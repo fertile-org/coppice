@@ -1,0 +1,7 @@
+{
+  "status": "blocked",
+  "blockerType": "needs_human",
+  "summary": "Mock agent blocked.",
+  "nextStatus": "Blocked",
+  "mentionAgents": []
+}

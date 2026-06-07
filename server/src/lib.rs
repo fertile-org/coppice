@@ -3,6 +3,7 @@ pub mod config;
 pub mod db;
 pub mod domain;
 pub mod middleware;
+pub mod providers;
 pub mod services;
 
 use axum::Router;
