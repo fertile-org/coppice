@@ -50,6 +50,21 @@ impl AppConfig {
                 Env::raw()
                     .only(&["SESSION_SECRET"])
                     .map(|_| "auth.session_secret".into()),
+            )
+            .merge(
+                Env::raw()
+                    .only(&["COPPICE_STORAGE__ARTIFACTS_DIR"])
+                    .map(|_| "storage.artifacts_dir".into()),
+            )
+            .merge(
+                Env::raw()
+                    .only(&["COPPICE_STORAGE__STATIC_DIR"])
+                    .map(|_| "storage.static_dir".into()),
+            )
+            .merge(
+                Env::raw()
+                    .only(&["COPPICE_STORAGE__MAX_UPLOAD_BYTES"])
+                    .map(|_| "storage.max_upload_bytes".into()),
             );
 
         if let Some(path) = config_path {
@@ -101,5 +116,24 @@ mod tests {
     fn loads_defaults_without_file() {
         let cfg = AppConfig::load(None).expect("defaults");
         assert_eq!(cfg.server.port, 8080);
+    }
+
+    #[test]
+    fn storage_artifacts_dir_from_env() {
+        static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        let _guard = ENV_LOCK.lock().expect("env lock");
+
+        const KEY: &str = "COPPICE_STORAGE__ARTIFACTS_DIR";
+        let previous = std::env::var(KEY).ok();
+        std::env::set_var(KEY, "/tmp/coppice-test-artifacts");
+
+        let cfg = AppConfig::load(None).expect("config should load");
+
+        match previous {
+            Some(value) => std::env::set_var(KEY, value),
+            None => std::env::remove_var(KEY),
+        }
+
+        assert_eq!(cfg.storage.artifacts_dir, "/tmp/coppice-test-artifacts");
     }
 }
