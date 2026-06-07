@@ -9,6 +9,7 @@ pub struct AppConfig {
     pub server: ServerConfig,
     pub database: DatabaseConfig,
     pub auth: AuthConfig,
+    pub storage: StorageConfig,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -26,6 +27,13 @@ pub struct AuthConfig {
     pub session_secret: String,
     pub bootstrap_password: String,
     pub cookie_secure: bool,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct StorageConfig {
+    pub artifacts_dir: String,
+    pub max_upload_bytes: u64,
+    pub static_dir: Option<String>,
 }
 
 impl AppConfig {
@@ -75,6 +83,11 @@ impl AppConfig {
                 session_secret: "dev-secret-change-me".into(),
                 bootstrap_password: "changeme".into(),
                 cookie_secure: false,
+            },
+            storage: StorageConfig {
+                artifacts_dir: "./data/artifacts".into(),
+                max_upload_bytes: 10 * 1024 * 1024,
+                static_dir: None,
             },
         }
     }
