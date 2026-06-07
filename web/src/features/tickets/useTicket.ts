@@ -4,6 +4,8 @@ import type { CreateCommentInput, UpdateStatusInput, UpdateTicketInput } from '.
 import type { Ticket } from '../board/useTickets';
 import type { TicketStatus } from '../board/columns';
 
+export { useAgents, type AgentSummary } from '../agents/useAgents';
+
 export interface Comment {
   id: string;
   ticketId: string;
@@ -14,13 +16,6 @@ export interface Comment {
   mentions: unknown;
   attachmentIds: string[];
   createdAt: string;
-}
-
-export interface AgentSummary {
-  id: string;
-  name: string;
-  role: string;
-  enabled: boolean;
 }
 
 export interface AttachmentUpload {
@@ -94,10 +89,16 @@ async function uploadAttachment(file: File): Promise<AttachmentUpload> {
   return res.json() as Promise<AttachmentUpload>;
 }
 
-async function fetchAgents(): Promise<AgentSummary[]> {
-  const res = await apiFetch('/api/agents');
-  const data = (await res.json()) as { items: AgentSummary[] };
-  return data.items;
+async function assignTicketAgent(
+  ticketId: string,
+  agentId: string | null,
+): Promise<Ticket> {
+  const res = await apiFetch(`/api/tickets/${ticketId}/assign`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ agentId }),
+  });
+  return res.json() as Promise<Ticket>;
 }
 
 export function useTicket(ticketId: string | undefined) {
@@ -116,10 +117,15 @@ export function useComments(ticketId: string | undefined) {
   });
 }
 
-export function useAgents() {
-  return useQuery({
-    queryKey: ['agents'],
-    queryFn: fetchAgents,
+export function useAssignAgent(ticketId: string) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (agentId: string | null) =>
+      assignTicketAgent(ticketId, agentId),
+    onSuccess: (ticket) => {
+      queryClient.setQueryData(ticketQueryKey(ticketId), ticket);
+    },
   });
 }
 
