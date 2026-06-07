@@ -1,28 +1,39 @@
+import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
+import { QueryClientProvider } from '@tanstack/react-query';
+import { AppShell } from './components/AppShell';
+import { ProtectedRoute } from './components/ProtectedRoute';
+import { AgentsPage } from './features/agents/AgentsPage';
+import { AuthProvider } from './features/auth/AuthProvider';
+import { LoginPage } from './features/auth/LoginPage';
+import { BoardPage } from './features/board/BoardPage';
+import { ProjectPickerPage } from './features/projects/ProjectPickerPage';
+import { UsersPage } from './features/users/UsersPage';
+import { queryClient } from './lib/query-client';
+
 function App() {
   return (
-    <div className="coppice-grain min-h-screen bg-background">
-      <header className="border-b border-border bg-surface px-8 py-4">
-        <div className="mx-auto flex max-w-6xl items-center gap-3">
-          <span
-            className="inline-block h-3 w-3 rounded-full bg-accent"
-            aria-hidden="true"
-          />
-          <h1 className="font-display text-2xl font-semibold tracking-tight text-text-primary">
-            Coppice
-          </h1>
-          <span className="font-body text-sm text-text-secondary">
-            grow an agent team from shared roots
-          </span>
-        </div>
-      </header>
-
-      <main className="mx-auto max-w-6xl px-8 py-12">
-        <p className="max-w-xl font-body text-lg leading-relaxed text-text-secondary">
-          Agent workspace scaffold ready. Board, tickets, and agents ship in M02.
-        </p>
-      </main>
-    </div>
-  )
+    <QueryClientProvider client={queryClient}>
+      <BrowserRouter>
+        <AuthProvider>
+          <Routes>
+            <Route path="/login" element={<LoginPage />} />
+            <Route element={<ProtectedRoute />}>
+              <Route element={<AppShell />}>
+                <Route path="/projects" element={<ProjectPickerPage />} />
+                <Route
+                  path="/projects/:projectId/board"
+                  element={<BoardPage />}
+                />
+                <Route path="/agents" element={<AgentsPage />} />
+                <Route path="/settings/users" element={<UsersPage />} />
+              </Route>
+            </Route>
+            <Route path="*" element={<Navigate to="/projects" replace />} />
+          </Routes>
+        </AuthProvider>
+      </BrowserRouter>
+    </QueryClientProvider>
+  );
 }
 
-export default App
+export default App;
