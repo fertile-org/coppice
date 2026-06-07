@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  rust:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: coppice
+          POSTGRES_PASSWORD: coppice
+          POSTGRES_DB: coppice
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U coppice"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgres://coppice:coppice@localhost:5432/coppice
+      SESSION_SECRET: ci-test-secret
+      COPPICE_BOOTSTRAP_PASSWORD: changeme
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Migrate
+        run: cargo run -p coppice-cli -- migrate
+      - name: Test
+        run: cargo test --workspace
+      - name: Clippy
+        run: cargo clippy --workspace -- -D warnings
