@@ -1,5 +1,7 @@
 pub mod auth;
 mod health;
+mod projects;
+mod repos;
 
 use axum::{middleware, Router};
 use std::sync::Arc;
@@ -12,6 +14,8 @@ pub fn router(state: Arc<AppState>) -> Router {
         .merge(auth::public_routes());
 
     let protected = auth::protected_routes()
+        .merge(projects::routes())
+        .merge(repos::routes())
         .layer(middleware::from_fn(csrf::csrf_middleware))
         .layer(middleware::from_fn_with_state(state.clone(), session::session_middleware));
 

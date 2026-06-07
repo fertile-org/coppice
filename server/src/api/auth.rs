@@ -71,7 +71,7 @@ struct LoginResponse {
     csrf_token: String,
 }
 
-fn pool_from_state(state: &AppState) -> Result<&sqlx::PgPool, StatusCode> {
+pub fn pool_from_state(state: &AppState) -> Result<&sqlx::PgPool, StatusCode> {
     state.db.as_ref().ok_or(StatusCode::INTERNAL_SERVER_ERROR)
 }
 
