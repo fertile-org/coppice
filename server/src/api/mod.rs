@@ -1,14 +1,22 @@
 pub mod auth;
 mod health;
 
-use axum::Router;
+use axum::{middleware, Router};
 use std::sync::Arc;
+use crate::middleware::{csrf, session};
 use crate::AppState;
 
 pub fn router(state: Arc<AppState>) -> Router {
-    Router::new()
+    let public = Router::new()
         .merge(health::routes())
-        .merge(auth::public_routes())
-        .merge(auth::protected_routes())
+        .merge(auth::public_routes());
+
+    let protected = auth::protected_routes()
+        .layer(middleware::from_fn(csrf::csrf_middleware))
+        .layer(middleware::from_fn_with_state(state.clone(), session::session_middleware));
+
+    Router::new()
+        .merge(public)
+        .merge(protected)
         .with_state(state)
 }

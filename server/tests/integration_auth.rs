@@ -1,3 +1,4 @@
+use coppice_server::middleware::session::parse_session_cookie;
 use coppice_server::{db, AppConfig, AppState};
 use std::sync::Arc;
 use tower::ServiceExt;
@@ -31,7 +32,7 @@ fn bootstrap_password_header() -> (&'static str, &'static str) {
 }
 
 #[tokio::test]
-async fn bootstrap_and_login_flow() {
+async fn bootstrap_login_me_logout_flow() {
     if !db_available().await {
         eprintln!("skipping: postgres not available");
         return;
@@ -57,6 +58,7 @@ async fn bootstrap_and_login_flow() {
     assert_eq!(bootstrap.status(), axum::http::StatusCode::OK);
 
     let login = app
+        .clone()
         .oneshot(
             axum::http::Request::builder()
                 .method("POST")
@@ -76,12 +78,147 @@ async fn bootstrap_and_login_flow() {
         .get(axum::http::header::SET_COOKIE)
         .expect("session cookie");
     let cookie = set_cookie.to_str().unwrap();
-    assert!(cookie.contains("coppice_session="));
-    assert!(cookie.contains("HttpOnly"));
+    let session_token = parse_session_cookie(cookie).expect("session token");
 
     let body = axum::body::to_bytes(login.into_body(), usize::MAX)
         .await
         .unwrap();
     let login_json: serde_json::Value = serde_json::from_slice(&body).unwrap();
-    assert!(login_json["csrfToken"].as_str().is_some());
+    let csrf_token = login_json["csrfToken"]
+        .as_str()
+        .expect("csrf token")
+        .to_string();
+
+    let me = app
+        .clone()
+        .oneshot(
+            axum::http::Request::builder()
+                .uri("/api/auth/me")
+                .header(
+                    axum::http::header::COOKIE,
+                    format!("coppice_session={session_token}"),
+                )
+                .body(axum::body::Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(me.status(), axum::http::StatusCode::OK);
+
+    let logout = app
+        .clone()
+        .oneshot(
+            axum::http::Request::builder()
+                .method("POST")
+                .uri("/api/auth/logout")
+                .header(
+                    axum::http::header::COOKIE,
+                    format!("coppice_session={session_token}"),
+                )
+                .header("x-csrf-token", csrf_token)
+                .body(axum::body::Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(logout.status(), axum::http::StatusCode::NO_CONTENT);
+
+    let me_after = app
+        .oneshot(
+            axum::http::Request::builder()
+                .uri("/api/auth/me")
+                .header(
+                    axum::http::header::COOKIE,
+                    format!("coppice_session={session_token}"),
+                )
+                .body(axum::body::Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(me_after.status(), axum::http::StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn logout_without_csrf_is_forbidden() {
+    if !db_available().await {
+        eprintln!("skipping: postgres not available");
+        return;
+    }
+    let state = test_state_with_db().await;
+    let app = coppice_server::app(state);
+
+    app.clone()
+        .oneshot(
+            axum::http::Request::builder()
+                .method("POST")
+                .uri("/api/auth/bootstrap")
+                .header("content-type", "application/json")
+                .header(bootstrap_password_header().0, bootstrap_password_header().1)
+                .body(axum::body::Body::from(
+                    r#"{"email":"admin@localhost","password":"changeme"}"#,
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    let login = app
+        .clone()
+        .oneshot(
+            axum::http::Request::builder()
+                .method("POST")
+                .uri("/api/auth/login")
+                .header("content-type", "application/json")
+                .body(axum::body::Body::from(
+                    r#"{"email":"admin@localhost","password":"changeme"}"#,
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    let set_cookie = login
+        .headers()
+        .get(axum::http::header::SET_COOKIE)
+        .expect("session cookie");
+    let cookie = set_cookie.to_str().unwrap();
+    let session_token = parse_session_cookie(cookie).expect("session token");
+
+    let logout = app
+        .oneshot(
+            axum::http::Request::builder()
+                .method("POST")
+                .uri("/api/auth/logout")
+                .header(
+                    axum::http::header::COOKIE,
+                    format!("coppice_session={session_token}"),
+                )
+                .body(axum::body::Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(logout.status(), axum::http::StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn me_without_session_is_unauthorized() {
+    if !db_available().await {
+        eprintln!("skipping: postgres not available");
+        return;
+    }
+    let state = test_state_with_db().await;
+    let app = coppice_server::app(state);
+
+    let response = app
+        .oneshot(
+            axum::http::Request::builder()
+                .uri("/api/auth/me")
+                .body(axum::body::Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), axum::http::StatusCode::UNAUTHORIZED);
 }
