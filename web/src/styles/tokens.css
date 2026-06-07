@@ -1,0 +1,201 @@
+/**
+ * Coppice design tokens
+ * Organic coppice-forest aesthetic — warm bark, moss accent, cream paper.
+ * Import in main.tsx before Tailwind.
+ */
+
+@import url('https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,600;0,9..144,700;1,9..144,400&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;1,6..72,400&display=swap');
+
+:root {
+  /* ── Typography ── */
+  --font-display: 'Fraunces', 'Georgia', serif;
+  --font-body: 'Newsreader', 'Georgia', serif;
+  --font-mono: 'ui-monospace', 'Cascadia Code', 'Source Code Pro', monospace;
+
+  --text-xs: 0.75rem;
+  --text-sm: 0.875rem;
+  --text-base: 1rem;
+  --text-lg: 1.125rem;
+  --text-xl: 1.25rem;
+  --text-2xl: 1.5rem;
+  --text-3xl: 1.875rem;
+
+  --leading-tight: 1.25;
+  --leading-normal: 1.5;
+  --leading-relaxed: 1.625;
+
+  /* ── Palette: bark & earth ── */
+  --color-bark-950: #1c1410;
+  --color-bark-900: #2a1f18;
+  --color-bark-800: #3d2914;
+  --color-bark-700: #5c4033;
+  --color-bark-600: #6b5344;
+  --color-bark-500: #8b6914;
+  --color-bark-400: #a68b5b;
+  --color-bark-300: #c4a77d;
+  --color-bark-200: #dcc9a8;
+  --color-bark-100: #ede5d8;
+  --color-bark-50: #f5f0e6;
+
+  /* ── Palette: moss & living green ── */
+  --color-moss-950: #0f1a14;
+  --color-moss-900: #1a2419;
+  --color-moss-800: #2d5a3d;
+  --color-moss-700: #3d6b4f;
+  --color-moss-600: #4a7c59;
+  --color-moss-500: #6b9b7a;
+  --color-moss-400: #8fb89a;
+  --color-moss-300: #b3d4bc;
+  --color-moss-200: #d4ead9;
+  --color-moss-100: #e8f4eb;
+  --color-moss-50: #f4faf6;
+
+  /* ── Palette: cream paper surfaces ── */
+  --color-paper-50: #faf7f2;
+  --color-paper-100: #f5f0e6;
+  --color-paper-200: #ede5d8;
+  --color-paper-300: #e0d4c4;
+
+  /* ── Semantic colors ── */
+  --color-background: var(--color-paper-50);
+  --color-surface: var(--color-paper-100);
+  --color-surface-raised: #fffdf9;
+  --color-border: var(--color-bark-200);
+  --color-border-strong: var(--color-bark-300);
+
+  --color-text-primary: var(--color-bark-900);
+  --color-text-secondary: var(--color-bark-600);
+  --color-text-muted: var(--color-bark-400);
+  --color-text-inverse: var(--color-paper-50);
+
+  --color-accent: var(--color-moss-600);
+  --color-accent-hover: var(--color-moss-700);
+  --color-accent-muted: var(--color-moss-100);
+  --color-accent-foreground: var(--color-paper-50);
+
+  --color-danger: #9b3d3d;
+  --color-danger-muted: #f5e6e6;
+  --color-warning: #b8860b;
+  --color-warning-muted: #f5edd6;
+  --color-info: #3d6b8b;
+  --color-info-muted: #e6eef5;
+  --color-success: var(--color-moss-700);
+  --color-success-muted: var(--color-moss-100);
+
+  /* ── Spacing scale ── */
+  --space-0: 0;
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.25rem;
+  --space-6: 1.5rem;
+  --space-8: 2rem;
+  --space-10: 2.5rem;
+  --space-12: 3rem;
+  --space-16: 4rem;
+
+  /* ── Radii ── */
+  --radius-sm: 0.25rem;
+  --radius-md: 0.5rem;
+  --radius-lg: 0.75rem;
+  --radius-xl: 1rem;
+  --radius-full: 9999px;
+
+  /* ── Shadows (warm, organic) ── */
+  --shadow-sm: 0 1px 2px rgba(42, 31, 24, 0.06);
+  --shadow-md: 0 4px 12px rgba(42, 31, 24, 0.08);
+  --shadow-lg: 0 8px 24px rgba(42, 31, 24, 0.1);
+  --shadow-card: 0 2px 8px rgba(61, 41, 20, 0.07), 0 0 0 1px rgba(61, 41, 20, 0.04);
+
+  /* ── Grain texture (subtle paper feel) ── */
+  --grain-opacity: 0.035;
+  --grain-url: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.5'/%3E%3C/svg%3E");
+
+  /* ── Board column status colors ── */
+  --column-backlog-bg: #e8e4df;
+  --column-backlog-border: #b8b0a4;
+  --column-backlog-accent: #6b6560;
+
+  --column-ready-bg: #e0ebe4;
+  --column-ready-border: #8fb89a;
+  --column-ready-accent: #4a7c59;
+
+  --column-in-progress-bg: #dce8f0;
+  --column-in-progress-border: #7ba3c4;
+  --column-in-progress-accent: #3d6b8b;
+
+  --column-in-review-bg: #ede5f5;
+  --column-in-review-border: #b8a0d4;
+  --column-in-review-accent: #6b4f8b;
+
+  --column-in-qa-bg: #f5edd6;
+  --column-in-qa-border: #d4b86b;
+  --column-in-qa-accent: #9a7b2e;
+
+  --column-wait-final-bg: #f0e8dc;
+  --column-wait-final-border: #c4a77d;
+  --column-wait-final-accent: #8b6914;
+
+  --column-done-bg: #d4ead9;
+  --column-done-border: #6b9b7a;
+  --column-done-accent: #2d5a3d;
+
+  --column-blocked-bg: #f5e6e6;
+  --column-blocked-border: #c49a9a;
+  --column-blocked-accent: #9b3d3d;
+
+  /* ── Substatus / badge variants ── */
+  --badge-priority-low-bg: var(--color-moss-100);
+  --badge-priority-low-text: var(--color-moss-800);
+  --badge-priority-low-border: var(--color-moss-300);
+
+  --badge-priority-medium-bg: var(--color-warning-muted);
+  --badge-priority-medium-text: #7a5c08;
+  --badge-priority-medium-border: #d4b86b;
+
+  --badge-priority-high-bg: #f5e0d6;
+  --badge-priority-high-text: #8b4513;
+  --badge-priority-high-border: #c49a7a;
+
+  --badge-priority-critical-bg: var(--color-danger-muted);
+  --badge-priority-critical-text: var(--color-danger);
+  --badge-priority-critical-border: #c49a9a;
+
+  --badge-agent-human-bg: var(--color-paper-200);
+  --badge-agent-human-text: var(--color-bark-700);
+  --badge-agent-human-border: var(--color-bark-300);
+
+  --badge-agent-ai-bg: var(--color-moss-100);
+  --badge-agent-ai-text: var(--color-moss-800);
+  --badge-agent-ai-border: var(--color-moss-300);
+
+  --badge-agent-system-bg: var(--color-info-muted);
+  --badge-agent-system-text: var(--color-info);
+  --badge-agent-system-border: #9ab8d4;
+
+  --badge-status-active-bg: var(--color-moss-100);
+  --badge-status-active-text: var(--color-moss-700);
+  --badge-status-disabled-bg: var(--color-bark-100);
+  --badge-status-disabled-text: var(--color-bark-500);
+
+  /* ── Motion ── */
+  --duration-fast: 120ms;
+  --duration-normal: 200ms;
+  --duration-slow: 350ms;
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+}
+
+/* Grain overlay utility — apply to page shell */
+.coppice-grain::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 9999;
+  opacity: var(--grain-opacity);
+  background-image: var(--grain-url);
+  background-repeat: repeat;
+  background-size: 128px 128px;
+}
