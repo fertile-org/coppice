@@ -1,7 +1,10 @@
 use coppice_server::middleware::session::parse_session_cookie;
 use coppice_server::{db, AppConfig, AppState};
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
+use tokio::sync::Mutex;
 use tower::ServiceExt;
+
+static DB_TEST_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
 
 async fn db_available() -> bool {
     let database_url = std::env::var("DATABASE_URL")
@@ -33,6 +36,7 @@ fn bootstrap_password_header() -> (&'static str, &'static str) {
 
 #[tokio::test]
 async fn bootstrap_login_me_logout_flow() {
+    let _guard = DB_TEST_LOCK.lock().await;
     if !db_available().await {
         eprintln!("skipping: postgres not available");
         return;
@@ -141,6 +145,7 @@ async fn bootstrap_login_me_logout_flow() {
 
 #[tokio::test]
 async fn logout_without_csrf_is_forbidden() {
+    let _guard = DB_TEST_LOCK.lock().await;
     if !db_available().await {
         eprintln!("skipping: postgres not available");
         return;
@@ -204,6 +209,7 @@ async fn logout_without_csrf_is_forbidden() {
 
 #[tokio::test]
 async fn me_without_session_is_unauthorized() {
+    let _guard = DB_TEST_LOCK.lock().await;
     if !db_available().await {
         eprintln!("skipping: postgres not available");
         return;
