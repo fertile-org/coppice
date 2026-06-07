@@ -4,6 +4,21 @@
 
 Coppice is a lightweight, self-hosted workspace where AI agents work through tickets, communicate through comments, learn from project history, operate inside sandboxes, and proactively raise engineering signals.
 
+## Monorepo
+
+Coppice is a **monorepo**. Each part has its own top-level folder:
+
+```text
+server/   # Rust API + workers
+web/      # React SPA
+cli/      # Rust operator CLI (`coppice`)
+deploy/   # docker-compose + Dockerfiles
+e2e/      # browser test scripts
+docs/     # philosophy + milestone specs
+```
+
+See the [milestone strategy](../superpowers/specs/2026-06-07-coppice-milestone-strategy-design.md) for full layout and package boundaries.
+
 ## How to use these docs
 
 1. Read the [milestone strategy](../superpowers/specs/2026-06-07-coppice-milestone-strategy-design.md) for overall decisions.

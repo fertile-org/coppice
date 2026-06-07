@@ -6,7 +6,7 @@ Authenticated Coppice SPA with a Trello-like board, ticket and comment managemen
 
 ## Product scope
 
-- React / Vite SPA with TanStack Query, Tailwind CSS, Radix UI / shadcn
+- React / Vite SPA in `web/` (monorepo package; own `package.json`)
 - Login page; all routes except `/login` require valid session
 - Projects and repos (minimal CRUD)
 - Fixed board columns: Backlog, Ready, In Progress, In Review, In QA, Wait for Final Review, Done, Blocked
@@ -101,7 +101,9 @@ web/src/features/
 
 ```yaml
   web:
-    build: ./web
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile.web
     depends_on:
       - server
     ports:

@@ -23,6 +23,7 @@ Milestones are **not release gates**. You start daily use only when all mileston
 | Auth | Session login (httpOnly cookie, argon2, CSRF) from M1 API / M2 UI — safety-first |
 | E2E | CI runs agent-browser **smoke** subset; full suite via local `make e2e` |
 | Environment | `docker compose up` is the only supported dev/CI path |
+| Repository | **Monorepo** — each deliverable in its own top-level folder (`server/`, `web/`, `cli/`, …) |
 
 ## Milestone overview
 
@@ -38,32 +39,56 @@ Milestones are **not release gates**. You start daily use only when all mileston
 
 Detailed scope, acceptance criteria, and test matrices: see `docs/milestones/`.
 
-## Repo layout
+## Monorepo layout
+
+This repository **is** the Coppice monorepo. All product code, tooling, deploy config, docs, and tests live here — nothing lives in external sibling repos for v1.
+
+Each major part gets its **own folder at the repository root**:
 
 ```text
-coppice/
-  server/                 # Rust / Axum / SQLx
+/                         # repo root (github.com/…/coppice)
+  server/                 # Rust / Axum / SQLx — HTTP API, workers, WebSocket
   web/                    # React / Vite SPA
+  cli/                    # Rust CLI (`coppice`) — operator/dev commands
   deploy/
     docker-compose.yml
+    Dockerfile.server
+    Dockerfile.web
   docs/
     philosophy/
     milestones/
     superpowers/specs/
   e2e/
     smoke/                # CI agent-browser scripts
-    full/                 # local make e2e scripts
-  scripts/
-    bootstrap-admin.sh
+    full/                 # local `make e2e` scripts
+  fixtures/               # shared test fixtures (e.g. mock agent responses)
+  Makefile                # root tasks: test, e2e, compose-up
+  README.md
 ```
+
+### Package boundaries
+
+| Folder | Role | Primary stack |
+|--------|------|---------------|
+| `server/` | Backend orchestrator, API, job workers, sandbox | Rust, Axum, SQLx |
+| `web/` | Browser UI | React, Vite |
+| `cli/` | Local operator tool (bootstrap, migrations, health, compose helpers) | Rust (shares conventions with `server/`) |
+| `deploy/` | Docker Compose and container build files | YAML, Dockerfiles |
+| `e2e/` | Cross-package smoke/full browser tests | agent-browser scripts |
+| `docs/` | Product philosophy, milestone specs, design docs | Markdown |
+
+`server/` and `cli/` may share a Rust workspace (`Cargo.toml` at repo root with `[workspace]` members) so types and config parsing stay DRY. `web/` remains an independent Node package (`web/package.json`).
+
+Do **not** nest packages (e.g. no `coppice/server/` — use root-level `server/`).
 
 ## Technical stack
 
 From `docs/philosophy/final_agent_workspace_framework_selection.md`:
 
 - **Backend:** Rust, Axum, Tokio, SQLx, PostgreSQL 16+, pgvector
+- **CLI:** Rust (`cli/` crate, `coppice` binary) — bootstrap, migrate, health
 - **Frontend:** React, Vite, TanStack Query, dnd-kit, xterm.js, Tailwind, Radix/shadcn
-- **Deploy:** Docker Compose (postgres + server + web)
+- **Deploy:** Docker Compose (postgres + server + web); Dockerfiles in `deploy/`
 - **Job queue:** Postgres-backed `agent_jobs` table (no Redis in v1)
 
 ## Agent provider adapter
@@ -79,9 +104,11 @@ agents:
       responses_dir: ./fixtures/agent-responses
 ```
 
+Shared fixtures live at repo root in `fixtures/` (used by `server` tests and compose).
+
 ## Auth model
 
-- M1: session auth API (login, logout, `/me`), argon2, httpOnly secure cookie, CSRF on mutations, bootstrap first admin via env/script
+- M1: session auth API (login, logout, `/me`), argon2, httpOnly secure cookie, CSRF on mutations, bootstrap first admin via `coppice bootstrap admin` or env
 - M2: login-gated SPA; only `/health` and auth routes are public
 - All integration and E2E tests authenticate via session cookie
 
