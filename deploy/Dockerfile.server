@@ -1,0 +1,15 @@
+FROM rust:1.87-bookworm AS builder
+WORKDIR /app
+COPY Cargo.toml Cargo.lock ./
+COPY server ./server
+COPY cli ./cli
+RUN cargo build --release -p coppice-server
+
+FROM debian:bookworm-slim
+RUN apt-get update && apt-get install -y ca-certificates && rm -rf /var/lib/apt/lists/*
+COPY --from=builder /app/target/release/coppice-server /usr/local/bin/coppice-server
+COPY deploy/config/default.yaml /etc/coppice/config.yaml
+RUN sed -i 's/@localhost:/@postgres:/' /etc/coppice/config.yaml
+ENV COPPICE_CONFIG=/etc/coppice/config.yaml
+EXPOSE 8080
+CMD ["coppice-server"]
