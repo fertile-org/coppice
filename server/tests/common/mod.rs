@@ -134,3 +134,20 @@ pub async fn json_body(response: axum::response::Response) -> serde_json::Value 
     let body = response.into_body().collect().await.unwrap().to_bytes();
     serde_json::from_slice(&body).unwrap()
 }
+
+pub async fn create_test_project(app: &Router, cookie: &str, csrf: &str) -> String {
+    let res = app
+        .clone()
+        .oneshot(json_request(
+            "POST",
+            "/api/projects",
+            r#"{"name":"Test Project"}"#,
+            cookie,
+            csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::CREATED);
+    let body: serde_json::Value = json_body(res).await;
+    body["id"].as_str().unwrap().to_string()
+}
