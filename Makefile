@@ -1,6 +1,6 @@
 COMPOSE = docker compose -f deploy/docker-compose.yml
 
-.PHONY: compose-up compose-down test clippy migrate web-test web-dev web-build release-tar
+.PHONY: compose-up compose-down test clippy migrate web-test web-dev web-build e2e-smoke release-tar
 
 compose-up:
 	$(COMPOSE) up -d --build
@@ -25,6 +25,9 @@ web-dev:
 
 web-build:
 	cd web && npm ci && npm run build
+
+e2e-smoke: compose-up
+	node e2e/smoke/m02-board.mjs
 
 release-tar: web-build
 	cargo build --release -p coppice-server -p coppice-cli
