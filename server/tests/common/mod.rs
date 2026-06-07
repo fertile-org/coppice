@@ -157,6 +157,61 @@ pub async fn create_test_project(app: &Router, cookie: &str, csrf: &str) -> Stri
     body["id"].as_str().unwrap().to_string()
 }
 
+pub async fn create_test_repo(
+    app: &Router,
+    project_id: &str,
+    cookie: &str,
+    csrf: &str,
+) -> String {
+    let res = app
+        .clone()
+        .oneshot(json_request(
+            "POST",
+            &format!("/api/projects/{project_id}/repos"),
+            r#"{"name":"main-repo","defaultBranch":"main"}"#,
+            cookie,
+            csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::CREATED);
+    let body: serde_json::Value = json_body(res).await;
+    body["id"].as_str().unwrap().to_string()
+}
+
+pub async fn create_test_agent_from_preset(
+    app: &Router,
+    name: &str,
+    cookie: &str,
+    csrf: &str,
+) -> String {
+    let presets_res = app
+        .clone()
+        .oneshot(json_request("GET", "/api/agent-presets", "", cookie, csrf))
+        .await
+        .unwrap();
+    assert_eq!(presets_res.status(), StatusCode::OK);
+
+    let presets: serde_json::Value = json_body(presets_res).await;
+    let preset_id = presets["items"][0]["id"].as_str().unwrap();
+
+    let create_res = app
+        .clone()
+        .oneshot(json_request(
+            "POST",
+            "/api/agents",
+            &format!(r#"{{"name":"{name}","presetId":"{preset_id}"}}"#),
+            cookie,
+            csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(create_res.status(), StatusCode::CREATED);
+
+    let agent: serde_json::Value = json_body(create_res).await;
+    agent["id"].as_str().unwrap().to_string()
+}
+
 pub async fn create_test_ticket(
     app: &Router,
     project_id: &str,

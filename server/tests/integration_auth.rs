@@ -23,8 +23,13 @@ async fn test_state_with_db() -> Arc<AppState> {
         .await
         .expect("truncate auth tables");
 
+    std::env::set_var(
+        "COPPICE_STORAGE__ARTIFACTS_DIR",
+        "/tmp/coppice-test-artifacts",
+    );
     let config = AppConfig::load(None).expect("test config");
     Arc::new(AppState {
+        attachments: AppState::attachment_store_from_config(&config),
         config,
         db: Some(pool),
     })
