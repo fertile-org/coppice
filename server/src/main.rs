@@ -12,8 +12,10 @@ async fn main() -> anyhow::Result<()> {
     let config = coppice_server::AppConfig::load(config_path.as_deref())
         .map_err(|e| anyhow::anyhow!("failed to load config: {e}"))?;
 
+    let db = coppice_server::db::connect_and_migrate(&config.database.url).await?;
     let state = Arc::new(coppice_server::AppState {
         config: config.clone(),
+        db: Some(db),
     });
     let app = coppice_server::app(state);
     let addr: SocketAddr = format!("0.0.0.0:{}", config.server.port).parse()?;
