@@ -48,10 +48,14 @@ export function LoginPage() {
   return (
     <div className="coppice-grain flex min-h-screen items-center justify-center bg-background px-4">
       <div className="w-full max-w-md rounded-xl border border-border bg-surface-raised p-8 shadow-card">
-        <div className="mb-8 flex items-center gap-3">
-          <span
-            className="inline-block h-3 w-3 rounded-full bg-accent"
-            aria-hidden="true"
+        <div className="mb-8 flex flex-col items-center gap-4 text-center">
+          <img
+            src="/logo.webp"
+            srcSet="/logo.webp 1x, /logo@2x.webp 2x"
+            alt="Coppice"
+            width={72}
+            height={72}
+            className="h-[4.5rem] w-[4.5rem] shrink-0"
           />
           <h1 className="font-display text-2xl font-semibold tracking-tight text-text-primary">
             Coppice

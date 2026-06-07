@@ -18,9 +18,13 @@ export function AppShell() {
         <div className="mx-auto flex max-w-6xl items-center justify-between gap-6">
           <div className="flex items-center gap-6">
             <div className="flex items-center gap-3">
-              <span
-                className="inline-block h-3 w-3 rounded-full bg-accent"
-                aria-hidden="true"
+              <img
+                src="/logo.webp"
+                srcSet="/logo.webp 1x, /logo@2x.webp 2x"
+                alt="Coppice"
+                width={32}
+                height={32}
+                className="h-8 w-8 shrink-0"
               />
               <span className="font-display text-xl font-semibold tracking-tight text-text-primary">
                 Coppice
