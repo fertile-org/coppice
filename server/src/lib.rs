@@ -1,6 +1,8 @@
 pub mod api;
 pub mod config;
 pub mod db;
+pub mod domain;
+pub mod services;
 
 use axum::Router;
 use sqlx::PgPool;

@@ -29,7 +29,7 @@ pub struct AuthConfig {
 }
 
 impl AppConfig {
-    pub fn load(config_path: Option<&str>) -> Result<Self, figment::Error> {
+    pub fn load(config_path: Option<&str>) -> Result<Self, Box<figment::Error>> {
         let mut figment = Figment::new()
             .merge(Serialized::defaults(Self::default_values()))
             .merge(Env::prefixed("COPPICE_").split("_"))
@@ -48,7 +48,7 @@ impl AppConfig {
             figment = figment.merge(Yaml::file(path));
         }
 
-        figment.extract()
+        figment.extract().map_err(Box::new)
     }
 
     pub fn resolve_config_path() -> Option<String> {
