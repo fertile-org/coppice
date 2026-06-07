@@ -15,6 +15,7 @@ export interface Ticket {
   description: string;
   status: TicketStatus;
   substatus?: string;
+  substatusMetadata?: Record<string, unknown>;
   priority?: string;
   assigneeAgentId?: string;
   ownerUserId?: string;

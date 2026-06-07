@@ -7,70 +7,21 @@ import {
   type DragEndEvent,
   type DragStartEvent,
 } from '@dnd-kit/core';
+import { useQueryClient } from '@tanstack/react-query';
 import { useEffect, useMemo, useState } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
+import { TicketDrawer } from '../tickets/TicketDrawer';
 import { setLastProjectId } from '../projects/useProjects';
 import { BoardColumn } from './BoardColumn';
 import { BOARD_COLUMNS, isTicketStatus, type TicketStatus } from './columns';
 import { TicketCard } from './TicketCard';
 import {
+  ticketsQueryKey,
   useCreateTicket,
   useTickets,
   useUpdateTicketStatus,
   type Ticket,
 } from './useTickets';
-
-function TicketDrawerPlaceholder({
-  ticketId,
-  onClose,
-}: {
-  ticketId: string;
-  onClose: () => void;
-}) {
-  useEffect(() => {
-    function onKeyDown(e: KeyboardEvent) {
-      if (e.key === 'Escape') onClose();
-    }
-    document.addEventListener('keydown', onKeyDown);
-    return () => document.removeEventListener('keydown', onKeyDown);
-  }, [onClose]);
-
-  return (
-    <div
-      className="fixed inset-0 z-40 flex justify-end bg-bark-950/30"
-      role="presentation"
-      onClick={onClose}
-    >
-      <aside
-        role="dialog"
-        aria-modal="true"
-        aria-label="Ticket detail"
-        className="flex h-full w-full max-w-md flex-col border-l border-border bg-surface-raised shadow-lg"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <header className="flex items-center justify-between border-b border-border px-5 py-4">
-          <h2 className="font-display text-lg font-semibold text-text-primary">
-            Ticket detail
-          </h2>
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-md border border-border px-2 py-1 font-body text-sm text-text-secondary transition-colors duration-fast hover:text-text-primary"
-          >
-            Close
-          </button>
-        </header>
-        <div className="flex flex-1 items-center justify-center p-6">
-          <p className="text-center font-body text-sm text-text-secondary">
-            Full ticket drawer ships in the next task.
-            <br />
-            <span className="font-mono text-xs text-text-muted">{ticketId}</span>
-          </p>
-        </div>
-      </aside>
-    </div>
-  );
-}
 
 function resolveDropStatus(
   overId: string | number,
@@ -85,6 +36,7 @@ function resolveDropStatus(
 export function BoardPage() {
   const { projectId } = useParams<{ projectId: string }>();
   const [searchParams, setSearchParams] = useSearchParams();
+  const queryClient = useQueryClient();
   const selectedTicketId = searchParams.get('ticket');
 
   const { data: tickets, isLoading, isError, refetch } = useTickets(projectId);
@@ -123,8 +75,11 @@ export function BoardPage() {
     setSearchParams({ ticket: ticketId });
   }
 
-  function closeTicket() {
+  function closeDrawer() {
     setSearchParams({});
+    if (projectId) {
+      void queryClient.invalidateQueries({ queryKey: ticketsQueryKey(projectId) });
+    }
   }
 
   function handleDragStart(event: DragStartEvent) {
@@ -220,10 +175,7 @@ export function BoardPage() {
       )}
 
       {selectedTicketId && (
-        <TicketDrawerPlaceholder
-          ticketId={selectedTicketId}
-          onClose={closeTicket}
-        />
+        <TicketDrawer ticketId={selectedTicketId} onClose={closeDrawer} />
       )}
     </div>
   );
