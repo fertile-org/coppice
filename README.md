@@ -22,9 +22,11 @@ Coppice is a lightweight, self-hosted workspace where AI agents work through tic
 cp deploy/.env.example .env
 make compose-up
 make migrate
-coppice bootstrap admin --email admin@localhost --password changeme
+cargo run -p coppice-cli -- bootstrap admin --email admin@localhost --password changeme
 curl http://localhost:8080/health
 ```
+
+Open the web UI at [http://localhost:5173](http://localhost:5173). Sign in with the bootstrap credentials (`admin@localhost` / `changeme`). If bootstrap returns 403, an admin user already exists — use those credentials to log in.
 
 ## Release build
 

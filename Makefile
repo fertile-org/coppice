@@ -31,8 +31,9 @@ e2e-smoke: compose-up
 
 release-tar: web-build
 	cargo build --release -p coppice-server -p coppice-cli
-	mkdir -p dist/release
-	cp target/release/coppice-server target/release/coppice-cli dist/release/
+	mkdir -p dist/release/web
+	cp target/release/coppice-server dist/release/
+	cp target/release/coppice dist/release/coppice-cli
 	cp -r web/dist dist/release/web/dist
 	cp deploy/config/default.yaml dist/release/
 	cp deploy/README-RELEASE.md dist/release/

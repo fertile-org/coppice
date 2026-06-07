@@ -107,6 +107,7 @@ impl<'a> AgentService<'a> {
         .await
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn create(
         &self,
         name: &str,
@@ -140,6 +141,7 @@ impl<'a> AgentService<'a> {
         .await
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn update(
         &self,
         agent_id: Uuid,
@@ -206,6 +208,7 @@ impl<'a> AgentService<'a> {
         Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn insert_agent(
         &self,
         name: &str,

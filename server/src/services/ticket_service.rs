@@ -96,6 +96,7 @@ impl<'a> TicketService<'a> {
         Ok(results)
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn create(
         &self,
         project_id: Uuid,
@@ -161,6 +162,7 @@ impl<'a> TicketService<'a> {
         self.enrich_ticket(row_to_ticket(&row)).await
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn update_fields(
         &self,
         ticket_id: Uuid,

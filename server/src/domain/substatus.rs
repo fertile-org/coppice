@@ -45,9 +45,7 @@ pub fn validate_substatus(
     substatus: Option<Substatus>,
     metadata: &Option<Value>,
 ) -> Option<&'static str> {
-    let Some(s) = substatus else {
-        return None;
-    };
+    let s = substatus?;
     let empty = Value::Object(Default::default());
     let meta = metadata.as_ref().unwrap_or(&empty);
     match s {
