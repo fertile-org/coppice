@@ -14,6 +14,7 @@ async fn main() -> anyhow::Result<()> {
 
     let db = coppice_server::db::connect_and_migrate(&config.database.url).await?;
     let state = Arc::new(coppice_server::AppState {
+        attachments: coppice_server::AppState::attachment_store_from_config(&config),
         config: config.clone(),
         db: Some(db),
     });

@@ -46,8 +46,13 @@ async fn test_state_with_db() -> Arc<AppState> {
         .expect("connect to test database");
     truncate_workspace(&pool).await;
 
+    std::env::set_var(
+        "COPPICE_STORAGE__ARTIFACTS_DIR",
+        "/tmp/coppice-test-artifacts",
+    );
     let config = AppConfig::load(None).expect("test config");
     Arc::new(AppState {
+        attachments: AppState::attachment_store_from_config(&config),
         config,
         db: Some(pool),
     })
@@ -150,4 +155,57 @@ pub async fn create_test_project(app: &Router, cookie: &str, csrf: &str) -> Stri
     assert_eq!(res.status(), StatusCode::CREATED);
     let body: serde_json::Value = json_body(res).await;
     body["id"].as_str().unwrap().to_string()
+}
+
+pub async fn create_test_ticket(
+    app: &Router,
+    project_id: &str,
+    cookie: &str,
+    csrf: &str,
+) -> String {
+    let res = app
+        .clone()
+        .oneshot(json_request(
+            "POST",
+            &format!("/api/projects/{project_id}/tickets"),
+            r#"{"title":"Test ticket","description":"details"}"#,
+            cookie,
+            csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::CREATED);
+    let body: serde_json::Value = json_body(res).await;
+    body["id"].as_str().unwrap().to_string()
+}
+
+pub fn multipart_request(
+    uri: &str,
+    filename: &str,
+    content_type: &str,
+    contents: &str,
+    cookie: &str,
+    csrf: &str,
+) -> Request<Body> {
+    let boundary = "----coppice-test-boundary";
+    let body = format!(
+        "--{boundary}\r\n\
+         Content-Disposition: form-data; name=\"file\"; filename=\"{filename}\"\r\n\
+         Content-Type: {content_type}\r\n\
+         \r\n\
+         {contents}\r\n\
+         --{boundary}--\r\n"
+    );
+
+    Request::builder()
+        .method("POST")
+        .uri(uri)
+        .header(
+            header::CONTENT_TYPE,
+            format!("multipart/form-data; boundary={boundary}"),
+        )
+        .header(header::COOKIE, cookie)
+        .header("x-csrf-token", csrf)
+        .body(Body::from(body))
+        .unwrap()
 }
