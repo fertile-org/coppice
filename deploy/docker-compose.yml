@@ -24,9 +24,24 @@ services:
     environment:
       DATABASE_URL: postgres://coppice:coppice@postgres:5432/coppice
       COPPICE_CONFIG: /etc/coppice/config.yaml
+      COPPICE_STORAGE__ARTIFACTS_DIR: /data/artifacts
+    volumes:
+      - artifact_data:/data/artifacts
     depends_on:
       postgres:
         condition: service_healthy
 
+  web:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.web
+    ports:
+      - "5173:5173"
+    environment:
+      VITE_API_URL: http://server:8080
+    depends_on:
+      - server
+
 volumes:
   coppice_pgdata:
+  artifact_data:
