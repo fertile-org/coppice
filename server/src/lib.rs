@@ -11,6 +11,7 @@ use axum::Router;
 use sqlx::PgPool;
 use std::sync::Arc;
 use storage::AttachmentStore;
+use tower_http::services::{ServeDir, ServeFile};
 
 pub use config::AppConfig;
 
@@ -40,5 +41,14 @@ pub async fn test_state() -> Arc<AppState> {
 }
 
 pub fn app(state: Arc<AppState>) -> Router {
-    api::router(state)
+    let mut app = api::router(state.clone());
+
+    if let Some(static_dir) = &state.config.storage.static_dir {
+        let index = format!("{static_dir}/index.html");
+        app = app.fallback_service(
+            ServeDir::new(static_dir).not_found_service(ServeFile::new(index)),
+        );
+    }
+
+    app
 }

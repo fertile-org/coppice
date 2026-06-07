@@ -25,3 +25,13 @@ make migrate
 coppice bootstrap admin --email admin@localhost --password changeme
 curl http://localhost:8080/health
 ```
+
+## Release build
+
+Build a self-contained tarball with the API server, CLI, and compiled SPA:
+
+```bash
+make release-tar
+```
+
+Extract the archive, set `COPPICE_STORAGE__STATIC_DIR=./web/dist`, and run `./coppice-server` on port `:8080`. See `deploy/README-RELEASE.md` for details.
