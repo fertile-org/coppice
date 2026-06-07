@@ -1,0 +1,10 @@
+server:
+  port: 8080
+
+database:
+  url: "postgres://coppice:coppice@localhost:5432/coppice"
+
+auth:
+  session_secret: "dev-secret-change-me"
+  bootstrap_password: "changeme"
+  cookie_secure: false

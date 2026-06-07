@@ -8,9 +8,15 @@ async fn main() -> anyhow::Result<()> {
         .with_env_filter(EnvFilter::from_default_env())
         .init();
 
-    let state = Arc::new(coppice_server::AppState {});
+    let config_path = coppice_server::AppConfig::resolve_config_path();
+    let config = coppice_server::AppConfig::load(config_path.as_deref())
+        .map_err(|e| anyhow::anyhow!("failed to load config: {e}"))?;
+
+    let state = Arc::new(coppice_server::AppState {
+        config: config.clone(),
+    });
     let app = coppice_server::app(state);
-    let addr: SocketAddr = "0.0.0.0:8080".parse()?;
+    let addr: SocketAddr = format!("0.0.0.0:{}", config.server.port).parse()?;
     tracing::info!(%addr, "listening");
     let listener = tokio::net::TcpListener::bind(addr).await?;
     axum::serve(listener, app).await?;
