@@ -1,0 +1,74 @@
+mod common;
+
+use axum::http::StatusCode;
+use tower::ServiceExt;
+
+#[tokio::test]
+async fn list_presets_has_ten_entries() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let (app, cookie, csrf) = common::bootstrap_and_login().await;
+
+    let res = app
+        .clone()
+        .oneshot(common::json_request(
+            "GET",
+            "/api/agent-presets",
+            "",
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+
+    let body: serde_json::Value = common::json_body(res).await;
+    assert_eq!(body["items"].as_array().unwrap().len(), 10);
+}
+
+#[tokio::test]
+async fn create_agent_from_preset() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let (app, cookie, csrf) = common::bootstrap_and_login().await;
+
+    let presets_res = app
+        .clone()
+        .oneshot(common::json_request(
+            "GET",
+            "/api/agent-presets",
+            "",
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(presets_res.status(), StatusCode::OK);
+
+    let presets: serde_json::Value = common::json_body(presets_res).await;
+    let preset = &presets["items"][0];
+    let preset_id = preset["id"].as_str().unwrap();
+    let preset_role = preset["role"].as_str().unwrap();
+
+    let create_res = app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            "/api/agents",
+            &format!(r#"{{"name":"PM Bot","presetId":"{preset_id}"}}"#),
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(create_res.status(), StatusCode::CREATED);
+
+    let agent: serde_json::Value = common::json_body(create_res).await;
+    assert_eq!(agent["role"].as_str().unwrap(), preset_role);
+    assert_eq!(agent["presetSource"].as_str().unwrap(), preset["key"].as_str().unwrap());
+    assert_eq!(agent["name"].as_str().unwrap(), "PM Bot");
+}

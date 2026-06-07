@@ -1,0 +1,234 @@
+use crate::api::auth::{pool_from_state, AuthUser};
+use crate::domain::agent::{Agent, AgentPreset};
+use crate::services::agent_service::{AgentError, AgentService};
+use crate::AppState;
+use axum::{
+    extract::{Path, State},
+    http::StatusCode,
+    routing::get,
+    Json, Router,
+};
+use serde::{Deserialize, Serialize};
+use std::sync::Arc;
+use time::format_description::well_known::Rfc3339;
+use uuid::Uuid;
+
+pub fn routes() -> Router<Arc<AppState>> {
+    Router::new()
+        .route("/api/agent-presets", get(list_presets))
+        .route("/api/agents", get(list_agents).post(create_agent))
+        .route(
+            "/api/agents/{agent_id}",
+            get(get_agent)
+                .patch(update_agent)
+                .delete(delete_agent),
+        )
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PresetResponse {
+    id: Uuid,
+    key: String,
+    role: String,
+    skills: Vec<String>,
+    responsibilities: Vec<String>,
+    system_prompt_template: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AgentResponse {
+    id: Uuid,
+    name: String,
+    role: String,
+    skills: Vec<String>,
+    responsibilities: Vec<String>,
+    system_prompt: String,
+    provider_id: String,
+    enabled: bool,
+    preset_source: Option<String>,
+    created_at: String,
+    updated_at: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PresetListResponse {
+    items: Vec<PresetResponse>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AgentListResponse {
+    items: Vec<AgentResponse>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CreateAgentBody {
+    name: String,
+    preset_id: Option<Uuid>,
+    role: Option<String>,
+    skills: Option<Vec<String>>,
+    responsibilities: Option<Vec<String>>,
+    system_prompt: Option<String>,
+    provider_id: Option<String>,
+    enabled: Option<bool>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct UpdateAgentBody {
+    name: Option<String>,
+    role: Option<String>,
+    skills: Option<Vec<String>>,
+    responsibilities: Option<Vec<String>>,
+    system_prompt: Option<String>,
+    provider_id: Option<String>,
+    enabled: Option<bool>,
+}
+
+fn preset_to_response(preset: AgentPreset) -> PresetResponse {
+    PresetResponse {
+        id: preset.id,
+        key: preset.key,
+        role: preset.role,
+        skills: preset.skills,
+        responsibilities: preset.responsibilities,
+        system_prompt_template: preset.system_prompt_template,
+    }
+}
+
+fn agent_to_response(agent: Agent) -> AgentResponse {
+    AgentResponse {
+        id: agent.id,
+        name: agent.name,
+        role: agent.role,
+        skills: agent.skills,
+        responsibilities: agent.responsibilities,
+        system_prompt: agent.system_prompt,
+        provider_id: agent.provider_id,
+        enabled: agent.enabled,
+        preset_source: agent.preset_source,
+        created_at: agent.created_at.format(&Rfc3339).unwrap_or_default(),
+        updated_at: agent.updated_at.format(&Rfc3339).unwrap_or_default(),
+    }
+}
+
+fn map_error(err: AgentError) -> StatusCode {
+    match err {
+        AgentError::AgentNotFound | AgentError::PresetNotFound => StatusCode::NOT_FOUND,
+        AgentError::Validation(_) => StatusCode::BAD_REQUEST,
+        AgentError::Database(_) => StatusCode::INTERNAL_SERVER_ERROR,
+    }
+}
+
+async fn list_presets(
+    State(state): State<Arc<AppState>>,
+    AuthUser { .. }: AuthUser,
+) -> Result<Json<PresetListResponse>, StatusCode> {
+    let pool = pool_from_state(&state)?;
+    let service = AgentService::new(pool);
+    let presets = service.list_presets().await.map_err(map_error)?;
+    Ok(Json(PresetListResponse {
+        items: presets.into_iter().map(preset_to_response).collect(),
+    }))
+}
+
+async fn list_agents(
+    State(state): State<Arc<AppState>>,
+    AuthUser { .. }: AuthUser,
+) -> Result<Json<AgentListResponse>, StatusCode> {
+    let pool = pool_from_state(&state)?;
+    let service = AgentService::new(pool);
+    let agents = service.list_agents().await.map_err(map_error)?;
+    Ok(Json(AgentListResponse {
+        items: agents.into_iter().map(agent_to_response).collect(),
+    }))
+}
+
+async fn create_agent(
+    State(state): State<Arc<AppState>>,
+    AuthUser { .. }: AuthUser,
+    Json(body): Json<CreateAgentBody>,
+) -> Result<(StatusCode, Json<AgentResponse>), StatusCode> {
+    let pool = pool_from_state(&state)?;
+    let service = AgentService::new(pool);
+
+    let agent = if let Some(preset_id) = body.preset_id {
+        service
+            .create_from_preset(preset_id, &body.name)
+            .await
+            .map_err(map_error)?
+    } else {
+        let role = body
+            .role
+            .as_deref()
+            .ok_or(StatusCode::BAD_REQUEST)?;
+        let system_prompt = body
+            .system_prompt
+            .as_deref()
+            .ok_or(StatusCode::BAD_REQUEST)?;
+        service
+            .create(
+                &body.name,
+                role,
+                body.skills.as_deref().unwrap_or(&[]),
+                body.responsibilities.as_deref().unwrap_or(&[]),
+                system_prompt,
+                body.provider_id.as_deref(),
+                body.enabled,
+            )
+            .await
+            .map_err(map_error)?
+    };
+
+    Ok((StatusCode::CREATED, Json(agent_to_response(agent))))
+}
+
+async fn get_agent(
+    State(state): State<Arc<AppState>>,
+    AuthUser { .. }: AuthUser,
+    Path(agent_id): Path<Uuid>,
+) -> Result<Json<AgentResponse>, StatusCode> {
+    let pool = pool_from_state(&state)?;
+    let service = AgentService::new(pool);
+    let agent = service.get(agent_id).await.map_err(map_error)?;
+    Ok(Json(agent_to_response(agent)))
+}
+
+async fn update_agent(
+    State(state): State<Arc<AppState>>,
+    AuthUser { .. }: AuthUser,
+    Path(agent_id): Path<Uuid>,
+    Json(body): Json<UpdateAgentBody>,
+) -> Result<Json<AgentResponse>, StatusCode> {
+    let pool = pool_from_state(&state)?;
+    let service = AgentService::new(pool);
+    let agent = service
+        .update(
+            agent_id,
+            body.name.as_deref(),
+            body.role.as_deref(),
+            body.skills.as_deref(),
+            body.responsibilities.as_deref(),
+            body.system_prompt.as_deref(),
+            body.provider_id.as_deref(),
+            body.enabled,
+        )
+        .await
+        .map_err(map_error)?;
+    Ok(Json(agent_to_response(agent)))
+}
+
+async fn delete_agent(
+    State(state): State<Arc<AppState>>,
+    AuthUser { .. }: AuthUser,
+    Path(agent_id): Path<Uuid>,
+) -> Result<StatusCode, StatusCode> {
+    let pool = pool_from_state(&state)?;
+    let service = AgentService::new(pool);
+    service.delete(agent_id).await.map_err(map_error)?;
+    Ok(StatusCode::NO_CONTENT)
+}

@@ -1,4 +1,5 @@
 pub mod auth;
+mod agents;
 mod attachments;
 mod comments;
 mod health;
@@ -22,6 +23,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .merge(tickets::routes())
         .merge(comments::routes())
         .merge(attachments::routes())
+        .merge(agents::routes())
         .layer(middleware::from_fn(csrf::csrf_middleware))
         .layer(middleware::from_fn_with_state(state.clone(), session::session_middleware));
 
