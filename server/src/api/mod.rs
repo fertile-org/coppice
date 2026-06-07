@@ -6,6 +6,7 @@ mod health;
 mod projects;
 mod repos;
 mod tickets;
+mod users;
 
 use axum::{middleware, Router};
 use std::sync::Arc;
@@ -24,6 +25,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .merge(comments::routes())
         .merge(attachments::routes())
         .merge(agents::routes())
+        .merge(users::routes())
         .layer(middleware::from_fn(csrf::csrf_middleware))
         .layer(middleware::from_fn_with_state(state.clone(), session::session_middleware));
 
