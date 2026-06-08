@@ -1,8 +1,10 @@
 pub mod agent;
 pub mod attachment;
 pub mod comment;
+pub mod job;
 pub mod project;
 pub mod repo;
+pub mod run;
 pub mod session;
 pub mod substatus;
 pub mod ticket;
