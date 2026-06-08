@@ -53,6 +53,18 @@ impl AgentProvider for MockProvider {
     }
 
     async fn run(&self, input: AgentRunInput) -> Result<AgentRunResult, ProviderError> {
+        if let (Some(stream), Some(mut cancel_rx)) = (&input.stream, input.cancel_rx.clone()) {
+            crate::sessions::scripted_stream::emit_script(
+                stream,
+                &mut cancel_rx,
+                crate::sessions::scripted_stream::MOCK_SCRIPT,
+            )
+            .await;
+            if *cancel_rx.borrow() {
+                return Err(ProviderError::Cancelled);
+            }
+        }
+
         let path = self.fixtures_dir.join(format!("{}.json", self.response_name()));
         let raw = std::fs::read_to_string(&path).map_err(|_| {
             ProviderError::FixtureNotFound(path.display().to_string())
@@ -106,6 +118,8 @@ mod tests {
                 context_path: "/tmp".into(),
                 run_id: Some(run_id.into()),
                 artifacts_dir: Some(artifacts.path().to_string_lossy().into_owned()),
+                stream: None,
+                cancel_rx: None,
             })
             .await
             .expect("mock run");

@@ -3,15 +3,21 @@ pub mod mock;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
+use std::sync::Arc;
 use thiserror::Error;
+use tokio::sync::watch;
 
-#[derive(Debug, Clone, Deserialize)]
+use crate::sessions::run_registry::RunStreamHandle;
+
+#[derive(Clone)]
 pub struct AgentRunInput {
     pub agent_id: String,
     pub ticket_id: Option<String>,
     pub context_path: String,
     pub run_id: Option<String>,
     pub artifacts_dir: Option<String>,
+    pub stream: Option<Arc<RunStreamHandle>>,
+    pub cancel_rx: Option<watch::Receiver<bool>>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -52,6 +58,8 @@ pub enum ProviderError {
     InvalidFixture(String),
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
+    #[error("run cancelled")]
+    Cancelled,
 }
 
 #[async_trait]
@@ -92,6 +100,8 @@ mod tests {
                 context_path: "/tmp".into(),
                 run_id: None,
                 artifacts_dir: None,
+                stream: None,
+                cancel_rx: None,
             })
             .await
             .expect("mock run");

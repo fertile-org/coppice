@@ -175,6 +175,8 @@ async fn execute_job(
             context_path,
             run_id: Some(run.id.to_string()),
             artifacts_dir: Some(state.config.storage.artifacts_dir.clone()),
+            stream: None,
+            cancel_rx: None,
         })
         .await
         .map_err(|err| anyhow::anyhow!("agent provider: {err}"))?;
