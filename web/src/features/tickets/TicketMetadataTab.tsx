@@ -10,6 +10,7 @@ import {
   type Substatus,
 } from '../../lib/schemas/substatus';
 import { ticketPrioritySchema } from '../../lib/schemas/ticket';
+import { useRepos } from '../repos/useRepos';
 import { useAgentRuns } from './useAgentRuns';
 import { useAgents, useUpdateTicket, useUpdateTicketStatus } from './useTicket';
 
@@ -25,6 +26,7 @@ export function TicketMetadataTab({ ticket }: TicketMetadataTabProps) {
   const updateTicket = useUpdateTicket(ticket.id);
   const updateStatus = useUpdateTicketStatus(ticket.id);
   const { data: agents } = useAgents();
+  const { data: repos } = useRepos();
   const { data: runs } = useAgentRuns(ticket.id);
   const latestRunWorktreePath = runs?.[0]?.worktreePath ?? null;
 
@@ -36,6 +38,7 @@ export function TicketMetadataTab({ ticket }: TicketMetadataTabProps) {
     metadataFromTicket(ticket),
   );
   const [priority, setPriority] = useState(ticket.priority ?? '');
+  const [repoId, setRepoId] = useState(ticket.repoId ?? '');
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -43,6 +46,7 @@ export function TicketMetadataTab({ ticket }: TicketMetadataTabProps) {
     setSubstatus((ticket.substatus as Substatus | undefined) ?? '');
     setMetadata(metadataFromTicket(ticket));
     setPriority(ticket.priority ?? '');
+    setRepoId(ticket.repoId ?? '');
   }, [ticket]);
 
   function updateMetadataField(key: string, value: string) {
@@ -76,9 +80,14 @@ export function TicketMetadataTab({ ticket }: TicketMetadataTabProps) {
         substatusMetadata: substatus ? metadata : undefined,
       });
 
-      if (parsedPriority.data !== ticket.priority) {
+      const nextRepoId = repoId || null;
+      const repoChanged = nextRepoId !== (ticket.repoId ?? null);
+      const priorityChanged = parsedPriority.data !== ticket.priority;
+
+      if (repoChanged || priorityChanged) {
         await updateTicket.mutateAsync({
-          priority: parsedPriority.data,
+          ...(repoChanged ? { repoId: nextRepoId } : {}),
+          ...(priorityChanged ? { priority: parsedPriority.data } : {}),
         });
       }
     } catch {
@@ -127,6 +136,27 @@ export function TicketMetadataTab({ ticket }: TicketMetadataTabProps) {
           )}
         </dl>
       )}
+
+      <label className="block space-y-1.5">
+        <span className="font-body text-sm font-medium text-text-secondary">
+          Repository
+        </span>
+        <select
+          value={repoId}
+          onChange={(e) => setRepoId(e.target.value)}
+          className="w-full rounded-md border border-border bg-surface px-3 py-2 font-body text-sm text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-muted"
+        >
+          <option value="">None</option>
+          {repos?.map((repo) => (
+            <option key={repo.id} value={repo.id}>
+              {repo.name}
+              {repo.verificationStatus !== 'ready'
+                ? ` (${repo.verificationStatus.replaceAll('_', ' ')})`
+                : ''}
+            </option>
+          ))}
+        </select>
+      </label>
 
       <div className="grid gap-4 sm:grid-cols-2">
         <label className="block space-y-1.5">

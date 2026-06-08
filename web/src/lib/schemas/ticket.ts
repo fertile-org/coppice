@@ -21,6 +21,7 @@ export type TicketPriorityValue = z.infer<typeof ticketPrioritySchema>;
 export const updateTicketSchema = z.object({
   title: z.string().min(1, 'Title is required').optional(),
   description: z.string().optional(),
+  repoId: z.string().uuid().optional().nullable(),
   priority: ticketPrioritySchema.optional().nullable(),
   branchName: z.string().optional().nullable(),
 });

@@ -3,6 +3,7 @@ import { TicketCommentsTab } from './TicketCommentsTab';
 import { TicketDescriptionTab } from './TicketDescriptionTab';
 import { TicketMetadataTab } from './TicketMetadataTab';
 import { TicketRunsTab } from './TicketRunsTab';
+import { useRepos } from '../repos/useRepos';
 import {
   isActiveRunStatus,
   useAgentRuns,
@@ -29,13 +30,20 @@ const TAB_ORDER: DrawerTab[] = ['description', 'comments', 'runs', 'metadata'];
 
 export function TicketDrawer({ ticketId, onClose }: TicketDrawerProps) {
   const { data: ticket, isLoading, isError, refetch } = useTicket(ticketId);
+  const { data: repos } = useRepos();
   const { data: runs } = useAgentRuns(ticketId);
   const runAgent = useRunAgent(ticketId);
   const stopRun = useStopRun(ticketId);
   const [tab, setTab] = useState<DrawerTab>('description');
   const [actionError, setActionError] = useState<string | null>(null);
 
-  const canRunAgent = Boolean(ticket?.assigneeAgentId && ticket?.repoId);
+  const selectedRepo = repos?.find((repo) => repo.id === ticket?.repoId);
+  const repoNotReady = Boolean(
+    ticket?.repoId && selectedRepo && selectedRepo.verificationStatus !== 'ready',
+  );
+  const canRunAgent = Boolean(
+    ticket?.assigneeAgentId && ticket?.repoId && !repoNotReady,
+  );
   const activeRun = runs?.find(
     (run) =>
       run.agentId === ticket?.assigneeAgentId &&
@@ -45,7 +53,9 @@ export function TicketDrawer({ ticketId, onClose }: TicketDrawerProps) {
     ? 'Assign an agent before running.'
     : !ticket?.repoId
       ? 'Link a repository before running.'
-      : null;
+      : repoNotReady
+        ? 'Repository path is not ready. Ask an admin to verify in Settings → Repositories.'
+        : null;
 
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
@@ -114,6 +124,12 @@ export function TicketDrawer({ ticketId, onClose }: TicketDrawerProps) {
                     </span>
                   </>
                 )}
+              </p>
+            )}
+            {repoNotReady && (
+              <p className="mt-2 font-body text-sm text-warning">
+                Repository path is not ready. Ask an admin to verify in Settings
+                → Repositories.
               </p>
             )}
             {actionError && (
