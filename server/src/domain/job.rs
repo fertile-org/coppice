@@ -44,3 +44,25 @@ pub fn job_status_from_str(s: &str) -> Option<JobStatus> {
         _ => None,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn job_status_roundtrip() {
+        let statuses = [
+            JobStatus::Pending,
+            JobStatus::Processing,
+            JobStatus::Done,
+            JobStatus::Failed,
+            JobStatus::Cancelled,
+        ];
+        for status in statuses {
+            assert_eq!(
+                job_status_from_str(job_status_to_str(status)),
+                Some(status)
+            );
+        }
+    }
+}

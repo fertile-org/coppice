@@ -49,3 +49,26 @@ pub fn run_status_from_str(s: &str) -> Option<RunStatus> {
         _ => None,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn run_status_roundtrip() {
+        let statuses = [
+            RunStatus::Queued,
+            RunStatus::Running,
+            RunStatus::Succeeded,
+            RunStatus::Failed,
+            RunStatus::Blocked,
+            RunStatus::Cancelled,
+        ];
+        for status in statuses {
+            assert_eq!(
+                run_status_from_str(run_status_to_str(status)),
+                Some(status)
+            );
+        }
+    }
+}
