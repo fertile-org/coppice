@@ -7,6 +7,7 @@ pub mod providers;
 pub mod sandbox;
 pub mod services;
 pub mod storage;
+pub mod util;
 pub mod workers;
 
 use axum::Router;
