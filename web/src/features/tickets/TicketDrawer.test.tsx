@@ -62,9 +62,10 @@ function renderDrawer() {
 }
 
 describe('TicketDrawer', () => {
-  it('renders Detail and Agent Runs tabs only', () => {
+  it('renders Detail, Live Console, and Agent Runs tabs', () => {
     renderDrawer();
     expect(screen.getByRole('tab', { name: 'Detail' })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'Live Console' })).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: 'Agent Runs' })).toBeInTheDocument();
     expect(screen.queryByRole('tab', { name: 'Comments' })).toBeNull();
   });

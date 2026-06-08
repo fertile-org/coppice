@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { LiveConsole } from '../runs/LiveConsole';
 import { TicketDetailPanel } from './TicketDetailPanel';
 import { TicketMetadataPanel } from './TicketMetadataPanel';
 import { TicketRunsTab } from './TicketRunsTab';
@@ -12,7 +13,7 @@ import {
 import { TicketStatusBadge } from './TicketStatusBadge';
 import { useTicket } from './useTicket';
 
-type DrawerTab = 'detail' | 'runs';
+type DrawerTab = 'detail' | 'live' | 'runs';
 
 interface TicketDrawerProps {
   ticketId: string;
@@ -21,10 +22,11 @@ interface TicketDrawerProps {
 
 const TAB_LABELS: Record<DrawerTab, string> = {
   detail: 'Detail',
+  live: 'Live Console',
   runs: 'Agent Runs',
 };
 
-const TAB_ORDER: DrawerTab[] = ['detail', 'runs'];
+const TAB_ORDER: DrawerTab[] = ['detail', 'live', 'runs'];
 
 export function TicketDrawer({ ticketId, onClose }: TicketDrawerProps) {
   const { data: ticket, isLoading, isError, refetch } = useTicket(ticketId);
@@ -47,6 +49,7 @@ export function TicketDrawer({ ticketId, onClose }: TicketDrawerProps) {
       run.agentId === ticket?.assigneeAgentId &&
       isActiveRunStatus(run.status),
   );
+  const latestRun = runs?.[0] ?? null;
   const runAgentDisabledReason = !ticket?.assigneeAgentId
     ? 'Assign an agent before running.'
     : !ticket?.repoId
@@ -228,6 +231,15 @@ export function TicketDrawer({ ticketId, onClose }: TicketDrawerProps) {
               <div className="min-h-0 overflow-y-auto border-border px-4 py-5 md:border-l">
                 <TicketMetadataPanel ticket={ticket} />
               </div>
+            </div>
+          )}
+
+          {ticket && tab === 'live' && (
+            <div className="flex h-full min-h-0 flex-col px-6 py-5">
+              <LiveConsole
+                runId={activeRun?.id ?? latestRun?.id ?? null}
+                runStatus={activeRun?.status ?? null}
+              />
             </div>
           )}
 

@@ -24,6 +24,7 @@ export const agentRunSchema = z.object({
   endedAt: z.string().nullable(),
   createdAt: z.string(),
   errorMessage: z.string().nullable(),
+  sessionId: z.string().nullable().optional(),
 });
 
 export type AgentRun = z.infer<typeof agentRunSchema>;
