@@ -12,7 +12,9 @@ async fn full_workspace_happy_path() {
     let (app, cookie, csrf) = common::bootstrap_and_login().await;
 
     let project_id = common::create_test_project(&app, &cookie, &csrf).await;
-    let _repo_id = common::create_test_repo(&app, &project_id, &cookie, &csrf).await;
+    let (_git_dir, local_path) = common::create_temp_git_checkout();
+    let _repo_id =
+        common::register_test_repo(&app, &local_path.display().to_string(), &cookie, &csrf).await;
     let agent_id = common::create_test_agent_from_preset(&app, "PM Bot", &cookie, &csrf).await;
     let ticket_id = common::create_test_ticket(&app, &project_id, &cookie, &csrf).await;
 

@@ -6,6 +6,8 @@ use axum::{
 use coppice_server::middleware::session::parse_session_cookie;
 use coppice_server::{db, AppConfig, AppState};
 use http_body_util::BodyExt;
+use std::path::PathBuf;
+use std::process::Command;
 use std::sync::{Arc, LazyLock};
 use tokio::sync::Mutex;
 use tower::ServiceExt;
@@ -42,30 +44,21 @@ pub async fn truncate_workspace(pool: &sqlx::PgPool) {
 
 #[allow(dead_code)]
 pub struct AgentTestEnv {
-    pub git_repos: tempfile::TempDir,
     pub worktrees: tempfile::TempDir,
 }
 
-pub fn create_temp_git_remote() -> (tempfile::TempDir, String) {
-    use std::process::Command;
-
-    let bare = tempfile::tempdir().expect("tempdir");
-    Command::new("git")
-        .args(["init", "--bare"])
-        .current_dir(bare.path())
-        .output()
-        .expect("git init --bare");
-
-    let work = tempfile::tempdir().expect("workdir");
+pub fn create_temp_git_checkout() -> (tempfile::TempDir, PathBuf) {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().to_path_buf();
     Command::new("git")
         .args(["init", "-b", "main"])
-        .current_dir(work.path())
+        .current_dir(&path)
         .output()
         .expect("git init");
-    std::fs::write(work.path().join("README.md"), "# test\n").expect("write readme");
+    std::fs::write(path.join("README.md"), "# test\n").expect("write readme");
     Command::new("git")
         .args(["add", "README.md"])
-        .current_dir(work.path())
+        .current_dir(&path)
         .output()
         .expect("git add");
     Command::new("git")
@@ -74,23 +67,10 @@ pub fn create_temp_git_remote() -> (tempfile::TempDir, String) {
         .env("GIT_AUTHOR_EMAIL", "test@localhost")
         .env("GIT_COMMITTER_NAME", "test")
         .env("GIT_COMMITTER_EMAIL", "test@localhost")
-        .current_dir(work.path())
+        .current_dir(&path)
         .output()
         .expect("git commit");
-
-    let url = format!("file://{}", bare.path().display());
-    Command::new("git")
-        .args(["remote", "add", "origin", &url])
-        .current_dir(work.path())
-        .output()
-        .expect("git remote add");
-    Command::new("git")
-        .args(["push", "-u", "origin", "main"])
-        .current_dir(work.path())
-        .output()
-        .expect("git push");
-
-    (bare, url)
+    (dir, path)
 }
 
 async fn test_state_with_db() -> Arc<AppState> {
@@ -115,10 +95,8 @@ async fn test_state_with_db() -> Arc<AppState> {
 }
 
 async fn test_state_with_db_and_workers(mock_response: &str) -> (Arc<AppState>, AgentTestEnv) {
-    let git_repos = tempfile::tempdir().expect("git repos tempdir");
     let worktrees = tempfile::tempdir().expect("worktrees tempdir");
 
-    std::env::set_var("GIT_REPOS_PATH", git_repos.path());
     std::env::set_var("WORKTREES_PATH", worktrees.path());
     std::env::set_var("MOCK_AGENT_RESPONSE", mock_response);
     std::env::set_var("AGENT_DEFAULT_PROVIDER", "mock");
@@ -126,13 +104,7 @@ async fn test_state_with_db_and_workers(mock_response: &str) -> (Arc<AppState>, 
     let state = test_state_with_db().await;
     coppice_server::workers::job_worker::spawn_workers(state.clone());
 
-    (
-        state,
-        AgentTestEnv {
-            git_repos,
-            worktrees,
-        },
-    )
+    (state, AgentTestEnv { worktrees })
 }
 
 fn bootstrap_password_header() -> (&'static str, &'static str) {
@@ -289,34 +261,23 @@ pub async fn create_test_project(app: &Router, cookie: &str, csrf: &str) -> Stri
     body["id"].as_str().unwrap().to_string()
 }
 
-pub async fn create_test_repo(
+pub async fn register_test_repo(
     app: &Router,
-    project_id: &str,
+    local_path: &str,
     cookie: &str,
     csrf: &str,
 ) -> String {
-    create_test_repo_with_remote(app, project_id, None, cookie, csrf).await
-}
-
-pub async fn create_test_repo_with_remote(
-    app: &Router,
-    project_id: &str,
-    remote_url: Option<&str>,
-    cookie: &str,
-    csrf: &str,
-) -> String {
-    let body = match remote_url {
-        Some(url) => format!(
-            r#"{{"name":"main-repo","defaultBranch":"main","remoteUrl":"{url}"}}"#
-        ),
-        None => r#"{"name":"main-repo","defaultBranch":"main"}"#.to_string(),
-    };
+    let body = serde_json::json!({
+        "name": "test-repo",
+        "localPath": local_path,
+        "defaultBranch": "main",
+    });
     let res = app
         .clone()
         .oneshot(json_request(
             "POST",
-            &format!("/api/projects/{project_id}/repos"),
-            &body,
+            "/api/repos",
+            &body.to_string(),
             cookie,
             csrf,
         ))

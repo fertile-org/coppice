@@ -9,17 +9,14 @@ async fn setup_agent_ticket(
     app: &axum::Router,
     cookie: &str,
     csrf: &str,
-    remote_url: &str,
+    repo_id: &str,
 ) -> (String, String, String) {
     let project_id = common::create_test_project(app, cookie, csrf).await;
-    let repo_id =
-        common::create_test_repo_with_remote(app, &project_id, Some(remote_url), cookie, csrf)
-            .await;
     let agent_id = common::create_test_agent_from_preset(app, "Worker", cookie, csrf).await;
     let ticket_id = common::create_test_ticket(app, &project_id, cookie, csrf).await;
     common::set_ticket_repo(app, &ticket_id, &repo_id, cookie, csrf).await;
     common::assign_agent_to_ticket(app, &ticket_id, &agent_id, cookie, csrf).await;
-    (ticket_id, agent_id, repo_id)
+    (ticket_id, agent_id, repo_id.to_string())
 }
 
 async fn post_run_agent(
@@ -91,8 +88,11 @@ async fn run_agent_applies_done_fixture() {
     }
 
     let (app, cookie, csrf, _env) = common::bootstrap_and_login_with_workers("done").await;
-    let (_git_remote, remote_url) = common::create_temp_git_remote();
-    let (ticket_id, _agent_id, _repo_id) = setup_agent_ticket(&app, &cookie, &csrf, &remote_url).await;
+    let (_git_dir, local_path) = common::create_temp_git_checkout();
+    let repo_id =
+        common::register_test_repo(&app, &local_path.display().to_string(), &cookie, &csrf).await;
+    let (ticket_id, _agent_id, _repo_id) =
+        setup_agent_ticket(&app, &cookie, &csrf, &repo_id).await;
 
     let (status, body) = post_run_agent(&app, &ticket_id, &cookie, &csrf).await;
     assert_eq!(status, StatusCode::CREATED);
@@ -154,8 +154,11 @@ async fn run_agent_applies_blocked_fixture() {
     }
 
     let (app, cookie, csrf, _env) = common::bootstrap_and_login_with_workers("blocked").await;
-    let (_git_remote, remote_url) = common::create_temp_git_remote();
-    let (ticket_id, _agent_id, _repo_id) = setup_agent_ticket(&app, &cookie, &csrf, &remote_url).await;
+    let (_git_dir, local_path) = common::create_temp_git_checkout();
+    let repo_id =
+        common::register_test_repo(&app, &local_path.display().to_string(), &cookie, &csrf).await;
+    let (ticket_id, _agent_id, _repo_id) =
+        setup_agent_ticket(&app, &cookie, &csrf, &repo_id).await;
 
     let (status, _) = post_run_agent(&app, &ticket_id, &cookie, &csrf).await;
     assert_eq!(status, StatusCode::CREATED);
@@ -213,8 +216,11 @@ async fn reject_second_run_while_active() {
     }
 
     let (app, cookie, csrf, _env) = common::bootstrap_and_login_with_workers("done").await;
-    let (_git_remote, remote_url) = common::create_temp_git_remote();
-    let (ticket_id, _agent_id, _repo_id) = setup_agent_ticket(&app, &cookie, &csrf, &remote_url).await;
+    let (_git_dir, local_path) = common::create_temp_git_checkout();
+    let repo_id =
+        common::register_test_repo(&app, &local_path.display().to_string(), &cookie, &csrf).await;
+    let (ticket_id, _agent_id, _repo_id) =
+        setup_agent_ticket(&app, &cookie, &csrf, &repo_id).await;
 
     let (status, _) = post_run_agent(&app, &ticket_id, &cookie, &csrf).await;
     assert_eq!(status, StatusCode::CREATED);
@@ -231,8 +237,11 @@ async fn stop_queued_run_cancels() {
     }
 
     let (app, cookie, csrf, _env) = common::bootstrap_and_login_with_workers("done").await;
-    let (_git_remote, remote_url) = common::create_temp_git_remote();
-    let (ticket_id, _agent_id, _repo_id) = setup_agent_ticket(&app, &cookie, &csrf, &remote_url).await;
+    let (_git_dir, local_path) = common::create_temp_git_checkout();
+    let repo_id =
+        common::register_test_repo(&app, &local_path.display().to_string(), &cookie, &csrf).await;
+    let (ticket_id, _agent_id, _repo_id) =
+        setup_agent_ticket(&app, &cookie, &csrf, &repo_id).await;
 
     let (status, body) = post_run_agent(&app, &ticket_id, &cookie, &csrf).await;
     assert_eq!(status, StatusCode::CREATED);
@@ -274,8 +283,11 @@ async fn retry_after_failed_creates_new_run() {
 
     let (app, cookie, csrf, _env) =
         common::bootstrap_and_login_with_workers("nonexistent-fixture").await;
-    let (_git_remote, remote_url) = common::create_temp_git_remote();
-    let (ticket_id, _agent_id, _repo_id) = setup_agent_ticket(&app, &cookie, &csrf, &remote_url).await;
+    let (_git_dir, local_path) = common::create_temp_git_checkout();
+    let repo_id =
+        common::register_test_repo(&app, &local_path.display().to_string(), &cookie, &csrf).await;
+    let (ticket_id, _agent_id, _repo_id) =
+        setup_agent_ticket(&app, &cookie, &csrf, &repo_id).await;
 
     let (status, body) = post_run_agent(&app, &ticket_id, &cookie, &csrf).await;
     assert_eq!(status, StatusCode::CREATED);

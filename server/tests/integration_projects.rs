@@ -25,13 +25,17 @@ async fn create_project_and_repo() {
     assert_eq!(create_project.status(), StatusCode::CREATED);
 
     let body: serde_json::Value = common::json_body(create_project).await;
-    let project_id = body["id"].as_str().unwrap();
+    let _project_id = body["id"].as_str().unwrap();
 
+    let (_git_dir, local_path) = common::create_temp_git_checkout();
     let create_repo = app
         .oneshot(common::json_request(
             "POST",
-            &format!("/api/projects/{project_id}/repos"),
-            r#"{"name":"main-repo","defaultBranch":"main"}"#,
+            "/api/repos",
+            &format!(
+                r#"{{"name":"main-repo","localPath":"{}","defaultBranch":"main"}}"#,
+                local_path.display()
+            ),
             &cookie,
             &csrf,
         ))
