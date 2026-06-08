@@ -35,6 +35,10 @@ pub enum AgentRunResult {
         next_status: String,
         #[serde(rename = "mentionAgents")]
         mention_agents: Vec<String>,
+        #[serde(default, rename = "requiredCapabilities")]
+        required_capabilities: Vec<String>,
+        #[serde(default, rename = "requiredSecrets")]
+        required_secrets: Vec<String>,
     },
 }
 

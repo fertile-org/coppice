@@ -3,6 +3,7 @@ pub mod auth_service;
 pub mod comment_service;
 pub mod context_builder;
 pub mod project_service;
+pub mod result_contract;
 pub mod ticket_service;
 pub mod user_service;
 pub mod worktree_service;

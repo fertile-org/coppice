@@ -1,0 +1,8 @@
+{
+  "status": "blocked",
+  "blockerType": "missing_capability",
+  "summary": "Need postgres access to run migrations.",
+  "nextStatus": "Blocked",
+  "mentionAgents": [],
+  "requiredCapabilities": ["postgres"]
+}
