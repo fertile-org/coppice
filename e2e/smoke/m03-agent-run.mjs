@@ -10,6 +10,7 @@
  *   COPPICE_BOOTSTRAP_PASSWORD default changeme
  *   COPPICE_SMOKE_EMAIL        default admin@localhost
  *   COPPICE_SMOKE_PASSWORD     default changeme
+ *   COPPICE_SMOKE_REPO_PATH    default /tmp/smoke-repo (path inside server container)
  */
 
 const API = process.env.COPPICE_API_URL ?? 'http://localhost:8080';
@@ -17,8 +18,8 @@ const BOOTSTRAP_PASSWORD =
   process.env.COPPICE_BOOTSTRAP_PASSWORD ?? 'changeme';
 const EMAIL = process.env.COPPICE_SMOKE_EMAIL ?? 'admin@localhost';
 const PASSWORD = process.env.COPPICE_SMOKE_PASSWORD ?? 'changeme';
-
-const REMOTE_URL = 'https://github.com/octocat/Hello-World.git';
+const SMOKE_REPO_PATH =
+  process.env.COPPICE_SMOKE_REPO_PATH ?? '/tmp/smoke-repo';
 const MOCK_SUMMARY = 'Mock implementation complete.';
 
 const MAX_HEALTH_ATTEMPTS = 60;
@@ -140,27 +141,39 @@ async function createProject(auth) {
   return project;
 }
 
-async function createRepo(projectId, auth) {
-  const res = await api('POST', `/api/projects/${projectId}/repos`, {
+async function registerRepo(auth) {
+  const res = await api('POST', '/api/repos', {
     ...auth,
     body: {
       name: 'smoke-repo',
+      localPath: SMOKE_REPO_PATH,
       defaultBranch: 'main',
-      remoteUrl: REMOTE_URL,
     },
   });
 
-  if (res.status !== 201) {
-    fail(`create repo failed: ${res.status} ${await res.text()}`);
+  if (res.status === 201) {
+    const repo = await res.json();
+    if (!repo.id) {
+      fail('register repo response missing id');
+    }
+    console.log(`smoke: registered repo ${repo.id} at ${SMOKE_REPO_PATH}`);
+    return repo;
   }
 
-  const repo = await res.json();
-  if (!repo.id) {
-    fail('create repo response missing id');
+  if (res.status === 409) {
+    const listRes = await api('GET', '/api/repos', auth);
+    if (!listRes.ok) {
+      fail(`list repos failed: ${listRes.status} ${await listRes.text()}`);
+    }
+    const repos = await listRes.json();
+    const existing = repos.find((r) => r.localPath === SMOKE_REPO_PATH);
+    if (existing?.id) {
+      console.log(`smoke: reusing registered repo ${existing.id}`);
+      return existing;
+    }
   }
 
-  console.log(`smoke: created repo ${repo.id}`);
-  return repo;
+  fail(`register repo failed: ${res.status} ${await res.text()}`);
 }
 
 async function createAgentFromPreset(auth) {
@@ -323,7 +336,7 @@ async function main() {
   await bootstrapIfNeeded();
   const auth = await login();
   const project = await createProject(auth);
-  const repo = await createRepo(project.id, auth);
+  const repo = await registerRepo(auth);
   const agent = await createAgentFromPreset(auth);
   const ticket = await createTicket(project.id, auth);
 

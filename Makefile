@@ -63,6 +63,7 @@ e2e-smoke: compose-up
 	node e2e/smoke/m02-board.mjs
 
 e2e-smoke-m03: compose-up
+	$(COMPOSE) exec -T server sh -c 'mkdir -p /tmp/smoke-repo && cd /tmp/smoke-repo && git init -b main && git config user.email smoke@coppice.local && git config user.name smoke && echo hi > README.md && git add . && git commit -m init'
 	node e2e/smoke/m03-agent-run.mjs
 
 release-tar: web-build
