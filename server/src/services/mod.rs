@@ -4,6 +4,7 @@ pub mod comment_service;
 pub mod context_builder;
 pub mod job_service;
 pub mod project_service;
+pub mod repo_verifier;
 pub mod result_contract;
 pub mod run_service;
 pub mod ticket_service;
