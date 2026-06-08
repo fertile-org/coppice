@@ -7,6 +7,7 @@ import { AuthProvider } from './features/auth/AuthProvider';
 import { LoginPage } from './features/auth/LoginPage';
 import { BoardPage } from './features/board/BoardPage';
 import { ProjectPickerPage } from './features/projects/ProjectPickerPage';
+import { RepositoriesPage } from './features/repos/RepositoriesPage';
 import { UsersPage } from './features/users/UsersPage';
 import { queryClient } from './lib/query-client';
 
@@ -25,6 +26,10 @@ function App() {
                   element={<BoardPage />}
                 />
                 <Route path="/agents" element={<AgentsPage />} />
+                <Route
+                  path="/settings/repositories"
+                  element={<RepositoriesPage />}
+                />
                 <Route path="/settings/users" element={<UsersPage />} />
               </Route>
             </Route>
