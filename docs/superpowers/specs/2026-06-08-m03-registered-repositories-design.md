@@ -2,6 +2,7 @@
 
 **Date:** 2026-06-08  
 **Status:** Approved  
+**Implementation plan:** [docs/superpowers/plans/2026-06-08-m03-registered-repositories.md](../plans/2026-06-08-m03-registered-repositories.md)  
 **Product:** Coppice — grow an agent team from shared roots.
 
 **Supersedes (partial):** [2026-06-08-m03-agent-execution-design.md](./2026-06-08-m03-agent-execution-design.md) — repo bootstrap, clone paths, `GIT_REPOS_PATH`, and project-scoped repos.
