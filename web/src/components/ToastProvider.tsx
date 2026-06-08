@@ -15,11 +15,18 @@ interface ToastItem {
   id: string;
   message: string;
   variant: ToastVariant;
+  persistent?: boolean;
+  onClick?: () => void;
+}
+
+interface ToastErrorOptions {
+  persistent?: boolean;
+  onClick?: () => void;
 }
 
 interface ToastApi {
   success: (message: string) => void;
-  error: (message: string) => void;
+  error: (message: string, opts?: ToastErrorOptions) => void;
 }
 
 const ToastContext = createContext<ToastApi | null>(null);
@@ -56,19 +63,40 @@ function ToastMessage({
   onDismiss: (id: string) => void;
 }) {
   useEffect(() => {
+    if (toast.persistent) return;
     const timer = window.setTimeout(() => onDismiss(toast.id), TOAST_DURATION_MS);
     return () => window.clearTimeout(timer);
-  }, [onDismiss, toast.id]);
+  }, [onDismiss, toast.id, toast.persistent]);
+
+  function handleClick() {
+    toast.onClick?.();
+    onDismiss(toast.id);
+  }
+
+  const isClickable = Boolean(toast.onClick);
 
   return (
     <div
-      role="status"
+      role={isClickable ? 'button' : 'status'}
+      tabIndex={isClickable ? 0 : undefined}
+      onClick={isClickable ? handleClick : undefined}
+      onKeyDown={
+        isClickable
+          ? (e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                handleClick();
+              }
+            }
+          : undefined
+      }
       className={cn(
         'pointer-events-auto animate-fade-in rounded-md border px-4 py-3 font-body text-sm shadow-md',
         toast.variant === 'success' &&
           'border-success-muted bg-success-muted text-success',
         toast.variant === 'error' &&
           'border-danger-muted bg-danger-muted text-danger',
+        isClickable && 'cursor-pointer hover:opacity-90',
       )}
     >
       {toast.message}
@@ -83,15 +111,31 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     setToasts((current) => current.filter((toast) => toast.id !== id));
   }, []);
 
-  const push = useCallback((message: string, variant: ToastVariant) => {
-    const id = crypto.randomUUID();
-    setToasts((current) => [...current, { id, message, variant }]);
-  }, []);
+  const push = useCallback(
+    (
+      message: string,
+      variant: ToastVariant,
+      opts?: ToastErrorOptions,
+    ) => {
+      const id = crypto.randomUUID();
+      setToasts((current) => [
+        ...current,
+        {
+          id,
+          message,
+          variant,
+          persistent: opts?.persistent,
+          onClick: opts?.onClick,
+        },
+      ]);
+    },
+    [],
+  );
 
   const api = useMemo<ToastApi>(
     () => ({
       success: (message) => push(message, 'success'),
-      error: (message) => push(message, 'error'),
+      error: (message, opts) => push(message, 'error', opts),
     }),
     [push],
   );

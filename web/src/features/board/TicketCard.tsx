@@ -5,9 +5,10 @@ import type { Ticket } from './useTickets';
 interface TicketCardProps {
   ticket: Ticket;
   onOpen: (ticketId: string) => void;
+  isLive?: boolean;
 }
 
-export function TicketCard({ ticket, onOpen }: TicketCardProps) {
+export function TicketCard({ ticket, onOpen, isLive = false }: TicketCardProps) {
   const { attributes, listeners, setNodeRef, transform, isDragging } =
     useDraggable({
       id: ticket.id,
@@ -41,8 +42,14 @@ export function TicketCard({ ticket, onOpen }: TicketCardProps) {
         isDragging ? 'z-10 opacity-60 shadow-lg' : '',
       ].join(' ')}
     >
-      <p className="font-body text-sm font-medium leading-snug text-text-primary">
-        {ticket.title}
+      <p className="flex items-start gap-1.5 font-body text-sm font-medium leading-snug text-text-primary">
+        {isLive && (
+          <span
+            className="mt-1.5 inline-block h-2 w-2 shrink-0 animate-pulse rounded-full bg-accent"
+            aria-label="Agent running"
+          />
+        )}
+        <span>{ticket.title}</span>
       </p>
 
       {(ticket.substatusDisplay || ticket.priority) && (
