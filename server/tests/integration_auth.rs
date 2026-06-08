@@ -30,6 +30,7 @@ async fn test_state_with_db() -> Arc<AppState> {
     let config = AppConfig::load(None).expect("test config");
     Arc::new(AppState {
         attachments: AppState::attachment_store_from_config(&config),
+        agent_provider: AppState::agent_provider_from_config(&config),
         config,
         db: Some(pool),
     })

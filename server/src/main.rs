@@ -15,9 +15,11 @@ async fn main() -> anyhow::Result<()> {
     let db = coppice_server::db::connect_and_migrate(&config.database.url).await?;
     let state = Arc::new(coppice_server::AppState {
         attachments: coppice_server::AppState::attachment_store_from_config(&config),
+        agent_provider: coppice_server::AppState::agent_provider_from_config(&config),
         config: config.clone(),
         db: Some(db),
     });
+    coppice_server::workers::job_worker::spawn_workers(state.clone());
     let app = coppice_server::app(state);
     let addr: SocketAddr = format!("0.0.0.0:{}", config.server.port).parse()?;
     tracing::info!(%addr, "listening");

@@ -86,6 +86,25 @@ impl<'a> JobService<'a> {
         Ok(())
     }
 
+    pub async fn mark_cancelled(&self, job_id: Uuid) -> Result<(), JobError> {
+        let result = sqlx::query(
+            r#"
+            UPDATE agent_jobs
+            SET status = $2
+            WHERE id = $1
+            "#,
+        )
+        .bind(job_id)
+        .bind(job_status_to_str(JobStatus::Cancelled))
+        .execute(self.pool)
+        .await?;
+
+        if result.rows_affected() == 0 {
+            return Err(JobError::NotFound);
+        }
+        Ok(())
+    }
+
     pub async fn mark_failed(&self, job_id: Uuid, _message: &str) -> Result<(), JobError> {
         let result = sqlx::query(
             r#"
