@@ -12,7 +12,7 @@ LOCAL_SERVER_URL = http://localhost:8081
 BOOTSTRAP_EMAIL = admin@localhost
 BOOTSTRAP_PASSWORD = changeme
 
-.PHONY: compose-up compose-down compose-local-up compose-local-down test clippy migrate migrate-local bootstrap bootstrap-local web-install web-test web-dev web-dev-local web-build e2e-smoke release-tar
+.PHONY: compose-up compose-down compose-local-up compose-local-down test clippy migrate migrate-local bootstrap bootstrap-local web-install web-test web-dev web-dev-local web-build e2e-smoke e2e-smoke-m03 release-tar
 
 compose-up:
 	$(COMPOSE) up -d --build
@@ -61,6 +61,9 @@ web-build:
 
 e2e-smoke: compose-up
 	node e2e/smoke/m02-board.mjs
+
+e2e-smoke-m03: compose-up
+	node e2e/smoke/m03-agent-run.mjs
 
 release-tar: web-build
 	cargo build --release -p coppice-server -p coppice-cli
