@@ -59,15 +59,15 @@ pub fn validate_substatus(
                 return Some("agentId required");
             }
         }
-        Substatus::BlockedByMissingCapability => {
-            if meta.get("capability").and_then(|v| v.as_str()).is_none() {
-                return Some("capability required");
-            }
+        Substatus::BlockedByMissingCapability
+            if meta.get("capability").and_then(|v| v.as_str()).is_none() =>
+        {
+            return Some("capability required");
         }
-        Substatus::BlockedByMissingSecret => {
-            if meta.get("secretKey").and_then(|v| v.as_str()).is_none() {
-                return Some("secretKey required");
-            }
+        Substatus::BlockedByMissingSecret
+            if meta.get("secretKey").and_then(|v| v.as_str()).is_none() =>
+        {
+            return Some("secretKey required");
         }
         _ => {}
     }

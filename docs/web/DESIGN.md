@@ -115,7 +115,7 @@ Column headers use accent color for the status dot; cards sit on `--color-surfac
 
 ## Implementation
 
-All tokens live in `src/styles/tokens.css`. Tailwind extends theme colors to reference these CSS variables — never hardcode hex in components.
+All tokens live in `web/src/styles/tokens.css`. Tailwind extends theme colors to reference these CSS variables — never hardcode hex in components.
 
 ```css
 /* Example usage */
