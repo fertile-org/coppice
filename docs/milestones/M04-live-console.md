@@ -15,6 +15,11 @@ Observable agent runs through a live terminal stream in the browser, persisted l
 - Terminal log saved as artifact on filesystem after run completes (not in Postgres body)
 - Board card badge: live run indicator
 - SPA subscribes to `/ws/events` for board refresh
+- **Run completion toasts** (deferred from pre-M04 polish; see [ticket drawer & run errors spec](../superpowers/specs/2026-06-08-ticket-drawer-and-run-errors-design.md) §3):
+  - App-level toast stack, **top-right** of viewport
+  - On `agent_run.finished`: success toast (subtle, auto-dismiss ~3s); failure toast (persistent until dismiss/click)
+  - Failure toast click: open ticket drawer → **Agent Runs** tab → scroll to run + brief highlight + expanded error
+  - Toasts fire even when ticket drawer is closed (subscribe via `/ws/events`, not drawer-local polling)
 
 ## Out of scope
 
@@ -64,7 +69,9 @@ web/src/features/
   runs/
     LiveConsole.tsx    # xterm.js + WS connect
   ws/
-    useEventSocket.ts  # board refresh
+    useEventSocket.ts  # board refresh + run-finished toasts
+  notifications/
+    ToastProvider.tsx  # top-right stack (M04)
 ```
 
 ## Docker Compose delta
@@ -118,6 +125,7 @@ No new services. Artifact volume from M02/M03 used for terminal logs.
 - [ ] Stop terminates tmux session and run
 - [ ] WebSocket requires authentication
 - [ ] CI smoke E2E passes
+- [ ] Run finished → toast appears (success and failure cases); failure toast navigates to Agent Runs error detail
 
 ## References
 
