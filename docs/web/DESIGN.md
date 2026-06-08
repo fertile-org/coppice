@@ -14,14 +14,12 @@ Coppice is a self-hosted agent workspace with a Trello-like board. The visual la
 
 | Role | Family | Rationale |
 |------|--------|-----------|
-| Display | **Fraunces** | Soft, slightly wonky variable serif with organic character. Headings feel hand-set, like field notes. |
-| Body | **Newsreader** | Editorial serif optimized for long reading. Comments, descriptions, and ticket bodies stay comfortable at length. |
-
-**Avoid:** Inter, Roboto, Arial, Space Grotesk, system-ui stacks as primary faces.
+| Display | **Roboto** | Headings — medium/ bold weight for hierarchy. |
+| Body | **Roboto** | UI sans for tickets, forms, and comments — neutral and easy to scan. |
 
 **Pairing rules:**
-- Headings: Fraunces 600–700, tight leading
-- Body: Newsreader 400–500, relaxed leading (1.625)
+- Headings: Roboto 500–700, tight leading
+- Body: Roboto 400–500, normal leading (1.5)
 - Mono: system monospace for branch names, IDs, code snippets only
 
 ## Color palette
