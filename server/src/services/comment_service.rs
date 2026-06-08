@@ -52,6 +52,7 @@ impl<'a> CommentService<'a> {
         Ok(rows.iter().map(row_to_comment).collect())
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn create(
         &self,
         ticket_id: Uuid,

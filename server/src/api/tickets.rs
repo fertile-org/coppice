@@ -1,8 +1,12 @@
+use crate::api::agent_runs::{
+    runs_list_response, single_run_response, RunsListResponse, SingleRunResponse,
+};
 use crate::api::auth::{pool_from_state, AuthUser};
 use crate::domain::substatus::{Substatus, SubstatusDisplay, TicketStatus};
 use crate::domain::ticket::{
     priority_from_str, status_from_str, substatus_from_str, TicketPriority,
 };
+use crate::services::run_service::{RunError, RunService};
 use crate::services::ticket_service::{TicketError, TicketFilters, TicketService, TicketWithDisplay};
 use crate::AppState;
 use axum::{
@@ -29,6 +33,8 @@ pub fn routes() -> Router<Arc<AppState>> {
         )
         .route("/api/tickets/{ticket_id}/status", axum::routing::patch(update_status))
         .route("/api/tickets/{ticket_id}/assign", post(assign_agent))
+        .route("/api/tickets/{ticket_id}/run-agent", post(run_agent))
+        .route("/api/tickets/{ticket_id}/runs", get(list_runs))
 }
 
 #[derive(Serialize)]
@@ -150,6 +156,15 @@ impl StatusSerde for TicketPriority {
             .ok()
             .and_then(|v| v.as_str().map(str::to_string))
             .unwrap_or_default()
+    }
+}
+
+fn map_run_error(err: RunError) -> StatusCode {
+    match err {
+        RunError::ActiveRunExists => StatusCode::CONFLICT,
+        RunError::NotFound => StatusCode::NOT_FOUND,
+        RunError::Validation(_) => StatusCode::BAD_REQUEST,
+        RunError::Database(_) => StatusCode::INTERNAL_SERVER_ERROR,
     }
 }
 
@@ -304,4 +319,29 @@ async fn assign_agent(
         .await
         .map_err(map_error)?;
     Ok(Json(ticket_to_response(ticket)))
+}
+
+async fn run_agent(
+    State(state): State<Arc<AppState>>,
+    AuthUser { .. }: AuthUser,
+    Path(ticket_id): Path<Uuid>,
+) -> Result<(StatusCode, Json<SingleRunResponse>), StatusCode> {
+    let pool = pool_from_state(&state)?;
+    let service = RunService::new(pool);
+    let run = service.start_run(ticket_id).await.map_err(map_run_error)?;
+    Ok((StatusCode::CREATED, Json(single_run_response(run))))
+}
+
+async fn list_runs(
+    State(state): State<Arc<AppState>>,
+    AuthUser { .. }: AuthUser,
+    Path(ticket_id): Path<Uuid>,
+) -> Result<Json<RunsListResponse>, StatusCode> {
+    let pool = pool_from_state(&state)?;
+    let service = RunService::new(pool);
+    let runs = service
+        .list_for_ticket(ticket_id)
+        .await
+        .map_err(map_run_error)?;
+    Ok(Json(runs_list_response(runs)))
 }

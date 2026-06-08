@@ -124,6 +124,22 @@ impl<'a> JobService<'a> {
         Ok(())
     }
 
+    pub async fn list_all(&self) -> Result<Vec<AgentJob>, JobError> {
+        let rows = sqlx::query(
+            r#"
+            SELECT
+                id, run_id, job_type, status, attempts, max_attempts,
+                available_at, locked_at, locked_by, created_at
+            FROM agent_jobs
+            ORDER BY created_at DESC
+            "#,
+        )
+        .fetch_all(self.pool)
+        .await?;
+
+        Ok(rows.iter().map(row_to_job).collect())
+    }
+
     pub async fn cancel_for_run(&self, run_id: Uuid) -> Result<(), JobError> {
         sqlx::query(
             r#"
