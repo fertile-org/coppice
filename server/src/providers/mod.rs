@@ -10,6 +10,8 @@ pub struct AgentRunInput {
     pub agent_id: String,
     pub ticket_id: Option<String>,
     pub context_path: String,
+    pub run_id: Option<String>,
+    pub artifacts_dir: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -88,6 +90,8 @@ mod tests {
                 agent_id: "agent-1".into(),
                 ticket_id: None,
                 context_path: "/tmp".into(),
+                run_id: None,
+                artifacts_dir: None,
             })
             .await
             .expect("mock run");
