@@ -6,6 +6,7 @@ use axum::{
 use coppice_server::middleware::session::parse_session_cookie;
 use coppice_server::{db, AppConfig, AppState};
 use http_body_util::BodyExt;
+use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::process::Command;
 use std::sync::{Arc, LazyLock};
@@ -112,6 +113,17 @@ async fn test_state_with_db_and_workers(mock_response: &str) -> (Arc<AppState>, 
 
 fn bootstrap_password_header() -> (&'static str, &'static str) {
     ("x-bootstrap-password", "changeme")
+}
+
+pub async fn spawn_test_server(app: Router) -> SocketAddr {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind test server");
+    let addr = listener.local_addr().expect("local addr");
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.expect("serve test server");
+    });
+    addr
 }
 
 pub async fn bootstrap_and_login() -> (Router, String, String) {
