@@ -29,12 +29,10 @@ services:
       COPPICE_CONFIG: /etc/coppice/config.yaml
       COPPICE_STORAGE__ARTIFACTS_DIR: /data/artifacts
       AGENT_DEFAULT_PROVIDER: mock
-      GIT_REPOS_PATH: /data/repos
       WORKTREES_PATH: /data/worktrees
       AGENT_WORKER_COUNT: "2"
     volumes:
       - artifact_data:/data/artifacts
-      - repo_data:/data/repos
       - worktree_data:/data/worktrees
     depends_on:
       postgres:
@@ -54,5 +52,4 @@ services:
 volumes:
   coppice_pgdata:
   artifact_data:
-  repo_data:
   worktree_data:

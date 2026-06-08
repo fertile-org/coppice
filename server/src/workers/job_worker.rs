@@ -97,7 +97,9 @@ async fn execute_job(
         .repo_id
         .context("ticket has no repo")?;
 
-    let repo_row = sqlx::query("SELECT local_path, name FROM repos WHERE id = $1")
+    let repo_row = sqlx::query(
+        "SELECT local_path, name, remote_url, default_branch FROM repos WHERE id = $1",
+    )
         .bind(repo_id)
         .fetch_optional(pool)
         .await?
@@ -111,6 +113,8 @@ async fn execute_job(
 
     let local_path: String = repo_row.get("local_path");
     let repo_name: String = repo_row.get("name");
+    let repo_remote_url: Option<String> = repo_row.get("remote_url");
+    let repo_default_branch: String = repo_row.get("default_branch");
 
     let worktree_service = WorktreeService::new(
         state.config.agent.worktrees_path.clone().into(),
@@ -133,6 +137,7 @@ async fn execute_job(
         .substatus
         .as_ref()
         .map(|s| substatus_to_str(*s));
+    let worktree_path = paths.worktree_dir.to_string_lossy().into_owned();
     let context_input = ContextInput {
         ticket_title: &ticket.ticket.title,
         ticket_description: &ticket.ticket.description,
@@ -143,6 +148,10 @@ async fn execute_job(
         agent_skills: &agent.skills,
         agent_responsibilities: &agent.responsibilities,
         agent_system_prompt: &agent.system_prompt,
+        repo_name: Some(&repo_name),
+        repo_remote_url: repo_remote_url.as_deref(),
+        repo_default_branch: Some(&repo_default_branch),
+        worktree_path: Some(&worktree_path),
     };
     write_context_file(&paths.worktree_dir, &context_input).context("write context file")?;
 

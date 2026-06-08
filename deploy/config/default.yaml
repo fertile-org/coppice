@@ -16,6 +16,5 @@ storage:
 
 agent:
   default_provider: mock
-  git_repos_path: /data/repos
   worktrees_path: /data/worktrees
   worker_count: 2

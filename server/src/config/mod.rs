@@ -40,7 +40,6 @@ pub struct StorageConfig {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct AgentConfig {
     pub default_provider: String,
-    pub git_repos_path: String,
     pub worktrees_path: String,
     pub worker_count: u32,
 }
@@ -79,11 +78,6 @@ impl AppConfig {
                 Env::raw()
                     .only(&["AGENT_DEFAULT_PROVIDER"])
                     .map(|_| "agent.default_provider".into()),
-            )
-            .merge(
-                Env::raw()
-                    .only(&["GIT_REPOS_PATH"])
-                    .map(|_| "agent.git_repos_path".into()),
             )
             .merge(
                 Env::raw()
@@ -135,7 +129,6 @@ impl AppConfig {
             },
             agent: AgentConfig {
                 default_provider: "mock".into(),
-                git_repos_path: "./data/repos".into(),
                 worktrees_path: "./data/worktrees".into(),
                 worker_count: 2,
             },

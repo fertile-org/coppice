@@ -12,6 +12,10 @@ pub struct ContextInput<'a> {
     pub agent_skills: &'a [String],
     pub agent_responsibilities: &'a [String],
     pub agent_system_prompt: &'a str,
+    pub repo_name: Option<&'a str>,
+    pub repo_remote_url: Option<&'a str>,
+    pub repo_default_branch: Option<&'a str>,
+    pub worktree_path: Option<&'a str>,
 }
 
 pub fn build_context_md(input: &ContextInput) -> String {
@@ -22,6 +26,7 @@ pub fn build_context_md(input: &ContextInput) -> String {
 
     let skills = format_bullet_list(input.agent_skills);
     let responsibilities = format_bullet_list(input.agent_responsibilities);
+    let repository_section = format_repository_section(input);
 
     format!(
         r#"# Current task
@@ -49,7 +54,7 @@ pub fn build_context_md(input: &ContextInput) -> String {
 
 {system_prompt}
 
-# Sandbox
+{repository_section}# Sandbox
 
 {sandbox_note}
 
@@ -94,7 +99,32 @@ When blocked by missing capability or secret, also include `requiredCapabilities
         skills = skills,
         responsibilities = responsibilities,
         system_prompt = input.agent_system_prompt,
+        repository_section = repository_section,
         sandbox_note = SANDBOX_NOTE,
+    )
+}
+
+fn format_repository_section(input: &ContextInput) -> String {
+    let name = input.repo_name.unwrap_or("(not set)");
+    let default_branch = input.repo_default_branch.unwrap_or("(not set)");
+    let worktree = input.worktree_path.unwrap_or("(not set)");
+
+    let remote_line = match input.repo_remote_url {
+        Some(url) => format!("**Remote URL:** {url}\n\n"),
+        None => String::new(),
+    };
+
+    format!(
+        r#"# Repository
+
+**Name:** {name}
+
+{remote_line}**Default branch:** {default_branch}
+
+**Worktree path:** {worktree}
+
+"#,
+        remote_line = remote_line,
     )
 }
 
@@ -132,9 +162,16 @@ mod tests {
             agent_skills: &["react".into()],
             agent_responsibilities: &["implement UI".into()],
             agent_system_prompt: "You are FE.",
+            repo_name: Some("coppice"),
+            repo_remote_url: Some("https://github.com/example/coppice"),
+            repo_default_branch: Some("main"),
+            worktree_path: Some("/data/worktrees/coppice/ticket-1"),
         });
         assert!(md.contains("# Current task"));
         assert!(md.contains("# Agent role"));
+        assert!(md.contains("# Repository"));
+        assert!(md.contains("**Name:** coppice"));
+        assert!(md.contains("**Remote URL:** https://github.com/example/coppice"));
         assert!(md.contains("# Sandbox"));
         assert!(md.contains("# Expected output contract"));
         assert!(md.contains("Fix polling"));
