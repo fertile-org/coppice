@@ -61,7 +61,7 @@ make compose-local-up
 make migrate
 
 # Step 2 — API (separate terminal)
-make server-dev-local
+make server-dev
 make bootstrap   # first time only
 
 # Step 3 — Web (separate terminal)
@@ -109,7 +109,7 @@ Always use Docker Compose via the Makefile — not standalone `docker run`.
 |--------|----------------|
 | `make compose-local-up` | Start local Postgres only (port 5433) |
 | `make compose-local-down` | Stop local Postgres |
-| `make server-dev-local` | API with `cargo watch` (hot reload) |
+| `make server-dev` | API with `cargo watch` (hot reload) |
 | `make compose-up` | Default Docker stack (agents / CI) |
 | `make compose-down` | Stop default stack |
 | `make migrate` | `coppice migrate` (reads `config.toml` on host) |

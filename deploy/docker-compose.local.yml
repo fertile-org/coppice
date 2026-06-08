@@ -1,5 +1,5 @@
 # Local developer stack — Postgres only (alternate host port 5433).
-# API and web run on the host for hot reload (make server-dev-local, make web-dev).
+# API and web run on the host for hot reload (make server-dev, make web-dev).
 #
 # Start: make compose-local-up
 

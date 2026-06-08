@@ -41,7 +41,7 @@ make migrate
 In a separate terminal:
 
 ```bash
-make server-dev-local
+make server-dev
 ```
 
 First time only (while the API is running):
@@ -65,7 +65,7 @@ Open [http://localhost:5173](http://localhost:5173) and sign in with `admin@loca
 | Service | Port | Where |
 |---------|------|--------|
 | Postgres | 5433 | Docker (`make compose-local-up`) |
-| API | 8080 | Host (`make server-dev-local`) |
+| API | 8080 | Host (`make server-dev`) |
 | Web | 5173 | Host (`make web-dev`) |
 
 Stop Postgres: `make compose-local-down`

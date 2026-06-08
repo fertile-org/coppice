@@ -10,7 +10,7 @@ COMPOSE_LOCAL = $(DOCKER_COMPOSE) -f deploy/docker-compose.local.yml
 BOOTSTRAP_EMAIL = admin@localhost
 BOOTSTRAP_PASSWORD = changeme
 
-.PHONY: compose-up compose-down compose-local-up compose-local-down server-dev-local test clippy migrate bootstrap web-install web-test web-dev web-build e2e-smoke e2e-smoke-m03 release-tar
+.PHONY: compose-up compose-down compose-local-up compose-local-down server-dev test clippy migrate bootstrap web-install web-test web-dev web-build e2e-smoke e2e-smoke-m03 release-tar
 
 compose-up:
 	$(COMPOSE) up -d --build
@@ -24,7 +24,7 @@ compose-local-up:
 compose-local-down:
 	$(COMPOSE_LOCAL) down
 
-server-dev-local:
+server-dev:
 	@command -v cargo-watch >/dev/null 2>&1 || { \
 		echo "cargo-watch is required for API hot reload. Install with: cargo install cargo-watch"; \
 		exit 1; \
