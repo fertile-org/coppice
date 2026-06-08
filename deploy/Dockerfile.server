@@ -8,6 +8,9 @@ RUN cargo build --release -p coppice-server
 FROM debian:bookworm-slim
 RUN apt-get update && apt-get install -y ca-certificates git && rm -rf /var/lib/apt/lists/*
 COPY --from=builder /app/target/release/coppice-server /usr/local/bin/coppice-server
+# MockProvider resolves fixtures relative to compile-time CARGO_MANIFEST_DIR (/app/server).
+RUN mkdir -p /app/server
+COPY fixtures /app/fixtures
 COPY deploy/config/default.yaml /etc/coppice/config.yaml
 RUN sed -i 's/@localhost:/@postgres:/' /etc/coppice/config.yaml
 ENV COPPICE_CONFIG=/etc/coppice/config.yaml
