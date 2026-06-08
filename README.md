@@ -16,17 +16,47 @@ Coppice is a lightweight, self-hosted workspace where AI agents work through tic
 | `e2e/` | End-to-end tests |
 | `fixtures/` | Test fixtures and sample data |
 
-## Quick start
+Contributing or using an AI agent? See [AGENTS.md](AGENTS.md).
+
+## Quick start (local testing)
+
+
+```bash
+cp deploy/.env.local.example .env.local
+make compose-local-up
+make migrate-local
+make bootstrap-local
+make web-dev-local    # Vite with hot reload (separate terminal)
+curl http://localhost:8081/health
+```
+
+`bootstrap` calls the HTTP API (default port 8080). The local stack exposes the API on **8081** — `make bootstrap-local` sets `COPPICE_SERVER_URL` for you.
+
+Open the web UI at [http://localhost:5173](http://localhost:5173). Sign in with `admin@localhost` / `changeme`. If bootstrap returns 403, an admin user already exists — use those credentials to log in.
+
+Stop the stack: `make compose-local-down`
+
+| Service | Local port | How |
+|---------|------------|-----|
+| Postgres | 5433 | Docker (`compose-local-up`) |
+| API | 8081 | Docker (`compose-local-up`) |
+| Web | 5173 | Host (`make web-dev-local`) |
+
+## Default stack (agents / CI)
+
+The default compose file uses standard ports for agents, smoke tests, and CI:
 
 ```bash
 cp deploy/.env.example .env
 make compose-up
 make migrate
-cargo run -p coppice-cli -- bootstrap admin --email admin@localhost --password changeme
-curl http://localhost:8080/health
+make bootstrap
 ```
 
-Open the web UI at [http://localhost:5173](http://localhost:5173). Sign in with the bootstrap credentials (`admin@localhost` / `changeme`). If bootstrap returns 403, an admin user already exists — use those credentials to log in.
+- API: http://localhost:8080/health
+- Web: http://localhost:5173
+
+More commands and env details: [docs/development.md](docs/development.md).
 
 ## Release build
 

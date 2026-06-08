@@ -44,7 +44,7 @@ export function BoardColumn({
     <section
       ref={setNodeRef}
       className={[
-        'flex w-72 shrink-0 flex-col rounded-lg border',
+        'flex min-h-[calc(100svh-14rem)] w-72 shrink-0 flex-col rounded-lg border',
         columnBgClass(column.colorKey),
         columnBorderClass(column.colorKey),
         isOver ? 'ring-2 ring-accent ring-offset-2 ring-offset-background' : '',
@@ -76,7 +76,7 @@ export function BoardColumn({
         </span>
       </header>
 
-      <div className="flex min-h-[12rem] flex-1 flex-col gap-2 p-2">
+      <div className="flex flex-1 flex-col gap-2 p-2">
         {showQuickAdd && onQuickAdd && (
           <form
             onSubmit={(e) => void handleQuickAdd(e)}

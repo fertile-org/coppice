@@ -10,15 +10,17 @@ React / Vite SPA for the Coppice agent workspace (M02).
 
 ## Design
 
-See [DESIGN.md](./DESIGN.md) for the coppice-forest aesthetic direction. Design tokens live in `src/styles/tokens.css`.
+See [docs/web/DESIGN.md](../docs/web/DESIGN.md) for the coppice-forest aesthetic direction. Design tokens live in `src/styles/tokens.css`.
 
 ## Development
 
 ```bash
-npm install
-npm run dev      # http://localhost:5173 — proxies /api → server
-npm run build
-npm test
+yarn install
+yarn dev      # http://localhost:5173 — proxies /api → server
+yarn build
+yarn test
 ```
+
+Or from the repo root: `make web-dev-local` (installs deps, then starts Vite against the local API on `:8081`).
 
 Set `VITE_API_URL` to override the API proxy target (default `http://localhost:8080`).

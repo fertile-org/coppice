@@ -18,12 +18,12 @@ cargo test --workspace
 cargo clippy --workspace -- -D warnings
 ```
 
-Locally, start Postgres via `make compose-up` (or CI-equivalent compose) before `make test` / `make clippy`.
+Locally, start Postgres via `make compose-up` (agents/default) or `make compose-local-up` (human testing on port 5433) before `make test` / `make clippy`. Set `DATABASE_URL` to match the stack you started.
 
 ### Web
 
 ```bash
-cd web && npm ci && npm run test
+cd web && yarn install --frozen-lockfile && yarn test
 ```
 
 Vitest — schemas, API helpers, board column logic. No browser.
@@ -61,7 +61,7 @@ cargo test -p coppice-server --test integration_tickets
 ```bash
 make web-test
 # or
-cd web && npm run test
+make web-test
 ```
 
 Focus: Zod schemas (`lib/schemas/`), pure helpers (`features/board/columns.ts`), `lib/api.ts`.

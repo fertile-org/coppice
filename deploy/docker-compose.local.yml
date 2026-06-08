@@ -1,5 +1,10 @@
-# Default stack for agents, CI, and make e2e-smoke (host ports 5432, 8080, 5173).
-# For local testing without port conflicts, use docker-compose.local.yml instead.
+# Local developer stack — alternate host ports to avoid conflicting with the
+# default compose file used by agents and CI (deploy/docker-compose.yml).
+#
+# Host ports: Postgres 5433, API 8081. Web runs on the host via make web-dev-local.
+# Start: make compose-local-up && make web-dev-local
+
+name: coppice-local
 
 services:
   postgres:
@@ -9,42 +14,31 @@ services:
       POSTGRES_PASSWORD: coppice
       POSTGRES_DB: coppice
     ports:
-      - "5432:5432"
+      - "5433:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U coppice"]
       interval: 5s
       timeout: 5s
       retries: 10
     volumes:
-      - coppice_pgdata:/var/lib/postgresql/data
+      - coppice_local_pgdata:/var/lib/postgresql/data
 
   server:
     build:
       context: ..
       dockerfile: deploy/Dockerfile.server
     ports:
-      - "8080:8080"
+      - "8081:8080"
     environment:
       DATABASE_URL: postgres://coppice:coppice@postgres:5432/coppice
       COPPICE_CONFIG: /etc/coppice/config.yaml
       COPPICE_STORAGE__ARTIFACTS_DIR: /data/artifacts
     volumes:
-      - artifact_data:/data/artifacts
+      - coppice_local_artifacts:/data/artifacts
     depends_on:
       postgres:
         condition: service_healthy
 
-  web:
-    build:
-      context: ..
-      dockerfile: deploy/Dockerfile.web
-    ports:
-      - "5173:5173"
-    environment:
-      VITE_API_URL: http://server:8080
-    depends_on:
-      - server
-
 volumes:
-  coppice_pgdata:
-  artifact_data:
+  coppice_local_pgdata:
+  coppice_local_artifacts:

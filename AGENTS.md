@@ -7,11 +7,11 @@
 ## Must read before coding
 
 1. **Milestones are sequential.** Read the current milestone spec in `docs/milestones/` before implementing. Do not skip acceptance criteria or pull scope from later milestones.
-2. **Docker Compose is the dev path.** Use `make compose-up` / `make compose-down` with `deploy/docker-compose.yml`. Do not start Postgres or services with ad-hoc `docker run`.
+2. **Docker Compose is the dev path.** Use `make compose-up` / `make compose-down` with `deploy/docker-compose.yml` (ports 5432, 8080, 5173). Humans testing locally use `deploy/docker-compose.local.yml` instead — see [docs/development.md](docs/development.md). Do not start Postgres or services with ad-hoc `docker run`.
 3. **Server owns state.** API handlers are thin; business rules live in `server/src/services/` and `server/src/domain/`. The SPA does not invent status transitions or workflow rules.
 4. **Auth is session + CSRF.** httpOnly cookie sessions; mutations require `X-CSRF-Token`. Integration tests authenticate via session cookie (see `server/tests/common/mod.rs`).
 5. **Agent tests use `MockProvider`.** No real CLI adapters in CI or automated tests until configured manually. Fixtures: `fixtures/agent-responses/`.
-6. **CI must pass.** `cargo test --workspace`, `cargo clippy --workspace -- -D warnings`, and `cd web && npm run test`. Clippy warnings are errors.
+6. **CI must pass.** `cargo test --workspace`, `cargo clippy --workspace -- -D warnings`, and `make web-test`. Clippy warnings are errors.
 
 ## Monorepo (quick map)
 
