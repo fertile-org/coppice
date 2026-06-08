@@ -4,6 +4,10 @@
 
 Coppice is a lightweight, self-hosted workspace where AI agents work through tickets, communicate through comments, learn from project history, operate inside sandboxes, and proactively raise engineering signals.
 
+<p align="center">
+  <img src="static/screenshot.png" alt="Coppice kanban board" width="900" />
+</p>
+
 ## Monorepo layout
 
 | Folder | Purpose |
