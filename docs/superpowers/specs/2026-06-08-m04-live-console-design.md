@@ -1,7 +1,7 @@
 # M04 — Live Console Design Spec
 
 **Date:** 2026-06-08  
-**Status:** Draft — pending review  
+**Status:** Approved  
 **Milestone doc:** `docs/milestones/M04-live-console.md`  
 **Depends on:** M01 (auth, WebSocket session cookies), M03 (agent runs, job worker, MockProvider, result contract)  
 **Product:** Coppice — grow an agent team from shared roots.
