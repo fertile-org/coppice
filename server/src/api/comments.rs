@@ -40,6 +40,7 @@ struct CreateCommentBody {
     body: String,
     intent: Option<String>,
     attachment_ids: Option<Vec<Uuid>>,
+    mentions: Option<Vec<String>>,
 }
 
 fn comment_to_response(comment: Comment) -> CommentResponse {
@@ -108,6 +109,7 @@ async fn create_comment(
         None => CommentIntent::ProgressUpdate,
     };
     let attachment_ids = body.attachment_ids.unwrap_or_default();
+    let mentions = body.mentions.unwrap_or_default();
     let comment = service
         .create(
             ticket_id,
@@ -116,6 +118,7 @@ async fn create_comment(
             &body.body,
             intent,
             &attachment_ids,
+            &mentions,
         )
         .await
         .map_err(map_error)?;

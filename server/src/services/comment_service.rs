@@ -60,6 +60,7 @@ impl<'a> CommentService<'a> {
         body: &str,
         intent: CommentIntent,
         attachment_ids: &[Uuid],
+        mentions: &[String],
     ) -> Result<Comment, CommentError> {
         self.ensure_ticket_exists(ticket_id).await?;
 
@@ -72,7 +73,7 @@ impl<'a> CommentService<'a> {
         }
 
         let id = Uuid::new_v4();
-        let mentions = serde_json::json!([]);
+        let mentions = serde_json::json!(mentions);
 
         let row = sqlx::query(
             r#"
