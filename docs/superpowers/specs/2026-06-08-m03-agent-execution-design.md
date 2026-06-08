@@ -1,8 +1,8 @@
 # M03 — Agent Execution Design Spec
 
 **Date:** 2026-06-08  
-**Status:** Approved  
-**Implementation plan:** [docs/superpowers/plans/2026-06-08-m03-agent-execution.md](../plans/2026-06-08-m03-agent-execution.md)
+**Status:** Superseded (repo model) — see [2026-06-08-m03-registered-repositories-design.md](./2026-06-08-m03-registered-repositories-design.md)  
+**Implementation plan:** [docs/superpowers/plans/2026-06-08-m03-agent-execution.md](../plans/2026-06-08-m03-agent-execution.md) (obsolete for repo/clone sections; agent execution portions remain valid)
 **Product:** Coppice — grow an agent team from shared roots.
 
 **Depends on:** M01 Foundation (MockProvider, auth, Postgres), M02 Workspace & Board (tickets, agents, comments, repos)  

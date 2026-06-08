@@ -65,15 +65,18 @@ providers/mod.rs          trait + AgentRunResult contract
 providers/mock.rs         deterministic fixtures from fixtures/agent-responses/
 services/run_service.rs   create/cancel/finish runs
 services/job_service.rs   enqueue, claim (SKIP LOCKED), mark done/failed
-services/worktree_service.rs   git clone + worktree per (ticket, agent)
+services/repo_service.rs       global registered repos (local_path, verify)
+services/worktree_service.rs   worktree per (ticket, agent) from registered local_path
 services/context_builder.rs    write .agent/context.md into worktree
 services/result_contract.rs    apply nextStatus, comments, blocker metadata
 workers/job_worker.rs     poll queue, run pipeline, spawn at server startup
 ```
 
-**Run pipeline (worker):** claim pending job → load run/ticket/agent/repo → mark running → ensure repo clone (`GIT_REPOS_PATH/{repo-id}/`) → ensure worktree (`WORKTREES_PATH/TICKET-{id}-{agent}-{repo}/`) → write context file → call `AgentProvider::run` → apply result contract → finish run.
+**Registered repositories:** Admin registers operator-managed git checkouts via `local_path` (instance-wide). Optional `remote_url` for display and future PR APIs. Coppice does **not** `git clone`. See [M03 registered repositories spec](superpowers/specs/2026-06-08-m03-registered-repositories-design.md).
 
-**Config env:** `AGENT_DEFAULT_PROVIDER`, `GIT_REPOS_PATH`, `WORKTREES_PATH`, `AGENT_WORKER_COUNT` (see `deploy/docker-compose.yml`). Swap real CLI adapters via provider config — do not fork orchestration per provider.
+**Run pipeline (worker):** claim pending job → load run/ticket/agent/repo → validate repo `local_path` → mark running → ensure worktree from registered path (`WORKTREES_PATH/TICKET-{id}-{agent}-{repo}/`) → write context file → call `AgentProvider::run` → apply result contract → finish run.
+
+**Config env:** `AGENT_DEFAULT_PROVIDER`, `WORKTREES_PATH`, `AGENT_WORKER_COUNT` (see `deploy/docker-compose.yml`). Operator bind-mounts host clones; register in-container paths in Settings → Repositories.
 
 ## Web frontend
 

@@ -2,7 +2,7 @@
 
 **Coppice** is a self-hosted agent workspace: Trello-like board, tickets, comments, and (from M03) agent execution. Philosophy and full product design live in `docs/philosophy/`.
 
-**Status:** M03 (agent execution) is complete. **Next:** [M04 — Live console](docs/milestones/M04-live-console.md).
+**Status:** M03 agent execution is implemented; **M03 retcon** (registered repositories — no lazy clone) is spec-approved, implementation pending. **Next:** M03 retcon, then [M04 — Live console](docs/milestones/M04-live-console.md). Spec: [docs/superpowers/specs/2026-06-08-m03-registered-repositories-design.md](docs/superpowers/specs/2026-06-08-m03-registered-repositories-design.md).
 
 ## Must read before coding
 
@@ -12,7 +12,8 @@
 4. **Auth is session + CSRF.** httpOnly cookie sessions; mutations require `X-CSRF-Token`. Integration tests authenticate via session cookie (see `server/tests/common/mod.rs`).
 5. **Agent tests use `MockProvider`.** No real CLI adapters in CI or automated tests until configured manually. Fixtures: `fixtures/agent-responses/`.
 6. **CI must pass.** `cargo test --workspace`, `cargo clippy --workspace -- -D warnings`, and `make web-test`. Clippy warnings are errors.
-7. **Agent execution env.** Compose sets `AGENT_DEFAULT_PROVIDER` (default `mock`), `GIT_REPOS_PATH`, `WORKTREES_PATH`, and `AGENT_WORKER_COUNT`. M03 smoke: `make e2e-smoke-m03`.
+7. **Repositories.** Admin registers git checkouts by `local_path` (Settings → Repositories). Coppice creates worktrees only — no server-side `git clone`. Optional `remote_url` for metadata/PR (M07). Bind-mount host repos into the server container in Docker.
+8. **Agent execution env.** `AGENT_DEFAULT_PROVIDER` (default `mock`), `WORKTREES_PATH`, `AGENT_WORKER_COUNT`. Smoke: `make e2e-smoke-m03`.
 
 ## Monorepo (quick map)
 

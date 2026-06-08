@@ -8,7 +8,7 @@ Authenticated Coppice SPA with a Trello-like board, ticket and comment managemen
 
 - React / Vite SPA in `web/` (monorepo package; own `package.json`)
 - Login page; all routes except `/login` require valid session
-- Projects and repos (minimal CRUD)
+- Projects (CRUD); repo **metadata API stub** only — full **registered repository** registry ships in M03 retcon (global paths, admin UI)
 - Fixed board columns: Backlog, Ready, In Progress, In Review, In QA, Wait for Final Review, Done, Blocked
 - Ticket CRUD: title, description, status, priority, assignee, repo/branch badges
 - Drag-and-drop column moves (dnd-kit)
@@ -68,8 +68,7 @@ attachments
 ```text
 GET/POST       /api/projects
 GET/PATCH      /api/projects/:id
-GET/POST       /api/projects/:id/repos
-GET/PATCH/DELETE /api/repos/:id
+GET/PATCH/DELETE /api/repos/:id   (project-scoped list/create removed in M03 retcon → global /api/repos)
 
 GET/POST       /api/tickets
 GET/PATCH      /api/tickets/:id

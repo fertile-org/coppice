@@ -1,61 +1,72 @@
-# M03 — Agent Execution
+# M03 — Agent Execution & Registered Repositories
 
 ## Goal
 
-Agents execute work on tickets through the job queue and mock provider, with git worktrees, context packages, and machine-readable result contracts driving ticket updates and comments.
+Agents execute work on tickets through the job queue and mock provider, using **admin-registered local git repositories** and Coppice-managed worktrees. Includes global repository registry (Settings UI), context packages, and machine-readable result contracts driving ticket updates and comments.
+
+**Design spec:** [docs/superpowers/specs/2026-06-08-m03-registered-repositories-design.md](../superpowers/specs/2026-06-08-m03-registered-repositories-design.md)
 
 ## Product scope
 
+### Registered repositories (retcon)
+
+- Instance-wide `repos` registry — not project-scoped
+- Admin **Settings → Repositories**: register name, `local_path`, optional `remote_url`, default branch
+- Path verification: exists + valid git repo; status pill (`ready`, `path_missing`, `not_git_repo`, `error`)
+- Any project's tickets can link any registered repo
+- **No lazy clone** — Coppice never runs `git clone`; operator clones on the host and bind-mounts into the server container when using Docker
+
+### Agent execution (unchanged scope)
+
 - Postgres-backed `agent_jobs` queue and background worker
 - Job types: `work_on_ticket` (others in later milestones)
-- Git worktree lifecycle: branch `agent/TICKET-{id}`, isolated worktree path
+- Git worktree lifecycle from registered `local_path`; branch `agent/TICKET-{id}-{agent-slug}`
 - Agent run lifecycle: queued → running → succeeded | failed | blocked | cancelled
-- Context package generation (`.agent/context.md`) with ticket, role, rules, sandbox note
-- Result contract parser (product design §17): done, blocked, mentionAgents, nextStatus, changedFiles, etc.
-- Agent-authored comments from run output (intent: progress_update, implementation_done, blocked, …)
-- Ticket detail: **Runs** tab; actions Run Agent, Stop Run
-- `MockProvider` as default compose provider — returns scripted JSON + optional stdout
-- Permissive default sandbox profile (wide command/path allowlist until M07)
+- Context package generation (`.agent/context.md`) with ticket, role, repo, rules, sandbox note
+- Result contract parser (product design §17)
+- Agent-authored comments from run output
+- Ticket detail: **Runs** tab; header **Run Agent** / **Stop**
+- `MockProvider` as default compose provider
+- Permissive default sandbox profile (until M07)
 
 ## Out of scope
 
+- Per-repo secrets / GitHub PR (M07 — UI placeholder only)
 - Live terminal streaming (M04)
 - Workflow rule engine and mention jobs (M05)
 - Knowledge injection into context (M06)
 - Strict capability/sandbox enforcement (M07)
 - Real CLI adapters
+- Path allowlist roots (trust admin + git validation)
 
 ## Dependencies
 
 - M01: MockProvider, auth, Postgres
-- M02: tickets, agents, comments, repos
+- M02: tickets, agents, comments, projects
 
 ## Architecture notes
 
-### New server modules
+### Server modules
 
 ```text
 server/src/
-  workers/
-    job_worker.rs
+  workers/job_worker.rs
   services/
+    repo_service.rs           # global repo CRUD + verify
     job_service.rs
     run_service.rs
-    worktree_service.rs
-    context_builder.rs      # basic ticket+agent sections only
+    worktree_service.rs       # worktree only (no clone)
+    context_builder.rs
     result_contract.rs
-  providers/
-    mock.rs                 # extended: emit stdout for M04 prep
-  sandbox/
-    permissive.rs           # placeholder until M07
-  api/
-    agent_runs.rs
-    jobs.rs
+  sandbox/permissive.rs
+  api/repos.rs                # global /api/repos
+  api/agent_runs.rs, jobs.rs
 ```
 
-### New database tables
+### Database tables
 
 ```text
+repos                         # revised: local_path, no project_id
 agent_jobs
 agent_runs
 ```
@@ -63,6 +74,10 @@ agent_runs
 ### API endpoints
 
 ```text
+GET/POST       /api/repos
+GET/PATCH/DELETE /api/repos/:id
+POST           /api/repos/:id/verify
+
 POST  /api/tickets/:id/run-agent
 GET   /api/tickets/:id/runs
 GET   /api/agent-runs/:id
@@ -71,81 +86,65 @@ POST  /api/agent-runs/:id/retry
 GET   /api/agent-jobs         (admin/debug)
 ```
 
-### AgentRun fields
+**Removed:** `GET/POST /api/projects/:id/repos`
 
-Per product design §10.2: ticketId, agentId, jobType, status, sandboxProfileId, worktreePath, timestamps, usedCapabilityIds (empty until M07).
-
-### Worktree layout
+### Filesystem layout
 
 ```text
-/data/repos/{repo-id}/
-/data/worktrees/TICKET-{id}-{repo-slug}/
+{repo.local_path}/                    ← operator-managed checkout (bind-mounted in Docker)
+{WORKTREES_PATH}/TICKET-{id}-{agent}-{repo-slug}/   ← Coppice worktrees
 ```
 
 ## Docker Compose delta
-
-**Added in M03:**
 
 ```yaml
   server:
     volumes:
       - artifact_data:/data/artifacts
       - worktree_data:/data/worktrees
-      - repo_data:/data/repos
+      # operator bind-mounts host clones; e.g. ~/code:/data/host-repos
     environment:
       AGENT_DEFAULT_PROVIDER: mock
-      GIT_REPOS_PATH: /data/repos
       WORKTREES_PATH: /data/worktrees
+      AGENT_WORKER_COUNT: 2
 
 volumes:
   worktree_data:
-  repo_data:
 ```
 
-Server image needs `git` CLI installed.
+Server image needs `git` CLI (worktree commands). **No `repo_data` volume.**
 
 ## Testing strategy
 
-### Unit tests
+### Unit
 
-- Context package renders expected markdown sections
-- Result contract parser: all JSON variants in product design §17
-- Job state machine transitions
-- Worktree path naming and branch slug sanitization
+- Repo path verification
+- Worktree path naming (no `repo_dir` under Coppice clone root)
+- Result contract, context package, job state machine
 
-### Integration tests
+### Integration
 
-- Assign agent → POST run-agent → job enqueued → worker picks up → MockProvider returns `done` → ticket comment created → run status succeeded
-- MockProvider returns `blocked` → ticket substatus updated → comment with blocker text
-- Worktree created on disk; branch exists in repo clone
-- Stop run cancels in-flight job
-- Retry creates new run linked to same ticket
+- `git init` temp checkout → register via `POST /api/repos` → run-agent → succeeded
+- Blocked fixture, duplicate run 409, stop, retry
+- Worktree created from registered path
 
-### E2E smoke (CI)
+### E2E smoke
 
-`e2e/smoke/m03-agent-run.spec`:
-
-1. Login → open ticket → assign mock-configured agent
-2. Click Run Agent → wait for run succeeded badge
-3. Verify agent comment appears in Comments tab
-4. Runs tab shows completed run
-
-### E2E full (local)
-
-- Stop mid-run
-- Retry after failure
-- Metadata tab shows worktree path and branch name
+`e2e/smoke/m03-agent-run.mjs`: clone to temp dir (or use mounted test dir) → register `localPath` → run-agent → assert comment.
 
 ## Acceptance criteria
 
-- [ ] Mock agent run completes end-to-end on a ticket
+- [ ] Admin can register and verify repositories with `local_path`
+- [ ] Tickets in any project can use any registered repo
+- [ ] Agent run uses worktree from registered path (no server-side clone)
+- [ ] Mock agent run completes end-to-end
 - [ ] Result contract drives comment + status/substatus update
-- [ ] Worktree and branch created per ticket
 - [ ] Stop and retry work via API and UI
 - [ ] All automated tests use MockProvider only
 - [ ] CI smoke E2E passes
 
 ## References
 
-- Product design §7 (provider abstraction), §10 (runs), §11 (worktrees), §16 (context package), §17 (result contract)
-- Framework selection §2 (job queue, git CLI, process execution)
+- [Registered repositories design spec](../superpowers/specs/2026-06-08-m03-registered-repositories-design.md)
+- Product design §10 (runs), §11 (worktrees), §16 (context), §17 (result contract)
+- Framework selection §2 (job queue, git CLI)

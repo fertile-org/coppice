@@ -29,9 +29,9 @@ Production-ready trust boundaries: capabilities, sandbox profiles, encrypted sec
 
 ### Git / PR (minimal)
 
-- View diff summary artifact from worktree
+- View diff summary artifact from worktree (under `WORKTREES_PATH`, from registered repo `local_path`)
 - Push branch (requires explicit human-triggered action + config flag)
-- Create PR via GitHub API (PAT in secrets); no auto-merge
+- Create PR via GitHub API using repo `remote_url` + **per-repo secret** on Settings → Repositories (M03 retcon UI placeholder); no auto-merge
 - Sensitive actions audit log
 
 ## Out of scope

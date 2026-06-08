@@ -31,7 +31,7 @@ Milestones are **not release gates**. You start daily use only when all mileston
 |-----------|-------|---------------|
 | M01 | Foundation | Postgres, auth API, mock provider trait, CI harness |
 | M02 | Workspace & board | Login UI, board, tickets, comments, agent config |
-| M03 | Agent execution | Job queue, worktrees, mock runs, result contract |
+| M03 | Agent execution | Registered repos, job queue, worktrees, mock runs, result contract |
 | M04 | Live console | tmux/PTY, WebSocket terminal, log artifacts |
 | M05 | Workflow & collaboration | Rules, mentions, clarification, final human gate |
 | M06 | Knowledge & learning | pgvector, retrieval, extractor, knowledge inbox |
@@ -118,7 +118,7 @@ Shared fixtures live at repo root in `fixtures/` (used by `server` tests and com
 |-----------|---------------------|
 | M01 | `postgres` (pgvector), `server` |
 | M02 | + `web`; artifact/worktree volume paths reserved |
-| M03+ | `server` mounts `/data/artifacts`, `/data/worktrees`, `/data/repos` |
+| M03+ | `server` mounts `/data/artifacts`, `/data/worktrees`; operator bind-mounts host git checkouts; repos registered by `local_path` (no Coppice-managed clone volume) |
 
 Every milestone must work with `docker compose up` alone — no manual Postgres install.
 

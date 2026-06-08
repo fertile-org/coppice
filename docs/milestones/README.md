@@ -32,7 +32,7 @@ See the [milestone strategy](../superpowers/specs/2026-06-07-coppice-milestone-s
 |---|-----|------|
 | M01 | [M01-foundation.md](./M01-foundation.md) | Infra, auth API, mock provider, CI |
 | M02 | [M02-workspace-and-board.md](./M02-workspace-and-board.md) | Login UI, board, tickets, agents CRUD |
-| M03 | [M03-agent-execution.md](./M03-agent-execution.md) | Job queue, worktrees, mock agent runs |
+| M03 | [M03-agent-execution.md](./M03-agent-execution.md) | Registered repos, job queue, worktrees, mock runs |
 | M04 | [M04-live-console.md](./M04-live-console.md) | Live terminal, WebSocket, log artifacts |
 | M05 | [M05-workflow-and-collaboration.md](./M05-workflow-and-collaboration.md) | Workflow rules, mentions, final review |
 | M06 | [M06-knowledge-and-learning.md](./M06-knowledge-and-learning.md) | pgvector, retrieval, learning inbox |
