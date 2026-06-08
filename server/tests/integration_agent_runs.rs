@@ -324,6 +324,10 @@ async fn retry_after_failed_creates_new_run() {
     .await;
     assert_eq!(failed_run["id"].as_str().unwrap(), failed_run_id);
 
+    let error_message = failed_run["errorMessage"].as_str().unwrap_or("");
+    assert!(error_message.len() > "ensure worktree".len());
+    assert!(error_message.contains("fixture"));
+
     std::env::set_var("MOCK_AGENT_RESPONSE", "done");
 
     let retry = app
