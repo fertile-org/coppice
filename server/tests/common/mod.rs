@@ -24,6 +24,8 @@ pub async fn truncate_workspace(pool: &sqlx::PgPool) {
         TRUNCATE
             attachments,
             ticket_comments,
+            agent_jobs,
+            agent_runs,
             tickets,
             repos,
             agents,
@@ -36,6 +38,59 @@ pub async fn truncate_workspace(pool: &sqlx::PgPool) {
     .execute(pool)
     .await
     .expect("truncate workspace tables");
+}
+
+#[allow(dead_code)]
+pub struct AgentTestEnv {
+    pub git_repos: tempfile::TempDir,
+    pub worktrees: tempfile::TempDir,
+}
+
+pub fn create_temp_git_remote() -> (tempfile::TempDir, String) {
+    use std::process::Command;
+
+    let bare = tempfile::tempdir().expect("tempdir");
+    Command::new("git")
+        .args(["init", "--bare"])
+        .current_dir(bare.path())
+        .output()
+        .expect("git init --bare");
+
+    let work = tempfile::tempdir().expect("workdir");
+    Command::new("git")
+        .args(["init", "-b", "main"])
+        .current_dir(work.path())
+        .output()
+        .expect("git init");
+    std::fs::write(work.path().join("README.md"), "# test\n").expect("write readme");
+    Command::new("git")
+        .args(["add", "README.md"])
+        .current_dir(work.path())
+        .output()
+        .expect("git add");
+    Command::new("git")
+        .args(["commit", "-m", "initial"])
+        .env("GIT_AUTHOR_NAME", "test")
+        .env("GIT_AUTHOR_EMAIL", "test@localhost")
+        .env("GIT_COMMITTER_NAME", "test")
+        .env("GIT_COMMITTER_EMAIL", "test@localhost")
+        .current_dir(work.path())
+        .output()
+        .expect("git commit");
+
+    let url = format!("file://{}", bare.path().display());
+    Command::new("git")
+        .args(["remote", "add", "origin", &url])
+        .current_dir(work.path())
+        .output()
+        .expect("git remote add");
+    Command::new("git")
+        .args(["push", "-u", "origin", "main"])
+        .current_dir(work.path())
+        .output()
+        .expect("git push");
+
+    (bare, url)
 }
 
 async fn test_state_with_db() -> Arc<AppState> {
@@ -57,6 +112,27 @@ async fn test_state_with_db() -> Arc<AppState> {
         config,
         db: Some(pool),
     })
+}
+
+async fn test_state_with_db_and_workers(mock_response: &str) -> (Arc<AppState>, AgentTestEnv) {
+    let git_repos = tempfile::tempdir().expect("git repos tempdir");
+    let worktrees = tempfile::tempdir().expect("worktrees tempdir");
+
+    std::env::set_var("GIT_REPOS_PATH", git_repos.path());
+    std::env::set_var("WORKTREES_PATH", worktrees.path());
+    std::env::set_var("MOCK_AGENT_RESPONSE", mock_response);
+    std::env::set_var("AGENT_DEFAULT_PROVIDER", "mock");
+
+    let state = test_state_with_db().await;
+    coppice_server::workers::job_worker::spawn_workers(state.clone());
+
+    (
+        state,
+        AgentTestEnv {
+            git_repos,
+            worktrees,
+        },
+    )
 }
 
 fn bootstrap_password_header() -> (&'static str, &'static str) {
@@ -116,6 +192,61 @@ pub async fn bootstrap_and_login() -> (Router, String, String) {
     (app, cookie, csrf_token)
 }
 
+pub async fn bootstrap_and_login_with_workers(
+    mock_response: &str,
+) -> (Router, String, String, AgentTestEnv) {
+    let (state, env) = test_state_with_db_and_workers(mock_response).await;
+    let app = coppice_server::app(state);
+
+    app.clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/auth/bootstrap")
+                .header("content-type", "application/json")
+                .header(bootstrap_password_header().0, bootstrap_password_header().1)
+                .body(Body::from(
+                    r#"{"email":"admin@localhost","password":"changeme"}"#,
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    let login = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/auth/login")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    r#"{"email":"admin@localhost","password":"changeme"}"#,
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(login.status(), StatusCode::OK);
+
+    let set_cookie = login
+        .headers()
+        .get(header::SET_COOKIE)
+        .expect("session cookie");
+    let cookie_header = set_cookie.to_str().unwrap();
+    let session_token = parse_session_cookie(cookie_header).expect("session token");
+    let cookie = format!("coppice_session={session_token}");
+
+    let body = login.into_body().collect().await.unwrap().to_bytes();
+    let login_json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    let csrf_token = login_json["csrfToken"]
+        .as_str()
+        .expect("csrf token")
+        .to_string();
+
+    (app, cookie, csrf_token, env)
+}
+
 pub fn json_request(
     method: &str,
     uri: &str,
@@ -164,12 +295,28 @@ pub async fn create_test_repo(
     cookie: &str,
     csrf: &str,
 ) -> String {
+    create_test_repo_with_remote(app, project_id, None, cookie, csrf).await
+}
+
+pub async fn create_test_repo_with_remote(
+    app: &Router,
+    project_id: &str,
+    remote_url: Option<&str>,
+    cookie: &str,
+    csrf: &str,
+) -> String {
+    let body = match remote_url {
+        Some(url) => format!(
+            r#"{{"name":"main-repo","defaultBranch":"main","remoteUrl":"{url}"}}"#
+        ),
+        None => r#"{"name":"main-repo","defaultBranch":"main"}"#.to_string(),
+    };
     let res = app
         .clone()
         .oneshot(json_request(
             "POST",
             &format!("/api/projects/{project_id}/repos"),
-            r#"{"name":"main-repo","defaultBranch":"main"}"#,
+            &body,
             cookie,
             csrf,
         ))
@@ -178,6 +325,48 @@ pub async fn create_test_repo(
     assert_eq!(res.status(), StatusCode::CREATED);
     let body: serde_json::Value = json_body(res).await;
     body["id"].as_str().unwrap().to_string()
+}
+
+pub async fn assign_agent_to_ticket(
+    app: &Router,
+    ticket_id: &str,
+    agent_id: &str,
+    cookie: &str,
+    csrf: &str,
+) {
+    let res = app
+        .clone()
+        .oneshot(json_request(
+            "POST",
+            &format!("/api/tickets/{ticket_id}/assign"),
+            &format!(r#"{{"agentId":"{agent_id}"}}"#),
+            cookie,
+            csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+}
+
+pub async fn set_ticket_repo(
+    app: &Router,
+    ticket_id: &str,
+    repo_id: &str,
+    cookie: &str,
+    csrf: &str,
+) {
+    let res = app
+        .clone()
+        .oneshot(json_request(
+            "PATCH",
+            &format!("/api/tickets/{ticket_id}"),
+            &format!(r#"{{"repoId":"{repo_id}"}}"#),
+            cookie,
+            csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
 }
 
 pub async fn create_test_agent_from_preset(
