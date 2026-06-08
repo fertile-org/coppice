@@ -108,6 +108,9 @@ async fn stop_run(
     let pool = pool_from_state(&state)?;
     let service = RunService::new(pool);
     let run = service.stop(run_id).await.map_err(map_error)?;
+    if let Some(handle) = state.run_streams.get(run_id) {
+        handle.cancel();
+    }
     Ok(Json(single_run_response(run)))
 }
 
