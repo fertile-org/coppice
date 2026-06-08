@@ -1,7 +1,7 @@
 # Ticket Drawer Layout & Agent Run Error Handling
 
 **Date:** 2026-06-08  
-**Status:** Approved for implementation  
+**Status:** Implemented  
 **Milestone:** Pre-M04 polish (does not replace M04)  
 **Deferred to M04:** Run completion toasts / app-level notifications (see `docs/milestones/M04-live-console.md`)
 
