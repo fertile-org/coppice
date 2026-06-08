@@ -53,6 +53,57 @@ pub struct AgentConfig {
     pub default_provider: String,
     pub worktrees_path: String,
     pub worker_count: u32,
+    #[serde(default)]
+    pub providers: AgentProvidersConfig,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+pub struct AgentProvidersConfig {
+    #[serde(default)]
+    pub opencode: OpenCodeProviderConfig,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct OpenCodeProviderConfig {
+    #[serde(default = "default_false")]
+    pub enabled: bool,
+    #[serde(default = "default_opencode_command")]
+    pub command: String,
+    #[serde(default = "default_opencode_host")]
+    pub serve_hostname: String,
+    #[serde(default = "default_opencode_port")]
+    pub serve_port: u16,
+    pub model: Option<String>,
+    pub variant: Option<String>,
+}
+
+fn default_false() -> bool {
+    false
+}
+
+fn default_opencode_command() -> String {
+    "opencode".into()
+}
+
+fn default_opencode_host() -> String {
+    "127.0.0.1".into()
+}
+
+fn default_opencode_port() -> u16 {
+    4096
+}
+
+impl Default for OpenCodeProviderConfig {
+    fn default() -> Self {
+        Self {
+            enabled: default_false(),
+            command: default_opencode_command(),
+            serve_hostname: default_opencode_host(),
+            serve_port: default_opencode_port(),
+            model: None,
+            variant: None,
+        }
+    }
 }
 
 impl AppConfig {
@@ -181,6 +232,7 @@ impl AppConfig {
                 default_provider: "mock".into(),
                 worktrees_path: "./data/worktrees".into(),
                 worker_count: 2,
+                providers: AgentProvidersConfig::default(),
             },
             web: WebConfig {
                 port: 5173,

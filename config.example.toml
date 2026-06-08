@@ -21,6 +21,13 @@ default_provider = "mock"
 worktrees_path = "./data/worktrees"
 worker_count = 2
 
+[agent.providers.opencode]
+enabled = false
+command = "opencode"
+serve_hostname = "127.0.0.1"
+serve_port = 4096
+# model = "anthropic/claude-sonnet-4-20250514"
+
 [web]
 port = 5173
 static_dir = "./web/dist"  # used by `coppice web start`
