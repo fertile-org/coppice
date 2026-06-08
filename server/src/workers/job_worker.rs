@@ -15,6 +15,7 @@ use crate::services::result_contract;
 use crate::services::run_service::RunService;
 use crate::services::ticket_service::TicketService;
 use crate::services::worktree_service::{compute_paths, WorktreeService};
+use crate::util::error_format::format_job_error;
 use crate::AppState;
 
 #[derive(Debug)]
@@ -64,7 +65,7 @@ async fn process_one(state: &AppState, worker_id: &str) -> anyhow::Result<()> {
             if run_svc.is_cancelled(run.id).await.unwrap_or(false) {
                 job_svc.mark_cancelled(job.id).await?;
             } else {
-                fail_job(pool, run.id, job.id, &err.to_string()).await?;
+                fail_job(pool, run.id, job.id, &format_job_error(&err)).await?;
             }
             return Err(err);
         }
