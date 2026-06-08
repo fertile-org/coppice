@@ -14,17 +14,15 @@ pub async fn emit_script(
     cancel_rx: &mut watch::Receiver<bool>,
     lines: &[&str],
 ) {
-    let mut seq = 0u64;
-    for line in lines {
+    for (seq, line) in lines.iter().enumerate() {
         if *cancel_rx.borrow() {
             break;
         }
         handle.publish(TerminalFrame {
-            seq,
+            seq: seq as u64,
             data: line.as_bytes().to_vec(),
             ts: OffsetDateTime::now_utc(),
         });
-        seq += 1;
         tokio::time::sleep(std::time::Duration::from_millis(80)).await;
     }
 }
