@@ -2,6 +2,11 @@ import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { apiFetch, setCsrfToken } from '../../lib/api';
 import { SessionContext, type User } from './useSession';
 
+interface MeResponse {
+  user: User;
+  csrfToken: string;
+}
+
 interface AuthProviderProps {
   children: ReactNode;
 }
@@ -16,9 +21,10 @@ export function AuthProvider({ children }: AuthProviderProps) {
     async function loadSession() {
       try {
         const res = await apiFetch('/api/auth/me');
-        const data = (await res.json()) as User;
+        const data = (await res.json()) as MeResponse;
         if (!cancelled) {
-          setUser(data);
+          setCsrfToken(data.csrfToken);
+          setUser(data.user);
         }
       } catch {
         if (!cancelled) {

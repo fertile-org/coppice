@@ -9,7 +9,8 @@ import {
   useRunAgent,
   useStopRun,
 } from './useAgentRuns';
-import { statusLabel, useTicket } from './useTicket';
+import { TicketStatusBadge } from './TicketStatusBadge';
+import { useTicket } from './useTicket';
 
 type DrawerTab = 'detail' | 'runs';
 
@@ -112,17 +113,17 @@ export function TicketDrawer({ ticketId, onClose }: TicketDrawerProps) {
               {isLoading ? 'Loading…' : (ticket?.title ?? 'Ticket detail')}
             </h2>
             {ticket && (
-              <p className="mt-1 font-body text-sm text-text-secondary">
-                {statusLabel(ticket.status)}
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                <TicketStatusBadge status={ticket.status} />
                 {ticket.substatusDisplay && (
-                  <>
-                    {' · '}
-                    <span title={ticket.substatusDisplay.detail}>
-                      {ticket.substatusDisplay.label}
-                    </span>
-                  </>
+                  <span
+                    className="inline-flex items-center rounded-full border border-border bg-surface px-2.5 py-0.5 font-body text-xs text-text-secondary"
+                    title={ticket.substatusDisplay.detail}
+                  >
+                    {ticket.substatusDisplay.label}
+                  </span>
                 )}
-              </p>
+              </div>
             )}
             {repoNotReady && (
               <p className="mt-2 font-body text-sm text-warning">
@@ -220,11 +221,11 @@ export function TicketDrawer({ ticketId, onClose }: TicketDrawerProps) {
           )}
 
           {ticket && tab === 'detail' && (
-            <div className="grid h-full gap-0 md:grid-cols-[3fr_2fr]">
+            <div className="grid h-full gap-0 md:grid-cols-[minmax(0,1fr)_minmax(0,16rem)]">
               <div className="min-h-0 overflow-y-auto px-6 py-5">
                 <TicketDetailPanel ticket={ticket} />
               </div>
-              <div className="min-h-0 overflow-y-auto border-border px-6 py-5 md:border-l">
+              <div className="min-h-0 overflow-y-auto border-border px-4 py-5 md:border-l">
                 <TicketMetadataPanel ticket={ticket} />
               </div>
             </div>

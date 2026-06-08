@@ -69,4 +69,6 @@ async fn upload_attachment_and_create_comment() {
         comments[0]["attachmentIds"][0].as_str().unwrap(),
         attachment_id
     );
+    assert_eq!(comments[0]["attachments"][0]["filename"], "notes.txt");
+    assert_eq!(comments[0]["attachments"][0]["contentType"], "text/plain");
 }

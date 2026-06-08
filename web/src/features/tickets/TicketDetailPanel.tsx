@@ -1,6 +1,10 @@
 import { useEffect, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import type { Ticket } from '../board/useTickets';
+import { useToast } from '../../components/ToastProvider';
+import { Button } from '../../components/ui/button';
+import { Input } from '../../components/ui/input';
+import { Textarea } from '../../components/ui/textarea';
 import { TicketCommentsTab } from './TicketCommentsTab';
 import { useUpdateTicket } from './useTicket';
 
@@ -9,8 +13,10 @@ interface TicketDetailPanelProps {
 }
 
 export function TicketDetailPanel({ ticket }: TicketDetailPanelProps) {
+  const toast = useToast();
   const updateTicket = useUpdateTicket(ticket.id);
   const [editing, setEditing] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
   const [title, setTitle] = useState(ticket.title);
   const [description, setDescription] = useState(ticket.description);
   const [error, setError] = useState<string | null>(null);
@@ -22,16 +28,23 @@ export function TicketDetailPanel({ ticket }: TicketDetailPanelProps) {
 
   async function handleSave() {
     setError(null);
+    setIsSaving(true);
     try {
       await updateTicket.mutateAsync({
         title: title.trim(),
         description,
       });
       setEditing(false);
+      toast.success('Ticket saved');
     } catch {
       setError('Unable to save changes.');
+      toast.error('Unable to save ticket');
+    } finally {
+      setIsSaving(false);
     }
   }
+
+  const saving = isSaving || updateTicket.isPending;
 
   function handleCancel() {
     setTitle(ticket.title);
@@ -41,15 +54,14 @@ export function TicketDetailPanel({ ticket }: TicketDetailPanelProps) {
   }
 
   return (
-    <div className="flex min-h-0 flex-col gap-6">
+    <div className="flex min-h-0 flex-col gap-8">
       <div className="flex flex-col gap-4">
         <div className="flex items-start justify-between gap-4">
           {editing ? (
-            <input
-              type="text"
+            <Input
               value={title}
               onChange={(e) => setTitle(e.target.value)}
-              className="w-full rounded-md border border-border bg-surface px-3 py-2 font-display text-lg font-semibold text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-muted"
+              className="font-display text-lg font-semibold"
             />
           ) : (
             <h3 className="font-display text-lg font-semibold text-text-primary">
@@ -60,31 +72,27 @@ export function TicketDetailPanel({ ticket }: TicketDetailPanelProps) {
           <div className="flex shrink-0 gap-2">
             {editing ? (
               <>
-                <button
+                <Button
                   type="button"
+                  variant="secondary"
                   onClick={handleCancel}
-                  disabled={updateTicket.isPending}
-                  className="rounded-md border border-border px-3 py-1.5 font-body text-sm text-text-secondary transition-colors duration-fast hover:text-text-primary disabled:opacity-50"
+                  disabled={saving}
                 >
                   Cancel
-                </button>
-                <button
+                </Button>
+                <Button
                   type="button"
                   onClick={() => void handleSave()}
-                  disabled={updateTicket.isPending || title.trim().length === 0}
-                  className="rounded-md bg-accent px-3 py-1.5 font-body text-sm font-medium text-white transition-colors duration-fast hover:bg-accent-hover disabled:opacity-50"
+                  loading={saving}
+                  disabled={saving || title.trim().length === 0}
                 >
-                  {updateTicket.isPending ? 'Saving…' : 'Save'}
-                </button>
+                  {saving ? 'Saving…' : 'Save'}
+                </Button>
               </>
             ) : (
-              <button
-                type="button"
-                onClick={() => setEditing(true)}
-                className="rounded-md border border-border px-3 py-1.5 font-body text-sm text-text-secondary transition-colors duration-fast hover:text-text-primary"
-              >
+              <Button type="button" variant="secondary" onClick={() => setEditing(true)}>
                 Edit
-              </button>
+              </Button>
             )}
           </div>
         </div>
@@ -96,15 +104,14 @@ export function TicketDetailPanel({ ticket }: TicketDetailPanelProps) {
         )}
 
         {editing ? (
-          <textarea
+          <Textarea
             value={description}
             onChange={(e) => setDescription(e.target.value)}
-            rows={16}
             placeholder="Describe the ticket in markdown…"
-            className="min-h-0 flex-1 resize-y rounded-md border border-border bg-surface px-3 py-2 font-mono text-sm leading-relaxed text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-muted"
+            className="min-h-[200px] font-mono text-sm leading-relaxed"
           />
         ) : (
-          <div className="min-h-0 flex-1 overflow-y-auto rounded-md border border-border bg-surface px-4 py-3 [&_a]:text-accent [&_code]:rounded [&_code]:bg-paper-200 [&_code]:px-1 [&_p+p]:mt-3">
+          <div className="min-h-[200px] overflow-y-auto rounded-md border border-border bg-surface px-4 py-3 [&_a]:text-accent [&_code]:rounded [&_code]:bg-paper-200 [&_code]:px-1 [&_p+p]:mt-3">
             {description.trim() ? (
               <ReactMarkdown>{description}</ReactMarkdown>
             ) : (
@@ -116,10 +123,8 @@ export function TicketDetailPanel({ ticket }: TicketDetailPanelProps) {
         )}
       </div>
 
-      <hr className="border-border" />
-
-      <section>
-        <h3 className="mb-3 font-body text-sm font-medium text-text-secondary">
+      <section className="border-t border-border pt-6">
+        <h3 className="mb-4 font-display text-base font-semibold tracking-tight text-text-primary">
           Comments
         </h3>
         <TicketCommentsTab ticketId={ticket.id} />

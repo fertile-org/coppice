@@ -65,7 +65,7 @@ struct UserResponse {
 }
 
 #[derive(Serialize)]
-struct LoginResponse {
+struct SessionResponse {
     user: UserResponse,
     #[serde(rename = "csrfToken")]
     csrf_token: String,
@@ -119,7 +119,7 @@ async fn login(
         })?;
 
     let cookie = session_cookie(&bundle.session_token, state.config.auth.cookie_secure);
-    let body = LoginResponse {
+    let body = SessionResponse {
         user: UserResponse {
             id: bundle.user.id,
             email: bundle.user.email,
@@ -136,11 +136,14 @@ async fn login(
         .into_response())
 }
 
-async fn me(AuthUser { user, .. }: AuthUser) -> Json<UserResponse> {
-    Json(UserResponse {
-        id: user.id,
-        email: user.email,
-        role: user.role,
+async fn me(AuthUser { user, session }: AuthUser) -> Json<SessionResponse> {
+    Json(SessionResponse {
+        user: UserResponse {
+            id: user.id,
+            email: user.email,
+            role: user.role,
+        },
+        csrf_token: session.csrf_token,
     })
 }
 

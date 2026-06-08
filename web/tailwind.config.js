@@ -14,6 +14,10 @@ export default {
           DEFAULT: 'var(--color-surface)',
           raised: 'var(--color-surface-raised)',
         },
+        field: {
+          DEFAULT: 'var(--color-field-bg)',
+          disabled: 'var(--color-field-bg-disabled)',
+        },
         border: {
           DEFAULT: 'var(--color-border)',
           strong: 'var(--color-border-strong)',

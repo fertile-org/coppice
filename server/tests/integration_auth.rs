@@ -115,6 +115,17 @@ async fn bootstrap_login_me_logout_flow() {
         .unwrap();
     assert_eq!(me.status(), axum::http::StatusCode::OK);
 
+    let me_body = axum::body::to_bytes(me.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let me_json: serde_json::Value = serde_json::from_slice(&me_body).unwrap();
+    assert_eq!(me_json["user"]["email"], "admin@localhost");
+    assert_eq!(
+        me_json["csrfToken"].as_str(),
+        Some(csrf_token.as_str()),
+        "session restore should return the same CSRF token as login"
+    );
+
     let logout = app
         .clone()
         .oneshot(

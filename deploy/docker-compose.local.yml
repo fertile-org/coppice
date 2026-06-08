@@ -38,8 +38,9 @@ services:
       AGENT_WORKER_COUNT: "2"
     volumes:
       - coppice_local_artifacts:/data/artifacts
-      # Example: - ~/code:/data/host-repos
       - coppice_local_worktrees:/data/worktrees
+      # Repo root (compose file lives in deploy/) — register as /data/host-repos/coppice in Settings → Repositories
+      - ..:/data/host-repos/coppice
     depends_on:
       postgres:
         condition: service_healthy

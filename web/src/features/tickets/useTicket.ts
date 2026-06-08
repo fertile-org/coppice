@@ -6,6 +6,13 @@ import type { TicketStatus } from '../board/columns';
 
 export { useAgents, type AgentSummary } from '../agents/useAgents';
 
+export interface CommentAttachment {
+  id: string;
+  filename: string;
+  contentType: string;
+  sizeBytes: number;
+}
+
 export interface Comment {
   id: string;
   ticketId: string;
@@ -15,6 +22,7 @@ export interface Comment {
   intent: string;
   mentions: unknown;
   attachmentIds: string[];
+  attachments: CommentAttachment[];
   createdAt: string;
 }
 

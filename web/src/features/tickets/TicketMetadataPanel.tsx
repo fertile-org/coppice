@@ -1,6 +1,17 @@
 import { useEffect, useState } from 'react';
-import { BOARD_COLUMNS } from '../board/columns';
+import { BOARD_COLUMNS, type TicketStatus } from '../board/columns';
 import type { Ticket } from '../board/useTickets';
+import { useToast } from '../../components/ToastProvider';
+import { Button } from '../../components/ui/button';
+import { Input } from '../../components/ui/input';
+import { Label } from '../../components/ui/label';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '../../components/ui/select';
 import {
   SUBSTATUSES,
   SUBSTATUS_LABELS,
@@ -12,6 +23,7 @@ import {
 import { ticketPrioritySchema } from '../../lib/schemas/ticket';
 import { useRepos } from '../repos/useRepos';
 import { useAgentRuns } from './useAgentRuns';
+import { TicketStatusBadge } from './TicketStatusBadge';
 import {
   useAgents,
   useAssignAgent,
@@ -28,6 +40,7 @@ function metadataFromTicket(ticket: Ticket): Record<string, unknown> {
 }
 
 export function TicketMetadataPanel({ ticket }: TicketMetadataPanelProps) {
+  const toast = useToast();
   const updateTicket = useUpdateTicket(ticket.id);
   const updateStatus = useUpdateTicketStatus(ticket.id);
   const assignAgent = useAssignAgent(ticket.id);
@@ -48,6 +61,7 @@ export function TicketMetadataPanel({ ticket }: TicketMetadataPanelProps) {
   const [priority, setPriority] = useState(ticket.priority ?? '');
   const [repoId, setRepoId] = useState(ticket.repoId ?? '');
   const [error, setError] = useState<string | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
 
   useEffect(() => {
     setAssigneeId(ticket.assigneeAgentId ?? '');
@@ -93,6 +107,7 @@ export function TicketMetadataPanel({ ticket }: TicketMetadataPanelProps) {
       }
     }
 
+    setIsSaving(true);
     try {
       await updateStatus.mutateAsync({
         status,
@@ -110,42 +125,52 @@ export function TicketMetadataPanel({ ticket }: TicketMetadataPanelProps) {
           ...(priorityChanged ? { priority: parsedPriority.data } : {}),
         });
       }
+
+      toast.success('Metadata saved');
     } catch {
       setError('Unable to save metadata.');
+      toast.error('Unable to save metadata');
+    } finally {
+      setIsSaving(false);
     }
   }
 
-  const isBusy = updateStatus.isPending || updateTicket.isPending;
+  const isBusy =
+    isSaving || updateStatus.isPending || updateTicket.isPending;
   const activeSubstatus = substatus || null;
   const assignedAgent = agents?.find((agent) => agent.id === assigneeId);
 
   return (
-    <div className="space-y-6">
-      <label className="block space-y-1.5">
-        <span className="font-body text-sm font-medium text-text-secondary">
-          Assignee
-        </span>
-        <select
-          value={assigneeId}
-          onChange={(e) => void handleAssignChange(e.target.value)}
+    <div className="space-y-5">
+      <div className="space-y-2">
+        <Label htmlFor="ticket-assignee">Assignee</Label>
+        <Select
+          value={assigneeId || '__none__'}
+          onValueChange={(value) =>
+            void handleAssignChange(value === '__none__' ? '' : value)
+          }
           disabled={assignAgent.isPending}
-          className="w-full rounded-md border border-border bg-surface px-3 py-2 font-body text-sm text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-muted disabled:opacity-50"
         >
-          <option value="">Unassigned</option>
-          {agents
-            ?.filter((agent) => agent.enabled)
-            .map((agent) => (
-              <option key={agent.id} value={agent.id}>
-                {agent.name} ({agent.role})
-              </option>
-            ))}
-        </select>
+          <SelectTrigger id="ticket-assignee">
+            <SelectValue placeholder="Unassigned" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="__none__">Unassigned</SelectItem>
+            {agents
+              ?.filter((agent) => agent.enabled)
+              .map((agent) => (
+                <SelectItem key={agent.id} value={agent.id} textValue={agent.name}>
+                  {agent.name} ({agent.role})
+                </SelectItem>
+              ))}
+          </SelectContent>
+        </Select>
         {assignedAgent && (
           <p className="font-body text-xs text-text-muted">
             Assigned to {assignedAgent.name}
           </p>
         )}
-      </label>
+      </div>
 
       {assignError && (
         <p className="rounded-md border border-danger-muted bg-danger-muted/40 px-3 py-2 font-body text-sm text-danger">
@@ -160,14 +185,12 @@ export function TicketMetadataPanel({ ticket }: TicketMetadataPanelProps) {
       )}
 
       {(ticket.branchName || latestRunWorktreePath) && (
-        <dl className="space-y-2 rounded-md border border-border bg-surface px-4 py-3">
+        <dl className="space-y-2 rounded-md border border-border bg-surface px-3 py-3">
           {ticket.branchName && (
-            <div className="grid gap-1 sm:grid-cols-[7rem_1fr]">
-              <dt className="font-body text-sm font-medium text-text-secondary">
-                Branch
-              </dt>
+            <div className="space-y-1">
+              <dt className="font-body text-xs font-medium text-text-muted">Branch</dt>
               <dd
-                className="truncate font-mono text-sm text-text-primary"
+                className="truncate font-mono text-xs text-text-primary"
                 title={ticket.branchName}
               >
                 {ticket.branchName}
@@ -175,12 +198,10 @@ export function TicketMetadataPanel({ ticket }: TicketMetadataPanelProps) {
             </div>
           )}
           {latestRunWorktreePath && (
-            <div className="grid gap-1 sm:grid-cols-[7rem_1fr]">
-              <dt className="font-body text-sm font-medium text-text-secondary">
-                Worktree
-              </dt>
+            <div className="space-y-1">
+              <dt className="font-body text-xs font-medium text-text-muted">Worktree</dt>
               <dd
-                className="truncate font-mono text-sm text-text-primary"
+                className="truncate font-mono text-xs text-text-primary"
                 title={latestRunWorktreePath}
               >
                 {latestRunWorktreePath}
@@ -190,148 +211,156 @@ export function TicketMetadataPanel({ ticket }: TicketMetadataPanelProps) {
         </dl>
       )}
 
-      <label className="block space-y-1.5">
-        <span className="font-body text-sm font-medium text-text-secondary">
-          Repository
-        </span>
-        <select
-          value={repoId}
-          onChange={(e) => setRepoId(e.target.value)}
-          className="w-full rounded-md border border-border bg-surface px-3 py-2 font-body text-sm text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-muted"
-        >
-          <option value="">None</option>
-          {repos?.map((repo) => (
-            <option key={repo.id} value={repo.id}>
-              {repo.name}
-              {repo.verificationStatus !== 'ready'
-                ? ` (${repo.verificationStatus.replaceAll('_', ' ')})`
-                : ''}
-            </option>
-          ))}
-        </select>
-      </label>
-
-      <div className="grid gap-4 sm:grid-cols-2">
-        <label className="block space-y-1.5">
-          <span className="font-body text-sm font-medium text-text-secondary">
-            Status
-          </span>
-          <select
-            value={status}
-            onChange={(e) => setStatus(e.target.value as typeof status)}
-            className="w-full rounded-md border border-border bg-surface px-3 py-2 font-body text-sm text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-muted"
-          >
-            {BOARD_COLUMNS.map((column) => (
-              <option key={column.status} value={column.status}>
-                {column.label}
-              </option>
+      <div className="space-y-2">
+        <Label htmlFor="ticket-repo">Repository</Label>
+        <Select value={repoId || '__none__'} onValueChange={(v) => setRepoId(v === '__none__' ? '' : v)}>
+          <SelectTrigger id="ticket-repo">
+            <SelectValue placeholder="None" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="__none__">None</SelectItem>
+            {repos?.map((repo) => (
+              <SelectItem
+                key={repo.id}
+                value={repo.id}
+                textValue={repo.name}
+              >
+                {repo.name}
+                {repo.verificationStatus !== 'ready'
+                  ? ` (${repo.verificationStatus.replaceAll('_', ' ')})`
+                  : ''}
+              </SelectItem>
             ))}
-          </select>
-        </label>
-
-        <label className="block space-y-1.5">
-          <span className="font-body text-sm font-medium text-text-secondary">
-            Priority
-          </span>
-          <select
-            value={priority}
-            onChange={(e) => setPriority(e.target.value)}
-            className="w-full rounded-md border border-border bg-surface px-3 py-2 font-body text-sm capitalize text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-muted"
-          >
-            <option value="">None</option>
-            {ticketPrioritySchema.options.map((p) => (
-              <option key={p} value={p}>
-                {p}
-              </option>
-            ))}
-          </select>
-        </label>
+          </SelectContent>
+        </Select>
       </div>
 
-      <label className="block space-y-1.5">
-        <span className="font-body text-sm font-medium text-text-secondary">
-          Substatus
-        </span>
-        <select
-          value={substatus}
-          onChange={(e) => {
-            const next = e.target.value as Substatus | '';
+      <div className="space-y-2">
+        <Label htmlFor="ticket-status">Status</Label>
+        <Select
+          value={status}
+          onValueChange={(value) => setStatus(value as TicketStatus)}
+        >
+          <SelectTrigger id="ticket-status" className="h-auto min-h-10 py-2">
+            <SelectValue>
+              <TicketStatusBadge status={status} />
+            </SelectValue>
+          </SelectTrigger>
+          <SelectContent>
+            {BOARD_COLUMNS.map((column) => (
+              <SelectItem
+                key={column.status}
+                value={column.status}
+                textValue={column.label}
+              >
+                <TicketStatusBadge status={column.status} />
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+
+      <div className="space-y-2">
+        <Label htmlFor="ticket-priority">Priority</Label>
+        <Select
+          value={priority || '__none__'}
+          onValueChange={(v) => setPriority(v === '__none__' ? '' : v)}
+        >
+          <SelectTrigger id="ticket-priority">
+            <SelectValue placeholder="None" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="__none__">None</SelectItem>
+            {ticketPrioritySchema.options.map((p) => (
+              <SelectItem key={p} value={p} className="capitalize">
+                {p}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+
+      <div className="space-y-2">
+        <Label htmlFor="ticket-substatus">Substatus</Label>
+        <Select
+          value={substatus || '__none__'}
+          onValueChange={(value) => {
+            const next = value === '__none__' ? '' : (value as Substatus);
             setSubstatus(next);
             if (!next) setMetadata({});
           }}
-          className="w-full rounded-md border border-border bg-surface px-3 py-2 font-body text-sm text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-muted"
         >
-          <option value="">None</option>
-          {SUBSTATUSES.map((value) => (
-            <option key={value} value={value}>
-              {SUBSTATUS_LABELS[value]}
-            </option>
-          ))}
-        </select>
-      </label>
+          <SelectTrigger id="ticket-substatus">
+            <SelectValue placeholder="None" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="__none__">None</SelectItem>
+            {SUBSTATUSES.map((value) => (
+              <SelectItem key={value} value={value} textValue={SUBSTATUS_LABELS[value]}>
+                {SUBSTATUS_LABELS[value]}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
 
       {activeSubstatus === 'waiting_for_agent' && (
-        <label className="block space-y-1.5">
-          <span className="font-body text-sm font-medium text-text-secondary">
-            Agent
-          </span>
-          <select
-            value={String(metadata.agentId ?? '')}
-            onChange={(e) => updateMetadataField('agentId', e.target.value)}
-            className="w-full rounded-md border border-border bg-surface px-3 py-2 font-body text-sm text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-muted"
+        <div className="space-y-2">
+          <Label htmlFor="substatus-agent">Agent</Label>
+          <Select
+            value={String(metadata.agentId ?? '__none__')}
+            onValueChange={(value) =>
+              updateMetadataField('agentId', value === '__none__' ? '' : value)
+            }
           >
-            <option value="">Select agent…</option>
-            {agents
-              ?.filter((agent) => agent.enabled)
-              .map((agent) => (
-                <option key={agent.id} value={agent.id}>
-                  {agent.name} ({agent.role})
-                </option>
-              ))}
-          </select>
-        </label>
+            <SelectTrigger id="substatus-agent">
+              <SelectValue placeholder="Select agent…" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="__none__">Select agent…</SelectItem>
+              {agents
+                ?.filter((agent) => agent.enabled)
+                .map((agent) => (
+                  <SelectItem key={agent.id} value={agent.id} textValue={agent.name}>
+                    {agent.name} ({agent.role})
+                  </SelectItem>
+                ))}
+            </SelectContent>
+          </Select>
+        </div>
       )}
 
       {activeSubstatus === 'blocked_by_missing_capability' && (
-        <label className="block space-y-1.5">
-          <span className="font-body text-sm font-medium text-text-secondary">
-            Capability
-          </span>
-          <input
-            type="text"
+        <div className="space-y-2">
+          <Label htmlFor="substatus-capability">Capability</Label>
+          <Input
+            id="substatus-capability"
             value={String(metadata.capability ?? '')}
             onChange={(e) => updateMetadataField('capability', e.target.value)}
-            className="w-full rounded-md border border-border bg-surface px-3 py-2 font-body text-sm text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-muted"
           />
-        </label>
+        </div>
       )}
 
       {activeSubstatus === 'blocked_by_missing_secret' && (
-        <label className="block space-y-1.5">
-          <span className="font-body text-sm font-medium text-text-secondary">
-            Secret key
-          </span>
-          <input
-            type="text"
+        <div className="space-y-2">
+          <Label htmlFor="substatus-secret">Secret key</Label>
+          <Input
+            id="substatus-secret"
             value={String(metadata.secretKey ?? '')}
             onChange={(e) => updateMetadataField('secretKey', e.target.value)}
-            className="w-full rounded-md border border-border bg-surface px-3 py-2 font-body text-sm text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-muted"
           />
-        </label>
+        </div>
       )}
 
       {activeSubstatus && substatusOptionalReason(activeSubstatus) && (
-        <label className="block space-y-1.5">
-          <span className="font-body text-sm font-medium text-text-secondary">
-            Reason (optional)
-          </span>
-          <input
-            type="text"
+        <div className="space-y-2">
+          <Label htmlFor="substatus-reason">Reason (optional)</Label>
+          <Input
+            id="substatus-reason"
             value={String(metadata.reason ?? '')}
             onChange={(e) => updateMetadataField('reason', e.target.value)}
-            className="w-full rounded-md border border-border bg-surface px-3 py-2 font-body text-sm text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-muted"
           />
-        </label>
+        </div>
       )}
 
       {activeSubstatus && substatusRequiresMetadata(activeSubstatus) && (
@@ -341,14 +370,15 @@ export function TicketMetadataPanel({ ticket }: TicketMetadataPanelProps) {
         </p>
       )}
 
-      <button
+      <Button
         type="button"
         onClick={() => void handleSave()}
+        loading={isBusy}
         disabled={isBusy}
-        className="rounded-md bg-accent px-4 py-2 font-body text-sm font-medium text-white transition-colors duration-fast hover:bg-accent-hover disabled:opacity-50"
+        className="w-full"
       >
         {isBusy ? 'Saving…' : 'Save metadata'}
-      </button>
+      </Button>
     </div>
   );
 }

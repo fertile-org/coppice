@@ -1,6 +1,7 @@
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { AppShell } from './components/AppShell';
+import { ToastProvider } from './components/ToastProvider';
 import { ProtectedRoute } from './components/ProtectedRoute';
 import { AgentsPage } from './features/agents/AgentsPage';
 import { AuthProvider } from './features/auth/AuthProvider';
@@ -14,6 +15,7 @@ import { queryClient } from './lib/query-client';
 function App() {
   return (
     <QueryClientProvider client={queryClient}>
+      <ToastProvider>
       <BrowserRouter>
         <AuthProvider>
           <Routes>
@@ -37,6 +39,7 @@ function App() {
           </Routes>
         </AuthProvider>
       </BrowserRouter>
+      </ToastProvider>
     </QueryClientProvider>
   );
 }

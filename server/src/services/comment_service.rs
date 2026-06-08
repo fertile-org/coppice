@@ -102,6 +102,30 @@ impl<'a> CommentService<'a> {
         Ok(row_to_comment(&row))
     }
 
+    pub async fn list_attachments_by_ids(
+        &self,
+        attachment_ids: &[Uuid],
+    ) -> Result<Vec<Attachment>, CommentError> {
+        if attachment_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let rows = sqlx::query(
+            r#"
+            SELECT
+                id, filename, content_type, size_bytes, storage_path,
+                uploaded_by, created_at
+            FROM attachments
+            WHERE id = ANY($1)
+            "#,
+        )
+        .bind(attachment_ids)
+        .fetch_all(self.pool)
+        .await?;
+
+        Ok(rows.iter().map(row_to_attachment).collect())
+    }
+
     pub async fn get_attachment(&self, attachment_id: Uuid) -> Result<Attachment, CommentError> {
         let row = sqlx::query(
             r#"

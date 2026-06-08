@@ -9,6 +9,7 @@ use axum::{
     Json, Router,
 };
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::sync::Arc;
 use time::format_description::well_known::Rfc3339;
 use uuid::Uuid;
@@ -22,6 +23,15 @@ pub fn routes() -> Router<Arc<AppState>> {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
+struct AttachmentSummary {
+    id: Uuid,
+    filename: String,
+    content_type: String,
+    size_bytes: i64,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 struct CommentResponse {
     id: Uuid,
     ticket_id: Uuid,
@@ -31,6 +41,7 @@ struct CommentResponse {
     intent: String,
     mentions: serde_json::Value,
     attachment_ids: Vec<Uuid>,
+    attachments: Vec<AttachmentSummary>,
     created_at: String,
 }
 
@@ -43,7 +54,26 @@ struct CreateCommentBody {
     mentions: Option<Vec<String>>,
 }
 
-fn comment_to_response(comment: Comment) -> CommentResponse {
+fn attachment_to_summary(attachment: &crate::domain::attachment::Attachment) -> AttachmentSummary {
+    AttachmentSummary {
+        id: attachment.id,
+        filename: attachment.filename.clone(),
+        content_type: attachment.content_type.clone(),
+        size_bytes: attachment.size_bytes,
+    }
+}
+
+fn comment_to_response(
+    comment: Comment,
+    attachments_by_id: &HashMap<Uuid, crate::domain::attachment::Attachment>,
+) -> CommentResponse {
+    let attachments = comment
+        .attachment_ids
+        .iter()
+        .filter_map(|id| attachments_by_id.get(id))
+        .map(attachment_to_summary)
+        .collect();
+
     CommentResponse {
         id: comment.id,
         ticket_id: comment.ticket_id,
@@ -59,11 +89,30 @@ fn comment_to_response(comment: Comment) -> CommentResponse {
             .unwrap_or_else(|| "progress_update".to_string()),
         mentions: comment.mentions,
         attachment_ids: comment.attachment_ids,
+        attachments,
         created_at: comment
             .created_at
             .format(&Rfc3339)
             .unwrap_or_default(),
     }
+}
+
+async fn attachments_for_comments(
+    service: &CommentService<'_>,
+    comments: &[Comment],
+) -> Result<HashMap<Uuid, crate::domain::attachment::Attachment>, CommentError> {
+    let mut ids: Vec<Uuid> = comments
+        .iter()
+        .flat_map(|comment| comment.attachment_ids.clone())
+        .collect();
+    ids.sort_unstable();
+    ids.dedup();
+
+    let attachments = service.list_attachments_by_ids(&ids).await?;
+    Ok(attachments
+        .into_iter()
+        .map(|attachment| (attachment.id, attachment))
+        .collect())
 }
 
 fn map_error(err: CommentError) -> StatusCode {
@@ -91,8 +140,14 @@ async fn list_comments(
         .list_by_ticket(ticket_id)
         .await
         .map_err(map_error)?;
+    let attachments_by_id = attachments_for_comments(&service, &comments)
+        .await
+        .map_err(map_error)?;
     Ok(Json(
-        comments.into_iter().map(comment_to_response).collect(),
+        comments
+            .into_iter()
+            .map(|comment| comment_to_response(comment, &attachments_by_id))
+            .collect(),
     ))
 }
 
@@ -122,5 +177,11 @@ async fn create_comment(
         )
         .await
         .map_err(map_error)?;
-    Ok((StatusCode::CREATED, Json(comment_to_response(comment))))
+    let attachments_by_id = attachments_for_comments(&service, std::slice::from_ref(&comment))
+        .await
+        .map_err(map_error)?;
+    Ok((
+        StatusCode::CREATED,
+        Json(comment_to_response(comment, &attachments_by_id)),
+    ))
 }

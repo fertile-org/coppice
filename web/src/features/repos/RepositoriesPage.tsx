@@ -157,7 +157,7 @@ function RepoForm({ editing, onCancelEdit }: RepoFormProps) {
             autoComplete="off"
             value={name}
             onChange={(e) => setName(e.target.value)}
-            className="w-full rounded-md border border-border bg-paper-50 px-3 py-2 font-body text-sm text-text-primary outline-none transition-colors duration-fast focus:border-moss-500 focus:ring-2 focus:ring-moss-100"
+            className="field-control w-full px-3 py-2 font-body text-sm"
           />
         </div>
 
@@ -176,7 +176,7 @@ function RepoForm({ editing, onCancelEdit }: RepoFormProps) {
             placeholder="/data/my-repo"
             value={localPath}
             onChange={(e) => setLocalPath(e.target.value)}
-            className="w-full rounded-md border border-border bg-paper-50 px-3 py-2 font-mono text-sm text-text-primary outline-none transition-colors duration-fast focus:border-moss-500 focus:ring-2 focus:ring-moss-100"
+            className="field-control w-full px-3 py-2 font-mono text-sm"
           />
         </div>
 
@@ -195,7 +195,7 @@ function RepoForm({ editing, onCancelEdit }: RepoFormProps) {
             placeholder="https://github.com/org/repo.git"
             value={remoteUrl}
             onChange={(e) => setRemoteUrl(e.target.value)}
-            className="w-full rounded-md border border-border bg-paper-50 px-3 py-2 font-mono text-sm text-text-primary outline-none transition-colors duration-fast focus:border-moss-500 focus:ring-2 focus:ring-moss-100"
+            className="field-control w-full px-3 py-2 font-mono text-sm"
           />
         </div>
 
@@ -213,7 +213,7 @@ function RepoForm({ editing, onCancelEdit }: RepoFormProps) {
             autoComplete="off"
             value={defaultBranch}
             onChange={(e) => setDefaultBranch(e.target.value)}
-            className="w-full rounded-md border border-border bg-paper-50 px-3 py-2 font-body text-sm text-text-primary outline-none transition-colors duration-fast focus:border-moss-500 focus:ring-2 focus:ring-moss-100"
+            className="field-control w-full px-3 py-2 font-body text-sm"
           />
         </div>
       </div>

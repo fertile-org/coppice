@@ -60,6 +60,11 @@
   --color-background: var(--color-paper-50);
   --color-surface: var(--color-paper-100);
   --color-surface-raised: #fffdf9;
+  /* Form fields: bright when editable, recessed when disabled */
+  --color-field-bg: #fffef8;
+  --color-field-border: var(--color-bark-300);
+  --color-field-bg-disabled: var(--color-paper-200);
+  --color-field-border-disabled: var(--color-bark-200);
   --color-border: var(--color-bark-200);
   --color-border-strong: var(--color-bark-300);
 

@@ -1,5 +1,9 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { X } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
+import { formatFileSize, isImageContentType } from '../../lib/attachments';
+import { Button } from '../../components/ui/button';
+import { CommentAttachments } from './CommentAttachments';
 import {
   useComments,
   useCreateComment,
@@ -9,6 +13,12 @@ import {
 
 interface TicketCommentsTabProps {
   ticketId: string;
+}
+
+interface PendingFile {
+  key: string;
+  file: File;
+  previewUrl: string | null;
 }
 
 function authorLabel(comment: Comment): string {
@@ -33,6 +43,16 @@ function formatTime(iso: string): string {
   }
 }
 
+function pendingFileFromFile(file: File): PendingFile {
+  return {
+    key: `${file.name}-${file.size}-${file.lastModified}-${crypto.randomUUID()}`,
+    file,
+    previewUrl: isImageContentType(file.type)
+      ? URL.createObjectURL(file)
+      : null,
+  };
+}
+
 export function TicketCommentsTab({ ticketId }: TicketCommentsTabProps) {
   const { data: comments, isLoading, isError } = useComments(ticketId);
   const createComment = useCreateComment(ticketId);
@@ -40,8 +60,37 @@ export function TicketCommentsTab({ ticketId }: TicketCommentsTabProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [body, setBody] = useState('');
-  const [pendingFile, setPendingFile] = useState<File | null>(null);
+  const [pendingFiles, setPendingFiles] = useState<PendingFile[]>([]);
   const [error, setError] = useState<string | null>(null);
+
+  const pendingFilesRef = useRef(pendingFiles);
+  pendingFilesRef.current = pendingFiles;
+
+  useEffect(() => {
+    return () => {
+      for (const pending of pendingFilesRef.current) {
+        if (pending.previewUrl) {
+          URL.revokeObjectURL(pending.previewUrl);
+        }
+      }
+    };
+  }, []);
+
+  function addPendingFiles(files: FileList | File[]) {
+    const next = Array.from(files).map(pendingFileFromFile);
+    if (next.length === 0) return;
+    setPendingFiles((current) => [...current, ...next]);
+  }
+
+  function removePendingFile(key: string) {
+    setPendingFiles((current) => {
+      const removed = current.find((item) => item.key === key);
+      if (removed?.previewUrl) {
+        URL.revokeObjectURL(removed.previewUrl);
+      }
+      return current.filter((item) => item.key !== key);
+    });
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -51,8 +100,8 @@ export function TicketCommentsTab({ ticketId }: TicketCommentsTabProps) {
     setError(null);
     try {
       const attachmentIds: string[] = [];
-      if (pendingFile) {
-        const uploaded = await uploadAttachment.mutateAsync(pendingFile);
+      for (const pending of pendingFiles) {
+        const uploaded = await uploadAttachment.mutateAsync(pending.file);
         attachmentIds.push(uploaded.id);
       }
 
@@ -62,7 +111,14 @@ export function TicketCommentsTab({ ticketId }: TicketCommentsTabProps) {
       });
 
       setBody('');
-      setPendingFile(null);
+      setPendingFiles((current) => {
+        for (const pending of current) {
+          if (pending.previewUrl) {
+            URL.revokeObjectURL(pending.previewUrl);
+          }
+        }
+        return [];
+      });
       if (fileInputRef.current) fileInputRef.current.value = '';
     } catch {
       setError('Unable to post comment.');
@@ -107,20 +163,18 @@ export function TicketCommentsTab({ ticketId }: TicketCommentsTabProps) {
             <div className="font-body text-sm text-text-primary [&_a]:text-accent [&_code]:rounded [&_code]:bg-paper-200 [&_code]:px-1 [&_p+p]:mt-2">
               <ReactMarkdown>{comment.body}</ReactMarkdown>
             </div>
-            {comment.attachmentIds.length > 0 && (
-              <ul className="mt-3 flex flex-wrap gap-2">
-                {comment.attachmentIds.map((id) => (
-                  <li key={id}>
-                    <a
-                      href={`/api/attachments/${id}`}
-                      className="inline-flex items-center rounded-full border border-border bg-paper-200 px-2.5 py-0.5 font-body text-xs text-accent hover:underline"
-                    >
-                      Attachment
-                    </a>
-                  </li>
-                ))}
-              </ul>
-            )}
+            <CommentAttachments
+              attachments={
+                comment.attachments.length > 0
+                  ? comment.attachments
+                  : comment.attachmentIds.map((id) => ({
+                      id,
+                      filename: 'Attachment',
+                      contentType: 'application/octet-stream',
+                      sizeBytes: 0,
+                    }))
+              }
+            />
           </article>
         ))}
       </div>
@@ -140,31 +194,67 @@ export function TicketCommentsTab({ ticketId }: TicketCommentsTabProps) {
           onChange={(e) => setBody(e.target.value)}
           rows={4}
           placeholder="Write a comment in markdown…"
-          className="w-full rounded-md border border-border bg-surface px-3 py-2 font-body text-sm text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-muted"
+          className="field-control w-full px-3 py-2 font-body text-sm"
         />
+
+        {pendingFiles.length > 0 && (
+          <ul className="flex flex-wrap gap-2">
+            {pendingFiles.map((pending) => (
+              <li key={pending.key} className="relative">
+                {pending.previewUrl ? (
+                  <img
+                    src={pending.previewUrl}
+                    alt={pending.file.name}
+                    className="size-16 rounded-md border border-border object-cover"
+                  />
+                ) : (
+                  <div className="flex size-16 flex-col items-center justify-center rounded-md border border-border bg-surface px-1 text-center">
+                    <span className="line-clamp-2 font-body text-[10px] leading-tight text-text-secondary">
+                      {pending.file.name}
+                    </span>
+                    <span className="font-body text-[10px] text-text-muted">
+                      {formatFileSize(pending.file.size)}
+                    </span>
+                  </div>
+                )}
+                <button
+                  type="button"
+                  onClick={() => removePendingFile(pending.key)}
+                  className="absolute -right-1.5 -top-1.5 rounded-full border border-border bg-surface-raised p-0.5 text-text-muted shadow-sm hover:text-text-primary"
+                  aria-label={`Remove ${pending.file.name}`}
+                >
+                  <X className="size-3" />
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
 
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-2">
             <input
               ref={fileInputRef}
               type="file"
-              onChange={(e) => setPendingFile(e.target.files?.[0] ?? null)}
+              multiple
+              onChange={(e) => {
+                if (e.target.files) {
+                  addPendingFiles(e.target.files);
+                }
+                e.target.value = '';
+              }}
               className="max-w-xs font-body text-xs text-text-secondary file:mr-2 file:rounded-md file:border file:border-border file:bg-surface-raised file:px-2 file:py-1 file:font-body file:text-xs file:text-text-secondary"
             />
-            {pendingFile && (
+            {pendingFiles.length > 0 && (
               <span className="font-body text-xs text-text-muted">
-                {pendingFile.name}
+                {pendingFiles.length} file{pendingFiles.length === 1 ? '' : 's'}{' '}
+                selected
               </span>
             )}
           </div>
 
-          <button
-            type="submit"
-            disabled={isBusy || body.trim().length === 0}
-            className="rounded-md bg-accent px-4 py-2 font-body text-sm font-medium text-white transition-colors duration-fast hover:bg-accent-hover disabled:opacity-50"
-          >
+          <Button type="submit" disabled={isBusy || body.trim().length === 0}>
             {isBusy ? 'Posting…' : 'Post comment'}
-          </button>
+          </Button>
         </div>
       </form>
     </div>

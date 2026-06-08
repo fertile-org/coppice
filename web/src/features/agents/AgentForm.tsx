@@ -115,7 +115,7 @@ export function AgentForm({
           value={values.name}
           onChange={(e) => updateField('name', e.target.value)}
           placeholder="e.g. PM Bot"
-          className="w-full rounded-md border border-border bg-surface-raised px-3 py-2 font-body text-sm text-text-primary outline-none transition-colors duration-fast focus:border-moss-500 focus:ring-2 focus:ring-moss-100"
+          className="field-control w-full px-3 py-2 font-body text-sm"
         />
       </div>
 
@@ -132,12 +132,7 @@ export function AgentForm({
           value={values.role}
           onChange={(e) => updateField('role', e.target.value)}
           readOnly={mode === 'create'}
-          className={[
-            'w-full rounded-md border border-border px-3 py-2 font-body text-sm text-text-primary outline-none transition-colors duration-fast',
-            mode === 'create'
-              ? 'bg-paper-200 text-text-secondary'
-              : 'bg-surface-raised focus:border-moss-500 focus:ring-2 focus:ring-moss-100',
-          ].join(' ')}
+          className="field-control w-full px-3 py-2 font-body text-sm"
         />
       </div>
 
@@ -155,12 +150,7 @@ export function AgentForm({
           value={values.skills}
           onChange={(e) => updateField('skills', e.target.value)}
           readOnly={mode === 'create'}
-          className={[
-            'w-full resize-y rounded-md border border-border px-3 py-2 font-body text-sm text-text-primary outline-none transition-colors duration-fast',
-            mode === 'create'
-              ? 'bg-paper-200 text-text-secondary'
-              : 'bg-surface-raised focus:border-moss-500 focus:ring-2 focus:ring-moss-100',
-          ].join(' ')}
+          className="field-control w-full resize-y px-3 py-2 font-body text-sm"
         />
       </div>
 
@@ -178,12 +168,7 @@ export function AgentForm({
           value={values.responsibilities}
           onChange={(e) => updateField('responsibilities', e.target.value)}
           readOnly={mode === 'create'}
-          className={[
-            'w-full resize-y rounded-md border border-border px-3 py-2 font-body text-sm text-text-primary outline-none transition-colors duration-fast',
-            mode === 'create'
-              ? 'bg-paper-200 text-text-secondary'
-              : 'bg-surface-raised focus:border-moss-500 focus:ring-2 focus:ring-moss-100',
-          ].join(' ')}
+          className="field-control w-full resize-y px-3 py-2 font-body text-sm"
         />
       </div>
 
@@ -200,12 +185,7 @@ export function AgentForm({
           value={values.systemPrompt}
           onChange={(e) => updateField('systemPrompt', e.target.value)}
           readOnly={mode === 'create'}
-          className={[
-            'w-full resize-y rounded-md border border-border px-3 py-2 font-mono text-sm leading-relaxed text-text-primary outline-none transition-colors duration-fast',
-            mode === 'create'
-              ? 'bg-paper-200 text-text-secondary'
-              : 'bg-surface-raised focus:border-moss-500 focus:ring-2 focus:ring-moss-100',
-          ].join(' ')}
+          className="field-control w-full resize-y px-3 py-2 font-mono text-sm leading-relaxed"
         />
       </div>
 

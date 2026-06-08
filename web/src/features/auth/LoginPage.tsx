@@ -81,7 +81,7 @@ export function LoginPage() {
               required
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              className="w-full rounded-md border border-border bg-paper-50 px-3 py-2 font-body text-sm text-text-primary outline-none transition-colors duration-fast focus:border-accent focus:ring-2 focus:ring-accent-muted"
+              className="field-control w-full px-3 py-2 font-body text-sm"
             />
           </div>
 
@@ -99,7 +99,7 @@ export function LoginPage() {
               required
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="w-full rounded-md border border-border bg-paper-50 px-3 py-2 font-body text-sm text-text-primary outline-none transition-colors duration-fast focus:border-accent focus:ring-2 focus:ring-accent-muted"
+              className="field-control w-full px-3 py-2 font-body text-sm"
             />
           </div>
 
