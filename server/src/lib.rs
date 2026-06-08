@@ -4,6 +4,7 @@ pub mod db;
 pub mod domain;
 pub mod middleware;
 pub mod providers;
+pub mod sessions;
 pub mod sandbox;
 pub mod services;
 pub mod storage;
