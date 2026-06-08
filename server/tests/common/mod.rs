@@ -89,6 +89,8 @@ async fn test_state_with_db() -> Arc<AppState> {
     Arc::new(AppState {
         attachments: AppState::attachment_store_from_config(&config),
         agent_provider: AppState::agent_provider_from_config(&config),
+        run_streams: Arc::new(coppice_server::sessions::run_registry::RunStreamRegistry::new()),
+        event_bus: Arc::new(coppice_server::events::bus::EventBus::new()),
         config,
         db: Some(pool),
     })

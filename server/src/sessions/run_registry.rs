@@ -7,7 +7,7 @@ use uuid::Uuid;
 pub struct RunStreamHandle {
     tx: broadcast::Sender<TerminalFrame>,
     cancel_tx: watch::Sender<bool>,
-    buffer: Arc<tokio::sync::Mutex<Vec<TerminalFrame>>>,
+    buffer: Arc<std::sync::Mutex<Vec<TerminalFrame>>>,
 }
 
 impl RunStreamHandle {
@@ -17,7 +17,7 @@ impl RunStreamHandle {
 
     pub fn publish(&self, frame: TerminalFrame) {
         let _ = self.tx.send(frame.clone());
-        if let Ok(mut buf) = self.buffer.try_lock() {
+        if let Ok(mut buf) = self.buffer.lock() {
             buf.push(frame);
             if buf.len() > 500 {
                 let drop = buf.len() - 500;
@@ -27,7 +27,7 @@ impl RunStreamHandle {
     }
 
     pub fn buffered_tail(&self) -> Vec<TerminalFrame> {
-        self.buffer.blocking_lock().clone()
+        self.buffer.lock().unwrap_or_else(|e| e.into_inner()).clone()
     }
 
     pub fn cancel(&self) {
@@ -55,7 +55,7 @@ impl RunStreamRegistry {
         let handle = Arc::new(RunStreamHandle {
             tx,
             cancel_tx,
-            buffer: Arc::new(tokio::sync::Mutex::new(Vec::new())),
+            buffer: Arc::new(std::sync::Mutex::new(Vec::new())),
         });
         self.inner.insert(run_id, handle.clone());
         handle

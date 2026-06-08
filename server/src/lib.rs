@@ -25,6 +25,8 @@ pub struct AppState {
     pub db: Option<PgPool>,
     pub attachments: AttachmentStore,
     pub agent_provider: Arc<dyn crate::providers::AgentProvider>,
+    pub run_streams: Arc<crate::sessions::run_registry::RunStreamRegistry>,
+    pub event_bus: Arc<crate::events::bus::EventBus>,
 }
 
 impl AppState {
@@ -50,6 +52,8 @@ pub async fn test_state() -> Arc<AppState> {
     Arc::new(AppState {
         attachments: AppState::attachment_store_from_config(&config),
         agent_provider: AppState::agent_provider_from_config(&config),
+        run_streams: Arc::new(crate::sessions::run_registry::RunStreamRegistry::new()),
+        event_bus: Arc::new(crate::events::bus::EventBus::new()),
         config,
         db: None,
     })

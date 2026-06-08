@@ -6,9 +6,14 @@ use anyhow::Context;
 use sqlx::PgPool;
 use sqlx::Row;
 
+use crate::domain::comment::author_type_to_str;
+use crate::domain::run::{run_status_to_str, RunStatus};
 use crate::domain::ticket::{status_to_str, substatus_to_str};
-use crate::providers::AgentRunInput;
+use crate::events::bus::AppEvent;
+use crate::providers::{AgentRunInput, ProviderError};
 use crate::services::agent_service::AgentService;
+use crate::services::artifact_service::{ArtifactService, RunArtifactMeta, RunArtifactPaths};
+use crate::services::comment_service::CommentService;
 use crate::services::context_builder::{write_context_file, ContextInput};
 use crate::services::job_service::JobService;
 use crate::services::result_contract;
@@ -17,6 +22,7 @@ use crate::services::ticket_service::TicketService;
 use crate::services::worktree_service::{compute_paths, WorktreeService};
 use crate::util::error_format::format_job_error;
 use crate::AppState;
+use time::format_description::well_known::Rfc3339;
 
 #[derive(Debug)]
 struct JobCancelled;
@@ -60,12 +66,23 @@ async fn process_one(state: &AppState, worker_id: &str) -> anyhow::Result<()> {
         Ok(()) => job_svc.mark_done(job.id).await?,
         Err(err) if err.downcast_ref::<JobCancelled>().is_some() => {
             job_svc.mark_cancelled(job.id).await?;
+            publish_run_finished(state, run.id, run.ticket_id, run.agent_id, RunStatus::Cancelled, None);
         }
         Err(err) => {
             if run_svc.is_cancelled(run.id).await.unwrap_or(false) {
                 job_svc.mark_cancelled(job.id).await?;
+                publish_run_finished(state, run.id, run.ticket_id, run.agent_id, RunStatus::Cancelled, None);
             } else {
-                fail_job(pool, run.id, job.id, &format_job_error(&err)).await?;
+                let message = format_job_error(&err);
+                fail_job(pool, run.id, job.id, &message).await?;
+                publish_run_finished(
+                    state,
+                    run.id,
+                    run.ticket_id,
+                    run.agent_id,
+                    RunStatus::Failed,
+                    Some(message),
+                );
             }
             return Err(err);
         }
@@ -167,7 +184,17 @@ async fn execute_job(
         .to_string_lossy()
         .into_owned();
 
-    let result = state
+    let stream = state.run_streams.register(run.id);
+    let cancel_rx = stream.cancelled_rx();
+
+    state.event_bus.publish(AppEvent::AgentRunStarted {
+        run_id: run.id,
+        ticket_id: run.ticket_id,
+        agent_id: run.agent_id,
+        status: "running".into(),
+    });
+
+    let provider_result = state
         .agent_provider
         .run(AgentRunInput {
             agent_id: run.agent_id.to_string(),
@@ -175,13 +202,28 @@ async fn execute_job(
             context_path,
             run_id: Some(run.id.to_string()),
             artifacts_dir: Some(state.config.storage.artifacts_dir.clone()),
-            stream: None,
-            cancel_rx: None,
+            stream: Some(stream.clone()),
+            cancel_rx: Some(cancel_rx),
         })
-        .await
-        .map_err(|err| anyhow::anyhow!("agent provider: {err}"))?;
+        .await;
+
+    let result = match provider_result {
+        Ok(result) => result,
+        Err(ProviderError::Cancelled) => {
+            persist_artifacts(state, &stream, run.id, None)?;
+            state.run_streams.remove(run.id);
+            return Err(JobCancelled.into());
+        }
+        Err(err) => {
+            persist_artifacts(state, &stream, run.id, None)?;
+            state.run_streams.remove(run.id);
+            return Err(anyhow::anyhow!("agent provider: {err}"));
+        }
+    };
 
     if run_svc.is_cancelled(run.id).await? {
+        persist_artifacts(state, &stream, run.id, None)?;
+        state.run_streams.remove(run.id);
         return Err(JobCancelled.into());
     }
 
@@ -189,7 +231,7 @@ async fn execute_job(
         .map_err(|err| anyhow::anyhow!("apply agent result: {err}"))?;
 
     let worktree_path = paths.worktree_dir.to_string_lossy().into_owned();
-    run_svc
+    let finished_run = run_svc
         .finish_with_apply(
             run.id,
             apply,
@@ -199,7 +241,96 @@ async fn execute_job(
         .await
         .context("finish run with apply")?;
 
+    persist_artifacts(state, &stream, run.id, None)?;
+    state.run_streams.remove(run.id);
+
+    let updated_ticket = TicketService::new(pool)
+        .get(run.ticket_id)
+        .await
+        .context("load updated ticket")?;
+    state.event_bus.publish(AppEvent::TicketUpdated {
+        ticket_id: run.ticket_id,
+        status: status_to_str(updated_ticket.ticket.status).into(),
+        substatus: updated_ticket
+            .ticket
+            .substatus
+            .map(|s| substatus_to_str(s).into()),
+        updated_at: updated_ticket
+            .ticket
+            .updated_at
+            .format(&Rfc3339)
+            .unwrap_or_default(),
+    });
+
+    let comments = CommentService::new(pool)
+        .list_by_ticket(run.ticket_id)
+        .await
+        .context("list comments after apply")?;
+    if let Some(comment) = comments.last() {
+        state.event_bus.publish(AppEvent::CommentCreated {
+            comment_id: comment.id,
+            ticket_id: run.ticket_id,
+            author_type: author_type_to_str(comment.author_type).into(),
+        });
+    }
+
+    publish_run_finished(
+        state,
+        run.id,
+        run.ticket_id,
+        run.agent_id,
+        finished_run.status,
+        finished_run.error_message,
+    );
+
     Ok(())
+}
+
+fn persist_artifacts(
+    state: &AppState,
+    stream: &crate::sessions::run_registry::RunStreamHandle,
+    run_id: uuid::Uuid,
+    session_id: Option<String>,
+) -> anyhow::Result<()> {
+    let paths = RunArtifactPaths::new(
+        &state.config.storage.artifacts_dir,
+        &run_id.to_string(),
+    );
+    let frames = stream.buffered_tail();
+    let mut log_bytes = Vec::new();
+    for frame in &frames {
+        log_bytes.extend_from_slice(&frame.data);
+    }
+    ArtifactService::write_terminal_log(&paths, &log_bytes)?;
+    ArtifactService::write_meta(
+        &paths,
+        &RunArtifactMeta {
+            provider: state.agent_provider.id().into(),
+            session_id,
+            frame_count: frames.len() as u64,
+            ended_at: time::OffsetDateTime::now_utc()
+                .format(&Rfc3339)
+                .unwrap_or_default(),
+        },
+    )?;
+    Ok(())
+}
+
+fn publish_run_finished(
+    state: &AppState,
+    run_id: uuid::Uuid,
+    ticket_id: uuid::Uuid,
+    agent_id: uuid::Uuid,
+    status: RunStatus,
+    error_message: Option<String>,
+) {
+    state.event_bus.publish(AppEvent::AgentRunFinished {
+        run_id,
+        ticket_id,
+        agent_id,
+        status: run_status_to_str(status).into(),
+        error_message,
+    });
 }
 
 async fn fail_job(
