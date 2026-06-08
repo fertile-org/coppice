@@ -11,6 +11,7 @@ Coppice is a lightweight, self-hosted workspace where AI agents work through tic
 | `server/` | Rust API server |
 | `web/` | React SPA |
 | `cli/` | Rust CLI (`coppice`) |
+| `config/` | Shared TOML config loader |
 | `deploy/` | Docker Compose and deployment config |
 | `docs/` | Architecture, milestones, and design docs |
 | `e2e/` | End-to-end tests |
@@ -18,52 +19,90 @@ Coppice is a lightweight, self-hosted workspace where AI agents work through tic
 
 Contributing or using an AI agent? See [AGENTS.md](AGENTS.md).
 
-## Quick start (local testing)
+## Quick start (local development)
 
+Prerequisites: Rust, Node.js 22 + Yarn, Docker Compose. For API hot reload: `cargo install cargo-watch`.
 
 ```bash
-cp deploy/.env.local.example .env.local
-make compose-local-up
-make migrate-local
-make bootstrap-local
-make web-dev-local    # Vite with hot reload (separate terminal)
-curl http://localhost:8081/health
+cp config.example.toml config.toml
 ```
 
-`bootstrap` calls the HTTP API (default port 8080). The local stack exposes the API on **8081** — `make bootstrap-local` sets `COPPICE_SERVER_URL` for you.
+Config layers built-in defaults, then `~/.config/coppice/config.toml`, then `./config.toml` (local overrides global). Use `localhost:5433` for Postgres — the port Docker publishes for the local stack.
 
-Open the web UI at [http://localhost:5173](http://localhost:5173). Sign in with `admin@localhost` / `changeme`. If bootstrap returns 403, an admin user already exists — use those credentials to log in.
+### Step 1 — Database
 
-Stop the stack: `make compose-local-down`
+```bash
+make compose-local-up
+make migrate
+```
 
-| Service | Local port | How |
-|---------|------------|-----|
-| Postgres | 5433 | Docker (`compose-local-up`) |
-| API | 8081 | Docker (`compose-local-up`) |
-| Web | 5173 | Host (`make web-dev-local`) |
+### Step 2 — API (hot reload)
+
+In a separate terminal:
+
+```bash
+make server-dev-local
+```
+
+First time only (while the API is running):
+
+```bash
+make bootstrap
+```
+
+API health: http://localhost:8080/health
+
+### Step 3 — Web (hot reload)
+
+In another terminal:
+
+```bash
+make web-dev
+```
+
+Open [http://localhost:5173](http://localhost:5173) and sign in with `admin@localhost` / `changeme`.
+
+| Service | Port | Where |
+|---------|------|--------|
+| Postgres | 5433 | Docker (`make compose-local-up`) |
+| API | 8080 | Host (`make server-dev-local`) |
+| Web | 5173 | Host (`make web-dev`) |
+
+Stop Postgres: `make compose-local-down`
+
+## Production / release
+
+After `make release-tar`, copy `config.example.toml` to `config.toml`, then:
+
+```bash
+coppice migrate
+coppice bootstrap admin --email admin@localhost --password changeme
+coppice server start   # API on :8080
+coppice web start      # UI on :5173 (proxies /api to the API)
+```
+
+Example systemd units are in `deploy/systemd/`. See `deploy/README-RELEASE.md`.
+
+More commands and config details: [docs/development.md](docs/development.md).
 
 ## Default stack (agents / CI)
 
 The default compose file uses standard ports for agents, smoke tests, and CI:
 
 ```bash
-cp deploy/.env.example .env
-make compose-up
-make migrate
-make bootstrap
+make compose-up    # server auto-migrates on start
+make bootstrap     # first time only
 ```
 
 - API: http://localhost:8080/health
 - Web: http://localhost:5173
 
-More commands and env details: [docs/development.md](docs/development.md).
+The Docker server uses `deploy/config/default.toml` inside the container — not your repo `config.toml`.
 
 ## Release build
-
-Build a self-contained tarball with the API server, CLI, and compiled SPA:
 
 ```bash
 make release-tar
 ```
 
-Extract the archive, set `COPPICE_STORAGE__STATIC_DIR=./web/dist`, and run `./coppice-server` on port `:8080`. See `deploy/README-RELEASE.md` for details.
+Extract the archive, configure `config.toml`, then run `coppice server start` and `coppice web start`. See `deploy/README-RELEASE.md` for details.

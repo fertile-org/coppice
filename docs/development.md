@@ -3,74 +3,101 @@
 ## Prerequisites
 
 - Rust (stable) + `cargo`
+- `cargo-watch` for local API hot reload (`cargo install cargo-watch`)
 - Node.js 22 + Yarn (`corepack enable` or `brew install yarn`)
 - Docker + Compose (`docker compose` plugin or `docker-compose` standalone)
 
-## Environment
+## Configuration
 
-Two compose stacks exist so agents and humans can run Coppice side by side:
+Coppice uses TOML config files — not `.env` files.
 
-| Stack | Compose file | Use |
-|-------|--------------|-----|
-| Default | `deploy/docker-compose.yml` | Agents, CI, `make e2e-smoke` |
-| Local | `deploy/docker-compose.local.yml` | Your day-to-day testing |
+| Location | Priority | Purpose |
+|----------|----------|---------|
+| Built-in defaults | lowest | Sensible dev defaults in `coppice-config` |
+| `~/.config/coppice/config.toml` | middle | Per-user global settings |
+| `./config.toml` (cwd) | higher | Local / per-install overrides (gitignored) |
+| `COPPICE_CONFIG` file | higher | Explicit file path (Docker / release) |
+| Environment variables | highest | Container overrides (`DATABASE_URL`, `COPPICE_*`, …) |
 
-Copy the env file that matches your stack:
+Copy the example for local development:
 
 ```bash
-# Human local testing (alternate ports)
-cp deploy/.env.local.example .env.local
-
-# Default / agent stack
-cp deploy/.env.example .env
+cp config.example.toml config.toml
 ```
 
-Key variables:
+Key fields for local dev (`config.toml`):
 
-| Variable | Purpose |
-|----------|---------|
-| `DATABASE_URL` | Postgres connection string (port differs per stack) |
-| `COPPICE_SERVER_URL` | API base URL for CLI `bootstrap` / `health` (local: `http://localhost:8081`) |
-| `VITE_API_URL` | Vite API proxy target (`make web-dev-local` sets this to `:8081`) |
-| `SESSION_SECRET` | Session cookie signing |
-| `COPPICE_BOOTSTRAP_PASSWORD` | First-admin bootstrap password |
+| Field | Purpose |
+|-------|---------|
+| `database.url` | Host → Docker Postgres on `localhost:5433` |
+| `server.port` | API listen port (`8080`) |
+| `auth.session_secret` | Session cookie signing |
+| `auth.bootstrap_password` | First-admin bootstrap password |
+| `storage.artifacts_dir` | Upload storage on host |
+| `agent.worktrees_path` | Agent worktrees on host |
 
-Config file defaults: `deploy/config/default.yaml`. Override via env (`COPPICE_*`) or `COPPICE_CONFIG`.
+Docker Compose (agents / CI) sets `COPPICE_CONFIG=/etc/coppice/config.toml` (from `deploy/config/default.toml` in the image) plus env overrides in `deploy/docker-compose.yml`. The server container does **not** read your repo `config.toml`.
 
-## Local stack (human testing)
+### Agent stack vs human `config.toml`
 
-Use the **local** compose file — alternate host ports avoid conflicting with the default stack:
+| | Agent / CI (`make compose-up`) | Human hot reload (`compose-local-up` + host API) |
+|--|--|--|
+| Postgres port | 5432 | 5433 |
+| API | Docker `:8080` | Host `:8080` |
+| Config source | `default.toml` + compose env inside container | `./config.toml` on the host |
+| Migrations | Server auto-migrates on container start | `make migrate` (reads `config.toml`) |
+
+Your gitignored `config.toml` (e.g. `database.url` → `:5433`) applies only to **host** CLI and `coppice-server` when run on the host. It does not affect the Docker server. Avoid running host `make migrate` against the agent stack unless you override the URL, e.g. `DATABASE_URL=postgres://coppice:coppice@localhost:5432/coppice make migrate` — otherwise you may migrate the wrong database.
+
+## Local development (human)
+
+Postgres runs in Docker on port **5433**. API and web run on the host for hot reload.
 
 ```bash
+cp config.example.toml config.toml
+
+# Step 1 — Database
 make compose-local-up
-make migrate-local
-make bootstrap-local
-make web-dev-local   # Vite on host with hot reload (separate terminal)
+make migrate
+
+# Step 2 — API (separate terminal)
+make server-dev-local
+make bootstrap   # first time only
+
+# Step 3 — Web (separate terminal)
+make web-dev
 ```
 
-`migrate` uses `DATABASE_URL`; `bootstrap` hits the API via `COPPICE_SERVER_URL` (not the DB). Web is not in the local compose file — run Vite on the host for hot reload.
-
-- API: http://localhost:8081/health
+- API: http://localhost:8080/health
 - Web: http://localhost:5173 — login `admin@localhost` / `changeme`
 
-Tear down Docker services:
+Tear down Postgres: `make compose-local-down`
+
+## Release / installed binary
 
 ```bash
-make compose-local-down
+cp config.example.toml config.toml   # or ~/.config/coppice/config.toml
+coppice migrate
+coppice bootstrap admin --email admin@localhost --password changeme
+coppice server start   # API
+coppice web start      # SPA + /api proxy (recommended for self-hosting)
 ```
 
-Docker host ports: Postgres **5433**, API **8081**. Separate Docker project (`coppice-local`) and volumes from the default stack.
+| Command | Role |
+|---------|------|
+| `coppice server start` | Runs `coppice-server` (API + workers) |
+| `coppice web start` | Serves `web/dist` and proxies `/api` to the API |
+
+Set `COPPICE_SERVER_BIN` to override the API binary path.
+
+**systemd:** example units in `deploy/systemd/`.
 
 ## Default stack (agents / smoke tests)
 
 ```bash
-make compose-up
-make migrate
-make bootstrap
+make compose-up    # server auto-migrates on start
+make bootstrap     # first time only
 ```
-
-- API: http://localhost:8080/health
-- Web: http://localhost:5173
 
 Tear down: `make compose-down`
 
@@ -80,47 +107,29 @@ Always use Docker Compose via the Makefile — not standalone `docker run`.
 
 | Target | What it does |
 |--------|----------------|
-| `make compose-local-up` | Local stack (`docker-compose.local.yml`) |
-| `make compose-local-down` | Stop local stack |
-| `make migrate-local` | Migrate against local Postgres (`:5433`) |
-| `make bootstrap-local` | Create admin via API on local port `8081` |
-| `make web-dev-local` | Vite dev server → local API on `8081` (hot reload) |
-| `make compose-up` | Default stack (`docker-compose.yml`) |
+| `make compose-local-up` | Start local Postgres only (port 5433) |
+| `make compose-local-down` | Stop local Postgres |
+| `make server-dev-local` | API with `cargo watch` (hot reload) |
+| `make compose-up` | Default Docker stack (agents / CI) |
 | `make compose-down` | Stop default stack |
-| `make migrate` | Migrate against default Postgres (`:5432`) |
-| `make bootstrap` | Create admin via API on default port `8080` |
+| `make migrate` | `coppice migrate` (reads `config.toml` on host) |
+| `make bootstrap` | `coppice bootstrap admin` |
+| `make web-dev` | Vite dev server (proxies to `:8080`) |
 | `make test` | `cargo test --workspace` |
 | `make clippy` | `cargo clippy --workspace -- -D warnings` |
-| `make web-install` | `yarn install --frozen-lockfile` in `web/` |
-| `make web-test` | Install + Vitest unit tests in `web/` |
-| `make web-dev` | Install + Vite dev server → default API on `8080` |
-| `make web-build` | Install + production SPA build |
-| `make e2e-smoke` | Compose up + M02 board smoke script |
 | `make release-tar` | Self-contained release tarball |
 
-## Running server or web outside compose
-
-For fast iteration on one package:
-
-```bash
-# Server (needs Postgres running via compose-local-up or compose-up)
-export DATABASE_URL=postgres://coppice:coppice@localhost:5433/coppice   # local stack
-# export DATABASE_URL=postgres://coppice:coppice@localhost:5432/coppice  # default stack
-cargo run -p coppice-server
-
-# Web dev server (proxies API — see web/vite.config.ts)
-make web-dev-local   # with compose-local-up
-# make web-dev       # with compose-up (default stack)
-```
-
-Migrations and bootstrap always go through the CLI crate (`coppice-cli`).
-
 ## CLI commands
+
+All CLI commands load the same config as the server:
 
 ```bash
 coppice migrate
 coppice health
+coppice health --check-database
 coppice bootstrap admin --email <email> --password <password>
+coppice server start
+coppice web start
 ```
 
 ## Release build

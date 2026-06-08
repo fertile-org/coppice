@@ -1,0 +1,9 @@
+[package]
+name = "coppice-config"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+directories = "5"
+figment = { version = "0.10", features = ["toml", "env"] }
+serde = { version = "1", features = ["derive"] }

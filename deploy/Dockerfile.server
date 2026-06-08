@@ -1,6 +1,7 @@
 FROM rust:1.87-bookworm AS builder
 WORKDIR /app
 COPY Cargo.toml Cargo.lock ./
+COPY config ./config
 COPY server ./server
 COPY cli ./cli
 RUN cargo build --release -p coppice-server
@@ -11,8 +12,7 @@ COPY --from=builder /app/target/release/coppice-server /usr/local/bin/coppice-se
 # MockProvider resolves fixtures relative to compile-time CARGO_MANIFEST_DIR (/app/server).
 RUN mkdir -p /app/server
 COPY fixtures /app/fixtures
-COPY deploy/config/default.yaml /etc/coppice/config.yaml
-RUN sed -i 's/@localhost:/@postgres:/' /etc/coppice/config.yaml
-ENV COPPICE_CONFIG=/etc/coppice/config.yaml
+COPY deploy/config/default.toml /etc/coppice/config.toml
+ENV COPPICE_CONFIG=/etc/coppice/config.toml
 EXPOSE 8080
 CMD ["coppice-server"]

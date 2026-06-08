@@ -1,19 +1,25 @@
 use clap::Args;
+use coppice_config::AppConfig;
 use sqlx::migrate::Migrator;
 use std::path::PathBuf;
 
 #[derive(Args)]
 pub struct MigrateArgs {
-    #[arg(long, env = "DATABASE_URL", default_value = "postgres://coppice:coppice@localhost:5432/coppice")]
-    pub database_url: String,
+    #[arg(long, help = "Override database.url from config")]
+    pub database_url: Option<String>,
 }
 
 pub async fn run(args: MigrateArgs) -> anyhow::Result<()> {
+    let config = AppConfig::load().map_err(|e| anyhow::anyhow!("failed to load config: {e}"))?;
+    let database_url = args
+        .database_url
+        .unwrap_or_else(|| config.database.url.clone());
+
     let migrations = migrations_path()?;
     let migrator = Migrator::new(migrations).await?;
     let pool = sqlx::postgres::PgPoolOptions::new()
         .max_connections(1)
-        .connect(&args.database_url)
+        .connect(&database_url)
         .await?;
     migrator.run(&pool).await?;
     println!("migrations applied");

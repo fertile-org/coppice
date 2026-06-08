@@ -1,8 +1,7 @@
-# Local developer stack — alternate host ports to avoid conflicting with the
-# default compose file used by agents and CI (deploy/docker-compose.yml).
+# Local developer stack — Postgres only (alternate host port 5433).
+# API and web run on the host for hot reload (make server-dev-local, make web-dev).
 #
-# Host ports: Postgres 5433, API 8081. Web runs on the host via make web-dev-local.
-# Start: make compose-local-up && make web-dev-local
+# Start: make compose-local-up
 
 name: coppice-local
 
@@ -23,29 +22,5 @@ services:
     volumes:
       - coppice_local_pgdata:/var/lib/postgresql/data
 
-  server:
-    build:
-      context: ..
-      dockerfile: deploy/Dockerfile.server
-    ports:
-      - "8081:8080"
-    environment:
-      DATABASE_URL: postgres://coppice:coppice@postgres:5432/coppice
-      COPPICE_CONFIG: /etc/coppice/config.yaml
-      COPPICE_STORAGE__ARTIFACTS_DIR: /data/artifacts
-      AGENT_DEFAULT_PROVIDER: mock
-      WORKTREES_PATH: /data/worktrees
-      AGENT_WORKER_COUNT: "2"
-    volumes:
-      - coppice_local_artifacts:/data/artifacts
-      - coppice_local_worktrees:/data/worktrees
-      # Repo root (compose file lives in deploy/) — register as /data/host-repos/coppice in Settings → Repositories
-      - ..:/data/host-repos/coppice
-    depends_on:
-      postgres:
-        condition: service_healthy
-
 volumes:
   coppice_local_pgdata:
-  coppice_local_artifacts:
-  coppice_local_worktrees:

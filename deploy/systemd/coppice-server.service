@@ -1,0 +1,14 @@
+[Unit]
+Description=Coppice API server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/coppice
+ExecStart=/opt/coppice/coppice server start
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

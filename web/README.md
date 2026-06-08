@@ -21,6 +21,6 @@ yarn build
 yarn test
 ```
 
-Or from the repo root: `make web-dev-local` (installs deps, then starts Vite against the local API on `:8081`).
+Or from the repo root: `make web-dev` (installs deps, then starts Vite against the host API on `:8080`).
 
 Set `VITE_API_URL` to override the API proxy target (default `http://localhost:8080`).

@@ -98,13 +98,13 @@ Visual design tokens and palette: `docs/web/DESIGN.md`.
 
 ## CLI
 
-`cli/` — thin clap wrapper around migrate, health, bootstrap. Shares DB/config conventions with server but no HTTP.
+`cli/` — operator CLI: migrate, health, bootstrap, `server start`, `web start`. Shares TOML config with the server. `coppice web start` serves the built SPA and proxies `/api` to the API.
 
 ## Config & artifacts
 
-- Default config: `deploy/config/default.yaml`
-- Attachments: filesystem under `COPPICE_STORAGE__ARTIFACTS_DIR` (compose volume `artifact_data`)
-- Static SPA (release): `COPPICE_STORAGE__STATIC_DIR` served by Axum fallback
+- Host/release: `config.toml` (see `config.example.toml`); Docker/CI: `deploy/config/default.toml` via `COPPICE_CONFIG`
+- Attachments: filesystem under `storage.artifacts_dir` (compose volume `artifact_data`)
+- Static SPA (release): `coppice web start` via `[web].static_dir`
 
 ## Milestone evolution
 

@@ -1,7 +1,7 @@
 mod commands;
 
 use clap::{Parser, Subcommand};
-use commands::{bootstrap, health, migrate};
+use commands::{bootstrap, health, migrate, server, web};
 
 #[derive(Parser)]
 #[command(name = "coppice", about = "Coppice operator CLI")]
@@ -18,11 +18,29 @@ enum Commands {
         #[command(subcommand)]
         command: BootstrapCommands,
     },
+    Server {
+        #[command(subcommand)]
+        command: ServerCommands,
+    },
+    Web {
+        #[command(subcommand)]
+        command: WebCommands,
+    },
 }
 
 #[derive(Subcommand)]
 enum BootstrapCommands {
     Admin(bootstrap::BootstrapArgs),
+}
+
+#[derive(Subcommand)]
+enum ServerCommands {
+    Start(server::ServerStartArgs),
+}
+
+#[derive(Subcommand)]
+enum WebCommands {
+    Start(web::WebStartArgs),
 }
 
 #[tokio::main]
@@ -34,5 +52,11 @@ async fn main() -> anyhow::Result<()> {
         Commands::Bootstrap {
             command: BootstrapCommands::Admin(args),
         } => bootstrap::run(args).await,
+        Commands::Server {
+            command: ServerCommands::Start(args),
+        } => server::run(args),
+        Commands::Web {
+            command: WebCommands::Start(args),
+        } => web::run(args).await,
     }
 }

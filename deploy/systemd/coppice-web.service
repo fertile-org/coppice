@@ -1,0 +1,15 @@
+[Unit]
+Description=Coppice web UI
+After=network-online.target coppice-server.service
+Wants=network-online.target
+Requires=coppice-server.service
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/coppice
+ExecStart=/opt/coppice/coppice web start
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

@@ -7,12 +7,10 @@ endif
 
 COMPOSE = $(DOCKER_COMPOSE) -f deploy/docker-compose.yml
 COMPOSE_LOCAL = $(DOCKER_COMPOSE) -f deploy/docker-compose.local.yml
-LOCAL_DATABASE_URL = postgres://coppice:coppice@localhost:5433/coppice
-LOCAL_SERVER_URL = http://localhost:8081
 BOOTSTRAP_EMAIL = admin@localhost
 BOOTSTRAP_PASSWORD = changeme
 
-.PHONY: compose-up compose-down compose-local-up compose-local-down test clippy migrate migrate-local bootstrap bootstrap-local web-install web-test web-dev web-dev-local web-build e2e-smoke e2e-smoke-m03 release-tar
+.PHONY: compose-up compose-down compose-local-up compose-local-down server-dev-local test clippy migrate bootstrap web-install web-test web-dev web-build e2e-smoke e2e-smoke-m03 release-tar
 
 compose-up:
 	$(COMPOSE) up -d --build
@@ -21,22 +19,23 @@ compose-down:
 	$(COMPOSE) down
 
 compose-local-up:
-	$(COMPOSE_LOCAL) up -d --build
+	$(COMPOSE_LOCAL) up -d
 
 compose-local-down:
 	$(COMPOSE_LOCAL) down
 
+server-dev-local:
+	@command -v cargo-watch >/dev/null 2>&1 || { \
+		echo "cargo-watch is required for API hot reload. Install with: cargo install cargo-watch"; \
+		exit 1; \
+	}
+	cargo watch -q -c -x 'run -p coppice-server'
+
 migrate:
 	cargo run -p coppice-cli -- migrate
 
-migrate-local:
-	DATABASE_URL=$(LOCAL_DATABASE_URL) cargo run -p coppice-cli -- migrate
-
 bootstrap:
 	cargo run -p coppice-cli -- bootstrap admin --email $(BOOTSTRAP_EMAIL) --password $(BOOTSTRAP_PASSWORD)
-
-bootstrap-local:
-	COPPICE_SERVER_URL=$(LOCAL_SERVER_URL) cargo run -p coppice-cli -- bootstrap admin --email $(BOOTSTRAP_EMAIL) --password $(BOOTSTRAP_PASSWORD)
 
 test:
 	cargo test --workspace
@@ -52,9 +51,6 @@ web-test:
 
 web-dev:
 	cd web && yarn install && yarn dev
-
-web-dev-local:
-	cd web && yarn install && VITE_API_URL=http://localhost:8081 yarn dev
 
 web-build:
 	cd web && yarn install --frozen-lockfile && yarn build
@@ -72,6 +68,7 @@ release-tar: web-build
 	cp target/release/coppice-server dist/release/
 	cp target/release/coppice dist/release/coppice-cli
 	cp -r web/dist dist/release/web/dist
-	cp deploy/config/default.yaml dist/release/
+	cp config.example.toml dist/release/config.example.toml
+	cp -r deploy/systemd dist/release/systemd
 	cp deploy/README-RELEASE.md dist/release/
 	tar -czf dist/coppice-$$(uname -s | tr A-Z a-z)-$$(uname -m).tar.gz -C dist/release .

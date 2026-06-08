@@ -1,4 +1,5 @@
 use clap::Args;
+use coppice_config::AppConfig;
 use serde::Serialize;
 
 #[derive(Args)]
@@ -7,10 +8,10 @@ pub struct BootstrapArgs {
     pub email: String,
     #[arg(long)]
     pub password: String,
-    #[arg(long, env = "COPPICE_SERVER_URL", default_value = "http://localhost:8080")]
-    pub server_url: String,
-    #[arg(long, env = "COPPICE_BOOTSTRAP_PASSWORD", default_value = "changeme")]
-    pub bootstrap_password: String,
+    #[arg(long, help = "Override API base URL derived from config server.port")]
+    pub server_url: Option<String>,
+    #[arg(long, help = "Override auth.bootstrap_password from config")]
+    pub bootstrap_password: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -20,15 +21,18 @@ struct BootstrapBody<'a> {
 }
 
 pub async fn run(args: BootstrapArgs) -> anyhow::Result<()> {
-    let url = format!(
-        "{}/api/auth/bootstrap",
-        args.server_url.trim_end_matches('/')
-    );
+    let config = AppConfig::load().map_err(|e| anyhow::anyhow!("failed to load config: {e}"))?;
+    let server_url = args.server_url.unwrap_or_else(|| config.server_url());
+    let bootstrap_password = args
+        .bootstrap_password
+        .unwrap_or_else(|| config.auth.bootstrap_password.clone());
+
+    let url = format!("{}/api/auth/bootstrap", server_url.trim_end_matches('/'));
     let client = reqwest::Client::new();
     let response = client
         .post(url)
         .header("content-type", "application/json")
-        .header("x-bootstrap-password", &args.bootstrap_password)
+        .header("x-bootstrap-password", &bootstrap_password)
         .json(&BootstrapBody {
             email: &args.email,
             password: &args.password,

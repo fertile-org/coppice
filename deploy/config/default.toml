@@ -1,0 +1,26 @@
+# Baked into the Docker server image (see deploy/Dockerfile.server).
+# Host / release installs use config.example.toml → config.toml instead.
+
+[server]
+port = 8080
+
+[database]
+url = "postgres://coppice:coppice@postgres:5432/coppice"
+
+[auth]
+session_secret = "dev-secret-change-me"
+bootstrap_password = "changeme"
+cookie_secure = false
+
+[storage]
+artifacts_dir = "/data/artifacts"
+max_upload_bytes = 10485760
+
+[agent]
+default_provider = "mock"
+worktrees_path = "/data/worktrees"
+worker_count = 2
+
+[web]
+port = 5173
+static_dir = "./web/dist"

@@ -8,8 +8,7 @@ async fn main() -> anyhow::Result<()> {
         .with_env_filter(EnvFilter::from_default_env())
         .init();
 
-    let config_path = coppice_server::AppConfig::resolve_config_path();
-    let config = coppice_server::AppConfig::load(config_path.as_deref())
+    let config = coppice_server::AppConfig::load()
         .map_err(|e| anyhow::anyhow!("failed to load config: {e}"))?;
 
     let db = coppice_server::db::connect_and_migrate(&config.database.url).await?;

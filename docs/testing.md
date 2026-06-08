@@ -18,7 +18,7 @@ cargo test --workspace
 cargo clippy --workspace -- -D warnings
 ```
 
-Locally, start Postgres via `make compose-up` (agents/default) or `make compose-local-up` (human testing on port 5433) before `make test` / `make clippy`. Set `DATABASE_URL` to match the stack you started.
+Locally, `cargo test` / `clippy` do not need Postgres. For host `make migrate`, ensure `config.toml` (or `DATABASE_URL`) matches the Postgres you started: `compose-up` → `:5432`, `compose-local-up` → `:5433`.
 
 ### Web
 
