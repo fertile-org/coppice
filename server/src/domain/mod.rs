@@ -1,4 +1,5 @@
 pub mod agent;
+pub mod slug;
 pub mod attachment;
 pub mod comment;
 pub mod job;
