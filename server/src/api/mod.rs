@@ -1,5 +1,6 @@
 pub mod auth;
 mod agent_runs;
+mod ws;
 mod agents;
 mod attachments;
 mod comments;
@@ -33,8 +34,14 @@ pub fn router(state: Arc<AppState>) -> Router {
         .layer(middleware::from_fn(csrf::csrf_middleware))
         .layer(middleware::from_fn_with_state(state.clone(), session::session_middleware));
 
+    let ws = ws::routes().layer(middleware::from_fn_with_state(
+        state.clone(),
+        session::session_middleware,
+    ));
+
     Router::new()
         .merge(public)
         .merge(protected)
+        .merge(ws)
         .with_state(state)
 }
