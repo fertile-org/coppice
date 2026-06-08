@@ -23,6 +23,7 @@ server/src/
   db/           Pool setup, migration runner
   middleware/   Session auth, CSRF, admin checks
   providers/    AgentProvider trait + MockProvider
+  workers/      In-process Tokio job workers (M03)
   storage/      Filesystem artifact store (attachments)
   config/       Figment-based AppConfig
 ```
@@ -45,7 +46,8 @@ server/src/
 
 - PostgreSQL 16 + pgvector image.
 - Migrations: `server/migrations/*.sql`, applied by `coppice migrate` and on test connect (`db::connect_and_migrate`).
-- No Redis; future job queue (M03) uses a Postgres `agent_jobs` table.
+- No Redis; agent job queue uses Postgres `agent_jobs` (M03).
+- **M03 tables:** `agent_runs` (one row per ticket+agent execution; statuses `queued`/`running`/`completed`/`failed`/`cancelled`; unique partial index on active `(ticket_id, agent_id)`), `agent_jobs` (queue row per run; `FOR UPDATE SKIP LOCKED` claim by workers).
 
 ## Auth
 
@@ -54,16 +56,24 @@ server/src/
 - Protected routes: session middleware + CSRF on mutations (`X-CSRF-Token` from login response).
 - Roles: `admin` / `member` — admin-only routes use `middleware/admin.rs`.
 
-## Agent provider (M01+, extended in M03)
+## Agent execution (M03)
 
-All agent execution goes through `AgentProvider`:
+All agent execution goes through `AgentProvider`; orchestration lives in services + workers:
 
 ```text
-providers/mod.rs     trait + AgentRunResult contract
-providers/mock.rs    deterministic fixtures from fixtures/agent-responses/
+providers/mod.rs          trait + AgentRunResult contract
+providers/mock.rs         deterministic fixtures from fixtures/agent-responses/
+services/run_service.rs   create/cancel/finish runs
+services/job_service.rs   enqueue, claim (SKIP LOCKED), mark done/failed
+services/worktree_service.rs   git clone + worktree per (ticket, agent)
+services/context_builder.rs    write .agent/context.md into worktree
+services/result_contract.rs    apply nextStatus, comments, blocker metadata
+workers/job_worker.rs     poll queue, run pipeline, spawn at server startup
 ```
 
-Orchestration (jobs, worktrees, context) arrives in M03 under `workers/` and new services. Swap real CLI adapters via config — do not fork orchestration per provider.
+**Run pipeline (worker):** claim pending job → load run/ticket/agent/repo → mark running → ensure repo clone (`GIT_REPOS_PATH/{repo-id}/`) → ensure worktree (`WORKTREES_PATH/TICKET-{id}-{agent}-{repo}/`) → write context file → call `AgentProvider::run` → apply result contract → finish run.
+
+**Config env:** `AGENT_DEFAULT_PROVIDER`, `GIT_REPOS_PATH`, `WORKTREES_PATH`, `AGENT_WORKER_COUNT` (see `deploy/docker-compose.yml`). Swap real CLI adapters via provider config — do not fork orchestration per provider.
 
 ## Web frontend
 
@@ -95,4 +105,4 @@ Visual design tokens and palette: `docs/web/DESIGN.md`.
 
 ## Milestone evolution
 
-Each milestone adds modules/tables/endpoints documented in `docs/milestones/M0N-*.md`. After M02 the server has projects, repos, tickets, comments, attachments, agents, users. M03 adds workers, runs, jobs, worktrees — see that spec before implementing.
+Each milestone adds modules/tables/endpoints documented in `docs/milestones/M0N-*.md`. After M03 the server has projects, repos, tickets, comments, attachments, agents, users, agent runs/jobs, worktrees, and in-process workers. **Next:** M04 live console — see that spec before implementing.

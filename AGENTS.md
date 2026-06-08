@@ -2,7 +2,7 @@
 
 **Coppice** is a self-hosted agent workspace: Trello-like board, tickets, comments, and (from M03) agent execution. Philosophy and full product design live in `docs/philosophy/`.
 
-**Status:** M02 (workspace & board) is complete. **Next:** [M03 — Agent execution](docs/milestones/M03-agent-execution.md).
+**Status:** M03 (agent execution) is complete. **Next:** [M04 — Live console](docs/milestones/M04-live-console.md).
 
 ## Must read before coding
 
@@ -12,6 +12,7 @@
 4. **Auth is session + CSRF.** httpOnly cookie sessions; mutations require `X-CSRF-Token`. Integration tests authenticate via session cookie (see `server/tests/common/mod.rs`).
 5. **Agent tests use `MockProvider`.** No real CLI adapters in CI or automated tests until configured manually. Fixtures: `fixtures/agent-responses/`.
 6. **CI must pass.** `cargo test --workspace`, `cargo clippy --workspace -- -D warnings`, and `make web-test`. Clippy warnings are errors.
+7. **Agent execution env.** Compose sets `AGENT_DEFAULT_PROVIDER` (default `mock`), `GIT_REPOS_PATH`, `WORKTREES_PATH`, and `AGENT_WORKER_COUNT`. M03 smoke: `make e2e-smoke-m03`.
 
 ## Monorepo (quick map)
 

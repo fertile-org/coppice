@@ -1,7 +1,8 @@
 # M03 — Agent Execution Design Spec
 
 **Date:** 2026-06-08  
-**Status:** Draft — pending user review  
+**Status:** Approved  
+**Implementation plan:** [docs/superpowers/plans/2026-06-08-m03-agent-execution.md](../plans/2026-06-08-m03-agent-execution.md)
 **Product:** Coppice — grow an agent team from shared roots.
 
 **Depends on:** M01 Foundation (MockProvider, auth, Postgres), M02 Workspace & Board (tickets, agents, comments, repos)  
