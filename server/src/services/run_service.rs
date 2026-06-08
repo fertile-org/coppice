@@ -1,7 +1,9 @@
 use crate::domain::comment::AuthorType;
+use crate::domain::repo::VerificationStatus;
 use crate::domain::run::{
     run_status_from_str, run_status_to_str, AgentRun, RunStatus,
 };
+use crate::services::repo_service::RepoService;
 use crate::sandbox::permissive::PROFILE_ID;
 use crate::services::comment_service::{CommentError, CommentService};
 use crate::domain::job::{job_status_to_str, JobStatus};
@@ -79,17 +81,23 @@ impl<'a> RunService<'a> {
             .repo_id
             .ok_or_else(|| RunError::Validation("ticket has no repo".into()))?;
 
-        let repo_row = sqlx::query(
-            "SELECT local_path, verification_status FROM repos WHERE id = $1",
-        )
-        .bind(repo_id)
-        .fetch_optional(self.pool)
-        .await?
-        .ok_or_else(|| RunError::Validation("repo not found".into()))?;
+        let repo = RepoService::new(self.pool)
+            .verify(repo_id)
+            .await
+            .map_err(|e| match e {
+                crate::services::repo_service::RepoError::NotFound => {
+                    RunError::Validation("repo not found".into())
+                }
+                other => RunError::Validation(other.to_string()),
+            })?;
 
-        let status: String = repo_row.get("verification_status");
-        if status != "ready" {
-            return Err(RunError::Validation("repository path is not ready".into()));
+        if repo.verification_status != VerificationStatus::Ready {
+            let detail = repo
+                .verification_error
+                .unwrap_or_else(|| "repository path is not ready".to_string());
+            return Err(RunError::Validation(format!(
+                "repository path is not ready: {detail}"
+            )));
         }
 
         let active = sqlx::query_scalar::<_, bool>(

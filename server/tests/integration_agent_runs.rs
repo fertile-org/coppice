@@ -275,6 +275,26 @@ async fn stop_queued_run_cancels() {
 }
 
 #[tokio::test]
+async fn reject_run_when_repo_path_missing() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+
+    let (app, cookie, csrf, _env) = common::bootstrap_and_login_with_workers("done").await;
+    let (git_dir, local_path) = common::create_temp_git_checkout();
+    let repo_id =
+        common::register_test_repo(&app, &local_path.display().to_string(), &cookie, &csrf).await;
+    let (ticket_id, _agent_id, _repo_id) =
+        setup_agent_ticket(&app, &cookie, &csrf, &repo_id).await;
+
+    drop(git_dir);
+
+    let (status, _body) = post_run_agent(&app, &ticket_id, &cookie, &csrf).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
 async fn retry_after_failed_creates_new_run() {
     let _guard = common::DB_TEST_LOCK.lock().await;
     if !common::db_available().await {
