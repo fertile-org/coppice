@@ -1,4 +1,5 @@
 pub mod mock;
+pub mod opencode;
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -56,6 +57,8 @@ pub enum ProviderError {
     FixtureNotFound(String),
     #[error("invalid fixture: {0}")]
     InvalidFixture(String),
+    #[error("invalid input: {0}")]
+    InvalidInput(String),
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
     #[error("run cancelled")]

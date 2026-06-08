@@ -1,0 +1,4 @@
+{"type":"text","text":"OpenCode agent starting..."}
+{"type":"content","content":"Reading .agent/context.md"}
+{"type":"tool","name":"read_file","path":".agent/context.md"}
+{"status":"done","summary":"OpenCode run complete.","changedFiles":[],"testsRun":[],"nextStatus":"In Review","mentionAgents":[],"blockers":[]}
