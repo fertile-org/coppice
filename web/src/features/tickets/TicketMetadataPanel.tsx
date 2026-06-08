@@ -12,9 +12,14 @@ import {
 import { ticketPrioritySchema } from '../../lib/schemas/ticket';
 import { useRepos } from '../repos/useRepos';
 import { useAgentRuns } from './useAgentRuns';
-import { useAgents, useUpdateTicket, useUpdateTicketStatus } from './useTicket';
+import {
+  useAgents,
+  useAssignAgent,
+  useUpdateTicket,
+  useUpdateTicketStatus,
+} from './useTicket';
 
-interface TicketMetadataTabProps {
+interface TicketMetadataPanelProps {
   ticket: Ticket;
 }
 
@@ -22,14 +27,17 @@ function metadataFromTicket(ticket: Ticket): Record<string, unknown> {
   return ticket.substatusMetadata ?? {};
 }
 
-export function TicketMetadataTab({ ticket }: TicketMetadataTabProps) {
+export function TicketMetadataPanel({ ticket }: TicketMetadataPanelProps) {
   const updateTicket = useUpdateTicket(ticket.id);
   const updateStatus = useUpdateTicketStatus(ticket.id);
+  const assignAgent = useAssignAgent(ticket.id);
   const { data: agents } = useAgents();
   const { data: repos } = useRepos();
   const { data: runs } = useAgentRuns(ticket.id);
   const latestRunWorktreePath = runs?.[0]?.worktreePath ?? null;
 
+  const [assigneeId, setAssigneeId] = useState(ticket.assigneeAgentId ?? '');
+  const [assignError, setAssignError] = useState<string | null>(null);
   const [status, setStatus] = useState(ticket.status);
   const [substatus, setSubstatus] = useState<Substatus | ''>(
     (ticket.substatus as Substatus | undefined) ?? '',
@@ -42,12 +50,24 @@ export function TicketMetadataTab({ ticket }: TicketMetadataTabProps) {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    setAssigneeId(ticket.assigneeAgentId ?? '');
     setStatus(ticket.status);
     setSubstatus((ticket.substatus as Substatus | undefined) ?? '');
     setMetadata(metadataFromTicket(ticket));
     setPriority(ticket.priority ?? '');
     setRepoId(ticket.repoId ?? '');
   }, [ticket]);
+
+  async function handleAssignChange(nextAgentId: string) {
+    setAssignError(null);
+    setAssigneeId(nextAgentId);
+    try {
+      await assignAgent.mutateAsync(nextAgentId || null);
+    } catch {
+      setAssigneeId(ticket.assigneeAgentId ?? '');
+      setAssignError('Unable to update assignee.');
+    }
+  }
 
   function updateMetadataField(key: string, value: string) {
     setMetadata((prev) => ({ ...prev, [key]: value }));
@@ -97,9 +117,42 @@ export function TicketMetadataTab({ ticket }: TicketMetadataTabProps) {
 
   const isBusy = updateStatus.isPending || updateTicket.isPending;
   const activeSubstatus = substatus || null;
+  const assignedAgent = agents?.find((agent) => agent.id === assigneeId);
 
   return (
     <div className="space-y-6">
+      <label className="block space-y-1.5">
+        <span className="font-body text-sm font-medium text-text-secondary">
+          Assignee
+        </span>
+        <select
+          value={assigneeId}
+          onChange={(e) => void handleAssignChange(e.target.value)}
+          disabled={assignAgent.isPending}
+          className="w-full rounded-md border border-border bg-surface px-3 py-2 font-body text-sm text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-muted disabled:opacity-50"
+        >
+          <option value="">Unassigned</option>
+          {agents
+            ?.filter((agent) => agent.enabled)
+            .map((agent) => (
+              <option key={agent.id} value={agent.id}>
+                {agent.name} ({agent.role})
+              </option>
+            ))}
+        </select>
+        {assignedAgent && (
+          <p className="font-body text-xs text-text-muted">
+            Assigned to {assignedAgent.name}
+          </p>
+        )}
+      </label>
+
+      {assignError && (
+        <p className="rounded-md border border-danger-muted bg-danger-muted/40 px-3 py-2 font-body text-sm text-danger">
+          {assignError}
+        </p>
+      )}
+
       {error && (
         <p className="rounded-md border border-danger-muted bg-danger-muted/40 px-3 py-2 font-body text-sm text-danger">
           {error}

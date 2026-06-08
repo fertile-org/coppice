@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { TicketCommentsTab } from './TicketCommentsTab';
-import { TicketDescriptionTab } from './TicketDescriptionTab';
-import { TicketMetadataTab } from './TicketMetadataTab';
+import { TicketDetailPanel } from './TicketDetailPanel';
+import { TicketMetadataPanel } from './TicketMetadataPanel';
 import { TicketRunsTab } from './TicketRunsTab';
 import { useRepos } from '../repos/useRepos';
 import {
@@ -215,7 +215,7 @@ export function TicketDrawer({ ticketId, onClose }: TicketDrawerProps) {
           )}
 
           {ticket && tab === 'description' && (
-            <TicketDescriptionTab ticket={ticket} />
+            <TicketDetailPanel ticket={ticket} />
           )}
 
           {ticket && tab === 'comments' && (
@@ -224,7 +224,9 @@ export function TicketDrawer({ ticketId, onClose }: TicketDrawerProps) {
 
           {ticket && tab === 'runs' && <TicketRunsTab ticketId={ticket.id} />}
 
-          {ticket && tab === 'metadata' && <TicketMetadataTab ticket={ticket} />}
+          {ticket && tab === 'metadata' && (
+            <TicketMetadataPanel ticket={ticket} />
+          )}
         </div>
       </div>
     </div>
