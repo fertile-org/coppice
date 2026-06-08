@@ -2,7 +2,7 @@
 
 **Coppice** is a self-hosted agent workspace: Trello-like board, tickets, comments, and (from M03) agent execution. Philosophy and full product design live in `docs/philosophy/`.
 
-**Status:** M03 agent execution is implemented; **M03 retcon** (registered repositories — no lazy clone) is spec-approved, implementation pending. **Next:** M03 retcon, then [M04 — Live console](docs/milestones/M04-live-console.md). Spec: [docs/superpowers/specs/2026-06-08-m03-registered-repositories-design.md](docs/superpowers/specs/2026-06-08-m03-registered-repositories-design.md).
+**Status:** M03 agent execution and **M03 retcon** (registered repositories — no lazy clone) are complete. **Next:** [M04 — Live console](docs/milestones/M04-live-console.md).
 
 ## Must read before coding
 

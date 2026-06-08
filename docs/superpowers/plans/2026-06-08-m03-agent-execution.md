@@ -1,5 +1,7 @@
 # M03 Agent Execution Implementation Plan
 
+> **Note:** Repository bootstrap sections in this plan are **obsolete** — superseded by [2026-06-08-m03-registered-repositories.md](./2026-06-08-m03-registered-repositories.md) (registered `local_path` repos, no lazy clone). Job queue, worker, worktrees, MockProvider, and Runs UI steps remain valid.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Deliver Postgres-backed agent job queue, background worker, git worktrees, MockProvider runs, result-contract-driven ticket updates, agent comments, and ticket drawer Runs tab with header Run Agent / Stop actions.

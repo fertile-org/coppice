@@ -1,7 +1,7 @@
 # M03 Retcon — Registered Repositories Design Spec
 
 **Date:** 2026-06-08  
-**Status:** Approved  
+**Status:** Implemented  
 **Implementation plan:** [docs/superpowers/plans/2026-06-08-m03-registered-repositories.md](../plans/2026-06-08-m03-registered-repositories.md)  
 **Product:** Coppice — grow an agent team from shared roots.
 
