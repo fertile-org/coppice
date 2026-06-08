@@ -1,9 +1,10 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { X } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { formatFileSize, isImageContentType } from '../../lib/attachments';
 import { Button } from '../../components/ui/button';
 import { CommentAttachments } from './CommentAttachments';
+import { useAgents } from '../agents/useAgents';
 import {
   useComments,
   useCreateComment,
@@ -21,9 +22,16 @@ interface PendingFile {
   previewUrl: string | null;
 }
 
-function authorLabel(comment: Comment): string {
+function authorLabel(
+  comment: Comment,
+  agentNamesById: ReadonlyMap<string, string>,
+): string {
   switch (comment.authorType) {
     case 'agent':
+      if (comment.authorId) {
+        const name = agentNamesById.get(comment.authorId);
+        if (name) return name;
+      }
       return 'Agent';
     case 'system':
       return 'System';
@@ -55,6 +63,11 @@ function pendingFileFromFile(file: File): PendingFile {
 
 export function TicketCommentsTab({ ticketId }: TicketCommentsTabProps) {
   const { data: comments, isLoading, isError } = useComments(ticketId);
+  const { data: agents } = useAgents();
+  const agentNamesById = useMemo(
+    () => new Map((agents ?? []).map((agent) => [agent.id, agent.name])),
+    [agents],
+  );
   const createComment = useCreateComment(ticketId);
   const uploadAttachment = useUploadAttachment();
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -151,7 +164,7 @@ export function TicketCommentsTab({ ticketId }: TicketCommentsTabProps) {
           >
             <header className="mb-2 flex items-center justify-between gap-2">
               <span className="font-body text-xs font-medium uppercase tracking-wide text-text-secondary">
-                {authorLabel(comment)}
+                {authorLabel(comment, agentNamesById)}
               </span>
               <time
                 dateTime={comment.createdAt}
