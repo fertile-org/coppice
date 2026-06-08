@@ -79,18 +79,18 @@ impl<'a> RunService<'a> {
             .repo_id
             .ok_or_else(|| RunError::Validation("ticket has no repo".into()))?;
 
-        let remote_url: Option<String> = sqlx::query_scalar(
-            "SELECT remote_url FROM repos WHERE id = $1",
+        let repo_row = sqlx::query(
+            "SELECT local_path, verification_status FROM repos WHERE id = $1",
         )
         .bind(repo_id)
         .fetch_optional(self.pool)
         .await?
-        .flatten();
+        .ok_or_else(|| RunError::Validation("repo not found".into()))?;
 
-        let remote_url = remote_url.filter(|url| !url.trim().is_empty()).ok_or_else(|| {
-            RunError::Validation("repo has no remote_url".into())
-        })?;
-        let _ = remote_url;
+        let status: String = repo_row.get("verification_status");
+        if status != "ready" {
+            return Err(RunError::Validation("repository path is not ready".into()));
+        }
 
         let active = sqlx::query_scalar::<_, bool>(
             r#"

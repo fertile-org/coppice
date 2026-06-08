@@ -1,3 +1,4 @@
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -96,16 +97,11 @@ async fn execute_job(
         .repo_id
         .context("ticket has no repo")?;
 
-    let repo_row = sqlx::query("SELECT name, remote_url FROM repos WHERE id = $1")
+    let repo_row = sqlx::query("SELECT local_path, name FROM repos WHERE id = $1")
         .bind(repo_id)
         .fetch_optional(pool)
         .await?
         .context("repo not found")?;
-    let repo_name: String = repo_row.get("name");
-    let remote_url: Option<String> = repo_row.get("remote_url");
-    let remote_url = remote_url
-        .filter(|url| !url.trim().is_empty())
-        .context("repo has no remote_url")?;
 
     if run_svc.is_cancelled(run.id).await? {
         return Err(JobCancelled.into());
@@ -113,25 +109,22 @@ async fn execute_job(
 
     run_svc.mark_running(run.id).await.context("mark run running")?;
 
-    let worktree_svc = WorktreeService::new(
-        state.config.agent.git_repos_path.clone().into(),
+    let local_path: String = repo_row.get("local_path");
+    let repo_name: String = repo_row.get("name");
+
+    let worktree_service = WorktreeService::new(
         state.config.agent.worktrees_path.clone().into(),
     );
     let paths = compute_paths(
-        worktree_svc.repos_root(),
-        worktree_svc.worktrees_root(),
-        repo_id,
+        worktree_service.worktrees_root(),
         &repo_name,
         run.ticket_id,
         &agent.name,
     );
+    let git_dir = PathBuf::from(&local_path);
 
-    worktree_svc
-        .ensure_repo_clone(&remote_url, &paths.repo_dir)
-        .await
-        .context("ensure repo clone")?;
-    worktree_svc
-        .ensure_worktree(&paths.repo_dir, &paths.worktree_dir, &paths.branch_name)
+    worktree_service
+        .ensure_worktree(&git_dir, &paths.worktree_dir, &paths.branch_name)
         .await
         .context("ensure worktree")?;
 
