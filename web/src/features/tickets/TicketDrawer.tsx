@@ -1,5 +1,4 @@
 import { useEffect, useState } from 'react';
-import { TicketCommentsTab } from './TicketCommentsTab';
 import { TicketDetailPanel } from './TicketDetailPanel';
 import { TicketMetadataPanel } from './TicketMetadataPanel';
 import { TicketRunsTab } from './TicketRunsTab';
@@ -12,7 +11,7 @@ import {
 } from './useAgentRuns';
 import { statusLabel, useTicket } from './useTicket';
 
-type DrawerTab = 'description' | 'comments' | 'runs' | 'metadata';
+type DrawerTab = 'detail' | 'runs';
 
 interface TicketDrawerProps {
   ticketId: string;
@@ -20,13 +19,11 @@ interface TicketDrawerProps {
 }
 
 const TAB_LABELS: Record<DrawerTab, string> = {
-  description: 'Description',
-  comments: 'Comments',
-  runs: 'Runs',
-  metadata: 'Metadata',
+  detail: 'Detail',
+  runs: 'Agent Runs',
 };
 
-const TAB_ORDER: DrawerTab[] = ['description', 'comments', 'runs', 'metadata'];
+const TAB_ORDER: DrawerTab[] = ['detail', 'runs'];
 
 export function TicketDrawer({ ticketId, onClose }: TicketDrawerProps) {
   const { data: ticket, isLoading, isError, refetch } = useTicket(ticketId);
@@ -34,7 +31,7 @@ export function TicketDrawer({ ticketId, onClose }: TicketDrawerProps) {
   const { data: runs } = useAgentRuns(ticketId);
   const runAgent = useRunAgent(ticketId);
   const stopRun = useStopRun(ticketId);
-  const [tab, setTab] = useState<DrawerTab>('description');
+  const [tab, setTab] = useState<DrawerTab>('detail');
   const [actionError, setActionError] = useState<string | null>(null);
 
   const selectedRepo = repos?.find((repo) => repo.id === ticket?.repoId);
@@ -66,7 +63,7 @@ export function TicketDrawer({ ticketId, onClose }: TicketDrawerProps) {
   }, [onClose]);
 
   useEffect(() => {
-    setTab('description');
+    setTab('detail');
     setActionError(null);
   }, [ticketId]);
 
@@ -93,16 +90,17 @@ export function TicketDrawer({ ticketId, onClose }: TicketDrawerProps) {
   const headerBusy = runAgent.isPending || stopRun.isPending;
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex bg-bark-950/40 backdrop-blur-[1px]"
-      role="presentation"
-      onClick={onClose}
-    >
+    <div className="fixed inset-0 z-50 flex justify-end" role="presentation">
+      <div
+        className="absolute inset-0 bg-bark-950/40 backdrop-blur-[1px]"
+        onClick={onClose}
+        aria-hidden="true"
+      />
       <div
         role="dialog"
         aria-modal="true"
         aria-label="Ticket detail"
-        className="flex h-full w-full flex-col bg-surface-raised shadow-2xl"
+        className="relative flex h-full w-[90%] max-w-[90vw] animate-fade-in flex-col bg-surface-raised shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
         <header className="flex shrink-0 items-center justify-between gap-4 border-b border-border px-6 py-4">
@@ -174,13 +172,16 @@ export function TicketDrawer({ ticketId, onClose }: TicketDrawerProps) {
         </header>
 
         <nav
-          className="flex shrink-0 gap-1 border-b border-border px-6"
+          role="tablist"
           aria-label="Ticket sections"
+          className="flex shrink-0 gap-1 border-b border-border px-6"
         >
           {TAB_ORDER.map((key) => (
             <button
               key={key}
               type="button"
+              role="tab"
+              aria-selected={tab === key}
               onClick={() => setTab(key)}
               className={[
                 'border-b-2 px-4 py-3 font-body text-sm transition-colors duration-fast',
@@ -194,38 +195,45 @@ export function TicketDrawer({ ticketId, onClose }: TicketDrawerProps) {
           ))}
         </nav>
 
-        <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">
+        <div className="min-h-0 flex-1 overflow-y-auto">
           {isLoading && (
-            <p className="font-body text-sm text-text-muted">Loading ticket…</p>
+            <p className="px-6 py-5 font-body text-sm text-text-muted">
+              Loading ticket…
+            </p>
           )}
 
           {isError && (
-            <div className="rounded-lg border border-danger-muted bg-danger-muted/40 p-4">
-              <p className="font-body text-sm text-danger">
-                Unable to load ticket.
-              </p>
-              <button
-                type="button"
-                onClick={() => void refetch()}
-                className="mt-2 font-body text-sm font-medium text-moss-700 underline-offset-2 hover:underline"
-              >
-                Try again
-              </button>
+            <div className="px-6 py-5">
+              <div className="rounded-lg border border-danger-muted bg-danger-muted/40 p-4">
+                <p className="font-body text-sm text-danger">
+                  Unable to load ticket.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => void refetch()}
+                  className="mt-2 font-body text-sm font-medium text-moss-700 underline-offset-2 hover:underline"
+                >
+                  Try again
+                </button>
+              </div>
             </div>
           )}
 
-          {ticket && tab === 'description' && (
-            <TicketDetailPanel ticket={ticket} />
+          {ticket && tab === 'detail' && (
+            <div className="grid h-full gap-0 md:grid-cols-[3fr_2fr]">
+              <div className="min-h-0 overflow-y-auto px-6 py-5">
+                <TicketDetailPanel ticket={ticket} />
+              </div>
+              <div className="min-h-0 overflow-y-auto border-border px-6 py-5 md:border-l">
+                <TicketMetadataPanel ticket={ticket} />
+              </div>
+            </div>
           )}
 
-          {ticket && tab === 'comments' && (
-            <TicketCommentsTab ticketId={ticket.id} />
-          )}
-
-          {ticket && tab === 'runs' && <TicketRunsTab ticketId={ticket.id} />}
-
-          {ticket && tab === 'metadata' && (
-            <TicketMetadataPanel ticket={ticket} />
+          {ticket && tab === 'runs' && (
+            <div className="px-6 py-5">
+              <TicketRunsTab ticketId={ticket.id} />
+            </div>
           )}
         </div>
       </div>
