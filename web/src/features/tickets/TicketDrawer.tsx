@@ -2,9 +2,16 @@ import { useEffect, useState } from 'react';
 import { TicketCommentsTab } from './TicketCommentsTab';
 import { TicketDescriptionTab } from './TicketDescriptionTab';
 import { TicketMetadataTab } from './TicketMetadataTab';
+import { TicketRunsTab } from './TicketRunsTab';
+import {
+  isActiveRunStatus,
+  useAgentRuns,
+  useRunAgent,
+  useStopRun,
+} from './useAgentRuns';
 import { statusLabel, useTicket } from './useTicket';
 
-type DrawerTab = 'description' | 'comments' | 'metadata';
+type DrawerTab = 'description' | 'comments' | 'runs' | 'metadata';
 
 interface TicketDrawerProps {
   ticketId: string;
@@ -14,12 +21,31 @@ interface TicketDrawerProps {
 const TAB_LABELS: Record<DrawerTab, string> = {
   description: 'Description',
   comments: 'Comments',
+  runs: 'Runs',
   metadata: 'Metadata',
 };
 
+const TAB_ORDER: DrawerTab[] = ['description', 'comments', 'runs', 'metadata'];
+
 export function TicketDrawer({ ticketId, onClose }: TicketDrawerProps) {
   const { data: ticket, isLoading, isError, refetch } = useTicket(ticketId);
+  const { data: runs } = useAgentRuns(ticketId);
+  const runAgent = useRunAgent(ticketId);
+  const stopRun = useStopRun(ticketId);
   const [tab, setTab] = useState<DrawerTab>('description');
+  const [actionError, setActionError] = useState<string | null>(null);
+
+  const canRunAgent = Boolean(ticket?.assigneeAgentId && ticket?.repoId);
+  const activeRun = runs?.find(
+    (run) =>
+      run.agentId === ticket?.assigneeAgentId &&
+      isActiveRunStatus(run.status),
+  );
+  const runAgentDisabledReason = !ticket?.assigneeAgentId
+    ? 'Assign an agent before running.'
+    : !ticket?.repoId
+      ? 'Link a repository before running.'
+      : null;
 
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
@@ -31,7 +57,30 @@ export function TicketDrawer({ ticketId, onClose }: TicketDrawerProps) {
 
   useEffect(() => {
     setTab('description');
+    setActionError(null);
   }, [ticketId]);
+
+  async function handleRunAgent() {
+    if (!canRunAgent) return;
+    setActionError(null);
+    try {
+      await runAgent.mutateAsync();
+    } catch {
+      setActionError('Unable to start agent run.');
+    }
+  }
+
+  async function handleStopRun() {
+    if (!activeRun) return;
+    setActionError(null);
+    try {
+      await stopRun.mutateAsync(activeRun.id);
+    } catch {
+      setActionError('Unable to stop agent run.');
+    }
+  }
+
+  const headerBusy = runAgent.isPending || stopRun.isPending;
 
   return (
     <div
@@ -67,22 +116,52 @@ export function TicketDrawer({ ticketId, onClose }: TicketDrawerProps) {
                 )}
               </p>
             )}
+            {actionError && (
+              <p className="mt-2 font-body text-sm text-danger">{actionError}</p>
+            )}
           </div>
 
-          <button
-            type="button"
-            onClick={onClose}
-            className="shrink-0 rounded-md border border-border px-3 py-1.5 font-body text-sm text-text-secondary transition-colors duration-fast hover:text-text-primary"
-          >
-            Close
-          </button>
+          <div className="flex shrink-0 items-center gap-2">
+            {ticket && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => void handleRunAgent()}
+                  disabled={!canRunAgent || headerBusy}
+                  title={runAgentDisabledReason ?? undefined}
+                  className="rounded-md bg-accent px-3 py-1.5 font-body text-sm font-medium text-white transition-colors duration-fast hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {runAgent.isPending ? 'Starting…' : 'Run Agent'}
+                </button>
+
+                {activeRun && (
+                  <button
+                    type="button"
+                    onClick={() => void handleStopRun()}
+                    disabled={headerBusy}
+                    className="rounded-md border border-danger px-3 py-1.5 font-body text-sm font-medium text-danger transition-colors duration-fast hover:bg-danger-muted/40 disabled:opacity-50"
+                  >
+                    {stopRun.isPending ? 'Stopping…' : 'Stop'}
+                  </button>
+                )}
+              </>
+            )}
+
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-md border border-border px-3 py-1.5 font-body text-sm text-text-secondary transition-colors duration-fast hover:text-text-primary"
+            >
+              Close
+            </button>
+          </div>
         </header>
 
         <nav
           className="flex shrink-0 gap-1 border-b border-border px-6"
           aria-label="Ticket sections"
         >
-          {(Object.keys(TAB_LABELS) as DrawerTab[]).map((key) => (
+          {TAB_ORDER.map((key) => (
             <button
               key={key}
               type="button"
@@ -126,6 +205,8 @@ export function TicketDrawer({ ticketId, onClose }: TicketDrawerProps) {
           {ticket && tab === 'comments' && (
             <TicketCommentsTab ticketId={ticket.id} />
           )}
+
+          {ticket && tab === 'runs' && <TicketRunsTab ticketId={ticket.id} />}
 
           {ticket && tab === 'metadata' && <TicketMetadataTab ticket={ticket} />}
         </div>

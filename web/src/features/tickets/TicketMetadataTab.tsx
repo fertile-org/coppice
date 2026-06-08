@@ -10,6 +10,7 @@ import {
   type Substatus,
 } from '../../lib/schemas/substatus';
 import { ticketPrioritySchema } from '../../lib/schemas/ticket';
+import { useAgentRuns } from './useAgentRuns';
 import { useAgents, useUpdateTicket, useUpdateTicketStatus } from './useTicket';
 
 interface TicketMetadataTabProps {
@@ -24,6 +25,8 @@ export function TicketMetadataTab({ ticket }: TicketMetadataTabProps) {
   const updateTicket = useUpdateTicket(ticket.id);
   const updateStatus = useUpdateTicketStatus(ticket.id);
   const { data: agents } = useAgents();
+  const { data: runs } = useAgentRuns(ticket.id);
+  const latestRunWorktreePath = runs?.[0]?.worktreePath ?? null;
 
   const [status, setStatus] = useState(ticket.status);
   const [substatus, setSubstatus] = useState<Substatus | ''>(
@@ -92,6 +95,37 @@ export function TicketMetadataTab({ ticket }: TicketMetadataTabProps) {
         <p className="rounded-md border border-danger-muted bg-danger-muted/40 px-3 py-2 font-body text-sm text-danger">
           {error}
         </p>
+      )}
+
+      {(ticket.branchName || latestRunWorktreePath) && (
+        <dl className="space-y-2 rounded-md border border-border bg-surface px-4 py-3">
+          {ticket.branchName && (
+            <div className="grid gap-1 sm:grid-cols-[7rem_1fr]">
+              <dt className="font-body text-sm font-medium text-text-secondary">
+                Branch
+              </dt>
+              <dd
+                className="truncate font-mono text-sm text-text-primary"
+                title={ticket.branchName}
+              >
+                {ticket.branchName}
+              </dd>
+            </div>
+          )}
+          {latestRunWorktreePath && (
+            <div className="grid gap-1 sm:grid-cols-[7rem_1fr]">
+              <dt className="font-body text-sm font-medium text-text-secondary">
+                Worktree
+              </dt>
+              <dd
+                className="truncate font-mono text-sm text-text-primary"
+                title={latestRunWorktreePath}
+              >
+                {latestRunWorktreePath}
+              </dd>
+            </div>
+          )}
+        </dl>
       )}
 
       <div className="grid gap-4 sm:grid-cols-2">
