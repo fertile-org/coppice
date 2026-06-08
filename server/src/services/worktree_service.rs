@@ -89,14 +89,31 @@ async fn run_git_in(git_dir: &Path, args: &[&str]) -> Result<(), WorktreeError> 
         .current_dir(git_dir)
         .args(args)
         .output()
-        .await?;
+        .await
+        .map_err(|err| {
+            WorktreeError::Io(std::io::Error::new(
+                err.kind(),
+                format!(
+                    "repository not accessible at {}: {err}",
+                    git_dir.display()
+                ),
+            ))
+        })?;
 
     if output.status.success() {
         Ok(())
     } else {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        let combined = match (stderr.is_empty(), stdout.is_empty()) {
+            (false, false) => format!("{stderr}\n{stdout}"),
+            (false, true) => stderr,
+            (true, false) => stdout,
+            (true, true) => format!("exit code {}", output.status),
+        };
         Err(WorktreeError::GitCommandFailed {
             command: format!("git {}", args.join(" ")),
-            stderr: String::from_utf8_lossy(&output.stderr).trim().to_string(),
+            stderr: combined,
         })
     }
 }
@@ -129,5 +146,15 @@ mod tests {
     fn worktree_service_stores_worktrees_root() {
         let service = WorktreeService::new(PathBuf::from("/data/worktrees"));
         assert_eq!(service.worktrees_root(), Path::new("/data/worktrees"));
+    }
+
+    #[test]
+    fn git_command_failed_display_includes_stderr() {
+        let err = WorktreeError::GitCommandFailed {
+            command: "git worktree add".into(),
+            stderr: "fatal: not a git repository".into(),
+        };
+        let msg = err.to_string();
+        assert!(msg.contains("fatal: not a git repository"));
     }
 }
