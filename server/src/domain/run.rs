@@ -22,6 +22,7 @@ pub struct AgentRun {
     pub worktree_path: Option<String>,
     pub branch_name: Option<String>,
     pub error_message: Option<String>,
+    pub session_id: Option<String>,
     pub started_at: Option<OffsetDateTime>,
     pub ended_at: Option<OffsetDateTime>,
     pub created_at: OffsetDateTime,

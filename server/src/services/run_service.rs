@@ -129,7 +129,7 @@ impl<'a> RunService<'a> {
             VALUES ($1, $2, $3, $4, $5, $6)
             RETURNING
                 id, ticket_id, agent_id, job_type, status, sandbox_profile_id,
-                worktree_path, branch_name, error_message,
+                worktree_path, branch_name, error_message, session_id,
                 started_at, ended_at, created_at
             "#,
         )
@@ -165,7 +165,7 @@ impl<'a> RunService<'a> {
             r#"
             SELECT
                 id, ticket_id, agent_id, job_type, status, sandbox_profile_id,
-                worktree_path, branch_name, error_message,
+                worktree_path, branch_name, error_message, session_id,
                 started_at, ended_at, created_at
             FROM agent_runs
             WHERE id = $1
@@ -184,7 +184,7 @@ impl<'a> RunService<'a> {
             r#"
             SELECT
                 id, ticket_id, agent_id, job_type, status, sandbox_profile_id,
-                worktree_path, branch_name, error_message,
+                worktree_path, branch_name, error_message, session_id,
                 started_at, ended_at, created_at
             FROM agent_runs
             WHERE ticket_id = $1
@@ -206,7 +206,7 @@ impl<'a> RunService<'a> {
             WHERE id = $1 AND status IN ('queued', 'running')
             RETURNING
                 id, ticket_id, agent_id, job_type, status, sandbox_profile_id,
-                worktree_path, branch_name, error_message,
+                worktree_path, branch_name, error_message, session_id,
                 started_at, ended_at, created_at
             "#,
         )
@@ -298,7 +298,7 @@ impl<'a> RunService<'a> {
             WHERE id = $1
             RETURNING
                 id, ticket_id, agent_id, job_type, status, sandbox_profile_id,
-                worktree_path, branch_name, error_message,
+                worktree_path, branch_name, error_message, session_id,
                 started_at, ended_at, created_at
             "#,
         )
@@ -321,7 +321,7 @@ impl<'a> RunService<'a> {
             WHERE id = $1
             RETURNING
                 id, ticket_id, agent_id, job_type, status, sandbox_profile_id,
-                worktree_path, branch_name, error_message,
+                worktree_path, branch_name, error_message, session_id,
                 started_at, ended_at, created_at
             "#,
         )
@@ -333,6 +333,15 @@ impl<'a> RunService<'a> {
         .ok_or(RunError::NotFound)?;
 
         Ok(row_to_run(&row))
+    }
+
+    pub async fn set_session_id(&self, run_id: Uuid, session_id: &str) -> Result<(), RunError> {
+        sqlx::query("UPDATE agent_runs SET session_id = $2 WHERE id = $1")
+            .bind(run_id)
+            .bind(session_id)
+            .execute(self.pool)
+            .await?;
+        Ok(())
     }
 
     pub async fn is_cancelled(&self, run_id: Uuid) -> Result<bool, RunError> {
@@ -364,6 +373,7 @@ fn row_to_run(row: &sqlx::postgres::PgRow) -> AgentRun {
         worktree_path: row.get("worktree_path"),
         branch_name: row.get("branch_name"),
         error_message: row.get("error_message"),
+        session_id: row.get("session_id"),
         started_at: row.get("started_at"),
         ended_at: row.get("ended_at"),
         created_at: row.get("created_at"),
