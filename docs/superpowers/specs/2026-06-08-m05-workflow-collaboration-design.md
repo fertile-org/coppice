@@ -1,7 +1,7 @@
 # M05 — Workflow & Collaboration Design Spec
 
 **Date:** 2026-06-08  
-**Status:** Draft — pending user review  
+**Status:** Approved  
 **Product:** Coppice — grow an agent team from shared roots.
 
 **Depends on:** M02 (board, tickets, comments, agents), M03 (job queue, runs, result contract), M04 (WebSocket events, live session)  
@@ -486,4 +486,4 @@ Migration: `00N_workflow_collaboration.sql`
 
 ## Implementation plan
 
-After user approves this spec, invoke **writing-plans** to produce `docs/superpowers/plans/2026-06-08-m05-workflow-collaboration.md`.
+[docs/superpowers/plans/2026-06-08-m05-workflow-collaboration.md](../plans/2026-06-08-m05-workflow-collaboration.md)
