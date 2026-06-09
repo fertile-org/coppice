@@ -104,7 +104,7 @@ function applyPartUpdated(store: SessionStore, event: OpenCodeEvent): void {
   const messageId =
     asString(part.messageID) ?? asString(part.messageId) ?? 'unknown';
 
-  upsertPart(store, messageId, part as Part);
+  upsertPart(store, messageId, part as unknown as Part);
   replayPendingDeltas(store, partId);
 }
 
@@ -119,10 +119,8 @@ function applyMessageUpdated(store: SessionStore, event: OpenCodeEvent): void {
   const messageId = messageIdFromValue(message);
   if (!messageId) return;
 
-  const index = store.messages.findIndex(
-    (existing) => messageIdFromValue(existing) === messageId,
-  );
-  const next = message as Message;
+  const index = store.messages.findIndex((existing) => existing.id === messageId);
+  const next = message as unknown as Message;
   if (index >= 0) {
     store.messages[index] = next;
   } else {

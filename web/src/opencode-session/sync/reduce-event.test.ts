@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { applyEvent, createSessionStore } from './reduce-event';
+import type { TextPart } from './types';
 
 describe('applyEvent', () => {
   it('appends text deltas incrementally', () => {
@@ -29,7 +30,7 @@ describe('applyEvent', () => {
         delta: 'world',
       },
     });
-    expect(store.parts['msg_1'][0].text).toBe('hello world');
+    expect((store.parts['msg_1'][0] as TextPart).text).toBe('hello world');
   });
 
   it('handles delta before part.updated', () => {
@@ -50,6 +51,6 @@ describe('applyEvent', () => {
         part: { id: 'prt_1', type: 'text', text: '', messageID: 'msg_1' },
       },
     });
-    expect(store.parts['msg_1'][0].text).toBe('early');
+    expect((store.parts['msg_1'][0] as TextPart).text).toBe('early');
   });
 });
