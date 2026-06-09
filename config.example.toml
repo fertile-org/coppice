@@ -35,3 +35,10 @@ model_providers = []
 port = 5173
 static_dir = "./web/dist"  # used by `coppice web start`
 # api_url = "http://127.0.0.1:8080"  # optional; defaults to server port
+
+[workflow]
+auto_start_runs = false
+
+[workflow.auto_assign]
+default = true
+backlog = false

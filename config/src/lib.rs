@@ -16,6 +16,94 @@ pub struct AppConfig {
     pub storage: StorageConfig,
     pub agent: AgentConfig,
     pub web: WebConfig,
+    #[serde(default)]
+    pub workflow: WorkflowConfig,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct WorkflowConfig {
+    #[serde(default)]
+    pub auto_start_runs: bool,
+    #[serde(default)]
+    pub auto_assign: AutoAssignConfig,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct AutoAssignConfig {
+    #[serde(default = "default_true")]
+    pub default: bool,
+    #[serde(default)]
+    pub backlog: Option<bool>,
+    #[serde(default)]
+    pub ready: Option<bool>,
+    #[serde(default)]
+    pub in_progress: Option<bool>,
+    #[serde(default)]
+    pub in_review: Option<bool>,
+    #[serde(default)]
+    pub in_qa: Option<bool>,
+    #[serde(default)]
+    pub wait_for_final_review: Option<bool>,
+    #[serde(default)]
+    pub blocked: Option<bool>,
+    #[serde(default)]
+    pub done: Option<bool>,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+impl Default for WorkflowConfig {
+    fn default() -> Self {
+        Self {
+            auto_start_runs: false,
+            auto_assign: AutoAssignConfig {
+                default: true,
+                backlog: Some(false),
+                ready: None,
+                in_progress: None,
+                in_review: None,
+                in_qa: None,
+                wait_for_final_review: None,
+                blocked: None,
+                done: None,
+            },
+        }
+    }
+}
+
+impl Default for AutoAssignConfig {
+    fn default() -> Self {
+        Self {
+            default: true,
+            backlog: None,
+            ready: None,
+            in_progress: None,
+            in_review: None,
+            in_qa: None,
+            wait_for_final_review: None,
+            blocked: None,
+            done: None,
+        }
+    }
+}
+
+impl AutoAssignConfig {
+    pub fn effective(&self, status: &str) -> bool {
+        let override_val = match status {
+            "backlog" => self.backlog,
+            "ready" => self.ready,
+            "in_progress" => self.in_progress,
+            "in_review" => self.in_review,
+            "in_qa" => self.in_qa,
+            "wait_for_final_review" => self.wait_for_final_review,
+            "blocked" => self.blocked,
+            "done" => self.done,
+            _ => None,
+        };
+        override_val.unwrap_or(self.default)
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -220,6 +308,11 @@ impl AppConfig {
                     .only(&["AGENT_WORKER_COUNT"])
                     .map(|_| "agent.worker_count".into()),
             )
+            .merge(
+                Env::raw()
+                    .only(&["WORKFLOW_AUTO_START_RUNS"])
+                    .map(|_| "workflow.auto_start_runs".into()),
+            )
     }
 
     fn default_values() -> Self {
@@ -249,6 +342,7 @@ impl AppConfig {
                 static_dir: "./web/dist".into(),
                 api_url: None,
             },
+            workflow: WorkflowConfig::default(),
         }
     }
 }
@@ -335,6 +429,24 @@ mod tests {
         }
 
         assert_eq!(cfg.agent.default_connector, "opencode");
+    }
+
+    #[test]
+    fn workflow_auto_assign_backlog_override() {
+        let raw = r#"
+        [workflow]
+        auto_start_runs = false
+
+        [workflow.auto_assign]
+        default = true
+        backlog = false
+    "#;
+        let cfg: AppConfig = toml::from_str(&format!(
+            "{raw}\n[server]\nport=8080\n[database]\nurl=\"postgres://x\"\n[auth]\nsession_secret=\"s\"\nbootstrap_password=\"p\"\ncookie_secure=false\n[storage]\nartifacts_dir=\"/tmp\"\nmax_upload_bytes=1\n[agent]\ndefault_connector=\"mock\"\nworktrees_path=\"/tmp\"\nworker_count=1\n[web]\nport=5173\nstatic_dir=\"./web/dist\""
+        )).expect("parse");
+        assert!(!cfg.workflow.auto_assign.effective("backlog"));
+        assert!(cfg.workflow.auto_assign.effective("ready"));
+        assert!(cfg.workflow.auto_assign.effective("in_progress"));
     }
 
     #[test]

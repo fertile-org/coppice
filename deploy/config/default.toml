@@ -31,3 +31,10 @@ model_providers = []
 [web]
 port = 5173
 static_dir = "./web/dist"
+
+[workflow]
+auto_start_runs = false
+
+[workflow.auto_assign]
+default = true
+backlog = false
