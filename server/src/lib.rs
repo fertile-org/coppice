@@ -1,3 +1,4 @@
+pub mod agent_templates;
 pub mod api;
 pub mod config;
 pub mod db;
