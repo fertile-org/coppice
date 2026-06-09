@@ -50,13 +50,14 @@ pub struct StorageConfig {
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct AgentConfig {
-    pub default_provider: String,
+    #[serde(alias = "default_provider")]
+    pub default_connector: String,
     pub worktrees_path: String,
     pub worker_count: u32,
     #[serde(default = "default_health_check_interval")]
     pub health_check_interval_secs: u32,
-    #[serde(default)]
-    pub providers: AgentProvidersConfig,
+    #[serde(default, alias = "providers")]
+    pub connectors: AgentConnectorsConfig,
 }
 
 fn default_health_check_interval() -> u32 {
@@ -64,13 +65,13 @@ fn default_health_check_interval() -> u32 {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
-pub struct AgentProvidersConfig {
+pub struct AgentConnectorsConfig {
     #[serde(default)]
-    pub opencode: OpenCodeProviderConfig,
+    pub opencode: OpenCodeConnectorConfig,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct OpenCodeProviderConfig {
+pub struct OpenCodeConnectorConfig {
     #[serde(default = "default_false")]
     pub enabled: bool,
     #[serde(default = "default_opencode_command")]
@@ -79,9 +80,12 @@ pub struct OpenCodeProviderConfig {
     pub serve_hostname: String,
     #[serde(default = "default_opencode_port")]
     pub serve_port: u16,
-    pub model: Option<String>,
-    pub variant: Option<String>,
+    #[serde(default)]
+    pub model_providers: Vec<String>,
 }
+
+pub type OpenCodeProviderConfig = OpenCodeConnectorConfig;
+pub type AgentProvidersConfig = AgentConnectorsConfig;
 
 fn default_false() -> bool {
     false
@@ -99,15 +103,14 @@ fn default_opencode_port() -> u16 {
     4096
 }
 
-impl Default for OpenCodeProviderConfig {
+impl Default for OpenCodeConnectorConfig {
     fn default() -> Self {
         Self {
             enabled: default_false(),
             command: default_opencode_command(),
             serve_hostname: default_opencode_host(),
             serve_port: default_opencode_port(),
-            model: None,
-            variant: None,
+            model_providers: Vec::new(),
         }
     }
 }
@@ -204,8 +207,8 @@ impl AppConfig {
             )
             .merge(
                 Env::raw()
-                    .only(&["AGENT_DEFAULT_PROVIDER"])
-                    .map(|_| "agent.default_provider".into()),
+                    .only(&["AGENT_DEFAULT_CONNECTOR", "AGENT_DEFAULT_PROVIDER"])
+                    .map(|_| "agent.default_connector".into()),
             )
             .merge(
                 Env::raw()
@@ -235,11 +238,11 @@ impl AppConfig {
                 max_upload_bytes: 10 * 1024 * 1024,
             },
             agent: AgentConfig {
-                default_provider: "mock".into(),
+                default_connector: "mock".into(),
                 worktrees_path: "./data/worktrees".into(),
                 worker_count: 2,
                 health_check_interval_secs: default_health_check_interval(),
-                providers: AgentProvidersConfig::default(),
+                connectors: AgentConnectorsConfig::default(),
             },
             web: WebConfig {
                 port: 5173,
@@ -261,6 +264,36 @@ mod tests {
     fn loads_defaults_without_files() {
         let cfg = AppConfig::load_defaults().expect("defaults");
         assert_eq!(cfg.server.port, 8080);
+    }
+
+    #[test]
+    fn opencode_connector_has_model_providers_default_empty() {
+        let cfg = OpenCodeConnectorConfig::default();
+        assert!(cfg.model_providers.is_empty());
+    }
+
+    #[test]
+    fn deserializes_connectors_section() {
+        let toml = r#"
+        [agent]
+        default_connector = "mock"
+        worktrees_path = "./data/worktrees"
+        worker_count = 2
+
+        [agent.connectors.opencode]
+        enabled = true
+        model_providers = ["zai-coding-plan", "zai"]
+    "#;
+        #[derive(Deserialize)]
+        struct Wrapper {
+            agent: AgentConfig,
+        }
+        let wrapper: Wrapper = toml::from_str(toml).expect("parse");
+        let cfg = wrapper.agent;
+        assert_eq!(
+            cfg.connectors.opencode.model_providers,
+            vec!["zai-coding-plan", "zai"]
+        );
     }
 
     #[test]
