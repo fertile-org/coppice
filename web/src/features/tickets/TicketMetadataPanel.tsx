@@ -170,6 +170,14 @@ export function TicketMetadataPanel({ ticket }: TicketMetadataPanelProps) {
             Assigned to {assignedAgent.name}
           </p>
         )}
+        {ticket.pendingAssignRecommendation && (
+          <p className="font-body text-sm text-text-muted">
+            Recommends:{' '}
+            <span className="inline-flex items-center rounded-full border border-border bg-surface px-2.5 py-0.5 font-medium text-text-primary">
+              {ticket.pendingAssignRecommendation.recommendedAgentKey}
+            </span>
+          </p>
+        )}
       </div>
 
       {assignError && (

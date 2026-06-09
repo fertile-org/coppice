@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiFetch } from '../../lib/api';
+import type { PendingRecommendation } from '../../lib/schemas/ticket';
 import type { TicketStatus } from './columns';
 
 export interface SubstatusDisplay {
@@ -26,6 +27,8 @@ export interface Ticket {
   updatedAt: string;
   lastActivityAt: string;
   substatusDisplay?: SubstatusDisplay;
+  pendingAssignRecommendation?: PendingRecommendation | null;
+  clarificationRound?: number;
 }
 
 export function ticketsQueryKey(projectId: string) {

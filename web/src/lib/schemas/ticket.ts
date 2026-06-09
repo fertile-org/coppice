@@ -56,3 +56,42 @@ export const createCommentSchema = z.object({
 });
 
 export type CreateCommentInput = z.infer<typeof createCommentSchema>;
+
+export const pendingRecommendationSchema = z.object({
+  recommendedAgentKey: z.string(),
+  recommendedByAgentId: z.string().uuid(),
+  recommendedAt: z.string(),
+  summary: z.string().optional(),
+});
+
+export type PendingRecommendation = z.infer<typeof pendingRecommendationSchema>;
+
+export const ticketSchema = z.object({
+  id: z.string().uuid(),
+  projectId: z.string().uuid(),
+  repoId: z.string().uuid().optional(),
+  title: z.string(),
+  description: z.string(),
+  status: ticketStatusSchema,
+  substatus: z.string().optional(),
+  substatusMetadata: z.record(z.unknown()).optional(),
+  priority: ticketPrioritySchema.optional(),
+  assigneeAgentId: z.string().uuid().optional(),
+  ownerUserId: z.string().uuid().optional(),
+  branchName: z.string().optional(),
+  createdBy: z.string(),
+  createdById: z.string().uuid().optional(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+  lastActivityAt: z.string(),
+  substatusDisplay: z
+    .object({
+      label: z.string(),
+      detail: z.string().optional(),
+    })
+    .optional(),
+  pendingAssignRecommendation: pendingRecommendationSchema.nullable().optional(),
+  clarificationRound: z.number().optional(),
+});
+
+export type TicketResponse = z.infer<typeof ticketSchema>;

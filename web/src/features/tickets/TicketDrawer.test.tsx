@@ -6,21 +6,23 @@ import { ToastProvider } from '../../components/ToastProvider';
 import { TicketDrawer } from './TicketDrawer';
 import type { Ticket } from '../board/useTickets';
 
-const mockTicket: Ticket = {
-  id: '00000000-0000-0000-0000-000000000001',
-  projectId: '00000000-0000-0000-0000-000000000002',
-  title: 'Test ticket',
-  description: 'Ticket description',
-  status: 'backlog',
-  createdBy: 'user',
-  createdAt: '2026-06-08T00:00:00.000Z',
-  updatedAt: '2026-06-08T00:00:00.000Z',
-  lastActivityAt: '2026-06-08T00:00:00.000Z',
+const ticketState: { ticket: Ticket } = {
+  ticket: {
+    id: '00000000-0000-0000-0000-000000000001',
+    projectId: '00000000-0000-0000-0000-000000000002',
+    title: 'Test ticket',
+    description: 'Ticket description',
+    status: 'backlog',
+    createdBy: 'user',
+    createdAt: '2026-06-08T00:00:00.000Z',
+    updatedAt: '2026-06-08T00:00:00.000Z',
+    lastActivityAt: '2026-06-08T00:00:00.000Z',
+  },
 };
 
 vi.mock('./useTicket', () => ({
   useTicket: () => ({
-    data: mockTicket,
+    data: ticketState.ticket,
     isLoading: false,
     isError: false,
     refetch: vi.fn(),
@@ -30,6 +32,7 @@ vi.mock('./useTicket', () => ({
   useAssignAgent: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useAgents: () => ({ data: [] }),
   useUpdateTicketStatus: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useFinalApprove: () => ({ mutateAsync: vi.fn(), isPending: false }),
 }));
 
 vi.mock('./useAgentRuns', () => ({
@@ -74,5 +77,21 @@ describe('TicketDrawer', () => {
     renderDrawer();
     const dialog = screen.getByRole('dialog', { name: 'Ticket detail' });
     expect(dialog.className).toMatch(/w-\[90%\]/);
+  });
+
+  it('shows Final Approve only when status is wait_for_final_review', () => {
+    ticketState.ticket = { ...ticketState.ticket, status: 'backlog' };
+    const { unmount } = renderDrawer();
+    expect(screen.queryByRole('button', { name: 'Final Approve' })).toBeNull();
+    unmount();
+
+    ticketState.ticket = {
+      ...ticketState.ticket,
+      status: 'wait_for_final_review',
+    };
+    renderDrawer();
+    expect(
+      screen.getByRole('button', { name: 'Final Approve' }),
+    ).toBeInTheDocument();
   });
 });

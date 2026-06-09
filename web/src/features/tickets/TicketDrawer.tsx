@@ -12,7 +12,7 @@ import {
   useStopRun,
 } from './useAgentRuns';
 import { TicketStatusBadge } from './TicketStatusBadge';
-import { useTicket } from './useTicket';
+import { useFinalApprove, useTicket } from './useTicket';
 
 type DrawerTab = 'detail' | 'live' | 'runs';
 
@@ -35,6 +35,7 @@ export function TicketDrawer({ ticketId, onClose }: TicketDrawerProps) {
   const { data: runs } = useAgentRuns(ticketId);
   const runAgent = useRunAgent(ticketId);
   const stopRun = useStopRun(ticketId);
+  const finalApprove = useFinalApprove(ticketId);
   const [tab, setTab] = useState<DrawerTab>('detail');
   const [actionError, setActionError] = useState<string | null>(null);
 
@@ -96,7 +97,17 @@ export function TicketDrawer({ ticketId, onClose }: TicketDrawerProps) {
     }
   }
 
-  const headerBusy = runAgent.isPending || stopRun.isPending;
+  async function handleFinalApprove() {
+    setActionError(null);
+    try {
+      await finalApprove.mutateAsync();
+    } catch {
+      setActionError('Unable to final approve ticket.');
+    }
+  }
+
+  const headerBusy =
+    runAgent.isPending || stopRun.isPending || finalApprove.isPending;
 
   return (
     <div className="fixed inset-0 z-50 flex justify-end" role="presentation">
@@ -165,6 +176,17 @@ export function TicketDrawer({ ticketId, onClose }: TicketDrawerProps) {
                     className="rounded-md border border-danger px-3 py-1.5 font-body text-sm font-medium text-danger transition-colors duration-fast hover:bg-danger-muted/40 disabled:opacity-50"
                   >
                     {stopRun.isPending ? 'Stopping…' : 'Stop'}
+                  </button>
+                )}
+
+                {ticket.status === 'wait_for_final_review' && (
+                  <button
+                    type="button"
+                    onClick={() => void handleFinalApprove()}
+                    disabled={headerBusy}
+                    className="rounded-md bg-moss-700 px-3 py-1.5 font-body text-sm font-medium text-white transition-colors duration-fast hover:bg-moss-800 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {finalApprove.isPending ? 'Approving…' : 'Final Approve'}
                   </button>
                 )}
               </>

@@ -109,6 +109,13 @@ async function assignTicketAgent(
   return res.json() as Promise<Ticket>;
 }
 
+async function postFinalApprove(ticketId: string): Promise<Ticket> {
+  const res = await apiFetch(`/api/tickets/${ticketId}/final-approve`, {
+    method: 'POST',
+  });
+  return res.json() as Promise<Ticket>;
+}
+
 export function useTicket(ticketId: string | undefined) {
   return useQuery({
     queryKey: ticketQueryKey(ticketId ?? ''),
@@ -133,6 +140,20 @@ export function useAssignAgent(ticketId: string) {
       assignTicketAgent(ticketId, agentId),
     onSuccess: (ticket) => {
       queryClient.setQueryData(ticketQueryKey(ticketId), ticket);
+    },
+  });
+}
+
+export function useFinalApprove(ticketId: string) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: () => postFinalApprove(ticketId),
+    onSuccess: (ticket) => {
+      queryClient.setQueryData(ticketQueryKey(ticketId), ticket);
+      void queryClient.invalidateQueries({
+        queryKey: ['tickets', ticket.projectId],
+      });
     },
   });
 }
