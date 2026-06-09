@@ -2,6 +2,57 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use tracing_subscriber::EnvFilter;
 
+use coppice_server::services::run_service::RunService;
+use coppice_server::sessions::opencode_client::OpenCodeClient;
+use coppice_server::AppState;
+
+async fn sweep_orphaned_runs(state: &AppState) {
+    let Some(pool) = state.db.as_ref() else {
+        return;
+    };
+    let run_svc = RunService::new(pool);
+    let Ok(runs) = run_svc.list_active_runs().await else {
+        return;
+    };
+
+    for run in runs {
+        if state.run_streams.get(run.id).is_some() {
+            continue;
+        }
+        if let (Some(session_id), Some(worktree)) = (&run.session_id, &run.worktree_path) {
+            let connector = run_svc
+                .agent_connector_for_run(run.agent_id)
+                .await
+                .ok()
+                .flatten();
+            if connector.as_deref() == Some("opencode") {
+                if let Some(serve) = state.opencode_serve.as_ref() {
+                    let client = OpenCodeClient::new(serve.base_url());
+                    let alive = client
+                        .session_status(std::path::Path::new(worktree), session_id)
+                        .await
+                        .ok()
+                        .flatten()
+                        .is_some();
+                    if !alive {
+                        let _ = run_svc
+                            .mark_interrupted(run.id, "server restarted during run")
+                            .await;
+                    }
+                } else {
+                    let _ = run_svc
+                        .mark_interrupted(run.id, "server restarted during run")
+                        .await;
+                }
+                continue;
+            }
+        }
+        let _ = run_svc
+            .mark_interrupted(run.id, "server restarted during run")
+            .await;
+    }
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
@@ -37,6 +88,7 @@ async fn main() -> anyhow::Result<()> {
         config: config.clone(),
         db: Some(db),
     });
+    sweep_orphaned_runs(&state).await;
     coppice_server::workers::job_worker::spawn_workers(state.clone());
     coppice_server::workers::health_worker::spawn_health_worker(state.clone());
     let app = coppice_server::app(state);

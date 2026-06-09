@@ -277,7 +277,7 @@ impl OpenCodeClient {
             .ok_or_else(|| ProviderError::InvalidFixture("opencode messages not an array".into()))
     }
 
-    async fn session_status(
+    pub async fn session_status(
         &self,
         directory: &Path,
         session_id: &str,

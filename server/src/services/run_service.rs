@@ -397,6 +397,127 @@ impl<'a> RunService<'a> {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::run::RunStatus;
+
+    async fn test_pool() -> Option<PgPool> {
+        let database_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
+            "postgres://coppice:coppice@localhost:5432/coppice".into()
+        });
+        crate::db::connect_and_migrate(&database_url).await.ok()
+    }
+
+    async fn insert_run(pool: &PgPool, status: RunStatus) -> Uuid {
+        let project_id = Uuid::new_v4();
+        sqlx::query("INSERT INTO projects (id, name, slug) VALUES ($1, $2, $3)")
+            .bind(project_id)
+            .bind("test project")
+            .bind(format!("test-{}", project_id))
+            .execute(pool)
+            .await
+            .expect("insert project");
+
+        let agent_id = Uuid::new_v4();
+        sqlx::query(
+            r#"
+            INSERT INTO agents (
+                id, name, role, skills, responsibilities, system_prompt, connector
+            )
+            VALUES ($1, $2, $3, '{}', '{}', $4, $5)
+            "#,
+        )
+        .bind(agent_id)
+        .bind("test agent")
+        .bind("worker")
+        .bind("prompt")
+        .bind("mock")
+        .execute(pool)
+        .await
+        .expect("insert agent");
+
+        let ticket_id = Uuid::new_v4();
+        sqlx::query(
+            r#"
+            INSERT INTO tickets (
+                id, project_id, title, status, created_by, assignee_agent_id
+            )
+            VALUES ($1, $2, $3, $4, $5, $6)
+            "#,
+        )
+        .bind(ticket_id)
+        .bind(project_id)
+        .bind("test ticket")
+        .bind("todo")
+        .bind("test")
+        .bind(agent_id)
+        .execute(pool)
+        .await
+        .expect("insert ticket");
+
+        let run_id = Uuid::new_v4();
+        sqlx::query(
+            r#"
+            INSERT INTO agent_runs (
+                id, ticket_id, agent_id, job_type, status, sandbox_profile_id
+            )
+            VALUES ($1, $2, $3, $4, $5, $6)
+            "#,
+        )
+        .bind(run_id)
+        .bind(ticket_id)
+        .bind(agent_id)
+        .bind(JOB_TYPE_WORK_ON_TICKET)
+        .bind(run_status_to_str(status))
+        .bind(PROFILE_ID)
+        .execute(pool)
+        .await
+        .expect("insert run");
+
+        run_id
+    }
+
+    #[tokio::test]
+    async fn mark_interrupted_sets_failed_status() {
+        let Some(pool) = test_pool().await else {
+            return;
+        };
+        let run_id = insert_run(&pool, RunStatus::Running).await;
+        let svc = RunService::new(&pool);
+
+        let updated = svc
+            .mark_interrupted(run_id, "server restarted during run")
+            .await
+            .expect("mark interrupted");
+
+        assert_eq!(updated.status, RunStatus::Failed);
+        assert_eq!(
+            updated.error_message.as_deref(),
+            Some("interrupted: server restarted during run")
+        );
+        assert!(updated.ended_at.is_some());
+    }
+
+    #[tokio::test]
+    async fn list_active_runs_returns_queued_and_running() {
+        let Some(pool) = test_pool().await else {
+            return;
+        };
+        let running_id = insert_run(&pool, RunStatus::Running).await;
+        let queued_id = insert_run(&pool, RunStatus::Queued).await;
+        let succeeded_id = insert_run(&pool, RunStatus::Succeeded).await;
+
+        let svc = RunService::new(&pool);
+        let active = svc.list_active_runs().await.expect("list active runs");
+        let active_ids: Vec<Uuid> = active.iter().map(|run| run.id).collect();
+
+        assert!(active_ids.contains(&running_id));
+        assert!(active_ids.contains(&queued_id));
+        assert!(!active_ids.contains(&succeeded_id));
+    }
+}
+
 fn row_to_run(row: &sqlx::postgres::PgRow) -> AgentRun {
     let status_str: String = row.get("status");
     let status = run_status_from_str(&status_str).unwrap_or(RunStatus::Queued);
