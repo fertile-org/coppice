@@ -86,7 +86,7 @@ async fn agent_with_unknown_provider_gets_missing_config_health() {
         .oneshot(common::json_request(
             "POST",
             "/api/agents",
-            r#"{"name":"OpenCode Bot","role":"Developer","systemPrompt":"You are a developer","provider":"opencode"}"#,
+            r#"{"name":"OpenCode Bot","role":"Developer","systemPrompt":"You are a developer","connector":"opencode"}"#,
             &cookie,
             &csrf,
         ))
@@ -113,7 +113,7 @@ async fn agent_with_unknown_provider_gets_missing_config_health() {
     let agents = body["items"].as_array().unwrap();
     assert_eq!(agents.len(), 1);
     let agent = &agents[0];
-    assert_eq!(agent["provider"].as_str().unwrap(), "opencode");
+    assert_eq!(agent["connector"].as_str().unwrap(), "opencode");
     assert_eq!(agent["health"].as_str().unwrap(), "missing_config");
     assert!(agent["healthDetail"]
         .as_str()

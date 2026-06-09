@@ -17,7 +17,6 @@ use uuid::Uuid;
 pub fn routes() -> Router<Arc<AppState>> {
     Router::new()
         .route("/api/agent-presets", get(list_presets))
-        .route("/api/agent-providers", get(list_agent_providers))
         .route("/api/agents", get(list_agents).post(create_agent))
         .route(
             "/api/agents/{agent_id}",
@@ -47,7 +46,8 @@ struct AgentResponse {
     skills: Vec<String>,
     responsibilities: Vec<String>,
     system_prompt: String,
-    provider: String,
+    connector: String,
+    model_provider: Option<String>,
     model: Option<String>,
     health: String,
     health_detail: Option<String>,
@@ -69,19 +69,6 @@ struct AgentListResponse {
     items: Vec<AgentResponse>,
 }
 
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct ProviderOptionResponse {
-    id: String,
-    default_model: Option<String>,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct ProviderListResponse {
-    items: Vec<ProviderOptionResponse>,
-}
-
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct CreateAgentBody {
@@ -91,7 +78,8 @@ struct CreateAgentBody {
     skills: Option<Vec<String>>,
     responsibilities: Option<Vec<String>>,
     system_prompt: Option<String>,
-    provider: Option<String>,
+    connector: Option<String>,
+    model_provider: Option<String>,
     model: Option<String>,
     enabled: Option<bool>,
 }
@@ -104,7 +92,8 @@ struct UpdateAgentBody {
     skills: Option<Vec<String>>,
     responsibilities: Option<Vec<String>>,
     system_prompt: Option<String>,
-    provider: Option<String>,
+    connector: Option<String>,
+    model_provider: Option<String>,
     model: Option<String>,
     enabled: Option<bool>,
 }
@@ -129,7 +118,8 @@ fn agent_to_response(agent: Agent, health: &AgentHealthRegistry) -> AgentRespons
         skills: agent.skills,
         responsibilities: agent.responsibilities,
         system_prompt: agent.system_prompt,
-        provider: agent.provider,
+        connector: agent.connector,
+        model_provider: agent.model_provider,
         model: agent.model,
         health: health_status_to_str(record.status).into(),
         health_detail: record.detail,
@@ -158,22 +148,6 @@ async fn list_presets(
     Ok(Json(PresetListResponse {
         items: presets.into_iter().map(preset_to_response).collect(),
     }))
-}
-
-async fn list_agent_providers(
-    State(state): State<Arc<AppState>>,
-    AuthUser { .. }: AuthUser,
-) -> Json<ProviderListResponse> {
-    let items = state
-        .provider_registry
-        .configured_ids()
-        .into_iter()
-        .map(|id| ProviderOptionResponse {
-            default_model: state.provider_registry.default_model_for(&id),
-            id,
-        })
-        .collect();
-    Json(ProviderListResponse { items })
 }
 
 async fn list_agents(
@@ -220,7 +194,8 @@ async fn create_agent(
                 body.skills.as_deref().unwrap_or(&[]),
                 body.responsibilities.as_deref().unwrap_or(&[]),
                 system_prompt,
-                body.provider.as_deref(),
+                body.connector.as_deref(),
+                body.model_provider.as_deref(),
                 body.model.as_deref(),
                 body.enabled,
             )
@@ -258,7 +233,8 @@ async fn update_agent(
             body.skills.as_deref(),
             body.responsibilities.as_deref(),
             body.system_prompt.as_deref(),
-            body.provider.as_deref(),
+            body.connector.as_deref(),
+            body.model_provider.as_deref(),
             body.model.as_deref(),
             body.enabled,
         )

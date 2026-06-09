@@ -43,7 +43,7 @@ impl<'a> AgentService<'a> {
             r#"
             SELECT
                 id, name, role, skills, responsibilities, system_prompt,
-                provider, model, enabled, preset_source, created_at, updated_at
+                connector, model_provider, model, enabled, preset_source, created_at, updated_at
             FROM agents
             ORDER BY created_at ASC
             "#,
@@ -59,7 +59,7 @@ impl<'a> AgentService<'a> {
             r#"
             SELECT
                 id, name, role, skills, responsibilities, system_prompt,
-                provider, model, enabled, preset_source, created_at, updated_at
+                connector, model_provider, model, enabled, preset_source, created_at, updated_at
             FROM agents
             WHERE id = $1
             "#,
@@ -102,6 +102,7 @@ impl<'a> AgentService<'a> {
             &preset.system_prompt_template,
             "mock",
             None,
+            None,
             true,
             Some(&preset.key),
         )
@@ -116,7 +117,8 @@ impl<'a> AgentService<'a> {
         skills: &[String],
         responsibilities: &[String],
         system_prompt: &str,
-        provider: Option<&str>,
+        connector: Option<&str>,
+        model_provider: Option<&str>,
         model: Option<&str>,
         enabled: Option<bool>,
     ) -> Result<Agent, AgentError> {
@@ -129,6 +131,11 @@ impl<'a> AgentService<'a> {
         if system_prompt.trim().is_empty() {
             return Err(AgentError::Validation("systemPrompt is required".into()));
         }
+        if let Some(mp) = model_provider {
+            if mp.trim().is_empty() {
+                return Err(AgentError::Validation("modelProvider cannot be empty".into()));
+            }
+        }
 
         self.insert_agent(
             name,
@@ -136,7 +143,8 @@ impl<'a> AgentService<'a> {
             skills,
             responsibilities,
             system_prompt,
-            provider.unwrap_or("mock"),
+            connector.unwrap_or("mock"),
+            model_provider,
             model,
             enabled.unwrap_or(true),
             None,
@@ -153,17 +161,25 @@ impl<'a> AgentService<'a> {
         skills: Option<&[String]>,
         responsibilities: Option<&[String]>,
         system_prompt: Option<&str>,
-        provider: Option<&str>,
+        connector: Option<&str>,
+        model_provider: Option<&str>,
         model: Option<&str>,
         enabled: Option<bool>,
     ) -> Result<Agent, AgentError> {
+        if let Some(mp) = model_provider {
+            if mp.trim().is_empty() {
+                return Err(AgentError::Validation("modelProvider cannot be empty".into()));
+            }
+        }
+
         let current = self.get(agent_id).await?;
         let name = name.unwrap_or(&current.name);
         let role = role.unwrap_or(&current.role);
         let skills = skills.unwrap_or(&current.skills);
         let responsibilities = responsibilities.unwrap_or(&current.responsibilities);
         let system_prompt = system_prompt.unwrap_or(&current.system_prompt);
-        let provider = provider.unwrap_or(&current.provider);
+        let connector = connector.unwrap_or(&current.connector);
+        let model_provider = model_provider.or(current.model_provider.as_deref());
         let model = model.or(current.model.as_deref());
         let enabled = enabled.unwrap_or(current.enabled);
 
@@ -176,14 +192,15 @@ impl<'a> AgentService<'a> {
                 skills = $4,
                 responsibilities = $5,
                 system_prompt = $6,
-                provider = $7,
-                model = $8,
-                enabled = $9,
+                connector = $7,
+                model_provider = $8,
+                model = $9,
+                enabled = $10,
                 updated_at = now()
             WHERE id = $1
             RETURNING
                 id, name, role, skills, responsibilities, system_prompt,
-                provider, model, enabled, preset_source, created_at, updated_at
+                connector, model_provider, model, enabled, preset_source, created_at, updated_at
             "#,
         )
         .bind(agent_id)
@@ -192,7 +209,8 @@ impl<'a> AgentService<'a> {
         .bind(skills)
         .bind(responsibilities)
         .bind(system_prompt)
-        .bind(provider)
+        .bind(connector)
+        .bind(model_provider)
         .bind(model)
         .bind(enabled)
         .fetch_optional(self.pool)
@@ -223,7 +241,8 @@ impl<'a> AgentService<'a> {
         skills: &[String],
         responsibilities: &[String],
         system_prompt: &str,
-        provider: &str,
+        connector: &str,
+        model_provider: Option<&str>,
         model: Option<&str>,
         enabled: bool,
         preset_source: Option<&str>,
@@ -233,12 +252,12 @@ impl<'a> AgentService<'a> {
             r#"
             INSERT INTO agents (
                 id, name, role, skills, responsibilities, system_prompt,
-                provider, model, enabled, preset_source
+                connector, model_provider, model, enabled, preset_source
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
             RETURNING
                 id, name, role, skills, responsibilities, system_prompt,
-                provider, model, enabled, preset_source, created_at, updated_at
+                connector, model_provider, model, enabled, preset_source, created_at, updated_at
             "#,
         )
         .bind(id)
@@ -247,7 +266,8 @@ impl<'a> AgentService<'a> {
         .bind(skills)
         .bind(responsibilities)
         .bind(system_prompt)
-        .bind(provider)
+        .bind(connector)
+        .bind(model_provider)
         .bind(model)
         .bind(enabled)
         .bind(preset_source)
@@ -277,7 +297,8 @@ fn row_to_agent(row: &sqlx::postgres::PgRow) -> Agent {
         skills: row.get("skills"),
         responsibilities: row.get("responsibilities"),
         system_prompt: row.get("system_prompt"),
-        provider: row.get("provider"),
+        connector: row.get("connector"),
+        model_provider: row.get("model_provider"),
         model: row.get("model"),
         enabled: row.get("enabled"),
         preset_source: row.get("preset_source"),
