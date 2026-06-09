@@ -1,8 +1,10 @@
 use crate::api::ws::auth::auth_user_from_cookie;
 use crate::domain::run::run_status_to_str;
+use crate::services::artifact_service::RunArtifactPaths;
 use crate::services::run_service::RunService;
 use crate::sessions::TerminalFrame;
 use crate::AppState;
+use time::OffsetDateTime;
 use axum::{
     extract::{
         ws::{Message, WebSocket, WebSocketUpgrade},
@@ -58,6 +60,15 @@ async fn handle_live_socket(state: Arc<AppState>, run_id: Uuid, socket: WebSocke
                 break;
             }
         }
+    } else if let Some(log_bytes) = read_terminal_log_artifact(&state, run_id) {
+        let frame = TerminalFrame {
+            seq: 0,
+            data: log_bytes,
+            ts: OffsetDateTime::now_utc(),
+        };
+        if send_frame(&mut sender, &frame).await.is_err() {
+            return;
+        }
     }
 
     let status = if let Some(pool) = state.db.as_ref() {
@@ -74,6 +85,14 @@ async fn handle_live_socket(state: Arc<AppState>, run_id: Uuid, socket: WebSocke
     let _ = sender
         .send(Message::Text(serde_json::to_string(&end).unwrap_or_default().into()))
         .await;
+}
+
+fn read_terminal_log_artifact(state: &AppState, run_id: Uuid) -> Option<Vec<u8>> {
+    let paths = RunArtifactPaths::new(&state.config.storage.artifacts_dir, &run_id.to_string());
+    if !paths.terminal_log.is_file() {
+        return None;
+    }
+    std::fs::read(&paths.terminal_log).ok().filter(|bytes| !bytes.is_empty())
 }
 
 async fn send_frame(

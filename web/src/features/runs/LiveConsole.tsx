@@ -10,12 +10,24 @@ interface LiveConsoleProps {
 
 type ConnectionState = 'connecting' | 'open' | 'closed';
 
+function isActiveRunStatus(status: string | null): boolean {
+  return status === 'running' || status === 'queued';
+}
+
+/** xterm needs CRLF; bare `\n` advances the row without resetting the column. */
+function writeTerminalData(term: Terminal, data: string) {
+  term.write(data.replace(/\r?\n/g, '\r\n'));
+}
+
 export function LiveConsole({ runId, runStatus }: LiveConsoleProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
+  const [termReady, setTermReady] = useState(false);
   const [connection, setConnection] = useState<ConnectionState>('closed');
   const [reconnectToken, setReconnectToken] = useState(0);
+  const [sawOutput, setSawOutput] = useState(false);
+  const sawOutputRef = useRef(false);
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -30,21 +42,27 @@ export function LiveConsole({ runId, runStatus }: LiveConsoleProps) {
     fit.fit();
     termRef.current = term;
     fitRef.current = fit;
+    setTermReady(true);
     return () => {
       term.dispose();
       termRef.current = null;
       fitRef.current = null;
+      setTermReady(false);
     };
   }, []);
 
   useEffect(() => {
-    if (!runId || !termRef.current) return;
+    if (!runId || !termReady || !termRef.current) return;
+
     termRef.current.clear();
+    sawOutputRef.current = false;
+    setSawOutput(false);
+    setConnection('connecting');
+
     const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
     const ws = new WebSocket(
       `${protocol}://${window.location.host}/ws/agent-runs/${runId}/live`,
     );
-    setConnection('connecting');
 
     ws.onopen = () => setConnection('open');
     ws.onclose = () => setConnection('closed');
@@ -53,23 +71,35 @@ export function LiveConsole({ runId, runStatus }: LiveConsoleProps) {
       const msg = JSON.parse(event.data as string) as {
         type?: string;
         data?: string;
+        status?: string;
       };
       if (msg.type === 'frame' && typeof msg.data === 'string') {
-        termRef.current?.write(msg.data);
+        if (termRef.current) writeTerminalData(termRef.current, msg.data);
+        sawOutputRef.current = true;
+        setSawOutput(true);
       }
       if (msg.type === 'end') {
+        if (
+          !sawOutputRef.current &&
+          msg.status &&
+          isActiveRunStatus(msg.status)
+        ) {
+          // Stream not ready yet; reconnect will pick up live frames.
+          ws.close();
+          return;
+        }
         ws.close();
       }
     };
 
     return () => ws.close();
-  }, [runId, reconnectToken]);
+  }, [runId, reconnectToken, termReady]);
 
   useEffect(() => {
-    if (runStatus !== 'running' || connection !== 'closed' || !runId) return;
+    if (!isActiveRunStatus(runStatus) || connection !== 'closed' || !runId) return;
     const timer = window.setTimeout(() => {
       setReconnectToken((token) => token + 1);
-    }, 2000);
+    }, 800);
     return () => window.clearTimeout(timer);
   }, [runStatus, connection, runId]);
 
@@ -78,7 +108,7 @@ export function LiveConsole({ runId, runStatus }: LiveConsoleProps) {
     const observer = new ResizeObserver(() => fitRef.current?.fit());
     observer.observe(containerRef.current);
     return () => observer.disconnect();
-  }, []);
+  }, [termReady]);
 
   if (!runId) {
     return (
@@ -93,9 +123,11 @@ export function LiveConsole({ runId, runStatus }: LiveConsoleProps) {
       ? 'Live'
       : connection === 'connecting'
         ? 'Connecting…'
-        : runStatus === 'running'
+        : isActiveRunStatus(runStatus)
           ? 'Disconnected — reconnecting…'
-          : 'Disconnected';
+          : sawOutput
+            ? 'Finished'
+            : 'Disconnected';
 
   return (
     <div className="flex h-full min-h-[320px] flex-col gap-2">

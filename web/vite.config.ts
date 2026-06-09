@@ -16,6 +16,11 @@ export default defineConfig({
         target: process.env.VITE_API_URL ?? 'http://localhost:8080',
         changeOrigin: true,
         ws: true,
+        configure: (proxy) => {
+          proxy.on('error', () => {
+            // Client or upstream may close WS early (e.g. after end frame); ignore EPIPE noise.
+          });
+        },
       },
     },
   },

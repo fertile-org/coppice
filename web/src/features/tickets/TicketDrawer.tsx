@@ -76,6 +76,7 @@ export function TicketDrawer({ ticketId, onClose }: TicketDrawerProps) {
     setActionError(null);
     try {
       await runAgent.mutateAsync();
+      setTab('live');
     } catch {
       setActionError('Unable to start agent run.');
     }
@@ -238,7 +239,7 @@ export function TicketDrawer({ ticketId, onClose }: TicketDrawerProps) {
             <div className="flex h-full min-h-0 flex-col px-6 py-5">
               <LiveConsole
                 runId={activeRun?.id ?? latestRun?.id ?? null}
-                runStatus={activeRun?.status ?? null}
+                runStatus={activeRun?.status ?? latestRun?.status ?? null}
               />
             </div>
           )}
