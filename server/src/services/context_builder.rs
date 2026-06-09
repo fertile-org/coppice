@@ -72,11 +72,13 @@ Return a single JSON object as your final result.
   "summary": "<markdown summary of what you did>",
   "changedFiles": ["<paths changed>"],
   "testsRun": ["<commands run>"],
-  "nextStatus": "<board column, e.g. In Review>",
+  "assignTo": "<agent key to recommend next, e.g. backend_engineer or research>",
   "mentionAgents": ["<agent keys to notify>"],
   "blockers": []
 }}
 ```
+
+The server ignores `nextStatus` for board moves — workflow gates control column transitions.
 
 ## `blocked` — cannot proceed
 
@@ -85,7 +87,6 @@ Return a single JSON object as your final result.
   "status": "blocked",
   "blockerType": "<missing_capability | missing_secret | permission | needs_human | ...>",
   "summary": "<why you are blocked>",
-  "nextStatus": "<board column, e.g. Blocked>",
   "mentionAgents": ["<agent keys to notify>"]
 }}
 ```
