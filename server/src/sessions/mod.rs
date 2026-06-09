@@ -1,6 +1,9 @@
 pub mod live_message;
+pub mod session_snapshot;
+pub mod opencode_client;
 pub mod opencode_events;
 pub mod opencode_serve;
+pub mod opencode_stream;
 pub mod run_registry;
 pub mod scripted_stream;
 pub mod terminal_frame;
