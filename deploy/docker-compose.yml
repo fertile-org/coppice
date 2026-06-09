@@ -31,6 +31,7 @@ services:
       AGENT_DEFAULT_PROVIDER: mock
       WORKTREES_PATH: /data/worktrees
       AGENT_WORKER_COUNT: "2"
+      WORKFLOW_AUTO_START_RUNS: "true"
     volumes:
       - artifact_data:/data/artifacts
       - worktree_data:/data/worktrees

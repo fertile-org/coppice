@@ -10,7 +10,7 @@ COMPOSE_LOCAL = $(DOCKER_COMPOSE) -f deploy/docker-compose.local.yml
 BOOTSTRAP_EMAIL = admin@localhost
 BOOTSTRAP_PASSWORD = changeme
 
-.PHONY: compose-up compose-down compose-local-up compose-local-down server-dev test clippy migrate bootstrap web-install web-test web-dev web-build e2e-smoke e2e-smoke-m03 e2e-smoke-m04 release-tar
+.PHONY: compose-up compose-down compose-local-up compose-local-down server-dev test clippy migrate bootstrap web-install web-test web-dev web-build e2e-smoke e2e-smoke-m03 e2e-smoke-m04 e2e-smoke-m05 release-tar
 
 compose-up:
 	$(COMPOSE) up -d --build
@@ -65,6 +65,10 @@ e2e-smoke-m03: compose-up
 e2e-smoke-m04: compose-up
 	$(COMPOSE) exec -T server sh -c 'mkdir -p /tmp/smoke-repo && cd /tmp/smoke-repo && git init -b main && git config user.email smoke@coppice.local && git config user.name smoke && echo hi > README.md && git add . && git commit -m init'
 	node e2e/smoke/m04-live-console.mjs
+
+e2e-smoke-m05: compose-up
+	$(COMPOSE) exec -T server sh -c 'mkdir -p /tmp/smoke-repo && cd /tmp/smoke-repo && git init -b main && git config user.email smoke@coppice.local && git config user.name smoke && echo hi > README.md && git add . && git commit -m init'
+	node e2e/smoke/m05-workflow.mjs
 
 release-tar: web-build
 	cargo build --release -p coppice-server -p coppice-cli
