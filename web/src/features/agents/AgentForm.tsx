@@ -1,5 +1,10 @@
 import { useEffect, useState, type FormEvent } from 'react';
-import type { Agent, AgentPreset, AgentProviderOption } from './useAgents';
+import type {
+  Agent,
+  AgentPreset,
+  ConnectorOption,
+} from './useAgents';
+import { useModelProviders, useModels } from './useAgents';
 
 export interface AgentFormValues {
   name: string;
@@ -7,7 +12,8 @@ export interface AgentFormValues {
   skills: string;
   responsibilities: string;
   systemPrompt: string;
-  provider: string;
+  connector: string;
+  modelProvider: string;
   model: string;
   enabled: boolean;
 }
@@ -30,7 +36,8 @@ export function agentToFormValues(agent: Agent): AgentFormValues {
     skills: linesFromList(agent.skills),
     responsibilities: linesFromList(agent.responsibilities),
     systemPrompt: agent.systemPrompt,
-    provider: agent.provider,
+    connector: agent.connector,
+    modelProvider: agent.modelProvider ?? '',
     model: agent.model ?? '',
     enabled: agent.enabled,
   };
@@ -46,7 +53,8 @@ export function presetToFormValues(
     skills: linesFromList(preset.skills),
     responsibilities: linesFromList(preset.responsibilities),
     systemPrompt: preset.systemPromptTemplate,
-    provider: 'mock',
+    connector: 'mock',
+    modelProvider: '',
     model: '',
     enabled: true,
   };
@@ -58,7 +66,7 @@ interface AgentFormProps {
   onChange: (values: AgentFormValues) => void;
   onSubmit: (values: AgentFormValues) => void | Promise<void>;
   onCancel: () => void;
-  providerOptions: AgentProviderOption[];
+  connectorOptions: ConnectorOption[];
   isPending?: boolean;
   error?: string | null;
   submitLabel?: string;
@@ -70,13 +78,19 @@ export function AgentForm({
   onChange,
   onSubmit,
   onCancel,
-  providerOptions,
+  connectorOptions,
   isPending = false,
   error = null,
   submitLabel,
 }: AgentFormProps) {
   const [localError, setLocalError] = useState<string | null>(null);
-  const selectedProvider = providerOptions.find((p) => p.id === values.provider);
+  const showModelFields = values.connector !== 'mock';
+  const { data: modelProviderOptions = [], isLoading: modelProvidersLoading } =
+    useModelProviders(showModelFields ? values.connector : undefined);
+  const { data: modelOptions = [], isLoading: modelsLoading } = useModels(
+    showModelFields ? values.connector : undefined,
+    showModelFields ? values.modelProvider : undefined,
+  );
 
   useEffect(() => {
     setLocalError(null);
@@ -87,6 +101,14 @@ export function AgentForm({
     value: AgentFormValues[K],
   ) {
     onChange({ ...values, [key]: value });
+  }
+
+  function handleConnectorChange(connector: string) {
+    onChange({ ...values, connector, modelProvider: '', model: '' });
+  }
+
+  function handleModelProviderChange(modelProvider: string) {
+    onChange({ ...values, modelProvider, model: '' });
   }
 
   async function handleSubmit(e: FormEvent) {
@@ -197,45 +219,78 @@ export function AgentForm({
 
       <div>
         <label
-          htmlFor="agent-provider"
+          htmlFor="agent-connector"
           className="mb-1 block font-body text-sm font-medium text-bark-800"
         >
-          Provider
+          Connector
         </label>
         <select
-          id="agent-provider"
-          value={values.provider}
-          onChange={(e) => updateField('provider', e.target.value)}
+          id="agent-connector"
+          value={values.connector}
+          onChange={(e) => handleConnectorChange(e.target.value)}
           className="field-control w-full px-3 py-2 font-body text-sm"
         >
-          {providerOptions.map((p) => (
-            <option key={p.id} value={p.id}>
-              {p.id}
+          {connectorOptions.map((c) => (
+            <option key={c.id} value={c.id}>
+              {c.id}
             </option>
           ))}
         </select>
       </div>
 
-      <div>
-        <label
-          htmlFor="agent-model"
-          className="mb-1 block font-body text-sm font-medium text-bark-800"
-        >
-          Model
-        </label>
-        <input
-          id="agent-model"
-          type="text"
-          placeholder={selectedProvider?.defaultModel ?? 'provider/model (optional)'}
-          value={values.model}
-          onChange={(e) => updateField('model', e.target.value)}
-          className="field-control w-full px-3 py-2 font-body text-sm"
-        />
-        <p className="mt-1 font-body text-xs text-text-muted">
-          OpenCode format: provider_id/model_id (e.g. zai-coding-plan/glm-5.1). Leave
-          empty to use server default.
-        </p>
-      </div>
+      {showModelFields && (
+        <>
+          <div>
+            <label
+              htmlFor="agent-model-provider"
+              className="mb-1 block font-body text-sm font-medium text-bark-800"
+            >
+              Model provider
+            </label>
+            <select
+              id="agent-model-provider"
+              value={values.modelProvider}
+              onChange={(e) => handleModelProviderChange(e.target.value)}
+              disabled={modelProvidersLoading}
+              className="field-control w-full px-3 py-2 font-body text-sm disabled:opacity-60"
+            >
+              <option value="">
+                {modelProvidersLoading ? 'Loading…' : 'Select model provider'}
+              </option>
+              {modelProviderOptions.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.id}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label
+              htmlFor="agent-model"
+              className="mb-1 block font-body text-sm font-medium text-bark-800"
+            >
+              Model
+            </label>
+            <select
+              id="agent-model"
+              value={values.model}
+              onChange={(e) => updateField('model', e.target.value)}
+              disabled={!values.modelProvider || modelsLoading}
+              className="field-control w-full px-3 py-2 font-body text-sm disabled:opacity-60"
+            >
+              <option value="">
+                {modelsLoading ? 'Loading…' : 'Select model'}
+              </option>
+              {modelOptions.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.name}
+                </option>
+              ))}
+            </select>
+          </div>
+        </>
+      )}
 
       {mode === 'edit' && (
         <label className="flex items-center gap-2">

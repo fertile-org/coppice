@@ -4,7 +4,7 @@ import type { CreateAgentInput, UpdateAgentInput } from '../../lib/schemas/agent
 
 export const AGENTS_QUERY_KEY = ['agents'] as const;
 export const AGENT_PRESETS_QUERY_KEY = ['agent-presets'] as const;
-export const AGENT_PROVIDERS_QUERY_KEY = ['agent-providers'] as const;
+export const CONNECTORS_QUERY_KEY = ['connectors'] as const;
 
 export interface AgentPreset {
   id: string;
@@ -22,7 +22,8 @@ export interface Agent {
   skills: string[];
   responsibilities: string[];
   systemPrompt: string;
-  provider: string;
+  connector: string;
+  modelProvider?: string | null;
   model?: string | null;
   health: 'unknown' | 'healthy' | 'missing_config' | 'unhealthy';
   healthDetail?: string | null;
@@ -32,9 +33,17 @@ export interface Agent {
   updatedAt: string;
 }
 
-export interface AgentProviderOption {
+export interface ConnectorOption {
   id: string;
-  defaultModel?: string | null;
+}
+
+export interface ModelProviderOption {
+  id: string;
+}
+
+export interface ModelOption {
+  id: string;
+  name: string;
 }
 
 export type AgentSummary = Pick<Agent, 'id' | 'name' | 'role' | 'enabled'>;
@@ -87,12 +96,44 @@ export function useAgents() {
   });
 }
 
-export function useAgentProviders() {
+export function useConnectors() {
   return useQuery({
-    queryKey: AGENT_PROVIDERS_QUERY_KEY,
+    queryKey: CONNECTORS_QUERY_KEY,
     queryFn: async () => {
-      const res = await apiFetch('/api/agent-providers');
-      const data = (await res.json()) as { items: AgentProviderOption[] };
+      const res = await apiFetch('/api/connectors');
+      const data = (await res.json()) as { items: ConnectorOption[] };
+      return data.items;
+    },
+  });
+}
+
+export function useModelProviders(connectorId: string | undefined) {
+  return useQuery({
+    queryKey: ['model-providers', connectorId],
+    enabled: !!connectorId && connectorId !== 'mock',
+    queryFn: async () => {
+      const res = await apiFetch(
+        `/api/connectors/${connectorId}/model-providers`,
+      );
+      const data = (await res.json()) as { items: ModelProviderOption[] };
+      return data.items;
+    },
+  });
+}
+
+export function useModels(
+  connectorId: string | undefined,
+  modelProviderId: string | undefined,
+) {
+  return useQuery({
+    queryKey: ['models', connectorId, modelProviderId],
+    enabled:
+      !!connectorId && !!modelProviderId && connectorId !== 'mock',
+    queryFn: async () => {
+      const res = await apiFetch(
+        `/api/connectors/${connectorId}/model-providers/${modelProviderId}/models`,
+      );
+      const data = (await res.json()) as { items: ModelOption[] };
       return data.items;
     },
   });

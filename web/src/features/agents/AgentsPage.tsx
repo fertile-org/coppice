@@ -9,14 +9,14 @@ import {
 } from './AgentForm';
 import {
   useAgentPresets,
-  useAgentProviders,
   useAgents,
+  useConnectors,
   useCreateAgent,
   useUpdateAgent,
   useUpdateAgentMutation,
   type Agent,
   type AgentPreset,
-  type AgentProviderOption,
+  type ConnectorOption,
 } from './useAgents';
 
 function formatDate(iso: string): string {
@@ -27,11 +27,6 @@ function formatDate(iso: string): string {
     day: 'numeric',
     year: 'numeric',
   });
-}
-
-function truncateModel(model: string, maxLen = 24): string {
-  if (model.length <= maxLen) return model;
-  return `${model.slice(0, maxLen - 1)}…`;
 }
 
 function HealthBadge({
@@ -62,12 +57,12 @@ function CreateAgentDialog({
   open,
   onClose,
   presets,
-  providerOptions,
+  connectorOptions,
 }: {
   open: boolean;
   onClose: () => void;
   presets: AgentPreset[];
-  providerOptions: AgentProviderOption[];
+  connectorOptions: ConnectorOption[];
 }) {
   const presetRef = useRef<HTMLSelectElement>(null);
   const [presetId, setPresetId] = useState('');
@@ -124,8 +119,9 @@ function CreateAgentDialog({
       await createAgent.mutateAsync({
         name: formValues.name.trim(),
         presetId: presetId || undefined,
-        provider: formValues.provider || undefined,
-        model: formValues.model.trim() || undefined,
+        connector: formValues.connector,
+        modelProvider: formValues.modelProvider || undefined,
+        model: formValues.model || undefined,
       });
       onClose();
     } catch (err) {
@@ -189,7 +185,7 @@ function CreateAgentDialog({
             onChange={setValues}
             onSubmit={handleSubmit}
             onCancel={onClose}
-            providerOptions={providerOptions}
+            connectorOptions={connectorOptions}
             isPending={createAgent.isPending}
             error={error}
           />
@@ -202,11 +198,11 @@ function CreateAgentDialog({
 function EditAgentDialog({
   agent,
   onClose,
-  providerOptions,
+  connectorOptions,
 }: {
   agent: Agent;
   onClose: () => void;
-  providerOptions: AgentProviderOption[];
+  connectorOptions: ConnectorOption[];
 }) {
   const [values, setValues] = useState<AgentFormValues>(() =>
     agentToFormValues(agent),
@@ -236,8 +232,9 @@ function EditAgentDialog({
         skills: listFromLines(formValues.skills),
         responsibilities: listFromLines(formValues.responsibilities),
         systemPrompt: formValues.systemPrompt,
-        provider: formValues.provider || undefined,
-        model: formValues.model.trim() || undefined,
+        connector: formValues.connector,
+        modelProvider: formValues.modelProvider || undefined,
+        model: formValues.model || undefined,
         enabled: formValues.enabled,
       });
       onClose();
@@ -276,7 +273,7 @@ function EditAgentDialog({
             onChange={setValues}
             onSubmit={handleSubmit}
             onCancel={onClose}
-            providerOptions={providerOptions}
+            connectorOptions={connectorOptions}
             isPending={updateAgent.isPending}
             error={error}
           />
@@ -312,14 +309,11 @@ function AgentRow({
       <td className="px-4 py-3 font-body text-sm text-text-secondary">
         {agent.role}
       </td>
-      <td className="px-4 py-3">
-        <div className="font-body text-sm text-text-primary">{agent.provider}</div>
-        {agent.model && (
-          <div
-            className="mt-0.5 max-w-[10rem] truncate font-mono text-xs text-text-muted"
-            title={agent.model}
-          >
-            {truncateModel(agent.model)}
+      <td className="px-4 py-3 font-body text-sm text-text-secondary">
+        <div>{agent.connector}</div>
+        {agent.modelProvider && agent.model && (
+          <div className="mt-0.5 font-mono text-xs text-text-muted">
+            {agent.modelProvider}/{agent.model}
           </div>
         )}
       </td>
@@ -367,7 +361,7 @@ function AgentRow({
 export function AgentsPage() {
   const { data: agents, isLoading, isError, refetch } = useAgents();
   const { data: presets, isLoading: presetsLoading } = useAgentPresets();
-  const { data: providerOptions = [] } = useAgentProviders();
+  const { data: connectorOptions = [] } = useConnectors();
   const [createOpen, setCreateOpen] = useState(false);
   const [editingAgent, setEditingAgent] = useState<Agent | null>(null);
   const [togglingId, setTogglingId] = useState<string | null>(null);
@@ -461,7 +455,7 @@ export function AgentsPage() {
                   Role
                 </th>
                 <th className="px-4 py-3 font-body text-xs font-medium uppercase tracking-wide text-text-muted">
-                  Provider
+                  Connector
                 </th>
                 <th className="px-4 py-3 font-body text-xs font-medium uppercase tracking-wide text-text-muted">
                   Status
@@ -495,7 +489,7 @@ export function AgentsPage() {
           open={createOpen}
           onClose={() => setCreateOpen(false)}
           presets={presets}
-          providerOptions={providerOptions}
+          connectorOptions={connectorOptions}
         />
       )}
 
@@ -503,7 +497,7 @@ export function AgentsPage() {
         <EditAgentDialog
           agent={editingAgent}
           onClose={() => setEditingAgent(null)}
-          providerOptions={providerOptions}
+          connectorOptions={connectorOptions}
         />
       )}
     </div>
