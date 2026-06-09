@@ -18,6 +18,12 @@ pub struct AgentHealthRegistry {
     inner: DashMap<Uuid, AgentHealthRecord>,
 }
 
+impl Default for AgentHealthRegistry {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl AgentHealthRegistry {
     pub fn new() -> Self {
         Self {

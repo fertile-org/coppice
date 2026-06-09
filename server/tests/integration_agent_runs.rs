@@ -356,3 +356,46 @@ async fn retry_after_failed_creates_new_run() {
     )
     .await;
 }
+
+#[tokio::test]
+async fn reject_run_when_agent_provider_missing_config() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+
+    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
+
+    let create_res = app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            "/api/agents",
+            r#"{"name":"OpenCode Bot","role":"Developer","systemPrompt":"You are a developer","provider":"opencode"}"#,
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(create_res.status(), StatusCode::CREATED);
+    let agent: serde_json::Value = common::json_body(create_res).await;
+    let agent_id = agent["id"].as_str().unwrap();
+
+    coppice_server::workers::health_worker::run_health_pass_once(&state).await;
+
+    let project_id = common::create_test_project(&app, &cookie, &csrf).await;
+    let ticket_id = common::create_test_ticket(&app, &project_id, &cookie, &csrf).await;
+    let (_git_dir, local_path) = common::create_temp_git_checkout();
+    let repo_id =
+        common::register_test_repo(&app, &local_path.display().to_string(), &cookie, &csrf).await;
+    common::set_ticket_repo(&app, &ticket_id, &repo_id, &cookie, &csrf).await;
+    common::assign_agent_to_ticket(&app, &ticket_id, agent_id, &cookie, &csrf).await;
+
+    let (status, body) = post_run_agent(&app, &ticket_id, &cookie, &csrf).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    let body = body.unwrap();
+    assert_eq!(
+        body["message"].as_str().unwrap(),
+        "Agent provider is not configured on this server"
+    );
+}

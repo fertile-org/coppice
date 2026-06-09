@@ -6,12 +6,14 @@ use crate::domain::substatus::{Substatus, SubstatusDisplay, TicketStatus};
 use crate::domain::ticket::{
     priority_from_str, status_from_str, substatus_from_str, TicketPriority,
 };
+use crate::domain::agent_health::AgentHealthStatus;
 use crate::services::run_service::{RunError, RunService};
 use crate::services::ticket_service::{TicketError, TicketFilters, TicketService, TicketWithDisplay};
 use crate::AppState;
 use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
+    response::{IntoResponse, Response},
     routing::{get, post},
     Json, Router,
 };
@@ -166,6 +168,36 @@ fn map_run_error(err: RunError) -> StatusCode {
         RunError::Validation(_) => StatusCode::BAD_REQUEST,
         RunError::Database(_) => StatusCode::INTERNAL_SERVER_ERROR,
     }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ApiMessageResponse {
+    message: String,
+}
+
+enum RunAgentError {
+    Status(StatusCode),
+    Message(StatusCode, String),
+}
+
+impl IntoResponse for RunAgentError {
+    fn into_response(self) -> Response {
+        match self {
+            RunAgentError::Status(code) => code.into_response(),
+            RunAgentError::Message(code, message) => {
+                (code, Json(ApiMessageResponse { message })).into_response()
+            }
+        }
+    }
+}
+
+fn map_run_error_response(err: RunError) -> RunAgentError {
+    RunAgentError::Status(map_run_error(err))
+}
+
+fn map_ticket_error_response(err: TicketError) -> RunAgentError {
+    RunAgentError::Status(map_error(err))
 }
 
 fn map_error(err: TicketError) -> StatusCode {
@@ -325,10 +357,28 @@ async fn run_agent(
     State(state): State<Arc<AppState>>,
     AuthUser { .. }: AuthUser,
     Path(ticket_id): Path<Uuid>,
-) -> Result<(StatusCode, Json<SingleRunResponse>), StatusCode> {
-    let pool = pool_from_state(&state)?;
+) -> Result<(StatusCode, Json<SingleRunResponse>), RunAgentError> {
+    let pool = pool_from_state(&state).map_err(RunAgentError::Status)?;
+    let ticket = TicketService::new(pool)
+        .get(ticket_id)
+        .await
+        .map_err(map_ticket_error_response)?;
+
+    if let Some(agent_id) = ticket.ticket.assignee_agent_id {
+        let health = state.agent_health.get(agent_id);
+        if health.status == AgentHealthStatus::MissingConfig {
+            return Err(RunAgentError::Message(
+                StatusCode::BAD_REQUEST,
+                "Agent provider is not configured on this server".into(),
+            ));
+        }
+    }
+
     let service = RunService::new(pool);
-    let run = service.start_run(ticket_id).await.map_err(map_run_error)?;
+    let run = service
+        .start_run(ticket_id)
+        .await
+        .map_err(map_run_error_response)?;
     Ok((StatusCode::CREATED, Json(single_run_response(run))))
 }
 
