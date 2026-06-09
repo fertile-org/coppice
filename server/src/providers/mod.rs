@@ -40,8 +40,10 @@ pub enum AgentRunResult {
         changed_files: Vec<String>,
         #[serde(default, rename = "testsRun")]
         tests_run: Vec<String>,
-        #[serde(rename = "nextStatus")]
-        next_status: String,
+        #[serde(default, rename = "nextStatus")]
+        next_status: Option<String>,
+        #[serde(default, rename = "assignTo")]
+        assign_to: Option<String>,
         #[serde(default, rename = "mentionAgents")]
         mention_agents: Vec<String>,
         #[serde(default)]
@@ -51,8 +53,10 @@ pub enum AgentRunResult {
         #[serde(rename = "blockerType")]
         blocker_type: String,
         summary: String,
-        #[serde(rename = "nextStatus")]
-        next_status: String,
+        #[serde(default, rename = "nextStatus")]
+        next_status: Option<String>,
+        #[serde(default, rename = "assignTo")]
+        assign_to: Option<String>,
         #[serde(rename = "mentionAgents")]
         mention_agents: Vec<String>,
         #[serde(default, rename = "requiredCapabilities")]

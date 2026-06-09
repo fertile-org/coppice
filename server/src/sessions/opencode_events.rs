@@ -262,9 +262,10 @@ mod tests {
                 tests_run,
                 mention_agents,
                 blockers,
+                ..
             } => {
                 assert_eq!(summary, "Test complete.");
-                assert_eq!(next_status, "In Review");
+                assert_eq!(next_status.as_deref(), Some("In Review"));
                 assert!(changed_files.is_empty());
                 assert!(tests_run.is_empty());
                 assert!(mention_agents.is_empty());

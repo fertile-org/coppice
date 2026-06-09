@@ -64,6 +64,7 @@ impl<'a> TicketService<'a> {
                 t.id, t.project_id, t.repo_id, t.title, t.description,
                 t.status, t.substatus, t.substatus_metadata, t.priority,
                 t.assignee_agent_id, t.owner_user_id, t.branch_name,
+                t.pending_assign_recommendation, t.clarification_round,
                 t.created_by, t.created_by_id, t.created_at, t.updated_at
             FROM tickets t
             WHERE t.project_id = $1
@@ -124,6 +125,7 @@ impl<'a> TicketService<'a> {
                 id, project_id, repo_id, title, description,
                 status, substatus, substatus_metadata, priority,
                 assignee_agent_id, owner_user_id, branch_name,
+                pending_assign_recommendation, clarification_round,
                 created_by, created_by_id, created_at, updated_at
             "#,
         )
@@ -149,6 +151,7 @@ impl<'a> TicketService<'a> {
                 id, project_id, repo_id, title, description,
                 status, substatus, substatus_metadata, priority,
                 assignee_agent_id, owner_user_id, branch_name,
+                pending_assign_recommendation, clarification_round,
                 created_by, created_by_id, created_at, updated_at
             FROM tickets
             WHERE id = $1
@@ -210,6 +213,7 @@ impl<'a> TicketService<'a> {
                 id, project_id, repo_id, title, description,
                 status, substatus, substatus_metadata, priority,
                 assignee_agent_id, owner_user_id, branch_name,
+                pending_assign_recommendation, clarification_round,
                 created_by, created_by_id, created_at, updated_at
             "#,
         )
@@ -265,6 +269,7 @@ impl<'a> TicketService<'a> {
                 id, project_id, repo_id, title, description,
                 status, substatus, substatus_metadata, priority,
                 assignee_agent_id, owner_user_id, branch_name,
+                pending_assign_recommendation, clarification_round,
                 created_by, created_by_id, created_at, updated_at
             "#,
         )
@@ -293,6 +298,7 @@ impl<'a> TicketService<'a> {
                 id, project_id, repo_id, title, description,
                 status, substatus, substatus_metadata, priority,
                 assignee_agent_id, owner_user_id, branch_name,
+                pending_assign_recommendation, clarification_round,
                 created_by, created_by_id, created_at, updated_at
             "#,
         )
@@ -395,6 +401,8 @@ fn row_to_ticket(row: &sqlx::postgres::PgRow) -> Ticket {
         assignee_agent_id: row.get("assignee_agent_id"),
         owner_user_id: row.get("owner_user_id"),
         branch_name: row.get("branch_name"),
+        pending_assign_recommendation: row.get("pending_assign_recommendation"),
+        clarification_round: row.get("clarification_round"),
         created_by: row.get("created_by"),
         created_by_id: row.get("created_by_id"),
         created_at: row.get("created_at"),

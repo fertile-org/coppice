@@ -44,9 +44,17 @@ pub fn apply_agent_result(result: &AgentRunResult) -> Result<ApplyResult, String
             next_status,
             mention_agents,
             blockers,
+            ..
         } => {
-            let status = ticket_status_from_next_status(next_status)
-                .ok_or_else(|| format!("unknown nextStatus: {next_status}"))?;
+            let status = next_status
+                .as_deref()
+                .and_then(ticket_status_from_next_status)
+                .ok_or_else(|| {
+                    next_status.as_deref().map_or_else(
+                        || "missing nextStatus".to_string(),
+                        |label| format!("unknown nextStatus: {label}"),
+                    )
+                })?;
             Ok(ApplyResult {
                 run_status: RunStatus::Succeeded,
                 ticket: ApplyTicketUpdate {
@@ -68,9 +76,17 @@ pub fn apply_agent_result(result: &AgentRunResult) -> Result<ApplyResult, String
             mention_agents,
             required_capabilities,
             required_secrets,
+            ..
         } => {
-            let status = ticket_status_from_next_status(next_status)
-                .ok_or_else(|| format!("unknown nextStatus: {next_status}"))?;
+            let status = next_status
+                .as_deref()
+                .and_then(ticket_status_from_next_status)
+                .ok_or_else(|| {
+                    next_status.as_deref().map_or_else(
+                        || "missing nextStatus".to_string(),
+                        |label| format!("unknown nextStatus: {label}"),
+                    )
+                })?;
             let (substatus, substatus_metadata) = blocked_substatus(
                 status,
                 blocker_type,
