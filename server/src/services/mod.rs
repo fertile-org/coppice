@@ -10,6 +10,7 @@ pub mod project_service;
 pub mod repo_service;
 pub mod repo_verifier;
 pub mod result_contract;
+pub mod run_orchestrator;
 pub mod run_service;
 pub mod ticket_service;
 pub mod user_service;

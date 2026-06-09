@@ -2,6 +2,7 @@ use crate::domain::substatus::{
     build_substatus_display, validate_status_substatus_combo, Substatus, SubstatusDisplay,
     TicketStatus,
 };
+use crate::domain::workflow::PendingRecommendation;
 use crate::domain::ticket::{
     priority_from_str, priority_to_str, status_from_str, status_to_str, substatus_from_str,
     substatus_to_str, Ticket, TicketPriority,
@@ -277,6 +278,83 @@ impl<'a> TicketService<'a> {
         .bind(status_to_str(status))
         .bind(substatus_str)
         .bind(&substatus_metadata)
+        .fetch_optional(self.pool)
+        .await?
+        .ok_or(TicketError::TicketNotFound)?;
+
+        self.enrich_ticket(row_to_ticket(&row)).await
+    }
+
+    pub async fn apply_workflow_update(
+        &self,
+        ticket_id: Uuid,
+        status: Option<TicketStatus>,
+        substatus: Option<Option<Substatus>>,
+        substatus_metadata: Option<Option<Value>>,
+        assignee: Option<Option<Uuid>>,
+        pending_recommendation: Option<Option<PendingRecommendation>>,
+        clarification_round_delta: i32,
+    ) -> Result<TicketWithDisplay, TicketError> {
+        let current = self.get(ticket_id).await?;
+
+        let status = status.unwrap_or(current.ticket.status);
+        let substatus = match substatus {
+            Some(value) => value,
+            None => current.ticket.substatus,
+        };
+        let substatus_metadata = match substatus_metadata {
+            Some(value) => value,
+            None => current.ticket.substatus_metadata.clone(),
+        };
+        let assignee_agent_id = match assignee {
+            Some(value) => value,
+            None => current.ticket.assignee_agent_id,
+        };
+        let pending_assign_recommendation = match pending_recommendation {
+            Some(None) => None,
+            Some(Some(rec)) => Some(serde_json::to_value(rec).map_err(|e| {
+                TicketError::Validation(format!("pending recommendation: {e}"))
+            })?),
+            None => current.ticket.pending_assign_recommendation.clone(),
+        };
+        let clarification_round =
+            current.ticket.clarification_round.saturating_add(clarification_round_delta);
+
+        if let Some(msg) =
+            validate_status_substatus_combo(status, substatus, &substatus_metadata)
+        {
+            return Err(TicketError::Validation(msg.to_string()));
+        }
+
+        let substatus_str = substatus.map(substatus_to_str);
+
+        let row = sqlx::query(
+            r#"
+            UPDATE tickets
+            SET
+                status = $2,
+                substatus = $3,
+                substatus_metadata = $4,
+                assignee_agent_id = $5,
+                pending_assign_recommendation = $6,
+                clarification_round = $7,
+                updated_at = now()
+            WHERE id = $1
+            RETURNING
+                id, project_id, repo_id, title, description,
+                status, substatus, substatus_metadata, priority,
+                assignee_agent_id, owner_user_id, branch_name,
+                pending_assign_recommendation, clarification_round,
+                created_by, created_by_id, created_at, updated_at
+            "#,
+        )
+        .bind(ticket_id)
+        .bind(status_to_str(status))
+        .bind(substatus_str)
+        .bind(&substatus_metadata)
+        .bind(assignee_agent_id)
+        .bind(&pending_assign_recommendation)
+        .bind(clarification_round)
         .fetch_optional(self.pool)
         .await?
         .ok_or(TicketError::TicketNotFound)?;

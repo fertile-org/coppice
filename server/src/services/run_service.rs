@@ -7,7 +7,9 @@ use crate::services::repo_service::RepoService;
 use crate::sandbox::permissive::PROFILE_ID;
 use crate::services::comment_service::{CommentError, CommentService};
 use crate::domain::job::{job_status_to_str, JobStatus};
+use crate::services::agent_service::AgentError;
 use crate::services::job_service::{JobError, JobService};
+use crate::services::mention_service::MentionError;
 use crate::services::result_contract::ApplyResult;
 use crate::services::ticket_service::{TicketError, TicketService};
 use sqlx::PgPool;
@@ -56,6 +58,27 @@ impl From<CommentError> for RunError {
             CommentError::Validation(msg) => RunError::Validation(msg),
             CommentError::Database(e) => RunError::Database(e),
             other => RunError::Validation(other.to_string()),
+        }
+    }
+}
+
+impl From<AgentError> for RunError {
+    fn from(err: AgentError) -> Self {
+        match err {
+            AgentError::AgentNotFound => RunError::Validation("agent not found".into()),
+            AgentError::PresetNotFound => RunError::Validation("preset not found".into()),
+            AgentError::Validation(msg) => RunError::Validation(msg),
+            AgentError::Database(e) => RunError::Database(e),
+        }
+    }
+}
+
+impl From<MentionError> for RunError {
+    fn from(err: MentionError) -> Self {
+        match err {
+            MentionError::MentionNotFound => RunError::Validation("mention not found".into()),
+            MentionError::Agent(e) => RunError::Validation(e.to_string()),
+            MentionError::Database(e) => RunError::Database(e),
         }
     }
 }
@@ -329,6 +352,131 @@ impl<'a> RunService<'a> {
         )
         .bind(run_id)
         .bind(run_status_to_str(apply.run_status))
+        .bind(worktree_path)
+        .bind(branch_name)
+        .fetch_optional(self.pool)
+        .await?
+        .ok_or(RunError::NotFound)?;
+
+        Ok(row_to_run(&row))
+    }
+
+    pub async fn start_run_for_agent(
+        &self,
+        ticket_id: Uuid,
+        agent_id: Uuid,
+        job_type: &str,
+    ) -> Result<AgentRun, RunError> {
+        let ticket = TicketService::new(self.pool).get(ticket_id).await?;
+
+        let repo_id = ticket
+            .ticket
+            .repo_id
+            .ok_or_else(|| RunError::Validation("ticket has no repo".into()))?;
+
+        let repo = RepoService::new(self.pool)
+            .verify(repo_id)
+            .await
+            .map_err(|e| match e {
+                crate::services::repo_service::RepoError::NotFound => {
+                    RunError::Validation("repo not found".into())
+                }
+                other => RunError::Validation(other.to_string()),
+            })?;
+
+        if repo.verification_status != VerificationStatus::Ready {
+            let detail = repo
+                .verification_error
+                .unwrap_or_else(|| "repository path is not ready".to_string());
+            return Err(RunError::Validation(format!(
+                "repository path is not ready: {detail}"
+            )));
+        }
+
+        let active = sqlx::query_scalar::<_, bool>(
+            r#"
+            SELECT EXISTS(
+                SELECT 1 FROM agent_runs
+                WHERE ticket_id = $1 AND agent_id = $2
+                  AND status IN ('queued', 'running')
+            )
+            "#,
+        )
+        .bind(ticket_id)
+        .bind(agent_id)
+        .fetch_one(self.pool)
+        .await?;
+
+        if active {
+            return Err(RunError::ActiveRunExists);
+        }
+
+        let mut tx = self.pool.begin().await?;
+        let run_id = Uuid::new_v4();
+
+        let row = sqlx::query(
+            r#"
+            INSERT INTO agent_runs (
+                id, ticket_id, agent_id, job_type, status, sandbox_profile_id
+            )
+            VALUES ($1, $2, $3, $4, $5, $6)
+            RETURNING
+                id, ticket_id, agent_id, job_type, status, sandbox_profile_id,
+                worktree_path, branch_name, error_message, session_id,
+                started_at, ended_at, created_at
+            "#,
+        )
+        .bind(run_id)
+        .bind(ticket_id)
+        .bind(agent_id)
+        .bind(job_type)
+        .bind(run_status_to_str(RunStatus::Queued))
+        .bind(PROFILE_ID)
+        .fetch_one(&mut *tx)
+        .await?;
+
+        sqlx::query(
+            r#"
+            INSERT INTO agent_jobs (id, run_id, job_type, status)
+            VALUES ($1, $2, $3, $4)
+            "#,
+        )
+        .bind(Uuid::new_v4())
+        .bind(run_id)
+        .bind(job_type)
+        .bind(job_status_to_str(JobStatus::Pending))
+        .execute(&mut *tx)
+        .await?;
+
+        tx.commit().await?;
+
+        Ok(row_to_run(&row))
+    }
+
+    pub async fn finish_run(
+        &self,
+        run_id: Uuid,
+        run_status: RunStatus,
+        worktree_path: Option<String>,
+        branch_name: Option<String>,
+    ) -> Result<AgentRun, RunError> {
+        let row = sqlx::query(
+            r#"
+            UPDATE agent_runs
+            SET
+                status = $2,
+                worktree_path = $3,
+                branch_name = $4,
+                ended_at = now()
+            WHERE id = $1
+            RETURNING
+                id, ticket_id, agent_id, job_type, status, sandbox_profile_id,
+                worktree_path, branch_name, error_message, session_id,
+                started_at, ended_at, created_at
+            "#,
+        )
+        .bind(run_id)
+        .bind(run_status_to_str(run_status))
         .bind(worktree_path)
         .bind(branch_name)
         .fetch_optional(self.pool)

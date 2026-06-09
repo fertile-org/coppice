@@ -18,6 +18,7 @@ use crate::services::comment_service::CommentService;
 use crate::services::context_builder::{write_context_file, ContextInput};
 use crate::services::job_service::JobService;
 use crate::services::result_contract;
+use crate::services::run_orchestrator::RunOrchestrator;
 use crate::services::run_service::RunService;
 use crate::services::ticket_service::TicketService;
 use crate::services::worktree_service::{compute_paths, WorktreeService};
@@ -279,15 +280,17 @@ async fn execute_job(
         .map_err(|err| anyhow::anyhow!("apply agent result: {err}"))?;
 
     let worktree_path = paths.worktree_dir.to_string_lossy().into_owned();
-    let finished_run = run_svc
-        .finish_with_apply(
-            run.id,
+    let orchestrator = RunOrchestrator::new(pool, &state.config.workflow);
+    let finished_run = orchestrator
+        .finish_run(
+            run,
+            &result,
             apply,
             Some(worktree_path),
             Some(paths.branch_name.clone()),
         )
         .await
-        .context("finish run with apply")?;
+        .context("finish run via orchestrator")?;
 
     let session_id = run_session_id(pool, run.id).await;
     persist_artifacts(state, &stream, run.id, connector_name, session_id)?;
