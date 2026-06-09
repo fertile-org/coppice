@@ -17,9 +17,16 @@ artifacts_dir = "/data/artifacts"
 max_upload_bytes = 10485760
 
 [agent]
-default_provider = "mock"
+default_connector = "mock"
 worktrees_path = "/data/worktrees"
 worker_count = 2
+
+[agent.connectors.opencode]
+enabled = false
+command = "opencode"
+serve_hostname = "127.0.0.1"
+serve_port = 4096
+model_providers = []
 
 [web]
 port = 5173
