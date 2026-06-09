@@ -7,7 +7,8 @@ export const createAgentSchema = z.object({
   skills: z.array(z.string()).optional(),
   responsibilities: z.array(z.string()).optional(),
   systemPrompt: z.string().optional(),
-  providerId: z.string().optional(),
+  provider: z.string().optional(),
+  model: z.string().optional(),
   enabled: z.boolean().optional(),
 });
 
@@ -19,7 +20,8 @@ export const updateAgentSchema = z.object({
   skills: z.array(z.string()).optional(),
   responsibilities: z.array(z.string()).optional(),
   systemPrompt: z.string().optional(),
-  providerId: z.string().optional(),
+  provider: z.string().optional(),
+  model: z.string().optional(),
   enabled: z.boolean().optional(),
 });
 

@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from 'react';
-import type { Agent, AgentPreset } from './useAgents';
+import type { Agent, AgentPreset, AgentProviderOption } from './useAgents';
 
 export interface AgentFormValues {
   name: string;
@@ -7,7 +7,8 @@ export interface AgentFormValues {
   skills: string;
   responsibilities: string;
   systemPrompt: string;
-  providerId: string;
+  provider: string;
+  model: string;
   enabled: boolean;
 }
 
@@ -29,7 +30,8 @@ export function agentToFormValues(agent: Agent): AgentFormValues {
     skills: linesFromList(agent.skills),
     responsibilities: linesFromList(agent.responsibilities),
     systemPrompt: agent.systemPrompt,
-    providerId: agent.providerId,
+    provider: agent.provider,
+    model: agent.model ?? '',
     enabled: agent.enabled,
   };
 }
@@ -44,7 +46,8 @@ export function presetToFormValues(
     skills: linesFromList(preset.skills),
     responsibilities: linesFromList(preset.responsibilities),
     systemPrompt: preset.systemPromptTemplate,
-    providerId: 'mock',
+    provider: 'mock',
+    model: '',
     enabled: true,
   };
 }
@@ -55,6 +58,7 @@ interface AgentFormProps {
   onChange: (values: AgentFormValues) => void;
   onSubmit: (values: AgentFormValues) => void | Promise<void>;
   onCancel: () => void;
+  providerOptions: AgentProviderOption[];
   isPending?: boolean;
   error?: string | null;
   submitLabel?: string;
@@ -66,11 +70,13 @@ export function AgentForm({
   onChange,
   onSubmit,
   onCancel,
+  providerOptions,
   isPending = false,
   error = null,
   submitLabel,
 }: AgentFormProps) {
   const [localError, setLocalError] = useState<string | null>(null);
+  const selectedProvider = providerOptions.find((p) => p.id === values.provider);
 
   useEffect(() => {
     setLocalError(null);
@@ -187,6 +193,48 @@ export function AgentForm({
           readOnly={mode === 'create'}
           className="field-control w-full resize-y px-3 py-2 font-mono text-sm leading-relaxed"
         />
+      </div>
+
+      <div>
+        <label
+          htmlFor="agent-provider"
+          className="mb-1 block font-body text-sm font-medium text-bark-800"
+        >
+          Provider
+        </label>
+        <select
+          id="agent-provider"
+          value={values.provider}
+          onChange={(e) => updateField('provider', e.target.value)}
+          className="field-control w-full px-3 py-2 font-body text-sm"
+        >
+          {providerOptions.map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.id}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      <div>
+        <label
+          htmlFor="agent-model"
+          className="mb-1 block font-body text-sm font-medium text-bark-800"
+        >
+          Model
+        </label>
+        <input
+          id="agent-model"
+          type="text"
+          placeholder={selectedProvider?.defaultModel ?? 'provider/model (optional)'}
+          value={values.model}
+          onChange={(e) => updateField('model', e.target.value)}
+          className="field-control w-full px-3 py-2 font-body text-sm"
+        />
+        <p className="mt-1 font-body text-xs text-text-muted">
+          OpenCode format: provider_id/model_id (e.g. zai-coding-plan/glm-5.1). Leave
+          empty to use server default.
+        </p>
       </div>
 
       {mode === 'edit' && (

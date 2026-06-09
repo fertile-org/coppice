@@ -9,12 +9,14 @@ import {
 } from './AgentForm';
 import {
   useAgentPresets,
+  useAgentProviders,
   useAgents,
   useCreateAgent,
   useUpdateAgent,
   useUpdateAgentMutation,
   type Agent,
   type AgentPreset,
+  type AgentProviderOption,
 } from './useAgents';
 
 function formatDate(iso: string): string {
@@ -27,14 +29,45 @@ function formatDate(iso: string): string {
   });
 }
 
+function truncateModel(model: string, maxLen = 24): string {
+  if (model.length <= maxLen) return model;
+  return `${model.slice(0, maxLen - 1)}…`;
+}
+
+function HealthBadge({
+  health,
+  detail,
+}: {
+  health: Agent['health'];
+  detail?: string | null;
+}) {
+  const labels = {
+    unknown: { text: 'Unknown', className: 'bg-bark-100 text-bark-600' },
+    healthy: { text: 'Healthy', className: 'bg-moss-100 text-moss-800' },
+    missing_config: { text: 'Missing config', className: 'bg-amber-100 text-amber-900' },
+    unhealthy: { text: 'Unhealthy', className: 'bg-danger-muted text-danger' },
+  };
+  const { text, className } = labels[health];
+  return (
+    <span
+      title={detail ?? undefined}
+      className={`inline-flex rounded-full px-2 py-0.5 font-body text-xs font-medium ${className}`}
+    >
+      {text}
+    </span>
+  );
+}
+
 function CreateAgentDialog({
   open,
   onClose,
   presets,
+  providerOptions,
 }: {
   open: boolean;
   onClose: () => void;
   presets: AgentPreset[];
+  providerOptions: AgentProviderOption[];
 }) {
   const presetRef = useRef<HTMLSelectElement>(null);
   const [presetId, setPresetId] = useState('');
@@ -91,6 +124,8 @@ function CreateAgentDialog({
       await createAgent.mutateAsync({
         name: formValues.name.trim(),
         presetId: presetId || undefined,
+        provider: formValues.provider || undefined,
+        model: formValues.model.trim() || undefined,
       });
       onClose();
     } catch (err) {
@@ -154,6 +189,7 @@ function CreateAgentDialog({
             onChange={setValues}
             onSubmit={handleSubmit}
             onCancel={onClose}
+            providerOptions={providerOptions}
             isPending={createAgent.isPending}
             error={error}
           />
@@ -166,9 +202,11 @@ function CreateAgentDialog({
 function EditAgentDialog({
   agent,
   onClose,
+  providerOptions,
 }: {
   agent: Agent;
   onClose: () => void;
+  providerOptions: AgentProviderOption[];
 }) {
   const [values, setValues] = useState<AgentFormValues>(() =>
     agentToFormValues(agent),
@@ -198,6 +236,8 @@ function EditAgentDialog({
         skills: listFromLines(formValues.skills),
         responsibilities: listFromLines(formValues.responsibilities),
         systemPrompt: formValues.systemPrompt,
+        provider: formValues.provider || undefined,
+        model: formValues.model.trim() || undefined,
         enabled: formValues.enabled,
       });
       onClose();
@@ -236,6 +276,7 @@ function EditAgentDialog({
             onChange={setValues}
             onSubmit={handleSubmit}
             onCancel={onClose}
+            providerOptions={providerOptions}
             isPending={updateAgent.isPending}
             error={error}
           />
@@ -272,6 +313,17 @@ function AgentRow({
         {agent.role}
       </td>
       <td className="px-4 py-3">
+        <div className="font-body text-sm text-text-primary">{agent.provider}</div>
+        {agent.model && (
+          <div
+            className="mt-0.5 max-w-[10rem] truncate font-mono text-xs text-text-muted"
+            title={agent.model}
+          >
+            {truncateModel(agent.model)}
+          </div>
+        )}
+      </td>
+      <td className="px-4 py-3">
         <span
           className={[
             'inline-flex rounded-full px-2 py-0.5 font-body text-xs font-medium',
@@ -282,6 +334,9 @@ function AgentRow({
         >
           {agent.enabled ? 'Enabled' : 'Disabled'}
         </span>
+      </td>
+      <td className="px-4 py-3">
+        <HealthBadge health={agent.health} detail={agent.healthDetail} />
       </td>
       <td className="px-4 py-3 font-body text-xs text-text-muted">
         {formatDate(agent.updatedAt)}
@@ -312,6 +367,7 @@ function AgentRow({
 export function AgentsPage() {
   const { data: agents, isLoading, isError, refetch } = useAgents();
   const { data: presets, isLoading: presetsLoading } = useAgentPresets();
+  const { data: providerOptions = [] } = useAgentProviders();
   const [createOpen, setCreateOpen] = useState(false);
   const [editingAgent, setEditingAgent] = useState<Agent | null>(null);
   const [togglingId, setTogglingId] = useState<string | null>(null);
@@ -405,7 +461,13 @@ export function AgentsPage() {
                   Role
                 </th>
                 <th className="px-4 py-3 font-body text-xs font-medium uppercase tracking-wide text-text-muted">
+                  Provider
+                </th>
+                <th className="px-4 py-3 font-body text-xs font-medium uppercase tracking-wide text-text-muted">
                   Status
+                </th>
+                <th className="px-4 py-3 font-body text-xs font-medium uppercase tracking-wide text-text-muted">
+                  Health
                 </th>
                 <th className="px-4 py-3 font-body text-xs font-medium uppercase tracking-wide text-text-muted">
                   Updated
@@ -433,6 +495,7 @@ export function AgentsPage() {
           open={createOpen}
           onClose={() => setCreateOpen(false)}
           presets={presets}
+          providerOptions={providerOptions}
         />
       )}
 
@@ -440,6 +503,7 @@ export function AgentsPage() {
         <EditAgentDialog
           agent={editingAgent}
           onClose={() => setEditingAgent(null)}
+          providerOptions={providerOptions}
         />
       )}
     </div>

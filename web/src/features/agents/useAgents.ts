@@ -4,6 +4,7 @@ import type { CreateAgentInput, UpdateAgentInput } from '../../lib/schemas/agent
 
 export const AGENTS_QUERY_KEY = ['agents'] as const;
 export const AGENT_PRESETS_QUERY_KEY = ['agent-presets'] as const;
+export const AGENT_PROVIDERS_QUERY_KEY = ['agent-providers'] as const;
 
 export interface AgentPreset {
   id: string;
@@ -21,11 +22,19 @@ export interface Agent {
   skills: string[];
   responsibilities: string[];
   systemPrompt: string;
-  providerId: string;
+  provider: string;
+  model?: string | null;
+  health: 'unknown' | 'healthy' | 'missing_config' | 'unhealthy';
+  healthDetail?: string | null;
   enabled: boolean;
   presetSource?: string;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface AgentProviderOption {
+  id: string;
+  defaultModel?: string | null;
 }
 
 export type AgentSummary = Pick<Agent, 'id' | 'name' | 'role' | 'enabled'>;
@@ -74,6 +83,18 @@ export function useAgents() {
   return useQuery({
     queryKey: AGENTS_QUERY_KEY,
     queryFn: fetchAgents,
+    refetchInterval: 30_000,
+  });
+}
+
+export function useAgentProviders() {
+  return useQuery({
+    queryKey: AGENT_PROVIDERS_QUERY_KEY,
+    queryFn: async () => {
+      const res = await apiFetch('/api/agent-providers');
+      const data = (await res.json()) as { items: AgentProviderOption[] };
+      return data.items;
+    },
   });
 }
 
