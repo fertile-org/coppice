@@ -33,19 +33,28 @@ impl AgentProvider for OpenCodeProvider {
             .and_then(|p| p.parent())
             .ok_or_else(|| ProviderError::InvalidInput("bad context path".into()))?;
 
+        let prompt =
+            "Read .agent/context.md and return the Expected output contract JSON.".to_string();
         let mut args = vec![
             "run".into(),
             "--attach".into(),
             self.serve.base_url().into(),
+            "--format".into(),
+            "json".into(),
             "--dir".into(),
             worktree.display().to_string(),
-            "-p".into(),
-            "Read .agent/context.md and return the Expected output contract JSON.".into(),
         ];
-        if let Some(model) = &self.config.model {
+        let model = input.model.as_ref().or(self.config.model.as_ref());
+        if let Some(model) = model {
             args.push("--model".into());
             args.push(model.clone());
         }
+        if let Some(variant) = &self.config.variant {
+            args.push("--variant".into());
+            args.push(variant.clone());
+        }
+        // Prompt is a positional message; `-p` is `--password` in the opencode CLI.
+        args.push(prompt);
 
         let mut child = tokio::process::Command::new(&self.config.command)
             .args(&args)

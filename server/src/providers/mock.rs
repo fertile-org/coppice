@@ -120,6 +120,7 @@ mod tests {
                 artifacts_dir: Some(artifacts.path().to_string_lossy().into_owned()),
                 stream: None,
                 cancel_rx: None,
+                model: None,
             })
             .await
             .expect("mock run");

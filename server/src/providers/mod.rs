@@ -22,6 +22,7 @@ pub struct AgentRunInput {
     pub artifacts_dir: Option<String>,
     pub stream: Option<Arc<RunStreamHandle>>,
     pub cancel_rx: Option<watch::Receiver<bool>>,
+    pub model: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -108,6 +109,7 @@ mod tests {
                 artifacts_dir: None,
                 stream: None,
                 cancel_rx: None,
+                model: None,
             })
             .await
             .expect("mock run");
