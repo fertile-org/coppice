@@ -28,6 +28,7 @@ pub struct AgentRunInput {
     pub cancel_rx: Option<watch::Receiver<bool>>,
     pub model_provider: Option<String>,
     pub model: Option<String>,
+    pub session_created_tx: Option<watch::Sender<String>>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -116,6 +117,7 @@ mod tests {
                 cancel_rx: None,
                 model_provider: None,
                 model: None,
+                session_created_tx: None,
             })
             .await
             .expect("mock run");

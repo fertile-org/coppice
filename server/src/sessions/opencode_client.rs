@@ -1,29 +1,48 @@
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use futures_util::StreamExt;
 use serde_json::json;
-use tokio::sync::{watch, Mutex};
+use tokio::sync::watch;
 
 use crate::providers::{AgentRunResult, ProviderError};
+use crate::sessions::live_message::LiveMessage;
 use crate::sessions::opencode_events::{
     extract_result_from_messages, session_status_from_sse,
 };
-use crate::sessions::opencode_stream::OpenCodeStreamTracker;
 use crate::sessions::run_registry::RunStreamHandle;
+use crate::sessions::session_snapshot::SessionSnapshot;
 
 const POLL_INTERVAL: Duration = Duration::from_millis(500);
-const MESSAGE_POLL_INTERVAL: Duration = Duration::from_millis(1500);
 const SSE_RECONNECT_DELAY: Duration = Duration::from_millis(750);
 const RUN_TIMEOUT: Duration = Duration::from_secs(3600);
 
 struct StreamContext {
     session_id: String,
     stream: Option<Arc<RunStreamHandle>>,
-    tracker: Arc<Mutex<OpenCodeStreamTracker>>,
-    seq: Arc<Mutex<u64>>,
+    snapshot: Arc<Mutex<SessionSnapshot>>,
     idle_flag: Arc<std::sync::atomic::AtomicBool>,
+}
+
+fn publish_sse_event(ctx: &StreamContext, event: &serde_json::Value) {
+    if let Some(stream) = &ctx.stream {
+        stream.publish(LiveMessage::Event {
+            event: event.clone(),
+        });
+        if let Ok(mut snap) = ctx.snapshot.lock() {
+            snap.apply_event(event);
+            stream.set_snapshot(snap.to_value());
+        }
+    }
+}
+
+fn event_for_session(event: &serde_json::Value, session_id: &str) -> bool {
+    event
+        .get("properties")
+        .and_then(|p| p.get("sessionID"))
+        .and_then(|s| s.as_str())
+        == Some(session_id)
 }
 
 pub struct OpenCodeClient {
@@ -61,6 +80,7 @@ impl OpenCodeClient {
         Ok(url)
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn run_session(
         &self,
         directory: &Path,
@@ -69,21 +89,24 @@ impl OpenCodeClient {
         prompt: &str,
         stream: Option<Arc<RunStreamHandle>>,
         cancel_rx: Option<watch::Receiver<bool>>,
+        session_created_tx: Option<watch::Sender<String>>,
     ) -> Result<AgentRunResult, ProviderError> {
         let directory = Self::resolve_directory(directory)?;
         let session_id = self
             .create_session(&directory, model_provider, model)
             .await?;
 
-        let tracker = Arc::new(Mutex::new(OpenCodeStreamTracker::new()));
-        let seq = Arc::new(Mutex::new(0u64));
+        if let Some(tx) = session_created_tx {
+            let _ = tx.send(session_id.clone());
+        }
+
         let idle_flag = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let snapshot = Arc::new(Mutex::new(SessionSnapshot::empty(&session_id)));
 
         let ctx = StreamContext {
             session_id: session_id.clone(),
             stream,
-            tracker,
-            seq,
+            snapshot,
             idle_flag: idle_flag.clone(),
         };
 
@@ -99,23 +122,10 @@ impl OpenCodeClient {
             })
         };
 
-        let poll_handle = {
-            let client = self.clone_inner();
-            let directory = directory.clone();
-            let mut cancel_rx = cancel_rx.clone();
-            let ctx = ctx.clone_refs();
-            tokio::spawn(async move {
-                client
-                    .poll_messages_loop(&directory, &mut cancel_rx, ctx)
-                    .await
-            })
-        };
-
         let prompt_result = self.prompt_async(&directory, &session_id, prompt).await;
         if let Err(err) = prompt_result {
             let _ = self.abort(&directory, &session_id).await;
             let _ = events_handle.await;
-            let _ = poll_handle.await;
             return Err(err);
         }
 
@@ -125,12 +135,10 @@ impl OpenCodeClient {
         if let Err(err) = wait_result {
             let _ = self.abort(&directory, &session_id).await;
             let _ = events_handle.await;
-            let _ = poll_handle.await;
             return Err(err);
         }
 
         let _ = events_handle.await;
-        let _ = poll_handle.await;
 
         let messages = self.fetch_messages(&directory, &session_id).await?;
         extract_result_from_messages(&messages).ok_or_else(|| {
@@ -147,8 +155,7 @@ impl StreamContext {
         Self {
             session_id: self.session_id.clone(),
             stream: self.stream.clone(),
-            tracker: self.tracker.clone(),
-            seq: self.seq.clone(),
+            snapshot: self.snapshot.clone(),
             idle_flag: self.idle_flag.clone(),
         }
     }
@@ -371,48 +378,13 @@ impl OpenCodeClient {
                             .store(true, std::sync::atomic::Ordering::Relaxed);
                     }
 
-                    if let Some(handle) = ctx.stream.as_ref() {
-                        let mut tracker = ctx.tracker.lock().await;
-                        let mut seq = ctx.seq.lock().await;
-                        if let Some(frame) =
-                            tracker.handle_sse_event(&event, &ctx.session_id, &mut seq)
-                        {
-                            handle.publish_frame(frame.seq, frame.data);
-                        }
+                    if event_for_session(&event, &ctx.session_id) {
+                        publish_sse_event(&ctx, &event);
                     }
                 }
             }
 
             tokio::time::sleep(SSE_RECONNECT_DELAY).await;
-        }
-    }
-
-    async fn poll_messages_loop(
-        &self,
-        directory: &Path,
-        cancel_rx: &mut Option<watch::Receiver<bool>>,
-        ctx: StreamContext,
-    ) {
-        loop {
-            if is_cancelled(cancel_rx) {
-                return;
-            }
-            if ctx.idle_flag.load(std::sync::atomic::Ordering::Relaxed) {
-                return;
-            }
-
-            if let Some(handle) = ctx.stream.as_ref() {
-                if let Ok(messages) = self.fetch_messages(directory, &ctx.session_id).await {
-                    let mut tracker = ctx.tracker.lock().await;
-                    let mut seq = ctx.seq.lock().await;
-                    let frames = tracker.sync_messages(&messages, &ctx.session_id, &mut seq);
-                    for frame in frames {
-                        handle.publish_frame(frame.seq, frame.data);
-                    }
-                }
-            }
-
-            tokio::time::sleep(MESSAGE_POLL_INTERVAL).await;
         }
     }
 }

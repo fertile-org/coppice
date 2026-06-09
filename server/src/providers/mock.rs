@@ -122,6 +122,7 @@ mod tests {
                 cancel_rx: None,
                 model_provider: None,
                 model: None,
+                session_created_tx: None,
             })
             .await
             .expect("mock run");

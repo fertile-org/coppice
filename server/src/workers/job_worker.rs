@@ -5,6 +5,7 @@ use std::time::Duration;
 use anyhow::Context;
 use sqlx::PgPool;
 use sqlx::Row;
+use tokio::sync::watch;
 
 use crate::domain::comment::author_type_to_str;
 use crate::domain::run::{run_status_to_str, RunStatus};
@@ -187,6 +188,25 @@ async fn execute_job(
     let stream = state.run_streams.register(run.id);
     let cancel_rx = stream.cancelled_rx();
 
+    let snapshot_handle = stream.clone();
+    let artifacts_dir = state.config.storage.artifacts_dir.clone();
+    let run_id_for_flush = run.id;
+    let mut flush_cancel = stream.cancelled_rx();
+    tokio::spawn(async move {
+        let paths = RunArtifactPaths::new(&artifacts_dir, &run_id_for_flush.to_string());
+        let mut interval = tokio::time::interval(Duration::from_secs(5));
+        loop {
+            tokio::select! {
+                _ = interval.tick() => {
+                    if let Some(snap) = snapshot_handle.snapshot() {
+                        let _ = ArtifactService::write_session_snapshot(&paths, &snap);
+                    }
+                }
+                _ = flush_cancel.changed() => break,
+            }
+        }
+    });
+
     state.event_bus.publish(AppEvent::AgentRunStarted {
         run_id: run.id,
         ticket_id: run.ticket_id,
@@ -200,6 +220,23 @@ async fn execute_job(
         .get(connector_name)
         .ok_or_else(|| anyhow::anyhow!("agent connector not configured: {connector_name}"))?;
 
+    let session_created_tx = if connector_name == "opencode" {
+        let (tx, mut rx) = watch::channel(String::new());
+        let pool = pool.clone();
+        let run_id = run.id;
+        tokio::spawn(async move {
+            if rx.changed().await.is_ok() {
+                let sid = rx.borrow().clone();
+                if !sid.is_empty() {
+                    let _ = RunService::new(&pool).set_session_id(run_id, &sid).await;
+                }
+            }
+        });
+        Some(tx)
+    } else {
+        None
+    };
+
     let provider_result = connector
         .run(AgentRunInput {
             agent_id: run.agent_id.to_string(),
@@ -211,25 +248,29 @@ async fn execute_job(
             model: agent.model.clone(),
             stream: Some(stream.clone()),
             cancel_rx: Some(cancel_rx),
+            session_created_tx,
         })
         .await;
 
     let result = match provider_result {
         Ok(result) => result,
         Err(ProviderError::Cancelled) => {
-            persist_artifacts(state, &stream, run.id, connector_name, None)?;
+            let session_id = run_session_id(pool, run.id).await;
+            persist_artifacts(state, &stream, run.id, connector_name, session_id)?;
             state.run_streams.remove(run.id);
             return Err(JobCancelled.into());
         }
         Err(err) => {
-            persist_artifacts(state, &stream, run.id, connector_name, None)?;
+            let session_id = run_session_id(pool, run.id).await;
+            persist_artifacts(state, &stream, run.id, connector_name, session_id)?;
             state.run_streams.remove(run.id);
             return Err(anyhow::anyhow!("agent provider: {err}"));
         }
     };
 
     if run_svc.is_cancelled(run.id).await? {
-        persist_artifacts(state, &stream, run.id, connector_name, None)?;
+        let session_id = run_session_id(pool, run.id).await;
+        persist_artifacts(state, &stream, run.id, connector_name, session_id)?;
         state.run_streams.remove(run.id);
         return Err(JobCancelled.into());
     }
@@ -248,7 +289,8 @@ async fn execute_job(
         .await
         .context("finish run with apply")?;
 
-    persist_artifacts(state, &stream, run.id, connector_name, None)?;
+    let session_id = run_session_id(pool, run.id).await;
+    persist_artifacts(state, &stream, run.id, connector_name, session_id)?;
     state.run_streams.remove(run.id);
 
     let updated_ticket = TicketService::new(pool)
@@ -304,6 +346,9 @@ fn persist_artifacts(
         &state.config.storage.artifacts_dir,
         &run_id.to_string(),
     );
+    if let Some(snap) = stream.snapshot() {
+        let _ = ArtifactService::write_session_snapshot(&paths, &snap);
+    }
     let messages = stream.buffered_tail();
     let mut log_bytes = Vec::new();
     let mut frame_count = 0u64;
@@ -326,6 +371,14 @@ fn persist_artifacts(
         },
     )?;
     Ok(())
+}
+
+async fn run_session_id(pool: &PgPool, run_id: uuid::Uuid) -> Option<String> {
+    RunService::new(pool)
+        .get(run_id)
+        .await
+        .ok()
+        .and_then(|r| r.session_id)
 }
 
 fn publish_run_finished(
