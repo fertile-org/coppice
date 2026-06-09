@@ -122,11 +122,11 @@ No new services. Optional workflow config mount:
 
 ## Acceptance criteria
 
-- [ ] Workflow rules auto-assign and transition tickets without manual drag for agent-done paths
-- [ ] Mentions create jobs and update substatus
-- [ ] Clarification/resume cycle works with round limits
-- [ ] Human Final Approve is required before Done
-- [ ] CI smoke E2E passes full mock pipeline
+- [x] Workflow rules auto-assign and transition tickets without manual drag for agent-done paths
+- [x] Mentions create jobs and update substatus
+- [x] Clarification/resume cycle works with round limits
+- [x] Human Final Approve is required before Done
+- [x] CI smoke E2E passes full mock pipeline
 
 ## References
 

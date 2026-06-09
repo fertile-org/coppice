@@ -2,7 +2,7 @@
 
 **Coppice** is a self-hosted agent workspace: Trello-like board, tickets, comments, and (from M03) agent execution. Philosophy and full product design live in `docs/philosophy/`.
 
-**Status:** M03 agent execution and **M03 retcon** (registered repositories — no lazy clone) are complete. **Next:** [M04 — Live console](docs/milestones/M04-live-console.md).
+**Status:** M05 workflow & collaboration is complete. **Next:** [M06 — Knowledge & learning](docs/milestones/M06-knowledge-and-learning.md).
 
 ## Must read before coding
 
