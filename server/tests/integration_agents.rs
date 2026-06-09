@@ -72,3 +72,51 @@ async fn create_agent_from_preset() {
     assert_eq!(agent["presetSource"].as_str().unwrap(), preset["key"].as_str().unwrap());
     assert_eq!(agent["name"].as_str().unwrap(), "PM Bot");
 }
+
+#[tokio::test]
+async fn agent_with_unknown_provider_gets_missing_config_health() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
+
+    let create_res = app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            "/api/agents",
+            r#"{"name":"OpenCode Bot","role":"Developer","systemPrompt":"You are a developer","provider":"opencode"}"#,
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(create_res.status(), StatusCode::CREATED);
+
+    coppice_server::workers::health_worker::run_health_pass_once(&state).await;
+
+    let list_res = app
+        .clone()
+        .oneshot(common::json_request(
+            "GET",
+            "/api/agents",
+            "",
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(list_res.status(), StatusCode::OK);
+
+    let body: serde_json::Value = common::json_body(list_res).await;
+    let agents = body["items"].as_array().unwrap();
+    assert_eq!(agents.len(), 1);
+    let agent = &agents[0];
+    assert_eq!(agent["provider"].as_str().unwrap(), "opencode");
+    assert_eq!(agent["health"].as_str().unwrap(), "missing_config");
+    assert!(agent["healthDetail"]
+        .as_str()
+        .unwrap()
+        .contains("not configured"));
+}

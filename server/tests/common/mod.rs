@@ -180,6 +180,59 @@ pub async fn bootstrap_and_login() -> (Router, String, String) {
     (app, cookie, csrf_token)
 }
 
+pub async fn bootstrap_and_login_with_state() -> (Arc<AppState>, Router, String, String) {
+    let state = test_state_with_db().await;
+    let app = coppice_server::app(state.clone());
+
+    app.clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/auth/bootstrap")
+                .header("content-type", "application/json")
+                .header(bootstrap_password_header().0, bootstrap_password_header().1)
+                .body(Body::from(
+                    r#"{"email":"admin@localhost","password":"changeme"}"#,
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    let login = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/auth/login")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    r#"{"email":"admin@localhost","password":"changeme"}"#,
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(login.status(), StatusCode::OK);
+
+    let set_cookie = login
+        .headers()
+        .get(header::SET_COOKIE)
+        .expect("session cookie");
+    let cookie_header = set_cookie.to_str().unwrap();
+    let session_token = parse_session_cookie(cookie_header).expect("session token");
+    let cookie = format!("coppice_session={session_token}");
+
+    let body = login.into_body().collect().await.unwrap().to_bytes();
+    let login_json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    let csrf_token = login_json["csrfToken"]
+        .as_str()
+        .expect("csrf token")
+        .to_string();
+
+    (state, app, cookie, csrf_token)
+}
+
 pub async fn bootstrap_and_login_with_workers(
     mock_response: &str,
 ) -> (Router, String, String, AgentTestEnv) {

@@ -20,6 +20,7 @@ max_upload_bytes = 10485760
 default_provider = "mock"
 worktrees_path = "./data/worktrees"
 worker_count = 2
+health_check_interval_secs = 60
 
 [agent.providers.opencode]
 enabled = false

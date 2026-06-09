@@ -1,5 +1,6 @@
 use crate::api::auth::{pool_from_state, AuthUser};
 use crate::domain::agent::{Agent, AgentPreset};
+use crate::services::agent_health::{health_status_to_str, AgentHealthRegistry};
 use crate::services::agent_service::{AgentError, AgentService};
 use crate::AppState;
 use axum::{
@@ -16,6 +17,7 @@ use uuid::Uuid;
 pub fn routes() -> Router<Arc<AppState>> {
     Router::new()
         .route("/api/agent-presets", get(list_presets))
+        .route("/api/agent-providers", get(list_agent_providers))
         .route("/api/agents", get(list_agents).post(create_agent))
         .route(
             "/api/agents/{agent_id}",
@@ -67,6 +69,19 @@ struct AgentListResponse {
     items: Vec<AgentResponse>,
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ProviderOptionResponse {
+    id: String,
+    default_model: Option<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ProviderListResponse {
+    items: Vec<ProviderOptionResponse>,
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct CreateAgentBody {
@@ -105,7 +120,8 @@ fn preset_to_response(preset: AgentPreset) -> PresetResponse {
     }
 }
 
-fn agent_to_response(agent: Agent) -> AgentResponse {
+fn agent_to_response(agent: Agent, health: &AgentHealthRegistry) -> AgentResponse {
+    let record = health.get(agent.id);
     AgentResponse {
         id: agent.id,
         name: agent.name,
@@ -115,8 +131,8 @@ fn agent_to_response(agent: Agent) -> AgentResponse {
         system_prompt: agent.system_prompt,
         provider: agent.provider,
         model: agent.model,
-        health: "unknown".into(),
-        health_detail: None,
+        health: health_status_to_str(record.status).into(),
+        health_detail: record.detail,
         enabled: agent.enabled,
         preset_source: agent.preset_source,
         created_at: agent.created_at.format(&Rfc3339).unwrap_or_default(),
@@ -144,6 +160,22 @@ async fn list_presets(
     }))
 }
 
+async fn list_agent_providers(
+    State(state): State<Arc<AppState>>,
+    AuthUser { .. }: AuthUser,
+) -> Json<ProviderListResponse> {
+    let items = state
+        .provider_registry
+        .configured_ids()
+        .into_iter()
+        .map(|id| ProviderOptionResponse {
+            default_model: state.provider_registry.default_model_for(&id),
+            id,
+        })
+        .collect();
+    Json(ProviderListResponse { items })
+}
+
 async fn list_agents(
     State(state): State<Arc<AppState>>,
     AuthUser { .. }: AuthUser,
@@ -152,7 +184,10 @@ async fn list_agents(
     let service = AgentService::new(pool);
     let agents = service.list_agents().await.map_err(map_error)?;
     Ok(Json(AgentListResponse {
-        items: agents.into_iter().map(agent_to_response).collect(),
+        items: agents
+            .into_iter()
+            .map(|agent| agent_to_response(agent, &state.agent_health))
+            .collect(),
     }))
 }
 
@@ -193,7 +228,7 @@ async fn create_agent(
             .map_err(map_error)?
     };
 
-    Ok((StatusCode::CREATED, Json(agent_to_response(agent))))
+    Ok((StatusCode::CREATED, Json(agent_to_response(agent, &state.agent_health))))
 }
 
 async fn get_agent(
@@ -204,7 +239,7 @@ async fn get_agent(
     let pool = pool_from_state(&state)?;
     let service = AgentService::new(pool);
     let agent = service.get(agent_id).await.map_err(map_error)?;
-    Ok(Json(agent_to_response(agent)))
+    Ok(Json(agent_to_response(agent, &state.agent_health)))
 }
 
 async fn update_agent(
@@ -229,7 +264,7 @@ async fn update_agent(
         )
         .await
         .map_err(map_error)?;
-    Ok(Json(agent_to_response(agent)))
+    Ok(Json(agent_to_response(agent, &state.agent_health)))
 }
 
 async fn delete_agent(

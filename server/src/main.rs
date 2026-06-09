@@ -38,6 +38,7 @@ async fn main() -> anyhow::Result<()> {
         db: Some(db),
     });
     coppice_server::workers::job_worker::spawn_workers(state.clone());
+    coppice_server::workers::health_worker::spawn_health_worker(state.clone());
     let app = coppice_server::app(state);
     let addr: SocketAddr = format!("0.0.0.0:{}", config.server.port).parse()?;
     tracing::info!(%addr, "listening");

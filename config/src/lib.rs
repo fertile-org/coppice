@@ -53,8 +53,14 @@ pub struct AgentConfig {
     pub default_provider: String,
     pub worktrees_path: String,
     pub worker_count: u32,
+    #[serde(default = "default_health_check_interval")]
+    pub health_check_interval_secs: u32,
     #[serde(default)]
     pub providers: AgentProvidersConfig,
+}
+
+fn default_health_check_interval() -> u32 {
+    60
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
@@ -232,6 +238,7 @@ impl AppConfig {
                 default_provider: "mock".into(),
                 worktrees_path: "./data/worktrees".into(),
                 worker_count: 2,
+                health_check_interval_secs: default_health_check_interval(),
                 providers: AgentProvidersConfig::default(),
             },
             web: WebConfig {
