@@ -43,7 +43,7 @@ impl<'a> AgentService<'a> {
             r#"
             SELECT
                 id, name, role, skills, responsibilities, system_prompt,
-                provider_id, enabled, preset_source, created_at, updated_at
+                provider, model, enabled, preset_source, created_at, updated_at
             FROM agents
             ORDER BY created_at ASC
             "#,
@@ -59,7 +59,7 @@ impl<'a> AgentService<'a> {
             r#"
             SELECT
                 id, name, role, skills, responsibilities, system_prompt,
-                provider_id, enabled, preset_source, created_at, updated_at
+                provider, model, enabled, preset_source, created_at, updated_at
             FROM agents
             WHERE id = $1
             "#,
@@ -101,6 +101,7 @@ impl<'a> AgentService<'a> {
             &preset.responsibilities,
             &preset.system_prompt_template,
             "mock",
+            None,
             true,
             Some(&preset.key),
         )
@@ -115,7 +116,8 @@ impl<'a> AgentService<'a> {
         skills: &[String],
         responsibilities: &[String],
         system_prompt: &str,
-        provider_id: Option<&str>,
+        provider: Option<&str>,
+        model: Option<&str>,
         enabled: Option<bool>,
     ) -> Result<Agent, AgentError> {
         if name.trim().is_empty() {
@@ -134,7 +136,8 @@ impl<'a> AgentService<'a> {
             skills,
             responsibilities,
             system_prompt,
-            provider_id.unwrap_or("mock"),
+            provider.unwrap_or("mock"),
+            model,
             enabled.unwrap_or(true),
             None,
         )
@@ -150,7 +153,8 @@ impl<'a> AgentService<'a> {
         skills: Option<&[String]>,
         responsibilities: Option<&[String]>,
         system_prompt: Option<&str>,
-        provider_id: Option<&str>,
+        provider: Option<&str>,
+        model: Option<&str>,
         enabled: Option<bool>,
     ) -> Result<Agent, AgentError> {
         let current = self.get(agent_id).await?;
@@ -159,7 +163,8 @@ impl<'a> AgentService<'a> {
         let skills = skills.unwrap_or(&current.skills);
         let responsibilities = responsibilities.unwrap_or(&current.responsibilities);
         let system_prompt = system_prompt.unwrap_or(&current.system_prompt);
-        let provider_id = provider_id.unwrap_or(&current.provider_id);
+        let provider = provider.unwrap_or(&current.provider);
+        let model = model.or(current.model.as_deref());
         let enabled = enabled.unwrap_or(current.enabled);
 
         let row = sqlx::query(
@@ -171,13 +176,14 @@ impl<'a> AgentService<'a> {
                 skills = $4,
                 responsibilities = $5,
                 system_prompt = $6,
-                provider_id = $7,
-                enabled = $8,
+                provider = $7,
+                model = $8,
+                enabled = $9,
                 updated_at = now()
             WHERE id = $1
             RETURNING
                 id, name, role, skills, responsibilities, system_prompt,
-                provider_id, enabled, preset_source, created_at, updated_at
+                provider, model, enabled, preset_source, created_at, updated_at
             "#,
         )
         .bind(agent_id)
@@ -186,7 +192,8 @@ impl<'a> AgentService<'a> {
         .bind(skills)
         .bind(responsibilities)
         .bind(system_prompt)
-        .bind(provider_id)
+        .bind(provider)
+        .bind(model)
         .bind(enabled)
         .fetch_optional(self.pool)
         .await?
@@ -216,7 +223,8 @@ impl<'a> AgentService<'a> {
         skills: &[String],
         responsibilities: &[String],
         system_prompt: &str,
-        provider_id: &str,
+        provider: &str,
+        model: Option<&str>,
         enabled: bool,
         preset_source: Option<&str>,
     ) -> Result<Agent, AgentError> {
@@ -225,12 +233,12 @@ impl<'a> AgentService<'a> {
             r#"
             INSERT INTO agents (
                 id, name, role, skills, responsibilities, system_prompt,
-                provider_id, enabled, preset_source
+                provider, model, enabled, preset_source
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
             RETURNING
                 id, name, role, skills, responsibilities, system_prompt,
-                provider_id, enabled, preset_source, created_at, updated_at
+                provider, model, enabled, preset_source, created_at, updated_at
             "#,
         )
         .bind(id)
@@ -239,7 +247,8 @@ impl<'a> AgentService<'a> {
         .bind(skills)
         .bind(responsibilities)
         .bind(system_prompt)
-        .bind(provider_id)
+        .bind(provider)
+        .bind(model)
         .bind(enabled)
         .bind(preset_source)
         .fetch_one(self.pool)
@@ -268,7 +277,8 @@ fn row_to_agent(row: &sqlx::postgres::PgRow) -> Agent {
         skills: row.get("skills"),
         responsibilities: row.get("responsibilities"),
         system_prompt: row.get("system_prompt"),
-        provider_id: row.get("provider_id"),
+        provider: row.get("provider"),
+        model: row.get("model"),
         enabled: row.get("enabled"),
         preset_source: row.get("preset_source"),
         created_at: row.get("created_at"),

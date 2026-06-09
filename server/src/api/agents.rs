@@ -45,7 +45,10 @@ struct AgentResponse {
     skills: Vec<String>,
     responsibilities: Vec<String>,
     system_prompt: String,
-    provider_id: String,
+    provider: String,
+    model: Option<String>,
+    health: String,
+    health_detail: Option<String>,
     enabled: bool,
     preset_source: Option<String>,
     created_at: String,
@@ -73,7 +76,8 @@ struct CreateAgentBody {
     skills: Option<Vec<String>>,
     responsibilities: Option<Vec<String>>,
     system_prompt: Option<String>,
-    provider_id: Option<String>,
+    provider: Option<String>,
+    model: Option<String>,
     enabled: Option<bool>,
 }
 
@@ -85,7 +89,8 @@ struct UpdateAgentBody {
     skills: Option<Vec<String>>,
     responsibilities: Option<Vec<String>>,
     system_prompt: Option<String>,
-    provider_id: Option<String>,
+    provider: Option<String>,
+    model: Option<String>,
     enabled: Option<bool>,
 }
 
@@ -108,7 +113,10 @@ fn agent_to_response(agent: Agent) -> AgentResponse {
         skills: agent.skills,
         responsibilities: agent.responsibilities,
         system_prompt: agent.system_prompt,
-        provider_id: agent.provider_id,
+        provider: agent.provider,
+        model: agent.model,
+        health: "unknown".into(),
+        health_detail: None,
         enabled: agent.enabled,
         preset_source: agent.preset_source,
         created_at: agent.created_at.format(&Rfc3339).unwrap_or_default(),
@@ -177,7 +185,8 @@ async fn create_agent(
                 body.skills.as_deref().unwrap_or(&[]),
                 body.responsibilities.as_deref().unwrap_or(&[]),
                 system_prompt,
-                body.provider_id.as_deref(),
+                body.provider.as_deref(),
+                body.model.as_deref(),
                 body.enabled,
             )
             .await
@@ -214,7 +223,8 @@ async fn update_agent(
             body.skills.as_deref(),
             body.responsibilities.as_deref(),
             body.system_prompt.as_deref(),
-            body.provider_id.as_deref(),
+            body.provider.as_deref(),
+            body.model.as_deref(),
             body.enabled,
         )
         .await
