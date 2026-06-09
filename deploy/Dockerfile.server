@@ -11,6 +11,7 @@ RUN apt-get update && apt-get install -y ca-certificates git && rm -rf /var/lib/
 COPY --from=builder /app/target/release/coppice-server /usr/local/bin/coppice-server
 # MockProvider resolves fixtures relative to compile-time CARGO_MANIFEST_DIR (/app/server).
 RUN mkdir -p /app/server
+COPY server/agent_templates /app/server/agent_templates
 COPY fixtures /app/fixtures
 COPY deploy/config/default.toml /etc/coppice/config.toml
 ENV COPPICE_CONFIG=/etc/coppice/config.toml

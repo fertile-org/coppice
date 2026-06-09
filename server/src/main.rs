@@ -75,6 +75,10 @@ async fn main() -> anyhow::Result<()> {
         };
 
     let db = coppice_server::db::connect_and_migrate(&config.database.url).await?;
+    let agent_templates = coppice_server::AppState::load_agent_templates();
+    coppice_server::agent_templates::ensure_all_presets_have_templates(&db, &agent_templates)
+        .await
+        .map_err(|e| anyhow::anyhow!("agent template validation failed: {e}"))?;
     let state = Arc::new(coppice_server::AppState {
         attachments: coppice_server::AppState::attachment_store_from_config(&config),
         connector_registry: coppice_server::AppState::connector_registry_from_config(
@@ -85,6 +89,7 @@ async fn main() -> anyhow::Result<()> {
         run_streams: Arc::new(coppice_server::sessions::run_registry::RunStreamRegistry::new()),
         event_bus: Arc::new(coppice_server::events::bus::EventBus::new()),
         opencode_serve: opencode_serve.clone(),
+        agent_templates,
         config: config.clone(),
         db: Some(db),
     });

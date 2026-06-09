@@ -15,6 +15,7 @@ pub mod workers;
 
 use axum::Router;
 use sqlx::PgPool;
+use std::collections::HashMap;
 use std::sync::Arc;
 use storage::AttachmentStore;
 
@@ -30,6 +31,7 @@ pub struct AppState {
     pub run_streams: Arc<crate::sessions::run_registry::RunStreamRegistry>,
     pub event_bus: Arc<crate::events::bus::EventBus>,
     pub opencode_serve: Option<Arc<crate::sessions::opencode_serve::OpenCodeServeManager>>,
+    pub agent_templates: HashMap<String, String>,
 }
 
 impl AppState {
@@ -53,6 +55,11 @@ impl AppState {
     pub fn default_connector_id(&self) -> &str {
         &self.config.agent.default_connector
     }
+
+    pub fn load_agent_templates() -> HashMap<String, String> {
+        let dir = crate::agent_templates::templates_dir();
+        crate::agent_templates::load(&dir).expect("failed to load agent_templates from disk")
+    }
 }
 
 pub async fn test_state() -> Arc<AppState> {
@@ -64,6 +71,7 @@ pub async fn test_state() -> Arc<AppState> {
         run_streams: Arc::new(crate::sessions::run_registry::RunStreamRegistry::new()),
         event_bus: Arc::new(crate::events::bus::EventBus::new()),
         opencode_serve: None,
+        agent_templates: AppState::load_agent_templates(),
         config,
         db: None,
     })

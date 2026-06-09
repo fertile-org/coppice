@@ -209,10 +209,9 @@ export function AgentForm({
         </label>
         <textarea
           id="agent-system-prompt"
-          rows={6}
+          rows={20}
           value={values.systemPrompt}
           onChange={(e) => updateField('systemPrompt', e.target.value)}
-          readOnly={mode === 'create'}
           className="field-control w-full resize-y px-3 py-2 font-mono text-sm leading-relaxed"
         />
       </div>

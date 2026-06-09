@@ -119,6 +119,7 @@ function CreateAgentDialog({
       await createAgent.mutateAsync({
         name: formValues.name.trim(),
         presetId: presetId || undefined,
+        systemPrompt: formValues.systemPrompt,
         connector: formValues.connector,
         modelProvider: formValues.modelProvider || undefined,
         model: formValues.model || undefined,

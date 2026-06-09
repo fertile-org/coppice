@@ -94,6 +94,7 @@ async fn test_state_with_db() -> Arc<AppState> {
         run_streams: Arc::new(coppice_server::sessions::run_registry::RunStreamRegistry::new()),
         event_bus: Arc::new(coppice_server::events::bus::EventBus::new()),
         opencode_serve: None,
+        agent_templates: coppice_server::AppState::load_agent_templates(),
         config,
         db: Some(pool),
     })

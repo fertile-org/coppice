@@ -26,6 +26,12 @@ async fn list_presets_has_ten_entries() {
 
     let body: serde_json::Value = common::json_body(res).await;
     assert_eq!(body["items"].as_array().unwrap().len(), 10);
+    let first = &body["items"][0];
+    let template = first["systemPromptTemplate"].as_str().unwrap();
+    assert!(
+        template.contains("# SOUL"),
+        "expected SOUL template, got: {template}"
+    );
 }
 
 #[tokio::test]
@@ -71,6 +77,8 @@ async fn create_agent_from_preset() {
     assert_eq!(agent["role"].as_str().unwrap(), preset_role);
     assert_eq!(agent["presetSource"].as_str().unwrap(), preset["key"].as_str().unwrap());
     assert_eq!(agent["name"].as_str().unwrap(), "PM Bot");
+    let template = preset["systemPromptTemplate"].as_str().unwrap();
+    assert_eq!(agent["systemPrompt"].as_str().unwrap(), template);
 }
 
 #[tokio::test]

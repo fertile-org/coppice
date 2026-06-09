@@ -10,6 +10,7 @@ use axum::{
     Json, Router,
 };
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::sync::Arc;
 use time::format_description::well_known::Rfc3339;
 use uuid::Uuid;
@@ -98,14 +99,18 @@ struct UpdateAgentBody {
     enabled: Option<bool>,
 }
 
-fn preset_to_response(preset: AgentPreset) -> PresetResponse {
+fn preset_to_response(preset: AgentPreset, templates: &HashMap<String, String>) -> PresetResponse {
+    let system_prompt_template = templates
+        .get(&preset.key)
+        .cloned()
+        .unwrap_or_default();
     PresetResponse {
         id: preset.id,
         key: preset.key,
         role: preset.role,
         skills: preset.skills,
         responsibilities: preset.responsibilities,
-        system_prompt_template: preset.system_prompt_template,
+        system_prompt_template,
     }
 }
 
@@ -146,7 +151,10 @@ async fn list_presets(
     let service = AgentService::new(pool);
     let presets = service.list_presets().await.map_err(map_error)?;
     Ok(Json(PresetListResponse {
-        items: presets.into_iter().map(preset_to_response).collect(),
+        items: presets
+            .into_iter()
+            .map(|p| preset_to_response(p, &state.agent_templates))
+            .collect(),
     }))
 }
 
@@ -174,8 +182,17 @@ async fn create_agent(
     let service = AgentService::new(pool);
 
     let agent = if let Some(preset_id) = body.preset_id {
+        let preset = service.get_preset(preset_id).await.map_err(map_error)?;
+        let default_prompt = state
+            .agent_templates
+            .get(&preset.key)
+            .ok_or(StatusCode::INTERNAL_SERVER_ERROR)?;
+        let system_prompt = body
+            .system_prompt
+            .as_deref()
+            .unwrap_or(default_prompt.as_str());
         service
-            .create_from_preset(preset_id, &body.name)
+            .create_from_preset(preset_id, &body.name, system_prompt)
             .await
             .map_err(map_error)?
     } else {

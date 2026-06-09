@@ -8,7 +8,6 @@ pub struct AgentPreset {
     pub role: String,
     pub skills: Vec<String>,
     pub responsibilities: Vec<String>,
-    pub system_prompt_template: String,
 }
 
 #[derive(Debug, Clone)]

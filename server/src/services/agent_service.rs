@@ -27,7 +27,7 @@ impl<'a> AgentService<'a> {
     pub async fn list_presets(&self) -> Result<Vec<AgentPreset>, AgentError> {
         let rows = sqlx::query(
             r#"
-            SELECT id, key, role, skills, responsibilities, system_prompt_template
+            SELECT id, key, role, skills, responsibilities
             FROM agent_presets
             ORDER BY key ASC
             "#,
@@ -72,18 +72,10 @@ impl<'a> AgentService<'a> {
         Ok(row_to_agent(&row))
     }
 
-    pub async fn create_from_preset(
-        &self,
-        preset_id: Uuid,
-        name: &str,
-    ) -> Result<Agent, AgentError> {
-        if name.trim().is_empty() {
-            return Err(AgentError::Validation("name is required".into()));
-        }
-
-        let preset_row = sqlx::query(
+    pub async fn get_preset(&self, preset_id: Uuid) -> Result<AgentPreset, AgentError> {
+        let row = sqlx::query(
             r#"
-            SELECT id, key, role, skills, responsibilities, system_prompt_template
+            SELECT id, key, role, skills, responsibilities
             FROM agent_presets
             WHERE id = $1
             "#,
@@ -93,13 +85,29 @@ impl<'a> AgentService<'a> {
         .await?
         .ok_or(AgentError::PresetNotFound)?;
 
-        let preset = row_to_preset(&preset_row);
+        Ok(row_to_preset(&row))
+    }
+
+    pub async fn create_from_preset(
+        &self,
+        preset_id: Uuid,
+        name: &str,
+        system_prompt: &str,
+    ) -> Result<Agent, AgentError> {
+        if name.trim().is_empty() {
+            return Err(AgentError::Validation("name is required".into()));
+        }
+        if system_prompt.trim().is_empty() {
+            return Err(AgentError::Validation("systemPrompt is required".into()));
+        }
+
+        let preset = self.get_preset(preset_id).await?;
         self.insert_agent(
             name,
             &preset.role,
             &preset.skills,
             &preset.responsibilities,
-            &preset.system_prompt_template,
+            system_prompt,
             "mock",
             None,
             None,
@@ -285,7 +293,6 @@ fn row_to_preset(row: &sqlx::postgres::PgRow) -> AgentPreset {
         role: row.get("role"),
         skills: row.get("skills"),
         responsibilities: row.get("responsibilities"),
-        system_prompt_template: row.get("system_prompt_template"),
     }
 }
 
