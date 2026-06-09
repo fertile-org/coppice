@@ -1,5 +1,6 @@
 pub mod mock;
 pub mod opencode;
+pub mod opencode_models;
 pub mod registry;
 
 pub use registry::ConnectorRegistry;

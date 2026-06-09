@@ -120,3 +120,33 @@ async fn agent_with_unknown_provider_gets_missing_config_health() {
         .unwrap()
         .contains("not configured"));
 }
+
+#[tokio::test]
+async fn list_connectors_returns_mock() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let (app, cookie, csrf) = common::bootstrap_and_login().await;
+
+    let res = app
+        .clone()
+        .oneshot(common::json_request(
+            "GET",
+            "/api/connectors",
+            "",
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let body: serde_json::Value = common::json_body(res).await;
+    let ids: Vec<_> = body["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|i| i["id"].as_str().unwrap())
+        .collect();
+    assert!(ids.contains(&"mock"));
+}
