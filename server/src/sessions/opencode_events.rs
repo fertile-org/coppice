@@ -1,4 +1,5 @@
 use crate::providers::AgentRunResult;
+use crate::sessions::session_snapshot::SessionSnapshot;
 use crate::sessions::TerminalFrame;
 use time::OffsetDateTime;
 
@@ -44,6 +45,10 @@ pub fn extract_result_from_messages(messages: &[serde_json::Value]) -> Option<Ag
         }
     }
     None
+}
+
+pub fn extract_result_from_snapshot(snapshot: &SessionSnapshot) -> Option<AgentRunResult> {
+    extract_result_from_messages(&snapshot.messages_for_extraction())
 }
 
 fn looks_like_template_contract(result: &AgentRunResult) -> bool {
@@ -127,6 +132,7 @@ fn extract_result_from_text(text: &str) -> Option<AgentRunResult> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::sessions::session_snapshot::SessionSnapshot;
     use std::path::PathBuf;
 
     fn fixtures_root() -> PathBuf {
@@ -240,6 +246,27 @@ mod tests {
             }
         });
         assert_eq!(session_status_from_sse(&event, "ses_test"), Some("idle".into()));
+    }
+
+    #[test]
+    fn extract_result_from_snapshot_helper() {
+        let mut snap = SessionSnapshot::empty("ses_1");
+        snap.messages.push(serde_json::json!({
+            "id": "msg_1",
+            "info": { "role": "assistant", "id": "msg_1" }
+        }));
+        snap.parts.insert(
+            "msg_1".into(),
+            vec![serde_json::json!({
+                "type": "text",
+                "text": r#"{"status":"done","summary":"Snap.","nextStatus":"In Review"}"#
+            })],
+        );
+        let result = extract_result_from_snapshot(&snap).expect("snapshot extract");
+        match result {
+            AgentRunResult::Done { summary, .. } => assert_eq!(summary, "Snap."),
+            _ => panic!("expected done"),
+        }
     }
 
     #[test]

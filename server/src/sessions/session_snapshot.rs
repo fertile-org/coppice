@@ -34,6 +34,24 @@ impl SessionSnapshot {
         })
     }
 
+    /// Build OpenCode API-shaped messages (info + parts) for contract extraction.
+    pub fn messages_for_extraction(&self) -> Vec<serde_json::Value> {
+        use serde_json::json;
+
+        self.messages
+            .iter()
+            .filter_map(|message| {
+                let message_id = message_id_from_value(message)?;
+                let parts = self.parts.get(message_id)?.clone();
+                let info = message
+                    .get("info")
+                    .cloned()
+                    .unwrap_or_else(|| message.clone());
+                Some(json!({ "info": info, "parts": parts }))
+            })
+            .collect()
+    }
+
     pub fn apply_event(&mut self, event: &Value) {
         let event_type = event.get("type").and_then(|v| v.as_str()).unwrap_or("");
         match event_type {
@@ -323,5 +341,31 @@ mod tests {
         assert_eq!(value["sessionId"], "ses_1");
         assert_eq!(value["messages"], json!([]));
         assert_eq!(value["parts"], json!({}));
+    }
+
+    #[test]
+    fn messages_for_extraction_merges_parts() {
+        let mut snap = SessionSnapshot::empty("ses_1");
+        snap.messages.push(serde_json::json!({
+            "id": "msg_1",
+            "info": { "role": "assistant", "id": "msg_1" }
+        }));
+        snap.parts.insert(
+            "msg_1".into(),
+            vec![serde_json::json!({
+                "type": "text",
+                "text": r#"{"status":"done","summary":"From snapshot.","nextStatus":"In Review"}"#
+            })],
+        );
+
+        let messages = snap.messages_for_extraction();
+        let result = crate::sessions::opencode_events::extract_result_from_messages(&messages)
+            .expect("extract from snapshot-shaped messages");
+        match result {
+            crate::providers::AgentRunResult::Done { summary, .. } => {
+                assert_eq!(summary, "From snapshot.");
+            }
+            _ => panic!("expected done"),
+        }
     }
 }
