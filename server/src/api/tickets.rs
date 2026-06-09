@@ -381,7 +381,11 @@ async fn run_agent(
         .start_run(ticket_id)
         .await
         .map_err(map_run_error_response)?;
-    Ok((StatusCode::CREATED, Json(single_run_response(run))))
+    let connector = service
+        .agent_connector_for_run(run.agent_id)
+        .await
+        .map_err(map_run_error_response)?;
+    Ok((StatusCode::CREATED, Json(single_run_response(run, connector))))
 }
 
 async fn list_runs(

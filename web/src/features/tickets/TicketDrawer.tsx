@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { LiveConsole } from '../runs/LiveConsole';
+import { LiveSession } from '../runs/LiveSession';
 import { TicketDetailPanel } from './TicketDetailPanel';
 import { TicketMetadataPanel } from './TicketMetadataPanel';
 import { TicketRunsTab } from './TicketRunsTab';
@@ -50,6 +51,9 @@ export function TicketDrawer({ ticketId, onClose }: TicketDrawerProps) {
       isActiveRunStatus(run.status),
   );
   const latestRun = runs?.[0] ?? null;
+  const liveRun = activeRun ?? latestRun;
+  const LiveView =
+    liveRun?.connector === 'opencode' ? LiveSession : LiveConsole;
   const runAgentDisabledReason = !ticket?.assigneeAgentId
     ? 'Assign an agent before running.'
     : !ticket?.repoId
@@ -237,9 +241,9 @@ export function TicketDrawer({ ticketId, onClose }: TicketDrawerProps) {
 
           {ticket && tab === 'live' && (
             <div className="flex h-full min-h-0 flex-col px-6 py-5">
-              <LiveConsole
-                runId={activeRun?.id ?? latestRun?.id ?? null}
-                runStatus={activeRun?.status ?? latestRun?.status ?? null}
+              <LiveView
+                runId={liveRun?.id ?? null}
+                runStatus={liveRun?.status ?? null}
               />
             </div>
           )}

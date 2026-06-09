@@ -16,6 +16,12 @@ use uuid::Uuid;
 
 const JOB_TYPE_WORK_ON_TICKET: &str = "work_on_ticket";
 
+#[derive(Debug, Clone)]
+pub struct AgentRunWithConnector {
+    pub run: AgentRun,
+    pub connector: Option<String>,
+}
+
 pub struct RunService<'a> {
     pool: &'a PgPool,
 }
@@ -179,23 +185,34 @@ impl<'a> RunService<'a> {
         Ok(row_to_run(&row))
     }
 
-    pub async fn list_for_ticket(&self, ticket_id: Uuid) -> Result<Vec<AgentRun>, RunError> {
+    pub async fn list_for_ticket(
+        &self,
+        ticket_id: Uuid,
+    ) -> Result<Vec<AgentRunWithConnector>, RunError> {
         let rows = sqlx::query(
             r#"
             SELECT
-                id, ticket_id, agent_id, job_type, status, sandbox_profile_id,
-                worktree_path, branch_name, error_message, session_id,
-                started_at, ended_at, created_at
-            FROM agent_runs
-            WHERE ticket_id = $1
-            ORDER BY created_at DESC
+                ar.id, ar.ticket_id, ar.agent_id, ar.job_type, ar.status, ar.sandbox_profile_id,
+                ar.worktree_path, ar.branch_name, ar.error_message, ar.session_id,
+                ar.started_at, ar.ended_at, ar.created_at,
+                a.connector
+            FROM agent_runs ar
+            JOIN agents a ON a.id = ar.agent_id
+            WHERE ar.ticket_id = $1
+            ORDER BY ar.created_at DESC
             "#,
         )
         .bind(ticket_id)
         .fetch_all(self.pool)
         .await?;
 
-        Ok(rows.iter().map(row_to_run).collect())
+        Ok(rows
+            .iter()
+            .map(|row| AgentRunWithConnector {
+                run: row_to_run(row),
+                connector: row.get("connector"),
+            })
+            .collect())
     }
 
     pub async fn stop(&self, run_id: Uuid) -> Result<AgentRun, RunError> {

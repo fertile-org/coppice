@@ -1,6 +1,6 @@
 use crate::api::auth::{pool_from_state, AuthUser};
 use crate::domain::run::{run_status_to_str, AgentRun};
-use crate::services::run_service::{RunError, RunService};
+use crate::services::run_service::{AgentRunWithConnector, RunError, RunService};
 use crate::AppState;
 use axum::{
     extract::{Path, State},
@@ -36,6 +36,7 @@ pub(crate) struct RunResponse {
     started_at: Option<String>,
     ended_at: Option<String>,
     created_at: String,
+    connector: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -50,19 +51,22 @@ pub(crate) struct RunsListResponse {
     runs: Vec<RunResponse>,
 }
 
-pub(crate) fn single_run_response(run: AgentRun) -> SingleRunResponse {
+pub(crate) fn single_run_response(run: AgentRun, connector: Option<String>) -> SingleRunResponse {
     SingleRunResponse {
-        run: run_to_response(run),
+        run: run_to_response(run, connector),
     }
 }
 
-pub(crate) fn runs_list_response(runs: Vec<AgentRun>) -> RunsListResponse {
+pub(crate) fn runs_list_response(runs: Vec<AgentRunWithConnector>) -> RunsListResponse {
     RunsListResponse {
-        runs: runs.into_iter().map(run_to_response).collect(),
+        runs: runs
+            .into_iter()
+            .map(|item| run_to_response(item.run, item.connector))
+            .collect(),
     }
 }
 
-pub(crate) fn run_to_response(run: AgentRun) -> RunResponse {
+pub(crate) fn run_to_response(run: AgentRun, connector: Option<String>) -> RunResponse {
     RunResponse {
         id: run.id,
         ticket_id: run.ticket_id,
@@ -77,6 +81,7 @@ pub(crate) fn run_to_response(run: AgentRun) -> RunResponse {
         started_at: run.started_at.map(|t| t.format(&Rfc3339).unwrap_or_default()),
         ended_at: run.ended_at.map(|t| t.format(&Rfc3339).unwrap_or_default()),
         created_at: run.created_at.format(&Rfc3339).unwrap_or_default(),
+        connector,
     }
 }
 
@@ -97,7 +102,11 @@ async fn get_run(
     let pool = pool_from_state(&state)?;
     let service = RunService::new(pool);
     let run = service.get(run_id).await.map_err(map_error)?;
-    Ok(Json(single_run_response(run)))
+    let connector = service
+        .agent_connector_for_run(run.agent_id)
+        .await
+        .map_err(map_error)?;
+    Ok(Json(single_run_response(run, connector)))
 }
 
 async fn stop_run(
@@ -111,7 +120,11 @@ async fn stop_run(
     if let Some(handle) = state.run_streams.get(run_id) {
         handle.cancel();
     }
-    Ok(Json(single_run_response(run)))
+    let connector = service
+        .agent_connector_for_run(run.agent_id)
+        .await
+        .map_err(map_error)?;
+    Ok(Json(single_run_response(run, connector)))
 }
 
 async fn retry_run(
@@ -122,7 +135,11 @@ async fn retry_run(
     let pool = pool_from_state(&state)?;
     let service = RunService::new(pool);
     let run = service.retry(run_id).await.map_err(map_error)?;
-    Ok((StatusCode::CREATED, Json(single_run_response(run))))
+    let connector = service
+        .agent_connector_for_run(run.agent_id)
+        .await
+        .map_err(map_error)?;
+    Ok((StatusCode::CREATED, Json(single_run_response(run, connector))))
 }
 
 #[cfg(test)]
@@ -147,7 +164,8 @@ mod tests {
             ended_at: None,
             created_at: time::OffsetDateTime::now_utc(),
         };
-        let response = run_to_response(run);
+        let response = run_to_response(run, Some("mock".into()));
         assert_eq!(response.status, "running");
+        assert_eq!(response.connector.as_deref(), Some("mock"));
     }
 }
