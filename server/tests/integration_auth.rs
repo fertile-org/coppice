@@ -30,7 +30,7 @@ async fn test_state_with_db() -> Arc<AppState> {
     let config = AppConfig::load_defaults().expect("test config");
     Arc::new(AppState {
         attachments: AppState::attachment_store_from_config(&config),
-        provider_registry: AppState::provider_registry_from_config(&config, None),
+        connector_registry: AppState::connector_registry_from_config(&config, None),
         agent_health: Arc::new(coppice_server::services::agent_health::AgentHealthRegistry::new()),
         run_streams: Arc::new(coppice_server::sessions::run_registry::RunStreamRegistry::new()),
         event_bus: Arc::new(coppice_server::events::bus::EventBus::new()),

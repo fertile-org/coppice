@@ -7,24 +7,24 @@ use crate::providers::opencode::OpenCodeProvider;
 use crate::providers::AgentProvider;
 use crate::sessions::opencode_serve::OpenCodeServeManager;
 
-pub struct ProviderRegistry {
-    providers: HashMap<String, Arc<dyn AgentProvider>>,
-    opencode_default_model: Option<String>,
+pub struct ConnectorRegistry {
+    connectors: HashMap<String, Arc<dyn AgentProvider>>,
+    opencode_model_providers: Vec<String>,
 }
 
-impl ProviderRegistry {
+impl ConnectorRegistry {
     pub fn from_config(
         config: &AppConfig,
         opencode_serve: Option<Arc<OpenCodeServeManager>>,
     ) -> Self {
-        let mut providers: HashMap<String, Arc<dyn AgentProvider>> = HashMap::new();
-        providers.insert("mock".into(), Arc::new(MockProvider::default()));
+        let mut connectors: HashMap<String, Arc<dyn AgentProvider>> = HashMap::new();
+        connectors.insert("mock".into(), Arc::new(MockProvider::default()));
 
         let opencode_available = config.agent.connectors.opencode.enabled
             || opencode_serve.is_some();
         if opencode_available {
             if let Some(serve) = opencode_serve {
-                providers.insert(
+                connectors.insert(
                     "opencode".into(),
                     Arc::new(OpenCodeProvider::new(
                         serve,
@@ -35,30 +35,36 @@ impl ProviderRegistry {
         }
 
         Self {
-            providers,
-            opencode_default_model: None,
+            connectors,
+            opencode_model_providers: config.agent.connectors.opencode.model_providers.clone(),
         }
     }
 
-    pub fn has(&self, name: &str) -> bool {
-        self.providers.contains_key(name)
+    pub fn has(&self, connector: &str) -> bool {
+        self.connectors.contains_key(connector)
     }
 
-    pub fn get(&self, name: &str) -> Option<Arc<dyn AgentProvider>> {
-        self.providers.get(name).cloned()
+    pub fn get(&self, connector: &str) -> Option<Arc<dyn AgentProvider>> {
+        self.connectors.get(connector).cloned()
     }
 
     pub fn configured_ids(&self) -> Vec<String> {
-        let mut ids: Vec<_> = self.providers.keys().cloned().collect();
+        let mut ids: Vec<_> = self.connectors.keys().cloned().collect();
         ids.sort();
         ids
     }
 
-    pub fn default_model_for(&self, provider: &str) -> Option<String> {
-        match provider {
-            "opencode" => self.opencode_default_model.clone(),
-            _ => None,
+    pub fn model_providers_for(&self, connector: &str) -> Vec<String> {
+        match connector {
+            "opencode" => self.opencode_model_providers.clone(),
+            _ => vec![],
         }
+    }
+
+    pub fn has_model_provider(&self, connector: &str, model_provider: &str) -> bool {
+        self.model_providers_for(connector)
+            .iter()
+            .any(|p| p == model_provider)
     }
 }
 
@@ -69,8 +75,20 @@ mod tests {
     #[test]
     fn lists_configured_provider_ids() {
         let config = AppConfig::load_defaults().expect("config");
-        let registry = ProviderRegistry::from_config(&config, None);
+        let registry = ConnectorRegistry::from_config(&config, None);
         assert!(registry.has("mock"));
         assert!(!registry.has("opencode")); // serve not started in test
+    }
+
+    #[test]
+    fn lists_model_providers_from_config() {
+        let mut config = AppConfig::load_defaults().expect("config");
+        config.agent.connectors.opencode.model_providers = vec!["zai-coding-plan".into()];
+        let registry = ConnectorRegistry::from_config(&config, None);
+        assert_eq!(
+            registry.model_providers_for("opencode"),
+            vec!["zai-coding-plan"]
+        );
+        assert!(registry.model_providers_for("mock").is_empty());
     }
 }

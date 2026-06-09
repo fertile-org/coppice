@@ -2,7 +2,7 @@ use dashmap::DashMap;
 use uuid::Uuid;
 
 use crate::domain::agent::Agent;
-use crate::providers::ProviderRegistry;
+use crate::providers::ConnectorRegistry;
 use crate::sessions::opencode_serve::OpenCodeServeManager;
 
 pub use crate::domain::agent_health::{health_status_to_str, AgentHealthStatus};
@@ -64,7 +64,7 @@ impl AgentHealthRegistry {
 
 pub async fn evaluate_agent_health(
     agent: &Agent,
-    registry: &ProviderRegistry,
+    registry: &ConnectorRegistry,
     opencode_serve: Option<&OpenCodeServeManager>,
 ) -> (AgentHealthStatus, Option<String>) {
     if !registry.has(&agent.connector) {

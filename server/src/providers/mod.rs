@@ -2,7 +2,10 @@ pub mod mock;
 pub mod opencode;
 pub mod registry;
 
-pub use registry::ProviderRegistry;
+pub use registry::ConnectorRegistry;
+
+/// Temporary alias for gradual migration.
+pub type ProviderRegistry = ConnectorRegistry;
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};

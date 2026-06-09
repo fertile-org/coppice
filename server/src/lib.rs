@@ -24,7 +24,7 @@ pub struct AppState {
     pub config: AppConfig,
     pub db: Option<PgPool>,
     pub attachments: AttachmentStore,
-    pub provider_registry: Arc<crate::providers::ProviderRegistry>,
+    pub connector_registry: Arc<crate::providers::ConnectorRegistry>,
     pub agent_health: Arc<crate::services::agent_health::AgentHealthRegistry>,
     pub run_streams: Arc<crate::sessions::run_registry::RunStreamRegistry>,
     pub event_bus: Arc<crate::events::bus::EventBus>,
@@ -39,17 +39,17 @@ impl AppState {
         )
     }
 
-    pub fn provider_registry_from_config(
+    pub fn connector_registry_from_config(
         config: &AppConfig,
         opencode_serve: Option<Arc<crate::sessions::opencode_serve::OpenCodeServeManager>>,
-    ) -> Arc<crate::providers::ProviderRegistry> {
-        Arc::new(crate::providers::ProviderRegistry::from_config(
+    ) -> Arc<crate::providers::ConnectorRegistry> {
+        Arc::new(crate::providers::ConnectorRegistry::from_config(
             config,
             opencode_serve,
         ))
     }
 
-    pub fn default_provider_id(&self) -> &str {
+    pub fn default_connector_id(&self) -> &str {
         &self.config.agent.default_connector
     }
 }
@@ -58,7 +58,7 @@ pub async fn test_state() -> Arc<AppState> {
     let config = AppConfig::load_defaults().expect("test config");
     Arc::new(AppState {
         attachments: AppState::attachment_store_from_config(&config),
-        provider_registry: AppState::provider_registry_from_config(&config, None),
+        connector_registry: AppState::connector_registry_from_config(&config, None),
         agent_health: Arc::new(crate::services::agent_health::AgentHealthRegistry::new()),
         run_streams: Arc::new(crate::sessions::run_registry::RunStreamRegistry::new()),
         event_bus: Arc::new(crate::events::bus::EventBus::new()),

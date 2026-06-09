@@ -194,17 +194,15 @@ async fn execute_job(
         status: "running".into(),
     });
 
-    let provider_name = &agent.connector;
-    let provider = state
-        .provider_registry
-        .get(provider_name)
-        .ok_or_else(|| anyhow::anyhow!("agent provider not configured: {provider_name}"))?;
+    let connector_name = &agent.connector;
+    let connector = state
+        .connector_registry
+        .get(connector_name)
+        .ok_or_else(|| anyhow::anyhow!("agent connector not configured: {connector_name}"))?;
 
-    let model = agent.model.clone().or_else(|| {
-        state.provider_registry.default_model_for(provider_name)
-    });
+    let model = agent.model.clone();
 
-    let provider_result = provider
+    let provider_result = connector
         .run(AgentRunInput {
             agent_id: run.agent_id.to_string(),
             ticket_id: Some(run.ticket_id.to_string()),
@@ -220,19 +218,19 @@ async fn execute_job(
     let result = match provider_result {
         Ok(result) => result,
         Err(ProviderError::Cancelled) => {
-            persist_artifacts(state, &stream, run.id, provider_name, None)?;
+            persist_artifacts(state, &stream, run.id, connector_name, None)?;
             state.run_streams.remove(run.id);
             return Err(JobCancelled.into());
         }
         Err(err) => {
-            persist_artifacts(state, &stream, run.id, provider_name, None)?;
+            persist_artifacts(state, &stream, run.id, connector_name, None)?;
             state.run_streams.remove(run.id);
             return Err(anyhow::anyhow!("agent provider: {err}"));
         }
     };
 
     if run_svc.is_cancelled(run.id).await? {
-        persist_artifacts(state, &stream, run.id, provider_name, None)?;
+        persist_artifacts(state, &stream, run.id, connector_name, None)?;
         state.run_streams.remove(run.id);
         return Err(JobCancelled.into());
     }
@@ -251,7 +249,7 @@ async fn execute_job(
         .await
         .context("finish run with apply")?;
 
-    persist_artifacts(state, &stream, run.id, provider_name, None)?;
+    persist_artifacts(state, &stream, run.id, connector_name, None)?;
     state.run_streams.remove(run.id);
 
     let updated_ticket = TicketService::new(pool)
@@ -300,7 +298,7 @@ fn persist_artifacts(
     state: &AppState,
     stream: &crate::sessions::run_registry::RunStreamHandle,
     run_id: uuid::Uuid,
-    provider_name: &str,
+    connector_name: &str,
     session_id: Option<String>,
 ) -> anyhow::Result<()> {
     let paths = RunArtifactPaths::new(
@@ -316,7 +314,7 @@ fn persist_artifacts(
     ArtifactService::write_meta(
         &paths,
         &RunArtifactMeta {
-            provider: provider_name.into(),
+            provider: connector_name.into(),
             session_id,
             frame_count: frames.len() as u64,
             ended_at: time::OffsetDateTime::now_utc()

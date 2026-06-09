@@ -32,7 +32,7 @@ pub async fn run_health_pass_once(state: &AppState) {
         state.agent_health.ensure_agent(agent.id);
         let (status, detail) = evaluate_agent_health(
             &agent,
-            state.provider_registry.as_ref(),
+            state.connector_registry.as_ref(),
             state.opencode_serve.as_deref(),
         )
         .await;
