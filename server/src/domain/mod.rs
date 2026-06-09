@@ -1,4 +1,5 @@
 pub mod agent;
+pub mod agent_health;
 pub mod slug;
 pub mod attachment;
 pub mod comment;

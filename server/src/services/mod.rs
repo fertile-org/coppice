@@ -1,3 +1,4 @@
+pub mod agent_health;
 pub mod agent_service;
 pub mod artifact_service;
 pub mod auth_service;
