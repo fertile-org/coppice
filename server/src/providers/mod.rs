@@ -96,7 +96,7 @@ pub fn fixtures_root() -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::providers::mock::MockProvider;
+    use crate::providers::mock::{mock_env_lock, MockProvider};
 
     #[test]
     fn agent_run_result_deserializes_done_fixture() {
@@ -112,7 +112,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn mock_provider_returns_done_fixture() {
+    async fn mock_provider_returns_done_fixture_via_env_override() {
+        let _lock = mock_env_lock();
+        let prev = std::env::var("MOCK_AGENT_RESPONSE").ok();
+        std::env::set_var("MOCK_AGENT_RESPONSE", "done");
         let provider = MockProvider::default();
         let result = provider
             .run(AgentRunInput {
@@ -137,6 +140,10 @@ mod tests {
                 assert_eq!(summary, "Mock implementation complete.");
             }
             _ => panic!("expected done variant"),
+        }
+        match prev {
+            Some(v) => std::env::set_var("MOCK_AGENT_RESPONSE", v),
+            None => std::env::remove_var("MOCK_AGENT_RESPONSE"),
         }
     }
 }

@@ -1,0 +1,8 @@
+{
+  "status": "blocked",
+  "blockerType": "needs_human",
+  "summary": "@pm Should we use option A or B for the API shape?",
+  "mentionAgents": ["pm"],
+  "requiredCapabilities": [],
+  "requiredSecrets": []
+}
