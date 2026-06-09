@@ -338,20 +338,23 @@ impl OpenCodeClient {
 
             if idle_flag.load(std::sync::atomic::Ordering::Relaxed) {
                 match self.session_status(directory, session_id).await? {
-                    Some(status) if status == "idle" => {
-                        idle_flag.store(true, std::sync::atomic::Ordering::Relaxed);
-                        return Ok(());
+                    Some(status) => {
+                        if mark_idle_when_status(Some(&status), &idle_flag) {
+                            return Ok(());
+                        }
+                        idle_flag.store(false, std::sync::atomic::Ordering::Relaxed);
                     }
-                    _ => idle_flag.store(false, std::sync::atomic::Ordering::Relaxed),
+                    None => idle_flag.store(false, std::sync::atomic::Ordering::Relaxed),
                 }
             }
 
             match self.session_status(directory, session_id).await? {
-                Some(status) if status == "idle" => {
-                    idle_flag.store(true, std::sync::atomic::Ordering::Relaxed);
-                    return Ok(());
+                Some(status) => {
+                    if mark_idle_when_status(Some(&status), &idle_flag) {
+                        return Ok(());
+                    }
                 }
-                _ => {}
+                None => {}
             }
 
             tokio::time::sleep(POLL_INTERVAL).await;
@@ -532,4 +535,26 @@ fn api_error(action: &str, status: reqwest::StatusCode, body: serde_json::Value)
     ProviderError::InvalidFixture(format!(
         "opencode {action} failed ({status}): {body}"
     ))
+}
+
+fn mark_idle_when_status(status: Option<&str>, idle_flag: &std::sync::atomic::AtomicBool) -> bool {
+    if status == Some("idle") {
+        idle_flag.store(true, std::sync::atomic::Ordering::Relaxed);
+        true
+    } else {
+        false
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn mark_idle_when_status_sets_flag() {
+        let flag = std::sync::atomic::AtomicBool::new(false);
+        assert!(mark_idle_when_status(Some("idle"), &flag));
+        assert!(flag.load(std::sync::atomic::Ordering::Relaxed));
+        assert!(!mark_idle_when_status(Some("busy"), &flag));
+    }
 }
