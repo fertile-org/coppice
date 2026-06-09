@@ -297,6 +297,47 @@ mod tests {
     }
 
     #[test]
+    fn deserializes_legacy_provider_keys() {
+        let toml = r#"
+        [agent]
+        default_provider = "opencode"
+        worktrees_path = "./data/worktrees"
+        worker_count = 2
+
+        [agent.providers.opencode]
+        enabled = true
+        model_providers = ["anthropic"]
+    "#;
+        #[derive(Deserialize)]
+        struct Wrapper {
+            agent: AgentConfig,
+        }
+        let wrapper: Wrapper = toml::from_str(toml).expect("parse");
+        let cfg = wrapper.agent;
+        assert_eq!(cfg.default_connector, "opencode");
+        assert!(cfg.connectors.opencode.enabled);
+        assert_eq!(cfg.connectors.opencode.model_providers, vec!["anthropic"]);
+    }
+
+    #[test]
+    fn agent_default_provider_env_maps_to_connector() {
+        let _guard = ENV_LOCK.lock().expect("env lock");
+
+        const KEY: &str = "AGENT_DEFAULT_PROVIDER";
+        let previous = std::env::var(KEY).ok();
+        std::env::set_var(KEY, "opencode");
+
+        let cfg = AppConfig::load_defaults().expect("config should load");
+
+        match previous {
+            Some(value) => std::env::set_var(KEY, value),
+            None => std::env::remove_var(KEY),
+        }
+
+        assert_eq!(cfg.agent.default_connector, "opencode");
+    }
+
+    #[test]
     fn storage_artifacts_dir_from_env() {
         let _guard = ENV_LOCK.lock().expect("env lock");
 
