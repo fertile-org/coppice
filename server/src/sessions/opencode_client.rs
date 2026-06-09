@@ -9,14 +9,15 @@ use tokio::sync::watch;
 use crate::providers::{AgentRunResult, ProviderError};
 use crate::sessions::live_message::LiveMessage;
 use crate::sessions::opencode_events::{
-    extract_result_from_messages, session_status_from_sse,
+    extract_result_from_messages, extract_result_from_snapshot, session_status_from_sse,
 };
 use crate::sessions::run_registry::RunStreamHandle;
 use crate::sessions::session_snapshot::SessionSnapshot;
 
 const POLL_INTERVAL: Duration = Duration::from_millis(500);
 const SSE_RECONNECT_DELAY: Duration = Duration::from_millis(750);
-const RUN_TIMEOUT: Duration = Duration::from_secs(3600);
+const RUN_IDLE_TIMEOUT: Duration = Duration::from_secs(600);
+const STREAM_DRAIN_TIMEOUT: Duration = Duration::from_secs(5);
 
 struct StreamContext {
     session_id: String,
@@ -125,27 +126,32 @@ impl OpenCodeClient {
         let prompt_result = self.prompt_async(&directory, &session_id, prompt).await;
         if let Err(err) = prompt_result {
             let _ = self.abort(&directory, &session_id).await;
-            let _ = events_handle.await;
+            drain_events_task(events_handle, &idle_flag).await;
             return Err(err);
         }
 
         let wait_result = self
-            .wait_idle(&directory, &session_id, cancel_rx, idle_flag)
+            .wait_idle(&directory, &session_id, cancel_rx, idle_flag.clone())
             .await;
         if let Err(err) = wait_result {
             let _ = self.abort(&directory, &session_id).await;
-            let _ = events_handle.await;
+            drain_events_task(events_handle, &idle_flag).await;
             return Err(err);
         }
 
-        let _ = events_handle.await;
+        drain_events_task(events_handle, &idle_flag).await;
 
         let messages = self.fetch_messages(&directory, &session_id).await?;
-        extract_result_from_messages(&messages).ok_or_else(|| {
-            ProviderError::InvalidFixture(
-                "no result contract in opencode session messages".into(),
-            )
-        })
+        let snapshot = ctx.snapshot.lock().map_err(|_| {
+            ProviderError::InvalidFixture("snapshot lock poisoned".into())
+        })?;
+        extract_result_from_messages(&messages)
+            .or_else(|| extract_result_from_snapshot(&snapshot))
+            .ok_or_else(|| {
+                ProviderError::InvalidFixture(
+                    "no result contract in opencode session messages or snapshot".into(),
+                )
+            })
     }
 
     pub async fn reattach_events(
@@ -181,6 +187,19 @@ impl StreamContext {
             snapshot: self.snapshot.clone(),
             idle_flag: self.idle_flag.clone(),
         }
+    }
+}
+
+async fn drain_events_task(
+    handle: tokio::task::JoinHandle<Result<(), ProviderError>>,
+    idle_flag: &Arc<std::sync::atomic::AtomicBool>,
+) {
+    idle_flag.store(true, std::sync::atomic::Ordering::Relaxed);
+    match tokio::time::timeout(STREAM_DRAIN_TIMEOUT, handle).await {
+        Ok(Ok(Ok(()))) => {}
+        Ok(Ok(Err(err))) => tracing::warn!(%err, "opencode event stream ended with error"),
+        Ok(Err(join_err)) => tracing::warn!(%join_err, "opencode event stream task panicked"),
+        Err(_) => tracing::warn!("opencode event stream drain timed out; continuing"),
     }
 }
 
@@ -303,7 +322,7 @@ impl OpenCodeClient {
         cancel_rx: Option<watch::Receiver<bool>>,
         idle_flag: Arc<std::sync::atomic::AtomicBool>,
     ) -> Result<(), ProviderError> {
-        let deadline = tokio::time::Instant::now() + RUN_TIMEOUT;
+        let deadline = tokio::time::Instant::now() + RUN_IDLE_TIMEOUT;
         let mut cancel_rx = cancel_rx;
 
         loop {
@@ -319,13 +338,19 @@ impl OpenCodeClient {
 
             if idle_flag.load(std::sync::atomic::Ordering::Relaxed) {
                 match self.session_status(directory, session_id).await? {
-                    Some(status) if status == "idle" => return Ok(()),
+                    Some(status) if status == "idle" => {
+                        idle_flag.store(true, std::sync::atomic::Ordering::Relaxed);
+                        return Ok(());
+                    }
                     _ => idle_flag.store(false, std::sync::atomic::Ordering::Relaxed),
                 }
             }
 
             match self.session_status(directory, session_id).await? {
-                Some(status) if status == "idle" => return Ok(()),
+                Some(status) if status == "idle" => {
+                    idle_flag.store(true, std::sync::atomic::Ordering::Relaxed);
+                    return Ok(());
+                }
                 _ => {}
             }
 
