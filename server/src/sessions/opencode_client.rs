@@ -148,6 +148,29 @@ impl OpenCodeClient {
         })
     }
 
+    pub async fn reattach_events(
+        &self,
+        directory: &Path,
+        session_id: &str,
+        event_tx: tokio::sync::mpsc::Sender<LiveMessage>,
+    ) -> Result<(), ProviderError> {
+        let directory = Self::resolve_directory(directory)?;
+
+        match self.session_status(&directory, session_id).await? {
+            Some(status) if status == "idle" => return Ok(()),
+            Some(_) => {}
+            None => {
+                return Err(ProviderError::InvalidFixture(format!(
+                    "opencode session {session_id} not found"
+                )));
+            }
+        }
+
+        let idle_flag = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        self.reattach_stream_loop(&directory, session_id, event_tx, idle_flag)
+            .await
+    }
+
 }
 
 impl StreamContext {
@@ -380,6 +403,86 @@ impl OpenCodeClient {
 
                     if event_for_session(&event, &ctx.session_id) {
                         publish_sse_event(&ctx, &event);
+                    }
+                }
+            }
+
+            tokio::time::sleep(SSE_RECONNECT_DELAY).await;
+        }
+    }
+
+    async fn reattach_stream_loop(
+        &self,
+        directory: &Path,
+        session_id: &str,
+        event_tx: tokio::sync::mpsc::Sender<LiveMessage>,
+        idle_flag: Arc<std::sync::atomic::AtomicBool>,
+    ) -> Result<(), ProviderError> {
+        loop {
+            if idle_flag.load(std::sync::atomic::Ordering::Relaxed) {
+                return Ok(());
+            }
+
+            let url = self.url_with_directory("/event", directory)?;
+            let resp = match self.stream.get(url).send().await {
+                Ok(resp) => resp,
+                Err(err) => {
+                    tracing::warn!(%err, "opencode reattach stream connect failed, retrying");
+                    tokio::time::sleep(SSE_RECONNECT_DELAY).await;
+                    continue;
+                }
+            };
+
+            if !resp.status().is_success() {
+                tokio::time::sleep(SSE_RECONNECT_DELAY).await;
+                continue;
+            }
+
+            let mut lines = resp.bytes_stream();
+            let mut buffer = String::new();
+
+            while let Some(chunk) = lines.next().await {
+                if idle_flag.load(std::sync::atomic::Ordering::Relaxed) {
+                    return Ok(());
+                }
+
+                let chunk = match chunk {
+                    Ok(c) => c,
+                    Err(err) => {
+                        tracing::warn!(%err, "opencode reattach stream read error, reconnecting");
+                        break;
+                    }
+                };
+                buffer.push_str(&String::from_utf8_lossy(&chunk));
+
+                while let Some(pos) = buffer.find('\n') {
+                    let line = buffer[..pos].trim_end_matches('\r').to_string();
+                    buffer = buffer[pos + 1..].to_string();
+
+                    let Some(data) = line.strip_prefix("data: ") else {
+                        continue;
+                    };
+                    if data.is_empty() {
+                        continue;
+                    }
+                    let Ok(event) = serde_json::from_str::<serde_json::Value>(data) else {
+                        continue;
+                    };
+
+                    if session_status_from_sse(&event, session_id).as_deref() == Some("idle") {
+                        idle_flag.store(true, std::sync::atomic::Ordering::Relaxed);
+                        return Ok(());
+                    }
+
+                    if event_for_session(&event, session_id)
+                        && event_tx
+                            .send(LiveMessage::Event {
+                                event: event.clone(),
+                            })
+                            .await
+                            .is_err()
+                    {
+                        return Ok(());
                     }
                 }
             }

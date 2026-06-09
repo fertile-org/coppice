@@ -344,6 +344,44 @@ impl<'a> RunService<'a> {
         Ok(())
     }
 
+    pub async fn mark_interrupted(&self, run_id: Uuid, reason: &str) -> Result<AgentRun, RunError> {
+        sqlx::query(
+            r#"UPDATE agent_runs SET status = $2, error_message = $3, ended_at = now() WHERE id = $1"#,
+        )
+        .bind(run_id)
+        .bind(run_status_to_str(RunStatus::Failed))
+        .bind(format!("interrupted: {reason}"))
+        .execute(self.pool)
+        .await?;
+        self.get(run_id).await
+    }
+
+    pub async fn list_active_runs(&self) -> Result<Vec<AgentRun>, RunError> {
+        let rows = sqlx::query(
+            r#"
+            SELECT
+                id, ticket_id, agent_id, job_type, status, sandbox_profile_id,
+                worktree_path, branch_name, error_message, session_id,
+                started_at, ended_at, created_at
+            FROM agent_runs
+            WHERE status IN ('queued', 'running')
+            ORDER BY created_at
+            "#,
+        )
+        .fetch_all(self.pool)
+        .await?;
+
+        Ok(rows.iter().map(row_to_run).collect())
+    }
+
+    pub async fn agent_connector_for_run(&self, agent_id: Uuid) -> Result<Option<String>, RunError> {
+        sqlx::query_scalar("SELECT connector FROM agents WHERE id = $1")
+            .bind(agent_id)
+            .fetch_optional(self.pool)
+            .await
+            .map_err(RunError::from)
+    }
+
     pub async fn is_cancelled(&self, run_id: Uuid) -> Result<bool, RunError> {
         let status: Option<String> = sqlx::query_scalar(
             "SELECT status FROM agent_runs WHERE id = $1",
