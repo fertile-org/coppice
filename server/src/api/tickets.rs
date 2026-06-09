@@ -345,11 +345,23 @@ async fn assign_agent(
     Json(body): Json<AssignAgentBody>,
 ) -> Result<Json<TicketResponse>, StatusCode> {
     let pool = pool_from_state(&state)?;
-    let service = TicketService::new(pool);
-    let ticket = service
+    let ticket_svc = TicketService::new(pool);
+    ticket_svc
         .assign_agent(ticket_id, body.agent_id)
         .await
         .map_err(map_error)?;
+    let ticket = ticket_svc
+        .clear_pending_recommendation(ticket_id)
+        .await
+        .map_err(map_error)?;
+
+    if state.config.workflow.auto_start_runs
+        && ticket.ticket.assignee_agent_id.is_some()
+        && ticket.ticket.repo_id.is_some()
+    {
+        let _ = RunService::new(pool).start_run(ticket_id).await;
+    }
+
     Ok(Json(ticket_to_response(ticket)))
 }
 

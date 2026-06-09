@@ -362,6 +362,31 @@ impl<'a> TicketService<'a> {
         self.enrich_ticket(row_to_ticket(&row)).await
     }
 
+    pub async fn clear_pending_recommendation(
+        &self,
+        ticket_id: Uuid,
+    ) -> Result<TicketWithDisplay, TicketError> {
+        let row = sqlx::query(
+            r#"
+            UPDATE tickets
+            SET pending_assign_recommendation = NULL, updated_at = now()
+            WHERE id = $1
+            RETURNING
+                id, project_id, repo_id, title, description,
+                status, substatus, substatus_metadata, priority,
+                assignee_agent_id, owner_user_id, branch_name,
+                pending_assign_recommendation, clarification_round,
+                created_by, created_by_id, created_at, updated_at
+            "#,
+        )
+        .bind(ticket_id)
+        .fetch_optional(self.pool)
+        .await?
+        .ok_or(TicketError::TicketNotFound)?;
+
+        self.enrich_ticket(row_to_ticket(&row)).await
+    }
+
     pub async fn assign_agent(
         &self,
         ticket_id: Uuid,

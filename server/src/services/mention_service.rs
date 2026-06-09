@@ -119,6 +119,17 @@ impl<'a> MentionService<'a> {
         Ok(())
     }
 
+    pub async fn find_pending_for_agent(
+        &self,
+        ticket_id: Uuid,
+        mentioned_agent_id: Uuid,
+    ) -> Result<Option<TicketMention>, MentionError> {
+        let mentions = self.list_pending_for_ticket(ticket_id).await?;
+        Ok(mentions
+            .into_iter()
+            .find(|m| m.mentioned_agent_id == mentioned_agent_id))
+    }
+
     pub async fn list_pending_for_ticket(
         &self,
         ticket_id: Uuid,

@@ -6,6 +6,9 @@ use crate::providers::AgentRunResult;
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 
+pub const MAX_CLARIFICATION_ROUNDS: i32 = 3;
+pub const MAX_MENTIONS_PER_RUN: u32 = 2;
+
 pub struct WorkflowService;
 
 impl Default for TransitionAction {
@@ -56,7 +59,10 @@ impl WorkflowService {
         let mut action = TransitionAction::default();
 
         if ctx.run_outcome == RunOutcome::Blocked {
-            let mention_agents = mention_agents_from_contract(&ctx.contract);
+            let mention_agents = mention_agents_from_contract(&ctx.contract)
+                .into_iter()
+                .take(MAX_MENTIONS_PER_RUN as usize)
+                .collect::<Vec<_>>();
             if !mention_agents.is_empty() {
                 let first_key = mention_agents[0].clone();
                 let metadata = if let Some(id) = ctx.project_agent_ids.get(&first_key) {

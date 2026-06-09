@@ -15,7 +15,7 @@ use crate::services::mention_service::MentionService;
 use crate::services::result_contract::ApplyResult;
 use crate::services::run_service::{RunError, RunService};
 use crate::services::ticket_service::TicketService;
-use crate::services::workflow_service::WorkflowService;
+use crate::services::workflow_service::{WorkflowService, MAX_CLARIFICATION_ROUNDS};
 use serde_json::Value;
 use sqlx::PgPool;
 use uuid::Uuid;
@@ -118,7 +118,7 @@ impl<'a> RunOrchestrator<'a> {
 
         let (substatus, substatus_metadata) = merge_substatus(&action, &apply);
 
-        ticket_svc
+        let ticket = ticket_svc
             .apply_workflow_update(
                 run.ticket_id,
                 action.new_status,
@@ -160,6 +160,10 @@ impl<'a> RunOrchestrator<'a> {
                 .await?;
         }
 
+        if run.job_type == "respond_to_mention" && apply.run_status == RunStatus::Succeeded {
+            self.handle_clarification_resume(run, &ticket).await?;
+        }
+
         if self.workflow.auto_start_runs {
             let run_svc = RunService::new(self.pool);
             for job_req in &action.enqueue_jobs {
@@ -167,11 +171,106 @@ impl<'a> RunOrchestrator<'a> {
                     .start_run_for_agent(run.ticket_id, job_req.agent_id, &job_req.job_type)
                     .await?;
             }
+
+            if let Some(Some(new_assignee)) = action.new_assignee_id {
+                if ticket.ticket.repo_id.is_some() {
+                    let already_queued = action.enqueue_jobs.iter().any(|j| {
+                        j.agent_id == new_assignee && j.job_type == "work_on_ticket"
+                    });
+                    if !already_queued {
+                        run_svc
+                            .start_run_for_agent(
+                                run.ticket_id,
+                                new_assignee,
+                                "work_on_ticket",
+                            )
+                            .await?;
+                    }
+                }
+            }
         }
 
         RunService::new(self.pool)
             .finish_run(run.id, apply.run_status, worktree_path, branch_name)
             .await
+    }
+
+    async fn handle_clarification_resume(
+        &self,
+        run: &AgentRun,
+        ticket: &crate::services::ticket_service::TicketWithDisplay,
+    ) -> Result<(), RunError> {
+        let mention_svc = MentionService::new(self.pool);
+        let Some(mention) = mention_svc
+            .find_pending_for_agent(run.ticket_id, run.agent_id)
+            .await?
+        else {
+            return Ok(());
+        };
+
+        mention_svc.mark_handled(mention.id).await?;
+
+        let ticket_svc = TicketService::new(self.pool);
+        let Some(resume_agent_id) = mention.resume_agent_id else {
+            ticket_svc
+                .apply_workflow_update(
+                    run.ticket_id,
+                    None,
+                    Some(None),
+                    Some(None),
+                    None,
+                    None,
+                    0,
+                )
+                .await?;
+            return Ok(());
+        };
+
+        if ticket.ticket.clarification_round < MAX_CLARIFICATION_ROUNDS {
+            ticket_svc
+                .apply_workflow_update(
+                    run.ticket_id,
+                    None,
+                    Some(None),
+                    Some(None),
+                    Some(Some(resume_agent_id)),
+                    None,
+                    1,
+                )
+                .await?;
+
+            if self.workflow.auto_start_runs && ticket.ticket.repo_id.is_some() {
+                RunService::new(self.pool)
+                    .start_run_for_agent(run.ticket_id, resume_agent_id, "work_on_ticket")
+                    .await?;
+            }
+        } else {
+            ticket_svc
+                .apply_workflow_update(
+                    run.ticket_id,
+                    None,
+                    Some(Some(Substatus::WaitingForHuman)),
+                    Some(None),
+                    None,
+                    None,
+                    0,
+                )
+                .await?;
+
+            CommentService::new(self.pool)
+                .create(
+                    run.ticket_id,
+                    AuthorType::System,
+                    None,
+                    "Maximum clarification rounds reached. Waiting for human input.",
+                    CommentIntent::SystemEvent,
+                    &[],
+                    &[],
+                )
+                .await?;
+        }
+
+        Ok(())
     }
 }
 
@@ -563,5 +662,177 @@ mod tests {
             .await
             .expect("list jobs");
         assert!(jobs.iter().any(|j| j.job_type == "respond_to_mention"));
+    }
+
+    #[tokio::test]
+    async fn orchestrator_respond_to_mention_resumes_engineer_when_under_limit() {
+        let Some(pool) = test_pool().await else {
+            return;
+        };
+        let fx = insert_fixture(&pool).await;
+        let _repo_dir = attach_ready_repo(&pool, fx.ticket_id).await;
+
+        sqlx::query("UPDATE tickets SET status = $2, assignee_agent_id = $3 WHERE id = $1")
+            .bind(fx.ticket_id)
+            .bind("in_progress")
+            .bind(fx.engineer_agent_id)
+            .execute(&pool)
+            .await
+            .expect("update ticket");
+
+        let workflow = WorkflowConfig {
+            auto_start_runs: true,
+            ..WorkflowConfig::default()
+        };
+        let orchestrator = RunOrchestrator::new(&pool, &workflow);
+
+        // Engineer blocks and mentions PM
+        let block_run_id = Uuid::new_v4();
+        sqlx::query(
+            r#"
+            INSERT INTO agent_runs (
+                id, ticket_id, agent_id, job_type, status, sandbox_profile_id
+            )
+            VALUES ($1, $2, $3, $4, $5, $6)
+            "#,
+        )
+        .bind(block_run_id)
+        .bind(fx.ticket_id)
+        .bind(fx.engineer_agent_id)
+        .bind("work_on_ticket")
+        .bind(run_status_to_str(RunStatus::Running))
+        .bind(PROFILE_ID)
+        .execute(&pool)
+        .await
+        .expect("insert block run");
+
+        orchestrator
+            .finish_run(
+                &AgentRun {
+                    id: block_run_id,
+                    ticket_id: fx.ticket_id,
+                    agent_id: fx.engineer_agent_id,
+                    job_type: "work_on_ticket".into(),
+                    status: RunStatus::Running,
+                    sandbox_profile_id: PROFILE_ID.to_string(),
+                    worktree_path: None,
+                    branch_name: None,
+                    error_message: None,
+                    session_id: None,
+                    started_at: None,
+                    ended_at: None,
+                    created_at: time::OffsetDateTime::now_utc(),
+                },
+                &blocked_with_mentions(&["pm"]),
+                ApplyResult {
+                    run_status: RunStatus::Blocked,
+                    ticket: ApplyTicketUpdate {
+                        status: None,
+                        substatus: Some(Substatus::BlockedByError),
+                        substatus_metadata: Some(serde_json::json!({ "reason": "Need clarification" })),
+                    },
+                    comment: ApplyComment {
+                        body: "Need clarification".into(),
+                        intent: CommentIntent::Blocked,
+                        mentions: vec!["pm".into()],
+                    },
+                },
+                None,
+                None,
+            )
+            .await
+            .expect("finish blocked run");
+
+        let pm_run_id = Uuid::new_v4();
+        sqlx::query(
+            r#"
+            INSERT INTO agent_runs (
+                id, ticket_id, agent_id, job_type, status, sandbox_profile_id
+            )
+            VALUES ($1, $2, $3, $4, $5, $6)
+            "#,
+        )
+        .bind(pm_run_id)
+        .bind(fx.ticket_id)
+        .bind(fx.pm_agent_id)
+        .bind("respond_to_mention")
+        .bind(run_status_to_str(RunStatus::Running))
+        .bind(PROFILE_ID)
+        .execute(&pool)
+        .await
+        .expect("insert pm run");
+
+        orchestrator
+            .finish_run(
+                &AgentRun {
+                    id: pm_run_id,
+                    ticket_id: fx.ticket_id,
+                    agent_id: fx.pm_agent_id,
+                    job_type: "respond_to_mention".into(),
+                    status: RunStatus::Running,
+                    sandbox_profile_id: PROFILE_ID.to_string(),
+                    worktree_path: None,
+                    branch_name: None,
+                    error_message: None,
+                    session_id: None,
+                    started_at: None,
+                    ended_at: None,
+                    created_at: time::OffsetDateTime::now_utc(),
+                },
+                &AgentRunResult::Done {
+                    summary: "Use option A".into(),
+                    changed_files: vec![],
+                    tests_run: vec![],
+                    next_status: None,
+                    assign_to: None,
+                    mention_agents: vec![],
+                    blockers: vec![],
+                },
+                ApplyResult {
+                    run_status: RunStatus::Succeeded,
+                    ticket: ApplyTicketUpdate {
+                        status: None,
+                        substatus: None,
+                        substatus_metadata: None,
+                    },
+                    comment: ApplyComment {
+                        body: "Use option A".into(),
+                        intent: CommentIntent::ClarificationAnswer,
+                        mentions: vec![],
+                    },
+                },
+                None,
+                None,
+            )
+            .await
+            .expect("finish pm run");
+
+        let ticket = TicketService::new(&pool)
+            .get(fx.ticket_id)
+            .await
+            .expect("load ticket");
+        assert_eq!(ticket.ticket.substatus, None);
+        assert_eq!(ticket.ticket.assignee_agent_id, Some(fx.engineer_agent_id));
+        assert_eq!(ticket.ticket.clarification_round, 1);
+
+        let mentions = MentionService::new(&pool)
+            .list_pending_for_ticket(fx.ticket_id)
+            .await
+            .expect("list mentions");
+        assert!(mentions.is_empty());
+
+        let resume_run_count = sqlx::query_scalar::<_, i64>(
+            r#"
+            SELECT COUNT(*) FROM agent_runs
+            WHERE ticket_id = $1 AND agent_id = $2
+              AND job_type = 'work_on_ticket' AND status = 'queued'
+            "#,
+        )
+        .bind(fx.ticket_id)
+        .bind(fx.engineer_agent_id)
+        .fetch_one(&pool)
+        .await
+        .expect("count resume runs");
+        assert!(resume_run_count >= 1);
     }
 }
