@@ -1,34 +1,59 @@
-# Agent providers
+# Agent connectors
 
-Coppice runs agents through a **provider adapter** layer. Orchestration (queue, worktrees, result contract, ticket updates) is provider-agnostic; each adapter handles execution, streaming, and result parsing.
+Coppice runs agents through a **connector adapter** layer. Orchestration (queue, worktrees, result contract, ticket updates) is connector-agnostic; each adapter handles execution, streaming, and result parsing.
 
-| Provider | Doc | Status |
-|----------|-----|--------|
+| Connector | Doc | Status |
+|-----------|-----|--------|
 | `mock` | [mock.md](mock.md) | Implemented — default for CI |
 | `opencode` | [opencode.md](opencode.md) | Implemented — manual host testing |
 | `claude-code` | [claude-code.md](claude-code.md) | Deferred |
 | `codex` | [codex.md](codex.md) | Deferred |
 | `shell` | [shell.md](shell.md) | Deferred |
 
-## Per-agent provider and model
+## Connectors vs model providers vs models
 
-Server `config.toml` sets the **default** provider via `[agent] default_provider` and optional global model defaults under `[agent.providers.<id>]`.
+| Layer | Example | Where configured |
+|-------|---------|------------------|
+| Connector | `opencode`, `mock` | `[agent.connectors.*]` in config.toml |
+| Model provider | `zai-coding-plan` | `model_providers = [...]` in connector config (after host auth) |
+| Model | `glm-5.1` | Per agent in UI (fetched live from connector) |
 
-Each **agent** can override those defaults with its own `provider` and optional `model` (Agents page or `POST/PATCH /api/agents`). At run time the worker uses the assigned agent’s values, not the server default.
+Host setup flow:
 
-**Health checks:** Coppice periodically evaluates whether each agent’s provider is registered and reachable. Health is separate from enabled/disabled status:
+1. Enable connector in config
+2. Authenticate (`opencode auth login`)
+3. Add provider IDs to `model_providers`
+4. Create agents in UI — pick connector, provider, model from dropdowns
+
+## Per-agent connector, model provider, and model
+
+Server `config.toml` sets the **default connector** via `[agent] default_connector` and optional connector settings under `[agent.connectors.<id>]`.
+
+Each **agent** can override the default connector and optionally set a `model_provider` and `model` (Agents page or `POST/PATCH /api/agents`). At run time the worker uses the assigned agent’s values, not the server default. Models are not stored in config — they are chosen per agent in the UI and fetched live from the connector.
+
+**Health checks:** Coppice periodically evaluates whether each agent’s connector is registered and reachable, and whether its model provider is configured on the server. Health is separate from enabled/disabled status:
 
 | Health | Meaning |
 |--------|---------|
 | `unknown` | Server started; check not run yet |
-| `healthy` | Provider registered and liveness check passed |
-| `missing_config` | Agent’s provider is not configured on this server |
-| `unhealthy` | Provider registered but liveness check failed |
+| `healthy` | Connector registered and liveness check passed |
+| `missing_config` | Agent’s connector or model provider is not configured on this server |
+| `unhealthy` | Connector registered but liveness check failed |
 
-Runs are **blocked** when health is `missing_config` (clear API error). `unknown` and `unhealthy` are not blocked at the API layer — the worker may still fail if the provider is unavailable.
+Runs are **blocked** when health is `missing_config` (clear API error). `unknown` and `unhealthy` are not blocked at the API layer — the worker may still fail if the connector is unavailable.
+
+## API
+
+```
+GET  /api/connectors
+GET  /api/connectors/{connector_id}/model-providers
+GET  /api/connectors/{connector_id}/model-providers/{model_provider_id}/models
+```
+
+Model providers come from config. Models are fetched live (e.g. `opencode models <provider>`).
 
 ## Testing rules
 
-- **CI / E2E:** always `default_provider = "mock"`.
+- **CI / E2E:** always `default_connector = "mock"`.
 - **Integration tests:** mock only; no network LLM calls.
 - **Manual:** OpenCode on host `config.toml` with your own API keys via `opencode auth login`.

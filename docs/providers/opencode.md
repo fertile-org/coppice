@@ -1,4 +1,4 @@
-# OpenCode provider
+# OpenCode connector
 
 **ID:** `opencode`  
 **Status:** Implemented (M04)  
@@ -21,39 +21,43 @@ Credentials are stored at `~/.local/share/opencode/auth.json`.
 
 ```toml
 [agent]
-default_provider = "opencode"
+default_connector = "opencode"
 
-[agent.providers.opencode]
+[agent.connectors.opencode]
 enabled = true
 command = "opencode"
 serve_hostname = "127.0.0.1"
 serve_port = 4096
-# model = "zai-coding-plan/glm-4.7"
-# variant = "high"   # optional; provider-specific reasoning effort
+model_providers = ["zai-coding-plan"]
+
+# After opencode auth login — list provider IDs with: opencode auth list
+# Models are chosen per agent in the UI (fetched via opencode models <provider>)
 ```
 
-### Provider + model format
+No server-level `model` or `variant` in config. Host adds model provider IDs to `model_providers` after authenticating with OpenCode.
 
-OpenCode has no separate `--provider` flag. Coppice passes `model` to `opencode run --model`, which must be **`provider_id/model_id`**:
+Use only in local `config.toml` for manual testing. Never in CI or the agent Docker stack.
 
-| Your `opencode auth list` entry | Provider ID | Example `model` |
-|--------------------------------|-------------|-----------------|
+### Model provider IDs
+
+OpenCode has no separate `--provider` flag. At run time Coppice assembles `model_provider/model` and passes it to `opencode run --model`:
+
+| Your `opencode auth list` entry | Model provider ID | Example assembled model |
+|--------------------------------|-------------------|-------------------------|
 | Z.AI Coding Plan api | `zai-coding-plan` | `zai-coding-plan/glm-4.7` |
 | Z.AI api | `zai` | `zai/glm-4.7` |
 | Alibaba api | `alibaba` | `alibaba/<model>` |
 | MiniMax Token Plan | `minimax-coding-plan` | `minimax-coding-plan/<model>` |
 
-List available IDs: `opencode models` (look for `zai-coding-plan/...` lines).
+List available provider IDs: `opencode auth list`. List models for a provider: `opencode models zai-coding-plan`.
 
-Use only in local `config.toml` for manual testing. Never in CI or the agent Docker stack.
+### Per-agent model provider and model
 
-### Per-agent model override
-
-An agent’s `model` field overrides the server default from `config.toml` for that agent’s runs. If the agent has no `model`, Coppice uses `[agent.providers.opencode] model` when set. The agent must still use `provider = "opencode"` and the server must have OpenCode enabled — otherwise health shows `missing_config` and runs are blocked.
+An agent’s `model_provider` and `model` fields are set in the UI (cascading dropdowns). Coppice assembles `{model_provider}/{model}` when invoking OpenCode. The agent must use `connector = "opencode"`, and its model provider must appear in `model_providers` — otherwise health shows `missing_config` and runs are blocked.
 
 ## Execution
 
-1. Server starts `opencode serve` on boot (when enabled or `default_provider = "opencode"`).
+1. Server starts `opencode serve` on boot (when enabled or `default_connector = "opencode"`).
 2. Per run: `opencode run --attach http://127.0.0.1:{port} --format json --dir <worktree> --model <provider/model> "<prompt>"`.
 3. Agent reads `.agent/context.md` and must return the result contract JSON.
 
