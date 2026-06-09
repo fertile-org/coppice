@@ -46,6 +46,11 @@ function dispatchMessage(raw: string) {
 
   if (msg.type === 'ticket.updated') {
     void queryClient.invalidateQueries({ queryKey: ['tickets'] });
+    if (msg.ticket_id) {
+      void queryClient.invalidateQueries({
+        queryKey: ['ticket', msg.ticket_id],
+      });
+    }
   }
 
   if (msg.type === 'comment.created' && msg.ticket_id) {
@@ -53,6 +58,10 @@ function dispatchMessage(raw: string) {
       queryKey: ['comments', msg.ticket_id],
     });
   }
+}
+
+export function dispatchMessageForTest(raw: string) {
+  dispatchMessage(raw);
 }
 
 function connectSocket() {

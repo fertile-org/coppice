@@ -1,0 +1,30 @@
+import { describe, expect, it, vi, beforeEach } from 'vitest';
+import { QueryClient } from '@tanstack/react-query';
+
+const invalidateSpy = vi.fn();
+
+vi.mock('../../lib/query-client', () => ({
+  queryClient: {
+    invalidateQueries: (...args: unknown[]) => invalidateSpy(...args),
+  },
+}));
+
+describe('useEventSocket dispatch', () => {
+  beforeEach(() => {
+    invalidateSpy.mockClear();
+  });
+
+  it('invalidates ticket and tickets queries on ticket.updated', async () => {
+    const { dispatchMessageForTest } = await import('./useEventSocket');
+    dispatchMessageForTest(
+      JSON.stringify({
+        type: 'ticket.updated',
+        ticket_id: 'ticket-123',
+        status: 'in_review',
+      }),
+    );
+
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['tickets'] });
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['ticket', 'ticket-123'] });
+  });
+});
