@@ -125,9 +125,18 @@ async fn replay_and_subscribe(
     sender: &mut futures_util::stream::SplitSink<WebSocket, Message>,
     handle: &Arc<crate::sessions::run_registry::RunStreamHandle>,
 ) {
-    for msg in handle.buffered_tail() {
-        if send_live_message(sender, &msg).await.is_err() {
+    if let Some(snapshot) = handle.snapshot() {
+        if send_live_message(sender, &LiveMessage::Snapshot { snapshot })
+            .await
+            .is_err()
+        {
             return;
+        }
+    } else {
+        for msg in handle.buffered_tail() {
+            if send_live_message(sender, &msg).await.is_err() {
+                return;
+            }
         }
     }
 

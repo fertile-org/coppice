@@ -53,26 +53,35 @@ impl WorktreeService {
         worktree_dir: &Path,
         branch: &str,
     ) -> Result<(), WorktreeError> {
-        if worktree_dir.exists() {
+        if worktree_dir.join(".git").exists() {
             return Ok(());
+        }
+
+        // Directory may have been deleted manually while git still lists a prunable
+        // worktree and/or the agent branch still exists from a prior run.
+        let _ = run_git_in(git_dir, &["worktree", "prune"]).await;
+
+        if worktree_dir.exists() {
+            tokio::fs::remove_dir_all(worktree_dir).await?;
         }
 
         if let Some(parent) = worktree_dir.parent() {
             tokio::fs::create_dir_all(parent).await?;
         }
 
-        run_git_in(
-            git_dir,
-            &[
-                "worktree",
-                "add",
-                "-b",
-                branch,
-                &path_to_string(worktree_dir)?,
-            ],
-        )
-        .await
+        let path = path_to_string(worktree_dir)?;
+        match run_git_in(git_dir, &["worktree", "add", "-b", branch, &path]).await {
+            Ok(()) => Ok(()),
+            Err(WorktreeError::GitCommandFailed { stderr, .. }) if branch_already_exists(&stderr) => {
+                run_git_in(git_dir, &["worktree", "add", &path, branch]).await
+            }
+            Err(err) => Err(err),
+        }
     }
+}
+
+fn branch_already_exists(stderr: &str) -> bool {
+    stderr.contains("already exists")
 }
 
 fn path_to_string(path: &Path) -> Result<String, WorktreeError> {
@@ -146,6 +155,14 @@ mod tests {
     fn worktree_service_stores_worktrees_root() {
         let service = WorktreeService::new(PathBuf::from("/data/worktrees"));
         assert_eq!(service.worktrees_root(), Path::new("/data/worktrees"));
+    }
+
+    #[test]
+    fn branch_already_exists_detects_git_stderr() {
+        assert!(branch_already_exists(
+            "fatal: a branch named 'agent/TICKET-5681de33-researcher' already exists"
+        ));
+        assert!(!branch_already_exists("fatal: not a git repository"));
     }
 
     #[test]

@@ -1,5 +1,5 @@
 //! Future CliTmuxProvider backend for Claude Code / Codex.
-//! See docs/providers.md.
+//! See docs/providers/ (claude-code.md, codex.md).
 
 pub struct TmuxStream;
 

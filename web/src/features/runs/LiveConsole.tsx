@@ -28,6 +28,7 @@ export function LiveConsole({ runId, runStatus }: LiveConsoleProps) {
   const [reconnectToken, setReconnectToken] = useState(0);
   const [sawOutput, setSawOutput] = useState(false);
   const sawOutputRef = useRef(false);
+  const wsRunIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -54,9 +55,13 @@ export function LiveConsole({ runId, runStatus }: LiveConsoleProps) {
   useEffect(() => {
     if (!runId || !termReady || !termRef.current) return;
 
-    termRef.current.clear();
-    sawOutputRef.current = false;
-    setSawOutput(false);
+    const isNewRun = wsRunIdRef.current !== runId;
+    if (isNewRun) {
+      termRef.current.clear();
+      wsRunIdRef.current = runId;
+      sawOutputRef.current = false;
+      setSawOutput(false);
+    }
     setConnection('connecting');
 
     const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';

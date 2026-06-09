@@ -181,6 +181,15 @@ function mergePart(existing: Part, incoming: Part): Part {
 
   const existingText = 'text' in existing ? existing.text : '';
   const incomingText = incoming.text;
+  if (incomingText === existingText) {
+    return incoming;
+  }
+  if (incomingText.startsWith(existingText)) {
+    return incoming;
+  }
+  if (existingText.startsWith(incomingText)) {
+    return { ...incoming, text: existingText };
+  }
   if ([...existingText].length > [...incomingText].length) {
     return { ...incoming, text: existingText };
   }
@@ -190,6 +199,13 @@ function mergePart(existing: Part, incoming: Part): Part {
 function appendFieldDelta(part: Part, field: string, delta: string): void {
   const record = part as Part & Record<string, unknown>;
   const current = typeof record[field] === 'string' ? record[field] : '';
+  if (!delta) return;
+  if (delta === current) return;
+  if (current && delta.startsWith(current)) {
+    record[field] = delta;
+    return;
+  }
+  if (current && current.endsWith(delta)) return;
   record[field] = `${current}${delta}`;
 }
 

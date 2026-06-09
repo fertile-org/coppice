@@ -93,8 +93,53 @@ pub fn extract_result_from_events(lines: &[String]) -> Option<AgentRunResult> {
     None
 }
 
+fn try_parse_contract(text: &str) -> Option<AgentRunResult> {
+    let result = serde_json::from_str::<AgentRunResult>(text.trim()).ok()?;
+    if looks_like_template_contract(&result) {
+        None
+    } else {
+        Some(result)
+    }
+}
+
+fn extract_json_objects_from_text(text: &str) -> Vec<AgentRunResult> {
+    let mut candidates = Vec::new();
+    let mut depth = 0usize;
+    let mut start: Option<usize> = None;
+    let bytes = text.as_bytes();
+
+    for (i, &byte) in bytes.iter().enumerate() {
+        if byte == b'{' {
+            if depth == 0 {
+                start = Some(i);
+            }
+            depth += 1;
+        } else if byte == b'}' {
+            if depth == 0 {
+                continue;
+            }
+            depth -= 1;
+            if depth == 0 {
+                if let Some(s) = start {
+                    if let Some(result) = try_parse_contract(&text[s..=i]) {
+                        candidates.push(result);
+                    }
+                }
+                start = None;
+            }
+        }
+    }
+
+    candidates
+}
+
 fn extract_result_from_text(text: &str) -> Option<AgentRunResult> {
-    if let Ok(result) = serde_json::from_str::<AgentRunResult>(text.trim()) {
+    if let Some(result) = try_parse_contract(text) {
+        return Some(result);
+    }
+
+    let concatenated = extract_json_objects_from_text(text);
+    if let Some(result) = concatenated.into_iter().last() {
         return Some(result);
     }
 
@@ -104,10 +149,8 @@ fn extract_result_from_text(text: &str) -> Option<AgentRunResult> {
         let after = &text[abs_start..];
         if let Some(end) = after.find("```") {
             let json_str = after[..end].trim();
-            if let Ok(result) = serde_json::from_str::<AgentRunResult>(json_str) {
-                if !looks_like_template_contract(&result) {
-                    return Some(result);
-                }
+            if let Some(result) = try_parse_contract(json_str) {
+                return Some(result);
             }
             search_from = abs_start + end + 3;
         } else {
@@ -118,10 +161,8 @@ fn extract_result_from_text(text: &str) -> Option<AgentRunResult> {
     for line in text.lines().rev() {
         let line = line.trim();
         if line.starts_with('{') {
-            if let Ok(result) = serde_json::from_str::<AgentRunResult>(line) {
-                if !looks_like_template_contract(&result) {
-                    return Some(result);
-                }
+            if let Some(result) = try_parse_contract(line) {
+                return Some(result);
             }
         }
     }
@@ -186,6 +227,21 @@ mod tests {
         let result = extract_result_from_events(&lines).expect("result");
         match result {
             AgentRunResult::Done { summary, .. } => assert_eq!(summary, "From code block."),
+            _ => panic!("expected done"),
+        }
+    }
+
+    #[test]
+    fn extract_result_from_concatenated_duplicate_json() {
+        let minimal = r#"{"status":"done","summary":"Done once.","nextStatus":"Done"}"#;
+        let text = format!("{minimal}{minimal}{minimal}");
+        let messages = vec![serde_json::json!({
+            "info": { "role": "assistant" },
+            "parts": [{ "type": "text", "text": text }]
+        })];
+        let result = extract_result_from_messages(&messages).expect("concatenated json");
+        match result {
+            AgentRunResult::Done { summary, .. } => assert_eq!(summary, "Done once."),
             _ => panic!("expected done"),
         }
     }

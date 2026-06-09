@@ -192,7 +192,15 @@ async fn create_agent(
             .as_deref()
             .unwrap_or(default_prompt.as_str());
         service
-            .create_from_preset(preset_id, &body.name, system_prompt)
+            .create_from_preset(
+                preset_id,
+                &body.name,
+                system_prompt,
+                body.connector.as_deref(),
+                body.model_provider.as_deref(),
+                body.model.as_deref(),
+                body.enabled,
+            )
             .await
             .map_err(map_error)?
     } else {

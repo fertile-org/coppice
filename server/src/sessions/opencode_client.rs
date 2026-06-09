@@ -336,16 +336,9 @@ impl OpenCodeClient {
                 return Err(ProviderError::Cancelled);
             }
 
+            // SSE session.status idle is authoritative; do not wait for REST to agree.
             if idle_flag.load(std::sync::atomic::Ordering::Relaxed) {
-                match self.session_status(directory, session_id).await? {
-                    Some(status) => {
-                        if mark_idle_when_status(Some(&status), &idle_flag) {
-                            return Ok(());
-                        }
-                        idle_flag.store(false, std::sync::atomic::Ordering::Relaxed);
-                    }
-                    None => idle_flag.store(false, std::sync::atomic::Ordering::Relaxed),
-                }
+                return Ok(());
             }
 
             match self.session_status(directory, session_id).await? {
@@ -556,5 +549,13 @@ mod tests {
         assert!(mark_idle_when_status(Some("idle"), &flag));
         assert!(flag.load(std::sync::atomic::Ordering::Relaxed));
         assert!(!mark_idle_when_status(Some("busy"), &flag));
+    }
+
+    #[test]
+    fn sse_idle_flag_survives_rest_busy_status() {
+        let flag = std::sync::atomic::AtomicBool::new(false);
+        flag.store(true, std::sync::atomic::Ordering::Relaxed);
+        assert!(!mark_idle_when_status(Some("busy"), &flag));
+        assert!(flag.load(std::sync::atomic::Ordering::Relaxed));
     }
 }

@@ -77,12 +77,40 @@ function tryParseJson(text: string): AgentResultContract | null {
   }
 }
 
+function extractJsonObjects(text: string): AgentResultContract[] {
+  const candidates: AgentResultContract[] = [];
+  let depth = 0;
+  let start = -1;
+
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (ch === '{') {
+      if (depth === 0) start = i;
+      depth++;
+    } else if (ch === '}') {
+      depth--;
+      if (depth === 0 && start >= 0) {
+        const contract = tryParseJson(text.slice(start, i + 1));
+        if (contract) candidates.push(contract);
+        start = -1;
+      }
+    }
+  }
+
+  return candidates;
+}
+
 export function parseResultContractFromText(text: string): AgentResultContract | null {
   const trimmed = text.trim();
   if (!trimmed) return null;
 
   const direct = tryParseJson(trimmed);
   if (direct) return direct;
+
+  const concatenated = extractJsonObjects(trimmed);
+  if (concatenated.length > 0) {
+    return concatenated[concatenated.length - 1];
+  }
 
   const candidates: AgentResultContract[] = [];
   let searchFrom = 0;

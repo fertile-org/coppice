@@ -53,4 +53,50 @@ describe('applyEvent', () => {
     });
     expect((store.parts['msg_1'][0] as TextPart).text).toBe('early');
   });
+
+  it('skips duplicate full-text deltas', () => {
+    const store = createSessionStore('ses_1');
+    const payload = JSON.stringify({
+      status: 'done',
+      summary: 'Done once.',
+      nextStatus: 'Done',
+    });
+
+    applyEvent(store, {
+      type: 'message.part.updated',
+      properties: {
+        sessionID: 'ses_1',
+        part: { id: 'prt_1', type: 'text', text: '', messageID: 'msg_1' },
+      },
+    });
+    applyEvent(store, {
+      type: 'message.part.delta',
+      properties: {
+        sessionID: 'ses_1',
+        partID: 'prt_1',
+        field: 'text',
+        delta: payload,
+      },
+    });
+    applyEvent(store, {
+      type: 'message.part.delta',
+      properties: {
+        sessionID: 'ses_1',
+        partID: 'prt_1',
+        field: 'text',
+        delta: payload,
+      },
+    });
+    applyEvent(store, {
+      type: 'message.part.delta',
+      properties: {
+        sessionID: 'ses_1',
+        partID: 'prt_1',
+        field: 'text',
+        delta: payload,
+      },
+    });
+
+    expect((store.parts['msg_1'][0] as TextPart).text).toBe(payload);
+  });
 });

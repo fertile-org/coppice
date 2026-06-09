@@ -79,6 +79,53 @@ async fn create_agent_from_preset() {
     assert_eq!(agent["name"].as_str().unwrap(), "PM Bot");
     let template = preset["systemPromptTemplate"].as_str().unwrap();
     assert_eq!(agent["systemPrompt"].as_str().unwrap(), template);
+    assert_eq!(agent["connector"].as_str().unwrap(), "mock");
+}
+
+#[tokio::test]
+async fn create_agent_from_preset_honors_connector_and_model() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let (app, cookie, csrf) = common::bootstrap_and_login().await;
+
+    let presets_res = app
+        .clone()
+        .oneshot(common::json_request(
+            "GET",
+            "/api/agent-presets",
+            "",
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    let presets: serde_json::Value = common::json_body(presets_res).await;
+    let preset_id = presets["items"][0]["id"].as_str().unwrap();
+
+    let create_res = app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            "/api/agents",
+            &format!(
+                r#"{{"name":"OpenCode PM","presetId":"{preset_id}","connector":"opencode","modelProvider":"anthropic","model":"claude-sonnet-4-20250514"}}"#
+            ),
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(create_res.status(), StatusCode::CREATED);
+
+    let agent: serde_json::Value = common::json_body(create_res).await;
+    assert_eq!(agent["connector"].as_str().unwrap(), "opencode");
+    assert_eq!(agent["modelProvider"].as_str().unwrap(), "anthropic");
+    assert_eq!(
+        agent["model"].as_str().unwrap(),
+        "claude-sonnet-4-20250514"
+    );
 }
 
 #[tokio::test]

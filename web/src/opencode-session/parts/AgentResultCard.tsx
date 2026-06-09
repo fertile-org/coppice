@@ -20,8 +20,17 @@ function MetaList({ label, items }: { label: string; items: string[] }) {
   );
 }
 
+function shouldShowNextStatus(contract: AgentResultContract): boolean {
+  if (!contract.nextStatus) return false;
+  const next = contract.nextStatus.trim().toLowerCase();
+  if (contract.status === 'done' && next === 'done') return false;
+  if (contract.status === 'blocked' && next === 'blocked') return false;
+  return true;
+}
+
 export function AgentResultCard({ contract }: { contract: AgentResultContract }) {
   const isDone = contract.status === 'done';
+  const showNextStatus = shouldShowNextStatus(contract);
 
   return (
     <div className={`overflow-hidden border border-[var(--oc-border)] ${sessionTheme.bgElement}`}>
@@ -40,7 +49,7 @@ export function AgentResultCard({ contract }: { contract: AgentResultContract })
             {contract.blockerType.replaceAll('_', ' ')}
           </span>
         ) : null}
-        {contract.nextStatus ? (
+        {showNextStatus ? (
           <span className={`${sessionTheme.fontMonoSm} ${sessionTheme.textMuted}`}>
             → {contract.nextStatus}
           </span>

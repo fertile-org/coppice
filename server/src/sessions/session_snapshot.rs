@@ -212,6 +212,19 @@ fn merge_part(existing: &Value, incoming: &Value) -> Value {
 
     let existing_text = existing.get("text").and_then(|t| t.as_str()).unwrap_or("");
     let incoming_text = incoming.get("text").and_then(|t| t.as_str()).unwrap_or("");
+    if incoming_text == existing_text {
+        return incoming.clone();
+    }
+    if incoming_text.starts_with(existing_text) {
+        return incoming.clone();
+    }
+    if existing_text.starts_with(incoming_text) {
+        let mut merged = incoming.clone();
+        if let Some(obj) = merged.as_object_mut() {
+            obj.insert("text".to_string(), Value::String(existing_text.to_string()));
+        }
+        return merged;
+    }
     if existing_text.chars().count() > incoming_text.chars().count() {
         let mut merged = incoming.clone();
         if let Some(obj) = merged.as_object_mut() {
@@ -232,7 +245,19 @@ fn append_field_delta(part: &mut Value, field: &str, delta: &str) {
         .and_then(|v| v.as_str())
         .unwrap_or("")
         .to_string();
-    obj.insert(field.to_string(), Value::String(format!("{current}{delta}")));
+    if delta.is_empty() {
+        return;
+    }
+    let next = if delta == current {
+        current
+    } else if !current.is_empty() && delta.starts_with(&current) {
+        delta.to_string()
+    } else if !current.is_empty() && current.ends_with(delta) {
+        current
+    } else {
+        format!("{current}{delta}")
+    };
+    obj.insert(field.to_string(), Value::String(next));
 }
 
 #[cfg(test)]
@@ -282,6 +307,31 @@ mod tests {
             }
         }));
         assert_eq!(snap.parts["msg_1"][0]["text"], "early");
+    }
+
+    #[test]
+    fn duplicate_full_text_deltas_are_not_appended() {
+        let mut snap = SessionSnapshot::empty("ses_1");
+        let payload = r#"{"status":"done","summary":"Done once.","nextStatus":"Done"}"#;
+        snap.apply_event(&json!({
+            "type": "message.part.updated",
+            "properties": {
+                "sessionID": "ses_1",
+                "part": { "id": "prt_1", "type": "text", "text": "", "messageID": "msg_1" }
+            }
+        }));
+        for _ in 0..3 {
+            snap.apply_event(&json!({
+                "type": "message.part.delta",
+                "properties": {
+                    "sessionID": "ses_1",
+                    "partID": "prt_1",
+                    "field": "text",
+                    "delta": payload
+                }
+            }));
+        }
+        assert_eq!(snap.parts["msg_1"][0]["text"], payload);
     }
 
     #[test]

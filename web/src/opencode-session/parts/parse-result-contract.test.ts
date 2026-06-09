@@ -66,4 +66,11 @@ describe('parseResultContractFromText', () => {
   it('returns null for normal markdown', () => {
     expect(parseResultContractFromText('Just a regular update.')).toBeNull();
   });
+
+  it('parses the last contract from concatenated duplicate JSON', () => {
+    const json = JSON.stringify(doneContract);
+    const result = parseResultContractFromText(json + json + json);
+    expect(result?.status).toBe('done');
+    expect(result?.summary).toContain('Research complete');
+  });
 });

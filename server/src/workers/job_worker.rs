@@ -44,7 +44,7 @@ pub fn spawn_workers(state: Arc<AppState>) {
             let worker_id = format!("worker-{i}");
             loop {
                 if let Err(err) = process_one(&state, &worker_id).await {
-                    tracing::error!(%err, "job worker error");
+                    tracing::error!(error = %format_job_error(&err), "job worker error");
                 }
                 tokio::time::sleep(Duration::from_millis(500)).await;
             }

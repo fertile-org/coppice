@@ -88,17 +88,27 @@ impl<'a> AgentService<'a> {
         Ok(row_to_preset(&row))
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn create_from_preset(
         &self,
         preset_id: Uuid,
         name: &str,
         system_prompt: &str,
+        connector: Option<&str>,
+        model_provider: Option<&str>,
+        model: Option<&str>,
+        enabled: Option<bool>,
     ) -> Result<Agent, AgentError> {
         if name.trim().is_empty() {
             return Err(AgentError::Validation("name is required".into()));
         }
         if system_prompt.trim().is_empty() {
             return Err(AgentError::Validation("systemPrompt is required".into()));
+        }
+        if let Some(mp) = model_provider {
+            if mp.trim().is_empty() {
+                return Err(AgentError::Validation("modelProvider cannot be empty".into()));
+            }
         }
 
         let preset = self.get_preset(preset_id).await?;
@@ -108,10 +118,10 @@ impl<'a> AgentService<'a> {
             &preset.skills,
             &preset.responsibilities,
             system_prompt,
-            "mock",
-            None,
-            None,
-            true,
+            connector.unwrap_or("mock"),
+            model_provider,
+            model,
+            enabled.unwrap_or(true),
             Some(&preset.key),
         )
         .await
