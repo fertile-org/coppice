@@ -1,3 +1,4 @@
+import { PlainOutput } from '../components/PlainOutput';
 import type { ToolPart } from '../sync/types';
 import { formatOutput, outputText, str } from './tool-utils';
 import { ToolOutput, ToolShell } from './ToolShell';
@@ -9,7 +10,11 @@ export function Skill({ part }: { part: ToolPart }) {
 
   return (
     <ToolShell tool="skill" status={part.state.status} title={title}>
-      {output ? <ToolOutput text={formatOutput(output)} /> : null}
+      {output ? (
+        <ToolOutput>
+          <PlainOutput text={formatOutput(output)} />
+        </ToolOutput>
+      ) : null}
     </ToolShell>
   );
 }

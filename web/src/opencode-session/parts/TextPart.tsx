@@ -1,13 +1,14 @@
-import ReactMarkdown from 'react-markdown';
+import { MarkdownContent } from '../components/MarkdownContent';
 import type { TextPart as TextPartType } from '../sync/types';
 import { sessionTheme } from '../theme/session-theme';
 
 export function TextPart({ part }: { part: TextPartType }) {
-  const text = part.text.trim();
-  if (!text) return null;
+  const content = part.text.trim();
+  if (!content) return null;
+
   return (
     <div className={`ml-3 mt-2 ${sessionTheme.text}`}>
-      <ReactMarkdown>{text}</ReactMarkdown>
+      <MarkdownContent>{content}</MarkdownContent>
     </div>
   );
 }

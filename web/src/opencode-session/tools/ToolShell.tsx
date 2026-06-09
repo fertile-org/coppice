@@ -39,8 +39,6 @@ export function ToolShell({ tool, status, title, children }: ToolShellProps) {
   );
 }
 
-export function ToolOutput({ text }: { text: string }) {
-  return (
-    <pre className={`overflow-x-auto whitespace-pre-wrap text-xs ${sessionTheme.text}`}>{text}</pre>
-  );
+export function ToolOutput({ children }: { children: ReactNode }) {
+  return <>{children}</>;
 }

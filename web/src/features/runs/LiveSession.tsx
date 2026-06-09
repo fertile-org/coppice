@@ -89,30 +89,36 @@ export function LiveSession({ runId, runStatus }: LiveSessionProps) {
   const [interrupted, setInterrupted] = useState<string | null>(null);
   const [hasContent, setHasContent] = useState(false);
   const recoverableRef = useRef(true);
-  const wsRunIdRef = useRef<string | null>(null);
+
+  // Initialize store when runId changes (also recovers after React StrictMode remount).
+  useEffect(() => {
+    if (!runId) return;
+    recoverableRef.current = true;
+    setInterrupted(null);
+    setHasContent(false);
+    dispatch({ type: 'reset', sessionId: runId });
+  }, [runId]);
 
   useEffect(() => {
     if (!runId) return;
 
-    const isNewRun = wsRunIdRef.current !== runId;
-    if (isNewRun) {
-      wsRunIdRef.current = runId;
-      recoverableRef.current = true;
-      setInterrupted(null);
-      setHasContent(false);
-      dispatch({ type: 'reset', sessionId: runId });
-    }
-
     setConnection('connecting');
 
+    let active = true;
     const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
     const ws = new WebSocket(
       `${protocol}://${window.location.host}/ws/agent-runs/${runId}/live`,
     );
 
-    ws.onopen = () => setConnection('open');
-    ws.onclose = () => setConnection('closed');
-    ws.onerror = () => setConnection('closed');
+    ws.onopen = () => {
+      if (active) setConnection('open');
+    };
+    ws.onclose = () => {
+      if (active) setConnection('closed');
+    };
+    ws.onerror = () => {
+      if (active) setConnection('closed');
+    };
     ws.onmessage = (event) => {
       const msg = JSON.parse(event.data as string) as {
         type?: string;
@@ -148,7 +154,10 @@ export function LiveSession({ runId, runStatus }: LiveSessionProps) {
       }
     };
 
-    return () => ws.close();
+    return () => {
+      active = false;
+      ws.close();
+    };
   }, [runId, reconnectToken]);
 
   useEffect(() => {

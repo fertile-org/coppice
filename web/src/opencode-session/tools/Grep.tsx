@@ -1,3 +1,4 @@
+import { PlainOutput } from '../components/PlainOutput';
 import type { ToolPart } from '../sync/types';
 import { formatOutput, num, outputText, pathFromInput, str } from './tool-utils';
 import { ToolOutput, ToolShell } from './ToolShell';
@@ -16,7 +17,11 @@ export function Grep({ part }: { part: ToolPart }) {
 
   return (
     <ToolShell tool="grep" status={part.state.status} title={title}>
-      {output ? <ToolOutput text={formatOutput(output)} /> : null}
+      {output ? (
+        <ToolOutput>
+          <PlainOutput text={formatOutput(output)} />
+        </ToolOutput>
+      ) : null}
     </ToolShell>
   );
 }
