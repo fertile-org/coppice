@@ -5,6 +5,7 @@ pub mod auth_service;
 pub mod comment_service;
 pub mod context_builder;
 pub mod job_service;
+pub mod mention_service;
 pub mod project_service;
 pub mod repo_service;
 pub mod repo_verifier;
