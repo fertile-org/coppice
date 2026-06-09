@@ -194,8 +194,11 @@ async fn execute_job(
         status: "running".into(),
     });
 
-    let provider_result = state
-        .agent_provider
+    let provider = state
+        .provider_registry
+        .get("mock")
+        .expect("mock provider");
+    let provider_result = provider
         .run(AgentRunInput {
             agent_id: run.agent_id.to_string(),
             ticket_id: Some(run.ticket_id.to_string()),
@@ -305,7 +308,12 @@ fn persist_artifacts(
     ArtifactService::write_meta(
         &paths,
         &RunArtifactMeta {
-            provider: state.agent_provider.id().into(),
+            provider: state
+                .provider_registry
+                .get("mock")
+                .expect("mock provider")
+                .id()
+                .into(),
             session_id,
             frame_count: frames.len() as u64,
             ended_at: time::OffsetDateTime::now_utc()

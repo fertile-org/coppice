@@ -1,5 +1,8 @@
 pub mod mock;
 pub mod opencode;
+pub mod registry;
+
+pub use registry::ProviderRegistry;
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};

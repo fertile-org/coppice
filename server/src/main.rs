@@ -26,10 +26,11 @@ async fn main() -> anyhow::Result<()> {
     let db = coppice_server::db::connect_and_migrate(&config.database.url).await?;
     let state = Arc::new(coppice_server::AppState {
         attachments: coppice_server::AppState::attachment_store_from_config(&config),
-        agent_provider: coppice_server::AppState::agent_provider_from_config(
+        provider_registry: coppice_server::AppState::provider_registry_from_config(
             &config,
             opencode_serve.clone(),
         ),
+        agent_health: Arc::new(coppice_server::services::agent_health::AgentHealthRegistry::new()),
         run_streams: Arc::new(coppice_server::sessions::run_registry::RunStreamRegistry::new()),
         event_bus: Arc::new(coppice_server::events::bus::EventBus::new()),
         opencode_serve: opencode_serve.clone(),
