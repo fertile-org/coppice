@@ -304,10 +304,14 @@ fn persist_artifacts(
         &state.config.storage.artifacts_dir,
         &run_id.to_string(),
     );
-    let frames = stream.buffered_tail();
+    let messages = stream.buffered_tail();
     let mut log_bytes = Vec::new();
-    for frame in &frames {
-        log_bytes.extend_from_slice(&frame.data);
+    let mut frame_count = 0u64;
+    for msg in &messages {
+        if let crate::sessions::LiveMessage::Frame { data, .. } = msg {
+            log_bytes.extend_from_slice(data);
+            frame_count += 1;
+        }
     }
     ArtifactService::write_terminal_log(&paths, &log_bytes)?;
     ArtifactService::write_meta(
@@ -315,7 +319,7 @@ fn persist_artifacts(
         &RunArtifactMeta {
             provider: connector_name.into(),
             session_id,
-            frame_count: frames.len() as u64,
+            frame_count,
             ended_at: time::OffsetDateTime::now_utc()
                 .format(&Rfc3339)
                 .unwrap_or_default(),

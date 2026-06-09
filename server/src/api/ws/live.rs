@@ -2,9 +2,8 @@ use crate::api::ws::auth::auth_user_from_cookie;
 use crate::domain::run::run_status_to_str;
 use crate::services::artifact_service::RunArtifactPaths;
 use crate::services::run_service::RunService;
-use crate::sessions::TerminalFrame;
+use crate::sessions::LiveMessage;
 use crate::AppState;
-use time::OffsetDateTime;
 use axum::{
     extract::{
         ws::{Message, WebSocket, WebSocketUpgrade},
@@ -38,8 +37,8 @@ async fn handle_live_socket(state: Arc<AppState>, run_id: Uuid, socket: WebSocke
     let (mut sender, _receiver) = socket.split();
 
     if let Some(handle) = state.run_streams.get(run_id) {
-        for frame in handle.buffered_tail() {
-            if send_frame(&mut sender, &frame).await.is_err() {
+        for msg in handle.buffered_tail() {
+            if send_message(&mut sender, &msg).await.is_err() {
                 return;
             }
         }
@@ -47,8 +46,8 @@ async fn handle_live_socket(state: Arc<AppState>, run_id: Uuid, socket: WebSocke
         let mut rx = handle.subscribe();
         loop {
             match rx.recv().await {
-                Ok(frame) => {
-                    if send_frame(&mut sender, &frame).await.is_err() {
+                Ok(msg) => {
+                    if send_message(&mut sender, &msg).await.is_err() {
                         break;
                     }
                 }
@@ -61,12 +60,11 @@ async fn handle_live_socket(state: Arc<AppState>, run_id: Uuid, socket: WebSocke
             }
         }
     } else if let Some(log_bytes) = read_terminal_log_artifact(&state, run_id) {
-        let frame = TerminalFrame {
+        let msg = LiveMessage::Frame {
             seq: 0,
             data: log_bytes,
-            ts: OffsetDateTime::now_utc(),
         };
-        if send_frame(&mut sender, &frame).await.is_err() {
+        if send_message(&mut sender, &msg).await.is_err() {
             return;
         }
     }
@@ -81,10 +79,23 @@ async fn handle_live_socket(state: Arc<AppState>, run_id: Uuid, socket: WebSocke
     } else {
         "unknown".into()
     };
-    let end = TerminalFrame::end_message(&status);
+    let is_terminal = is_terminal_run_status(&status);
+    let end = LiveMessage::End {
+        status,
+        reason: None,
+        recoverable: !is_terminal,
+    };
     let _ = sender
-        .send(Message::Text(serde_json::to_string(&end).unwrap_or_default().into()))
+        .send(Message::Text(
+            serde_json::to_string(&end.to_ws_json())
+                .unwrap_or_default()
+                .into(),
+        ))
         .await;
+}
+
+fn is_terminal_run_status(status: &str) -> bool {
+    matches!(status, "succeeded" | "failed" | "blocked" | "cancelled")
 }
 
 fn read_terminal_log_artifact(state: &AppState, run_id: Uuid) -> Option<Vec<u8>> {
@@ -95,11 +106,11 @@ fn read_terminal_log_artifact(state: &AppState, run_id: Uuid) -> Option<Vec<u8>>
     std::fs::read(&paths.terminal_log).ok().filter(|bytes| !bytes.is_empty())
 }
 
-async fn send_frame(
+async fn send_message(
     sender: &mut futures_util::stream::SplitSink<WebSocket, Message>,
-    frame: &TerminalFrame,
+    msg: &LiveMessage,
 ) -> Result<(), ()> {
-    let json = frame.to_ws_json();
+    let json = msg.to_ws_json();
     sender
         .send(Message::Text(serde_json::to_string(&json).unwrap_or_default().into()))
         .await

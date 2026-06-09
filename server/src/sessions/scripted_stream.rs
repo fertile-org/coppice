@@ -1,5 +1,4 @@
-use crate::sessions::{run_registry::RunStreamHandle, TerminalFrame};
-use time::OffsetDateTime;
+use crate::sessions::run_registry::RunStreamHandle;
 use tokio::sync::watch;
 
 pub const MOCK_SCRIPT: &[&str] = &[
@@ -18,11 +17,7 @@ pub async fn emit_script(
         if *cancel_rx.borrow() {
             break;
         }
-        handle.publish(TerminalFrame {
-            seq: seq as u64,
-            data: line.as_bytes().to_vec(),
-            ts: OffsetDateTime::now_utc(),
-        });
+        handle.publish_frame(seq as u64, line.as_bytes().to_vec());
         tokio::time::sleep(std::time::Duration::from_millis(80)).await;
     }
 }
