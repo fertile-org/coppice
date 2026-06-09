@@ -1,6 +1,7 @@
 use crate::domain::substatus::{Substatus, TicketStatus};
 use crate::providers::AgentRunResult;
 use serde_json::Value;
+use std::collections::HashMap;
 use uuid::Uuid;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -20,6 +21,7 @@ pub struct TransitionContext {
     pub run_outcome: RunOutcome,
     pub contract: AgentRunResult,
     pub project_agent_keys: Vec<String>,
+    pub project_agent_ids: HashMap<String, Uuid>,
     pub auto_assign_enabled: bool,
 }
 

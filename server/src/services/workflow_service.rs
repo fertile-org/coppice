@@ -1,0 +1,521 @@
+use crate::domain::substatus::{Substatus, TicketStatus};
+use crate::domain::workflow::{
+    JobRequest, PendingRecommendation, RunOutcome, TransitionAction, TransitionContext,
+};
+use crate::providers::AgentRunResult;
+use time::OffsetDateTime;
+use time::format_description::well_known::Rfc3339;
+
+pub struct WorkflowService;
+
+impl Default for TransitionAction {
+    fn default() -> Self {
+        Self {
+            new_status: None,
+            new_assignee_id: None,
+            pending_recommendation: None,
+            substatus: None,
+            substatus_metadata: None,
+            enqueue_jobs: Vec::new(),
+            increment_clarification_round: false,
+        }
+    }
+}
+
+impl WorkflowService {
+    pub fn is_legal_transition(from: TicketStatus, to: TicketStatus) -> bool {
+        use TicketStatus::*;
+        matches!(
+            (from, to),
+            (Backlog, Ready)
+                | (Backlog, InProgress)
+                | (Backlog, InReview)
+                | (Backlog, Blocked)
+                | (Ready, InProgress)
+                | (Ready, InReview)
+                | (Ready, Blocked)
+                | (InProgress, InReview)
+                | (InProgress, Blocked)
+                | (InReview, InQa)
+                | (InReview, WaitForFinalReview)
+                | (InReview, Blocked)
+                | (InQa, WaitForFinalReview)
+                | (InQa, Blocked)
+                | (Blocked, Ready)
+                | (Blocked, InProgress)
+                | (Blocked, Backlog)
+                | (WaitForFinalReview, Done)
+        )
+    }
+
+    pub fn resolve_transition(ctx: TransitionContext) -> Result<TransitionAction, String> {
+        if ctx.job_type == "respond_to_mention" && ctx.run_outcome == RunOutcome::Succeeded {
+            return Ok(TransitionAction::default());
+        }
+
+        let mut action = TransitionAction::default();
+
+        if ctx.run_outcome == RunOutcome::Blocked {
+            let mention_agents = mention_agents_from_contract(&ctx.contract);
+            if !mention_agents.is_empty() {
+                let first_key = mention_agents[0].clone();
+                let metadata = if let Some(id) = ctx.project_agent_ids.get(&first_key) {
+                    serde_json::json!({ "agentId": id, "agentKey": first_key })
+                } else {
+                    serde_json::json!({ "agentKey": first_key })
+                };
+                action.substatus = Some(Some(Substatus::WaitingForAgent));
+                action.substatus_metadata = Some(Some(metadata));
+                for key in mention_agents {
+                    if let Some(&agent_id) = ctx.project_agent_ids.get(&key) {
+                        action.enqueue_jobs.push(JobRequest {
+                            job_type: "respond_to_mention".into(),
+                            agent_id,
+                            resume_agent_id: ctx.assignee_agent_id,
+                        });
+                    }
+                }
+            }
+            return Ok(action);
+        }
+
+        if ctx.run_outcome != RunOutcome::Succeeded || ctx.job_type != "work_on_ticket" {
+            return Ok(action);
+        }
+
+        if let Some(assign_key) = assign_to_from_contract(&ctx.contract) {
+            let key_known = ctx.project_agent_keys.iter().any(|k| k == &assign_key);
+            if ctx.auto_assign_enabled && !key_known {
+                action.new_status = Some(TicketStatus::Blocked);
+                return Ok(action);
+            }
+            if key_known || !ctx.auto_assign_enabled {
+                apply_assign_to(&mut action, &ctx, &assign_key);
+            }
+        }
+
+        if let Some(next) = resolve_succeeded_gate(ctx.current_status, &ctx.agent_role) {
+            if !Self::is_legal_transition(ctx.current_status, next) {
+                return Err(format!(
+                    "illegal transition {:?} -> {:?}",
+                    ctx.current_status, next
+                ));
+            }
+            action.new_status = Some(next);
+            if next == TicketStatus::WaitForFinalReview {
+                action.new_assignee_id = Some(None);
+            }
+        }
+
+        Ok(action)
+    }
+
+    pub fn resolve_run_start_transition(
+        current: TicketStatus,
+        agent_role: &str,
+        job_type: &str,
+    ) -> Option<TicketStatus> {
+        if job_type != "work_on_ticket" {
+            return None;
+        }
+        match (current, agent_role) {
+            (TicketStatus::Backlog, role) if is_implementer(role) => {
+                Some(TicketStatus::InProgress)
+            }
+            (TicketStatus::Ready, role) if is_implementer(role) => Some(TicketStatus::InProgress),
+            _ => None,
+        }
+    }
+
+    pub fn final_approve(current: TicketStatus) -> Result<TicketStatus, &'static str> {
+        if current == TicketStatus::WaitForFinalReview {
+            Ok(TicketStatus::Done)
+        } else {
+            Err("final approve requires wait_for_final_review")
+        }
+    }
+}
+
+pub fn is_implementer(role: &str) -> bool {
+    let r = role.to_lowercase();
+    r.contains("engineer") || r.contains("research")
+}
+
+fn is_pm(role: &str) -> bool {
+    let r = role.to_lowercase();
+    r == "pm" || r.contains("product manager")
+}
+
+fn is_reviewer(role: &str) -> bool {
+    role.to_lowercase().contains("review")
+}
+
+fn is_qc(role: &str) -> bool {
+    let r = role.to_lowercase();
+    r == "qc" || r.contains("quality")
+}
+
+fn resolve_succeeded_gate(current: TicketStatus, role: &str) -> Option<TicketStatus> {
+    use TicketStatus::*;
+    match (current, role) {
+        (Backlog, role) if is_pm(role) => Some(Ready),
+        (Backlog, role) if is_implementer(role) => Some(InReview),
+        (Ready, role) if is_implementer(role) => Some(InReview),
+        (InProgress, role) if is_implementer(role) => Some(InReview),
+        (InReview, role) if is_implementer(role) => Some(WaitForFinalReview),
+        (InReview, role) if is_reviewer(role) => Some(InQa),
+        (InQa, role) if is_qc(role) => Some(WaitForFinalReview),
+        _ => None,
+    }
+}
+
+fn assign_to_from_contract(contract: &AgentRunResult) -> Option<String> {
+    match contract {
+        AgentRunResult::Done { assign_to, .. } | AgentRunResult::Blocked { assign_to, .. } => {
+            assign_to.clone()
+        }
+    }
+}
+
+fn mention_agents_from_contract(contract: &AgentRunResult) -> Vec<String> {
+    match contract {
+        AgentRunResult::Done { mention_agents, .. }
+        | AgentRunResult::Blocked { mention_agents, .. } => mention_agents.clone(),
+    }
+}
+
+fn summary_from_contract(contract: &AgentRunResult) -> Option<String> {
+    match contract {
+        AgentRunResult::Done { summary, .. } | AgentRunResult::Blocked { summary, .. } => {
+            if summary.is_empty() {
+                None
+            } else {
+                Some(summary.clone())
+            }
+        }
+    }
+}
+
+fn apply_assign_to(action: &mut TransitionAction, ctx: &TransitionContext, key: &str) {
+    if ctx.auto_assign_enabled {
+        if let Some(&id) = ctx.project_agent_ids.get(key) {
+            action.new_assignee_id = Some(Some(id));
+            action.pending_recommendation = Some(None);
+        }
+    } else {
+        let Some(recommended_by) = ctx.assignee_agent_id else {
+            return;
+        };
+        let recommended_at = OffsetDateTime::now_utc()
+            .format(&Rfc3339)
+            .unwrap_or_else(|_| String::new());
+        action.pending_recommendation = Some(Some(PendingRecommendation {
+            recommended_agent_key: key.to_string(),
+            recommended_by_agent_id: recommended_by,
+            recommended_at,
+            summary: summary_from_contract(&ctx.contract),
+        }));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+    use uuid::Uuid;
+
+    fn pm_agent_id() -> Uuid {
+        Uuid::from_u128(0x100)
+    }
+
+    fn engineer_agent_id() -> Uuid {
+        Uuid::from_u128(0x200)
+    }
+
+    fn minimal_ctx() -> TransitionContext {
+        TransitionContext {
+            ticket_id: Uuid::from_u128(1),
+            current_status: TicketStatus::Backlog,
+            assignee_agent_id: Some(pm_agent_id()),
+            agent_role: "PM".into(),
+            agent_key: "pm".into(),
+            job_type: "work_on_ticket".into(),
+            run_outcome: RunOutcome::Succeeded,
+            contract: AgentRunResult::Done {
+                summary: String::new(),
+                changed_files: vec![],
+                tests_run: vec![],
+                next_status: None,
+                assign_to: None,
+                mention_agents: vec![],
+                blockers: vec![],
+            },
+            project_agent_keys: vec!["pm".into()],
+            project_agent_ids: HashMap::from([("pm".into(), pm_agent_id())]),
+            auto_assign_enabled: true,
+        }
+    }
+
+    fn done_with_assign_to(key: &str) -> AgentRunResult {
+        AgentRunResult::Done {
+            summary: "Enriched ticket".into(),
+            changed_files: vec![],
+            tests_run: vec![],
+            next_status: None,
+            assign_to: Some(key.into()),
+            mention_agents: vec![],
+            blockers: vec![],
+        }
+    }
+
+    fn blocked_with_mentions(keys: &[&str]) -> AgentRunResult {
+        AgentRunResult::Blocked {
+            blocker_type: "error".into(),
+            summary: "Need clarification".into(),
+            next_status: None,
+            assign_to: None,
+            mention_agents: keys.iter().map(|k| (*k).into()).collect(),
+            required_capabilities: vec![],
+            required_secrets: vec![],
+        }
+    }
+
+    fn agent_map(keys: &[(&str, Uuid)]) -> HashMap<String, Uuid> {
+        keys.iter()
+            .map(|(k, id)| (k.to_string(), *id))
+            .collect()
+    }
+
+    #[test]
+    fn rejects_backlog_to_done() {
+        assert!(!WorkflowService::is_legal_transition(
+            TicketStatus::Backlog,
+            TicketStatus::Done,
+        ));
+    }
+
+    #[test]
+    fn case1_pm_backlog_to_ready_with_pending_recommendation() {
+        let action = WorkflowService::resolve_transition(TransitionContext {
+            current_status: TicketStatus::Backlog,
+            agent_role: "PM".into(),
+            agent_key: "pm".into(),
+            job_type: "work_on_ticket".into(),
+            run_outcome: RunOutcome::Succeeded,
+            auto_assign_enabled: false,
+            contract: done_with_assign_to("engineer"),
+            project_agent_keys: vec!["pm".into(), "backend_engineer".into()],
+            project_agent_ids: agent_map(&[("pm", pm_agent_id()), ("backend_engineer", engineer_agent_id())]),
+            ..minimal_ctx()
+        })
+        .expect("resolve");
+        assert_eq!(action.new_status, Some(TicketStatus::Ready));
+        assert!(action.pending_recommendation.unwrap().is_some());
+        assert!(action.new_assignee_id.is_none());
+    }
+
+    #[test]
+    fn auto_assign_true_applies_assign_to_when_agent_exists() {
+        let action = WorkflowService::resolve_transition(TransitionContext {
+            current_status: TicketStatus::Backlog,
+            agent_role: "PM".into(),
+            auto_assign_enabled: true,
+            contract: done_with_assign_to("backend_engineer"),
+            project_agent_keys: vec!["pm".into(), "backend_engineer".into()],
+            project_agent_ids: agent_map(&[("pm", pm_agent_id()), ("backend_engineer", engineer_agent_id())]),
+            ..minimal_ctx()
+        })
+        .expect("resolve");
+        assert_eq!(action.new_status, Some(TicketStatus::Ready));
+        assert_eq!(
+            action.new_assignee_id,
+            Some(Some(engineer_agent_id()))
+        );
+        assert!(matches!(action.pending_recommendation, Some(None)));
+    }
+
+    #[test]
+    fn case4_missing_assign_to_agent_blocks() {
+        let action = WorkflowService::resolve_transition(TransitionContext {
+            auto_assign_enabled: true,
+            contract: done_with_assign_to("frontend_engineer"),
+            project_agent_keys: vec!["pm".into()],
+            ..minimal_ctx()
+        })
+        .expect("resolve");
+        assert_eq!(action.new_status, Some(TicketStatus::Blocked));
+    }
+
+    #[test]
+    fn case2_engineer_backlog_succeeded_moves_to_in_review() {
+        let action = WorkflowService::resolve_transition(TransitionContext {
+            current_status: TicketStatus::Backlog,
+            agent_role: "Backend Engineer".into(),
+            agent_key: "backend_engineer".into(),
+            assignee_agent_id: Some(engineer_agent_id()),
+            project_agent_keys: vec!["backend_engineer".into()],
+            project_agent_ids: agent_map(&[("backend_engineer", engineer_agent_id())]),
+            contract: AgentRunResult::Done {
+                summary: "Implemented".into(),
+                changed_files: vec![],
+                tests_run: vec![],
+                next_status: None,
+                assign_to: None,
+                mention_agents: vec![],
+                blockers: vec![],
+            },
+            ..minimal_ctx()
+        })
+        .expect("resolve");
+        assert_eq!(action.new_status, Some(TicketStatus::InReview));
+    }
+
+    #[test]
+    fn in_progress_implementer_succeeded_moves_to_in_review() {
+        let action = WorkflowService::resolve_transition(TransitionContext {
+            current_status: TicketStatus::InProgress,
+            agent_role: "Backend Engineer".into(),
+            agent_key: "backend_engineer".into(),
+            assignee_agent_id: Some(engineer_agent_id()),
+            project_agent_keys: vec!["backend_engineer".into()],
+            project_agent_ids: agent_map(&[("backend_engineer", engineer_agent_id())]),
+            contract: AgentRunResult::Done {
+                summary: "Done".into(),
+                changed_files: vec![],
+                tests_run: vec![],
+                next_status: None,
+                assign_to: None,
+                mention_agents: vec![],
+                blockers: vec![],
+            },
+            ..minimal_ctx()
+        })
+        .expect("resolve");
+        assert_eq!(action.new_status, Some(TicketStatus::InReview));
+    }
+
+    #[test]
+    fn scope_b_in_review_implementer_moves_to_wait_for_final_review_and_unassigns() {
+        let action = WorkflowService::resolve_transition(TransitionContext {
+            current_status: TicketStatus::InReview,
+            agent_role: "Backend Engineer".into(),
+            agent_key: "backend_engineer".into(),
+            assignee_agent_id: Some(engineer_agent_id()),
+            project_agent_keys: vec!["backend_engineer".into()],
+            project_agent_ids: agent_map(&[("backend_engineer", engineer_agent_id())]),
+            contract: AgentRunResult::Done {
+                summary: "Resume complete".into(),
+                changed_files: vec![],
+                tests_run: vec![],
+                next_status: None,
+                assign_to: None,
+                mention_agents: vec![],
+                blockers: vec![],
+            },
+            ..minimal_ctx()
+        })
+        .expect("resolve");
+        assert_eq!(
+            action.new_status,
+            Some(TicketStatus::WaitForFinalReview)
+        );
+        assert_eq!(action.new_assignee_id, Some(None));
+    }
+
+    #[test]
+    fn respond_to_mention_does_not_change_status() {
+        let action = WorkflowService::resolve_transition(TransitionContext {
+            job_type: "respond_to_mention".into(),
+            run_outcome: RunOutcome::Succeeded,
+            ..minimal_ctx()
+        })
+        .expect("resolve");
+        assert!(action.new_status.is_none());
+    }
+
+    #[test]
+    fn blocked_with_mention_agents_sets_waiting_substatus_and_enqueues_jobs() {
+        let action = WorkflowService::resolve_transition(TransitionContext {
+            current_status: TicketStatus::InProgress,
+            agent_role: "Backend Engineer".into(),
+            agent_key: "backend_engineer".into(),
+            assignee_agent_id: Some(engineer_agent_id()),
+            run_outcome: RunOutcome::Blocked,
+            contract: blocked_with_mentions(&["pm"]),
+            project_agent_keys: vec!["pm".into(), "backend_engineer".into()],
+            project_agent_ids: agent_map(&[("pm", pm_agent_id()), ("backend_engineer", engineer_agent_id())]),
+            ..minimal_ctx()
+        })
+        .expect("resolve");
+        assert!(action.new_status.is_none());
+        assert_eq!(
+            action.substatus,
+            Some(Some(Substatus::WaitingForAgent))
+        );
+        assert_eq!(action.enqueue_jobs.len(), 1);
+        assert_eq!(action.enqueue_jobs[0].job_type, "respond_to_mention");
+        assert_eq!(action.enqueue_jobs[0].agent_id, pm_agent_id());
+        assert_eq!(
+            action.enqueue_jobs[0].resume_agent_id,
+            Some(engineer_agent_id())
+        );
+    }
+
+    #[test]
+    fn resolve_run_start_backlog_engineer_to_in_progress() {
+        assert_eq!(
+            WorkflowService::resolve_run_start_transition(
+                TicketStatus::Backlog,
+                "Backend Engineer",
+                "work_on_ticket",
+            ),
+            Some(TicketStatus::InProgress)
+        );
+    }
+
+    #[test]
+    fn resolve_run_start_ready_engineer_to_in_progress() {
+        assert_eq!(
+            WorkflowService::resolve_run_start_transition(
+                TicketStatus::Ready,
+                "Researcher",
+                "work_on_ticket",
+            ),
+            Some(TicketStatus::InProgress)
+        );
+    }
+
+    #[test]
+    fn resolve_run_start_ignores_non_work_jobs() {
+        assert_eq!(
+            WorkflowService::resolve_run_start_transition(
+                TicketStatus::Backlog,
+                "Backend Engineer",
+                "respond_to_mention",
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn final_approve_from_wait_for_final_review() {
+        assert_eq!(
+            WorkflowService::final_approve(TicketStatus::WaitForFinalReview),
+            Ok(TicketStatus::Done)
+        );
+    }
+
+    #[test]
+    fn final_approve_rejects_other_status() {
+        assert!(WorkflowService::final_approve(TicketStatus::InReview).is_err());
+    }
+
+    #[test]
+    fn is_implementer_matches_engineer_and_research_roles() {
+        assert!(is_implementer("Backend Engineer"));
+        assert!(is_implementer("frontend engineer"));
+        assert!(is_implementer("Researcher"));
+        assert!(!is_implementer("PM"));
+        assert!(!is_implementer("Reviewer"));
+    }
+}
