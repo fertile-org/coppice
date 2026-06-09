@@ -9,7 +9,7 @@ export function Skill({ part }: { part: ToolPart }) {
   const title = name ? `Skill "${name}"` : 'Loading skill...';
 
   return (
-    <ToolShell tool="skill" status={part.state.status} title={title}>
+    <ToolShell status={part.state.status} title={title}>
       {output ? (
         <ToolOutput>
           <PlainOutput text={formatOutput(output)} />

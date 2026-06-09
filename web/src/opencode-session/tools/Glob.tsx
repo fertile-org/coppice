@@ -16,7 +16,7 @@ export function Glob({ part }: { part: ToolPart }) {
   }
 
   return (
-    <ToolShell tool="glob" status={part.state.status} title={title}>
+    <ToolShell status={part.state.status} title={title}>
       {output ? (
         <ToolOutput>
           <PlainOutput text={formatOutput(output)} />

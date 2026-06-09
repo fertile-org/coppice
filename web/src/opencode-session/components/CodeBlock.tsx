@@ -1,4 +1,3 @@
-import 'highlight.js/styles/github.min.css';
 import hljs from 'highlight.js/lib/core';
 import bash from 'highlight.js/lib/languages/bash';
 import css from 'highlight.js/lib/languages/css';
@@ -14,6 +13,7 @@ import typescript from 'highlight.js/lib/languages/typescript';
 import xml from 'highlight.js/lib/languages/xml';
 import yaml from 'highlight.js/lib/languages/yaml';
 import { useMemo } from 'react';
+import { sessionTheme } from '../theme/session-theme';
 
 hljs.registerLanguage('bash', bash);
 hljs.registerLanguage('css', css);
@@ -48,10 +48,11 @@ export function CodeBlock({
   }, [code, language]);
 
   return (
-    <pre
-      className={`hljs overflow-x-auto rounded-md border border-border bg-surface-raised px-3 py-2 text-xs leading-relaxed ${className}`}
-    >
-      <code className="hljs font-mono" dangerouslySetInnerHTML={{ __html: html }} />
+    <pre className={`overflow-x-auto ${className}`}>
+      <code
+        className={`hljs font-mono text-[length:var(--oc-font-size-sm)] leading-[var(--oc-line-height)] ${sessionTheme.text}`}
+        dangerouslySetInnerHTML={{ __html: html }}
+      />
     </pre>
   );
 }

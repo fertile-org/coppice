@@ -1,0 +1,100 @@
+/* Ayu Dark — matches postrednik/opencode-ayu-theme */
+.oc-session {
+  --oc-bg: #0d1017;
+  --oc-bg-panel: #141821;
+  --oc-bg-element: #10141c;
+  --oc-bg-code: #10141c;
+  --oc-border: #1b1f29;
+  --oc-border-subtle: #1b1f29;
+  --oc-text: #bfbdb6;
+  --oc-text-muted: #555e73;
+  --oc-text-dim: #626d7a;
+  --oc-primary: #e6b450;
+  --oc-secondary: #59c2ff;
+  --oc-success: #70bf56;
+  --oc-warning: #ff8f40;
+  --oc-error: #d95757;
+  --oc-info: #39bae6;
+  --oc-thinking: #e6b450;
+  --oc-thinking-detail: #9da3ae;
+  --oc-mode: #59c2ff;
+  --oc-markdown-heading: #ff8f40;
+  --oc-markdown-link: #59c2ff;
+  --oc-markdown-code: #aad94c;
+  --oc-markdown-strong: #ffb454;
+  --oc-markdown-emph: #f07178;
+  --oc-markdown-blockquote: #626d7a;
+  --oc-tool-active: #bfbdb6;
+  --oc-tool-complete: #555e73;
+
+  --oc-font-size: 0.9375rem;
+  --oc-font-size-sm: 0.875rem;
+  --oc-font-size-xs: 0.75rem;
+  --oc-line-height: 1.6;
+  --oc-gap-section: 1.75rem;
+  --oc-gap-block: 0.5rem;
+  --oc-pad-block: 1rem;
+
+  background-color: var(--oc-bg);
+  color: var(--oc-text);
+  font-family: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
+  font-size: var(--oc-font-size);
+  line-height: var(--oc-line-height);
+}
+
+.oc-session .oc-output-block {
+  margin-top: var(--oc-gap-block);
+  background-color: var(--oc-bg-element);
+  padding: var(--oc-pad-block);
+}
+
+.oc-session .hljs {
+  background: transparent !important;
+  color: var(--oc-text) !important;
+}
+
+.oc-session .hljs-comment,
+.oc-session .hljs-quote {
+  color: #626d7a;
+}
+
+.oc-session .hljs-keyword,
+.oc-session .hljs-selector-tag {
+  color: #ff8f40;
+}
+
+.oc-session .hljs-string,
+.oc-session .hljs-regexp {
+  color: #aad94c;
+}
+
+.oc-session .hljs-number,
+.oc-session .hljs-literal {
+  color: #d2a6ff;
+}
+
+.oc-session .hljs-title,
+.oc-session .hljs-section,
+.oc-session .hljs-name {
+  color: #ffb454;
+}
+
+.oc-session .hljs-attr,
+.oc-session .hljs-attribute,
+.oc-session .hljs-variable {
+  color: #39bae6;
+}
+
+.oc-session .hljs-type,
+.oc-session .hljs-class {
+  color: #59c2ff;
+}
+
+.oc-session .hljs-built_in,
+.oc-session .hljs-operator {
+  color: #f29668;
+}
+
+.oc-session .hljs-punctuation {
+  color: #bfbdb6;
+}

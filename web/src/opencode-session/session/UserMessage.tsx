@@ -1,3 +1,4 @@
+import { SessionSectionCard } from '../components/SessionSectionCard';
 import type { Message, Part, TextPart as TextPartType } from '../sync/types';
 import { sessionTheme } from '../theme/session-theme';
 
@@ -21,13 +22,18 @@ export function UserMessage({
   if (!text) return null;
 
   return (
-    <div className={`rounded-md border border-border bg-surface px-3 py-2 ${sessionTheme.text}`}>
-      <p className="whitespace-pre-wrap font-body text-sm">{text}</p>
-      {message.error?.data?.message && (
-        <p className={`mt-1 font-body text-xs ${sessionTheme.error}`}>
-          {message.error.data.message}
+    <SessionSectionCard>
+      <div className={sessionTheme.fontMono}>
+        <p className={`whitespace-pre-wrap ${sessionTheme.text}`}>
+          <span className={sessionTheme.thinking}>{'> '}</span>
+          {text}
         </p>
-      )}
-    </div>
+        {message.error?.data?.message && (
+          <p className={`mt-1 ${sessionTheme.error}`}>
+            {message.error.data.message}
+          </p>
+        )}
+      </div>
+    </SessionSectionCard>
   );
 }

@@ -12,7 +12,7 @@ export function Read({ part }: { part: ToolPart }) {
   const title = filePath ? `Read ${filePath}` : parsed?.path ? `Read ${parsed.path}` : 'Read';
 
   return (
-    <ToolShell tool="read" status={part.state.status} title={title}>
+    <ToolShell status={part.state.status} title={title}>
       {parsed ? (
         <ToolOutput>
           <FileContentView path={parsed.path ?? filePath} content={parsed.content} />

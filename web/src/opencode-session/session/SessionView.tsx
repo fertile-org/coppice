@@ -1,6 +1,8 @@
 import { useMemo } from 'react';
 import type { SessionStore } from '../sync/types';
+import { sessionTheme } from '../theme/session-theme';
 import { AssistantMessage } from './AssistantMessage';
+import { SessionFooter } from './SessionFooter';
 import { UserMessage } from './UserMessage';
 
 export function SessionView({ store }: { store: SessionStore }) {
@@ -10,7 +12,7 @@ export function SessionView({ store }: { store: SessionStore }) {
   );
 
   return (
-    <div className="flex flex-col gap-3 overflow-y-auto">
+    <div className={`flex flex-col ${sessionTheme.sectionGap}`}>
       {messages.map((message) =>
         message.role === 'assistant' ? (
           <AssistantMessage
@@ -26,6 +28,7 @@ export function SessionView({ store }: { store: SessionStore }) {
           />
         ),
       )}
+      <SessionFooter messages={messages} />
     </div>
   );
 }

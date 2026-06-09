@@ -16,7 +16,7 @@ export function Grep({ part }: { part: ToolPart }) {
   }
 
   return (
-    <ToolShell tool="grep" status={part.state.status} title={title}>
+    <ToolShell status={part.state.status} title={title}>
       {output ? (
         <ToolOutput>
           <PlainOutput text={formatOutput(output)} />

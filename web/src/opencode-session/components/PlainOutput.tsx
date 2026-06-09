@@ -1,3 +1,4 @@
+import { sessionTheme } from '../theme/session-theme';
 import { CodeBlock } from './CodeBlock';
 
 export function PlainOutput({ text, language }: { text: string; language?: string }) {
@@ -9,7 +10,7 @@ export function PlainOutput({ text, language }: { text: string; language?: strin
   }
 
   return (
-    <pre className="overflow-x-auto whitespace-pre-wrap rounded-md border border-border bg-surface-raised px-3 py-2 font-mono text-xs leading-relaxed text-text-primary">
+    <pre className={`overflow-x-auto whitespace-pre-wrap ${sessionTheme.text}`}>
       {trimmed}
     </pre>
   );

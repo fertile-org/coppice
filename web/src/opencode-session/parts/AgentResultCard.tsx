@@ -1,0 +1,84 @@
+import { MarkdownContent } from '../components/MarkdownContent';
+import { sessionTheme } from '../theme/session-theme';
+import type { AgentResultContract } from './parse-result-contract';
+
+function MetaList({ label, items }: { label: string; items: string[] }) {
+  if (items.length === 0) return null;
+  return (
+    <div className="mt-3 border-t border-[var(--oc-border)] pt-3">
+      <p className={`mb-1 ${sessionTheme.fontMonoSm} ${sessionTheme.textMuted}`}>
+        {label}
+      </p>
+      <ul className={`list-disc space-y-0.5 pl-4 ${sessionTheme.fontMonoSm} ${sessionTheme.text}`}>
+        {items.map((item) => (
+          <li key={item} className="break-all">
+            {item}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+export function AgentResultCard({ contract }: { contract: AgentResultContract }) {
+  const isDone = contract.status === 'done';
+
+  return (
+    <div className={`overflow-hidden border border-[var(--oc-border)] ${sessionTheme.bgElement}`}>
+      <div
+        className={`flex flex-wrap items-center gap-2 border-b border-[var(--oc-border)] px-3 py-2`}
+      >
+        <span
+          className={`px-2 py-0.5 ${sessionTheme.fontMonoSm} font-medium ${
+            isDone ? sessionTheme.success : sessionTheme.warning
+          }`}
+        >
+          {isDone ? 'Done' : 'Blocked'}
+        </span>
+        {!isDone && contract.blockerType ? (
+          <span className={`${sessionTheme.fontMonoSm} ${sessionTheme.secondary}`}>
+            {contract.blockerType.replaceAll('_', ' ')}
+          </span>
+        ) : null}
+        {contract.nextStatus ? (
+          <span className={`${sessionTheme.fontMonoSm} ${sessionTheme.textMuted}`}>
+            → {contract.nextStatus}
+          </span>
+        ) : null}
+      </div>
+
+      <div className="px-3 py-3">
+        <MarkdownContent>{contract.summary}</MarkdownContent>
+
+        {isDone ? (
+          <>
+            <MetaList label="Changed files" items={contract.changedFiles ?? []} />
+            <MetaList label="Tests run" items={contract.testsRun ?? []} />
+            <MetaList label="Blockers" items={contract.blockers ?? []} />
+          </>
+        ) : (
+          <>
+            <MetaList
+              label="Required capabilities"
+              items={contract.requiredCapabilities ?? []}
+            />
+            <MetaList label="Required secrets" items={contract.requiredSecrets ?? []} />
+          </>
+        )}
+
+        {(contract.mentionAgents?.length ?? 0) > 0 ? (
+          <div className="mt-3 flex flex-wrap gap-1">
+            {contract.mentionAgents!.map((agent) => (
+              <span
+                key={agent}
+                className={`px-2 py-0.5 ${sessionTheme.fontMonoSm} ${sessionTheme.info}`}
+              >
+                @{agent}
+              </span>
+            ))}
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+}

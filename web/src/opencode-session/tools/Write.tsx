@@ -13,7 +13,7 @@ export function Write({ part }: { part: ToolPart }) {
   const title = filePath ? `Write ${filePath}` : 'Preparing write...';
 
   return (
-    <ToolShell tool="write" status={part.state.status} title={title}>
+    <ToolShell status={part.state.status} title={title}>
       {parsed ? (
         <ToolOutput>
           <FileContentView path={parsed.path ?? filePath} content={parsed.content} />

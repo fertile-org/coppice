@@ -1,5 +1,7 @@
 import { useEffect, useReducer, useRef, useState } from 'react';
+import '../../opencode-session/theme/opencode-theme.css';
 import { SessionView } from '../../opencode-session/session/SessionView';
+import { sessionTheme } from '../../opencode-session/theme/session-theme';
 import {
   applyEvent,
   applySnapshot,
@@ -198,11 +200,13 @@ export function LiveSession({ runId, runStatus }: LiveSessionProps) {
       {interrupted && (
         <p className="font-body text-xs text-warning">{interrupted}</p>
       )}
-      <div className="min-h-[280px] flex-1 overflow-y-auto rounded-md border border-border bg-surface px-3 py-2">
+      <div
+        className={`oc-session min-h-[280px] flex-1 overflow-y-auto border border-[var(--oc-border)] px-4 py-4 ${sessionTheme.bg}`}
+      >
         {store ? (
           <SessionView store={store} />
         ) : (
-          <p className="font-body text-sm text-text-muted">
+          <p className={`${sessionTheme.fontBody} ${sessionTheme.textMuted}`}>
             Waiting for session…
           </p>
         )}

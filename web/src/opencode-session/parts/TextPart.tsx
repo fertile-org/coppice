@@ -1,13 +1,19 @@
 import { MarkdownContent } from '../components/MarkdownContent';
 import type { TextPart as TextPartType } from '../sync/types';
-import { sessionTheme } from '../theme/session-theme';
+import { AgentResultCard } from './AgentResultCard';
+import { parseResultContractFromText } from './parse-result-contract';
 
 export function TextPart({ part }: { part: TextPartType }) {
   const content = part.text.trim();
   if (!content) return null;
 
+  const contract = parseResultContractFromText(content);
+  if (contract) {
+    return <AgentResultCard contract={contract} />;
+  }
+
   return (
-    <div className={`ml-3 mt-2 ${sessionTheme.text}`}>
+    <div>
       <MarkdownContent>{content}</MarkdownContent>
     </div>
   );

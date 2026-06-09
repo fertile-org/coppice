@@ -38,13 +38,13 @@ export function Question({ part }: { part: ToolPart }) {
       : 'Asking questions...';
 
   return (
-    <ToolShell tool="question" status={part.state.status} title={title}>
+    <ToolShell status={part.state.status} title={title}>
       <div className="flex flex-col gap-2">
         {questions.map((q, index) => (
           <div key={index} className="flex flex-col gap-0.5">
-            <div className={`text-xs ${sessionTheme.textMuted}`}>{q.question}</div>
+            <div className={`${sessionTheme.fontBody} ${sessionTheme.textMuted}`}>{q.question}</div>
             {answers ? (
-              <div className={`text-xs ${sessionTheme.text}`}>{formatAnswer(answers[index])}</div>
+              <div className={`${sessionTheme.fontBody} ${sessionTheme.text}`}>{formatAnswer(answers[index])}</div>
             ) : null}
           </div>
         ))}

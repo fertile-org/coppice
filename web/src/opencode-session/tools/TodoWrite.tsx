@@ -34,10 +34,10 @@ export function TodoWrite({ part }: { part: ToolPart }) {
   const title = todos.length > 0 ? 'Todos' : 'Updating todos...';
 
   return (
-    <ToolShell tool="todowrite" status={part.state.status} title={title}>
+    <ToolShell status={part.state.status} title={title}>
       <ul className="flex flex-col gap-1">
         {todos.map((todo, index) => (
-          <li key={index} className={`flex gap-2 text-xs ${sessionTheme.text}`}>
+          <li key={index} className={`flex gap-2 ${sessionTheme.fontBody} ${sessionTheme.text}`}>
             <span className={sessionTheme.textMuted}>{statusIcon(todo.status)}</span>
             <span>{todo.content}</span>
           </li>

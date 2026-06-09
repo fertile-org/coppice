@@ -9,7 +9,7 @@ export function List({ part }: { part: ToolPart }) {
   const title = `List ${dirPath}`;
 
   return (
-    <ToolShell tool="ls" status={part.state.status} title={title}>
+    <ToolShell status={part.state.status} title={title}>
       {output ? (
         <ToolOutput>
           <PlainOutput text={formatOutput(output)} />

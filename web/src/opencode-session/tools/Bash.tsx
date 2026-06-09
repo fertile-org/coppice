@@ -8,7 +8,7 @@ export function Bash({ part }: { part: ToolPart }) {
   const output = outputText(part);
 
   return (
-    <ToolShell tool="bash" status={part.state.status} title={command || '$'}>
+    <ToolShell variant="shell" status={part.state.status} title={command}>
       {output ? (
         <ToolOutput>
           <PlainOutput text={formatOutput(output)} language="bash" />

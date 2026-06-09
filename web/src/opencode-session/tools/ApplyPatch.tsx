@@ -35,7 +35,7 @@ export function ApplyPatch({ part }: { part: ToolPart }) {
   }
 
   return (
-    <ToolShell tool="apply_patch" status={part.state.status} title={title}>
+    <ToolShell status={part.state.status} title={title}>
       {output ? (
         <ToolOutput>
           <PlainOutput text={formatOutput(output)} />

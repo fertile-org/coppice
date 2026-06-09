@@ -14,7 +14,7 @@ export function Task({ part }: { part: ToolPart }) {
   }
 
   return (
-    <ToolShell tool="task" status={part.state.status} title={title}>
+    <ToolShell status={part.state.status} title={title}>
       {output ? (
         <ToolOutput>
           <PlainOutput text={formatOutput(output)} />
