@@ -12,10 +12,10 @@ async fn main() -> anyhow::Result<()> {
         .map_err(|e| anyhow::anyhow!("failed to load config: {e}"))?;
 
     let opencode_serve =
-        if config.agent.providers.opencode.enabled || config.agent.default_provider == "opencode" {
+        if config.agent.connectors.opencode.enabled || config.agent.default_connector == "opencode" {
             Some(
                 coppice_server::sessions::opencode_serve::OpenCodeServeManager::start(
-                    &config.agent.providers.opencode,
+                    &config.agent.connectors.opencode,
                 )
                 .await?,
             )

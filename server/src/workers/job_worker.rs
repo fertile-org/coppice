@@ -194,7 +194,7 @@ async fn execute_job(
         status: "running".into(),
     });
 
-    let provider_name = &agent.provider;
+    let provider_name = &agent.connector;
     let provider = state
         .provider_registry
         .get(provider_name)

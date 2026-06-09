@@ -50,7 +50,7 @@ impl AppState {
     }
 
     pub fn default_provider_id(&self) -> &str {
-        &self.config.agent.default_provider
+        &self.config.agent.default_connector
     }
 }
 

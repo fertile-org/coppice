@@ -67,17 +67,17 @@ pub async fn evaluate_agent_health(
     registry: &ProviderRegistry,
     opencode_serve: Option<&OpenCodeServeManager>,
 ) -> (AgentHealthStatus, Option<String>) {
-    if !registry.has(&agent.provider) {
+    if !registry.has(&agent.connector) {
         return (
             AgentHealthStatus::MissingConfig,
             Some(format!(
                 "Provider '{}' is not configured on this server",
-                agent.provider
+                agent.connector
             )),
         );
     }
 
-    match agent.provider.as_str() {
+    match agent.connector.as_str() {
         "mock" => (AgentHealthStatus::Healthy, None),
         "opencode" => {
             let Some(serve) = opencode_serve else {

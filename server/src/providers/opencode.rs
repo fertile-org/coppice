@@ -44,14 +44,9 @@ impl AgentProvider for OpenCodeProvider {
             "--dir".into(),
             worktree.display().to_string(),
         ];
-        let model = input.model.as_ref().or(self.config.model.as_ref());
-        if let Some(model) = model {
+        if let Some(model) = input.model.as_ref() {
             args.push("--model".into());
             args.push(model.clone());
-        }
-        if let Some(variant) = &self.config.variant {
-            args.push("--variant".into());
-            args.push(variant.clone());
         }
         // Prompt is a positional message; `-p` is `--password` in the opencode CLI.
         args.push(prompt);

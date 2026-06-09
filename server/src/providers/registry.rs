@@ -20,7 +20,7 @@ impl ProviderRegistry {
         let mut providers: HashMap<String, Arc<dyn AgentProvider>> = HashMap::new();
         providers.insert("mock".into(), Arc::new(MockProvider::default()));
 
-        let opencode_available = config.agent.providers.opencode.enabled
+        let opencode_available = config.agent.connectors.opencode.enabled
             || opencode_serve.is_some();
         if opencode_available {
             if let Some(serve) = opencode_serve {
@@ -28,7 +28,7 @@ impl ProviderRegistry {
                     "opencode".into(),
                     Arc::new(OpenCodeProvider::new(
                         serve,
-                        config.agent.providers.opencode.clone(),
+                        config.agent.connectors.opencode.clone(),
                     )),
                 );
             }
@@ -36,7 +36,7 @@ impl ProviderRegistry {
 
         Self {
             providers,
-            opencode_default_model: config.agent.providers.opencode.model.clone(),
+            opencode_default_model: None,
         }
     }
 
