@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use crate::config::WorkflowConfig;
 use crate::domain::agent::Agent;
-use crate::domain::comment::AuthorType;
+use crate::domain::comment::{AuthorType, CommentIntent};
 use crate::domain::run::{AgentRun, RunStatus};
 use crate::domain::slug::slugify;
 use crate::domain::substatus::Substatus;
@@ -10,7 +10,7 @@ use crate::domain::ticket::status_to_str;
 use crate::domain::workflow::{RunOutcome, TransitionAction, TransitionContext};
 use crate::providers::AgentRunResult;
 use crate::services::agent_service::AgentService;
-use crate::services::comment_service::CommentService;
+use crate::services::comment_service::{CommentError, CommentService};
 use crate::services::mention_service::MentionService;
 use crate::services::result_contract::ApplyResult;
 use crate::services::run_service::{RunError, RunService};
@@ -23,6 +23,41 @@ use uuid::Uuid;
 pub struct RunOrchestrator<'a> {
     pool: &'a PgPool,
     workflow: &'a WorkflowConfig,
+}
+
+pub async fn load_resume_context(
+    pool: &PgPool,
+    run: &AgentRun,
+) -> Result<Option<String>, CommentError> {
+    if run.job_type != "work_on_ticket" {
+        return Ok(None);
+    }
+
+    let comments = CommentService::new(pool)
+        .list_by_ticket(run.ticket_id)
+        .await?;
+
+    let answer_idx = comments
+        .iter()
+        .rposition(|c| c.intent == CommentIntent::ClarificationAnswer);
+
+    let Some(answer_idx) = answer_idx else {
+        return Ok(None);
+    };
+
+    let blocker = comments[..answer_idx]
+        .iter()
+        .rfind(|c| c.intent == CommentIntent::Blocked);
+
+    let Some(blocker) = blocker else {
+        return Ok(None);
+    };
+
+    let answer = &comments[answer_idx];
+    Ok(Some(format!(
+        "**Prior blocker:**\n\n{}\n\n**PM answer:**\n\n{}",
+        blocker.body, answer.body
+    )))
 }
 
 impl<'a> RunOrchestrator<'a> {

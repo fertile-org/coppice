@@ -114,6 +114,8 @@ mod tests {
         let result = provider
             .run(AgentRunInput {
                 agent_id: "agent-1".into(),
+                agent_key: "agent-1".into(),
+                job_type: "work_on_ticket".into(),
                 ticket_id: None,
                 context_path: "/tmp".into(),
                 run_id: Some(run_id.into()),
@@ -123,6 +125,7 @@ mod tests {
                 model_provider: None,
                 model: None,
                 session_created_tx: None,
+                resume_context: None,
             })
             .await
             .expect("mock run");

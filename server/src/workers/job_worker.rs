@@ -9,6 +9,7 @@ use tokio::sync::watch;
 
 use crate::domain::comment::author_type_to_str;
 use crate::domain::run::{run_status_to_str, RunStatus};
+use crate::domain::slug::slugify;
 use crate::domain::ticket::{status_to_str, substatus_to_str};
 use crate::events::bus::AppEvent;
 use crate::providers::{AgentRunInput, ProviderError};
@@ -18,9 +19,10 @@ use crate::services::comment_service::CommentService;
 use crate::services::context_builder::{write_context_file, ContextInput};
 use crate::services::job_service::JobService;
 use crate::services::result_contract;
-use crate::services::run_orchestrator::RunOrchestrator;
+use crate::services::run_orchestrator::{load_resume_context, RunOrchestrator};
 use crate::services::run_service::RunService;
 use crate::services::ticket_service::TicketService;
+use crate::services::workflow_service::WorkflowService;
 use crate::services::worktree_service::{compute_paths, WorktreeService};
 use crate::util::error_format::format_job_error;
 use crate::AppState;
@@ -131,6 +133,26 @@ async fn execute_job(
 
     run_svc.mark_running(run.id).await.context("mark run running")?;
 
+    if let Some(new_status) = WorkflowService::resolve_run_start_transition(
+        ticket.ticket.status,
+        &agent.role,
+        &run.job_type,
+    ) {
+        TicketService::new(pool)
+            .update_status(run.ticket_id, new_status, None, None)
+            .await
+            .context("apply run-start transition")?;
+    }
+
+    let agent_key = agent
+        .preset_source
+        .clone()
+        .unwrap_or_else(|| slugify(&agent.name));
+    let resume_context = load_resume_context(pool, run)
+        .await
+        .map_err(|e| anyhow::anyhow!("load resume context: {e}"))?;
+    let resume_context_ref = resume_context.as_deref();
+
     let local_path: String = repo_row.get("local_path");
     let repo_name: String = repo_row.get("name");
     let repo_remote_url: Option<String> = repo_row.get("remote_url");
@@ -172,6 +194,7 @@ async fn execute_job(
         repo_remote_url: repo_remote_url.as_deref(),
         repo_default_branch: Some(&repo_default_branch),
         worktree_path: Some(&worktree_path),
+        resume_context: resume_context_ref,
     };
     write_context_file(&paths.worktree_dir, &context_input).context("write context file")?;
 
@@ -241,6 +264,8 @@ async fn execute_job(
     let provider_result = connector
         .run(AgentRunInput {
             agent_id: run.agent_id.to_string(),
+            agent_key,
+            job_type: run.job_type.clone(),
             ticket_id: Some(run.ticket_id.to_string()),
             context_path,
             run_id: Some(run.id.to_string()),
@@ -250,6 +275,7 @@ async fn execute_job(
             stream: Some(stream.clone()),
             cancel_rx: Some(cancel_rx),
             session_created_tx,
+            resume_context,
         })
         .await;
 

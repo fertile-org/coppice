@@ -20,6 +20,8 @@ use crate::sessions::run_registry::RunStreamHandle;
 #[derive(Clone)]
 pub struct AgentRunInput {
     pub agent_id: String,
+    pub agent_key: String,
+    pub job_type: String,
     pub ticket_id: Option<String>,
     pub context_path: String,
     pub run_id: Option<String>,
@@ -29,6 +31,7 @@ pub struct AgentRunInput {
     pub model_provider: Option<String>,
     pub model: Option<String>,
     pub session_created_tx: Option<watch::Sender<String>>,
+    pub resume_context: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -114,6 +117,8 @@ mod tests {
         let result = provider
             .run(AgentRunInput {
                 agent_id: "agent-1".into(),
+                agent_key: "agent-1".into(),
+                job_type: "work_on_ticket".into(),
                 ticket_id: None,
                 context_path: "/tmp".into(),
                 run_id: None,
@@ -123,6 +128,7 @@ mod tests {
                 model_provider: None,
                 model: None,
                 session_created_tx: None,
+                resume_context: None,
             })
             .await
             .expect("mock run");

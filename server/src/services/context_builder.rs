@@ -16,6 +16,7 @@ pub struct ContextInput<'a> {
     pub repo_remote_url: Option<&'a str>,
     pub repo_default_branch: Option<&'a str>,
     pub worktree_path: Option<&'a str>,
+    pub resume_context: Option<&'a str>,
 }
 
 pub fn build_context_md(input: &ContextInput) -> String {
@@ -27,6 +28,7 @@ pub fn build_context_md(input: &ContextInput) -> String {
     let skills = format_bullet_list(input.agent_skills);
     let responsibilities = format_bullet_list(input.agent_responsibilities);
     let repository_section = format_repository_section(input);
+    let resume_section = format_resume_section(input);
 
     format!(
         r#"# Current task
@@ -54,7 +56,7 @@ pub fn build_context_md(input: &ContextInput) -> String {
 
 {system_prompt}
 
-{repository_section}# Sandbox
+{repository_section}{resume_section}# Sandbox
 
 {sandbox_note}
 
@@ -102,6 +104,13 @@ When blocked by missing capability or secret, also include `requiredCapabilities
         repository_section = repository_section,
         sandbox_note = SANDBOX_NOTE,
     )
+}
+
+fn format_resume_section(input: &ContextInput) -> String {
+    match input.resume_context {
+        Some(ctx) => format!("## Resume\n\n{ctx}\n\n"),
+        None => String::new(),
+    }
 }
 
 fn format_repository_section(input: &ContextInput) -> String {
@@ -166,6 +175,7 @@ mod tests {
             repo_remote_url: Some("https://github.com/example/coppice"),
             repo_default_branch: Some("main"),
             worktree_path: Some("/data/worktrees/coppice/ticket-1"),
+            resume_context: None,
         });
         assert!(md.contains("# Current task"));
         assert!(md.contains("# Agent role"));
@@ -175,5 +185,28 @@ mod tests {
         assert!(md.contains("# Sandbox"));
         assert!(md.contains("# Expected output contract"));
         assert!(md.contains("Fix polling"));
+    }
+
+    #[test]
+    fn context_includes_resume_section_when_provided() {
+        let md = build_context_md(&ContextInput {
+            ticket_title: "Fix polling",
+            ticket_description: "Add retry",
+            ticket_status: "in_progress",
+            ticket_substatus: None,
+            agent_name: "FE Agent",
+            agent_role: "Frontend Engineer",
+            agent_skills: &[],
+            agent_responsibilities: &[],
+            agent_system_prompt: "You are FE.",
+            repo_name: None,
+            repo_remote_url: None,
+            repo_default_branch: None,
+            worktree_path: None,
+            resume_context: Some("**Prior blocker:**\n\nNeed API shape.\n\n**PM answer:**\n\nUse option A."),
+        });
+        assert!(md.contains("## Resume"));
+        assert!(md.contains("Need API shape."));
+        assert!(md.contains("Use option A."));
     }
 }
