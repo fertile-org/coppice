@@ -4,7 +4,7 @@ use crate::domain::substatus::{Substatus, TicketStatus};
 use crate::providers::AgentRunResult;
 
 pub struct ApplyTicketUpdate {
-    pub status: TicketStatus,
+    pub status: Option<TicketStatus>,
     pub substatus: Option<Substatus>,
     pub substatus_metadata: Option<serde_json::Value>,
 }
@@ -41,24 +41,13 @@ pub fn apply_agent_result(result: &AgentRunResult) -> Result<ApplyResult, String
             summary,
             changed_files,
             tests_run,
-            next_status,
             mention_agents,
             blockers,
             ..
-        } => {
-            let status = next_status
-                .as_deref()
-                .and_then(ticket_status_from_next_status)
-                .ok_or_else(|| {
-                    next_status.as_deref().map_or_else(
-                        || "missing nextStatus".to_string(),
-                        |label| format!("unknown nextStatus: {label}"),
-                    )
-                })?;
-            Ok(ApplyResult {
+        } => Ok(ApplyResult {
                 run_status: RunStatus::Succeeded,
                 ticket: ApplyTicketUpdate {
-                    status,
+                    status: None,
                     substatus: None,
                     substatus_metadata: None,
                 },
@@ -67,28 +56,16 @@ pub fn apply_agent_result(result: &AgentRunResult) -> Result<ApplyResult, String
                     intent: CommentIntent::ImplementationDone,
                     mentions: mention_agents.clone(),
                 },
-            })
-        }
+            }),
         AgentRunResult::Blocked {
             blocker_type,
             summary,
-            next_status,
             mention_agents,
             required_capabilities,
             required_secrets,
             ..
         } => {
-            let status = next_status
-                .as_deref()
-                .and_then(ticket_status_from_next_status)
-                .ok_or_else(|| {
-                    next_status.as_deref().map_or_else(
-                        || "missing nextStatus".to_string(),
-                        |label| format!("unknown nextStatus: {label}"),
-                    )
-                })?;
             let (substatus, substatus_metadata) = blocked_substatus(
-                status,
                 blocker_type,
                 summary,
                 required_capabilities,
@@ -97,7 +74,7 @@ pub fn apply_agent_result(result: &AgentRunResult) -> Result<ApplyResult, String
             Ok(ApplyResult {
                 run_status: RunStatus::Blocked,
                 ticket: ApplyTicketUpdate {
-                    status,
+                    status: None,
                     substatus,
                     substatus_metadata,
                 },
@@ -140,15 +117,11 @@ fn build_done_comment_body(
 }
 
 fn blocked_substatus(
-    status: TicketStatus,
     blocker_type: &str,
     summary: &str,
     required_capabilities: &[String],
     required_secrets: &[String],
 ) -> (Option<Substatus>, Option<serde_json::Value>) {
-    if status != TicketStatus::Blocked {
-        return (None, None);
-    }
     match blocker_type {
         "missing_capability" => (
             Some(Substatus::BlockedByMissingCapability),
@@ -191,7 +164,7 @@ mod tests {
         let result = load_fixture("done.json");
         let applied = apply_agent_result(&result).expect("apply done");
         assert_eq!(applied.run_status, RunStatus::Succeeded);
-        assert_eq!(applied.ticket.status, TicketStatus::InReview);
+        assert_eq!(applied.ticket.status, None);
         assert_eq!(
             intent_to_str(applied.comment.intent),
             "implementation_done"
@@ -199,11 +172,18 @@ mod tests {
     }
 
     #[test]
+    fn apply_does_not_set_ticket_status_from_next_status() {
+        let result = load_fixture("done.json");
+        let applied = apply_agent_result(&result).expect("apply done");
+        assert_eq!(applied.ticket.status, None);
+    }
+
+    #[test]
     fn blocked_fixture_maps_to_blocked_status() {
         let result = load_fixture("blocked.json");
         let applied = apply_agent_result(&result).expect("apply blocked");
         assert_eq!(applied.run_status, RunStatus::Blocked);
-        assert_eq!(applied.ticket.status, TicketStatus::Blocked);
+        assert_eq!(applied.ticket.status, None);
         assert_eq!(intent_to_str(applied.comment.intent), "blocked");
     }
 

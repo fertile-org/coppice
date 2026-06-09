@@ -283,14 +283,22 @@ impl<'a> RunService<'a> {
     ) -> Result<AgentRun, RunError> {
         let run = self.get(run_id).await?;
 
-        TicketService::new(self.pool)
-            .update_status(
-                run.ticket_id,
-                apply.ticket.status,
-                Some(apply.ticket.substatus),
-                Some(apply.ticket.substatus_metadata),
-            )
-            .await?;
+        if apply.ticket.status.is_some() || apply.ticket.substatus.is_some() {
+            let ticket_svc = TicketService::new(self.pool);
+            let current = ticket_svc.get(run.ticket_id).await?;
+            let status = apply
+                .ticket
+                .status
+                .unwrap_or(current.ticket.status);
+            ticket_svc
+                .update_status(
+                    run.ticket_id,
+                    status,
+                    Some(apply.ticket.substatus),
+                    Some(apply.ticket.substatus_metadata),
+                )
+                .await?;
+        }
 
         CommentService::new(self.pool)
             .create(
