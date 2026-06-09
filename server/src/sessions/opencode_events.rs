@@ -2,6 +2,57 @@ use crate::providers::AgentRunResult;
 use crate::sessions::TerminalFrame;
 use time::OffsetDateTime;
 
+const COPPICE_RUN_PROMPT: &str = "Read .agent/context.md and complete the task described there. \
+When finished, reply with ONLY a single JSON object matching the done or blocked contract \
+from that file — use real values from your work, not placeholder text.";
+
+pub fn coppice_run_prompt() -> &'static str {
+    COPPICE_RUN_PROMPT
+}
+
+pub fn session_status_from_sse(event: &serde_json::Value, session_id: &str) -> Option<String> {
+    if event.get("type")?.as_str()? != "session.status" {
+        return None;
+    }
+    let props = event.get("properties")?;
+    if props.get("sessionID")?.as_str()? != session_id {
+        return None;
+    }
+    props
+        .get("status")?
+        .get("type")?
+        .as_str()
+        .map(str::to_string)
+}
+
+pub fn extract_result_from_messages(messages: &[serde_json::Value]) -> Option<AgentRunResult> {
+    for msg in messages.iter().rev() {
+        if msg.get("info")?.get("role")?.as_str()? != "assistant" {
+            continue;
+        }
+        let parts = msg.get("parts")?.as_array()?;
+        for part in parts.iter().rev() {
+            if part.get("type")?.as_str()? != "text" {
+                continue;
+            }
+            let text = part.get("text")?.as_str()?;
+            if let Some(result) = extract_result_from_text(text) {
+                if !looks_like_template_contract(&result) {
+                    return Some(result);
+                }
+            }
+        }
+    }
+    None
+}
+
+fn looks_like_template_contract(result: &AgentRunResult) -> bool {
+    let summary = match result {
+        AgentRunResult::Done { summary, .. } | AgentRunResult::Blocked { summary, .. } => summary,
+    };
+    summary.contains('<') && summary.contains('>')
+}
+
 pub fn event_line_to_frame(seq: u64, line: &str) -> Option<TerminalFrame> {
     let value: serde_json::Value = serde_json::from_str(line).ok()?;
     let text = value
@@ -18,7 +69,9 @@ pub fn event_line_to_frame(seq: u64, line: &str) -> Option<TerminalFrame> {
 pub fn extract_result_from_events(lines: &[String]) -> Option<AgentRunResult> {
     for line in lines.iter().rev() {
         if let Ok(result) = serde_json::from_str::<AgentRunResult>(line) {
-            return Some(result);
+            if !looks_like_template_contract(&result) {
+                return Some(result);
+            }
         }
         if let Ok(value) = serde_json::from_str::<serde_json::Value>(line) {
             let text = value
@@ -36,16 +89,39 @@ pub fn extract_result_from_events(lines: &[String]) -> Option<AgentRunResult> {
 }
 
 fn extract_result_from_text(text: &str) -> Option<AgentRunResult> {
-    if let Some(start) = text.find("```json") {
-        let after = &text[start + 7..];
+    if let Ok(result) = serde_json::from_str::<AgentRunResult>(text.trim()) {
+        return Some(result);
+    }
+
+    let mut search_from = 0;
+    while let Some(start) = text[search_from..].find("```json") {
+        let abs_start = search_from + start + 7;
+        let after = &text[abs_start..];
         if let Some(end) = after.find("```") {
             let json_str = after[..end].trim();
             if let Ok(result) = serde_json::from_str::<AgentRunResult>(json_str) {
-                return Some(result);
+                if !looks_like_template_contract(&result) {
+                    return Some(result);
+                }
+            }
+            search_from = abs_start + end + 3;
+        } else {
+            break;
+        }
+    }
+
+    for line in text.lines().rev() {
+        let line = line.trim();
+        if line.starts_with('{') {
+            if let Ok(result) = serde_json::from_str::<AgentRunResult>(line) {
+                if !looks_like_template_contract(&result) {
+                    return Some(result);
+                }
             }
         }
     }
-    serde_json::from_str(text).ok()
+
+    None
 }
 
 #[cfg(test)]
@@ -106,6 +182,64 @@ mod tests {
             AgentRunResult::Done { summary, .. } => assert_eq!(summary, "From code block."),
             _ => panic!("expected done"),
         }
+    }
+
+    #[test]
+    fn extract_result_from_minimal_done_json() {
+        let minimal = r#"{"status":"done","summary":"Test complete.","nextStatus":"In Review"}"#;
+        let messages = vec![serde_json::json!({
+            "info": { "role": "assistant" },
+            "parts": [{ "type": "text", "text": minimal }]
+        })];
+        let result = extract_result_from_messages(&messages).expect("minimal done should parse");
+        match result {
+            AgentRunResult::Done {
+                summary,
+                next_status,
+                changed_files,
+                tests_run,
+                mention_agents,
+                blockers,
+            } => {
+                assert_eq!(summary, "Test complete.");
+                assert_eq!(next_status, "In Review");
+                assert!(changed_files.is_empty());
+                assert!(tests_run.is_empty());
+                assert!(mention_agents.is_empty());
+                assert!(blockers.is_empty());
+            }
+            _ => panic!("expected done"),
+        }
+    }
+
+    #[test]
+    fn extract_result_from_messages_skips_template_codeblock() {
+        let template = r#"{"status":"done","summary":"<markdown summary>","changedFiles":["<paths>"],"testsRun":[],"nextStatus":"In Review","mentionAgents":[],"blockers":[]}"#;
+        let real = r#"{"status":"done","summary":"Research complete.","changedFiles":[],"testsRun":[],"nextStatus":"In Review","mentionAgents":[],"blockers":[]}"#;
+        let messages = vec![serde_json::json!({
+            "info": { "role": "assistant" },
+            "parts": [{
+                "type": "text",
+                "text": format!("Templates:\n```json\n{template}\n```\n\nResult:\n{real}")
+            }]
+        })];
+        let result = extract_result_from_messages(&messages).expect("result");
+        match result {
+            AgentRunResult::Done { summary, .. } => assert_eq!(summary, "Research complete."),
+            _ => panic!("expected done"),
+        }
+    }
+
+    #[test]
+    fn session_status_from_sse_detects_idle() {
+        let event = serde_json::json!({
+            "type": "session.status",
+            "properties": {
+                "sessionID": "ses_test",
+                "status": { "type": "idle" }
+            }
+        });
+        assert_eq!(session_status_from_sse(&event, "ses_test"), Some("idle".into()));
     }
 
     #[test]

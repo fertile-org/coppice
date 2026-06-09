@@ -36,14 +36,15 @@ pub struct AgentRunInput {
 pub enum AgentRunResult {
     Done {
         summary: String,
-        #[serde(rename = "changedFiles")]
+        #[serde(default, rename = "changedFiles")]
         changed_files: Vec<String>,
-        #[serde(rename = "testsRun")]
+        #[serde(default, rename = "testsRun")]
         tests_run: Vec<String>,
         #[serde(rename = "nextStatus")]
         next_status: String,
-        #[serde(rename = "mentionAgents")]
+        #[serde(default, rename = "mentionAgents")]
         mention_agents: Vec<String>,
+        #[serde(default)]
         blockers: Vec<String>,
     },
     Blocked {
