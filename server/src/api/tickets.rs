@@ -369,7 +369,9 @@ async fn run_agent(
         if health.status == AgentHealthStatus::MissingConfig {
             return Err(RunAgentError::Message(
                 StatusCode::BAD_REQUEST,
-                "Agent provider is not configured on this server".into(),
+                health
+                    .detail
+                    .unwrap_or_else(|| "Agent connector is not configured".into()),
             ));
         }
     }

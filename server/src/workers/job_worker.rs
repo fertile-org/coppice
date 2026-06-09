@@ -200,8 +200,6 @@ async fn execute_job(
         .get(connector_name)
         .ok_or_else(|| anyhow::anyhow!("agent connector not configured: {connector_name}"))?;
 
-    let model = agent.model.clone();
-
     let provider_result = connector
         .run(AgentRunInput {
             agent_id: run.agent_id.to_string(),
@@ -209,7 +207,8 @@ async fn execute_job(
             context_path,
             run_id: Some(run.id.to_string()),
             artifacts_dir: Some(state.config.storage.artifacts_dir.clone()),
-            model,
+            model_provider: agent.model_provider.clone(),
+            model: agent.model.clone(),
             stream: Some(stream.clone()),
             cancel_rx: Some(cancel_rx),
         })

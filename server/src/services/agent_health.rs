@@ -71,7 +71,7 @@ pub async fn evaluate_agent_health(
         return (
             AgentHealthStatus::MissingConfig,
             Some(format!(
-                "Provider '{}' is not configured on this server",
+                "Connector '{}' is not configured on this server",
                 agent.connector
             )),
         );
@@ -80,6 +80,17 @@ pub async fn evaluate_agent_health(
     match agent.connector.as_str() {
         "mock" => (AgentHealthStatus::Healthy, None),
         "opencode" => {
+            if let Some(ref mp) = agent.model_provider {
+                if !registry.has_model_provider("opencode", mp) {
+                    return (
+                        AgentHealthStatus::MissingConfig,
+                        Some(format!(
+                            "Model provider '{}' is not configured on this server",
+                            mp
+                        )),
+                    );
+                }
+            }
             let Some(serve) = opencode_serve else {
                 return (
                     AgentHealthStatus::Unhealthy,
@@ -93,7 +104,7 @@ pub async fn evaluate_agent_health(
         }
         other => (
             AgentHealthStatus::MissingConfig,
-            Some(format!("Unknown provider: {other}")),
+            Some(format!("Unknown connector: {other}")),
         ),
     }
 }

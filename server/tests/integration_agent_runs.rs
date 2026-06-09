@@ -371,7 +371,7 @@ async fn reject_run_when_agent_provider_missing_config() {
         .oneshot(common::json_request(
             "POST",
             "/api/agents",
-            r#"{"name":"OpenCode Bot","role":"Developer","systemPrompt":"You are a developer","provider":"opencode"}"#,
+            r#"{"name":"OpenCode Bot","role":"Developer","systemPrompt":"You are a developer","connector":"opencode"}"#,
             &cookie,
             &csrf,
         ))
@@ -396,6 +396,6 @@ async fn reject_run_when_agent_provider_missing_config() {
     let body = body.unwrap();
     assert_eq!(
         body["message"].as_str().unwrap(),
-        "Agent provider is not configured on this server"
+        "Connector 'opencode' is not configured on this server"
     );
 }

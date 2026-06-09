@@ -26,6 +26,7 @@ pub struct AgentRunInput {
     pub artifacts_dir: Option<String>,
     pub stream: Option<Arc<RunStreamHandle>>,
     pub cancel_rx: Option<watch::Receiver<bool>>,
+    pub model_provider: Option<String>,
     pub model: Option<String>,
 }
 
@@ -113,6 +114,7 @@ mod tests {
                 artifacts_dir: None,
                 stream: None,
                 cancel_rx: None,
+                model_provider: None,
                 model: None,
             })
             .await

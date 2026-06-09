@@ -20,6 +20,14 @@ impl OpenCodeProvider {
     }
 }
 
+fn assemble_opencode_model(input: &AgentRunInput) -> Option<String> {
+    match (&input.model_provider, &input.model) {
+        (Some(provider), Some(model)) => Some(format!("{provider}/{model}")),
+        (None, Some(model)) if model.contains('/') => Some(model.clone()),
+        _ => None,
+    }
+}
+
 #[async_trait]
 impl AgentProvider for OpenCodeProvider {
     fn id(&self) -> &str {
@@ -44,9 +52,9 @@ impl AgentProvider for OpenCodeProvider {
             "--dir".into(),
             worktree.display().to_string(),
         ];
-        if let Some(model) = input.model.as_ref() {
+        if let Some(model) = assemble_opencode_model(&input) {
             args.push("--model".into());
-            args.push(model.clone());
+            args.push(model);
         }
         // Prompt is a positional message; `-p` is `--password` in the opencode CLI.
         args.push(prompt);
