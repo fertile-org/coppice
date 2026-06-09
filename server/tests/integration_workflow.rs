@@ -1,53 +1,8 @@
 mod common;
 
 use axum::http::StatusCode;
+use std::time::Duration;
 use tower::ServiceExt;
-
-async fn create_agent_with_preset_key(
-    app: &axum::Router,
-    preset_key: &str,
-    name: &str,
-    cookie: &str,
-    csrf: &str,
-) -> String {
-    let presets_res = app
-        .clone()
-        .oneshot(common::json_request(
-            "GET",
-            "/api/agent-presets",
-            "",
-            cookie,
-            csrf,
-        ))
-        .await
-        .unwrap();
-    assert_eq!(presets_res.status(), StatusCode::OK);
-
-    let presets: serde_json::Value = common::json_body(presets_res).await;
-    let preset_id = presets["items"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|item| item["key"].as_str() == Some(preset_key))
-        .and_then(|item| item["id"].as_str())
-        .unwrap_or_else(|| panic!("preset {preset_key} not found"));
-
-    let create_res = app
-        .clone()
-        .oneshot(common::json_request(
-            "POST",
-            "/api/agents",
-            &format!(r#"{{"name":"{name}","presetId":"{preset_id}"}}"#),
-            cookie,
-            csrf,
-        ))
-        .await
-        .unwrap();
-    assert_eq!(create_res.status(), StatusCode::CREATED);
-
-    let agent: serde_json::Value = common::json_body(create_res).await;
-    agent["id"].as_str().unwrap().to_string()
-}
 
 #[tokio::test]
 async fn human_mention_does_not_change_ticket_status() {
@@ -60,7 +15,8 @@ async fn human_mention_does_not_change_ticket_status() {
 
     let project_id = common::create_test_project(&app, &cookie, &csrf).await;
     let ticket_id = common::create_test_ticket(&app, &project_id, &cookie, &csrf).await;
-    let _agent_id = create_agent_with_preset_key(&app, "pm", "PM Agent", &cookie, &csrf).await;
+    let _agent_id =
+        common::create_agent_with_preset_key(&app, "pm", "PM Agent", &cookie, &csrf).await;
 
     let before = app
         .clone()
@@ -151,6 +107,147 @@ async fn final_approve_requires_wait_for_final_review() {
         .await
         .unwrap();
     assert_eq!(patch.status(), StatusCode::OK);
+
+    let approve = app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            &format!("/api/tickets/{ticket_id}/final-approve"),
+            "{}",
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(approve.status(), StatusCode::OK);
+
+    let approved: serde_json::Value = common::json_body(approve).await;
+    assert_eq!(approved["status"], "done");
+    assert!(approved["substatus"].is_null());
+}
+
+#[tokio::test]
+async fn scope_b_mock_pipeline_reaches_final_review() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+
+    let (_state, app, cookie, csrf, _env) =
+        common::bootstrap_and_login_with_auto_start_workers().await;
+
+    let project_id = common::create_test_project(&app, &cookie, &csrf).await;
+    let (_git_dir, local_path) = common::create_temp_git_checkout();
+    let repo_id =
+        common::register_test_repo(&app, &local_path.display().to_string(), &cookie, &csrf).await;
+
+    let pm_id =
+        common::create_agent_with_preset_key(&app, "pm", "PM Agent", &cookie, &csrf).await;
+    let engineer_id = common::create_agent_with_preset_key(
+        &app,
+        "backend_engineer",
+        "Backend Engineer",
+        &cookie,
+        &csrf,
+    )
+    .await;
+
+    let ticket_id = common::create_test_ticket(&app, &project_id, &cookie, &csrf).await;
+    common::set_ticket_repo(&app, &ticket_id, &repo_id, &cookie, &csrf).await;
+    common::assign_agent_to_ticket(&app, &ticket_id, &pm_id, &cookie, &csrf).await;
+
+    let pm_ready = common::poll_ticket_until(
+        &app,
+        &ticket_id,
+        &cookie,
+        &csrf,
+        "PM run → ready + recommendation",
+        Duration::from_secs(30),
+        |ticket| {
+            ticket["status"].as_str() == Some("ready")
+                && ticket["pendingAssignRecommendation"]
+                    .as_object()
+                    .and_then(|rec| rec.get("recommendedAgentKey"))
+                    .and_then(|key| key.as_str())
+                    == Some("backend_engineer")
+        },
+    )
+    .await;
+    assert!(pm_ready["pendingAssignRecommendation"].is_object());
+
+    common::assign_agent_to_ticket(&app, &ticket_id, &engineer_id, &cookie, &csrf).await;
+
+    let after_assign = common::get_ticket(&app, &ticket_id, &cookie, &csrf).await;
+    assert!(after_assign["pendingAssignRecommendation"].is_null());
+
+    common::poll_runs_until_count(
+        &app,
+        &ticket_id,
+        &cookie,
+        &csrf,
+        "engineer blocked run",
+        Duration::from_secs(30),
+        |runs| {
+            runs.iter().any(|run| {
+                run["agentId"].as_str() == Some(engineer_id.as_str())
+                    && run["jobType"].as_str() == Some("work_on_ticket")
+                    && run["status"].as_str() == Some("blocked")
+            })
+        },
+    )
+    .await;
+
+    common::poll_runs_until_count(
+        &app,
+        &ticket_id,
+        &cookie,
+        &csrf,
+        "PM respond_to_mention succeeded",
+        Duration::from_secs(30),
+        |runs| {
+            runs.iter().any(|run| {
+                run["agentId"].as_str() == Some(pm_id.as_str())
+                    && run["jobType"].as_str() == Some("respond_to_mention")
+                    && run["status"].as_str() == Some("succeeded")
+            })
+        },
+    )
+    .await;
+
+    common::poll_runs_until_count(
+        &app,
+        &ticket_id,
+        &cookie,
+        &csrf,
+        "engineer resume succeeded",
+        Duration::from_secs(30),
+        |runs| {
+            let engineer_work_runs: Vec<_> = runs
+                .iter()
+                .filter(|run| {
+                    run["agentId"].as_str() == Some(engineer_id.as_str())
+                        && run["jobType"].as_str() == Some("work_on_ticket")
+                })
+                .collect();
+            engineer_work_runs.len() >= 2
+                && engineer_work_runs
+                    .iter()
+                    .any(|run| run["status"].as_str() == Some("succeeded"))
+        },
+    )
+    .await;
+
+    let final_ticket = common::poll_ticket_until(
+        &app,
+        &ticket_id,
+        &cookie,
+        &csrf,
+        "wait_for_final_review",
+        Duration::from_secs(120),
+        |ticket| ticket["status"].as_str() == Some("wait_for_final_review"),
+    )
+    .await;
+    assert_eq!(final_ticket["status"], "wait_for_final_review");
 
     let approve = app
         .clone()

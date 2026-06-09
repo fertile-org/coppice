@@ -10,6 +10,7 @@ use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::process::Command;
 use std::sync::{Arc, LazyLock};
+use std::time::{Duration, Instant};
 use tokio::sync::Mutex;
 use tower::ServiceExt;
 
@@ -107,8 +108,47 @@ async fn test_state_with_db_and_workers(mock_response: &str) -> (Arc<AppState>, 
     std::env::set_var("WORKTREES_PATH", worktrees.path());
     std::env::set_var("MOCK_AGENT_RESPONSE", mock_response);
     std::env::set_var("AGENT_DEFAULT_PROVIDER", "mock");
+    std::env::remove_var("WORKFLOW_AUTO_START_RUNS");
 
     let state = test_state_with_db().await;
+    coppice_server::workers::job_worker::spawn_workers(state.clone());
+
+    (state, AgentTestEnv { worktrees })
+}
+
+async fn test_state_with_db_and_auto_start_workers() -> (Arc<AppState>, AgentTestEnv) {
+    let worktrees = tempfile::tempdir().expect("worktrees tempdir");
+
+    std::env::set_var("WORKTREES_PATH", worktrees.path());
+    std::env::remove_var("MOCK_AGENT_RESPONSE");
+    std::env::set_var("AGENT_DEFAULT_PROVIDER", "mock");
+    std::env::set_var("WORKFLOW_AUTO_START_RUNS", "true");
+
+    let database_url = std::env::var("DATABASE_URL")
+        .unwrap_or_else(|_| "postgres://coppice:coppice@localhost:5432/coppice".into());
+    let pool = db::connect_and_migrate(&database_url)
+        .await
+        .expect("connect to test database");
+    truncate_workspace(&pool).await;
+
+    std::env::set_var(
+        "COPPICE_STORAGE__ARTIFACTS_DIR",
+        "/tmp/coppice-test-artifacts",
+    );
+    let mut config = AppConfig::load_defaults().expect("test config");
+    config.workflow.auto_start_runs = true;
+
+    let state = Arc::new(AppState {
+        attachments: AppState::attachment_store_from_config(&config),
+        connector_registry: AppState::connector_registry_from_config(&config, None),
+        agent_health: Arc::new(coppice_server::services::agent_health::AgentHealthRegistry::new()),
+        run_streams: Arc::new(coppice_server::sessions::run_registry::RunStreamRegistry::new()),
+        event_bus: Arc::new(coppice_server::events::bus::EventBus::new()),
+        opencode_serve: None,
+        agent_templates: coppice_server::AppState::load_agent_templates(),
+        config,
+        db: Some(pool),
+    });
     coppice_server::workers::job_worker::spawn_workers(state.clone());
 
     (state, AgentTestEnv { worktrees })
@@ -233,6 +273,60 @@ pub async fn bootstrap_and_login_with_state() -> (Arc<AppState>, Router, String,
         .to_string();
 
     (state, app, cookie, csrf_token)
+}
+
+pub async fn bootstrap_and_login_with_auto_start_workers(
+) -> (Arc<AppState>, Router, String, String, AgentTestEnv) {
+    let (state, env) = test_state_with_db_and_auto_start_workers().await;
+    let app = coppice_server::app(state.clone());
+
+    app.clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/auth/bootstrap")
+                .header("content-type", "application/json")
+                .header(bootstrap_password_header().0, bootstrap_password_header().1)
+                .body(Body::from(
+                    r#"{"email":"admin@localhost","password":"changeme"}"#,
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    let login = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/auth/login")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    r#"{"email":"admin@localhost","password":"changeme"}"#,
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(login.status(), StatusCode::OK);
+
+    let set_cookie = login
+        .headers()
+        .get(header::SET_COOKIE)
+        .expect("session cookie");
+    let cookie_header = set_cookie.to_str().unwrap();
+    let session_token = parse_session_cookie(cookie_header).expect("session token");
+    let cookie = format!("coppice_session={session_token}");
+
+    let body = login.into_body().collect().await.unwrap().to_bytes();
+    let login_json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    let csrf_token = login_json["csrfToken"]
+        .as_str()
+        .expect("csrf token")
+        .to_string();
+
+    (state, app, cookie, csrf_token, env)
 }
 
 pub async fn bootstrap_and_login_with_workers(
@@ -401,6 +495,47 @@ pub async fn set_ticket_repo(
     assert_eq!(res.status(), StatusCode::OK);
 }
 
+pub async fn create_agent_with_preset_key(
+    app: &Router,
+    preset_key: &str,
+    name: &str,
+    cookie: &str,
+    csrf: &str,
+) -> String {
+    let presets_res = app
+        .clone()
+        .oneshot(json_request("GET", "/api/agent-presets", "", cookie, csrf))
+        .await
+        .unwrap();
+    assert_eq!(presets_res.status(), StatusCode::OK);
+
+    let presets: serde_json::Value = json_body(presets_res).await;
+    let preset_id = presets["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["key"].as_str() == Some(preset_key))
+        .and_then(|item| item["id"].as_str())
+        .unwrap_or_else(|| panic!("preset {preset_key} not found"));
+
+    let create_res = app
+        .clone()
+        .oneshot(json_request(
+            "POST",
+            "/api/agents",
+            &format!(r#"{{"name":"{name}","presetId":"{preset_id}"}}"#),
+            cookie,
+            csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(create_res.status(), StatusCode::CREATED);
+
+    let agent: serde_json::Value = json_body(create_res).await;
+    assert_eq!(agent["connector"].as_str().unwrap(), "mock");
+    agent["id"].as_str().unwrap().to_string()
+}
+
 pub async fn create_test_agent_from_preset(
     app: &Router,
     name: &str,
@@ -432,6 +567,90 @@ pub async fn create_test_agent_from_preset(
 
     let agent: serde_json::Value = json_body(create_res).await;
     agent["id"].as_str().unwrap().to_string()
+}
+
+pub async fn get_ticket(
+    app: &Router,
+    ticket_id: &str,
+    cookie: &str,
+    csrf: &str,
+) -> serde_json::Value {
+    let res = app
+        .clone()
+        .oneshot(json_request(
+            "GET",
+            &format!("/api/tickets/{ticket_id}"),
+            "",
+            cookie,
+            csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    json_body(res).await
+}
+
+pub async fn poll_ticket_until(
+    app: &Router,
+    ticket_id: &str,
+    cookie: &str,
+    csrf: &str,
+    label: &str,
+    timeout: Duration,
+    predicate: impl Fn(&serde_json::Value) -> bool,
+) -> serde_json::Value {
+    let deadline = Instant::now() + timeout;
+    loop {
+        let ticket = get_ticket(app, ticket_id, cookie, csrf).await;
+        if predicate(&ticket) {
+            return ticket;
+        }
+        if Instant::now() >= deadline {
+            panic!(
+                "timed out waiting for ticket condition: {label}; last status={}",
+                ticket["status"].as_str().unwrap_or("?")
+            );
+        }
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
+}
+
+pub async fn poll_runs_until_count(
+    app: &Router,
+    ticket_id: &str,
+    cookie: &str,
+    csrf: &str,
+    label: &str,
+    timeout: Duration,
+    predicate: impl Fn(&[serde_json::Value]) -> bool,
+) -> Vec<serde_json::Value> {
+    let deadline = Instant::now() + timeout;
+    loop {
+        let res = app
+            .clone()
+            .oneshot(json_request(
+                "GET",
+                &format!("/api/tickets/{ticket_id}/runs"),
+                "",
+                cookie,
+                csrf,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        let body: serde_json::Value = json_body(res).await;
+        let runs = body["runs"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default();
+        if predicate(&runs) {
+            return runs;
+        }
+        if Instant::now() >= deadline {
+            panic!("timed out waiting for runs condition: {label}");
+        }
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
 }
 
 pub async fn create_test_ticket(
