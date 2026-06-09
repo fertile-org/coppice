@@ -1,0 +1,4 @@
+ALTER TABLE agents RENAME COLUMN provider_id TO provider;
+
+ALTER TABLE agents
+  ADD COLUMN IF NOT EXISTS model TEXT NULL;
