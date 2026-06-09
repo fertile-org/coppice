@@ -25,6 +25,7 @@ pub async fn truncate_workspace(pool: &sqlx::PgPool) {
     sqlx::query(
         r#"
         TRUNCATE
+            ticket_mentions,
             attachments,
             ticket_comments,
             agent_jobs,

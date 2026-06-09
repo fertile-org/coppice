@@ -5,6 +5,7 @@ mod agents;
 mod connectors;
 mod attachments;
 mod comments;
+mod mentions;
 mod health;
 mod jobs;
 mod projects;
@@ -27,6 +28,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .merge(repos::routes())
         .merge(tickets::routes())
         .merge(comments::routes())
+        .merge(mentions::routes())
         .merge(attachments::routes())
         .merge(agents::routes())
         .merge(connectors::routes())

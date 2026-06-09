@@ -32,6 +32,13 @@ pub enum AppEvent {
         ticket_id: Uuid,
         author_type: String,
     },
+    #[serde(rename = "agent.mentioned")]
+    AgentMentioned {
+        mention_id: Uuid,
+        ticket_id: Uuid,
+        comment_id: Uuid,
+        mentioned_agent_id: Uuid,
+    },
 }
 
 pub struct EventBus {

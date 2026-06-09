@@ -99,6 +99,23 @@ impl<'a> MentionService<'a> {
         Ok(())
     }
 
+    pub async fn get(&self, mention_id: Uuid) -> Result<TicketMention, MentionError> {
+        let row = sqlx::query(
+            r#"
+            SELECT
+                id, ticket_id, comment_id, mentioned_agent_id, resume_agent_id, status
+            FROM ticket_mentions
+            WHERE id = $1
+            "#,
+        )
+        .bind(mention_id)
+        .fetch_optional(self.pool)
+        .await?
+        .ok_or(MentionError::MentionNotFound)?;
+
+        Ok(row_to_mention(&row))
+    }
+
     pub async fn mark_ignored(&self, mention_id: Uuid) -> Result<(), MentionError> {
         let result = sqlx::query(
             r#"

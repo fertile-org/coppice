@@ -6,6 +6,8 @@ use crate::domain::substatus::{Substatus, SubstatusDisplay, TicketStatus};
 use crate::domain::ticket::{
     priority_from_str, status_from_str, substatus_from_str, TicketPriority,
 };
+use crate::domain::workflow::PendingRecommendation;
+use crate::services::workflow_service::WorkflowService;
 use crate::domain::agent_health::AgentHealthStatus;
 use crate::services::run_service::{RunError, RunService};
 use crate::services::ticket_service::{TicketError, TicketFilters, TicketService, TicketWithDisplay};
@@ -37,11 +39,19 @@ pub fn routes() -> Router<Arc<AppState>> {
         .route("/api/tickets/{ticket_id}/assign", post(assign_agent))
         .route("/api/tickets/{ticket_id}/run-agent", post(run_agent))
         .route("/api/tickets/{ticket_id}/runs", get(list_runs))
+        .route(
+            "/api/tickets/{ticket_id}/final-approve",
+            post(final_approve),
+        )
+        .route(
+            "/api/tickets/{ticket_id}/resolve-blocker",
+            post(resolve_blocker),
+        )
 }
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-struct TicketResponse {
+pub(crate) struct TicketResponse {
     id: Uuid,
     project_id: Uuid,
     repo_id: Option<Uuid>,
@@ -62,6 +72,9 @@ struct TicketResponse {
     last_activity_at: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     substatus_display: Option<SubstatusDisplay>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pending_assign_recommendation: Option<PendingRecommendation>,
+    clarification_round: i32,
 }
 
 #[derive(Deserialize)]
@@ -106,8 +119,12 @@ struct ListTicketsQuery {
     assignee_agent_id: Option<Uuid>,
 }
 
-fn ticket_to_response(item: TicketWithDisplay) -> TicketResponse {
+pub(crate) fn ticket_to_response(item: TicketWithDisplay) -> TicketResponse {
     let ticket = item.ticket;
+    let pending_assign_recommendation = ticket
+        .pending_assign_recommendation
+        .as_ref()
+        .and_then(|value| serde_json::from_value(value.clone()).ok());
     TicketResponse {
         id: ticket.id,
         project_id: ticket.project_id,
@@ -127,6 +144,8 @@ fn ticket_to_response(item: TicketWithDisplay) -> TicketResponse {
         updated_at: ticket.updated_at.format(&Rfc3339).unwrap_or_default(),
         last_activity_at: item.last_activity_at.format(&Rfc3339).unwrap_or_default(),
         substatus_display: item.substatus_display,
+        pending_assign_recommendation,
+        clarification_round: ticket.clarification_round,
     }
 }
 
@@ -200,7 +219,7 @@ fn map_ticket_error_response(err: TicketError) -> RunAgentError {
     RunAgentError::Status(map_error(err))
 }
 
-fn map_error(err: TicketError) -> StatusCode {
+pub(crate) fn map_error(err: TicketError) -> StatusCode {
     match err {
         TicketError::TicketNotFound | TicketError::ProjectNotFound => StatusCode::NOT_FOUND,
         TicketError::InvalidStatus
@@ -412,4 +431,53 @@ async fn list_runs(
         .await
         .map_err(map_run_error)?;
     Ok(Json(runs_list_response(runs)))
+}
+
+async fn final_approve(
+    State(state): State<Arc<AppState>>,
+    AuthUser { .. }: AuthUser,
+    Path(ticket_id): Path<Uuid>,
+) -> Result<Json<TicketResponse>, StatusCode> {
+    let pool = pool_from_state(&state)?;
+    let ticket_svc = TicketService::new(pool);
+    let ticket = ticket_svc.get(ticket_id).await.map_err(map_error)?;
+    let next = WorkflowService::final_approve(ticket.ticket.status)
+        .map_err(|_| StatusCode::BAD_REQUEST)?;
+    let updated = ticket_svc
+        .update_status(ticket_id, next, Some(None), Some(None))
+        .await
+        .map_err(map_error)?;
+    Ok(Json(ticket_to_response(updated)))
+}
+
+async fn resolve_blocker(
+    State(state): State<Arc<AppState>>,
+    AuthUser { .. }: AuthUser,
+    Path(ticket_id): Path<Uuid>,
+) -> Result<Json<TicketResponse>, StatusCode> {
+    let pool = pool_from_state(&state)?;
+    let ticket_svc = TicketService::new(pool);
+    let ticket = ticket_svc.get(ticket_id).await.map_err(map_error)?;
+
+    if matches!(
+        ticket.ticket.substatus,
+        Some(
+            Substatus::BlockedByMissingCapability
+                | Substatus::BlockedByMissingSecret
+                | Substatus::BlockedByPermission
+        )
+    ) {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+
+    let updated = ticket_svc
+        .update_status(
+            ticket_id,
+            ticket.ticket.status,
+            Some(None),
+            Some(None),
+        )
+        .await
+        .map_err(map_error)?;
+    Ok(Json(ticket_to_response(updated)))
 }
