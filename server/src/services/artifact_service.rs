@@ -4,6 +4,7 @@ use std::path::PathBuf;
 pub struct RunArtifactPaths {
     pub terminal_log: PathBuf,
     pub meta_json: PathBuf,
+    pub session_snapshot: PathBuf,
 }
 
 impl RunArtifactPaths {
@@ -12,6 +13,7 @@ impl RunArtifactPaths {
         Self {
             terminal_log: base.join("terminal.log"),
             meta_json: base.join("meta.json"),
+            session_snapshot: base.join("session.snapshot.json"),
         }
     }
 }
@@ -39,6 +41,24 @@ impl ArtifactService {
         let raw = serde_json::to_vec_pretty(meta)?;
         std::fs::write(&paths.meta_json, raw)
     }
+
+    pub fn write_session_snapshot(
+        paths: &RunArtifactPaths,
+        snapshot: &serde_json::Value,
+    ) -> std::io::Result<()> {
+        if let Some(parent) = paths.session_snapshot.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let tmp = paths.session_snapshot.with_extension("json.tmp");
+        let raw = serde_json::to_vec_pretty(snapshot)?;
+        std::fs::write(&tmp, raw)?;
+        std::fs::rename(tmp, &paths.session_snapshot)
+    }
+
+    pub fn read_session_snapshot(paths: &RunArtifactPaths) -> Option<serde_json::Value> {
+        let raw = std::fs::read_to_string(&paths.session_snapshot).ok()?;
+        serde_json::from_str(&raw).ok()
+    }
 }
 
 #[cfg(test)]
@@ -55,6 +75,15 @@ mod tests {
         assert_eq!(
             paths.meta_json.display().to_string(),
             "/data/artifacts/runs/550e8400-e29b-41d4-a716-446655440000/meta.json"
+        );
+    }
+
+    #[test]
+    fn run_artifact_paths_includes_session_snapshot() {
+        let paths = RunArtifactPaths::new("/data/artifacts", "550e8400-e29b-41d4-a716-446655440000");
+        assert_eq!(
+            paths.session_snapshot.display().to_string(),
+            "/data/artifacts/runs/550e8400-e29b-41d4-a716-446655440000/session.snapshot.json"
         );
     }
 }
