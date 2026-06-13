@@ -27,4 +27,21 @@ describe('useEventSocket dispatch', () => {
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['tickets'] });
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['ticket', 'ticket-123'] });
   });
+
+  it('invalidates agent runs on agent_run.started', async () => {
+    const { dispatchMessageForTest } = await import('./useEventSocket');
+    dispatchMessageForTest(
+      JSON.stringify({
+        type: 'agent_run.started',
+        run_id: 'run-1',
+        ticket_id: 'ticket-456',
+        agent_id: 'agent-1',
+        status: 'running',
+      }),
+    );
+
+    expect(invalidateSpy).toHaveBeenCalledWith({
+      queryKey: ['agent-runs', 'ticket-456'],
+    });
+  });
 });

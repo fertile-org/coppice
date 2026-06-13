@@ -8,6 +8,7 @@ pub struct ContextInput<'a> {
     pub ticket_status: &'a str,
     pub ticket_substatus: Option<&'a str>,
     pub agent_name: &'a str,
+    pub agent_key: &'a str,
     pub agent_role: &'a str,
     pub agent_skills: &'a [String],
     pub agent_responsibilities: &'a [String],
@@ -29,6 +30,8 @@ pub fn build_context_md(input: &ContextInput) -> String {
     let responsibilities = format_bullet_list(input.agent_responsibilities);
     let repository_section = format_repository_section(input);
     let resume_section = format_resume_section(input);
+    let contract_guidance = format_contract_guidance(input);
+    let verification_guidance = format_verification_guidance();
 
     format!(
         r#"# Current task
@@ -56,7 +59,7 @@ pub fn build_context_md(input: &ContextInput) -> String {
 
 {system_prompt}
 
-{repository_section}{resume_section}# Sandbox
+{repository_section}{resume_section}{verification_guidance}# Sandbox
 
 {sandbox_note}
 
@@ -70,15 +73,20 @@ Return a single JSON object as your final result.
 {{
   "status": "done",
   "summary": "<markdown summary of what you did>",
+  "updatedDescription": "<optional full ticket description replacement>",
+  "acceptanceCriteria": "<optional acceptance criteria; stored under ## Acceptance criteria>",
   "changedFiles": ["<paths changed>"],
   "testsRun": ["<commands run>"],
   "assignTo": "<agent key to recommend next, e.g. backend_engineer or research>",
   "mentionAgents": ["<agent keys to notify>"],
-  "blockers": []
+  "blockers": [],
+  "splitTickets": []
 }}
 ```
 
 The server ignores `nextStatus` for board moves — workflow gates control column transitions.
+
+{contract_guidance}
 
 ## `blocked` — cannot proceed
 
@@ -103,8 +111,71 @@ When blocked by missing capability or secret, also include `requiredCapabilities
         responsibilities = responsibilities,
         system_prompt = input.agent_system_prompt,
         repository_section = repository_section,
+        resume_section = resume_section,
+        verification_guidance = verification_guidance,
+        contract_guidance = contract_guidance,
         sandbox_note = SANDBOX_NOTE,
     )
+}
+
+fn format_verification_guidance() -> String {
+    r#"## Coppice platform rules — verification (required)
+
+These rules override conflicting instructions in your system prompt or soul file.
+
+- Do **not** run `cargo test --workspace` or `make test` during a ticket run unless the acceptance criteria explicitly require the full suite. Prefer `make test-unit` or `make test-smoke` for fast feedback.
+- Prefer targeted checks:
+  - `cargo test -p coppice-server --lib` — fast unit tests
+  - `cargo test -p coppice-server <module>::tests::<name>` — one module or test
+  - `cargo test -p coppice-server --test integration_<area>` — one integration file
+  - `make web-test` — frontend unit tests only
+- If verification will take longer than one session, return `status: "continued"` with a `progressNote`, then finish tests in a follow-up run.
+
+"#
+    .to_string()
+}
+
+fn is_pm_agent(input: &ContextInput) -> bool {
+    if input.agent_key.eq_ignore_ascii_case("pm") {
+        return true;
+    }
+    let role = input.agent_role.to_ascii_lowercase();
+    role == "pm" || role.contains("product manager")
+}
+
+/// Coppice-owned contract rules injected on every run (not editable via agent soul).
+fn format_contract_guidance(input: &ContextInput) -> String {
+    if is_pm_agent(input) {
+        return r#"## Coppice platform rules — PM refinement (required)
+
+These rules override conflicting instructions in your system prompt or soul file.
+
+**Enrich (single ticket):**
+- `updatedDescription` — full refined ticket body (markdown with `##` headings and lists). Stored on the ticket.
+- `acceptanceCriteria` — checklist only. Stored under `## Acceptance criteria` on the ticket. Do not repeat description prose.
+- `summary` — 1–3 sentences for the comment thread only. Never paste the full spec, analysis tables, or acceptance checklist here when `updatedDescription` is set.
+
+**Split (multiple child tickets):**
+- Use `splitTickets` when work has multiple independent deliverables or the description would exceed ~2–3 screens.
+- Each child must be self-contained: `title`, `description`, and `acceptanceCriteria`. Optional per-child `assignTo` (agent key).
+- Parent `updatedDescription` should be a short epic summary, not a copy of all children.
+- Do not set both a huge `updatedDescription` and `splitTickets` with duplicate content.
+"#
+        .to_string();
+    }
+
+    r#"**Field roles (do not duplicate content across fields):**
+- `updatedDescription` — full ticket body (scope, context, constraints). Stored on the ticket.
+- `acceptanceCriteria` — checklist only. Stored under `## Acceptance criteria` on the ticket.
+- `summary` — short activity note for the comment thread (1–3 sentences). Do not paste the full spec, analysis tables, or acceptance checklist here when `updatedDescription` is set.
+
+## Coppice platform rules — long tasks (required)
+
+- Prefer `status: "continued"` with `progressNote` when substantial work remains and the session is getting long.
+- Use `status: "done"` only when acceptance criteria are met.
+- Use `status: "blocked"` when genuinely stuck.
+"#
+    .to_string()
 }
 
 fn format_resume_section(input: &ContextInput) -> String {
@@ -168,6 +239,7 @@ mod tests {
             ticket_status: "in_progress",
             ticket_substatus: None,
             agent_name: "FE Agent",
+            agent_key: "frontend_engineer",
             agent_role: "Frontend Engineer",
             agent_skills: &["react".into()],
             agent_responsibilities: &["implement UI".into()],
@@ -186,6 +258,37 @@ mod tests {
         assert!(md.contains("# Sandbox"));
         assert!(md.contains("# Expected output contract"));
         assert!(md.contains("Fix polling"));
+        assert!(md.contains("**Field roles"));
+        assert!(md.contains("Coppice platform rules — long tasks (required)"));
+        assert!(md.contains("Coppice platform rules — verification (required)"));
+        assert!(!md.contains("PM refinement (required)"));
+    }
+
+    #[test]
+    fn pm_context_includes_platform_refinement_rules() {
+        let md = build_context_md(&ContextInput {
+            ticket_title: "Integrate CLI",
+            ticket_description: "Add connector",
+            ticket_status: "backlog",
+            ticket_substatus: None,
+            agent_name: "PM Agent",
+            agent_key: "pm",
+            agent_role: "PM",
+            agent_skills: &[],
+            agent_responsibilities: &[],
+            agent_system_prompt: "Custom soul that says put everything in summary.",
+            repo_name: None,
+            repo_remote_url: None,
+            repo_default_branch: None,
+            worktree_path: None,
+            resume_context: None,
+        });
+        assert!(md.contains("Coppice platform rules — PM refinement (required)"));
+        assert!(md.contains("Coppice platform rules — verification (required)"));
+        assert!(md.contains("override conflicting instructions"));
+        assert!(md.contains("**Split (multiple child tickets):**"));
+        assert!(md.contains("Use `splitTickets` when work has multiple independent deliverables"));
+        assert!(!md.contains("**Field roles"));
     }
 
     #[test]
@@ -196,6 +299,7 @@ mod tests {
             ticket_status: "in_progress",
             ticket_substatus: None,
             agent_name: "FE Agent",
+            agent_key: "frontend_engineer",
             agent_role: "Frontend Engineer",
             agent_skills: &[],
             agent_responsibilities: &[],
@@ -204,7 +308,9 @@ mod tests {
             repo_remote_url: None,
             repo_default_branch: None,
             worktree_path: None,
-            resume_context: Some("**Prior blocker:**\n\nNeed API shape.\n\n**PM answer:**\n\nUse option A."),
+            resume_context: Some(
+                "**Prior blocker:** Need API shape. / **PM answer:** Use option A.",
+            ),
         });
         assert!(md.contains("## Resume"));
         assert!(md.contains("Need API shape."));

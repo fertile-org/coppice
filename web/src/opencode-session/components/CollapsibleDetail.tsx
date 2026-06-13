@@ -10,6 +10,7 @@ export function excerptPreview(text: string, maxLen = 100): string {
 interface CollapsibleDetailProps {
   label: string;
   preview?: string;
+  badge?: ReactNode;
   streaming?: boolean;
   defaultOpen?: boolean;
   className?: string;
@@ -19,6 +20,7 @@ interface CollapsibleDetailProps {
 export function CollapsibleDetail({
   label,
   preview,
+  badge,
   streaming = false,
   defaultOpen = false,
   className = '',
@@ -47,6 +49,7 @@ export function CollapsibleDetail({
         aria-expanded={open}
       >
         <span className={sessionTheme.thinking}>{label}</span>
+        {badge ? <span className="ml-2 inline-flex align-middle">{badge}</span> : null}
         {!open && preview ? (
           <span className={sessionTheme.thinkingDetail}>: {preview}</span>
         ) : null}

@@ -66,6 +66,25 @@ export const pendingRecommendationSchema = z.object({
 
 export type PendingRecommendation = z.infer<typeof pendingRecommendationSchema>;
 
+export const splitTicketSpecSchema = z.object({
+  title: z.string(),
+  description: z.string(),
+  acceptanceCriteria: z.string().optional(),
+  assignTo: z.string().optional(),
+});
+
+export type SplitTicketSpec = z.infer<typeof splitTicketSpecSchema>;
+
+export const pendingSplitRecommendationSchema = z.object({
+  recommendedByAgentId: z.string().uuid(),
+  recommendedAt: z.string(),
+  splits: z.array(splitTicketSpecSchema),
+});
+
+export type PendingSplitRecommendation = z.infer<
+  typeof pendingSplitRecommendationSchema
+>;
+
 export const ticketSchema = z.object({
   id: z.string().uuid(),
   projectId: z.string().uuid(),
@@ -91,6 +110,10 @@ export const ticketSchema = z.object({
     })
     .optional(),
   pendingAssignRecommendation: pendingRecommendationSchema.nullable().optional(),
+  parentTicketId: z.string().uuid().nullable().optional(),
+  pendingSplitRecommendation: pendingSplitRecommendationSchema
+    .nullable()
+    .optional(),
   clarificationRound: z.number().optional(),
 });
 

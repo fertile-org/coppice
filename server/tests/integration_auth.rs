@@ -1,27 +1,12 @@
+mod common;
+
 use coppice_server::middleware::session::parse_session_cookie;
-use coppice_server::{db, AppConfig, AppState};
-use std::sync::{Arc, LazyLock};
-use tokio::sync::Mutex;
+use coppice_server::{AppConfig, AppState};
+use std::sync::Arc;
 use tower::ServiceExt;
 
-static DB_TEST_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
-
-async fn db_available() -> bool {
-    let database_url = std::env::var("DATABASE_URL")
-        .unwrap_or_else(|_| "postgres://coppice:coppice@localhost:5432/coppice".into());
-    db::connect_and_migrate(&database_url).await.is_ok()
-}
-
 async fn test_state_with_db() -> Arc<AppState> {
-    let database_url = std::env::var("DATABASE_URL")
-        .unwrap_or_else(|_| "postgres://coppice:coppice@localhost:5432/coppice".into());
-    let pool = db::connect_and_migrate(&database_url)
-        .await
-        .expect("connect to test database");
-    sqlx::query("TRUNCATE sessions, users RESTART IDENTITY CASCADE")
-        .execute(&pool)
-        .await
-        .expect("truncate auth tables");
+    let pool = common::prepare_test_pool_for_auth().await;
 
     std::env::set_var(
         "COPPICE_STORAGE__ARTIFACTS_DIR",
@@ -47,8 +32,8 @@ fn bootstrap_password_header() -> (&'static str, &'static str) {
 
 #[tokio::test]
 async fn bootstrap_login_me_logout_flow() {
-    let _guard = DB_TEST_LOCK.lock().await;
-    if !db_available().await {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
         eprintln!("skipping: postgres not available");
         return;
     }
@@ -167,8 +152,8 @@ async fn bootstrap_login_me_logout_flow() {
 
 #[tokio::test]
 async fn logout_without_csrf_is_forbidden() {
-    let _guard = DB_TEST_LOCK.lock().await;
-    if !db_available().await {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
         eprintln!("skipping: postgres not available");
         return;
     }
@@ -231,8 +216,8 @@ async fn logout_without_csrf_is_forbidden() {
 
 #[tokio::test]
 async fn me_without_session_is_unauthorized() {
-    let _guard = DB_TEST_LOCK.lock().await;
-    if !db_available().await {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
         eprintln!("skipping: postgres not available");
         return;
     }

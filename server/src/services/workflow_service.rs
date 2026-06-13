@@ -89,6 +89,20 @@ impl WorkflowService {
             return Ok(action);
         }
 
+        if matches!(ctx.contract, AgentRunResult::Continued { .. }) {
+            return Ok(action);
+        }
+
+        // Scope B smoke: after PM clarification, implementer completion skips QA → final review.
+        if ctx.current_status == TicketStatus::InProgress
+            && is_implementer(&ctx.agent_role)
+            && ctx.clarification_round > 0
+        {
+            action.new_status = Some(TicketStatus::WaitForFinalReview);
+            action.new_assignee_id = Some(None);
+            return Ok(action);
+        }
+
         if let Some(assign_key) = assign_to_from_contract(&ctx.contract) {
             let key_known = ctx.project_agent_keys.iter().any(|k| k == &assign_key);
             if ctx.auto_assign_enabled && !key_known {
@@ -180,6 +194,7 @@ fn assign_to_from_contract(contract: &AgentRunResult) -> Option<String> {
         AgentRunResult::Done { assign_to, .. } | AgentRunResult::Blocked { assign_to, .. } => {
             assign_to.clone()
         }
+        AgentRunResult::Continued { .. } => None,
     }
 }
 
@@ -187,12 +202,15 @@ fn mention_agents_from_contract(contract: &AgentRunResult) -> Vec<String> {
     match contract {
         AgentRunResult::Done { mention_agents, .. }
         | AgentRunResult::Blocked { mention_agents, .. } => mention_agents.clone(),
+        AgentRunResult::Continued { .. } => vec![],
     }
 }
 
 fn summary_from_contract(contract: &AgentRunResult) -> Option<String> {
     match contract {
-        AgentRunResult::Done { summary, .. } | AgentRunResult::Blocked { summary, .. } => {
+        AgentRunResult::Done { summary, .. }
+        | AgentRunResult::Blocked { summary, .. }
+        | AgentRunResult::Continued { summary, .. } => {
             if summary.is_empty() {
                 None
             } else {
@@ -253,12 +271,16 @@ mod tests {
                 tests_run: vec![],
                 next_status: None,
                 assign_to: None,
+                updated_description: None,
+                acceptance_criteria: None,
                 mention_agents: vec![],
                 blockers: vec![],
+                split_tickets: vec![],
             },
             project_agent_keys: vec!["pm".into()],
             project_agent_ids: HashMap::from([("pm".into(), pm_agent_id())]),
             auto_assign_enabled: true,
+            clarification_round: 0,
         }
     }
 
@@ -269,8 +291,11 @@ mod tests {
             tests_run: vec![],
             next_status: None,
             assign_to: Some(key.into()),
+            updated_description: None,
+            acceptance_criteria: None,
             mention_agents: vec![],
             blockers: vec![],
+            split_tickets: vec![],
         }
     }
 
@@ -280,6 +305,8 @@ mod tests {
             summary: "Need clarification".into(),
             next_status: None,
             assign_to: None,
+            updated_description: None,
+            acceptance_criteria: None,
             mention_agents: keys.iter().map(|k| (*k).into()).collect(),
             required_capabilities: vec![],
             required_secrets: vec![],
@@ -367,13 +394,40 @@ mod tests {
                 tests_run: vec![],
                 next_status: None,
                 assign_to: None,
+                updated_description: None,
+                acceptance_criteria: None,
                 mention_agents: vec![],
                 blockers: vec![],
+                split_tickets: vec![],
             },
             ..minimal_ctx()
         })
         .expect("resolve");
         assert_eq!(action.new_status, Some(TicketStatus::InReview));
+    }
+
+    #[test]
+    fn continued_run_does_not_change_ticket_status() {
+        let action = WorkflowService::resolve_transition(TransitionContext {
+            current_status: TicketStatus::InProgress,
+            agent_role: "Backend Engineer".into(),
+            agent_key: "backend_engineer".into(),
+            assignee_agent_id: Some(engineer_agent_id()),
+            project_agent_keys: vec!["backend_engineer".into()],
+            project_agent_ids: agent_map(&[("backend_engineer", engineer_agent_id())]),
+            contract: AgentRunResult::Continued {
+                summary: "Checkpoint".into(),
+                progress_note: Some("Partial work".into()),
+                changed_files: vec![],
+                tests_run: vec![],
+                blockers: vec![],
+            },
+            ..minimal_ctx()
+        })
+        .expect("resolve");
+        assert!(action.new_status.is_none());
+        assert!(action.new_assignee_id.is_none());
+        assert!(action.pending_recommendation.is_none());
     }
 
     #[test]
@@ -391,13 +445,46 @@ mod tests {
                 tests_run: vec![],
                 next_status: None,
                 assign_to: None,
+                updated_description: None,
+                acceptance_criteria: None,
                 mention_agents: vec![],
                 blockers: vec![],
+                split_tickets: vec![],
             },
             ..minimal_ctx()
         })
         .expect("resolve");
         assert_eq!(action.new_status, Some(TicketStatus::InReview));
+    }
+
+    #[test]
+    fn post_clarification_implementer_done_skips_to_wait_for_final_review() {
+        let action = WorkflowService::resolve_transition(TransitionContext {
+            current_status: TicketStatus::InProgress,
+            agent_role: "Backend Engineer".into(),
+            agent_key: "backend_engineer".into(),
+            assignee_agent_id: Some(engineer_agent_id()),
+            clarification_round: 1,
+            contract: AgentRunResult::Done {
+                summary: "Resume complete".into(),
+                changed_files: vec![],
+                tests_run: vec![],
+                next_status: None,
+                assign_to: None,
+                updated_description: None,
+                acceptance_criteria: None,
+                mention_agents: vec![],
+                blockers: vec![],
+                split_tickets: vec![],
+            },
+            ..minimal_ctx()
+        })
+        .expect("resolve");
+        assert_eq!(
+            action.new_status,
+            Some(TicketStatus::WaitForFinalReview)
+        );
+        assert_eq!(action.new_assignee_id, Some(None));
     }
 
     #[test]
@@ -415,8 +502,11 @@ mod tests {
                 tests_run: vec![],
                 next_status: None,
                 assign_to: None,
+                updated_description: None,
+                acceptance_criteria: None,
                 mention_agents: vec![],
                 blockers: vec![],
+                split_tickets: vec![],
             },
             ..minimal_ctx()
         })

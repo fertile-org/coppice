@@ -26,14 +26,22 @@ pub fn session_status_from_sse(event: &serde_json::Value, session_id: &str) -> O
         .map(str::to_string)
 }
 
+fn message_role(msg: &serde_json::Value) -> Option<&str> {
+    msg.get("info")
+        .and_then(|info| info.get("role"))
+        .or_else(|| msg.get("role"))
+        .and_then(|role| role.as_str())
+}
+
 pub fn extract_result_from_messages(messages: &[serde_json::Value]) -> Option<AgentRunResult> {
     for msg in messages.iter().rev() {
-        if msg.get("info")?.get("role")?.as_str()? != "assistant" {
+        if message_role(msg) != Some("assistant") {
             continue;
         }
         let parts = msg.get("parts")?.as_array()?;
         for part in parts.iter().rev() {
-            if part.get("type")?.as_str()? != "text" {
+            let part_type = part.get("type")?.as_str()?;
+            if part_type != "text" && part_type != "reasoning" && part_type != "compaction" {
                 continue;
             }
             let text = part.get("text")?.as_str()?;
@@ -51,11 +59,111 @@ pub fn extract_result_from_snapshot(snapshot: &SessionSnapshot) -> Option<AgentR
     extract_result_from_messages(&snapshot.messages_for_extraction())
 }
 
+/// Detect placeholder text copied from `.agent/context.md`, not real agent output.
 fn looks_like_template_contract(result: &AgentRunResult) -> bool {
-    let summary = match result {
-        AgentRunResult::Done { summary, .. } | AgentRunResult::Blocked { summary, .. } => summary,
-    };
-    summary.contains('<') && summary.contains('>')
+    match result {
+        AgentRunResult::Done {
+            summary,
+            changed_files,
+            tests_run,
+            assign_to,
+            updated_description,
+            acceptance_criteria,
+            mention_agents,
+            split_tickets,
+            ..
+        } => {
+            if field_looks_like_template(summary) {
+                return true;
+            }
+            if changed_files.iter().any(|p| field_looks_like_template(p)) {
+                return true;
+            }
+            if tests_run.iter().any(|t| field_looks_like_template(t)) {
+                return true;
+            }
+            if assign_to.as_deref().is_some_and(field_looks_like_template) {
+                return true;
+            }
+            if updated_description
+                .as_deref()
+                .is_some_and(field_looks_like_template)
+            {
+                return true;
+            }
+            if acceptance_criteria
+                .as_deref()
+                .is_some_and(field_looks_like_template)
+            {
+                return true;
+            }
+            for split in split_tickets {
+                if field_looks_like_template(&split.title)
+                    || field_looks_like_template(&split.description)
+                {
+                    return true;
+                }
+                if split
+                    .acceptance_criteria
+                    .as_deref()
+                    .is_some_and(field_looks_like_template)
+                {
+                    return true;
+                }
+                if split.assign_to.as_deref().is_some_and(field_looks_like_template) {
+                    return true;
+                }
+            }
+            mention_agents.iter().any(|m| field_looks_like_template(m))
+        }
+        AgentRunResult::Blocked {
+            summary,
+            blocker_type,
+            mention_agents,
+            ..
+        } => {
+            if field_looks_like_template(summary) || field_looks_like_template(blocker_type) {
+                return true;
+            }
+            mention_agents.iter().any(|m| field_looks_like_template(m))
+        }
+        AgentRunResult::Continued {
+            summary,
+            progress_note,
+            changed_files,
+            tests_run,
+            blockers,
+        } => {
+            if field_looks_like_template(summary) {
+                return true;
+            }
+            if progress_note.as_deref().is_some_and(field_looks_like_template) {
+                return true;
+            }
+            if changed_files.iter().any(|p| field_looks_like_template(p)) {
+                return true;
+            }
+            if tests_run.iter().any(|t| field_looks_like_template(t)) {
+                return true;
+            }
+            blockers.iter().any(|b| field_looks_like_template(b))
+        }
+    }
+}
+
+fn field_looks_like_template(value: &str) -> bool {
+    const MARKERS: &[&str] = &[
+        "<markdown summary",
+        "<optional full ticket description",
+        "<optional acceptance criteria",
+        "<paths changed>",
+        "<paths>",
+        "<commands run>",
+        "<agent key",
+        "<missing_capability",
+        "<why you are blocked>",
+    ];
+    MARKERS.iter().any(|marker| value.contains(marker))
 }
 
 pub fn event_line_to_frame(seq: u64, line: &str) -> Option<TerminalFrame> {
@@ -322,6 +430,87 @@ mod tests {
         let result = extract_result_from_snapshot(&snap).expect("snapshot extract");
         match result {
             AgentRunResult::Done { summary, .. } => assert_eq!(summary, "Snap."),
+            _ => panic!("expected done"),
+        }
+    }
+
+    #[test]
+    fn extract_result_accepts_summary_with_angle_bracket_field_names() {
+        let contract = r#"{"status":"done","summary":"Wire `ConnectorRegistry::get(<id>)` and spawn `<command>` at `<path>`.","changedFiles":[],"testsRun":[],"assignTo":"backend_engineer","mentionAgents":[],"blockers":[]}"#;
+        let text = format!(
+            "Analysis complete.\n\n```json\n{contract}\n```"
+        );
+        let messages = vec![serde_json::json!({
+            "info": { "role": "assistant" },
+            "parts": [{ "type": "text", "text": text }]
+        })];
+        let result = extract_result_from_messages(&messages).expect("real summary with <id> etc");
+        match result {
+            AgentRunResult::Done { assign_to, .. } => {
+                assert_eq!(assign_to.as_deref(), Some("backend_engineer"));
+            }
+            _ => panic!("expected done"),
+        }
+    }
+
+    #[test]
+    fn extract_result_from_reasoning_part() {
+        let minimal = r#"{"status":"done","summary":"Done from reasoning.","nextStatus":"In Review"}"#;
+        let messages = vec![serde_json::json!({
+            "info": { "role": "assistant" },
+            "parts": [{ "type": "reasoning", "text": minimal }]
+        })];
+        let result = extract_result_from_messages(&messages).expect("reasoning part");
+        match result {
+            AgentRunResult::Done { summary, .. } => assert_eq!(summary, "Done from reasoning."),
+            _ => panic!("expected done"),
+        }
+    }
+
+    #[test]
+    fn extract_result_after_compaction_part_in_messages() {
+        let messages = vec![serde_json::json!({
+            "info": { "role": "assistant" },
+            "parts": [
+                { "type": "compaction", "text": "Summary of prior work…", "auto": true },
+                { "type": "text", "text": r#"{"status":"done","summary":"Done after compact.","nextStatus":"In Review"}"# }
+            ]
+        })];
+        let result = extract_result_from_messages(&messages).expect("extract after compaction");
+        match result {
+            AgentRunResult::Done { summary, .. } => assert_eq!(summary, "Done after compact."),
+            _ => panic!("expected done"),
+        }
+    }
+
+    #[test]
+    fn extract_result_from_compaction_fallback_layout() {
+        let messages = vec![serde_json::json!({
+            "info": { "role": "assistant" },
+            "parts": [
+                { "type": "compaction", "text": r#"{"status":"done","summary":"From compaction.","nextStatus":"In Review"}"#, "auto": true },
+                { "type": "text", "text": "Implementation complete." }
+            ]
+        })];
+        let result = extract_result_from_messages(&messages).expect("compaction fallback");
+        match result {
+            AgentRunResult::Done { summary, .. } => assert_eq!(summary, "From compaction."),
+            _ => panic!("expected done"),
+        }
+    }
+
+    #[test]
+    fn compacted_done_jsonl_fixture_extracts_result_from_messages() {
+        let path = fixtures_root().join("compacted-done.jsonl");
+        let raw = std::fs::read_to_string(path).expect("read compacted-done.jsonl");
+        let message: serde_json::Value =
+            serde_json::from_str(raw.lines().next().expect("one line")).expect("parse message");
+        let messages = vec![message];
+        let result = extract_result_from_messages(&messages).expect("result from compacted-done");
+        match result {
+            AgentRunResult::Done { summary, .. } => {
+                assert_eq!(summary, "Done after compact.");
+            }
             _ => panic!("expected done"),
         }
     }

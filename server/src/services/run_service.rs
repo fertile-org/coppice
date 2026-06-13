@@ -83,6 +83,18 @@ impl From<MentionError> for RunError {
     }
 }
 
+impl From<crate::services::split_service::SplitError> for RunError {
+    fn from(err: crate::services::split_service::SplitError) -> Self {
+        match err {
+            crate::services::split_service::SplitError::Validation(msg) => {
+                RunError::Validation(msg)
+            }
+            crate::services::split_service::SplitError::Ticket(e) => e.into(),
+            crate::services::split_service::SplitError::Agent(e) => e.into(),
+        }
+    }
+}
+
 impl From<JobError> for RunError {
     fn from(err: JobError) -> Self {
         match err {
@@ -576,10 +588,9 @@ mod tests {
     use crate::domain::run::RunStatus;
 
     async fn test_pool() -> Option<PgPool> {
-        let database_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
-            "postgres://coppice:coppice@localhost:5432/coppice".into()
-        });
-        crate::db::connect_and_migrate(&database_url).await.ok()
+        let pool = crate::db::shared_test_pool().await.ok()?;
+        crate::db::truncate_test_workspace(&pool).await.ok()?;
+        Some(pool)
     }
 
     async fn insert_run(pool: &PgPool, status: RunStatus) -> Uuid {

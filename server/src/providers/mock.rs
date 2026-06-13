@@ -176,7 +176,10 @@ mod tests {
             .expect("pm work_on_ticket");
         match pm_done {
             AgentRunResult::Done { assign_to, summary, .. } => {
-                assert_eq!(summary, "Ticket enriched with acceptance criteria.");
+                assert_eq!(
+                    summary,
+                    "Refined ticket scope and added acceptance criteria for engineering handoff."
+                );
                 assert_eq!(assign_to.as_deref(), Some("backend_engineer"));
             }
             _ => panic!("expected done variant"),
@@ -217,6 +220,32 @@ mod tests {
                 assert_eq!(summary, "Implementation complete.");
             }
             _ => panic!("expected done variant"),
+        }
+
+        let continued_path = fixtures_root().join("backend_engineer/continued.json");
+        let continued_raw = std::fs::read_to_string(&continued_path).expect("read continued");
+        let continued: AgentRunResult =
+            serde_json::from_str(&continued_raw).expect("parse continued");
+        match continued {
+            AgentRunResult::Continued { summary, progress_note, .. } => {
+                assert!(summary.contains("TmuxStream"));
+                assert!(progress_note.as_deref().unwrap().contains("tmux_stream.rs"));
+            }
+            _ => panic!("expected continued variant"),
+        }
+
+        let mut checkpoint_resume = base_input("backend_engineer", "work_on_ticket");
+        checkpoint_resume.resume_context =
+            Some("**Last checkpoint:** Implemented TmuxStream create/kill.".into());
+        let second_run = provider
+            .run(checkpoint_resume)
+            .await
+            .expect("second run after continued");
+        match second_run {
+            AgentRunResult::Done { summary, .. } => {
+                assert_eq!(summary, "Implementation complete.");
+            }
+            _ => panic!("expected done variant after checkpoint resume"),
         }
     }
 

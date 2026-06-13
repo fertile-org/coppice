@@ -28,6 +28,8 @@ pub struct Ticket {
     pub owner_user_id: Option<Uuid>,
     pub branch_name: Option<String>,
     pub pending_assign_recommendation: Option<Value>,
+    pub parent_ticket_id: Option<Uuid>,
+    pub pending_split_recommendation: Option<Value>,
     pub clarification_round: i32,
     pub created_by: String,
     pub created_by_id: Option<Uuid>,

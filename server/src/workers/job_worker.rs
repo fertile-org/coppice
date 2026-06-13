@@ -7,7 +7,7 @@ use sqlx::PgPool;
 use sqlx::Row;
 use tokio::sync::watch;
 
-use crate::domain::comment::author_type_to_str;
+use crate::domain::comment::{author_type_to_str, CommentIntent};
 use crate::domain::run::{run_status_to_str, RunStatus};
 use crate::domain::slug::slugify;
 use crate::domain::ticket::{status_to_str, substatus_to_str};
@@ -19,7 +19,7 @@ use crate::services::comment_service::CommentService;
 use crate::services::context_builder::{write_context_file, ContextInput};
 use crate::services::job_service::JobService;
 use crate::services::result_contract;
-use crate::services::run_orchestrator::{load_resume_context, RunOrchestrator};
+use crate::services::run_orchestrator::{load_run_continuation_context, RunOrchestrator};
 use crate::services::run_service::RunService;
 use crate::services::ticket_service::TicketService;
 use crate::services::workflow_service::WorkflowService;
@@ -148,9 +148,9 @@ async fn execute_job(
         .preset_source
         .clone()
         .unwrap_or_else(|| slugify(&agent.name));
-    let resume_context = load_resume_context(pool, run)
+    let resume_context = load_run_continuation_context(pool, run)
         .await
-        .map_err(|e| anyhow::anyhow!("load resume context: {e}"))?;
+        .map_err(|e| anyhow::anyhow!("load run continuation context: {e}"))?;
     let resume_context_ref = resume_context.as_deref();
 
     let local_path: String = repo_row.get("local_path");
@@ -186,6 +186,7 @@ async fn execute_job(
         ticket_status: status_to_str(ticket.ticket.status),
         ticket_substatus,
         agent_name: &agent.name,
+        agent_key: &agent_key,
         agent_role: &agent.role,
         agent_skills: &agent.skills,
         agent_responsibilities: &agent.responsibilities,
@@ -302,8 +303,11 @@ async fn execute_job(
         return Err(JobCancelled.into());
     }
 
-    let apply = result_contract::apply_agent_result(&result)
+    let mut apply = result_contract::apply_agent_result(&result)
         .map_err(|err| anyhow::anyhow!("apply agent result: {err}"))?;
+    if run.job_type == "respond_to_mention" && apply.run_status == RunStatus::Succeeded {
+        apply.comment.intent = CommentIntent::ClarificationAnswer;
+    }
 
     let worktree_path = paths.worktree_dir.to_string_lossy().into_owned();
     let orchestrator = RunOrchestrator::new(pool, &state.config.workflow);

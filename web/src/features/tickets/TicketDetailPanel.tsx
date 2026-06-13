@@ -1,12 +1,14 @@
 import { useEffect, useState } from 'react';
-import ReactMarkdown from 'react-markdown';
+import { useSearchParams } from 'react-router-dom';
 import type { Ticket } from '../board/useTickets';
+import { TicketMarkdown } from '../../components/TicketMarkdown';
 import { useToast } from '../../components/ToastProvider';
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
 import { Textarea } from '../../components/ui/textarea';
+import { TicketStatusBadge } from './TicketStatusBadge';
 import { TicketCommentsTab } from './TicketCommentsTab';
-import { useUpdateTicket } from './useTicket';
+import { useTicketChildren, useUpdateTicket } from './useTicket';
 
 interface TicketDetailPanelProps {
   ticket: Ticket;
@@ -14,7 +16,9 @@ interface TicketDetailPanelProps {
 
 export function TicketDetailPanel({ ticket }: TicketDetailPanelProps) {
   const toast = useToast();
+  const [, setSearchParams] = useSearchParams();
   const updateTicket = useUpdateTicket(ticket.id);
+  const { data: children } = useTicketChildren(ticket.id);
   const [editing, setEditing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [title, setTitle] = useState(ticket.title);
@@ -111,9 +115,9 @@ export function TicketDetailPanel({ ticket }: TicketDetailPanelProps) {
             className="min-h-[200px] font-mono text-sm leading-relaxed"
           />
         ) : (
-          <div className="min-h-[200px] overflow-y-auto rounded-md border border-border bg-surface px-4 py-3 [&_a]:text-accent [&_code]:rounded [&_code]:bg-paper-200 [&_code]:px-1 [&_p+p]:mt-3">
+          <div className="min-h-[200px] overflow-y-auto rounded-md border border-border bg-surface px-4 py-3">
             {description.trim() ? (
-              <ReactMarkdown>{description}</ReactMarkdown>
+              <TicketMarkdown>{description}</TicketMarkdown>
             ) : (
               <p className="font-body text-sm italic text-text-muted">
                 No description yet.
@@ -122,6 +126,30 @@ export function TicketDetailPanel({ ticket }: TicketDetailPanelProps) {
           </div>
         )}
       </div>
+
+      {children && children.length > 0 && (
+        <section className="border-t border-border pt-6">
+          <h3 className="mb-4 font-display text-base font-semibold tracking-tight text-text-primary">
+            Child tickets
+          </h3>
+          <ul className="space-y-2">
+            {children.map((child) => (
+              <li key={child.id}>
+                <button
+                  type="button"
+                  onClick={() => setSearchParams({ ticket: child.id })}
+                  className="flex w-full items-center justify-between gap-3 rounded-md border border-border bg-surface px-3 py-2 text-left transition-colors duration-fast hover:bg-paper-200"
+                >
+                  <span className="truncate font-body text-sm font-medium text-text-primary">
+                    {child.title}
+                  </span>
+                  <TicketStatusBadge status={child.status} />
+                </button>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
 
       <section className="border-t border-border pt-6">
         <h3 className="mb-4 font-display text-base font-semibold tracking-tight text-text-primary">

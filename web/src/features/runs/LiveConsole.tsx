@@ -77,6 +77,7 @@ export function LiveConsole({ runId, runStatus }: LiveConsoleProps) {
         type?: string;
         data?: string;
         status?: string;
+        recoverable?: boolean;
       };
       if (msg.type === 'frame' && typeof msg.data === 'string') {
         if (termRef.current) writeTerminalData(termRef.current, msg.data);
@@ -84,11 +85,12 @@ export function LiveConsole({ runId, runStatus }: LiveConsoleProps) {
         setSawOutput(true);
       }
       if (msg.type === 'end') {
-        if (
+        const shouldReconnect =
           !sawOutputRef.current &&
           msg.status &&
-          isActiveRunStatus(msg.status)
-        ) {
+          isActiveRunStatus(msg.status) &&
+          msg.recoverable !== false;
+        if (shouldReconnect) {
           // Stream not ready yet; reconnect will pick up live frames.
           ws.close();
           return;

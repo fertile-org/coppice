@@ -185,7 +185,8 @@ async fn run_agent_applies_blocked_fixture() {
         .await
         .unwrap();
     let ticket: serde_json::Value = common::json_body(ticket).await;
-    assert_eq!(ticket["status"], "blocked");
+    assert_eq!(ticket["status"], "in_progress");
+    assert_eq!(ticket["substatus"], "blocked_by_error");
 
     let comments = app
         .clone()

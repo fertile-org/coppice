@@ -1,0 +1,8 @@
+{
+  "status": "continued",
+  "summary": "Implemented TmuxStream create/kill; capture loop next.",
+  "progressNote": "Files touched: server/src/sessions/tmux_stream.rs. Tests not yet run.",
+  "changedFiles": ["server/src/sessions/tmux_stream.rs"],
+  "testsRun": [],
+  "blockers": []
+}

@@ -2,6 +2,7 @@ import '@testing-library/jest-dom/vitest';
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { MemoryRouter } from 'react-router-dom';
 import { ToastProvider } from '../../components/ToastProvider';
 import { TicketDrawer } from './TicketDrawer';
 import type { Ticket } from '../board/useTickets';
@@ -33,6 +34,9 @@ vi.mock('./useTicket', () => ({
   useAgents: () => ({ data: [] }),
   useUpdateTicketStatus: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useFinalApprove: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useTicketChildren: () => ({ data: [] }),
+  useApproveSplits: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useDismissSplits: () => ({ mutateAsync: vi.fn(), isPending: false }),
 }));
 
 vi.mock('./useAgentRuns', () => ({
@@ -53,14 +57,16 @@ vi.mock('./TicketCommentsTab', () => ({
 function renderDrawer() {
   const client = new QueryClient();
   return render(
-    <QueryClientProvider client={client}>
-      <ToastProvider>
-        <TicketDrawer
-          ticketId="00000000-0000-0000-0000-000000000001"
-          onClose={() => {}}
-        />
-      </ToastProvider>
-    </QueryClientProvider>,
+    <MemoryRouter>
+      <QueryClientProvider client={client}>
+        <ToastProvider>
+          <TicketDrawer
+            ticketId="00000000-0000-0000-0000-000000000001"
+            onClose={() => {}}
+          />
+        </ToastProvider>
+      </QueryClientProvider>
+    </MemoryRouter>,
   );
 }
 

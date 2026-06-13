@@ -1,6 +1,9 @@
 export interface DoneResultContract {
   status: 'done';
   summary: string;
+  updatedDescription?: string;
+  acceptanceCriteria?: string;
+  assignTo?: string;
   changedFiles?: string[];
   testsRun?: string[];
   nextStatus?: string;
@@ -12,6 +15,8 @@ export interface BlockedResultContract {
   status: 'blocked';
   blockerType?: string;
   summary: string;
+  updatedDescription?: string;
+  acceptanceCriteria?: string;
   nextStatus?: string;
   mentionAgents?: string[];
   requiredCapabilities?: string[];
@@ -39,6 +44,15 @@ function parseContractObject(value: unknown): AgentResultContract | null {
     return {
       status: 'done',
       summary,
+      updatedDescription:
+        typeof value.updatedDescription === 'string'
+          ? value.updatedDescription
+          : undefined,
+      acceptanceCriteria:
+        typeof value.acceptanceCriteria === 'string'
+          ? value.acceptanceCriteria
+          : undefined,
+      assignTo: typeof value.assignTo === 'string' ? value.assignTo : undefined,
       changedFiles: stringArray(value.changedFiles),
       testsRun: stringArray(value.testsRun),
       nextStatus: typeof value.nextStatus === 'string' ? value.nextStatus : undefined,
@@ -51,6 +65,14 @@ function parseContractObject(value: unknown): AgentResultContract | null {
     return {
       status: 'blocked',
       summary,
+      updatedDescription:
+        typeof value.updatedDescription === 'string'
+          ? value.updatedDescription
+          : undefined,
+      acceptanceCriteria:
+        typeof value.acceptanceCriteria === 'string'
+          ? value.acceptanceCriteria
+          : undefined,
       blockerType: typeof value.blockerType === 'string' ? value.blockerType : undefined,
       nextStatus: typeof value.nextStatus === 'string' ? value.nextStatus : undefined,
       mentionAgents: stringArray(value.mentionAgents),
@@ -62,8 +84,32 @@ function parseContractObject(value: unknown): AgentResultContract | null {
   return null;
 }
 
+const TEMPLATE_MARKERS = [
+  '<markdown summary',
+  '<optional full ticket description',
+  '<optional acceptance criteria',
+  '<paths changed>',
+  '<paths>',
+  '<commands run>',
+  '<agent key',
+  '<missing_capability',
+  '<why you are blocked>',
+] as const;
+
+function fieldLooksLikeTemplate(value: string): boolean {
+  return TEMPLATE_MARKERS.some((marker) => value.includes(marker));
+}
+
 export function looksLikeTemplateContract(contract: AgentResultContract): boolean {
-  return contract.summary.includes('<') && contract.summary.includes('>');
+  if (fieldLooksLikeTemplate(contract.summary)) return true;
+  if (contract.status === 'done') {
+    if (contract.changedFiles?.some(fieldLooksLikeTemplate)) return true;
+    if (contract.testsRun?.some(fieldLooksLikeTemplate)) return true;
+  }
+  if (contract.status === 'blocked' && contract.blockerType) {
+    if (fieldLooksLikeTemplate(contract.blockerType)) return true;
+  }
+  return false;
 }
 
 function tryParseJson(text: string): AgentResultContract | null {

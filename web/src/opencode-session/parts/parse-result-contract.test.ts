@@ -67,6 +67,45 @@ describe('parseResultContractFromText', () => {
     expect(parseResultContractFromText('Just a regular update.')).toBeNull();
   });
 
+  it('parses acceptanceCriteria and assignTo', () => {
+    const contract = {
+      status: 'done',
+      summary: 'Refined ticket.',
+      acceptanceCriteria: '- Must pass CI\n- Must include tests',
+      assignTo: 'backend_engineer',
+      changedFiles: [],
+      testsRun: [],
+      mentionAgents: [],
+      blockers: [],
+    };
+    const result = parseResultContractFromText(JSON.stringify(contract));
+    expect(result?.status).toBe('done');
+    if (result?.status === 'done') {
+      expect(result.acceptanceCriteria).toContain('Must pass CI');
+      expect(result.assignTo).toBe('backend_engineer');
+    }
+  });
+
+  it('parses summary with angle-bracket field names', () => {
+    const contract = {
+      status: 'done',
+      summary:
+        'Wire `ConnectorRegistry::get(<id>)` and spawn `<command>` at `<path>`.',
+      changedFiles: [],
+      testsRun: [],
+      assignTo: 'backend_engineer',
+      mentionAgents: [],
+      blockers: [],
+    };
+    const text =
+      'Done.\n\n```json\n' + JSON.stringify(contract, null, 2) + '\n```';
+    const result = parseResultContractFromText(text);
+    expect(result?.status).toBe('done');
+    if (result?.status === 'done') {
+      expect(result.summary).toContain('<id>');
+    }
+  });
+
   it('parses the last contract from concatenated duplicate JSON', () => {
     const json = JSON.stringify(doneContract);
     const result = parseResultContractFromText(json + json + json);

@@ -6,10 +6,11 @@ use crate::domain::substatus::{Substatus, SubstatusDisplay, TicketStatus};
 use crate::domain::ticket::{
     priority_from_str, status_from_str, substatus_from_str, TicketPriority,
 };
-use crate::domain::workflow::PendingRecommendation;
+use crate::domain::workflow::{PendingRecommendation, PendingSplitRecommendation};
 use crate::services::workflow_service::WorkflowService;
 use crate::domain::agent_health::AgentHealthStatus;
 use crate::services::run_service::{RunError, RunService};
+use crate::services::split_service::{SplitError, SplitService};
 use crate::services::ticket_service::{TicketError, TicketFilters, TicketService, TicketWithDisplay};
 use crate::AppState;
 use axum::{
@@ -47,6 +48,15 @@ pub fn routes() -> Router<Arc<AppState>> {
             "/api/tickets/{ticket_id}/resolve-blocker",
             post(resolve_blocker),
         )
+        .route(
+            "/api/tickets/{ticket_id}/approve-splits",
+            post(approve_splits),
+        )
+        .route(
+            "/api/tickets/{ticket_id}/dismiss-splits",
+            post(dismiss_splits),
+        )
+        .route("/api/tickets/{ticket_id}/children", get(list_children))
 }
 
 #[derive(Serialize)]
@@ -74,6 +84,10 @@ pub(crate) struct TicketResponse {
     substatus_display: Option<SubstatusDisplay>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pending_assign_recommendation: Option<PendingRecommendation>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    parent_ticket_id: Option<Uuid>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pending_split_recommendation: Option<PendingSplitRecommendation>,
     clarification_round: i32,
 }
 
@@ -125,6 +139,10 @@ pub(crate) fn ticket_to_response(item: TicketWithDisplay) -> TicketResponse {
         .pending_assign_recommendation
         .as_ref()
         .and_then(|value| serde_json::from_value(value.clone()).ok());
+    let pending_split_recommendation = ticket
+        .pending_split_recommendation
+        .as_ref()
+        .and_then(|value| serde_json::from_value(value.clone()).ok());
     TicketResponse {
         id: ticket.id,
         project_id: ticket.project_id,
@@ -145,6 +163,8 @@ pub(crate) fn ticket_to_response(item: TicketWithDisplay) -> TicketResponse {
         last_activity_at: item.last_activity_at.format(&Rfc3339).unwrap_or_default(),
         substatus_display: item.substatus_display,
         pending_assign_recommendation,
+        parent_ticket_id: ticket.parent_ticket_id,
+        pending_split_recommendation,
         clarification_round: ticket.clarification_round,
     }
 }
@@ -227,6 +247,14 @@ pub(crate) fn map_error(err: TicketError) -> StatusCode {
         | TicketError::InvalidPriority
         | TicketError::Validation(_) => StatusCode::BAD_REQUEST,
         TicketError::Database(_) => StatusCode::INTERNAL_SERVER_ERROR,
+    }
+}
+
+fn map_split_error(err: SplitError) -> StatusCode {
+    match err {
+        SplitError::Validation(_) => StatusCode::BAD_REQUEST,
+        SplitError::Ticket(e) => map_error(e),
+        SplitError::Agent(_) => StatusCode::INTERNAL_SERVER_ERROR,
     }
 }
 
@@ -448,6 +476,54 @@ async fn final_approve(
         .await
         .map_err(map_error)?;
     Ok(Json(ticket_to_response(updated)))
+}
+
+async fn approve_splits(
+    State(state): State<Arc<AppState>>,
+    AuthUser { .. }: AuthUser,
+    Path(ticket_id): Path<Uuid>,
+) -> Result<Json<Vec<TicketResponse>>, StatusCode> {
+    let pool = pool_from_state(&state)?;
+    let children = SplitService::new(pool, &state.config.workflow)
+        .approve_splits(ticket_id)
+        .await
+        .map_err(map_split_error)?;
+
+    let ticket_svc = TicketService::new(pool);
+    let mut responses = Vec::with_capacity(children.len());
+    for child in children {
+        let enriched = ticket_svc.get(child.id).await.map_err(map_error)?;
+        responses.push(ticket_to_response(enriched));
+    }
+    Ok(Json(responses))
+}
+
+async fn dismiss_splits(
+    State(state): State<Arc<AppState>>,
+    AuthUser { .. }: AuthUser,
+    Path(ticket_id): Path<Uuid>,
+) -> Result<Json<TicketResponse>, StatusCode> {
+    let pool = pool_from_state(&state)?;
+    let parent = SplitService::new(pool, &state.config.workflow)
+        .dismiss_splits(ticket_id)
+        .await
+        .map_err(map_split_error)?;
+    Ok(Json(ticket_to_response(parent)))
+}
+
+async fn list_children(
+    State(state): State<Arc<AppState>>,
+    AuthUser { .. }: AuthUser,
+    Path(ticket_id): Path<Uuid>,
+) -> Result<Json<Vec<TicketResponse>>, StatusCode> {
+    let pool = pool_from_state(&state)?;
+    let children = SplitService::new(pool, &state.config.workflow)
+        .list_children(ticket_id)
+        .await
+        .map_err(map_split_error)?;
+    Ok(Json(
+        children.into_iter().map(ticket_to_response).collect(),
+    ))
 }
 
 async fn resolve_blocker(

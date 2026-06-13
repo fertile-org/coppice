@@ -1,4 +1,4 @@
-export type PartType = 'text' | 'reasoning' | 'tool';
+export type PartType = 'text' | 'reasoning' | 'tool' | 'compaction';
 
 export interface TextPart {
   id: string;
@@ -12,6 +12,14 @@ export interface ReasoningPart {
   type: 'reasoning';
   text: string;
   messageID: string;
+}
+
+export interface CompactionPart {
+  id: string;
+  type: 'compaction';
+  text: string;
+  messageID: string;
+  auto?: boolean;
 }
 
 export interface ToolPart {
@@ -28,7 +36,7 @@ export interface ToolPart {
   };
 }
 
-export type Part = TextPart | ReasoningPart | ToolPart;
+export type Part = TextPart | ReasoningPart | CompactionPart | ToolPart;
 
 export interface Message {
   id: string;

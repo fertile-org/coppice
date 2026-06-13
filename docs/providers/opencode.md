@@ -28,6 +28,7 @@ enabled = true
 command = "opencode"
 serve_hostname = "127.0.0.1"
 serve_port = 4096
+# run_timeout_secs = 1800   # optional; default 600
 model_providers = ["zai-coding-plan"]
 
 # After opencode auth login — list provider IDs with: opencode auth list
@@ -128,6 +129,44 @@ Coppice subscribes to `GET /event?directory=<worktree>` (SSE, auto-reconnects) a
 - **Text** — streamed incrementally via `message.part.delta` (no full-text flash)
 - **Thinking** — `reasoning` parts shown dimmed
 - **Tools** — `→ read: context.md` while running, `✓ read: context.md` when done
+
+## Context compaction
+
+OpenCode compacts long session history **within a single run** when context nears the model limit. Coppice relies on this provider guard; it does **not** call `POST /session/{id}/compact` proactively.
+
+### Config (`~/.config/opencode/opencode.jsonc`)
+
+| Knob | Default | Effect |
+|------|---------|--------|
+| `compaction.auto` | `true` | Summarize tool-heavy history automatically when the threshold is reached |
+| `compaction.reserved` | `20000` | Tokens held back from the input limit before compaction fires |
+
+Compaction triggers when:
+
+```text
+token_count >= input_limit - reserved
+```
+
+With `reserved` at 20k, a model with a 200K input limit (e.g. `glm-5.1`) rarely compacts below ~180K tokens. Typical Coppice runs stay well under that, so compaction is uncommon unless the session accumulates many tool rounds or very large outputs.
+
+Disable auto-compaction only for debugging (`"compaction": { "auto": false }`); production runs should leave it on.
+
+### Coppice behavior
+
+- **No manual `/compact`** — orchestration waits for OpenCode’s automatic guard.
+- **Result contract** — after compaction, Coppice still parses the final assistant `text` part (and scans `compaction` parts as a fallback). See `fixtures/opencode-events/compacted-done.jsonl`.
+- **Run timeout** — Coppice waits up to **`run_timeout_secs`** (default **600**) for the OpenCode session to reach `idle`. Long shell commands (e.g. full `cargo test --workspace` in this monorepo) often exceed this and fail with `opencode session timed out`. Increase `agent.connectors.opencode.run_timeout_secs` in `config.toml`, or prefer targeted tests (`make test-unit`, `make test-smoke`, `cargo test -p coppice-server --lib`) during agent runs. For work that spans multiple sessions, return `status: "continued"` with a `progressNote` (see [Context & Long-Running Tasks design](../superpowers/specs/2026-06-10-context-long-running-tasks-design.md)).
+
+### SSE events (Live Session)
+
+OpenCode emits compaction-related events on `GET /event`:
+
+| Event | Meaning |
+|-------|---------|
+| `session.compacted` | Compaction finished; session history was summarized |
+| `session.next.compaction.*` | Upcoming compaction signals (e.g. threshold approaching) |
+
+Coppice forwards these as WebSocket `event` messages. The Live Session may render `compaction` message parts when present.
 
 ## Requirements
 

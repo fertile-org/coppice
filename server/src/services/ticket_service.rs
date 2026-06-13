@@ -2,7 +2,7 @@ use crate::domain::substatus::{
     build_substatus_display, validate_status_substatus_combo, Substatus, SubstatusDisplay,
     TicketStatus,
 };
-use crate::domain::workflow::PendingRecommendation;
+use crate::domain::workflow::{PendingRecommendation, PendingSplitRecommendation};
 use crate::domain::ticket::{
     priority_from_str, priority_to_str, status_from_str, status_to_str, substatus_from_str,
     substatus_to_str, Ticket, TicketPriority,
@@ -65,7 +65,8 @@ impl<'a> TicketService<'a> {
                 t.id, t.project_id, t.repo_id, t.title, t.description,
                 t.status, t.substatus, t.substatus_metadata, t.priority,
                 t.assignee_agent_id, t.owner_user_id, t.branch_name,
-                t.pending_assign_recommendation, t.clarification_round,
+                t.pending_assign_recommendation, t.parent_ticket_id,
+                t.pending_split_recommendation, t.clarification_round,
                 t.created_by, t.created_by_id, t.created_at, t.updated_at
             FROM tickets t
             WHERE t.project_id = $1
@@ -126,7 +127,8 @@ impl<'a> TicketService<'a> {
                 id, project_id, repo_id, title, description,
                 status, substatus, substatus_metadata, priority,
                 assignee_agent_id, owner_user_id, branch_name,
-                pending_assign_recommendation, clarification_round,
+                pending_assign_recommendation, parent_ticket_id,
+                pending_split_recommendation, clarification_round,
                 created_by, created_by_id, created_at, updated_at
             "#,
         )
@@ -145,6 +147,81 @@ impl<'a> TicketService<'a> {
         self.enrich_ticket(row_to_ticket(&row)).await
     }
 
+    pub async fn create_child(
+        &self,
+        parent: &Ticket,
+        title: &str,
+        description: &str,
+        created_by_id: Uuid,
+    ) -> Result<TicketWithDisplay, TicketError> {
+        self.ensure_project_exists(parent.project_id).await?;
+
+        let id = Uuid::new_v4();
+        let status = TicketStatus::Backlog;
+
+        let row = sqlx::query(
+            r#"
+            INSERT INTO tickets (
+                id, project_id, repo_id, title, description, status,
+                parent_ticket_id, created_by, created_by_id
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+            RETURNING
+                id, project_id, repo_id, title, description,
+                status, substatus, substatus_metadata, priority,
+                assignee_agent_id, owner_user_id, branch_name,
+                pending_assign_recommendation, parent_ticket_id,
+                pending_split_recommendation, clarification_round,
+                created_by, created_by_id, created_at, updated_at
+            "#,
+        )
+        .bind(id)
+        .bind(parent.project_id)
+        .bind(parent.repo_id)
+        .bind(title)
+        .bind(description)
+        .bind(status_to_str(status))
+        .bind(parent.id)
+        .bind("agent")
+        .bind(created_by_id)
+        .fetch_one(self.pool)
+        .await?;
+
+        self.enrich_ticket(row_to_ticket(&row)).await
+    }
+
+    pub async fn set_pending_split_recommendation(
+        &self,
+        ticket_id: Uuid,
+        recommendation: PendingSplitRecommendation,
+    ) -> Result<TicketWithDisplay, TicketError> {
+        let value = serde_json::to_value(recommendation).map_err(|e| {
+            TicketError::Validation(format!("pending split recommendation: {e}"))
+        })?;
+
+        let row = sqlx::query(
+            r#"
+            UPDATE tickets
+            SET pending_split_recommendation = $2, updated_at = now()
+            WHERE id = $1
+            RETURNING
+                id, project_id, repo_id, title, description,
+                status, substatus, substatus_metadata, priority,
+                assignee_agent_id, owner_user_id, branch_name,
+                pending_assign_recommendation, parent_ticket_id,
+                pending_split_recommendation, clarification_round,
+                created_by, created_by_id, created_at, updated_at
+            "#,
+        )
+        .bind(ticket_id)
+        .bind(&value)
+        .fetch_optional(self.pool)
+        .await?
+        .ok_or(TicketError::TicketNotFound)?;
+
+        self.enrich_ticket(row_to_ticket(&row)).await
+    }
+
     pub async fn get(&self, ticket_id: Uuid) -> Result<TicketWithDisplay, TicketError> {
         let row = sqlx::query(
             r#"
@@ -152,7 +229,8 @@ impl<'a> TicketService<'a> {
                 id, project_id, repo_id, title, description,
                 status, substatus, substatus_metadata, priority,
                 assignee_agent_id, owner_user_id, branch_name,
-                pending_assign_recommendation, clarification_round,
+                pending_assign_recommendation, parent_ticket_id,
+                pending_split_recommendation, clarification_round,
                 created_by, created_by_id, created_at, updated_at
             FROM tickets
             WHERE id = $1
@@ -214,7 +292,8 @@ impl<'a> TicketService<'a> {
                 id, project_id, repo_id, title, description,
                 status, substatus, substatus_metadata, priority,
                 assignee_agent_id, owner_user_id, branch_name,
-                pending_assign_recommendation, clarification_round,
+                pending_assign_recommendation, parent_ticket_id,
+                pending_split_recommendation, clarification_round,
                 created_by, created_by_id, created_at, updated_at
             "#,
         )
@@ -270,7 +349,8 @@ impl<'a> TicketService<'a> {
                 id, project_id, repo_id, title, description,
                 status, substatus, substatus_metadata, priority,
                 assignee_agent_id, owner_user_id, branch_name,
-                pending_assign_recommendation, clarification_round,
+                pending_assign_recommendation, parent_ticket_id,
+                pending_split_recommendation, clarification_round,
                 created_by, created_by_id, created_at, updated_at
             "#,
         )
@@ -344,7 +424,8 @@ impl<'a> TicketService<'a> {
                 id, project_id, repo_id, title, description,
                 status, substatus, substatus_metadata, priority,
                 assignee_agent_id, owner_user_id, branch_name,
-                pending_assign_recommendation, clarification_round,
+                pending_assign_recommendation, parent_ticket_id,
+                pending_split_recommendation, clarification_round,
                 created_by, created_by_id, created_at, updated_at
             "#,
         )
@@ -375,7 +456,8 @@ impl<'a> TicketService<'a> {
                 id, project_id, repo_id, title, description,
                 status, substatus, substatus_metadata, priority,
                 assignee_agent_id, owner_user_id, branch_name,
-                pending_assign_recommendation, clarification_round,
+                pending_assign_recommendation, parent_ticket_id,
+                pending_split_recommendation, clarification_round,
                 created_by, created_by_id, created_at, updated_at
             "#,
         )
@@ -385,6 +467,63 @@ impl<'a> TicketService<'a> {
         .ok_or(TicketError::TicketNotFound)?;
 
         self.enrich_ticket(row_to_ticket(&row)).await
+    }
+
+    pub async fn clear_pending_split_recommendation(
+        &self,
+        ticket_id: Uuid,
+    ) -> Result<TicketWithDisplay, TicketError> {
+        let row = sqlx::query(
+            r#"
+            UPDATE tickets
+            SET pending_split_recommendation = NULL, updated_at = now()
+            WHERE id = $1
+            RETURNING
+                id, project_id, repo_id, title, description,
+                status, substatus, substatus_metadata, priority,
+                assignee_agent_id, owner_user_id, branch_name,
+                pending_assign_recommendation, parent_ticket_id,
+                pending_split_recommendation, clarification_round,
+                created_by, created_by_id, created_at, updated_at
+            "#,
+        )
+        .bind(ticket_id)
+        .fetch_optional(self.pool)
+        .await?
+        .ok_or(TicketError::TicketNotFound)?;
+
+        self.enrich_ticket(row_to_ticket(&row)).await
+    }
+
+    pub async fn list_children(
+        &self,
+        parent_ticket_id: Uuid,
+    ) -> Result<Vec<TicketWithDisplay>, TicketError> {
+        self.get(parent_ticket_id).await?;
+
+        let rows = sqlx::query(
+            r#"
+            SELECT
+                id, project_id, repo_id, title, description,
+                status, substatus, substatus_metadata, priority,
+                assignee_agent_id, owner_user_id, branch_name,
+                pending_assign_recommendation, parent_ticket_id,
+                pending_split_recommendation, clarification_round,
+                created_by, created_by_id, created_at, updated_at
+            FROM tickets
+            WHERE parent_ticket_id = $1
+            ORDER BY created_at ASC
+            "#,
+        )
+        .bind(parent_ticket_id)
+        .fetch_all(self.pool)
+        .await?;
+
+        let mut results = Vec::with_capacity(rows.len());
+        for row in &rows {
+            results.push(self.enrich_ticket(row_to_ticket(row)).await?);
+        }
+        Ok(results)
     }
 
     pub async fn assign_agent(
@@ -401,7 +540,8 @@ impl<'a> TicketService<'a> {
                 id, project_id, repo_id, title, description,
                 status, substatus, substatus_metadata, priority,
                 assignee_agent_id, owner_user_id, branch_name,
-                pending_assign_recommendation, clarification_round,
+                pending_assign_recommendation, parent_ticket_id,
+                pending_split_recommendation, clarification_round,
                 created_by, created_by_id, created_at, updated_at
             "#,
         )
@@ -505,6 +645,8 @@ fn row_to_ticket(row: &sqlx::postgres::PgRow) -> Ticket {
         owner_user_id: row.get("owner_user_id"),
         branch_name: row.get("branch_name"),
         pending_assign_recommendation: row.get("pending_assign_recommendation"),
+        parent_ticket_id: row.get("parent_ticket_id"),
+        pending_split_recommendation: row.get("pending_split_recommendation"),
         clarification_round: row.get("clarification_round"),
         created_by: row.get("created_by"),
         created_by_id: row.get("created_by_id"),

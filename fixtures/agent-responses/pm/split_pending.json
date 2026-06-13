@@ -1,0 +1,22 @@
+{
+  "status": "done",
+  "summary": "Split large epic into two focused child tickets for parallel delivery.",
+  "updatedDescription": "Epic: improve API reliability across outbound HTTP clients.",
+  "splitTickets": [
+    {
+      "title": "Add retry logic to API client",
+      "description": "Implement exponential backoff for outbound HTTP calls.",
+      "acceptanceCriteria": "- Retry up to 3 times with exponential backoff\n- Log failures after final retry",
+      "assignTo": "backend_engineer"
+    },
+    {
+      "title": "Add circuit breaker dashboard",
+      "description": "Surface open/closed breaker state in the admin UI.",
+      "acceptanceCriteria": "- Shows per-service breaker status\n- Updates within 30 seconds of state change"
+    }
+  ],
+  "changedFiles": [],
+  "testsRun": [],
+  "mentionAgents": [],
+  "blockers": []
+}

@@ -90,6 +90,7 @@ export function LiveSession({ runId, runStatus }: LiveSessionProps) {
   const [reconnectToken, setReconnectToken] = useState(0);
   const [interrupted, setInterrupted] = useState<string | null>(null);
   const [hasContent, setHasContent] = useState(false);
+  const hasContentRef = useRef(false);
   const recoverableRef = useRef(true);
 
   // Initialize store when runId changes (also recovers after React StrictMode remount).
@@ -98,6 +99,7 @@ export function LiveSession({ runId, runStatus }: LiveSessionProps) {
     recoverableRef.current = true;
     setInterrupted(null);
     setHasContent(false);
+    hasContentRef.current = false;
     dispatch({ type: 'reset', sessionId: runId });
   }, [runId]);
 
@@ -130,6 +132,7 @@ export function LiveSession({ runId, runStatus }: LiveSessionProps) {
         event?: OpenCodeEvent;
         recoverable?: boolean;
         reason?: string | null;
+        status?: string;
       };
 
       if (msg.type === 'snapshot') {
@@ -141,9 +144,11 @@ export function LiveSession({ runId, runStatus }: LiveSessionProps) {
             parts: msg.parts ?? {},
           },
         });
+        hasContentRef.current = true;
         setHasContent(true);
       } else if (msg.type === 'event' && msg.event) {
         dispatch({ type: 'event', event: msg.event });
+        hasContentRef.current = true;
         setHasContent(true);
       } else if (msg.type === 'end') {
         if (shouldStopReconnect(msg)) {
@@ -151,6 +156,16 @@ export function LiveSession({ runId, runStatus }: LiveSessionProps) {
         }
         if (msg.reason) {
           setInterrupted(msg.reason);
+        }
+        if (
+          !hasContentRef.current &&
+          msg.status &&
+          isActiveRunStatus(msg.status) &&
+          recoverableRef.current
+        ) {
+          // Stream not ready yet; reconnect will pick up live frames.
+          ws.close();
+          return;
         }
         ws.close();
       }

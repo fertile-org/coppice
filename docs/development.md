@@ -115,9 +115,31 @@ Always use Docker Compose via the Makefile — not standalone `docker run`.
 | `make migrate` | `coppice migrate` (reads `config.toml` on host) |
 | `make bootstrap` | `coppice bootstrap admin` |
 | `make web-dev` | Vite dev server (proxies to `:8080`) |
-| `make test` | `cargo test --workspace` |
+| `make test` | Full Rust suite (`cargo test --workspace --features embedded-test-db`) |
+| `make test-unit` | Lib tests only — use during agent runs (~5–15s warm) |
+| `make test-smoke` | Lib + smoke integration (`health`, `integration_comments`, `integration_tickets`) |
+| `make test-pg-reset` | Clear shared embedded Postgres session file |
 | `make clippy` | `cargo clippy --workspace -- -D warnings` |
+| `make clean` | `cargo clean` — remove `target/` build cache |
+| `make e2e-smoke-m06` | Context long-running smoke (`continued` + pending splits) |
 | `make release-tar` | Self-contained release tarball |
+
+### Context long-running tasks
+
+Agents can return `status: "continued"` to checkpoint progress without leaving **In Progress** — the run succeeds and the next run picks up via resume context in `.agent/context.md`. PM agents may propose `splitTickets`; with default `auto_split = false` these appear as a **pending split recommendation** on the parent ticket until a human approves. See [context long-running design](superpowers/specs/2026-06-10-context-long-running-tasks-design.md).
+
+## Disk usage / cleanup
+
+Rust `target/` can grow to **8–16+ GB** during development (debug builds, many integration test binaries, heavy deps like sqlx/tokio/axum). It is gitignored and safe to delete.
+
+| Command | When |
+|---------|------|
+| `make clean` | After a full test pass when you are done with the task |
+| `cargo clean` | Same |
+
+Do **not** run `clean` before every incremental `cargo test` — the next build will recompile everything. **Agents:** run `make clean` once after your task’s workspace tests pass.
+
+Cursor’s agent sandbox may also cache builds under a separate `cargo-target` directory in the system temp folder. That cache is outside the repo; delete it manually if disk is tight (see Cursor docs / your temp dir).
 
 ## CLI commands
 

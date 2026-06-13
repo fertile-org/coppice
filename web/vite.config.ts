@@ -11,14 +11,20 @@ export default defineConfig({
       '/api': {
         target: process.env.VITE_API_URL ?? 'http://localhost:8080',
         changeOrigin: true,
+        configure: (proxy) => {
+          proxy.on('error', () => {});
+        },
       },
       '/ws': {
         target: process.env.VITE_API_URL ?? 'http://localhost:8080',
         changeOrigin: true,
         ws: true,
         configure: (proxy) => {
-          proxy.on('error', () => {
-            // Client or upstream may close WS early (e.g. after end frame); ignore EPIPE noise.
+          // Upstream may close WS early (e.g. after end frame) or restart during dev.
+          proxy.on('error', () => {});
+          proxy.on('close', () => {});
+          proxy.on('proxyReqWs', (_proxyReq, _req, socket) => {
+            socket.on('error', () => {});
           });
         },
       },

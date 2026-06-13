@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { X } from 'lucide-react';
-import ReactMarkdown from 'react-markdown';
+import { TicketMarkdown } from '../../components/TicketMarkdown';
 import { formatFileSize, isImageContentType } from '../../lib/attachments';
 import { Button } from '../../components/ui/button';
 import { CommentAttachments } from './CommentAttachments';
@@ -173,9 +173,7 @@ export function TicketCommentsTab({ ticketId }: TicketCommentsTabProps) {
                 {formatTime(comment.createdAt)}
               </time>
             </header>
-            <div className="font-body text-sm text-text-primary [&_a]:text-accent [&_code]:rounded [&_code]:bg-paper-200 [&_code]:px-1 [&_p+p]:mt-2">
-              <ReactMarkdown>{comment.body}</ReactMarkdown>
-            </div>
+            <TicketMarkdown>{comment.body}</TicketMarkdown>
             <CommentAttachments
               attachments={
                 comment.attachments.length > 0

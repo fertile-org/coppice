@@ -16,10 +16,33 @@ use tower::ServiceExt;
 
 pub static DB_TEST_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
 
+/// Whether the shared embedded (or external escape-hatch) test database is reachable.
 pub async fn db_available() -> bool {
-    let database_url = std::env::var("DATABASE_URL")
-        .unwrap_or_else(|_| "postgres://coppice:coppice@localhost:5432/coppice".into());
-    db::connect_and_migrate(&database_url).await.is_ok()
+    let pool = match db::shared_test_pool().await {
+        Ok(pool) => pool,
+        Err(_) => return false,
+    };
+    sqlx::query("SELECT 1").execute(&pool).await.is_ok()
+}
+
+async fn prepare_test_pool() -> sqlx::PgPool {
+    let pool = db::shared_test_pool()
+        .await
+        .expect("embedded test database (see docs/testing.md)");
+    truncate_workspace(&pool).await;
+    pool
+}
+
+/// Auth integration tests only need sessions/users cleared.
+pub async fn prepare_test_pool_for_auth() -> sqlx::PgPool {
+    let pool = db::shared_test_pool()
+        .await
+        .expect("embedded test database (see docs/testing.md)");
+    sqlx::query("TRUNCATE sessions, users RESTART IDENTITY CASCADE")
+        .execute(&pool)
+        .await
+        .expect("truncate auth tables");
+    pool
 }
 
 pub async fn truncate_workspace(pool: &sqlx::PgPool) {
@@ -77,12 +100,7 @@ pub fn create_temp_git_checkout() -> (tempfile::TempDir, PathBuf) {
 }
 
 async fn test_state_with_db() -> Arc<AppState> {
-    let database_url = std::env::var("DATABASE_URL")
-        .unwrap_or_else(|_| "postgres://coppice:coppice@localhost:5432/coppice".into());
-    let pool = db::connect_and_migrate(&database_url)
-        .await
-        .expect("connect to test database");
-    truncate_workspace(&pool).await;
+    let pool = prepare_test_pool().await;
 
     std::env::set_var(
         "COPPICE_STORAGE__ARTIFACTS_DIR",
@@ -103,6 +121,16 @@ async fn test_state_with_db() -> Arc<AppState> {
 }
 
 async fn test_state_with_db_and_workers(mock_response: &str) -> (Arc<AppState>, AgentTestEnv) {
+    test_state_with_db_and_workers_config(mock_response, |_| {}).await
+}
+
+async fn test_state_with_db_and_workers_config<F>(
+    mock_response: &str,
+    configure: F,
+) -> (Arc<AppState>, AgentTestEnv)
+where
+    F: FnOnce(&mut AppConfig),
+{
     let worktrees = tempfile::tempdir().expect("worktrees tempdir");
 
     std::env::set_var("WORKTREES_PATH", worktrees.path());
@@ -110,7 +138,27 @@ async fn test_state_with_db_and_workers(mock_response: &str) -> (Arc<AppState>, 
     std::env::set_var("AGENT_DEFAULT_PROVIDER", "mock");
     std::env::remove_var("WORKFLOW_AUTO_START_RUNS");
 
-    let state = test_state_with_db().await;
+    let pool = prepare_test_pool().await;
+
+    std::env::set_var(
+        "COPPICE_STORAGE__ARTIFACTS_DIR",
+        "/tmp/coppice-test-artifacts",
+    );
+    let mut config = AppConfig::load_defaults().expect("test config");
+    configure(&mut config);
+    config.agent.worker_count = 1;
+
+    let state = Arc::new(AppState {
+        attachments: AppState::attachment_store_from_config(&config),
+        connector_registry: AppState::connector_registry_from_config(&config, None),
+        agent_health: Arc::new(coppice_server::services::agent_health::AgentHealthRegistry::new()),
+        run_streams: Arc::new(coppice_server::sessions::run_registry::RunStreamRegistry::new()),
+        event_bus: Arc::new(coppice_server::events::bus::EventBus::new()),
+        opencode_serve: None,
+        agent_templates: coppice_server::AppState::load_agent_templates(),
+        config,
+        db: Some(pool),
+    });
     coppice_server::workers::job_worker::spawn_workers(state.clone());
 
     (state, AgentTestEnv { worktrees })
@@ -124,12 +172,7 @@ async fn test_state_with_db_and_auto_start_workers() -> (Arc<AppState>, AgentTes
     std::env::set_var("AGENT_DEFAULT_PROVIDER", "mock");
     std::env::set_var("WORKFLOW_AUTO_START_RUNS", "true");
 
-    let database_url = std::env::var("DATABASE_URL")
-        .unwrap_or_else(|_| "postgres://coppice:coppice@localhost:5432/coppice".into());
-    let pool = db::connect_and_migrate(&database_url)
-        .await
-        .expect("connect to test database");
-    truncate_workspace(&pool).await;
+    let pool = prepare_test_pool().await;
 
     std::env::set_var(
         "COPPICE_STORAGE__ARTIFACTS_DIR",
@@ -137,6 +180,7 @@ async fn test_state_with_db_and_auto_start_workers() -> (Arc<AppState>, AgentTes
     );
     let mut config = AppConfig::load_defaults().expect("test config");
     config.workflow.auto_start_runs = true;
+    config.agent.worker_count = 1;
 
     let state = Arc::new(AppState {
         attachments: AppState::attachment_store_from_config(&config),
@@ -329,11 +373,15 @@ pub async fn bootstrap_and_login_with_auto_start_workers(
     (state, app, cookie, csrf_token, env)
 }
 
-pub async fn bootstrap_and_login_with_workers(
+pub async fn bootstrap_and_login_with_state_and_workers<F>(
     mock_response: &str,
-) -> (Router, String, String, AgentTestEnv) {
-    let (state, env) = test_state_with_db_and_workers(mock_response).await;
-    let app = coppice_server::app(state);
+    configure: F,
+) -> (Arc<AppState>, Router, String, String, AgentTestEnv)
+where
+    F: FnOnce(&mut AppConfig),
+{
+    let (state, env) = test_state_with_db_and_workers_config(mock_response, configure).await;
+    let app = coppice_server::app(state.clone());
 
     app.clone()
         .oneshot(
@@ -381,7 +429,15 @@ pub async fn bootstrap_and_login_with_workers(
         .expect("csrf token")
         .to_string();
 
-    (app, cookie, csrf_token, env)
+    (state, app, cookie, csrf_token, env)
+}
+
+pub async fn bootstrap_and_login_with_workers(
+    mock_response: &str,
+) -> (Router, String, String, AgentTestEnv) {
+    let (_state, app, cookie, csrf, env) =
+        bootstrap_and_login_with_state_and_workers(mock_response, |_| {}).await;
+    (app, cookie, csrf, env)
 }
 
 pub fn json_request(

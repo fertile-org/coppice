@@ -10,6 +10,8 @@ Coppice runs agents through a **connector adapter** layer. Orchestration (queue,
 | `codex` | [codex.md](codex.md) | Deferred |
 | `shell` | [shell.md](shell.md) | Deferred |
 
+OpenCode within-run **context compaction** is documented in [opencode.md § Context compaction](opencode.md#context-compaction).
+
 ## Connectors vs model providers vs models
 
 | Layer | Example | Where configured |

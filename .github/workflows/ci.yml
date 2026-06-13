@@ -9,23 +9,8 @@ on:
 jobs:
   rust:
     runs-on: ubuntu-latest
-    services:
-      postgres:
-        image: pgvector/pgvector:pg16
-        env:
-          POSTGRES_USER: coppice
-          POSTGRES_PASSWORD: coppice
-          POSTGRES_DB: coppice
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U coppice"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 10
 
     env:
-      DATABASE_URL: postgres://coppice:coppice@localhost:5432/coppice
       SESSION_SECRET: ci-test-secret
       COPPICE_BOOTSTRAP_PASSWORD: changeme
 
@@ -33,10 +18,15 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - name: Migrate
-        run: cargo run -p coppice-cli -- migrate
+      - name: Cache pg-embed
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/coppice
+            ~/.embedded-postgres
+          key: pg-embed-${{ runner.os }}-${{ hashFiles('server/Cargo.toml') }}
       - name: Test
-        run: cargo test --workspace
+        run: cargo test --workspace --features embedded-test-db
       - name: Clippy
         run: cargo clippy --workspace -- -D warnings
 

@@ -1,4 +1,5 @@
 import { SessionSectionCard } from '../components/SessionSectionCard';
+import { CompactionPart } from '../parts/CompactionPart';
 import { ReasoningPart } from '../parts/ReasoningPart';
 import { TextPart } from '../parts/TextPart';
 import { ToolPart } from '../parts/ToolPart';
@@ -27,6 +28,8 @@ function renderPart(
           streaming={reasoningStreaming}
         />
       );
+    case 'compaction':
+      return <CompactionPart key={part.id} part={part} />;
     case 'tool':
       return <ToolPart key={part.id} part={part} />;
     default:
@@ -46,6 +49,9 @@ export function AssistantMessage({
   const hasParts = parts.some((part) => {
     if (part.type === 'reasoning') {
       return part.text.replaceAll('[REDACTED]', '').trim().length > 0;
+    }
+    if (part.type === 'compaction') {
+      return part.text.trim().length > 0;
     }
     if (part.type === 'text') {
       return part.text.trim().length > 0;

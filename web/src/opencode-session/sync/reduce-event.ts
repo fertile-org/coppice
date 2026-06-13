@@ -175,7 +175,11 @@ function messageIdFromValue(message: Record<string, unknown>): string | undefine
 }
 
 function mergePart(existing: Part, incoming: Part): Part {
-  if (incoming.type !== 'text' && incoming.type !== 'reasoning') {
+  if (
+    incoming.type !== 'text' &&
+    incoming.type !== 'reasoning' &&
+    incoming.type !== 'compaction'
+  ) {
     return incoming;
   }
 

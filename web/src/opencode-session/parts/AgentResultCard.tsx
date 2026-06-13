@@ -59,6 +59,12 @@ export function AgentResultCard({ contract }: { contract: AgentResultContract })
       <div className="px-3 py-3">
         <MarkdownContent>{contract.summary}</MarkdownContent>
 
+        {contract.acceptanceCriteria?.trim() ? (
+          <div className="mt-3 border-t border-[var(--oc-border)] pt-3">
+            <MarkdownContent>{contract.acceptanceCriteria}</MarkdownContent>
+          </div>
+        ) : null}
+
         {isDone ? (
           <>
             <MetaList label="Changed files" items={contract.changedFiles ?? []} />
@@ -74,6 +80,13 @@ export function AgentResultCard({ contract }: { contract: AgentResultContract })
             <MetaList label="Required secrets" items={contract.requiredSecrets ?? []} />
           </>
         )}
+
+        {contract.status === 'done' && contract.assignTo ? (
+          <p className={`mt-3 ${sessionTheme.fontMonoSm} ${sessionTheme.textMuted}`}>
+            Assign to:{' '}
+            <span className={sessionTheme.text}>{contract.assignTo}</span>
+          </p>
+        ) : null}
 
         {(contract.mentionAgents?.length ?? 0) > 0 ? (
           <div className="mt-3 flex flex-wrap gap-1">

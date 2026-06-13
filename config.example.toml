@@ -27,6 +27,8 @@ enabled = false
 command = "opencode"
 serve_hostname = "127.0.0.1"
 serve_port = 4096
+# Max seconds Coppice waits for OpenCode session idle (default 600). Increase for marathon runs.
+# run_timeout_secs = 1800
 model_providers = []
 # model_providers = ["zai-coding-plan", "opencode-go", "opencode-zen", "alibaba"]
 
@@ -42,3 +44,6 @@ auto_start_runs = false
 [workflow.auto_assign]
 default = true
 backlog = false
+
+[workflow.auto_split]
+default = false

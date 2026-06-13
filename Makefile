@@ -10,7 +10,9 @@ COMPOSE_LOCAL = $(DOCKER_COMPOSE) -f deploy/docker-compose.local.yml
 BOOTSTRAP_EMAIL = admin@localhost
 BOOTSTRAP_PASSWORD = changeme
 
-.PHONY: compose-up compose-down compose-local-up compose-local-down server-dev test clippy migrate bootstrap web-install web-test web-dev web-build e2e-smoke e2e-smoke-m03 e2e-smoke-m04 e2e-smoke-m05 release-tar
+.PHONY: compose-up compose-down compose-local-up compose-local-down server-dev test test-unit test-smoke test-pg-reset clippy clean migrate bootstrap web-install web-test web-dev web-build e2e-smoke e2e-smoke-m03 e2e-smoke-m04 e2e-smoke-m05 e2e-smoke-m06 release-tar
+
+CARGO_TEST = cargo test --features embedded-test-db
 
 compose-up:
 	$(COMPOSE) up -d --build
@@ -37,11 +39,28 @@ migrate:
 bootstrap:
 	cargo run -p coppice-cli -- bootstrap admin --email $(BOOTSTRAP_EMAIL) --password $(BOOTSTRAP_PASSWORD)
 
+# Full suite — one shared embedded Postgres for all binaries (~2–3 min warm).
 test:
-	cargo test --workspace
+	$(CARGO_TEST) --workspace -- --test-threads 1
+
+# Unit tests only — lib crates, no integration binaries (~5–15s warm).
+test-unit:
+	$(CARGO_TEST) --workspace --lib -q -- --test-threads 1
+
+# Smoke integration — lib + health + comments + tickets (~target <60s warm).
+test-smoke:
+	$(CARGO_TEST) --workspace --lib -q -- --test-threads 1
+	$(CARGO_TEST) -p coppice-server --test health --test integration_comments --test integration_tickets -q
+
+# Drop session file so the next test run starts a fresh embedded Postgres (old process may linger).
+test-pg-reset:
+	rm -f $(HOME)/.cache/coppice/test-pg/session.json
 
 clippy:
 	cargo clippy --workspace -- -D warnings
+
+clean:
+	cargo clean
 
 web-install:
 	cd web && yarn install --frozen-lockfile
@@ -69,6 +88,11 @@ e2e-smoke-m04: compose-up
 e2e-smoke-m05: compose-up
 	$(COMPOSE) exec -T server sh -c 'mkdir -p /tmp/smoke-repo && cd /tmp/smoke-repo && git init -b main && git config user.email smoke@coppice.local && git config user.name smoke && echo hi > README.md && git add . && git commit -m init'
 	node e2e/smoke/m05-workflow.mjs
+
+e2e-smoke-m06: compose-up
+	$(COMPOSE) exec -T server sh -c 'mkdir -p /tmp/smoke-repo && cd /tmp/smoke-repo && git init -b main && git config user.email smoke@coppice.local && git config user.name smoke && echo hi > README.md && git add . && git commit -m init'
+	MOCK_AGENT_RESPONSE=pm/split_pending $(COMPOSE) up -d --force-recreate --no-deps server
+	node e2e/smoke/m06-context.mjs
 
 release-tar: web-build
 	cargo build --release -p coppice-server -p coppice-cli

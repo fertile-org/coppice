@@ -16,7 +16,7 @@ use crate::sessions::session_snapshot::SessionSnapshot;
 
 const POLL_INTERVAL: Duration = Duration::from_millis(500);
 const SSE_RECONNECT_DELAY: Duration = Duration::from_millis(750);
-const RUN_IDLE_TIMEOUT: Duration = Duration::from_secs(600);
+const DEFAULT_RUN_TIMEOUT: Duration = Duration::from_secs(600);
 const STREAM_DRAIN_TIMEOUT: Duration = Duration::from_secs(5);
 
 struct StreamContext {
@@ -50,10 +50,15 @@ pub struct OpenCodeClient {
     api: reqwest::Client,
     stream: reqwest::Client,
     base_url: String,
+    run_timeout: Duration,
 }
 
 impl OpenCodeClient {
     pub fn new(base_url: &str) -> Self {
+        Self::with_run_timeout(base_url, DEFAULT_RUN_TIMEOUT)
+    }
+
+    pub fn with_run_timeout(base_url: &str, run_timeout: Duration) -> Self {
         Self {
             api: reqwest::Client::builder()
                 .timeout(Duration::from_secs(30))
@@ -64,6 +69,7 @@ impl OpenCodeClient {
                 .build()
                 .expect("opencode stream client"),
             base_url: base_url.trim_end_matches('/').to_string(),
+            run_timeout,
         }
     }
 
@@ -131,7 +137,13 @@ impl OpenCodeClient {
         }
 
         let wait_result = self
-            .wait_idle(&directory, &session_id, cancel_rx, idle_flag.clone())
+            .wait_idle(
+                &directory,
+                &session_id,
+                cancel_rx,
+                idle_flag.clone(),
+                self.run_timeout,
+            )
             .await;
         if let Err(err) = wait_result {
             let _ = self.abort(&directory, &session_id).await;
@@ -209,6 +221,7 @@ impl OpenCodeClient {
             api: self.api.clone(),
             stream: self.stream.clone(),
             base_url: self.base_url.clone(),
+            run_timeout: self.run_timeout,
         }
     }
 
@@ -321,15 +334,18 @@ impl OpenCodeClient {
         session_id: &str,
         cancel_rx: Option<watch::Receiver<bool>>,
         idle_flag: Arc<std::sync::atomic::AtomicBool>,
+        run_timeout: Duration,
     ) -> Result<(), ProviderError> {
-        let deadline = tokio::time::Instant::now() + RUN_IDLE_TIMEOUT;
+        let deadline = tokio::time::Instant::now() + run_timeout;
         let mut cancel_rx = cancel_rx;
 
         loop {
             if tokio::time::Instant::now() >= deadline {
-                return Err(ProviderError::InvalidFixture(
-                    "opencode session timed out".into(),
-                ));
+                return Err(ProviderError::InvalidFixture(format!(
+                    "opencode session timed out after {}s waiting for idle \
+                     (increase agent.connectors.opencode.run_timeout_secs or use targeted tests)",
+                    run_timeout.as_secs()
+                )));
             }
 
             if is_cancelled(&mut cancel_rx) {

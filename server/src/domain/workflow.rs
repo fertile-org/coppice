@@ -23,6 +23,26 @@ pub struct TransitionContext {
     pub project_agent_keys: Vec<String>,
     pub project_agent_ids: HashMap<String, Uuid>,
     pub auto_assign_enabled: bool,
+    pub clarification_round: i32,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SplitTicketSpec {
+    pub title: String,
+    pub description: String,
+    #[serde(default, rename = "acceptanceCriteria")]
+    pub acceptance_criteria: Option<String>,
+    #[serde(default, rename = "assignTo")]
+    pub assign_to: Option<String>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PendingSplitRecommendation {
+    pub recommended_by_agent_id: Uuid,
+    pub recommended_at: String,
+    pub splits: Vec<SplitTicketSpec>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]

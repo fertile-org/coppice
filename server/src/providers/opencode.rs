@@ -6,10 +6,10 @@ use async_trait::async_trait;
 use coppice_config::OpenCodeProviderConfig;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Duration;
 
 pub struct OpenCodeProvider {
     serve: Arc<OpenCodeServeManager>,
-    #[allow(dead_code)]
     config: OpenCodeProviderConfig,
 }
 
@@ -32,7 +32,8 @@ impl AgentProvider for OpenCodeProvider {
             .and_then(|p| p.parent())
             .ok_or_else(|| ProviderError::InvalidInput("bad context path".into()))?;
 
-        let client = OpenCodeClient::new(self.serve.base_url());
+        let run_timeout = Duration::from_secs(self.config.run_timeout_secs);
+        let client = OpenCodeClient::with_run_timeout(self.serve.base_url(), run_timeout);
         client
             .run_session(
                 worktree,

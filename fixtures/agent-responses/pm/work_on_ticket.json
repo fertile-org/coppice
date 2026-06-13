@@ -1,6 +1,8 @@
 {
   "status": "done",
-  "summary": "Ticket enriched with acceptance criteria.",
+  "summary": "Refined ticket scope and added acceptance criteria for engineering handoff.",
+  "updatedDescription": "Implement retry with exponential backoff for API calls.\n\n## Context\n\nUsers see intermittent failures when the upstream service is slow.",
+  "acceptanceCriteria": "- Retry up to 3 times with exponential backoff\n- Show user-visible error only after final failure\n- Unit tests cover success and exhausted-retry paths",
   "assignTo": "backend_engineer",
   "changedFiles": [],
   "testsRun": [],

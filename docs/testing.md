@@ -6,19 +6,19 @@ Two jobs on every push/PR to `main`:
 
 ### Rust
 
-Runs against a service Postgres (`pgvector/pgvector:pg16`):
+Rust tests use **embedded PostgreSQL** (`pg-embed`) — no Docker Postgres service in CI:
 
 ```bash
-export DATABASE_URL=postgres://coppice:coppice@localhost:5432/coppice
 export SESSION_SECRET=ci-test-secret
 export COPPICE_BOOTSTRAP_PASSWORD=changeme
 
-cargo run -p coppice-cli -- migrate
-cargo test --workspace
+cargo test --workspace --features embedded-test-db
 cargo clippy --workspace -- -D warnings
 ```
 
-Locally, `cargo test` / `clippy` do not need Postgres. For host `make migrate`, ensure `config.toml` (or `DATABASE_URL`) matches the Postgres you started: `compose-up` → `:5432`, `compose-local-up` → `:5433`.
+Locally, use `make test` (same flags). First run may download Postgres + pgvector binaries (network once); later runs use cache.
+
+For host `make migrate` / dev server, ensure `config.toml` (or `DATABASE_URL`) matches the Postgres you started: `compose-up` → `:5432`, `compose-local-up` → `:5433`.
 
 ### Web
 
@@ -39,7 +39,9 @@ Vitest — schemas, API helpers, board column logic. No browser.
 ### Integration test conventions
 
 - Shared helpers: `server/tests/common/mod.rs`
-- `db_available()` skips tests when `DATABASE_URL` is unreachable
+- **No Docker Postgres required** for `cargo test` / `make test`. Tests start in-process PostgreSQL via `pg-embed` (real SQL, same migrations).
+- Escape hatch for debugging against compose: `COPPICE_TEST_USE_EXTERNAL_DB=1` + `DATABASE_URL=postgres://coppice:coppice@127.0.0.1:5433/coppice`.
+- One shared embedded pool + one migration pass per integration-test **binary**; each case only `TRUNCATE`s tables.
 - `DB_TEST_LOCK` serializes DB tests; `truncate_workspace()` resets tables between cases
 - Auth: `login_and_csrf()` performs bootstrap login, returns session cookie + CSRF token
 - Artifact dir: `/tmp/coppice-test-artifacts`
@@ -49,6 +51,30 @@ Run all server tests:
 ```bash
 make test
 ```
+
+### Why `cargo test --workspace` is slow
+
+| Cause | Effect |
+|-------|--------|
+| **12 integration binaries** | Each links the full server; cold compile is minutes |
+| **`DB_TEST_LOCK`** | All DB tests run serially — times add up |
+| **Workflow pipeline test** (`scope_b_mock_pipeline_reaches_final_review`) | Full multi-agent mock pipeline ~30s alone |
+| **Agent-run tests** | Spawn job workers + poll for run completion |
+| **Postgres down / wrong port** | Eliminated: embedded PG is always up when `embedded-test-db` feature is enabled |
+
+**Typical wall times** (Postgres up, warm build): unit tests ~1 min; full integration suite ~15–25 min.
+
+**Agent / OpenCode runs:** do not use `make test` during a ticket. Use fast iteration instead:
+
+```bash
+make test-unit              # lib tests only (~seconds)
+make test-smoke             # lib + 3 integration smoke files (~<60s warm)
+cargo test -p coppice-server result_contract   # one module
+cargo test -p coppice-server --test integration_tickets  # one integration file
+make web-test               # frontend unit tests
+```
+
+When finished with a task (after tests pass), run `make clean` to reclaim disk. See [development.md](development.md#disk-usage--cleanup).
 
 Run one integration file:
 
@@ -90,11 +116,11 @@ Browser script against the compose stack: login → create ticket → drag colum
 ## Pre-push checklist
 
 ```bash
-make compose-up
-make migrate
-make test
+make test          # embedded Postgres — no compose required
 make clippy
 make web-test
 ```
+
+Optional before E2E: `make compose-up` (Docker stack for browser smoke only).
 
 Optional before UI-heavy changes: `make e2e-smoke`.

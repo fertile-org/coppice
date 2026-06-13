@@ -26,12 +26,17 @@ interface EventSocketListener {
 const listeners = new Set<EventSocketListener>();
 let socket: WebSocket | null = null;
 let subscriberCount = 0;
+let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+const RECONNECT_DELAY_MS = 1000;
 
 function dispatchMessage(raw: string) {
   const msg = JSON.parse(raw) as { type?: string; ticket_id?: string };
 
   if (msg.type === 'agent_run.started') {
     const payload = msg as AgentRunStartedPayload;
+    void queryClient.invalidateQueries({
+      queryKey: ['agent-runs', payload.ticket_id],
+    });
     for (const listener of listeners) {
       listener.onRunStarted?.(payload);
     }
@@ -39,6 +44,9 @@ function dispatchMessage(raw: string) {
 
   if (msg.type === 'agent_run.finished') {
     const payload = msg as AgentRunFinishedPayload;
+    void queryClient.invalidateQueries({
+      queryKey: ['agent-runs', payload.ticket_id],
+    });
     for (const listener of listeners) {
       listener.onRunFinished?.(payload);
     }
@@ -64,8 +72,16 @@ export function dispatchMessageForTest(raw: string) {
   dispatchMessage(raw);
 }
 
+function scheduleReconnect() {
+  if (reconnectTimer || subscriberCount === 0) return;
+  reconnectTimer = window.setTimeout(() => {
+    reconnectTimer = null;
+    connectSocket();
+  }, RECONNECT_DELAY_MS);
+}
+
 function connectSocket() {
-  if (socket) return;
+  if (socket || subscriberCount === 0) return;
 
   const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
   socket = new WebSocket(`${protocol}://${window.location.host}/ws/events`);
@@ -76,13 +92,19 @@ function connectSocket() {
 
   socket.onclose = () => {
     socket = null;
-    if (subscriberCount > 0) {
-      connectSocket();
-    }
+    scheduleReconnect();
+  };
+
+  socket.onerror = () => {
+    socket?.close();
   };
 }
 
 function disconnectSocket() {
+  if (reconnectTimer) {
+    window.clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+  }
   socket?.close();
   socket = null;
 }

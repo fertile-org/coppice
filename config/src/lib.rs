@@ -26,6 +26,8 @@ pub struct WorkflowConfig {
     pub auto_start_runs: bool,
     #[serde(default)]
     pub auto_assign: AutoAssignConfig,
+    #[serde(default)]
+    pub auto_split: AutoSplitConfig,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -69,6 +71,7 @@ impl Default for WorkflowConfig {
                 blocked: None,
                 done: None,
             },
+            auto_split: AutoSplitConfig::default(),
         }
     }
 }
@@ -90,6 +93,61 @@ impl Default for AutoAssignConfig {
 }
 
 impl AutoAssignConfig {
+    pub fn effective(&self, status: &str) -> bool {
+        let override_val = match status {
+            "backlog" => self.backlog,
+            "ready" => self.ready,
+            "in_progress" => self.in_progress,
+            "in_review" => self.in_review,
+            "in_qa" => self.in_qa,
+            "wait_for_final_review" => self.wait_for_final_review,
+            "blocked" => self.blocked,
+            "done" => self.done,
+            _ => None,
+        };
+        override_val.unwrap_or(self.default)
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct AutoSplitConfig {
+    #[serde(default = "default_false")]
+    pub default: bool,
+    #[serde(default)]
+    pub backlog: Option<bool>,
+    #[serde(default)]
+    pub ready: Option<bool>,
+    #[serde(default)]
+    pub in_progress: Option<bool>,
+    #[serde(default)]
+    pub in_review: Option<bool>,
+    #[serde(default)]
+    pub in_qa: Option<bool>,
+    #[serde(default)]
+    pub wait_for_final_review: Option<bool>,
+    #[serde(default)]
+    pub blocked: Option<bool>,
+    #[serde(default)]
+    pub done: Option<bool>,
+}
+
+impl Default for AutoSplitConfig {
+    fn default() -> Self {
+        Self {
+            default: false,
+            backlog: None,
+            ready: None,
+            in_progress: None,
+            in_review: None,
+            in_qa: None,
+            wait_for_final_review: None,
+            blocked: None,
+            done: None,
+        }
+    }
+}
+
+impl AutoSplitConfig {
     pub fn effective(&self, status: &str) -> bool {
         let override_val = match status {
             "backlog" => self.backlog,
@@ -168,6 +226,10 @@ pub struct OpenCodeConnectorConfig {
     pub serve_hostname: String,
     #[serde(default = "default_opencode_port")]
     pub serve_port: u16,
+    /// Max seconds Coppice waits for an OpenCode session to reach idle before failing the run.
+    /// Long shell commands (e.g. full `cargo test --workspace`) can exceed the default.
+    #[serde(default = "default_opencode_run_timeout_secs")]
+    pub run_timeout_secs: u64,
     #[serde(default)]
     pub model_providers: Vec<String>,
 }
@@ -191,6 +253,10 @@ fn default_opencode_port() -> u16 {
     4096
 }
 
+fn default_opencode_run_timeout_secs() -> u64 {
+    600
+}
+
 impl Default for OpenCodeConnectorConfig {
     fn default() -> Self {
         Self {
@@ -198,6 +264,7 @@ impl Default for OpenCodeConnectorConfig {
             command: default_opencode_command(),
             serve_hostname: default_opencode_host(),
             serve_port: default_opencode_port(),
+            run_timeout_secs: default_opencode_run_timeout_secs(),
             model_providers: Vec::new(),
         }
     }
@@ -429,6 +496,15 @@ mod tests {
         }
 
         assert_eq!(cfg.agent.default_connector, "opencode");
+    }
+
+    #[test]
+    fn auto_split_default_false() {
+        let cfg = WorkflowConfig::default();
+        assert!(!cfg.auto_split.default);
+        assert!(!cfg.auto_split.effective("backlog"));
+        assert!(!cfg.auto_split.effective("ready"));
+        assert!(!cfg.auto_split.effective("in_progress"));
     }
 
     #[test]

@@ -330,12 +330,11 @@ mod tests {
 
     #[tokio::test]
     async fn list_presets_has_ten_entries() {
-        let database_url = std::env::var("DATABASE_URL")
-            .unwrap_or_else(|_| "postgres://coppice:coppice@localhost:5432/coppice".into());
-        let pool = match crate::db::connect_and_migrate(&database_url).await {
+        let pool = match crate::db::shared_test_pool().await {
             Ok(pool) => pool,
             Err(_) => return,
         };
+        crate::db::truncate_test_workspace(&pool).await.ok();
 
         let service = AgentService::new(&pool);
         let presets = service.list_presets().await.expect("list presets");

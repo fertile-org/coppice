@@ -26,7 +26,9 @@ import { useAgentRuns } from './useAgentRuns';
 import { TicketStatusBadge } from './TicketStatusBadge';
 import {
   useAgents,
+  useApproveSplits,
   useAssignAgent,
+  useDismissSplits,
   useUpdateTicket,
   useUpdateTicketStatus,
 } from './useTicket';
@@ -44,6 +46,8 @@ export function TicketMetadataPanel({ ticket }: TicketMetadataPanelProps) {
   const updateTicket = useUpdateTicket(ticket.id);
   const updateStatus = useUpdateTicketStatus(ticket.id);
   const assignAgent = useAssignAgent(ticket.id);
+  const approveSplits = useApproveSplits(ticket.id);
+  const dismissSplits = useDismissSplits(ticket.id);
   const { data: agents } = useAgents();
   const { data: repos } = useRepos();
   const { data: runs } = useAgentRuns(ticket.id);
@@ -61,6 +65,7 @@ export function TicketMetadataPanel({ ticket }: TicketMetadataPanelProps) {
   const [priority, setPriority] = useState(ticket.priority ?? '');
   const [repoId, setRepoId] = useState(ticket.repoId ?? '');
   const [error, setError] = useState<string | null>(null);
+  const [splitError, setSplitError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
 
   useEffect(() => {
@@ -71,6 +76,40 @@ export function TicketMetadataPanel({ ticket }: TicketMetadataPanelProps) {
     setPriority(ticket.priority ?? '');
     setRepoId(ticket.repoId ?? '');
   }, [ticket]);
+
+  async function handleApproveSplits() {
+    const splits = ticket.pendingSplitRecommendation?.splits ?? [];
+    if (splits.length === 0) return;
+
+    const label = splits.length === 1 ? '1 child ticket' : `${splits.length} child tickets`;
+    if (
+      !window.confirm(
+        `Create ${label} from this split recommendation? The parent ticket will remain unchanged.`,
+      )
+    ) {
+      return;
+    }
+
+    setSplitError(null);
+    try {
+      await approveSplits.mutateAsync();
+      toast.success('Child tickets created');
+    } catch {
+      setSplitError('Unable to approve splits.');
+      toast.error('Unable to approve splits');
+    }
+  }
+
+  async function handleDismissSplits() {
+    setSplitError(null);
+    try {
+      await dismissSplits.mutateAsync();
+      toast.success('Split recommendation dismissed');
+    } catch {
+      setSplitError('Unable to dismiss split recommendation.');
+      toast.error('Unable to dismiss split recommendation');
+    }
+  }
 
   async function handleAssignChange(nextAgentId: string) {
     setAssignError(null);
@@ -136,7 +175,11 @@ export function TicketMetadataPanel({ ticket }: TicketMetadataPanelProps) {
   }
 
   const isBusy =
-    isSaving || updateStatus.isPending || updateTicket.isPending;
+    isSaving ||
+    updateStatus.isPending ||
+    updateTicket.isPending ||
+    approveSplits.isPending ||
+    dismissSplits.isPending;
   const activeSubstatus = substatus || null;
   const assignedAgent = agents?.find((agent) => agent.id === assigneeId);
 
@@ -180,9 +223,54 @@ export function TicketMetadataPanel({ ticket }: TicketMetadataPanelProps) {
         )}
       </div>
 
+      {ticket.pendingSplitRecommendation && (
+        <div className="space-y-3 rounded-md border border-border bg-surface px-3 py-3">
+          <p className="font-body text-xs font-medium text-text-muted">
+            Pending split recommendation
+          </p>
+          <ul className="space-y-1">
+            {ticket.pendingSplitRecommendation.splits.map((split, index) => (
+              <li
+                key={`${split.title}-${index}`}
+                className="font-body text-sm text-text-primary"
+              >
+                {split.title}
+              </li>
+            ))}
+          </ul>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              type="button"
+              onClick={() => void handleApproveSplits()}
+              loading={approveSplits.isPending}
+              disabled={isBusy}
+              className="flex-1"
+            >
+              {approveSplits.isPending ? 'Approving…' : 'Approve splits'}
+            </Button>
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => void handleDismissSplits()}
+              loading={dismissSplits.isPending}
+              disabled={isBusy}
+              className="flex-1"
+            >
+              {dismissSplits.isPending ? 'Dismissing…' : 'Dismiss'}
+            </Button>
+          </div>
+        </div>
+      )}
+
       {assignError && (
         <p className="rounded-md border border-danger-muted bg-danger-muted/40 px-3 py-2 font-body text-sm text-danger">
           {assignError}
+        </p>
+      )}
+
+      {splitError && (
+        <p className="rounded-md border border-danger-muted bg-danger-muted/40 px-3 py-2 font-body text-sm text-danger">
+          {splitError}
         </p>
       )}
 

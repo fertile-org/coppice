@@ -15,6 +15,7 @@ use std::sync::Arc;
 use thiserror::Error;
 use tokio::sync::watch;
 
+use crate::domain::workflow::SplitTicketSpec;
 use crate::sessions::run_registry::RunStreamHandle;
 
 #[derive(Clone)]
@@ -47,10 +48,16 @@ pub enum AgentRunResult {
         next_status: Option<String>,
         #[serde(default, rename = "assignTo")]
         assign_to: Option<String>,
+        #[serde(default, rename = "updatedDescription")]
+        updated_description: Option<String>,
+        #[serde(default, rename = "acceptanceCriteria")]
+        acceptance_criteria: Option<String>,
         #[serde(default, rename = "mentionAgents")]
         mention_agents: Vec<String>,
         #[serde(default)]
         blockers: Vec<String>,
+        #[serde(default, rename = "splitTickets")]
+        split_tickets: Vec<SplitTicketSpec>,
     },
     Blocked {
         #[serde(rename = "blockerType")]
@@ -60,12 +67,27 @@ pub enum AgentRunResult {
         next_status: Option<String>,
         #[serde(default, rename = "assignTo")]
         assign_to: Option<String>,
+        #[serde(default, rename = "updatedDescription")]
+        updated_description: Option<String>,
+        #[serde(default, rename = "acceptanceCriteria")]
+        acceptance_criteria: Option<String>,
         #[serde(rename = "mentionAgents")]
         mention_agents: Vec<String>,
         #[serde(default, rename = "requiredCapabilities")]
         required_capabilities: Vec<String>,
         #[serde(default, rename = "requiredSecrets")]
         required_secrets: Vec<String>,
+    },
+    Continued {
+        summary: String,
+        #[serde(default, rename = "progressNote")]
+        progress_note: Option<String>,
+        #[serde(default, rename = "changedFiles")]
+        changed_files: Vec<String>,
+        #[serde(default, rename = "testsRun")]
+        tests_run: Vec<String>,
+        #[serde(default)]
+        blockers: Vec<String>,
     },
 }
 

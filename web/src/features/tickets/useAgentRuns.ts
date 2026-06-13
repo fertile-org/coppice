@@ -80,12 +80,32 @@ export function useAgentRuns(ticketId: string | undefined) {
   });
 }
 
+function upsertAgentRunInCache(
+  queryClient: QueryClient,
+  ticketId: string,
+  run: AgentRun,
+) {
+  queryClient.setQueryData<AgentRun[]>(agentRunsQueryKey(ticketId), (old) => {
+    const prev = old ?? [];
+    const index = prev.findIndex((item) => item.id === run.id);
+    if (index === -1) {
+      return [run, ...prev];
+    }
+    const next = [...prev];
+    next[index] = run;
+    return next;
+  });
+}
+
 export function useRunAgent(ticketId: string) {
   const queryClient = useQueryClient();
 
   return useMutation({
     mutationFn: () => postRunAgent(ticketId),
-    onSuccess: () => invalidateRunRelated(queryClient, ticketId),
+    onSuccess: (run) => {
+      upsertAgentRunInCache(queryClient, ticketId, run);
+      invalidateRunRelated(queryClient, ticketId);
+    },
   });
 }
 

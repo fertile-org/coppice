@@ -32,6 +32,7 @@ services:
       WORKTREES_PATH: /data/worktrees
       AGENT_WORKER_COUNT: "2"
       WORKFLOW_AUTO_START_RUNS: "true"
+      MOCK_AGENT_RESPONSE: ${MOCK_AGENT_RESPONSE:-}
     volumes:
       - artifact_data:/data/artifacts
       - worktree_data:/data/worktrees

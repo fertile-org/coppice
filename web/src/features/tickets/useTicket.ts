@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiFetch } from '../../lib/api';
 import type { CreateCommentInput, UpdateStatusInput, UpdateTicketInput } from '../../lib/schemas/ticket';
-import type { Ticket } from '../board/useTickets';
+import { ticketsQueryKey, type Ticket } from '../board/useTickets';
 import type { TicketStatus } from '../board/columns';
 
 export { useAgents, type AgentSummary } from '../agents/useAgents';
@@ -39,6 +39,10 @@ export function ticketQueryKey(ticketId: string) {
 
 export function commentsQueryKey(ticketId: string) {
   return ['comments', ticketId] as const;
+}
+
+export function childrenQueryKey(ticketId: string) {
+  return ['ticket-children', ticketId] as const;
 }
 
 async function fetchTicket(ticketId: string): Promise<Ticket> {
@@ -116,6 +120,25 @@ async function postFinalApprove(ticketId: string): Promise<Ticket> {
   return res.json() as Promise<Ticket>;
 }
 
+async function fetchTicketChildren(ticketId: string): Promise<Ticket[]> {
+  const res = await apiFetch(`/api/tickets/${ticketId}/children`);
+  return res.json() as Promise<Ticket[]>;
+}
+
+async function postApproveSplits(ticketId: string): Promise<Ticket[]> {
+  const res = await apiFetch(`/api/tickets/${ticketId}/approve-splits`, {
+    method: 'POST',
+  });
+  return res.json() as Promise<Ticket[]>;
+}
+
+async function postDismissSplits(ticketId: string): Promise<Ticket> {
+  const res = await apiFetch(`/api/tickets/${ticketId}/dismiss-splits`, {
+    method: 'POST',
+  });
+  return res.json() as Promise<Ticket>;
+}
+
 export function useTicket(ticketId: string | undefined) {
   return useQuery({
     queryKey: ticketQueryKey(ticketId ?? ''),
@@ -138,6 +161,43 @@ export function useAssignAgent(ticketId: string) {
   return useMutation({
     mutationFn: (agentId: string | null) =>
       assignTicketAgent(ticketId, agentId),
+    onSuccess: (ticket) => {
+      queryClient.setQueryData(ticketQueryKey(ticketId), ticket);
+    },
+  });
+}
+
+export function useTicketChildren(ticketId: string | undefined) {
+  return useQuery({
+    queryKey: childrenQueryKey(ticketId ?? ''),
+    queryFn: () => fetchTicketChildren(ticketId!),
+    enabled: Boolean(ticketId),
+  });
+}
+
+export function useApproveSplits(ticketId: string) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: () => postApproveSplits(ticketId),
+    onSuccess: (children) => {
+      queryClient.setQueryData(childrenQueryKey(ticketId), children);
+      void queryClient.invalidateQueries({ queryKey: ticketQueryKey(ticketId) });
+      const projectId = children[0]?.projectId;
+      if (projectId) {
+        void queryClient.invalidateQueries({
+          queryKey: ticketsQueryKey(projectId),
+        });
+      }
+    },
+  });
+}
+
+export function useDismissSplits(ticketId: string) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: () => postDismissSplits(ticketId),
     onSuccess: (ticket) => {
       queryClient.setQueryData(ticketQueryKey(ticketId), ticket);
     },
