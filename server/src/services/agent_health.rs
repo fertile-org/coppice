@@ -79,6 +79,20 @@ pub async fn evaluate_agent_health(
 
     match agent.connector.as_str() {
         "mock" => (AgentHealthStatus::Healthy, None),
+        "claude-code" => {
+            if let Some(ref mp) = agent.model_provider {
+                if !registry.has_model_provider("claude-code", mp) {
+                    return (
+                        AgentHealthStatus::MissingConfig,
+                        Some(format!(
+                            "Model provider '{}' is not configured on this server",
+                            mp
+                        )),
+                    );
+                }
+            }
+            (AgentHealthStatus::Healthy, None)
+        }
         "opencode" => {
             if let Some(ref mp) = agent.model_provider {
                 if !registry.has_model_provider("opencode", mp) {

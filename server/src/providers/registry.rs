@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::config::AppConfig;
+use crate::providers::claude_code::ClaudeCodeProvider;
 use crate::providers::mock::MockProvider;
 use crate::providers::opencode::OpenCodeProvider;
 use crate::providers::AgentProvider;
@@ -10,6 +11,7 @@ use crate::sessions::opencode_serve::OpenCodeServeManager;
 pub struct ConnectorRegistry {
     connectors: HashMap<String, Arc<dyn AgentProvider>>,
     opencode_model_providers: Vec<String>,
+    claude_code_model_providers: Vec<String>,
 }
 
 impl ConnectorRegistry {
@@ -34,9 +36,19 @@ impl ConnectorRegistry {
             }
         }
 
+        if config.agent.connectors.claude_code.enabled {
+            connectors.insert(
+                "claude-code".into(),
+                Arc::new(ClaudeCodeProvider::new(
+                    config.agent.connectors.claude_code.clone(),
+                )),
+            );
+        }
+
         Self {
             connectors,
             opencode_model_providers: config.agent.connectors.opencode.model_providers.clone(),
+            claude_code_model_providers: config.agent.connectors.claude_code.model_providers.clone(),
         }
     }
 
@@ -57,6 +69,7 @@ impl ConnectorRegistry {
     pub fn model_providers_for(&self, connector: &str) -> Vec<String> {
         match connector {
             "opencode" => self.opencode_model_providers.clone(),
+            "claude-code" => self.claude_code_model_providers.clone(),
             _ => vec![],
         }
     }
@@ -90,5 +103,26 @@ mod tests {
             vec!["zai-coding-plan"]
         );
         assert!(registry.model_providers_for("mock").is_empty());
+    }
+
+    #[test]
+    fn registers_claude_code_when_enabled() {
+        let mut config = AppConfig::load_defaults().expect("config");
+        config.agent.connectors.claude_code.enabled = true;
+        config.agent.connectors.claude_code.model_providers =
+            vec!["sonnet".into(), "opus".into()];
+        let registry = ConnectorRegistry::from_config(&config, None);
+        assert!(registry.has("claude-code"));
+        assert_eq!(
+            registry.model_providers_for("claude-code"),
+            vec!["sonnet", "opus"]
+        );
+    }
+
+    #[test]
+    fn does_not_register_claude_code_when_disabled() {
+        let config = AppConfig::load_defaults().expect("config");
+        let registry = ConnectorRegistry::from_config(&config, None);
+        assert!(!registry.has("claude-code"));
     }
 }

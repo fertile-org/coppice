@@ -11,20 +11,6 @@ pub const MAX_MENTIONS_PER_RUN: u32 = 2;
 
 pub struct WorkflowService;
 
-impl Default for TransitionAction {
-    fn default() -> Self {
-        Self {
-            new_status: None,
-            new_assignee_id: None,
-            pending_recommendation: None,
-            substatus: None,
-            substatus_metadata: None,
-            enqueue_jobs: Vec::new(),
-            increment_clarification_round: false,
-        }
-    }
-}
-
 impl WorkflowService {
     pub fn is_legal_transition(from: TicketStatus, to: TicketStatus) -> bool {
         use TicketStatus::*;

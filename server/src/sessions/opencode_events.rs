@@ -241,7 +241,7 @@ fn extract_json_objects_from_text(text: &str) -> Vec<AgentRunResult> {
     candidates
 }
 
-fn extract_result_from_text(text: &str) -> Option<AgentRunResult> {
+pub fn extract_result_from_text(text: &str) -> Option<AgentRunResult> {
     if let Some(result) = try_parse_contract(text) {
         return Some(result);
     }

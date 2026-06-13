@@ -109,7 +109,7 @@ impl AutoAssignConfig {
     }
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct AutoSplitConfig {
     #[serde(default = "default_false")]
     pub default: bool,
@@ -129,22 +129,6 @@ pub struct AutoSplitConfig {
     pub blocked: Option<bool>,
     #[serde(default)]
     pub done: Option<bool>,
-}
-
-impl Default for AutoSplitConfig {
-    fn default() -> Self {
-        Self {
-            default: false,
-            backlog: None,
-            ready: None,
-            in_progress: None,
-            in_review: None,
-            in_qa: None,
-            wait_for_final_review: None,
-            blocked: None,
-            done: None,
-        }
-    }
 }
 
 impl AutoSplitConfig {
@@ -214,6 +198,8 @@ fn default_health_check_interval() -> u32 {
 pub struct AgentConnectorsConfig {
     #[serde(default)]
     pub opencode: OpenCodeConnectorConfig,
+    #[serde(default, rename = "claude-code")]
+    pub claude_code: ClaudeCodeConnectorConfig,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -265,6 +251,49 @@ impl Default for OpenCodeConnectorConfig {
             serve_hostname: default_opencode_host(),
             serve_port: default_opencode_port(),
             run_timeout_secs: default_opencode_run_timeout_secs(),
+            model_providers: Vec::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct ClaudeCodeConnectorConfig {
+    #[serde(default = "default_false")]
+    pub enabled: bool,
+    #[serde(default = "default_claude_code_command")]
+    pub command: String,
+    #[serde(default = "default_claude_code_run_timeout_secs")]
+    pub run_timeout_secs: u64,
+    /// Environment variable name that holds the OAuth token for subscription auth.
+    /// The provider reads this var from the server's environment and injects it as
+    /// `CLAUDE_CODE_OAUTH_TOKEN` for the child process.
+    #[serde(default = "default_claude_code_oauth_env")]
+    pub oauth_token_secret: String,
+    #[serde(default)]
+    pub model_providers: Vec<String>,
+}
+
+pub type ClaudeCodeProviderConfig = ClaudeCodeConnectorConfig;
+
+fn default_claude_code_command() -> String {
+    "claude".into()
+}
+
+fn default_claude_code_run_timeout_secs() -> u64 {
+    600
+}
+
+fn default_claude_code_oauth_env() -> String {
+    "CLAUDE_CODE_OAUTH_TOKEN".into()
+}
+
+impl Default for ClaudeCodeConnectorConfig {
+    fn default() -> Self {
+        Self {
+            enabled: default_false(),
+            command: default_claude_code_command(),
+            run_timeout_secs: default_claude_code_run_timeout_secs(),
+            oauth_token_secret: default_claude_code_oauth_env(),
             model_providers: Vec::new(),
         }
     }
@@ -478,6 +507,46 @@ mod tests {
         assert_eq!(cfg.default_connector, "opencode");
         assert!(cfg.connectors.opencode.enabled);
         assert_eq!(cfg.connectors.opencode.model_providers, vec!["anthropic"]);
+    }
+
+    #[test]
+    fn deserializes_claude_code_connector() {
+        let toml = r#"
+        [agent]
+        default_connector = "claude-code"
+        worktrees_path = "./data/worktrees"
+        worker_count = 2
+
+        [agent.connectors.claude-code]
+        enabled = true
+        run_timeout_secs = 900
+        oauth_token_secret = "MY_CLAUDE_TOKEN"
+        model_providers = ["sonnet", "opus"]
+    "#;
+        #[derive(Deserialize)]
+        struct Wrapper {
+            agent: AgentConfig,
+        }
+        let wrapper: Wrapper = toml::from_str(toml).expect("parse");
+        let cfg = wrapper.agent;
+        assert!(cfg.connectors.claude_code.enabled);
+        assert_eq!(cfg.connectors.claude_code.command, "claude");
+        assert_eq!(cfg.connectors.claude_code.run_timeout_secs, 900);
+        assert_eq!(cfg.connectors.claude_code.oauth_token_secret, "MY_CLAUDE_TOKEN");
+        assert_eq!(
+            cfg.connectors.claude_code.model_providers,
+            vec!["sonnet", "opus"]
+        );
+    }
+
+    #[test]
+    fn claude_code_connector_defaults() {
+        let cfg = ClaudeCodeConnectorConfig::default();
+        assert!(!cfg.enabled);
+        assert_eq!(cfg.command, "claude");
+        assert_eq!(cfg.run_timeout_secs, 600);
+        assert_eq!(cfg.oauth_token_secret, "CLAUDE_CODE_OAUTH_TOKEN");
+        assert!(cfg.model_providers.is_empty());
     }
 
     #[test]

@@ -371,13 +371,10 @@ impl OpenCodeClient {
                 return Ok(());
             }
 
-            match self.session_status(directory, session_id).await? {
-                Some(status) => {
-                    if mark_idle_when_status(Some(&status), &idle_flag) {
-                        return Ok(());
-                    }
+            if let Some(status) = self.session_status(directory, session_id).await? {
+                if mark_idle_when_status(Some(&status), &idle_flag) {
+                    return Ok(());
                 }
-                None => {}
             }
 
             tokio::time::sleep(POLL_INTERVAL).await;
