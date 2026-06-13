@@ -205,6 +205,24 @@ export function TicketGitActions({ ticket }: TicketGitActionsProps) {
         <Button
           type="button"
           variant="secondary"
+          disabled={busy || isLoading || !gitInfo?.prCreateUrl}
+          title={
+            gitInfo?.prCreateUrl
+              ? 'Open pull request creation on the git host'
+              : 'Set a repository remote URL in Settings → Repositories (GitHub, GitLab, or Bitbucket)'
+          }
+          onClick={() => {
+            if (gitInfo?.prCreateUrl) {
+              window.open(gitInfo.prCreateUrl, '_blank', 'noopener,noreferrer');
+            }
+          }}
+          className="w-full"
+        >
+          Create PR
+        </Button>
+        <Button
+          type="button"
+          variant="secondary"
           disabled={busy || isLoading || !gitInfo}
           onClick={() => setMergeOpen(true)}
           className="w-full"

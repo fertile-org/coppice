@@ -55,6 +55,8 @@ export interface TicketGitInfo {
   worktreeExists: boolean;
   defaultBranch: string;
   branches: string[];
+  remoteUrl?: string | null;
+  prCreateUrl?: string | null;
 }
 
 export interface MergeBranchResponse {

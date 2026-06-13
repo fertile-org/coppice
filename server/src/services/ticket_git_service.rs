@@ -4,6 +4,7 @@ use sqlx::PgPool;
 use sqlx::Row;
 use uuid::Uuid;
 
+use crate::services::pr_create_url::build_pr_create_url;
 use crate::services::ticket_service::{TicketError, TicketService};
 use crate::services::worktree_service::{
     compute_paths, finalize_worktree_git, sync_worktree_to_branch_tip, WorktreeError,
@@ -17,6 +18,8 @@ pub struct TicketGitInfo {
     pub worktree_exists: bool,
     pub default_branch: String,
     pub branches: Vec<String>,
+    pub remote_url: Option<String>,
+    pub pr_create_url: Option<String>,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -33,6 +36,7 @@ pub struct TicketGitContext {
     pub worktree_dir: PathBuf,
     pub ticket_branch: String,
     pub default_branch: String,
+    pub remote_url: Option<String>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -82,7 +86,7 @@ impl<'a> TicketGitService<'a> {
 
         let row = sqlx::query(
             r#"
-            SELECT local_path, name, default_branch, verification_status
+            SELECT local_path, name, default_branch, verification_status, remote_url
             FROM repos
             WHERE id = $1
             "#,
@@ -100,6 +104,7 @@ impl<'a> TicketGitService<'a> {
         let local_path: String = row.get("local_path");
         let repo_name: String = row.get("name");
         let default_branch: String = row.get("default_branch");
+        let remote_url: Option<String> = row.get("remote_url");
 
         let paths = compute_paths(&self.worktrees_root, &repo_name, ticket_id);
 
@@ -108,18 +113,26 @@ impl<'a> TicketGitService<'a> {
             worktree_dir: paths.worktree_dir,
             ticket_branch: paths.branch_name,
             default_branch,
+            remote_url,
         })
     }
 
     pub async fn git_info(&self, ticket_id: Uuid) -> Result<TicketGitInfo, TicketGitError> {
         let ctx = self.resolve_context(ticket_id).await?;
         let branches = list_local_branches(&ctx.git_dir).await?;
+        let pr_create_url = build_pr_create_url(
+            ctx.remote_url.as_deref(),
+            &ctx.default_branch,
+            &ctx.ticket_branch,
+        );
         Ok(TicketGitInfo {
             ticket_branch: ctx.ticket_branch.clone(),
             worktree_path: ctx.worktree_dir.to_string_lossy().into_owned(),
             worktree_exists: worktree_exists(&ctx.worktree_dir),
             default_branch: ctx.default_branch,
             branches,
+            remote_url: ctx.remote_url,
+            pr_create_url,
         })
     }
 
