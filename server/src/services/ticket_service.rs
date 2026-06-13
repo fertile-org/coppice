@@ -365,6 +365,7 @@ impl<'a> TicketService<'a> {
         self.enrich_ticket(row_to_ticket(&row)).await
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn apply_workflow_update(
         &self,
         ticket_id: Uuid,

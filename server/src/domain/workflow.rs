@@ -61,7 +61,7 @@ pub struct JobRequest {
     pub resume_agent_id: Option<Uuid>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct TransitionAction {
     pub new_status: Option<TicketStatus>,
     pub new_assignee_id: Option<Option<Uuid>>,

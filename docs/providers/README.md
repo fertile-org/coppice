@@ -6,7 +6,7 @@ Coppice runs agents through a **connector adapter** layer. Orchestration (queue,
 |-----------|-----|--------|
 | `mock` | [mock.md](mock.md) | Implemented — default for CI |
 | `opencode` | [opencode.md](opencode.md) | Implemented — manual host testing |
-| `claude-code` | [claude-code.md](claude-code.md) | Deferred |
+| `claude-code` | [claude-code.md](claude-code.md) | Implemented — subprocess with subscription auth |
 | `codex` | [codex.md](codex.md) | Deferred |
 | `shell` | [shell.md](shell.md) | Deferred |
 

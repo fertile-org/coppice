@@ -117,7 +117,42 @@ async fn list_models(
                     .collect(),
             }))
         }
+        "claude-code" => {
+            let models = known_claude_code_models(&model_provider_id);
+            Ok(Json(ModelListResponse {
+                items: models
+                    .into_iter()
+                    .map(|m| ModelResponse {
+                        id: m.id.to_string(),
+                        name: m.name.to_string(),
+                    })
+                    .collect(),
+            }))
+        }
         "mock" => Ok(Json(ModelListResponse { items: vec![] })),
         _ => Err(StatusCode::NOT_FOUND),
+    }
+}
+
+struct KnownModel {
+    id: &'static str,
+    name: &'static str,
+}
+
+fn known_claude_code_models(provider_id: &str) -> Vec<KnownModel> {
+    match provider_id {
+        "sonnet" => vec![
+            KnownModel { id: "claude-sonnet-4-20250514", name: "Claude Sonnet 4" },
+            KnownModel { id: "claude-3-5-sonnet-20241022", name: "Claude 3.5 Sonnet" },
+        ],
+        "opus" => vec![
+            KnownModel { id: "claude-opus-4-20250514", name: "Claude Opus 4" },
+            KnownModel { id: "claude-3-opus-20240229", name: "Claude 3 Opus" },
+        ],
+        "haiku" => vec![
+            KnownModel { id: "claude-3-5-haiku-20241022", name: "Claude 3.5 Haiku" },
+            KnownModel { id: "claude-3-haiku-20240307", name: "Claude 3 Haiku" },
+        ],
+        _ => vec![],
     }
 }

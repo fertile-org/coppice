@@ -245,7 +245,7 @@ async fn execute_job(
         .get(connector_name)
         .ok_or_else(|| anyhow::anyhow!("agent connector not configured: {connector_name}"))?;
 
-    let session_created_tx = if connector_name == "opencode" {
+    let session_created_tx = if connector_name == "opencode" || connector_name == "claude-code" {
         let (tx, mut rx) = watch::channel(String::new());
         let pool = pool.clone();
         let run_id = run.id;

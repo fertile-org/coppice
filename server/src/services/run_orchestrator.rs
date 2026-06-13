@@ -365,11 +365,11 @@ fn merge_substatus(
 ) -> (Option<Option<Substatus>>, Option<Option<Value>>) {
     let substatus = match &action.substatus {
         Some(value) => Some(*value),
-        None => apply.ticket.substatus.map(|s| Some(s)),
+        None => apply.ticket.substatus.map(Some),
     };
     let substatus_metadata = match &action.substatus_metadata {
         Some(value) => Some(value.clone()),
-        None => apply.ticket.substatus_metadata.clone().map(|m| Some(m)),
+        None => apply.ticket.substatus_metadata.clone().map(Some),
     };
     (substatus, substatus_metadata)
 }

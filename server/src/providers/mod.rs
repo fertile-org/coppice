@@ -1,3 +1,4 @@
+pub mod claude_code;
 pub mod mock;
 pub mod opencode;
 pub mod opencode_models;
