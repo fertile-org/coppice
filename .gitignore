@@ -9,3 +9,4 @@ config.toml
 /server/.sqlx/
 /data/
 dist
+.agent/

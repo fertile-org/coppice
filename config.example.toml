@@ -2,7 +2,7 @@
 # Optional global defaults: ~/.config/coppice/config.toml (lower priority than config.toml).
 
 [server]
-port = 8080
+port = 5000
 
 [database]
 url = "postgres://coppice:coppice@localhost:5433/coppice"
@@ -27,16 +27,16 @@ enabled = false
 command = "opencode"
 serve_hostname = "127.0.0.1"
 serve_port = 4096
-# Max seconds Coppice waits for OpenCode session idle (default 600). Increase for marathon runs.
-# run_timeout_secs = 1800
+# Max seconds Coppice waits for OpenCode session idle (default 1800 = 30 min).
+# run_timeout_secs = 3600
 model_providers = []
 # model_providers = ["zai-coding-plan", "opencode-go", "opencode-zen", "alibaba"]
 
 
 [web]
-port = 5173
+port = 5001
 static_dir = "./web/dist"  # used by `coppice web start`
-# api_url = "http://127.0.0.1:8080"  # optional; defaults to server port
+# api_url = "http://127.0.0.1:5000"  # optional; defaults to server port
 
 [workflow]
 auto_start_runs = false

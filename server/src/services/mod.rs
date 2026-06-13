@@ -13,6 +13,8 @@ pub mod result_contract;
 pub mod run_orchestrator;
 pub mod run_service;
 pub mod split_service;
+pub mod ticket_thread;
+pub mod ticket_git_service;
 pub mod ticket_service;
 pub mod user_service;
 pub mod workflow_service;

@@ -16,7 +16,7 @@ use crate::sessions::session_snapshot::SessionSnapshot;
 
 const POLL_INTERVAL: Duration = Duration::from_millis(500);
 const SSE_RECONNECT_DELAY: Duration = Duration::from_millis(750);
-const DEFAULT_RUN_TIMEOUT: Duration = Duration::from_secs(600);
+const DEFAULT_RUN_TIMEOUT: Duration = Duration::from_secs(1800);
 const STREAM_DRAIN_TIMEOUT: Duration = Duration::from_secs(5);
 
 struct StreamContext {
@@ -338,6 +338,9 @@ impl OpenCodeClient {
     ) -> Result<(), ProviderError> {
         let deadline = tokio::time::Instant::now() + run_timeout;
         let mut cancel_rx = cancel_rx;
+        let wait_started = tokio::time::Instant::now();
+        let mut last_log = tokio::time::Instant::now();
+        const LOG_INTERVAL: Duration = Duration::from_secs(60);
 
         loop {
             if tokio::time::Instant::now() >= deadline {
@@ -350,6 +353,17 @@ impl OpenCodeClient {
 
             if is_cancelled(&mut cancel_rx) {
                 return Err(ProviderError::Cancelled);
+            }
+
+            if last_log.elapsed() >= LOG_INTERVAL {
+                tracing::info!(
+                    session_id,
+                    directory = %directory.display(),
+                    waited_secs = wait_started.elapsed().as_secs(),
+                    timeout_secs = run_timeout.as_secs(),
+                    "waiting for opencode session idle"
+                );
+                last_log = tokio::time::Instant::now();
             }
 
             // SSE session.status idle is authoritative; do not wait for REST to agree.

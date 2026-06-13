@@ -24,6 +24,7 @@ import { ticketPrioritySchema } from '../../lib/schemas/ticket';
 import { useRepos } from '../repos/useRepos';
 import { useAgentRuns } from './useAgentRuns';
 import { TicketStatusBadge } from './TicketStatusBadge';
+import { TicketGitActions } from './TicketGitActions';
 import {
   useAgents,
   useApproveSplits,
@@ -306,6 +307,8 @@ export function TicketMetadataPanel({ ticket }: TicketMetadataPanelProps) {
           )}
         </dl>
       )}
+
+      <TicketGitActions ticket={ticket} />
 
       <div className="space-y-2">
         <Label htmlFor="ticket-repo">Repository</Label>

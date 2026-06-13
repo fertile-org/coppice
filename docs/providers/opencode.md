@@ -28,7 +28,7 @@ enabled = true
 command = "opencode"
 serve_hostname = "127.0.0.1"
 serve_port = 4096
-# run_timeout_secs = 1800   # optional; default 600
+# run_timeout_secs = 3600   # optional; default 1800 (30 min)
 model_providers = ["zai-coding-plan"]
 
 # After opencode auth login — list provider IDs with: opencode auth list
@@ -155,7 +155,7 @@ Disable auto-compaction only for debugging (`"compaction": { "auto": false }`); 
 
 - **No manual `/compact`** — orchestration waits for OpenCode’s automatic guard.
 - **Result contract** — after compaction, Coppice still parses the final assistant `text` part (and scans `compaction` parts as a fallback). See `fixtures/opencode-events/compacted-done.jsonl`.
-- **Run timeout** — Coppice waits up to **`run_timeout_secs`** (default **600**) for the OpenCode session to reach `idle`. Long shell commands (e.g. full `cargo test --workspace` in this monorepo) often exceed this and fail with `opencode session timed out`. Increase `agent.connectors.opencode.run_timeout_secs` in `config.toml`, or prefer targeted tests (`make test-unit`, `make test-smoke`, `cargo test -p coppice-server --lib`) during agent runs. For work that spans multiple sessions, return `status: "continued"` with a `progressNote` (see [Context & Long-Running Tasks design](../superpowers/specs/2026-06-10-context-long-running-tasks-design.md)).
+- **Run timeout** — Coppice waits up to **`run_timeout_secs`** (default **1800**, 30 minutes) for the OpenCode session to reach `idle`. Very long shell commands may still exceed this; increase `agent.connectors.opencode.run_timeout_secs` in `config.toml`, or prefer targeted tests (`make test-unit`, `make test-smoke`, `cargo test -p coppice-server --lib`) during agent runs. For work that spans multiple sessions, return `status: "continued"` with a `progressNote` (see [Context & Long-Running Tasks design](../superpowers/specs/2026-06-10-context-long-running-tasks-design.md)).
 
 ### SSE events (Live Session)
 

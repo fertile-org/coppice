@@ -41,8 +41,29 @@ export function commentsQueryKey(ticketId: string) {
   return ['comments', ticketId] as const;
 }
 
+export function gitInfoQueryKey(ticketId: string) {
+  return ['ticket-git-info', ticketId] as const;
+}
+
 export function childrenQueryKey(ticketId: string) {
   return ['ticket-children', ticketId] as const;
+}
+
+export interface TicketGitInfo {
+  ticketBranch: string;
+  worktreePath: string;
+  worktreeExists: boolean;
+  defaultBranch: string;
+  branches: string[];
+}
+
+export interface MergeBranchResponse {
+  merge: {
+    baseBranch: string;
+    ticketBranch: string;
+    headSha: string;
+    message: string;
+  };
 }
 
 async function fetchTicket(ticketId: string): Promise<Ticket> {
@@ -120,6 +141,30 @@ async function postFinalApprove(ticketId: string): Promise<Ticket> {
   return res.json() as Promise<Ticket>;
 }
 
+async function fetchTicketGitInfo(ticketId: string): Promise<TicketGitInfo> {
+  const res = await apiFetch(`/api/tickets/${ticketId}/git-info`);
+  return res.json() as Promise<TicketGitInfo>;
+}
+
+async function postMergeBranch(
+  ticketId: string,
+  baseBranch: string,
+): Promise<MergeBranchResponse> {
+  const res = await apiFetch(`/api/tickets/${ticketId}/merge-branch`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ baseBranch }),
+  });
+  return res.json() as Promise<MergeBranchResponse>;
+}
+
+async function postRemoveWorktree(ticketId: string): Promise<TicketGitInfo> {
+  const res = await apiFetch(`/api/tickets/${ticketId}/remove-worktree`, {
+    method: 'POST',
+  });
+  return res.json() as Promise<TicketGitInfo>;
+}
+
 async function fetchTicketChildren(ticketId: string): Promise<Ticket[]> {
   const res = await apiFetch(`/api/tickets/${ticketId}/children`);
   return res.json() as Promise<Ticket[]>;
@@ -163,6 +208,9 @@ export function useAssignAgent(ticketId: string) {
       assignTicketAgent(ticketId, agentId),
     onSuccess: (ticket) => {
       queryClient.setQueryData(ticketQueryKey(ticketId), ticket);
+      void queryClient.invalidateQueries({
+        queryKey: ['tickets', ticket.projectId],
+      });
     },
   });
 }
@@ -214,6 +262,41 @@ export function useFinalApprove(ticketId: string) {
       void queryClient.invalidateQueries({
         queryKey: ['tickets', ticket.projectId],
       });
+      void queryClient.invalidateQueries({
+        queryKey: commentsQueryKey(ticketId),
+      });
+    },
+  });
+}
+
+export function useTicketGitInfo(ticketId: string, enabled: boolean) {
+  return useQuery({
+    queryKey: gitInfoQueryKey(ticketId),
+    queryFn: () => fetchTicketGitInfo(ticketId),
+    enabled,
+  });
+}
+
+export function useMergeTicketBranch(ticketId: string) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (baseBranch: string) => postMergeBranch(ticketId, baseBranch),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: gitInfoQueryKey(ticketId) });
+      void queryClient.invalidateQueries({ queryKey: commentsQueryKey(ticketId) });
+    },
+  });
+}
+
+export function useRemoveWorktree(ticketId: string) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: () => postRemoveWorktree(ticketId),
+    onSuccess: (info) => {
+      queryClient.setQueryData(gitInfoQueryKey(ticketId), info);
+      void queryClient.invalidateQueries({ queryKey: commentsQueryKey(ticketId) });
     },
   });
 }

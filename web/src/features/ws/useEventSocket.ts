@@ -37,6 +37,10 @@ function dispatchMessage(raw: string) {
     void queryClient.invalidateQueries({
       queryKey: ['agent-runs', payload.ticket_id],
     });
+    void queryClient.invalidateQueries({
+      queryKey: ['ticket', payload.ticket_id],
+    });
+    void queryClient.invalidateQueries({ queryKey: ['tickets'] });
     for (const listener of listeners) {
       listener.onRunStarted?.(payload);
     }

@@ -15,5 +15,5 @@ COPY server/agent_templates /app/server/agent_templates
 COPY fixtures /app/fixtures
 COPY deploy/config/default.toml /etc/coppice/config.toml
 ENV COPPICE_CONFIG=/etc/coppice/config.toml
-EXPOSE 8080
+EXPOSE 5000
 CMD ["coppice-server"]

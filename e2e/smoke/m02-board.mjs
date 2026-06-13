@@ -7,15 +7,15 @@
  * runs locally via `make e2e-smoke` with compose services up.
  *
  * Env:
- *   COPPICE_API_URL            default http://localhost:8080
- *   COPPICE_WEB_URL            optional http://localhost:5173 (reachability only)
+ *   COPPICE_API_URL            default http://localhost:5000
+ *   COPPICE_WEB_URL            optional http://localhost:5001 (reachability only)
  *   COPPICE_BOOTSTRAP_PASSWORD default changeme
  *   COPPICE_SMOKE_EMAIL        default admin@localhost
  *   COPPICE_SMOKE_PASSWORD     default changeme
  */
 
-const API = process.env.COPPICE_API_URL ?? 'http://localhost:8080';
-const WEB = process.env.COPPICE_WEB_URL ?? 'http://localhost:5173';
+const API = process.env.COPPICE_API_URL ?? 'http://localhost:5000';
+const WEB = process.env.COPPICE_WEB_URL ?? 'http://localhost:5001';
 const BOOTSTRAP_PASSWORD =
   process.env.COPPICE_BOOTSTRAP_PASSWORD ?? 'changeme';
 const EMAIL = process.env.COPPICE_SMOKE_EMAIL ?? 'admin@localhost';

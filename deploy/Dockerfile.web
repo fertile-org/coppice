@@ -4,5 +4,5 @@ RUN corepack enable && corepack prepare yarn@1.22.22 --activate
 COPY web/package.json web/yarn.lock ./
 RUN yarn install --frozen-lockfile
 COPY web/ .
-EXPOSE 5173
+EXPOSE 5001
 CMD ["yarn", "dev", "--host", "0.0.0.0"]

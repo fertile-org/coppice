@@ -30,7 +30,7 @@ Key fields for local dev (`config.toml`):
 | Field | Purpose |
 |-------|---------|
 | `database.url` | Host → Docker Postgres on `localhost:5433` |
-| `server.port` | API listen port (`8080`) |
+| `server.port` | API listen port (`5000`) |
 | `auth.session_secret` | Session cookie signing |
 | `auth.bootstrap_password` | First-admin bootstrap password |
 | `storage.artifacts_dir` | Upload storage on host |
@@ -43,7 +43,7 @@ Docker Compose (agents / CI) sets `COPPICE_CONFIG=/etc/coppice/config.toml` (fro
 | | Agent / CI (`make compose-up`) | Human hot reload (`compose-local-up` + host API) |
 |--|--|--|
 | Postgres port | 5432 | 5433 |
-| API | Docker `:8080` | Host `:8080` |
+| API | Docker `:5000` | Host `:5000` |
 | Config source | `default.toml` + compose env inside container | `./config.toml` on the host |
 | Migrations | Server auto-migrates on container start | `make migrate` (reads `config.toml`) |
 
@@ -68,8 +68,8 @@ make bootstrap   # first time only
 make web-dev
 ```
 
-- API: http://localhost:8080/health
-- Web: http://localhost:5173 — login `admin@localhost` / `changeme`
+- API: http://localhost:5000/health
+- Web: http://localhost:5001 — login `admin@localhost` / `changeme`
 
 Tear down Postgres: `make compose-local-down`
 
@@ -114,7 +114,7 @@ Always use Docker Compose via the Makefile — not standalone `docker run`.
 | `make compose-down` | Stop default stack |
 | `make migrate` | `coppice migrate` (reads `config.toml` on host) |
 | `make bootstrap` | `coppice bootstrap admin` |
-| `make web-dev` | Vite dev server (proxies to `:8080`) |
+| `make web-dev` | Vite dev server (proxies to `:5000`) |
 | `make test` | Full Rust suite (`cargo test --workspace --features embedded-test-db`) |
 | `make test-unit` | Lib tests only — use during agent runs (~5–15s warm) |
 | `make test-smoke` | Lib + smoke integration (`health`, `integration_comments`, `integration_tickets`) |

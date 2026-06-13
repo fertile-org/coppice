@@ -251,7 +251,7 @@ export function TicketDrawer({ ticketId, onClose }: TicketDrawerProps) {
           )}
 
           {ticket && tab === 'detail' && (
-            <div className="grid h-full gap-0 md:grid-cols-[minmax(0,1fr)_minmax(0,16rem)]">
+            <div className="grid h-full gap-0 md:grid-cols-[minmax(0,1fr)_minmax(0,calc(16rem+50px))]">
               <div className="min-h-0 overflow-y-auto px-6 py-5">
                 <TicketDetailPanel ticket={ticket} />
               </div>
@@ -266,6 +266,7 @@ export function TicketDrawer({ ticketId, onClose }: TicketDrawerProps) {
               <LiveView
                 runId={liveRun?.id ?? null}
                 runStatus={liveRun?.status ?? null}
+                startedAt={liveRun?.startedAt ?? null}
               />
             </div>
           )}

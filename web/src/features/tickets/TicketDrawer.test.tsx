@@ -37,6 +37,9 @@ vi.mock('./useTicket', () => ({
   useTicketChildren: () => ({ data: [] }),
   useApproveSplits: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useDismissSplits: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useTicketGitInfo: () => ({ data: undefined, isLoading: false }),
+  useMergeTicketBranch: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useRemoveWorktree: () => ({ mutateAsync: vi.fn(), isPending: false }),
 }));
 
 vi.mock('./useAgentRuns', () => ({

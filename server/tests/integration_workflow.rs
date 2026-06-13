@@ -124,6 +124,86 @@ async fn final_approve_requires_wait_for_final_review() {
     let approved: serde_json::Value = common::json_body(approve).await;
     assert_eq!(approved["status"], "done");
     assert!(approved["substatus"].is_null());
+
+    let comments_res = app
+        .clone()
+        .oneshot(common::json_request(
+            "GET",
+            &format!("/api/tickets/{ticket_id}/comments"),
+            "",
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(comments_res.status(), StatusCode::OK);
+    let comments: serde_json::Value = common::json_body(comments_res).await;
+    let final_comment = comments
+        .as_array()
+        .and_then(|list| list.last())
+        .expect("final approve comment");
+    assert!(
+        final_comment["body"]
+            .as_str()
+            .unwrap_or("")
+            .contains("Final approval")
+    );
+}
+
+#[tokio::test]
+async fn assign_on_ready_moves_ticket_to_in_progress() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+
+    let (_state, app, cookie, csrf, _env) =
+        common::bootstrap_and_login_with_auto_start_workers().await;
+
+    let project_id = common::create_test_project(&app, &cookie, &csrf).await;
+    let (_git_dir, local_path) = common::create_temp_git_checkout();
+    let repo_id =
+        common::register_test_repo(&app, &local_path.display().to_string(), &cookie, &csrf).await;
+
+    let engineer_id = common::create_agent_with_preset_key(
+        &app,
+        "backend_engineer",
+        "Backend Engineer",
+        &cookie,
+        &csrf,
+    )
+    .await;
+
+    let ticket_id = common::create_test_ticket(&app, &project_id, &cookie, &csrf).await;
+    common::set_ticket_repo(&app, &ticket_id, &repo_id, &cookie, &csrf).await;
+
+    let patch = app
+        .clone()
+        .oneshot(common::json_request(
+            "PATCH",
+            &format!("/api/tickets/{ticket_id}/status"),
+            r#"{"status":"ready"}"#,
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(patch.status(), StatusCode::OK);
+
+    let assign_res = app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            &format!("/api/tickets/{ticket_id}/assign"),
+            &format!(r#"{{"agentId":"{engineer_id}"}}"#),
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(assign_res.status(), StatusCode::OK);
+    let assigned: serde_json::Value = common::json_body(assign_res).await;
+    assert_eq!(assigned["status"], "in_progress");
 }
 
 #[tokio::test]

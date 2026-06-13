@@ -5,6 +5,10 @@ pub enum LiveMessage {
     Frame { seq: u64, data: Vec<u8> },
     Snapshot { snapshot: Value },
     Event { event: Value },
+    Heartbeat {
+        session_status: Option<String>,
+        elapsed_secs: u64,
+    },
     End {
         status: String,
         reason: Option<String>,
@@ -29,6 +33,14 @@ impl LiveMessage {
             LiveMessage::Event { event } => json!({
                 "type": "event",
                 "event": event,
+            }),
+            LiveMessage::Heartbeat {
+                session_status,
+                elapsed_secs,
+            } => json!({
+                "type": "heartbeat",
+                "sessionStatus": session_status,
+                "elapsedSecs": elapsed_secs,
             }),
             LiveMessage::End {
                 status,
@@ -68,6 +80,18 @@ mod tests {
         let json = msg.to_ws_json();
         assert_eq!(json["type"], "event");
         assert_eq!(json["event"], event);
+    }
+
+    #[test]
+    fn heartbeat_encodes_session_status_and_elapsed() {
+        let msg = LiveMessage::Heartbeat {
+            session_status: Some("busy".into()),
+            elapsed_secs: 120,
+        };
+        let json = msg.to_ws_json();
+        assert_eq!(json["type"], "heartbeat");
+        assert_eq!(json["sessionStatus"], "busy");
+        assert_eq!(json["elapsedSecs"], 120);
     }
 
     #[test]

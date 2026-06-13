@@ -7,7 +7,7 @@
  * agent_run.finished.
  *
  * Env:
- *   COPPICE_API_URL            default http://localhost:8080
+ *   COPPICE_API_URL            default http://localhost:5000
  *   COPPICE_BOOTSTRAP_PASSWORD default changeme
  *   COPPICE_SMOKE_EMAIL        default admin@localhost
  *   COPPICE_SMOKE_PASSWORD     default changeme
@@ -23,7 +23,7 @@ const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '../..');
 execSync('npm install --no-save ws', { cwd: repoRoot, stdio: 'inherit' });
 const WebSocket = createRequire(join(repoRoot, 'node_modules/ws/package.json'))('ws');
 
-const API = process.env.COPPICE_API_URL ?? 'http://localhost:8080';
+const API = process.env.COPPICE_API_URL ?? 'http://localhost:5000';
 const WS_BASE = API.replace(/^http/, 'ws');
 const BOOTSTRAP_PASSWORD =
   process.env.COPPICE_BOOTSTRAP_PASSWORD ?? 'changeme';

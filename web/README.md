@@ -16,11 +16,11 @@ See [docs/web/DESIGN.md](../docs/web/DESIGN.md) for the coppice-forest aesthetic
 
 ```bash
 yarn install
-yarn dev      # http://localhost:5173 — proxies /api → server
+yarn dev      # http://localhost:5001 — proxies /api → server
 yarn build
 yarn test
 ```
 
-Or from the repo root: `make web-dev` (installs deps, then starts Vite against the host API on `:8080`).
+Or from the repo root: `make web-dev` (installs deps, then starts Vite against the host API on `:5000`).
 
-Set `VITE_API_URL` to override the API proxy target (default `http://localhost:8080`).
+Set `VITE_API_URL` to override the API proxy target (default `http://localhost:5000`).

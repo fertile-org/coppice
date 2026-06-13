@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use crate::config::WorkflowConfig;
 use crate::domain::agent::Agent;
-use crate::domain::comment::{AuthorType, Comment, CommentIntent};
+use crate::domain::comment::{AuthorType, CommentIntent};
 use crate::domain::run::{AgentRun, RunStatus};
 use crate::domain::slug::slugify;
 use crate::domain::substatus::Substatus;
@@ -16,42 +16,22 @@ use crate::services::result_contract::{merge_ticket_description, ApplyResult};
 use crate::services::run_service::{RunError, RunService};
 use crate::services::split_service::SplitService;
 use crate::services::ticket_service::TicketService;
+use crate::services::ticket_thread;
 use crate::services::workflow_service::{WorkflowService, MAX_CLARIFICATION_ROUNDS};
-use crate::util::truncate::truncate_with_ellipsis;
 use serde_json::Value;
 use sqlx::PgPool;
 use uuid::Uuid;
-
-const RESUME_SECTION_MAX: usize = 2000;
-const RESUME_SECTION_HEADER: &str = "## Resume\n\n";
-const RESUME_SECTION_FOOTER: &str = "\n\n";
 
 pub struct RunOrchestrator<'a> {
     pool: &'a PgPool,
     workflow: &'a WorkflowConfig,
 }
 
-fn cap_resume_body(body: &str) -> String {
-    let overhead = RESUME_SECTION_HEADER.len() + RESUME_SECTION_FOOTER.len();
-    let max_body = RESUME_SECTION_MAX.saturating_sub(overhead);
-    truncate_with_ellipsis(body, max_body)
-}
-
-fn find_blocker_clarification(comments: &[Comment]) -> Option<(&Comment, &Comment)> {
-    let answer_idx = comments
-        .iter()
-        .rposition(|c| c.intent == CommentIntent::ClarificationAnswer)?;
-    let blocker = comments[..answer_idx]
-        .iter()
-        .rfind(|c| c.intent == CommentIntent::Blocked)?;
-    Some((blocker, &comments[answer_idx]))
-}
-
 pub async fn load_run_continuation_context(
     pool: &PgPool,
     run: &AgentRun,
 ) -> Result<Option<String>, CommentError> {
-    if run.job_type != "work_on_ticket" {
+    if run.job_type != "work_on_ticket" && run.job_type != "respond_to_mention" {
         return Ok(None);
     }
 
@@ -59,28 +39,15 @@ pub async fn load_run_continuation_context(
         .list_by_ticket(run.ticket_id)
         .await?;
 
-    let checkpoint = comments.iter().rfind(|c| {
-        c.author_type == AuthorType::Agent && c.intent == CommentIntent::ProgressUpdate
-    });
+    let agent_names = AgentService::new(pool)
+        .list_agents()
+        .await
+        .unwrap_or_default()
+        .into_iter()
+        .map(|agent| (agent.id, agent.name))
+        .collect();
 
-    let blocker_answer = find_blocker_clarification(&comments);
-
-    let mut parts = Vec::new();
-    if let Some(comment) = checkpoint {
-        parts.push(format!("**Last checkpoint:** {}", comment.body));
-    }
-    if let Some((blocker, answer)) = blocker_answer {
-        parts.push(format!(
-            "**Prior blocker:** {} / **PM answer:** {}",
-            blocker.body, answer.body
-        ));
-    }
-
-    if parts.is_empty() {
-        return Ok(None);
-    }
-
-    Ok(Some(cap_resume_body(&parts.join("\n\n"))))
+    Ok(ticket_thread::format_ticket_thread(&comments, &agent_names))
 }
 
 impl<'a> RunOrchestrator<'a> {
@@ -1055,9 +1022,9 @@ mod tests {
             .expect("load continuation context")
             .expect("resume context");
 
-        assert!(ctx.contains("**Last checkpoint:**"));
+        assert!(ctx.contains("Recent activity on this ticket"));
         assert!(ctx.contains("Implemented TmuxStream create/kill"));
-        assert!(!ctx.contains("**Prior blocker:**"));
+        assert!(ctx.contains("progress update"));
     }
 
     #[tokio::test]
@@ -1174,8 +1141,7 @@ mod tests {
         let md = std::fs::read_to_string(worktree.path().join(".agent/context.md"))
             .expect("read context.md");
 
-        assert!(md.contains("## Resume"));
-        assert!(md.contains("**Last checkpoint:**"));
+        assert!(md.contains("## Ticket thread"));
         assert!(md.contains("Implemented TmuxStream create/kill"));
         assert!(md.contains("tmux_stream.rs"));
 

@@ -3,6 +3,7 @@ use crate::domain::repo::VerificationStatus;
 use crate::domain::run::{
     run_status_from_str, run_status_to_str, AgentRun, RunStatus,
 };
+use crate::services::agent_service::AgentService;
 use crate::services::repo_service::RepoService;
 use crate::sandbox::permissive::PROFILE_ID;
 use crate::services::comment_service::{CommentError, CommentService};
@@ -11,7 +12,8 @@ use crate::services::agent_service::AgentError;
 use crate::services::job_service::{JobError, JobService};
 use crate::services::mention_service::MentionError;
 use crate::services::result_contract::ApplyResult;
-use crate::services::ticket_service::{TicketError, TicketService};
+use crate::services::ticket_service::{TicketError, TicketService, TicketWithDisplay};
+use crate::services::workflow_service::WorkflowService;
 use sqlx::PgPool;
 use sqlx::Row;
 use uuid::Uuid;
@@ -198,7 +200,32 @@ impl<'a> RunService<'a> {
 
         tx.commit().await?;
 
+        self.apply_run_start_status(ticket_id, agent_id, JOB_TYPE_WORK_ON_TICKET)
+            .await?;
+
         Ok(row_to_run(&row))
+    }
+
+    async fn apply_run_start_status(
+        &self,
+        ticket_id: Uuid,
+        agent_id: Uuid,
+        job_type: &str,
+    ) -> Result<Option<TicketWithDisplay>, RunError> {
+        let ticket_svc = TicketService::new(self.pool);
+        let ticket = ticket_svc.get(ticket_id).await?;
+        let agent = AgentService::new(self.pool).get(agent_id).await?;
+        let Some(new_status) = WorkflowService::resolve_run_start_transition(
+            ticket.ticket.status,
+            &agent.role,
+            job_type,
+        ) else {
+            return Ok(None);
+        };
+        let updated = ticket_svc
+            .update_status(ticket_id, new_status, None, None)
+            .await?;
+        Ok(Some(updated))
     }
 
     pub async fn get(&self, run_id: Uuid) -> Result<AgentRun, RunError> {
@@ -461,6 +488,9 @@ impl<'a> RunService<'a> {
         .await?;
 
         tx.commit().await?;
+
+        self.apply_run_start_status(ticket_id, agent_id, job_type)
+            .await?;
 
         Ok(row_to_run(&row))
     }

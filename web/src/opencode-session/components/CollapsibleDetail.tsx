@@ -49,6 +49,17 @@ export function CollapsibleDetail({
         aria-expanded={open}
       >
         <span className={sessionTheme.thinking}>{label}</span>
+        {streaming ? (
+          <span className="ml-2 inline-flex items-center gap-1 align-middle" aria-hidden>
+            {[0, 150, 300].map((delay) => (
+              <span
+                key={delay}
+                className="inline-block h-1 w-1 animate-bounce rounded-full bg-[var(--oc-thinking)]"
+                style={{ animationDelay: `${delay}ms` }}
+              />
+            ))}
+          </span>
+        ) : null}
         {badge ? <span className="ml-2 inline-flex align-middle">{badge}</span> : null}
         {!open && preview ? (
           <span className={sessionTheme.thinkingDetail}>: {preview}</span>

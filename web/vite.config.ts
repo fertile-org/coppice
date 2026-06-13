@@ -6,17 +6,17 @@ export default defineConfig({
   plugins: [react()],
   server: {
     host: '0.0.0.0',
-    port: 5173,
+    port: 5001,
     proxy: {
       '/api': {
-        target: process.env.VITE_API_URL ?? 'http://localhost:8080',
+        target: process.env.VITE_API_URL ?? 'http://localhost:5000',
         changeOrigin: true,
         configure: (proxy) => {
           proxy.on('error', () => {});
         },
       },
       '/ws': {
-        target: process.env.VITE_API_URL ?? 'http://localhost:8080',
+        target: process.env.VITE_API_URL ?? 'http://localhost:5000',
         changeOrigin: true,
         ws: true,
         configure: (proxy) => {

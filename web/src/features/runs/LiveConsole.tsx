@@ -2,10 +2,12 @@ import { FitAddon } from '@xterm/addon-fit';
 import { Terminal } from 'xterm';
 import { useEffect, useRef, useState } from 'react';
 import 'xterm/css/xterm.css';
+import { LiveRunActivityBar } from './LiveRunActivityBar';
 
 interface LiveConsoleProps {
   runId: string | null;
   runStatus: string | null;
+  startedAt?: string | null;
 }
 
 type ConnectionState = 'connecting' | 'open' | 'closed';
@@ -19,7 +21,7 @@ function writeTerminalData(term: Terminal, data: string) {
   term.write(data.replace(/\r?\n/g, '\r\n'));
 }
 
-export function LiveConsole({ runId, runStatus }: LiveConsoleProps) {
+export function LiveConsole({ runId, runStatus, startedAt }: LiveConsoleProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
@@ -27,6 +29,10 @@ export function LiveConsole({ runId, runStatus }: LiveConsoleProps) {
   const [connection, setConnection] = useState<ConnectionState>('closed');
   const [reconnectToken, setReconnectToken] = useState(0);
   const [sawOutput, setSawOutput] = useState(false);
+  const [lastActivityAt, setLastActivityAt] = useState<number | null>(null);
+  const [heartbeatElapsedSecs, setHeartbeatElapsedSecs] = useState<number | null>(
+    null,
+  );
   const sawOutputRef = useRef(false);
   const wsRunIdRef = useRef<string | null>(null);
 
@@ -61,6 +67,8 @@ export function LiveConsole({ runId, runStatus }: LiveConsoleProps) {
       wsRunIdRef.current = runId;
       sawOutputRef.current = false;
       setSawOutput(false);
+      setLastActivityAt(null);
+      setHeartbeatElapsedSecs(null);
     }
     setConnection('connecting');
 
@@ -78,7 +86,19 @@ export function LiveConsole({ runId, runStatus }: LiveConsoleProps) {
         data?: string;
         status?: string;
         recoverable?: boolean;
+        sessionStatus?: string;
+        elapsedSecs?: number;
       };
+      setLastActivityAt(Date.now());
+      if (msg.type === 'heartbeat') {
+        if (typeof msg.sessionStatus === 'string') {
+          // terminal view has no session UI; elapsed still useful
+        }
+        if (typeof msg.elapsedSecs === 'number') {
+          setHeartbeatElapsedSecs(msg.elapsedSecs);
+        }
+        return;
+      }
       if (msg.type === 'frame' && typeof msg.data === 'string') {
         if (termRef.current) writeTerminalData(termRef.current, msg.data);
         sawOutputRef.current = true;
@@ -138,6 +158,13 @@ export function LiveConsole({ runId, runStatus }: LiveConsoleProps) {
 
   return (
     <div className="flex h-full min-h-[320px] flex-col gap-2">
+      <LiveRunActivityBar
+        runStatus={runStatus}
+        startedAt={startedAt}
+        connection={connection}
+        lastActivityAt={lastActivityAt}
+        heartbeatElapsedSecs={heartbeatElapsedSecs}
+      />
       <p className="font-body text-xs text-text-secondary">{statusLabel}</p>
       <div
         ref={containerRef}

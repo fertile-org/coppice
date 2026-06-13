@@ -14,10 +14,12 @@ import type {
   SessionSnapshot,
   SessionStore,
 } from '../../opencode-session/sync/types';
+import { LiveRunActivityBar } from './LiveRunActivityBar';
 
 interface LiveSessionProps {
   runId: string | null;
   runStatus: string | null;
+  startedAt?: string | null;
 }
 
 type ConnectionState = 'connecting' | 'open' | 'closed';
@@ -84,14 +86,31 @@ function shouldStopReconnect(msg: {
   );
 }
 
-export function LiveSession({ runId, runStatus }: LiveSessionProps) {
+function sessionStatusFromEvent(event: OpenCodeEvent): string | null {
+  if (event.type !== 'session.status') return null;
+  const props = event.properties;
+  if (!props || typeof props !== 'object') return null;
+  const status = (props as { status?: { type?: string } }).status;
+  return typeof status?.type === 'string' ? status.type : null;
+}
+
+export function LiveSession({ runId, runStatus, startedAt }: LiveSessionProps) {
   const [store, dispatch] = useReducer(sessionReducer, null);
   const [connection, setConnection] = useState<ConnectionState>('closed');
   const [reconnectToken, setReconnectToken] = useState(0);
   const [interrupted, setInterrupted] = useState<string | null>(null);
   const [hasContent, setHasContent] = useState(false);
+  const [lastActivityAt, setLastActivityAt] = useState<number | null>(null);
+  const [sessionStatus, setSessionStatus] = useState<string | null>(null);
+  const [heartbeatElapsedSecs, setHeartbeatElapsedSecs] = useState<number | null>(
+    null,
+  );
   const hasContentRef = useRef(false);
   const recoverableRef = useRef(true);
+
+  function touchActivity() {
+    setLastActivityAt(Date.now());
+  }
 
   // Initialize store when runId changes (also recovers after React StrictMode remount).
   useEffect(() => {
@@ -100,6 +119,9 @@ export function LiveSession({ runId, runStatus }: LiveSessionProps) {
     setInterrupted(null);
     setHasContent(false);
     hasContentRef.current = false;
+    setLastActivityAt(null);
+    setSessionStatus(null);
+    setHeartbeatElapsedSecs(null);
     dispatch({ type: 'reset', sessionId: runId });
   }, [runId]);
 
@@ -133,7 +155,21 @@ export function LiveSession({ runId, runStatus }: LiveSessionProps) {
         recoverable?: boolean;
         reason?: string | null;
         status?: string;
+        sessionStatus?: string;
+        elapsedSecs?: number;
       };
+
+      touchActivity();
+
+      if (msg.type === 'heartbeat') {
+        if (typeof msg.sessionStatus === 'string') {
+          setSessionStatus(msg.sessionStatus);
+        }
+        if (typeof msg.elapsedSecs === 'number') {
+          setHeartbeatElapsedSecs(msg.elapsedSecs);
+        }
+        return;
+      }
 
       if (msg.type === 'snapshot') {
         dispatch({
@@ -147,6 +183,8 @@ export function LiveSession({ runId, runStatus }: LiveSessionProps) {
         hasContentRef.current = true;
         setHasContent(true);
       } else if (msg.type === 'event' && msg.event) {
+        const nextStatus = sessionStatusFromEvent(msg.event);
+        if (nextStatus) setSessionStatus(nextStatus);
         dispatch({ type: 'event', event: msg.event });
         hasContentRef.current = true;
         setHasContent(true);
@@ -211,6 +249,14 @@ export function LiveSession({ runId, runStatus }: LiveSessionProps) {
 
   return (
     <div className="flex h-full min-h-[320px] flex-col gap-2">
+      <LiveRunActivityBar
+        runStatus={runStatus}
+        startedAt={startedAt}
+        connection={connection}
+        sessionStatus={sessionStatus}
+        lastActivityAt={lastActivityAt}
+        heartbeatElapsedSecs={heartbeatElapsedSecs}
+      />
       <p className="font-body text-xs text-text-secondary">{statusLabel}</p>
       {interrupted && (
         <p className="font-body text-xs text-warning">{interrupted}</p>

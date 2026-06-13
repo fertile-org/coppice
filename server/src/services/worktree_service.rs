@@ -8,22 +8,151 @@ pub struct WorktreePaths {
     pub branch_name: String,
 }
 
+/// One worktree and branch per ticket — shared by all agents working sequentially on it.
 pub fn compute_paths(
     worktrees_root: &Path,
     repo_name: &str,
     ticket_id: Uuid,
-    agent_name: &str,
 ) -> WorktreePaths {
-    let agent_slug = crate::domain::slug::slugify(agent_name);
     let repo_slug = crate::domain::slug::slugify(repo_name);
     let ticket_id_str = ticket_id.to_string();
     let ticket_short = ticket_id_str.split('-').next().unwrap_or("ticket");
     WorktreePaths {
-        worktree_dir: worktrees_root.join(format!(
-            "TICKET-{ticket_short}-{agent_slug}-{repo_slug}"
-        )),
-        branch_name: format!("agent/TICKET-{ticket_short}-{agent_slug}"),
+        worktree_dir: worktrees_root.join(format!("TICKET-{ticket_short}-{repo_slug}")),
+        branch_name: format!("agent/TICKET-{ticket_short}"),
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorktreeGitState {
+    pub branch: String,
+    pub head_sha: String,
+    pub newly_committed: bool,
+}
+
+/// Fast-forward the worktree to the branch tip in the main repo (if behind).
+/// Removes `.agent/` first so injected runtime context cannot block the merge.
+pub async fn sync_worktree_to_branch_tip(
+    git_dir: &Path,
+    worktree: &Path,
+    branch: &str,
+) -> Result<(), WorktreeError> {
+    let branch_tip = git_ref_sha(git_dir, branch).await?;
+    let head = git_head_sha(worktree).await?;
+    if branch_tip == head {
+        return Ok(());
+    }
+
+    let agent_dir = worktree.join(".agent");
+    if agent_dir.exists() {
+        tokio::fs::remove_dir_all(&agent_dir).await?;
+    }
+
+    run_git_in(worktree, &["merge", "--ff-only", &branch_tip]).await
+}
+
+/// Stage and commit any uncommitted changes (excluding `.agent/`), then return branch + HEAD.
+pub async fn finalize_worktree_git(
+    worktree: &Path,
+    branch: &str,
+    commit_message: &str,
+) -> Result<WorktreeGitState, WorktreeError> {
+    let dirty = worktree_dirty_excluding_agent(worktree).await?;
+    let newly_committed = if dirty {
+        // Never commit Coppice-injected runtime context under .agent/
+        run_git_in(
+            worktree,
+            &["add", "-A", "--", ".", ":!.agent"],
+        )
+        .await?;
+        run_git_in(worktree, &["commit", "-m", commit_message]).await?;
+        true
+    } else {
+        false
+    };
+    let head_sha = git_head_sha(worktree).await?;
+    Ok(WorktreeGitState {
+        branch: branch.to_string(),
+        head_sha,
+        newly_committed,
+    })
+}
+
+pub fn format_git_comment_footer(state: &WorktreeGitState) -> String {
+    let short_sha = state
+        .head_sha
+        .get(..7)
+        .unwrap_or(state.head_sha.as_str());
+    let action = if state.newly_committed {
+        "committed"
+    } else {
+        "no new changes (HEAD"
+    };
+    if state.newly_committed {
+        format!("\n\n---\n**Git:** branch `{branch}` · {action} `{short_sha}`", branch = state.branch)
+    } else {
+        format!(
+            "\n\n---\n**Git:** branch `{branch}` · {action} `{short_sha}`)",
+            branch = state.branch
+        )
+    }
+}
+
+async fn worktree_dirty_excluding_agent(worktree: &Path) -> Result<bool, WorktreeError> {
+    let output = tokio::process::Command::new("git")
+        .current_dir(worktree)
+        .args(["status", "--porcelain", "--", ".", ":!.agent"])
+        .output()
+        .await
+        .map_err(WorktreeError::from)?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        return Err(WorktreeError::GitCommandFailed {
+            command: "git status --porcelain -- . :!.agent".into(),
+            stderr,
+        });
+    }
+
+    Ok(!String::from_utf8_lossy(&output.stdout).trim().is_empty())
+}
+
+async fn git_ref_sha(git_dir: &Path, ref_name: &str) -> Result<String, WorktreeError> {
+    let output = tokio::process::Command::new("git")
+        .current_dir(git_dir)
+        .args(["rev-parse", ref_name])
+        .output()
+        .await
+        .map_err(WorktreeError::from)?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        return Err(WorktreeError::GitCommandFailed {
+            command: format!("git rev-parse {ref_name}"),
+            stderr,
+        });
+    }
+
+    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
+async fn git_head_sha(worktree: &Path) -> Result<String, WorktreeError> {
+    let output = tokio::process::Command::new("git")
+        .current_dir(worktree)
+        .args(["rev-parse", "HEAD"])
+        .output()
+        .await
+        .map_err(WorktreeError::from)?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        return Err(WorktreeError::GitCommandFailed {
+            command: "git rev-parse HEAD".into(),
+            stderr,
+        });
+    }
+
+    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
 
 pub struct WorktreeService {
@@ -133,22 +262,81 @@ mod tests {
     use uuid::uuid;
 
     #[test]
-    fn compute_paths_builds_expected_strings() {
+    fn compute_paths_builds_per_ticket_strings() {
         let worktrees_root = Path::new("/data/worktrees");
         let ticket_id = uuid!("550e8400-e29b-41d4-a716-446655440000");
 
-        let paths = compute_paths(
-            worktrees_root,
-            "My Repo",
-            ticket_id,
-            "Frontend Engineer",
-        );
+        let paths = compute_paths(worktrees_root, "My Repo", ticket_id);
 
         assert_eq!(
             paths.worktree_dir,
-            PathBuf::from("/data/worktrees/TICKET-550e8400-frontend-engineer-my-repo")
+            PathBuf::from("/data/worktrees/TICKET-550e8400-my-repo")
         );
-        assert_eq!(paths.branch_name, "agent/TICKET-550e8400-frontend-engineer");
+        assert_eq!(paths.branch_name, "agent/TICKET-550e8400");
+    }
+
+    #[test]
+    fn format_git_comment_footer_notes_branch_and_commit() {
+        let footer = format_git_comment_footer(&WorktreeGitState {
+            branch: "agent/TICKET-abc".into(),
+            head_sha: "deadbeef1234".into(),
+            newly_committed: true,
+        });
+        assert!(footer.contains("agent/TICKET-abc"));
+        assert!(footer.contains("deadbee"));
+        assert!(footer.contains("committed"));
+    }
+
+    #[tokio::test]
+    async fn finalize_worktree_git_commits_dirty_tree() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let repo = tmp.path().join("repo.git");
+        std::process::Command::new("git")
+            .args(["init", repo.to_str().unwrap()])
+            .status()
+            .expect("git init");
+        std::process::Command::new("git")
+            .current_dir(&repo)
+            .args(["config", "user.email", "test@example.com"])
+            .status()
+            .expect("git config email");
+        std::process::Command::new("git")
+            .current_dir(&repo)
+            .args(["config", "user.name", "Test"])
+            .status()
+            .expect("git config name");
+        std::process::Command::new("git")
+            .current_dir(&repo)
+            .args(["commit", "--allow-empty", "-m", "initial"])
+            .status()
+            .expect("initial commit");
+
+        let worktree = tmp.path().join("wt");
+        std::process::Command::new("git")
+            .current_dir(&repo)
+            .args([
+                "worktree",
+                "add",
+                "-b",
+                "agent/TICKET-test",
+                worktree.to_str().unwrap(),
+            ])
+            .status()
+            .expect("worktree add");
+
+        std::fs::write(worktree.join("change.txt"), "hello").expect("write file");
+
+        let state = finalize_worktree_git(
+            &worktree,
+            "agent/TICKET-test",
+            "[coppice] test: sample",
+        )
+        .await
+        .expect("finalize git");
+
+        assert!(state.newly_committed);
+        assert!(!state.head_sha.is_empty());
+        assert_eq!(state.branch, "agent/TICKET-test");
     }
 
     #[test]

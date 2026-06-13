@@ -2,7 +2,7 @@
 # Host / release installs use config.example.toml → config.toml instead.
 
 [server]
-port = 8080
+port = 5000
 
 [database]
 url = "postgres://coppice:coppice@postgres:5432/coppice"
@@ -29,7 +29,7 @@ serve_port = 4096
 model_providers = []
 
 [web]
-port = 5173
+port = 5001
 static_dir = "./web/dist"
 
 [workflow]

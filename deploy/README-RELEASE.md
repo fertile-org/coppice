@@ -30,11 +30,11 @@ Set `database.url` to your PostgreSQL instance.
 ```bash
 ./coppice migrate
 ./coppice bootstrap admin --email admin@localhost --password changeme
-./coppice server start    # terminal 1 — API on :8080
-./coppice web start       # terminal 2 — UI on :5173, proxies /api to API
+./coppice server start    # terminal 1 — API on :5000
+./coppice web start       # terminal 2 — UI on :5001, proxies /api to API
 ```
 
-Open http://127.0.0.1:5173
+Open http://127.0.0.1:5001
 
 ## systemd
 

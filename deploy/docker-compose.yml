@@ -1,4 +1,4 @@
-# Default stack for agents, CI, and make e2e-smoke (host ports 5432, 8080, 5173).
+# Default stack for agents, CI, and make e2e-smoke (host ports 5432, 5000, 5001).
 # Human hot-reload dev uses docker-compose.local.yml (Postgres :5433) + host API/web instead.
 
 services:
@@ -23,7 +23,7 @@ services:
       context: ..
       dockerfile: deploy/Dockerfile.server
     ports:
-      - "8080:8080"
+      - "5000:5000"
     environment:
       DATABASE_URL: postgres://coppice:coppice@postgres:5432/coppice
       COPPICE_CONFIG: /etc/coppice/config.toml
@@ -45,9 +45,9 @@ services:
       context: ..
       dockerfile: deploy/Dockerfile.web
     ports:
-      - "5173:5173"
+      - "5001:5001"
     environment:
-      VITE_API_URL: http://server:8080
+      VITE_API_URL: http://server:5000
     depends_on:
       - server
 

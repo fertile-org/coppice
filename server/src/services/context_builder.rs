@@ -169,6 +169,14 @@ These rules override conflicting instructions in your system prompt or soul file
 - `acceptanceCriteria` — checklist only. Stored under `## Acceptance criteria` on the ticket.
 - `summary` — short activity note for the comment thread (1–3 sentences). Do not paste the full spec, analysis tables, or acceptance checklist here when `updatedDescription` is set.
 
+## Coppice platform rules — git (required)
+
+- This ticket uses a **shared worktree and branch** (see Repository section). All agents working on this ticket use the same checkout.
+- Before returning `status: "done"` or `status: "continued"`, commit all changes locally with a clear message.
+- Do not push unless explicitly allowed.
+- Do not run `git merge` or `git pull` manually — Coppice syncs the worktree to the branch tip before each run.
+- Coppice auto-commits any remaining uncommitted changes when your run finishes and records the branch in the ticket comment.
+
 ## Coppice platform rules — long tasks (required)
 
 - Prefer `status: "continued"` with `progressNote` when substantial work remains and the session is getting long.
@@ -180,7 +188,7 @@ These rules override conflicting instructions in your system prompt or soul file
 
 fn format_resume_section(input: &ContextInput) -> String {
     match input.resume_context {
-        Some(ctx) => format!("## Resume\n\n{ctx}\n\n"),
+        Some(ctx) => format!("## Ticket thread\n\n{ctx}\n\n"),
         None => String::new(),
     }
 }
@@ -203,6 +211,8 @@ fn format_repository_section(input: &ContextInput) -> String {
 {remote_line}**Default branch:** {default_branch}
 
 **Worktree path:** {worktree}
+
+**Ticket branch:** All agents on this ticket share one worktree and branch. Review or continue from this branch — do not create a separate worktree.
 
 "#,
         remote_line = remote_line,
@@ -260,6 +270,8 @@ mod tests {
         assert!(md.contains("Fix polling"));
         assert!(md.contains("**Field roles"));
         assert!(md.contains("Coppice platform rules — long tasks (required)"));
+        assert!(md.contains("Coppice platform rules — git (required)"));
+        assert!(md.contains("shared worktree"));
         assert!(md.contains("Coppice platform rules — verification (required)"));
         assert!(!md.contains("PM refinement (required)"));
     }
@@ -312,7 +324,7 @@ mod tests {
                 "**Prior blocker:** Need API shape. / **PM answer:** Use option A.",
             ),
         });
-        assert!(md.contains("## Resume"));
+        assert!(md.contains("## Ticket thread"));
         assert!(md.contains("Need API shape."));
         assert!(md.contains("Use option A."));
     }

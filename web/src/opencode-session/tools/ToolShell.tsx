@@ -51,6 +51,7 @@ export function ToolShell({
 
   const prefix = variant === 'shell' ? '$ ' : '→ ';
   const lineText = title || (variant === 'shell' ? '' : '(no input)');
+  const active = !isTerminalStatus(status);
 
   return (
     <div>
@@ -75,6 +76,17 @@ export function ToolShell({
       >
         {prefix}
         {lineText}
+        {active ? (
+          <span className="ml-2 inline-flex items-center gap-1 align-middle" aria-hidden>
+            {[0, 150, 300].map((delay) => (
+              <span
+                key={delay}
+                className="inline-block h-1 w-1 animate-bounce rounded-full bg-[var(--oc-tool-active)]"
+                style={{ animationDelay: `${delay}ms` }}
+              />
+            ))}
+          </span>
+        ) : null}
       </div>
       {showOutput && outputOpen ? (
         <OutputBlock>{children}</OutputBlock>

@@ -7,10 +7,14 @@ use crate::domain::ticket::{
     priority_from_str, status_from_str, substatus_from_str, TicketPriority,
 };
 use crate::domain::workflow::{PendingRecommendation, PendingSplitRecommendation};
+use crate::domain::comment::{AuthorType, CommentIntent};
+use crate::events::bus::AppEvent;
+use crate::services::comment_service::CommentService;
 use crate::services::workflow_service::WorkflowService;
 use crate::domain::agent_health::AgentHealthStatus;
 use crate::services::run_service::{RunError, RunService};
 use crate::services::split_service::{SplitError, SplitService};
+use crate::services::ticket_git_service::{TicketGitError, TicketGitInfo, TicketGitService};
 use crate::services::ticket_service::{TicketError, TicketFilters, TicketService, TicketWithDisplay};
 use crate::AppState;
 use axum::{
@@ -43,6 +47,18 @@ pub fn routes() -> Router<Arc<AppState>> {
         .route(
             "/api/tickets/{ticket_id}/final-approve",
             post(final_approve),
+        )
+        .route(
+            "/api/tickets/{ticket_id}/git-info",
+            get(ticket_git_info),
+        )
+        .route(
+            "/api/tickets/{ticket_id}/merge-branch",
+            post(merge_ticket_branch),
+        )
+        .route(
+            "/api/tickets/{ticket_id}/remove-worktree",
+            post(remove_ticket_worktree),
         )
         .route(
             "/api/tickets/{ticket_id}/resolve-blocker",
@@ -258,6 +274,54 @@ fn map_split_error(err: SplitError) -> StatusCode {
     }
 }
 
+fn map_ticket_git_error(err: TicketGitError) -> StatusCode {
+    match err {
+        TicketGitError::TicketNotFound | TicketGitError::RepoNotFound => StatusCode::NOT_FOUND,
+        TicketGitError::NoRepo
+        | TicketGitError::RepoNotReady
+        | TicketGitError::TicketBranchMissing(_)
+        | TicketGitError::WorktreeAlreadyRemoved
+        | TicketGitError::InvalidBranchName
+        | TicketGitError::Git(_) => StatusCode::BAD_REQUEST,
+        TicketGitError::Ticket(e) => map_error(e),
+        TicketGitError::Worktree(_) | TicketGitError::Io(_) | TicketGitError::Database(_) => {
+            StatusCode::INTERNAL_SERVER_ERROR
+        }
+    }
+}
+
+fn ticket_git_service<'a>(state: &'a AppState, pool: &'a sqlx::PgPool) -> TicketGitService<'a> {
+    TicketGitService::new(pool, state.config.agent.worktrees_path.clone().into())
+}
+
+async fn create_git_action_comment(
+    pool: &sqlx::PgPool,
+    state: &AppState,
+    ticket_id: Uuid,
+    user_id: Uuid,
+    body: &str,
+) -> Result<(), StatusCode> {
+    let comment = CommentService::new(pool)
+        .create(
+            ticket_id,
+            AuthorType::Human,
+            Some(user_id),
+            body,
+            CommentIntent::SystemEvent,
+            &[],
+            &[],
+        )
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    state.event_bus.publish(AppEvent::CommentCreated {
+        comment_id: comment.id,
+        ticket_id,
+        author_type: "human".into(),
+    });
+    Ok(())
+}
+
 fn parse_status(status: &str) -> Result<TicketStatus, TicketError> {
     status_from_str(status).ok_or(TicketError::InvalidStatus)
 }
@@ -397,7 +461,7 @@ async fn assign_agent(
         .assign_agent(ticket_id, body.agent_id)
         .await
         .map_err(map_error)?;
-    let ticket = ticket_svc
+    let mut ticket = ticket_svc
         .clear_pending_recommendation(ticket_id)
         .await
         .map_err(map_error)?;
@@ -406,7 +470,10 @@ async fn assign_agent(
         && ticket.ticket.assignee_agent_id.is_some()
         && ticket.ticket.repo_id.is_some()
     {
-        let _ = RunService::new(pool).start_run(ticket_id).await;
+        if RunService::new(pool).start_run(ticket_id).await.is_ok() {
+            ticket = ticket_svc.get(ticket_id).await.map_err(map_error)?;
+            crate::events::publish_ticket_updated(&state.event_bus, &ticket);
+        }
     }
 
     Ok(Json(ticket_to_response(ticket)))
@@ -440,6 +507,11 @@ async fn run_agent(
         .start_run(ticket_id)
         .await
         .map_err(map_run_error_response)?;
+    if let Ok(updated) = TicketService::new(pool).get(ticket_id).await {
+        if updated.ticket.status != ticket.ticket.status {
+            crate::events::publish_ticket_updated(&state.event_bus, &updated);
+        }
+    }
     let connector = service
         .agent_connector_for_run(run.agent_id)
         .await
@@ -463,7 +535,7 @@ async fn list_runs(
 
 async fn final_approve(
     State(state): State<Arc<AppState>>,
-    AuthUser { .. }: AuthUser,
+    AuthUser { user, .. }: AuthUser,
     Path(ticket_id): Path<Uuid>,
 ) -> Result<Json<TicketResponse>, StatusCode> {
     let pool = pool_from_state(&state)?;
@@ -475,7 +547,87 @@ async fn final_approve(
         .update_status(ticket_id, next, Some(None), Some(None))
         .await
         .map_err(map_error)?;
+
+    create_git_action_comment(
+        pool,
+        &state,
+        ticket_id,
+        user.id,
+        "Final approval: ticket moved to **Done**.",
+    )
+    .await?;
+
+    crate::events::publish_ticket_updated(&state.event_bus, &updated);
     Ok(Json(ticket_to_response(updated)))
+}
+
+async fn ticket_git_info(
+    State(state): State<Arc<AppState>>,
+    AuthUser { .. }: AuthUser,
+    Path(ticket_id): Path<Uuid>,
+) -> Result<Json<TicketGitInfo>, StatusCode> {
+    let pool = pool_from_state(&state)?;
+    let info = ticket_git_service(&state, pool)
+        .git_info(ticket_id)
+        .await
+        .map_err(map_ticket_git_error)?;
+    Ok(Json(info))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct MergeBranchBody {
+    base_branch: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct MergeBranchResponse {
+    merge: crate::services::ticket_git_service::MergeBranchResult,
+}
+
+async fn merge_ticket_branch(
+    State(state): State<Arc<AppState>>,
+    AuthUser { user, .. }: AuthUser,
+    Path(ticket_id): Path<Uuid>,
+    Json(body): Json<MergeBranchBody>,
+) -> Result<Json<MergeBranchResponse>, StatusCode> {
+    let pool = pool_from_state(&state)?;
+    let merge = ticket_git_service(&state, pool)
+        .merge_ticket_branch(ticket_id, body.base_branch.trim())
+        .await
+        .map_err(map_ticket_git_error)?;
+
+    let short_sha = merge.head_sha.get(..7).unwrap_or(&merge.head_sha);
+    let comment_body = format!(
+        "**Merge:** {} (`{short_sha}` on `{}`)",
+        merge.message, merge.base_branch
+    );
+    create_git_action_comment(pool, &state, ticket_id, user.id, &comment_body).await?;
+
+    Ok(Json(MergeBranchResponse { merge }))
+}
+
+async fn remove_ticket_worktree(
+    State(state): State<Arc<AppState>>,
+    AuthUser { user, .. }: AuthUser,
+    Path(ticket_id): Path<Uuid>,
+) -> Result<Json<TicketGitInfo>, StatusCode> {
+    let pool = pool_from_state(&state)?;
+    let svc = ticket_git_service(&state, pool);
+    let info_before = svc.git_info(ticket_id).await.map_err(map_ticket_git_error)?;
+    svc.remove_worktree(ticket_id)
+        .await
+        .map_err(map_ticket_git_error)?;
+
+    let comment_body = format!(
+        "**Worktree removed:** `{}`",
+        info_before.worktree_path
+    );
+    create_git_action_comment(pool, &state, ticket_id, user.id, &comment_body).await?;
+
+    let info = svc.git_info(ticket_id).await.map_err(map_ticket_git_error)?;
+    Ok(Json(info))
 }
 
 async fn approve_splits(

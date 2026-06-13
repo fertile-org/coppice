@@ -65,7 +65,7 @@ make compose-up
 make bootstrap
 ```
 
-Open [http://localhost:5173](http://localhost:5173) and sign in. Full setup, development, and deployment guides live in [docs/development.md](docs/development.md).
+Open [http://localhost:5001](http://localhost:5001) and sign in. Full setup, development, and deployment guides live in [docs/development.md](docs/development.md).
 
 ## Learn more
 

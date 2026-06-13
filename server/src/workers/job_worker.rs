@@ -23,8 +23,12 @@ use crate::services::run_orchestrator::{load_run_continuation_context, RunOrches
 use crate::services::run_service::RunService;
 use crate::services::ticket_service::TicketService;
 use crate::services::workflow_service::WorkflowService;
-use crate::services::worktree_service::{compute_paths, WorktreeService};
+use crate::services::worktree_service::{
+    compute_paths, finalize_worktree_git, format_git_comment_footer, sync_worktree_to_branch_tip,
+    WorktreeService,
+};
 use crate::util::error_format::format_job_error;
+use crate::util::truncate::truncate_with_ellipsis;
 use crate::AppState;
 use time::format_description::well_known::Rfc3339;
 
@@ -105,7 +109,7 @@ async fn execute_job(
         return Err(JobCancelled.into());
     }
 
-    let ticket = TicketService::new(pool)
+    let mut ticket = TicketService::new(pool)
         .get(run.ticket_id)
         .await
         .context("load ticket")?;
@@ -133,15 +137,25 @@ async fn execute_job(
 
     run_svc.mark_running(run.id).await.context("mark run running")?;
 
+    tracing::info!(
+        run_id = %run.id,
+        ticket_id = %run.ticket_id,
+        agent_id = %run.agent_id,
+        job_type = %run.job_type,
+        "agent run started"
+    );
+
     if let Some(new_status) = WorkflowService::resolve_run_start_transition(
         ticket.ticket.status,
         &agent.role,
         &run.job_type,
     ) {
-        TicketService::new(pool)
+        let updated = TicketService::new(pool)
             .update_status(run.ticket_id, new_status, None, None)
             .await
             .context("apply run-start transition")?;
+        crate::events::publish_ticket_updated(&state.event_bus, &updated);
+        ticket = updated;
     }
 
     let agent_key = agent
@@ -165,7 +179,6 @@ async fn execute_job(
         worktree_service.worktrees_root(),
         &repo_name,
         run.ticket_id,
-        &agent.name,
     );
     let git_dir = PathBuf::from(&local_path);
 
@@ -173,6 +186,10 @@ async fn execute_job(
         .ensure_worktree(&git_dir, &paths.worktree_dir, &paths.branch_name)
         .await
         .context("ensure worktree")?;
+
+    sync_worktree_to_branch_tip(&git_dir, &paths.worktree_dir, &paths.branch_name)
+        .await
+        .context("sync worktree to branch tip")?;
 
     let ticket_substatus = ticket
         .ticket
@@ -265,7 +282,7 @@ async fn execute_job(
     let provider_result = connector
         .run(AgentRunInput {
             agent_id: run.agent_id.to_string(),
-            agent_key,
+            agent_key: agent_key.clone(),
             job_type: run.job_type.clone(),
             ticket_id: Some(run.ticket_id.to_string()),
             context_path,
@@ -309,6 +326,32 @@ async fn execute_job(
         apply.comment.intent = CommentIntent::ClarificationAnswer;
     }
 
+    if run.job_type == "work_on_ticket" && apply.run_status == RunStatus::Succeeded {
+        let commit_message = format!(
+            "[coppice] {}: {}",
+            &agent_key,
+            truncate_with_ellipsis(&ticket.ticket.title, 72)
+        );
+        match finalize_worktree_git(
+            &paths.worktree_dir,
+            &paths.branch_name,
+            &commit_message,
+        )
+        .await
+        {
+            Ok(git_state) => {
+                apply.comment.body.push_str(&format_git_comment_footer(&git_state));
+            }
+            Err(err) => {
+                tracing::warn!(
+                    run_id = %run.id,
+                    error = %err,
+                    "worktree auto-commit failed; comment will omit git footer"
+                );
+            }
+        }
+    }
+
     let worktree_path = paths.worktree_dir.to_string_lossy().into_owned();
     let orchestrator = RunOrchestrator::new(pool, &state.config.workflow);
     let finished_run = orchestrator
@@ -330,19 +373,7 @@ async fn execute_job(
         .get(run.ticket_id)
         .await
         .context("load updated ticket")?;
-    state.event_bus.publish(AppEvent::TicketUpdated {
-        ticket_id: run.ticket_id,
-        status: status_to_str(updated_ticket.ticket.status).into(),
-        substatus: updated_ticket
-            .ticket
-            .substatus
-            .map(|s| substatus_to_str(s).into()),
-        updated_at: updated_ticket
-            .ticket
-            .updated_at
-            .format(&Rfc3339)
-            .unwrap_or_default(),
-    });
+    crate::events::publish_ticket_updated(&state.event_bus, &updated_ticket);
 
     let comments = CommentService::new(pool)
         .list_by_ticket(run.ticket_id)

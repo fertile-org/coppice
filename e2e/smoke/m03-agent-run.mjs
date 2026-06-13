@@ -6,14 +6,14 @@
  * mock provider, and agent comment creation against a running Coppice stack.
  *
  * Env:
- *   COPPICE_API_URL            default http://localhost:8080
+ *   COPPICE_API_URL            default http://localhost:5000
  *   COPPICE_BOOTSTRAP_PASSWORD default changeme
  *   COPPICE_SMOKE_EMAIL        default admin@localhost
  *   COPPICE_SMOKE_PASSWORD     default changeme
  *   COPPICE_SMOKE_REPO_PATH    default /tmp/smoke-repo (path inside server container)
  */
 
-const API = process.env.COPPICE_API_URL ?? 'http://localhost:8080';
+const API = process.env.COPPICE_API_URL ?? 'http://localhost:5000';
 const BOOTSTRAP_PASSWORD =
   process.env.COPPICE_BOOTSTRAP_PASSWORD ?? 'changeme';
 const EMAIL = process.env.COPPICE_SMOKE_EMAIL ?? 'admin@localhost';

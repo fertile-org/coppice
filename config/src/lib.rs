@@ -254,7 +254,7 @@ fn default_opencode_port() -> u16 {
 }
 
 fn default_opencode_run_timeout_secs() -> u64 {
-    600
+    1800
 }
 
 impl Default for OpenCodeConnectorConfig {
@@ -384,7 +384,7 @@ impl AppConfig {
 
     fn default_values() -> Self {
         Self {
-            server: ServerConfig { port: 8080 },
+            server: ServerConfig { port: 5000 },
             database: DatabaseConfig {
                 url: "postgres://coppice:coppice@localhost:5432/coppice".into(),
             },
@@ -405,7 +405,7 @@ impl AppConfig {
                 connectors: AgentConnectorsConfig::default(),
             },
             web: WebConfig {
-                port: 5173,
+                port: 5001,
                 static_dir: "./web/dist".into(),
                 api_url: None,
             },
@@ -424,7 +424,7 @@ mod tests {
     #[test]
     fn loads_defaults_without_files() {
         let cfg = AppConfig::load_defaults().expect("defaults");
-        assert_eq!(cfg.server.port, 8080);
+        assert_eq!(cfg.server.port, 5000);
     }
 
     #[test]
@@ -518,7 +518,7 @@ mod tests {
         backlog = false
     "#;
         let cfg: AppConfig = toml::from_str(&format!(
-            "{raw}\n[server]\nport=8080\n[database]\nurl=\"postgres://x\"\n[auth]\nsession_secret=\"s\"\nbootstrap_password=\"p\"\ncookie_secure=false\n[storage]\nartifacts_dir=\"/tmp\"\nmax_upload_bytes=1\n[agent]\ndefault_connector=\"mock\"\nworktrees_path=\"/tmp\"\nworker_count=1\n[web]\nport=5173\nstatic_dir=\"./web/dist\""
+            "{raw}\n[server]\nport=5000\n[database]\nurl=\"postgres://x\"\n[auth]\nsession_secret=\"s\"\nbootstrap_password=\"p\"\ncookie_secure=false\n[storage]\nartifacts_dir=\"/tmp\"\nmax_upload_bytes=1\n[agent]\ndefault_connector=\"mock\"\nworktrees_path=\"/tmp\"\nworker_count=1\n[web]\nport=5001\nstatic_dir=\"./web/dist\""
         )).expect("parse");
         assert!(!cfg.workflow.auto_assign.effective("backlog"));
         assert!(cfg.workflow.auto_assign.effective("ready"));
