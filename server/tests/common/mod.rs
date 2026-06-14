@@ -7,7 +7,7 @@ use coppice_server::middleware::session::parse_session_cookie;
 use coppice_server::{db, AppConfig, AppState};
 use http_body_util::BodyExt;
 use std::net::SocketAddr;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::{Arc, LazyLock};
 use std::time::{Duration, Instant};
@@ -71,6 +71,51 @@ pub async fn truncate_workspace(pool: &sqlx::PgPool) {
 #[allow(dead_code)]
 pub struct AgentTestEnv {
     pub worktrees: tempfile::TempDir,
+}
+
+pub fn setup_worktree_with_commit(
+    git_dir: &Path,
+    worktrees_root: &Path,
+    repo_name: &str,
+    ticket_id: &str,
+) -> PathBuf {
+    use coppice_server::services::worktree_service::compute_paths;
+    let ticket_uuid: uuid::Uuid = ticket_id.parse().expect("ticket uuid");
+    let paths = compute_paths(worktrees_root, repo_name, ticket_uuid);
+    std::fs::create_dir_all(&paths.worktree_dir).expect("worktree dir");
+    let worktree_output = Command::new("git")
+        .args([
+            "worktree",
+            "add",
+            "-B",
+            &paths.branch_name,
+            paths.worktree_dir.to_str().unwrap(),
+            "main",
+        ])
+        .current_dir(git_dir)
+        .output()
+        .expect("worktree add");
+    assert!(
+        worktree_output.status.success(),
+        "worktree add failed: {}",
+        String::from_utf8_lossy(&worktree_output.stderr)
+    );
+    std::fs::write(paths.worktree_dir.join("feature.txt"), "new feature\n").expect("write");
+    Command::new("git")
+        .args(["add", "feature.txt"])
+        .current_dir(&paths.worktree_dir)
+        .output()
+        .expect("git add");
+    Command::new("git")
+        .args(["commit", "-m", "feature"])
+        .env("GIT_AUTHOR_NAME", "test")
+        .env("GIT_AUTHOR_EMAIL", "test@localhost")
+        .env("GIT_COMMITTER_NAME", "test")
+        .env("GIT_COMMITTER_EMAIL", "test@localhost")
+        .current_dir(&paths.worktree_dir)
+        .output()
+        .expect("git commit");
+    paths.worktree_dir
 }
 
 pub fn create_temp_git_checkout() -> (tempfile::TempDir, PathBuf) {

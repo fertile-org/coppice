@@ -367,6 +367,10 @@ impl<'a> CodeReviewService<'a> {
             ));
         }
 
+        for comment in &input.inline_comments {
+            validate_diff_file_path(&comment.path)?;
+        }
+
         let ticket_service = TicketService::new(self.pool);
         let mut ticket_created = false;
         let ticket_id = if let Some(ticket_id) = input.ticket_id {
@@ -381,6 +385,9 @@ impl<'a> CodeReviewService<'a> {
                     "new_ticket is required when ticket_id is omitted".into(),
                 )
             })?;
+            if new_ticket.title.trim().is_empty() {
+                return Err(CodeReviewError::Validation("title is required".into()));
+            }
             let created = ticket_service
                 .create(
                     new_ticket.project_id,
@@ -395,10 +402,6 @@ impl<'a> CodeReviewService<'a> {
             ticket_created = true;
             created.ticket.id
         };
-
-        for comment in &input.inline_comments {
-            validate_diff_file_path(&comment.path)?;
-        }
 
         let body = format_review_comment(
             &repo.name,
