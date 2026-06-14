@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use crate::config::WorkflowConfig;
 use crate::domain::agent::Agent;
 use crate::domain::comment::{AuthorType, CommentIntent};
+use crate::domain::context_profile::ContextProfile;
 use crate::domain::run::{AgentRun, RunStatus};
 use crate::domain::slug::slugify;
 use crate::domain::substatus::Substatus;
@@ -31,6 +32,10 @@ pub async fn load_run_continuation_context(
     pool: &PgPool,
     run: &AgentRun,
 ) -> Result<Option<String>, CommentError> {
+    if run.context_profile != ContextProfile::Full {
+        return Ok(None);
+    }
+
     if run.job_type != "work_on_ticket" && run.job_type != "respond_to_mention" {
         return Ok(None);
     }

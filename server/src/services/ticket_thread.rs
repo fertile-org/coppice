@@ -50,7 +50,47 @@ pub fn format_ticket_thread(
     Some(format!("{header}{thread}{footer}"))
 }
 
-fn author_label(comment: &Comment, agent_names: &HashMap<Uuid, String>) -> String {
+/// Build a short excerpt of the most recent non-system comments for human chat context.
+pub fn format_thread_excerpt(
+    comments: &[Comment],
+    agent_names: &HashMap<Uuid, String>,
+    max_comments: usize,
+    max_chars: usize,
+) -> Option<String> {
+    let mut relevant: Vec<&Comment> = comments
+        .iter()
+        .filter(|c| c.intent != CommentIntent::SystemEvent)
+        .take(max_comments)
+        .collect();
+    if relevant.is_empty() {
+        return None;
+    }
+
+    relevant.sort_by_key(|c| c.created_at);
+
+    let mut lines: Vec<String> = Vec::new();
+    for comment in relevant {
+        let author = author_label(comment, agent_names);
+        let intent = intent_to_str(comment.intent).replace('_', " ");
+        let body = truncate_with_ellipsis(comment.body.trim(), COMMENT_BODY_MAX);
+        lines.push(format!("- **{author}** ({intent}): {body}"));
+    }
+
+    let mut thread = lines.join("\n");
+    if thread.len() > max_chars {
+        while lines.len() > 1 && lines.join("\n").len() > max_chars {
+            lines.remove(0);
+        }
+        thread = lines.join("\n");
+        if thread.len() > max_chars {
+            thread = truncate_with_ellipsis(&thread, max_chars);
+        }
+    }
+
+    Some(thread)
+}
+
+pub fn author_label(comment: &Comment, agent_names: &HashMap<Uuid, String>) -> String {
     match comment.author_type {
         AuthorType::Human => "Human".into(),
         AuthorType::System => "System".into(),
@@ -98,6 +138,39 @@ mod tests {
     fn format_ticket_thread_skips_system_events() {
         let comment = sample_comment("Run started", CommentIntent::SystemEvent);
         assert!(format_ticket_thread(&[comment], &HashMap::new()).is_none());
+    }
+
+    #[test]
+    fn format_thread_excerpt_limits_comments_and_chars() {
+        let agent_id = Uuid::new_v4();
+        let mut names = HashMap::new();
+        names.insert(agent_id, "Engineer".into());
+        let base = OffsetDateTime::now_utc();
+
+        let mut comments: Vec<Comment> = (0..5)
+            .map(|i| {
+                let mut c = sample_comment(
+                    &format!("Chat message #{i} with some padding."),
+                    CommentIntent::ProgressUpdate,
+                );
+                c.author_id = Some(agent_id);
+                c.created_at = base + time::Duration::seconds(i);
+                c
+            })
+            .collect();
+        comments.reverse();
+
+        let excerpt = format_thread_excerpt(&comments, &names, 3, 800).expect("excerpt");
+        assert!(excerpt.contains("Chat message #4"));
+        assert!(excerpt.contains("Chat message #2"));
+        assert!(!excerpt.contains("Chat message #1"));
+        assert!(excerpt.len() <= 800);
+    }
+
+    #[test]
+    fn format_thread_excerpt_skips_system_events() {
+        let comment = sample_comment("System notice", CommentIntent::SystemEvent);
+        assert!(format_thread_excerpt(&[comment], &HashMap::new(), 3, 800).is_none());
     }
 
     #[test]

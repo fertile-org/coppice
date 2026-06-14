@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
@@ -7,7 +8,7 @@ use sqlx::PgPool;
 use sqlx::Row;
 use tokio::sync::watch;
 
-use crate::domain::comment::{author_type_to_str, CommentIntent};
+use crate::domain::comment::{author_type_to_str, intent_to_str, Comment, CommentIntent};
 use crate::domain::substatus::TicketStatus;
 use crate::domain::run::{run_status_to_str, RunStatus};
 use crate::domain::slug::slugify;
@@ -18,12 +19,15 @@ use crate::services::agent_service::AgentService;
 use crate::services::artifact_service::{ArtifactService, RunArtifactMeta, RunArtifactPaths};
 use crate::services::comment_service::CommentService;
 use crate::domain::context_profile::ContextProfile;
-use crate::services::context_builder::{write_context_file, ContextInput};
+use crate::services::context_builder::{
+    write_agent_context_files, write_context_file, ContextInput, HumanRequest,
+};
 use crate::services::job_service::JobService;
-use crate::services::result_contract;
+use crate::services::result_contract::{self, ACCEPTANCE_CRITERIA_HEADER};
 use crate::services::run_orchestrator::{load_run_continuation_context, RunOrchestrator};
-use crate::services::run_service::RunService;
-use crate::services::ticket_service::TicketService;
+use crate::services::run_service::{AgentRunWithConnector, RunService};
+use crate::services::ticket_service::{TicketService, TicketWithDisplay};
+use crate::services::ticket_thread;
 use crate::services::workflow_service::WorkflowService;
 use crate::services::worktree_service::{
     compute_paths, finalize_worktree_git, format_git_comment_footer, sync_worktree_to_branch_tip,
@@ -147,27 +151,95 @@ async fn execute_job(
         "agent run started"
     );
 
-    if let Some(new_status) = WorkflowService::resolve_run_start_transition(
-        ticket.ticket.status,
-        &agent.role,
-        &run.job_type,
-    ) {
-        let updated = TicketService::new(pool)
-            .update_status(run.ticket_id, new_status, None, None)
-            .await
-            .context("apply run-start transition")?;
-        crate::events::publish_ticket_updated(&state.event_bus, &updated);
-        ticket = updated;
+    if run.context_profile != ContextProfile::HumanAgent {
+        if let Some(new_status) = WorkflowService::resolve_run_start_transition(
+            ticket.ticket.status,
+            &agent.role,
+            &run.job_type,
+        ) {
+            let updated = TicketService::new(pool)
+                .update_status(run.ticket_id, new_status, None, None)
+                .await
+                .context("apply run-start transition")?;
+            crate::events::publish_ticket_updated(&state.event_bus, &updated);
+            ticket = updated;
+        }
     }
 
     let agent_key = agent
         .preset_source
         .clone()
         .unwrap_or_else(|| slugify(&agent.name));
-    let resume_context = load_run_continuation_context(pool, run)
+
+    let agents = AgentService::new(pool)
+        .list_agents()
         .await
-        .map_err(|e| anyhow::anyhow!("load run continuation context: {e}"))?;
+        .unwrap_or_default();
+    let agent_names = agents
+        .iter()
+        .map(|a| (a.id, a.name.clone()))
+        .collect::<HashMap<_, _>>();
+
+    let assignee_agent_key_owned = ticket.ticket.assignee_agent_id.and_then(|id| {
+        agents.iter().find(|a| a.id == id).map(|a| {
+            a.preset_source
+                .clone()
+                .unwrap_or_else(|| slugify(&a.name))
+        })
+    });
+    let assignee_agent_key_ref = assignee_agent_key_owned.as_deref();
+
+    let resume_context = if run.context_profile == ContextProfile::Full {
+        load_run_continuation_context(pool, run)
+            .await
+            .map_err(|e| anyhow::anyhow!("load run continuation context: {e}"))?
+    } else {
+        None
+    };
     let resume_context_ref = resume_context.as_deref();
+
+    let thread_excerpt_owned = if run.context_profile == ContextProfile::HumanChat {
+        let comments = CommentService::new(pool)
+            .list_by_ticket(run.ticket_id)
+            .await
+            .context("load comments for thread excerpt")?;
+        ticket_thread::format_thread_excerpt(&comments, &agent_names, 3, 800)
+    } else {
+        None
+    };
+    let thread_excerpt_ref = thread_excerpt_owned.as_deref();
+
+    let trigger_posted_at: Option<String>;
+    let trigger_body: Option<String>;
+    if let Some(comment_id) = run.trigger_comment_id {
+        let trigger = CommentService::new(pool)
+            .get(comment_id)
+            .await
+            .context("load trigger comment")?;
+        trigger_posted_at = Some(
+            trigger
+                .created_at
+                .format(&Rfc3339)
+                .unwrap_or_default(),
+        );
+        trigger_body = Some(trigger.body);
+    } else {
+        trigger_posted_at = None;
+        trigger_body = None;
+    }
+
+    let human_request = match (
+        trigger_body.as_deref(),
+        trigger_posted_at.as_deref(),
+        human_request_mode_label(run.context_profile),
+    ) {
+        (Some(body), Some(posted_at), Some(mode_label)) => Some(HumanRequest {
+            body,
+            posted_at,
+            mode_label,
+        }),
+        _ => None,
+    };
 
     let local_path: String = repo_row.get("local_path");
     let repo_name: String = repo_row.get("name");
@@ -199,9 +271,13 @@ async fn execute_job(
         .as_ref()
         .map(|s| substatus_to_str(*s));
     let worktree_path = paths.worktree_dir.to_string_lossy().into_owned();
+    let ticket_description = match run.context_profile {
+        ContextProfile::Full => ticket.ticket.description.as_str(),
+        ContextProfile::HumanAgent | ContextProfile::HumanChat => "",
+    };
     let context_input = ContextInput {
         ticket_title: &ticket.ticket.title,
-        ticket_description: &ticket.ticket.description,
+        ticket_description,
         ticket_status: status_to_str(ticket.ticket.status),
         ticket_substatus,
         agent_name: &agent.name,
@@ -215,13 +291,34 @@ async fn execute_job(
         repo_default_branch: Some(&repo_default_branch),
         worktree_path: Some(&worktree_path),
         resume_context: resume_context_ref,
-        context_profile: ContextProfile::Full,
-        human_request: None,
-        ticket_id: None,
-        assignee_agent_key: None,
-        thread_excerpt: None,
+        context_profile: run.context_profile,
+        human_request,
+        ticket_id: Some(run.ticket_id),
+        assignee_agent_key: assignee_agent_key_ref,
+        thread_excerpt: thread_excerpt_ref,
     };
     write_context_file(&paths.worktree_dir, &context_input).context("write context file")?;
+
+    if run.context_profile != ContextProfile::Full {
+        let comments = CommentService::new(pool)
+            .list_by_ticket(run.ticket_id)
+            .await
+            .context("load comments for context snapshot")?;
+        let runs = RunService::new(pool)
+            .list_for_ticket(run.ticket_id)
+            .await
+            .context("load runs for context snapshot")?;
+        let ticket_json = build_ticket_json(&ticket, assignee_agent_key_ref);
+        let comments_json = build_comments_json(&comments, &agent_names);
+        let runs_json = build_runs_json(&runs, &agent_names);
+        write_agent_context_files(
+            &paths.worktree_dir,
+            &ticket_json,
+            &comments_json,
+            &runs_json,
+        )
+        .context("write agent context files")?;
+    }
 
     if run_svc.is_cancelled(run.id).await? {
         return Err(JobCancelled.into());
@@ -536,4 +633,83 @@ async fn fail_job(
         .await
         .context("mark job failed")?;
     Ok(())
+}
+
+fn human_request_mode_label(profile: ContextProfile) -> Option<&'static str> {
+    match profile {
+        ContextProfile::HumanAgent => Some("Agent"),
+        ContextProfile::HumanChat => Some("Chat"),
+        ContextProfile::Full => None,
+    }
+}
+
+fn split_ticket_description(description: &str) -> (String, Option<String>) {
+    if let Some(idx) = description.find(ACCEPTANCE_CRITERIA_HEADER) {
+        let body = description[..idx].trim_end().to_string();
+        let acceptance = description[idx..].trim().to_string();
+        (body, Some(acceptance))
+    } else {
+        (description.to_string(), None)
+    }
+}
+
+fn build_ticket_json(
+    ticket: &TicketWithDisplay,
+    assignee_agent_key: Option<&str>,
+) -> serde_json::Value {
+    let (description, acceptance_criteria) =
+        split_ticket_description(&ticket.ticket.description);
+    serde_json::json!({
+        "id": ticket.ticket.id,
+        "title": ticket.ticket.title,
+        "status": status_to_str(ticket.ticket.status),
+        "substatus": ticket.ticket.substatus.as_ref().map(|s| substatus_to_str(*s)),
+        "description": description,
+        "acceptance_criteria": acceptance_criteria,
+        "assignee_agent_id": ticket.ticket.assignee_agent_id,
+        "assignee_agent_key": assignee_agent_key,
+    })
+}
+
+fn build_comments_json(
+    comments: &[Comment],
+    agent_names: &HashMap<uuid::Uuid, String>,
+) -> serde_json::Value {
+    comments
+        .iter()
+        .map(|comment| {
+            serde_json::json!({
+                "id": comment.id,
+                "author": ticket_thread::author_label(comment, agent_names),
+                "intent": intent_to_str(comment.intent),
+                "body": comment.body,
+                "created_at": comment.created_at.format(&Rfc3339).unwrap_or_default(),
+            })
+        })
+        .collect::<Vec<_>>()
+        .into()
+}
+
+fn build_runs_json(
+    runs: &[AgentRunWithConnector],
+    agent_names: &HashMap<uuid::Uuid, String>,
+) -> serde_json::Value {
+    runs.iter()
+        .take(10)
+        .map(|entry| {
+            let agent = agent_names
+                .get(&entry.run.agent_id)
+                .map(String::as_str)
+                .unwrap_or("Agent");
+            serde_json::json!({
+                "id": entry.run.id,
+                "agent": agent,
+                "job_type": entry.run.job_type,
+                "status": run_status_to_str(entry.run.status),
+                "started_at": entry.run.started_at.map(|t| t.format(&Rfc3339).unwrap_or_default()),
+                "ended_at": entry.run.ended_at.map(|t| t.format(&Rfc3339).unwrap_or_default()),
+            })
+        })
+        .collect::<Vec<_>>()
+        .into()
 }

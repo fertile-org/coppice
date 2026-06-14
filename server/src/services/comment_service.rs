@@ -32,6 +32,24 @@ impl<'a> CommentService<'a> {
         Self { pool }
     }
 
+    pub async fn get(&self, comment_id: Uuid) -> Result<Comment, CommentError> {
+        let row = sqlx::query(
+            r#"
+            SELECT
+                id, ticket_id, author_type, author_id, body, intent,
+                mentions, attachment_ids, created_at
+            FROM ticket_comments
+            WHERE id = $1
+            "#,
+        )
+        .bind(comment_id)
+        .fetch_optional(self.pool)
+        .await?
+        .ok_or(CommentError::CommentNotFound)?;
+
+        Ok(row_to_comment(&row))
+    }
+
     pub async fn list_by_ticket(&self, ticket_id: Uuid) -> Result<Vec<Comment>, CommentError> {
         self.ensure_ticket_exists(ticket_id).await?;
 
