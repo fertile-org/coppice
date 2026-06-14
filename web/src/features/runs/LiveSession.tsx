@@ -5,6 +5,7 @@ import { sessionTheme } from '../../opencode-session/theme/session-theme';
 import {
   applyEvent,
   applySnapshot,
+  cloneSessionStore,
   createSessionStore,
 } from '../../opencode-session/sync/reduce-event';
 import type {
@@ -29,25 +30,6 @@ type SessionAction =
   | { type: 'snapshot'; snapshot: SessionSnapshot }
   | { type: 'event'; event: OpenCodeEvent };
 
-function cloneStore(store: SessionStore): SessionStore {
-  return {
-    sessionId: store.sessionId,
-    messages: [...store.messages],
-    parts: Object.fromEntries(
-      Object.entries(store.parts).map(([messageId, parts]) => [
-        messageId,
-        [...parts],
-      ]),
-    ),
-    pendingDeltas: Object.fromEntries(
-      Object.entries(store.pendingDeltas).map(([partId, deltas]) => [
-        partId,
-        [...deltas],
-      ]),
-    ),
-  };
-}
-
 function sessionReducer(
   state: SessionStore | null,
   action: SessionAction,
@@ -57,13 +39,13 @@ function sessionReducer(
       return createSessionStore(action.sessionId);
     case 'snapshot': {
       const base = state ?? createSessionStore(action.snapshot.sessionId);
-      const next = cloneStore(base);
+      const next = cloneSessionStore(base);
       applySnapshot(next, action.snapshot);
       return next;
     }
     case 'event': {
       if (!state) return state;
-      const next = cloneStore(state);
+      const next = cloneSessionStore(state);
       applyEvent(next, action.event);
       return next;
     }

@@ -42,7 +42,7 @@ impl<'a> CommentService<'a> {
                 mentions, attachment_ids, created_at
             FROM ticket_comments
             WHERE ticket_id = $1
-            ORDER BY created_at ASC
+            ORDER BY created_at DESC
             "#,
         )
         .bind(ticket_id)

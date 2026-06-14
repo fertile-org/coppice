@@ -27,6 +27,35 @@ function rebuildPartLocations(store: SessionStore): void {
   partLocations.set(store, locations);
 }
 
+function clonePart(part: Part): Part {
+  if (part.type === 'tool') {
+    return { ...part, state: { ...part.state } };
+  }
+  return { ...part };
+}
+
+/** Deep-enough clone for reducer passes (avoids StrictMode double-apply mutation). */
+export function cloneSessionStore(store: SessionStore): SessionStore {
+  const next: SessionStore = {
+    sessionId: store.sessionId,
+    messages: store.messages.map((message) => ({ ...message })),
+    parts: Object.fromEntries(
+      Object.entries(store.parts).map(([messageId, parts]) => [
+        messageId,
+        parts.map(clonePart),
+      ]),
+    ),
+    pendingDeltas: Object.fromEntries(
+      Object.entries(store.pendingDeltas).map(([partId, deltas]) => [
+        partId,
+        deltas.map((delta) => ({ ...delta })),
+      ]),
+    ),
+  };
+  rebuildPartLocations(next);
+  return next;
+}
+
 export function createSessionStore(sessionId: string): SessionStore {
   const store: SessionStore = {
     sessionId,
@@ -40,8 +69,13 @@ export function createSessionStore(sessionId: string): SessionStore {
 
 export function applySnapshot(store: SessionStore, snapshot: SessionSnapshot): void {
   store.sessionId = snapshot.sessionId;
-  store.messages = snapshot.messages;
-  store.parts = snapshot.parts;
+  store.messages = snapshot.messages.map((message) => ({ ...message }));
+  store.parts = Object.fromEntries(
+    Object.entries(snapshot.parts).map(([messageId, parts]) => [
+      messageId,
+      parts.map(clonePart),
+    ]),
+  );
   store.pendingDeltas = {};
   rebuildPartLocations(store);
 }
@@ -79,7 +113,12 @@ function applyPartDelta(store: SessionStore, event: OpenCodeEvent): void {
     const parts = store.parts[messageId];
     const part = parts?.[index];
     if (part) {
-      appendFieldDelta(part, field, delta);
+      const updated = applyFieldDelta(part, field, delta);
+      if (updated !== part) {
+        const nextParts = [...parts];
+        nextParts[index] = updated;
+        store.parts[messageId] = nextParts;
+      }
       return;
     }
     delete locations[partId];
@@ -122,9 +161,11 @@ function applyMessageUpdated(store: SessionStore, event: OpenCodeEvent): void {
   const index = store.messages.findIndex((existing) => existing.id === messageId);
   const next = message as unknown as Message;
   if (index >= 0) {
-    store.messages[index] = next;
+    store.messages = store.messages.map((existing, i) =>
+      i === index ? next : existing,
+    );
   } else {
-    store.messages.push(next);
+    store.messages = [...store.messages, next];
   }
 }
 
@@ -135,16 +176,17 @@ function upsertPart(store: SessionStore, messageId: string, incoming: Part): voi
   const locations = getPartLocations(store);
 
   if (index >= 0) {
-    parts[index] = mergePart(parts[index], incoming);
-    store.parts[messageId] = parts;
+    const merged = mergePart(parts[index], incoming);
+    const nextParts = [...parts];
+    nextParts[index] = merged;
+    store.parts[messageId] = nextParts;
     locations[partId] = [messageId, index];
     return;
   }
 
-  const position = parts.length;
-  parts.push(incoming);
-  store.parts[messageId] = parts;
-  locations[partId] = [messageId, position];
+  const nextParts = [...parts, incoming];
+  store.parts[messageId] = nextParts;
+  locations[partId] = [messageId, nextParts.length - 1];
 }
 
 function replayPendingDeltas(store: SessionStore, partId: string): void {
@@ -157,11 +199,18 @@ function replayPendingDeltas(store: SessionStore, partId: string): void {
   if (!location) return;
 
   const [messageId, index] = location;
-  const part = store.parts[messageId]?.[index];
+  const parts = store.parts[messageId];
+  const part = parts?.[index];
   if (!part) return;
 
+  let updated = part;
   for (const pending of deltas) {
-    appendFieldDelta(part, pending.field, pending.delta);
+    updated = applyFieldDelta(updated, pending.field, pending.delta);
+  }
+  if (updated !== part) {
+    const nextParts = [...parts];
+    nextParts[index] = updated;
+    store.parts[messageId] = nextParts;
   }
 }
 
@@ -200,17 +249,21 @@ function mergePart(existing: Part, incoming: Part): Part {
   return incoming;
 }
 
-function appendFieldDelta(part: Part, field: string, delta: string): void {
+/** Pure merge for streaming field deltas (text / reasoning). */
+export function mergeFieldDelta(current: string, delta: string): string {
+  if (!delta) return current;
+  if (delta === current) return current;
+  if (current && delta.startsWith(current)) return delta;
+  if (current && current.endsWith(delta)) return current;
+  return `${current}${delta}`;
+}
+
+function applyFieldDelta(part: Part, field: string, delta: string): Part {
   const record = part as Part & Record<string, unknown>;
   const current = typeof record[field] === 'string' ? record[field] : '';
-  if (!delta) return;
-  if (delta === current) return;
-  if (current && delta.startsWith(current)) {
-    record[field] = delta;
-    return;
-  }
-  if (current && current.endsWith(delta)) return;
-  record[field] = `${current}${delta}`;
+  const next = mergeFieldDelta(current, delta);
+  if (next === current) return part;
+  return { ...part, [field]: next } as Part;
 }
 
 function asString(value: unknown): string | undefined {

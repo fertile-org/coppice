@@ -268,13 +268,13 @@ fn build_done_comment_body(
         }
     }
     if !tests_run.is_empty() {
-        body.push_str("\n**Tests run:**\n");
+        body.push_str("\n\n**Tests run:**\n");
         for test in tests_run {
             body.push_str(&format!("- {test}\n"));
         }
     }
     if !blockers.is_empty() {
-        body.push_str("\n**Blockers:**\n");
+        body.push_str("\n\n**Blockers:**\n");
         for blocker in blockers {
             body.push_str(&format!("- {blocker}\n"));
         }
@@ -301,13 +301,13 @@ fn build_continued_comment_body(
         }
     }
     if !tests_run.is_empty() {
-        body.push_str("\n**Tests run:**\n");
+        body.push_str("\n\n**Tests run:**\n");
         for test in tests_run {
             body.push_str(&format!("- {test}\n"));
         }
     }
     if !blockers.is_empty() {
-        body.push_str("\n**Blockers:**\n");
+        body.push_str("\n\n**Blockers:**\n");
         for blocker in blockers {
             body.push_str(&format!("- {blocker}\n"));
         }
@@ -445,6 +445,24 @@ mod tests {
     #[test]
     fn merge_returns_none_when_unchanged() {
         assert!(merge_ticket_description("Same", None, None).is_none());
+    }
+
+    #[test]
+    fn done_comment_separates_tests_run_with_blank_line() {
+        let result = AgentRunResult::Done {
+            summary: "Approving.".into(),
+            changed_files: vec![],
+            tests_run: vec!["cargo test -p coppice-server --lib".into()],
+            next_status: None,
+            assign_to: None,
+            updated_description: None,
+            acceptance_criteria: None,
+            mention_agents: vec![],
+            blockers: vec![],
+            split_tickets: vec![],
+        };
+        let applied = apply_agent_result(&result).expect("apply");
+        assert!(applied.comment.body.contains("Approving.\n\n**Tests run:**"));
     }
 
     #[test]

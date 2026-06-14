@@ -12,10 +12,11 @@ pub fn format_ticket_thread(
     comments: &[Comment],
     agent_names: &HashMap<Uuid, String>,
 ) -> Option<String> {
-    let relevant: Vec<&Comment> = comments
+    let mut relevant: Vec<&Comment> = comments
         .iter()
         .filter(|c| c.intent != CommentIntent::SystemEvent)
         .collect();
+    relevant.sort_by_key(|c| c.created_at);
 
     if relevant.is_empty() {
         return None;

@@ -75,8 +75,13 @@ const components: Components = {
   ),
 };
 
+export function normalizeCommentMarkdown(text: string): string {
+  // Ensure markdown block sections (e.g. **Tests run:**) start on their own paragraph.
+  return text.replace(/([^\n])\n(\*\*[^*]+:\*\*)/g, '$1\n\n$2');
+}
+
 export function TicketMarkdown({ children }: { children: string }) {
-  const text = children.trim();
+  const text = normalizeCommentMarkdown(children.trim());
   if (!text) return null;
 
   return (

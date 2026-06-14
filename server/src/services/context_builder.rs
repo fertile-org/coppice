@@ -143,6 +143,26 @@ fn is_pm_agent(input: &ContextInput) -> bool {
     role == "pm" || role.contains("product manager")
 }
 
+fn is_tech_lead_agent(input: &ContextInput) -> bool {
+    if input.agent_key.eq_ignore_ascii_case("tech_lead") {
+        return true;
+    }
+    let role = input.agent_role.to_ascii_lowercase();
+    role.contains("tech lead") || role.contains("technical lead")
+}
+
+fn is_reviewer_agent(input: &ContextInput) -> bool {
+    if input.agent_key.eq_ignore_ascii_case("reviewer") {
+        return true;
+    }
+    input.agent_role.to_ascii_lowercase().contains("review")
+}
+
+fn is_in_review_review_task(input: &ContextInput) -> bool {
+    input.ticket_status.eq_ignore_ascii_case("in_review")
+        && (is_tech_lead_agent(input) || is_reviewer_agent(input))
+}
+
 /// Coppice-owned contract rules injected on every run (not editable via agent soul).
 fn format_contract_guidance(input: &ContextInput) -> String {
     if is_pm_agent(input) {
@@ -164,10 +184,45 @@ These rules override conflicting instructions in your system prompt or soul file
         .to_string();
     }
 
+    if is_in_review_review_task(input) {
+        return r#"## Coppice platform rules — code review (required)
+
+These rules override conflicting instructions in your system prompt or soul file.
+
+When reviewing work in **in_review** status, structure the `summary` field as markdown:
+
+```markdown
+## Verdict
+**Approved** — ready for QA.
+(or **Changes required** — see below)
+
+## Summary
+What you verified and the main findings (short bullets or paragraphs).
+
+## Follow-ups
+Non-blocking improvements. Write "None" if there are no follow-ups.
+
+## Recommendation
+What should happen next. On approval write: "Ready for QA — Coppice moves this ticket to In QA automatically."
+On changes required, use `status: "blocked"`, list concrete fixes in `summary`, and `mentionAgents` for the implementer.
+```
+
+- Put test commands in the `testsRun` JSON array only — do not append a "Tests run" section inside `summary`.
+- On approval, return `status: "done"` and **omit `assignTo`** — workflow gates advance the ticket to In QA.
+- Use blank lines between `##` sections so comments render cleanly.
+"#
+        .to_string();
+    }
+
     r#"**Field roles (do not duplicate content across fields):**
 - `updatedDescription` — full ticket body (scope, context, constraints). Stored on the ticket.
 - `acceptanceCriteria` — checklist only. Stored under `## Acceptance criteria` on the ticket.
 - `summary` — short activity note for the comment thread (1–3 sentences). Do not paste the full spec, analysis tables, or acceptance checklist here when `updatedDescription` is set.
+
+## Coppice platform rules — implementer completion (required)
+
+- On `status: "done"`, **omit `assignTo`** — workflow gates move the ticket to In Review automatically.
+- Only PM agents use `assignTo` (when refining backlog tickets). Use agent keys that exist on the project (e.g. `backend_engineer`, `research`).
 
 ## Coppice platform rules — git (required)
 
@@ -327,5 +382,30 @@ mod tests {
         assert!(md.contains("## Ticket thread"));
         assert!(md.contains("Need API shape."));
         assert!(md.contains("Use option A."));
+    }
+
+    #[test]
+    fn tech_lead_in_review_context_includes_review_rules() {
+        let md = build_context_md(&ContextInput {
+            ticket_title: "Streaming feature",
+            ticket_description: "Add WS streaming",
+            ticket_status: "in_review",
+            ticket_substatus: None,
+            agent_name: "Tech Lead Agent",
+            agent_key: "tech_lead",
+            agent_role: "Technical Lead",
+            agent_skills: &[],
+            agent_responsibilities: &[],
+            agent_system_prompt: "You are TL.",
+            repo_name: None,
+            repo_remote_url: None,
+            repo_default_branch: None,
+            worktree_path: None,
+            resume_context: None,
+        });
+        assert!(md.contains("Coppice platform rules — code review (required)"));
+        assert!(md.contains("## Verdict"));
+        assert!(md.contains("moves this ticket to In QA"));
+        assert!(!md.contains("implementer completion"));
     }
 }

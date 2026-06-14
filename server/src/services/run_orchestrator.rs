@@ -170,6 +170,20 @@ impl<'a> RunOrchestrator<'a> {
             )
             .await?;
 
+        for notice in &action.system_comments {
+            CommentService::new(self.pool)
+                .create(
+                    run.ticket_id,
+                    AuthorType::System,
+                    None,
+                    notice,
+                    CommentIntent::SystemEvent,
+                    &[],
+                    &[],
+                )
+                .await?;
+        }
+
         let mention_keys = mention_agents_from_contract(contract);
         if !mention_keys.is_empty() {
             let resume_agent_id = if apply.run_status == RunStatus::Blocked {
@@ -554,6 +568,82 @@ mod tests {
             .expect("load ticket");
         assert_eq!(ticket.ticket.status, TicketStatus::Ready);
         assert!(ticket.ticket.pending_assign_recommendation.is_some());
+    }
+
+    #[tokio::test]
+    async fn orchestrator_unknown_assign_to_posts_system_comment_when_blocked() {
+        let Some(pool) = test_pool().await else {
+            return;
+        };
+        let fx = insert_fixture(&pool).await;
+        let workflow = WorkflowConfig {
+            auto_start_runs: false,
+            auto_assign: coppice_config::AutoAssignConfig {
+                default: true,
+                ..Default::default()
+            },
+            ..WorkflowConfig::default()
+        };
+        let orchestrator = RunOrchestrator::new(&pool, &workflow);
+
+        let contract = pm_done_with_assign_to("frontend_engineer");
+        let apply = ApplyResult {
+            run_status: RunStatus::Succeeded,
+            ticket: ApplyTicketUpdate {
+                status: None,
+                substatus: None,
+                substatus_metadata: None,
+                updated_description: None,
+                acceptance_criteria: None,
+            },
+            comment: ApplyComment {
+                body: "PM done with bad assignee".into(),
+                intent: CommentIntent::ImplementationDone,
+                mentions: vec![],
+            },
+        };
+
+        orchestrator
+            .finish_run(
+                &AgentRun {
+                    id: fx.run_id,
+                    ticket_id: fx.ticket_id,
+                    agent_id: fx.pm_agent_id,
+                    job_type: "work_on_ticket".into(),
+                    status: RunStatus::Running,
+                    sandbox_profile_id: PROFILE_ID.to_string(),
+                    worktree_path: None,
+                    branch_name: None,
+                    error_message: None,
+                    session_id: None,
+                    started_at: None,
+                    ended_at: None,
+                    created_at: time::OffsetDateTime::now_utc(),
+                },
+                &contract,
+                apply,
+                None,
+                None,
+            )
+            .await
+            .expect("finish run");
+
+        let ticket = TicketService::new(&pool)
+            .get(fx.ticket_id)
+            .await
+            .expect("load ticket");
+        assert_eq!(ticket.ticket.status, TicketStatus::Blocked);
+
+        let comments = CommentService::new(&pool)
+            .list_by_ticket(fx.ticket_id)
+            .await
+            .expect("list comments");
+        let system = comments
+            .iter()
+            .find(|c| c.author_type == AuthorType::System)
+            .expect("system comment for unknown assignee");
+        assert!(system.body.contains("frontend_engineer"));
+        assert!(system.body.contains("Workflow blocked"));
     }
 
     #[tokio::test]

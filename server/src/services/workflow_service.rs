@@ -92,10 +92,24 @@ impl WorkflowService {
         if let Some(assign_key) = assign_to_from_contract(&ctx.contract) {
             let key_known = ctx.project_agent_keys.iter().any(|k| k == &assign_key);
             if ctx.auto_assign_enabled && !key_known {
-                action.new_status = Some(TicketStatus::Blocked);
-                return Ok(action);
-            }
-            if key_known || !ctx.auto_assign_enabled {
+                // PM backlog refinement must assign a real project agent; implementer
+                // completion should still advance via the succeeded gate when assignTo
+                // is wrong or names an agent not on the project (e.g. frontend_engineer).
+                if unknown_assign_to_blocks_ticket(ctx.current_status, &ctx.agent_role) {
+                    action.new_status = Some(TicketStatus::Blocked);
+                    action.system_comments.push(unknown_assign_to_notice(
+                        &assign_key,
+                        &ctx.project_agent_keys,
+                        true,
+                    ));
+                    return Ok(action);
+                }
+                action.system_comments.push(unknown_assign_to_notice(
+                    &assign_key,
+                    &ctx.project_agent_keys,
+                    false,
+                ));
+            } else if key_known || !ctx.auto_assign_enabled {
                 apply_assign_to(&mut action, &ctx, &assign_key);
             }
         }
@@ -156,9 +170,41 @@ fn is_reviewer(role: &str) -> bool {
     role.to_lowercase().contains("review")
 }
 
+fn is_tech_lead(role: &str) -> bool {
+    let r = role.to_lowercase();
+    r.contains("tech lead") || r.contains("technical lead")
+}
+
 fn is_qc(role: &str) -> bool {
     let r = role.to_lowercase();
     r == "qc" || r.contains("quality")
+}
+
+/// Unknown `assignTo` blocks only when PM refinement must pick a valid next assignee.
+fn unknown_assign_to_blocks_ticket(current: TicketStatus, role: &str) -> bool {
+    current == TicketStatus::Backlog && is_pm(role)
+}
+
+fn unknown_assign_to_notice(assign_key: &str, known_keys: &[String], blocked: bool) -> String {
+    let available = if known_keys.is_empty() {
+        "(none)".to_string()
+    } else {
+        known_keys
+            .iter()
+            .map(|key| format!("`{key}`"))
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+
+    if blocked {
+        format!(
+            "Workflow blocked this ticket: the agent recommended assignee `{assign_key}`, which is not available on this project. Add or enable the agent, or re-run with a valid agent key. Available keys: {available}."
+        )
+    } else {
+        format!(
+            "Workflow note: the agent returned assignTo `{assign_key}`, which is not on this project — ignored; status was advanced by workflow gates. Available keys: {available}."
+        )
+    }
 }
 
 fn resolve_succeeded_gate(current: TicketStatus, role: &str) -> Option<TicketStatus> {
@@ -169,7 +215,7 @@ fn resolve_succeeded_gate(current: TicketStatus, role: &str) -> Option<TicketSta
         (Ready, role) if is_implementer(role) => Some(InReview),
         (InProgress, role) if is_implementer(role) => Some(InReview),
         (InReview, role) if is_implementer(role) => Some(WaitForFinalReview),
-        (InReview, role) if is_reviewer(role) => Some(InQa),
+        (InReview, role) if is_reviewer(role) || is_tech_lead(role) => Some(InQa),
         (InQa, role) if is_qc(role) => Some(WaitForFinalReview),
         _ => None,
     }
@@ -363,6 +409,9 @@ mod tests {
         })
         .expect("resolve");
         assert_eq!(action.new_status, Some(TicketStatus::Blocked));
+        assert_eq!(action.system_comments.len(), 1);
+        assert!(action.system_comments[0].contains("frontend_engineer"));
+        assert!(action.system_comments[0].contains("Workflow blocked"));
     }
 
     #[test]
@@ -444,6 +493,27 @@ mod tests {
     }
 
     #[test]
+    fn implementer_unknown_assign_to_still_moves_to_in_review() {
+        let action = WorkflowService::resolve_transition(TransitionContext {
+            current_status: TicketStatus::InProgress,
+            agent_role: "Backend Engineer".into(),
+            agent_key: "backend_engineer".into(),
+            assignee_agent_id: Some(engineer_agent_id()),
+            auto_assign_enabled: true,
+            contract: done_with_assign_to("frontend_engineer"),
+            project_agent_keys: vec!["backend_engineer".into()],
+            project_agent_ids: agent_map(&[("backend_engineer", engineer_agent_id())]),
+            ..minimal_ctx()
+        })
+        .expect("resolve");
+        assert_eq!(action.new_status, Some(TicketStatus::InReview));
+        assert!(action.new_assignee_id.is_none());
+        assert_eq!(action.system_comments.len(), 1);
+        assert!(action.system_comments[0].contains("frontend_engineer"));
+        assert!(action.system_comments[0].contains("ignored"));
+    }
+
+    #[test]
     fn post_clarification_implementer_done_skips_to_wait_for_final_review() {
         let action = WorkflowService::resolve_transition(TransitionContext {
             current_status: TicketStatus::InProgress,
@@ -471,6 +541,30 @@ mod tests {
             Some(TicketStatus::WaitForFinalReview)
         );
         assert_eq!(action.new_assignee_id, Some(None));
+    }
+
+    #[test]
+    fn in_review_tech_lead_succeeded_moves_to_in_qa() {
+        let action = WorkflowService::resolve_transition(TransitionContext {
+            current_status: TicketStatus::InReview,
+            agent_role: "Technical Lead".into(),
+            agent_key: "tech_lead".into(),
+            contract: AgentRunResult::Done {
+                summary: "## Verdict\n**Approved**".into(),
+                changed_files: vec![],
+                tests_run: vec![],
+                next_status: None,
+                assign_to: None,
+                updated_description: None,
+                acceptance_criteria: None,
+                mention_agents: vec![],
+                blockers: vec![],
+                split_tickets: vec![],
+            },
+            ..minimal_ctx()
+        })
+        .expect("resolve");
+        assert_eq!(action.new_status, Some(TicketStatus::InQa));
     }
 
     #[test]

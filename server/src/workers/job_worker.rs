@@ -8,6 +8,7 @@ use sqlx::Row;
 use tokio::sync::watch;
 
 use crate::domain::comment::{author_type_to_str, CommentIntent};
+use crate::domain::substatus::TicketStatus;
 use crate::domain::run::{run_status_to_str, RunStatus};
 use crate::domain::slug::slugify;
 use crate::domain::ticket::{status_to_str, substatus_to_str};
@@ -324,6 +325,12 @@ async fn execute_job(
         .map_err(|err| anyhow::anyhow!("apply agent result: {err}"))?;
     if run.job_type == "respond_to_mention" && apply.run_status == RunStatus::Succeeded {
         apply.comment.intent = CommentIntent::ClarificationAnswer;
+    } else if run.job_type == "work_on_ticket"
+        && apply.run_status == RunStatus::Succeeded
+        && ticket.ticket.status == TicketStatus::InReview
+        && is_review_agent(&agent)
+    {
+        apply.comment.intent = CommentIntent::ReviewFeedback;
     }
 
     if run.job_type == "work_on_ticket" && apply.run_status == RunStatus::Succeeded {
@@ -435,6 +442,19 @@ fn persist_artifacts(
         },
     )?;
     Ok(())
+}
+
+fn is_review_agent(agent: &crate::domain::agent::Agent) -> bool {
+    if matches!(
+        agent.preset_source.as_deref(),
+        Some("tech_lead") | Some("reviewer")
+    ) {
+        return true;
+    }
+    let role = agent.role.to_lowercase();
+    role.contains("tech lead")
+        || role.contains("technical lead")
+        || role.contains("review")
 }
 
 async fn run_session_id(pool: &PgPool, run_id: uuid::Uuid) -> Option<String> {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { applyEvent, createSessionStore } from './reduce-event';
+import { applyEvent, cloneSessionStore, createSessionStore } from './reduce-event';
 import type { TextPart } from './types';
 
 describe('applyEvent', () => {
@@ -98,5 +98,35 @@ describe('applyEvent', () => {
     });
 
     expect((store.parts['msg_1'][0] as TextPart).text).toBe(payload);
+  });
+
+  it('re-applying the same delta on a cloned store does not duplicate text', () => {
+    const store = createSessionStore('ses_1');
+    applyEvent(store, {
+      type: 'message.part.updated',
+      properties: {
+        sessionID: 'ses_1',
+        part: { id: 'prt_1', type: 'reasoning', text: '', messageID: 'msg_1' },
+      },
+    });
+
+    const deltaEvent = {
+      type: 'message.part.delta' as const,
+      properties: {
+        sessionID: 'ses_1',
+        partID: 'prt_1',
+        field: 'text',
+        delta:
+          "I'm the Tech Lead Agent reviewing a ticket in in_review status. Let me investigate.",
+      },
+    };
+
+    const working = cloneSessionStore(store);
+    applyEvent(working, deltaEvent);
+    const once = (working.parts['msg_1'][0] as TextPart).text;
+
+    const strictModePass = cloneSessionStore(store);
+    applyEvent(strictModePass, deltaEvent);
+    expect((strictModePass.parts['msg_1'][0] as TextPart).text).toBe(once);
   });
 });

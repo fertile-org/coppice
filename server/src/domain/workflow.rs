@@ -70,4 +70,6 @@ pub struct TransitionAction {
     pub substatus_metadata: Option<Option<Value>>,
     pub enqueue_jobs: Vec<JobRequest>,
     pub increment_clarification_round: bool,
+    /// System comments explaining workflow issues (unknown assignee, etc.).
+    pub system_comments: Vec<String>,
 }

@@ -332,7 +332,7 @@ export function useCreateComment(ticketId: string) {
     mutationFn: (body: CreateCommentInput) => postComment(ticketId, body),
     onSuccess: (comment) => {
       queryClient.setQueryData<Comment[]>(commentsQueryKey(ticketId), (old) =>
-        old ? [...old, comment] : [comment],
+        old ? [comment, ...old] : [comment],
       );
     },
   });
