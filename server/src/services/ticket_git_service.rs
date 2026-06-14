@@ -230,7 +230,7 @@ pub fn worktree_exists(worktree_dir: &Path) -> bool {
     worktree_dir.join(".git").exists()
 }
 
-fn validate_branch_name(branch: &str) -> Result<(), TicketGitError> {
+pub(crate) fn validate_branch_name(branch: &str) -> Result<(), TicketGitError> {
     let trimmed = branch.trim();
     if trimmed.is_empty()
         || trimmed.len() > 200
@@ -257,7 +257,7 @@ fn path_to_string(path: &Path) -> Result<String, TicketGitError> {
         )))
 }
 
-async fn list_local_branches(git_dir: &Path) -> Result<Vec<String>, TicketGitError> {
+pub(crate) async fn list_local_branches(git_dir: &Path) -> Result<Vec<String>, TicketGitError> {
     let output = tokio::process::Command::new("git")
         .current_dir(git_dir)
         .args(["branch", "--format=%(refname:short)"])
