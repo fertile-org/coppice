@@ -1,10 +1,11 @@
 use crate::api::auth::{pool_from_state, AuthUser};
 use crate::domain::comment::{intent_from_str, AuthorType, Comment, CommentIntent};
+use crate::domain::context_profile::ContextProfile;
 use crate::events::bus::AppEvent;
 use crate::services::agent_service::{AgentError, AgentService};
 use crate::services::comment_service::{CommentError, CommentService};
 use crate::services::mention_service::{MentionError, MentionService};
-use crate::services::run_service::{RunService, StartRunOptions};
+use crate::services::run_service::{RunError, RunService, StartRunOptions};
 use crate::services::ticket_service::{TicketError, TicketService};
 use crate::AppState;
 use axum::{
@@ -57,6 +58,36 @@ struct CreateCommentBody {
     intent: Option<String>,
     attachment_ids: Option<Vec<Uuid>>,
     mentions: Option<Vec<String>>,
+    mention_mode: Option<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct StartedRunSummary {
+    run_id: Uuid,
+    agent_id: Uuid,
+    agent_key: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CreateCommentResponse {
+    #[serde(flatten)]
+    comment: CommentResponse,
+    started_runs: Vec<StartedRunSummary>,
+}
+
+enum MentionMode {
+    Agent,
+    Chat,
+}
+
+fn parse_mention_mode(raw: Option<&str>) -> Result<MentionMode, CommentError> {
+    match raw.unwrap_or("agent") {
+        "agent" => Ok(MentionMode::Agent),
+        "chat" => Ok(MentionMode::Chat),
+        other => Err(CommentError::Validation(format!("invalid mentionMode: {other}"))),
+    }
 }
 
 fn attachment_to_summary(attachment: &crate::domain::attachment::Attachment) -> AttachmentSummary {
@@ -148,6 +179,15 @@ fn map_mention_error(err: MentionError) -> StatusCode {
     }
 }
 
+fn map_run_error(err: RunError) -> StatusCode {
+    match err {
+        RunError::ActiveRunExists => StatusCode::CONFLICT,
+        RunError::NotFound => StatusCode::NOT_FOUND,
+        RunError::Validation(_) => StatusCode::BAD_REQUEST,
+        RunError::Database(_) => StatusCode::INTERNAL_SERVER_ERROR,
+    }
+}
+
 fn parse_intent(intent: &str) -> Result<CommentIntent, CommentError> {
     intent_from_str(intent).ok_or(CommentError::InvalidIntent)
 }
@@ -179,12 +219,14 @@ async fn create_comment(
     AuthUser { user, .. }: AuthUser,
     Path(ticket_id): Path<Uuid>,
     Json(body): Json<CreateCommentBody>,
-) -> Result<(StatusCode, Json<CommentResponse>), StatusCode> {
+) -> Result<(StatusCode, Json<CreateCommentResponse>), StatusCode> {
     let pool = pool_from_state(&state)?;
     let ticket = TicketService::new(pool)
         .get(ticket_id)
         .await
         .map_err(map_ticket_error)?;
+
+    let mention_mode = parse_mention_mode(body.mention_mode.as_deref()).map_err(map_error)?;
 
     let agents = AgentService::new(pool)
         .list_agents()
@@ -198,6 +240,19 @@ async fn create_comment(
     let mut parsed_mentions = MentionService::parse_mention_keys(&body.body, &key_refs);
     if parsed_mentions.is_empty() {
         parsed_mentions = body.mentions.unwrap_or_default();
+    }
+
+    if !parsed_mentions.is_empty() {
+        if parsed_mentions.len() > 1 {
+            return Err(map_error(CommentError::Validation(
+                "only one @mention per comment is supported".into(),
+            )));
+        }
+        if matches!(mention_mode, MentionMode::Agent) && ticket.ticket.repo_id.is_none() {
+            return Err(map_error(CommentError::Validation(
+                "repository required to run agent in worktree".into(),
+            )));
+        }
     }
 
     let service = CommentService::new(pool);
@@ -219,6 +274,8 @@ async fn create_comment(
         .await
         .map_err(map_error)?;
 
+    let mut started_runs = Vec::new();
+
     if !parsed_mentions.is_empty() {
         let mention_svc = MentionService::new(pool);
         let mentions = mention_svc
@@ -232,17 +289,32 @@ async fn create_comment(
             .await
             .map_err(map_mention_error)?;
 
-        if state.config.workflow.auto_start_runs && ticket.ticket.repo_id.is_some() {
+        let should_start = ticket.ticket.repo_id.is_some();
+
+        if should_start {
+            let (job_type, profile) = match mention_mode {
+                MentionMode::Agent => ("work_on_ticket", ContextProfile::HumanAgent),
+                MentionMode::Chat => ("respond_to_mention", ContextProfile::HumanChat),
+            };
             let run_svc = RunService::new(pool);
             for mention in &mentions {
-                let _ = run_svc
+                let run = run_svc
                     .start_run_for_agent(
                         ticket_id,
                         mention.mentioned_agent_id,
-                        "respond_to_mention",
-                        StartRunOptions::default(),
+                        job_type,
+                        StartRunOptions {
+                            context_profile: profile,
+                            trigger_comment_id: Some(comment.id),
+                        },
                     )
-                    .await;
+                    .await
+                    .map_err(map_run_error)?;
+                started_runs.push(StartedRunSummary {
+                    run_id: run.id,
+                    agent_id: run.agent_id,
+                    agent_key: agent_key_for_agent(run.agent_id, &agents),
+                });
             }
         }
 
@@ -261,8 +333,26 @@ async fn create_comment(
         .map_err(map_error)?;
     Ok((
         StatusCode::CREATED,
-        Json(comment_to_response(comment, &attachments_by_id)),
+        Json(CreateCommentResponse {
+            comment: comment_to_response(comment, &attachments_by_id),
+            started_runs,
+        }),
     ))
+}
+
+fn agent_key_for_agent(agent_id: Uuid, agents: &[crate::domain::agent::Agent]) -> String {
+    use crate::domain::slug::slugify;
+
+    agents
+        .iter()
+        .find(|agent| agent.id == agent_id)
+        .map(|agent| {
+            agent
+                .preset_source
+                .clone()
+                .unwrap_or_else(|| slugify(&agent.name))
+        })
+        .unwrap_or_else(|| "unknown".to_string())
 }
 
 fn build_agent_keys(agents: &[crate::domain::agent::Agent]) -> Vec<String> {

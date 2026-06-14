@@ -3,6 +3,35 @@ mod common;
 use axum::http::StatusCode;
 use tower::ServiceExt;
 
+async fn setup_ticket_with_repo_and_agents(
+) -> (
+    tempfile::TempDir,
+    sqlx::PgPool,
+    axum::Router,
+    String,
+    String,
+    String,
+) {
+    let (git_dir, local_path) = common::create_temp_git_checkout();
+    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
+    let pool = state.db.as_ref().expect("db pool").clone();
+    let repo_id =
+        common::register_test_repo(&app, &local_path.display().to_string(), &cookie, &csrf).await;
+    let project_id = common::create_test_project(&app, &cookie, &csrf).await;
+    let ticket_id = common::create_test_ticket(&app, &project_id, &cookie, &csrf).await;
+    common::set_ticket_repo(&app, &ticket_id, &repo_id, &cookie, &csrf).await;
+    common::create_agent_with_preset_key(&app, "pm", "PM Agent", &cookie, &csrf).await;
+    common::create_agent_with_preset_key(
+        &app,
+        "backend_engineer",
+        "Backend Engineer",
+        &cookie,
+        &csrf,
+    )
+    .await;
+    (git_dir, pool, app, cookie, csrf, ticket_id)
+}
+
 #[tokio::test]
 async fn upload_attachment_and_create_comment() {
     let _guard = common::DB_TEST_LOCK.lock().await;
@@ -71,4 +100,105 @@ async fn upload_attachment_and_create_comment() {
     );
     assert_eq!(comments[0]["attachments"][0]["filename"], "notes.txt");
     assert_eq!(comments[0]["attachments"][0]["contentType"], "text/plain");
+}
+
+#[tokio::test]
+async fn mention_chat_mode_starts_respond_to_mention_run() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+
+    let (_git_dir, pool, app, cookie, csrf, ticket_id) = setup_ticket_with_repo_and_agents().await;
+
+    let res = app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            &format!("/api/tickets/{ticket_id}/comments"),
+            r#"{"body":"@pm hello","mentionMode":"chat"}"#,
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::CREATED);
+
+    let body: serde_json::Value = common::json_body(res).await;
+    let started_runs = body["startedRuns"].as_array().unwrap();
+    assert_eq!(started_runs.len(), 1);
+    assert_eq!(started_runs[0]["agentKey"], "pm");
+
+    let run_id = uuid::Uuid::parse_str(started_runs[0]["runId"].as_str().unwrap()).unwrap();
+    let row: (String, String) = sqlx::query_as(
+        "SELECT job_type, context_profile FROM agent_runs WHERE id = $1",
+    )
+    .bind(run_id)
+    .fetch_one(&pool)
+    .await
+    .expect("run row");
+    assert_eq!(row.0, "respond_to_mention");
+    assert_eq!(row.1, "human_chat");
+}
+
+#[tokio::test]
+async fn mention_agent_mode_starts_work_on_ticket_run() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+
+    let (_git_dir, pool, app, cookie, csrf, ticket_id) = setup_ticket_with_repo_and_agents().await;
+
+    let res = app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            &format!("/api/tickets/{ticket_id}/comments"),
+            r#"{"body":"@backend_engineer fix","mentionMode":"agent"}"#,
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::CREATED);
+
+    let body: serde_json::Value = common::json_body(res).await;
+    let started_runs = body["startedRuns"].as_array().unwrap();
+    assert_eq!(started_runs.len(), 1);
+    assert_eq!(started_runs[0]["agentKey"], "backend_engineer");
+
+    let run_id = uuid::Uuid::parse_str(started_runs[0]["runId"].as_str().unwrap()).unwrap();
+    let row: (String, String) = sqlx::query_as(
+        "SELECT job_type, context_profile FROM agent_runs WHERE id = $1",
+    )
+    .bind(run_id)
+    .fetch_one(&pool)
+    .await
+    .expect("run row");
+    assert_eq!(row.0, "work_on_ticket");
+    assert_eq!(row.1, "human_agent");
+}
+
+#[tokio::test]
+async fn mention_multiple_agents_returns_bad_request() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+
+    let (_git_dir, _pool, app, cookie, csrf, ticket_id) = setup_ticket_with_repo_and_agents().await;
+
+    let res = app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            &format!("/api/tickets/{ticket_id}/comments"),
+            r#"{"body":"@pm @backend_engineer please help"}"#,
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
 }
