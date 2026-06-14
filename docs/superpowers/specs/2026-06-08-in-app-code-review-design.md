@@ -1,7 +1,7 @@
 # In-App Code Review — Design Spec
 
 **Date:** 2026-06-08  
-**Status:** Draft (pending review)  
+**Status:** Approved (plan ready)  
 **Product:** Coppice — agent workspace on tickets
 
 **Depends on:** M03 registered repositories & worktrees, M05 comments (`review_feedback` intent), ticket git actions  
@@ -389,11 +389,11 @@ web/src/features/code/
 
 ## Acceptance criteria
 
-- [ ] `/code` page opens in new tab from ticket sidebar and Repositories page
-- [ ] Worktree and base branch selectable; diff shows changed files with syntax highlighting
-- [ ] Inline line comments can be added and removed before submit
-- [ ] Submit posts one combined `review_feedback` comment on existing ticket
-- [ ] Submit without ticket creates unassigned Backlog ticket (title + project from dialog)
-- [ ] Optional workflow action on existing ticket (comment only / move to In Progress / reassign)
-- [ ] Invalid paths and oversized files rejected safely
-- [ ] Integration tests pass for diff APIs and submit flow
+- [x] `/code` page opens in new tab from ticket sidebar and Repositories page
+- [x] Worktree and base branch selectable; diff shows changed files with syntax highlighting
+- [x] Inline line comments can be added and removed before submit
+- [x] Submit posts one combined `review_feedback` comment on existing ticket
+- [x] Submit without ticket creates unassigned Backlog ticket (title + project from dialog)
+- [x] Optional workflow action on existing ticket (comment only / move to In Progress / reassign)
+- [x] Invalid paths and oversized files rejected safely
+- [x] Integration tests pass for diff APIs and submit flow
