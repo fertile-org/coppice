@@ -4,6 +4,7 @@ mod ws;
 mod agents;
 mod connectors;
 mod attachments;
+mod code_reviews;
 mod comments;
 mod mentions;
 mod health;
@@ -26,6 +27,7 @@ pub fn router(state: Arc<AppState>) -> Router {
     let protected = auth::protected_routes()
         .merge(projects::routes())
         .merge(repos::routes())
+        .merge(code_reviews::routes())
         .merge(tickets::routes())
         .merge(comments::routes())
         .merge(mentions::routes())

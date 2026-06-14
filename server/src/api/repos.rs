@@ -1,8 +1,9 @@
 use crate::api::auth::{pool_from_state, AuthUser};
+use crate::api::code_reviews::map_code_review_error;
 use crate::domain::repo::{verification_status_to_str, Repo};
 use crate::middleware::admin::AdminUser;
 use crate::services::code_review_service::{
-    BranchesResponse, CodeReviewError, CodeReviewService, DiffSummary, FilePatch,
+    BranchesResponse, CodeReviewService, DiffSummary, FilePatch,
 };
 use crate::services::repo_service::{RepoError, RepoService};
 use crate::AppState;
@@ -267,16 +268,4 @@ async fn get_repo_diff_file(
         .await
         .map_err(map_code_review_error)?;
     Ok(Json(patch))
-}
-
-fn map_code_review_error(err: CodeReviewError) -> StatusCode {
-    match err {
-        CodeReviewError::RepoNotFound | CodeReviewError::TicketNotFound => StatusCode::NOT_FOUND,
-        CodeReviewError::RepoNotReady
-        | CodeReviewError::InvalidWorktreePath
-        | CodeReviewError::InvalidFilePath
-        | CodeReviewError::InvalidBranchName => StatusCode::BAD_REQUEST,
-        CodeReviewError::PatchTooLarge => StatusCode::PAYLOAD_TOO_LARGE,
-        _ => StatusCode::INTERNAL_SERVER_ERROR,
-    }
 }

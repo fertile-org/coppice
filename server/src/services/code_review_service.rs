@@ -3,9 +3,13 @@ use std::path::{Path, PathBuf};
 use sqlx::{PgPool, Row};
 use uuid::Uuid;
 
+use crate::domain::comment::{AuthorType, CommentIntent};
 use crate::domain::slug::slugify;
+use crate::domain::substatus::TicketStatus;
+use crate::services::comment_service::CommentService;
 use crate::services::repo_service::{RepoError, RepoService};
 use crate::services::ticket_git_service::{list_local_branches, validate_branch_name};
+use crate::services::ticket_service::TicketService;
 
 #[derive(Debug, thiserror::Error)]
 pub enum CodeReviewError {
@@ -25,6 +29,8 @@ pub enum CodeReviewError {
     TicketNotFound,
     #[error("ticket repo mismatch")]
     TicketRepoMismatch,
+    #[error("validation error: {0}")]
+    Validation(String),
     #[error("git error: {0}")]
     Git(String),
     #[error(transparent)]
@@ -39,7 +45,7 @@ pub enum CodeReviewError {
 
 pub const MAX_PATCH_BYTES: usize = 512 * 1024;
 
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct InlineCommentInput {
     pub path: String,
@@ -149,6 +155,37 @@ pub struct DiffSummary {
 pub struct FilePatch {
     pub path: String,
     pub patch: String,
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NewTicketInput {
+    pub project_id: Uuid,
+    pub title: String,
+    pub description: Option<String>,
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SubmitReviewInput {
+    pub repo_id: Uuid,
+    pub worktree_path: String,
+    pub base_branch: String,
+    pub head_sha: String,
+    pub ticket_id: Option<Uuid>,
+    pub new_ticket: Option<NewTicketInput>,
+    pub summary: String,
+    pub inline_comments: Vec<InlineCommentInput>,
+    pub workflow_action: Option<String>,
+    pub reassign_agent_id: Option<Uuid>,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SubmitReviewResponse {
+    pub ticket_id: Uuid,
+    pub comment_id: Uuid,
+    pub ticket_created: bool,
 }
 
 struct WorktreeRepoContext {
@@ -300,6 +337,111 @@ impl<'a> CodeReviewService<'a> {
         Ok(FilePatch {
             path: path.to_string(),
             patch,
+        })
+    }
+
+    pub async fn submit_review(
+        &self,
+        user_id: Uuid,
+        input: SubmitReviewInput,
+    ) -> Result<SubmitReviewResponse, CodeReviewError> {
+        if input.summary.trim().is_empty() {
+            return Err(CodeReviewError::Validation("summary is required".into()));
+        }
+
+        let repo = RepoService::new(self.pool).get(input.repo_id).await.map_err(|e| match e {
+            RepoError::NotFound => CodeReviewError::RepoNotFound,
+            RepoError::Database(err) => CodeReviewError::Database(err),
+            other => CodeReviewError::Git(other.to_string()),
+        })?;
+        if repo.verification_status != crate::domain::repo::VerificationStatus::Ready {
+            return Err(CodeReviewError::RepoNotReady);
+        }
+
+        let ctx = self
+            .resolve_worktree_repo(input.repo_id, &input.worktree_path, &input.base_branch)
+            .await?;
+        if ctx.head_sha != input.head_sha {
+            return Err(CodeReviewError::Git(
+                "worktree HEAD changed; refresh diff before submitting".into(),
+            ));
+        }
+
+        let ticket_service = TicketService::new(self.pool);
+        let mut ticket_created = false;
+        let ticket_id = if let Some(ticket_id) = input.ticket_id {
+            let ticket = ticket_service.get(ticket_id).await?;
+            if ticket.ticket.repo_id != Some(input.repo_id) {
+                return Err(CodeReviewError::TicketRepoMismatch);
+            }
+            ticket_id
+        } else {
+            let new_ticket = input.new_ticket.ok_or_else(|| {
+                CodeReviewError::Validation(
+                    "new_ticket is required when ticket_id is omitted".into(),
+                )
+            })?;
+            let created = ticket_service
+                .create(
+                    new_ticket.project_id,
+                    new_ticket.title.trim(),
+                    new_ticket.description.as_deref().unwrap_or(""),
+                    Some(input.repo_id),
+                    None,
+                    "human",
+                    user_id,
+                )
+                .await?;
+            ticket_created = true;
+            created.ticket.id
+        };
+
+        for comment in &input.inline_comments {
+            validate_diff_file_path(&comment.path)?;
+        }
+
+        let body = format_review_comment(
+            &repo.name,
+            &input.worktree_path,
+            &input.base_branch,
+            &ctx.head_branch,
+            &ctx.head_sha,
+            input.summary.trim(),
+            &input.inline_comments,
+        );
+
+        let comment = CommentService::new(self.pool)
+            .create(
+                ticket_id,
+                AuthorType::Human,
+                Some(user_id),
+                &body,
+                CommentIntent::ReviewFeedback,
+                &[],
+                &[],
+            )
+            .await?;
+
+        match input.workflow_action.as_deref() {
+            Some("move_to_in_progress") => {
+                ticket_service
+                    .update_status(ticket_id, TicketStatus::InProgress, None, None)
+                    .await?;
+            }
+            Some("reassign_engineer") => {
+                if let Some(agent_id) = input.reassign_agent_id {
+                    ticket_service
+                        .assign_agent(ticket_id, Some(agent_id))
+                        .await?;
+                }
+            }
+            _ => {}
+        }
+
+        Ok(SubmitReviewResponse {
+            ticket_id,
+            comment_id: comment.id,
+            ticket_created,
         })
     }
 
