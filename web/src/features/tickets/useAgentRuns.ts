@@ -80,6 +80,22 @@ export function useAgentRuns(ticketId: string | undefined) {
   });
 }
 
+export function patchAgentRunStatusInCache(
+  queryClient: QueryClient,
+  ticketId: string,
+  runId: string,
+  status: RunStatus,
+) {
+  queryClient.setQueryData<AgentRun[]>(agentRunsQueryKey(ticketId), (old) => {
+    if (!old) return old;
+    const index = old.findIndex((item) => item.id === runId);
+    if (index === -1) return old;
+    const next = [...old];
+    next[index] = { ...next[index], status };
+    return next;
+  });
+}
+
 export function upsertAgentRunInCache(
   queryClient: QueryClient,
   ticketId: string,

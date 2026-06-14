@@ -119,8 +119,31 @@ impl<'a> JobService<'a> {
         .await?;
 
         if result.rows_affected() == 0 {
-            return Err(JobError::NotFound);
+            let exists: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM agent_jobs WHERE id = $1)")
+                .bind(job_id)
+                .fetch_one(self.pool)
+                .await?;
+            if !exists {
+                return Err(JobError::NotFound);
+            }
         }
+        Ok(())
+    }
+
+    /// Fail pending and in-flight jobs for a run whose terminal state was set elsewhere
+    /// (e.g. server restart sweep, watchdog interrupt).
+    pub async fn fail_active_jobs_for_run(&self, run_id: Uuid) -> Result<(), JobError> {
+        sqlx::query(
+            r#"
+            UPDATE agent_jobs
+            SET status = $2
+            WHERE run_id = $1 AND status IN ('pending', 'processing')
+            "#,
+        )
+        .bind(run_id)
+        .bind(job_status_to_str(JobStatus::Failed))
+        .execute(self.pool)
+        .await?;
         Ok(())
     }
 

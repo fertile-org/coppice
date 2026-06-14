@@ -3,6 +3,7 @@ use std::path::PathBuf;
 
 pub struct RunArtifactPaths {
     pub terminal_log: PathBuf,
+    pub console_events: PathBuf,
     pub meta_json: PathBuf,
     pub session_snapshot: PathBuf,
 }
@@ -12,6 +13,7 @@ impl RunArtifactPaths {
         let base = PathBuf::from(artifacts_dir).join("runs").join(run_id);
         Self {
             terminal_log: base.join("terminal.log"),
+            console_events: base.join("console.events.jsonl"),
             meta_json: base.join("meta.json"),
             session_snapshot: base.join("session.snapshot.json"),
         }
@@ -35,6 +37,30 @@ impl ArtifactService {
             std::fs::create_dir_all(parent)?;
         }
         std::fs::write(&paths.terminal_log, content)
+    }
+
+    pub fn write_console_events(
+        paths: &RunArtifactPaths,
+        events: &[serde_json::Value],
+    ) -> std::io::Result<()> {
+        if let Some(parent) = paths.console_events.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let mut lines = String::new();
+        for event in events {
+            lines.push_str(&serde_json::to_string(event)?);
+            lines.push('\n');
+        }
+        std::fs::write(&paths.console_events, lines)
+    }
+
+    pub fn read_console_events(paths: &RunArtifactPaths) -> Vec<serde_json::Value> {
+        let Ok(raw) = std::fs::read_to_string(&paths.console_events) else {
+            return Vec::new();
+        };
+        raw.lines()
+            .filter_map(|line| serde_json::from_str(line).ok())
+            .collect()
     }
 
     pub fn write_meta(paths: &RunArtifactPaths, meta: &RunArtifactMeta) -> std::io::Result<()> {

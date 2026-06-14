@@ -1,16 +1,19 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 
 const invalidateSpy = vi.fn();
+const setQueryDataSpy = vi.fn();
 
 vi.mock('../../lib/query-client', () => ({
   queryClient: {
     invalidateQueries: (...args: unknown[]) => invalidateSpy(...args),
+    setQueryData: (...args: unknown[]) => setQueryDataSpy(...args),
   },
 }));
 
 describe('useEventSocket dispatch', () => {
   beforeEach(() => {
     invalidateSpy.mockClear();
+    setQueryDataSpy.mockClear();
   });
 
   it('invalidates ticket and tickets queries on ticket.updated', async () => {
@@ -39,6 +42,10 @@ describe('useEventSocket dispatch', () => {
       }),
     );
 
+    expect(setQueryDataSpy).toHaveBeenCalledWith(
+      ['agent-runs', 'ticket-456'],
+      expect.any(Function),
+    );
     expect(invalidateSpy).toHaveBeenCalledWith({
       queryKey: ['agent-runs', 'ticket-456'],
     });

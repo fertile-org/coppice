@@ -2,6 +2,9 @@ import { FitAddon } from '@xterm/addon-fit';
 import { Terminal } from 'xterm';
 import { useEffect, useRef, useState } from 'react';
 import 'xterm/css/xterm.css';
+import '../../opencode-session/theme/opencode-theme.css';
+import { openCodeXtermTheme } from '../../opencode-session/theme/ayu-palette';
+import { sessionTheme } from '../../opencode-session/theme/session-theme';
 import { LiveRunActivityBar } from './LiveRunActivityBar';
 
 interface LiveConsoleProps {
@@ -39,9 +42,11 @@ export function LiveConsole({ runId, runStatus, startedAt }: LiveConsoleProps) {
   useEffect(() => {
     if (!containerRef.current) return;
     const term = new Terminal({
-      fontFamily: 'ui-monospace, monospace',
-      fontSize: 13,
+      theme: openCodeXtermTheme,
+      fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
+      fontSize: 15,
       scrollback: 5000,
+      convertEol: true,
     });
     const fit = new FitAddon();
     term.loadAddon(fit);
@@ -168,7 +173,7 @@ export function LiveConsole({ runId, runStatus, startedAt }: LiveConsoleProps) {
       <p className="font-body text-xs text-text-secondary">{statusLabel}</p>
       <div
         ref={containerRef}
-        className="min-h-[280px] flex-1 overflow-hidden rounded-md border border-border bg-[#1e1e1e] p-1"
+        className={`oc-session min-h-[280px] flex-1 overflow-hidden border border-[var(--oc-border)] p-1 ${sessionTheme.bg}`}
       />
     </div>
   );

@@ -15,6 +15,7 @@ use axum::{
 };
 use futures_util::{SinkExt, StreamExt};
 use std::sync::Arc;
+use std::time::Duration;
 use uuid::Uuid;
 
 pub async fn live_ws_handler(
@@ -81,7 +82,15 @@ async fn handle_live_socket(state: Arc<AppState>, run_id: Uuid, socket: WebSocke
     let is_opencode = connector.as_deref() == Some("opencode");
     let is_claude_code = connector.as_deref() == Some("claude-code");
 
-    let recovery = if let Some(handle) = state.run_streams.get(run_id) {
+    let stream_handle = if let Some(handle) = state.run_streams.get(run_id) {
+        Some(handle)
+    } else if is_active_run_status(run.status) {
+        wait_for_run_stream(&state, run_id, Duration::from_secs(10)).await
+    } else {
+        None
+    };
+
+    let recovery = if let Some(handle) = stream_handle {
         replay_and_subscribe(&state, run_id, &mut sender, &handle).await;
         None
     } else if is_opencode {
@@ -122,6 +131,23 @@ async fn handle_live_socket(state: Arc<AppState>, run_id: Uuid, socket: WebSocke
         recoverable,
     };
     let _ = send_live_message(&mut sender, &end).await;
+}
+
+async fn wait_for_run_stream(
+    state: &AppState,
+    run_id: Uuid,
+    max_wait: Duration,
+) -> Option<Arc<crate::sessions::run_registry::RunStreamHandle>> {
+    let deadline = tokio::time::Instant::now() + max_wait;
+    loop {
+        if let Some(handle) = state.run_streams.get(run_id) {
+            return Some(handle);
+        }
+        if tokio::time::Instant::now() >= deadline {
+            return None;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
 }
 
 async fn replay_and_subscribe(
@@ -264,8 +290,8 @@ async fn handle_opencode_recovery(
 /// process is gone, so we cannot reattach to a live stream. Instead we replay
 /// the persisted terminal log and session snapshot from disk.
 ///
-/// If the run is still marked active (queued/running) but its stream handle is
-/// gone, the process died during the restart — mark it interrupted.
+/// If the run is still marked active after waiting for a stream handle, the
+/// subprocess is gone (e.g. server restarted) — mark it interrupted.
 async fn handle_claude_code_recovery(
     state: &AppState,
     sender: &mut futures_util::stream::SplitSink<WebSocket, Message>,
@@ -273,8 +299,20 @@ async fn handle_claude_code_recovery(
     run: &AgentRun,
     run_svc: &RunService<'_>,
 ) -> RecoveryOutcome {
-    // Replay terminal log as a single frame.
-    if let Some(log_bytes) = read_terminal_log_artifact(state, run_id) {
+    // Replay structured console events from disk (preferred) or legacy terminal log.
+    let paths = RunArtifactPaths::new(&state.config.storage.artifacts_dir, &run_id.to_string());
+    let console_events = ArtifactService::read_console_events(&paths);
+    if !console_events.is_empty() {
+        for event in console_events {
+            let msg = LiveMessage::Event { event };
+            if send_live_message(sender, &msg).await.is_err() {
+                return RecoveryOutcome {
+                    recoverable: None,
+                    reason: None,
+                };
+            }
+        }
+    } else if let Some(log_bytes) = read_terminal_log_artifact(state, run_id) {
         let msg = LiveMessage::Frame {
             seq: 0,
             data: log_bytes,
@@ -287,8 +325,8 @@ async fn handle_claude_code_recovery(
         }
     }
 
-    // If run is still active, the subprocess died during restart.
-    if is_active_run_status(run.status) {
+    // Only running runs without a stream handle after waiting indicate a dead process.
+    if run.status == RunStatus::Running {
         let reason = "server restarted during run";
         let _ = run_svc.mark_interrupted(run_id, reason).await;
         return RecoveryOutcome {
@@ -298,7 +336,7 @@ async fn handle_claude_code_recovery(
     }
 
     RecoveryOutcome {
-        recoverable: Some(false),
+        recoverable: Some(is_active_run_status(run.status)),
         reason: None,
     }
 }

@@ -45,6 +45,13 @@ impl WorkflowService {
         let mut action = TransitionAction::default();
 
         if ctx.run_outcome == RunOutcome::Blocked {
+            if let Some(handoff) = resolve_verification_handoff(&ctx) {
+                apply_assign_to(&mut action, &ctx, &handoff.agent_key);
+                action.new_status = Some(TicketStatus::InProgress);
+                action.enqueue_jobs.push(handoff.job);
+                return Ok(action);
+            }
+
             let mention_agents = mention_agents_from_contract(&ctx.contract)
                 .into_iter()
                 .take(MAX_MENTIONS_PER_RUN as usize)
@@ -76,6 +83,13 @@ impl WorkflowService {
         }
 
         if matches!(ctx.contract, AgentRunResult::Continued { .. }) {
+            return Ok(action);
+        }
+
+        if let Some(handoff) = resolve_verification_handoff(&ctx) {
+            apply_assign_to(&mut action, &ctx, &handoff.agent_key);
+            action.new_status = Some(TicketStatus::InProgress);
+            action.enqueue_jobs.push(handoff.job);
             return Ok(action);
         }
 
@@ -178,6 +192,51 @@ fn is_tech_lead(role: &str) -> bool {
 fn is_qc(role: &str) -> bool {
     let r = role.to_lowercase();
     r == "qc" || r.contains("quality")
+}
+
+fn is_verification_role(role: &str) -> bool {
+    is_reviewer(role) || is_tech_lead(role) || is_qc(role)
+}
+
+struct VerificationHandoff {
+    agent_key: String,
+    job: JobRequest,
+}
+
+fn resolve_verification_handoff(ctx: &TransitionContext) -> Option<VerificationHandoff> {
+    if ctx.job_type != "work_on_ticket" || !is_verification_role(&ctx.agent_role) {
+        return None;
+    }
+
+    let send_back = match ctx.run_outcome {
+        RunOutcome::Blocked => true,
+        RunOutcome::Succeeded => match &ctx.contract {
+            AgentRunResult::Done { blockers, .. } => !blockers.is_empty(),
+            _ => false,
+        },
+        _ => false,
+    };
+    if !send_back {
+        return None;
+    }
+
+    let mention_agents = mention_agents_from_contract(&ctx.contract)
+        .into_iter()
+        .take(MAX_MENTIONS_PER_RUN as usize)
+        .collect::<Vec<_>>();
+    let agent_key = mention_agents
+        .into_iter()
+        .find(|key| ctx.project_agent_ids.contains_key(key))?;
+    let agent_id = *ctx.project_agent_ids.get(&agent_key)?;
+
+    Some(VerificationHandoff {
+        agent_key,
+        job: JobRequest {
+            job_type: "work_on_ticket".into(),
+            agent_id,
+            resume_agent_id: None,
+        },
+    })
 }
 
 /// Unknown `assignTo` blocks only when PM refinement must pick a valid next assignee.
@@ -598,6 +657,72 @@ mod tests {
             Some(TicketStatus::WaitForFinalReview)
         );
         assert_eq!(action.new_assignee_id, Some(None));
+    }
+
+    #[test]
+    fn verification_done_with_mentions_and_blockers_returns_to_in_progress() {
+        let action = WorkflowService::resolve_transition(TransitionContext {
+            current_status: TicketStatus::InQa,
+            agent_role: "QC".into(),
+            agent_key: "qc".into(),
+            assignee_agent_id: Some(Uuid::from_u128(0x300)),
+            run_outcome: RunOutcome::Succeeded,
+            contract: AgentRunResult::Done {
+                summary: "Defects found.".into(),
+                changed_files: vec![],
+                tests_run: vec![],
+                next_status: None,
+                assign_to: None,
+                updated_description: None,
+                acceptance_criteria: None,
+                mention_agents: vec!["backend_engineer".into()],
+                blockers: vec!["Missing tests".into()],
+                split_tickets: vec![],
+            },
+            project_agent_keys: vec!["qc".into(), "backend_engineer".into()],
+            project_agent_ids: agent_map(&[
+                ("qc", Uuid::from_u128(0x300)),
+                ("backend_engineer", engineer_agent_id()),
+            ]),
+            auto_assign_enabled: true,
+            ..minimal_ctx()
+        })
+        .expect("resolve");
+        assert_eq!(action.new_status, Some(TicketStatus::InProgress));
+        assert_eq!(
+            action.new_assignee_id,
+            Some(Some(engineer_agent_id()))
+        );
+        assert_eq!(action.enqueue_jobs.len(), 1);
+        assert_eq!(action.enqueue_jobs[0].job_type, "work_on_ticket");
+        assert_eq!(action.enqueue_jobs[0].agent_id, engineer_agent_id());
+    }
+
+    #[test]
+    fn verification_blocked_with_mentions_returns_to_in_progress() {
+        let action = WorkflowService::resolve_transition(TransitionContext {
+            current_status: TicketStatus::InReview,
+            agent_role: "Technical Lead".into(),
+            agent_key: "tech_lead".into(),
+            assignee_agent_id: Some(Uuid::from_u128(0x400)),
+            run_outcome: RunOutcome::Blocked,
+            contract: blocked_with_mentions(&["backend_engineer"]),
+            project_agent_keys: vec!["tech_lead".into(), "backend_engineer".into()],
+            project_agent_ids: agent_map(&[
+                ("tech_lead", Uuid::from_u128(0x400)),
+                ("backend_engineer", engineer_agent_id()),
+            ]),
+            auto_assign_enabled: true,
+            ..minimal_ctx()
+        })
+        .expect("resolve");
+        assert_eq!(action.new_status, Some(TicketStatus::InProgress));
+        assert_eq!(
+            action.new_assignee_id,
+            Some(Some(engineer_agent_id()))
+        );
+        assert_eq!(action.enqueue_jobs.len(), 1);
+        assert_eq!(action.enqueue_jobs[0].job_type, "work_on_ticket");
     }
 
     #[test]

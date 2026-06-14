@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { ClaudeLiveConsole } from '../runs/ClaudeLiveConsole';
 import { LiveConsole } from '../runs/LiveConsole';
 import { LiveSession } from '../runs/LiveSession';
 import { TicketDetailPanel } from './TicketDetailPanel';
@@ -50,7 +51,11 @@ export function TicketDrawer({ ticketId, onClose }: TicketDrawerProps) {
   const latestRun = runs?.[0] ?? null;
   const liveRun = activeRun ?? latestRun;
   const LiveView =
-    liveRun?.connector === 'opencode' ? LiveSession : LiveConsole;
+    liveRun?.connector === 'opencode'
+      ? LiveSession
+      : liveRun?.connector === 'claude-code'
+        ? ClaudeLiveConsole
+        : LiveConsole;
   const runAgentDisabledReason = !ticket?.assigneeAgentId
     ? 'Assign an agent before running.'
     : !ticket?.repoId
