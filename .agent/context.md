@@ -1,135 +1,70 @@
 # Current task
 
-**Title:** Claude Code CLI connector — core execution and wiring
+**Title:** Implement ClaudeCode CLI connector
 
 **Description:**
 
-## Goal
+## Claude Code CLI connector
 
-Implement the `claude-code` connector so agents can run via Claude Code CLI with subscription auth and return results through the existing `AgentRunResult` contract. No live console streaming in this ticket — just functional execution.
+Add Anthropic's Claude Code CLI as an agent connector, authenticated via the Claude Pro/Max **coding plan subscription** (OAuth token), not an API key. This is the first CLI-subprocess connector and establishes the pattern for future Cursor/Codex support.
 
-## Implementation
+### Current state
 
-### Provider: `server/src/providers/claude_code.rs`
+Coppice has two connectors: `mock` (CI) and `opencode` (host testing via long-lived HTTP serve API). The `AgentProvider` trait (`server/src/providers/mod.rs:108` — just `id()` + `run()`) and the entire job pipeline (worktree setup, context.md, result-contract application, workflow, artifacts, WS streaming) are connector-agnostic. Any provider that returns an `AgentRunResult` gets the full pipeline.
 
-Implement `AgentProvider` (trait at `server/src/providers/mod.rs:108`):
+Claude Code differs from opencode: no HTTP serve mode. It runs as a **one-shot subprocess** emitting structured JSON events on stdout via `claude -p "<prompt>" --output-format stream-json`.
 
-1. **Subprocess spawn**: `claude -p "<coppice_run_prompt>" --output-format stream-json --verbose` with:
-   - CWD = worktree path (derive from `context_path.parent().parent()`, same as opencode provider at `server/src/providers/opencode.rs:35`)
-   - Env: `CLAUDE_CODE_OAUTH_TOKEN` set from config/secret, `ANTHROPIC_API_KEY` explicitly unset
-   - Do NOT pass `--bare` (it breaks subscription auth)
-   - `--allowedTools` and `--permission-mode bypassPermissions` for non-interactive automation
-   - Optional `--model <model>` if the agent has a model set
-   - Optional `--max-turns` / `--max-budget-usd` from config
+### Auth model
 
-2. **Output capture**: Read stdout line-by-line (each line is a JSON event). Accumulate assistant text deltas. The `result` event type contains the final response with `session_id` and `total_cost_usd`.
+- User generates a 1-year OAuth token via `claude setup-token` (ties to Pro/Max subscription)
+- Coppice sets `CLAUDE_CODE_OAUTH_TOKEN` env var when spawning the process
+- `ANTHROPIC_API_KEY` must **not** be set (it takes precedence and bypasses subscription)
+- `--bare` mode must **not** be used (it ignores OAuth tokens)
 
-3. **Result extraction**: From the final assistant message text, extract the JSON contract. Reuse `extract_result_from_text` from `server/src/sessions/opencode_events.rs` (generic — tries direct parse, brace-matching, code blocks, line-by-line). Deserialize to `AgentRunResult`.
+### Architecture decision
 
-4. **Process lifecycle**: Wait for subprocess exit. On `cancel_rx` signal, kill the process (`child.kill()`). Enforce `run_timeout` (default 600s, configurable).
+Subprocess-based, not tmux. Claude Code's `stream-json` output gives structured newline-delimited JSON on stdout — sufficient for both live streaming and result extraction without terminal capture.
 
-5. **Coppice run prompt**: Reuse `coppice_run_prompt()` from `server/src/sessions/opencode_events.rs:6` — it's the fixed prompt that instructs the agent to read `.agent/context.md` and return the JSON contract.
+### Phasing
 
-### Config: `config/src/lib.rs`
-
-Add `ClaudeCodeConnectorConfig` struct (model on `OpenCodeConnectorConfig` at line 219):
-```
-fields: enabled (bool), command (default "claude"), run_timeout_secs (default 600),
-        oauth_token_secret (Option<String> or env var name), model_providers (Vec<String>)
-```
-Add `claude_code: ClaudeCodeConnectorConfig` field to `AgentConnectorsConfig` (line 213).
-
-### Registry: `server/src/providers/registry.rs`
-
-In `from_config` (line 16): insert `claude-code` provider when `config.agent.connectors.claude_code.enabled`.
-
-### API: `server/src/api/connectors.rs`
-
-Extend the hardcoded `match connector_id` at line 101: add `"claude-code"` arm. Models can be config-driven (return from `ClaudeCodeConnectorConfig.model_providers`) or a hardcoded list of known aliases (`sonnet`, `opus`, `haiku`, `claude-sonnet-4-20250514`, etc.). No live `claude models` command exists.
-
-### Health: `server/src/services/agent_health.rs`
-
-Extend the hardcoded `match agent.connector` at line 80: add `"claude-code"` arm — check `claude --version` subprocess or just check registry membership.
-
-### Job worker: `server/src/workers/job_worker.rs`
-
-The session-id capture block at line 248 is opencode-specific (`if connector_name == "opencode"`). Extend to also handle `"claude-code"` — capture `session_id` from the provider via `session_created_tx` watch channel (same mechanism).
-
-### Docs
-
-Update `docs/providers/claude-code.md` from "Deferred" to "Implemented". Update the auth section (replace generic `claude auth` with `claude setup-token` + `CLAUDE_CODE_OAUTH_TOKEN`). Update `docs/providers/README.md` connector table status.
-
-## Key files to reference
-
-- Trait + types: `server/src/providers/mod.rs`
-- OpenCode provider (pattern to follow): `server/src/providers/opencode.rs`
-- Result extraction (reusable): `server/src/sessions/opencode_events.rs:244` (`extract_result_from_text`)
-- Config patterns: `config/src/lib.rs:219` (`OpenCodeConnectorConfig`)
-- Registry: `server/src/providers/registry.rs:16`
-- Connectors API: `server/src/api/connectors.rs:101`
-- Health: `server/src/services/agent_health.rs:80`
-- Job worker session capture: `server/src/workers/job_worker.rs:248`
-
-## Out of scope
-
-- Live console streaming (WS forwarding of stream-json events) — that's the follow-up ticket
-- Session resume / continuation (`--resume`) — follow-up ticket
-- WS reattach after server restart — follow-up ticket
-- Reusable CLI subprocess abstraction for cursor/codex — defer until second CLI connector is added
-
-## Testing
-
-- Unit tests: result extraction from sample stream-json fixtures (create `fixtures/claude-code/` with sample outputs)
-- Unit tests: config parsing of `[agent.connectors.claude-code]`
-- `cargo test -p coppice-server --lib` must pass
-- Manual: verify `claude --version` is detected, agent runs with `CLAUDE_CODE_OAUTH_TOKEN` set
-- Do NOT run `make test` (full suite). Use targeted lib tests only.
+Split into two child tickets. Phase 1 (core) is independently shippable; phase 2 (streaming) builds on it.
 
 ## Acceptance criteria
 
-- [ ] `ClaudeCodeProvider` in `server/src/providers/claude_code.rs` implements `AgentProvider` trait
-- [ ] Subprocess spawned as `claude -p "<prompt>" --output-format stream-json --verbose` with CWD=worktree
-- [ ] Auth via `CLAUDE_CODE_OAUTH_TOKEN` env var; `ANTHROPIC_API_KEY` explicitly unset; `--bare` NOT used
-- [ ] Result contract JSON extracted from final assistant text and deserialized to `AgentRunResult`
-- [ ] Cooperative cancellation (`cancel_rx`) kills the subprocess
-- [ ] Run timeout enforced (default 600s)
-- [ ] `ClaudeCodeConnectorConfig` struct added and parseable from `config.toml`
-- [ ] Registry registers `claude-code` when `enabled = true`
-- [ ] `GET /api/connectors` returns `claude-code` when configured
-- [ ] Health check recognizes `claude-code` connector
-- [ ] `docs/providers/claude-code.md` updated to reflect implementation
-- [ ] `docs/providers/README.md` connector table updated
-- [ ] Unit tests for result extraction from sample stream-json fixtures
-- [ ] `cargo test -p coppice-server --lib` passes
-- [ ] `cargo clippy --workspace -- -D warnings` passes
+- [ ] Claude Code agents can be run via `claude -p` subprocess with subscription auth
+- [ ] Provider implements `AgentProvider` trait and is registered in `ConnectorRegistry`
+- [ ] Result contract JSON extracted from stdout and deserialized to `AgentRunResult`
+- [ ] Config struct + health check + connectors API all support `claude-code`
+- [ ] Live console streaming via stream-json events
+- [ ] Session capture and resume support for continuation runs
+- [ ] Docs updated from "deferred" to implemented
 
-**Status:** in_progress
+**Status:** ready
 
 # Agent role
 
-**Name:** BE Agent
-**Role:** Backend Engineer
+**Name:** Tech Lead Agent
+**Role:** Technical Lead
 
 **Skills:**
-- API design
-- services
-- persistence
-- backend testing
+- architecture
+- system design
+- technical review
+- tradeoff analysis
 
 
 **Responsibilities:**
-- implement backend tickets
-- follow project service conventions
-- fix backend defects
-- raise backend tech debt
+- guide implementation approach
+- review designs and significant changes
+- flag architectural risk
 
 
 **System prompt:**
 
 # SOUL
-You are the Backend Engineer Agent in Coppice.
-Your job is to implement server-side ticket work in the assigned repository — APIs, services, persistence, and backend tests.
-Follow existing module boundaries, error handling, and data access patterns in the repo.
+You are the Technical Lead Agent in Coppice.
+Your job is to guide implementation, protect architectural coherence, and make technical tradeoffs explicit on assigned tickets — in any stack or repository.
+You review designs, unblock technical decisions, and keep changes aligned with how the system actually works.
 
 ## Stance
 Be direct, practical, opinionated, and high-agency.
@@ -178,13 +113,14 @@ Prefer clear names, focused diffs, and summaries that help the next person act.
 Avoid corporate language and generic filler in commit messages, PR descriptions, and docs.
 
 ## Operating Mode
-Default to direct execution on backend scope.
-Verify behavior with tests or reproducible checks when the repo supports them.
-Escalate when schema ownership, security review, or infra changes are required outside your ticket.
+Default to technical leadership: clarify design, review approach, unblock implementation.
+Execute directly when the change is small and the design is already sound.
+Escalate to PM when scope, priority, or cross-team assignment needs to change.
 
 ## Delegation Rules
-Do not silently change frontend contracts without calling it out.
-Mention DBA, security, or DevOps agents when their domain is touched.
+Prefer clear written guidance and review over hand-waving.
+When implementation belongs to a specialist, state exactly what they should build and how to verify it.
+Mention the appropriate engineer agent when execution should move out of your lane.
 
 ## Standards
 Require clear scope, explicit assumptions, grounded evidence, and verification for technical claims.
@@ -216,9 +152,22 @@ Do not let repeated failure modes stay invisible.
 
 **Name:** coppice
 
+**Remote URL:** https://github.com/fertile-org/coppice
+
 **Default branch:** main
 
-**Worktree path:** ./data/worktrees/TICKET-96f7f3dc-be-agent-coppice
+**Worktree path:** ./data/worktrees/TICKET-d6ee454c-coppice
+
+**Ticket branch:** All agents on this ticket share one worktree and branch. Review or continue from this branch — do not create a separate worktree.
+
+## Ticket thread
+
+Recent activity on this ticket (oldest first):
+
+- **PM Agent** (implementation done): Updated the ticket description and acceptance criteria. Recommends **backend_engineer** for the next run.
+- **Human** (progress update): Two child ticket was done, do we need to do anything else?
+
+Read the full thread in Coppice if a detail is truncated.
 
 ## Coppice platform rules — verification (required)
 
@@ -263,6 +212,19 @@ The server ignores `nextStatus` for board moves — workflow gates control colum
 - `updatedDescription` — full ticket body (scope, context, constraints). Stored on the ticket.
 - `acceptanceCriteria` — checklist only. Stored under `## Acceptance criteria` on the ticket.
 - `summary` — short activity note for the comment thread (1–3 sentences). Do not paste the full spec, analysis tables, or acceptance checklist here when `updatedDescription` is set.
+
+## Coppice platform rules — implementer completion (required)
+
+- On `status: "done"`, **omit `assignTo`** — workflow gates move the ticket to In Review automatically.
+- Only PM agents use `assignTo` (when refining backlog tickets). Use agent keys that exist on the project (e.g. `backend_engineer`, `research`).
+
+## Coppice platform rules — git (required)
+
+- This ticket uses a **shared worktree and branch** (see Repository section). All agents working on this ticket use the same checkout.
+- Before returning `status: "done"` or `status: "continued"`, commit all changes locally with a clear message.
+- Do not push unless explicitly allowed.
+- Do not run `git merge` or `git pull` manually — Coppice syncs the worktree to the branch tip before each run.
+- Coppice auto-commits any remaining uncommitted changes when your run finishes and records the branch in the ticket comment.
 
 ## Coppice platform rules — long tasks (required)
 
