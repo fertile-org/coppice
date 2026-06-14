@@ -64,12 +64,12 @@ export function TicketMetadataPanel({ ticket }: TicketMetadataPanelProps) {
   const { data: repos } = useRepos();
   const { data: runs } = useAgentRuns(ticket.id);
   const latestRunWorktreePath = runs?.[0]?.worktreePath ?? null;
-  const { data: gitInfo } = useTicketGitInfo(ticket.id, Boolean(ticket.repoId));
   const selectedRepo = repos?.find((repo) => repo.id === ticket.repoId);
   const repoNotReady = Boolean(
     ticket.repoId && selectedRepo && selectedRepo.verificationStatus !== 'ready',
   );
-  const codeReviewWorktreePath =
+  const { data: gitInfo } = useTicketGitInfo(ticket.id, Boolean(ticket.repoId));
+  const worktreePath =
     latestRunWorktreePath ??
     (gitInfo?.worktreeExists ? gitInfo.worktreePath : null);
 
@@ -361,7 +361,7 @@ export function TicketMetadataPanel({ ticket }: TicketMetadataPanelProps) {
             const url = buildCodeReviewUrl(
               ticket,
               ticket.repoId!,
-              codeReviewWorktreePath,
+              worktreePath,
             );
             window.open(url, '_blank', 'noopener,noreferrer');
           }}
