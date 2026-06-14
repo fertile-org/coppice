@@ -1,70 +1,132 @@
 # Current task
 
-**Title:** Implement ClaudeCode CLI connector
+**Title:** Implement Codex CLI
 
 **Description:**
 
-## Claude Code CLI connector
+## Goal
 
-Add Anthropic's Claude Code CLI as an agent connector, authenticated via the Claude Pro/Max **coding plan subscription** (OAuth token), not an API key. This is the first CLI-subprocess connector and establishes the pattern for future Cursor/Codex support.
+Implement the `codex` connector — OpenAI Codex CLI integration via subprocess, mirroring the existing `claude-code` connector. Codex is a subscription/OAuth coding-agent CLI; Coppice spawns it as a child process that inherits the server's environment (host-managed auth, same model as claude-code and opencode).
 
-### Current state
+This is a config + one-adapter-impl change. The orchestration layer (`AgentProvider` trait, job worker, result contract) is connector-agnostic and does **not** change. There is no existing codex code — this is greenfield.
 
-Coppice has two connectors: `mock` (CI) and `opencode` (host testing via long-lived HTTP serve API). The `AgentProvider` trait (`server/src/providers/mod.rs:108` — just `id()` + `run()`) and the entire job pipeline (worktree setup, context.md, result-contract application, workflow, artifacts, WS streaming) are connector-agnostic. Any provider that returns an `AgentRunResult` gets the full pipeline.
+## Template
 
-Claude Code differs from opencode: no HTTP serve mode. It runs as a **one-shot subprocess** emitting structured JSON events on stdout via `claude -p "<prompt>" --output-format stream-json`.
+Clone `server/src/providers/claude_code.rs` and `docs/providers/claude-code.md`. Both are subscription-CLI subprocess connectors that read NDJSON stdout, accumulate assistant text, capture a session id, forward display frames to the run stream, and extract the `AgentRunResult` contract from the terminal event via `extract_result_from_text`.
 
-### Auth model
+## Architecture context
 
-- User generates a 1-year OAuth token via `claude setup-token` (ties to Pro/Max subscription)
-- Coppice sets `CLAUDE_CODE_OAUTH_TOKEN` env var when spawning the process
-- `ANTHROPIC_API_KEY` must **not** be set (it takes precedence and bypasses subscription)
-- `--bare` mode must **not** be used (it ignores OAuth tokens)
+- **Trait:** `AgentProvider` (`server/src/providers/mod.rs:110-114`) — `fn id()` + `async fn run(AgentRunInput) -> Result<AgentRunResult, ProviderError>`.
+- **Result contract:** `AgentRunResult` (`server/src/providers/mod.rs:40-94`) — `Done`/`Blocked`/`Continued` tagged enum. Connector-agnostic.
+- **Shared helpers:** `coppice_run_prompt()` and `extract_result_from_text()` in `server/src/sessions/opencode_events.rs:6-12,244-279`. Reuse both — do not re-implement result parsing.
+- **Claude-code reference impl:** `server/src/providers/claude_code.rs` (510 lines incl. tests).
 
-### Architecture decision
+## Work breakdown
 
-Subprocess-based, not tmux. Claude Code's `stream-json` output gives structured newline-delimited JSON on stdout — sufficient for both live streaming and result extraction without terminal capture.
+### 1. Provider implementation
+- Create `server/src/providers/codex.rs` — `CodexProvider` implementing `AgentProvider`, `id()` returns `"codex"`.
+- Add `pub mod codex;` to `server/src/providers/mod.rs`.
+- `run()` spawns the Codex CLI as a subprocess (CWD = worktree, stdout/stderr piped, stdin null), sets a deadline from `run_timeout_secs`, loops over stdout lines with cancel/timeout `tokio::select!`, accumulates assistant text, captures session id via `session_created_tx`, forwards display text as `Frame`s, and calls `extract_result_from_text` on the terminal output.
+- **Open question to verify first (upstream Codex CLI docs):** the exact command + flags. Claude Code uses `claude -p "<prompt>" --output-format stream-json --verbose --allowedTools ... --permission-mode bypassPermissions`. Determine the Codex CLI equivalent for: non-interactive prompt mode, structured/streamed JSON output on stdout, approval/sandbox mode that lets it run autonomously, and `--model` selection. If the CLI emits line-delimited JSON events, write `extract_display_text`/`extract_assistant_text` helpers for Codex's event shape (analogous to `claude_code.rs:202-244`). If it emits plain text only, accumulate all stdout and rely on `extract_result_from_text`'s JSON-extraction heuristics.
 
-### Phasing
+### 2. Config
+- Add `CodexConnectorConfig` struct to `config/src/lib.rs` (mirror `ClaudeCodeConnectorConfig` at lines 259-283): `enabled: bool` (default false), `run_timeout_secs: u64` (default 600), `model_providers: Vec<String>`.
+- Add `pub type CodexProviderConfig = CodexConnectorConfig;`.
+- Add `#[serde(default, rename = "codex")] pub codex: CodexConnectorConfig` to `AgentConnectorsConfig` (`config/src/lib.rs:197-203`).
+- Add config tests mirroring `deserializes_claude_code_connector` and `claude_code_connector_defaults` (`config/src/lib.rs:495-528`).
 
-Split into two child tickets. Phase 1 (core) is independently shippable; phase 2 (streaming) builds on it.
+### 3. Registry
+- `server/src/providers/registry.rs`: import `CodexProvider`, add `codex_model_providers` field, register when `config.agent.connectors.codex.enabled` (mirror lines 39-46), add `"codex"` arm in `model_providers_for` (lines 69-75), add tests mirroring `registers_claude_code_when_enabled` / `does_not_register_claude_code_when_disabled` (lines 108-127).
+
+### 4. Health
+- `server/src/services/agent_health.rs:80-95`: add a `"codex" =>` match arm mirroring the claude-code arm (model-provider presence check → Healthy).
+
+### 5. Connectors API
+- `server/src/api/connectors.rs:101-134`: add a `"codex" =>` arm in `list_models` returning `known_codex_models(...)` (mirror `known_claude_code_models` at lines 142-157). Codex model list is a small known set per model provider — confirm actual model ids from upstream docs.
+
+### 6. Job worker — session capture
+- `server/src/workers/job_worker.rs:369`: extend the `session_created_tx` condition `if connector_name == "opencode" || connector_name == "claude-code"` to include `"codex"` **only if** the codex provider emits a session id. If the Codex CLI does not expose a session id, leave this unchanged and the provider should not set `session_created_tx`.
+
+### 7. Job worker — session resume (DECISION: skip for now)
+- Do **not** extend `load_resume_session_id` (`job_worker.rs:574-602`) for codex. The deferred doc (`docs/providers/codex.md:18`) marks session resume as "Unreliable." Cross-run continuity uses the `Continued` + context.md checkpoint path, which is provider-agnostic and already works for all connectors. Add a code comment noting this. If a future Codex CLI version stabilizes resume, open a follow-up ticket.
+
+### 8. WebSocket live recovery
+- `server/src/api/ws/live.rs:81-94`: confirm codex falls through to the generic `terminal.log` replay path (lines 95-103) — this is the correct behavior for a per-run subprocess (same as claude-code's fallback). Likely no code change needed; verify with a test or add `is_codex` branch only if the generic path is insufficient.
+
+### 9. Config files
+- Add `[agent.connectors.codex]` block to `config.example.toml` (after the claude-code block at lines 35-38) with `enabled = false`, `model_providers`.
+- Add the same block to `deploy/config/default.toml` (after lines 31-33).
+
+### 10. Fixtures + unit tests
+- Create `fixtures/codex/done.jsonl` and `fixtures/codex/blocked.jsonl` with captured/representative Codex CLI output (same role as `fixtures/claude-code/*.jsonl`).
+- In `server/src/providers/codex.rs` `#[cfg(test)] mod tests`: mirror the claude-code tests — fixture result extraction (done + blocked), provider id, session-id extraction, streaming frame publishing.
+- **No real `codex` binary in CI** (`docs/testing.md:107`). All tests use captured fixtures.
+
+### 11. Docs
+- Rewrite `docs/providers/codex.md` from "Deferred" to "Implemented" — mirror `docs/providers/claude-code.md` structure (auth, capabilities table, command shape, stream-event mapping, live streaming, context compaction). Drop the "Why deferred" and "TmuxStream" sections.
+- Update `docs/providers/README.md:10` — flip status from Deferred to Implemented.
+- Update `docs/providers.md:8` — flip "deferred" wording.
+- Update `docs/architecture.md:25,60-76` — add `providers/codex.rs` to the module list.
+- Note `docs/milestones/M07-trust-and-signals.md:208` says codex is "post-v1" — this ticket explicitly brings it forward. No milestone doc change required, but the implementing agent should be aware it is ahead of the documented roadmap.
+
+## Verification
+
+- `cargo test -p coppice-server --lib` — new codex provider + registry + health unit tests pass.
+- `cargo test -p coppice-config --lib` — new codex config deserialization tests pass.
+- `cargo clippy -p coppice-server -p coppice-config -- -D warnings` — clean.
+- `make web-test` — frontend unaffected (connector list is data-driven from `GET /api/connectors`; codex appears automatically once registered).
+- Do **not** run `make test` or `cargo test --workspace` unless final acceptance demands it (per platform verification rules).
+
+## Out of scope
+
+- Session resume for codex (documented as unreliable — follow-up if CLI stabilizes it).
+- MCP injection via `$CODEX_HOME/config.toml` (separate follow-up).
+- Live reattach after server restart (not possible for per-run subprocess; terminal.log replay is the fallback).
+- The `shell` connector (separate ticket).
 
 ## Acceptance criteria
 
-- [x] Claude Code agents can be run via `claude -p` subprocess with subscription auth
-- [x] Provider implements `AgentProvider` trait and is registered in `ConnectorRegistry`
-- [x] Result contract JSON extracted from stdout and deserialized to `AgentRunResult`
-- [x] Config struct + health check + connectors API all support `claude-code`
-- [x] Live console streaming via stream-json events
-- [x] Session capture and resume support for continuation runs
-- [x] Docs updated from "deferred" to implemented
+- [ ] `server/src/providers/codex.rs` exists and implements `AgentProvider` with `id() == "codex"`, spawning the Codex CLI as a subprocess with CWD = worktree
+- [ ] `pub mod codex;` declared in `server/src/providers/mod.rs`
+- [ ] `CodexConnectorConfig` (enabled, run_timeout_secs default 600, model_providers) added to `config/src/lib.rs` with `rename = "codex"` serde attr and `CodexProviderConfig` type alias
+- [ ] `AgentConnectorsConfig` includes the `codex` field; config deserialization + defaults tests pass
+- [ ] `ConnectorRegistry::from_config` registers codex when enabled; `model_providers_for("codex")` returns configured providers; registry tests mirror the claude-code pair
+- [ ] `evaluate_agent_health` (`agent_health.rs`) has a `"codex"` arm returning Healthy when model provider is configured
+- [ ] `list_models` (`connectors.rs`) has a `"codex"` arm returning known models
+- [ ] `job_worker.rs:369` session-capture condition updated only if codex emits a session id; `load_resume_session_id` left claude-code-only with a comment explaining why
+- [ ] `config.example.toml` and `deploy/config/default.toml` both have `[agent.connectors.codex]` blocks
+- [ ] `fixtures/codex/done.jsonl` and `blocked.jsonl` exist; codex provider unit tests pass against them (done + blocked result extraction, provider id, streaming frames)
+- [ ] `docs/providers/codex.md` rewritten to Implemented mirroring `claude-code.md`; `docs/providers/README.md`, `docs/providers.md`, `docs/architecture.md` updated
+- [ ] `cargo clippy -p coppice-server -p coppice-config -- -D warnings` clean
+- [ ] No real `codex` binary invoked in any automated test
 
-**Status:** ready
+**Status:** in_progress
 
 # Agent role
 
-**Name:** Tech Lead Agent
-**Role:** Technical Lead
+**Name:** BE Agent Claude
+**Role:** Backend Engineer
 
 **Skills:**
-- architecture
-- system design
-- technical review
-- tradeoff analysis
+- API design
+- services
+- persistence
+- backend testing
 
 
 **Responsibilities:**
-- guide implementation approach
-- review designs and significant changes
-- flag architectural risk
+- implement backend tickets
+- follow project service conventions
+- fix backend defects
+- raise backend tech debt
 
 
 **System prompt:**
 
 # SOUL
-You are the Technical Lead Agent in Coppice.
-Your job is to guide implementation, protect architectural coherence, and make technical tradeoffs explicit on assigned tickets — in any stack or repository.
-You review designs, unblock technical decisions, and keep changes aligned with how the system actually works.
+You are the Backend Engineer Agent in Coppice.
+Your job is to implement server-side ticket work in the assigned repository — APIs, services, persistence, and backend tests.
+Follow existing module boundaries, error handling, and data access patterns in the repo.
 
 ## Stance
 Be direct, practical, opinionated, and high-agency.
@@ -113,14 +175,13 @@ Prefer clear names, focused diffs, and summaries that help the next person act.
 Avoid corporate language and generic filler in commit messages, PR descriptions, and docs.
 
 ## Operating Mode
-Default to technical leadership: clarify design, review approach, unblock implementation.
-Execute directly when the change is small and the design is already sound.
-Escalate to PM when scope, priority, or cross-team assignment needs to change.
+Default to direct execution on backend scope.
+Verify behavior with tests or reproducible checks when the repo supports them.
+Escalate when schema ownership, security review, or infra changes are required outside your ticket.
 
 ## Delegation Rules
-Prefer clear written guidance and review over hand-waving.
-When implementation belongs to a specialist, state exactly what they should build and how to verify it.
-Mention the appropriate engineer agent when execution should move out of your lane.
+Do not silently change frontend contracts without calling it out.
+Mention DBA, security, or DevOps agents when their domain is touched.
 
 ## Standards
 Require clear scope, explicit assumptions, grounded evidence, and verification for technical claims.
@@ -156,7 +217,7 @@ Do not let repeated failure modes stay invisible.
 
 **Default branch:** main
 
-**Worktree path:** ./data/worktrees/TICKET-d6ee454c-coppice
+**Worktree path:** ./data/worktrees/TICKET-3ed145fa-coppice
 
 **Ticket branch:** All agents on this ticket share one worktree and branch. Review or continue from this branch — do not create a separate worktree.
 
@@ -165,9 +226,9 @@ Do not let repeated failure modes stay invisible.
 Recent activity on this ticket (oldest first):
 
 - **PM Agent** (implementation done): Updated the ticket description and acceptance criteria. Recommends **backend_engineer** for the next run.
-- **Human** (progress update): Two child ticket was done, do we need to do anything else?
-- **Tech Lead Agent** (implementation done): Reviewed both child tickets (524bcd4 core execution+wiring, 436cec1 streaming/resume/WS recovery). All seven acceptance criteria are met in code: `claude -p` subprocess with subscription OAuth auth (token injected, `ANTHROPIC_API_KEY` unset, no `--bare`), `AgentProvider` impl registered in `ConnectorRegistry`, stream-json→`AgentRunResult` extraction, `ClaudeCodeConnectorConfig` + health-check…
-- **Human** (progress update): Ok, so let fix the docs
+
+---
+**Git:** branch `agent/TICKET-3ed145fa` · no new changes (HEAD `5874244`)
 
 Read the full thread in Coppice if a detail is truncated.
 
@@ -221,6 +282,8 @@ The server ignores `nextStatus` for board moves — workflow gates control colum
 - Only PM agents use `assignTo` (when refining backlog tickets). Use agent keys that exist on the project (e.g. `backend_engineer`, `research`).
 
 ## Coppice platform rules — git (required)
+
+These rules override conflicting instructions in your system prompt or soul file.
 
 - This ticket uses a **shared worktree and branch** (see Repository section). All agents working on this ticket use the same checkout.
 - Before returning `status: "done"` or `status: "continued"`, commit all changes locally with a clear message.
