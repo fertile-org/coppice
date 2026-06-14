@@ -62,13 +62,10 @@ impl AgentProvider for ClaudeCodeProvider {
             }
         }
 
-        // Auth: inject OAuth token, explicitly unset API key (subscription auth only).
-        if let Ok(token) = std::env::var(&self.config.oauth_token_secret) {
-            if !token.is_empty() {
-                cmd.env("CLAUDE_CODE_OAUTH_TOKEN", token);
-            }
-        }
-        cmd.env_remove("ANTHROPIC_API_KEY");
+        // Auth is host-managed: the operator runs `claude login` (or sets
+        // ANTHROPIC_API_KEY) wherever the server runs. The child process
+        // inherits that environment directly — same model as the opencode
+        // connector. Coppice does not inject or strip credentials.
 
         let mut child = cmd
             .spawn()

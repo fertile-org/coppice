@@ -4,18 +4,17 @@
 **Status:** Implemented  
 **Stream backend:** subprocess stdout (stream-json)
 
-Anthropic Claude Code CLI integration via subprocess. Agents run as `claude -p` processes with subscription (OAuth token) auth.
+Anthropic Claude Code CLI integration via subprocess. Agents run as `claude -p` processes that inherit the server's environment.
 
 ## Auth
 
-The host operator generates an OAuth token with `claude setup-token` and stores it in an environment variable (default: `CLAUDE_CODE_OAUTH_TOKEN`). Coppice reads this variable from the server's environment and injects it into the child process. `ANTHROPIC_API_KEY` is explicitly unset to ensure subscription auth only.
+Auth is **host-managed**, exactly like the opencode connector. The operator runs `claude login` (subscription) or sets `ANTHROPIC_API_KEY` wherever the server runs, and the spawned `claude` child process inherits that environment directly. Coppice does not inject or strip credentials.
 
 ```toml
 [agent.connectors.claude-code]
 enabled = true
 # command = "claude"
 # run_timeout_secs = 600
-# oauth_token_secret = "CLAUDE_CODE_OAUTH_TOKEN"
 # model_providers = ["sonnet", "opus", "haiku"]
 ```
 

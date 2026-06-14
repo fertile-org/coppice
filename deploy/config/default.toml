@@ -28,6 +28,10 @@ serve_hostname = "127.0.0.1"
 serve_port = 4096
 model_providers = []
 
+[agent.connectors.claude-code]
+enabled = true
+model_providers = ["sonnet", "opus", "haiku"]
+
 [web]
 port = 5001
 static_dir = "./web/dist"

@@ -264,11 +264,6 @@ pub struct ClaudeCodeConnectorConfig {
     pub command: String,
     #[serde(default = "default_claude_code_run_timeout_secs")]
     pub run_timeout_secs: u64,
-    /// Environment variable name that holds the OAuth token for subscription auth.
-    /// The provider reads this var from the server's environment and injects it as
-    /// `CLAUDE_CODE_OAUTH_TOKEN` for the child process.
-    #[serde(default = "default_claude_code_oauth_env")]
-    pub oauth_token_secret: String,
     #[serde(default)]
     pub model_providers: Vec<String>,
 }
@@ -283,17 +278,12 @@ fn default_claude_code_run_timeout_secs() -> u64 {
     600
 }
 
-fn default_claude_code_oauth_env() -> String {
-    "CLAUDE_CODE_OAUTH_TOKEN".into()
-}
-
 impl Default for ClaudeCodeConnectorConfig {
     fn default() -> Self {
         Self {
             enabled: default_false(),
             command: default_claude_code_command(),
             run_timeout_secs: default_claude_code_run_timeout_secs(),
-            oauth_token_secret: default_claude_code_oauth_env(),
             model_providers: Vec::new(),
         }
     }
@@ -520,7 +510,6 @@ mod tests {
         [agent.connectors.claude-code]
         enabled = true
         run_timeout_secs = 900
-        oauth_token_secret = "MY_CLAUDE_TOKEN"
         model_providers = ["sonnet", "opus"]
     "#;
         #[derive(Deserialize)]
@@ -532,7 +521,6 @@ mod tests {
         assert!(cfg.connectors.claude_code.enabled);
         assert_eq!(cfg.connectors.claude_code.command, "claude");
         assert_eq!(cfg.connectors.claude_code.run_timeout_secs, 900);
-        assert_eq!(cfg.connectors.claude_code.oauth_token_secret, "MY_CLAUDE_TOKEN");
         assert_eq!(
             cfg.connectors.claude_code.model_providers,
             vec!["sonnet", "opus"]
@@ -545,7 +533,6 @@ mod tests {
         assert!(!cfg.enabled);
         assert_eq!(cfg.command, "claude");
         assert_eq!(cfg.run_timeout_secs, 600);
-        assert_eq!(cfg.oauth_token_secret, "CLAUDE_CODE_OAUTH_TOKEN");
         assert!(cfg.model_providers.is_empty());
     }
 

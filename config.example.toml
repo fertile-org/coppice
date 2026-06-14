@@ -32,6 +32,12 @@ serve_port = 4096
 model_providers = []
 # model_providers = ["zai-coding-plan", "opencode-go", "opencode-zen", "alibaba"]
 
+[agent.connectors.claude-code]
+enabled = true
+# command = "claude"
+# run_timeout_secs = 600
+model_providers = ["sonnet", "opus", "haiku"]
+
 
 [web]
 port = 5001
