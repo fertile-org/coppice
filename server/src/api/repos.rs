@@ -1,6 +1,9 @@
 use crate::api::auth::{pool_from_state, AuthUser};
 use crate::domain::repo::{verification_status_to_str, Repo};
 use crate::middleware::admin::AdminUser;
+use crate::services::code_review_service::{
+    BranchesResponse, CodeReviewError, CodeReviewService,
+};
 use crate::services::repo_service::{RepoError, RepoService};
 use crate::AppState;
 use axum::{
@@ -22,6 +25,8 @@ pub fn routes() -> Router<Arc<AppState>> {
             get(get_repo).patch(update_repo).delete(delete_repo),
         )
         .route("/api/repos/{repo_id}/verify", post(verify_repo))
+        .route("/api/repos/{repo_id}/worktrees", get(list_repo_worktrees))
+        .route("/api/repos/{repo_id}/branches", get(list_repo_branches))
 }
 
 #[derive(Serialize)]
@@ -170,4 +175,50 @@ async fn verify_repo(
     let service = RepoService::new(pool);
     let repo = service.verify(repo_id).await.map_err(map_error)?;
     Ok(Json(repo_to_response(repo)))
+}
+
+async fn list_repo_worktrees(
+    AuthUser { .. }: AuthUser,
+    State(state): State<Arc<AppState>>,
+    Path(repo_id): Path<Uuid>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    let pool = pool_from_state(&state)?;
+    let service = CodeReviewService::new(
+        pool,
+        state.config.agent.worktrees_path.clone().into(),
+    );
+    let worktrees = service
+        .list_worktrees(repo_id)
+        .await
+        .map_err(map_code_review_error)?;
+    Ok(Json(serde_json::json!({ "worktrees": worktrees })))
+}
+
+async fn list_repo_branches(
+    AuthUser { .. }: AuthUser,
+    State(state): State<Arc<AppState>>,
+    Path(repo_id): Path<Uuid>,
+) -> Result<Json<BranchesResponse>, StatusCode> {
+    let pool = pool_from_state(&state)?;
+    let service = CodeReviewService::new(
+        pool,
+        state.config.agent.worktrees_path.clone().into(),
+    );
+    let branches = service
+        .list_branches(repo_id)
+        .await
+        .map_err(map_code_review_error)?;
+    Ok(Json(branches))
+}
+
+fn map_code_review_error(err: CodeReviewError) -> StatusCode {
+    match err {
+        CodeReviewError::RepoNotFound | CodeReviewError::TicketNotFound => StatusCode::NOT_FOUND,
+        CodeReviewError::RepoNotReady
+        | CodeReviewError::InvalidWorktreePath
+        | CodeReviewError::InvalidFilePath
+        | CodeReviewError::InvalidBranchName => StatusCode::BAD_REQUEST,
+        CodeReviewError::PatchTooLarge => StatusCode::PAYLOAD_TOO_LARGE,
+        _ => StatusCode::INTERNAL_SERVER_ERROR,
+    }
 }

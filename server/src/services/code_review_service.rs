@@ -1,5 +1,12 @@
 use std::path::{Path, PathBuf};
 
+use sqlx::{PgPool, Row};
+use uuid::Uuid;
+
+use crate::domain::slug::slugify;
+use crate::services::repo_service::{RepoError, RepoService};
+use crate::services::ticket_git_service::list_local_branches;
+
 #[derive(Debug, thiserror::Error)]
 pub enum CodeReviewError {
     #[error("repository not found")]
@@ -99,6 +106,138 @@ pub fn format_review_comment(
         }
     }
     body
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorktreeSummary {
+    pub path: String,
+    pub branch: String,
+    pub head_sha: String,
+    pub ticket_id: Option<Uuid>,
+    pub ticket_title: Option<String>,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BranchesResponse {
+    pub default_branch: String,
+    pub branches: Vec<String>,
+}
+
+pub struct CodeReviewService<'a> {
+    pool: &'a PgPool,
+    worktrees_root: PathBuf,
+}
+
+impl<'a> CodeReviewService<'a> {
+    pub fn new(pool: &'a PgPool, worktrees_root: PathBuf) -> Self {
+        Self {
+            pool,
+            worktrees_root,
+        }
+    }
+
+    pub async fn list_worktrees(&self, repo_id: Uuid) -> Result<Vec<WorktreeSummary>, CodeReviewError> {
+        let repo = RepoService::new(self.pool).get(repo_id).await.map_err(|e| match e {
+            RepoError::NotFound => CodeReviewError::RepoNotFound,
+            RepoError::Database(err) => CodeReviewError::Database(err),
+            other => CodeReviewError::Git(other.to_string()),
+        })?;
+        if repo.verification_status != crate::domain::repo::VerificationStatus::Ready {
+            return Err(CodeReviewError::RepoNotReady);
+        }
+        let repo_slug = slugify(&repo.name);
+        let prefix = format!("TICKET-");
+        let suffix = format!("-{repo_slug}");
+        let mut out = Vec::new();
+        let mut entries = tokio::fs::read_dir(&self.worktrees_root).await?;
+        while let Some(entry) = entries.next_entry().await? {
+            let name = entry.file_name().to_string_lossy().to_string();
+            if !name.starts_with(&prefix) || !name.ends_with(&suffix) {
+                continue;
+            }
+            let path = entry.path();
+            if !path.join(".git").exists() {
+                continue;
+            }
+            let branch = git_in(&path, &["rev-parse", "--abbrev-ref", "HEAD"]).await?;
+            let head_sha = git_in(&path, &["rev-parse", "HEAD"]).await?;
+            let ticket_short = name
+                .strip_prefix("TICKET-")
+                .and_then(|rest| rest.strip_suffix(&suffix))
+                .unwrap_or("");
+            let (ticket_id, ticket_title) = self.lookup_ticket_by_short(repo_id, ticket_short).await?;
+            out.push(WorktreeSummary {
+                path: path.to_string_lossy().into_owned(),
+                branch,
+                head_sha,
+                ticket_id,
+                ticket_title,
+            });
+        }
+        out.sort_by(|a, b| a.path.cmp(&b.path));
+        Ok(out)
+    }
+
+    async fn lookup_ticket_by_short(
+        &self,
+        repo_id: Uuid,
+        ticket_short: &str,
+    ) -> Result<(Option<Uuid>, Option<String>), CodeReviewError> {
+        if ticket_short.is_empty() {
+            return Ok((None, None));
+        }
+        let row = sqlx::query(
+            r#"
+            SELECT id, title
+            FROM tickets
+            WHERE repo_id = $1 AND CAST(id AS text) LIKE $2
+            LIMIT 1
+            "#,
+        )
+        .bind(repo_id)
+        .bind(format!("{ticket_short}%"))
+        .fetch_optional(self.pool)
+        .await?;
+        Ok(match row {
+            Some(row) => (Some(row.get("id")), Some(row.get("title"))),
+            None => (None, None),
+        })
+    }
+
+    pub async fn list_branches(&self, repo_id: Uuid) -> Result<BranchesResponse, CodeReviewError> {
+        let repo = RepoService::new(self.pool).get(repo_id).await.map_err(|e| match e {
+            RepoError::NotFound => CodeReviewError::RepoNotFound,
+            RepoError::Database(err) => CodeReviewError::Database(err),
+            other => CodeReviewError::Git(other.to_string()),
+        })?;
+        if repo.verification_status != crate::domain::repo::VerificationStatus::Ready {
+            return Err(CodeReviewError::RepoNotReady);
+        }
+        let git_dir = PathBuf::from(&repo.local_path);
+        let branches = list_local_branches(&git_dir)
+            .await
+            .map_err(|e| CodeReviewError::Git(e.to_string()))?;
+        Ok(BranchesResponse {
+            default_branch: repo.default_branch,
+            branches,
+        })
+    }
+}
+
+async fn git_in(worktree: &Path, args: &[&str]) -> Result<String, CodeReviewError> {
+    let output = tokio::process::Command::new("git")
+        .current_dir(worktree)
+        .args(args)
+        .output()
+        .await?;
+    if !output.status.success() {
+        return Err(CodeReviewError::Git(
+            String::from_utf8_lossy(&output.stderr).trim().to_string(),
+        ));
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
 
 #[cfg(test)]
