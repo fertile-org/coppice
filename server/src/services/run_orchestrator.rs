@@ -13,7 +13,7 @@ use crate::services::agent_service::AgentService;
 use crate::services::comment_service::{CommentError, CommentService};
 use crate::services::mention_service::MentionService;
 use crate::services::result_contract::{merge_ticket_description, ApplyResult};
-use crate::services::run_service::{RunError, RunService};
+use crate::services::run_service::{RunError, RunService, StartRunOptions};
 use crate::services::split_service::SplitService;
 use crate::services::ticket_service::TicketService;
 use crate::services::ticket_thread;
@@ -210,7 +210,12 @@ impl<'a> RunOrchestrator<'a> {
             let run_svc = RunService::new(self.pool);
             for job_req in &action.enqueue_jobs {
                 run_svc
-                    .start_run_for_agent(run.ticket_id, job_req.agent_id, &job_req.job_type)
+                    .start_run_for_agent(
+                        run.ticket_id,
+                        job_req.agent_id,
+                        &job_req.job_type,
+                        StartRunOptions::default(),
+                    )
                     .await?;
             }
 
@@ -225,6 +230,7 @@ impl<'a> RunOrchestrator<'a> {
                                 run.ticket_id,
                                 new_assignee,
                                 "work_on_ticket",
+                                StartRunOptions::default(),
                             )
                             .await?;
                     }
@@ -283,7 +289,12 @@ impl<'a> RunOrchestrator<'a> {
 
             if self.workflow.auto_start_runs && ticket.ticket.repo_id.is_some() {
                 RunService::new(self.pool)
-                    .start_run_for_agent(run.ticket_id, resume_agent_id, "work_on_ticket")
+                    .start_run_for_agent(
+                        run.ticket_id,
+                        resume_agent_id,
+                        "work_on_ticket",
+                        StartRunOptions::default(),
+                    )
                     .await?;
             }
         } else {
@@ -367,6 +378,7 @@ fn mention_agents_from_contract(contract: &AgentRunResult) -> Vec<String> {
 mod tests {
     use super::*;
     use crate::domain::comment::CommentIntent;
+    use crate::domain::context_profile::ContextProfile;
     use crate::domain::run::run_status_to_str;
     use crate::domain::substatus::TicketStatus;
     use crate::sandbox::permissive::PROFILE_ID;
@@ -550,6 +562,8 @@ mod tests {
                     branch_name: None,
                     error_message: None,
                     session_id: None,
+                    context_profile: ContextProfile::Full,
+                    trigger_comment_id: None,
                     started_at: None,
                     ended_at: None,
                     created_at: time::OffsetDateTime::now_utc(),
@@ -616,6 +630,8 @@ mod tests {
                     branch_name: None,
                     error_message: None,
                     session_id: None,
+                    context_profile: ContextProfile::Full,
+                    trigger_comment_id: None,
                     started_at: None,
                     ended_at: None,
                     created_at: time::OffsetDateTime::now_utc(),
@@ -709,6 +725,8 @@ mod tests {
                     branch_name: None,
                     error_message: None,
                     session_id: None,
+                    context_profile: ContextProfile::Full,
+                    trigger_comment_id: None,
                     started_at: None,
                     ended_at: None,
                     created_at: time::OffsetDateTime::now_utc(),
@@ -849,6 +867,8 @@ mod tests {
                     branch_name: None,
                     error_message: None,
                     session_id: None,
+                    context_profile: ContextProfile::Full,
+                    trigger_comment_id: None,
                     started_at: None,
                     ended_at: None,
                     created_at: time::OffsetDateTime::now_utc(),
@@ -945,6 +965,8 @@ mod tests {
                     branch_name: None,
                     error_message: None,
                     session_id: None,
+                    context_profile: ContextProfile::Full,
+                    trigger_comment_id: None,
                     started_at: None,
                     ended_at: None,
                     created_at: time::OffsetDateTime::now_utc(),
@@ -1005,6 +1027,8 @@ mod tests {
                     branch_name: None,
                     error_message: None,
                     session_id: None,
+                    context_profile: ContextProfile::Full,
+                    trigger_comment_id: None,
                     started_at: None,
                     ended_at: None,
                     created_at: time::OffsetDateTime::now_utc(),
@@ -1102,6 +1126,8 @@ mod tests {
             branch_name: None,
             error_message: None,
             session_id: None,
+            context_profile: ContextProfile::Full,
+            trigger_comment_id: None,
             started_at: None,
             ended_at: None,
             created_at: time::OffsetDateTime::now_utc(),
@@ -1157,6 +1183,8 @@ mod tests {
                     branch_name: None,
                     error_message: None,
                     session_id: None,
+                    context_profile: ContextProfile::Full,
+                    trigger_comment_id: None,
                     started_at: None,
                     ended_at: None,
                     created_at: time::OffsetDateTime::now_utc(),
@@ -1199,6 +1227,8 @@ mod tests {
             branch_name: None,
             error_message: None,
             session_id: None,
+            context_profile: ContextProfile::Full,
+            trigger_comment_id: None,
             started_at: None,
             ended_at: None,
             created_at: time::OffsetDateTime::now_utc(),

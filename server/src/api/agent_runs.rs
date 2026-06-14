@@ -145,6 +145,7 @@ async fn retry_run(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::context_profile::ContextProfile;
     use crate::domain::run::RunStatus;
 
     #[test]
@@ -160,6 +161,8 @@ mod tests {
             branch_name: None,
             error_message: None,
             session_id: None,
+            context_profile: ContextProfile::Full,
+            trigger_comment_id: None,
             started_at: None,
             ended_at: None,
             created_at: time::OffsetDateTime::now_utc(),

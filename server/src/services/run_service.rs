@@ -1,4 +1,5 @@
 use crate::domain::comment::AuthorType;
+use crate::domain::context_profile::ContextProfile;
 use crate::domain::repo::VerificationStatus;
 use crate::domain::run::{
     run_status_from_str, run_status_to_str, AgentRun, RunStatus,
@@ -19,6 +20,20 @@ use sqlx::Row;
 use uuid::Uuid;
 
 const JOB_TYPE_WORK_ON_TICKET: &str = "work_on_ticket";
+
+pub struct StartRunOptions {
+    pub context_profile: ContextProfile,
+    pub trigger_comment_id: Option<Uuid>,
+}
+
+impl Default for StartRunOptions {
+    fn default() -> Self {
+        Self {
+            context_profile: ContextProfile::Full,
+            trigger_comment_id: None,
+        }
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct AgentRunWithConnector {
@@ -167,12 +182,14 @@ impl<'a> RunService<'a> {
         let row = sqlx::query(
             r#"
             INSERT INTO agent_runs (
-                id, ticket_id, agent_id, job_type, status, sandbox_profile_id
+                id, ticket_id, agent_id, job_type, status, sandbox_profile_id,
+                context_profile, trigger_comment_id
             )
-            VALUES ($1, $2, $3, $4, $5, $6)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
             RETURNING
                 id, ticket_id, agent_id, job_type, status, sandbox_profile_id,
                 worktree_path, branch_name, error_message, session_id,
+                context_profile, trigger_comment_id,
                 started_at, ended_at, created_at
             "#,
         )
@@ -182,6 +199,8 @@ impl<'a> RunService<'a> {
         .bind(JOB_TYPE_WORK_ON_TICKET)
         .bind(run_status_to_str(RunStatus::Queued))
         .bind(PROFILE_ID)
+        .bind(ContextProfile::Full.as_str())
+        .bind(None::<Uuid>)
         .fetch_one(&mut *tx)
         .await?;
 
@@ -234,6 +253,7 @@ impl<'a> RunService<'a> {
             SELECT
                 id, ticket_id, agent_id, job_type, status, sandbox_profile_id,
                 worktree_path, branch_name, error_message, session_id,
+                context_profile, trigger_comment_id,
                 started_at, ended_at, created_at
             FROM agent_runs
             WHERE id = $1
@@ -256,6 +276,7 @@ impl<'a> RunService<'a> {
             SELECT
                 ar.id, ar.ticket_id, ar.agent_id, ar.job_type, ar.status, ar.sandbox_profile_id,
                 ar.worktree_path, ar.branch_name, ar.error_message, ar.session_id,
+                ar.context_profile, ar.trigger_comment_id,
                 ar.started_at, ar.ended_at, ar.created_at,
                 a.connector
             FROM agent_runs ar
@@ -286,6 +307,7 @@ impl<'a> RunService<'a> {
             RETURNING
                 id, ticket_id, agent_id, job_type, status, sandbox_profile_id,
                 worktree_path, branch_name, error_message, session_id,
+                context_profile, trigger_comment_id,
                 started_at, ended_at, created_at
             "#,
         )
@@ -386,6 +408,7 @@ impl<'a> RunService<'a> {
             RETURNING
                 id, ticket_id, agent_id, job_type, status, sandbox_profile_id,
                 worktree_path, branch_name, error_message, session_id,
+                context_profile, trigger_comment_id,
                 started_at, ended_at, created_at
             "#,
         )
@@ -405,6 +428,7 @@ impl<'a> RunService<'a> {
         ticket_id: Uuid,
         agent_id: Uuid,
         job_type: &str,
+        options: StartRunOptions,
     ) -> Result<AgentRun, RunError> {
         let ticket = TicketService::new(self.pool).get(ticket_id).await?;
 
@@ -456,12 +480,14 @@ impl<'a> RunService<'a> {
         let row = sqlx::query(
             r#"
             INSERT INTO agent_runs (
-                id, ticket_id, agent_id, job_type, status, sandbox_profile_id
+                id, ticket_id, agent_id, job_type, status, sandbox_profile_id,
+                context_profile, trigger_comment_id
             )
-            VALUES ($1, $2, $3, $4, $5, $6)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
             RETURNING
                 id, ticket_id, agent_id, job_type, status, sandbox_profile_id,
                 worktree_path, branch_name, error_message, session_id,
+                context_profile, trigger_comment_id,
                 started_at, ended_at, created_at
             "#,
         )
@@ -471,6 +497,8 @@ impl<'a> RunService<'a> {
         .bind(job_type)
         .bind(run_status_to_str(RunStatus::Queued))
         .bind(PROFILE_ID)
+        .bind(options.context_profile.as_str())
+        .bind(options.trigger_comment_id)
         .fetch_one(&mut *tx)
         .await?;
 
@@ -514,6 +542,7 @@ impl<'a> RunService<'a> {
             RETURNING
                 id, ticket_id, agent_id, job_type, status, sandbox_profile_id,
                 worktree_path, branch_name, error_message, session_id,
+                context_profile, trigger_comment_id,
                 started_at, ended_at, created_at
             "#,
         )
@@ -537,6 +566,7 @@ impl<'a> RunService<'a> {
             RETURNING
                 id, ticket_id, agent_id, job_type, status, sandbox_profile_id,
                 worktree_path, branch_name, error_message, session_id,
+                context_profile, trigger_comment_id,
                 started_at, ended_at, created_at
             "#,
         )
@@ -577,6 +607,7 @@ impl<'a> RunService<'a> {
             SELECT
                 id, ticket_id, agent_id, job_type, status, sandbox_profile_id,
                 worktree_path, branch_name, error_message, session_id,
+                context_profile, trigger_comment_id,
                 started_at, ended_at, created_at
             FROM agent_runs
             WHERE status IN ('queued', 'running')
@@ -735,6 +766,9 @@ mod tests {
 fn row_to_run(row: &sqlx::postgres::PgRow) -> AgentRun {
     let status_str: String = row.get("status");
     let status = run_status_from_str(&status_str).unwrap_or(RunStatus::Queued);
+    let profile_str: String = row.get("context_profile");
+    let context_profile =
+        ContextProfile::from_str(&profile_str).unwrap_or(ContextProfile::Full);
 
     AgentRun {
         id: row.get("id"),
@@ -747,6 +781,8 @@ fn row_to_run(row: &sqlx::postgres::PgRow) -> AgentRun {
         branch_name: row.get("branch_name"),
         error_message: row.get("error_message"),
         session_id: row.get("session_id"),
+        context_profile,
+        trigger_comment_id: row.get("trigger_comment_id"),
         started_at: row.get("started_at"),
         ended_at: row.get("ended_at"),
         created_at: row.get("created_at"),

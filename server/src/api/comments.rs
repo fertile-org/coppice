@@ -4,7 +4,7 @@ use crate::events::bus::AppEvent;
 use crate::services::agent_service::{AgentError, AgentService};
 use crate::services::comment_service::{CommentError, CommentService};
 use crate::services::mention_service::{MentionError, MentionService};
-use crate::services::run_service::RunService;
+use crate::services::run_service::{RunService, StartRunOptions};
 use crate::services::ticket_service::{TicketError, TicketService};
 use crate::AppState;
 use axum::{
@@ -240,6 +240,7 @@ async fn create_comment(
                         ticket_id,
                         mention.mentioned_agent_id,
                         "respond_to_mention",
+                        StartRunOptions::default(),
                     )
                     .await;
             }
