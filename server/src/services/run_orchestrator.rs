@@ -1146,6 +1146,7 @@ mod tests {
     #[tokio::test]
     async fn continued_run_resume_appears_in_context_file() {
         use crate::providers::fixtures_root;
+        use crate::domain::context_profile::ContextProfile;
         use crate::services::context_builder::{build_context_md, write_context_file, ContextInput};
         use crate::services::result_contract::apply_agent_result;
 
@@ -1256,6 +1257,11 @@ mod tests {
             repo_default_branch: None,
             worktree_path: None,
             resume_context: Some(&resume_context),
+            context_profile: ContextProfile::Full,
+            human_request: None,
+            ticket_id: None,
+            assignee_agent_key: None,
+            thread_excerpt: None,
         };
         write_context_file(worktree.path(), &context_input).expect("write context");
         let md = std::fs::read_to_string(worktree.path().join(".agent/context.md"))

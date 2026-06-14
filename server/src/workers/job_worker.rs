@@ -17,6 +17,7 @@ use crate::providers::{AgentRunInput, ProviderError};
 use crate::services::agent_service::AgentService;
 use crate::services::artifact_service::{ArtifactService, RunArtifactMeta, RunArtifactPaths};
 use crate::services::comment_service::CommentService;
+use crate::domain::context_profile::ContextProfile;
 use crate::services::context_builder::{write_context_file, ContextInput};
 use crate::services::job_service::JobService;
 use crate::services::result_contract;
@@ -214,6 +215,11 @@ async fn execute_job(
         repo_default_branch: Some(&repo_default_branch),
         worktree_path: Some(&worktree_path),
         resume_context: resume_context_ref,
+        context_profile: ContextProfile::Full,
+        human_request: None,
+        ticket_id: None,
+        assignee_agent_key: None,
+        thread_excerpt: None,
     };
     write_context_file(&paths.worktree_dir, &context_input).context("write context file")?;
 
