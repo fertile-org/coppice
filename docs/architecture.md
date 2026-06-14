@@ -22,7 +22,7 @@ server/src/
   domain/       Entity types, enums, pure validation helpers
   db/           Pool setup, migration runner
   middleware/   Session auth, CSRF, admin checks
-  providers/    AgentProvider trait + MockProvider
+  providers/    AgentProvider trait + mock / opencode / claude-code connectors
   workers/      In-process Tokio job workers (M03)
   storage/      Filesystem artifact store (attachments)
   config/       Figment-based AppConfig
@@ -62,7 +62,10 @@ All agent execution goes through `AgentProvider`; orchestration lives in service
 
 ```text
 providers/mod.rs          trait + AgentRunResult contract
+providers/registry.rs     ConnectorRegistry — builds providers from config
 providers/mock.rs         deterministic fixtures from fixtures/agent-responses/
+providers/opencode.rs     HTTP serve-mode connector (host testing, API keys)
+providers/claude_code.rs  subprocess connector (claude -p, subscription OAuth)
 services/run_service.rs   create/cancel/finish runs
 services/job_service.rs   enqueue, claim (SKIP LOCKED), mark done/failed
 services/repo_service.rs       global registered repos (local_path, verify)

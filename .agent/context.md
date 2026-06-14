@@ -31,13 +31,13 @@ Split into two child tickets. Phase 1 (core) is independently shippable; phase 2
 
 ## Acceptance criteria
 
-- [ ] Claude Code agents can be run via `claude -p` subprocess with subscription auth
-- [ ] Provider implements `AgentProvider` trait and is registered in `ConnectorRegistry`
-- [ ] Result contract JSON extracted from stdout and deserialized to `AgentRunResult`
-- [ ] Config struct + health check + connectors API all support `claude-code`
-- [ ] Live console streaming via stream-json events
-- [ ] Session capture and resume support for continuation runs
-- [ ] Docs updated from "deferred" to implemented
+- [x] Claude Code agents can be run via `claude -p` subprocess with subscription auth
+- [x] Provider implements `AgentProvider` trait and is registered in `ConnectorRegistry`
+- [x] Result contract JSON extracted from stdout and deserialized to `AgentRunResult`
+- [x] Config struct + health check + connectors API all support `claude-code`
+- [x] Live console streaming via stream-json events
+- [x] Session capture and resume support for continuation runs
+- [x] Docs updated from "deferred" to implemented
 
 **Status:** ready
 
@@ -166,6 +166,8 @@ Recent activity on this ticket (oldest first):
 
 - **PM Agent** (implementation done): Updated the ticket description and acceptance criteria. Recommends **backend_engineer** for the next run.
 - **Human** (progress update): Two child ticket was done, do we need to do anything else?
+- **Tech Lead Agent** (implementation done): Reviewed both child tickets (524bcd4 core execution+wiring, 436cec1 streaming/resume/WS recovery). All seven acceptance criteria are met in code: `claude -p` subprocess with subscription OAuth auth (token injected, `ANTHROPIC_API_KEY` unset, no `--bare`), `AgentProvider` impl registered in `ConnectorRegistry`, stream-json→`AgentRunResult` extraction, `ClaudeCodeConnectorConfig` + health-check…
+- **Human** (progress update): Ok, so let fix the docs
 
 Read the full thread in Coppice if a detail is truncated.
 

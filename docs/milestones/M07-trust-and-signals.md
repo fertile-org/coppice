@@ -205,4 +205,4 @@ Use compose profiles so default `docker compose up` stays minimal.
 
 ## v1 complete
 
-When M07 acceptance criteria pass, Coppice implements the full philosophy product design for self-hosted v1. Real CLI provider adapters and scheduled observations can follow as post-v1 configuration work without new milestones.
+When M07 acceptance criteria pass, Coppice implements the full philosophy product design for self-hosted v1. The `mock`, `opencode`, and `claude-code` connectors are already implemented; remaining connectors (`codex`, `shell`) and scheduled observations can follow as post-v1 configuration work without new milestones.
