@@ -295,6 +295,7 @@ async fn execute_job(
             cancel_rx: Some(cancel_rx),
             session_created_tx,
             resume_context,
+            resume_session_id: load_resume_session_id(pool, run, connector_name).await,
         })
         .await;
 
@@ -463,6 +464,38 @@ async fn run_session_id(pool: &PgPool, run_id: uuid::Uuid) -> Option<String> {
         .await
         .ok()
         .and_then(|r| r.session_id)
+}
+
+/// For claude-code continuation runs, look up the previous run's session_id
+/// so the connector can pass `--resume <session_id>` to maintain conversation context.
+async fn load_resume_session_id(
+    pool: &PgPool,
+    run: &crate::domain::run::AgentRun,
+    connector_name: &str,
+) -> Option<String> {
+    if connector_name != "claude-code" {
+        return None;
+    }
+    if run.job_type != "work_on_ticket" {
+        return None;
+    }
+    let session_id: Option<String> = sqlx::query_scalar(
+        r#"
+        SELECT session_id FROM agent_runs
+        WHERE ticket_id = $1 AND agent_id = $2 AND id != $3
+          AND session_id IS NOT NULL AND session_id != ''
+        ORDER BY created_at DESC
+        LIMIT 1
+        "#,
+    )
+    .bind(run.ticket_id)
+    .bind(run.agent_id)
+    .bind(run.id)
+    .fetch_optional(pool)
+    .await
+    .ok()
+    .flatten();
+    session_id
 }
 
 fn publish_run_finished(

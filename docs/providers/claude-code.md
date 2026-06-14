@@ -29,8 +29,8 @@ enabled = true
 | Result parsing | `extract_result_from_text` on final assistant / result text |
 | Cancellation | `cancel_rx` kills the subprocess |
 | Timeout | Configurable via `run_timeout_secs` (default 600s) |
-| Live stream | Forwarded to run stream as frames (basic) |
-| Session resume | Follow-up ticket |
+| Live stream | Forwarded to run stream as `Frame` messages |
+| Session resume | `--resume <session_id>` on continuation runs |
 | MCP injection | Follow-up ticket |
 
 ## How it works
@@ -39,6 +39,25 @@ enabled = true
 2. Each stdout line is a JSON event. The provider accumulates assistant text deltas and captures `session_id` from the first event that contains it.
 3. The terminal `result` event provides the final assistant text. Coppice extracts the JSON contract (`AgentRunResult`) from that text using `extract_result_from_text`.
 4. On cancel or timeout, the subprocess is killed.
+
+## Live streaming (WebSocket console)
+
+Claude Code's `--output-format stream-json` emits newline-delimited JSON events on stdout. Each event is mapped to a `LiveMessage` variant and forwarded to the `RunStreamHandle` in real time:
+
+| Stream-JSON event | LiveMessage variant | Notes |
+|-------------------|---------------------|-------|
+| `system` (subtype `init`) | `Frame` | Contains the `session_id`; captured early via `session_created_tx` |
+| `assistant` (message with text content) | `Frame` | Display text extracted from `message.content[].text` parts |
+| `result` (terminal event) | `Frame` | Final result text; signals loop break |
+| Tool / other events | — (ignored for display) | Not forwarded as frames |
+
+Frames are published via `RunStreamHandle::publish_frame(seq, data)` where `seq` is a monotonic counter. The `RunStreamHandle` broadcasts to all WebSocket subscribers and retains a 500-message ring buffer for late-replay.
+
+**Recovery after server restart:** The subprocess is gone, so live reattach is not possible. The WS live endpoint replays the persisted `terminal.log` artifact as a single `Frame` message. If the run was still active, it is marked interrupted.
+
+## Session resume
+
+When a `Continued` result leads to a follow-up run, the job worker looks up the previous run's `session_id` from `agent_runs` and passes it to the connector as `resume_session_id`. The connector adds `--resume <session_id>` to the claude command, which restores the full conversation context within claude-code's session store.
 
 ## Context compaction
 

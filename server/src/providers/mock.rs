@@ -161,6 +161,7 @@ mod tests {
             model: None,
             session_created_tx: None,
             resume_context: None,
+            resume_session_id: None,
         }
     }
 
@@ -290,6 +291,7 @@ mod tests {
                 model: None,
                 session_created_tx: None,
                 resume_context: None,
+                resume_session_id: None,
             })
             .await
             .expect("mock run");

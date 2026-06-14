@@ -34,6 +34,7 @@ pub struct AgentRunInput {
     pub model: Option<String>,
     pub session_created_tx: Option<watch::Sender<String>>,
     pub resume_context: Option<String>,
+    pub resume_session_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -155,6 +156,7 @@ mod tests {
                 model: None,
                 session_created_tx: None,
                 resume_context: None,
+                resume_session_id: None,
             })
             .await
             .expect("mock run");
