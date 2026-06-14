@@ -13,13 +13,17 @@ impl ContextProfile {
             Self::HumanChat => "human_chat",
         }
     }
+}
 
-    pub fn from_str(s: &str) -> Option<Self> {
+impl std::str::FromStr for ContextProfile {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
-            "full" => Some(Self::Full),
-            "human_agent" => Some(Self::HumanAgent),
-            "human_chat" => Some(Self::HumanChat),
-            _ => None,
+            "full" => Ok(Self::Full),
+            "human_agent" => Ok(Self::HumanAgent),
+            "human_chat" => Ok(Self::HumanChat),
+            other => Err(format!("unknown context profile: {other}")),
         }
     }
 }
@@ -27,6 +31,7 @@ impl ContextProfile {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::str::FromStr;
 
     #[test]
     fn context_profile_roundtrip() {
@@ -35,7 +40,7 @@ mod tests {
             ContextProfile::HumanAgent,
             ContextProfile::HumanChat,
         ] {
-            assert_eq!(ContextProfile::from_str(profile.as_str()), Some(profile));
+            assert_eq!(ContextProfile::from_str(profile.as_str()), Ok(profile));
         }
     }
 }

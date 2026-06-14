@@ -549,14 +549,13 @@ fn persist_artifacts(
                 log_bytes.extend_from_slice(data);
                 frame_count += 1;
             }
-            crate::sessions::LiveMessage::Event { event } => {
+            crate::sessions::LiveMessage::Event { event }
                 if event
                     .get("type")
                     .and_then(|v| v.as_str())
-                    .is_some_and(|ty| ty.starts_with("claude.console."))
-                {
-                    console_events.push(event.clone());
-                }
+                    .is_some_and(|ty| ty.starts_with("claude.console.")) =>
+            {
+                console_events.push(event.clone());
             }
             _ => {}
         }

@@ -214,7 +214,6 @@ fn resolve_verification_handoff(ctx: &TransitionContext) -> Option<VerificationH
             AgentRunResult::Done { blockers, .. } => !blockers.is_empty(),
             _ => false,
         },
-        _ => false,
     };
     if !send_back {
         return None;

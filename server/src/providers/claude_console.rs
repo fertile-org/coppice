@@ -9,6 +9,12 @@ pub struct ClaudeConsolePublisher {
     contract_published: bool,
 }
 
+impl Default for ClaudeConsolePublisher {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ClaudeConsolePublisher {
     pub fn new() -> Self {
         Self {

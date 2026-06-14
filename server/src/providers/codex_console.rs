@@ -9,6 +9,12 @@ pub struct CodexConsolePublisher {
     contract_published: bool,
 }
 
+impl Default for CodexConsolePublisher {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl CodexConsolePublisher {
     pub fn new() -> Self {
         Self {
