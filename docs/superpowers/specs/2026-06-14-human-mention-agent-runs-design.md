@@ -1,7 +1,7 @@
 # Human @Mention Agent Runs — Design Spec
 
 **Date:** 2026-06-14  
-**Status:** Draft (pending review)  
+**Status:** Implemented  
 **Product:** Coppice — agent workspace on tickets
 
 **Depends on:** M05 workflow/mentions, M03 runs/job worker, M04 live console  
