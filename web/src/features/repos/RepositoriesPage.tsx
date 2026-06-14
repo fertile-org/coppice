@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from 'react';
+import { Button } from '../../components/ui/button';
 import { ApiError } from '../../lib/api';
 import {
   createRepoSchema,
@@ -410,11 +411,9 @@ export function RepositoriesPage() {
                       <th className="px-4 py-3 font-body text-xs font-medium uppercase tracking-wide text-text-muted">
                         Last verified
                       </th>
-                      {isAdmin && (
-                        <th className="px-4 py-3 text-right font-body text-xs font-medium uppercase tracking-wide text-text-muted">
-                          Actions
-                        </th>
-                      )}
+                      <th className="px-4 py-3 text-right font-body text-xs font-medium uppercase tracking-wide text-text-muted">
+                        Actions
+                      </th>
                     </tr>
                   </thead>
                   <tbody>
@@ -457,14 +456,30 @@ export function RepositoriesPage() {
                         <td className="px-4 py-3 font-body text-xs text-text-muted">
                           {formatDate(repo.lastVerifiedAt)}
                         </td>
-                        {isAdmin && (
-                          <td className="px-4 py-3">
-                            <RepoRowActions
-                              repo={repo}
-                              onEdit={(r) => setEditing(r)}
-                            />
-                          </td>
-                        )}
+                        <td className="px-4 py-3">
+                          <div className="flex flex-col items-end gap-1">
+                            <Button
+                              type="button"
+                              variant="secondary"
+                              disabled={repo.verificationStatus !== 'ready'}
+                              onClick={() => {
+                                window.open(
+                                  `/code?repoId=${repo.id}`,
+                                  '_blank',
+                                  'noopener,noreferrer',
+                                );
+                              }}
+                            >
+                              View code
+                            </Button>
+                            {isAdmin && (
+                              <RepoRowActions
+                                repo={repo}
+                                onEdit={(r) => setEditing(r)}
+                              />
+                            )}
+                          </div>
+                        </td>
                       </tr>
                     ))}
                   </tbody>

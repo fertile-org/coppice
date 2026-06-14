@@ -30,12 +30,23 @@ import {
   useApproveSplits,
   useAssignAgent,
   useDismissSplits,
+  useTicketGitInfo,
   useUpdateTicket,
   useUpdateTicketStatus,
 } from './useTicket';
 
 interface TicketMetadataPanelProps {
   ticket: Ticket;
+}
+
+function buildCodeReviewUrl(
+  ticket: Ticket,
+  repoId: string,
+  worktreePath: string | null,
+) {
+  const params = new URLSearchParams({ repoId, ticketId: ticket.id });
+  if (worktreePath) params.set('worktree', worktreePath);
+  return `/code?${params.toString()}`;
 }
 
 function metadataFromTicket(ticket: Ticket): Record<string, unknown> {
@@ -53,6 +64,14 @@ export function TicketMetadataPanel({ ticket }: TicketMetadataPanelProps) {
   const { data: repos } = useRepos();
   const { data: runs } = useAgentRuns(ticket.id);
   const latestRunWorktreePath = runs?.[0]?.worktreePath ?? null;
+  const { data: gitInfo } = useTicketGitInfo(ticket.id, Boolean(ticket.repoId));
+  const selectedRepo = repos?.find((repo) => repo.id === ticket.repoId);
+  const repoNotReady = Boolean(
+    ticket.repoId && selectedRepo && selectedRepo.verificationStatus !== 'ready',
+  );
+  const codeReviewWorktreePath =
+    latestRunWorktreePath ??
+    (gitInfo?.worktreeExists ? gitInfo.worktreePath : null);
 
   const [assigneeId, setAssigneeId] = useState(ticket.assigneeAgentId ?? '');
   const [assignError, setAssignError] = useState<string | null>(null);
@@ -112,23 +131,13 @@ export function TicketMetadataPanel({ ticket }: TicketMetadataPanelProps) {
     }
   }
 
-  async function handleAssignChange(nextAgentId: string) {
-    setAssignError(null);
-    setAssigneeId(nextAgentId);
-    try {
-      await assignAgent.mutateAsync(nextAgentId || null);
-    } catch {
-      setAssigneeId(ticket.assigneeAgentId ?? '');
-      setAssignError('Unable to update assignee.');
-    }
-  }
-
   function updateMetadataField(key: string, value: string) {
     setMetadata((prev) => ({ ...prev, [key]: value }));
   }
 
   async function handleSave() {
     setError(null);
+    setAssignError(null);
 
     const parsedPriority = priority
       ? ticketPrioritySchema.safeParse(priority)
@@ -147,8 +156,16 @@ export function TicketMetadataPanel({ ticket }: TicketMetadataPanelProps) {
       }
     }
 
+    const nextAssigneeId = assigneeId || null;
+    const assigneeChanged =
+      nextAssigneeId !== (ticket.assigneeAgentId ?? null);
+
     setIsSaving(true);
     try {
+      if (assigneeChanged) {
+        await assignAgent.mutateAsync(nextAssigneeId);
+      }
+
       await updateStatus.mutateAsync({
         status,
         substatus: substatus || null,
@@ -168,7 +185,9 @@ export function TicketMetadataPanel({ ticket }: TicketMetadataPanelProps) {
 
       toast.success('Metadata saved');
     } catch {
+      setAssigneeId(ticket.assigneeAgentId ?? '');
       setError('Unable to save metadata.');
+      setAssignError(assigneeChanged ? 'Unable to update assignee.' : null);
       toast.error('Unable to save metadata');
     } finally {
       setIsSaving(false);
@@ -179,6 +198,7 @@ export function TicketMetadataPanel({ ticket }: TicketMetadataPanelProps) {
     isSaving ||
     updateStatus.isPending ||
     updateTicket.isPending ||
+    assignAgent.isPending ||
     approveSplits.isPending ||
     dismissSplits.isPending;
   const activeSubstatus = substatus || null;
@@ -190,10 +210,11 @@ export function TicketMetadataPanel({ ticket }: TicketMetadataPanelProps) {
         <Label htmlFor="ticket-assignee">Assignee</Label>
         <Select
           value={assigneeId || '__none__'}
-          onValueChange={(value) =>
-            void handleAssignChange(value === '__none__' ? '' : value)
-          }
-          disabled={assignAgent.isPending}
+          onValueChange={(value) => {
+            setAssigneeId(value === '__none__' ? '' : value);
+            setAssignError(null);
+          }}
+          disabled={isBusy}
         >
           <SelectTrigger id="ticket-assignee">
             <SelectValue placeholder="Unassigned" />
@@ -332,6 +353,22 @@ export function TicketMetadataPanel({ ticket }: TicketMetadataPanelProps) {
             ))}
           </SelectContent>
         </Select>
+        <Button
+          type="button"
+          variant="secondary"
+          disabled={!ticket.repoId || repoNotReady}
+          onClick={() => {
+            const url = buildCodeReviewUrl(
+              ticket,
+              ticket.repoId!,
+              codeReviewWorktreePath,
+            );
+            window.open(url, '_blank', 'noopener,noreferrer');
+          }}
+          className="w-full"
+        >
+          Review code
+        </Button>
       </div>
 
       <div className="space-y-2">
