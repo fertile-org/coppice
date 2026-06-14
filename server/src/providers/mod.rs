@@ -1,6 +1,7 @@
 pub mod claude_code;
 pub mod claude_console;
 pub mod codex;
+pub mod codex_console;
 pub mod mock;
 pub mod opencode;
 pub mod opencode_models;

@@ -1,3 +1,4 @@
+use super::codex_console::CodexConsolePublisher;
 use super::{AgentProvider, AgentRunInput, AgentRunResult, ProviderError};
 use crate::sessions::opencode_events::{coppice_run_prompt, extract_result_from_text};
 use async_trait::async_trait;
@@ -101,8 +102,8 @@ impl AgentProvider for CodexProvider {
         });
 
         let mut assistant_text = String::new();
-        let mut frame_seq: u64 = 0;
         let mut session_sent = false;
+        let mut console = CodexConsolePublisher::new();
 
         loop {
             if is_cancelled(&cancel_rx) {
@@ -150,12 +151,9 @@ impl AgentProvider for CodexProvider {
                                 }
                             }
 
-                            // Forward display text to the run stream.
+                            // Forward structured console events to the run stream.
                             if let Some(stream) = &input.stream {
-                                if let Some(text) = extract_display_text(&value) {
-                                    stream.publish_frame(frame_seq, format!("{text}\n").into_bytes());
-                                    frame_seq += 1;
-                                }
+                                console.handle_json(stream, &value);
                             }
 
                             // Accumulate assistant text.
@@ -210,7 +208,7 @@ async fn wait_cancel(cancel_rx: &mut Option<watch::Receiver<bool>>) {
     }
 }
 
-fn extract_display_text(value: &serde_json::Value) -> Option<String> {
+fn extract_assistant_text(value: &serde_json::Value) -> Option<String> {
     // Codex CLI event format:
     // - {"type":"thread.started","thread_id":"..."}
     // - {"type":"turn.started"}
@@ -218,23 +216,14 @@ fn extract_display_text(value: &serde_json::Value) -> Option<String> {
     // - {"type":"turn.completed","usage":{...}}
 
     let ty = value.get("type").and_then(|v| v.as_str())?;
-    match ty {
-        "item.completed" => {
-            let item = value.get("item")?;
-            let item_type = item.get("type").and_then(|v| v.as_str())?;
-            if item_type == "agent_message" {
-                item.get("text").and_then(|v| v.as_str()).map(str::to_string)
-            } else {
-                None
-            }
+    if ty == "item.completed" {
+        let item = value.get("item")?;
+        let item_type = item.get("type").and_then(|v| v.as_str())?;
+        if item_type == "agent_message" {
+            return item.get("text").and_then(|v| v.as_str()).map(str::to_string);
         }
-        _ => None,
     }
-}
-
-fn extract_assistant_text(value: &serde_json::Value) -> Option<String> {
-    // Same logic as extract_display_text for Codex.
-    extract_display_text(value)
+    None
 }
 
 #[cfg(test)]
@@ -291,7 +280,7 @@ mod tests {
     }
 
     #[test]
-    fn extract_display_text_from_agent_message() {
+    fn extract_assistant_text_from_agent_message() {
         // Codex format: item.completed with agent_message
         let event = serde_json::json!({
             "type": "item.completed",
@@ -301,12 +290,12 @@ mod tests {
                 "text": "Codex is working"
             }
         });
-        let text = extract_display_text(&event).expect("display text");
+        let text = extract_assistant_text(&event).expect("assistant text");
         assert_eq!(text, "Codex is working");
     }
 
     #[test]
-    fn extract_display_text_ignores_command_execution() {
+    fn extract_assistant_text_ignores_command_execution() {
         // Codex format: item.completed with command_execution should be ignored
         let event = serde_json::json!({
             "type": "item.completed",
@@ -317,7 +306,7 @@ mod tests {
                 "exit_code": 0
             }
         });
-        assert!(extract_display_text(&event).is_none());
+        assert!(extract_assistant_text(&event).is_none());
     }
 
     #[test]
@@ -345,122 +334,5 @@ mod tests {
             }
         }
         assert_eq!(captured_id.as_deref(), Some("codex_thread_abc123"));
-    }
-
-    #[test]
-    fn streaming_pipeline_publishes_frames_to_run_stream_handle() {
-        use crate::sessions::run_registry::RunStreamRegistry;
-        use crate::sessions::LiveMessage;
-
-        let raw = std::fs::read_to_string(fixtures_root().join("done.jsonl"))
-            .expect("read done.jsonl");
-
-        let registry = RunStreamRegistry::new();
-        let run_id = uuid::Uuid::new_v4();
-        let handle = registry.register(run_id);
-        let mut rx = handle.subscribe();
-
-        let mut frame_seq: u64 = 0;
-        let mut session_sent = false;
-
-        for line in raw.lines() {
-            let Ok(value) = serde_json::from_str::<serde_json::Value>(line) else {
-                continue;
-            };
-
-            if !session_sent {
-                if let Some(sid) = value
-                    .get("thread_id")
-                    .and_then(|v| v.as_str())
-                    .filter(|s| !s.is_empty())
-                {
-                    let _ = sid;
-                    session_sent = true;
-                }
-            }
-
-            if let Some(text) = extract_display_text(&value) {
-                handle.publish_frame(frame_seq, format!("{text}\n").into_bytes());
-                frame_seq += 1;
-            }
-        }
-
-        let mut received = Vec::new();
-        while let Ok(msg) = rx.try_recv() {
-            received.push(msg);
-        }
-
-        assert!(session_sent, "thread_id should have been captured");
-        assert_eq!(received.len(), 2, "should have 2 frames from agent_message items");
-        for (i, msg) in received.iter().enumerate() {
-            match msg {
-                LiveMessage::Frame { seq, data } => {
-                    assert_eq!(*seq, i as u64, "frame seq should be sequential");
-                    assert!(!data.is_empty(), "frame data should not be empty");
-                }
-                _ => panic!("expected Frame, got {msg:?}"),
-            }
-        }
-    }
-
-    #[test]
-    fn streaming_pipeline_blocked_fixture_publishes_frames() {
-        use crate::sessions::run_registry::RunStreamRegistry;
-        use crate::sessions::LiveMessage;
-
-        let raw = std::fs::read_to_string(fixtures_root().join("blocked.jsonl"))
-            .expect("read blocked.jsonl");
-
-        let registry = RunStreamRegistry::new();
-        let run_id = uuid::Uuid::new_v4();
-        let handle = registry.register(run_id);
-        let mut rx = handle.subscribe();
-
-        let mut frame_seq: u64 = 0;
-        for line in raw.lines() {
-            let Ok(value) = serde_json::from_str::<serde_json::Value>(line) else {
-                continue;
-            };
-            if let Some(text) = extract_display_text(&value) {
-                handle.publish_frame(frame_seq, format!("{text}\n").into_bytes());
-                frame_seq += 1;
-            }
-        }
-
-        let mut received = Vec::new();
-        while let Ok(msg) = rx.try_recv() {
-            received.push(msg);
-        }
-
-        assert_eq!(received.len(), 2, "2 frames from agent_message items");
-        assert!(received.iter().all(|m| matches!(m, LiveMessage::Frame { .. })));
-    }
-
-    #[test]
-    fn buffered_tail_replays_frames_for_recovery() {
-        use crate::sessions::run_registry::RunStreamRegistry;
-        use crate::sessions::LiveMessage;
-
-        let raw = std::fs::read_to_string(fixtures_root().join("done.jsonl"))
-            .expect("read done.jsonl");
-
-        let registry = RunStreamRegistry::new();
-        let run_id = uuid::Uuid::new_v4();
-        let handle = registry.register(run_id);
-
-        let mut frame_seq: u64 = 0;
-        for line in raw.lines() {
-            let Ok(value) = serde_json::from_str::<serde_json::Value>(line) else {
-                continue;
-            };
-            if let Some(text) = extract_display_text(&value) {
-                handle.publish_frame(frame_seq, format!("{text}\n").into_bytes());
-                frame_seq += 1;
-            }
-        }
-
-        let tail = handle.buffered_tail();
-        assert_eq!(tail.len(), 2, "buffered tail should have all 2 frames");
-        assert!(tail.iter().all(|m| matches!(m, LiveMessage::Frame { .. })));
     }
 }
