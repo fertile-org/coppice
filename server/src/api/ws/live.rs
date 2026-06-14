@@ -79,6 +79,7 @@ async fn handle_live_socket(state: Arc<AppState>, run_id: Uuid, socket: WebSocke
         .ok()
         .flatten();
     let is_opencode = connector.as_deref() == Some("opencode");
+    let is_claude_code = connector.as_deref() == Some("claude-code");
 
     let recovery = if let Some(handle) = state.run_streams.get(run_id) {
         replay_and_subscribe(&state, run_id, &mut sender, &handle).await;
@@ -86,6 +87,10 @@ async fn handle_live_socket(state: Arc<AppState>, run_id: Uuid, socket: WebSocke
     } else if is_opencode {
         Some(
             handle_opencode_recovery(&state, &mut sender, run_id, &run, &run_svc).await,
+        )
+    } else if is_claude_code {
+        Some(
+            handle_claude_code_recovery(&state, &mut sender, run_id, &run, &run_svc).await,
         )
     } else if let Some(log_bytes) = read_terminal_log_artifact(&state, run_id) {
         let msg = LiveMessage::Frame {
@@ -245,6 +250,51 @@ async fn handle_opencode_recovery(
                 break;
             }
         }
+    }
+
+    RecoveryOutcome {
+        recoverable: Some(false),
+        reason: None,
+    }
+}
+
+/// Replay captured artifacts for a claude-code run after server restart.
+///
+/// Claude-code runs as a fresh subprocess per run. After a server restart the
+/// process is gone, so we cannot reattach to a live stream. Instead we replay
+/// the persisted terminal log and session snapshot from disk.
+///
+/// If the run is still marked active (queued/running) but its stream handle is
+/// gone, the process died during the restart — mark it interrupted.
+async fn handle_claude_code_recovery(
+    state: &AppState,
+    sender: &mut futures_util::stream::SplitSink<WebSocket, Message>,
+    run_id: Uuid,
+    run: &AgentRun,
+    run_svc: &RunService<'_>,
+) -> RecoveryOutcome {
+    // Replay terminal log as a single frame.
+    if let Some(log_bytes) = read_terminal_log_artifact(state, run_id) {
+        let msg = LiveMessage::Frame {
+            seq: 0,
+            data: log_bytes,
+        };
+        if send_live_message(sender, &msg).await.is_err() {
+            return RecoveryOutcome {
+                recoverable: None,
+                reason: None,
+            };
+        }
+    }
+
+    // If run is still active, the subprocess died during restart.
+    if is_active_run_status(run.status) {
+        let reason = "server restarted during run";
+        let _ = run_svc.mark_interrupted(run_id, reason).await;
+        return RecoveryOutcome {
+            recoverable: Some(false),
+            reason: Some(format!("interrupted: {reason}")),
+        };
     }
 
     RecoveryOutcome {

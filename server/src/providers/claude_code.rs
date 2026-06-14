@@ -55,6 +55,13 @@ impl AgentProvider for ClaudeCodeProvider {
             cmd.arg("--model").arg(model);
         }
 
+        // Resume a previous claude-code session if we have its session_id.
+        if let Some(sid) = &input.resume_session_id {
+            if !sid.is_empty() {
+                cmd.arg("--resume").arg(sid);
+            }
+        }
+
         // Auth: inject OAuth token, explicitly unset API key (subscription auth only).
         if let Ok(token) = std::env::var(&self.config.oauth_token_secret) {
             if !token.is_empty() {
@@ -339,5 +346,168 @@ mod tests {
     fn provider_id() {
         let provider = ClaudeCodeProvider::new(ClaudeCodeProviderConfig::default());
         assert_eq!(provider.id(), "claude-code");
+    }
+
+    #[test]
+    fn session_id_extracted_from_init_event() {
+        let raw = std::fs::read_to_string(fixtures_root().join("done.jsonl"))
+            .expect("read done.jsonl");
+        let mut session_sent = false;
+        let mut captured_id = None::<String>;
+        for line in raw.lines() {
+            let Ok(value) = serde_json::from_str::<serde_json::Value>(line) else {
+                continue;
+            };
+            if !session_sent {
+                if let Some(sid) = value
+                    .get("session_id")
+                    .and_then(|v| v.as_str())
+                    .filter(|s| !s.is_empty())
+                {
+                    captured_id = Some(sid.to_string());
+                    session_sent = true;
+                }
+            }
+        }
+        assert_eq!(captured_id.as_deref(), Some("sess_abc123"));
+    }
+
+    #[test]
+    fn session_id_extracted_from_result_event() {
+        let event = serde_json::json!({
+            "type": "result",
+            "subtype": "success",
+            "result": "final output",
+            "session_id": "sess_xyz789"
+        });
+        let sid = event
+            .get("session_id")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty());
+        assert_eq!(sid, Some("sess_xyz789"));
+    }
+
+    #[test]
+    fn streaming_pipeline_publishes_frames_to_run_stream_handle() {
+        use crate::sessions::run_registry::RunStreamRegistry;
+        use crate::sessions::LiveMessage;
+
+        let raw = std::fs::read_to_string(fixtures_root().join("done.jsonl"))
+            .expect("read done.jsonl");
+
+        let registry = RunStreamRegistry::new();
+        let run_id = uuid::Uuid::new_v4();
+        let handle = registry.register(run_id);
+        let mut rx = handle.subscribe();
+
+        let mut frame_seq: u64 = 0;
+        let mut session_sent = false;
+
+        for line in raw.lines() {
+            let Ok(value) = serde_json::from_str::<serde_json::Value>(line) else {
+                continue;
+            };
+
+            if !session_sent {
+                if let Some(sid) = value
+                    .get("session_id")
+                    .and_then(|v| v.as_str())
+                    .filter(|s| !s.is_empty())
+                {
+                    let _ = sid;
+                    session_sent = true;
+                }
+            }
+
+            if let Some(text) = extract_display_text(&value) {
+                handle.publish_frame(frame_seq, format!("{text}\n").into_bytes());
+                frame_seq += 1;
+            }
+        }
+
+        let mut received = Vec::new();
+        while let Ok(msg) = rx.try_recv() {
+            received.push(msg);
+        }
+
+        assert!(session_sent, "session_id should have been captured");
+        assert_eq!(received.len(), 4, "should have 4 frames: 3 assistant + 1 result");
+        for (i, msg) in received.iter().enumerate() {
+            match msg {
+                LiveMessage::Frame { seq, data } => {
+                    assert_eq!(*seq, i as u64, "frame seq should be sequential");
+                    assert!(!data.is_empty(), "frame data should not be empty");
+                }
+                _ => panic!("expected Frame, got {msg:?}"),
+            }
+        }
+
+        let first_data = match &received[0] {
+            LiveMessage::Frame { data, .. } => data.clone(),
+            _ => unreachable!(),
+        };
+        let first = std::str::from_utf8(&first_data).unwrap();
+        assert!(first.contains("Reading .agent/context.md"));
+    }
+
+    #[test]
+    fn streaming_pipeline_blocked_fixture_publishes_frames() {
+        use crate::sessions::run_registry::RunStreamRegistry;
+        use crate::sessions::LiveMessage;
+
+        let raw = std::fs::read_to_string(fixtures_root().join("blocked.jsonl"))
+            .expect("read blocked.jsonl");
+
+        let registry = RunStreamRegistry::new();
+        let run_id = uuid::Uuid::new_v4();
+        let handle = registry.register(run_id);
+        let mut rx = handle.subscribe();
+
+        let mut frame_seq: u64 = 0;
+        for line in raw.lines() {
+            let Ok(value) = serde_json::from_str::<serde_json::Value>(line) else {
+                continue;
+            };
+            if let Some(text) = extract_display_text(&value) {
+                handle.publish_frame(frame_seq, format!("{text}\n").into_bytes());
+                frame_seq += 1;
+            }
+        }
+
+        let mut received = Vec::new();
+        while let Ok(msg) = rx.try_recv() {
+            received.push(msg);
+        }
+
+        assert_eq!(received.len(), 3, "3 frames: 2 assistant + 1 result");
+        assert!(received.iter().all(|m| matches!(m, LiveMessage::Frame { .. })));
+    }
+
+    #[test]
+    fn buffered_tail_replays_frames_for_recovery() {
+        use crate::sessions::run_registry::RunStreamRegistry;
+        use crate::sessions::LiveMessage;
+
+        let raw = std::fs::read_to_string(fixtures_root().join("done.jsonl"))
+            .expect("read done.jsonl");
+
+        let registry = RunStreamRegistry::new();
+        let run_id = uuid::Uuid::new_v4();
+        let handle = registry.register(run_id);
+
+        let mut frame_seq: u64 = 0;
+        for line in raw.lines() {
+            let Ok(value) = serde_json::from_str::<serde_json::Value>(line) else {
+                continue;
+            };
+            if let Some(text) = extract_display_text(&value) {
+                handle.publish_frame(frame_seq, format!("{text}\n").into_bytes());
+                frame_seq += 1;
+            }
+        }
+
+        let tail = handle.buffered_tail();
+        assert_eq!(tail.len(), 4, "buffered tail should have all 4 frames");
+        assert!(tail.iter().all(|m| matches!(m, LiveMessage::Frame { .. })));
     }
 }
