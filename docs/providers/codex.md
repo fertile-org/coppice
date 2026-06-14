@@ -2,9 +2,9 @@
 
 **ID:** `codex`
 **Status:** Implemented
-**Stream backend:** subprocess stdout (stream-json)
+**Stream backend:** subprocess stdout (JSONL)
 
-OpenAI Codex CLI integration via subprocess. Agents run as `codex -p` processes that inherit the server's environment.
+OpenAI Codex CLI integration via subprocess. Agents run as `codex exec` processes that inherit the server's environment.
 
 ## Auth
 
@@ -21,33 +21,33 @@ enabled = true
 
 | Capability | Status |
 |------------|--------|
-| Subprocess execution | `codex -p --output-format stream-json --verbose` |
-| Session ID capture | Extracted from stream-json events, persisted to run |
-| Model selection | `--model` from agent config |
-| Result parsing | `extract_result_from_text` on final assistant / result text |
+| Subprocess execution | `codex exec --json --dangerously-bypass-approvals-and-sandbox` |
+| Thread ID capture | Extracted from `thread.started` event, persisted to run |
+| Model selection | `-m` / `--model` from agent config |
+| Result parsing | `extract_result_from_text` on accumulated agent_message text |
 | Cancellation | `cancel_rx` kills the subprocess |
 | Timeout | Configurable via `run_timeout_secs` (default 600s) |
 | Live stream | Forwarded to run stream as `Frame` messages |
-| Session resume | `--resume <session_id>` on continuation runs (unreliable) |
+| Session resume | `codex exec resume <thread_id>` on continuation runs (unreliable) |
 | MCP injection | Follow-up ticket |
 
 ## How it works
 
-1. Coppice spawns `codex -p "<coppice_run_prompt>" --output-format stream-json --verbose --allowedTools ... --permission-mode bypassPermissions` with CWD set to the agent worktree.
-2. Each stdout line is a JSON event. The provider accumulates assistant text deltas and captures `session_id` from the first event that contains it.
-3. The terminal `result` event provides the final assistant text. Coppice extracts the JSON contract (`AgentRunResult`) from that text using `extract_result_from_text`.
+1. Coppice spawns `codex exec --json --dangerously-bypass-approvals-and-sandbox -C <worktree> -m <model>` and writes the prompt to stdin.
+2. Each stdout line is a JSON event. The provider accumulates agent_message text from `item.completed` events and captures `thread_id` from the `thread.started` event.
+3. The terminal `turn.completed` event signals completion. Coppice extracts the JSON contract (`AgentRunResult`) from the accumulated text using `extract_result_from_text`.
 4. On cancel or timeout, the subprocess is killed.
 
 ## Live streaming (WebSocket console)
 
-Codex's `--output-format stream-json` emits newline-delimited JSON events on stdout. Each event is mapped to a `LiveMessage` variant and forwarded to the `RunStreamHandle` in real time:
+Codex's `--json` emits newline-delimited JSON events on stdout. Each event is mapped to a `LiveMessage` variant and forwarded to the `RunStreamHandle` in real time:
 
-| Stream-JSON event | LiveMessage variant | Notes |
-|-------------------|---------------------|-------|
-| `system` (subtype `init`) | `Frame` | Contains the `session_id`; captured early via `session_created_tx` |
-| `assistant` (message with text content) | `Frame` | Display text extracted from `message.content[].text` parts |
-| `result` (terminal event) | `Frame` | Final result text; signals loop break |
-| Tool / other events | — (ignored for display) | Not forwarded as frames |
+| Codex event | LiveMessage variant | Notes |
+|-------------|---------------------|-------|
+| `thread.started` | — | Contains the `thread_id`; captured early via `session_created_tx` |
+| `item.completed` (type: `agent_message`) | `Frame` | Display text extracted from `item.text` |
+| `turn.completed` | — | Terminal event; signals loop break |
+| Other events | — (ignored for display) | Not forwarded as frames |
 
 Frames are published via `RunStreamHandle::publish_frame(seq, data)` where `seq` is a monotonic counter. The `RunStreamHandle` broadcasts to all WebSocket subscribers and retains a 500-message ring buffer for late-replay.
 
@@ -55,7 +55,9 @@ Frames are published via `RunStreamHandle::publish_frame(seq, data)` where `seq`
 
 ## Session resume
 
-Session resume for codex is **unreliable**—the Codex CLI implementation for session continuation is not stable. The connector includes `--resume <session_id>` support (following the same pattern as claude-code), but cross-run continuity should rely on checkpoint runs: the agent returns `status: "continued"` with a `progressNote`, the human starts the next run, and Coppice injects resume context into `.agent/context.md` (see [Context & Long-Running Tasks design](../superpowers/specs/2026-06-10-context-long-running-tasks-design.md)).
+Session resume for codex is **unreliable**—the Codex CLI implementation for session continuation is not stable. The connector includes `codex exec resume <thread_id>` support (following the same pattern as claude-code), but cross-run continuity should rely on checkpoint runs: the agent returns `status: "continued"` with a `progressNote`, the human starts the next run, and Coppice injects resume context into `.agent/context.md` (see [Context & Long-Running Tasks design](../superpowers/specs/2026-06-10-context-long-running-tasks-design.md)).
+
+**Note:** Session resume for codex is NOT supported in the job worker's `load_resume_session_id` function (unlike claude-code). The `load_resume_session_id` function only returns session IDs for claude-code runs; codex relies on the checkpoint-based continuation pattern.
 
 ## Context compaction
 
