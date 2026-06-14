@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use crate::config::AppConfig;
 use crate::providers::claude_code::ClaudeCodeProvider;
+use crate::providers::codex::CodexProvider;
 use crate::providers::mock::MockProvider;
 use crate::providers::opencode::OpenCodeProvider;
 use crate::providers::AgentProvider;
@@ -12,6 +13,7 @@ pub struct ConnectorRegistry {
     connectors: HashMap<String, Arc<dyn AgentProvider>>,
     opencode_model_providers: Vec<String>,
     claude_code_model_providers: Vec<String>,
+    codex_model_providers: Vec<String>,
 }
 
 impl ConnectorRegistry {
@@ -45,10 +47,20 @@ impl ConnectorRegistry {
             );
         }
 
+        if config.agent.connectors.codex.enabled {
+            connectors.insert(
+                "codex".into(),
+                Arc::new(CodexProvider::new(
+                    config.agent.connectors.codex.clone(),
+                )),
+            );
+        }
+
         Self {
             connectors,
             opencode_model_providers: config.agent.connectors.opencode.model_providers.clone(),
             claude_code_model_providers: config.agent.connectors.claude_code.model_providers.clone(),
+            codex_model_providers: config.agent.connectors.codex.model_providers.clone(),
         }
     }
 
@@ -70,6 +82,7 @@ impl ConnectorRegistry {
         match connector {
             "opencode" => self.opencode_model_providers.clone(),
             "claude-code" => self.claude_code_model_providers.clone(),
+            "codex" => self.codex_model_providers.clone(),
             _ => vec![],
         }
     }
@@ -124,5 +137,26 @@ mod tests {
         let config = AppConfig::load_defaults().expect("config");
         let registry = ConnectorRegistry::from_config(&config, None);
         assert!(!registry.has("claude-code"));
+    }
+
+    #[test]
+    fn registers_codex_when_enabled() {
+        let mut config = AppConfig::load_defaults().expect("config");
+        config.agent.connectors.codex.enabled = true;
+        config.agent.connectors.codex.model_providers =
+            vec!["openai".into(), "azure".into()];
+        let registry = ConnectorRegistry::from_config(&config, None);
+        assert!(registry.has("codex"));
+        assert_eq!(
+            registry.model_providers_for("codex"),
+            vec!["openai", "azure"]
+        );
+    }
+
+    #[test]
+    fn does_not_register_codex_when_disabled() {
+        let config = AppConfig::load_defaults().expect("config");
+        let registry = ConnectorRegistry::from_config(&config, None);
+        assert!(!registry.has("codex"));
     }
 }

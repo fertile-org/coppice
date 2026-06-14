@@ -381,7 +381,7 @@ async fn execute_job(
         .get(connector_name)
         .ok_or_else(|| anyhow::anyhow!("agent connector not configured: {connector_name}"))?;
 
-    let session_created_tx = if connector_name == "opencode" || connector_name == "claude-code" {
+    let session_created_tx = if connector_name == "opencode" || connector_name == "claude-code" || connector_name == "codex" {
         let (tx, mut rx) = watch::channel(String::new());
         let pool = pool.clone();
         let run_id = run.id;
@@ -549,14 +549,13 @@ fn persist_artifacts(
                 log_bytes.extend_from_slice(data);
                 frame_count += 1;
             }
-            crate::sessions::LiveMessage::Event { event } => {
+            crate::sessions::LiveMessage::Event { event }
                 if event
                     .get("type")
                     .and_then(|v| v.as_str())
-                    .is_some_and(|ty| ty.starts_with("claude.console."))
-                {
-                    console_events.push(event.clone());
-                }
+                    .is_some_and(|ty| ty.starts_with("claude.console.")) =>
+            {
+                console_events.push(event.clone());
             }
             _ => {}
         }
@@ -606,6 +605,11 @@ async fn run_session_id(pool: &PgPool, run_id: uuid::Uuid) -> Option<String> {
 
 /// For claude-code continuation runs, look up the previous run's session_id
 /// so the connector can pass `--resume <session_id>` to maintain conversation context.
+///
+/// Note: codex session resume is not implemented here. The codex connector includes
+/// the `--resume` flag in its command invocation, but session resume is documented
+/// as unreliable for codex (see docs/providers/codex.md). Cross-run continuity uses
+/// the `Continued` + context.md checkpoint path instead, which is provider-agnostic.
 async fn load_resume_session_id(
     pool: &PgPool,
     run: &crate::domain::run::AgentRun,

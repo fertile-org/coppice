@@ -129,6 +129,18 @@ async fn list_models(
                     .collect(),
             }))
         }
+        "codex" => {
+            let models = known_codex_models(&model_provider_id);
+            Ok(Json(ModelListResponse {
+                items: models
+                    .into_iter()
+                    .map(|m| ModelResponse {
+                        id: m.id.to_string(),
+                        name: m.name.to_string(),
+                    })
+                    .collect(),
+            }))
+        }
         "mock" => Ok(Json(ModelListResponse { items: vec![] })),
         _ => Err(StatusCode::NOT_FOUND),
     }
@@ -152,6 +164,23 @@ fn known_claude_code_models(provider_id: &str) -> Vec<KnownModel> {
         "haiku" => vec![
             KnownModel { id: "claude-3-5-haiku-20241022", name: "Claude 3.5 Haiku" },
             KnownModel { id: "claude-3-haiku-20240307", name: "Claude 3 Haiku" },
+        ],
+        _ => vec![],
+    }
+}
+
+fn known_codex_models(provider_id: &str) -> Vec<KnownModel> {
+    match provider_id {
+        "openai" => vec![
+            KnownModel { id: "gpt-4o", name: "GPT-4o" },
+            KnownModel { id: "gpt-4o-mini", name: "GPT-4o Mini" },
+            KnownModel { id: "o1", name: "o1" },
+            KnownModel { id: "o1-mini", name: "o1 Mini" },
+        ],
+        "azure" => vec![
+            KnownModel { id: "azure/gpt-4o", name: "Azure GPT-4o" },
+            KnownModel { id: "azure/gpt-4o-mini", name: "Azure GPT-4o Mini" },
+            KnownModel { id: "azure/o1", name: "Azure o1" },
         ],
         _ => vec![],
     }

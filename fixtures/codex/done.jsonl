@@ -1,0 +1,5 @@
+{"type":"thread.started","thread_id":"codex_thread_abc123"}
+{"type":"turn.started"}
+{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"Reading .agent/context.md and implementing the feature..."}}
+{"type":"item.completed","item":{"id":"item_1","type":"agent_message","text":"{\"status\":\"done\",\"summary\":\"Codex feature implementation complete.\",\"changedFiles\":[\"src/main.rs\",\"src/providers/codex.rs\"],\"testsRun\":[\"cargo test -p coppice-server --lib\"],\"assignTo\":\"backend_engineer\",\"mentionAgents\":[],\"blockers\":[]}"}}
+{"type":"turn.completed","usage":{"input_tokens":1000,"output_tokens":500}}

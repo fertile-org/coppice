@@ -1,5 +1,6 @@
 use crate::domain::comment::AuthorType;
 use crate::domain::context_profile::ContextProfile;
+use std::str::FromStr;
 use crate::domain::repo::VerificationStatus;
 use crate::domain::run::{
     run_status_from_str, run_status_to_str, AgentRun, RunStatus,

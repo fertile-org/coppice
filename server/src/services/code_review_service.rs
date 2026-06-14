@@ -219,13 +219,13 @@ impl<'a> CodeReviewService<'a> {
             return Err(CodeReviewError::RepoNotReady);
         }
         let repo_slug = slugify(&repo.name);
-        let prefix = format!("TICKET-");
+        let prefix = "TICKET-";
         let suffix = format!("-{repo_slug}");
         let mut out = Vec::new();
         let mut entries = tokio::fs::read_dir(&self.worktrees_root).await?;
         while let Some(entry) = entries.next_entry().await? {
             let name = entry.file_name().to_string_lossy().to_string();
-            if !name.starts_with(&prefix) || !name.ends_with(&suffix) {
+            if !name.starts_with(prefix) || !name.ends_with(&suffix) {
                 continue;
             }
             let path = entry.path();

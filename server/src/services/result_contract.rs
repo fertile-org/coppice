@@ -237,6 +237,7 @@ fn upsert_markdown_section(body: &str, header: &str, content: &str) -> String {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn build_done_comment_body(
     summary: &str,
     changed_files: &[String],

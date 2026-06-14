@@ -513,11 +513,10 @@ async fn assign_agent(
     if state.config.workflow.auto_start_runs
         && ticket.ticket.assignee_agent_id.is_some()
         && ticket.ticket.repo_id.is_some()
+        && RunService::new(pool).start_run(ticket_id).await.is_ok()
     {
-        if RunService::new(pool).start_run(ticket_id).await.is_ok() {
-            ticket = ticket_svc.get(ticket_id).await.map_err(map_error)?;
-            crate::events::publish_ticket_updated(&state.event_bus, &ticket);
-        }
+        ticket = ticket_svc.get(ticket_id).await.map_err(map_error)?;
+        crate::events::publish_ticket_updated(&state.event_bus, &ticket);
     }
 
     Ok(Json(ticket_to_response(ticket)))

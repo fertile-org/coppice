@@ -32,6 +32,10 @@ model_providers = []
 enabled = true
 model_providers = ["sonnet", "opus", "haiku"]
 
+[agent.connectors.codex]
+enabled = false
+model_providers = ["openai", "azure"]
+
 [web]
 port = 5001
 static_dir = "./web/dist"

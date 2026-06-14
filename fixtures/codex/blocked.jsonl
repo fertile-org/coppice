@@ -1,0 +1,5 @@
+{"type":"thread.started","thread_id":"codex_thread_def456"}
+{"type":"turn.started"}
+{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"I need additional capability to proceed."}}
+{"type":"item.completed","item":{"id":"item_1","type":"agent_message","text":"{\"status\":\"blocked\",\"blockerType\":\"missing_capability\",\"summary\":\"The required capability is not available\",\"mentionAgents\":[\"devops\"],\"requiredCapabilities\":[\"docker\"]}"}}
+{"type":"turn.completed","usage":{"input_tokens":800,"output_tokens":300}}

@@ -37,6 +37,11 @@ enabled = true
 # run_timeout_secs = 600
 model_providers = ["sonnet", "opus", "haiku"]
 
+[agent.connectors.codex]
+enabled = false
+# run_timeout_secs = 600
+model_providers = ["openai", "azure"]
+
 
 [web]
 port = 5001

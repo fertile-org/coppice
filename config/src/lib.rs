@@ -200,6 +200,8 @@ pub struct AgentConnectorsConfig {
     pub opencode: OpenCodeConnectorConfig,
     #[serde(default, rename = "claude-code")]
     pub claude_code: ClaudeCodeConnectorConfig,
+    #[serde(default, rename = "codex")]
+    pub codex: CodexConnectorConfig,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -267,6 +269,32 @@ pub struct ClaudeCodeConnectorConfig {
 }
 
 pub type ClaudeCodeProviderConfig = ClaudeCodeConnectorConfig;
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct CodexConnectorConfig {
+    #[serde(default = "default_false")]
+    pub enabled: bool,
+    #[serde(default = "default_codex_run_timeout_secs")]
+    pub run_timeout_secs: u64,
+    #[serde(default)]
+    pub model_providers: Vec<String>,
+}
+
+pub type CodexProviderConfig = CodexConnectorConfig;
+
+fn default_codex_run_timeout_secs() -> u64 {
+    600
+}
+
+impl Default for CodexConnectorConfig {
+    fn default() -> Self {
+        Self {
+            enabled: default_false(),
+            run_timeout_secs: default_codex_run_timeout_secs(),
+            model_providers: Vec::new(),
+        }
+    }
+}
 
 fn default_claude_code_run_timeout_secs() -> u64 {
     600
@@ -522,6 +550,41 @@ mod tests {
     #[test]
     fn claude_code_connector_defaults() {
         let cfg = ClaudeCodeConnectorConfig::default();
+        assert!(!cfg.enabled);
+        assert_eq!(cfg.run_timeout_secs, 600);
+        assert!(cfg.model_providers.is_empty());
+    }
+
+    #[test]
+    fn deserializes_codex_connector() {
+        let toml = r#"
+        [agent]
+        default_connector = "codex"
+        worktrees_path = "./data/worktrees"
+        worker_count = 2
+
+        [agent.connectors.codex]
+        enabled = true
+        run_timeout_secs = 900
+        model_providers = ["openai", "azure"]
+    "#;
+        #[derive(Deserialize)]
+        struct Wrapper {
+            agent: AgentConfig,
+        }
+        let wrapper: Wrapper = toml::from_str(toml).expect("parse");
+        let cfg = wrapper.agent;
+        assert!(cfg.connectors.codex.enabled);
+        assert_eq!(cfg.connectors.codex.run_timeout_secs, 900);
+        assert_eq!(
+            cfg.connectors.codex.model_providers,
+            vec!["openai", "azure"]
+        );
+    }
+
+    #[test]
+    fn codex_connector_defaults() {
+        let cfg = CodexConnectorConfig::default();
         assert!(!cfg.enabled);
         assert_eq!(cfg.run_timeout_secs, 600);
         assert!(cfg.model_providers.is_empty());
