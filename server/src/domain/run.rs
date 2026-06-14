@@ -1,3 +1,4 @@
+use crate::domain::context_profile::ContextProfile;
 use time::OffsetDateTime;
 use uuid::Uuid;
 
@@ -23,6 +24,8 @@ pub struct AgentRun {
     pub branch_name: Option<String>,
     pub error_message: Option<String>,
     pub session_id: Option<String>,
+    pub context_profile: ContextProfile,
+    pub trigger_comment_id: Option<Uuid>,
     pub started_at: Option<OffsetDateTime>,
     pub ended_at: Option<OffsetDateTime>,
     pub created_at: OffsetDateTime,

@@ -3,6 +3,7 @@ pub mod agent_health;
 pub mod slug;
 pub mod attachment;
 pub mod comment;
+pub mod context_profile;
 pub mod job;
 pub mod mention;
 pub mod project;
