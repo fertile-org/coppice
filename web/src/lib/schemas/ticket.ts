@@ -36,8 +36,12 @@ export const updateStatusSchema = z.object({
 
 export type UpdateStatusInput = z.infer<typeof updateStatusSchema>;
 
+export const mentionModeSchema = z.enum(['agent', 'chat']);
+export type MentionMode = z.infer<typeof mentionModeSchema>;
+
 export const createCommentSchema = z.object({
   body: z.string().min(1, 'Comment cannot be empty'),
+  mentionMode: mentionModeSchema.optional(),
   intent: z
     .enum([
       'progress_update',

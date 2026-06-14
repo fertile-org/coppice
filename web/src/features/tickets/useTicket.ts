@@ -3,6 +3,7 @@ import { apiFetch } from '../../lib/api';
 import type { CreateCommentInput, UpdateStatusInput, UpdateTicketInput } from '../../lib/schemas/ticket';
 import { ticketsQueryKey, type Ticket } from '../board/useTickets';
 import type { TicketStatus } from '../board/columns';
+import { agentRunsQueryKey } from './useAgentRuns';
 
 export { useAgents, type AgentSummary } from '../agents/useAgents';
 
@@ -31,6 +32,16 @@ export interface AttachmentUpload {
   filename: string;
   contentType: string;
   sizeBytes: number;
+}
+
+export interface StartedRunSummary {
+  runId: string;
+  agentId: string;
+  agentKey: string;
+}
+
+export interface CreateCommentResponse extends Comment {
+  startedRuns?: StartedRunSummary[];
 }
 
 export function ticketQueryKey(ticketId: string) {
@@ -105,13 +116,13 @@ async function fetchComments(ticketId: string): Promise<Comment[]> {
 async function postComment(
   ticketId: string,
   body: CreateCommentInput,
-): Promise<Comment> {
+): Promise<CreateCommentResponse> {
   const res = await apiFetch(`/api/tickets/${ticketId}/comments`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   });
-  return res.json() as Promise<Comment>;
+  return res.json() as Promise<CreateCommentResponse>;
 }
 
 async function uploadAttachment(file: File): Promise<AttachmentUpload> {
@@ -330,10 +341,16 @@ export function useCreateComment(ticketId: string) {
 
   return useMutation({
     mutationFn: (body: CreateCommentInput) => postComment(ticketId, body),
-    onSuccess: (comment) => {
+    onSuccess: (data) => {
+      const { startedRuns, ...comment } = data;
       queryClient.setQueryData<Comment[]>(commentsQueryKey(ticketId), (old) =>
         old ? [comment, ...old] : [comment],
       );
+      if (startedRuns?.length) {
+        void queryClient.invalidateQueries({
+          queryKey: agentRunsQueryKey(ticketId),
+        });
+      }
     },
   });
 }

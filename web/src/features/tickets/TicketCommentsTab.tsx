@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { X } from 'lucide-react';
 import { TicketMarkdown } from '../../components/TicketMarkdown';
+import { useToast } from '../../components/ToastProvider';
 import { formatFileSize, isImageContentType } from '../../lib/attachments';
+import type { MentionMode } from '../../lib/schemas/ticket';
 import { Button } from '../../components/ui/button';
 import { CommentAttachments } from './CommentAttachments';
-import { useAgents } from '../agents/useAgents';
+import { useAgents, type Agent } from '../agents/useAgents';
 import {
   useComments,
   useCreateComment,
@@ -61,18 +63,69 @@ function pendingFileFromFile(file: File): PendingFile {
   };
 }
 
+function slugifyAgentName(input: string): string {
+  const lower = input.toLowerCase();
+  let out = '';
+  let prevHyphen = false;
+  for (const ch of lower) {
+    if (/[a-z0-9]/.test(ch)) {
+      out += ch;
+      prevHyphen = false;
+    } else if (!prevHyphen) {
+      out += '-';
+      prevHyphen = true;
+    }
+  }
+  return out.replace(/^-+|-+$/g, '');
+}
+
+function agentKey(agent: Pick<Agent, 'name' | 'presetSource'>): string {
+  return agent.presetSource ?? slugifyAgentName(agent.name);
+}
+
+interface MentionMatch {
+  start: number;
+  query: string;
+}
+
+function mentionMatchAtCursor(text: string, cursor: number): MentionMatch | null {
+  const before = text.slice(0, cursor);
+  const atIndex = before.lastIndexOf('@');
+  if (atIndex === -1) return null;
+
+  const query = before.slice(atIndex + 1);
+  if (/\s/.test(query)) return null;
+
+  return { start: atIndex, query };
+}
+
 export function TicketCommentsTab({ ticketId }: TicketCommentsTabProps) {
   const { data: comments, isLoading, isError } = useComments(ticketId);
   const { data: agents } = useAgents();
+  const toast = useToast();
   const agentNamesById = useMemo(
     () => new Map((agents ?? []).map((agent) => [agent.id, agent.name])),
+    [agents],
+  );
+  const agentKeyOptions = useMemo(
+    () =>
+      (agents ?? [])
+        .filter((agent) => agent.enabled)
+        .map((agent) => ({
+          key: agentKey(agent),
+          name: agent.name,
+        }))
+        .sort((a, b) => a.key.localeCompare(b.key)),
     [agents],
   );
   const createComment = useCreateComment(ticketId);
   const uploadAttachment = useUploadAttachment();
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const [body, setBody] = useState('');
+  const [mentionMode, setMentionMode] = useState<MentionMode>('agent');
+  const [mentionMatch, setMentionMatch] = useState<MentionMatch | null>(null);
   const [pendingFiles, setPendingFiles] = useState<PendingFile[]>([]);
   const [error, setError] = useState<string | null>(null);
 
@@ -94,6 +147,50 @@ export function TicketCommentsTab({ ticketId }: TicketCommentsTabProps) {
     if (next.length === 0) return;
     setPendingFiles((current) => [...current, ...next]);
   }
+
+  function syncMentionMatch(value: string, cursor: number) {
+    setMentionMatch(mentionMatchAtCursor(value, cursor));
+  }
+
+  function handleBodyChange(e: React.ChangeEvent<HTMLTextAreaElement>) {
+    const value = e.target.value;
+    setBody(value);
+    syncMentionMatch(value, e.target.selectionStart);
+  }
+
+  function handleBodySelect(e: React.SyntheticEvent<HTMLTextAreaElement>) {
+    syncMentionMatch(e.currentTarget.value, e.currentTarget.selectionStart);
+  }
+
+  function insertMention(key: string) {
+    if (!mentionMatch) return;
+
+    const cursor = textareaRef.current?.selectionStart ?? body.length;
+    const before = body.slice(0, mentionMatch.start);
+    const after = body.slice(cursor);
+    const next = `${before}@${key} ${after}`;
+    const nextCursor = before.length + key.length + 2;
+
+    setBody(next);
+    setMentionMatch(null);
+
+    requestAnimationFrame(() => {
+      const textarea = textareaRef.current;
+      if (!textarea) return;
+      textarea.focus();
+      textarea.setSelectionRange(nextCursor, nextCursor);
+    });
+  }
+
+  const filteredMentionKeys = useMemo(() => {
+    if (!mentionMatch) return [];
+    const query = mentionMatch.query.toLowerCase();
+    return agentKeyOptions.filter(
+      (option) =>
+        option.key.toLowerCase().includes(query) ||
+        option.name.toLowerCase().includes(query),
+    );
+  }, [agentKeyOptions, mentionMatch]);
 
   function removePendingFile(key: string) {
     setPendingFiles((current) => {
@@ -118,12 +215,20 @@ export function TicketCommentsTab({ ticketId }: TicketCommentsTabProps) {
         attachmentIds.push(uploaded.id);
       }
 
-      await createComment.mutateAsync({
+      const result = await createComment.mutateAsync({
         body: trimmed,
         attachmentIds: attachmentIds.length > 0 ? attachmentIds : undefined,
+        mentionMode,
       });
 
+      if (result.startedRuns?.length) {
+        for (const run of result.startedRuns) {
+          toast.success(`Started run for ${run.agentKey}`);
+        }
+      }
+
       setBody('');
+      setMentionMatch(null);
       setPendingFiles((current) => {
         for (const pending of current) {
           if (pending.previewUrl) {
@@ -200,13 +305,67 @@ export function TicketCommentsTab({ ticketId }: TicketCommentsTabProps) {
           </p>
         )}
 
-        <textarea
-          value={body}
-          onChange={(e) => setBody(e.target.value)}
-          rows={4}
-          placeholder="Write a comment in markdown…"
-          className="field-control w-full px-3 py-2 font-body text-sm"
-        />
+        <div className="flex gap-2">
+          <select
+            value={mentionMode}
+            onChange={(e) => setMentionMode(e.target.value as MentionMode)}
+            aria-label="Mention mode"
+            className="field-control shrink-0 px-2 py-2 font-body text-sm"
+          >
+            <option
+              value="agent"
+              title="Run mentioned agent in ticket worktree to execute your request"
+            >
+              Agent
+            </option>
+            <option
+              value="chat"
+              title="Ask mentioned agent; reply in comments only"
+            >
+              Chat
+            </option>
+          </select>
+
+          <div className="relative min-w-0 flex-1">
+            <textarea
+              ref={textareaRef}
+              value={body}
+              onChange={handleBodyChange}
+              onSelect={handleBodySelect}
+              onClick={handleBodySelect}
+              rows={4}
+              placeholder="Write a comment in markdown…"
+              className="field-control w-full px-3 py-2 font-body text-sm"
+            />
+
+            {mentionMatch && filteredMentionKeys.length > 0 && (
+              <ul
+                role="listbox"
+                aria-label="Agent mentions"
+                className="absolute bottom-full left-0 z-10 mb-1 max-h-40 w-full overflow-y-auto rounded-md border border-border bg-surface-raised shadow-md"
+              >
+                {filteredMentionKeys.map((option) => (
+                  <li key={option.key}>
+                    <button
+                      type="button"
+                      role="option"
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={() => insertMention(option.key)}
+                      className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left font-body text-sm hover:bg-surface"
+                    >
+                      <span className="font-mono text-text-primary">
+                        @{option.key}
+                      </span>
+                      <span className="truncate text-text-muted">
+                        {option.name}
+                      </span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </div>
 
         {pendingFiles.length > 0 && (
           <ul className="flex flex-wrap gap-2">
