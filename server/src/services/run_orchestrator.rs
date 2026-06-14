@@ -109,10 +109,16 @@ impl<'a> RunOrchestrator<'a> {
             project_agent_ids,
             auto_assign_enabled,
             clarification_round: ticket.ticket.clarification_round,
+            context_profile: run.context_profile,
         };
 
-        let action = WorkflowService::resolve_transition(ctx)
-            .map_err(RunError::Validation)?;
+        let skip_workflow = ctx.context_profile == ContextProfile::HumanAgent
+            && ctx.run_outcome == RunOutcome::Succeeded;
+        let action = if skip_workflow {
+            TransitionAction::default()
+        } else {
+            WorkflowService::resolve_transition(ctx).map_err(RunError::Validation)?
+        };
 
         let (substatus, substatus_metadata) = merge_substatus(&action, &apply);
 
@@ -526,6 +532,48 @@ mod tests {
             required_capabilities: vec![],
             required_secrets: vec![],
         }
+    }
+
+    #[test]
+    fn human_agent_done_does_not_change_status() {
+        let ctx = TransitionContext {
+            ticket_id: Uuid::from_u128(1),
+            current_status: TicketStatus::Backlog,
+            assignee_agent_id: Some(Uuid::from_u128(0x100)),
+            agent_role: "PM".into(),
+            agent_key: "pm".into(),
+            job_type: "work_on_ticket".into(),
+            run_outcome: RunOutcome::Succeeded,
+            contract: pm_done_with_assign_to("backend_engineer"),
+            project_agent_keys: vec!["pm".into(), "backend_engineer".into()],
+            project_agent_ids: HashMap::from([
+                ("pm".into(), Uuid::from_u128(0x100)),
+                ("backend_engineer".into(), Uuid::from_u128(0x200)),
+            ]),
+            auto_assign_enabled: true,
+            clarification_round: 0,
+            context_profile: ContextProfile::HumanAgent,
+        };
+
+        let skip_workflow = ctx.context_profile == ContextProfile::HumanAgent
+            && ctx.run_outcome == RunOutcome::Succeeded;
+        assert!(skip_workflow);
+
+        let full_action = WorkflowService::resolve_transition(TransitionContext {
+            context_profile: ContextProfile::Full,
+            ..ctx.clone()
+        })
+        .expect("full profile resolves");
+        assert_eq!(full_action.new_status, Some(TicketStatus::Ready));
+
+        let action = if skip_workflow {
+            TransitionAction::default()
+        } else {
+            WorkflowService::resolve_transition(ctx).expect("resolve")
+        };
+        assert!(action.new_status.is_none());
+        assert!(action.new_assignee_id.is_none());
+        assert!(action.pending_recommendation.is_none());
     }
 
     #[tokio::test]

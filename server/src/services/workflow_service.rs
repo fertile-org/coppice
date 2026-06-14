@@ -277,6 +277,7 @@ fn apply_assign_to(action: &mut TransitionAction, ctx: &TransitionContext, key: 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::context_profile::ContextProfile;
     use std::collections::HashMap;
     use uuid::Uuid;
 
@@ -313,6 +314,7 @@ mod tests {
             project_agent_ids: HashMap::from([("pm".into(), pm_agent_id())]),
             auto_assign_enabled: true,
             clarification_round: 0,
+            context_profile: ContextProfile::Full,
         }
     }
 

@@ -1,3 +1,4 @@
+use crate::domain::context_profile::ContextProfile;
 use crate::domain::substatus::{Substatus, TicketStatus};
 use crate::providers::AgentRunResult;
 use serde_json::Value;
@@ -24,6 +25,7 @@ pub struct TransitionContext {
     pub project_agent_ids: HashMap<String, Uuid>,
     pub auto_assign_enabled: bool,
     pub clarification_round: i32,
+    pub context_profile: ContextProfile,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
