@@ -274,18 +274,62 @@ fn map_split_error(err: SplitError) -> StatusCode {
     }
 }
 
-fn map_ticket_git_error(err: TicketGitError) -> StatusCode {
+fn map_ticket_git_error_response(err: TicketGitError) -> TicketGitApiError {
+    let (status, message) = match err {
+        TicketGitError::TicketNotFound => (StatusCode::NOT_FOUND, "Ticket not found.".into()),
+        TicketGitError::NoRepo => (
+            StatusCode::BAD_REQUEST,
+            "Ticket has no linked repository.".into(),
+        ),
+        TicketGitError::RepoNotFound => (StatusCode::NOT_FOUND, "Repository not found.".into()),
+        TicketGitError::RepoNotReady => (
+            StatusCode::BAD_REQUEST,
+            "Repository is not ready. Verify the path in Settings → Repositories.".into(),
+        ),
+        TicketGitError::TicketBranchMissing(branch) => (
+            StatusCode::BAD_REQUEST,
+            format!("Ticket branch `{branch}` was not found in the repository."),
+        ),
+        TicketGitError::WorktreeAlreadyRemoved => (
+            StatusCode::BAD_REQUEST,
+            "Worktree has already been removed.".into(),
+        ),
+        TicketGitError::InvalidBranchName => (
+            StatusCode::BAD_REQUEST,
+            "Invalid base branch name.".into(),
+        ),
+        TicketGitError::Git(msg) => (StatusCode::BAD_REQUEST, msg),
+        TicketGitError::Ticket(e) => {
+            let message = ticket_error_message(&e);
+            (map_error(e), message)
+        }
+        TicketGitError::Worktree(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+        TicketGitError::Io(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+        TicketGitError::Database(_) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "An internal error occurred.".into(),
+        ),
+    };
+    TicketGitApiError::Message(status, message)
+}
+
+fn ticket_error_message(err: &TicketError) -> String {
     match err {
-        TicketGitError::TicketNotFound | TicketGitError::RepoNotFound => StatusCode::NOT_FOUND,
-        TicketGitError::NoRepo
-        | TicketGitError::RepoNotReady
-        | TicketGitError::TicketBranchMissing(_)
-        | TicketGitError::WorktreeAlreadyRemoved
-        | TicketGitError::InvalidBranchName
-        | TicketGitError::Git(_) => StatusCode::BAD_REQUEST,
-        TicketGitError::Ticket(e) => map_error(e),
-        TicketGitError::Worktree(_) | TicketGitError::Io(_) | TicketGitError::Database(_) => {
-            StatusCode::INTERNAL_SERVER_ERROR
+        TicketError::Validation(message) => message.clone(),
+        _ => err.to_string(),
+    }
+}
+
+enum TicketGitApiError {
+    Message(StatusCode, String),
+}
+
+impl IntoResponse for TicketGitApiError {
+    fn into_response(self) -> Response {
+        match self {
+            TicketGitApiError::Message(code, message) => {
+                (code, Json(ApiMessageResponse { message })).into_response()
+            }
         }
     }
 }
@@ -565,12 +609,14 @@ async fn ticket_git_info(
     State(state): State<Arc<AppState>>,
     AuthUser { .. }: AuthUser,
     Path(ticket_id): Path<Uuid>,
-) -> Result<Json<TicketGitInfo>, StatusCode> {
-    let pool = pool_from_state(&state)?;
+) -> Result<Json<TicketGitInfo>, TicketGitApiError> {
+    let pool = pool_from_state(&state).map_err(|code| {
+        TicketGitApiError::Message(code, "Database unavailable.".into())
+    })?;
     let info = ticket_git_service(&state, pool)
         .git_info(ticket_id)
         .await
-        .map_err(map_ticket_git_error)?;
+        .map_err(map_ticket_git_error_response)?;
     Ok(Json(info))
 }
 
@@ -591,19 +637,23 @@ async fn merge_ticket_branch(
     AuthUser { user, .. }: AuthUser,
     Path(ticket_id): Path<Uuid>,
     Json(body): Json<MergeBranchBody>,
-) -> Result<Json<MergeBranchResponse>, StatusCode> {
-    let pool = pool_from_state(&state)?;
+) -> Result<Json<MergeBranchResponse>, TicketGitApiError> {
+    let pool = pool_from_state(&state).map_err(|code| {
+        TicketGitApiError::Message(code, "Database unavailable.".into())
+    })?;
     let merge = ticket_git_service(&state, pool)
         .merge_ticket_branch(ticket_id, body.base_branch.trim())
         .await
-        .map_err(map_ticket_git_error)?;
+        .map_err(map_ticket_git_error_response)?;
 
     let short_sha = merge.head_sha.get(..7).unwrap_or(&merge.head_sha);
     let comment_body = format!(
         "**Merge:** {} (`{short_sha}` on `{}`)",
         merge.message, merge.base_branch
     );
-    create_git_action_comment(pool, &state, ticket_id, user.id, &comment_body).await?;
+    create_git_action_comment(pool, &state, ticket_id, user.id, &comment_body)
+        .await
+        .map_err(|code| TicketGitApiError::Message(code, "Unable to record merge comment.".into()))?;
 
     Ok(Json(MergeBranchResponse { merge }))
 }
@@ -612,21 +662,33 @@ async fn remove_ticket_worktree(
     State(state): State<Arc<AppState>>,
     AuthUser { user, .. }: AuthUser,
     Path(ticket_id): Path<Uuid>,
-) -> Result<Json<TicketGitInfo>, StatusCode> {
-    let pool = pool_from_state(&state)?;
+) -> Result<Json<TicketGitInfo>, TicketGitApiError> {
+    let pool = pool_from_state(&state).map_err(|code| {
+        TicketGitApiError::Message(code, "Database unavailable.".into())
+    })?;
     let svc = ticket_git_service(&state, pool);
-    let info_before = svc.git_info(ticket_id).await.map_err(map_ticket_git_error)?;
+    let info_before = svc
+        .git_info(ticket_id)
+        .await
+        .map_err(map_ticket_git_error_response)?;
     svc.remove_worktree(ticket_id)
         .await
-        .map_err(map_ticket_git_error)?;
+        .map_err(map_ticket_git_error_response)?;
 
     let comment_body = format!(
         "**Worktree removed:** `{}`",
         info_before.worktree_path
     );
-    create_git_action_comment(pool, &state, ticket_id, user.id, &comment_body).await?;
+    create_git_action_comment(pool, &state, ticket_id, user.id, &comment_body)
+        .await
+        .map_err(|code| {
+            TicketGitApiError::Message(code, "Unable to record worktree removal comment.".into())
+        })?;
 
-    let info = svc.git_info(ticket_id).await.map_err(map_ticket_git_error)?;
+    let info = svc
+        .git_info(ticket_id)
+        .await
+        .map_err(map_ticket_git_error_response)?;
     Ok(Json(info))
 }
 

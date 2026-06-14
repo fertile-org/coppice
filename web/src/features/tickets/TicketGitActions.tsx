@@ -1,4 +1,5 @@
 import { useEffect, useState, type FormEvent } from 'react';
+import { apiErrorToastMessage, parseApiErrorMessage } from '../../lib/api';
 import { useToast } from '../../components/ToastProvider';
 import { Button } from '../../components/ui/button';
 import { Label } from '../../components/ui/label';
@@ -69,9 +70,13 @@ function MergeBranchDialog({
       const result = await mergeBranch.mutateAsync(baseBranch);
       toast.success(result.merge.message);
       onClose();
-    } catch {
-      setError('Merge failed. Check that the base branch is clean and the ticket branch exists.');
-      toast.error('Merge failed');
+    } catch (err) {
+      const message = parseApiErrorMessage(
+        err,
+        'Merge failed. Check that the base branch is clean and the ticket branch exists.',
+      );
+      setError(message);
+      toast.error(apiErrorToastMessage(message));
     }
   }
 
@@ -119,7 +124,7 @@ function MergeBranchDialog({
           </div>
 
           {error && (
-            <p className="rounded-md border border-danger-muted bg-danger-muted/40 px-3 py-2 font-body text-sm text-danger">
+            <p className="whitespace-pre-wrap rounded-md border border-danger-muted bg-danger-muted/40 px-3 py-2 font-body text-sm text-danger">
               {error}
             </p>
           )}
@@ -165,9 +170,10 @@ export function TicketGitActions({ ticket }: TicketGitActionsProps) {
     try {
       await removeWorktree.mutateAsync();
       toast.success('Worktree removed');
-    } catch {
-      setGitError('Unable to remove worktree.');
-      toast.error('Unable to remove worktree');
+    } catch (err) {
+      const message = parseApiErrorMessage(err, 'Unable to remove worktree.');
+      setGitError(message);
+      toast.error(apiErrorToastMessage(message));
     }
   }
 
@@ -241,7 +247,7 @@ export function TicketGitActions({ ticket }: TicketGitActionsProps) {
       </div>
 
       {gitError && (
-        <p className="rounded-md border border-danger-muted bg-danger-muted/40 px-3 py-2 font-body text-sm text-danger">
+        <p className="whitespace-pre-wrap rounded-md border border-danger-muted bg-danger-muted/40 px-3 py-2 font-body text-sm text-danger">
           {gitError}
         </p>
       )}

@@ -14,6 +14,36 @@ export function withCsrf(
   return headers;
 }
 
+export function parseApiErrorMessage(
+  err: unknown,
+  fallback = 'Something went wrong.',
+): string {
+  if (!(err instanceof ApiError)) {
+    return fallback;
+  }
+  const trimmed = err.body.trim();
+  if (!trimmed) {
+    return fallback;
+  }
+  try {
+    const parsed = JSON.parse(trimmed) as { message?: unknown };
+    if (typeof parsed.message === 'string' && parsed.message.trim()) {
+      return parsed.message.trim();
+    }
+  } catch {
+    // Plain-text error body
+  }
+  return trimmed;
+}
+
+export function apiErrorToastMessage(message: string, maxLen = 120): string {
+  const firstLine = message.split('\n').find((line) => line.trim())?.trim() ?? message;
+  if (firstLine.length <= maxLen) {
+    return firstLine;
+  }
+  return `${firstLine.slice(0, maxLen)}…`;
+}
+
 export class ApiError extends Error {
   status: number;
   body: string;
