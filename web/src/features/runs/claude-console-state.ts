@@ -4,7 +4,7 @@ import { parseResultContractFromText } from '../../opencode-session/parts/parse-
 export type ClaudeToolStatus = 'running' | 'completed' | 'error';
 
 export type ClaudeConsoleEntry =
-  | { kind: 'session'; id: string; model: string }
+  | { kind: 'session'; id: string; model: string; connector?: 'claude' | 'codex' }
   | { kind: 'thinking'; id: string; text: string }
   | { kind: 'text'; id: string; markdown: string }
   | {
@@ -68,16 +68,18 @@ export function applyClaudeConsoleEvent(
   if (typeof ty !== 'string') return state;
 
   switch (ty) {
-    case 'claude.console.session': {
+    case 'claude.console.session':
+    case 'codex.console.session': {
       const model =
         typeof event.model === 'string' && event.model.trim()
           ? event.model
           : 'unknown';
+      const connector = ty.startsWith('codex.') ? 'codex' : 'claude';
       return {
         ...state,
         entries: [
           ...state.entries,
-          { kind: 'session', id: nextEntryId(), model },
+          { kind: 'session', id: nextEntryId(), model, connector },
         ],
       };
     }
@@ -89,7 +91,8 @@ export function applyClaudeConsoleEvent(
         entries: [...state.entries, { kind: 'thinking', id: nextEntryId(), text }],
       };
     }
-    case 'claude.console.text': {
+    case 'claude.console.text':
+    case 'codex.console.text': {
       const markdown =
         typeof event.markdown === 'string' ? event.markdown.trim() : '';
       if (!markdown) return state;
@@ -99,8 +102,10 @@ export function applyClaudeConsoleEvent(
       };
     }
     case 'claude.console.tool':
+    case 'codex.console.tool':
       return applyToolEvent(state, event);
     case 'claude.console.result':
+    case 'codex.console.result':
       return applyResultEvent(state, event);
     default:
       return state;

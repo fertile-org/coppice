@@ -6,10 +6,17 @@ import { ToolOutput, ToolShell } from '../../opencode-session/tools/ToolShell';
 import { sessionTheme } from '../../opencode-session/theme/session-theme';
 import type { ClaudeConsoleEntry } from './claude-console-state';
 
-function SessionLine({ model }: { model: string }) {
+function SessionLine({
+  model,
+  connector,
+}: {
+  model: string;
+  connector?: 'claude' | 'codex';
+}) {
+  const label = connector === 'codex' ? 'Codex' : 'Claude';
   return (
     <p className={`${sessionTheme.fontMonoSm} ${sessionTheme.textMuted}`}>
-      → Claude session started (model: {model})
+      → {label} session started (model: {model})
     </p>
   );
 }
@@ -105,7 +112,13 @@ function renderEntry(
 ) {
   switch (entry.kind) {
     case 'session':
-      return <SessionLine key={entry.id} model={entry.model} />;
+      return (
+        <SessionLine
+          key={entry.id}
+          model={entry.model}
+          connector={entry.connector}
+        />
+      );
     case 'thinking':
       return (
         <ThinkingEntry

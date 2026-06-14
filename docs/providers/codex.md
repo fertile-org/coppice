@@ -67,11 +67,17 @@ For **cross-run continuity**, prefer checkpoint runs: the agent returns `status:
 
 ## Models
 
-Known models by provider:
+Model options are loaded dynamically from the installed Codex CLI:
 
-| Provider | Models |
+```bash
+codex debug models
+```
+
+Coppice calls this at `GET /api/connectors/codex/model-providers/{provider}/models` and returns models whose `visibility` is not `hide`, filtered by provider:
+
+| Provider | Filter |
 |----------|--------|
-| `openai` | `gpt-4o`, `gpt-4o-mini`, `o1`, `o1-mini` |
-| `azure` | `azure/gpt-4o`, `azure/gpt-4o-mini`, `azure/o1` |
+| `openai` | Slugs without an `azure/` prefix (e.g. `gpt-5.5`, `gpt-5.4`) |
+| `azure` | Slugs with an `azure/` prefix |
 
-Model availability depends on the Codex CLI version and the configured API credentials.
+The list reflects your Codex CLI version and login — it is not hardcoded in Coppice. If the CLI is missing or not logged in, the models endpoint returns an error.

@@ -130,13 +130,15 @@ async fn list_models(
             }))
         }
         "codex" => {
-            let models = known_codex_models(&model_provider_id);
+            let models = crate::providers::codex_models::list_codex_models(&model_provider_id)
+                .await
+                .map_err(|_| StatusCode::BAD_GATEWAY)?;
             Ok(Json(ModelListResponse {
                 items: models
                     .into_iter()
                     .map(|m| ModelResponse {
-                        id: m.id.to_string(),
-                        name: m.name.to_string(),
+                        id: m.id,
+                        name: m.name,
                     })
                     .collect(),
             }))
@@ -151,37 +153,67 @@ struct KnownModel {
     name: &'static str,
 }
 
+/// Curated Claude Code model IDs (Anthropic API / subscription CLI).
+/// No live CLI catalog exists yet; refresh from https://platform.claude.com/docs/en/about-claude/models/overview
+/// Fable 5 is intentionally omitted (not permitted in this deployment).
 fn known_claude_code_models(provider_id: &str) -> Vec<KnownModel> {
     match provider_id {
         "sonnet" => vec![
-            KnownModel { id: "claude-sonnet-4-20250514", name: "Claude Sonnet 4" },
-            KnownModel { id: "claude-3-5-sonnet-20241022", name: "Claude 3.5 Sonnet" },
+            KnownModel {
+                id: "claude-sonnet-4-6",
+                name: "Claude Sonnet 4.6",
+            },
+            KnownModel {
+                id: "sonnet[1m]",
+                name: "Sonnet 4.6 (1M context)",
+            },
+            KnownModel {
+                id: "claude-sonnet-4-5-20250929",
+                name: "Claude Sonnet 4.5",
+            },
         ],
         "opus" => vec![
-            KnownModel { id: "claude-opus-4-20250514", name: "Claude Opus 4" },
-            KnownModel { id: "claude-3-opus-20240229", name: "Claude 3 Opus" },
+            KnownModel {
+                id: "claude-opus-4-8",
+                name: "Claude Opus 4.8",
+            },
+            KnownModel {
+                id: "opus[1m]",
+                name: "Opus 4.8 (1M context)",
+            },
+            KnownModel {
+                id: "claude-opus-4-7",
+                name: "Claude Opus 4.7",
+            },
+            KnownModel {
+                id: "claude-opus-4-6",
+                name: "Claude Opus 4.6",
+            },
         ],
         "haiku" => vec![
-            KnownModel { id: "claude-3-5-haiku-20241022", name: "Claude 3.5 Haiku" },
-            KnownModel { id: "claude-3-haiku-20240307", name: "Claude 3 Haiku" },
+            KnownModel {
+                id: "claude-haiku-4-5-20251001",
+                name: "Claude Haiku 4.5",
+            },
+            KnownModel {
+                id: "claude-haiku-4-5",
+                name: "Claude Haiku 4.5 (alias)",
+            },
         ],
         _ => vec![],
     }
 }
 
-fn known_codex_models(provider_id: &str) -> Vec<KnownModel> {
-    match provider_id {
-        "openai" => vec![
-            KnownModel { id: "gpt-4o", name: "GPT-4o" },
-            KnownModel { id: "gpt-4o-mini", name: "GPT-4o Mini" },
-            KnownModel { id: "o1", name: "o1" },
-            KnownModel { id: "o1-mini", name: "o1 Mini" },
-        ],
-        "azure" => vec![
-            KnownModel { id: "azure/gpt-4o", name: "Azure GPT-4o" },
-            KnownModel { id: "azure/gpt-4o-mini", name: "Azure GPT-4o Mini" },
-            KnownModel { id: "azure/o1", name: "Azure o1" },
-        ],
-        _ => vec![],
+#[cfg(test)]
+mod claude_code_models_tests {
+    use super::*;
+
+    #[test]
+    fn claude_code_models_include_current_opus_and_exclude_fable() {
+        let opus = known_claude_code_models("opus");
+        assert!(opus.iter().any(|m| m.id == "claude-opus-4-8"));
+        assert!(!opus.iter().any(|m| m.id.contains("fable")));
+        let sonnet = known_claude_code_models("sonnet");
+        assert!(sonnet.iter().any(|m| m.id == "claude-sonnet-4-6"));
     }
 }

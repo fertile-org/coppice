@@ -54,9 +54,12 @@ function shouldStopReconnect(msg: {
   );
 }
 
-function isClaudeConsoleEvent(event: Record<string, unknown>): boolean {
+function isStructuredConsoleEvent(event: Record<string, unknown>): boolean {
   const ty = event.type;
-  return typeof ty === 'string' && ty.startsWith('claude.console.');
+  return (
+    typeof ty === 'string' &&
+    (ty.startsWith('claude.console.') || ty.startsWith('codex.console.'))
+  );
 }
 
 export function ClaudeLiveConsole({
@@ -121,7 +124,7 @@ export function ClaudeLiveConsole({
         return;
       }
 
-      if (msg.type === 'event' && msg.event && isClaudeConsoleEvent(msg.event)) {
+      if (msg.type === 'event' && msg.event && isStructuredConsoleEvent(msg.event)) {
         dispatch({ type: 'event', event: msg.event });
         hasContentRef.current = true;
       } else if (msg.type === 'frame' && typeof msg.data === 'string') {

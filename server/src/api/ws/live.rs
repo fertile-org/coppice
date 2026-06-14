@@ -81,6 +81,7 @@ async fn handle_live_socket(state: Arc<AppState>, run_id: Uuid, socket: WebSocke
         .flatten();
     let is_opencode = connector.as_deref() == Some("opencode");
     let is_claude_code = connector.as_deref() == Some("claude-code");
+    let is_codex = connector.as_deref() == Some("codex");
 
     let stream_handle = if let Some(handle) = state.run_streams.get(run_id) {
         Some(handle)
@@ -97,9 +98,9 @@ async fn handle_live_socket(state: Arc<AppState>, run_id: Uuid, socket: WebSocke
         Some(
             handle_opencode_recovery(&state, &mut sender, run_id, &run, &run_svc).await,
         )
-    } else if is_claude_code {
+    } else if is_claude_code || is_codex {
         Some(
-            handle_claude_code_recovery(&state, &mut sender, run_id, &run, &run_svc).await,
+            handle_structured_console_recovery(&state, &mut sender, run_id, &run, &run_svc).await,
         )
     } else if let Some(log_bytes) = read_terminal_log_artifact(&state, run_id) {
         let msg = LiveMessage::Frame {
@@ -284,15 +285,15 @@ async fn handle_opencode_recovery(
     }
 }
 
-/// Replay captured artifacts for a claude-code run after server restart.
+/// Replay captured artifacts for claude-code / codex runs after server restart.
 ///
-/// Claude-code runs as a fresh subprocess per run. After a server restart the
+/// These connectors run as fresh subprocesses per run. After a server restart the
 /// process is gone, so we cannot reattach to a live stream. Instead we replay
-/// the persisted terminal log and session snapshot from disk.
+/// persisted console events (preferred) or legacy terminal log from disk.
 ///
 /// If the run is still marked active after waiting for a stream handle, the
 /// subprocess is gone (e.g. server restarted) — mark it interrupted.
-async fn handle_claude_code_recovery(
+async fn handle_structured_console_recovery(
     state: &AppState,
     sender: &mut futures_util::stream::SplitSink<WebSocket, Message>,
     run_id: Uuid,
