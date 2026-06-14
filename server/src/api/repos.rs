@@ -2,12 +2,12 @@ use crate::api::auth::{pool_from_state, AuthUser};
 use crate::domain::repo::{verification_status_to_str, Repo};
 use crate::middleware::admin::AdminUser;
 use crate::services::code_review_service::{
-    BranchesResponse, CodeReviewError, CodeReviewService,
+    BranchesResponse, CodeReviewError, CodeReviewService, DiffSummary, FilePatch,
 };
 use crate::services::repo_service::{RepoError, RepoService};
 use crate::AppState;
 use axum::{
-    extract::{Path, State},
+    extract::{Path, Query, State},
     http::StatusCode,
     routing::{get, post},
     Json, Router,
@@ -27,6 +27,23 @@ pub fn routes() -> Router<Arc<AppState>> {
         .route("/api/repos/{repo_id}/verify", post(verify_repo))
         .route("/api/repos/{repo_id}/worktrees", get(list_repo_worktrees))
         .route("/api/repos/{repo_id}/branches", get(list_repo_branches))
+        .route("/api/repos/{repo_id}/diff", get(get_repo_diff))
+        .route("/api/repos/{repo_id}/diff/file", get(get_repo_diff_file))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DiffQuery {
+    worktree_path: String,
+    base_branch: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DiffFileQuery {
+    worktree_path: String,
+    base_branch: String,
+    path: String,
 }
 
 #[derive(Serialize)]
@@ -209,6 +226,47 @@ async fn list_repo_branches(
         .await
         .map_err(map_code_review_error)?;
     Ok(Json(branches))
+}
+
+async fn get_repo_diff(
+    AuthUser { .. }: AuthUser,
+    State(state): State<Arc<AppState>>,
+    Path(repo_id): Path<Uuid>,
+    Query(query): Query<DiffQuery>,
+) -> Result<Json<DiffSummary>, StatusCode> {
+    let pool = pool_from_state(&state)?;
+    let service = CodeReviewService::new(
+        pool,
+        state.config.agent.worktrees_path.clone().into(),
+    );
+    let diff = service
+        .diff_summary(repo_id, &query.worktree_path, &query.base_branch)
+        .await
+        .map_err(map_code_review_error)?;
+    Ok(Json(diff))
+}
+
+async fn get_repo_diff_file(
+    AuthUser { .. }: AuthUser,
+    State(state): State<Arc<AppState>>,
+    Path(repo_id): Path<Uuid>,
+    Query(query): Query<DiffFileQuery>,
+) -> Result<Json<FilePatch>, StatusCode> {
+    let pool = pool_from_state(&state)?;
+    let service = CodeReviewService::new(
+        pool,
+        state.config.agent.worktrees_path.clone().into(),
+    );
+    let patch = service
+        .file_patch(
+            repo_id,
+            &query.worktree_path,
+            &query.base_branch,
+            &query.path,
+        )
+        .await
+        .map_err(map_code_review_error)?;
+    Ok(Json(patch))
 }
 
 fn map_code_review_error(err: CodeReviewError) -> StatusCode {

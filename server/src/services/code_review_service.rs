@@ -5,7 +5,7 @@ use uuid::Uuid;
 
 use crate::domain::slug::slugify;
 use crate::services::repo_service::{RepoError, RepoService};
-use crate::services::ticket_git_service::list_local_branches;
+use crate::services::ticket_git_service::{list_local_branches, validate_branch_name};
 
 #[derive(Debug, thiserror::Error)]
 pub enum CodeReviewError {
@@ -125,6 +125,40 @@ pub struct BranchesResponse {
     pub branches: Vec<String>,
 }
 
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DiffFileSummary {
+    pub path: String,
+    pub status: String,
+    pub additions: u32,
+    pub deletions: u32,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DiffSummary {
+    pub base_branch: String,
+    pub base_sha: String,
+    pub head_sha: String,
+    pub head_branch: String,
+    pub files: Vec<DiffFileSummary>,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FilePatch {
+    pub path: String,
+    pub patch: String,
+}
+
+struct WorktreeRepoContext {
+    worktree: PathBuf,
+    base_branch: String,
+    base_sha: String,
+    head_sha: String,
+    head_branch: String,
+}
+
 pub struct CodeReviewService<'a> {
     pool: &'a PgPool,
     worktrees_root: PathBuf,
@@ -224,6 +258,164 @@ impl<'a> CodeReviewService<'a> {
             branches,
         })
     }
+
+    pub async fn diff_summary(
+        &self,
+        repo_id: Uuid,
+        worktree_path: &str,
+        base_branch: &str,
+    ) -> Result<DiffSummary, CodeReviewError> {
+        let ctx = self
+            .resolve_worktree_repo(repo_id, worktree_path, base_branch)
+            .await?;
+        let range = format!("{}...HEAD", ctx.base_branch);
+        let name_status = git_in(&ctx.worktree, &["diff", "--name-status", &range]).await?;
+        let numstat = git_in(&ctx.worktree, &["diff", "--numstat", &range]).await?;
+        let files = parse_diff_files(&name_status, &numstat);
+        Ok(DiffSummary {
+            base_branch: ctx.base_branch,
+            base_sha: ctx.base_sha,
+            head_sha: ctx.head_sha,
+            head_branch: ctx.head_branch,
+            files,
+        })
+    }
+
+    pub async fn file_patch(
+        &self,
+        repo_id: Uuid,
+        worktree_path: &str,
+        base_branch: &str,
+        path: &str,
+    ) -> Result<FilePatch, CodeReviewError> {
+        validate_diff_file_path(path)?;
+        let ctx = self
+            .resolve_worktree_repo(repo_id, worktree_path, base_branch)
+            .await?;
+        let range = format!("{}...HEAD", ctx.base_branch);
+        let patch = git_in(&ctx.worktree, &["diff", &range, "--", path]).await?;
+        if patch.len() > MAX_PATCH_BYTES {
+            return Err(CodeReviewError::PatchTooLarge);
+        }
+        Ok(FilePatch {
+            path: path.to_string(),
+            patch,
+        })
+    }
+
+    async fn resolve_worktree_repo(
+        &self,
+        repo_id: Uuid,
+        worktree_path: &str,
+        base_branch: &str,
+    ) -> Result<WorktreeRepoContext, CodeReviewError> {
+        validate_branch_name(base_branch).map_err(|_| CodeReviewError::InvalidBranchName)?;
+
+        let repo = RepoService::new(self.pool).get(repo_id).await.map_err(|e| match e {
+            RepoError::NotFound => CodeReviewError::RepoNotFound,
+            RepoError::Database(err) => CodeReviewError::Database(err),
+            other => CodeReviewError::Git(other.to_string()),
+        })?;
+        if repo.verification_status != crate::domain::repo::VerificationStatus::Ready {
+            return Err(CodeReviewError::RepoNotReady);
+        }
+
+        let worktree = validate_worktree_path(&self.worktrees_root, Path::new(worktree_path))?;
+        verify_worktree_belongs_to_repo(&worktree, Path::new(&repo.local_path)).await?;
+
+        let repo_path = PathBuf::from(&repo.local_path);
+        let base_sha = git_in(&repo_path, &["rev-parse", base_branch]).await?;
+        let head_sha = git_in(&worktree, &["rev-parse", "HEAD"]).await?;
+        let head_branch = git_in(&worktree, &["rev-parse", "--abbrev-ref", "HEAD"]).await?;
+
+        Ok(WorktreeRepoContext {
+            worktree,
+            base_branch: base_branch.to_string(),
+            base_sha,
+            head_sha,
+            head_branch,
+        })
+    }
+}
+
+async fn verify_worktree_belongs_to_repo(
+    worktree: &Path,
+    repo_path: &Path,
+) -> Result<(), CodeReviewError> {
+    let worktree_common = resolve_git_common_dir(worktree).await?;
+    let repo_common = resolve_git_common_dir(repo_path).await?;
+    if worktree_common != repo_common {
+        return Err(CodeReviewError::InvalidWorktreePath);
+    }
+    Ok(())
+}
+
+async fn resolve_git_common_dir(git_dir: &Path) -> Result<PathBuf, CodeReviewError> {
+    let common_dir = git_in(git_dir, &["rev-parse", "--git-common-dir"]).await?;
+    let path = PathBuf::from(&common_dir);
+    let absolute = if path.is_absolute() {
+        path
+    } else {
+        git_dir.join(path)
+    };
+    absolute
+        .canonicalize()
+        .map_err(|_| CodeReviewError::InvalidWorktreePath)
+}
+
+fn parse_diff_files(name_status: &str, numstat: &str) -> Vec<DiffFileSummary> {
+    let mut stats: std::collections::HashMap<String, (u32, u32)> = std::collections::HashMap::new();
+    for line in numstat.lines() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        let mut parts = line.split('\t');
+        let additions = parts
+            .next()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(0);
+        let deletions = parts
+            .next()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(0);
+        if let Some(path) = parts.next() {
+            stats.insert(path.to_string(), (additions, deletions));
+        }
+    }
+
+    let mut files = Vec::new();
+    for line in name_status.lines() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        let mut parts = line.split('\t');
+        let status_code = parts.next().unwrap_or("");
+        let status = match status_code.chars().next() {
+            Some('A') => "added",
+            Some('M') => "modified",
+            Some('D') => "deleted",
+            Some('R') => "renamed",
+            _ => "modified",
+        };
+        let path = if status == "renamed" {
+            parts.nth(1).unwrap_or("").to_string()
+        } else {
+            parts.next().unwrap_or("").to_string()
+        };
+        if path.is_empty() {
+            continue;
+        }
+        let (additions, deletions) = stats.get(&path).copied().unwrap_or((0, 0));
+        files.push(DiffFileSummary {
+            path,
+            status: status.to_string(),
+            additions,
+            deletions,
+        });
+    }
+    files
 }
 
 async fn git_in(worktree: &Path, args: &[&str]) -> Result<String, CodeReviewError> {
@@ -280,6 +472,18 @@ mod tests {
         assert!(body.contains("#### `src/a.ts`"));
         assert!(body.contains("**L10** (new): Fix this"));
         assert!(body.contains("#### `src/b.rs`"));
+    }
+
+    #[test]
+    fn parse_diff_files_merges_name_status_and_numstat() {
+        let files = parse_diff_files(
+            "M\tsrc/a.ts\nA\tsrc/b.ts",
+            "3\t1\tsrc/a.ts\n10\t0\tsrc/b.ts",
+        );
+        assert_eq!(files.len(), 2);
+        assert_eq!(files[0].path, "src/a.ts");
+        assert_eq!(files[0].status, "modified");
+        assert_eq!(files[0].additions, 3);
     }
 
     #[test]
