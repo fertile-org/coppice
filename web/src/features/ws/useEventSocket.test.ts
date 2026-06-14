@@ -1,5 +1,4 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
-import { QueryClient } from '@tanstack/react-query';
 
 const invalidateSpy = vi.fn();
 

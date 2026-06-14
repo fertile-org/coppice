@@ -517,8 +517,10 @@ impl<'a> RunService<'a> {
 
         tx.commit().await?;
 
-        self.apply_run_start_status(ticket_id, agent_id, job_type)
-            .await?;
+        if options.context_profile != ContextProfile::HumanAgent {
+            self.apply_run_start_status(ticket_id, agent_id, job_type)
+                .await?;
+        }
 
         Ok(row_to_run(&row))
     }

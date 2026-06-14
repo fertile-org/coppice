@@ -80,7 +80,7 @@ export function useAgentRuns(ticketId: string | undefined) {
   });
 }
 
-function upsertAgentRunInCache(
+export function upsertAgentRunInCache(
   queryClient: QueryClient,
   ticketId: string,
   run: AgentRun,

@@ -39,7 +39,8 @@ export function LiveRunActivityBar({
   lastActivityAt,
   heartbeatElapsedSecs,
 }: LiveRunActivityBarProps) {
-  const active = isActiveRunStatus(runStatus as RunStatus | null);
+  const active =
+    runStatus != null && isActiveRunStatus(runStatus as RunStatus);
   const now = useNowTick(active);
 
   if (!active) return null;

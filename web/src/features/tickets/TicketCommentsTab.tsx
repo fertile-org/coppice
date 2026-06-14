@@ -5,6 +5,13 @@ import { useToast } from '../../components/ToastProvider';
 import { formatFileSize, isImageContentType } from '../../lib/attachments';
 import type { MentionMode } from '../../lib/schemas/ticket';
 import { Button } from '../../components/ui/button';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '../../components/ui/select';
 import { CommentAttachments } from './CommentAttachments';
 import { useAgents, type Agent } from '../agents/useAgents';
 import {
@@ -98,6 +105,19 @@ function mentionMatchAtCursor(text: string, cursor: number): MentionMatch | null
 
   return { start: atIndex, query };
 }
+
+const MENTION_MODE_TOOLTIP = (
+  <>
+    <span className="block">
+      <strong className="font-medium text-text-primary">Agent:</strong> will do the
+      work you ask for.
+    </span>
+    <span className="block">
+      <strong className="font-medium text-text-primary">Chat:</strong> will reply in
+      the comment thread.
+    </span>
+  </>
+);
 
 export function TicketCommentsTab({ ticketId }: TicketCommentsTabProps) {
   const { data: comments, isLoading, isError } = useComments(ticketId);
@@ -247,57 +267,9 @@ export function TicketCommentsTab({ ticketId }: TicketCommentsTabProps) {
 
   return (
     <div className="flex h-full flex-col gap-4">
-      <div className="min-h-0 flex-1 space-y-3 overflow-y-auto">
-        {isLoading && (
-          <p className="font-body text-sm text-text-muted">Loading comments…</p>
-        )}
-
-        {isError && (
-          <p className="font-body text-sm text-danger">Unable to load comments.</p>
-        )}
-
-        {!isLoading && !isError && (comments?.length ?? 0) === 0 && (
-          <p className="font-body text-sm text-text-muted">
-            No comments yet. Start the thread below.
-          </p>
-        )}
-
-        {comments?.map((comment) => (
-          <article
-            key={comment.id}
-            className="rounded-md border border-border bg-surface px-4 py-3"
-          >
-            <header className="mb-2 flex items-center justify-between gap-2">
-              <span className="font-body text-xs font-medium uppercase tracking-wide text-text-secondary">
-                {authorLabel(comment, agentNamesById)}
-              </span>
-              <time
-                dateTime={comment.createdAt}
-                className="font-body text-xs text-text-muted"
-              >
-                {formatTime(comment.createdAt)}
-              </time>
-            </header>
-            <TicketMarkdown>{comment.body}</TicketMarkdown>
-            <CommentAttachments
-              attachments={
-                comment.attachments.length > 0
-                  ? comment.attachments
-                  : comment.attachmentIds.map((id) => ({
-                      id,
-                      filename: 'Attachment',
-                      contentType: 'application/octet-stream',
-                      sizeBytes: 0,
-                    }))
-              }
-            />
-          </article>
-        ))}
-      </div>
-
       <form
         onSubmit={(e) => void handleSubmit(e)}
-        className="shrink-0 space-y-3 border-t border-border pt-4"
+        className="shrink-0 space-y-3 border-b border-border pb-4"
       >
         {error && (
           <p className="rounded-md border border-danger-muted bg-danger-muted/40 px-3 py-2 font-body text-sm text-danger">
@@ -305,28 +277,34 @@ export function TicketCommentsTab({ ticketId }: TicketCommentsTabProps) {
           </p>
         )}
 
-        <div className="flex gap-2">
-          <select
-            value={mentionMode}
-            onChange={(e) => setMentionMode(e.target.value as MentionMode)}
-            aria-label="Mention mode"
-            className="field-control shrink-0 px-2 py-2 font-body text-sm"
-          >
-            <option
-              value="agent"
-              title="Run mentioned agent in ticket worktree to execute your request"
+        <div className="space-y-2">
+          <div className="group relative w-fit">
+            <Select
+              value={mentionMode}
+              onValueChange={(value) => setMentionMode(value as MentionMode)}
             >
-              Agent
-            </option>
-            <option
-              value="chat"
-              title="Ask mentioned agent; reply in comments only"
+              <SelectTrigger
+                aria-label="Mention mode"
+                aria-describedby="mention-mode-tooltip"
+                className="h-8 w-[6.75rem] shrink-0"
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="agent">Agent</SelectItem>
+                <SelectItem value="chat">Chat</SelectItem>
+              </SelectContent>
+            </Select>
+            <span
+              id="mention-mode-tooltip"
+              role="tooltip"
+              className="pointer-events-none absolute left-0 top-full z-20 mt-1.5 hidden w-max max-w-xs space-y-1 rounded-md border border-border bg-surface-raised px-2.5 py-1.5 font-body text-xs leading-snug text-text-secondary shadow-sm group-hover:block group-focus-within:block"
             >
-              Chat
-            </option>
-          </select>
+              {MENTION_MODE_TOOLTIP}
+            </span>
+          </div>
 
-          <div className="relative min-w-0 flex-1">
+          <div className="relative">
             <textarea
               ref={textareaRef}
               value={body}
@@ -427,6 +405,52 @@ export function TicketCommentsTab({ ticketId }: TicketCommentsTabProps) {
           </Button>
         </div>
       </form>
+
+      <div className="min-h-0 flex-1 space-y-3 overflow-y-auto">
+        {isLoading && (
+          <p className="font-body text-sm text-text-muted">Loading comments…</p>
+        )}
+
+        {isError && (
+          <p className="font-body text-sm text-danger">Unable to load comments.</p>
+        )}
+
+        {!isLoading && !isError && (comments?.length ?? 0) === 0 && (
+          <p className="font-body text-sm text-text-muted">No comments yet.</p>
+        )}
+
+        {comments?.map((comment) => (
+          <article
+            key={comment.id}
+            className="rounded-md border border-border bg-surface px-4 py-3"
+          >
+            <header className="mb-2 flex items-center justify-between gap-2">
+              <span className="font-body text-xs font-medium uppercase tracking-wide text-text-secondary">
+                {authorLabel(comment, agentNamesById)}
+              </span>
+              <time
+                dateTime={comment.createdAt}
+                className="font-body text-xs text-text-muted"
+              >
+                {formatTime(comment.createdAt)}
+              </time>
+            </header>
+            <TicketMarkdown>{comment.body}</TicketMarkdown>
+            <CommentAttachments
+              attachments={
+                comment.attachments.length > 0
+                  ? comment.attachments
+                  : comment.attachmentIds.map((id) => ({
+                      id,
+                      filename: 'Attachment',
+                      contentType: 'application/octet-stream',
+                      sizeBytes: 0,
+                    }))
+              }
+            />
+          </article>
+        ))}
+      </div>
     </div>
   );
 }

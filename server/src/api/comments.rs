@@ -67,6 +67,7 @@ struct StartedRunSummary {
     run_id: Uuid,
     agent_id: Uuid,
     agent_key: String,
+    job_type: String,
 }
 
 #[derive(Serialize)]
@@ -314,6 +315,7 @@ async fn create_comment(
                     run_id: run.id,
                     agent_id: run.agent_id,
                     agent_key: agent_key_for_agent(run.agent_id, &agents),
+                    job_type: job_type.to_string(),
                 });
             }
         }
@@ -331,6 +333,13 @@ async fn create_comment(
     let attachments_by_id = attachments_for_comments(&service, std::slice::from_ref(&comment))
         .await
         .map_err(map_error)?;
+
+    state.event_bus.publish(AppEvent::CommentCreated {
+        comment_id: comment.id,
+        ticket_id,
+        author_type: "human".into(),
+    });
+
     Ok((
         StatusCode::CREATED,
         Json(CreateCommentResponse {

@@ -26,7 +26,7 @@ interface EventSocketListener {
 const listeners = new Set<EventSocketListener>();
 let socket: WebSocket | null = null;
 let subscriberCount = 0;
-let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+let reconnectTimer: number | null = null;
 const RECONNECT_DELAY_MS = 1000;
 
 function dispatchMessage(raw: string) {

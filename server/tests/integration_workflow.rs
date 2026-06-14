@@ -33,18 +33,32 @@ async fn human_mention_does_not_change_ticket_status() {
     let before_body: serde_json::Value = common::json_body(before).await;
     assert_eq!(before_body["status"], "backlog");
 
+    // Agent mode requires a repo; chat mode creates mention without changing status.
     let comment_res = app
         .clone()
         .oneshot(common::json_request(
             "POST",
             &format!("/api/tickets/{ticket_id}/comments"),
-            r#"{"body":"@pm please review the approach"}"#,
+            r#"{"body":"@pm please review the approach","mentionMode":"chat"}"#,
             &cookie,
             &csrf,
         ))
         .await
         .unwrap();
     assert_eq!(comment_res.status(), StatusCode::CREATED);
+
+    let agent_without_repo = app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            &format!("/api/tickets/{ticket_id}/comments"),
+            r#"{"body":"@pm run this","mentionMode":"agent"}"#,
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(agent_without_repo.status(), StatusCode::BAD_REQUEST);
 
     let after = app
         .clone()

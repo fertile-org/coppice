@@ -3,7 +3,8 @@ import { apiFetch } from '../../lib/api';
 import type { CreateCommentInput, UpdateStatusInput, UpdateTicketInput } from '../../lib/schemas/ticket';
 import { ticketsQueryKey, type Ticket } from '../board/useTickets';
 import type { TicketStatus } from '../board/columns';
-import { agentRunsQueryKey } from './useAgentRuns';
+import { agentRunsQueryKey, upsertAgentRunInCache } from './useAgentRuns';
+import type { AgentRun } from '../../lib/schemas/agentRun';
 
 export { useAgents, type AgentSummary } from '../agents/useAgents';
 
@@ -38,6 +39,7 @@ export interface StartedRunSummary {
   runId: string;
   agentId: string;
   agentKey: string;
+  jobType: string;
 }
 
 export interface CreateCommentResponse extends Comment {
@@ -341,12 +343,37 @@ export function useCreateComment(ticketId: string) {
 
   return useMutation({
     mutationFn: (body: CreateCommentInput) => postComment(ticketId, body),
+    onMutate: async () => {
+      await queryClient.cancelQueries({ queryKey: commentsQueryKey(ticketId) });
+    },
     onSuccess: (data) => {
       const { startedRuns, ...comment } = data;
-      queryClient.setQueryData<Comment[]>(commentsQueryKey(ticketId), (old) =>
-        old ? [comment, ...old] : [comment],
-      );
+      queryClient.setQueryData<Comment[]>(commentsQueryKey(ticketId), (old) => {
+        const withoutDuplicate = (old ?? []).filter((item) => item.id !== comment.id);
+        return [comment, ...withoutDuplicate];
+      });
+      void queryClient.invalidateQueries({ queryKey: commentsQueryKey(ticketId) });
+
       if (startedRuns?.length) {
+        const now = new Date().toISOString();
+        for (const started of startedRuns) {
+          const placeholder: AgentRun = {
+            id: started.runId,
+            ticketId,
+            agentId: started.agentId,
+            jobType: started.jobType,
+            status: 'queued',
+            sandboxProfileId: 'permissive-default',
+            worktreePath: null,
+            branchName: null,
+            startedAt: null,
+            endedAt: null,
+            createdAt: now,
+            errorMessage: null,
+            sessionId: null,
+          };
+          upsertAgentRunInCache(queryClient, ticketId, placeholder);
+        }
         void queryClient.invalidateQueries({
           queryKey: agentRunsQueryKey(ticketId),
         });

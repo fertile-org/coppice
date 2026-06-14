@@ -46,11 +46,7 @@ export function TicketDrawer({ ticketId, onClose }: TicketDrawerProps) {
   const canRunAgent = Boolean(
     ticket?.assigneeAgentId && ticket?.repoId && !repoNotReady,
   );
-  const activeRun = runs?.find(
-    (run) =>
-      run.agentId === ticket?.assigneeAgentId &&
-      isActiveRunStatus(run.status),
-  );
+  const activeRun = runs?.find((run) => isActiveRunStatus(run.status));
   const latestRun = runs?.[0] ?? null;
   const liveRun = activeRun ?? latestRun;
   const LiveView =
