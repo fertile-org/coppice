@@ -18,6 +18,7 @@ import { BoardPage } from './features/board/BoardPage';
 import { ProjectPickerPage } from './features/projects/ProjectPickerPage';
 import { RepositoriesPage } from './features/repos/RepositoriesPage';
 import { UsersPage } from './features/users/UsersPage';
+import { CodeReviewPage } from './features/code/CodeReviewPage';
 import { type Ticket } from './features/board/useTickets';
 import { ticketQueryKey } from './features/tickets/useTicket';
 import {
@@ -93,6 +94,7 @@ function App() {
                 />
                 <Route path="/settings/users" element={<UsersPage />} />
               </Route>
+              <Route path="/code" element={<CodeReviewPage />} />
             </Route>
             <Route path="*" element={<Navigate to="/projects" replace />} />
           </Routes>
