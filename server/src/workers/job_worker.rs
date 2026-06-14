@@ -76,13 +76,28 @@ async fn process_one(state: &AppState, worker_id: &str) -> anyhow::Result<()> {
     let run_svc = RunService::new(pool);
     let run = run_svc.get(job.run_id).await.context("load run")?;
 
+    if run.status != RunStatus::Queued {
+        tracing::debug!(
+            run_id = %run.id,
+            job_id = %job.id,
+            status = %run_status_to_str(run.status),
+            "discarding stale job for inactive run"
+        );
+        job_svc
+            .mark_failed(job.id, "stale job for inactive run")
+            .await?;
+        return Ok(());
+    }
+
     match execute_job(state, pool, &run_svc, &run).await {
         Ok(()) => job_svc.mark_done(job.id).await?,
         Err(err) if err.downcast_ref::<JobCancelled>().is_some() => {
+            state.run_streams.remove(run.id);
             job_svc.mark_cancelled(job.id).await?;
             publish_run_finished(state, run.id, run.ticket_id, run.agent_id, RunStatus::Cancelled, None);
         }
         Err(err) => {
+            state.run_streams.remove(run.id);
             if run_svc.is_cancelled(run.id).await.unwrap_or(false) {
                 job_svc.mark_cancelled(job.id).await?;
                 publish_run_finished(state, run.id, run.ticket_id, run.agent_id, RunStatus::Cancelled, None);
@@ -165,6 +180,35 @@ async fn execute_job(
             ticket = updated;
         }
     }
+
+    let stream = state.run_streams.register(run.id);
+    let cancel_rx = stream.cancelled_rx();
+
+    let snapshot_handle = stream.clone();
+    let artifacts_dir = state.config.storage.artifacts_dir.clone();
+    let run_id_for_flush = run.id;
+    let mut flush_cancel = stream.cancelled_rx();
+    tokio::spawn(async move {
+        let paths = RunArtifactPaths::new(&artifacts_dir, &run_id_for_flush.to_string());
+        let mut interval = tokio::time::interval(Duration::from_secs(5));
+        loop {
+            tokio::select! {
+                _ = interval.tick() => {
+                    if let Some(snap) = snapshot_handle.snapshot() {
+                        let _ = ArtifactService::write_session_snapshot(&paths, &snap);
+                    }
+                }
+                _ = flush_cancel.changed() => break,
+            }
+        }
+    });
+
+    state.event_bus.publish(AppEvent::AgentRunStarted {
+        run_id: run.id,
+        ticket_id: run.ticket_id,
+        agent_id: run.agent_id,
+        status: "running".into(),
+    });
 
     let agent_key = agent
         .preset_source
@@ -330,35 +374,6 @@ async fn execute_job(
         .join("context.md")
         .to_string_lossy()
         .into_owned();
-
-    let stream = state.run_streams.register(run.id);
-    let cancel_rx = stream.cancelled_rx();
-
-    let snapshot_handle = stream.clone();
-    let artifacts_dir = state.config.storage.artifacts_dir.clone();
-    let run_id_for_flush = run.id;
-    let mut flush_cancel = stream.cancelled_rx();
-    tokio::spawn(async move {
-        let paths = RunArtifactPaths::new(&artifacts_dir, &run_id_for_flush.to_string());
-        let mut interval = tokio::time::interval(Duration::from_secs(5));
-        loop {
-            tokio::select! {
-                _ = interval.tick() => {
-                    if let Some(snap) = snapshot_handle.snapshot() {
-                        let _ = ArtifactService::write_session_snapshot(&paths, &snap);
-                    }
-                }
-                _ = flush_cancel.changed() => break,
-            }
-        }
-    });
-
-    state.event_bus.publish(AppEvent::AgentRunStarted {
-        run_id: run.id,
-        ticket_id: run.ticket_id,
-        agent_id: run.agent_id,
-        status: "running".into(),
-    });
 
     let connector_name = &agent.connector;
     let connector = state
@@ -527,13 +542,33 @@ fn persist_artifacts(
     let messages = stream.buffered_tail();
     let mut log_bytes = Vec::new();
     let mut frame_count = 0u64;
+    let mut console_events = Vec::new();
     for msg in &messages {
-        if let crate::sessions::LiveMessage::Frame { data, .. } = msg {
-            log_bytes.extend_from_slice(data);
-            frame_count += 1;
+        match msg {
+            crate::sessions::LiveMessage::Frame { data, .. } => {
+                log_bytes.extend_from_slice(data);
+                frame_count += 1;
+            }
+            crate::sessions::LiveMessage::Event { event } => {
+                if event
+                    .get("type")
+                    .and_then(|v| v.as_str())
+                    .is_some_and(|ty| ty.starts_with("claude.console."))
+                {
+                    console_events.push(event.clone());
+                }
+            }
+            _ => {}
         }
     }
-    ArtifactService::write_terminal_log(&paths, &log_bytes)?;
+    if !console_events.is_empty() {
+        ArtifactService::write_console_events(&paths, &console_events)?;
+    }
+    if !log_bytes.is_empty() {
+        ArtifactService::write_terminal_log(&paths, &log_bytes)?;
+    } else if !console_events.is_empty() {
+        ArtifactService::write_terminal_log(&paths, b"")?;
+    }
     ArtifactService::write_meta(
         &paths,
         &RunArtifactMeta {

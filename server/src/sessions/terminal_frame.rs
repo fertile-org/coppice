@@ -1,6 +1,8 @@
 use serde_json::json;
 use time::OffsetDateTime;
 
+use crate::sessions::terminal_encoding::terminal_bytes_to_ws_string;
+
 #[derive(Debug, Clone)]
 pub struct TerminalFrame {
     pub seq: u64,
@@ -13,7 +15,7 @@ impl TerminalFrame {
         json!({
             "type": "frame",
             "seq": self.seq,
-            "data": String::from_utf8_lossy(&self.data),
+            "data": terminal_bytes_to_ws_string(&self.data),
         })
     }
 

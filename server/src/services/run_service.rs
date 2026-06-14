@@ -560,6 +560,9 @@ impl<'a> RunService<'a> {
     }
 
     pub async fn finish_failed(&self, run_id: Uuid, message: &str) -> Result<AgentRun, RunError> {
+        JobService::new(self.pool)
+            .fail_active_jobs_for_run(run_id)
+            .await?;
         let row = sqlx::query(
             r#"
             UPDATE agent_runs
@@ -592,6 +595,9 @@ impl<'a> RunService<'a> {
     }
 
     pub async fn mark_interrupted(&self, run_id: Uuid, reason: &str) -> Result<AgentRun, RunError> {
+        JobService::new(self.pool)
+            .fail_active_jobs_for_run(run_id)
+            .await?;
         sqlx::query(
             r#"UPDATE agent_runs SET status = $2, error_message = $3, ended_at = now() WHERE id = $1"#,
         )
@@ -648,6 +654,7 @@ impl<'a> RunService<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::job::job_status_to_str;
     use crate::domain::run::RunStatus;
 
     async fn test_pool() -> Option<PgPool> {
@@ -744,6 +751,40 @@ mod tests {
             Some("interrupted: server restarted during run")
         );
         assert!(updated.ended_at.is_some());
+    }
+
+    #[tokio::test]
+    async fn mark_interrupted_fails_pending_jobs_for_run() {
+        let Some(pool) = test_pool().await else {
+            return;
+        };
+        let run_id = insert_run(&pool, RunStatus::Queued).await;
+        let job_id = Uuid::new_v4();
+        sqlx::query(
+            r#"
+            INSERT INTO agent_jobs (id, run_id, job_type, status)
+            VALUES ($1, $2, $3, $4)
+            "#,
+        )
+        .bind(job_id)
+        .bind(run_id)
+        .bind(JOB_TYPE_WORK_ON_TICKET)
+        .bind(job_status_to_str(JobStatus::Pending))
+        .execute(&pool)
+        .await
+        .expect("insert job");
+
+        RunService::new(&pool)
+            .mark_interrupted(run_id, "server restarted during run")
+            .await
+            .expect("mark interrupted");
+
+        let status: String = sqlx::query_scalar("SELECT status FROM agent_jobs WHERE id = $1")
+            .bind(job_id)
+            .fetch_one(&pool)
+            .await
+            .expect("job status");
+        assert_eq!(status, "failed");
     }
 
     #[tokio::test]

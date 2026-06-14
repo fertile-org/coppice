@@ -1,3 +1,4 @@
+use super::claude_console::ClaudeConsolePublisher;
 use super::{AgentProvider, AgentRunInput, AgentRunResult, ProviderError};
 use crate::sessions::opencode_events::{coppice_run_prompt, extract_result_from_text};
 use async_trait::async_trait;
@@ -87,8 +88,8 @@ impl AgentProvider for ClaudeCodeProvider {
         });
 
         let mut assistant_text = String::new();
-        let mut frame_seq: u64 = 0;
         let mut session_sent = false;
+        let mut console = ClaudeConsolePublisher::new();
 
         loop {
             if is_cancelled(&cancel_rx) {
@@ -135,12 +136,9 @@ impl AgentProvider for ClaudeCodeProvider {
                                 }
                             }
 
-                            // Forward display text to the run stream.
+                            // Forward structured console events to the run stream.
                             if let Some(stream) = &input.stream {
-                                if let Some(text) = extract_display_text(&value) {
-                                    stream.publish_frame(frame_seq, format!("{text}\n").into_bytes());
-                                    frame_seq += 1;
-                                }
+                                console.handle_stream_json(stream, &value);
                             }
 
                             // Accumulate assistant text.
@@ -196,33 +194,6 @@ async fn wait_cancel(cancel_rx: &mut Option<watch::Receiver<bool>>) {
             let _ = rx.changed().await;
         }
         None => std::future::pending::<()>().await,
-    }
-}
-
-fn extract_display_text(value: &serde_json::Value) -> Option<String> {
-    let ty = value.get("type").and_then(|v| v.as_str())?;
-    match ty {
-        "assistant" => {
-            let content = value.get("message")?.get("content")?.as_array()?;
-            let mut text = String::new();
-            for part in content {
-                if part.get("type").and_then(|t| t.as_str()) == Some("text") {
-                    if let Some(t) = part.get("text").and_then(|v| v.as_str()) {
-                        text.push_str(t);
-                    }
-                }
-            }
-            if text.is_empty() { None } else { Some(text) }
-        }
-        "system" => value
-            .get("message")
-            .and_then(|m| m.as_str())
-            .map(str::to_string),
-        "result" => value
-            .get("result")
-            .and_then(|v| v.as_str())
-            .map(str::to_string),
-        _ => None,
     }
 }
 
@@ -307,39 +278,6 @@ mod tests {
     }
 
     #[test]
-    fn extract_display_text_from_assistant_event() {
-        let event = serde_json::json!({
-            "type": "assistant",
-            "message": {
-                "content": [
-                    {"type": "text", "text": "Hello world"}
-                ]
-            }
-        });
-        let text = extract_display_text(&event).expect("display text");
-        assert_eq!(text, "Hello world");
-    }
-
-    #[test]
-    fn extract_display_text_from_result_event() {
-        let event = serde_json::json!({
-            "type": "result",
-            "result": "Final output"
-        });
-        let text = extract_display_text(&event).expect("display text");
-        assert_eq!(text, "Final output");
-    }
-
-    #[test]
-    fn extract_display_text_ignores_tool_events() {
-        let event = serde_json::json!({
-            "type": "tool",
-            "name": "Read"
-        });
-        assert!(extract_display_text(&event).is_none());
-    }
-
-    #[test]
     fn provider_id() {
         let provider = ClaudeCodeProvider::new(ClaudeCodeProviderConfig::default());
         assert_eq!(provider.id(), "claude-code");
@@ -369,119 +307,103 @@ mod tests {
         assert_eq!(captured_id.as_deref(), Some("sess_abc123"));
     }
 
-    #[test]
-    fn session_id_extracted_from_result_event() {
-        let event = serde_json::json!({
-            "type": "result",
-            "subtype": "success",
-            "result": "final output",
-            "session_id": "sess_xyz789"
-        });
-        let sid = event
-            .get("session_id")
-            .and_then(|v| v.as_str())
-            .filter(|s| !s.is_empty());
-        assert_eq!(sid, Some("sess_xyz789"));
+    fn publish_fixture_lines(
+        handle: &std::sync::Arc<crate::sessions::run_registry::RunStreamHandle>,
+        raw: &str,
+    ) {
+        let mut console = crate::providers::claude_console::ClaudeConsolePublisher::new();
+        for line in raw.lines() {
+            let Ok(value) = serde_json::from_str::<serde_json::Value>(line) else {
+                continue;
+            };
+            console.handle_stream_json(handle, &value);
+        }
+    }
+
+    fn collect_console_events(
+        messages: &[crate::sessions::LiveMessage],
+    ) -> Vec<serde_json::Value> {
+        messages
+            .iter()
+            .filter_map(|msg| match msg {
+                crate::sessions::LiveMessage::Event { event } => Some(event.clone()),
+                _ => None,
+            })
+            .collect()
     }
 
     #[test]
-    fn streaming_pipeline_publishes_frames_to_run_stream_handle() {
+    fn streaming_pipeline_publishes_console_events() {
         use crate::sessions::run_registry::RunStreamRegistry;
-        use crate::sessions::LiveMessage;
 
         let raw = std::fs::read_to_string(fixtures_root().join("done.jsonl"))
             .expect("read done.jsonl");
 
         let registry = RunStreamRegistry::new();
-        let run_id = uuid::Uuid::new_v4();
-        let handle = registry.register(run_id);
-        let mut rx = handle.subscribe();
+        let handle = registry.register(uuid::Uuid::new_v4());
 
-        let mut frame_seq: u64 = 0;
-        let mut session_sent = false;
+        publish_fixture_lines(&handle, &raw);
 
-        for line in raw.lines() {
-            let Ok(value) = serde_json::from_str::<serde_json::Value>(line) else {
-                continue;
-            };
-
-            if !session_sent {
-                if let Some(sid) = value
-                    .get("session_id")
-                    .and_then(|v| v.as_str())
-                    .filter(|s| !s.is_empty())
-                {
-                    let _ = sid;
-                    session_sent = true;
-                }
-            }
-
-            if let Some(text) = extract_display_text(&value) {
-                handle.publish_frame(frame_seq, format!("{text}\n").into_bytes());
-                frame_seq += 1;
-            }
-        }
-
-        let mut received = Vec::new();
-        while let Ok(msg) = rx.try_recv() {
-            received.push(msg);
-        }
-
-        assert!(session_sent, "session_id should have been captured");
-        assert_eq!(received.len(), 4, "should have 4 frames: 3 assistant + 1 result");
-        for (i, msg) in received.iter().enumerate() {
-            match msg {
-                LiveMessage::Frame { seq, data } => {
-                    assert_eq!(*seq, i as u64, "frame seq should be sequential");
-                    assert!(!data.is_empty(), "frame data should not be empty");
-                }
-                _ => panic!("expected Frame, got {msg:?}"),
-            }
-        }
-
-        let first_data = match &received[0] {
-            LiveMessage::Frame { data, .. } => data.clone(),
-            _ => unreachable!(),
-        };
-        let first = std::str::from_utf8(&first_data).unwrap();
-        assert!(first.contains("Reading .agent/context.md"));
+        let events = collect_console_events(&handle.buffered_tail());
+        assert_eq!(
+            events.len(),
+            4,
+            "session + 2 text + result; duplicate result event is skipped"
+        );
+        assert_eq!(events[0]["type"], "claude.console.session");
+        assert_eq!(events[1]["type"], "claude.console.text");
+        assert!(events[1]["markdown"]
+            .as_str()
+            .unwrap()
+            .contains("Reading .agent/context.md"));
+        assert_eq!(events[3]["type"], "claude.console.result");
+        assert_eq!(events[3]["contract"]["summary"], "Implemented the feature.");
     }
 
     #[test]
-    fn streaming_pipeline_blocked_fixture_publishes_frames() {
+    fn streaming_pipeline_agentic_fixture_includes_tool_activity() {
         use crate::sessions::run_registry::RunStreamRegistry;
-        use crate::sessions::LiveMessage;
+
+        let raw = std::fs::read_to_string(fixtures_root().join("agentic.jsonl"))
+            .expect("read agentic.jsonl");
+
+        let registry = RunStreamRegistry::new();
+        let handle = registry.register(uuid::Uuid::new_v4());
+
+        publish_fixture_lines(&handle, &raw);
+
+        let events = collect_console_events(&handle.buffered_tail());
+        let tool_titles: Vec<_> = events
+            .iter()
+            .filter(|e| e["type"] == "claude.console.tool")
+            .filter_map(|e| e["title"].as_str())
+            .collect();
+        assert!(tool_titles.iter().any(|t| t.contains("codex.rs")));
+        assert!(tool_titles.iter().any(|t| t.contains("cargo test")));
+
+        let has_result = events.iter().any(|e| e["type"] == "claude.console.result");
+        assert!(has_result);
+    }
+
+    #[test]
+    fn streaming_pipeline_blocked_fixture_publishes_console_events() {
+        use crate::sessions::run_registry::RunStreamRegistry;
 
         let raw = std::fs::read_to_string(fixtures_root().join("blocked.jsonl"))
             .expect("read blocked.jsonl");
 
         let registry = RunStreamRegistry::new();
-        let run_id = uuid::Uuid::new_v4();
-        let handle = registry.register(run_id);
-        let mut rx = handle.subscribe();
+        let handle = registry.register(uuid::Uuid::new_v4());
 
-        let mut frame_seq: u64 = 0;
-        for line in raw.lines() {
-            let Ok(value) = serde_json::from_str::<serde_json::Value>(line) else {
-                continue;
-            };
-            if let Some(text) = extract_display_text(&value) {
-                handle.publish_frame(frame_seq, format!("{text}\n").into_bytes());
-                frame_seq += 1;
-            }
-        }
+        publish_fixture_lines(&handle, &raw);
 
-        let mut received = Vec::new();
-        while let Ok(msg) = rx.try_recv() {
-            received.push(msg);
-        }
-
-        assert_eq!(received.len(), 3, "3 frames: 2 assistant + 1 result");
-        assert!(received.iter().all(|m| matches!(m, LiveMessage::Frame { .. })));
+        let events = collect_console_events(&handle.buffered_tail());
+        assert_eq!(events.len(), 3, "session + text + blocked result");
+        assert_eq!(events.last().unwrap()["contract"]["status"], "blocked");
     }
 
     #[test]
-    fn buffered_tail_replays_frames_for_recovery() {
+    fn buffered_tail_replays_console_events_for_recovery() {
         use crate::sessions::run_registry::RunStreamRegistry;
         use crate::sessions::LiveMessage;
 
@@ -489,22 +411,14 @@ mod tests {
             .expect("read done.jsonl");
 
         let registry = RunStreamRegistry::new();
-        let run_id = uuid::Uuid::new_v4();
-        let handle = registry.register(run_id);
+        let handle = registry.register(uuid::Uuid::new_v4());
 
-        let mut frame_seq: u64 = 0;
-        for line in raw.lines() {
-            let Ok(value) = serde_json::from_str::<serde_json::Value>(line) else {
-                continue;
-            };
-            if let Some(text) = extract_display_text(&value) {
-                handle.publish_frame(frame_seq, format!("{text}\n").into_bytes());
-                frame_seq += 1;
-            }
-        }
+        publish_fixture_lines(&handle, &raw);
 
         let tail = handle.buffered_tail();
-        assert_eq!(tail.len(), 4, "buffered tail should have all 4 frames");
-        assert!(tail.iter().all(|m| matches!(m, LiveMessage::Frame { .. })));
+        assert_eq!(tail.len(), 4);
+        assert!(tail
+            .iter()
+            .all(|m| matches!(m, LiveMessage::Event { .. })));
     }
 }

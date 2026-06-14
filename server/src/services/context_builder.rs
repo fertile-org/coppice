@@ -455,6 +455,16 @@ fn is_in_review_review_task(input: &ContextInput) -> bool {
         && (is_tech_lead_agent(input) || is_reviewer_agent(input))
 }
 
+fn is_in_qa_qc_task(input: &ContextInput) -> bool {
+    if !input.ticket_status.eq_ignore_ascii_case("in_qa") {
+        return false;
+    }
+    if input.agent_key.eq_ignore_ascii_case("qc") {
+        return true;
+    }
+    input.agent_role.to_ascii_lowercase().contains("quality")
+}
+
 /// Coppice-owned contract rules injected on every run (not editable via agent soul).
 fn format_contract_guidance(input: &ContextInput) -> String {
     if is_pm_agent(input) {
@@ -496,12 +506,26 @@ Non-blocking improvements. Write "None" if there are no follow-ups.
 
 ## Recommendation
 What should happen next. On approval write: "Ready for QA — Coppice moves this ticket to In QA automatically."
-On changes required, use `status: "blocked"`, list concrete fixes in `summary`, and `mentionAgents` for the implementer.
+On changes required, use `status: "blocked"`, list concrete fixes in `summary`, and `mentionAgents` for the implementer (e.g. `["backend_engineer"]`).
 ```
 
 - Put test commands in the `testsRun` JSON array only — do not append a "Tests run" section inside `summary`.
-- On approval, return `status: "done"` and **omit `assignTo`** — workflow gates advance the ticket to In QA.
+- On approval, return `status: "done"` and **omit `assignTo` and `mentionAgents`** — workflow gates advance the ticket to In QA.
+- When changes are required, set `mentionAgents` to the implementer agent key — Coppice assigns them and auto-starts a fix run.
 - Use blank lines between `##` sections so comments render cleanly.
+"#
+        .to_string();
+    }
+
+    if is_in_qa_qc_task(input) {
+        return r#"## Coppice platform rules — QA verification (required)
+
+These rules override conflicting instructions in your system prompt or soul file.
+
+- On pass: return `status: "done"` with a short summary — Coppice moves the ticket to Wait for Final Review.
+- On defects: return `status: "blocked"` **or** `status: "done"` with non-empty `blockers` and `mentionAgents: ["backend_engineer"]` (use the implementer key on this project).
+- Coppice appends `@agent` mentions to the ticket comment, assigns the mentioned implementer, and auto-starts their run when `auto_start_runs` is enabled.
+- Put test commands in `testsRun` only — not inside `summary`.
 "#
         .to_string();
     }

@@ -44,10 +44,12 @@ Claude Code's `--output-format stream-json` emits newline-delimited JSON events 
 
 | Stream-JSON event | LiveMessage variant | Notes |
 |-------------------|---------------------|-------|
-| `system` (subtype `init`) | `Frame` | Contains the `session_id`; captured early via `session_created_tx` |
-| `assistant` (message with text content) | `Frame` | Display text extracted from `message.content[].text` parts |
-| `result` (terminal event) | `Frame` | Final result text; signals loop break |
-| Tool / other events | — (ignored for display) | Not forwarded as frames |
+| `system` (subtype `init`) | `Frame` | Session start line; `session_id` captured via `session_created_tx` |
+| `system` (subtype `api_retry`) | `Frame` | Retry notice |
+| `assistant` / `user` (`text` content) | `Frame` | Assistant prose or final JSON contract |
+| `assistant` / `user` (`tool_use`) | `Frame` | e.g. `▸ Read: path`, `$ cargo test` |
+| `assistant` / `user` (`tool_result`) | `Frame` | Truncated tool output (`✓` / `✗`) |
+| `result` (terminal event) | `Frame` | Formatted result card (Done/Blocked + summary + meta lists); duplicate skipped |
 
 Frames are published via `RunStreamHandle::publish_frame(seq, data)` where `seq` is a monotonic counter. The `RunStreamHandle` broadcasts to all WebSocket subscribers and retains a 500-message ring buffer for late-replay.
 

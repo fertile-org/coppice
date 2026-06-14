@@ -1,5 +1,9 @@
 import { useEffect } from 'react';
 import { queryClient } from '../../lib/query-client';
+import {
+  patchAgentRunStatusInCache,
+} from '../tickets/useAgentRuns';
+import type { RunStatus } from '../../lib/schemas/agentRun';
 
 export interface AgentRunStartedPayload {
   type: 'agent_run.started';
@@ -34,6 +38,12 @@ function dispatchMessage(raw: string) {
 
   if (msg.type === 'agent_run.started') {
     const payload = msg as AgentRunStartedPayload;
+    patchAgentRunStatusInCache(
+      queryClient,
+      payload.ticket_id,
+      payload.run_id,
+      payload.status as RunStatus,
+    );
     void queryClient.invalidateQueries({
       queryKey: ['agent-runs', payload.ticket_id],
     });
@@ -48,6 +58,12 @@ function dispatchMessage(raw: string) {
 
   if (msg.type === 'agent_run.finished') {
     const payload = msg as AgentRunFinishedPayload;
+    patchAgentRunStatusInCache(
+      queryClient,
+      payload.ticket_id,
+      payload.run_id,
+      payload.status as RunStatus,
+    );
     void queryClient.invalidateQueries({
       queryKey: ['agent-runs', payload.ticket_id],
     });

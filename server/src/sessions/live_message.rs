@@ -1,5 +1,7 @@
 use serde_json::{json, Value};
 
+use crate::sessions::terminal_encoding::terminal_bytes_to_ws_string;
+
 #[derive(Debug, Clone)]
 pub enum LiveMessage {
     Frame { seq: u64, data: Vec<u8> },
@@ -22,7 +24,7 @@ impl LiveMessage {
             LiveMessage::Frame { seq, data } => json!({
                 "type": "frame",
                 "seq": seq,
-                "data": String::from_utf8_lossy(data),
+                "data": terminal_bytes_to_ws_string(data),
             }),
             LiveMessage::Snapshot { snapshot } => json!({
                 "type": "snapshot",
@@ -60,6 +62,18 @@ impl LiveMessage {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn frame_preserves_ansi_in_ws_json() {
+        let msg = LiveMessage::Frame {
+            seq: 0,
+            data: b"\x1b[90mmuted\x1b[0m\n".to_vec(),
+        };
+        let json = msg.to_ws_json();
+        let data = json["data"].as_str().expect("data string");
+        assert!(data.contains('\x1b'), "ANSI ESC should survive JSON encoding");
+        assert!(data.contains("muted"));
+    }
 
     #[test]
     fn frame_encodes_as_legacy_type() {

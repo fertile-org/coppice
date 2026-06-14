@@ -69,6 +69,7 @@ pub fn apply_agent_result(result: &AgentRunResult) -> Result<ApplyResult, String
                         acceptance_criteria.as_deref(),
                         updated_description.as_deref(),
                         assign_to.as_deref(),
+                        mention_agents,
                     ),
                     intent: CommentIntent::ImplementationDone,
                     mentions: mention_agents.clone(),
@@ -108,6 +109,7 @@ pub fn apply_agent_result(result: &AgentRunResult) -> Result<ApplyResult, String
                         acceptance_criteria.as_deref(),
                         updated_description.as_deref(),
                         None,
+                        mention_agents,
                     ),
                     intent: CommentIntent::Blocked,
                     mentions: mention_agents.clone(),
@@ -243,6 +245,7 @@ fn build_done_comment_body(
     acceptance_criteria: Option<&str>,
     updated_description: Option<&str>,
     assign_to: Option<&str>,
+    mention_agents: &[String],
 ) -> String {
     let description_updated = updated_description
         .map(str::trim)
@@ -279,7 +282,28 @@ fn build_done_comment_body(
             body.push_str(&format!("- {blocker}\n"));
         }
     }
+    append_mention_agents_to_body(&mut body, mention_agents);
     body
+}
+
+fn append_mention_agents_to_body(body: &mut String, mention_agents: &[String]) {
+    let mut appended = Vec::new();
+    for key in mention_agents {
+        let trimmed = key.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let needle = format!("@{trimmed}");
+        if body.contains(&needle) {
+            continue;
+        }
+        appended.push(needle);
+    }
+    if appended.is_empty() {
+        return;
+    }
+    body.push_str("\n\n");
+    body.push_str(&appended.join(" "));
 }
 
 fn build_continued_comment_body(
@@ -289,7 +313,7 @@ fn build_continued_comment_body(
     tests_run: &[String],
     blockers: &[String],
 ) -> String {
-    let mut body = build_done_comment_body(summary, &[], &[], &[], None, None, None);
+    let mut body = build_done_comment_body(summary, &[], &[], &[], None, None, None, &[]);
     if let Some(note) = progress_note.map(str::trim).filter(|s| !s.is_empty()) {
         body.push_str("\n\n**Progress note:**\n");
         body.push_str(note);
@@ -445,6 +469,25 @@ mod tests {
     #[test]
     fn merge_returns_none_when_unchanged() {
         assert!(merge_ticket_description("Same", None, None).is_none());
+    }
+
+    #[test]
+    fn done_comment_appends_mention_agents_to_body() {
+        let result = AgentRunResult::Done {
+            summary: "Fix the connector.".into(),
+            changed_files: vec![],
+            tests_run: vec![],
+            next_status: None,
+            assign_to: None,
+            updated_description: None,
+            acceptance_criteria: None,
+            mention_agents: vec!["backend_engineer".into()],
+            blockers: vec!["Docs mismatch".into()],
+            split_tickets: vec![],
+        };
+        let applied = apply_agent_result(&result).expect("apply");
+        assert!(applied.comment.body.contains("@backend_engineer"));
+        assert_eq!(applied.comment.mentions, vec!["backend_engineer"]);
     }
 
     #[test]
