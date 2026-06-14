@@ -34,7 +34,6 @@ model_providers = []
 
 [agent.connectors.claude-code]
 enabled = true
-# command = "claude"
 # run_timeout_secs = 600
 model_providers = ["sonnet", "opus", "haiku"]
 

@@ -36,7 +36,7 @@ impl AgentProvider for ClaudeCodeProvider {
 
         let run_timeout = Duration::from_secs(self.config.run_timeout_secs);
 
-        let mut cmd = Command::new(&self.config.command);
+        let mut cmd = Command::new("claude");
         cmd.arg("-p")
             .arg(coppice_run_prompt())
             .arg("--output-format")

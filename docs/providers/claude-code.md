@@ -13,7 +13,6 @@ Auth is **host-managed**, exactly like the opencode connector. The operator runs
 ```toml
 [agent.connectors.claude-code]
 enabled = true
-# command = "claude"
 # run_timeout_secs = 600
 # model_providers = ["sonnet", "opus", "haiku"]
 ```

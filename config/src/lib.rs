@@ -260,8 +260,6 @@ impl Default for OpenCodeConnectorConfig {
 pub struct ClaudeCodeConnectorConfig {
     #[serde(default = "default_false")]
     pub enabled: bool,
-    #[serde(default = "default_claude_code_command")]
-    pub command: String,
     #[serde(default = "default_claude_code_run_timeout_secs")]
     pub run_timeout_secs: u64,
     #[serde(default)]
@@ -269,10 +267,6 @@ pub struct ClaudeCodeConnectorConfig {
 }
 
 pub type ClaudeCodeProviderConfig = ClaudeCodeConnectorConfig;
-
-fn default_claude_code_command() -> String {
-    "claude".into()
-}
 
 fn default_claude_code_run_timeout_secs() -> u64 {
     600
@@ -282,7 +276,6 @@ impl Default for ClaudeCodeConnectorConfig {
     fn default() -> Self {
         Self {
             enabled: default_false(),
-            command: default_claude_code_command(),
             run_timeout_secs: default_claude_code_run_timeout_secs(),
             model_providers: Vec::new(),
         }
@@ -519,7 +512,6 @@ mod tests {
         let wrapper: Wrapper = toml::from_str(toml).expect("parse");
         let cfg = wrapper.agent;
         assert!(cfg.connectors.claude_code.enabled);
-        assert_eq!(cfg.connectors.claude_code.command, "claude");
         assert_eq!(cfg.connectors.claude_code.run_timeout_secs, 900);
         assert_eq!(
             cfg.connectors.claude_code.model_providers,
@@ -531,7 +523,6 @@ mod tests {
     fn claude_code_connector_defaults() {
         let cfg = ClaudeCodeConnectorConfig::default();
         assert!(!cfg.enabled);
-        assert_eq!(cfg.command, "claude");
         assert_eq!(cfg.run_timeout_secs, 600);
         assert!(cfg.model_providers.is_empty());
     }
