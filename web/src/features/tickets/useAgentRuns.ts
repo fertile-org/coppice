@@ -121,6 +121,7 @@ export function useRunAgent(ticketId: string) {
     onSuccess: (run) => {
       upsertAgentRunInCache(queryClient, ticketId, run);
       invalidateRunRelated(queryClient, ticketId);
+      void queryClient.invalidateQueries({ queryKey: ['tickets'] });
     },
   });
 }
@@ -130,7 +131,10 @@ export function useStopRun(ticketId: string) {
 
   return useMutation({
     mutationFn: (runId: string) => postStopRun(runId),
-    onSuccess: () => invalidateRunRelated(queryClient, ticketId),
+    onSuccess: () => {
+      invalidateRunRelated(queryClient, ticketId);
+      void queryClient.invalidateQueries({ queryKey: ['tickets'] });
+    },
   });
 }
 

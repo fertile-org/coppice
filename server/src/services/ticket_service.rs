@@ -10,6 +10,7 @@ use crate::domain::ticket::{
 use serde_json::Value;
 use sqlx::PgPool;
 use sqlx::Row;
+use std::collections::HashSet;
 use time::OffsetDateTime;
 use uuid::Uuid;
 
@@ -45,6 +46,7 @@ pub struct TicketWithDisplay {
     pub ticket: Ticket,
     pub substatus_display: Option<SubstatusDisplay>,
     pub last_activity_at: OffsetDateTime,
+    pub has_active_run: bool,
 }
 
 impl<'a> TicketService<'a> {
@@ -92,9 +94,12 @@ impl<'a> TicketService<'a> {
         }
 
         let rows = q.fetch_all(self.pool).await?;
+        let active_ticket_ids = self.active_ticket_ids_for_project(project_id).await?;
         let mut results = Vec::with_capacity(rows.len());
         for row in &rows {
-            results.push(self.enrich_ticket(row_to_ticket(row)).await?);
+            let ticket = row_to_ticket(row);
+            let has_active_run = active_ticket_ids.contains(&ticket.id);
+            results.push(self.enrich_ticket(ticket, has_active_run).await?);
         }
         Ok(results)
     }
@@ -144,7 +149,7 @@ impl<'a> TicketService<'a> {
         .fetch_one(self.pool)
         .await?;
 
-        self.enrich_ticket(row_to_ticket(&row)).await
+        self.enrich_row(&row).await
     }
 
     pub async fn create_child(
@@ -187,7 +192,7 @@ impl<'a> TicketService<'a> {
         .fetch_one(self.pool)
         .await?;
 
-        self.enrich_ticket(row_to_ticket(&row)).await
+        self.enrich_row(&row).await
     }
 
     pub async fn set_pending_split_recommendation(
@@ -219,7 +224,9 @@ impl<'a> TicketService<'a> {
         .await?
         .ok_or(TicketError::TicketNotFound)?;
 
-        self.enrich_ticket(row_to_ticket(&row)).await
+        let ticket = row_to_ticket(&row);
+        let has_active_run = self.ticket_has_active_run(ticket.id).await?;
+        self.enrich_ticket(ticket, has_active_run).await
     }
 
     pub async fn get(&self, ticket_id: Uuid) -> Result<TicketWithDisplay, TicketError> {
@@ -241,7 +248,9 @@ impl<'a> TicketService<'a> {
         .await?
         .ok_or(TicketError::TicketNotFound)?;
 
-        self.enrich_ticket(row_to_ticket(&row)).await
+        let ticket = row_to_ticket(&row);
+        let has_active_run = self.ticket_has_active_run(ticket.id).await?;
+        self.enrich_ticket(ticket, has_active_run).await
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -308,7 +317,7 @@ impl<'a> TicketService<'a> {
         .await?
         .ok_or(TicketError::TicketNotFound)?;
 
-        self.enrich_ticket(row_to_ticket(&row)).await
+        self.enrich_row(&row).await
     }
 
     pub async fn update_status(
@@ -362,7 +371,7 @@ impl<'a> TicketService<'a> {
         .await?
         .ok_or(TicketError::TicketNotFound)?;
 
-        self.enrich_ticket(row_to_ticket(&row)).await
+        self.enrich_row(&row).await
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -441,7 +450,7 @@ impl<'a> TicketService<'a> {
         .await?
         .ok_or(TicketError::TicketNotFound)?;
 
-        self.enrich_ticket(row_to_ticket(&row)).await
+        self.enrich_row(&row).await
     }
 
     pub async fn clear_pending_recommendation(
@@ -467,7 +476,7 @@ impl<'a> TicketService<'a> {
         .await?
         .ok_or(TicketError::TicketNotFound)?;
 
-        self.enrich_ticket(row_to_ticket(&row)).await
+        self.enrich_row(&row).await
     }
 
     pub async fn clear_pending_split_recommendation(
@@ -493,7 +502,7 @@ impl<'a> TicketService<'a> {
         .await?
         .ok_or(TicketError::TicketNotFound)?;
 
-        self.enrich_ticket(row_to_ticket(&row)).await
+        self.enrich_row(&row).await
     }
 
     pub async fn list_children(
@@ -522,7 +531,7 @@ impl<'a> TicketService<'a> {
 
         let mut results = Vec::with_capacity(rows.len());
         for row in &rows {
-            results.push(self.enrich_ticket(row_to_ticket(row)).await?);
+            results.push(self.enrich_row(row).await?);
         }
         Ok(results)
     }
@@ -552,7 +561,7 @@ impl<'a> TicketService<'a> {
         .await?
         .ok_or(TicketError::TicketNotFound)?;
 
-        self.enrich_ticket(row_to_ticket(&row)).await
+        self.enrich_row(&row).await
     }
 
     pub async fn compute_last_activity_at(
@@ -594,7 +603,56 @@ impl<'a> TicketService<'a> {
         Ok(())
     }
 
-    async fn enrich_ticket(&self, ticket: Ticket) -> Result<TicketWithDisplay, TicketError> {
+    async fn active_ticket_ids_for_project(
+        &self,
+        project_id: Uuid,
+    ) -> Result<HashSet<Uuid>, TicketError> {
+        let rows = sqlx::query_scalar::<_, Uuid>(
+            r#"
+            SELECT DISTINCT ar.ticket_id
+            FROM agent_runs ar
+            INNER JOIN tickets t ON t.id = ar.ticket_id
+            WHERE t.project_id = $1
+              AND ar.status IN ('queued', 'running')
+            "#,
+        )
+        .bind(project_id)
+        .fetch_all(self.pool)
+        .await?;
+        Ok(rows.into_iter().collect())
+    }
+
+    async fn ticket_has_active_run(&self, ticket_id: Uuid) -> Result<bool, TicketError> {
+        sqlx::query_scalar::<_, bool>(
+            r#"
+            SELECT EXISTS(
+                SELECT 1
+                FROM agent_runs
+                WHERE ticket_id = $1
+                  AND status IN ('queued', 'running')
+            )
+            "#,
+        )
+        .bind(ticket_id)
+        .fetch_one(self.pool)
+        .await
+        .map_err(TicketError::from)
+    }
+
+    async fn enrich_row(
+        &self,
+        row: &sqlx::postgres::PgRow,
+    ) -> Result<TicketWithDisplay, TicketError> {
+        let ticket = row_to_ticket(row);
+        let has_active_run = self.ticket_has_active_run(ticket.id).await?;
+        self.enrich_ticket(ticket, has_active_run).await
+    }
+
+    async fn enrich_ticket(
+        &self,
+        ticket: Ticket,
+        has_active_run: bool,
+    ) -> Result<TicketWithDisplay, TicketError> {
         let agent_name = if let Some(agent_id) = ticket.assignee_agent_id {
             sqlx::query_scalar::<_, Option<String>>("SELECT name FROM agents WHERE id = $1")
                 .bind(agent_id)
@@ -616,6 +674,7 @@ impl<'a> TicketService<'a> {
             ticket,
             substatus_display,
             last_activity_at,
+            has_active_run,
         })
     }
 }

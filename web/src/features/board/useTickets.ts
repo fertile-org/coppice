@@ -34,6 +34,7 @@ export interface Ticket {
   parentTicketId?: string | null;
   pendingSplitRecommendation?: PendingSplitRecommendation | null;
   clarificationRound?: number;
+  hasActiveRun?: boolean;
 }
 
 export function ticketsQueryKey(projectId: string) {
@@ -74,6 +75,13 @@ export function useTickets(projectId: string | undefined) {
     queryKey: ticketsQueryKey(projectId ?? ''),
     queryFn: () => fetchTickets(projectId!),
     enabled: Boolean(projectId),
+    refetchInterval: (query) => {
+      const tickets = query.state.data;
+      if (tickets?.some((ticket) => ticket.hasActiveRun)) {
+        return 3000;
+      }
+      return false;
+    },
   });
 }
 

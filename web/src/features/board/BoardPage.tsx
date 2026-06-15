@@ -8,11 +8,9 @@ import {
   type DragStartEvent,
 } from '@dnd-kit/core';
 import { useQueryClient } from '@tanstack/react-query';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
-import { useSession } from '../auth/useSession';
 import { TicketDrawer } from '../tickets/TicketDrawer';
-import { useEventSocket } from '../ws/useEventSocket';
 import { setLastProjectId } from '../projects/useProjects';
 import { BoardColumn } from './BoardColumn';
 import { BOARD_COLUMNS, isTicketStatus, type TicketStatus } from './columns';
@@ -39,7 +37,6 @@ export function BoardPage() {
   const { projectId } = useParams<{ projectId: string }>();
   const [searchParams, setSearchParams] = useSearchParams();
   const queryClient = useQueryClient();
-  const { user } = useSession();
   const selectedTicketId = searchParams.get('ticket');
 
   const { data: tickets, isLoading, isError, refetch } = useTickets(projectId);
@@ -47,33 +44,6 @@ export function BoardPage() {
   const updateStatus = useUpdateTicketStatus(projectId ?? '');
 
   const [activeTicket, setActiveTicket] = useState<Ticket | null>(null);
-  const [runningTicketIds, setRunningTicketIds] = useState<Set<string>>(
-    () => new Set(),
-  );
-
-  const handleRunStarted = useCallback(
-    (payload: { ticket_id: string }) => {
-      setRunningTicketIds((current) => new Set(current).add(payload.ticket_id));
-    },
-    [],
-  );
-
-  const handleRunFinished = useCallback(
-    (payload: { ticket_id: string }) => {
-      setRunningTicketIds((current) => {
-        const next = new Set(current);
-        next.delete(payload.ticket_id);
-        return next;
-      });
-    },
-    [],
-  );
-
-  useEventSocket({
-    enabled: Boolean(user),
-    onRunStarted: handleRunStarted,
-    onRunFinished: handleRunFinished,
-  });
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -189,7 +159,6 @@ export function BoardPage() {
                   onQuickAdd={handleQuickAdd}
                   isAdding={createTicket.isPending}
                   onOpenTicket={openTicket}
-                  liveTicketIds={runningTicketIds}
                 />
               ))}
             </div>
@@ -201,7 +170,7 @@ export function BoardPage() {
                 <TicketCard
                   ticket={activeTicket}
                   onOpen={() => {}}
-                  isLive={runningTicketIds.has(activeTicket.id)}
+                  isLive={activeTicket.hasActiveRun ?? false}
                 />
               </div>
             ) : null}

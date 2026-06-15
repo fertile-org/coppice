@@ -105,6 +105,7 @@ pub(crate) struct TicketResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     pending_split_recommendation: Option<PendingSplitRecommendation>,
     clarification_round: i32,
+    has_active_run: bool,
 }
 
 #[derive(Deserialize)]
@@ -182,6 +183,7 @@ pub(crate) fn ticket_to_response(item: TicketWithDisplay) -> TicketResponse {
         parent_ticket_id: ticket.parent_ticket_id,
         pending_split_recommendation,
         clarification_round: ticket.clarification_round,
+        has_active_run: item.has_active_run,
     }
 }
 

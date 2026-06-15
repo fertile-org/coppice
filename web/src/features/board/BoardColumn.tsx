@@ -16,7 +16,6 @@ interface BoardColumnProps {
   onQuickAdd?: (title: string) => Promise<void>;
   isAdding?: boolean;
   onOpenTicket: (ticketId: string) => void;
-  liveTicketIds?: Set<string>;
 }
 
 export function BoardColumn({
@@ -26,7 +25,6 @@ export function BoardColumn({
   onQuickAdd,
   isAdding = false,
   onOpenTicket,
-  liveTicketIds,
 }: BoardColumnProps) {
   const [title, setTitle] = useState('');
   const { setNodeRef, isOver } = useDroppable({
@@ -100,7 +98,7 @@ export function BoardColumn({
             key={ticket.id}
             ticket={ticket}
             onOpen={onOpenTicket}
-            isLive={liveTicketIds?.has(ticket.id) ?? false}
+            isLive={ticket.hasActiveRun ?? false}
           />
         ))}
       </div>
