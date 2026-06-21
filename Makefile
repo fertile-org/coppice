@@ -10,7 +10,7 @@ COMPOSE_LOCAL = $(DOCKER_COMPOSE) -f deploy/docker-compose.local.yml
 BOOTSTRAP_EMAIL = admin@localhost
 BOOTSTRAP_PASSWORD = changeme
 
-.PHONY: compose-up compose-down compose-local-up compose-local-down server-dev test test-unit test-smoke test-pg-reset clippy clean migrate bootstrap web-install web-test web-dev web-build e2e-smoke e2e-smoke-m03 e2e-smoke-m04 e2e-smoke-m05 e2e-smoke-m06 release-tar
+.PHONY: compose-up compose-down compose-local-up compose-local-down server server-dev test test-unit test-smoke test-pg-reset clippy clean migrate bootstrap web-install web-test web-dev web-build e2e-smoke e2e-smoke-m03 e2e-smoke-m04 e2e-smoke-m05 e2e-smoke-m06 release-tar
 
 CARGO_TEST = cargo test --features embedded-test-db
 
@@ -25,6 +25,9 @@ compose-local-up:
 
 compose-local-down:
 	$(COMPOSE_LOCAL) down
+
+server:
+	cargo run -p coppice-server
 
 server-dev:
 	@command -v cargo-watch >/dev/null 2>&1 || { \
