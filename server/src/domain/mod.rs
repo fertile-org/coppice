@@ -6,6 +6,7 @@ pub mod comment;
 pub mod context_profile;
 pub mod job;
 pub mod mention;
+pub mod notification;
 pub mod project;
 pub mod repo;
 pub mod run;

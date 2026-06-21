@@ -49,6 +49,7 @@ pub async fn truncate_test_workspace(pool: &PgPool) -> anyhow::Result<()> {
     sqlx::query(
         r#"
         TRUNCATE
+            notifications,
             ticket_mentions,
             attachments,
             ticket_comments,

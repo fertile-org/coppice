@@ -327,6 +327,24 @@ async fn create_comment(
                 comment_id: comment.id,
                 mentioned_agent_id: mention.mentioned_agent_id,
             });
+
+            // Persist a durable notification for the mention. Idempotent per
+            // mention_id: re-processing the same comment will not duplicate.
+            if let Err(err) = crate::services::notification_service::NotificationService::new(pool)
+                .create_for_agent_mentioned(
+                    mention.id,
+                    ticket_id,
+                    comment.id,
+                    mention.mentioned_agent_id,
+                )
+                .await
+            {
+                tracing::warn!(error = %err, mention_id = %mention.id, "failed to create mention notification");
+            } else {
+                state.event_bus.publish(AppEvent::NotificationChanged {
+                    recipient_user_id: None,
+                });
+            }
         }
     }
 

@@ -7,6 +7,7 @@ pub mod comment_service;
 pub mod context_builder;
 pub mod job_service;
 pub mod mention_service;
+pub mod notification_service;
 pub mod pr_create_url;
 pub mod project_service;
 pub mod repo_service;

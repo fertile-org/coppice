@@ -23,6 +23,7 @@ use crate::services::context_builder::{
     write_agent_context_files, write_context_file, ContextInput, HumanRequest,
 };
 use crate::services::job_service::JobService;
+use crate::services::notification_service::NotificationService;
 use crate::services::result_contract::{self, ACCEPTANCE_CRITERIA_HEADER};
 use crate::services::run_orchestrator::{load_run_continuation_context, RunOrchestrator};
 use crate::services::run_service::{AgentRunWithConnector, RunService};
@@ -94,24 +95,26 @@ async fn process_one(state: &AppState, worker_id: &str) -> anyhow::Result<()> {
         Err(err) if err.downcast_ref::<JobCancelled>().is_some() => {
             state.run_streams.remove(run.id);
             job_svc.mark_cancelled(job.id).await?;
-            publish_run_finished(state, run.id, run.ticket_id, run.agent_id, RunStatus::Cancelled, None);
+            publish_run_finished(state, pool, run.id, run.ticket_id, run.agent_id, RunStatus::Cancelled, None).await;
         }
         Err(err) => {
             state.run_streams.remove(run.id);
             if run_svc.is_cancelled(run.id).await.unwrap_or(false) {
                 job_svc.mark_cancelled(job.id).await?;
-                publish_run_finished(state, run.id, run.ticket_id, run.agent_id, RunStatus::Cancelled, None);
+                publish_run_finished(state, pool, run.id, run.ticket_id, run.agent_id, RunStatus::Cancelled, None).await;
             } else {
                 let message = format_job_error(&err);
                 fail_job(pool, run.id, job.id, &message).await?;
                 publish_run_finished(
                     state,
+                    pool,
                     run.id,
                     run.ticket_id,
                     run.agent_id,
                     RunStatus::Failed,
                     Some(message),
-                );
+                )
+                .await;
             }
             return Err(err);
         }
@@ -523,12 +526,14 @@ async fn execute_job(
 
     publish_run_finished(
         state,
+        pool,
         run.id,
         run.ticket_id,
         run.agent_id,
         finished_run.status,
         finished_run.error_message,
-    );
+    )
+    .await;
 
     Ok(())
 }
@@ -675,8 +680,9 @@ async fn load_resume_session_id(
     session_id
 }
 
-fn publish_run_finished(
+async fn publish_run_finished(
     state: &AppState,
+    pool: &PgPool,
     run_id: uuid::Uuid,
     ticket_id: uuid::Uuid,
     agent_id: uuid::Uuid,
@@ -690,6 +696,21 @@ fn publish_run_finished(
         status: run_status_to_str(status).into(),
         error_message,
     });
+
+    // Persist durable in-app notifications for the four terminal statuses.
+    // Failures are non-fatal: a missing notification row is preferable to a
+    // dropped run-completion signal.
+    let status_str = run_status_to_str(status);
+    if let Err(err) = NotificationService::new(pool)
+        .create_for_run_finished(run_id, ticket_id, agent_id, status_str)
+        .await
+    {
+        tracing::warn!(error = %err, %run_id, "failed to create run-finished notification");
+    } else {
+        state.event_bus.publish(AppEvent::NotificationChanged {
+            recipient_user_id: None,
+        });
+    }
 }
 
 async fn fail_job(

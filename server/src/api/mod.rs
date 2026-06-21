@@ -9,6 +9,7 @@ mod comments;
 mod mentions;
 mod health;
 mod jobs;
+mod notifications;
 mod projects;
 mod repos;
 mod tickets;
@@ -37,6 +38,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .merge(agent_runs::routes())
         .merge(jobs::routes())
         .merge(users::routes())
+        .merge(notifications::routes())
         .layer(middleware::from_fn(csrf::csrf_middleware))
         .layer(middleware::from_fn_with_state(state.clone(), session::session_middleware));
 
