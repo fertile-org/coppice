@@ -202,6 +202,8 @@ pub struct AgentConnectorsConfig {
     pub claude_code: ClaudeCodeConnectorConfig,
     #[serde(default, rename = "codex")]
     pub codex: CodexConnectorConfig,
+    #[serde(default, rename = "kilo-code")]
+    pub kilo_code: KiloCodeConnectorConfig,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -305,6 +307,39 @@ impl Default for ClaudeCodeConnectorConfig {
         Self {
             enabled: default_false(),
             run_timeout_secs: default_claude_code_run_timeout_secs(),
+            model_providers: Vec::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct KiloCodeConnectorConfig {
+    #[serde(default = "default_false")]
+    pub enabled: bool,
+    #[serde(default = "default_kilo_code_command")]
+    pub command: String,
+    #[serde(default = "default_kilo_code_run_timeout_secs")]
+    pub run_timeout_secs: u64,
+    #[serde(default)]
+    pub model_providers: Vec<String>,
+}
+
+pub type KiloCodeProviderConfig = KiloCodeConnectorConfig;
+
+fn default_kilo_code_command() -> String {
+    "kilo".into()
+}
+
+fn default_kilo_code_run_timeout_secs() -> u64 {
+    600
+}
+
+impl Default for KiloCodeConnectorConfig {
+    fn default() -> Self {
+        Self {
+            enabled: default_false(),
+            command: default_kilo_code_command(),
+            run_timeout_secs: default_kilo_code_run_timeout_secs(),
             model_providers: Vec::new(),
         }
     }
@@ -586,6 +621,44 @@ mod tests {
     fn codex_connector_defaults() {
         let cfg = CodexConnectorConfig::default();
         assert!(!cfg.enabled);
+        assert_eq!(cfg.run_timeout_secs, 600);
+        assert!(cfg.model_providers.is_empty());
+    }
+
+    #[test]
+    fn deserializes_kilo_code_connector() {
+        let toml = r#"
+        [agent]
+        default_connector = "kilo-code"
+        worktrees_path = "./data/worktrees"
+        worker_count = 2
+
+        [agent.connectors.kilo-code]
+        enabled = true
+        command = "kilo"
+        run_timeout_secs = 900
+        model_providers = ["anthropic", "openai"]
+    "#;
+        #[derive(Deserialize)]
+        struct Wrapper {
+            agent: AgentConfig,
+        }
+        let wrapper: Wrapper = toml::from_str(toml).expect("parse");
+        let cfg = wrapper.agent;
+        assert!(cfg.connectors.kilo_code.enabled);
+        assert_eq!(cfg.connectors.kilo_code.command, "kilo");
+        assert_eq!(cfg.connectors.kilo_code.run_timeout_secs, 900);
+        assert_eq!(
+            cfg.connectors.kilo_code.model_providers,
+            vec!["anthropic", "openai"]
+        );
+    }
+
+    #[test]
+    fn kilo_code_connector_defaults() {
+        let cfg = KiloCodeConnectorConfig::default();
+        assert!(!cfg.enabled);
+        assert_eq!(cfg.command, "kilo");
         assert_eq!(cfg.run_timeout_secs, 600);
         assert!(cfg.model_providers.is_empty());
     }

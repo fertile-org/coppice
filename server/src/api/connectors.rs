@@ -143,6 +143,24 @@ async fn list_models(
                     .collect(),
             }))
         }
+        "kilo-code" => {
+            let command = &state.config.agent.connectors.kilo_code.command;
+            let models = crate::providers::kilo_models::list_kilo_models(
+                command,
+                &model_provider_id,
+            )
+            .await
+            .map_err(|_| StatusCode::BAD_GATEWAY)?;
+            Ok(Json(ModelListResponse {
+                items: models
+                    .into_iter()
+                    .map(|m| ModelResponse {
+                        id: m.id,
+                        name: m.name,
+                    })
+                    .collect(),
+            }))
+        }
         "mock" => Ok(Json(ModelListResponse { items: vec![] })),
         _ => Err(StatusCode::NOT_FOUND),
     }

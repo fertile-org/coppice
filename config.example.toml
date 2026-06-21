@@ -42,6 +42,13 @@ enabled = false
 # run_timeout_secs = 600
 model_providers = ["openai", "azure"]
 
+[agent.connectors.kilo-code]
+enabled = false
+command = "kilo"
+# run_timeout_secs = 600
+model_providers = []
+# model_providers = ["anthropic", "openai"]
+
 
 [web]
 port = 5001

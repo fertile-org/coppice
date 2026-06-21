@@ -381,7 +381,7 @@ async fn execute_job(
         .get(connector_name)
         .ok_or_else(|| anyhow::anyhow!("agent connector not configured: {connector_name}"))?;
 
-    let session_created_tx = if connector_name == "opencode" || connector_name == "claude-code" || connector_name == "codex" {
+    let session_created_tx = if connector_name == "opencode" || connector_name == "claude-code" || connector_name == "codex" || connector_name == "kilo-code" {
         let (tx, mut rx) = watch::channel(String::new());
         let pool = pool.clone();
         let run_id = run.id;
@@ -557,7 +557,9 @@ fn persist_artifacts(
                     .get("type")
                     .and_then(|v| v.as_str())
                     .is_some_and(|ty| {
-                        ty.starts_with("claude.console.") || ty.starts_with("codex.console.")
+                        ty.starts_with("claude.console.")
+                            || ty.starts_with("codex.console.")
+                            || ty.starts_with("kilo.console.")
                     }) =>
             {
                 console_events.push(event.clone());

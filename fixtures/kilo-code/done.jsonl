@@ -1,0 +1,4 @@
+{"type":"session.updated","properties":{"sessionID":"kilo_sess_abc123"}}
+{"type":"session.message","properties":{"message":{"info":{"role":"assistant"},"parts":[{"type":"text","text":"Reading .agent/context.md and implementing the feature..."}]}}}
+{"type":"session.message","properties":{"message":{"info":{"role":"assistant"},"parts":[{"type":"text","text":"{\"status\":\"done\",\"summary\":\"Kilo feature implementation complete.\",\"changedFiles\":[\"server/src/providers/kilo_code.rs\",\"config/src/lib.rs\"],\"testsRun\":[\"cargo test -p coppice-server --lib\"],\"mentionAgents\":[],\"blockers\":[]}"}]}}}
+{"type":"session.idle","properties":{"sessionID":"kilo_sess_abc123"}}

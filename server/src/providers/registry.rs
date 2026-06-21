@@ -4,6 +4,7 @@ use std::sync::Arc;
 use crate::config::AppConfig;
 use crate::providers::claude_code::ClaudeCodeProvider;
 use crate::providers::codex::CodexProvider;
+use crate::providers::kilo_code::KiloCodeProvider;
 use crate::providers::mock::MockProvider;
 use crate::providers::opencode::OpenCodeProvider;
 use crate::providers::AgentProvider;
@@ -14,6 +15,7 @@ pub struct ConnectorRegistry {
     opencode_model_providers: Vec<String>,
     claude_code_model_providers: Vec<String>,
     codex_model_providers: Vec<String>,
+    kilo_code_model_providers: Vec<String>,
 }
 
 impl ConnectorRegistry {
@@ -56,11 +58,21 @@ impl ConnectorRegistry {
             );
         }
 
+        if config.agent.connectors.kilo_code.enabled {
+            connectors.insert(
+                "kilo-code".into(),
+                Arc::new(KiloCodeProvider::new(
+                    config.agent.connectors.kilo_code.clone(),
+                )),
+            );
+        }
+
         Self {
             connectors,
             opencode_model_providers: config.agent.connectors.opencode.model_providers.clone(),
             claude_code_model_providers: config.agent.connectors.claude_code.model_providers.clone(),
             codex_model_providers: config.agent.connectors.codex.model_providers.clone(),
+            kilo_code_model_providers: config.agent.connectors.kilo_code.model_providers.clone(),
         }
     }
 
@@ -83,6 +95,7 @@ impl ConnectorRegistry {
             "opencode" => self.opencode_model_providers.clone(),
             "claude-code" => self.claude_code_model_providers.clone(),
             "codex" => self.codex_model_providers.clone(),
+            "kilo-code" => self.kilo_code_model_providers.clone(),
             _ => vec![],
         }
     }
@@ -158,5 +171,26 @@ mod tests {
         let config = AppConfig::load_defaults().expect("config");
         let registry = ConnectorRegistry::from_config(&config, None);
         assert!(!registry.has("codex"));
+    }
+
+    #[test]
+    fn registers_kilo_code_when_enabled() {
+        let mut config = AppConfig::load_defaults().expect("config");
+        config.agent.connectors.kilo_code.enabled = true;
+        config.agent.connectors.kilo_code.model_providers =
+            vec!["anthropic".into(), "openai".into()];
+        let registry = ConnectorRegistry::from_config(&config, None);
+        assert!(registry.has("kilo-code"));
+        assert_eq!(
+            registry.model_providers_for("kilo-code"),
+            vec!["anthropic", "openai"]
+        );
+    }
+
+    #[test]
+    fn does_not_register_kilo_code_when_disabled() {
+        let config = AppConfig::load_defaults().expect("config");
+        let registry = ConnectorRegistry::from_config(&config, None);
+        assert!(!registry.has("kilo-code"));
     }
 }

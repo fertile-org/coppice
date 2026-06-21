@@ -36,6 +36,11 @@ model_providers = ["sonnet", "opus", "haiku"]
 enabled = false
 model_providers = ["openai", "azure"]
 
+[agent.connectors.kilo-code]
+enabled = false
+command = "kilo"
+model_providers = []
+
 [web]
 port = 5001
 static_dir = "./web/dist"

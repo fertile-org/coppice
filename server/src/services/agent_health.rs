@@ -107,6 +107,20 @@ pub async fn evaluate_agent_health(
             }
             (AgentHealthStatus::Healthy, None)
         }
+        "kilo-code" => {
+            if let Some(ref mp) = agent.model_provider {
+                if !registry.has_model_provider("kilo-code", mp) {
+                    return (
+                        AgentHealthStatus::MissingConfig,
+                        Some(format!(
+                            "Model provider '{}' is not configured on this server",
+                            mp
+                        )),
+                    );
+                }
+            }
+            (AgentHealthStatus::Healthy, None)
+        }
         "opencode" => {
             if let Some(ref mp) = agent.model_provider {
                 if !registry.has_model_provider("opencode", mp) {
