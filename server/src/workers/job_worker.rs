@@ -554,7 +554,9 @@ fn persist_artifacts(
                     .get("type")
                     .and_then(|v| v.as_str())
                     .is_some_and(|ty| {
-                        ty.starts_with("claude.console.") || ty.starts_with("codex.console.")
+                        ty.starts_with("claude.console.")
+                            || ty.starts_with("codex.console.")
+                            || ty.starts_with("kilo.console.")
                     }) =>
             {
                 console_events.push(event.clone());
