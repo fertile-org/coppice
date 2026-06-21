@@ -124,43 +124,39 @@ async fn live_ws_receives_mock_frames_and_terminal_log_written() {
 
     let ws_url = format!("ws://{addr}/ws/agent-runs/{run_id}/live");
 
-    // The worker registers the stream only after dequeue; reconnect until we catch live frames.
+    // The stream handle is registered before the run is marked running, so a
+    // single connect attaches deterministically (live frames while active, or
+    // artifact replay once terminal). No reconnect loop required.
+    let ws = connect_ws(&ws_url, Some(&cookie)).await;
+    let (_, mut read) = ws.split();
+
     let mut saw_mock_frame = false;
     let mut saw_end = false;
-    let deadline = Instant::now() + Duration::from_secs(10);
+    let deadline = Instant::now() + Duration::from_secs(15);
 
     while Instant::now() < deadline && !saw_end {
-        let ws = connect_ws(&ws_url, Some(&cookie)).await;
-        let (_, mut read) = ws.split();
-
-        loop {
-            let msg = tokio::time::timeout(Duration::from_millis(500), read.next()).await;
-            match msg {
-                Ok(Some(Ok(Message::Text(text)))) => {
-                    let json: serde_json::Value = serde_json::from_str(&text).unwrap();
-                    if json["type"] == "frame" {
-                        if json["data"]
-                            .as_str()
-                            .unwrap_or("")
-                            .contains("Mock agent")
-                        {
-                            saw_mock_frame = true;
-                        }
-                    } else if json["type"] == "end" {
-                        if json["status"] == "succeeded" {
-                            saw_end = true;
-                        }
-                        break;
+        let msg = tokio::time::timeout(Duration::from_millis(500), read.next()).await;
+        match msg {
+            Ok(Some(Ok(Message::Text(text)))) => {
+                let json: serde_json::Value = serde_json::from_str(&text).unwrap();
+                if json["type"] == "frame" {
+                    if json["data"]
+                        .as_str()
+                        .unwrap_or("")
+                        .contains("Mock agent")
+                    {
+                        saw_mock_frame = true;
                     }
+                } else if json["type"] == "end" {
+                    if json["status"] == "succeeded" {
+                        saw_end = true;
+                    }
+                    break;
                 }
-                Ok(Some(Ok(_))) => {}
-                Ok(Some(Err(e))) => panic!("ws error: {e}"),
-                Ok(None) | Err(_) => break,
             }
-        }
-
-        if !saw_end {
-            tokio::time::sleep(Duration::from_millis(50)).await;
+            Ok(Some(Ok(_))) => {}
+            Ok(Some(Err(e))) => panic!("ws error: {e}"),
+            Ok(None) | Err(_) => break,
         }
     }
 
@@ -249,4 +245,90 @@ async fn events_ws_receives_run_finished() {
     }
 
     assert!(saw_finished, "expected agent_run.finished event");
+}
+
+/// Insert a run directly into the DB in the given status, tied to an existing
+/// ticket/agent. Used to deterministically model "a run that already
+/// transitioned to running before the client connected" without racing the
+/// worker (which finishes mock runs in milliseconds).
+async fn insert_run_row(
+    ticket_id: &str,
+    agent_id: &str,
+    status: &str,
+) -> String {
+    use coppice_server::db;
+    let run_id = uuid::Uuid::new_v4().to_string();
+    let pool = db::shared_test_pool()
+        .await
+        .expect("shared test pool");
+    sqlx::query(
+        r#"
+        INSERT INTO agent_runs (
+            id, ticket_id, agent_id, job_type, status, sandbox_profile_id
+        )
+        VALUES ($1, $2, $3, $4, $5, $6)
+        "#,
+    )
+    .bind(&run_id)
+    .bind(ticket_id)
+    .bind(agent_id)
+    .bind("work_on_ticket")
+    .bind(status)
+    .bind("permissive-default")
+    .execute(&pool)
+    .await
+    .expect("insert active run");
+    run_id
+}
+
+#[tokio::test]
+async fn events_ws_late_subscriber_learns_running_status() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+
+    let (app, cookie, csrf, _env) = common::bootstrap_and_login_with_workers("done").await;
+    let addr = common::spawn_test_server(app.clone()).await;
+
+    let (_git_dir, local_path) = common::create_temp_git_checkout();
+    let repo_id =
+        common::register_test_repo(&app, &local_path.display().to_string(), &cookie, &csrf).await;
+    let (ticket_id, agent_id, _) = setup_agent_ticket(&app, &cookie, &csrf, &repo_id).await;
+
+    // A run already transitioned to `running` before the client connects — no
+    // agent_run.started broadcast is pending. The snapshot-on-connect path must
+    // surface current truth.
+    let run_id = insert_run_row(&ticket_id, &agent_id, "running").await;
+
+    let ws_url = format!("ws://{addr}/ws/events");
+    let ws = connect_ws(&ws_url, Some(&cookie)).await;
+    let (_, mut read) = ws.split();
+
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let mut saw_started = false;
+
+    while Instant::now() < deadline {
+        let msg = tokio::time::timeout(Duration::from_secs(2), read.next()).await;
+        match msg {
+            Ok(Some(Ok(Message::Text(text)))) => {
+                let json: serde_json::Value = serde_json::from_str(&text).unwrap();
+                if json["type"] == "agent_run.started" {
+                    assert_eq!(json["run_id"].as_str().unwrap(), run_id);
+                    assert_eq!(json["status"].as_str().unwrap(), "running");
+                    saw_started = true;
+                    break;
+                }
+            }
+            Ok(Some(Ok(_))) => {}
+            Ok(Some(Err(e))) => panic!("ws error: {e}"),
+            Ok(None) => break,
+            Err(_) => continue,
+        }
+    }
+
+    assert!(
+        saw_started,
+        "late subscriber must learn the run is running without polling"
+    );
 }

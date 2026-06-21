@@ -156,6 +156,14 @@ async fn execute_job(
         return Err(JobCancelled.into());
     }
 
+    // Register the live stream handle BEFORE marking the run running so that any
+    // client that observes the run as active (DB status or the agent_run.started
+    // event below) can attach deterministically. Registering after mark_running
+    // left a window where wait_for_run_stream polled an empty registry; short
+    // runs finished and unregistered before a client could attach.
+    let stream = state.run_streams.register(run.id);
+    let cancel_rx = stream.cancelled_rx();
+
     run_svc.mark_running(run.id).await.context("mark run running")?;
 
     tracing::info!(
@@ -180,9 +188,6 @@ async fn execute_job(
             ticket = updated;
         }
     }
-
-    let stream = state.run_streams.register(run.id);
-    let cancel_rx = stream.cancelled_rx();
 
     let snapshot_handle = stream.clone();
     let artifacts_dir = state.config.storage.artifacts_dir.clone();
