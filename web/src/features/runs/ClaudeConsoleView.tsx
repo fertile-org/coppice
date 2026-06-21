@@ -5,6 +5,7 @@ import { AgentResultCard } from '../../opencode-session/parts/AgentResultCard';
 import { ToolOutput, ToolShell } from '../../opencode-session/tools/ToolShell';
 import { sessionTheme } from '../../opencode-session/theme/session-theme';
 import type { ClaudeConsoleEntry } from './claude-console-state';
+import { useTypewriter } from './useTypewriter';
 
 function SessionLine({
   model,
@@ -29,6 +30,7 @@ function ThinkingEntry({
   streaming?: boolean;
 }) {
   const content = text.replaceAll('[REDACTED]', '').trim();
+  const revealed = useTypewriter(content, { enabled: !!streaming });
   if (!content) return null;
 
   return (
@@ -38,18 +40,25 @@ function ThinkingEntry({
       streaming={streaming}
     >
       <div className={sessionTheme.fontMonoSm}>
-        <MarkdownContent tone="thinking">{content}</MarkdownContent>
+        <MarkdownContent tone="thinking">{revealed}</MarkdownContent>
       </div>
     </CollapsibleDetail>
   );
 }
 
-function TextEntry({ markdown }: { markdown: string }) {
+function TextEntry({
+  markdown,
+  animate,
+}: {
+  markdown: string;
+  animate?: boolean;
+}) {
   const content = markdown.trim();
+  const revealed = useTypewriter(content, { enabled: !!animate });
   if (!content) return null;
   return (
     <div>
-      <MarkdownContent>{content}</MarkdownContent>
+      <MarkdownContent>{revealed}</MarkdownContent>
     </div>
   );
 }
@@ -128,7 +137,13 @@ function renderEntry(
         />
       );
     case 'text':
-      return <TextEntry key={entry.id} markdown={entry.markdown} />;
+      return (
+        <TextEntry
+          key={entry.id}
+          markdown={entry.markdown}
+          animate={isLive && index === total - 1}
+        />
+      );
     case 'tool':
       return <ToolEntry key={entry.id} entry={entry} />;
     case 'result':
