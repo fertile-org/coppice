@@ -86,8 +86,8 @@ function slugifyAgentName(input: string): string {
   return out.replace(/^-+|-+$/g, '');
 }
 
-function agentKey(agent: Pick<Agent, 'name' | 'presetSource'>): string {
-  return agent.presetSource ?? slugifyAgentName(agent.name);
+function agentMentionKey(agent: Pick<Agent, 'name'>): string {
+  return slugifyAgentName(agent.name);
 }
 
 interface MentionMatch {
@@ -132,10 +132,10 @@ export function TicketCommentsTab({ ticketId }: TicketCommentsTabProps) {
       (agents ?? [])
         .filter((agent) => agent.enabled)
         .map((agent) => ({
-          key: agentKey(agent),
+          key: agentMentionKey(agent),
           name: agent.name,
         }))
-        .sort((a, b) => a.key.localeCompare(b.key)),
+        .sort((a, b) => a.name.localeCompare(b.name)),
     [agents],
   );
   const createComment = useCreateComment(ticketId);
@@ -331,11 +331,11 @@ export function TicketCommentsTab({ ticketId }: TicketCommentsTabProps) {
                       onClick={() => insertMention(option.key)}
                       className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left font-body text-sm hover:bg-surface"
                     >
-                      <span className="font-mono text-text-primary">
-                        @{option.key}
-                      </span>
-                      <span className="truncate text-text-muted">
+                      <span className="truncate font-medium text-text-primary">
                         {option.name}
+                      </span>
+                      <span className="shrink-0 font-mono text-xs text-text-muted">
+                        @{option.key}
                       </span>
                     </button>
                   </li>

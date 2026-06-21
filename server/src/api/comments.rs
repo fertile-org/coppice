@@ -355,12 +355,7 @@ fn agent_key_for_agent(agent_id: Uuid, agents: &[crate::domain::agent::Agent]) -
     agents
         .iter()
         .find(|agent| agent.id == agent_id)
-        .map(|agent| {
-            agent
-                .preset_source
-                .clone()
-                .unwrap_or_else(|| slugify(&agent.name))
-        })
+        .map(|agent| slugify(&agent.name))
         .unwrap_or_else(|| "unknown".to_string())
 }
 
