@@ -1,0 +1,4 @@
+{"type":"session.updated","properties":{"sessionID":"kilo_sess_def456"}}
+{"type":"session.message","properties":{"message":{"info":{"role":"assistant"},"parts":[{"type":"text","text":"I need additional capability to proceed."}]}}}
+{"type":"session.message","properties":{"message":{"info":{"role":"assistant"},"parts":[{"type":"text","text":"{\"status\":\"blocked\",\"blockerType\":\"missing_capability\",\"summary\":\"The required capability is not available\",\"mentionAgents\":[\"devops\"],\"requiredCapabilities\":[\"docker\"]}"}]}}}
+{"type":"session.idle","properties":{"sessionID":"kilo_sess_def456"}}
