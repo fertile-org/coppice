@@ -47,10 +47,23 @@ vi.mock('./useAgentRuns', () => ({
   useRunAgent: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useStopRun: () => ({ mutateAsync: vi.fn(), isPending: false }),
   isActiveRunStatus: () => false,
+  shouldPollRunForReconciliation: () => false,
 }));
 
 vi.mock('../repos/useRepos', () => ({
   useRepos: () => ({ data: [] }),
+}));
+
+vi.mock('../runs/LiveConsole', () => ({
+  LiveConsole: () => <div>Live console</div>,
+}));
+
+vi.mock('../runs/LiveSession', () => ({
+  LiveSession: () => <div>Live session</div>,
+}));
+
+vi.mock('../runs/ClaudeLiveConsole', () => ({
+  ClaudeLiveConsole: () => <div>Claude live console</div>,
 }));
 
 vi.mock('./TicketCommentsTab', () => ({

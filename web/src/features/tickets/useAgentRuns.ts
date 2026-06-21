@@ -59,6 +59,17 @@ export function isActiveRunStatus(status: RunStatus): boolean {
   return status === 'queued' || status === 'running';
 }
 
+export function shouldPollRunForReconciliation(run: AgentRun): boolean {
+  return isActiveRunStatus(run.status) || run.endedAt == null;
+}
+
+export function agentRunsRefetchInterval(runs: AgentRun[] | undefined): number | false {
+  if (runs?.some(shouldPollRunForReconciliation)) {
+    return 3000;
+  }
+  return false;
+}
+
 function invalidateRunRelated(queryClient: QueryClient, ticketId: string) {
   void queryClient.invalidateQueries({ queryKey: agentRunsQueryKey(ticketId) });
   void queryClient.invalidateQueries({ queryKey: ticketQueryKey(ticketId) });
@@ -71,11 +82,7 @@ export function useAgentRuns(ticketId: string | undefined) {
     queryFn: () => fetchAgentRuns(ticketId!),
     enabled: Boolean(ticketId),
     refetchInterval: (query) => {
-      const runs = query.state.data;
-      if (runs?.some((run) => isActiveRunStatus(run.status))) {
-        return 3000;
-      }
-      return false;
+      return agentRunsRefetchInterval(query.state.data);
     },
   });
 }

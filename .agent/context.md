@@ -1,132 +1,82 @@
 # Current task
 
-**Title:** Implement Codex CLI
+**Title:** [Bug] Make frontend WS clients robust & status reconciliation reliable
 
 **Description:**
 
-## Goal
+## Problem
 
-Implement the `codex` connector — OpenAI Codex CLI integration via subprocess, mirroring the existing `claude-code` connector. Codex is a subscription/OAuth coding-agent CLI; Coppice spawns it as a child process that inherits the server's environment (host-managed auth, same model as claude-code and opencode).
+The frontend half of the "needs reload" bug: the WebSocket client lifecycle is fragile and its REST polling backstop can be defeated by the same lost events it's meant to cover for.
 
-This is a config + one-adapter-impl change. The orchestration layer (`AgentProvider` trait, job worker, result contract) is connector-agnostic and does **not** change. There is no existing codex code — this is greenfield.
+- `web/src/features/ws/useEventSocket.ts:155` — `useEffect` deps `[enabled, onRunStarted, onRunFinished]` tear down and re-register the listener whenever the callbacks change identity. At `subscriberCount === 0` (lines 151-153) the socket is fully disconnected, so any churn in `App.tsx`'s `handleRunFinished`/`handleRunStarted` identities (e.g. an unstable `toast`) drops the socket and loses events. Reconnect is a fixed 1000ms with no backoff, no cap, no visibility handling.
+- `web/src/features/tickets/useAgentRuns.ts:73-79` — `refetchInterval` returns 3000ms **only while the cache believes a run is active**, else `false`. If an out-of-order or lost event flips the cached run to terminal, polling stops and the UI is stuck until a manual reload — the backstop is gated on the same state it's protecting.
+- `web/src/features/tickets/TicketDrawer.tsx:52` — `liveRun = activeRun ?? latestRun`; the reconnect guards in `LiveConsole.tsx`/`LiveSession.tsx`/`ClaudeLiveConsole.tsx` key off this derived `runStatus`, so a stale derivation stalls the live console even while the server-side run is still active.
+- The entire WS client lifecycle is **untested**: `web/src/features/ws/useEventSocket.test.ts` only tests `dispatchMessageForTest`; there are no tests for `LiveConsole.tsx`, `LiveSession.tsx`, or `ClaudeLiveConsole.tsx`.
 
-## Template
+## Scope
 
-Clone `server/src/providers/claude_code.rs` and `docs/providers/claude-code.md`. Both are subscription-CLI subprocess connectors that read NDJSON stdout, accumulate assistant text, capture a session id, forward display frames to the run stream, and extract the `AgentRunResult` contract from the terminal event via `extract_result_from_text`.
+1. **Stabilize the global event socket lifecycle** (`web/src/features/ws/useEventSocket.ts`, `web/src/App.tsx`). Decouple connection lifetime from callback identity (memoize callbacks / move listeners out of the effect deps) so renders don't disconnect the socket. Add exponential backoff with a cap on reconnect, and reconnect on `visibilitychange` (tab refocus). Never silently drop to zero subscribers during normal UI churn.
+2. **Make the polling backstop unconditional during a run.
 
-## Architecture context
+** In `web/src/features/tickets/useAgentRuns.ts`, ensure polling continues reliably while a run is known-active server-side — do not let a single stale/lost event flip the cache to terminal and kill polling. Coordinate with the backend child's snapshot/resync so the client reconciles against server truth (e.g. on reconnect, refetch runs regardless of cached status).
+3. **Fix live-console reconnect guards.
 
-- **Trait:** `AgentProvider` (`server/src/providers/mod.rs:110-114`) — `fn id()` + `async fn run(AgentRunInput) -> Result<AgentRunResult, ProviderError>`.
-- **Result contract:** `AgentRunResult` (`server/src/providers/mod.rs:40-94`) — `Done`/`Blocked`/`Continued` tagged enum. Connector-agnostic.
-- **Shared helpers:** `coppice_run_prompt()` and `extract_result_from_text()` in `server/src/sessions/opencode_events.rs:6-12,244-279`. Reuse both — do not re-implement result parsing.
-- **Claude-code reference impl:** `server/src/providers/claude_code.rs` (510 lines incl. tests).
+** In `web/src/features/tickets/TicketDrawer.tsx` and the three live-console components, ensure `runStatus` derivation and `isActiveRunStatus` guards cannot false-negative a run that is still server-side active (e.g. derive from the authoritative run id, not from cache that may be stale). Keep the existing `recoverable`/`interrupted` stop-reconnect semantics intact.
+4. **Connection-state visibility.
 
-## Work breakdown
+** Surface connecting/live/disconnected/reconnecting clearly in the UI (extend `web/src/features/runs/LiveRunActivityBar.tsx`) so a dead socket is observable instead of silent.
+5. **Tests.
 
-### 1. Provider implementation
-- Create `server/src/providers/codex.rs` — `CodexProvider` implementing `AgentProvider`, `id()` returns `"codex"`.
-- Add `pub mod codex;` to `server/src/providers/mod.rs`.
-- `run()` spawns the Codex CLI as a subprocess (CWD = worktree, stdout/stderr piped, stdin null), sets a deadline from `run_timeout_secs`, loops over stdout lines with cancel/timeout `tokio::select!`, accumulates assistant text, captures session id via `session_created_tx`, forwards display text as `Frame`s, and calls `extract_result_from_text` on the terminal output.
-- **Open question to verify first (upstream Codex CLI docs):** the exact command + flags. Claude Code uses `claude -p "<prompt>" --output-format stream-json --verbose --allowedTools ... --permission-mode bypassPermissions`. Determine the Codex CLI equivalent for: non-interactive prompt mode, structured/streamed JSON output on stdout, approval/sandbox mode that lets it run autonomously, and `--model` selection. If the CLI emits line-delimited JSON events, write `extract_display_text`/`extract_assistant_text` helpers for Codex's event shape (analogous to `claude_code.rs:202-244`). If it emits plain text only, accumulate all stdout and rely on `extract_result_from_text`'s JSON-extraction heuristics.
+** Add coverage for: connect/reconnect/backoff in `useEventSocket`, status reconciliation when a `started`/`finished` event is missed, and at least one live-console reconnect guard behavior.
 
-### 2. Config
-- Add `CodexConnectorConfig` struct to `config/src/lib.rs` (mirror `ClaudeCodeConnectorConfig` at lines 259-283): `enabled: bool` (default false), `run_timeout_secs: u64` (default 600), `model_providers: Vec<String>`.
-- Add `pub type CodexProviderConfig = CodexConnectorConfig;`.
-- Add `#[serde(default, rename = "codex")] pub codex: CodexConnectorConfig` to `AgentConnectorsConfig` (`config/src/lib.rs:197-203`).
-- Add config tests mirroring `deserializes_claude_code_connector` and `claude_code_connector_defaults` (`config/src/lib.rs:495-528`).
+## Constraints
 
-### 3. Registry
-- `server/src/providers/registry.rs`: import `CodexProvider`, add `codex_model_providers` field, register when `config.agent.connectors.codex.enabled` (mirror lines 39-46), add `"codex"` arm in `model_providers_for` (lines 69-75), add tests mirroring `registers_claude_code_when_enabled` / `does_not_register_claude_code_when_disabled` (lines 108-127).
+- Do not change the wire shape of consumed events unless coordinated with the backend child (this ticket may consume a new resync/snapshot event if the backend child exposes one).
+- Stay within React/TanStack Query conventions used in `web/`.
+- No new dependencies without justification.
 
-### 4. Health
-- `server/src/services/agent_health.rs:80-95`: add a `"codex" =>` match arm mirroring the claude-code arm (model-provider presence check → Healthy).
+## How to verify
 
-### 5. Connectors API
-- `server/src/api/connectors.rs:101-134`: add a `"codex" =>` arm in `list_models` returning `known_codex_models(...)` (mirror `known_claude_code_models` at lines 142-157). Codex model list is a small known set per model provider — confirm actual model ids from upstream docs.
-
-### 6. Job worker — session capture
-- `server/src/workers/job_worker.rs:369`: extend the `session_created_tx` condition `if connector_name == "opencode" || connector_name == "claude-code"` to include `"codex"` **only if** the codex provider emits a session id. If the Codex CLI does not expose a session id, leave this unchanged and the provider should not set `session_created_tx`.
-
-### 7. Job worker — session resume (DECISION: skip for now)
-- Do **not** extend `load_resume_session_id` (`job_worker.rs:574-602`) for codex. The deferred doc (`docs/providers/codex.md:18`) marks session resume as "Unreliable." Cross-run continuity uses the `Continued` + context.md checkpoint path, which is provider-agnostic and already works for all connectors. Add a code comment noting this. If a future Codex CLI version stabilizes resume, open a follow-up ticket.
-
-### 8. WebSocket live recovery
-- `server/src/api/ws/live.rs:81-94`: confirm codex falls through to the generic `terminal.log` replay path (lines 95-103) — this is the correct behavior for a per-run subprocess (same as claude-code's fallback). Likely no code change needed; verify with a test or add `is_codex` branch only if the generic path is insufficient.
-
-### 9. Config files
-- Add `[agent.connectors.codex]` block to `config.example.toml` (after the claude-code block at lines 35-38) with `enabled = false`, `model_providers`.
-- Add the same block to `deploy/config/default.toml` (after lines 31-33).
-
-### 10. Fixtures + unit tests
-- Create `fixtures/codex/done.jsonl` and `fixtures/codex/blocked.jsonl` with captured/representative Codex CLI output (same role as `fixtures/claude-code/*.jsonl`).
-- In `server/src/providers/codex.rs` `#[cfg(test)] mod tests`: mirror the claude-code tests — fixture result extraction (done + blocked), provider id, session-id extraction, streaming frame publishing.
-- **No real `codex` binary in CI** (`docs/testing.md:107`). All tests use captured fixtures.
-
-### 11. Docs
-- Rewrite `docs/providers/codex.md` from "Deferred" to "Implemented" — mirror `docs/providers/claude-code.md` structure (auth, capabilities table, command shape, stream-event mapping, live streaming, context compaction). Drop the "Why deferred" and "TmuxStream" sections.
-- Update `docs/providers/README.md:10` — flip status from Deferred to Implemented.
-- Update `docs/providers.md:8` — flip "deferred" wording.
-- Update `docs/architecture.md:25,60-76` — add `providers/codex.rs` to the module list.
-- Note `docs/milestones/M07-trust-and-signals.md:208` says codex is "post-v1" — this ticket explicitly brings it forward. No milestone doc change required, but the implementing agent should be aware it is ahead of the documented roadmap.
-
-## Verification
-
-- `cargo test -p coppice-server --lib` — new codex provider + registry + health unit tests pass.
-- `cargo test -p coppice-config --lib` — new codex config deserialization tests pass.
-- `cargo clippy -p coppice-server -p coppice-config -- -D warnings` — clean.
-- `make web-test` — frontend unaffected (connector list is data-driven from `GET /api/connectors`; codex appears automatically once registered).
-- Do **not** run `make test` or `cargo test --workspace` unless final acceptance demands it (per platform verification rules).
-
-## Out of scope
-
-- Session resume for codex (documented as unreliable — follow-up if CLI stabilizes it).
-- MCP injection via `$CODEX_HOME/config.toml` (separate follow-up).
-- Live reattach after server restart (not possible for per-run subprocess; terminal.log replay is the fallback).
-- The `shell` connector (separate ticket).
+- `make web-test`
+- `make e2e-smoke-m03` (end-to-end validation of the WS flow)
+- Manual: run an agent and confirm status flips to `running` and console streams without reload; simulate a dropped socket (devtools offline toggle) and confirm automatic recovery.
 
 ## Acceptance criteria
 
-- [ ] `server/src/providers/codex.rs` exists and implements `AgentProvider` with `id() == "codex"`, spawning the Codex CLI as a subprocess with CWD = worktree
-- [ ] `pub mod codex;` declared in `server/src/providers/mod.rs`
-- [ ] `CodexConnectorConfig` (enabled, run_timeout_secs default 600, model_providers) added to `config/src/lib.rs` with `rename = "codex"` serde attr and `CodexProviderConfig` type alias
-- [ ] `AgentConnectorsConfig` includes the `codex` field; config deserialization + defaults tests pass
-- [ ] `ConnectorRegistry::from_config` registers codex when enabled; `model_providers_for("codex")` returns configured providers; registry tests mirror the claude-code pair
-- [ ] `evaluate_agent_health` (`agent_health.rs`) has a `"codex"` arm returning Healthy when model provider is configured
-- [ ] `list_models` (`connectors.rs`) has a `"codex"` arm returning known models
-- [ ] `job_worker.rs:369` session-capture condition updated only if codex emits a session id; `load_resume_session_id` left claude-code-only with a comment explaining why
-- [ ] `config.example.toml` and `deploy/config/default.toml` both have `[agent.connectors.codex]` blocks
-- [ ] `fixtures/codex/done.jsonl` and `blocked.jsonl` exist; codex provider unit tests pass against them (done + blocked result extraction, provider id, streaming frames)
-- [ ] `docs/providers/codex.md` rewritten to Implemented mirroring `claude-code.md`; `docs/providers/README.md`, `docs/providers.md`, `docs/architecture.md` updated
-- [ ] `cargo clippy -p coppice-server -p coppice-config -- -D warnings` clean
-- [ ] No real `codex` binary invoked in any automated test
+- [ ] `useEventSocket` connection lifecycle is independent of `onRunStarted`/`onRunFinished` identity — re-renders do not disconnect the socket (new unit test asserting no teardown on callback identity change).
+- [ ] Reconnect uses exponential backoff (with cap) and reconnects on `visibilitychange` (unit test).
+- [ ] Polling (`useAgentRuns`) remains a reliable backstop: a missed/lost event cannot leave the UI believing a run is terminal while it is still server-side active (unit test simulating event loss).
+- [ ] Live-console reconnect guards do not false-negative an active run due to stale `runStatus` derivation (unit or component test).
+- [ ] Connection state (connecting/live/disconnected/reconnecting) is visible to the user in the live-console UI.
+- [ ] `make web-test` passes.
 
 **Status:** in_progress
 
 # Agent role
 
-**Name:** BE Agent Claude
-**Role:** Backend Engineer
+**Name:** FE Agent
+**Role:** Frontend Engineer
 
 **Skills:**
-- API design
-- services
-- persistence
-- backend testing
+- UI implementation
+- component design
+- accessibility
+- frontend testing
 
 
 **Responsibilities:**
-- implement backend tickets
-- follow project service conventions
-- fix backend defects
-- raise backend tech debt
+- implement frontend tickets
+- follow project UI conventions
+- fix UI defects
+- raise frontend tech debt
 
 
 **System prompt:**
 
 # SOUL
-You are the Backend Engineer Agent in Coppice.
-Your job is to implement server-side ticket work in the assigned repository — APIs, services, persistence, and backend tests.
-Follow existing module boundaries, error handling, and data access patterns in the repo.
+You are the Frontend Engineer Agent in Coppice.
+Your job is to implement UI-facing ticket work in the assigned repository — whatever framework or design system it uses.
+Read existing patterns first. Match the project's component, styling, and testing conventions.
 
 ## Stance
 Be direct, practical, opinionated, and high-agency.
@@ -175,13 +125,14 @@ Prefer clear names, focused diffs, and summaries that help the next person act.
 Avoid corporate language and generic filler in commit messages, PR descriptions, and docs.
 
 ## Operating Mode
-Default to direct execution on backend scope.
-Verify behavior with tests or reproducible checks when the repo supports them.
-Escalate when schema ownership, security review, or infra changes are required outside your ticket.
+Default to direct execution on frontend scope.
+Inspect existing UI architecture before adding new patterns.
+Escalate when the ticket requires backend contract changes, design decisions outside the repo, or missing assets.
 
 ## Delegation Rules
-Do not silently change frontend contracts without calling it out.
-Mention DBA, security, or DevOps agents when their domain is touched.
+Do not silently expand into backend or infra work.
+Use mentions and blockers when another role must act.
+Keep diffs focused on the ticket scope.
 
 ## Standards
 Require clear scope, explicit assumptions, grounded evidence, and verification for technical claims.
@@ -217,20 +168,9 @@ Do not let repeated failure modes stay invisible.
 
 **Default branch:** main
 
-**Worktree path:** ./data/worktrees/TICKET-3ed145fa-coppice
+**Worktree path:** ./data/worktrees/TICKET-1995f379-coppice
 
 **Ticket branch:** All agents on this ticket share one worktree and branch. Review or continue from this branch — do not create a separate worktree.
-
-## Ticket thread
-
-Recent activity on this ticket (oldest first):
-
-- **PM Agent** (implementation done): Updated the ticket description and acceptance criteria. Recommends **backend_engineer** for the next run.
-
----
-**Git:** branch `agent/TICKET-3ed145fa` · no new changes (HEAD `5874244`)
-
-Read the full thread in Coppice if a detail is truncated.
 
 ## Coppice platform rules — verification (required)
 

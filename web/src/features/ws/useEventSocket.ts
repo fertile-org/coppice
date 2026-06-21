@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { queryClient } from '../../lib/query-client';
 import {
   patchAgentRunStatusInCache,
@@ -31,7 +31,9 @@ const listeners = new Set<EventSocketListener>();
 let socket: WebSocket | null = null;
 let subscriberCount = 0;
 let reconnectTimer: number | null = null;
-const RECONNECT_DELAY_MS = 1000;
+let reconnectAttempt = 0;
+const RECONNECT_BASE_DELAY_MS = 1000;
+const RECONNECT_MAX_DELAY_MS = 30000;
 
 function dispatchMessage(raw: string) {
   const msg = JSON.parse(raw) as { type?: string; ticket_id?: string };
@@ -93,12 +95,26 @@ export function dispatchMessageForTest(raw: string) {
   dispatchMessage(raw);
 }
 
+function invalidateRealtimeQueries() {
+  void queryClient.invalidateQueries({ queryKey: ['agent-runs'] });
+  void queryClient.invalidateQueries({ queryKey: ['tickets'] });
+}
+
+function nextReconnectDelayMs() {
+  const delay = Math.min(
+    RECONNECT_MAX_DELAY_MS,
+    RECONNECT_BASE_DELAY_MS * 2 ** reconnectAttempt,
+  );
+  reconnectAttempt += 1;
+  return delay;
+}
+
 function scheduleReconnect() {
   if (reconnectTimer || subscriberCount === 0) return;
   reconnectTimer = window.setTimeout(() => {
     reconnectTimer = null;
     connectSocket();
-  }, RECONNECT_DELAY_MS);
+  }, nextReconnectDelayMs());
 }
 
 function connectSocket() {
@@ -109,6 +125,11 @@ function connectSocket() {
 
   socket.onmessage = (event) => {
     dispatchMessage(event.data as string);
+  };
+
+  socket.onopen = () => {
+    reconnectAttempt = 0;
+    invalidateRealtimeQueries();
   };
 
   socket.onclose = () => {
@@ -130,27 +151,59 @@ function disconnectSocket() {
   socket = null;
 }
 
+function handleVisibilityChange() {
+  if (document.visibilityState !== 'visible' || subscriberCount === 0) return;
+  invalidateRealtimeQueries();
+  if (reconnectTimer) {
+    window.clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+  }
+  if (!socket) {
+    connectSocket();
+  }
+}
+
 export function useEventSocket(opts: {
   enabled: boolean;
   onRunStarted?: (payload: AgentRunStartedPayload) => void;
   onRunFinished?: (payload: AgentRunFinishedPayload) => void;
 }) {
   const { enabled, onRunStarted, onRunFinished } = opts;
+  const listenerRef = useRef<EventSocketListener>({});
+
+  useEffect(() => {
+    listenerRef.current.onRunStarted = onRunStarted;
+    listenerRef.current.onRunFinished = onRunFinished;
+  }, [onRunStarted, onRunFinished]);
 
   useEffect(() => {
     if (!enabled) return;
 
-    const listener: EventSocketListener = { onRunStarted, onRunFinished };
+    const listener = listenerRef.current;
+    const wasIdle = subscriberCount === 0;
     listeners.add(listener);
     subscriberCount += 1;
+    if (wasIdle) {
+      document.addEventListener('visibilitychange', handleVisibilityChange);
+    }
     connectSocket();
 
     return () => {
       listeners.delete(listener);
       subscriberCount -= 1;
       if (subscriberCount === 0) {
+        document.removeEventListener('visibilitychange', handleVisibilityChange);
+        reconnectAttempt = 0;
         disconnectSocket();
       }
     };
-  }, [enabled, onRunStarted, onRunFinished]);
+  }, [enabled]);
+}
+
+export function resetEventSocketForTest() {
+  listeners.clear();
+  subscriberCount = 0;
+  reconnectAttempt = 0;
+  document.removeEventListener('visibilitychange', handleVisibilityChange);
+  disconnectSocket();
 }

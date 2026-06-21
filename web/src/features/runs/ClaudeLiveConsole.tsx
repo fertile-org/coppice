@@ -14,10 +14,11 @@ import { LiveRunActivityBar } from './LiveRunActivityBar';
 interface ClaudeLiveConsoleProps {
   runId: string | null;
   runStatus: string | null;
+  shouldReconnect?: boolean;
   startedAt?: string | null;
 }
 
-type ConnectionState = 'connecting' | 'open' | 'closed';
+type ConnectionState = 'connecting' | 'open' | 'closed' | 'reconnecting';
 
 type ConsoleAction =
   | { type: 'reset' }
@@ -65,6 +66,7 @@ function isStructuredConsoleEvent(event: Record<string, unknown>): boolean {
 export function ClaudeLiveConsole({
   runId,
   runStatus,
+  shouldReconnect,
   startedAt,
 }: ClaudeLiveConsoleProps) {
   const [state, dispatch] = useReducer(consoleReducer, null, createClaudeConsoleState);
@@ -157,7 +159,8 @@ export function ClaudeLiveConsole({
   }, [runId, reconnectToken]);
 
   useEffect(() => {
-    if (!isActiveRunStatus(runStatus) || connection !== 'closed' || !runId) {
+    const canReconnect = shouldReconnect ?? isActiveRunStatus(runStatus);
+    if (!canReconnect || connection !== 'closed' || !runId) {
       return;
     }
     if (!recoverableRef.current) return;
@@ -166,7 +169,7 @@ export function ClaudeLiveConsole({
       setReconnectToken((token) => token + 1);
     }, 800);
     return () => window.clearTimeout(timer);
-  }, [runStatus, connection, runId]);
+  }, [runStatus, shouldReconnect, connection, runId]);
 
   if (!runId) {
     return (
@@ -181,24 +184,31 @@ export function ClaudeLiveConsole({
     state.entries.length > 0 ||
     state.legacyText.trim().length > 0;
 
+  const canReconnect =
+    (shouldReconnect ?? isActiveRunStatus(runStatus)) && recoverableRef.current;
+  const displayConnection =
+    connection === 'closed' && canReconnect ? 'reconnecting' : connection;
   const statusLabel = interrupted
     ? 'Interrupted'
-    : connection === 'open'
+    : displayConnection === 'open'
       ? 'Live'
-      : connection === 'connecting'
+      : displayConnection === 'connecting'
         ? 'Connecting…'
-        : isActiveRunStatus(runStatus) && recoverableRef.current
+        : displayConnection === 'reconnecting'
           ? 'Disconnected — reconnecting…'
-          : hasContent
-            ? 'Finished'
-            : 'Disconnected';
+          : canReconnect
+            ? 'Disconnected — reconnecting…'
+            : hasContent
+              ? 'Finished'
+              : 'Disconnected';
 
   return (
     <div className="flex h-full min-h-[320px] flex-col gap-2">
       <LiveRunActivityBar
         runStatus={runStatus}
         startedAt={startedAt}
-        connection={connection}
+        shouldReconnect={shouldReconnect}
+        connection={displayConnection}
         sessionStatus={null}
         lastActivityAt={lastActivityAt}
         heartbeatElapsedSecs={null}
@@ -213,7 +223,7 @@ export function ClaudeLiveConsole({
         <ClaudeConsoleView
           entries={state.entries}
           legacyText={state.legacyText}
-          isLive={isActiveRunStatus(runStatus) && connection === 'open'}
+          isLive={canReconnect && connection === 'open'}
         />
       </div>
     </div>

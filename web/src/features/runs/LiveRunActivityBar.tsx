@@ -25,7 +25,8 @@ function useNowTick(active: boolean, intervalMs = 1000): number {
 export interface LiveRunActivityBarProps {
   runStatus: string | null;
   startedAt?: string | null;
-  connection: 'connecting' | 'open' | 'closed';
+  shouldReconnect?: boolean;
+  connection: 'connecting' | 'open' | 'closed' | 'reconnecting';
   sessionStatus?: string | null;
   lastActivityAt?: number | null;
   heartbeatElapsedSecs?: number | null;
@@ -34,13 +35,14 @@ export interface LiveRunActivityBarProps {
 export function LiveRunActivityBar({
   runStatus,
   startedAt,
+  shouldReconnect,
   connection,
   sessionStatus,
   lastActivityAt,
   heartbeatElapsedSecs,
 }: LiveRunActivityBarProps) {
   const active =
-    runStatus != null && isActiveRunStatus(runStatus as RunStatus);
+    shouldReconnect ?? (runStatus != null && isActiveRunStatus(runStatus as RunStatus));
   const now = useNowTick(active);
 
   if (!active) return null;
@@ -67,8 +69,10 @@ export function LiveRunActivityBar({
     detail = `No new output for ${formatElapsed(quietSecs)} — session may still be running`;
   } else if (connection === 'connecting') {
     detail = 'Connecting to live stream…';
-  } else if (connection === 'closed') {
+  } else if (connection === 'reconnecting') {
     detail = 'Reconnecting to live stream…';
+  } else if (connection === 'closed') {
+    detail = 'Live stream disconnected';
   }
 
   return (
@@ -82,7 +86,13 @@ export function LiveRunActivityBar({
           <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-moss-500 opacity-60" />
           <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-moss-600" />
         </span>
-        Running · {formatElapsed(elapsedSecs)}
+        {connection === 'open'
+          ? 'Live'
+          : connection === 'connecting'
+            ? 'Connecting'
+            : connection === 'reconnecting'
+              ? 'Reconnecting'
+              : 'Disconnected'} · {formatElapsed(elapsedSecs)}
       </span>
       <span className="font-body text-xs text-text-secondary">{detail}</span>
       {working && (

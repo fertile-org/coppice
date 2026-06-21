@@ -1,4 +1,5 @@
-import { describe, expect, it, vi, beforeEach } from 'vitest';
+import { act, renderHook } from '@testing-library/react';
+import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 
 const invalidateSpy = vi.fn();
 const setQueryDataSpy = vi.fn();
@@ -49,5 +50,98 @@ describe('useEventSocket dispatch', () => {
     expect(invalidateSpy).toHaveBeenCalledWith({
       queryKey: ['agent-runs', 'ticket-456'],
     });
+  });
+});
+
+class MockWebSocket {
+  static instances: MockWebSocket[] = [];
+  onopen: (() => void) | null = null;
+  onmessage: ((event: MessageEvent) => void) | null = null;
+  onclose: (() => void) | null = null;
+  onerror: (() => void) | null = null;
+  close = vi.fn(() => {
+    this.onclose?.();
+  });
+
+  constructor(readonly url: string) {
+    MockWebSocket.instances.push(this);
+  }
+}
+
+describe('useEventSocket lifecycle', () => {
+  beforeEach(async () => {
+    vi.useFakeTimers();
+    MockWebSocket.instances = [];
+    vi.stubGlobal('WebSocket', MockWebSocket);
+    const { resetEventSocketForTest } = await import('./useEventSocket');
+    resetEventSocketForTest();
+    invalidateSpy.mockClear();
+    setQueryDataSpy.mockClear();
+  });
+
+  afterEach(async () => {
+    const { resetEventSocketForTest } = await import('./useEventSocket');
+    resetEventSocketForTest();
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+  });
+
+  it('does not disconnect when callback identity changes', async () => {
+    const { useEventSocket } = await import('./useEventSocket');
+    const firstHandler = vi.fn();
+    const secondHandler = vi.fn();
+
+    const { rerender, unmount } = renderHook(
+      ({ onRunFinished }) =>
+        useEventSocket({ enabled: true, onRunFinished }),
+      { initialProps: { onRunFinished: firstHandler } },
+    );
+
+    expect(MockWebSocket.instances).toHaveLength(1);
+    rerender({ onRunFinished: secondHandler });
+
+    expect(MockWebSocket.instances).toHaveLength(1);
+    expect(MockWebSocket.instances[0].close).not.toHaveBeenCalled();
+
+    unmount();
+  });
+
+  it('reconnects with exponential backoff capped by active subscribers', async () => {
+    const { useEventSocket } = await import('./useEventSocket');
+    renderHook(() => useEventSocket({ enabled: true }));
+
+    act(() => MockWebSocket.instances[0].close());
+    act(() => vi.advanceTimersByTime(999));
+    expect(MockWebSocket.instances).toHaveLength(1);
+
+    act(() => vi.advanceTimersByTime(1));
+    expect(MockWebSocket.instances).toHaveLength(2);
+
+    act(() => MockWebSocket.instances[1].close());
+    act(() => vi.advanceTimersByTime(1999));
+    expect(MockWebSocket.instances).toHaveLength(2);
+
+    act(() => vi.advanceTimersByTime(1));
+    expect(MockWebSocket.instances).toHaveLength(3);
+  });
+
+  it('reconnects immediately and refetches realtime queries on tab refocus', async () => {
+    const { useEventSocket } = await import('./useEventSocket');
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      get: () => 'visible',
+    });
+    renderHook(() => useEventSocket({ enabled: true }));
+
+    act(() => MockWebSocket.instances[0].close());
+    expect(MockWebSocket.instances).toHaveLength(1);
+
+    act(() => {
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+
+    expect(MockWebSocket.instances).toHaveLength(2);
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['agent-runs'] });
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['tickets'] });
   });
 });

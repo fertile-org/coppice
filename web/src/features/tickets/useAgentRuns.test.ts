@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { QueryClient } from '@tanstack/react-query';
-import { agentRunsQueryKey } from './useAgentRuns';
+import {
+  agentRunsQueryKey,
+  agentRunsRefetchInterval,
+  shouldPollRunForReconciliation,
+} from './useAgentRuns';
 import type { AgentRun } from '../../lib/schemas/agentRun';
 
 function upsertRun(
@@ -53,5 +57,29 @@ describe('agent runs cache upsert', () => {
       baseRun,
       previousRun,
     ]);
+  });
+});
+
+describe('agent runs polling reconciliation', () => {
+  it('keeps polling when a terminal status has not been confirmed by server endedAt', () => {
+    const staleTerminalRun: AgentRun = {
+      ...baseRun,
+      status: 'succeeded',
+      endedAt: null,
+    };
+
+    expect(shouldPollRunForReconciliation(staleTerminalRun)).toBe(true);
+    expect(agentRunsRefetchInterval([staleTerminalRun])).toBe(3000);
+  });
+
+  it('stops polling after the server confirms a terminal run ended', () => {
+    const finishedRun: AgentRun = {
+      ...baseRun,
+      status: 'succeeded',
+      endedAt: '2026-01-01T00:05:00Z',
+    };
+
+    expect(shouldPollRunForReconciliation(finishedRun)).toBe(false);
+    expect(agentRunsRefetchInterval([finishedRun])).toBe(false);
   });
 });

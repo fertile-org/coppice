@@ -10,10 +10,11 @@ import { LiveRunActivityBar } from './LiveRunActivityBar';
 interface LiveConsoleProps {
   runId: string | null;
   runStatus: string | null;
+  shouldReconnect?: boolean;
   startedAt?: string | null;
 }
 
-type ConnectionState = 'connecting' | 'open' | 'closed';
+type ConnectionState = 'connecting' | 'open' | 'closed' | 'reconnecting';
 
 function isActiveRunStatus(status: string | null): boolean {
   return status === 'running' || status === 'queued';
@@ -24,7 +25,12 @@ function writeTerminalData(term: Terminal, data: string) {
   term.write(data.replace(/\r?\n/g, '\r\n'));
 }
 
-export function LiveConsole({ runId, runStatus, startedAt }: LiveConsoleProps) {
+export function LiveConsole({
+  runId,
+  runStatus,
+  shouldReconnect,
+  startedAt,
+}: LiveConsoleProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
@@ -128,12 +134,13 @@ export function LiveConsole({ runId, runStatus, startedAt }: LiveConsoleProps) {
   }, [runId, reconnectToken, termReady]);
 
   useEffect(() => {
-    if (!isActiveRunStatus(runStatus) || connection !== 'closed' || !runId) return;
+    const canReconnect = shouldReconnect ?? isActiveRunStatus(runStatus);
+    if (!canReconnect || connection !== 'closed' || !runId) return;
     const timer = window.setTimeout(() => {
       setReconnectToken((token) => token + 1);
     }, 800);
     return () => window.clearTimeout(timer);
-  }, [runStatus, connection, runId]);
+  }, [runStatus, shouldReconnect, connection, runId]);
 
   useEffect(() => {
     if (!containerRef.current || !fitRef.current) return;
@@ -150,23 +157,29 @@ export function LiveConsole({ runId, runStatus, startedAt }: LiveConsoleProps) {
     );
   }
 
+  const canReconnect = shouldReconnect ?? isActiveRunStatus(runStatus);
+  const displayConnection =
+    connection === 'closed' && canReconnect ? 'reconnecting' : connection;
   const statusLabel =
-    connection === 'open'
+    displayConnection === 'open'
       ? 'Live'
-      : connection === 'connecting'
+      : displayConnection === 'connecting'
         ? 'Connecting…'
-        : isActiveRunStatus(runStatus)
+        : displayConnection === 'reconnecting'
           ? 'Disconnected — reconnecting…'
-          : sawOutput
-            ? 'Finished'
-            : 'Disconnected';
+          : canReconnect
+            ? 'Disconnected — reconnecting…'
+            : sawOutput
+              ? 'Finished'
+              : 'Disconnected';
 
   return (
     <div className="flex h-full min-h-[320px] flex-col gap-2">
       <LiveRunActivityBar
         runStatus={runStatus}
         startedAt={startedAt}
-        connection={connection}
+        shouldReconnect={shouldReconnect}
+        connection={displayConnection}
         lastActivityAt={lastActivityAt}
         heartbeatElapsedSecs={heartbeatElapsedSecs}
       />

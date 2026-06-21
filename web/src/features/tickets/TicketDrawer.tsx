@@ -8,6 +8,7 @@ import { TicketRunsTab } from './TicketRunsTab';
 import { useRepos } from '../repos/useRepos';
 import {
   isActiveRunStatus,
+  shouldPollRunForReconciliation,
   useAgentRuns,
   useRunAgent,
   useStopRun,
@@ -48,8 +49,12 @@ export function TicketDrawer({ ticketId, onClose }: TicketDrawerProps) {
     ticket?.assigneeAgentId && ticket?.repoId && !repoNotReady,
   );
   const activeRun = runs?.find((run) => isActiveRunStatus(run.status));
+  const reconnectableRun = runs?.find(shouldPollRunForReconciliation);
   const latestRun = runs?.[0] ?? null;
-  const liveRun = activeRun ?? latestRun;
+  const liveRun = activeRun ?? reconnectableRun ?? latestRun;
+  const shouldReconnectLiveRun = liveRun
+    ? shouldPollRunForReconciliation(liveRun)
+    : false;
   const LiveView =
     liveRun?.connector === 'opencode'
       ? LiveSession
@@ -268,6 +273,7 @@ export function TicketDrawer({ ticketId, onClose }: TicketDrawerProps) {
               <LiveView
                 runId={liveRun?.id ?? null}
                 runStatus={liveRun?.status ?? null}
+                shouldReconnect={shouldReconnectLiveRun}
                 startedAt={liveRun?.startedAt ?? null}
               />
             </div>

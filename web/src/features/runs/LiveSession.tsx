@@ -20,10 +20,11 @@ import { LiveRunActivityBar } from './LiveRunActivityBar';
 interface LiveSessionProps {
   runId: string | null;
   runStatus: string | null;
+  shouldReconnect?: boolean;
   startedAt?: string | null;
 }
 
-type ConnectionState = 'connecting' | 'open' | 'closed';
+type ConnectionState = 'connecting' | 'open' | 'closed' | 'reconnecting';
 
 type SessionAction =
   | { type: 'reset'; sessionId: string }
@@ -76,7 +77,12 @@ function sessionStatusFromEvent(event: OpenCodeEvent): string | null {
   return typeof status?.type === 'string' ? status.type : null;
 }
 
-export function LiveSession({ runId, runStatus, startedAt }: LiveSessionProps) {
+export function LiveSession({
+  runId,
+  runStatus,
+  shouldReconnect,
+  startedAt,
+}: LiveSessionProps) {
   const [store, dispatch] = useReducer(sessionReducer, null);
   const [connection, setConnection] = useState<ConnectionState>('closed');
   const [reconnectToken, setReconnectToken] = useState(0);
@@ -198,7 +204,8 @@ export function LiveSession({ runId, runStatus, startedAt }: LiveSessionProps) {
   }, [runId, reconnectToken]);
 
   useEffect(() => {
-    if (!isActiveRunStatus(runStatus) || connection !== 'closed' || !runId) {
+    const canReconnect = shouldReconnect ?? isActiveRunStatus(runStatus);
+    if (!canReconnect || connection !== 'closed' || !runId) {
       return;
     }
     if (!recoverableRef.current) return;
@@ -207,7 +214,7 @@ export function LiveSession({ runId, runStatus, startedAt }: LiveSessionProps) {
       setReconnectToken((token) => token + 1);
     }, 800);
     return () => window.clearTimeout(timer);
-  }, [runStatus, connection, runId]);
+  }, [runStatus, shouldReconnect, connection, runId]);
 
   if (!runId) {
     return (
@@ -217,24 +224,31 @@ export function LiveSession({ runId, runStatus, startedAt }: LiveSessionProps) {
     );
   }
 
+  const canReconnect =
+    (shouldReconnect ?? isActiveRunStatus(runStatus)) && recoverableRef.current;
+  const displayConnection =
+    connection === 'closed' && canReconnect ? 'reconnecting' : connection;
   const statusLabel = interrupted
     ? 'Interrupted'
-    : connection === 'open'
+    : displayConnection === 'open'
       ? 'Live'
-      : connection === 'connecting'
+      : displayConnection === 'connecting'
         ? 'Connecting…'
-        : isActiveRunStatus(runStatus) && recoverableRef.current
+        : displayConnection === 'reconnecting'
           ? 'Disconnected — reconnecting…'
-          : hasContent
-            ? 'Finished'
-            : 'Disconnected';
+          : canReconnect
+            ? 'Disconnected — reconnecting…'
+            : hasContent
+              ? 'Finished'
+              : 'Disconnected';
 
   return (
     <div className="flex h-full min-h-[320px] flex-col gap-2">
       <LiveRunActivityBar
         runStatus={runStatus}
         startedAt={startedAt}
-        connection={connection}
+        shouldReconnect={shouldReconnect}
+        connection={displayConnection}
         sessionStatus={sessionStatus}
         lastActivityAt={lastActivityAt}
         heartbeatElapsedSecs={heartbeatElapsedSecs}
