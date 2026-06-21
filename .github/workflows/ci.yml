@@ -42,6 +42,28 @@ jobs:
       - run: corepack enable && corepack prepare yarn@1.22.22 --activate
       - run: cd web && yarn install --frozen-lockfile && yarn test
 
+  # Guard against lockfile/toolchain drift: extract the rust version pinned in
+  # deploy/Dockerfile.server and confirm the committed Cargo.lock compiles with
+  # that exact toolchain. Catches regressions like time@0.3.47 (MSRV 1.88)
+  # landing while the Dockerfile still pinned 1.87.
+  docker-toolchain:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify Cargo.lock compiles with Dockerfile toolchain
+        run: |
+          set -euo pipefail
+          TOOLCHAIN=$(grep -oE 'FROM rust:[0-9]+\.[0-9]+' deploy/Dockerfile.server | head -1 | sed -E 's/.*rust://')
+          if [ -z "$TOOLCHAIN" ]; then
+            echo "Could not extract rust version from deploy/Dockerfile.server" >&2
+            exit 1
+          fi
+          echo "Dockerfile.server pins rust ${TOOLCHAIN}; checking Cargo.lock compiles against it"
+          # --locked => fail if Cargo.lock would need to change.
+          # --workspace => cover every workspace member the lockfile resolves.
+          docker run --rm -v "$PWD":/app -w /app rust:${TOOLCHAIN}-bookworm \
+            sh -c 'cargo check --locked --workspace --all-targets --target-dir /tmp/check-target'
+
   e2e:
     runs-on: ubuntu-latest
     steps:
