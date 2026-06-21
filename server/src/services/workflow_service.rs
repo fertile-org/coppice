@@ -698,6 +698,44 @@ mod tests {
     }
 
     #[test]
+    fn qc_pass_advances_in_qa_to_wait_for_final_review() {
+        let action = WorkflowService::resolve_transition(TransitionContext {
+            current_status: TicketStatus::InQa,
+            agent_role: "QC".into(),
+            agent_key: "qc".into(),
+            assignee_agent_id: Some(Uuid::from_u128(0x300)),
+            run_outcome: RunOutcome::Succeeded,
+            contract: AgentRunResult::Done {
+                summary: "No defects — all checks pass.".into(),
+                changed_files: vec![],
+                tests_run: vec!["cargo test -p coppice-server --lib".into()],
+                next_status: None,
+                assign_to: None,
+                updated_description: None,
+                acceptance_criteria: None,
+                mention_agents: vec![],
+                blockers: vec![],
+                split_tickets: vec![],
+            },
+            project_agent_keys: vec!["qc".into(), "backend_engineer".into()],
+            project_agent_ids: agent_map(&[
+                ("qc", Uuid::from_u128(0x300)),
+                ("backend_engineer", engineer_agent_id()),
+            ]),
+            auto_assign_enabled: true,
+            ..minimal_ctx()
+        })
+        .expect("resolve");
+        assert_eq!(
+            action.new_status,
+            Some(TicketStatus::WaitForFinalReview)
+        );
+        // Pass path unassigns and does not enqueue a fix run.
+        assert_eq!(action.new_assignee_id, Some(None));
+        assert!(action.enqueue_jobs.is_empty());
+    }
+
+    #[test]
     fn verification_blocked_with_mentions_returns_to_in_progress() {
         let action = WorkflowService::resolve_transition(TransitionContext {
             current_status: TicketStatus::InReview,

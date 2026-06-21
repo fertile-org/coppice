@@ -529,3 +529,128 @@ async fn scope_pm_split_pending() {
     let children: serde_json::Value = common::json_body(children_res).await;
     assert!(children.as_array().unwrap().is_empty());
 }
+
+#[tokio::test]
+async fn qc_defect_handoff_returns_to_engineer_without_committing() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+
+    let (_state, app, cookie, csrf, _env) =
+        common::bootstrap_and_login_with_auto_start_workers().await;
+
+    let project_id = common::create_test_project(&app, &cookie, &csrf).await;
+    let (_git_dir, local_path) = common::create_temp_git_checkout();
+    let repo_id =
+        common::register_test_repo(&app, &local_path.display().to_string(), &cookie, &csrf).await;
+
+    let engineer_id = common::create_agent_with_preset_key(
+        &app,
+        "backend_engineer",
+        "Backend Engineer",
+        &cookie,
+        &csrf,
+    )
+    .await;
+    let qc_id =
+        common::create_agent_with_preset_key(&app, "qc", "QC Agent", &cookie, &csrf).await;
+
+    let ticket_id = common::create_test_ticket(&app, &project_id, &cookie, &csrf).await;
+    common::set_ticket_repo(&app, &ticket_id, &repo_id, &cookie, &csrf).await;
+
+    // Place the ticket in QA and hand it to QC.
+    let patch = app
+        .clone()
+        .oneshot(common::json_request(
+            "PATCH",
+            &format!("/api/tickets/{ticket_id}/status"),
+            r#"{"status":"in_qa"}"#,
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(patch.status(), StatusCode::OK);
+    common::assign_agent_to_ticket(&app, &ticket_id, &qc_id, &cookie, &csrf).await;
+
+    // QC run fires (autostart), returns a defect with mentionAgents: ["backend_engineer"].
+    // The workflow handoff must return the ticket to In Progress, assign the engineer,
+    // and enqueue a work_on_ticket fix run.
+    let runs = common::poll_runs_until_count(
+        &app,
+        &ticket_id,
+        &cookie,
+        &csrf,
+        "QC defect → engineer work_on_ticket enqueued",
+        Duration::from_secs(30),
+        |runs| {
+            runs.iter().any(|r| {
+                r["agentId"].as_str() == Some(qc_id.as_str())
+                    && r["jobType"].as_str() == Some("work_on_ticket")
+                    && r["status"].as_str() == Some("succeeded")
+            }) && runs.iter().any(|r| {
+                r["agentId"].as_str() == Some(engineer_id.as_str())
+                    && r["jobType"].as_str() == Some("work_on_ticket")
+            })
+        },
+    )
+    .await;
+
+    // QC run completed; engineer fix run was enqueued by the handoff.
+    assert!(runs.iter().any(|r| {
+        r["agentId"].as_str() == Some(qc_id.as_str())
+            && r["jobType"].as_str() == Some("work_on_ticket")
+            && r["status"].as_str() == Some("succeeded")
+    }));
+
+    // Ticket left in_qa and is now in_progress owned by the implementing engineer.
+    let ticket = common::poll_ticket_until(
+        &app,
+        &ticket_id,
+        &cookie,
+        &csrf,
+        "in_progress owned by backend_engineer",
+        Duration::from_secs(30),
+        |t| {
+            t["status"].as_str() == Some("in_progress")
+                && t["assigneeAgentId"].as_str() == Some(engineer_id.as_str())
+        },
+    )
+    .await;
+    assert_eq!(ticket["status"], "in_progress");
+    assert_eq!(ticket["assigneeAgentId"], engineer_id);
+
+    // QC-authored comment must not present a git commit footer: QC is verification-only
+    // and its (potential) edits must never be committed as the implementation.
+    let comments_res = app
+        .clone()
+        .oneshot(common::json_request(
+            "GET",
+            &format!("/api/tickets/{ticket_id}/comments"),
+            "",
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(comments_res.status(), StatusCode::OK);
+    let comments: serde_json::Value = common::json_body(comments_res).await;
+    let qc_comment = comments
+        .as_array()
+        .expect("comments array")
+        .iter()
+        .find(|c| c["authorId"].as_str() == Some(qc_id.as_str()))
+        .expect("QC-authored comment");
+    let body = qc_comment["body"].as_str().expect("qc comment body");
+    assert!(body.contains("Defects found"), "QC defect verdict present: {body}");
+    assert!(
+        !body.contains("**Git:**"),
+        "QC comment must not carry a git footer: {body}"
+    );
+    assert!(
+        !body.contains("committed"),
+        "QC comment must not claim a commit: {body}"
+    );
+}
+

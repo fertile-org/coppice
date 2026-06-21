@@ -452,7 +452,10 @@ async fn execute_job(
         apply.comment.intent = CommentIntent::ReviewFeedback;
     }
 
-    if run.job_type == "work_on_ticket" && apply.run_status == RunStatus::Succeeded {
+    if run.job_type == "work_on_ticket"
+        && apply.run_status == RunStatus::Succeeded
+        && should_finalize_worktree_git(&agent, ticket.ticket.status)
+    {
         let commit_message = format!(
             "[coppice] {}: {}",
             &agent_key,
@@ -595,6 +598,29 @@ fn is_review_agent(agent: &crate::domain::agent::Agent) -> bool {
     role.contains("tech lead")
         || role.contains("technical lead")
         || role.contains("review")
+}
+
+fn is_qc_agent(agent: &crate::domain::agent::Agent) -> bool {
+    if matches!(agent.preset_source.as_deref(), Some("qc")) {
+        return true;
+    }
+    let role = agent.role.to_ascii_lowercase();
+    role == "qc" || role.contains("quality")
+}
+
+/// Whether a successful `work_on_ticket` run should auto-commit worktree changes.
+///
+/// QC is verification-only in `in_qa`: it must not present its (potential) edits as
+/// committed implementation work. Skip git finalization for QC verification runs so
+/// any stray changes never become the ticket's implementation commit.
+fn should_finalize_worktree_git(
+    agent: &crate::domain::agent::Agent,
+    ticket_status: TicketStatus,
+) -> bool {
+    if is_qc_agent(agent) && ticket_status == TicketStatus::InQa {
+        return false;
+    }
+    true
 }
 
 async fn run_session_id(pool: &PgPool, run_id: uuid::Uuid) -> Option<String> {
@@ -753,4 +779,65 @@ fn build_runs_json(
         })
         .collect::<Vec<_>>()
         .into()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::agent::Agent;
+    use time::OffsetDateTime;
+
+    fn test_agent(role: &str, preset_source: Option<&str>) -> Agent {
+        Agent {
+            id: uuid::Uuid::new_v4(),
+            name: format!("{role} Agent"),
+            role: role.into(),
+            skills: vec![],
+            responsibilities: vec![],
+            system_prompt: String::new(),
+            connector: "mock".into(),
+            model_provider: None,
+            model: None,
+            enabled: true,
+            preset_source: preset_source.map(str::to_string),
+            created_at: OffsetDateTime::now_utc(),
+            updated_at: OffsetDateTime::now_utc(),
+        }
+    }
+
+    #[test]
+    fn is_qc_agent_matches_preset_and_role() {
+        assert!(is_qc_agent(&test_agent("QC", Some("qc"))));
+        assert!(is_qc_agent(&test_agent("QC", None)));
+        assert!(is_qc_agent(&test_agent("Quality Engineer", None)));
+        assert!(!is_qc_agent(&test_agent("Backend Engineer", Some("backend_engineer"))));
+        assert!(!is_qc_agent(&test_agent("Reviewer", Some("reviewer"))));
+    }
+
+    #[test]
+    fn should_not_finalize_git_for_qc_verification_in_qa() {
+        let qc = test_agent("QC", Some("qc"));
+        assert!(!should_finalize_worktree_git(&qc, TicketStatus::InQa));
+    }
+
+    #[test]
+    fn should_finalize_git_for_engineer_work() {
+        let engineer = test_agent("Backend Engineer", Some("backend_engineer"));
+        assert!(should_finalize_worktree_git(&engineer, TicketStatus::InProgress));
+        assert!(should_finalize_worktree_git(&engineer, TicketStatus::InQa));
+    }
+
+    #[test]
+    fn should_finalize_git_for_reviewer_in_review() {
+        let reviewer = test_agent("Reviewer", Some("reviewer"));
+        assert!(should_finalize_worktree_git(&reviewer, TicketStatus::InReview));
+    }
+
+    #[test]
+    fn should_finalize_git_for_qc_outside_in_qa() {
+        // The guard is scoped to in_qa verification; a QC run elsewhere still finalizes
+        // (it should not normally occur, but the guard must not over-reach).
+        let qc = test_agent("QC", Some("qc"));
+        assert!(should_finalize_worktree_git(&qc, TicketStatus::InProgress));
+    }
 }
