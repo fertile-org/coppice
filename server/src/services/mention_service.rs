@@ -3,6 +3,7 @@ use crate::domain::slug::slugify;
 use crate::services::agent_service::AgentService;
 use sqlx::PgPool;
 use sqlx::Row;
+use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use uuid::Uuid;
 
@@ -26,13 +27,15 @@ impl<'a> MentionService<'a> {
     }
 
     pub fn parse_mention_keys(body: &str, known_keys: &[&str]) -> Vec<String> {
+        let known: HashMap<&str, ()> = known_keys.iter().map(|key| (*key, ())).collect();
         let mut found = Vec::new();
-        for key in known_keys {
-            let needle = format!("@{key}");
-            if body.contains(&needle) && !found.iter().any(|k| k == key) {
-                found.push((*key).to_string());
+
+        for token in body.split('@').skip(1).filter_map(mention_token) {
+            if known.contains_key(token) && !found.iter().any(|key| key == token) {
+                found.push(token.to_string());
             }
         }
+
         found
     }
 
@@ -177,13 +180,32 @@ impl<'a> MentionService<'a> {
                 continue;
             }
             if let Some(ref preset) = agent.preset_source {
-                map.insert(preset.clone(), agent.id);
+                if let Entry::Vacant(entry) = map.entry(preset.clone()) {
+                    entry.insert(agent.id);
+                }
             }
             map.insert(slugify(&agent.name), agent.id);
         }
 
         Ok(map)
     }
+}
+
+fn mention_token(input: &str) -> Option<&str> {
+    let end = input
+        .char_indices()
+        .find_map(|(idx, ch)| (!is_mention_key_char(ch)).then_some(idx))
+        .unwrap_or(input.len());
+
+    if end == 0 {
+        None
+    } else {
+        Some(&input[..end])
+    }
+}
+
+fn is_mention_key_char(ch: char) -> bool {
+    ch.is_ascii_alphanumeric() || ch == '_' || ch == '-'
 }
 
 fn mention_status_to_str(status: MentionStatus) -> &'static str {
@@ -226,5 +248,23 @@ mod tests {
             &["pm", "backend_engineer"],
         );
         assert_eq!(keys, vec!["backend_engineer"]);
+    }
+
+    #[test]
+    fn parses_full_name_slug_without_matching_preset_prefix() {
+        let keys = MentionService::parse_mention_keys(
+            "@pm-codex thoughts on option A vs B?",
+            &["pm", "pm-codex"],
+        );
+        assert_eq!(keys, vec!["pm-codex"]);
+    }
+
+    #[test]
+    fn parses_distinct_mentions_in_body_order() {
+        let keys = MentionService::parse_mention_keys(
+            "@pm-codex and @backend_engineer",
+            &["pm", "backend_engineer", "pm-codex"],
+        );
+        assert_eq!(keys, vec!["pm-codex", "backend_engineer"]);
     }
 }

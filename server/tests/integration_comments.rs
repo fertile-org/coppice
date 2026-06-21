@@ -3,8 +3,7 @@ mod common;
 use axum::http::StatusCode;
 use tower::ServiceExt;
 
-async fn setup_ticket_with_repo_and_agents(
-) -> (
+async fn setup_ticket_with_repo_and_agents() -> (
     tempfile::TempDir,
     sqlx::PgPool,
     axum::Router,
@@ -67,9 +66,7 @@ async fn upload_attachment_and_create_comment() {
         .oneshot(common::json_request(
             "POST",
             &format!("/api/tickets/{ticket_id}/comments"),
-            &format!(
-                r#"{{"body":"See attached","attachmentIds":["{attachment_id}"]}}"#
-            ),
+            &format!(r#"{{"body":"See attached","attachmentIds":["{attachment_id}"]}}"#),
             &cookie,
             &csrf,
         ))
@@ -127,16 +124,15 @@ async fn mention_chat_mode_starts_respond_to_mention_run() {
     let body: serde_json::Value = common::json_body(res).await;
     let started_runs = body["startedRuns"].as_array().unwrap();
     assert_eq!(started_runs.len(), 1);
-    assert_eq!(started_runs[0]["agentKey"], "pm");
+    assert_eq!(started_runs[0]["agentKey"], "pm-agent");
 
     let run_id = uuid::Uuid::parse_str(started_runs[0]["runId"].as_str().unwrap()).unwrap();
-    let row: (String, String) = sqlx::query_as(
-        "SELECT job_type, context_profile FROM agent_runs WHERE id = $1",
-    )
-    .bind(run_id)
-    .fetch_one(&pool)
-    .await
-    .expect("run row");
+    let row: (String, String) =
+        sqlx::query_as("SELECT job_type, context_profile FROM agent_runs WHERE id = $1")
+            .bind(run_id)
+            .fetch_one(&pool)
+            .await
+            .expect("run row");
     assert_eq!(row.0, "respond_to_mention");
     assert_eq!(row.1, "human_chat");
 }
@@ -166,18 +162,60 @@ async fn mention_agent_mode_starts_work_on_ticket_run() {
     let body: serde_json::Value = common::json_body(res).await;
     let started_runs = body["startedRuns"].as_array().unwrap();
     assert_eq!(started_runs.len(), 1);
-    assert_eq!(started_runs[0]["agentKey"], "backend_engineer");
+    assert_eq!(started_runs[0]["agentKey"], "backend-engineer");
 
     let run_id = uuid::Uuid::parse_str(started_runs[0]["runId"].as_str().unwrap()).unwrap();
-    let row: (String, String) = sqlx::query_as(
-        "SELECT job_type, context_profile FROM agent_runs WHERE id = $1",
-    )
-    .bind(run_id)
-    .fetch_one(&pool)
-    .await
-    .expect("run row");
+    let row: (String, String) =
+        sqlx::query_as("SELECT job_type, context_profile FROM agent_runs WHERE id = $1")
+            .bind(run_id)
+            .fetch_one(&pool)
+            .await
+            .expect("run row");
     assert_eq!(row.0, "work_on_ticket");
     assert_eq!(row.1, "human_agent");
+}
+
+#[tokio::test]
+async fn full_name_mention_selects_agent_when_preset_matches_another_agent() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+
+    let (_git_dir, pool, app, cookie, csrf, ticket_id) = setup_ticket_with_repo_and_agents().await;
+    common::create_agent_with_preset_key(&app, "pm", "PM Opencode", &cookie, &csrf).await;
+
+    let res = app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            &format!("/api/tickets/{ticket_id}/comments"),
+            r#"{"body":"@pm-opencode please inspect","mentionMode":"chat"}"#,
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::CREATED);
+
+    let body: serde_json::Value = common::json_body(res).await;
+    let started_runs = body["startedRuns"].as_array().unwrap();
+    assert_eq!(started_runs.len(), 1);
+    assert_eq!(started_runs[0]["agentKey"], "pm-opencode");
+
+    let mentioned_name: String = sqlx::query_scalar(
+        r#"
+        SELECT agents.name
+        FROM ticket_mentions
+        JOIN agents ON agents.id = ticket_mentions.mentioned_agent_id
+        WHERE ticket_mentions.ticket_id = $1
+        "#,
+    )
+    .bind(uuid::Uuid::parse_str(&ticket_id).unwrap())
+    .fetch_one(&pool)
+    .await
+    .expect("mentioned agent name");
+    assert_eq!(mentioned_name, "PM Opencode");
 }
 
 #[tokio::test]
