@@ -4,7 +4,7 @@ import { parseResultContractFromText } from '../../opencode-session/parts/parse-
 export type ClaudeToolStatus = 'running' | 'completed' | 'error';
 
 export type ClaudeConsoleEntry =
-  | { kind: 'session'; id: string; model: string; connector?: 'claude' | 'codex' }
+  | { kind: 'session'; id: string; model: string; connector?: string }
   | { kind: 'thinking'; id: string; text: string }
   | { kind: 'text'; id: string; markdown: string }
   | {
@@ -60,30 +60,45 @@ function continuedSummary(value: Record<string, unknown>): ClaudeConsoleEntry | 
   };
 }
 
+function consoleEventParts(ty: string): { connector: string; event: string } | null {
+  const marker = '.console.';
+  const markerIndex = ty.indexOf(marker);
+  if (markerIndex <= 0) return null;
+  const connector = ty.slice(0, markerIndex);
+  const event = ty.slice(markerIndex + marker.length);
+  if (!connector || !event) return null;
+  return { connector, event };
+}
+
 export function applyClaudeConsoleEvent(
   state: ClaudeConsoleState,
   event: Record<string, unknown>,
 ): ClaudeConsoleState {
   const ty = event.type;
   if (typeof ty !== 'string') return state;
+  const parts = consoleEventParts(ty);
+  if (!parts) return state;
 
-  switch (ty) {
-    case 'claude.console.session':
-    case 'codex.console.session': {
+  switch (parts.event) {
+    case 'session': {
       const model =
         typeof event.model === 'string' && event.model.trim()
           ? event.model
           : 'unknown';
-      const connector = ty.startsWith('codex.') ? 'codex' : 'claude';
       return {
         ...state,
         entries: [
           ...state.entries,
-          { kind: 'session', id: nextEntryId(), model, connector },
+          {
+            kind: 'session',
+            id: nextEntryId(),
+            model,
+            connector: parts.connector,
+          },
         ],
       };
     }
-    case 'claude.console.thinking': {
+    case 'thinking': {
       const text = typeof event.text === 'string' ? event.text.trim() : '';
       if (!text) return state;
       return {
@@ -91,8 +106,7 @@ export function applyClaudeConsoleEvent(
         entries: [...state.entries, { kind: 'thinking', id: nextEntryId(), text }],
       };
     }
-    case 'claude.console.text':
-    case 'codex.console.text': {
+    case 'text': {
       const markdown =
         typeof event.markdown === 'string' ? event.markdown.trim() : '';
       if (!markdown) return state;
@@ -101,11 +115,9 @@ export function applyClaudeConsoleEvent(
         entries: [...state.entries, { kind: 'text', id: nextEntryId(), markdown }],
       };
     }
-    case 'claude.console.tool':
-    case 'codex.console.tool':
+    case 'tool':
       return applyToolEvent(state, event);
-    case 'claude.console.result':
-    case 'codex.console.result':
+    case 'result':
       return applyResultEvent(state, event);
     default:
       return state;

@@ -2,6 +2,7 @@ import { CollapsibleDetail, excerptPreview } from '../components/CollapsibleDeta
 import { MarkdownContent } from '../components/MarkdownContent';
 import type { ReasoningPart as ReasoningPartType } from '../sync/types';
 import { sessionTheme } from '../theme/session-theme';
+import { useTypewriter } from '../../features/runs/useTypewriter';
 
 export function ReasoningPart({
   part,
@@ -11,6 +12,7 @@ export function ReasoningPart({
   streaming?: boolean;
 }) {
   const content = part.text.replaceAll('[REDACTED]', '').trim();
+  const revealed = useTypewriter(content, { enabled: streaming });
   if (!content) return null;
 
   return (
@@ -20,7 +22,7 @@ export function ReasoningPart({
       streaming={streaming}
     >
       <div className={sessionTheme.fontMonoSm}>
-        <MarkdownContent tone="thinking">{content}</MarkdownContent>
+        <MarkdownContent tone="thinking">{revealed}</MarkdownContent>
       </div>
     </CollapsibleDetail>
   );

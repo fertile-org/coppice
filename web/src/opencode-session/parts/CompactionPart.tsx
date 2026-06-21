@@ -3,9 +3,17 @@ import { CollapsibleDetail, excerptPreview } from '../components/CollapsibleDeta
 import { MarkdownContent } from '../components/MarkdownContent';
 import type { CompactionPart as CompactionPartType } from '../sync/types';
 import { sessionTheme } from '../theme/session-theme';
+import { useTypewriter } from '../../features/runs/useTypewriter';
 
-export function CompactionPart({ part }: { part: CompactionPartType }) {
+export function CompactionPart({
+  part,
+  streaming = false,
+}: {
+  part: CompactionPartType;
+  streaming?: boolean;
+}) {
   const content = part.text.trim();
+  const revealed = useTypewriter(content, { enabled: streaming });
   if (!content) return null;
 
   return (
@@ -21,7 +29,7 @@ export function CompactionPart({ part }: { part: CompactionPartType }) {
       }
     >
       <div className={sessionTheme.fontMonoSm}>
-        <MarkdownContent tone="thinking">{content}</MarkdownContent>
+        <MarkdownContent tone="thinking">{revealed}</MarkdownContent>
       </div>
     </CollapsibleDetail>
   );

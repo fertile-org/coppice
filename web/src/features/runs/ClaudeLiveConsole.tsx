@@ -57,10 +57,7 @@ function shouldStopReconnect(msg: {
 
 function isStructuredConsoleEvent(event: Record<string, unknown>): boolean {
   const ty = event.type;
-  return (
-    typeof ty === 'string' &&
-    (ty.startsWith('claude.console.') || ty.startsWith('codex.console.'))
-  );
+  return typeof ty === 'string' && ty.includes('.console.');
 }
 
 export function ClaudeLiveConsole({

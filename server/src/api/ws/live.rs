@@ -80,8 +80,9 @@ async fn handle_live_socket(state: Arc<AppState>, run_id: Uuid, socket: WebSocke
         .ok()
         .flatten();
     let is_opencode = connector.as_deref() == Some("opencode");
-    let is_claude_code = connector.as_deref() == Some("claude-code");
-    let is_codex = connector.as_deref() == Some("codex");
+    let is_structured_console = connector
+        .as_deref()
+        .is_some_and(|connector| matches!(connector, "claude-code" | "codex" | "kilo-code"));
 
     let stream_handle = if let Some(handle) = state.run_streams.get(run_id) {
         Some(handle)
@@ -98,7 +99,7 @@ async fn handle_live_socket(state: Arc<AppState>, run_id: Uuid, socket: WebSocke
         Some(
             handle_opencode_recovery(&state, &mut sender, run_id, &run, &run_svc).await,
         )
-    } else if is_claude_code || is_codex {
+    } else if is_structured_console {
         Some(
             handle_structured_console_recovery(&state, &mut sender, run_id, &run, &run_svc).await,
         )

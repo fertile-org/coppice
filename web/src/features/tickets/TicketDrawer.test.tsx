@@ -1,11 +1,12 @@
 import '@testing-library/jest-dom/vitest';
-import { describe, it, expect, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { beforeEach, describe, it, expect, vi } from 'vitest';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router-dom';
 import { ToastProvider } from '../../components/ToastProvider';
 import { TicketDrawer } from './TicketDrawer';
 import type { Ticket } from '../board/useTickets';
+import type { AgentRun } from '../../lib/schemas/agentRun';
 
 const ticketState: { ticket: Ticket } = {
   ticket: {
@@ -19,6 +20,10 @@ const ticketState: { ticket: Ticket } = {
     updatedAt: '2026-06-08T00:00:00.000Z',
     lastActivityAt: '2026-06-08T00:00:00.000Z',
   },
+};
+
+const runsState: { runs: AgentRun[] } = {
+  runs: [],
 };
 
 vi.mock('./useTicket', () => ({
@@ -43,11 +48,12 @@ vi.mock('./useTicket', () => ({
 }));
 
 vi.mock('./useAgentRuns', () => ({
-  useAgentRuns: () => ({ data: [], isLoading: false, isError: false }),
+  useAgentRuns: () => ({ data: runsState.runs, isLoading: false, isError: false }),
   useRunAgent: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useStopRun: () => ({ mutateAsync: vi.fn(), isPending: false }),
-  isActiveRunStatus: () => false,
-  shouldPollRunForReconciliation: () => false,
+  isActiveRunStatus: (status: string) => status === 'running' || status === 'queued',
+  shouldPollRunForReconciliation: (run: AgentRun) =>
+    run.status === 'running' || run.status === 'queued' || run.endedAt == null,
 }));
 
 vi.mock('../repos/useRepos', () => ({
@@ -87,6 +93,11 @@ function renderDrawer() {
 }
 
 describe('TicketDrawer', () => {
+  beforeEach(() => {
+    runsState.runs = [];
+    ticketState.ticket = { ...ticketState.ticket, status: 'backlog' };
+  });
+
   it('renders Detail, Live Console, and Agent Runs tabs', () => {
     renderDrawer();
     expect(screen.getByRole('tab', { name: 'Detail' })).toBeInTheDocument();
@@ -115,5 +126,30 @@ describe('TicketDrawer', () => {
     expect(
       screen.getByRole('button', { name: 'Final Approve' }),
     ).toBeInTheDocument();
+  });
+
+  it('routes kilo-code runs through the structured live console', () => {
+    runsState.runs = [
+      {
+        id: '00000000-0000-0000-0000-000000000010',
+        ticketId: ticketState.ticket.id,
+        agentId: '00000000-0000-0000-0000-000000000011',
+        jobType: 'agent_run',
+        status: 'running',
+        sandboxProfileId: 'default',
+        errorMessage: null,
+        worktreePath: null,
+        branchName: null,
+        startedAt: '2026-06-08T00:00:00.000Z',
+        endedAt: null,
+        createdAt: '2026-06-08T00:00:00.000Z',
+        connector: 'kilo-code',
+      },
+    ];
+
+    renderDrawer();
+    fireEvent.click(screen.getByRole('tab', { name: 'Live Console' }));
+
+    expect(screen.getByText('Claude live console')).toBeInTheDocument();
   });
 });
