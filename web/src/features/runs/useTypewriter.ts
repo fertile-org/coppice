@@ -72,9 +72,9 @@ function usePrefersReducedMotion(): boolean {
  *   or when the text is at/above `maxAnimateLength`. The disabled/reduced/
  *   oversized cases are handled purely in render; the hidden case flushes via
  *   the visibility listener.
- * - `fullText` is treated as immutable per entry; the drain loop starts at 0
- *   and self-terminates, so there is no cross-entry buffer and memory stays
- *   bounded across long runs.
+ * - Appended `fullText` keeps the current reveal position and animates only
+ *   the new tail. A non-prefix replacement restarts from 0 so reused
+ *   components do not leak old text into unrelated content.
  */
 export function useTypewriter(fullText: string, options: UseTypewriterOptions): string {
   const {
@@ -97,12 +97,28 @@ export function useTypewriter(fullText: string, options: UseTypewriterOptions): 
   const countRef = useRef(0);
   const lastCommitRef = useRef(0);
   const frameRef = useRef<number | null>(null);
+  const previousFullTextRef = useRef('');
 
   useEffect(() => {
-    if (!shouldAnimate) return;
+    if (!shouldAnimate) {
+      previousFullTextRef.current = fullText;
+      countRef.current = fullText.length;
+      lastCommitRef.current = 0;
+      setRevealedCount(fullText.length);
+      return;
+    }
 
-    countRef.current = 0;
+    const previousFullText = previousFullTextRef.current;
+    const isAppend =
+      previousFullText.length > 0 && fullText.startsWith(previousFullText);
+    const initialCount = isAppend
+      ? Math.min(countRef.current, fullText.length)
+      : 0;
+
+    previousFullTextRef.current = fullText;
+    countRef.current = initialCount;
     lastCommitRef.current = 0;
+    setRevealedCount(initialCount);
 
     let cancelled = false;
 

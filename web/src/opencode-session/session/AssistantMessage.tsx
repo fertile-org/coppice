@@ -16,10 +16,18 @@ function renderPart(
     part.type === 'reasoning' &&
     !messageComplete &&
     index === parts.length - 1;
+  const textStreaming =
+    part.type === 'text' &&
+    !messageComplete &&
+    index === parts.length - 1;
+  const compactionStreaming =
+    part.type === 'compaction' &&
+    !messageComplete &&
+    index === parts.length - 1;
 
   switch (part.type) {
     case 'text':
-      return <TextPart key={part.id} part={part} />;
+      return <TextPart key={part.id} part={part} streaming={textStreaming} />;
     case 'reasoning':
       return (
         <ReasoningPart
@@ -29,7 +37,13 @@ function renderPart(
         />
       );
     case 'compaction':
-      return <CompactionPart key={part.id} part={part} />;
+      return (
+        <CompactionPart
+          key={part.id}
+          part={part}
+          streaming={compactionStreaming}
+        />
+      );
     case 'tool':
       return <ToolPart key={part.id} part={part} />;
     default:

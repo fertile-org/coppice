@@ -12,9 +12,15 @@ function SessionLine({
   connector,
 }: {
   model: string;
-  connector?: 'claude' | 'codex';
+  connector?: string;
 }) {
-  const label = connector === 'codex' ? 'Codex' : 'Claude';
+  const label = connector
+    ? connector
+        .split(/[-_]/)
+        .filter(Boolean)
+        .map((part) => part[0].toUpperCase() + part.slice(1))
+        .join(' ')
+    : 'Agent';
   return (
     <p className={`${sessionTheme.fontMonoSm} ${sessionTheme.textMuted}`}>
       → {label} session started (model: {model})
@@ -172,6 +178,7 @@ export function ClaudeConsoleView({
 }) {
   const hasStructured = entries.length > 0;
   const legacy = legacyText.trim();
+  const revealedLegacy = useTypewriter(legacy, { enabled: isLive });
 
   if (!hasStructured && !legacy) {
     return (
@@ -190,7 +197,7 @@ export function ClaudeConsoleView({
         <pre
           className={`overflow-x-auto whitespace-pre-wrap ${sessionTheme.fontMonoSm} ${sessionTheme.textMuted}`}
         >
-          {legacy}
+          {revealedLegacy}
         </pre>
       ) : null}
     </div>

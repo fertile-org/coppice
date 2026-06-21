@@ -89,6 +89,30 @@ describe('useTypewriter', () => {
     expect(result.current).toBe(full);
   });
 
+  it('continues from the current reveal position when streaming text appends', () => {
+    const { result, rerender } = renderHook(
+      ({ full }: { full: string }) =>
+        useTypewriter(full, { enabled: true, commitIntervalMs: 0 }),
+      { initialProps: { full: 'hello world'.repeat(20) } },
+    );
+
+    act(() => {
+      vi.advanceTimersByTime(64);
+    });
+    const beforeAppend = result.current;
+    expect(beforeAppend.length).toBeGreaterThan(0);
+    expect(beforeAppend.length).toBeLessThan('hello world'.repeat(20).length);
+
+    rerender({ full: 'hello world'.repeat(20) + ' appended tail' });
+
+    expect(result.current).toBe(beforeAppend);
+
+    act(() => {
+      vi.advanceTimersByTime(5000);
+    });
+    expect(result.current).toBe('hello world'.repeat(20) + ' appended tail');
+  });
+
   it('drains a large backlog faster per frame than a small one', () => {
     const short = 'b'.repeat(50);
     const long = 'c'.repeat(2000);
