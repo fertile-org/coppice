@@ -1,0 +1,11 @@
+{
+  "status": "done",
+  "summary": "## QC Verdict\n**Defects found** — returned to the implementing engineer.\n\n## Defects\n- `workflow_service::resolve_succeeded_gate` advances QC pass to Wait for Final Review; defect path must hand off instead.\n  - Repro: `cargo test -p coppice-server --lib qc_pass_advances`.\n  - Expected: ticket returns to In Progress. Actual: advances toward final review on a defect run.\n  - Failed check: acceptance criterion 'QC defect handoff'.",
+  "changedFiles": [],
+  "testsRun": ["cargo test -p coppice-server --lib services::workflow_service"],
+  "nextStatus": null,
+  "mentionAgents": ["backend_engineer"],
+  "blockers": [
+    "Defect: QC defect run advanced the ticket instead of handing back to the implementing engineer."
+  ]
+}

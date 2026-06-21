@@ -522,10 +522,16 @@ On changes required, use `status: "blocked"`, list concrete fixes in `summary`, 
 
 These rules override conflicting instructions in your system prompt or soul file.
 
-- On pass: return `status: "done"` with a short summary — Coppice moves the ticket to Wait for Final Review.
-- On defects: return `status: "blocked"` **or** `status: "done"` with non-empty `blockers` and `mentionAgents: ["backend_engineer"]` (use the implementer key on this project).
-- Coppice appends `@agent` mentions to the ticket comment, assigns the mentioned implementer, and auto-starts their run when `auto_start_runs` is enabled.
-- Put test commands in `testsRun` only — not inside `summary`.
+**Your role is verification-only.** You may inspect code, run tests, and gather evidence. You must **not** edit, patch, or fix source files, configuration, or product behavior — fixing is the implementing engineer's job. Leave `changedFiles` empty; any changes you make will not be committed or treated as the implementation.
+
+**On pass (no defects):** return `status: "done"` with a short summary. Coppice moves the ticket to Wait for Final Review. Omit `assignTo` and `mentionAgents`.
+
+**On defects:** report a defect comment — do **not** fix it yourself. Return `status: "done"` with:
+- `blockers`: one entry per defect, each with reproduction steps, the failed check or test, and expected vs actual behavior.
+- `mentionAgents`: `["backend_engineer"]` (the implementing engineer agent key on this project). Coppice assigns that engineer, appends the `@agent` mention to the comment, and auto-starts their fix run when `auto_start_runs` is enabled.
+- Do **not** use `assignTo` or attempt to set status yourself — the workflow gate drives the handoff from `blockers` + `mentionAgents` and returns the ticket to In Progress.
+
+Put test commands in `testsRun` only — not inside `summary`.
 "#
         .to_string();
     }
@@ -785,6 +791,48 @@ mod tests {
         assert!(md.contains("Coppice platform rules — code review (required)"));
         assert!(md.contains("## Verdict"));
         assert!(md.contains("moves this ticket to In QA"));
+        assert!(!md.contains("implementer completion"));
+    }
+
+    #[test]
+    fn qc_in_qa_context_is_verification_only_with_mention_handoff() {
+        let (context_profile, human_request, ticket_id, assignee_agent_key, thread_excerpt) =
+            full_profile_defaults();
+        let md = build_context_md(&ContextInput {
+            ticket_title: "Verify retry behavior",
+            ticket_description: "QC the retry fix",
+            ticket_status: "in_qa",
+            ticket_substatus: None,
+            agent_name: "QC Agent",
+            agent_key: "qc",
+            agent_role: "QC",
+            agent_skills: &[],
+            agent_responsibilities: &[],
+            agent_system_prompt: "You are QC.",
+            repo_name: None,
+            repo_remote_url: None,
+            repo_default_branch: None,
+            worktree_path: None,
+            resume_context: None,
+            context_profile,
+            human_request,
+            ticket_id,
+            assignee_agent_key,
+            thread_excerpt,
+        });
+        assert!(md.contains("Coppice platform rules — QA verification (required)"));
+        // Verification-only: must not edit or fix source.
+        assert!(md.contains("verification-only"));
+        assert!(md.contains("must **not** edit, patch, or fix"));
+        // Defect contract: mentionAgents to the engineer, no assignTo/status manipulation.
+        assert!(md.contains("mentionAgents"));
+        assert!(md.contains("`[\"backend_engineer\"]`"));
+        assert!(md.contains("Do **not** use `assignTo`"));
+        assert!(md.contains("blockers"));
+        assert!(md.contains("reproduction steps"));
+        // Pass path preserved.
+        assert!(md.contains("Wait for Final Review"));
+        // Implementer rules must not leak into the QC contract.
         assert!(!md.contains("implementer completion"));
     }
 
