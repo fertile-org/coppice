@@ -87,6 +87,12 @@ function dispatchMessage(raw: string) {
       queryKey: ['comments', msg.ticket_id],
     });
   }
+
+  // Server signalled that this socket's view may be stale (e.g. its broadcast
+  // receiver lagged). Invalidate everything so the next render refetches truth.
+  if (msg.type === 'resync') {
+    void queryClient.invalidateQueries();
+  }
 }
 
 export function dispatchMessageForTest(raw: string) {

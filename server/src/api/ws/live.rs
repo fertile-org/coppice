@@ -86,7 +86,7 @@ async fn handle_live_socket(state: Arc<AppState>, run_id: Uuid, socket: WebSocke
     let stream_handle = if let Some(handle) = state.run_streams.get(run_id) {
         Some(handle)
     } else if is_active_run_status(run.status) {
-        wait_for_run_stream(&state, run_id, Duration::from_secs(10)).await
+        wait_for_run_stream(&state, run_id, Duration::from_secs(5)).await
     } else {
         None
     };
@@ -139,6 +139,9 @@ async fn wait_for_run_stream(
     run_id: Uuid,
     max_wait: Duration,
 ) -> Option<Arc<crate::sessions::run_registry::RunStreamHandle>> {
+    // The stream handle is registered before the run is marked running, so a
+    // client attaching to an already-active run finds it on the first poll in
+    // the common case. This loop is a safety net for the brief dequeue window.
     let deadline = tokio::time::Instant::now() + max_wait;
     loop {
         if let Some(handle) = state.run_streams.get(run_id) {
@@ -146,6 +149,16 @@ async fn wait_for_run_stream(
         }
         if tokio::time::Instant::now() >= deadline {
             return None;
+        }
+        // Bail early once the run transitions to a terminal state so we fall
+        // through to artifact replay instead of waiting out the full deadline
+        // for a stream that will never appear.
+        if let Some(pool) = state.db.as_ref() {
+            if let Ok(run) = RunService::new(pool).get(run_id).await {
+                if !is_active_run_status(run.status) {
+                    return None;
+                }
+            }
         }
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
@@ -174,19 +187,38 @@ async fn replay_and_subscribe(
 
     let mut rx = handle.subscribe();
     loop {
-        match rx.recv().await {
-            Ok(msg) => {
+        match classify_replay_recv(rx.recv().await) {
+            ReplayRecvAction::Send(msg) => {
                 if send_live_message(sender, &msg).await.is_err() {
                     break;
                 }
             }
-            Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
-            Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+            // Lagged or closed: bail so the handler emits an End (recoverable
+            // for active runs) and the client reconnects to re-replay from the
+            // snapshot/buffer. Silently continuing would drop missed frames.
+            ReplayRecvAction::Break => break,
         }
 
         if state.run_streams.get(run_id).is_none() {
             break;
         }
+    }
+}
+
+/// Decision for one iteration of the replay loop. Extracted so the
+/// Lagged -> reconnect reconciliation is independently testable.
+enum ReplayRecvAction {
+    Send(LiveMessage),
+    Break,
+}
+
+fn classify_replay_recv(
+    recv: Result<LiveMessage, tokio::sync::broadcast::error::RecvError>,
+) -> ReplayRecvAction {
+    match recv {
+        Ok(msg) => ReplayRecvAction::Send(msg),
+        Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => ReplayRecvAction::Break,
+        Err(tokio::sync::broadcast::error::RecvError::Closed) => ReplayRecvAction::Break,
     }
 }
 
@@ -372,4 +404,57 @@ async fn send_live_message(
         ))
         .await
         .map_err(|_| ())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::sessions::run_registry::RunStreamRegistry;
+
+    #[test]
+    fn classify_lagged_breaks_for_reconnect() {
+        assert!(matches!(
+            classify_replay_recv(Err(tokio::sync::broadcast::error::RecvError::Lagged(3))),
+            ReplayRecvAction::Break
+        ));
+    }
+
+    #[test]
+    fn classify_closed_breaks() {
+        assert!(matches!(
+            classify_replay_recv(Err(tokio::sync::broadcast::error::RecvError::Closed)),
+            ReplayRecvAction::Break
+        ));
+    }
+
+    #[test]
+    fn classify_ok_sends() {
+        let msg = LiveMessage::Frame { seq: 0, data: vec![] };
+        assert!(matches!(
+            classify_replay_recv(Ok(msg)),
+            ReplayRecvAction::Send(_)
+        ));
+    }
+
+    /// Overflowing a run stream's broadcast receiver forces Lagged — the
+    /// condition the replay loop must turn into a Break so the client
+    /// reconnects and re-replays instead of silently dropping frames.
+    #[tokio::test]
+    async fn run_stream_receiver_lags_on_overflow() {
+        let registry = RunStreamRegistry::new();
+        let run_id = Uuid::new_v4();
+        let handle = registry.register(run_id);
+        let mut rx = handle.subscribe();
+
+        for i in 0..3000 {
+            handle.publish_frame(i, b"x".to_vec());
+        }
+
+        let recv = rx.recv().await;
+        assert!(
+            matches!(recv, Err(tokio::sync::broadcast::error::RecvError::Lagged(_))),
+            "expected Lagged after overflow, got {recv:?}"
+        );
+        assert!(matches!(classify_replay_recv(recv), ReplayRecvAction::Break));
+    }
 }

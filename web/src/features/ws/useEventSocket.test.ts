@@ -50,4 +50,11 @@ describe('useEventSocket dispatch', () => {
       queryKey: ['agent-runs', 'ticket-456'],
     });
   });
+
+  it('invalidates all queries on resync (receiver lag reconciliation)', async () => {
+    const { dispatchMessageForTest } = await import('./useEventSocket');
+    dispatchMessageForTest(JSON.stringify({ type: 'resync' }));
+
+    expect(invalidateSpy).toHaveBeenCalledWith();
+  });
 });
