@@ -94,13 +94,11 @@ async fn process_one(state: &AppState, worker_id: &str) -> anyhow::Result<()> {
         Err(err) if err.downcast_ref::<JobCancelled>().is_some() => {
             state.run_streams.remove(run.id);
             job_svc.mark_cancelled(job.id).await?;
-            publish_run_finished(state, pool, run.id, run.ticket_id, run.agent_id, RunStatus::Cancelled, None).await;
         }
         Err(err) => {
             state.run_streams.remove(run.id);
             if run_svc.is_cancelled(run.id).await.unwrap_or(false) {
                 job_svc.mark_cancelled(job.id).await?;
-                publish_run_finished(state, pool, run.id, run.ticket_id, run.agent_id, RunStatus::Cancelled, None).await;
             } else {
                 let message = format_job_error(&err);
                 fail_job(pool, run.id, job.id, &message).await?;

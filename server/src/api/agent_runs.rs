@@ -120,20 +120,19 @@ async fn stop_run(
     let run = service.stop(run_id).await.map_err(map_error)?;
     if let Some(handle) = state.run_streams.get(run_id) {
         handle.cancel();
-    } else {
-        // Queued and orphaned runs have no worker that can publish their
-        // terminal transition, so complete that responsibility here.
-        publish_run_finished(
-            &state,
-            pool,
-            run.id,
-            run.ticket_id,
-            run.agent_id,
-            run.status,
-            None,
-        )
-        .await;
     }
+    // This endpoint owns cancellation publication because it owns the only
+    // transition into RunStatus::Cancelled. Workers only clean up the job.
+    publish_run_finished(
+        &state,
+        pool,
+        run.id,
+        run.ticket_id,
+        run.agent_id,
+        run.status,
+        None,
+    )
+    .await;
     let connector = service
         .agent_connector_for_run(run.agent_id)
         .await

@@ -1,8 +1,10 @@
 mod common;
 
 use axum::http::StatusCode;
+use coppice_server::events::AppEvent;
 use coppice_server::services::notification_service::NotificationService;
 use sqlx::Row;
+use std::time::{Duration, Instant};
 use tower::ServiceExt;
 
 async fn login_as(app: &axum::Router, email: &str, password: &str) -> (String, String) {
@@ -565,4 +567,91 @@ async fn stopping_queued_run_creates_cancelled_notification() {
         .as_str()
         .unwrap()
         .contains("cancelled"));
+}
+
+#[tokio::test]
+async fn stopping_running_run_publishes_cancellation_once() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let (state, app, cookie, csrf, _env) =
+        common::bootstrap_and_login_with_state_and_workers("done", |_| {}).await;
+    let (_git_dir, local_path) = common::create_temp_git_checkout();
+    let repo_id =
+        common::register_test_repo(&app, &local_path.display().to_string(), &cookie, &csrf).await;
+    let project_id = common::create_test_project(&app, &cookie, &csrf).await;
+    let ticket_id = common::create_test_ticket(&app, &project_id, &cookie, &csrf).await;
+    let agent_id = common::create_agent_with_preset_key(
+        &app,
+        "backend_engineer",
+        "Backend Engineer",
+        &cookie,
+        &csrf,
+    )
+    .await;
+    common::set_ticket_repo(&app, &ticket_id, &repo_id, &cookie, &csrf).await;
+    common::assign_agent_to_ticket(&app, &ticket_id, &agent_id, &cookie, &csrf).await;
+
+    let started = app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            &format!("/api/tickets/{ticket_id}/run-agent"),
+            "",
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(started.status(), StatusCode::CREATED);
+    let started: serde_json::Value = common::json_body(started).await;
+    let run_id = started["run"]["id"]
+        .as_str()
+        .unwrap()
+        .parse::<uuid::Uuid>()
+        .unwrap();
+
+    let stream_deadline = Instant::now() + Duration::from_secs(5);
+    while state.run_streams.get(run_id).is_none() {
+        assert!(
+            Instant::now() < stream_deadline,
+            "timed out waiting for worker to register run stream"
+        );
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+
+    let mut events = state.event_bus.subscribe();
+    let stopped = app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            &format!("/api/agent-runs/{run_id}/stop"),
+            "",
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(stopped.status(), StatusCode::OK);
+
+    let mut finished_events = 0;
+    let mut notification_events = 0;
+    loop {
+        match tokio::time::timeout(Duration::from_secs(1), events.recv()).await {
+            Ok(Ok(AppEvent::AgentRunFinished {
+                run_id: event_run_id,
+                status,
+                ..
+            })) if event_run_id == run_id && status == "cancelled" => finished_events += 1,
+            Ok(Ok(AppEvent::NotificationChanged { .. })) => notification_events += 1,
+            Ok(Ok(_)) => {}
+            Ok(Err(err)) => panic!("event receiver failed: {err}"),
+            Err(_) => break,
+        }
+    }
+
+    assert_eq!(finished_events, 1);
+    assert_eq!(notification_events, 1);
+    assert_eq!(get_unread_count(&app, &cookie, &csrf).await["count"], 1);
 }
