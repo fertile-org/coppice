@@ -3,7 +3,10 @@ mod common;
 use axum::http::StatusCode;
 use coppice_server::domain::run::RunStatus;
 use coppice_server::events::{mark_run_interrupted, AppEvent};
+use coppice_server::providers::AgentRunResult;
 use coppice_server::services::notification_service::NotificationService;
+use coppice_server::services::result_contract::apply_agent_result;
+use coppice_server::services::run_orchestrator::RunOrchestrator;
 use coppice_server::services::run_service::RunService;
 use sqlx::Row;
 use std::time::{Duration, Instant};
@@ -287,6 +290,89 @@ async fn mention_creates_notification_for_all_users() {
     let admin_list = list_notifications(&app, &admin_cookie, &admin_csrf, "").await;
     assert_eq!(admin_list["items"][0]["type"], "agent_mentioned");
     assert!(admin_list["items"][0]["mentionId"].is_string());
+}
+
+#[tokio::test]
+async fn workflow_agent_mention_creates_notification() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
+    let pool = state.db.as_ref().expect("db pool");
+
+    let project_id = common::create_test_project(&app, &cookie, &csrf).await;
+    let ticket_id = common::create_test_ticket(&app, &project_id, &cookie, &csrf).await;
+    let engineer_id = common::create_agent_with_preset_key(
+        &app,
+        "backend_engineer",
+        "Backend Engineer",
+        &cookie,
+        &csrf,
+    )
+    .await;
+    common::create_agent_with_preset_key(&app, "pm", "PM Agent", &cookie, &csrf).await;
+
+    let ticket_id = ticket_id.parse::<uuid::Uuid>().unwrap();
+    let engineer_id = engineer_id.parse::<uuid::Uuid>().unwrap();
+    sqlx::query("UPDATE tickets SET status = 'in_progress', assignee_agent_id = $2 WHERE id = $1")
+        .bind(ticket_id)
+        .bind(engineer_id)
+        .execute(pool)
+        .await
+        .unwrap();
+
+    let run_id = uuid::Uuid::new_v4();
+    sqlx::query(
+        r#"
+        INSERT INTO agent_runs (id, ticket_id, agent_id, job_type, status, sandbox_profile_id)
+        VALUES ($1, $2, $3, 'work_on_ticket', 'running', 'permissive-default')
+        "#,
+    )
+    .bind(run_id)
+    .bind(ticket_id)
+    .bind(engineer_id)
+    .execute(pool)
+    .await
+    .unwrap();
+
+    let contract = AgentRunResult::Blocked {
+        blocker_type: "needs_human".into(),
+        summary: "Need product direction".into(),
+        next_status: None,
+        assign_to: None,
+        updated_description: None,
+        acceptance_criteria: None,
+        mention_agents: vec!["pm".into()],
+        required_capabilities: vec![],
+        required_secrets: vec![],
+    };
+    let apply = apply_agent_result(&contract).unwrap();
+    let run = RunService::new(pool).get(run_id).await.unwrap();
+
+    RunOrchestrator::new(pool, &state.config.workflow)
+        .finish_run(&run, &contract, apply, None, None)
+        .await
+        .unwrap();
+
+    let mention_id: uuid::Uuid = sqlx::query_scalar(
+        "SELECT id FROM ticket_mentions WHERE ticket_id = $1 ORDER BY created_at DESC LIMIT 1",
+    )
+    .bind(ticket_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    let notification_count: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM notifications WHERE mention_id = $1")
+            .bind(mention_id)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+
+    assert_eq!(
+        notification_count, 1,
+        "workflow-generated mentionAgents must create a durable notification"
+    );
 }
 
 #[tokio::test]
