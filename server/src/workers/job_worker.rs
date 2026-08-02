@@ -89,6 +89,8 @@ async fn process_one(state: &AppState, worker_id: &str) -> anyhow::Result<()> {
         return Ok(());
     }
 
+    // The stop endpoint publishes the cancelled transition when it commits;
+    // cancellation branches here only reconcile the durable job state.
     match execute_job(state, pool, &run_svc, &run).await {
         Ok(()) => job_svc.mark_done(job.id).await?,
         Err(err) if err.downcast_ref::<JobCancelled>().is_some() => {
@@ -101,17 +103,24 @@ async fn process_one(state: &AppState, worker_id: &str) -> anyhow::Result<()> {
                 job_svc.mark_cancelled(job.id).await?;
             } else {
                 let message = format_job_error(&err);
-                fail_job(pool, run.id, job.id, &message).await?;
-                publish_run_finished(
-                    state,
-                    pool,
-                    run.id,
-                    run.ticket_id,
-                    run.agent_id,
-                    RunStatus::Failed,
-                    Some(message),
-                )
-                .await;
+                if let Err(finish_err) = fail_job(pool, run.id, job.id, &message).await {
+                    if run_svc.is_cancelled(run.id).await.unwrap_or(false) {
+                        job_svc.mark_cancelled(job.id).await?;
+                    } else {
+                        return Err(finish_err);
+                    }
+                } else {
+                    publish_run_finished(
+                        state,
+                        pool,
+                        run.id,
+                        run.ticket_id,
+                        run.agent_id,
+                        RunStatus::Failed,
+                        Some(message),
+                    )
+                    .await;
+                }
             }
             return Err(err);
         }

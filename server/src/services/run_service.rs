@@ -367,6 +367,9 @@ impl<'a> RunService<'a> {
         branch_name: Option<String>,
     ) -> Result<AgentRun, RunError> {
         let run = self.get(run_id).await?;
+        if run.status != RunStatus::Running {
+            return Err(RunError::Validation("run is not running".into()));
+        }
 
         if apply.ticket.status.is_some() || apply.ticket.substatus.is_some() {
             let ticket_svc = TicketService::new(self.pool);
@@ -405,7 +408,7 @@ impl<'a> RunService<'a> {
                 worktree_path = $3,
                 branch_name = $4,
                 ended_at = now()
-            WHERE id = $1
+            WHERE id = $1 AND status = $5
             RETURNING
                 id, ticket_id, agent_id, job_type, status, sandbox_profile_id,
                 worktree_path, branch_name, error_message, session_id,
@@ -417,9 +420,10 @@ impl<'a> RunService<'a> {
         .bind(run_status_to_str(apply.run_status))
         .bind(worktree_path)
         .bind(branch_name)
+        .bind(run_status_to_str(RunStatus::Running))
         .fetch_optional(self.pool)
         .await?
-        .ok_or(RunError::NotFound)?;
+        .ok_or_else(|| RunError::Validation("run is not running".into()))?;
 
         Ok(row_to_run(&row))
     }
@@ -541,7 +545,7 @@ impl<'a> RunService<'a> {
                 worktree_path = $3,
                 branch_name = $4,
                 ended_at = now()
-            WHERE id = $1
+            WHERE id = $1 AND status = $5
             RETURNING
                 id, ticket_id, agent_id, job_type, status, sandbox_profile_id,
                 worktree_path, branch_name, error_message, session_id,
@@ -553,22 +557,20 @@ impl<'a> RunService<'a> {
         .bind(run_status_to_str(run_status))
         .bind(worktree_path)
         .bind(branch_name)
+        .bind(run_status_to_str(RunStatus::Running))
         .fetch_optional(self.pool)
         .await?
-        .ok_or(RunError::NotFound)?;
+        .ok_or_else(|| RunError::Validation("run is not running".into()))?;
 
         Ok(row_to_run(&row))
     }
 
     pub async fn finish_failed(&self, run_id: Uuid, message: &str) -> Result<AgentRun, RunError> {
-        JobService::new(self.pool)
-            .fail_active_jobs_for_run(run_id)
-            .await?;
         let row = sqlx::query(
             r#"
             UPDATE agent_runs
             SET status = $2, error_message = $3, ended_at = now()
-            WHERE id = $1
+            WHERE id = $1 AND status IN ($4, $5)
             RETURNING
                 id, ticket_id, agent_id, job_type, status, sandbox_profile_id,
                 worktree_path, branch_name, error_message, session_id,
@@ -579,9 +581,15 @@ impl<'a> RunService<'a> {
         .bind(run_id)
         .bind(run_status_to_str(RunStatus::Failed))
         .bind(message)
+        .bind(run_status_to_str(RunStatus::Queued))
+        .bind(run_status_to_str(RunStatus::Running))
         .fetch_optional(self.pool)
         .await?
-        .ok_or(RunError::NotFound)?;
+        .ok_or_else(|| RunError::Validation("run is not active".into()))?;
+
+        JobService::new(self.pool)
+            .fail_active_jobs_for_run(run_id)
+            .await?;
 
         Ok(row_to_run(&row))
     }
@@ -804,6 +812,42 @@ mod tests {
         assert!(active_ids.contains(&running_id));
         assert!(active_ids.contains(&queued_id));
         assert!(!active_ids.contains(&succeeded_id));
+    }
+
+    #[tokio::test]
+    async fn finish_run_does_not_overwrite_cancelled_run() {
+        let Some(pool) = test_pool().await else {
+            return;
+        };
+        let run_id = insert_run(&pool, RunStatus::Cancelled).await;
+        let svc = RunService::new(&pool);
+
+        let result = svc
+            .finish_run(run_id, RunStatus::Succeeded, None, None)
+            .await;
+
+        assert!(matches!(result, Err(RunError::Validation(_))));
+        assert_eq!(
+            svc.get(run_id).await.expect("load run").status,
+            RunStatus::Cancelled
+        );
+    }
+
+    #[tokio::test]
+    async fn finish_failed_does_not_overwrite_cancelled_run() {
+        let Some(pool) = test_pool().await else {
+            return;
+        };
+        let run_id = insert_run(&pool, RunStatus::Cancelled).await;
+        let svc = RunService::new(&pool);
+
+        let result = svc.finish_failed(run_id, "late failure").await;
+
+        assert!(matches!(result, Err(RunError::Validation(_))));
+        assert_eq!(
+            svc.get(run_id).await.expect("load run").status,
+            RunStatus::Cancelled
+        );
     }
 }
 

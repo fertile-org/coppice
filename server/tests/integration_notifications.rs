@@ -635,7 +635,7 @@ async fn stopping_running_run_publishes_cancellation_once() {
         .unwrap();
     assert_eq!(stopped.status(), StatusCode::OK);
 
-    let mut finished_events = 0;
+    let mut finished_statuses = Vec::new();
     let mut notification_events = 0;
     loop {
         match tokio::time::timeout(Duration::from_secs(1), events.recv()).await {
@@ -643,7 +643,7 @@ async fn stopping_running_run_publishes_cancellation_once() {
                 run_id: event_run_id,
                 status,
                 ..
-            })) if event_run_id == run_id && status == "cancelled" => finished_events += 1,
+            })) if event_run_id == run_id => finished_statuses.push(status),
             Ok(Ok(AppEvent::NotificationChanged { .. })) => notification_events += 1,
             Ok(Ok(_)) => {}
             Ok(Err(err)) => panic!("event receiver failed: {err}"),
@@ -651,7 +651,7 @@ async fn stopping_running_run_publishes_cancellation_once() {
         }
     }
 
-    assert_eq!(finished_events, 1);
+    assert_eq!(finished_statuses, ["cancelled"]);
     assert_eq!(notification_events, 1);
     assert_eq!(get_unread_count(&app, &cookie, &csrf).await["count"], 1);
 }
