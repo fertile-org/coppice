@@ -209,7 +209,9 @@ where
     (state, AgentTestEnv { worktrees })
 }
 
-async fn test_state_with_db_and_auto_start_workers() -> (Arc<AppState>, AgentTestEnv) {
+async fn test_state_with_db_and_auto_start_workers(
+    worker_count: u32,
+) -> (Arc<AppState>, AgentTestEnv) {
     let worktrees = tempfile::tempdir().expect("worktrees tempdir");
 
     std::env::set_var("WORKTREES_PATH", worktrees.path());
@@ -225,7 +227,7 @@ async fn test_state_with_db_and_auto_start_workers() -> (Arc<AppState>, AgentTes
     );
     let mut config = AppConfig::load_defaults().expect("test config");
     config.workflow.auto_start_runs = true;
-    config.agent.worker_count = 1;
+    config.agent.worker_count = worker_count;
 
     let state = Arc::new(AppState {
         attachments: AppState::attachment_store_from_config(&config),
@@ -366,7 +368,13 @@ pub async fn bootstrap_and_login_with_state() -> (Arc<AppState>, Router, String,
 
 pub async fn bootstrap_and_login_with_auto_start_workers(
 ) -> (Arc<AppState>, Router, String, String, AgentTestEnv) {
-    let (state, env) = test_state_with_db_and_auto_start_workers().await;
+    bootstrap_and_login_with_auto_start_worker_count(1).await
+}
+
+pub async fn bootstrap_and_login_with_auto_start_worker_count(
+    worker_count: u32,
+) -> (Arc<AppState>, Router, String, String, AgentTestEnv) {
+    let (state, env) = test_state_with_db_and_auto_start_workers(worker_count).await;
     let app = coppice_server::app(state.clone());
 
     app.clone()
@@ -740,10 +748,7 @@ pub async fn poll_runs_until_count(
             .unwrap();
         assert_eq!(res.status(), StatusCode::OK);
         let body: serde_json::Value = json_body(res).await;
-        let runs = body["runs"]
-            .as_array()
-            .cloned()
-            .unwrap_or_default();
+        let runs = body["runs"].as_array().cloned().unwrap_or_default();
         if predicate(&runs) {
             return runs;
         }

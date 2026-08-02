@@ -603,6 +603,23 @@ async fn qc_defect_handoff_returns_to_engineer_without_committing() {
             && r["jobType"].as_str() == Some("work_on_ticket")
             && r["status"].as_str() == Some("succeeded")
     }));
+    assert_eq!(
+        runs.iter()
+            .filter(|r| {
+                r["agentId"].as_str() == Some(engineer_id.as_str())
+                    && r["jobType"].as_str() == Some("work_on_ticket")
+            })
+            .count(),
+        1,
+        "QC handoff must enqueue exactly one engineer work run"
+    );
+    assert!(
+        !runs.iter().any(|r| {
+            r["agentId"].as_str() == Some(engineer_id.as_str())
+                && r["jobType"].as_str() == Some("respond_to_mention")
+        }),
+        "QC handoff must not also enqueue an engineer response run"
+    );
 
     // Ticket left in_qa and is now in_progress owned by the implementing engineer.
     let ticket = common::poll_ticket_until(
@@ -653,4 +670,3 @@ async fn qc_defect_handoff_returns_to_engineer_without_committing() {
         "QC comment must not claim a commit: {body}"
     );
 }
-

@@ -1,10 +1,11 @@
+use crate::domain::agent::Agent;
 use crate::domain::mention::{MentionStatus, TicketMention};
 use crate::domain::slug::slugify;
 use crate::services::agent_service::AgentService;
 use sqlx::PgPool;
 use sqlx::Row;
 use std::collections::hash_map::Entry;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
 
 pub struct MentionService<'a> {
@@ -50,11 +51,15 @@ impl<'a> MentionService<'a> {
         let _ = project_id;
         let agent_map = self.build_agent_key_map().await?;
         let mut mentions = Vec::new();
+        let mut mentioned_agent_ids = HashSet::new();
 
         for key in keys {
             let Some(&agent_id) = agent_map.get(key) else {
                 continue;
             };
+            if !mentioned_agent_ids.insert(agent_id) {
+                continue;
+            }
 
             let id = Uuid::new_v4();
             let row = sqlx::query(
@@ -144,10 +149,37 @@ impl<'a> MentionService<'a> {
         ticket_id: Uuid,
         mentioned_agent_id: Uuid,
     ) -> Result<Option<TicketMention>, MentionError> {
-        let mentions = self.list_pending_for_ticket(ticket_id).await?;
-        Ok(mentions
-            .into_iter()
-            .find(|m| m.mentioned_agent_id == mentioned_agent_id))
+        self.find_pending_for_agent_and_comment(ticket_id, mentioned_agent_id, None)
+            .await
+    }
+
+    pub async fn find_pending_for_agent_and_comment(
+        &self,
+        ticket_id: Uuid,
+        mentioned_agent_id: Uuid,
+        comment_id: Option<Uuid>,
+    ) -> Result<Option<TicketMention>, MentionError> {
+        let row = sqlx::query(
+            r#"
+            SELECT
+                id, ticket_id, comment_id, mentioned_agent_id, resume_agent_id, status
+            FROM ticket_mentions
+            WHERE ticket_id = $1
+              AND mentioned_agent_id = $2
+              AND status = $3
+              AND ($4::uuid IS NULL OR comment_id = $4)
+            ORDER BY created_at ASC
+            LIMIT 1
+            "#,
+        )
+        .bind(ticket_id)
+        .bind(mentioned_agent_id)
+        .bind(mention_status_to_str(MentionStatus::Pending))
+        .bind(comment_id)
+        .fetch_optional(self.pool)
+        .await?;
+
+        Ok(row.as_ref().map(row_to_mention))
     }
 
     pub async fn list_pending_for_ticket(
@@ -173,22 +205,26 @@ impl<'a> MentionService<'a> {
 
     async fn build_agent_key_map(&self) -> Result<HashMap<String, Uuid>, MentionError> {
         let agents = AgentService::new(self.pool).list_agents().await?;
-        let mut map = HashMap::new();
-
-        for agent in agents {
-            if !agent.enabled {
-                continue;
-            }
-            if let Some(ref preset) = agent.preset_source {
-                if let Entry::Vacant(entry) = map.entry(preset.clone()) {
-                    entry.insert(agent.id);
-                }
-            }
-            map.insert(slugify(&agent.name), agent.id);
-        }
-
-        Ok(map)
+        Ok(resolve_agent_keys(&agents))
     }
+}
+
+pub(crate) fn resolve_agent_keys(agents: &[Agent]) -> HashMap<String, Uuid> {
+    let mut map = HashMap::new();
+
+    for agent in agents {
+        if !agent.enabled {
+            continue;
+        }
+        if let Some(ref preset) = agent.preset_source {
+            if let Entry::Vacant(entry) = map.entry(preset.clone()) {
+                entry.insert(agent.id);
+            }
+        }
+        map.insert(slugify(&agent.name), agent.id);
+    }
+
+    map
 }
 
 fn mention_token(input: &str) -> Option<&str> {
