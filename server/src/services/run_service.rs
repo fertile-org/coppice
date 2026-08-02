@@ -13,6 +13,7 @@ use crate::domain::job::{job_status_to_str, JobStatus};
 use crate::services::agent_service::AgentError;
 use crate::services::job_service::{JobError, JobService};
 use crate::services::mention_service::MentionError;
+use crate::services::notification_service::NotificationService;
 use crate::services::result_contract::ApplyResult;
 use crate::services::ticket_service::{TicketError, TicketService, TicketWithDisplay};
 use crate::services::workflow_service::WorkflowService;
@@ -604,18 +605,25 @@ impl<'a> RunService<'a> {
     }
 
     pub async fn mark_interrupted(&self, run_id: Uuid, reason: &str) -> Result<AgentRun, RunError> {
-        JobService::new(self.pool)
-            .fail_active_jobs_for_run(run_id)
-            .await?;
-        sqlx::query(
-            r#"UPDATE agent_runs SET status = $2, error_message = $3, ended_at = now() WHERE id = $1"#,
-        )
-        .bind(run_id)
-        .bind(run_status_to_str(RunStatus::Failed))
-        .bind(format!("interrupted: {reason}"))
-        .execute(self.pool)
-        .await?;
-        self.get(run_id).await
+        let message = format!("interrupted: {reason}");
+        let run = self.finish_failed(run_id, &message).await?;
+
+        // Recovery paths can call this service without an API or worker event
+        // publisher. Attempt the durable notification at the transition; the
+        // source key makes publication retries safe.
+        if let Err(err) = NotificationService::new(self.pool)
+            .create_for_run_finished(
+                run.id,
+                run.ticket_id,
+                run.agent_id,
+                run_status_to_str(run.status),
+            )
+            .await
+        {
+            tracing::warn!(error = %err, run_id = %run.id, "failed to create interrupted-run notification");
+        }
+
+        Ok(run)
     }
 
     pub async fn list_active_runs(&self) -> Result<Vec<AgentRun>, RunError> {
@@ -794,6 +802,25 @@ mod tests {
             .await
             .expect("job status");
         assert_eq!(status, "failed");
+    }
+
+    #[tokio::test]
+    async fn mark_interrupted_does_not_overwrite_cancelled_run() {
+        let Some(pool) = test_pool().await else {
+            return;
+        };
+        let run_id = insert_run(&pool, RunStatus::Cancelled).await;
+        let svc = RunService::new(&pool);
+
+        let result = svc
+            .mark_interrupted(run_id, "late watchdog observation")
+            .await;
+
+        assert!(matches!(result, Err(RunError::Validation(_))));
+        assert_eq!(
+            svc.get(run_id).await.expect("load run").status,
+            RunStatus::Cancelled
+        );
     }
 
     #[tokio::test]

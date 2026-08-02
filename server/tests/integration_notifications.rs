@@ -2,7 +2,7 @@ mod common;
 
 use axum::http::StatusCode;
 use coppice_server::domain::run::RunStatus;
-use coppice_server::events::AppEvent;
+use coppice_server::events::{mark_run_interrupted, AppEvent};
 use coppice_server::services::notification_service::NotificationService;
 use coppice_server::services::run_service::RunService;
 use sqlx::Row;
@@ -622,6 +622,63 @@ async fn interrupted_run_creates_failed_notification() {
         .as_str()
         .unwrap()
         .contains("failed"));
+
+    let published_run_id = uuid::Uuid::new_v4();
+    sqlx::query(
+        r#"
+        INSERT INTO agent_runs (id, ticket_id, agent_id, job_type, status, sandbox_profile_id)
+        VALUES ($1, $2, $3, 'work_on_ticket', 'running', 'permissive-default')
+        "#,
+    )
+    .bind(published_run_id)
+    .bind(ticket_id.parse::<uuid::Uuid>().unwrap())
+    .bind(agent_id.parse::<uuid::Uuid>().unwrap())
+    .execute(pool)
+    .await
+    .unwrap();
+
+    let mut events = state.event_bus.subscribe();
+    let published = mark_run_interrupted(
+        &state,
+        published_run_id,
+        "server restarted during run",
+    )
+    .await
+    .unwrap();
+    assert_eq!(published.status, RunStatus::Failed);
+
+    match tokio::time::timeout(Duration::from_secs(1), events.recv())
+        .await
+        .unwrap()
+        .unwrap()
+    {
+        AppEvent::AgentRunFinished { run_id, status, .. } => {
+            assert_eq!(run_id, published_run_id);
+            assert_eq!(status, "failed");
+        }
+        event => panic!("expected run-finished event, got {event:?}"),
+    }
+    assert!(matches!(
+        tokio::time::timeout(Duration::from_secs(1), events.recv())
+            .await
+            .unwrap()
+            .unwrap(),
+        AppEvent::NotificationChanged { .. }
+    ));
+    assert!(
+        tokio::time::timeout(Duration::from_millis(50), events.recv())
+            .await
+            .is_err(),
+        "interruption should publish each terminal event exactly once"
+    );
+
+    let published_notifications: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM notifications WHERE run_id = $1")
+            .bind(published_run_id)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    assert_eq!(published_notifications, 1);
 }
 
 #[tokio::test]

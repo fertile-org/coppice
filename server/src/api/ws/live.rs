@@ -1,5 +1,6 @@
 use crate::api::ws::auth::auth_user_from_cookie;
 use crate::domain::run::{run_status_to_str, AgentRun, RunStatus};
+use crate::events::mark_run_interrupted;
 use crate::services::artifact_service::{ArtifactService, RunArtifactPaths};
 use crate::services::run_service::{RunError, RunService};
 use crate::sessions::opencode_client::OpenCodeClient;
@@ -38,6 +39,33 @@ pub async fn live_ws_handler(
 struct RecoveryOutcome {
     recoverable: Option<bool>,
     reason: Option<String>,
+}
+
+async fn mark_recovery_interrupted(
+    state: &AppState,
+    run_id: Uuid,
+    reason: &str,
+) -> RecoveryOutcome {
+    match mark_run_interrupted(state, run_id, reason).await {
+        Ok(_) => RecoveryOutcome {
+            recoverable: Some(false),
+            reason: Some(format!("interrupted: {reason}")),
+        },
+        Err(RunError::Validation(message)) => {
+            tracing::debug!(%run_id, %message, "run interruption lost a terminal transition race");
+            RecoveryOutcome {
+                recoverable: None,
+                reason: None,
+            }
+        }
+        Err(err) => {
+            tracing::warn!(error = %err, %run_id, "failed to mark recovered run interrupted");
+            RecoveryOutcome {
+                recoverable: None,
+                reason: None,
+            }
+        }
+    }
 }
 
 async fn handle_live_socket(state: Arc<AppState>, run_id: Uuid, socket: WebSocket) {
@@ -97,11 +125,11 @@ async fn handle_live_socket(state: Arc<AppState>, run_id: Uuid, socket: WebSocke
         None
     } else if is_opencode {
         Some(
-            handle_opencode_recovery(&state, &mut sender, run_id, &run, &run_svc).await,
+            handle_opencode_recovery(&state, &mut sender, run_id, &run).await,
         )
     } else if is_structured_console {
         Some(
-            handle_structured_console_recovery(&state, &mut sender, run_id, &run, &run_svc).await,
+            handle_structured_console_recovery(&state, &mut sender, run_id, &run).await,
         )
     } else if let Some(log_bytes) = read_terminal_log_artifact(&state, run_id) {
         let msg = LiveMessage::Frame {
@@ -228,7 +256,6 @@ async fn handle_opencode_recovery(
     sender: &mut futures_util::stream::SplitSink<WebSocket, Message>,
     run_id: Uuid,
     run: &AgentRun,
-    run_svc: &RunService<'_>,
 ) -> RecoveryOutcome {
     let paths = RunArtifactPaths::new(&state.config.storage.artifacts_dir, &run_id.to_string());
 
@@ -296,11 +323,7 @@ async fn handle_opencode_recovery(
                     let err_msg = err.to_string();
                     if err_msg.contains("not found") {
                         let reason = "server restarted during run";
-                        let _ = run_svc.mark_interrupted(run_id, reason).await;
-                        return RecoveryOutcome {
-                            recoverable: Some(false),
-                            reason: Some(format!("interrupted: {reason}")),
-                        };
+                        return mark_recovery_interrupted(state, run_id, reason).await;
                     }
                     return RecoveryOutcome {
                         recoverable: Some(false),
@@ -331,7 +354,6 @@ async fn handle_structured_console_recovery(
     sender: &mut futures_util::stream::SplitSink<WebSocket, Message>,
     run_id: Uuid,
     run: &AgentRun,
-    run_svc: &RunService<'_>,
 ) -> RecoveryOutcome {
     // Replay structured console events from disk (preferred) or legacy terminal log.
     let paths = RunArtifactPaths::new(&state.config.storage.artifacts_dir, &run_id.to_string());
@@ -362,11 +384,7 @@ async fn handle_structured_console_recovery(
     // Only running runs without a stream handle after waiting indicate a dead process.
     if run.status == RunStatus::Running {
         let reason = "server restarted during run";
-        let _ = run_svc.mark_interrupted(run_id, reason).await;
-        return RecoveryOutcome {
-            recoverable: Some(false),
-            reason: Some(format!("interrupted: {reason}")),
-        };
+        return mark_recovery_interrupted(state, run_id, reason).await;
     }
 
     RecoveryOutcome {

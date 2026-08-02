@@ -2,10 +2,11 @@ use sqlx::PgPool;
 use time::format_description::well_known::Rfc3339;
 use uuid::Uuid;
 
-use crate::domain::run::{run_status_to_str, RunStatus};
+use crate::domain::run::{run_status_to_str, AgentRun, RunStatus};
 use crate::domain::ticket::{status_to_str, substatus_to_str};
 use crate::events::bus::{AppEvent, EventBus};
 use crate::services::notification_service::NotificationService;
+use crate::services::run_service::{RunError, RunService};
 use crate::services::ticket_service::TicketWithDisplay;
 use crate::AppState;
 
@@ -56,4 +57,35 @@ pub async fn publish_run_finished(
             recipient_user_id: None,
         });
     }
+}
+
+/// Mark an active run interrupted and publish its terminal events. The service
+/// persists the notification itself so direct recovery transitions are durable;
+/// `publish_run_finished` retries that idempotent write before invalidating
+/// connected clients.
+pub async fn mark_run_interrupted(
+    state: &AppState,
+    run_id: Uuid,
+    reason: &str,
+) -> Result<AgentRun, RunError> {
+    let pool = state
+        .db
+        .as_ref()
+        .ok_or_else(|| RunError::Validation("database unavailable".into()))?;
+    let run = RunService::new(pool)
+        .mark_interrupted(run_id, reason)
+        .await?;
+
+    publish_run_finished(
+        state,
+        pool,
+        run.id,
+        run.ticket_id,
+        run.agent_id,
+        run.status,
+        run.error_message.clone(),
+    )
+    .await;
+
+    Ok(run)
 }

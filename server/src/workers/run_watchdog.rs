@@ -5,6 +5,7 @@ use time::OffsetDateTime;
 use uuid::Uuid;
 
 use crate::domain::run::RunStatus;
+use crate::events::mark_run_interrupted;
 use crate::services::run_service::RunService;
 use crate::sessions::live_message::LiveMessage;
 use crate::sessions::opencode_client::OpenCodeClient;
@@ -107,9 +108,16 @@ async fn run_watchdog_pass(state: &AppState) {
                     elapsed_secs,
                     "opencode session missing while run is active; marking interrupted"
                 );
-                let _ = run_svc
-                    .mark_interrupted(run.id, "opencode session lost during run")
-                    .await;
+                if let Err(err) =
+                    mark_run_interrupted(state, run.id, "opencode session lost during run").await
+                {
+                    tracing::warn!(
+                        error = %err,
+                        run_id = %run.id,
+                        ticket_id = %run.ticket_id,
+                        "failed to mark watchdog-observed run interrupted"
+                    );
+                }
             }
             Err(err) => {
                 tracing::warn!(

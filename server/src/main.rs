@@ -2,9 +2,16 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use tracing_subscriber::EnvFilter;
 
+use coppice_server::events::mark_run_interrupted;
 use coppice_server::services::run_service::RunService;
 use coppice_server::sessions::opencode_client::OpenCodeClient;
 use coppice_server::AppState;
+
+async fn interrupt_orphaned_run(state: &AppState, run_id: uuid::Uuid) {
+    if let Err(err) = mark_run_interrupted(state, run_id, "server restarted during run").await {
+        tracing::warn!(error = %err, %run_id, "failed to mark orphaned run interrupted");
+    }
+}
 
 async fn sweep_orphaned_runs(state: &AppState) {
     let Some(pool) = state.db.as_ref() else {
@@ -35,21 +42,15 @@ async fn sweep_orphaned_runs(state: &AppState) {
                         .flatten()
                         .is_some();
                     if !alive {
-                        let _ = run_svc
-                            .mark_interrupted(run.id, "server restarted during run")
-                            .await;
+                        interrupt_orphaned_run(state, run.id).await;
                     }
                 } else {
-                    let _ = run_svc
-                        .mark_interrupted(run.id, "server restarted during run")
-                        .await;
+                    interrupt_orphaned_run(state, run.id).await;
                 }
                 continue;
             }
         }
-        let _ = run_svc
-            .mark_interrupted(run.id, "server restarted during run")
-            .await;
+        interrupt_orphaned_run(state, run.id).await;
     }
 }
 
