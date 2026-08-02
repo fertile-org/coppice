@@ -1,5 +1,6 @@
 use crate::api::auth::{pool_from_state, AuthUser};
 use crate::domain::run::{run_status_to_str, AgentRun};
+use crate::events::publish_run_finished;
 use crate::services::run_service::{AgentRunWithConnector, RunError, RunService};
 use crate::AppState;
 use axum::{
@@ -119,6 +120,19 @@ async fn stop_run(
     let run = service.stop(run_id).await.map_err(map_error)?;
     if let Some(handle) = state.run_streams.get(run_id) {
         handle.cancel();
+    } else {
+        // Queued and orphaned runs have no worker that can publish their
+        // terminal transition, so complete that responsibility here.
+        publish_run_finished(
+            &state,
+            pool,
+            run.id,
+            run.ticket_id,
+            run.agent_id,
+            run.status,
+            None,
+        )
+        .await;
     }
     let connector = service
         .agent_connector_for_run(run.agent_id)

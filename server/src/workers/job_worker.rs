@@ -13,7 +13,7 @@ use crate::domain::substatus::TicketStatus;
 use crate::domain::run::{run_status_to_str, RunStatus};
 use crate::domain::slug::slugify;
 use crate::domain::ticket::{status_to_str, substatus_to_str};
-use crate::events::bus::AppEvent;
+use crate::events::{publish_run_finished, AppEvent};
 use crate::providers::{AgentRunInput, ProviderError};
 use crate::services::agent_service::AgentService;
 use crate::services::artifact_service::{ArtifactService, RunArtifactMeta, RunArtifactPaths};
@@ -23,7 +23,6 @@ use crate::services::context_builder::{
     write_agent_context_files, write_context_file, ContextInput, HumanRequest,
 };
 use crate::services::job_service::JobService;
-use crate::services::notification_service::NotificationService;
 use crate::services::result_contract::{self, ACCEPTANCE_CRITERIA_HEADER};
 use crate::services::run_orchestrator::{load_run_continuation_context, RunOrchestrator};
 use crate::services::run_service::{AgentRunWithConnector, RunService};
@@ -678,39 +677,6 @@ async fn load_resume_session_id(
     .ok()
     .flatten();
     session_id
-}
-
-async fn publish_run_finished(
-    state: &AppState,
-    pool: &PgPool,
-    run_id: uuid::Uuid,
-    ticket_id: uuid::Uuid,
-    agent_id: uuid::Uuid,
-    status: RunStatus,
-    error_message: Option<String>,
-) {
-    state.event_bus.publish(AppEvent::AgentRunFinished {
-        run_id,
-        ticket_id,
-        agent_id,
-        status: run_status_to_str(status).into(),
-        error_message,
-    });
-
-    // Persist durable in-app notifications for the four terminal statuses.
-    // Failures are non-fatal: a missing notification row is preferable to a
-    // dropped run-completion signal.
-    let status_str = run_status_to_str(status);
-    if let Err(err) = NotificationService::new(pool)
-        .create_for_run_finished(run_id, ticket_id, agent_id, status_str)
-        .await
-    {
-        tracing::warn!(error = %err, %run_id, "failed to create run-finished notification");
-    } else {
-        state.event_bus.publish(AppEvent::NotificationChanged {
-            recipient_user_id: None,
-        });
-    }
 }
 
 async fn fail_job(
