@@ -504,3 +504,65 @@ async fn mark_read_unknown_id_returns_not_found() {
         .unwrap();
     assert_eq!(res.status(), StatusCode::NOT_FOUND);
 }
+
+#[tokio::test]
+async fn stopping_queued_run_creates_cancelled_notification() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
+    let pool = state.db.as_ref().expect("db pool");
+    let project_id = common::create_test_project(&app, &cookie, &csrf).await;
+    let ticket_id = common::create_test_ticket(&app, &project_id, &cookie, &csrf).await;
+    let agent_id = common::create_agent_with_preset_key(
+        &app,
+        "backend_engineer",
+        "Backend Engineer",
+        &cookie,
+        &csrf,
+    )
+    .await;
+    let run_id = uuid::Uuid::new_v4();
+    sqlx::query(
+        r#"
+        INSERT INTO agent_runs (id, ticket_id, agent_id, job_type, status, sandbox_profile_id)
+        VALUES ($1, $2, $3, 'work_on_ticket', 'queued', 'permissive-default')
+        "#,
+    )
+    .bind(run_id)
+    .bind(ticket_id.parse::<uuid::Uuid>().unwrap())
+    .bind(agent_id.parse::<uuid::Uuid>().unwrap())
+    .execute(pool)
+    .await
+    .unwrap();
+
+    let before: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM notifications")
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    assert_eq!(before, 0, "setup should not create notifications");
+    let stopped = app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            &format!("/api/agent-runs/{run_id}/stop"),
+            "",
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(stopped.status(), StatusCode::OK);
+    let stopped: serde_json::Value = common::json_body(stopped).await;
+    assert_eq!(stopped["run"]["status"], "cancelled");
+
+    let unread = get_unread_count(&app, &cookie, &csrf).await;
+    assert_eq!(unread["count"].as_i64().unwrap(), 1);
+    let listed = list_notifications(&app, &cookie, &csrf, "?filter=all").await;
+    assert_eq!(listed["items"][0]["type"], "agent_run_finished");
+    assert!(listed["items"][0]["title"]
+        .as_str()
+        .unwrap()
+        .contains("cancelled"));
+}
