@@ -1,8 +1,10 @@
 mod common;
 
 use axum::http::StatusCode;
+use coppice_server::domain::run::RunStatus;
 use coppice_server::events::AppEvent;
 use coppice_server::services::notification_service::NotificationService;
+use coppice_server::services::run_service::RunService;
 use sqlx::Row;
 use std::time::{Duration, Instant};
 use tower::ServiceExt;
@@ -567,6 +569,59 @@ async fn stopping_queued_run_creates_cancelled_notification() {
         .as_str()
         .unwrap()
         .contains("cancelled"));
+}
+
+#[tokio::test]
+async fn interrupted_run_creates_failed_notification() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
+    let pool = state.db.as_ref().expect("db pool");
+    let project_id = common::create_test_project(&app, &cookie, &csrf).await;
+    let ticket_id = common::create_test_ticket(&app, &project_id, &cookie, &csrf).await;
+    let agent_id = common::create_agent_with_preset_key(
+        &app,
+        "backend_engineer",
+        "Backend Engineer",
+        &cookie,
+        &csrf,
+    )
+    .await;
+    let run_id = uuid::Uuid::new_v4();
+    sqlx::query(
+        r#"
+        INSERT INTO agent_runs (id, ticket_id, agent_id, job_type, status, sandbox_profile_id)
+        VALUES ($1, $2, $3, 'work_on_ticket', 'running', 'permissive-default')
+        "#,
+    )
+    .bind(run_id)
+    .bind(ticket_id.parse::<uuid::Uuid>().unwrap())
+    .bind(agent_id.parse::<uuid::Uuid>().unwrap())
+    .execute(pool)
+    .await
+    .unwrap();
+
+    let interrupted = RunService::new(pool)
+        .mark_interrupted(run_id, "server restarted during run")
+        .await
+        .unwrap();
+    assert_eq!(interrupted.status, RunStatus::Failed);
+
+    let unread = get_unread_count(&app, &cookie, &csrf).await;
+    assert_eq!(
+        unread["count"].as_i64().unwrap(),
+        1,
+        "an interrupted run finishes as failed and must create a notification"
+    );
+    let listed = list_notifications(&app, &cookie, &csrf, "?filter=all").await;
+    assert_eq!(listed["items"][0]["type"], "agent_run_finished");
+    assert_eq!(listed["items"][0]["runId"], run_id.to_string());
+    assert!(listed["items"][0]["title"]
+        .as_str()
+        .unwrap()
+        .contains("failed"));
 }
 
 #[tokio::test]
