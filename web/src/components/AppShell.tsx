@@ -1,5 +1,7 @@
 import { NavLink, Outlet } from 'react-router-dom';
 import { useSession } from '../features/auth/useSession';
+import { NotificationBell } from '../features/notifications/NotificationBell';
+import { useOpenTicket } from '../features/tickets/useOpenTicket';
 
 const navLinkClass = ({ isActive }: { isActive: boolean }) =>
   [
@@ -11,6 +13,7 @@ const navLinkClass = ({ isActive }: { isActive: boolean }) =>
 
 export function AppShell() {
   const { user, logout } = useSession();
+  const openTicket = useOpenTicket();
 
   return (
     <div className="coppice-grain min-h-screen bg-background">
@@ -50,6 +53,7 @@ export function AppShell() {
           </div>
 
           <div className="flex items-center gap-4">
+            {user && <NotificationBell onOpenTicket={openTicket} />}
             <span className="font-body text-sm text-text-secondary">
               {user?.email}
             </span>

@@ -4,9 +4,8 @@ import {
   Navigate,
   Route,
   Routes,
-  useNavigate,
 } from 'react-router-dom';
-import { QueryClientProvider, useQueryClient } from '@tanstack/react-query';
+import { QueryClientProvider } from '@tanstack/react-query';
 import { AppShell } from './components/AppShell';
 import { ToastProvider, useToast } from './components/ToastProvider';
 import { ProtectedRoute } from './components/ProtectedRoute';
@@ -19,32 +18,17 @@ import { ProjectPickerPage } from './features/projects/ProjectPickerPage';
 import { RepositoriesPage } from './features/repos/RepositoriesPage';
 import { UsersPage } from './features/users/UsersPage';
 import { CodeReviewPage } from './features/code/CodeReviewPage';
-import { type Ticket } from './features/board/useTickets';
-import { ticketQueryKey } from './features/tickets/useTicket';
+import { useOpenTicket } from './features/tickets/useOpenTicket';
 import {
   useEventSocket,
   type AgentRunFinishedPayload,
 } from './features/ws/useEventSocket';
-import { apiFetch } from './lib/api';
 import { queryClient } from './lib/query-client';
 
 function EventSocketBridge() {
   const { user } = useSession();
   const toast = useToast();
-  const navigate = useNavigate();
-  const queryClient = useQueryClient();
-
-  const openTicket = useCallback(
-    async (ticketId: string) => {
-      let ticket = queryClient.getQueryData<Ticket>(ticketQueryKey(ticketId));
-      if (!ticket) {
-        const res = await apiFetch(`/api/tickets/${ticketId}`);
-        ticket = (await res.json()) as Ticket;
-      }
-      navigate(`/projects/${ticket.projectId}/board?ticket=${ticketId}`);
-    },
-    [navigate, queryClient],
-  );
+  const openTicket = useOpenTicket();
 
   const handleRunFinished = useCallback(
     (payload: AgentRunFinishedPayload) => {
