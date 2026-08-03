@@ -34,17 +34,24 @@ interface MarkAllReadResponse {
 }
 
 export const NOTIFICATIONS_QUERY_KEY = ['notifications'] as const;
-const NOTIFICATION_LIST_QUERY_KEY = [
-  ...NOTIFICATIONS_QUERY_KEY,
-  'list',
-] as const;
-export const unreadNotificationCountQueryKey = [
-  ...NOTIFICATIONS_QUERY_KEY,
-  'unread-count',
-] as const;
+export function notificationUserQueryKey(userId: string) {
+  return [...NOTIFICATIONS_QUERY_KEY, 'user', userId] as const;
+}
 
-export function notificationListQueryKey(filter: 'all' | 'unread', limit: number) {
-  return [...NOTIFICATION_LIST_QUERY_KEY, filter, limit] as const;
+function notificationListPrefix(userId: string) {
+  return [...notificationUserQueryKey(userId), 'list'] as const;
+}
+
+export function unreadNotificationCountQueryKey(userId: string) {
+  return [...notificationUserQueryKey(userId), 'unread-count'] as const;
+}
+
+export function notificationListQueryKey(
+  userId: string,
+  filter: 'all' | 'unread',
+  limit: number,
+) {
+  return [...notificationListPrefix(userId), filter, limit] as const;
 }
 
 async function fetchNotifications(
@@ -76,10 +83,11 @@ async function markAllNotificationsRead(): Promise<MarkAllReadResponse> {
 
 function updateNotificationLists(
   queryClient: QueryClient,
+  userId: string,
   update: (item: NotificationItem) => NotificationItem,
 ) {
   queryClient.setQueriesData<NotificationPage>(
-    { queryKey: NOTIFICATION_LIST_QUERY_KEY },
+    { queryKey: notificationListPrefix(userId) },
     (page) =>
       page
         ? {
@@ -100,47 +108,50 @@ function restoreNotificationQueries(
 }
 
 export function useNotifications({
+  userId,
   filter = 'all',
   limit = 20,
   enabled = true,
 }: {
+  userId: string;
   filter?: 'all' | 'unread';
   limit?: number;
   enabled?: boolean;
-} = {}) {
+}) {
   return useQuery({
-    queryKey: notificationListQueryKey(filter, limit),
+    queryKey: notificationListQueryKey(userId, filter, limit),
     queryFn: () => fetchNotifications(filter, limit),
     enabled,
   });
 }
 
-export function useUnreadNotificationCount() {
+export function useUnreadNotificationCount(userId: string) {
   return useQuery({
-    queryKey: unreadNotificationCountQueryKey,
+    queryKey: unreadNotificationCountQueryKey(userId),
     queryFn: fetchUnreadCount,
   });
 }
 
-export function useMarkNotificationRead() {
+export function useMarkNotificationRead(userId: string) {
   const queryClient = useQueryClient();
 
   return useMutation({
     mutationFn: (notification: NotificationItem) =>
       markNotificationRead(notification.id),
     onMutate: async (notification) => {
-      await queryClient.cancelQueries({ queryKey: NOTIFICATIONS_QUERY_KEY });
+      const userQueryKey = notificationUserQueryKey(userId);
+      await queryClient.cancelQueries({ queryKey: userQueryKey });
       const snapshots = queryClient.getQueriesData({
-        queryKey: NOTIFICATIONS_QUERY_KEY,
+        queryKey: userQueryKey,
       });
 
       if (notification.readAt === null) {
         const readAt = new Date().toISOString();
-        updateNotificationLists(queryClient, (item) =>
+        updateNotificationLists(queryClient, userId, (item) =>
           item.id === notification.id ? { ...item, readAt } : item,
         );
         queryClient.setQueryData<UnreadCountResponse>(
-          unreadNotificationCountQueryKey,
+          unreadNotificationCountQueryKey(userId),
           (current) =>
             current
               ? { count: Math.max(0, current.count - 1) }
@@ -156,28 +167,31 @@ export function useMarkNotificationRead() {
       }
     },
     onSettled: () => {
-      void queryClient.invalidateQueries({ queryKey: NOTIFICATIONS_QUERY_KEY });
+      void queryClient.invalidateQueries({
+        queryKey: notificationUserQueryKey(userId),
+      });
     },
   });
 }
 
-export function useMarkAllNotificationsRead() {
+export function useMarkAllNotificationsRead(userId: string) {
   const queryClient = useQueryClient();
 
   return useMutation({
     mutationFn: markAllNotificationsRead,
     onMutate: async () => {
-      await queryClient.cancelQueries({ queryKey: NOTIFICATIONS_QUERY_KEY });
+      const userQueryKey = notificationUserQueryKey(userId);
+      await queryClient.cancelQueries({ queryKey: userQueryKey });
       const snapshots = queryClient.getQueriesData({
-        queryKey: NOTIFICATIONS_QUERY_KEY,
+        queryKey: userQueryKey,
       });
       const readAt = new Date().toISOString();
 
-      updateNotificationLists(queryClient, (item) =>
+      updateNotificationLists(queryClient, userId, (item) =>
         item.readAt === null ? { ...item, readAt } : item,
       );
       queryClient.setQueryData<UnreadCountResponse>(
-        unreadNotificationCountQueryKey,
+        unreadNotificationCountQueryKey(userId),
         (current) => (current ? { count: 0 } : current),
       );
 
@@ -189,7 +203,9 @@ export function useMarkAllNotificationsRead() {
       }
     },
     onSettled: () => {
-      void queryClient.invalidateQueries({ queryKey: NOTIFICATIONS_QUERY_KEY });
+      void queryClient.invalidateQueries({
+        queryKey: notificationUserQueryKey(userId),
+      });
     },
   });
 }

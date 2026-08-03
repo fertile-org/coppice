@@ -14,6 +14,7 @@ import {
 } from './useNotifications';
 
 interface NotificationBellProps {
+  userId: string;
   onOpenTicket: (ticketId: string) => void | Promise<void>;
 }
 
@@ -57,6 +58,9 @@ function NotificationRow({
           ].join(' ')}
         />
         <span className="min-w-0 flex-1">
+          <span className="sr-only">
+            {unread ? 'Unread notification. ' : 'Read notification. '}
+          </span>
           <span
             className={[
               'block font-body text-sm text-text-primary',
@@ -83,20 +87,28 @@ function NotificationRow({
   );
 }
 
-export function NotificationBell({ onOpenTicket }: NotificationBellProps) {
+export function NotificationBell({ userId, onOpenTicket }: NotificationBellProps) {
   const [open, setOpen] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
-  const countQuery = useUnreadNotificationCount();
-  const listQuery = useNotifications({ enabled: open });
-  const markRead = useMarkNotificationRead();
-  const markAllRead = useMarkAllNotificationsRead();
+  const popoverTitleRef = useRef<HTMLHeadingElement>(null);
+  const countQuery = useUnreadNotificationCount(userId);
+  const listQuery = useNotifications({ userId, enabled: open });
+  const markRead = useMarkNotificationRead(userId);
+  const markAllRead = useMarkAllNotificationsRead(userId);
   const unreadCount = countQuery.data?.count ?? 0;
   const notifications = useMemo(
     () => newestFirst(listQuery.data?.items ?? []),
     [listQuery.data?.items],
   );
+  const hasUnreadNotifications =
+    unreadCount > 0 || notifications.some((item) => item.readAt === null);
+  const bellLabel = countQuery.data
+    ? notificationBellLabel(unreadCount)
+    : countQuery.isError
+      ? 'Notifications, unread count unavailable'
+      : 'Notifications, loading unread count';
 
   useEffect(() => {
     if (!open) return;
@@ -128,19 +140,32 @@ export function NotificationBell({ onOpenTicket }: NotificationBellProps) {
   }
 
   function handleNotificationClick(notification: NotificationItem) {
+    setActionError(null);
     setOpen(false);
     if (notification.readAt === null) {
-      markRead.mutate(notification);
+      markRead.mutate(notification, {
+        onError: () => {
+          setActionError('Unable to mark this notification as read. Try again.');
+          setOpen(true);
+        },
+      });
     }
     if (notification.ticketId) {
-      void onOpenTicket(notification.ticketId);
+      void Promise.resolve()
+        .then(() => onOpenTicket(notification.ticketId!))
+        .catch(() => {
+          setActionError('Unable to open the related ticket. Try again.');
+          setOpen(true);
+        });
     }
   }
 
   async function handleMarkAllRead() {
     setActionError(null);
     try {
-      await markAllRead.mutateAsync();
+      const mutation = markAllRead.mutateAsync();
+      popoverTitleRef.current?.focus();
+      await mutation;
     } catch {
       setActionError('Unable to mark notifications as read. Try again.');
     }
@@ -151,7 +176,7 @@ export function NotificationBell({ onOpenTicket }: NotificationBellProps) {
       <button
         ref={triggerRef}
         type="button"
-        aria-label={notificationBellLabel(unreadCount)}
+        aria-label={bellLabel}
         aria-haspopup="dialog"
         aria-expanded={open}
         aria-controls="notification-popover"
@@ -179,7 +204,9 @@ export function NotificationBell({ onOpenTicket }: NotificationBellProps) {
           <div className="flex min-h-14 items-center justify-between gap-3 border-b border-border bg-paper-50 px-4 py-3">
             <div>
               <h2
+                ref={popoverTitleRef}
                 id="notification-popover-title"
+                tabIndex={-1}
                 className="font-display text-base font-semibold text-text-primary"
               >
                 Notifications
@@ -188,7 +215,7 @@ export function NotificationBell({ onOpenTicket }: NotificationBellProps) {
                 Recent workspace activity
               </p>
             </div>
-            {unreadCount > 0 && (
+            {hasUnreadNotifications && (
               <button
                 type="button"
                 aria-label="Mark all notifications as read"
@@ -206,6 +233,22 @@ export function NotificationBell({ onOpenTicket }: NotificationBellProps) {
             <p role="alert" className="border-b border-danger/20 bg-danger-muted px-4 py-2 font-body text-xs text-danger">
               {actionError}
             </p>
+          )}
+
+          {countQuery.isError && !countQuery.data && (
+            <div
+              role="alert"
+              className="flex min-h-11 items-center justify-between gap-3 border-b border-warning/20 bg-warning-muted px-4 py-2 font-body text-xs text-text-primary"
+            >
+              <span>Unread count unavailable.</span>
+              <button
+                type="button"
+                onClick={() => void countQuery.refetch()}
+                className="min-h-11 rounded-md px-2 font-medium text-text-primary underline decoration-bark-300 underline-offset-2 hover:text-accent"
+              >
+                Retry count
+              </button>
+            </div>
           )}
 
           {listQuery.isLoading && (

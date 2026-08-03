@@ -53,7 +53,9 @@ export function AppShell() {
           </div>
 
           <div className="flex items-center gap-4">
-            {user && <NotificationBell onOpenTicket={openTicket} />}
+            {user && (
+              <NotificationBell userId={user.id} onOpenTicket={openTicket} />
+            )}
             <span className="font-body text-sm text-text-secondary">
               {user?.email}
             </span>

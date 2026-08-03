@@ -9,6 +9,8 @@ import {
   type NotificationItem,
 } from './useNotifications';
 
+const USER_ID = '00000000-0000-0000-0000-000000000100';
+
 const unreadNotification: NotificationItem = {
   id: '00000000-0000-0000-0000-000000000001',
   type: 'agent_run_finished',
@@ -63,11 +65,15 @@ function renderBell({
   count = 1,
   onOpenTicket = vi.fn(),
   primeList = true,
+  primeCount = true,
+  userId = USER_ID,
 }: {
   items?: NotificationItem[];
   count?: number;
   onOpenTicket?: (ticketId: string) => void | Promise<void>;
   primeList?: boolean;
+  primeCount?: boolean;
+  userId?: string;
 } = {}) {
   const queryClient = new QueryClient({
     defaultOptions: {
@@ -75,9 +81,11 @@ function renderBell({
       mutations: { retry: false },
     },
   });
-  queryClient.setQueryData(unreadNotificationCountQueryKey, { count });
+  if (primeCount) {
+    queryClient.setQueryData(unreadNotificationCountQueryKey(userId), { count });
+  }
   if (primeList) {
-    queryClient.setQueryData(notificationListQueryKey('all', 20), {
+    queryClient.setQueryData(notificationListQueryKey(userId, 'all', 20), {
       items,
       nextCursor: null,
     });
@@ -88,7 +96,7 @@ function renderBell({
     onOpenTicket,
     ...render(
       <QueryClientProvider client={queryClient}>
-        <NotificationBell onOpenTicket={onOpenTicket} />
+        <NotificationBell userId={userId} onOpenTicket={onOpenTicket} />
       </QueryClientProvider>,
     ),
   };
@@ -99,6 +107,43 @@ afterEach(() => {
 });
 
 describe('NotificationBell', () => {
+  it('does not reuse notification state when the signed-in user changes', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input).endsWith('/unread-count')) {
+        return jsonResponse({ count: 0 });
+      }
+      throw new Error(`Unexpected request: ${String(input)}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const firstUserId = '00000000-0000-0000-0000-000000000301';
+    const secondUserId = '00000000-0000-0000-0000-000000000302';
+    const { queryClient, onOpenTicket, rerender } = renderBell({
+      userId: firstUserId,
+      count: 6,
+    });
+    expect(
+      screen.getByRole('button', { name: 'Notifications, 6 unread' }),
+    ).toBeInTheDocument();
+
+    rerender(
+      <QueryClientProvider client={queryClient}>
+        <NotificationBell
+          userId={secondUserId}
+          onOpenTicket={onOpenTicket}
+        />
+      </QueryClientProvider>,
+    );
+
+    expect(
+      screen.queryByRole('button', { name: 'Notifications, 6 unread' }),
+    ).toBeNull();
+    expect(
+      await screen.findByRole('button', {
+        name: 'Notifications, no unread notifications',
+      }),
+    ).toBeInTheDocument();
+  });
+
   it('shows an unread badge and exposes the count in its accessible name', () => {
     renderBell({ count: 3 });
 
@@ -122,6 +167,12 @@ describe('NotificationBell', () => {
     expect(items[1]).toHaveTextContent(readNotification.title);
     expect(items[0]).toHaveAttribute('data-unread', 'true');
     expect(items[1]).toHaveAttribute('data-unread', 'false');
+    expect(items[0]).toHaveAccessibleName(
+      expect.stringMatching(/^Unread notification\./),
+    );
+    expect(items[1]).toHaveAccessibleName(
+      expect.stringMatching(/^Read notification\./),
+    );
   });
 
   it('marks an unread notification read and opens its ticket', async () => {
@@ -137,8 +188,8 @@ describe('NotificationBell', () => {
       screen.getByRole('button', { name: /Frontend Agent run succeeded/ }),
     );
 
-    expect(onOpenTicket).toHaveBeenCalledWith(unreadNotification.ticketId);
     await waitFor(() => {
+      expect(onOpenTicket).toHaveBeenCalledWith(unreadNotification.ticketId);
       expect(fetchMock).toHaveBeenCalledWith(
         `/api/notifications/${unreadNotification.id}/read`,
         expect.objectContaining({ method: 'POST' }),
@@ -155,9 +206,13 @@ describe('NotificationBell', () => {
       2,
     );
     vi.stubGlobal('fetch', fetchMock);
-    renderBell({
+    const { queryClient } = renderBell({
       items: [unreadNotification, { ...readNotification, readAt: null }],
       count: 2,
+    });
+    const otherUserId = '00000000-0000-0000-0000-000000000200';
+    queryClient.setQueryData(unreadNotificationCountQueryKey(otherUserId), {
+      count: 7,
     });
 
     fireEvent.click(
@@ -178,6 +233,12 @@ describe('NotificationBell', () => {
       '/api/notifications/mark-all-read',
       expect.objectContaining({ method: 'POST' }),
     );
+    expect(
+      queryClient.getQueryData(unreadNotificationCountQueryKey(otherUserId)),
+    ).toEqual({ count: 7 });
+    expect(
+      screen.getByRole('heading', { name: 'Notifications' }),
+    ).toHaveFocus();
   });
 
   it('shows the empty state when there is no history', () => {
@@ -224,5 +285,45 @@ describe('NotificationBell', () => {
 
     expect(screen.queryByRole('dialog', { name: 'Notifications' })).toBeNull();
     expect(trigger).toHaveFocus();
+  });
+
+  it('uses a neutral accessible label and retry state when count loading fails', async () => {
+    vi.stubGlobal('fetch', vi.fn(() => Promise.reject(new Error('offline'))));
+    renderBell({ items: [], primeCount: false });
+
+    expect(
+      screen.getByRole('button', {
+        name: 'Notifications, loading unread count',
+      }),
+    ).toBeInTheDocument();
+    const trigger = await screen.findByRole('button', {
+      name: 'Notifications, unread count unavailable',
+    });
+    fireEvent.click(trigger);
+
+    expect(screen.getByText('Unread count unavailable.')).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'Retry count' }),
+    ).toBeInTheDocument();
+  });
+
+  it('surfaces ticket navigation failures instead of rejecting silently', async () => {
+    const fetchMock = mockNotificationApi([unreadNotification], 1);
+    vi.stubGlobal('fetch', fetchMock);
+    renderBell({
+      items: [unreadNotification],
+      onOpenTicket: vi.fn(() => Promise.reject(new Error('ticket unavailable'))),
+    });
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Notifications, 1 unread' }),
+    );
+    fireEvent.click(
+      screen.getByRole('button', { name: /Frontend Agent run succeeded/ }),
+    );
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Unable to open the related ticket.',
+    );
   });
 });
