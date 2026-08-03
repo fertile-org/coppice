@@ -74,7 +74,10 @@ impl From<KnowledgeError> for KnowledgeApiError {
                 status: StatusCode::NOT_FOUND,
                 message: error.to_string(),
             },
-            KnowledgeError::VersionConflict { .. } | KnowledgeError::Capacity(_) => Self {
+            KnowledgeError::VersionConflict { .. }
+            | KnowledgeError::Capacity(_)
+            | KnowledgeError::LiveReplacementConflict
+            | KnowledgeError::ActivationConflict => Self {
                 status: StatusCode::CONFLICT,
                 message: error.to_string(),
             },

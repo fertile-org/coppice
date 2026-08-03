@@ -10,6 +10,8 @@ use thiserror::Error;
 use time::OffsetDateTime;
 use uuid::Uuid;
 
+const ONE_LIVE_REPLACEMENT_INDEX: &str = "knowledge_items_one_live_replacement_idx";
+
 const VIEW_SELECT: &str = r#"
 SELECT
     i.id, i.version, i.status, i.current_revision_id, i.active_revision_id,
@@ -47,6 +49,10 @@ pub enum KnowledgeError {
     Validation(String),
     #[error("knowledge capacity reached: {0}")]
     Capacity(String),
+    #[error("knowledge item already has a live replacement")]
+    LiveReplacementConflict,
+    #[error("knowledge activation was blocked by a concurrent lifecycle change")]
+    ActivationConflict,
     #[error(transparent)]
     Database(#[from] sqlx::Error),
 }
@@ -245,8 +251,10 @@ LIMIT $6"#
         .bind(item_id)
         .bind(user_id)
         .execute(&mut *tx)
-        .await?;
+        .await
+        .map_err(map_database_error)?;
         enqueue_embedding(&mut tx, item.current_revision_id).await?;
+        activate_embedded_revision(&mut tx, item_id, item.current_revision_id).await?;
         tx.commit().await?;
         self.get(item_id).await
     }
@@ -361,6 +369,21 @@ LIMIT $6"#
         let item = lock_item(&mut tx, item_id).await?;
         check_version(item, expected_version)?;
         self.enforce_capacity(&mut tx, &replacement).await?;
+        let has_live_replacement: bool = sqlx::query_scalar(
+            r#"
+            SELECT EXISTS (
+                SELECT 1 FROM knowledge_items
+                WHERE supersedes_item_id = $1
+                  AND status IN ('pending', 'approved')
+            )
+            "#,
+        )
+        .bind(item_id)
+        .fetch_one(&mut *tx)
+        .await?;
+        if has_live_replacement {
+            return Err(KnowledgeError::LiveReplacementConflict);
+        }
         let replacement_id = self
             .insert_item_revision(
                 &mut tx,
@@ -373,6 +396,12 @@ LIMIT $6"#
                 None,
             )
             .await?;
+        sqlx::query(
+            "UPDATE knowledge_items SET version = version + 1, updated_at = now() WHERE id = $1",
+        )
+        .bind(item_id)
+        .execute(&mut *tx)
+        .await?;
         tx.commit().await?;
         self.get(replacement_id).await
     }
@@ -498,7 +527,8 @@ LIMIT $6"#
         .bind(extraction_job_id)
         .bind(extraction_candidate_index)
         .execute(&mut **tx)
-        .await?;
+        .await
+        .map_err(map_database_error)?;
         insert_revision_with_id(tx, revision_id, item_id, 1, created_by, input).await?;
         sqlx::query("UPDATE knowledge_items SET current_revision_id = $2 WHERE id = $1")
             .bind(item_id)
@@ -506,6 +536,89 @@ LIMIT $6"#
             .execute(&mut **tx)
             .await?;
         Ok(item_id)
+    }
+}
+
+pub async fn activate_embedded_revision(
+    tx: &mut Transaction<'_, Postgres>,
+    item_id: Uuid,
+    revision_id: Uuid,
+) -> Result<bool, KnowledgeError> {
+    let candidate = sqlx::query(
+        r#"
+        SELECT supersedes_item_id
+        FROM knowledge_items
+        WHERE id = $1
+          AND current_revision_id = $2
+          AND status = 'approved'
+          AND EXISTS (
+              SELECT 1 FROM knowledge_embeddings WHERE revision_id = $2
+          )
+        FOR UPDATE
+        "#,
+    )
+    .bind(item_id)
+    .bind(revision_id)
+    .fetch_optional(&mut **tx)
+    .await?;
+    let Some(candidate) = candidate else {
+        return Ok(false);
+    };
+
+    let supersedes_item_id: Option<Uuid> = candidate.try_get("supersedes_item_id")?;
+    if let Some(original_id) = supersedes_item_id {
+        let original =
+            sqlx::query("SELECT superseded_by FROM knowledge_items WHERE id = $1 FOR UPDATE")
+                .bind(original_id)
+                .fetch_optional(&mut **tx)
+                .await?
+                .ok_or(KnowledgeError::ActivationConflict)?;
+        let superseded_by: Option<Uuid> = original.try_get("superseded_by")?;
+        match superseded_by {
+            None => {
+                sqlx::query(
+                    r#"
+                    UPDATE knowledge_items
+                    SET superseded_by = $2, version = version + 1, updated_at = now()
+                    WHERE id = $1
+                    "#,
+                )
+                .bind(original_id)
+                .bind(item_id)
+                .execute(&mut **tx)
+                .await?;
+            }
+            Some(existing) if existing == item_id => {}
+            Some(_) => return Err(KnowledgeError::LiveReplacementConflict),
+        }
+    }
+
+    let activated = sqlx::query(
+        r#"
+        UPDATE knowledge_items
+        SET active_revision_id = $2, updated_at = now()
+        WHERE id = $1 AND current_revision_id = $2 AND status = 'approved'
+        "#,
+    )
+    .bind(item_id)
+    .bind(revision_id)
+    .execute(&mut **tx)
+    .await?;
+    if activated.rows_affected() != 1 {
+        return Err(KnowledgeError::ActivationConflict);
+    }
+    Ok(true)
+}
+
+fn map_database_error(error: sqlx::Error) -> KnowledgeError {
+    if error
+        .as_database_error()
+        .and_then(|database_error| database_error.constraint())
+        == Some(ONE_LIVE_REPLACEMENT_INDEX)
+    {
+        KnowledgeError::LiveReplacementConflict
+    } else {
+        KnowledgeError::Database(error)
     }
 }
 

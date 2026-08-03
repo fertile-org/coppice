@@ -5,7 +5,7 @@ use crate::knowledge::extractor::{
     policy_decision, ExtractionInput, ExtractionProvider, MockExtractionProvider,
 };
 use crate::services::knowledge_job_service::{KnowledgeJob, KnowledgeJobService};
-use crate::services::knowledge_service::KnowledgeService;
+use crate::services::knowledge_service::{activate_embedded_revision, KnowledgeService};
 use crate::AppState;
 use anyhow::Context;
 use sqlx::{PgPool, Row};
@@ -121,34 +121,7 @@ async fn process_embedding(
     .bind(literal)
     .execute(&mut *tx)
     .await?;
-    let activated = sqlx::query(
-        r#"
-        UPDATE knowledge_items
-        SET active_revision_id = $2, updated_at = now()
-        WHERE id = $1 AND current_revision_id = $2 AND status = 'approved'
-        RETURNING supersedes_item_id
-        "#,
-    )
-    .bind(item_id)
-    .bind(revision_id)
-    .fetch_optional(&mut *tx)
-    .await?;
-    if let Some(row) = activated {
-        let supersedes: Option<Uuid> = row.try_get("supersedes_item_id")?;
-        if let Some(old_item_id) = supersedes {
-            sqlx::query(
-                r#"
-                UPDATE knowledge_items
-                SET superseded_by = $2, version = version + 1, updated_at = now()
-                WHERE id = $1 AND superseded_by IS NULL
-                "#,
-            )
-            .bind(old_item_id)
-            .bind(item_id)
-            .execute(&mut *tx)
-            .await?;
-        }
-    }
+    activate_embedded_revision(&mut tx, item_id, revision_id).await?;
     tx.commit().await?;
     Ok(())
 }
