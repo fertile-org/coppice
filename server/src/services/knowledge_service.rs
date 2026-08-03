@@ -90,6 +90,7 @@ struct LockedItem {
     version: i32,
     status: KnowledgeStatus,
     current_revision_id: Uuid,
+    supersedes_item_id: Option<Uuid>,
     superseded_by: Option<Uuid>,
 }
 
@@ -240,7 +241,7 @@ LIMIT $6"#
         user_id: Uuid,
     ) -> Result<KnowledgeItemView, KnowledgeError> {
         let mut tx = self.pool.begin().await?;
-        let item = lock_item(&mut tx, item_id).await?;
+        let item = lock_item_for_activation(&mut tx, item_id).await?;
         check_version(item, expected_version)?;
         sqlx::query(
             r#"
@@ -550,35 +551,28 @@ pub async fn activate_embedded_revision(
     item_id: Uuid,
     revision_id: Uuid,
 ) -> Result<bool, KnowledgeError> {
-    let candidate = sqlx::query(
-        r#"
-        SELECT supersedes_item_id
-        FROM knowledge_items
-        WHERE id = $1
-          AND current_revision_id = $2
-          AND status = 'approved'
-          AND EXISTS (
-              SELECT 1 FROM knowledge_embeddings WHERE revision_id = $2
-          )
-        FOR UPDATE
-        "#,
-    )
-    .bind(item_id)
-    .bind(revision_id)
-    .fetch_optional(&mut **tx)
-    .await?;
-    let Some(candidate) = candidate else {
+    let candidate = lock_item_for_activation(tx, item_id).await?;
+    if candidate.current_revision_id != revision_id || candidate.status != KnowledgeStatus::Approved
+    {
         return Ok(false);
-    };
+    }
+    let embedding_ready: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM knowledge_embeddings WHERE revision_id = $1)",
+    )
+    .bind(revision_id)
+    .fetch_one(&mut **tx)
+    .await?;
+    if !embedding_ready {
+        return Ok(false);
+    }
 
-    let supersedes_item_id: Option<Uuid> = candidate.try_get("supersedes_item_id")?;
-    if let Some(original_id) = supersedes_item_id {
-        let original =
-            sqlx::query("SELECT superseded_by FROM knowledge_items WHERE id = $1 FOR UPDATE")
-                .bind(original_id)
-                .fetch_optional(&mut **tx)
-                .await?
-                .ok_or(KnowledgeError::ActivationConflict)?;
+    if let Some(original_id) = candidate.supersedes_item_id {
+        // lock_item_for_activation already holds this original row lock.
+        let original = sqlx::query("SELECT superseded_by FROM knowledge_items WHERE id = $1")
+            .bind(original_id)
+            .fetch_optional(&mut **tx)
+            .await?
+            .ok_or(KnowledgeError::ActivationConflict)?;
         let superseded_by: Option<Uuid> = original.try_get("superseded_by")?;
         match superseded_by {
             None => {
@@ -633,7 +627,7 @@ async fn lock_item(
     item_id: Uuid,
 ) -> Result<LockedItem, KnowledgeError> {
     let row = sqlx::query(
-        "SELECT version, status, current_revision_id, superseded_by FROM knowledge_items WHERE id = $1 FOR UPDATE",
+        "SELECT version, status, current_revision_id, supersedes_item_id, superseded_by FROM knowledge_items WHERE id = $1 FOR UPDATE",
     )
     .bind(item_id)
     .fetch_optional(&mut **tx)
@@ -643,8 +637,35 @@ async fn lock_item(
         version: row.try_get("version")?,
         status: parse_status(row.try_get("status")?)?,
         current_revision_id: row.try_get("current_revision_id")?,
+        supersedes_item_id: row.try_get("supersedes_item_id")?,
         superseded_by: row.try_get("superseded_by")?,
     })
+}
+
+async fn lock_item_for_activation(
+    tx: &mut Transaction<'_, Postgres>,
+    item_id: Uuid,
+) -> Result<LockedItem, KnowledgeError> {
+    let discovered = sqlx::query("SELECT supersedes_item_id FROM knowledge_items WHERE id = $1")
+        .bind(item_id)
+        .fetch_optional(&mut **tx)
+        .await?
+        .ok_or(KnowledgeError::NotFound)?;
+    let supersedes_item_id: Option<Uuid> = discovered.try_get("supersedes_item_id")?;
+
+    if let Some(original_id) = supersedes_item_id {
+        sqlx::query("SELECT id FROM knowledge_items WHERE id = $1 FOR UPDATE")
+            .bind(original_id)
+            .fetch_optional(&mut **tx)
+            .await?
+            .ok_or(KnowledgeError::ActivationConflict)?;
+    }
+
+    let item = lock_item(tx, item_id).await?;
+    if item.supersedes_item_id != supersedes_item_id {
+        return Err(KnowledgeError::ActivationConflict);
+    }
+    Ok(item)
 }
 
 fn check_version(item: LockedItem, expected: i32) -> Result<(), KnowledgeError> {

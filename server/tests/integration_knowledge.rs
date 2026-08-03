@@ -8,6 +8,7 @@ use coppice_server::services::context_budget::{record_usage, render_knowledge, B
 use coppice_server::workers::knowledge_worker;
 use coppice_server::AppState;
 use std::sync::Arc;
+use std::time::Duration;
 use tower::ServiceExt;
 use uuid::Uuid;
 
@@ -82,6 +83,26 @@ async fn mutate(
         .unwrap();
     let status = response.status();
     (status, common::json_body(response).await)
+}
+
+fn supersede_body(
+    project_id: &str,
+    expected_version: i64,
+    title: &str,
+    content: &str,
+) -> serde_json::Value {
+    serde_json::json!({
+        "expectedVersion": expected_version,
+        "replacement": {
+            "scope": "project",
+            "projectId": project_id,
+            "knowledgeType": "test_command",
+            "title": title,
+            "content": content,
+            "sourceType": "human_note",
+            "confidence": "high"
+        }
+    })
 }
 
 async fn process_one_knowledge_job(state: &Arc<AppState>) -> anyhow::Result<bool> {
@@ -700,6 +721,390 @@ async fn supersession_rejects_a_second_live_replacement_at_the_current_version()
         .as_str()
         .unwrap()
         .contains("already has a live replacement"));
+}
+
+#[tokio::test]
+async fn supersession_stale_never_activated_candidate_allows_a_successor() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
+    let project_id = common::create_test_project(&app, &cookie, &csrf).await;
+    let original = create_candidate(
+        &app,
+        &project_id,
+        &cookie,
+        &csrf,
+        "Original with stale candidate",
+    )
+    .await;
+    let original_id = original["id"].as_str().unwrap();
+    let original_uuid = Uuid::parse_str(original_id).unwrap();
+
+    let (status, _) = mutate(
+        &app,
+        "POST",
+        &format!("/api/knowledge/{original_id}/approve"),
+        serde_json::json!({"expectedVersion": 1}),
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(process_one_knowledge_job(&state).await.unwrap());
+
+    let (status, first) = mutate(
+        &app,
+        "POST",
+        &format!("/api/knowledge/{original_id}/supersede"),
+        supersede_body(
+            &project_id,
+            2,
+            "Never activated stale candidate",
+            "This candidate may be abandoned before activation.",
+        ),
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    let first_id = first["id"].as_str().unwrap();
+
+    let (status, stale) = mutate(
+        &app,
+        "POST",
+        &format!("/api/knowledge/{first_id}/mark-stale"),
+        serde_json::json!({"expectedVersion": 1}),
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(stale["status"], "stale");
+    assert!(stale["activeRevisionId"].is_null());
+
+    let (status, successor) = mutate(
+        &app,
+        "POST",
+        &format!("/api/knowledge/{original_id}/supersede"),
+        supersede_body(
+            &project_id,
+            3,
+            "Successor after stale abandonment",
+            "A stale never-activated candidate does not retire the original.",
+        ),
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    assert_ne!(successor["id"], first["id"]);
+
+    let states: Vec<String> = sqlx::query_scalar(
+        "SELECT status FROM knowledge_items WHERE supersedes_item_id = $1 ORDER BY status",
+    )
+    .bind(original_uuid)
+    .fetch_all(state.db.as_ref().unwrap())
+    .await
+    .unwrap();
+    assert_eq!(states, vec!["pending".to_string(), "stale".to_string()]);
+}
+
+#[tokio::test]
+async fn supersession_concurrent_reapproval_and_successor_creation_do_not_deadlock() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
+    let project_id = common::create_test_project(&app, &cookie, &csrf).await;
+    let project_uuid = Uuid::parse_str(&project_id).unwrap();
+    let original = create_candidate(
+        &app,
+        &project_id,
+        &cookie,
+        &csrf,
+        "Original in supersession race",
+    )
+    .await;
+    let original_id = original["id"].as_str().unwrap();
+    let original_uuid = Uuid::parse_str(original_id).unwrap();
+
+    let (status, _) = mutate(
+        &app,
+        "POST",
+        &format!("/api/knowledge/{original_id}/approve"),
+        serde_json::json!({"expectedVersion": 1}),
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(process_one_knowledge_job(&state).await.unwrap());
+
+    let (status, abandoned) = mutate(
+        &app,
+        "POST",
+        &format!("/api/knowledge/{original_id}/supersede"),
+        supersede_body(
+            &project_id,
+            2,
+            "Rejected embedded candidate",
+            "Reapproval races with creation of a successor.",
+        ),
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    let abandoned_id = abandoned["id"].as_str().unwrap().to_string();
+    let abandoned_uuid = Uuid::parse_str(&abandoned_id).unwrap();
+
+    let (status, _) = mutate(
+        &app,
+        "POST",
+        &format!("/api/knowledge/{abandoned_id}/approve"),
+        serde_json::json!({"expectedVersion": 1}),
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, _) = mutate(
+        &app,
+        "POST",
+        &format!("/api/knowledge/{abandoned_id}/reject"),
+        serde_json::json!({"expectedVersion": 2, "reason": "abandoned before embedding"}),
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(process_one_knowledge_job(&state).await.unwrap());
+
+    let approve_path = format!("/api/knowledge/{abandoned_id}/approve");
+    let supersede_path = format!("/api/knowledge/{original_id}/supersede");
+    let ((approve_status, _), (create_status, _)) =
+        tokio::time::timeout(Duration::from_secs(5), async {
+            tokio::join!(
+                mutate(
+                    &app,
+                    "POST",
+                    &approve_path,
+                    serde_json::json!({"expectedVersion": 3}),
+                    &cookie,
+                    &csrf,
+                ),
+                mutate(
+                    &app,
+                    "POST",
+                    &supersede_path,
+                    supersede_body(
+                        &project_id,
+                        3,
+                        "Concurrent successor",
+                        "Exactly one racing candidate may remain live.",
+                    ),
+                    &cookie,
+                    &csrf,
+                )
+            )
+        })
+        .await
+        .expect("concurrent supersession mutations must not deadlock");
+
+    let reapproval_won = approve_status == StatusCode::OK && create_status == StatusCode::CONFLICT;
+    let successor_won =
+        approve_status == StatusCode::CONFLICT && create_status == StatusCode::CREATED;
+    assert!(
+        reapproval_won || successor_won,
+        "expected one success and one 409, got approve={approve_status}, create={create_status}"
+    );
+
+    let pool = state.db.as_ref().unwrap();
+    let live_children: i64 = sqlx::query_scalar(
+        r#"
+        SELECT count(*) FROM knowledge_items
+        WHERE supersedes_item_id = $1 AND status IN ('pending', 'approved')
+        "#,
+    )
+    .bind(original_uuid)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(live_children, 1);
+
+    let original_link: Option<Uuid> =
+        sqlx::query_scalar("SELECT superseded_by FROM knowledge_items WHERE id = $1")
+            .bind(original_uuid)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    let abandoned_state: (String, Option<Uuid>) =
+        sqlx::query_as("SELECT status, active_revision_id FROM knowledge_items WHERE id = $1")
+            .bind(abandoned_uuid)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+
+    let provider: Arc<dyn EmbeddingProvider> =
+        embedding_provider(&state.config.knowledge.embedding).unwrap();
+    let query = provider.embed(&["supersession race".into()]).await.unwrap();
+    let mut retrieval_config = state.config.knowledge.retrieval.clone();
+    retrieval_config.minimum_similarity = -1.0;
+    retrieval_config.top_k = 20;
+    let retrieved = retrieve(
+        pool,
+        project_uuid,
+        Uuid::new_v4(),
+        &query[0],
+        &retrieval_config,
+    )
+    .await
+    .unwrap();
+    assert_eq!(retrieved.len(), 1);
+    if reapproval_won {
+        assert_eq!(original_link, Some(abandoned_uuid));
+        assert_eq!(abandoned_state.0, "approved");
+        assert!(abandoned_state.1.is_some());
+        assert_eq!(retrieved[0].item_id, abandoned_uuid);
+    } else {
+        assert!(original_link.is_none());
+        assert_eq!(abandoned_state, ("rejected".into(), None));
+        assert_eq!(retrieved[0].item_id, original_uuid);
+    }
+}
+
+#[tokio::test]
+async fn supersession_migration_repairs_legacy_competing_children_deterministically() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    let (state, _app, _cookie, _csrf) = common::bootstrap_and_login_with_state().await;
+    let pool = state.db.as_ref().unwrap();
+    let mut tx = pool.begin().await.unwrap();
+    sqlx::query("DROP INDEX knowledge_items_one_live_replacement_idx")
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+
+    sqlx::raw_sql(
+        r#"
+        INSERT INTO knowledge_items (
+            id, status, version, supersedes_item_id, superseded_by, created_at, updated_at
+        ) VALUES
+            ('10000000-0000-0000-0000-000000000001', 'approved', 5, NULL, NULL, now(), now()),
+            ('10000000-0000-0000-0000-000000000002', 'approved', 5, NULL, '30000000-0000-0000-0000-000000000001', now(), now()),
+            ('10000000-0000-0000-0000-000000000003', 'approved', 5, NULL, '40000000-0000-0000-0000-000000000001', now(), now()),
+            ('20000000-0000-0000-0000-000000000001', 'approved', 7, '10000000-0000-0000-0000-000000000001', NULL, '2026-01-01', '2026-01-01'),
+            ('20000000-0000-0000-0000-000000000002', 'approved', 7, '10000000-0000-0000-0000-000000000001', NULL, '2026-01-01', '2026-01-01'),
+            ('20000000-0000-0000-0000-000000000003', 'pending', 7, '10000000-0000-0000-0000-000000000001', NULL, '2025-01-01', '2025-01-01'),
+            ('30000000-0000-0000-0000-000000000001', 'rejected', 7, '10000000-0000-0000-0000-000000000002', NULL, '2025-01-01', '2025-01-01'),
+            ('30000000-0000-0000-0000-000000000002', 'approved', 7, '10000000-0000-0000-0000-000000000002', NULL, '2026-01-01', '2026-01-01'),
+            ('30000000-0000-0000-0000-000000000003', 'pending', 7, '10000000-0000-0000-0000-000000000002', NULL, '2026-01-02', '2026-01-02'),
+            ('40000000-0000-0000-0000-000000000001', 'pending', 7, '10000000-0000-0000-0000-000000000003', NULL, '2026-01-02', '2026-01-02'),
+            ('40000000-0000-0000-0000-000000000002', 'approved', 7, '10000000-0000-0000-0000-000000000003', NULL, '2026-01-01', '2026-01-01');
+
+        INSERT INTO knowledge_revisions (
+            id, item_id, revision_number, scope, knowledge_type, title, content,
+            source_type, confidence
+        ) VALUES
+            ('50000000-0000-0000-0000-000000000001', '20000000-0000-0000-0000-000000000001', 1, 'workspace', 'test_command', 'winner', 'winner', 'human_note', 'high'),
+            ('50000000-0000-0000-0000-000000000002', '20000000-0000-0000-0000-000000000002', 1, 'workspace', 'test_command', 'competitor', 'competitor', 'human_note', 'high'),
+            ('50000000-0000-0000-0000-000000000003', '40000000-0000-0000-0000-000000000002', 1, 'workspace', 'test_command', 'linked competitor', 'linked competitor', 'human_note', 'high');
+
+        UPDATE knowledge_items i
+        SET current_revision_id = r.id, active_revision_id = r.id
+        FROM knowledge_revisions r
+        WHERE r.item_id = i.id;
+        "#,
+    )
+    .execute(&mut *tx)
+    .await
+    .unwrap();
+
+    sqlx::raw_sql(include_str!(
+        "../migrations/014_singular_knowledge_supersession.sql"
+    ))
+    .execute(&mut *tx)
+    .await
+    .unwrap();
+
+    let original_one: (Option<Uuid>, i32) = sqlx::query_as(
+        "SELECT superseded_by, version FROM knowledge_items WHERE id = '10000000-0000-0000-0000-000000000001'",
+    )
+    .fetch_one(&mut *tx)
+    .await
+    .unwrap();
+    assert_eq!(
+        original_one,
+        (
+            Some(Uuid::parse_str("20000000-0000-0000-0000-000000000001").unwrap()),
+            6,
+        )
+    );
+
+    let group_one: Vec<(Uuid, String, i32, Option<Uuid>, Option<String>)> = sqlx::query_as(
+        r#"
+        SELECT id, status, version, active_revision_id, rejection_reason
+        FROM knowledge_items
+        WHERE supersedes_item_id = '10000000-0000-0000-0000-000000000001'
+        ORDER BY id
+        "#,
+    )
+    .fetch_all(&mut *tx)
+    .await
+    .unwrap();
+    assert_eq!(group_one[0].1, "approved");
+    assert_eq!(group_one[0].2, 7);
+    assert!(group_one[0].3.is_some());
+    for row in &group_one[1..] {
+        assert_eq!(row.1, "rejected");
+        assert_eq!(row.2, 8);
+        assert!(row.3.is_none());
+        assert_eq!(
+            row.4.as_deref(),
+            Some("migration 014: competing live supersession candidate quarantined")
+        );
+    }
+
+    let group_two: Vec<(Uuid, String)> = sqlx::query_as(
+        r#"
+        SELECT id, status FROM knowledge_items
+        WHERE supersedes_item_id = '10000000-0000-0000-0000-000000000002'
+        ORDER BY id
+        "#,
+    )
+    .fetch_all(&mut *tx)
+    .await
+    .unwrap();
+    assert_eq!(group_two[0].1, "rejected");
+    assert_eq!(group_two[1].1, "rejected");
+    assert_eq!(group_two[2].1, "rejected");
+
+    let group_three: Vec<(Uuid, String)> = sqlx::query_as(
+        r#"
+        SELECT id, status FROM knowledge_items
+        WHERE supersedes_item_id = '10000000-0000-0000-0000-000000000003'
+        ORDER BY id
+        "#,
+    )
+    .fetch_all(&mut *tx)
+    .await
+    .unwrap();
+    assert_eq!(group_three[0].1, "pending");
+    assert_eq!(group_three[1].1, "rejected");
+
+    let duplicate_error = sqlx::query(
+        r#"
+        INSERT INTO knowledge_items (id, supersedes_item_id)
+        VALUES ('60000000-0000-0000-0000-000000000001',
+                '10000000-0000-0000-0000-000000000001')
+        "#,
+    )
+    .execute(&mut *tx)
+    .await
+    .expect_err("migration must install the singular live replacement index");
+    assert_eq!(
+        duplicate_error
+            .as_database_error()
+            .and_then(|error| error.constraint()),
+        Some("knowledge_items_one_live_replacement_idx")
+    );
+    tx.rollback().await.unwrap();
 }
 
 #[tokio::test]
