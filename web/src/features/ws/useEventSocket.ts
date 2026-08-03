@@ -4,6 +4,7 @@ import {
   patchAgentRunStatusInCache,
 } from '../tickets/useAgentRuns';
 import type { RunStatus } from '../../lib/schemas/agentRun';
+import { NOTIFICATIONS_QUERY_KEY } from '../notifications/useNotifications';
 
 export interface AgentRunStartedPayload {
   type: 'agent_run.started';
@@ -90,6 +91,12 @@ function dispatchMessage(raw: string) {
     });
   }
 
+  if (msg.type === 'notification.changed') {
+    void queryClient.invalidateQueries({
+      queryKey: NOTIFICATIONS_QUERY_KEY,
+    });
+  }
+
   // Server signalled that this socket's view may be stale (e.g. its broadcast
   // receiver lagged). Invalidate everything so the next render refetches truth.
   if (msg.type === 'resync') {
@@ -104,6 +111,7 @@ export function dispatchMessageForTest(raw: string) {
 function invalidateRealtimeQueries() {
   void queryClient.invalidateQueries({ queryKey: ['agent-runs'] });
   void queryClient.invalidateQueries({ queryKey: ['tickets'] });
+  void queryClient.invalidateQueries({ queryKey: NOTIFICATIONS_QUERY_KEY });
 }
 
 function nextReconnectDelayMs() {

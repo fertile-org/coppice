@@ -58,6 +58,20 @@ describe('useEventSocket dispatch', () => {
 
     expect(invalidateSpy).toHaveBeenCalledWith();
   });
+
+  it('invalidates notification queries on notification.changed', async () => {
+    const { dispatchMessageForTest } = await import('./useEventSocket');
+    dispatchMessageForTest(
+      JSON.stringify({
+        type: 'notification.changed',
+        recipient_user_id: 'user-123',
+      }),
+    );
+
+    expect(invalidateSpy).toHaveBeenCalledWith({
+      queryKey: ['notifications'],
+    });
+  });
 });
 
 class MockWebSocket {
