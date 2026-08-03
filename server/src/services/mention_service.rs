@@ -203,6 +203,10 @@ impl<'a> MentionService<'a> {
         Ok(rows.iter().map(row_to_mention).collect())
     }
 
+    /// Returns the oldest ordinary agent mention that has never had a response run.
+    /// Any prior response attempt excludes the mention; failed/cancelled ordinary
+    /// responses are marked ignored by the terminal-run orchestration hook rather
+    /// than retried automatically in a loop.
     pub async fn find_next_unscheduled_agent_mention(
         &self,
         ticket_id: Uuid,

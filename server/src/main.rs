@@ -2,6 +2,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use tracing_subscriber::EnvFilter;
 
+use coppice_server::services::run_orchestrator::RunOrchestrator;
 use coppice_server::services::run_service::RunService;
 use coppice_server::sessions::opencode_client::OpenCodeClient;
 use coppice_server::AppState;
@@ -35,21 +36,36 @@ async fn sweep_orphaned_runs(state: &AppState) {
                         .flatten()
                         .is_some();
                     if !alive {
-                        let _ = run_svc
+                        if let Ok(interrupted) = run_svc
                             .mark_interrupted(run.id, "server restarted during run")
-                            .await;
+                            .await
+                        {
+                            RunOrchestrator::new(pool, &state.config.workflow)
+                                .handle_terminal_run(&interrupted)
+                                .await;
+                        }
                     }
                 } else {
-                    let _ = run_svc
+                    if let Ok(interrupted) = run_svc
                         .mark_interrupted(run.id, "server restarted during run")
-                        .await;
+                        .await
+                    {
+                        RunOrchestrator::new(pool, &state.config.workflow)
+                            .handle_terminal_run(&interrupted)
+                            .await;
+                    }
                 }
                 continue;
             }
         }
-        let _ = run_svc
+        if let Ok(interrupted) = run_svc
             .mark_interrupted(run.id, "server restarted during run")
-            .await;
+            .await
+        {
+            RunOrchestrator::new(pool, &state.config.workflow)
+                .handle_terminal_run(&interrupted)
+                .await;
+        }
     }
 }
 

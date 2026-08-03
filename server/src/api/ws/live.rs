@@ -1,6 +1,7 @@
 use crate::api::ws::auth::auth_user_from_cookie;
 use crate::domain::run::{run_status_to_str, AgentRun, RunStatus};
 use crate::services::artifact_service::{ArtifactService, RunArtifactPaths};
+use crate::services::run_orchestrator::RunOrchestrator;
 use crate::services::run_service::{RunError, RunService};
 use crate::sessions::opencode_client::OpenCodeClient;
 use crate::sessions::LiveMessage;
@@ -223,6 +224,23 @@ fn classify_replay_recv(
     }
 }
 
+async fn interrupt_run_and_drain(
+    state: &AppState,
+    run_svc: &RunService<'_>,
+    run_id: Uuid,
+    reason: &str,
+) {
+    let Ok(interrupted) = run_svc.mark_interrupted(run_id, reason).await else {
+        return;
+    };
+    let Some(pool) = state.db.as_ref() else {
+        return;
+    };
+    RunOrchestrator::new(pool, &state.config.workflow)
+        .handle_terminal_run(&interrupted)
+        .await;
+}
+
 async fn handle_opencode_recovery(
     state: &AppState,
     sender: &mut futures_util::stream::SplitSink<WebSocket, Message>,
@@ -296,7 +314,7 @@ async fn handle_opencode_recovery(
                     let err_msg = err.to_string();
                     if err_msg.contains("not found") {
                         let reason = "server restarted during run";
-                        let _ = run_svc.mark_interrupted(run_id, reason).await;
+                        interrupt_run_and_drain(state, run_svc, run_id, reason).await;
                         return RecoveryOutcome {
                             recoverable: Some(false),
                             reason: Some(format!("interrupted: {reason}")),
@@ -362,7 +380,7 @@ async fn handle_structured_console_recovery(
     // Only running runs without a stream handle after waiting indicate a dead process.
     if run.status == RunStatus::Running {
         let reason = "server restarted during run";
-        let _ = run_svc.mark_interrupted(run_id, reason).await;
+        interrupt_run_and_drain(state, run_svc, run_id, reason).await;
         return RecoveryOutcome {
             recoverable: Some(false),
             reason: Some(format!("interrupted: {reason}")),
