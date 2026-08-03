@@ -34,6 +34,10 @@ Create two pools, insert a project through the first, truncate through the secon
 ```rust
 #[tokio::test]
 async fn embedded_test_pools_isolate_fixture_data() {
+    if super::use_external_test_db() {
+        return;
+    }
+
     let first = super::embedded_test_pool().await.expect("first pool");
     let second = super::embedded_test_pool().await.expect("second pool");
     crate::db::truncate_test_workspace(&first).await.expect("truncate first");
@@ -164,7 +168,7 @@ While the admin advisory lock is held:
 1. Select inactive databases whose names start with `CASE_DATABASE_PREFIX` and have no `pg_stat_activity` rows.
 2. Drop each inactive database with a safely quoted identifier.
 3. Run `CREATE DATABASE <case> TEMPLATE <template>`.
-4. Connect a pool configured with `min_connections(1)`, `max_connections(10)`, and a ten-second acquire timeout before dropping the admin connection.
+4. Connect a pool configured with `min_connections(1)`, `max_connections(10)`, disabled idle/lifetime reaping, and a ten-second acquire timeout before dropping the admin connection.
 
 `embedded_test_pool()` uses this path unless `COPPICE_TEST_USE_EXTERNAL_DB=1`; the external path continues through `connect_and_migrate_for_tests`.
 

@@ -157,8 +157,10 @@ async fn connect_database_pool(
 ) -> anyhow::Result<PgPool> {
     let options = database_connect_options(session_url, database)?;
     PgPoolOptions::new()
+        // Case cleanup treats this as a sentinel; template pools are closed explicitly.
         .min_connections(1)
         .max_connections(max_connections)
+        .max_lifetime(None)
         .idle_timeout(None)
         .acquire_timeout(Duration::from_secs(10))
         .connect_with(options)
@@ -480,6 +482,11 @@ mod tests {
 
     #[tokio::test]
     async fn embedded_test_pools_isolate_fixture_data() {
+        if super::use_external_test_db() {
+            // The manual escape hatch intentionally uses one shared database.
+            return;
+        }
+
         let first = super::embedded_test_pool().await.expect("first pool");
         let second = super::embedded_test_pool().await.expect("second pool");
         crate::db::truncate_test_workspace(&first)

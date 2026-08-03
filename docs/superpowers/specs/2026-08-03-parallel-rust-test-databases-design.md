@@ -31,7 +31,7 @@ embedded PostgreSQL session
 
 The template name includes a fingerprint of every migration version and checksum. Different branches or worktrees therefore never reuse a template with incompatible migration history. Creating templates and cloning case databases is protected by a PostgreSQL advisory lock because the embedded server is shared across test processes.
 
-Each returned case pool keeps at least one connection open. Before cloning another case, the allocator removes only `coppice_case_` databases with no active connections. This bounds generated database buildup without risking a database still owned by a running test. One final inactive case may remain until the next allocation.
+Each returned case pool keeps at least one connection open and disables idle and lifetime reaping for that sentinel connection. Before cloning another case, the allocator removes only `coppice_case_` databases with no active connections. This bounds generated database buildup without risking a database still owned by a running test. One final inactive case may remain until the next allocation.
 
 The manual `COPPICE_TEST_USE_EXTERNAL_DB=1` escape hatch keeps its existing shared-database behavior. It is a debugging path and still requires serialized database tests; the default embedded path is the supported parallel path.
 
