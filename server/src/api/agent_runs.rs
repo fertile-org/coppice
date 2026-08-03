@@ -118,11 +118,12 @@ async fn stop_run(
     let pool = pool_from_state(&state)?;
     let service = RunService::new(pool);
     let run = service.stop(run_id).await.map_err(map_error)?;
-    RunOrchestrator::new(pool, &state.config.workflow)
-        .handle_terminal_run(&run)
-        .await;
     if let Some(handle) = state.run_streams.get(run_id) {
         handle.cancel();
+    } else {
+        RunOrchestrator::new(pool, &state.config.workflow)
+            .handle_terminal_run(&run)
+            .await;
     }
     let connector = service
         .agent_connector_for_run(run.agent_id)
