@@ -17,9 +17,9 @@ export function AppShell() {
 
   return (
     <div className="coppice-grain min-h-screen bg-background">
-      <header className="border-b border-border bg-surface px-8 py-4">
-        <div className="mx-auto flex max-w-6xl items-center justify-between gap-6">
-          <div className="flex items-center gap-6">
+      <header className="border-b border-border bg-surface px-4 py-3 sm:px-8 sm:py-4">
+        <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-3 sm:gap-6">
+          <div className="flex w-full flex-wrap items-center gap-3 sm:w-auto sm:gap-6">
             <div className="flex items-center gap-3">
               <img
                 src="/logo.webp"
@@ -34,7 +34,7 @@ export function AppShell() {
               </span>
             </div>
 
-            <nav className="flex items-center gap-1" aria-label="Main">
+            <nav className="flex flex-wrap items-center gap-1" aria-label="Main">
               <NavLink to="/projects" className={navLinkClass}>
                 Projects
               </NavLink>
@@ -52,11 +52,13 @@ export function AppShell() {
             </nav>
           </div>
 
-          <div className="flex items-center gap-4">
+          <div className="ml-auto flex items-center gap-2 sm:gap-4">
             {user && (
-              <NotificationBell userId={user.id} onOpenTicket={openTicket} />
+              <div className="order-last sm:order-none">
+                <NotificationBell userId={user.id} onOpenTicket={openTicket} />
+              </div>
             )}
-            <span className="font-body text-sm text-text-secondary">
+            <span className="hidden font-body text-sm text-text-secondary lg:inline">
               {user?.email}
             </span>
             <button
