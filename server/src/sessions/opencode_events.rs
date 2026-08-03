@@ -70,6 +70,7 @@ fn looks_like_template_contract(result: &AgentRunResult) -> bool {
             updated_description,
             acceptance_criteria,
             mention_agents,
+            agent_requests,
             split_tickets,
             ..
         } => {
@@ -110,11 +111,20 @@ fn looks_like_template_contract(result: &AgentRunResult) -> bool {
                 {
                     return true;
                 }
-                if split.assign_to.as_deref().is_some_and(field_looks_like_template) {
+                if split
+                    .assign_to
+                    .as_deref()
+                    .is_some_and(field_looks_like_template)
+                {
                     return true;
                 }
             }
             mention_agents.iter().any(|m| field_looks_like_template(m))
+                || agent_requests.iter().any(|request| {
+                    field_looks_like_template(&request.agent_key)
+                        || field_looks_like_template(&request.intent)
+                        || field_looks_like_template(&request.request)
+                })
         }
         AgentRunResult::Blocked {
             summary,
@@ -137,7 +147,10 @@ fn looks_like_template_contract(result: &AgentRunResult) -> bool {
             if field_looks_like_template(summary) {
                 return true;
             }
-            if progress_note.as_deref().is_some_and(field_looks_like_template) {
+            if progress_note
+                .as_deref()
+                .is_some_and(field_looks_like_template)
+            {
                 return true;
             }
             if changed_files.iter().any(|p| field_looks_like_template(p)) {
@@ -410,7 +423,10 @@ mod tests {
                 "status": { "type": "idle" }
             }
         });
-        assert_eq!(session_status_from_sse(&event, "ses_test"), Some("idle".into()));
+        assert_eq!(
+            session_status_from_sse(&event, "ses_test"),
+            Some("idle".into())
+        );
     }
 
     #[test]
@@ -437,9 +453,7 @@ mod tests {
     #[test]
     fn extract_result_accepts_summary_with_angle_bracket_field_names() {
         let contract = r#"{"status":"done","summary":"Wire `ConnectorRegistry::get(<id>)` and spawn `<command>` at `<path>`.","changedFiles":[],"testsRun":[],"assignTo":"backend_engineer","mentionAgents":[],"blockers":[]}"#;
-        let text = format!(
-            "Analysis complete.\n\n```json\n{contract}\n```"
-        );
+        let text = format!("Analysis complete.\n\n```json\n{contract}\n```");
         let messages = vec![serde_json::json!({
             "info": { "role": "assistant" },
             "parts": [{ "type": "text", "text": text }]
@@ -455,7 +469,8 @@ mod tests {
 
     #[test]
     fn extract_result_from_reasoning_part() {
-        let minimal = r#"{"status":"done","summary":"Done from reasoning.","nextStatus":"In Review"}"#;
+        let minimal =
+            r#"{"status":"done","summary":"Done from reasoning.","nextStatus":"In Review"}"#;
         let messages = vec![serde_json::json!({
             "info": { "role": "assistant" },
             "parts": [{ "type": "reasoning", "text": minimal }]

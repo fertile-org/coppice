@@ -3,8 +3,8 @@ use crate::domain::workflow::{
     JobRequest, PendingRecommendation, RunOutcome, TransitionAction, TransitionContext,
 };
 use crate::providers::AgentRunResult;
-use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
+use time::OffsetDateTime;
 
 pub const MAX_CLARIFICATION_ROUNDS: i32 = 3;
 pub const MAX_MENTIONS_PER_RUN: u32 = 2;
@@ -38,7 +38,10 @@ impl WorkflowService {
     }
 
     pub fn resolve_transition(ctx: TransitionContext) -> Result<TransitionAction, String> {
-        if ctx.job_type == "respond_to_mention" && ctx.run_outcome == RunOutcome::Succeeded {
+        if ctx.job_type == "respond_to_mention"
+            && (ctx.context_profile == crate::domain::context_profile::ContextProfile::Full
+                || ctx.run_outcome == RunOutcome::Succeeded)
+        {
             return Ok(TransitionAction::default());
         }
 
@@ -153,9 +156,7 @@ impl WorkflowService {
             return None;
         }
         match (current, agent_role) {
-            (TicketStatus::Backlog, role) if is_implementer(role) => {
-                Some(TicketStatus::InProgress)
-            }
+            (TicketStatus::Backlog, role) if is_implementer(role) => Some(TicketStatus::InProgress),
             (TicketStatus::Ready, role) if is_implementer(role) => Some(TicketStatus::InProgress),
             _ => None,
         }
@@ -365,6 +366,7 @@ mod tests {
                 updated_description: None,
                 acceptance_criteria: None,
                 mention_agents: vec![],
+                agent_requests: vec![],
                 blockers: vec![],
                 split_tickets: vec![],
             },
@@ -386,6 +388,7 @@ mod tests {
             updated_description: None,
             acceptance_criteria: None,
             mention_agents: vec![],
+            agent_requests: vec![],
             blockers: vec![],
             split_tickets: vec![],
         }
@@ -406,9 +409,7 @@ mod tests {
     }
 
     fn agent_map(keys: &[(&str, Uuid)]) -> HashMap<String, Uuid> {
-        keys.iter()
-            .map(|(k, id)| (k.to_string(), *id))
-            .collect()
+        keys.iter().map(|(k, id)| (k.to_string(), *id)).collect()
     }
 
     #[test]
@@ -430,7 +431,10 @@ mod tests {
             auto_assign_enabled: false,
             contract: done_with_assign_to("engineer"),
             project_agent_keys: vec!["pm".into(), "backend_engineer".into()],
-            project_agent_ids: agent_map(&[("pm", pm_agent_id()), ("backend_engineer", engineer_agent_id())]),
+            project_agent_ids: agent_map(&[
+                ("pm", pm_agent_id()),
+                ("backend_engineer", engineer_agent_id()),
+            ]),
             ..minimal_ctx()
         })
         .expect("resolve");
@@ -447,15 +451,15 @@ mod tests {
             auto_assign_enabled: true,
             contract: done_with_assign_to("backend_engineer"),
             project_agent_keys: vec!["pm".into(), "backend_engineer".into()],
-            project_agent_ids: agent_map(&[("pm", pm_agent_id()), ("backend_engineer", engineer_agent_id())]),
+            project_agent_ids: agent_map(&[
+                ("pm", pm_agent_id()),
+                ("backend_engineer", engineer_agent_id()),
+            ]),
             ..minimal_ctx()
         })
         .expect("resolve");
         assert_eq!(action.new_status, Some(TicketStatus::Ready));
-        assert_eq!(
-            action.new_assignee_id,
-            Some(Some(engineer_agent_id()))
-        );
+        assert_eq!(action.new_assignee_id, Some(Some(engineer_agent_id())));
         assert!(matches!(action.pending_recommendation, Some(None)));
     }
 
@@ -492,6 +496,7 @@ mod tests {
                 updated_description: None,
                 acceptance_criteria: None,
                 mention_agents: vec![],
+                agent_requests: vec![],
                 blockers: vec![],
                 split_tickets: vec![],
             },
@@ -543,6 +548,7 @@ mod tests {
                 updated_description: None,
                 acceptance_criteria: None,
                 mention_agents: vec![],
+                agent_requests: vec![],
                 blockers: vec![],
                 split_tickets: vec![],
             },
@@ -590,16 +596,14 @@ mod tests {
                 updated_description: None,
                 acceptance_criteria: None,
                 mention_agents: vec![],
+                agent_requests: vec![],
                 blockers: vec![],
                 split_tickets: vec![],
             },
             ..minimal_ctx()
         })
         .expect("resolve");
-        assert_eq!(
-            action.new_status,
-            Some(TicketStatus::WaitForFinalReview)
-        );
+        assert_eq!(action.new_status, Some(TicketStatus::WaitForFinalReview));
         assert_eq!(action.new_assignee_id, Some(None));
     }
 
@@ -618,6 +622,7 @@ mod tests {
                 updated_description: None,
                 acceptance_criteria: None,
                 mention_agents: vec![],
+                agent_requests: vec![],
                 blockers: vec![],
                 split_tickets: vec![],
             },
@@ -645,16 +650,14 @@ mod tests {
                 updated_description: None,
                 acceptance_criteria: None,
                 mention_agents: vec![],
+                agent_requests: vec![],
                 blockers: vec![],
                 split_tickets: vec![],
             },
             ..minimal_ctx()
         })
         .expect("resolve");
-        assert_eq!(
-            action.new_status,
-            Some(TicketStatus::WaitForFinalReview)
-        );
+        assert_eq!(action.new_status, Some(TicketStatus::WaitForFinalReview));
         assert_eq!(action.new_assignee_id, Some(None));
     }
 
@@ -675,6 +678,7 @@ mod tests {
                 updated_description: None,
                 acceptance_criteria: None,
                 mention_agents: vec!["backend_engineer".into()],
+                agent_requests: vec![],
                 blockers: vec!["Missing tests".into()],
                 split_tickets: vec![],
             },
@@ -688,10 +692,7 @@ mod tests {
         })
         .expect("resolve");
         assert_eq!(action.new_status, Some(TicketStatus::InProgress));
-        assert_eq!(
-            action.new_assignee_id,
-            Some(Some(engineer_agent_id()))
-        );
+        assert_eq!(action.new_assignee_id, Some(Some(engineer_agent_id())));
         assert_eq!(action.enqueue_jobs.len(), 1);
         assert_eq!(action.enqueue_jobs[0].job_type, "work_on_ticket");
         assert_eq!(action.enqueue_jobs[0].agent_id, engineer_agent_id());
@@ -714,6 +715,7 @@ mod tests {
                 updated_description: None,
                 acceptance_criteria: None,
                 mention_agents: vec![],
+                agent_requests: vec![],
                 blockers: vec![],
                 split_tickets: vec![],
             },
@@ -726,10 +728,7 @@ mod tests {
             ..minimal_ctx()
         })
         .expect("resolve");
-        assert_eq!(
-            action.new_status,
-            Some(TicketStatus::WaitForFinalReview)
-        );
+        assert_eq!(action.new_status, Some(TicketStatus::WaitForFinalReview));
         // Pass path unassigns and does not enqueue a fix run.
         assert_eq!(action.new_assignee_id, Some(None));
         assert!(action.enqueue_jobs.is_empty());
@@ -754,10 +753,7 @@ mod tests {
         })
         .expect("resolve");
         assert_eq!(action.new_status, Some(TicketStatus::InProgress));
-        assert_eq!(
-            action.new_assignee_id,
-            Some(Some(engineer_agent_id()))
-        );
+        assert_eq!(action.new_assignee_id, Some(Some(engineer_agent_id())));
         assert_eq!(action.enqueue_jobs.len(), 1);
         assert_eq!(action.enqueue_jobs[0].job_type, "work_on_ticket");
     }
@@ -783,15 +779,15 @@ mod tests {
             run_outcome: RunOutcome::Blocked,
             contract: blocked_with_mentions(&["pm"]),
             project_agent_keys: vec!["pm".into(), "backend_engineer".into()],
-            project_agent_ids: agent_map(&[("pm", pm_agent_id()), ("backend_engineer", engineer_agent_id())]),
+            project_agent_ids: agent_map(&[
+                ("pm", pm_agent_id()),
+                ("backend_engineer", engineer_agent_id()),
+            ]),
             ..minimal_ctx()
         })
         .expect("resolve");
         assert!(action.new_status.is_none());
-        assert_eq!(
-            action.substatus,
-            Some(Some(Substatus::WaitingForAgent))
-        );
+        assert_eq!(action.substatus, Some(Some(Substatus::WaitingForAgent)));
         assert_eq!(action.enqueue_jobs.len(), 1);
         assert_eq!(action.enqueue_jobs[0].job_type, "respond_to_mention");
         assert_eq!(action.enqueue_jobs[0].agent_id, pm_agent_id());

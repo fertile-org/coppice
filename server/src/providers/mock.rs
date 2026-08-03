@@ -1,4 +1,4 @@
-use super::{AgentProvider, AgentRunInput, AgentRunResult, ProviderError, fixtures_root};
+use super::{fixtures_root, AgentProvider, AgentRunInput, AgentRunResult, ProviderError};
 use async_trait::async_trait;
 use std::path::PathBuf;
 
@@ -23,12 +23,12 @@ impl MockProvider {
         if let Ok(override_name) = std::env::var("MOCK_AGENT_RESPONSE") {
             return self.fixtures_dir.join(format!("{override_name}.json"));
         }
-        let resume = self
-            .fixtures_dir
-            .join(&input.agent_key)
-            .join("resume.json");
+        let resume = self.fixtures_dir.join(&input.agent_key).join("resume.json");
         if input.job_type == "work_on_ticket"
-            && input.resume_context.is_some()
+            && input
+                .resume_context
+                .as_deref()
+                .is_some_and(has_resume_signal)
             && resume.exists()
         {
             return resume;
@@ -68,6 +68,15 @@ impl MockProvider {
     }
 }
 
+fn has_resume_signal(context: &str) -> bool {
+    let context = context.to_ascii_lowercase();
+    context.contains("prior blocker")
+        || context.contains("last checkpoint")
+        || context.contains("(blocked)")
+        || context.contains("(clarification answer)")
+        || context.contains("(progress update)")
+}
+
 #[async_trait]
 impl AgentProvider for MockProvider {
     fn id(&self) -> &str {
@@ -88,9 +97,8 @@ impl AgentProvider for MockProvider {
         }
 
         let path = self.fixture_path(&input);
-        let raw = std::fs::read_to_string(&path).map_err(|_| {
-            ProviderError::FixtureNotFound(path.display().to_string())
-        })?;
+        let raw = std::fs::read_to_string(&path)
+            .map_err(|_| ProviderError::FixtureNotFound(path.display().to_string()))?;
         let result: AgentRunResult = serde_json::from_str(&raw)
             .map_err(|err| ProviderError::InvalidFixture(err.to_string()))?;
         Self::maybe_write_stdout(&input)?;
@@ -176,12 +184,19 @@ mod tests {
             .await
             .expect("pm work_on_ticket");
         match pm_done {
-            AgentRunResult::Done { assign_to, summary, .. } => {
+            AgentRunResult::Done {
+                assign_to,
+                agent_requests,
+                summary,
+                ..
+            } => {
                 assert_eq!(
                     summary,
                     "Refined ticket scope and added acceptance criteria for engineering handoff."
                 );
                 assert_eq!(assign_to.as_deref(), Some("backend_engineer"));
+                assert_eq!(agent_requests.len(), 1);
+                assert_eq!(agent_requests[0].agent_key, "backend_engineer");
             }
             _ => panic!("expected done variant"),
         }
@@ -201,6 +216,18 @@ mod tests {
             }
             _ => panic!("expected blocked variant"),
         }
+
+        let mut ordinary_thread_input = base_input("backend_engineer", "work_on_ticket");
+        ordinary_thread_input.resume_context =
+            Some("Recent activity:\n- **PM Agent** (implementation done): Refined scope.".into());
+        let ordinary_thread_result = provider
+            .run(ordinary_thread_input)
+            .await
+            .expect("ordinary ticket thread");
+        assert!(matches!(
+            ordinary_thread_result,
+            AgentRunResult::Blocked { .. }
+        ));
 
         let pm_mention = provider
             .run(base_input("pm", "respond_to_mention"))
@@ -228,7 +255,11 @@ mod tests {
         let continued: AgentRunResult =
             serde_json::from_str(&continued_raw).expect("parse continued");
         match continued {
-            AgentRunResult::Continued { summary, progress_note, .. } => {
+            AgentRunResult::Continued {
+                summary,
+                progress_note,
+                ..
+            } => {
                 assert!(summary.contains("TmuxStream"));
                 assert!(progress_note.as_deref().unwrap().contains("tmux_stream.rs"));
             }

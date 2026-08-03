@@ -2,7 +2,9 @@ mod common;
 
 use axum::http::StatusCode;
 use coppice_server::domain::comment::{AuthorType, CommentIntent};
+use coppice_server::providers::AgentRequest;
 use coppice_server::sandbox::permissive::PROFILE_ID;
+use coppice_server::services::agent_request::append_agent_requests_to_comment;
 use coppice_server::services::comment_service::CommentService;
 use coppice_server::services::mention_service::MentionService;
 use coppice_server::services::run_orchestrator::RunOrchestrator;
@@ -12,7 +14,7 @@ use tower::ServiceExt;
 use uuid::Uuid;
 
 #[tokio::test]
-async fn successful_agent_result_mention_auto_starts_response_run() {
+async fn successful_attention_mention_persists_without_starting_response_run() {
     let _guard = common::DB_TEST_LOCK.lock().await;
     if !common::db_available().await {
         return;
@@ -39,16 +41,12 @@ async fn successful_agent_result_mention_auto_starts_response_run() {
         &ticket_id,
         &cookie,
         &csrf,
-        "research mention triggers PM response",
+        "research attention mention completes",
         Duration::from_secs(30),
         |runs| {
             runs.iter().any(|run| {
                 run["agentId"].as_str() == Some(research_id.as_str())
                     && run["jobType"].as_str() == Some("work_on_ticket")
-                    && run["status"].as_str() == Some("succeeded")
-            }) && runs.iter().any(|run| {
-                run["agentId"].as_str() == Some(pm_id.as_str())
-                    && run["jobType"].as_str() == Some("respond_to_mention")
                     && run["status"].as_str() == Some("succeeded")
             })
         },
@@ -62,7 +60,7 @@ async fn successful_agent_result_mention_auto_starts_response_run() {
                     && run["jobType"].as_str() == Some("respond_to_mention")
             })
             .count(),
-        1
+        0
     );
     let ticket_uuid = uuid::Uuid::parse_str(&ticket_id).expect("ticket UUID");
     let mentions = sqlx::query_as::<_, (uuid::Uuid, uuid::Uuid)>(
@@ -80,6 +78,19 @@ async fn successful_agent_result_mention_auto_starts_response_run() {
     assert_eq!(mentions.len(), 1);
     assert_eq!(mentions[0].1.to_string(), pm_id);
 
+    let notification_count = sqlx::query_scalar::<_, i64>(
+        r#"
+        SELECT COUNT(*) FROM notifications
+        WHERE ticket_id = $1 AND agent_id = $2 AND type = 'agent_mentioned'
+        "#,
+    )
+    .bind(ticket_uuid)
+    .bind(Uuid::parse_str(&pm_id).expect("PM UUID"))
+    .fetch_one(pool)
+    .await
+    .expect("count attention notifications");
+    assert_eq!(notification_count, 1);
+
     let ticket = common::get_ticket(&app, &ticket_id, &cookie, &csrf).await;
     assert_eq!(ticket["status"], "in_review");
     assert_eq!(ticket["assigneeAgentId"], research_id);
@@ -87,7 +98,7 @@ async fn successful_agent_result_mention_auto_starts_response_run() {
 }
 
 #[tokio::test]
-async fn two_workers_chain_mentions_back_to_a_finished_source_agent() {
+async fn successful_work_consultation_runs_once_and_response_cannot_chain() {
     let _guard = common::DB_TEST_LOCK.lock().await;
     if !common::db_available().await {
         return;
@@ -167,7 +178,7 @@ async fn two_workers_chain_mentions_back_to_a_finished_source_agent() {
         &ticket_id,
         &cookie,
         &csrf,
-        "frontend to DBA to frontend mention chain",
+        "frontend consultation receives DBA response",
         Duration::from_secs(30),
         |runs| {
             runs.iter().any(|run| {
@@ -176,10 +187,6 @@ async fn two_workers_chain_mentions_back_to_a_finished_source_agent() {
                     && run["status"].as_str() == Some("succeeded")
             }) && runs.iter().any(|run| {
                 run["agentId"].as_str() == Some(dba_id.as_str())
-                    && run["jobType"].as_str() == Some("respond_to_mention")
-                    && run["status"].as_str() == Some("succeeded")
-            }) && runs.iter().any(|run| {
-                run["agentId"].as_str() == Some(frontend_id.as_str())
                     && run["jobType"].as_str() == Some("respond_to_mention")
                     && run["status"].as_str() == Some("succeeded")
             })
@@ -221,8 +228,35 @@ async fn two_workers_chain_mentions_back_to_a_finished_source_agent() {
                     && run["jobType"].as_str() == Some("respond_to_mention")
             })
             .count(),
-        1
+        0
     );
+
+    let dba_response = runs
+        .iter()
+        .find(|run| {
+            run["agentId"].as_str() == Some(dba_id.as_str())
+                && run["jobType"].as_str() == Some("respond_to_mention")
+        })
+        .expect("DBA response run");
+    let worktree_path = dba_response["worktreePath"]
+        .as_str()
+        .expect("response worktree path");
+    let context = std::fs::read_to_string(
+        std::path::Path::new(worktree_path)
+            .join(".agent")
+            .join("context.md"),
+    )
+    .expect("read consultation context");
+    let exact_request = "Verify the data assumptions used by the frontend implementation.";
+    let request_pos = context
+        .find(exact_request)
+        .expect("exact request in context");
+    let ticket_pos = context.find("# Ticket context").expect("ticket context");
+    assert!(request_pos < ticket_pos);
+    assert!(context.contains("Coppice platform rules — consultation response"));
+    assert!(context.contains("Do not edit"));
+    assert!(context.contains("Do not commit"));
+    assert!(context.contains("Do not take assignment"));
 
     let ticket_uuid = uuid::Uuid::parse_str(&ticket_id).expect("ticket UUID");
     let handled_mentions = sqlx::query_scalar::<_, i64>(
@@ -236,7 +270,116 @@ async fn two_workers_chain_mentions_back_to_a_finished_source_agent() {
 }
 
 #[tokio::test]
-async fn stopping_live_run_defers_mention_until_worker_exit_with_two_workers() {
+async fn pending_pm_assignment_wins_over_same_target_consultation_request() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+
+    let (state, app, cookie, csrf, _env) =
+        common::bootstrap_and_login_with_auto_start_workers().await;
+    let pool = state.db.as_ref().expect("db pool");
+    let project_id = common::create_test_project(&app, &cookie, &csrf).await;
+    let (_git_dir, local_path) = common::create_temp_git_checkout();
+    let repo_id =
+        common::register_test_repo(&app, &local_path.display().to_string(), &cookie, &csrf).await;
+    let pm_id =
+        common::create_agent_with_preset_key(&app, "pm", "Consulting PM Agent", &cookie, &csrf)
+            .await;
+    let tech_lead_id = common::create_agent_with_preset_key(
+        &app,
+        "tech_lead",
+        "Pending Tech Lead",
+        &cookie,
+        &csrf,
+    )
+    .await;
+
+    sqlx::query("UPDATE agents SET preset_source = 'pm_consult_tech_lead' WHERE id = $1")
+        .bind(Uuid::parse_str(&pm_id).expect("PM UUID"))
+        .execute(pool)
+        .await
+        .expect("select PM regression fixture");
+
+    let ticket_id = common::create_test_ticket(&app, &project_id, &cookie, &csrf).await;
+    common::set_ticket_repo(&app, &ticket_id, &repo_id, &cookie, &csrf).await;
+    common::assign_agent_to_ticket(&app, &ticket_id, &pm_id, &cookie, &csrf).await;
+
+    let ticket = common::poll_ticket_until(
+        &app,
+        &ticket_id,
+        &cookie,
+        &csrf,
+        "PM recommendation awaits human Tech Lead assignment",
+        Duration::from_secs(30),
+        |ticket| {
+            ticket["status"].as_str() == Some("ready")
+                && ticket["pendingAssignRecommendation"]["recommendedAgentKey"].as_str()
+                    == Some("tech_lead")
+        },
+    )
+    .await;
+    assert_eq!(ticket["assigneeAgentId"], pm_id);
+
+    common::poll_runs_until_count(
+        &app,
+        &ticket_id,
+        &cookie,
+        &csrf,
+        "PM recommendation run finishes",
+        Duration::from_secs(30),
+        |runs| {
+            runs.iter().any(|run| {
+                run["agentId"].as_str() == Some(pm_id.as_str())
+                    && run["jobType"].as_str() == Some("work_on_ticket")
+                    && run["status"].as_str() == Some("succeeded")
+            })
+        },
+    )
+    .await;
+
+    let ticket_uuid = Uuid::parse_str(&ticket_id).expect("ticket UUID");
+    let tech_lead_uuid = Uuid::parse_str(&tech_lead_id).expect("Tech Lead UUID");
+    let mention_count = sqlx::query_scalar::<_, i64>(
+        "SELECT COUNT(*) FROM ticket_mentions WHERE ticket_id = $1 AND mentioned_agent_id = $2",
+    )
+    .bind(ticket_uuid)
+    .bind(tech_lead_uuid)
+    .fetch_one(pool)
+    .await
+    .expect("count Tech Lead request mentions");
+    assert_eq!(mention_count, 1);
+
+    let premature_run_count = sqlx::query_scalar::<_, i64>(
+        r#"
+        SELECT COUNT(*) FROM agent_runs
+        WHERE ticket_id = $1 AND agent_id = $2
+          AND job_type IN ('respond_to_mention', 'work_on_ticket')
+        "#,
+    )
+    .bind(ticket_uuid)
+    .bind(tech_lead_uuid)
+    .fetch_one(pool)
+    .await
+    .expect("count premature Tech Lead runs");
+    assert_eq!(premature_run_count, 0);
+
+    let request_notification_count = sqlx::query_scalar::<_, i64>(
+        r#"
+        SELECT COUNT(*) FROM notifications
+        WHERE ticket_id = $1 AND agent_id = $2 AND type = 'agent_mentioned'
+        "#,
+    )
+    .bind(ticket_uuid)
+    .bind(tech_lead_uuid)
+    .fetch_one(pool)
+    .await
+    .expect("count Tech Lead request notifications");
+    assert_eq!(request_notification_count, 1);
+}
+
+#[tokio::test]
+async fn stopping_live_run_defers_consultation_until_worker_exit_with_two_workers() {
     let _guard = common::DB_TEST_LOCK.lock().await;
     if !common::db_available().await {
         return;
@@ -266,12 +409,21 @@ async fn stopping_live_run_defers_mention_until_worker_exit_with_two_workers() {
     let source_id = Uuid::parse_str(&source_id).expect("source agent UUID");
     let target_id = Uuid::parse_str(&target_id).expect("target agent UUID");
 
+    let mut comment_body = "Please respond".to_string();
+    append_agent_requests_to_comment(
+        &mut comment_body,
+        &[AgentRequest {
+            agent_key: "backend_engineer".into(),
+            intent: "consult".into(),
+            request: "Please respond".into(),
+        }],
+    );
     let comment = CommentService::new(pool)
         .create(
             ticket_id,
             AuthorType::Agent,
             Some(source_id),
-            "Please respond",
+            &comment_body,
             CommentIntent::ProgressUpdate,
             &[],
             &[],

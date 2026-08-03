@@ -1,7 +1,7 @@
 # Consultation-Safe Agent Requests — Design
 
-**Status:** Approved by ticket contract  
-**Date:** 2026-08-03  
+**Status:** Approved by ticket contract
+**Date:** 2026-08-03
 **Depends on:** M05 workflow and collaboration
 
 ## Problem

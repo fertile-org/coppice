@@ -24,7 +24,7 @@ Add tests that deserialize `agentRequests`, reject empty/non-consult/over-bound 
 
 - [ ] **Step 2: Run tests to verify failure**
 
-Run: `cargo test -p coppice-server agent_request --lib`  
+Run: `cargo test -p coppice-server agent_request --lib`
 Expected: FAIL because `AgentRequest` and durable metadata helpers do not exist.
 
 - [ ] **Step 3: Implement the minimal result and helper types**
@@ -37,7 +37,7 @@ Append accepted requests and their metadata to done comments, and combine reques
 
 - [ ] **Step 5: Run focused tests**
 
-Run: `cargo test -p coppice-server agent_request --lib`  
+Run: `cargo test -p coppice-server agent_request --lib`
 Expected: PASS.
 
 ### Task 2: Consultation-only context
@@ -52,7 +52,7 @@ Build a response context containing a multiline request and assert the exact req
 
 - [ ] **Step 2: Run the context test to verify failure**
 
-Run: `cargo test -p coppice-server context_builder::tests::consultation --lib`  
+Run: `cargo test -p coppice-server context_builder::tests::consultation --lib`
 Expected: FAIL because full contexts have no consultation mode.
 
 - [ ] **Step 3: Implement the dedicated response context**
@@ -65,7 +65,7 @@ For `respond_to_mention`, load the trigger comment, parse a target-matching stru
 
 - [ ] **Step 5: Run focused tests**
 
-Run: `cargo test -p coppice-server context_builder::tests::consultation --lib`  
+Run: `cargo test -p coppice-server context_builder::tests::consultation --lib`
 Expected: PASS.
 
 ### Task 3: Safe persistence and one-hop dispatch
@@ -81,7 +81,7 @@ Cover attention-only mentions producing no job, work consultation producing one 
 
 - [ ] **Step 2: Run focused orchestration tests to verify failure**
 
-Run: `cargo test -p coppice-server run_orchestrator::tests::successful --lib`  
+Run: `cargo test -p coppice-server run_orchestrator::tests::successful --lib`
 Expected: FAIL under the mention-driven dispatcher.
 
 - [ ] **Step 3: Implement target selection and ownership precedence**
@@ -98,7 +98,7 @@ Leave blocked `mentionAgents` workflow jobs and `resume_agent_id` semantics inta
 
 - [ ] **Step 6: Run orchestration unit tests**
 
-Run: `cargo test -p coppice-server run_orchestrator --lib`  
+Run: `cargo test -p coppice-server run_orchestrator --lib`
 Expected: PASS.
 
 ### Task 4: Fixtures, integration regressions, and M05 documentation
@@ -125,7 +125,7 @@ Document attention versus consultation versus ownership, bounded request shape, 
 
 - [ ] **Step 4: Run the required integration binary**
 
-Run: `cargo test -p coppice-server --features embedded-test-db --test integration_agent_mentions`  
+Run: `cargo test -p coppice-server --features embedded-test-db --test integration_agent_mentions`
 Expected: PASS.
 
 ### Task 5: Verification and review
@@ -135,17 +135,17 @@ Expected: PASS.
 
 - [ ] **Step 1: Format and run unit coverage**
 
-Run: `cargo fmt --all -- --check` and `cargo test -p coppice-server --lib`  
+Run: `cargo fmt --all -- --check` and `cargo test -p coppice-server --lib`
 Expected: PASS.
 
 - [ ] **Step 2: Run focused workflow regression**
 
-Run: `cargo test -p coppice-server --features embedded-test-db --test integration_workflow`  
+Run: `cargo test -p coppice-server --features embedded-test-db --test integration_workflow`
 Expected: PASS, including blocked clarification/resume and QC defect handoff coverage.
 
 - [ ] **Step 3: Run Clippy**
 
-Run: `cargo clippy --workspace -- -D warnings`  
+Run: `cargo clippy --workspace -- -D warnings`
 Expected: PASS.
 
 - [ ] **Step 4: Review the diff against every acceptance criterion**

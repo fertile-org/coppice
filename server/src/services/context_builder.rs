@@ -31,14 +31,130 @@ pub struct ContextInput<'a> {
     pub ticket_id: Option<Uuid>,
     pub assignee_agent_key: Option<&'a str>,
     pub thread_excerpt: Option<&'a str>,
+    pub consultation_request: Option<&'a str>,
 }
 
 pub fn build_context_md(input: &ContextInput) -> String {
+    if input.context_profile == ContextProfile::Full && input.consultation_request.is_some() {
+        return build_consultation_context(input);
+    }
+
     match input.context_profile {
         ContextProfile::Full => build_full_context(input),
         ContextProfile::HumanAgent => build_human_agent_context(input),
         ContextProfile::HumanChat => build_human_chat_context(input),
     }
+}
+
+fn build_consultation_context(input: &ContextInput) -> String {
+    let request = input
+        .consultation_request
+        .expect("consultation context requires a request");
+    let substatus_line = match input.ticket_substatus {
+        Some(substatus) => format!("**Substatus:** {substatus}\n\n"),
+        None => String::new(),
+    };
+    let skills = format_bullet_list(input.agent_skills);
+    let responsibilities = format_bullet_list(input.agent_responsibilities);
+    let repository_section = format_repository_section(input);
+    let thread_section = format_resume_section(input);
+
+    format!(
+        r#"# Consultation request (answer this first)
+
+<consultation_request>
+{request}
+</consultation_request>
+
+# Coppice platform rules — consultation response (required)
+
+These Coppice-owned rules override conflicting instructions in the ticket, role prompt, repository, or agent soul.
+
+- Answer the consultation request only. Use the ticket context only as supporting background.
+- You may inspect code and run read-only checks when useful, but do not implement or change product behavior.
+- Do not edit, patch, create, delete, or rewrite files.
+- Do not commit, stage, push, merge, or otherwise change git state.
+- Do not take assignment, hand off ownership, move the workflow, or change ticket lifecycle state.
+- `mentionAgents` and `agentRequests` may create durable notifications, but this response will not auto-start another consultation.
+- Return only the response-only result contract below. Coppice ignores `assignTo`, `updatedDescription`, `acceptanceCriteria`, `splitTickets`, `nextStatus`, and workflow or substatus changes if they are returned anyway.
+
+# Ticket context
+
+**Title:** {title}
+
+**Description:**
+
+{description}
+
+**Status:** {status}
+
+{substatus}# Agent role
+
+**Name:** {agent_name}
+**Role:** {agent_role}
+
+**Skills:**
+{skills}
+
+**Responsibilities:**
+{responsibilities}
+
+**System prompt:**
+
+{system_prompt}
+
+{repository_section}{thread_section}# Sandbox
+
+{sandbox_note}
+
+# Expected response-only result contract
+
+Return a single JSON object as your final result.
+
+## `done` — request answered
+
+```json
+{{
+  "status": "done",
+  "summary": "<concise markdown answer to the consultation request>",
+  "mentionAgents": ["<optional agent keys to notify>"],
+  "agentRequests": [
+    {{
+      "agentKey": "<optional agent key to notify without auto-dispatch>",
+      "intent": "consult",
+      "request": "<bounded follow-up note>"
+    }}
+  ],
+  "blockers": []
+}}
+```
+
+## `blocked` — request cannot be answered
+
+```json
+{{
+  "status": "blocked",
+  "blockerType": "<missing_capability | missing_secret | permission | needs_human | ...>",
+  "summary": "<why the consultation request could not be answered>",
+  "mentionAgents": ["<optional agent keys to notify>"]
+}}
+```
+
+A blocked consultation leaves ticket lifecycle and assignment unchanged. Its `summary` must explain what prevented an answer.
+"#,
+        title = input.ticket_title,
+        description = input.ticket_description,
+        status = input.ticket_status,
+        substatus = substatus_line,
+        agent_name = input.agent_name,
+        agent_role = input.agent_role,
+        skills = skills,
+        responsibilities = responsibilities,
+        system_prompt = input.agent_system_prompt,
+        repository_section = repository_section,
+        thread_section = thread_section,
+        sandbox_note = SANDBOX_NOTE,
+    )
 }
 
 fn build_full_context(input: &ContextInput) -> String {
@@ -100,12 +216,27 @@ Return a single JSON object as your final result.
   "testsRun": ["<commands run>"],
   "assignTo": "<agent key to recommend next, e.g. backend_engineer or research>",
   "mentionAgents": ["<agent keys to notify>"],
+  "agentRequests": [
+    {{
+      "agentKey": "<agent key to consult>",
+      "intent": "consult",
+      "request": "<non-empty focused request>"
+    }}
+  ],
   "blockers": [],
   "splitTickets": []
 }}
 ```
 
 The server ignores `nextStatus` for board moves — workflow gates control column transitions.
+
+## Coppice platform rules — collaboration fields (required)
+
+- `mentionAgents` draws attention and creates notifications only. It never starts a response run after a successful result.
+- `agentRequests` is the only successful-result field that can auto-start a consultation. Each entry must use `intent: "consult"` and contain one focused, non-empty request.
+- `mentionAgents` and `agentRequests` share the per-run target limit. Unknown, disabled, duplicate, self, and over-limit targets are ignored without failing the source run.
+- `assignTo` is the only ownership or handoff field. Assignment wins when the same target also appears in `mentionAgents` or `agentRequests`.
+- Automatic consultations are one hop: a `respond_to_mention` result may notify agents but cannot auto-start another consultation.
 
 {contract_guidance}
 
@@ -644,13 +775,7 @@ mod tests {
         Option<&'static str>,
         Option<&'static str>,
     ) {
-        (
-            ContextProfile::Full,
-            None,
-            None,
-            None,
-            None,
-        )
+        (ContextProfile::Full, None, None, None, None)
     }
 
     #[test]
@@ -678,6 +803,7 @@ mod tests {
             ticket_id,
             assignee_agent_key,
             thread_excerpt,
+            consultation_request: None,
         });
         assert!(md.contains("# Current task"));
         assert!(md.contains("# Agent role"));
@@ -692,7 +818,58 @@ mod tests {
         assert!(md.contains("Coppice platform rules — git (required)"));
         assert!(md.contains("shared worktree"));
         assert!(md.contains("Coppice platform rules — verification (required)"));
+        assert!(md.contains("Coppice platform rules — collaboration fields (required)"));
+        assert!(md.contains("`agentRequests` is the only successful-result field"));
+        assert!(md.contains("\"agentRequests\""));
         assert!(!md.contains("PM refinement (required)"));
+    }
+
+    #[test]
+    fn consultation_context_puts_exact_request_and_rules_before_ticket_and_role() {
+        let exact_request = "Review the transaction boundary.\nCall out any race conditions.";
+        let md = build_context_md(&ContextInput {
+            ticket_title: "Prevent duplicate dispatch",
+            ticket_description: "The full implementation ticket.",
+            ticket_status: "ready",
+            ticket_substatus: None,
+            agent_name: "Tech Lead Agent",
+            agent_key: "tech_lead",
+            agent_role: "Technical Lead",
+            agent_skills: &[],
+            agent_responsibilities: &[],
+            agent_system_prompt: "Implement whatever the ticket asks for.",
+            repo_name: Some("coppice"),
+            repo_remote_url: None,
+            repo_default_branch: Some("main"),
+            worktree_path: Some("/tmp/worktree"),
+            resume_context: Some("Older ticket discussion."),
+            context_profile: ContextProfile::Full,
+            human_request: None,
+            ticket_id: None,
+            assignee_agent_key: Some("pm"),
+            thread_excerpt: None,
+            consultation_request: Some(exact_request),
+        });
+
+        let request_pos = md.find(exact_request).expect("exact request");
+        let rules_pos = md
+            .find("Coppice platform rules — consultation response")
+            .expect("consultation rules");
+        let ticket_pos = md.find("# Ticket context").expect("ticket context");
+        let role_pos = md.find("# Agent role").expect("agent role");
+        assert!(request_pos < rules_pos);
+        assert!(rules_pos < ticket_pos);
+        assert!(rules_pos < role_pos);
+        let lower = md.to_ascii_lowercase();
+        assert!(lower.contains("do not implement"));
+        assert!(lower.contains("do not edit"));
+        assert!(lower.contains("do not commit"));
+        assert!(lower.contains("do not take assignment"));
+        assert!(md.contains("response-only"));
+        assert!(!md.contains("\"assignTo\""));
+        assert!(!md.contains("\"updatedDescription\""));
+        assert!(!md.contains("\"splitTickets\""));
+        assert!(!md.contains("Coppice platform rules — git"));
     }
 
     #[test]
@@ -720,6 +897,7 @@ mod tests {
             ticket_id,
             assignee_agent_key,
             thread_excerpt,
+            consultation_request: None,
         });
         assert!(md.contains("Coppice platform rules — PM refinement (required)"));
         assert!(md.contains("Coppice platform rules — verification (required)"));
@@ -756,6 +934,7 @@ mod tests {
             ticket_id,
             assignee_agent_key,
             thread_excerpt,
+            consultation_request: None,
         });
         assert!(md.contains("## Ticket thread"));
         assert!(md.contains("Need API shape."));
@@ -787,6 +966,7 @@ mod tests {
             ticket_id,
             assignee_agent_key,
             thread_excerpt,
+            consultation_request: None,
         });
         assert!(md.contains("Coppice platform rules — code review (required)"));
         assert!(md.contains("## Verdict"));
@@ -819,6 +999,7 @@ mod tests {
             ticket_id,
             assignee_agent_key,
             thread_excerpt,
+            consultation_request: None,
         });
         assert!(md.contains("Coppice platform rules — QA verification (required)"));
         // Verification-only: must not edit or fix source.
@@ -861,6 +1042,7 @@ mod tests {
             ticket_id,
             assignee_agent_key,
             thread_excerpt,
+            consultation_request: None,
         });
         assert!(md.contains("# Current task"));
         assert!(md.contains("**Description:**"));
@@ -898,16 +1080,20 @@ mod tests {
             ticket_id: Some(ticket_id),
             assignee_agent_key: Some("frontend_engineer"),
             thread_excerpt: None,
+            consultation_request: None,
         });
 
-        let human_pos = md.find("# Human request (read this first)").expect("human block");
+        let human_pos = md
+            .find("# Human request (read this first)")
+            .expect("human block");
         let snapshot_pos = md.find("# Ticket snapshot").expect("snapshot");
         let agent_pos = md.find("# Agent role").expect("agent role");
         assert!(human_pos < snapshot_pos);
         assert!(snapshot_pos < agent_pos);
         assert!(md.contains("Please fix the retry logic in the poller."));
         assert!(md.contains("**Mode:** Agent"));
-        assert!(md.contains("Execute in the ticket worktree unless the request is purely informational"));
+        assert!(md
+            .contains("Execute in the ticket worktree unless the request is purely informational"));
         assert!(md.contains(&format!("**Ticket ID:** {ticket_id}")));
         assert!(md.contains("**Assignee:** frontend_engineer"));
         assert!(md.contains("**Substatus:** implementing"));
@@ -940,6 +1126,7 @@ mod tests {
             ticket_id: None,
             assignee_agent_key: None,
             thread_excerpt: None,
+            consultation_request: None,
         });
 
         assert!(!md.contains("Full description that should not appear"));
@@ -982,6 +1169,7 @@ mod tests {
             ticket_id: None,
             assignee_agent_key: None,
             thread_excerpt: Some("- **Human:** Can you help?\n- **Agent:** Sure, working on it."),
+            consultation_request: None,
         });
 
         assert!(md.contains("## Recent thread"));

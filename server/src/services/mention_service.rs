@@ -1,6 +1,7 @@
 use crate::domain::agent::Agent;
 use crate::domain::mention::{MentionStatus, TicketMention};
 use crate::domain::slug::slugify;
+use crate::services::agent_request::agent_requests_from_comment;
 use crate::services::agent_service::AgentService;
 use sqlx::PgPool;
 use sqlx::Row;
@@ -203,20 +204,20 @@ impl<'a> MentionService<'a> {
         Ok(rows.iter().map(row_to_mention).collect())
     }
 
-    /// Returns the oldest ordinary agent mention that has never had a response run.
+    /// Returns the oldest structured consultation request that has never had a response run.
     /// Any prior response attempt excludes the mention; failed/cancelled ordinary
     /// responses are marked ignored by the terminal-run orchestration hook rather
     /// than retried automatically in a loop.
-    pub async fn find_next_unscheduled_agent_mention(
+    pub async fn find_next_unscheduled_agent_request(
         &self,
         ticket_id: Uuid,
         mentioned_agent_id: Uuid,
     ) -> Result<Option<TicketMention>, MentionError> {
-        let row = sqlx::query(
+        let rows = sqlx::query(
             r#"
             SELECT
                 tm.id, tm.ticket_id, tm.comment_id, tm.mentioned_agent_id,
-                tm.resume_agent_id, tm.status
+                tm.resume_agent_id, tm.status, tc.body AS comment_body
             FROM ticket_mentions tm
             JOIN ticket_comments tc ON tc.id = tm.comment_id
             JOIN agents a ON a.id = tm.mentioned_agent_id
@@ -236,16 +237,26 @@ impl<'a> MentionService<'a> {
                     AND ar.trigger_comment_id = tm.comment_id
               )
             ORDER BY tm.created_at ASC, tm.id ASC
-            LIMIT 1
             "#,
         )
         .bind(ticket_id)
         .bind(mentioned_agent_id)
         .bind(mention_status_to_str(MentionStatus::Pending))
-        .fetch_optional(self.pool)
+        .fetch_all(self.pool)
         .await?;
 
-        Ok(row.as_ref().map(row_to_mention))
+        let agent_map = self.build_agent_key_map().await?;
+        for row in rows {
+            let comment_body: String = row.get("comment_body");
+            let targets_agent = agent_requests_from_comment(&comment_body)
+                .iter()
+                .any(|request| agent_map.get(&request.agent_key) == Some(&mentioned_agent_id));
+            if targets_agent {
+                return Ok(Some(row_to_mention(&row)));
+            }
+        }
+
+        Ok(None)
     }
 
     async fn build_agent_key_map(&self) -> Result<HashMap<String, Uuid>, MentionError> {

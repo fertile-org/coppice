@@ -1,0 +1,17 @@
+{
+  "status": "done",
+  "summary": "Refined the ticket and recommends Tech Lead ownership after the human gate.",
+  "assignTo": "tech_lead",
+  "changedFiles": [],
+  "testsRun": [],
+  "mentionAgents": ["tech_lead"],
+  "agentRequests": [
+    {
+      "agentKey": "tech_lead",
+      "intent": "consult",
+      "request": "Review the refined technical scope before accepting ownership."
+    }
+  ],
+  "blockers": [],
+  "splitTickets": []
+}

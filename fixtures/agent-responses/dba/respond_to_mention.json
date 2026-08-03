@@ -4,6 +4,13 @@
   "changedFiles": [],
   "testsRun": [],
   "nextStatus": null,
-  "mentionAgents": ["frontend_engineer"],
+  "mentionAgents": [],
+  "agentRequests": [
+    {
+      "agentKey": "frontend_engineer",
+      "intent": "consult",
+      "request": "The assumptions are valid; this follow-up is notification-only."
+    }
+  ],
   "blockers": []
 }

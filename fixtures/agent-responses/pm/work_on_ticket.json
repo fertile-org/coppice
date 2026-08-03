@@ -7,5 +7,12 @@
   "changedFiles": [],
   "testsRun": [],
   "mentionAgents": [],
+  "agentRequests": [
+    {
+      "agentKey": "backend_engineer",
+      "intent": "consult",
+      "request": "Review the refined scope and flag any implementation risks before ownership transfers."
+    }
+  ],
   "blockers": []
 }
