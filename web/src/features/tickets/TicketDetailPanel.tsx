@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
+import { GitBranch } from 'lucide-react';
+import type { TicketParentSummary } from '../board/ticketHierarchy';
 import type { Ticket } from '../board/useTickets';
 import { TicketMarkdown } from '../../components/TicketMarkdown';
 import { useToast } from '../../components/ToastProvider';
@@ -12,9 +14,13 @@ import { useTicketChildren, useUpdateTicket } from './useTicket';
 
 interface TicketDetailPanelProps {
   ticket: Ticket;
+  parentTicket?: TicketParentSummary | null;
 }
 
-export function TicketDetailPanel({ ticket }: TicketDetailPanelProps) {
+export function TicketDetailPanel({
+  ticket,
+  parentTicket = null,
+}: TicketDetailPanelProps) {
   const toast = useToast();
   const [, setSearchParams] = useSearchParams();
   const updateTicket = useUpdateTicket(ticket.id);
@@ -127,6 +133,31 @@ export function TicketDetailPanel({ ticket }: TicketDetailPanelProps) {
         )}
       </div>
 
+      {parentTicket && ticket.parentTicketId === parentTicket.id && (
+        <section className="border-t border-border pt-6">
+          <h3 className="mb-4 font-display text-base font-semibold tracking-tight text-text-primary">
+            Parent ticket
+          </h3>
+          <button
+            type="button"
+            aria-label={`Open parent ticket: ${parentTicket.title}`}
+            onClick={() => setSearchParams({ ticket: parentTicket.id })}
+            className="flex min-h-11 w-full min-w-0 items-center gap-2 rounded-md border border-border bg-surface px-3 py-2 text-left transition-colors duration-fast hover:bg-paper-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2"
+          >
+            <GitBranch
+              className="h-4 w-4 shrink-0 text-text-secondary"
+              aria-hidden="true"
+            />
+            <span
+              className="min-w-0 truncate font-body text-sm font-medium text-text-primary"
+              title={parentTicket.title}
+            >
+              {parentTicket.title}
+            </span>
+          </button>
+        </section>
+      )}
+
       {children && children.length > 0 && (
         <section className="border-t border-border pt-6">
           <h3 className="mb-4 font-display text-base font-semibold tracking-tight text-text-primary">
@@ -138,7 +169,7 @@ export function TicketDetailPanel({ ticket }: TicketDetailPanelProps) {
                 <button
                   type="button"
                   onClick={() => setSearchParams({ ticket: child.id })}
-                  className="flex w-full items-center justify-between gap-3 rounded-md border border-border bg-surface px-3 py-2 text-left transition-colors duration-fast hover:bg-paper-200"
+                  className="flex min-h-11 w-full items-center justify-between gap-3 rounded-md border border-border bg-surface px-3 py-2 text-left transition-colors duration-fast hover:bg-paper-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2"
                 >
                   <span className="truncate font-body text-sm font-medium text-text-primary">
                     {child.title}

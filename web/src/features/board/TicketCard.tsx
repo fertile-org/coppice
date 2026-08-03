@@ -1,14 +1,22 @@
 import { useDraggable } from '@dnd-kit/core';
 import { CSS } from '@dnd-kit/utilities';
+import { GitBranch, Network } from 'lucide-react';
+import type { TicketHierarchy } from './ticketHierarchy';
 import type { Ticket } from './useTickets';
 
 interface TicketCardProps {
   ticket: Ticket;
+  hierarchy?: TicketHierarchy;
   onOpen: (ticketId: string) => void;
   isLive?: boolean;
 }
 
-export function TicketCard({ ticket, onOpen, isLive = false }: TicketCardProps) {
+export function TicketCard({
+  ticket,
+  hierarchy,
+  onOpen,
+  isLive = false,
+}: TicketCardProps) {
   const { attributes, listeners, setNodeRef, transform, isDragging } =
     useDraggable({
       id: ticket.id,
@@ -38,10 +46,31 @@ export function TicketCard({ ticket, onOpen, isLive = false }: TicketCardProps) 
       }}
       className={[
         'cursor-grab rounded-md border border-border bg-surface-raised p-3 shadow-card transition-shadow duration-fast',
-        'hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-muted',
+        'hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
         isDragging ? 'z-10 opacity-60 shadow-lg' : '',
       ].join(' ')}
     >
+      {(hierarchy?.parent || hierarchy?.parentUnavailable) && (
+        <div className="mb-2 flex min-w-0 items-center gap-1.5 font-body text-xs leading-tight text-text-secondary">
+          <GitBranch
+            className="h-3.5 w-3.5 shrink-0"
+            aria-hidden="true"
+          />
+          {hierarchy.parent ? (
+            <span
+              className="min-w-0 truncate"
+              title={hierarchy.parent.title}
+            >
+              Child of {hierarchy.parent.title}
+            </span>
+          ) : (
+            <span className="min-w-0 truncate">
+              Child ticket · Parent unavailable
+            </span>
+          )}
+        </div>
+      )}
+
       <p className="flex items-start gap-1.5 font-body text-sm font-medium leading-snug text-text-primary">
         {isLive && (
           <span
@@ -72,6 +101,16 @@ export function TicketCard({ ticket, onOpen, isLive = false }: TicketCardProps) 
               {ticket.priority}
             </span>
           )}
+        </div>
+      )}
+
+      {hierarchy && hierarchy.directChildCount > 0 && (
+        <div className="mt-2 flex min-w-0 items-center gap-1.5 font-body text-xs leading-tight text-text-secondary">
+          <Network className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+          <span className="min-w-0 truncate">
+            Parent · {hierarchy.directChildCount} children ·{' '}
+            {hierarchy.doneChildCount}/{hierarchy.directChildCount} done
+          </span>
         </div>
       )}
     </div>

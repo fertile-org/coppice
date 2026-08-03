@@ -15,6 +15,7 @@ import { setLastProjectId } from '../projects/useProjects';
 import { BoardColumn } from './BoardColumn';
 import { BOARD_COLUMNS, isTicketStatus, type TicketStatus } from './columns';
 import { TicketCard } from './TicketCard';
+import { buildTicketHierarchyIndex } from './ticketHierarchy';
 import {
   ticketsQueryKey,
   useCreateTicket,
@@ -60,6 +61,11 @@ export function BoardPage() {
     [tickets],
   );
 
+  const hierarchyIndex = useMemo(
+    () => buildTicketHierarchyIndex(tickets ?? []),
+    [tickets],
+  );
+
   const ticketsByStatus = useMemo(() => {
     const grouped = new Map<TicketStatus, Ticket[]>(
       BOARD_COLUMNS.map((c) => [c.status, []]),
@@ -70,6 +76,10 @@ export function BoardPage() {
     }
     return grouped;
   }, [tickets]);
+
+  const selectedParentTicket = selectedTicketId
+    ? (hierarchyIndex.get(selectedTicketId)?.parent ?? null)
+    : null;
 
   function openTicket(ticketId: string) {
     setSearchParams({ ticket: ticketId });
@@ -155,6 +165,7 @@ export function BoardPage() {
                   key={column.status}
                   column={column}
                   tickets={ticketsByStatus.get(column.status) ?? []}
+                  hierarchyIndex={hierarchyIndex}
                   showQuickAdd={column.status === 'backlog'}
                   onQuickAdd={handleQuickAdd}
                   isAdding={createTicket.isPending}
@@ -169,6 +180,7 @@ export function BoardPage() {
               <div className="w-72 rotate-2 opacity-95">
                 <TicketCard
                   ticket={activeTicket}
+                  hierarchy={hierarchyIndex.get(activeTicket.id)}
                   onOpen={() => {}}
                   isLive={activeTicket.hasActiveRun ?? false}
                 />
@@ -179,7 +191,11 @@ export function BoardPage() {
       )}
 
       {selectedTicketId && (
-        <TicketDrawer ticketId={selectedTicketId} onClose={closeDrawer} />
+        <TicketDrawer
+          ticketId={selectedTicketId}
+          parentTicket={selectedParentTicket}
+          onClose={closeDrawer}
+        />
       )}
     </div>
   );

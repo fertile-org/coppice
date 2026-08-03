@@ -69,8 +69,10 @@ class MockWebSocket {
   close = vi.fn(() => {
     this.onclose?.();
   });
+  readonly url: string;
 
-  constructor(readonly url: string) {
+  constructor(url: string) {
+    this.url = url;
     MockWebSocket.instances.push(this);
   }
 }
