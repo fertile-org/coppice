@@ -3,13 +3,23 @@ use std::sync::Arc;
 use tracing_subscriber::EnvFilter;
 
 use coppice_server::events::mark_run_interrupted;
+use coppice_server::services::run_orchestrator::RunOrchestrator;
 use coppice_server::services::run_service::RunService;
 use coppice_server::sessions::opencode_client::OpenCodeClient;
 use coppice_server::AppState;
 
 async fn interrupt_orphaned_run(state: &AppState, run_id: uuid::Uuid) {
-    if let Err(err) = mark_run_interrupted(state, run_id, "server restarted during run").await {
-        tracing::warn!(error = %err, %run_id, "failed to mark orphaned run interrupted");
+    match mark_run_interrupted(state, run_id, "server restarted during run").await {
+        Ok(interrupted) => {
+            if let Some(pool) = state.db.as_ref() {
+                RunOrchestrator::new(pool, &state.config.workflow)
+                    .handle_terminal_run(&interrupted)
+                    .await;
+            }
+        }
+        Err(err) => {
+            tracing::warn!(error = %err, %run_id, "failed to mark orphaned run interrupted");
+        }
     }
 }
 

@@ -2,6 +2,7 @@ use crate::api::ws::auth::auth_user_from_cookie;
 use crate::domain::run::{run_status_to_str, AgentRun, RunStatus};
 use crate::events::mark_run_interrupted;
 use crate::services::artifact_service::{ArtifactService, RunArtifactPaths};
+use crate::services::run_orchestrator::RunOrchestrator;
 use crate::services::run_service::{RunError, RunService};
 use crate::sessions::opencode_client::OpenCodeClient;
 use crate::sessions::LiveMessage;
@@ -47,10 +48,17 @@ async fn mark_recovery_interrupted(
     reason: &str,
 ) -> RecoveryOutcome {
     match mark_run_interrupted(state, run_id, reason).await {
-        Ok(_) => RecoveryOutcome {
-            recoverable: Some(false),
-            reason: Some(format!("interrupted: {reason}")),
-        },
+        Ok(interrupted) => {
+            if let Some(pool) = state.db.as_ref() {
+                RunOrchestrator::new(pool, &state.config.workflow)
+                    .handle_terminal_run(&interrupted)
+                    .await;
+            }
+            RecoveryOutcome {
+                recoverable: Some(false),
+                reason: Some(format!("interrupted: {reason}")),
+            }
+        }
         Err(RunError::Validation(message)) => {
             tracing::debug!(%run_id, %message, "run interruption lost a terminal transition race");
             RecoveryOutcome {

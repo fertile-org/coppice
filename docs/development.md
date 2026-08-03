@@ -103,6 +103,21 @@ Tear down: `make compose-down`
 
 Always use Docker Compose via the Makefile — not standalone `docker run`.
 
+### Host port overrides
+
+The default stack binds host ports 5432 / 5000 / 5001. If another project owns one of them (common on busy dev machines), override the host-side mapping without touching the file:
+
+```bash
+COPPICE_PG_PORT=55432 \
+COPPICE_SERVER_PORT=15000 \
+COPPICE_WEB_PORT=15001 \
+COPPICE_API_URL=http://localhost:15000 \
+COPPICE_WEB_URL=http://localhost:15001 \
+  make e2e-smoke
+```
+
+Only the host-side mapping changes; container-internal ports and the `postgres` service DNS are unaffected, so `DATABASE_URL` and `VITE_API_URL` inside the stack stay the same. The smoke scripts read `COPPICE_API_URL` / `COPPICE_WEB_URL` (defaults `:5000` / `:5001`), so set those to match when you move the server/web ports.
+
 ## Makefile targets
 
 | Target | What it does |

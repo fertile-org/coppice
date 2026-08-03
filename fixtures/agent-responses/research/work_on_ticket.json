@@ -1,0 +1,9 @@
+{
+  "status": "done",
+  "summary": "Research complete; asking PM to confirm the recommendation.",
+  "changedFiles": [],
+  "testsRun": [],
+  "nextStatus": null,
+  "mentionAgents": ["pm"],
+  "blockers": []
+}

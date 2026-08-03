@@ -10,7 +10,7 @@ use tokio::sync::watch;
 
 use crate::domain::comment::{author_type_to_str, intent_to_str, Comment, CommentIntent};
 use crate::domain::substatus::TicketStatus;
-use crate::domain::run::{run_status_to_str, RunStatus};
+use crate::domain::run::{run_status_to_str, AgentRun, RunStatus};
 use crate::domain::slug::slugify;
 use crate::domain::ticket::{status_to_str, substatus_to_str};
 use crate::events::{publish_run_finished, AppEvent};
@@ -96,30 +96,51 @@ async fn process_one(state: &AppState, worker_id: &str) -> anyhow::Result<()> {
         Err(err) if err.downcast_ref::<JobCancelled>().is_some() => {
             state.run_streams.remove(run.id);
             job_svc.mark_cancelled(job.id).await?;
+            if let Ok(cancelled_run) = run_svc.get(run.id).await {
+                RunOrchestrator::new(pool, &state.config.workflow)
+                    .handle_terminal_run(&cancelled_run)
+                    .await;
+            }
         }
         Err(err) => {
             state.run_streams.remove(run.id);
             if run_svc.is_cancelled(run.id).await.unwrap_or(false) {
                 job_svc.mark_cancelled(job.id).await?;
+                if let Ok(cancelled_run) = run_svc.get(run.id).await {
+                    RunOrchestrator::new(pool, &state.config.workflow)
+                        .handle_terminal_run(&cancelled_run)
+                        .await;
+                }
             } else {
                 let message = format_job_error(&err);
-                if let Err(finish_err) = fail_job(pool, run.id, job.id, &message).await {
-                    if run_svc.is_cancelled(run.id).await.unwrap_or(false) {
-                        job_svc.mark_cancelled(job.id).await?;
-                    } else {
-                        return Err(finish_err);
+                match fail_job(pool, run.id, job.id, &message).await {
+                    Ok(failed_run) => {
+                        RunOrchestrator::new(pool, &state.config.workflow)
+                            .handle_terminal_run(&failed_run)
+                            .await;
+                        publish_run_finished(
+                            state,
+                            pool,
+                            failed_run.id,
+                            failed_run.ticket_id,
+                            failed_run.agent_id,
+                            failed_run.status,
+                            Some(message),
+                        )
+                        .await;
                     }
-                } else {
-                    publish_run_finished(
-                        state,
-                        pool,
-                        run.id,
-                        run.ticket_id,
-                        run.agent_id,
-                        RunStatus::Failed,
-                        Some(message),
-                    )
-                    .await;
+                    Err(finish_err) => {
+                        if run_svc.is_cancelled(run.id).await.unwrap_or(false) {
+                            job_svc.mark_cancelled(job.id).await?;
+                            if let Ok(cancelled_run) = run_svc.get(run.id).await {
+                                RunOrchestrator::new(pool, &state.config.workflow)
+                                    .handle_terminal_run(&cancelled_run)
+                                    .await;
+                            }
+                        } else {
+                            return Err(finish_err);
+                        }
+                    }
                 }
             }
             return Err(err);
@@ -691,8 +712,8 @@ async fn fail_job(
     run_id: uuid::Uuid,
     job_id: uuid::Uuid,
     message: &str,
-) -> anyhow::Result<()> {
-    RunService::new(pool)
+) -> anyhow::Result<AgentRun> {
+    let run = RunService::new(pool)
         .finish_failed(run_id, message)
         .await
         .context("finish run failed")?;
@@ -700,7 +721,7 @@ async fn fail_job(
         .mark_failed(job_id, message)
         .await
         .context("mark job failed")?;
-    Ok(())
+    Ok(run)
 }
 
 fn human_request_mode_label(profile: ContextProfile) -> Option<&'static str> {
