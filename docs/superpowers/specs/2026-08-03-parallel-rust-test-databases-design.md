@@ -1,7 +1,7 @@
 # Parallel Rust Test Databases — Design
 
-**Status:** Approved  
-**Date:** 2026-08-03  
+**Status:** Approved
+**Date:** 2026-08-03
 **Goal:** Make database-backed Rust library tests deterministic under the default parallel test runner without paying the cost of serializing the whole unit suite.
 
 ---
