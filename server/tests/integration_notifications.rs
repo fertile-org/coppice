@@ -365,13 +365,21 @@ async fn workflow_agent_mention_creates_notification() {
         .await
         .unwrap();
 
-    let mention_id: uuid::Uuid = sqlx::query_scalar(
-        "SELECT id FROM ticket_mentions WHERE ticket_id = $1 ORDER BY created_at DESC LIMIT 1",
+    let (mention_id, comment_id): (uuid::Uuid, uuid::Uuid) = sqlx::query_as(
+        "SELECT id, comment_id FROM ticket_mentions WHERE ticket_id = $1 ORDER BY created_at DESC LIMIT 1",
     )
     .bind(ticket_id)
     .fetch_one(pool)
     .await
     .unwrap();
+    let duplicate = NotificationService::new(pool)
+        .create_for_agent_mentioned(mention_id, ticket_id, comment_id, pm_id)
+        .await
+        .unwrap();
+    assert!(
+        duplicate.is_empty(),
+        "re-processing the same mention source must be idempotent"
+    );
     let notification_count: i64 =
         sqlx::query_scalar("SELECT COUNT(*) FROM notifications WHERE mention_id = $1")
             .bind(mention_id)
