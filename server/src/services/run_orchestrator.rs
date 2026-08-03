@@ -10,10 +10,12 @@ use crate::domain::slug::slugify;
 use crate::domain::substatus::Substatus;
 use crate::domain::ticket::status_to_str;
 use crate::domain::workflow::{JobRequest, RunOutcome, TransitionAction, TransitionContext};
+use crate::events::{AppEvent, EventBus};
 use crate::providers::AgentRunResult;
 use crate::services::agent_service::AgentService;
 use crate::services::comment_service::{CommentError, CommentService};
 use crate::services::mention_service::{resolve_agent_keys, MentionService};
+use crate::services::notification_service::NotificationService;
 use crate::services::result_contract::{merge_ticket_description, ApplyResult};
 use crate::services::run_service::{RunError, RunService, StartRunOptions};
 use crate::services::split_service::SplitService;
@@ -29,6 +31,7 @@ use uuid::Uuid;
 pub struct RunOrchestrator<'a> {
     pool: &'a PgPool,
     workflow: &'a WorkflowConfig,
+    event_bus: Option<&'a EventBus>,
 }
 
 pub async fn load_run_continuation_context(
@@ -60,7 +63,16 @@ pub async fn load_run_continuation_context(
 
 impl<'a> RunOrchestrator<'a> {
     pub fn new(pool: &'a PgPool, workflow: &'a WorkflowConfig) -> Self {
-        Self { pool, workflow }
+        Self {
+            pool,
+            workflow,
+            event_bus: None,
+        }
+    }
+
+    pub fn with_event_bus(mut self, event_bus: &'a EventBus) -> Self {
+        self.event_bus = Some(event_bus);
+        self
     }
 
     pub async fn finish_run(
@@ -213,6 +225,8 @@ impl<'a> RunOrchestrator<'a> {
                 .await?
         };
 
+        self.persist_and_publish_mentions(&mentions).await;
+
         if run.job_type == "respond_to_mention" && apply.run_status == RunStatus::Succeeded {
             if let Some(resume_job) = self.handle_clarification_resume(run, &ticket).await? {
                 action.enqueue_jobs.push(resume_job);
@@ -311,6 +325,49 @@ impl<'a> RunOrchestrator<'a> {
         self.handle_terminal_run(&finished_run).await;
 
         Ok(finished_run)
+    }
+
+    async fn persist_and_publish_mentions(&self, mentions: &[TicketMention]) {
+        let notification_svc = NotificationService::new(self.pool);
+        let mut notifications_changed = false;
+
+        for mention in mentions {
+            if let Some(event_bus) = self.event_bus {
+                event_bus.publish(AppEvent::AgentMentioned {
+                    mention_id: mention.id,
+                    ticket_id: mention.ticket_id,
+                    comment_id: mention.comment_id,
+                    mentioned_agent_id: mention.mentioned_agent_id,
+                });
+            }
+
+            match notification_svc
+                .create_for_agent_mentioned(
+                    mention.id,
+                    mention.ticket_id,
+                    mention.comment_id,
+                    mention.mentioned_agent_id,
+                )
+                .await
+            {
+                Ok(created) => notifications_changed |= !created.is_empty(),
+                Err(error) => {
+                    tracing::warn!(
+                        mention_id = %mention.id,
+                        error = %error,
+                        "failed to create workflow mention notification"
+                    );
+                }
+            }
+        }
+
+        if notifications_changed {
+            if let Some(event_bus) = self.event_bus {
+                event_bus.publish(AppEvent::NotificationChanged {
+                    recipient_user_id: None,
+                });
+            }
+        }
     }
 
     async fn handle_clarification_resume(

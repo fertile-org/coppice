@@ -517,7 +517,8 @@ async fn execute_job(
     }
 
     let worktree_path = paths.worktree_dir.to_string_lossy().into_owned();
-    let orchestrator = RunOrchestrator::new(pool, &state.config.workflow);
+    let orchestrator = RunOrchestrator::new(pool, &state.config.workflow)
+        .with_event_bus(&state.event_bus);
     let finished_run = orchestrator
         .finish_run(
             run,

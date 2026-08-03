@@ -311,10 +311,18 @@ async fn workflow_agent_mention_creates_notification() {
         &csrf,
     )
     .await;
-    common::create_agent_with_preset_key(&app, "pm", "PM Agent", &cookie, &csrf).await;
+    let pm_id = common::create_agent_with_preset_key(
+        &app,
+        "pm",
+        "PM Agent",
+        &cookie,
+        &csrf,
+    )
+    .await;
 
     let ticket_id = ticket_id.parse::<uuid::Uuid>().unwrap();
     let engineer_id = engineer_id.parse::<uuid::Uuid>().unwrap();
+    let pm_id = pm_id.parse::<uuid::Uuid>().unwrap();
     sqlx::query("UPDATE tickets SET status = 'in_progress', assignee_agent_id = $2 WHERE id = $1")
         .bind(ticket_id)
         .bind(engineer_id)
@@ -350,7 +358,9 @@ async fn workflow_agent_mention_creates_notification() {
     let apply = apply_agent_result(&contract).unwrap();
     let run = RunService::new(pool).get(run_id).await.unwrap();
 
+    let mut events = state.event_bus.subscribe();
     RunOrchestrator::new(pool, &state.config.workflow)
+        .with_event_bus(&state.event_bus)
         .finish_run(&run, &contract, apply, None, None)
         .await
         .unwrap();
@@ -373,6 +383,33 @@ async fn workflow_agent_mention_creates_notification() {
         notification_count, 1,
         "workflow-generated mentionAgents must create a durable notification"
     );
+
+    match tokio::time::timeout(Duration::from_secs(1), events.recv())
+        .await
+        .unwrap()
+        .unwrap()
+    {
+        AppEvent::AgentMentioned {
+            mention_id: event_mention_id,
+            ticket_id: event_ticket_id,
+            mentioned_agent_id,
+            ..
+        } => {
+            assert_eq!(event_mention_id, mention_id);
+            assert_eq!(event_ticket_id, ticket_id);
+            assert_eq!(mentioned_agent_id, pm_id);
+        }
+        event => panic!("expected agent-mentioned event, got {event:?}"),
+    }
+    assert!(matches!(
+        tokio::time::timeout(Duration::from_secs(1), events.recv())
+            .await
+            .unwrap()
+            .unwrap(),
+        AppEvent::NotificationChanged {
+            recipient_user_id: None
+        }
+    ));
 }
 
 #[tokio::test]

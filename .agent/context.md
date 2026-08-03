@@ -1,24 +1,71 @@
-# Human request (read this first)
-
-**From:** Human
-**Posted:** 2026-08-03T04:17:18.343278Z
-**Mode:** Agent
-
-> Please merge latest main into this worktree @be-agent-codex
-
-This instruction overrides ticket description and thread summaries when they conflict.
-
-Execute in the ticket worktree unless the request is purely informational (then reply in your result summary only).
-
-# Ticket snapshot
+# Current task
 
 **Title:** Create notification persistence and APIs
 
+**Description:**
+
+## Goal
+
+Add durable in-app notification storage and APIs so Coppice can track unread activity independently of transient WebSocket toasts.
+
+## Context
+
+The app already emits `agent_run.finished`, `agent.mentioned`, `comment.created`, and `ticket.updated` events over `/ws/events`. M04 also added transient run-completion toasts. This ticket should reuse those event sources, but persist notification records on the server so unread/read state survives reloads.
+
+## Scope
+
+Add a server-side notification model for the current signed-in workspace/user context.
+
+Each notification should include:
+
+- `id`
+- recipient user or resolvable recipient scope
+- `type` such as `agent_run_finished` or `agent_mentioned`
+- `title`
+- optional short `body`
+- `ticketId` when relevant
+- optional `runId`, `agentId`, `commentId`, or `mentionId`
+- `readAt` nullable timestamp
+- `createdAt`
+
+Create notifications for:
+
+- Agent run finished with `succeeded`, `blocked`, `failed`, or `cancelled`.
+- Agent mention created when it should be visible to the signed-in user/workflow owner.
+
+Expose APIs:
+
+- `GET /api/notifications?filter=unread|all&limit=&cursor=`
+- `GET /api/notifications/unread-count`
+- `POST /api/notifications/:id/read`
+- `POST /api/notifications/mark-all-read`
+
+Publish or reuse `/ws/events` updates so connected clients can invalidate notification queries after new notification creation or read-state changes.
+
+## Out of scope
+
+- Email, push, Slack, desktop, or browser push delivery.
+- User notification preferences.
+- Digesting, grouping, snoozing, or deletion.
+- A generic rules engine for arbitrary event subscriptions.
+
+## Verification
+
+Use targeted Rust checks only. Do not run the full `make test` suite for this ticket unless specifically requested.
+
+## Acceptance criteria
+
+- [ ] A migration creates durable notification storage with indexes for recipient, unread state, and newest-first listing.
+- [ ] Server creates a notification when an agent run finishes with `succeeded`, `blocked`, `failed`, or `cancelled`.
+- [ ] Server creates a notification for supported mention events without duplicating notifications for the same source event.
+- [ ] `GET /api/notifications` returns newest-first notifications with cursor or limit-based pagination.
+- [ ] `GET /api/notifications/unread-count` returns the current unread count for the signed-in user context.
+- [ ] `POST /api/notifications/:id/read` marks only an authorized notification as read.
+- [ ] `POST /api/notifications/mark-all-read` marks the signed-in user's unread notifications as read.
+- [ ] Mutating endpoints require the existing session and CSRF protections.
+- [ ] Integration tests cover creation, listing, unread count, mark-one-read, mark-all-read, and authorization boundaries.
+
 **Status:** in_review
-
-**Assignee:** backend_engineer
-
-**Ticket ID:** 5af6d7c0-01e1-4fc7-ac12-0ed5e9542882
 
 # Agent role
 
@@ -139,6 +186,62 @@ Do not let repeated failure modes stay invisible.
 
 **Ticket branch:** All agents on this ticket share one worktree and branch. Review or continue from this branch — do not create a separate worktree.
 
+## Ticket thread
+
+Recent activity on this ticket (oldest first):
+
+- **BE Agent** (implementation done): Added durable per-user notification storage and APIs. Migration 012 creates the `notifications` table (recipient, unread, newest-first indexes + `(recipient, source_key)` dedupe). `NotificationService` fans out run-finished (succeeded/blocked/failed/cancelled) and agent-mentioned events to every workspace user, idempotent per source event, and supports newest-first keyset listing, unread count,…
+- **QC Agent** (implementation done): QC rejected the implementation: `POST /api/agent-runs/:id/stop` cancels a queued run but creates no notification because the direct stop path bypasses `publish_run_finished`. Committed regression test `b296dbe`; all other targeted notification checks pass, and the defect is handed back to `backend_engineer`.
+
+**Changed files:**
+- .agent/context.md
+- server/tests/integration_notifications.rs
+
+
+*…
+- **BE Agent Codex** (implementation done): Fixed queued-run cancellation notifications and made the stop endpoint the sole cancellation-event publisher. Guarded terminal transitions so late worker success or failure cannot overwrite cancellation or emit conflicting events. Committed through `699127d`; transactional outbox/reconciliation remains non-blocking follow-up debt.
+
+**Changed files:**
+- .agent/context.md
+- server/src/api/agent_r…
+- **QC Agent** (implementation done): QC rejected the follow-up. Cancellation notifications now pass, but startup/live-session/watchdog interruption uses `RunService::mark_interrupted`, leaves the run `failed`, and creates no notification (`0` unread instead of `1`); regression committed as `8f3d4c5` for backend follow-up.
+
+**Changed files:**
+- .agent/context.md
+- server/tests/integration_notifications.rs
+
+
+**Tests run:**
+- cargo t…
+- **BE Agent Codex** (implementation done): Fixed interrupted-run notifications across startup, live recovery, and watchdog paths while preserving cancellation races. Added durable-row and WebSocket event regression coverage; committed as `0d5aaaf`.
+
+**Changed files:**
+- .agent/context.md
+- server/src/api/ws/live.rs
+- server/src/events/mod.rs
+- server/src/events/publish.rs
+- server/src/main.rs
+- server/src/services/run_service.rs
+- serve…
+- **QC Agent** (implementation done): QC rejected the ticket after verifying the interruption fix. Regression commit `8ace01c` proves workflow-generated `mentionAgents` persists a mention but creates 0 durable notifications instead of 1; backend must wire this producer to notification persistence and `notification.changed`.
+
+**Changed files:**
+- .agent/context.md
+- server/tests/integration_notifications.rs
+
+
+**Tests run:**
+- cargo …
+- **Smoke Worker** (implementation done): Implementation complete.
+
+---
+**Git:** branch `agent/TICKET-5af6d7c0` · no new changes (HEAD `8ace01c`)
+- **Human** (progress update): Please merge latest main into this worktree @be-agent-codex
+- **BE Agent Codex** (implementation done): Merged current `origin/main` (`fdc66c5`) into the ticket branch and committed locally as `cd2981c`. Resolved terminal-run conflicts while preserving durable notifications, cancellation race protection, and deferred-mention draining. Worktree is clean; nothing was pushed. Independent review found no issues. Two broader-suite failures were confirmed as pre-existing parent defects: workflow mentio…
+- **Human** (progress update): Ok, continue fix the QC comment
+
+Read the full thread in Coppice if a detail is truncated.
+
 ## Coppice platform rules — verification (required)
 
 These rules override conflicting instructions in your system prompt or soul file.
@@ -169,11 +272,24 @@ Return a single JSON object as your final result.
   "acceptanceCriteria": "<optional acceptance criteria; stored under ## Acceptance criteria>",
   "changedFiles": ["<paths changed>"],
   "testsRun": ["<commands run>"],
+  "assignTo": "<agent key to recommend next, e.g. backend_engineer or research>",
   "mentionAgents": ["<agent keys to notify>"],
   "blockers": [],
   "splitTickets": []
 }
 ```
+
+The server ignores `nextStatus` for board moves — workflow gates control column transitions.
+
+**Field roles (do not duplicate content across fields):**
+- `updatedDescription` — full ticket body (scope, context, constraints). Stored on the ticket.
+- `acceptanceCriteria` — checklist only. Stored under `## Acceptance criteria` on the ticket.
+- `summary` — short activity note for the comment thread (1–3 sentences). Do not paste the full spec, analysis tables, or acceptance checklist here when `updatedDescription` is set.
+
+## Coppice platform rules — implementer completion (required)
+
+- On `status: "done"`, **omit `assignTo`** — workflow gates move the ticket to In Review automatically.
+- Only PM agents use `assignTo` (when refining backlog tickets). Use agent keys that exist on the project (e.g. `backend_engineer`, `research`).
 
 ## Coppice platform rules — git (required)
 
@@ -184,6 +300,12 @@ These rules override conflicting instructions in your system prompt or soul file
 - Do not push unless explicitly allowed.
 - Do not run `git merge` or `git pull` manually — Coppice syncs the worktree to the branch tip before each run.
 - Coppice auto-commits any remaining uncommitted changes when your run finishes and records the branch in the ticket comment.
+
+## Coppice platform rules — long tasks (required)
+
+- Prefer `status: "continued"` with `progressNote` when substantial work remains and the session is getting long.
+- Use `status: "done"` only when acceptance criteria are met.
+- Use `status: "blocked"` when genuinely stuck.
 
 
 ## `blocked` — cannot proceed
@@ -198,12 +320,3 @@ These rules override conflicting instructions in your system prompt or soul file
 ```
 
 When blocked by missing capability or secret, also include `requiredCapabilities` and/or `requiredSecrets` arrays as applicable.
-
-## On-demand ticket data
-
-If you need full description, history, or past runs, read:
-- `.agent/ticket.json`
-- `.agent/comments.json`
-- `.agent/runs.json`
-
-Do not load these unless necessary for the human request.
