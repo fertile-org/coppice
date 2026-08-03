@@ -51,6 +51,8 @@ pub enum KnowledgeError {
     Capacity(String),
     #[error("knowledge item already has a live replacement")]
     LiveReplacementConflict,
+    #[error("knowledge item has already been superseded")]
+    AlreadySupersededConflict,
     #[error("knowledge activation was blocked by a concurrent lifecycle change")]
     ActivationConflict,
     #[error(transparent)]
@@ -88,6 +90,7 @@ struct LockedItem {
     version: i32,
     status: KnowledgeStatus,
     current_revision_id: Uuid,
+    superseded_by: Option<Uuid>,
 }
 
 pub struct KnowledgeService<'a> {
@@ -369,6 +372,9 @@ LIMIT $6"#
         let item = lock_item(&mut tx, item_id).await?;
         check_version(item, expected_version)?;
         self.enforce_capacity(&mut tx, &replacement).await?;
+        if item.superseded_by.is_some() {
+            return Err(KnowledgeError::AlreadySupersededConflict);
+        }
         let has_live_replacement: bool = sqlx::query_scalar(
             r#"
             SELECT EXISTS (
@@ -627,7 +633,7 @@ async fn lock_item(
     item_id: Uuid,
 ) -> Result<LockedItem, KnowledgeError> {
     let row = sqlx::query(
-        "SELECT version, status, current_revision_id FROM knowledge_items WHERE id = $1 FOR UPDATE",
+        "SELECT version, status, current_revision_id, superseded_by FROM knowledge_items WHERE id = $1 FOR UPDATE",
     )
     .bind(item_id)
     .fetch_optional(&mut **tx)
@@ -637,6 +643,7 @@ async fn lock_item(
         version: row.try_get("version")?,
         status: parse_status(row.try_get("status")?)?,
         current_revision_id: row.try_get("current_revision_id")?,
+        superseded_by: row.try_get("superseded_by")?,
     })
 }
 

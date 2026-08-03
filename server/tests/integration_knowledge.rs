@@ -427,6 +427,117 @@ async fn supersession_reapproval_activates_embedded_replacement_atomically() {
 }
 
 #[tokio::test]
+async fn supersession_rejects_a_new_candidate_for_an_already_retired_original() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
+    let project_id = common::create_test_project(&app, &cookie, &csrf).await;
+    let original = create_candidate(
+        &app,
+        &project_id,
+        &cookie,
+        &csrf,
+        "Permanently retired original",
+    )
+    .await;
+    let original_id = original["id"].as_str().unwrap();
+    let original_uuid = Uuid::parse_str(original_id).unwrap();
+
+    let (status, _) = mutate(
+        &app,
+        "POST",
+        &format!("/api/knowledge/{original_id}/approve"),
+        serde_json::json!({"expectedVersion": 1}),
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(process_one_knowledge_job(&state).await.unwrap());
+
+    let replacement_body = |expected_version, title: &str| {
+        serde_json::json!({
+            "expectedVersion": expected_version,
+            "replacement": {
+                "scope": "project",
+                "projectId": project_id,
+                "knowledgeType": "test_command",
+                "title": title,
+                "content": "An activated replacement permanently retires its original.",
+                "sourceType": "human_note",
+                "confidence": "high"
+            }
+        })
+    };
+    let (status, first) = mutate(
+        &app,
+        "POST",
+        &format!("/api/knowledge/{original_id}/supersede"),
+        replacement_body(2, "Activated replacement"),
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    let first_id = first["id"].as_str().unwrap();
+    let first_uuid = Uuid::parse_str(first_id).unwrap();
+
+    let (status, _) = mutate(
+        &app,
+        "POST",
+        &format!("/api/knowledge/{first_id}/approve"),
+        serde_json::json!({"expectedVersion": 1}),
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(process_one_knowledge_job(&state).await.unwrap());
+
+    let (status, _) = mutate(
+        &app,
+        "POST",
+        &format!("/api/knowledge/{first_id}/reject"),
+        serde_json::json!({"expectedVersion": 2, "reason": "retired replacement"}),
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let pool = state.db.as_ref().unwrap();
+    let original_state: (i32, Option<Uuid>) =
+        sqlx::query_as("SELECT version, superseded_by FROM knowledge_items WHERE id = $1")
+            .bind(original_uuid)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    assert_eq!(original_state, (4, Some(first_uuid)));
+
+    let (status, conflict) = mutate(
+        &app,
+        "POST",
+        &format!("/api/knowledge/{original_id}/supersede"),
+        replacement_body(i64::from(original_state.0), "Impossible second replacement"),
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert!(conflict["message"]
+        .as_str()
+        .unwrap()
+        .contains("already been superseded"));
+
+    let children: Vec<Uuid> =
+        sqlx::query_scalar("SELECT id FROM knowledge_items WHERE supersedes_item_id = $1")
+            .bind(original_uuid)
+            .fetch_all(pool)
+            .await
+            .unwrap();
+    assert_eq!(children, vec![first_uuid]);
+}
+
+#[tokio::test]
 async fn supersession_rejects_a_second_live_replacement_at_the_current_version() {
     let _guard = common::DB_TEST_LOCK.lock().await;
     let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;

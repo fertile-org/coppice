@@ -77,6 +77,7 @@ impl From<KnowledgeError> for KnowledgeApiError {
             KnowledgeError::VersionConflict { .. }
             | KnowledgeError::Capacity(_)
             | KnowledgeError::LiveReplacementConflict
+            | KnowledgeError::AlreadySupersededConflict
             | KnowledgeError::ActivationConflict => Self {
                 status: StatusCode::CONFLICT,
                 message: error.to_string(),
