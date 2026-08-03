@@ -18,6 +18,7 @@ import { ProjectPickerPage } from './features/projects/ProjectPickerPage';
 import { RepositoriesPage } from './features/repos/RepositoriesPage';
 import { UsersPage } from './features/users/UsersPage';
 import { CodeReviewPage } from './features/code/CodeReviewPage';
+import { KnowledgePage } from './features/knowledge/KnowledgePage';
 import { useOpenTicket } from './features/tickets/useOpenTicket';
 import {
   useEventSocket,
@@ -72,6 +73,7 @@ function App() {
                   element={<BoardPage />}
                 />
                 <Route path="/agents" element={<AgentsPage />} />
+                <Route path="/knowledge" element={<KnowledgePage />} />
                 <Route
                   path="/settings/repositories"
                   element={<RepositoriesPage />}

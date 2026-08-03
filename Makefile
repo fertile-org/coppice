@@ -10,7 +10,7 @@ COMPOSE_LOCAL = $(DOCKER_COMPOSE) -f deploy/docker-compose.local.yml
 BOOTSTRAP_EMAIL = admin@localhost
 BOOTSTRAP_PASSWORD = changeme
 
-.PHONY: compose-up compose-down compose-local-up compose-local-down server server-dev test test-unit test-smoke test-pg-reset clippy clean migrate bootstrap web-install web-test web-dev web-build e2e-smoke e2e-smoke-m03 e2e-smoke-m04 e2e-smoke-m05 e2e-smoke-m06 release-tar
+.PHONY: compose-up compose-down compose-local-up compose-local-down server server-dev test test-unit test-smoke test-pg-reset clippy clean migrate bootstrap web-install web-test web-dev web-build e2e-smoke e2e-smoke-m03 e2e-smoke-m04 e2e-smoke-m05 e2e-smoke-m06 e2e-smoke-m06-knowledge release-tar
 
 CARGO_TEST = cargo test --features embedded-test-db
 
@@ -96,6 +96,11 @@ e2e-smoke-m06: compose-up
 	$(COMPOSE) exec -T server sh -c 'mkdir -p /tmp/smoke-repo && cd /tmp/smoke-repo && git init -b main && git config user.email smoke@coppice.local && git config user.name smoke && echo hi > README.md && git add . && git commit -m init'
 	MOCK_AGENT_RESPONSE=pm/split_pending $(COMPOSE) up -d --force-recreate --no-deps server
 	node e2e/smoke/m06-context.mjs
+
+e2e-smoke-m06-knowledge: compose-up
+	MOCK_AGENT_RESPONSE=done $(COMPOSE) up -d --force-recreate --no-deps server
+	$(COMPOSE) exec -T server sh -c 'if [ ! -d /tmp/smoke-repo/.git ]; then mkdir -p /tmp/smoke-repo; cd /tmp/smoke-repo; git init -b main; git config user.email smoke@coppice.local; git config user.name smoke; echo hi > README.md; git add .; git commit -m init; fi'
+	node e2e/smoke/m06-knowledge.mjs
 
 release-tar: web-build
 	cargo build --release -p coppice-server -p coppice-cli

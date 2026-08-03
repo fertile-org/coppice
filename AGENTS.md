@@ -2,7 +2,7 @@
 
 **Coppice** is a self-hosted agent workspace: Trello-like board, tickets, comments, and (from M03) agent execution. Philosophy and full product design live in `docs/philosophy/`.
 
-**Status:** M05 workflow & collaboration is complete. **Next:** [M06 — Knowledge & learning](docs/milestones/M06-knowledge-and-learning.md).
+**Status:** M06 knowledge & learning is complete. **Next:** [M07 — Trust & signals](docs/milestones/M07-trust-and-signals.md).
 
 ## Must read before coding
 
@@ -14,7 +14,7 @@
 6. **CI must pass.** `make test` (embedded Postgres, no Docker), `cargo clippy --workspace -- -D warnings`, and `make web-test`. Clippy warnings are errors. After a **successful** full Rust test pass for your task, run `make clean` to reclaim disk (`target/` can grow to 10+ GB). Do **not** run it before every incremental `cargo test` during development — only when you are done with the task.
 7. **Fast verification during work.** Do **not** run `make test` while iterating — the full suite often takes several minutes. Use `make test-unit` (lib only), `make test-smoke` (lib + a few integration files), targeted `cargo test -p coppice-server --features embedded-test-db <filter>`, or `make web-test`. Reserve `make test` for final acceptance. Rust tests do **not** require `make compose-up` or `DATABASE_URL`.
 8. **Repositories.** Admin registers git checkouts by `local_path` (Settings → Repositories). Coppice creates worktrees only — no server-side `git clone`. Optional `remote_url` for metadata/PR (M07). Bind-mount host repos into the server container in Docker.
-9. **Agent execution env.** `AGENT_DEFAULT_PROVIDER` (default `mock`), `WORKTREES_PATH`, `AGENT_WORKER_COUNT`. Smoke: `make e2e-smoke-m03`. Context long-running (`continued`, `splitTickets`): [design spec](docs/superpowers/specs/2026-06-10-context-long-running-tasks-design.md); smoke: `make e2e-smoke-m06`.
+9. **Agent execution env.** `AGENT_DEFAULT_PROVIDER` (default `mock`), `WORKTREES_PATH`, `AGENT_WORKER_COUNT`. Smoke: `make e2e-smoke-m03`. Context long-running (`continued`, `splitTickets`): [design spec](docs/superpowers/specs/2026-06-10-context-long-running-tasks-design.md); smoke: `make e2e-smoke-m06`. Governed knowledge: [design spec](docs/superpowers/specs/2026-08-03-m06-knowledge-and-learning-design.md); smoke: `make e2e-smoke-m06-knowledge`.
 
 ## Monorepo (quick map)
 

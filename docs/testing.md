@@ -33,7 +33,7 @@ Vitest — schemas, API helpers, board column logic. No browser.
 | Layer | Location | Notes |
 |-------|----------|-------|
 | Unit | `server/src/**` (`#[cfg(test)]`) | Domain validation, config, provider fixtures |
-| Integration | `server/tests/integration_*.rs` | Full HTTP stack against real Postgres |
+| Integration | `server/tests/integration_*.rs` | Full HTTP stack against real Postgres; `integration_knowledge.rs` covers M06 lifecycle/retrieval/jobs/plans |
 | Health | `server/tests/health.rs` | Smoke without DB |
 
 ### Integration test conventions
@@ -99,6 +99,15 @@ make e2e-smoke   # compose up + node e2e/smoke/m02-board.mjs
 ```
 
 Browser script against the compose stack: login → create ticket → drag column → comment. CI may run a subset; full suite grows per milestone in `e2e/`.
+
+M06 keeps the existing context smoke and adds a distinct knowledge smoke:
+
+```bash
+make e2e-smoke-m06              # context continuation + pending split behavior
+make e2e-smoke-m06-knowledge    # governance → embed → Full retrieval → audit → extraction
+```
+
+Both use the default `deploy/docker-compose.yml` stack. The knowledge smoke uses only deterministic mock agent, embedding, and extraction providers.
 
 ## Agent / provider testing
 

@@ -41,6 +41,9 @@ export function AppShell() {
               <NavLink to="/agents" className={navLinkClass}>
                 Agents
               </NavLink>
+              <NavLink to="/knowledge" className={navLinkClass}>
+                Knowledge
+              </NavLink>
               <NavLink to="/settings/repositories" className={navLinkClass}>
                 Repositories
               </NavLink>

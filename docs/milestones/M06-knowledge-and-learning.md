@@ -29,9 +29,11 @@ Controlled agent memory: typed knowledge with pgvector retrieval, context budget
 - M03: context builder, agent runs
 - M05: completed ticket workflow (extractor trigger)
 
-## Architecture notes
+## Architecture contract
 
-### New server modules
+The reviewed design gate is [M06 Knowledge and Learning Design](../superpowers/specs/2026-08-03-m06-knowledge-and-learning-design.md). It fixes the trust boundary, revision model, vector dimension, retrieval ordering, capacity envelope, token counter, worker ownership, and API contract. The matching implementation plan is [here](../superpowers/plans/2026-08-03-m06-knowledge-and-learning.md).
+
+### Server modules
 
 ```text
 server/src/
@@ -40,22 +42,25 @@ server/src/
     mock_embedder.rs
     retrieval.rs
     extractor.rs
-    inbox_service.rs
+    openai_embedder.rs
   services/
-    context_builder.rs    # extended with budget + retrieval
+    knowledge_service.rs
+    knowledge_job_service.rs
+    context_budget.rs
   api/
     knowledge.rs
   workers/
-    embed_worker.rs       # async embed on approve
+    knowledge_worker.rs   # dedicated embed + extraction queue
 ```
 
 ### New database tables
 
 ```text
 knowledge_items
+knowledge_revisions        # immutable semantic history
 knowledge_embeddings
 knowledge_usage_logs
-knowledge_candidates       # inbox pending
+knowledge_jobs             # dedicated durable work queue
 ```
 
 ### EmbeddingProvider trait
@@ -64,26 +69,31 @@ knowledge_candidates       # inbox pending
 #[async_trait]
 pub trait EmbeddingProvider: Send + Sync {
     async fn embed(&self, texts: &[String]) -> Result<Vec<Vec<f32>>, EmbedError>;
+    fn provider_name(&self) -> &str;
+    fn model_name(&self) -> &str;
     fn dimension(&self) -> usize;
 }
 ```
 
-Mock returns deterministic vectors from text hash for reproducible retrieval tests.
+Mock returns deterministic normalized vectors from text hashes for reproducible retrieval tests. The OpenAI-compatible adapter uses `POST /embeddings` and strictly checks result count, ordering, finiteness, and the configured dimension. M06 migrates `vector(1536)` and startup rejects a different configured dimension.
 
 ### Context budget (default)
 
-Per product design §13.7 — configurable via YAML.
+The selected `ByteTokenCounter` counts `ceil(UTF-8 bytes / 4)` and records its name in the assembled context path. TOML config bounds ticket, comments, project rules, retrieved knowledge, prior-attempt summary, output contract, and the total. Safety and result-contract sections are mandatory; overflow fails before provider invocation.
 
 ### API endpoints
 
 ```text
 GET   /api/knowledge
 GET   /api/knowledge/inbox
-POST  /api/knowledge/inbox/:id/approve
-POST  /api/knowledge/inbox/:id/reject
+POST  /api/knowledge
+GET   /api/knowledge/:id
 PATCH /api/knowledge/:id
+POST  /api/knowledge/:id/approve
+POST  /api/knowledge/:id/reject
 POST  /api/knowledge/:id/supersede
 POST  /api/knowledge/:id/mark-stale
+POST  /api/knowledge/:id/expire
 GET   /api/agent-runs/:id/knowledge-used
 ```
 
@@ -92,13 +102,11 @@ GET   /api/agent-runs/:id/knowledge-used
 ```yaml
   server:
     environment:
-      EMBEDDING_PROVIDER: mock          # tests + default dev
-      EMBEDDING_DIMENSION: 1536
-      # optional real provider:
-      # OPENAI_API_KEY: ${OPENAI_API_KEY}
+      COPPICE_KNOWLEDGE__EMBEDDING__PROVIDER: mock
+      COPPICE_KNOWLEDGE__EMBEDDING__DIMENSION: "1536"
 ```
 
-Postgres pgvector index created in migration (IVFFlat or HNSW per pgvector version).
+Postgres uses an HNSW cosine index. M06 first materializes relational eligibility and then performs bounded, deterministic cosine ranking; this ordering is intentional for the documented 10,000-active-items-per-project envelope.
 
 ## Testing strategy
 
@@ -119,11 +127,12 @@ Postgres pgvector index created in migration (IVFFlat or HNSW per pgvector versi
 
 ### E2E smoke (CI)
 
-`e2e/smoke/m06-knowledge.spec`:
+`make e2e-smoke-m06-knowledge`:
 
-1. Complete ticket (or seed approved knowledge via API)
-2. Open Knowledge screen → approve pending inbox item
-3. Run agent on new ticket → Knowledge Used tab lists retrieved item
+1. Create, edit, approve, and wait for a project-scoped manual candidate to embed.
+2. Run an agent with an exact-match ticket and verify the exact revision appears once in Knowledge Used.
+3. Move a separate ticket to Done and verify deterministic extraction creates one Pending candidate even after a repeated Done update.
+4. Verify the `/knowledge` SPA route is served.
 
 ### E2E full (local)
 
@@ -133,11 +142,16 @@ Postgres pgvector index created in migration (IVFFlat or HNSW per pgvector versi
 
 ## Acceptance criteria
 
-- [ ] Approved knowledge appears in agent context package on subsequent runs
-- [ ] Inbox governs what enters long-term memory
-- [ ] pgvector retrieval respects metadata filters and budget
-- [ ] Extractor creates candidates after ticket completion
-- [ ] CI smoke E2E passes
+- [ ] The design gate is committed before persistence implementation.
+- [ ] Manual candidates support concurrency-safe approve, edit, reject, supersede, expire, and stale operations with immutable provenance.
+- [ ] Only active, embedding-ready, in-scope, confident, unexpired, and unsuperseded knowledge enters Full runs.
+- [ ] Relational filtering precedes bounded stable cosine ranking and representative query plans use the documented indexes.
+- [ ] Selected-token-counter context totals stay within configuration while mandatory safety and result-contract sections are preserved.
+- [ ] Every included exact revision is logged at most once per run and appears under Knowledge Used.
+- [ ] Done transitions durably and idempotently schedule deterministic extraction.
+- [ ] Default extraction is Pending; only explicitly allowlisted, high-confidence, low-risk types can auto-save.
+- [ ] Knowledge UI exposes Pending, Approved, Rejected, and Stale views plus source, embedding, expiry, supersession, and usage metadata.
+- [ ] Targeted Rust/web tests and the distinct default-Compose knowledge smoke pass without changing the existing M06 context smoke.
 
 ## References
 

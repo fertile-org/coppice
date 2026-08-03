@@ -35,6 +35,9 @@ Key fields for local dev (`config.toml`):
 | `auth.bootstrap_password` | First-admin bootstrap password |
 | `storage.artifacts_dir` | Upload storage on host |
 | `agent.worktrees_path` | Agent worktrees on host |
+| `knowledge.embedding` | Provider/model and fixed migrated vector dimension |
+| `knowledge.retrieval` | Confidence, stable top-k/page bounds, and scope capacities |
+| `knowledge.context_budget` | Total and per-section token budgets for Full runs |
 
 Docker Compose (agents / CI) sets `COPPICE_CONFIG=/etc/coppice/config.toml` (from `deploy/config/default.toml` in the image) plus env overrides in `deploy/docker-compose.yml`. The server container does **not** read your repo `config.toml`.
 
@@ -137,11 +140,18 @@ Only the host-side mapping changes; container-internal ports and the `postgres` 
 | `make clippy` | `cargo clippy --workspace -- -D warnings` |
 | `make clean` | `cargo clean` — remove `target/` build cache |
 | `make e2e-smoke-m06` | Context long-running smoke (`continued` + pending splits) |
+| `make e2e-smoke-m06-knowledge` | Governed knowledge lifecycle, retrieval, audit, extraction, and web-route smoke |
 | `make release-tar` | Self-contained release tarball |
 
 ### Context long-running tasks
 
 Agents can return `status: "continued"` to checkpoint progress without leaving **In Progress** — the run succeeds and the next run picks up via resume context in `.agent/context.md`. PM agents may propose `splitTickets`; with default `auto_split = false` these appear as a **pending split recommendation** on the parent ticket until a human approves. See [context long-running design](superpowers/specs/2026-06-10-context-long-running-tasks-design.md).
+
+### Knowledge configuration
+
+M06 settings live under `[knowledge]` in TOML. The default stack uses deterministic mock embedding and extraction providers. For an OpenAI-compatible embedding endpoint, set `knowledge.embedding.provider = "openai_compatible"`, configure `base_url`, `model`, and `api_key`, and keep `dimension = 1536`. Startup fails if the configured dimension differs from the migrated `vector(1536)` column; vectors are never padded or truncated.
+
+Knowledge embedding and extraction run on the dedicated `knowledge_jobs` queue. `knowledge.worker_count = 0` disables processing but leaves API reads available. Keep production limits in `knowledge.retrieval` and `knowledge.context_budget`; list endpoints and retrieval also enforce hard server caps.
 
 ## Disk usage / cleanup
 
