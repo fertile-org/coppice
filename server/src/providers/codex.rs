@@ -218,6 +218,9 @@ fn extract_assistant_text(value: &serde_json::Value) -> Option<String> {
     let ty = value.get("type").and_then(|v| v.as_str())?;
     if ty == "item.completed" {
         let item = value.get("item")?;
+        item.get("id")
+            .and_then(|v| v.as_str())
+            .filter(|id| !id.trim().is_empty())?;
         let item_type = item.get("type").and_then(|v| v.as_str())?;
         if item_type == "agent_message" {
             return item.get("text").and_then(|v| v.as_str()).map(str::to_string);
@@ -306,6 +309,33 @@ mod tests {
                 "exit_code": 0
             }
         });
+        assert!(extract_assistant_text(&event).is_none());
+    }
+
+    #[test]
+    fn extract_assistant_text_ignores_reasoning() {
+        let event = serde_json::json!({
+            "type": "item.completed",
+            "item": {
+                "id": "item_2",
+                "type": "reasoning",
+                "text": "{\"status\":\"done\",\"summary\":\"Not the final result.\"}"
+            }
+        });
+
+        assert!(extract_assistant_text(&event).is_none());
+    }
+
+    #[test]
+    fn extract_assistant_text_ignores_agent_message_without_id() {
+        let event = serde_json::json!({
+            "type": "item.completed",
+            "item": {
+                "type": "agent_message",
+                "text": "{\"status\":\"done\",\"summary\":\"Malformed.\"}"
+            }
+        });
+
         assert!(extract_assistant_text(&event).is_none());
     }
 

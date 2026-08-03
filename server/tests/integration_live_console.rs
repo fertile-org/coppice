@@ -1,6 +1,10 @@
 mod common;
 
 use axum::http::{header, StatusCode};
+use coppice_server::providers::codex_console::CodexConsolePublisher;
+use coppice_server::services::artifact_service::{ArtifactService, RunArtifactPaths};
+use coppice_server::sessions::run_registry::RunStreamRegistry;
+use coppice_server::sessions::LiveMessage;
 use futures_util::StreamExt;
 use http_body_util::BodyExt;
 use std::time::{Duration, Instant};
@@ -180,6 +184,86 @@ async fn live_ws_receives_mock_frames_and_terminal_log_written() {
     assert!(terminal_log.exists(), "terminal.log should exist");
     let content = std::fs::read_to_string(&terminal_log).unwrap();
     assert!(content.contains("Mock agent"));
+}
+
+#[tokio::test]
+async fn completed_codex_run_replays_structured_fixture_events_in_order() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+
+    let (app, cookie, csrf, _env) = common::bootstrap_and_login_with_workers("done").await;
+    let addr = common::spawn_test_server(app.clone()).await;
+    let (_git_dir, local_path) = common::create_temp_git_checkout();
+    let repo_id =
+        common::register_test_repo(&app, &local_path.display().to_string(), &cookie, &csrf).await;
+    let (ticket_id, agent_id, _) = setup_agent_ticket(&app, &cookie, &csrf, &repo_id).await;
+
+    let pool = coppice_server::db::shared_test_pool()
+        .await
+        .expect("shared test pool");
+    sqlx::query("UPDATE agents SET connector = 'codex' WHERE id = $1")
+        .bind(&agent_id)
+        .execute(&pool)
+        .await
+        .expect("set Codex connector");
+    let run_id = insert_run_row(&ticket_id, &agent_id, "succeeded").await;
+
+    let fixture_path =
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../fixtures/codex/done.jsonl");
+    let raw = std::fs::read_to_string(fixture_path).expect("read Codex fixture");
+    let registry = RunStreamRegistry::new();
+    let handle = registry.register(uuid::Uuid::new_v4());
+    let mut publisher = CodexConsolePublisher::new();
+    for line in raw.lines() {
+        let value = serde_json::from_str(line).expect("valid Codex fixture event");
+        publisher.handle_json(&handle, &value);
+    }
+    let expected_events: Vec<serde_json::Value> = handle
+        .buffered_tail()
+        .into_iter()
+        .filter_map(|message| match message {
+            LiveMessage::Event { event } => Some(event),
+            _ => None,
+        })
+        .collect();
+    assert!(!expected_events.is_empty());
+
+    let paths = RunArtifactPaths::new("/tmp/coppice-test-artifacts", &run_id);
+    ArtifactService::write_console_events(&paths, &expected_events)
+        .expect("persist Codex console events");
+
+    let ws_url = format!("ws://{addr}/ws/agent-runs/{run_id}/live");
+    let ws = connect_ws(&ws_url, Some(&cookie)).await;
+    let (_, mut read) = ws.split();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let mut replayed_events = Vec::new();
+    let mut saw_end = false;
+
+    while Instant::now() < deadline && !saw_end {
+        let message = tokio::time::timeout(Duration::from_secs(1), read.next()).await;
+        match message {
+            Ok(Some(Ok(Message::Text(text)))) => {
+                let value: serde_json::Value = serde_json::from_str(&text).unwrap();
+                match value["type"].as_str() {
+                    Some("event") => replayed_events.push(value["event"].clone()),
+                    Some("end") => {
+                        assert_eq!(value["status"], "succeeded");
+                        saw_end = true;
+                    }
+                    _ => {}
+                }
+            }
+            Ok(Some(Ok(_))) => {}
+            Ok(Some(Err(error))) => panic!("ws error: {error}"),
+            Ok(None) => break,
+            Err(_) => continue,
+        }
+    }
+
+    assert_eq!(replayed_events, expected_events);
+    assert!(saw_end, "expected terminal replay end message");
 }
 
 #[tokio::test]

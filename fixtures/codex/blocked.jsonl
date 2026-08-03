@@ -1,5 +1,6 @@
 {"type":"thread.started","thread_id":"codex_thread_def456"}
 {"type":"turn.started"}
-{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"I need additional capability to proceed."}}
-{"type":"item.completed","item":{"id":"item_1","type":"agent_message","text":"{\"status\":\"blocked\",\"blockerType\":\"missing_capability\",\"summary\":\"The required capability is not available\",\"mentionAgents\":[\"devops\"],\"requiredCapabilities\":[\"docker\"]}"}}
-{"type":"turn.completed","usage":{"input_tokens":800,"output_tokens":300}}
+{"type":"item.completed","item":{"id":"reason_1","type":"reasoning","text":"The required local capability is unavailable."}}
+{"type":"item.completed","item":{"id":"message_1","type":"agent_message","text":"I need an additional capability to proceed."}}
+{"type":"item.completed","item":{"id":"message_2","type":"agent_message","text":"{\"status\":\"blocked\",\"blockerType\":\"missing_capability\",\"summary\":\"The required capability is not available.\",\"mentionAgents\":[\"devops\"],\"requiredCapabilities\":[\"docker\"]}"}}
+{"type":"turn.completed","usage":{"input_tokens":800,"cached_input_tokens":100,"cache_write_input_tokens":0,"output_tokens":300,"reasoning_output_tokens":80}}
