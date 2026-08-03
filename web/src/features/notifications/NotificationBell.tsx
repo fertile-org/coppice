@@ -113,6 +113,8 @@ export function NotificationBell({ userId, onOpenTicket }: NotificationBellProps
   useEffect(() => {
     if (!open) return;
 
+    popoverTitleRef.current?.focus();
+
     function handleMouseDown(event: MouseEvent) {
       if (!containerRef.current?.contains(event.target as Node)) {
         setOpen(false);

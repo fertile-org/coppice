@@ -154,6 +154,18 @@ describe('NotificationBell', () => {
     expect(within(button).getByText('3')).toBeInTheDocument();
   });
 
+  it('moves focus into the notification dialog when it opens', () => {
+    renderBell();
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Notifications, 1 unread' }),
+    );
+
+    expect(
+      screen.getByRole('heading', { name: 'Notifications' }),
+    ).toHaveFocus();
+  });
+
   it('opens a newest-first list with unread items visually distinguished', () => {
     renderBell({ items: [readNotification, unreadNotification] });
 
