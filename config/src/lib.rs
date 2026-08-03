@@ -18,6 +18,325 @@ pub struct AppConfig {
     pub web: WebConfig,
     #[serde(default)]
     pub workflow: WorkflowConfig,
+    #[serde(default)]
+    pub knowledge: KnowledgeConfig,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct KnowledgeConfig {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    #[serde(default)]
+    pub embedding: EmbeddingConfig,
+    #[serde(default)]
+    pub extraction: ExtractionConfig,
+    #[serde(default)]
+    pub auto_save: KnowledgeAutoSaveConfig,
+    #[serde(default)]
+    pub retrieval: KnowledgeRetrievalConfig,
+    #[serde(default)]
+    pub context_budget: ContextBudgetConfig,
+    #[serde(default = "default_knowledge_worker_count")]
+    pub worker_count: u32,
+    #[serde(default = "default_knowledge_poll_interval_ms")]
+    pub poll_interval_ms: u64,
+    #[serde(default = "default_knowledge_stale_lock_secs")]
+    pub stale_lock_secs: u64,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct EmbeddingConfig {
+    #[serde(default = "default_embedding_provider")]
+    pub provider: String,
+    #[serde(default = "default_embedding_model")]
+    pub model: String,
+    #[serde(default = "default_embedding_dimension")]
+    pub dimension: usize,
+    #[serde(default = "default_embedding_base_url")]
+    pub base_url: String,
+    #[serde(default)]
+    pub api_key: Option<String>,
+    #[serde(default = "default_embedding_timeout_secs")]
+    pub timeout_secs: u64,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct ExtractionConfig {
+    #[serde(default = "default_extraction_provider")]
+    pub provider: String,
+    #[serde(default = "default_extraction_max_source_bytes")]
+    pub max_source_bytes: usize,
+    #[serde(default = "default_extraction_max_candidates")]
+    pub max_candidates: usize,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct KnowledgeAutoSaveConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub allowed_types: Vec<String>,
+    #[serde(default = "default_auto_save_confidence")]
+    pub minimum_confidence: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct KnowledgeRetrievalConfig {
+    #[serde(default = "default_retrieval_top_k")]
+    pub top_k: usize,
+    #[serde(default = "default_retrieval_min_confidence")]
+    pub minimum_confidence: String,
+    #[serde(default)]
+    pub minimum_similarity: f32,
+    #[serde(default = "default_knowledge_list_limit")]
+    pub default_page_size: usize,
+    #[serde(default = "default_knowledge_list_max")]
+    pub max_page_size: usize,
+    #[serde(default = "default_knowledge_project_capacity")]
+    pub max_active_per_project: i64,
+    #[serde(default = "default_knowledge_workspace_capacity")]
+    pub max_active_workspace: i64,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct ContextBudgetConfig {
+    #[serde(default = "default_context_max_tokens")]
+    pub max_tokens: usize,
+    #[serde(default = "default_context_ticket_tokens")]
+    pub ticket: usize,
+    #[serde(default = "default_context_latest_comments_tokens")]
+    pub latest_comments: usize,
+    #[serde(default = "default_context_project_rules_tokens")]
+    pub project_rules: usize,
+    #[serde(default = "default_context_knowledge_tokens")]
+    pub retrieved_knowledge: usize,
+    #[serde(default = "default_context_previous_tokens")]
+    pub previous_attempt_summary: usize,
+    #[serde(default = "default_context_output_tokens")]
+    pub output_contract: usize,
+}
+
+const LOW_RISK_AUTO_SAVE_TYPES: &[&str] = &[
+    "bug_pattern",
+    "coding_convention",
+    "dependency_note",
+    "performance_note",
+    "review_feedback",
+    "test_command",
+];
+
+impl KnowledgeConfig {
+    pub fn validate(&self) -> Result<(), String> {
+        if self.embedding.dimension == 0 {
+            return Err("knowledge.embedding.dimension must be greater than zero".into());
+        }
+        if !matches!(
+            self.embedding.provider.as_str(),
+            "mock" | "openai_compatible"
+        ) {
+            return Err("knowledge.embedding.provider must be mock or openai_compatible".into());
+        }
+        if self.embedding.provider == "openai_compatible"
+            && self
+                .embedding
+                .api_key
+                .as_deref()
+                .is_none_or(|key| key.trim().is_empty())
+        {
+            return Err("knowledge.embedding.api_key is required for openai_compatible".into());
+        }
+        if self.extraction.provider != "mock" {
+            return Err("knowledge.extraction.provider must be mock in M06".into());
+        }
+        if !matches!(self.auto_save.minimum_confidence.as_str(), "high") {
+            return Err("knowledge.auto_save.minimum_confidence must be high".into());
+        }
+        for knowledge_type in &self.auto_save.allowed_types {
+            if !LOW_RISK_AUTO_SAVE_TYPES.contains(&knowledge_type.as_str()) {
+                return Err(format!(
+                    "knowledge.auto_save.allowed_types contains high-impact or unknown type: {knowledge_type}"
+                ));
+            }
+        }
+        if self.retrieval.top_k == 0 || self.retrieval.top_k > 20 {
+            return Err("knowledge.retrieval.top_k must be between 1 and 20".into());
+        }
+        if !matches!(
+            self.retrieval.minimum_confidence.as_str(),
+            "low" | "medium" | "high"
+        ) {
+            return Err(
+                "knowledge.retrieval.minimum_confidence must be low, medium, or high".into(),
+            );
+        }
+        if self.retrieval.default_page_size == 0
+            || self.retrieval.default_page_size > self.retrieval.max_page_size
+            || self.retrieval.max_page_size > 100
+        {
+            return Err(
+                "knowledge retrieval page sizes must satisfy 1 <= default <= max <= 100".into(),
+            );
+        }
+        if self.context_budget.max_tokens == 0
+            || self.context_budget.retrieved_knowledge > self.context_budget.max_tokens
+        {
+            return Err("knowledge context budget is invalid".into());
+        }
+        Ok(())
+    }
+}
+
+impl Default for KnowledgeConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            embedding: EmbeddingConfig::default(),
+            extraction: ExtractionConfig::default(),
+            auto_save: KnowledgeAutoSaveConfig::default(),
+            retrieval: KnowledgeRetrievalConfig::default(),
+            context_budget: ContextBudgetConfig::default(),
+            worker_count: default_knowledge_worker_count(),
+            poll_interval_ms: default_knowledge_poll_interval_ms(),
+            stale_lock_secs: default_knowledge_stale_lock_secs(),
+        }
+    }
+}
+
+impl Default for EmbeddingConfig {
+    fn default() -> Self {
+        Self {
+            provider: default_embedding_provider(),
+            model: default_embedding_model(),
+            dimension: default_embedding_dimension(),
+            base_url: default_embedding_base_url(),
+            api_key: None,
+            timeout_secs: default_embedding_timeout_secs(),
+        }
+    }
+}
+
+impl Default for ExtractionConfig {
+    fn default() -> Self {
+        Self {
+            provider: default_extraction_provider(),
+            max_source_bytes: default_extraction_max_source_bytes(),
+            max_candidates: default_extraction_max_candidates(),
+        }
+    }
+}
+
+impl Default for KnowledgeAutoSaveConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            allowed_types: Vec::new(),
+            minimum_confidence: default_auto_save_confidence(),
+        }
+    }
+}
+
+impl Default for KnowledgeRetrievalConfig {
+    fn default() -> Self {
+        Self {
+            top_k: default_retrieval_top_k(),
+            minimum_confidence: default_retrieval_min_confidence(),
+            minimum_similarity: 0.0,
+            default_page_size: default_knowledge_list_limit(),
+            max_page_size: default_knowledge_list_max(),
+            max_active_per_project: default_knowledge_project_capacity(),
+            max_active_workspace: default_knowledge_workspace_capacity(),
+        }
+    }
+}
+
+impl Default for ContextBudgetConfig {
+    fn default() -> Self {
+        Self {
+            max_tokens: default_context_max_tokens(),
+            ticket: default_context_ticket_tokens(),
+            latest_comments: default_context_latest_comments_tokens(),
+            project_rules: default_context_project_rules_tokens(),
+            retrieved_knowledge: default_context_knowledge_tokens(),
+            previous_attempt_summary: default_context_previous_tokens(),
+            output_contract: default_context_output_tokens(),
+        }
+    }
+}
+
+fn default_embedding_provider() -> String {
+    "mock".into()
+}
+fn default_embedding_model() -> String {
+    "coppice-mock-1536".into()
+}
+fn default_embedding_dimension() -> usize {
+    1536
+}
+fn default_embedding_base_url() -> String {
+    "https://api.openai.com/v1".into()
+}
+fn default_embedding_timeout_secs() -> u64 {
+    30
+}
+fn default_extraction_provider() -> String {
+    "mock".into()
+}
+fn default_extraction_max_source_bytes() -> usize {
+    24_000
+}
+fn default_extraction_max_candidates() -> usize {
+    5
+}
+fn default_auto_save_confidence() -> String {
+    "high".into()
+}
+fn default_retrieval_top_k() -> usize {
+    8
+}
+fn default_retrieval_min_confidence() -> String {
+    "medium".into()
+}
+fn default_knowledge_list_limit() -> usize {
+    25
+}
+fn default_knowledge_list_max() -> usize {
+    100
+}
+fn default_knowledge_project_capacity() -> i64 {
+    10_000
+}
+fn default_knowledge_workspace_capacity() -> i64 {
+    1_000
+}
+fn default_knowledge_worker_count() -> u32 {
+    1
+}
+fn default_knowledge_poll_interval_ms() -> u64 {
+    500
+}
+fn default_knowledge_stale_lock_secs() -> u64 {
+    300
+}
+fn default_context_max_tokens() -> usize {
+    24_000
+}
+fn default_context_ticket_tokens() -> usize {
+    5_000
+}
+fn default_context_latest_comments_tokens() -> usize {
+    4_000
+}
+fn default_context_project_rules_tokens() -> usize {
+    3_000
+}
+fn default_context_knowledge_tokens() -> usize {
+    4_000
+}
+fn default_context_previous_tokens() -> usize {
+    2_000
+}
+fn default_context_output_tokens() -> usize {
+    1_000
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -365,7 +684,11 @@ impl AppConfig {
 
     pub fn global_config_path() -> PathBuf {
         directories::BaseDirs::new()
-            .map(|dirs| dirs.config_dir().join(GLOBAL_CONFIG_DIR).join("config.toml"))
+            .map(|dirs| {
+                dirs.config_dir()
+                    .join(GLOBAL_CONFIG_DIR)
+                    .join("config.toml")
+            })
             .unwrap_or_else(|| PathBuf::from(".config/coppice/config.toml"))
     }
 
@@ -381,7 +704,12 @@ impl AppConfig {
     }
 
     fn load_figment(figment: Figment) -> Result<Self, Box<figment::Error>> {
-        figment.extract().map_err(Box::new)
+        let config: Self = figment.extract().map_err(Box::new)?;
+        config
+            .knowledge
+            .validate()
+            .map_err(|message| Box::new(figment::Error::from(message)))?;
+        Ok(config)
     }
 
     fn base_figment() -> Figment {
@@ -485,6 +813,7 @@ impl AppConfig {
                 api_url: None,
             },
             workflow: WorkflowConfig::default(),
+            knowledge: KnowledgeConfig::default(),
         }
     }
 }
@@ -724,5 +1053,36 @@ mod tests {
         }
 
         assert_eq!(cfg.storage.artifacts_dir, "/tmp/coppice-test-artifacts");
+    }
+
+    #[test]
+    fn knowledge_defaults_are_fail_closed_and_bounded() {
+        let cfg = KnowledgeConfig::default();
+        assert!(cfg.enabled);
+        assert_eq!(cfg.embedding.dimension, 1536);
+        assert_eq!(cfg.embedding.provider, "mock");
+        assert!(!cfg.auto_save.enabled);
+        assert!(cfg.auto_save.allowed_types.is_empty());
+        assert_eq!(cfg.retrieval.top_k, 8);
+        assert_eq!(cfg.retrieval.max_page_size, 100);
+        assert_eq!(cfg.context_budget.max_tokens, 24_000);
+        assert!(cfg.validate().is_ok());
+    }
+
+    #[test]
+    fn knowledge_rejects_high_impact_auto_save_type() {
+        let mut cfg = KnowledgeConfig::default();
+        cfg.auto_save.enabled = true;
+        cfg.auto_save.allowed_types = vec!["security_rule".into()];
+        let error = cfg.validate().expect_err("security rules require humans");
+        assert!(error.contains("security_rule"));
+    }
+
+    #[test]
+    fn knowledge_accepts_explicit_low_risk_auto_save_type() {
+        let mut cfg = KnowledgeConfig::default();
+        cfg.auto_save.enabled = true;
+        cfg.auto_save.allowed_types = vec!["test_command".into()];
+        assert!(cfg.validate().is_ok());
     }
 }

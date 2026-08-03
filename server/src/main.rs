@@ -86,6 +86,13 @@ async fn main() -> anyhow::Result<()> {
         };
 
     let db = coppice_server::db::connect_and_migrate(&config.database.url).await?;
+    if config.knowledge.enabled {
+        coppice_server::knowledge::validate_schema_dimension(
+            &db,
+            config.knowledge.embedding.dimension,
+        )
+        .await?;
+    }
     let agent_templates = coppice_server::AppState::load_agent_templates();
     coppice_server::agent_templates::ensure_all_presets_have_templates(&db, &agent_templates)
         .await
@@ -106,6 +113,7 @@ async fn main() -> anyhow::Result<()> {
     });
     sweep_orphaned_runs(&state).await;
     coppice_server::workers::job_worker::spawn_workers(state.clone());
+    coppice_server::workers::knowledge_worker::spawn_workers(state.clone())?;
     coppice_server::workers::health_worker::spawn_health_worker(state.clone());
     coppice_server::workers::run_watchdog::spawn_run_watchdog(state.clone());
     let app = coppice_server::app(state);

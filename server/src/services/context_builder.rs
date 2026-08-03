@@ -603,9 +603,13 @@ fn format_bullet_list(items: &[String]) -> String {
 }
 
 pub fn write_context_file(worktree: &Path, input: &ContextInput) -> std::io::Result<()> {
+    write_context_document(worktree, &build_context_md(input))
+}
+
+pub fn write_context_document(worktree: &Path, markdown: &str) -> std::io::Result<()> {
     let agent_dir = worktree.join(".agent");
     std::fs::create_dir_all(&agent_dir)?;
-    std::fs::write(agent_dir.join("context.md"), build_context_md(input))?;
+    std::fs::write(agent_dir.join("context.md"), markdown)?;
     Ok(())
 }
 

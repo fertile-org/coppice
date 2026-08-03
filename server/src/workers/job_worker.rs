@@ -20,7 +20,11 @@ use crate::services::artifact_service::{ArtifactService, RunArtifactMeta, RunArt
 use crate::services::comment_service::CommentService;
 use crate::domain::context_profile::ContextProfile;
 use crate::services::context_builder::{
-    write_agent_context_files, write_context_file, ContextInput, HumanRequest,
+    write_agent_context_files, write_context_document, write_context_file, ContextInput,
+    HumanRequest,
+};
+use crate::services::context_budget::{
+    build_budgeted_context, record_usage, render_knowledge, ByteTokenCounter, KnowledgeSection,
 };
 use crate::services::job_service::JobService;
 use crate::services::result_contract::{self, ACCEPTANCE_CRITERIA_HEADER};
@@ -36,6 +40,10 @@ use crate::services::worktree_service::{
 use crate::util::error_format::format_job_error;
 use crate::util::truncate::truncate_with_ellipsis;
 use crate::AppState;
+use crate::{
+    knowledge::embedding_provider,
+    knowledge::retrieval::{has_eligible, retrieve},
+};
 use time::format_description::well_known::Rfc3339;
 
 #[derive(Debug)]
@@ -376,7 +384,75 @@ async fn execute_job(
         assignee_agent_key: assignee_agent_key_ref,
         thread_excerpt: thread_excerpt_ref,
     };
-    write_context_file(&paths.worktree_dir, &context_input).context("write context file")?;
+    if run.context_profile == ContextProfile::Full {
+        let counter = ByteTokenCounter;
+        let knowledge_section = if state.config.knowledge.enabled
+            && has_eligible(
+                pool,
+                ticket.ticket.project_id,
+                run.agent_id,
+                &state.config.knowledge.retrieval.minimum_confidence,
+            )
+            .await
+            .context("check eligible knowledge")?
+        {
+            let provider = embedding_provider(&state.config.knowledge.embedding)
+                .context("configure knowledge embedding provider")?;
+            let query_text = format!(
+                "{}\n\n{}",
+                ticket.ticket.title,
+                ticket.ticket.description.chars().take(32_000).collect::<String>()
+            );
+            let query_vectors = provider
+                .embed(&[query_text])
+                .await
+                .context("embed knowledge retrieval query")?;
+            let query_vector = query_vectors
+                .first()
+                .context("knowledge query embedding missing")?;
+            let retrieved = retrieve(
+                pool,
+                ticket.ticket.project_id,
+                run.agent_id,
+                query_vector,
+                &state.config.knowledge.retrieval,
+            )
+            .await
+            .context("retrieve knowledge")?;
+            render_knowledge(
+                &retrieved,
+                state
+                    .config
+                    .knowledge
+                    .context_budget
+                    .retrieved_knowledge,
+                &counter,
+            )
+        } else {
+            KnowledgeSection::default()
+        };
+        let budgeted = build_budgeted_context(
+            &context_input,
+            &knowledge_section.markdown,
+            &state.config.knowledge.context_budget,
+            &counter,
+        )
+        .context("enforce agent context budget")?;
+        write_context_document(&paths.worktree_dir, &budgeted.markdown)
+            .context("write context file")?;
+        record_usage(pool, run.id, &knowledge_section.entries)
+            .await
+            .context("record knowledge usage")?;
+        tracing::debug!(
+            run_id = %run.id,
+            tokens = budgeted.token_count,
+            token_counter = budgeted.token_counter,
+            knowledge_entries = knowledge_section.entries.len(),
+            "wrote budgeted agent context"
+        );
+    } else {
+        write_context_file(&paths.worktree_dir, &context_input).context("write context file")?;
+    }
 
     if run.context_profile != ContextProfile::Full {
         let comments = CommentService::new(pool)
