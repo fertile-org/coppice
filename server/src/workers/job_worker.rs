@@ -540,10 +540,23 @@ fn persist_artifacts(
     connector_name: &str,
     session_id: Option<String>,
 ) -> anyhow::Result<()> {
-    let paths = RunArtifactPaths::new(
+    persist_artifacts_to_dir(
         &state.config.storage.artifacts_dir,
-        &run_id.to_string(),
-    );
+        stream,
+        run_id,
+        connector_name,
+        session_id,
+    )
+}
+
+fn persist_artifacts_to_dir(
+    artifacts_dir: &str,
+    stream: &crate::sessions::run_registry::RunStreamHandle,
+    run_id: uuid::Uuid,
+    connector_name: &str,
+    session_id: Option<String>,
+) -> anyhow::Result<()> {
+    let paths = RunArtifactPaths::new(artifacts_dir, &run_id.to_string());
     if let Some(snap) = stream.snapshot() {
         let _ = ArtifactService::write_session_snapshot(&paths, &snap);
     }
@@ -792,6 +805,9 @@ fn build_runs_json(
 mod tests {
     use super::*;
     use crate::domain::agent::Agent;
+    use crate::providers::codex_console::CodexConsolePublisher;
+    use crate::sessions::run_registry::RunStreamRegistry;
+    use crate::sessions::LiveMessage;
     use time::OffsetDateTime;
 
     fn test_agent(role: &str, preset_source: Option<&str>) -> Agent {
@@ -846,5 +862,55 @@ mod tests {
         // (it should not normally occur, but the guard must not over-reach).
         let qc = test_agent("QC", Some("qc"));
         assert!(should_finalize_worktree_git(&qc, TicketStatus::InProgress));
+    }
+
+    #[test]
+    fn production_persistence_retains_codex_console_events_in_order() {
+        let fixture_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../fixtures/codex/done.jsonl");
+        let raw = std::fs::read_to_string(fixture_path).expect("read Codex fixture");
+        let registry = RunStreamRegistry::new();
+        let handle = registry.register(uuid::Uuid::new_v4());
+        let mut publisher = CodexConsolePublisher::new();
+
+        for line in raw.lines() {
+            let value = serde_json::from_str(line).expect("valid Codex fixture event");
+            publisher.handle_json(&handle, &value);
+        }
+
+        let expected_events: Vec<serde_json::Value> = handle
+            .buffered_tail()
+            .into_iter()
+            .filter_map(|message| match message {
+                LiveMessage::Event { event } => Some(event),
+                _ => None,
+            })
+            .collect();
+        handle.publish(LiveMessage::Event {
+            event: serde_json::json!({
+                "type": "unrelated.event",
+                "payload": "must not enter the console artifact"
+            }),
+        });
+
+        let temp = tempfile::tempdir().expect("temp artifact directory");
+        let run_id = uuid::Uuid::new_v4();
+        persist_artifacts_to_dir(
+            temp.path().to_str().expect("UTF-8 temp path"),
+            &handle,
+            run_id,
+            "codex",
+            Some("codex_thread_abc123".into()),
+        )
+        .expect("persist production artifacts");
+
+        let paths = RunArtifactPaths::new(
+            temp.path().to_str().expect("UTF-8 temp path"),
+            &run_id.to_string(),
+        );
+        assert_eq!(
+            ArtifactService::read_console_events(&paths),
+            expected_events
+        );
     }
 }
