@@ -1,5 +1,6 @@
 use crate::api::auth::{pool_from_state, AuthUser};
 use crate::domain::run::{run_status_to_str, AgentRun};
+use crate::services::run_orchestrator::RunOrchestrator;
 use crate::services::run_service::{AgentRunWithConnector, RunError, RunService};
 use crate::AppState;
 use axum::{
@@ -119,6 +120,10 @@ async fn stop_run(
     let run = service.stop(run_id).await.map_err(map_error)?;
     if let Some(handle) = state.run_streams.get(run_id) {
         handle.cancel();
+    } else {
+        RunOrchestrator::new(pool, &state.config.workflow)
+            .handle_terminal_run(&run)
+            .await;
     }
     let connector = service
         .agent_connector_for_run(run.agent_id)

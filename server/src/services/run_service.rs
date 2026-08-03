@@ -1,23 +1,21 @@
 use crate::domain::comment::AuthorType;
 use crate::domain::context_profile::ContextProfile;
-use std::str::FromStr;
-use crate::domain::repo::VerificationStatus;
-use crate::domain::run::{
-    run_status_from_str, run_status_to_str, AgentRun, RunStatus,
-};
-use crate::services::agent_service::AgentService;
-use crate::services::repo_service::RepoService;
-use crate::sandbox::permissive::PROFILE_ID;
-use crate::services::comment_service::{CommentError, CommentService};
 use crate::domain::job::{job_status_to_str, JobStatus};
+use crate::domain::repo::VerificationStatus;
+use crate::domain::run::{run_status_from_str, run_status_to_str, AgentRun, RunStatus};
+use crate::sandbox::permissive::PROFILE_ID;
 use crate::services::agent_service::AgentError;
+use crate::services::agent_service::AgentService;
+use crate::services::comment_service::{CommentError, CommentService};
 use crate::services::job_service::{JobError, JobService};
 use crate::services::mention_service::MentionError;
+use crate::services::repo_service::RepoService;
 use crate::services::result_contract::ApplyResult;
 use crate::services::ticket_service::{TicketError, TicketService, TicketWithDisplay};
 use crate::services::workflow_service::WorkflowService;
 use sqlx::PgPool;
 use sqlx::Row;
+use std::str::FromStr;
 use uuid::Uuid;
 
 const JOB_TYPE_WORK_ON_TICKET: &str = "work_on_ticket";
@@ -159,24 +157,6 @@ impl<'a> RunService<'a> {
             )));
         }
 
-        let active = sqlx::query_scalar::<_, bool>(
-            r#"
-            SELECT EXISTS(
-                SELECT 1 FROM agent_runs
-                WHERE ticket_id = $1 AND agent_id = $2
-                  AND status IN ('queued', 'running')
-            )
-            "#,
-        )
-        .bind(ticket_id)
-        .bind(agent_id)
-        .fetch_one(self.pool)
-        .await?;
-
-        if active {
-            return Err(RunError::ActiveRunExists);
-        }
-
         let mut tx = self.pool.begin().await?;
         let run_id = Uuid::new_v4();
 
@@ -187,6 +167,9 @@ impl<'a> RunService<'a> {
                 context_profile, trigger_comment_id
             )
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            ON CONFLICT (ticket_id, agent_id)
+                WHERE status IN ('queued', 'running')
+            DO NOTHING
             RETURNING
                 id, ticket_id, agent_id, job_type, status, sandbox_profile_id,
                 worktree_path, branch_name, error_message, session_id,
@@ -202,8 +185,12 @@ impl<'a> RunService<'a> {
         .bind(PROFILE_ID)
         .bind(ContextProfile::Full.as_str())
         .bind(None::<Uuid>)
-        .fetch_one(&mut *tx)
+        .fetch_optional(&mut *tx)
         .await?;
+        let Some(row) = row else {
+            tx.rollback().await?;
+            return Err(RunError::ActiveRunExists);
+        };
 
         sqlx::query(
             r#"
@@ -318,9 +305,7 @@ impl<'a> RunService<'a> {
         .await?
         .ok_or_else(|| RunError::Validation("run is not active".into()))?;
 
-        JobService::new(self.pool)
-            .cancel_for_run(run_id)
-            .await?;
+        JobService::new(self.pool).cancel_for_run(run_id).await?;
 
         Ok(row_to_run(&row))
     }
@@ -352,9 +337,7 @@ impl<'a> RunService<'a> {
         .await?;
 
         if result.rows_affected() == 0 {
-            return Err(RunError::Validation(
-                "run is not in queued state".into(),
-            ));
+            return Err(RunError::Validation("run is not in queued state".into()));
         }
         Ok(())
     }
@@ -371,10 +354,7 @@ impl<'a> RunService<'a> {
         if apply.ticket.status.is_some() || apply.ticket.substatus.is_some() {
             let ticket_svc = TicketService::new(self.pool);
             let current = ticket_svc.get(run.ticket_id).await?;
-            let status = apply
-                .ticket
-                .status
-                .unwrap_or(current.ticket.status);
+            let status = apply.ticket.status.unwrap_or(current.ticket.status);
             ticket_svc
                 .update_status(
                     run.ticket_id,
@@ -457,24 +437,6 @@ impl<'a> RunService<'a> {
             )));
         }
 
-        let active = sqlx::query_scalar::<_, bool>(
-            r#"
-            SELECT EXISTS(
-                SELECT 1 FROM agent_runs
-                WHERE ticket_id = $1 AND agent_id = $2
-                  AND status IN ('queued', 'running')
-            )
-            "#,
-        )
-        .bind(ticket_id)
-        .bind(agent_id)
-        .fetch_one(self.pool)
-        .await?;
-
-        if active {
-            return Err(RunError::ActiveRunExists);
-        }
-
         let mut tx = self.pool.begin().await?;
         let run_id = Uuid::new_v4();
 
@@ -485,6 +447,9 @@ impl<'a> RunService<'a> {
                 context_profile, trigger_comment_id
             )
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            ON CONFLICT (ticket_id, agent_id)
+                WHERE status IN ('queued', 'running')
+            DO NOTHING
             RETURNING
                 id, ticket_id, agent_id, job_type, status, sandbox_profile_id,
                 worktree_path, branch_name, error_message, session_id,
@@ -500,8 +465,12 @@ impl<'a> RunService<'a> {
         .bind(PROFILE_ID)
         .bind(options.context_profile.as_str())
         .bind(options.trigger_comment_id)
-        .fetch_one(&mut *tx)
+        .fetch_optional(&mut *tx)
         .await?;
+        let Some(row) = row else {
+            tx.rollback().await?;
+            return Err(RunError::ActiveRunExists);
+        };
 
         sqlx::query(
             r#"
@@ -629,7 +598,10 @@ impl<'a> RunService<'a> {
         Ok(rows.iter().map(row_to_run).collect())
     }
 
-    pub async fn agent_connector_for_run(&self, agent_id: Uuid) -> Result<Option<String>, RunError> {
+    pub async fn agent_connector_for_run(
+        &self,
+        agent_id: Uuid,
+    ) -> Result<Option<String>, RunError> {
         sqlx::query_scalar("SELECT connector FROM agents WHERE id = $1")
             .bind(agent_id)
             .fetch_optional(self.pool)
@@ -638,12 +610,11 @@ impl<'a> RunService<'a> {
     }
 
     pub async fn is_cancelled(&self, run_id: Uuid) -> Result<bool, RunError> {
-        let status: Option<String> = sqlx::query_scalar(
-            "SELECT status FROM agent_runs WHERE id = $1",
-        )
-        .bind(run_id)
-        .fetch_optional(self.pool)
-        .await?;
+        let status: Option<String> =
+            sqlx::query_scalar("SELECT status FROM agent_runs WHERE id = $1")
+                .bind(run_id)
+                .fetch_optional(self.pool)
+                .await?;
 
         match status {
             Some(s) => Ok(run_status_from_str(&s) == Some(RunStatus::Cancelled)),
@@ -811,8 +782,7 @@ fn row_to_run(row: &sqlx::postgres::PgRow) -> AgentRun {
     let status_str: String = row.get("status");
     let status = run_status_from_str(&status_str).unwrap_or(RunStatus::Queued);
     let profile_str: String = row.get("context_profile");
-    let context_profile =
-        ContextProfile::from_str(&profile_str).unwrap_or(ContextProfile::Full);
+    let context_profile = ContextProfile::from_str(&profile_str).unwrap_or(ContextProfile::Full);
 
     AgentRun {
         id: row.get("id"),
