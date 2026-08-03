@@ -53,11 +53,6 @@ export function AppShell() {
           </div>
 
           <div className="ml-auto flex items-center gap-2 sm:gap-4">
-            {user && (
-              <div className="order-last sm:order-none">
-                <NotificationBell userId={user.id} onOpenTicket={openTicket} />
-              </div>
-            )}
             <span className="hidden font-body text-sm text-text-secondary lg:inline">
               {user?.email}
             </span>
@@ -68,6 +63,7 @@ export function AppShell() {
             >
               Sign out
             </button>
+            {user && <NotificationBell userId={user.id} onOpenTicket={openTicket} />}
           </div>
         </div>
       </header>
