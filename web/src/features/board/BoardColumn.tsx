@@ -7,11 +7,13 @@ import {
   type BoardColumnDef,
 } from './columns';
 import { TicketCard } from './TicketCard';
+import type { TicketHierarchyIndex } from './ticketHierarchy';
 import type { Ticket } from './useTickets';
 
 interface BoardColumnProps {
   column: BoardColumnDef;
   tickets: Ticket[];
+  hierarchyIndex: TicketHierarchyIndex;
   showQuickAdd?: boolean;
   onQuickAdd?: (title: string) => Promise<void>;
   isAdding?: boolean;
@@ -21,6 +23,7 @@ interface BoardColumnProps {
 export function BoardColumn({
   column,
   tickets,
+  hierarchyIndex,
   showQuickAdd = false,
   onQuickAdd,
   isAdding = false,
@@ -97,6 +100,7 @@ export function BoardColumn({
           <TicketCard
             key={ticket.id}
             ticket={ticket}
+            hierarchy={hierarchyIndex.get(ticket.id)}
             onOpen={onOpenTicket}
             isLive={ticket.hasActiveRun ?? false}
           />

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import type { TicketParentSummary } from '../board/ticketHierarchy';
 import { ClaudeLiveConsole } from '../runs/ClaudeLiveConsole';
 import { LiveConsole } from '../runs/LiveConsole';
 import { LiveSession } from '../runs/LiveSession';
@@ -20,6 +21,7 @@ type DrawerTab = 'detail' | 'live' | 'runs';
 
 interface TicketDrawerProps {
   ticketId: string;
+  parentTicket?: TicketParentSummary | null;
   onClose: () => void;
 }
 
@@ -31,7 +33,11 @@ const TAB_LABELS: Record<DrawerTab, string> = {
 
 const TAB_ORDER: DrawerTab[] = ['detail', 'live', 'runs'];
 
-export function TicketDrawer({ ticketId, onClose }: TicketDrawerProps) {
+export function TicketDrawer({
+  ticketId,
+  parentTicket = null,
+  onClose,
+}: TicketDrawerProps) {
   const { data: ticket, isLoading, isError, refetch } = useTicket(ticketId);
   const { data: repos } = useRepos();
   const { data: runs } = useAgentRuns(ticketId);
@@ -261,7 +267,10 @@ export function TicketDrawer({ ticketId, onClose }: TicketDrawerProps) {
           {ticket && tab === 'detail' && (
             <div className="grid h-full gap-0 md:grid-cols-[minmax(0,1fr)_minmax(0,calc(16rem+50px))]">
               <div className="min-h-0 overflow-y-auto px-6 py-5">
-                <TicketDetailPanel ticket={ticket} />
+                <TicketDetailPanel
+                  ticket={ticket}
+                  parentTicket={parentTicket}
+                />
               </div>
               <div className="min-h-0 overflow-y-auto border-border px-4 py-5 md:border-l">
                 <TicketMetadataPanel ticket={ticket} />
