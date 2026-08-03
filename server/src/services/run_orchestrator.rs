@@ -219,8 +219,17 @@ impl<'a> RunOrchestrator<'a> {
             }
         }
 
-        if !skip_workflow {
-            enqueue_successful_mention_jobs(&mut action, run, apply.run_status, &mentions);
+        let mention_dispatch = if skip_workflow {
+            SuccessfulMentionDispatch::default()
+        } else {
+            enqueue_successful_mention_jobs(&mut action, run, apply.run_status, &mentions)
+        };
+        let mention_svc = MentionService::new(self.pool);
+        for mention_id in &mention_dispatch.handled_mention_ids {
+            mention_svc.mark_handled(*mention_id).await?;
+        }
+        for mention_id in &mention_dispatch.ignored_mention_ids {
+            mention_svc.mark_ignored(*mention_id).await?;
         }
 
         // Terminalize the source before exposing any follow-up runs. Otherwise a
@@ -245,22 +254,28 @@ impl<'a> RunOrchestrator<'a> {
                 } else {
                     StartRunOptions::default()
                 };
-                if let Err(error) = start_automatic_run(
-                    &run_svc,
-                    run.ticket_id,
-                    job_req.agent_id,
-                    &job_req.job_type,
-                    options,
-                )
-                .await
+                match run_svc
+                    .start_run_for_agent(
+                        run.ticket_id,
+                        job_req.agent_id,
+                        &job_req.job_type,
+                        options,
+                    )
+                    .await
                 {
-                    tracing::warn!(
-                        source_run_id = %run.id,
-                        target_agent_id = %job_req.agent_id,
-                        job_type = %job_req.job_type,
-                        error = %error,
-                        "could not auto-start mentioned agent; mention remains pending"
-                    );
+                    Ok(_) => {}
+                    Err(RunError::ActiveRunExists)
+                        if mention_dispatch
+                            .response_agent_ids
+                            .contains(&job_req.agent_id) =>
+                    {
+                        tracing::info!(
+                            source_run_id = %run.id,
+                            target_agent_id = %job_req.agent_id,
+                            "mentioned agent is already active; response will start after it finishes"
+                        );
+                    }
+                    Err(error) => return Err(error),
                 }
             }
 
@@ -271,26 +286,20 @@ impl<'a> RunOrchestrator<'a> {
                         .iter()
                         .any(|j| j.agent_id == new_assignee && j.job_type == "work_on_ticket");
                     if !already_queued {
-                        if let Err(error) = start_automatic_run(
-                            &run_svc,
-                            run.ticket_id,
-                            new_assignee,
-                            "work_on_ticket",
-                            StartRunOptions::default(),
-                        )
-                        .await
-                        {
-                            tracing::warn!(
-                                source_run_id = %run.id,
-                                target_agent_id = %new_assignee,
-                                job_type = "work_on_ticket",
-                                error = %error,
-                                "could not auto-start assigned agent"
-                            );
-                        }
+                        run_svc
+                            .start_run_for_agent(
+                                run.ticket_id,
+                                new_assignee,
+                                "work_on_ticket",
+                                StartRunOptions::default(),
+                            )
+                            .await?;
                     }
                 }
             }
+
+            self.start_next_pending_agent_mention(run.ticket_id, run.agent_id)
+                .await?;
         }
 
         Ok(finished_run)
@@ -375,22 +384,42 @@ impl<'a> RunOrchestrator<'a> {
 
         Ok(None)
     }
+
+    async fn start_next_pending_agent_mention(
+        &self,
+        ticket_id: Uuid,
+        agent_id: Uuid,
+    ) -> Result<(), RunError> {
+        let Some(mention) = MentionService::new(self.pool)
+            .find_next_unscheduled_agent_mention(ticket_id, agent_id)
+            .await?
+        else {
+            return Ok(());
+        };
+
+        match RunService::new(self.pool)
+            .start_run_for_agent(
+                ticket_id,
+                agent_id,
+                "respond_to_mention",
+                StartRunOptions {
+                    trigger_comment_id: Some(mention.comment_id),
+                    ..StartRunOptions::default()
+                },
+            )
+            .await
+        {
+            Ok(_) | Err(RunError::ActiveRunExists) => Ok(()),
+            Err(error) => Err(error),
+        }
+    }
 }
 
-async fn start_automatic_run(
-    run_svc: &RunService<'_>,
-    ticket_id: Uuid,
-    agent_id: Uuid,
-    job_type: &str,
-    options: StartRunOptions,
-) -> Result<(), RunError> {
-    match run_svc
-        .start_run_for_agent(ticket_id, agent_id, job_type, options)
-        .await
-    {
-        Ok(_) | Err(RunError::ActiveRunExists) => Ok(()),
-        Err(err) => Err(err),
-    }
+#[derive(Default)]
+struct SuccessfulMentionDispatch {
+    response_agent_ids: HashSet<Uuid>,
+    handled_mention_ids: Vec<Uuid>,
+    ignored_mention_ids: Vec<Uuid>,
 }
 
 fn enqueue_successful_mention_jobs(
@@ -398,12 +427,13 @@ fn enqueue_successful_mention_jobs(
     run: &AgentRun,
     run_status: RunStatus,
     mentions: &[TicketMention],
-) {
+) -> SuccessfulMentionDispatch {
+    let mut dispatch = SuccessfulMentionDispatch::default();
     if run_status != RunStatus::Succeeded
         || run.context_profile != ContextProfile::Full
         || (run.job_type != "work_on_ticket" && run.job_type != "respond_to_mention")
     {
-        return;
+        return dispatch;
     }
 
     let mut scheduled_agent_ids: HashSet<Uuid> =
@@ -417,10 +447,12 @@ fn enqueue_successful_mention_jobs(
     for mention in mentions {
         let target_id = mention.mentioned_agent_id;
         if target_id == run.agent_id || !distinct_targets.insert(target_id) {
+            dispatch.ignored_mention_ids.push(mention.id);
             continue;
         }
         if selected_targets >= MAX_MENTIONS_PER_RUN as usize {
-            break;
+            dispatch.ignored_mention_ids.push(mention.id);
+            continue;
         }
         selected_targets += 1;
 
@@ -430,8 +462,13 @@ fn enqueue_successful_mention_jobs(
                 agent_id: target_id,
                 resume_agent_id: None,
             });
+            dispatch.response_agent_ids.insert(target_id);
+        } else {
+            dispatch.handled_mention_ids.push(mention.id);
         }
     }
+
+    dispatch
 }
 
 fn build_project_agent_maps(agents: &[Agent]) -> (Vec<String>, HashMap<String, Uuid>) {
@@ -709,7 +746,8 @@ mod tests {
         ];
         let mut action = TransitionAction::default();
 
-        enqueue_successful_mention_jobs(&mut action, &run, RunStatus::Succeeded, &mentions);
+        let dispatch =
+            enqueue_successful_mention_jobs(&mut action, &run, RunStatus::Succeeded, &mentions);
 
         assert_eq!(action.enqueue_jobs.len(), 2);
         assert_eq!(action.enqueue_jobs[0].agent_id, first_target);
@@ -718,6 +756,9 @@ mod tests {
             .enqueue_jobs
             .iter()
             .all(|job| job.job_type == "respond_to_mention" && job.resume_agent_id.is_none()));
+        assert_eq!(dispatch.response_agent_ids.len(), 2);
+        assert_eq!(dispatch.ignored_mention_ids.len(), 3);
+        assert!(dispatch.handled_mention_ids.is_empty());
     }
 
     #[test]
@@ -727,7 +768,7 @@ mod tests {
         let run = test_run(source_id, "respond_to_mention");
         let mut action = TransitionAction::default();
 
-        enqueue_successful_mention_jobs(
+        let dispatch = enqueue_successful_mention_jobs(
             &mut action,
             &run,
             RunStatus::Succeeded,
@@ -740,6 +781,7 @@ mod tests {
         assert_eq!(action.enqueue_jobs.len(), 1);
         assert_eq!(action.enqueue_jobs[0].agent_id, target_id);
         assert_eq!(action.enqueue_jobs[0].job_type, "respond_to_mention");
+        assert_eq!(dispatch.response_agent_ids, HashSet::from([target_id]));
     }
 
     #[test]
@@ -758,7 +800,7 @@ mod tests {
             ..TransitionAction::default()
         };
 
-        enqueue_successful_mention_jobs(
+        let dispatch = enqueue_successful_mention_jobs(
             &mut action,
             &run,
             RunStatus::Succeeded,
@@ -771,6 +813,9 @@ mod tests {
         assert_eq!(action.enqueue_jobs.len(), 1);
         assert_eq!(action.enqueue_jobs[0].job_type, "work_on_ticket");
         assert_eq!(action.enqueue_jobs[0].agent_id, handoff_target);
+        assert!(dispatch.response_agent_ids.is_empty());
+        assert_eq!(dispatch.handled_mention_ids.len(), 2);
+        assert!(dispatch.ignored_mention_ids.is_empty());
     }
 
     #[test]
@@ -1260,12 +1305,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn successful_mention_of_agent_with_active_run_does_not_fail_source() {
+    async fn successful_mention_waits_for_active_target_then_starts_response() {
         let Some(pool) = test_pool().await else {
             return;
         };
         let fx = insert_fixture(&pool).await;
         let _repo_dir = attach_ready_repo(&pool, fx.ticket_id).await;
+        let active_target_run_id = Uuid::new_v4();
         sqlx::query(
             r#"
             INSERT INTO agent_runs (
@@ -1274,7 +1320,7 @@ mod tests {
             VALUES ($1, $2, $3, 'work_on_ticket', 'queued', $4)
             "#,
         )
-        .bind(Uuid::new_v4())
+        .bind(active_target_run_id)
         .bind(fx.ticket_id)
         .bind(fx.engineer_agent_id)
         .bind(PROFILE_ID)
@@ -1314,10 +1360,51 @@ mod tests {
             .expect("finish source when mention target is already active");
         assert_eq!(finished.status, RunStatus::Succeeded);
 
-        let target_runs = sqlx::query_as::<_, (String, String)>(
+        let mention_comment_id = sqlx::query_scalar::<_, Uuid>(
+            "SELECT comment_id FROM ticket_mentions WHERE ticket_id = $1",
+        )
+        .bind(fx.ticket_id)
+        .fetch_one(&pool)
+        .await
+        .expect("load persisted mention");
+
+        sqlx::query("UPDATE agent_runs SET status = 'running' WHERE id = $1")
+            .bind(active_target_run_id)
+            .execute(&pool)
+            .await
+            .expect("mark unrelated target run running");
+        RunOrchestrator::new(&pool, &workflow)
+            .finish_run(
+                &AgentRun {
+                    id: active_target_run_id,
+                    ticket_id: fx.ticket_id,
+                    agent_id: fx.engineer_agent_id,
+                    job_type: "work_on_ticket".into(),
+                    status: RunStatus::Running,
+                    sandbox_profile_id: PROFILE_ID.to_string(),
+                    worktree_path: None,
+                    branch_name: None,
+                    error_message: None,
+                    session_id: None,
+                    context_profile: ContextProfile::Full,
+                    trigger_comment_id: None,
+                    started_at: None,
+                    ended_at: None,
+                    created_at: time::OffsetDateTime::now_utc(),
+                },
+                &done_with_mentions(&[]),
+                succeeded_apply("Unrelated work finished", &[]),
+                None,
+                None,
+            )
+            .await
+            .expect("finish unrelated target run");
+
+        let target_runs = sqlx::query_as::<_, (String, String, Option<Uuid>)>(
             r#"
-            SELECT job_type, status FROM agent_runs
+            SELECT job_type, status, trigger_comment_id FROM agent_runs
             WHERE ticket_id = $1 AND agent_id = $2
+            ORDER BY created_at ASC
             "#,
         )
         .bind(fx.ticket_id)
@@ -1327,7 +1414,14 @@ mod tests {
         .expect("load target runs");
         assert_eq!(
             target_runs,
-            vec![("work_on_ticket".into(), "queued".into())]
+            vec![
+                ("work_on_ticket".into(), "succeeded".into(), None),
+                (
+                    "respond_to_mention".into(),
+                    "queued".into(),
+                    Some(mention_comment_id),
+                ),
+            ]
         );
 
         let mention_count = sqlx::query_scalar::<_, i64>(
@@ -1663,9 +1757,9 @@ mod tests {
             .await
             .expect("finish qc defect handoff");
 
-        let target_runs = sqlx::query_as::<_, (Uuid, String)>(
+        let target_runs = sqlx::query_as::<_, (Uuid, Uuid, String)>(
             r#"
-            SELECT agent_id, job_type FROM agent_runs
+            SELECT id, agent_id, job_type FROM agent_runs
             WHERE ticket_id = $1 AND id <> $2
             ORDER BY created_at ASC
             "#,
@@ -1677,21 +1771,70 @@ mod tests {
         .expect("load handoff runs");
         assert_eq!(
             target_runs,
-            vec![(fx.engineer_agent_id, "work_on_ticket".into())]
+            vec![(
+                target_runs[0].0,
+                fx.engineer_agent_id,
+                "work_on_ticket".into(),
+            )]
         );
 
-        let mentions = MentionService::new(&pool)
-            .list_pending_for_ticket(fx.ticket_id)
-            .await
-            .expect("load handoff mention");
+        let mentions = sqlx::query_as::<_, (Uuid, String)>(
+            "SELECT mentioned_agent_id, status FROM ticket_mentions WHERE ticket_id = $1",
+        )
+        .bind(fx.ticket_id)
+        .fetch_all(&pool)
+        .await
+        .expect("load handoff mention");
         assert_eq!(mentions.len(), 1);
-        assert_eq!(mentions[0].mentioned_agent_id, fx.engineer_agent_id);
+        assert_eq!(mentions[0], (fx.engineer_agent_id, "handled".into()));
 
         let ticket = TicketService::new(&pool)
             .get(fx.ticket_id)
             .await
             .expect("load handed-off ticket");
         assert_eq!(ticket.ticket.assignee_agent_id, Some(fx.engineer_agent_id));
+
+        let handoff_run_id = target_runs[0].0;
+        sqlx::query("UPDATE agent_runs SET status = 'running' WHERE id = $1")
+            .bind(handoff_run_id)
+            .execute(&pool)
+            .await
+            .expect("mark handoff run running");
+        RunOrchestrator::new(&pool, &workflow)
+            .finish_run(
+                &AgentRun {
+                    id: handoff_run_id,
+                    ticket_id: fx.ticket_id,
+                    agent_id: fx.engineer_agent_id,
+                    job_type: "work_on_ticket".into(),
+                    status: RunStatus::Running,
+                    sandbox_profile_id: PROFILE_ID.to_string(),
+                    worktree_path: None,
+                    branch_name: None,
+                    error_message: None,
+                    session_id: None,
+                    context_profile: ContextProfile::Full,
+                    trigger_comment_id: None,
+                    started_at: None,
+                    ended_at: None,
+                    created_at: time::OffsetDateTime::now_utc(),
+                },
+                &done_with_mentions(&[]),
+                succeeded_apply("Defect fixed", &[]),
+                None,
+                None,
+            )
+            .await
+            .expect("finish handoff run");
+
+        let response_run_count = sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM agent_runs WHERE ticket_id = $1 AND job_type = 'respond_to_mention'",
+        )
+        .bind(fx.ticket_id)
+        .fetch_one(&pool)
+        .await
+        .expect("count response runs after handoff completion");
+        assert_eq!(response_run_count, 0);
     }
 
     #[tokio::test]
@@ -1853,6 +1996,87 @@ mod tests {
         .await
         .expect("count chained response runs");
         assert_eq!(chained_run_count, 1);
+    }
+
+    #[tokio::test]
+    async fn blocked_clarification_auto_start_error_is_returned() {
+        let Some(pool) = test_pool().await else {
+            return;
+        };
+        let fx = insert_fixture(&pool).await;
+        sqlx::query("UPDATE tickets SET status = $2, assignee_agent_id = $3 WHERE id = $1")
+            .bind(fx.ticket_id)
+            .bind("in_progress")
+            .bind(fx.engineer_agent_id)
+            .execute(&pool)
+            .await
+            .expect("prepare ticket");
+        sqlx::query("UPDATE agent_runs SET agent_id = $2 WHERE id = $1")
+            .bind(fx.run_id)
+            .bind(fx.engineer_agent_id)
+            .execute(&pool)
+            .await
+            .expect("prepare engineer run");
+
+        let workflow = WorkflowConfig {
+            auto_start_runs: true,
+            ..WorkflowConfig::default()
+        };
+        let error = RunOrchestrator::new(&pool, &workflow)
+            .finish_run(
+                &AgentRun {
+                    id: fx.run_id,
+                    ticket_id: fx.ticket_id,
+                    agent_id: fx.engineer_agent_id,
+                    job_type: "work_on_ticket".into(),
+                    status: RunStatus::Running,
+                    sandbox_profile_id: PROFILE_ID.to_string(),
+                    worktree_path: None,
+                    branch_name: None,
+                    error_message: None,
+                    session_id: None,
+                    context_profile: ContextProfile::Full,
+                    trigger_comment_id: None,
+                    started_at: None,
+                    ended_at: None,
+                    created_at: time::OffsetDateTime::now_utc(),
+                },
+                &blocked_with_mentions(&["pm"]),
+                ApplyResult {
+                    run_status: RunStatus::Blocked,
+                    ticket: ApplyTicketUpdate {
+                        status: None,
+                        substatus: Some(Substatus::BlockedByError),
+                        substatus_metadata: Some(
+                            serde_json::json!({ "reason": "Need clarification" }),
+                        ),
+                        updated_description: None,
+                        acceptance_criteria: None,
+                    },
+                    comment: ApplyComment {
+                        body: "Need clarification".into(),
+                        intent: CommentIntent::Blocked,
+                        mentions: vec!["pm".into()],
+                    },
+                },
+                None,
+                None,
+            )
+            .await
+            .expect_err("missing repository must surface the required follow-up start failure");
+
+        assert!(matches!(
+            error,
+            RunError::Validation(message) if message == "ticket has no repo"
+        ));
+        let mention = MentionService::new(&pool)
+            .list_pending_for_ticket(fx.ticket_id)
+            .await
+            .expect("load clarification mention")
+            .into_iter()
+            .next()
+            .expect("clarification mention persisted");
+        assert_eq!(mention.resume_agent_id, Some(fx.engineer_agent_id));
     }
 
     #[tokio::test]
@@ -2164,13 +2388,22 @@ mod tests {
             .list_pending_for_ticket(fx.ticket_id)
             .await
             .expect("list mentions");
-        assert_eq!(mentions.len(), 2);
-        assert!(mentions
-            .iter()
-            .any(|mention| mention.id == ordinary_mention.id));
-        assert!(mentions.iter().any(|mention| {
-            mention.mentioned_agent_id == fx.engineer_agent_id && mention.resume_agent_id.is_none()
-        }));
+        assert_eq!(mentions.len(), 1);
+        assert_eq!(mentions[0].id, ordinary_mention.id);
+
+        let handled_resume_mention_count = sqlx::query_scalar::<_, i64>(
+            r#"
+            SELECT COUNT(*) FROM ticket_mentions
+            WHERE ticket_id = $1 AND mentioned_agent_id = $2
+              AND resume_agent_id IS NULL AND status = 'handled'
+            "#,
+        )
+        .bind(fx.ticket_id)
+        .bind(fx.engineer_agent_id)
+        .fetch_one(&pool)
+        .await
+        .expect("count response mention covered by resume handoff");
+        assert_eq!(handled_resume_mention_count, 1);
 
         let mention_statuses = sqlx::query_as::<_, (Uuid, String)>(
             "SELECT id, status FROM ticket_mentions WHERE id = ANY($1)",

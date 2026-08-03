@@ -203,6 +203,47 @@ impl<'a> MentionService<'a> {
         Ok(rows.iter().map(row_to_mention).collect())
     }
 
+    pub async fn find_next_unscheduled_agent_mention(
+        &self,
+        ticket_id: Uuid,
+        mentioned_agent_id: Uuid,
+    ) -> Result<Option<TicketMention>, MentionError> {
+        let row = sqlx::query(
+            r#"
+            SELECT
+                tm.id, tm.ticket_id, tm.comment_id, tm.mentioned_agent_id,
+                tm.resume_agent_id, tm.status
+            FROM ticket_mentions tm
+            JOIN ticket_comments tc ON tc.id = tm.comment_id
+            JOIN agents a ON a.id = tm.mentioned_agent_id
+            WHERE tm.ticket_id = $1
+              AND tm.mentioned_agent_id = $2
+              AND tm.status = $3
+              AND tm.resume_agent_id IS NULL
+              AND tc.author_type = 'agent'
+              AND tc.author_id IS DISTINCT FROM tm.mentioned_agent_id
+              AND a.enabled = true
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM agent_runs ar
+                  WHERE ar.ticket_id = tm.ticket_id
+                    AND ar.agent_id = tm.mentioned_agent_id
+                    AND ar.job_type = 'respond_to_mention'
+                    AND ar.trigger_comment_id = tm.comment_id
+              )
+            ORDER BY tm.created_at ASC, tm.id ASC
+            LIMIT 1
+            "#,
+        )
+        .bind(ticket_id)
+        .bind(mentioned_agent_id)
+        .bind(mention_status_to_str(MentionStatus::Pending))
+        .fetch_optional(self.pool)
+        .await?;
+
+        Ok(row.as_ref().map(row_to_mention))
+    }
+
     async fn build_agent_key_map(&self) -> Result<HashMap<String, Uuid>, MentionError> {
         let agents = AgentService::new(self.pool).list_agents().await?;
         Ok(resolve_agent_keys(&agents))

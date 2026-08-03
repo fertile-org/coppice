@@ -49,7 +49,9 @@ Keep scheduling policy in the server workflow/orchestration layer. Extend succes
 - [ ] Automatic scheduling honors `MAX_MENTIONS_PER_RUN`.
 - [ ] Unit and integration regression tests cover ordinary successful mentions, chained response mentions, deduplication, disabled auto-start, and preserved special handoffs.
 
-**Status:** in_progress
+**Status:** in_review
+
+**Substatus:** blocked_by_error
 
 # Agent role
 
@@ -184,6 +186,17 @@ Recent activity on this ticket (oldest first):
 
 ---
 **Git:** …
+- **BE Agent Codex** (implementation done): Implemented deduplicated auto-scheduling for structured agent mentions from successful work and response runs. Preserved clarification resumes and verification handoffs, added real-Postgres regression coverage, and committed as e9fc6de.
+
+**Changed files:**
+- .agent/context.md
+- fixtures/agent-responses/dba/respond_to_mention.json
+- fixtures/agent-responses/frontend_engineer/respond_to_mention.j…
+- **QC Agent** (blocked): QC found an acceptance blocker: when a valid mentioned target already has an unrelated active run, `ActiveRunExists` is treated as success; reproduction leaves the mention pending with no `respond_to_mention` run or later drain path. Automatic-start errors are also swallowed for required clarification resumes and QC/reviewer handoffs, potentially leaving tickets waiting or reassigned without fo…
+- **Smoke Worker** (implementation done): Implementation complete.
+
+---
+**Git:** branch `agent/TICKET-a5f70029` · no new changes (HEAD `e9fc6de`)
 
 Read the full thread in Coppice if a detail is truncated.
 
