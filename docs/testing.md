@@ -40,9 +40,9 @@ Vitest — schemas, API helpers, board column logic. No browser.
 
 - Shared helpers: `server/tests/common/mod.rs`
 - **No Docker Postgres required** for `cargo test` / `make test`. Tests start in-process PostgreSQL via `pg-embed` (real SQL, same migrations).
-- Escape hatch for debugging against compose: `COPPICE_TEST_USE_EXTERNAL_DB=1` + `DATABASE_URL=postgres://coppice:coppice@127.0.0.1:5433/coppice`.
-- One shared embedded pool + one migration pass per integration-test **binary**; each case only `TRUNCATE`s tables.
-- `DB_TEST_LOCK` serializes DB tests; `truncate_workspace()` resets tables between cases
+- Escape hatch for debugging against compose: `COPPICE_TEST_USE_EXTERNAL_DB=1` + `DATABASE_URL=postgres://coppice:coppice@127.0.0.1:5433/coppice`. This path uses the caller's shared database, so run database tests serially.
+- One embedded PostgreSQL process is shared across test binaries. Migrations run once per fingerprinted template; each pool clones a fresh database from that template, so library tests are safe under Rust's parallel runner.
+- `DB_TEST_LOCK` still serializes integration cases that also coordinate process environment or filesystem state; `truncate_workspace()` preserves the external-database escape hatch.
 - Auth: `login_and_csrf()` performs bootstrap login, returns session cookie + CSRF token
 - Artifact dir: `/tmp/coppice-test-artifacts`
 
@@ -57,7 +57,7 @@ make test
 | Cause | Effect |
 |-------|--------|
 | **12 integration binaries** | Each links the full server; cold compile is minutes |
-| **`DB_TEST_LOCK`** | All DB tests run serially — times add up |
+| **`DB_TEST_LOCK`** | Integration cases that share process or filesystem state still run serially within each binary |
 | **Workflow pipeline test** (`scope_b_mock_pipeline_reaches_final_review`) | Full multi-agent mock pipeline ~30s alone |
 | **Agent-run tests** | Spawn job workers + poll for run completion |
 | **Postgres down / wrong port** | Eliminated: embedded PG is always up when `embedded-test-db` feature is enabled |
@@ -67,7 +67,7 @@ make test
 **Agent / OpenCode runs:** do not use `make test` during a ticket. Use fast iteration instead:
 
 ```bash
-make test-unit              # lib tests only (~seconds)
+make test-unit              # parallel lib tests only (~seconds)
 make test-smoke             # lib + 3 integration smoke files (~<60s warm)
 cargo test -p coppice-server result_contract   # one module
 cargo test -p coppice-server --test integration_tickets  # one integration file

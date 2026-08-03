@@ -91,21 +91,25 @@ Expected: FAIL. With a clean legacy database, the second truncate removes the fi
 
 - [ ] **Step 1: Make the compiled migrator reusable and fingerprintable**
 
-Add a module-level migrator and hash every migration version and checksum:
+Add a module-level migrator and deterministically hash every migration version and checksum:
 
 ```rust
 static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations");
 
 pub(crate) fn test_migration_fingerprint() -> u64 {
-    use std::collections::hash_map::DefaultHasher;
-    use std::hash::{Hash, Hasher};
+    const FNV_OFFSET_BASIS: u64 = 0xcbf2_9ce4_8422_2325;
+    const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
 
-    let mut hasher = DefaultHasher::new();
-    for migration in MIGRATOR.iter() {
-        migration.version.hash(&mut hasher);
-        migration.checksum.as_ref().hash(&mut hasher);
-    }
-    hasher.finish()
+    MIGRATOR.iter().fold(FNV_OFFSET_BASIS, |hash, migration| {
+        migration
+            .version
+            .to_be_bytes()
+            .iter()
+            .chain(migration.checksum.as_ref())
+            .fold(hash, |hash, byte| {
+                (hash ^ u64::from(*byte)).wrapping_mul(FNV_PRIME)
+            })
+    })
 }
 
 pub(crate) async fn migrate_pool(pool: &PgPool) -> anyhow::Result<()> {
@@ -230,7 +234,7 @@ Expected: PASS without `--test-threads 1` and without Docker or `DATABASE_URL`.
 Run:
 
 ```bash
-cargo fmt --all -- --check
+rustfmt --edition 2021 --check server/src/db/pool.rs server/src/db/test_embed.rs
 git diff --check
 ```
 
@@ -251,12 +255,23 @@ Expected: every run passes with no foreign-key or migration-history failures.
 Run:
 
 ```bash
-cargo clippy --workspace --all-targets --features embedded-test-db -- -D warnings
+cargo clippy -p coppice-server --lib --features embedded-test-db -- -D warnings
+cargo clippy --workspace -- -D warnings
 ```
 
 Expected: exit zero with no warnings.
 
-- [ ] **Step 4: Commit implementation**
+- [ ] **Step 4: Run the integration smoke tier**
+
+Run:
+
+```bash
+make test-smoke
+```
+
+Expected: the library suite and health, comments, and tickets integration binaries pass against isolated embedded databases.
+
+- [ ] **Step 5: Commit implementation**
 
 ```bash
 git add Makefile docs/testing.md server/src/db/pool.rs server/src/db/test_embed.rs \

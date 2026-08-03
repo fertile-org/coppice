@@ -46,9 +46,9 @@ bootstrap:
 test:
 	$(CARGO_TEST) --workspace -- --test-threads 1
 
-# Unit tests only — lib crates, no integration binaries (~5–15s warm).
+# Unit tests only — isolated databases allow default parallelism (~5–15s warm).
 test-unit:
-	$(CARGO_TEST) --workspace --lib -q -- --test-threads 1
+	$(CARGO_TEST) --workspace --lib -q
 
 # Smoke integration — lib + health + comments + tickets (~target <60s warm).
 test-smoke:
