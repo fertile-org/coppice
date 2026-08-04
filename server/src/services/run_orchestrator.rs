@@ -10,7 +10,8 @@ use crate::domain::slug::slugify;
 use crate::domain::substatus::Substatus;
 use crate::domain::ticket::status_to_str;
 use crate::domain::workflow::{
-    is_ready_tech_lead_refinement, JobRequest, RunOutcome, TransitionAction, TransitionContext,
+    is_ready_tech_lead_refinement, is_tech_lead_identity, JobRequest, RunOutcome, TransitionAction,
+    TransitionContext,
 };
 use crate::events::{AppEvent, EventBus};
 use crate::providers::AgentRunResult;
@@ -633,7 +634,7 @@ impl<'a> RunOrchestrator<'a> {
     }
 
     async fn start_deferred_ready_assignee_work(&self, terminal_run: &AgentRun) {
-        if terminal_run.job_type == "work_on_ticket" {
+        if terminal_run.job_type != "respond_to_mention" {
             return;
         }
 
@@ -655,6 +656,34 @@ impl<'a> RunOrchestrator<'a> {
         if ticket.ticket.status != crate::domain::substatus::TicketStatus::Ready
             || ticket.ticket.assignee_agent_id != Some(terminal_run.agent_id)
             || ticket.ticket.repo_id.is_none()
+            || ticket.ticket.pending_assign_recommendation.is_some()
+        {
+            return;
+        }
+
+        let agent = match AgentService::new(self.pool)
+            .get(terminal_run.agent_id)
+            .await
+        {
+            Ok(agent) => agent,
+            Err(error) => {
+                tracing::warn!(
+                    terminal_run_id = %terminal_run.id,
+                    ticket_id = %terminal_run.ticket_id,
+                    agent_id = %terminal_run.agent_id,
+                    error = %error,
+                    "could not inspect deferred Ready assignee"
+                );
+                return;
+            }
+        };
+        let agent_key = agent
+            .preset_source
+            .clone()
+            .unwrap_or_else(|| slugify(&agent.name));
+        if !agent.enabled
+            || !is_implementer(&agent.role)
+            || is_tech_lead_identity(&agent_key, &agent.role)
         {
             return;
         }
@@ -2872,6 +2901,100 @@ mod tests {
             .expect("load ticket after deferred start");
         assert_eq!(ticket.ticket.status, TicketStatus::InProgress);
         assert_eq!(ticket.ticket.assignee_agent_id, Some(fx.engineer_agent_id));
+    }
+
+    #[tokio::test]
+    async fn human_chat_does_not_start_ready_work_for_retained_tech_lead() {
+        let Some(pool) = test_pool().await else {
+            return;
+        };
+        let fx = insert_fixture(&pool).await;
+        let _repo_dir = attach_ready_repo(&pool, fx.ticket_id).await;
+
+        sqlx::query(
+            "UPDATE agents SET name = 'Tech Lead', role = 'Technical Lead Engineer', preset_source = 'tech_lead' WHERE id = $1",
+        )
+        .bind(fx.pm_agent_id)
+        .execute(&pool)
+        .await
+        .expect("make retained assignee the Tech Lead");
+        sqlx::query("UPDATE agent_runs SET status = 'succeeded' WHERE id = $1")
+            .bind(fx.run_id)
+            .execute(&pool)
+            .await
+            .expect("terminalize fixture work run");
+
+        let pending = serde_json::json!({
+            "recommendedAgentKey": "backend_engineer",
+            "recommendedByAgentId": fx.pm_agent_id,
+            "recommendedAt": "2026-08-04T00:00:00Z",
+            "summary": "Technical refinement complete"
+        });
+        sqlx::query(
+            "UPDATE tickets SET status = 'ready', assignee_agent_id = $2, pending_assign_recommendation = $3 WHERE id = $1",
+        )
+        .bind(fx.ticket_id)
+        .bind(fx.pm_agent_id)
+        .bind(pending)
+        .execute(&pool)
+        .await
+        .expect("prepare manual Ready recommendation");
+
+        let workflow = WorkflowConfig {
+            auto_start_runs: true,
+            ..WorkflowConfig::default()
+        };
+        let orchestrator = RunOrchestrator::new(&pool, &workflow);
+        let human_chat_run = AgentRun {
+            id: Uuid::new_v4(),
+            ticket_id: fx.ticket_id,
+            agent_id: fx.pm_agent_id,
+            job_type: "respond_to_mention".into(),
+            status: RunStatus::Succeeded,
+            sandbox_profile_id: PROFILE_ID.to_string(),
+            worktree_path: None,
+            branch_name: None,
+            error_message: None,
+            session_id: None,
+            context_profile: ContextProfile::HumanChat,
+            trigger_comment_id: None,
+            started_at: None,
+            ended_at: None,
+            created_at: time::OffsetDateTime::now_utc(),
+        };
+
+        orchestrator.handle_terminal_run(&human_chat_run).await;
+        let work_after_manual = sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM agent_runs WHERE ticket_id = $1 AND id != $2 AND job_type = 'work_on_ticket'",
+        )
+        .bind(fx.ticket_id)
+        .bind(fx.run_id)
+        .fetch_one(&pool)
+        .await
+        .expect("count work after manual handoff");
+        assert_eq!(work_after_manual, 0);
+
+        sqlx::query("UPDATE tickets SET pending_assign_recommendation = NULL WHERE id = $1")
+            .bind(fx.ticket_id)
+            .execute(&pool)
+            .await
+            .expect("prepare invalid handoff state");
+        orchestrator
+            .handle_terminal_run(&AgentRun {
+                id: Uuid::new_v4(),
+                ..human_chat_run
+            })
+            .await;
+
+        let work_after_invalid = sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM agent_runs WHERE ticket_id = $1 AND id != $2 AND job_type = 'work_on_ticket'",
+        )
+        .bind(fx.ticket_id)
+        .bind(fx.run_id)
+        .fetch_one(&pool)
+        .await
+        .expect("count work after invalid handoff");
+        assert_eq!(work_after_invalid, 0);
     }
 
     #[tokio::test]
