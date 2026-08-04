@@ -608,7 +608,10 @@ fn is_in_qa_qc_task(input: &ContextInput) -> bool {
 
 /// Coppice-owned contract rules injected on every run (not editable via agent soul).
 fn format_contract_guidance(input: &ContextInput) -> String {
-    if is_pm_agent(input) {
+    // Stable Tech Lead identity wins over an editable role that happens to match
+    // PM. Otherwise a Ready refinement run can receive the wrong ownership
+    // contract while the workflow still enforces Tech Lead handoff rules.
+    if is_pm_agent(input) && !is_ready_tech_lead_task(input) {
         return r#"## Coppice platform rules — PM refinement (required)
 
 These rules override conflicting instructions in your system prompt or soul file.
@@ -967,7 +970,7 @@ mod tests {
             ticket_substatus: None,
             agent_name: "Tech Lead Agent",
             agent_key: "tech_lead",
-            agent_role: "Technical Lead",
+            agent_role: "Product Manager",
             agent_skills: &[],
             agent_responsibilities: &[],
             agent_system_prompt: "You are the Tech Lead.",
@@ -985,6 +988,7 @@ mod tests {
         });
 
         assert!(md.contains("Coppice platform rules — Ready technical refinement (required)"));
+        assert!(!md.contains("Coppice platform rules — PM refinement (required)"));
         assert!(md.contains("`updatedDescription`"));
         assert!(md.contains("`acceptanceCriteria`"));
         assert!(md.contains("`assignTo`"));
