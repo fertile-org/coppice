@@ -458,6 +458,20 @@ async fn deleting_agent_preserves_run_knowledge_usage_audit() {
     .await
     .unwrap();
 
+    let direct_delete_error = sqlx::query("DELETE FROM agent_runs WHERE id = $1")
+        .bind(run_id)
+        .execute(pool)
+        .await
+        .expect_err("the database must preserve runs referenced by knowledge usage logs");
+    let database_error = direct_delete_error
+        .as_database_error()
+        .expect("expected a database constraint error");
+    assert_eq!(database_error.code().as_deref(), Some("23503"));
+    assert_eq!(
+        database_error.constraint(),
+        Some("knowledge_usage_logs_run_id_fkey")
+    );
+
     let deleted = app
         .clone()
         .oneshot(common::json_request(

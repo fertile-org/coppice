@@ -242,8 +242,8 @@ impl ExtractionProvider for CommentReviewExtractionProvider {
     }
 }
 
-struct LatestCommentExtractionProvider {
-    newest_comment_id: Uuid,
+struct OrderedCommentExtractionProvider {
+    expected_comment_ids: [Uuid; 2],
     max_source_bytes: usize,
 }
 
@@ -275,7 +275,7 @@ impl ExtractionProvider for BoundedExtractionProvider {
 }
 
 #[async_trait]
-impl ExtractionProvider for LatestCommentExtractionProvider {
+impl ExtractionProvider for OrderedCommentExtractionProvider {
     async fn extract(
         &self,
         input: &ExtractionInput,
@@ -293,13 +293,17 @@ impl ExtractionProvider for LatestCommentExtractionProvider {
                 self.max_source_bytes
             )));
         }
-        if !input
+        let comment_ids = input
             .comments
             .iter()
-            .any(|comment| comment.id == self.newest_comment_id)
-        {
+            .map(|comment| comment.id)
+            .collect::<Vec<_>>();
+        if comment_ids != self.expected_comment_ids {
             return Err(ExtractionError::InvalidInput(
-                "newest comment was discarded before older source material".into(),
+                format!(
+                    "expected retained comments in chronological order {:?}, got {comment_ids:?}",
+                    self.expected_comment_ids
+                ),
             ));
         }
         Ok(Vec::new())
@@ -2374,8 +2378,8 @@ async fn extraction_byte_budget_prioritizes_the_newest_comments() {
     let mut bounded_state = state.as_ref().clone();
     bounded_state.config.knowledge.extraction.max_source_bytes = max_source_bytes;
     let embedder = embedding_provider(&bounded_state.config.knowledge.embedding).unwrap();
-    let extractor: Arc<dyn ExtractionProvider> = Arc::new(LatestCommentExtractionProvider {
-        newest_comment_id,
+    let extractor: Arc<dyn ExtractionProvider> = Arc::new(OrderedCommentExtractionProvider {
+        expected_comment_ids: [oldest_comment_id, newest_comment_id],
         max_source_bytes,
     });
     assert!(
