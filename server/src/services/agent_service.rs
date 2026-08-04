@@ -15,6 +15,8 @@ pub enum AgentError {
     PresetNotFound,
     #[error("validation error: {0}")]
     Validation(String),
+    #[error("agent cannot be deleted because immutable knowledge provenance references it")]
+    KnowledgeProvenanceConflict,
     #[error(transparent)]
     Database(#[from] sqlx::Error),
 }
@@ -107,7 +109,9 @@ impl<'a> AgentService<'a> {
         }
         if let Some(mp) = model_provider {
             if mp.trim().is_empty() {
-                return Err(AgentError::Validation("modelProvider cannot be empty".into()));
+                return Err(AgentError::Validation(
+                    "modelProvider cannot be empty".into(),
+                ));
             }
         }
 
@@ -151,7 +155,9 @@ impl<'a> AgentService<'a> {
         }
         if let Some(mp) = model_provider {
             if mp.trim().is_empty() {
-                return Err(AgentError::Validation("modelProvider cannot be empty".into()));
+                return Err(AgentError::Validation(
+                    "modelProvider cannot be empty".into(),
+                ));
             }
         }
 
@@ -186,7 +192,9 @@ impl<'a> AgentService<'a> {
     ) -> Result<Agent, AgentError> {
         if let Some(mp) = model_provider {
             if mp.trim().is_empty() {
-                return Err(AgentError::Validation("modelProvider cannot be empty".into()));
+                return Err(AgentError::Validation(
+                    "modelProvider cannot be empty".into(),
+                ));
             }
         }
 
@@ -239,10 +247,50 @@ impl<'a> AgentService<'a> {
     }
 
     pub async fn delete(&self, agent_id: Uuid) -> Result<(), AgentError> {
+        let has_knowledge_provenance: bool = sqlx::query_scalar(
+            r#"
+            SELECT
+                EXISTS(
+                    SELECT 1
+                    FROM knowledge_revisions revision
+                    LEFT JOIN agent_runs source_run ON source_run.id = revision.source_run_id
+                    WHERE revision.agent_id = $1 OR source_run.agent_id = $1
+                )
+                OR EXISTS(
+                    SELECT 1
+                    FROM agent_runs usage_run
+                    JOIN knowledge_usage_logs usage ON usage.run_id = usage_run.id
+                    WHERE usage_run.agent_id = $1
+                )
+            "#,
+        )
+        .bind(agent_id)
+        .fetch_one(self.pool)
+        .await?;
+        if has_knowledge_provenance {
+            return Err(AgentError::KnowledgeProvenanceConflict);
+        }
+
         let result = sqlx::query("DELETE FROM agents WHERE id = $1")
             .bind(agent_id)
             .execute(self.pool)
-            .await?;
+            .await
+            .map_err(|error| {
+                if matches!(
+                    error
+                        .as_database_error()
+                        .and_then(|database_error| database_error.constraint()),
+                    Some(
+                        "knowledge_revisions_agent_id_fkey"
+                            | "knowledge_revisions_source_run_id_fkey"
+                            | "knowledge_usage_logs_run_id_fkey"
+                    )
+                ) {
+                    AgentError::KnowledgeProvenanceConflict
+                } else {
+                    AgentError::Database(error)
+                }
+            })?;
 
         if result.rows_affected() == 0 {
             return Err(AgentError::AgentNotFound);

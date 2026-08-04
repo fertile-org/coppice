@@ -64,3 +64,46 @@ backlog = false
 
 [workflow.auto_split]
 default = false
+
+[knowledge]
+enabled = true
+worker_count = 1
+poll_interval_ms = 500
+stale_lock_secs = 300
+
+[knowledge.embedding]
+provider = "mock" # set to "openai_compatible" and configure api_key for a real provider
+model = "coppice-mock-1536"
+dimension = 1536
+base_url = "https://api.openai.com/v1"
+timeout_secs = 30
+# api_key = "..." # prefer COPPICE_KNOWLEDGE__EMBEDDING__API_KEY
+
+[knowledge.extraction]
+provider = "mock"
+max_source_bytes = 24000
+max_candidates = 5
+
+[knowledge.auto_save]
+enabled = false
+allowed_types = []
+minimum_confidence = "high"
+
+[knowledge.retrieval]
+top_k = 8
+allowed_types = []
+minimum_confidence = "medium"
+minimum_similarity = 0.0
+default_page_size = 25
+max_page_size = 100
+max_active_per_project = 10000
+max_active_workspace = 1000
+
+[knowledge.context_budget]
+max_tokens = 24000
+ticket = 5000
+latest_comments = 4000
+project_rules = 3000
+retrieved_knowledge = 4000
+previous_attempt_summary = 2000
+output_contract = 1000

@@ -5,6 +5,7 @@ pub mod attachment;
 pub mod comment;
 pub mod context_profile;
 pub mod job;
+pub mod knowledge;
 pub mod mention;
 pub mod notification;
 pub mod project;

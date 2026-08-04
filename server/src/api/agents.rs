@@ -139,6 +139,7 @@ fn map_error(err: AgentError) -> StatusCode {
     match err {
         AgentError::AgentNotFound | AgentError::PresetNotFound => StatusCode::NOT_FOUND,
         AgentError::Validation(_) => StatusCode::BAD_REQUEST,
+        AgentError::KnowledgeProvenanceConflict => StatusCode::CONFLICT,
         AgentError::Database(_) => StatusCode::INTERNAL_SERVER_ERROR,
     }
 }

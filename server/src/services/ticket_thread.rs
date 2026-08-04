@@ -12,6 +12,15 @@ pub fn format_ticket_thread(
     comments: &[Comment],
     agent_names: &HashMap<Uuid, String>,
 ) -> Option<String> {
+    format_ticket_thread_with_limit(comments, agent_names, TICKET_THREAD_MAX)
+}
+
+/// Build a chronological comment section bounded for the caller's token allocation.
+pub fn format_ticket_thread_with_limit(
+    comments: &[Comment],
+    agent_names: &HashMap<Uuid, String>,
+    max_chars: usize,
+) -> Option<String> {
     let mut relevant: Vec<&Comment> = comments
         .iter()
         .filter(|c| c.intent != CommentIntent::SystemEvent)
@@ -33,7 +42,10 @@ pub fn format_ticket_thread(
     let header = "Recent activity on this ticket (oldest first):\n\n";
     let footer = "\n\nRead the full thread in Coppice if a detail is truncated.";
     let overhead = header.len() + footer.len();
-    let max_body = TICKET_THREAD_MAX.saturating_sub(overhead);
+    if max_chars <= overhead {
+        return None;
+    }
+    let max_body = max_chars - overhead;
 
     let mut thread = lines.join("\n");
     if thread.len() > max_body {
@@ -48,6 +60,28 @@ pub fn format_ticket_thread(
     }
 
     Some(format!("{header}{thread}{footer}"))
+}
+
+/// Build the most recent durable update from the agent that is continuing the work.
+pub fn format_previous_attempt_summary(
+    comments: &[Comment],
+    agent_id: Uuid,
+    agent_names: &HashMap<Uuid, String>,
+) -> Option<String> {
+    let comment = comments
+        .iter()
+        .filter(|comment| {
+            comment.author_type == AuthorType::Agent
+                && comment.author_id == Some(agent_id)
+                && comment.intent != CommentIntent::SystemEvent
+        })
+        .max_by_key(|comment| comment.created_at)?;
+    let author = author_label(comment, agent_names);
+    let intent = intent_to_str(comment.intent).replace('_', " ");
+    let body = comment.body.trim();
+    Some(format!(
+        "Most recent prior update from **{author}** ({intent}):\n\n{body}"
+    ))
 }
 
 /// Build a short excerpt of the most recent non-system comments for human chat context.
@@ -141,6 +175,36 @@ mod tests {
     }
 
     #[test]
+    fn previous_attempt_summary_uses_newest_update_from_same_agent() {
+        let agent_id = Uuid::new_v4();
+        let other_agent_id = Uuid::new_v4();
+        let base = OffsetDateTime::now_utc();
+        let mut older = sample_comment("older matching update", CommentIntent::ProgressUpdate);
+        older.author_id = Some(agent_id);
+        older.created_at = base;
+        let mut newer = sample_comment("newer matching update", CommentIntent::ProgressUpdate);
+        newer.author_id = Some(agent_id);
+        newer.created_at = base + time::Duration::seconds(1);
+        let mut other = sample_comment("other agent update", CommentIntent::ReviewFeedback);
+        other.author_id = Some(other_agent_id);
+        other.created_at = base + time::Duration::seconds(2);
+
+        let mut names = HashMap::new();
+        names.insert(agent_id, "Backend Engineer".into());
+        let summary = format_previous_attempt_summary(
+            &[older, newer, other],
+            agent_id,
+            &names,
+        )
+        .expect("previous attempt summary");
+
+        assert!(summary.contains("Backend Engineer"));
+        assert!(summary.contains("newer matching update"));
+        assert!(!summary.contains("older matching update"));
+        assert!(!summary.contains("other agent update"));
+    }
+
+    #[test]
     fn format_thread_excerpt_limits_comments_and_chars() {
         let agent_id = Uuid::new_v4();
         let mut names = HashMap::new();
@@ -194,5 +258,34 @@ mod tests {
         assert!(thread.len() <= TICKET_THREAD_MAX);
         assert!(thread.contains("Thread entry #49"));
         assert!(!thread.contains("Thread entry #00"));
+    }
+
+    #[test]
+    fn configurable_ticket_thread_limit_can_use_a_larger_context_allocation() {
+        let agent_id = Uuid::new_v4();
+        let mut names = HashMap::new();
+        names.insert(agent_id, "Engineer".into());
+        let comments: Vec<Comment> = (0..50)
+            .map(|i| {
+                let mut comment = sample_comment(
+                    &format!(
+                        "Expanded thread entry #{i:02} with {}",
+                        "padding ".repeat(20)
+                    ),
+                    CommentIntent::ProgressUpdate,
+                );
+                comment.author_id = Some(agent_id);
+                comment.created_at += time::Duration::seconds(i);
+                comment
+            })
+            .collect();
+
+        let legacy = format_ticket_thread(&comments, &names).expect("legacy thread");
+        let expanded = format_ticket_thread_with_limit(&comments, &names, 16_000)
+            .expect("expanded thread");
+        assert!(legacy.len() <= TICKET_THREAD_MAX);
+        assert!(expanded.len() <= 16_000);
+        assert!(expanded.len() > legacy.len());
+        assert!(expanded.contains("Expanded thread entry #00"));
     }
 }

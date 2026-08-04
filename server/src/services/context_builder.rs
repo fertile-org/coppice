@@ -25,6 +25,8 @@ pub struct ContextInput<'a> {
     pub repo_remote_url: Option<&'a str>,
     pub repo_default_branch: Option<&'a str>,
     pub worktree_path: Option<&'a str>,
+    pub latest_comments: Option<&'a str>,
+    pub project_rules: Option<&'a str>,
     pub resume_context: Option<&'a str>,
     pub context_profile: ContextProfile,
     pub human_request: Option<HumanRequest<'a>>,
@@ -166,9 +168,11 @@ fn build_full_context(input: &ContextInput) -> String {
     let skills = format_bullet_list(input.agent_skills);
     let responsibilities = format_bullet_list(input.agent_responsibilities);
     let repository_section = format_repository_section(input);
+    let latest_comments_section = format_latest_comments_section(input);
+    let project_rules_section = format_project_rules_section(input);
     let resume_section = format_resume_section(input);
-    let contract_guidance = format_contract_guidance(input);
     let verification_guidance = format_verification_guidance();
+    let output_contract = format_full_output_contract(input);
 
     format!(
         r#"# Current task
@@ -196,11 +200,35 @@ fn build_full_context(input: &ContextInput) -> String {
 
 {system_prompt}
 
-{repository_section}{resume_section}{verification_guidance}# Sandbox
+{repository_section}{latest_comments_section}{resume_section}{project_rules_section}{verification_guidance}# Sandbox
 
 {sandbox_note}
 
-# Expected output contract
+{output_contract}
+"#,
+        title = input.ticket_title,
+        description = input.ticket_description,
+        status = input.ticket_status,
+        substatus = substatus_line,
+        agent_name = input.agent_name,
+        agent_role = input.agent_role,
+        skills = skills,
+        responsibilities = responsibilities,
+        system_prompt = input.agent_system_prompt,
+        repository_section = repository_section,
+        latest_comments_section = latest_comments_section,
+        resume_section = resume_section,
+        project_rules_section = project_rules_section,
+        verification_guidance = verification_guidance,
+        sandbox_note = SANDBOX_NOTE,
+        output_contract = output_contract,
+    )
+}
+
+pub fn format_full_output_contract(input: &ContextInput<'_>) -> String {
+    let contract_guidance = format_contract_guidance(input);
+    format!(
+        r#"# Expected output contract
 
 Return a single JSON object as your final result.
 
@@ -253,20 +281,6 @@ The server ignores `nextStatus` for board moves — workflow gates control colum
 
 When blocked by missing capability or secret, also include `requiredCapabilities` and/or `requiredSecrets` arrays as applicable.
 "#,
-        title = input.ticket_title,
-        description = input.ticket_description,
-        status = input.ticket_status,
-        substatus = substatus_line,
-        agent_name = input.agent_name,
-        agent_role = input.agent_role,
-        skills = skills,
-        responsibilities = responsibilities,
-        system_prompt = input.agent_system_prompt,
-        repository_section = repository_section,
-        resume_section = resume_section,
-        verification_guidance = verification_guidance,
-        contract_guidance = contract_guidance,
-        sandbox_note = SANDBOX_NOTE,
     )
 }
 
@@ -691,7 +705,21 @@ Put test commands in `testsRun` only — not inside `summary`.
 
 fn format_resume_section(input: &ContextInput) -> String {
     match input.resume_context {
-        Some(ctx) => format!("## Ticket thread\n\n{ctx}\n\n"),
+        Some(ctx) => format!("# Previous attempt summary\n\n{ctx}\n\n"),
+        None => String::new(),
+    }
+}
+
+fn format_latest_comments_section(input: &ContextInput) -> String {
+    match input.latest_comments {
+        Some(comments) => format!("# Latest comments\n\n{comments}\n\n"),
+        None => String::new(),
+    }
+}
+
+fn format_project_rules_section(input: &ContextInput) -> String {
+    match input.project_rules {
+        Some(rules) => format!("# Project rules\n\n{rules}\n\n"),
         None => String::new(),
     }
 }
@@ -734,9 +762,13 @@ fn format_bullet_list(items: &[String]) -> String {
 }
 
 pub fn write_context_file(worktree: &Path, input: &ContextInput) -> std::io::Result<()> {
+    write_context_document(worktree, &build_context_md(input))
+}
+
+pub fn write_context_document(worktree: &Path, markdown: &str) -> std::io::Result<()> {
     let agent_dir = worktree.join(".agent");
     std::fs::create_dir_all(&agent_dir)?;
-    std::fs::write(agent_dir.join("context.md"), build_context_md(input))?;
+    std::fs::write(agent_dir.join("context.md"), markdown)?;
     Ok(())
 }
 
@@ -797,6 +829,8 @@ mod tests {
             repo_remote_url: Some("https://github.com/example/coppice"),
             repo_default_branch: Some("main"),
             worktree_path: Some("/data/worktrees/coppice/ticket-1"),
+            latest_comments: None,
+            project_rules: None,
             resume_context: None,
             context_profile,
             human_request,
@@ -897,6 +931,8 @@ mod tests {
             repo_remote_url: None,
             repo_default_branch: None,
             worktree_path: None,
+            latest_comments: None,
+            project_rules: None,
             resume_context: None,
             context_profile,
             human_request,
@@ -932,6 +968,8 @@ mod tests {
             repo_remote_url: None,
             repo_default_branch: None,
             worktree_path: None,
+            latest_comments: None,
+            project_rules: None,
             resume_context: Some(
                 "**Prior blocker:** Need API shape. / **PM answer:** Use option A.",
             ),
@@ -942,7 +980,7 @@ mod tests {
             thread_excerpt,
             consultation_request: None,
         });
-        assert!(md.contains("## Ticket thread"));
+        assert!(md.contains("# Previous attempt summary"));
         assert!(md.contains("Need API shape."));
         assert!(md.contains("Use option A."));
     }
@@ -966,6 +1004,8 @@ mod tests {
             repo_remote_url: None,
             repo_default_branch: None,
             worktree_path: None,
+            latest_comments: None,
+            project_rules: None,
             resume_context: None,
             context_profile,
             human_request,
@@ -999,6 +1039,8 @@ mod tests {
             repo_remote_url: None,
             repo_default_branch: None,
             worktree_path: None,
+            latest_comments: None,
+            project_rules: None,
             resume_context: None,
             context_profile,
             human_request,
@@ -1042,6 +1084,8 @@ mod tests {
             repo_remote_url: Some("https://github.com/example/coppice"),
             repo_default_branch: Some("main"),
             worktree_path: Some("/data/worktrees/coppice/ticket-1"),
+            latest_comments: None,
+            project_rules: None,
             resume_context: None,
             context_profile,
             human_request,
@@ -1080,6 +1124,8 @@ mod tests {
             repo_remote_url: None,
             repo_default_branch: Some("main"),
             worktree_path: Some("/data/worktrees/coppice/ticket-1"),
+            latest_comments: None,
+            project_rules: None,
             resume_context: Some("Full thread that should not appear"),
             context_profile: ContextProfile::HumanAgent,
             human_request: Some(human_request),
@@ -1122,6 +1168,8 @@ mod tests {
             repo_remote_url: None,
             repo_default_branch: None,
             worktree_path: None,
+            latest_comments: None,
+            project_rules: None,
             resume_context: Some("Full thread that should not appear"),
             context_profile: ContextProfile::HumanAgent,
             human_request: Some(HumanRequest {
@@ -1165,6 +1213,8 @@ mod tests {
             repo_remote_url: None,
             repo_default_branch: None,
             worktree_path: None,
+            latest_comments: None,
+            project_rules: None,
             resume_context: Some("Full resume thread"),
             context_profile: ContextProfile::HumanChat,
             human_request: Some(HumanRequest {

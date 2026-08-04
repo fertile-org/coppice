@@ -21,6 +21,7 @@ server/src/
   services/     Business logic, DB queries, validation orchestration
   domain/       Entity types, enums, pure validation helpers
   db/           Pool setup, migration runner
+  knowledge/    Embedding, retrieval, extraction providers (M06)
   middleware/   Session auth, CSRF, admin checks
   providers/    AgentProvider trait + mock / opencode / claude-code / codex connectors
   workers/      In-process Tokio job workers (M03)
@@ -48,6 +49,7 @@ server/src/
 - Migrations: `server/migrations/*.sql`, applied by `coppice migrate` and on test connect (`db::connect_and_migrate`).
 - No Redis; agent job queue uses Postgres `agent_jobs` (M03).
 - **M03 tables:** `agent_runs` (one row per ticket+agent execution; statuses `queued`/`running`/`completed`/`failed`/`cancelled`; unique partial index on active `(ticket_id, agent_id)`), `agent_jobs` (queue row per run; `FOR UPDATE SKIP LOCKED` claim by workers).
+- **M06 tables:** `knowledge_items` (mutable lifecycle pointer), immutable `knowledge_revisions`, `knowledge_embeddings` (`vector(1536)` + HNSW cosine index), `knowledge_usage_logs` (unique run/revision audit snapshot), and `knowledge_jobs` (dedicated durable extraction/embedding queue). Knowledge work does not reuse run-bound `agent_jobs`.
 
 ## Auth
 
@@ -80,13 +82,35 @@ workers/job_worker.rs     poll queue, run pipeline, spawn at server startup
 
 **Run pipeline (worker):** claim pending job → load run/ticket/agent/repo → validate repo `local_path` → mark running → ensure worktree from registered path (`WORKTREES_PATH/TICKET-{id}-{agent}-{repo}/`) → write context file → call `AgentProvider::run` → apply result contract → finish run.
 
+## Governed knowledge (M06)
+
+Knowledge keeps lifecycle state separate from semantic content. An edit inserts an immutable revision and advances `current_revision_id`; `active_revision_id` changes only after that exact revision embeds successfully. This keeps the last usable revision active if a replacement embedding fails. Approve, edit, reject, supersede, stale, and expire operations require an optimistic `expectedVersion`.
+
+```text
+api/knowledge.rs                    authenticated reads; admin + CSRF lifecycle writes
+domain/knowledge.rs                 types, scope and content validation, risk classification
+services/knowledge_service.rs       revision/lifecycle invariants and bounded keyset lists
+services/knowledge_job_service.rs   SKIP LOCKED queue, stale-lock reclaim, bounded retry
+knowledge/embedder.rs               EmbeddingProvider contract
+knowledge/mock_embedder.rs          deterministic test/default vectors
+knowledge/openai_embedder.rs        OpenAI-compatible /embeddings adapter
+knowledge/retrieval.rs              relational eligibility CTE, then stable cosine rank
+knowledge/extractor.rs              deterministic bounded candidate extraction + policy
+services/context_budget.rs          ByteTokenCounter, untrusted delimiters, usage snapshots
+workers/knowledge_worker.rs         asynchronous embed and post-Done extraction jobs
+```
+
+Only Full-profile runs retrieve knowledge. Relational eligibility (approved, active, embedded, unexpired, unsuperseded, confidence, project/agent scope) is materialized before cosine ranking. The bounded result is rendered as untrusted data and passed through the configured total context budget; mandatory safety and result-contract sections either survive or the run fails before provider invocation. Every included exact revision is inserted once into `knowledge_usage_logs` before the provider runs.
+
+A database trigger idempotently enqueues `extract_ticket` when a ticket first enters Done. Default extraction is fail-closed: candidates remain Pending. Policy auto-save additionally requires an enabled explicit low-risk type allowlist and high confidence; high-impact types always require human approval.
+
 **Config env:** `AGENT_DEFAULT_PROVIDER`, `WORKTREES_PATH`, `AGENT_WORKER_COUNT` (see `deploy/docker-compose.yml`). Operator bind-mounts host clones; register in-container paths in Settings → Repositories.
 
 ## Web frontend
 
 ```text
 web/src/
-  features/     auth, board, tickets, agents, projects, users
+  features/     auth, board, tickets, agents, knowledge, projects, users
   components/   AppShell, ProtectedRoute, shared UI
   lib/          api.ts (fetch + CSRF), schemas/ (Zod), query-client
   styles/       tokens.css (design tokens)
@@ -96,6 +120,7 @@ web/src/
 - **Data:** TanStack Query hooks per feature (`useTickets`, `useAgents`, …).
 - **API client:** `lib/api.ts` — `credentials: 'include'`, CSRF header on writes.
 - **Board:** fixed columns in `features/board/columns.ts`; dnd-kit for drag-and-drop.
+- **Knowledge:** `/knowledge` has Pending, Approved, Rejected, and Stale views with provenance and lifecycle controls. Expanded Agent Run details load the immutable **Knowledge Used** audit.
 - **Forms:** React Hook Form + Zod schemas in `lib/schemas/`.
 
 Visual design tokens and palette: `docs/web/DESIGN.md`.
@@ -112,4 +137,4 @@ Visual design tokens and palette: `docs/web/DESIGN.md`.
 
 ## Milestone evolution
 
-Each milestone adds modules/tables/endpoints documented in `docs/milestones/M0N-*.md`. After M03 the server has projects, repos, tickets, comments, attachments, agents, users, agent runs/jobs, worktrees, and in-process workers. **Next:** M04 live console — see that spec before implementing.
+Each milestone adds modules/tables/endpoints documented in `docs/milestones/M0N-*.md`. Through M06 the system includes projects, repositories, tickets, collaboration workflow, live agent runs, governed long-term knowledge, and bounded/auditable context assembly. **Next:** M07 trust and signals.

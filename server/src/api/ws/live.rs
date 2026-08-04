@@ -5,7 +5,7 @@ use crate::services::artifact_service::{ArtifactService, RunArtifactPaths};
 use crate::services::run_orchestrator::RunOrchestrator;
 use crate::services::run_service::{RunError, RunService};
 use crate::sessions::opencode_client::OpenCodeClient;
-use crate::sessions::LiveMessage;
+use crate::sessions::{run_registry::RunStreamRegistry, LiveMessage};
 use crate::AppState;
 use axum::{
     extract::{
@@ -224,7 +224,10 @@ async fn replay_and_subscribe(
 
     let mut rx = handle.subscribe();
     loop {
-        match classify_replay_recv(rx.recv().await) {
+        let Some(recv) = recv_replay_or_removed(&state.run_streams, run_id, &mut rx).await else {
+            break;
+        };
+        match classify_replay_recv(recv) {
             ReplayRecvAction::Send(msg) => {
                 if send_live_message(sender, &msg).await.is_err() {
                     break;
@@ -235,9 +238,25 @@ async fn replay_and_subscribe(
             // snapshot/buffer. Silently continuing would drop missed frames.
             ReplayRecvAction::Break => break,
         }
+    }
+}
 
-        if state.run_streams.get(run_id).is_none() {
-            break;
+async fn recv_replay_or_removed(
+    registry: &RunStreamRegistry,
+    run_id: Uuid,
+    rx: &mut tokio::sync::broadcast::Receiver<LiveMessage>,
+) -> Option<Result<LiveMessage, tokio::sync::broadcast::error::RecvError>> {
+    loop {
+        match tokio::time::timeout(Duration::from_millis(100), rx.recv()).await {
+            Ok(recv) => return Some(recv),
+            Err(_) if registry.get(run_id).is_none() => {
+                // The handler keeps the broadcast sender alive through its
+                // stream handle. Once the registry drops ownership, exit only
+                // after the channel backlog has drained so terminal clients do
+                // not miss frames queued immediately before completion.
+                return None;
+            }
+            Err(_) => {}
         }
     }
 }
@@ -436,7 +455,6 @@ async fn send_live_message(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::sessions::run_registry::RunStreamRegistry;
 
     #[test]
     fn classify_lagged_breaks_for_reconnect() {
@@ -483,5 +501,28 @@ mod tests {
             "expected Lagged after overflow, got {recv:?}"
         );
         assert!(matches!(classify_replay_recv(recv), ReplayRecvAction::Break));
+    }
+
+    #[tokio::test]
+    async fn removed_stream_drains_queued_messages_before_end() {
+        let registry = RunStreamRegistry::new();
+        let run_id = Uuid::new_v4();
+        let handle = registry.register(run_id);
+        let mut rx = handle.subscribe();
+
+        for seq in 0..3 {
+            handle.publish_frame(seq, vec![seq as u8]);
+        }
+        registry.remove(run_id);
+
+        let mut received = Vec::new();
+        while let Some(recv) = recv_replay_or_removed(&registry, run_id, &mut rx).await {
+            match recv.expect("queued message") {
+                LiveMessage::Frame { seq, .. } => received.push(seq),
+                other => panic!("expected frame, got {other:?}"),
+            }
+        }
+
+        assert_eq!(received, vec![0, 1, 2]);
     }
 }

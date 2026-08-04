@@ -21,7 +21,11 @@ use crate::services::agent_service::AgentService;
 use crate::services::artifact_service::{ArtifactService, RunArtifactMeta, RunArtifactPaths};
 use crate::services::comment_service::CommentService;
 use crate::services::context_builder::{
-    write_agent_context_files, write_context_file, ContextInput, HumanRequest,
+    write_agent_context_files, write_context_document, write_context_file, ContextInput,
+    HumanRequest,
+};
+use crate::services::context_budget::{
+    build_budgeted_context, record_usage, render_knowledge, ByteTokenCounter, KnowledgeSection,
 };
 use crate::services::job_service::JobService;
 use crate::services::mention_service::MentionService;
@@ -38,6 +42,10 @@ use crate::services::worktree_service::{
 use crate::util::error_format::format_job_error;
 use crate::util::truncate::truncate_with_ellipsis;
 use crate::AppState;
+use crate::{
+    knowledge::embedding_provider,
+    knowledge::retrieval::{has_eligible, retrieve},
+};
 use time::format_description::well_known::Rfc3339;
 
 #[derive(Debug)]
@@ -277,6 +285,26 @@ async fn execute_job(
     };
     let resume_context_ref = resume_context.as_deref();
 
+    let latest_comments_owned = if run.context_profile == ContextProfile::Full {
+        let comments = CommentService::new(pool)
+            .list_by_ticket(run.ticket_id)
+            .await
+            .context("load latest comments for full context")?;
+        ticket_thread::format_ticket_thread_with_limit(
+            &comments,
+            &agent_names,
+            state
+                .config
+                .knowledge
+                .context_budget
+                .latest_comments
+                .saturating_mul(4),
+        )
+    } else {
+        None
+    };
+    let latest_comments_ref = latest_comments_owned.as_deref();
+
     let thread_excerpt_owned = if run.context_profile == ContextProfile::HumanChat {
         let comments = CommentService::new(pool)
             .list_by_ticket(run.ticket_id)
@@ -360,6 +388,22 @@ async fn execute_job(
         .await
         .context("sync worktree to branch tip")?;
 
+    let project_rules_owned = if run.context_profile == ContextProfile::Full {
+        let project_rules_path = paths.worktree_dir.join("AGENTS.md");
+        match std::fs::read_to_string(&project_rules_path) {
+            Ok(rules) => Some(rules),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+            Err(error) => {
+                return Err(error).with_context(|| {
+                    format!("read project rules from {}", project_rules_path.display())
+                })
+            }
+        }
+    } else {
+        None
+    };
+    let project_rules_ref = project_rules_owned.as_deref();
+
     let ticket_substatus = ticket
         .ticket
         .substatus
@@ -385,6 +429,8 @@ async fn execute_job(
         repo_remote_url: repo_remote_url.as_deref(),
         repo_default_branch: Some(&repo_default_branch),
         worktree_path: Some(&worktree_path),
+        latest_comments: latest_comments_ref,
+        project_rules: project_rules_ref,
         resume_context: resume_context_ref,
         context_profile: run.context_profile,
         human_request,
@@ -393,7 +439,75 @@ async fn execute_job(
         thread_excerpt: thread_excerpt_ref,
         consultation_request: consultation_request_ref,
     };
-    write_context_file(&paths.worktree_dir, &context_input).context("write context file")?;
+    if run.context_profile == ContextProfile::Full {
+        let counter = ByteTokenCounter;
+        let knowledge_section = if state.config.knowledge.enabled
+            && has_eligible(
+                pool,
+                ticket.ticket.project_id,
+                run.agent_id,
+                &state.config.knowledge.retrieval,
+            )
+            .await
+            .context("check eligible knowledge")?
+        {
+            let provider = embedding_provider(&state.config.knowledge.embedding)
+                .context("configure knowledge embedding provider")?;
+            let query_text = format!(
+                "{}\n\n{}",
+                ticket.ticket.title,
+                ticket.ticket.description.chars().take(32_000).collect::<String>()
+            );
+            let query_vectors = provider
+                .embed(&[query_text])
+                .await
+                .context("embed knowledge retrieval query")?;
+            let query_vector = query_vectors
+                .first()
+                .context("knowledge query embedding missing")?;
+            let retrieved = retrieve(
+                pool,
+                ticket.ticket.project_id,
+                run.agent_id,
+                query_vector,
+                &state.config.knowledge.retrieval,
+            )
+            .await
+            .context("retrieve knowledge")?;
+            render_knowledge(
+                &retrieved,
+                state
+                    .config
+                    .knowledge
+                    .context_budget
+                    .retrieved_knowledge,
+                &counter,
+            )
+        } else {
+            KnowledgeSection::default()
+        };
+        let budgeted = build_budgeted_context(
+            &context_input,
+            &knowledge_section,
+            &state.config.knowledge.context_budget,
+            &counter,
+        )
+        .context("enforce agent context budget")?;
+        write_context_document(&paths.worktree_dir, &budgeted.markdown)
+            .context("write context file")?;
+        record_usage(pool, run.id, &budgeted.knowledge_entries)
+            .await
+            .context("record knowledge usage")?;
+        tracing::debug!(
+            run_id = %run.id,
+            tokens = budgeted.token_count,
+            token_counter = budgeted.token_counter,
+            knowledge_entries = budgeted.knowledge_entries.len(),
+            "wrote budgeted agent context"
+        );
+    } else {
+        write_context_file(&paths.worktree_dir, &context_input).context("write context file")?;
+    }
 
     if run.context_profile != ContextProfile::Full {
         let comments = CommentService::new(pool)

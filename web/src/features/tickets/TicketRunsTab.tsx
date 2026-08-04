@@ -1,6 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { useAgents } from '../agents/useAgents';
+import { KnowledgeUsed } from '../knowledge/KnowledgeUsed';
 import type { AgentRun, RunStatus } from '../../lib/schemas/agentRun';
+import { useOpenTicket } from './useOpenTicket';
 import { useAgentRuns } from './useAgentRuns';
 
 interface TicketRunsTabProps {
@@ -71,11 +73,9 @@ function RunRow({
   run: AgentRun;
   agents: { id: string; name: string }[] | undefined;
 }) {
-  const [expanded, setExpanded] = useState(run.status === 'failed');
-
-  useEffect(() => {
-    setExpanded(run.status === 'failed');
-  }, [run.status, run.errorMessage]);
+  const [errorExpanded, setErrorExpanded] = useState(false);
+  const [detailsExpanded, setDetailsExpanded] = useState(false);
+  const openTicket = useOpenTicket();
 
   return (
     <article className="rounded-md border border-border bg-surface px-4 py-3">
@@ -129,19 +129,33 @@ function RunRow({
           {run.status !== 'failed' && (
             <button
               type="button"
-              onClick={() => setExpanded((value) => !value)}
+              onClick={() => setErrorExpanded((value) => !value)}
               className="font-body text-xs font-medium text-danger underline-offset-2 hover:underline"
             >
-              {expanded ? 'Hide error' : 'Show error'}
+              {errorExpanded ? 'Hide error' : 'Show error'}
             </button>
           )}
-          {(expanded || run.status === 'failed') && (
+          {(errorExpanded || run.status === 'failed') && (
             <pre className="mt-2 overflow-x-auto rounded-md border border-danger-muted bg-danger-muted/30 p-2 font-mono text-xs text-danger whitespace-pre-wrap">
               {run.errorMessage}
             </pre>
           )}
         </div>
       )}
+
+      <button
+        type="button"
+        onClick={() => setDetailsExpanded((value) => !value)}
+        aria-expanded={detailsExpanded}
+        className="mt-3 font-body text-xs font-medium text-moss-700 underline-offset-2 hover:underline"
+      >
+        {detailsExpanded ? 'Hide run details' : 'Show run details'}
+      </button>
+      <KnowledgeUsed
+        runId={run.id}
+        enabled={detailsExpanded}
+        onOpenTicket={openTicket}
+      />
     </article>
   );
 }

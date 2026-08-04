@@ -85,6 +85,9 @@ impl From<AgentError> for RunError {
             AgentError::AgentNotFound => RunError::Validation("agent not found".into()),
             AgentError::PresetNotFound => RunError::Validation("preset not found".into()),
             AgentError::Validation(msg) => RunError::Validation(msg),
+            AgentError::KnowledgeProvenanceConflict => {
+                RunError::Validation("agent has immutable knowledge provenance".into())
+            }
             AgentError::Database(e) => RunError::Database(e),
         }
     }
