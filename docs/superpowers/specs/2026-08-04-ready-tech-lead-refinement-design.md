@@ -25,6 +25,8 @@ Full-context `work_on_ticket` runs select technical refinement when the ticket i
 - requires a successful result to hand ownership to an enabled implementer;
 - preserves blocked PM clarification through `mentionAgents`.
 
+Human-triggered Agent mode and non-`work_on_ticket` jobs remain outside this specialization and preserve their existing context, workflow, fixture, and git behavior.
+
 PM guidance defines one intent per target: `assignTo` transfers or recommends ownership, `agentRequests` requests bounded consultation, and successful `mentionAgents` only notifies. A formal PM-to-Tech-Lead handoff uses only `assignTo` for that target.
 
 ## Workflow resolution
@@ -35,7 +37,7 @@ The workflow resolver recognizes Ready-stage Tech Lead refinement before generic
 - Missing, empty, unknown, disabled, or non-implementer targets leave status and assignment unchanged and add an actionable system comment listing available implementer keys.
 - The refinement result never moves the ticket directly to `In Progress` or `In Review`.
 
-With `auto_start_runs`, the existing orchestrator starts one `work_on_ticket` run for an immediately assigned implementer. The existing run-start gate owns `Ready → In Progress`. Successful refinement consultations are not auto-dispatched, so a valid handoff produces exactly one implementer run and an invalid handoff produces no run.
+With `auto_start_runs`, the existing orchestrator starts one `work_on_ticket` run for an immediately assigned implementer. The existing run-start gate owns `Ready → In Progress`. If the assignee already has an active consultation, assignment in `Ready` is the durable deferred-work marker: the consultation's terminal hook starts the ownership run idempotently after releasing the active-run guard. Successful refinement consultations are not auto-dispatched, so a valid handoff produces exactly one implementer run and an invalid handoff produces no run.
 
 Blocked Ready-stage Tech Lead results bypass verification handoff logic. A PM mention creates the existing response job with the Tech Lead as `resume_agent_id`; the PM answer restores Tech Lead assignment and queues the same `work_on_ticket` job while status remains `Ready`. Context reconstruction therefore selects the same technical-refinement contract without a new job type.
 

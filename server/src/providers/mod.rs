@@ -23,6 +23,7 @@ use std::sync::Arc;
 use thiserror::Error;
 use tokio::sync::watch;
 
+use crate::domain::context_profile::ContextProfile;
 use crate::domain::substatus::TicketStatus;
 use crate::domain::workflow::SplitTicketSpec;
 use crate::sessions::run_registry::RunStreamHandle;
@@ -42,9 +43,11 @@ pub struct AgentRequest {
 pub struct AgentRunInput {
     pub agent_id: String,
     pub agent_key: String,
+    pub agent_role: String,
     pub job_type: String,
     pub ticket_id: Option<String>,
     pub ticket_status: Option<TicketStatus>,
+    pub context_profile: ContextProfile,
     pub context_path: String,
     pub run_id: Option<String>,
     pub artifacts_dir: Option<String>,
@@ -196,9 +199,11 @@ mod tests {
             .run(AgentRunInput {
                 agent_id: "agent-1".into(),
                 agent_key: "agent-1".into(),
+                agent_role: "Backend Engineer".into(),
                 job_type: "work_on_ticket".into(),
                 ticket_id: None,
                 ticket_status: None,
+                context_profile: ContextProfile::Full,
                 context_path: "/tmp".into(),
                 run_id: None,
                 artifacts_dir: None,

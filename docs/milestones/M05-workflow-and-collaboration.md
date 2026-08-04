@@ -105,12 +105,14 @@ Blocked `work_on_ticket` mentions retain the original clarification flow shown a
 
 `Ready` is the pre-implementation coordination gate in the fixed board. A Tech Lead assigned there runs the ordinary full-context `work_on_ticket` job, but status plus role selects a mandatory technical-refinement contract instead of implementer guidance:
 
+Human-triggered Agent mode and non-`work_on_ticket` jobs are not ownership refinement runs. They retain their existing context, fixture routing, workflow, and git behavior even when the selected agent is a Tech Lead and the ticket is in `Ready`.
+
 1. Inspect requirements and repository architecture using read-only checks.
 2. Record a concrete technical approach, affected boundaries, decisions, and risks through `updatedDescription`, with an optional refined `acceptanceCriteria` checklist and a concise thread summary.
 3. Do not implement, edit source files, stage, or commit. `changedFiles` must remain empty, and the worker skips git finalization defensively.
 4. On success, return `assignTo` naming a different enabled implementer; the Tech Lead cannot hand ownership back to itself. Do not send a parallel consultation as part of the formal handoff.
 
-The Tech Lead completion itself leaves the ticket in `Ready`. A valid target follows `workflow.auto_assign` for the Ready status: immediate assignment when enabled, otherwise a pending recommendation for human approval. With `auto_start_runs`, an immediate assignment queues exactly one implementer `work_on_ticket` run; the existing run-start gate owns `Ready → In Progress`. Missing, blank, unknown, disabled, or non-implementer targets leave status and assignment unchanged, start nobody, and add an actionable system comment listing enabled implementer keys.
+The Tech Lead completion itself leaves the ticket in `Ready`. A valid target follows `workflow.auto_assign` for the Ready status: immediate assignment when enabled, otherwise a pending recommendation for human approval. With `auto_start_runs`, an immediate assignment queues exactly one implementer `work_on_ticket` run; the existing run-start gate owns `Ready → In Progress`. If that implementer is already answering a consultation, the Ready assignment durably defers its ownership run until the active response terminates, and the active-run guard keeps the later start idempotent. Missing, blank, unknown, disabled, or non-implementer targets leave status and assignment unchanged, start nobody, and add an actionable system comment listing enabled implementer keys.
 
 Blocked requirements clarification keeps the same job model. A Ready Tech Lead may mention PM, receive a response-only answer, and resume `work_on_ticket` while the ticket is still `Ready`; rebuilt context therefore selects the same technical-refinement contract. An informal Tech Lead opinion is instead requested with `agentRequests`, never transfers ownership, and never advances workflow.
 

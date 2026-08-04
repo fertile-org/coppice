@@ -1,6 +1,7 @@
 use std::path::Path;
 
 use crate::domain::context_profile::ContextProfile;
+use crate::domain::workflow::{is_ready_tech_lead_refinement, is_tech_lead_identity};
 use crate::sandbox::permissive::SANDBOX_NOTE;
 use uuid::Uuid;
 
@@ -14,6 +15,7 @@ pub struct ContextInput<'a> {
     pub ticket_title: &'a str,
     pub ticket_description: &'a str,
     pub ticket_status: &'a str,
+    pub job_type: &'a str,
     pub ticket_substatus: Option<&'a str>,
     pub agent_name: &'a str,
     pub agent_key: &'a str,
@@ -573,11 +575,7 @@ fn is_pm_agent(input: &ContextInput) -> bool {
 }
 
 fn is_tech_lead_agent(input: &ContextInput) -> bool {
-    if input.agent_key.eq_ignore_ascii_case("tech_lead") {
-        return true;
-    }
-    let role = input.agent_role.to_ascii_lowercase();
-    role.contains("tech lead") || role.contains("technical lead")
+    is_tech_lead_identity(input.agent_key, input.agent_role)
 }
 
 fn is_reviewer_agent(input: &ContextInput) -> bool {
@@ -593,7 +591,13 @@ fn is_in_review_review_task(input: &ContextInput) -> bool {
 }
 
 fn is_ready_tech_lead_task(input: &ContextInput) -> bool {
-    input.ticket_status.eq_ignore_ascii_case("ready") && is_tech_lead_agent(input)
+    is_ready_tech_lead_refinement(
+        input.context_profile,
+        input.job_type,
+        input.ticket_status,
+        input.agent_key,
+        input.agent_role,
+    )
 }
 
 fn is_in_qa_qc_task(input: &ContextInput) -> bool {
@@ -828,6 +832,7 @@ mod tests {
             ticket_title: "Fix polling",
             ticket_description: "Add retry",
             ticket_status: "in_progress",
+            job_type: "work_on_ticket",
             ticket_substatus: None,
             agent_name: "FE Agent",
             agent_key: "frontend_engineer",
@@ -873,6 +878,7 @@ mod tests {
             ticket_title: "Prevent duplicate dispatch",
             ticket_description: "The full implementation ticket.",
             ticket_status: "ready",
+            job_type: "respond_to_mention",
             ticket_substatus: None,
             agent_name: "Tech Lead Agent",
             agent_key: "tech_lead",
@@ -928,6 +934,7 @@ mod tests {
             ticket_title: "Integrate CLI",
             ticket_description: "Add connector",
             ticket_status: "backlog",
+            job_type: "work_on_ticket",
             ticket_substatus: None,
             agent_name: "PM Agent",
             agent_key: "pm",
@@ -967,6 +974,7 @@ mod tests {
             ticket_title: "Retry upstream requests",
             ticket_description: "Define the implementation approach before engineering starts.",
             ticket_status: "ready",
+            job_type: "work_on_ticket",
             ticket_substatus: None,
             agent_name: "Tech Lead Agent",
             agent_key: "tech_lead",
@@ -1006,6 +1014,41 @@ mod tests {
     }
 
     #[test]
+    fn tech_lead_in_ready_non_work_context_keeps_generic_contract() {
+        let (context_profile, human_request, ticket_id, assignee_agent_key, thread_excerpt) =
+            full_profile_defaults();
+        let md = build_context_md(&ContextInput {
+            ticket_title: "Retry upstream requests",
+            ticket_description: "Inspect a bounded question outside ticket ownership.",
+            ticket_status: "ready",
+            job_type: "review_ticket",
+            ticket_substatus: None,
+            agent_name: "Tech Lead Agent",
+            agent_key: "tech_lead",
+            agent_role: "Technical Lead",
+            agent_skills: &[],
+            agent_responsibilities: &[],
+            agent_system_prompt: "You are the Tech Lead.",
+            repo_name: Some("coppice"),
+            repo_remote_url: None,
+            repo_default_branch: Some("main"),
+            worktree_path: Some("/tmp/worktree"),
+            resume_context: None,
+            context_profile,
+            human_request,
+            ticket_id,
+            assignee_agent_key,
+            thread_excerpt,
+            consultation_request: None,
+        });
+
+        assert!(!md.contains("Coppice platform rules — Ready technical refinement"));
+        assert!(md.contains("Coppice platform rules — implementer completion"));
+        assert!(md.contains("Coppice platform rules — git (required)"));
+        assert!(md.contains("\"changedFiles\": [\"<paths changed>\"]"));
+    }
+
+    #[test]
     fn context_includes_resume_section_when_provided() {
         let (context_profile, human_request, ticket_id, assignee_agent_key, thread_excerpt) =
             full_profile_defaults();
@@ -1013,6 +1056,7 @@ mod tests {
             ticket_title: "Fix polling",
             ticket_description: "Add retry",
             ticket_status: "in_progress",
+            job_type: "work_on_ticket",
             ticket_substatus: None,
             agent_name: "FE Agent",
             agent_key: "frontend_engineer",
@@ -1047,6 +1091,7 @@ mod tests {
             ticket_title: "Streaming feature",
             ticket_description: "Add WS streaming",
             ticket_status: "in_review",
+            job_type: "work_on_ticket",
             ticket_substatus: None,
             agent_name: "Tech Lead Agent",
             agent_key: "tech_lead",
@@ -1080,6 +1125,7 @@ mod tests {
             ticket_title: "Verify retry behavior",
             ticket_description: "QC the retry fix",
             ticket_status: "in_qa",
+            job_type: "work_on_ticket",
             ticket_substatus: None,
             agent_name: "QC Agent",
             agent_key: "qc",
@@ -1123,6 +1169,7 @@ mod tests {
             ticket_title: "Fix polling",
             ticket_description: "Add retry",
             ticket_status: "in_progress",
+            job_type: "work_on_ticket",
             ticket_substatus: None,
             agent_name: "FE Agent",
             agent_key: "frontend_engineer",
@@ -1161,6 +1208,7 @@ mod tests {
             ticket_title: "Fix polling",
             ticket_description: "Full description that should not appear",
             ticket_status: "in_progress",
+            job_type: "work_on_ticket",
             ticket_substatus: Some("implementing"),
             agent_name: "FE Agent",
             agent_key: "frontend_engineer",
@@ -1203,6 +1251,7 @@ mod tests {
             ticket_title: "Fix polling",
             ticket_description: "Full description that should not appear",
             ticket_status: "in_progress",
+            job_type: "work_on_ticket",
             ticket_substatus: None,
             agent_name: "FE Agent",
             agent_key: "frontend_engineer",
@@ -1246,6 +1295,7 @@ mod tests {
             ticket_title: "Fix polling",
             ticket_description: "Full description that should not appear",
             ticket_status: "in_progress",
+            job_type: "respond_to_mention",
             ticket_substatus: Some("implementing"),
             agent_name: "FE Agent",
             agent_key: "frontend_engineer",

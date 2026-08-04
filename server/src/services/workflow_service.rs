@@ -1,6 +1,9 @@
+use crate::domain::context_profile::ContextProfile;
 use crate::domain::substatus::{Substatus, TicketStatus};
+use crate::domain::ticket::status_to_str;
 use crate::domain::workflow::{
-    JobRequest, PendingRecommendation, RunOutcome, TransitionAction, TransitionContext,
+    is_ready_tech_lead_refinement as matches_ready_tech_lead_refinement, JobRequest,
+    PendingRecommendation, RunOutcome, TransitionAction, TransitionContext,
 };
 use crate::providers::AgentRunResult;
 use time::format_description::well_known::Rfc3339;
@@ -156,11 +159,18 @@ impl WorkflowService {
         agent_key: &str,
         agent_role: &str,
         job_type: &str,
+        context_profile: ContextProfile,
     ) -> Option<TicketStatus> {
-        if job_type != "work_on_ticket" {
+        if context_profile == ContextProfile::HumanAgent || job_type != "work_on_ticket" {
             return None;
         }
-        if current == TicketStatus::Ready && is_tech_lead_identity(agent_key, agent_role) {
+        if matches_ready_tech_lead_refinement(
+            context_profile,
+            job_type,
+            status_to_str(current),
+            agent_key,
+            agent_role,
+        ) {
             return None;
         }
         match (current, agent_role) {
@@ -251,12 +261,13 @@ fn resolve_verification_handoff(ctx: &TransitionContext) -> Option<VerificationH
 }
 
 fn is_ready_tech_lead_refinement(ctx: &TransitionContext) -> bool {
-    ctx.current_status == TicketStatus::Ready
-        && is_tech_lead_identity(&ctx.agent_key, &ctx.agent_role)
-}
-
-fn is_tech_lead_identity(agent_key: &str, agent_role: &str) -> bool {
-    agent_key.eq_ignore_ascii_case("tech_lead") || is_tech_lead(agent_role)
+    matches_ready_tech_lead_refinement(
+        ctx.context_profile,
+        &ctx.job_type,
+        status_to_str(ctx.current_status),
+        &ctx.agent_key,
+        &ctx.agent_role,
+    )
 }
 
 fn resolve_ready_tech_lead_handoff(ctx: &TransitionContext) -> TransitionAction {
@@ -1113,6 +1124,7 @@ mod tests {
                 "backend_engineer",
                 "Backend Engineer",
                 "work_on_ticket",
+                ContextProfile::Full,
             ),
             Some(TicketStatus::InProgress)
         );
@@ -1126,6 +1138,7 @@ mod tests {
                 "research",
                 "Researcher",
                 "work_on_ticket",
+                ContextProfile::Full,
             ),
             Some(TicketStatus::InProgress)
         );
@@ -1139,6 +1152,7 @@ mod tests {
                 "tech_lead",
                 "Technical Lead Engineer",
                 "work_on_ticket",
+                ContextProfile::Full,
             ),
             None
         );
@@ -1152,6 +1166,21 @@ mod tests {
                 "tech_lead",
                 "Lead Engineer",
                 "work_on_ticket",
+                ContextProfile::Full,
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn ready_tech_lead_human_agent_run_uses_existing_no_transition_behavior() {
+        assert_eq!(
+            WorkflowService::resolve_run_start_transition(
+                TicketStatus::Ready,
+                "tech_lead",
+                "Technical Lead Engineer",
+                "work_on_ticket",
+                ContextProfile::HumanAgent,
             ),
             None
         );
@@ -1165,6 +1194,7 @@ mod tests {
                 "backend_engineer",
                 "Backend Engineer",
                 "respond_to_mention",
+                ContextProfile::Full,
             ),
             None
         );

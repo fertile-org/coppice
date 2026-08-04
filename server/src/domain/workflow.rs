@@ -76,3 +76,53 @@ pub struct TransitionAction {
     /// System comments explaining workflow issues (unknown assignee, etc.).
     pub system_comments: Vec<String>,
 }
+
+pub fn is_ready_tech_lead_refinement(
+    context_profile: ContextProfile,
+    job_type: &str,
+    ticket_status: &str,
+    agent_key: &str,
+    agent_role: &str,
+) -> bool {
+    context_profile == ContextProfile::Full
+        && job_type == "work_on_ticket"
+        && ticket_status.eq_ignore_ascii_case("ready")
+        && is_tech_lead_identity(agent_key, agent_role)
+}
+
+pub fn is_tech_lead_identity(agent_key: &str, agent_role: &str) -> bool {
+    let role = agent_role.to_ascii_lowercase();
+    agent_key.eq_ignore_ascii_case("tech_lead")
+        || role.contains("tech lead")
+        || role.contains("technical lead")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ready_tech_lead_refinement_requires_full_work_context() {
+        assert!(is_ready_tech_lead_refinement(
+            ContextProfile::Full,
+            "work_on_ticket",
+            "ready",
+            "tech_lead",
+            "Lead Engineer",
+        ));
+        assert!(!is_ready_tech_lead_refinement(
+            ContextProfile::HumanAgent,
+            "work_on_ticket",
+            "ready",
+            "tech_lead",
+            "Technical Lead",
+        ));
+        assert!(!is_ready_tech_lead_refinement(
+            ContextProfile::Full,
+            "respond_to_mention",
+            "ready",
+            "tech_lead",
+            "Technical Lead",
+        ));
+    }
+}

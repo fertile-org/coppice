@@ -209,8 +209,13 @@ impl<'a> RunService<'a> {
 
         tx.commit().await?;
 
-        self.apply_run_start_status(ticket_id, agent_id, JOB_TYPE_WORK_ON_TICKET)
-            .await?;
+        self.apply_run_start_status(
+            ticket_id,
+            agent_id,
+            JOB_TYPE_WORK_ON_TICKET,
+            ContextProfile::Full,
+        )
+        .await?;
 
         Ok(row_to_run(&row))
     }
@@ -220,6 +225,7 @@ impl<'a> RunService<'a> {
         ticket_id: Uuid,
         agent_id: Uuid,
         job_type: &str,
+        context_profile: ContextProfile,
     ) -> Result<Option<TicketWithDisplay>, RunError> {
         let ticket_svc = TicketService::new(self.pool);
         let ticket = ticket_svc.get(ticket_id).await?;
@@ -233,6 +239,7 @@ impl<'a> RunService<'a> {
             &agent_key,
             &agent.role,
             job_type,
+            context_profile,
         ) else {
             return Ok(None);
         };
@@ -498,10 +505,8 @@ impl<'a> RunService<'a> {
 
         tx.commit().await?;
 
-        if options.context_profile != ContextProfile::HumanAgent {
-            self.apply_run_start_status(ticket_id, agent_id, job_type)
-                .await?;
-        }
+        self.apply_run_start_status(ticket_id, agent_id, job_type, options.context_profile)
+            .await?;
 
         Ok(row_to_run(&row))
     }

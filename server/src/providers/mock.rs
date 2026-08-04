@@ -1,5 +1,6 @@
 use super::{fixtures_root, AgentProvider, AgentRunInput, AgentRunResult, ProviderError};
-use crate::domain::substatus::TicketStatus;
+use crate::domain::ticket::status_to_str;
+use crate::domain::workflow::is_ready_tech_lead_refinement;
 use async_trait::async_trait;
 use std::path::PathBuf;
 
@@ -35,9 +36,15 @@ impl MockProvider {
             return resume;
         }
         let ready = self.fixtures_dir.join(&input.agent_key).join("ready.json");
-        if input.job_type == "work_on_ticket"
-            && input.ticket_status == Some(TicketStatus::Ready)
-            && ready.exists()
+        if input.ticket_status.is_some_and(|status| {
+            is_ready_tech_lead_refinement(
+                input.context_profile,
+                &input.job_type,
+                status_to_str(status),
+                &input.agent_key,
+                &input.agent_role,
+            )
+        }) && ready.exists()
         {
             return ready;
         }
@@ -115,6 +122,10 @@ impl AgentProvider for MockProvider {
 }
 
 #[cfg(test)]
+use crate::domain::context_profile::ContextProfile;
+#[cfg(test)]
+use crate::domain::substatus::TicketStatus;
+#[cfg(test)]
 use std::sync::{Mutex, MutexGuard};
 
 #[cfg(test)]
@@ -166,9 +177,16 @@ mod tests {
         AgentRunInput {
             agent_id: agent_key.into(),
             agent_key: agent_key.into(),
+            agent_role: match agent_key {
+                "tech_lead" => "Technical Lead",
+                "pm" => "PM",
+                _ => "Backend Engineer",
+            }
+            .into(),
             job_type: job_type.into(),
             ticket_id: None,
             ticket_status: None,
+            context_profile: ContextProfile::Full,
             context_path: "/tmp".into(),
             run_id: None,
             artifacts_dir: None,
@@ -345,6 +363,23 @@ mod tests {
             }
             _ => panic!("expected review result"),
         }
+
+        let mut human_agent_input = base_input("tech_lead", "work_on_ticket");
+        human_agent_input.ticket_status = Some(TicketStatus::Ready);
+        human_agent_input.context_profile = ContextProfile::HumanAgent;
+        let human_agent_result = provider
+            .run(human_agent_input)
+            .await
+            .expect("Human Agent Tech Lead fixture");
+        match human_agent_result {
+            AgentRunResult::Done {
+                assign_to, summary, ..
+            } => {
+                assert!(assign_to.is_none());
+                assert!(summary.contains("## Verdict"));
+            }
+            _ => panic!("expected regular work fixture for Human Agent mode"),
+        }
     }
 
     #[tokio::test]
@@ -377,9 +412,11 @@ mod tests {
             .run(AgentRunInput {
                 agent_id: "agent-1".into(),
                 agent_key: "agent-1".into(),
+                agent_role: "Backend Engineer".into(),
                 job_type: "work_on_ticket".into(),
                 ticket_id: None,
                 ticket_status: None,
+                context_profile: ContextProfile::Full,
                 context_path: "/tmp".into(),
                 run_id: Some(run_id.into()),
                 artifacts_dir: Some(artifacts.path().to_string_lossy().into_owned()),

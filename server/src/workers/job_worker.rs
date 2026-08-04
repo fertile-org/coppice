@@ -14,6 +14,7 @@ use crate::domain::run::{run_status_to_str, AgentRun, RunStatus};
 use crate::domain::slug::slugify;
 use crate::domain::substatus::TicketStatus;
 use crate::domain::ticket::{status_to_str, substatus_to_str};
+use crate::domain::workflow::is_ready_tech_lead_refinement;
 use crate::events::{publish_run_finished, AppEvent};
 use crate::providers::{AgentRunInput, ProviderError};
 use crate::services::agent_request::agent_request_for_target_from_comment;
@@ -215,6 +216,7 @@ async fn execute_job(
             &agent_key,
             &agent.role,
             &run.job_type,
+            run.context_profile,
         ) {
             let updated = TicketService::new(pool)
                 .update_status(run.ticket_id, new_status, None, None)
@@ -374,6 +376,7 @@ async fn execute_job(
         ticket_title: &ticket.ticket.title,
         ticket_description,
         ticket_status: status_to_str(ticket.ticket.status),
+        job_type: &run.job_type,
         ticket_substatus,
         agent_name: &agent.name,
         agent_key: &agent_key,
@@ -458,9 +461,11 @@ async fn execute_job(
         .run(AgentRunInput {
             agent_id: run.agent_id.to_string(),
             agent_key: agent_key.clone(),
+            agent_role: agent.role.clone(),
             job_type: run.job_type.clone(),
             ticket_id: Some(run.ticket_id.to_string()),
             ticket_status: Some(ticket.ticket.status),
+            context_profile: run.context_profile,
             context_path,
             run_id: Some(run.id.to_string()),
             artifacts_dir: Some(state.config.storage.artifacts_dir.clone()),
@@ -691,8 +696,6 @@ fn is_qc_agent(agent: &crate::domain::agent::Agent) -> bool {
 
 /// Whether a successful `work_on_ticket` run should auto-commit worktree changes.
 ///
-/// Ready-stage Tech Lead runs are technical refinement only. They may update the
-/// ticket contract but must never present worktree changes as implementation.
 /// QC is verification-only in `in_qa`: it must not present its (potential) edits as
 /// committed implementation work. Skip git finalization for QC verification runs so
 /// any stray changes never become the ticket's implementation commit.
@@ -700,9 +703,6 @@ fn should_finalize_worktree_git(
     agent: &crate::domain::agent::Agent,
     ticket_status: TicketStatus,
 ) -> bool {
-    if is_tech_lead_agent(agent) && ticket_status == TicketStatus::Ready {
-        return false;
-    }
     if is_qc_agent(agent) && ticket_status == TicketStatus::InQa {
         return false;
     }
@@ -714,7 +714,20 @@ fn should_finalize_run_git(
     agent: &crate::domain::agent::Agent,
     ticket_status: TicketStatus,
 ) -> bool {
-    run.job_type == "work_on_ticket" && should_finalize_worktree_git(agent, ticket_status)
+    if run.job_type != "work_on_ticket" {
+        return false;
+    }
+    let agent_key = agent
+        .preset_source
+        .clone()
+        .unwrap_or_else(|| slugify(&agent.name));
+    !is_ready_tech_lead_refinement(
+        run.context_profile,
+        &run.job_type,
+        status_to_str(ticket_status),
+        &agent_key,
+        &agent.role,
+    ) && should_finalize_worktree_git(agent, ticket_status)
 }
 
 fn consultation_request_from_trigger(
@@ -950,7 +963,21 @@ mod tests {
     #[test]
     fn should_not_finalize_git_for_ready_tech_lead() {
         let tech_lead = test_agent("Technical Lead", Some("tech_lead"));
-        assert!(!should_finalize_worktree_git(
+        assert!(!should_finalize_run_git(
+            &test_run("work_on_ticket"),
+            &tech_lead,
+            TicketStatus::Ready
+        ));
+    }
+
+    #[test]
+    fn ready_tech_lead_human_agent_run_still_finalizes_git() {
+        let tech_lead = test_agent("Technical Lead", Some("tech_lead"));
+        let mut run = test_run("work_on_ticket");
+        run.context_profile = ContextProfile::HumanAgent;
+
+        assert!(should_finalize_run_git(
+            &run,
             &tech_lead,
             TicketStatus::Ready
         ));
