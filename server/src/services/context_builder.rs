@@ -99,7 +99,7 @@ fn build_consultation_context(input: &ContextInput, request: &str) -> String {
     let skills = format_bullet_list(input.agent_skills);
     let responsibilities = format_bullet_list(input.agent_responsibilities);
     let repository_section = format_repository_section(input);
-    let thread_section = format_resume_section(input);
+    let thread_section = format_consultation_thread_section(input);
 
     format!(
         r#"# Consultation request (answer this first)
@@ -789,6 +789,15 @@ fn format_resume_section(input: &ContextInput) -> String {
     }
 }
 
+fn format_consultation_thread_section(input: &ContextInput) -> String {
+    let mut section = match input.latest_comments {
+        Some(comments) => format!("## Ticket thread\n\n{comments}\n\n"),
+        None => String::new(),
+    };
+    section.push_str(&format_resume_section(input));
+    section
+}
+
 fn format_latest_comments_section(input: &ContextInput) -> String {
     match input.latest_comments {
         Some(comments) => format!("# Latest comments\n\n{comments}\n\n"),
@@ -1008,6 +1017,45 @@ mod tests {
         assert!(md.contains("Coppice platform rules — implementer completion"));
         assert!(md.contains("Coppice platform rules — git (required)"));
         assert!(md.contains("\"changedFiles\": [\"<paths changed>\"]"));
+    }
+
+    #[test]
+    fn first_time_consultation_includes_bounded_ticket_thread() {
+        let latest_comments = "Recent activity on this ticket (oldest first):\n\n\
+- **Frontend Engineer** (implementation done): Added the initial UI flow.";
+        let request = "Verify the data assumptions used by the frontend implementation.";
+        let md = build_context_md(&ContextInput {
+            ticket_title: "Validate frontend data assumptions",
+            ticket_description: "Review the ticket before answering the bounded request.",
+            ticket_status: "in_progress",
+            ticket_substatus: None,
+            agent_name: "DBA Agent",
+            agent_key: "dba",
+            agent_role: "Database Administrator",
+            agent_skills: &[],
+            agent_responsibilities: &[],
+            agent_system_prompt: "Advise on database concerns.",
+            repo_name: Some("coppice"),
+            repo_remote_url: None,
+            repo_default_branch: Some("main"),
+            worktree_path: Some("/tmp/worktree"),
+            latest_comments: Some(latest_comments),
+            project_rules: None,
+            resume_context: None,
+            context_profile: ContextProfile::Full,
+            human_request: None,
+            ticket_id: None,
+            assignee_agent_key: Some("frontend_engineer"),
+            thread_excerpt: Some(request),
+        });
+
+        let ticket_pos = md.find("# Ticket context").expect("ticket context");
+        let thread_pos = md.find("## Ticket thread").expect("ticket thread");
+        let role_pos = md.find("# Agent role").expect("agent role");
+        assert!(ticket_pos < thread_pos);
+        assert!(thread_pos < role_pos);
+        assert!(md.contains(latest_comments));
+        assert!(!md.contains("# Previous attempt summary"));
     }
 
     #[test]
