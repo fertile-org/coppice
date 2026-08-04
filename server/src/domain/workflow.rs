@@ -23,6 +23,7 @@ pub struct TransitionContext {
     pub contract: AgentRunResult,
     pub project_agent_keys: Vec<String>,
     pub project_agent_ids: HashMap<String, Uuid>,
+    pub project_implementer_keys: Vec<String>,
     pub auto_assign_enabled: bool,
     pub clarification_round: i32,
     pub context_profile: ContextProfile,

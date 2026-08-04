@@ -25,7 +25,7 @@ use crate::services::split_service::SplitService;
 use crate::services::ticket_service::TicketService;
 use crate::services::ticket_thread;
 use crate::services::workflow_service::{
-    WorkflowService, MAX_CLARIFICATION_ROUNDS, MAX_MENTIONS_PER_RUN,
+    is_implementer, WorkflowService, MAX_CLARIFICATION_ROUNDS, MAX_MENTIONS_PER_RUN,
 };
 use serde_json::Value;
 use sqlx::PgPool;
@@ -92,7 +92,8 @@ impl<'a> RunOrchestrator<'a> {
         let original_description = ticket.ticket.description.clone();
         let agent = AgentService::new(self.pool).get(run.agent_id).await?;
         let agents = AgentService::new(self.pool).list_agents().await?;
-        let (project_agent_keys, project_agent_ids) = build_project_agent_maps(&agents);
+        let (project_agent_keys, project_agent_ids, project_implementer_keys) =
+            build_project_agent_maps(&agents);
 
         let agent_key = agent
             .preset_source
@@ -125,6 +126,7 @@ impl<'a> RunOrchestrator<'a> {
             contract: contract.clone(),
             project_agent_keys,
             project_agent_ids: project_agent_ids.clone(),
+            project_implementer_keys,
             auto_assign_enabled,
             clarification_round: ticket.ticket.clarification_round,
             context_profile: run.context_profile,
@@ -807,7 +809,7 @@ fn pending_recommendation_target(
     project_agent_ids.get(pending_key).copied()
 }
 
-fn build_project_agent_maps(agents: &[Agent]) -> (Vec<String>, HashMap<String, Uuid>) {
+fn build_project_agent_maps(agents: &[Agent]) -> (Vec<String>, HashMap<String, Uuid>, Vec<String>) {
     let mut keys = Vec::new();
 
     for agent in agents {
@@ -825,7 +827,23 @@ fn build_project_agent_maps(agents: &[Agent]) -> (Vec<String>, HashMap<String, U
         }
     }
 
-    (keys, resolve_agent_keys(agents))
+    let agent_ids = resolve_agent_keys(agents);
+    let implementer_ids = agents
+        .iter()
+        .filter(|agent| agent.enabled && is_implementer(&agent.role))
+        .map(|agent| agent.id)
+        .collect::<HashSet<_>>();
+    let implementer_keys = keys
+        .iter()
+        .filter(|key| {
+            agent_ids
+                .get(*key)
+                .is_some_and(|id| implementer_ids.contains(id))
+        })
+        .cloned()
+        .collect();
+
+    (keys, agent_ids, implementer_keys)
 }
 
 fn merge_substatus(
@@ -1366,6 +1384,7 @@ mod tests {
                 ("pm".into(), Uuid::from_u128(0x100)),
                 ("backend_engineer".into(), Uuid::from_u128(0x200)),
             ]),
+            project_implementer_keys: vec!["backend_engineer".into()],
             auto_assign_enabled: true,
             clarification_round: 0,
             context_profile: ContextProfile::HumanAgent,
