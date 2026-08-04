@@ -91,6 +91,7 @@ minimum_confidence = "high"
 
 [knowledge.retrieval]
 top_k = 8
+allowed_types = []
 minimum_confidence = "medium"
 minimum_similarity = 0.0
 default_page_size = 25

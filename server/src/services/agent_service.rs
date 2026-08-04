@@ -15,6 +15,8 @@ pub enum AgentError {
     PresetNotFound,
     #[error("validation error: {0}")]
     Validation(String),
+    #[error("agent cannot be deleted because immutable knowledge revisions reference it")]
+    KnowledgeProvenanceConflict,
     #[error(transparent)]
     Database(#[from] sqlx::Error),
 }
@@ -239,10 +241,31 @@ impl<'a> AgentService<'a> {
     }
 
     pub async fn delete(&self, agent_id: Uuid) -> Result<(), AgentError> {
+        let has_knowledge_provenance: bool = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM knowledge_revisions WHERE agent_id = $1)",
+        )
+        .bind(agent_id)
+        .fetch_one(self.pool)
+        .await?;
+        if has_knowledge_provenance {
+            return Err(AgentError::KnowledgeProvenanceConflict);
+        }
+
         let result = sqlx::query("DELETE FROM agents WHERE id = $1")
             .bind(agent_id)
             .execute(self.pool)
-            .await?;
+            .await
+            .map_err(|error| {
+                if error
+                    .as_database_error()
+                    .and_then(|database_error| database_error.constraint())
+                    == Some("knowledge_revisions_agent_id_fkey")
+                {
+                    AgentError::KnowledgeProvenanceConflict
+                } else {
+                    AgentError::Database(error)
+                }
+            })?;
 
         if result.rows_affected() == 0 {
             return Err(AgentError::AgentNotFound);

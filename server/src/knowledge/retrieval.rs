@@ -52,6 +52,7 @@ WITH eligible AS MATERIALIZED (
             WHEN 'medium' THEN r.confidence IN ('medium', 'high')
             ELSE r.confidence IN ('low', 'medium', 'high')
           END
+      AND (cardinality($7::text[]) = 0 OR r.knowledge_type = ANY($7::text[]))
       AND (
             r.scope = 'workspace'
             OR (r.scope = 'project' AND r.project_id = $1)
@@ -75,7 +76,7 @@ pub async fn has_eligible(
     pool: &PgPool,
     project_id: Uuid,
     agent_id: Uuid,
-    minimum_confidence: &str,
+    config: &KnowledgeRetrievalConfig,
 ) -> Result<bool, sqlx::Error> {
     sqlx::query_scalar(
         r#"
@@ -92,6 +93,7 @@ pub async fn has_eligible(
                     WHEN 'medium' THEN r.confidence IN ('medium', 'high')
                     ELSE r.confidence IN ('low', 'medium', 'high')
                   END
+              AND (cardinality($4::text[]) = 0 OR r.knowledge_type = ANY($4::text[]))
               AND (
                     r.scope = 'workspace'
                     OR (r.scope = 'project' AND r.project_id = $1)
@@ -102,7 +104,8 @@ pub async fn has_eligible(
     )
     .bind(project_id)
     .bind(agent_id)
-    .bind(minimum_confidence)
+    .bind(&config.minimum_confidence)
+    .bind(&config.allowed_types)
     .fetch_one(pool)
     .await
 }
@@ -123,6 +126,7 @@ pub async fn retrieve(
         .bind(vector)
         .bind(config.minimum_similarity as f64)
         .bind(top_k)
+        .bind(&config.allowed_types)
         .fetch_all(pool)
         .await?;
     rows.into_iter()

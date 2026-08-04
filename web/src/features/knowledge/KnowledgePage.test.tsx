@@ -5,6 +5,7 @@ import type { KnowledgeItem } from '../../lib/schemas/knowledge';
 import { KnowledgePage } from './KnowledgePage';
 
 const mocks = vi.hoisted(() => ({
+  items: [] as KnowledgeItem[],
   filter: null as unknown,
   create: vi.fn(),
   approve: vi.fn(),
@@ -94,7 +95,7 @@ vi.mock('./useKnowledge', () => ({
   useKnowledge: (filter: unknown) => {
     mocks.filter = filter;
     return {
-      data: { pages: [{ items: [item], nextCursor: null }] },
+      data: { pages: [{ items: mocks.items, nextCursor: null }] },
       isLoading: false,
       isError: false,
       hasNextPage: false,
@@ -115,6 +116,7 @@ vi.mock('./useKnowledge', () => ({
 describe('KnowledgePage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.items = [item];
     mocks.create.mockResolvedValue(item);
     mocks.approve.mockResolvedValue({ ...item, status: 'approved' });
   });
@@ -186,6 +188,97 @@ describe('KnowledgePage', () => {
         sourceId: null,
         sourceRunId: null,
         confidence: 'medium',
+      });
+    });
+  });
+
+  it('sends optimistic versions for edit and rejection actions', async () => {
+    render(<KnowledgePage />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
+    fireEvent.change(screen.getByLabelText('Revision title'), {
+      target: { value: 'Updated feedback loop' },
+    });
+    fireEvent.change(screen.getByLabelText('Revision content'), {
+      target: { value: 'Run the focused tests before review.' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Save revision' }));
+    await waitFor(() => {
+      expect(mocks.edit).toHaveBeenCalledWith({
+        id: item.id,
+        expectedVersion: item.version,
+        patch: {
+          title: 'Updated feedback loop',
+          content: 'Run the focused tests before review.',
+          confidence: 'high',
+        },
+      });
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Reject' }));
+    fireEvent.change(screen.getByLabelText('Reason (optional)'), {
+      target: { value: 'Too specific to this incident.' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Reject candidate' }));
+    await waitFor(() => {
+      expect(mocks.reject).toHaveBeenCalledWith({
+        id: item.id,
+        expectedVersion: item.version,
+        reason: 'Too specific to this incident.',
+      });
+    });
+  });
+
+  it('exposes supersede, stale, and expire actions for approved knowledge', async () => {
+    const approved = {
+      ...item,
+      status: 'approved' as const,
+      activeRevisionId: item.revisionId,
+      expiresAt: null,
+    };
+    mocks.items = [approved];
+    render(<KnowledgePage />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Supersede' }));
+    fireEvent.change(screen.getByLabelText('Revision title'), {
+      target: { value: 'Replacement feedback loop' },
+    });
+    fireEvent.change(screen.getByLabelText('Revision content'), {
+      target: { value: 'Use the replacement command.' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Create replacement' }));
+    await waitFor(() => {
+      expect(mocks.supersede).toHaveBeenCalledWith({
+        id: approved.id,
+        expectedVersion: approved.version,
+        replacement: {
+          scope: approved.scope,
+          projectId: approved.projectId,
+          agentId: approved.agentId,
+          knowledgeType: approved.knowledgeType,
+          title: 'Replacement feedback loop',
+          content: 'Use the replacement command.',
+          sourceType: 'human_note',
+          sourceId: null,
+          sourceRunId: null,
+          confidence: approved.confidence,
+        },
+      });
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Mark stale' }));
+    await waitFor(() => {
+      expect(mocks.stale).toHaveBeenCalledWith({
+        id: approved.id,
+        expectedVersion: approved.version,
+      });
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Expire now' }));
+    await waitFor(() => {
+      expect(mocks.expire).toHaveBeenCalledWith({
+        id: approved.id,
+        expectedVersion: approved.version,
       });
     });
   });

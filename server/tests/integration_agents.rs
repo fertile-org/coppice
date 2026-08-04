@@ -2,6 +2,7 @@ mod common;
 
 use axum::http::StatusCode;
 use tower::ServiceExt;
+use uuid::Uuid;
 
 #[tokio::test]
 async fn list_presets_has_ten_entries() {
@@ -204,4 +205,77 @@ async fn list_connectors_returns_mock() {
         .map(|i| i["id"].as_str().unwrap())
         .collect();
     assert!(ids.contains(&"mock"));
+}
+
+#[tokio::test]
+async fn deleting_agent_with_knowledge_provenance_returns_conflict_and_preserves_revision() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
+    let project_id = common::create_test_project(&app, &cookie, &csrf).await;
+    let agent_id = common::create_agent_with_preset_key(
+        &app,
+        "backend_engineer",
+        "Provenance Agent",
+        &cookie,
+        &csrf,
+    )
+    .await;
+    let create = app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            "/api/knowledge",
+            &serde_json::json!({
+                "scope": "agent",
+                "projectId": project_id,
+                "agentId": agent_id,
+                "knowledgeType": "test_command",
+                "title": "Agent-specific command",
+                "content": "Preserve this immutable provenance after deletion is refused.",
+                "sourceType": "human_note",
+                "confidence": "high"
+            })
+            .to_string(),
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(create.status(), StatusCode::CREATED);
+    let knowledge = common::json_body(create).await;
+    let item_id = knowledge["id"].as_str().unwrap();
+    let revision_id = Uuid::parse_str(knowledge["revisionId"].as_str().unwrap()).unwrap();
+
+    let deleted = app
+        .clone()
+        .oneshot(common::json_request(
+            "DELETE",
+            &format!("/api/agents/{agent_id}"),
+            "",
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(deleted.status(), StatusCode::CONFLICT);
+
+    let knowledge = app
+        .clone()
+        .oneshot(common::json_request(
+            "GET",
+            &format!("/api/knowledge/{item_id}"),
+            "",
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(knowledge.status(), StatusCode::OK);
+    let revision_count: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM knowledge_revisions WHERE id = $1")
+            .bind(revision_id)
+            .fetch_one(state.db.as_ref().unwrap())
+            .await
+            .unwrap();
+    assert_eq!(revision_count, 1);
 }

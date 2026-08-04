@@ -1,6 +1,8 @@
 use crate::config::ContextBudgetConfig;
 use crate::knowledge::retrieval::RetrievedKnowledge;
-use crate::services::context_builder::{build_context_md, ContextInput};
+use crate::services::context_builder::{
+    build_context_md, format_full_output_contract, ContextInput,
+};
 use sqlx::PgPool;
 use thiserror::Error;
 use uuid::Uuid;
@@ -25,6 +27,14 @@ impl TokenCounter for ByteTokenCounter {
 
 #[derive(Debug, Error)]
 pub enum ContextBudgetError {
+    #[error(
+        "mandatory context section {section} requires {required} tokens, above configured allocation {maximum}"
+    )]
+    MandatorySectionOverflow {
+        section: &'static str,
+        required: usize,
+        maximum: usize,
+    },
     #[error("mandatory context requires {required} tokens, above configured maximum {maximum}")]
     MandatoryOverflow { required: usize, maximum: usize },
     #[error(
@@ -198,7 +208,16 @@ pub fn build_budgeted_context(
     budget: &ContextBudgetConfig,
     counter: &dyn TokenCounter,
 ) -> Result<BudgetedContext, ContextBudgetError> {
-    let mandatory_input = optional_input(input, "", None);
+    let output_contract_tokens = counter.count(&format_full_output_contract(input));
+    if output_contract_tokens > budget.output_contract {
+        return Err(ContextBudgetError::MandatorySectionOverflow {
+            section: "output_contract",
+            required: output_contract_tokens,
+            maximum: budget.output_contract,
+        });
+    }
+
+    let mandatory_input = optional_input(input, "", None, None, None);
     let mandatory = build_context_md(&mandatory_input);
     let mandatory_tokens = counter.count(&mandatory);
     if mandatory_tokens > budget.max_tokens {
@@ -211,14 +230,29 @@ pub fn build_budgeted_context(
     let mut ticket_tokens = budget.ticket;
     let mut previous_tokens = budget.previous_attempt_summary;
     let mut knowledge_tokens = budget.retrieved_knowledge;
+    let latest_comments = input
+        .latest_comments
+        .map(|value| truncate_to_tokens(value, budget.latest_comments, counter))
+        .filter(|value| !value.is_empty());
+    let project_rules = input
+        .project_rules
+        .map(|value| truncate_to_tokens(value, budget.project_rules, counter))
+        .filter(|value| !value.is_empty());
     let mut markdown = String::new();
     for _ in 0..knowledge.entries.len().saturating_add(8) {
         let ticket = truncate_to_tokens(input.ticket_description, ticket_tokens, counter);
         let previous = input
             .resume_context
-            .map(|value| truncate_to_tokens(value, previous_tokens, counter));
+            .map(|value| truncate_to_tokens(value, previous_tokens, counter))
+            .filter(|value| !value.is_empty());
         let included_knowledge = fit_knowledge_section(knowledge, knowledge_tokens, counter);
-        let bounded_input = optional_input(input, &ticket, previous.as_deref());
+        let bounded_input = optional_input(
+            input,
+            &ticket,
+            latest_comments.as_deref(),
+            project_rules.as_deref(),
+            previous.as_deref(),
+        );
         markdown = inject_knowledge(
             build_context_md(&bounded_input),
             &included_knowledge.markdown,
@@ -263,6 +297,8 @@ pub fn build_budgeted_context(
 fn optional_input<'a>(
     input: &'a ContextInput<'a>,
     ticket_description: &'a str,
+    latest_comments: Option<&'a str>,
+    project_rules: Option<&'a str>,
     resume_context: Option<&'a str>,
 ) -> ContextInput<'a> {
     ContextInput {
@@ -280,6 +316,8 @@ fn optional_input<'a>(
         repo_remote_url: input.repo_remote_url,
         repo_default_branch: input.repo_default_branch,
         worktree_path: input.worktree_path,
+        latest_comments,
+        project_rules,
         resume_context,
         context_profile: input.context_profile,
         human_request: None,
@@ -348,6 +386,8 @@ mod tests {
             repo_remote_url: None,
             repo_default_branch: Some("main"),
             worktree_path: Some("/tmp/worktree"),
+            latest_comments: None,
+            project_rules: None,
             resume_context: None,
             context_profile: ContextProfile::Full,
             human_request: None,
@@ -413,6 +453,95 @@ mod tests {
     }
 
     #[test]
+    fn full_context_applies_independent_comment_rule_and_resume_allocations() {
+        let counter = ByteTokenCounter;
+        let comments = "LATEST-COMMENT ".repeat(200);
+        let rules = "PROJECT-RULE ".repeat(200);
+        let previous = "PREVIOUS-ATTEMPT ".repeat(200);
+        let mut context = input("", "Protect safety.");
+        context.latest_comments = Some(&comments);
+        context.project_rules = Some(&rules);
+        context.resume_context = Some(&previous);
+
+        let mut budget = ContextBudgetConfig::default();
+        budget.max_tokens = 10_000;
+        budget.ticket = 0;
+        budget.latest_comments = 24;
+        budget.project_rules = 24;
+        budget.retrieved_knowledge = 0;
+        budget.previous_attempt_summary = 24;
+        let bounded = build_budgeted_context(
+            &context,
+            &KnowledgeSection::default(),
+            &budget,
+            &counter,
+        )
+        .unwrap();
+        assert!(bounded.markdown.contains("# Latest comments"));
+        assert!(bounded.markdown.contains("# Project rules"));
+        assert!(bounded.markdown.contains("# Previous attempt summary"));
+        assert!(!bounded.markdown.contains(&comments));
+        assert!(!bounded.markdown.contains(&rules));
+        assert!(!bounded.markdown.contains(&previous));
+
+        budget.latest_comments = 0;
+        budget.project_rules = 0;
+        budget.previous_attempt_summary = 0;
+        let omitted = build_budgeted_context(
+            &context,
+            &KnowledgeSection::default(),
+            &budget,
+            &counter,
+        )
+        .unwrap();
+        assert!(!omitted.markdown.contains("# Latest comments"));
+        assert!(!omitted.markdown.contains("# Project rules"));
+        assert!(!omitted.markdown.contains("# Previous attempt summary"));
+    }
+
+    #[test]
+    fn output_contract_must_fit_its_mandatory_section_allocation() {
+        let counter = ByteTokenCounter;
+        let mut budget = ContextBudgetConfig::default();
+        budget.output_contract = 1;
+        let result = build_budgeted_context(
+            &input("", "Protect safety."),
+            &KnowledgeSection::default(),
+            &budget,
+            &counter,
+        );
+        assert!(matches!(
+            result,
+            Err(ContextBudgetError::MandatorySectionOverflow {
+                section: "output_contract",
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn default_output_allocation_fits_each_full_run_contract() {
+        let counter = ByteTokenCounter;
+        let budget = ContextBudgetConfig::default();
+        for (agent_key, role, status) in [
+            ("backend_engineer", "Backend Engineer", "in_progress"),
+            ("pm", "PM", "backlog"),
+            ("tech_lead", "Technical Lead", "in_review"),
+            ("qc", "QC", "in_qa"),
+        ] {
+            let mut context = input("", "Protect safety.");
+            context.agent_key = agent_key;
+            context.agent_role = role;
+            context.ticket_status = status;
+            let required = counter.count(&format_full_output_contract(&context));
+            assert!(
+                required <= budget.output_contract,
+                "{agent_key} contract needs {required} tokens"
+            );
+        }
+    }
+
+    #[test]
     fn total_pressure_drops_whole_entries_and_reports_only_survivors() {
         let counter = ByteTokenCounter;
         let first = RenderedKnowledge {
@@ -447,6 +576,8 @@ mod tests {
         let mandatory = counter.count(&build_context_md(&optional_input(
             &input("", "Protect safety."),
             "",
+            None,
+            None,
             None,
         )));
         let mut budget = ContextBudgetConfig::default();

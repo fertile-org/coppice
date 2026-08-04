@@ -1,4 +1,5 @@
-use sqlx::{PgPool, Row};
+use sqlx::{PgPool, Postgres, Row, Transaction};
+use thiserror::Error;
 use time::OffsetDateTime;
 use uuid::Uuid;
 
@@ -15,6 +16,14 @@ pub struct KnowledgeJob {
     pub claim_token: Uuid,
 }
 
+#[derive(Debug, Error)]
+pub enum KnowledgeJobError {
+    #[error("knowledge job {job_id} claim is no longer active")]
+    ClaimLost { job_id: Uuid },
+    #[error(transparent)]
+    Database(#[from] sqlx::Error),
+}
+
 pub struct KnowledgeJobService<'a> {
     pool: &'a PgPool,
 }
@@ -28,7 +37,7 @@ impl<'a> KnowledgeJobService<'a> {
         &self,
         worker_id: &str,
         stale_lock_secs: u64,
-    ) -> Result<Option<KnowledgeJob>, sqlx::Error> {
+    ) -> Result<Option<KnowledgeJob>, KnowledgeJobError> {
         let mut tx = self.pool.begin().await?;
         sqlx::query(
             r#"
@@ -103,8 +112,35 @@ impl<'a> KnowledgeJobService<'a> {
         Ok(Some(row_to_job(&row)?))
     }
 
-    pub async fn mark_completed(&self, job: &KnowledgeJob) -> Result<(), sqlx::Error> {
-        sqlx::query(
+    pub async fn lock_active_claim(
+        &self,
+        tx: &mut Transaction<'_, Postgres>,
+        job: &KnowledgeJob,
+    ) -> Result<(), KnowledgeJobError> {
+        let claimed = sqlx::query_scalar::<_, Uuid>(
+            r#"
+            SELECT id FROM knowledge_jobs
+            WHERE id = $1 AND status = 'running' AND locked_by = $2 AND claim_token = $3
+            FOR UPDATE
+            "#,
+        )
+        .bind(job.id)
+        .bind(&job.locked_by)
+        .bind(job.claim_token)
+        .fetch_optional(&mut **tx)
+        .await?;
+        if claimed.is_none() {
+            return Err(KnowledgeJobError::ClaimLost { job_id: job.id });
+        }
+        Ok(())
+    }
+
+    pub async fn mark_completed_in_tx(
+        &self,
+        tx: &mut Transaction<'_, Postgres>,
+        job: &KnowledgeJob,
+    ) -> Result<(), KnowledgeJobError> {
+        let result = sqlx::query(
             r#"
             UPDATE knowledge_jobs
             SET status = 'completed', completed_at = now(), updated_at = now(),
@@ -115,14 +151,29 @@ impl<'a> KnowledgeJobService<'a> {
         .bind(job.id)
         .bind(&job.locked_by)
         .bind(job.claim_token)
-        .execute(self.pool)
+        .execute(&mut **tx)
         .await?;
+        if result.rows_affected() != 1 {
+            return Err(KnowledgeJobError::ClaimLost { job_id: job.id });
+        }
         Ok(())
     }
 
-    pub async fn mark_error(&self, job: &KnowledgeJob, error: &str) -> Result<(), sqlx::Error> {
+    pub async fn mark_completed(&self, job: &KnowledgeJob) -> Result<(), KnowledgeJobError> {
+        let mut tx = self.pool.begin().await?;
+        self.lock_active_claim(&mut tx, job).await?;
+        self.mark_completed_in_tx(&mut tx, job).await?;
+        tx.commit().await?;
+        Ok(())
+    }
+
+    pub async fn mark_error(
+        &self,
+        job: &KnowledgeJob,
+        error: &str,
+    ) -> Result<(), KnowledgeJobError> {
         let bounded = error.chars().take(2_000).collect::<String>();
-        if job.attempts >= job.max_attempts {
+        let result = if job.attempts >= job.max_attempts {
             sqlx::query(
                 r#"
                 UPDATE knowledge_jobs
@@ -137,7 +188,7 @@ impl<'a> KnowledgeJobService<'a> {
             .bind(job.claim_token)
             .bind(bounded)
             .execute(self.pool)
-            .await?;
+            .await?
         } else {
             let exponent = u32::try_from(job.attempts.max(1) - 1).unwrap_or(0).min(8);
             let delay_secs = 1_i64.checked_shl(exponent).unwrap_or(256).min(300);
@@ -158,7 +209,10 @@ impl<'a> KnowledgeJobService<'a> {
             .bind(bounded)
             .bind(available_at)
             .execute(self.pool)
-            .await?;
+            .await?
+        };
+        if result.rows_affected() != 1 {
+            return Err(KnowledgeJobError::ClaimLost { job_id: job.id });
         }
         Ok(())
     }

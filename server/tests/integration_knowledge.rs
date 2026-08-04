@@ -1,18 +1,27 @@
 mod common;
 
+use async_trait::async_trait;
 use axum::{http::StatusCode, Router};
-use coppice_server::knowledge::extractor::{ExtractionProvider, MockExtractionProvider};
-use coppice_server::knowledge::retrieval::{retrieve, RETRIEVAL_QUERY_SQL};
+use coppice_server::domain::knowledge::{
+    KnowledgeConfidence, KnowledgeRevisionInput, KnowledgeScope, KnowledgeSourceType, KnowledgeType,
+};
+use coppice_server::knowledge::embedder::EmbeddingError;
+use coppice_server::knowledge::extractor::{
+    ExtractedCandidate, ExtractionError, ExtractionInput, ExtractionProvider,
+    MockExtractionProvider,
+};
+use coppice_server::knowledge::retrieval::{has_eligible, retrieve, RETRIEVAL_QUERY_SQL};
 use coppice_server::knowledge::{embedder::EmbeddingProvider, embedding_provider};
 use coppice_server::services::context_budget::{record_usage, render_knowledge, ByteTokenCounter};
 use coppice_server::services::knowledge_job_service::KnowledgeJobService;
 use coppice_server::services::knowledge_service::{
-    KnowledgeError, KnowledgeRevisionPatch, KnowledgeService,
+    activate_embedded_revision, KnowledgeError, KnowledgeListFilter, KnowledgeRevisionPatch,
+    KnowledgeService,
 };
 use coppice_server::workers::knowledge_worker;
 use coppice_server::AppState;
 use serde_json::Value;
-use sqlx::{Postgres, Transaction};
+use sqlx::{PgPool, Postgres, Transaction};
 use std::sync::Arc;
 use std::time::Duration;
 use tower::ServiceExt;
@@ -117,8 +126,160 @@ async fn process_one_knowledge_job(state: &Arc<AppState>) -> anyhow::Result<bool
     knowledge_worker::process_one(state, "integration-knowledge", &embedder, &extractor).await
 }
 
+struct ReclaimingEmbeddingProvider {
+    pool: PgPool,
+    revision_id: Uuid,
+}
+
+#[async_trait]
+impl EmbeddingProvider for ReclaimingEmbeddingProvider {
+    async fn embed(&self, _texts: &[String]) -> Result<Vec<Vec<f32>>, EmbeddingError> {
+        sqlx::query(
+            "UPDATE knowledge_jobs SET locked_at = now() - interval '301 seconds' WHERE revision_id = $1 AND status = 'running'",
+        )
+        .bind(self.revision_id)
+        .execute(&self.pool)
+        .await
+        .map_err(|error| EmbeddingError::Request(error.to_string()))?;
+        KnowledgeJobService::new(&self.pool)
+            .claim_next("fresh-embedding-worker", 300)
+            .await
+            .map_err(|error| EmbeddingError::Request(error.to_string()))?
+            .ok_or_else(|| EmbeddingError::Request("failed to reclaim embedding job".into()))?;
+        Ok(vec![std::iter::once(1.0)
+            .chain(std::iter::repeat_n(0.0, 1_535))
+            .collect()])
+    }
+
+    fn provider_name(&self) -> &str {
+        "reclaiming-test"
+    }
+
+    fn model_name(&self) -> &str {
+        "reclaiming-test-1536"
+    }
+
+    fn dimension(&self) -> usize {
+        1_536
+    }
+}
+
+struct ReclaimingExtractionProvider {
+    pool: PgPool,
+    ticket_id: Uuid,
+}
+
+#[async_trait]
+impl ExtractionProvider for ReclaimingExtractionProvider {
+    async fn extract(
+        &self,
+        _input: &ExtractionInput,
+    ) -> Result<Vec<ExtractedCandidate>, ExtractionError> {
+        sqlx::query(
+            "UPDATE knowledge_jobs SET locked_at = now() - interval '301 seconds' WHERE ticket_id = $1 AND status = 'running'",
+        )
+        .bind(self.ticket_id)
+        .execute(&self.pool)
+        .await
+        .map_err(|error| ExtractionError::InvalidInput(error.to_string()))?;
+        KnowledgeJobService::new(&self.pool)
+            .claim_next("fresh-extraction-worker", 300)
+            .await
+            .map_err(|error| ExtractionError::InvalidInput(error.to_string()))?
+            .ok_or_else(|| {
+                ExtractionError::InvalidInput("failed to reclaim extraction job".into())
+            })?;
+        Ok(vec![ExtractedCandidate {
+            knowledge_type: KnowledgeType::ReviewFeedback,
+            title: "Stale extraction candidate".into(),
+            content: "A stale claim must never persist this candidate.".into(),
+            confidence: KnowledgeConfidence::High,
+            should_require_human_approval: true,
+            source_type: KnowledgeSourceType::AgentSummary,
+        }])
+    }
+}
+
 fn unit_vector_literal() -> String {
     format!("[1{}]", ",0".repeat(1_535))
+}
+
+#[derive(Clone, Copy)]
+struct RetrievalSeed<'a> {
+    label: &'a str,
+    status: &'a str,
+    scope: &'a str,
+    project_id: Option<Uuid>,
+    agent_id: Option<Uuid>,
+    confidence: &'a str,
+    expired: bool,
+    activate: bool,
+    store_embedding: bool,
+}
+
+async fn seed_retrieval_item(pool: &PgPool, seed: RetrievalSeed<'_>) -> (Uuid, Uuid) {
+    let item_id = Uuid::new_v4();
+    let revision_id = Uuid::new_v4();
+    sqlx::query(
+        r#"
+        INSERT INTO knowledge_items (id, status, version, expires_at)
+        VALUES ($1, $2, 1, CASE WHEN $3 THEN now() - interval '1 minute' ELSE NULL END)
+        "#,
+    )
+    .bind(item_id)
+    .bind(seed.status)
+    .bind(seed.expired)
+    .execute(pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"
+        INSERT INTO knowledge_revisions (
+            id, item_id, revision_number, scope, project_id, agent_id,
+            knowledge_type, title, content, source_type, confidence
+        ) VALUES ($1, $2, 1, $3, $4, $5, 'test_command', $6, $7, 'human_note', $8)
+        "#,
+    )
+    .bind(revision_id)
+    .bind(item_id)
+    .bind(seed.scope)
+    .bind(seed.project_id)
+    .bind(seed.agent_id)
+    .bind(seed.label)
+    .bind(format!("Retrieval matrix entry: {}", seed.label))
+    .bind(seed.confidence)
+    .execute(pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"
+        UPDATE knowledge_items
+        SET current_revision_id = $2,
+            active_revision_id = CASE WHEN $3 THEN $2 ELSE NULL END
+        WHERE id = $1
+        "#,
+    )
+    .bind(item_id)
+    .bind(revision_id)
+    .bind(seed.activate)
+    .execute(pool)
+    .await
+    .unwrap();
+    if seed.store_embedding {
+        sqlx::query(
+            r#"
+            INSERT INTO knowledge_embeddings (
+                revision_id, provider, model, embedding_dimension, embedding
+            ) VALUES ($1, 'matrix', 'unit-vector', 1536, $2::vector)
+            "#,
+        )
+        .bind(revision_id)
+        .bind(unit_vector_literal())
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+    (item_id, revision_id)
 }
 
 async fn seed_retrieval_cardinality(
@@ -245,6 +406,7 @@ async fn explain_production_retrieval(
         .bind(unit_vector_literal())
         .bind(-1.0_f64)
         .bind(20_i64)
+        .bind(Vec::<String>::new())
         .fetch_one(&mut **tx)
         .await
         .unwrap()
@@ -410,6 +572,172 @@ async fn lifecycle_is_concurrency_safe_and_preserves_active_revision() {
 }
 
 #[tokio::test]
+async fn edit_distinguishes_omitted_and_explicitly_null_scope_ids() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    let (_state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
+    let project_id = common::create_test_project(&app, &cookie, &csrf).await;
+    let agent_id = common::create_agent_with_preset_key(
+        &app,
+        "backend_engineer",
+        "Scoped Knowledge Agent",
+        &cookie,
+        &csrf,
+    )
+    .await;
+    let created = mutate(
+        &app,
+        "POST",
+        "/api/knowledge",
+        serde_json::json!({
+            "scope": "agent",
+            "projectId": project_id,
+            "agentId": agent_id,
+            "knowledgeType": "test_command",
+            "title": "Scoped command",
+            "content": "Run the scoped command.",
+            "sourceType": "human_note",
+            "confidence": "high"
+        }),
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(created.0, StatusCode::CREATED);
+    let item_id = created.1["id"].as_str().unwrap();
+
+    let (status, preserved) = mutate(
+        &app,
+        "PATCH",
+        &format!("/api/knowledge/{item_id}"),
+        serde_json::json!({
+            "expectedVersion": 1,
+            "title": "Renamed scoped command"
+        }),
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(preserved["scope"], "agent");
+    assert_eq!(preserved["projectId"], project_id);
+    assert_eq!(preserved["agentId"], agent_id);
+
+    let (status, cleared) = mutate(
+        &app,
+        "PATCH",
+        &format!("/api/knowledge/{item_id}"),
+        serde_json::json!({
+            "expectedVersion": 2,
+            "scope": "workspace",
+            "projectId": null,
+            "agentId": null
+        }),
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(cleared["scope"], "workspace");
+    assert!(cleared["projectId"].is_null());
+    assert!(cleared["agentId"].is_null());
+}
+
+#[tokio::test]
+async fn knowledge_list_has_stable_hard_limited_pages_and_auth_failures() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
+    let project_id = common::create_test_project(&app, &cookie, &csrf).await;
+    for title in ["Pagination one", "Pagination two", "Pagination three"] {
+        create_candidate(&app, &project_id, &cookie, &csrf, title).await;
+    }
+
+    let unauthenticated = app
+        .clone()
+        .oneshot(
+            axum::http::Request::builder()
+                .uri("/api/knowledge")
+                .body(axum::body::Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(unauthenticated.status(), StatusCode::UNAUTHORIZED);
+
+    let malformed_cursor = app
+        .clone()
+        .oneshot(common::json_request(
+            "GET",
+            "/api/knowledge?cursor=not-a-cursor",
+            "",
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(malformed_cursor.status(), StatusCode::BAD_REQUEST);
+
+    let mut bounded_config = state.config.knowledge.clone();
+    bounded_config.retrieval.max_page_size = 2;
+    bounded_config.retrieval.default_page_size = 2;
+    let service = KnowledgeService::new(state.db.as_ref().unwrap(), &bounded_config);
+    let first = service
+        .list(KnowledgeListFilter {
+            status: None,
+            project_id: None,
+            knowledge_type: None,
+            cursor: None,
+            limit: Some(1_000),
+        })
+        .await
+        .unwrap();
+    assert_eq!(first.items.len(), 2);
+    let cursor = first.next_cursor.expect("hard-limited first page cursor");
+    let first_ids = first
+        .items
+        .into_iter()
+        .map(|item| item.id)
+        .collect::<std::collections::HashSet<_>>();
+    let second = service
+        .list(KnowledgeListFilter {
+            status: None,
+            project_id: None,
+            knowledge_type: None,
+            cursor: Some(cursor),
+            limit: Some(1_000),
+        })
+        .await
+        .unwrap();
+    assert_eq!(second.items.len(), 1);
+    assert!(second.next_cursor.is_none());
+    assert!(second.items.iter().all(|item| !first_ids.contains(&item.id)));
+
+    sqlx::query("UPDATE users SET role = 'member' WHERE email = 'admin@localhost'")
+        .execute(state.db.as_ref().unwrap())
+        .await
+        .unwrap();
+    let forbidden = app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            "/api/knowledge",
+            &serde_json::json!({
+                "scope": "workspace",
+                "knowledgeType": "test_command",
+                "title": "Member write",
+                "content": "Members cannot mutate governed knowledge.",
+                "sourceType": "human_note",
+                "confidence": "high"
+            })
+            .to_string(),
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(forbidden.status(), StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
 async fn terminal_knowledge_edits_do_not_consume_active_capacity() {
     let _guard = common::DB_TEST_LOCK.lock().await;
     let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
@@ -466,6 +794,122 @@ async fn terminal_knowledge_edits_do_not_consume_active_capacity() {
     let approval = service.approve(terminal_uuid, 3, user_id).await;
     assert!(matches!(approval, Err(KnowledgeError::Capacity(_))));
     assert_eq!(live["status"], "pending");
+}
+
+#[tokio::test]
+async fn cross_scope_edit_reserves_both_active_and_current_capacity() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
+    let project_a = common::create_test_project(&app, &cookie, &csrf).await;
+    let project_b = create_project_named(&app, "Capacity Project B", &cookie, &csrf).await;
+    let item = create_candidate(&app, &project_a, &cookie, &csrf, "Cross-scope capacity").await;
+    let item_id = Uuid::parse_str(item["id"].as_str().unwrap()).unwrap();
+    let (status, _) = mutate(
+        &app,
+        "POST",
+        &format!("/api/knowledge/{item_id}/approve"),
+        serde_json::json!({"expectedVersion": 1}),
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(process_one_knowledge_job(&state).await.unwrap());
+
+    let pool = state.db.as_ref().unwrap();
+    let admin_id: Uuid = sqlx::query_scalar("SELECT id FROM users WHERE email = 'admin@localhost'")
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    let mut config = state.config.knowledge.clone();
+    config.retrieval.max_active_per_project = 1;
+    let service = KnowledgeService::new(pool, &config);
+    let edited = service
+        .edit(
+            item_id,
+            2,
+            admin_id,
+            KnowledgeRevisionPatch {
+                scope: Some(KnowledgeScope::Project),
+                project_id: Some(Some(Uuid::parse_str(&project_b).unwrap())),
+                content: Some("Replacement embedding has not completed.".into()),
+                ..KnowledgeRevisionPatch::default()
+            },
+        )
+        .await
+        .unwrap();
+    assert_ne!(edited.revision_id, edited.active_revision_id.unwrap());
+
+    for project_id in [&project_a, &project_b] {
+        let error = service
+            .create_manual(
+                admin_id,
+                KnowledgeRevisionInput {
+                    scope: KnowledgeScope::Project,
+                    project_id: Some(Uuid::parse_str(project_id).unwrap()),
+                    agent_id: None,
+                    knowledge_type: KnowledgeType::TestCommand,
+                    title: format!("Overflow {project_id}"),
+                    content: "This project already has a reserved active slot.".into(),
+                    source_type: KnowledgeSourceType::HumanNote,
+                    source_id: None,
+                    source_run_id: None,
+                    confidence: KnowledgeConfidence::High,
+                },
+            )
+            .await
+            .expect_err("active and current scopes must both reserve capacity");
+        assert!(matches!(error, KnowledgeError::Capacity(_)));
+    }
+}
+
+#[tokio::test]
+async fn activation_revalidates_capacity_before_replacing_the_active_revision() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
+    let project_id = common::create_test_project(&app, &cookie, &csrf).await;
+    let first = create_candidate(&app, &project_id, &cookie, &csrf, "Capacity occupant").await;
+    let second = create_candidate(&app, &project_id, &cookie, &csrf, "Activation candidate").await;
+
+    for candidate in [&first, &second] {
+        let (status, _) = mutate(
+            &app,
+            "POST",
+            &format!(
+                "/api/knowledge/{}/approve",
+                candidate["id"].as_str().unwrap()
+            ),
+            serde_json::json!({"expectedVersion": 1}),
+            &cookie,
+            &csrf,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+    }
+    assert!(process_one_knowledge_job(&state).await.unwrap());
+
+    let mut config = state.config.knowledge.clone();
+    config.retrieval.max_active_per_project = 1;
+    let second_item_id = Uuid::parse_str(second["id"].as_str().unwrap()).unwrap();
+    let second_revision_id = Uuid::parse_str(second["revisionId"].as_str().unwrap()).unwrap();
+    let mut tx = state.db.as_ref().unwrap().begin().await.unwrap();
+    sqlx::query(
+        r#"
+        INSERT INTO knowledge_embeddings (
+            revision_id, provider, model, embedding_dimension, embedding
+        ) VALUES ($1, 'test', 'test-1536', 1536, $2::vector)
+        "#,
+    )
+    .bind(second_revision_id)
+    .bind(unit_vector_literal())
+    .execute(&mut *tx)
+    .await
+    .unwrap();
+    let error = activate_embedded_revision(&mut tx, second_item_id, second_revision_id, &config)
+        .await
+        .expect_err("activation must revalidate capacity under its transaction lock");
+    assert!(matches!(error, KnowledgeError::Capacity(_)));
+    tx.rollback().await.unwrap();
 }
 
 #[tokio::test]
@@ -1440,6 +1884,37 @@ async fn retrieval_is_scoped_and_usage_is_logged_once() {
     .unwrap();
     assert!(wrong_project.is_empty());
 
+    let mut type_filtered = state.config.knowledge.retrieval.clone();
+    type_filtered.allowed_types = vec!["bug_pattern".into()];
+    assert!(!has_eligible(
+        state.db.as_ref().unwrap(),
+        Uuid::parse_str(&project_id).unwrap(),
+        Uuid::parse_str(&agent_id).unwrap(),
+        &type_filtered,
+    )
+    .await
+    .unwrap());
+    let excluded_by_type = retrieve(
+        state.db.as_ref().unwrap(),
+        Uuid::parse_str(&project_id).unwrap(),
+        Uuid::parse_str(&agent_id).unwrap(),
+        &query[0],
+        &type_filtered,
+    )
+    .await
+    .unwrap();
+    assert!(excluded_by_type.is_empty());
+
+    type_filtered.allowed_types = vec!["test_command".into()];
+    assert!(has_eligible(
+        state.db.as_ref().unwrap(),
+        Uuid::parse_str(&project_id).unwrap(),
+        Uuid::parse_str(&agent_id).unwrap(),
+        &type_filtered,
+    )
+    .await
+    .unwrap());
+
     let run_id = Uuid::new_v4();
     sqlx::query(
         r#"
@@ -1482,6 +1957,167 @@ async fn retrieval_is_scoped_and_usage_is_logged_once() {
         .as_str()
         .unwrap()
         .contains("UNTRUSTED KNOWLEDGE"));
+}
+
+#[tokio::test]
+async fn retrieval_excludes_every_ineligible_lifecycle_and_scope_variant() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
+    let project_id = Uuid::parse_str(
+        &common::create_test_project(&app, &cookie, &csrf).await,
+    )
+    .unwrap();
+    let other_project_id = Uuid::parse_str(
+        &create_project_named(&app, "Retrieval Matrix Other", &cookie, &csrf).await,
+    )
+    .unwrap();
+    let agent_id = Uuid::parse_str(
+        &common::create_agent_with_preset_key(
+            &app,
+            "backend_engineer",
+            "Retrieval Matrix Agent",
+            &cookie,
+            &csrf,
+        )
+        .await,
+    )
+    .unwrap();
+    let other_agent_id = Uuid::parse_str(
+        &common::create_agent_with_preset_key(
+            &app,
+            "frontend_engineer",
+            "Retrieval Matrix Other Agent",
+            &cookie,
+            &csrf,
+        )
+        .await,
+    )
+    .unwrap();
+    let pool = state.db.as_ref().unwrap();
+    let base = RetrievalSeed {
+        label: "valid project",
+        status: "approved",
+        scope: "project",
+        project_id: Some(project_id),
+        agent_id: None,
+        confidence: "high",
+        expired: false,
+        activate: true,
+        store_embedding: true,
+    };
+
+    let valid_project = seed_retrieval_item(pool, base).await.0;
+    let valid_workspace = seed_retrieval_item(
+        pool,
+        RetrievalSeed {
+            label: "valid workspace",
+            scope: "workspace",
+            project_id: None,
+            ..base
+        },
+    )
+    .await
+    .0;
+    let valid_agent = seed_retrieval_item(
+        pool,
+        RetrievalSeed {
+            label: "valid agent",
+            scope: "agent",
+            agent_id: Some(agent_id),
+            ..base
+        },
+    )
+    .await
+    .0;
+
+    for seed in [
+        RetrievalSeed {
+            label: "rejected",
+            status: "rejected",
+            ..base
+        },
+        RetrievalSeed {
+            label: "stale",
+            status: "stale",
+            ..base
+        },
+        RetrievalSeed {
+            label: "expired",
+            expired: true,
+            ..base
+        },
+        RetrievalSeed {
+            label: "low confidence",
+            confidence: "low",
+            ..base
+        },
+        RetrievalSeed {
+            label: "wrong project",
+            project_id: Some(other_project_id),
+            ..base
+        },
+        RetrievalSeed {
+            label: "wrong agent",
+            scope: "agent",
+            agent_id: Some(other_agent_id),
+            ..base
+        },
+        RetrievalSeed {
+            label: "missing active revision",
+            activate: false,
+            ..base
+        },
+        RetrievalSeed {
+            label: "missing embedding",
+            store_embedding: false,
+            ..base
+        },
+    ] {
+        seed_retrieval_item(pool, seed).await;
+    }
+
+    let (superseded_id, _) = seed_retrieval_item(
+        pool,
+        RetrievalSeed {
+            label: "superseded",
+            ..base
+        },
+    )
+    .await;
+    let replacement_id = Uuid::new_v4();
+    sqlx::query("INSERT INTO knowledge_items (id, status, version) VALUES ($1, 'pending', 1)")
+        .bind(replacement_id)
+        .execute(pool)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE knowledge_items SET superseded_by = $2 WHERE id = $1")
+        .bind(superseded_id)
+        .bind(replacement_id)
+        .execute(pool)
+        .await
+        .unwrap();
+
+    let found = retrieve(
+        pool,
+        project_id,
+        agent_id,
+        &std::iter::once(1.0)
+            .chain(std::iter::repeat_n(0.0, 1_535))
+            .collect::<Vec<_>>(),
+        &state.config.knowledge.retrieval,
+    )
+    .await
+    .unwrap();
+    let found_ids = found
+        .into_iter()
+        .map(|item| item.item_id)
+        .collect::<std::collections::HashSet<_>>();
+    assert_eq!(
+        found_ids,
+        [valid_project, valid_workspace, valid_agent]
+            .into_iter()
+            .collect()
+    );
 }
 
 #[tokio::test]
@@ -1627,6 +2263,93 @@ async fn knowledge_retrieval_capacity_p95_benchmark() {
 }
 
 #[tokio::test]
+async fn reclaimed_embedding_claim_cannot_persist_embedding_or_activation() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
+    let project_id = common::create_test_project(&app, &cookie, &csrf).await;
+    let item = create_candidate(
+        &app,
+        &project_id,
+        &cookie,
+        &csrf,
+        "Fence stale embedding writes",
+    )
+    .await;
+    let item_id = item["id"].as_str().unwrap();
+    let revision_id = Uuid::parse_str(item["revisionId"].as_str().unwrap()).unwrap();
+    let (status, _) = mutate(
+        &app,
+        "POST",
+        &format!("/api/knowledge/{item_id}/approve"),
+        serde_json::json!({"expectedVersion": 1}),
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let pool = state.db.as_ref().unwrap().clone();
+    let embedder: Arc<dyn EmbeddingProvider> = Arc::new(ReclaimingEmbeddingProvider {
+        pool: pool.clone(),
+        revision_id,
+    });
+    let extractor: Arc<dyn ExtractionProvider> = Arc::new(MockExtractionProvider);
+    let result =
+        knowledge_worker::process_one(&state, "stale-embedding-worker", &embedder, &extractor)
+            .await;
+    assert!(result.is_err(), "a worker that lost its claim must fail");
+
+    let embedding_count: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM knowledge_embeddings WHERE revision_id = $1")
+            .bind(revision_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    let active_revision_id: Option<Uuid> =
+        sqlx::query_scalar("SELECT active_revision_id FROM knowledge_items WHERE id = $1")
+            .bind(Uuid::parse_str(item_id).unwrap())
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(embedding_count, 0);
+    assert_eq!(active_revision_id, None);
+}
+
+#[tokio::test]
+async fn reclaimed_extraction_claim_cannot_persist_candidates() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
+    let project_id = common::create_test_project(&app, &cookie, &csrf).await;
+    let ticket_id = common::create_test_ticket(&app, &project_id, &cookie, &csrf).await;
+    let ticket_id = Uuid::parse_str(&ticket_id).unwrap();
+    let pool = state.db.as_ref().unwrap().clone();
+    sqlx::query("UPDATE tickets SET status = 'done' WHERE id = $1")
+        .bind(ticket_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let embedder = embedding_provider(&state.config.knowledge.embedding).unwrap();
+    let extractor: Arc<dyn ExtractionProvider> = Arc::new(ReclaimingExtractionProvider {
+        pool: pool.clone(),
+        ticket_id,
+    });
+    let result =
+        knowledge_worker::process_one(&state, "stale-extraction-worker", &embedder, &extractor)
+            .await;
+    assert!(result.is_err(), "a worker that lost its claim must fail");
+
+    let candidate_count: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM knowledge_items WHERE extraction_job_id = (SELECT id FROM knowledge_jobs WHERE ticket_id = $1)",
+    )
+    .bind(ticket_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(candidate_count, 0);
+}
+
+#[tokio::test]
 async fn stale_knowledge_worker_cannot_overwrite_new_owner_state() {
     let _guard = common::DB_TEST_LOCK.lock().await;
     let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
@@ -1672,10 +2395,11 @@ async fn stale_knowledge_worker_cannot_overwrite_new_owner_state() {
     );
     let mut terminal_stale_claim = stale_claim.clone();
     terminal_stale_claim.max_attempts = terminal_stale_claim.attempts;
-    service
+    let terminal_error = service
         .mark_error(&terminal_stale_claim, "late terminal failure")
         .await
-        .unwrap();
+        .expect_err("stale terminal failure must report claim loss");
+    assert!(terminal_error.to_string().contains("claim"));
     let after_terminal_error: (String, Option<String>, Option<Uuid>) =
         sqlx::query_as("SELECT status, locked_by, claim_token FROM knowledge_jobs WHERE id = $1")
             .bind(stale_claim.id)
@@ -1684,10 +2408,11 @@ async fn stale_knowledge_worker_cannot_overwrite_new_owner_state() {
             .unwrap();
     assert_eq!(after_terminal_error, expected_running);
 
-    service
+    let retry_error = service
         .mark_error(&stale_claim, "late retryable failure")
         .await
-        .unwrap();
+        .expect_err("stale retry must report claim loss");
+    assert!(retry_error.to_string().contains("claim"));
     let after_retryable_error: (String, Option<String>, Option<Uuid>) =
         sqlx::query_as("SELECT status, locked_by, claim_token FROM knowledge_jobs WHERE id = $1")
             .bind(stale_claim.id)
@@ -1696,7 +2421,11 @@ async fn stale_knowledge_worker_cannot_overwrite_new_owner_state() {
             .unwrap();
     assert_eq!(after_retryable_error, expected_running);
 
-    service.mark_completed(&stale_claim).await.unwrap();
+    let completion_error = service
+        .mark_completed(&stale_claim)
+        .await
+        .expect_err("stale completion must report claim loss");
+    assert!(completion_error.to_string().contains("claim"));
     let after_stale_completion: (String, Option<String>, Option<Uuid>) =
         sqlx::query_as("SELECT status, locked_by, claim_token FROM knowledge_jobs WHERE id = $1")
             .bind(stale_claim.id)

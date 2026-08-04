@@ -58,7 +58,11 @@ pub async fn load_run_continuation_context(
         .map(|agent| (agent.id, agent.name))
         .collect();
 
-    Ok(ticket_thread::format_ticket_thread(&comments, &agent_names))
+    Ok(ticket_thread::format_previous_attempt_summary(
+        &comments,
+        run.agent_id,
+        &agent_names,
+    ))
 }
 
 impl<'a> RunOrchestrator<'a> {
@@ -2904,7 +2908,7 @@ mod tests {
             .expect("load continuation context")
             .expect("resume context");
 
-        assert!(ctx.contains("Recent activity on this ticket"));
+        assert!(ctx.contains("Most recent prior update"));
         assert!(ctx.contains("Implemented TmuxStream create/kill"));
         assert!(ctx.contains("progress update"));
     }
@@ -3024,6 +3028,8 @@ mod tests {
             repo_remote_url: None,
             repo_default_branch: None,
             worktree_path: None,
+            latest_comments: None,
+            project_rules: None,
             resume_context: Some(&resume_context),
             context_profile: ContextProfile::Full,
             human_request: None,
@@ -3035,7 +3041,7 @@ mod tests {
         let md = std::fs::read_to_string(worktree.path().join(".agent/context.md"))
             .expect("read context.md");
 
-        assert!(md.contains("## Ticket thread"));
+        assert!(md.contains("# Previous attempt summary"));
         assert!(md.contains("Implemented TmuxStream create/kill"));
         assert!(md.contains("tmux_stream.rs"));
 

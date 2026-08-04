@@ -285,6 +285,26 @@ async fn execute_job(
     };
     let resume_context_ref = resume_context.as_deref();
 
+    let latest_comments_owned = if run.context_profile == ContextProfile::Full {
+        let comments = CommentService::new(pool)
+            .list_by_ticket(run.ticket_id)
+            .await
+            .context("load latest comments for full context")?;
+        ticket_thread::format_ticket_thread_with_limit(
+            &comments,
+            &agent_names,
+            state
+                .config
+                .knowledge
+                .context_budget
+                .latest_comments
+                .saturating_mul(4),
+        )
+    } else {
+        None
+    };
+    let latest_comments_ref = latest_comments_owned.as_deref();
+
     let thread_excerpt_owned = if run.context_profile == ContextProfile::HumanChat {
         let comments = CommentService::new(pool)
             .list_by_ticket(run.ticket_id)
@@ -352,6 +372,22 @@ async fn execute_job(
         .await
         .context("sync worktree to branch tip")?;
 
+    let project_rules_owned = if run.context_profile == ContextProfile::Full {
+        let project_rules_path = paths.worktree_dir.join("AGENTS.md");
+        match std::fs::read_to_string(&project_rules_path) {
+            Ok(rules) => Some(rules),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+            Err(error) => {
+                return Err(error).with_context(|| {
+                    format!("read project rules from {}", project_rules_path.display())
+                })
+            }
+        }
+    } else {
+        None
+    };
+    let project_rules_ref = project_rules_owned.as_deref();
+
     let ticket_substatus = ticket
         .ticket
         .substatus
@@ -377,6 +413,8 @@ async fn execute_job(
         repo_remote_url: repo_remote_url.as_deref(),
         repo_default_branch: Some(&repo_default_branch),
         worktree_path: Some(&worktree_path),
+        latest_comments: latest_comments_ref,
+        project_rules: project_rules_ref,
         resume_context: resume_context_ref,
         context_profile: run.context_profile,
         human_request,
@@ -391,7 +429,7 @@ async fn execute_job(
                 pool,
                 ticket.ticket.project_id,
                 run.agent_id,
-                &state.config.knowledge.retrieval.minimum_confidence,
+                &state.config.knowledge.retrieval,
             )
             .await
             .context("check eligible knowledge")?

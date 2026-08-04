@@ -54,14 +54,18 @@ pub async fn process_one(
         return Ok(false);
     };
     let result = match job.kind.as_str() {
-        "embed_revision" => process_embedding(pool, &job, embedder).await,
+        "embed_revision" => process_embedding(state, pool, &job, embedder).await,
         "extract_ticket" => process_extraction(state, pool, &job, extractor).await,
         other => Err(anyhow::anyhow!("unsupported knowledge job kind: {other}")),
     };
     match result {
-        Ok(()) => jobs.mark_completed(&job).await?,
+        Ok(()) => {}
         Err(error) => {
-            jobs.mark_error(&job, &error.to_string()).await?;
+            if let Err(mark_error) = jobs.mark_error(&job, &error.to_string()).await {
+                return Err(error).context(format!(
+                    "knowledge job failure could not update its claim: {mark_error}"
+                ));
+            }
             return Err(error);
         }
     }
@@ -69,6 +73,7 @@ pub async fn process_one(
 }
 
 async fn process_embedding(
+    state: &AppState,
     pool: &PgPool,
     job: &KnowledgeJob,
     embedder: &Arc<dyn EmbeddingProvider>,
@@ -101,6 +106,8 @@ async fn process_embedding(
     }
     let literal = vector_literal(vector)?;
     let mut tx = pool.begin().await?;
+    let jobs = KnowledgeJobService::new(pool);
+    jobs.lock_active_claim(&mut tx, job).await?;
     sqlx::query(
         r#"
         INSERT INTO knowledge_embeddings (
@@ -121,7 +128,8 @@ async fn process_embedding(
     .bind(literal)
     .execute(&mut *tx)
     .await?;
-    activate_embedded_revision(&mut tx, item_id, revision_id).await?;
+    activate_embedded_revision(&mut tx, item_id, revision_id, &state.config.knowledge).await?;
+    jobs.mark_completed_in_tx(&mut tx, job).await?;
     tx.commit().await?;
     Ok(())
 }
@@ -181,6 +189,9 @@ async fn process_extraction(
         comments,
     };
     let candidates = extractor.extract(&input).await?;
+    let mut tx = pool.begin().await?;
+    let jobs = KnowledgeJobService::new(pool);
+    jobs.lock_active_claim(&mut tx, job).await?;
     let service = KnowledgeService::new(pool, &state.config.knowledge);
     for (index, candidate) in candidates
         .into_iter()
@@ -201,7 +212,8 @@ async fn process_extraction(
             confidence: candidate.confidence,
         };
         service
-            .create_extracted(
+            .create_extracted_in_tx(
+                &mut tx,
                 job.id,
                 i32::try_from(index).context("candidate index exceeds i32")?,
                 revision,
@@ -211,6 +223,8 @@ async fn process_extraction(
             )
             .await?;
     }
+    jobs.mark_completed_in_tx(&mut tx, job).await?;
+    tx.commit().await?;
     Ok(())
 }
 

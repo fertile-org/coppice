@@ -16,7 +16,7 @@ use axum::{
     routing::{get, post},
     Json, Router,
 };
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use sqlx::Row;
 use std::sync::Arc;
 use time::format_description::well_known::Rfc3339;
@@ -144,12 +144,22 @@ struct RejectBody {
     reason: Option<String>,
 }
 
+fn deserialize_present_nullable<'de, D, T>(deserializer: D) -> Result<Option<Option<T>>, D::Error>
+where
+    D: Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    Option::<T>::deserialize(deserializer).map(Some)
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct EditBody {
     expected_version: i32,
     scope: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_present_nullable")]
     project_id: Option<Option<Uuid>>,
+    #[serde(default, deserialize_with = "deserialize_present_nullable")]
     agent_id: Option<Option<Uuid>>,
     knowledge_type: Option<String>,
     title: Option<String>,
@@ -585,5 +595,24 @@ mod tests {
             source_type_to_str(crate::domain::knowledge::KnowledgeSourceType::HumanNote),
             "human_note"
         );
+    }
+
+    #[test]
+    fn edit_body_distinguishes_omitted_and_null_scope_ids() {
+        let omitted: EditBody = serde_json::from_value(serde_json::json!({
+            "expectedVersion": 1
+        }))
+        .unwrap();
+        assert_eq!(omitted.project_id, None);
+        assert_eq!(omitted.agent_id, None);
+
+        let cleared: EditBody = serde_json::from_value(serde_json::json!({
+            "expectedVersion": 1,
+            "projectId": null,
+            "agentId": null
+        }))
+        .unwrap();
+        assert_eq!(cleared.project_id, Some(None));
+        assert_eq!(cleared.agent_id, Some(None));
     }
 }

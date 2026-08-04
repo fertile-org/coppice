@@ -84,6 +84,8 @@ pub struct KnowledgeAutoSaveConfig {
 pub struct KnowledgeRetrievalConfig {
     #[serde(default = "default_retrieval_top_k")]
     pub top_k: usize,
+    #[serde(default)]
+    pub allowed_types: Vec<String>,
     #[serde(default = "default_retrieval_min_confidence")]
     pub minimum_confidence: String,
     #[serde(default)]
@@ -125,6 +127,21 @@ const LOW_RISK_AUTO_SAVE_TYPES: &[&str] = &[
     "test_command",
 ];
 
+const KNOWLEDGE_TYPES: &[&str] = &[
+    "coding_convention",
+    "architecture_rule",
+    "bug_pattern",
+    "test_command",
+    "review_feedback",
+    "dependency_note",
+    "api_contract",
+    "workflow_rule",
+    "human_preference",
+    "operational_runbook",
+    "security_rule",
+    "performance_note",
+];
+
 impl KnowledgeConfig {
     pub fn validate(&self) -> Result<(), String> {
         if self.embedding.dimension == 0 {
@@ -161,6 +178,18 @@ impl KnowledgeConfig {
         if self.retrieval.top_k == 0 || self.retrieval.top_k > 20 {
             return Err("knowledge.retrieval.top_k must be between 1 and 20".into());
         }
+        for (index, knowledge_type) in self.retrieval.allowed_types.iter().enumerate() {
+            if !KNOWLEDGE_TYPES.contains(&knowledge_type.as_str()) {
+                return Err(format!(
+                    "knowledge.retrieval.allowed_types contains unknown type: {knowledge_type}"
+                ));
+            }
+            if self.retrieval.allowed_types[..index].contains(knowledge_type) {
+                return Err(format!(
+                    "knowledge.retrieval.allowed_types contains duplicate type: {knowledge_type}"
+                ));
+            }
+        }
         if !matches!(
             self.retrieval.minimum_confidence.as_str(),
             "low" | "medium" | "high"
@@ -177,8 +206,22 @@ impl KnowledgeConfig {
                 "knowledge retrieval page sizes must satisfy 1 <= default <= max <= 100".into(),
             );
         }
-        if self.context_budget.max_tokens == 0
-            || self.context_budget.retrieved_knowledge > self.context_budget.max_tokens
+        if self.retrieval.max_active_per_project <= 0 || self.retrieval.max_active_workspace <= 0 {
+            return Err("knowledge retrieval capacity limits must be greater than zero".into());
+        }
+        let budget = &self.context_budget;
+        if budget.max_tokens == 0
+            || budget.output_contract == 0
+            || [
+                budget.ticket,
+                budget.latest_comments,
+                budget.project_rules,
+                budget.retrieved_knowledge,
+                budget.previous_attempt_summary,
+                budget.output_contract,
+            ]
+            .into_iter()
+            .any(|allocation| allocation > budget.max_tokens)
         {
             return Err("knowledge context budget is invalid".into());
         }
@@ -239,6 +282,7 @@ impl Default for KnowledgeRetrievalConfig {
     fn default() -> Self {
         Self {
             top_k: default_retrieval_top_k(),
+            allowed_types: Vec::new(),
             minimum_confidence: default_retrieval_min_confidence(),
             minimum_similarity: 0.0,
             default_page_size: default_knowledge_list_limit(),
@@ -1065,6 +1109,7 @@ mod tests {
         assert!(!cfg.auto_save.enabled);
         assert!(cfg.auto_save.allowed_types.is_empty());
         assert_eq!(cfg.retrieval.top_k, 8);
+        assert!(cfg.retrieval.allowed_types.is_empty());
         assert_eq!(cfg.retrieval.max_page_size, 100);
         assert_eq!(cfg.context_budget.max_tokens, 24_000);
         assert!(cfg.validate().is_ok());
@@ -1085,6 +1130,30 @@ mod tests {
         cfg.auto_save.enabled = true;
         cfg.auto_save.allowed_types = vec!["test_command".into()];
         assert!(cfg.validate().is_ok());
+    }
+
+    #[test]
+    fn knowledge_validates_optional_retrieval_type_allowlist() {
+        let mut cfg = KnowledgeConfig::default();
+        cfg.retrieval.allowed_types = vec!["test_command".into(), "bug_pattern".into()];
+        assert!(cfg.validate().is_ok());
+
+        cfg.retrieval.allowed_types = vec!["invented_type".into()];
+        let error = cfg
+            .validate()
+            .expect_err("unknown retrieval types must fail closed");
+        assert!(error.contains("invented_type"));
+    }
+
+    #[test]
+    fn knowledge_validates_every_context_budget_allocation() {
+        let mut cfg = KnowledgeConfig::default();
+        cfg.context_budget.project_rules = cfg.context_budget.max_tokens + 1;
+        assert!(cfg.validate().is_err());
+
+        cfg.context_budget.project_rules = 0;
+        cfg.context_budget.output_contract = 0;
+        assert!(cfg.validate().is_err());
     }
 
     #[test]
