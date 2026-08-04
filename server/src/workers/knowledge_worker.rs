@@ -151,10 +151,12 @@ async fn process_extraction(
     let project_id: Uuid = ticket.try_get("project_id")?;
     let mut title: String = ticket.try_get("title")?;
     let mut description: String = ticket.try_get("description")?;
-    title = truncate_utf8(&title, 1_000);
+    let max_source_bytes = state.config.knowledge.extraction.max_source_bytes;
+    title = truncate_utf8(&title, max_source_bytes.min(1_000));
+    let remaining_after_title = max_source_bytes.saturating_sub(title.len());
     description = truncate_utf8(
         &description,
-        state.config.knowledge.extraction.max_source_bytes / 2,
+        (max_source_bytes / 2).min(remaining_after_title),
     );
     let rows = sqlx::query(
         r#"
@@ -167,14 +169,11 @@ async fn process_extraction(
     .bind(ticket_id)
     .fetch_all(pool)
     .await?;
-    let mut remaining = state
-        .config
-        .knowledge
-        .extraction
-        .max_source_bytes
-        .saturating_sub(title.len() + description.len());
+    let mut remaining = max_source_bytes.saturating_sub(title.len() + description.len());
     let mut comments = Vec::new();
-    for row in rows.into_iter().rev() {
+    // Allocate the bounded snapshot newest-first so older comments cannot crowd
+    // the latest review evidence out of the extraction input.
+    for row in rows {
         if remaining == 0 {
             break;
         }
@@ -193,6 +192,8 @@ async fn process_extraction(
             source_type,
         });
     }
+    // Providers receive retained comments in chronological order.
+    comments.reverse();
     let input = ExtractionInput {
         ticket_id,
         project_id,

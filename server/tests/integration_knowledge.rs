@@ -242,6 +242,70 @@ impl ExtractionProvider for CommentReviewExtractionProvider {
     }
 }
 
+struct LatestCommentExtractionProvider {
+    newest_comment_id: Uuid,
+    max_source_bytes: usize,
+}
+
+struct BoundedExtractionProvider {
+    max_source_bytes: usize,
+}
+
+#[async_trait]
+impl ExtractionProvider for BoundedExtractionProvider {
+    async fn extract(
+        &self,
+        input: &ExtractionInput,
+    ) -> Result<Vec<ExtractedCandidate>, ExtractionError> {
+        let total_bytes = input.title.len()
+            + input.description.len()
+            + input
+                .comments
+                .iter()
+                .map(|comment| comment.body.len())
+                .sum::<usize>();
+        if total_bytes > self.max_source_bytes {
+            return Err(ExtractionError::InvalidInput(format!(
+                "source snapshot used {total_bytes} bytes, above {}",
+                self.max_source_bytes
+            )));
+        }
+        Ok(Vec::new())
+    }
+}
+
+#[async_trait]
+impl ExtractionProvider for LatestCommentExtractionProvider {
+    async fn extract(
+        &self,
+        input: &ExtractionInput,
+    ) -> Result<Vec<ExtractedCandidate>, ExtractionError> {
+        let total_bytes = input.title.len()
+            + input.description.len()
+            + input
+                .comments
+                .iter()
+                .map(|comment| comment.body.len())
+                .sum::<usize>();
+        if total_bytes > self.max_source_bytes {
+            return Err(ExtractionError::InvalidInput(format!(
+                "source snapshot used {total_bytes} bytes, above {}",
+                self.max_source_bytes
+            )));
+        }
+        if !input
+            .comments
+            .iter()
+            .any(|comment| comment.id == self.newest_comment_id)
+        {
+            return Err(ExtractionError::InvalidInput(
+                "newest comment was discarded before older source material".into(),
+            ));
+        }
+        Ok(Vec::new())
+    }
+}
+
 fn unit_vector_literal() -> String {
     format!("[1{}]", ",0".repeat(1_535))
 }
@@ -2272,6 +2336,96 @@ async fn extraction_preserves_typed_comment_and_review_source_ids() {
     assert_eq!(
         sources,
         vec![("comment".into(), comment_id), ("review".into(), review_id)]
+    );
+}
+
+#[tokio::test]
+async fn extraction_byte_budget_prioritizes_the_newest_comments() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
+    let project_id = common::create_test_project(&app, &cookie, &csrf).await;
+    let ticket_id = common::create_test_ticket(&app, &project_id, &cookie, &csrf).await;
+    let ticket_id = Uuid::parse_str(&ticket_id).unwrap();
+    let oldest_comment_id = Uuid::new_v4();
+    let newest_comment_id = Uuid::new_v4();
+    let pool = state.db.as_ref().unwrap();
+    sqlx::query(
+        r#"
+        INSERT INTO ticket_comments (id, ticket_id, author_type, body, intent, created_at)
+        VALUES
+            ($1, $3, 'human', $4, 'progress_update', now() - interval '1 second'),
+            ($2, $3, 'human', 'newest durable evidence', 'review_feedback', now())
+        "#,
+    )
+    .bind(oldest_comment_id)
+    .bind(newest_comment_id)
+    .bind(ticket_id)
+    .bind("old source material ".repeat(20))
+    .execute(pool)
+    .await
+    .unwrap();
+    sqlx::query("UPDATE tickets SET status = 'done' WHERE id = $1")
+        .bind(ticket_id)
+        .execute(pool)
+        .await
+        .unwrap();
+
+    let max_source_bytes = 128;
+    let mut bounded_state = state.as_ref().clone();
+    bounded_state.config.knowledge.extraction.max_source_bytes = max_source_bytes;
+    let embedder = embedding_provider(&bounded_state.config.knowledge.embedding).unwrap();
+    let extractor: Arc<dyn ExtractionProvider> = Arc::new(LatestCommentExtractionProvider {
+        newest_comment_id,
+        max_source_bytes,
+    });
+    assert!(
+        knowledge_worker::process_one(
+            &bounded_state,
+            "latest-source-worker",
+            &embedder,
+            &extractor,
+        )
+        .await
+        .unwrap()
+    );
+}
+
+#[tokio::test]
+async fn extraction_byte_budget_includes_title_and_description() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
+    let project_id = common::create_test_project(&app, &cookie, &csrf).await;
+    let ticket_id = common::create_test_ticket(&app, &project_id, &cookie, &csrf).await;
+    let ticket_id = Uuid::parse_str(&ticket_id).unwrap();
+    let pool = state.db.as_ref().unwrap();
+    sqlx::query("UPDATE tickets SET title = $2, description = $3 WHERE id = $1")
+        .bind(ticket_id)
+        .bind("long title ".repeat(40))
+        .bind("long description ".repeat(40))
+        .execute(pool)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE tickets SET status = 'done' WHERE id = $1")
+        .bind(ticket_id)
+        .execute(pool)
+        .await
+        .unwrap();
+
+    let max_source_bytes = 64;
+    let mut bounded_state = state.as_ref().clone();
+    bounded_state.config.knowledge.extraction.max_source_bytes = max_source_bytes;
+    let embedder = embedding_provider(&bounded_state.config.knowledge.embedding).unwrap();
+    let extractor: Arc<dyn ExtractionProvider> =
+        Arc::new(BoundedExtractionProvider { max_source_bytes });
+    assert!(
+        knowledge_worker::process_one(
+            &bounded_state,
+            "bounded-source-worker",
+            &embedder,
+            &extractor,
+        )
+        .await
+        .unwrap()
     );
 }
 

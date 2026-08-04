@@ -389,3 +389,99 @@ async fn deleting_agent_with_run_sourced_knowledge_preserves_comment_and_review_
         .unwrap();
     assert_eq!(run_count, 1);
 }
+
+#[tokio::test]
+async fn deleting_agent_preserves_run_knowledge_usage_audit() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
+    let project_id = common::create_test_project(&app, &cookie, &csrf).await;
+    let ticket_id = common::create_test_ticket(&app, &project_id, &cookie, &csrf).await;
+    let agent_id = common::create_agent_with_preset_key(
+        &app,
+        "backend_engineer",
+        "Usage Audit Agent",
+        &cookie,
+        &csrf,
+    )
+    .await;
+    let knowledge = app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            "/api/knowledge",
+            &serde_json::json!({
+                "scope": "project",
+                "projectId": project_id,
+                "knowledgeType": "test_command",
+                "title": "Audited command",
+                "content": "Keep the run and usage snapshot that consumed this revision.",
+                "sourceType": "human_note",
+                "confidence": "high"
+            })
+            .to_string(),
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(knowledge.status(), StatusCode::CREATED);
+    let knowledge = common::json_body(knowledge).await;
+    let item_id = Uuid::parse_str(knowledge["id"].as_str().unwrap()).unwrap();
+    let revision_id = Uuid::parse_str(knowledge["revisionId"].as_str().unwrap()).unwrap();
+    let run_id = Uuid::new_v4();
+    let pool = state.db.as_ref().unwrap();
+    sqlx::query(
+        r#"
+        INSERT INTO agent_runs (id, ticket_id, agent_id, job_type, status, sandbox_profile_id)
+        VALUES ($1, $2, $3, 'implementation', 'succeeded', 'permissive')
+        "#,
+    )
+    .bind(run_id)
+    .bind(Uuid::parse_str(&ticket_id).unwrap())
+    .bind(Uuid::parse_str(&agent_id).unwrap())
+    .execute(pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"
+        INSERT INTO knowledge_usage_logs (
+            id, run_id, item_id, revision_id, rank, similarity,
+            token_count, rendered_content
+        ) VALUES ($1, $2, $3, $4, 1, 0.9, 12, 'immutable usage snapshot')
+        "#,
+    )
+    .bind(Uuid::new_v4())
+    .bind(run_id)
+    .bind(item_id)
+    .bind(revision_id)
+    .execute(pool)
+    .await
+    .unwrap();
+
+    let deleted = app
+        .clone()
+        .oneshot(common::json_request(
+            "DELETE",
+            &format!("/api/agents/{agent_id}"),
+            "",
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(deleted.status(), StatusCode::CONFLICT);
+
+    let run_count: i64 = sqlx::query_scalar("SELECT count(*) FROM agent_runs WHERE id = $1")
+        .bind(run_id)
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    let usage_count: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM knowledge_usage_logs WHERE run_id = $1")
+            .bind(run_id)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    assert_eq!(run_count, 1);
+    assert_eq!(usage_count, 1);
+}
