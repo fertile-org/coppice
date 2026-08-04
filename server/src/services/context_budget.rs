@@ -202,6 +202,35 @@ fn fit_knowledge_section(
     }
 }
 
+fn fit_wrapped_section(
+    value: &str,
+    max_tokens: usize,
+    heading: &str,
+    counter: &dyn TokenCounter,
+) -> Option<String> {
+    if value.is_empty() || max_tokens == 0 {
+        return None;
+    }
+    let mut payload_tokens = max_tokens;
+    loop {
+        let payload = truncate_to_tokens(value, payload_tokens, counter);
+        if payload.is_empty() {
+            return None;
+        }
+        let rendered = format!("{heading}\n\n{payload}\n\n");
+        let rendered_tokens = counter.count(&rendered);
+        if rendered_tokens <= max_tokens {
+            return Some(payload);
+        }
+        let overflow = rendered_tokens - max_tokens;
+        let next = payload_tokens.saturating_sub(overflow.max(1));
+        if next == payload_tokens {
+            return None;
+        }
+        payload_tokens = next;
+    }
+}
+
 pub fn build_budgeted_context(
     input: &ContextInput<'_>,
     knowledge: &KnowledgeSection,
@@ -230,21 +259,23 @@ pub fn build_budgeted_context(
     let mut ticket_tokens = budget.ticket;
     let mut previous_tokens = budget.previous_attempt_summary;
     let mut knowledge_tokens = budget.retrieved_knowledge;
-    let latest_comments = input
-        .latest_comments
-        .map(|value| truncate_to_tokens(value, budget.latest_comments, counter))
-        .filter(|value| !value.is_empty());
-    let project_rules = input
-        .project_rules
-        .map(|value| truncate_to_tokens(value, budget.project_rules, counter))
-        .filter(|value| !value.is_empty());
+    let latest_comments = input.latest_comments.and_then(|value| {
+        fit_wrapped_section(value, budget.latest_comments, "# Latest comments", counter)
+    });
+    let project_rules = input.project_rules.and_then(|value| {
+        fit_wrapped_section(value, budget.project_rules, "# Project rules", counter)
+    });
     let mut markdown = String::new();
     for _ in 0..knowledge.entries.len().saturating_add(8) {
         let ticket = truncate_to_tokens(input.ticket_description, ticket_tokens, counter);
-        let previous = input
-            .resume_context
-            .map(|value| truncate_to_tokens(value, previous_tokens, counter))
-            .filter(|value| !value.is_empty());
+        let previous = input.resume_context.and_then(|value| {
+            fit_wrapped_section(
+                value,
+                previous_tokens,
+                "# Previous attempt summary",
+                counter,
+            )
+        });
         let included_knowledge = fit_knowledge_section(knowledge, knowledge_tokens, counter);
         let bounded_input = optional_input(
             input,
@@ -454,6 +485,20 @@ mod tests {
 
     #[test]
     fn full_context_applies_independent_comment_rule_and_resume_allocations() {
+        fn section_tokens(
+            markdown: &str,
+            start: &str,
+            end: &str,
+            counter: &dyn TokenCounter,
+        ) -> usize {
+            let start = markdown.find(start).expect("section start");
+            let end = markdown[start..]
+                .find(end)
+                .map(|offset| start + offset)
+                .expect("section end");
+            counter.count(&markdown[start..end])
+        }
+
         let counter = ByteTokenCounter;
         let comments = "LATEST-COMMENT ".repeat(200);
         let rules = "PROJECT-RULE ".repeat(200);
@@ -470,30 +515,46 @@ mod tests {
         budget.project_rules = 24;
         budget.retrieved_knowledge = 0;
         budget.previous_attempt_summary = 24;
-        let bounded = build_budgeted_context(
-            &context,
-            &KnowledgeSection::default(),
-            &budget,
-            &counter,
-        )
-        .unwrap();
+        let bounded =
+            build_budgeted_context(&context, &KnowledgeSection::default(), &budget, &counter)
+                .unwrap();
         assert!(bounded.markdown.contains("# Latest comments"));
         assert!(bounded.markdown.contains("# Project rules"));
         assert!(bounded.markdown.contains("# Previous attempt summary"));
         assert!(!bounded.markdown.contains(&comments));
         assert!(!bounded.markdown.contains(&rules));
         assert!(!bounded.markdown.contains(&previous));
+        assert!(
+            section_tokens(
+                &bounded.markdown,
+                "# Latest comments",
+                "# Previous attempt summary",
+                &counter,
+            ) <= budget.latest_comments
+        );
+        assert!(
+            section_tokens(
+                &bounded.markdown,
+                "# Previous attempt summary",
+                "# Project rules",
+                &counter,
+            ) <= budget.previous_attempt_summary
+        );
+        assert!(
+            section_tokens(
+                &bounded.markdown,
+                "# Project rules",
+                "## Coppice platform rules — verification",
+                &counter,
+            ) <= budget.project_rules
+        );
 
         budget.latest_comments = 0;
         budget.project_rules = 0;
         budget.previous_attempt_summary = 0;
-        let omitted = build_budgeted_context(
-            &context,
-            &KnowledgeSection::default(),
-            &budget,
-            &counter,
-        )
-        .unwrap();
+        let omitted =
+            build_budgeted_context(&context, &KnowledgeSection::default(), &budget, &counter)
+                .unwrap();
         assert!(!omitted.markdown.contains("# Latest comments"));
         assert!(!omitted.markdown.contains("# Project rules"));
         assert!(!omitted.markdown.contains("# Previous attempt summary"));

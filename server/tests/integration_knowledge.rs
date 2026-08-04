@@ -196,7 +196,49 @@ impl ExtractionProvider for ReclaimingExtractionProvider {
             confidence: KnowledgeConfidence::High,
             should_require_human_approval: true,
             source_type: KnowledgeSourceType::AgentSummary,
+            source_id: None,
         }])
+    }
+}
+
+struct CommentReviewExtractionProvider;
+
+#[async_trait]
+impl ExtractionProvider for CommentReviewExtractionProvider {
+    async fn extract(
+        &self,
+        input: &ExtractionInput,
+    ) -> Result<Vec<ExtractedCandidate>, ExtractionError> {
+        let comment = input
+            .comments
+            .iter()
+            .find(|comment| comment.source_type == KnowledgeSourceType::Comment)
+            .ok_or_else(|| ExtractionError::InvalidInput("comment source missing".into()))?;
+        let review = input
+            .comments
+            .iter()
+            .find(|comment| comment.source_type == KnowledgeSourceType::Review)
+            .ok_or_else(|| ExtractionError::InvalidInput("review source missing".into()))?;
+        Ok(vec![
+            ExtractedCandidate {
+                knowledge_type: KnowledgeType::BugPattern,
+                title: "Comment-sourced pattern".into(),
+                content: comment.body.clone(),
+                confidence: KnowledgeConfidence::High,
+                should_require_human_approval: true,
+                source_type: KnowledgeSourceType::Comment,
+                source_id: Some(comment.id),
+            },
+            ExtractedCandidate {
+                knowledge_type: KnowledgeType::ReviewFeedback,
+                title: "Review-sourced feedback".into(),
+                content: review.body.clone(),
+                confidence: KnowledgeConfidence::High,
+                should_require_human_approval: true,
+                source_type: KnowledgeSourceType::Review,
+                source_id: Some(review.id),
+            },
+        ])
     }
 }
 
@@ -709,7 +751,10 @@ async fn knowledge_list_has_stable_hard_limited_pages_and_auth_failures() {
         .unwrap();
     assert_eq!(second.items.len(), 1);
     assert!(second.next_cursor.is_none());
-    assert!(second.items.iter().all(|item| !first_ids.contains(&item.id)));
+    assert!(second
+        .items
+        .iter()
+        .all(|item| !first_ids.contains(&item.id)));
 
     sqlx::query("UPDATE users SET role = 'member' WHERE email = 'admin@localhost'")
         .execute(state.db.as_ref().unwrap())
@@ -1963,10 +2008,8 @@ async fn retrieval_is_scoped_and_usage_is_logged_once() {
 async fn retrieval_excludes_every_ineligible_lifecycle_and_scope_variant() {
     let _guard = common::DB_TEST_LOCK.lock().await;
     let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
-    let project_id = Uuid::parse_str(
-        &common::create_test_project(&app, &cookie, &csrf).await,
-    )
-    .unwrap();
+    let project_id =
+        Uuid::parse_str(&common::create_test_project(&app, &cookie, &csrf).await).unwrap();
     let other_project_id = Uuid::parse_str(
         &create_project_named(&app, "Retrieval Matrix Other", &cookie, &csrf).await,
     )
@@ -2162,6 +2205,74 @@ async fn done_transition_schedules_idempotent_extraction_to_pending() {
     assert_eq!(inbox["items"].as_array().unwrap().len(), 1);
     assert_eq!(inbox["items"][0]["sourceId"], ticket_id);
     assert_eq!(inbox["items"][0]["policyDecision"], "human_review");
+}
+
+#[tokio::test]
+async fn extraction_preserves_typed_comment_and_review_source_ids() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
+    let project_id = common::create_test_project(&app, &cookie, &csrf).await;
+    let ticket_id = common::create_test_ticket(&app, &project_id, &cookie, &csrf).await;
+    let ticket_id = Uuid::parse_str(&ticket_id).unwrap();
+    let comment_id = Uuid::new_v4();
+    let review_id = Uuid::new_v4();
+    sqlx::query(
+        r#"
+        INSERT INTO ticket_comments (id, ticket_id, author_type, body, intent, created_at)
+        VALUES
+            ($1, $3, 'human', 'Ordinary diagnostic comment.', 'progress_update', now() - interval '1 second'),
+            ($2, $3, 'agent', 'Review-specific correction.', 'review_feedback', now())
+        "#,
+    )
+    .bind(comment_id)
+    .bind(review_id)
+    .bind(ticket_id)
+    .execute(state.db.as_ref().unwrap())
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO knowledge_jobs (id, kind, ticket_id) VALUES ($1, 'extract_ticket', $2)",
+    )
+    .bind(Uuid::new_v4())
+    .bind(ticket_id)
+    .execute(state.db.as_ref().unwrap())
+    .await
+    .unwrap();
+
+    let embedder = embedding_provider(&state.config.knowledge.embedding).unwrap();
+    let extractor: Arc<dyn ExtractionProvider> = Arc::new(CommentReviewExtractionProvider);
+    assert!(
+        knowledge_worker::process_one(&state, "source-aware", &embedder, &extractor)
+            .await
+            .unwrap()
+    );
+
+    let rows = sqlx::query(
+        r#"
+        SELECT source_type, source_id
+        FROM knowledge_revisions
+        WHERE source_id IN ($1, $2)
+        ORDER BY source_type
+        "#,
+    )
+    .bind(comment_id)
+    .bind(review_id)
+    .fetch_all(state.db.as_ref().unwrap())
+    .await
+    .unwrap();
+    let sources = rows
+        .iter()
+        .map(|row| {
+            (
+                sqlx::Row::get::<String, _>(row, "source_type"),
+                sqlx::Row::get::<Uuid, _>(row, "source_id"),
+            )
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        sources,
+        vec![("comment".into(), comment_id), ("review".into(), review_id)]
+    );
 }
 
 #[tokio::test]

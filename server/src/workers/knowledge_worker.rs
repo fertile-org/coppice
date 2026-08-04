@@ -1,8 +1,10 @@
-use crate::domain::knowledge::{KnowledgeRevisionInput, KnowledgeScope};
+use crate::domain::comment::{intent_from_str, CommentIntent};
+use crate::domain::knowledge::{KnowledgeRevisionInput, KnowledgeScope, KnowledgeSourceType};
 use crate::knowledge::embedder::{vector_literal, EmbeddingProvider};
 use crate::knowledge::embedding_provider;
 use crate::knowledge::extractor::{
-    policy_decision, ExtractionInput, ExtractionProvider, MockExtractionProvider,
+    policy_decision, ExtractedCandidate, ExtractionComment, ExtractionInput, ExtractionProvider,
+    MockExtractionProvider,
 };
 use crate::services::knowledge_job_service::{KnowledgeJob, KnowledgeJobService};
 use crate::services::knowledge_service::{activate_embedded_revision, KnowledgeService};
@@ -156,7 +158,7 @@ async fn process_extraction(
     );
     let rows = sqlx::query(
         r#"
-        SELECT body FROM ticket_comments
+        SELECT id, body, intent FROM ticket_comments
         WHERE ticket_id = $1
         ORDER BY created_at DESC, id DESC
         LIMIT 20
@@ -177,9 +179,19 @@ async fn process_extraction(
             break;
         }
         let body: String = row.try_get("body")?;
+        let intent: String = row.try_get("intent")?;
         let bounded = truncate_utf8(&body, remaining.min(2_000));
         remaining = remaining.saturating_sub(bounded.len());
-        comments.push(bounded);
+        let source_type = match intent_from_str(&intent) {
+            Some(CommentIntent::ReviewFeedback) => KnowledgeSourceType::Review,
+            Some(_) => KnowledgeSourceType::Comment,
+            None => anyhow::bail!("ticket comment has invalid intent: {intent}"),
+        };
+        comments.push(ExtractionComment {
+            id: row.try_get("id")?,
+            body: bounded,
+            source_type,
+        });
     }
     let input = ExtractionInput {
         ticket_id,
@@ -199,6 +211,7 @@ async fn process_extraction(
         .enumerate()
     {
         let (status, decision, reason) = policy_decision(&state.config.knowledge, &candidate);
+        let source_id = validated_candidate_source_id(&input, &candidate)?;
         let revision = KnowledgeRevisionInput {
             scope: KnowledgeScope::Project,
             project_id: Some(project_id),
@@ -207,7 +220,7 @@ async fn process_extraction(
             title: candidate.title,
             content: candidate.content,
             source_type: candidate.source_type,
-            source_id: Some(ticket_id),
+            source_id,
             source_run_id: None,
             confidence: candidate.confidence,
         };
@@ -226,6 +239,40 @@ async fn process_extraction(
     jobs.mark_completed_in_tx(&mut tx, job).await?;
     tx.commit().await?;
     Ok(())
+}
+
+fn validated_candidate_source_id(
+    input: &ExtractionInput,
+    candidate: &ExtractedCandidate,
+) -> anyhow::Result<Option<Uuid>> {
+    match candidate.source_type {
+        KnowledgeSourceType::Ticket | KnowledgeSourceType::AgentSummary => {
+            if let Some(source_id) = candidate.source_id {
+                anyhow::ensure!(
+                    source_id == input.ticket_id,
+                    "ticket-derived candidate source does not match extraction ticket"
+                );
+            }
+            Ok(Some(input.ticket_id))
+        }
+        KnowledgeSourceType::Comment | KnowledgeSourceType::Review => {
+            let source_id = candidate
+                .source_id
+                .context("comment-derived candidate has no source id")?;
+            anyhow::ensure!(
+                input.comments.iter().any(|comment| {
+                    comment.id == source_id && comment.source_type == candidate.source_type
+                }),
+                "comment-derived candidate source is not present in the extraction input"
+            );
+            Ok(Some(source_id))
+        }
+        KnowledgeSourceType::HumanNote
+        | KnowledgeSourceType::WorkspaceSignal
+        | KnowledgeSourceType::ObservationRun => {
+            anyhow::bail!("unsupported extracted knowledge source type")
+        }
+    }
 }
 
 fn truncate_utf8(value: &str, max_bytes: usize) -> String {

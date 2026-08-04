@@ -109,7 +109,9 @@ impl<'a> AgentService<'a> {
         }
         if let Some(mp) = model_provider {
             if mp.trim().is_empty() {
-                return Err(AgentError::Validation("modelProvider cannot be empty".into()));
+                return Err(AgentError::Validation(
+                    "modelProvider cannot be empty".into(),
+                ));
             }
         }
 
@@ -153,7 +155,9 @@ impl<'a> AgentService<'a> {
         }
         if let Some(mp) = model_provider {
             if mp.trim().is_empty() {
-                return Err(AgentError::Validation("modelProvider cannot be empty".into()));
+                return Err(AgentError::Validation(
+                    "modelProvider cannot be empty".into(),
+                ));
             }
         }
 
@@ -188,7 +192,9 @@ impl<'a> AgentService<'a> {
     ) -> Result<Agent, AgentError> {
         if let Some(mp) = model_provider {
             if mp.trim().is_empty() {
-                return Err(AgentError::Validation("modelProvider cannot be empty".into()));
+                return Err(AgentError::Validation(
+                    "modelProvider cannot be empty".into(),
+                ));
             }
         }
 
@@ -242,7 +248,14 @@ impl<'a> AgentService<'a> {
 
     pub async fn delete(&self, agent_id: Uuid) -> Result<(), AgentError> {
         let has_knowledge_provenance: bool = sqlx::query_scalar(
-            "SELECT EXISTS(SELECT 1 FROM knowledge_revisions WHERE agent_id = $1)",
+            r#"
+            SELECT EXISTS(
+                SELECT 1
+                FROM knowledge_revisions revision
+                LEFT JOIN agent_runs source_run ON source_run.id = revision.source_run_id
+                WHERE revision.agent_id = $1 OR source_run.agent_id = $1
+            )
+            "#,
         )
         .bind(agent_id)
         .fetch_one(self.pool)
@@ -256,11 +269,15 @@ impl<'a> AgentService<'a> {
             .execute(self.pool)
             .await
             .map_err(|error| {
-                if error
-                    .as_database_error()
-                    .and_then(|database_error| database_error.constraint())
-                    == Some("knowledge_revisions_agent_id_fkey")
-                {
+                if matches!(
+                    error
+                        .as_database_error()
+                        .and_then(|database_error| database_error.constraint()),
+                    Some(
+                        "knowledge_revisions_agent_id_fkey"
+                            | "knowledge_revisions_source_run_id_fkey"
+                    )
+                ) {
                     AgentError::KnowledgeProvenanceConflict
                 } else {
                     AgentError::Database(error)

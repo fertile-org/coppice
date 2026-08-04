@@ -8,12 +8,19 @@ use thiserror::Error;
 use uuid::Uuid;
 
 #[derive(Debug, Clone)]
+pub struct ExtractionComment {
+    pub id: Uuid,
+    pub body: String,
+    pub source_type: KnowledgeSourceType,
+}
+
+#[derive(Debug, Clone)]
 pub struct ExtractionInput {
     pub ticket_id: Uuid,
     pub project_id: Uuid,
     pub title: String,
     pub description: String,
-    pub comments: Vec<String>,
+    pub comments: Vec<ExtractionComment>,
 }
 
 #[derive(Debug, Clone)]
@@ -24,6 +31,7 @@ pub struct ExtractedCandidate {
     pub confidence: KnowledgeConfidence,
     pub should_require_human_approval: bool,
     pub source_type: KnowledgeSourceType,
+    pub source_id: Option<Uuid>,
 }
 
 #[derive(Debug, Error)]
@@ -59,8 +67,8 @@ impl ExtractionProvider for MockExtractionProvider {
             .comments
             .iter()
             .rev()
-            .find(|comment| !comment.trim().is_empty())
-            .map(String::as_str)
+            .find(|comment| !comment.body.trim().is_empty())
+            .map(|comment| comment.body.as_str())
             .unwrap_or(&input.description);
         let content = if evidence.trim().is_empty() {
             format!("Completed ticket: {title}")
@@ -74,6 +82,7 @@ impl ExtractionProvider for MockExtractionProvider {
             confidence: KnowledgeConfidence::High,
             should_require_human_approval: false,
             source_type: KnowledgeSourceType::AgentSummary,
+            source_id: None,
         }])
     }
 }
@@ -130,6 +139,7 @@ mod tests {
             confidence: KnowledgeConfidence::High,
             should_require_human_approval: false,
             source_type: KnowledgeSourceType::AgentSummary,
+            source_id: None,
         }
     }
 
