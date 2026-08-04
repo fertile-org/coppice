@@ -4353,7 +4353,6 @@ mod tests {
             ticket_title: "orchestrator ticket",
             ticket_description: "",
             ticket_status: "in_progress",
-            job_type: "work_on_ticket",
             ticket_substatus: None,
             agent_name: "Backend Engineer",
             agent_key: "backend_engineer",
@@ -4371,7 +4370,6 @@ mod tests {
             ticket_id: None,
             assignee_agent_key: None,
             thread_excerpt: None,
-            consultation_request: None,
         };
         write_context_file(worktree.path(), &context_input).expect("write context");
         let md = std::fs::read_to_string(worktree.path().join(".agent/context.md"))

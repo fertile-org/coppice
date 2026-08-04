@@ -15,7 +15,6 @@ pub struct ContextInput<'a> {
     pub ticket_title: &'a str,
     pub ticket_description: &'a str,
     pub ticket_status: &'a str,
-    pub job_type: &'a str,
     pub ticket_substatus: Option<&'a str>,
     pub agent_name: &'a str,
     pub agent_key: &'a str,
@@ -32,26 +31,65 @@ pub struct ContextInput<'a> {
     pub human_request: Option<HumanRequest<'a>>,
     pub ticket_id: Option<Uuid>,
     pub assignee_agent_key: Option<&'a str>,
+    // HumanChat: recent-thread excerpt. Full: None for owned work, Some("") for
+    // other non-work runs, or Some(request) for a bounded consultation.
     pub thread_excerpt: Option<&'a str>,
-    pub consultation_request: Option<&'a str>,
 }
 
 pub fn build_context_md(input: &ContextInput) -> String {
-    if input.context_profile == ContextProfile::Full && input.consultation_request.is_some() {
-        return build_consultation_context(input);
+    if input.context_profile == ContextProfile::Full {
+        if let FullContextKind::Consultation(request) = full_context_kind(input) {
+            return build_consultation_context(input, request);
+        }
     }
 
-    match input.context_profile {
+    let markdown = match input.context_profile {
         ContextProfile::Full => build_full_context(input),
         ContextProfile::HumanAgent => build_human_agent_context(input),
         ContextProfile::HumanChat => build_human_chat_context(input),
+    };
+
+    specialize_ready_tech_lead_contract(input, markdown)
+}
+
+enum FullContextKind<'a> {
+    Work,
+    Other,
+    Consultation(&'a str),
+}
+
+fn full_context_kind<'a>(input: &'a ContextInput<'a>) -> FullContextKind<'a> {
+    match input.thread_excerpt {
+        None => FullContextKind::Work,
+        Some("") => FullContextKind::Other,
+        Some(request) => FullContextKind::Consultation(request),
     }
 }
 
-fn build_consultation_context(input: &ContextInput) -> String {
-    let request = input
-        .consultation_request
-        .expect("consultation context requires a request");
+fn specialize_ready_tech_lead_contract(input: &ContextInput, mut markdown: String) -> String {
+    if !is_ready_tech_lead_task(input) {
+        return markdown;
+    }
+
+    const GENERIC_CHANGED_FILES: &str = r#""changedFiles": ["<paths changed>"]"#;
+    // Preserve the generic example's byte count so main's strict context-budget
+    // accounting remains exact after this branch is merged.
+    const READ_ONLY_CHANGED_FILES: &str = r#""changedFiles": []                 "#;
+    debug_assert_eq!(GENERIC_CHANGED_FILES.len(), READ_ONLY_CHANGED_FILES.len());
+
+    // The output contract is the final section, so replace its example rather
+    // than an identical snippet that may appear in ticket-provided context.
+    if let Some(start) = markdown.rfind(GENERIC_CHANGED_FILES) {
+        markdown.replace_range(
+            start..start + GENERIC_CHANGED_FILES.len(),
+            READ_ONLY_CHANGED_FILES,
+        );
+    }
+
+    markdown
+}
+
+fn build_consultation_context(input: &ContextInput, request: &str) -> String {
     let substatus_line = match input.ticket_substatus {
         Some(substatus) => format!("**Substatus:** {substatus}\n\n"),
         None => String::new(),
@@ -171,11 +209,6 @@ fn build_full_context(input: &ContextInput) -> String {
     let resume_section = format_resume_section(input);
     let contract_guidance = format_contract_guidance(input);
     let verification_guidance = format_verification_guidance();
-    let changed_files_example = if is_ready_tech_lead_task(input) {
-        "[]"
-    } else {
-        r#"["<paths changed>"]"#
-    };
 
     format!(
         r#"# Current task
@@ -219,7 +252,7 @@ Return a single JSON object as your final result.
   "summary": "<markdown summary of what you did>",
   "updatedDescription": "<optional full ticket description replacement>",
   "acceptanceCriteria": "<optional acceptance criteria; stored under ## Acceptance criteria>",
-  "changedFiles": {changed_files_example},
+  "changedFiles": ["<paths changed>"],
   "testsRun": ["<commands run>"],
   "assignTo": "<agent key to recommend next, e.g. backend_engineer or research>",
   "mentionAgents": ["<agent keys to notify>"],
@@ -272,7 +305,6 @@ When blocked by missing capability or secret, also include `requiredCapabilities
         repository_section = repository_section,
         resume_section = resume_section,
         verification_guidance = verification_guidance,
-        changed_files_example = changed_files_example,
         contract_guidance = contract_guidance,
         sandbox_note = SANDBOX_NOTE,
     )
@@ -591,13 +623,14 @@ fn is_in_review_review_task(input: &ContextInput) -> bool {
 }
 
 fn is_ready_tech_lead_task(input: &ContextInput) -> bool {
-    is_ready_tech_lead_refinement(
-        input.context_profile,
-        input.job_type,
-        input.ticket_status,
-        input.agent_key,
-        input.agent_role,
-    )
+    matches!(full_context_kind(input), FullContextKind::Work)
+        && is_ready_tech_lead_refinement(
+            input.context_profile,
+            "work_on_ticket",
+            input.ticket_status,
+            input.agent_key,
+            input.agent_role,
+        )
 }
 
 fn is_in_qa_qc_task(input: &ContextInput) -> bool {
@@ -828,11 +861,10 @@ mod tests {
     fn context_includes_required_sections() {
         let (context_profile, human_request, ticket_id, assignee_agent_key, thread_excerpt) =
             full_profile_defaults();
-        let md = build_context_md(&ContextInput {
+        let mut input = ContextInput {
             ticket_title: "Fix polling",
             ticket_description: "Add retry",
             ticket_status: "in_progress",
-            job_type: "work_on_ticket",
             ticket_substatus: None,
             agent_name: "FE Agent",
             agent_key: "frontend_engineer",
@@ -850,8 +882,8 @@ mod tests {
             ticket_id,
             assignee_agent_key,
             thread_excerpt,
-            consultation_request: None,
-        });
+        };
+        let md = build_context_md(&input);
         assert!(md.contains("# Current task"));
         assert!(md.contains("# Agent role"));
         assert!(md.contains("# Repository"));
@@ -869,42 +901,32 @@ mod tests {
         assert!(md.contains("`agentRequests` is the only successful-result field"));
         assert!(md.contains("\"agentRequests\""));
         assert!(!md.contains("PM refinement (required)"));
-    }
 
-    #[test]
-    fn consultation_context_puts_exact_request_and_rules_before_ticket_and_role() {
         let exact_request = "Review the transaction boundary.\nCall out any race conditions.";
-        let md = build_context_md(&ContextInput {
-            ticket_title: "Prevent duplicate dispatch",
-            ticket_description: "The full implementation ticket.",
-            ticket_status: "ready",
-            job_type: "respond_to_mention",
-            ticket_substatus: None,
-            agent_name: "Tech Lead Agent",
-            agent_key: "tech_lead",
-            agent_role: "Technical Lead",
-            agent_skills: &[],
-            agent_responsibilities: &[],
-            agent_system_prompt: "Implement whatever the ticket asks for.",
-            repo_name: Some("coppice"),
-            repo_remote_url: None,
-            repo_default_branch: Some("main"),
-            worktree_path: Some("/tmp/worktree"),
-            resume_context: Some("Older ticket discussion."),
-            context_profile: ContextProfile::Full,
-            human_request: None,
-            ticket_id: None,
-            assignee_agent_key: Some("pm"),
-            thread_excerpt: None,
-            consultation_request: Some(exact_request),
-        });
+        input.ticket_title = "Prevent duplicate dispatch";
+        input.ticket_description = "The full implementation ticket.";
+        input.ticket_status = "ready";
+        input.agent_name = "Tech Lead Agent";
+        input.agent_key = "tech_lead";
+        input.agent_role = "Technical Lead";
+        input.agent_skills = &[];
+        input.agent_responsibilities = &[];
+        input.agent_system_prompt = "Implement whatever the ticket asks for.";
+        input.repo_remote_url = None;
+        input.worktree_path = Some("/tmp/worktree");
+        input.resume_context = Some("Older ticket discussion.");
+        input.assignee_agent_key = Some("pm");
+        input.thread_excerpt = Some(exact_request);
+        let md = build_context_md(&input);
 
         let request_pos = md.find(exact_request).expect("exact request");
         let rules_pos = md
             .find("Coppice platform rules — consultation response")
             .expect("consultation rules");
         let ticket_pos = md.find("# Ticket context").expect("ticket context");
-        let thread_pos = md.find("## Ticket thread").expect("ticket thread");
+        let thread_pos = md
+            .find("Older ticket discussion.")
+            .expect("supporting ticket context");
         let role_pos = md.find("# Agent role").expect("agent role");
         let contract_pos = md
             .find("# Expected response-only result contract")
@@ -924,6 +946,34 @@ mod tests {
         assert!(!md.contains("\"updatedDescription\""));
         assert!(!md.contains("\"splitTickets\""));
         assert!(!md.contains("Coppice platform rules — git"));
+
+        input.thread_excerpt = None;
+        input.agent_role = "Product Manager";
+        let md = build_context_md(&input);
+        assert!(md.contains("Coppice platform rules — Ready technical refinement (required)"));
+        assert!(!md.contains("Coppice platform rules — PM refinement (required)"));
+        assert!(md.contains("`updatedDescription`"));
+        assert!(md.contains("`acceptanceCriteria`"));
+        assert!(md.contains("`assignTo`"));
+        assert!(md.contains("enabled implementer"));
+        assert!(md.contains("technical approach"));
+        assert!(md.contains("risks"));
+        assert!(md.contains("`changedFiles` must be `[]`"));
+        assert!(md.contains("\"changedFiles\": []"));
+        assert!(!md.contains("\"changedFiles\": [\"<paths changed>\"]"));
+        assert!(md.contains("must **not** implement"));
+        assert!(md.contains("mention PM"));
+        assert!(!md.contains("Coppice platform rules — git (required)"));
+        assert!(!md.contains("implementer completion"));
+        assert!(!md.contains("Coppice platform rules — code review"));
+
+        input.thread_excerpt = Some("");
+        input.agent_role = "Technical Lead";
+        let md = build_context_md(&input);
+        assert!(!md.contains("Coppice platform rules — Ready technical refinement"));
+        assert!(md.contains("Coppice platform rules — implementer completion"));
+        assert!(md.contains("Coppice platform rules — git (required)"));
+        assert!(md.contains("\"changedFiles\": [\"<paths changed>\"]"));
     }
 
     #[test]
@@ -934,7 +984,6 @@ mod tests {
             ticket_title: "Integrate CLI",
             ticket_description: "Add connector",
             ticket_status: "backlog",
-            job_type: "work_on_ticket",
             ticket_substatus: None,
             agent_name: "PM Agent",
             agent_key: "pm",
@@ -952,7 +1001,6 @@ mod tests {
             ticket_id,
             assignee_agent_key,
             thread_excerpt,
-            consultation_request: None,
         });
         assert!(md.contains("Coppice platform rules — PM refinement (required)"));
         assert!(md.contains("Coppice platform rules — verification (required)"));
@@ -967,88 +1015,6 @@ mod tests {
     }
 
     #[test]
-    fn tech_lead_in_ready_context_requires_no_code_refinement_handoff() {
-        let (context_profile, human_request, ticket_id, assignee_agent_key, thread_excerpt) =
-            full_profile_defaults();
-        let md = build_context_md(&ContextInput {
-            ticket_title: "Retry upstream requests",
-            ticket_description: "Define the implementation approach before engineering starts.",
-            ticket_status: "ready",
-            job_type: "work_on_ticket",
-            ticket_substatus: None,
-            agent_name: "Tech Lead Agent",
-            agent_key: "tech_lead",
-            agent_role: "Product Manager",
-            agent_skills: &[],
-            agent_responsibilities: &[],
-            agent_system_prompt: "You are the Tech Lead.",
-            repo_name: Some("coppice"),
-            repo_remote_url: None,
-            repo_default_branch: Some("main"),
-            worktree_path: Some("/tmp/worktree"),
-            resume_context: None,
-            context_profile,
-            human_request,
-            ticket_id,
-            assignee_agent_key,
-            thread_excerpt,
-            consultation_request: None,
-        });
-
-        assert!(md.contains("Coppice platform rules — Ready technical refinement (required)"));
-        assert!(!md.contains("Coppice platform rules — PM refinement (required)"));
-        assert!(md.contains("`updatedDescription`"));
-        assert!(md.contains("`acceptanceCriteria`"));
-        assert!(md.contains("`assignTo`"));
-        assert!(md.contains("enabled implementer"));
-        assert!(md.contains("technical approach"));
-        assert!(md.contains("risks"));
-        assert!(md.contains("`changedFiles` must be `[]`"));
-        assert!(md.contains("\"changedFiles\": []"));
-        assert!(!md.contains("\"changedFiles\": [\"<paths changed>\"]"));
-        assert!(md.contains("must **not** implement"));
-        assert!(md.contains("mention PM"));
-        assert!(!md.contains("Coppice platform rules — git (required)"));
-        assert!(!md.contains("implementer completion"));
-        assert!(!md.contains("Coppice platform rules — code review"));
-    }
-
-    #[test]
-    fn tech_lead_in_ready_non_work_context_keeps_generic_contract() {
-        let (context_profile, human_request, ticket_id, assignee_agent_key, thread_excerpt) =
-            full_profile_defaults();
-        let md = build_context_md(&ContextInput {
-            ticket_title: "Retry upstream requests",
-            ticket_description: "Inspect a bounded question outside ticket ownership.",
-            ticket_status: "ready",
-            job_type: "review_ticket",
-            ticket_substatus: None,
-            agent_name: "Tech Lead Agent",
-            agent_key: "tech_lead",
-            agent_role: "Technical Lead",
-            agent_skills: &[],
-            agent_responsibilities: &[],
-            agent_system_prompt: "You are the Tech Lead.",
-            repo_name: Some("coppice"),
-            repo_remote_url: None,
-            repo_default_branch: Some("main"),
-            worktree_path: Some("/tmp/worktree"),
-            resume_context: None,
-            context_profile,
-            human_request,
-            ticket_id,
-            assignee_agent_key,
-            thread_excerpt,
-            consultation_request: None,
-        });
-
-        assert!(!md.contains("Coppice platform rules — Ready technical refinement"));
-        assert!(md.contains("Coppice platform rules — implementer completion"));
-        assert!(md.contains("Coppice platform rules — git (required)"));
-        assert!(md.contains("\"changedFiles\": [\"<paths changed>\"]"));
-    }
-
-    #[test]
     fn context_includes_resume_section_when_provided() {
         let (context_profile, human_request, ticket_id, assignee_agent_key, thread_excerpt) =
             full_profile_defaults();
@@ -1056,7 +1022,6 @@ mod tests {
             ticket_title: "Fix polling",
             ticket_description: "Add retry",
             ticket_status: "in_progress",
-            job_type: "work_on_ticket",
             ticket_substatus: None,
             agent_name: "FE Agent",
             agent_key: "frontend_engineer",
@@ -1076,7 +1041,6 @@ mod tests {
             ticket_id,
             assignee_agent_key,
             thread_excerpt,
-            consultation_request: None,
         });
         assert!(md.contains("## Ticket thread"));
         assert!(md.contains("Need API shape."));
@@ -1091,7 +1055,6 @@ mod tests {
             ticket_title: "Streaming feature",
             ticket_description: "Add WS streaming",
             ticket_status: "in_review",
-            job_type: "work_on_ticket",
             ticket_substatus: None,
             agent_name: "Tech Lead Agent",
             agent_key: "tech_lead",
@@ -1109,7 +1072,6 @@ mod tests {
             ticket_id,
             assignee_agent_key,
             thread_excerpt,
-            consultation_request: None,
         });
         assert!(md.contains("Coppice platform rules — code review (required)"));
         assert!(md.contains("## Verdict"));
@@ -1125,7 +1087,6 @@ mod tests {
             ticket_title: "Verify retry behavior",
             ticket_description: "QC the retry fix",
             ticket_status: "in_qa",
-            job_type: "work_on_ticket",
             ticket_substatus: None,
             agent_name: "QC Agent",
             agent_key: "qc",
@@ -1143,7 +1104,6 @@ mod tests {
             ticket_id,
             assignee_agent_key,
             thread_excerpt,
-            consultation_request: None,
         });
         assert!(md.contains("Coppice platform rules — QA verification (required)"));
         // Verification-only: must not edit or fix source.
@@ -1169,7 +1129,6 @@ mod tests {
             ticket_title: "Fix polling",
             ticket_description: "Add retry",
             ticket_status: "in_progress",
-            job_type: "work_on_ticket",
             ticket_substatus: None,
             agent_name: "FE Agent",
             agent_key: "frontend_engineer",
@@ -1187,7 +1146,6 @@ mod tests {
             ticket_id,
             assignee_agent_key,
             thread_excerpt,
-            consultation_request: None,
         });
         assert!(md.contains("# Current task"));
         assert!(md.contains("**Description:**"));
@@ -1208,7 +1166,6 @@ mod tests {
             ticket_title: "Fix polling",
             ticket_description: "Full description that should not appear",
             ticket_status: "in_progress",
-            job_type: "work_on_ticket",
             ticket_substatus: Some("implementing"),
             agent_name: "FE Agent",
             agent_key: "frontend_engineer",
@@ -1226,7 +1183,6 @@ mod tests {
             ticket_id: Some(ticket_id),
             assignee_agent_key: Some("frontend_engineer"),
             thread_excerpt: None,
-            consultation_request: None,
         });
 
         let human_pos = md
@@ -1251,7 +1207,6 @@ mod tests {
             ticket_title: "Fix polling",
             ticket_description: "Full description that should not appear",
             ticket_status: "in_progress",
-            job_type: "work_on_ticket",
             ticket_substatus: None,
             agent_name: "FE Agent",
             agent_key: "frontend_engineer",
@@ -1273,7 +1228,6 @@ mod tests {
             ticket_id: None,
             assignee_agent_key: None,
             thread_excerpt: None,
-            consultation_request: None,
         });
 
         assert!(!md.contains("Full description that should not appear"));
@@ -1295,7 +1249,6 @@ mod tests {
             ticket_title: "Fix polling",
             ticket_description: "Full description that should not appear",
             ticket_status: "in_progress",
-            job_type: "respond_to_mention",
             ticket_substatus: Some("implementing"),
             agent_name: "FE Agent",
             agent_key: "frontend_engineer",
@@ -1317,7 +1270,6 @@ mod tests {
             ticket_id: None,
             assignee_agent_key: None,
             thread_excerpt: Some("- **Human:** Can you help?\n- **Agent:** Sure, working on it."),
-            consultation_request: None,
         });
 
         assert!(md.contains("## Recent thread"));

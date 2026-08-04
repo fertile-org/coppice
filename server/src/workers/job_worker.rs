@@ -372,11 +372,16 @@ async fn execute_job(
         ContextProfile::Full => ticket.ticket.description.as_str(),
         ContextProfile::HumanAgent | ContextProfile::HumanChat => "",
     };
+    let context_thread_excerpt = match run.context_profile {
+        ContextProfile::Full if run.job_type == "work_on_ticket" => None,
+        ContextProfile::Full => Some(consultation_request_ref.unwrap_or_default()),
+        ContextProfile::HumanChat => thread_excerpt_ref,
+        ContextProfile::HumanAgent => None,
+    };
     let context_input = ContextInput {
         ticket_title: &ticket.ticket.title,
         ticket_description,
         ticket_status: status_to_str(ticket.ticket.status),
-        job_type: &run.job_type,
         ticket_substatus,
         agent_name: &agent.name,
         agent_key: &agent_key,
@@ -393,8 +398,7 @@ async fn execute_job(
         human_request,
         ticket_id: Some(run.ticket_id),
         assignee_agent_key: assignee_agent_key_ref,
-        thread_excerpt: thread_excerpt_ref,
-        consultation_request: consultation_request_ref,
+        thread_excerpt: context_thread_excerpt,
     };
     write_context_file(&paths.worktree_dir, &context_input).context("write context file")?;
 
