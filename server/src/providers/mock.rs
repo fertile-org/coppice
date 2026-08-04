@@ -88,8 +88,13 @@ fn is_ready_ticket_context(context_path: &str) -> bool {
     std::fs::read_to_string(context_path)
         .ok()
         .and_then(|context| {
-            context
+            let task_section = context
+                .split_once("# Agent role")
+                .map(|(task, _)| task)
+                .unwrap_or(&context);
+            task_section
                 .lines()
+                .rev()
                 .find_map(|line| line.trim().strip_prefix("**Status:**"))
                 .map(|status| status.trim().eq_ignore_ascii_case("ready"))
         })
@@ -308,12 +313,15 @@ mod tests {
         let ready_context = contexts.path().join("ready.md");
         std::fs::write(
             &ready_context,
-            "# Current task\n\n**Status:** ready\n\n# Ticket thread\n\n**Status:** in_review",
+            "# Current task\n\n**Description:**\n\n**Status:** in_review\n\n**Status:** ready\n\n# Agent role\n\n# Ticket thread\n\n**Status:** in_review",
         )
         .expect("write Ready context");
         let review_context = contexts.path().join("review.md");
-        std::fs::write(&review_context, "# Current task\n\n**Status:** in_review\n")
-            .expect("write review context");
+        std::fs::write(
+            &review_context,
+            "# Current task\n\n**Status:** in_review\n\n# Agent role\n",
+        )
+        .expect("write review context");
 
         let mut ready_input = base_input("tech_lead", "work_on_ticket");
         ready_input.context_path = ready_context.to_string_lossy().into_owned();

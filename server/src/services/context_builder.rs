@@ -169,6 +169,11 @@ fn build_full_context(input: &ContextInput) -> String {
     let resume_section = format_resume_section(input);
     let contract_guidance = format_contract_guidance(input);
     let verification_guidance = format_verification_guidance();
+    let changed_files_example = if is_ready_tech_lead_task(input) {
+        "[]"
+    } else {
+        r#"["<paths changed>"]"#
+    };
 
     format!(
         r#"# Current task
@@ -212,7 +217,7 @@ Return a single JSON object as your final result.
   "summary": "<markdown summary of what you did>",
   "updatedDescription": "<optional full ticket description replacement>",
   "acceptanceCriteria": "<optional acceptance criteria; stored under ## Acceptance criteria>",
-  "changedFiles": ["<paths changed>"],
+  "changedFiles": {changed_files_example},
   "testsRun": ["<commands run>"],
   "assignTo": "<agent key to recommend next, e.g. backend_engineer or research>",
   "mentionAgents": ["<agent keys to notify>"],
@@ -265,6 +270,7 @@ When blocked by missing capability or secret, also include `requiredCapabilities
         repository_section = repository_section,
         resume_section = resume_section,
         verification_guidance = verification_guidance,
+        changed_files_example = changed_files_example,
         contract_guidance = contract_guidance,
         sandbox_note = SANDBOX_NOTE,
     )
@@ -986,6 +992,8 @@ mod tests {
         assert!(md.contains("technical approach"));
         assert!(md.contains("risks"));
         assert!(md.contains("`changedFiles` must be `[]`"));
+        assert!(md.contains("\"changedFiles\": []"));
+        assert!(!md.contains("\"changedFiles\": [\"<paths changed>\"]"));
         assert!(md.contains("must **not** implement"));
         assert!(md.contains("mention PM"));
         assert!(!md.contains("Coppice platform rules — git (required)"));
