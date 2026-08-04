@@ -235,8 +235,10 @@ async fn scope_b_mock_pipeline_reaches_final_review() {
     let repo_id =
         common::register_test_repo(&app, &local_path.display().to_string(), &cookie, &csrf).await;
 
-    let pm_id =
-        common::create_agent_with_preset_key(&app, "pm", "PM Agent", &cookie, &csrf).await;
+    let pm_id = common::create_agent_with_preset_key(&app, "pm", "PM Agent", &cookie, &csrf).await;
+    let tech_lead_id =
+        common::create_agent_with_preset_key(&app, "tech_lead", "Tech Lead Agent", &cookie, &csrf)
+            .await;
     let engineer_id = common::create_agent_with_preset_key(
         &app,
         "backend_engineer",
@@ -263,16 +265,36 @@ async fn scope_b_mock_pipeline_reaches_final_review() {
                     .as_object()
                     .and_then(|rec| rec.get("recommendedAgentKey"))
                     .and_then(|key| key.as_str())
-                    == Some("backend_engineer")
+                    == Some("tech_lead")
         },
     )
     .await;
     assert!(pm_ready["pendingAssignRecommendation"].is_object());
 
-    common::assign_agent_to_ticket(&app, &ticket_id, &engineer_id, &cookie, &csrf).await;
+    common::assign_agent_to_ticket(&app, &ticket_id, &tech_lead_id, &cookie, &csrf).await;
 
     let after_assign = common::get_ticket(&app, &ticket_id, &cookie, &csrf).await;
     assert!(after_assign["pendingAssignRecommendation"].is_null());
+
+    common::poll_runs_until_count(
+        &app,
+        &ticket_id,
+        &cookie,
+        &csrf,
+        "Tech Lead refinement succeeded and handed off to engineering",
+        Duration::from_secs(30),
+        |runs| {
+            runs.iter().any(|run| {
+                run["agentId"].as_str() == Some(tech_lead_id.as_str())
+                    && run["jobType"].as_str() == Some("work_on_ticket")
+                    && run["status"].as_str() == Some("succeeded")
+            }) && runs.iter().any(|run| {
+                run["agentId"].as_str() == Some(engineer_id.as_str())
+                    && run["jobType"].as_str() == Some("work_on_ticket")
+            })
+        },
+    )
+    .await;
 
     common::poll_runs_until_count(
         &app,
@@ -359,6 +381,353 @@ async fn scope_b_mock_pipeline_reaches_final_review() {
     let approved: serde_json::Value = common::json_body(approve).await;
     assert_eq!(approved["status"], "done");
     assert!(approved["substatus"].is_null());
+}
+
+#[tokio::test]
+async fn ready_tech_lead_auto_handoff_queues_exactly_one_implementer_run() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+
+    let (state, app, cookie, csrf, _env) =
+        common::bootstrap_and_login_with_auto_start_workers().await;
+    let pool = state.db.as_ref().expect("db pool");
+    let project_id = common::create_test_project(&app, &cookie, &csrf).await;
+    let (_git_dir, local_path) = common::create_temp_git_checkout();
+    let repo_id =
+        common::register_test_repo(&app, &local_path.display().to_string(), &cookie, &csrf).await;
+    let tech_lead_id =
+        common::create_agent_with_preset_key(&app, "tech_lead", "Ready Tech Lead", &cookie, &csrf)
+            .await;
+    let engineer_id = common::create_agent_with_preset_key(
+        &app,
+        "backend_engineer",
+        "Ready Backend Engineer",
+        &cookie,
+        &csrf,
+    )
+    .await;
+
+    let ticket_id = common::create_test_ticket(&app, &project_id, &cookie, &csrf).await;
+    common::set_ticket_repo(&app, &ticket_id, &repo_id, &cookie, &csrf).await;
+    let ready = app
+        .clone()
+        .oneshot(common::json_request(
+            "PATCH",
+            &format!("/api/tickets/{ticket_id}/status"),
+            r#"{"status":"ready"}"#,
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(ready.status(), StatusCode::OK);
+
+    common::assign_agent_to_ticket(&app, &ticket_id, &tech_lead_id, &cookie, &csrf).await;
+
+    let runs = common::poll_runs_until_count(
+        &app,
+        &ticket_id,
+        &cookie,
+        &csrf,
+        "Ready Tech Lead handoff and implementer run start",
+        Duration::from_secs(30),
+        |runs| {
+            runs.iter().any(|run| {
+                run["agentId"].as_str() == Some(tech_lead_id.as_str())
+                    && run["jobType"].as_str() == Some("work_on_ticket")
+                    && run["status"].as_str() == Some("succeeded")
+            }) && runs.iter().any(|run| {
+                run["agentId"].as_str() == Some(engineer_id.as_str())
+                    && run["jobType"].as_str() == Some("work_on_ticket")
+            })
+        },
+    )
+    .await;
+
+    assert_eq!(
+        runs.iter()
+            .filter(|run| {
+                run["agentId"].as_str() == Some(engineer_id.as_str())
+                    && run["jobType"].as_str() == Some("work_on_ticket")
+            })
+            .count(),
+        1,
+        "technical refinement must queue exactly one implementer work run"
+    );
+    assert!(!runs.iter().any(|run| {
+        run["agentId"].as_str() == Some(engineer_id.as_str())
+            && run["jobType"].as_str() == Some("respond_to_mention")
+    }));
+
+    let ticket = common::get_ticket(&app, &ticket_id, &cookie, &csrf).await;
+    assert_eq!(ticket["status"], "in_progress");
+    assert_eq!(ticket["assigneeAgentId"], engineer_id);
+
+    let tech_lead_comment = sqlx::query_scalar::<_, String>(
+        r#"
+        SELECT body FROM ticket_comments
+        WHERE ticket_id = $1 AND author_type = 'agent' AND author_id = $2
+        ORDER BY created_at DESC
+        LIMIT 1
+        "#,
+    )
+    .bind(uuid::Uuid::parse_str(&ticket_id).expect("ticket UUID"))
+    .bind(uuid::Uuid::parse_str(&tech_lead_id).expect("Tech Lead UUID"))
+    .fetch_one(pool)
+    .await
+    .expect("Tech Lead refinement comment");
+    assert!(tech_lead_comment.contains("technical approach"));
+    assert!(!tech_lead_comment.contains("**Git:**"));
+}
+
+#[tokio::test]
+async fn ready_tech_lead_invalid_handoffs_stay_ready_and_start_nobody() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+
+    let (state, app, cookie, csrf, _env) =
+        common::bootstrap_and_login_with_auto_start_workers().await;
+    let pool = state.db.as_ref().expect("db pool");
+    let project_id = common::create_test_project(&app, &cookie, &csrf).await;
+    let (_git_dir, local_path) = common::create_temp_git_checkout();
+    let repo_id =
+        common::register_test_repo(&app, &local_path.display().to_string(), &cookie, &csrf).await;
+    let tech_lead_id = common::create_agent_with_preset_key(
+        &app,
+        "tech_lead",
+        "Invalid Handoff Tech Lead",
+        &cookie,
+        &csrf,
+    )
+    .await;
+    let engineer_id = common::create_agent_with_preset_key(
+        &app,
+        "backend_engineer",
+        "Invalid Handoff Engineer",
+        &cookie,
+        &csrf,
+    )
+    .await;
+    let tech_lead_uuid = uuid::Uuid::parse_str(&tech_lead_id).expect("Tech Lead UUID");
+    let engineer_uuid = uuid::Uuid::parse_str(&engineer_id).expect("engineer UUID");
+
+    for (fixture_key, disable_engineer, expected_reason) in [
+        ("tech_lead_missing", false, "did not return `assignTo`"),
+        ("tech_lead_unknown", false, "unknown or disabled"),
+        ("tech_lead_disabled", true, "unknown or disabled"),
+    ] {
+        sqlx::query("UPDATE agents SET preset_source = $2 WHERE id = $1")
+            .bind(tech_lead_uuid)
+            .bind(fixture_key)
+            .execute(pool)
+            .await
+            .expect("select invalid Tech Lead fixture");
+        sqlx::query("UPDATE agents SET enabled = $2 WHERE id = $1")
+            .bind(engineer_uuid)
+            .bind(!disable_engineer)
+            .execute(pool)
+            .await
+            .expect("configure implementer availability");
+
+        let ticket_id = common::create_test_ticket(&app, &project_id, &cookie, &csrf).await;
+        common::set_ticket_repo(&app, &ticket_id, &repo_id, &cookie, &csrf).await;
+        let ready = app
+            .clone()
+            .oneshot(common::json_request(
+                "PATCH",
+                &format!("/api/tickets/{ticket_id}/status"),
+                r#"{"status":"ready"}"#,
+                &cookie,
+                &csrf,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(ready.status(), StatusCode::OK);
+        common::assign_agent_to_ticket(&app, &ticket_id, &tech_lead_id, &cookie, &csrf).await;
+
+        common::poll_runs_until_count(
+            &app,
+            &ticket_id,
+            &cookie,
+            &csrf,
+            "invalid Ready Tech Lead handoff completed",
+            Duration::from_secs(30),
+            |runs| {
+                runs.iter().any(|run| {
+                    run["agentId"].as_str() == Some(tech_lead_id.as_str())
+                        && run["jobType"].as_str() == Some("work_on_ticket")
+                        && run["status"].as_str() == Some("succeeded")
+                })
+            },
+        )
+        .await;
+
+        let ticket = common::get_ticket(&app, &ticket_id, &cookie, &csrf).await;
+        assert_eq!(ticket["status"], "ready", "fixture {fixture_key}");
+        assert_eq!(
+            ticket["assigneeAgentId"], tech_lead_id,
+            "fixture {fixture_key}"
+        );
+        assert!(ticket["pendingAssignRecommendation"].is_null());
+
+        let target_run_count = sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM agent_runs WHERE ticket_id = $1 AND agent_id != $2",
+        )
+        .bind(uuid::Uuid::parse_str(&ticket_id).expect("ticket UUID"))
+        .bind(tech_lead_uuid)
+        .fetch_one(pool)
+        .await
+        .expect("count invalid handoff target runs");
+        assert_eq!(target_run_count, 0, "fixture {fixture_key}");
+
+        let system_comment = sqlx::query_scalar::<_, String>(
+            r#"
+            SELECT body FROM ticket_comments
+            WHERE ticket_id = $1 AND author_type = 'system'
+            ORDER BY created_at DESC
+            LIMIT 1
+            "#,
+        )
+        .bind(uuid::Uuid::parse_str(&ticket_id).expect("ticket UUID"))
+        .fetch_one(pool)
+        .await
+        .expect("invalid handoff system comment");
+        assert!(system_comment.contains("Technical refinement handoff is incomplete"));
+        assert!(system_comment.contains(expected_reason));
+        assert!(system_comment.contains("remains in Ready"));
+        assert!(system_comment.contains("enabled implementer"));
+    }
+}
+
+#[tokio::test]
+async fn ready_tech_lead_clarification_resumes_same_refinement_contract() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+
+    let (state, app, cookie, csrf, _env) =
+        common::bootstrap_and_login_with_auto_start_workers().await;
+    let pool = state.db.as_ref().expect("db pool");
+    let project_id = common::create_test_project(&app, &cookie, &csrf).await;
+    let (_git_dir, local_path) = common::create_temp_git_checkout();
+    let repo_id =
+        common::register_test_repo(&app, &local_path.display().to_string(), &cookie, &csrf).await;
+    let pm_id =
+        common::create_agent_with_preset_key(&app, "pm", "Clarification PM", &cookie, &csrf).await;
+    let tech_lead_id = common::create_agent_with_preset_key(
+        &app,
+        "tech_lead",
+        "Clarification Tech Lead",
+        &cookie,
+        &csrf,
+    )
+    .await;
+    let engineer_id = common::create_agent_with_preset_key(
+        &app,
+        "backend_engineer",
+        "Clarification Engineer",
+        &cookie,
+        &csrf,
+    )
+    .await;
+    sqlx::query("UPDATE agents SET preset_source = 'tech_lead_clarification' WHERE id = $1")
+        .bind(uuid::Uuid::parse_str(&tech_lead_id).expect("Tech Lead UUID"))
+        .execute(pool)
+        .await
+        .expect("select Tech Lead clarification fixtures");
+
+    let ticket_id = common::create_test_ticket(&app, &project_id, &cookie, &csrf).await;
+    common::set_ticket_repo(&app, &ticket_id, &repo_id, &cookie, &csrf).await;
+    let ready = app
+        .clone()
+        .oneshot(common::json_request(
+            "PATCH",
+            &format!("/api/tickets/{ticket_id}/status"),
+            r#"{"status":"ready"}"#,
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(ready.status(), StatusCode::OK);
+    common::assign_agent_to_ticket(&app, &ticket_id, &tech_lead_id, &cookie, &csrf).await;
+
+    let runs = common::poll_runs_until_count(
+        &app,
+        &ticket_id,
+        &cookie,
+        &csrf,
+        "Tech Lead clarification response and resumed refinement",
+        Duration::from_secs(45),
+        |runs| {
+            let tech_lead_work = runs
+                .iter()
+                .filter(|run| {
+                    run["agentId"].as_str() == Some(tech_lead_id.as_str())
+                        && run["jobType"].as_str() == Some("work_on_ticket")
+                })
+                .collect::<Vec<_>>();
+            tech_lead_work.len() == 2
+                && tech_lead_work
+                    .iter()
+                    .any(|run| run["status"].as_str() == Some("blocked"))
+                && tech_lead_work
+                    .iter()
+                    .any(|run| run["status"].as_str() == Some("succeeded"))
+                && runs.iter().any(|run| {
+                    run["agentId"].as_str() == Some(pm_id.as_str())
+                        && run["jobType"].as_str() == Some("respond_to_mention")
+                        && run["status"].as_str() == Some("succeeded")
+                })
+                && runs.iter().any(|run| {
+                    run["agentId"].as_str() == Some(engineer_id.as_str())
+                        && run["jobType"].as_str() == Some("work_on_ticket")
+                })
+        },
+    )
+    .await;
+
+    assert_eq!(
+        runs.iter()
+            .filter(|run| {
+                run["agentId"].as_str() == Some(tech_lead_id.as_str())
+                    && run["jobType"].as_str() == Some("work_on_ticket")
+            })
+            .count(),
+        2
+    );
+    let clarification_round =
+        sqlx::query_scalar::<_, i32>("SELECT clarification_round FROM tickets WHERE id = $1")
+            .bind(uuid::Uuid::parse_str(&ticket_id).expect("ticket UUID"))
+            .fetch_one(pool)
+            .await
+            .expect("clarification round");
+    assert_eq!(clarification_round, 1);
+
+    let tech_lead_comments = sqlx::query_scalar::<_, String>(
+        r#"
+        SELECT body FROM ticket_comments
+        WHERE ticket_id = $1 AND author_type = 'agent' AND author_id = $2
+        ORDER BY created_at ASC
+        "#,
+    )
+    .bind(uuid::Uuid::parse_str(&ticket_id).expect("ticket UUID"))
+    .bind(uuid::Uuid::parse_str(&tech_lead_id).expect("Tech Lead UUID"))
+    .fetch_all(pool)
+    .await
+    .expect("Tech Lead comments");
+    assert_eq!(tech_lead_comments.len(), 2);
+    assert!(tech_lead_comments
+        .iter()
+        .all(|comment| !comment.contains("**Git:**")));
+    assert!(tech_lead_comments
+        .iter()
+        .any(|comment| comment.contains("clarified technical approach")));
 }
 
 #[tokio::test]
