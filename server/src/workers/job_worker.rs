@@ -665,14 +665,19 @@ fn persist_artifacts_to_dir(
 }
 
 fn is_review_agent(agent: &crate::domain::agent::Agent) -> bool {
-    if matches!(
-        agent.preset_source.as_deref(),
-        Some("tech_lead") | Some("reviewer")
-    ) {
+    if is_tech_lead_agent(agent) || matches!(agent.preset_source.as_deref(), Some("reviewer")) {
         return true;
     }
     let role = agent.role.to_lowercase();
-    role.contains("tech lead") || role.contains("technical lead") || role.contains("review")
+    role.contains("review")
+}
+
+fn is_tech_lead_agent(agent: &crate::domain::agent::Agent) -> bool {
+    if matches!(agent.preset_source.as_deref(), Some("tech_lead")) {
+        return true;
+    }
+    let role = agent.role.to_ascii_lowercase();
+    role.contains("tech lead") || role.contains("technical lead")
 }
 
 fn is_qc_agent(agent: &crate::domain::agent::Agent) -> bool {
@@ -685,6 +690,8 @@ fn is_qc_agent(agent: &crate::domain::agent::Agent) -> bool {
 
 /// Whether a successful `work_on_ticket` run should auto-commit worktree changes.
 ///
+/// Ready-stage Tech Lead runs are technical refinement only. They may update the
+/// ticket contract but must never present worktree changes as implementation.
 /// QC is verification-only in `in_qa`: it must not present its (potential) edits as
 /// committed implementation work. Skip git finalization for QC verification runs so
 /// any stray changes never become the ticket's implementation commit.
@@ -692,6 +699,9 @@ fn should_finalize_worktree_git(
     agent: &crate::domain::agent::Agent,
     ticket_status: TicketStatus,
 ) -> bool {
+    if is_tech_lead_agent(agent) && ticket_status == TicketStatus::Ready {
+        return false;
+    }
     if is_qc_agent(agent) && ticket_status == TicketStatus::InQa {
         return false;
     }
@@ -934,6 +944,21 @@ mod tests {
     fn should_not_finalize_git_for_qc_verification_in_qa() {
         let qc = test_agent("QC", Some("qc"));
         assert!(!should_finalize_worktree_git(&qc, TicketStatus::InQa));
+    }
+
+    #[test]
+    fn should_not_finalize_git_for_ready_tech_lead() {
+        let tech_lead = test_agent("Technical Lead", Some("tech_lead"));
+        assert!(!should_finalize_worktree_git(
+            &tech_lead,
+            TicketStatus::Ready
+        ));
+    }
+
+    #[test]
+    fn ready_implementer_still_finalizes_git() {
+        let engineer = test_agent("Backend Engineer", Some("backend_engineer"));
+        assert!(should_finalize_worktree_git(&engineer, TicketStatus::Ready));
     }
 
     #[test]

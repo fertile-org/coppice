@@ -99,6 +99,9 @@ impl<'a> RunOrchestrator<'a> {
             .preset_source
             .clone()
             .unwrap_or_else(|| slugify(&agent.name));
+        let technical_refinement_run = run.job_type == "work_on_ticket"
+            && current_status == crate::domain::substatus::TicketStatus::Ready
+            && (agent_key.eq_ignore_ascii_case("tech_lead") || is_tech_lead_role(&agent.role));
 
         let run_outcome = match apply.run_status {
             RunStatus::Succeeded => RunOutcome::Succeeded,
@@ -265,6 +268,7 @@ impl<'a> RunOrchestrator<'a> {
             ticket.ticket.assignee_agent_id,
             ticket.ticket.pending_assign_recommendation.as_ref(),
             &project_agent_ids,
+            !technical_refinement_run,
         );
         let mention_svc = MentionService::new(self.pool);
         for mention_id in &mention_dispatch.handled_mention_ids {
@@ -709,6 +713,7 @@ fn enqueue_successful_consultation_jobs(
     current_assignee_id: Option<Uuid>,
     pending_recommendation: Option<&Value>,
     project_agent_ids: &HashMap<String, Uuid>,
+    allow_consultation_dispatch: bool,
 ) -> SuccessfulMentionDispatch {
     let mut dispatch = SuccessfulMentionDispatch::default();
     if run_status != RunStatus::Succeeded {
@@ -753,6 +758,15 @@ fn enqueue_successful_consultation_jobs(
         .filter(|mention| consultation_agent_ids.contains(&mention.mentioned_agent_id))
         .collect::<Vec<_>>();
     if request_mentions.is_empty() {
+        return dispatch;
+    }
+
+    // Ready-stage Tech Lead work is a formal ownership gate. Keep request
+    // mentions durable, but do not let them create parallel consultation runs.
+    if !allow_consultation_dispatch {
+        dispatch
+            .handled_mention_ids
+            .extend(request_mentions.iter().map(|mention| mention.id));
         return dispatch;
     }
 
@@ -844,6 +858,11 @@ fn build_project_agent_maps(agents: &[Agent]) -> (Vec<String>, HashMap<String, U
         .collect();
 
     (keys, agent_ids, implementer_keys)
+}
+
+fn is_tech_lead_role(role: &str) -> bool {
+    let role = role.to_ascii_lowercase();
+    role.contains("tech lead") || role.contains("technical lead")
 }
 
 fn merge_substatus(
@@ -1205,6 +1224,7 @@ mod tests {
             None,
             None,
             &HashMap::new(),
+            true,
         )
     }
 
@@ -1328,6 +1348,7 @@ mod tests {
             None,
             Some(&pending),
             &HashMap::from([("tech_lead".into(), target_id)]),
+            true,
         );
 
         assert!(action.enqueue_jobs.is_empty());
@@ -1366,6 +1387,61 @@ mod tests {
             );
             assert!(action.enqueue_jobs.is_empty());
         }
+    }
+
+    #[test]
+    fn technical_refinement_requests_are_handled_without_response_runs() {
+        let source_id = Uuid::from_u128(1);
+        let target_id = Uuid::from_u128(2);
+        let run = test_run(source_id, "work_on_ticket");
+        let mention = pending_mention(target_id);
+        let mention_id = mention.id;
+        let mut action = TransitionAction::default();
+
+        let dispatch = enqueue_successful_consultation_jobs(
+            &mut action,
+            &run,
+            RunStatus::Succeeded,
+            &[mention],
+            &HashSet::from([target_id]),
+            None,
+            None,
+            &HashMap::new(),
+            false,
+        );
+
+        assert!(action.enqueue_jobs.is_empty());
+        assert!(dispatch.response_agent_ids.is_empty());
+        assert_eq!(dispatch.handled_mention_ids, vec![mention_id]);
+    }
+
+    #[test]
+    fn project_agent_maps_only_expose_enabled_implementer_aliases() {
+        let tech_lead_id = Uuid::from_u128(1);
+        let engineer_id = Uuid::from_u128(2);
+        let disabled_engineer_id = Uuid::from_u128(3);
+        let mut tech_lead = collaboration_agent(tech_lead_id, "Tech Lead", "tech_lead", true);
+        tech_lead.role = "Technical Lead".into();
+        let mut engineer =
+            collaboration_agent(engineer_id, "Backend Engineer", "backend_engineer", true);
+        engineer.role = "Backend Engineer".into();
+        let mut disabled = collaboration_agent(
+            disabled_engineer_id,
+            "Disabled Engineer",
+            "disabled_engineer",
+            false,
+        );
+        disabled.role = "Backend Engineer".into();
+
+        let (keys, agent_ids, implementer_keys) =
+            build_project_agent_maps(&[tech_lead, engineer, disabled]);
+
+        assert!(keys.contains(&"tech_lead".to_string()));
+        assert_eq!(agent_ids.get("backend_engineer"), Some(&engineer_id));
+        assert!(implementer_keys.contains(&"backend_engineer".to_string()));
+        assert!(implementer_keys.contains(&"backend-engineer".to_string()));
+        assert!(!implementer_keys.contains(&"tech_lead".to_string()));
+        assert!(!keys.contains(&"disabled_engineer".to_string()));
     }
 
     #[test]
