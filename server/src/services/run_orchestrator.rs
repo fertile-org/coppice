@@ -360,7 +360,7 @@ impl<'a> RunOrchestrator<'a> {
                             .await
                         {
                             Ok(_) => {}
-                            Err(RunError::ActiveRunExists) => {
+                            Err(RunError::ActiveRunExists) if technical_refinement_run => {
                                 tracing::info!(
                                     source_run_id = %run.id,
                                     target_agent_id = %new_assignee,
