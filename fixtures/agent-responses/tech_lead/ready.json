@@ -1,0 +1,12 @@
+{
+  "status": "done",
+  "summary": "Recorded the technical approach and key risks, then handed implementation to the backend engineer.",
+  "updatedDescription": "Implement retry with exponential backoff for API calls.\n\n## Context\n\nUsers see intermittent failures when the upstream service is slow.\n\n## Technical approach\n\nKeep retry policy in the existing API client boundary. Retry only transient upstream failures, use capped exponential backoff, and preserve the final error for the caller.\n\n## Risks\n\nRetries can amplify upstream load and duplicate non-idempotent requests. Limit attempts, classify retryable failures explicitly, and do not retry non-idempotent operations without an idempotency key.",
+  "acceptanceCriteria": "- [ ] Retry transient failures up to 3 times with capped exponential backoff\n- [ ] Never retry non-idempotent operations without an idempotency key\n- [ ] Show the final user-visible error only after retries are exhausted\n- [ ] Unit tests cover success, retry exhaustion, and non-retryable failures",
+  "assignTo": "backend_engineer",
+  "changedFiles": [],
+  "testsRun": [],
+  "mentionAgents": [],
+  "agentRequests": [],
+  "blockers": []
+}

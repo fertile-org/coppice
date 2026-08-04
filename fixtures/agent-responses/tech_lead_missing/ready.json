@@ -1,0 +1,10 @@
+{
+  "status": "done",
+  "summary": "Recorded the technical approach but omitted the implementation owner.",
+  "updatedDescription": "## Technical approach\n\nUse the existing service boundary.\n\n## Risks\n\nThe handoff needs an implementation owner.",
+  "changedFiles": [],
+  "testsRun": [],
+  "mentionAgents": [],
+  "agentRequests": [],
+  "blockers": []
+}

@@ -33,6 +33,13 @@ impl MockProvider {
         {
             return resume;
         }
+        let ready = self.fixtures_dir.join(&input.agent_key).join("ready.json");
+        if input.job_type == "work_on_ticket"
+            && is_ready_ticket_context(&input.context_path)
+            && ready.exists()
+        {
+            return ready;
+        }
         let keyed = self
             .fixtures_dir
             .join(&input.agent_key)
@@ -75,6 +82,18 @@ fn has_resume_signal(context: &str) -> bool {
         || context.contains("(blocked)")
         || context.contains("(clarification answer)")
         || context.contains("(progress update)")
+}
+
+fn is_ready_ticket_context(context_path: &str) -> bool {
+    std::fs::read_to_string(context_path)
+        .ok()
+        .and_then(|context| {
+            context
+                .lines()
+                .find_map(|line| line.trim().strip_prefix("**Status:**"))
+                .map(|status| status.trim().eq_ignore_ascii_case("ready"))
+        })
+        .unwrap_or(false)
 }
 
 #[async_trait]
@@ -192,11 +211,10 @@ mod tests {
             } => {
                 assert_eq!(
                     summary,
-                    "Refined ticket scope and added acceptance criteria for engineering handoff."
+                    "Refined ticket scope and prepared it for Tech Lead technical refinement."
                 );
-                assert_eq!(assign_to.as_deref(), Some("backend_engineer"));
-                assert_eq!(agent_requests.len(), 1);
-                assert_eq!(agent_requests[0].agent_key, "backend_engineer");
+                assert_eq!(assign_to.as_deref(), Some("tech_lead"));
+                assert!(agent_requests.is_empty());
             }
             _ => panic!("expected done variant"),
         }
@@ -278,6 +296,59 @@ mod tests {
                 assert_eq!(summary, "Implementation complete.");
             }
             _ => panic!("expected done variant after checkpoint resume"),
+        }
+    }
+
+    #[tokio::test]
+    async fn tech_lead_ready_uses_refinement_fixture() {
+        let _lock = env_lock();
+        let _response_guard = EnvGuard::clear("MOCK_AGENT_RESPONSE");
+        let provider = MockProvider::new(fixtures_root());
+        let contexts = TempDir::new().expect("context tempdir");
+        let ready_context = contexts.path().join("ready.md");
+        std::fs::write(
+            &ready_context,
+            "# Current task\n\n**Status:** ready\n\n# Ticket thread\n\n**Status:** in_review",
+        )
+        .expect("write Ready context");
+        let review_context = contexts.path().join("review.md");
+        std::fs::write(&review_context, "# Current task\n\n**Status:** in_review\n")
+            .expect("write review context");
+
+        let mut ready_input = base_input("tech_lead", "work_on_ticket");
+        ready_input.context_path = ready_context.to_string_lossy().into_owned();
+        let ready_result = provider
+            .run(ready_input)
+            .await
+            .expect("Ready Tech Lead fixture");
+        match ready_result {
+            AgentRunResult::Done {
+                assign_to,
+                changed_files,
+                summary,
+                ..
+            } => {
+                assert_eq!(assign_to.as_deref(), Some("backend_engineer"));
+                assert!(changed_files.is_empty());
+                assert!(summary.contains("technical approach"));
+            }
+            _ => panic!("expected Ready refinement result"),
+        }
+
+        let mut review_input = base_input("tech_lead", "work_on_ticket");
+        review_input.context_path = review_context.to_string_lossy().into_owned();
+        let review_result = provider
+            .run(review_input)
+            .await
+            .expect("In Review Tech Lead fixture");
+        match review_result {
+            AgentRunResult::Done {
+                assign_to, summary, ..
+            } => {
+                assert!(assign_to.is_none());
+                assert!(summary.contains("## Verdict"));
+            }
+            _ => panic!("expected review result"),
         }
     }
 
