@@ -2,11 +2,17 @@ mod common;
 
 use axum::{http::StatusCode, Router};
 use coppice_server::knowledge::extractor::{ExtractionProvider, MockExtractionProvider};
-use coppice_server::knowledge::retrieval::retrieve;
+use coppice_server::knowledge::retrieval::{retrieve, RETRIEVAL_QUERY_SQL};
 use coppice_server::knowledge::{embedder::EmbeddingProvider, embedding_provider};
 use coppice_server::services::context_budget::{record_usage, render_knowledge, ByteTokenCounter};
+use coppice_server::services::knowledge_job_service::KnowledgeJobService;
+use coppice_server::services::knowledge_service::{
+    KnowledgeError, KnowledgeRevisionPatch, KnowledgeService,
+};
 use coppice_server::workers::knowledge_worker;
 use coppice_server::AppState;
+use serde_json::Value;
+use sqlx::{Postgres, Transaction};
 use std::sync::Arc;
 use std::time::Duration;
 use tower::ServiceExt;
@@ -111,6 +117,181 @@ async fn process_one_knowledge_job(state: &Arc<AppState>) -> anyhow::Result<bool
     knowledge_worker::process_one(state, "integration-knowledge", &embedder, &extractor).await
 }
 
+fn unit_vector_literal() -> String {
+    format!("[1{}]", ",0".repeat(1_535))
+}
+
+async fn seed_retrieval_cardinality(
+    tx: &mut Transaction<'_, Postgres>,
+    target_project_id: Uuid,
+    other_project_id: Uuid,
+    target_approved: i32,
+    other_approved: i32,
+    rejected: i32,
+) {
+    sqlx::query(
+        r#"
+        CREATE TEMP TABLE knowledge_plan_seed (
+            ordinal INT PRIMARY KEY,
+            item_id UUID NOT NULL,
+            revision_id UUID NOT NULL,
+            status TEXT NOT NULL,
+            project_id UUID NOT NULL
+        ) ON COMMIT DROP
+        "#,
+    )
+    .execute(&mut **tx)
+    .await
+    .unwrap();
+
+    let approved = target_approved + other_approved;
+    let total = approved + rejected;
+    sqlx::query(
+        r#"
+        INSERT INTO knowledge_plan_seed (
+            ordinal, item_id, revision_id, status, project_id
+        )
+        SELECT ordinal,
+               gen_random_uuid(),
+               gen_random_uuid(),
+               CASE WHEN ordinal <= $4 THEN 'approved' ELSE 'rejected' END,
+               CASE WHEN ordinal <= $3 THEN $1 ELSE $2 END
+        FROM generate_series(1, $5) AS ordinal
+        "#,
+    )
+    .bind(target_project_id)
+    .bind(other_project_id)
+    .bind(target_approved)
+    .bind(approved)
+    .bind(total)
+    .execute(&mut **tx)
+    .await
+    .unwrap();
+
+    sqlx::query(
+        r#"
+        INSERT INTO knowledge_items (id, status, version)
+        SELECT item_id, status, 1 FROM knowledge_plan_seed
+        "#,
+    )
+    .execute(&mut **tx)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"
+        INSERT INTO knowledge_revisions (
+            id, item_id, revision_number, scope, project_id, knowledge_type,
+            title, content, source_type, confidence
+        )
+        SELECT revision_id, item_id, 1, 'project', project_id, 'test_command',
+               'Retrieval plan seed ' || ordinal,
+               'Use the bounded retrieval plan.', 'human_note', 'high'
+        FROM knowledge_plan_seed
+        "#,
+    )
+    .execute(&mut **tx)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"
+        UPDATE knowledge_items item
+        SET current_revision_id = seed.revision_id,
+            active_revision_id = CASE
+                WHEN seed.status = 'approved' THEN seed.revision_id
+                ELSE NULL
+            END
+        FROM knowledge_plan_seed seed
+        WHERE item.id = seed.item_id
+        "#,
+    )
+    .execute(&mut **tx)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"
+        INSERT INTO knowledge_embeddings (
+            revision_id, provider, model, embedding_dimension, embedding
+        )
+        SELECT revision_id, 'benchmark', 'unit-vector', 1536, $1::vector
+        FROM knowledge_plan_seed
+        WHERE status = 'approved'
+        "#,
+    )
+    .bind(unit_vector_literal())
+    .execute(&mut **tx)
+    .await
+    .unwrap();
+    sqlx::query("ANALYZE knowledge_items, knowledge_revisions, knowledge_embeddings")
+        .execute(&mut **tx)
+        .await
+        .unwrap();
+}
+
+async fn explain_production_retrieval(
+    tx: &mut Transaction<'_, Postgres>,
+    project_id: Uuid,
+    analyze: bool,
+) -> Value {
+    let options = if analyze {
+        "ANALYZE, BUFFERS, VERBOSE, FORMAT JSON"
+    } else {
+        "VERBOSE, FORMAT JSON"
+    };
+    let sql = format!("EXPLAIN ({options}) {RETRIEVAL_QUERY_SQL}");
+    sqlx::query_scalar(&sql)
+        .bind(project_id)
+        .bind(Uuid::new_v4())
+        .bind("low")
+        .bind(unit_vector_literal())
+        .bind(-1.0_f64)
+        .bind(20_i64)
+        .fetch_one(&mut **tx)
+        .await
+        .unwrap()
+}
+
+fn collect_index_scan_names(value: &Value, names: &mut Vec<String>) {
+    match value {
+        Value::Object(object) => {
+            let node_type = object
+                .get("Node Type")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            if node_type.contains("Index") {
+                if let Some(name) = object.get("Index Name").and_then(Value::as_str) {
+                    names.push(name.to_string());
+                }
+            }
+            for child in object.values() {
+                collect_index_scan_names(child, names);
+            }
+        }
+        Value::Array(array) => {
+            for child in array {
+                collect_index_scan_names(child, names);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn find_plan_node<'a>(value: &'a Value, key: &str, expected: &str) -> Option<&'a Value> {
+    match value {
+        Value::Object(object) => {
+            if object.get(key).and_then(Value::as_str) == Some(expected) {
+                return Some(value);
+            }
+            object
+                .values()
+                .find_map(|child| find_plan_node(child, key, expected))
+        }
+        Value::Array(array) => array
+            .iter()
+            .find_map(|child| find_plan_node(child, key, expected)),
+        _ => None,
+    }
+}
+
 #[tokio::test]
 async fn lifecycle_is_concurrency_safe_and_preserves_active_revision() {
     let _guard = common::DB_TEST_LOCK.lock().await;
@@ -212,6 +393,79 @@ async fn lifecycle_is_concurrency_safe_and_preserves_active_revision() {
     assert_eq!(rejected["status"], "rejected");
     assert!(rejected["activeRevisionId"].is_null());
     assert_eq!(rejected["rejectionReason"], "obsolete");
+
+    let (status, reapproved) = mutate(
+        &app,
+        "POST",
+        &format!("/api/knowledge/{item_id}/approve"),
+        serde_json::json!({"expectedVersion": 4}),
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(reapproved["status"], "approved");
+    assert_eq!(reapproved["activeRevisionId"], reapproved["revisionId"]);
+    assert_eq!(reapproved["embeddingStatus"], "ready");
+}
+
+#[tokio::test]
+async fn terminal_knowledge_edits_do_not_consume_active_capacity() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
+    let project_id = common::create_test_project(&app, &cookie, &csrf).await;
+    let live = create_candidate(&app, &project_id, &cookie, &csrf, "Live candidate").await;
+    let terminal = create_candidate(
+        &app,
+        &project_id,
+        &cookie,
+        &csrf,
+        "Rejected candidate to revise",
+    )
+    .await;
+    let terminal_id = terminal["id"].as_str().unwrap();
+    let (status, rejected) = mutate(
+        &app,
+        "POST",
+        &format!("/api/knowledge/{terminal_id}/reject"),
+        serde_json::json!({"expectedVersion": 1, "reason": "needs revision"}),
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(rejected["status"], "rejected");
+
+    let pool = state.db.as_ref().unwrap();
+    let user_id: Uuid = sqlx::query_scalar("SELECT id FROM users ORDER BY created_at, id LIMIT 1")
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    let mut limited_config = state.config.knowledge.clone();
+    limited_config.retrieval.max_active_per_project = 1;
+    let service = KnowledgeService::new(pool, &limited_config);
+    let terminal_uuid = Uuid::parse_str(terminal_id).unwrap();
+    let edited = service
+        .edit(
+            terminal_uuid,
+            2,
+            user_id,
+            KnowledgeRevisionPatch {
+                title: Some("Revised rejected history".into()),
+                ..KnowledgeRevisionPatch::default()
+            },
+        )
+        .await
+        .expect("editing terminal history must not consume active capacity");
+    assert_eq!(
+        edited.status,
+        coppice_server::domain::knowledge::KnowledgeStatus::Rejected
+    );
+    assert_eq!(edited.version, 3);
+
+    let approval = service.approve(terminal_uuid, 3, user_id).await;
+    assert!(matches!(approval, Err(KnowledgeError::Capacity(_))));
+    assert_eq!(live["status"], "pending");
 }
 
 #[tokio::test]
@@ -256,6 +510,32 @@ async fn supersession_waits_for_replacement_embedding() {
     assert_eq!(status, StatusCode::CREATED);
     let replacement_id = replacement["id"].as_str().unwrap();
     assert_eq!(replacement["status"], "pending");
+
+    let (stale_status, stale_conflict) = mutate(
+        &app,
+        "POST",
+        &format!("/api/knowledge/{original_id}/supersede"),
+        serde_json::json!({
+            "expectedVersion": 2,
+            "replacement": {
+                "scope": "project",
+                "projectId": project_id,
+                "knowledgeType": "test_command",
+                "title": "Conflicting rule",
+                "content": "This stale supersession must not be created.",
+                "sourceType": "human_note",
+                "confidence": "high"
+            }
+        }),
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(stale_status, StatusCode::CONFLICT);
+    assert!(stale_conflict["message"]
+        .as_str()
+        .unwrap()
+        .contains("current version is 3"));
 
     let original_before: Option<Uuid> =
         sqlx::query_scalar("SELECT superseded_by FROM knowledge_items WHERE id = $1")
@@ -1251,39 +1531,285 @@ async fn done_transition_schedules_idempotent_extraction_to_pending() {
 #[tokio::test]
 async fn knowledge_query_plan_has_relational_indexes() {
     let _guard = common::DB_TEST_LOCK.lock().await;
-    let (state, _app, _cookie, _csrf) = common::bootstrap_and_login_with_state().await;
+    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
+    let target_project_id =
+        Uuid::parse_str(&create_project_named(&app, "Retrieval target", &cookie, &csrf).await)
+            .unwrap();
+    let other_project_id =
+        Uuid::parse_str(&create_project_named(&app, "Retrieval noise", &cookie, &csrf).await)
+            .unwrap();
     let pool = state.db.as_ref().unwrap();
-    let indexes: Vec<String> = sqlx::query_scalar(
-        r#"
-        SELECT indexname FROM pg_indexes
-        WHERE schemaname = current_schema()
-          AND indexname IN (
-            'knowledge_items_retrieval_state_idx',
-            'knowledge_revisions_project_scope_idx',
-            'knowledge_revisions_agent_scope_idx'
-          )
-        ORDER BY indexname
-        "#,
-    )
-    .fetch_all(pool)
-    .await
-    .unwrap();
-    assert_eq!(indexes.len(), 3);
+    let mut tx = pool.begin().await.unwrap();
+    seed_retrieval_cardinality(&mut tx, target_project_id, other_project_id, 32, 512, 4_096).await;
 
-    let plan: Vec<String> = sqlx::query_scalar(
-        r#"
-        EXPLAIN (COSTS OFF)
-        WITH eligible AS MATERIALIZED (
-            SELECT i.id, r.project_id
-            FROM knowledge_items i
-            JOIN knowledge_revisions r ON r.id = i.active_revision_id
-            WHERE i.status = 'approved' AND i.superseded_by IS NULL
-        )
-        SELECT * FROM eligible ORDER BY id LIMIT 20
-        "#,
+    let explain = explain_production_retrieval(&mut tx, target_project_id, true).await;
+    let plan = &explain[0]["Plan"];
+    let mut index_scans = Vec::new();
+    collect_index_scan_names(plan, &mut index_scans);
+    assert!(
+        index_scans
+            .iter()
+            .any(|name| name == "knowledge_items_retrieval_state_idx"),
+        "expected the approved-state eligibility index in {index_scans:?}\n{explain:#}"
+    );
+    assert!(
+        index_scans.iter().any(|name| {
+            name == "knowledge_revisions_project_scope_idx" || name == "knowledge_revisions_pkey"
+        }),
+        "expected a relational revision index scan in {index_scans:?}\n{explain:#}"
+    );
+
+    let serialized_plan = plan.to_string();
+    let eligible_producer = find_plan_node(plan, "Subplan Name", "CTE eligible")
+        .expect("materialized eligible CTE producer");
+    assert!(
+        !eligible_producer.to_string().contains("<=>"),
+        "vector distance must not run inside relational eligibility"
+    );
+    assert!(serialized_plan.contains("<=>"));
+    assert!(find_plan_node(plan, "CTE Name", "eligible").is_some());
+    assert!(
+        !serialized_plan.contains("knowledge_embeddings_hnsw_cosine_idx"),
+        "production plan must not rank globally before eligibility"
+    );
+    tx.rollback().await.unwrap();
+
+    coppice_server::knowledge::validate_schema_dimension(pool, 1536)
+        .await
+        .unwrap();
+    let mismatch = coppice_server::knowledge::validate_schema_dimension(pool, 512)
+        .await
+        .expect_err("configured dimension mismatch must stop startup");
+    assert!(mismatch.to_string().contains("vector(1536)"));
+}
+
+#[tokio::test]
+#[ignore = "run with make benchmark-m06-knowledge-retrieval on the default Compose stack"]
+async fn knowledge_retrieval_capacity_p95_benchmark() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    let database_url = std::env::var("COPPICE_RETRIEVAL_BENCHMARK_DATABASE_URL")
+        .expect("benchmark target must provide its isolated default-Compose database URL");
+    let pool = sqlx::postgres::PgPoolOptions::new()
+        .max_connections(2)
+        .connect(&database_url)
+        .await
+        .unwrap();
+    let mut tx = pool.begin().await.unwrap();
+    let project_id = Uuid::new_v4();
+    sqlx::query("INSERT INTO projects (id, name, slug) VALUES ($1, $2, $3)")
+        .bind(project_id)
+        .bind("M06 retrieval capacity benchmark")
+        .bind(format!("m06-retrieval-benchmark-{project_id}"))
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+    seed_retrieval_cardinality(&mut tx, project_id, project_id, 10_000, 0, 0).await;
+
+    let _warmup = explain_production_retrieval(&mut tx, project_id, true).await;
+    let mut timings_ms = Vec::with_capacity(20);
+    for _ in 0..20 {
+        let explain = explain_production_retrieval(&mut tx, project_id, true).await;
+        timings_ms.push(
+            explain[0]["Execution Time"]
+                .as_f64()
+                .expect("Postgres execution time"),
+        );
+    }
+    timings_ms.sort_by(f64::total_cmp);
+    let p95_index = (timings_ms.len() * 95).div_ceil(100) - 1;
+    let p95_ms = timings_ms[p95_index];
+    eprintln!("M06 retrieval timings (ms): {timings_ms:?}; p95={p95_ms:.3}ms");
+    assert!(
+        p95_ms < 250.0,
+        "10,000-row retrieval p95 {p95_ms:.3}ms exceeded the 250ms target"
+    );
+    tx.rollback().await.unwrap();
+}
+
+#[tokio::test]
+async fn stale_knowledge_worker_cannot_overwrite_new_owner_state() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
+    let project_id = common::create_test_project(&app, &cookie, &csrf).await;
+    let ticket_id = common::create_test_ticket(&app, &project_id, &cookie, &csrf).await;
+    let ticket_uuid = Uuid::parse_str(&ticket_id).unwrap();
+    let pool = state.db.as_ref().unwrap();
+    sqlx::query("UPDATE tickets SET status = 'done' WHERE id = $1")
+        .bind(ticket_uuid)
+        .execute(pool)
+        .await
+        .unwrap();
+
+    let service = KnowledgeJobService::new(pool);
+    let worker_id = "knowledge-worker-0";
+    let stale_claim = service
+        .claim_next(worker_id, 300)
+        .await
+        .unwrap()
+        .expect("extraction job");
+    sqlx::query(
+        "UPDATE knowledge_jobs SET locked_at = now() - interval '301 seconds' WHERE id = $1",
     )
-    .fetch_all(pool)
+    .bind(stale_claim.id)
+    .execute(pool)
     .await
     .unwrap();
-    assert!(plan.join("\n").contains("eligible"));
+
+    let fresh_claim = service
+        .claim_next(worker_id, 300)
+        .await
+        .unwrap()
+        .expect("reclaimed extraction job");
+    assert_eq!(fresh_claim.id, stale_claim.id);
+    assert_eq!(fresh_claim.locked_by, worker_id);
+    assert_eq!(stale_claim.locked_by, worker_id);
+    assert_ne!(fresh_claim.claim_token, stale_claim.claim_token);
+
+    let expected_running = (
+        "running".to_string(),
+        Some(worker_id.to_string()),
+        Some(fresh_claim.claim_token),
+    );
+    let mut terminal_stale_claim = stale_claim.clone();
+    terminal_stale_claim.max_attempts = terminal_stale_claim.attempts;
+    service
+        .mark_error(&terminal_stale_claim, "late terminal failure")
+        .await
+        .unwrap();
+    let after_terminal_error: (String, Option<String>, Option<Uuid>) =
+        sqlx::query_as("SELECT status, locked_by, claim_token FROM knowledge_jobs WHERE id = $1")
+            .bind(stale_claim.id)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    assert_eq!(after_terminal_error, expected_running);
+
+    service
+        .mark_error(&stale_claim, "late retryable failure")
+        .await
+        .unwrap();
+    let after_retryable_error: (String, Option<String>, Option<Uuid>) =
+        sqlx::query_as("SELECT status, locked_by, claim_token FROM knowledge_jobs WHERE id = $1")
+            .bind(stale_claim.id)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    assert_eq!(after_retryable_error, expected_running);
+
+    service.mark_completed(&stale_claim).await.unwrap();
+    let after_stale_completion: (String, Option<String>, Option<Uuid>) =
+        sqlx::query_as("SELECT status, locked_by, claim_token FROM knowledge_jobs WHERE id = $1")
+            .bind(stale_claim.id)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    assert_eq!(after_stale_completion, expected_running);
+
+    service.mark_completed(&fresh_claim).await.unwrap();
+    let completed: (String, Option<String>, Option<Uuid>, Option<String>) = sqlx::query_as(
+        "SELECT status, locked_by, claim_token, last_error FROM knowledge_jobs WHERE id = $1",
+    )
+    .bind(fresh_claim.id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(completed, ("completed".into(), None, None, None));
+}
+
+#[tokio::test]
+async fn current_knowledge_claim_marks_job_failed_at_max_attempts() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
+    let project_id = common::create_test_project(&app, &cookie, &csrf).await;
+    let ticket_id = common::create_test_ticket(&app, &project_id, &cookie, &csrf).await;
+    let ticket_uuid = Uuid::parse_str(&ticket_id).unwrap();
+    let pool = state.db.as_ref().unwrap();
+    sqlx::query("UPDATE tickets SET status = 'done' WHERE id = $1")
+        .bind(ticket_uuid)
+        .execute(pool)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE knowledge_jobs SET max_attempts = 1 WHERE ticket_id = $1")
+        .bind(ticket_uuid)
+        .execute(pool)
+        .await
+        .unwrap();
+
+    let service = KnowledgeJobService::new(pool);
+    let claim = service
+        .claim_next("knowledge-worker-0", 300)
+        .await
+        .unwrap()
+        .expect("extraction job");
+    assert_eq!(claim.attempts, claim.max_attempts);
+    service
+        .mark_error(&claim, "terminal extraction failure")
+        .await
+        .unwrap();
+
+    let failed: (String, Option<String>, Option<String>, Option<Uuid>) = sqlx::query_as(
+        "SELECT status, last_error, locked_by, claim_token FROM knowledge_jobs WHERE id = $1",
+    )
+    .bind(claim.id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        failed,
+        (
+            "failed".into(),
+            Some("terminal extraction failure".into()),
+            None,
+            None,
+        )
+    );
+}
+
+#[tokio::test]
+async fn stale_max_attempt_knowledge_claim_is_failed_without_reexecution() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
+    let project_id = common::create_test_project(&app, &cookie, &csrf).await;
+    let ticket_id = common::create_test_ticket(&app, &project_id, &cookie, &csrf).await;
+    let ticket_uuid = Uuid::parse_str(&ticket_id).unwrap();
+    let pool = state.db.as_ref().unwrap();
+    sqlx::query("UPDATE tickets SET status = 'done' WHERE id = $1")
+        .bind(ticket_uuid)
+        .execute(pool)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE knowledge_jobs SET max_attempts = 1 WHERE ticket_id = $1")
+        .bind(ticket_uuid)
+        .execute(pool)
+        .await
+        .unwrap();
+
+    let service = KnowledgeJobService::new(pool);
+    let claim = service
+        .claim_next("knowledge-worker-0", 300)
+        .await
+        .unwrap()
+        .expect("first extraction claim");
+    assert_eq!(claim.attempts, claim.max_attempts);
+    sqlx::query(
+        "UPDATE knowledge_jobs SET locked_at = now() - interval '301 seconds' WHERE id = $1",
+    )
+    .bind(claim.id)
+    .execute(pool)
+    .await
+    .unwrap();
+
+    let reclaimed = service.claim_next("knowledge-worker-1", 300).await.unwrap();
+    assert!(
+        reclaimed.is_none(),
+        "exhausted stale claim must not run again"
+    );
+    let failed: (String, i32, Option<String>, Option<Uuid>) = sqlx::query_as(
+        "SELECT status, attempts, locked_by, claim_token FROM knowledge_jobs WHERE id = $1",
+    )
+    .bind(claim.id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(failed, ("failed".into(), 1, None, None));
 }

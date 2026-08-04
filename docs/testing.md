@@ -109,6 +109,19 @@ make e2e-smoke-m06-knowledge    # governance → embed → Full retrieval → au
 
 Both use the default `deploy/docker-compose.yml` stack. The knowledge smoke uses only deterministic mock agent, embedding, and extraction providers.
 
+The supported 10,000-eligible-row retrieval envelope has a separate, non-CI
+default-Compose benchmark. It seeds rows inside a rolled-back transaction, runs
+the production retrieval query 20 times after warmup, and fails unless measured
+p95 PostgreSQL execution time remains below 250 ms:
+
+```bash
+make benchmark-m06-knowledge-retrieval
+```
+
+Keep this benchmark separate from routine integration tests because constructing
+10,000 1536-dimension embeddings and their HNSW entries is intentionally heavier
+than the representative mixed-cardinality query-plan assertion.
+
 ## Agent / provider testing
 
 - **Always `MockProvider` in automated tests.** Returns JSON from `fixtures/agent-responses/` (`done.json`, `blocked.json`, …).

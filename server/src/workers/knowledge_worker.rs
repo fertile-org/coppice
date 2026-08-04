@@ -59,7 +59,7 @@ pub async fn process_one(
         other => Err(anyhow::anyhow!("unsupported knowledge job kind: {other}")),
     };
     match result {
-        Ok(()) => jobs.mark_completed(job.id).await?,
+        Ok(()) => jobs.mark_completed(&job).await?,
         Err(error) => {
             jobs.mark_error(&job, &error.to_string()).await?;
             return Err(error);

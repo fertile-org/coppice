@@ -14,7 +14,6 @@ pub fn format_job_error(err: &anyhow::Error) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use anyhow::Context;
 
     #[derive(Debug, thiserror::Error)]
     #[error("git command failed: git worktree add: fatal: not a git repository")]

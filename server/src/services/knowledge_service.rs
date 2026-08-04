@@ -111,7 +111,7 @@ impl<'a> KnowledgeService<'a> {
     ) -> Result<KnowledgeItemView, KnowledgeError> {
         validate_revision(&mut input).map_err(KnowledgeError::Validation)?;
         let mut tx = self.pool.begin().await?;
-        self.enforce_capacity(&mut tx, &input).await?;
+        self.enforce_capacity(&mut tx, &input, None).await?;
         let item_id = self
             .insert_item_revision(
                 &mut tx,
@@ -151,7 +151,7 @@ impl<'a> KnowledgeService<'a> {
             tx.commit().await?;
             return Ok(existing);
         }
-        self.enforce_capacity(&mut tx, &input).await?;
+        self.enforce_capacity(&mut tx, &input, None).await?;
         let approval_mode = (status == KnowledgeStatus::Approved).then_some("policy");
         let item_id = self
             .insert_item_revision(
@@ -243,6 +243,17 @@ LIMIT $6"#
         let mut tx = self.pool.begin().await?;
         let item = lock_item_for_activation(&mut tx, item_id).await?;
         check_version(item, expected_version)?;
+        if item.superseded_by.is_none() {
+            let revision =
+                sqlx::query("SELECT scope, project_id FROM knowledge_revisions WHERE id = $1")
+                    .bind(item.current_revision_id)
+                    .fetch_one(&mut *tx)
+                    .await?;
+            let scope = parse_scope(revision.try_get("scope")?)?;
+            let project_id = revision.try_get("project_id")?;
+            self.enforce_capacity_for_scope(&mut tx, scope, project_id, Some(item_id))
+                .await?;
+        }
         sqlx::query(
             r#"
             UPDATE knowledge_items
@@ -300,6 +311,15 @@ LIMIT $6"#
                 .unwrap_or(parse_confidence(row.try_get("confidence")?)?),
         };
         validate_revision(&mut input).map_err(KnowledgeError::Validation)?;
+        if item.superseded_by.is_none()
+            && matches!(
+                item.status,
+                KnowledgeStatus::Pending | KnowledgeStatus::Approved
+            )
+        {
+            self.enforce_capacity(&mut tx, &input, Some(item_id))
+                .await?;
+        }
         let revision_id = insert_revision(
             &mut tx,
             item_id,
@@ -372,7 +392,6 @@ LIMIT $6"#
         let mut tx = self.pool.begin().await?;
         let item = lock_item(&mut tx, item_id).await?;
         check_version(item, expected_version)?;
-        self.enforce_capacity(&mut tx, &replacement).await?;
         if item.superseded_by.is_some() {
             return Err(KnowledgeError::AlreadySupersededConflict);
         }
@@ -391,6 +410,7 @@ LIMIT $6"#
         if has_live_replacement {
             return Err(KnowledgeError::LiveReplacementConflict);
         }
+        self.enforce_capacity(&mut tx, &replacement, None).await?;
         let replacement_id = self
             .insert_item_revision(
                 &mut tx,
@@ -447,11 +467,23 @@ LIMIT $6"#
         &self,
         tx: &mut Transaction<'_, Postgres>,
         input: &KnowledgeRevisionInput,
+        exclude_item_id: Option<Uuid>,
+    ) -> Result<(), KnowledgeError> {
+        self.enforce_capacity_for_scope(tx, input.scope, input.project_id, exclude_item_id)
+            .await
+    }
+
+    async fn enforce_capacity_for_scope(
+        &self,
+        tx: &mut Transaction<'_, Postgres>,
+        scope: KnowledgeScope,
+        project_id: Option<Uuid>,
+        exclude_item_id: Option<Uuid>,
     ) -> Result<(), KnowledgeError> {
         sqlx::query("LOCK TABLE knowledge_items IN SHARE ROW EXCLUSIVE MODE")
             .execute(&mut **tx)
             .await?;
-        match input.scope {
+        match scope {
             KnowledgeScope::Workspace => {
                 let count: i64 = sqlx::query_scalar(
                     r#"
@@ -459,8 +491,10 @@ LIMIT $6"#
                     JOIN knowledge_revisions r ON r.id = i.current_revision_id
                     WHERE i.status IN ('pending', 'approved') AND i.superseded_by IS NULL
                       AND r.scope = 'workspace'
+                      AND ($1::uuid IS NULL OR i.id <> $1)
                     "#,
                 )
+                .bind(exclude_item_id)
                 .fetch_one(&mut **tx)
                 .await?;
                 if count >= self.config.retrieval.max_active_workspace {
@@ -471,8 +505,7 @@ LIMIT $6"#
                 }
             }
             KnowledgeScope::Project | KnowledgeScope::Agent => {
-                let project_id = input
-                    .project_id
+                let project_id = project_id
                     .ok_or_else(|| KnowledgeError::Validation("projectId is required".into()))?;
                 let count: i64 = sqlx::query_scalar(
                     r#"
@@ -480,9 +513,11 @@ LIMIT $6"#
                     JOIN knowledge_revisions r ON r.id = i.current_revision_id
                     WHERE i.status IN ('pending', 'approved') AND i.superseded_by IS NULL
                       AND r.project_id = $1
+                      AND ($2::uuid IS NULL OR i.id <> $2)
                     "#,
                 )
                 .bind(project_id)
+                .bind(exclude_item_id)
                 .fetch_one(&mut **tx)
                 .await?;
                 if count >= self.config.retrieval.max_active_per_project {

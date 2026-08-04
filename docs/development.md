@@ -141,6 +141,7 @@ Only the host-side mapping changes; container-internal ports and the `postgres` 
 | `make clean` | `cargo clean` — remove `target/` build cache |
 | `make e2e-smoke-m06` | Context long-running smoke (`continued` + pending splits) |
 | `make e2e-smoke-m06-knowledge` | Governed knowledge lifecycle, retrieval, audit, extraction, and web-route smoke |
+| `make benchmark-m06-knowledge-retrieval` | Default-Compose 10,000-row retrieval benchmark; asserts p95 below 250 ms |
 | `make release-tar` | Self-contained release tarball |
 
 ### Context long-running tasks

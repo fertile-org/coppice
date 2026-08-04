@@ -50,7 +50,7 @@ export function KnowledgeUsed({
           Unable to load the knowledge audit.
         </p>
       )}
-      {data?.length === 0 && (
+      {!isLoading && !isError && data?.length === 0 && (
         <p className="mt-2 font-body text-xs text-text-muted">
           This run did not include stored knowledge.
         </p>
@@ -58,47 +58,68 @@ export function KnowledgeUsed({
 
       {data && data.length > 0 && (
         <ol className="mt-2 space-y-2">
-          {data.map((usage) => (
-            <li
-              key={usage.revisionId}
-              className="rounded-md border border-moss-200 bg-moss-50/70 px-3 py-2"
-            >
-              <div className="flex flex-wrap items-start justify-between gap-2">
-                <div>
-                  <p className="font-body text-sm font-medium text-bark-900">
-                    {usage.rank}. {usage.title}
-                  </p>
-                  <p className="mt-0.5 font-body text-xs text-text-muted">
-                    {humanize(usage.knowledgeType)} · {humanize(usage.scope)} ·{' '}
-                    {usage.tokenCount} tokens · similarity{' '}
-                    {usage.similarity.toFixed(3)}
-                  </p>
+          {data.map((usage) => {
+            const sourceOpensTicket =
+              usage.sourceType === 'ticket' ||
+              usage.sourceType === 'agent_summary';
+            return (
+              <li
+                key={usage.revisionId}
+                className="rounded-md border border-moss-200 bg-moss-50/70 px-3 py-2"
+              >
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <div>
+                    <p className="font-body text-sm font-medium text-bark-900">
+                      {usage.rank}. {usage.title}
+                    </p>
+                    <p className="mt-0.5 font-body text-xs text-text-muted">
+                      {humanize(usage.knowledgeType)} · {humanize(usage.scope)} ·{' '}
+                      {usage.tokenCount} tokens · similarity{' '}
+                      {usage.similarity.toFixed(3)}
+                    </p>
+                    <p className="mt-1 font-body text-xs text-text-secondary">
+                      Revision{' '}
+                      <code className="font-mono text-bark-700">
+                        {usage.revisionId}
+                      </code>
+                    </p>
+                    <p className="mt-0.5 font-body text-xs text-text-secondary">
+                      Source {humanize(usage.sourceType)} ·{' '}
+                      {usage.sourceId ? (
+                        <code className="font-mono text-bark-700">
+                          {usage.sourceId}
+                        </code>
+                      ) : (
+                        'no source ID'
+                      )}
+                    </p>
+                  </div>
+                  {sourceOpensTicket && usage.sourceId && (
+                    <button
+                      type="button"
+                      onClick={() => void onOpenTicket(usage.sourceId!)}
+                      className="inline-flex items-center gap-1 font-body text-xs font-medium text-moss-700 hover:underline"
+                    >
+                      Source ticket
+                      <ExternalLink className="size-3" aria-hidden="true" />
+                    </button>
+                  )}
                 </div>
-                {usage.sourceType === 'ticket' && usage.sourceId && (
-                  <button
-                    type="button"
-                    onClick={() => void onOpenTicket(usage.sourceId!)}
-                    className="inline-flex items-center gap-1 font-body text-xs font-medium text-moss-700 hover:underline"
-                  >
-                    Source ticket
-                    <ExternalLink className="size-3" aria-hidden="true" />
-                  </button>
-                )}
-              </div>
-              <details className="group mt-2">
-                <summary className="flex cursor-pointer list-none items-center gap-1 font-body text-xs font-medium text-text-secondary">
-                  <ChevronDown
-                    className="size-3 transition-transform group-open:rotate-180"
-                    aria-hidden="true"
-                  />
-                  Exact rendered revision
-                </summary>
-                <pre className="mt-2 max-h-64 overflow-auto rounded-md bg-paper-100 p-2 font-mono text-xs text-bark-700 whitespace-pre-wrap">
-                  {usage.renderedContent}
-                </pre>
-              </details>
-            </li>
-          ))}
+                <details className="group mt-2">
+                  <summary className="flex cursor-pointer list-none items-center gap-1 font-body text-xs font-medium text-text-secondary">
+                    <ChevronDown
+                      className="size-3 transition-transform group-open:rotate-180"
+                      aria-hidden="true"
+                    />
+                    Exact rendered revision
+                  </summary>
+                  <pre className="mt-2 max-h-64 overflow-auto rounded-md bg-paper-100 p-2 font-mono text-xs text-bark-700 whitespace-pre-wrap">
+                    {usage.renderedContent}
+                  </pre>
+                </details>
+              </li>
+            );
+          })}
         </ol>
       )}
     </section>

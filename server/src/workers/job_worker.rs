@@ -433,21 +433,21 @@ async fn execute_job(
         };
         let budgeted = build_budgeted_context(
             &context_input,
-            &knowledge_section.markdown,
+            &knowledge_section,
             &state.config.knowledge.context_budget,
             &counter,
         )
         .context("enforce agent context budget")?;
         write_context_document(&paths.worktree_dir, &budgeted.markdown)
             .context("write context file")?;
-        record_usage(pool, run.id, &knowledge_section.entries)
+        record_usage(pool, run.id, &budgeted.knowledge_entries)
             .await
             .context("record knowledge usage")?;
         tracing::debug!(
             run_id = %run.id,
             tokens = budgeted.token_count,
             token_counter = budgeted.token_counter,
-            knowledge_entries = knowledge_section.entries.len(),
+            knowledge_entries = budgeted.knowledge_entries.len(),
             "wrote budgeted agent context"
         );
     } else {

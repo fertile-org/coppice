@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { MemoryRouter } from 'react-router-dom';
 import { TicketRunsTab } from './TicketRunsTab';
 import type { AgentRun } from '../../lib/schemas/agentRun';
 
@@ -32,9 +33,11 @@ vi.mock('../agents/useAgents', () => ({
 function renderRuns() {
   const client = new QueryClient();
   return render(
-    <QueryClientProvider client={client}>
-      <TicketRunsTab ticketId="00000000-0000-0000-0000-000000000002" />
-    </QueryClientProvider>,
+    <MemoryRouter>
+      <QueryClientProvider client={client}>
+        <TicketRunsTab ticketId="00000000-0000-0000-0000-000000000002" />
+      </QueryClientProvider>
+    </MemoryRouter>,
   );
 }
 

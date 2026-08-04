@@ -11,6 +11,8 @@ pub struct KnowledgeJob {
     pub revision_id: Option<Uuid>,
     pub attempts: i32,
     pub max_attempts: i32,
+    pub locked_by: String,
+    pub claim_token: Uuid,
 }
 
 pub struct KnowledgeJobService<'a> {
@@ -31,9 +33,21 @@ impl<'a> KnowledgeJobService<'a> {
         sqlx::query(
             r#"
             UPDATE knowledge_jobs
-            SET status = 'pending', locked_at = NULL, locked_by = NULL,
+            SET status = CASE
+                    WHEN attempts >= max_attempts THEN 'failed'
+                    ELSE 'pending'
+                END,
+                locked_at = NULL, locked_by = NULL,
+                claim_token = NULL,
                 available_at = now(), updated_at = now(),
-                last_error = COALESCE(last_error, 'reclaimed stale worker lock')
+                last_error = COALESCE(
+                    last_error,
+                    CASE
+                        WHEN attempts >= max_attempts
+                            THEN 'stale worker lock exhausted maximum attempts'
+                        ELSE 'reclaimed stale worker lock'
+                    END
+                )
             WHERE status = 'running'
               AND locked_at < now() - make_interval(secs => $1::double precision)
             "#,
@@ -42,10 +56,22 @@ impl<'a> KnowledgeJobService<'a> {
         .execute(&mut *tx)
         .await?;
 
+        sqlx::query(
+            r#"
+            UPDATE knowledge_jobs
+            SET status = 'failed', updated_at = now(),
+                locked_at = NULL, locked_by = NULL, claim_token = NULL,
+                last_error = COALESCE(last_error, 'maximum attempts exhausted before claim')
+            WHERE status = 'pending' AND attempts >= max_attempts
+            "#,
+        )
+        .execute(&mut *tx)
+        .await?;
+
         let row = sqlx::query(
             r#"
             SELECT id FROM knowledge_jobs
-            WHERE status = 'pending' AND available_at <= now()
+            WHERE status = 'pending' AND attempts < max_attempts AND available_at <= now()
             ORDER BY available_at, created_at, id
             FOR UPDATE SKIP LOCKED
             LIMIT 1
@@ -62,9 +88,11 @@ impl<'a> KnowledgeJobService<'a> {
             r#"
             UPDATE knowledge_jobs
             SET status = 'running', attempts = attempts + 1,
-                locked_at = now(), locked_by = $2, updated_at = now()
+                locked_at = now(), locked_by = $2, claim_token = gen_random_uuid(),
+                updated_at = now()
             WHERE id = $1
-            RETURNING id, kind, status, ticket_id, revision_id, attempts, max_attempts
+            RETURNING id, kind, status, ticket_id, revision_id, attempts, max_attempts,
+                      locked_by, claim_token
             "#,
         )
         .bind(id)
@@ -75,16 +103,18 @@ impl<'a> KnowledgeJobService<'a> {
         Ok(Some(row_to_job(&row)?))
     }
 
-    pub async fn mark_completed(&self, job_id: Uuid) -> Result<(), sqlx::Error> {
+    pub async fn mark_completed(&self, job: &KnowledgeJob) -> Result<(), sqlx::Error> {
         sqlx::query(
             r#"
             UPDATE knowledge_jobs
             SET status = 'completed', completed_at = now(), updated_at = now(),
-                locked_at = NULL, locked_by = NULL, last_error = NULL
-            WHERE id = $1
+                locked_at = NULL, locked_by = NULL, claim_token = NULL, last_error = NULL
+            WHERE id = $1 AND status = 'running' AND locked_by = $2 AND claim_token = $3
             "#,
         )
-        .bind(job_id)
+        .bind(job.id)
+        .bind(&job.locked_by)
+        .bind(job.claim_token)
         .execute(self.pool)
         .await?;
         Ok(())
@@ -96,12 +126,15 @@ impl<'a> KnowledgeJobService<'a> {
             sqlx::query(
                 r#"
                 UPDATE knowledge_jobs
-                SET status = 'failed', last_error = $2, updated_at = now(),
-                    locked_at = NULL, locked_by = NULL
-                WHERE id = $1
+                SET status = 'failed', last_error = $4, updated_at = now(),
+                    locked_at = NULL, locked_by = NULL, claim_token = NULL
+                WHERE id = $1 AND status = 'running' AND locked_by = $2
+                  AND claim_token = $3
                 "#,
             )
             .bind(job.id)
+            .bind(&job.locked_by)
+            .bind(job.claim_token)
             .bind(bounded)
             .execute(self.pool)
             .await?;
@@ -112,12 +145,16 @@ impl<'a> KnowledgeJobService<'a> {
             sqlx::query(
                 r#"
                 UPDATE knowledge_jobs
-                SET status = 'pending', last_error = $2, available_at = $3,
-                    updated_at = now(), locked_at = NULL, locked_by = NULL
-                WHERE id = $1
+                SET status = 'pending', last_error = $4, available_at = $5,
+                    updated_at = now(), locked_at = NULL, locked_by = NULL,
+                    claim_token = NULL
+                WHERE id = $1 AND status = 'running' AND locked_by = $2
+                  AND claim_token = $3
                 "#,
             )
             .bind(job.id)
+            .bind(&job.locked_by)
+            .bind(job.claim_token)
             .bind(bounded)
             .bind(available_at)
             .execute(self.pool)
@@ -136,5 +173,7 @@ fn row_to_job(row: &sqlx::postgres::PgRow) -> Result<KnowledgeJob, sqlx::Error> 
         revision_id: row.try_get("revision_id")?,
         attempts: row.try_get("attempts")?,
         max_attempts: row.try_get("max_attempts")?,
+        locked_by: row.try_get("locked_by")?,
+        claim_token: row.try_get("claim_token")?,
     })
 }

@@ -743,6 +743,7 @@ impl AppConfig {
     fn apply_env(figment: Figment) -> Figment {
         figment
             .merge(Env::prefixed("COPPICE_").split("_"))
+            .merge(Env::prefixed("COPPICE_").split("__"))
             .merge(
                 Env::raw()
                     .only(&["DATABASE_URL"])
@@ -1084,5 +1085,29 @@ mod tests {
         cfg.auto_save.enabled = true;
         cfg.auto_save.allowed_types = vec!["test_command".into()];
         assert!(cfg.validate().is_ok());
+    }
+
+    #[test]
+    fn knowledge_nested_values_load_from_double_underscore_env() {
+        let _guard = ENV_LOCK.lock().expect("env lock");
+        const WORKERS: &str = "COPPICE_KNOWLEDGE__WORKER_COUNT";
+        const TOP_K: &str = "COPPICE_KNOWLEDGE__RETRIEVAL__TOP_K";
+        let previous_workers = std::env::var(WORKERS).ok();
+        let previous_top_k = std::env::var(TOP_K).ok();
+        std::env::set_var(WORKERS, "7");
+        std::env::set_var(TOP_K, "3");
+
+        let cfg = AppConfig::load_defaults().expect("knowledge env config should load");
+
+        match previous_workers {
+            Some(value) => std::env::set_var(WORKERS, value),
+            None => std::env::remove_var(WORKERS),
+        }
+        match previous_top_k {
+            Some(value) => std::env::set_var(TOP_K, value),
+            None => std::env::remove_var(TOP_K),
+        }
+        assert_eq!(cfg.knowledge.worker_count, 7);
+        assert_eq!(cfg.knowledge.retrieval.top_k, 3);
     }
 }
