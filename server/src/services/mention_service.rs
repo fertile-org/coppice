@@ -1,6 +1,7 @@
 use crate::domain::agent::Agent;
 use crate::domain::mention::{MentionStatus, TicketMention};
 use crate::domain::slug::slugify;
+use crate::services::agent_request::agent_request_for_target_from_comment;
 use crate::services::agent_service::AgentService;
 use sqlx::PgPool;
 use sqlx::Row;
@@ -50,13 +51,25 @@ impl<'a> MentionService<'a> {
     ) -> Result<Vec<TicketMention>, MentionError> {
         let _ = project_id;
         let agent_map = self.build_agent_key_map().await?;
+        let agent_ids = keys
+            .iter()
+            .filter_map(|key| agent_map.get(key).copied())
+            .collect::<Vec<_>>();
+        self.create_mentions_for_agents(ticket_id, comment_id, &agent_ids, resume_agent_id)
+            .await
+    }
+
+    pub async fn create_mentions_for_agents(
+        &self,
+        ticket_id: Uuid,
+        comment_id: Uuid,
+        agent_ids: &[Uuid],
+        resume_agent_id: Option<Uuid>,
+    ) -> Result<Vec<TicketMention>, MentionError> {
         let mut mentions = Vec::new();
         let mut mentioned_agent_ids = HashSet::new();
 
-        for key in keys {
-            let Some(&agent_id) = agent_map.get(key) else {
-                continue;
-            };
+        for &agent_id in agent_ids {
             if !mentioned_agent_ids.insert(agent_id) {
                 continue;
             }
@@ -203,20 +216,20 @@ impl<'a> MentionService<'a> {
         Ok(rows.iter().map(row_to_mention).collect())
     }
 
-    /// Returns the oldest ordinary agent mention that has never had a response run.
+    /// Returns the oldest structured consultation request that has never had a response run.
     /// Any prior response attempt excludes the mention; failed/cancelled ordinary
     /// responses are marked ignored by the terminal-run orchestration hook rather
     /// than retried automatically in a loop.
-    pub async fn find_next_unscheduled_agent_mention(
+    pub async fn find_next_unscheduled_agent_request(
         &self,
         ticket_id: Uuid,
         mentioned_agent_id: Uuid,
     ) -> Result<Option<TicketMention>, MentionError> {
-        let row = sqlx::query(
+        let rows = sqlx::query(
             r#"
             SELECT
                 tm.id, tm.ticket_id, tm.comment_id, tm.mentioned_agent_id,
-                tm.resume_agent_id, tm.status
+                tm.resume_agent_id, tm.status, tc.body AS comment_body
             FROM ticket_mentions tm
             JOIN ticket_comments tc ON tc.id = tm.comment_id
             JOIN agents a ON a.id = tm.mentioned_agent_id
@@ -236,16 +249,24 @@ impl<'a> MentionService<'a> {
                     AND ar.trigger_comment_id = tm.comment_id
               )
             ORDER BY tm.created_at ASC, tm.id ASC
-            LIMIT 1
             "#,
         )
         .bind(ticket_id)
         .bind(mentioned_agent_id)
         .bind(mention_status_to_str(MentionStatus::Pending))
-        .fetch_optional(self.pool)
+        .fetch_all(self.pool)
         .await?;
 
-        Ok(row.as_ref().map(row_to_mention))
+        for row in rows {
+            let comment_body: String = row.get("comment_body");
+            let targets_agent =
+                agent_request_for_target_from_comment(&comment_body, mentioned_agent_id).is_some();
+            if targets_agent {
+                return Ok(Some(row_to_mention(&row)));
+            }
+        }
+
+        Ok(None)
     }
 
     async fn build_agent_key_map(&self) -> Result<HashMap<String, Uuid>, MentionError> {

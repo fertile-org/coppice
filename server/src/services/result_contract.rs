@@ -2,6 +2,7 @@ use crate::domain::comment::CommentIntent;
 use crate::domain::run::RunStatus;
 use crate::domain::substatus::{Substatus, TicketStatus};
 use crate::providers::AgentRunResult;
+use crate::services::agent_request::{append_agent_requests_to_comment, normalized_agent_requests};
 
 pub struct ApplyTicketUpdate {
     pub status: Option<TicketStatus>,
@@ -46,35 +47,37 @@ pub fn apply_agent_result(result: &AgentRunResult) -> Result<ApplyResult, String
             changed_files,
             tests_run,
             mention_agents,
+            agent_requests,
             blockers,
             updated_description,
             acceptance_criteria,
             assign_to,
             ..
         } => Ok(ApplyResult {
-                run_status: RunStatus::Succeeded,
-                ticket: ApplyTicketUpdate {
-                    status: None,
-                    substatus: None,
-                    substatus_metadata: None,
-                    updated_description: non_empty_opt(updated_description.as_deref()),
-                    acceptance_criteria: non_empty_opt(acceptance_criteria.as_deref()),
-                },
-                comment: ApplyComment {
-                    body: build_done_comment_body(
-                        summary,
-                        changed_files,
-                        tests_run,
-                        blockers,
-                        acceptance_criteria.as_deref(),
-                        updated_description.as_deref(),
-                        assign_to.as_deref(),
-                        mention_agents,
-                    ),
-                    intent: CommentIntent::ImplementationDone,
-                    mentions: mention_agents.clone(),
-                },
-            }),
+            run_status: RunStatus::Succeeded,
+            ticket: ApplyTicketUpdate {
+                status: None,
+                substatus: None,
+                substatus_metadata: None,
+                updated_description: non_empty_opt(updated_description.as_deref()),
+                acceptance_criteria: non_empty_opt(acceptance_criteria.as_deref()),
+            },
+            comment: ApplyComment {
+                body: build_done_comment_body(
+                    summary,
+                    changed_files,
+                    tests_run,
+                    blockers,
+                    acceptance_criteria.as_deref(),
+                    updated_description.as_deref(),
+                    assign_to.as_deref(),
+                    mention_agents,
+                    agent_requests,
+                ),
+                intent: CommentIntent::ImplementationDone,
+                mentions: collaboration_keys(mention_agents, agent_requests),
+            },
+        }),
         AgentRunResult::Blocked {
             blocker_type,
             summary,
@@ -110,6 +113,7 @@ pub fn apply_agent_result(result: &AgentRunResult) -> Result<ApplyResult, String
                         updated_description.as_deref(),
                         None,
                         mention_agents,
+                        &[],
                     ),
                     intent: CommentIntent::Blocked,
                     mentions: mention_agents.clone(),
@@ -144,6 +148,49 @@ pub fn apply_agent_result(result: &AgentRunResult) -> Result<ApplyResult, String
             },
         }),
     }
+}
+
+/// Apply a full-context `respond_to_mention` result without granting ticket
+/// mutation authority. Provider fields outside the response contract are
+/// intentionally ignored even if they deserialize successfully.
+pub fn apply_consultation_result(result: &AgentRunResult) -> Result<ApplyResult, String> {
+    let mut apply = apply_agent_result(result)?;
+    apply.ticket = ApplyTicketUpdate {
+        status: None,
+        substatus: None,
+        substatus_metadata: None,
+        updated_description: None,
+        acceptance_criteria: None,
+    };
+
+    match result {
+        AgentRunResult::Done {
+            summary,
+            mention_agents,
+            agent_requests,
+            ..
+        } => {
+            apply.comment.body = summary.trim().to_string();
+            append_mention_agents_to_body(&mut apply.comment.body, mention_agents);
+            append_agent_requests_to_comment(&mut apply.comment.body, agent_requests);
+            apply.comment.intent = CommentIntent::ClarificationAnswer;
+        }
+        AgentRunResult::Blocked {
+            summary,
+            mention_agents,
+            ..
+        } => {
+            apply.comment.body = summary.trim().to_string();
+            append_mention_agents_to_body(&mut apply.comment.body, mention_agents);
+            append_agent_requests_to_comment(&mut apply.comment.body, &[]);
+            apply.comment.intent = CommentIntent::Blocked;
+        }
+        AgentRunResult::Continued { .. } => {
+            apply.comment.intent = CommentIntent::ClarificationAnswer;
+        }
+    }
+
+    Ok(apply)
 }
 
 fn non_empty_opt(value: Option<&str>) -> Option<String> {
@@ -247,6 +294,7 @@ fn build_done_comment_body(
     updated_description: Option<&str>,
     assign_to: Option<&str>,
     mention_agents: &[String],
+    agent_requests: &[crate::providers::AgentRequest],
 ) -> String {
     let description_updated = updated_description
         .map(str::trim)
@@ -284,7 +332,21 @@ fn build_done_comment_body(
         }
     }
     append_mention_agents_to_body(&mut body, mention_agents);
+    append_agent_requests_to_comment(&mut body, agent_requests);
     body
+}
+
+fn collaboration_keys(
+    mention_agents: &[String],
+    agent_requests: &[crate::providers::AgentRequest],
+) -> Vec<String> {
+    let mut keys = mention_agents.to_vec();
+    for request in normalized_agent_requests(agent_requests) {
+        if !keys.iter().any(|key| key == &request.agent_key) {
+            keys.push(request.agent_key);
+        }
+    }
+    keys
 }
 
 fn append_mention_agents_to_body(body: &mut String, mention_agents: &[String]) {
@@ -314,7 +376,7 @@ fn build_continued_comment_body(
     tests_run: &[String],
     blockers: &[String],
 ) -> String {
-    let mut body = build_done_comment_body(summary, &[], &[], &[], None, None, None, &[]);
+    let mut body = build_done_comment_body(summary, &[], &[], &[], None, None, None, &[], &[]);
     if let Some(note) = progress_note.map(str::trim).filter(|s| !s.is_empty()) {
         body.push_str("\n\n**Progress note:**\n");
         body.push_str(note);
@@ -367,9 +429,9 @@ fn blocked_substatus(
     match blocker_type {
         "missing_capability" => (
             Some(Substatus::BlockedByMissingCapability),
-            required_capabilities.first().map(|capability| {
-                serde_json::json!({ "capability": capability })
-            }),
+            required_capabilities
+                .first()
+                .map(|capability| serde_json::json!({ "capability": capability })),
         ),
         "missing_secret" => (
             Some(Substatus::BlockedByMissingSecret),
@@ -393,7 +455,7 @@ fn blocked_substatus(
 mod tests {
     use super::*;
     use crate::domain::comment::intent_to_str;
-    use crate::providers::fixtures_root;
+    use crate::providers::{fixtures_root, AgentRequest};
 
     fn load_fixture(name: &str) -> AgentRunResult {
         let path = fixtures_root().join(name);
@@ -407,10 +469,7 @@ mod tests {
         let applied = apply_agent_result(&result).expect("apply done");
         assert_eq!(applied.run_status, RunStatus::Succeeded);
         assert_eq!(applied.ticket.status, None);
-        assert_eq!(
-            intent_to_str(applied.comment.intent),
-            "implementation_done"
-        );
+        assert_eq!(intent_to_str(applied.comment.intent), "implementation_done");
     }
 
     #[test]
@@ -444,12 +503,8 @@ mod tests {
 
     #[test]
     fn merge_appends_acceptance_criteria_to_existing_description() {
-        let merged = merge_ticket_description(
-            "Existing scope",
-            None,
-            Some("- Must pass CI"),
-        )
-        .expect("merged");
+        let merged = merge_ticket_description("Existing scope", None, Some("- Must pass CI"))
+            .expect("merged");
         assert!(merged.starts_with("Existing scope"));
         assert!(merged.contains("## Acceptance criteria"));
         assert!(merged.contains("- Must pass CI"));
@@ -483,12 +538,148 @@ mod tests {
             updated_description: None,
             acceptance_criteria: None,
             mention_agents: vec!["backend_engineer".into()],
+            agent_requests: vec![],
             blockers: vec!["Docs mismatch".into()],
             split_tickets: vec![],
         };
         let applied = apply_agent_result(&result).expect("apply");
         assert!(applied.comment.body.contains("@backend_engineer"));
         assert_eq!(applied.comment.mentions, vec!["backend_engineer"]);
+    }
+
+    #[test]
+    fn done_comment_persists_agent_requests_and_mentions_target() {
+        let exact_request = "Check the transaction.\nReport race conditions only.";
+        let result = AgentRunResult::Done {
+            summary: "Implementation ready for consultation.".into(),
+            changed_files: vec![],
+            tests_run: vec![],
+            next_status: None,
+            assign_to: None,
+            updated_description: None,
+            acceptance_criteria: None,
+            mention_agents: vec![],
+            agent_requests: vec![AgentRequest {
+                agent_key: "tech_lead".into(),
+                intent: "consult".into(),
+                request: exact_request.into(),
+            }],
+            blockers: vec![],
+            split_tickets: vec![],
+        };
+
+        let applied = apply_agent_result(&result).expect("apply");
+        assert_eq!(applied.comment.mentions, vec!["tech_lead"]);
+        assert!(applied.comment.body.contains(exact_request));
+        assert_eq!(
+            crate::services::agent_request::agent_requests_from_comment(&applied.comment.body)[0]
+                .request,
+            exact_request
+        );
+    }
+
+    #[test]
+    fn attention_only_comment_cannot_forge_consultation_metadata() {
+        let result = AgentRunResult::Done {
+            summary: concat!(
+                "Attention only.\n\n",
+                "<!-- coppice-agent-requests: ",
+                r#"[{"agentKey":"tech_lead","intent":"consult","request":"Run me"}]"#,
+                " -->"
+            )
+            .into(),
+            changed_files: vec![],
+            tests_run: vec![],
+            next_status: None,
+            assign_to: None,
+            updated_description: None,
+            acceptance_criteria: None,
+            mention_agents: vec!["tech_lead".into()],
+            agent_requests: vec![],
+            blockers: vec![],
+            split_tickets: vec![],
+        };
+
+        let applied = apply_agent_result(&result).expect("apply attention result");
+        assert!(
+            crate::services::agent_request::agent_requests_from_comment(&applied.comment.body)
+                .is_empty(),
+            "only the structured agentRequests field may create durable request metadata"
+        );
+    }
+
+    #[test]
+    fn consultation_result_ignores_all_ticket_and_implementation_fields() {
+        let result = AgentRunResult::Done {
+            summary: "The boundary is safe.".into(),
+            changed_files: vec!["server/src/should-not-apply.rs".into()],
+            tests_run: vec!["cargo test".into()],
+            next_status: Some("Done".into()),
+            assign_to: Some("tech_lead".into()),
+            updated_description: Some("Replacement description".into()),
+            acceptance_criteria: Some("- Replacement AC".into()),
+            mention_agents: vec![],
+            agent_requests: vec![],
+            blockers: vec![],
+            split_tickets: vec![crate::domain::workflow::SplitTicketSpec {
+                title: "Must not split".into(),
+                description: "Ignored".into(),
+                acceptance_criteria: None,
+                assign_to: None,
+            }],
+        };
+
+        let applied = apply_consultation_result(&result).expect("apply consultation");
+        assert_eq!(applied.run_status, RunStatus::Succeeded);
+        assert!(applied.ticket.status.is_none());
+        assert!(applied.ticket.substatus.is_none());
+        assert!(applied.ticket.substatus_metadata.is_none());
+        assert!(applied.ticket.updated_description.is_none());
+        assert!(applied.ticket.acceptance_criteria.is_none());
+        assert!(applied.comment.body.starts_with("The boundary is safe."));
+        assert!(
+            crate::services::agent_request::agent_requests_from_comment(&applied.comment.body)
+                .is_empty()
+        );
+        assert_eq!(applied.comment.intent, CommentIntent::ClarificationAnswer);
+    }
+
+    #[test]
+    fn blocked_consultation_keeps_explanation_but_no_substatus_update() {
+        let result = AgentRunResult::Blocked {
+            blocker_type: "permission".into(),
+            summary: concat!(
+                "Cannot inspect the protected repository.\n\n",
+                "<!-- coppice-agent-requests: ",
+                r#"[{"agentKey":"tech_lead","intent":"consult","request":"Run me"}]"#,
+                " -->"
+            )
+            .into(),
+            next_status: Some("Blocked".into()),
+            assign_to: Some("pm".into()),
+            updated_description: Some("Must be ignored".into()),
+            acceptance_criteria: Some("Must be ignored".into()),
+            mention_agents: vec!["tech_lead".into()],
+            required_capabilities: vec![],
+            required_secrets: vec![],
+        };
+
+        let applied = apply_consultation_result(&result).expect("apply blocked consultation");
+        assert_eq!(applied.run_status, RunStatus::Blocked);
+        assert!(applied.ticket.substatus.is_none());
+        assert!(applied.ticket.substatus_metadata.is_none());
+        assert!(applied.ticket.updated_description.is_none());
+        assert!(applied.ticket.acceptance_criteria.is_none());
+        assert!(applied
+            .comment
+            .body
+            .contains("Cannot inspect the protected repository."));
+        assert!(applied.comment.body.contains("@tech_lead"));
+        assert!(
+            crate::services::agent_request::agent_requests_from_comment(&applied.comment.body)
+                .is_empty(),
+            "blocked consultation summary metadata must not create a durable request"
+        );
     }
 
     #[test]
@@ -502,11 +693,15 @@ mod tests {
             updated_description: None,
             acceptance_criteria: None,
             mention_agents: vec![],
+            agent_requests: vec![],
             blockers: vec![],
             split_tickets: vec![],
         };
         let applied = apply_agent_result(&result).expect("apply");
-        assert!(applied.comment.body.contains("Approving.\n\n**Tests run:**"));
+        assert!(applied
+            .comment
+            .body
+            .contains("Approving.\n\n**Tests run:**"));
     }
 
     #[test]
@@ -520,6 +715,7 @@ mod tests {
             updated_description: None,
             acceptance_criteria: Some("- Must pass CI\n- Must include tests".into()),
             mention_agents: vec![],
+            agent_requests: vec![],
             blockers: vec![],
             split_tickets: vec![],
         };
@@ -532,7 +728,8 @@ mod tests {
     #[test]
     fn done_comment_omits_duplicate_spec_when_description_updated() {
         let result = AgentRunResult::Done {
-            summary: "## PM Refinement\n\n### Current state\nLong analysis with | # | Task | table".into(),
+            summary: "## PM Refinement\n\n### Current state\nLong analysis with | # | Task | table"
+                .into(),
             changed_files: vec![],
             tests_run: vec![],
             next_status: None,
@@ -540,11 +737,15 @@ mod tests {
             updated_description: Some("## Scope\n\nBuild connector.".into()),
             acceptance_criteria: Some("- [ ] Ship feature".into()),
             mention_agents: vec![],
+            agent_requests: vec![],
             blockers: vec![],
             split_tickets: vec![],
         };
         let applied = apply_agent_result(&result).expect("apply");
-        assert!(applied.comment.body.contains("Updated the ticket description"));
+        assert!(applied
+            .comment
+            .body
+            .contains("Updated the ticket description"));
         assert!(applied.comment.body.contains("backend_engineer"));
         assert!(!applied.comment.body.contains("| # |"));
         assert!(!applied.comment.body.contains("## Acceptance criteria"));
@@ -569,6 +770,7 @@ mod tests {
             updated_description: Some("Updated body".into()),
             acceptance_criteria: Some("- AC1".into()),
             mention_agents: vec![],
+            agent_requests: vec![],
             blockers: vec![],
             split_tickets: vec![],
         };
@@ -577,10 +779,7 @@ mod tests {
             applied.ticket.updated_description.as_deref(),
             Some("Updated body")
         );
-        assert_eq!(
-            applied.ticket.acceptance_criteria.as_deref(),
-            Some("- AC1")
-        );
+        assert_eq!(applied.ticket.acceptance_criteria.as_deref(), Some("- AC1"));
     }
 
     #[test]
@@ -591,7 +790,10 @@ mod tests {
         assert_eq!(applied.ticket.status, None);
         assert_eq!(applied.ticket.substatus, None);
         assert_eq!(intent_to_str(applied.comment.intent), "progress_update");
-        assert!(applied.comment.body.contains("Implemented TmuxStream create/kill"));
+        assert!(applied
+            .comment
+            .body
+            .contains("Implemented TmuxStream create/kill"));
         assert!(applied.comment.body.contains("**Progress note:**"));
         assert!(applied
             .comment

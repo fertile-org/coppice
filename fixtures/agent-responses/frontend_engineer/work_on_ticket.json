@@ -4,6 +4,13 @@
   "changedFiles": [],
   "testsRun": [],
   "nextStatus": null,
-  "mentionAgents": ["dba"],
+  "mentionAgents": [],
+  "agentRequests": [
+    {
+      "agentKey": "dba",
+      "intent": "consult",
+      "request": "Verify the data assumptions used by the frontend implementation."
+    }
+  ],
   "blockers": []
 }

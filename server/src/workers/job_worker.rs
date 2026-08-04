@@ -9,20 +9,22 @@ use sqlx::Row;
 use tokio::sync::watch;
 
 use crate::domain::comment::{author_type_to_str, intent_to_str, Comment, CommentIntent};
-use crate::domain::substatus::TicketStatus;
+use crate::domain::context_profile::ContextProfile;
 use crate::domain::run::{run_status_to_str, AgentRun, RunStatus};
 use crate::domain::slug::slugify;
+use crate::domain::substatus::TicketStatus;
 use crate::domain::ticket::{status_to_str, substatus_to_str};
 use crate::events::{publish_run_finished, AppEvent};
 use crate::providers::{AgentRunInput, ProviderError};
+use crate::services::agent_request::agent_request_for_target_from_comment;
 use crate::services::agent_service::AgentService;
 use crate::services::artifact_service::{ArtifactService, RunArtifactMeta, RunArtifactPaths};
 use crate::services::comment_service::CommentService;
-use crate::domain::context_profile::ContextProfile;
 use crate::services::context_builder::{
     write_agent_context_files, write_context_file, ContextInput, HumanRequest,
 };
 use crate::services::job_service::JobService;
+use crate::services::mention_service::MentionService;
 use crate::services::result_contract::{self, ACCEPTANCE_CRITERIA_HEADER};
 use crate::services::run_orchestrator::{load_run_continuation_context, RunOrchestrator};
 use crate::services::run_service::{AgentRunWithConnector, RunService};
@@ -169,18 +171,14 @@ async fn execute_job(
         .await
         .context("load agent")?;
 
-    let repo_id = ticket
-        .ticket
-        .repo_id
-        .context("ticket has no repo")?;
+    let repo_id = ticket.ticket.repo_id.context("ticket has no repo")?;
 
-    let repo_row = sqlx::query(
-        "SELECT local_path, name, remote_url, default_branch FROM repos WHERE id = $1",
-    )
-        .bind(repo_id)
-        .fetch_optional(pool)
-        .await?
-        .context("repo not found")?;
+    let repo_row =
+        sqlx::query("SELECT local_path, name, remote_url, default_branch FROM repos WHERE id = $1")
+            .bind(repo_id)
+            .fetch_optional(pool)
+            .await?
+            .context("repo not found")?;
 
     if run_svc.is_cancelled(run.id).await? {
         return Err(JobCancelled.into());
@@ -194,7 +192,10 @@ async fn execute_job(
     let stream = state.run_streams.register(run.id);
     let cancel_rx = stream.cancelled_rx();
 
-    run_svc.mark_running(run.id).await.context("mark run running")?;
+    run_svc
+        .mark_running(run.id)
+        .await
+        .context("mark run running")?;
 
     tracing::info!(
         run_id = %run.id,
@@ -253,18 +254,17 @@ async fn execute_job(
     let agents = AgentService::new(pool)
         .list_agents()
         .await
-        .unwrap_or_default();
+        .context("load agents")?;
     let agent_names = agents
         .iter()
         .map(|a| (a.id, a.name.clone()))
         .collect::<HashMap<_, _>>();
 
     let assignee_agent_key_owned = ticket.ticket.assignee_agent_id.and_then(|id| {
-        agents.iter().find(|a| a.id == id).map(|a| {
-            a.preset_source
-                .clone()
-                .unwrap_or_else(|| slugify(&a.name))
-        })
+        agents
+            .iter()
+            .find(|a| a.id == id)
+            .map(|a| a.preset_source.clone().unwrap_or_else(|| slugify(&a.name)))
     });
     let assignee_agent_key_ref = assignee_agent_key_owned.as_deref();
 
@@ -295,12 +295,7 @@ async fn execute_job(
             .get(comment_id)
             .await
             .context("load trigger comment")?;
-        trigger_posted_at = Some(
-            trigger
-                .created_at
-                .format(&Rfc3339)
-                .unwrap_or_default(),
-        );
+        trigger_posted_at = Some(trigger.created_at.format(&Rfc3339).unwrap_or_default());
         trigger_body = Some(trigger.body);
     } else {
         trigger_posted_at = None;
@@ -320,19 +315,40 @@ async fn execute_job(
         _ => None,
     };
 
+    let consultation_request_owned =
+        if run.job_type == "respond_to_mention" && run.context_profile == ContextProfile::Full {
+            let trigger_comment_id = run
+                .trigger_comment_id
+                .context("consultation run has no trigger comment")?;
+            let body = trigger_body
+                .as_deref()
+                .context("consultation trigger comment has no body")?;
+            let mention = MentionService::new(pool)
+                .find_pending_for_agent_and_comment(
+                    run.ticket_id,
+                    run.agent_id,
+                    Some(trigger_comment_id),
+                )
+                .await
+                .context("load consultation trigger mention")?
+                .context("consultation run has no pending linked mention")?;
+            Some(consultation_request_from_trigger(
+                body,
+                &mention,
+                run.agent_id,
+            )?)
+        } else {
+            None
+        };
+    let consultation_request_ref = consultation_request_owned.as_deref();
+
     let local_path: String = repo_row.get("local_path");
     let repo_name: String = repo_row.get("name");
     let repo_remote_url: Option<String> = repo_row.get("remote_url");
     let repo_default_branch: String = repo_row.get("default_branch");
 
-    let worktree_service = WorktreeService::new(
-        state.config.agent.worktrees_path.clone().into(),
-    );
-    let paths = compute_paths(
-        worktree_service.worktrees_root(),
-        &repo_name,
-        run.ticket_id,
-    );
+    let worktree_service = WorktreeService::new(state.config.agent.worktrees_path.clone().into());
+    let paths = compute_paths(worktree_service.worktrees_root(), &repo_name, run.ticket_id);
     let git_dir = PathBuf::from(&local_path);
 
     worktree_service
@@ -375,6 +391,7 @@ async fn execute_job(
         ticket_id: Some(run.ticket_id),
         assignee_agent_key: assignee_agent_key_ref,
         thread_excerpt: thread_excerpt_ref,
+        consultation_request: consultation_request_ref,
     };
     write_context_file(&paths.worktree_dir, &context_input).context("write context file")?;
 
@@ -416,7 +433,11 @@ async fn execute_job(
         .get(connector_name)
         .ok_or_else(|| anyhow::anyhow!("agent connector not configured: {connector_name}"))?;
 
-    let session_created_tx = if connector_name == "opencode" || connector_name == "claude-code" || connector_name == "codex" || connector_name == "kilo-code" {
+    let session_created_tx = if connector_name == "opencode"
+        || connector_name == "claude-code"
+        || connector_name == "codex"
+        || connector_name == "kilo-code"
+    {
         let (tx, mut rx) = watch::channel(String::new());
         let pool = pool.clone();
         let run_id = run.id;
@@ -475,8 +496,14 @@ async fn execute_job(
         return Err(JobCancelled.into());
     }
 
-    let mut apply = result_contract::apply_agent_result(&result)
-        .map_err(|err| anyhow::anyhow!("apply agent result: {err}"))?;
+    let consultation_run =
+        run.job_type == "respond_to_mention" && run.context_profile == ContextProfile::Full;
+    let mut apply = if consultation_run {
+        result_contract::apply_consultation_result(&result)
+    } else {
+        result_contract::apply_agent_result(&result)
+    }
+    .map_err(|err| anyhow::anyhow!("apply agent result: {err}"))?;
     if run.job_type == "respond_to_mention" && apply.run_status == RunStatus::Succeeded {
         apply.comment.intent = CommentIntent::ClarificationAnswer;
     } else if run.job_type == "work_on_ticket"
@@ -487,24 +514,21 @@ async fn execute_job(
         apply.comment.intent = CommentIntent::ReviewFeedback;
     }
 
-    if run.job_type == "work_on_ticket"
-        && apply.run_status == RunStatus::Succeeded
-        && should_finalize_worktree_git(&agent, ticket.ticket.status)
+    if apply.run_status == RunStatus::Succeeded
+        && should_finalize_run_git(run, &agent, ticket.ticket.status)
     {
         let commit_message = format!(
             "[coppice] {}: {}",
             &agent_key,
             truncate_with_ellipsis(&ticket.ticket.title, 72)
         );
-        match finalize_worktree_git(
-            &paths.worktree_dir,
-            &paths.branch_name,
-            &commit_message,
-        )
-        .await
+        match finalize_worktree_git(&paths.worktree_dir, &paths.branch_name, &commit_message).await
         {
             Ok(git_state) => {
-                apply.comment.body.push_str(&format_git_comment_footer(&git_state));
+                apply
+                    .comment
+                    .body
+                    .push_str(&format_git_comment_footer(&git_state));
             }
             Err(err) => {
                 tracing::warn!(
@@ -517,8 +541,8 @@ async fn execute_job(
     }
 
     let worktree_path = paths.worktree_dir.to_string_lossy().into_owned();
-    let orchestrator = RunOrchestrator::new(pool, &state.config.workflow)
-        .with_event_bus(&state.event_bus);
+    let orchestrator =
+        RunOrchestrator::new(pool, &state.config.workflow).with_event_bus(&state.event_bus);
     let finished_run = orchestrator
         .finish_run(
             run,
@@ -648,9 +672,7 @@ fn is_review_agent(agent: &crate::domain::agent::Agent) -> bool {
         return true;
     }
     let role = agent.role.to_lowercase();
-    role.contains("tech lead")
-        || role.contains("technical lead")
-        || role.contains("review")
+    role.contains("tech lead") || role.contains("technical lead") || role.contains("review")
 }
 
 fn is_qc_agent(agent: &crate::domain::agent::Agent) -> bool {
@@ -674,6 +696,34 @@ fn should_finalize_worktree_git(
         return false;
     }
     true
+}
+
+fn should_finalize_run_git(
+    run: &crate::domain::run::AgentRun,
+    agent: &crate::domain::agent::Agent,
+    ticket_status: TicketStatus,
+) -> bool {
+    run.job_type == "work_on_ticket" && should_finalize_worktree_git(agent, ticket_status)
+}
+
+fn consultation_request_from_trigger(
+    body: &str,
+    mention: &crate::domain::mention::TicketMention,
+    target_agent_id: uuid::Uuid,
+) -> anyhow::Result<String> {
+    if mention.mentioned_agent_id != target_agent_id {
+        anyhow::bail!("consultation trigger mention targets a different agent");
+    }
+
+    // Blocked work mentions predate structured requests. The resume link is the
+    // durable discriminator for their legacy clarification semantics.
+    if mention.resume_agent_id.is_some() {
+        return Ok(body.to_string());
+    }
+
+    agent_request_for_target_from_comment(body, target_agent_id)
+        .map(|request| request.request)
+        .context("structured consultation trigger lacks stable target metadata")
 }
 
 async fn run_session_id(pool: &PgPool, run_id: uuid::Uuid) -> Option<String> {
@@ -760,8 +810,7 @@ fn build_ticket_json(
     ticket: &TicketWithDisplay,
     assignee_agent_key: Option<&str>,
 ) -> serde_json::Value {
-    let (description, acceptance_criteria) =
-        split_ticket_description(&ticket.ticket.description);
+    let (description, acceptance_criteria) = split_ticket_description(&ticket.ticket.description);
     serde_json::json!({
         "id": ticket.ticket.id,
         "title": ticket.ticket.title,
@@ -821,7 +870,12 @@ fn build_runs_json(
 mod tests {
     use super::*;
     use crate::domain::agent::Agent;
+    use crate::domain::mention::{MentionStatus, TicketMention};
     use crate::providers::codex_console::CodexConsolePublisher;
+    use crate::providers::AgentRequest;
+    use crate::services::agent_request::{
+        append_agent_requests_to_comment, replace_agent_requests_in_comment, ResolvedAgentRequest,
+    };
     use crate::sessions::run_registry::RunStreamRegistry;
     use crate::sessions::LiveMessage;
     use time::OffsetDateTime;
@@ -844,12 +898,35 @@ mod tests {
         }
     }
 
+    fn test_run(job_type: &str) -> AgentRun {
+        AgentRun {
+            id: uuid::Uuid::new_v4(),
+            ticket_id: uuid::Uuid::new_v4(),
+            agent_id: uuid::Uuid::new_v4(),
+            job_type: job_type.into(),
+            status: RunStatus::Running,
+            sandbox_profile_id: "permissive-default".into(),
+            worktree_path: None,
+            branch_name: None,
+            error_message: None,
+            session_id: None,
+            context_profile: ContextProfile::Full,
+            trigger_comment_id: None,
+            started_at: None,
+            ended_at: None,
+            created_at: OffsetDateTime::now_utc(),
+        }
+    }
+
     #[test]
     fn is_qc_agent_matches_preset_and_role() {
         assert!(is_qc_agent(&test_agent("QC", Some("qc"))));
         assert!(is_qc_agent(&test_agent("QC", None)));
         assert!(is_qc_agent(&test_agent("Quality Engineer", None)));
-        assert!(!is_qc_agent(&test_agent("Backend Engineer", Some("backend_engineer"))));
+        assert!(!is_qc_agent(&test_agent(
+            "Backend Engineer",
+            Some("backend_engineer")
+        )));
         assert!(!is_qc_agent(&test_agent("Reviewer", Some("reviewer"))));
     }
 
@@ -862,14 +939,112 @@ mod tests {
     #[test]
     fn should_finalize_git_for_engineer_work() {
         let engineer = test_agent("Backend Engineer", Some("backend_engineer"));
-        assert!(should_finalize_worktree_git(&engineer, TicketStatus::InProgress));
+        assert!(should_finalize_worktree_git(
+            &engineer,
+            TicketStatus::InProgress
+        ));
         assert!(should_finalize_worktree_git(&engineer, TicketStatus::InQa));
+    }
+
+    #[test]
+    fn consultation_run_never_finalizes_git_for_engineer() {
+        let engineer = test_agent("Backend Engineer", Some("backend_engineer"));
+        let response_run = test_run("respond_to_mention");
+        assert!(!should_finalize_run_git(
+            &response_run,
+            &engineer,
+            TicketStatus::InProgress
+        ));
+    }
+
+    #[test]
+    fn structured_consultation_uses_stable_target_metadata() {
+        let target_agent_id = uuid::Uuid::new_v4();
+        let exact_request = "Review this boundary, and only this boundary.";
+        let request = AgentRequest {
+            agent_key: "old_agent_key".into(),
+            intent: "consult".into(),
+            request: exact_request.into(),
+        };
+        let mut body = "Source summary".to_string();
+        append_agent_requests_to_comment(&mut body, std::slice::from_ref(&request));
+        replace_agent_requests_in_comment(
+            &mut body,
+            std::slice::from_ref(&request),
+            &[ResolvedAgentRequest {
+                agent_id: target_agent_id,
+                request: request.clone(),
+            }],
+        );
+        let mention = TicketMention {
+            id: uuid::Uuid::new_v4(),
+            ticket_id: uuid::Uuid::new_v4(),
+            comment_id: uuid::Uuid::new_v4(),
+            mentioned_agent_id: target_agent_id,
+            resume_agent_id: None,
+            status: MentionStatus::Pending,
+        };
+
+        assert_eq!(
+            consultation_request_from_trigger(&body, &mention, target_agent_id)
+                .expect("resolve stable request"),
+            exact_request
+        );
+    }
+
+    #[test]
+    fn structured_consultation_without_stable_metadata_fails_closed() {
+        let target_agent_id = uuid::Uuid::new_v4();
+        let mut body = "Source summary".to_string();
+        append_agent_requests_to_comment(
+            &mut body,
+            &[AgentRequest {
+                agent_key: "old_agent_key".into(),
+                intent: "consult".into(),
+                request: "Do not fall back to the source comment.".into(),
+            }],
+        );
+        let mention = TicketMention {
+            id: uuid::Uuid::new_v4(),
+            ticket_id: uuid::Uuid::new_v4(),
+            comment_id: uuid::Uuid::new_v4(),
+            mentioned_agent_id: target_agent_id,
+            resume_agent_id: None,
+            status: MentionStatus::Pending,
+        };
+
+        let error = consultation_request_from_trigger(&body, &mention, target_agent_id)
+            .expect_err("unbound structured metadata must fail closed");
+        assert!(error.to_string().contains("stable target metadata"));
+    }
+
+    #[test]
+    fn legacy_clarification_uses_source_comment_with_resume_link() {
+        let target_agent_id = uuid::Uuid::new_v4();
+        let body = "Which API option should I implement?";
+        let mention = TicketMention {
+            id: uuid::Uuid::new_v4(),
+            ticket_id: uuid::Uuid::new_v4(),
+            comment_id: uuid::Uuid::new_v4(),
+            mentioned_agent_id: target_agent_id,
+            resume_agent_id: Some(uuid::Uuid::new_v4()),
+            status: MentionStatus::Pending,
+        };
+
+        assert_eq!(
+            consultation_request_from_trigger(body, &mention, target_agent_id)
+                .expect("resolve legacy clarification"),
+            body
+        );
     }
 
     #[test]
     fn should_finalize_git_for_reviewer_in_review() {
         let reviewer = test_agent("Reviewer", Some("reviewer"));
-        assert!(should_finalize_worktree_git(&reviewer, TicketStatus::InReview));
+        assert!(should_finalize_worktree_git(
+            &reviewer,
+            TicketStatus::InReview
+        ));
     }
 
     #[test]
@@ -882,8 +1057,8 @@ mod tests {
 
     #[test]
     fn production_persistence_retains_codex_console_events_in_order() {
-        let fixture_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../fixtures/codex/done.jsonl");
+        let fixture_path =
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../fixtures/codex/done.jsonl");
         let raw = std::fs::read_to_string(fixture_path).expect("read Codex fixture");
         let registry = RunStreamRegistry::new();
         let handle = registry.register(uuid::Uuid::new_v4());

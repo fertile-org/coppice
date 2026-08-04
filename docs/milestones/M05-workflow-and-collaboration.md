@@ -8,7 +8,8 @@ Inter-agent coordination through ticket comments, `@mentions`, explicit workflow
 
 - YAML workflow rules loaded from config (product design §8.2)
 - Events: `on_ticket_created`, `on_agent_done`, status transitions
-- `@agent-name` mention parsing in comments → `ticket_mentions` records → jobs for mentioned agents
+- `@agent-name` mention parsing in comments → `ticket_mentions` records and notifications
+- Structured `agentRequests` consultations → bounded, linked, response-only jobs
 - Job types: `work_on_ticket`, `respond_to_mention`, `review_ticket`, `qa_ticket`
 - Clarification flow: agent returns blocked + mention → substatus waiting_for_* → resume job after answer
 - Communication limits: max clarification rounds, max mentions per run, escalate to human (product design §9.4)
@@ -63,13 +64,39 @@ See product design §8.2 — loaded at server start, validated on boot.
 ### Mention flow
 
 ```text
-Comment with @pm-agent
+Blocked work comment with @pm-agent
   → Mention record (pending)
   → agent_jobs: respond_to_mention
   → ticket substatus: waiting_for_pm_agent
   → PM mock run → clarification_answer comment
   → resume job for original assignee
 ```
+
+### Agent-authored collaboration signals
+
+Successful agent results keep attention, consultation, and ownership separate:
+
+| Result field | Meaning | Automatic run |
+|---|---|---|
+| `mentionAgents` | Draw attention and create a durable mention/notification | Never |
+| `agentRequests` | Ask a bounded, non-empty `intent: "consult"` question | One `respond_to_mention` hop from successful full-context `work_on_ticket` when `auto_start_runs` is enabled |
+| `assignTo` | Transfer or recommend ownership | Workflow-controlled `work_on_ticket`; wins over a same-target consultation, including while a Backlog recommendation awaits approval |
+
+`agentRequests` entries use this v1 shape:
+
+```json
+{
+  "agentKey": "tech_lead",
+  "intent": "consult",
+  "request": "Review the transaction boundary and identify race risks."
+}
+```
+
+Consultation targets share `MAX_MENTIONS_PER_RUN` with attention targets and use the same enabled, resolvable, duplicate, and self-target checks. Coppice renders each accepted request into the source comment, stores structured metadata bound to the resolved agent ID, and creates the linked mention from that same ID. This keeps both the target and exact trigger durable across later agent renames, disabling, or key reassignment without a schema change. Disabling `workflow.auto_start_runs` preserves the mention and request but starts no run.
+
+A full-context `respond_to_mention` run receives the exact request, Coppice-owned response-only rules, ticket context and thread, role prompt, then the response-only contract in that order. It may answer, inspect code, and run read-only checks; it may not implement, edit, commit, take assignment, or move workflow. The server ignores assignment, description, acceptance-criteria, split, status, and substatus output defensively and never finalizes git for the response. Successful responses may create notifications but cannot auto-dispatch another response, so automatic collaboration is one hop.
+
+Blocked `work_on_ticket` mentions retain the original clarification flow shown above. A blocked consultation posts its explanation without changing ticket lifecycle or assignment.
 
 ### API additions
 
@@ -116,14 +143,15 @@ No new services. Optional workflow config mount:
 
 ### E2E full (local)
 
-- @mention visible in comment thread; mentioned agent receives job
+- Attention-only `@mentions` are visible and notify but never start runs; with auto-start enabled, blocked `work_on_ticket` clarification mentions and eligible structured requests from successful full-context `work_on_ticket` runs create scoped `respond_to_mention` jobs, subject to ownership precedence
 - Blocked card badge shows substatus text
 - Ignore mention action
 
 ## Acceptance criteria
 
 - [x] Workflow rules auto-assign and transition tickets without manual drag for agent-done paths
-- [x] Mentions create jobs and update substatus
+- [x] Blocked clarification mentions create jobs and update substatus
+- [x] Successful attention mentions notify without executing; structured consultations are response-only and one hop
 - [x] Clarification/resume cycle works with round limits
 - [x] Human Final Approve is required before Done
 - [x] CI smoke E2E passes full mock pipeline

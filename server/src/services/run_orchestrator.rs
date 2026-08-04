@@ -12,6 +12,9 @@ use crate::domain::ticket::status_to_str;
 use crate::domain::workflow::{JobRequest, RunOutcome, TransitionAction, TransitionContext};
 use crate::events::{AppEvent, EventBus};
 use crate::providers::AgentRunResult;
+use crate::services::agent_request::{
+    normalized_agent_requests, replace_agent_requests_in_comment, ResolvedAgentRequest,
+};
 use crate::services::agent_service::AgentService;
 use crate::services::comment_service::{CommentError, CommentService};
 use crate::services::mention_service::{resolve_agent_keys, MentionService};
@@ -79,7 +82,7 @@ impl<'a> RunOrchestrator<'a> {
         &self,
         run: &AgentRun,
         contract: &AgentRunResult,
-        apply: ApplyResult,
+        mut apply: ApplyResult,
         worktree_path: Option<String>,
         branch_name: Option<String>,
     ) -> Result<AgentRun, RunError> {
@@ -121,7 +124,7 @@ impl<'a> RunOrchestrator<'a> {
             run_outcome,
             contract: contract.clone(),
             project_agent_keys,
-            project_agent_ids,
+            project_agent_ids: project_agent_ids.clone(),
             auto_assign_enabled,
             clarification_round: ticket.ticket.clarification_round,
             context_profile: run.context_profile,
@@ -129,13 +132,19 @@ impl<'a> RunOrchestrator<'a> {
 
         let skip_workflow = ctx.context_profile == ContextProfile::HumanAgent
             && ctx.run_outcome == RunOutcome::Succeeded;
-        let mut action = if skip_workflow {
+        let consultation_run =
+            run.job_type == "respond_to_mention" && run.context_profile == ContextProfile::Full;
+        let mut action = if skip_workflow || consultation_run {
             TransitionAction::default()
         } else {
             WorkflowService::resolve_transition(ctx).map_err(RunError::Validation)?
         };
 
-        let (substatus, substatus_metadata) = merge_substatus(&action, &apply);
+        let (substatus, substatus_metadata) = if consultation_run {
+            (None, None)
+        } else {
+            merge_substatus(&action, &apply)
+        };
 
         let mut ticket = ticket_svc
             .apply_workflow_update(
@@ -149,34 +158,47 @@ impl<'a> RunOrchestrator<'a> {
             )
             .await?;
 
-        if let Some(description) = merge_ticket_description(
-            &original_description,
-            apply.ticket.updated_description.as_deref(),
-            apply.ticket.acceptance_criteria.as_deref(),
-        ) {
-            ticket = ticket_svc
-                .update_fields(
-                    run.ticket_id,
-                    None,
-                    Some(&description),
-                    None,
-                    None,
-                    None,
-                    None,
-                )
-                .await?;
-        }
-
-        if let AgentRunResult::Done { split_tickets, .. } = contract {
-            if !split_tickets.is_empty() {
-                let auto_split = self
-                    .workflow
-                    .auto_split
-                    .effective(status_to_str(current_status));
-                SplitService::new(self.pool, self.workflow)
-                    .apply_splits(&ticket.ticket, split_tickets, run.agent_id, auto_split)
+        if !consultation_run {
+            if let Some(description) = merge_ticket_description(
+                &original_description,
+                apply.ticket.updated_description.as_deref(),
+                apply.ticket.acceptance_criteria.as_deref(),
+            ) {
+                ticket = ticket_svc
+                    .update_fields(
+                        run.ticket_id,
+                        None,
+                        Some(&description),
+                        None,
+                        None,
+                        None,
+                        None,
+                    )
                     .await?;
             }
+        }
+
+        if !consultation_run {
+            if let AgentRunResult::Done { split_tickets, .. } = contract {
+                if !split_tickets.is_empty() {
+                    let auto_split = self
+                        .workflow
+                        .auto_split
+                        .effective(status_to_str(current_status));
+                    SplitService::new(self.pool, self.workflow)
+                        .apply_splits(&ticket.ticket, split_tickets, run.agent_id, auto_split)
+                        .await?;
+                }
+            }
+        }
+
+        let collaboration_targets = select_collaboration_targets(contract, &agents, run.agent_id);
+        if let AgentRunResult::Done { agent_requests, .. } = contract {
+            replace_agent_requests_in_comment(
+                &mut apply.comment.body,
+                agent_requests,
+                &collaboration_targets.agent_requests,
+            );
         }
 
         let comment = CommentService::new(self.pool)
@@ -187,7 +209,7 @@ impl<'a> RunOrchestrator<'a> {
                 &apply.comment.body,
                 apply.comment.intent,
                 &[],
-                &apply.comment.mentions,
+                &collaboration_targets.keys,
             )
             .await?;
 
@@ -205,22 +227,21 @@ impl<'a> RunOrchestrator<'a> {
                 .await?;
         }
 
-        let mention_keys = mention_agents_from_contract(contract);
-        let mentions = if mention_keys.is_empty() {
+        let mentions = if collaboration_targets.agent_ids.is_empty() {
             Vec::new()
         } else {
-            let resume_agent_id = if apply.run_status == RunStatus::Blocked {
-                Some(run.agent_id)
-            } else {
-                None
-            };
+            let resume_agent_id =
+                if apply.run_status == RunStatus::Blocked && run.job_type == "work_on_ticket" {
+                    Some(run.agent_id)
+                } else {
+                    None
+                };
             MentionService::new(self.pool)
-                .create_mentions(
+                .create_mentions_for_agents(
                     run.ticket_id,
                     comment.id,
-                    &mention_keys,
+                    &collaboration_targets.agent_ids,
                     resume_agent_id,
-                    ticket.ticket.project_id,
                 )
                 .await?
         };
@@ -233,8 +254,16 @@ impl<'a> RunOrchestrator<'a> {
             }
         }
 
-        let mention_dispatch =
-            enqueue_successful_mention_jobs(&mut action, run, apply.run_status, &mentions);
+        let mention_dispatch = enqueue_successful_consultation_jobs(
+            &mut action,
+            run,
+            apply.run_status,
+            &mentions,
+            &collaboration_targets.consultation_agent_ids,
+            ticket.ticket.assignee_agent_id,
+            ticket.ticket.pending_assign_recommendation.as_ref(),
+            &project_agent_ids,
+        );
         let mention_svc = MentionService::new(self.pool);
         for mention_id in &mention_dispatch.handled_mention_ids {
             mention_svc.mark_handled(*mention_id).await?;
@@ -490,7 +519,7 @@ impl<'a> RunOrchestrator<'a> {
         }
 
         let mention = match MentionService::new(self.pool)
-            .find_next_unscheduled_agent_mention(run.ticket_id, run.agent_id)
+            .find_next_unscheduled_agent_request(run.ticket_id, run.agent_id)
             .await
         {
             Ok(Some(mention)) => mention,
@@ -506,6 +535,51 @@ impl<'a> RunOrchestrator<'a> {
                 return;
             }
         };
+
+        let ticket = match TicketService::new(self.pool).get(run.ticket_id).await {
+            Ok(ticket) => ticket,
+            Err(error) => {
+                tracing::warn!(
+                    terminal_run_id = %run.id,
+                    ticket_id = %run.ticket_id,
+                    error = %error,
+                    "could not recheck deferred consultation ownership"
+                );
+                return;
+            }
+        };
+        let agents = match AgentService::new(self.pool).list_agents().await {
+            Ok(agents) => agents,
+            Err(error) => {
+                tracing::warn!(
+                    terminal_run_id = %run.id,
+                    ticket_id = %run.ticket_id,
+                    error = %error,
+                    "could not resolve deferred consultation ownership"
+                );
+                return;
+            }
+        };
+        let agent_ids = resolve_agent_keys(&agents);
+        if target_has_ownership(
+            run.agent_id,
+            ticket.ticket.assignee_agent_id,
+            ticket.ticket.pending_assign_recommendation.as_ref(),
+            &agent_ids,
+        ) {
+            if let Err(error) = MentionService::new(self.pool)
+                .mark_handled(mention.id)
+                .await
+            {
+                tracing::warn!(
+                    terminal_run_id = %run.id,
+                    mention_id = %mention.id,
+                    error = %error,
+                    "could not mark ownership-superseded consultation handled"
+                );
+            }
+            return;
+        }
 
         match RunService::new(self.pool)
             .start_run_for_agent(
@@ -541,19 +615,105 @@ struct SuccessfulMentionDispatch {
     ignored_mention_ids: Vec<Uuid>,
 }
 
-fn enqueue_successful_mention_jobs(
+#[derive(Default)]
+struct CollaborationTargets {
+    keys: Vec<String>,
+    agent_ids: Vec<Uuid>,
+    consultation_agent_ids: HashSet<Uuid>,
+    agent_requests: Vec<ResolvedAgentRequest>,
+}
+
+fn select_collaboration_targets(
+    contract: &AgentRunResult,
+    agents: &[Agent],
+    source_agent_id: Uuid,
+) -> CollaborationTargets {
+    let agent_map = resolve_agent_keys(agents);
+    let mut targets = CollaborationTargets::default();
+    let mut selected_agent_ids = HashSet::new();
+
+    let mention_agents = match contract {
+        AgentRunResult::Done { mention_agents, .. }
+        | AgentRunResult::Blocked { mention_agents, .. } => mention_agents.as_slice(),
+        AgentRunResult::Continued { .. } => &[],
+    };
+
+    for key in mention_agents {
+        let _ = select_target(
+            key,
+            source_agent_id,
+            &agent_map,
+            &mut selected_agent_ids,
+            &mut targets,
+        );
+    }
+
+    if let AgentRunResult::Done { agent_requests, .. } = contract {
+        for request in normalized_agent_requests(agent_requests) {
+            let Some(target_id) = select_target(
+                &request.agent_key,
+                source_agent_id,
+                &agent_map,
+                &mut selected_agent_ids,
+                &mut targets,
+            ) else {
+                continue;
+            };
+            if targets.consultation_agent_ids.insert(target_id) {
+                targets.agent_requests.push(ResolvedAgentRequest {
+                    agent_id: target_id,
+                    request,
+                });
+            }
+        }
+    }
+
+    targets
+}
+
+fn select_target(
+    key: &str,
+    source_agent_id: Uuid,
+    agent_map: &HashMap<String, Uuid>,
+    selected_agent_ids: &mut HashSet<Uuid>,
+    targets: &mut CollaborationTargets,
+) -> Option<Uuid> {
+    let key = key.trim();
+    let &target_id = agent_map.get(key)?;
+    if target_id == source_agent_id {
+        return None;
+    }
+
+    if selected_agent_ids.contains(&target_id) {
+        return Some(target_id);
+    }
+    if selected_agent_ids.len() >= MAX_MENTIONS_PER_RUN as usize {
+        return None;
+    }
+
+    selected_agent_ids.insert(target_id);
+    targets.keys.push(key.to_string());
+    targets.agent_ids.push(target_id);
+    Some(target_id)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn enqueue_successful_consultation_jobs(
     action: &mut TransitionAction,
     run: &AgentRun,
     run_status: RunStatus,
     mentions: &[TicketMention],
+    consultation_agent_ids: &HashSet<Uuid>,
+    current_assignee_id: Option<Uuid>,
+    pending_recommendation: Option<&Value>,
+    project_agent_ids: &HashMap<String, Uuid>,
 ) -> SuccessfulMentionDispatch {
     let mut dispatch = SuccessfulMentionDispatch::default();
     if run_status != RunStatus::Succeeded {
         return dispatch;
     }
-    if run.context_profile != ContextProfile::Full
-        || (run.job_type != "work_on_ticket" && run.job_type != "respond_to_mention")
-    {
+
+    if run.context_profile != ContextProfile::Full {
         dispatch
             .ignored_mention_ids
             .extend(mentions.iter().map(|mention| mention.id));
@@ -562,24 +722,55 @@ fn enqueue_successful_mention_jobs(
 
     let mut scheduled_agent_ids: HashSet<Uuid> =
         action.enqueue_jobs.iter().map(|job| job.agent_id).collect();
+    if let Some(assignee_id) = current_assignee_id {
+        scheduled_agent_ids.insert(assignee_id);
+    }
     if let Some(Some(assignee_id)) = action.new_assignee_id {
         scheduled_agent_ids.insert(assignee_id);
     }
+    if let Some(pending_id) =
+        pending_recommendation_target(pending_recommendation, project_agent_ids)
+    {
+        scheduled_agent_ids.insert(pending_id);
+    }
 
-    let mut distinct_targets = HashSet::new();
-    let mut selected_targets = 0;
-    for mention in mentions {
+    // Attention does not create a response. When workflow already scheduled or
+    // assigned that target, consider the attention handled by the ownership path.
+    dispatch.handled_mention_ids.extend(
+        mentions
+            .iter()
+            .filter(|mention| {
+                !consultation_agent_ids.contains(&mention.mentioned_agent_id)
+                    && scheduled_agent_ids.contains(&mention.mentioned_agent_id)
+            })
+            .map(|mention| mention.id),
+    );
+
+    let request_mentions = mentions
+        .iter()
+        .filter(|mention| consultation_agent_ids.contains(&mention.mentioned_agent_id))
+        .collect::<Vec<_>>();
+    if request_mentions.is_empty() {
+        return dispatch;
+    }
+
+    // Automatic collaboration is one hop. A response may still persist new
+    // mentions and notifications, but its own structured requests are terminal.
+    if run.job_type == "respond_to_mention" {
+        dispatch
+            .handled_mention_ids
+            .extend(request_mentions.iter().map(|mention| mention.id));
+        return dispatch;
+    }
+    if run.job_type != "work_on_ticket" {
+        dispatch
+            .ignored_mention_ids
+            .extend(request_mentions.iter().map(|mention| mention.id));
+        return dispatch;
+    }
+
+    for mention in request_mentions {
         let target_id = mention.mentioned_agent_id;
-        if target_id == run.agent_id || !distinct_targets.insert(target_id) {
-            dispatch.ignored_mention_ids.push(mention.id);
-            continue;
-        }
-        if selected_targets >= MAX_MENTIONS_PER_RUN as usize {
-            dispatch.ignored_mention_ids.push(mention.id);
-            continue;
-        }
-        selected_targets += 1;
-
         if scheduled_agent_ids.insert(target_id) {
             action.enqueue_jobs.push(JobRequest {
                 job_type: "respond_to_mention".into(),
@@ -593,6 +784,27 @@ fn enqueue_successful_mention_jobs(
     }
 
     dispatch
+}
+
+fn target_has_ownership(
+    target_id: Uuid,
+    current_assignee_id: Option<Uuid>,
+    pending_recommendation: Option<&Value>,
+    project_agent_ids: &HashMap<String, Uuid>,
+) -> bool {
+    current_assignee_id == Some(target_id)
+        || pending_recommendation_target(pending_recommendation, project_agent_ids)
+            == Some(target_id)
+}
+
+fn pending_recommendation_target(
+    pending_recommendation: Option<&Value>,
+    project_agent_ids: &HashMap<String, Uuid>,
+) -> Option<Uuid> {
+    let pending_key = pending_recommendation?
+        .get("recommendedAgentKey")?
+        .as_str()?;
+    project_agent_ids.get(pending_key).copied()
 }
 
 fn build_project_agent_maps(agents: &[Agent]) -> (Vec<String>, HashMap<String, Uuid>) {
@@ -629,14 +841,6 @@ fn merge_substatus(
         None => apply.ticket.substatus_metadata.clone().map(Some),
     };
     (substatus, substatus_metadata)
-}
-
-fn mention_agents_from_contract(contract: &AgentRunResult) -> Vec<String> {
-    match contract {
-        AgentRunResult::Done { mention_agents, .. }
-        | AgentRunResult::Blocked { mention_agents, .. } => mention_agents.clone(),
-        AgentRunResult::Continued { .. } => vec![],
-    }
 }
 
 #[cfg(test)]
@@ -771,6 +975,7 @@ mod tests {
             updated_description: None,
             acceptance_criteria: None,
             mention_agents: vec![],
+            agent_requests: vec![],
             blockers: vec![],
             split_tickets: vec![],
         }
@@ -800,9 +1005,38 @@ mod tests {
             updated_description: None,
             acceptance_criteria: None,
             mention_agents: keys.iter().map(|key| (*key).into()).collect(),
+            agent_requests: vec![],
             blockers: vec![],
             split_tickets: vec![],
         }
+    }
+
+    fn done_with_requests(keys: &[&str]) -> AgentRunResult {
+        AgentRunResult::Done {
+            summary: "Requesting a focused consultation".into(),
+            changed_files: vec![],
+            tests_run: vec![],
+            next_status: None,
+            assign_to: None,
+            updated_description: None,
+            acceptance_criteria: None,
+            mention_agents: vec![],
+            agent_requests: keys
+                .iter()
+                .map(|key| crate::providers::AgentRequest {
+                    agent_key: (*key).into(),
+                    intent: "consult".into(),
+                    request: format!("Review the focused question for {key}."),
+                })
+                .collect(),
+            blockers: vec![],
+            split_tickets: vec![],
+        }
+    }
+
+    fn succeeded_request_apply(keys: &[&str]) -> ApplyResult {
+        crate::services::result_contract::apply_agent_result(&done_with_requests(keys))
+            .expect("apply consultation request fixture")
     }
 
     fn succeeded_apply(body: &str, mentions: &[&str]) -> ApplyResult {
@@ -854,54 +1088,146 @@ mod tests {
         }
     }
 
+    fn collaboration_agent(id: Uuid, name: &str, key: &str, enabled: bool) -> Agent {
+        Agent {
+            id,
+            name: name.into(),
+            role: "Reviewer".into(),
+            skills: vec![],
+            responsibilities: vec![],
+            system_prompt: "Review only".into(),
+            connector: "mock".into(),
+            model_provider: None,
+            model: None,
+            enabled,
+            preset_source: Some(key.into()),
+            created_at: time::OffsetDateTime::now_utc(),
+            updated_at: time::OffsetDateTime::now_utc(),
+        }
+    }
+
     #[test]
-    fn successful_work_run_enqueues_distinct_valid_mentions_up_to_limit() {
+    fn collaboration_targets_share_limit_and_ignore_invalid_duplicate_and_self_entries() {
         let source_id = Uuid::from_u128(1);
-        let first_target = Uuid::from_u128(2);
-        let second_target = Uuid::from_u128(3);
-        let over_limit_target = Uuid::from_u128(4);
-        let run = test_run(source_id, "work_on_ticket");
-        let mentions = vec![
-            pending_mention(source_id),
-            pending_mention(first_target),
-            pending_mention(first_target),
-            pending_mention(second_target),
-            pending_mention(over_limit_target),
+        let first_id = Uuid::from_u128(2);
+        let second_id = Uuid::from_u128(3);
+        let over_limit_id = Uuid::from_u128(4);
+        let disabled_id = Uuid::from_u128(5);
+        let agents = vec![
+            collaboration_agent(source_id, "Source Agent", "source", true),
+            collaboration_agent(first_id, "First Agent", "first", true),
+            collaboration_agent(second_id, "Second Agent", "second", true),
+            collaboration_agent(over_limit_id, "Third Agent", "third", true),
+            collaboration_agent(disabled_id, "Disabled Agent", "disabled", false),
         ];
+        let contract = AgentRunResult::Done {
+            summary: "Collaborate".into(),
+            changed_files: vec![],
+            tests_run: vec![],
+            next_status: None,
+            assign_to: None,
+            updated_description: None,
+            acceptance_criteria: None,
+            mention_agents: vec![
+                "unknown".into(),
+                "source".into(),
+                "first".into(),
+                "disabled".into(),
+            ],
+            agent_requests: vec![
+                crate::providers::AgentRequest {
+                    agent_key: "first-agent".into(),
+                    intent: "consult".into(),
+                    request: "Duplicate alias".into(),
+                },
+                crate::providers::AgentRequest {
+                    agent_key: "second".into(),
+                    intent: "consult".into(),
+                    request: "Second target".into(),
+                },
+                crate::providers::AgentRequest {
+                    agent_key: "third".into(),
+                    intent: "consult".into(),
+                    request: "Over the shared target limit".into(),
+                },
+            ],
+            blockers: vec![],
+            split_tickets: vec![],
+        };
+
+        let targets = select_collaboration_targets(&contract, &agents, source_id);
+        assert_eq!(targets.keys, vec!["first", "second"]);
+        assert_eq!(
+            targets.consultation_agent_ids,
+            HashSet::from([first_id, second_id])
+        );
+        assert_eq!(
+            targets
+                .agent_requests
+                .iter()
+                .map(|request| request.request.agent_key.as_str())
+                .collect::<Vec<_>>(),
+            vec!["first-agent", "second"]
+        );
+    }
+
+    fn dispatch_consultations(
+        action: &mut TransitionAction,
+        run: &AgentRun,
+        status: RunStatus,
+        mentions: &[TicketMention],
+        consultation_agent_ids: HashSet<Uuid>,
+    ) -> SuccessfulMentionDispatch {
+        enqueue_successful_consultation_jobs(
+            action,
+            run,
+            status,
+            mentions,
+            &consultation_agent_ids,
+            None,
+            None,
+            &HashMap::new(),
+        )
+    }
+
+    #[test]
+    fn successful_attention_mentions_do_not_enqueue_response_runs() {
+        let source_id = Uuid::from_u128(1);
+        let target_id = Uuid::from_u128(2);
+        let run = test_run(source_id, "work_on_ticket");
+        let mentions = vec![pending_mention(target_id)];
         let mut action = TransitionAction::default();
 
-        let dispatch =
-            enqueue_successful_mention_jobs(&mut action, &run, RunStatus::Succeeded, &mentions);
+        let dispatch = dispatch_consultations(
+            &mut action,
+            &run,
+            RunStatus::Succeeded,
+            &mentions,
+            HashSet::new(),
+        );
 
-        assert_eq!(action.enqueue_jobs.len(), 2);
-        assert_eq!(action.enqueue_jobs[0].agent_id, first_target);
-        assert_eq!(action.enqueue_jobs[1].agent_id, second_target);
-        assert!(action
-            .enqueue_jobs
-            .iter()
-            .all(|job| job.job_type == "respond_to_mention" && job.resume_agent_id.is_none()));
-        assert_eq!(dispatch.response_agent_ids.len(), 2);
-        assert_eq!(dispatch.ignored_mention_ids.len(), 3);
+        assert!(action.enqueue_jobs.is_empty());
+        assert!(dispatch.response_agent_ids.is_empty());
+        assert!(dispatch.ignored_mention_ids.is_empty());
         assert!(dispatch.handled_mention_ids.is_empty());
     }
 
     #[test]
-    fn successful_response_can_chain_without_workflow_state_changes() {
+    fn successful_work_request_enqueues_one_response() {
         let source_id = Uuid::from_u128(1);
         let target_id = Uuid::from_u128(2);
-        let run = test_run(source_id, "respond_to_mention");
+        let run = test_run(source_id, "work_on_ticket");
         let mut action = TransitionAction::default();
+        let mention = pending_mention(target_id);
 
-        let dispatch = enqueue_successful_mention_jobs(
+        let dispatch = dispatch_consultations(
             &mut action,
             &run,
             RunStatus::Succeeded,
-            &[pending_mention(target_id)],
+            &[mention],
+            HashSet::from([target_id]),
         );
 
-        assert!(action.new_status.is_none());
-        assert!(action.substatus.is_none());
-        assert!(action.new_assignee_id.is_none());
         assert_eq!(action.enqueue_jobs.len(), 1);
         assert_eq!(action.enqueue_jobs[0].agent_id, target_id);
         assert_eq!(action.enqueue_jobs[0].job_type, "respond_to_mention");
@@ -909,7 +1235,29 @@ mod tests {
     }
 
     #[test]
-    fn successful_mentions_do_not_duplicate_handoff_or_assignee_runs() {
+    fn successful_response_request_is_handled_without_chaining() {
+        let source_id = Uuid::from_u128(1);
+        let target_id = Uuid::from_u128(2);
+        let run = test_run(source_id, "respond_to_mention");
+        let mut action = TransitionAction::default();
+        let mention = pending_mention(target_id);
+        let mention_id = mention.id;
+
+        let dispatch = dispatch_consultations(
+            &mut action,
+            &run,
+            RunStatus::Succeeded,
+            &[mention],
+            HashSet::from([target_id]),
+        );
+
+        assert!(action.enqueue_jobs.is_empty());
+        assert!(dispatch.response_agent_ids.is_empty());
+        assert_eq!(dispatch.handled_mention_ids, vec![mention_id]);
+    }
+
+    #[test]
+    fn successful_requests_do_not_duplicate_handoff_or_assignee_runs() {
         let source_id = Uuid::from_u128(1);
         let handoff_target = Uuid::from_u128(2);
         let assignee_target = Uuid::from_u128(3);
@@ -924,7 +1272,7 @@ mod tests {
             ..TransitionAction::default()
         };
 
-        let dispatch = enqueue_successful_mention_jobs(
+        let dispatch = dispatch_consultations(
             &mut action,
             &run,
             RunStatus::Succeeded,
@@ -932,6 +1280,7 @@ mod tests {
                 pending_mention(handoff_target),
                 pending_mention(assignee_target),
             ],
+            HashSet::from([handoff_target, assignee_target]),
         );
 
         assert_eq!(action.enqueue_jobs.len(), 1);
@@ -940,6 +1289,32 @@ mod tests {
         assert!(dispatch.response_agent_ids.is_empty());
         assert_eq!(dispatch.handled_mention_ids.len(), 2);
         assert!(dispatch.ignored_mention_ids.is_empty());
+    }
+
+    #[test]
+    fn pending_assignment_recommendation_wins_over_consultation() {
+        let source_id = Uuid::from_u128(1);
+        let target_id = Uuid::from_u128(2);
+        let run = test_run(source_id, "work_on_ticket");
+        let mut action = TransitionAction::default();
+        let mention = pending_mention(target_id);
+        let mention_id = mention.id;
+        let pending = serde_json::json!({ "recommendedAgentKey": "tech_lead" });
+
+        let dispatch = enqueue_successful_consultation_jobs(
+            &mut action,
+            &run,
+            RunStatus::Succeeded,
+            &[mention],
+            &HashSet::from([target_id]),
+            None,
+            Some(&pending),
+            &HashMap::from([("tech_lead".into(), target_id)]),
+        );
+
+        assert!(action.enqueue_jobs.is_empty());
+        assert!(dispatch.response_agent_ids.is_empty());
+        assert_eq!(dispatch.handled_mention_ids, vec![mention_id]);
     }
 
     #[test]
@@ -964,7 +1339,13 @@ mod tests {
             let mut run = test_run(source_id, job_type);
             run.context_profile = profile;
             let mut action = TransitionAction::default();
-            enqueue_successful_mention_jobs(&mut action, &run, status, &mentions);
+            dispatch_consultations(
+                &mut action,
+                &run,
+                status,
+                &mentions,
+                HashSet::from([target_id]),
+            );
             assert!(action.enqueue_jobs.is_empty());
         }
     }
@@ -1168,6 +1549,7 @@ mod tests {
             updated_description: Some("Short epic summary for parent.".into()),
             acceptance_criteria: None,
             mention_agents: vec![],
+            agent_requests: vec![],
             blockers: vec![],
             split_tickets: vec![
                 crate::domain::workflow::SplitTicketSpec {
@@ -1296,7 +1678,64 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn successful_work_mention_persists_and_auto_starts_response() {
+    async fn successful_attention_mention_persists_without_response_run() {
+        let Some(pool) = test_pool().await else {
+            return;
+        };
+        let fx = insert_fixture(&pool).await;
+        let workflow = WorkflowConfig {
+            auto_start_runs: true,
+            ..WorkflowConfig::default()
+        };
+
+        RunOrchestrator::new(&pool, &workflow)
+            .finish_run(
+                &AgentRun {
+                    id: fx.run_id,
+                    ticket_id: fx.ticket_id,
+                    agent_id: fx.pm_agent_id,
+                    job_type: "work_on_ticket".into(),
+                    status: RunStatus::Running,
+                    sandbox_profile_id: PROFILE_ID.to_string(),
+                    worktree_path: None,
+                    branch_name: None,
+                    error_message: None,
+                    session_id: None,
+                    context_profile: ContextProfile::Full,
+                    trigger_comment_id: None,
+                    started_at: None,
+                    ended_at: None,
+                    created_at: time::OffsetDateTime::now_utc(),
+                },
+                &done_with_mentions(&["backend_engineer"]),
+                succeeded_apply("FYI @backend_engineer", &["backend_engineer"]),
+                None,
+                None,
+            )
+            .await
+            .expect("finish attention-only mention run");
+
+        let mention_count = sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM ticket_mentions WHERE ticket_id = $1",
+        )
+        .bind(fx.ticket_id)
+        .fetch_one(&pool)
+        .await
+        .expect("count attention mentions");
+        assert_eq!(mention_count, 1);
+
+        let response_count = sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM agent_runs WHERE ticket_id = $1 AND job_type = 'respond_to_mention'",
+        )
+        .bind(fx.ticket_id)
+        .fetch_one(&pool)
+        .await
+        .expect("count attention response runs");
+        assert_eq!(response_count, 0);
+    }
+
+    #[tokio::test]
+    async fn successful_work_request_persists_and_auto_starts_response() {
         let Some(pool) = test_pool().await else {
             return;
         };
@@ -1326,13 +1765,13 @@ mod tests {
                     ended_at: None,
                     created_at: time::OffsetDateTime::now_utc(),
                 },
-                &done_with_mentions(&["backend_engineer"]),
-                succeeded_apply("Please check this @backend_engineer", &["backend_engineer"]),
+                &done_with_requests(&["backend_engineer"]),
+                succeeded_request_apply(&["backend_engineer"]),
                 None,
                 None,
             )
             .await
-            .expect("finish successful mention run");
+            .expect("finish successful consultation run");
 
         let mention_rows = sqlx::query_as::<_, (Uuid, Uuid, Option<Uuid>)>(
             r#"
@@ -1368,7 +1807,140 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn successful_work_mention_persists_without_run_when_auto_start_is_disabled() {
+    async fn successful_work_request_keeps_resolved_target_when_key_is_reassigned() {
+        let Some(pool) = test_pool().await else {
+            return;
+        };
+        let fx = insert_fixture(&pool).await;
+        let _repo_dir = attach_ready_repo(&pool, fx.ticket_id).await;
+        let replacement_agent_id = Uuid::new_v4();
+        sqlx::query(
+            r#"
+            INSERT INTO agents (
+                id, name, role, skills, responsibilities, system_prompt, connector, preset_source
+            )
+            VALUES ($1, 'Replacement Engineer', 'Engineer', '{}', '{}', 'prompt', 'mock', 'research')
+            "#,
+        )
+        .bind(replacement_agent_id)
+        .execute(&pool)
+        .await
+        .expect("insert replacement agent");
+
+        sqlx::query(
+            "DROP TRIGGER IF EXISTS test_reassign_agent_key_after_comment ON ticket_comments",
+        )
+        .execute(&pool)
+        .await
+        .expect("drop stale key reassignment trigger");
+        sqlx::query("DROP FUNCTION IF EXISTS test_reassign_agent_key_after_comment()")
+            .execute(&pool)
+            .await
+            .expect("drop stale key reassignment function");
+        sqlx::query(&format!(
+            r#"
+            CREATE FUNCTION test_reassign_agent_key_after_comment()
+            RETURNS trigger
+            LANGUAGE plpgsql
+            AS $$
+            BEGIN
+                UPDATE agents SET preset_source = 'renamed_engineer'
+                WHERE id = '{original_target}'::uuid;
+                UPDATE agents SET preset_source = 'backend_engineer'
+                WHERE id = '{replacement_target}'::uuid;
+                RETURN NEW;
+            END;
+            $$
+            "#,
+            original_target = fx.engineer_agent_id,
+            replacement_target = replacement_agent_id,
+        ))
+        .execute(&pool)
+        .await
+        .expect("create key reassignment function");
+        sqlx::query(&format!(
+            r#"
+            CREATE TRIGGER test_reassign_agent_key_after_comment
+            AFTER INSERT ON ticket_comments
+            FOR EACH ROW
+            WHEN (
+                NEW.ticket_id = '{ticket_id}'::uuid
+                AND NEW.author_id = '{source_agent_id}'::uuid
+                AND NEW.author_type = 'agent'
+            )
+            EXECUTE FUNCTION test_reassign_agent_key_after_comment()
+            "#,
+            ticket_id = fx.ticket_id,
+            source_agent_id = fx.pm_agent_id,
+        ))
+        .execute(&pool)
+        .await
+        .expect("create key reassignment trigger");
+
+        let workflow = WorkflowConfig {
+            auto_start_runs: true,
+            ..WorkflowConfig::default()
+        };
+        RunOrchestrator::new(&pool, &workflow)
+            .finish_run(
+                &AgentRun {
+                    id: fx.run_id,
+                    ticket_id: fx.ticket_id,
+                    agent_id: fx.pm_agent_id,
+                    job_type: "work_on_ticket".into(),
+                    status: RunStatus::Running,
+                    sandbox_profile_id: PROFILE_ID.to_string(),
+                    worktree_path: None,
+                    branch_name: None,
+                    error_message: None,
+                    session_id: None,
+                    context_profile: ContextProfile::Full,
+                    trigger_comment_id: None,
+                    started_at: None,
+                    ended_at: None,
+                    created_at: time::OffsetDateTime::now_utc(),
+                },
+                &done_with_requests(&["backend_engineer"]),
+                succeeded_request_apply(&["backend_engineer"]),
+                None,
+                None,
+            )
+            .await
+            .expect("finish consultation while target key changes");
+
+        sqlx::query("DROP TRIGGER test_reassign_agent_key_after_comment ON ticket_comments")
+            .execute(&pool)
+            .await
+            .expect("drop key reassignment trigger");
+        sqlx::query("DROP FUNCTION test_reassign_agent_key_after_comment()")
+            .execute(&pool)
+            .await
+            .expect("drop key reassignment function");
+
+        let mentioned_agent_id = sqlx::query_scalar::<_, Uuid>(
+            "SELECT mentioned_agent_id FROM ticket_mentions WHERE ticket_id = $1",
+        )
+        .bind(fx.ticket_id)
+        .fetch_one(&pool)
+        .await
+        .expect("load consultation mention target");
+        assert_eq!(mentioned_agent_id, fx.engineer_agent_id);
+
+        let response_agent_id = sqlx::query_scalar::<_, Uuid>(
+            r#"
+            SELECT agent_id FROM agent_runs
+            WHERE ticket_id = $1 AND job_type = 'respond_to_mention'
+            "#,
+        )
+        .bind(fx.ticket_id)
+        .fetch_one(&pool)
+        .await
+        .expect("load consultation response target");
+        assert_eq!(response_agent_id, fx.engineer_agent_id);
+    }
+
+    #[tokio::test]
+    async fn successful_work_request_persists_without_run_when_auto_start_is_disabled() {
         let Some(pool) = test_pool().await else {
             return;
         };
@@ -1397,13 +1969,13 @@ mod tests {
                     ended_at: None,
                     created_at: time::OffsetDateTime::now_utc(),
                 },
-                &done_with_mentions(&["backend_engineer"]),
-                succeeded_apply("Please check this @backend_engineer", &["backend_engineer"]),
+                &done_with_requests(&["backend_engineer"]),
+                succeeded_request_apply(&["backend_engineer"]),
                 None,
                 None,
             )
             .await
-            .expect("finish successful mention run");
+            .expect("finish successful consultation run");
 
         let mention_count = sqlx::query_scalar::<_, i64>(
             "SELECT COUNT(*) FROM ticket_mentions WHERE ticket_id = $1",
@@ -1429,7 +2001,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn successful_mention_waits_for_active_target_then_starts_response() {
+    async fn successful_request_waits_for_active_target_then_starts_response() {
         let Some(pool) = test_pool().await else {
             return;
         };
@@ -1475,8 +2047,8 @@ mod tests {
                     ended_at: None,
                     created_at: time::OffsetDateTime::now_utc(),
                 },
-                &done_with_mentions(&["backend_engineer"]),
-                succeeded_apply("Please check this @backend_engineer", &["backend_engineer"]),
+                &done_with_requests(&["backend_engineer"]),
+                succeeded_request_apply(&["backend_engineer"]),
                 None,
                 None,
             )
@@ -1559,7 +2131,110 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn successful_mention_start_error_leaves_pending_without_failing_source() {
+    async fn deferred_request_is_suppressed_when_target_becomes_pending_owner() {
+        let Some(pool) = test_pool().await else {
+            return;
+        };
+        let fx = insert_fixture(&pool).await;
+        let _repo_dir = attach_ready_repo(&pool, fx.ticket_id).await;
+        let active_target_run_id = Uuid::new_v4();
+        sqlx::query(
+            r#"
+            INSERT INTO agent_runs (
+                id, ticket_id, agent_id, job_type, status, sandbox_profile_id
+            )
+            VALUES ($1, $2, $3, 'work_on_ticket', 'queued', $4)
+            "#,
+        )
+        .bind(active_target_run_id)
+        .bind(fx.ticket_id)
+        .bind(fx.engineer_agent_id)
+        .bind(PROFILE_ID)
+        .execute(&pool)
+        .await
+        .expect("insert active consultation target");
+
+        let workflow = WorkflowConfig {
+            auto_start_runs: true,
+            ..WorkflowConfig::default()
+        };
+        RunOrchestrator::new(&pool, &workflow)
+            .finish_run(
+                &AgentRun {
+                    id: fx.run_id,
+                    ticket_id: fx.ticket_id,
+                    agent_id: fx.pm_agent_id,
+                    job_type: "work_on_ticket".into(),
+                    status: RunStatus::Running,
+                    sandbox_profile_id: PROFILE_ID.to_string(),
+                    worktree_path: None,
+                    branch_name: None,
+                    error_message: None,
+                    session_id: None,
+                    context_profile: ContextProfile::Full,
+                    trigger_comment_id: None,
+                    started_at: None,
+                    ended_at: None,
+                    created_at: time::OffsetDateTime::now_utc(),
+                },
+                &done_with_requests(&["backend_engineer"]),
+                succeeded_request_apply(&["backend_engineer"]),
+                None,
+                None,
+            )
+            .await
+            .expect("defer request while target is active");
+
+        let pending = serde_json::json!({
+            "recommendedAgentKey": "backend_engineer",
+            "recommendedByAgentId": fx.pm_agent_id,
+            "recommendedAt": "2026-08-03T00:00:00Z",
+            "summary": "Ownership now wins"
+        });
+        sqlx::query("UPDATE tickets SET pending_assign_recommendation = $2 WHERE id = $1")
+            .bind(fx.ticket_id)
+            .bind(&pending)
+            .execute(&pool)
+            .await
+            .expect("set pending ownership recommendation");
+        sqlx::query("UPDATE agent_runs SET status = 'cancelled', ended_at = now() WHERE id = $1")
+            .bind(active_target_run_id)
+            .execute(&pool)
+            .await
+            .expect("terminalize active target");
+        let terminal_run = RunService::new(&pool)
+            .get(active_target_run_id)
+            .await
+            .expect("load terminal target run");
+
+        RunOrchestrator::new(&pool, &workflow)
+            .handle_terminal_run(&terminal_run)
+            .await;
+
+        let mention_status = sqlx::query_scalar::<_, String>(
+            "SELECT status FROM ticket_mentions WHERE ticket_id = $1",
+        )
+        .bind(fx.ticket_id)
+        .fetch_one(&pool)
+        .await
+        .expect("load ownership-superseded request");
+        assert_eq!(mention_status, "handled");
+        let response_count = sqlx::query_scalar::<_, i64>(
+            r#"
+            SELECT COUNT(*) FROM agent_runs
+            WHERE ticket_id = $1 AND agent_id = $2 AND job_type = 'respond_to_mention'
+            "#,
+        )
+        .bind(fx.ticket_id)
+        .bind(fx.engineer_agent_id)
+        .fetch_one(&pool)
+        .await
+        .expect("count deferred responses");
+        assert_eq!(response_count, 0);
+    }
+
+    #[tokio::test]
+    async fn successful_request_start_error_leaves_pending_without_failing_source() {
         let Some(pool) = test_pool().await else {
             return;
         };
@@ -1588,8 +2263,8 @@ mod tests {
                     ended_at: None,
                     created_at: time::OffsetDateTime::now_utc(),
                 },
-                &done_with_mentions(&["backend_engineer"]),
-                succeeded_apply("Please check this", &["backend_engineer"]),
+                &done_with_requests(&["backend_engineer"]),
+                succeeded_request_apply(&["backend_engineer"]),
                 None,
                 None,
             )
@@ -1722,8 +2397,8 @@ mod tests {
                     ended_at: None,
                     created_at: time::OffsetDateTime::now_utc(),
                 },
-                &done_with_mentions(&["backend_engineer"]),
-                succeeded_apply("Please check this", &["backend_engineer"]),
+                &done_with_requests(&["backend_engineer"]),
+                succeeded_request_apply(&["backend_engineer"]),
                 None,
                 None,
             )
@@ -1912,7 +2587,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn successful_mentions_ignore_unknown_disabled_duplicate_and_self_targets() {
+    async fn successful_requests_ignore_unknown_disabled_duplicate_and_self_targets() {
         let Some(pool) = test_pool().await else {
             return;
         };
@@ -1937,7 +2612,7 @@ mod tests {
             auto_start_runs: true,
             ..WorkflowConfig::default()
         };
-        let mention_keys = [
+        let request_keys = [
             "unknown_agent",
             "pm",
             "backend_engineer",
@@ -1964,13 +2639,13 @@ mod tests {
                     ended_at: None,
                     created_at: time::OffsetDateTime::now_utc(),
                 },
-                &done_with_mentions(&mention_keys),
-                succeeded_apply("Structured mentions", &mention_keys),
+                &done_with_requests(&request_keys),
+                succeeded_request_apply(&request_keys),
                 None,
                 None,
             )
             .await
-            .expect("finish run despite invalid mention targets");
+            .expect("finish run despite invalid request targets");
         assert_eq!(finished.status, RunStatus::Succeeded);
 
         let engineer_mention_count = sqlx::query_scalar::<_, i64>(
@@ -1985,6 +2660,24 @@ mod tests {
         .await
         .expect("count deduplicated engineer mentions");
         assert_eq!(engineer_mention_count, 1);
+
+        let source_comment_body = sqlx::query_scalar::<_, String>(
+            r#"
+            SELECT body FROM ticket_comments
+            WHERE ticket_id = $1 AND author_id = $2
+            ORDER BY created_at DESC
+            LIMIT 1
+            "#,
+        )
+        .bind(fx.ticket_id)
+        .bind(fx.pm_agent_id)
+        .fetch_one(&pool)
+        .await
+        .expect("load filtered request comment");
+        let persisted_requests =
+            crate::services::agent_request::agent_requests_from_comment(&source_comment_body);
+        assert_eq!(persisted_requests.len(), 1);
+        assert_eq!(persisted_requests[0].agent_key, "backend_engineer");
 
         let target_runs = sqlx::query_as::<_, (Uuid, String)>(
             r#"
@@ -2135,6 +2828,7 @@ mod tests {
             updated_description: None,
             acceptance_criteria: None,
             mention_agents: vec!["backend_engineer".into()],
+            agent_requests: vec![],
             blockers: vec!["Regression remains".into()],
             split_tickets: vec![],
         };
@@ -2251,7 +2945,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn successful_response_mention_chains_without_changing_ticket_state() {
+    async fn successful_response_request_does_not_chain_or_change_ticket_state() {
         let Some(pool) = test_pool().await else {
             return;
         };
@@ -2300,13 +2994,13 @@ mod tests {
                     ended_at: None,
                     created_at: time::OffsetDateTime::now_utc(),
                 },
-                &done_with_mentions(&["pm"]),
-                succeeded_apply("Question for @pm", &["pm"]),
+                &done_with_requests(&["pm"]),
+                succeeded_request_apply(&["pm"]),
                 None,
                 None,
             )
             .await
-            .expect("finish engineer mention run");
+            .expect("finish engineer consultation request run");
 
         let (pm_run_id, trigger_comment_id) = sqlx::query_as::<_, (Uuid, Option<Uuid>)>(
             r#"
@@ -2346,6 +3040,35 @@ mod tests {
         assert_eq!(pending_pm_mentions.len(), 1);
         assert_eq!(pending_pm_mentions[0].1, None);
 
+        let response_contract = AgentRunResult::Done {
+            summary: "Consultation answered".into(),
+            changed_files: vec!["must-not-apply.rs".into()],
+            tests_run: vec!["must-not-run".into()],
+            next_status: Some("Done".into()),
+            assign_to: Some("backend_engineer".into()),
+            updated_description: Some("Must not replace the description".into()),
+            acceptance_criteria: Some("- Must not replace criteria".into()),
+            mention_agents: vec![],
+            agent_requests: vec![crate::providers::AgentRequest {
+                agent_key: "backend_engineer".into(),
+                intent: "consult".into(),
+                request: "This follow-up must remain notification-only.".into(),
+            }],
+            blockers: vec![],
+            split_tickets: vec![crate::domain::workflow::SplitTicketSpec {
+                title: "Must not split".into(),
+                description: "Ignored response output".into(),
+                acceptance_criteria: None,
+                assign_to: None,
+            }],
+        };
+        let mut malicious_apply =
+            crate::services::result_contract::apply_agent_result(&response_contract)
+                .expect("apply provider response");
+        malicious_apply.ticket.substatus = Some(Substatus::BlockedByError);
+        malicious_apply.ticket.substatus_metadata =
+            Some(serde_json::json!({ "reason": "must not apply" }));
+
         orchestrator
             .finish_run(
                 &AgentRun {
@@ -2365,13 +3088,13 @@ mod tests {
                     ended_at: None,
                     created_at: time::OffsetDateTime::now_utc(),
                 },
-                &done_with_mentions(&["backend_engineer"]),
-                succeeded_apply("Passing this to @backend_engineer", &["backend_engineer"]),
+                &response_contract,
+                malicious_apply,
                 None,
                 None,
             )
             .await
-            .expect("finish chained response");
+            .expect("finish one-hop response");
 
         let after = TicketService::new(&pool)
             .get(fx.ticket_id)
@@ -2383,6 +3106,23 @@ mod tests {
             after.ticket.assignee_agent_id,
             before.ticket.assignee_agent_id
         );
+        assert_eq!(after.ticket.description, before.ticket.description);
+        assert_eq!(
+            after.ticket.pending_assign_recommendation,
+            before.ticket.pending_assign_recommendation
+        );
+        assert_eq!(
+            after.ticket.pending_split_recommendation,
+            before.ticket.pending_split_recommendation
+        );
+        let child_count = sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM tickets WHERE parent_ticket_id = $1",
+        )
+        .bind(fx.ticket_id)
+        .fetch_one(&pool)
+        .await
+        .expect("count response-created children");
+        assert_eq!(child_count, 0);
         let handled_pm_mentions = sqlx::query_scalar::<_, i64>(
             r#"
             SELECT COUNT(*) FROM ticket_mentions
@@ -2408,7 +3148,180 @@ mod tests {
         .fetch_one(&pool)
         .await
         .expect("count chained response runs");
-        assert_eq!(chained_run_count, 1);
+        assert_eq!(chained_run_count, 0);
+    }
+
+    #[tokio::test]
+    async fn blocked_consultation_keeps_ticket_lifecycle_and_assignment_unchanged() {
+        let Some(pool) = test_pool().await else {
+            return;
+        };
+        let fx = insert_fixture(&pool).await;
+        let _repo_dir = attach_ready_repo(&pool, fx.ticket_id).await;
+        sqlx::query("UPDATE agent_runs SET job_type = 'respond_to_mention' WHERE id = $1")
+            .bind(fx.run_id)
+            .execute(&pool)
+            .await
+            .expect("persist consultation source job type");
+        let pending = serde_json::json!({
+            "recommendedAgentKey": "backend_engineer",
+            "recommendedByAgentId": fx.pm_agent_id,
+            "recommendedAt": "2026-08-03T00:00:00Z",
+            "summary": "Pending ownership"
+        });
+        sqlx::query(
+            r#"
+            UPDATE tickets
+            SET status = 'in_progress', substatus = 'waiting_for_human',
+                assignee_agent_id = $2, description = 'Original description',
+                pending_assign_recommendation = $3
+            WHERE id = $1
+            "#,
+        )
+        .bind(fx.ticket_id)
+        .bind(fx.engineer_agent_id)
+        .bind(&pending)
+        .execute(&pool)
+        .await
+        .expect("prepare blocked consultation ticket");
+
+        let contract = AgentRunResult::Blocked {
+            blocker_type: "permission".into(),
+            summary: concat!(
+                "Cannot inspect the protected dependency.\n\n",
+                "<!-- coppice-agent-requests: ",
+                r#"[{"agentKey":"backend_engineer","intent":"consult","request":"Run me"}]"#,
+                " -->"
+            )
+            .into(),
+            next_status: Some("Blocked".into()),
+            assign_to: Some("pm".into()),
+            updated_description: Some("Must not replace description".into()),
+            acceptance_criteria: Some("- Must not replace criteria".into()),
+            mention_agents: vec!["backend_engineer".into()],
+            required_capabilities: vec![],
+            required_secrets: vec![],
+        };
+        let apply = crate::services::result_contract::apply_consultation_result(&contract)
+            .expect("apply blocked consultation result");
+
+        let workflow = WorkflowConfig {
+            auto_start_runs: true,
+            ..WorkflowConfig::default()
+        };
+        let orchestrator = RunOrchestrator::new(&pool, &workflow);
+        orchestrator
+            .finish_run(
+                &AgentRun {
+                    id: fx.run_id,
+                    ticket_id: fx.ticket_id,
+                    agent_id: fx.pm_agent_id,
+                    job_type: "respond_to_mention".into(),
+                    status: RunStatus::Running,
+                    sandbox_profile_id: PROFILE_ID.to_string(),
+                    worktree_path: None,
+                    branch_name: None,
+                    error_message: None,
+                    session_id: None,
+                    context_profile: ContextProfile::Full,
+                    trigger_comment_id: None,
+                    started_at: None,
+                    ended_at: None,
+                    created_at: time::OffsetDateTime::now_utc(),
+                },
+                &contract,
+                apply,
+                None,
+                None,
+            )
+            .await
+            .expect("finish blocked consultation");
+
+        let ticket = TicketService::new(&pool)
+            .get(fx.ticket_id)
+            .await
+            .expect("load ticket after blocked consultation");
+        assert_eq!(ticket.ticket.status, TicketStatus::InProgress);
+        assert_eq!(ticket.ticket.substatus, Some(Substatus::WaitingForHuman));
+        assert_eq!(ticket.ticket.assignee_agent_id, Some(fx.engineer_agent_id));
+        assert_eq!(ticket.ticket.description, "Original description");
+        assert_eq!(ticket.ticket.pending_assign_recommendation, Some(pending));
+
+        let mentions = MentionService::new(&pool)
+            .list_pending_for_ticket(fx.ticket_id)
+            .await
+            .expect("load blocked consultation mention");
+        assert_eq!(mentions.len(), 1);
+        assert_eq!(mentions[0].mentioned_agent_id, fx.engineer_agent_id);
+        assert_eq!(mentions[0].resume_agent_id, None);
+
+        let response_run_count = sqlx::query_scalar::<_, i64>(
+            r#"
+            SELECT COUNT(*) FROM agent_runs
+            WHERE ticket_id = $1 AND agent_id = $2 AND job_type = 'respond_to_mention'
+            "#,
+        )
+        .bind(fx.ticket_id)
+        .bind(fx.engineer_agent_id)
+        .fetch_one(&pool)
+        .await
+        .expect("count blocked consultation response runs");
+        assert_eq!(response_run_count, 0);
+
+        // Remove ownership precedence only to exercise deferred request
+        // scheduling after the invariance assertions above.
+        sqlx::query(
+            r#"
+            UPDATE tickets
+            SET assignee_agent_id = $2, pending_assign_recommendation = NULL
+            WHERE id = $1
+            "#,
+        )
+        .bind(fx.ticket_id)
+        .bind(fx.pm_agent_id)
+        .execute(&pool)
+        .await
+        .expect("remove engineer ownership suppression");
+
+        let terminal_engineer_run_id = Uuid::new_v4();
+        sqlx::query(
+            r#"
+            INSERT INTO agent_runs (
+                id, ticket_id, agent_id, job_type, status, sandbox_profile_id,
+                error_message, ended_at
+            )
+            VALUES ($1, $2, $3, 'work_on_ticket', 'failed', $4, $5, now())
+            "#,
+        )
+        .bind(terminal_engineer_run_id)
+        .bind(fx.ticket_id)
+        .bind(fx.engineer_agent_id)
+        .bind(PROFILE_ID)
+        .bind("provider failed")
+        .execute(&pool)
+        .await
+        .expect("insert terminal engineer run");
+        let terminal_engineer_run = RunService::new(&pool)
+            .get(terminal_engineer_run_id)
+            .await
+            .expect("load terminal engineer run");
+
+        orchestrator
+            .handle_terminal_run(&terminal_engineer_run)
+            .await;
+
+        let deferred_response_run_count = sqlx::query_scalar::<_, i64>(
+            r#"
+            SELECT COUNT(*) FROM agent_runs
+            WHERE ticket_id = $1 AND agent_id = $2 AND job_type = 'respond_to_mention'
+            "#,
+        )
+        .bind(fx.ticket_id)
+        .bind(fx.engineer_agent_id)
+        .fetch_one(&pool)
+        .await
+        .expect("count deferred blocked consultation response runs");
+        assert_eq!(deferred_response_run_count, 0);
     }
 
     #[tokio::test]
@@ -2765,6 +3678,7 @@ mod tests {
                     updated_description: None,
                     acceptance_criteria: None,
                     mention_agents: vec!["backend_engineer".into()],
+                    agent_requests: vec![],
                     blockers: vec![],
                     split_tickets: vec![],
                 },
@@ -3030,6 +3944,7 @@ mod tests {
             ticket_id: None,
             assignee_agent_key: None,
             thread_excerpt: None,
+            consultation_request: None,
         };
         write_context_file(worktree.path(), &context_input).expect("write context");
         let md = std::fs::read_to_string(worktree.path().join(".agent/context.md"))

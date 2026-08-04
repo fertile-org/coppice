@@ -26,6 +26,17 @@ use tokio::sync::watch;
 use crate::domain::workflow::SplitTicketSpec;
 use crate::sessions::run_registry::RunStreamHandle;
 
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentRequest {
+    #[serde(default)]
+    pub agent_key: String,
+    #[serde(default)]
+    pub intent: String,
+    #[serde(default)]
+    pub request: String,
+}
+
 #[derive(Clone)]
 pub struct AgentRunInput {
     pub agent_id: String,
@@ -63,6 +74,8 @@ pub enum AgentRunResult {
         acceptance_criteria: Option<String>,
         #[serde(default, rename = "mentionAgents")]
         mention_agents: Vec<String>,
+        #[serde(default, rename = "agentRequests")]
+        agent_requests: Vec<AgentRequest>,
         #[serde(default)]
         blockers: Vec<String>,
         #[serde(default, rename = "splitTickets")]
@@ -137,6 +150,35 @@ mod tests {
         match result {
             AgentRunResult::Done { summary, .. } => {
                 assert_eq!(summary, "Mock implementation complete.");
+            }
+            _ => panic!("expected done variant"),
+        }
+    }
+
+    #[test]
+    fn agent_run_result_deserializes_structured_consultation_requests() {
+        let raw = r#"{
+            "status": "done",
+            "summary": "Need a focused review.",
+            "agentRequests": [
+                {
+                    "agentKey": "tech_lead",
+                    "intent": "consult",
+                    "request": "Check whether this transaction boundary is safe."
+                }
+            ]
+        }"#;
+
+        let result: AgentRunResult = serde_json::from_str(raw).expect("deserialize requests");
+        match result {
+            AgentRunResult::Done { agent_requests, .. } => {
+                assert_eq!(agent_requests.len(), 1);
+                assert_eq!(agent_requests[0].agent_key, "tech_lead");
+                assert_eq!(agent_requests[0].intent, "consult");
+                assert_eq!(
+                    agent_requests[0].request,
+                    "Check whether this transaction boundary is safe."
+                );
             }
             _ => panic!("expected done variant"),
         }
