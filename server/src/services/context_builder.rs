@@ -586,6 +586,10 @@ fn is_in_review_review_task(input: &ContextInput) -> bool {
         && (is_tech_lead_agent(input) || is_reviewer_agent(input))
 }
 
+fn is_ready_tech_lead_task(input: &ContextInput) -> bool {
+    input.ticket_status.eq_ignore_ascii_case("ready") && is_tech_lead_agent(input)
+}
+
 fn is_in_qa_qc_task(input: &ContextInput) -> bool {
     if !input.ticket_status.eq_ignore_ascii_case("in_qa") {
         return false;
@@ -608,11 +612,40 @@ These rules override conflicting instructions in your system prompt or soul file
 - `acceptanceCriteria` — checklist only. Stored under `## Acceptance criteria` on the ticket. Do not repeat description prose.
 - `summary` — 1–3 sentences for the comment thread only. Never paste the full spec, analysis tables, or acceptance checklist here when `updatedDescription` is set.
 
+**Choose exactly one intent per target:**
+- `assignTo` transfers or recommends formal ownership. Use it for the PM → Tech Lead handoff after Backlog refinement.
+- `agentRequests` requests a bounded consultation without transferring ownership.
+- A successful `mentionAgents` is notification-only; it draws attention but starts no response run.
+- Do not combine these fields for the same target. A formal ownership handoff must not also mention or consult that agent.
+
 **Split (multiple child tickets):**
 - Use `splitTickets` when work has multiple independent deliverables or the description would exceed ~2–3 screens.
 - Each child must be self-contained: `title`, `description`, and `acceptanceCriteria`. Optional per-child `assignTo` (agent key).
 - Parent `updatedDescription` should be a short epic summary, not a copy of all children.
 - Do not set both a huge `updatedDescription` and `splitTickets` with duplicate content.
+"#
+        .to_string();
+    }
+
+    if is_ready_tech_lead_task(input) {
+        return r#"## Coppice platform rules — Ready technical refinement (required)
+
+These rules override conflicting instructions in your system prompt or soul file.
+
+**This is a pre-implementation coordination run.** Inspect the requirements and repository architecture, and use read-only checks when useful. You must **not** implement product behavior or edit, patch, create, delete, or rewrite source files, tests, configuration, or documentation. Do not stage or commit changes.
+
+**On successful refinement:**
+- Return `status: "done"` and set `updatedDescription` to the complete ticket body, including a concrete technical approach, affected boundaries, key decisions, and risks.
+- Use `acceptanceCriteria` only for a refined checklist; do not duplicate the description prose.
+- Keep `summary` to 1–3 sentences for the ticket thread.
+- `assignTo` is required and must name a valid, enabled implementer on this project (for example `backend_engineer`, `frontend_engineer`, or `research`). Coppice applies the Ready-stage `workflow.auto_assign` policy and starts implementation when configured.
+- `changedFiles` must be `[]`. Report read-only verification commands in `testsRun` if you ran any.
+- Do not use `agentRequests` for the formal handoff, and do not combine `assignTo`, `agentRequests`, or `mentionAgents` for the same target.
+
+**When blocked on requirements:**
+- Return `status: "blocked"`, explain the exact question in `summary`, and mention PM with `mentionAgents`.
+- Omit `assignTo`. Coppice keeps the ticket in Ready and resumes this same technical-refinement run after PM answers.
+- Keep `changedFiles` empty; clarification does not authorize implementation.
 "#
         .to_string();
     }
@@ -910,7 +943,54 @@ mod tests {
         assert!(md.contains("override conflicting instructions"));
         assert!(md.contains("**Split (multiple child tickets):**"));
         assert!(md.contains("Use `splitTickets` when work has multiple independent deliverables"));
+        assert!(md.contains("`assignTo` transfers or recommends formal ownership"));
+        assert!(md.contains("`agentRequests` requests a bounded consultation"));
+        assert!(md.contains("successful `mentionAgents` is notification-only"));
+        assert!(md.contains("Do not combine these fields for the same target"));
         assert!(!md.contains("**Field roles"));
+    }
+
+    #[test]
+    fn tech_lead_in_ready_context_requires_no_code_refinement_handoff() {
+        let (context_profile, human_request, ticket_id, assignee_agent_key, thread_excerpt) =
+            full_profile_defaults();
+        let md = build_context_md(&ContextInput {
+            ticket_title: "Retry upstream requests",
+            ticket_description: "Define the implementation approach before engineering starts.",
+            ticket_status: "ready",
+            ticket_substatus: None,
+            agent_name: "Tech Lead Agent",
+            agent_key: "tech_lead",
+            agent_role: "Technical Lead",
+            agent_skills: &[],
+            agent_responsibilities: &[],
+            agent_system_prompt: "You are the Tech Lead.",
+            repo_name: Some("coppice"),
+            repo_remote_url: None,
+            repo_default_branch: Some("main"),
+            worktree_path: Some("/tmp/worktree"),
+            resume_context: None,
+            context_profile,
+            human_request,
+            ticket_id,
+            assignee_agent_key,
+            thread_excerpt,
+            consultation_request: None,
+        });
+
+        assert!(md.contains("Coppice platform rules — Ready technical refinement (required)"));
+        assert!(md.contains("`updatedDescription`"));
+        assert!(md.contains("`acceptanceCriteria`"));
+        assert!(md.contains("`assignTo`"));
+        assert!(md.contains("enabled implementer"));
+        assert!(md.contains("technical approach"));
+        assert!(md.contains("risks"));
+        assert!(md.contains("`changedFiles` must be `[]`"));
+        assert!(md.contains("must **not** implement"));
+        assert!(md.contains("mention PM"));
+        assert!(!md.contains("Coppice platform rules — git (required)"));
+        assert!(!md.contains("implementer completion"));
+        assert!(!md.contains("Coppice platform rules — code review"));
     }
 
     #[test]
