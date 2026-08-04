@@ -22,7 +22,10 @@ impl MockProvider {
     }
 
     fn fixture_path(&self, input: &AgentRunInput) -> PathBuf {
-        if let Ok(override_name) = std::env::var("MOCK_AGENT_RESPONSE") {
+        if let Some(override_name) = std::env::var("MOCK_AGENT_RESPONSE")
+            .ok()
+            .filter(|name| !name.is_empty())
+        {
             return self.fixtures_dir.join(format!("{override_name}.json"));
         }
         let resume = self.fixtures_dir.join(&input.agent_key).join("resume.json");
@@ -379,6 +382,30 @@ mod tests {
                 assert!(summary.contains("## Verdict"));
             }
             _ => panic!("expected regular work fixture for Human Agent mode"),
+        }
+    }
+
+    #[tokio::test]
+    async fn empty_env_override_uses_agent_fixture() {
+        let _lock = env_lock();
+        let _response_guard = EnvGuard::set("MOCK_AGENT_RESPONSE", "");
+        let provider = MockProvider::new(fixtures_root());
+
+        let result = provider
+            .run(base_input("pm", "work_on_ticket"))
+            .await
+            .expect("empty override falls back to agent fixture");
+        match result {
+            AgentRunResult::Done {
+                assign_to, summary, ..
+            } => {
+                assert_eq!(assign_to.as_deref(), Some("tech_lead"));
+                assert_eq!(
+                    summary,
+                    "Refined ticket scope and prepared it for Tech Lead technical refinement."
+                );
+            }
+            _ => panic!("expected done variant"),
         }
     }
 
