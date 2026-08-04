@@ -1,25 +1,43 @@
 use crate::providers::AgentRequest;
+use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 pub const MAX_AGENT_REQUEST_CHARS: usize = 2_000;
 
 const METADATA_PREFIX: &str = "<!-- coppice-agent-requests: ";
 const METADATA_SUFFIX: &str = " -->";
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResolvedAgentRequest {
+    pub agent_id: Uuid,
+    pub request: AgentRequest,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct StoredAgentRequest {
+    agent_key: String,
+    intent: String,
+    request: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    agent_id: Option<Uuid>,
+}
+
 pub fn normalized_agent_requests(requests: &[AgentRequest]) -> Vec<AgentRequest> {
     requests.iter().filter_map(normalize_request).collect()
 }
 
 pub fn append_agent_requests_to_comment(body: &mut String, requests: &[AgentRequest]) {
-    body.push_str(&format_agent_requests(requests));
+    body.push_str(&format_agent_requests(requests, &[]));
 }
 
 pub fn replace_agent_requests_in_comment(
     body: &mut String,
     original_requests: &[AgentRequest],
-    accepted_requests: &[AgentRequest],
+    accepted_requests: &[ResolvedAgentRequest],
 ) {
-    let original = format_agent_requests(original_requests);
-    let accepted = format_agent_requests(accepted_requests);
+    let original = format_agent_requests(original_requests, &[]);
+    let accepted = format_agent_requests(&[], accepted_requests);
 
     if let Some(start) = body.rfind(&original) {
         body.replace_range(start..start + original.len(), &accepted);
@@ -28,8 +46,20 @@ pub fn replace_agent_requests_in_comment(
     }
 }
 
-fn format_agent_requests(requests: &[AgentRequest]) -> String {
-    let requests = normalized_agent_requests(requests);
+fn format_agent_requests(
+    unresolved_requests: &[AgentRequest],
+    resolved_requests: &[ResolvedAgentRequest],
+) -> String {
+    let mut requests = unresolved_requests
+        .iter()
+        .filter_map(|request| stored_request(request, None))
+        .collect::<Vec<_>>();
+    requests.extend(
+        resolved_requests
+            .iter()
+            .filter_map(|resolved| stored_request(&resolved.request, Some(resolved.agent_id))),
+    );
+
     let mut formatted = String::new();
     if !requests.is_empty() {
         formatted.push_str("\n\n**Consultation requests:**");
@@ -54,6 +84,31 @@ fn format_agent_requests(requests: &[AgentRequest]) -> String {
 }
 
 pub fn agent_requests_from_comment(body: &str) -> Vec<AgentRequest> {
+    stored_agent_requests_from_comment(body)
+        .into_iter()
+        .map(|request| AgentRequest {
+            agent_key: request.agent_key,
+            intent: request.intent,
+            request: request.request,
+        })
+        .collect()
+}
+
+pub fn agent_request_for_target_from_comment(
+    body: &str,
+    target_agent_id: Uuid,
+) -> Option<AgentRequest> {
+    stored_agent_requests_from_comment(body)
+        .into_iter()
+        .find(|request| request.agent_id == Some(target_agent_id))
+        .map(|request| AgentRequest {
+            agent_key: request.agent_key,
+            intent: request.intent,
+            request: request.request,
+        })
+}
+
+fn stored_agent_requests_from_comment(body: &str) -> Vec<StoredAgentRequest> {
     body.lines()
         .rev()
         .find(|line| line.trim().starts_with(METADATA_PREFIX))
@@ -62,10 +117,35 @@ pub fn agent_requests_from_comment(body: &str) -> Vec<AgentRequest> {
                 .trim()
                 .strip_prefix(METADATA_PREFIX)?
                 .strip_suffix(METADATA_SUFFIX)?;
-            serde_json::from_str::<Vec<AgentRequest>>(metadata).ok()
+            serde_json::from_str::<Vec<StoredAgentRequest>>(metadata).ok()
         })
-        .map(|requests| normalized_agent_requests(&requests))
+        .map(|requests| {
+            requests
+                .iter()
+                .filter_map(normalize_stored_request)
+                .collect()
+        })
         .unwrap_or_default()
+}
+
+fn stored_request(request: &AgentRequest, agent_id: Option<Uuid>) -> Option<StoredAgentRequest> {
+    normalize_request(request).map(|request| StoredAgentRequest {
+        agent_key: request.agent_key,
+        intent: request.intent,
+        request: request.request,
+        agent_id,
+    })
+}
+
+fn normalize_stored_request(request: &StoredAgentRequest) -> Option<StoredAgentRequest> {
+    stored_request(
+        &AgentRequest {
+            agent_key: request.agent_key.clone(),
+            intent: request.intent.clone(),
+            request: request.request.clone(),
+        },
+        request.agent_id,
+    )
 }
 
 fn normalize_request(request: &AgentRequest) -> Option<AgentRequest> {
@@ -141,13 +221,37 @@ mod tests {
         append_agent_requests_to_comment(&mut body, &original);
         body.push_str("\n\n---\n**Git:** committed `abc1234`");
 
-        replace_agent_requests_in_comment(&mut body, &original, &original[1..]);
+        let target_agent_id = Uuid::new_v4();
+        let accepted = [ResolvedAgentRequest {
+            agent_id: target_agent_id,
+            request: original[1].clone(),
+        }];
+
+        replace_agent_requests_in_comment(&mut body, &original, &accepted);
 
         assert_eq!(
             agent_requests_from_comment(&body),
             vec![request("tech_lead", "consult", "Review the boundary")]
         );
+        assert_eq!(
+            agent_request_for_target_from_comment(&body, target_agent_id),
+            Some(request("tech_lead", "consult", "Review the boundary"))
+        );
         assert!(!body.contains("Ignore me"));
         assert!(body.ends_with("**Git:** committed `abc1234`"));
+    }
+
+    #[test]
+    fn unresolved_metadata_cannot_match_a_structured_consultation_target() {
+        let mut body = "Implementation ready.".to_string();
+        append_agent_requests_to_comment(
+            &mut body,
+            &[request("tech_lead", "consult", "Review the boundary")],
+        );
+
+        assert_eq!(
+            agent_request_for_target_from_comment(&body, Uuid::new_v4()),
+            None
+        );
     }
 }

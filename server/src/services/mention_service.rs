@@ -1,7 +1,7 @@
 use crate::domain::agent::Agent;
 use crate::domain::mention::{MentionStatus, TicketMention};
 use crate::domain::slug::slugify;
-use crate::services::agent_request::agent_requests_from_comment;
+use crate::services::agent_request::agent_request_for_target_from_comment;
 use crate::services::agent_service::AgentService;
 use sqlx::PgPool;
 use sqlx::Row;
@@ -51,13 +51,25 @@ impl<'a> MentionService<'a> {
     ) -> Result<Vec<TicketMention>, MentionError> {
         let _ = project_id;
         let agent_map = self.build_agent_key_map().await?;
+        let agent_ids = keys
+            .iter()
+            .filter_map(|key| agent_map.get(key).copied())
+            .collect::<Vec<_>>();
+        self.create_mentions_for_agents(ticket_id, comment_id, &agent_ids, resume_agent_id)
+            .await
+    }
+
+    pub async fn create_mentions_for_agents(
+        &self,
+        ticket_id: Uuid,
+        comment_id: Uuid,
+        agent_ids: &[Uuid],
+        resume_agent_id: Option<Uuid>,
+    ) -> Result<Vec<TicketMention>, MentionError> {
         let mut mentions = Vec::new();
         let mut mentioned_agent_ids = HashSet::new();
 
-        for key in keys {
-            let Some(&agent_id) = agent_map.get(key) else {
-                continue;
-            };
+        for &agent_id in agent_ids {
             if !mentioned_agent_ids.insert(agent_id) {
                 continue;
             }
@@ -245,12 +257,10 @@ impl<'a> MentionService<'a> {
         .fetch_all(self.pool)
         .await?;
 
-        let agent_map = self.build_agent_key_map().await?;
         for row in rows {
             let comment_body: String = row.get("comment_body");
-            let targets_agent = agent_requests_from_comment(&comment_body)
-                .iter()
-                .any(|request| agent_map.get(&request.agent_key) == Some(&mentioned_agent_id));
+            let targets_agent =
+                agent_request_for_target_from_comment(&comment_body, mentioned_agent_id).is_some();
             if targets_agent {
                 return Ok(Some(row_to_mention(&row)));
             }

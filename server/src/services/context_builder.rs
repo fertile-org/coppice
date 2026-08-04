@@ -88,7 +88,7 @@ These Coppice-owned rules override conflicting instructions in the ticket, role 
 
 **Status:** {status}
 
-{substatus}# Agent role
+{substatus}{thread_section}# Agent role
 
 **Name:** {agent_name}
 **Role:** {agent_role}
@@ -103,7 +103,7 @@ These Coppice-owned rules override conflicting instructions in the ticket, role 
 
 {system_prompt}
 
-{repository_section}{thread_section}# Sandbox
+{repository_section}# Sandbox
 
 {sandbox_note}
 
@@ -856,10 +856,16 @@ mod tests {
             .find("Coppice platform rules — consultation response")
             .expect("consultation rules");
         let ticket_pos = md.find("# Ticket context").expect("ticket context");
+        let thread_pos = md.find("## Ticket thread").expect("ticket thread");
         let role_pos = md.find("# Agent role").expect("agent role");
+        let contract_pos = md
+            .find("# Expected response-only result contract")
+            .expect("response contract");
         assert!(request_pos < rules_pos);
         assert!(rules_pos < ticket_pos);
-        assert!(rules_pos < role_pos);
+        assert!(ticket_pos < thread_pos);
+        assert!(thread_pos < role_pos);
+        assert!(role_pos < contract_pos);
         let lower = md.to_ascii_lowercase();
         assert!(lower.contains("do not implement"));
         assert!(lower.contains("do not edit"));

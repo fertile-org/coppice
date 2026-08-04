@@ -4,7 +4,9 @@ use axum::http::StatusCode;
 use coppice_server::domain::comment::{AuthorType, CommentIntent};
 use coppice_server::providers::AgentRequest;
 use coppice_server::sandbox::permissive::PROFILE_ID;
-use coppice_server::services::agent_request::append_agent_requests_to_comment;
+use coppice_server::services::agent_request::{
+    append_agent_requests_to_comment, replace_agent_requests_in_comment, ResolvedAgentRequest,
+};
 use coppice_server::services::comment_service::CommentService;
 use coppice_server::services::mention_service::MentionService;
 use coppice_server::services::run_orchestrator::RunOrchestrator;
@@ -251,9 +253,20 @@ async fn successful_work_consultation_runs_once_and_response_cannot_chain() {
     let request_pos = context
         .find(exact_request)
         .expect("exact request in context");
+    let rules_pos = context
+        .find("Coppice platform rules — consultation response")
+        .expect("consultation rules");
     let ticket_pos = context.find("# Ticket context").expect("ticket context");
-    assert!(request_pos < ticket_pos);
-    assert!(context.contains("Coppice platform rules — consultation response"));
+    let thread_pos = context.find("## Ticket thread").expect("ticket thread");
+    let role_pos = context.find("# Agent role").expect("agent role");
+    let contract_pos = context
+        .find("# Expected response-only result contract")
+        .expect("response contract");
+    assert!(request_pos < rules_pos);
+    assert!(rules_pos < ticket_pos);
+    assert!(ticket_pos < thread_pos);
+    assert!(thread_pos < role_pos);
+    assert!(role_pos < contract_pos);
     assert!(context.contains("Do not edit"));
     assert!(context.contains("Do not commit"));
     assert!(context.contains("Do not take assignment"));
@@ -267,6 +280,174 @@ async fn successful_work_consultation_runs_once_and_response_cannot_chain() {
     .await
     .expect("count handled chained mentions");
     assert_eq!(handled_mentions, 2);
+}
+
+#[tokio::test]
+async fn queued_consultation_keeps_exact_request_after_target_is_disabled() {
+    assert_queued_consultation_survives_target_change(false, "DBA Agent", "dba").await;
+}
+
+#[tokio::test]
+async fn queued_consultation_keeps_exact_request_after_target_is_renamed() {
+    assert_queued_consultation_survives_target_change(true, "Renamed DBA", "pm").await;
+}
+
+async fn assert_queued_consultation_survives_target_change(
+    target_enabled: bool,
+    target_name: &str,
+    target_key: &str,
+) {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+
+    let (state, app, cookie, csrf, _env) =
+        common::bootstrap_and_login_with_auto_start_workers().await;
+    let pool = state.db.as_ref().expect("db pool");
+    let project_id = common::create_test_project(&app, &cookie, &csrf).await;
+    let (_git_dir, local_path) = common::create_temp_git_checkout();
+    let repo_id =
+        common::register_test_repo(&app, &local_path.display().to_string(), &cookie, &csrf).await;
+    let frontend_id = common::create_agent_with_preset_key(
+        &app,
+        "frontend_engineer",
+        "Frontend Engineer",
+        &cookie,
+        &csrf,
+    )
+    .await;
+    let dba_id =
+        common::create_agent_with_preset_key(&app, "dba", "DBA Agent", &cookie, &csrf).await;
+
+    sqlx::query("DROP TRIGGER IF EXISTS test_mutate_consultation_target ON agent_runs")
+        .execute(pool)
+        .await
+        .expect("drop stale target mutation trigger");
+    sqlx::query("DROP FUNCTION IF EXISTS test_mutate_consultation_target()")
+        .execute(pool)
+        .await
+        .expect("drop stale target mutation function");
+    sqlx::query(&format!(
+        r#"
+        CREATE FUNCTION test_mutate_consultation_target()
+        RETURNS trigger
+        LANGUAGE plpgsql
+        AS $$
+        BEGIN
+            UPDATE agents
+            SET enabled = {target_enabled},
+                name = '{target_name}',
+                preset_source = '{target_key}'
+            WHERE id = NEW.agent_id;
+            RETURN NEW;
+        END;
+        $$
+        "#,
+    ))
+    .execute(pool)
+    .await
+    .expect("create target mutation function");
+    sqlx::query(&format!(
+        r#"
+        CREATE TRIGGER test_mutate_consultation_target
+        AFTER INSERT ON agent_runs
+        FOR EACH ROW
+        WHEN (
+            NEW.agent_id = '{dba_id}'::uuid
+            AND NEW.job_type = 'respond_to_mention'
+        )
+        EXECUTE FUNCTION test_mutate_consultation_target()
+        "#,
+    ))
+    .execute(pool)
+    .await
+    .expect("create target mutation trigger");
+
+    let ticket_id = common::create_test_ticket(&app, &project_id, &cookie, &csrf).await;
+    common::set_ticket_repo(&app, &ticket_id, &repo_id, &cookie, &csrf).await;
+    common::assign_agent_to_ticket(&app, &ticket_id, &frontend_id, &cookie, &csrf).await;
+
+    let runs = common::poll_runs_until_count(
+        &app,
+        &ticket_id,
+        &cookie,
+        &csrf,
+        "changed target answers queued consultation",
+        Duration::from_secs(30),
+        |runs| {
+            runs.iter().any(|run| {
+                run["agentId"].as_str() == Some(dba_id.as_str())
+                    && run["jobType"].as_str() == Some("respond_to_mention")
+                    && run["status"].as_str() == Some("succeeded")
+            })
+        },
+    )
+    .await;
+
+    sqlx::query("DROP TRIGGER test_mutate_consultation_target ON agent_runs")
+        .execute(pool)
+        .await
+        .expect("drop target mutation trigger");
+    sqlx::query("DROP FUNCTION test_mutate_consultation_target()")
+        .execute(pool)
+        .await
+        .expect("drop target mutation function");
+
+    let target_state = sqlx::query_as::<_, (bool, String, Option<String>)>(
+        "SELECT enabled, name, preset_source FROM agents WHERE id = $1",
+    )
+    .bind(Uuid::parse_str(&dba_id).expect("DBA UUID"))
+    .fetch_one(pool)
+    .await
+    .expect("load mutated target");
+    assert_eq!(
+        target_state,
+        (target_enabled, target_name.into(), Some(target_key.into()))
+    );
+    let source_comment = sqlx::query_scalar::<_, String>(
+        r#"
+        SELECT tc.body
+        FROM ticket_comments tc
+        JOIN ticket_mentions tm ON tm.comment_id = tc.id
+        WHERE tm.ticket_id = $1 AND tm.mentioned_agent_id = $2
+        ORDER BY tc.created_at ASC
+        LIMIT 1
+        "#,
+    )
+    .bind(Uuid::parse_str(&ticket_id).expect("ticket UUID"))
+    .bind(Uuid::parse_str(&dba_id).expect("DBA UUID"))
+    .fetch_one(pool)
+    .await
+    .expect("load consultation source comment");
+    assert!(source_comment
+        .starts_with("Frontend work complete; asking DBA to verify the data assumptions."));
+
+    let response = runs
+        .iter()
+        .find(|run| {
+            run["agentId"].as_str() == Some(dba_id.as_str())
+                && run["jobType"].as_str() == Some("respond_to_mention")
+        })
+        .expect("response run");
+    let worktree_path = response["worktreePath"]
+        .as_str()
+        .expect("response worktree path");
+    let context = std::fs::read_to_string(
+        std::path::Path::new(worktree_path)
+            .join(".agent")
+            .join("context.md"),
+    )
+    .expect("read response context");
+    let request = context
+        .split_once("<consultation_request>\n")
+        .and_then(|(_, rest)| rest.split_once("\n</consultation_request>"))
+        .map(|(request, _)| request)
+        .expect("consultation request block");
+    assert_eq!(
+        request,
+        "Verify the data assumptions used by the frontend implementation."
+    );
 }
 
 #[tokio::test]
@@ -410,12 +591,18 @@ async fn stopping_live_run_defers_consultation_until_worker_exit_with_two_worker
     let target_id = Uuid::parse_str(&target_id).expect("target agent UUID");
 
     let mut comment_body = "Please respond".to_string();
-    append_agent_requests_to_comment(
+    let request = AgentRequest {
+        agent_key: "backend_engineer".into(),
+        intent: "consult".into(),
+        request: "Please respond".into(),
+    };
+    append_agent_requests_to_comment(&mut comment_body, std::slice::from_ref(&request));
+    replace_agent_requests_in_comment(
         &mut comment_body,
-        &[AgentRequest {
-            agent_key: "backend_engineer".into(),
-            intent: "consult".into(),
-            request: "Please respond".into(),
+        std::slice::from_ref(&request),
+        &[ResolvedAgentRequest {
+            agent_id: target_id,
+            request: request.clone(),
         }],
     );
     let comment = CommentService::new(pool)

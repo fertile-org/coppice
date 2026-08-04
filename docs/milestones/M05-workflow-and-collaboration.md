@@ -92,9 +92,9 @@ Successful agent results keep attention, consultation, and ownership separate:
 }
 ```
 
-Consultation targets share `MAX_MENTIONS_PER_RUN` with attention targets and use the same enabled, resolvable, duplicate, and self-target checks. Coppice renders each accepted request into the source comment and stores structured metadata there, keeping the exact trigger durable without a schema change. Disabling `workflow.auto_start_runs` preserves the mention and request but starts no run.
+Consultation targets share `MAX_MENTIONS_PER_RUN` with attention targets and use the same enabled, resolvable, duplicate, and self-target checks. Coppice renders each accepted request into the source comment, stores structured metadata bound to the resolved agent ID, and creates the linked mention from that same ID. This keeps both the target and exact trigger durable across later agent renames, disabling, or key reassignment without a schema change. Disabling `workflow.auto_start_runs` preserves the mention and request but starts no run.
 
-A full-context `respond_to_mention` run receives the exact request before ticket context and Coppice-owned response-only rules before its role prompt. It may answer, inspect code, and run read-only checks; it may not implement, edit, commit, take assignment, or move workflow. The server ignores assignment, description, acceptance-criteria, split, status, and substatus output defensively and never finalizes git for the response. Successful responses may create notifications but cannot auto-dispatch another response, so automatic collaboration is one hop.
+A full-context `respond_to_mention` run receives the exact request, Coppice-owned response-only rules, ticket context and thread, role prompt, then the response-only contract in that order. It may answer, inspect code, and run read-only checks; it may not implement, edit, commit, take assignment, or move workflow. The server ignores assignment, description, acceptance-criteria, split, status, and substatus output defensively and never finalizes git for the response. Successful responses may create notifications but cannot auto-dispatch another response, so automatic collaboration is one hop.
 
 Blocked `work_on_ticket` mentions retain the original clarification flow shown above. A blocked consultation posts its explanation without changing ticket lifecycle or assignment.
 

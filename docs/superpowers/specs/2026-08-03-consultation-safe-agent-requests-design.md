@@ -22,7 +22,7 @@ Blocked `work_on_ticket` mentions retain the M05 clarification and resume behavi
 
 `AgentRunResult::Done` gains `agentRequests`, with entries containing `agentKey`, `intent`, and `request`. The server accepts only `intent: "consult"`, trims empty keys and requests, rejects requests above the server-owned character bound, resolves enabled targets, rejects self-targets, deduplicates aliases by agent ID, and applies the shared per-run target limit across `mentionAgents` and `agentRequests`.
 
-The source comment renders each accepted consultation request for humans and carries a one-line Coppice metadata marker containing the same structured values. The marker allows a later worker to recover the exact request through the existing `trigger_comment_id`; no database column is added.
+The source comment renders each accepted consultation request for humans and carries a one-line Coppice metadata marker containing the structured values plus the server-resolved agent ID. The linked mention is persisted directly from that resolved ID rather than resolving the mutable key a second time. The marker allows a later worker to recover the exact request by stable target identity through the existing `trigger_comment_id`, even if that agent is later renamed, disabled, or its key is reassigned; no database column is added. Structured requests without stable target metadata fail closed, while linked mentions with `resume_agent_id` retain the legacy blocked-work clarification fallback.
 
 ## Dispatch and lifecycle
 

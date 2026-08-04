@@ -11,9 +11,9 @@ use crate::domain::substatus::Substatus;
 use crate::domain::ticket::status_to_str;
 use crate::domain::workflow::{JobRequest, RunOutcome, TransitionAction, TransitionContext};
 use crate::events::{AppEvent, EventBus};
-use crate::providers::{AgentRequest, AgentRunResult};
+use crate::providers::AgentRunResult;
 use crate::services::agent_request::{
-    normalized_agent_requests, replace_agent_requests_in_comment,
+    normalized_agent_requests, replace_agent_requests_in_comment, ResolvedAgentRequest,
 };
 use crate::services::agent_service::AgentService;
 use crate::services::comment_service::{CommentError, CommentService};
@@ -227,7 +227,7 @@ impl<'a> RunOrchestrator<'a> {
                 .await?;
         }
 
-        let mentions = if collaboration_targets.keys.is_empty() {
+        let mentions = if collaboration_targets.agent_ids.is_empty() {
             Vec::new()
         } else {
             let resume_agent_id =
@@ -237,12 +237,11 @@ impl<'a> RunOrchestrator<'a> {
                     None
                 };
             MentionService::new(self.pool)
-                .create_mentions(
+                .create_mentions_for_agents(
                     run.ticket_id,
                     comment.id,
-                    &collaboration_targets.keys,
+                    &collaboration_targets.agent_ids,
                     resume_agent_id,
-                    ticket.ticket.project_id,
                 )
                 .await?
         };
@@ -619,8 +618,9 @@ struct SuccessfulMentionDispatch {
 #[derive(Default)]
 struct CollaborationTargets {
     keys: Vec<String>,
+    agent_ids: Vec<Uuid>,
     consultation_agent_ids: HashSet<Uuid>,
-    agent_requests: Vec<AgentRequest>,
+    agent_requests: Vec<ResolvedAgentRequest>,
 }
 
 fn select_collaboration_targets(
@@ -660,7 +660,10 @@ fn select_collaboration_targets(
                 continue;
             };
             if targets.consultation_agent_ids.insert(target_id) {
-                targets.agent_requests.push(request);
+                targets.agent_requests.push(ResolvedAgentRequest {
+                    agent_id: target_id,
+                    request,
+                });
             }
         }
     }
@@ -690,6 +693,7 @@ fn select_target(
 
     selected_agent_ids.insert(target_id);
     targets.keys.push(key.to_string());
+    targets.agent_ids.push(target_id);
     Some(target_id)
 }
 
@@ -1161,7 +1165,7 @@ mod tests {
             targets
                 .agent_requests
                 .iter()
-                .map(|request| request.agent_key.as_str())
+                .map(|request| request.request.agent_key.as_str())
                 .collect::<Vec<_>>(),
             vec!["first-agent", "second"]
         );
@@ -1800,6 +1804,139 @@ mod tests {
         assert_eq!(response_runs[0].0, "respond_to_mention");
         assert_eq!(response_runs[0].1, "queued");
         assert_eq!(response_runs[0].2, Some(mention_rows[0].0));
+    }
+
+    #[tokio::test]
+    async fn successful_work_request_keeps_resolved_target_when_key_is_reassigned() {
+        let Some(pool) = test_pool().await else {
+            return;
+        };
+        let fx = insert_fixture(&pool).await;
+        let _repo_dir = attach_ready_repo(&pool, fx.ticket_id).await;
+        let replacement_agent_id = Uuid::new_v4();
+        sqlx::query(
+            r#"
+            INSERT INTO agents (
+                id, name, role, skills, responsibilities, system_prompt, connector, preset_source
+            )
+            VALUES ($1, 'Replacement Engineer', 'Engineer', '{}', '{}', 'prompt', 'mock', 'research')
+            "#,
+        )
+        .bind(replacement_agent_id)
+        .execute(&pool)
+        .await
+        .expect("insert replacement agent");
+
+        sqlx::query(
+            "DROP TRIGGER IF EXISTS test_reassign_agent_key_after_comment ON ticket_comments",
+        )
+        .execute(&pool)
+        .await
+        .expect("drop stale key reassignment trigger");
+        sqlx::query("DROP FUNCTION IF EXISTS test_reassign_agent_key_after_comment()")
+            .execute(&pool)
+            .await
+            .expect("drop stale key reassignment function");
+        sqlx::query(&format!(
+            r#"
+            CREATE FUNCTION test_reassign_agent_key_after_comment()
+            RETURNS trigger
+            LANGUAGE plpgsql
+            AS $$
+            BEGIN
+                UPDATE agents SET preset_source = 'renamed_engineer'
+                WHERE id = '{original_target}'::uuid;
+                UPDATE agents SET preset_source = 'backend_engineer'
+                WHERE id = '{replacement_target}'::uuid;
+                RETURN NEW;
+            END;
+            $$
+            "#,
+            original_target = fx.engineer_agent_id,
+            replacement_target = replacement_agent_id,
+        ))
+        .execute(&pool)
+        .await
+        .expect("create key reassignment function");
+        sqlx::query(&format!(
+            r#"
+            CREATE TRIGGER test_reassign_agent_key_after_comment
+            AFTER INSERT ON ticket_comments
+            FOR EACH ROW
+            WHEN (
+                NEW.ticket_id = '{ticket_id}'::uuid
+                AND NEW.author_id = '{source_agent_id}'::uuid
+                AND NEW.author_type = 'agent'
+            )
+            EXECUTE FUNCTION test_reassign_agent_key_after_comment()
+            "#,
+            ticket_id = fx.ticket_id,
+            source_agent_id = fx.pm_agent_id,
+        ))
+        .execute(&pool)
+        .await
+        .expect("create key reassignment trigger");
+
+        let workflow = WorkflowConfig {
+            auto_start_runs: true,
+            ..WorkflowConfig::default()
+        };
+        RunOrchestrator::new(&pool, &workflow)
+            .finish_run(
+                &AgentRun {
+                    id: fx.run_id,
+                    ticket_id: fx.ticket_id,
+                    agent_id: fx.pm_agent_id,
+                    job_type: "work_on_ticket".into(),
+                    status: RunStatus::Running,
+                    sandbox_profile_id: PROFILE_ID.to_string(),
+                    worktree_path: None,
+                    branch_name: None,
+                    error_message: None,
+                    session_id: None,
+                    context_profile: ContextProfile::Full,
+                    trigger_comment_id: None,
+                    started_at: None,
+                    ended_at: None,
+                    created_at: time::OffsetDateTime::now_utc(),
+                },
+                &done_with_requests(&["backend_engineer"]),
+                succeeded_request_apply(&["backend_engineer"]),
+                None,
+                None,
+            )
+            .await
+            .expect("finish consultation while target key changes");
+
+        sqlx::query("DROP TRIGGER test_reassign_agent_key_after_comment ON ticket_comments")
+            .execute(&pool)
+            .await
+            .expect("drop key reassignment trigger");
+        sqlx::query("DROP FUNCTION test_reassign_agent_key_after_comment()")
+            .execute(&pool)
+            .await
+            .expect("drop key reassignment function");
+
+        let mentioned_agent_id = sqlx::query_scalar::<_, Uuid>(
+            "SELECT mentioned_agent_id FROM ticket_mentions WHERE ticket_id = $1",
+        )
+        .bind(fx.ticket_id)
+        .fetch_one(&pool)
+        .await
+        .expect("load consultation mention target");
+        assert_eq!(mentioned_agent_id, fx.engineer_agent_id);
+
+        let response_agent_id = sqlx::query_scalar::<_, Uuid>(
+            r#"
+            SELECT agent_id FROM agent_runs
+            WHERE ticket_id = $1 AND job_type = 'respond_to_mention'
+            "#,
+        )
+        .bind(fx.ticket_id)
+        .fetch_one(&pool)
+        .await
+        .expect("load consultation response target");
+        assert_eq!(response_agent_id, fx.engineer_agent_id);
     }
 
     #[tokio::test]
