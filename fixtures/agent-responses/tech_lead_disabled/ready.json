@@ -1,0 +1,11 @@
+{
+  "status": "done",
+  "summary": "Recorded the technical approach and selected the configured backend implementation owner.",
+  "updatedDescription": "## Technical approach\n\nUse the existing service boundary.\n\n## Risks\n\nThe selected implementation owner must remain enabled.",
+  "assignTo": "backend_engineer",
+  "changedFiles": [],
+  "testsRun": [],
+  "mentionAgents": [],
+  "agentRequests": [],
+  "blockers": []
+}

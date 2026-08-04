@@ -1,0 +1,9 @@
+{
+  "status": "done",
+  "summary": "## Verdict\n\n**Approved** — ready for QA.\n\n## Summary\n\nThe implementation follows the existing service boundary and covers the material failure paths.\n\n## Follow-ups\n\nNone.\n\n## Recommendation\n\nReady for QA — Coppice moves this ticket to In QA automatically.",
+  "changedFiles": [],
+  "testsRun": [],
+  "mentionAgents": [],
+  "agentRequests": [],
+  "blockers": []
+}

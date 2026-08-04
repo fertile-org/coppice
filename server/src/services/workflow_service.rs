@@ -1,6 +1,9 @@
+use crate::domain::context_profile::ContextProfile;
 use crate::domain::substatus::{Substatus, TicketStatus};
+use crate::domain::ticket::status_to_str;
 use crate::domain::workflow::{
-    JobRequest, PendingRecommendation, RunOutcome, TransitionAction, TransitionContext,
+    is_ready_tech_lead_refinement as matches_ready_tech_lead_refinement, JobRequest,
+    PendingRecommendation, RunOutcome, TransitionAction, TransitionContext,
 };
 use crate::providers::AgentRunResult;
 use time::format_description::well_known::Rfc3339;
@@ -89,6 +92,10 @@ impl WorkflowService {
             return Ok(action);
         }
 
+        if is_ready_tech_lead_refinement(&ctx) {
+            return Ok(resolve_ready_tech_lead_handoff(&ctx));
+        }
+
         if let Some(handoff) = resolve_verification_handoff(&ctx) {
             apply_assign_to(&mut action, &ctx, &handoff.agent_key);
             action.new_status = Some(TicketStatus::InProgress);
@@ -149,10 +156,21 @@ impl WorkflowService {
 
     pub fn resolve_run_start_transition(
         current: TicketStatus,
+        agent_key: &str,
         agent_role: &str,
         job_type: &str,
+        context_profile: ContextProfile,
     ) -> Option<TicketStatus> {
-        if job_type != "work_on_ticket" {
+        if context_profile == ContextProfile::HumanAgent || job_type != "work_on_ticket" {
+            return None;
+        }
+        if matches_ready_tech_lead_refinement(
+            context_profile,
+            job_type,
+            status_to_str(current),
+            agent_key,
+            agent_role,
+        ) {
             return None;
         }
         match (current, agent_role) {
@@ -205,7 +223,10 @@ struct VerificationHandoff {
 }
 
 fn resolve_verification_handoff(ctx: &TransitionContext) -> Option<VerificationHandoff> {
-    if ctx.job_type != "work_on_ticket" || !is_verification_role(&ctx.agent_role) {
+    if ctx.job_type != "work_on_ticket"
+        || !is_verification_role(&ctx.agent_role)
+        || is_ready_tech_lead_refinement(ctx)
+    {
         return None;
     }
 
@@ -237,6 +258,101 @@ fn resolve_verification_handoff(ctx: &TransitionContext) -> Option<VerificationH
             resume_agent_id: None,
         },
     })
+}
+
+fn is_ready_tech_lead_refinement(ctx: &TransitionContext) -> bool {
+    matches_ready_tech_lead_refinement(
+        ctx.context_profile,
+        &ctx.job_type,
+        status_to_str(ctx.current_status),
+        &ctx.agent_key,
+        &ctx.agent_role,
+    )
+}
+
+fn resolve_ready_tech_lead_handoff(ctx: &TransitionContext) -> TransitionAction {
+    let mut action = TransitionAction::default();
+    let Some(assign_key) = assign_to_from_contract(&ctx.contract) else {
+        action.system_comments.push(ready_handoff_notice(
+            None,
+            None,
+            &ctx.project_implementer_keys,
+        ));
+        return action;
+    };
+    let assign_key = assign_key.trim();
+    if assign_key.is_empty() {
+        action.system_comments.push(ready_handoff_notice(
+            None,
+            None,
+            &ctx.project_implementer_keys,
+        ));
+        return action;
+    }
+
+    if !ctx.project_agent_keys.iter().any(|key| key == assign_key) {
+        action.system_comments.push(ready_handoff_notice(
+            Some(assign_key),
+            Some("unknown or disabled"),
+            &ctx.project_implementer_keys,
+        ));
+        return action;
+    }
+
+    if !ctx
+        .project_implementer_keys
+        .iter()
+        .any(|key| key == assign_key)
+    {
+        action.system_comments.push(ready_handoff_notice(
+            Some(assign_key),
+            Some("not an implementer"),
+            &ctx.project_implementer_keys,
+        ));
+        return action;
+    }
+
+    if ctx
+        .project_agent_ids
+        .get(assign_key)
+        .is_some_and(|target_id| Some(*target_id) == ctx.assignee_agent_id)
+    {
+        action.system_comments.push(ready_handoff_notice(
+            Some(assign_key),
+            Some("the current Tech Lead cannot hand off to itself"),
+            &ctx.project_implementer_keys,
+        ));
+        return action;
+    }
+
+    apply_assign_to(&mut action, ctx, assign_key);
+    action
+}
+
+fn ready_handoff_notice(
+    assign_key: Option<&str>,
+    reason: Option<&str>,
+    implementer_keys: &[String],
+) -> String {
+    let available = if implementer_keys.is_empty() {
+        "(none — add or enable an implementer first)".to_string()
+    } else {
+        implementer_keys
+            .iter()
+            .map(|key| format!("`{key}`"))
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+
+    match (assign_key, reason) {
+        (None, _) => format!(
+            "Technical refinement handoff is incomplete: the Tech Lead did not return `assignTo`. The ticket remains in Ready and no implementation run was started. Re-run technical refinement and select an enabled implementer. Available implementer keys: {available}."
+        ),
+        (Some(key), Some(reason)) => format!(
+            "Technical refinement handoff is incomplete: `assignTo` target `{key}` is {reason}. The ticket remains in Ready and no implementation run was started. Re-run technical refinement and select an enabled implementer. Available implementer keys: {available}."
+        ),
+        (Some(_), None) => unreachable!("invalid Ready handoff notice reason"),
+    }
 }
 
 /// Unknown `assignTo` blocks only when PM refinement must pick a valid next assignee.
@@ -348,6 +464,10 @@ mod tests {
         Uuid::from_u128(0x200)
     }
 
+    fn tech_lead_agent_id() -> Uuid {
+        Uuid::from_u128(0x300)
+    }
+
     fn minimal_ctx() -> TransitionContext {
         TransitionContext {
             ticket_id: Uuid::from_u128(1),
@@ -372,6 +492,7 @@ mod tests {
             },
             project_agent_keys: vec!["pm".into()],
             project_agent_ids: HashMap::from([("pm".into(), pm_agent_id())]),
+            project_implementer_keys: vec![],
             auto_assign_enabled: true,
             clarification_round: 0,
             context_profile: ContextProfile::Full,
@@ -461,6 +582,204 @@ mod tests {
         assert_eq!(action.new_status, Some(TicketStatus::Ready));
         assert_eq!(action.new_assignee_id, Some(Some(engineer_agent_id())));
         assert!(matches!(action.pending_recommendation, Some(None)));
+    }
+
+    #[test]
+    fn ready_tech_lead_auto_assigns_enabled_implementer_without_advancing_status() {
+        let action = WorkflowService::resolve_transition(TransitionContext {
+            current_status: TicketStatus::Ready,
+            agent_role: "Technical Lead".into(),
+            agent_key: "tech_lead".into(),
+            assignee_agent_id: Some(tech_lead_agent_id()),
+            auto_assign_enabled: true,
+            contract: done_with_assign_to("backend_engineer"),
+            project_agent_keys: vec!["tech_lead".into(), "backend_engineer".into()],
+            project_agent_ids: agent_map(&[
+                ("tech_lead", tech_lead_agent_id()),
+                ("backend_engineer", engineer_agent_id()),
+            ]),
+            project_implementer_keys: vec!["backend_engineer".into()],
+            ..minimal_ctx()
+        })
+        .expect("resolve Ready Tech Lead handoff");
+
+        assert!(action.new_status.is_none());
+        assert_eq!(action.new_assignee_id, Some(Some(engineer_agent_id())));
+        assert!(matches!(action.pending_recommendation, Some(None)));
+        assert!(action.enqueue_jobs.is_empty());
+        assert!(action.system_comments.is_empty());
+    }
+
+    #[test]
+    fn ready_tech_lead_manual_policy_records_pending_implementer_recommendation() {
+        let action = WorkflowService::resolve_transition(TransitionContext {
+            current_status: TicketStatus::Ready,
+            agent_role: "Technical Lead".into(),
+            agent_key: "tech_lead".into(),
+            assignee_agent_id: Some(tech_lead_agent_id()),
+            auto_assign_enabled: false,
+            contract: done_with_assign_to("backend_engineer"),
+            project_agent_keys: vec!["tech_lead".into(), "backend_engineer".into()],
+            project_agent_ids: agent_map(&[
+                ("tech_lead", tech_lead_agent_id()),
+                ("backend_engineer", engineer_agent_id()),
+            ]),
+            project_implementer_keys: vec!["backend_engineer".into()],
+            ..minimal_ctx()
+        })
+        .expect("resolve manual Ready Tech Lead handoff");
+
+        assert!(action.new_status.is_none());
+        assert!(action.new_assignee_id.is_none());
+        let pending = action
+            .pending_recommendation
+            .expect("pending recommendation action")
+            .expect("pending recommendation");
+        assert_eq!(pending.recommended_agent_key, "backend_engineer");
+        assert!(action.enqueue_jobs.is_empty());
+        assert!(action.system_comments.is_empty());
+    }
+
+    #[test]
+    fn ready_tech_lead_missing_assign_to_stays_ready_with_actionable_comment() {
+        let action = WorkflowService::resolve_transition(TransitionContext {
+            current_status: TicketStatus::Ready,
+            agent_role: "Technical Lead".into(),
+            agent_key: "tech_lead".into(),
+            assignee_agent_id: Some(tech_lead_agent_id()),
+            project_agent_keys: vec!["tech_lead".into(), "backend_engineer".into()],
+            project_agent_ids: agent_map(&[
+                ("tech_lead", tech_lead_agent_id()),
+                ("backend_engineer", engineer_agent_id()),
+            ]),
+            project_implementer_keys: vec!["backend_engineer".into()],
+            ..minimal_ctx()
+        })
+        .expect("resolve missing Ready Tech Lead handoff");
+
+        assert!(action.new_status.is_none());
+        assert!(action.new_assignee_id.is_none());
+        assert!(action.pending_recommendation.is_none());
+        assert!(action.enqueue_jobs.is_empty());
+        assert_eq!(action.system_comments.len(), 1);
+        assert!(action.system_comments[0].contains("did not return `assignTo`"));
+        assert!(action.system_comments[0].contains("backend_engineer"));
+        assert!(action.system_comments[0].contains("remains in Ready"));
+    }
+
+    #[test]
+    fn ready_tech_lead_unknown_assign_to_under_manual_policy_starts_nobody() {
+        let action = WorkflowService::resolve_transition(TransitionContext {
+            current_status: TicketStatus::Ready,
+            agent_role: "Technical Lead".into(),
+            agent_key: "tech_lead".into(),
+            assignee_agent_id: Some(tech_lead_agent_id()),
+            auto_assign_enabled: false,
+            contract: done_with_assign_to("missing_engineer"),
+            project_agent_keys: vec!["tech_lead".into(), "backend_engineer".into()],
+            project_agent_ids: agent_map(&[
+                ("tech_lead", tech_lead_agent_id()),
+                ("backend_engineer", engineer_agent_id()),
+            ]),
+            project_implementer_keys: vec!["backend_engineer".into()],
+            ..minimal_ctx()
+        })
+        .expect("resolve unknown Ready Tech Lead handoff");
+
+        assert!(action.new_status.is_none());
+        assert!(action.new_assignee_id.is_none());
+        assert!(action.pending_recommendation.is_none());
+        assert!(action.enqueue_jobs.is_empty());
+        assert_eq!(action.system_comments.len(), 1);
+        assert!(action.system_comments[0].contains("missing_engineer"));
+        assert!(action.system_comments[0].contains("unknown or disabled"));
+    }
+
+    #[test]
+    fn ready_tech_lead_cannot_handoff_to_enabled_non_implementer() {
+        let action = WorkflowService::resolve_transition(TransitionContext {
+            current_status: TicketStatus::Ready,
+            agent_role: "Technical Lead".into(),
+            agent_key: "tech_lead".into(),
+            assignee_agent_id: Some(tech_lead_agent_id()),
+            auto_assign_enabled: true,
+            contract: done_with_assign_to("pm"),
+            project_agent_keys: vec!["pm".into(), "tech_lead".into(), "backend_engineer".into()],
+            project_agent_ids: agent_map(&[
+                ("pm", pm_agent_id()),
+                ("tech_lead", tech_lead_agent_id()),
+                ("backend_engineer", engineer_agent_id()),
+            ]),
+            project_implementer_keys: vec!["backend_engineer".into()],
+            ..minimal_ctx()
+        })
+        .expect("resolve non-implementer Ready Tech Lead handoff");
+
+        assert!(action.new_status.is_none());
+        assert!(action.new_assignee_id.is_none());
+        assert!(action.pending_recommendation.is_none());
+        assert!(action.enqueue_jobs.is_empty());
+        assert_eq!(action.system_comments.len(), 1);
+        assert!(action.system_comments[0].contains("not an implementer"));
+    }
+
+    #[test]
+    fn ready_tech_lead_cannot_handoff_to_its_own_implementer_alias() {
+        let action = WorkflowService::resolve_transition(TransitionContext {
+            current_status: TicketStatus::Ready,
+            agent_role: "Technical Lead Engineer".into(),
+            agent_key: "tech_lead".into(),
+            assignee_agent_id: Some(tech_lead_agent_id()),
+            auto_assign_enabled: true,
+            contract: done_with_assign_to("tech_lead"),
+            project_agent_keys: vec!["tech_lead".into(), "backend_engineer".into()],
+            project_agent_ids: agent_map(&[
+                ("tech_lead", tech_lead_agent_id()),
+                ("backend_engineer", engineer_agent_id()),
+            ]),
+            // Defend even if a caller accidentally classifies this dual-role agent
+            // as an implementer.
+            project_implementer_keys: vec!["tech_lead".into(), "backend_engineer".into()],
+            ..minimal_ctx()
+        })
+        .expect("resolve self-targeted Ready Tech Lead handoff");
+
+        assert!(action.new_status.is_none());
+        assert!(action.new_assignee_id.is_none());
+        assert!(action.pending_recommendation.is_none());
+        assert!(action.enqueue_jobs.is_empty());
+        assert_eq!(action.system_comments.len(), 1);
+        assert!(action.system_comments[0].contains("cannot hand off to itself"));
+    }
+
+    #[test]
+    fn ready_tech_lead_blocked_pm_mention_uses_clarification_resume_path() {
+        let action = WorkflowService::resolve_transition(TransitionContext {
+            current_status: TicketStatus::Ready,
+            agent_role: "Technical Lead".into(),
+            agent_key: "tech_lead".into(),
+            assignee_agent_id: Some(tech_lead_agent_id()),
+            run_outcome: RunOutcome::Blocked,
+            contract: blocked_with_mentions(&["pm"]),
+            project_agent_keys: vec!["pm".into(), "tech_lead".into()],
+            project_agent_ids: agent_map(&[
+                ("pm", pm_agent_id()),
+                ("tech_lead", tech_lead_agent_id()),
+            ]),
+            ..minimal_ctx()
+        })
+        .expect("resolve Ready Tech Lead clarification");
+
+        assert!(action.new_status.is_none());
+        assert!(action.new_assignee_id.is_none());
+        assert_eq!(action.substatus, Some(Some(Substatus::WaitingForAgent)));
+        assert_eq!(action.enqueue_jobs.len(), 1);
+        assert_eq!(action.enqueue_jobs[0].job_type, "respond_to_mention");
+        assert_eq!(action.enqueue_jobs[0].agent_id, pm_agent_id());
+        assert_eq!(
+            action.enqueue_jobs[0].resume_agent_id,
+            Some(tech_lead_agent_id())
+        );
     }
 
     #[test]
@@ -802,8 +1121,10 @@ mod tests {
         assert_eq!(
             WorkflowService::resolve_run_start_transition(
                 TicketStatus::Backlog,
+                "backend_engineer",
                 "Backend Engineer",
                 "work_on_ticket",
+                ContextProfile::Full,
             ),
             Some(TicketStatus::InProgress)
         );
@@ -814,10 +1135,54 @@ mod tests {
         assert_eq!(
             WorkflowService::resolve_run_start_transition(
                 TicketStatus::Ready,
+                "research",
                 "Researcher",
                 "work_on_ticket",
+                ContextProfile::Full,
             ),
             Some(TicketStatus::InProgress)
+        );
+    }
+
+    #[test]
+    fn ready_tech_lead_run_start_does_not_move_to_in_progress() {
+        assert_eq!(
+            WorkflowService::resolve_run_start_transition(
+                TicketStatus::Ready,
+                "tech_lead",
+                "Technical Lead Engineer",
+                "work_on_ticket",
+                ContextProfile::Full,
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn ready_tech_lead_preset_run_start_ignores_edited_implementer_role() {
+        assert_eq!(
+            WorkflowService::resolve_run_start_transition(
+                TicketStatus::Ready,
+                "tech_lead",
+                "Lead Engineer",
+                "work_on_ticket",
+                ContextProfile::Full,
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn ready_tech_lead_human_agent_run_uses_existing_no_transition_behavior() {
+        assert_eq!(
+            WorkflowService::resolve_run_start_transition(
+                TicketStatus::Ready,
+                "tech_lead",
+                "Technical Lead Engineer",
+                "work_on_ticket",
+                ContextProfile::HumanAgent,
+            ),
+            None
         );
     }
 
@@ -826,8 +1191,10 @@ mod tests {
         assert_eq!(
             WorkflowService::resolve_run_start_transition(
                 TicketStatus::Backlog,
+                "backend_engineer",
                 "Backend Engineer",
                 "respond_to_mention",
+                ContextProfile::Full,
             ),
             None
         );

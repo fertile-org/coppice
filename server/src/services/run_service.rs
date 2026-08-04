@@ -3,6 +3,7 @@ use crate::domain::context_profile::ContextProfile;
 use crate::domain::job::{job_status_to_str, JobStatus};
 use crate::domain::repo::VerificationStatus;
 use crate::domain::run::{run_status_from_str, run_status_to_str, AgentRun, RunStatus};
+use crate::domain::slug::slugify;
 use crate::sandbox::permissive::PROFILE_ID;
 use crate::services::agent_service::AgentError;
 use crate::services::agent_service::AgentService;
@@ -211,8 +212,13 @@ impl<'a> RunService<'a> {
 
         tx.commit().await?;
 
-        self.apply_run_start_status(ticket_id, agent_id, JOB_TYPE_WORK_ON_TICKET)
-            .await?;
+        self.apply_run_start_status(
+            ticket_id,
+            agent_id,
+            JOB_TYPE_WORK_ON_TICKET,
+            ContextProfile::Full,
+        )
+        .await?;
 
         Ok(row_to_run(&row))
     }
@@ -222,14 +228,21 @@ impl<'a> RunService<'a> {
         ticket_id: Uuid,
         agent_id: Uuid,
         job_type: &str,
+        context_profile: ContextProfile,
     ) -> Result<Option<TicketWithDisplay>, RunError> {
         let ticket_svc = TicketService::new(self.pool);
         let ticket = ticket_svc.get(ticket_id).await?;
         let agent = AgentService::new(self.pool).get(agent_id).await?;
+        let agent_key = agent
+            .preset_source
+            .clone()
+            .unwrap_or_else(|| slugify(&agent.name));
         let Some(new_status) = WorkflowService::resolve_run_start_transition(
             ticket.ticket.status,
+            &agent_key,
             &agent.role,
             job_type,
+            context_profile,
         ) else {
             return Ok(None);
         };
@@ -495,10 +508,8 @@ impl<'a> RunService<'a> {
 
         tx.commit().await?;
 
-        if options.context_profile != ContextProfile::HumanAgent {
-            self.apply_run_start_status(ticket_id, agent_id, job_type)
-                .await?;
-        }
+        self.apply_run_start_status(ticket_id, agent_id, job_type, options.context_profile)
+            .await?;
 
         Ok(row_to_run(&row))
     }

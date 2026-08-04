@@ -1,18 +1,12 @@
 {
   "status": "done",
-  "summary": "Refined ticket scope and added acceptance criteria for engineering handoff.",
+  "summary": "Refined ticket scope and prepared it for Tech Lead technical refinement.",
   "updatedDescription": "Implement retry with exponential backoff for API calls.\n\n## Context\n\nUsers see intermittent failures when the upstream service is slow.",
   "acceptanceCriteria": "- Retry up to 3 times with exponential backoff\n- Show user-visible error only after final failure\n- Unit tests cover success and exhausted-retry paths",
-  "assignTo": "backend_engineer",
+  "assignTo": "tech_lead",
   "changedFiles": [],
   "testsRun": [],
   "mentionAgents": [],
-  "agentRequests": [
-    {
-      "agentKey": "backend_engineer",
-      "intent": "consult",
-      "request": "Review the refined scope and flag any implementation risks before ownership transfers."
-    }
-  ],
+  "agentRequests": [],
   "blockers": []
 }

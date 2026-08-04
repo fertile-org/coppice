@@ -332,6 +332,11 @@ async function main() {
   const project = await createProject(auth);
   const repo = await registerRepo(auth);
   const pm = await createAgentFromPresetKey(auth, 'pm', 'PM Agent');
+  const techLead = await createAgentFromPresetKey(
+    auth,
+    'tech_lead',
+    'Tech Lead Agent',
+  );
   const engineer = await createAgentFromPresetKey(
     auth,
     'backend_engineer',
@@ -349,17 +354,36 @@ async function main() {
     RUN_POLL_TIMEOUT_MS,
     (t) =>
       t.status === 'ready' &&
-      t.pendingAssignRecommendation?.recommendedAgentKey === 'backend_engineer',
+      t.pendingAssignRecommendation?.recommendedAgentKey === 'tech_lead',
   );
   console.log(
     `smoke: PM run complete; status=${pmReady.status}, recommendation=${pmReady.pendingAssignRecommendation.recommendedAgentKey}`,
   );
 
-  const afterEngineerAssign = await assignAgent(ticket.id, engineer.id, auth);
-  if (afterEngineerAssign.pendingAssignRecommendation != null) {
-    fail('expected pending recommendation cleared after engineer assign');
+  const afterTechLeadAssign = await assignAgent(ticket.id, techLead.id, auth);
+  if (afterTechLeadAssign.pendingAssignRecommendation != null) {
+    fail('expected pending recommendation cleared after Tech Lead assign');
   }
-  console.log('smoke: assigned backend engineer');
+  console.log('smoke: assigned Tech Lead for Ready refinement');
+
+  await pollRunsUntil(
+    ticket.id,
+    auth,
+    'Tech Lead refinement → engineer work run',
+    RUN_POLL_TIMEOUT_MS,
+    (runs) =>
+      runs.some(
+        (run) =>
+          run.agentId === techLead.id &&
+          run.jobType === 'work_on_ticket' &&
+          run.status === 'succeeded',
+      ) &&
+      runs.some(
+        (run) =>
+          run.agentId === engineer.id && run.jobType === 'work_on_ticket',
+      ),
+  );
+  console.log('smoke: Tech Lead handed implementation to backend engineer');
 
   await pollRunsUntil(
     ticket.id,

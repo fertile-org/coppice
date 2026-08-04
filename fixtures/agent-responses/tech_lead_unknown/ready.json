@@ -1,0 +1,11 @@
+{
+  "status": "done",
+  "summary": "Recorded the technical approach and selected an unavailable implementation owner.",
+  "updatedDescription": "## Technical approach\n\nUse the existing service boundary.\n\n## Risks\n\nThe configured handoff target must exist and be enabled.",
+  "assignTo": "missing_engineer",
+  "changedFiles": [],
+  "testsRun": [],
+  "mentionAgents": [],
+  "agentRequests": [],
+  "blockers": []
+}

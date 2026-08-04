@@ -1,0 +1,8 @@
+{
+  "status": "blocked",
+  "blockerType": "needs_human",
+  "summary": "@pm Should retries be limited to idempotent requests, or will callers provide idempotency keys?",
+  "mentionAgents": ["pm"],
+  "requiredCapabilities": [],
+  "requiredSecrets": []
+}

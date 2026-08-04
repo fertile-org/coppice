@@ -1,6 +1,7 @@
 use std::path::Path;
 
 use crate::domain::context_profile::ContextProfile;
+use crate::domain::workflow::{is_ready_tech_lead_refinement, is_tech_lead_identity};
 use crate::sandbox::permissive::SANDBOX_NOTE;
 use uuid::Uuid;
 
@@ -32,26 +33,65 @@ pub struct ContextInput<'a> {
     pub human_request: Option<HumanRequest<'a>>,
     pub ticket_id: Option<Uuid>,
     pub assignee_agent_key: Option<&'a str>,
+    // HumanChat: recent-thread excerpt. Full: None for owned work, Some("") for
+    // other non-work runs, or Some(request) for a bounded consultation.
     pub thread_excerpt: Option<&'a str>,
-    pub consultation_request: Option<&'a str>,
 }
 
 pub fn build_context_md(input: &ContextInput) -> String {
-    if input.context_profile == ContextProfile::Full && input.consultation_request.is_some() {
-        return build_consultation_context(input);
+    if input.context_profile == ContextProfile::Full {
+        if let FullContextKind::Consultation(request) = full_context_kind(input) {
+            return build_consultation_context(input, request);
+        }
     }
 
-    match input.context_profile {
+    let markdown = match input.context_profile {
         ContextProfile::Full => build_full_context(input),
         ContextProfile::HumanAgent => build_human_agent_context(input),
         ContextProfile::HumanChat => build_human_chat_context(input),
+    };
+
+    specialize_ready_tech_lead_contract(input, markdown)
+}
+
+enum FullContextKind<'a> {
+    Work,
+    Other,
+    Consultation(&'a str),
+}
+
+fn full_context_kind<'a>(input: &'a ContextInput<'a>) -> FullContextKind<'a> {
+    match input.thread_excerpt {
+        None => FullContextKind::Work,
+        Some("") => FullContextKind::Other,
+        Some(request) => FullContextKind::Consultation(request),
     }
 }
 
-fn build_consultation_context(input: &ContextInput) -> String {
-    let request = input
-        .consultation_request
-        .expect("consultation context requires a request");
+fn specialize_ready_tech_lead_contract(input: &ContextInput, mut markdown: String) -> String {
+    if !is_ready_tech_lead_task(input) {
+        return markdown;
+    }
+
+    const GENERIC_CHANGED_FILES: &str = r#""changedFiles": ["<paths changed>"]"#;
+    // Preserve the generic example's byte count so main's strict context-budget
+    // accounting remains exact after this branch is merged.
+    const READ_ONLY_CHANGED_FILES: &str = r#""changedFiles": []                 "#;
+    debug_assert_eq!(GENERIC_CHANGED_FILES.len(), READ_ONLY_CHANGED_FILES.len());
+
+    // The output contract is the final section, so replace its example rather
+    // than an identical snippet that may appear in ticket-provided context.
+    if let Some(start) = markdown.rfind(GENERIC_CHANGED_FILES) {
+        markdown.replace_range(
+            start..start + GENERIC_CHANGED_FILES.len(),
+            READ_ONLY_CHANGED_FILES,
+        );
+    }
+
+    markdown
+}
+
+fn build_consultation_context(input: &ContextInput, request: &str) -> String {
     let substatus_line = match input.ticket_substatus {
         Some(substatus) => format!("**Substatus:** {substatus}\n\n"),
         None => String::new(),
@@ -581,11 +621,7 @@ fn is_pm_agent(input: &ContextInput) -> bool {
 }
 
 fn is_tech_lead_agent(input: &ContextInput) -> bool {
-    if input.agent_key.eq_ignore_ascii_case("tech_lead") {
-        return true;
-    }
-    let role = input.agent_role.to_ascii_lowercase();
-    role.contains("tech lead") || role.contains("technical lead")
+    is_tech_lead_identity(input.agent_key, input.agent_role)
 }
 
 fn is_reviewer_agent(input: &ContextInput) -> bool {
@@ -600,6 +636,17 @@ fn is_in_review_review_task(input: &ContextInput) -> bool {
         && (is_tech_lead_agent(input) || is_reviewer_agent(input))
 }
 
+fn is_ready_tech_lead_task(input: &ContextInput) -> bool {
+    matches!(full_context_kind(input), FullContextKind::Work)
+        && is_ready_tech_lead_refinement(
+            input.context_profile,
+            "work_on_ticket",
+            input.ticket_status,
+            input.agent_key,
+            input.agent_role,
+        )
+}
+
 fn is_in_qa_qc_task(input: &ContextInput) -> bool {
     if !input.ticket_status.eq_ignore_ascii_case("in_qa") {
         return false;
@@ -612,7 +659,10 @@ fn is_in_qa_qc_task(input: &ContextInput) -> bool {
 
 /// Coppice-owned contract rules injected on every run (not editable via agent soul).
 fn format_contract_guidance(input: &ContextInput) -> String {
-    if is_pm_agent(input) {
+    // Stable Tech Lead identity wins over an editable role that happens to match
+    // PM. Otherwise a Ready refinement run can receive the wrong ownership
+    // contract while the workflow still enforces Tech Lead handoff rules.
+    if is_pm_agent(input) && !is_ready_tech_lead_task(input) {
         return r#"## Coppice platform rules — PM refinement (required)
 
 These rules override conflicting instructions in your system prompt or soul file.
@@ -622,11 +672,40 @@ These rules override conflicting instructions in your system prompt or soul file
 - `acceptanceCriteria` — checklist only. Stored under `## Acceptance criteria` on the ticket. Do not repeat description prose.
 - `summary` — 1–3 sentences for the comment thread only. Never paste the full spec, analysis tables, or acceptance checklist here when `updatedDescription` is set.
 
+**Choose exactly one intent per target:**
+- `assignTo` transfers or recommends formal ownership. Use it for the PM → Tech Lead handoff after Backlog refinement.
+- `agentRequests` requests a bounded consultation without transferring ownership.
+- A successful `mentionAgents` is notification-only; it draws attention but starts no response run.
+- Do not combine these fields for the same target. A formal ownership handoff must not also mention or consult that agent.
+
 **Split (multiple child tickets):**
 - Use `splitTickets` when work has multiple independent deliverables or the description would exceed ~2–3 screens.
 - Each child must be self-contained: `title`, `description`, and `acceptanceCriteria`. Optional per-child `assignTo` (agent key).
 - Parent `updatedDescription` should be a short epic summary, not a copy of all children.
 - Do not set both a huge `updatedDescription` and `splitTickets` with duplicate content.
+"#
+        .to_string();
+    }
+
+    if is_ready_tech_lead_task(input) {
+        return r#"## Coppice platform rules — Ready technical refinement (required)
+
+These rules override conflicting instructions in your system prompt or soul file.
+
+**This is a pre-implementation coordination run.** Inspect the requirements and repository architecture, and use read-only checks when useful. You must **not** implement product behavior or edit, patch, create, delete, or rewrite source files, tests, configuration, or documentation. Do not stage or commit changes.
+
+**On successful refinement:**
+- Return `status: "done"` and set `updatedDescription` to the complete ticket body, including a concrete technical approach, affected boundaries, key decisions, and risks.
+- Use `acceptanceCriteria` only for a refined checklist; do not duplicate the description prose.
+- Keep `summary` to 1–3 sentences for the ticket thread.
+- `assignTo` is required and must name a valid, enabled implementer on this project (for example `backend_engineer`, `frontend_engineer`, or `research`). Coppice applies the Ready-stage `workflow.auto_assign` policy and starts implementation when configured.
+- `changedFiles` must be `[]`. Report read-only verification commands in `testsRun` if you ran any.
+- Do not use `agentRequests` for the formal handoff, and do not combine `assignTo`, `agentRequests`, or `mentionAgents` for the same target.
+
+**When blocked on requirements:**
+- Return `status: "blocked"`, explain the exact question in `summary`, and mention PM with `mentionAgents`.
+- Omit `assignTo`. Coppice keeps the ticket in Ready and resumes this same technical-refinement run after PM answers.
+- Keep `changedFiles` empty; clarification does not authorize implementation.
 "#
         .to_string();
     }
@@ -814,7 +893,7 @@ mod tests {
     fn context_includes_required_sections() {
         let (context_profile, human_request, ticket_id, assignee_agent_key, thread_excerpt) =
             full_profile_defaults();
-        let md = build_context_md(&ContextInput {
+        let mut input = ContextInput {
             ticket_title: "Fix polling",
             ticket_description: "Add retry",
             ticket_status: "in_progress",
@@ -837,8 +916,8 @@ mod tests {
             ticket_id,
             assignee_agent_key,
             thread_excerpt,
-            consultation_request: None,
-        });
+        };
+        let md = build_context_md(&input);
         assert!(md.contains("# Current task"));
         assert!(md.contains("# Agent role"));
         assert!(md.contains("# Repository"));
@@ -856,41 +935,32 @@ mod tests {
         assert!(md.contains("`agentRequests` is the only successful-result field"));
         assert!(md.contains("\"agentRequests\""));
         assert!(!md.contains("PM refinement (required)"));
-    }
 
-    #[test]
-    fn consultation_context_puts_exact_request_and_rules_before_ticket_and_role() {
         let exact_request = "Review the transaction boundary.\nCall out any race conditions.";
-        let md = build_context_md(&ContextInput {
-            ticket_title: "Prevent duplicate dispatch",
-            ticket_description: "The full implementation ticket.",
-            ticket_status: "ready",
-            ticket_substatus: None,
-            agent_name: "Tech Lead Agent",
-            agent_key: "tech_lead",
-            agent_role: "Technical Lead",
-            agent_skills: &[],
-            agent_responsibilities: &[],
-            agent_system_prompt: "Implement whatever the ticket asks for.",
-            repo_name: Some("coppice"),
-            repo_remote_url: None,
-            repo_default_branch: Some("main"),
-            worktree_path: Some("/tmp/worktree"),
-            resume_context: Some("Older ticket discussion."),
-            context_profile: ContextProfile::Full,
-            human_request: None,
-            ticket_id: None,
-            assignee_agent_key: Some("pm"),
-            thread_excerpt: None,
-            consultation_request: Some(exact_request),
-        });
+        input.ticket_title = "Prevent duplicate dispatch";
+        input.ticket_description = "The full implementation ticket.";
+        input.ticket_status = "ready";
+        input.agent_name = "Tech Lead Agent";
+        input.agent_key = "tech_lead";
+        input.agent_role = "Technical Lead";
+        input.agent_skills = &[];
+        input.agent_responsibilities = &[];
+        input.agent_system_prompt = "Implement whatever the ticket asks for.";
+        input.repo_remote_url = None;
+        input.worktree_path = Some("/tmp/worktree");
+        input.resume_context = Some("Older ticket discussion.");
+        input.assignee_agent_key = Some("pm");
+        input.thread_excerpt = Some(exact_request);
+        let md = build_context_md(&input);
 
         let request_pos = md.find(exact_request).expect("exact request");
         let rules_pos = md
             .find("Coppice platform rules — consultation response")
             .expect("consultation rules");
         let ticket_pos = md.find("# Ticket context").expect("ticket context");
-        let thread_pos = md.find("## Ticket thread").expect("ticket thread");
+        let thread_pos = md
+            .find("Older ticket discussion.")
+            .expect("supporting ticket context");
         let role_pos = md.find("# Agent role").expect("agent role");
         let contract_pos = md
             .find("# Expected response-only result contract")
@@ -910,6 +980,34 @@ mod tests {
         assert!(!md.contains("\"updatedDescription\""));
         assert!(!md.contains("\"splitTickets\""));
         assert!(!md.contains("Coppice platform rules — git"));
+
+        input.thread_excerpt = None;
+        input.agent_role = "Product Manager";
+        let md = build_context_md(&input);
+        assert!(md.contains("Coppice platform rules — Ready technical refinement (required)"));
+        assert!(!md.contains("Coppice platform rules — PM refinement (required)"));
+        assert!(md.contains("`updatedDescription`"));
+        assert!(md.contains("`acceptanceCriteria`"));
+        assert!(md.contains("`assignTo`"));
+        assert!(md.contains("enabled implementer"));
+        assert!(md.contains("technical approach"));
+        assert!(md.contains("risks"));
+        assert!(md.contains("`changedFiles` must be `[]`"));
+        assert!(md.contains("\"changedFiles\": []"));
+        assert!(!md.contains("\"changedFiles\": [\"<paths changed>\"]"));
+        assert!(md.contains("must **not** implement"));
+        assert!(md.contains("mention PM"));
+        assert!(!md.contains("Coppice platform rules — git (required)"));
+        assert!(!md.contains("implementer completion"));
+        assert!(!md.contains("Coppice platform rules — code review"));
+
+        input.thread_excerpt = Some("");
+        input.agent_role = "Technical Lead";
+        let md = build_context_md(&input);
+        assert!(!md.contains("Coppice platform rules — Ready technical refinement"));
+        assert!(md.contains("Coppice platform rules — implementer completion"));
+        assert!(md.contains("Coppice platform rules — git (required)"));
+        assert!(md.contains("\"changedFiles\": [\"<paths changed>\"]"));
     }
 
     #[test]
@@ -939,13 +1037,16 @@ mod tests {
             ticket_id,
             assignee_agent_key,
             thread_excerpt,
-            consultation_request: None,
         });
         assert!(md.contains("Coppice platform rules — PM refinement (required)"));
         assert!(md.contains("Coppice platform rules — verification (required)"));
         assert!(md.contains("override conflicting instructions"));
         assert!(md.contains("**Split (multiple child tickets):**"));
         assert!(md.contains("Use `splitTickets` when work has multiple independent deliverables"));
+        assert!(md.contains("`assignTo` transfers or recommends formal ownership"));
+        assert!(md.contains("`agentRequests` requests a bounded consultation"));
+        assert!(md.contains("successful `mentionAgents` is notification-only"));
+        assert!(md.contains("Do not combine these fields for the same target"));
         assert!(!md.contains("**Field roles"));
     }
 
@@ -978,7 +1079,6 @@ mod tests {
             ticket_id,
             assignee_agent_key,
             thread_excerpt,
-            consultation_request: None,
         });
         assert!(md.contains("# Previous attempt summary"));
         assert!(md.contains("Need API shape."));
@@ -1012,7 +1112,6 @@ mod tests {
             ticket_id,
             assignee_agent_key,
             thread_excerpt,
-            consultation_request: None,
         });
         assert!(md.contains("Coppice platform rules — code review (required)"));
         assert!(md.contains("## Verdict"));
@@ -1047,7 +1146,6 @@ mod tests {
             ticket_id,
             assignee_agent_key,
             thread_excerpt,
-            consultation_request: None,
         });
         assert!(md.contains("Coppice platform rules — QA verification (required)"));
         // Verification-only: must not edit or fix source.
@@ -1092,7 +1190,6 @@ mod tests {
             ticket_id,
             assignee_agent_key,
             thread_excerpt,
-            consultation_request: None,
         });
         assert!(md.contains("# Current task"));
         assert!(md.contains("**Description:**"));
@@ -1132,7 +1229,6 @@ mod tests {
             ticket_id: Some(ticket_id),
             assignee_agent_key: Some("frontend_engineer"),
             thread_excerpt: None,
-            consultation_request: None,
         });
 
         let human_pos = md
@@ -1180,7 +1276,6 @@ mod tests {
             ticket_id: None,
             assignee_agent_key: None,
             thread_excerpt: None,
-            consultation_request: None,
         });
 
         assert!(!md.contains("Full description that should not appear"));
@@ -1225,7 +1320,6 @@ mod tests {
             ticket_id: None,
             assignee_agent_key: None,
             thread_excerpt: Some("- **Human:** Can you help?\n- **Agent:** Sure, working on it."),
-            consultation_request: None,
         });
 
         assert!(md.contains("## Recent thread"));

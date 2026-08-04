@@ -9,7 +9,10 @@ use crate::domain::run::{AgentRun, RunStatus};
 use crate::domain::slug::slugify;
 use crate::domain::substatus::Substatus;
 use crate::domain::ticket::status_to_str;
-use crate::domain::workflow::{JobRequest, RunOutcome, TransitionAction, TransitionContext};
+use crate::domain::workflow::{
+    is_ready_tech_lead_refinement, is_tech_lead_identity, JobRequest, RunOutcome, TransitionAction,
+    TransitionContext,
+};
 use crate::events::{AppEvent, EventBus};
 use crate::providers::AgentRunResult;
 use crate::services::agent_request::{
@@ -25,7 +28,7 @@ use crate::services::split_service::SplitService;
 use crate::services::ticket_service::TicketService;
 use crate::services::ticket_thread;
 use crate::services::workflow_service::{
-    WorkflowService, MAX_CLARIFICATION_ROUNDS, MAX_MENTIONS_PER_RUN,
+    is_implementer, WorkflowService, MAX_CLARIFICATION_ROUNDS, MAX_MENTIONS_PER_RUN,
 };
 use serde_json::Value;
 use sqlx::PgPool;
@@ -96,12 +99,20 @@ impl<'a> RunOrchestrator<'a> {
         let original_description = ticket.ticket.description.clone();
         let agent = AgentService::new(self.pool).get(run.agent_id).await?;
         let agents = AgentService::new(self.pool).list_agents().await?;
-        let (project_agent_keys, project_agent_ids) = build_project_agent_maps(&agents);
+        let (project_agent_keys, project_agent_ids, project_implementer_keys) =
+            build_project_agent_maps(&agents);
 
         let agent_key = agent
             .preset_source
             .clone()
             .unwrap_or_else(|| slugify(&agent.name));
+        let technical_refinement_run = is_ready_tech_lead_refinement(
+            run.context_profile,
+            &run.job_type,
+            status_to_str(current_status),
+            &agent_key,
+            &agent.role,
+        );
 
         let run_outcome = match apply.run_status {
             RunStatus::Succeeded => RunOutcome::Succeeded,
@@ -129,6 +140,7 @@ impl<'a> RunOrchestrator<'a> {
             contract: contract.clone(),
             project_agent_keys,
             project_agent_ids: project_agent_ids.clone(),
+            project_implementer_keys,
             auto_assign_enabled,
             clarification_round: ticket.ticket.clarification_round,
             context_profile: run.context_profile,
@@ -267,6 +279,7 @@ impl<'a> RunOrchestrator<'a> {
             ticket.ticket.assignee_agent_id,
             ticket.ticket.pending_assign_recommendation.as_ref(),
             &project_agent_ids,
+            !technical_refinement_run,
         );
         let mention_svc = MentionService::new(self.pool);
         for mention_id in &mention_dispatch.handled_mention_ids {
@@ -342,14 +355,25 @@ impl<'a> RunOrchestrator<'a> {
                         .iter()
                         .any(|j| j.agent_id == new_assignee && j.job_type == "work_on_ticket");
                     if !already_queued {
-                        run_svc
+                        match run_svc
                             .start_run_for_agent(
                                 run.ticket_id,
                                 new_assignee,
                                 "work_on_ticket",
                                 StartRunOptions::default(),
                             )
-                            .await?;
+                            .await
+                        {
+                            Ok(_) => {}
+                            Err(RunError::ActiveRunExists) if technical_refinement_run => {
+                                tracing::info!(
+                                    source_run_id = %run.id,
+                                    target_agent_id = %new_assignee,
+                                    "handoff target is already active; assigned Ready work will start after the active run finishes"
+                                );
+                            }
+                            Err(error) => return Err(error),
+                        }
                     }
                 }
             }
@@ -522,6 +546,8 @@ impl<'a> RunOrchestrator<'a> {
             return;
         }
 
+        self.start_deferred_ready_assignee_work(run).await;
+
         let mention = match MentionService::new(self.pool)
             .find_next_unscheduled_agent_request(run.ticket_id, run.agent_id)
             .await
@@ -606,6 +632,91 @@ impl<'a> RunOrchestrator<'a> {
                     mention_id = %mention.id,
                     error = %error,
                     "could not start deferred agent mention; mention remains pending"
+                );
+            }
+        }
+    }
+
+    async fn start_deferred_ready_assignee_work(&self, terminal_run: &AgentRun) {
+        if terminal_run.job_type != "respond_to_mention" {
+            return;
+        }
+
+        let ticket = match TicketService::new(self.pool)
+            .get(terminal_run.ticket_id)
+            .await
+        {
+            Ok(ticket) => ticket,
+            Err(error) => {
+                tracing::warn!(
+                    terminal_run_id = %terminal_run.id,
+                    ticket_id = %terminal_run.ticket_id,
+                    error = %error,
+                    "could not inspect deferred Ready ownership"
+                );
+                return;
+            }
+        };
+        if ticket.ticket.status != crate::domain::substatus::TicketStatus::Ready
+            || ticket.ticket.assignee_agent_id != Some(terminal_run.agent_id)
+            || ticket.ticket.repo_id.is_none()
+            || ticket.ticket.pending_assign_recommendation.is_some()
+        {
+            return;
+        }
+
+        let agent = match AgentService::new(self.pool)
+            .get(terminal_run.agent_id)
+            .await
+        {
+            Ok(agent) => agent,
+            Err(error) => {
+                tracing::warn!(
+                    terminal_run_id = %terminal_run.id,
+                    ticket_id = %terminal_run.ticket_id,
+                    agent_id = %terminal_run.agent_id,
+                    error = %error,
+                    "could not inspect deferred Ready assignee"
+                );
+                return;
+            }
+        };
+        let agent_key = agent
+            .preset_source
+            .clone()
+            .unwrap_or_else(|| slugify(&agent.name));
+        if !agent.enabled
+            || !is_implementer(&agent.role)
+            || is_tech_lead_identity(&agent_key, &agent.role)
+        {
+            return;
+        }
+
+        match RunService::new(self.pool)
+            .start_run_for_agent(
+                terminal_run.ticket_id,
+                terminal_run.agent_id,
+                "work_on_ticket",
+                StartRunOptions::default(),
+            )
+            .await
+        {
+            Ok(_) => {}
+            Err(RunError::ActiveRunExists) => {
+                tracing::info!(
+                    terminal_run_id = %terminal_run.id,
+                    ticket_id = %terminal_run.ticket_id,
+                    agent_id = %terminal_run.agent_id,
+                    "deferred Ready ownership already has an active run"
+                );
+            }
+            Err(error) => {
+                tracing::warn!(
+                    terminal_run_id = %terminal_run.id,
+                    ticket_id = %terminal_run.ticket_id,
+                    agent_id = %terminal_run.agent_id,
+                    error = %error,
+                    "could not start deferred Ready ownership work"
                 );
             }
         }
@@ -711,6 +822,7 @@ fn enqueue_successful_consultation_jobs(
     current_assignee_id: Option<Uuid>,
     pending_recommendation: Option<&Value>,
     project_agent_ids: &HashMap<String, Uuid>,
+    allow_consultation_dispatch: bool,
 ) -> SuccessfulMentionDispatch {
     let mut dispatch = SuccessfulMentionDispatch::default();
     if run_status != RunStatus::Succeeded {
@@ -755,6 +867,15 @@ fn enqueue_successful_consultation_jobs(
         .filter(|mention| consultation_agent_ids.contains(&mention.mentioned_agent_id))
         .collect::<Vec<_>>();
     if request_mentions.is_empty() {
+        return dispatch;
+    }
+
+    // Ready-stage Tech Lead work is a formal ownership gate. Keep request
+    // mentions durable, but do not let them create parallel consultation runs.
+    if !allow_consultation_dispatch {
+        dispatch
+            .handled_mention_ids
+            .extend(request_mentions.iter().map(|mention| mention.id));
         return dispatch;
     }
 
@@ -811,7 +932,7 @@ fn pending_recommendation_target(
     project_agent_ids.get(pending_key).copied()
 }
 
-fn build_project_agent_maps(agents: &[Agent]) -> (Vec<String>, HashMap<String, Uuid>) {
+fn build_project_agent_maps(agents: &[Agent]) -> (Vec<String>, HashMap<String, Uuid>, Vec<String>) {
     let mut keys = Vec::new();
 
     for agent in agents {
@@ -829,7 +950,36 @@ fn build_project_agent_maps(agents: &[Agent]) -> (Vec<String>, HashMap<String, U
         }
     }
 
-    (keys, resolve_agent_keys(agents))
+    let agent_ids = resolve_agent_keys(agents);
+    let implementer_ids = agents
+        .iter()
+        .filter(|agent| {
+            agent.enabled
+                && is_implementer(&agent.role)
+                && !agent
+                    .preset_source
+                    .as_deref()
+                    .is_some_and(|preset| preset.eq_ignore_ascii_case("tech_lead"))
+                && !is_tech_lead_role(&agent.role)
+        })
+        .map(|agent| agent.id)
+        .collect::<HashSet<_>>();
+    let implementer_keys = keys
+        .iter()
+        .filter(|key| {
+            agent_ids
+                .get(*key)
+                .is_some_and(|id| implementer_ids.contains(id))
+        })
+        .cloned()
+        .collect();
+
+    (keys, agent_ids, implementer_keys)
+}
+
+fn is_tech_lead_role(role: &str) -> bool {
+    let role = role.to_ascii_lowercase();
+    role.contains("tech lead") || role.contains("technical lead")
 }
 
 fn merge_substatus(
@@ -1191,6 +1341,7 @@ mod tests {
             None,
             None,
             &HashMap::new(),
+            true,
         )
     }
 
@@ -1314,6 +1465,7 @@ mod tests {
             None,
             Some(&pending),
             &HashMap::from([("tech_lead".into(), target_id)]),
+            true,
         );
 
         assert!(action.enqueue_jobs.is_empty());
@@ -1355,6 +1507,66 @@ mod tests {
     }
 
     #[test]
+    fn technical_refinement_requests_are_handled_without_response_runs() {
+        let source_id = Uuid::from_u128(1);
+        let target_id = Uuid::from_u128(2);
+        let run = test_run(source_id, "work_on_ticket");
+        let mention = pending_mention(target_id);
+        let mention_id = mention.id;
+        let mut action = TransitionAction::default();
+
+        let dispatch = enqueue_successful_consultation_jobs(
+            &mut action,
+            &run,
+            RunStatus::Succeeded,
+            &[mention],
+            &HashSet::from([target_id]),
+            None,
+            None,
+            &HashMap::new(),
+            false,
+        );
+
+        assert!(action.enqueue_jobs.is_empty());
+        assert!(dispatch.response_agent_ids.is_empty());
+        assert_eq!(dispatch.handled_mention_ids, vec![mention_id]);
+    }
+
+    #[test]
+    fn project_agent_maps_only_expose_enabled_implementer_aliases() {
+        let tech_lead_id = Uuid::from_u128(1);
+        let engineer_id = Uuid::from_u128(2);
+        let disabled_engineer_id = Uuid::from_u128(3);
+        let dual_lead_id = Uuid::from_u128(4);
+        let mut tech_lead = collaboration_agent(tech_lead_id, "Tech Lead", "tech_lead", true);
+        tech_lead.role = "Lead Engineer".into();
+        let mut engineer =
+            collaboration_agent(engineer_id, "Backend Engineer", "backend_engineer", true);
+        engineer.role = "Backend Engineer".into();
+        let mut disabled = collaboration_agent(
+            disabled_engineer_id,
+            "Disabled Engineer",
+            "disabled_engineer",
+            false,
+        );
+        disabled.role = "Backend Engineer".into();
+        let mut dual_lead =
+            collaboration_agent(dual_lead_id, "Architecture Lead", "architecture_lead", true);
+        dual_lead.role = "Technical Lead Engineer".into();
+
+        let (keys, agent_ids, implementer_keys) =
+            build_project_agent_maps(&[tech_lead, engineer, disabled, dual_lead]);
+
+        assert!(keys.contains(&"tech_lead".to_string()));
+        assert_eq!(agent_ids.get("backend_engineer"), Some(&engineer_id));
+        assert!(implementer_keys.contains(&"backend_engineer".to_string()));
+        assert!(implementer_keys.contains(&"backend-engineer".to_string()));
+        assert!(!implementer_keys.contains(&"tech_lead".to_string()));
+        assert!(!implementer_keys.contains(&"architecture_lead".to_string()));
+        assert!(!keys.contains(&"disabled_engineer".to_string()));
+    }
+
+    #[test]
     fn human_agent_done_does_not_change_status() {
         let ctx = TransitionContext {
             ticket_id: Uuid::from_u128(1),
@@ -1370,6 +1582,7 @@ mod tests {
                 ("pm".into(), Uuid::from_u128(0x100)),
                 ("backend_engineer".into(), Uuid::from_u128(0x200)),
             ]),
+            project_implementer_keys: vec!["backend_engineer".into()],
             auto_assign_enabled: true,
             clarification_round: 0,
             context_profile: ContextProfile::HumanAgent,
@@ -2573,6 +2786,219 @@ mod tests {
         .await
         .expect("count active target runs");
         assert_eq!(run_count, 1);
+    }
+
+    #[tokio::test]
+    async fn ready_handoff_defers_exactly_one_work_run_until_consultation_finishes() {
+        let Some(pool) = test_pool().await else {
+            return;
+        };
+        let fx = insert_fixture(&pool).await;
+        let _repo_dir = attach_ready_repo(&pool, fx.ticket_id).await;
+
+        sqlx::query(
+            "UPDATE agents SET name = 'Tech Lead', role = 'Technical Lead', preset_source = 'tech_lead' WHERE id = $1",
+        )
+        .bind(fx.pm_agent_id)
+        .execute(&pool)
+        .await
+        .expect("make source agent the Tech Lead");
+        sqlx::query("UPDATE tickets SET status = 'ready' WHERE id = $1")
+            .bind(fx.ticket_id)
+            .execute(&pool)
+            .await
+            .expect("prepare Ready ticket");
+
+        let run_svc = RunService::new(&pool);
+        let consultation = run_svc
+            .start_run_for_agent(
+                fx.ticket_id,
+                fx.engineer_agent_id,
+                "respond_to_mention",
+                StartRunOptions::default(),
+            )
+            .await
+            .expect("start target consultation");
+
+        let workflow = WorkflowConfig {
+            auto_start_runs: true,
+            ..WorkflowConfig::default()
+        };
+        let orchestrator = RunOrchestrator::new(&pool, &workflow);
+        orchestrator
+            .finish_run(
+                &AgentRun {
+                    id: fx.run_id,
+                    ticket_id: fx.ticket_id,
+                    agent_id: fx.pm_agent_id,
+                    job_type: "work_on_ticket".into(),
+                    status: RunStatus::Running,
+                    sandbox_profile_id: PROFILE_ID.to_string(),
+                    worktree_path: None,
+                    branch_name: None,
+                    error_message: None,
+                    session_id: None,
+                    context_profile: ContextProfile::Full,
+                    trigger_comment_id: None,
+                    started_at: None,
+                    ended_at: None,
+                    created_at: time::OffsetDateTime::now_utc(),
+                },
+                &pm_done_with_assign_to("backend_engineer"),
+                succeeded_apply("Technical approach is ready", &[]),
+                None,
+                None,
+            )
+            .await
+            .expect("defer implementation while target consultation is active");
+
+        let target_work_before = sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM agent_runs WHERE ticket_id = $1 AND agent_id = $2 AND job_type = 'work_on_ticket'",
+        )
+        .bind(fx.ticket_id)
+        .bind(fx.engineer_agent_id)
+        .fetch_one(&pool)
+        .await
+        .expect("count work runs before consultation finishes");
+        assert_eq!(target_work_before, 0);
+
+        sqlx::query("UPDATE agent_runs SET status = 'running' WHERE id = $1")
+            .bind(consultation.id)
+            .execute(&pool)
+            .await
+            .expect("mark consultation running");
+        let finished_consultation = run_svc
+            .finish_run(consultation.id, RunStatus::Succeeded, None, None)
+            .await
+            .expect("finish consultation");
+
+        orchestrator
+            .handle_terminal_run(&finished_consultation)
+            .await;
+        orchestrator
+            .handle_terminal_run(&finished_consultation)
+            .await;
+
+        let target_runs = sqlx::query_as::<_, (String, String)>(
+            r#"
+            SELECT job_type, status FROM agent_runs
+            WHERE ticket_id = $1 AND agent_id = $2
+            ORDER BY created_at ASC
+            "#,
+        )
+        .bind(fx.ticket_id)
+        .bind(fx.engineer_agent_id)
+        .fetch_all(&pool)
+        .await
+        .expect("load target runs");
+        assert_eq!(
+            target_runs,
+            vec![
+                ("respond_to_mention".into(), "succeeded".into()),
+                ("work_on_ticket".into(), "queued".into()),
+            ]
+        );
+
+        let ticket = TicketService::new(&pool)
+            .get(fx.ticket_id)
+            .await
+            .expect("load ticket after deferred start");
+        assert_eq!(ticket.ticket.status, TicketStatus::InProgress);
+        assert_eq!(ticket.ticket.assignee_agent_id, Some(fx.engineer_agent_id));
+    }
+
+    #[tokio::test]
+    async fn human_chat_does_not_start_ready_work_for_retained_tech_lead() {
+        let Some(pool) = test_pool().await else {
+            return;
+        };
+        let fx = insert_fixture(&pool).await;
+        let _repo_dir = attach_ready_repo(&pool, fx.ticket_id).await;
+
+        sqlx::query(
+            "UPDATE agents SET name = 'Tech Lead', role = 'Technical Lead Engineer', preset_source = 'tech_lead' WHERE id = $1",
+        )
+        .bind(fx.pm_agent_id)
+        .execute(&pool)
+        .await
+        .expect("make retained assignee the Tech Lead");
+        sqlx::query("UPDATE agent_runs SET status = 'succeeded' WHERE id = $1")
+            .bind(fx.run_id)
+            .execute(&pool)
+            .await
+            .expect("terminalize fixture work run");
+
+        let pending = serde_json::json!({
+            "recommendedAgentKey": "backend_engineer",
+            "recommendedByAgentId": fx.pm_agent_id,
+            "recommendedAt": "2026-08-04T00:00:00Z",
+            "summary": "Technical refinement complete"
+        });
+        sqlx::query(
+            "UPDATE tickets SET status = 'ready', assignee_agent_id = $2, pending_assign_recommendation = $3 WHERE id = $1",
+        )
+        .bind(fx.ticket_id)
+        .bind(fx.pm_agent_id)
+        .bind(pending)
+        .execute(&pool)
+        .await
+        .expect("prepare manual Ready recommendation");
+
+        let workflow = WorkflowConfig {
+            auto_start_runs: true,
+            ..WorkflowConfig::default()
+        };
+        let orchestrator = RunOrchestrator::new(&pool, &workflow);
+        let human_chat_run = AgentRun {
+            id: Uuid::new_v4(),
+            ticket_id: fx.ticket_id,
+            agent_id: fx.pm_agent_id,
+            job_type: "respond_to_mention".into(),
+            status: RunStatus::Succeeded,
+            sandbox_profile_id: PROFILE_ID.to_string(),
+            worktree_path: None,
+            branch_name: None,
+            error_message: None,
+            session_id: None,
+            context_profile: ContextProfile::HumanChat,
+            trigger_comment_id: None,
+            started_at: None,
+            ended_at: None,
+            created_at: time::OffsetDateTime::now_utc(),
+        };
+
+        orchestrator.handle_terminal_run(&human_chat_run).await;
+        let work_after_manual = sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM agent_runs WHERE ticket_id = $1 AND id != $2 AND job_type = 'work_on_ticket'",
+        )
+        .bind(fx.ticket_id)
+        .bind(fx.run_id)
+        .fetch_one(&pool)
+        .await
+        .expect("count work after manual handoff");
+        assert_eq!(work_after_manual, 0);
+
+        sqlx::query("UPDATE tickets SET pending_assign_recommendation = NULL WHERE id = $1")
+            .bind(fx.ticket_id)
+            .execute(&pool)
+            .await
+            .expect("prepare invalid handoff state");
+        orchestrator
+            .handle_terminal_run(&AgentRun {
+                id: Uuid::new_v4(),
+                ..human_chat_run
+            })
+            .await;
+
+        let work_after_invalid = sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM agent_runs WHERE ticket_id = $1 AND id != $2 AND job_type = 'work_on_ticket'",
+        )
+        .bind(fx.ticket_id)
+        .bind(fx.run_id)
+        .fetch_one(&pool)
+        .await
+        .expect("count work after invalid handoff");
+        assert_eq!(work_after_invalid, 0);
     }
 
     #[tokio::test]
@@ -3950,7 +4376,6 @@ mod tests {
             ticket_id: None,
             assignee_agent_key: None,
             thread_excerpt: None,
-            consultation_request: None,
         };
         write_context_file(worktree.path(), &context_input).expect("write context");
         let md = std::fs::read_to_string(worktree.path().join(".agent/context.md"))

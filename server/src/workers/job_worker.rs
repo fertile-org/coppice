@@ -14,6 +14,7 @@ use crate::domain::run::{run_status_to_str, AgentRun, RunStatus};
 use crate::domain::slug::slugify;
 use crate::domain::substatus::TicketStatus;
 use crate::domain::ticket::{status_to_str, substatus_to_str};
+use crate::domain::workflow::is_ready_tech_lead_refinement;
 use crate::events::{publish_run_finished, AppEvent};
 use crate::providers::{AgentRunInput, ProviderError};
 use crate::services::agent_request::agent_request_for_target_from_comment;
@@ -178,6 +179,10 @@ async fn execute_job(
         .get(run.agent_id)
         .await
         .context("load agent")?;
+    let agent_key = agent
+        .preset_source
+        .clone()
+        .unwrap_or_else(|| slugify(&agent.name));
 
     let repo_id = ticket.ticket.repo_id.context("ticket has no repo")?;
 
@@ -216,8 +221,10 @@ async fn execute_job(
     if run.context_profile != ContextProfile::HumanAgent {
         if let Some(new_status) = WorkflowService::resolve_run_start_transition(
             ticket.ticket.status,
+            &agent_key,
             &agent.role,
             &run.job_type,
+            run.context_profile,
         ) {
             let updated = TicketService::new(pool)
                 .update_status(run.ticket_id, new_status, None, None)
@@ -253,11 +260,6 @@ async fn execute_job(
         agent_id: run.agent_id,
         status: "running".into(),
     });
-
-    let agent_key = agent
-        .preset_source
-        .clone()
-        .unwrap_or_else(|| slugify(&agent.name));
 
     let agents = AgentService::new(pool)
         .list_agents()
@@ -414,6 +416,12 @@ async fn execute_job(
         ContextProfile::Full => ticket.ticket.description.as_str(),
         ContextProfile::HumanAgent | ContextProfile::HumanChat => "",
     };
+    let context_thread_excerpt = match run.context_profile {
+        ContextProfile::Full if run.job_type == "work_on_ticket" => None,
+        ContextProfile::Full => Some(consultation_request_ref.unwrap_or_default()),
+        ContextProfile::HumanChat => thread_excerpt_ref,
+        ContextProfile::HumanAgent => None,
+    };
     let context_input = ContextInput {
         ticket_title: &ticket.ticket.title,
         ticket_description,
@@ -436,8 +444,7 @@ async fn execute_job(
         human_request,
         ticket_id: Some(run.ticket_id),
         assignee_agent_key: assignee_agent_key_ref,
-        thread_excerpt: thread_excerpt_ref,
-        consultation_request: consultation_request_ref,
+        thread_excerpt: context_thread_excerpt,
     };
     if run.context_profile == ContextProfile::Full {
         let counter = ByteTokenCounter;
@@ -572,8 +579,11 @@ async fn execute_job(
         .run(AgentRunInput {
             agent_id: run.agent_id.to_string(),
             agent_key: agent_key.clone(),
+            agent_role: agent.role.clone(),
             job_type: run.job_type.clone(),
             ticket_id: Some(run.ticket_id.to_string()),
+            ticket_status: Some(ticket.ticket.status),
+            context_profile: run.context_profile,
             context_path,
             run_id: Some(run.id.to_string()),
             artifacts_dir: Some(state.config.storage.artifacts_dir.clone()),
@@ -779,14 +789,19 @@ fn persist_artifacts_to_dir(
 }
 
 fn is_review_agent(agent: &crate::domain::agent::Agent) -> bool {
-    if matches!(
-        agent.preset_source.as_deref(),
-        Some("tech_lead") | Some("reviewer")
-    ) {
+    if is_tech_lead_agent(agent) || matches!(agent.preset_source.as_deref(), Some("reviewer")) {
         return true;
     }
     let role = agent.role.to_lowercase();
-    role.contains("tech lead") || role.contains("technical lead") || role.contains("review")
+    role.contains("review")
+}
+
+fn is_tech_lead_agent(agent: &crate::domain::agent::Agent) -> bool {
+    if matches!(agent.preset_source.as_deref(), Some("tech_lead")) {
+        return true;
+    }
+    let role = agent.role.to_ascii_lowercase();
+    role.contains("tech lead") || role.contains("technical lead")
 }
 
 fn is_qc_agent(agent: &crate::domain::agent::Agent) -> bool {
@@ -817,7 +832,20 @@ fn should_finalize_run_git(
     agent: &crate::domain::agent::Agent,
     ticket_status: TicketStatus,
 ) -> bool {
-    run.job_type == "work_on_ticket" && should_finalize_worktree_git(agent, ticket_status)
+    if run.job_type != "work_on_ticket" {
+        return false;
+    }
+    let agent_key = agent
+        .preset_source
+        .clone()
+        .unwrap_or_else(|| slugify(&agent.name));
+    !is_ready_tech_lead_refinement(
+        run.context_profile,
+        &run.job_type,
+        status_to_str(ticket_status),
+        &agent_key,
+        &agent.role,
+    ) && should_finalize_worktree_git(agent, ticket_status)
 }
 
 fn consultation_request_from_trigger(
@@ -1048,6 +1076,35 @@ mod tests {
     fn should_not_finalize_git_for_qc_verification_in_qa() {
         let qc = test_agent("QC", Some("qc"));
         assert!(!should_finalize_worktree_git(&qc, TicketStatus::InQa));
+    }
+
+    #[test]
+    fn should_not_finalize_git_for_ready_tech_lead() {
+        let tech_lead = test_agent("Technical Lead", Some("tech_lead"));
+        assert!(!should_finalize_run_git(
+            &test_run("work_on_ticket"),
+            &tech_lead,
+            TicketStatus::Ready
+        ));
+    }
+
+    #[test]
+    fn ready_tech_lead_human_agent_run_still_finalizes_git() {
+        let tech_lead = test_agent("Technical Lead", Some("tech_lead"));
+        let mut run = test_run("work_on_ticket");
+        run.context_profile = ContextProfile::HumanAgent;
+
+        assert!(should_finalize_run_git(
+            &run,
+            &tech_lead,
+            TicketStatus::Ready
+        ));
+    }
+
+    #[test]
+    fn ready_implementer_still_finalizes_git() {
+        let engineer = test_agent("Backend Engineer", Some("backend_engineer"));
+        assert!(should_finalize_worktree_git(&engineer, TicketStatus::Ready));
     }
 
     #[test]

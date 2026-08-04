@@ -1,4 +1,6 @@
 use super::{fixtures_root, AgentProvider, AgentRunInput, AgentRunResult, ProviderError};
+use crate::domain::ticket::status_to_str;
+use crate::domain::workflow::is_ready_tech_lead_refinement;
 use async_trait::async_trait;
 use std::path::PathBuf;
 
@@ -32,6 +34,19 @@ impl MockProvider {
             && resume.exists()
         {
             return resume;
+        }
+        let ready = self.fixtures_dir.join(&input.agent_key).join("ready.json");
+        if input.ticket_status.is_some_and(|status| {
+            is_ready_tech_lead_refinement(
+                input.context_profile,
+                &input.job_type,
+                status_to_str(status),
+                &input.agent_key,
+                &input.agent_role,
+            )
+        }) && ready.exists()
+        {
+            return ready;
         }
         let keyed = self
             .fixtures_dir
@@ -107,6 +122,10 @@ impl AgentProvider for MockProvider {
 }
 
 #[cfg(test)]
+use crate::domain::context_profile::ContextProfile;
+#[cfg(test)]
+use crate::domain::substatus::TicketStatus;
+#[cfg(test)]
 use std::sync::{Mutex, MutexGuard};
 
 #[cfg(test)]
@@ -158,8 +177,16 @@ mod tests {
         AgentRunInput {
             agent_id: agent_key.into(),
             agent_key: agent_key.into(),
+            agent_role: match agent_key {
+                "tech_lead" => "Technical Lead",
+                "pm" => "PM",
+                _ => "Backend Engineer",
+            }
+            .into(),
             job_type: job_type.into(),
             ticket_id: None,
+            ticket_status: None,
+            context_profile: ContextProfile::Full,
             context_path: "/tmp".into(),
             run_id: None,
             artifacts_dir: None,
@@ -192,11 +219,10 @@ mod tests {
             } => {
                 assert_eq!(
                     summary,
-                    "Refined ticket scope and added acceptance criteria for engineering handoff."
+                    "Refined ticket scope and prepared it for Tech Lead technical refinement."
                 );
-                assert_eq!(assign_to.as_deref(), Some("backend_engineer"));
-                assert_eq!(agent_requests.len(), 1);
-                assert_eq!(agent_requests[0].agent_key, "backend_engineer");
+                assert_eq!(assign_to.as_deref(), Some("tech_lead"));
+                assert!(agent_requests.is_empty());
             }
             _ => panic!("expected done variant"),
         }
@@ -282,6 +308,81 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn tech_lead_ready_uses_refinement_fixture() {
+        let _lock = env_lock();
+        let _response_guard = EnvGuard::clear("MOCK_AGENT_RESPONSE");
+        let provider = MockProvider::new(fixtures_root());
+        let contexts = TempDir::new().expect("context tempdir");
+        let ready_context = contexts.path().join("ready.md");
+        std::fs::write(
+            &ready_context,
+            "# Ticket context\n\n**Description:**\n\n# Agent role\n\n**Status:** in_review\n\n**Status:** ready\n\n# Agent role\n\n# Ticket thread\n\n**Status:** in_review",
+        )
+        .expect("write Ready context");
+        let review_context = contexts.path().join("review.md");
+        std::fs::write(
+            &review_context,
+            "# Ticket context\n\n**Description:**\n\n# Agent role\n\n**Status:** ready\n\n**Status:** in_review\n\n# Agent role\n",
+        )
+        .expect("write review context");
+
+        let mut ready_input = base_input("tech_lead", "work_on_ticket");
+        ready_input.ticket_status = Some(TicketStatus::Ready);
+        ready_input.context_path = ready_context.to_string_lossy().into_owned();
+        let ready_result = provider
+            .run(ready_input)
+            .await
+            .expect("Ready Tech Lead fixture");
+        match ready_result {
+            AgentRunResult::Done {
+                assign_to,
+                changed_files,
+                summary,
+                ..
+            } => {
+                assert_eq!(assign_to.as_deref(), Some("backend_engineer"));
+                assert!(changed_files.is_empty());
+                assert!(summary.contains("technical approach"));
+            }
+            _ => panic!("expected Ready refinement result"),
+        }
+
+        let mut review_input = base_input("tech_lead", "work_on_ticket");
+        review_input.ticket_status = Some(TicketStatus::InReview);
+        review_input.context_path = review_context.to_string_lossy().into_owned();
+        let review_result = provider
+            .run(review_input)
+            .await
+            .expect("In Review Tech Lead fixture");
+        match review_result {
+            AgentRunResult::Done {
+                assign_to, summary, ..
+            } => {
+                assert!(assign_to.is_none());
+                assert!(summary.contains("## Verdict"));
+            }
+            _ => panic!("expected review result"),
+        }
+
+        let mut human_agent_input = base_input("tech_lead", "work_on_ticket");
+        human_agent_input.ticket_status = Some(TicketStatus::Ready);
+        human_agent_input.context_profile = ContextProfile::HumanAgent;
+        let human_agent_result = provider
+            .run(human_agent_input)
+            .await
+            .expect("Human Agent Tech Lead fixture");
+        match human_agent_result {
+            AgentRunResult::Done {
+                assign_to, summary, ..
+            } => {
+                assert!(assign_to.is_none());
+                assert!(summary.contains("## Verdict"));
+            }
+            _ => panic!("expected regular work fixture for Human Agent mode"),
+        }
+    }
+
+    #[tokio::test]
     async fn env_override_still_resolves_root_fixture() {
         let _lock = env_lock();
         let _response_guard = EnvGuard::set("MOCK_AGENT_RESPONSE", "done");
@@ -311,8 +412,11 @@ mod tests {
             .run(AgentRunInput {
                 agent_id: "agent-1".into(),
                 agent_key: "agent-1".into(),
+                agent_role: "Backend Engineer".into(),
                 job_type: "work_on_ticket".into(),
                 ticket_id: None,
+                ticket_status: None,
+                context_profile: ContextProfile::Full,
                 context_path: "/tmp".into(),
                 run_id: Some(run_id.into()),
                 artifacts_dir: Some(artifacts.path().to_string_lossy().into_owned()),

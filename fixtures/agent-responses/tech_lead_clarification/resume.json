@@ -1,0 +1,12 @@
+{
+  "status": "done",
+  "summary": "Recorded the clarified technical approach and risks, then handed implementation to the backend engineer.",
+  "updatedDescription": "Implement retry with exponential backoff for idempotent API calls.\n\n## Technical approach\n\nKeep retry policy at the API client boundary and require an idempotency key for mutating requests.\n\n## Risks\n\nUnbounded retries can amplify load; cap attempts and backoff duration.",
+  "acceptanceCriteria": "- [ ] Retry only idempotent requests or requests carrying an idempotency key\n- [ ] Cap attempts at 3\n- [ ] Cover retryable and non-retryable failures in unit tests",
+  "assignTo": "backend_engineer",
+  "changedFiles": [],
+  "testsRun": [],
+  "mentionAgents": [],
+  "agentRequests": [],
+  "blockers": []
+}
