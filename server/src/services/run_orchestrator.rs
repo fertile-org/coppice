@@ -3020,6 +3020,12 @@ mod tests {
             return;
         };
         let fx = insert_fixture(&pool).await;
+        let _repo_dir = attach_ready_repo(&pool, fx.ticket_id).await;
+        sqlx::query("UPDATE agent_runs SET job_type = 'respond_to_mention' WHERE id = $1")
+            .bind(fx.run_id)
+            .execute(&pool)
+            .await
+            .expect("persist consultation source job type");
         let pending = serde_json::json!({
             "recommendedAgentKey": "backend_engineer",
             "recommendedByAgentId": fx.pm_agent_id,
@@ -3044,7 +3050,13 @@ mod tests {
 
         let contract = AgentRunResult::Blocked {
             blocker_type: "permission".into(),
-            summary: "Cannot inspect the protected dependency.".into(),
+            summary: concat!(
+                "Cannot inspect the protected dependency.\n\n",
+                "<!-- coppice-agent-requests: ",
+                r#"[{"agentKey":"backend_engineer","intent":"consult","request":"Run me"}]"#,
+                " -->"
+            )
+            .into(),
             next_status: Some("Blocked".into()),
             assign_to: Some("pm".into()),
             updated_description: Some("Must not replace description".into()),
@@ -3053,14 +3065,15 @@ mod tests {
             required_capabilities: vec![],
             required_secrets: vec![],
         };
-        let apply = crate::services::result_contract::apply_agent_result(&contract)
-            .expect("apply provider blocked result");
+        let apply = crate::services::result_contract::apply_consultation_result(&contract)
+            .expect("apply blocked consultation result");
 
         let workflow = WorkflowConfig {
             auto_start_runs: true,
             ..WorkflowConfig::default()
         };
-        RunOrchestrator::new(&pool, &workflow)
+        let orchestrator = RunOrchestrator::new(&pool, &workflow);
+        orchestrator
             .finish_run(
                 &AgentRun {
                     id: fx.run_id,
@@ -3117,6 +3130,61 @@ mod tests {
         .await
         .expect("count blocked consultation response runs");
         assert_eq!(response_run_count, 0);
+
+        // Remove ownership precedence only to exercise deferred request
+        // scheduling after the invariance assertions above.
+        sqlx::query(
+            r#"
+            UPDATE tickets
+            SET assignee_agent_id = $2, pending_assign_recommendation = NULL
+            WHERE id = $1
+            "#,
+        )
+        .bind(fx.ticket_id)
+        .bind(fx.pm_agent_id)
+        .execute(&pool)
+        .await
+        .expect("remove engineer ownership suppression");
+
+        let terminal_engineer_run_id = Uuid::new_v4();
+        sqlx::query(
+            r#"
+            INSERT INTO agent_runs (
+                id, ticket_id, agent_id, job_type, status, sandbox_profile_id,
+                error_message, ended_at
+            )
+            VALUES ($1, $2, $3, 'work_on_ticket', 'failed', $4, $5, now())
+            "#,
+        )
+        .bind(terminal_engineer_run_id)
+        .bind(fx.ticket_id)
+        .bind(fx.engineer_agent_id)
+        .bind(PROFILE_ID)
+        .bind("provider failed")
+        .execute(&pool)
+        .await
+        .expect("insert terminal engineer run");
+        let terminal_engineer_run = RunService::new(&pool)
+            .get(terminal_engineer_run_id)
+            .await
+            .expect("load terminal engineer run");
+
+        orchestrator
+            .handle_terminal_run(&terminal_engineer_run)
+            .await;
+
+        let deferred_response_run_count = sqlx::query_scalar::<_, i64>(
+            r#"
+            SELECT COUNT(*) FROM agent_runs
+            WHERE ticket_id = $1 AND agent_id = $2 AND job_type = 'respond_to_mention'
+            "#,
+        )
+        .bind(fx.ticket_id)
+        .bind(fx.engineer_agent_id)
+        .fetch_one(&pool)
+        .await
+        .expect("count deferred blocked consultation response runs");
+        assert_eq!(deferred_response_run_count, 0);
     }
 
     #[tokio::test]

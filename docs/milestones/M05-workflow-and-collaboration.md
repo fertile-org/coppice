@@ -143,7 +143,7 @@ No new services. Optional workflow config mount:
 
 ### E2E full (local)
 
-- Successful attention-only `@mentions` are visible and notify without starting a run; blocked `work_on_ticket` clarification mentions and successful structured consultation requests create `respond_to_mention` jobs
+- Attention-only `@mentions` are visible and notify but never start runs; with auto-start enabled, blocked `work_on_ticket` clarification mentions and eligible structured requests from successful full-context `work_on_ticket` runs create scoped `respond_to_mention` jobs, subject to ownership precedence
 - Blocked card badge shows substatus text
 - Ignore mention action
 

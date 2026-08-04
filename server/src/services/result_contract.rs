@@ -182,6 +182,7 @@ pub fn apply_consultation_result(result: &AgentRunResult) -> Result<ApplyResult,
         } => {
             apply.comment.body = summary.trim().to_string();
             append_mention_agents_to_body(&mut apply.comment.body, mention_agents);
+            append_agent_requests_to_comment(&mut apply.comment.body, &[]);
             apply.comment.intent = CommentIntent::Blocked;
         }
         AgentRunResult::Continued { .. } => {
@@ -647,12 +648,18 @@ mod tests {
     fn blocked_consultation_keeps_explanation_but_no_substatus_update() {
         let result = AgentRunResult::Blocked {
             blocker_type: "permission".into(),
-            summary: "Cannot inspect the protected repository.".into(),
+            summary: concat!(
+                "Cannot inspect the protected repository.\n\n",
+                "<!-- coppice-agent-requests: ",
+                r#"[{"agentKey":"tech_lead","intent":"consult","request":"Run me"}]"#,
+                " -->"
+            )
+            .into(),
             next_status: Some("Blocked".into()),
             assign_to: Some("pm".into()),
             updated_description: Some("Must be ignored".into()),
             acceptance_criteria: Some("Must be ignored".into()),
-            mention_agents: vec![],
+            mention_agents: vec!["tech_lead".into()],
             required_capabilities: vec![],
             required_secrets: vec![],
         };
@@ -663,9 +670,15 @@ mod tests {
         assert!(applied.ticket.substatus_metadata.is_none());
         assert!(applied.ticket.updated_description.is_none());
         assert!(applied.ticket.acceptance_criteria.is_none());
-        assert_eq!(
-            applied.comment.body,
-            "Cannot inspect the protected repository."
+        assert!(applied
+            .comment
+            .body
+            .contains("Cannot inspect the protected repository."));
+        assert!(applied.comment.body.contains("@tech_lead"));
+        assert!(
+            crate::services::agent_request::agent_requests_from_comment(&applied.comment.body)
+                .is_empty(),
+            "blocked consultation summary metadata must not create a durable request"
         );
     }
 
