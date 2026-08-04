@@ -230,11 +230,12 @@ impl<'a> RunOrchestrator<'a> {
         let mentions = if collaboration_targets.keys.is_empty() {
             Vec::new()
         } else {
-            let resume_agent_id = if apply.run_status == RunStatus::Blocked {
-                Some(run.agent_id)
-            } else {
-                None
-            };
+            let resume_agent_id =
+                if apply.run_status == RunStatus::Blocked && run.job_type == "work_on_ticket" {
+                    Some(run.agent_id)
+                } else {
+                    None
+                };
             MentionService::new(self.pool)
                 .create_mentions(
                     run.ticket_id,
@@ -3048,14 +3049,18 @@ mod tests {
             assign_to: Some("pm".into()),
             updated_description: Some("Must not replace description".into()),
             acceptance_criteria: Some("- Must not replace criteria".into()),
-            mention_agents: vec![],
+            mention_agents: vec!["backend_engineer".into()],
             required_capabilities: vec![],
             required_secrets: vec![],
         };
         let apply = crate::services::result_contract::apply_agent_result(&contract)
             .expect("apply provider blocked result");
 
-        RunOrchestrator::new(&pool, &WorkflowConfig::default())
+        let workflow = WorkflowConfig {
+            auto_start_runs: true,
+            ..WorkflowConfig::default()
+        };
+        RunOrchestrator::new(&pool, &workflow)
             .finish_run(
                 &AgentRun {
                     id: fx.run_id,
@@ -3091,6 +3096,27 @@ mod tests {
         assert_eq!(ticket.ticket.assignee_agent_id, Some(fx.engineer_agent_id));
         assert_eq!(ticket.ticket.description, "Original description");
         assert_eq!(ticket.ticket.pending_assign_recommendation, Some(pending));
+
+        let mentions = MentionService::new(&pool)
+            .list_pending_for_ticket(fx.ticket_id)
+            .await
+            .expect("load blocked consultation mention");
+        assert_eq!(mentions.len(), 1);
+        assert_eq!(mentions[0].mentioned_agent_id, fx.engineer_agent_id);
+        assert_eq!(mentions[0].resume_agent_id, None);
+
+        let response_run_count = sqlx::query_scalar::<_, i64>(
+            r#"
+            SELECT COUNT(*) FROM agent_runs
+            WHERE ticket_id = $1 AND agent_id = $2 AND job_type = 'respond_to_mention'
+            "#,
+        )
+        .bind(fx.ticket_id)
+        .bind(fx.engineer_agent_id)
+        .fetch_one(&pool)
+        .await
+        .expect("count blocked consultation response runs");
+        assert_eq!(response_run_count, 0);
     }
 
     #[tokio::test]

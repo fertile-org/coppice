@@ -143,7 +143,7 @@ No new services. Optional workflow config mount:
 
 ### E2E full (local)
 
-- @mention visible in comment thread; mentioned agent receives job
+- Successful attention-only `@mentions` are visible and notify without starting a run; blocked `work_on_ticket` clarification mentions and successful structured consultation requests create `respond_to_mention` jobs
 - Blocked card badge shows substatus text
 - Ignore mention action
 
