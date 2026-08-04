@@ -3,6 +3,7 @@ use crate::domain::context_profile::ContextProfile;
 use crate::domain::job::{job_status_to_str, JobStatus};
 use crate::domain::repo::VerificationStatus;
 use crate::domain::run::{run_status_from_str, run_status_to_str, AgentRun, RunStatus};
+use crate::domain::slug::slugify;
 use crate::sandbox::permissive::PROFILE_ID;
 use crate::services::agent_service::AgentError;
 use crate::services::agent_service::AgentService;
@@ -223,8 +224,13 @@ impl<'a> RunService<'a> {
         let ticket_svc = TicketService::new(self.pool);
         let ticket = ticket_svc.get(ticket_id).await?;
         let agent = AgentService::new(self.pool).get(agent_id).await?;
+        let agent_key = agent
+            .preset_source
+            .clone()
+            .unwrap_or_else(|| slugify(&agent.name));
         let Some(new_status) = WorkflowService::resolve_run_start_transition(
             ticket.ticket.status,
+            &agent_key,
             &agent.role,
             job_type,
         ) else {

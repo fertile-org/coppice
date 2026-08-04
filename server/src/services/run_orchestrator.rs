@@ -844,7 +844,15 @@ fn build_project_agent_maps(agents: &[Agent]) -> (Vec<String>, HashMap<String, U
     let agent_ids = resolve_agent_keys(agents);
     let implementer_ids = agents
         .iter()
-        .filter(|agent| agent.enabled && is_implementer(&agent.role))
+        .filter(|agent| {
+            agent.enabled
+                && is_implementer(&agent.role)
+                && !agent
+                    .preset_source
+                    .as_deref()
+                    .is_some_and(|preset| preset.eq_ignore_ascii_case("tech_lead"))
+                && !is_tech_lead_role(&agent.role)
+        })
         .map(|agent| agent.id)
         .collect::<HashSet<_>>();
     let implementer_keys = keys
@@ -1420,8 +1428,9 @@ mod tests {
         let tech_lead_id = Uuid::from_u128(1);
         let engineer_id = Uuid::from_u128(2);
         let disabled_engineer_id = Uuid::from_u128(3);
+        let dual_lead_id = Uuid::from_u128(4);
         let mut tech_lead = collaboration_agent(tech_lead_id, "Tech Lead", "tech_lead", true);
-        tech_lead.role = "Technical Lead".into();
+        tech_lead.role = "Lead Engineer".into();
         let mut engineer =
             collaboration_agent(engineer_id, "Backend Engineer", "backend_engineer", true);
         engineer.role = "Backend Engineer".into();
@@ -1432,15 +1441,19 @@ mod tests {
             false,
         );
         disabled.role = "Backend Engineer".into();
+        let mut dual_lead =
+            collaboration_agent(dual_lead_id, "Architecture Lead", "architecture_lead", true);
+        dual_lead.role = "Technical Lead Engineer".into();
 
         let (keys, agent_ids, implementer_keys) =
-            build_project_agent_maps(&[tech_lead, engineer, disabled]);
+            build_project_agent_maps(&[tech_lead, engineer, disabled, dual_lead]);
 
         assert!(keys.contains(&"tech_lead".to_string()));
         assert_eq!(agent_ids.get("backend_engineer"), Some(&engineer_id));
         assert!(implementer_keys.contains(&"backend_engineer".to_string()));
         assert!(implementer_keys.contains(&"backend-engineer".to_string()));
         assert!(!implementer_keys.contains(&"tech_lead".to_string()));
+        assert!(!implementer_keys.contains(&"architecture_lead".to_string()));
         assert!(!keys.contains(&"disabled_engineer".to_string()));
     }
 

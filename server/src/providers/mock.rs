@@ -1,4 +1,5 @@
 use super::{fixtures_root, AgentProvider, AgentRunInput, AgentRunResult, ProviderError};
+use crate::domain::substatus::TicketStatus;
 use async_trait::async_trait;
 use std::path::PathBuf;
 
@@ -35,7 +36,7 @@ impl MockProvider {
         }
         let ready = self.fixtures_dir.join(&input.agent_key).join("ready.json");
         if input.job_type == "work_on_ticket"
-            && is_ready_ticket_context(&input.context_path)
+            && input.ticket_status == Some(TicketStatus::Ready)
             && ready.exists()
         {
             return ready;
@@ -82,23 +83,6 @@ fn has_resume_signal(context: &str) -> bool {
         || context.contains("(blocked)")
         || context.contains("(clarification answer)")
         || context.contains("(progress update)")
-}
-
-fn is_ready_ticket_context(context_path: &str) -> bool {
-    std::fs::read_to_string(context_path)
-        .ok()
-        .and_then(|context| {
-            let task_section = context
-                .split_once("# Agent role")
-                .map(|(task, _)| task)
-                .unwrap_or(&context);
-            task_section
-                .lines()
-                .rev()
-                .find_map(|line| line.trim().strip_prefix("**Status:**"))
-                .map(|status| status.trim().eq_ignore_ascii_case("ready"))
-        })
-        .unwrap_or(false)
 }
 
 #[async_trait]
@@ -184,6 +168,7 @@ mod tests {
             agent_key: agent_key.into(),
             job_type: job_type.into(),
             ticket_id: None,
+            ticket_status: None,
             context_path: "/tmp".into(),
             run_id: None,
             artifacts_dir: None,
@@ -313,17 +298,18 @@ mod tests {
         let ready_context = contexts.path().join("ready.md");
         std::fs::write(
             &ready_context,
-            "# Current task\n\n**Description:**\n\n**Status:** in_review\n\n**Status:** ready\n\n# Agent role\n\n# Ticket thread\n\n**Status:** in_review",
+            "# Ticket context\n\n**Description:**\n\n# Agent role\n\n**Status:** in_review\n\n**Status:** ready\n\n# Agent role\n\n# Ticket thread\n\n**Status:** in_review",
         )
         .expect("write Ready context");
         let review_context = contexts.path().join("review.md");
         std::fs::write(
             &review_context,
-            "# Current task\n\n**Status:** in_review\n\n# Agent role\n",
+            "# Ticket context\n\n**Description:**\n\n# Agent role\n\n**Status:** ready\n\n**Status:** in_review\n\n# Agent role\n",
         )
         .expect("write review context");
 
         let mut ready_input = base_input("tech_lead", "work_on_ticket");
+        ready_input.ticket_status = Some(TicketStatus::Ready);
         ready_input.context_path = ready_context.to_string_lossy().into_owned();
         let ready_result = provider
             .run(ready_input)
@@ -344,6 +330,7 @@ mod tests {
         }
 
         let mut review_input = base_input("tech_lead", "work_on_ticket");
+        review_input.ticket_status = Some(TicketStatus::InReview);
         review_input.context_path = review_context.to_string_lossy().into_owned();
         let review_result = provider
             .run(review_input)
@@ -392,6 +379,7 @@ mod tests {
                 agent_key: "agent-1".into(),
                 job_type: "work_on_ticket".into(),
                 ticket_id: None,
+                ticket_status: None,
                 context_path: "/tmp".into(),
                 run_id: Some(run_id.into()),
                 artifacts_dir: Some(artifacts.path().to_string_lossy().into_owned()),

@@ -153,13 +153,14 @@ impl WorkflowService {
 
     pub fn resolve_run_start_transition(
         current: TicketStatus,
+        agent_key: &str,
         agent_role: &str,
         job_type: &str,
     ) -> Option<TicketStatus> {
         if job_type != "work_on_ticket" {
             return None;
         }
-        if current == TicketStatus::Ready && is_tech_lead(agent_role) {
+        if current == TicketStatus::Ready && is_tech_lead_identity(agent_key, agent_role) {
             return None;
         }
         match (current, agent_role) {
@@ -251,7 +252,11 @@ fn resolve_verification_handoff(ctx: &TransitionContext) -> Option<VerificationH
 
 fn is_ready_tech_lead_refinement(ctx: &TransitionContext) -> bool {
     ctx.current_status == TicketStatus::Ready
-        && (ctx.agent_key.eq_ignore_ascii_case("tech_lead") || is_tech_lead(&ctx.agent_role))
+        && is_tech_lead_identity(&ctx.agent_key, &ctx.agent_role)
+}
+
+fn is_tech_lead_identity(agent_key: &str, agent_role: &str) -> bool {
+    agent_key.eq_ignore_ascii_case("tech_lead") || is_tech_lead(agent_role)
 }
 
 fn resolve_ready_tech_lead_handoff(ctx: &TransitionContext) -> TransitionAction {
@@ -291,6 +296,19 @@ fn resolve_ready_tech_lead_handoff(ctx: &TransitionContext) -> TransitionAction 
         action.system_comments.push(ready_handoff_notice(
             Some(assign_key),
             Some("not an implementer"),
+            &ctx.project_implementer_keys,
+        ));
+        return action;
+    }
+
+    if ctx
+        .project_agent_ids
+        .get(assign_key)
+        .is_some_and(|target_id| Some(*target_id) == ctx.assignee_agent_id)
+    {
+        action.system_comments.push(ready_handoff_notice(
+            Some(assign_key),
+            Some("the current Tech Lead cannot hand off to itself"),
             &ctx.project_implementer_keys,
         ));
         return action;
@@ -695,6 +713,35 @@ mod tests {
     }
 
     #[test]
+    fn ready_tech_lead_cannot_handoff_to_its_own_implementer_alias() {
+        let action = WorkflowService::resolve_transition(TransitionContext {
+            current_status: TicketStatus::Ready,
+            agent_role: "Technical Lead Engineer".into(),
+            agent_key: "tech_lead".into(),
+            assignee_agent_id: Some(tech_lead_agent_id()),
+            auto_assign_enabled: true,
+            contract: done_with_assign_to("tech_lead"),
+            project_agent_keys: vec!["tech_lead".into(), "backend_engineer".into()],
+            project_agent_ids: agent_map(&[
+                ("tech_lead", tech_lead_agent_id()),
+                ("backend_engineer", engineer_agent_id()),
+            ]),
+            // Defend even if a caller accidentally classifies this dual-role agent
+            // as an implementer.
+            project_implementer_keys: vec!["tech_lead".into(), "backend_engineer".into()],
+            ..minimal_ctx()
+        })
+        .expect("resolve self-targeted Ready Tech Lead handoff");
+
+        assert!(action.new_status.is_none());
+        assert!(action.new_assignee_id.is_none());
+        assert!(action.pending_recommendation.is_none());
+        assert!(action.enqueue_jobs.is_empty());
+        assert_eq!(action.system_comments.len(), 1);
+        assert!(action.system_comments[0].contains("cannot hand off to itself"));
+    }
+
+    #[test]
     fn ready_tech_lead_blocked_pm_mention_uses_clarification_resume_path() {
         let action = WorkflowService::resolve_transition(TransitionContext {
             current_status: TicketStatus::Ready,
@@ -1063,6 +1110,7 @@ mod tests {
         assert_eq!(
             WorkflowService::resolve_run_start_transition(
                 TicketStatus::Backlog,
+                "backend_engineer",
                 "Backend Engineer",
                 "work_on_ticket",
             ),
@@ -1075,6 +1123,7 @@ mod tests {
         assert_eq!(
             WorkflowService::resolve_run_start_transition(
                 TicketStatus::Ready,
+                "research",
                 "Researcher",
                 "work_on_ticket",
             ),
@@ -1087,7 +1136,21 @@ mod tests {
         assert_eq!(
             WorkflowService::resolve_run_start_transition(
                 TicketStatus::Ready,
+                "tech_lead",
                 "Technical Lead Engineer",
+                "work_on_ticket",
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn ready_tech_lead_preset_run_start_ignores_edited_implementer_role() {
+        assert_eq!(
+            WorkflowService::resolve_run_start_transition(
+                TicketStatus::Ready,
+                "tech_lead",
+                "Lead Engineer",
                 "work_on_ticket",
             ),
             None
@@ -1099,6 +1162,7 @@ mod tests {
         assert_eq!(
             WorkflowService::resolve_run_start_transition(
                 TicketStatus::Backlog,
+                "backend_engineer",
                 "Backend Engineer",
                 "respond_to_mention",
             ),

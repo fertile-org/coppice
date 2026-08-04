@@ -108,7 +108,7 @@ Blocked `work_on_ticket` mentions retain the original clarification flow shown a
 1. Inspect requirements and repository architecture using read-only checks.
 2. Record a concrete technical approach, affected boundaries, decisions, and risks through `updatedDescription`, with an optional refined `acceptanceCriteria` checklist and a concise thread summary.
 3. Do not implement, edit source files, stage, or commit. `changedFiles` must remain empty, and the worker skips git finalization defensively.
-4. On success, return `assignTo` naming an enabled implementer. Do not send a parallel consultation as part of the formal handoff.
+4. On success, return `assignTo` naming a different enabled implementer; the Tech Lead cannot hand ownership back to itself. Do not send a parallel consultation as part of the formal handoff.
 
 The Tech Lead completion itself leaves the ticket in `Ready`. A valid target follows `workflow.auto_assign` for the Ready status: immediate assignment when enabled, otherwise a pending recommendation for human approval. With `auto_start_runs`, an immediate assignment queues exactly one implementer `work_on_ticket` run; the existing run-start gate owns `Ready → In Progress`. Missing, blank, unknown, disabled, or non-implementer targets leave status and assignment unchanged, start nobody, and add an actionable system comment listing enabled implementer keys.
 

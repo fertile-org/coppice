@@ -170,6 +170,10 @@ async fn execute_job(
         .get(run.agent_id)
         .await
         .context("load agent")?;
+    let agent_key = agent
+        .preset_source
+        .clone()
+        .unwrap_or_else(|| slugify(&agent.name));
 
     let repo_id = ticket.ticket.repo_id.context("ticket has no repo")?;
 
@@ -208,6 +212,7 @@ async fn execute_job(
     if run.context_profile != ContextProfile::HumanAgent {
         if let Some(new_status) = WorkflowService::resolve_run_start_transition(
             ticket.ticket.status,
+            &agent_key,
             &agent.role,
             &run.job_type,
         ) {
@@ -245,11 +250,6 @@ async fn execute_job(
         agent_id: run.agent_id,
         status: "running".into(),
     });
-
-    let agent_key = agent
-        .preset_source
-        .clone()
-        .unwrap_or_else(|| slugify(&agent.name));
 
     let agents = AgentService::new(pool)
         .list_agents()
@@ -460,6 +460,7 @@ async fn execute_job(
             agent_key: agent_key.clone(),
             job_type: run.job_type.clone(),
             ticket_id: Some(run.ticket_id.to_string()),
+            ticket_status: Some(ticket.ticket.status),
             context_path,
             run_id: Some(run.id.to_string()),
             artifacts_dir: Some(state.config.storage.artifacts_dir.clone()),
