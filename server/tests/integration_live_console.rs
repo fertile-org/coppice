@@ -160,7 +160,8 @@ async fn live_ws_receives_mock_frames_and_terminal_log_written() {
             }
             Ok(Some(Ok(_))) => {}
             Ok(Some(Err(e))) => panic!("ws error: {e}"),
-            Ok(None) | Err(_) => break,
+            Ok(None) => break,
+            Err(_) => continue,
         }
     }
 
@@ -203,8 +204,9 @@ async fn completed_codex_run_replays_structured_fixture_events_in_order() {
     let pool = coppice_server::db::shared_test_pool()
         .await
         .expect("shared test pool");
+    let parsed_agent_id = uuid::Uuid::parse_str(&agent_id).expect("valid agent id");
     sqlx::query("UPDATE agents SET connector = 'codex' WHERE id = $1")
-        .bind(&agent_id)
+        .bind(parsed_agent_id)
         .execute(&pool)
         .await
         .expect("set Codex connector");
@@ -341,7 +343,9 @@ async fn insert_run_row(
     status: &str,
 ) -> String {
     use coppice_server::db;
-    let run_id = uuid::Uuid::new_v4().to_string();
+    let run_id = uuid::Uuid::new_v4();
+    let ticket_id = uuid::Uuid::parse_str(ticket_id).expect("valid ticket id");
+    let agent_id = uuid::Uuid::parse_str(agent_id).expect("valid agent id");
     let pool = db::shared_test_pool()
         .await
         .expect("shared test pool");
@@ -353,7 +357,7 @@ async fn insert_run_row(
         VALUES ($1, $2, $3, $4, $5, $6)
         "#,
     )
-    .bind(&run_id)
+    .bind(run_id)
     .bind(ticket_id)
     .bind(agent_id)
     .bind("work_on_ticket")
@@ -362,7 +366,7 @@ async fn insert_run_row(
     .execute(&pool)
     .await
     .expect("insert active run");
-    run_id
+    run_id.to_string()
 }
 
 #[tokio::test]
