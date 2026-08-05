@@ -41,6 +41,11 @@ enabled = false
 command = "kilo"
 model_providers = []
 
+[agent.connectors.cursor]
+enabled = false
+command = "agent"
+model_providers = []
+
 [web]
 port = 5001
 static_dir = "./web/dist"

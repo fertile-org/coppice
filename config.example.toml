@@ -49,6 +49,13 @@ command = "kilo"
 model_providers = []
 # model_providers = ["anthropic", "openai"]
 
+[agent.connectors.cursor]
+enabled = false
+command = "agent"
+# run_timeout_secs = 3600
+model_providers = []
+# model_providers = ["cursor"]
+
 
 [web]
 port = 5001

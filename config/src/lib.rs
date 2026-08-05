@@ -567,6 +567,8 @@ pub struct AgentConnectorsConfig {
     pub codex: CodexConnectorConfig,
     #[serde(default, rename = "kilo-code")]
     pub kilo_code: KiloCodeConnectorConfig,
+    #[serde(default, rename = "cursor")]
+    pub cursor: CursorConnectorConfig,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -703,6 +705,39 @@ impl Default for KiloCodeConnectorConfig {
             enabled: default_false(),
             command: default_kilo_code_command(),
             run_timeout_secs: default_kilo_code_run_timeout_secs(),
+            model_providers: Vec::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct CursorConnectorConfig {
+    #[serde(default = "default_false")]
+    pub enabled: bool,
+    #[serde(default = "default_cursor_command")]
+    pub command: String,
+    #[serde(default = "default_cursor_run_timeout_secs")]
+    pub run_timeout_secs: u64,
+    #[serde(default)]
+    pub model_providers: Vec<String>,
+}
+
+pub type CursorProviderConfig = CursorConnectorConfig;
+
+fn default_cursor_command() -> String {
+    "agent".into()
+}
+
+fn default_cursor_run_timeout_secs() -> u64 {
+    600
+}
+
+impl Default for CursorConnectorConfig {
+    fn default() -> Self {
+        Self {
+            enabled: default_false(),
+            command: default_cursor_command(),
+            run_timeout_secs: default_cursor_run_timeout_secs(),
             model_providers: Vec::new(),
         }
     }
@@ -1033,6 +1068,41 @@ mod tests {
         let cfg = KiloCodeConnectorConfig::default();
         assert!(!cfg.enabled);
         assert_eq!(cfg.command, "kilo");
+        assert_eq!(cfg.run_timeout_secs, 600);
+        assert!(cfg.model_providers.is_empty());
+    }
+
+    #[test]
+    fn deserializes_cursor_connector() {
+        let toml = r#"
+        [agent]
+        default_connector = "cursor"
+        worktrees_path = "./data/worktrees"
+        worker_count = 2
+
+        [agent.connectors.cursor]
+        enabled = true
+        command = "cursor-agent"
+        run_timeout_secs = 900
+        model_providers = ["cursor"]
+    "#;
+        #[derive(Deserialize)]
+        struct Wrapper {
+            agent: AgentConfig,
+        }
+        let wrapper: Wrapper = toml::from_str(toml).expect("parse");
+        let cfg = wrapper.agent;
+        assert!(cfg.connectors.cursor.enabled);
+        assert_eq!(cfg.connectors.cursor.command, "cursor-agent");
+        assert_eq!(cfg.connectors.cursor.run_timeout_secs, 900);
+        assert_eq!(cfg.connectors.cursor.model_providers, vec!["cursor"]);
+    }
+
+    #[test]
+    fn cursor_connector_defaults() {
+        let cfg = CursorConnectorConfig::default();
+        assert!(!cfg.enabled);
+        assert_eq!(cfg.command, "agent");
         assert_eq!(cfg.run_timeout_secs, 600);
         assert!(cfg.model_providers.is_empty());
     }
