@@ -760,6 +760,7 @@ fn persist_artifacts_to_dir(
                         ty.starts_with("claude.console.")
                             || ty.starts_with("codex.console.")
                             || ty.starts_with("kilo.console.")
+                            || ty.starts_with("cursor.console.")
                     }) =>
             {
                 console_events.push(event.clone());
@@ -1015,6 +1016,7 @@ mod tests {
     use crate::domain::agent::Agent;
     use crate::domain::mention::{MentionStatus, TicketMention};
     use crate::providers::codex_console::CodexConsolePublisher;
+    use crate::providers::cursor_console::CursorConsolePublisher;
     use crate::providers::AgentRequest;
     use crate::services::agent_request::{
         append_agent_requests_to_comment, replace_agent_requests_in_comment, ResolvedAgentRequest,
@@ -1264,6 +1266,56 @@ mod tests {
             run_id,
             "codex",
             Some("codex_thread_abc123".into()),
+        )
+        .expect("persist production artifacts");
+
+        let paths = RunArtifactPaths::new(
+            temp.path().to_str().expect("UTF-8 temp path"),
+            &run_id.to_string(),
+        );
+        assert_eq!(
+            ArtifactService::read_console_events(&paths),
+            expected_events
+        );
+    }
+
+    #[test]
+    fn production_persistence_retains_cursor_console_events_in_order() {
+        let fixture_path =
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../fixtures/cursor/done.jsonl");
+        let raw = std::fs::read_to_string(fixture_path).expect("read Cursor fixture");
+        let registry = RunStreamRegistry::new();
+        let handle = registry.register(uuid::Uuid::new_v4());
+        let mut publisher = CursorConsolePublisher::new();
+
+        for line in raw.lines() {
+            let value = serde_json::from_str(line).expect("valid Cursor fixture event");
+            publisher.handle_stream_json(&handle, &value);
+        }
+
+        let expected_events: Vec<serde_json::Value> = handle
+            .buffered_tail()
+            .into_iter()
+            .filter_map(|message| match message {
+                LiveMessage::Event { event } => Some(event),
+                _ => None,
+            })
+            .collect();
+        handle.publish(LiveMessage::Event {
+            event: serde_json::json!({
+                "type": "unrelated.event",
+                "payload": "must not enter the console artifact"
+            }),
+        });
+
+        let temp = tempfile::tempdir().expect("temp artifact directory");
+        let run_id = uuid::Uuid::new_v4();
+        persist_artifacts_to_dir(
+            temp.path().to_str().expect("UTF-8 temp path"),
+            &handle,
+            run_id,
+            "cursor",
+            Some("sess_cursor_abc".into()),
         )
         .expect("persist production artifacts");
 
