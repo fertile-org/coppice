@@ -4,6 +4,7 @@ use std::sync::Arc;
 use crate::config::AppConfig;
 use crate::providers::claude_code::ClaudeCodeProvider;
 use crate::providers::codex::CodexProvider;
+use crate::providers::cursor::CursorProvider;
 use crate::providers::kilo_code::KiloCodeProvider;
 use crate::providers::mock::MockProvider;
 use crate::providers::opencode::OpenCodeProvider;
@@ -16,6 +17,7 @@ pub struct ConnectorRegistry {
     claude_code_model_providers: Vec<String>,
     codex_model_providers: Vec<String>,
     kilo_code_model_providers: Vec<String>,
+    cursor_model_providers: Vec<String>,
 }
 
 impl ConnectorRegistry {
@@ -67,12 +69,22 @@ impl ConnectorRegistry {
             );
         }
 
+        if config.agent.connectors.cursor.enabled {
+            connectors.insert(
+                "cursor".into(),
+                Arc::new(CursorProvider::new(
+                    config.agent.connectors.cursor.clone(),
+                )),
+            );
+        }
+
         Self {
             connectors,
             opencode_model_providers: config.agent.connectors.opencode.model_providers.clone(),
             claude_code_model_providers: config.agent.connectors.claude_code.model_providers.clone(),
             codex_model_providers: config.agent.connectors.codex.model_providers.clone(),
             kilo_code_model_providers: config.agent.connectors.kilo_code.model_providers.clone(),
+            cursor_model_providers: config.agent.connectors.cursor.model_providers.clone(),
         }
     }
 
@@ -96,6 +108,7 @@ impl ConnectorRegistry {
             "claude-code" => self.claude_code_model_providers.clone(),
             "codex" => self.codex_model_providers.clone(),
             "kilo-code" => self.kilo_code_model_providers.clone(),
+            "cursor" => self.cursor_model_providers.clone(),
             _ => vec![],
         }
     }
@@ -192,5 +205,22 @@ mod tests {
         let config = AppConfig::load_defaults().expect("config");
         let registry = ConnectorRegistry::from_config(&config, None);
         assert!(!registry.has("kilo-code"));
+    }
+
+    #[test]
+    fn registers_cursor_when_enabled() {
+        let mut config = AppConfig::load_defaults().expect("config");
+        config.agent.connectors.cursor.enabled = true;
+        config.agent.connectors.cursor.model_providers = vec!["cursor".into()];
+        let registry = ConnectorRegistry::from_config(&config, None);
+        assert!(registry.has("cursor"));
+        assert_eq!(registry.model_providers_for("cursor"), vec!["cursor"]);
+    }
+
+    #[test]
+    fn does_not_register_cursor_when_disabled() {
+        let config = AppConfig::load_defaults().expect("config");
+        let registry = ConnectorRegistry::from_config(&config, None);
+        assert!(!registry.has("cursor"));
     }
 }

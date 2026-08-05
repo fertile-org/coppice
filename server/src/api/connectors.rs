@@ -161,6 +161,24 @@ async fn list_models(
                     .collect(),
             }))
         }
+        "cursor" => {
+            if model_provider_id != "cursor" {
+                return Ok(Json(ModelListResponse { items: vec![] }));
+            }
+            let command = &state.config.agent.connectors.cursor.command;
+            let models = crate::providers::cursor_models::list_cursor_models(command)
+                .await
+                .map_err(|_| StatusCode::BAD_GATEWAY)?;
+            Ok(Json(ModelListResponse {
+                items: models
+                    .into_iter()
+                    .map(|m| ModelResponse {
+                        id: m.id,
+                        name: m.name,
+                    })
+                    .collect(),
+            }))
+        }
         "mock" => Ok(Json(ModelListResponse { items: vec![] })),
         _ => Err(StatusCode::NOT_FOUND),
     }
