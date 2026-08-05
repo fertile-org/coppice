@@ -1,5 +1,11 @@
-# Baked into the Docker server image (see deploy/Dockerfile.server).
-# Host / release installs use config.example.toml → config.toml instead.
+# Docker Compose server config.
+# Copy to config.toml in this directory (gitignored), then edit:
+#   cp deploy/config/config.example.toml deploy/config/config.toml
+# Compose bind-mounts config.toml into the container — recreate the server
+# after edits (no image rebuild required):
+#   docker compose -f deploy/docker-compose.yml up -d --force-recreate server
+#
+# Host / release installs use the repo-root config.example.toml → config.toml instead.
 
 [server]
 port = 5000

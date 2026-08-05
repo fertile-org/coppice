@@ -12,7 +12,7 @@ session_secret = "dev-secret-change-me"
 bootstrap_password = "changeme"
 cookie_secure = false
 # Optional: create first admin on server start when users is empty.
-# Docker Compose default.toml sets these; host installs can use `coppice bootstrap` instead.
+# Docker Compose uses deploy/config/config.toml (from config.example.toml there).
 # bootstrap_admin_email = "admin@localhost"
 # bootstrap_admin_password = "changeme"
 

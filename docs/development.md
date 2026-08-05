@@ -13,19 +13,28 @@ Coppice uses TOML config files — not `.env` files.
 
 | Location | Priority | Purpose |
 |----------|----------|---------|
-| Built-in defaults | lowest | Sensible dev defaults in `coppice-config` |
-| `~/.config/coppice/config.toml` | middle | Per-user global settings |
-| `./config.toml` (cwd) | higher | Local / per-install overrides (gitignored) |
-| `COPPICE_CONFIG` file | higher | Explicit file path (Docker / release) |
+| Built-in defaults | lowest | Sensible defaults in `coppice-config` |
+| `~/.config/coppice/config.toml` | middle | Per-user global settings (host installs) |
+| `./config.toml` (cwd) | higher | Host / hot-reload overrides (gitignored; from root `config.example.toml`) |
+| `deploy/config/config.toml` | Docker | Compose bind-mount (gitignored; from `deploy/config/config.example.toml`) |
+| `COPPICE_CONFIG` file | higher | Explicit file path |
 | Environment variables | highest | Container overrides (`DATABASE_URL`, `COPPICE_*`, …) |
 
-Copy the example for local development:
+**Host / hot-reload:**
 
 ```bash
 cp config.example.toml config.toml
 ```
 
-Key fields for local dev (`config.toml`):
+**Docker Compose:**
+
+```bash
+cp deploy/config/config.example.toml deploy/config/config.toml
+```
+
+`make compose-up` creates `deploy/config/config.toml` from the example when missing. After editing that file, recreate the server (no image rebuild): `docker compose -f deploy/docker-compose.yml up -d --force-recreate server`.
+
+Key fields for local host dev (`./config.toml`):
 
 | Field | Purpose |
 |-------|---------|
@@ -41,7 +50,7 @@ Key fields for local dev (`config.toml`):
 | `knowledge.retrieval` | Confidence, stable top-k/page bounds, and scope capacities |
 | `knowledge.context_budget` | Total and per-section token budgets for Full runs |
 
-Docker Compose (agents / CI) sets `COPPICE_CONFIG=/etc/coppice/config.toml` (from `deploy/config/default.toml` in the image) plus env overrides in `deploy/docker-compose.yml`. The server container does **not** read your repo `config.toml`.
+Docker Compose bind-mounts `deploy/config/config.toml` at `COPPICE_CONFIG=/etc/coppice/config.toml`, plus env overrides in `deploy/docker-compose.yml`. The server container does **not** read the repo-root `config.toml`.
 
 ### Agent stack vs human `config.toml`
 
@@ -49,10 +58,10 @@ Docker Compose (agents / CI) sets `COPPICE_CONFIG=/etc/coppice/config.toml` (fro
 |--|--|--|
 | Postgres port | 5432 | 5433 |
 | API | Docker `:5000` | Host `:5000` |
-| Config source | `default.toml` + compose env inside container | `./config.toml` on the host |
+| Config source | `deploy/config/config.toml` + compose env | `./config.toml` on the host |
 | Migrations | Server auto-migrates on container start | `make migrate` (reads `config.toml`) |
 
-Your gitignored `config.toml` (e.g. `database.url` → `:5433`) applies only to **host** CLI and `coppice-server` when run on the host. It does not affect the Docker server. Avoid running host `make migrate` against the agent stack unless you override the URL, e.g. `DATABASE_URL=postgres://coppice:coppice@localhost:5432/coppice make migrate` — otherwise you may migrate the wrong database.
+Your gitignored repo-root `config.toml` (e.g. `database.url` → `:5433`) applies only to **host** CLI and `coppice-server` when run on the host. It does not affect the Docker server. Avoid running host `make migrate` against the agent stack unless you override the URL, e.g. `DATABASE_URL=postgres://coppice:coppice@localhost:5432/coppice make migrate` — otherwise you may migrate the wrong database.
 
 ## Local development (human)
 
@@ -100,10 +109,10 @@ Set `COPPICE_SERVER_BIN` to override the API binary path.
 ## Default stack (agents / smoke tests)
 
 ```bash
-make compose-up    # server auto-migrates and auto-bootstraps admin when users is empty
+make compose-up    # copies deploy/config/config.toml if missing; auto-migrates + auto-bootstraps admin
 ```
 
-Docker image config (`deploy/config/default.toml`) sets `auth.bootstrap_admin_email` / `auth.bootstrap_admin_password`. Host installs without those fields still use `make bootstrap` (or `coppice bootstrap admin`) once.
+Docker config (`deploy/config/config.toml`, from `config.example.toml` in that folder) can set `auth.bootstrap_admin_email` / `auth.bootstrap_admin_password`. Host installs without those fields still use `make bootstrap` (or `coppice bootstrap admin`) once.
 
 Tear down: `make compose-down`
 

@@ -132,7 +132,7 @@ Visual design tokens and palette: `docs/web/DESIGN.md`.
 
 ## Config & artifacts
 
-- Host/release: `config.toml` (see `config.example.toml`); Docker/CI: `deploy/config/default.toml` via `COPPICE_CONFIG`
+- Host/release: `config.toml` (see root `config.example.toml`); Docker Compose: `deploy/config/config.toml` (see `deploy/config/config.example.toml`), bind-mounted as `COPPICE_CONFIG`
 - Attachments: filesystem under `storage.artifacts_dir` (compose volume `artifact_data`)
 - Static SPA (release): `coppice web start` via `[web].static_dir`
 

@@ -15,7 +15,8 @@ RUN chmod +x /entrypoint.sh
 RUN mkdir -p /app/server /data/artifacts /data/worktrees
 COPY server/agent_templates /app/server/agent_templates
 COPY fixtures /app/fixtures
-COPY deploy/config/default.toml /etc/coppice/config.toml
+# Fallback only; Compose bind-mounts deploy/config/config.toml over this path.
+COPY deploy/config/config.example.toml /etc/coppice/config.toml
 ENV COPPICE_CONFIG=/etc/coppice/config.toml
 EXPOSE 5000
 ENTRYPOINT ["/entrypoint.sh"]

@@ -29,6 +29,7 @@ define SMOKE_REPO_SETUP_IF_MISSING
 endef
 
 compose-up:
+	@test -f deploy/config/config.toml || cp deploy/config/config.example.toml deploy/config/config.toml
 	$(COMPOSE) up -d --build
 
 compose-down:
