@@ -118,7 +118,7 @@ async fn handle_live_socket(state: Arc<AppState>, run_id: Uuid, socket: WebSocke
     let is_opencode = connector.as_deref() == Some("opencode");
     let is_structured_console = connector
         .as_deref()
-        .is_some_and(|connector| matches!(connector, "claude-code" | "codex" | "kilo-code"));
+        .is_some_and(|connector| matches!(connector, "claude-code" | "codex" | "kilo-code" | "cursor"));
 
     let stream_handle = if let Some(handle) = state.run_streams.get(run_id) {
         Some(handle)
@@ -368,7 +368,7 @@ async fn handle_opencode_recovery(
     }
 }
 
-/// Replay captured artifacts for claude-code / codex runs after server restart.
+/// Replay captured artifacts for claude-code / codex / kilo-code / cursor runs after server restart.
 ///
 /// These connectors run as fresh subprocesses per run. After a server restart the
 /// process is gone, so we cannot reattach to a live stream. Instead we replay

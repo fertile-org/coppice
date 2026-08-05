@@ -170,6 +170,31 @@ describe('TicketDrawer', () => {
     expect(screen.getByText('Claude live console')).toBeInTheDocument();
   });
 
+  it('routes cursor runs through the structured live console', () => {
+    runsState.runs = [
+      {
+        id: '00000000-0000-0000-0000-000000000010',
+        ticketId: ticketState.ticket.id,
+        agentId: '00000000-0000-0000-0000-000000000011',
+        jobType: 'agent_run',
+        status: 'running',
+        sandboxProfileId: 'default',
+        errorMessage: null,
+        worktreePath: null,
+        branchName: null,
+        startedAt: '2026-06-08T00:00:00.000Z',
+        endedAt: null,
+        createdAt: '2026-06-08T00:00:00.000Z',
+        connector: 'cursor',
+      },
+    ];
+
+    renderDrawer();
+    fireEvent.click(screen.getByRole('tab', { name: 'Live Console' }));
+
+    expect(screen.getByText('Claude live console')).toBeInTheDocument();
+  });
+
   it('opens a child ticket parent in the same drawer route', () => {
     const parent = {
       id: '00000000-0000-0000-0000-000000000020',

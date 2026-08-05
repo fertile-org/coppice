@@ -66,7 +66,8 @@ export function TicketDrawer({
       ? LiveSession
       : liveRun?.connector === 'claude-code' ||
           liveRun?.connector === 'codex' ||
-          liveRun?.connector === 'kilo-code'
+          liveRun?.connector === 'kilo-code' ||
+          liveRun?.connector === 'cursor'
         ? ClaudeLiveConsole
         : LiveConsole;
   const runAgentDisabledReason = !ticket?.assigneeAgentId
