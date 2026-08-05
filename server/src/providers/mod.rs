@@ -3,6 +3,7 @@ pub mod claude_console;
 pub mod codex;
 pub mod codex_console;
 pub mod codex_models;
+pub mod cursor_console;
 pub mod kilo_code;
 pub mod kilo_console;
 pub mod kilo_models;
