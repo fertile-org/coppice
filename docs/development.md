@@ -109,6 +109,17 @@ Tear down: `make compose-down`
 
 Always use Docker Compose via the Makefile — not standalone `docker run`.
 
+### Host repos for agents
+
+The server bind-mounts host git checkouts at `/repos`:
+
+| Env / path | Meaning |
+|------------|---------|
+| `COPPICE_REPOS_HOST` | Host directory (default `$HOME/coppice/repos`) |
+| `/repos/<name>` | Path to register in Settings → Repositories |
+
+Clone or symlink projects into that host directory, then register `/repos/<name>` (the in-container path). Coppice creates worktrees under `/data/worktrees`; it does not `git clone` from `remote_url`.
+
 ### Host port overrides
 
 The default stack binds host ports 5432 / 5000 / 5001. If another project owns one of them (common on busy dev machines), override the host-side mapping without touching the file:

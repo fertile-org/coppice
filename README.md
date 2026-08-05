@@ -78,6 +78,19 @@ This builds and starts Postgres, the API (port **5000**), and the web UI (port *
 
 Visit [http://localhost:5001](http://localhost:5001) and sign in with `admin@localhost` / `changeme`.
 
+**3. Attach projects**
+
+Coppice does not clone repos for you. Put git checkouts on the host under `~/coppice/repos` (or set `COPPICE_REPOS_HOST` to another directory), then restart the stack so they appear inside the container at `/repos`:
+
+```bash
+mkdir -p ~/coppice/repos
+# clone or symlink projects into ~/coppice/repos/
+# e.g. git clone … ~/coppice/repos/my-app
+docker compose -f deploy/docker-compose.yml up -d
+```
+
+In **Settings → Repositories**, register the **in-container** path (for example `/repos/my-app`), not the host path. Agents get isolated worktrees under `/data/worktrees`.
+
 **Stop the stack:** `docker compose -f deploy/docker-compose.yml down` (or `make compose-down`).
 
 Default passwords and session secrets are for local use only — change them before exposing the stack on a real server. More detail: [docs/development.md](docs/development.md).

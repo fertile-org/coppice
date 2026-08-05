@@ -174,7 +174,7 @@ function RepoForm({ editing, onCancelEdit }: RepoFormProps) {
             type="text"
             required
             autoComplete="off"
-            placeholder="/data/my-repo"
+            placeholder="/repos/my-app"
             value={localPath}
             onChange={(e) => setLocalPath(e.target.value)}
             className="field-control w-full px-3 py-2 font-mono text-sm"
