@@ -162,8 +162,21 @@ fn emit(stream: &Arc<RunStreamHandle>, event: Value) {
     stream.publish(LiveMessage::Event { event });
 }
 
+const KNOWN_TOOL_KEYS: &[&str] = &[
+    "shellToolCall",
+    "editToolCall",
+    "readToolCall",
+    "writeToolCall",
+    "deleteToolCall",
+];
+
 fn find_tool_payload(tool_call: &Value) -> Option<(&str, &Value)> {
     let obj = tool_call.as_object()?;
+    for &key in KNOWN_TOOL_KEYS {
+        if let Some(value) = obj.get(key) {
+            return Some((key, value));
+        }
+    }
     for (key, value) in obj {
         if key.ends_with("ToolCall") {
             return Some((key.as_str(), value));
@@ -335,5 +348,80 @@ mod tests {
             }),
         );
         assert!(collect_events(&handle).is_empty());
+    }
+
+    #[test]
+    fn duplicate_result_contract_is_skipped() {
+        let registry = RunStreamRegistry::new();
+        let handle = registry.register(uuid::Uuid::new_v4());
+        let mut console = CursorConsolePublisher::new();
+        let contract =
+            r#"{"status":"done","summary":"Done.","changedFiles":[],"testsRun":[],"blockers":[]}"#;
+
+        console.handle_stream_json(
+            &handle,
+            &json!({
+                "type": "assistant",
+                "message": {"content": [{"type": "text", "text": contract}]}
+            }),
+        );
+        console.handle_stream_json(
+            &handle,
+            &json!({"type": "result", "result": contract}),
+        );
+
+        let result_count = collect_events(&handle)
+            .iter()
+            .filter(|e| e["type"] == "cursor.console.result")
+            .count();
+        assert_eq!(result_count, 1);
+    }
+
+    #[test]
+    fn completed_tool_with_nonzero_exit_is_error() {
+        let registry = RunStreamRegistry::new();
+        let handle = registry.register(uuid::Uuid::new_v4());
+        let mut console = CursorConsolePublisher::new();
+
+        console.handle_stream_json(
+            &handle,
+            &json!({
+                "type": "tool_call",
+                "subtype": "completed",
+                "call_id": "tool_fail",
+                "tool_call": {
+                    "shellToolCall": {
+                        "args": {"command": "cargo test"},
+                        "result": {"success": {"exitCode": 1, "stdout": "FAILED"}}
+                    },
+                    "toolCallId": "tool_fail"
+                }
+            }),
+        );
+        console.handle_stream_json(
+            &handle,
+            &json!({
+                "type": "tool_call",
+                "subtype": "completed",
+                "call_id": "tool_err",
+                "tool_call": {
+                    "readToolCall": {
+                        "args": {"path": "/missing.rs"},
+                        "result": {"error": {"message": "not found"}}
+                    },
+                    "toolCallId": "tool_err"
+                }
+            }),
+        );
+
+        let tools: Vec<_> = collect_events(&handle)
+            .into_iter()
+            .filter(|e| e["type"] == "cursor.console.tool")
+            .collect();
+        assert_eq!(tools.len(), 2);
+        assert_eq!(tools[0]["id"], "tool_fail");
+        assert_eq!(tools[0]["status"], "error");
+        assert_eq!(tools[1]["id"], "tool_err");
+        assert_eq!(tools[1]["status"], "error");
     }
 }
