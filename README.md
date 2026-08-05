@@ -67,12 +67,14 @@ Run Coppice with Docker Compose. You need Docker and the Compose plugin (`docker
 ```bash
 git clone https://github.com/fertile-org/coppice.git
 cd coppice
-cp deploy/config/config.example.toml deploy/config/config.toml
+cp deploy/config/config.example.toml deploy/config/config.toml   # required before first up
 export COPPICE_UID=$(id -u) COPPICE_GID=$(id -g)
 docker compose -f deploy/docker-compose.yml up -d --build
 ```
 
 Or from the repo root: `make compose-up` (copies Docker config if missing, and sets `COPPICE_UID` / `COPPICE_GID`).
+
+If Compose was started **without** `config.toml`, Docker may have created a directory at `deploy/config/config.toml`. Fix with `rm -rf deploy/config/config.toml` and the `cp` above, then recreate the server.
 
 This builds and starts Postgres, the API (port **5000**), and the web UI (port **5001**). The server migrates the database and creates the first admin when the users table is empty (`admin@localhost` / `changeme` from `deploy/config/config.toml`).
 

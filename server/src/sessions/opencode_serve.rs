@@ -29,7 +29,20 @@ impl OpenCodeServeManager {
                 "--port",
                 &config.serve_port.to_string(),
             ])
-            .spawn()?;
+            .spawn()
+            .map_err(|err| {
+                if err.kind() == std::io::ErrorKind::NotFound {
+                    anyhow::anyhow!(
+                        "opencode binary `{}` not found on PATH. Install it where the server runs, \
+                         or disable OpenCode in config.toml \
+                         (agent.connectors.opencode.enabled = false and \
+                         agent.default_connector = \"mock\" or another connector)",
+                        config.command
+                    )
+                } else {
+                    anyhow::anyhow!("failed to spawn `{} serve`: {err}", config.command)
+                }
+            })?;
 
         if let Err(err) = wait_for_healthy(&base_url, Some(&mut child)).await {
             let _ = child.start_kill();
