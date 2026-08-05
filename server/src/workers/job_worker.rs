@@ -556,6 +556,7 @@ async fn execute_job(
 
     let session_created_tx = if connector_name == "opencode"
         || connector_name == "claude-code"
+        || connector_name == "cursor"
         || connector_name == "codex"
         || connector_name == "kilo-code"
     {
@@ -876,7 +877,7 @@ async fn run_session_id(pool: &PgPool, run_id: uuid::Uuid) -> Option<String> {
         .and_then(|r| r.session_id)
 }
 
-/// For claude-code continuation runs, look up the previous run's session_id
+/// For claude-code and cursor continuation runs, look up the previous run's session_id
 /// so the connector can pass `--resume <session_id>` to maintain conversation context.
 ///
 /// Note: codex session resume is not implemented here. The codex connector includes
@@ -888,7 +889,7 @@ async fn load_resume_session_id(
     run: &crate::domain::run::AgentRun,
     connector_name: &str,
 ) -> Option<String> {
-    if connector_name != "claude-code" {
+    if connector_name != "claude-code" && connector_name != "cursor" {
         return None;
     }
     if run.job_type != "work_on_ticket" {
