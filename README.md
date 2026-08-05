@@ -67,10 +67,11 @@ Run Coppice with Docker Compose. You need Docker and the Compose plugin (`docker
 ```bash
 git clone https://github.com/fertile-org/coppice.git
 cd coppice
+export COPPICE_UID=$(id -u) COPPICE_GID=$(id -g)
 docker compose -f deploy/docker-compose.yml up -d --build
 ```
 
-Or from the repo root: `make compose-up`.
+Or from the repo root: `make compose-up` (sets `COPPICE_UID` / `COPPICE_GID` for you).
 
 This builds and starts Postgres, the API (port **5000**), and the web UI (port **5001**). The server migrates the database and creates the first admin when the users table is empty (`admin@localhost` / `changeme` from `deploy/config/default.toml`).
 
@@ -86,10 +87,11 @@ Coppice does not clone repos for you. Put git checkouts on the host under `~/cop
 mkdir -p ~/coppice/repos
 # clone or symlink projects into ~/coppice/repos/
 # e.g. git clone … ~/coppice/repos/my-app
+export COPPICE_UID=$(id -u) COPPICE_GID=$(id -g)
 docker compose -f deploy/docker-compose.yml up -d
 ```
 
-In **Settings → Repositories**, register the **in-container** path (for example `/repos/my-app`), not the host path. Agents get isolated worktrees under `/data/worktrees`.
+In **Settings → Repositories**, register the **in-container** path (for example `/repos/my-app`), not the host path. Agents get isolated worktrees under `/data/worktrees`. The API process runs as your host UID so new files under `/repos` stay owned by you.
 
 **Stop the stack:** `docker compose -f deploy/docker-compose.yml down` (or `make compose-down`).
 

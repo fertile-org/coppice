@@ -7,13 +7,16 @@ COPY cli ./cli
 RUN cargo build --release -p coppice-server
 
 FROM debian:bookworm-slim
-RUN apt-get update && apt-get install -y ca-certificates git && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y ca-certificates git gosu && rm -rf /var/lib/apt/lists/*
 COPY --from=builder /app/target/release/coppice-server /usr/local/bin/coppice-server
+COPY deploy/entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
 # MockProvider resolves fixtures relative to compile-time CARGO_MANIFEST_DIR (/app/server).
-RUN mkdir -p /app/server
+RUN mkdir -p /app/server /data/artifacts /data/worktrees
 COPY server/agent_templates /app/server/agent_templates
 COPY fixtures /app/fixtures
 COPY deploy/config/default.toml /etc/coppice/config.toml
 ENV COPPICE_CONFIG=/etc/coppice/config.toml
 EXPOSE 5000
+ENTRYPOINT ["/entrypoint.sh"]
 CMD ["coppice-server"]

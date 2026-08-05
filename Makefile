@@ -9,10 +9,24 @@ COMPOSE = $(DOCKER_COMPOSE) -f deploy/docker-compose.yml
 COMPOSE_LOCAL = $(DOCKER_COMPOSE) -f deploy/docker-compose.local.yml
 BOOTSTRAP_EMAIL = admin@localhost
 BOOTSTRAP_PASSWORD = changeme
+# Match host user so bind-mounted /repos files stay owned by the operator.
+export COPPICE_UID ?= $(shell id -u)
+export COPPICE_GID ?= $(shell id -g)
 
 .PHONY: compose-up compose-down compose-local-up compose-local-down server server-dev test test-unit test-smoke test-pg-reset clippy clean migrate bootstrap web-install web-test web-dev web-build e2e-smoke e2e-smoke-m03 e2e-smoke-m04 e2e-smoke-m05 e2e-smoke-m06 e2e-smoke-m06-knowledge benchmark-m06-knowledge-retrieval release-tar
 
 CARGO_TEST = cargo test --features embedded-test-db
+
+# Create /tmp/smoke-repo inside the server container as COPPICE_UID (matches API process).
+define SMOKE_REPO_SETUP
+	$(COMPOSE) exec -T server sh -c 'rm -rf /tmp/smoke-repo && mkdir -p /tmp/smoke-repo && chown $(COPPICE_UID):$(COPPICE_GID) /tmp/smoke-repo'
+	$(COMPOSE) exec -T -u $(COPPICE_UID):$(COPPICE_GID) server sh -c 'cd /tmp/smoke-repo && git init -b main && git config user.email smoke@coppice.local && git config user.name smoke && echo hi > README.md && git add . && git commit -m init'
+endef
+
+define SMOKE_REPO_SETUP_IF_MISSING
+	$(COMPOSE) exec -T server sh -c 'if [ ! -d /tmp/smoke-repo/.git ]; then mkdir -p /tmp/smoke-repo && chown $(COPPICE_UID):$(COPPICE_GID) /tmp/smoke-repo; fi'
+	$(COMPOSE) exec -T -u $(COPPICE_UID):$(COPPICE_GID) server sh -c 'if [ ! -d /tmp/smoke-repo/.git ]; then cd /tmp/smoke-repo && git init -b main && git config user.email smoke@coppice.local && git config user.name smoke && echo hi > README.md && git add . && git commit -m init; fi'
+endef
 
 compose-up:
 	$(COMPOSE) up -d --build
@@ -81,25 +95,25 @@ e2e-smoke: compose-up
 	node e2e/smoke/m02-board.mjs
 
 e2e-smoke-m03: compose-up
-	$(COMPOSE) exec -T server sh -c 'mkdir -p /tmp/smoke-repo && cd /tmp/smoke-repo && git init -b main && git config user.email smoke@coppice.local && git config user.name smoke && echo hi > README.md && git add . && git commit -m init'
+	$(SMOKE_REPO_SETUP)
 	node e2e/smoke/m03-agent-run.mjs
 
 e2e-smoke-m04: compose-up
-	$(COMPOSE) exec -T server sh -c 'mkdir -p /tmp/smoke-repo && cd /tmp/smoke-repo && git init -b main && git config user.email smoke@coppice.local && git config user.name smoke && echo hi > README.md && git add . && git commit -m init'
+	$(SMOKE_REPO_SETUP)
 	node e2e/smoke/m04-live-console.mjs
 
 e2e-smoke-m05: compose-up
-	$(COMPOSE) exec -T server sh -c 'mkdir -p /tmp/smoke-repo && cd /tmp/smoke-repo && git init -b main && git config user.email smoke@coppice.local && git config user.name smoke && echo hi > README.md && git add . && git commit -m init'
+	$(SMOKE_REPO_SETUP)
 	node e2e/smoke/m05-workflow.mjs
 
 e2e-smoke-m06: compose-up
 	WORKFLOW_AUTO_START_RUNS=false MOCK_AGENT_RESPONSE=pm/split_pending $(COMPOSE) up -d --force-recreate --no-deps server
-	$(COMPOSE) exec -T server sh -c 'if [ ! -d /tmp/smoke-repo/.git ]; then mkdir -p /tmp/smoke-repo; cd /tmp/smoke-repo; git init -b main; git config user.email smoke@coppice.local; git config user.name smoke; echo hi > README.md; git add .; git commit -m init; fi'
+	$(SMOKE_REPO_SETUP_IF_MISSING)
 	node e2e/smoke/m06-context.mjs
 
 e2e-smoke-m06-knowledge: compose-up
 	MOCK_AGENT_RESPONSE=done $(COMPOSE) up -d --force-recreate --no-deps server
-	$(COMPOSE) exec -T server sh -c 'if [ ! -d /tmp/smoke-repo/.git ]; then mkdir -p /tmp/smoke-repo; cd /tmp/smoke-repo; git init -b main; git config user.email smoke@coppice.local; git config user.name smoke; echo hi > README.md; git add .; git commit -m init; fi'
+	$(SMOKE_REPO_SETUP_IF_MISSING)
 	node e2e/smoke/m06-knowledge.mjs
 
 benchmark-m06-knowledge-retrieval: compose-up

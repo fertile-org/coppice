@@ -6,6 +6,8 @@
 #   COPPICE_API_URL=http://localhost:15000 COPPICE_WEB_URL=http://localhost:15001
 # Host git checkouts for agent work (Settings → Repositories use the in-container path):
 #   COPPICE_REPOS_HOST=/path/to/checkouts  # default: $HOME/coppice/repos → /repos
+# Run the API as your host user so writes under /repos keep your ownership:
+#   COPPICE_UID=$(id -u) COPPICE_GID=$(id -g)  # make compose-up sets these
 # Human hot-reload dev uses docker-compose.local.yml (Postgres :5433) + host API/web instead.
 
 services:
@@ -42,6 +44,9 @@ services:
       COPPICE_KNOWLEDGE__EMBEDDING__PROVIDER: mock
       COPPICE_KNOWLEDGE__EMBEDDING__DIMENSION: "1536"
       MOCK_AGENT_RESPONSE: ${MOCK_AGENT_RESPONSE:-}
+      # Numeric host user for /repos ownership (entrypoint drops privileges).
+      COPPICE_UID: ${COPPICE_UID:-1000}
+      COPPICE_GID: ${COPPICE_GID:-1000}
     volumes:
       - artifact_data:/data/artifacts
       - worktree_data:/data/worktrees

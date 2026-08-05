@@ -117,8 +117,11 @@ The server bind-mounts host git checkouts at `/repos`:
 |------------|---------|
 | `COPPICE_REPOS_HOST` | Host directory (default `$HOME/coppice/repos`) |
 | `/repos/<name>` | Path to register in Settings → Repositories |
+| `COPPICE_UID` / `COPPICE_GID` | Host user the API runs as (default `1000`; `make compose-up` uses `id -u` / `id -g`) |
 
 Clone or symlink projects into that host directory, then register `/repos/<name>` (the in-container path). Coppice creates worktrees under `/data/worktrees`; it does not `git clone` from `remote_url`.
+
+The server entrypoint starts as root only long enough to `chown` `/data/*` volumes, then drops to `COPPICE_UID`/`COPPICE_GID` so Git ownership matches the bind mount and new files under `/repos` stay yours on the host. If an older root-owned run left files behind: `sudo chown -R "$(id -u):$(id -g)" ~/coppice/repos`.
 
 ### Host port overrides
 
