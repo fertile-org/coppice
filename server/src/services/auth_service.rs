@@ -62,6 +62,41 @@ impl<'a> AuthService<'a> {
         Ok(row_to_user(&row))
     }
 
+    /// Create the configured first admin when the users table is empty.
+    ///
+    /// No-op when email/password are unset, incomplete, or users already exist.
+    /// Concurrent startups that lose the race are treated as success.
+    pub async fn maybe_auto_bootstrap(
+        &self,
+        auth: &AuthConfig,
+    ) -> Result<Option<User>, AuthError> {
+        let (Some(email), Some(password)) =
+            (&auth.bootstrap_admin_email, &auth.bootstrap_admin_password)
+        else {
+            return Ok(None);
+        };
+        let email = email.trim();
+        let password = password.trim();
+        if email.is_empty() || password.is_empty() {
+            tracing::warn!(
+                "auth.bootstrap_admin_email/password set but empty; skipping auto-bootstrap"
+            );
+            return Ok(None);
+        }
+
+        match self.bootstrap_admin(email, password).await {
+            Ok(user) => {
+                tracing::info!(email = %user.email, "auto-bootstrapped first admin");
+                Ok(Some(user))
+            }
+            Err(AuthError::BootstrapNotAllowed) => {
+                tracing::debug!("users already exist; skipping auto-bootstrap");
+                Ok(None)
+            }
+            Err(err) => Err(err),
+        }
+    }
+
     pub async fn login(&self, email: &str, password: &str) -> Result<SessionBundle, AuthError> {
         let row = sqlx::query(
             r#"

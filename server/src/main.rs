@@ -93,6 +93,10 @@ async fn main() -> anyhow::Result<()> {
         )
         .await?;
     }
+    coppice_server::services::auth_service::AuthService::new(&db, &config.auth)
+        .maybe_auto_bootstrap(&config.auth)
+        .await
+        .map_err(|e| anyhow::anyhow!("auto-bootstrap failed: {e}"))?;
     let agent_templates = coppice_server::AppState::load_agent_templates();
     coppice_server::agent_templates::ensure_all_presets_have_templates(&db, &agent_templates)
         .await

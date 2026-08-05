@@ -11,6 +11,10 @@ url = "postgres://coppice:coppice@localhost:5433/coppice"
 session_secret = "dev-secret-change-me"
 bootstrap_password = "changeme"
 cookie_secure = false
+# Optional: create first admin on server start when users is empty.
+# Docker Compose default.toml sets these; host installs can use `coppice bootstrap` instead.
+# bootstrap_admin_email = "admin@localhost"
+# bootstrap_admin_password = "changeme"
 
 [storage]
 artifacts_dir = "./data/artifacts"

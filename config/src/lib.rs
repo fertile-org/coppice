@@ -533,6 +533,12 @@ pub struct AuthConfig {
     pub session_secret: String,
     pub bootstrap_password: String,
     pub cookie_secure: bool,
+    /// When set with [`Self::bootstrap_admin_password`], the server creates this
+    /// admin on startup if the users table is empty. Omit for manual bootstrap only.
+    #[serde(default)]
+    pub bootstrap_admin_email: Option<String>,
+    #[serde(default)]
+    pub bootstrap_admin_password: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -875,6 +881,8 @@ impl AppConfig {
                 session_secret: "dev-secret-change-me".into(),
                 bootstrap_password: "changeme".into(),
                 cookie_secure: false,
+                bootstrap_admin_email: None,
+                bootstrap_admin_password: None,
             },
             storage: StorageConfig {
                 artifacts_dir: "./data/artifacts".into(),
@@ -1168,6 +1176,37 @@ mod tests {
         }
 
         assert_eq!(cfg.storage.artifacts_dir, "/tmp/coppice-test-artifacts");
+    }
+
+    #[test]
+    fn bootstrap_admin_fields_from_double_underscore_env() {
+        let _guard = ENV_LOCK.lock().expect("env lock");
+        const EMAIL: &str = "COPPICE_AUTH__BOOTSTRAP_ADMIN_EMAIL";
+        const PASSWORD: &str = "COPPICE_AUTH__BOOTSTRAP_ADMIN_PASSWORD";
+        let previous_email = std::env::var(EMAIL).ok();
+        let previous_password = std::env::var(PASSWORD).ok();
+        std::env::set_var(EMAIL, "ops@example.com");
+        std::env::set_var(PASSWORD, "ops-secret");
+
+        let cfg = AppConfig::load_defaults().expect("auth bootstrap env config should load");
+
+        match previous_email {
+            Some(value) => std::env::set_var(EMAIL, value),
+            None => std::env::remove_var(EMAIL),
+        }
+        match previous_password {
+            Some(value) => std::env::set_var(PASSWORD, value),
+            None => std::env::remove_var(PASSWORD),
+        }
+
+        assert_eq!(
+            cfg.auth.bootstrap_admin_email.as_deref(),
+            Some("ops@example.com")
+        );
+        assert_eq!(
+            cfg.auth.bootstrap_admin_password.as_deref(),
+            Some("ops-secret")
+        );
     }
 
     #[test]

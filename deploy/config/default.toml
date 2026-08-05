@@ -11,6 +11,9 @@ url = "postgres://coppice:coppice@postgres:5432/coppice"
 session_secret = "dev-secret-change-me"
 bootstrap_password = "changeme"
 cookie_secure = false
+# Auto-create first admin on server start when users table is empty.
+bootstrap_admin_email = "admin@localhost"
+bootstrap_admin_password = "changeme"
 
 [storage]
 artifacts_dir = "/data/artifacts"

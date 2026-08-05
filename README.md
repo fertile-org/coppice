@@ -60,12 +60,27 @@ That proactive loop — role owners who observe, signal, and escalate — is cen
 
 ## Get started
 
+Run Coppice with Docker Compose. You need Docker and the Compose plugin (`docker compose`).
+
+**1. Clone and start the stack**
+
 ```bash
-make compose-up
-make bootstrap
+git clone https://github.com/fertile-org/coppice.git
+cd coppice
+docker compose -f deploy/docker-compose.yml up -d --build
 ```
 
-Open [http://localhost:5001](http://localhost:5001) and sign in. Full setup, development, and deployment guides live in [docs/development.md](docs/development.md).
+Or from the repo root: `make compose-up`.
+
+This builds and starts Postgres, the API (port **5000**), and the web UI (port **5001**). The server migrates the database and creates the first admin when the users table is empty (`admin@localhost` / `changeme` from `deploy/config/default.toml`).
+
+**2. Open the UI**
+
+Visit [http://localhost:5001](http://localhost:5001) and sign in with `admin@localhost` / `changeme`.
+
+**Stop the stack:** `docker compose -f deploy/docker-compose.yml down` (or `make compose-down`).
+
+Default passwords and session secrets are for local use only — change them before exposing the stack on a real server. More detail: [docs/development.md](docs/development.md).
 
 ## Learn more
 

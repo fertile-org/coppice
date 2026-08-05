@@ -644,7 +644,7 @@ async fn execute_job(
     {
         let commit_message = format!(
             "[coppice] {}: {}",
-            &agent_key,
+            agent_key,
             truncate_with_ellipsis(&ticket.ticket.title, 72)
         );
         match finalize_worktree_git(&paths.worktree_dir, &paths.branch_name, &commit_message).await

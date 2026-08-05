@@ -32,7 +32,9 @@ Key fields for local dev (`config.toml`):
 | `database.url` | Host → Docker Postgres on `localhost:5433` |
 | `server.port` | API listen port (`5000`) |
 | `auth.session_secret` | Session cookie signing |
-| `auth.bootstrap_password` | First-admin bootstrap password |
+| `auth.bootstrap_password` | Shared secret for the HTTP `/api/auth/bootstrap` gate |
+| `auth.bootstrap_admin_email` | Optional: auto-create this admin on server start if users is empty |
+| `auth.bootstrap_admin_password` | Optional: login password for auto-created admin |
 | `storage.artifacts_dir` | Upload storage on host |
 | `agent.worktrees_path` | Agent worktrees on host |
 | `knowledge.embedding` | Provider/model and fixed migrated vector dimension |
@@ -65,7 +67,7 @@ make migrate
 
 # Step 2 — API (separate terminal)
 make server-dev
-make bootstrap   # first time only
+make bootstrap   # first time only (host config has no auto-bootstrap by default)
 
 # Step 3 — Web (separate terminal)
 make web-dev
@@ -98,9 +100,10 @@ Set `COPPICE_SERVER_BIN` to override the API binary path.
 ## Default stack (agents / smoke tests)
 
 ```bash
-make compose-up    # server auto-migrates on start
-make bootstrap     # first time only
+make compose-up    # server auto-migrates and auto-bootstraps admin when users is empty
 ```
+
+Docker image config (`deploy/config/default.toml`) sets `auth.bootstrap_admin_email` / `auth.bootstrap_admin_password`. Host installs without those fields still use `make bootstrap` (or `coppice bootstrap admin`) once.
 
 Tear down: `make compose-down`
 
