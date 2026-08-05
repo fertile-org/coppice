@@ -23,7 +23,7 @@ server/src/
   db/           Pool setup, migration runner
   knowledge/    Embedding, retrieval, extraction providers (M06)
   middleware/   Session auth, CSRF, admin checks
-  providers/    AgentProvider trait + mock / opencode / claude-code / codex connectors
+  providers/    AgentProvider trait + mock / opencode / claude-code / codex / cursor connectors
   workers/      In-process Tokio job workers (M03)
   storage/      Filesystem artifact store (attachments)
   config/       Figment-based AppConfig
@@ -69,6 +69,7 @@ providers/mock.rs         deterministic fixtures from fixtures/agent-responses/
 providers/opencode.rs     HTTP serve-mode connector (host testing, API keys)
 providers/claude_code.rs  subprocess connector (claude -p, host-managed auth)
 providers/codex.rs         subprocess connector (codex exec, host-managed auth)
+providers/cursor.rs        subprocess connector (agent -p, host-managed auth)
 services/run_service.rs   create/cancel/finish runs
 services/job_service.rs   enqueue, claim (SKIP LOCKED), mark done/failed
 services/repo_service.rs       global registered repos (local_path, verify)

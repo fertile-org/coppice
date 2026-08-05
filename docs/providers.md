@@ -6,4 +6,5 @@ Provider documentation lives in **[docs/providers/](providers/README.md)** — o
 - [opencode](providers/opencode.md) — manual host testing with API keys
 - [claude-code](providers/claude-code.md) — implemented (subprocess, subscription auth)
 - [codex](providers/codex.md) — implemented (subprocess, subscription auth)
+- [cursor](providers/cursor.md) — implemented (subprocess, host-managed auth)
 - [shell](providers/shell.md) — deferred

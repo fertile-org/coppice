@@ -9,6 +9,7 @@ Coppice runs agents through a **connector adapter** layer. Orchestration (queue,
 | `claude-code` | [claude-code.md](claude-code.md) | Implemented — subprocess with subscription auth |
 | `codex` | [codex.md](codex.md) | Implemented — subprocess with subscription auth |
 | `kilo-code` | [kilo-code.md](kilo-code.md) | Implemented — subprocess (OpenCode-derived; daemon compat unverified) |
+| `cursor` | [cursor.md](cursor.md) | Implemented — subprocess with host-managed auth |
 | `shell` | [shell.md](shell.md) | Deferred |
 
 OpenCode within-run **context compaction** is documented in [opencode.md § Context compaction](opencode.md#context-compaction).
