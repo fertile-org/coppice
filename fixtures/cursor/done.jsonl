@@ -1,0 +1,5 @@
+{"type":"system","subtype":"init","apiKeySource":"login","cwd":"/worktree","session_id":"sess_cursor_abc","model":"composer-2.5","permissionMode":"default"}
+{"type":"user","message":{"role":"user","content":[{"type":"text","text":"Run the Coppice job."}]},"session_id":"sess_cursor_abc"}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Reading .agent/context.md..."}]},"session_id":"sess_cursor_abc"}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Implementing changes..."}]},"session_id":"sess_cursor_abc"}
+{"type":"result","subtype":"success","is_error":false,"duration_ms":5000,"duration_api_ms":4000,"result":"{\"status\":\"done\",\"summary\":\"Implemented the feature.\",\"changedFiles\":[\"src/main.rs\"],\"testsRun\":[\"cargo test\"],\"assignTo\":\"backend_engineer\",\"mentionAgents\":[],\"blockers\":[]}","session_id":"sess_cursor_abc","request_id":"req_1"}

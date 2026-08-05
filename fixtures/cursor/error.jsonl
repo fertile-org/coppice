@@ -1,0 +1,2 @@
+{"type":"system","subtype":"init","cwd":"/worktree","session_id":"sess_cursor_err","model":"auto","permissionMode":"default"}
+{"type":"result","subtype":"error","is_error":true,"result":"Authentication required","session_id":"sess_cursor_err"}

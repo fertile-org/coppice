@@ -1,0 +1,5 @@
+{"type":"system","subtype":"init","apiKeySource":"login","cwd":"/worktree","session_id":"sess_cursor_blocked","model":"composer-2.5","permissionMode":"default"}
+{"type":"user","message":{"role":"user","content":[{"type":"text","text":"Run the Coppice job."}]},"session_id":"sess_cursor_blocked"}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Reading .agent/context.md..."}]},"session_id":"sess_cursor_blocked"}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"I need a deploy token to proceed."}]},"session_id":"sess_cursor_blocked"}
+{"type":"result","subtype":"success","is_error":false,"duration_ms":3000,"duration_api_ms":2500,"result":"{\"status\":\"blocked\",\"blockerType\":\"missing_secret\",\"summary\":\"Need API token\",\"mentionAgents\":[],\"requiredCapabilities\":[],\"requiredSecrets\":[\"DEPLOY_TOKEN\"]}","session_id":"sess_cursor_blocked","request_id":"req_2"}
