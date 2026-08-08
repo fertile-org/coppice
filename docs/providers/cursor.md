@@ -40,6 +40,12 @@ command = "agent"
 model_providers = ["cursor"]
 ```
 
+If the Agents UI / models API returns 502 while `docker compose exec … agent models` works, set an absolute `command` (compose `PATH` may not be what you expect at runtime):
+
+```toml
+command = "/home/YOUR_USER/.local/bin/agent"
+```
+
 **3. Compose override** — save as `deploy/docker-compose.cursor.yml` (local only; do not commit if you prefer private mounts):
 
 ```yaml
@@ -48,7 +54,7 @@ services:
     environment:
       # Same UID as make compose-up; CLI auth lives under this HOME.
       HOME: ${HOME}
-      PATH: ${HOME}/.local/bin:/usr/local/bin:/usr/bin:/bin
+      PATH: ${HOME}/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
     volumes:
       # `agent` symlink + install tree (symlink target must also be mounted)
       - ${HOME}/.local/bin:${HOME}/.local/bin:ro

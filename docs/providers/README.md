@@ -53,7 +53,7 @@ Shared pattern:
 4. `docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.<connector>.yml up -d --force-recreate server`
 5. `exec` the CLI inside the container to verify.
 
-Prefer mounting at the **same absolute paths** as on the host and set `HOME` / `PATH` so symlinks and auth lookup keep working. Ensure host directories exist before the first `up`.
+Prefer mounting at the **same absolute paths** as on the host and set `HOME` / `PATH` so symlinks and auth lookup keep working. When overriding `PATH`, keep `/usr/sbin` (and `/sbin`) so the server entrypoint can still find `gosu`. Ensure host directories exist before the first `up`.
 
 ## Per-agent connector, model provider, and model
 

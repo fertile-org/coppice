@@ -202,7 +202,7 @@ services:
   server:
     environment:
       HOME: ${HOME}
-      PATH: ${HOME}/.opencode/bin:${HOME}/.local/bin:/usr/local/bin:/usr/bin:/bin
+      PATH: ${HOME}/.opencode/bin:${HOME}/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
     volumes:
       - ${HOME}/.opencode:${HOME}/.opencode:ro
       - ${HOME}/.local/share/opencode:${HOME}/.local/share/opencode:ro

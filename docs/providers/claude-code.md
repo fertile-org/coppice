@@ -43,7 +43,7 @@ services:
   server:
     environment:
       HOME: ${HOME}
-      PATH: ${HOME}/.local/bin:/usr/local/bin:/usr/bin:/bin
+      PATH: ${HOME}/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
       # Optional instead of mounting ~/.claude:
       # ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
     volumes:

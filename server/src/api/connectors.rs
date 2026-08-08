@@ -3,6 +3,7 @@ use crate::AppState;
 use axum::{
     extract::{Path, State},
     http::StatusCode,
+    response::{IntoResponse, Response},
     routing::get,
     Json, Router,
 };
@@ -54,6 +55,35 @@ struct ModelListResponse {
     items: Vec<ModelResponse>,
 }
 
+#[derive(Serialize)]
+struct ApiMessageResponse {
+    message: String,
+}
+
+enum ModelsApiError {
+    Status(StatusCode),
+    Message(StatusCode, String),
+}
+
+impl IntoResponse for ModelsApiError {
+    fn into_response(self) -> Response {
+        match self {
+            ModelsApiError::Status(code) => code.into_response(),
+            ModelsApiError::Message(code, message) => {
+                tracing::warn!(%message, status = %code, "connector models listing failed");
+                (code, Json(ApiMessageResponse { message })).into_response()
+            }
+        }
+    }
+}
+
+fn models_gateway_err(context: &str, err: impl std::fmt::Display) -> ModelsApiError {
+    ModelsApiError::Message(
+        StatusCode::BAD_GATEWAY,
+        format!("{context}: {err}"),
+    )
+}
+
 async fn list_connectors(
     State(state): State<Arc<AppState>>,
     AuthUser { .. }: AuthUser,
@@ -88,15 +118,15 @@ async fn list_models(
     State(state): State<Arc<AppState>>,
     AuthUser { .. }: AuthUser,
     Path((connector_id, model_provider_id)): Path<(String, String)>,
-) -> Result<Json<ModelListResponse>, StatusCode> {
+) -> Result<Json<ModelListResponse>, ModelsApiError> {
     if !state.connector_registry.has(&connector_id) {
-        return Err(StatusCode::NOT_FOUND);
+        return Err(ModelsApiError::Status(StatusCode::NOT_FOUND));
     }
     if !state
         .connector_registry
         .has_model_provider(&connector_id, &model_provider_id)
     {
-        return Err(StatusCode::NOT_FOUND);
+        return Err(ModelsApiError::Status(StatusCode::NOT_FOUND));
     }
     match connector_id.as_str() {
         "opencode" => {
@@ -106,7 +136,7 @@ async fn list_models(
                 &model_provider_id,
             )
             .await
-            .map_err(|_| StatusCode::BAD_GATEWAY)?;
+            .map_err(|err| models_gateway_err("opencode models", err))?;
             Ok(Json(ModelListResponse {
                 items: models
                     .into_iter()
@@ -132,7 +162,7 @@ async fn list_models(
         "codex" => {
             let models = crate::providers::codex_models::list_codex_models(&model_provider_id)
                 .await
-                .map_err(|_| StatusCode::BAD_GATEWAY)?;
+                .map_err(|err| models_gateway_err("codex models", err))?;
             Ok(Json(ModelListResponse {
                 items: models
                     .into_iter()
@@ -150,7 +180,7 @@ async fn list_models(
                 &model_provider_id,
             )
             .await
-            .map_err(|_| StatusCode::BAD_GATEWAY)?;
+            .map_err(|err| models_gateway_err("kilo-code models", err))?;
             Ok(Json(ModelListResponse {
                 items: models
                     .into_iter()
@@ -168,7 +198,7 @@ async fn list_models(
             let command = &state.config.agent.connectors.cursor.command;
             let models = crate::providers::cursor_models::list_cursor_models(command)
                 .await
-                .map_err(|_| StatusCode::BAD_GATEWAY)?;
+                .map_err(|err| models_gateway_err("cursor models", err))?;
             Ok(Json(ModelListResponse {
                 items: models
                     .into_iter()
@@ -180,7 +210,7 @@ async fn list_models(
             }))
         }
         "mock" => Ok(Json(ModelListResponse { items: vec![] })),
-        _ => Err(StatusCode::NOT_FOUND),
+        _ => Err(ModelsApiError::Status(StatusCode::NOT_FOUND)),
     }
 }
 

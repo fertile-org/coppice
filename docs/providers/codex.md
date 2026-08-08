@@ -43,7 +43,7 @@ services:
   server:
     environment:
       HOME: ${HOME}
-      PATH: ${HOME}/.local/bin:/usr/local/bin:/usr/bin:/bin
+      PATH: ${HOME}/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
     volumes:
       - ${HOME}/.local/bin:${HOME}/.local/bin:ro
       # Typical auth/config dir after `codex login` (create/adjust if yours differs)

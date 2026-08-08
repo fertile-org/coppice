@@ -65,7 +65,7 @@ services:
   server:
     environment:
       HOME: ${HOME}
-      PATH: /usr/local/bin:/usr/bin:/bin
+      PATH: /usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
     volumes:
       - /usr/local/bin/kilo:/usr/local/bin/kilo:ro
       - /usr/local/lib/node_modules/@kilocode:/usr/local/lib/node_modules/@kilocode:ro
