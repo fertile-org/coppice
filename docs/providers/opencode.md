@@ -37,7 +37,7 @@ model_providers = ["zai-coding-plan"]
 
 No server-level `model` or `variant` in config. Host adds model provider IDs to `model_providers` after authenticating with OpenCode.
 
-CI and the default Compose stack stay on `mock`. Use OpenCode on a host install or after mounting the CLI into Compose (see [Requirements](#requirements) / [providers README](README.md#docker-compose-host-clis)).
+CI and the default Compose stack stay on `mock`. Use OpenCode on a host install or after mounting the CLI into Compose (see [Docker](#docker)).
 
 ### Model provider IDs
 
@@ -172,7 +172,51 @@ Coppice forwards these as WebSocket `event` messages. The Live Session may rende
 
 - `opencode` on `PATH`
 - `opencode auth login` completed where the server process runs (host `make server-dev`, or inside Compose after you mount the CLI + auth)
-- For Docker Compose: mount the host CLI + `~/.local/share/opencode` yourself once — see [Docker Compose (host CLIs)](README.md#docker-compose-host-clis). OpenCode also needs `opencode serve` reachable from the server (attach mode).
+
+## Docker
+
+The server image does not include `opencode`. Mount the host CLI + auth yourself once (overview: [Docker Compose (host CLIs)](README.md#docker-compose-host-clis)). OpenCode also needs `opencode serve` reachable from the server (attach mode).
+
+**1. Host prep**
+
+```bash
+opencode auth login
+opencode auth list
+```
+
+**2. Enable in** `deploy/config/config.toml`
+
+```toml
+[agent.connectors.opencode]
+enabled = true
+command = "opencode"
+serve_hostname = "127.0.0.1"
+serve_port = 4096
+model_providers = ["zai-coding-plan"]  # IDs from `opencode auth list`
+```
+
+**3. Compose override** — save as `deploy/docker-compose.opencode.yml` (local only). Adjust the binary path to match `which opencode` (often `~/.opencode/bin/opencode`):
+
+```yaml
+services:
+  server:
+    environment:
+      HOME: ${HOME}
+      PATH: ${HOME}/.opencode/bin:${HOME}/.local/bin:/usr/local/bin:/usr/bin:/bin
+    volumes:
+      - ${HOME}/.opencode:${HOME}/.opencode:ro
+      - ${HOME}/.local/share/opencode:${HOME}/.local/share/opencode:ro
+```
+
+**4. Apply**
+
+```bash
+docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.opencode.yml \
+  up -d --force-recreate server
+
+docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.opencode.yml \
+  exec -u "$(id -u):$(id -g)" server opencode --version
+```
 
 ## Future TODO
 

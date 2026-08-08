@@ -20,9 +20,54 @@ model_providers = ["cursor"]
 
 ## Docker
 
-The server image does not include `agent`. For Compose, mount the host CLI + auth yourself once — same manual step as other connectors. See [Docker Compose (host CLIs)](README.md#docker-compose-host-clis).
+The server image does not include `agent`. Mount the host CLI + auth yourself once (same idea as other connectors; overview: [Docker Compose (host CLIs)](README.md#docker-compose-host-clis)).
 
-Typical pieces: `~/.local/bin/agent`, `~/.local/share/cursor-agent`, `~/.config/cursor` after `agent login` on the host. Set container `HOME` so the CLI finds auth.
+**1. Host prep**
+
+```bash
+# install Cursor Agent CLI, then:
+agent login
+# confirm
+agent models | head
+```
+
+**2. Enable in** `deploy/config/config.toml`
+
+```toml
+[agent.connectors.cursor]
+enabled = true
+command = "agent"
+model_providers = ["cursor"]
+```
+
+**3. Compose override** — save as `deploy/docker-compose.cursor.yml` (local only; do not commit if you prefer private mounts):
+
+```yaml
+services:
+  server:
+    environment:
+      # Same UID as make compose-up; CLI auth lives under this HOME.
+      HOME: ${HOME}
+      PATH: ${HOME}/.local/bin:/usr/local/bin:/usr/bin:/bin
+    volumes:
+      # `agent` symlink + install tree (symlink target must also be mounted)
+      - ${HOME}/.local/bin:${HOME}/.local/bin:ro
+      - ${HOME}/.local/share/cursor-agent:${HOME}/.local/share/cursor-agent:ro
+      # auth.json from `agent login`
+      - ${HOME}/.config/cursor:${HOME}/.config/cursor:ro
+```
+
+Ensure those host directories already exist before the first `up` (Docker creates empty dirs otherwise).
+
+**4. Apply**
+
+```bash
+docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.cursor.yml \
+  up -d --force-recreate server
+
+docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.cursor.yml \
+  exec -u "$(id -u):$(id -g)" server agent models | head
+```
 
 ## Capabilities
 
