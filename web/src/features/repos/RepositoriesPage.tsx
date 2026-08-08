@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { Button } from '../../components/ui/button';
 import { ApiError } from '../../lib/api';
 import {
@@ -266,18 +266,36 @@ function ForgeTokenCard({ repos }: { repos: Repo[] }) {
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  // Repos often arrive after mount (`repos ?? []` while loading). Keep the
+  // controlled <select> in sync so the visible option matches state.
+  useEffect(() => {
+    if (repos.length === 0) {
+      setRepoId('');
+      return;
+    }
+    if (!repos.some((repo) => repo.id === repoId)) {
+      setRepoId(repos[0].id);
+    }
+  }, [repos, repoId]);
+
   const selected = repos.find((r) => r.id === repoId);
 
   async function handleSave(e: FormEvent) {
     e.preventDefault();
-    if (!repoId || !token.trim()) {
-      setError('Select a repository and paste a token.');
+    const effectiveRepoId =
+      repoId || (repos.length === 1 ? repos[0].id : '');
+    if (!effectiveRepoId) {
+      setError('Select a repository.');
+      return;
+    }
+    if (!token.trim()) {
+      setError('Paste a forge token.');
       return;
     }
     setError(null);
     setMessage(null);
     try {
-      await setToken.mutateAsync({ id: repoId, token: token.trim() });
+      await setToken.mutateAsync({ id: effectiveRepoId, token: token.trim() });
       setTokenValue('');
       setMessage('Forge token saved. The value is not shown again.');
     } catch {
@@ -286,12 +304,14 @@ function ForgeTokenCard({ repos }: { repos: Repo[] }) {
   }
 
   async function handleClear() {
-    if (!repoId || !selected?.forgeTokenConfigured) return;
+    const effectiveRepoId =
+      repoId || (repos.length === 1 ? repos[0].id : '');
+    if (!effectiveRepoId || !selected?.forgeTokenConfigured) return;
     if (!window.confirm('Remove the forge token for this repository?')) return;
     setError(null);
     setMessage(null);
     try {
-      await clearToken.mutateAsync(repoId);
+      await clearToken.mutateAsync(effectiveRepoId);
       setMessage('Forge token removed.');
     } catch {
       setError('Unable to remove forge token.');
