@@ -21,6 +21,7 @@ async fn test_state_with_db() -> Arc<AppState> {
         event_bus: Arc::new(coppice_server::events::bus::EventBus::new()),
         opencode_serve: None,
         agent_templates: coppice_server::AppState::load_agent_templates(),
+        secret_store: coppice_server::crypto::SecretStore::from_master_key(&config.secrets.master_key),
         config,
         db: Some(pool),
     })

@@ -9,9 +9,11 @@ import {
 } from '../../lib/schemas/repo';
 import { useSession } from '../auth/useSession';
 import {
+  useClearForgeToken,
   useCreateRepo,
   useDeleteRepo,
   useRepos,
+  useSetForgeToken,
   useUpdateRepo,
   useVerifyRepo,
 } from './useRepos';
@@ -256,15 +258,129 @@ function RepoForm({ editing, onCancelEdit }: RepoFormProps) {
   );
 }
 
-function M07PlaceholderCard() {
+function ForgeTokenCard({ repos }: { repos: Repo[] }) {
+  const setToken = useSetForgeToken();
+  const clearToken = useClearForgeToken();
+  const [repoId, setRepoId] = useState(repos[0]?.id ?? '');
+  const [token, setTokenValue] = useState('');
+  const [message, setMessage] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const selected = repos.find((r) => r.id === repoId);
+
+  async function handleSave(e: FormEvent) {
+    e.preventDefault();
+    if (!repoId || !token.trim()) {
+      setError('Select a repository and paste a token.');
+      return;
+    }
+    setError(null);
+    setMessage(null);
+    try {
+      await setToken.mutateAsync({ id: repoId, token: token.trim() });
+      setTokenValue('');
+      setMessage('Forge token saved. The value is not shown again.');
+    } catch {
+      setError('Unable to save forge token.');
+    }
+  }
+
+  async function handleClear() {
+    if (!repoId || !selected?.forgeTokenConfigured) return;
+    if (!window.confirm('Remove the forge token for this repository?')) return;
+    setError(null);
+    setMessage(null);
+    try {
+      await clearToken.mutateAsync(repoId);
+      setMessage('Forge token removed.');
+    } catch {
+      setError('Unable to remove forge token.');
+    }
+  }
+
+  if (repos.length === 0) {
+    return (
+      <div className="rounded-xl border border-dashed border-border bg-paper-50 p-5">
+        <h2 className="font-display text-sm font-semibold text-bark-800">
+          Forge token
+        </h2>
+        <p className="mt-1 font-body text-sm text-text-muted">
+          Add a repository first, then paste a GitHub PAT for push / create PR.
+        </p>
+      </div>
+    );
+  }
+
   return (
-    <div className="rounded-xl border border-dashed border-border bg-paper-50 p-5">
+    <div className="rounded-xl border border-border bg-paper-50 p-5">
       <h2 className="font-display text-sm font-semibold text-bark-800">
-        Pull request secrets
+        Forge token
       </h2>
       <p className="mt-1 font-body text-sm text-text-muted">
-        Secrets for pull requests — coming in M07
+        GitHub PAT (or fine-grained token) per repository for human-triggered
+        push and create PR. Value is stored encrypted and never shown again.
       </p>
+      <form onSubmit={(e) => void handleSave(e)} className="mt-4 space-y-3">
+        <div>
+          <label className="font-body text-xs font-medium text-text-muted">
+            Repository
+          </label>
+          <select
+            value={repoId}
+            onChange={(e) => {
+              setRepoId(e.target.value);
+              setMessage(null);
+              setError(null);
+            }}
+            className="field-control mt-1 w-full px-3 py-2 font-body text-sm"
+          >
+            {repos.map((repo) => (
+              <option key={repo.id} value={repo.id}>
+                {repo.name}
+                {repo.forgeTokenConfigured ? ' (token set)' : ''}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label className="font-body text-xs font-medium text-text-muted">
+            Token
+          </label>
+          <input
+            type="password"
+            autoComplete="off"
+            value={token}
+            onChange={(e) => setTokenValue(e.target.value)}
+            placeholder="ghp_…"
+            className="field-control mt-1 w-full px-3 py-2 font-mono text-sm"
+          />
+        </div>
+        {selected && (
+          <p className="font-body text-xs text-text-muted">
+            Status:{' '}
+            {selected.forgeTokenConfigured ? (
+              <span className="text-success">configured</span>
+            ) : (
+              <span className="text-warning">not configured</span>
+            )}
+          </p>
+        )}
+        {error && <p className="font-body text-xs text-danger">{error}</p>}
+        {message && <p className="font-body text-xs text-success">{message}</p>}
+        <div className="flex flex-wrap gap-2">
+          <Button type="submit" loading={setToken.isPending}>
+            {setToken.isPending ? 'Saving…' : 'Save token'}
+          </Button>
+          <Button
+            type="button"
+            variant="secondary"
+            disabled={!selected?.forgeTokenConfigured || clearToken.isPending}
+            onClick={() => void handleClear()}
+          >
+            {clearToken.isPending ? 'Removing…' : 'Clear'}
+          </Button>
+        </div>
+      </form>
     </div>
   );
 }
@@ -434,6 +550,20 @@ export function RepositoriesPage() {
                           <div className="mt-0.5 font-body text-xs text-text-muted">
                             Branch: {repo.defaultBranch}
                           </div>
+                          <div className="mt-1">
+                            <span
+                              className={[
+                                'inline-flex items-center rounded-full border px-2 py-0.5 font-body text-xs',
+                                repo.forgeTokenConfigured
+                                  ? 'border-success-muted bg-success-muted text-success'
+                                  : 'border-border bg-paper-100 text-text-muted',
+                              ].join(' ')}
+                            >
+                              {repo.forgeTokenConfigured
+                                ? 'token configured'
+                                : 'token not configured'}
+                            </span>
+                          </div>
                         </td>
                         <td className="max-w-[200px] truncate px-4 py-3 font-mono text-xs text-text-secondary">
                           {repo.localPath}
@@ -496,7 +626,7 @@ export function RepositoriesPage() {
               editing={editing}
               onCancelEdit={() => setEditing(null)}
             />
-            <M07PlaceholderCard />
+            <ForgeTokenCard repos={repos ?? []} />
           </div>
         )}
       </div>

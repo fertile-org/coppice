@@ -43,6 +43,28 @@ async function verifyRepo(id: string): Promise<Repo> {
   return res.json() as Promise<Repo>;
 }
 
+async function setForgeToken({
+  id,
+  token,
+}: {
+  id: string;
+  token: string;
+}): Promise<Repo> {
+  const res = await apiFetch(`/api/repos/${id}/forge-token`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ token }),
+  });
+  return res.json() as Promise<Repo>;
+}
+
+async function clearForgeToken(id: string): Promise<Repo> {
+  const res = await apiFetch(`/api/repos/${id}/forge-token`, {
+    method: 'DELETE',
+  });
+  return res.json() as Promise<Repo>;
+}
+
 export function useRepos() {
   return useQuery({
     queryKey: REPOS_QUERY_KEY,
@@ -88,6 +110,28 @@ export function useVerifyRepo() {
 
   return useMutation({
     mutationFn: verifyRepo,
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: REPOS_QUERY_KEY });
+    },
+  });
+}
+
+export function useSetForgeToken() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: setForgeToken,
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: REPOS_QUERY_KEY });
+    },
+  });
+}
+
+export function useClearForgeToken() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: clearForgeToken,
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: REPOS_QUERY_KEY });
     },

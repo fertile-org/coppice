@@ -18,6 +18,7 @@ export const repoSchema = z.object({
   verificationStatus: verificationStatusSchema,
   verificationError: z.string().nullable(),
   lastVerifiedAt: z.string().nullable(),
+  forgeTokenConfigured: z.boolean().optional().default(false),
   createdAt: z.string(),
   updatedAt: z.string(),
 });

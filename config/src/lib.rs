@@ -20,6 +20,58 @@ pub struct AppConfig {
     pub workflow: WorkflowConfig,
     #[serde(default)]
     pub knowledge: KnowledgeConfig,
+    #[serde(default)]
+    pub secrets: SecretsConfig,
+    #[serde(default)]
+    pub git: GitConfig,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct SecretsConfig {
+    /// Material for AES-256-GCM key derivation (SHA-256). Change in production.
+    #[serde(default = "default_secrets_master_key")]
+    pub master_key: String,
+}
+
+fn default_secrets_master_key() -> String {
+    "dev-master-key-change-me".into()
+}
+
+impl Default for SecretsConfig {
+    fn default() -> Self {
+        Self {
+            master_key: default_secrets_master_key(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct GitConfig {
+    #[serde(default = "default_git_author_name")]
+    pub author_name: String,
+    #[serde(default = "default_git_author_email")]
+    pub author_email: String,
+    /// When false, push-branch / create-pr APIs return 403.
+    #[serde(default)]
+    pub push_enabled: bool,
+}
+
+fn default_git_author_name() -> String {
+    "Coppice".into()
+}
+
+fn default_git_author_email() -> String {
+    "coppice@localhost".into()
+}
+
+impl Default for GitConfig {
+    fn default() -> Self {
+        Self {
+            author_name: default_git_author_name(),
+            author_email: default_git_author_email(),
+            push_enabled: false,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -869,6 +921,26 @@ impl AppConfig {
                     .only(&["WORKFLOW_AUTO_START_RUNS"])
                     .map(|_| "workflow.auto_start_runs".into()),
             )
+            .merge(
+                Env::raw()
+                    .only(&["SECRETS_MASTER_KEY"])
+                    .map(|_| "secrets.master_key".into()),
+            )
+            .merge(
+                Env::raw()
+                    .only(&["GIT_AUTHOR_NAME"])
+                    .map(|_| "git.author_name".into()),
+            )
+            .merge(
+                Env::raw()
+                    .only(&["GIT_AUTHOR_EMAIL"])
+                    .map(|_| "git.author_email".into()),
+            )
+            .merge(
+                Env::raw()
+                    .only(&["GIT_PUSH_ENABLED"])
+                    .map(|_| "git.push_enabled".into()),
+            )
     }
 
     fn default_values() -> Self {
@@ -902,6 +974,8 @@ impl AppConfig {
             },
             workflow: WorkflowConfig::default(),
             knowledge: KnowledgeConfig::default(),
+            secrets: SecretsConfig::default(),
+            git: GitConfig::default(),
         }
     }
 }

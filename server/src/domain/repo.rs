@@ -19,8 +19,15 @@ pub struct Repo {
     pub verification_status: VerificationStatus,
     pub verification_error: Option<String>,
     pub last_verified_at: Option<OffsetDateTime>,
+    pub forge_token_secret_id: Option<Uuid>,
     pub created_at: OffsetDateTime,
     pub updated_at: OffsetDateTime,
+}
+
+impl Repo {
+    pub fn forge_token_configured(&self) -> bool {
+        self.forge_token_secret_id.is_some()
+    }
 }
 
 pub fn verification_status_to_str(status: VerificationStatus) -> &'static str {

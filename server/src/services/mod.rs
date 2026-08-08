@@ -19,6 +19,7 @@ pub mod repo_verifier;
 pub mod result_contract;
 pub mod run_orchestrator;
 pub mod run_service;
+pub mod secret_service;
 pub mod split_service;
 pub mod ticket_git_service;
 pub mod ticket_service;

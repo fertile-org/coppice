@@ -1,6 +1,7 @@
 pub mod agent_templates;
 pub mod api;
 pub mod config;
+pub mod crypto;
 pub mod db;
 pub mod domain;
 pub mod events;
@@ -33,6 +34,7 @@ pub struct AppState {
     pub event_bus: Arc<crate::events::bus::EventBus>,
     pub opencode_serve: Option<Arc<crate::sessions::opencode_serve::OpenCodeServeManager>>,
     pub agent_templates: HashMap<String, String>,
+    pub secret_store: crate::crypto::SecretStore,
 }
 
 impl AppState {
@@ -65,6 +67,7 @@ impl AppState {
 
 pub async fn test_state() -> Arc<AppState> {
     let config = AppConfig::load_defaults().expect("test config");
+    let secret_store = crate::crypto::SecretStore::from_master_key(&config.secrets.master_key);
     Arc::new(AppState {
         attachments: AppState::attachment_store_from_config(&config),
         connector_registry: AppState::connector_registry_from_config(&config, None),
@@ -73,6 +76,7 @@ pub async fn test_state() -> Arc<AppState> {
         event_bus: Arc::new(crate::events::bus::EventBus::new()),
         opencode_serve: None,
         agent_templates: AppState::load_agent_templates(),
+        secret_store,
         config,
         db: None,
     })

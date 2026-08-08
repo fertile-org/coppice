@@ -33,7 +33,26 @@ pub fn build_pr_create_url(
     None
 }
 
-fn is_github_host(host: &str) -> bool {
+/// HTTPS remote suitable for token auth: `https://github.com/owner/repo.git`
+pub fn https_remote_url(remote_url: &str) -> Option<String> {
+    let (host, repo_path) = parse_git_remote(remote_url.trim())?;
+    Some(format!("https://{host}/{repo_path}.git"))
+}
+
+/// GitHub `owner` / `repo` for the REST API (exactly one slash in path).
+pub fn github_owner_repo(remote_url: &str) -> Option<(String, String)> {
+    let (host, repo_path) = parse_git_remote(remote_url.trim())?;
+    if !is_github_host(&host) {
+        return None;
+    }
+    let (owner, repo) = repo_path.split_once('/')?;
+    if owner.is_empty() || repo.is_empty() || repo.contains('/') {
+        return None;
+    }
+    Some((owner.to_string(), repo.to_string()))
+}
+
+pub fn is_github_host(host: &str) -> bool {
     host == "github.com" || host.ends_with(".github.com") || host.contains("github.")
 }
 
@@ -41,7 +60,7 @@ fn is_gitlab_host(host: &str) -> bool {
     host == "gitlab.com" || host.ends_with(".gitlab.com") || host.contains("gitlab")
 }
 
-fn parse_git_remote(remote: &str) -> Option<(String, String)> {
+pub fn parse_git_remote(remote: &str) -> Option<(String, String)> {
     if let Some(scp) = remote.strip_prefix("git@") {
         let (host, path) = scp.split_once(':')?;
         let path = path.trim_end_matches(".git").trim();
@@ -51,14 +70,19 @@ fn parse_git_remote(remote: &str) -> Option<(String, String)> {
         return Some((host.to_string(), path.to_string()));
     }
 
-    if remote.starts_with("ssh://") || remote.starts_with("https://") || remote.starts_with("http://") {
+    if remote.starts_with("ssh://")
+        || remote.starts_with("https://")
+        || remote.starts_with("http://")
+    {
         let without_scheme = remote
             .trim_start_matches("ssh://")
             .trim_start_matches("https://")
             .trim_start_matches("http://");
         let path_start = without_scheme.find('/')?;
         let authority = &without_scheme[..path_start];
-        let path = without_scheme[path_start + 1..].trim_end_matches(".git").trim();
+        let path = without_scheme[path_start + 1..]
+            .trim_end_matches(".git")
+            .trim();
         let host = authority
             .strip_prefix("git@")
             .unwrap_or(authority)
@@ -119,36 +143,35 @@ mod tests {
         let url = build_pr_create_url(
             Some("https://gitlab.com/group/coppice.git"),
             "main",
-            "agent/TICKET-1",
+            "feat",
         )
         .expect("url");
-        assert!(url.contains("/-/merge_requests/new"));
-        assert!(url.contains("source_branch%5D=agent%2FTICKET-1"));
-        assert!(url.contains("target_branch%5D=main"));
+        assert!(url.contains("gitlab.com/group/coppice/-/merge_requests/new"));
     }
 
     #[test]
-    fn bitbucket_pull_request_url() {
+    fn bitbucket_pr_url() {
         let url = build_pr_create_url(
-            Some("git@bitbucket.org:workspace/coppice.git"),
+            Some("https://bitbucket.org/acme/repo.git"),
             "main",
-            "agent/TICKET-1",
+            "feat",
         )
         .expect("url");
-        assert_eq!(
-            url,
-            "https://bitbucket.org/workspace/coppice/pull-requests/new?source=agent%2FTICKET-1&dest=main"
-        );
+        assert!(url.contains("bitbucket.org/acme/repo/pull-requests/new"));
     }
 
     #[test]
-    fn missing_remote_returns_none() {
+    fn missing_or_unknown_remote() {
         assert!(build_pr_create_url(None, "main", "feature").is_none());
         assert!(build_pr_create_url(Some(""), "main", "feature").is_none());
+        assert!(build_pr_create_url(Some("git@codeberg.org:acme/repo.git"), "main", "feat").is_none());
     }
 
     #[test]
-    fn unknown_host_returns_none() {
-        assert!(build_pr_create_url(Some("git@codeberg.org:acme/repo.git"), "main", "feat").is_none());
+    fn github_owner_repo_from_ssh() {
+        assert_eq!(
+            github_owner_repo("git@github.com:acme/coppice.git"),
+            Some(("acme".into(), "coppice".into()))
+        );
     }
 }

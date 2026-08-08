@@ -38,7 +38,7 @@ use crate::services::ticket_thread;
 use crate::services::workflow_service::WorkflowService;
 use crate::services::worktree_service::{
     compute_paths, finalize_worktree_git, format_git_comment_footer, sync_worktree_to_branch_tip,
-    WorktreeService,
+    GitAuthor, WorktreeService,
 };
 use crate::util::error_format::format_job_error;
 use crate::util::truncate::truncate_with_ellipsis;
@@ -647,7 +647,16 @@ async fn execute_job(
             agent_key,
             truncate_with_ellipsis(&ticket.ticket.title, 72)
         );
-        match finalize_worktree_git(&paths.worktree_dir, &paths.branch_name, &commit_message).await
+        match finalize_worktree_git(
+            &paths.worktree_dir,
+            &paths.branch_name,
+            &commit_message,
+            Some(&GitAuthor {
+                name: state.config.git.author_name.clone(),
+                email: state.config.git.author_email.clone(),
+            }),
+        )
+        .await
         {
             Ok(git_state) => {
                 apply

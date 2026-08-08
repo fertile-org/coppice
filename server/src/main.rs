@@ -112,6 +112,7 @@ async fn main() -> anyhow::Result<()> {
         event_bus: Arc::new(coppice_server::events::bus::EventBus::new()),
         opencode_serve: opencode_serve.clone(),
         agent_templates,
+        secret_store: coppice_server::crypto::SecretStore::from_master_key(&config.secrets.master_key),
         config: config.clone(),
         db: Some(db),
     });

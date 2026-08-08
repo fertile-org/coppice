@@ -61,6 +61,14 @@ pub fn routes() -> Router<Arc<AppState>> {
             post(remove_ticket_worktree),
         )
         .route(
+            "/api/tickets/{ticket_id}/push-branch",
+            post(push_ticket_branch),
+        )
+        .route(
+            "/api/tickets/{ticket_id}/create-pr",
+            post(create_ticket_pr),
+        )
+        .route(
             "/api/tickets/{ticket_id}/resolve-blocker",
             post(resolve_blocker),
         )
@@ -300,7 +308,24 @@ fn map_ticket_git_error_response(err: TicketGitError) -> TicketGitApiError {
             StatusCode::BAD_REQUEST,
             "Invalid base branch name.".into(),
         ),
+        TicketGitError::PushDisabled => (
+            StatusCode::FORBIDDEN,
+            "Git push is disabled. Set git.push_enabled = true in server config.".into(),
+        ),
+        TicketGitError::NoRemoteUrl => (
+            StatusCode::BAD_REQUEST,
+            "Repository has no remote_url. Set one in Settings → Repositories.".into(),
+        ),
+        TicketGitError::NoForgeToken => (
+            StatusCode::BAD_REQUEST,
+            "Repository has no forge token. Set one in Settings → Repositories.".into(),
+        ),
+        TicketGitError::NotGitHub => (
+            StatusCode::BAD_REQUEST,
+            "Create PR via API requires a GitHub remote_url.".into(),
+        ),
         TicketGitError::Git(msg) => (StatusCode::BAD_REQUEST, msg),
+        TicketGitError::GitHubApi(msg) => (StatusCode::BAD_REQUEST, format!("GitHub API: {msg}")),
         TicketGitError::Ticket(e) => {
             let message = ticket_error_message(&e);
             (map_error(e), message)
@@ -310,6 +335,10 @@ fn map_ticket_git_error_response(err: TicketGitError) -> TicketGitApiError {
         TicketGitError::Database(_) => (
             StatusCode::INTERNAL_SERVER_ERROR,
             "An internal error occurred.".into(),
+        ),
+        TicketGitError::Secret(_) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Unable to decrypt forge token.".into(),
         ),
     };
     TicketGitApiError::Message(status, message)
@@ -337,7 +366,16 @@ impl IntoResponse for TicketGitApiError {
 }
 
 fn ticket_git_service<'a>(state: &'a AppState, pool: &'a sqlx::PgPool) -> TicketGitService<'a> {
-    TicketGitService::new(pool, state.config.agent.worktrees_path.clone().into())
+    TicketGitService::with_forge(
+        pool,
+        state.config.agent.worktrees_path.clone().into(),
+        state.config.git.push_enabled,
+        &state.secret_store,
+        crate::services::worktree_service::GitAuthor {
+            name: state.config.git.author_name.clone(),
+            email: state.config.git.author_email.clone(),
+        },
+    )
 }
 
 async fn create_git_action_comment(
@@ -691,6 +729,80 @@ async fn remove_ticket_worktree(
         .await
         .map_err(map_ticket_git_error_response)?;
     Ok(Json(info))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CreatePrBody {
+    title: Option<String>,
+    body: Option<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PushBranchResponse {
+    push: crate::services::ticket_git_service::PushBranchResult,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CreatePrResponse {
+    pull_request: crate::services::ticket_git_service::CreatePrResult,
+}
+
+async fn push_ticket_branch(
+    State(state): State<Arc<AppState>>,
+    AuthUser { user, .. }: AuthUser,
+    Path(ticket_id): Path<Uuid>,
+) -> Result<Json<PushBranchResponse>, TicketGitApiError> {
+    let pool = pool_from_state(&state).map_err(|code| {
+        TicketGitApiError::Message(code, "Database unavailable.".into())
+    })?;
+    let push = ticket_git_service(&state, pool)
+        .push_branch(ticket_id)
+        .await
+        .map_err(map_ticket_git_error_response)?;
+
+    let comment_body = format!(
+        "**Push:** branch `{}` → `{}`",
+        push.ticket_branch, push.remote
+    );
+    create_git_action_comment(pool, &state, ticket_id, user.id, &comment_body)
+        .await
+        .map_err(|code| TicketGitApiError::Message(code, "Unable to record push comment.".into()))?;
+
+    Ok(Json(PushBranchResponse { push }))
+}
+
+async fn create_ticket_pr(
+    State(state): State<Arc<AppState>>,
+    AuthUser { user, .. }: AuthUser,
+    Path(ticket_id): Path<Uuid>,
+    Json(body): Json<CreatePrBody>,
+) -> Result<Json<CreatePrResponse>, TicketGitApiError> {
+    let pool = pool_from_state(&state).map_err(|code| {
+        TicketGitApiError::Message(code, "Database unavailable.".into())
+    })?;
+    let pull_request = ticket_git_service(&state, pool)
+        .create_pr(
+            ticket_id,
+            body.title.as_deref(),
+            body.body.as_deref(),
+        )
+        .await
+        .map_err(map_ticket_git_error_response)?;
+
+    let comment_body = format!(
+        "**Pull request:** [#{}]({}) — {}",
+        pull_request.number, pull_request.pr_url, pull_request.title
+    );
+    create_git_action_comment(pool, &state, ticket_id, user.id, &comment_body)
+        .await
+        .map_err(|code| {
+            TicketGitApiError::Message(code, "Unable to record PR comment.".into())
+        })?;
+
+    Ok(Json(CreatePrResponse { pull_request }))
 }
 
 async fn approve_splits(

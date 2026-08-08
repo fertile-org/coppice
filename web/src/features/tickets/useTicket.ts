@@ -70,6 +70,13 @@ export interface TicketGitInfo {
   branches: string[];
   remoteUrl?: string | null;
   prCreateUrl?: string | null;
+  prUrl?: string | null;
+  forgeTokenConfigured?: boolean;
+  pushEnabled?: boolean;
+  canPush?: boolean;
+  canCreatePr?: boolean;
+  pushDisabledReason?: string | null;
+  createPrDisabledReason?: string | null;
 }
 
 export interface MergeBranchResponse {
@@ -178,6 +185,25 @@ async function postRemoveWorktree(ticketId: string): Promise<TicketGitInfo> {
     method: 'POST',
   });
   return res.json() as Promise<TicketGitInfo>;
+}
+
+async function postPushBranch(ticketId: string): Promise<{ push: { ticketBranch: string; remote: string; message: string } }> {
+  const res = await apiFetch(`/api/tickets/${ticketId}/push-branch`, {
+    method: 'POST',
+  });
+  return res.json();
+}
+
+async function postCreatePr(
+  ticketId: string,
+  body?: { title?: string; body?: string },
+): Promise<{ pullRequest: { prUrl: string; number: number; title: string } }> {
+  const res = await apiFetch(`/api/tickets/${ticketId}/create-pr`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body ?? {}),
+  });
+  return res.json();
 }
 
 async function fetchTicketChildren(ticketId: string): Promise<Ticket[]> {
@@ -312,6 +338,32 @@ export function useRemoveWorktree(ticketId: string) {
     onSuccess: (info) => {
       queryClient.setQueryData(gitInfoQueryKey(ticketId), info);
       void queryClient.invalidateQueries({ queryKey: commentsQueryKey(ticketId) });
+    },
+  });
+}
+
+export function usePushTicketBranch(ticketId: string) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: () => postPushBranch(ticketId),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: gitInfoQueryKey(ticketId) });
+      void queryClient.invalidateQueries({ queryKey: commentsQueryKey(ticketId) });
+    },
+  });
+}
+
+export function useCreateTicketPr(ticketId: string) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (body?: { title?: string; body?: string }) =>
+      postCreatePr(ticketId, body),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: gitInfoQueryKey(ticketId) });
+      void queryClient.invalidateQueries({ queryKey: commentsQueryKey(ticketId) });
+      void queryClient.invalidateQueries({ queryKey: ticketQueryKey(ticketId) });
     },
   });
 }

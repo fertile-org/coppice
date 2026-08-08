@@ -52,10 +52,17 @@ pub async fn sync_worktree_to_branch_tip(
 }
 
 /// Stage and commit any uncommitted changes (excluding `.agent/`), then return branch + HEAD.
+#[derive(Debug, Clone)]
+pub struct GitAuthor {
+    pub name: String,
+    pub email: String,
+}
+
 pub async fn finalize_worktree_git(
     worktree: &Path,
     branch: &str,
     commit_message: &str,
+    author: Option<&GitAuthor>,
 ) -> Result<WorktreeGitState, WorktreeError> {
     let dirty = worktree_dirty_excluding_agent(worktree).await?;
     let newly_committed = if dirty {
@@ -65,7 +72,28 @@ pub async fn finalize_worktree_git(
             &["add", "-A", "--", ".", ":!.agent"],
         )
         .await?;
-        run_git_in(worktree, &["commit", "-m", commit_message]).await?;
+        match author {
+            Some(author) => {
+                let name_cfg = format!("user.name={}", author.name);
+                let email_cfg = format!("user.email={}", author.email);
+                run_git_in(
+                    worktree,
+                    &[
+                        "-c",
+                        &name_cfg,
+                        "-c",
+                        &email_cfg,
+                        "commit",
+                        "-m",
+                        commit_message,
+                    ],
+                )
+                .await?;
+            }
+            None => {
+                run_git_in(worktree, &["commit", "-m", commit_message]).await?;
+            }
+        }
         true
     } else {
         false
@@ -330,6 +358,10 @@ mod tests {
             &worktree,
             "agent/TICKET-test",
             "[coppice] test: sample",
+            Some(&GitAuthor {
+                name: "Test".into(),
+                email: "test@example.com".into(),
+            }),
         )
         .await
         .expect("finalize git");

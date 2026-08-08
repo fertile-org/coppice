@@ -12,7 +12,9 @@ import {
 } from '../../components/ui/select';
 import type { Ticket } from '../board/useTickets';
 import {
+  useCreateTicketPr,
   useMergeTicketBranch,
+  usePushTicketBranch,
   useRemoveWorktree,
   useTicketGitInfo,
 } from './useTicket';
@@ -152,6 +154,8 @@ export function TicketGitActions({ ticket }: TicketGitActionsProps) {
     showActions && Boolean(ticket.repoId),
   );
   const removeWorktree = useRemoveWorktree(ticket.id);
+  const pushBranch = usePushTicketBranch(ticket.id);
+  const createPr = useCreateTicketPr(ticket.id);
   const [mergeOpen, setMergeOpen] = useState(false);
   const [gitError, setGitError] = useState<string | null>(null);
 
@@ -177,7 +181,33 @@ export function TicketGitActions({ ticket }: TicketGitActionsProps) {
     }
   }
 
-  const busy = removeWorktree.isPending;
+  async function handlePush() {
+    setGitError(null);
+    try {
+      const result = await pushBranch.mutateAsync();
+      toast.success(result.push.message);
+    } catch (err) {
+      const message = parseApiErrorMessage(err, 'Push failed.');
+      setGitError(message);
+      toast.error(apiErrorToastMessage(message));
+    }
+  }
+
+  async function handleCreatePr() {
+    setGitError(null);
+    try {
+      const result = await createPr.mutateAsync({});
+      toast.success(`PR #${result.pullRequest.number} created`);
+      window.open(result.pullRequest.prUrl, '_blank', 'noopener,noreferrer');
+    } catch (err) {
+      const message = parseApiErrorMessage(err, 'Create PR failed.');
+      setGitError(message);
+      toast.error(apiErrorToastMessage(message));
+    }
+  }
+
+  const busy =
+    removeWorktree.isPending || pushBranch.isPending || createPr.isPending;
 
   return (
     <div className="space-y-3 rounded-md border border-border bg-surface px-3 py-3">
@@ -204,6 +234,21 @@ export function TicketGitActions({ ticket }: TicketGitActionsProps) {
               {gitInfo.worktreeExists ? gitInfo.worktreePath : '(removed)'}
             </dd>
           </div>
+          {gitInfo.prUrl && (
+            <div className="space-y-1">
+              <dt className="font-body text-xs font-medium text-text-muted">Pull request</dt>
+              <dd>
+                <a
+                  href={gitInfo.prUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="font-body text-xs text-moss-700 underline-offset-2 hover:underline"
+                >
+                  {gitInfo.prUrl}
+                </a>
+              </dd>
+            </div>
+          )}
         </dl>
       )}
 
@@ -211,21 +256,48 @@ export function TicketGitActions({ ticket }: TicketGitActionsProps) {
         <Button
           type="button"
           variant="secondary"
-          disabled={busy || isLoading || !gitInfo?.prCreateUrl}
+          disabled={busy || isLoading || !gitInfo?.canPush}
           title={
-            gitInfo?.prCreateUrl
-              ? 'Open pull request creation on the git host'
-              : 'Set a repository remote URL in Settings → Repositories (GitHub, GitLab, or Bitbucket)'
+            gitInfo?.canPush
+              ? 'Push ticket branch to origin using the repo forge token'
+              : (gitInfo?.pushDisabledReason ?? 'Push unavailable')
           }
-          onClick={() => {
-            if (gitInfo?.prCreateUrl) {
-              window.open(gitInfo.prCreateUrl, '_blank', 'noopener,noreferrer');
-            }
-          }}
+          onClick={() => void handlePush()}
           className="w-full"
         >
-          Create PR
+          {pushBranch.isPending ? 'Pushing…' : 'Push branch'}
         </Button>
+        <Button
+          type="button"
+          variant="secondary"
+          disabled={busy || isLoading || !gitInfo?.canCreatePr}
+          title={
+            gitInfo?.canCreatePr
+              ? 'Create a GitHub pull request via API'
+              : (gitInfo?.createPrDisabledReason ??
+                gitInfo?.prCreateUrl
+                  ? 'API create unavailable — use compare link if the branch is already pushed'
+                  : 'Create PR unavailable')
+          }
+          onClick={() => void handleCreatePr()}
+          className="w-full"
+        >
+          {createPr.isPending ? 'Creating…' : 'Create PR'}
+        </Button>
+        {gitInfo?.prCreateUrl && !gitInfo.canCreatePr && (
+          <Button
+            type="button"
+            variant="secondary"
+            disabled={busy || isLoading}
+            title="Open compare URL on the git host (branch must already be pushed)"
+            onClick={() => {
+              window.open(gitInfo.prCreateUrl!, '_blank', 'noopener,noreferrer');
+            }}
+            className="w-full"
+          >
+            Open compare URL
+          </Button>
+        )}
         <Button
           type="button"
           variant="secondary"

@@ -26,6 +26,10 @@ pub fn routes() -> Router<Arc<AppState>> {
             get(get_repo).patch(update_repo).delete(delete_repo),
         )
         .route("/api/repos/{repo_id}/verify", post(verify_repo))
+        .route(
+            "/api/repos/{repo_id}/forge-token",
+            post(set_forge_token).delete(clear_forge_token),
+        )
         .route("/api/repos/{repo_id}/worktrees", get(list_repo_worktrees))
         .route("/api/repos/{repo_id}/branches", get(list_repo_branches))
         .route("/api/repos/{repo_id}/diff", get(get_repo_diff))
@@ -58,6 +62,7 @@ struct RepoResponse {
     verification_status: String,
     verification_error: Option<String>,
     last_verified_at: Option<String>,
+    forge_token_configured: bool,
     created_at: String,
     updated_at: String,
 }
@@ -86,6 +91,7 @@ fn default_branch() -> String {
 }
 
 fn repo_to_response(repo: Repo) -> RepoResponse {
+    let forge_token_configured = repo.forge_token_configured();
     RepoResponse {
         id: repo.id,
         name: repo.name,
@@ -97,6 +103,7 @@ fn repo_to_response(repo: Repo) -> RepoResponse {
         last_verified_at: repo
             .last_verified_at
             .map(|t| t.format(&Rfc3339).unwrap_or_default()),
+        forge_token_configured,
         created_at: repo.created_at.format(&Rfc3339).unwrap_or_default(),
         updated_at: repo.updated_at.format(&Rfc3339).unwrap_or_default(),
     }
@@ -192,6 +199,57 @@ async fn verify_repo(
     let pool = pool_from_state(&state)?;
     let service = RepoService::new(pool);
     let repo = service.verify(repo_id).await.map_err(map_error)?;
+    Ok(Json(repo_to_response(repo)))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ForgeTokenBody {
+    token: String,
+}
+
+async fn set_forge_token(
+    State(state): State<Arc<AppState>>,
+    AdminUser(_): AdminUser,
+    Path(repo_id): Path<Uuid>,
+    Json(body): Json<ForgeTokenBody>,
+) -> Result<Json<RepoResponse>, StatusCode> {
+    let pool = pool_from_state(&state)?;
+    let repo_svc = RepoService::new(pool);
+    let _ = repo_svc.get(repo_id).await.map_err(map_error)?;
+    let secret_name = format!("repo-forge-token-{repo_id}");
+    let secret_id = crate::services::secret_service::SecretService::new(pool, &state.secret_store)
+        .upsert_named(&secret_name, &body.token)
+        .await
+        .map_err(|err| match err {
+            crate::services::secret_service::SecretError::Validation(_) => StatusCode::BAD_REQUEST,
+            _ => StatusCode::INTERNAL_SERVER_ERROR,
+        })?;
+    let repo = repo_svc
+        .set_forge_token_secret(repo_id, Some(secret_id))
+        .await
+        .map_err(map_error)?;
+    Ok(Json(repo_to_response(repo)))
+}
+
+async fn clear_forge_token(
+    State(state): State<Arc<AppState>>,
+    AdminUser(_): AdminUser,
+    Path(repo_id): Path<Uuid>,
+) -> Result<Json<RepoResponse>, StatusCode> {
+    let pool = pool_from_state(&state)?;
+    let repo_svc = RepoService::new(pool);
+    let current = repo_svc.get(repo_id).await.map_err(map_error)?;
+    let previous = current.forge_token_secret_id;
+    let repo = repo_svc
+        .set_forge_token_secret(repo_id, None)
+        .await
+        .map_err(map_error)?;
+    if let Some(secret_id) = previous {
+        let _ = crate::services::secret_service::SecretService::new(pool, &state.secret_store)
+            .delete_by_id(secret_id)
+            .await;
+    }
     Ok(Json(repo_to_response(repo)))
 }
 

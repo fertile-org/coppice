@@ -118,3 +118,13 @@ project_rules = 3000
 retrieved_knowledge = 4000
 previous_attempt_summary = 2000
 output_contract = 1000
+
+# Encrypt forge tokens at rest (override with SECRETS_MASTER_KEY).
+[secrets]
+master_key = "dev-master-key-change-me"
+
+# Author for Coppice commits in worktrees. Enable push for human Push / Create PR.
+[git]
+author_name = "Coppice"
+author_email = "coppice@localhost"
+push_enabled = true

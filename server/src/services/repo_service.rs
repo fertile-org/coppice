@@ -12,7 +12,7 @@ use uuid::Uuid;
 const REPO_COLUMNS: &str = r#"
     id, name, local_path, remote_url, default_branch,
     verification_status, verification_error, last_verified_at,
-    created_at, updated_at
+    forge_token_secret_id, created_at, updated_at
 "#;
 
 pub struct RepoService<'a> {
@@ -203,6 +203,29 @@ impl<'a> RepoService<'a> {
         Ok(())
     }
 
+    pub async fn set_forge_token_secret(
+        &self,
+        id: Uuid,
+        secret_id: Option<Uuid>,
+    ) -> Result<Repo, RepoError> {
+        let _ = self.get(id).await?;
+        let query = format!(
+            r#"
+            UPDATE repos
+            SET forge_token_secret_id = $2, updated_at = now()
+            WHERE id = $1
+            RETURNING {REPO_COLUMNS}
+            "#
+        );
+        let row = sqlx::query(&query)
+            .bind(id)
+            .bind(secret_id)
+            .fetch_optional(self.pool)
+            .await?
+            .ok_or(RepoError::NotFound)?;
+        Ok(row_to_repo(&row))
+    }
+
     pub async fn verify(&self, id: Uuid) -> Result<Repo, RepoError> {
         let current = self.get(id).await?;
         let verify_result = verify_local_path(Path::new(&current.local_path));
@@ -256,6 +279,7 @@ fn row_to_repo(row: &sqlx::postgres::PgRow) -> Repo {
         verification_status,
         verification_error: row.get("verification_error"),
         last_verified_at: row.get("last_verified_at"),
+        forge_token_secret_id: row.get("forge_token_secret_id"),
         created_at: row.get("created_at"),
         updated_at: row.get("updated_at"),
     }

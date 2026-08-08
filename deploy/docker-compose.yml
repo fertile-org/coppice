@@ -46,6 +46,7 @@ services:
       COPPICE_KNOWLEDGE__EMBEDDING__PROVIDER: mock
       COPPICE_KNOWLEDGE__EMBEDDING__DIMENSION: "1536"
       MOCK_AGENT_RESPONSE: ${MOCK_AGENT_RESPONSE:-}
+      SECRETS_MASTER_KEY: ${SECRETS_MASTER_KEY:-dev-master-key-change-me}
       # Numeric host user for /repos ownership (entrypoint drops privileges).
       COPPICE_UID: ${COPPICE_UID:-1000}
       COPPICE_GID: ${COPPICE_GID:-1000}
