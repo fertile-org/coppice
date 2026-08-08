@@ -11,6 +11,8 @@
 # Run the API as your host user so writes under /repos keep your ownership:
 #   COPPICE_UID=$(id -u) COPPICE_GID=$(id -g)  # make compose-up sets these
 # Human hot-reload dev uses docker-compose.local.yml (Postgres :5433) + host API/web instead.
+# Real agent CLIs (cursor, claude, …) are not in the image — mount them yourself once:
+#   docs/providers/README.md § Docker Compose (host CLIs)
 
 services:
   postgres:

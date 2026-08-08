@@ -25,9 +25,51 @@ OpenCode within-run **context compaction** is documented in [opencode.md § Cont
 Host setup flow:
 
 1. Enable connector in config
-2. Authenticate (`opencode auth login`)
+2. Authenticate on the host (`opencode auth login`, `claude login`, `agent login`, …)
 3. Add provider IDs to `model_providers`
 4. Create agents in UI — pick connector, provider, model from dropdowns
+
+## Docker Compose (host CLIs)
+
+The default server image ships **no** real agent CLIs (`mock` only). CI and smoke tests stay on mock. To use a real connector with `make compose-up`, mount the host CLI and its auth into the server **yourself once** — same pattern for every connector.
+
+1. Install and log in on the **host** (paths below are typical Linux locations).
+2. Edit `deploy/docker-compose.yml` under `services.server` — add volumes (and `HOME` / `PATH` if needed). Prefer mounting at the **same absolute paths** as on the host so symlinks and auth lookup keep working.
+3. Enable the connector in `deploy/config/config.toml` (`enabled = true`, `model_providers = [...]`, `command` if non-default).
+4. Recreate the server:  
+   `docker compose -f deploy/docker-compose.yml up -d --force-recreate server`
+5. Verify inside the container:  
+   `docker compose -f deploy/docker-compose.yml exec -u "$(id -u):$(id -g)" server sh -c 'command -v <cli> && <cli> …'`
+
+| Connector | Host CLI | Typical auth / data to mount | Notes |
+|-----------|----------|------------------------------|-------|
+| `cursor` | `agent` (`~/.local/bin/agent` → `~/.local/share/cursor-agent/…`) | `~/.config/cursor` (`auth.json`); often also the install under `~/.local/share/cursor-agent` | Set `HOME` to the host home path (or mount auth where the CLI expects it). |
+| `claude-code` | `claude` | Claude CLI auth/config under the host home (e.g. `~/.claude`) | Or set `ANTHROPIC_API_KEY` in the server service env. |
+| `codex` | `codex` | Codex auth/config under the host home | Or set the provider env var Codex expects. |
+| `kilo-code` | `kilo` | Kilo/OpenCode-style auth under the host home | Global npm install must be on container `PATH`. |
+| `opencode` | `opencode` | `~/.local/share/opencode` (e.g. `auth.json`) | Also needs `opencode serve` reachability; see [opencode.md](opencode.md). |
+
+**Do not** add these mounts to the default Compose file in-repo: missing host paths become empty directories, and layouts differ per machine. Keep mounts in a local override or a private edit of `deploy/docker-compose.yml` (gitignored changes / compose override).
+
+Example override file (`deploy/docker-compose.clis.yml` — local only):
+
+```yaml
+services:
+  server:
+    environment:
+      HOME: ${HOME}
+      PATH: ${HOME}/.local/bin:/usr/local/bin:/usr/bin:/bin
+    volumes:
+      - ${HOME}/.local/bin:${HOME}/.local/bin:ro
+      - ${HOME}/.local/share:${HOME}/.local/share:ro
+      - ${HOME}/.config:${HOME}/.config:ro
+```
+
+```bash
+docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.clis.yml up -d --force-recreate server
+```
+
+Only mount what you need; ensure the host directories already exist before the first `up` (otherwise Docker may create empty dirs).
 
 ## Per-agent connector, model provider, and model
 

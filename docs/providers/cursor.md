@@ -18,6 +18,12 @@ command = "agent"
 model_providers = ["cursor"]
 ```
 
+## Docker
+
+The server image does not include `agent`. For Compose, mount the host CLI + auth yourself once — same manual step as other connectors. See [Docker Compose (host CLIs)](README.md#docker-compose-host-clis).
+
+Typical pieces: `~/.local/bin/agent`, `~/.local/share/cursor-agent`, `~/.config/cursor` after `agent login` on the host. Set container `HOME` so the CLI finds auth.
+
 ## Capabilities
 
 | Capability | Status |
@@ -75,7 +81,7 @@ The list reflects your Cursor CLI version and login — it is not hardcoded in C
 
 ## Limitations
 
-- **Docker / PATH:** The `agent` binary must be available inside the environment that executes `coppice-server`, with valid CLI login state. Bind-mount or install the CLI in the server container the same way you would for `claude` or `codex`.
+- **Docker / PATH:** The `agent` binary and login state must be available to the server process. Host install: put `agent` on PATH and run `agent login`. Compose: mount CLI + auth manually ([Docker Compose (host CLIs)](README.md#docker-compose-host-clis)).
 - **No Cursor worktree flag:** Coppice already owns worktrees. The connector uses `--workspace <coppice-worktree>` and process CWD; it never passes Cursor's `-w` / `--worktree`.
 - **No SDK:** This connector drives the CLI subprocess only. It does not use `@cursor/sdk`, `cursor-sdk`, or cloud/private worker integrations.
 - **MCP injection:** Not supported in v1 (follow-up ticket).

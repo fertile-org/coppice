@@ -37,7 +37,7 @@ model_providers = ["zai-coding-plan"]
 
 No server-level `model` or `variant` in config. Host adds model provider IDs to `model_providers` after authenticating with OpenCode.
 
-Use only in local `config.toml` for manual testing. Never in CI or the agent Docker stack.
+CI and the default Compose stack stay on `mock`. Use OpenCode on a host install or after mounting the CLI into Compose (see [Requirements](#requirements) / [providers README](README.md#docker-compose-host-clis)).
 
 ### Model provider IDs
 
@@ -171,8 +171,8 @@ Coppice forwards these as WebSocket `event` messages. The Live Session may rende
 ## Requirements
 
 - `opencode` on `PATH`
-- `opencode auth login` completed on the **same host** as `make server-dev`
-- Host dev only — do not run inside Docker (server spawns the CLI child process)
+- `opencode auth login` completed where the server process runs (host `make server-dev`, or inside Compose after you mount the CLI + auth)
+- For Docker Compose: mount the host CLI + `~/.local/share/opencode` yourself once — see [Docker Compose (host CLIs)](README.md#docker-compose-host-clis). OpenCode also needs `opencode serve` reachable from the server (attach mode).
 
 ## Future TODO
 

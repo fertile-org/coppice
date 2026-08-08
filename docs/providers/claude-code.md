@@ -17,6 +17,10 @@ enabled = true
 # model_providers = ["sonnet", "opus", "haiku"]
 ```
 
+## Docker
+
+The server image does not include `claude`. For Compose, mount the host CLI + auth yourself once — same manual step as other connectors. See [Docker Compose (host CLIs)](README.md#docker-compose-host-clis).
+
 ## Capabilities
 
 | Capability | Status |

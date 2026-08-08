@@ -37,6 +37,10 @@ command = "kilo"
 model_providers = ["anthropic", "openai"]
 ```
 
+## Docker
+
+The server image does not include `kilo`. For Compose, mount the host CLI + auth yourself once — same manual step as other connectors. See [Docker Compose (host CLIs)](README.md#docker-compose-host-clis).
+
 ## Capabilities
 
 | Capability | Status |
