@@ -105,7 +105,8 @@ pub const CONNECTORS: &[ConnectorMeta] = &[
         binary: "opencode",
         default_model_providers: &[],
         auth_hint: "opencode auth login",
-        auth_paths: &[".local/share/opencode", ".opencode"],
+        // After login; do NOT list `.opencode` (install tree).
+        auth_paths: &[".local/share/opencode"],
         auth_env: &[],
     },
 ];
@@ -145,13 +146,76 @@ pub fn auth_present(meta: &ConnectorMeta, home: &Path) -> bool {
     }
     for rel in meta.auth_paths {
         let p = home.join(rel);
-        if p.exists() {
+        if path_looks_like_auth(&p) {
             return true;
         }
     }
     false
 }
 
+fn path_looks_like_auth(path: &Path) -> bool {
+    if path.is_file() {
+        return std::fs::metadata(path)
+            .map(|m| m.len() > 0)
+            .unwrap_or(false);
+    }
+    if path.is_dir() {
+        return std::fs::read_dir(path)
+            .ok()
+            .map(|mut entries| entries.next().is_some())
+            .unwrap_or(false);
+    }
+    false
+}
+
 pub fn binary_on_path(name: &str) -> Option<PathBuf> {
     which::which(name).ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use std::io::Write;
+
+    #[test]
+    fn auth_rejects_empty_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let auth = dir.path().join(".config/cursor/auth.json");
+        fs::create_dir_all(auth.parent().unwrap()).unwrap();
+        fs::File::create(&auth).unwrap(); // empty
+        let m = meta(ConnectorId::Cursor);
+        assert!(!auth_present(m, dir.path()));
+    }
+
+    #[test]
+    fn auth_accepts_non_empty_auth_json() {
+        let dir = tempfile::tempdir().unwrap();
+        let auth = dir.path().join(".config/cursor/auth.json");
+        fs::create_dir_all(auth.parent().unwrap()).unwrap();
+        let mut f = fs::File::create(&auth).unwrap();
+        writeln!(f, "{{ \"token\": \"x\" }}").unwrap();
+        let m = meta(ConnectorId::Cursor);
+        assert!(auth_present(m, dir.path()));
+    }
+
+    #[test]
+    fn auth_rejects_empty_opencode_install_dir() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::create_dir_all(dir.path().join(".opencode/bin")).unwrap();
+        let m = meta(ConnectorId::OpenCode);
+        assert!(
+            !auth_present(m, dir.path()),
+            "install tree alone must not count as auth"
+        );
+    }
+
+    #[test]
+    fn auth_accepts_anthropic_api_key_env() {
+        let dir = tempfile::tempdir().unwrap();
+        std::env::set_var("ANTHROPIC_API_KEY", "test-key");
+        let m = meta(ConnectorId::ClaudeCode);
+        assert!(auth_present(m, dir.path()));
+        std::env::remove_var("ANTHROPIC_API_KEY");
+    }
 }
