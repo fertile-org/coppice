@@ -1,7 +1,7 @@
 mod commands;
 
 use clap::{Parser, Subcommand};
-use commands::{bootstrap, health, migrate, server, web};
+use commands::{bootstrap, connector, health, migrate, server, web};
 
 #[derive(Parser)]
 #[command(name = "coppice", about = "Coppice operator CLI")]
@@ -26,6 +26,8 @@ enum Commands {
         #[command(subcommand)]
         command: WebCommands,
     },
+    /// Manage agent connectors (enable, install, setup, doctor)
+    Connector(connector::ConnectorArgs),
 }
 
 #[derive(Subcommand)]
@@ -58,5 +60,6 @@ async fn main() -> anyhow::Result<()> {
         Commands::Web {
             command: WebCommands::Start(args),
         } => web::run(args).await,
+        Commands::Connector(args) => connector::run(args).await,
     }
 }

@@ -1,67 +1,84 @@
-# M08 — Connector operator CLI
+# M08 — Connector operator CLI (managed HOME)
 
 ## Goal
 
-Give operators a first-class `coppice connector …` workflow to enable, diagnose, and (optionally) install real agent CLIs for Docker Compose and host installs — without baking vendor CLIs into the default server image or relying only on copy-paste compose overrides.
+Operators enable, install, authenticate, and diagnose real agent CLIs with a **single Docker path**: a named volume at `/home/coppice` (`HOME`), `coppice` on PATH in the server image, and `coppice connector …` — **not** host `~/.local` / `~/.config` bind-mounts.
 
-After this milestone, setting up `cursor` / `claude-code` / `codex` / `kilo-code` / `opencode` is a documented CLI path that works the same on the host and via `docker compose exec` on the **server** service.
+Default image stays **mock-only**. CI and smoke stay on mock.
 
-## Product scope
+## CLI surface
 
-### CLI surface (extend existing `cli/` binary)
-
-Prefer extending **`coppice`** (already ships `migrate`, `bootstrap`, `health`, `server`, `web`). Do **not** introduce a separate `coppice-cli` binary.
+Extend the existing **`coppice`** binary (`cli/`):
 
 ```text
 coppice connector list
 coppice connector enable <id> [--config PATH]
 coppice connector doctor <id>
-coppice connector setup <id>          # interactive login wrapper (TTY)
-coppice connector compose-snippet <id>
-coppice connector install <id>        # optional / phase 2 — see below
+coppice connector setup <id>     # vendor login (device-code / URL / paste-token)
+coppice connector install <id>   # install into managed $HOME (cursor required; others as available)
 ```
 
 | Command | Behavior |
 |---------|----------|
-| `list` | Known connectors + enabled? + binary on PATH? + auth hint |
-| `enable` | Patch `[agent.connectors.<id>]` in the active config (`enabled = true`, default `model_providers` / `command` when missing) |
-| `doctor` | Non-interactive checks: binary, version, auth files/env, `models` listing if the connector supports it; clear next-step errors |
-| `setup` | Run the connector’s host login (`agent login`, `claude login`, …) with inherited TTY/env; print success/failure |
-| `compose-snippet` | Print a ready-to-save `docker-compose.<id>.yml` override (same content class as [docs/providers/](../providers/README.md#docker-compose-host-clis)) |
-| `install` | **Phase 2:** download/install CLI into a Coppice-managed directory on a persistent volume (see Architecture) |
+| `list` | Known connectors + enabled? + binary on PATH? + short auth hint |
+| `enable` | Patch `[agent.connectors.<id>]` (`enabled = true`, default `model_providers` / `command` when missing) |
+| `doctor` | Binary on PATH, auth paths under `$HOME`, optional models probe; clear next steps |
+| `setup` | Run the connector’s login command with inherited TTY |
+| `install` | Install CLI into managed `$HOME` (e.g. `$HOME/.local/bin`) |
 
-### Operator UX principles
+There is **no** `compose-snippet` product surface (that re-encoded host-mount workarounds).
 
-- Default Compose stack stays **`mock`-only**; no vendor CLIs in the default image.
-- Same commands on host and in-container (`docker compose exec -it -u "$(id -u):$(id -g)" server coppice connector …`).
-- Always target the **server** container (workers spawn CLIs there) — never the web service.
-- Docs in [docs/providers/](../providers/) point at these commands; keep per-connector copy-paste overrides as fallback.
+## Auth matrix (`setup`)
 
-### Config + Docker
+| ID | Setup behavior |
+|----|----------------|
+| `cursor` | `agent login` — copy URL / complete in browser if printed |
+| `codex` | `codex login --device-auth` |
+| `claude-code` | Prefer `ANTHROPIC_API_KEY` or `claude setup-token` (paste). Browser OAuth is unreliable in headless containers; document limits |
+| `opencode` | `opencode auth login` (vendor CLI / paste as required) |
+| `kilo-code` | Vendor auth CLI / TUI `/connect` / paste instructions |
+| `mock` | n/a — always healthy |
 
-- `enable` writes the Docker config path when `COPPICE_CONFIG` / `deploy/config/config.toml` is in use.
-- Document `HOME` / `PATH` expectations for in-container `setup` / `doctor` when operators use compose overrides or phase-2 volumes.
-- Optional compose profile or override template that mounts a **connector data volume** once `install` exists.
+## Docker contract (single path)
+
+```mermaid
+flowchart LR
+  op[Operator] --> cli["coppice connector setup/install"]
+  cli --> home["/home/coppice volume"]
+  home --> agent[agent/claude/codex binaries + auth]
+  api[coppice-server] --> agent
+```
+
+- Named volume `connector_data` → `/home/coppice` (stable HOME)
+- Compose sets `HOME=/home/coppice` and prepends `/home/coppice/.local/bin` to `PATH` (keep `/usr/sbin` for `gosu`)
+- Ship `coppice` in the server image next to `coppice-server`
+- Entrypoint preserves Compose `HOME`/`PATH` after `gosu` and chowns `$HOME` for `COPPICE_UID`
+- **No** host bind-mount recipes in default docs or default compose
+
+Operator loop:
+
+```bash
+docker compose -f deploy/docker-compose.yml exec -it -u "$(id -u):$(id -g)" server \
+  coppice connector enable cursor
+docker compose -f deploy/docker-compose.yml exec -it -u "$(id -u):$(id -g)" server \
+  coppice connector install cursor
+docker compose -f deploy/docker-compose.yml exec -it -u "$(id -u):$(id -g)" server \
+  coppice connector setup cursor
+docker compose -f deploy/docker-compose.yml exec -it -u "$(id -u):$(id -g)" server \
+  coppice connector doctor cursor
+```
+
+Always target the **server** service (workers spawn CLIs there), never web.
 
 ## Out of scope
 
-- Baking Cursor / Claude / Codex / Kilo / OpenCode into `deploy/Dockerfile.server` by default
-- Auto-mounting host `~/.local` / `~/.config` in default `deploy/docker-compose.yml`
-- GUI Settings UI for connector install (CLI-first; Settings can come later)
-- Managing OAuth browser redirects inside a headless agent (document `docker exec -it` + host browser constraints)
-- Changing connector runtime adapters (`server/src/providers/*`) beyond what doctor needs to invoke for checks
+- Baking vendor CLIs into the default server image
+- Host bind-mounts as a supported path
+- Settings UI for connectors
+- Finishing remaining M07 sandbox/signals work
 - CI using real connectors (continue `MockProvider`)
 
-## Dependencies
-
-- M01–M07: connectors and provider docs exist; M07 secrets/git remain independent
-- Existing `cli/` crate and server image that can include the `coppice` binary (or a slim install of it) on PATH inside the server container
-
-## Architecture notes
-
-### Phased delivery
-
-**Phase 1 (required for M08 acceptance)** — diagnose + enable + snippet + setup wrapper:
+## Architecture
 
 ```text
 cli/src/commands/connector/
@@ -70,81 +87,34 @@ cli/src/commands/connector/
   enable.rs
   doctor.rs
   setup.rs
-  compose_snippet.rs
+  install.rs
+  registry.rs   # per-id command, auth paths, setup/install adapters
 ```
 
-- `doctor` / `setup` shell out to the configured `command` for each connector (from config defaults when disabled).
-- `compose-snippet` embeds or generates YAML matching provider docs (single source of truth preferred: shared templates under `cli/templates/connectors/` or `docs/providers/snippets/` consumed by both docs and CLI).
+`enable` writes `COPPICE_CONFIG` when set (Compose: `/etc/coppice/config.toml` → host `deploy/config/config.toml`), else `--config`, else the usual local/global path.
 
-**Phase 2 (same milestone if time; otherwise explicitly deferred in acceptance)** — managed install:
+`install cursor` runs the upstream Cursor Agent installer into `$HOME` so `agent` lands on `$HOME/.local/bin`. Other connectors: install when a stable vendor script exists; otherwise print clear deferral / manual steps into managed HOME.
 
-```text
-/var/lib/coppice/connectors/<id>/   # versioned install root (volume)
-PATH prepend or config command= absolute path into that root
-```
+## Testing
 
-- `install cursor` (etc.) downloads into the managed root; survives container recreate via a named volume.
-- Still no default image bloat; operators opt in with a volume + `install`.
-
-### In-container packaging
-
-- Ship `coppice` on PATH in the **server** image (same binary as host CLI), or document installing it beside `coppice-server`.
-- Entrypoint continues to drop to `COPPICE_UID`/`COPPICE_GID`; connector commands must run as that user so auth files stay owned correctly.
-
-### Per-connector adapters (CLI only)
-
-Small registry mirroring server connector IDs:
-
-| ID | setup | doctor probes |
-|----|-------|----------------|
-| `cursor` | `agent login` | `agent models` / binary + `~/.config/cursor` |
-| `claude-code` | `claude login` | `claude --version` (+ auth dir or `ANTHROPIC_API_KEY`) |
-| `codex` | `codex login` | `codex --version` / models debug if available |
-| `kilo-code` | document TUI `/connect` or `kilo auth login` | `kilo --version` / `kilo models …` |
-| `opencode` | `opencode auth login` | `opencode auth list` / `opencode models …` |
-| `mock` | n/a | always healthy |
-
-## Testing strategy
-
-### Unit / CLI tests
-
-- `enable` patches TOML idempotently (enabled flag + default model_providers)
-- `compose-snippet` output is valid YAML and includes expected volume keys per connector
-- `doctor` returns non-zero when binary missing; zero when mocked PATH fixtures present
-
-### Manual / smoke (not CI default)
-
-```bash
-# host
-coppice connector doctor cursor
-
-# compose (server)
-docker compose -f deploy/docker-compose.yml exec -it -u "$(id -u):$(id -g)" server \
-  coppice connector doctor cursor
-```
-
-Document in [docs/providers/README.md](../providers/README.md) and [docs/development.md](../development.md).
+- Unit: `enable` patches TOML idempotently; `doctor` non-zero when binary missing
+- `cargo test -p coppice-cli`; `cargo clippy -p coppice-cli -- -D warnings`
+- Manual: compose up → `doctor cursor` fails clearly until install/setup; after setup, models API works **without** host mounts
 
 ## Acceptance criteria
 
-- [ ] `coppice connector list|enable|doctor|setup|compose-snippet` implemented for all non-mock connectors above
-- [ ] `coppice` binary available in the server container on PATH (or documented equivalent)
-- [ ] `enable` updates `deploy/config/config.toml` / `COPPICE_CONFIG` correctly; server recreate picks up connector
-- [ ] `doctor` fails clearly when CLI or auth is missing; succeeds after host or volume-mounted CLI works
-- [ ] `compose-snippet` matches provider doc override shape; docs link to CLI as primary path
-- [ ] Default `make compose-up` / CI smoke still use `mock` only — no vendor CLI required
-- [ ] Exec target documented as **server**, not web
-- [ ] Phase 2 `install` either shipped with a persistent volume recipe **or** explicitly listed under “Deferred to follow-up” in this doc’s changelog when M08 closes
-
-## Deferred / follow-up
-
-- Settings UI for connector health (surface `doctor` results)
-- Non-interactive device-code login flows where vendors support them
-- Auto-updating managed installs
-- Windows/macOS path variants beyond Linux self-host
+- [x] Docs no longer recommend host CLI bind-mount overrides; they point at `coppice connector …`
+- [x] `coppice connector list|enable|doctor|setup` for all non-mock connectors
+- [x] `coppice connector install cursor` works into managed `$HOME` (other IDs: clear “not yet / manual” message)
+- [x] `coppice` binary on PATH in the server image
+- [x] Compose: `connector_data` → `/home/coppice`, `HOME` + PATH as above
+- [x] `enable` updates Docker/`COPPICE_CONFIG` correctly
+- [x] `doctor` fails clearly when CLI or auth missing
+- [x] Default `make compose-up` / CI smoke still mock-only
+- [x] No `compose-snippet` command
 
 ## Related docs
 
-- [docs/providers/README.md](../providers/README.md) — Docker Compose (host CLIs)
-- Per-connector Docker sections under [docs/providers/](../providers/)
-- Existing CLI: `cli/` (`coppice migrate`, `bootstrap`, …)
+- [docs/providers/README.md](../providers/README.md) — Docker Compose (managed connectors)
+- [docs/development.md](../development.md)
+- `cli/`, `deploy/docker-compose.yml`, `deploy/Dockerfile.server`

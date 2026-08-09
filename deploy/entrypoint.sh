@@ -27,4 +27,22 @@ fi
 mkdir -p /data/artifacts /data/worktrees
 chown -R "${uid}:${gid}" /data/artifacts /data/worktrees
 
+# gosu may reset HOME from /etc/passwd. For numeric COPPICE_UID with no
+# passwd entry that clears Compose HOME, connector auth under $HOME would
+# be invisible to API-spawned CLIs. Preserve Compose HOME/PATH.
+preserved_home="${HOME:-}"
+preserved_path="${PATH:-}"
+
+# Managed connector home (Compose volume). Ensure ownership for COPPICE_UID.
+if [ -n "$preserved_home" ] && [ -d "$preserved_home" ]; then
+  mkdir -p "$preserved_home"
+  chown "${uid}:${gid}" "$preserved_home"
+fi
+
+if [ -n "$preserved_home" ] && [ -n "$preserved_path" ]; then
+  exec gosu "${uid}:${gid}" env HOME="$preserved_home" PATH="$preserved_path" "$@"
+fi
+if [ -n "$preserved_home" ]; then
+  exec gosu "${uid}:${gid}" env HOME="$preserved_home" "$@"
+fi
 exec gosu "${uid}:${gid}" "$@"

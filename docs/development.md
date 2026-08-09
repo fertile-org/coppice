@@ -132,7 +132,7 @@ Clone or symlink projects into that host directory, then register `/repos/<name>
 
 The server entrypoint starts as root only long enough to `chown` `/data/*` volumes, then drops to `COPPICE_UID`/`COPPICE_GID` so Git ownership matches the bind mount and new files under `/repos` stay yours on the host. If an older root-owned run left files behind: `sudo chown -R "$(id -u):$(id -g)" ~/coppice/repos`.
 
-Real agent CLIs are **not** in the server image. To use cursor / claude-code / codex / … with Compose, mount the host CLI and auth yourself once — see [docs/providers/README.md § Docker Compose (host CLIs)](providers/README.md#docker-compose-host-clis).
+Real agent CLIs are **not** baked into the server image. Compose mounts a managed `$HOME` volume at `/home/coppice`; use `coppice connector install|setup|doctor` inside the **server** container — see [M08](milestones/M08-connector-operator-cli.md) and [providers README](providers/README.md#docker-compose-managed-connectors).
 
 ### Host port overrides
 

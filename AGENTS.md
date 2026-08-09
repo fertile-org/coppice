@@ -14,7 +14,7 @@
 6. **CI must pass.** `make test` (embedded Postgres, no Docker), `cargo clippy --workspace -- -D warnings`, and `make web-test`. Clippy warnings are errors. After a **successful** full Rust test pass for your task, run `make clean` to reclaim disk (`target/` can grow to 10+ GB). Do **not** run it before every incremental `cargo test` during development — only when you are done with the task.
 7. **Fast verification during work.** Do **not** run `make test` while iterating — the full suite often takes several minutes. Use `make test-unit` (lib only), `make test-smoke` (lib + a few integration files), targeted `cargo test -p coppice-server --features embedded-test-db <filter>`, or `make web-test`. Reserve `make test` for final acceptance. Rust tests do **not** require `make compose-up` or `DATABASE_URL`.
 8. **Repositories.** Admin registers git checkouts by `local_path` (Settings → Repositories). Coppice creates worktrees only — no server-side `git clone`. Optional `remote_url` for metadata/PR (M07). Bind-mount host repos into the server container in Docker.
-9. **Agent execution env.** `AGENT_DEFAULT_PROVIDER` (default `mock`), `WORKTREES_PATH`, `AGENT_WORKER_COUNT`. Smoke: `make e2e-smoke-m03`. Context long-running (`continued`, `splitTickets`): [design spec](docs/superpowers/specs/2026-06-10-context-long-running-tasks-design.md); smoke: `make e2e-smoke-m06`. Governed knowledge: [design spec](docs/superpowers/specs/2026-08-03-m06-knowledge-and-learning-design.md); smoke: `make e2e-smoke-m06-knowledge`.
+9. **Agent execution env.** `AGENT_DEFAULT_PROVIDER` (default `mock`), `WORKTREES_PATH`, `AGENT_WORKER_COUNT`. Smoke: `make e2e-smoke-m03`. Context long-running (`continued`, `splitTickets`): [design spec](docs/superpowers/specs/2026-06-10-context-long-running-tasks-design.md); smoke: `make e2e-smoke-m06`. Governed knowledge: [design spec](docs/superpowers/specs/2026-08-03-m06-knowledge-and-learning-design.md); smoke: `make e2e-smoke-m06-knowledge`. Real connectors: managed `$HOME` volume + `coppice connector …` ([M08](docs/milestones/M08-connector-operator-cli.md)) — not host CLI bind-mounts.
 
 ## Monorepo (quick map)
 
@@ -22,7 +22,7 @@
 |------|------|
 | `server/` | Rust API (Axum, SQLx) |
 | `web/` | React SPA (Vite, TanStack Query) |
-| `cli/` | Operator CLI (`coppice migrate`, `bootstrap`, `health`) |
+| `cli/` | Operator CLI (`coppice migrate`, `bootstrap`, `health`, `connector`) |
 | `deploy/` | Docker Compose + Dockerfiles |
 | `e2e/` | Browser smoke tests |
 | `docs/` | Philosophy, milestones, dev docs |

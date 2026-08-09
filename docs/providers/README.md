@@ -24,36 +24,28 @@ OpenCode within-run **context compaction** is documented in [opencode.md § Cont
 
 Host setup flow:
 
-1. Enable connector in config
-2. Authenticate on the host (`opencode auth login`, `claude login`, `agent login`, …)
-3. Add provider IDs to `model_providers`
-4. Create agents in UI — pick connector, provider, model from dropdowns
+1. `coppice connector enable <id>` (or edit config)
+2. `coppice connector install <id>` when using Docker (managed `$HOME` volume)
+3. `coppice connector setup <id>` (vendor login)
+4. `coppice connector doctor <id>`
+5. Create agents in UI — pick connector, provider, model from dropdowns
 
-## Docker Compose (host CLIs)
+## Docker Compose (managed connectors)
 
-The default server image ships **no** real agent CLIs (`mock` only). CI and smoke tests stay on mock.
+The default server image ships **no** real agent CLIs (`mock` only). CI and smoke stay on mock.
 
-To use a real connector with Compose, add a **local override** that mounts that CLI and its auth — do **not** bake mounts into the default `deploy/docker-compose.yml` (missing host paths become empty dirs; layouts differ per machine).
+Compose mounts a **named volume** at `/home/coppice` (`HOME=/home/coppice`) for CLI binaries and auth. Do **not** bind-mount host `~/.local` / `~/.config` — use the operator CLI instead:
 
-**Copy-paste snippets** (config + override YAML + verify commands) live on each connector page:
+```bash
+docker compose -f deploy/docker-compose.yml exec -it -u "$(id -u):$(id -g)" server \
+  coppice connector install cursor
+docker compose -f deploy/docker-compose.yml exec -it -u "$(id -u):$(id -g)" server \
+  coppice connector setup cursor
+docker compose -f deploy/docker-compose.yml exec -it -u "$(id -u):$(id -g)" server \
+  coppice connector doctor cursor
+```
 
-| Connector | Snippet |
-|-----------|---------|
-| `cursor` | [cursor.md § Docker](cursor.md#docker) |
-| `claude-code` | [claude-code.md § Docker](claude-code.md#docker) |
-| `codex` | [codex.md § Docker](codex.md#docker) |
-| `kilo-code` | [kilo-code.md § Docker](kilo-code.md#docker) |
-| `opencode` | [opencode.md § Docker](opencode.md#docker) |
-
-Shared pattern:
-
-1. Install + log in on the **host**.
-2. Enable the connector in `deploy/config/config.toml`.
-3. Save a local `deploy/docker-compose.<connector>.yml` from the connector doc.
-4. `docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.<connector>.yml up -d --force-recreate server`
-5. `exec` the CLI inside the container to verify.
-
-Prefer mounting at the **same absolute paths** as on the host and set `HOME` / `PATH` so symlinks and auth lookup keep working. When overriding `PATH`, keep `/usr/sbin` (and `/sbin`) so the server entrypoint can still find `gosu`. Ensure host directories exist before the first `up`.
+Full design: [M08 — Connector operator CLI](../milestones/M08-connector-operator-cli.md). Per-connector auth notes live on each provider page under **Setup**.
 
 ## Per-agent connector, model provider, and model
 

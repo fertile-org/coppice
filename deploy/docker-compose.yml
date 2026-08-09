@@ -11,8 +11,7 @@
 # Run the API as your host user so writes under /repos keep your ownership:
 #   COPPICE_UID=$(id -u) COPPICE_GID=$(id -g)  # make compose-up sets these
 # Human hot-reload dev uses docker-compose.local.yml (Postgres :5433) + host API/web instead.
-# Real agent CLIs (cursor, claude, …) are not in the image — mount them yourself once:
-#   docs/providers/README.md § Docker Compose (host CLIs)
+# Real agent CLIs: managed /home/coppice volume + `coppice connector …` (M08), not host bind-mounts.
 
 services:
   postgres:
@@ -54,11 +53,15 @@ services:
       # Numeric host user for /repos ownership (entrypoint drops privileges).
       COPPICE_UID: ${COPPICE_UID:-1000}
       COPPICE_GID: ${COPPICE_GID:-1000}
+      # Managed connector HOME (CLI binaries + auth). Keep /usr/sbin for gosu.
+      HOME: /home/coppice
+      PATH: /home/coppice/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
     volumes:
       - artifact_data:/data/artifacts
       - worktree_data:/data/worktrees
-      # Operator-edited Docker config (gitignored). Recreate server after changes.
-      - ./config/config.toml:/etc/coppice/config.toml:ro
+      - connector_data:/home/coppice
+      # Operator-edited Docker config (gitignored). Writable so `coppice connector enable` works.
+      - ./config/config.toml:/etc/coppice/config.toml
       # Operator git checkouts. Register /repos/<name> in Settings → Repositories.
       - ${COPPICE_REPOS_HOST:-${HOME}/coppice/repos}:/repos
     depends_on:
@@ -80,3 +83,4 @@ volumes:
   coppice_pgdata:
   artifact_data:
   worktree_data:
+  connector_data:

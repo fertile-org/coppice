@@ -4,20 +4,22 @@ COPY Cargo.toml Cargo.lock ./
 COPY config ./config
 COPY server ./server
 COPY cli ./cli
-RUN cargo build --release -p coppice-server
+RUN cargo build --release -p coppice-server -p coppice-cli
 
 FROM debian:bookworm-slim
-RUN apt-get update && apt-get install -y ca-certificates git gosu && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y ca-certificates curl git gosu && rm -rf /var/lib/apt/lists/*
 COPY --from=builder /app/target/release/coppice-server /usr/local/bin/coppice-server
+COPY --from=builder /app/target/release/coppice /usr/local/bin/coppice
 COPY deploy/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 # MockProvider resolves fixtures relative to compile-time CARGO_MANIFEST_DIR (/app/server).
-RUN mkdir -p /app/server /data/artifacts /data/worktrees
+RUN mkdir -p /app/server /data/artifacts /data/worktrees /home/coppice
 COPY server/agent_templates /app/server/agent_templates
 COPY fixtures /app/fixtures
 # Fallback only; Compose bind-mounts deploy/config/config.toml over this path.
 COPY deploy/config/config.example.toml /etc/coppice/config.toml
 ENV COPPICE_CONFIG=/etc/coppice/config.toml
+ENV HOME=/home/coppice
 EXPOSE 5000
 ENTRYPOINT ["/entrypoint.sh"]
 CMD ["coppice-server"]

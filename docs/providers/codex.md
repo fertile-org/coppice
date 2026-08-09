@@ -17,48 +17,16 @@ enabled = true
 # model_providers = ["openai", "azure"]
 ```
 
-## Docker
-
-The server image does not include `codex`. Mount the host CLI + auth yourself once (overview: [Docker Compose (host CLIs)](README.md#docker-compose-host-clis)).
-
-**1. Host prep**
+## Setup
 
 ```bash
-codex login   # or set the env var your Codex install expects
-codex --version
+coppice connector enable codex
+coppice connector install codex
+coppice connector setup codex     # codex login --device-auth
+coppice connector doctor codex
 ```
 
-**2. Enable in** `deploy/config/config.toml`
-
-```toml
-[agent.connectors.codex]
-enabled = true
-model_providers = ["openai", "azure"]
-```
-
-**3. Compose override** — save as `deploy/docker-compose.codex.yml` (local only). Adjust binary/auth paths to match `which codex` / your Codex home:
-
-```yaml
-services:
-  server:
-    environment:
-      HOME: ${HOME}
-      PATH: ${HOME}/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-    volumes:
-      - ${HOME}/.local/bin:${HOME}/.local/bin:ro
-      # Typical auth/config dir after `codex login` (create/adjust if yours differs)
-      - ${HOME}/.codex:${HOME}/.codex:ro
-```
-
-**4. Apply**
-
-```bash
-docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.codex.yml \
-  up -d --force-recreate server
-
-docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.codex.yml \
-  exec -u "$(id -u):$(id -g)" server codex --version
-```
+See [M08](../milestones/M08-connector-operator-cli.md).
 
 ## Capabilities
 

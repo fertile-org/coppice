@@ -17,51 +17,16 @@ enabled = true
 # model_providers = ["sonnet", "opus", "haiku"]
 ```
 
-## Docker
-
-The server image does not include `claude`. Mount the host CLI + auth yourself once (overview: [Docker Compose (host CLIs)](README.md#docker-compose-host-clis)).
-
-**1. Host prep**
+## Setup
 
 ```bash
-claude login   # or export ANTHROPIC_API_KEY on the server instead of mounting auth
-claude --version
+coppice connector enable claude-code
+coppice connector install claude-code   # when available; else install `claude` into managed HOME
+coppice connector setup claude-code     # prefers API key / setup-token; see M08 auth matrix
+coppice connector doctor claude-code
 ```
 
-**2. Enable in** `deploy/config/config.toml`
-
-```toml
-[agent.connectors.claude-code]
-enabled = true
-model_providers = ["sonnet", "opus", "haiku"]
-```
-
-**3. Compose override** — save as `deploy/docker-compose.claude.yml` (local only):
-
-```yaml
-services:
-  server:
-    environment:
-      HOME: ${HOME}
-      PATH: ${HOME}/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-      # Optional instead of mounting ~/.claude:
-      # ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
-    volumes:
-      - ${HOME}/.local/bin:${HOME}/.local/bin:ro
-      # Claude install tree when `claude` is a symlink into ~/.local/share/claude
-      - ${HOME}/.local/share/claude:${HOME}/.local/share/claude:ro
-      - ${HOME}/.claude:${HOME}/.claude:ro
-```
-
-**4. Apply**
-
-```bash
-docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.claude.yml \
-  up -d --force-recreate server
-
-docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.claude.yml \
-  exec -u "$(id -u):$(id -g)" server claude --version
-```
+Headless Docker: prefer `ANTHROPIC_API_KEY` or `claude setup-token` → paste; browser OAuth is unreliable in containers. See [M08](../milestones/M08-connector-operator-cli.md).
 
 ## Capabilities
 

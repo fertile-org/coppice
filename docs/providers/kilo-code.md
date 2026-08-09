@@ -37,53 +37,16 @@ command = "kilo"
 model_providers = ["anthropic", "openai"]
 ```
 
-## Docker
-
-The server image does not include `kilo`. Mount the host CLI + auth yourself once (overview: [Docker Compose (host CLIs)](README.md#docker-compose-host-clis)).
-
-**1. Host prep**
+## Setup
 
 ```bash
-npm install -g @kilocode/cli
-kilo --version
-# authenticate via TUI `/connect` or `kilo auth login <url>`
+coppice connector enable kilo-code
+coppice connector install kilo-code
+coppice connector setup kilo-code
+coppice connector doctor kilo-code
 ```
 
-**2. Enable in** `deploy/config/config.toml`
-
-```toml
-[agent.connectors.kilo-code]
-enabled = true
-command = "kilo"
-model_providers = ["anthropic", "openai"]
-```
-
-**3. Compose override** — save as `deploy/docker-compose.kilo.yml` (local only). A global npm install usually needs both the shim and the package tree:
-
-```yaml
-services:
-  server:
-    environment:
-      HOME: ${HOME}
-      PATH: /usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-    volumes:
-      - /usr/local/bin/kilo:/usr/local/bin/kilo:ro
-      - /usr/local/lib/node_modules/@kilocode:/usr/local/lib/node_modules/@kilocode:ro
-      # Adjust if your Kilo/OpenCode auth lives elsewhere
-      - ${HOME}/.local/share/opencode:${HOME}/.local/share/opencode:ro
-```
-
-If `which kilo` points elsewhere, mount that path (and its realpath target) instead.
-
-**4. Apply**
-
-```bash
-docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.kilo.yml \
-  up -d --force-recreate server
-
-docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.kilo.yml \
-  exec -u "$(id -u):$(id -g)" server kilo --version
-```
+See [M08](../milestones/M08-connector-operator-cli.md).
 
 ## Capabilities
 

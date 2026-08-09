@@ -8,7 +8,7 @@ Cursor Agent CLI integration via subprocess. Agents run as `agent -p` processes 
 
 ## Auth
 
-Auth is **host-managed**, exactly like the claude-code and codex connectors. The operator runs `agent login` wherever the server runs, and the spawned `agent` child process inherits that environment directly. Coppice does not inject or strip credentials.
+Auth lives under the process `$HOME` (Compose: `/home/coppice` volume). Run `coppice connector setup cursor` (`agent login`); the spawned `agent` child inherits that environment. Coppice does not inject or strip credentials.
 
 ```toml
 [agent.connectors.cursor]
@@ -18,62 +18,18 @@ command = "agent"
 model_providers = ["cursor"]
 ```
 
-## Docker
+## Setup
 
-The server image does not include `agent`. Mount the host CLI + auth yourself once (same idea as other connectors; overview: [Docker Compose (host CLIs)](README.md#docker-compose-host-clis)).
-
-**1. Host prep**
+Real CLIs are not in the default image. Use the operator CLI (managed `$HOME` volume in Compose):
 
 ```bash
-# install Cursor Agent CLI, then:
-agent login
-# confirm
-agent models | head
+coppice connector enable cursor
+coppice connector install cursor   # Docker / managed home
+coppice connector setup cursor     # agent login (copy URL if needed)
+coppice connector doctor cursor
 ```
 
-**2. Enable in** `deploy/config/config.toml`
-
-```toml
-[agent.connectors.cursor]
-enabled = true
-command = "agent"
-model_providers = ["cursor"]
-```
-
-If the Agents UI / models API returns 502 while `docker compose exec … agent models` works, set an absolute `command` (compose `PATH` may not be what you expect at runtime):
-
-```toml
-command = "/home/YOUR_USER/.local/bin/agent"
-```
-
-**3. Compose override** — save as `deploy/docker-compose.cursor.yml` (local only; do not commit if you prefer private mounts):
-
-```yaml
-services:
-  server:
-    environment:
-      # Same UID as make compose-up; CLI auth lives under this HOME.
-      HOME: ${HOME}
-      PATH: ${HOME}/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-    volumes:
-      # `agent` symlink + install tree (symlink target must also be mounted)
-      - ${HOME}/.local/bin:${HOME}/.local/bin:ro
-      - ${HOME}/.local/share/cursor-agent:${HOME}/.local/share/cursor-agent:ro
-      # auth.json from `agent login`
-      - ${HOME}/.config/cursor:${HOME}/.config/cursor:ro
-```
-
-Ensure those host directories already exist before the first `up` (Docker creates empty dirs otherwise).
-
-**4. Apply**
-
-```bash
-docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.cursor.yml \
-  up -d --force-recreate server
-
-docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.cursor.yml \
-  exec -u "$(id -u):$(id -g)" server agent models | head
-```
+See [M08](../milestones/M08-connector-operator-cli.md) and [providers README § Docker](README.md#docker-compose-managed-connectors).
 
 ## Capabilities
 
@@ -132,7 +88,7 @@ The list reflects your Cursor CLI version and login — it is not hardcoded in C
 
 ## Limitations
 
-- **Docker / PATH:** The `agent` binary and login state must be available to the server process. Host install: put `agent` on PATH and run `agent login`. Compose: mount CLI + auth manually ([Docker Compose (host CLIs)](README.md#docker-compose-host-clis)).
+- **Docker:** Use `coppice connector install|setup|doctor cursor` with the managed `/home/coppice` volume ([M08](../milestones/M08-connector-operator-cli.md)). Do not bind-mount host CLI paths.
 - **No Cursor worktree flag:** Coppice already owns worktrees. The connector uses `--workspace <coppice-worktree>` and process CWD; it never passes Cursor's `-w` / `--worktree`.
 - **No SDK:** This connector drives the CLI subprocess only. It does not use `@cursor/sdk`, `cursor-sdk`, or cloud/private worker integrations.
 - **MCP injection:** Not supported in v1 (follow-up ticket).

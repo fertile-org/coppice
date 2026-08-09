@@ -37,7 +37,7 @@ See the [milestone strategy](../superpowers/specs/2026-06-07-coppice-milestone-s
 | M05 | [M05-workflow-and-collaboration.md](./M05-workflow-and-collaboration.md) | Workflow rules, mentions, final review |
 | M06 | [M06-knowledge-and-learning.md](./M06-knowledge-and-learning.md) | pgvector, retrieval, learning inbox |
 | M07 | [M07-trust-and-signals.md](./M07-trust-and-signals.md) | Sandbox, secrets, signals, git/PR |
-| M08 | [M08-connector-operator-cli.md](./M08-connector-operator-cli.md) | `coppice connector` enable/doctor/setup/snippets (real CLIs) |
+| M08 | [M08-connector-operator-cli.md](./M08-connector-operator-cli.md) | Managed HOME volume + `coppice connector` install/setup/doctor |
 
 ## Philosophy references
 
