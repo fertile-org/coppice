@@ -182,7 +182,9 @@ coppice connector setup opencode
 coppice connector doctor opencode
 ```
 
-Compose uses a managed `$HOME` volume — see [M08](../milestones/M08-connector-operator-cli.md). OpenCode also needs `opencode serve` reachable (attach mode).
+`install` places the binary at `$HOME/.opencode/bin` (Compose prepends that directory to `PATH`). A green `doctor` confirms binary + auth under managed `$HOME`; a live agent run still needs `opencode serve` reachable for attach mode — see **Execution** above.
+
+Compose uses a managed `$HOME` volume — see [M08](../milestones/M08-connector-operator-cli.md).
 
 ## Future TODO
 

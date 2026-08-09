@@ -34,7 +34,7 @@ Host setup flow:
 
 The default server image ships **no** real agent CLIs (`mock` only). CI and smoke stay on mock.
 
-Compose mounts a **named volume** at `/home/coppice` (`HOME=/home/coppice`) for CLI binaries and auth. Do **not** bind-mount host `~/.local` / `~/.config` — use the operator CLI instead:
+Compose mounts a **named volume** at `/home/coppice` (`HOME=/home/coppice`) for CLI binaries and auth. Compose sets `HOME=/home/coppice` and prepends `/home/coppice/.local/bin` and `/home/coppice/.opencode/bin` to `PATH` (keeps `/usr/sbin` for `gosu`). Do **not** bind-mount host `~/.local` / `~/.config` — use the operator CLI instead:
 
 ```bash
 docker compose -f deploy/docker-compose.yml exec -it -u "$(id -u):$(id -g)" server \
@@ -43,6 +43,13 @@ docker compose -f deploy/docker-compose.yml exec -it -u "$(id -u):$(id -g)" serv
   coppice connector setup cursor
 docker compose -f deploy/docker-compose.yml exec -it -u "$(id -u):$(id -g)" server \
   coppice connector doctor cursor
+
+docker compose -f deploy/docker-compose.yml exec -it -u "$(id -u):$(id -g)" server \
+  coppice connector install opencode
+docker compose -f deploy/docker-compose.yml exec -it -u "$(id -u):$(id -g)" server \
+  coppice connector setup opencode
+docker compose -f deploy/docker-compose.yml exec -it -u "$(id -u):$(id -g)" server \
+  coppice connector doctor opencode
 ```
 
 Full design: [M08 — Connector operator CLI](../milestones/M08-connector-operator-cli.md). Per-connector auth notes live on each provider page under **Setup**.

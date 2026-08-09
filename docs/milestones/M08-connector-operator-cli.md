@@ -50,7 +50,7 @@ flowchart LR
 ```
 
 - Named volume `connector_data` → `/home/coppice` (stable HOME)
-- Compose sets `HOME=/home/coppice` and prepends `/home/coppice/.local/bin` to `PATH` (keep `/usr/sbin` for `gosu`)
+- Compose sets `HOME=/home/coppice` and prepends `/home/coppice/.local/bin` and `/home/coppice/.opencode/bin` to `PATH` (keep `/usr/sbin` for `gosu`)
 - Ship `coppice` in the server image next to `coppice-server`
 - Entrypoint preserves Compose `HOME`/`PATH` after `gosu` and chowns `$HOME` for `COPPICE_UID`
 - **No** host bind-mount recipes in default docs or default compose
@@ -104,12 +104,16 @@ cli/src/commands/connector/
 ## Acceptance criteria
 
 - [x] Docs no longer recommend host CLI bind-mount overrides; they point at `coppice connector …`
-- [x] `coppice connector list|enable|doctor|setup` for all non-mock connectors
-- [x] `coppice connector install cursor` works into managed `$HOME` (other IDs: clear “not yet / manual” message)
+- [x] `coppice connector list|enable|doctor|setup|install` implemented for all non-mock connectors
+- [ ] `coppice connector install cursor` works into managed `$HOME` (binary at `$HOME/.local/bin`)
+- [ ] `coppice connector install opencode` works into managed `$HOME` (binary at `$HOME/.opencode/bin`)
 - [x] `coppice` binary on PATH in the server image
-- [x] Compose: `connector_data` → `/home/coppice`, `HOME` + PATH as above
-- [x] `enable` updates Docker/`COPPICE_CONFIG` correctly
-- [x] `doctor` fails clearly when CLI or auth missing
+- [x] Compose: `connector_data` → `/home/coppice`, `HOME=/home/coppice`, PATH prepends `.local/bin` and `.opencode/bin`
+- [ ] `enable` updates Docker/`COPPICE_CONFIG` correctly
+- [x] `doctor` fails clearly when CLI or auth missing (unit-tested)
+- [ ] `doctor cursor` green after install + setup in Compose
+- [ ] `doctor opencode` green after install + setup in Compose
+- [ ] Models API works after setup (`GET .../models`) without host mounts
 - [x] Default `make compose-up` / CI smoke still mock-only
 - [x] No `compose-snippet` command
 
