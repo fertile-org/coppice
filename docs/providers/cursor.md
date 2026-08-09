@@ -1,95 +1,93 @@
-# Cursor provider
+# Cursor
 
-**ID:** `cursor`  
-**Status:** Implemented  
-**Stream backend:** subprocess stdout (stream-json)
+Use the [Cursor Agent CLI](https://cursor.com) (`agent`) as a Coppice connector. Coppice starts `agent` for each ticket run and shows live progress in the ticket drawer.
 
-Cursor Agent CLI integration via subprocess. Agents run as `agent -p` processes that inherit the server's environment.
+**Connector id:** `cursor`
 
-## Auth
+## Prerequisites
 
-Auth lives under the process `$HOME` (Compose: `/home/coppice` volume). Run `coppice connector setup cursor` (`agent login`); the spawned `agent` child inherits that environment. Coppice does not inject or strip credentials.
+- Coppice running via Docker Compose (`make compose-up`), or a host install with `coppice` on your PATH
+- A Cursor account that can log in with `agent login`
+
+## One-time setup (Docker Compose)
+
+From the repo root, run these on the **server** container (not `web`):
+
+```bash
+docker compose -f deploy/docker-compose.yml exec -it -u "$(id -u):$(id -g)" server \
+  coppice connector enable cursor
+docker compose -f deploy/docker-compose.yml up -d --force-recreate server
+docker compose -f deploy/docker-compose.yml exec -it -u "$(id -u):$(id -g)" server \
+  coppice connector install cursor
+docker compose -f deploy/docker-compose.yml exec -it -u "$(id -u):$(id -g)" server \
+  coppice connector setup cursor
+docker compose -f deploy/docker-compose.yml exec -it -u "$(id -u):$(id -g)" server \
+  coppice connector doctor cursor
+```
+
+What each step does:
+
+| Step | What you should see |
+|------|---------------------|
+| `enable` | Writes `enabled = true` into `deploy/config/config.toml` |
+| recreate server | Picks up the config change |
+| `install` | Downloads `agent` into the container’s home volume |
+| `setup` | Runs `agent login` — copy the printed URL into a browser on your machine, finish login, return to the terminal |
+| `doctor` | Prints `doctor: ok` when the CLI and login look healthy |
+
+CLI binaries and login state live in a Compose volume at `/home/coppice`. You do **not** need to mount host `~/.local` or `~/.config`.
+
+### Host install (no Docker)
+
+```bash
+coppice connector enable cursor
+# restart your coppice-server process so it reloads config
+coppice connector install cursor   # or install Cursor Agent CLI yourself onto PATH
+coppice connector setup cursor
+coppice connector doctor cursor
+```
+
+## Use it in the UI
+
+1. Open **Agents** and create or edit an agent.
+2. Set connector to **cursor**.
+3. Pick model provider **cursor** and a model from the list (loaded from `agent models` after login).
+4. Assign the agent to a ticket and start a run. Live output appears in the ticket drawer.
+
+Optional config (usually set by `enable`):
 
 ```toml
 [agent.connectors.cursor]
 enabled = true
 command = "agent"
-# run_timeout_secs = 600
 model_providers = ["cursor"]
+# run_timeout_secs = 600
 ```
 
-## Setup
+## If something goes wrong
 
-Real CLIs are not in the default image. Use the operator CLI (managed `$HOME` volume in Compose):
+| Symptom | What to try |
+|---------|-------------|
+| `doctor` says binary missing | Re-run `install`, or confirm PATH includes `/home/coppice/.local/bin` inside the server container |
+| `doctor` says auth missing / models fail | Re-run `setup` and finish the browser login |
+| Agents UI has no models / API errors | Same as auth missing; also recreate the server after `enable` |
+| Changes to config.toml ignored | `docker compose … up -d --force-recreate server` |
 
-```bash
-coppice connector enable cursor
-coppice connector install cursor   # Docker / managed home
-coppice connector setup cursor     # agent login (copy URL if needed)
-coppice connector doctor cursor
+## Behavior notes
+
+- **Live console:** Streams Cursor’s progress while the run is active. After a server restart mid-run, live reattach is not possible; Coppice replays the saved log and marks an interrupted run.
+- **Continued tickets:** Follow-up runs can resume the same Cursor chat session when Coppice has a prior `session_id`.
+- **Worktrees:** Coppice owns git worktrees. It does not pass Cursor’s `-w` / `--worktree` flag.
+- **MCP:** Not injected by Coppice in this version.
+
+## How Coppice runs Cursor (reference)
+
+Coppice spawns roughly:
+
+```text
+agent -p "<prompt>" --trust --force --output-format stream-json --workspace <worktree>
 ```
 
-See [M08](../milestones/M08-connector-operator-cli.md) and [providers README § Docker](README.md#docker-compose-managed-connectors).
+with optional `--model` and `--resume <session_id>`. Stdout is NDJSON (`stream-json`); the final `result` event is parsed for Coppice’s JSON result contract. Live events are published as `cursor.console.*` on the run WebSocket.
 
-## Capabilities
-
-| Capability | Status |
-|------------|--------|
-| Subprocess execution | `agent -p --trust --force --output-format stream-json --workspace <worktree>` |
-| Session ID capture | Extracted from stream-json events, persisted to run |
-| Model selection | `--model` from agent config |
-| Result parsing | `extract_result_from_text` on terminal `result` event text |
-| Cancellation | `cancel_rx` kills the subprocess |
-| Timeout | Configurable via `run_timeout_secs` (default 600s) |
-| Live stream | Forwarded to run stream as `cursor.console.*` events |
-| Session resume | `--resume <session_id>` on continuation runs |
-| MCP injection | Follow-up ticket |
-
-## How it works
-
-1. Coppice spawns `agent -p "<coppice_run_prompt>" --trust --force --output-format stream-json --workspace <worktree>` with CWD set to the agent worktree.
-2. `--model <model>` is added when configured on the agent. `--resume <session_id>` is added when the job worker supplies a prior run's session id.
-3. Each stdout line is a JSON event. The provider captures `session_id` from the first event that contains it and forwards events to `CursorConsolePublisher` for live display.
-4. The terminal `type: "result"` event provides the final text. Coppice extracts the JSON contract (`AgentRunResult`) from that text using `extract_result_from_text`. If `is_error` is true or the subtype indicates failure, the run fails with a clear error.
-5. On cancel or timeout, the subprocess is killed.
-
-## Live streaming (WebSocket console)
-
-Cursor's `--output-format stream-json` emits newline-delimited JSON events on stdout. Each event is mapped to a `cursor.console.*` event and forwarded to the `RunStreamHandle` in real time:
-
-| Stream-JSON event | Console event | Notes |
-|-------------------|---------------|-------|
-| `system` (subtype `init`) | `cursor.console.session` | Session start; `session_id` captured via `session_created_tx` |
-| `assistant` (`message.content[].text`) | `cursor.console.text` | Assistant prose; markdown payload |
-| `tool_call` (subtype `started`) | `cursor.console.tool` | Running tool summary (shell command or file path) |
-| `tool_call` (subtype `completed`) | `cursor.console.tool` | Completed or error status; optional output |
-| `result` | `cursor.console.text` / `cursor.console.result` | Result text; contract emitted once when JSON contract is detected |
-| `thinking`, `user` | — (ignored) | Not forwarded as console events |
-
-Events are published via `RunStreamHandle::publish` as `LiveMessage::Event`. The `RunStreamHandle` broadcasts to all WebSocket subscribers and retains a 500-message ring buffer for late-replay.
-
-**Recovery after server restart:** The subprocess is gone, so live reattach is not possible. The WS live endpoint replays the persisted `terminal.log` artifact as a single `Frame` message. If the run was still active, it is marked interrupted.
-
-## Session resume
-
-When a `Continued` result leads to a follow-up run, the job worker looks up the previous run's `session_id` from `agent_runs` and passes it to the connector as `resume_session_id`. The connector adds `--resume <session_id>` to the agent command, which restores the full conversation context within Cursor's session store. This wiring matches `claude-code`.
-
-## Models
-
-Model options are loaded dynamically from the installed Cursor Agent CLI:
-
-```bash
-agent models
-```
-
-Coppice calls this at `GET /api/connectors/cursor/model-providers/cursor/models` and returns model ids for the Agents UI. The connector uses a single synthetic model provider id: `cursor`. Operators set `model_providers = ["cursor"]` in config.
-
-The list reflects your Cursor CLI version and login — it is not hardcoded in Coppice. If the CLI is missing or not logged in, the models endpoint returns an error.
-
-## Limitations
-
-- **Docker:** Use `coppice connector install|setup|doctor cursor` with the managed `/home/coppice` volume ([M08](../milestones/M08-connector-operator-cli.md)). Do not bind-mount host CLI paths.
-- **No Cursor worktree flag:** Coppice already owns worktrees. The connector uses `--workspace <coppice-worktree>` and process CWD; it never passes Cursor's `-w` / `--worktree`.
-- **No SDK:** This connector drives the CLI subprocess only. It does not use `@cursor/sdk`, `cursor-sdk`, or cloud/private worker integrations.
-- **MCP injection:** Not supported in v1 (follow-up ticket).
-- **Live recovery:** Not possible after a server restart (subprocess is gone). The persisted `terminal.log` is replayed instead.
+More on connectors in general: [providers README](README.md). Milestone notes: [M08](../milestones/M08-connector-operator-cli.md).

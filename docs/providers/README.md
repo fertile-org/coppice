@@ -1,88 +1,54 @@
 # Agent connectors
 
-Coppice runs agents through a **connector adapter** layer. Orchestration (queue, worktrees, result contract, ticket updates) is connector-agnostic; each adapter handles execution, streaming, and result parsing.
+Coppice runs agents through **connectors**. Each connector talks to a different CLI or service (Cursor, Claude Code, OpenCode, …). Tickets, the board, and worktrees stay the same; you pick a connector per agent.
 
-| Connector | Doc | Status |
+| Connector | Doc | Notes |
 |-----------|-----|--------|
-| `mock` | [mock.md](mock.md) | Implemented — default for CI |
-| `opencode` | [opencode.md](opencode.md) | Implemented — manual host testing |
-| `claude-code` | [claude-code.md](claude-code.md) | Implemented — subprocess with subscription auth |
-| `codex` | [codex.md](codex.md) | Implemented — subprocess with subscription auth |
-| `kilo-code` | [kilo-code.md](kilo-code.md) | Implemented — subprocess (OpenCode-derived; daemon compat unverified) |
-| `cursor` | [cursor.md](cursor.md) | Implemented — subprocess with host-managed auth |
+| `mock` | [mock.md](mock.md) | Default for CI and Compose smoke — no real CLI |
+| `cursor` | [cursor.md](cursor.md) | Cursor Agent CLI (`agent`) |
+| `claude-code` | [claude-code.md](claude-code.md) | Claude Code CLI (`claude`) |
+| `codex` | [codex.md](codex.md) | OpenAI Codex CLI (`codex`) |
+| `opencode` | [opencode.md](opencode.md) | OpenCode serve + Live Session UI |
+| `kilo-code` | [kilo-code.md](kilo-code.md) | Kilo CLI (`kilo`) |
 | `shell` | [shell.md](shell.md) | Deferred |
-
-OpenCode within-run **context compaction** is documented in [opencode.md § Context compaction](opencode.md#context-compaction).
 
 ## Connectors vs model providers vs models
 
-| Layer | Example | Where configured |
+| Layer | Example | Where you set it |
 |-------|---------|------------------|
-| Connector | `opencode`, `mock` | `[agent.connectors.*]` in config.toml |
-| Model provider | `zai-coding-plan` | `model_providers = [...]` in connector config (after host auth) |
-| Model | `glm-5.1` | Per agent in UI (fetched live from connector) |
+| Connector | `cursor`, `opencode` | Agent in the UI, and `[agent.connectors.*]` in config |
+| Model provider | `cursor`, `zai-coding-plan` | `model_providers = [...]` in connector config |
+| Model | a specific model id | Per agent in the UI (fetched live after login) |
 
-Host setup flow:
+## Docker Compose
 
-1. `coppice connector enable <id>` (or edit config)
-2. `coppice connector install <id>` when using Docker (managed `$HOME` volume)
-3. `coppice connector setup <id>` (vendor login)
-4. `coppice connector doctor <id>`
-5. Create agents in UI — pick connector, provider, model from dropdowns
+To use a real connector, follow that connector’s doc **One-time setup** section (run `coppice connector …` on the **server** container). Example for Cursor: [cursor.md § One-time setup](cursor.md#one-time-setup-docker-compose).
 
-## Docker Compose (managed connectors)
+Pattern for every connector:
 
-The default server image ships **no** real agent CLIs (`mock` only). CI and smoke stay on mock.
+1. `enable` → recreate the server  
+2. `install` → `setup` → `doctor`  
+3. Create an agent in the UI and pick connector / provider / model  
 
-Compose mounts a **named volume** at `/home/coppice` (`HOME=/home/coppice`) for CLI binaries and auth. Compose sets `HOME=/home/coppice` and prepends `/home/coppice/.local/bin` and `/home/coppice/.opencode/bin` to `PATH` (keeps `/usr/sbin` for `gosu`). Do **not** bind-mount host `~/.local` / `~/.config` — use the operator CLI instead:
+Binaries and login state live in a Compose volume at `/home/coppice`. You do not mount host `~/.local` / `~/.config` for CLIs. Default Compose stays on `mock` for CI.
 
-```bash
-docker compose -f deploy/docker-compose.yml exec -it -u "$(id -u):$(id -g)" server \
-  coppice connector install cursor
-docker compose -f deploy/docker-compose.yml exec -it -u "$(id -u):$(id -g)" server \
-  coppice connector setup cursor
-docker compose -f deploy/docker-compose.yml exec -it -u "$(id -u):$(id -g)" server \
-  coppice connector doctor cursor
+Design notes: [M08](../milestones/M08-connector-operator-cli.md).
 
-docker compose -f deploy/docker-compose.yml exec -it -u "$(id -u):$(id -g)" server \
-  coppice connector install opencode
-docker compose -f deploy/docker-compose.yml exec -it -u "$(id -u):$(id -g)" server \
-  coppice connector setup opencode
-docker compose -f deploy/docker-compose.yml exec -it -u "$(id -u):$(id -g)" server \
-  coppice connector doctor opencode
-```
+## Per-agent choice
 
-Full design: [M08 — Connector operator CLI](../milestones/M08-connector-operator-cli.md). Per-connector auth notes live on each provider page under **Setup**.
+`[agent] default_connector` sets the default. Each agent can override connector, model provider, and model on the Agents page. At run time the worker uses that agent’s values.
 
-## Per-agent connector, model provider, and model
-
-Server `config.toml` sets the **default connector** via `[agent] default_connector` and optional connector settings under `[agent.connectors.<id>]`.
-
-Each **agent** can override the default connector and optionally set a `model_provider` and `model` (Agents page or `POST/PATCH /api/agents`). At run time the worker uses the assigned agent’s values, not the server default. Models are not stored in config — they are chosen per agent in the UI and fetched live from the connector.
-
-**Health checks:** Coppice periodically evaluates whether each agent’s connector is registered and reachable, and whether its model provider is configured on the server. Health is separate from enabled/disabled status:
+**Health** (separate from enabled/disabled):
 
 | Health | Meaning |
 |--------|---------|
-| `unknown` | Server started; check not run yet |
-| `healthy` | Connector registered and liveness check passed |
-| `missing_config` | Agent’s connector or model provider is not configured on this server |
-| `unhealthy` | Connector registered but liveness check failed |
+| `unknown` | Check not run yet |
+| `healthy` | Connector reachable and model provider configured |
+| `unreachable` | Connector/CLI not usable |
+| `missing_config` | Model provider missing from connector `model_providers` |
 
-Runs are **blocked** when health is `missing_config` (clear API error). `unknown` and `unhealthy` are not blocked at the API layer — the worker may still fail if the connector is unavailable.
+Unreachable or misconfigured agents are not used for new auto-assignments until fixed.
 
-## API
+## Adding a connector
 
-```
-GET  /api/connectors
-GET  /api/connectors/{connector_id}/model-providers
-GET  /api/connectors/{connector_id}/model-providers/{model_provider_id}/models
-```
-
-Model providers come from config. Models are fetched live (e.g. `opencode models <provider>`).
-
-## Testing rules
-
-- **CI / E2E:** always `default_connector = "mock"`.
-- **Integration tests:** mock only; no network LLM calls.
-- **Manual:** OpenCode on host `config.toml` with your own API keys via `opencode auth login`.
+See [architecture.md](../architecture.md) (server `providers/`, thin API handlers) and the existing docs above as templates. Prefer a dedicated provider module and live model listing when the CLI supports it.

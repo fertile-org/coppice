@@ -1,94 +1,85 @@
-# Codex provider
+# Codex
 
-**ID:** `codex`
-**Status:** Implemented
-**Stream backend:** subprocess stdout (JSONL)
+Use the [OpenAI Codex CLI](https://github.com/openai/codex) (`codex`) as a Coppice connector. Coppice starts `codex exec` for each ticket run and shows live progress in the ticket drawer.
 
-OpenAI Codex CLI integration via subprocess. Agents run as `codex exec` processes that inherit the server's environment.
+**Connector id:** `codex`
 
-## Auth
+## Prerequisites
 
-Auth is **host-managed**, exactly like the opencode and claude-code connectors. The operator runs `codex login` (subscription) or sets the appropriate environment variable wherever the server runs, and the spawned `codex` child process inherits that environment directly. Coppice does not inject or strip credentials.
+- Coppice running via Docker Compose (`make compose-up`), or a host install with `coppice` on your PATH
+- A Codex login (device auth) **or** the API key env your Codex install expects
+
+## One-time setup (Docker Compose)
+
+From the repo root, run these on the **server** container (not `web`):
+
+```bash
+docker compose -f deploy/docker-compose.yml exec -it -u "$(id -u):$(id -g)" server \
+  coppice connector enable codex
+docker compose -f deploy/docker-compose.yml up -d --force-recreate server
+docker compose -f deploy/docker-compose.yml exec -it -u "$(id -u):$(id -g)" server \
+  coppice connector install codex
+docker compose -f deploy/docker-compose.yml exec -it -u "$(id -u):$(id -g)" server \
+  coppice connector setup codex
+docker compose -f deploy/docker-compose.yml exec -it -u "$(id -u):$(id -g)" server \
+  coppice connector doctor codex
+```
+
+| Step | Notes |
+|------|--------|
+| `enable` | Writes `enabled = true` into `deploy/config/config.toml` |
+| recreate server | Picks up the config change |
+| `install` | May still print manual steps — put `codex` on PATH under `/home/coppice` if install is not automated yet |
+| `setup` | Runs `codex login --device-auth` (follow the device-code / URL prompts) |
+| `doctor` | Prints `doctor: ok` when the CLI and auth look healthy |
+
+CLI binaries and auth live in the Compose volume at `/home/coppice`. You do **not** need to mount host home directories.
+
+### Host install (no Docker)
+
+```bash
+coppice connector enable codex
+# restart coppice-server so it reloads config
+coppice connector install codex   # or install `codex` onto PATH yourself
+coppice connector setup codex
+coppice connector doctor codex
+```
+
+## Use it in the UI
+
+1. Open **Agents** and create or edit an agent.
+2. Set connector to **codex**.
+3. Pick model provider **openai** or **azure**, then a model from the list (from `codex debug models` after login).
+4. Assign the agent to a ticket and start a run.
+
+Optional config (usually set by `enable`):
 
 ```toml
 [agent.connectors.codex]
 enabled = true
+model_providers = ["openai", "azure"]
 # run_timeout_secs = 600
-# model_providers = ["openai", "azure"]
 ```
 
-## Setup
+## If something goes wrong
 
-```bash
-coppice connector enable codex
-coppice connector install codex
-coppice connector setup codex     # codex login --device-auth
-coppice connector doctor codex
-```
+| Symptom | What to try |
+|---------|-------------|
+| Binary missing | Install `codex` into `/home/coppice/.local/bin` (or your host PATH) |
+| Auth missing | Re-run `setup` (`codex login --device-auth`) |
+| No models in UI | Confirm login, then check `doctor` |
+| Config ignored | Recreate/restart the server after `enable` |
 
-See [M08](../milestones/M08-connector-operator-cli.md).
+## Behavior notes
 
-## Capabilities
+- **Live console:** Streams Codex output while the run is active. After a server restart mid-run, Coppice replays the saved log.
+- **Continued tickets:** Prefer checkpoint-style `continued` runs (progress note → next run). Codex session resume via `codex exec resume` is unreliable and not wired like Claude/Cursor.
+- **Long context:** Within a single run, Codex may compact history near the model limit. Across runs, use checkpoints ([context design](../superpowers/specs/2026-06-10-context-long-running-tasks-design.md)).
 
-| Capability | Status |
-|------------|--------|
-| Subprocess execution | `codex exec --json --dangerously-bypass-approvals-and-sandbox` |
-| Thread ID capture | Extracted from `thread.started` event, persisted to run |
-| Model selection | `-m` / `--model` from agent config |
-| Result parsing | `extract_result_from_text` on accumulated agent_message text |
-| Cancellation | `cancel_rx` kills the subprocess |
-| Timeout | Configurable via `run_timeout_secs` (default 600s) |
-| Live stream | Forwarded to run stream as `Frame` messages |
-| Session resume | `codex exec resume <thread_id>` on continuation runs (unreliable) |
-| MCP injection | Follow-up ticket |
+## How Coppice runs Codex (reference)
 
-## How it works
+Coppice spawns `codex exec --json --dangerously-bypass-approvals-and-sandbox` with worktree `-C`, optional `-m`, and the prompt on stdin. JSONL events drive the live console; accumulated agent text is parsed for Coppice’s JSON result contract.
 
-1. Coppice spawns `codex exec --json --dangerously-bypass-approvals-and-sandbox -C <worktree> -m <model>` and writes the prompt to stdin.
-2. Each stdout line is a JSON event. The provider accumulates agent_message text from `item.completed` events and captures `thread_id` from the `thread.started` event.
-3. The terminal `turn.completed` event signals completion. Coppice extracts the JSON contract (`AgentRunResult`) from the accumulated text using `extract_result_from_text`.
-4. On cancel or timeout, the subprocess is killed.
+Models: `openai` = slugs without an `azure/` prefix; `azure` = slugs with `azure/`.
 
-## Live streaming (WebSocket console)
-
-Codex's `--json` emits newline-delimited JSON events on stdout. Each event is mapped to a `LiveMessage` variant and forwarded to the `RunStreamHandle` in real time:
-
-| Codex event | LiveMessage variant | Notes |
-|-------------|---------------------|-------|
-| `thread.started` | — | Contains the `thread_id`; captured early via `session_created_tx` |
-| `item.completed` (type: `agent_message`) | `Frame` | Display text extracted from `item.text` |
-| `turn.completed` | — | Terminal event; signals loop break |
-| Other events | — (ignored for display) | Not forwarded as frames |
-
-Frames are published via `RunStreamHandle::publish_frame(seq, data)` where `seq` is a monotonic counter. The `RunStreamHandle` broadcasts to all WebSocket subscribers and retains a 500-message ring buffer for late-replay.
-
-**Recovery after server restart:** The subprocess is gone, so live reattach is not possible. The WS live endpoint replays the persisted `terminal.log` artifact as a single `Frame` message. If the run was still active, it is marked interrupted.
-
-## Session resume
-
-Session resume for codex is **unreliable**—the Codex CLI implementation for session continuation is not stable. The connector includes `codex exec resume <thread_id>` support (following the same pattern as claude-code), but cross-run continuity should rely on checkpoint runs: the agent returns `status: "continued"` with a `progressNote`, the human starts the next run, and Coppice injects resume context into `.agent/context.md` (see [Context & Long-Running Tasks design](../superpowers/specs/2026-06-10-context-long-running-tasks-design.md)).
-
-**Note:** Session resume for codex is NOT supported in the job worker's `load_resume_session_id` function (unlike claude-code). The `load_resume_session_id` function only returns session IDs for claude-code runs; codex relies on the checkpoint-based continuation pattern.
-
-## Context compaction
-
-Codex compacts long session history **within a single run** when context nears the model limit. Coppice relies on this provider guard; it does **not** implement a parallel summarizer or call provider compaction APIs proactively.
-
-For **cross-run continuity**, prefer checkpoint runs: the agent returns `status: "continued"` with a `progressNote`, the human starts the next run, and Coppice injects resume context into `.agent/context.md` (see [Context & Long-Running Tasks design](../superpowers/specs/2026-06-10-context-long-running-tasks-design.md)).
-
-## Models
-
-Model options are loaded dynamically from the installed Codex CLI:
-
-```bash
-codex debug models
-```
-
-Coppice calls this at `GET /api/connectors/codex/model-providers/{provider}/models` and returns models whose `visibility` is not `hide`, filtered by provider:
-
-| Provider | Filter |
-|----------|--------|
-| `openai` | Slugs without an `azure/` prefix (e.g. `gpt-5.5`, `gpt-5.4`) |
-| `azure` | Slugs with an `azure/` prefix |
-
-The list reflects your Codex CLI version and login — it is not hardcoded in Coppice. If the CLI is missing or not logged in, the models endpoint returns an error.
+More: [providers README](README.md), [M08](../milestones/M08-connector-operator-cli.md).
