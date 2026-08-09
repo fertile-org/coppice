@@ -18,11 +18,11 @@ pub fn run(args: InstallArgs) -> anyhow::Result<()> {
 
     let home = home_dir();
     let local_bin = home.join(".local/bin");
+    let opencode_bin = home.join(".opencode/bin");
     std::fs::create_dir_all(&local_bin)?;
-
-    // Ensure managed bin dir is first on PATH for this process + advise operator.
+    std::fs::create_dir_all(&opencode_bin)?;
     let path = std::env::var("PATH").unwrap_or_default();
-    let prepended = format!("{}:{path}", local_bin.display());
+    let prepended = format!("{}:{}:{path}", local_bin.display(), opencode_bin.display());
     std::env::set_var("PATH", &prepended);
     std::env::set_var("HOME", &home);
 
@@ -46,12 +46,7 @@ pub fn run(args: InstallArgs) -> anyhow::Result<()> {
                 "Install `@kilocode/cli` into this HOME (e.g. npm install -g with prefix under $HOME).",
             )?;
         }
-        ConnectorId::OpenCode => {
-            defer_or_hint(
-                id,
-                "Install OpenCode into this HOME so `opencode` is on PATH under $HOME.",
-            )?;
-        }
+        ConnectorId::OpenCode => install_opencode(&home)?,
         ConnectorId::Mock => {}
     }
 
@@ -59,11 +54,16 @@ pub fn run(args: InstallArgs) -> anyhow::Result<()> {
     match binary_on_path(m.binary) {
         Some(p) => println!("install ok: {} -> {}", m.binary, p.display()),
         None => {
-            println!(
-                "install finished but `{}` still not on PATH. Ensure PATH includes {}.",
+            let msg = format!(
+                "install finished but `{}` still not on PATH. Ensure PATH includes {} and {}.",
                 m.binary,
-                local_bin.display()
+                local_bin.display(),
+                opencode_bin.display()
             );
+            if matches!(id, ConnectorId::Cursor | ConnectorId::OpenCode) {
+                anyhow::bail!(msg);
+            }
+            println!("{msg}");
         }
     }
     Ok(())
@@ -87,6 +87,39 @@ fn install_cursor(home: &std::path::Path) -> anyhow::Result<()> {
         .map_err(|e| anyhow::anyhow!("failed to run cursor install (need curl?): {e}"))?;
     if !status.success() {
         anyhow::bail!("cursor install script exited with {status}");
+    }
+    Ok(())
+}
+
+fn install_opencode(home: &std::path::Path) -> anyhow::Result<()> {
+    let opencode_bin = home.join(".opencode/bin");
+    std::fs::create_dir_all(&opencode_bin)?;
+
+    let path = std::env::var("PATH").unwrap_or_default();
+    let prepended = format!(
+        "{}:{}:{path}",
+        home.join(".local/bin").display(),
+        opencode_bin.display()
+    );
+    std::env::set_var("PATH", &prepended);
+
+    if binary_on_path("opencode").is_some() {
+        println!("`opencode` already on PATH; skipping download");
+        return Ok(());
+    }
+
+    println!("Installing OpenCode into HOME={} …", home.display());
+    let status = Command::new("sh")
+        .arg("-c")
+        .arg("curl -fsSL https://opencode.ai/install | bash")
+        .env("HOME", home)
+        .stdin(Stdio::inherit())
+        .stdout(Stdio::inherit())
+        .stderr(Stdio::inherit())
+        .status()
+        .map_err(|e| anyhow::anyhow!("failed to run opencode install (need curl?): {e}"))?;
+    if !status.success() {
+        anyhow::bail!("opencode install script exited with {status}");
     }
     Ok(())
 }

@@ -55,7 +55,7 @@ services:
       COPPICE_GID: ${COPPICE_GID:-1000}
       # Managed connector HOME (CLI binaries + auth). Keep /usr/sbin for gosu.
       HOME: /home/coppice
-      PATH: /home/coppice/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+      PATH: /home/coppice/.local/bin:/home/coppice/.opencode/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
     volumes:
       - artifact_data:/data/artifacts
       - worktree_data:/data/worktrees
