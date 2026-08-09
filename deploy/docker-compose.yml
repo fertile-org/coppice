@@ -74,8 +74,6 @@ services:
       dockerfile: deploy/Dockerfile.web
     ports:
       - "${COPPICE_WEB_PORT:-5001}:5001"
-    environment:
-      VITE_API_URL: http://server:5000
     depends_on:
       - server
 

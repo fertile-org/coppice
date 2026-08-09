@@ -112,6 +112,8 @@ Set `COPPICE_SERVER_BIN` to override the API binary path.
 make compose-up    # copies deploy/config/config.toml if missing; auto-migrates + auto-bootstraps admin
 ```
 
+The **web** service is a production image: `yarn build` then **nginx** on `:5001` (static SPA, proxies `/api` and `/ws` to `server:5000`). For UI hot reload, use the human path (`make web-dev`), not Compose web.
+
 Docker config (`deploy/config/config.toml`, from `config.example.toml` in that folder) can set `auth.bootstrap_admin_email` / `auth.bootstrap_admin_password`. Host installs without those fields still use `make bootstrap` (or `coppice bootstrap admin`) once.
 
 Tear down: `make compose-down`
@@ -147,7 +149,7 @@ COPPICE_WEB_URL=http://localhost:15001 \
   make e2e-smoke
 ```
 
-Only the host-side mapping changes; container-internal ports and the `postgres` service DNS are unaffected, so `DATABASE_URL` and `VITE_API_URL` inside the stack stay the same. The smoke scripts read `COPPICE_API_URL` / `COPPICE_WEB_URL` (defaults `:5000` / `:5001`), so set those to match when you move the server/web ports.
+Only the host-side mapping changes; container-internal ports and the `postgres` service DNS are unaffected, so `DATABASE_URL` inside the stack stays the same. The smoke scripts read `COPPICE_API_URL` / `COPPICE_WEB_URL` (defaults `:5000` / `:5001`), so set those to match when you move the server/web ports.
 
 ## Makefile targets
 
@@ -160,7 +162,7 @@ Only the host-side mapping changes; container-internal ports and the `postgres` 
 | `make compose-down` | Stop default stack |
 | `make migrate` | `coppice migrate` (reads `config.toml` on host) |
 | `make bootstrap` | `coppice bootstrap admin` |
-| `make web-dev` | Vite dev server (proxies to `:5000`) |
+| `make web-dev` | Host Vite hot reload (proxies to `:5000`); Compose web uses nginx instead |
 | `make test` | Full Rust suite (`cargo test --workspace --features embedded-test-db`) |
 | `make test-unit` | Lib tests only — use during agent runs (~5–15s warm) |
 | `make test-smoke` | Lib + smoke integration (`health`, `integration_comments`, `integration_tickets`) |
