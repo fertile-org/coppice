@@ -25,7 +25,11 @@ pub fn run(args: DoctorArgs) -> anyhow::Result<()> {
     println!("connector: {}", id);
     println!("HOME: {}", home.display());
 
-    match binary_on_path(m.binary) {
+    let auth_ok = auth_present(m, &home);
+    let binary_path = binary_on_path(m.binary);
+    let binary_ok = binary_path.is_some();
+
+    match binary_path {
         Some(path) => println!("binary: ok ({})", path.display()),
         None => {
             println!(
@@ -33,31 +37,43 @@ pub fn run(args: DoctorArgs) -> anyhow::Result<()> {
                 m.binary
             );
             println!(
-                "  next: coppice connector install {id}  (or install `{bin}` into $HOME/.local/bin)",
-                id = id,
-                bin = m.binary
+                "  next: coppice connector install {id}  (ensure PATH includes $HOME/.local/bin and $HOME/.opencode/bin)"
             );
             failed = true;
         }
     }
 
-    if auth_present(m, &home) {
+    if binary_ok {
+        match probe_models(id, m.binary) {
+            Ok(()) => {
+                println!("models probe: ok");
+                if !auth_ok {
+                    println!("auth: ok (via models/auth probe)");
+                } else {
+                    println!("auth: ok ({})", m.auth_hint);
+                }
+            }
+            Err(e) => {
+                if auth_ok {
+                    println!("auth: ok ({})", m.auth_hint);
+                    println!("models probe: FAIL ({e})");
+                    failed = true;
+                } else {
+                    println!("auth: MISSING");
+                    println!("  next: coppice connector setup {id}");
+                    println!("  hint: {}", m.auth_hint);
+                    println!("models probe: FAIL ({e})");
+                    failed = true;
+                }
+            }
+        }
+    } else if auth_ok {
         println!("auth: ok ({})", m.auth_hint);
     } else {
         println!("auth: MISSING");
         println!("  next: coppice connector setup {id}");
         println!("  hint: {}", m.auth_hint);
         failed = true;
-    }
-
-    if !failed {
-        if let Err(e) = probe_models(id, m.binary) {
-            println!("models probe: WARN ({e})");
-            // Auth/binary present but models failed — still non-zero so operators notice.
-            failed = true;
-        } else {
-            println!("models probe: ok");
-        }
     }
 
     if failed {
@@ -114,16 +130,78 @@ fn probe_models(id: ConnectorId, binary: &str) -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
+
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    fn with_env_vars(vars: &[(&str, Option<String>)], f: impl FnOnce()) {
+        let _guard = ENV_LOCK.lock().expect("env lock");
+        let saved: Vec<(String, Option<String>)> = vars
+            .iter()
+            .map(|(key, _)| {
+                (
+                    (*key).to_string(),
+                    std::env::var(*key).ok(),
+                )
+            })
+            .collect();
+        for (key, val) in vars {
+            match val {
+                Some(v) => std::env::set_var(key, v),
+                None => std::env::remove_var(key),
+            }
+        }
+        f();
+        for (key, prev) in saved {
+            match prev {
+                Some(v) => std::env::set_var(&key, v),
+                None => std::env::remove_var(&key),
+            }
+        }
+    }
 
     #[test]
     fn doctor_fails_when_binary_missing() {
-        // Use a fake PATH so `agent` cannot be found.
         let dir = tempfile::tempdir().unwrap();
-        std::env::set_var("PATH", dir.path());
-        std::env::set_var("HOME", dir.path());
-        let err = run(DoctorArgs {
-            id: "cursor".into(),
-        });
-        assert!(err.is_err());
+        with_env_vars(
+            &[
+                ("PATH", Some(dir.path().display().to_string())),
+                ("HOME", Some(dir.path().display().to_string())),
+            ],
+            || {
+                let err = run(DoctorArgs {
+                    id: "cursor".into(),
+                });
+                assert!(err.is_err());
+            },
+        );
+    }
+
+    #[test]
+    fn doctor_fails_when_auth_missing_even_if_binary_exists() {
+        let dir = tempfile::tempdir().unwrap();
+        let bin = dir.path().join("bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        let agent = bin.join("agent");
+        std::fs::write(&agent, "#!/bin/sh\necho no\nexit 1\n").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut perms = std::fs::metadata(&agent).unwrap().permissions();
+            perms.set_mode(0o755);
+            std::fs::set_permissions(&agent, perms).unwrap();
+        }
+        with_env_vars(
+            &[
+                ("PATH", Some(bin.display().to_string())),
+                ("HOME", Some(dir.path().display().to_string())),
+            ],
+            || {
+                let err = run(DoctorArgs {
+                    id: "cursor".into(),
+                });
+                assert!(err.is_err());
+            },
+        );
     }
 }
