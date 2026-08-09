@@ -47,10 +47,15 @@ pub fn run(args: DoctorArgs) -> anyhow::Result<()> {
         match probe_models(id, m.binary) {
             Ok(()) => {
                 println!("models probe: ok");
-                if !auth_ok {
+                if auth_ok {
+                    println!("auth: ok ({})", m.auth_hint);
+                } else if probe_proves_auth(id) {
                     println!("auth: ok (via models/auth probe)");
                 } else {
-                    println!("auth: ok ({})", m.auth_hint);
+                    println!("auth: MISSING");
+                    println!("  next: coppice connector setup {id}");
+                    println!("  hint: {}", m.auth_hint);
+                    failed = true;
                 }
             }
             Err(e) => {
@@ -81,6 +86,10 @@ pub fn run(args: DoctorArgs) -> anyhow::Result<()> {
     }
     println!("doctor: ok");
     Ok(())
+}
+
+fn probe_proves_auth(id: ConnectorId) -> bool {
+    matches!(id, ConnectorId::Cursor | ConnectorId::OpenCode)
 }
 
 fn probe_models(id: ConnectorId, binary: &str) -> anyhow::Result<()> {
@@ -158,6 +167,44 @@ mod tests {
                 None => std::env::remove_var(&key),
             }
         }
+    }
+
+    #[test]
+    fn probe_proves_auth_only_for_cursor_and_opencode() {
+        assert!(probe_proves_auth(ConnectorId::Cursor));
+        assert!(probe_proves_auth(ConnectorId::OpenCode));
+        assert!(!probe_proves_auth(ConnectorId::ClaudeCode));
+        assert!(!probe_proves_auth(ConnectorId::Codex));
+        assert!(!probe_proves_auth(ConnectorId::KiloCode));
+    }
+
+    #[test]
+    fn doctor_fails_when_claude_version_ok_but_auth_missing() {
+        let dir = tempfile::tempdir().unwrap();
+        let bin = dir.path().join("bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        let claude = bin.join("claude");
+        std::fs::write(&claude, "#!/bin/sh\n[ \"$1\" = \"--version\" ] && exit 0\nexit 1\n")
+            .unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut perms = std::fs::metadata(&claude).unwrap().permissions();
+            perms.set_mode(0o755);
+            std::fs::set_permissions(&claude, perms).unwrap();
+        }
+        with_env_vars(
+            &[
+                ("PATH", Some(bin.display().to_string())),
+                ("HOME", Some(dir.path().display().to_string())),
+            ],
+            || {
+                let err = run(DoctorArgs {
+                    id: "claude-code".into(),
+                });
+                assert!(err.is_err());
+            },
+        );
     }
 
     #[test]
