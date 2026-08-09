@@ -197,6 +197,8 @@ mod tests {
             &[
                 ("PATH", Some(bin.display().to_string())),
                 ("HOME", Some(dir.path().display().to_string())),
+                ("ANTHROPIC_API_KEY", None),
+                ("OPENAI_API_KEY", None),
             ],
             || {
                 let err = run(DoctorArgs {
@@ -214,6 +216,8 @@ mod tests {
             &[
                 ("PATH", Some(dir.path().display().to_string())),
                 ("HOME", Some(dir.path().display().to_string())),
+                ("ANTHROPIC_API_KEY", None),
+                ("OPENAI_API_KEY", None),
             ],
             || {
                 let err = run(DoctorArgs {
@@ -242,6 +246,8 @@ mod tests {
             &[
                 ("PATH", Some(bin.display().to_string())),
                 ("HOME", Some(dir.path().display().to_string())),
+                ("ANTHROPIC_API_KEY", None),
+                ("OPENAI_API_KEY", None),
             ],
             || {
                 let err = run(DoctorArgs {
