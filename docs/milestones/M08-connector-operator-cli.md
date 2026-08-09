@@ -105,14 +105,14 @@ cli/src/commands/connector/
 
 - [x] Docs no longer recommend host CLI bind-mount overrides; they point at `coppice connector …`
 - [x] `coppice connector list|enable|doctor|setup|install` implemented for all non-mock connectors
-- [ ] `coppice connector install cursor` works into managed `$HOME` (binary at `$HOME/.local/bin`)
-- [ ] `coppice connector install opencode` works into managed `$HOME` (binary at `$HOME/.opencode/bin`)
+- [x] `coppice connector install cursor` works into managed `$HOME` (binary at `$HOME/.local/bin`)
+- [x] `coppice connector install opencode` works into managed `$HOME` (binary at `$HOME/.opencode/bin`)
 - [x] `coppice` binary on PATH in the server image
 - [x] Compose: `connector_data` → `/home/coppice`, `HOME=/home/coppice`, PATH prepends `.local/bin` and `.opencode/bin`
-- [ ] `enable` updates Docker/`COPPICE_CONFIG` correctly
+- [x] `enable` updates Docker/`COPPICE_CONFIG` correctly
 - [x] `doctor` fails clearly when CLI or auth missing (unit-tested)
 - [ ] `doctor cursor` green after install + setup in Compose
-- [ ] `doctor opencode` green after install + setup in Compose
+- [x] `doctor opencode` green after install + setup in Compose
 - [ ] Models API works after setup (`GET .../models`) without host mounts
 - [x] Default `make compose-up` / CI smoke still mock-only
 - [x] No `compose-snippet` command
