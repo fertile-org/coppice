@@ -120,6 +120,42 @@ Tear down: `make compose-down`
 
 Always use Docker Compose via the Makefile — not standalone `docker run`.
 
+### Agent dev toolchain
+
+The default **server** image ships build/verification tools so Cursor (and other real connectors) can run Coppice checks from a ticket worktree inside the container. Vendor CLIs (`agent`, `claude`, …) are **not** baked in — install those via the managed `/home/coppice` volume per [M08](milestones/M08-connector-operator-cli.md).
+
+| Tool | Version / source |
+|------|------------------|
+| `cargo` / `rustc` | 1.88 (copied from `rust:1.88-bookworm` builder stage) |
+| `make` | Debian `bookworm-slim` |
+| `node` / `npm` | 22 (`node:22-bookworm` stage) |
+| `yarn` | 1.22.22 (corepack) |
+
+Compose prepends `/usr/local/cargo/bin` to `PATH` (see `deploy/docker-compose.yml`) so agent child processes inherit `cargo`/`rustc` alongside connector binaries under `$HOME/.local/bin`.
+
+From a Coppice worktree mounted or checked out inside the server container:
+
+```bash
+cargo --version && make --version && node --version && yarn --version
+make test-unit
+make web-test
+```
+
+**Image size** (measure after `docker compose -f deploy/docker-compose.yml build server` with `docker image inspect deploy-server --format '{{.Size}}'`; expected ranges from ticket sizing analysis):
+
+| Image | Size |
+|-------|------|
+| Baseline runtime (slim Debian + Coppice binaries only) | ~200–250 MB |
+| After dev toolchain (Rust + Node + build-essential) | ~800 MB–1.2 GB |
+
+Breakdown: +500–900 MB Rust std/toolchain, +100–150 MB Node, +150–250 MB build-essential/make. Build-time delta: +1–3 min for extra COPY/apt layers; the Rust release compile in the `builder` stage is unchanged.
+
+**Runtime caveats:**
+
+- First `make test-unit` in a worktree compiles the workspace (`target/` under the worktree volume bind-mount).
+- First run with `embedded-test-db` may download pg-embed binaries (requires outbound network; fails closed in air-gapped deploys).
+- After a full verification pass, run `make clean` in the worktree to reclaim disk (see [Disk usage / cleanup](#disk-usage--cleanup)).
+
 ### Host repos for agents
 
 The server bind-mounts host git checkouts at `/repos`:

@@ -6,8 +6,27 @@ COPY server ./server
 COPY cli ./cli
 RUN cargo build --release -p coppice-server -p coppice-cli
 
+FROM node:22-bookworm AS node
+RUN corepack enable && corepack prepare yarn@1.22.22 --activate
+
 FROM debian:bookworm-slim
-RUN apt-get update && apt-get install -y ca-certificates curl git gosu && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y \
+    ca-certificates curl git gosu make \
+    build-essential pkg-config \
+    && rm -rf /var/lib/apt/lists/*
+
+ENV RUSTUP_HOME=/usr/local/rustup CARGO_HOME=/usr/local/cargo
+ENV PATH="/usr/local/cargo/bin:${PATH}"
+COPY --from=builder /usr/local/rustup /usr/local/rustup
+COPY --from=builder /usr/local/cargo /usr/local/cargo
+
+COPY --from=node /usr/local/bin/node /usr/local/bin/node
+COPY --from=node /usr/local/lib/node_modules /usr/local/lib/node_modules
+RUN ln -sf ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
+ && ln -sf ../lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx \
+ && ln -sf ../lib/node_modules/corepack/dist/corepack.js /usr/local/bin/corepack \
+ && corepack enable && corepack prepare yarn@1.22.22 --activate
+
 COPY --from=builder /app/target/release/coppice-server /usr/local/bin/coppice-server
 COPY --from=builder /app/target/release/coppice /usr/local/bin/coppice
 COPY deploy/entrypoint.sh /entrypoint.sh

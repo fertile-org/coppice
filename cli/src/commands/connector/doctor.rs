@@ -1,3 +1,4 @@
+use std::path::PathBuf;
 use std::process::Command;
 
 use clap::Args;
@@ -81,11 +82,37 @@ pub fn run(args: DoctorArgs) -> anyhow::Result<()> {
         failed = true;
     }
 
+    warn_if_makefile_without_make();
+
     if failed {
         anyhow::bail!("doctor failed for {id}");
     }
     println!("doctor: ok");
     Ok(())
+}
+
+fn warn_if_makefile_without_make() {
+    if which::which("make").is_ok() {
+        return;
+    }
+    if repo_root_with_makefile().is_some() {
+        println!("build-tools: WARN (Makefile present but make missing)");
+    }
+}
+
+fn repo_root_with_makefile() -> Option<PathBuf> {
+    let start = std::env::current_dir().ok()?;
+    let mut dir = Some(start.as_path());
+    while let Some(current) = dir {
+        if current.join(".git").exists() {
+            if current.join("Makefile").is_file() {
+                return Some(current.to_path_buf());
+            }
+            return None;
+        }
+        dir = current.parent();
+    }
+    start.join("Makefile").is_file().then_some(start)
 }
 
 fn probe_proves_auth(id: ConnectorId) -> bool {
@@ -255,6 +282,30 @@ mod tests {
                 });
                 assert!(err.is_err());
             },
+        );
+    }
+
+    #[test]
+    fn doctor_warns_when_makefile_present_but_make_missing() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("Makefile"), "test:\n").unwrap();
+        with_env_vars(&[("PATH", Some("/usr/bin".into()))], || {
+            std::env::set_current_dir(dir.path()).unwrap();
+            assert!(repo_root_with_makefile().is_some());
+            assert!(which::which("make").is_err());
+        });
+    }
+
+    #[test]
+    fn repo_root_with_makefile_finds_git_root() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".git")).unwrap();
+        std::fs::write(dir.path().join("Makefile"), "test:\n").unwrap();
+        std::fs::create_dir_all(dir.path().join("server")).unwrap();
+        std::env::set_current_dir(dir.path().join("server")).unwrap();
+        assert_eq!(
+            repo_root_with_makefile().as_deref(),
+            Some(dir.path().as_path())
         );
     }
 }
