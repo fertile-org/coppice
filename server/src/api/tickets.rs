@@ -57,6 +57,10 @@ pub fn routes() -> Router<Arc<AppState>> {
             post(merge_ticket_branch),
         )
         .route(
+            "/api/tickets/{ticket_id}/rebase-branch",
+            post(rebase_ticket_branch),
+        )
+        .route(
             "/api/tickets/{ticket_id}/remove-worktree",
             post(remove_ticket_worktree),
         )
@@ -304,6 +308,21 @@ fn map_ticket_git_error_response(err: TicketGitError) -> TicketGitApiError {
             StatusCode::BAD_REQUEST,
             "Worktree has already been removed.".into(),
         ),
+        TicketGitError::WorktreeMissing => (
+            StatusCode::BAD_REQUEST,
+            "Ticket worktree does not exist — rebase requires an existing worktree.".into(),
+        ),
+        TicketGitError::RebaseConflict { paths, detail } => {
+            let paths_note = if paths.is_empty() {
+                String::new()
+            } else {
+                format!(" Conflicting paths: {}.", paths.join(", "))
+            };
+            (
+                StatusCode::BAD_REQUEST,
+                format!("Rebase conflict — aborted.{paths_note} {detail}"),
+            )
+        }
         TicketGitError::InvalidBranchName => (
             StatusCode::BAD_REQUEST,
             "Invalid base branch name.".into(),
@@ -695,6 +714,52 @@ async fn merge_ticket_branch(
         .map_err(|code| TicketGitApiError::Message(code, "Unable to record merge comment.".into()))?;
 
     Ok(Json(MergeBranchResponse { merge }))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RebaseBranchBody {
+    #[serde(default)]
+    base_branch: Option<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RebaseBranchResponse {
+    rebase: crate::services::ticket_git_service::RebaseBranchResult,
+}
+
+async fn rebase_ticket_branch(
+    State(state): State<Arc<AppState>>,
+    AuthUser { user, .. }: AuthUser,
+    Path(ticket_id): Path<Uuid>,
+    Json(body): Json<RebaseBranchBody>,
+) -> Result<Json<RebaseBranchResponse>, TicketGitApiError> {
+    let pool = pool_from_state(&state).map_err(|code| {
+        TicketGitApiError::Message(code, "Database unavailable.".into())
+    })?;
+    let base = body
+        .base_branch
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+    let rebase = ticket_git_service(&state, pool)
+        .rebase_ticket_branch(ticket_id, base)
+        .await
+        .map_err(map_ticket_git_error_response)?;
+
+    let short_sha = rebase.head_sha.get(..7).unwrap_or(&rebase.head_sha);
+    let comment_body = format!(
+        "**Rebase:** {} (`{short_sha}` onto `{}`)",
+        rebase.message, rebase.onto_ref
+    );
+    create_git_action_comment(pool, &state, ticket_id, user.id, &comment_body)
+        .await
+        .map_err(|code| {
+            TicketGitApiError::Message(code, "Unable to record rebase comment.".into())
+        })?;
+
+    Ok(Json(RebaseBranchResponse { rebase }))
 }
 
 async fn remove_ticket_worktree(

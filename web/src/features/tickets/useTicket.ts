@@ -88,6 +88,16 @@ export interface MergeBranchResponse {
   };
 }
 
+export interface RebaseBranchResponse {
+  rebase: {
+    baseBranch: string;
+    ontoRef: string;
+    ticketBranch: string;
+    headSha: string;
+    message: string;
+  };
+}
+
 async function fetchTicket(ticketId: string): Promise<Ticket> {
   const res = await apiFetch(`/api/tickets/${ticketId}`);
   return res.json() as Promise<Ticket>;
@@ -178,6 +188,20 @@ async function postMergeBranch(
     body: JSON.stringify({ baseBranch }),
   });
   return res.json() as Promise<MergeBranchResponse>;
+}
+
+async function postRebaseBranch(
+  ticketId: string,
+  baseBranch?: string,
+): Promise<RebaseBranchResponse> {
+  const res = await apiFetch(`/api/tickets/${ticketId}/rebase-branch`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(
+      baseBranch && baseBranch.trim() ? { baseBranch: baseBranch.trim() } : {},
+    ),
+  });
+  return res.json() as Promise<RebaseBranchResponse>;
 }
 
 async function postRemoveWorktree(ticketId: string): Promise<TicketGitInfo> {
@@ -323,6 +347,18 @@ export function useMergeTicketBranch(ticketId: string) {
 
   return useMutation({
     mutationFn: (baseBranch: string) => postMergeBranch(ticketId, baseBranch),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: gitInfoQueryKey(ticketId) });
+      void queryClient.invalidateQueries({ queryKey: commentsQueryKey(ticketId) });
+    },
+  });
+}
+
+export function useRebaseTicketBranch(ticketId: string) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (baseBranch?: string) => postRebaseBranch(ticketId, baseBranch),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: gitInfoQueryKey(ticketId) });
       void queryClient.invalidateQueries({ queryKey: commentsQueryKey(ticketId) });

@@ -44,6 +44,16 @@ pub struct MergeBranchResult {
 
 #[derive(Debug, Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct RebaseBranchResult {
+    pub base_branch: String,
+    pub onto_ref: String,
+    pub ticket_branch: String,
+    pub head_sha: String,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct PushBranchResult {
     pub ticket_branch: String,
     pub remote: String,
@@ -82,6 +92,13 @@ pub enum TicketGitError {
     TicketBranchMissing(String),
     #[error("worktree already removed")]
     WorktreeAlreadyRemoved,
+    #[error("ticket worktree does not exist")]
+    WorktreeMissing,
+    #[error("rebase conflict: {detail}")]
+    RebaseConflict {
+        paths: Vec<String>,
+        detail: String,
+    },
     #[error("invalid branch name")]
     InvalidBranchName,
     #[error("git push is disabled (set git.push_enabled = true)")]
@@ -441,6 +458,135 @@ impl<'a> TicketGitService<'a> {
         })
     }
 
+    /// Rebase the ticket branch onto `base_branch` (or the repo default) **in the
+    /// ticket worktree**. Does not auto-commit; dirty trees fail hard. Fetch is
+    /// best-effort and never blocks a local rebase.
+    pub async fn rebase_ticket_branch(
+        &self,
+        ticket_id: Uuid,
+        base_branch: Option<&str>,
+    ) -> Result<RebaseBranchResult, TicketGitError> {
+        let ctx = self.resolve_context(ticket_id).await?;
+        let base = base_branch
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .unwrap_or(ctx.default_branch.as_str());
+        validate_branch_name(base)?;
+
+        if !git_ref_exists(&ctx.git_dir, &ctx.ticket_branch).await? {
+            return Err(TicketGitError::TicketBranchMissing(ctx.ticket_branch));
+        }
+
+        if !worktree_exists(&ctx.worktree_dir) {
+            return Err(TicketGitError::WorktreeMissing);
+        }
+
+        if !git_status_clean(&ctx.worktree_dir).await? {
+            return Err(TicketGitError::Git(
+                "worktree has uncommitted changes — commit or stash before rebasing".into(),
+            ));
+        }
+
+        run_git(&ctx.worktree_dir, &["checkout", &ctx.ticket_branch]).await?;
+
+        let fetch_succeeded = self.soft_fetch_for_rebase(&ctx, base).await;
+        let onto_ref = resolve_rebase_onto(&ctx.worktree_dir, base, fetch_succeeded).await?;
+
+        let rebase_output =
+            run_git_capture(&ctx.worktree_dir, &["rebase", &onto_ref]).await;
+
+        match rebase_output {
+            Ok(_) => {
+                let head_sha = git_head_sha(&ctx.worktree_dir).await?;
+                let message = format!(
+                    "Rebased `{}` onto `{}`",
+                    ctx.ticket_branch, onto_ref
+                );
+                Ok(RebaseBranchResult {
+                    base_branch: base.to_string(),
+                    onto_ref,
+                    ticket_branch: ctx.ticket_branch,
+                    head_sha,
+                    message,
+                })
+            }
+            Err(detail) => {
+                let paths = unmerged_paths(&ctx.worktree_dir).await;
+                let paths = if paths.is_empty() {
+                    parse_conflict_paths_from_output(&detail)
+                } else {
+                    paths
+                };
+                let _ = run_git(&ctx.worktree_dir, &["rebase", "--abort"]).await;
+                let clean_after = git_status_clean(&ctx.worktree_dir).await.unwrap_or(false);
+                if !paths.is_empty() {
+                    let mut detail = detail;
+                    if !clean_after {
+                        detail.push_str(" (worktree may still be dirty after rebase --abort)");
+                    }
+                    return Err(TicketGitError::RebaseConflict { paths, detail });
+                }
+                Err(TicketGitError::Git(detail))
+            }
+        }
+    }
+
+    /// Best-effort fetch so rebase can prefer `origin/<base>`. Failures never
+    /// fail the rebase itself.
+    async fn soft_fetch_for_rebase(&self, ctx: &TicketGitContext, base: &str) -> bool {
+        if let Some(token) = self.decrypt_forge_token(ctx).await {
+            if let Some(remote_url) = ctx.remote_url.as_deref() {
+                if let Some(https) = https_remote_url(remote_url) {
+                    let auth_remote = format!(
+                        "https://x-access-token:{}@{}",
+                        token.trim(),
+                        https.trim_start_matches("https://")
+                    );
+                    let refspec =
+                        format!("+refs/heads/{base}:refs/remotes/origin/{base}");
+                    match run_git(
+                        &ctx.worktree_dir,
+                        &["fetch", &auth_remote, &refspec],
+                    )
+                    .await
+                    {
+                        Ok(()) => return true,
+                        Err(TicketGitError::Git(msg)) => {
+                            tracing::warn!(
+                                "authenticated fetch for rebase failed: {}",
+                                sanitize_token(&msg, token.trim())
+                            );
+                        }
+                        Err(err) => {
+                            tracing::warn!("authenticated fetch for rebase failed: {err}");
+                        }
+                    }
+                }
+            }
+        }
+
+        if !has_git_remote(&ctx.worktree_dir).await {
+            return false;
+        }
+
+        match run_git(&ctx.worktree_dir, &["fetch"]).await {
+            Ok(()) => true,
+            Err(err) => {
+                tracing::warn!("plain fetch for rebase failed: {err}");
+                false
+            }
+        }
+    }
+
+    async fn decrypt_forge_token(&self, ctx: &TicketGitContext) -> Option<String> {
+        let store = self.secret_store?;
+        let secret_id = ctx.forge_token_secret_id?;
+        SecretService::new(self.pool, store)
+            .decrypt_by_id(secret_id)
+            .await
+            .ok()
+    }
+
     pub async fn remove_worktree(&self, ticket_id: Uuid) -> Result<(), TicketGitError> {
         let ctx = self.resolve_context(ticket_id).await?;
         if !worktree_exists(&ctx.worktree_dir) {
@@ -594,6 +740,88 @@ async fn git_status_clean(git_dir: &Path) -> Result<bool, TicketGitError> {
     Ok(String::from_utf8_lossy(&output.stdout).trim().is_empty())
 }
 
+async fn resolve_rebase_onto(
+    worktree: &Path,
+    base: &str,
+    prefer_origin: bool,
+) -> Result<String, TicketGitError> {
+    let origin_ref = format!("origin/{base}");
+    if prefer_origin && git_ref_exists(worktree, &origin_ref).await? {
+        return Ok(origin_ref);
+    }
+    if git_ref_exists(worktree, base).await? {
+        return Ok(base.to_string());
+    }
+    if git_ref_exists(worktree, &origin_ref).await? {
+        return Ok(origin_ref);
+    }
+    Err(TicketGitError::Git(format!(
+        "base branch `{base}` was not found locally (and origin/{base} is unavailable)"
+    )))
+}
+
+async fn has_git_remote(git_dir: &Path) -> bool {
+    let Ok(output) = tokio::process::Command::new("git")
+        .current_dir(git_dir)
+        .args(["remote"])
+        .output()
+        .await
+    else {
+        return false;
+    };
+    output.status.success() && !String::from_utf8_lossy(&output.stdout).trim().is_empty()
+}
+
+async fn unmerged_paths(git_dir: &Path) -> Vec<String> {
+    let Ok(output) = tokio::process::Command::new("git")
+        .current_dir(git_dir)
+        .args(["diff", "--name-only", "--diff-filter=U"])
+        .output()
+        .await
+    else {
+        return Vec::new();
+    };
+    if !output.status.success() {
+        return Vec::new();
+    }
+    let mut paths: Vec<String> = String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(str::to_string)
+        .collect();
+    paths.sort_unstable();
+    paths.dedup();
+    paths
+}
+
+fn parse_conflict_paths_from_output(output: &str) -> Vec<String> {
+    let mut paths = Vec::new();
+    for line in output.lines() {
+        let trimmed = line.trim();
+        // e.g. "CONFLICT (content): Merge conflict in path/to/file"
+        if let Some(idx) = trimmed.find("Merge conflict in ") {
+            let path = trimmed[idx + "Merge conflict in ".len()..].trim();
+            if !path.is_empty() {
+                paths.push(path.to_string());
+            }
+            continue;
+        }
+        // e.g. "CONFLICT (add/add): Merge conflict in path"
+        if let Some(rest) = trimmed.strip_prefix("CONFLICT") {
+            if let Some(idx) = rest.find(" in ") {
+                let path = rest[idx + " in ".len()..].trim();
+                if !path.is_empty() && !path.contains(' ') {
+                    paths.push(path.to_string());
+                }
+            }
+        }
+    }
+    paths.sort_unstable();
+    paths.dedup();
+    paths
+}
+
 async fn git_head_sha(git_dir: &Path) -> Result<String, TicketGitError> {
     let output = tokio::process::Command::new("git")
         .current_dir(git_dir)
@@ -670,5 +898,19 @@ mod tests {
         assert!(!worktree_exists(tmp.path()));
         std::fs::write(tmp.path().join(".git"), "gitdir: /path").expect("write");
         assert!(worktree_exists(tmp.path()));
+    }
+
+    #[test]
+    fn parse_conflict_paths_from_rebase_output() {
+        let output = "\
+Rebasing (1/1)\n\
+Auto-merging README.md\n\
+CONFLICT (content): Merge conflict in README.md\n\
+error: could not apply abc123... feature\n\
+hint: Resolve all conflicts manually\n";
+        assert_eq!(
+            parse_conflict_paths_from_output(output),
+            vec!["README.md".to_string()]
+        );
     }
 }

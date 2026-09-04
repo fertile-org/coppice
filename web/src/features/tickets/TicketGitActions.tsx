@@ -15,12 +15,17 @@ import {
   useCreateTicketPr,
   useMergeTicketBranch,
   usePushTicketBranch,
+  useRebaseTicketBranch,
   useRemoveWorktree,
   useTicketGitInfo,
 } from './useTicket';
 
 interface TicketGitActionsProps {
   ticket: Ticket;
+}
+
+function isFinalReviewOrDone(status: string): boolean {
+  return status === 'wait_for_final_review' || status === 'done';
 }
 
 function MergeBranchDialog({
@@ -145,21 +150,148 @@ function MergeBranchDialog({
   );
 }
 
+function RebaseBranchDialog({
+  open,
+  onClose,
+  ticketId,
+  defaultBranch,
+  branches,
+  ticketBranch,
+}: {
+  open: boolean;
+  onClose: () => void;
+  ticketId: string;
+  defaultBranch: string;
+  branches: string[];
+  ticketBranch: string;
+}) {
+  const toast = useToast();
+  const rebaseBranch = useRebaseTicketBranch(ticketId);
+  const [baseBranch, setBaseBranch] = useState(defaultBranch);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (open) {
+      setBaseBranch(defaultBranch);
+      setError(null);
+    }
+  }, [open, defaultBranch]);
+
+  useEffect(() => {
+    if (!open) return;
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === 'Escape') onClose();
+    }
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [open, onClose]);
+
+  if (!open) return null;
+
+  async function handleSubmit(e: FormEvent) {
+    e.preventDefault();
+    if (!baseBranch) {
+      setError('Select a base branch.');
+      return;
+    }
+    setError(null);
+    try {
+      const result = await rebaseBranch.mutateAsync(baseBranch);
+      toast.success(
+        `${result.rebase.message} — if already pushed, force-with-lease push is not available yet`,
+      );
+      onClose();
+    } catch (err) {
+      const message = parseApiErrorMessage(
+        err,
+        'Rebase failed. Worktree must be clean; conflicts are aborted automatically.',
+      );
+      setError(message);
+      toast.error(apiErrorToastMessage(message));
+    }
+  }
+
+  const options = branches.length > 0 ? branches : [defaultBranch];
+
+  return (
+    <div
+      className="fixed inset-0 z-[60] flex items-center justify-center bg-bark-950/40 px-4"
+      role="presentation"
+      onClick={onClose}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="rebase-branch-title"
+        className="w-full max-w-md rounded-xl border border-border bg-paper-50 p-6 shadow-lg"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h2
+          id="rebase-branch-title"
+          className="font-display text-xl font-semibold text-bark-900"
+        >
+          Rebase ticket branch
+        </h2>
+        <p className="mt-1 font-body text-sm text-text-secondary">
+          Rebase <span className="font-mono text-xs">{ticketBranch}</span> onto a
+          base branch in the ticket worktree. The worktree must be clean.
+        </p>
+
+        <form onSubmit={(e) => void handleSubmit(e)} className="mt-5 space-y-4">
+          <div className="space-y-2">
+            <Label htmlFor="rebase-base-branch">Base branch</Label>
+            <Select value={baseBranch} onValueChange={setBaseBranch}>
+              <SelectTrigger id="rebase-base-branch">
+                <SelectValue placeholder="Select branch…" />
+              </SelectTrigger>
+              <SelectContent>
+                {options.map((branch) => (
+                  <SelectItem key={branch} value={branch} textValue={branch}>
+                    {branch}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          {error && (
+            <p
+              data-testid="rebase-inline-error"
+              className="whitespace-pre-wrap rounded-md border border-danger-muted bg-danger-muted/40 px-3 py-2 font-body text-sm text-danger"
+            >
+              {error}
+            </p>
+          )}
+
+          <div className="flex justify-end gap-2">
+            <Button type="button" variant="secondary" onClick={onClose}>
+              Cancel
+            </Button>
+            <Button type="submit" loading={rebaseBranch.isPending}>
+              {rebaseBranch.isPending ? 'Rebasing…' : 'Rebase'}
+            </Button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
 export function TicketGitActions({ ticket }: TicketGitActionsProps) {
   const toast = useToast();
-  const showActions =
-    ticket.status === 'wait_for_final_review' || ticket.status === 'done';
+  const showFinalActions = isFinalReviewOrDone(ticket.status);
   const { data: gitInfo, isLoading } = useTicketGitInfo(
     ticket.id,
-    showActions && Boolean(ticket.repoId),
+    Boolean(ticket.repoId),
   );
   const removeWorktree = useRemoveWorktree(ticket.id);
   const pushBranch = usePushTicketBranch(ticket.id);
   const createPr = useCreateTicketPr(ticket.id);
   const [mergeOpen, setMergeOpen] = useState(false);
+  const [rebaseOpen, setRebaseOpen] = useState(false);
   const [gitError, setGitError] = useState<string | null>(null);
 
-  if (!showActions || !ticket.repoId) {
+  if (!ticket.repoId) {
     return null;
   }
 
@@ -256,66 +388,85 @@ export function TicketGitActions({ ticket }: TicketGitActionsProps) {
         <Button
           type="button"
           variant="secondary"
-          disabled={busy || isLoading || !gitInfo?.canPush}
-          title={
-            gitInfo?.canPush
-              ? 'Push ticket branch to origin using the repo forge token'
-              : (gitInfo?.pushDisabledReason ?? 'Push unavailable')
-          }
-          onClick={() => void handlePush()}
-          className="w-full"
-        >
-          {pushBranch.isPending ? 'Pushing…' : 'Push branch'}
-        </Button>
-        <Button
-          type="button"
-          variant="secondary"
-          disabled={busy || isLoading || !gitInfo?.canCreatePr}
-          title={
-            gitInfo?.canCreatePr
-              ? 'Create a GitHub pull request via API'
-              : (gitInfo?.createPrDisabledReason ??
-                gitInfo?.prCreateUrl
-                  ? 'API create unavailable — use compare link if the branch is already pushed'
-                  : 'Create PR unavailable')
-          }
-          onClick={() => void handleCreatePr()}
-          className="w-full"
-        >
-          {createPr.isPending ? 'Creating…' : 'Create PR'}
-        </Button>
-        {gitInfo?.prCreateUrl && !gitInfo.canCreatePr && (
-          <Button
-            type="button"
-            variant="secondary"
-            disabled={busy || isLoading}
-            title="Open compare URL on the git host (branch must already be pushed)"
-            onClick={() => {
-              window.open(gitInfo.prCreateUrl!, '_blank', 'noopener,noreferrer');
-            }}
-            className="w-full"
-          >
-            Open compare URL
-          </Button>
-        )}
-        <Button
-          type="button"
-          variant="secondary"
-          disabled={busy || isLoading || !gitInfo}
-          onClick={() => setMergeOpen(true)}
-          className="w-full"
-        >
-          Merge…
-        </Button>
-        <Button
-          type="button"
-          variant="secondary"
           disabled={busy || isLoading || !gitInfo?.worktreeExists}
-          onClick={() => void handleRemoveWorktree()}
+          title={
+            gitInfo?.worktreeExists
+              ? 'Rebase the ticket branch onto a base in the worktree'
+              : 'Rebase requires an existing worktree'
+          }
+          onClick={() => setRebaseOpen(true)}
           className="w-full"
         >
-          {removeWorktree.isPending ? 'Removing…' : 'Remove worktree'}
+          Rebase…
         </Button>
+
+        {showFinalActions && (
+          <>
+            <Button
+              type="button"
+              variant="secondary"
+              disabled={busy || isLoading || !gitInfo?.canPush}
+              title={
+                gitInfo?.canPush
+                  ? 'Push ticket branch to origin using the repo forge token'
+                  : (gitInfo?.pushDisabledReason ?? 'Push unavailable')
+              }
+              onClick={() => void handlePush()}
+              className="w-full"
+            >
+              {pushBranch.isPending ? 'Pushing…' : 'Push branch'}
+            </Button>
+            <Button
+              type="button"
+              variant="secondary"
+              disabled={busy || isLoading || !gitInfo?.canCreatePr}
+              title={
+                gitInfo?.canCreatePr
+                  ? 'Create a GitHub pull request via API'
+                  : (gitInfo?.createPrDisabledReason ??
+                    gitInfo?.prCreateUrl
+                      ? 'API create unavailable — use compare link if the branch is already pushed'
+                      : 'Create PR unavailable')
+              }
+              onClick={() => void handleCreatePr()}
+              className="w-full"
+            >
+              {createPr.isPending ? 'Creating…' : 'Create PR'}
+            </Button>
+            {gitInfo?.prCreateUrl && !gitInfo.canCreatePr && (
+              <Button
+                type="button"
+                variant="secondary"
+                disabled={busy || isLoading}
+                title="Open compare URL on the git host (branch must already be pushed)"
+                onClick={() => {
+                  window.open(gitInfo.prCreateUrl!, '_blank', 'noopener,noreferrer');
+                }}
+                className="w-full"
+              >
+                Open compare URL
+              </Button>
+            )}
+            <Button
+              type="button"
+              variant="secondary"
+              disabled={busy || isLoading || !gitInfo}
+              onClick={() => setMergeOpen(true)}
+              className="w-full"
+            >
+              Merge…
+            </Button>
+            <Button
+              type="button"
+              variant="secondary"
+              disabled={busy || isLoading || !gitInfo?.worktreeExists}
+              onClick={() => void handleRemoveWorktree()}
+              className="w-full"
+            >
+              {removeWorktree.isPending ? 'Removing…' : 'Remove worktree'}
+            </Button>
+          </>
+        )}
       </div>
 
       {gitError && (
@@ -325,14 +476,26 @@ export function TicketGitActions({ ticket }: TicketGitActionsProps) {
       )}
 
       {gitInfo && (
-        <MergeBranchDialog
-          open={mergeOpen}
-          onClose={() => setMergeOpen(false)}
-          ticketId={ticket.id}
-          defaultBranch={gitInfo.defaultBranch}
-          branches={gitInfo.branches}
-          ticketBranch={gitInfo.ticketBranch}
-        />
+        <>
+          <RebaseBranchDialog
+            open={rebaseOpen}
+            onClose={() => setRebaseOpen(false)}
+            ticketId={ticket.id}
+            defaultBranch={gitInfo.defaultBranch}
+            branches={gitInfo.branches}
+            ticketBranch={gitInfo.ticketBranch}
+          />
+          {showFinalActions && (
+            <MergeBranchDialog
+              open={mergeOpen}
+              onClose={() => setMergeOpen(false)}
+              ticketId={ticket.id}
+              defaultBranch={gitInfo.defaultBranch}
+              branches={gitInfo.branches}
+              ticketBranch={gitInfo.ticketBranch}
+            />
+          )}
+        </>
       )}
     </div>
   );
