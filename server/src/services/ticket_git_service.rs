@@ -5,6 +5,10 @@ use sqlx::Row;
 use uuid::Uuid;
 
 use crate::crypto::SecretStore;
+use crate::services::git_ops::{
+    auth_https_remote, git_head_sha, git_ref_exists, git_status_clean, list_local_branches,
+    push_argv, push_gate, push_refspec, run_git, run_git_capture, sanitize_token, GitOpsError,
+};
 use crate::services::pr_create_url::{
     build_pr_create_url, github_owner_repo, https_remote_url,
 };
@@ -106,6 +110,15 @@ pub enum TicketGitError {
     Database(#[from] sqlx::Error),
     #[error(transparent)]
     Secret(#[from] crate::services::secret_service::SecretError),
+}
+
+impl From<GitOpsError> for TicketGitError {
+    fn from(err: GitOpsError) -> Self {
+        match err {
+            GitOpsError::Git(msg) => TicketGitError::Git(msg),
+            GitOpsError::Io(err) => TicketGitError::Io(err),
+        }
+    }
 }
 
 pub struct TicketGitService<'a> {
@@ -263,11 +276,7 @@ impl<'a> TicketGitService<'a> {
             .await;
         }
 
-        let auth_remote = format!(
-            "https://x-access-token:{}@{}",
-            token.trim(),
-            https.trim_start_matches("https://")
-        );
+        let auth_remote = auth_https_remote(remote_url, token.trim())?;
 
         let cwd = if worktree_exists(&ctx.worktree_dir) {
             ctx.worktree_dir.as_path()
@@ -275,13 +284,14 @@ impl<'a> TicketGitService<'a> {
             ctx.git_dir.as_path()
         };
 
-        let refspec = format!("refs/heads/{0}:refs/heads/{0}", ctx.ticket_branch);
-        match run_git(cwd, &["push", "-u", &auth_remote, &refspec]).await {
+        let refspec = push_refspec(&ctx.ticket_branch);
+        let args = push_argv(&auth_remote, &refspec);
+        match run_git(cwd, &args).await {
             Ok(()) => {}
-            Err(TicketGitError::Git(msg)) => {
+            Err(GitOpsError::Git(msg)) => {
                 return Err(TicketGitError::Git(sanitize_token(&msg, token.trim())));
             }
-            Err(other) => return Err(other),
+            Err(other) => return Err(other.into()),
         }
 
         Ok(PushBranchResult {
@@ -459,32 +469,6 @@ impl<'a> TicketGitService<'a> {
     }
 }
 
-fn push_gate(
-    push_enabled: bool,
-    remote_url: Option<&str>,
-    forge_token_configured: bool,
-) -> (bool, Option<String>) {
-    if !push_enabled {
-        return (
-            false,
-            Some("git.push_enabled is false in server config".into()),
-        );
-    }
-    if remote_url.map(str::trim).filter(|s| !s.is_empty()).is_none() {
-        return (
-            false,
-            Some("Set repository remote URL in Settings → Repositories".into()),
-        );
-    }
-    if !forge_token_configured {
-        return (
-            false,
-            Some("Set a forge token in Settings → Repositories".into()),
-        );
-    }
-    (true, None)
-}
-
 fn create_pr_gate(
     push_enabled: bool,
     remote_url: Option<&str>,
@@ -501,13 +485,6 @@ fn create_pr_gate(
         );
     }
     (true, None)
-}
-
-fn sanitize_token(message: &str, token: &str) -> String {
-    if token.is_empty() {
-        return message.to_string();
-    }
-    message.replace(token, "***")
 }
 
 fn truncate_err(text: &str) -> String {
@@ -549,107 +526,6 @@ fn path_to_string(path: &Path) -> Result<String, TicketGitError> {
             std::io::ErrorKind::InvalidInput,
             format!("path is not valid UTF-8: {}", path.display()),
         )))
-}
-
-pub(crate) async fn list_local_branches(git_dir: &Path) -> Result<Vec<String>, TicketGitError> {
-    let output = tokio::process::Command::new("git")
-        .current_dir(git_dir)
-        .args(["branch", "--format=%(refname:short)"])
-        .output()
-        .await?;
-
-    if !output.status.success() {
-        return Err(TicketGitError::Git(git_stderr(&output)));
-    }
-
-    let mut branches: Vec<String> = String::from_utf8_lossy(&output.stdout)
-        .lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty())
-        .map(str::to_string)
-        .collect();
-    branches.sort_unstable();
-    branches.dedup();
-    Ok(branches)
-}
-
-async fn git_ref_exists(git_dir: &Path, ref_name: &str) -> Result<bool, TicketGitError> {
-    let output = tokio::process::Command::new("git")
-        .current_dir(git_dir)
-        .args(["rev-parse", "--verify", ref_name])
-        .output()
-        .await?;
-    Ok(output.status.success())
-}
-
-async fn git_status_clean(git_dir: &Path) -> Result<bool, TicketGitError> {
-    let output = tokio::process::Command::new("git")
-        .current_dir(git_dir)
-        .args(["status", "--porcelain"])
-        .output()
-        .await?;
-    if !output.status.success() {
-        return Err(TicketGitError::Git(git_stderr(&output)));
-    }
-    Ok(String::from_utf8_lossy(&output.stdout).trim().is_empty())
-}
-
-async fn git_head_sha(git_dir: &Path) -> Result<String, TicketGitError> {
-    let output = tokio::process::Command::new("git")
-        .current_dir(git_dir)
-        .args(["rev-parse", "HEAD"])
-        .output()
-        .await?;
-    if !output.status.success() {
-        return Err(TicketGitError::Git(git_stderr(&output)));
-    }
-    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
-}
-
-async fn run_git(git_dir: &Path, args: &[&str]) -> Result<(), TicketGitError> {
-    let output = tokio::process::Command::new("git")
-        .current_dir(git_dir)
-        .args(args)
-        .output()
-        .await?;
-    if output.status.success() {
-        Ok(())
-    } else {
-        Err(TicketGitError::Git(format!(
-            "git {} failed: {}",
-            args.join(" "),
-            git_stderr(&output)
-        )))
-    }
-}
-
-async fn run_git_capture(git_dir: &Path, args: &[&str]) -> Result<String, String> {
-    let output = tokio::process::Command::new("git")
-        .current_dir(git_dir)
-        .args(args)
-        .output()
-        .await
-        .map_err(|err| err.to_string())?;
-    if output.status.success() {
-        Ok(combine_git_output(&output))
-    } else {
-        Err(combine_git_output(&output))
-    }
-}
-
-fn git_stderr(output: &std::process::Output) -> String {
-    combine_git_output(output)
-}
-
-fn combine_git_output(output: &std::process::Output) -> String {
-    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    match (stderr.is_empty(), stdout.is_empty()) {
-        (false, false) => format!("{stdout}\n{stderr}"),
-        (false, true) => stderr,
-        (true, false) => stdout,
-        (true, true) => format!("exit code {}", output.status),
-    }
 }
 
 #[cfg(test)]

@@ -7,8 +7,9 @@ use crate::domain::comment::{AuthorType, CommentIntent};
 use crate::domain::slug::slugify;
 use crate::domain::substatus::TicketStatus;
 use crate::services::comment_service::CommentService;
+use crate::services::git_ops::list_local_branches;
 use crate::services::repo_service::{RepoError, RepoService};
-use crate::services::ticket_git_service::{list_local_branches, validate_branch_name};
+use crate::services::ticket_git_service::validate_branch_name;
 use crate::services::ticket_service::TicketService;
 
 #[derive(Debug, thiserror::Error)]
