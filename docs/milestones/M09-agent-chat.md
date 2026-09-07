@@ -184,6 +184,8 @@ Live tokens: reuse `GET /ws/agent-runs/:runId/live` for the turn run.
 
 ## Related docs
 
+- [Design gate](../superpowers/specs/2026-09-08-m09-agent-chat-design.md)
+- [Implementation plan](../superpowers/plans/2026-09-08-m09-agent-chat.md)
 - [M06 — Knowledge & learning](./M06-knowledge-and-learning.md)
 - [M07 — Trust & signals](./M07-trust-and-signals.md)
 - [M08 — Connector operator CLI](./M08-connector-operator-cli.md)
