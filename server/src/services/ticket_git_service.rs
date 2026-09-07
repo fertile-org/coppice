@@ -6,8 +6,9 @@ use uuid::Uuid;
 
 use crate::crypto::SecretStore;
 use crate::services::git_ops::{
-    auth_https_remote, git_head_sha, git_ref_exists, git_status_clean, list_local_branches,
-    push_argv, push_gate, push_refspec, run_git, run_git_capture, sanitize_token, GitOpsError,
+    auth_https_remote, fetch_default_refspec, git_head_sha, git_ref_exists, git_status_clean,
+    list_local_branches, push_argv, push_gate, push_refspec, run_git, run_git_capture,
+    sanitize_token, GitOpsError,
 };
 use crate::services::pr_create_url::{
     build_pr_create_url, github_owner_repo, https_remote_url,
@@ -546,14 +547,8 @@ impl<'a> TicketGitService<'a> {
     async fn soft_fetch_for_rebase(&self, ctx: &TicketGitContext, base: &str) -> bool {
         if let Some(token) = self.decrypt_forge_token(ctx).await {
             if let Some(remote_url) = ctx.remote_url.as_deref() {
-                if let Some(https) = https_remote_url(remote_url) {
-                    let auth_remote = format!(
-                        "https://x-access-token:{}@{}",
-                        token.trim(),
-                        https.trim_start_matches("https://")
-                    );
-                    let refspec =
-                        format!("+refs/heads/{base}:refs/remotes/origin/{base}");
+                if let Ok(auth_remote) = auth_https_remote(remote_url, token.trim()) {
+                    let refspec = fetch_default_refspec(base);
                     match run_git(
                         &ctx.worktree_dir,
                         &["fetch", &auth_remote, &refspec],
@@ -561,7 +556,7 @@ impl<'a> TicketGitService<'a> {
                     .await
                     {
                         Ok(()) => return true,
-                        Err(TicketGitError::Git(msg)) => {
+                        Err(GitOpsError::Git(msg)) => {
                             tracing::warn!(
                                 "authenticated fetch for rebase failed: {}",
                                 sanitize_token(&msg, token.trim())
@@ -674,50 +669,6 @@ fn path_to_string(path: &Path) -> Result<String, TicketGitError> {
         )))
 }
 
-<<<<<<< HEAD
-pub(crate) async fn list_local_branches(git_dir: &Path) -> Result<Vec<String>, TicketGitError> {
-    let output = tokio::process::Command::new("git")
-        .current_dir(git_dir)
-        .args(["branch", "--format=%(refname:short)"])
-        .output()
-        .await?;
-
-    if !output.status.success() {
-        return Err(TicketGitError::Git(git_stderr(&output)));
-    }
-
-    let mut branches: Vec<String> = String::from_utf8_lossy(&output.stdout)
-        .lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty())
-        .map(str::to_string)
-        .collect();
-    branches.sort_unstable();
-    branches.dedup();
-    Ok(branches)
-}
-
-async fn git_ref_exists(git_dir: &Path, ref_name: &str) -> Result<bool, TicketGitError> {
-    let output = tokio::process::Command::new("git")
-        .current_dir(git_dir)
-        .args(["rev-parse", "--verify", ref_name])
-        .output()
-        .await?;
-    Ok(output.status.success())
-}
-
-async fn git_status_clean(git_dir: &Path) -> Result<bool, TicketGitError> {
-    let output = tokio::process::Command::new("git")
-        .current_dir(git_dir)
-        .args(["status", "--porcelain"])
-        .output()
-        .await?;
-    if !output.status.success() {
-        return Err(TicketGitError::Git(git_stderr(&output)));
-    }
-    Ok(String::from_utf8_lossy(&output.stdout).trim().is_empty())
-}
-
 async fn resolve_rebase_onto(
     worktree: &Path,
     base: &str,
@@ -800,66 +751,6 @@ fn parse_conflict_paths_from_output(output: &str) -> Vec<String> {
     paths
 }
 
-async fn git_head_sha(git_dir: &Path) -> Result<String, TicketGitError> {
-    let output = tokio::process::Command::new("git")
-        .current_dir(git_dir)
-        .args(["rev-parse", "HEAD"])
-        .output()
-        .await?;
-    if !output.status.success() {
-        return Err(TicketGitError::Git(git_stderr(&output)));
-    }
-    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
-}
-
-async fn run_git(git_dir: &Path, args: &[&str]) -> Result<(), TicketGitError> {
-    let output = tokio::process::Command::new("git")
-        .current_dir(git_dir)
-        .args(args)
-        .output()
-        .await?;
-    if output.status.success() {
-        Ok(())
-    } else {
-        Err(TicketGitError::Git(format!(
-            "git {} failed: {}",
-            args.join(" "),
-            git_stderr(&output)
-        )))
-    }
-}
-
-async fn run_git_capture(git_dir: &Path, args: &[&str]) -> Result<String, String> {
-    let output = tokio::process::Command::new("git")
-        .current_dir(git_dir)
-        .args(args)
-        .output()
-        .await
-        .map_err(|err| err.to_string())?;
-    if output.status.success() {
-        Ok(combine_git_output(&output))
-    } else {
-        Err(combine_git_output(&output))
-    }
-}
-
-fn git_stderr(output: &std::process::Output) -> String {
-    combine_git_output(output)
-}
-
-fn combine_git_output(output: &std::process::Output) -> String {
-    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    match (stderr.is_empty(), stdout.is_empty()) {
-        (false, false) => format!("{stdout}\n{stderr}"),
-        (false, true) => stderr,
-        (true, false) => stdout,
-        (true, true) => format!("exit code {}", output.status),
-    }
-}
-
-=======
->>>>>>> agent/TICKET-d4e76ac5
 #[cfg(test)]
 mod tests {
     use super::*;
