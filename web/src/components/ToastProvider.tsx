@@ -7,6 +7,7 @@ import {
   useState,
   type ReactNode,
 } from 'react';
+import { X } from 'lucide-react';
 import { cn } from '../lib/utils';
 
 type ToastVariant = 'success' | 'error';
@@ -68,7 +69,7 @@ function ToastMessage({
     return () => window.clearTimeout(timer);
   }, [onDismiss, toast.id, toast.persistent]);
 
-  function handleClick() {
+  function handleAction() {
     toast.onClick?.();
     onDismiss(toast.id);
   }
@@ -77,29 +78,47 @@ function ToastMessage({
 
   return (
     <div
-      role={isClickable ? 'button' : 'status'}
-      tabIndex={isClickable ? 0 : undefined}
-      onClick={isClickable ? handleClick : undefined}
-      onKeyDown={
-        isClickable
-          ? (e) => {
-              if (e.key === 'Enter' || e.key === ' ') {
-                e.preventDefault();
-                handleClick();
-              }
-            }
-          : undefined
-      }
+      role="status"
       className={cn(
-        'pointer-events-auto animate-fade-in rounded-md border px-4 py-3 font-body text-sm shadow-md',
+        'pointer-events-auto relative overflow-hidden rounded-md border font-body text-sm shadow-md animate-fade-in',
         toast.variant === 'success' &&
           'border-success-muted bg-success-muted text-success',
         toast.variant === 'error' &&
           'border-danger-muted bg-danger-muted text-danger',
-        isClickable && 'cursor-pointer hover:opacity-90',
       )}
     >
-      {toast.message}
+      <div className="flex items-start gap-2 px-4 py-3">
+        {isClickable ? (
+          <button
+            type="button"
+            onClick={handleAction}
+            className="min-w-0 flex-1 cursor-pointer text-left hover:opacity-90"
+          >
+            {toast.message}
+          </button>
+        ) : (
+          <p className="min-w-0 flex-1">{toast.message}</p>
+        )}
+        <button
+          type="button"
+          aria-label="Dismiss"
+          onClick={(e) => {
+            e.stopPropagation();
+            onDismiss(toast.id);
+          }}
+          className="shrink-0 rounded-md border border-border p-1 text-text-secondary transition-colors duration-fast hover:text-text-primary"
+        >
+          <X className="size-3.5" aria-hidden="true" />
+        </button>
+      </div>
+      {!toast.persistent && (
+        <div
+          data-testid="toast-progress"
+          aria-hidden="true"
+          className="absolute bottom-0 left-0 h-0.5 w-full bg-current opacity-40 animate-toast-progress"
+          style={{ animationDuration: `${TOAST_DURATION_MS}ms` }}
+        />
+      )}
     </div>
   );
 }
