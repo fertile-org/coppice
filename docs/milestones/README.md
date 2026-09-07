@@ -38,6 +38,7 @@ See the [milestone strategy](../superpowers/specs/2026-06-07-coppice-milestone-s
 | M06 | [M06-knowledge-and-learning.md](./M06-knowledge-and-learning.md) | pgvector, retrieval, learning inbox |
 | M07 | [M07-trust-and-signals.md](./M07-trust-and-signals.md) | Sandbox, secrets, signals, git/PR |
 | M08 | [M08-connector-operator-cli.md](./M08-connector-operator-cli.md) | Managed HOME volume + `coppice connector` install/setup/doctor |
+| M09 | [M09-agent-chat.md](./M09-agent-chat.md) | Human↔agent chat sessions, conversation profile, cwd + write-denial |
 
 ## Philosophy references
 
