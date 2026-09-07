@@ -5,11 +5,15 @@ use crate::middleware::admin::AdminUser;
 use crate::services::code_review_service::{
     BranchesResponse, CodeReviewService, DiffSummary, FilePatch,
 };
+use crate::services::repo_git_service::{
+    DefaultBranchSyncStatus, PushDefaultBranchResult, RepoGitError, RepoGitService,
+};
 use crate::services::repo_service::{RepoError, RepoService};
 use crate::AppState;
 use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
+    response::{IntoResponse, Response},
     routing::{get, post},
     Json, Router,
 };
@@ -29,6 +33,15 @@ pub fn routes() -> Router<Arc<AppState>> {
         .route(
             "/api/repos/{repo_id}/forge-token",
             post(set_forge_token).delete(clear_forge_token),
+        )
+        .route(
+            "/api/repos/{repo_id}/default-branch-sync",
+            get(default_branch_sync),
+        )
+        .route("/api/repos/{repo_id}/fetch", post(fetch_default_branch))
+        .route(
+            "/api/repos/{repo_id}/push-default-branch",
+            post(push_default_branch),
         )
         .route("/api/repos/{repo_id}/worktrees", get(list_repo_worktrees))
         .route("/api/repos/{repo_id}/branches", get(list_repo_branches))
@@ -251,6 +264,108 @@ async fn clear_forge_token(
             .await;
     }
     Ok(Json(repo_to_response(repo)))
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ApiMessageResponse {
+    message: String,
+}
+
+enum RepoGitApiError {
+    Message(StatusCode, String),
+}
+
+impl IntoResponse for RepoGitApiError {
+    fn into_response(self) -> Response {
+        match self {
+            RepoGitApiError::Message(code, message) => {
+                (code, Json(ApiMessageResponse { message })).into_response()
+            }
+        }
+    }
+}
+
+fn map_repo_git_error(err: RepoGitError) -> RepoGitApiError {
+    let (status, message) = match err {
+        RepoGitError::RepoNotFound => (StatusCode::NOT_FOUND, "Repository not found.".into()),
+        RepoGitError::RepoNotReady => (
+            StatusCode::BAD_REQUEST,
+            "Repository is not ready. Verify the path in Settings → Repositories.".into(),
+        ),
+        RepoGitError::PushDisabled => (
+            StatusCode::FORBIDDEN,
+            "Git push is disabled. Set git.push_enabled = true in server config.".into(),
+        ),
+        RepoGitError::NoRemoteUrl => (
+            StatusCode::BAD_REQUEST,
+            "Repository has no remote_url. Set one in Settings → Repositories.".into(),
+        ),
+        RepoGitError::NoForgeToken => (
+            StatusCode::BAD_REQUEST,
+            "Repository has no forge token. Set one in Settings → Repositories.".into(),
+        ),
+        RepoGitError::Git(msg) => (StatusCode::BAD_REQUEST, msg),
+        RepoGitError::Io(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+        RepoGitError::Database(_) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "An internal error occurred.".into(),
+        ),
+        RepoGitError::Secret(_) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Unable to decrypt forge token.".into(),
+        ),
+    };
+    RepoGitApiError::Message(status, message)
+}
+
+fn repo_git_service<'a>(state: &'a AppState, pool: &'a sqlx::PgPool) -> RepoGitService<'a> {
+    RepoGitService::new(pool, state.config.git.push_enabled, &state.secret_store)
+}
+
+async fn default_branch_sync(
+    State(state): State<Arc<AppState>>,
+    AdminUser(_): AdminUser,
+    Path(repo_id): Path<Uuid>,
+) -> Result<Json<DefaultBranchSyncStatus>, RepoGitApiError> {
+    let pool = pool_from_state(&state).map_err(|code| {
+        RepoGitApiError::Message(code, "Database unavailable.".into())
+    })?;
+    let status = repo_git_service(&state, pool)
+        .default_branch_sync_status(repo_id)
+        .await
+        .map_err(map_repo_git_error)?;
+    Ok(Json(status))
+}
+
+async fn fetch_default_branch(
+    State(state): State<Arc<AppState>>,
+    AdminUser(_): AdminUser,
+    Path(repo_id): Path<Uuid>,
+) -> Result<Json<DefaultBranchSyncStatus>, RepoGitApiError> {
+    let pool = pool_from_state(&state).map_err(|code| {
+        RepoGitApiError::Message(code, "Database unavailable.".into())
+    })?;
+    let status = repo_git_service(&state, pool)
+        .fetch_default_branch(repo_id)
+        .await
+        .map_err(map_repo_git_error)?;
+    Ok(Json(status))
+}
+
+async fn push_default_branch(
+    State(state): State<Arc<AppState>>,
+    AdminUser(_): AdminUser,
+    Path(repo_id): Path<Uuid>,
+) -> Result<Json<PushDefaultBranchResult>, RepoGitApiError> {
+    let pool = pool_from_state(&state).map_err(|code| {
+        RepoGitApiError::Message(code, "Database unavailable.".into())
+    })?;
+    let result = repo_git_service(&state, pool)
+        .push_default_branch(repo_id)
+        .await
+        .map_err(map_repo_git_error)?;
+    Ok(Json(result))
 }
 
 async fn list_repo_worktrees(

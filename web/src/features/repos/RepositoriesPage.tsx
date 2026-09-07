@@ -8,6 +8,7 @@ import {
   type VerificationStatus,
 } from '../../lib/schemas/repo';
 import { useSession } from '../auth/useSession';
+import { DefaultBranchSyncControls } from './DefaultBranchSyncControls';
 import {
   useClearForgeToken,
   useCreateRepo,
@@ -627,6 +628,9 @@ export function RepositoriesPage() {
                                 repo={repo}
                                 onEdit={(r) => setEditing(r)}
                               />
+                            )}
+                            {isAdmin && (
+                              <DefaultBranchSyncControls repo={repo} />
                             )}
                           </div>
                         </td>
