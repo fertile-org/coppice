@@ -9,6 +9,7 @@ import {
 } from '../../lib/schemas/repo';
 import { useSession } from '../auth/useSession';
 import { DefaultBranchSyncControls } from './DefaultBranchSyncControls';
+import { RepoDrawer } from './RepoDrawer';
 import {
   useClearForgeToken,
   useCreateRepo,
@@ -25,6 +26,11 @@ const STATUS_LABELS: Record<VerificationStatus, string> = {
   not_git_repo: 'Not a git repo',
   error: 'Error',
 };
+
+type DrawerState =
+  | { type: 'closed' }
+  | { type: 'create' }
+  | { type: 'edit'; repoId: string };
 
 function statusPillClass(status: VerificationStatus): string {
   const base =
@@ -52,57 +58,20 @@ function formatDate(iso: string | null): string {
   });
 }
 
-interface RepoFormProps {
-  editing: Repo | null;
-  onCancelEdit: () => void;
+interface CreateRepoFormProps {
+  onCreated: () => void;
 }
 
-function RepoForm({ editing, onCancelEdit }: RepoFormProps) {
-  const [name, setName] = useState(editing?.name ?? '');
-  const [localPath, setLocalPath] = useState(editing?.localPath ?? '');
-  const [remoteUrl, setRemoteUrl] = useState(editing?.remoteUrl ?? '');
-  const [defaultBranch, setDefaultBranch] = useState(
-    editing?.defaultBranch ?? 'main',
-  );
+function CreateRepoForm({ onCreated }: CreateRepoFormProps) {
+  const [name, setName] = useState('');
+  const [localPath, setLocalPath] = useState('');
+  const [remoteUrl, setRemoteUrl] = useState('');
+  const [defaultBranch, setDefaultBranch] = useState('main');
   const [error, setError] = useState<string | null>(null);
-
   const createRepo = useCreateRepo();
-  const updateRepo = useUpdateRepo();
-
-  const isPending = createRepo.isPending || updateRepo.isPending;
-  const isEditing = editing !== null;
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
-
-    if (isEditing) {
-      const parsed = updateRepoSchema.safeParse({
-        name,
-        localPath,
-        remoteUrl: remoteUrl.trim() === '' ? null : remoteUrl.trim(),
-        defaultBranch,
-      });
-      if (!parsed.success) {
-        setError(parsed.error.issues[0]?.message ?? 'Invalid input.');
-        return;
-      }
-
-      setError(null);
-      try {
-        await updateRepo.mutateAsync({ id: editing.id, ...parsed.data });
-        onCancelEdit();
-      } catch (err) {
-        if (err instanceof ApiError && err.status === 409) {
-          setError('A repository with that path already exists.');
-        } else if (err instanceof ApiError && err.status === 403) {
-          setError('You do not have permission to update repositories.');
-        } else {
-          setError('Unable to update repository. Please try again.');
-        }
-      }
-      return;
-    }
-
     const parsed = createRepoSchema.safeParse({
       name,
       localPath,
@@ -121,6 +90,7 @@ function RepoForm({ editing, onCancelEdit }: RepoFormProps) {
       setLocalPath('');
       setRemoteUrl('');
       setDefaultBranch('main');
+      onCreated();
     } catch (err) {
       if (err instanceof ApiError && err.status === 409) {
         setError('A repository with that path already exists.');
@@ -133,162 +103,222 @@ function RepoForm({ editing, onCancelEdit }: RepoFormProps) {
   }
 
   return (
-    <form
-      onSubmit={(e) => void handleSubmit(e)}
-      className="rounded-xl border border-border bg-surface-raised p-5 shadow-card"
-    >
-      <h2 className="font-display text-lg font-semibold text-bark-900">
-        {isEditing ? 'Edit repository' : 'Add repository'}
-      </h2>
-      <p className="mt-1 font-body text-sm text-text-secondary">
-        {isEditing
-          ? 'Update the registered checkout path and metadata.'
-          : 'Register a local git checkout on the server.'}
-      </p>
-
-      <div className="mt-4 space-y-3">
-        <div>
-          <label
-            htmlFor="repo-name"
-            className="mb-1 block font-body text-sm font-medium text-bark-800"
-          >
-            Name
-          </label>
-          <input
-            id="repo-name"
-            type="text"
-            required
-            autoComplete="off"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            className="field-control w-full px-3 py-2 font-body text-sm"
-          />
-        </div>
-
-        <div>
-          <label
-            htmlFor="repo-local-path"
-            className="mb-1 block font-body text-sm font-medium text-bark-800"
-          >
-            Local path
-          </label>
-          <input
-            id="repo-local-path"
-            type="text"
-            required
-            autoComplete="off"
-            placeholder="/repos/my-app"
-            value={localPath}
-            onChange={(e) => setLocalPath(e.target.value)}
-            className="field-control w-full px-3 py-2 font-mono text-sm"
-          />
-        </div>
-
-        <div>
-          <label
-            htmlFor="repo-remote-url"
-            className="mb-1 block font-body text-sm font-medium text-bark-800"
-          >
-            Remote URL{' '}
-            <span className="font-normal text-text-muted">(optional)</span>
-          </label>
-          <input
-            id="repo-remote-url"
-            type="url"
-            autoComplete="off"
-            placeholder="https://github.com/org/repo.git"
-            value={remoteUrl}
-            onChange={(e) => setRemoteUrl(e.target.value)}
-            className="field-control w-full px-3 py-2 font-mono text-sm"
-          />
-        </div>
-
-        <div>
-          <label
-            htmlFor="repo-default-branch"
-            className="mb-1 block font-body text-sm font-medium text-bark-800"
-          >
-            Default branch
-          </label>
-          <input
-            id="repo-default-branch"
-            type="text"
-            required
-            autoComplete="off"
-            value={defaultBranch}
-            onChange={(e) => setDefaultBranch(e.target.value)}
-            className="field-control w-full px-3 py-2 font-body text-sm"
-          />
-        </div>
-      </div>
-
+    <form onSubmit={(e) => void handleSubmit(e)} className="space-y-4">
+      <RepoFields
+        name={name}
+        localPath={localPath}
+        remoteUrl={remoteUrl}
+        defaultBranch={defaultBranch}
+        onNameChange={setName}
+        onLocalPathChange={setLocalPath}
+        onRemoteUrlChange={setRemoteUrl}
+        onDefaultBranchChange={setDefaultBranch}
+        idPrefix="create"
+      />
       {error && (
         <p
           role="alert"
-          className="mt-3 rounded-md bg-danger-muted px-3 py-2 font-body text-sm text-danger"
+          className="rounded-md bg-danger-muted px-3 py-2 font-body text-sm text-danger"
         >
           {error}
         </p>
       )}
-
-      <div className="mt-4 flex flex-wrap gap-2">
-        <button
-          type="submit"
-          disabled={isPending}
-          className="rounded-md bg-moss-600 px-4 py-2 font-body text-sm font-medium text-paper-50 transition-colors duration-fast hover:bg-moss-700 disabled:opacity-60"
-        >
-          {isPending
-            ? isEditing
-              ? 'Saving…'
-              : 'Creating…'
-            : isEditing
-              ? 'Save changes'
-              : 'Add repository'}
-        </button>
-        {isEditing && (
-          <button
-            type="button"
-            onClick={onCancelEdit}
-            className="rounded-md border border-border px-4 py-2 font-body text-sm text-text-secondary transition-colors duration-fast hover:border-border-strong hover:text-text-primary"
-          >
-            Cancel
-          </button>
-        )}
-      </div>
+      <button
+        type="submit"
+        disabled={createRepo.isPending}
+        className="rounded-md bg-moss-600 px-4 py-2 font-body text-sm font-medium text-paper-50 transition-colors duration-fast hover:bg-moss-700 disabled:opacity-60"
+      >
+        {createRepo.isPending ? 'Creating…' : 'Add repository'}
+      </button>
     </form>
   );
 }
 
-function ForgeTokenCard({ repos }: { repos: Repo[] }) {
+interface EditRepoFormProps {
+  repo: Repo;
+}
+
+function EditRepoForm({ repo }: EditRepoFormProps) {
+  const [name, setName] = useState(repo.name);
+  const [localPath, setLocalPath] = useState(repo.localPath);
+  const [remoteUrl, setRemoteUrl] = useState(repo.remoteUrl ?? '');
+  const [defaultBranch, setDefaultBranch] = useState(repo.defaultBranch);
+  const [error, setError] = useState<string | null>(null);
+  const updateRepo = useUpdateRepo();
+
+  async function handleSubmit(e: FormEvent) {
+    e.preventDefault();
+    const parsed = updateRepoSchema.safeParse({
+      name,
+      localPath,
+      remoteUrl: remoteUrl.trim() === '' ? null : remoteUrl.trim(),
+      defaultBranch,
+    });
+    if (!parsed.success) {
+      setError(parsed.error.issues[0]?.message ?? 'Invalid input.');
+      return;
+    }
+
+    setError(null);
+    try {
+      await updateRepo.mutateAsync({ id: repo.id, ...parsed.data });
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 409) {
+        setError('A repository with that path already exists.');
+      } else if (err instanceof ApiError && err.status === 403) {
+        setError('You do not have permission to update repositories.');
+      } else {
+        setError('Unable to update repository. Please try again.');
+      }
+    }
+  }
+
+  return (
+    <form onSubmit={(e) => void handleSubmit(e)} className="space-y-4">
+      <h3 className="font-display text-sm font-semibold text-bark-800">
+        Metadata
+      </h3>
+      <RepoFields
+        name={name}
+        localPath={localPath}
+        remoteUrl={remoteUrl}
+        defaultBranch={defaultBranch}
+        onNameChange={setName}
+        onLocalPathChange={setLocalPath}
+        onRemoteUrlChange={setRemoteUrl}
+        onDefaultBranchChange={setDefaultBranch}
+        idPrefix="edit"
+      />
+      {error && (
+        <p
+          role="alert"
+          className="rounded-md bg-danger-muted px-3 py-2 font-body text-sm text-danger"
+        >
+          {error}
+        </p>
+      )}
+      <button
+        type="submit"
+        disabled={updateRepo.isPending}
+        className="rounded-md bg-moss-600 px-4 py-2 font-body text-sm font-medium text-paper-50 transition-colors duration-fast hover:bg-moss-700 disabled:opacity-60"
+      >
+        {updateRepo.isPending ? 'Saving…' : 'Save changes'}
+      </button>
+    </form>
+  );
+}
+
+interface RepoFieldsProps {
+  name: string;
+  localPath: string;
+  remoteUrl: string;
+  defaultBranch: string;
+  onNameChange: (value: string) => void;
+  onLocalPathChange: (value: string) => void;
+  onRemoteUrlChange: (value: string) => void;
+  onDefaultBranchChange: (value: string) => void;
+  idPrefix: string;
+}
+
+function RepoFields({
+  name,
+  localPath,
+  remoteUrl,
+  defaultBranch,
+  onNameChange,
+  onLocalPathChange,
+  onRemoteUrlChange,
+  onDefaultBranchChange,
+  idPrefix,
+}: RepoFieldsProps) {
+  return (
+    <div className="space-y-3">
+      <div>
+        <label
+          htmlFor={`${idPrefix}-repo-name`}
+          className="mb-1 block font-body text-sm font-medium text-bark-800"
+        >
+          Name
+        </label>
+        <input
+          id={`${idPrefix}-repo-name`}
+          type="text"
+          required
+          autoComplete="off"
+          value={name}
+          onChange={(e) => onNameChange(e.target.value)}
+          className="field-control w-full px-3 py-2 font-body text-sm"
+        />
+      </div>
+
+      <div>
+        <label
+          htmlFor={`${idPrefix}-repo-local-path`}
+          className="mb-1 block font-body text-sm font-medium text-bark-800"
+        >
+          Local path
+        </label>
+        <input
+          id={`${idPrefix}-repo-local-path`}
+          type="text"
+          required
+          autoComplete="off"
+          placeholder="/repos/my-app"
+          value={localPath}
+          onChange={(e) => onLocalPathChange(e.target.value)}
+          className="field-control w-full px-3 py-2 font-mono text-sm"
+        />
+      </div>
+
+      <div>
+        <label
+          htmlFor={`${idPrefix}-repo-remote-url`}
+          className="mb-1 block font-body text-sm font-medium text-bark-800"
+        >
+          Remote URL{' '}
+          <span className="font-normal text-text-muted">(optional)</span>
+        </label>
+        <input
+          id={`${idPrefix}-repo-remote-url`}
+          type="url"
+          autoComplete="off"
+          placeholder="https://github.com/org/repo.git"
+          value={remoteUrl}
+          onChange={(e) => onRemoteUrlChange(e.target.value)}
+          className="field-control w-full px-3 py-2 font-mono text-sm"
+        />
+      </div>
+
+      <div>
+        <label
+          htmlFor={`${idPrefix}-repo-default-branch`}
+          className="mb-1 block font-body text-sm font-medium text-bark-800"
+        >
+          Default branch
+        </label>
+        <input
+          id={`${idPrefix}-repo-default-branch`}
+          type="text"
+          required
+          autoComplete="off"
+          value={defaultBranch}
+          onChange={(e) => onDefaultBranchChange(e.target.value)}
+          className="field-control w-full px-3 py-2 font-body text-sm"
+        />
+      </div>
+    </div>
+  );
+}
+
+function ForgeTokenSection({ repo }: { repo: Repo }) {
   const setToken = useSetForgeToken();
   const clearToken = useClearForgeToken();
-  const [repoId, setRepoId] = useState(repos[0]?.id ?? '');
   const [token, setTokenValue] = useState('');
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  // Repos often arrive after mount (`repos ?? []` while loading). Keep the
-  // controlled <select> in sync so the visible option matches state.
-  useEffect(() => {
-    if (repos.length === 0) {
-      setRepoId('');
-      return;
-    }
-    if (!repos.some((repo) => repo.id === repoId)) {
-      setRepoId(repos[0].id);
-    }
-  }, [repos, repoId]);
-
-  const selected = repos.find((r) => r.id === repoId);
-
   async function handleSave(e: FormEvent) {
     e.preventDefault();
-    const effectiveRepoId =
-      repoId || (repos.length === 1 ? repos[0].id : '');
-    if (!effectiveRepoId) {
-      setError('Select a repository.');
-      return;
-    }
     if (!token.trim()) {
       setError('Paste a forge token.');
       return;
@@ -296,7 +326,7 @@ function ForgeTokenCard({ repos }: { repos: Repo[] }) {
     setError(null);
     setMessage(null);
     try {
-      await setToken.mutateAsync({ id: effectiveRepoId, token: token.trim() });
+      await setToken.mutateAsync({ id: repo.id, token: token.trim() });
       setTokenValue('');
       setMessage('Forge token saved. The value is not shown again.');
     } catch {
@@ -305,69 +335,39 @@ function ForgeTokenCard({ repos }: { repos: Repo[] }) {
   }
 
   async function handleClear() {
-    const effectiveRepoId =
-      repoId || (repos.length === 1 ? repos[0].id : '');
-    if (!effectiveRepoId || !selected?.forgeTokenConfigured) return;
+    if (!repo.forgeTokenConfigured) return;
     if (!window.confirm('Remove the forge token for this repository?')) return;
     setError(null);
     setMessage(null);
     try {
-      await clearToken.mutateAsync(effectiveRepoId);
+      await clearToken.mutateAsync(repo.id);
       setMessage('Forge token removed.');
     } catch {
       setError('Unable to remove forge token.');
     }
   }
 
-  if (repos.length === 0) {
-    return (
-      <div className="rounded-xl border border-dashed border-border bg-paper-50 p-5">
-        <h2 className="font-display text-sm font-semibold text-bark-800">
+  return (
+    <div className="space-y-3 border-t border-border pt-5">
+      <div>
+        <h3 className="font-display text-sm font-semibold text-bark-800">
           Forge token
-        </h2>
+        </h3>
         <p className="mt-1 font-body text-sm text-text-muted">
-          Add a repository first, then paste a GitHub PAT for push / create PR.
+          GitHub PAT (or fine-grained token) for human-triggered push and create
+          PR. Value is stored encrypted and never shown again.
         </p>
       </div>
-    );
-  }
-
-  return (
-    <div className="rounded-xl border border-border bg-paper-50 p-5">
-      <h2 className="font-display text-sm font-semibold text-bark-800">
-        Forge token
-      </h2>
-      <p className="mt-1 font-body text-sm text-text-muted">
-        GitHub PAT (or fine-grained token) per repository for human-triggered
-        push and create PR. Value is stored encrypted and never shown again.
-      </p>
-      <form onSubmit={(e) => void handleSave(e)} className="mt-4 space-y-3">
+      <form onSubmit={(e) => void handleSave(e)} className="space-y-3">
         <div>
-          <label className="font-body text-xs font-medium text-text-muted">
-            Repository
-          </label>
-          <select
-            value={repoId}
-            onChange={(e) => {
-              setRepoId(e.target.value);
-              setMessage(null);
-              setError(null);
-            }}
-            className="field-control mt-1 w-full px-3 py-2 font-body text-sm"
+          <label
+            htmlFor="forge-token"
+            className="font-body text-xs font-medium text-text-muted"
           >
-            {repos.map((repo) => (
-              <option key={repo.id} value={repo.id}>
-                {repo.name}
-                {repo.forgeTokenConfigured ? ' (token set)' : ''}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div>
-          <label className="font-body text-xs font-medium text-text-muted">
             Token
           </label>
           <input
+            id="forge-token"
             type="password"
             autoComplete="off"
             value={token}
@@ -376,16 +376,14 @@ function ForgeTokenCard({ repos }: { repos: Repo[] }) {
             className="field-control mt-1 w-full px-3 py-2 font-mono text-sm"
           />
         </div>
-        {selected && (
-          <p className="font-body text-xs text-text-muted">
-            Status:{' '}
-            {selected.forgeTokenConfigured ? (
-              <span className="text-success">configured</span>
-            ) : (
-              <span className="text-warning">not configured</span>
-            )}
-          </p>
-        )}
+        <p className="font-body text-xs text-text-muted">
+          Status:{' '}
+          {repo.forgeTokenConfigured ? (
+            <span className="text-success">configured</span>
+          ) : (
+            <span className="text-warning">not configured</span>
+          )}
+        </p>
         {error && <p className="font-body text-xs text-danger">{error}</p>}
         {message && <p className="font-body text-xs text-success">{message}</p>}
         <div className="flex flex-wrap gap-2">
@@ -395,7 +393,7 @@ function ForgeTokenCard({ repos }: { repos: Repo[] }) {
           <Button
             type="button"
             variant="secondary"
-            disabled={!selected?.forgeTokenConfigured || clearToken.isPending}
+            disabled={!repo.forgeTokenConfigured || clearToken.isPending}
             onClick={() => void handleClear()}
           >
             {clearToken.isPending ? 'Removing…' : 'Clear'}
@@ -406,12 +404,12 @@ function ForgeTokenCard({ repos }: { repos: Repo[] }) {
   );
 }
 
-interface RepoRowActionsProps {
+interface EditRepoActionsProps {
   repo: Repo;
-  onEdit: (repo: Repo) => void;
+  onRemoved: () => void;
 }
 
-function RepoRowActions({ repo, onEdit }: RepoRowActionsProps) {
+function EditRepoActions({ repo, onRemoved }: EditRepoActionsProps) {
   const verifyRepo = useVerifyRepo();
   const deleteRepo = useDeleteRepo();
   const [actionError, setActionError] = useState<string | null>(null);
@@ -430,6 +428,7 @@ function RepoRowActions({ repo, onEdit }: RepoRowActionsProps) {
     setActionError(null);
     try {
       await deleteRepo.mutateAsync(repo.id);
+      onRemoved();
     } catch (err) {
       if (err instanceof ApiError && err.status === 409) {
         setActionError('Repository is in use by a ticket.');
@@ -440,35 +439,32 @@ function RepoRowActions({ repo, onEdit }: RepoRowActionsProps) {
   }
 
   return (
-    <div className="flex flex-col items-end gap-1">
-      <div className="flex flex-wrap justify-end gap-1">
+    <div className="space-y-3 border-t border-border pt-5">
+      <h3 className="font-display text-sm font-semibold text-bark-800">
+        Actions
+      </h3>
+      <div className="flex flex-wrap gap-2">
         <button
           type="button"
           onClick={() => void handleVerify()}
           disabled={verifyRepo.isPending}
-          className="rounded-md border border-border px-2 py-1 font-body text-xs text-text-secondary transition-colors duration-fast hover:border-moss-500 hover:text-moss-700 disabled:opacity-50"
+          className="rounded-md border border-border px-3 py-1.5 font-body text-sm text-text-secondary transition-colors duration-fast hover:border-moss-500 hover:text-moss-700 disabled:opacity-50"
         >
           {verifyRepo.isPending ? 'Verifying…' : 'Verify'}
         </button>
         <button
           type="button"
-          onClick={() => onEdit(repo)}
-          className="rounded-md border border-border px-2 py-1 font-body text-xs text-text-secondary transition-colors duration-fast hover:border-border-strong hover:text-text-primary"
-        >
-          Edit
-        </button>
-        <button
-          type="button"
           onClick={() => void handleDelete()}
           disabled={deleteRepo.isPending}
-          className="rounded-md border border-danger-muted px-2 py-1 font-body text-xs text-danger transition-colors duration-fast hover:bg-danger-muted/40 disabled:opacity-50"
+          className="rounded-md border border-danger-muted px-3 py-1.5 font-body text-sm text-danger transition-colors duration-fast hover:bg-danger-muted/40 disabled:opacity-50"
         >
           {deleteRepo.isPending ? 'Removing…' : 'Remove'}
         </button>
       </div>
       {actionError && (
-        <p className="font-body text-xs text-danger">{actionError}</p>
+        <p className="font-body text-sm text-danger">{actionError}</p>
       )}
+      <DefaultBranchSyncControls repo={repo} />
     </div>
   );
 }
@@ -476,8 +472,23 @@ function RepoRowActions({ repo, onEdit }: RepoRowActionsProps) {
 export function RepositoriesPage() {
   const { user, loading } = useSession();
   const { data: repos, isLoading, isError, refetch } = useRepos();
-  const [editing, setEditing] = useState<Repo | null>(null);
+  const [drawer, setDrawer] = useState<DrawerState>({ type: 'closed' });
   const isAdmin = user?.role === 'admin';
+
+  const editingRepo =
+    drawer.type === 'edit'
+      ? (repos?.find((repo) => repo.id === drawer.repoId) ?? null)
+      : null;
+
+  useEffect(() => {
+    if (drawer.type === 'edit' && repos && !editingRepo) {
+      setDrawer({ type: 'closed' });
+    }
+  }, [drawer, repos, editingRepo]);
+
+  function closeDrawer() {
+    setDrawer({ type: 'closed' });
+  }
 
   if (loading) {
     return (
@@ -487,173 +498,193 @@ export function RepositoriesPage() {
 
   return (
     <div>
-      <div>
-        <h1 className="font-display text-2xl font-semibold text-bark-900">
-          Repositories
-        </h1>
-        <p className="mt-2 max-w-xl font-body text-text-secondary">
-          {isAdmin
-            ? 'Register local git checkouts for agent worktrees.'
-            : 'Registered git checkouts available for tickets and agent runs.'}
-        </p>
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <h1 className="font-display text-2xl font-semibold text-bark-900">
+            Repositories
+          </h1>
+          <p className="mt-2 max-w-xl font-body text-text-secondary">
+            {isAdmin
+              ? 'Register local git checkouts for agent worktrees.'
+              : 'Registered git checkouts available for tickets and agent runs.'}
+          </p>
+        </div>
+        {isAdmin && (
+          <Button
+            type="button"
+            onClick={() => setDrawer({ type: 'create' })}
+          >
+            Add repository
+          </Button>
+        )}
       </div>
 
-      <div
-        className={[
-          'mt-8 grid gap-8',
-          isAdmin ? 'lg:grid-cols-[minmax(0,1fr)_320px]' : '',
-        ].join(' ')}
-      >
-        <div>
-          {isLoading && (
-            <p className="font-body text-sm text-text-muted">
-              Loading repositories…
+      <div className="mt-8">
+        {isLoading && (
+          <p className="font-body text-sm text-text-muted">
+            Loading repositories…
+          </p>
+        )}
+
+        {isError && (
+          <div className="rounded-lg border border-danger-muted bg-danger-muted/50 p-4">
+            <p className="font-body text-sm text-danger">
+              Unable to load repositories.
             </p>
-          )}
+            <button
+              type="button"
+              onClick={() => void refetch()}
+              className="mt-2 font-body text-sm font-medium text-moss-700 underline-offset-2 hover:underline"
+            >
+              Try again
+            </button>
+          </div>
+        )}
 
-          {isError && (
-            <div className="rounded-lg border border-danger-muted bg-danger-muted/50 p-4">
-              <p className="font-body text-sm text-danger">
-                Unable to load repositories.
+        {!isLoading && !isError && repos && (
+          <div className="overflow-hidden rounded-xl border border-border bg-surface-raised shadow-card">
+            {repos.length === 0 ? (
+              <p className="px-4 py-8 text-center font-body text-sm text-text-muted">
+                No repositories registered yet.
               </p>
-              <button
-                type="button"
-                onClick={() => void refetch()}
-                className="mt-2 font-body text-sm font-medium text-moss-700 underline-offset-2 hover:underline"
-              >
-                Try again
-              </button>
-            </div>
-          )}
-
-          {!isLoading && !isError && repos && (
-            <div className="overflow-hidden rounded-xl border border-border bg-surface-raised shadow-card">
-              {repos.length === 0 ? (
-                <p className="px-4 py-8 text-center font-body text-sm text-text-muted">
-                  No repositories registered yet.
-                </p>
-              ) : (
-                <table className="w-full text-left">
-                  <thead>
-                    <tr className="border-b border-border bg-paper-100">
-                      <th className="px-4 py-3 font-body text-xs font-medium uppercase tracking-wide text-text-muted">
-                        Name
-                      </th>
-                      <th className="px-4 py-3 font-body text-xs font-medium uppercase tracking-wide text-text-muted">
-                        Local path
-                      </th>
-                      <th className="px-4 py-3 font-body text-xs font-medium uppercase tracking-wide text-text-muted">
-                        Status
-                      </th>
-                      <th className="px-4 py-3 font-body text-xs font-medium uppercase tracking-wide text-text-muted">
-                        Last verified
-                      </th>
-                      <th className="px-4 py-3 text-right font-body text-xs font-medium uppercase tracking-wide text-text-muted">
-                        Actions
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {repos.map((repo) => (
-                      <tr
-                        key={repo.id}
-                        className="border-b border-border last:border-b-0"
-                      >
-                        <td className="px-4 py-3">
-                          <div className="font-body text-sm font-medium text-text-primary">
-                            {repo.name}
+            ) : (
+              <table className="w-full text-left">
+                <thead>
+                  <tr className="border-b border-border bg-paper-100">
+                    <th className="px-4 py-3 font-body text-xs font-medium uppercase tracking-wide text-text-muted">
+                      Name
+                    </th>
+                    <th className="px-4 py-3 font-body text-xs font-medium uppercase tracking-wide text-text-muted">
+                      Local path
+                    </th>
+                    <th className="px-4 py-3 font-body text-xs font-medium uppercase tracking-wide text-text-muted">
+                      Status
+                    </th>
+                    <th className="px-4 py-3 font-body text-xs font-medium uppercase tracking-wide text-text-muted">
+                      Last verified
+                    </th>
+                    <th className="px-4 py-3 text-right font-body text-xs font-medium uppercase tracking-wide text-text-muted">
+                      Actions
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {repos.map((repo) => (
+                    <tr
+                      key={repo.id}
+                      className="border-b border-border last:border-b-0"
+                    >
+                      <td className="px-4 py-3">
+                        <div className="font-body text-sm font-medium text-text-primary">
+                          {repo.name}
+                        </div>
+                        {repo.remoteUrl && (
+                          <div className="mt-0.5 truncate font-mono text-xs text-text-muted">
+                            {repo.remoteUrl}
                           </div>
-                          {repo.remoteUrl && (
-                            <div className="mt-0.5 truncate font-mono text-xs text-text-muted">
-                              {repo.remoteUrl}
-                            </div>
-                          )}
-                          <div className="mt-0.5 font-body text-xs text-text-muted">
-                            Branch: {repo.defaultBranch}
-                          </div>
-                          <div className="mt-1">
-                            <span
-                              className={[
-                                'inline-flex items-center rounded-full border px-2 py-0.5 font-body text-xs',
-                                repo.forgeTokenConfigured
-                                  ? 'border-success-muted bg-success-muted text-success'
-                                  : 'border-border bg-paper-100 text-text-muted',
-                              ].join(' ')}
-                            >
-                              {repo.forgeTokenConfigured
-                                ? 'token configured'
-                                : 'token not configured'}
-                            </span>
-                          </div>
-                        </td>
-                        <td className="max-w-[200px] truncate px-4 py-3 font-mono text-xs text-text-secondary">
-                          {repo.localPath}
-                        </td>
-                        <td className="px-4 py-3">
+                        )}
+                        <div className="mt-0.5 font-body text-xs text-text-muted">
+                          Branch: {repo.defaultBranch}
+                        </div>
+                        <div className="mt-1">
                           <span
-                            className={statusPillClass(repo.verificationStatus)}
+                            className={[
+                              'inline-flex items-center rounded-full border px-2 py-0.5 font-body text-xs',
+                              repo.forgeTokenConfigured
+                                ? 'border-success-muted bg-success-muted text-success'
+                                : 'border-border bg-paper-100 text-text-muted',
+                            ].join(' ')}
                           >
-                            {STATUS_LABELS[repo.verificationStatus]}
+                            {repo.forgeTokenConfigured
+                              ? 'token configured'
+                              : 'token not configured'}
                           </span>
-                          {repo.verificationError && (
-                            <p
-                              className="mt-1 max-w-xs font-body text-xs text-danger"
-                              title={repo.verificationError}
-                            >
-                              {repo.verificationError}
-                            </p>
-                          )}
-                        </td>
-                        <td className="px-4 py-3 font-body text-xs text-text-muted">
-                          {formatDate(repo.lastVerifiedAt)}
-                        </td>
-                        <td className="px-4 py-3">
-                          <div className="flex flex-col items-end gap-1">
-                            <Button
+                        </div>
+                      </td>
+                      <td className="max-w-[200px] truncate px-4 py-3 font-mono text-xs text-text-secondary">
+                        {repo.localPath}
+                      </td>
+                      <td className="px-4 py-3">
+                        <span
+                          className={statusPillClass(repo.verificationStatus)}
+                        >
+                          {STATUS_LABELS[repo.verificationStatus]}
+                        </span>
+                        {repo.verificationError && (
+                          <p
+                            className="mt-1 max-w-xs font-body text-xs text-danger"
+                            title={repo.verificationError}
+                          >
+                            {repo.verificationError}
+                          </p>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 font-body text-xs text-text-muted">
+                        {formatDate(repo.lastVerifiedAt)}
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="flex flex-wrap items-center justify-end gap-2">
+                          <Button
+                            type="button"
+                            variant="secondary"
+                            disabled={repo.verificationStatus !== 'ready'}
+                            onClick={() => {
+                              window.open(
+                                `/code?repoId=${repo.id}`,
+                                '_blank',
+                                'noopener,noreferrer',
+                              );
+                            }}
+                          >
+                            View code
+                          </Button>
+                          {isAdmin && (
+                            <button
                               type="button"
-                              variant="secondary"
-                              disabled={repo.verificationStatus !== 'ready'}
-                              onClick={() => {
-                                window.open(
-                                  `/code?repoId=${repo.id}`,
-                                  '_blank',
-                                  'noopener,noreferrer',
-                                );
-                              }}
+                              onClick={() =>
+                                setDrawer({ type: 'edit', repoId: repo.id })
+                              }
+                              className="rounded-md border border-border px-3 py-1.5 font-body text-sm text-text-secondary transition-colors duration-fast hover:border-border-strong hover:text-text-primary"
                             >
-                              View code
-                            </Button>
-                            {isAdmin && (
-                              <RepoRowActions
-                                repo={repo}
-                                onEdit={(r) => setEditing(r)}
-                              />
-                            )}
-                            {isAdmin && (
-                              <DefaultBranchSyncControls repo={repo} />
-                            )}
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
-            </div>
-          )}
-        </div>
-
-        {isAdmin && (
-          <div className="space-y-6">
-            <RepoForm
-              key={editing?.id ?? 'create'}
-              editing={editing}
-              onCancelEdit={() => setEditing(null)}
-            />
-            <ForgeTokenCard repos={repos ?? []} />
+                              Edit
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
           </div>
         )}
       </div>
+
+      {isAdmin && drawer.type === 'create' && (
+        <RepoDrawer
+          ariaLabel="Add repository"
+          title="Add repository"
+          description="Register a local git checkout on the server."
+          onClose={closeDrawer}
+        >
+          <CreateRepoForm onCreated={closeDrawer} />
+        </RepoDrawer>
+      )}
+
+      {isAdmin && drawer.type === 'edit' && editingRepo && (
+        <RepoDrawer
+          ariaLabel="Edit repository"
+          title="Edit repository"
+          description="Update metadata, forge token, and admin actions for this checkout."
+          onClose={closeDrawer}
+        >
+          <div className="space-y-6">
+            <EditRepoForm key={editingRepo.id} repo={editingRepo} />
+            <ForgeTokenSection key={`token-${editingRepo.id}`} repo={editingRepo} />
+            <EditRepoActions repo={editingRepo} onRemoved={closeDrawer} />
+          </div>
+        </RepoDrawer>
+      )}
     </div>
   );
 }
