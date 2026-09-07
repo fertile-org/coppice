@@ -54,7 +54,7 @@ Avoid complex project-management concepts unless they directly support agent wor
 
 Every agent action should be visible through ticket comments, run logs, live terminal sessions, artifacts, and state changes.
 
-Agents should not communicate through hidden chat sessions that humans cannot inspect.
+Agents must not communicate through **hidden** chat sessions that humans cannot inspect. First-class **human↔agent** Agent Chat sessions (M09) are allowed when they are human-owned, SPA/API-visible, and auditable. Agents still must not use chat sessions as a private side channel with each other.
 
 ### 3.3 Controlled Autonomy
 
@@ -426,7 +426,7 @@ Agents may prepare branches, diffs, summaries, test reports, and PR descriptions
 
 ### 9.1 Comments as the Official Communication Protocol
 
-Agents communicate through ticket comments, not hidden chats.
+**Inter-agent** communication uses ticket comments and mentions — not chat sessions. **Human↔agent** exploratory conversation may use first-class Agent Chat sessions (M09) that are visible in the SPA and API. Agents must not use chat sessions to talk to each other; durable ticket work and workflow still flow through comments, runs, and board state.
 
 A comment should support:
 
