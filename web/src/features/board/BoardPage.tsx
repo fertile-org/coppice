@@ -10,11 +10,12 @@ import {
 import { useQueryClient } from '@tanstack/react-query';
 import { useEffect, useMemo, useState } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
+import { useAgents } from '../agents/useAgents';
 import { TicketDrawer } from '../tickets/TicketDrawer';
 import { setLastProjectId } from '../projects/useProjects';
 import { BoardColumn } from './BoardColumn';
 import { BOARD_COLUMNS, isTicketStatus, type TicketStatus } from './columns';
-import { TicketCard } from './TicketCard';
+import { resolveAssigneeName, TicketCard } from './TicketCard';
 import { buildTicketHierarchyIndex } from './ticketHierarchy';
 import {
   ticketsQueryKey,
@@ -41,10 +42,19 @@ export function BoardPage() {
   const selectedTicketId = searchParams.get('ticket');
 
   const { data: tickets, isLoading, isError, refetch } = useTickets(projectId);
+  const { data: agents } = useAgents();
   const createTicket = useCreateTicket(projectId ?? '');
   const updateStatus = useUpdateTicketStatus(projectId ?? '');
 
   const [activeTicket, setActiveTicket] = useState<Ticket | null>(null);
+
+  const agentsById = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const agent of agents ?? []) {
+      map.set(agent.id, agent.name);
+    }
+    return map;
+  }, [agents]);
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -166,6 +176,7 @@ export function BoardPage() {
                   column={column}
                   tickets={ticketsByStatus.get(column.status) ?? []}
                   hierarchyIndex={hierarchyIndex}
+                  agentsById={agentsById}
                   showQuickAdd={column.status === 'backlog'}
                   onQuickAdd={handleQuickAdd}
                   isAdding={createTicket.isPending}
@@ -183,6 +194,10 @@ export function BoardPage() {
                   hierarchy={hierarchyIndex.get(activeTicket.id)}
                   onOpen={() => {}}
                   isLive={activeTicket.hasActiveRun ?? false}
+                  assigneeName={resolveAssigneeName(
+                    activeTicket.assigneeAgentId,
+                    agentsById,
+                  )}
                 />
               </div>
             ) : null}
