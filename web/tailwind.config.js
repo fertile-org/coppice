@@ -165,9 +165,14 @@ export default {
           '0%': { opacity: '0' },
           '100%': { opacity: '1' },
         },
+        'toast-progress': {
+          '0%': { width: '100%' },
+          '100%': { width: '0%' },
+        },
       },
       animation: {
         'fade-in': 'fade-in 200ms var(--ease-out) forwards',
+        'toast-progress': 'toast-progress linear forwards',
       },
     },
   },
