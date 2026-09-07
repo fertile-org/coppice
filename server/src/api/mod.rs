@@ -2,6 +2,7 @@ pub mod auth;
 mod agent_runs;
 mod ws;
 mod agents;
+mod chat;
 mod connectors;
 mod attachments;
 mod code_reviews;
@@ -37,6 +38,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .merge(agents::routes())
         .merge(connectors::routes())
         .merge(agent_runs::routes())
+        .merge(chat::routes())
         .merge(jobs::routes())
         .merge(knowledge::routes())
         .merge(users::routes())

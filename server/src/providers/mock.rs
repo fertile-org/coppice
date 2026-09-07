@@ -200,6 +200,7 @@ mod tests {
             session_created_tx: None,
             resume_context: None,
             resume_session_id: None,
+            read_only_tools: false,
         }
     }
 
@@ -454,7 +455,8 @@ mod tests {
                 session_created_tx: None,
                 resume_context: None,
                 resume_session_id: None,
-            })
+                        read_only_tools: false,
+        })
             .await
             .expect("mock run");
 

@@ -40,7 +40,7 @@ async fn run_watchdog_pass(state: &AppState) {
         if run.status == RunStatus::Queued && elapsed_secs > 300 {
             tracing::warn!(
                 run_id = %run.id,
-                ticket_id = %run.ticket_id,
+                ticket_id = ?run.ticket_id,
                 elapsed_secs,
                 "agent run queued for over 5 minutes"
             );
@@ -58,7 +58,7 @@ async fn run_watchdog_pass(state: &AppState) {
         if connector.as_deref() != Some("opencode") {
             tracing::debug!(
                 run_id = %run.id,
-                ticket_id = %run.ticket_id,
+                ticket_id = ?run.ticket_id,
                 elapsed_secs,
                 connector = ?connector,
                 "agent run in progress"
@@ -70,7 +70,7 @@ async fn run_watchdog_pass(state: &AppState) {
         let (Some(session_id), Some(worktree)) = (&run.session_id, &run.worktree_path) else {
             tracing::debug!(
                 run_id = %run.id,
-                ticket_id = %run.ticket_id,
+                ticket_id = ?run.ticket_id,
                 elapsed_secs,
                 "opencode run waiting for session attachment"
             );
@@ -81,7 +81,7 @@ async fn run_watchdog_pass(state: &AppState) {
         let Some(serve) = state.opencode_serve.as_ref() else {
             tracing::warn!(
                 run_id = %run.id,
-                ticket_id = %run.ticket_id,
+                ticket_id = ?run.ticket_id,
                 "opencode run active but serve is unavailable"
             );
             continue;
@@ -93,7 +93,7 @@ async fn run_watchdog_pass(state: &AppState) {
             Ok(Some(session_status)) => {
                 tracing::info!(
                     run_id = %run.id,
-                    ticket_id = %run.ticket_id,
+                    ticket_id = ?run.ticket_id,
                     session_id = %session_id,
                     %session_status,
                     elapsed_secs,
@@ -104,7 +104,7 @@ async fn run_watchdog_pass(state: &AppState) {
             Ok(None) => {
                 tracing::warn!(
                     run_id = %run.id,
-                    ticket_id = %run.ticket_id,
+                    ticket_id = ?run.ticket_id,
                     session_id = %session_id,
                     elapsed_secs,
                     "opencode session missing while run is active; marking interrupted"
@@ -120,7 +120,7 @@ async fn run_watchdog_pass(state: &AppState) {
                         tracing::warn!(
                             error = %err,
                             run_id = %run.id,
-                            ticket_id = %run.ticket_id,
+                            ticket_id = ?run.ticket_id,
                             "failed to mark watchdog-observed run interrupted"
                         );
                     }
@@ -129,7 +129,7 @@ async fn run_watchdog_pass(state: &AppState) {
             Err(err) => {
                 tracing::warn!(
                     run_id = %run.id,
-                    ticket_id = %run.ticket_id,
+                    ticket_id = ?run.ticket_id,
                     error = %err,
                     elapsed_secs,
                     "failed to poll opencode session status"

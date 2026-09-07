@@ -1,6 +1,7 @@
 use super::claude_console::ClaudeConsolePublisher;
 use super::{
     worktree_dir_from_context, AgentProvider, AgentRunInput, AgentRunResult, ProviderError,
+    CHAT_READ_ONLY_TOOLS,
 };
 use crate::sessions::opencode_events::{coppice_run_prompt, extract_result_from_text};
 use async_trait::async_trait;
@@ -11,7 +12,8 @@ use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 use tokio::sync::watch;
 
-const ALLOWED_TOOLS: &str = "Read,Write,Edit,MultiEdit,Bash,NotebookEdit,WebFetch,WebSearch,Glob,Grep,TodoWrite,Task";
+const ALLOWED_TOOLS: &str =
+    "Read,Write,Edit,MultiEdit,Bash,NotebookEdit,WebFetch,WebSearch,Glob,Grep,TodoWrite,Task";
 
 pub struct ClaudeCodeProvider {
     config: ClaudeCodeProviderConfig,
@@ -41,7 +43,11 @@ impl AgentProvider for ClaudeCodeProvider {
             .arg("stream-json")
             .arg("--verbose")
             .arg("--allowedTools")
-            .arg(ALLOWED_TOOLS)
+            .arg(if input.read_only_tools {
+                CHAT_READ_ONLY_TOOLS
+            } else {
+                ALLOWED_TOOLS
+            })
             .arg("--permission-mode")
             .arg("bypassPermissions")
             .current_dir(&worktree)

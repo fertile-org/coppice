@@ -178,8 +178,14 @@ async fn execute_job(
         return Err(JobCancelled.into());
     }
 
+    if run.job_type == "chat_turn" || run.context_profile == ContextProfile::Conversation {
+        return execute_chat_turn(state, pool, run_svc, run).await;
+    }
+
+    let ticket_id = run.ticket_id.context("ticket run has no ticket")?;
+
     let mut ticket = TicketService::new(pool)
-        .get(run.ticket_id)
+        .get(ticket_id)
         .await
         .context("load ticket")?;
     let agent = AgentService::new(pool)
@@ -219,7 +225,7 @@ async fn execute_job(
 
     tracing::info!(
         run_id = %run.id,
-        ticket_id = %run.ticket_id,
+        ticket_id = %ticket_id,
         agent_id = %run.agent_id,
         job_type = %run.job_type,
         "agent run started"
@@ -234,7 +240,7 @@ async fn execute_job(
             run.context_profile,
         ) {
             let updated = TicketService::new(pool)
-                .update_status(run.ticket_id, new_status, None, None)
+                .update_status(ticket_id, new_status, None, None)
                 .await
                 .context("apply run-start transition")?;
             crate::events::publish_ticket_updated(&state.event_bus, &updated);
@@ -263,7 +269,7 @@ async fn execute_job(
 
     state.event_bus.publish(AppEvent::AgentRunStarted {
         run_id: run.id,
-        ticket_id: run.ticket_id,
+        ticket_id,
         agent_id: run.agent_id,
         status: "running".into(),
     });
@@ -296,7 +302,7 @@ async fn execute_job(
 
     let latest_comments_owned = if run.context_profile == ContextProfile::Full {
         let comments = CommentService::new(pool)
-            .list_by_ticket(run.ticket_id)
+            .list_by_ticket(ticket_id)
             .await
             .context("load latest comments for full context")?;
         ticket_thread::format_ticket_thread_with_limit(
@@ -316,7 +322,7 @@ async fn execute_job(
 
     let thread_excerpt_owned = if run.context_profile == ContextProfile::HumanChat {
         let comments = CommentService::new(pool)
-            .list_by_ticket(run.ticket_id)
+            .list_by_ticket(ticket_id)
             .await
             .context("load comments for thread excerpt")?;
         ticket_thread::format_thread_excerpt(&comments, &agent_names, 3, 800)
@@ -362,7 +368,7 @@ async fn execute_job(
                 .context("consultation trigger comment has no body")?;
             let mention = MentionService::new(pool)
                 .find_pending_for_agent_and_comment(
-                    run.ticket_id,
+                    ticket_id,
                     run.agent_id,
                     Some(trigger_comment_id),
                 )
@@ -385,7 +391,7 @@ async fn execute_job(
     let repo_default_branch: String = repo_row.get("default_branch");
 
     let worktree_service = WorktreeService::new(state.config.agent.worktrees_path.clone().into());
-    let paths = compute_paths(worktree_service.worktrees_root(), &repo_name, run.ticket_id);
+    let paths = compute_paths(worktree_service.worktrees_root(), &repo_name, ticket_id);
     let git_dir = PathBuf::from(&local_path);
 
     worktree_service
@@ -421,13 +427,15 @@ async fn execute_job(
     let worktree_path = paths.worktree_dir.to_string_lossy().into_owned();
     let ticket_description = match run.context_profile {
         ContextProfile::Full => ticket.ticket.description.as_str(),
-        ContextProfile::HumanAgent | ContextProfile::HumanChat => "",
+        ContextProfile::HumanAgent
+        | ContextProfile::HumanChat
+        | ContextProfile::Conversation => "",
     };
     let context_thread_excerpt = match run.context_profile {
         ContextProfile::Full if run.job_type == "work_on_ticket" => None,
         ContextProfile::Full => Some(consultation_request_ref.unwrap_or_default()),
         ContextProfile::HumanChat => thread_excerpt_ref,
-        ContextProfile::HumanAgent => None,
+        ContextProfile::HumanAgent | ContextProfile::Conversation => None,
     };
     let context_input = ContextInput {
         ticket_title: &ticket.ticket.title,
@@ -449,7 +457,7 @@ async fn execute_job(
         resume_context: resume_context_ref,
         context_profile: run.context_profile,
         human_request,
-        ticket_id: Some(run.ticket_id),
+        ticket_id: Some(ticket_id),
         assignee_agent_key: assignee_agent_key_ref,
         thread_excerpt: context_thread_excerpt,
     };
@@ -525,11 +533,11 @@ async fn execute_job(
 
     if run.context_profile != ContextProfile::Full {
         let comments = CommentService::new(pool)
-            .list_by_ticket(run.ticket_id)
+            .list_by_ticket(ticket_id)
             .await
             .context("load comments for context snapshot")?;
         let runs = RunService::new(pool)
-            .list_for_ticket(run.ticket_id)
+            .list_for_ticket(ticket_id)
             .await
             .context("load runs for context snapshot")?;
         let ticket_json = build_ticket_json(&ticket, assignee_agent_key_ref);
@@ -589,7 +597,7 @@ async fn execute_job(
             agent_key: agent_key.clone(),
             agent_role: agent.role.clone(),
             job_type: run.job_type.clone(),
-            ticket_id: Some(run.ticket_id.to_string()),
+            ticket_id: Some(ticket_id.to_string()),
             ticket_status: Some(ticket.ticket.status),
             context_profile: run.context_profile,
             context_path,
@@ -602,6 +610,7 @@ async fn execute_job(
             session_created_tx,
             resume_context,
             resume_session_id: load_resume_session_id(pool, run, connector_name).await,
+                    read_only_tools: false,
         })
         .await;
 
@@ -723,19 +732,19 @@ async fn execute_job(
     state.run_streams.remove(run.id);
 
     let updated_ticket = TicketService::new(pool)
-        .get(run.ticket_id)
+        .get(ticket_id)
         .await
         .context("load updated ticket")?;
     crate::events::publish_ticket_updated(&state.event_bus, &updated_ticket);
 
     let comments = CommentService::new(pool)
-        .list_by_ticket(run.ticket_id)
+        .list_by_ticket(ticket_id)
         .await
         .context("list comments after apply")?;
     if let Some(comment) = comments.last() {
         state.event_bus.publish(AppEvent::CommentCreated {
             comment_id: comment.id,
-            ticket_id: run.ticket_id,
+            ticket_id,
             author_type: author_type_to_str(comment.author_type).into(),
         });
     }
@@ -745,6 +754,190 @@ async fn execute_job(
         pool,
         run.id,
         run.ticket_id,
+        run.agent_id,
+        finished_run.status,
+        finished_run.error_message,
+    )
+    .await;
+
+    Ok(())
+}
+
+async fn execute_chat_turn(
+    state: &AppState,
+    pool: &PgPool,
+    run_svc: &RunService<'_>,
+    run: &crate::domain::run::AgentRun,
+) -> anyhow::Result<()> {
+    use crate::providers::AgentRunResult;
+    use crate::services::chat_cwd::resolve_chat_cwd;
+    use crate::services::chat_service::ChatService;
+    use crate::services::context_builder::{write_context_file, ContextInput};
+
+    let session_id = run
+        .chat_session_id
+        .context("chat turn has no chat_session_id")?;
+    let session = ChatService::new(pool)
+        .get_session_by_id(session_id)
+        .await
+        .context("load chat session")?;
+    let agent = AgentService::new(pool)
+        .get(run.agent_id)
+        .await
+        .context("load agent")?;
+    let agent_key = agent
+        .preset_source
+        .clone()
+        .unwrap_or_else(|| slugify(&agent.name));
+
+    let repo_local_path = if let Some(repo_id) = session.repo_id {
+        sqlx::query_scalar::<_, String>("SELECT local_path FROM repos WHERE id = $1")
+            .bind(repo_id)
+            .fetch_optional(pool)
+            .await?
+    } else {
+        None
+    };
+
+    let cwd = resolve_chat_cwd(
+        std::path::Path::new(&state.config.agent.worktrees_path),
+        session_id,
+        repo_local_path.as_deref(),
+    )
+    .context("resolve chat cwd")?;
+    let cwd_str = cwd.to_string_lossy().into_owned();
+
+    let stream = state.run_streams.register(run.id);
+    let cancel_rx = stream.cancelled_rx();
+
+    run_svc
+        .mark_running(run.id)
+        .await
+        .context("mark chat run running")?;
+
+    tracing::info!(
+        run_id = %run.id,
+        chat_session_id = %session_id,
+        agent_id = %run.agent_id,
+        cwd = %cwd_str,
+        "chat turn started"
+    );
+
+    let transcript = ChatService::new(pool)
+        .format_transcript(session_id)
+        .await
+        .context("format chat transcript")?;
+
+    let context_input = ContextInput {
+        ticket_title: "Agent Chat",
+        ticket_description: "",
+        ticket_status: "n/a",
+        ticket_substatus: None,
+        agent_name: &agent.name,
+        agent_key: &agent_key,
+        agent_role: &agent.role,
+        agent_skills: &agent.skills,
+        agent_responsibilities: &agent.responsibilities,
+        agent_system_prompt: &agent.system_prompt,
+        repo_name: None,
+        repo_remote_url: None,
+        repo_default_branch: None,
+        worktree_path: Some(&cwd_str),
+        latest_comments: Some(&transcript),
+        project_rules: None,
+        resume_context: None,
+        context_profile: ContextProfile::Conversation,
+        human_request: None,
+        ticket_id: None,
+        assignee_agent_key: None,
+        thread_excerpt: None,
+    };
+    let context_path = cwd.join(".agent").join("context.md");
+    write_context_file(&cwd, &context_input).context("write chat context")?;
+
+    let connector_name = &agent.connector;
+    let connector = state
+        .connector_registry
+        .get(connector_name)
+        .ok_or_else(|| anyhow::anyhow!("agent connector not configured: {connector_name}"))?;
+
+    let provider_result = connector
+        .run(AgentRunInput {
+            agent_id: run.agent_id.to_string(),
+            agent_key: agent_key.clone(),
+            agent_role: agent.role.clone(),
+            job_type: run.job_type.clone(),
+            ticket_id: None,
+            ticket_status: None,
+            context_profile: ContextProfile::Conversation,
+            context_path: context_path.to_string_lossy().into_owned(),
+            run_id: Some(run.id.to_string()),
+            artifacts_dir: Some(state.config.storage.artifacts_dir.clone()),
+            model_provider: agent.model_provider.clone(),
+            model: agent.model.clone(),
+            stream: Some(stream.clone()),
+            cancel_rx: Some(cancel_rx),
+            session_created_tx: None,
+            resume_context: None,
+            resume_session_id: None,
+            read_only_tools: true,
+        })
+        .await;
+
+    let result = match provider_result {
+        Ok(result) => result,
+        Err(ProviderError::Cancelled) => {
+            best_effort_persist_artifacts(state, &stream, run.id, connector_name, None, "after cancel");
+            state.run_streams.remove(run.id);
+            return Err(JobCancelled.into());
+        }
+        Err(err) => {
+            best_effort_persist_artifacts(
+                state,
+                &stream,
+                run.id,
+                connector_name,
+                None,
+                "after provider error",
+            );
+            state.run_streams.remove(run.id);
+            return Err(anyhow::Error::new(err).context(format!(
+                "connector `{connector_name}` chat turn failed"
+            )));
+        }
+    };
+
+    if run_svc.is_cancelled(run.id).await? {
+        best_effort_persist_artifacts(state, &stream, run.id, connector_name, None, "after cancel");
+        state.run_streams.remove(run.id);
+        return Err(JobCancelled.into());
+    }
+
+    let (summary, run_status) = match &result {
+        AgentRunResult::Done { summary, .. } => (summary.clone(), RunStatus::Succeeded),
+        AgentRunResult::Blocked { summary, .. } => (summary.clone(), RunStatus::Blocked),
+        AgentRunResult::Continued { summary, .. } => (summary.clone(), RunStatus::Succeeded),
+    };
+
+    ChatService::new(pool)
+        .append_agent_message(session_id, run.id, &summary)
+        .await
+        .context("persist agent chat message")?;
+
+    let finished_run = run_svc
+        .finish_run(run.id, run_status, Some(cwd_str), None)
+        .await
+        .context("finish chat run")?;
+
+    let session_id_opt = run_session_id(pool, run.id).await;
+    persist_artifacts(state, &stream, run.id, connector_name, session_id_opt)?;
+    state.run_streams.remove(run.id);
+
+    publish_run_finished(
+        state,
+        pool,
+        run.id,
+        None,
         run.agent_id,
         finished_run.status,
         finished_run.error_message,
@@ -996,7 +1189,7 @@ fn human_request_mode_label(profile: ContextProfile) -> Option<&'static str> {
     match profile {
         ContextProfile::HumanAgent => Some("Agent"),
         ContextProfile::HumanChat => Some("Chat"),
-        ContextProfile::Full => None,
+        ContextProfile::Full | ContextProfile::Conversation => None,
     }
 }
 
@@ -1106,7 +1299,9 @@ mod tests {
     fn test_run(job_type: &str) -> AgentRun {
         AgentRun {
             id: uuid::Uuid::new_v4(),
-            ticket_id: uuid::Uuid::new_v4(),
+            ticket_id: Some(uuid::Uuid::new_v4()),
+            chat_session_id: None,
+            chat_message_id: None,
             agent_id: uuid::Uuid::new_v4(),
             job_type: job_type.into(),
             status: RunStatus::Running,

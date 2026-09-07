@@ -30,32 +30,33 @@ pub async fn publish_run_finished(
     state: &AppState,
     pool: &PgPool,
     run_id: Uuid,
-    ticket_id: Uuid,
+    ticket_id: Option<Uuid>,
     agent_id: Uuid,
     status: RunStatus,
     error_message: Option<String>,
 ) {
-    state.event_bus.publish(AppEvent::AgentRunFinished {
-        run_id,
-        ticket_id,
-        agent_id,
-        status: run_status_to_str(status).into(),
-        error_message,
-    });
-
-    // Persist durable in-app notifications for the four terminal statuses.
-    // Failures are non-fatal: a missing notification row is preferable to a
-    // dropped run-completion signal.
-    let status_str = run_status_to_str(status);
-    if let Err(err) = NotificationService::new(pool)
-        .create_for_run_finished(run_id, ticket_id, agent_id, status_str)
-        .await
-    {
-        tracing::warn!(error = %err, %run_id, "failed to create run-finished notification");
-    } else {
-        state.event_bus.publish(AppEvent::NotificationChanged {
-            recipient_user_id: None,
+    if let Some(ticket_id) = ticket_id {
+        state.event_bus.publish(AppEvent::AgentRunFinished {
+            run_id,
+            ticket_id,
+            agent_id,
+            status: run_status_to_str(status).into(),
+            error_message,
         });
+
+        // Persist durable in-app notifications for ticket runs. Chat clients
+        // use the per-run live stream and durable transcript.
+        let status_str = run_status_to_str(status);
+        if let Err(err) = NotificationService::new(pool)
+            .create_for_run_finished(run_id, ticket_id, agent_id, status_str)
+            .await
+        {
+            tracing::warn!(error = %err, %run_id, "failed to create run-finished notification");
+        } else {
+            state.event_bus.publish(AppEvent::NotificationChanged {
+                recipient_user_id: None,
+            });
+        }
     }
 }
 

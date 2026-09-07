@@ -51,9 +51,12 @@ pub async fn load_run_continuation_context(
     if run.job_type != "work_on_ticket" && run.job_type != "respond_to_mention" {
         return Ok(None);
     }
+    let Some(ticket_id) = run.ticket_id else {
+        return Ok(None);
+    };
 
     let comments = CommentService::new(pool)
-        .list_by_ticket(run.ticket_id)
+        .list_by_ticket(ticket_id)
         .await?;
 
     let agent_names = AgentService::new(pool)
@@ -93,8 +96,11 @@ impl<'a> RunOrchestrator<'a> {
         worktree_path: Option<String>,
         branch_name: Option<String>,
     ) -> Result<AgentRun, RunError> {
+        let ticket_id = run
+            .ticket_id
+            .ok_or_else(|| RunError::Validation("ticket run has no ticket".into()))?;
         let ticket_svc = TicketService::new(self.pool);
-        let ticket = ticket_svc.get(run.ticket_id).await?;
+        let ticket = ticket_svc.get(ticket_id).await?;
         let current_status = ticket.ticket.status;
         let original_description = ticket.ticket.description.clone();
         let agent = AgentService::new(self.pool).get(run.agent_id).await?;
@@ -130,7 +136,7 @@ impl<'a> RunOrchestrator<'a> {
             .effective(status_to_str(ticket.ticket.status));
 
         let ctx = TransitionContext {
-            ticket_id: run.ticket_id,
+            ticket_id,
             current_status: ticket.ticket.status,
             assignee_agent_id: ticket.ticket.assignee_agent_id,
             agent_role: agent.role.clone(),
@@ -164,7 +170,7 @@ impl<'a> RunOrchestrator<'a> {
 
         let mut ticket = ticket_svc
             .apply_workflow_update(
-                run.ticket_id,
+                ticket_id,
                 action.new_status,
                 substatus,
                 substatus_metadata,
@@ -182,7 +188,7 @@ impl<'a> RunOrchestrator<'a> {
             ) {
                 ticket = ticket_svc
                     .update_fields(
-                        run.ticket_id,
+                        ticket_id,
                         None,
                         Some(&description),
                         None,
@@ -219,7 +225,7 @@ impl<'a> RunOrchestrator<'a> {
 
         let comment = CommentService::new(self.pool)
             .create(
-                run.ticket_id,
+                ticket_id,
                 AuthorType::Agent,
                 Some(run.agent_id),
                 &apply.comment.body,
@@ -232,7 +238,7 @@ impl<'a> RunOrchestrator<'a> {
         for notice in &action.system_comments {
             CommentService::new(self.pool)
                 .create(
-                    run.ticket_id,
+                    ticket_id,
                     AuthorType::System,
                     None,
                     notice,
@@ -254,7 +260,7 @@ impl<'a> RunOrchestrator<'a> {
                 };
             MentionService::new(self.pool)
                 .create_mentions_for_agents(
-                    run.ticket_id,
+                    ticket_id,
                     comment.id,
                     &collaboration_targets.agent_ids,
                     resume_agent_id,
@@ -313,7 +319,7 @@ impl<'a> RunOrchestrator<'a> {
                 };
                 match run_svc
                     .start_run_for_agent(
-                        run.ticket_id,
+                        ticket_id,
                         job_req.agent_id,
                         &job_req.job_type,
                         options,
@@ -357,7 +363,7 @@ impl<'a> RunOrchestrator<'a> {
                     if !already_queued {
                         match run_svc
                             .start_run_for_agent(
-                                run.ticket_id,
+                                ticket_id,
                                 new_assignee,
                                 "work_on_ticket",
                                 StartRunOptions::default(),
@@ -432,9 +438,12 @@ impl<'a> RunOrchestrator<'a> {
         run: &AgentRun,
         ticket: &crate::services::ticket_service::TicketWithDisplay,
     ) -> Result<Option<JobRequest>, RunError> {
+        let ticket_id = run
+            .ticket_id
+            .ok_or_else(|| RunError::Validation("ticket run has no ticket".into()))?;
         let mention_svc = MentionService::new(self.pool);
         let Some(mention) = mention_svc
-            .find_pending_for_agent_and_comment(run.ticket_id, run.agent_id, run.trigger_comment_id)
+            .find_pending_for_agent_and_comment(ticket_id, run.agent_id, run.trigger_comment_id)
             .await?
         else {
             return Ok(None);
@@ -447,7 +456,7 @@ impl<'a> RunOrchestrator<'a> {
             if run.context_profile == ContextProfile::HumanChat {
                 ticket_svc
                     .apply_workflow_update(
-                        run.ticket_id,
+                        ticket_id,
                         None,
                         Some(None),
                         Some(None),
@@ -463,7 +472,7 @@ impl<'a> RunOrchestrator<'a> {
         if ticket.ticket.clarification_round < MAX_CLARIFICATION_ROUNDS {
             ticket_svc
                 .apply_workflow_update(
-                    run.ticket_id,
+                    ticket_id,
                     None,
                     Some(None),
                     Some(None),
@@ -481,7 +490,7 @@ impl<'a> RunOrchestrator<'a> {
         } else {
             ticket_svc
                 .apply_workflow_update(
-                    run.ticket_id,
+                    ticket_id,
                     None,
                     Some(Some(Substatus::WaitingForHuman)),
                     Some(None),
@@ -493,7 +502,7 @@ impl<'a> RunOrchestrator<'a> {
 
             CommentService::new(self.pool)
                 .create(
-                    run.ticket_id,
+                    ticket_id,
                     AuthorType::System,
                     None,
                     "Maximum clarification rounds reached. Waiting for human input.",
@@ -508,6 +517,9 @@ impl<'a> RunOrchestrator<'a> {
     }
 
     pub async fn handle_terminal_run(&self, run: &AgentRun) {
+        let Some(ticket_id) = run.ticket_id else {
+            return;
+        };
         if run.job_type == "respond_to_mention"
             && matches!(run.status, RunStatus::Failed | RunStatus::Cancelled)
             && run.trigger_comment_id.is_some()
@@ -515,7 +527,7 @@ impl<'a> RunOrchestrator<'a> {
             let mention_svc = MentionService::new(self.pool);
             match mention_svc
                 .find_pending_for_agent_and_comment(
-                    run.ticket_id,
+                    ticket_id,
                     run.agent_id,
                     run.trigger_comment_id,
                 )
@@ -549,7 +561,7 @@ impl<'a> RunOrchestrator<'a> {
         self.start_deferred_ready_assignee_work(run).await;
 
         let mention = match MentionService::new(self.pool)
-            .find_next_unscheduled_agent_request(run.ticket_id, run.agent_id)
+            .find_next_unscheduled_agent_request(ticket_id, run.agent_id)
             .await
         {
             Ok(Some(mention)) => mention,
@@ -557,7 +569,7 @@ impl<'a> RunOrchestrator<'a> {
             Err(error) => {
                 tracing::warn!(
                     terminal_run_id = %run.id,
-                    ticket_id = %run.ticket_id,
+                    ticket_id = %ticket_id,
                     agent_id = %run.agent_id,
                     error = %error,
                     "could not inspect deferred agent mentions"
@@ -566,12 +578,12 @@ impl<'a> RunOrchestrator<'a> {
             }
         };
 
-        let ticket = match TicketService::new(self.pool).get(run.ticket_id).await {
+        let ticket = match TicketService::new(self.pool).get(ticket_id).await {
             Ok(ticket) => ticket,
             Err(error) => {
                 tracing::warn!(
                     terminal_run_id = %run.id,
-                    ticket_id = %run.ticket_id,
+                    ticket_id = %ticket_id,
                     error = %error,
                     "could not recheck deferred consultation ownership"
                 );
@@ -583,7 +595,7 @@ impl<'a> RunOrchestrator<'a> {
             Err(error) => {
                 tracing::warn!(
                     terminal_run_id = %run.id,
-                    ticket_id = %run.ticket_id,
+                    ticket_id = %ticket_id,
                     error = %error,
                     "could not resolve deferred consultation ownership"
                 );
@@ -613,7 +625,7 @@ impl<'a> RunOrchestrator<'a> {
 
         match RunService::new(self.pool)
             .start_run_for_agent(
-                run.ticket_id,
+                ticket_id,
                 run.agent_id,
                 "respond_to_mention",
                 StartRunOptions {
@@ -627,7 +639,7 @@ impl<'a> RunOrchestrator<'a> {
             Err(error) => {
                 tracing::warn!(
                     terminal_run_id = %run.id,
-                    ticket_id = %run.ticket_id,
+                    ticket_id = %ticket_id,
                     agent_id = %run.agent_id,
                     mention_id = %mention.id,
                     error = %error,
@@ -641,16 +653,19 @@ impl<'a> RunOrchestrator<'a> {
         if terminal_run.job_type != "respond_to_mention" {
             return;
         }
+        let Some(ticket_id) = terminal_run.ticket_id else {
+            return;
+        };
 
         let ticket = match TicketService::new(self.pool)
-            .get(terminal_run.ticket_id)
+            .get(ticket_id)
             .await
         {
             Ok(ticket) => ticket,
             Err(error) => {
                 tracing::warn!(
                     terminal_run_id = %terminal_run.id,
-                    ticket_id = %terminal_run.ticket_id,
+                    ticket_id = %ticket_id,
                     error = %error,
                     "could not inspect deferred Ready ownership"
                 );
@@ -673,7 +688,7 @@ impl<'a> RunOrchestrator<'a> {
             Err(error) => {
                 tracing::warn!(
                     terminal_run_id = %terminal_run.id,
-                    ticket_id = %terminal_run.ticket_id,
+                    ticket_id = %ticket_id,
                     agent_id = %terminal_run.agent_id,
                     error = %error,
                     "could not inspect deferred Ready assignee"
@@ -694,7 +709,7 @@ impl<'a> RunOrchestrator<'a> {
 
         match RunService::new(self.pool)
             .start_run_for_agent(
-                terminal_run.ticket_id,
+                ticket_id,
                 terminal_run.agent_id,
                 "work_on_ticket",
                 StartRunOptions::default(),
@@ -705,7 +720,7 @@ impl<'a> RunOrchestrator<'a> {
             Err(RunError::ActiveRunExists) => {
                 tracing::info!(
                     terminal_run_id = %terminal_run.id,
-                    ticket_id = %terminal_run.ticket_id,
+                    ticket_id = %ticket_id,
                     agent_id = %terminal_run.agent_id,
                     "deferred Ready ownership already has an active run"
                 );
@@ -713,7 +728,7 @@ impl<'a> RunOrchestrator<'a> {
             Err(error) => {
                 tracing::warn!(
                     terminal_run_id = %terminal_run.id,
-                    ticket_id = %terminal_run.ticket_id,
+                    ticket_id = %ticket_id,
                     agent_id = %terminal_run.agent_id,
                     error = %error,
                     "could not start deferred Ready ownership work"
@@ -1214,7 +1229,9 @@ mod tests {
     fn test_run(agent_id: Uuid, job_type: &str) -> AgentRun {
         AgentRun {
             id: Uuid::new_v4(),
-            ticket_id: Uuid::new_v4(),
+            ticket_id: Some(Uuid::new_v4()),
+            chat_session_id: None,
+            chat_message_id: None,
             agent_id,
             job_type: job_type.into(),
             status: RunStatus::Running,
@@ -1639,7 +1656,9 @@ mod tests {
             .finish_run(
                 &AgentRun {
                     id: fx.run_id,
-                    ticket_id: fx.ticket_id,
+                    ticket_id: Some(fx.ticket_id),
+                    chat_session_id: None,
+                    chat_message_id: None,
                     agent_id: fx.pm_agent_id,
                     job_type: "work_on_ticket".into(),
                     status: RunStatus::Running,
@@ -1707,7 +1726,9 @@ mod tests {
             .finish_run(
                 &AgentRun {
                     id: fx.run_id,
-                    ticket_id: fx.ticket_id,
+                    ticket_id: Some(fx.ticket_id),
+                    chat_session_id: None,
+                    chat_message_id: None,
                     agent_id: fx.pm_agent_id,
                     job_type: "work_on_ticket".into(),
                     status: RunStatus::Running,
@@ -1803,7 +1824,9 @@ mod tests {
             .finish_run(
                 &AgentRun {
                     id: fx.run_id,
-                    ticket_id: fx.ticket_id,
+                    ticket_id: Some(fx.ticket_id),
+                    chat_session_id: None,
+                    chat_message_id: None,
                     agent_id: fx.pm_agent_id,
                     job_type: "work_on_ticket".into(),
                     status: RunStatus::Running,
@@ -1909,7 +1932,9 @@ mod tests {
             .finish_run(
                 &AgentRun {
                     id: fx.run_id,
-                    ticket_id: fx.ticket_id,
+                    ticket_id: Some(fx.ticket_id),
+                    chat_session_id: None,
+                    chat_message_id: None,
                     agent_id: fx.pm_agent_id,
                     job_type: "work_on_ticket".into(),
                     status: RunStatus::Running,
@@ -1967,7 +1992,9 @@ mod tests {
             .finish_run(
                 &AgentRun {
                     id: fx.run_id,
-                    ticket_id: fx.ticket_id,
+                    ticket_id: Some(fx.ticket_id),
+                    chat_session_id: None,
+                    chat_message_id: None,
                     agent_id: fx.pm_agent_id,
                     job_type: "work_on_ticket".into(),
                     status: RunStatus::Running,
@@ -2102,7 +2129,9 @@ mod tests {
             .finish_run(
                 &AgentRun {
                     id: fx.run_id,
-                    ticket_id: fx.ticket_id,
+                    ticket_id: Some(fx.ticket_id),
+                    chat_session_id: None,
+                    chat_message_id: None,
                     agent_id: fx.pm_agent_id,
                     job_type: "work_on_ticket".into(),
                     status: RunStatus::Running,
@@ -2171,7 +2200,9 @@ mod tests {
             .finish_run(
                 &AgentRun {
                     id: fx.run_id,
-                    ticket_id: fx.ticket_id,
+                    ticket_id: Some(fx.ticket_id),
+                    chat_session_id: None,
+                    chat_message_id: None,
                     agent_id: fx.pm_agent_id,
                     job_type: "work_on_ticket".into(),
                     status: RunStatus::Running,
@@ -2249,7 +2280,9 @@ mod tests {
             .finish_run(
                 &AgentRun {
                     id: fx.run_id,
-                    ticket_id: fx.ticket_id,
+                    ticket_id: Some(fx.ticket_id),
+                    chat_session_id: None,
+                    chat_message_id: None,
                     agent_id: fx.pm_agent_id,
                     job_type: "work_on_ticket".into(),
                     status: RunStatus::Running,
@@ -2290,7 +2323,9 @@ mod tests {
             .finish_run(
                 &AgentRun {
                     id: active_target_run_id,
-                    ticket_id: fx.ticket_id,
+                    ticket_id: Some(fx.ticket_id),
+                    chat_session_id: None,
+                    chat_message_id: None,
                     agent_id: fx.engineer_agent_id,
                     job_type: "work_on_ticket".into(),
                     status: RunStatus::Running,
@@ -2379,7 +2414,9 @@ mod tests {
             .finish_run(
                 &AgentRun {
                     id: fx.run_id,
-                    ticket_id: fx.ticket_id,
+                    ticket_id: Some(fx.ticket_id),
+                    chat_session_id: None,
+                    chat_message_id: None,
                     agent_id: fx.pm_agent_id,
                     job_type: "work_on_ticket".into(),
                     status: RunStatus::Running,
@@ -2465,7 +2502,9 @@ mod tests {
             .finish_run(
                 &AgentRun {
                     id: fx.run_id,
-                    ticket_id: fx.ticket_id,
+                    ticket_id: Some(fx.ticket_id),
+                    chat_session_id: None,
+                    chat_message_id: None,
                     agent_id: fx.pm_agent_id,
                     job_type: "work_on_ticket".into(),
                     status: RunStatus::Running,
@@ -2524,7 +2563,9 @@ mod tests {
             .finish_run(
                 &AgentRun {
                     id: fx.run_id,
-                    ticket_id: fx.ticket_id,
+                    ticket_id: Some(fx.ticket_id),
+                    chat_session_id: None,
+                    chat_message_id: None,
                     agent_id: fx.pm_agent_id,
                     job_type: "respond_to_mention".into(),
                     status: RunStatus::Running,
@@ -2599,7 +2640,9 @@ mod tests {
             .finish_run(
                 &AgentRun {
                     id: fx.run_id,
-                    ticket_id: fx.ticket_id,
+                    ticket_id: Some(fx.ticket_id),
+                    chat_session_id: None,
+                    chat_message_id: None,
                     agent_id: fx.pm_agent_id,
                     job_type: "work_on_ticket".into(),
                     status: RunStatus::Running,
@@ -2713,7 +2756,9 @@ mod tests {
         RunOrchestrator::new(&pool, &WorkflowConfig::default())
             .handle_terminal_run(&AgentRun {
                 id: failed_response_id,
-                ticket_id: fx.ticket_id,
+                ticket_id: Some(fx.ticket_id),
+                    chat_session_id: None,
+                    chat_message_id: None,
                 agent_id: fx.engineer_agent_id,
                 job_type: "respond_to_mention".into(),
                 status: RunStatus::Failed,
@@ -2829,7 +2874,9 @@ mod tests {
             .finish_run(
                 &AgentRun {
                     id: fx.run_id,
-                    ticket_id: fx.ticket_id,
+                    ticket_id: Some(fx.ticket_id),
+                    chat_session_id: None,
+                    chat_message_id: None,
                     agent_id: fx.pm_agent_id,
                     job_type: "work_on_ticket".into(),
                     status: RunStatus::Running,
@@ -2951,7 +2998,9 @@ mod tests {
         let orchestrator = RunOrchestrator::new(&pool, &workflow);
         let human_chat_run = AgentRun {
             id: Uuid::new_v4(),
-            ticket_id: fx.ticket_id,
+            ticket_id: Some(fx.ticket_id),
+                    chat_session_id: None,
+                    chat_message_id: None,
             agent_id: fx.pm_agent_id,
             job_type: "respond_to_mention".into(),
             status: RunStatus::Succeeded,
@@ -3054,7 +3103,9 @@ mod tests {
             .finish_run(
                 &AgentRun {
                     id: fx.run_id,
-                    ticket_id: fx.ticket_id,
+                    ticket_id: Some(fx.ticket_id),
+                    chat_session_id: None,
+                    chat_message_id: None,
                     agent_id: fx.pm_agent_id,
                     job_type: "work_on_ticket".into(),
                     status: RunStatus::Running,
@@ -3141,7 +3192,9 @@ mod tests {
             .finish_run(
                 &AgentRun {
                     id: fx.run_id,
-                    ticket_id: fx.ticket_id,
+                    ticket_id: Some(fx.ticket_id),
+                    chat_session_id: None,
+                    chat_message_id: None,
                     agent_id: fx.pm_agent_id,
                     job_type: "work_on_ticket".into(),
                     status: RunStatus::Running,
@@ -3271,7 +3324,9 @@ mod tests {
             .finish_run(
                 &AgentRun {
                     id: fx.run_id,
-                    ticket_id: fx.ticket_id,
+                    ticket_id: Some(fx.ticket_id),
+                    chat_session_id: None,
+                    chat_message_id: None,
                     agent_id: qc_agent_id,
                     job_type: "work_on_ticket".into(),
                     status: RunStatus::Running,
@@ -3341,7 +3396,9 @@ mod tests {
             .finish_run(
                 &AgentRun {
                     id: handoff_run_id,
-                    ticket_id: fx.ticket_id,
+                    ticket_id: Some(fx.ticket_id),
+                    chat_session_id: None,
+                    chat_message_id: None,
                     agent_id: fx.engineer_agent_id,
                     job_type: "work_on_ticket".into(),
                     status: RunStatus::Running,
@@ -3409,7 +3466,9 @@ mod tests {
             .finish_run(
                 &AgentRun {
                     id: fx.run_id,
-                    ticket_id: fx.ticket_id,
+                    ticket_id: Some(fx.ticket_id),
+                    chat_session_id: None,
+                    chat_message_id: None,
                     agent_id: fx.engineer_agent_id,
                     job_type: "work_on_ticket".into(),
                     status: RunStatus::Running,
@@ -3503,7 +3562,9 @@ mod tests {
             .finish_run(
                 &AgentRun {
                     id: pm_run_id,
-                    ticket_id: fx.ticket_id,
+                    ticket_id: Some(fx.ticket_id),
+                    chat_session_id: None,
+                    chat_message_id: None,
                     agent_id: fx.pm_agent_id,
                     job_type: "respond_to_mention".into(),
                     status: RunStatus::Running,
@@ -3644,7 +3705,9 @@ mod tests {
             .finish_run(
                 &AgentRun {
                     id: fx.run_id,
-                    ticket_id: fx.ticket_id,
+                    ticket_id: Some(fx.ticket_id),
+                    chat_session_id: None,
+                    chat_message_id: None,
                     agent_id: fx.pm_agent_id,
                     job_type: "respond_to_mention".into(),
                     status: RunStatus::Running,
@@ -3782,7 +3845,9 @@ mod tests {
             .finish_run(
                 &AgentRun {
                     id: fx.run_id,
-                    ticket_id: fx.ticket_id,
+                    ticket_id: Some(fx.ticket_id),
+                    chat_session_id: None,
+                    chat_message_id: None,
                     agent_id: fx.engineer_agent_id,
                     job_type: "work_on_ticket".into(),
                     status: RunStatus::Running,
@@ -3886,7 +3951,9 @@ mod tests {
             .finish_run(
                 &AgentRun {
                     id: fx.run_id,
-                    ticket_id: fx.ticket_id,
+                    ticket_id: Some(fx.ticket_id),
+                    chat_session_id: None,
+                    chat_message_id: None,
                     agent_id: fx.engineer_agent_id,
                     job_type: "work_on_ticket".into(),
                     status: RunStatus::Running,
@@ -4007,7 +4074,9 @@ mod tests {
             .finish_run(
                 &AgentRun {
                     id: block_run_id,
-                    ticket_id: fx.ticket_id,
+                    ticket_id: Some(fx.ticket_id),
+                    chat_session_id: None,
+                    chat_message_id: None,
                     agent_id: fx.engineer_agent_id,
                     job_type: "work_on_ticket".into(),
                     status: RunStatus::Running,
@@ -4084,7 +4153,9 @@ mod tests {
             .finish_run(
                 &AgentRun {
                     id: pm_run_id,
-                    ticket_id: fx.ticket_id,
+                    ticket_id: Some(fx.ticket_id),
+                    chat_session_id: None,
+                    chat_message_id: None,
                     agent_id: fx.pm_agent_id,
                     job_type: "respond_to_mention".into(),
                     status: RunStatus::Running,
@@ -4227,7 +4298,9 @@ mod tests {
 
         let run = AgentRun {
             id: fx.run_id,
-            ticket_id: fx.ticket_id,
+            ticket_id: Some(fx.ticket_id),
+                    chat_session_id: None,
+                    chat_message_id: None,
             agent_id: fx.engineer_agent_id,
             job_type: "work_on_ticket".into(),
             status: RunStatus::Queued,
@@ -4287,7 +4360,9 @@ mod tests {
             .finish_run(
                 &AgentRun {
                     id: fx.run_id,
-                    ticket_id: fx.ticket_id,
+                    ticket_id: Some(fx.ticket_id),
+                    chat_session_id: None,
+                    chat_message_id: None,
                     agent_id: fx.engineer_agent_id,
                     job_type: "work_on_ticket".into(),
                     status: RunStatus::Running,
@@ -4331,7 +4406,9 @@ mod tests {
 
         let second_run = AgentRun {
             id: second_run_id,
-            ticket_id: fx.ticket_id,
+            ticket_id: Some(fx.ticket_id),
+                    chat_session_id: None,
+                    chat_message_id: None,
             agent_id: fx.engineer_agent_id,
             job_type: "work_on_ticket".into(),
             status: RunStatus::Queued,

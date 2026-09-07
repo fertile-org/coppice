@@ -21,6 +21,7 @@ use std::str::FromStr;
 use uuid::Uuid;
 
 const JOB_TYPE_WORK_ON_TICKET: &str = "work_on_ticket";
+const JOB_TYPE_CHAT_TURN: &str = "chat_turn";
 
 pub struct StartRunOptions {
     pub context_profile: ContextProfile,
@@ -256,8 +257,8 @@ impl<'a> RunService<'a> {
         let row = sqlx::query(
             r#"
             SELECT
-                id, ticket_id, agent_id, job_type, status, sandbox_profile_id,
-                worktree_path, branch_name, error_message, session_id,
+                id, ticket_id, chat_session_id, chat_message_id, agent_id, job_type, status,
+                sandbox_profile_id, worktree_path, branch_name, error_message, session_id,
                 context_profile, trigger_comment_id,
                 started_at, ended_at, created_at
             FROM agent_runs
@@ -336,7 +337,10 @@ impl<'a> RunService<'a> {
             ));
         }
 
-        self.start_run(run.ticket_id).await
+        let ticket_id = run
+            .ticket_id
+            .ok_or_else(|| RunError::Validation("chat turns cannot be retried here".into()))?;
+        self.start_run(ticket_id).await
     }
 
     pub async fn mark_running(&self, run_id: Uuid) -> Result<(), RunError> {
@@ -370,14 +374,17 @@ impl<'a> RunService<'a> {
         if run.status != RunStatus::Running {
             return Err(RunError::Validation("run is not running".into()));
         }
+        let ticket_id = run
+            .ticket_id
+            .ok_or_else(|| RunError::Validation("chat turn cannot apply ticket result".into()))?;
 
         if apply.ticket.status.is_some() || apply.ticket.substatus.is_some() {
             let ticket_svc = TicketService::new(self.pool);
-            let current = ticket_svc.get(run.ticket_id).await?;
+            let current = ticket_svc.get(ticket_id).await?;
             let status = apply.ticket.status.unwrap_or(current.ticket.status);
             ticket_svc
                 .update_status(
-                    run.ticket_id,
+                    ticket_id,
                     status,
                     Some(apply.ticket.substatus),
                     Some(apply.ticket.substatus_metadata),
@@ -387,7 +394,7 @@ impl<'a> RunService<'a> {
 
         CommentService::new(self.pool)
             .create(
-                run.ticket_id,
+                ticket_id,
                 AuthorType::Agent,
                 Some(run.agent_id),
                 &apply.comment.body,
@@ -514,6 +521,66 @@ impl<'a> RunService<'a> {
         Ok(row_to_run(&row))
     }
 
+    pub async fn start_chat_turn(
+        &self,
+        chat_session_id: Uuid,
+        chat_message_id: Uuid,
+        agent_id: Uuid,
+    ) -> Result<AgentRun, RunError> {
+        let mut tx = self.pool.begin().await?;
+        let run_id = Uuid::new_v4();
+
+        let row = sqlx::query(
+            r#"
+            INSERT INTO agent_runs (
+                id, ticket_id, chat_session_id, chat_message_id,
+                agent_id, job_type, status, sandbox_profile_id,
+                context_profile, trigger_comment_id
+            )
+            VALUES ($1, NULL, $2, $3, $4, $5, $6, $7, $8, NULL)
+            ON CONFLICT (chat_session_id, agent_id)
+                WHERE status IN ('queued', 'running') AND chat_session_id IS NOT NULL
+            DO NOTHING
+            RETURNING
+                id, ticket_id, chat_session_id, chat_message_id,
+                agent_id, job_type, status, sandbox_profile_id,
+                worktree_path, branch_name, error_message, session_id,
+                context_profile, trigger_comment_id,
+                started_at, ended_at, created_at
+            "#,
+        )
+        .bind(run_id)
+        .bind(chat_session_id)
+        .bind(chat_message_id)
+        .bind(agent_id)
+        .bind(JOB_TYPE_CHAT_TURN)
+        .bind(run_status_to_str(RunStatus::Queued))
+        .bind(PROFILE_ID)
+        .bind(ContextProfile::Conversation.as_str())
+        .fetch_optional(&mut *tx)
+        .await?;
+        let Some(row) = row else {
+            tx.rollback().await?;
+            return Err(RunError::ActiveRunExists);
+        };
+
+        sqlx::query(
+            r#"
+            INSERT INTO agent_jobs (id, run_id, job_type, status)
+            VALUES ($1, $2, $3, $4)
+            "#,
+        )
+        .bind(Uuid::new_v4())
+        .bind(run_id)
+        .bind(JOB_TYPE_CHAT_TURN)
+        .bind(job_status_to_str(JobStatus::Pending))
+        .execute(&mut *tx)
+        .await?;
+
+        tx.commit().await?;
+        Ok(row_to_run(&row))
+    }
+
     pub async fn finish_run(
         &self,
         run_id: Uuid,
@@ -594,16 +661,18 @@ impl<'a> RunService<'a> {
         // Recovery paths can call this service without an API or worker event
         // publisher. Attempt the durable notification at the transition; the
         // source key makes publication retries safe.
-        if let Err(err) = NotificationService::new(self.pool)
-            .create_for_run_finished(
-                run.id,
-                run.ticket_id,
-                run.agent_id,
-                run_status_to_str(run.status),
-            )
-            .await
-        {
-            tracing::warn!(error = %err, run_id = %run.id, "failed to create interrupted-run notification");
+        if let Some(ticket_id) = run.ticket_id {
+            if let Err(err) = NotificationService::new(self.pool)
+                .create_for_run_finished(
+                    run.id,
+                    ticket_id,
+                    run.agent_id,
+                    run_status_to_str(run.status),
+                )
+                .await
+            {
+                tracing::warn!(error = %err, run_id = %run.id, "failed to create interrupted-run notification");
+            }
         }
 
         Ok(run)
@@ -872,6 +941,8 @@ fn row_to_run(row: &sqlx::postgres::PgRow) -> AgentRun {
     AgentRun {
         id: row.get("id"),
         ticket_id: row.get("ticket_id"),
+        chat_session_id: row.try_get("chat_session_id").ok().flatten(),
+        chat_message_id: row.try_get("chat_message_id").ok().flatten(),
         agent_id: row.get("agent_id"),
         job_type: row.get("job_type"),
         status,

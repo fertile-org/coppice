@@ -3,6 +3,7 @@ pub enum ContextProfile {
     Full,
     HumanAgent,
     HumanChat,
+    Conversation,
 }
 
 impl ContextProfile {
@@ -11,6 +12,7 @@ impl ContextProfile {
             Self::Full => "full",
             Self::HumanAgent => "human_agent",
             Self::HumanChat => "human_chat",
+            Self::Conversation => "conversation",
         }
     }
 }
@@ -23,6 +25,7 @@ impl std::str::FromStr for ContextProfile {
             "full" => Ok(Self::Full),
             "human_agent" => Ok(Self::HumanAgent),
             "human_chat" => Ok(Self::HumanChat),
+            "conversation" => Ok(Self::Conversation),
             other => Err(format!("unknown context profile: {other}")),
         }
     }
@@ -39,6 +42,7 @@ mod tests {
             ContextProfile::Full,
             ContextProfile::HumanAgent,
             ContextProfile::HumanChat,
+            ContextProfile::Conversation,
         ] {
             assert_eq!(ContextProfile::from_str(profile.as_str()), Ok(profile));
         }

@@ -15,7 +15,9 @@ pub enum RunStatus {
 #[derive(Debug, Clone)]
 pub struct AgentRun {
     pub id: Uuid,
-    pub ticket_id: Uuid,
+    pub ticket_id: Option<Uuid>,
+    pub chat_session_id: Option<Uuid>,
+    pub chat_message_id: Option<Uuid>,
     pub agent_id: Uuid,
     pub job_type: String,
     pub status: RunStatus,

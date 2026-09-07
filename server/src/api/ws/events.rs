@@ -127,9 +127,12 @@ async fn emit_active_run_snapshot(
     };
     let runs = RunService::new(pool).list_active_runs().await.unwrap_or_default();
     for run in runs {
+        let Some(ticket_id) = run.ticket_id else {
+            continue;
+        };
         let event = AppEvent::AgentRunStarted {
             run_id: run.id,
-            ticket_id: run.ticket_id,
+            ticket_id,
             agent_id: run.agent_id,
             status: run_status_to_str(run.status).to_string(),
         };

@@ -26,7 +26,9 @@ pub fn routes() -> Router<Arc<AppState>> {
 #[serde(rename_all = "camelCase")]
 pub(crate) struct RunResponse {
     id: Uuid,
-    ticket_id: Uuid,
+    ticket_id: Option<Uuid>,
+    chat_session_id: Option<Uuid>,
+    chat_message_id: Option<Uuid>,
     agent_id: Uuid,
     job_type: String,
     status: String,
@@ -72,6 +74,8 @@ pub(crate) fn run_to_response(run: AgentRun, connector: Option<String>) -> RunRe
     RunResponse {
         id: run.id,
         ticket_id: run.ticket_id,
+        chat_session_id: run.chat_session_id,
+        chat_message_id: run.chat_message_id,
         agent_id: run.agent_id,
         job_type: run.job_type,
         status: run_status_to_str(run.status).to_string(),
@@ -170,7 +174,9 @@ mod tests {
     fn run_status_serializes_as_snake_case() {
         let run = AgentRun {
             id: Uuid::new_v4(),
-            ticket_id: Uuid::new_v4(),
+            ticket_id: Some(Uuid::new_v4()),
+            chat_session_id: None,
+            chat_message_id: None,
             agent_id: Uuid::new_v4(),
             job_type: "work_on_ticket".into(),
             status: RunStatus::Running,

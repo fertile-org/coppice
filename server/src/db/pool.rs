@@ -67,6 +67,8 @@ pub async fn truncate_test_workspace(pool: &PgPool) -> anyhow::Result<()> {
     sqlx::query(
         r#"
         TRUNCATE
+            chat_messages,
+            chat_sessions,
             knowledge_usage_logs,
             knowledge_embeddings,
             knowledge_jobs,

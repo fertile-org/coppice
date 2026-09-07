@@ -61,6 +61,18 @@ pub struct AgentRunInput {
     pub session_created_tx: Option<watch::Sender<String>>,
     pub resume_context: Option<String>,
     pub resume_session_id: Option<String>,
+    /// When true, connectors must enforce a read-only tool allowlist or fail closed.
+    pub read_only_tools: bool,
+}
+
+/// Read-only allowlist for connectors that can enforce it (claude-code).
+pub const CHAT_READ_ONLY_TOOLS: &str = "Read,Glob,Grep,WebFetch,WebSearch";
+
+/// Fail closed when a connector cannot enforce read-only tools for chat turns.
+pub fn refuse_unsupported_read_only(connector_id: &str) -> ProviderError {
+    ProviderError::InvalidInput(format!(
+        "connector `{connector_id}` cannot enforce read-only tools for conversation chat turns"
+    ))
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -246,7 +258,8 @@ mod tests {
                 session_created_tx: None,
                 resume_context: None,
                 resume_session_id: None,
-            })
+                        read_only_tools: false,
+        })
             .await
             .expect("mock run");
         match result {

@@ -49,9 +49,63 @@ pub fn build_context_md(input: &ContextInput) -> String {
         ContextProfile::Full => build_full_context(input),
         ContextProfile::HumanAgent => build_human_agent_context(input),
         ContextProfile::HumanChat => build_human_chat_context(input),
+        ContextProfile::Conversation => build_conversation_context(input),
     };
 
     specialize_ready_tech_lead_contract(input, markdown)
+}
+
+pub fn build_conversation_context(input: &ContextInput<'_>) -> String {
+    let transcript = input.latest_comments.unwrap_or("(No previous messages)");
+    let repository = input
+        .worktree_path
+        .map(|path| format!("\n# Working directory\n\n`{path}`\n"))
+        .unwrap_or_default();
+    format!(
+        r#"# Agent Chat
+
+You are replying in a human-owned exploratory chat session.
+
+# Agent
+
+**Name:** {name}
+**Role:** {role}
+
+{system_prompt}
+{repository}
+# Conversation transcript
+
+{transcript}
+
+# Coppice chat rules
+
+- You may inspect files with read-only tools when a repository is bound.
+- Do not write, edit, create, delete, rename, stage, commit, or push files.
+- Do not change tickets, workflow state, or knowledge.
+- Answer the latest human message directly and concisely.
+
+# Expected output contract
+
+Return one JSON object:
+
+```json
+{{
+  "status": "done",
+  "summary": "<markdown reply>",
+  "changedFiles": [],
+  "testsRun": [],
+  "blockers": []
+}}
+```
+
+If you cannot answer, return `blocked` with a clear `summary`.
+"#,
+        name = input.agent_name,
+        role = input.agent_role,
+        system_prompt = input.agent_system_prompt,
+        repository = repository,
+        transcript = transcript,
+    )
 }
 
 enum FullContextKind<'a> {
