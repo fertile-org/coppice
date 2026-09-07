@@ -30,8 +30,9 @@ export function ToolShell({
   const hasOutput = Boolean(children);
   const showOutput = isTerminalStatus(status) && hasOutput;
   const streaming = hasOutput && !isTerminalStatus(status);
+  const isErrorWithOutput = status === 'error' && hasOutput;
 
-  const [outputOpen, setOutputOpen] = useState(false);
+  const [outputOpen, setOutputOpen] = useState(isErrorWithOutput);
   const wasStreaming = useRef(streaming);
 
   useEffect(() => {
@@ -39,11 +40,16 @@ export function ToolShell({
       setOutputOpen(true);
       return;
     }
+    if (isErrorWithOutput) {
+      setOutputOpen(true);
+      wasStreaming.current = streaming;
+      return;
+    }
     if (wasStreaming.current) {
       setOutputOpen(false);
     }
     wasStreaming.current = streaming;
-  }, [streaming]);
+  }, [streaming, isErrorWithOutput]);
 
   const toggleOutput = () => {
     if (showOutput) setOutputOpen((value) => !value);

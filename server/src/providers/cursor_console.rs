@@ -228,33 +228,84 @@ fn completed_tool_status(payload: &Value) -> &'static str {
     "completed"
 }
 
-fn tool_output(payload: &Value) -> Option<String> {
-    let result = payload.get("result")?;
-    if let Some(success) = result.get("success") {
-        if let Some(stdout) = success.get("stdout").and_then(|v| v.as_str()) {
-            let trimmed = stdout.trim();
-            if !trimmed.is_empty() {
-                return Some(trimmed.to_string());
-            }
-        }
-        if let Some(stderr) = success.get("stderr").and_then(|v| v.as_str()) {
-            let trimmed = stderr.trim();
-            if !trimmed.is_empty() {
-                return Some(trimmed.to_string());
-            }
-        }
-    }
-    if let Some(error) = result.get("error") {
-        if let Some(message) = error
+fn non_empty_str(value: Option<&str>) -> Option<String> {
+    value
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+}
+
+fn extract_error_output(result: &Value) -> Option<String> {
+    let error = result.get("error")?;
+    non_empty_str(
+        error
             .get("message")
             .and_then(|v| v.as_str())
-            .or_else(|| error.as_str())
-        {
-            let trimmed = message.trim();
-            if !trimmed.is_empty() {
-                return Some(trimmed.to_string());
-            }
+            .or_else(|| error.as_str()),
+    )
+}
+
+fn extract_failure_output(result: &Value) -> Option<String> {
+    let failure = result.get("failure")?;
+    if let Some(text) = non_empty_str(failure.as_str()) {
+        return Some(text);
+    }
+    for key in ["message", "reason", "error"] {
+        if let Some(text) = non_empty_str(failure.get(key).and_then(|v| v.as_str())) {
+            return Some(text);
         }
+    }
+    None
+}
+
+fn stream_text(success: &Value, key: &str) -> Option<String> {
+    non_empty_str(success.get(key).and_then(|v| v.as_str()))
+}
+
+/// Extraction priority for completed tools:
+/// 1. `result.error` message / string
+/// 2. `result.failure` string or object `message` / `reason` / `error`
+/// 3. Failed shell (`status == "error"` under `success`): stderr then stdout when both nonempty
+/// 4. Error fallback: `exit code N` or `tool failed`
+/// Success tools keep stdout-first (then stderr) publishing.
+fn tool_output(payload: &Value) -> Option<String> {
+    let status = completed_tool_status(payload);
+    let result = payload.get("result")?;
+
+    if let Some(output) = extract_error_output(result) {
+        return Some(output);
+    }
+    if let Some(output) = extract_failure_output(result) {
+        return Some(output);
+    }
+
+    if let Some(success) = result.get("success") {
+        let stdout = stream_text(success, "stdout");
+        let stderr = stream_text(success, "stderr");
+
+        if status == "error" {
+            match (stderr, stdout) {
+                (Some(err), Some(out)) => return Some(format!("{err}\n\n{out}")),
+                (Some(err), None) => return Some(err),
+                (None, Some(out)) => return Some(out),
+                (None, None) => {}
+            }
+            if let Some(code) = success.get("exitCode").and_then(|v| v.as_i64()) {
+                return Some(format!("exit code {code}"));
+            }
+            return Some("tool failed".to_string());
+        }
+
+        if let Some(out) = stdout {
+            return Some(out);
+        }
+        if let Some(err) = stderr {
+            return Some(err);
+        }
+    }
+
+    if status == "error" {
+        return Some("tool failed".to_string());
     }
     None
 }
@@ -377,8 +428,99 @@ mod tests {
         assert_eq!(result_count, 1);
     }
 
+    fn publish_completed_shell(
+        console: &mut CursorConsolePublisher,
+        handle: &std::sync::Arc<crate::sessions::run_registry::RunStreamHandle>,
+        call_id: &str,
+        result: Value,
+    ) {
+        console.handle_stream_json(
+            handle,
+            &json!({
+                "type": "tool_call",
+                "subtype": "completed",
+                "call_id": call_id,
+                "tool_call": {
+                    "shellToolCall": {
+                        "args": {"command": "cargo test"},
+                        "result": result
+                    },
+                    "toolCallId": call_id
+                }
+            }),
+        );
+    }
+
+    fn last_tool(handle: &std::sync::Arc<crate::sessions::run_registry::RunStreamHandle>) -> Value {
+        collect_events(handle)
+            .into_iter()
+            .filter(|e| e["type"] == "cursor.console.tool")
+            .next_back()
+            .expect("tool event")
+    }
+
     #[test]
-    fn completed_tool_with_nonzero_exit_is_error() {
+    fn nonzero_exit_with_stdout_publishes_output() {
+        let registry = RunStreamRegistry::new();
+        let handle = registry.register(uuid::Uuid::new_v4());
+        let mut console = CursorConsolePublisher::new();
+
+        publish_completed_shell(
+            &mut console,
+            &handle,
+            "tool_fail",
+            json!({"success": {"exitCode": 1, "stdout": "FAILED"}}),
+        );
+
+        let tool = last_tool(&handle);
+        assert_eq!(tool["status"], "error");
+        assert_eq!(tool["output"], "FAILED");
+    }
+
+    #[test]
+    fn nonzero_exit_with_stderr_and_stdout_publishes_stderr_first() {
+        let registry = RunStreamRegistry::new();
+        let handle = registry.register(uuid::Uuid::new_v4());
+        let mut console = CursorConsolePublisher::new();
+
+        publish_completed_shell(
+            &mut console,
+            &handle,
+            "tool_both",
+            json!({
+                "success": {
+                    "exitCode": 2,
+                    "stdout": "out line",
+                    "stderr": "err line"
+                }
+            }),
+        );
+
+        let tool = last_tool(&handle);
+        assert_eq!(tool["status"], "error");
+        assert_eq!(tool["output"], "err line\n\nout line");
+    }
+
+    #[test]
+    fn nonzero_exit_with_empty_streams_publishes_exit_code_fallback() {
+        let registry = RunStreamRegistry::new();
+        let handle = registry.register(uuid::Uuid::new_v4());
+        let mut console = CursorConsolePublisher::new();
+
+        publish_completed_shell(
+            &mut console,
+            &handle,
+            "tool_empty",
+            json!({"success": {"exitCode": 7, "stdout": "", "stderr": ""}}),
+        );
+
+        let tool = last_tool(&handle);
+        assert_eq!(tool["status"], "error");
+        assert_eq!(tool["output"], "exit code 7");
+    }
+
+    #[test]
+    fn result_error_message_and_string_error_are_published() {
         let registry = RunStreamRegistry::new();
         let handle = registry.register(uuid::Uuid::new_v4());
         let mut console = CursorConsolePublisher::new();
@@ -388,13 +530,13 @@ mod tests {
             &json!({
                 "type": "tool_call",
                 "subtype": "completed",
-                "call_id": "tool_fail",
+                "call_id": "tool_err_obj",
                 "tool_call": {
-                    "shellToolCall": {
-                        "args": {"command": "cargo test"},
-                        "result": {"success": {"exitCode": 1, "stdout": "FAILED"}}
+                    "readToolCall": {
+                        "args": {"path": "/missing.rs"},
+                        "result": {"error": {"message": "not found"}}
                     },
-                    "toolCallId": "tool_fail"
+                    "toolCallId": "tool_err_obj"
                 }
             }),
         );
@@ -403,13 +545,13 @@ mod tests {
             &json!({
                 "type": "tool_call",
                 "subtype": "completed",
-                "call_id": "tool_err",
+                "call_id": "tool_err_str",
                 "tool_call": {
                     "readToolCall": {
                         "args": {"path": "/missing.rs"},
-                        "result": {"error": {"message": "not found"}}
+                        "result": {"error": "boom"}
                     },
-                    "toolCallId": "tool_err"
+                    "toolCallId": "tool_err_str"
                 }
             }),
         );
@@ -418,10 +560,56 @@ mod tests {
             .into_iter()
             .filter(|e| e["type"] == "cursor.console.tool")
             .collect();
-        assert_eq!(tools.len(), 2);
-        assert_eq!(tools[0]["id"], "tool_fail");
         assert_eq!(tools[0]["status"], "error");
-        assert_eq!(tools[1]["id"], "tool_err");
+        assert_eq!(tools[0]["output"], "not found");
         assert_eq!(tools[1]["status"], "error");
+        assert_eq!(tools[1]["output"], "boom");
+    }
+
+    #[test]
+    fn result_failure_string_and_object_message_are_published() {
+        let registry = RunStreamRegistry::new();
+        let handle = registry.register(uuid::Uuid::new_v4());
+        let mut console = CursorConsolePublisher::new();
+
+        publish_completed_shell(
+            &mut console,
+            &handle,
+            "tool_fail_str",
+            json!({"failure": "permission denied"}),
+        );
+        publish_completed_shell(
+            &mut console,
+            &handle,
+            "tool_fail_obj",
+            json!({"failure": {"message": "timeout waiting"}}),
+        );
+
+        let tools: Vec<_> = collect_events(&handle)
+            .into_iter()
+            .filter(|e| e["type"] == "cursor.console.tool")
+            .collect();
+        assert_eq!(tools[0]["status"], "error");
+        assert_eq!(tools[0]["output"], "permission denied");
+        assert_eq!(tools[1]["status"], "error");
+        assert_eq!(tools[1]["output"], "timeout waiting");
+    }
+
+    #[test]
+    fn successful_tool_still_publishes_stdout_as_completed() {
+        let registry = RunStreamRegistry::new();
+        let handle = registry.register(uuid::Uuid::new_v4());
+        let mut console = CursorConsolePublisher::new();
+
+        publish_completed_shell(
+            &mut console,
+            &handle,
+            "tool_ok",
+            json!({"success": {"exitCode": 0, "stdout": "ok\n"}}),
+        );
+
+        let tool = last_tool(&handle);
+        assert_eq!(tool["status"], "completed");
+        assert_eq!(tool["output"], "ok");
     }
 }
