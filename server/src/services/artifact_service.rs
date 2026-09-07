@@ -64,6 +64,9 @@ impl ArtifactService {
     }
 
     pub fn write_meta(paths: &RunArtifactPaths, meta: &RunArtifactMeta) -> std::io::Result<()> {
+        if let Some(parent) = paths.meta_json.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
         let raw = serde_json::to_vec_pretty(meta)?;
         std::fs::write(&paths.meta_json, raw)
     }
@@ -111,5 +114,30 @@ mod tests {
             paths.session_snapshot.display().to_string(),
             "/data/artifacts/runs/550e8400-e29b-41d4-a716-446655440000/session.snapshot.json"
         );
+    }
+
+    #[test]
+    fn write_meta_creates_missing_parent_dirs() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let artifacts_dir = temp.path().join("artifacts");
+        let run_id = "550e8400-e29b-41d4-a716-446655440000";
+        let paths = RunArtifactPaths::new(
+            artifacts_dir.to_str().expect("utf8"),
+            run_id,
+        );
+        assert!(!paths.meta_json.parent().expect("parent").exists());
+
+        ArtifactService::write_meta(
+            &paths,
+            &RunArtifactMeta {
+                provider: "cursor".into(),
+                session_id: None,
+                frame_count: 0,
+                ended_at: "2026-09-07T00:00:00Z".into(),
+            },
+        )
+        .expect("write meta");
+
+        assert!(paths.meta_json.is_file());
     }
 }

@@ -145,6 +145,35 @@ pub fn fixtures_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../fixtures/agent-responses")
 }
 
+/// Resolve the ticket worktree directory from `.agent/context.md` and return an
+/// absolute path.
+///
+/// Config often uses relative `worktrees_path` (e.g. `./data/worktrees`). Providers
+/// that both `current_dir(worktree)` and pass that same relative path as a CLI
+/// flag (`--workspace`, `-C`, …) make the child resolve the flag against the new
+/// cwd and look for a duplicated path. Canonicalizing once here keeps every
+/// connector safe.
+pub fn worktree_dir_from_context(context_path: &str) -> Result<PathBuf, ProviderError> {
+    let context_path = PathBuf::from(context_path);
+    let worktree = context_path
+        .parent()
+        .and_then(|p| p.parent())
+        .ok_or_else(|| ProviderError::InvalidInput("bad context path".into()))?;
+    absolute_existing_dir(worktree)
+}
+
+pub fn absolute_existing_dir(path: &std::path::Path) -> Result<PathBuf, ProviderError> {
+    std::fs::canonicalize(path).map_err(|err| {
+        ProviderError::Io(std::io::Error::new(
+            err.kind(),
+            format!(
+                "worktree path `{}` is not an accessible directory: {err}",
+                path.display()
+            ),
+        ))
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -230,5 +259,33 @@ mod tests {
             Some(v) => std::env::set_var("MOCK_AGENT_RESPONSE", v),
             None => std::env::remove_var("MOCK_AGENT_RESPONSE"),
         }
+    }
+
+    #[test]
+    fn worktree_dir_from_context_absolutizes_existing_dir() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let worktree = tmp.path().join("wt");
+        let context = worktree.join(".agent").join("context.md");
+        std::fs::create_dir_all(context.parent().unwrap()).expect("mkdir");
+        std::fs::write(&context, "x").expect("write");
+
+        let resolved = worktree_dir_from_context(context.to_str().unwrap()).expect("resolve");
+        assert!(resolved.is_absolute());
+        assert_eq!(resolved, worktree.canonicalize().unwrap());
+    }
+
+    #[test]
+    fn worktree_dir_from_context_rejects_bad_path() {
+        let err = worktree_dir_from_context("context.md").expect_err("need parents");
+        assert!(matches!(err, ProviderError::InvalidInput(_)));
+    }
+
+    #[test]
+    fn absolute_existing_dir_rejects_missing() {
+        let err = absolute_existing_dir(std::path::Path::new(
+            "./data/worktrees/definitely-missing-coppice-wt",
+        ))
+        .expect_err("missing");
+        assert!(err.to_string().contains("not an accessible directory"));
     }
 }

@@ -68,7 +68,14 @@ pub fn spawn_workers(state: Arc<AppState>) {
             let worker_id = format!("worker-{i}");
             loop {
                 if let Err(err) = process_one(&state, &worker_id).await {
-                    tracing::error!(error = %format_job_error(&err), "job worker error");
+                    // Prefer the anyhow chain (where the failure happened) over a bare
+                    // Display. Backtraces appear when RUST_BACKTRACE/RUST_LIB_BACKTRACE=1.
+                    tracing::error!(
+                        error = %format_job_error(&err),
+                        error_debug = ?err,
+                        backtrace = %err.backtrace(),
+                        "job worker error"
+                    );
                 }
                 tokio::time::sleep(Duration::from_millis(500)).await;
             }
@@ -602,21 +609,44 @@ async fn execute_job(
         Ok(result) => result,
         Err(ProviderError::Cancelled) => {
             let session_id = run_session_id(pool, run.id).await;
-            persist_artifacts(state, &stream, run.id, connector_name, session_id)?;
+            best_effort_persist_artifacts(
+                state,
+                &stream,
+                run.id,
+                connector_name,
+                session_id,
+                "after cancel",
+            );
             state.run_streams.remove(run.id);
             return Err(JobCancelled.into());
         }
         Err(err) => {
             let session_id = run_session_id(pool, run.id).await;
-            persist_artifacts(state, &stream, run.id, connector_name, session_id)?;
+            best_effort_persist_artifacts(
+                state,
+                &stream,
+                run.id,
+                connector_name,
+                session_id,
+                "after provider error",
+            );
             state.run_streams.remove(run.id);
-            return Err(anyhow::anyhow!("agent provider: {err}"));
+            return Err(anyhow::Error::new(err).context(format!(
+                "connector `{connector_name}` run failed"
+            )));
         }
     };
 
     if run_svc.is_cancelled(run.id).await? {
         let session_id = run_session_id(pool, run.id).await;
-        persist_artifacts(state, &stream, run.id, connector_name, session_id)?;
+        best_effort_persist_artifacts(
+            state,
+            &stream,
+            run.id,
+            connector_name,
+            session_id,
+            "after cancel",
+        );
         state.run_streams.remove(run.id);
         return Err(JobCancelled.into());
     }
@@ -738,6 +768,27 @@ fn persist_artifacts(
         connector_name,
         session_id,
     )
+}
+
+/// Artifact persistence must never replace the real run failure (e.g. missing CLI)
+/// with a secondary ENOENT from creating artifact files.
+fn best_effort_persist_artifacts(
+    state: &AppState,
+    stream: &crate::sessions::run_registry::RunStreamHandle,
+    run_id: uuid::Uuid,
+    connector_name: &str,
+    session_id: Option<String>,
+    when: &str,
+) {
+    if let Err(err) = persist_artifacts(state, stream, run_id, connector_name, session_id) {
+        tracing::warn!(
+            run_id = %run_id,
+            connector = connector_name,
+            when,
+            error = %err,
+            "failed to persist run artifacts"
+        );
+    }
 }
 
 fn persist_artifacts_to_dir(
@@ -1335,6 +1386,32 @@ mod tests {
         assert_eq!(
             ArtifactService::read_console_events(&paths),
             expected_events
+        );
+    }
+
+    #[test]
+    fn persist_artifacts_with_empty_stream_creates_meta() {
+        let temp = tempfile::tempdir().expect("temp artifact directory");
+        let registry = RunStreamRegistry::new();
+        let handle = registry.register(uuid::Uuid::new_v4());
+        let run_id = uuid::Uuid::new_v4();
+
+        persist_artifacts_to_dir(
+            temp.path().to_str().expect("UTF-8 temp path"),
+            &handle,
+            run_id,
+            "cursor",
+            None,
+        )
+        .expect("persist empty-run artifacts");
+
+        let paths = RunArtifactPaths::new(
+            temp.path().to_str().expect("UTF-8 temp path"),
+            &run_id.to_string(),
+        );
+        assert!(
+            paths.meta_json.is_file(),
+            "meta.json must be created even when the run produced no console frames"
         );
     }
 }

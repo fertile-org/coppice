@@ -1,9 +1,10 @@
 use super::codex_console::CodexConsolePublisher;
-use super::{AgentProvider, AgentRunInput, AgentRunResult, ProviderError};
+use super::{
+    worktree_dir_from_context, AgentProvider, AgentRunInput, AgentRunResult, ProviderError,
+};
 use crate::sessions::opencode_events::{coppice_run_prompt, extract_result_from_text};
 use async_trait::async_trait;
 use coppice_config::CodexProviderConfig;
-use std::path::PathBuf;
 use std::process::Stdio;
 use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, BufReader};
@@ -27,11 +28,7 @@ impl AgentProvider for CodexProvider {
     }
 
     async fn run(&self, input: AgentRunInput) -> Result<AgentRunResult, ProviderError> {
-        let context_path = PathBuf::from(&input.context_path);
-        let worktree = context_path
-            .parent()
-            .and_then(|p| p.parent())
-            .ok_or_else(|| ProviderError::InvalidInput("bad context path".into()))?;
+        let worktree = worktree_dir_from_context(&input.context_path)?;
 
         let run_timeout = Duration::from_secs(self.config.run_timeout_secs);
 
@@ -43,7 +40,7 @@ impl AgentProvider for CodexProvider {
             .arg("--json")
             .arg("--dangerously-bypass-approvals-and-sandbox")
             .arg("-C")
-            .arg(worktree)
+            .arg(&worktree)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());

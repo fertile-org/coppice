@@ -1,9 +1,10 @@
 use super::cursor_console::CursorConsolePublisher;
-use super::{AgentProvider, AgentRunInput, AgentRunResult, ProviderError};
+use super::{
+    worktree_dir_from_context, AgentProvider, AgentRunInput, AgentRunResult, ProviderError,
+};
 use crate::sessions::opencode_events::{coppice_run_prompt, extract_result_from_text};
 use async_trait::async_trait;
 use coppice_config::CursorProviderConfig;
-use std::path::PathBuf;
 use std::process::Stdio;
 use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, BufReader};
@@ -27,15 +28,12 @@ impl AgentProvider for CursorProvider {
     }
 
     async fn run(&self, input: AgentRunInput) -> Result<AgentRunResult, ProviderError> {
-        let context_path = PathBuf::from(&input.context_path);
-        let worktree = context_path
-            .parent()
-            .and_then(|p| p.parent())
-            .ok_or_else(|| ProviderError::InvalidInput("bad context path".into()))?;
+        let worktree = worktree_dir_from_context(&input.context_path)?;
 
         let run_timeout = Duration::from_secs(self.config.run_timeout_secs);
+        let command = self.config.command.as_str();
 
-        let mut cmd = Command::new(&self.config.command);
+        let mut cmd = Command::new(command);
         cmd.arg("-p")
             .arg(coppice_run_prompt())
             .arg("--trust")
@@ -43,11 +41,12 @@ impl AgentProvider for CursorProvider {
             .arg("--output-format")
             .arg("stream-json")
             .arg("--workspace")
-            .arg(worktree)
-            .current_dir(worktree)
+            .arg(&worktree)
+            .current_dir(&worktree)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
+            .stderr(Stdio::piped())
+            .kill_on_drop(true);
 
         if let Some(model) = &input.model {
             cmd.arg("--model").arg(model);
@@ -64,26 +63,48 @@ impl AgentProvider for CursorProvider {
         // server runs. The child process inherits that environment directly.
         // Coppice does not inject or strip credentials.
 
-        let mut child = cmd.spawn().map_err(ProviderError::Io)?;
+        tracing::info!(
+            command,
+            cwd = %worktree.display(),
+            model = input.model.as_deref().unwrap_or(""),
+            resume = input.resume_session_id.as_deref().unwrap_or(""),
+            "starting cursor connector subprocess"
+        );
+
+        let mut child = cmd.spawn().map_err(|err| {
+            ProviderError::Io(std::io::Error::new(
+                err.kind(),
+                format!(
+                    "failed to spawn `{command}` (cwd {}): {err}",
+                    worktree.display()
+                ),
+            ))
+        })?;
 
         let stdout = child.stdout.take().expect("piped stdout");
-        let mut stderr = child.stderr.take().expect("piped stderr");
+        let stderr = child.stderr.take().expect("piped stderr");
 
         let mut reader = BufReader::new(stdout).lines();
         let deadline = tokio::time::Instant::now() + run_timeout;
         let mut cancel_rx = input.cancel_rx;
 
-        // Pump stderr to tracing so we don't lose diagnostics.
+        // Collect stderr for failure messages; also mirror to tracing.
         let stderr_task = tokio::spawn(async move {
-            let mut reader = BufReader::new(&mut stderr).lines();
+            let mut reader = BufReader::new(stderr).lines();
+            let mut lines = Vec::new();
             while let Ok(Some(line)) = reader.next_line().await {
                 tracing::debug!(target: "cursor.stderr", "{line}");
+                if lines.len() < 40 {
+                    lines.push(line);
+                }
             }
+            lines
         });
 
         let mut assistant_text = String::new();
         let mut session_sent = false;
         let mut result_error: Option<String> = None;
+        let mut saw_result_event = false;
         let mut console = CursorConsolePublisher::new();
 
         loop {
@@ -104,9 +125,11 @@ impl AgentProvider for CursorProvider {
 
                 _ = tokio::time::sleep_until(deadline) => {
                     let _ = child.kill().await;
+                    let stderr_tail = stderr_tail_from_task(stderr_task).await;
                     return Err(ProviderError::InvalidFixture(format!(
-                        "cursor run timed out after {}s",
-                        run_timeout.as_secs()
+                        "`{command}` timed out after {}s{}",
+                        run_timeout.as_secs(),
+                        format_stderr_suffix(&stderr_tail)
                     )));
                 }
 
@@ -143,6 +166,7 @@ impl AgentProvider for CursorProvider {
 
                             // Terminal result event.
                             if value.get("type").and_then(|v| v.as_str()) == Some("result") {
+                                saw_result_event = true;
                                 if result_event_is_error(&value) {
                                     result_error = Some(
                                         value
@@ -173,23 +197,58 @@ impl AgentProvider for CursorProvider {
 
         // Wait for the process to exit.
         let status = child.wait().await.map_err(ProviderError::Io)?;
-        let _ = stderr_task.await;
+        let stderr_tail = stderr_tail_from_task(stderr_task).await;
 
         if let Some(msg) = result_error {
             return Err(ProviderError::InvalidFixture(format!(
-                "cursor result error: {msg}"
+                "`{command}` result error: {msg}{}",
+                format_stderr_suffix(&stderr_tail)
             )));
         }
 
-        if !status.success() {
+        // Prefer a successful stream result over a weird non-zero exit.
+        if !status.success() && !saw_result_event {
             return Err(ProviderError::InvalidFixture(format!(
-                "cursor exited with status {status}"
+                "`{command}` exited with {status} (cwd {}){}",
+                worktree.display(),
+                format_stderr_suffix(&stderr_tail)
             )));
+        }
+        if !status.success() && saw_result_event {
+            tracing::warn!(
+                command,
+                %status,
+                stderr = %stderr_tail.join("\n"),
+                "cursor CLI returned a result event but exited non-zero; accepting stream result"
+            );
         }
 
         extract_result_from_text(&assistant_text).ok_or_else(|| {
-            ProviderError::InvalidFixture("no result contract found in cursor output".into())
+            ProviderError::InvalidFixture(format!(
+                "no result contract found in `{command}` output{}",
+                format_stderr_suffix(&stderr_tail)
+            ))
         })
+    }
+}
+
+async fn stderr_tail_from_task(
+    stderr_task: tokio::task::JoinHandle<Vec<String>>,
+) -> Vec<String> {
+    stderr_task.await.unwrap_or_default()
+}
+
+fn format_stderr_suffix(lines: &[String]) -> String {
+    let joined = lines
+        .iter()
+        .map(|l| l.trim())
+        .filter(|l| !l.is_empty())
+        .collect::<Vec<_>>()
+        .join(" | ");
+    if joined.is_empty() {
+        String::new()
+    } else {
+        format!("; stderr: {joined}")
     }
 }
 

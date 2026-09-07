@@ -1,10 +1,11 @@
 use super::kilo_console::KiloConsolePublisher;
-use super::{AgentProvider, AgentRunInput, AgentRunResult, ProviderError};
+use super::{
+    worktree_dir_from_context, AgentProvider, AgentRunInput, AgentRunResult, ProviderError,
+};
 use crate::sessions::opencode_events::{coppice_run_prompt, extract_result_from_text};
 use async_trait::async_trait;
 use coppice_config::KiloCodeProviderConfig;
 use serde_json::Value;
-use std::path::PathBuf;
 use std::process::Stdio;
 use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, BufReader};
@@ -60,11 +61,7 @@ impl AgentProvider for KiloCodeProvider {
     }
 
     async fn run(&self, input: AgentRunInput) -> Result<AgentRunResult, ProviderError> {
-        let context_path = PathBuf::from(&input.context_path);
-        let worktree = context_path
-            .parent()
-            .and_then(|p| p.parent())
-            .ok_or_else(|| ProviderError::InvalidInput("bad context path".into()))?;
+        let worktree = worktree_dir_from_context(&input.context_path)?;
 
         let run_timeout = Duration::from_secs(self.config.run_timeout_secs);
 
@@ -78,7 +75,7 @@ impl AgentProvider for KiloCodeProvider {
             .arg("json")
             .arg("--auto")
             .arg(coppice_run_prompt())
-            .current_dir(worktree)
+            .current_dir(&worktree)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());

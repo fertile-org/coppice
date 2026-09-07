@@ -29,6 +29,19 @@ mod tests {
     }
 
     #[test]
+    fn format_job_error_preserves_provider_spawn_detail() {
+        let io = std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            "failed to spawn `agent` (cwd /tmp/wt): No such file or directory (os error 2)",
+        );
+        let err = anyhow::Error::new(io).context("connector `cursor` run failed");
+        let formatted = format_job_error(&err);
+        assert!(formatted.contains("connector `cursor` run failed"));
+        assert!(formatted.contains("failed to spawn `agent`"));
+        assert!(formatted.contains("No such file or directory"));
+    }
+
+    #[test]
     fn format_job_error_truncates_long_messages() {
         let err = anyhow::anyhow!("x".repeat(5000));
         let formatted = format_job_error(&err);
