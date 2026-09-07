@@ -75,9 +75,26 @@ const components: Components = {
   ),
 };
 
+const AGENT_REQUESTS_MARKER_PREFIX = '<!-- coppice-agent-requests: ';
+
+function isAgentRequestsMarkerLine(line: string): boolean {
+  const trimmed = line.trim();
+  return (
+    trimmed.startsWith(AGENT_REQUESTS_MARKER_PREFIX) && trimmed.endsWith(' -->')
+  );
+}
+
 export function normalizeCommentMarkdown(text: string): string {
+  // Drop durable Coppice metadata markers from display only (storage keeps them).
+  const withoutMarkers = text
+    .split('\n')
+    .filter((line) => !isAgentRequestsMarkerLine(line))
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .replace(/\n+$/g, '');
+
   // Ensure markdown block sections (e.g. **Tests run:**) start on their own paragraph.
-  return text.replace(/([^\n])\n(\*\*[^*]+:\*\*)/g, '$1\n\n$2');
+  return withoutMarkers.replace(/([^\n])\n(\*\*[^*]+:\*\*)/g, '$1\n\n$2');
 }
 
 export function TicketMarkdown({ children }: { children: string }) {
