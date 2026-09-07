@@ -26,8 +26,10 @@ pub struct DefaultBranchSyncStatus {
     pub forge_token_configured: bool,
     pub can_fetch: bool,
     pub can_push: bool,
+    pub can_pull: bool,
     pub fetch_disabled_reason: Option<String>,
     pub push_disabled_reason: Option<String>,
+    pub pull_disabled_reason: Option<String>,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -35,6 +37,14 @@ pub struct DefaultBranchSyncStatus {
 pub struct PushDefaultBranchResult {
     pub default_branch: String,
     pub remote: String,
+    pub message: String,
+    pub status: DefaultBranchSyncStatus,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PullDefaultBranchResult {
+    pub default_branch: String,
     pub message: String,
     pub status: DefaultBranchSyncStatus,
 }
@@ -169,6 +179,16 @@ impl<'a> RepoGitService<'a> {
             local_sha.is_some(),
         );
 
+        let (can_pull, pull_disabled_reason) = default_branch_pull_gate(
+            can_fetch,
+            fetch_disabled_reason.clone(),
+            working_tree_clean,
+            ahead_count,
+            behind_count,
+            missing_remote_reason.as_deref(),
+            local_sha.is_some(),
+        );
+
         Ok(DefaultBranchSyncStatus {
             default_branch: branch.clone(),
             local_sha,
@@ -180,8 +200,10 @@ impl<'a> RepoGitService<'a> {
             forge_token_configured,
             can_fetch,
             can_push,
+            can_pull,
             fetch_disabled_reason,
             push_disabled_reason,
+            pull_disabled_reason,
         })
     }
 
@@ -314,6 +336,125 @@ impl<'a> RepoGitService<'a> {
         })
     }
 
+    /// Fetch the default branch from the configured remote, then fast-forward the local
+    /// default branch when strictly behind. Never merges diverged history.
+    pub async fn pull_default_branch(
+        &self,
+        repo_id: Uuid,
+    ) -> Result<PullDefaultBranchResult, RepoGitError> {
+        let ctx = self.resolve(repo_id).await?;
+        let remote_url = ctx
+            .remote_url
+            .as_deref()
+            .filter(|s| !s.trim().is_empty())
+            .ok_or(RepoGitError::NoRemoteUrl)?;
+        let secret_id = ctx
+            .forge_token_secret_id
+            .ok_or(RepoGitError::NoForgeToken)?;
+        let token = SecretService::new(self.pool, self.secret_store)
+            .decrypt_by_id(secret_id)
+            .await?;
+        let auth_remote = auth_https_remote(remote_url, token.trim())?;
+        self.fetch_then_ff_pull(&ctx, &auth_remote, Some(token.trim()))
+            .await
+    }
+
+    /// Fetch from an explicit remote URL then fast-forward (tests with a bare sibling).
+    pub async fn pull_default_branch_from_remote(
+        &self,
+        repo_id: Uuid,
+        remote: &str,
+    ) -> Result<PullDefaultBranchResult, RepoGitError> {
+        let ctx = self.resolve(repo_id).await?;
+        self.fetch_then_ff_pull(&ctx, remote, None).await
+    }
+
+    async fn fetch_then_ff_pull(
+        &self,
+        ctx: &RepoGitContext,
+        fetch_remote: &str,
+        token: Option<&str>,
+    ) -> Result<PullDefaultBranchResult, RepoGitError> {
+        let refspec = fetch_default_refspec(&ctx.default_branch);
+        match run_git(ctx.git_dir.as_path(), &["fetch", fetch_remote, &refspec]).await {
+            Ok(()) => {}
+            Err(GitOpsError::Git(msg)) => {
+                let sanitized = match token {
+                    Some(t) => sanitize_token(&msg, t),
+                    None => msg,
+                };
+                return Err(RepoGitError::Git(sanitized));
+            }
+            Err(other) => return Err(other.into()),
+        }
+
+        self.enforce_pull_gates(ctx).await?;
+        self.fast_forward_default_branch(ctx).await?;
+
+        let status = self.build_status(ctx).await?;
+        Ok(PullDefaultBranchResult {
+            default_branch: ctx.default_branch.clone(),
+            message: "Default branch pulled".into(),
+            status,
+        })
+    }
+
+    async fn fast_forward_default_branch(
+        &self,
+        ctx: &RepoGitContext,
+    ) -> Result<(), RepoGitError> {
+        let local_ref = format!("refs/heads/{}", ctx.default_branch);
+        let remote_ref = format!("refs/remotes/origin/{}", ctx.default_branch);
+        let remote_sha = git_rev_parse(&ctx.git_dir, &remote_ref)
+            .await?
+            .ok_or_else(|| {
+                RepoGitError::Git(format!("Remote-tracking ref `{remote_ref}` not found"))
+            })?;
+
+        // Belt-and-suspenders: refuse unless local is a strict ancestor of remote.
+        match run_git(
+            &ctx.git_dir,
+            &["merge-base", "--is-ancestor", &local_ref, &remote_ref],
+        )
+        .await
+        {
+            Ok(()) => {}
+            Err(GitOpsError::Git(_)) => {
+                return Err(RepoGitError::Git(
+                    "Local default branch is not a fast-forward of remote — refuse pull".into(),
+                ));
+            }
+            Err(other) => return Err(other.into()),
+        }
+
+        let on_default = head_points_at_ref(&ctx.git_dir, &local_ref).await?;
+        if on_default {
+            // Update HEAD, index, and working tree together.
+            run_git(&ctx.git_dir, &["merge", "--ff-only", &remote_ref]).await?;
+        } else {
+            // Leave unrelated checked-out branches alone; only move the default branch tip.
+            run_git(&ctx.git_dir, &["update-ref", &local_ref, &remote_sha]).await?;
+        }
+        Ok(())
+    }
+
+    async fn enforce_pull_gates(&self, ctx: &RepoGitContext) -> Result<(), RepoGitError> {
+        let status = self.build_status(ctx).await?;
+        if !status.can_pull {
+            let reason = status
+                .pull_disabled_reason
+                .unwrap_or_else(|| "Pull is not allowed".into());
+            if ctx.remote_url.as_deref().map(str::trim).filter(|s| !s.is_empty()).is_none() {
+                return Err(RepoGitError::NoRemoteUrl);
+            }
+            if ctx.forge_token_secret_id.is_none() {
+                return Err(RepoGitError::NoForgeToken);
+            }
+            return Err(RepoGitError::Git(reason));
+        }
+        Ok(())
+    }
+
     async fn enforce_push_gates(&self, ctx: &RepoGitContext) -> Result<(), RepoGitError> {
         let status = self.build_status(ctx).await?;
         if !status.can_push {
@@ -368,7 +509,7 @@ fn default_branch_push_gate(
         return (
             false,
             Some(
-                "Local default branch is behind or diverged from remote — refuse push without force"
+                "Local default branch is behind or diverged from remote — use Pull when strictly behind, or resolve divergence outside Coppice"
                     .into(),
             ),
         );
@@ -380,6 +521,72 @@ fn default_branch_push_gate(
         );
     }
     (true, None)
+}
+
+fn default_branch_pull_gate(
+    config_ok: bool,
+    config_reason: Option<String>,
+    working_tree_clean: bool,
+    ahead_count: Option<u64>,
+    behind_count: Option<u64>,
+    missing_remote_reason: Option<&str>,
+    local_branch_exists: bool,
+) -> (bool, Option<String>) {
+    if !config_ok {
+        return (false, config_reason);
+    }
+    if !local_branch_exists {
+        return (false, Some("Local default branch not found".into()));
+    }
+    if !working_tree_clean {
+        return (
+            false,
+            Some(
+                "Main repository has uncommitted changes — commit or stash before pulling"
+                    .into(),
+            ),
+        );
+    }
+    if let Some(reason) = missing_remote_reason {
+        return (false, Some(reason.to_string()));
+    }
+    let behind = behind_count.unwrap_or(0);
+    let ahead = ahead_count.unwrap_or(0);
+    if ahead > 0 && behind > 0 {
+        return (
+            false,
+            Some(
+                "Local default branch has diverged from remote — refuse pull without merge or rebase"
+                    .into(),
+            ),
+        );
+    }
+    if ahead > 0 {
+        return (
+            false,
+            Some("Local default branch is ahead of remote — pull is not needed".into()),
+        );
+    }
+    if behind == 0 {
+        return (
+            false,
+            Some("Local default branch is not behind remote".into()),
+        );
+    }
+    (true, None)
+}
+
+async fn head_points_at_ref(git_dir: &std::path::Path, local_ref: &str) -> Result<bool, RepoGitError> {
+    let output = tokio::process::Command::new("git")
+        .current_dir(git_dir)
+        .args(["symbolic-ref", "-q", "HEAD"])
+        .output()
+        .await?;
+    if !output.status.success() {
+        return Ok(false);
+    }
+    let head = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    Ok(head == local_ref)
 }
 
 #[cfg(test)]
@@ -443,6 +650,10 @@ mod tests {
         assert!(!ok);
         let reason = reason.unwrap();
         assert!(reason.contains("behind") || reason.contains("diverged"));
+        assert!(
+            reason.to_lowercase().contains("pull"),
+            "behind push reason should point operators at Pull: {reason}"
+        );
 
         let (ok, reason) =
             default_branch_push_gate(true, None, true, Some(0), Some(0), None, true);
@@ -456,6 +667,82 @@ mod tests {
 
         let (ok, _) = default_branch_push_gate(true, None, true, Some(2), Some(0), None, true);
         assert!(ok);
+    }
+
+    #[test]
+    fn pull_gate_allows_strictly_behind_clean_checkout() {
+        let (ok, reason) = default_branch_pull_gate(
+            true,
+            None,
+            true,
+            Some(0),
+            Some(2),
+            None,
+            true,
+        );
+        assert!(ok, "{reason:?}");
+        assert!(reason.is_none());
+    }
+
+    #[test]
+    fn pull_gate_blocks_dirty_diverged_not_behind_and_missing_remote() {
+        let (ok, reason) = default_branch_pull_gate(
+            true,
+            None,
+            false,
+            Some(0),
+            Some(1),
+            None,
+            true,
+        );
+        assert!(!ok);
+        assert!(reason.unwrap().contains("uncommitted"));
+
+        let (ok, reason) = default_branch_pull_gate(
+            true,
+            None,
+            true,
+            Some(1),
+            Some(1),
+            None,
+            true,
+        );
+        assert!(!ok);
+        let reason = reason.unwrap();
+        assert!(reason.contains("diverged") || reason.contains("ahead"));
+
+        let (ok, reason) =
+            default_branch_pull_gate(true, None, true, Some(0), Some(0), None, true);
+        assert!(!ok);
+        assert!(reason.unwrap().contains("not behind"));
+
+        let (ok, reason) =
+            default_branch_pull_gate(true, None, true, Some(2), Some(0), None, true);
+        assert!(!ok);
+        let reason = reason.unwrap();
+        assert!(reason.contains("ahead") || reason.contains("not behind"));
+
+        let (ok, reason) = default_branch_pull_gate(
+            true,
+            None,
+            true,
+            None,
+            None,
+            Some("Fetch remote first"),
+            true,
+        );
+        assert!(!ok);
+        assert_eq!(reason.as_deref(), Some("Fetch remote first"));
+
+        let (ok, reason) =
+            default_branch_pull_gate(false, Some("Set a forge token".into()), true, Some(0), Some(1), None, true);
+        assert!(!ok);
+        assert!(reason.unwrap().contains("forge token"));
+
+        let (ok, reason) =
+            default_branch_pull_gate(true, None, true, Some(0), Some(1), None, false);
+        assert!(!ok);
+        assert!(reason.unwrap().contains("Local default branch not found"));
     }
 
     #[test]
@@ -493,5 +780,24 @@ mod tests {
         let (can_push, reason) =
             default_branch_push_gate(true, None, true, Some(ahead), Some(behind), None, true);
         assert!(can_push, "{reason:?}");
+    }
+
+    #[tokio::test]
+    async fn head_points_at_ref_detects_checked_out_branch() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let repo = tmp.path();
+        git(repo, &["init", "-b", "main"]);
+        commit_file(repo, "a.txt", "a\n", "initial");
+        assert!(head_points_at_ref(repo, "refs/heads/main")
+            .await
+            .expect("head"));
+
+        git(repo, &["checkout", "-b", "feature"]);
+        assert!(!head_points_at_ref(repo, "refs/heads/main")
+            .await
+            .expect("head"));
+        assert!(head_points_at_ref(repo, "refs/heads/feature")
+            .await
+            .expect("head"));
     }
 }

@@ -26,6 +26,10 @@ vi.mock('./useRepos', async () => {
       mutateAsync: vi.fn(),
       isPending: false,
     }),
+    usePullDefaultBranch: () => ({
+      mutateAsync: vi.fn(),
+      isPending: false,
+    }),
     usePushDefaultBranch: () => ({
       mutateAsync: vi.fn(),
       isPending: false,
@@ -61,8 +65,10 @@ function baseStatus(
     forgeTokenConfigured: true,
     canFetch: true,
     canPush: true,
+    canPull: false,
     fetchDisabledReason: null,
     pushDisabledReason: null,
+    pullDisabledReason: 'Local default branch is not behind remote',
     ...overrides,
   };
 }
@@ -79,7 +85,56 @@ describe('DefaultBranchSyncControls', () => {
 
     expect(screen.getByRole('button', { name: 'Fetch' })).toBeEnabled();
     expect(screen.getByRole('button', { name: 'Push to remote' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Pull' })).toBeDisabled();
     expect(screen.getByText(/ahead 1, behind 0/)).toBeVisible();
+  });
+
+  it('enables Pull from server canPull and disables Push when behind', () => {
+    render(
+      <DefaultBranchSyncControls
+        repo={repo}
+        statusOverride={baseStatus({
+          aheadCount: 0,
+          behindCount: 2,
+          canPush: false,
+          canPull: true,
+          pushDisabledReason:
+            'Local default branch is behind or diverged from remote — use Pull when strictly behind, or resolve divergence outside Coppice',
+          pullDisabledReason: null,
+        })}
+      />,
+    );
+
+    expect(screen.getByRole('button', { name: 'Pull' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Push to remote' })).toBeDisabled();
+    expect(
+      screen.getByText(/use Pull when strictly behind/),
+    ).toBeVisible();
+  });
+
+  it('disables Pull and surfaces pullDisabledReason when canPull is false', () => {
+    render(
+      <DefaultBranchSyncControls
+        repo={repo}
+        statusOverride={baseStatus({
+          canPull: false,
+          pullDisabledReason:
+            'Main repository has uncommitted changes — commit or stash before pulling',
+        })}
+      />,
+    );
+
+    const pull = screen.getByRole('button', { name: 'Pull' });
+    expect(pull).toBeDisabled();
+    expect(pull).toHaveAttribute(
+      'title',
+      'Main repository has uncommitted changes — commit or stash before pulling',
+    );
+    expect(
+      screen.getByText(
+        'Main repository has uncommitted changes — commit or stash before pulling',
+      ),
+    ).toBeVisible();
   });
 
   it('disables Push and surfaces pushDisabledReason when canPush is false', () => {
@@ -113,8 +168,10 @@ describe('DefaultBranchSyncControls', () => {
         statusOverride={baseStatus({
           canFetch: false,
           canPush: false,
+          canPull: false,
           fetchDisabledReason: 'Set a forge token in Settings → Repositories',
           pushDisabledReason: 'Set a forge token in Settings → Repositories',
+          pullDisabledReason: 'Set a forge token in Settings → Repositories',
         })}
       />,
     );
@@ -142,6 +199,30 @@ describe('DefaultBranchSyncControls', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Push to remote' }));
     expect(confirm).toHaveBeenCalled();
     expect(onPush).toHaveBeenCalled();
+    confirm.mockRestore();
+  });
+
+  it('confirms before pulling', async () => {
+    const onPull = vi.fn();
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
+
+    render(
+      <DefaultBranchSyncControls
+        repo={repo}
+        statusOverride={baseStatus({
+          aheadCount: 0,
+          behindCount: 1,
+          canPush: false,
+          canPull: true,
+          pullDisabledReason: null,
+        })}
+        onPull={onPull}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Pull' }));
+    expect(confirm).toHaveBeenCalled();
+    expect(onPull).toHaveBeenCalled();
     confirm.mockRestore();
   });
 });

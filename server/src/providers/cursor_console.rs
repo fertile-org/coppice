@@ -267,6 +267,7 @@ fn stream_text(success: &Value, key: &str) -> Option<String> {
 /// 2. `result.failure` string or object `message` / `reason` / `error`
 /// 3. Failed shell (`status == "error"` under `success`): stderr then stdout when both nonempty
 /// 4. Error fallback: `exit code N` or `tool failed`
+///
 /// Success tools keep stdout-first (then stderr) publishing.
 fn tool_output(payload: &Value) -> Option<String> {
     let status = completed_tool_status(payload);

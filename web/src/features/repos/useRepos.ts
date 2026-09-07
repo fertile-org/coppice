@@ -19,13 +19,21 @@ export type DefaultBranchSyncStatus = {
   forgeTokenConfigured: boolean;
   canFetch: boolean;
   canPush: boolean;
+  canPull: boolean;
   fetchDisabledReason: string | null;
   pushDisabledReason: string | null;
+  pullDisabledReason: string | null;
 };
 
 export type PushDefaultBranchResult = {
   defaultBranch: string;
   remote: string;
+  message: string;
+  status: DefaultBranchSyncStatus;
+};
+
+export type PullDefaultBranchResult = {
+  defaultBranch: string;
   message: string;
   status: DefaultBranchSyncStatus;
 };
@@ -112,6 +120,15 @@ async function pushDefaultBranch(
   return res.json() as Promise<PushDefaultBranchResult>;
 }
 
+async function pullDefaultBranch(
+  repoId: string,
+): Promise<PullDefaultBranchResult> {
+  const res = await apiFetch(`/api/repos/${repoId}/pull-default-branch`, {
+    method: 'POST',
+  });
+  return res.json() as Promise<PullDefaultBranchResult>;
+}
+
 export function useRepos() {
   return useQuery({
     queryKey: REPOS_QUERY_KEY,
@@ -143,6 +160,20 @@ export function usePushDefaultBranch(repoId: string) {
 
   return useMutation({
     mutationFn: () => pushDefaultBranch(repoId),
+    onSuccess: (result) => {
+      queryClient.setQueryData(
+        defaultBranchSyncQueryKey(repoId),
+        result.status,
+      );
+    },
+  });
+}
+
+export function usePullDefaultBranch(repoId: string) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: () => pullDefaultBranch(repoId),
     onSuccess: (result) => {
       queryClient.setQueryData(
         defaultBranchSyncQueryKey(repoId),
