@@ -1,14 +1,28 @@
 import { useDraggable } from '@dnd-kit/core';
 import { CSS } from '@dnd-kit/utilities';
-import { GitBranch, Network } from 'lucide-react';
+import { Bot, GitBranch, Network } from 'lucide-react';
+import type { CSSProperties } from 'react';
 import type { TicketHierarchy } from './ticketHierarchy';
 import type { Ticket } from './useTickets';
+
+const PRIORITY_LEVELS = new Set(['low', 'medium', 'high', 'critical']);
+
+function priorityBadgeStyle(priority: string): CSSProperties | undefined {
+  if (!PRIORITY_LEVELS.has(priority)) return undefined;
+  return {
+    backgroundColor: `var(--badge-priority-${priority}-bg)`,
+    color: `var(--badge-priority-${priority}-text)`,
+    borderColor: `var(--badge-priority-${priority}-border)`,
+  };
+}
 
 interface TicketCardProps {
   ticket: Ticket;
   hierarchy?: TicketHierarchy;
   onOpen: (ticketId: string) => void;
   isLive?: boolean;
+  /** Resolved agent display name; omit when ticket has no assignee. */
+  assigneeName?: string;
 }
 
 export function TicketCard({
@@ -16,6 +30,7 @@ export function TicketCard({
   hierarchy,
   onOpen,
   isLive = false,
+  assigneeName,
 }: TicketCardProps) {
   const { attributes, listeners, setNodeRef, transform, isDragging } =
     useDraggable({
@@ -81,6 +96,15 @@ export function TicketCard({
         <span>{ticket.title}</span>
       </p>
 
+      {assigneeName && (
+        <div className="mt-1.5 flex min-w-0 items-center gap-1.5 font-body text-xs leading-tight text-text-secondary">
+          <Bot className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+          <span className="min-w-0 truncate" title={assigneeName}>
+            {assigneeName}
+          </span>
+        </div>
+      )}
+
       {(ticket.substatusDisplay || ticket.priority) && (
         <div className="mt-2 flex flex-wrap gap-1.5">
           {ticket.substatusDisplay && (
@@ -97,7 +121,16 @@ export function TicketCard({
             </span>
           )}
           {ticket.priority && (
-            <span className="rounded-full border border-border bg-paper-200 px-2 py-0.5 font-body text-xs capitalize text-text-secondary">
+            <span
+              className={[
+                'rounded-full border px-2 py-0.5 font-body text-xs capitalize',
+                PRIORITY_LEVELS.has(ticket.priority)
+                  ? ''
+                  : 'border-border bg-paper-200 text-text-secondary',
+              ].join(' ')}
+              style={priorityBadgeStyle(ticket.priority)}
+              data-priority={ticket.priority}
+            >
               {ticket.priority}
             </span>
           )}
@@ -115,4 +148,13 @@ export function TicketCard({
       )}
     </div>
   );
+}
+
+/** Resolve assignee label for a card; returns undefined when unassigned. */
+export function resolveAssigneeName(
+  assigneeAgentId: string | undefined,
+  agentsById: Map<string, string>,
+): string | undefined {
+  if (!assigneeAgentId) return undefined;
+  return agentsById.get(assigneeAgentId) ?? 'Unknown agent';
 }

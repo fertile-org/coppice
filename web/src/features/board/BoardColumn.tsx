@@ -6,7 +6,7 @@ import {
   columnBorderClass,
   type BoardColumnDef,
 } from './columns';
-import { TicketCard } from './TicketCard';
+import { resolveAssigneeName, TicketCard } from './TicketCard';
 import type { TicketHierarchyIndex } from './ticketHierarchy';
 import type { Ticket } from './useTickets';
 
@@ -14,6 +14,7 @@ interface BoardColumnProps {
   column: BoardColumnDef;
   tickets: Ticket[];
   hierarchyIndex: TicketHierarchyIndex;
+  agentsById: Map<string, string>;
   showQuickAdd?: boolean;
   onQuickAdd?: (title: string) => Promise<void>;
   isAdding?: boolean;
@@ -24,6 +25,7 @@ export function BoardColumn({
   column,
   tickets,
   hierarchyIndex,
+  agentsById,
   showQuickAdd = false,
   onQuickAdd,
   isAdding = false,
@@ -103,6 +105,10 @@ export function BoardColumn({
             hierarchy={hierarchyIndex.get(ticket.id)}
             onOpen={onOpenTicket}
             isLive={ticket.hasActiveRun ?? false}
+            assigneeName={resolveAssigneeName(
+              ticket.assigneeAgentId,
+              agentsById,
+            )}
           />
         ))}
       </div>

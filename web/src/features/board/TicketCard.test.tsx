@@ -3,7 +3,7 @@ import { DndContext } from '@dnd-kit/core';
 import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import type { TicketHierarchy } from './ticketHierarchy';
-import { TicketCard } from './TicketCard';
+import { resolveAssigneeName, TicketCard } from './TicketCard';
 import type { Ticket } from './useTickets';
 
 const ticket: Ticket = {
@@ -22,6 +22,7 @@ function renderCard(
   hierarchy?: TicketHierarchy,
   ticketOverrides: Partial<Ticket> = {},
   onOpen = vi.fn(),
+  assigneeName?: string,
 ) {
   const result = render(
     <DndContext>
@@ -29,6 +30,7 @@ function renderCard(
         ticket={{ ...ticket, ...ticketOverrides }}
         hierarchy={hierarchy}
         onOpen={onOpen}
+        assigneeName={assigneeName}
       />
     </DndContext>,
   );
@@ -132,5 +134,63 @@ describe('TicketCard hierarchy cues', () => {
 
     expect(onOpen).toHaveBeenNthCalledWith(1, ticket.id);
     expect(onOpen).toHaveBeenNthCalledWith(2, ticket.id);
+  });
+});
+
+describe('TicketCard assignee and priority', () => {
+  it('shows the assignee name when provided and omits it when unset', () => {
+    const { rerender } = renderCard(undefined, {}, vi.fn(), 'Frontend Engineer');
+
+    const assignee = screen.getByText('Frontend Engineer');
+    expect(assignee).toBeVisible();
+    expect(assignee).toHaveClass('truncate');
+    expect(assignee).toHaveAttribute('title', 'Frontend Engineer');
+
+    rerender(
+      <DndContext>
+        <TicketCard ticket={ticket} onOpen={vi.fn()} />
+      </DndContext>,
+    );
+    expect(screen.queryByText('Frontend Engineer')).toBeNull();
+  });
+
+  it('renders the unknown-agent fallback label', () => {
+    renderCard(undefined, {}, vi.fn(), 'Unknown agent');
+    expect(screen.getByText('Unknown agent')).toBeVisible();
+  });
+
+  it('styles low and critical priority badges with distinct token colors', () => {
+    const { rerender } = renderCard(undefined, { priority: 'low' });
+    const low = screen.getByText('low');
+    expect(low).toHaveAttribute('data-priority', 'low');
+    expect(low.style.backgroundColor).toBe('var(--badge-priority-low-bg)');
+    expect(low.style.color).toBe('var(--badge-priority-low-text)');
+    expect(low.style.borderColor).toBe('var(--badge-priority-low-border)');
+    expect(low.className).toMatch(/capitalize/);
+
+    rerender(
+      <DndContext>
+        <TicketCard
+          ticket={{ ...ticket, priority: 'critical' }}
+          onOpen={vi.fn()}
+        />
+      </DndContext>,
+    );
+    const critical = screen.getByText('critical');
+    expect(critical).toHaveAttribute('data-priority', 'critical');
+    expect(critical.style.backgroundColor).toBe(
+      'var(--badge-priority-critical-bg)',
+    );
+    expect(critical.style.color).toBe('var(--badge-priority-critical-text)');
+    expect(critical.style.borderColor).toBe(
+      'var(--badge-priority-critical-border)',
+    );
+  });
+
+  it('resolveAssigneeName omits unset ids and falls back for missing agents', () => {
+    const agents = new Map([['agent-1', 'FE']]);
+    expect(resolveAssigneeName(undefined, agents)).toBeUndefined();
+    expect(resolveAssigneeName('agent-1', agents)).toBe('FE');
+    expect(resolveAssigneeName('missing', agents)).toBe('Unknown agent');
   });
 });

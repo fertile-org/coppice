@@ -64,6 +64,12 @@ vi.mock('../projects/useProjects', () => ({
   setLastProjectId: vi.fn(),
 }));
 
+vi.mock('../agents/useAgents', () => ({
+  useAgents: () => ({
+    data: [{ id: 'agent-fe', name: 'Frontend Engineer' }],
+  }),
+}));
+
 vi.mock('../tickets/TicketDrawer', () => ({
   TicketDrawer: ({
     parentTicket,
@@ -160,5 +166,42 @@ describe('BoardPage ticket hierarchy', () => {
     expect(screen.getByTestId('ticket-drawer-parent')).toHaveTextContent(
       'Root ticket',
     );
+  });
+
+  it('shows assignee names on cards and omits them when unassigned', () => {
+    ticketsState.tickets = [
+      makeTicket({
+        id: 'assigned',
+        title: 'Assigned ticket',
+        status: 'backlog',
+        assigneeAgentId: 'agent-fe',
+        priority: 'high',
+      }),
+      makeTicket({
+        id: 'unassigned',
+        title: 'Unassigned ticket',
+        status: 'backlog',
+        assigneeAgentId: 'missing-agent',
+      }),
+      makeTicket({
+        id: 'plain',
+        title: 'Plain ticket',
+        status: 'ready',
+      }),
+    ];
+
+    renderBoard();
+
+    const backlog = screen.getByRole('region', { name: 'Backlog' });
+    expect(within(backlog).getByText('Frontend Engineer')).toBeVisible();
+    expect(within(backlog).getByText('Unknown agent')).toBeVisible();
+    expect(within(backlog).getByText('high')).toHaveAttribute(
+      'data-priority',
+      'high',
+    );
+
+    const ready = screen.getByRole('region', { name: 'Ready' });
+    expect(within(ready).queryByText('Frontend Engineer')).toBeNull();
+    expect(within(ready).queryByText('Unknown agent')).toBeNull();
   });
 });
