@@ -18,6 +18,7 @@ import { ProjectPickerPage } from './features/projects/ProjectPickerPage';
 import { RepositoriesPage } from './features/repos/RepositoriesPage';
 import { UsersPage } from './features/users/UsersPage';
 import { CodeReviewPage } from './features/code/CodeReviewPage';
+import { ChatPage } from './features/chat/ChatPage';
 import { KnowledgePage } from './features/knowledge/KnowledgePage';
 import { useOpenTicket } from './features/tickets/useOpenTicket';
 import {
@@ -73,6 +74,8 @@ function App() {
                   element={<BoardPage />}
                 />
                 <Route path="/agents" element={<AgentsPage />} />
+                <Route path="/chat" element={<ChatPage />} />
+                <Route path="/chat/:sessionId" element={<ChatPage />} />
                 <Route path="/knowledge" element={<KnowledgePage />} />
                 <Route
                   path="/settings/repositories"
