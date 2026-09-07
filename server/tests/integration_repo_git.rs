@@ -115,6 +115,40 @@ fn checkout_ahead_of_bare() -> (tempfile::TempDir, PathBuf, PathBuf) {
     (root, local, bare)
 }
 
+/// Local checkout that is one commit behind a bare sibling (origin/main at tip).
+fn checkout_behind_of_bare() -> (tempfile::TempDir, PathBuf, PathBuf) {
+    let root = tempfile::tempdir().expect("tempdir");
+    let bare = root.path().join("remote.git");
+    let local = root.path().join("local");
+    std::fs::create_dir_all(&bare).expect("mkdir bare");
+    std::fs::create_dir_all(&local).expect("mkdir local");
+
+    git(&bare, &["init", "--bare", "-b", "main"]);
+    git(&local, &["init", "-b", "main"]);
+    commit_file(&local, "README.md", "# test\n", "initial");
+    git(
+        &local,
+        &[
+            "remote",
+            "add",
+            "origin",
+            bare.to_str().expect("utf8"),
+        ],
+    );
+    git(&local, &["push", "-u", "origin", "main"]);
+    let base = rev_parse(&local, "HEAD");
+
+    // Advance both local and remote, then rewind local so it is strictly behind.
+    commit_file(&local, "remote.txt", "remote ahead\n", "remote ahead");
+    git(&local, &["push", "origin", "main"]);
+    let tip = rev_parse(&local, "HEAD");
+    git(&local, &["reset", "--hard", &base]);
+    assert_eq!(rev_parse(&local, "HEAD"), base);
+    assert_eq!(rev_parse(&local, "refs/remotes/origin/main"), tip);
+
+    (root, local, bare)
+}
+
 async fn register_repo_with_remote(
     app: &axum::Router,
     local_path: &str,
@@ -221,6 +255,7 @@ async fn default_branch_sync_requires_admin_and_csrf() {
         format!("/api/repos/{repo_id}/default-branch-sync"),
         format!("/api/repos/{repo_id}/fetch"),
         format!("/api/repos/{repo_id}/push-default-branch"),
+        format!("/api/repos/{repo_id}/pull-default-branch"),
     ] {
         let method = if uri.ends_with("default-branch-sync") {
             "GET"
@@ -534,4 +569,201 @@ async fn successful_default_branch_push_via_bare_sibling() {
     let body: serde_json::Value = common::json_body(status).await;
     assert_eq!(body["aheadCount"], 0);
     assert_eq!(body["canPush"], false);
+}
+
+#[tokio::test]
+async fn successful_default_branch_pull_via_bare_sibling() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        eprintln!("skipping: postgres not available");
+        return;
+    }
+
+    let (_root, local, bare) = checkout_behind_of_bare();
+    let (state, app, cookie, csrf, _env) =
+        common::bootstrap_and_login_with_state_and_workers("", |cfg| {
+            cfg.git.push_enabled = true;
+        })
+        .await;
+
+    let repo_id = register_repo_with_remote(
+        &app,
+        &local.display().to_string(),
+        Some("https://github.com/example/repo.git"),
+        &cookie,
+        &csrf,
+    )
+    .await;
+    set_forge_token(&app, &repo_id, "ghs_testtoken", &cookie, &csrf).await;
+
+    let status = app
+        .clone()
+        .oneshot(common::json_request(
+            "GET",
+            &format!("/api/repos/{repo_id}/default-branch-sync"),
+            "",
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(status.status(), StatusCode::OK);
+    let body: serde_json::Value = common::json_body(status).await;
+    assert_eq!(body["aheadCount"], 0);
+    assert_eq!(body["behindCount"], 1);
+    assert_eq!(body["canPull"], true);
+    assert_eq!(body["canPush"], false);
+    assert!(
+        body["pushDisabledReason"]
+            .as_str()
+            .unwrap()
+            .to_lowercase()
+            .contains("pull"),
+        "{body}"
+    );
+
+    let repo_uuid = uuid::Uuid::parse_str(&repo_id).unwrap();
+    let pool = state.db.as_ref().expect("db");
+    let svc = RepoGitService::new(pool, true, &state.secret_store);
+    let result = svc
+        .pull_default_branch_from_remote(repo_uuid, bare.to_str().unwrap())
+        .await
+        .expect("pull from bare");
+
+    assert_eq!(result.status.ahead_count, Some(0));
+    assert_eq!(result.status.behind_count, Some(0));
+    assert_eq!(result.status.can_pull, false);
+    assert_eq!(
+        rev_parse(&local, "HEAD"),
+        rev_parse(&bare, "refs/heads/main")
+    );
+
+    let status = app
+        .clone()
+        .oneshot(common::json_request(
+            "GET",
+            &format!("/api/repos/{repo_id}/default-branch-sync"),
+            "",
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(status.status(), StatusCode::OK);
+    let body: serde_json::Value = common::json_body(status).await;
+    assert_eq!(body["behindCount"], 0);
+    assert_eq!(body["canPull"], false);
+}
+
+#[tokio::test]
+async fn pull_blocked_when_dirty_diverged_or_missing_token() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        eprintln!("skipping: postgres not available");
+        return;
+    }
+
+    let (_root, local, bare) = checkout_behind_of_bare();
+    let (state, app, cookie, csrf, _env) =
+        common::bootstrap_and_login_with_state_and_workers("", |cfg| {
+            cfg.git.push_enabled = true;
+        })
+        .await;
+
+    let repo_id = register_repo_with_remote(
+        &app,
+        &local.display().to_string(),
+        Some("https://github.com/example/repo.git"),
+        &cookie,
+        &csrf,
+    )
+    .await;
+
+    let pull_no_token = app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            &format!("/api/repos/{repo_id}/pull-default-branch"),
+            "{}",
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(pull_no_token.status(), StatusCode::BAD_REQUEST);
+    let body: serde_json::Value = common::json_body(pull_no_token).await;
+    assert!(
+        body["message"].as_str().unwrap().to_lowercase().contains("token"),
+        "{body}"
+    );
+
+    set_forge_token(&app, &repo_id, "ghs_testtoken", &cookie, &csrf).await;
+    std::fs::write(local.join("dirty.txt"), "dirty").expect("dirty");
+
+    let status = app
+        .clone()
+        .oneshot(common::json_request(
+            "GET",
+            &format!("/api/repos/{repo_id}/default-branch-sync"),
+            "",
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    let body: serde_json::Value = common::json_body(status).await;
+    assert_eq!(body["canPull"], false);
+    assert!(body["pullDisabledReason"]
+        .as_str()
+        .unwrap()
+        .contains("uncommitted"));
+
+    let pull_dirty = app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            &format!("/api/repos/{repo_id}/pull-default-branch"),
+            "{}",
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(pull_dirty.status(), StatusCode::BAD_REQUEST);
+
+    std::fs::remove_file(local.join("dirty.txt")).expect("clean dirty");
+
+    // Diverge: local commit + remote tip still ahead of original base.
+    commit_file(&local, "local.txt", "local\n", "local diverge");
+    let status = app
+        .clone()
+        .oneshot(common::json_request(
+            "GET",
+            &format!("/api/repos/{repo_id}/default-branch-sync"),
+            "",
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    let body: serde_json::Value = common::json_body(status).await;
+    assert_eq!(body["canPull"], false);
+    let reason = body["pullDisabledReason"].as_str().unwrap();
+    assert!(
+        reason.contains("diverged") || reason.contains("ahead"),
+        "{body}"
+    );
+
+    let repo_uuid = uuid::Uuid::parse_str(&repo_id).unwrap();
+    let pool = state.db.as_ref().expect("db");
+    let svc = RepoGitService::new(pool, true, &state.secret_store);
+    let err = svc
+        .pull_default_branch_from_remote(repo_uuid, bare.to_str().unwrap())
+        .await
+        .expect_err("diverged pull must fail");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("diverged") || msg.contains("ahead") || msg.contains("fast-forward"),
+        "{msg}"
+    );
 }

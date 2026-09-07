@@ -6,7 +6,8 @@ use crate::services::code_review_service::{
     BranchesResponse, CodeReviewService, DiffSummary, FilePatch,
 };
 use crate::services::repo_git_service::{
-    DefaultBranchSyncStatus, PushDefaultBranchResult, RepoGitError, RepoGitService,
+    DefaultBranchSyncStatus, PullDefaultBranchResult, PushDefaultBranchResult, RepoGitError,
+    RepoGitService,
 };
 use crate::services::repo_service::{RepoError, RepoService};
 use crate::AppState;
@@ -42,6 +43,10 @@ pub fn routes() -> Router<Arc<AppState>> {
         .route(
             "/api/repos/{repo_id}/push-default-branch",
             post(push_default_branch),
+        )
+        .route(
+            "/api/repos/{repo_id}/pull-default-branch",
+            post(pull_default_branch),
         )
         .route("/api/repos/{repo_id}/worktrees", get(list_repo_worktrees))
         .route("/api/repos/{repo_id}/branches", get(list_repo_branches))
@@ -363,6 +368,21 @@ async fn push_default_branch(
     })?;
     let result = repo_git_service(&state, pool)
         .push_default_branch(repo_id)
+        .await
+        .map_err(map_repo_git_error)?;
+    Ok(Json(result))
+}
+
+async fn pull_default_branch(
+    State(state): State<Arc<AppState>>,
+    AdminUser(_): AdminUser,
+    Path(repo_id): Path<Uuid>,
+) -> Result<Json<PullDefaultBranchResult>, RepoGitApiError> {
+    let pool = pool_from_state(&state).map_err(|code| {
+        RepoGitApiError::Message(code, "Database unavailable.".into())
+    })?;
+    let result = repo_git_service(&state, pool)
+        .pull_default_branch(repo_id)
         .await
         .map_err(map_repo_git_error)?;
     Ok(Json(result))

@@ -7,6 +7,7 @@ import {
   type DefaultBranchSyncStatus,
   useDefaultBranchSync,
   useFetchDefaultBranch,
+  usePullDefaultBranch,
   usePushDefaultBranch,
 } from './useRepos';
 
@@ -40,30 +41,36 @@ export interface DefaultBranchSyncControlsProps {
   statusOverride?: DefaultBranchSyncStatus;
   onFetch?: () => void | Promise<void>;
   onPush?: () => void | Promise<void>;
+  onPull?: () => void | Promise<void>;
   fetchPending?: boolean;
   pushPending?: boolean;
+  pullPending?: boolean;
 }
 
-/** Sync status + Fetch / Push for a ready repo's default branch (admin UI). */
+/** Sync status + Fetch / Pull / Push for a ready repo's default branch (admin UI). */
 export function DefaultBranchSyncControls({
   repo,
   statusOverride,
   onFetch,
   onPush,
+  onPull,
   fetchPending: fetchPendingOverride,
   pushPending: pushPendingOverride,
+  pullPending: pullPendingOverride,
 }: DefaultBranchSyncControlsProps) {
   const toast = useToast();
   const enabled = statusOverride == null && repo.verificationStatus === 'ready';
   const { data: fetched, isLoading } = useDefaultBranchSync(repo.id, enabled);
   const fetchMutation = useFetchDefaultBranch(repo.id);
+  const pullMutation = usePullDefaultBranch(repo.id);
   const pushMutation = usePushDefaultBranch(repo.id);
   const [error, setError] = useState<string | null>(null);
 
   const status = statusOverride ?? fetched;
   const fetchPending = fetchPendingOverride ?? fetchMutation.isPending;
+  const pullPending = pullPendingOverride ?? pullMutation.isPending;
   const pushPending = pushPendingOverride ?? pushMutation.isPending;
-  const busy = fetchPending || pushPending;
+  const busy = fetchPending || pullPending || pushPending;
 
   if (repo.verificationStatus !== 'ready' && statusOverride == null) {
     return null;
@@ -80,6 +87,30 @@ export function DefaultBranchSyncControls({
       toast.success('Remote refs updated');
     } catch (err) {
       const message = parseApiErrorMessage(err, 'Fetch failed.');
+      setError(message);
+      toast.error(apiErrorToastMessage(message));
+    }
+  }
+
+  async function handlePull() {
+    if (
+      !window.confirm(
+        `Pull remote \`${repo.defaultBranch}\` into the local default branch?\n\nThis fast-forwards the registered checkout only when it is strictly behind (no merge or rebase).`,
+      )
+    ) {
+      return;
+    }
+    setError(null);
+    try {
+      if (onPull) {
+        await onPull();
+        toast.success('Default branch pulled');
+      } else {
+        const result = await pullMutation.mutateAsync();
+        toast.success(result.message);
+      }
+    } catch (err) {
+      const message = parseApiErrorMessage(err, 'Pull failed.');
       setError(message);
       toast.error(apiErrorToastMessage(message));
     }
@@ -144,6 +175,19 @@ export function DefaultBranchSyncControls({
             <Button
               type="button"
               variant="secondary"
+              disabled={busy || !status.canPull}
+              title={
+                status.canPull
+                  ? `Fast-forward local ${status.defaultBranch} from remote`
+                  : (status.pullDisabledReason ?? 'Pull unavailable')
+              }
+              onClick={() => void handlePull()}
+            >
+              {pullPending ? 'Pulling…' : 'Pull'}
+            </Button>
+            <Button
+              type="button"
+              variant="secondary"
               disabled={busy || !status.canPush}
               title={
                 status.canPush
@@ -155,6 +199,11 @@ export function DefaultBranchSyncControls({
               {pushPending ? 'Pushing…' : 'Push to remote'}
             </Button>
           </div>
+          {!status.canPull && status.pullDisabledReason && (
+            <p className="font-body text-xs text-text-muted">
+              {status.pullDisabledReason}
+            </p>
+          )}
           {!status.canPush && status.pushDisabledReason && (
             <p className="font-body text-xs text-text-muted">
               {status.pushDisabledReason}
