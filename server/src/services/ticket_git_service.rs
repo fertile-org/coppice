@@ -325,9 +325,10 @@ impl<'a> TicketGitService<'a> {
         title: Option<&str>,
         body: Option<&str>,
     ) -> Result<CreatePrResult, TicketGitError> {
-        if !self.push_enabled {
-            return Err(TicketGitError::PushDisabled);
-        }
+        // GitHub rejects create-PR with field=head code=invalid when the branch
+        // only exists locally. Push first so Create PR is self-contained.
+        let pushed = self.push_branch(ticket_id).await?;
+
         let store = self.secret_store.ok_or(TicketGitError::NoForgeToken)?;
         let ctx = self.resolve_context(ticket_id).await?;
         let remote_url = ctx.remote_url.as_deref().ok_or(TicketGitError::NoRemoteUrl)?;
@@ -345,7 +346,8 @@ impl<'a> TicketGitService<'a> {
             .filter(|s| !s.is_empty())
             .unwrap_or(ticket.ticket.title.as_str())
             .to_string();
-        let pr_body = body.unwrap_or("").to_string();
+        let pr_body = resolve_pr_body(body, &ticket.ticket.description);
+        let head = pushed.ticket_branch;
 
         let client = reqwest::Client::new();
         let url = format!("https://api.github.com/repos/{owner}/{repo}/pulls");
@@ -357,7 +359,7 @@ impl<'a> TicketGitService<'a> {
             .header("X-GitHub-Api-Version", "2022-11-28")
             .json(&serde_json::json!({
                 "title": pr_title,
-                "head": ctx.ticket_branch,
+                "head": head,
                 "base": ctx.default_branch,
                 "body": pr_body,
             }))
@@ -371,9 +373,8 @@ impl<'a> TicketGitService<'a> {
             .await
             .map_err(|e| TicketGitError::GitHubApi(e.to_string()))?;
         if !status.is_success() {
-            return Err(TicketGitError::GitHubApi(format!(
-                "{status}: {}",
-                truncate_err(&text)
+            return Err(TicketGitError::GitHubApi(explain_github_create_pr_error(
+                status, &text, &head,
             )));
         }
 
@@ -638,6 +639,33 @@ fn truncate_err(text: &str) -> String {
     }
 }
 
+/// Prefer an explicit Create PR body; otherwise use the ticket description.
+fn resolve_pr_body(override_body: Option<&str>, ticket_description: &str) -> String {
+    override_body
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| ticket_description.trim().to_string())
+}
+
+/// Map GitHub create-PR failures into actionable messages.
+fn explain_github_create_pr_error(
+    status: reqwest::StatusCode,
+    body: &str,
+    head_branch: &str,
+) -> String {
+    let truncated = truncate_err(body);
+    let head_invalid = status.as_u16() == 422
+        && body.contains("\"field\":\"head\"")
+        && body.contains("\"code\":\"invalid\"");
+    if head_invalid {
+        return format!(
+            "branch `{head_branch}` was not found on GitHub (push may have failed or not been visible yet). Push the ticket branch, then retry Create PR. GitHub: {truncated}"
+        );
+    }
+    format!("{status}: {truncated}")
+}
+
 pub fn worktree_exists(worktree_dir: &Path) -> bool {
     worktree_dir.join(".git").exists()
 }
@@ -761,6 +789,49 @@ mod tests {
         assert!(validate_branch_name("agent/TICKET-abc").is_ok());
         assert!(validate_branch_name("").is_err());
         assert!(validate_branch_name("bad branch").is_err());
+    }
+
+    #[test]
+    fn explain_github_create_pr_error_maps_invalid_head() {
+        let body = r#"{"message":"Validation Failed","errors":[{"resource":"PullRequest","field":"head","code":"invalid"}]}"#;
+        let msg = explain_github_create_pr_error(
+            reqwest::StatusCode::UNPROCESSABLE_ENTITY,
+            body,
+            "agent/TICKET-abc",
+        );
+        assert!(
+            msg.contains("agent/TICKET-abc"),
+            "expected branch in message: {msg}"
+        );
+        assert!(
+            msg.contains("not found on GitHub") || msg.contains("push"),
+            "expected push/not-found guidance: {msg}"
+        );
+    }
+
+    #[test]
+    fn explain_github_create_pr_error_passthrough_other_failures() {
+        let body = r#"{"message":"Validation Failed","errors":[{"resource":"PullRequest","field":"base","code":"invalid"}]}"#;
+        let msg = explain_github_create_pr_error(
+            reqwest::StatusCode::UNPROCESSABLE_ENTITY,
+            body,
+            "agent/TICKET-abc",
+        );
+        assert!(msg.starts_with("422"), "expected status prefix: {msg}");
+        assert!(msg.contains("base"), "expected raw body retained: {msg}");
+    }
+
+    #[test]
+    fn resolve_pr_body_defaults_to_ticket_description() {
+        let desc = "## Goal\n\nFix the toast UI.\n\n## Acceptance criteria\n\n- Dismiss works";
+        assert_eq!(resolve_pr_body(None, desc), desc);
+        assert_eq!(resolve_pr_body(Some(""), desc), desc);
+        assert_eq!(resolve_pr_body(Some("   "), desc), desc);
+        assert_eq!(
+            resolve_pr_body(Some("Custom PR notes"), desc),
+            "Custom PR notes"
+        );
+        assert_eq!(resolve_pr_body(None, "  padded  "), "padded");
     }
 
     #[test]

@@ -422,7 +422,7 @@ export function TicketGitActions({ ticket }: TicketGitActionsProps) {
               disabled={busy || isLoading || !gitInfo?.canCreatePr}
               title={
                 gitInfo?.canCreatePr
-                  ? 'Create a GitHub pull request via API'
+                  ? 'Push the ticket branch (if needed) and create a GitHub pull request'
                   : (gitInfo?.createPrDisabledReason ??
                     gitInfo?.prCreateUrl
                       ? 'API create unavailable — use compare link if the branch is already pushed'
