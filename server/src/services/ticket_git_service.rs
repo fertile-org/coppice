@@ -259,7 +259,14 @@ impl<'a> TicketGitService<'a> {
         })
     }
 
+    async fn ensure_ticket_mutable(&self, ticket_id: Uuid) -> Result<(), TicketGitError> {
+        let ticket = TicketService::new(self.pool).get(ticket_id).await?;
+        TicketService::ensure_not_archived(&ticket.ticket)?;
+        Ok(())
+    }
+
     pub async fn push_branch(&self, ticket_id: Uuid) -> Result<PushBranchResult, TicketGitError> {
+        self.ensure_ticket_mutable(ticket_id).await?;
         if !self.push_enabled {
             return Err(TicketGitError::PushDisabled);
         }
@@ -404,6 +411,7 @@ impl<'a> TicketGitService<'a> {
         ticket_id: Uuid,
         base_branch: &str,
     ) -> Result<MergeBranchResult, TicketGitError> {
+        self.ensure_ticket_mutable(ticket_id).await?;
         validate_branch_name(base_branch)?;
         let ctx = self.resolve_context(ticket_id).await?;
 
@@ -478,6 +486,7 @@ impl<'a> TicketGitService<'a> {
         ticket_id: Uuid,
         base_branch: Option<&str>,
     ) -> Result<RebaseBranchResult, TicketGitError> {
+        self.ensure_ticket_mutable(ticket_id).await?;
         let ctx = self.resolve_context(ticket_id).await?;
         let base = base_branch
             .map(str::trim)
@@ -594,6 +603,7 @@ impl<'a> TicketGitService<'a> {
     }
 
     pub async fn remove_worktree(&self, ticket_id: Uuid) -> Result<(), TicketGitError> {
+        self.ensure_ticket_mutable(ticket_id).await?;
         let ctx = self.resolve_context(ticket_id).await?;
         if !worktree_exists(&ctx.worktree_dir) {
             return Err(TicketGitError::WorktreeAlreadyRemoved);

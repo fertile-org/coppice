@@ -22,6 +22,7 @@ pub struct TicketService<'a> {
 pub struct TicketFilters {
     pub status: Option<TicketStatus>,
     pub assignee_agent_id: Option<Uuid>,
+    pub include_archived: bool,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -36,11 +37,25 @@ pub enum TicketError {
     InvalidSubstatus,
     #[error("invalid priority")]
     InvalidPriority,
+    #[error("an active run already exists for this ticket")]
+    ActiveRunExists,
+    #[error("ticket is archived; unarchive before continuing")]
+    Archived,
     #[error("validation error: {0}")]
     Validation(String),
     #[error(transparent)]
     Database(#[from] sqlx::Error),
 }
+
+/// Columns returned by aliased ticket list queries (keep in sync with `row_to_ticket`).
+const TICKET_COLUMNS_ALIASED: &str = r#"
+                t.id, t.project_id, t.repo_id, t.title, t.description,
+                t.status, t.substatus, t.substatus_metadata, t.priority,
+                t.assignee_agent_id, t.owner_user_id, t.branch_name,
+                t.pending_assign_recommendation, t.parent_ticket_id,
+                t.pending_split_recommendation, t.clarification_round,
+                t.created_by, t.created_by_id, t.created_at, t.updated_at, t.archived_at
+"#;
 
 pub struct TicketWithDisplay {
     pub ticket: Ticket,
@@ -61,21 +76,19 @@ impl<'a> TicketService<'a> {
     ) -> Result<Vec<TicketWithDisplay>, TicketError> {
         self.ensure_project_exists(project_id).await?;
 
-        let mut query = String::from(
+        let mut query = format!(
             r#"
             SELECT
-                t.id, t.project_id, t.repo_id, t.title, t.description,
-                t.status, t.substatus, t.substatus_metadata, t.priority,
-                t.assignee_agent_id, t.owner_user_id, t.branch_name,
-                t.pending_assign_recommendation, t.parent_ticket_id,
-                t.pending_split_recommendation, t.clarification_round,
-                t.created_by, t.created_by_id, t.created_at, t.updated_at
+                {TICKET_COLUMNS_ALIASED}
             FROM tickets t
             WHERE t.project_id = $1
             "#,
         );
         let mut bind_index = 2;
 
+        if !filters.include_archived {
+            query.push_str(" AND t.archived_at IS NULL");
+        }
         if filters.status.is_some() {
             query.push_str(&format!(" AND t.status = ${bind_index}"));
             bind_index += 1;
@@ -159,7 +172,7 @@ impl<'a> TicketService<'a> {
                 assignee_agent_id, owner_user_id, branch_name,
                 pending_assign_recommendation, parent_ticket_id,
                 pending_split_recommendation, clarification_round,
-                created_by, created_by_id, created_at, updated_at
+                created_by, created_by_id, created_at, updated_at, archived_at
             "#,
         )
         .bind(id)
@@ -203,7 +216,7 @@ impl<'a> TicketService<'a> {
                 assignee_agent_id, owner_user_id, branch_name,
                 pending_assign_recommendation, parent_ticket_id,
                 pending_split_recommendation, clarification_round,
-                created_by, created_by_id, created_at, updated_at
+                created_by, created_by_id, created_at, updated_at, archived_at
             "#,
         )
         .bind(id)
@@ -241,7 +254,7 @@ impl<'a> TicketService<'a> {
                 assignee_agent_id, owner_user_id, branch_name,
                 pending_assign_recommendation, parent_ticket_id,
                 pending_split_recommendation, clarification_round,
-                created_by, created_by_id, created_at, updated_at
+                created_by, created_by_id, created_at, updated_at, archived_at
             "#,
         )
         .bind(ticket_id)
@@ -264,7 +277,7 @@ impl<'a> TicketService<'a> {
                 assignee_agent_id, owner_user_id, branch_name,
                 pending_assign_recommendation, parent_ticket_id,
                 pending_split_recommendation, clarification_round,
-                created_by, created_by_id, created_at, updated_at
+                created_by, created_by_id, created_at, updated_at, archived_at
             FROM tickets
             WHERE id = $1
             "#,
@@ -291,6 +304,7 @@ impl<'a> TicketService<'a> {
         owner_user_id: Option<Option<Uuid>>,
     ) -> Result<TicketWithDisplay, TicketError> {
         let current = self.get(ticket_id).await?;
+        Self::ensure_not_archived(&current.ticket)?;
         let title = title.unwrap_or(&current.ticket.title);
         let description = description.unwrap_or(&current.ticket.description);
         let repo_id = match repo_id {
@@ -329,7 +343,7 @@ impl<'a> TicketService<'a> {
                 assignee_agent_id, owner_user_id, branch_name,
                 pending_assign_recommendation, parent_ticket_id,
                 pending_split_recommendation, clarification_round,
-                created_by, created_by_id, created_at, updated_at
+                created_by, created_by_id, created_at, updated_at, archived_at
             "#,
         )
         .bind(ticket_id)
@@ -354,6 +368,7 @@ impl<'a> TicketService<'a> {
         substatus_metadata: Option<Option<Value>>,
     ) -> Result<TicketWithDisplay, TicketError> {
         let current = self.get(ticket_id).await?;
+        Self::ensure_not_archived(&current.ticket)?;
         let substatus = match substatus {
             Some(value) => value,
             None => current.ticket.substatus,
@@ -386,7 +401,7 @@ impl<'a> TicketService<'a> {
                 assignee_agent_id, owner_user_id, branch_name,
                 pending_assign_recommendation, parent_ticket_id,
                 pending_split_recommendation, clarification_round,
-                created_by, created_by_id, created_at, updated_at
+                created_by, created_by_id, created_at, updated_at, archived_at
             "#,
         )
         .bind(ticket_id)
@@ -412,6 +427,7 @@ impl<'a> TicketService<'a> {
         clarification_round_delta: i32,
     ) -> Result<TicketWithDisplay, TicketError> {
         let current = self.get(ticket_id).await?;
+        Self::ensure_not_archived(&current.ticket)?;
 
         let status = status.unwrap_or(current.ticket.status);
         let substatus = match substatus {
@@ -462,7 +478,7 @@ impl<'a> TicketService<'a> {
                 assignee_agent_id, owner_user_id, branch_name,
                 pending_assign_recommendation, parent_ticket_id,
                 pending_split_recommendation, clarification_round,
-                created_by, created_by_id, created_at, updated_at
+                created_by, created_by_id, created_at, updated_at, archived_at
             "#,
         )
         .bind(ticket_id)
@@ -494,7 +510,7 @@ impl<'a> TicketService<'a> {
                 assignee_agent_id, owner_user_id, branch_name,
                 pending_assign_recommendation, parent_ticket_id,
                 pending_split_recommendation, clarification_round,
-                created_by, created_by_id, created_at, updated_at
+                created_by, created_by_id, created_at, updated_at, archived_at
             "#,
         )
         .bind(ticket_id)
@@ -520,7 +536,7 @@ impl<'a> TicketService<'a> {
                 assignee_agent_id, owner_user_id, branch_name,
                 pending_assign_recommendation, parent_ticket_id,
                 pending_split_recommendation, clarification_round,
-                created_by, created_by_id, created_at, updated_at
+                created_by, created_by_id, created_at, updated_at, archived_at
             "#,
         )
         .bind(ticket_id)
@@ -545,7 +561,7 @@ impl<'a> TicketService<'a> {
                 assignee_agent_id, owner_user_id, branch_name,
                 pending_assign_recommendation, parent_ticket_id,
                 pending_split_recommendation, clarification_round,
-                created_by, created_by_id, created_at, updated_at
+                created_by, created_by_id, created_at, updated_at, archived_at
             FROM tickets
             WHERE parent_ticket_id = $1
             ORDER BY created_at ASC
@@ -567,6 +583,9 @@ impl<'a> TicketService<'a> {
         ticket_id: Uuid,
         agent_id: Option<Uuid>,
     ) -> Result<TicketWithDisplay, TicketError> {
+        let current = self.get(ticket_id).await?;
+        Self::ensure_not_archived(&current.ticket)?;
+
         let row = sqlx::query(
             r#"
             UPDATE tickets
@@ -578,7 +597,7 @@ impl<'a> TicketService<'a> {
                 assignee_agent_id, owner_user_id, branch_name,
                 pending_assign_recommendation, parent_ticket_id,
                 pending_split_recommendation, clarification_round,
-                created_by, created_by_id, created_at, updated_at
+                created_by, created_by_id, created_at, updated_at, archived_at
             "#,
         )
         .bind(ticket_id)
@@ -588,6 +607,73 @@ impl<'a> TicketService<'a> {
         .ok_or(TicketError::TicketNotFound)?;
 
         self.enrich_row(&row).await
+    }
+
+    pub async fn archive(&self, ticket_id: Uuid) -> Result<TicketWithDisplay, TicketError> {
+        let current = self.get(ticket_id).await?;
+        if self.ticket_has_active_run(ticket_id).await? {
+            return Err(TicketError::ActiveRunExists);
+        }
+        if current.ticket.archived_at.is_some() {
+            return Ok(current);
+        }
+
+        let row = sqlx::query(
+            r#"
+            UPDATE tickets
+            SET archived_at = now(), updated_at = now()
+            WHERE id = $1 AND archived_at IS NULL
+            RETURNING
+                id, project_id, repo_id, title, description,
+                status, substatus, substatus_metadata, priority,
+                assignee_agent_id, owner_user_id, branch_name,
+                pending_assign_recommendation, parent_ticket_id,
+                pending_split_recommendation, clarification_round,
+                created_by, created_by_id, created_at, updated_at, archived_at
+            "#,
+        )
+        .bind(ticket_id)
+        .fetch_optional(self.pool)
+        .await?
+        .ok_or(TicketError::TicketNotFound)?;
+
+        self.enrich_row(&row).await
+    }
+
+    pub async fn unarchive(&self, ticket_id: Uuid) -> Result<TicketWithDisplay, TicketError> {
+        let current = self.get(ticket_id).await?;
+        if current.ticket.archived_at.is_none() {
+            return Ok(current);
+        }
+
+        let row = sqlx::query(
+            r#"
+            UPDATE tickets
+            SET archived_at = NULL, updated_at = now()
+            WHERE id = $1 AND archived_at IS NOT NULL
+            RETURNING
+                id, project_id, repo_id, title, description,
+                status, substatus, substatus_metadata, priority,
+                assignee_agent_id, owner_user_id, branch_name,
+                pending_assign_recommendation, parent_ticket_id,
+                pending_split_recommendation, clarification_round,
+                created_by, created_by_id, created_at, updated_at, archived_at
+            "#,
+        )
+        .bind(ticket_id)
+        .fetch_optional(self.pool)
+        .await?
+        .ok_or(TicketError::TicketNotFound)?;
+
+        self.enrich_row(&row).await
+    }
+
+    pub fn ensure_not_archived(ticket: &Ticket) -> Result<(), TicketError> {
+        if ticket.archived_at.is_some() {
+            Err(TicketError::Archived)
+        } else {
+            Ok(())
+        }
     }
 
     pub async fn compute_last_activity_at(
@@ -738,5 +824,6 @@ fn row_to_ticket(row: &sqlx::postgres::PgRow) -> Ticket {
         created_by_id: row.get("created_by_id"),
         created_at: row.get("created_at"),
         updated_at: row.get("updated_at"),
+        archived_at: row.get("archived_at"),
     }
 }

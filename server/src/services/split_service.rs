@@ -146,6 +146,7 @@ impl<'a> SplitService<'a> {
     pub async fn approve_splits(&self, ticket_id: Uuid) -> Result<Vec<Ticket>, SplitError> {
         let ticket_svc = TicketService::new(self.pool);
         let parent = ticket_svc.get(ticket_id).await?;
+        TicketService::ensure_not_archived(&parent.ticket)?;
 
         let pending_value = parent
             .ticket
@@ -176,6 +177,7 @@ impl<'a> SplitService<'a> {
     pub async fn dismiss_splits(&self, ticket_id: Uuid) -> Result<TicketWithDisplay, SplitError> {
         let ticket_svc = TicketService::new(self.pool);
         let parent = ticket_svc.get(ticket_id).await?;
+        TicketService::ensure_not_archived(&parent.ticket)?;
 
         if parent.ticket.pending_split_recommendation.is_none() {
             return Err(SplitError::Validation(

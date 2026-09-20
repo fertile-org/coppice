@@ -35,6 +35,7 @@ pub struct Ticket {
     pub created_by_id: Option<Uuid>,
     pub created_at: OffsetDateTime,
     pub updated_at: OffsetDateTime,
+    pub archived_at: Option<OffsetDateTime>,
 }
 
 pub fn status_to_str(status: TicketStatus) -> &'static str {
