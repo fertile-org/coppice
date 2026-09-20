@@ -2,6 +2,10 @@
 # API and web run on the host for hot reload (make server-dev, make web-dev).
 #
 # Start: make compose-local-up
+#
+# Optional later: opt-in Ollama embedder like deploy/docker-compose.yml (profile
+# `embeddings`, nomic-embed-text → http://127.0.0.1:11434/v1) for host API knowledge
+# embeddings. Not required here — Postgres-only keeps human hot-reload light.
 
 name: coppice-local
 

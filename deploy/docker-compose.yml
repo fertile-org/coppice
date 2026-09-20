@@ -12,6 +12,13 @@
 #   COPPICE_UID=$(id -u) COPPICE_GID=$(id -g)  # make compose-up sets these
 # Human hot-reload dev uses docker-compose.local.yml (Postgres :5433) + host API/web instead.
 # Real agent CLIs: managed /home/coppice volume + `coppice connector …` (M08), not host bind-mounts.
+#
+# Knowledge embeddings (operator default):
+#   Local Ollama sidecar (profile `embeddings`) serves openai_compatible at http://embedder:11434/v1
+#   with nomic-embed-text (dimension 768). First boot pulls ~274MB; cached in ollama_data.
+#   Server does NOT wait on embedder health — API stays up while the model pulls or if the
+#   sidecar is down; embedding jobs fail until the sidecar is ready (soft dependency).
+#   Smoke/CI: Makefile clears COMPOSE_PROFILES and forces PROVIDER=mock (no Ollama/GPU/pull).
 
 services:
   postgres:
@@ -30,6 +37,33 @@ services:
     volumes:
       - coppice_pgdata:/var/lib/postgresql/data
 
+  # Local OpenAI-compatible embedder (Ollama). Enabled when COMPOSE_PROFILES includes
+  # `embeddings` (Makefile default for make compose-up). Opt out: COMPOSE_PROFILES= make compose-up
+  embedder:
+    profiles: ["embeddings"]
+    image: ollama/ollama:latest
+    ports:
+      - "${COPPICE_EMBEDDER_PORT:-11434}:11434"
+    environment:
+      EMBEDDER_MODEL: ${EMBEDDER_MODEL:-nomic-embed-text}
+      # Set EMBEDDER_PULL_MODEL=0 to start Ollama without downloading weights.
+      EMBEDDER_PULL_MODEL: ${EMBEDDER_PULL_MODEL:-1}
+    volumes:
+      - ollama_data:/root/.ollama
+      - ./embedder-entrypoint.sh:/embedder-entrypoint.sh:ro
+    entrypoint: ["/bin/sh", "/embedder-entrypoint.sh"]
+    healthcheck:
+      # Healthy once the configured model is present (or pull was skipped and API is up).
+      test:
+        [
+          "CMD-SHELL",
+          'case "$${EMBEDDER_PULL_MODEL:-1}" in 0|false|FALSE|no|NO) ollama list >/dev/null 2>&1;; *) ollama show "$${EMBEDDER_MODEL:-nomic-embed-text}" >/dev/null 2>&1;; esac',
+        ]
+      interval: 10s
+      timeout: 10s
+      retries: 60
+      start_period: 20s
+
   server:
     build:
       context: ..
@@ -44,8 +78,13 @@ services:
       WORKTREES_PATH: /data/worktrees
       AGENT_WORKER_COUNT: "2"
       WORKFLOW_AUTO_START_RUNS: "${WORKFLOW_AUTO_START_RUNS:-true}"
-      COPPICE_KNOWLEDGE__EMBEDDING__PROVIDER: mock
-      COPPICE_KNOWLEDGE__EMBEDDING__DIMENSION: "1536"
+      # Operator default: Ollama sidecar. Smoke/CI override PROVIDER=mock (see Makefile).
+      COPPICE_KNOWLEDGE__EMBEDDING__PROVIDER: ${COPPICE_KNOWLEDGE__EMBEDDING__PROVIDER:-openai_compatible}
+      COPPICE_KNOWLEDGE__EMBEDDING__MODEL: ${COPPICE_KNOWLEDGE__EMBEDDING__MODEL:-nomic-embed-text}
+      COPPICE_KNOWLEDGE__EMBEDDING__DIMENSION: ${COPPICE_KNOWLEDGE__EMBEDDING__DIMENSION:-768}
+      COPPICE_KNOWLEDGE__EMBEDDING__BASE_URL: ${COPPICE_KNOWLEDGE__EMBEDDING__BASE_URL:-http://embedder:11434/v1}
+      # Required by config validation; Ollama ignores the key.
+      COPPICE_KNOWLEDGE__EMBEDDING__API_KEY: ${COPPICE_KNOWLEDGE__EMBEDDING__API_KEY:-ollama}
       MOCK_AGENT_RESPONSE: ${MOCK_AGENT_RESPONSE:-}
       SECRETS_MASTER_KEY: ${SECRETS_MASTER_KEY:-dev-master-key-change-me}
       # Default was silent when RUST_LOG unset; override e.g. RUST_LOG=debug
@@ -67,6 +106,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      # Soft dependency: do not wait for embedder. API boots while nomic pulls or if the
+      # sidecar/profile is absent; knowledge embed jobs error until the sidecar is reachable.
 
   web:
     build:
@@ -82,3 +123,4 @@ volumes:
   artifact_data:
   worktree_data:
   connector_data:
+  ollama_data:

@@ -107,7 +107,7 @@ make e2e-smoke-m06              # context continuation + pending split behavior
 make e2e-smoke-m06-knowledge    # governance → embed → Full retrieval → audit → extraction
 ```
 
-Both use the default `deploy/docker-compose.yml` stack. The knowledge smoke uses only deterministic mock agent, embedding, and extraction providers.
+Both use the default `deploy/docker-compose.yml` stack. E2e Makefile targets clear the `embeddings` Compose profile and force `COPPICE_KNOWLEDGE__EMBEDDING__PROVIDER=mock` so CI stays deterministic (no Ollama/GPU/model pulls). Operator `make compose-up` enables the Ollama embedder sidecar by default.
 
 The supported 10,000-eligible-row retrieval envelope has a separate, non-CI
 default-Compose benchmark. It seeds rows inside a rolled-back transaction, runs
