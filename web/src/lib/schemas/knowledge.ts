@@ -36,6 +36,7 @@ export const knowledgeSourceTypeSchema = z.enum([
   'agent_summary',
   'workspace_signal',
   'observation_run',
+  'chat_session',
 ]);
 
 export const knowledgeConfidenceSchema = z.enum(['low', 'medium', 'high']);

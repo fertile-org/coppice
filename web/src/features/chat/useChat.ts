@@ -4,11 +4,22 @@ import {
   chatMessageListSchema,
   chatSessionListSchema,
   chatSessionSchema,
+  createKnowledgeFromChatResponseSchema,
+  createTicketFromChatResponseSchema,
+  cutoffSessionResponseSchema,
   postChatMessageResponseSchema,
   type ChatMessage,
   type ChatSession,
   type ChatSessionStatus,
+  type CreateKnowledgeFromChatResponse,
+  type CreateTicketFromChatResponse,
+  type CutoffSessionResponse,
 } from '../../lib/schemas/chat';
+import type {
+  KnowledgeScope,
+  KnowledgeType,
+} from '../../lib/schemas/knowledge';
+import { KNOWLEDGE_QUERY_KEY } from '../knowledge/useKnowledge';
 
 export const CHAT_SESSIONS_QUERY_KEY = ['chat-sessions'] as const;
 
@@ -25,6 +36,21 @@ export interface CreateChatSessionInput {
 export interface PostChatMessageResult {
   message: ChatMessage;
   runId: string;
+}
+
+export interface CreateTicketFromChatInput {
+  projectId: string;
+  title?: string;
+  description?: string;
+  repoId?: string | null;
+}
+
+export interface CreateKnowledgeFromChatInput {
+  title?: string;
+  content?: string;
+  knowledgeType?: KnowledgeType;
+  scope?: KnowledgeScope;
+  projectId?: string;
 }
 
 async function fetchSessions(projectId?: string | null): Promise<ChatSession[]> {
@@ -80,6 +106,53 @@ async function patchSessionStatus(
     body: JSON.stringify({ status }),
   });
   return chatSessionSchema.parse(await res.json());
+}
+
+async function createTicketFromChat(
+  sessionId: string,
+  input: CreateTicketFromChatInput,
+): Promise<CreateTicketFromChatResponse> {
+  const res = await apiFetch(`/api/chat/sessions/${sessionId}/create-ticket`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      projectId: input.projectId,
+      title: input.title,
+      description: input.description,
+      repoId: input.repoId ?? undefined,
+    }),
+  });
+  return createTicketFromChatResponseSchema.parse(await res.json());
+}
+
+async function createKnowledgeFromChat(
+  sessionId: string,
+  input: CreateKnowledgeFromChatInput,
+): Promise<CreateKnowledgeFromChatResponse> {
+  const res = await apiFetch(
+    `/api/chat/sessions/${sessionId}/create-knowledge`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        title: input.title,
+        content: input.content,
+        knowledgeType: input.knowledgeType,
+        scope: input.scope,
+        projectId: input.projectId,
+      }),
+    },
+  );
+  return createKnowledgeFromChatResponseSchema.parse(await res.json());
+}
+
+async function cutoffSession(sessionId: string): Promise<CutoffSessionResponse> {
+  const res = await apiFetch(`/api/chat/sessions/${sessionId}/cutoff`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: '{}',
+  });
+  return cutoffSessionResponseSchema.parse(await res.json());
 }
 
 export function useChatSessions(projectId?: string | null) {
@@ -145,6 +218,54 @@ export function usePatchChatSession() {
       status: ChatSessionStatus;
     }) => patchSessionStatus(sessionId, status),
     onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: CHAT_SESSIONS_QUERY_KEY });
+    },
+  });
+}
+
+export function useCreateTicketFromChat(sessionId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: CreateTicketFromChatInput) =>
+      createTicketFromChat(sessionId, input),
+    onSuccess: (result) => {
+      void queryClient.invalidateQueries({
+        queryKey: chatMessagesQueryKey(sessionId),
+      });
+      void queryClient.invalidateQueries({ queryKey: CHAT_SESSIONS_QUERY_KEY });
+      void queryClient.invalidateQueries({
+        queryKey: ['tickets', result.ticket.projectId],
+      });
+    },
+  });
+}
+
+export function useCreateKnowledgeFromChat(sessionId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: CreateKnowledgeFromChatInput) =>
+      createKnowledgeFromChat(sessionId, input),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: chatMessagesQueryKey(sessionId),
+      });
+      void queryClient.invalidateQueries({ queryKey: CHAT_SESSIONS_QUERY_KEY });
+      void queryClient.invalidateQueries({ queryKey: KNOWLEDGE_QUERY_KEY });
+    },
+  });
+}
+
+export function useCutoffChatSession(sessionId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () => cutoffSession(sessionId),
+    onSuccess: (result) => {
+      void queryClient.invalidateQueries({
+        queryKey: chatMessagesQueryKey(sessionId),
+      });
+      void queryClient.invalidateQueries({
+        queryKey: chatMessagesQueryKey(result.child.id),
+      });
       void queryClient.invalidateQueries({ queryKey: CHAT_SESSIONS_QUERY_KEY });
     },
   });

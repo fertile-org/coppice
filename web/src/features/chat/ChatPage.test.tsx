@@ -7,6 +7,10 @@ import { ChatPage } from './ChatPage';
 const mocks = vi.hoisted(() => ({
   createSession: vi.fn(),
   postMessage: vi.fn(),
+  createTicket: vi.fn(),
+  createKnowledge: vi.fn(),
+  cutoffSession: vi.fn(),
+  openTicket: vi.fn(),
   sessions: [] as Array<{
     id: string;
     projectId: string | null;
@@ -59,6 +63,10 @@ vi.mock('../projects/useProjects', () => ({
   }),
 }));
 
+vi.mock('../tickets/useOpenTicket', () => ({
+  useOpenTicket: () => mocks.openTicket,
+}));
+
 vi.mock('./useChat', () => ({
   useChatSessions: () => ({
     data: mocks.sessions,
@@ -79,6 +87,18 @@ vi.mock('./useChat', () => ({
     mutateAsync: mocks.postMessage,
     isPending: false,
   }),
+  useCreateTicketFromChat: () => ({
+    mutateAsync: mocks.createTicket,
+    isPending: false,
+  }),
+  useCreateKnowledgeFromChat: () => ({
+    mutateAsync: mocks.createKnowledge,
+    isPending: false,
+  }),
+  useCutoffChatSession: () => ({
+    mutateAsync: mocks.cutoffSession,
+    isPending: false,
+  }),
 }));
 
 vi.mock('./ChatLiveTurn', () => ({
@@ -93,17 +113,34 @@ function renderChat(path = '/chat') {
       <Routes>
         <Route path="/chat" element={<ChatPage />} />
         <Route path="/chat/:sessionId" element={<ChatPage />} />
+        <Route path="/knowledge" element={<div>Knowledge inbox</div>} />
       </Routes>
     </MemoryRouter>,
   );
 }
 
+const ACTIVE_SESSION = {
+  id: '00000000-0000-4000-8000-000000000001',
+  projectId: '00000000-0000-4000-8000-000000000003',
+  ownerUserId: '00000000-0000-4000-8000-000000000002',
+  agentId: '00000000-0000-4000-8000-000000000010',
+  repoId: null,
+  status: 'active' as const,
+  createdAt: '2026-09-08T00:00:00Z',
+  updatedAt: '2026-09-08T00:00:00Z',
+};
+
 describe('ChatPage', () => {
   beforeEach(() => {
     mocks.createSession.mockReset();
     mocks.postMessage.mockReset();
+    mocks.createTicket.mockReset();
+    mocks.createKnowledge.mockReset();
+    mocks.cutoffSession.mockReset();
+    mocks.openTicket.mockReset();
     mocks.sessions = [];
     mocks.messages = [];
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
   });
 
   it('shows new-chat controls for agent and optional project', () => {
@@ -161,18 +198,7 @@ describe('ChatPage', () => {
       },
     });
 
-    mocks.sessions = [
-      {
-        id: '00000000-0000-4000-8000-000000000001',
-        projectId: null,
-        ownerUserId: '00000000-0000-4000-8000-000000000002',
-        agentId: '00000000-0000-4000-8000-000000000010',
-        repoId: null,
-        status: 'active',
-        createdAt: '2026-09-08T00:00:00Z',
-        updatedAt: '2026-09-08T00:00:00Z',
-      },
-    ];
+    mocks.sessions = [ACTIVE_SESSION];
     mocks.messages = [
       {
         id: '00000000-0000-4000-8000-000000000030',
@@ -202,6 +228,7 @@ describe('ChatPage', () => {
     renderChat('/chat/00000000-0000-4000-8000-000000000001');
 
     expect(await screen.findByText('Prior message')).toBeInTheDocument();
+    expect(screen.getByTestId('chat-session-actions')).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText('Message'), {
       target: { value: 'What is cwd?' },
     });
@@ -213,5 +240,160 @@ describe('ChatPage', () => {
     expect(await screen.findByTestId('chat-live-turn')).toHaveTextContent(
       'live:00000000-0000-4000-8000-000000000040',
     );
+  });
+
+  it('creates a ticket from chat after confirming project and title', async () => {
+    mocks.sessions = [ACTIVE_SESSION];
+    mocks.createTicket.mockResolvedValue({
+      ticket: {
+        id: '00000000-0000-4000-8000-000000000050',
+        projectId: '00000000-0000-4000-8000-000000000003',
+        title: 'Fix chat cwd',
+        status: 'backlog',
+      },
+      message: {
+        id: '00000000-0000-4000-8000-000000000051',
+        sessionId: ACTIVE_SESSION.id,
+        seq: 2,
+        role: 'system',
+        body: 'Created ticket',
+        agentRunId: null,
+        actionMetadata: {
+          action: 'create_ticket',
+          ticketId: '00000000-0000-4000-8000-000000000050',
+        },
+        createdAt: '2026-09-08T00:03:00Z',
+      },
+    });
+
+    renderChat(`/chat/${ACTIVE_SESSION.id}`);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Create ticket' }));
+    expect(screen.getByTestId('create-ticket-dialog')).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('Title (optional)'), {
+      target: { value: 'Fix chat cwd' },
+    });
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Confirm create ticket' }),
+    );
+
+    await waitFor(() => {
+      expect(mocks.createTicket).toHaveBeenCalledWith({
+        projectId: '00000000-0000-4000-8000-000000000003',
+        title: 'Fix chat cwd',
+        description: undefined,
+      });
+    });
+    expect(mocks.openTicket).toHaveBeenCalledWith(
+      '00000000-0000-4000-8000-000000000050',
+    );
+  });
+
+  it('proposes knowledge from chat into the pending inbox', async () => {
+    mocks.sessions = [ACTIVE_SESSION];
+    mocks.createKnowledge.mockResolvedValue({
+      knowledge: { id: '00000000-0000-4000-8000-000000000060', status: 'pending' },
+      message: {
+        id: '00000000-0000-4000-8000-000000000061',
+        sessionId: ACTIVE_SESSION.id,
+        seq: 2,
+        role: 'system',
+        body: 'Proposed knowledge',
+        agentRunId: null,
+        actionMetadata: {
+          action: 'create_knowledge',
+          knowledgeItemId: '00000000-0000-4000-8000-000000000060',
+        },
+        createdAt: '2026-09-08T00:03:00Z',
+      },
+    });
+
+    renderChat(`/chat/${ACTIVE_SESSION.id}`);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Propose knowledge' }));
+    expect(screen.getByTestId('create-knowledge-dialog')).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('Knowledge title (optional)'), {
+      target: { value: 'Resolve chat cwd under worktrees' },
+    });
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Confirm propose knowledge' }),
+    );
+
+    await waitFor(() => {
+      expect(mocks.createKnowledge).toHaveBeenCalledWith({
+        title: 'Resolve chat cwd under worktrees',
+        content: undefined,
+        knowledgeType: 'coding_convention',
+        scope: 'project',
+        projectId: '00000000-0000-4000-8000-000000000003',
+      });
+    });
+    expect(await screen.findByText('Knowledge inbox')).toBeInTheDocument();
+  });
+
+  it('cutoffs the session and opens the seeded child chat', async () => {
+    mocks.sessions = [ACTIVE_SESSION];
+    mocks.cutoffSession.mockResolvedValue({
+      parent: { ...ACTIVE_SESSION, status: 'cutoff' },
+      child: {
+        ...ACTIVE_SESSION,
+        id: '00000000-0000-4000-8000-000000000070',
+        parentSessionId: ACTIVE_SESSION.id,
+        status: 'active',
+      },
+      seedMessage: {
+        id: '00000000-0000-4000-8000-000000000071',
+        sessionId: '00000000-0000-4000-8000-000000000070',
+        seq: 1,
+        role: 'system',
+        body: 'Prior conversation summary',
+        agentRunId: null,
+        actionMetadata: {
+          action: 'cutoff_seed',
+          parentSessionId: ACTIVE_SESSION.id,
+        },
+        createdAt: '2026-09-08T00:04:00Z',
+      },
+    });
+
+    // After navigate, child must resolve from sessions list.
+    mocks.cutoffSession.mockImplementation(async () => {
+      const child = {
+        ...ACTIVE_SESSION,
+        id: '00000000-0000-4000-8000-000000000070',
+        parentSessionId: ACTIVE_SESSION.id,
+        status: 'active' as const,
+      };
+      mocks.sessions = [{ ...ACTIVE_SESSION, status: 'cutoff' }, child];
+      return {
+        parent: { ...ACTIVE_SESSION, status: 'cutoff' as const },
+        child,
+        seedMessage: {
+          id: '00000000-0000-4000-8000-000000000071',
+          sessionId: child.id,
+          seq: 1,
+          role: 'system' as const,
+          body: 'Prior conversation summary',
+          agentRunId: null,
+          actionMetadata: {
+            action: 'cutoff_seed',
+            parentSessionId: ACTIVE_SESSION.id,
+          },
+          createdAt: '2026-09-08T00:04:00Z',
+        },
+      };
+    });
+
+    renderChat(`/chat/${ACTIVE_SESSION.id}`);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Cutoff' }));
+
+    await waitFor(() => {
+      expect(mocks.cutoffSession).toHaveBeenCalled();
+    });
+    expect(window.confirm).toHaveBeenCalled();
+    expect(
+      await screen.findByRole('heading', { name: 'Backend Engineer' }),
+    ).toBeInTheDocument();
   });
 });

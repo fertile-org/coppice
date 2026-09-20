@@ -1,8 +1,13 @@
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { useEffect, useRef } from 'react';
+import { Link } from 'react-router-dom';
 import { MarkdownContent } from '../../opencode-session/components/MarkdownContent';
-import type { ChatMessage } from '../../lib/schemas/chat';
+import {
+  parseChatActionMetadata,
+  type ChatMessage,
+} from '../../lib/schemas/chat';
 import { cn } from '../../lib/utils';
+import { useOpenTicket } from '../tickets/useOpenTicket';
 
 const ESTIMATED_ROW_HEIGHT = 88;
 
@@ -39,6 +44,67 @@ function roleLabel(role: ChatMessage['role']): string {
   }
 }
 
+function OpenTicketChip({ ticketId }: { ticketId: string }) {
+  const openTicket = useOpenTicket();
+  return (
+    <button
+      type="button"
+      className="mt-2 inline-flex rounded-md border border-accent/40 bg-accent-muted px-2 py-0.5 font-body text-xs text-accent hover:bg-accent/15"
+      data-testid="chat-action-chip-ticket"
+      onClick={() => void openTicket(ticketId)}
+    >
+      Open ticket
+    </button>
+  );
+}
+
+function ActionMetadataChip({ message }: { message: ChatMessage }) {
+  const meta = parseChatActionMetadata(message.actionMetadata);
+  if (!meta) return null;
+
+  if (meta.action === 'create_ticket' && meta.ticketId) {
+    return <OpenTicketChip ticketId={meta.ticketId} />;
+  }
+
+  if (meta.action === 'create_knowledge' && meta.knowledgeItemId) {
+    return (
+      <Link
+        to="/knowledge"
+        className="mt-2 inline-flex rounded-md border border-accent/40 bg-accent-muted px-2 py-0.5 font-body text-xs text-accent hover:bg-accent/15"
+        data-testid="chat-action-chip-knowledge"
+      >
+        View knowledge inbox
+      </Link>
+    );
+  }
+
+  if (meta.action === 'cutoff' && meta.childSessionId) {
+    return (
+      <Link
+        to={`/chat/${meta.childSessionId}`}
+        className="mt-2 inline-flex rounded-md border border-border bg-surface-raised px-2 py-0.5 font-body text-xs text-text-secondary hover:text-text-primary"
+        data-testid="chat-action-chip-cutoff"
+      >
+        Open continued session
+      </Link>
+    );
+  }
+
+  if (meta.action === 'cutoff_seed' && meta.parentSessionId) {
+    return (
+      <Link
+        to={`/chat/${meta.parentSessionId}`}
+        className="mt-2 inline-flex rounded-md border border-border bg-surface-raised px-2 py-0.5 font-body text-xs text-text-secondary hover:text-text-primary"
+        data-testid="chat-action-chip-cutoff-seed"
+      >
+        View parent session
+      </Link>
+    );
+  }
+
+  return null;
+}
+
 export function ChatMessageBubble({ message }: { message: ChatMessage }) {
   const isHuman = message.role === 'human';
   return (
@@ -63,6 +129,7 @@ export function ChatMessageBubble({ message }: { message: ChatMessage }) {
           <MarkdownContent>{message.body}</MarkdownContent>
         </div>
       )}
+      <ActionMetadataChip message={message} />
     </article>
   );
 }

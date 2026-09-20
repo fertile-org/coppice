@@ -1,8 +1,15 @@
 import '@testing-library/jest-dom/vitest';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { render, screen } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { ReactElement } from 'react';
 import type { ChatMessage } from '../../lib/schemas/chat';
 import { ChatMessageList, ThinkingIndicator } from './ChatMessageList';
+
+vi.mock('../tickets/useOpenTicket', () => ({
+  useOpenTicket: () => vi.fn(),
+}));
 
 const messages: ChatMessage[] = Array.from({ length: 40 }, (_, index) => ({
   id: `00000000-0000-4000-8000-${String(index).padStart(12, '0')}`,
@@ -14,6 +21,15 @@ const messages: ChatMessage[] = Array.from({ length: 40 }, (_, index) => ({
   actionMetadata: null,
   createdAt: '2026-09-08T00:00:00Z',
 }));
+
+function renderList(ui: ReactElement) {
+  const client = new QueryClient();
+  return render(
+    <QueryClientProvider client={client}>
+      <MemoryRouter>{ui}</MemoryRouter>
+    </QueryClientProvider>,
+  );
+}
 
 describe('ChatMessageList', () => {
   beforeEach(() => {
@@ -45,7 +61,7 @@ describe('ChatMessageList', () => {
   });
 
   it('virtualizes a long transcript in a scrollable log', () => {
-    render(<ChatMessageList messages={messages} thinking />);
+    renderList(<ChatMessageList messages={messages} thinking />);
 
     const list = screen.getByTestId('chat-message-list');
     expect(list).toHaveAttribute('role', 'log');
@@ -112,7 +128,7 @@ describe('ChatMessageList', () => {
       },
     );
 
-    render(<ChatMessageList messages={tallMessages} />);
+    renderList(<ChatMessageList messages={tallMessages} />);
 
     const list = screen.getByTestId('chat-message-list');
     const tallRow = list.querySelector('[data-index="0"]');
@@ -124,6 +140,62 @@ describe('ChatMessageList', () => {
     expect(spacer).not.toBeNull();
     expect(Number.parseFloat(spacer!.style.height)).toBeGreaterThanOrEqual(
       TALL_ROW_HEIGHT + SHORT_ROW_HEIGHT,
+    );
+  });
+
+  it('surfaces action result chips for ticket, knowledge, and cutoff', () => {
+    const actionMessages: ChatMessage[] = [
+      {
+        id: '00000000-0000-4000-8000-000000000001',
+        sessionId: '00000000-0000-4000-8000-000000000099',
+        seq: 1,
+        role: 'system',
+        body: 'Created ticket',
+        agentRunId: null,
+        actionMetadata: {
+          action: 'create_ticket',
+          ticketId: '00000000-0000-4000-8000-000000000050',
+        },
+        createdAt: '2026-09-08T00:00:00Z',
+      },
+      {
+        id: '00000000-0000-4000-8000-000000000002',
+        sessionId: '00000000-0000-4000-8000-000000000099',
+        seq: 2,
+        role: 'system',
+        body: 'Proposed knowledge',
+        agentRunId: null,
+        actionMetadata: {
+          action: 'create_knowledge',
+          knowledgeItemId: '00000000-0000-4000-8000-000000000060',
+        },
+        createdAt: '2026-09-08T00:00:01Z',
+      },
+      {
+        id: '00000000-0000-4000-8000-000000000003',
+        sessionId: '00000000-0000-4000-8000-000000000099',
+        seq: 3,
+        role: 'system',
+        body: 'Session cutoff',
+        agentRunId: null,
+        actionMetadata: {
+          action: 'cutoff',
+          childSessionId: '00000000-0000-4000-8000-000000000070',
+        },
+        createdAt: '2026-09-08T00:00:02Z',
+      },
+    ];
+
+    renderList(<ChatMessageList messages={actionMessages} />);
+
+    expect(screen.getByTestId('chat-action-chip-ticket')).toBeInTheDocument();
+    expect(screen.getByTestId('chat-action-chip-knowledge')).toHaveAttribute(
+      'href',
+      '/knowledge',
+    );
+    expect(screen.getByTestId('chat-action-chip-cutoff')).toHaveAttribute(
+      'href',
+      '/chat/00000000-0000-4000-8000-000000000070',
     );
   });
 });
