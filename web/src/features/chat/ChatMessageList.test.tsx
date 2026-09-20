@@ -57,4 +57,73 @@ describe('ChatMessageList', () => {
     expect(screen.queryByText('Human turn 0')).toBeInTheDocument();
     expect(screen.queryByText('Human turn 39')).not.toBeInTheDocument();
   });
+
+  it('sizes rows from measured content so tall messages do not clip to 88px', () => {
+    const tallBody = Array.from({ length: 12 }, (_, i) => `Paragraph ${i}.`).join(
+      '\n\n',
+    );
+    const tallMessages: ChatMessage[] = [
+      {
+        id: '00000000-0000-4000-8000-000000000001',
+        sessionId: '00000000-0000-4000-8000-000000000099',
+        seq: 1,
+        role: 'agent',
+        body: tallBody,
+        agentRunId: null,
+        actionMetadata: null,
+        createdAt: '2026-09-08T00:00:00Z',
+      },
+      {
+        id: '00000000-0000-4000-8000-000000000002',
+        sessionId: '00000000-0000-4000-8000-000000000099',
+        seq: 2,
+        role: 'human',
+        body: 'Short follow-up',
+        agentRunId: null,
+        actionMetadata: null,
+        createdAt: '2026-09-08T00:00:01Z',
+      },
+    ];
+
+    const TALL_ROW_HEIGHT = 240;
+    const SHORT_ROW_HEIGHT = 64;
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
+      function getBoundingClientRect(this: HTMLElement) {
+        const indexAttr = this.getAttribute?.('data-index');
+        const height =
+          indexAttr === '0'
+            ? TALL_ROW_HEIGHT
+            : indexAttr === '1'
+              ? SHORT_ROW_HEIGHT
+              : 0;
+        return {
+          x: 0,
+          y: 0,
+          top: 0,
+          left: 0,
+          bottom: height,
+          right: 640,
+          width: 640,
+          height,
+          toJSON() {
+            return {};
+          },
+        };
+      },
+    );
+
+    render(<ChatMessageList messages={tallMessages} />);
+
+    const list = screen.getByTestId('chat-message-list');
+    const tallRow = list.querySelector('[data-index="0"]');
+    expect(tallRow).not.toBeNull();
+    // Content-driven rows must not lock height to the 88px estimate.
+    expect(tallRow).not.toHaveStyle({ height: '88px' });
+
+    const spacer = list.firstElementChild as HTMLElement | null;
+    expect(spacer).not.toBeNull();
+    expect(Number.parseFloat(spacer!.style.height)).toBeGreaterThanOrEqual(
+      TALL_ROW_HEIGHT + SHORT_ROW_HEIGHT,
+    );
+  });
 });

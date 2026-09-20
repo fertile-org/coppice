@@ -80,6 +80,11 @@ export function ChatMessageList({
     count: messages.length,
     getScrollElement: () => parentRef.current,
     estimateSize: () => ESTIMATED_ROW_HEIGHT,
+    measureElement: (element) => {
+      const measured = element.getBoundingClientRect().height;
+      // jsdom / pre-layout often reports 0; keep the estimate until real layout exists.
+      return measured > 0 ? measured : ESTIMATED_ROW_HEIGHT;
+    },
     overscan: 8,
     initialRect: { width: 640, height: 480 },
   });
@@ -106,9 +111,9 @@ export function ChatMessageList({
             <div
               key={item.key}
               data-index={item.index}
+              ref={virtualizer.measureElement}
               className="absolute left-0 top-0 w-full px-1 py-1.5"
               style={{
-                height: `${item.size}px`,
                 transform: `translateY(${item.start}px)`,
               }}
             >
