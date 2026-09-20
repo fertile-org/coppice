@@ -2,7 +2,7 @@
 
 **Coppice** is a self-hosted agent workspace: Trello-like board, tickets, comments, and (from M03) agent execution. Philosophy and full product design live in `docs/philosophy/`.
 
-**Status:** M06 knowledge & learning is complete. **Next implement:** [M07 — Trust & signals](docs/milestones/M07-trust-and-signals.md), then [M08](docs/milestones/M08-connector-operator-cli.md), then [M09 — Agent chat](docs/milestones/M09-agent-chat.md). Design-gate docs for M09 may proceed in parallel; do not implement M09 before M07/M08.
+**Status:** M06 knowledge & learning is complete. M09 Agent Chat is implemented on main (sessions API, SPA Chat, actions, `make e2e-smoke-m09`). **Next implement:** [M07 — Trust & signals](docs/milestones/M07-trust-and-signals.md), then [M08](docs/milestones/M08-connector-operator-cli.md). M09 shipped ahead of the sequential gate; M07/M08 remain required before claiming full trust/connector readiness for real connectors.
 
 ## Must read before coding
 

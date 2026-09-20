@@ -13,7 +13,7 @@ BOOTSTRAP_PASSWORD = changeme
 export COPPICE_UID ?= $(shell id -u)
 export COPPICE_GID ?= $(shell id -g)
 
-.PHONY: compose-up compose-down compose-local-up compose-local-down server server-dev test test-unit test-smoke test-pg-reset clippy clean migrate bootstrap web-install web-test web-dev web-build e2e-smoke e2e-smoke-m03 e2e-smoke-m04 e2e-smoke-m05 e2e-smoke-m06 e2e-smoke-m06-knowledge benchmark-m06-knowledge-retrieval release-tar
+.PHONY: compose-up compose-down compose-local-up compose-local-down server server-dev test test-unit test-smoke test-pg-reset clippy clean migrate bootstrap web-install web-test web-dev web-build e2e-smoke e2e-smoke-m03 e2e-smoke-m04 e2e-smoke-m05 e2e-smoke-m06 e2e-smoke-m06-knowledge e2e-smoke-m09 benchmark-m06-knowledge-retrieval release-tar
 
 CARGO_TEST = cargo test --features embedded-test-db
 
@@ -116,6 +116,10 @@ e2e-smoke-m06-knowledge: compose-up
 	MOCK_AGENT_RESPONSE=done $(COMPOSE) up -d --force-recreate --no-deps server
 	$(SMOKE_REPO_SETUP_IF_MISSING)
 	node e2e/smoke/m06-knowledge.mjs
+
+e2e-smoke-m09: compose-up
+	MOCK_AGENT_RESPONSE=backend_engineer/chat_turn $(COMPOSE) up -d --force-recreate --no-deps server
+	node e2e/smoke/m09-chat.mjs
 
 benchmark-m06-knowledge-retrieval: compose-up
 	COPPICE_RETRIEVAL_BENCHMARK_DATABASE_URL=postgres://coppice:coppice@127.0.0.1:$${COPPICE_PG_PORT:-5432}/coppice \

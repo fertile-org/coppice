@@ -172,15 +172,16 @@ Live tokens: reuse `GET /ws/agent-runs/:runId/live` for the turn run.
 
 ## Acceptance criteria
 
-- [ ] Milestone + approved design spec + implementation plan exist (API, cwd, profile, actions, UI reuse)
-- [ ] `chat_sessions` / `chat_messages` (or equivalent) persisted; human can list/open history in SPA
-- [ ] `conversation` profile + `chat_turn` run kind distinct from `human_chat` / `full`
-- [ ] Cwd resolver implements repo-bound vs `$WORKTREES_PATH/chat/{session_id}/`
-- [ ] Write tools denied for chat turns (orchestrator + connector); reads allowed per policy
-- [ ] Streaming reuses run live channel (documented); session list updates via events or poll
-- [ ] Actions: create-ticket, create-knowledge (inbox pending), cutoff — server-validated
-- [ ] No regression: ticket `@mention` Chat mode still `human_chat`; M06 inbox still requires human approve
-- [ ] CI/mock path green; no real CLI required in automated tests
+- [x] Milestone + approved design spec + implementation plan exist (API, cwd, profile, actions, UI reuse)
+- [x] `chat_sessions` / `chat_messages` (or equivalent) persisted; human can list/open history in SPA
+- [x] `conversation` profile + `chat_turn` run kind distinct from `human_chat` / `full`
+- [x] Cwd resolver implements repo-bound vs `$WORKTREES_PATH/chat/{session_id}/`
+- [x] Write tools denied for chat turns (orchestrator + connector); reads allowed per policy
+- [x] Streaming reuses run live channel (documented); session list updates via events or poll
+- [x] Actions: create-ticket, create-knowledge (inbox pending), cutoff — server-validated
+- [x] No regression: ticket `@mention` Chat mode still `human_chat`; M06 inbox still requires human approve
+- [x] CI/mock path green; no real CLI required in automated tests
+- [x] `make e2e-smoke-m09` — session create, one mock turn, cutoff
 
 ## Related docs
 
