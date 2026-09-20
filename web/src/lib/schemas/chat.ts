@@ -10,6 +10,7 @@ export const chatSessionSchema = z.object({
   ownerUserId: z.string().uuid(),
   agentId: z.string().uuid(),
   repoId: z.string().uuid().nullable(),
+  parentSessionId: z.string().uuid().nullable().optional(),
   status: chatSessionStatusSchema,
   createdAt: z.string(),
   updatedAt: z.string(),

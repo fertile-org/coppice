@@ -270,7 +270,8 @@ fn validated_candidate_source_id(
         }
         KnowledgeSourceType::HumanNote
         | KnowledgeSourceType::WorkspaceSignal
-        | KnowledgeSourceType::ObservationRun => {
+        | KnowledgeSourceType::ObservationRun
+        | KnowledgeSourceType::ChatSession => {
             anyhow::bail!("unsupported extracted knowledge source type")
         }
     }

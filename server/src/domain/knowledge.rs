@@ -40,6 +40,7 @@ pub enum KnowledgeSourceType {
     AgentSummary,
     WorkspaceSignal,
     ObservationRun,
+    ChatSession,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -149,6 +150,7 @@ string_enum!(source_type_to_str, source_type_from_str, KnowledgeSourceType, {
     KnowledgeSourceType::AgentSummary => "agent_summary",
     KnowledgeSourceType::WorkspaceSignal => "workspace_signal",
     KnowledgeSourceType::ObservationRun => "observation_run",
+    KnowledgeSourceType::ChatSession => "chat_session",
 });
 string_enum!(confidence_to_str, confidence_from_str, KnowledgeConfidence, {
     KnowledgeConfidence::Low => "low",

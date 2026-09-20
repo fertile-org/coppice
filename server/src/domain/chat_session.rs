@@ -38,6 +38,7 @@ pub struct ChatSession {
     pub owner_user_id: Uuid,
     pub agent_id: Uuid,
     pub repo_id: Option<Uuid>,
+    pub parent_session_id: Option<Uuid>,
     pub status: ChatSessionStatus,
     pub created_at: OffsetDateTime,
     pub updated_at: OffsetDateTime,

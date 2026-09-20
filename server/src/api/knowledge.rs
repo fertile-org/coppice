@@ -183,7 +183,7 @@ struct ExpireBody {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-struct KnowledgeResponse {
+pub(crate) struct KnowledgeResponse {
     id: Uuid,
     version: i32,
     status: String,
@@ -307,7 +307,7 @@ fn page_response(page: KnowledgePage) -> KnowledgeListResponse {
     }
 }
 
-fn item_response(item: KnowledgeItemView) -> KnowledgeResponse {
+pub(crate) fn item_response(item: KnowledgeItemView) -> KnowledgeResponse {
     let format = |value: Option<OffsetDateTime>| {
         value.map(|timestamp| timestamp.format(&Rfc3339).unwrap_or_default())
     };
