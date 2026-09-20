@@ -18,6 +18,7 @@ import {
   useCreateKnowledgeFromChat,
   useCreateTicketFromChat,
   useCutoffChatSession,
+  useDraftTicketFromChat,
 } from './useChat';
 
 const KNOWLEDGE_TYPES = knowledgeTypeSchema.options;
@@ -98,6 +99,11 @@ function CreateTicketDialog({
 }) {
   const { data: projects = [] } = useProjects();
   const createTicket = useCreateTicketFromChat(session.id);
+  const {
+    data: draft,
+    isLoading: draftLoading,
+    isError: draftError,
+  } = useDraftTicketFromChat(session.id);
   const openTicket = useOpenTicket();
   const [projectId, setProjectId] = useState(
     session.projectId ?? projects[0]?.id ?? '',
@@ -105,12 +111,20 @@ function CreateTicketDialog({
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [draftApplied, setDraftApplied] = useState(false);
 
   useEffect(() => {
     if (!projectId && projects[0]?.id) {
       setProjectId(session.projectId ?? projects[0].id);
     }
   }, [projectId, projects, session.projectId]);
+
+  useEffect(() => {
+    if (!draft || draftApplied) return;
+    setTitle(draft.title);
+    setDescription(draft.description);
+    setDraftApplied(true);
+  }, [draft, draftApplied]);
 
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
@@ -132,6 +146,14 @@ function CreateTicketDialog({
     }
   }
 
+  const draftHint = draftLoading
+    ? 'Drafting title and description from this chat…'
+    : draftError
+      ? 'Could not load an agent draft; edit the fields below or confirm to use server defaults.'
+      : draft?.source === 'fallback'
+        ? 'Using a deterministic fallback draft. Edit before confirming.'
+        : 'Review the agent draft, edit if needed, then confirm.';
+
   return (
     <ActionDialogShell
       title="Create ticket"
@@ -143,6 +165,9 @@ function CreateTicketDialog({
         className="space-y-3"
         data-testid="create-ticket-dialog"
       >
+        <p className="font-body text-sm text-text-secondary" data-testid="draft-ticket-status">
+          {draftHint}
+        </p>
         <div className="space-y-2">
           <Label htmlFor="chat-ticket-project">Project</Label>
           <select
@@ -162,24 +187,30 @@ function CreateTicketDialog({
           </select>
         </div>
         <div className="space-y-2">
-          <Label htmlFor="chat-ticket-title">Title (optional)</Label>
+          <Label htmlFor="chat-ticket-title">Title</Label>
           <Input
             id="chat-ticket-title"
-            aria-label="Title (optional)"
+            aria-label="Title"
             value={title}
             onChange={(event) => setTitle(event.target.value)}
-            placeholder="Defaults from the latest human turn"
+            placeholder={draftLoading ? 'Drafting…' : 'Board-ready ticket title'}
+            disabled={draftLoading}
           />
         </div>
         <div className="space-y-2">
-          <Label htmlFor="chat-ticket-description">Description (optional)</Label>
+          <Label htmlFor="chat-ticket-description">Description</Label>
           <Textarea
             id="chat-ticket-description"
-            aria-label="Description (optional)"
+            aria-label="Description"
             value={description}
             onChange={(event) => setDescription(event.target.value)}
             rows={4}
-            placeholder="Defaults to a compacted transcript"
+            placeholder={
+              draftLoading
+                ? 'Drafting…'
+                : 'Structured description with context and next steps'
+            }
+            disabled={draftLoading}
           />
         </div>
         {error && (
@@ -191,7 +222,10 @@ function CreateTicketDialog({
           <Button type="button" variant="secondary" onClick={onClose}>
             Cancel
           </Button>
-          <Button type="submit" disabled={createTicket.isPending || !projectId}>
+          <Button
+            type="submit"
+            disabled={createTicket.isPending || draftLoading || !projectId}
+          >
             {createTicket.isPending ? 'Creating…' : 'Confirm create ticket'}
           </Button>
         </div>

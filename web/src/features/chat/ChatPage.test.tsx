@@ -11,6 +11,11 @@ const mocks = vi.hoisted(() => ({
   postMessagePending: false,
   uploadAttachment: vi.fn(),
   createTicket: vi.fn(),
+  draftTicketData: {
+    title: 'Harden chat cwd resolution',
+    description: '## Context\n\nUnbound chat sessions need a safe cwd.\n',
+    source: 'agent' as 'agent' | 'fallback',
+  },
   createKnowledge: vi.fn(),
   cutoffSession: vi.fn(),
   openTicket: vi.fn(),
@@ -108,6 +113,11 @@ vi.mock('./useChat', () => ({
     mutateAsync: mocks.createTicket,
     isPending: false,
   }),
+  useDraftTicketFromChat: () => ({
+    data: mocks.draftTicketData,
+    isLoading: false,
+    isError: false,
+  }),
   useCreateKnowledgeFromChat: () => ({
     mutateAsync: mocks.createKnowledge,
     isPending: false,
@@ -154,6 +164,11 @@ describe('ChatPage', () => {
     mocks.postMessagePending = false;
     mocks.uploadAttachment.mockReset();
     mocks.createTicket.mockReset();
+    mocks.draftTicketData = {
+      title: 'Harden chat cwd resolution',
+      description: '## Context\n\nUnbound chat sessions need a safe cwd.\n',
+      source: 'agent',
+    };
     mocks.createKnowledge.mockReset();
     mocks.cutoffSession.mockReset();
     mocks.openTicket.mockReset();
@@ -468,7 +483,8 @@ describe('ChatPage', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Create ticket' }));
     expect(screen.getByTestId('create-ticket-dialog')).toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText('Title (optional)'), {
+    expect(await screen.findByDisplayValue('Harden chat cwd resolution')).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('Title'), {
       target: { value: 'Fix chat cwd' },
     });
     fireEvent.click(
@@ -479,7 +495,7 @@ describe('ChatPage', () => {
       expect(mocks.createTicket).toHaveBeenCalledWith({
         projectId: '00000000-0000-4000-8000-000000000003',
         title: 'Fix chat cwd',
-        description: undefined,
+        description: '## Context\n\nUnbound chat sessions need a safe cwd.',
       });
     });
     expect(mocks.openTicket).toHaveBeenCalledWith(

@@ -7,6 +7,7 @@ import {
   createKnowledgeFromChatResponseSchema,
   createTicketFromChatResponseSchema,
   cutoffSessionResponseSchema,
+  draftTicketFromChatResponseSchema,
   postChatMessageResponseSchema,
   type ChatMessage,
   type ChatSession,
@@ -14,6 +15,7 @@ import {
   type CreateKnowledgeFromChatResponse,
   type CreateTicketFromChatResponse,
   type CutoffSessionResponse,
+  type DraftTicketFromChatResponse,
   type PostChatMessageInput,
 } from '../../lib/schemas/chat';
 import type {
@@ -132,6 +134,17 @@ async function createTicketFromChat(
   return createTicketFromChatResponseSchema.parse(await res.json());
 }
 
+async function draftTicketFromChat(
+  sessionId: string,
+): Promise<DraftTicketFromChatResponse> {
+  const res = await apiFetch(`/api/chat/sessions/${sessionId}/draft-ticket`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: '{}',
+  });
+  return draftTicketFromChatResponseSchema.parse(await res.json());
+}
+
 async function createKnowledgeFromChat(
   sessionId: string,
   input: CreateKnowledgeFromChatInput,
@@ -244,6 +257,13 @@ export function useCreateTicketFromChat(sessionId: string) {
         queryKey: ['tickets', result.ticket.projectId],
       });
     },
+  });
+}
+
+export function useDraftTicketFromChat(sessionId: string) {
+  return useQuery({
+    queryKey: ['chat-draft-ticket', sessionId],
+    queryFn: () => draftTicketFromChat(sessionId),
   });
 }
 

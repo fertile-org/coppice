@@ -108,6 +108,63 @@ If you cannot answer, return `blocked` with a clear `summary`.
     )
 }
 
+/// Minimal overlay for in-process chat → board ticket drafting (no transcript reply).
+pub fn build_draft_ticket_context(input: &ContextInput<'_>) -> String {
+    let transcript = input.latest_comments.unwrap_or("(No previous messages)");
+    let repository = input
+        .worktree_path
+        .map(|path| format!("\n# Working directory\n\n`{path}`\n"))
+        .unwrap_or_default();
+    format!(
+        r#"# Draft board ticket
+
+You are drafting a board-ready ticket from a human-owned chat session.
+Do not reply in chat. Do not create a ticket. Draft title and description only.
+
+# Agent
+
+**Name:** {name}
+**Role:** {role}
+
+{system_prompt}
+{repository}
+# Conversation transcript
+
+{transcript}
+
+# Drafting rules
+
+- Produce a concise, actionable title (not a pasted chat line).
+- Write a structured markdown description with Context and Next steps when helpful.
+- Do not invent acceptanceCriteria as a separate field.
+- Do not write, edit, create, delete, rename, stage, commit, or push files.
+- Do not change tickets, workflow state, or knowledge.
+
+# Expected output contract
+
+Return one JSON object:
+
+```json
+{{
+  "status": "done",
+  "summary": "<concise board ticket title>",
+  "updatedDescription": "<markdown description with context and next steps>",
+  "changedFiles": [],
+  "testsRun": [],
+  "blockers": []
+}}
+```
+
+`summary` is the ticket title. `updatedDescription` is the ticket body.
+"#,
+        name = input.agent_name,
+        role = input.agent_role,
+        system_prompt = input.agent_system_prompt,
+        repository = repository,
+        transcript = transcript,
+    )
+}
+
 enum FullContextKind<'a> {
     Work,
     Other,
