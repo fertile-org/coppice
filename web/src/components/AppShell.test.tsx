@@ -92,4 +92,35 @@ describe('AppShell', () => {
     expect(main).toHaveAttribute('data-layout', 'chat');
     expect(main).not.toHaveClass('max-w-6xl');
   });
+
+  it('clamps chat routes to the viewport so document scroll cannot move chrome', () => {
+    render(
+      <MemoryRouter initialEntries={['/chat']}>
+        <AppShell />
+      </MemoryRouter>,
+    );
+
+    const main = screen.getByTestId('app-shell-main');
+    const root = main.parentElement;
+    expect(root).toHaveClass('h-svh');
+    expect(root).toHaveClass('overflow-hidden');
+    expect(root).toHaveClass('flex');
+    expect(root).toHaveClass('flex-col');
+    expect(main).toHaveClass('overflow-hidden');
+    expect(main).toHaveClass('min-h-0');
+  });
+
+  it('does not viewport-clamp non-chat routes', () => {
+    render(
+      <MemoryRouter initialEntries={['/projects']}>
+        <AppShell />
+      </MemoryRouter>,
+    );
+
+    const main = screen.getByTestId('app-shell-main');
+    const root = main.parentElement;
+    expect(root).toHaveClass('min-h-screen');
+    expect(root).not.toHaveClass('h-svh');
+    expect(root).not.toHaveClass('overflow-hidden');
+  });
 });
