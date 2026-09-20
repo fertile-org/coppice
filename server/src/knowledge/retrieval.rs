@@ -4,6 +4,28 @@ use sqlx::{PgPool, Row};
 use time::OffsetDateTime;
 use uuid::Uuid;
 
+/// Inbox near-duplicate assist floor — separate from agent `minimum_similarity` (default 0.0).
+pub const INBOX_SIMILAR_MINIMUM_SIMILARITY: f64 = 0.75;
+pub const INBOX_SIMILAR_DEFAULT_LIMIT: usize = 5;
+pub const INBOX_SIMILAR_MAX_LIMIT: usize = 10;
+
+/// Shared join + base predicates for approved, live, embedding-ready knowledge.
+/// Agent retrieval adds confidence/type/scope filters on top; inbox assist does not.
+macro_rules! eligible_knowledge_from {
+    () => {
+        r#"
+    FROM knowledge_items i
+    JOIN knowledge_revisions r ON r.id = i.active_revision_id
+    JOIN knowledge_embeddings e ON e.revision_id = r.id
+    WHERE i.status = 'approved'
+      AND i.superseded_by IS NULL
+      AND (i.expires_at IS NULL OR i.expires_at > now())
+"#
+    };
+}
+
+pub const ELIGIBLE_KNOWLEDGE_FROM: &str = eligible_knowledge_from!();
+
 #[derive(Debug, Clone)]
 pub struct RetrievedKnowledge {
     pub item_id: Uuid,
@@ -19,6 +41,19 @@ pub struct RetrievedKnowledge {
     pub revision_created_at: OffsetDateTime,
 }
 
+#[derive(Debug, Clone)]
+pub struct SimilarKnowledgeNeighbor {
+    pub item_id: Uuid,
+    pub revision_id: Uuid,
+    pub title: String,
+    pub knowledge_type: String,
+    pub scope: String,
+    pub project_id: Option<Uuid>,
+    pub similarity: f64,
+    pub status: String,
+    pub embedding_status: String,
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum RetrievalError {
     #[error(transparent)]
@@ -27,7 +62,8 @@ pub enum RetrievalError {
     Embedding(#[from] EmbeddingError),
 }
 
-pub const RETRIEVAL_QUERY_SQL: &str = r#"
+pub const RETRIEVAL_QUERY_SQL: &str = concat!(
+    r#"
 WITH eligible AS MATERIALIZED (
     SELECT
         i.id AS item_id,
@@ -41,12 +77,9 @@ WITH eligible AS MATERIALIZED (
         r.confidence,
         r.created_at AS revision_created_at,
         e.embedding
-    FROM knowledge_items i
-    JOIN knowledge_revisions r ON r.id = i.active_revision_id
-    JOIN knowledge_embeddings e ON e.revision_id = r.id
-    WHERE i.status = 'approved'
-      AND i.superseded_by IS NULL
-      AND (i.expires_at IS NULL OR i.expires_at > now())
+"#,
+    eligible_knowledge_from!(),
+    r#"
       AND CASE $3
             WHEN 'high' THEN r.confidence = 'high'
             WHEN 'medium' THEN r.confidence IN ('medium', 'high')
@@ -70,7 +103,51 @@ FROM ranked
 WHERE 1.0 - distance >= $5
 ORDER BY distance ASC, revision_created_at DESC, item_id ASC
 LIMIT $6
-"#;
+"#
+);
+
+const INBOX_SIMILAR_QUERY_SQL: &str = concat!(
+    r#"
+WITH eligible AS MATERIALIZED (
+    SELECT
+        i.id AS item_id,
+        r.id AS revision_id,
+        r.scope,
+        r.knowledge_type,
+        r.title,
+        r.project_id,
+        i.status,
+        e.embedding
+"#,
+    eligible_knowledge_from!(),
+    r#"
+      AND i.id <> $1
+), ranked AS (
+    SELECT eligible.*, (eligible.embedding <=> $2::vector) AS distance
+    FROM eligible
+)
+SELECT
+    item_id,
+    revision_id,
+    scope,
+    knowledge_type,
+    title,
+    project_id,
+    status,
+    1.0 - distance AS similarity
+FROM ranked
+WHERE 1.0 - distance >= $3
+ORDER BY
+    CASE
+        WHEN $4::uuid IS NOT NULL AND project_id IS NOT DISTINCT FROM $4 THEN 0
+        ELSE 1
+    END ASC,
+    CASE WHEN scope = $5 THEN 0 ELSE 1 END ASC,
+    distance ASC,
+    item_id ASC
+LIMIT $6
+"#
+);
 
 pub async fn has_eligible(
     pool: &PgPool,
@@ -78,16 +155,13 @@ pub async fn has_eligible(
     agent_id: Uuid,
     config: &KnowledgeRetrievalConfig,
 ) -> Result<bool, sqlx::Error> {
-    sqlx::query_scalar(
+    let sql = concat!(
         r#"
         SELECT EXISTS (
             SELECT 1
-            FROM knowledge_items i
-            JOIN knowledge_revisions r ON r.id = i.active_revision_id
-            JOIN knowledge_embeddings e ON e.revision_id = r.id
-            WHERE i.status = 'approved'
-              AND i.superseded_by IS NULL
-              AND (i.expires_at IS NULL OR i.expires_at > now())
+"#,
+        eligible_knowledge_from!(),
+        r#"
               AND CASE $3
                     WHEN 'high' THEN r.confidence = 'high'
                     WHEN 'medium' THEN r.confidence IN ('medium', 'high')
@@ -100,14 +174,15 @@ pub async fn has_eligible(
                     OR (r.scope = 'agent' AND r.project_id = $1 AND r.agent_id = $2)
                   )
         )
-        "#,
-    )
-    .bind(project_id)
-    .bind(agent_id)
-    .bind(&config.minimum_confidence)
-    .bind(&config.allowed_types)
-    .fetch_one(pool)
-    .await
+        "#
+    );
+    sqlx::query_scalar(sql)
+        .bind(project_id)
+        .bind(agent_id)
+        .bind(&config.minimum_confidence)
+        .bind(&config.allowed_types)
+        .fetch_one(pool)
+        .await
 }
 
 pub async fn retrieve(
@@ -146,4 +221,58 @@ pub async fn retrieve(
             })
         })
         .collect()
+}
+
+/// Rank approved + embedding-ready neighbors for inbox review assist.
+/// Soft-prefers the pending item's project and scope; does not apply agent confidence/type filters.
+pub async fn find_similar_inbox(
+    pool: &PgPool,
+    exclude_item_id: Uuid,
+    query_vector: &[f32],
+    prefer_project_id: Option<Uuid>,
+    prefer_scope: &str,
+    limit: usize,
+) -> Result<Vec<SimilarKnowledgeNeighbor>, RetrievalError> {
+    let vector = vector_literal(query_vector)?;
+    let limit = limit.clamp(1, INBOX_SIMILAR_MAX_LIMIT) as i64;
+    let rows = sqlx::query(INBOX_SIMILAR_QUERY_SQL)
+        .bind(exclude_item_id)
+        .bind(vector)
+        .bind(INBOX_SIMILAR_MINIMUM_SIMILARITY)
+        .bind(prefer_project_id)
+        .bind(prefer_scope)
+        .bind(limit)
+        .fetch_all(pool)
+        .await?;
+    rows.into_iter()
+        .map(|row| {
+            Ok(SimilarKnowledgeNeighbor {
+                item_id: row.try_get("item_id")?,
+                revision_id: row.try_get("revision_id")?,
+                title: row.try_get("title")?,
+                knowledge_type: row.try_get("knowledge_type")?,
+                scope: row.try_get("scope")?,
+                project_id: row.try_get("project_id")?,
+                similarity: row.try_get("similarity")?,
+                status: row.try_get("status")?,
+                embedding_status: "ready".into(),
+            })
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn inbox_limits_are_independent_of_agent_defaults() {
+        assert_eq!(INBOX_SIMILAR_MINIMUM_SIMILARITY, 0.75);
+        assert_eq!(INBOX_SIMILAR_DEFAULT_LIMIT, 5);
+        assert_eq!(INBOX_SIMILAR_MAX_LIMIT, 10);
+        assert!(INBOX_SIMILAR_QUERY_SQL.contains("i.id <> $1"));
+        assert!(INBOX_SIMILAR_QUERY_SQL.contains("i.status = 'approved'"));
+        assert!(RETRIEVAL_QUERY_SQL.contains("i.status = 'approved'"));
+        assert_eq!(ELIGIBLE_KNOWLEDGE_FROM, eligible_knowledge_from!());
+    }
 }

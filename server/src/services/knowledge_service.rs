@@ -5,6 +5,11 @@ use crate::domain::knowledge::{
     validate_revision, KnowledgeConfidence, KnowledgeItemView, KnowledgeRevisionInput,
     KnowledgeScope, KnowledgeStatus, KnowledgeType,
 };
+use crate::knowledge::embedder::{EmbeddingError, EmbeddingProvider};
+use crate::knowledge::retrieval::{
+    find_similar_inbox, SimilarKnowledgeNeighbor, INBOX_SIMILAR_DEFAULT_LIMIT,
+    INBOX_SIMILAR_MAX_LIMIT, RetrievalError,
+};
 use sqlx::{PgPool, Postgres, Row, Transaction};
 use thiserror::Error;
 use time::OffsetDateTime;
@@ -56,7 +61,18 @@ pub enum KnowledgeError {
     #[error("knowledge activation was blocked by a concurrent lifecycle change")]
     ActivationConflict,
     #[error(transparent)]
+    Embedding(#[from] EmbeddingError),
+    #[error(transparent)]
     Database(#[from] sqlx::Error),
+}
+
+impl From<RetrievalError> for KnowledgeError {
+    fn from(error: RetrievalError) -> Self {
+        match error {
+            RetrievalError::Database(error) => Self::Database(error),
+            RetrievalError::Embedding(error) => Self::Embedding(error),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default)]
@@ -209,6 +225,40 @@ impl<'a> KnowledgeService<'a> {
             .await?
             .ok_or(KnowledgeError::NotFound)?;
         row_to_view(&row)
+    }
+
+    /// Near-duplicate assist for pending inbox review. Embeds the pending revision
+    /// ephemerally — never writes `knowledge_embeddings` for pending items.
+    pub async fn find_similar(
+        &self,
+        item_id: Uuid,
+        limit: Option<usize>,
+        embedder: &dyn EmbeddingProvider,
+    ) -> Result<Vec<SimilarKnowledgeNeighbor>, KnowledgeError> {
+        let item = self.get(item_id).await?;
+        if item.status != KnowledgeStatus::Pending {
+            return Err(KnowledgeError::Validation(
+                "similar neighbors are only available for pending knowledge items".into(),
+            ));
+        }
+        let limit = limit
+            .unwrap_or(INBOX_SIMILAR_DEFAULT_LIMIT)
+            .clamp(1, INBOX_SIMILAR_MAX_LIMIT);
+        let content: String = item.content.chars().take(32_000).collect();
+        let query_text = format!("{}\n\n{content}", item.title);
+        let vectors = embedder.embed(&[query_text]).await?;
+        let query_vector = vectors.first().ok_or_else(|| {
+            EmbeddingError::InvalidOutput("embedding provider returned no vector".into())
+        })?;
+        Ok(find_similar_inbox(
+            self.pool,
+            item_id,
+            query_vector,
+            item.project_id,
+            scope_to_str(item.scope),
+            limit,
+        )
+        .await?)
     }
 
     pub async fn list(&self, filter: KnowledgeListFilter) -> Result<KnowledgePage, KnowledgeError> {

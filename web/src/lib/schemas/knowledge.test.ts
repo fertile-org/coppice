@@ -2,12 +2,34 @@ import { describe, expect, it } from 'vitest';
 import {
   knowledgeItemSchema,
   knowledgeUsageListSchema,
+  similarListSchema,
 } from './knowledge';
 
 const ID = '00000000-0000-4000-8000-000000000001';
 const REVISION_ID = '00000000-0000-4000-8000-000000000002';
 
 describe('knowledge schemas', () => {
+  it('parses similar-neighbor assist payloads', () => {
+    const parsed = similarListSchema.parse({
+      items: [
+        {
+          itemId: ID,
+          revisionId: REVISION_ID,
+          title: 'Existing rule',
+          knowledgeType: 'test_command',
+          scope: 'project',
+          projectId: '00000000-0000-4000-8000-000000000003',
+          similarity: 0.97,
+          status: 'approved',
+          embeddingStatus: 'ready',
+        },
+      ],
+    });
+    expect(parsed.items).toHaveLength(1);
+    expect(parsed.items[0].similarity).toBe(0.97);
+    expect(similarListSchema.parse({ items: [] }).items).toEqual([]);
+  });
+
   it('parses lifecycle, provenance, embedding, and usage metadata', () => {
     const parsed = knowledgeItemSchema.parse({
       id: ID,

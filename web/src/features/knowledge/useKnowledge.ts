@@ -9,6 +9,7 @@ import {
   knowledgeItemSchema,
   knowledgePageSchema,
   knowledgeUsageListSchema,
+  similarListSchema,
   type KnowledgeConfidence,
   type KnowledgeItem,
   type KnowledgePage,
@@ -17,6 +18,7 @@ import {
   type KnowledgeStatus,
   type KnowledgeType,
   type KnowledgeUsage,
+  type SimilarList,
 } from '../../lib/schemas/knowledge';
 
 export const KNOWLEDGE_QUERY_KEY = ['knowledge'] as const;
@@ -82,6 +84,28 @@ export function useKnowledge(filter: KnowledgeListFilter) {
     queryFn: ({ pageParam }) => fetchKnowledgePage(filter, pageParam),
     initialPageParam: null as string | null,
     getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
+  });
+}
+
+export async function fetchKnowledgeItem(itemId: string): Promise<KnowledgeItem> {
+  const response = await apiFetch(`/api/knowledge/${itemId}`);
+  return knowledgeItemSchema.parse(await response.json());
+}
+
+async function fetchSimilarKnowledge(itemId: string): Promise<SimilarList> {
+  const response = await apiFetch(`/api/knowledge/${itemId}/similar`);
+  return similarListSchema.parse(await response.json());
+}
+
+export function similarKnowledgeQueryKey(itemId: string) {
+  return [...KNOWLEDGE_QUERY_KEY, 'similar', itemId] as const;
+}
+
+export function useSimilarKnowledge(itemId: string, enabled: boolean) {
+  return useQuery({
+    queryKey: similarKnowledgeQueryKey(itemId),
+    queryFn: () => fetchSimilarKnowledge(itemId),
+    enabled,
   });
 }
 

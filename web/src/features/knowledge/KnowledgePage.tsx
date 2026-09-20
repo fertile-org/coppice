@@ -23,6 +23,7 @@ import {
   type KnowledgeScope,
   type KnowledgeStatus,
   type KnowledgeType,
+  type SimilarNeighbor,
 } from '../../lib/schemas/knowledge';
 import { useAgents } from '../agents/useAgents';
 import { useSession } from '../auth/useSession';
@@ -35,6 +36,7 @@ import {
   guidanceForType,
 } from './curationGuide';
 import {
+  fetchKnowledgeItem,
   useApproveKnowledge,
   useCreateKnowledge,
   useEditKnowledge,
@@ -42,6 +44,7 @@ import {
   useKnowledge,
   useMarkKnowledgeStale,
   useRejectKnowledge,
+  useSimilarKnowledge,
   useSupersedeKnowledge,
   type KnowledgeRevisionInput,
 } from './useKnowledge';
@@ -112,6 +115,11 @@ function humanize(value: string): string {
 
 function shortId(value: string): string {
   return value.slice(0, 8);
+}
+
+function duplicateRejectReason(neighborTitle: string, neighborId: string): string {
+  const preset = REJECT_PRESETS.find((entry) => entry.id === 'duplicate')!;
+  return `${preset.reasonText.slice(0, -1)}: "${neighborTitle}" (${shortId(neighborId)}).`;
 }
 
 function statusPillClass(status: KnowledgeStatus): string {
@@ -411,14 +419,138 @@ function RejectPresetRow({
   );
 }
 
-function KnowledgeCard({
+function NearDuplicateAssist({
   item,
   canGovern,
-  onOpenTicket,
+  busy,
+  onOpenNeighbor,
+  onApproveAnyway,
+  onRejectDuplicate,
+  onStartSupersede,
 }: {
   item: KnowledgeItem;
   canGovern: boolean;
+  busy: boolean;
+  onOpenNeighbor: (neighborId: string) => void;
+  onApproveAnyway: () => void;
+  onRejectDuplicate: (neighbor: SimilarNeighbor) => void;
+  onStartSupersede: (neighbor: SimilarNeighbor) => void;
+}) {
+  const similar = useSimilarKnowledge(item.id, item.status === 'pending');
+  const neighbors = similar.data?.items ?? [];
+
+  return (
+    <section
+      aria-label="Near-duplicate assist"
+      className="mt-4 rounded-lg border border-moss-200 bg-moss-50/70 p-4"
+    >
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h3 className="font-display text-sm font-semibold text-bark-900">
+            Near duplicates
+          </h3>
+          <p className="mt-0.5 font-body text-xs text-text-secondary">
+            Close approved neighbors before you confirm this pending item.
+          </p>
+        </div>
+        {canGovern && (
+          <Button
+            type="button"
+            size="sm"
+            disabled={busy}
+            onClick={onApproveAnyway}
+          >
+            <Check className="size-3.5" aria-hidden="true" />
+            Approve anyway
+          </Button>
+        )}
+      </div>
+
+      {similar.isLoading && (
+        <p className="mt-3 font-body text-xs text-text-muted">
+          Checking for close matches…
+        </p>
+      )}
+      {similar.isError && (
+        <p className="mt-3 font-body text-xs text-danger">
+          Unable to load similar knowledge.
+        </p>
+      )}
+      {!similar.isLoading && !similar.isError && neighbors.length === 0 && (
+        <p className="mt-3 font-body text-sm text-text-secondary">
+          No close matches
+        </p>
+      )}
+      {neighbors.length > 0 && (
+        <ul className="mt-3 space-y-3">
+          {neighbors.map((neighbor) => (
+            <li
+              key={neighbor.itemId}
+              className="rounded-md border border-border bg-surface-raised px-3 py-2"
+            >
+              <div className="flex flex-wrap items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <p className="font-body text-sm font-medium text-bark-900">
+                    {neighbor.title}
+                  </p>
+                  <p className="mt-0.5 font-body text-xs text-text-muted">
+                    {TYPE_LABELS[neighbor.knowledgeType] ??
+                      humanize(neighbor.knowledgeType)}{' '}
+                    · {humanize(neighbor.scope)} · similarity{' '}
+                    {neighbor.similarity.toFixed(3)}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => onOpenNeighbor(neighbor.itemId)}
+                  className="inline-flex items-center gap-1 font-body text-xs font-medium text-moss-700 hover:underline"
+                >
+                  Open
+                  <ExternalLink className="size-3" aria-hidden="true" />
+                </button>
+              </div>
+              {canGovern && (
+                <div className="mt-2 flex flex-wrap gap-2">
+                  <Button
+                    type="button"
+                    variant="destructive"
+                    size="sm"
+                    disabled={busy}
+                    onClick={() => onRejectDuplicate(neighbor)}
+                  >
+                    Reject as duplicate
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    disabled={busy}
+                    onClick={() => onStartSupersede(neighbor)}
+                  >
+                    Start supersede
+                  </Button>
+                </div>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
+function KnowledgeCard({
+  item,
+  canGovern,
+  focused,
+  onOpenTicket,
+  onOpenNeighbor,
+}: {
+  item: KnowledgeItem;
+  canGovern: boolean;
+  focused?: boolean;
   onOpenTicket: (ticketId: string) => void | Promise<void>;
+  onOpenNeighbor: (neighborId: string) => void;
 }) {
   const approve = useApproveKnowledge();
   const reject = useRejectKnowledge();
@@ -523,8 +655,53 @@ function KnowledgeCard({
     }
   }
 
+  async function rejectAsDuplicate(neighbor: SimilarNeighbor) {
+    await run(() =>
+      reject.mutateAsync({
+        id: item.id,
+        expectedVersion: item.version,
+        reason: duplicateRejectReason(neighbor.title, neighbor.itemId),
+      }),
+    );
+  }
+
+  async function startSupersede(neighbor: SimilarNeighbor) {
+    await run(async () => {
+      const neighborItem = await fetchKnowledgeItem(neighbor.itemId);
+      await supersede.mutateAsync({
+        id: neighbor.itemId,
+        expectedVersion: neighborItem.version,
+        replacement: {
+          scope: item.scope,
+          projectId: item.projectId,
+          agentId: item.agentId,
+          knowledgeType: item.knowledgeType,
+          title: item.title,
+          content: item.content,
+          sourceType: item.sourceType,
+          sourceId: item.sourceId,
+          sourceRunId: item.sourceRunId,
+          confidence: item.confidence,
+        },
+      });
+      await reject.mutateAsync({
+        id: item.id,
+        expectedVersion: item.version,
+        reason: duplicateRejectReason(neighbor.title, neighbor.itemId),
+      });
+    });
+  }
+
   return (
-    <article className="rounded-xl border border-border bg-surface-raised p-5 shadow-card">
+    <article
+      id={`knowledge-item-${item.id}`}
+      data-focused={focused ? 'true' : undefined}
+      className={
+        focused
+          ? 'rounded-xl border border-moss-400 bg-surface-raised p-5 shadow-card ring-2 ring-moss-200'
+          : 'rounded-xl border border-border bg-surface-raised p-5 shadow-card'
+      }
+    >
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
@@ -565,6 +742,25 @@ function KnowledgeCard({
           Embedding · {humanize(item.embeddingStatus)}
         </span>
       </div>
+
+      {item.status === 'pending' && (
+        <NearDuplicateAssist
+          item={item}
+          canGovern={canGovern}
+          busy={busy}
+          onOpenNeighbor={onOpenNeighbor}
+          onApproveAnyway={() =>
+            void run(() =>
+              approve.mutateAsync({
+                id: item.id,
+                expectedVersion: item.version,
+              }),
+            )
+          }
+          onRejectDuplicate={(neighbor) => void rejectAsDuplicate(neighbor)}
+          onStartSupersede={(neighbor) => void startSupersede(neighbor)}
+        />
+      )}
 
       {awaitingReplacementEmbedding && (
         <div className="mt-4 flex gap-2 rounded-md border border-info-muted bg-info-muted/60 px-3 py-2">
@@ -648,7 +844,7 @@ function KnowledgeCard({
 
       {canGovern && !item.supersededBy && (
         <div className="mt-4 flex flex-wrap gap-2 border-t border-border pt-4">
-          {item.status !== 'approved' && (
+          {item.status !== 'approved' && item.status !== 'pending' && (
             <Button
               type="button"
               size="sm"
@@ -819,12 +1015,20 @@ export function KnowledgePage() {
   const [status, setStatus] = useState<KnowledgeStatus>('pending');
   const [projectId, setProjectId] = useState('');
   const [knowledgeType, setKnowledgeType] = useState('');
+  const [focusItemId, setFocusItemId] = useState<string | null>(null);
   const query = useKnowledge({
     status,
     projectId: projectId || undefined,
     knowledgeType: (knowledgeType || undefined) as KnowledgeType | undefined,
   });
   const items = query.data?.pages.flatMap((page) => page.items) ?? [];
+
+  function openNeighbor(neighborId: string) {
+    setProjectId('');
+    setKnowledgeType('');
+    setFocusItemId(neighborId);
+    setStatus('approved');
+  }
 
   return (
     <div>
@@ -864,7 +1068,10 @@ export function KnowledgePage() {
                   type="button"
                   role="tab"
                   aria-selected={status === tab.value}
-                  onClick={() => setStatus(tab.value)}
+                  onClick={() => {
+                    setFocusItemId(null);
+                    setStatus(tab.value);
+                  }}
                   className={
                     status === tab.value
                       ? 'rounded-md bg-surface-raised px-3 py-2 font-body text-sm font-medium text-bark-900 shadow-sm'
@@ -946,7 +1153,9 @@ export function KnowledgePage() {
                   key={item.id}
                   item={item}
                   canGovern={user?.role === 'admin'}
+                  focused={focusItemId === item.id}
                   onOpenTicket={openTicket}
+                  onOpenNeighbor={openNeighbor}
                 />
               ))}
             </div>

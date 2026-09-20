@@ -4,6 +4,8 @@ use crate::domain::knowledge::{
     source_type_to_str, status_from_str, status_to_str, type_from_str, type_to_str,
     KnowledgeItemView, KnowledgeRevisionInput,
 };
+use crate::knowledge::embedding_provider;
+use crate::knowledge::retrieval::SimilarKnowledgeNeighbor;
 use crate::middleware::admin::AdminUser;
 use crate::services::knowledge_service::{
     KnowledgeError, KnowledgeListFilter, KnowledgePage, KnowledgeRevisionPatch, KnowledgeService,
@@ -31,6 +33,7 @@ pub fn routes() -> Router<Arc<AppState>> {
             "/api/knowledge/{item_id}",
             get(get_knowledge).patch(edit_knowledge),
         )
+        .route("/api/knowledge/{item_id}/similar", get(similar_knowledge))
         .route("/api/knowledge/{item_id}/approve", post(approve_knowledge))
         .route("/api/knowledge/{item_id}/reject", post(reject_knowledge))
         .route(
@@ -86,6 +89,10 @@ impl From<KnowledgeError> for KnowledgeApiError {
                 status: StatusCode::BAD_REQUEST,
                 message: error.to_string(),
             },
+            KnowledgeError::Embedding(embedding_error) => {
+                tracing::error!(error = %embedding_error, "knowledge embedding error");
+                Self::internal()
+            }
             KnowledgeError::Database(database_error) => {
                 tracing::error!(error = %database_error, "knowledge database error");
                 Self::internal()
@@ -385,6 +392,65 @@ async fn get_knowledge(
         .get(item_id)
         .await?;
     Ok(Json(item_response(item)))
+}
+
+#[derive(Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+struct SimilarQuery {
+    limit: Option<usize>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SimilarNeighborResponse {
+    item_id: Uuid,
+    revision_id: Uuid,
+    title: String,
+    knowledge_type: String,
+    scope: String,
+    project_id: Option<Uuid>,
+    similarity: f64,
+    status: String,
+    embedding_status: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SimilarListResponse {
+    items: Vec<SimilarNeighborResponse>,
+}
+
+fn similar_neighbor_response(neighbor: SimilarKnowledgeNeighbor) -> SimilarNeighborResponse {
+    SimilarNeighborResponse {
+        item_id: neighbor.item_id,
+        revision_id: neighbor.revision_id,
+        title: neighbor.title,
+        knowledge_type: neighbor.knowledge_type,
+        scope: neighbor.scope,
+        project_id: neighbor.project_id,
+        similarity: neighbor.similarity,
+        status: neighbor.status,
+        embedding_status: neighbor.embedding_status,
+    }
+}
+
+async fn similar_knowledge(
+    State(state): State<Arc<AppState>>,
+    AuthUser { .. }: AuthUser,
+    Path(item_id): Path<Uuid>,
+    Query(query): Query<SimilarQuery>,
+) -> Result<Json<SimilarListResponse>, KnowledgeApiError> {
+    let embedder = embedding_provider(&state.config.knowledge.embedding).map_err(|error| {
+        tracing::error!(error = %error, "knowledge embedding provider configuration error");
+        KnowledgeApiError::internal()
+    })?;
+    let items = KnowledgeService::new(pool(&state)?, &state.config.knowledge)
+        .find_similar(item_id, query.limit, embedder.as_ref())
+        .await?
+        .into_iter()
+        .map(similar_neighbor_response)
+        .collect();
+    Ok(Json(SimilarListResponse { items }))
 }
 
 async fn create_knowledge(

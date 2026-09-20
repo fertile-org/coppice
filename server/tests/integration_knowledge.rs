@@ -2811,3 +2811,378 @@ async fn stale_max_attempt_knowledge_claim_is_failed_without_reexecution() {
     .unwrap();
     assert_eq!(failed, ("failed".into(), 1, None, None));
 }
+
+async fn create_candidate_with_content(
+    app: &Router,
+    project_id: &str,
+    cookie: &str,
+    csrf: &str,
+    title: &str,
+    content: &str,
+) -> serde_json::Value {
+    let body = serde_json::json!({
+        "scope": "project",
+        "projectId": project_id,
+        "knowledgeType": "test_command",
+        "title": title,
+        "content": content,
+        "sourceType": "human_note",
+        "confidence": "high"
+    });
+    let response = app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            "/api/knowledge",
+            &body.to_string(),
+            cookie,
+            csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::CREATED);
+    common::json_body(response).await
+}
+
+async fn approve_and_embed(
+    state: &Arc<AppState>,
+    app: &Router,
+    item_id: &str,
+    expected_version: i64,
+    cookie: &str,
+    csrf: &str,
+) -> serde_json::Value {
+    let (status, approved) = mutate(
+        app,
+        "POST",
+        &format!("/api/knowledge/{item_id}/approve"),
+        serde_json::json!({"expectedVersion": expected_version}),
+        cookie,
+        csrf,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(process_one_knowledge_job(state).await.unwrap());
+    let response = app
+        .clone()
+        .oneshot(common::json_request(
+            "GET",
+            &format!("/api/knowledge/{item_id}"),
+            "",
+            cookie,
+            csrf,
+        ))
+        .await
+        .unwrap();
+    let ready = common::json_body(response).await;
+    assert_eq!(ready["embeddingStatus"], "ready");
+    ready
+}
+
+async fn get_similar(
+    app: &Router,
+    item_id: &str,
+    query: &str,
+    cookie: &str,
+    csrf: &str,
+) -> (StatusCode, serde_json::Value) {
+    let path = if query.is_empty() {
+        format!("/api/knowledge/{item_id}/similar")
+    } else {
+        format!("/api/knowledge/{item_id}/similar?{query}")
+    };
+    let response = app
+        .clone()
+        .oneshot(common::json_request("GET", &path, "", cookie, csrf))
+        .await
+        .unwrap();
+    let status = response.status();
+    (status, common::json_body(response).await)
+}
+
+#[tokio::test]
+async fn similar_returns_identical_approved_neighbor_for_pending() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
+    let project_id = common::create_test_project(&app, &cookie, &csrf).await;
+    let title = "Inbox duplicate assist title";
+    let content = "Run make test-unit before review.";
+
+    let neighbor = create_candidate_with_content(
+        &app, &project_id, &cookie, &csrf, title, content,
+    )
+    .await;
+    let neighbor_id = neighbor["id"].as_str().unwrap().to_string();
+    let ready = approve_and_embed(&state, &app, &neighbor_id, 1, &cookie, &csrf).await;
+
+    let pending = create_candidate_with_content(
+        &app, &project_id, &cookie, &csrf, title, content,
+    )
+    .await;
+    let pending_id = pending["id"].as_str().unwrap();
+    let pending_revision = Uuid::parse_str(pending["revisionId"].as_str().unwrap()).unwrap();
+
+    let (status, body) = get_similar(&app, pending_id, "limit=5", &cookie, &csrf).await;
+    assert_eq!(status, StatusCode::OK);
+    let items = body["items"].as_array().unwrap();
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0]["itemId"], neighbor_id);
+    assert_eq!(items[0]["revisionId"], ready["activeRevisionId"]);
+    assert_eq!(items[0]["title"], title);
+    assert_eq!(items[0]["knowledgeType"], "test_command");
+    assert_eq!(items[0]["scope"], "project");
+    assert_eq!(items[0]["status"], "approved");
+    assert_eq!(items[0]["embeddingStatus"], "ready");
+    assert!(items[0]["similarity"].as_f64().unwrap() >= 0.99);
+
+    let embed_count: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM knowledge_embeddings WHERE revision_id = $1",
+    )
+    .bind(pending_revision)
+    .fetch_one(state.db.as_ref().unwrap())
+    .await
+    .unwrap();
+    assert_eq!(embed_count, 0, "pending embeddings must not be persisted");
+}
+
+#[tokio::test]
+async fn similar_returns_empty_for_dissimilar_pending() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
+    let project_id = common::create_test_project(&app, &cookie, &csrf).await;
+
+    let neighbor = create_candidate_with_content(
+        &app,
+        &project_id,
+        &cookie,
+        &csrf,
+        "Approved neighbor title",
+        "Run make test-unit before review.",
+    )
+    .await;
+    let neighbor_id = neighbor["id"].as_str().unwrap();
+    approve_and_embed(&state, &app, neighbor_id, 1, &cookie, &csrf).await;
+
+    let pending = create_candidate_with_content(
+        &app,
+        &project_id,
+        &cookie,
+        &csrf,
+        "Totally unrelated guidance",
+        "Never mix paint with diesel fuel.",
+    )
+    .await;
+    let pending_id = pending["id"].as_str().unwrap();
+
+    let (status, body) = get_similar(&app, pending_id, "", &cookie, &csrf).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["items"].as_array().unwrap().len(), 0);
+}
+
+#[tokio::test]
+async fn similar_excludes_ineligible_neighbors_and_self() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
+    let project_id = common::create_test_project(&app, &cookie, &csrf).await;
+    let project_uuid = Uuid::parse_str(&project_id).unwrap();
+    let pool = state.db.as_ref().unwrap();
+    let title = "Eligibility matrix title";
+    let content = "Shared eligibility content for inbox assist.";
+    let query_text = format!("{title}\n\n{content}");
+
+    let eligible = create_candidate_with_content(
+        &app, &project_id, &cookie, &csrf, title, content,
+    )
+    .await;
+    let eligible_id = eligible["id"].as_str().unwrap().to_string();
+    approve_and_embed(&state, &app, &eligible_id, 1, &cookie, &csrf).await;
+
+    let embedder = embedding_provider(&state.config.knowledge.embedding).unwrap();
+    let vector = embedder.embed(&[query_text]).await.unwrap().remove(0);
+    let literal = coppice_server::knowledge::embedder::vector_literal(&vector).unwrap();
+
+    async fn seed_variant(
+        pool: &PgPool,
+        project_id: Uuid,
+        title: &str,
+        content: &str,
+        status: &str,
+        activate: bool,
+        store_embedding: bool,
+        expired: bool,
+        superseded_by: Option<Uuid>,
+        literal: &str,
+    ) -> Uuid {
+        let item_id = Uuid::new_v4();
+        let revision_id = Uuid::new_v4();
+        sqlx::query(
+            r#"
+            INSERT INTO knowledge_items (id, status, version, expires_at, superseded_by)
+            VALUES (
+                $1, $2, 1,
+                CASE WHEN $3 THEN now() - interval '1 minute' ELSE NULL END,
+                $4
+            )
+            "#,
+        )
+        .bind(item_id)
+        .bind(status)
+        .bind(expired)
+        .bind(superseded_by)
+        .execute(pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            r#"
+            INSERT INTO knowledge_revisions (
+                id, item_id, revision_number, scope, project_id,
+                knowledge_type, title, content, source_type, confidence
+            ) VALUES ($1, $2, 1, 'project', $3, 'test_command', $4, $5, 'human_note', 'high')
+            "#,
+        )
+        .bind(revision_id)
+        .bind(item_id)
+        .bind(project_id)
+        .bind(title)
+        .bind(content)
+        .execute(pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            r#"
+            UPDATE knowledge_items
+            SET current_revision_id = $2,
+                active_revision_id = CASE WHEN $3 THEN $2 ELSE NULL END
+            WHERE id = $1
+            "#,
+        )
+        .bind(item_id)
+        .bind(revision_id)
+        .bind(activate)
+        .execute(pool)
+        .await
+        .unwrap();
+        if store_embedding {
+            sqlx::query(
+                r#"
+                INSERT INTO knowledge_embeddings (
+                    revision_id, provider, model, embedding_dimension, embedding
+                ) VALUES ($1, 'mock', 'test', 1536, $2::vector)
+                "#,
+            )
+            .bind(revision_id)
+            .bind(literal)
+            .execute(pool)
+            .await
+            .unwrap();
+        }
+        item_id
+    }
+
+    seed_variant(
+        pool, project_uuid, title, content, "rejected", true, true, false, None, &literal,
+    )
+    .await;
+    seed_variant(
+        pool, project_uuid, title, content, "stale", true, true, false, None, &literal,
+    )
+    .await;
+    seed_variant(
+        pool, project_uuid, title, content, "approved", true, true, true, None, &literal,
+    )
+    .await;
+    let eligible_uuid = Uuid::parse_str(&eligible_id).unwrap();
+    seed_variant(
+        pool,
+        project_uuid,
+        title,
+        content,
+        "approved",
+        true,
+        true,
+        false,
+        Some(eligible_uuid),
+        &literal,
+    )
+    .await;
+    seed_variant(
+        pool, project_uuid, title, content, "approved", true, false, false, None, &literal,
+    )
+    .await;
+
+    let pending = create_candidate_with_content(
+        &app, &project_id, &cookie, &csrf, title, content,
+    )
+    .await;
+    let pending_id = pending["id"].as_str().unwrap();
+
+    let (status, body) = get_similar(&app, pending_id, "limit=10", &cookie, &csrf).await;
+    assert_eq!(status, StatusCode::OK);
+    let items = body["items"].as_array().unwrap();
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0]["itemId"], eligible_id);
+}
+
+#[tokio::test]
+async fn similar_authz_allows_member_read_and_rejects_unauthenticated() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
+    let project_id = common::create_test_project(&app, &cookie, &csrf).await;
+    let pending = create_candidate(&app, &project_id, &cookie, &csrf, "Authz pending").await;
+    let pending_id = pending["id"].as_str().unwrap();
+
+    let unauthenticated = app
+        .clone()
+        .oneshot(
+            axum::http::Request::builder()
+                .uri(format!("/api/knowledge/{pending_id}/similar"))
+                .body(axum::body::Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(unauthenticated.status(), StatusCode::UNAUTHORIZED);
+
+    sqlx::query("UPDATE users SET role = 'member' WHERE email = 'admin@localhost'")
+        .execute(state.db.as_ref().unwrap())
+        .await
+        .unwrap();
+
+    let (status, body) = get_similar(&app, pending_id, "", &cookie, &csrf).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(body["items"].as_array().unwrap().is_empty());
+
+    let forbidden_approve = app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            &format!("/api/knowledge/{pending_id}/approve"),
+            &serde_json::json!({"expectedVersion": 1}).to_string(),
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(forbidden_approve.status(), StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn similar_rejects_non_pending_and_missing_items() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
+    let project_id = common::create_test_project(&app, &cookie, &csrf).await;
+    let created = create_candidate(&app, &project_id, &cookie, &csrf, "Approve first").await;
+    let item_id = created["id"].as_str().unwrap();
+    approve_and_embed(&state, &app, item_id, 1, &cookie, &csrf).await;
+
+    let (status, body) = get_similar(&app, item_id, "", &cookie, &csrf).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert!(body["message"]
+        .as_str()
+        .unwrap()
+        .contains("pending"));
+
+    let missing = Uuid::new_v4();
+    let (status, _) = get_similar(&app, &missing.to_string(), "", &cookie, &csrf).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}
