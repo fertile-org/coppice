@@ -1,13 +1,18 @@
 import '@testing-library/jest-dom/vitest';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { KnowledgeItem } from '../../lib/schemas/knowledge';
+import type {
+  KnowledgeItem,
+  SimilarNeighbor,
+} from '../../lib/schemas/knowledge';
 import { REJECT_PRESETS, guidanceForType } from './curationGuide';
 import { KnowledgePage } from './KnowledgePage';
 
 const mocks = vi.hoisted(() => ({
   items: [] as KnowledgeItem[],
   filter: null as unknown,
+  similarItems: [] as SimilarNeighbor[],
+  similarEnabled: null as boolean | null,
   create: vi.fn(),
   approve: vi.fn(),
   reject: vi.fn(),
@@ -16,7 +21,20 @@ const mocks = vi.hoisted(() => ({
   stale: vi.fn(),
   expire: vi.fn(),
   openTicket: vi.fn(),
+  fetchKnowledgeItem: vi.fn(),
 }));
+
+const neighbor: SimilarNeighbor = {
+  itemId: '00000000-0000-4000-8000-000000000099',
+  revisionId: '00000000-0000-4000-8000-000000000098',
+  title: 'Existing feedback loop',
+  knowledgeType: 'test_command',
+  scope: 'project',
+  projectId: '00000000-0000-4000-8000-000000000003',
+  similarity: 0.98123,
+  status: 'approved',
+  embeddingStatus: 'ready',
+};
 
 const item: KnowledgeItem = {
   id: '00000000-0000-4000-8000-000000000001',
@@ -105,6 +123,16 @@ vi.mock('./useKnowledge', () => ({
       fetchNextPage: vi.fn(),
     };
   },
+  useSimilarKnowledge: (itemId: string, enabled: boolean) => {
+    mocks.similarEnabled = enabled;
+    return {
+      data: { items: mocks.similarItems },
+      isLoading: false,
+      isError: false,
+      isFetching: false,
+    };
+  },
+  fetchKnowledgeItem: (id: string) => mocks.fetchKnowledgeItem(id),
   useCreateKnowledge: () => mutation(mocks.create),
   useApproveKnowledge: () => mutation(mocks.approve),
   useRejectKnowledge: () => mutation(mocks.reject),
@@ -118,8 +146,17 @@ describe('KnowledgePage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.items = [item];
+    mocks.similarItems = [];
+    mocks.similarEnabled = null;
     mocks.create.mockResolvedValue(item);
     mocks.approve.mockResolvedValue({ ...item, status: 'approved' });
+    mocks.fetchKnowledgeItem.mockResolvedValue({
+      ...item,
+      id: neighbor.itemId,
+      version: 7,
+      status: 'approved',
+      title: neighbor.title,
+    });
   });
 
   it('shows governed lifecycle tabs and audit metadata', () => {
@@ -199,7 +236,114 @@ describe('KnowledgePage', () => {
     fireEvent.click(screen.getByRole('tab', { name: 'Rejected' }));
     expect(mocks.filter).toMatchObject({ status: 'rejected' });
 
-    fireEvent.click(screen.getByRole('button', { name: 'Approve' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Approve anyway' }));
+    await waitFor(() => {
+      expect(mocks.approve).toHaveBeenCalledWith({
+        id: item.id,
+        expectedVersion: item.version,
+      });
+    });
+  });
+
+  it('shows No close matches when similar list is empty', () => {
+    mocks.similarItems = [];
+    render(<KnowledgePage />);
+
+    const assist = screen.getByRole('region', { name: 'Near-duplicate assist' });
+    expect(assist).toHaveTextContent('No close matches');
+    expect(mocks.similarEnabled).toBe(true);
+  });
+
+  it('renders similar neighbors and opens the approved neighbor', async () => {
+    mocks.similarItems = [neighbor];
+    const approvedNeighbor: KnowledgeItem = {
+      ...item,
+      id: neighbor.itemId,
+      status: 'approved',
+      title: neighbor.title,
+      activeRevisionId: neighbor.revisionId,
+    };
+    mocks.items = [item];
+    render(<KnowledgePage />);
+
+    const assist = screen.getByRole('region', { name: 'Near-duplicate assist' });
+    expect(within(assist).getByText(neighbor.title)).toBeVisible();
+    expect(within(assist).getByText(/0.981/)).toBeVisible();
+
+    mocks.items = [approvedNeighbor];
+    fireEvent.click(within(assist).getByRole('button', { name: /Open/i }));
+    await waitFor(() => {
+      expect(mocks.filter).toMatchObject({ status: 'approved' });
+    });
+    expect(screen.getByText(neighbor.title)).toBeVisible();
+  });
+
+  it('rejects as duplicate with cited neighbor and expectedVersion', async () => {
+    mocks.similarItems = [neighbor];
+    render(<KnowledgePage />);
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Reject as duplicate' }),
+    );
+    await waitFor(() => {
+      expect(mocks.reject).toHaveBeenCalledWith({
+        id: item.id,
+        expectedVersion: item.version,
+        reason: expect.stringMatching(
+          /Duplicate of existing approved knowledge.*Existing feedback loop.*00000000/,
+        ),
+      });
+    });
+  });
+
+  it('starts supersede against neighbor then rejects pending as duplicate', async () => {
+    mocks.similarItems = [neighbor];
+    mocks.supersede.mockResolvedValue({
+      ...item,
+      id: '00000000-0000-4000-8000-000000000088',
+      status: 'pending',
+    });
+    mocks.reject.mockResolvedValue({ ...item, status: 'rejected' });
+    render(<KnowledgePage />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Start supersede' }));
+    await waitFor(() => {
+      expect(mocks.fetchKnowledgeItem).toHaveBeenCalledWith(neighbor.itemId);
+    });
+    await waitFor(() => {
+      expect(mocks.supersede).toHaveBeenCalledWith({
+        id: neighbor.itemId,
+        expectedVersion: 7,
+        replacement: {
+          scope: item.scope,
+          projectId: item.projectId,
+          agentId: item.agentId,
+          knowledgeType: item.knowledgeType,
+          title: item.title,
+          content: item.content,
+          sourceType: item.sourceType,
+          sourceId: item.sourceId,
+          sourceRunId: item.sourceRunId,
+          confidence: item.confidence,
+        },
+      });
+    });
+    await waitFor(() => {
+      expect(mocks.reject).toHaveBeenCalledWith({
+        id: item.id,
+        expectedVersion: item.version,
+        reason: expect.stringMatching(
+          /Duplicate of existing approved knowledge.*Existing feedback loop.*00000000/,
+        ),
+      });
+    });
+  });
+
+  it('approves anyway with pending expectedVersion', async () => {
+    mocks.similarItems = [neighbor];
+    render(<KnowledgePage />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Approve anyway' }));
     await waitFor(() => {
       expect(mocks.approve).toHaveBeenCalledWith({
         id: item.id,

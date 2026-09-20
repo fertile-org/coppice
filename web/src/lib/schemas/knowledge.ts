@@ -102,6 +102,22 @@ export const knowledgeUsageListSchema = z.object({
   items: z.array(knowledgeUsageSchema),
 });
 
+export const similarNeighborSchema = z.object({
+  itemId: z.string().uuid(),
+  revisionId: z.string().uuid(),
+  title: z.string(),
+  knowledgeType: knowledgeTypeSchema,
+  scope: knowledgeScopeSchema,
+  projectId: z.string().uuid().nullable(),
+  similarity: z.number(),
+  status: z.string(),
+  embeddingStatus: z.string(),
+});
+
+export const similarListSchema = z.object({
+  items: z.array(similarNeighborSchema),
+});
+
 export type KnowledgeStatus = z.infer<typeof knowledgeStatusSchema>;
 export type KnowledgeScope = z.infer<typeof knowledgeScopeSchema>;
 export type KnowledgeType = z.infer<typeof knowledgeTypeSchema>;
@@ -110,3 +126,5 @@ export type KnowledgeConfidence = z.infer<typeof knowledgeConfidenceSchema>;
 export type KnowledgeItem = z.infer<typeof knowledgeItemSchema>;
 export type KnowledgePage = z.infer<typeof knowledgePageSchema>;
 export type KnowledgeUsage = z.infer<typeof knowledgeUsageSchema>;
+export type SimilarNeighbor = z.infer<typeof similarNeighborSchema>;
+export type SimilarList = z.infer<typeof similarListSchema>;
