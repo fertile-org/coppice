@@ -262,7 +262,23 @@ impl IntoResponse for RunAgentError {
 }
 
 fn map_run_error_response(err: RunError) -> RunAgentError {
-    RunAgentError::Status(map_run_error(err))
+    match &err {
+        RunError::ActiveRunExists => RunAgentError::Message(
+            StatusCode::CONFLICT,
+            "An active run already exists for this ticket and agent.".into(),
+        ),
+        RunError::NotFound => RunAgentError::Status(StatusCode::NOT_FOUND),
+        RunError::Validation(msg) => {
+            RunAgentError::Message(StatusCode::BAD_REQUEST, msg.clone())
+        }
+        RunError::Database(db_err) => {
+            tracing::error!(error = %db_err, "run-agent database error");
+            RunAgentError::Message(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "An internal error occurred.".into(),
+            )
+        }
+    }
 }
 
 fn map_ticket_error_response(err: TicketError) -> RunAgentError {

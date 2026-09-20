@@ -174,7 +174,7 @@ impl<'a> RunService<'a> {
             )
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
             ON CONFLICT (ticket_id, agent_id)
-                WHERE status IN ('queued', 'running')
+                WHERE status IN ('queued', 'running') AND ticket_id IS NOT NULL
             DO NOTHING
             RETURNING
                 id, ticket_id, agent_id, job_type, status, sandbox_profile_id,
@@ -476,7 +476,7 @@ impl<'a> RunService<'a> {
             )
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
             ON CONFLICT (ticket_id, agent_id)
-                WHERE status IN ('queued', 'running')
+                WHERE status IN ('queued', 'running') AND ticket_id IS NOT NULL
             DO NOTHING
             RETURNING
                 id, ticket_id, agent_id, job_type, status, sandbox_profile_id,
