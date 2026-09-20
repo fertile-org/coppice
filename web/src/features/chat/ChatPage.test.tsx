@@ -399,9 +399,15 @@ describe('ChatPage', () => {
       expect(mocks.cutoffSession).toHaveBeenCalled();
     });
     expect(window.confirm).toHaveBeenCalled();
-    expect(
-      await screen.findByRole('heading', { name: 'Backend Engineer' }),
-    ).toBeInTheDocument();
+    await waitFor(() => {
+      expect(
+        screen.getByRole('heading', { name: 'Backend Engineer' }),
+      ).toBeInTheDocument();
+      expect(screen.getByTestId('chat-session-status')).toHaveTextContent(
+        'Active',
+      );
+      expect(screen.getByTestId('chat-composer')).toBeInTheDocument();
+    });
   });
 
   it('submits on Enter with a non-empty body', async () => {
