@@ -10,6 +10,7 @@ import { useAgents } from '../agents/useAgents';
 import { useProjects } from '../projects/useProjects';
 import { ChatLiveTurn } from './ChatLiveTurn';
 import { ChatMessageList } from './ChatMessageList';
+import { ChatSessionActions } from './ChatSessionActions';
 import {
   useChatMessages,
   useChatSession,
@@ -239,7 +240,7 @@ function ChatSessionPane({ sessionId }: { sessionId: string }) {
 
   return (
     <div className="flex h-[min(70vh,720px)] flex-col gap-3">
-      <header className="flex items-baseline justify-between gap-3">
+      <header className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h2 className="font-display text-lg font-semibold text-text-primary">
             {agentName}
@@ -248,6 +249,9 @@ function ChatSessionPane({ sessionId }: { sessionId: string }) {
             {session ? `${session.status} · ${formatSessionTime(session.updatedAt)}` : 'Loading…'}
           </p>
         </div>
+        {session && (
+          <ChatSessionActions session={session} disabled={awaiting} />
+        )}
       </header>
 
       <div className="min-h-0 flex-1 rounded-lg border border-border bg-surface-raised p-2">
@@ -260,7 +264,13 @@ function ChatSessionPane({ sessionId }: { sessionId: string }) {
 
       {cutoff ? (
         <p className="font-body text-sm text-text-secondary">
-          This session is {session?.status}. Start a new chat to continue.
+          This session is {session?.status}. History stays readable
+          {session?.status === 'cutoff'
+            ? ' — open the continued child session from the transcript chip if one exists.'
+            : '.'}{' '}
+          <Link to="/chat" className="text-accent hover:underline">
+            Start a new chat
+          </Link>
         </p>
       ) : (
         <ChatComposer

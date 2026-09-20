@@ -195,3 +195,259 @@ async fn conversation_profile_refuses_write_capable_connectors() {
     assert!(matches!(err, ProviderError::InvalidInput(_)));
     assert!(err.to_string().contains("read-only"));
 }
+
+#[tokio::test]
+async fn create_ticket_from_chat_sets_source_session() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+
+    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
+    let pool = state.db.as_ref().expect("db");
+    let project_id = common::create_test_project(&app, &cookie, &csrf).await;
+    let agent_id =
+        common::create_agent_with_preset_key(&app, "backend_engineer", "BE", &cookie, &csrf).await;
+
+    let created = app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            "/api/chat/sessions",
+            &format!(r#"{{"agentId":"{agent_id}","projectId":"{project_id}"}}"#),
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(created.status(), StatusCode::CREATED);
+    let session: serde_json::Value = common::json_body(created).await;
+    let session_id = session["id"].as_str().unwrap();
+
+    let _ = app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            &format!("/api/chat/sessions/{session_id}/messages"),
+            r#"{"body":"We should fix chat cwd policy"}"#,
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+
+    let missing_project = app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            &format!("/api/chat/sessions/{session_id}/create-ticket"),
+            r#"{"title":"Fix cwd"}"#,
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(missing_project.status(), StatusCode::UNPROCESSABLE_ENTITY);
+
+    let created_ticket = app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            &format!("/api/chat/sessions/{session_id}/create-ticket"),
+            &format!(r#"{{"projectId":"{project_id}","title":"Fix chat cwd"}}"#),
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(created_ticket.status(), StatusCode::CREATED);
+    let body: serde_json::Value = common::json_body(created_ticket).await;
+    let ticket_id = body["ticket"]["id"].as_str().expect("ticket id");
+    assert_eq!(body["ticket"]["title"], "Fix chat cwd");
+    assert_eq!(body["ticket"]["status"], "backlog");
+    assert_eq!(body["message"]["role"], "system");
+    assert_eq!(body["message"]["actionMetadata"]["action"], "create_ticket");
+    assert_eq!(body["message"]["actionMetadata"]["ticketId"], ticket_id);
+
+    let source: Option<uuid::Uuid> = sqlx::query_scalar(
+        "SELECT source_chat_session_id FROM tickets WHERE id = $1",
+    )
+    .bind(uuid::Uuid::parse_str(ticket_id).unwrap())
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        source.map(|id| id.to_string()).as_deref(),
+        Some(session_id)
+    );
+}
+
+#[tokio::test]
+async fn create_knowledge_from_chat_is_pending_not_admin_route() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+
+    let (app, cookie, csrf) = common::bootstrap_and_login().await;
+    let project_id = common::create_test_project(&app, &cookie, &csrf).await;
+    let agent_id =
+        common::create_agent_with_preset_key(&app, "backend_engineer", "BE", &cookie, &csrf).await;
+
+    let created = app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            "/api/chat/sessions",
+            &format!(r#"{{"agentId":"{agent_id}","projectId":"{project_id}"}}"#),
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    let session: serde_json::Value = common::json_body(created).await;
+    let session_id = session["id"].as_str().unwrap();
+
+    let _ = app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            &format!("/api/chat/sessions/{session_id}/messages"),
+            r#"{"body":"Prefer WORKTREES_PATH/chat/{id} for unbound sessions"}"#,
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+
+    let created_knowledge = app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            &format!("/api/chat/sessions/{session_id}/create-knowledge"),
+            &format!(
+                r#"{{"projectId":"{project_id}","title":"Chat cwd convention","knowledgeType":"coding_convention","scope":"project"}}"#
+            ),
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(created_knowledge.status(), StatusCode::CREATED);
+    let body: serde_json::Value = common::json_body(created_knowledge).await;
+    assert_eq!(body["knowledge"]["status"], "pending");
+    assert_eq!(body["knowledge"]["sourceType"], "chat_session");
+    assert_eq!(body["knowledge"]["sourceId"], session_id);
+    assert!(body["knowledge"]["activeRevisionId"].is_null());
+    assert_eq!(body["message"]["actionMetadata"]["action"], "create_knowledge");
+}
+
+#[tokio::test]
+async fn cutoff_opens_child_session_with_summary_seed() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+
+    let (app, cookie, csrf) = common::bootstrap_and_login().await;
+    let agent_id =
+        common::create_agent_with_preset_key(&app, "backend_engineer", "BE", &cookie, &csrf).await;
+
+    let created = app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            "/api/chat/sessions",
+            &format!(r#"{{"agentId":"{agent_id}"}}"#),
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    let session: serde_json::Value = common::json_body(created).await;
+    let parent_id = session["id"].as_str().unwrap().to_string();
+
+    let _ = app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            &format!("/api/chat/sessions/{parent_id}/messages"),
+            r#"{"body":"Long exploration about cwd policy"}"#,
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+
+    let cutoff = app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            &format!("/api/chat/sessions/{parent_id}/cutoff"),
+            "{}",
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(cutoff.status(), StatusCode::OK);
+    let body: serde_json::Value = common::json_body(cutoff).await;
+    assert_eq!(body["parent"]["status"], "cutoff");
+    assert_eq!(body["parent"]["id"], parent_id);
+    let child_id = body["child"]["id"].as_str().expect("child id");
+    assert_eq!(body["child"]["status"], "active");
+    assert_eq!(body["child"]["parentSessionId"], parent_id);
+    assert_eq!(body["seedMessage"]["role"], "system");
+    assert!(body["seedMessage"]["body"]
+        .as_str()
+        .unwrap()
+        .contains("Prior conversation summary"));
+
+    let parent_messages = app
+        .clone()
+        .oneshot(common::json_request(
+            "GET",
+            &format!("/api/chat/sessions/{parent_id}/messages"),
+            "",
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(parent_messages.status(), StatusCode::OK);
+    let parent_body: serde_json::Value = common::json_body(parent_messages).await;
+    assert!(
+        parent_body["messages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|m| m["role"] == "human"),
+        "parent transcript retained"
+    );
+
+    let reject_post = app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            &format!("/api/chat/sessions/{parent_id}/messages"),
+            r#"{"body":"should fail"}"#,
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(reject_post.status(), StatusCode::BAD_REQUEST);
+
+    let child_post = app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            &format!("/api/chat/sessions/{child_id}/messages"),
+            r#"{"body":"continue from summary"}"#,
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(child_post.status(), StatusCode::CREATED);
+}

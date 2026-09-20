@@ -2,6 +2,7 @@ pub mod agent;
 pub mod agent_health;
 pub mod slug;
 pub mod attachment;
+pub mod chat_action;
 pub mod chat_message;
 pub mod chat_session;
 pub mod comment;

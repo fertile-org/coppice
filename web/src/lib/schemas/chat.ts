@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { knowledgeItemSchema } from './knowledge';
 
 export const chatSessionStatusSchema = z.enum(['active', 'archived', 'cutoff']);
 
@@ -10,9 +11,23 @@ export const chatSessionSchema = z.object({
   ownerUserId: z.string().uuid(),
   agentId: z.string().uuid(),
   repoId: z.string().uuid().nullable(),
+  parentSessionId: z.string().uuid().nullable().optional(),
   status: chatSessionStatusSchema,
   createdAt: z.string(),
   updatedAt: z.string(),
+});
+
+export const chatActionMetadataSchema = z.object({
+  action: z.enum([
+    'create_ticket',
+    'create_knowledge',
+    'cutoff',
+    'cutoff_seed',
+  ]),
+  ticketId: z.string().uuid().optional(),
+  knowledgeItemId: z.string().uuid().optional(),
+  childSessionId: z.string().uuid().optional(),
+  parentSessionId: z.string().uuid().optional(),
 });
 
 export const chatMessageSchema = z.object({
@@ -39,7 +54,48 @@ export const postChatMessageResponseSchema = z.object({
   runId: z.string().uuid(),
 });
 
+/** Ticket fields needed after create-ticket; full board shape varies. */
+const chatCreatedTicketSchema = z
+  .object({
+    id: z.string().uuid(),
+    projectId: z.string().uuid(),
+    title: z.string(),
+    status: z.string(),
+  })
+  .passthrough();
+
+export const createTicketFromChatResponseSchema = z.object({
+  ticket: chatCreatedTicketSchema,
+  message: chatMessageSchema,
+});
+
+export const createKnowledgeFromChatResponseSchema = z.object({
+  knowledge: knowledgeItemSchema,
+  message: chatMessageSchema,
+});
+
+export const cutoffSessionResponseSchema = z.object({
+  parent: chatSessionSchema,
+  child: chatSessionSchema,
+  seedMessage: chatMessageSchema,
+});
+
 export type ChatSession = z.infer<typeof chatSessionSchema>;
 export type ChatMessage = z.infer<typeof chatMessageSchema>;
 export type ChatSessionStatus = z.infer<typeof chatSessionStatusSchema>;
 export type ChatMessageRole = z.infer<typeof chatMessageRoleSchema>;
+export type ChatActionMetadata = z.infer<typeof chatActionMetadataSchema>;
+export type CreateTicketFromChatResponse = z.infer<
+  typeof createTicketFromChatResponseSchema
+>;
+export type CreateKnowledgeFromChatResponse = z.infer<
+  typeof createKnowledgeFromChatResponseSchema
+>;
+export type CutoffSessionResponse = z.infer<typeof cutoffSessionResponseSchema>;
+
+export function parseChatActionMetadata(
+  value: unknown,
+): ChatActionMetadata | null {
+  const parsed = chatActionMetadataSchema.safeParse(value);
+  return parsed.success ? parsed.data : null;
+}

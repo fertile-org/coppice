@@ -115,6 +115,31 @@ impl<'a> TicketService<'a> {
         created_by: &str,
         created_by_id: Uuid,
     ) -> Result<TicketWithDisplay, TicketError> {
+        self.create_with_source(
+            project_id,
+            title,
+            description,
+            repo_id,
+            priority,
+            created_by,
+            created_by_id,
+            None,
+        )
+        .await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn create_with_source(
+        &self,
+        project_id: Uuid,
+        title: &str,
+        description: &str,
+        repo_id: Option<Uuid>,
+        priority: Option<TicketPriority>,
+        created_by: &str,
+        created_by_id: Uuid,
+        source_chat_session_id: Option<Uuid>,
+    ) -> Result<TicketWithDisplay, TicketError> {
         self.ensure_project_exists(project_id).await?;
 
         let id = Uuid::new_v4();
@@ -125,9 +150,9 @@ impl<'a> TicketService<'a> {
             r#"
             INSERT INTO tickets (
                 id, project_id, repo_id, title, description, status, priority,
-                created_by, created_by_id
+                created_by, created_by_id, source_chat_session_id
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
             RETURNING
                 id, project_id, repo_id, title, description,
                 status, substatus, substatus_metadata, priority,
@@ -146,6 +171,7 @@ impl<'a> TicketService<'a> {
         .bind(priority_str)
         .bind(created_by)
         .bind(created_by_id)
+        .bind(source_chat_session_id)
         .fetch_one(self.pool)
         .await?;
 
