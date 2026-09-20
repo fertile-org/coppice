@@ -308,6 +308,31 @@ describe('ChatPage', () => {
     expect(pane.className).not.toMatch(/70vh|720px/);
   });
 
+  it('keeps session list and pane header fixed while transcript scrolls', () => {
+    mocks.sessions = [ACTIVE_SESSION];
+    renderChat(`/chat/${ACTIVE_SESSION.id}`);
+
+    const list = screen.getByTestId('chat-session-list');
+    expect(list).toHaveClass('min-h-0');
+    expect(list).toHaveClass('overflow-y-auto');
+    expect(list).toHaveClass('lg:h-full');
+
+    const grid = screen.getByTestId('chat-layout-grid');
+    expect(grid).toHaveClass('min-h-0');
+    expect(grid).toHaveClass('flex-1');
+    expect(grid).toHaveClass('overflow-hidden');
+
+    const header = screen.getByTestId('chat-session-header');
+    expect(header).toHaveClass('shrink-0');
+
+    const pane = screen.getByTestId('chat-session-pane');
+    expect(pane).toHaveClass('overflow-hidden');
+    expect(pane).toHaveClass('min-h-0');
+
+    const composer = screen.getByTestId('chat-composer');
+    expect(composer).toHaveClass('shrink-0');
+  });
+
   it('uploads attachments then posts message with attachmentIds', async () => {
     Object.defineProperty(HTMLElement.prototype, 'offsetHeight', {
       configurable: true,

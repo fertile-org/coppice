@@ -25,8 +25,10 @@ export function AppShell() {
   return (
     <div
       className={cn(
-        'coppice-grain min-h-screen bg-background',
-        chatLayout && 'flex flex-col',
+        'coppice-grain bg-background',
+        chatLayout
+          ? 'flex h-svh flex-col overflow-hidden'
+          : 'min-h-screen',
       )}
     >
       <header className="shrink-0 border-b border-border bg-surface px-4 py-3 sm:px-8 sm:py-4">
@@ -94,7 +96,7 @@ export function AppShell() {
       <main
         className={cn(
           chatLayout
-            ? 'flex min-h-0 flex-1 flex-col px-4 py-4 sm:px-6 sm:py-5'
+            ? 'flex min-h-0 flex-1 flex-col overflow-hidden px-4 py-4 sm:px-6 sm:py-5'
             : 'mx-auto max-w-6xl px-8 py-8',
         )}
         data-testid="app-shell-main"

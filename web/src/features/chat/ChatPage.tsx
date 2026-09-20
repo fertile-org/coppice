@@ -451,7 +451,10 @@ function ChatSessionPane({ sessionId }: { sessionId: string }) {
       className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-border bg-surface-raised shadow-sm"
       data-testid="chat-session-pane"
     >
-      <header className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-border bg-paper-50/80 px-4 py-3">
+      <header
+        className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-border bg-paper-50/80 px-4 py-3"
+        data-testid="chat-session-header"
+      >
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
             <h2 className="font-display text-base font-semibold text-text-primary">
@@ -541,10 +544,14 @@ export function ChatPage() {
         </Button>
       </div>
 
-      <div className="grid min-h-0 flex-1 gap-4 lg:grid-cols-[240px_minmax(0,1fr)]">
+      <div
+        className="grid min-h-0 flex-1 gap-4 overflow-hidden lg:grid-cols-[240px_minmax(0,1fr)]"
+        data-testid="chat-layout-grid"
+      >
         <aside
-          className="min-h-0 space-y-2 overflow-y-auto lg:max-h-full"
+          className="min-h-0 space-y-2 overflow-y-auto lg:h-full lg:max-h-full lg:self-stretch"
           aria-label="Chat sessions"
+          data-testid="chat-session-list"
         >
           {isLoading && (
             <p className="font-body text-sm text-text-muted">Loading sessions…</p>
@@ -562,14 +569,16 @@ export function ChatPage() {
           ))}
         </aside>
 
-        <section className="flex min-h-0 min-w-0 flex-col">
+        <section className="flex min-h-0 min-w-0 flex-col overflow-hidden lg:h-full">
           {showNew && !sessionId ? (
-            <NewChatForm
-              onCreated={(id) => {
-                setShowNew(false);
-                navigate(`/chat/${id}`);
-              }}
-            />
+            <div className="min-h-0 flex-1 overflow-y-auto">
+              <NewChatForm
+                onCreated={(id) => {
+                  setShowNew(false);
+                  navigate(`/chat/${id}`);
+                }}
+              />
+            </div>
           ) : sessionId ? (
             <ChatSessionPane key={sessionId} sessionId={sessionId} />
           ) : (
