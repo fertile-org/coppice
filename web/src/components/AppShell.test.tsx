@@ -39,4 +39,17 @@ describe('AppShell', () => {
     ).toBeTruthy();
     expect(bell.parentElement).not.toHaveClass('order-last');
   });
+
+  it('exposes Chat in the main nav', () => {
+    render(
+      <MemoryRouter>
+        <AppShell />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByRole('link', { name: 'Chat' })).toHaveAttribute(
+      'href',
+      '/chat',
+    );
+  });
 });

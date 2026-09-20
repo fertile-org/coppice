@@ -56,6 +56,7 @@ vi.mock('./useRepos', () => ({
   useDefaultBranchSync: () => ({ data: undefined, isLoading: false }),
   useFetchDefaultBranch: () => mutation(vi.fn()),
   usePushDefaultBranch: () => mutation(vi.fn()),
+  usePullDefaultBranch: () => mutation(vi.fn()),
 }));
 
 vi.mock('../../components/ToastProvider', () => ({
