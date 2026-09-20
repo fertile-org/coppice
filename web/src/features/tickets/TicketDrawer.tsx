@@ -15,7 +15,12 @@ import {
   useStopRun,
 } from './useAgentRuns';
 import { TicketStatusBadge } from './TicketStatusBadge';
-import { useFinalApprove, useTicket } from './useTicket';
+import {
+  useArchiveTicket,
+  useFinalApprove,
+  useTicket,
+  useUnarchiveTicket,
+} from './useTicket';
 
 type DrawerTab = 'detail' | 'live' | 'runs';
 
@@ -44,6 +49,8 @@ export function TicketDrawer({
   const runAgent = useRunAgent(ticketId);
   const stopRun = useStopRun(ticketId);
   const finalApprove = useFinalApprove(ticketId);
+  const archiveTicket = useArchiveTicket(ticketId);
+  const unarchiveTicket = useUnarchiveTicket(ticketId);
   const [tab, setTab] = useState<DrawerTab>('detail');
   const [actionError, setActionError] = useState<string | null>(null);
 
@@ -51,8 +58,12 @@ export function TicketDrawer({
   const repoNotReady = Boolean(
     ticket?.repoId && selectedRepo && selectedRepo.verificationStatus !== 'ready',
   );
+  const isArchived = Boolean(ticket?.archivedAt);
   const canRunAgent = Boolean(
-    ticket?.assigneeAgentId && ticket?.repoId && !repoNotReady,
+    ticket?.assigneeAgentId &&
+      ticket?.repoId &&
+      !repoNotReady &&
+      !isArchived,
   );
   const activeRun = runs?.find((run) => isActiveRunStatus(run.status));
   const reconnectableRun = runs?.find(shouldPollRunForReconciliation);
@@ -70,13 +81,15 @@ export function TicketDrawer({
           liveRun?.connector === 'cursor'
         ? ClaudeLiveConsole
         : LiveConsole;
-  const runAgentDisabledReason = !ticket?.assigneeAgentId
-    ? 'Assign an agent before running.'
-    : !ticket?.repoId
-      ? 'Link a repository before running.'
-      : repoNotReady
-        ? 'Repository path is not ready. Ask an admin to verify in Settings → Repositories.'
-        : null;
+  const runAgentDisabledReason = isArchived
+    ? 'Unarchive this ticket before running an agent.'
+    : !ticket?.assigneeAgentId
+      ? 'Assign an agent before running.'
+      : !ticket?.repoId
+        ? 'Link a repository before running.'
+        : repoNotReady
+          ? 'Repository path is not ready. Ask an admin to verify in Settings → Repositories.'
+          : null;
 
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
@@ -121,8 +134,37 @@ export function TicketDrawer({
     }
   }
 
+  async function handleArchive() {
+    setActionError(null);
+    try {
+      await archiveTicket.mutateAsync();
+    } catch {
+      setActionError(
+        ticket?.hasActiveRun
+          ? 'Cannot archive while an agent run is queued or running.'
+          : 'Unable to archive ticket.',
+      );
+    }
+  }
+
+  async function handleUnarchive() {
+    setActionError(null);
+    try {
+      await unarchiveTicket.mutateAsync();
+    } catch {
+      setActionError('Unable to unarchive ticket.');
+    }
+  }
+
   const headerBusy =
-    runAgent.isPending || stopRun.isPending || finalApprove.isPending;
+    runAgent.isPending ||
+    stopRun.isPending ||
+    finalApprove.isPending ||
+    archiveTicket.isPending ||
+    unarchiveTicket.isPending;
+  const archiveDisabledReason = ticket?.hasActiveRun
+    ? 'Stop or wait for the active agent run before archiving.'
+    : null;
 
   return (
     <div className="fixed inset-0 z-50 flex justify-end" role="presentation">
@@ -194,7 +236,7 @@ export function TicketDrawer({
                   </button>
                 )}
 
-                {ticket.status === 'wait_for_final_review' && (
+                {ticket.status === 'wait_for_final_review' && !isArchived && (
                   <button
                     type="button"
                     onClick={() => void handleFinalApprove()}
@@ -202,6 +244,27 @@ export function TicketDrawer({
                     className="rounded-md bg-moss-700 px-3 py-1.5 font-body text-sm font-medium text-white transition-colors duration-fast hover:bg-moss-800 disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     {finalApprove.isPending ? 'Approving…' : 'Final Approve'}
+                  </button>
+                )}
+
+                {isArchived ? (
+                  <button
+                    type="button"
+                    onClick={() => void handleUnarchive()}
+                    disabled={headerBusy}
+                    className="rounded-md border border-border px-3 py-1.5 font-body text-sm font-medium text-text-primary transition-colors duration-fast hover:bg-paper-200 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {unarchiveTicket.isPending ? 'Unarchiving…' : 'Unarchive'}
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => void handleArchive()}
+                    disabled={headerBusy || Boolean(ticket.hasActiveRun)}
+                    title={archiveDisabledReason ?? undefined}
+                    className="rounded-md border border-border px-3 py-1.5 font-body text-sm font-medium text-text-secondary transition-colors duration-fast hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {archiveTicket.isPending ? 'Archiving…' : 'Archive'}
                   </button>
                 )}
               </>
@@ -216,6 +279,16 @@ export function TicketDrawer({
             </button>
           </div>
         </header>
+
+        {ticket && isArchived && (
+          <div
+            role="status"
+            className="shrink-0 border-b border-border bg-paper-200 px-6 py-3 font-body text-sm text-text-secondary"
+          >
+            This ticket is archived. Unarchive it before changing status,
+            assigning agents, running work, or updating fields.
+          </div>
+        )}
 
         <nav
           role="tablist"

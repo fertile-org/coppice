@@ -194,3 +194,12 @@ describe('TicketCard assignee and priority', () => {
     expect(resolveAssigneeName('missing', agents)).toBe('Unknown agent');
   });
 });
+
+describe('TicketCard archived affordance', () => {
+  it('shows an Archived badge and muted styling when archivedAt is set', () => {
+    renderCard(undefined, { archivedAt: '2026-09-20T00:00:00.000Z' });
+
+    expect(screen.getByText('Archived')).toBeVisible();
+    expect(screen.getByRole('button')).toHaveClass('opacity-60');
+  });
+});

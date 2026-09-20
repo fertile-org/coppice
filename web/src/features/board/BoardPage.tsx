@@ -40,11 +40,15 @@ export function BoardPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const queryClient = useQueryClient();
   const selectedTicketId = searchParams.get('ticket');
+  const [showArchived, setShowArchived] = useState(false);
 
-  const { data: tickets, isLoading, isError, refetch } = useTickets(projectId);
+  const { data: tickets, isLoading, isError, refetch } = useTickets(
+    projectId,
+    showArchived,
+  );
   const { data: agents } = useAgents();
   const createTicket = useCreateTicket(projectId ?? '');
-  const updateStatus = useUpdateTicketStatus(projectId ?? '');
+  const updateStatus = useUpdateTicketStatus(projectId ?? '', showArchived);
 
   const [activeTicket, setActiveTicket] = useState<Ticket | null>(null);
 
@@ -114,7 +118,7 @@ export function BoardPage() {
 
     const ticketId = String(active.id);
     const ticket = ticketsById.get(ticketId);
-    if (!ticket) return;
+    if (!ticket || ticket.archivedAt) return;
 
     const targetStatus = resolveDropStatus(over.id, ticketsById);
     if (!targetStatus || targetStatus === ticket.status) return;
@@ -134,13 +138,24 @@ export function BoardPage() {
 
   return (
     <div>
-      <div className="mb-6">
-        <h1 className="font-display text-2xl font-semibold text-text-primary">
-          Board
-        </h1>
-        <p className="mt-1 font-body text-sm text-text-secondary">
-          Drag tickets between columns to update status.
-        </p>
+      <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
+        <div>
+          <h1 className="font-display text-2xl font-semibold text-text-primary">
+            Board
+          </h1>
+          <p className="mt-1 font-body text-sm text-text-secondary">
+            Drag tickets between columns to update status.
+          </p>
+        </div>
+        <label className="flex items-center gap-2 font-body text-sm text-text-secondary">
+          <input
+            type="checkbox"
+            checked={showArchived}
+            onChange={(e) => setShowArchived(e.target.checked)}
+            className="h-4 w-4 rounded border-border text-moss-600 focus:ring-moss-500"
+          />
+          Show archived
+        </label>
       </div>
 
       {isLoading && (

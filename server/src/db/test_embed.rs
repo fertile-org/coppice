@@ -313,7 +313,9 @@ async fn start_shared_embedded_pg() -> anyhow::Result<TestPgSession> {
     stage_extension_libs_in_postgresql_libdir(&pg, &pgvector_root.join("lib")).await?;
 
     pg.start_db().await?;
-    pg.create_database(TEST_DB).await?;
+    if !pg.database_exists(TEST_DB).await.unwrap_or(false) {
+        pg.create_database(TEST_DB).await?;
+    }
 
     std::mem::forget(pg);
 

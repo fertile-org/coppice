@@ -85,6 +85,8 @@ pub fn routes() -> Router<Arc<AppState>> {
             post(dismiss_splits),
         )
         .route("/api/tickets/{ticket_id}/children", get(list_children))
+        .route("/api/tickets/{ticket_id}/archive", post(archive_ticket))
+        .route("/api/tickets/{ticket_id}/unarchive", post(unarchive_ticket))
 }
 
 #[derive(Serialize)]
@@ -118,6 +120,7 @@ pub(crate) struct TicketResponse {
     pending_split_recommendation: Option<PendingSplitRecommendation>,
     clarification_round: i32,
     has_active_run: bool,
+    archived_at: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -160,6 +163,8 @@ struct AssignAgentBody {
 struct ListTicketsQuery {
     status: Option<String>,
     assignee_agent_id: Option<Uuid>,
+    #[serde(default)]
+    include_archived: bool,
 }
 
 pub(crate) fn ticket_to_response(item: TicketWithDisplay) -> TicketResponse {
@@ -196,6 +201,9 @@ pub(crate) fn ticket_to_response(item: TicketWithDisplay) -> TicketResponse {
         pending_split_recommendation,
         clarification_round: ticket.clarification_round,
         has_active_run: item.has_active_run,
+        archived_at: ticket
+            .archived_at
+            .map(|ts| ts.format(&Rfc3339).unwrap_or_default()),
     }
 }
 
@@ -282,7 +290,17 @@ fn map_run_error_response(err: RunError) -> RunAgentError {
 }
 
 fn map_ticket_error_response(err: TicketError) -> RunAgentError {
-    RunAgentError::Status(map_error(err))
+    match err {
+        TicketError::Archived => RunAgentError::Message(
+            StatusCode::CONFLICT,
+            "ticket is archived; unarchive before continuing".into(),
+        ),
+        TicketError::ActiveRunExists => RunAgentError::Message(
+            StatusCode::CONFLICT,
+            "An active run already exists for this ticket.".into(),
+        ),
+        other => RunAgentError::Status(map_error(other)),
+    }
 }
 
 pub(crate) fn map_error(err: TicketError) -> StatusCode {
@@ -292,6 +310,7 @@ pub(crate) fn map_error(err: TicketError) -> StatusCode {
         | TicketError::InvalidSubstatus
         | TicketError::InvalidPriority
         | TicketError::Validation(_) => StatusCode::BAD_REQUEST,
+        TicketError::ActiveRunExists | TicketError::Archived => StatusCode::CONFLICT,
         TicketError::Database(_) => StatusCode::INTERNAL_SERVER_ERROR,
     }
 }
@@ -382,6 +401,8 @@ fn map_ticket_git_error_response(err: TicketGitError) -> TicketGitApiError {
 fn ticket_error_message(err: &TicketError) -> String {
     match err {
         TicketError::Validation(message) => message.clone(),
+        TicketError::Archived => "ticket is archived; unarchive before continuing".into(),
+        TicketError::ActiveRunExists => "An active run already exists for this ticket.".into(),
         _ => err.to_string(),
     }
 }
@@ -461,6 +482,7 @@ fn build_filters(query: ListTicketsQuery) -> Result<TicketFilters, TicketError> 
     Ok(TicketFilters {
         status,
         assignee_agent_id: query.assignee_agent_id,
+        include_archived: query.include_archived,
     })
 }
 
@@ -517,6 +539,32 @@ async fn get_ticket(
     let pool = pool_from_state(&state)?;
     let service = TicketService::new(pool);
     let ticket = service.get(ticket_id).await.map_err(map_error)?;
+    Ok(Json(ticket_to_response(ticket)))
+}
+
+async fn archive_ticket(
+    State(state): State<Arc<AppState>>,
+    AuthUser { .. }: AuthUser,
+    Path(ticket_id): Path<Uuid>,
+) -> Result<Json<TicketResponse>, RunAgentError> {
+    let pool = pool_from_state(&state).map_err(RunAgentError::Status)?;
+    let ticket = TicketService::new(pool)
+        .archive(ticket_id)
+        .await
+        .map_err(map_ticket_error_response)?;
+    Ok(Json(ticket_to_response(ticket)))
+}
+
+async fn unarchive_ticket(
+    State(state): State<Arc<AppState>>,
+    AuthUser { .. }: AuthUser,
+    Path(ticket_id): Path<Uuid>,
+) -> Result<Json<TicketResponse>, StatusCode> {
+    let pool = pool_from_state(&state)?;
+    let ticket = TicketService::new(pool)
+        .unarchive(ticket_id)
+        .await
+        .map_err(map_error)?;
     Ok(Json(ticket_to_response(ticket)))
 }
 
@@ -607,6 +655,7 @@ async fn run_agent(
         .get(ticket_id)
         .await
         .map_err(map_ticket_error_response)?;
+    TicketService::ensure_not_archived(&ticket.ticket).map_err(map_ticket_error_response)?;
 
     if let Some(agent_id) = ticket.ticket.assignee_agent_id {
         let health = state.agent_health.get(agent_id);

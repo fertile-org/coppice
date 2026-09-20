@@ -6,7 +6,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { BoardPage } from './BoardPage';
 import type { Ticket } from './useTickets';
 
-const ticketsState = vi.hoisted(() => ({ tickets: [] as Ticket[] }));
+const ticketsState = vi.hoisted(() => ({
+  active: [] as Ticket[],
+  archived: [] as Ticket[],
+  lastIncludeArchived: false,
+}));
 
 vi.mock('@dnd-kit/core', () => ({
   DndContext: ({
@@ -50,12 +54,20 @@ vi.mock('@dnd-kit/core', () => ({
 
 vi.mock('./useTickets', () => ({
   ticketsQueryKey: (projectId: string) => ['tickets', projectId],
-  useTickets: () => ({
-    data: ticketsState.tickets,
-    isLoading: false,
-    isError: false,
-    refetch: vi.fn(),
-  }),
+  useTickets: (
+    _projectId: string | undefined,
+    includeArchived = false,
+  ) => {
+    ticketsState.lastIncludeArchived = includeArchived;
+    return {
+      data: includeArchived
+        ? [...ticketsState.active, ...ticketsState.archived]
+        : ticketsState.active,
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
+    };
+  },
   useCreateTicket: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useUpdateTicketStatus: () => ({ mutateAsync: vi.fn() }),
 }));
@@ -113,7 +125,9 @@ function renderBoard(initialEntry = '/projects/project-1/board') {
 
 describe('BoardPage ticket hierarchy', () => {
   beforeEach(() => {
-    ticketsState.tickets = [
+    ticketsState.lastIncludeArchived = false;
+    ticketsState.archived = [];
+    ticketsState.active = [
       makeTicket({
         id: 'root',
         title: 'Root ticket',
@@ -169,7 +183,7 @@ describe('BoardPage ticket hierarchy', () => {
   });
 
   it('shows assignee names on cards and omits them when unassigned', () => {
-    ticketsState.tickets = [
+    ticketsState.active = [
       makeTicket({
         id: 'assigned',
         title: 'Assigned ticket',
@@ -203,5 +217,37 @@ describe('BoardPage ticket hierarchy', () => {
     const ready = screen.getByRole('region', { name: 'Ready' });
     expect(within(ready).queryByText('Frontend Engineer')).toBeNull();
     expect(within(ready).queryByText('Unknown agent')).toBeNull();
+  });
+
+  it('hides archived tickets by default and shows them when toggled', () => {
+    ticketsState.active = [
+      makeTicket({
+        id: 'active-1',
+        title: 'Active ticket',
+        status: 'backlog',
+      }),
+    ];
+    ticketsState.archived = [
+      makeTicket({
+        id: 'archived-1',
+        title: 'Archived ticket',
+        status: 'done',
+        archivedAt: '2026-09-20T00:00:00.000Z',
+      }),
+    ];
+
+    renderBoard();
+
+    expect(screen.getByText('Active ticket')).toBeVisible();
+    expect(screen.queryByText('Archived ticket')).toBeNull();
+    expect(ticketsState.lastIncludeArchived).toBe(false);
+
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Show archived' }));
+
+    expect(ticketsState.lastIncludeArchived).toBe(true);
+    expect(screen.getByText('Archived ticket')).toBeVisible();
+    expect(
+      within(screen.getByRole('region', { name: 'Done' })).getByText('Archived'),
+    ).toBeVisible();
   });
 });
