@@ -1,5 +1,6 @@
 import { useEffect, useReducer, useRef, useState } from 'react';
 import '../../opencode-session/theme/opencode-theme.css';
+import { MarkdownContent } from '../../opencode-session/components/MarkdownContent';
 import { AssistantMessage } from '../../opencode-session/session/AssistantMessage';
 import { UserMessage } from '../../opencode-session/session/UserMessage';
 import { sessionTheme } from '../../opencode-session/theme/session-theme';
@@ -16,6 +17,13 @@ import type {
   SessionSnapshot,
   SessionStore,
 } from '../../opencode-session/sync/types';
+import {
+  applyClaudeConsoleEvent,
+  createClaudeConsoleState,
+  resetClaudeConsoleState,
+  type ClaudeConsoleEntry,
+  type ClaudeConsoleState,
+} from '../runs/claude-console-state';
 import { ThinkingIndicator } from './ChatMessageList';
 
 type ConnectionState = 'connecting' | 'open' | 'closed' | 'reconnecting';
@@ -24,6 +32,10 @@ type SessionAction =
   | { type: 'reset'; sessionId: string }
   | { type: 'snapshot'; snapshot: SessionSnapshot }
   | { type: 'event'; event: OpenCodeEvent };
+
+type ConsoleAction =
+  | { type: 'reset' }
+  | { type: 'event'; event: Record<string, unknown> };
 
 function sessionReducer(
   state: SessionStore | null,
@@ -44,6 +56,20 @@ function sessionReducer(
       applyEvent(next, action.event);
       return next;
     }
+    default:
+      return state;
+  }
+}
+
+function consoleReducer(
+  state: ClaudeConsoleState,
+  action: ConsoleAction,
+): ClaudeConsoleState {
+  switch (action.type) {
+    case 'reset':
+      return resetClaudeConsoleState();
+    case 'event':
+      return applyClaudeConsoleEvent(state, action.event);
     default:
       return state;
   }
@@ -71,6 +97,31 @@ function sessionStatusFromEvent(event: OpenCodeEvent): string | null {
   return typeof status?.type === 'string' ? status.type : null;
 }
 
+function isConsoleEvent(event: Record<string, unknown>): boolean {
+  const ty = event.type;
+  return typeof ty === 'string' && ty.includes('.console.');
+}
+
+function isOpenCodeEvent(event: Record<string, unknown>): boolean {
+  const ty = event.type;
+  return (
+    typeof ty === 'string' &&
+    (ty === 'message.updated' ||
+      ty === 'message.part.updated' ||
+      ty === 'message.part.delta' ||
+      ty === 'session.status')
+  );
+}
+
+function openCodeHasMessages(store: SessionStore | null): boolean {
+  return Boolean(store && store.messages.length > 0);
+}
+
+/** Session-start alone is not visible body — keep the thinking indicator. */
+function consoleHasVisibleBody(entries: ClaudeConsoleEntry[]): boolean {
+  return entries.some((entry) => entry.kind !== 'session');
+}
+
 function ChatStreamView({ store }: { store: SessionStore }) {
   const messages = [...store.messages].sort((a, b) => a.id.localeCompare(b.id));
   return (
@@ -94,6 +145,67 @@ function ChatStreamView({ store }: { store: SessionStore }) {
   );
 }
 
+/** Light Coppice chrome for Cursor/Claude/Kilo `*.console.*` live turns. */
+function ChatConsolePreview({ entries }: { entries: ClaudeConsoleEntry[] }) {
+  const visible = entries.filter((entry) => entry.kind !== 'session');
+  if (visible.length === 0) return null;
+
+  const textBlocks = visible
+    .filter((entry): entry is Extract<ClaudeConsoleEntry, { kind: 'text' }> =>
+      entry.kind === 'text',
+    )
+    .map((entry) => entry.markdown)
+    .join('\n\n')
+    .trim();
+
+  const tools = visible.filter(
+    (entry): entry is Extract<ClaudeConsoleEntry, { kind: 'tool' }> =>
+      entry.kind === 'tool',
+  );
+
+  const result = visible.find(
+    (entry): entry is Extract<ClaudeConsoleEntry, { kind: 'result' }> =>
+      entry.kind === 'result',
+  );
+
+  const continued = visible.find(
+    (entry): entry is Extract<ClaudeConsoleEntry, { kind: 'continued' }> =>
+      entry.kind === 'continued',
+  );
+
+  const body =
+    textBlocks ||
+    result?.contract.summary ||
+    continued?.summary ||
+    '';
+
+  return (
+    <article
+      className="mr-8 rounded-lg border border-border bg-paper-100 px-3 py-2"
+      data-testid="chat-console-preview"
+    >
+      <header className="mb-1 font-body text-xs font-medium text-text-secondary">
+        Agent
+      </header>
+      {tools.length > 0 ? (
+        <ul className="mb-2 space-y-0.5 font-body text-xs text-text-secondary">
+          {tools.map((tool) => (
+            <li key={tool.id}>
+              {tool.status === 'running' ? 'Using' : 'Used'} {tool.title || 'tool'}
+              {tool.status === 'running' ? '…' : ''}
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      {body ? (
+        <div className="font-body text-sm text-text-primary">
+          <MarkdownContent>{body}</MarkdownContent>
+        </div>
+      ) : null}
+    </article>
+  );
+}
+
 export function ChatLiveTurn({
   runId,
   runStatus = 'running',
@@ -103,22 +215,26 @@ export function ChatLiveTurn({
   runStatus?: string | null;
   onFinished?: () => void;
 }) {
-  const [store, dispatch] = useReducer(sessionReducer, null);
+  const [store, dispatchSession] = useReducer(sessionReducer, null);
+  const [consoleState, dispatchConsole] = useReducer(
+    consoleReducer,
+    null,
+    createClaudeConsoleState,
+  );
   const [connection, setConnection] = useState<ConnectionState>('closed');
   const [reconnectToken, setReconnectToken] = useState(0);
-  const [hasContent, setHasContent] = useState(false);
   const [sessionStatus, setSessionStatus] = useState<string | null>(null);
-  const hasContentRef = useRef(false);
+  const hasStreamRef = useRef(false);
   const recoverableRef = useRef(true);
   const finishedRef = useRef(false);
 
   useEffect(() => {
     recoverableRef.current = true;
     finishedRef.current = false;
-    setHasContent(false);
-    hasContentRef.current = false;
+    hasStreamRef.current = false;
     setSessionStatus(null);
-    dispatch({ type: 'reset', sessionId: runId });
+    dispatchSession({ type: 'reset', sessionId: runId });
+    dispatchConsole({ type: 'reset' });
   }, [runId]);
 
   useEffect(() => {
@@ -145,7 +261,7 @@ export function ChatLiveTurn({
         messages?: Message[];
         parts?: Record<string, Part[]>;
         sessionId?: string;
-        event?: OpenCodeEvent;
+        event?: Record<string, unknown>;
         recoverable?: boolean;
         reason?: string | null;
         status?: string;
@@ -160,7 +276,7 @@ export function ChatLiveTurn({
       }
 
       if (msg.type === 'snapshot') {
-        dispatch({
+        dispatchSession({
           type: 'snapshot',
           snapshot: {
             sessionId: msg.sessionId ?? runId,
@@ -168,20 +284,44 @@ export function ChatLiveTurn({
             parts: msg.parts ?? {},
           },
         });
-        hasContentRef.current = true;
-        setHasContent(true);
+        if ((msg.messages ?? []).length > 0) {
+          hasStreamRef.current = true;
+        }
       } else if (msg.type === 'event' && msg.event) {
-        const nextStatus = sessionStatusFromEvent(msg.event);
-        if (nextStatus) setSessionStatus(nextStatus);
-        dispatch({ type: 'event', event: msg.event });
-        hasContentRef.current = true;
-        setHasContent(true);
+        const liveEvent = msg.event;
+        if (isConsoleEvent(liveEvent)) {
+          dispatchConsole({ type: 'event', event: liveEvent });
+          const ty = liveEvent.type;
+          // Session-start alone is not enough to count as stream body.
+          if (
+            typeof ty === 'string' &&
+            !ty.endsWith('.console.session')
+          ) {
+            hasStreamRef.current = true;
+          }
+        } else if (isOpenCodeEvent(liveEvent)) {
+          const nextStatus = sessionStatusFromEvent(
+            liveEvent as OpenCodeEvent,
+          );
+          if (nextStatus) setSessionStatus(nextStatus);
+          dispatchSession({
+            type: 'event',
+            event: liveEvent as OpenCodeEvent,
+          });
+          if (
+            liveEvent.type === 'message.updated' ||
+            liveEvent.type === 'message.part.updated' ||
+            liveEvent.type === 'message.part.delta'
+          ) {
+            hasStreamRef.current = true;
+          }
+        }
       } else if (msg.type === 'end') {
         if (shouldStopReconnect(msg)) {
           recoverableRef.current = false;
         }
         if (
-          !hasContentRef.current &&
+          !hasStreamRef.current &&
           msg.status &&
           isActiveRunStatus(msg.status) &&
           recoverableRef.current
@@ -212,8 +352,12 @@ export function ChatLiveTurn({
     return () => window.clearTimeout(timer);
   }, [runStatus, connection]);
 
+  const hasOpenCode = openCodeHasMessages(store);
+  const hasConsole = consoleHasVisibleBody(consoleState.entries);
+  const hasRenderable = hasOpenCode || hasConsole;
+
   const awaiting =
-    !hasContent &&
+    !hasRenderable &&
     (connection === 'connecting' ||
       connection === 'open' ||
       connection === 'reconnecting' ||
@@ -227,12 +371,19 @@ export function ChatLiveTurn({
         : 'Thinking…';
 
   return (
-    <div
-      className={`oc-session rounded-lg border border-[var(--oc-border)] px-3 py-3 ${sessionTheme.bg}`}
-      data-testid="chat-live-turn"
-    >
-      {awaiting && <ThinkingIndicator label={thinkingLabel} />}
-      {store && hasContent ? <ChatStreamView store={store} /> : null}
+    <div className="flex flex-col gap-2" data-testid="chat-live-turn">
+      {awaiting ? <ThinkingIndicator label={thinkingLabel} /> : null}
+      {hasConsole ? (
+        <ChatConsolePreview entries={consoleState.entries} />
+      ) : null}
+      {hasOpenCode && store ? (
+        <div
+          className={`oc-session rounded-lg border border-[var(--oc-border)] px-3 py-3 ${sessionTheme.bg}`}
+          data-testid="chat-opencode-stream"
+        >
+          <ChatStreamView store={store} />
+        </div>
+      ) : null}
     </div>
   );
 }

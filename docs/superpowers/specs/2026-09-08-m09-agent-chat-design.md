@@ -219,7 +219,7 @@ Rules:
 |-----------|------------------------|-----------------|
 | `mock` | Yes (orchestrator/fixture) | **Supported** (CI) |
 | `claude-code` | Yes — narrow `--allowedTools` (omit Write/Edit/MultiEdit/NotebookEdit/Bash/TodoWrite/Task; keep Read/Glob/Grep; decide WebFetch/WebSearch as read-only OK) | **Supported** when enabled |
-| `cursor` | No clean allowlist today (`--force`) | **Unsupported** — fail closed |
+| `cursor` | Yes — `--mode ask` (read-only Q&A; omit `--force`) | **Supported** when enabled |
 | `codex` | No (`--dangerously-bypass-…`) | **Unsupported** — fail closed |
 | `kilo-code` | No (`--auto`) | **Unsupported** — fail closed |
 | `opencode` | No proven read-only allowlist in-tree today | **Unsupported** — fail closed until implementer proves flags and updates this matrix |

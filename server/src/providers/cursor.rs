@@ -1,11 +1,11 @@
 use super::cursor_console::CursorConsolePublisher;
 use super::{
-    refuse_unsupported_read_only, worktree_dir_from_context, AgentProvider, AgentRunInput,
-    AgentRunResult, ProviderError,
+    worktree_dir_from_context, AgentProvider, AgentRunInput, AgentRunResult, ProviderError,
 };
 use crate::sessions::opencode_events::{coppice_run_prompt, extract_result_from_text};
 use async_trait::async_trait;
 use coppice_config::CursorProviderConfig;
+use std::path::Path;
 use std::process::Stdio;
 use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, BufReader};
@@ -29,39 +29,25 @@ impl AgentProvider for CursorProvider {
     }
 
     async fn run(&self, input: AgentRunInput) -> Result<AgentRunResult, ProviderError> {
-        if input.read_only_tools {
-            return Err(refuse_unsupported_read_only(self.id()));
-        }
         let worktree = worktree_dir_from_context(&input.context_path)?;
 
         let run_timeout = Duration::from_secs(self.config.run_timeout_secs);
         let command = self.config.command.as_str();
 
         let mut cmd = Command::new(command);
-        cmd.arg("-p")
-            .arg(coppice_run_prompt())
-            .arg("--trust")
-            .arg("--force")
-            .arg("--output-format")
-            .arg("stream-json")
-            .arg("--workspace")
-            .arg(&worktree)
-            .current_dir(&worktree)
+        for arg in cursor_cli_args(
+            &worktree,
+            input.read_only_tools,
+            input.model.as_deref(),
+            input.resume_session_id.as_deref(),
+        ) {
+            cmd.arg(arg);
+        }
+        cmd.current_dir(&worktree)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .kill_on_drop(true);
-
-        if let Some(model) = &input.model {
-            cmd.arg("--model").arg(model);
-        }
-
-        // Resume a previous cursor session if we have its session_id.
-        if let Some(sid) = &input.resume_session_id {
-            if !sid.is_empty() {
-                cmd.arg("--resume").arg(sid);
-            }
-        }
 
         // Auth is host-managed: the operator runs `agent login` wherever the
         // server runs. The child process inherits that environment directly.
@@ -72,6 +58,7 @@ impl AgentProvider for CursorProvider {
             cwd = %worktree.display(),
             model = input.model.as_deref().unwrap_or(""),
             resume = input.resume_session_id.as_deref().unwrap_or(""),
+            read_only_tools = input.read_only_tools,
             "starting cursor connector subprocess"
         );
 
@@ -256,6 +243,48 @@ fn format_stderr_suffix(lines: &[String]) -> String {
     }
 }
 
+/// Build `agent` CLI argv (excluding the binary name).
+///
+/// Ticket runs use `--force` (write-capable). Chat turns use `--mode ask`
+/// (Cursor's read-only Q&A mode) and omit `--force`.
+fn cursor_cli_args(
+    worktree: &Path,
+    read_only_tools: bool,
+    model: Option<&str>,
+    resume_session_id: Option<&str>,
+) -> Vec<String> {
+    let mut args = vec![
+        "-p".to_string(),
+        coppice_run_prompt().to_string(),
+        "--trust".to_string(),
+    ];
+    if read_only_tools {
+        args.push("--mode".to_string());
+        args.push("ask".to_string());
+    } else {
+        args.push("--force".to_string());
+    }
+    args.extend([
+        "--output-format".to_string(),
+        "stream-json".to_string(),
+        "--workspace".to_string(),
+        worktree.display().to_string(),
+    ]);
+    if let Some(model) = model {
+        if !model.is_empty() {
+            args.push("--model".to_string());
+            args.push(model.to_string());
+        }
+    }
+    if let Some(sid) = resume_session_id {
+        if !sid.is_empty() {
+            args.push("--resume".to_string());
+            args.push(sid.to_string());
+        }
+    }
+    args
+}
+
 fn is_cancelled(cancel_rx: &Option<watch::Receiver<bool>>) -> bool {
     cancel_rx.as_ref().is_some_and(|rx| *rx.borrow())
 }
@@ -307,6 +336,22 @@ mod tests {
 
     fn fixtures_root() -> PathBuf {
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../fixtures/cursor")
+    }
+
+    #[test]
+    fn chat_turns_use_ask_mode_without_force() {
+        let args = cursor_cli_args(Path::new("/tmp/chat"), true, Some("auto"), None);
+        assert!(args.windows(2).any(|w| w == ["--mode", "ask"]));
+        assert!(!args.iter().any(|a| a == "--force"));
+        assert!(args.windows(2).any(|w| w == ["--model", "auto"]));
+    }
+
+    #[test]
+    fn ticket_turns_use_force_without_ask_mode() {
+        let args = cursor_cli_args(Path::new("/tmp/wt"), false, None, Some("sess-1"));
+        assert!(args.iter().any(|a| a == "--force"));
+        assert!(!args.windows(2).any(|w| w == ["--mode", "ask"]));
+        assert!(args.windows(2).any(|w| w == ["--resume", "sess-1"]));
     }
 
     #[test]

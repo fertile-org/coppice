@@ -82,12 +82,18 @@ model_providers = ["cursor"]
 
 ## How Coppice runs Cursor (reference)
 
-Coppice spawns roughly:
+**Ticket / write-capable runs** spawn roughly:
 
 ```text
 agent -p "<prompt>" --trust --force --output-format stream-json --workspace <worktree>
 ```
 
-with optional `--model` and `--resume <session_id>`. Stdout is NDJSON (`stream-json`); the final `result` event is parsed for Coppice’s JSON result contract. Live events are published as `cursor.console.*` on the run WebSocket.
+**Agent Chat turns** use Cursor’s read-only Q&A mode (no `--force`):
+
+```text
+agent -p "<prompt>" --trust --mode ask --output-format stream-json --workspace <worktree>
+```
+
+Both paths accept optional `--model` and `--resume <session_id>`. Stdout is NDJSON (`stream-json`); the final `result` event is parsed for Coppice’s JSON result contract. Live events are published as `cursor.console.*` on the run WebSocket.
 
 More on connectors in general: [providers README](README.md). Milestone notes: [M08](../milestones/M08-connector-operator-cli.md).
