@@ -119,6 +119,8 @@ export const ticketSchema = z.object({
     .nullable()
     .optional(),
   clarificationRound: z.number().optional(),
+  hasActiveRun: z.boolean().optional(),
+  archivedAt: z.string().nullable().optional(),
 });
 
 export type TicketResponse = z.infer<typeof ticketSchema>;

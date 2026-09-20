@@ -32,10 +32,12 @@ export function TicketCard({
   isLive = false,
   assigneeName,
 }: TicketCardProps) {
+  const isArchived = Boolean(ticket.archivedAt);
   const { attributes, listeners, setNodeRef, transform, isDragging } =
     useDraggable({
       id: ticket.id,
       data: { ticket, type: 'ticket' },
+      disabled: isArchived,
     });
 
   const style = transform
@@ -60,8 +62,9 @@ export function TicketCard({
         }
       }}
       className={[
-        'cursor-grab rounded-md border border-border bg-surface-raised p-3 shadow-card transition-shadow duration-fast',
+        'rounded-md border border-border bg-surface-raised p-3 shadow-card transition-shadow duration-fast',
         'hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
+        isArchived ? 'cursor-pointer opacity-60' : 'cursor-grab',
         isDragging ? 'z-10 opacity-60 shadow-lg' : '',
       ].join(' ')}
     >
@@ -93,7 +96,12 @@ export function TicketCard({
             aria-label="Agent running"
           />
         )}
-        <span>{ticket.title}</span>
+        <span className="min-w-0 flex-1">{ticket.title}</span>
+        {isArchived && (
+          <span className="shrink-0 rounded-full border border-border bg-paper-200 px-2 py-0.5 font-body text-[0.65rem] font-normal uppercase tracking-wide text-text-muted">
+            Archived
+          </span>
+        )}
       </p>
 
       {assigneeName && (

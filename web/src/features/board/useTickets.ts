@@ -35,14 +35,24 @@ export interface Ticket {
   pendingSplitRecommendation?: PendingSplitRecommendation | null;
   clarificationRound?: number;
   hasActiveRun?: boolean;
+  archivedAt?: string | null;
 }
 
+/** Prefix for all ticket-list queries for a project (any includeArchived variant). */
 export function ticketsQueryKey(projectId: string) {
   return ['tickets', projectId] as const;
 }
 
-async function fetchTickets(projectId: string): Promise<Ticket[]> {
-  const res = await apiFetch(`/api/projects/${projectId}/tickets`);
+function ticketsListQueryKey(projectId: string, includeArchived: boolean) {
+  return [...ticketsQueryKey(projectId), includeArchived] as const;
+}
+
+async function fetchTickets(
+  projectId: string,
+  includeArchived: boolean,
+): Promise<Ticket[]> {
+  const params = includeArchived ? '?includeArchived=true' : '';
+  const res = await apiFetch(`/api/projects/${projectId}/tickets${params}`);
   return res.json() as Promise<Ticket[]>;
 }
 
@@ -70,10 +80,13 @@ async function patchTicketStatus(
   return res.json() as Promise<Ticket>;
 }
 
-export function useTickets(projectId: string | undefined) {
+export function useTickets(
+  projectId: string | undefined,
+  includeArchived = false,
+) {
   return useQuery({
-    queryKey: ticketsQueryKey(projectId ?? ''),
-    queryFn: () => fetchTickets(projectId!),
+    queryKey: ticketsListQueryKey(projectId ?? '', includeArchived),
+    queryFn: () => fetchTickets(projectId!, includeArchived),
     enabled: Boolean(projectId),
     refetchInterval: (query) => {
       const tickets = query.state.data;
@@ -98,8 +111,12 @@ export function useCreateTicket(projectId: string) {
   });
 }
 
-export function useUpdateTicketStatus(projectId: string) {
+export function useUpdateTicketStatus(
+  projectId: string,
+  includeArchived = false,
+) {
   const queryClient = useQueryClient();
+  const listKey = ticketsListQueryKey(projectId, includeArchived);
 
   return useMutation({
     mutationFn: ({
@@ -111,10 +128,8 @@ export function useUpdateTicketStatus(projectId: string) {
     }) => patchTicketStatus(ticketId, status),
     onMutate: async ({ ticketId, status }) => {
       await queryClient.cancelQueries({ queryKey: ticketsQueryKey(projectId) });
-      const previous = queryClient.getQueryData<Ticket[]>(
-        ticketsQueryKey(projectId),
-      );
-      queryClient.setQueryData<Ticket[]>(ticketsQueryKey(projectId), (old) =>
+      const previous = queryClient.getQueryData<Ticket[]>(listKey);
+      queryClient.setQueryData<Ticket[]>(listKey, (old) =>
         old?.map((ticket) =>
           ticket.id === ticketId ? { ...ticket, status } : ticket,
         ),
@@ -123,10 +138,7 @@ export function useUpdateTicketStatus(projectId: string) {
     },
     onError: (_error, _variables, context) => {
       if (context?.previous) {
-        queryClient.setQueryData(
-          ticketsQueryKey(projectId),
-          context.previous,
-        );
+        queryClient.setQueryData(listKey, context.previous);
       }
     },
     onSettled: () => {

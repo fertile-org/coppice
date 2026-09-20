@@ -249,6 +249,20 @@ async function postDismissSplits(ticketId: string): Promise<Ticket> {
   return res.json() as Promise<Ticket>;
 }
 
+async function postArchiveTicket(ticketId: string): Promise<Ticket> {
+  const res = await apiFetch(`/api/tickets/${ticketId}/archive`, {
+    method: 'POST',
+  });
+  return res.json() as Promise<Ticket>;
+}
+
+async function postUnarchiveTicket(ticketId: string): Promise<Ticket> {
+  const res = await apiFetch(`/api/tickets/${ticketId}/unarchive`, {
+    method: 'POST',
+  });
+  return res.json() as Promise<Ticket>;
+}
+
 export function useTicket(ticketId: string | undefined) {
   return useQuery({
     queryKey: ticketQueryKey(ticketId ?? ''),
@@ -313,6 +327,34 @@ export function useDismissSplits(ticketId: string) {
     mutationFn: () => postDismissSplits(ticketId),
     onSuccess: (ticket) => {
       queryClient.setQueryData(ticketQueryKey(ticketId), ticket);
+    },
+  });
+}
+
+export function useArchiveTicket(ticketId: string) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: () => postArchiveTicket(ticketId),
+    onSuccess: (ticket) => {
+      queryClient.setQueryData(ticketQueryKey(ticketId), ticket);
+      void queryClient.invalidateQueries({
+        queryKey: ticketsQueryKey(ticket.projectId),
+      });
+    },
+  });
+}
+
+export function useUnarchiveTicket(ticketId: string) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: () => postUnarchiveTicket(ticketId),
+    onSuccess: (ticket) => {
+      queryClient.setQueryData(ticketQueryKey(ticketId), ticket);
+      void queryClient.invalidateQueries({
+        queryKey: ticketsQueryKey(ticket.projectId),
+      });
     },
   });
 }

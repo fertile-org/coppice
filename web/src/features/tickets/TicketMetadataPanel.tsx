@@ -201,11 +201,18 @@ export function TicketMetadataPanel({ ticket }: TicketMetadataPanelProps) {
     assignAgent.isPending ||
     approveSplits.isPending ||
     dismissSplits.isPending;
+  const isArchived = Boolean(ticket.archivedAt);
+  const formDisabled = isBusy || isArchived;
   const activeSubstatus = substatus || null;
   const assignedAgent = agents?.find((agent) => agent.id === assigneeId);
 
   return (
     <div className="space-y-5">
+      {isArchived && (
+        <p className="rounded-md border border-border bg-paper-200 px-3 py-2 font-body text-xs text-text-secondary">
+          Unarchive this ticket to edit metadata, status, or assignment.
+        </p>
+      )}
       <div className="space-y-2">
         <Label htmlFor="ticket-assignee">Assignee</Label>
         <Select
@@ -214,7 +221,7 @@ export function TicketMetadataPanel({ ticket }: TicketMetadataPanelProps) {
             setAssigneeId(value === '__none__' ? '' : value);
             setAssignError(null);
           }}
-          disabled={isBusy}
+          disabled={formDisabled}
         >
           <SelectTrigger id="ticket-assignee">
             <SelectValue placeholder="Unassigned" />
@@ -265,7 +272,7 @@ export function TicketMetadataPanel({ ticket }: TicketMetadataPanelProps) {
               type="button"
               onClick={() => void handleApproveSplits()}
               loading={approveSplits.isPending}
-              disabled={isBusy}
+              disabled={formDisabled}
               className="flex-1"
             >
               {approveSplits.isPending ? 'Approving…' : 'Approve splits'}
@@ -275,7 +282,7 @@ export function TicketMetadataPanel({ ticket }: TicketMetadataPanelProps) {
               variant="secondary"
               onClick={() => void handleDismissSplits()}
               loading={dismissSplits.isPending}
-              disabled={isBusy}
+              disabled={formDisabled}
               className="flex-1"
             >
               {dismissSplits.isPending ? 'Dismissing…' : 'Dismiss'}
@@ -333,7 +340,11 @@ export function TicketMetadataPanel({ ticket }: TicketMetadataPanelProps) {
 
       <div className="space-y-2">
         <Label htmlFor="ticket-repo">Repository</Label>
-        <Select value={repoId || '__none__'} onValueChange={(v) => setRepoId(v === '__none__' ? '' : v)}>
+        <Select
+          value={repoId || '__none__'}
+          onValueChange={(v) => setRepoId(v === '__none__' ? '' : v)}
+          disabled={formDisabled}
+        >
           <SelectTrigger id="ticket-repo">
             <SelectValue placeholder="None" />
           </SelectTrigger>
@@ -376,6 +387,7 @@ export function TicketMetadataPanel({ ticket }: TicketMetadataPanelProps) {
         <Select
           value={status}
           onValueChange={(value) => setStatus(value as TicketStatus)}
+          disabled={formDisabled}
         >
           <SelectTrigger id="ticket-status" className="h-auto min-h-10 py-2">
             <SelectValue>
@@ -401,6 +413,7 @@ export function TicketMetadataPanel({ ticket }: TicketMetadataPanelProps) {
         <Select
           value={priority || '__none__'}
           onValueChange={(v) => setPriority(v === '__none__' ? '' : v)}
+          disabled={formDisabled}
         >
           <SelectTrigger id="ticket-priority">
             <SelectValue placeholder="None" />
@@ -425,6 +438,7 @@ export function TicketMetadataPanel({ ticket }: TicketMetadataPanelProps) {
             setSubstatus(next);
             if (!next) setMetadata({});
           }}
+          disabled={formDisabled}
         >
           <SelectTrigger id="ticket-substatus">
             <SelectValue placeholder="None" />
@@ -448,6 +462,7 @@ export function TicketMetadataPanel({ ticket }: TicketMetadataPanelProps) {
             onValueChange={(value) =>
               updateMetadataField('agentId', value === '__none__' ? '' : value)
             }
+            disabled={formDisabled}
           >
             <SelectTrigger id="substatus-agent">
               <SelectValue placeholder="Select agent…" />
@@ -510,7 +525,7 @@ export function TicketMetadataPanel({ ticket }: TicketMetadataPanelProps) {
         type="button"
         onClick={() => void handleSave()}
         loading={isBusy}
-        disabled={isBusy}
+        disabled={formDisabled}
         className="w-full"
       >
         {isBusy ? 'Saving…' : 'Save metadata'}

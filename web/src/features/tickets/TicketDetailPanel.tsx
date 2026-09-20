@@ -55,6 +55,7 @@ export function TicketDetailPanel({
   }
 
   const saving = isSaving || updateTicket.isPending;
+  const isArchived = Boolean(ticket.archivedAt);
 
   function handleCancel() {
     setTitle(ticket.title);
@@ -100,7 +101,17 @@ export function TicketDetailPanel({
                 </Button>
               </>
             ) : (
-              <Button type="button" variant="secondary" onClick={() => setEditing(true)}>
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => setEditing(true)}
+                disabled={isArchived}
+                title={
+                  isArchived
+                    ? 'Unarchive this ticket before editing'
+                    : undefined
+                }
+              >
                 Edit
               </Button>
             )}

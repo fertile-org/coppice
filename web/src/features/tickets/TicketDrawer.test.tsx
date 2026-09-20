@@ -31,6 +31,11 @@ const childrenState: { children: Ticket[] } = {
   children: [],
 };
 
+const archiveMocks = vi.hoisted(() => ({
+  archive: vi.fn(),
+  unarchive: vi.fn(),
+}));
+
 vi.mock('./useTicket', () => ({
   useTicket: () => ({
     data: ticketState.ticket,
@@ -44,6 +49,14 @@ vi.mock('./useTicket', () => ({
   useAgents: () => ({ data: [] }),
   useUpdateTicketStatus: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useFinalApprove: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useArchiveTicket: () => ({
+    mutateAsync: archiveMocks.archive,
+    isPending: false,
+  }),
+  useUnarchiveTicket: () => ({
+    mutateAsync: archiveMocks.unarchive,
+    isPending: false,
+  }),
   useTicketChildren: () => ({ data: childrenState.children }),
   useApproveSplits: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useDismissSplits: () => ({ mutateAsync: vi.fn(), isPending: false }),
@@ -111,10 +124,16 @@ describe('TicketDrawer', () => {
   beforeEach(() => {
     runsState.runs = [];
     childrenState.children = [];
+    archiveMocks.archive.mockReset();
+    archiveMocks.unarchive.mockReset();
+    archiveMocks.archive.mockResolvedValue(undefined);
+    archiveMocks.unarchive.mockResolvedValue(undefined);
     ticketState.ticket = {
       ...ticketState.ticket,
       status: 'backlog',
       parentTicketId: undefined,
+      archivedAt: null,
+      hasActiveRun: false,
     };
   });
 
@@ -148,6 +167,46 @@ describe('TicketDrawer', () => {
     ).toBeInTheDocument();
   });
 
+  it('archives an active ticket from the drawer header', async () => {
+    renderDrawer();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Archive' }));
+
+    expect(archiveMocks.archive).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole('button', { name: 'Unarchive' })).toBeNull();
+  });
+
+  it('disables archive while an agent run is active', () => {
+    ticketState.ticket = {
+      ...ticketState.ticket,
+      hasActiveRun: true,
+    };
+    renderDrawer();
+
+    expect(screen.getByRole('button', { name: 'Archive' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Archive' })).toHaveAttribute(
+      'title',
+      'Stop or wait for the active agent run before archiving.',
+    );
+  });
+
+  it('shows unarchive and banner for archived tickets', async () => {
+    ticketState.ticket = {
+      ...ticketState.ticket,
+      archivedAt: '2026-09-20T12:00:00.000Z',
+      status: 'wait_for_final_review',
+    };
+    renderDrawer();
+
+    expect(screen.queryByRole('button', { name: 'Archive' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Final Approve' })).toBeNull();
+    expect(
+      screen.getByText(/This ticket is archived/i),
+    ).toBeVisible();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Unarchive' }));
+    expect(archiveMocks.unarchive).toHaveBeenCalledTimes(1);
+  });
   it('routes kilo-code runs through the structured live console', () => {
     runsState.runs = [
       {

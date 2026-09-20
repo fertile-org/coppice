@@ -340,10 +340,16 @@ export function TicketGitActions({ ticket }: TicketGitActionsProps) {
 
   const busy =
     removeWorktree.isPending || pushBranch.isPending || createPr.isPending;
+  const isArchived = Boolean(ticket.archivedAt);
 
   return (
     <div className="space-y-3 rounded-md border border-border bg-surface px-3 py-3">
       <p className="font-body text-xs font-medium text-text-muted">Git actions</p>
+      {isArchived && (
+        <p className="font-body text-xs text-text-secondary">
+          Unarchive to run git actions.
+        </p>
+      )}
 
       {isLoading && (
         <p className="font-body text-xs text-text-muted">Loading git info…</p>
@@ -388,7 +394,7 @@ export function TicketGitActions({ ticket }: TicketGitActionsProps) {
         <Button
           type="button"
           variant="secondary"
-          disabled={busy || isLoading || !gitInfo?.worktreeExists}
+          disabled={busy || isLoading || isArchived || !gitInfo?.worktreeExists}
           title={
             gitInfo?.worktreeExists
               ? 'Rebase the ticket branch onto a base in the worktree'
@@ -405,7 +411,7 @@ export function TicketGitActions({ ticket }: TicketGitActionsProps) {
             <Button
               type="button"
               variant="secondary"
-              disabled={busy || isLoading || !gitInfo?.canPush}
+              disabled={busy || isLoading || isArchived || !gitInfo?.canPush}
               title={
                 gitInfo?.canPush
                   ? 'Push ticket branch to origin using the repo forge token'
@@ -419,7 +425,7 @@ export function TicketGitActions({ ticket }: TicketGitActionsProps) {
             <Button
               type="button"
               variant="secondary"
-              disabled={busy || isLoading || !gitInfo?.canCreatePr}
+              disabled={busy || isLoading || isArchived || !gitInfo?.canCreatePr}
               title={
                 gitInfo?.canCreatePr
                   ? 'Push the ticket branch (if needed) and create a GitHub pull request'
@@ -437,7 +443,7 @@ export function TicketGitActions({ ticket }: TicketGitActionsProps) {
               <Button
                 type="button"
                 variant="secondary"
-                disabled={busy || isLoading}
+                disabled={busy || isLoading || isArchived}
                 title="Open compare URL on the git host (branch must already be pushed)"
                 onClick={() => {
                   window.open(gitInfo.prCreateUrl!, '_blank', 'noopener,noreferrer');
@@ -450,7 +456,7 @@ export function TicketGitActions({ ticket }: TicketGitActionsProps) {
             <Button
               type="button"
               variant="secondary"
-              disabled={busy || isLoading || !gitInfo}
+              disabled={busy || isLoading || isArchived || !gitInfo}
               onClick={() => setMergeOpen(true)}
               className="w-full"
             >
@@ -459,7 +465,7 @@ export function TicketGitActions({ ticket }: TicketGitActionsProps) {
             <Button
               type="button"
               variant="secondary"
-              disabled={busy || isLoading || !gitInfo?.worktreeExists}
+              disabled={busy || isLoading || isArchived || !gitInfo?.worktreeExists}
               onClick={() => void handleRemoveWorktree()}
               className="w-full"
             >
