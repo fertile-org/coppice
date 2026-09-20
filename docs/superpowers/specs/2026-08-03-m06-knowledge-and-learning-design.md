@@ -118,10 +118,10 @@ One row per embedded revision:
 - `revision_id` primary key
 - provider and model identifiers
 - configured dimension
-- `vector(1536)` embedding
+- typed `vector(n)` embedding (`n` = `knowledge.embedding.dimension`, default 1536)
 - creation timestamp
 
-M06 fixes the migrated pgvector dimension at 1536. On startup Coppice reads PostgreSQL's column type and requires it to match `knowledge.embedding.dimension`. It never truncates or pads provider output. Provider output with a different length fails the job and leaves the previous active revision intact.
+The migrated column starts as `vector(1536)` (M06). Later installs may rewrite an empty column to another typed size so local models (e.g. 768 / 1024) work. On startup Coppice requires the live column type to match `knowledge.embedding.dimension`; if they differ and rows exist, startup fails until embeddings are cleared and re-embedded. It never truncates or pads provider output. Provider output with a different length fails the job and leaves the previous active revision intact.
 
 ### `knowledge_usage_logs`
 

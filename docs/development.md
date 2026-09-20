@@ -216,7 +216,9 @@ Agents can return `status: "continued"` to checkpoint progress without leaving *
 
 ### Knowledge configuration
 
-M06 settings live under `[knowledge]` in TOML. The default stack uses deterministic mock embedding and extraction providers. For an OpenAI-compatible embedding endpoint, set `knowledge.embedding.provider = "openai_compatible"`, configure `base_url`, `model`, and `api_key`, and keep `dimension = 1536`. Startup fails if the configured dimension differs from the migrated `vector(1536)` column; vectors are never padded or truncated.
+M06 settings live under `[knowledge]` in TOML. The default stack uses deterministic mock embedding and extraction providers. For an OpenAI-compatible embedding endpoint, set `knowledge.embedding.provider = "openai_compatible"`, configure `base_url`, `model`, and `api_key`, and set `dimension` to the model size (default `1536`). Startup requires the live `knowledge_embeddings.embedding` column type `vector(n)` to match `knowledge.embedding.dimension`; vectors are never padded or truncated.
+
+**Changing dimension:** set `knowledge.embedding.dimension` to the new size. If `knowledge_embeddings` is empty, startup rewrites the column (and HNSW index) to `vector(n)`. If rows already exist at another dimension, startup fails — run `DELETE FROM knowledge_embeddings`, restart so the column can be rewritten, then re-embed (approve/re-queue revisions). Do not mix dimensions in one column.
 
 Knowledge embedding and extraction run on the dedicated `knowledge_jobs` queue. `knowledge.worker_count = 0` disables processing but leaves API reads available. Keep production limits in `knowledge.retrieval` and `knowledge.context_budget`; list endpoints and retrieval also enforce hard server caps.
 

@@ -49,7 +49,7 @@ server/src/
 - Migrations: `server/migrations/*.sql`, applied by `coppice migrate` and on test connect (`db::connect_and_migrate`).
 - No Redis; agent job queue uses Postgres `agent_jobs` (M03).
 - **M03 tables:** `agent_runs` (one row per ticket+agent execution; statuses `queued`/`running`/`completed`/`failed`/`cancelled`; unique partial index on active `(ticket_id, agent_id)`), `agent_jobs` (queue row per run; `FOR UPDATE SKIP LOCKED` claim by workers).
-- **M06 tables:** `knowledge_items` (mutable lifecycle pointer), immutable `knowledge_revisions`, `knowledge_embeddings` (`vector(1536)` + HNSW cosine index), `knowledge_usage_logs` (unique run/revision audit snapshot), and `knowledge_jobs` (dedicated durable extraction/embedding queue). Knowledge work does not reuse run-bound `agent_jobs`.
+- **M06 tables:** `knowledge_items` (mutable lifecycle pointer), immutable `knowledge_revisions`, `knowledge_embeddings` (typed `vector(n)` matching `knowledge.embedding.dimension` + HNSW cosine index), `knowledge_usage_logs` (unique run/revision audit snapshot), and `knowledge_jobs` (dedicated durable extraction/embedding queue). Knowledge work does not reuse run-bound `agent_jobs`.
 
 ## Auth
 

@@ -2486,6 +2486,73 @@ async fn knowledge_query_plan_has_relational_indexes() {
         .await
         .expect_err("configured dimension mismatch must stop startup");
     assert!(mismatch.to_string().contains("vector(1536)"));
+
+    // Empty table: ensure may rewrite the typed column to match config, then restore.
+    let empty_count: i64 =
+        sqlx::query_scalar("SELECT COUNT(*)::bigint FROM knowledge_embeddings")
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    assert_eq!(empty_count, 0, "ensure rewrite path requires an empty table");
+    coppice_server::knowledge::ensure_schema_dimension(pool, 768)
+        .await
+        .unwrap();
+    coppice_server::knowledge::validate_schema_dimension(pool, 768)
+        .await
+        .unwrap();
+    coppice_server::knowledge::ensure_schema_dimension(pool, 1536)
+        .await
+        .unwrap();
+    coppice_server::knowledge::validate_schema_dimension(pool, 1536)
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn knowledge_ensure_dimension_rejects_nonempty_mismatch() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
+    let project_id =
+        Uuid::parse_str(&create_project_named(&app, "Dimension lock", &cookie, &csrf).await)
+            .unwrap();
+    let pool = state.db.as_ref().unwrap();
+
+    let (item_id, _revision_id) = seed_retrieval_item(
+        pool,
+        RetrievalSeed {
+            label: "dim-lock",
+            status: "approved",
+            scope: "project",
+            project_id: Some(project_id),
+            agent_id: None,
+            confidence: "high",
+            expired: false,
+            activate: true,
+            store_embedding: true,
+        },
+    )
+    .await;
+
+    let err = coppice_server::knowledge::ensure_schema_dimension(pool, 768)
+        .await
+        .expect_err("non-empty mismatch must refuse rewrite");
+    let message = err.to_string();
+    assert!(message.contains("vector(1536)"), "{message}");
+    assert!(message.contains("Clear embeddings"), "{message}");
+    assert!(message.contains("re-embed"), "{message}");
+
+    sqlx::query(
+        "UPDATE knowledge_items SET current_revision_id = NULL, active_revision_id = NULL WHERE id = $1",
+    )
+    .bind(item_id)
+    .execute(pool)
+    .await
+    .unwrap();
+    sqlx::query("DELETE FROM knowledge_items WHERE id = $1")
+        .bind(item_id)
+        .execute(pool)
+        .await
+        .unwrap();
 }
 
 #[tokio::test]

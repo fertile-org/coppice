@@ -90,7 +90,7 @@ async fn main() -> anyhow::Result<()> {
 
     let db = coppice_server::db::connect_and_migrate(&config.database.url).await?;
     if config.knowledge.enabled {
-        coppice_server::knowledge::validate_schema_dimension(
+        coppice_server::knowledge::ensure_schema_dimension(
             &db,
             config.knowledge.embedding.dimension,
         )

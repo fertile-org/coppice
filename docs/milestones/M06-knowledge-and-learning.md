@@ -75,7 +75,7 @@ pub trait EmbeddingProvider: Send + Sync {
 }
 ```
 
-Mock returns deterministic normalized vectors from text hashes for reproducible retrieval tests. The OpenAI-compatible adapter uses `POST /embeddings` and strictly checks result count, ordering, finiteness, and the configured dimension. M06 migrates `vector(1536)` and startup rejects a different configured dimension.
+Mock returns deterministic normalized vectors from text hashes for reproducible retrieval tests. The OpenAI-compatible adapter uses `POST /embeddings` and strictly checks result count, ordering, finiteness, and the configured dimension. M06 migrates `vector(1536)` by default; startup requires the live typed column to match `knowledge.embedding.dimension` (empty tables may be rewritten; non-empty mismatches fail until embeddings are cleared and re-embedded).
 
 ### Context budget (default)
 
