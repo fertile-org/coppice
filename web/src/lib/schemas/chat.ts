@@ -78,6 +78,12 @@ export const createTicketFromChatResponseSchema = z.object({
   message: chatMessageSchema,
 });
 
+export const draftTicketFromChatResponseSchema = z.object({
+  title: z.string(),
+  description: z.string(),
+  source: z.enum(['agent', 'fallback']),
+});
+
 export const createKnowledgeFromChatResponseSchema = z.object({
   knowledge: knowledgeItemSchema,
   message: chatMessageSchema,
@@ -97,6 +103,9 @@ export type ChatMessageRole = z.infer<typeof chatMessageRoleSchema>;
 export type ChatActionMetadata = z.infer<typeof chatActionMetadataSchema>;
 export type CreateTicketFromChatResponse = z.infer<
   typeof createTicketFromChatResponseSchema
+>;
+export type DraftTicketFromChatResponse = z.infer<
+  typeof draftTicketFromChatResponseSchema
 >;
 export type CreateKnowledgeFromChatResponse = z.infer<
   typeof createKnowledgeFromChatResponseSchema

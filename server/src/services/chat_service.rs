@@ -1,16 +1,24 @@
 use crate::domain::attachment::Attachment;
 use crate::domain::chat_action::{
-    compact_transcript, draft_ticket_title, ChatActionResultMeta,
+    compact_transcript, draft_fields_from_agent_summary, draft_ticket_title,
+    fallback_draft_ticket, ChatActionResultMeta, DraftTicketFields, DraftTicketSource,
 };
 use crate::domain::chat_message::{ChatMessage, ChatMessageRole};
 use crate::domain::chat_session::{ChatSession, ChatSessionStatus};
+use crate::domain::context_profile::ContextProfile;
 use crate::domain::knowledge::{
     scope_from_str, type_from_str, KnowledgeConfidence, KnowledgeItemView, KnowledgeRevisionInput,
     KnowledgeScope, KnowledgeSourceType, KnowledgeType, MAX_KNOWLEDGE_CONTENT_CHARS,
 };
 use crate::domain::run::AgentRun;
+use crate::domain::slug::slugify;
+use crate::providers::{AgentRunInput, AgentRunResult};
 use crate::services::agent_service::{AgentError, AgentService};
+use crate::services::chat_cwd::resolve_chat_cwd;
 use crate::services::comment_service::CommentService;
+use crate::services::context_builder::{
+    build_draft_ticket_context, write_context_document, ContextInput,
+};
 use crate::services::knowledge_service::{KnowledgeError, KnowledgeService};
 use crate::services::project_service::{ProjectError, ProjectService};
 use crate::services::repo_service::{RepoError, RepoService};
@@ -23,9 +31,11 @@ use sqlx::Row;
 use std::collections::HashSet;
 use std::path::Path;
 use std::str::FromStr;
+use std::time::Duration;
 use uuid::Uuid;
 
 const TRANSCRIPT_COMPACT_CHARS: usize = 4_000;
+const DRAFT_TICKET_TIMEOUT: Duration = Duration::from_secs(45);
 const MAX_CHAT_ATTACHMENTS_PER_MESSAGE: usize = 5;
 
 /// MIME types allowed when associating uploads with a chat message (stricter than comments).
@@ -155,6 +165,20 @@ pub struct CreateTicketFromChatInput<'a> {
     pub description: Option<&'a str>,
     pub repo_id: Option<Uuid>,
     pub created_by: &'a str,
+}
+
+#[derive(Debug, Clone)]
+pub struct DraftTicketResult {
+    pub title: String,
+    pub description: String,
+    pub source: DraftTicketSource,
+}
+
+pub struct DraftTicketDeps<'a> {
+    pub worktrees_path: &'a Path,
+    pub artifacts_dir: Option<&'a str>,
+    pub connector_registry: &'a crate::providers::ConnectorRegistry,
+    pub timeout: Duration,
 }
 
 pub struct CreateKnowledgeFromChatInput<'a> {
@@ -778,6 +802,137 @@ impl<'a> ChatService<'a> {
         })
     }
 
+    /// In-process agent draft for create-ticket confirm dialog. Never creates a
+    /// ticket or appends chat messages. Always returns a usable draft.
+    pub async fn draft_ticket_from_chat(
+        &self,
+        session_id: Uuid,
+        owner_user_id: Uuid,
+        deps: DraftTicketDeps<'_>,
+    ) -> Result<DraftTicketResult, ChatError> {
+        let session = self.get_session(session_id, owner_user_id).await?;
+        let transcript = self.format_transcript(session_id).await?;
+        let fallback = fallback_draft_ticket(&transcript, TRANSCRIPT_COMPACT_CHARS);
+
+        let agent = match AgentService::new(self.pool).get(session.agent_id).await {
+            Ok(agent) => agent,
+            Err(_) => {
+                return Ok(draft_result(fallback, DraftTicketSource::Fallback));
+            }
+        };
+        let Some(connector) = deps.connector_registry.get(&agent.connector) else {
+            return Ok(draft_result(fallback, DraftTicketSource::Fallback));
+        };
+        let agent_key = agent
+            .preset_source
+            .clone()
+            .unwrap_or_else(|| slugify(&agent.name));
+
+        let repo_local_path = if let Some(repo_id) = session.repo_id {
+            sqlx::query_scalar::<_, String>("SELECT local_path FROM repos WHERE id = $1")
+                .bind(repo_id)
+                .fetch_optional(self.pool)
+                .await?
+        } else {
+            None
+        };
+
+        let cwd = match resolve_chat_cwd(deps.worktrees_path, session_id, repo_local_path.as_deref())
+        {
+            Ok(path) => path,
+            Err(_) => {
+                return Ok(draft_result(fallback, DraftTicketSource::Fallback));
+            }
+        };
+        let cwd_str = cwd.to_string_lossy().into_owned();
+
+        if self
+            .stage_attachments_into_cwd(session_id, &cwd)
+            .await
+            .is_err()
+        {
+            // Attachments are best-effort for drafting; continue without them.
+        }
+
+        let context_input = ContextInput {
+            ticket_title: "Draft ticket from chat",
+            ticket_description: "",
+            ticket_status: "n/a",
+            ticket_substatus: None,
+            agent_name: &agent.name,
+            agent_key: &agent_key,
+            agent_role: &agent.role,
+            agent_skills: &agent.skills,
+            agent_responsibilities: &agent.responsibilities,
+            agent_system_prompt: &agent.system_prompt,
+            repo_name: None,
+            repo_remote_url: None,
+            repo_default_branch: None,
+            worktree_path: Some(&cwd_str),
+            latest_comments: Some(&transcript),
+            project_rules: None,
+            resume_context: None,
+            context_profile: ContextProfile::Conversation,
+            human_request: None,
+            ticket_id: None,
+            assignee_agent_key: None,
+            thread_excerpt: None,
+        };
+        let markdown = build_draft_ticket_context(&context_input);
+        if write_context_document(&cwd, &markdown).is_err() {
+            return Ok(draft_result(fallback, DraftTicketSource::Fallback));
+        }
+        let context_path = cwd.join(".agent").join("context.md");
+
+        let timeout = if deps.timeout.is_zero() {
+            DRAFT_TICKET_TIMEOUT
+        } else {
+            deps.timeout
+        };
+        let provider_input = AgentRunInput {
+            agent_id: agent.id.to_string(),
+            agent_key: agent_key.clone(),
+            agent_role: agent.role.clone(),
+            job_type: "draft_ticket".into(),
+            ticket_id: None,
+            ticket_status: None,
+            context_profile: ContextProfile::Conversation,
+            context_path: context_path.to_string_lossy().into_owned(),
+            run_id: None,
+            artifacts_dir: deps.artifacts_dir.map(str::to_string),
+            model_provider: agent.model_provider.clone(),
+            model: agent.model.clone(),
+            stream: None,
+            cancel_rx: None,
+            session_created_tx: None,
+            resume_context: None,
+            resume_session_id: None,
+            read_only_tools: true,
+        };
+
+        let provider_result =
+            match tokio::time::timeout(timeout, connector.run(provider_input)).await {
+                Ok(Ok(result)) => result,
+                Ok(Err(_)) | Err(_) => {
+                    return Ok(draft_result(fallback, DraftTicketSource::Fallback));
+                }
+            };
+
+        let fields = match provider_result {
+            AgentRunResult::Done {
+                summary,
+                updated_description,
+                ..
+            } => draft_fields_from_agent_summary(&summary, updated_description.as_deref()),
+            _ => None,
+        };
+
+        match fields {
+            Some(fields) => Ok(draft_result(fields, DraftTicketSource::Agent)),
+            None => Ok(draft_result(fallback, DraftTicketSource::Fallback)),
+        }
+    }
+
     /// Human-confirmed knowledge candidate from compacted chat transcript (M06 pending).
     pub async fn create_knowledge_from_chat(
         &self,
@@ -977,6 +1132,14 @@ fn verify_image_magic_bytes(att: &Attachment) -> Result<(), String> {
         ));
     }
     Ok(())
+}
+
+fn draft_result(fields: DraftTicketFields, source: DraftTicketSource) -> DraftTicketResult {
+    DraftTicketResult {
+        title: fields.title,
+        description: fields.description,
+        source,
+    }
 }
 
 fn row_to_session(row: &sqlx::postgres::PgRow) -> ChatSession {

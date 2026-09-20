@@ -6,6 +6,7 @@ use crate::domain::chat_message::ChatMessage;
 use crate::domain::chat_session::{ChatSession, ChatSessionStatus};
 use crate::services::chat_service::{
     ChatError, ChatService, CreateKnowledgeFromChatInput, CreateTicketFromChatInput,
+    DraftTicketDeps,
 };
 use crate::services::comment_service::CommentService;
 use crate::AppState;
@@ -19,8 +20,11 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::str::FromStr;
 use std::sync::Arc;
+use std::time::Duration;
 use time::format_description::well_known::Rfc3339;
 use uuid::Uuid;
+
+const DRAFT_TICKET_HTTP_TIMEOUT: Duration = Duration::from_secs(45);
 
 pub fn routes() -> Router<Arc<AppState>> {
     Router::new()
@@ -32,6 +36,10 @@ pub fn routes() -> Router<Arc<AppState>> {
         .route(
             "/api/chat/sessions/{session_id}/messages",
             get(list_messages).post(post_message),
+        )
+        .route(
+            "/api/chat/sessions/{session_id}/draft-ticket",
+            post(draft_ticket),
         )
         .route(
             "/api/chat/sessions/{session_id}/create-ticket",
@@ -152,6 +160,14 @@ struct PostMessageResponse {
 struct CreateTicketResponse {
     ticket: crate::api::tickets::TicketResponse,
     message: MessageResponse,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DraftTicketResponse {
+    title: String,
+    description: String,
+    source: String,
 }
 
 #[derive(Serialize)]
@@ -370,6 +386,33 @@ async fn create_ticket(
             message: message_response(result.system_message, &attachments_by_id),
         }),
     ))
+}
+
+async fn draft_ticket(
+    State(state): State<Arc<AppState>>,
+    AuthUser { user, .. }: AuthUser,
+    Path(session_id): Path<Uuid>,
+) -> Result<Json<DraftTicketResponse>, StatusCode> {
+    let pool = pool_from_state(&state)?;
+    let result = ChatService::new(pool)
+        .draft_ticket_from_chat(
+            session_id,
+            user.id,
+            DraftTicketDeps {
+                worktrees_path: std::path::Path::new(&state.config.agent.worktrees_path),
+                artifacts_dir: Some(state.config.storage.artifacts_dir.as_str()),
+                connector_registry: state.connector_registry.as_ref(),
+                timeout: DRAFT_TICKET_HTTP_TIMEOUT,
+            },
+        )
+        .await
+        .map_err(map_error)?;
+
+    Ok(Json(DraftTicketResponse {
+        title: result.title,
+        description: result.description,
+        source: result.source.as_str().to_string(),
+    }))
 }
 
 async fn create_knowledge(

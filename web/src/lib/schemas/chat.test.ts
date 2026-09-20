@@ -8,6 +8,7 @@ import {
   createKnowledgeFromChatResponseSchema,
   createTicketFromChatResponseSchema,
   cutoffSessionResponseSchema,
+  draftTicketFromChatResponseSchema,
   parseChatActionMetadata,
   postChatMessageResponseSchema,
 } from './chat';
@@ -142,6 +143,14 @@ describe('chat schemas', () => {
         },
       }).ticket.title,
     ).toBe('Fix chat cwd');
+
+    expect(
+      draftTicketFromChatResponseSchema.parse({
+        title: 'Harden chat cwd resolution',
+        description: '## Context\n\nDetails',
+        source: 'agent',
+      }).source,
+    ).toBe('agent');
 
     expect(
       createKnowledgeFromChatResponseSchema.parse({
