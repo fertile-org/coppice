@@ -11,7 +11,8 @@ import { Button } from '../../components/ui/button';
 import { Label } from '../../components/ui/label';
 import { Textarea } from '../../components/ui/textarea';
 import { parseApiErrorMessage } from '../../lib/api';
-import type { ChatSession } from '../../lib/schemas/chat';
+import type { ChatSession, ChatSessionStatus } from '../../lib/schemas/chat';
+import { cn } from '../../lib/utils';
 import { useAgents } from '../agents/useAgents';
 import { useProjects } from '../projects/useProjects';
 import { ChatLiveTurn } from './ChatLiveTurn';
@@ -34,6 +35,33 @@ function formatSessionTime(iso: string): string {
     hour: 'numeric',
     minute: '2-digit',
   });
+}
+
+function sessionStatusLabel(status: ChatSessionStatus): string {
+  switch (status) {
+    case 'active':
+      return 'Active';
+    case 'cutoff':
+      return 'Cutoff';
+    case 'archived':
+      return 'Archived';
+  }
+}
+
+function SessionStatusPill({ status }: { status: ChatSessionStatus }) {
+  return (
+    <span
+      className={cn(
+        'inline-flex items-center rounded-full px-2 py-0.5 font-body text-[11px] font-medium',
+        status === 'active' && 'bg-moss-100 text-moss-800',
+        status === 'cutoff' && 'bg-warning-muted text-bark-700',
+        status === 'archived' && 'bg-bark-100 text-bark-600',
+      )}
+      data-testid="chat-session-status"
+    >
+      {sessionStatusLabel(status)}
+    </span>
+  );
 }
 
 function SessionListItem({
@@ -206,34 +234,43 @@ function ChatComposer({
   return (
     <form
       onSubmit={(event) => void handleSubmit(event)}
-      className="space-y-2 border-t border-border pt-3"
+      className="shrink-0 border-t border-border bg-paper-50/90 px-3 py-2.5"
       data-testid="chat-composer"
     >
-      <Label htmlFor="chat-composer-input" className="sr-only">
-        Message
-      </Label>
-      <Textarea
-        id="chat-composer-input"
-        value={body}
-        onChange={(event) => setBody(event.target.value)}
-        onKeyDown={handleKeyDown}
-        placeholder="Message the agent…"
-        rows={3}
-        disabled={composerLocked}
-      />
-      {error && (
-        <p className="font-body text-sm text-danger" role="alert">
-          {error}
-        </p>
-      )}
-      <div className="flex justify-end">
+      <div className="flex items-end gap-2">
+        <Label htmlFor="chat-composer-input" className="sr-only">
+          Message
+        </Label>
+        <Textarea
+          id="chat-composer-input"
+          value={body}
+          onChange={(event) => setBody(event.target.value)}
+          onKeyDown={handleKeyDown}
+          placeholder="Message the agent…"
+          rows={2}
+          disabled={composerLocked}
+          className="min-h-[2.75rem] flex-1 resize-none border-border bg-surface-raised"
+          aria-describedby="chat-composer-hint"
+        />
         <Button
           type="submit"
           disabled={composerLocked || !body.trim()}
+          className="shrink-0"
         >
           {postMessage.isPending ? 'Sending…' : 'Send'}
         </Button>
       </div>
+      <p
+        id="chat-composer-hint"
+        className="mt-1.5 font-body text-[11px] text-text-muted"
+      >
+        Enter to send · Shift+Enter for a new line
+      </p>
+      {error && (
+        <p className="mt-1 font-body text-sm text-danger" role="alert">
+          {error}
+        </p>
+      )}
     </form>
   );
 }
@@ -259,14 +296,22 @@ function ChatSessionPane({ sessionId }: { sessionId: string }) {
   const cutoff = session?.status === 'cutoff' || session?.status === 'archived';
 
   return (
-    <div className="flex h-[min(70vh,720px)] flex-col gap-3">
-      <header className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h2 className="font-display text-lg font-semibold text-text-primary">
-            {agentName}
-          </h2>
-          <p className="font-body text-xs text-text-secondary">
-            {session ? `${session.status} · ${formatSessionTime(session.updatedAt)}` : 'Loading…'}
+    <div
+      className="flex h-[min(70vh,720px)] flex-col overflow-hidden rounded-xl border border-border bg-surface-raised shadow-sm"
+      data-testid="chat-session-pane"
+    >
+      <header className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-border bg-paper-50/80 px-4 py-3">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <h2 className="font-display text-base font-semibold text-text-primary">
+              {agentName}
+            </h2>
+            {session ? <SessionStatusPill status={session.status} /> : null}
+          </div>
+          <p className="mt-0.5 font-body text-xs text-text-secondary">
+            {session
+              ? `Updated ${formatSessionTime(session.updatedAt)}`
+              : 'Loading conversation…'}
           </p>
         </div>
         {session && (
@@ -274,16 +319,18 @@ function ChatSessionPane({ sessionId }: { sessionId: string }) {
         )}
       </header>
 
-      <div className="min-h-0 flex-1 rounded-lg border border-border bg-surface-raised p-2">
-        <ChatMessageList messages={messages} thinking={awaiting && !activeRunId} />
+      <div className="flex min-h-0 flex-1 flex-col gap-2 bg-paper-100/40 px-3 py-2">
+        <ChatMessageList
+          messages={messages}
+          thinking={awaiting && !activeRunId}
+        />
+        {activeRunId ? (
+          <ChatLiveTurn runId={activeRunId} onFinished={onLiveFinished} />
+        ) : null}
       </div>
 
-      {activeRunId && (
-        <ChatLiveTurn runId={activeRunId} onFinished={onLiveFinished} />
-      )}
-
       {cutoff ? (
-        <p className="font-body text-sm text-text-secondary">
+        <p className="shrink-0 border-t border-border bg-paper-50/90 px-4 py-3 font-body text-sm text-text-secondary">
           This session is {session?.status}. History stays readable
           {session?.status === 'cutoff'
             ? ' — open the continued child session from the transcript chip if one exists.'

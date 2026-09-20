@@ -180,29 +180,30 @@ function ChatConsolePreview({ entries }: { entries: ClaudeConsoleEntry[] }) {
     '';
 
   return (
-    <article
-      className="mr-8 rounded-lg border border-border bg-paper-100 px-3 py-2"
-      data-testid="chat-console-preview"
-    >
-      <header className="mb-1 font-body text-xs font-medium text-text-secondary">
-        Agent
-      </header>
-      {tools.length > 0 ? (
-        <ul className="mb-2 space-y-0.5 font-body text-xs text-text-secondary">
-          {tools.map((tool) => (
-            <li key={tool.id}>
-              {tool.status === 'running' ? 'Using' : 'Used'} {tool.title || 'tool'}
-              {tool.status === 'running' ? '…' : ''}
-            </li>
-          ))}
-        </ul>
-      ) : null}
-      {body ? (
-        <div className="font-body text-sm text-text-primary">
-          <MarkdownContent>{body}</MarkdownContent>
-        </div>
-      ) : null}
-    </article>
+    <div className="flex justify-start">
+      <article
+        aria-label="Agent"
+        className="max-w-[85%] rounded-2xl rounded-bl-md border border-moss-200 bg-moss-50 px-3 py-1.5 font-body text-sm text-text-primary"
+        data-testid="chat-console-preview"
+      >
+        {tools.length > 0 ? (
+          <ul className="mb-1.5 space-y-0.5 font-body text-xs text-text-secondary">
+            {tools.map((tool) => (
+              <li key={tool.id}>
+                {tool.status === 'running' ? 'Using' : 'Used'}{' '}
+                {tool.title || 'tool'}
+                {tool.status === 'running' ? '…' : ''}
+              </li>
+            ))}
+          </ul>
+        ) : null}
+        {body ? (
+          <div className="leading-snug">
+            <MarkdownContent>{body}</MarkdownContent>
+          </div>
+        ) : null}
+      </article>
+    </div>
   );
 }
 

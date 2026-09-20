@@ -60,6 +60,42 @@ describe('ChatMessageList', () => {
     expect(screen.getByRole('status')).toHaveTextContent('Thinking…');
   });
 
+  it('aligns human and agent bubbles for a messenger thread', () => {
+    const pair: ChatMessage[] = [
+      {
+        id: '00000000-0000-4000-8000-000000000001',
+        sessionId: '00000000-0000-4000-8000-000000000099',
+        seq: 1,
+        role: 'human',
+        body: 'Hello from me',
+        agentRunId: null,
+        actionMetadata: null,
+        createdAt: '2026-09-08T00:00:00Z',
+      },
+      {
+        id: '00000000-0000-4000-8000-000000000002',
+        sessionId: '00000000-0000-4000-8000-000000000099',
+        seq: 2,
+        role: 'agent',
+        body: 'Hello from the agent',
+        agentRunId: null,
+        actionMetadata: null,
+        createdAt: '2026-09-08T00:00:01Z',
+      },
+    ];
+
+    renderList(<ChatMessageList messages={pair} />);
+
+    const human = screen.getByLabelText('You');
+    const agent = screen.getByLabelText('Agent');
+    expect(human).toHaveAttribute('data-role', 'human');
+    expect(agent).toHaveAttribute('data-role', 'agent');
+    expect(human.parentElement).toHaveClass('justify-end');
+    expect(agent.parentElement).toHaveClass('justify-start');
+    expect(human.className).toMatch(/bg-bark-800/);
+    expect(agent.className).toMatch(/bg-moss-50/);
+  });
+
   it('virtualizes a long transcript in a scrollable log', () => {
     renderList(<ChatMessageList messages={messages} thinking />);
 
@@ -133,7 +169,8 @@ describe('ChatMessageList', () => {
     const list = screen.getByTestId('chat-message-list');
     const tallRow = list.querySelector('[data-index="0"]');
     expect(tallRow).not.toBeNull();
-    // Content-driven rows must not lock height to the 88px estimate.
+    // Content-driven rows must not lock height to the estimate.
+    expect(tallRow).not.toHaveStyle({ height: '72px' });
     expect(tallRow).not.toHaveStyle({ height: '88px' });
 
     const spacer = list.firstElementChild as HTMLElement | null;

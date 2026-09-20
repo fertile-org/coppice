@@ -230,7 +230,12 @@ describe('ChatPage', () => {
     renderChat('/chat/00000000-0000-4000-8000-000000000001');
 
     expect(await screen.findByText('Prior message')).toBeInTheDocument();
+    expect(screen.getByTestId('chat-session-pane')).toBeInTheDocument();
+    expect(screen.getByTestId('chat-session-status')).toHaveTextContent(
+      'Active',
+    );
     expect(screen.getByTestId('chat-session-actions')).toBeInTheDocument();
+    expect(screen.getByTestId('chat-composer')).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText('Message'), {
       target: { value: 'What is cwd?' },
     });
