@@ -14,6 +14,7 @@ import {
 } from '../../lib/schemas/knowledge';
 import { useProjects } from '../projects/useProjects';
 import { useOpenTicket } from '../tickets/useOpenTicket';
+import { ThinkingIndicator } from './ChatMessageList';
 import {
   useCreateKnowledgeFromChat,
   useCreateTicketFromChat,
@@ -146,13 +147,11 @@ function CreateTicketDialog({
     }
   }
 
-  const draftHint = draftLoading
-    ? 'Drafting title and description from this chat…'
-    : draftError
-      ? 'Could not load an agent draft; edit the fields below or confirm to use server defaults.'
-      : draft?.source === 'fallback'
-        ? 'Using a deterministic fallback draft. Edit before confirming.'
-        : 'Review the agent draft, edit if needed, then confirm.';
+  const draftHint = draftError
+    ? 'Could not load an agent draft; edit the fields below or confirm to use server defaults.'
+    : draft?.source === 'fallback'
+      ? 'Using a deterministic fallback draft. Edit before confirming.'
+      : 'Review the agent draft, edit if needed, then confirm.';
 
   return (
     <ActionDialogShell
@@ -165,9 +164,17 @@ function CreateTicketDialog({
         className="space-y-3"
         data-testid="create-ticket-dialog"
       >
-        <p className="font-body text-sm text-text-secondary" data-testid="draft-ticket-status">
-          {draftHint}
-        </p>
+        <div
+          className="font-body text-sm text-text-secondary"
+          data-testid="draft-ticket-status"
+          aria-busy={draftLoading || undefined}
+        >
+          {draftLoading ? (
+            <ThinkingIndicator label="Drafting title and description from this chat… This can take up to about a minute." />
+          ) : (
+            <p>{draftHint}</p>
+          )}
+        </div>
         <div className="space-y-2">
           <Label htmlFor="chat-ticket-project">Project</Label>
           <select

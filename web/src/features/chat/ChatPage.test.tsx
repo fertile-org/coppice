@@ -15,7 +15,13 @@ const mocks = vi.hoisted(() => ({
     title: 'Harden chat cwd resolution',
     description: '## Context\n\nUnbound chat sessions need a safe cwd.\n',
     source: 'agent' as 'agent' | 'fallback',
-  },
+  } as {
+    title: string;
+    description: string;
+    source: 'agent' | 'fallback';
+  } | undefined,
+  draftTicketLoading: false,
+  draftTicketError: false,
   createKnowledge: vi.fn(),
   cutoffSession: vi.fn(),
   openTicket: vi.fn(),
@@ -115,8 +121,8 @@ vi.mock('./useChat', () => ({
   }),
   useDraftTicketFromChat: () => ({
     data: mocks.draftTicketData,
-    isLoading: false,
-    isError: false,
+    isLoading: mocks.draftTicketLoading,
+    isError: mocks.draftTicketError,
   }),
   useCreateKnowledgeFromChat: () => ({
     mutateAsync: mocks.createKnowledge,
@@ -169,6 +175,8 @@ describe('ChatPage', () => {
       description: '## Context\n\nUnbound chat sessions need a safe cwd.\n',
       source: 'agent',
     };
+    mocks.draftTicketLoading = false;
+    mocks.draftTicketError = false;
     mocks.createKnowledge.mockReset();
     mocks.cutoffSession.mockReset();
     mocks.openTicket.mockReset();
@@ -478,6 +486,56 @@ describe('ChatPage', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Send' }));
 
     expect(await screen.findByRole('alert')).toHaveTextContent('File too large');
+  });
+
+  it('shows ThinkingIndicator while draft-ticket is loading', () => {
+    mocks.sessions = [ACTIVE_SESSION];
+    mocks.draftTicketLoading = true;
+    mocks.draftTicketData = undefined;
+
+    renderChat(`/chat/${ACTIVE_SESSION.id}`);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Create ticket' }));
+    expect(screen.getByTestId('create-ticket-dialog')).toBeInTheDocument();
+
+    const status = screen.getByTestId('draft-ticket-status');
+    expect(status).toHaveAttribute('aria-busy', 'true');
+    expect(screen.getByTestId('thinking-indicator')).toBeInTheDocument();
+    expect(screen.getByTestId('thinking-indicator')).toHaveAttribute(
+      'aria-busy',
+      'true',
+    );
+    expect(screen.getByTestId('thinking-indicator')).toHaveTextContent(
+      /Drafting title and description from this chat/,
+    );
+    expect(screen.getByLabelText('Title')).toBeDisabled();
+    expect(screen.getByLabelText('Description')).toBeDisabled();
+    expect(
+      screen.getByRole('button', { name: 'Confirm create ticket' }),
+    ).toBeDisabled();
+  });
+
+  it('clears ThinkingIndicator after draft-ticket finishes', async () => {
+    mocks.sessions = [ACTIVE_SESSION];
+
+    renderChat(`/chat/${ACTIVE_SESSION.id}`);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Create ticket' }));
+    expect(screen.getByTestId('create-ticket-dialog')).toBeInTheDocument();
+    expect(await screen.findByDisplayValue('Harden chat cwd resolution')).toBeInTheDocument();
+
+    expect(screen.queryByTestId('thinking-indicator')).not.toBeInTheDocument();
+    expect(screen.getByTestId('draft-ticket-status')).not.toHaveAttribute(
+      'aria-busy',
+      'true',
+    );
+    expect(screen.getByTestId('draft-ticket-status')).toHaveTextContent(
+      'Review the agent draft, edit if needed, then confirm.',
+    );
+    expect(screen.getByLabelText('Title')).not.toBeDisabled();
+    expect(
+      screen.getByRole('button', { name: 'Confirm create ticket' }),
+    ).not.toBeDisabled();
   });
 
   it('creates a ticket from chat after confirming project and title', async () => {
