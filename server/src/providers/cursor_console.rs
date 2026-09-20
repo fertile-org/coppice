@@ -235,80 +235,205 @@ fn non_empty_str(value: Option<&str>) -> Option<String> {
         .map(str::to_string)
 }
 
-fn extract_error_output(result: &Value) -> Option<String> {
-    let error = result.get("error")?;
-    non_empty_str(
-        error
-            .get("message")
-            .and_then(|v| v.as_str())
-            .or_else(|| error.as_str()),
-    )
-}
-
-fn extract_failure_output(result: &Value) -> Option<String> {
-    let failure = result.get("failure")?;
-    if let Some(text) = non_empty_str(failure.as_str()) {
+/// Walk string / object / simple string-array shapes for error-ish text.
+fn value_text(value: &Value) -> Option<String> {
+    if let Some(text) = non_empty_str(value.as_str()) {
         return Some(text);
     }
-    for key in ["message", "reason", "error"] {
-        if let Some(text) = non_empty_str(failure.get(key).and_then(|v| v.as_str())) {
+    if let Some(arr) = value.as_array() {
+        let parts: Vec<String> = arr
+            .iter()
+            .filter_map(|item| non_empty_str(item.as_str()))
+            .collect();
+        if !parts.is_empty() {
+            return Some(parts.join("\n"));
+        }
+        return None;
+    }
+    let obj = value.as_object()?;
+    for key in ["message", "reason", "error", "text", "content", "details"] {
+        if let Some(text) = obj.get(key).and_then(value_text) {
             return Some(text);
         }
     }
     None
 }
 
-fn stream_text(success: &Value, key: &str) -> Option<String> {
-    non_empty_str(success.get(key).and_then(|v| v.as_str()))
+fn extract_error_output(result: &Value) -> Option<String> {
+    value_text(result.get("error")?)
 }
 
-/// Extraction priority for completed tools:
-/// 1. `result.error` message / string
-/// 2. `result.failure` string or object `message` / `reason` / `error`
-/// 3. Failed shell (`status == "error"` under `success`): stderr then stdout when both nonempty
-/// 4. Error fallback: `exit code N` or `tool failed`
-///
-/// Success tools keep stdout-first (then stderr) publishing.
+fn extract_failure_output(result: &Value) -> Option<String> {
+    value_text(result.get("failure")?)
+}
+
+fn stream_text(success: &Value, key: &str) -> Option<String> {
+    let value = success.get(key)?;
+    if let Some(text) = non_empty_str(value.as_str()) {
+        return Some(text);
+    }
+    // Tolerate `{ "text": "..." }` or arrays of strings / text objects.
+    if let Some(text) = value.get("text").and_then(|v| non_empty_str(v.as_str())) {
+        return Some(text);
+    }
+    if let Some(arr) = value.as_array() {
+        let parts: Vec<String> = arr
+            .iter()
+            .filter_map(|item| {
+                non_empty_str(item.as_str()).or_else(|| {
+                    item.get("text")
+                        .and_then(|v| non_empty_str(v.as_str()))
+                })
+            })
+            .collect();
+        if !parts.is_empty() {
+            return Some(parts.join("\n"));
+        }
+    }
+    None
+}
+
+fn is_generic_failure_phrase(text: &str) -> bool {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return true;
+    }
+    let lower = trimmed.to_ascii_lowercase();
+    matches!(
+        lower.as_str(),
+        "tool failed" | "tool call failed" | "failed" | "error"
+    )
+}
+
+fn exit_code_line(success: &Value) -> Option<String> {
+    success
+        .get("exitCode")
+        .and_then(|v| v.as_i64())
+        .map(|code| format!("exit code {code}"))
+}
+
+fn args_summary(payload: &Value) -> Option<String> {
+    let args = payload.get("args")?;
+    if let Some(command) = non_empty_str(args.get("command").and_then(|v| v.as_str())) {
+        return Some(format!("command: {command}"));
+    }
+    if let Some(path) = non_empty_str(args.get("path").and_then(|v| v.as_str())) {
+        return Some(format!("path: {path}"));
+    }
+    None
+}
+
+fn join_secondary(parts: &[String]) -> Option<String> {
+    let nonempty: Vec<&str> = parts
+        .iter()
+        .map(String::as_str)
+        .filter(|s| !s.trim().is_empty())
+        .collect();
+    if nonempty.is_empty() {
+        None
+    } else {
+        Some(nonempty.join("\n\n"))
+    }
+}
+
+fn secondary_adds_info(primary: &str, secondary: &str) -> bool {
+    let primary_lower = primary.to_ascii_lowercase();
+    secondary
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .any(|line| !primary_lower.contains(&line.to_ascii_lowercase()))
+}
+
+fn compose_error_output(primary: Option<String>, secondary: Option<String>) -> Option<String> {
+    match (primary, secondary) {
+        (Some(primary), Some(secondary)) if is_generic_failure_phrase(&primary) => {
+            // Prefer actionable secondary; keep primary only when it still adds a label.
+            if secondary_adds_info(&primary, &secondary) {
+                Some(format!("{primary}\n\n{secondary}"))
+            } else {
+                Some(secondary)
+            }
+        }
+        (Some(primary), Some(secondary)) => {
+            if secondary_adds_info(&primary, &secondary) {
+                Some(format!("{primary}\n\n{secondary}"))
+            } else {
+                Some(primary)
+            }
+        }
+        (Some(primary), None) => Some(primary),
+        (None, Some(secondary)) => Some(secondary),
+        (None, None) => None,
+    }
+}
+
+fn stream_and_exit_secondary(result: &Value) -> Option<String> {
+    let success = result.get("success")?;
+    let stdout = stream_text(success, "stdout");
+    let stderr = stream_text(success, "stderr");
+    let mut parts: Vec<String> = Vec::new();
+    match (stderr, stdout) {
+        (Some(err), Some(out)) => {
+            parts.push(err);
+            parts.push(out);
+        }
+        (Some(err), None) => parts.push(err),
+        (None, Some(out)) => parts.push(out),
+        (None, None) => {}
+    }
+    // Exit code only when streams are absent (keeps PR #2 stream-only output).
+    if parts.is_empty() {
+        if let Some(code) = exit_code_line(success) {
+            parts.push(code);
+        }
+    }
+    join_secondary(&parts)
+}
+
+/// Extraction for completed tools:
+/// - Success: stdout-first, then stderr.
+/// - Error: compose primary (`result.error` / `result.failure`) with secondary
+///   (stderr → stdout, exit code, short args summary). Generic primary phrases
+///   like `tool call failed` never suppress secondary context.
 fn tool_output(payload: &Value) -> Option<String> {
     let status = completed_tool_status(payload);
     let result = payload.get("result")?;
 
-    if let Some(output) = extract_error_output(result) {
+    if status != "error" {
+        if let Some(success) = result.get("success") {
+            let stdout = stream_text(success, "stdout");
+            let stderr = stream_text(success, "stderr");
+            if let Some(out) = stdout {
+                return Some(out);
+            }
+            if let Some(err) = stderr {
+                return Some(err);
+            }
+        }
+        return None;
+    }
+
+    let primary = extract_error_output(result).or_else(|| extract_failure_output(result));
+    let primary_was_generic = primary
+        .as_ref()
+        .is_some_and(|p| is_generic_failure_phrase(p));
+    let secondary = stream_and_exit_secondary(result);
+
+    if let Some(output) = compose_error_output(primary, secondary) {
+        // Args summary only when the Cursor primary was opaque and nothing richer landed.
+        if primary_was_generic && is_generic_failure_phrase(&output) {
+            if let Some(summary) = args_summary(payload) {
+                return Some(format!("{output}\n\n{summary}"));
+            }
+        }
         return Some(output);
     }
-    if let Some(output) = extract_failure_output(result) {
-        return Some(output);
+
+    if let Some(summary) = args_summary(payload) {
+        return Some(summary);
     }
-
-    if let Some(success) = result.get("success") {
-        let stdout = stream_text(success, "stdout");
-        let stderr = stream_text(success, "stderr");
-
-        if status == "error" {
-            match (stderr, stdout) {
-                (Some(err), Some(out)) => return Some(format!("{err}\n\n{out}")),
-                (Some(err), None) => return Some(err),
-                (None, Some(out)) => return Some(out),
-                (None, None) => {}
-            }
-            if let Some(code) = success.get("exitCode").and_then(|v| v.as_i64()) {
-                return Some(format!("exit code {code}"));
-            }
-            return Some("tool failed".to_string());
-        }
-
-        if let Some(out) = stdout {
-            return Some(out);
-        }
-        if let Some(err) = stderr {
-            return Some(err);
-        }
-    }
-
-    if status == "error" {
-        return Some("tool failed".to_string());
-    }
-    None
+    Some("tool failed".to_string())
 }
 
 #[cfg(test)]
@@ -612,5 +737,157 @@ mod tests {
         let tool = last_tool(&handle);
         assert_eq!(tool["status"], "completed");
         assert_eq!(tool["output"], "ok");
+    }
+
+    #[test]
+    fn generic_tool_call_failed_merges_stderr_and_exit_code() {
+        let registry = RunStreamRegistry::new();
+        let handle = registry.register(uuid::Uuid::new_v4());
+        let mut console = CursorConsolePublisher::new();
+
+        publish_completed_shell(
+            &mut console,
+            &handle,
+            "tool_opaque",
+            json!({
+                "error": "tool call failed",
+                "success": {
+                    "exitCode": 1,
+                    "stdout": "",
+                    "stderr": "error: could not compile `coppice-server`"
+                }
+            }),
+        );
+
+        let tool = last_tool(&handle);
+        assert_eq!(tool["status"], "error");
+        let output = tool["output"].as_str().unwrap();
+        assert!(
+            output.contains("could not compile"),
+            "expected actionable stderr, got {output:?}"
+        );
+        assert!(
+            !matches!(
+                output.trim().to_ascii_lowercase().as_str(),
+                "tool call failed" | "tool failed" | "failed" | "error"
+            ),
+            "must not leave only the generic phrase, got {output:?}"
+        );
+    }
+
+    #[test]
+    fn generic_failure_phrase_with_exit_code_only_publishes_exit_code() {
+        let registry = RunStreamRegistry::new();
+        let handle = registry.register(uuid::Uuid::new_v4());
+        let mut console = CursorConsolePublisher::new();
+
+        publish_completed_shell(
+            &mut console,
+            &handle,
+            "tool_opaque_exit",
+            json!({
+                "failure": {"message": "tool call failed"},
+                "success": {"exitCode": 127, "stdout": "", "stderr": ""}
+            }),
+        );
+
+        let tool = last_tool(&handle);
+        assert_eq!(tool["status"], "error");
+        let output = tool["output"].as_str().unwrap();
+        assert!(
+            output.contains("exit code 127"),
+            "expected exit code in output, got {output:?}"
+        );
+        assert!(
+            output.contains("tool call failed") || output.contains("exit code 127"),
+            "expected composed or secondary detail, got {output:?}"
+        );
+    }
+
+    #[test]
+    fn generic_error_without_streams_falls_back_to_args_summary() {
+        let registry = RunStreamRegistry::new();
+        let handle = registry.register(uuid::Uuid::new_v4());
+        let mut console = CursorConsolePublisher::new();
+
+        console.handle_stream_json(
+            &handle,
+            &json!({
+                "type": "tool_call",
+                "subtype": "completed",
+                "call_id": "tool_opaque_args",
+                "tool_call": {
+                    "readToolCall": {
+                        "args": {"path": "/tmp/missing.rs"},
+                        "result": {"error": {"details": "tool call failed"}}
+                    },
+                    "toolCallId": "tool_opaque_args"
+                }
+            }),
+        );
+
+        let tool = last_tool(&handle);
+        assert_eq!(tool["status"], "error");
+        let output = tool["output"].as_str().unwrap();
+        assert!(
+            output.contains("/tmp/missing.rs"),
+            "expected path args summary, got {output:?}"
+        );
+    }
+
+    #[test]
+    fn nested_error_object_and_object_stream_text_are_extracted() {
+        let registry = RunStreamRegistry::new();
+        let handle = registry.register(uuid::Uuid::new_v4());
+        let mut console = CursorConsolePublisher::new();
+
+        publish_completed_shell(
+            &mut console,
+            &handle,
+            "tool_nested",
+            json!({
+                "error": {"text": "tool call failed"},
+                "success": {
+                    "exitCode": 1,
+                    "stderr": {"text": "permission denied: /etc/shadow"},
+                    "stdout": ""
+                }
+            }),
+        );
+
+        let tool = last_tool(&handle);
+        assert_eq!(tool["status"], "error");
+        let output = tool["output"].as_str().unwrap();
+        assert!(
+            output.contains("permission denied"),
+            "expected nested stderr text, got {output:?}"
+        );
+    }
+
+    #[test]
+    fn specific_error_message_is_not_diluted_by_args_summary() {
+        let registry = RunStreamRegistry::new();
+        let handle = registry.register(uuid::Uuid::new_v4());
+        let mut console = CursorConsolePublisher::new();
+
+        console.handle_stream_json(
+            &handle,
+            &json!({
+                "type": "tool_call",
+                "subtype": "completed",
+                "call_id": "tool_specific",
+                "tool_call": {
+                    "readToolCall": {
+                        "args": {"path": "/missing.rs"},
+                        "result": {"error": {"message": "not found"}}
+                    },
+                    "toolCallId": "tool_specific"
+                }
+            }),
+        );
+
+        let tool = last_tool(&handle);
+        assert_eq!(tool["status"], "error");
+        assert_eq!(tool["output"], "not found");
     }
 }
