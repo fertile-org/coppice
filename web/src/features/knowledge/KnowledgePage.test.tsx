@@ -2,6 +2,7 @@ import '@testing-library/jest-dom/vitest';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { KnowledgeItem } from '../../lib/schemas/knowledge';
+import { REJECT_PRESETS, guidanceForType } from './curationGuide';
 import { KnowledgePage } from './KnowledgePage';
 
 const mocks = vi.hoisted(() => ({
@@ -139,6 +140,59 @@ describe('KnowledgePage', () => {
     expect(mocks.openTicket).toHaveBeenCalledWith(item.sourceId);
   });
 
+  it('shows Pending inbox litmus and hides it on other tabs', () => {
+    render(<KnowledgePage />);
+
+    const guidance = screen.getByRole('complementary', {
+      name: 'Pending inbox guidance',
+    });
+    expect(guidance).toHaveTextContent(
+      'Would a different ticket next month still need this exact rule?',
+    );
+    expect(guidance).toHaveTextContent(/eligible for retrieval/);
+    expect(guidance).toHaveTextContent(/not instruction authority/);
+
+    const typeGuidance = guidanceForType('test_command');
+    expect(screen.getByTestId('pending-type-guidance')).toHaveTextContent(
+      typeGuidance.approveExample,
+    );
+    expect(screen.getByTestId('pending-type-guidance')).toHaveTextContent(
+      typeGuidance.rejectExample,
+    );
+
+    mocks.items = [
+      { ...item, status: 'approved', activeRevisionId: item.revisionId },
+    ];
+    fireEvent.click(screen.getByRole('tab', { name: 'Approved' }));
+    expect(
+      screen.queryByRole('complementary', { name: 'Pending inbox guidance' }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByTestId('pending-type-guidance')).not.toBeInTheDocument();
+
+    mocks.items = [{ ...item, status: 'rejected' }];
+    fireEvent.click(screen.getByRole('tab', { name: 'Rejected' }));
+    expect(
+      screen.queryByRole('complementary', { name: 'Pending inbox guidance' }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByTestId('pending-type-guidance')).not.toBeInTheDocument();
+
+    mocks.items = [{ ...item, status: 'stale' }];
+    fireEvent.click(screen.getByRole('tab', { name: 'Stale' }));
+    expect(
+      screen.queryByRole('complementary', { name: 'Pending inbox guidance' }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByTestId('pending-type-guidance')).not.toBeInTheDocument();
+  });
+
+  it('frames approval as retrieval eligibility in the page header', () => {
+    render(<KnowledgePage />);
+
+    expect(screen.getByText('Human-governed · fail-closed')).toBeVisible();
+    expect(
+      screen.getAllByText(/eligible for retrieval as untrusted reference data/).length,
+    ).toBeGreaterThan(0);
+  });
+
   it('uses the selected status and sends optimistic versions for approval', async () => {
     render(<KnowledgePage />);
 
@@ -225,6 +279,41 @@ describe('KnowledgePage', () => {
         id: item.id,
         expectedVersion: item.version,
         reason: 'Too specific to this incident.',
+      });
+    });
+  });
+
+  it('populates reject reason from presets and submits clear prose', async () => {
+    render(<KnowledgePage />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Reject' }));
+    const presets = screen.getByRole('group', { name: 'Reject reason presets' });
+    const oneOff = REJECT_PRESETS.find((preset) => preset.id === 'one_off')!;
+    fireEvent.click(within(presets).getByRole('button', { name: oneOff.label }));
+
+    expect(screen.getByLabelText('Reason (optional)')).toHaveValue(oneOff.reasonText);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Reject candidate' }));
+    await waitFor(() => {
+      expect(mocks.reject).toHaveBeenCalledWith({
+        id: item.id,
+        expectedVersion: item.version,
+        reason: oneOff.reasonText,
+      });
+    });
+    expect(mocks.reject.mock.calls[0][0].reason).not.toBe('one_off');
+  });
+
+  it('allows empty reject reason without a preset', async () => {
+    render(<KnowledgePage />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Reject' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Reject candidate' }));
+    await waitFor(() => {
+      expect(mocks.reject).toHaveBeenCalledWith({
+        id: item.id,
+        expectedVersion: item.version,
+        reason: null,
       });
     });
   });

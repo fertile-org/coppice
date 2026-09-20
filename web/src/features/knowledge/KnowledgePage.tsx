@@ -29,6 +29,12 @@ import { useSession } from '../auth/useSession';
 import { useProjects } from '../projects/useProjects';
 import { useOpenTicket } from '../tickets/useOpenTicket';
 import {
+  CURATION_LITMUS,
+  CURATION_TRUST_FRAMING,
+  REJECT_PRESETS,
+  guidanceForType,
+} from './curationGuide';
+import {
   useApproveKnowledge,
   useCreateKnowledge,
   useEditKnowledge,
@@ -361,6 +367,50 @@ function ManualCandidateForm() {
 
 type EditorMode = 'edit' | 'supersede' | 'reject' | null;
 
+function PendingInboxGuidance() {
+  return (
+    <aside
+      aria-label="Pending inbox guidance"
+      className="rounded-xl border border-moss-200 bg-moss-50 px-4 py-3"
+    >
+      <p className="font-display text-sm font-semibold text-bark-900">
+        {CURATION_LITMUS}
+      </p>
+      <p className="mt-1.5 font-body text-xs leading-relaxed text-text-secondary">
+        {CURATION_TRUST_FRAMING}
+      </p>
+      <p className="mt-2 font-body text-xs text-text-muted">
+        Use the approve/reject examples on each card to keep curation consistent.
+      </p>
+    </aside>
+  );
+}
+
+function RejectPresetRow({
+  onSelect,
+}: {
+  onSelect: (reasonText: string) => void;
+}) {
+  return (
+    <div
+      role="group"
+      aria-label="Reject reason presets"
+      className="flex flex-wrap gap-1.5"
+    >
+      {REJECT_PRESETS.map((preset) => (
+        <button
+          key={preset.id}
+          type="button"
+          onClick={() => onSelect(preset.reasonText)}
+          className="rounded-md border border-danger-muted bg-surface-raised px-2 py-1 font-body text-xs font-medium text-danger transition-colors hover:bg-danger-muted/40"
+        >
+          {preset.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 function KnowledgeCard({
   item,
   canGovern,
@@ -383,6 +433,7 @@ function KnowledgeCard({
     useState<KnowledgeConfidence>(item.confidence);
   const [reason, setReason] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const typeGuidance = guidanceForType(item.knowledgeType);
 
   const busy =
     approve.isPending ||
@@ -493,6 +544,22 @@ function KnowledgeCard({
           <p className="mt-2 font-body text-sm leading-relaxed text-bark-700 whitespace-pre-wrap">
             {item.content}
           </p>
+          {item.status === 'pending' && (
+            <p
+              data-testid="pending-type-guidance"
+              className="mt-3 font-body text-xs leading-relaxed text-text-secondary"
+            >
+              <span className="font-medium text-moss-800">
+                {typeGuidance.approveExample}
+              </span>
+              <span className="mx-1.5 text-text-muted" aria-hidden="true">
+                ·
+              </span>
+              <span className="font-medium text-danger">
+                {typeGuidance.rejectExample}
+              </span>
+            </p>
+          )}
         </div>
         <span className={embeddingPillClass(item.embeddingStatus)}>
           Embedding · {humanize(item.embeddingStatus)}
@@ -718,6 +785,7 @@ function KnowledgeCard({
           className="mt-4 space-y-3 rounded-lg border border-danger-muted bg-danger-muted/30 p-4"
         >
           <Label htmlFor={`reject-${item.id}`}>Reason (optional)</Label>
+          <RejectPresetRow onSelect={setReason} />
           <Textarea
             id={`reject-${item.id}`}
             value={reason}
@@ -773,11 +841,16 @@ export function KnowledgePage() {
             Review durable facts before agents can use them. Every revision keeps its source, policy decision, embedding state, and run history.
           </p>
         </div>
-        <div className="flex items-center gap-2 rounded-lg border border-moss-200 bg-moss-50 px-3 py-2">
-          <ShieldCheck className="size-4 text-moss-700" aria-hidden="true" />
-          <span className="font-body text-xs font-medium text-moss-800">
-            Human-governed · fail-closed
-          </span>
+        <div className="max-w-xs rounded-lg border border-moss-200 bg-moss-50 px-3 py-2">
+          <div className="flex items-center gap-2">
+            <ShieldCheck className="size-4 shrink-0 text-moss-700" aria-hidden="true" />
+            <span className="font-body text-xs font-medium text-moss-800">
+              Human-governed · fail-closed
+            </span>
+          </div>
+          <p className="mt-1.5 font-body text-xs leading-relaxed text-moss-800/90">
+            {CURATION_TRUST_FRAMING}
+          </p>
         </div>
       </header>
 
@@ -832,6 +905,12 @@ export function KnowledgePage() {
               </select>
             </label>
           </div>
+
+          {status === 'pending' && (
+            <div className="mt-4">
+              <PendingInboxGuidance />
+            </div>
+          )}
 
           {query.isLoading && (
             <div className="mt-5 rounded-xl border border-dashed border-border bg-paper-50 p-10 text-center">
