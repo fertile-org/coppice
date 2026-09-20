@@ -4,7 +4,8 @@
  *
  * Proves the default stack can govern a manual candidate, embed and retrieve
  * its exact revision in a Full run, expose the run audit, and idempotently
- * extract a Pending candidate after a separate ticket enters Done.
+ * extract a Pending coding_convention from a seeded reusable Done-ticket
+ * description (outcome-only Done may yield zero candidates — valid success).
  *
  * Env:
  *   COPPICE_API_URL            default http://localhost:5000
@@ -354,7 +355,7 @@ async function main() {
   const extractionTicket = await createTicket(
     project.id,
     `M06 extraction ${suffix}`,
-    `Extraction evidence ${suffix}`,
+    `Prefer Result over panic in public APIs. Extraction marker ${suffix}.`,
     auth,
   );
   await expectJson(
@@ -379,14 +380,17 @@ async function main() {
       page.items.find(
         (entry) =>
           entry.sourceType === 'agent_summary' &&
-          entry.sourceId === extractionTicket.id,
+          entry.sourceId === extractionTicket.id &&
+          entry.knowledgeType === 'coding_convention',
       ) ?? null
     );
   });
   if (
     extracted.status !== 'pending' ||
     extracted.policyDecision !== 'human_review' ||
-    extracted.embeddingStatus !== 'not_requested'
+    extracted.embeddingStatus !== 'not_requested' ||
+    extracted.confidence !== 'high' ||
+    String(extracted.title || '').startsWith('Outcome:')
   ) {
     fail(`extraction policy did not fail closed: ${JSON.stringify(extracted)}`);
   }

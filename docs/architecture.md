@@ -105,6 +105,8 @@ Only Full-profile runs retrieve knowledge. Relational eligibility (approved, act
 
 A database trigger idempotently enqueues `extract_ticket` when a ticket first enters Done. Default extraction is fail-closed: candidates remain Pending. Policy auto-save additionally requires an enabled explicit low-risk type allowlist and high confidence; high-impact types always require human approval.
 
+The mock extractor applies the same reuse litmus as the Knowledge Inbox (`Would a different ticket next month still need this exact rule?` — see `web/src/features/knowledge/curationGuide.ts`): it keeps only candidates that look reusable, still-true, and scoped, and omits clear one-offs and ticket-outcome logs (`Outcome: …`, `Fixed ticket #N`, `Completed ticket: …`, LGTM). Empty extraction is a valid success. Borderline candidates may carry a `reuse_hint` token folded into `policy_reason` (e.g. `reuse_hint=borderline_vague`) without auto-approving.
+
 **Config env:** `AGENT_DEFAULT_PROVIDER`, `WORKTREES_PATH`, `AGENT_WORKER_COUNT` (see `deploy/docker-compose.yml`). Operator bind-mounts host clones; register in-container paths in Settings → Repositories.
 
 ## Web frontend

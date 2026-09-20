@@ -197,6 +197,7 @@ impl ExtractionProvider for ReclaimingExtractionProvider {
             should_require_human_approval: true,
             source_type: KnowledgeSourceType::AgentSummary,
             source_id: None,
+            reuse_hint: None,
         }])
     }
 }
@@ -228,6 +229,7 @@ impl ExtractionProvider for CommentReviewExtractionProvider {
                 should_require_human_approval: true,
                 source_type: KnowledgeSourceType::Comment,
                 source_id: Some(comment.id),
+                reuse_hint: None,
             },
             ExtractedCandidate {
                 knowledge_type: KnowledgeType::ReviewFeedback,
@@ -237,6 +239,7 @@ impl ExtractionProvider for CommentReviewExtractionProvider {
                 should_require_human_approval: true,
                 source_type: KnowledgeSourceType::Review,
                 source_id: Some(review.id),
+                reuse_hint: None,
             },
         ])
     }
@@ -2258,6 +2261,58 @@ async fn done_transition_schedules_idempotent_extraction_to_pending() {
     assert_eq!(jobs, 1);
 
     process_one_knowledge_job(&state).await.unwrap();
+    // Default ticket description ("details") is not reusable — empty extraction is success.
+    let job_status: String = sqlx::query_scalar(
+        "SELECT status FROM knowledge_jobs WHERE kind = 'extract_ticket' AND ticket_id = $1",
+    )
+    .bind(ticket_uuid)
+    .fetch_one(state.db.as_ref().unwrap())
+    .await
+    .unwrap();
+    assert_eq!(job_status, "completed");
+    let response = app
+        .clone()
+        .oneshot(common::json_request(
+            "GET",
+            &format!("/api/knowledge/inbox?projectId={project_id}"),
+            "",
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    let inbox = common::json_body(response).await;
+    assert_eq!(inbox["items"].as_array().unwrap().len(), 0);
+}
+
+#[tokio::test]
+async fn mock_extraction_emits_pending_for_seeded_reusable_convention() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
+    let project_id = common::create_test_project(&app, &cookie, &csrf).await;
+    let create = app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            &format!("/api/projects/{project_id}/tickets"),
+            r#"{"title":"API hardening","description":"Prefer Result over panic in public APIs."}"#,
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(create.status(), StatusCode::CREATED);
+    let created = common::json_body(create).await;
+    let ticket_id = created["id"].as_str().unwrap().to_string();
+    let ticket_uuid = Uuid::parse_str(&ticket_id).unwrap();
+
+    sqlx::query("UPDATE tickets SET status = 'done' WHERE id = $1")
+        .bind(ticket_uuid)
+        .execute(state.db.as_ref().unwrap())
+        .await
+        .unwrap();
+    process_one_knowledge_job(&state).await.unwrap();
+
     let response = app
         .clone()
         .oneshot(common::json_request(
@@ -2272,7 +2327,14 @@ async fn done_transition_schedules_idempotent_extraction_to_pending() {
     let inbox = common::json_body(response).await;
     assert_eq!(inbox["items"].as_array().unwrap().len(), 1);
     assert_eq!(inbox["items"][0]["sourceId"], ticket_id);
+    assert_eq!(inbox["items"][0]["knowledgeType"], "coding_convention");
+    assert_eq!(inbox["items"][0]["status"], "pending");
     assert_eq!(inbox["items"][0]["policyDecision"], "human_review");
+    assert_eq!(inbox["items"][0]["confidence"], "high");
+    assert!(!inbox["items"][0]["title"]
+        .as_str()
+        .unwrap()
+        .starts_with("Outcome:"));
 }
 
 #[tokio::test]

@@ -123,7 +123,7 @@ vi.mock('./useKnowledge', () => ({
       fetchNextPage: vi.fn(),
     };
   },
-  useSimilarKnowledge: (itemId: string, enabled: boolean) => {
+  useSimilarKnowledge: (_itemId: string, enabled: boolean) => {
     mocks.similarEnabled = enabled;
     return {
       data: { items: mocks.similarItems },

@@ -160,7 +160,7 @@ pub trait EmbeddingProvider: Send + Sync {
 
 `MockEmbeddingProvider` hashes normalized UTF-8 input into deterministic, normalized vectors. `OpenAiCompatibleEmbeddingProvider` sends bounded batches with `input`, `model`, `dimensions`, and `encoding_format: "float"`, preserves response indexes, and validates count, finiteness, and dimension. The request shape follows the official [Create embeddings API](https://developers.openai.com/api/reference/resources/embeddings/methods/create).
 
-Extraction uses a separate trait returning typed candidates. The deterministic M06 extractor reads a bounded ticket snapshot (title, description, latest comments, and review feedback) and emits reproducible candidates for tests and default development. Its input and outputs use strict byte/item limits. Provider-produced fields still pass domain validation and policy evaluation.
+Extraction uses a separate trait returning typed candidates. The deterministic M06 extractor reads a bounded ticket snapshot (title, description, latest comments, and review feedback) and emits reproducible candidates for tests and default development. It applies the Inbox reuse litmus (human-facing copy in `web/src/features/knowledge/curationGuide.ts`): keep reusable, still-true, scoped facts; omit vague advice and ticket-outcome logs. Prefer fewer sharper candidates (empty extraction is success); borderline rows may record `reuse_hint=<token>` inside `policy_reason`. Its input and outputs use strict byte/item limits. Provider-produced fields still pass domain validation and policy evaluation.
 
 Worker ordering is not semantically significant. Jobs are idempotent, activation transactions check the revision is still current, and usage insertion is conflict-safe.
 
