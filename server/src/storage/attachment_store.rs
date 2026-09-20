@@ -41,7 +41,7 @@ impl AttachmentStore {
     }
 }
 
-fn sanitize_filename(filename: &str) -> String {
+pub fn sanitize_filename(filename: &str) -> String {
     let base = Path::new(filename)
         .file_name()
         .and_then(|name| name.to_str())

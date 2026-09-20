@@ -116,11 +116,19 @@ async fn upload_attachment(
 
 async fn get_attachment(
     State(state): State<Arc<AppState>>,
-    AuthUser { .. }: AuthUser,
+    AuthUser { user, .. }: AuthUser,
     Path(attachment_id): Path<Uuid>,
 ) -> Result<Response, StatusCode> {
     let pool = pool_from_state(&state)?;
     let service = CommentService::new(pool);
+    let allowed = service
+        .user_can_access_attachment(attachment_id, user.id)
+        .await
+        .map_err(map_error)?;
+    if !allowed {
+        return Err(StatusCode::NOT_FOUND);
+    }
+
     let attachment = service
         .get_attachment(attachment_id)
         .await

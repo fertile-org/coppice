@@ -240,3 +240,98 @@ async fn mention_multiple_agents_returns_bad_request() {
         .unwrap();
     assert_eq!(res.status(), StatusCode::BAD_REQUEST);
 }
+
+#[tokio::test]
+async fn comment_linked_attachment_still_downloadable_by_other_user() {
+    use coppice_server::middleware::session::parse_session_cookie;
+    use http_body_util::BodyExt;
+
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+
+    let (app, admin_cookie, admin_csrf) = common::bootstrap_and_login().await;
+    let create_member = app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            "/api/users",
+            r#"{"email":"member@localhost","password":"secret123"}"#,
+            &admin_cookie,
+            &admin_csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(create_member.status(), StatusCode::CREATED);
+
+    let project_id = common::create_test_project(&app, &admin_cookie, &admin_csrf).await;
+    let ticket_id =
+        common::create_test_ticket(&app, &project_id, &admin_cookie, &admin_csrf).await;
+
+    let upload = app
+        .clone()
+        .oneshot(common::multipart_request(
+            "/api/attachments",
+            "shared.txt",
+            "text/plain",
+            "comment shared",
+            &admin_cookie,
+            &admin_csrf,
+        ))
+        .await
+        .unwrap();
+    let attachment: serde_json::Value = common::json_body(upload).await;
+    let attachment_id = attachment["id"].as_str().unwrap();
+
+    let create_comment = app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            &format!("/api/tickets/{ticket_id}/comments"),
+            &format!(r#"{{"body":"See attached","attachmentIds":["{attachment_id}"]}}"#),
+            &admin_cookie,
+            &admin_csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(create_comment.status(), StatusCode::CREATED);
+
+    let login = app
+        .clone()
+        .oneshot(
+            axum::http::Request::builder()
+                .method("POST")
+                .uri("/api/auth/login")
+                .header("content-type", "application/json")
+                .body(axum::body::Body::from(
+                    r#"{"email":"member@localhost","password":"secret123"}"#,
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(login.status(), StatusCode::OK);
+    let set_cookie = login
+        .headers()
+        .get(axum::http::header::SET_COOKIE)
+        .expect("session cookie");
+    let session_token = parse_session_cookie(set_cookie.to_str().unwrap()).unwrap();
+    let member_cookie = format!("coppice_session={session_token}");
+    let body = login.into_body().collect().await.unwrap().to_bytes();
+    let login_json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    let member_csrf = login_json["csrfToken"].as_str().unwrap();
+
+    let get = app
+        .clone()
+        .oneshot(common::json_request(
+            "GET",
+            &format!("/api/attachments/{attachment_id}"),
+            "",
+            &member_cookie,
+            member_csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(get.status(), StatusCode::OK);
+}

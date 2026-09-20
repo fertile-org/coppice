@@ -1,11 +1,13 @@
 use crate::api::auth::{pool_from_state, AuthUser};
 use crate::api::knowledge::item_response as knowledge_item_response;
 use crate::api::tickets::ticket_to_response;
+use crate::domain::attachment::Attachment;
 use crate::domain::chat_message::ChatMessage;
 use crate::domain::chat_session::{ChatSession, ChatSessionStatus};
 use crate::services::chat_service::{
     ChatError, ChatService, CreateKnowledgeFromChatInput, CreateTicketFromChatInput,
 };
+use crate::services::comment_service::CommentService;
 use crate::AppState;
 use axum::{
     extract::{Path, Query, State},
@@ -14,6 +16,7 @@ use axum::{
     Json, Router,
 };
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::str::FromStr;
 use std::sync::Arc;
 use time::format_description::well_known::Rfc3339;
@@ -65,6 +68,7 @@ struct PatchSessionBody {
 #[serde(rename_all = "camelCase")]
 struct PostMessageBody {
     body: String,
+    attachment_ids: Option<Vec<Uuid>>,
 }
 
 #[derive(Deserialize)]
@@ -102,6 +106,15 @@ struct SessionResponse {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
+struct AttachmentSummary {
+    id: Uuid,
+    filename: String,
+    content_type: String,
+    size_bytes: i64,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 struct MessageResponse {
     id: Uuid,
     session_id: Uuid,
@@ -110,6 +123,8 @@ struct MessageResponse {
     body: String,
     agent_run_id: Option<Uuid>,
     action_metadata: Option<serde_json::Value>,
+    attachment_ids: Vec<Uuid>,
+    attachments: Vec<AttachmentSummary>,
     created_at: String,
 }
 
@@ -159,7 +174,7 @@ fn map_error(err: ChatError) -> StatusCode {
         ChatError::NotFound => StatusCode::NOT_FOUND,
         ChatError::Validation(_) => StatusCode::BAD_REQUEST,
         ChatError::ActiveRunExists => StatusCode::CONFLICT,
-        ChatError::Database(_) => StatusCode::INTERNAL_SERVER_ERROR,
+        ChatError::Database(_) | ChatError::Io(_) => StatusCode::INTERNAL_SERVER_ERROR,
     }
 }
 
@@ -177,7 +192,26 @@ fn session_response(session: ChatSession) -> SessionResponse {
     }
 }
 
-fn message_response(message: ChatMessage) -> MessageResponse {
+fn attachment_to_summary(attachment: &Attachment) -> AttachmentSummary {
+    AttachmentSummary {
+        id: attachment.id,
+        filename: attachment.filename.clone(),
+        content_type: attachment.content_type.clone(),
+        size_bytes: attachment.size_bytes,
+    }
+}
+
+fn message_response(
+    message: ChatMessage,
+    attachments_by_id: &HashMap<Uuid, Attachment>,
+) -> MessageResponse {
+    let attachments = message
+        .attachment_ids
+        .iter()
+        .filter_map(|id| attachments_by_id.get(id))
+        .map(attachment_to_summary)
+        .collect();
+
     MessageResponse {
         id: message.id,
         session_id: message.session_id,
@@ -186,8 +220,27 @@ fn message_response(message: ChatMessage) -> MessageResponse {
         body: message.body,
         agent_run_id: message.agent_run_id,
         action_metadata: message.action_metadata,
+        attachment_ids: message.attachment_ids,
+        attachments,
         created_at: message.created_at.format(&Rfc3339).unwrap_or_default(),
     }
+}
+
+async fn attachments_for_messages(
+    pool: &sqlx::PgPool,
+    messages: &[ChatMessage],
+) -> Result<HashMap<Uuid, Attachment>, StatusCode> {
+    let mut ids: Vec<Uuid> = messages
+        .iter()
+        .flat_map(|m| m.attachment_ids.clone())
+        .collect();
+    ids.sort_unstable();
+    ids.dedup();
+    let attachments = CommentService::new(pool)
+        .list_attachments_by_ids(&ids)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    Ok(attachments.into_iter().map(|a| (a.id, a)).collect())
 }
 
 async fn create_session(
@@ -256,8 +309,12 @@ async fn list_messages(
         .list_messages(session_id, user.id)
         .await
         .map_err(map_error)?;
+    let attachments_by_id = attachments_for_messages(pool, &messages).await?;
     Ok(Json(MessageListResponse {
-        messages: messages.into_iter().map(message_response).collect(),
+        messages: messages
+            .into_iter()
+            .map(|m| message_response(m, &attachments_by_id))
+            .collect(),
     }))
 }
 
@@ -268,14 +325,16 @@ async fn post_message(
     Json(body): Json<PostMessageBody>,
 ) -> Result<(StatusCode, Json<PostMessageResponse>), StatusCode> {
     let pool = pool_from_state(&state)?;
+    let attachment_ids = body.attachment_ids.unwrap_or_default();
     let result = ChatService::new(pool)
-        .post_message(session_id, user.id, &body.body)
+        .post_message(session_id, user.id, &body.body, &attachment_ids)
         .await
         .map_err(map_error)?;
+    let attachments_by_id = attachments_for_messages(pool, std::slice::from_ref(&result.message)).await?;
     Ok((
         StatusCode::CREATED,
         Json(PostMessageResponse {
-            message: message_response(result.message),
+            message: message_response(result.message, &attachments_by_id),
             run_id: result.run.id,
         }),
     ))
@@ -302,11 +361,13 @@ async fn create_ticket(
         )
         .await
         .map_err(map_error)?;
+    let attachments_by_id =
+        attachments_for_messages(pool, std::slice::from_ref(&result.system_message)).await?;
     Ok((
         StatusCode::CREATED,
         Json(CreateTicketResponse {
             ticket: ticket_to_response(result.ticket),
-            message: message_response(result.system_message),
+            message: message_response(result.system_message, &attachments_by_id),
         }),
     ))
 }
@@ -333,11 +394,13 @@ async fn create_knowledge(
         )
         .await
         .map_err(map_error)?;
+    let attachments_by_id =
+        attachments_for_messages(pool, std::slice::from_ref(&result.system_message)).await?;
     Ok((
         StatusCode::CREATED,
         Json(CreateKnowledgeResponse {
             knowledge: knowledge_item_response(result.item),
-            message: message_response(result.system_message),
+            message: message_response(result.system_message, &attachments_by_id),
         }),
     ))
 }
@@ -352,9 +415,11 @@ async fn cutoff_session(
         .cutoff_session(session_id, user.id)
         .await
         .map_err(map_error)?;
+    let attachments_by_id =
+        attachments_for_messages(pool, std::slice::from_ref(&result.seed_message)).await?;
     Ok(Json(CutoffResponse {
         parent: session_response(result.parent),
         child: session_response(result.child),
-        seed_message: message_response(result.seed_message),
+        seed_message: message_response(result.seed_message, &attachments_by_id),
     }))
 }

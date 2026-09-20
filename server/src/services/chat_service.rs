@@ -1,3 +1,4 @@
+use crate::domain::attachment::Attachment;
 use crate::domain::chat_action::{
     compact_transcript, draft_ticket_title, ChatActionResultMeta,
 };
@@ -9,18 +10,36 @@ use crate::domain::knowledge::{
 };
 use crate::domain::run::AgentRun;
 use crate::services::agent_service::{AgentError, AgentService};
+use crate::services::comment_service::CommentService;
 use crate::services::knowledge_service::{KnowledgeError, KnowledgeService};
 use crate::services::project_service::{ProjectError, ProjectService};
 use crate::services::repo_service::{RepoError, RepoService};
 use crate::services::run_service::{RunError, RunService};
 use crate::services::ticket_service::{TicketError, TicketService, TicketWithDisplay};
+use crate::storage::attachment_store::sanitize_filename;
 use coppice_config::KnowledgeConfig;
 use sqlx::PgPool;
 use sqlx::Row;
+use std::collections::HashSet;
+use std::path::Path;
 use std::str::FromStr;
 use uuid::Uuid;
 
 const TRANSCRIPT_COMPACT_CHARS: usize = 4_000;
+const MAX_CHAT_ATTACHMENTS_PER_MESSAGE: usize = 5;
+
+/// MIME types allowed when associating uploads with a chat message (stricter than comments).
+pub const CHAT_ATTACHMENT_MIME_ALLOWLIST: &[&str] = &[
+    "image/png",
+    "image/jpeg",
+    "image/gif",
+    "image/webp",
+    "text/plain",
+    "text/markdown",
+    "text/csv",
+    "application/json",
+    "application/pdf",
+];
 
 pub struct ChatService<'a> {
     pool: &'a PgPool,
@@ -36,6 +55,8 @@ pub enum ChatError {
     ActiveRunExists,
     #[error(transparent)]
     Database(#[from] sqlx::Error),
+    #[error(transparent)]
+    Io(#[from] std::io::Error),
 }
 
 impl From<AgentError> for ChatError {
@@ -322,7 +343,8 @@ impl<'a> ChatService<'a> {
         let rows = sqlx::query(
             r#"
             SELECT
-                id, session_id, seq, role, body, agent_run_id, action_metadata, created_at
+                id, session_id, seq, role, body, agent_run_id, action_metadata,
+                attachment_ids, created_at
             FROM chat_messages
             WHERE session_id = $1
             ORDER BY seq ASC
@@ -339,10 +361,13 @@ impl<'a> ChatService<'a> {
         session_id: Uuid,
         owner_user_id: Uuid,
         body: &str,
+        attachment_ids: &[Uuid],
     ) -> Result<PostMessageResult, ChatError> {
         let body = body.trim();
-        if body.is_empty() {
-            return Err(ChatError::Validation("message body is required".into()));
+        if body.is_empty() && attachment_ids.is_empty() {
+            return Err(ChatError::Validation(
+                "message body or at least one attachment is required".into(),
+            ));
         }
 
         let session = self.get_session(session_id, owner_user_id).await?;
@@ -351,6 +376,9 @@ impl<'a> ChatService<'a> {
                 "session is not active; reopen before posting".into(),
             ));
         }
+
+        self.validate_chat_attachments(owner_user_id, attachment_ids)
+            .await?;
 
         let mut tx = self.pool.begin().await?;
         let next_seq: i64 = sqlx::query_scalar(
@@ -366,11 +394,12 @@ impl<'a> ChatService<'a> {
         let row = sqlx::query(
             r#"
             INSERT INTO chat_messages (
-                id, session_id, seq, role, body, agent_run_id, action_metadata
+                id, session_id, seq, role, body, agent_run_id, action_metadata, attachment_ids
             )
-            VALUES ($1, $2, $3, $4, $5, NULL, NULL)
+            VALUES ($1, $2, $3, $4, $5, NULL, NULL, $6)
             RETURNING
-                id, session_id, seq, role, body, agent_run_id, action_metadata, created_at
+                id, session_id, seq, role, body, agent_run_id, action_metadata,
+                attachment_ids, created_at
             "#,
         )
         .bind(message_id)
@@ -378,6 +407,7 @@ impl<'a> ChatService<'a> {
         .bind(next_seq)
         .bind(ChatMessageRole::Human.as_str())
         .bind(body)
+        .bind(attachment_ids)
         .fetch_one(&mut *tx)
         .await?;
         let message = row_to_message(&row);
@@ -453,11 +483,12 @@ impl<'a> ChatService<'a> {
         let row = sqlx::query(
             r#"
             INSERT INTO chat_messages (
-                id, session_id, seq, role, body, agent_run_id, action_metadata
+                id, session_id, seq, role, body, agent_run_id, action_metadata, attachment_ids
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, '{}')
             RETURNING
-                id, session_id, seq, role, body, agent_run_id, action_metadata, created_at
+                id, session_id, seq, role, body, agent_run_id, action_metadata,
+                attachment_ids, created_at
             "#,
         )
         .bind(id)
@@ -486,7 +517,7 @@ impl<'a> ChatService<'a> {
     pub async fn format_transcript(&self, session_id: Uuid) -> Result<String, ChatError> {
         let rows = sqlx::query(
             r#"
-            SELECT role, body FROM chat_messages
+            SELECT role, body, attachment_ids FROM chat_messages
             WHERE session_id = $1
             ORDER BY seq ASC
             "#,
@@ -499,19 +530,176 @@ impl<'a> ChatService<'a> {
             return Ok("(No previous messages)".into());
         }
 
+        let mut all_ids: Vec<Uuid> = rows
+            .iter()
+            .flat_map(|row| {
+                let ids: Vec<Uuid> = row.get("attachment_ids");
+                ids
+            })
+            .collect();
+        all_ids.sort_unstable();
+        all_ids.dedup();
+
+        let attachments = CommentService::new(self.pool)
+            .list_attachments_by_ids(&all_ids)
+            .await
+            .map_err(|err| match err {
+                crate::services::comment_service::CommentError::Database(e) => {
+                    ChatError::Database(e)
+                }
+                other => ChatError::Validation(other.to_string()),
+            })?;
+        let by_id: std::collections::HashMap<Uuid, Attachment> = attachments
+            .into_iter()
+            .map(|a| (a.id, a))
+            .collect();
+
         let mut out = String::new();
         for row in rows {
             let role: String = row.get("role");
             let body: String = row.get("body");
+            let attachment_ids: Vec<Uuid> = row.get("attachment_ids");
             let label = match role.as_str() {
                 "human" => "Human",
                 "agent" => "Agent",
                 "system" => "System",
                 other => other,
             };
-            out.push_str(&format!("### {label}\n\n{body}\n\n"));
+            out.push_str(&format!("### {label}\n\n"));
+            if !body.is_empty() {
+                out.push_str(&body);
+                out.push_str("\n\n");
+            }
+            if !attachment_ids.is_empty() {
+                out.push_str("Attachments:\n");
+                for id in &attachment_ids {
+                    if let Some(att) = by_id.get(id) {
+                        let safe_name = sanitize_filename(&att.filename);
+                        out.push_str(&format!(
+                            "- file: attachments/{}/{safe_name} ({}, {} bytes)\n",
+                            att.id, att.content_type, att.size_bytes
+                        ));
+                    } else {
+                        out.push_str(&format!("- file: attachments/{id}/(missing)\n"));
+                    }
+                }
+                out.push('\n');
+            }
         }
         Ok(out)
+    }
+
+    /// Copy session attachment bytes into `{chat_cwd}/attachments/{id}/{filename}` for agent Read.
+    pub async fn stage_attachments_into_cwd(
+        &self,
+        session_id: Uuid,
+        chat_cwd: &Path,
+    ) -> Result<(), ChatError> {
+        let rows = sqlx::query(
+            r#"
+            SELECT attachment_ids FROM chat_messages
+            WHERE session_id = $1 AND cardinality(attachment_ids) > 0
+            "#,
+        )
+        .bind(session_id)
+        .fetch_all(self.pool)
+        .await?;
+
+        let mut ids: Vec<Uuid> = rows
+            .iter()
+            .flat_map(|row| {
+                let ids: Vec<Uuid> = row.get("attachment_ids");
+                ids
+            })
+            .collect();
+        ids.sort_unstable();
+        ids.dedup();
+        if ids.is_empty() {
+            return Ok(());
+        }
+
+        let attachments = CommentService::new(self.pool)
+            .list_attachments_by_ids(&ids)
+            .await
+            .map_err(|err| match err {
+                crate::services::comment_service::CommentError::Database(e) => {
+                    ChatError::Database(e)
+                }
+                other => ChatError::Validation(other.to_string()),
+            })?;
+
+        for att in attachments {
+            let dest_dir = chat_cwd.join("attachments").join(att.id.to_string());
+            std::fs::create_dir_all(&dest_dir)?;
+            let dest = dest_dir.join(sanitize_filename(&att.filename));
+            if dest.exists() {
+                continue;
+            }
+            match std::fs::copy(&att.storage_path, &dest) {
+                Ok(_) => {}
+                Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => {}
+                Err(err) => return Err(ChatError::Io(err)),
+            }
+        }
+        Ok(())
+    }
+
+    async fn validate_chat_attachments(
+        &self,
+        owner_user_id: Uuid,
+        attachment_ids: &[Uuid],
+    ) -> Result<(), ChatError> {
+        if attachment_ids.is_empty() {
+            return Ok(());
+        }
+        if attachment_ids.len() > MAX_CHAT_ATTACHMENTS_PER_MESSAGE {
+            return Err(ChatError::Validation(format!(
+                "at most {MAX_CHAT_ATTACHMENTS_PER_MESSAGE} attachments per message"
+            )));
+        }
+
+        let mut seen = HashSet::new();
+        for id in attachment_ids {
+            if !seen.insert(*id) {
+                return Err(ChatError::Validation(
+                    "duplicate attachment ids are not allowed".into(),
+                ));
+            }
+        }
+
+        let attachments = CommentService::new(self.pool)
+            .list_attachments_by_ids(attachment_ids)
+            .await
+            .map_err(|err| match err {
+                crate::services::comment_service::CommentError::Database(e) => {
+                    ChatError::Database(e)
+                }
+                other => ChatError::Validation(other.to_string()),
+            })?;
+
+        if attachments.len() != attachment_ids.len() {
+            return Err(ChatError::Validation(
+                "one or more attachments were not found".into(),
+            ));
+        }
+
+        for att in &attachments {
+            if att.uploaded_by != owner_user_id {
+                return Err(ChatError::Validation(
+                    "attachment must be uploaded by the session owner".into(),
+                ));
+            }
+            if !CHAT_ATTACHMENT_MIME_ALLOWLIST.contains(&att.content_type.as_str()) {
+                return Err(ChatError::Validation(format!(
+                    "content type '{}' is not allowed for chat attachments",
+                    att.content_type
+                )));
+            }
+            if let Err(msg) = verify_image_magic_bytes(att) {
+                return Err(ChatError::Validation(msg));
+            }
+        }
+        Ok(())
     }
 
     /// Human-confirmed create ticket from chat context. Requires an explicit project.
@@ -756,6 +944,41 @@ impl<'a> ChatService<'a> {
     }
 }
 
+fn verify_image_magic_bytes(att: &Attachment) -> Result<(), String> {
+    let needs_check = matches!(
+        att.content_type.as_str(),
+        "image/png" | "image/jpeg" | "image/gif" | "image/webp"
+    );
+    if !needs_check {
+        return Ok(());
+    }
+
+    let bytes = std::fs::read(&att.storage_path).map_err(|_| {
+        format!(
+            "could not read attachment '{}' for content verification",
+            att.filename
+        )
+    })?;
+
+    let matches = match att.content_type.as_str() {
+        "image/png" => bytes.starts_with(b"\x89PNG\r\n\x1a\n"),
+        "image/jpeg" => bytes.starts_with(b"\xff\xd8\xff"),
+        "image/gif" => bytes.starts_with(b"GIF87a") || bytes.starts_with(b"GIF89a"),
+        "image/webp" => {
+            bytes.len() >= 12 && &bytes[0..4] == b"RIFF" && &bytes[8..12] == b"WEBP"
+        }
+        _ => true,
+    };
+
+    if !matches {
+        return Err(format!(
+            "attachment '{}' content does not match declared type {}",
+            att.filename, att.content_type
+        ));
+    }
+    Ok(())
+}
+
 fn row_to_session(row: &sqlx::postgres::PgRow) -> ChatSession {
     let status_str: String = row.get("status");
     ChatSession {
@@ -781,6 +1004,22 @@ fn row_to_message(row: &sqlx::postgres::PgRow) -> ChatMessage {
         body: row.get("body"),
         agent_run_id: row.get("agent_run_id"),
         action_metadata: row.get("action_metadata"),
+        attachment_ids: row
+            .try_get("attachment_ids")
+            .unwrap_or_else(|_| Vec::new()),
         created_at: row.get("created_at"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn chat_mime_allowlist_excludes_html_and_svg() {
+        assert!(CHAT_ATTACHMENT_MIME_ALLOWLIST.contains(&"image/png"));
+        assert!(CHAT_ATTACHMENT_MIME_ALLOWLIST.contains(&"text/plain"));
+        assert!(!CHAT_ATTACHMENT_MIME_ALLOWLIST.contains(&"text/html"));
+        assert!(!CHAT_ATTACHMENT_MIME_ALLOWLIST.contains(&"image/svg+xml"));
     }
 }

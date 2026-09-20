@@ -828,6 +828,11 @@ async fn execute_chat_turn(
         .await
         .context("format chat transcript")?;
 
+    ChatService::new(pool)
+        .stage_attachments_into_cwd(session_id, &cwd)
+        .await
+        .context("stage chat attachments into cwd")?;
+
     let context_input = ContextInput {
         ticket_title: "Agent Chat",
         ticket_description: "",

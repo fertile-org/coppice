@@ -40,6 +40,7 @@ pub struct ChatMessage {
     pub body: String,
     pub agent_run_id: Option<Uuid>,
     pub action_metadata: Option<serde_json::Value>,
+    pub attachment_ids: Vec<Uuid>,
     pub created_at: OffsetDateTime,
 }
 

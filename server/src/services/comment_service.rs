@@ -194,6 +194,54 @@ impl<'a> CommentService<'a> {
         Ok(row_to_attachment(&row))
     }
 
+    /// Whether `user_id` may download the attachment.
+    ///
+    /// Allowed when the caller uploaded it, owns a chat session that links it,
+    /// or it is linked to any ticket comment (existing ticket access for authenticated users).
+    pub async fn user_can_access_attachment(
+        &self,
+        attachment_id: Uuid,
+        user_id: Uuid,
+    ) -> Result<bool, CommentError> {
+        let attachment = self.get_attachment(attachment_id).await?;
+        if attachment.uploaded_by == user_id {
+            return Ok(true);
+        }
+
+        let linked_to_owned_chat: bool = sqlx::query_scalar(
+            r#"
+            SELECT EXISTS(
+                SELECT 1
+                FROM chat_messages m
+                JOIN chat_sessions s ON s.id = m.session_id
+                WHERE s.owner_user_id = $1
+                  AND $2 = ANY(m.attachment_ids)
+            )
+            "#,
+        )
+        .bind(user_id)
+        .bind(attachment_id)
+        .fetch_one(self.pool)
+        .await?;
+        if linked_to_owned_chat {
+            return Ok(true);
+        }
+
+        let linked_to_comment: bool = sqlx::query_scalar(
+            r#"
+            SELECT EXISTS(
+                SELECT 1
+                FROM ticket_comments
+                WHERE $1 = ANY(attachment_ids)
+            )
+            "#,
+        )
+        .bind(attachment_id)
+        .fetch_one(self.pool)
+        .await?;
+        Ok(linked_to_comment)
+    }
+
     async fn ensure_ticket_exists(&self, ticket_id: Uuid) -> Result<(), CommentError> {
         let exists = sqlx::query_scalar::<_, bool>(
             "SELECT EXISTS(SELECT 1 FROM tickets WHERE id = $1)",

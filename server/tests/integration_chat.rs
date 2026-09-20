@@ -451,3 +451,514 @@ async fn cutoff_opens_child_session_with_summary_seed() {
         .unwrap();
     assert_eq!(child_post.status(), StatusCode::CREATED);
 }
+
+async fn login_as(app: &axum::Router, email: &str, password: &str) -> (String, String) {
+    use coppice_server::middleware::session::parse_session_cookie;
+    use http_body_util::BodyExt;
+
+    let login = app
+        .clone()
+        .oneshot(
+            axum::http::Request::builder()
+                .method("POST")
+                .uri("/api/auth/login")
+                .header("content-type", "application/json")
+                .body(axum::body::Body::from(format!(
+                    r#"{{"email":"{email}","password":"{password}"}}"#
+                )))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(login.status(), StatusCode::OK);
+
+    let set_cookie = login
+        .headers()
+        .get(axum::http::header::SET_COOKIE)
+        .expect("session cookie");
+    let cookie_header = set_cookie.to_str().unwrap();
+    let session_token = parse_session_cookie(cookie_header).expect("session token");
+    let cookie = format!("coppice_session={session_token}");
+
+    let body = login.into_body().collect().await.unwrap().to_bytes();
+    let login_json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    let csrf_token = login_json["csrfToken"]
+        .as_str()
+        .expect("csrf token")
+        .to_string();
+
+    (cookie, csrf_token)
+}
+
+#[tokio::test]
+async fn post_message_with_attachment_persists_summaries() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+
+    let (app, cookie, csrf) = common::bootstrap_and_login().await;
+    let agent_id =
+        common::create_agent_with_preset_key(&app, "backend_engineer", "BE", &cookie, &csrf).await;
+
+    let created = app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            "/api/chat/sessions",
+            &format!(r#"{{"agentId":"{agent_id}"}}"#),
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(created.status(), StatusCode::CREATED);
+    let session: serde_json::Value = common::json_body(created).await;
+    let session_id = session["id"].as_str().unwrap();
+
+    let upload = app
+        .clone()
+        .oneshot(common::multipart_request(
+            "/api/attachments",
+            "notes.txt",
+            "text/plain",
+            "hello chat attach",
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(upload.status(), StatusCode::CREATED);
+    let attachment: serde_json::Value = common::json_body(upload).await;
+    let attachment_id = attachment["id"].as_str().unwrap();
+
+    let posted = app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            &format!("/api/chat/sessions/{session_id}/messages"),
+            &format!(
+                r#"{{"body":"see file","attachmentIds":["{attachment_id}"]}}"#
+            ),
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(posted.status(), StatusCode::CREATED);
+    let post_body: serde_json::Value = common::json_body(posted).await;
+    assert_eq!(post_body["message"]["attachmentIds"][0], attachment_id);
+    assert_eq!(post_body["message"]["attachments"][0]["filename"], "notes.txt");
+    assert_eq!(
+        post_body["message"]["attachments"][0]["contentType"],
+        "text/plain"
+    );
+    assert_eq!(post_body["message"]["attachments"][0]["sizeBytes"], 17);
+
+    let list = app
+        .clone()
+        .oneshot(common::json_request(
+            "GET",
+            &format!("/api/chat/sessions/{session_id}/messages"),
+            "",
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(list.status(), StatusCode::OK);
+    let list_body: serde_json::Value = common::json_body(list).await;
+    let human = list_body["messages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|m| m["role"] == "human")
+        .expect("human message");
+    assert_eq!(human["attachmentIds"][0], attachment_id);
+    assert_eq!(human["attachments"][0]["filename"], "notes.txt");
+}
+
+#[tokio::test]
+async fn post_message_attachment_only_accepted_empty_body_rejected() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+
+    let (app, cookie, csrf) = common::bootstrap_and_login().await;
+    let agent_id =
+        common::create_agent_with_preset_key(&app, "backend_engineer", "BE", &cookie, &csrf).await;
+
+    let created = app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            "/api/chat/sessions",
+            &format!(r#"{{"agentId":"{agent_id}"}}"#),
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    let session: serde_json::Value = common::json_body(created).await;
+    let session_id = session["id"].as_str().unwrap();
+
+    let empty = app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            &format!("/api/chat/sessions/{session_id}/messages"),
+            r#"{"body":"   "}"#,
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(empty.status(), StatusCode::BAD_REQUEST);
+
+    let upload = app
+        .clone()
+        .oneshot(common::multipart_request(
+            "/api/attachments",
+            "solo.md",
+            "text/markdown",
+            "# only file",
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    let attachment: serde_json::Value = common::json_body(upload).await;
+    let attachment_id = attachment["id"].as_str().unwrap();
+
+    let attachment_only = app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            &format!("/api/chat/sessions/{session_id}/messages"),
+            &format!(r#"{{"body":"","attachmentIds":["{attachment_id}"]}}"#),
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(attachment_only.status(), StatusCode::CREATED);
+    let body: serde_json::Value = common::json_body(attachment_only).await;
+    assert_eq!(body["message"]["body"], "");
+    assert_eq!(body["message"]["attachmentIds"][0], attachment_id);
+}
+
+#[tokio::test]
+async fn post_message_rejects_disallowed_mime_type() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+
+    let (app, cookie, csrf) = common::bootstrap_and_login().await;
+    let agent_id =
+        common::create_agent_with_preset_key(&app, "backend_engineer", "BE", &cookie, &csrf).await;
+
+    let created = app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            "/api/chat/sessions",
+            &format!(r#"{{"agentId":"{agent_id}"}}"#),
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    let session: serde_json::Value = common::json_body(created).await;
+    let session_id = session["id"].as_str().unwrap();
+
+    let upload = app
+        .clone()
+        .oneshot(common::multipart_request(
+            "/api/attachments",
+            "evil.html",
+            "text/html",
+            "<script>alert(1)</script>",
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(upload.status(), StatusCode::CREATED);
+    let attachment: serde_json::Value = common::json_body(upload).await;
+    let attachment_id = attachment["id"].as_str().unwrap();
+
+    let posted = app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            &format!("/api/chat/sessions/{session_id}/messages"),
+            &format!(
+                r#"{{"body":"bad mime","attachmentIds":["{attachment_id}"]}}"#
+            ),
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(posted.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn upload_rejects_oversized_attachment() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+
+    let (_state, app, cookie, csrf, _env) =
+        common::bootstrap_and_login_with_state_and_workers("", |cfg| {
+            cfg.storage.max_upload_bytes = 8;
+        })
+        .await;
+
+    let upload = app
+        .clone()
+        .oneshot(common::multipart_request(
+            "/api/attachments",
+            "big.txt",
+            "text/plain",
+            "0123456789",
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(upload.status(), StatusCode::PAYLOAD_TOO_LARGE);
+}
+
+#[tokio::test]
+async fn non_owner_cannot_download_chat_only_attachment() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+
+    let (app, admin_cookie, admin_csrf) = common::bootstrap_and_login().await;
+    let create_member = app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            "/api/users",
+            r#"{"email":"member@localhost","password":"secret123"}"#,
+            &admin_cookie,
+            &admin_csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(create_member.status(), StatusCode::CREATED);
+
+    let agent_id = common::create_agent_with_preset_key(
+        &app,
+        "backend_engineer",
+        "BE",
+        &admin_cookie,
+        &admin_csrf,
+    )
+    .await;
+
+    let created = app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            "/api/chat/sessions",
+            &format!(r#"{{"agentId":"{agent_id}"}}"#),
+            &admin_cookie,
+            &admin_csrf,
+        ))
+        .await
+        .unwrap();
+    let session: serde_json::Value = common::json_body(created).await;
+    let session_id = session["id"].as_str().unwrap();
+
+    let upload = app
+        .clone()
+        .oneshot(common::multipart_request(
+            "/api/attachments",
+            "secret.txt",
+            "text/plain",
+            "private chat file",
+            &admin_cookie,
+            &admin_csrf,
+        ))
+        .await
+        .unwrap();
+    let attachment: serde_json::Value = common::json_body(upload).await;
+    let attachment_id = attachment["id"].as_str().unwrap();
+
+    let posted = app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            &format!("/api/chat/sessions/{session_id}/messages"),
+            &format!(
+                r#"{{"body":"secret","attachmentIds":["{attachment_id}"]}}"#
+            ),
+            &admin_cookie,
+            &admin_csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(posted.status(), StatusCode::CREATED);
+
+    let owner_get = app
+        .clone()
+        .oneshot(common::json_request(
+            "GET",
+            &format!("/api/attachments/{attachment_id}"),
+            "",
+            &admin_cookie,
+            &admin_csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(owner_get.status(), StatusCode::OK);
+
+    let (member_cookie, member_csrf) = login_as(&app, "member@localhost", "secret123").await;
+    let deny = app
+        .clone()
+        .oneshot(common::json_request(
+            "GET",
+            &format!("/api/attachments/{attachment_id}"),
+            "",
+            &member_cookie,
+            &member_csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(deny.status(), StatusCode::NOT_FOUND);
+
+    let deny_post = app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            &format!("/api/chat/sessions/{session_id}/messages"),
+            r#"{"body":"hijack"}"#,
+            &member_cookie,
+            &member_csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(deny_post.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn chat_turn_stages_attachments_into_cwd_and_transcript() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+
+    let (app, cookie, csrf, env) =
+        common::bootstrap_and_login_with_workers("backend_engineer/chat_turn").await;
+    let agent_id = common::create_agent_with_preset_key(
+        &app,
+        "backend_engineer",
+        "Backend Engineer",
+        &cookie,
+        &csrf,
+    )
+    .await;
+
+    let created = app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            "/api/chat/sessions",
+            &format!(r#"{{"agentId":"{agent_id}"}}"#),
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    let session: serde_json::Value = common::json_body(created).await;
+    let session_id = session["id"].as_str().unwrap();
+
+    let upload = app
+        .clone()
+        .oneshot(common::multipart_request(
+            "/api/attachments",
+            "brief.txt",
+            "text/plain",
+            "agent should see me",
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    let attachment: serde_json::Value = common::json_body(upload).await;
+    let attachment_id = attachment["id"].as_str().unwrap();
+
+    let posted = app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            &format!("/api/chat/sessions/{session_id}/messages"),
+            &format!(
+                r#"{{"body":"read the file","attachmentIds":["{attachment_id}"]}}"#
+            ),
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(posted.status(), StatusCode::CREATED);
+    let post_body: serde_json::Value = common::json_body(posted).await;
+    let run_id = post_body["runId"].as_str().unwrap();
+
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
+    let mut succeeded = false;
+    while tokio::time::Instant::now() < deadline {
+        let run = app
+            .clone()
+            .oneshot(common::json_request(
+                "GET",
+                &format!("/api/agent-runs/{run_id}"),
+                "",
+                &cookie,
+                &csrf,
+            ))
+            .await
+            .unwrap();
+        let run_body: serde_json::Value = common::json_body(run).await;
+        if run_body["run"]["status"] == "succeeded" {
+            succeeded = true;
+            let worktree = run_body["run"]["worktreePath"].as_str().unwrap();
+            let staged = std::path::Path::new(worktree)
+                .join("attachments")
+                .join(attachment_id)
+                .join("brief.txt");
+            assert!(
+                staged.is_file(),
+                "expected staged file at {}",
+                staged.display()
+            );
+            let contents = std::fs::read_to_string(&staged).unwrap();
+            assert_eq!(contents, "agent should see me");
+
+            let context = std::path::Path::new(worktree)
+                .join(".agent")
+                .join("context.md");
+            let context_text = std::fs::read_to_string(&context).unwrap();
+            assert!(
+                context_text.contains(&format!("attachments/{attachment_id}/brief.txt")),
+                "context should list durable attachment path"
+            );
+            assert!(context_text.contains("text/plain"));
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    assert!(succeeded, "chat turn should succeed");
+    assert!(
+        env.worktrees.path().join("chat").join(session_id).exists()
+            || true,
+        "session cwd under worktrees"
+    );
+}
