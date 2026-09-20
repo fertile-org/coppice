@@ -1,5 +1,11 @@
 import { MessageSquarePlus } from 'lucide-react';
-import { useCallback, useMemo, useState, type FormEvent } from 'react';
+import {
+  useCallback,
+  useMemo,
+  useState,
+  type FormEvent,
+  type KeyboardEvent,
+} from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { Button } from '../../components/ui/button';
 import { Label } from '../../components/ui/label';
@@ -169,11 +175,11 @@ function ChatComposer({
   const postMessage = usePostChatMessage(sessionId);
   const [body, setBody] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const composerLocked = Boolean(disabled || postMessage.isPending);
 
-  async function handleSubmit(event: FormEvent) {
-    event.preventDefault();
+  async function submitMessage() {
     const trimmed = body.trim();
-    if (!trimmed || disabled) return;
+    if (!trimmed || composerLocked) return;
     setError(null);
     try {
       const result = await postMessage.mutateAsync(trimmed);
@@ -182,6 +188,19 @@ function ChatComposer({
     } catch (err) {
       setError(parseApiErrorMessage(err, 'Could not send message.'));
     }
+  }
+
+  async function handleSubmit(event: FormEvent) {
+    event.preventDefault();
+    await submitMessage();
+  }
+
+  function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+    if (event.key !== 'Enter') return;
+    if (event.nativeEvent.isComposing || event.keyCode === 229) return;
+    if (event.shiftKey) return;
+    event.preventDefault();
+    void submitMessage();
   }
 
   return (
@@ -197,9 +216,10 @@ function ChatComposer({
         id="chat-composer-input"
         value={body}
         onChange={(event) => setBody(event.target.value)}
+        onKeyDown={handleKeyDown}
         placeholder="Message the agent…"
         rows={3}
-        disabled={disabled || postMessage.isPending}
+        disabled={composerLocked}
       />
       {error && (
         <p className="font-body text-sm text-danger" role="alert">
@@ -209,7 +229,7 @@ function ChatComposer({
       <div className="flex justify-end">
         <Button
           type="submit"
-          disabled={disabled || postMessage.isPending || !body.trim()}
+          disabled={composerLocked || !body.trim()}
         >
           {postMessage.isPending ? 'Sending…' : 'Send'}
         </Button>

@@ -7,6 +7,7 @@ import { ChatPage } from './ChatPage';
 const mocks = vi.hoisted(() => ({
   createSession: vi.fn(),
   postMessage: vi.fn(),
+  postMessagePending: false,
   createTicket: vi.fn(),
   createKnowledge: vi.fn(),
   cutoffSession: vi.fn(),
@@ -85,7 +86,7 @@ vi.mock('./useChat', () => ({
   }),
   usePostChatMessage: () => ({
     mutateAsync: mocks.postMessage,
-    isPending: false,
+    isPending: mocks.postMessagePending,
   }),
   useCreateTicketFromChat: () => ({
     mutateAsync: mocks.createTicket,
@@ -134,6 +135,7 @@ describe('ChatPage', () => {
   beforeEach(() => {
     mocks.createSession.mockReset();
     mocks.postMessage.mockReset();
+    mocks.postMessagePending = false;
     mocks.createTicket.mockReset();
     mocks.createKnowledge.mockReset();
     mocks.cutoffSession.mockReset();
@@ -395,5 +397,132 @@ describe('ChatPage', () => {
     expect(
       await screen.findByRole('heading', { name: 'Backend Engineer' }),
     ).toBeInTheDocument();
+  });
+
+  it('submits on Enter with a non-empty body', async () => {
+    mocks.sessions = [ACTIVE_SESSION];
+    mocks.postMessage.mockResolvedValue({
+      message: {
+        id: '00000000-0000-4000-8000-000000000031',
+        sessionId: ACTIVE_SESSION.id,
+        seq: 2,
+        role: 'human',
+        body: 'Hello via Enter',
+        agentRunId: '00000000-0000-4000-8000-000000000040',
+        actionMetadata: null,
+        createdAt: '2026-09-08T00:02:00Z',
+      },
+      runId: '00000000-0000-4000-8000-000000000040',
+    });
+
+    renderChat(`/chat/${ACTIVE_SESSION.id}`);
+
+    const input = await screen.findByLabelText('Message');
+    fireEvent.change(input, { target: { value: 'Hello via Enter' } });
+    fireEvent.keyDown(input, { key: 'Enter', code: 'Enter' });
+
+    await waitFor(() => {
+      expect(mocks.postMessage).toHaveBeenCalledWith('Hello via Enter');
+    });
+  });
+
+  it('inserts a newline on Shift+Enter without submitting', async () => {
+    mocks.sessions = [ACTIVE_SESSION];
+
+    renderChat(`/chat/${ACTIVE_SESSION.id}`);
+
+    const input = await screen.findByLabelText('Message');
+    fireEvent.change(input, { target: { value: 'line one' } });
+    fireEvent.keyDown(input, { key: 'Enter', code: 'Enter', shiftKey: true });
+
+    expect(mocks.postMessage).not.toHaveBeenCalled();
+    expect(input).toHaveValue('line one');
+  });
+
+  it('does nothing on Enter when the body is empty or whitespace', async () => {
+    mocks.sessions = [ACTIVE_SESSION];
+
+    renderChat(`/chat/${ACTIVE_SESSION.id}`);
+
+    const input = await screen.findByLabelText('Message');
+    fireEvent.keyDown(input, { key: 'Enter', code: 'Enter' });
+    expect(mocks.postMessage).not.toHaveBeenCalled();
+
+    fireEvent.change(input, { target: { value: '   ' } });
+    fireEvent.keyDown(input, { key: 'Enter', code: 'Enter' });
+    expect(mocks.postMessage).not.toHaveBeenCalled();
+  });
+
+  it('does not submit Enter while IME composition is active', async () => {
+    mocks.sessions = [ACTIVE_SESSION];
+
+    renderChat(`/chat/${ACTIVE_SESSION.id}`);
+
+    const input = await screen.findByLabelText('Message');
+    fireEvent.change(input, { target: { value: 'こんにちは' } });
+    fireEvent.keyDown(input, {
+      key: 'Enter',
+      code: 'Enter',
+      isComposing: true,
+    });
+    expect(mocks.postMessage).not.toHaveBeenCalled();
+
+    fireEvent.keyDown(input, {
+      key: 'Enter',
+      code: 'Enter',
+      keyCode: 229,
+    });
+    expect(mocks.postMessage).not.toHaveBeenCalled();
+  });
+
+  it('does not submit Enter while a post is pending', async () => {
+    mocks.sessions = [ACTIVE_SESSION];
+    mocks.postMessagePending = true;
+
+    renderChat(`/chat/${ACTIVE_SESSION.id}`);
+
+    const input = await screen.findByLabelText('Message');
+    // Pending disables the textarea; still assert key handler is a no-op.
+    expect(input).toBeDisabled();
+    fireEvent.change(input, { target: { value: 'Should not send' } });
+    fireEvent.keyDown(input, { key: 'Enter', code: 'Enter' });
+
+    expect(mocks.postMessage).not.toHaveBeenCalled();
+  });
+
+  it('does not submit Enter while a turn is in flight', async () => {
+    mocks.sessions = [ACTIVE_SESSION];
+    mocks.postMessage.mockResolvedValue({
+      message: {
+        id: '00000000-0000-4000-8000-000000000031',
+        sessionId: ACTIVE_SESSION.id,
+        seq: 2,
+        role: 'human',
+        body: 'First',
+        agentRunId: '00000000-0000-4000-8000-000000000040',
+        actionMetadata: null,
+        createdAt: '2026-09-08T00:02:00Z',
+      },
+      runId: '00000000-0000-4000-8000-000000000040',
+    });
+
+    renderChat(`/chat/${ACTIVE_SESSION.id}`);
+
+    const input = await screen.findByLabelText('Message');
+    fireEvent.change(input, { target: { value: 'First' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+
+    await waitFor(() => {
+      expect(mocks.postMessage).toHaveBeenCalledWith('First');
+    });
+    expect(await screen.findByTestId('chat-live-turn')).toBeInTheDocument();
+
+    mocks.postMessage.mockClear();
+    const disabledInput = screen.getByLabelText('Message');
+    expect(disabledInput).toBeDisabled();
+    fireEvent.change(disabledInput, { target: { value: 'Second' } });
+    fireEvent.keyDown(disabledInput, { key: 'Enter', code: 'Enter' });
+
+    expect(mocks.postMessage).not.toHaveBeenCalled();
   });
 });
