@@ -52,4 +52,44 @@ describe('AppShell', () => {
       '/chat',
     );
   });
+
+  it('keeps the default max-width main on non-chat routes', () => {
+    render(
+      <MemoryRouter initialEntries={['/projects']}>
+        <AppShell />
+      </MemoryRouter>,
+    );
+
+    const main = screen.getByTestId('app-shell-main');
+    expect(main).toHaveAttribute('data-layout', 'default');
+    expect(main).toHaveClass('max-w-6xl');
+    expect(main).not.toHaveAttribute('data-layout', 'chat');
+  });
+
+  it('uses full-bleed main on /chat', () => {
+    render(
+      <MemoryRouter initialEntries={['/chat']}>
+        <AppShell />
+      </MemoryRouter>,
+    );
+
+    const main = screen.getByTestId('app-shell-main');
+    expect(main).toHaveAttribute('data-layout', 'chat');
+    expect(main).not.toHaveClass('max-w-6xl');
+    expect(main).toHaveClass('flex-1');
+  });
+
+  it('uses full-bleed main on /chat/:sessionId', () => {
+    render(
+      <MemoryRouter
+        initialEntries={['/chat/00000000-0000-4000-8000-000000000001']}
+      >
+        <AppShell />
+      </MemoryRouter>,
+    );
+
+    const main = screen.getByTestId('app-shell-main');
+    expect(main).toHaveAttribute('data-layout', 'chat');
+    expect(main).not.toHaveClass('max-w-6xl');
+  });
 });

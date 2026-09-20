@@ -1,7 +1,8 @@
-import { NavLink, Outlet } from 'react-router-dom';
+import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import { useSession } from '../features/auth/useSession';
 import { NotificationBell } from '../features/notifications/NotificationBell';
 import { useOpenTicket } from '../features/tickets/useOpenTicket';
+import { cn } from '../lib/utils';
 
 const navLinkClass = ({ isActive }: { isActive: boolean }) =>
   [
@@ -11,14 +12,30 @@ const navLinkClass = ({ isActive }: { isActive: boolean }) =>
       : 'text-text-secondary hover:bg-paper-200 hover:text-text-primary',
   ].join(' ');
 
+function isChatRoute(pathname: string): boolean {
+  return pathname === '/chat' || pathname.startsWith('/chat/');
+}
+
 export function AppShell() {
   const { user, logout } = useSession();
   const openTicket = useOpenTicket();
+  const { pathname } = useLocation();
+  const chatLayout = isChatRoute(pathname);
 
   return (
-    <div className="coppice-grain min-h-screen bg-background">
-      <header className="border-b border-border bg-surface px-4 py-3 sm:px-8 sm:py-4">
-        <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-3 sm:gap-6">
+    <div
+      className={cn(
+        'coppice-grain min-h-screen bg-background',
+        chatLayout && 'flex flex-col',
+      )}
+    >
+      <header className="shrink-0 border-b border-border bg-surface px-4 py-3 sm:px-8 sm:py-4">
+        <div
+          className={cn(
+            'mx-auto flex flex-wrap items-center justify-between gap-3 sm:gap-6',
+            chatLayout ? 'max-w-none' : 'max-w-6xl',
+          )}
+        >
           <div className="flex w-full flex-wrap items-center gap-3 sm:w-auto sm:gap-6">
             <div className="flex items-center gap-3">
               <img
@@ -74,7 +91,15 @@ export function AppShell() {
         </div>
       </header>
 
-      <main className="mx-auto max-w-6xl px-8 py-8">
+      <main
+        className={cn(
+          chatLayout
+            ? 'flex min-h-0 flex-1 flex-col px-4 py-4 sm:px-6 sm:py-5'
+            : 'mx-auto max-w-6xl px-8 py-8',
+        )}
+        data-testid="app-shell-main"
+        data-layout={chatLayout ? 'chat' : 'default'}
+      >
         <Outlet />
       </main>
     </div>

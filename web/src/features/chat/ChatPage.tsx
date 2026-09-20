@@ -448,7 +448,7 @@ function ChatSessionPane({ sessionId }: { sessionId: string }) {
 
   return (
     <div
-      className="flex h-[min(70vh,720px)] flex-col overflow-hidden rounded-xl border border-border bg-surface-raised shadow-sm"
+      className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-border bg-surface-raised shadow-sm"
       data-testid="chat-session-pane"
     >
       <header className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-border bg-paper-50/80 px-4 py-3">
@@ -515,8 +515,11 @@ export function ChatPage() {
   }, [agents]);
 
   return (
-    <div className="space-y-6" data-testid="chat-page">
-      <div className="flex flex-wrap items-end justify-between gap-3">
+    <div
+      className="flex min-h-0 flex-1 flex-col gap-4"
+      data-testid="chat-page"
+    >
+      <div className="flex shrink-0 flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="font-display text-2xl font-semibold text-text-primary">
             Chat
@@ -538,8 +541,11 @@ export function ChatPage() {
         </Button>
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-[240px_minmax(0,1fr)]">
-        <aside className="space-y-2" aria-label="Chat sessions">
+      <div className="grid min-h-0 flex-1 gap-4 lg:grid-cols-[240px_minmax(0,1fr)]">
+        <aside
+          className="min-h-0 space-y-2 overflow-y-auto lg:max-h-full"
+          aria-label="Chat sessions"
+        >
           {isLoading && (
             <p className="font-body text-sm text-text-muted">Loading sessions…</p>
           )}
@@ -556,7 +562,7 @@ export function ChatPage() {
           ))}
         </aside>
 
-        <section>
+        <section className="flex min-h-0 min-w-0 flex-col">
           {showNew && !sessionId ? (
             <NewChatForm
               onCreated={(id) => {

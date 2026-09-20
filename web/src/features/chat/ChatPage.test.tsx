@@ -279,6 +279,20 @@ describe('ChatPage', () => {
     );
   });
 
+  it('fills available height instead of a fixed 70vh/720px pane', () => {
+    mocks.sessions = [ACTIVE_SESSION];
+    renderChat(`/chat/${ACTIVE_SESSION.id}`);
+
+    const page = screen.getByTestId('chat-page');
+    expect(page).toHaveClass('flex-1');
+    expect(page).toHaveClass('min-h-0');
+
+    const pane = screen.getByTestId('chat-session-pane');
+    expect(pane).toHaveClass('flex-1');
+    expect(pane).toHaveClass('min-h-0');
+    expect(pane.className).not.toMatch(/70vh|720px/);
+  });
+
   it('uploads attachments then posts message with attachmentIds', async () => {
     Object.defineProperty(HTMLElement.prototype, 'offsetHeight', {
       configurable: true,
