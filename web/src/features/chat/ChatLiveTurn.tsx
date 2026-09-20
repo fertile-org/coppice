@@ -302,12 +302,12 @@ export function ChatLiveTurn({
           }
         } else if (isOpenCodeEvent(liveEvent)) {
           const nextStatus = sessionStatusFromEvent(
-            liveEvent as OpenCodeEvent,
+            liveEvent as unknown as OpenCodeEvent,
           );
           if (nextStatus) setSessionStatus(nextStatus);
           dispatchSession({
             type: 'event',
-            event: liveEvent as OpenCodeEvent,
+            event: liveEvent as unknown as OpenCodeEvent,
           });
           if (
             liveEvent.type === 'message.updated' ||
