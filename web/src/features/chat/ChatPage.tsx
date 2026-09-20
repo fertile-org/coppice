@@ -1,7 +1,9 @@
-import { MessageSquarePlus } from 'lucide-react';
+import { MessageSquarePlus, Paperclip, X } from 'lucide-react';
 import {
   useCallback,
+  useEffect,
   useMemo,
+  useRef,
   useState,
   type FormEvent,
   type KeyboardEvent,
@@ -11,10 +13,15 @@ import { Button } from '../../components/ui/button';
 import { Label } from '../../components/ui/label';
 import { Textarea } from '../../components/ui/textarea';
 import { parseApiErrorMessage } from '../../lib/api';
+import {
+  formatFileSize,
+  isImageContentType,
+} from '../../lib/attachments';
 import type { ChatSession, ChatSessionStatus } from '../../lib/schemas/chat';
 import { cn } from '../../lib/utils';
 import { useAgents } from '../agents/useAgents';
 import { useProjects } from '../projects/useProjects';
+import { useUploadAttachment } from '../tickets/useTicket';
 import { ChatLiveTurn } from './ChatLiveTurn';
 import { ChatMessageList } from './ChatMessageList';
 import { ChatSessionActions } from './ChatSessionActions';
@@ -25,6 +32,26 @@ import {
   useCreateChatSession,
   usePostChatMessage,
 } from './useChat';
+
+const CHAT_ATTACHMENT_ACCEPT =
+  'image/png,image/jpeg,image/gif,image/webp,text/plain,text/markdown,text/csv,application/json,application/pdf,.md,.csv,.json,.pdf,.txt,.png,.jpg,.jpeg,.gif,.webp';
+const MAX_CHAT_ATTACHMENTS = 5;
+
+interface PendingFile {
+  key: string;
+  file: File;
+  previewUrl: string | null;
+}
+
+function pendingFileFromFile(file: File): PendingFile {
+  return {
+    key: `${file.name}-${file.size}-${file.lastModified}-${crypto.randomUUID()}`,
+    file,
+    previewUrl: isImageContentType(file.type)
+      ? URL.createObjectURL(file)
+      : null,
+  };
+}
 
 function formatSessionTime(iso: string): string {
   const date = new Date(iso);
@@ -201,17 +228,77 @@ function ChatComposer({
   onPosted: (runId: string) => void;
 }) {
   const postMessage = usePostChatMessage(sessionId);
+  const uploadAttachment = useUploadAttachment();
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [body, setBody] = useState('');
+  const [pendingFiles, setPendingFiles] = useState<PendingFile[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const composerLocked = Boolean(disabled || postMessage.isPending);
+  const composerLocked = Boolean(
+    disabled || postMessage.isPending || uploadAttachment.isPending,
+  );
+  const canSend = body.trim().length > 0 || pendingFiles.length > 0;
+
+  const pendingFilesRef = useRef(pendingFiles);
+  pendingFilesRef.current = pendingFiles;
+
+  useEffect(() => {
+    return () => {
+      for (const pending of pendingFilesRef.current) {
+        if (pending.previewUrl) {
+          URL.revokeObjectURL(pending.previewUrl);
+        }
+      }
+    };
+  }, []);
+
+  function addPendingFiles(files: FileList | File[]) {
+    const next = Array.from(files).map(pendingFileFromFile);
+    if (next.length === 0) return;
+    setPendingFiles((current) => {
+      const room = MAX_CHAT_ATTACHMENTS - current.length;
+      if (room <= 0) return current;
+      return [...current, ...next.slice(0, room)];
+    });
+  }
+
+  function removePendingFile(key: string) {
+    setPendingFiles((current) => {
+      const removed = current.find((item) => item.key === key);
+      if (removed?.previewUrl) {
+        URL.revokeObjectURL(removed.previewUrl);
+      }
+      return current.filter((item) => item.key !== key);
+    });
+  }
+
+  function clearPendingFiles() {
+    setPendingFiles((current) => {
+      for (const pending of current) {
+        if (pending.previewUrl) {
+          URL.revokeObjectURL(pending.previewUrl);
+        }
+      }
+      return [];
+    });
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  }
 
   async function submitMessage() {
     const trimmed = body.trim();
-    if (!trimmed || composerLocked) return;
+    if ((!trimmed && pendingFiles.length === 0) || composerLocked) return;
     setError(null);
     try {
-      const result = await postMessage.mutateAsync(trimmed);
+      const attachmentIds: string[] = [];
+      for (const pending of pendingFiles) {
+        const uploaded = await uploadAttachment.mutateAsync(pending.file);
+        attachmentIds.push(uploaded.id);
+      }
+      const result = await postMessage.mutateAsync({
+        body: trimmed,
+        attachmentIds: attachmentIds.length > 0 ? attachmentIds : undefined,
+      });
       setBody('');
+      clearPendingFiles();
       onPosted(result.runId);
     } catch (err) {
       setError(parseApiErrorMessage(err, 'Could not send message.'));
@@ -237,7 +324,68 @@ function ChatComposer({
       className="shrink-0 border-t border-border bg-paper-50/90 px-3 py-2.5"
       data-testid="chat-composer"
     >
+      {pendingFiles.length > 0 && (
+        <ul className="mb-2 flex flex-wrap gap-2">
+          {pendingFiles.map((pending) => (
+            <li key={pending.key} className="relative">
+              {pending.previewUrl ? (
+                <img
+                  src={pending.previewUrl}
+                  alt={pending.file.name}
+                  className="size-14 rounded-md border border-border object-cover"
+                />
+              ) : (
+                <div className="flex size-14 flex-col items-center justify-center rounded-md border border-border bg-surface px-1 text-center">
+                  <span className="line-clamp-2 font-body text-[10px] leading-tight text-text-secondary">
+                    {pending.file.name}
+                  </span>
+                  <span className="font-body text-[10px] text-text-muted">
+                    {formatFileSize(pending.file.size)}
+                  </span>
+                </div>
+              )}
+              <button
+                type="button"
+                onClick={() => removePendingFile(pending.key)}
+                className="absolute -right-1.5 -top-1.5 rounded-full border border-border bg-surface-raised p-0.5 text-text-muted shadow-sm hover:text-text-primary"
+                aria-label={`Remove ${pending.file.name}`}
+                disabled={composerLocked}
+              >
+                <X className="size-3" />
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+
       <div className="flex items-end gap-2">
+        <input
+          ref={fileInputRef}
+          id="chat-composer-files"
+          type="file"
+          multiple
+          accept={CHAT_ATTACHMENT_ACCEPT}
+          className="sr-only"
+          data-testid="chat-composer-files"
+          tabIndex={-1}
+          disabled={composerLocked || pendingFiles.length >= MAX_CHAT_ATTACHMENTS}
+          onChange={(event) => {
+            if (event.target.files) {
+              addPendingFiles(event.target.files);
+            }
+            event.target.value = '';
+          }}
+        />
+        <Button
+          type="button"
+          variant="secondary"
+          className="shrink-0 px-2.5"
+          disabled={composerLocked || pendingFiles.length >= MAX_CHAT_ATTACHMENTS}
+          aria-label="Attach files"
+          onClick={() => fileInputRef.current?.click()}
+        >
+          <Paperclip className="size-4" />
+        </Button>
         <Label htmlFor="chat-composer-input" className="sr-only">
           Message
         </Label>
@@ -254,17 +402,20 @@ function ChatComposer({
         />
         <Button
           type="submit"
-          disabled={composerLocked || !body.trim()}
+          disabled={composerLocked || !canSend}
           className="shrink-0"
         >
-          {postMessage.isPending ? 'Sending…' : 'Send'}
+          {postMessage.isPending || uploadAttachment.isPending
+            ? 'Sending…'
+            : 'Send'}
         </Button>
       </div>
       <p
         id="chat-composer-hint"
         className="mt-1.5 font-body text-[11px] text-text-muted"
       >
-        Enter to send · Shift+Enter for a new line
+        Enter to send · Shift+Enter for a new line · up to {MAX_CHAT_ATTACHMENTS}{' '}
+        files
       </p>
       {error && (
         <p className="mt-1 font-body text-sm text-danger" role="alert">

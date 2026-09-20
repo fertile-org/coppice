@@ -79,6 +79,23 @@ describe('chat schemas', () => {
 
   it('parses messages and post-message responses', () => {
     expect(chatMessageSchema.parse(message).role).toBe('human');
+    expect(chatMessageSchema.parse(message).attachmentIds).toEqual([]);
+    expect(chatMessageSchema.parse(message).attachments).toEqual([]);
+    const withAttachment = {
+      ...message,
+      attachmentIds: ['00000000-0000-4000-8000-000000000090'],
+      attachments: [
+        {
+          id: '00000000-0000-4000-8000-000000000090',
+          filename: 'shot.png',
+          contentType: 'image/png',
+          sizeBytes: 1024,
+        },
+      ],
+    };
+    expect(chatMessageSchema.parse(withAttachment).attachments[0]?.filename).toBe(
+      'shot.png',
+    );
     expect(
       chatMessageListSchema.parse({ messages: [message] }).messages[0]?.body,
     ).toBe('Hello');

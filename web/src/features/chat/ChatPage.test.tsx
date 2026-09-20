@@ -2,12 +2,14 @@ import '@testing-library/jest-dom/vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { ApiError } from '../../lib/api';
 import { ChatPage } from './ChatPage';
 
 const mocks = vi.hoisted(() => ({
   createSession: vi.fn(),
   postMessage: vi.fn(),
   postMessagePending: false,
+  uploadAttachment: vi.fn(),
   createTicket: vi.fn(),
   createKnowledge: vi.fn(),
   cutoffSession: vi.fn(),
@@ -30,6 +32,13 @@ const mocks = vi.hoisted(() => ({
     body: string;
     agentRunId: string | null;
     actionMetadata: unknown;
+    attachmentIds: string[];
+    attachments: Array<{
+      id: string;
+      filename: string;
+      contentType: string;
+      sizeBytes: number;
+    }>;
     createdAt: string;
   }>,
 }));
@@ -66,6 +75,13 @@ vi.mock('../projects/useProjects', () => ({
 
 vi.mock('../tickets/useOpenTicket', () => ({
   useOpenTicket: () => mocks.openTicket,
+}));
+
+vi.mock('../tickets/useTicket', () => ({
+  useUploadAttachment: () => ({
+    mutateAsync: mocks.uploadAttachment,
+    isPending: false,
+  }),
 }));
 
 vi.mock('./useChat', () => ({
@@ -136,6 +152,7 @@ describe('ChatPage', () => {
     mocks.createSession.mockReset();
     mocks.postMessage.mockReset();
     mocks.postMessagePending = false;
+    mocks.uploadAttachment.mockReset();
     mocks.createTicket.mockReset();
     mocks.createKnowledge.mockReset();
     mocks.cutoffSession.mockReset();
@@ -143,6 +160,13 @@ describe('ChatPage', () => {
     mocks.sessions = [];
     mocks.messages = [];
     vi.spyOn(window, 'confirm').mockReturnValue(true);
+    vi.stubGlobal(
+      'URL',
+      class extends URL {
+        static createObjectURL = vi.fn(() => 'blob:mock-preview');
+        static revokeObjectURL = vi.fn();
+      },
+    );
   });
 
   it('shows new-chat controls for agent and optional project', () => {
@@ -210,6 +234,8 @@ describe('ChatPage', () => {
         body: 'Prior message',
         agentRunId: null,
         actionMetadata: null,
+        attachmentIds: [],
+        attachments: [],
         createdAt: '2026-09-08T00:01:00Z',
       },
     ];
@@ -222,6 +248,8 @@ describe('ChatPage', () => {
         body: 'What is cwd?',
         agentRunId: '00000000-0000-4000-8000-000000000040',
         actionMetadata: null,
+        attachmentIds: [],
+        attachments: [],
         createdAt: '2026-09-08T00:02:00Z',
       },
       runId: '00000000-0000-4000-8000-000000000040',
@@ -242,11 +270,160 @@ describe('ChatPage', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Send' }));
 
     await waitFor(() => {
-      expect(mocks.postMessage).toHaveBeenCalledWith('What is cwd?');
+      expect(mocks.postMessage).toHaveBeenCalledWith({
+        body: 'What is cwd?',
+      });
     });
     expect(await screen.findByTestId('chat-live-turn')).toHaveTextContent(
       'live:00000000-0000-4000-8000-000000000040',
     );
+  });
+
+  it('uploads attachments then posts message with attachmentIds', async () => {
+    Object.defineProperty(HTMLElement.prototype, 'offsetHeight', {
+      configurable: true,
+      get() {
+        return 480;
+      },
+    });
+    Object.defineProperty(HTMLElement.prototype, 'offsetWidth', {
+      configurable: true,
+      get() {
+        return 640;
+      },
+    });
+
+    const attachmentId = '00000000-0000-4000-8000-000000000090';
+    mocks.sessions = [ACTIVE_SESSION];
+    mocks.uploadAttachment.mockResolvedValue({
+      id: attachmentId,
+      filename: 'shot.png',
+      contentType: 'image/png',
+      sizeBytes: 1024,
+    });
+    mocks.postMessage.mockResolvedValue({
+      message: {
+        id: '00000000-0000-4000-8000-000000000031',
+        sessionId: ACTIVE_SESSION.id,
+        seq: 1,
+        role: 'human',
+        body: 'Look at this',
+        agentRunId: '00000000-0000-4000-8000-000000000040',
+        actionMetadata: null,
+        attachmentIds: [attachmentId],
+        attachments: [
+          {
+            id: attachmentId,
+            filename: 'shot.png',
+            contentType: 'image/png',
+            sizeBytes: 1024,
+          },
+        ],
+        createdAt: '2026-09-08T00:02:00Z',
+      },
+      runId: '00000000-0000-4000-8000-000000000040',
+    });
+
+    renderChat(`/chat/${ACTIVE_SESSION.id}`);
+
+    const file = new File(['png-bytes'], 'shot.png', { type: 'image/png' });
+    fireEvent.change(screen.getByTestId('chat-composer-files'), {
+      target: { files: [file] },
+    });
+    expect(await screen.findByAltText('shot.png')).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText('Message'), {
+      target: { value: 'Look at this' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+
+    await waitFor(() => {
+      expect(mocks.uploadAttachment).toHaveBeenCalledWith(file);
+      expect(mocks.postMessage).toHaveBeenCalledWith({
+        body: 'Look at this',
+        attachmentIds: [attachmentId],
+      });
+    });
+  });
+
+  it('sends attachment-only messages', async () => {
+    Object.defineProperty(HTMLElement.prototype, 'offsetHeight', {
+      configurable: true,
+      get() {
+        return 480;
+      },
+    });
+    Object.defineProperty(HTMLElement.prototype, 'offsetWidth', {
+      configurable: true,
+      get() {
+        return 640;
+      },
+    });
+
+    const attachmentId = '00000000-0000-4000-8000-000000000091';
+    mocks.sessions = [ACTIVE_SESSION];
+    mocks.uploadAttachment.mockResolvedValue({
+      id: attachmentId,
+      filename: 'notes.txt',
+      contentType: 'text/plain',
+      sizeBytes: 12,
+    });
+    mocks.postMessage.mockResolvedValue({
+      message: {
+        id: '00000000-0000-4000-8000-000000000032',
+        sessionId: ACTIVE_SESSION.id,
+        seq: 1,
+        role: 'human',
+        body: '',
+        agentRunId: '00000000-0000-4000-8000-000000000041',
+        actionMetadata: null,
+        attachmentIds: [attachmentId],
+        attachments: [
+          {
+            id: attachmentId,
+            filename: 'notes.txt',
+            contentType: 'text/plain',
+            sizeBytes: 12,
+          },
+        ],
+        createdAt: '2026-09-08T00:02:00Z',
+      },
+      runId: '00000000-0000-4000-8000-000000000041',
+    });
+
+    renderChat(`/chat/${ACTIVE_SESSION.id}`);
+
+    const file = new File(['hello notes'], 'notes.txt', { type: 'text/plain' });
+    fireEvent.change(screen.getByTestId('chat-composer-files'), {
+      target: { files: [file] },
+    });
+    expect(await screen.findByText('notes.txt')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+
+    await waitFor(() => {
+      expect(mocks.postMessage).toHaveBeenCalledWith({
+        body: '',
+        attachmentIds: [attachmentId],
+      });
+    });
+  });
+
+  it('surfaces upload errors in the composer', async () => {
+    mocks.sessions = [ACTIVE_SESSION];
+    mocks.uploadAttachment.mockRejectedValue(
+      new ApiError(413, JSON.stringify({ message: 'File too large' })),
+    );
+
+    renderChat(`/chat/${ACTIVE_SESSION.id}`);
+
+    const big = new File(['x'], 'big.png', { type: 'image/png' });
+    fireEvent.change(screen.getByTestId('chat-composer-files'), {
+      target: { files: [big] },
+    });
+    expect(await screen.findByAltText('big.png')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('File too large');
   });
 
   it('creates a ticket from chat after confirming project and title', async () => {
@@ -421,6 +598,8 @@ describe('ChatPage', () => {
         body: 'Hello via Enter',
         agentRunId: '00000000-0000-4000-8000-000000000040',
         actionMetadata: null,
+        attachmentIds: [],
+        attachments: [],
         createdAt: '2026-09-08T00:02:00Z',
       },
       runId: '00000000-0000-4000-8000-000000000040',
@@ -433,7 +612,9 @@ describe('ChatPage', () => {
     fireEvent.keyDown(input, { key: 'Enter', code: 'Enter' });
 
     await waitFor(() => {
-      expect(mocks.postMessage).toHaveBeenCalledWith('Hello via Enter');
+      expect(mocks.postMessage).toHaveBeenCalledWith({
+        body: 'Hello via Enter',
+      });
     });
   });
 
@@ -512,6 +693,8 @@ describe('ChatPage', () => {
         body: 'First',
         agentRunId: '00000000-0000-4000-8000-000000000040',
         actionMetadata: null,
+        attachmentIds: [],
+        attachments: [],
         createdAt: '2026-09-08T00:02:00Z',
       },
       runId: '00000000-0000-4000-8000-000000000040',
@@ -524,7 +707,7 @@ describe('ChatPage', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Send' }));
 
     await waitFor(() => {
-      expect(mocks.postMessage).toHaveBeenCalledWith('First');
+      expect(mocks.postMessage).toHaveBeenCalledWith({ body: 'First' });
     });
     expect(await screen.findByTestId('chat-live-turn')).toBeInTheDocument();
 

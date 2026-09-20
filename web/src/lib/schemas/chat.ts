@@ -30,6 +30,13 @@ export const chatActionMetadataSchema = z.object({
   parentSessionId: z.string().uuid().optional(),
 });
 
+export const chatAttachmentSchema = z.object({
+  id: z.string().uuid(),
+  filename: z.string(),
+  contentType: z.string(),
+  sizeBytes: z.number().int(),
+});
+
 export const chatMessageSchema = z.object({
   id: z.string().uuid(),
   sessionId: z.string().uuid(),
@@ -38,6 +45,8 @@ export const chatMessageSchema = z.object({
   body: z.string(),
   agentRunId: z.string().uuid().nullable(),
   actionMetadata: z.unknown().nullable(),
+  attachmentIds: z.array(z.string().uuid()).default([]),
+  attachments: z.array(chatAttachmentSchema).default([]),
   createdAt: z.string(),
 });
 
@@ -82,6 +91,7 @@ export const cutoffSessionResponseSchema = z.object({
 
 export type ChatSession = z.infer<typeof chatSessionSchema>;
 export type ChatMessage = z.infer<typeof chatMessageSchema>;
+export type ChatAttachment = z.infer<typeof chatAttachmentSchema>;
 export type ChatSessionStatus = z.infer<typeof chatSessionStatusSchema>;
 export type ChatMessageRole = z.infer<typeof chatMessageRoleSchema>;
 export type ChatActionMetadata = z.infer<typeof chatActionMetadataSchema>;
@@ -92,6 +102,11 @@ export type CreateKnowledgeFromChatResponse = z.infer<
   typeof createKnowledgeFromChatResponseSchema
 >;
 export type CutoffSessionResponse = z.infer<typeof cutoffSessionResponseSchema>;
+
+export interface PostChatMessageInput {
+  body: string;
+  attachmentIds?: string[];
+}
 
 export function parseChatActionMetadata(
   value: unknown,

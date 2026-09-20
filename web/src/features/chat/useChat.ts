@@ -14,6 +14,7 @@ import {
   type CreateKnowledgeFromChatResponse,
   type CreateTicketFromChatResponse,
   type CutoffSessionResponse,
+  type PostChatMessageInput,
 } from '../../lib/schemas/chat';
 import type {
   KnowledgeScope,
@@ -86,12 +87,18 @@ async function fetchMessages(sessionId: string): Promise<ChatMessage[]> {
 
 async function postMessage(
   sessionId: string,
-  body: string,
+  input: PostChatMessageInput,
 ): Promise<PostChatMessageResult> {
   const res = await apiFetch(`/api/chat/sessions/${sessionId}/messages`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ body }),
+    body: JSON.stringify({
+      body: input.body,
+      attachmentIds:
+        input.attachmentIds && input.attachmentIds.length > 0
+          ? input.attachmentIds
+          : undefined,
+    }),
   });
   return postChatMessageResponseSchema.parse(await res.json());
 }
@@ -197,7 +204,7 @@ export function useCreateChatSession() {
 export function usePostChatMessage(sessionId: string) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (body: string) => postMessage(sessionId, body),
+    mutationFn: (input: PostChatMessageInput) => postMessage(sessionId, input),
     onSuccess: () => {
       void queryClient.invalidateQueries({
         queryKey: chatMessagesQueryKey(sessionId),

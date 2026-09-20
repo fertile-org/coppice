@@ -7,6 +7,7 @@ import {
   type ChatMessage,
 } from '../../lib/schemas/chat';
 import { cn } from '../../lib/utils';
+import { CommentAttachments } from '../tickets/CommentAttachments';
 import { useOpenTicket } from '../tickets/useOpenTicket';
 
 const ESTIMATED_ROW_HEIGHT = 72;
@@ -108,6 +109,16 @@ function ActionMetadataChip({ message }: { message: ChatMessage }) {
 export function ChatMessageBubble({ message }: { message: ChatMessage }) {
   const isHuman = message.role === 'human';
   const isSystem = message.role === 'system';
+  const attachments =
+    message.attachments.length > 0
+      ? message.attachments
+      : message.attachmentIds.map((id) => ({
+          id,
+          filename: 'Attachment',
+          contentType: 'application/octet-stream',
+          sizeBytes: 0,
+        }));
+  const hasBody = message.body.trim().length > 0;
 
   return (
     <div
@@ -134,18 +145,21 @@ export function ChatMessageBubble({ message }: { message: ChatMessage }) {
             System
           </header>
         ) : null}
-        {isHuman ? (
-          <p className="whitespace-pre-wrap leading-snug">{message.body}</p>
-        ) : (
-          <div
-            className={cn(
-              'leading-snug',
-              isSystem ? 'text-text-secondary' : 'text-text-primary',
-            )}
-          >
-            <MarkdownContent>{message.body}</MarkdownContent>
-          </div>
-        )}
+        {hasBody ? (
+          isHuman ? (
+            <p className="whitespace-pre-wrap leading-snug">{message.body}</p>
+          ) : (
+            <div
+              className={cn(
+                'leading-snug',
+                isSystem ? 'text-text-secondary' : 'text-text-primary',
+              )}
+            >
+              <MarkdownContent>{message.body}</MarkdownContent>
+            </div>
+          )
+        ) : null}
+        <CommentAttachments attachments={attachments} />
         <ActionMetadataChip message={message} />
       </article>
     </div>

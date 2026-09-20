@@ -19,6 +19,8 @@ const messages: ChatMessage[] = Array.from({ length: 40 }, (_, index) => ({
   body: index % 2 === 0 ? `Human turn ${index}` : `**Agent** reply ${index}`,
   agentRunId: null,
   actionMetadata: null,
+  attachmentIds: [],
+  attachments: [],
   createdAt: '2026-09-08T00:00:00Z',
 }));
 
@@ -70,6 +72,8 @@ describe('ChatMessageList', () => {
         body: 'Hello from me',
         agentRunId: null,
         actionMetadata: null,
+        attachmentIds: [],
+        attachments: [],
         createdAt: '2026-09-08T00:00:00Z',
       },
       {
@@ -80,6 +84,8 @@ describe('ChatMessageList', () => {
         body: 'Hello from the agent',
         agentRunId: null,
         actionMetadata: null,
+        attachmentIds: [],
+        attachments: [],
         createdAt: '2026-09-08T00:00:01Z',
       },
     ];
@@ -123,6 +129,8 @@ describe('ChatMessageList', () => {
         body: tallBody,
         agentRunId: null,
         actionMetadata: null,
+        attachmentIds: [],
+        attachments: [],
         createdAt: '2026-09-08T00:00:00Z',
       },
       {
@@ -133,6 +141,8 @@ describe('ChatMessageList', () => {
         body: 'Short follow-up',
         agentRunId: null,
         actionMetadata: null,
+        attachmentIds: [],
+        attachments: [],
         createdAt: '2026-09-08T00:00:01Z',
       },
     ];
@@ -193,6 +203,8 @@ describe('ChatMessageList', () => {
           action: 'create_ticket',
           ticketId: '00000000-0000-4000-8000-000000000050',
         },
+        attachmentIds: [],
+        attachments: [],
         createdAt: '2026-09-08T00:00:00Z',
       },
       {
@@ -206,6 +218,8 @@ describe('ChatMessageList', () => {
           action: 'create_knowledge',
           knowledgeItemId: '00000000-0000-4000-8000-000000000060',
         },
+        attachmentIds: [],
+        attachments: [],
         createdAt: '2026-09-08T00:00:01Z',
       },
       {
@@ -219,6 +233,8 @@ describe('ChatMessageList', () => {
           action: 'cutoff',
           childSessionId: '00000000-0000-4000-8000-000000000070',
         },
+        attachmentIds: [],
+        attachments: [],
         createdAt: '2026-09-08T00:00:02Z',
       },
     ];
@@ -234,5 +250,43 @@ describe('ChatMessageList', () => {
       'href',
       '/chat/00000000-0000-4000-8000-000000000070',
     );
+  });
+
+  it('renders image preview and file attachment in the transcript bubble', () => {
+    const attachmentId = '00000000-0000-4000-8000-000000000080';
+    const fileId = '00000000-0000-4000-8000-000000000081';
+    const withAttachments: ChatMessage[] = [
+      {
+        id: '00000000-0000-4000-8000-000000000001',
+        sessionId: '00000000-0000-4000-8000-000000000099',
+        seq: 1,
+        role: 'human',
+        body: 'See attached',
+        agentRunId: null,
+        actionMetadata: null,
+        attachmentIds: [attachmentId, fileId],
+        attachments: [
+          {
+            id: attachmentId,
+            filename: 'diagram.png',
+            contentType: 'image/png',
+            sizeBytes: 2048,
+          },
+          {
+            id: fileId,
+            filename: 'notes.txt',
+            contentType: 'text/plain',
+            sizeBytes: 128,
+          },
+        ],
+        createdAt: '2026-09-08T00:00:00Z',
+      },
+    ];
+
+    renderList(<ChatMessageList messages={withAttachments} />);
+
+    const image = screen.getByRole('img', { name: 'diagram.png' });
+    expect(image).toHaveAttribute('src', `/api/attachments/${attachmentId}`);
+    expect(screen.getByText('notes.txt')).toBeInTheDocument();
   });
 });
