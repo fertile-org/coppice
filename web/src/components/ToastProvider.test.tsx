@@ -68,6 +68,37 @@ describe('ToastProvider', () => {
     expect(screen.queryByText('Open ticket')).not.toBeInTheDocument();
   });
 
+  it('clicking message dismisses toast without onClick', () => {
+    let api: ReturnType<typeof useToast> | null = null;
+
+    renderWithToast((toast) => {
+      api = toast;
+    });
+
+    act(() => {
+      api!.success('Saved successfully');
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Saved successfully' }));
+
+    expect(screen.queryByText('Saved successfully')).not.toBeInTheDocument();
+  });
+
+  it('positions the toast viewport with top-10 clearance', () => {
+    let api: ReturnType<typeof useToast> | null = null;
+
+    renderWithToast((toast) => {
+      api = toast;
+    });
+
+    act(() => {
+      api!.success('Saved');
+    });
+
+    const status = screen.getByRole('status');
+    expect(status.parentElement).toHaveClass('top-10');
+  });
+
   it('shows progress only for non-persistent toasts', () => {
     let api: ReturnType<typeof useToast> | null = null;
 
