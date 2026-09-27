@@ -21,7 +21,7 @@ Controlled agent memory: typed knowledge with pgvector retrieval, context budget
 
 - Capability-gated observation runs (M07)
 - Consolidation batch jobs (optional stretch; basic expiry sufficient for v1)
-- Local Ollama embeddings (future; OpenAI-compatible API default)
+- Remote multi-model embedding routing beyond a single configured `openai_compatible` endpoint (local Ollama sidecar is the Compose install default; see [Knowledge configuration](../development.md#knowledge-configuration))
 
 ## Dependencies
 
@@ -99,11 +99,13 @@ GET   /api/agent-runs/:id/knowledge-used
 
 ## Docker Compose delta
 
+Operator default (`make compose-up`, profile `embeddings`): Ollama sidecar + server env `openai_compatible` / `nomic-embed-text` / dimension `768`. E2e/CI clear the profile and force mock:
+
 ```yaml
   server:
     environment:
       COPPICE_KNOWLEDGE__EMBEDDING__PROVIDER: mock
-      COPPICE_KNOWLEDGE__EMBEDDING__DIMENSION: "1536"
+      COPPICE_KNOWLEDGE__EMBEDDING__DIMENSION: "768"
 ```
 
 Postgres uses an HNSW cosine index. M06 first materializes relational eligibility and then performs bounded, deterministic cosine ranking; this ordering is intentional for the documented 10,000-active-items-per-project envelope.

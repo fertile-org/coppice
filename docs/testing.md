@@ -107,7 +107,7 @@ make e2e-smoke-m06              # context continuation + pending split behavior
 make e2e-smoke-m06-knowledge    # governance → embed → Full retrieval → audit → extraction
 ```
 
-Both use the default `deploy/docker-compose.yml` stack. E2e Makefile targets clear the `embeddings` Compose profile and force `COPPICE_KNOWLEDGE__EMBEDDING__PROVIDER=mock` so CI stays deterministic (no Ollama/GPU/model pulls). Operator `make compose-up` enables the Ollama embedder sidecar by default.
+Both use the default `deploy/docker-compose.yml` stack. E2e Makefile targets clear the `embeddings` Compose profile and force `COPPICE_KNOWLEDGE__EMBEDDING__PROVIDER=mock` so CI stays deterministic (no Ollama/GPU/model pulls). That mock path is for tests/smoke only — operator `make compose-up` enables the Ollama embedder sidecar by default (`nomic-embed-text` @ 768). Mode comparison and first-boot pull cost: [Knowledge configuration](development.md#knowledge-configuration).
 
 The supported 10,000-eligible-row retrieval envelope has a separate, non-CI
 default-Compose benchmark. It seeds rows inside a rolled-back transaction, runs
@@ -119,7 +119,7 @@ make benchmark-m06-knowledge-retrieval
 ```
 
 Keep this benchmark separate from routine integration tests because constructing
-10,000 embeddings at the configured dimension (default 1536) and their HNSW entries is intentionally heavier
+10,000 embeddings at the configured dimension (Compose sidecar default 768; host mock example 1536) and their HNSW entries is intentionally heavier
 than the representative mixed-cardinality query-plan assertion.
 
 ## Agent / provider testing

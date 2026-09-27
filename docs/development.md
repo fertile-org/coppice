@@ -112,6 +112,8 @@ Set `COPPICE_SERVER_BIN` to override the API binary path.
 make compose-up    # copies deploy/config/config.toml if missing; auto-migrates + auto-bootstraps admin
 ```
 
+`make compose-up` enables Compose profile `embeddings` (Makefile default). That starts the **Ollama embedder sidecar** beside Postgres/server/web and points the server at it (`openai_compatible` → `nomic-embed-text`, dimension `768`). First boot pulls the model (~274MB, often 1–5+ minutes); weights persist in the `ollama_data` volume. The API does **not** wait on embedder health — knowledge embed jobs fail until the sidecar is ready. Opt out with `COMPOSE_PROFILES= make compose-up` (no Ollama container). Do **not** treat `deploy/docker-compose.local.yml` as the operator embedder default — that file is Postgres-only for human hot reload.
+
 The **web** service is a production image: `yarn build` then **nginx** on `:5001` (static SPA, proxies `/api` and `/ws` to `server:5000`). For UI hot reload, use the human path (`make web-dev`), not Compose web.
 
 Docker config (`deploy/config/config.toml`, from `config.example.toml` in that folder) can set `auth.bootstrap_admin_email` / `auth.bootstrap_admin_password`. Host installs without those fields still use `make bootstrap` (or `coppice bootstrap admin`) once.
@@ -216,9 +218,21 @@ Agents can return `status: "continued"` to checkpoint progress without leaving *
 
 ### Knowledge configuration
 
-M06 settings live under `[knowledge]` in TOML. Operator Docker Compose (`COMPOSE_PROFILES=embeddings`, the Makefile default) wires knowledge embedding to the local Ollama sidecar (`openai_compatible` → `http://embedder:11434/v1`, `nomic-embed-text`, dimension `768`, placeholder `api_key`). The server does **not** wait for embedder health — the API stays up while the model pulls (~274MB first boot) or if the sidecar is down. E2e/CI clear the profile and force `PROVIDER=mock`. Host installs and `make test` keep the deterministic mock provider. For a remote OpenAI-compatible endpoint, set `knowledge.embedding.provider = "openai_compatible"`, configure `base_url`, `model`, and `api_key`, and set `dimension` to the model size. Startup requires the live `knowledge_embeddings.embedding` column type `vector(n)` to match `knowledge.embedding.dimension`; vectors are never padded or truncated.
+M06 settings live under `[knowledge]` in TOML. There are **three embedding modes** — do not confuse CI mock with the Docker install default.
+
+| Mode | When | Provider config | Notes |
+|------|------|-----------------|-------|
+| **`mock`** | `make test`, knowledge unit/integration tests, e2e/CI smoke | `provider = "mock"` (Makefile forces this for smoke; host `config.example.toml` defaults here) | Deterministic hashed vectors; no download, no network, no GPU |
+| **Local Compose sidecar** | Operator default after `make compose-up` | `openai_compatible` → `http://embedder:11434/v1`, model `nomic-embed-text`, dimension `768`, placeholder `api_key` | Ollama service under Compose profile `embeddings`; first boot pulls ~274MB into `ollama_data` |
+| **Remote `openai_compatible`** | Opt-in (OpenAI or any `/v1/embeddings` host) | Same provider string; set your `base_url`, `model`, `api_key`, and matching `dimension` | Disable or ignore the sidecar; point env/TOML at the remote host |
+
+**Retrieval split:** cosine ranking and HNSW live in **Postgres** (`knowledge_embeddings`). Query text still goes to the **configured embedding provider** first (mock, local Ollama, or remote). Provider downtime breaks new embeds and Full-run query embedding even though stored vectors remain in the DB.
+
+**Dimension must match the model.** `knowledge.embedding.dimension` must equal the live `vector(n)` column and the provider’s output length. Startup requires the column type to match config; vectors are never padded or truncated. A provider response with the wrong length fails the embed job and leaves the previous active revision intact. Config/column mismatch with existing rows fails startup until embeddings are cleared and re-embedded.
 
 **Changing dimension:** set `knowledge.embedding.dimension` to the new size. If `knowledge_embeddings` is empty, startup rewrites the column (and HNSW index) to `vector(n)`. If rows already exist at another dimension, startup fails — run `DELETE FROM knowledge_embeddings`, restart so the column can be rewritten, then re-embed (approve/re-queue revisions). Do not mix dimensions in one column.
+
+The server does **not** wait for embedder health on Compose boot. Soft dependency: API stays up while nomic pulls or if the sidecar/profile is absent; embed jobs error until the endpoint is reachable. E2e Makefile targets clear `COMPOSE_PROFILES` and force `PROVIDER=mock` so CI stays deterministic.
 
 Knowledge embedding and extraction run on the dedicated `knowledge_jobs` queue. `knowledge.worker_count = 0` disables processing but leaves API reads available. Keep production limits in `knowledge.retrieval` and `knowledge.context_budget`; list endpoints and retrieval also enforce hard server caps.
 

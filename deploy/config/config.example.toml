@@ -83,10 +83,13 @@ poll_interval_ms = 500
 stale_lock_secs = 300
 
 [knowledge.embedding]
-# Docker Compose defaults (env in docker-compose.yml) point at the Ollama embedder sidecar:
-#   provider=openai_compatible model=nomic-embed-text dimension=768
-#   base_url=http://embedder:11434/v1 api_key=ollama (ignored by Ollama)
-# Smoke/CI force PROVIDER=mock via Makefile. Host installs may keep mock or point elsewhere.
+# Three modes (see docs/development.md#knowledge-configuration):
+#   mock — tests/CI/smoke only (Makefile forces PROVIDER=mock; no download)
+#   local sidecar — Compose default: openai_compatible → http://embedder:11434/v1
+#                   nomic-embed-text @ 768 (first boot pulls ~274MB into ollama_data)
+#   remote openai_compatible — opt-in: set base_url/model/api_key/dimension to your host
+# Dimension must match the model and live vector(n); mismatch fails startup or the embed job.
+# Ranking stays in Postgres; query embedding still calls this provider.
 provider = "openai_compatible"
 model = "nomic-embed-text"
 dimension = 768 # must match live vector(n); empty table rewrites on startup when changed
