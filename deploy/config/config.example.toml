@@ -83,12 +83,16 @@ poll_interval_ms = 500
 stale_lock_secs = 300
 
 [knowledge.embedding]
-provider = "mock" # set to "openai_compatible" and configure api_key for a real provider
-model = "coppice-mock-1536"
-dimension = 1536 # must match live vector(n); empty table rewrites on startup when changed
-base_url = "https://api.openai.com/v1"
+# Docker Compose defaults (env in docker-compose.yml) point at the Ollama embedder sidecar:
+#   provider=openai_compatible model=nomic-embed-text dimension=768
+#   base_url=http://embedder:11434/v1 api_key=ollama (ignored by Ollama)
+# Smoke/CI force PROVIDER=mock via Makefile. Host installs may keep mock or point elsewhere.
+provider = "openai_compatible"
+model = "nomic-embed-text"
+dimension = 768 # must match live vector(n); empty table rewrites on startup when changed
+base_url = "http://embedder:11434/v1"
 timeout_secs = 30
-# api_key = "..." # prefer COPPICE_KNOWLEDGE__EMBEDDING__API_KEY
+api_key = "ollama" # required by validation; Ollama ignores it. Prefer COPPICE_KNOWLEDGE__EMBEDDING__API_KEY
 
 [knowledge.extraction]
 provider = "mock"

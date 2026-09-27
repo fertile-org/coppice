@@ -12,6 +12,11 @@ BOOTSTRAP_PASSWORD = changeme
 # Match host user so bind-mounted /repos files stay owned by the operator.
 export COPPICE_UID ?= $(shell id -u)
 export COPPICE_GID ?= $(shell id -g)
+# Operator compose-up includes the Ollama embedder sidecar. Smoke/CI clear this.
+export COMPOSE_PROFILES ?= embeddings
+
+# Deterministic knowledge embeddings for e2e — no Ollama image/model/GPU.
+SMOKE_EMBEDDING_ENV = COMPOSE_PROFILES= COPPICE_KNOWLEDGE__EMBEDDING__PROVIDER=mock COPPICE_KNOWLEDGE__EMBEDDING__DIMENSION=768
 
 .PHONY: compose-up compose-down compose-local-up compose-local-down server server-dev test test-unit test-smoke test-pg-reset clippy clean migrate bootstrap web-install web-test web-dev web-build e2e-smoke e2e-smoke-m03 e2e-smoke-m04 e2e-smoke-m05 e2e-smoke-m06 e2e-smoke-m06-knowledge e2e-smoke-m09 benchmark-m06-knowledge-retrieval release-tar
 
@@ -92,36 +97,44 @@ web-dev:
 web-build:
 	cd web && yarn install --frozen-lockfile && yarn build
 
-e2e-smoke: compose-up
+e2e-smoke:
+	$(SMOKE_EMBEDDING_ENV) $(MAKE) compose-up
 	node e2e/smoke/m02-board.mjs
 
-e2e-smoke-m03: compose-up
+e2e-smoke-m03:
+	$(SMOKE_EMBEDDING_ENV) $(MAKE) compose-up
 	$(SMOKE_REPO_SETUP)
 	node e2e/smoke/m03-agent-run.mjs
 
-e2e-smoke-m04: compose-up
+e2e-smoke-m04:
+	$(SMOKE_EMBEDDING_ENV) $(MAKE) compose-up
 	$(SMOKE_REPO_SETUP)
 	node e2e/smoke/m04-live-console.mjs
 
-e2e-smoke-m05: compose-up
+e2e-smoke-m05:
+	$(SMOKE_EMBEDDING_ENV) $(MAKE) compose-up
 	$(SMOKE_REPO_SETUP)
 	node e2e/smoke/m05-workflow.mjs
 
-e2e-smoke-m06: compose-up
-	WORKFLOW_AUTO_START_RUNS=false MOCK_AGENT_RESPONSE=pm/split_pending $(COMPOSE) up -d --force-recreate --no-deps server
+e2e-smoke-m06:
+	$(SMOKE_EMBEDDING_ENV) $(MAKE) compose-up
+	$(SMOKE_EMBEDDING_ENV) WORKFLOW_AUTO_START_RUNS=false MOCK_AGENT_RESPONSE=pm/split_pending $(COMPOSE) up -d --force-recreate --no-deps server
 	$(SMOKE_REPO_SETUP_IF_MISSING)
 	node e2e/smoke/m06-context.mjs
 
-e2e-smoke-m06-knowledge: compose-up
-	MOCK_AGENT_RESPONSE=done $(COMPOSE) up -d --force-recreate --no-deps server
+e2e-smoke-m06-knowledge:
+	$(SMOKE_EMBEDDING_ENV) $(MAKE) compose-up
+	$(SMOKE_EMBEDDING_ENV) MOCK_AGENT_RESPONSE=done $(COMPOSE) up -d --force-recreate --no-deps server
 	$(SMOKE_REPO_SETUP_IF_MISSING)
 	node e2e/smoke/m06-knowledge.mjs
 
-e2e-smoke-m09: compose-up
-	MOCK_AGENT_RESPONSE=backend_engineer/chat_turn $(COMPOSE) up -d --force-recreate --no-deps server
+e2e-smoke-m09:
+	$(SMOKE_EMBEDDING_ENV) $(MAKE) compose-up
+	$(SMOKE_EMBEDDING_ENV) MOCK_AGENT_RESPONSE=backend_engineer/chat_turn $(COMPOSE) up -d --force-recreate --no-deps server
 	node e2e/smoke/m09-chat.mjs
 
-benchmark-m06-knowledge-retrieval: compose-up
+benchmark-m06-knowledge-retrieval:
+	$(SMOKE_EMBEDDING_ENV) $(MAKE) compose-up
 	COPPICE_RETRIEVAL_BENCHMARK_DATABASE_URL=postgres://coppice:coppice@127.0.0.1:$${COPPICE_PG_PORT:-5432}/coppice \
 		cargo test -p coppice-server --features embedded-test-db --test integration_knowledge knowledge_retrieval_capacity_p95_benchmark -- --ignored --nocapture --test-threads 1
 
