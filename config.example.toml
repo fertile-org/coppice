@@ -83,7 +83,11 @@ poll_interval_ms = 500
 stale_lock_secs = 300
 
 [knowledge.embedding]
-provider = "mock" # set to "openai_compatible" and configure api_key for a real provider
+# Host/hot-reload default is mock (tests-friendly). Docker Compose install default is the
+# Ollama sidecar (deploy/config + profile embeddings) — not this file.
+# Remote opt-in: provider=openai_compatible + base_url/model/api_key + matching dimension.
+# See docs/development.md#knowledge-configuration.
+provider = "mock"
 model = "coppice-mock-1536"
 dimension = 1536 # must match live vector(n); empty table rewrites on startup when changed
 base_url = "https://api.openai.com/v1"

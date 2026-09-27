@@ -3,9 +3,9 @@
 #
 # Start: make compose-local-up
 #
-# Optional later: opt-in Ollama embedder like deploy/docker-compose.yml (profile
-# `embeddings`, nomic-embed-text → http://127.0.0.1:11434/v1) for host API knowledge
-# embeddings. Not required here — Postgres-only keeps human hot-reload light.
+# Operator embedder default lives on deploy/docker-compose.yml (profile `embeddings`),
+# not here. Optional: run Ollama yourself and point host config at
+# http://127.0.0.1:11434/v1 — Postgres-only keeps human hot-reload light.
 
 name: coppice-local
 
