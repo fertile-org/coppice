@@ -123,4 +123,41 @@ describe('AppShell', () => {
     expect(root).not.toHaveClass('h-svh');
     expect(root).not.toHaveClass('overflow-hidden');
   });
+
+  it('uses full-width main on board routes without chat viewport clamp', () => {
+    render(
+      <MemoryRouter
+        initialEntries={['/projects/00000000-0000-4000-8000-000000000001/board']}
+      >
+        <AppShell />
+      </MemoryRouter>,
+    );
+
+    const main = screen.getByTestId('app-shell-main');
+    const root = main.parentElement;
+    expect(main).toHaveAttribute('data-layout', 'board');
+    expect(main).not.toHaveClass('max-w-6xl');
+    expect(main).not.toHaveClass('mx-auto');
+    expect(main).toHaveClass('px-8');
+    expect(main).toHaveClass('py-8');
+    expect(main).not.toHaveClass('flex-1');
+    expect(main).not.toHaveClass('overflow-hidden');
+    expect(root).toHaveClass('min-h-screen');
+    expect(root).not.toHaveClass('h-svh');
+    expect(root).not.toHaveClass('overflow-hidden');
+  });
+
+  it('keeps default max-width on non-board project routes', () => {
+    render(
+      <MemoryRouter
+        initialEntries={['/projects/00000000-0000-4000-8000-000000000001']}
+      >
+        <AppShell />
+      </MemoryRouter>,
+    );
+
+    const main = screen.getByTestId('app-shell-main');
+    expect(main).toHaveAttribute('data-layout', 'default');
+    expect(main).toHaveClass('max-w-6xl');
+  });
 });

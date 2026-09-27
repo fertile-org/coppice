@@ -16,11 +16,17 @@ function isChatRoute(pathname: string): boolean {
   return pathname === '/chat' || pathname.startsWith('/chat/');
 }
 
+function isBoardRoute(pathname: string): boolean {
+  return /^\/projects\/[^/]+\/board\/?$/.test(pathname);
+}
+
 export function AppShell() {
   const { user, logout } = useSession();
   const openTicket = useOpenTicket();
   const { pathname } = useLocation();
   const chatLayout = isChatRoute(pathname);
+  const boardLayout = isBoardRoute(pathname);
+  const fullWidth = chatLayout || boardLayout;
 
   return (
     <div
@@ -35,7 +41,7 @@ export function AppShell() {
         <div
           className={cn(
             'mx-auto flex flex-wrap items-center justify-between gap-3 sm:gap-6',
-            chatLayout ? 'max-w-none' : 'max-w-6xl',
+            fullWidth ? 'max-w-none' : 'max-w-6xl',
           )}
         >
           <div className="flex w-full flex-wrap items-center gap-3 sm:w-auto sm:gap-6">
@@ -97,10 +103,12 @@ export function AppShell() {
         className={cn(
           chatLayout
             ? 'flex min-h-0 flex-1 flex-col overflow-hidden px-4 py-4 sm:px-6 sm:py-5'
-            : 'mx-auto max-w-6xl px-8 py-8',
+            : boardLayout
+              ? 'px-8 py-8'
+              : 'mx-auto max-w-6xl px-8 py-8',
         )}
         data-testid="app-shell-main"
-        data-layout={chatLayout ? 'chat' : 'default'}
+        data-layout={chatLayout ? 'chat' : boardLayout ? 'board' : 'default'}
       >
         <Outlet />
       </main>
