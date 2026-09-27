@@ -47,7 +47,7 @@ function ToastViewport({
     <div
       aria-live="polite"
       aria-relevant="additions"
-      className="pointer-events-none fixed right-4 top-4 z-[100] flex w-full max-w-sm flex-col gap-2"
+      className="pointer-events-none fixed right-4 top-10 z-[100] flex w-full max-w-sm flex-col gap-2"
     >
       {toasts.map((toast) => (
         <ToastMessage key={toast.id} toast={toast} onDismiss={onDismiss} />
@@ -69,12 +69,10 @@ function ToastMessage({
     return () => window.clearTimeout(timer);
   }, [onDismiss, toast.id, toast.persistent]);
 
-  function handleAction() {
+  function handleMessageClick() {
     toast.onClick?.();
     onDismiss(toast.id);
   }
-
-  const isClickable = Boolean(toast.onClick);
 
   return (
     <div
@@ -88,17 +86,13 @@ function ToastMessage({
       )}
     >
       <div className="flex items-start gap-2 px-4 py-3">
-        {isClickable ? (
-          <button
-            type="button"
-            onClick={handleAction}
-            className="min-w-0 flex-1 cursor-pointer text-left hover:opacity-90"
-          >
-            {toast.message}
-          </button>
-        ) : (
-          <p className="min-w-0 flex-1">{toast.message}</p>
-        )}
+        <button
+          type="button"
+          onClick={handleMessageClick}
+          className="min-w-0 flex-1 cursor-pointer text-left hover:opacity-90"
+        >
+          {toast.message}
+        </button>
         <button
           type="button"
           aria-label="Dismiss"
