@@ -1,16 +1,63 @@
+import type { LucideIcon } from 'lucide-react';
+import {
+  BookOpen,
+  Bot,
+  FolderGit2,
+  LayoutGrid,
+  LogOut,
+  MessageSquare,
+  PanelLeftClose,
+  PanelLeftOpen,
+  Users,
+} from 'lucide-react';
+import { useCallback, useEffect, useState } from 'react';
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import { useSession } from '../features/auth/useSession';
 import { NotificationBell } from '../features/notifications/NotificationBell';
 import { useOpenTicket } from '../features/tickets/useOpenTicket';
 import { cn } from '../lib/utils';
 
-const navLinkClass = ({ isActive }: { isActive: boolean }) =>
-  [
-    'rounded-md px-3 py-1.5 font-body text-sm transition-colors duration-fast',
+const SIDEBAR_COLLAPSED_KEY = 'coppice.sidebar.collapsed';
+
+type NavItem = {
+  to: string;
+  label: string;
+  icon: LucideIcon;
+  adminOnly?: boolean;
+};
+
+const NAV_ITEMS: NavItem[] = [
+  { to: '/projects', label: 'Projects', icon: LayoutGrid },
+  { to: '/agents', label: 'Agents', icon: Bot },
+  { to: '/chat', label: 'Chat', icon: MessageSquare },
+  { to: '/knowledge', label: 'Knowledge', icon: BookOpen },
+  { to: '/settings/repositories', label: 'Repositories', icon: FolderGit2 },
+  { to: '/settings/users', label: 'Users', icon: Users, adminOnly: true },
+];
+
+function readSidebarCollapsed(): boolean {
+  try {
+    return localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+function navLinkClass({
+  isActive,
+  collapsed,
+}: {
+  isActive: boolean;
+  collapsed: boolean;
+}) {
+  return cn(
+    'flex items-center rounded-md font-body text-sm transition-colors duration-fast',
+    collapsed ? 'justify-center px-2 py-2.5' : 'gap-3 px-3 py-2',
     isActive
       ? 'bg-accent-muted text-accent'
       : 'text-text-secondary hover:bg-paper-200 hover:text-text-primary',
-  ].join(' ');
+  );
+}
 
 function isChatRoute(pathname: string): boolean {
   return pathname === '/chat' || pathname.startsWith('/chat/');
@@ -28,90 +75,150 @@ export function AppShell() {
   const boardLayout = isBoardRoute(pathname);
   const fullWidth = chatLayout || boardLayout;
 
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(readSidebarCollapsed);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(
+        SIDEBAR_COLLAPSED_KEY,
+        sidebarCollapsed ? '1' : '0',
+      );
+    } catch {
+      /* ignore quota / private mode */
+    }
+  }, [sidebarCollapsed]);
+
+  const toggleSidebar = useCallback(() => {
+    setSidebarCollapsed((prev) => !prev);
+  }, []);
+
+  const visibleNavItems = NAV_ITEMS.filter(
+    (item) => !item.adminOnly || user?.role === 'admin',
+  );
+
   return (
     <div
+      data-testid="app-shell-root"
       className={cn(
-        'coppice-grain bg-background',
-        chatLayout
-          ? 'flex h-svh flex-col overflow-hidden'
-          : 'min-h-screen',
+        'coppice-grain flex bg-background',
+        chatLayout ? 'h-svh overflow-hidden' : 'min-h-screen',
       )}
     >
-      <header className="shrink-0 border-b border-border bg-surface px-4 py-3 sm:px-8 sm:py-4">
+      <aside
+        data-testid="app-shell-sidebar"
+        data-collapsed={sidebarCollapsed ? 'true' : 'false'}
+        className={cn(
+          'flex shrink-0 flex-col border-r border-border bg-surface transition-[width] duration-200 ease-out',
+          sidebarCollapsed ? 'w-[4.25rem]' : 'w-56',
+        )}
+        aria-label="Application sidebar"
+      >
         <div
           className={cn(
-            'mx-auto flex flex-wrap items-center justify-between gap-3 sm:gap-6',
-            fullWidth ? 'max-w-none' : 'max-w-6xl',
+            'flex shrink-0 items-center border-b border-border py-4',
+            sidebarCollapsed ? 'justify-center px-2' : 'gap-3 px-4',
           )}
         >
-          <div className="flex w-full flex-wrap items-center gap-3 sm:w-auto sm:gap-6">
-            <div className="flex items-center gap-3">
-              <img
-                src="/logo.webp"
-                srcSet="/logo.webp 1x, /logo@2x.webp 2x"
-                alt="Coppice"
-                width={32}
-                height={32}
-                className="h-8 w-8 shrink-0"
-              />
-              <span className="font-display text-xl font-semibold tracking-tight text-text-primary">
-                Coppice
-              </span>
-            </div>
-
-            <nav className="flex flex-wrap items-center gap-1" aria-label="Main">
-              <NavLink to="/projects" className={navLinkClass}>
-                Projects
-              </NavLink>
-              <NavLink to="/agents" className={navLinkClass}>
-                Agents
-              </NavLink>
-              <NavLink to="/chat" className={navLinkClass}>
-                Chat
-              </NavLink>
-              <NavLink to="/knowledge" className={navLinkClass}>
-                Knowledge
-              </NavLink>
-              <NavLink to="/settings/repositories" className={navLinkClass}>
-                Repositories
-              </NavLink>
-              {user?.role === 'admin' && (
-                <NavLink to="/settings/users" className={navLinkClass}>
-                  Users
-                </NavLink>
-              )}
-            </nav>
-          </div>
-
-          <div className="ml-auto flex items-center gap-2 sm:gap-4">
-            <span className="hidden font-body text-sm text-text-secondary lg:inline">
-              {user?.email}
+          <img
+            src="/logo.webp"
+            srcSet="/logo.webp 1x, /logo@2x.webp 2x"
+            alt="Coppice"
+            width={32}
+            height={32}
+            className="h-8 w-8 shrink-0"
+          />
+          {!sidebarCollapsed && (
+            <span className="font-display text-lg font-semibold tracking-tight text-text-primary">
+              Coppice
             </span>
-            <button
-              type="button"
-              onClick={() => void logout()}
-              className="rounded-md border border-border px-3 py-1.5 font-body text-sm text-text-secondary transition-colors duration-fast hover:border-border-strong hover:text-text-primary"
-            >
-              Sign out
-            </button>
-            {user && <NotificationBell userId={user.id} onOpenTicket={openTicket} />}
-          </div>
+          )}
         </div>
-      </header>
 
-      <main
+        <nav
+          className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto p-2"
+          aria-label="Main"
+        >
+          {visibleNavItems.map(({ to, label, icon: Icon }) => (
+            <NavLink
+              key={to}
+              to={to}
+              aria-label={sidebarCollapsed ? label : undefined}
+              title={sidebarCollapsed ? label : undefined}
+              className={({ isActive }) =>
+                navLinkClass({ isActive, collapsed: sidebarCollapsed })
+              }
+            >
+              <Icon className="h-[1.125rem] w-[1.125rem] shrink-0" aria-hidden />
+              {!sidebarCollapsed && <span>{label}</span>}
+            </NavLink>
+          ))}
+        </nav>
+
+        <div className="shrink-0 border-t border-border p-2">
+          <button
+            type="button"
+            onClick={toggleSidebar}
+            className={cn(
+              'flex w-full items-center rounded-md font-body text-sm text-text-secondary transition-colors duration-fast hover:bg-paper-200 hover:text-text-primary',
+              sidebarCollapsed ? 'justify-center px-2 py-2.5' : 'gap-3 px-3 py-2',
+            )}
+            aria-expanded={!sidebarCollapsed}
+            aria-label={
+              sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'
+            }
+          >
+            {sidebarCollapsed ? (
+              <PanelLeftOpen className="h-[1.125rem] w-[1.125rem] shrink-0" />
+            ) : (
+              <>
+                <PanelLeftClose className="h-[1.125rem] w-[1.125rem] shrink-0" />
+                <span>Collapse</span>
+              </>
+            )}
+          </button>
+        </div>
+      </aside>
+
+      <div
         className={cn(
-          chatLayout
-            ? 'flex min-h-0 flex-1 flex-col overflow-hidden px-4 py-4 sm:px-6 sm:py-5'
-            : boardLayout
-              ? 'px-8 py-8'
-              : 'mx-auto max-w-6xl px-8 py-8',
+          'flex min-h-0 min-w-0 flex-1 flex-col',
+          chatLayout && 'overflow-hidden',
         )}
-        data-testid="app-shell-main"
-        data-layout={chatLayout ? 'chat' : boardLayout ? 'board' : 'default'}
       >
-        <Outlet />
-      </main>
+        <header
+          className="flex shrink-0 items-center justify-end gap-2 border-b border-border bg-surface px-4 py-3 sm:gap-4 sm:px-6"
+        >
+          <span className="mr-auto hidden truncate font-body text-sm text-text-secondary sm:inline">
+            {user?.email}
+          </span>
+          <button
+            type="button"
+            onClick={() => void logout()}
+            className="inline-flex items-center gap-2 rounded-md border border-border px-3 py-1.5 font-body text-sm text-text-secondary transition-colors duration-fast hover:border-border-strong hover:text-text-primary"
+          >
+            <LogOut className="h-4 w-4 shrink-0" aria-hidden />
+            Sign out
+          </button>
+          {user && (
+            <NotificationBell userId={user.id} onOpenTicket={openTicket} />
+          )}
+        </header>
+
+        <main
+          className={cn(
+            chatLayout
+              ? 'flex min-h-0 flex-1 flex-col overflow-hidden px-4 py-4 sm:px-6 sm:py-5'
+              : boardLayout
+                ? 'px-8 py-8'
+                : 'mx-auto max-w-6xl px-8 py-8',
+            fullWidth && !chatLayout && 'max-w-none',
+          )}
+          data-testid="app-shell-main"
+          data-layout={chatLayout ? 'chat' : boardLayout ? 'board' : 'default'}
+        >
+          <Outlet />
+        </main>
+      </div>
     </div>
   );
 }

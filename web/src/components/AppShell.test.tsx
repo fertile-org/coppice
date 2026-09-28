@@ -1,5 +1,5 @@
 import '@testing-library/jest-dom/vitest';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { describe, expect, it, vi } from 'vitest';
 import { AppShell } from './AppShell';
@@ -24,6 +24,10 @@ vi.mock('../features/tickets/useOpenTicket', () => ({
 }));
 
 describe('AppShell', () => {
+  beforeEach(() => {
+    localStorage.clear();
+  });
+
   it('keeps notification and sign-out controls in the same visual and focus order', () => {
     render(
       <MemoryRouter>
@@ -101,11 +105,11 @@ describe('AppShell', () => {
     );
 
     const main = screen.getByTestId('app-shell-main');
-    const root = main.parentElement;
+    const root = screen.getByTestId('app-shell-root');
     expect(root).toHaveClass('h-svh');
     expect(root).toHaveClass('overflow-hidden');
     expect(root).toHaveClass('flex');
-    expect(root).toHaveClass('flex-col');
+    expect(main.parentElement).toHaveClass('flex-col');
     expect(main).toHaveClass('overflow-hidden');
     expect(main).toHaveClass('min-h-0');
   });
@@ -117,8 +121,7 @@ describe('AppShell', () => {
       </MemoryRouter>,
     );
 
-    const main = screen.getByTestId('app-shell-main');
-    const root = main.parentElement;
+    const root = screen.getByTestId('app-shell-root');
     expect(root).toHaveClass('min-h-screen');
     expect(root).not.toHaveClass('h-svh');
     expect(root).not.toHaveClass('overflow-hidden');
@@ -134,7 +137,7 @@ describe('AppShell', () => {
     );
 
     const main = screen.getByTestId('app-shell-main');
-    const root = main.parentElement;
+    const root = screen.getByTestId('app-shell-root');
     expect(main).toHaveAttribute('data-layout', 'board');
     expect(main).not.toHaveClass('max-w-6xl');
     expect(main).not.toHaveClass('mx-auto');
@@ -159,5 +162,36 @@ describe('AppShell', () => {
     const main = screen.getByTestId('app-shell-main');
     expect(main).toHaveAttribute('data-layout', 'default');
     expect(main).toHaveClass('max-w-6xl');
+  });
+
+  it('renders an expanded sidebar by default with nav icons', () => {
+    render(
+      <MemoryRouter>
+        <AppShell />
+      </MemoryRouter>,
+    );
+
+    const sidebar = screen.getByTestId('app-shell-sidebar');
+    expect(sidebar).toHaveAttribute('data-collapsed', 'false');
+    expect(screen.getByRole('link', { name: 'Projects' })).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'Collapse sidebar' }),
+    ).toBeInTheDocument();
+  });
+
+  it('collapses the sidebar when the toggle is used', () => {
+    render(
+      <MemoryRouter>
+        <AppShell />
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Collapse sidebar' }));
+
+    const sidebar = screen.getByTestId('app-shell-sidebar');
+    expect(sidebar).toHaveAttribute('data-collapsed', 'true');
+    expect(
+      screen.getByRole('button', { name: 'Expand sidebar' }),
+    ).toBeInTheDocument();
   });
 });
