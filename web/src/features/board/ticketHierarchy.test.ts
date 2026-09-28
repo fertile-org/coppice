@@ -6,7 +6,7 @@ function makeTicket(
   overrides: Pick<Ticket, 'id' | 'title' | 'status'> & Partial<Ticket>,
 ): Ticket {
   return {
-    projectId: 'project-1',
+    boardId: 'board-1',
     description: '',
     createdBy: 'user',
     createdAt: '2026-08-03T00:00:00.000Z',

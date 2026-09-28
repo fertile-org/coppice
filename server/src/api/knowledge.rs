@@ -115,7 +115,7 @@ impl IntoResponse for KnowledgeApiError {
 #[serde(rename_all = "camelCase")]
 struct ListQuery {
     status: Option<String>,
-    project_id: Option<Uuid>,
+    board_id: Option<Uuid>,
     knowledge_type: Option<String>,
     cursor: Option<String>,
     limit: Option<usize>,
@@ -125,7 +125,7 @@ struct ListQuery {
 #[serde(rename_all = "camelCase")]
 struct RevisionBody {
     scope: String,
-    project_id: Option<Uuid>,
+    board_id: Option<Uuid>,
     agent_id: Option<Uuid>,
     knowledge_type: String,
     title: String,
@@ -165,7 +165,7 @@ struct EditBody {
     expected_version: i32,
     scope: Option<String>,
     #[serde(default, deserialize_with = "deserialize_present_nullable")]
-    project_id: Option<Option<Uuid>>,
+    board_id: Option<Option<Uuid>>,
     #[serde(default, deserialize_with = "deserialize_present_nullable")]
     agent_id: Option<Option<Uuid>>,
     knowledge_type: Option<String>,
@@ -198,8 +198,8 @@ pub(crate) struct KnowledgeResponse {
     revision_number: i32,
     active_revision_id: Option<Uuid>,
     scope: String,
-    project_id: Option<Uuid>,
-    project_name: Option<String>,
+    board_id: Option<Uuid>,
+    board_name: Option<String>,
     agent_id: Option<Uuid>,
     agent_name: Option<String>,
     knowledge_type: String,
@@ -268,7 +268,7 @@ fn revision_input(body: RevisionBody) -> Result<KnowledgeRevisionInput, Knowledg
     Ok(KnowledgeRevisionInput {
         scope: scope_from_str(&body.scope)
             .ok_or_else(|| KnowledgeApiError::validation("invalid scope"))?,
-        project_id: body.project_id,
+        board_id: body.board_id,
         agent_id: body.agent_id,
         knowledge_type: type_from_str(&body.knowledge_type)
             .ok_or_else(|| KnowledgeApiError::validation("invalid knowledgeType"))?,
@@ -293,7 +293,7 @@ fn page_filter(query: ListQuery) -> Result<KnowledgeListFilter, KnowledgeApiErro
                     .ok_or_else(|| KnowledgeApiError::validation("invalid status"))
             })
             .transpose()?,
-        project_id: query.project_id,
+        board_id: query.board_id,
         knowledge_type: query
             .knowledge_type
             .as_deref()
@@ -326,8 +326,8 @@ pub(crate) fn item_response(item: KnowledgeItemView) -> KnowledgeResponse {
         revision_number: item.revision_number,
         active_revision_id: item.active_revision_id,
         scope: scope_to_str(item.scope).into(),
-        project_id: item.project_id,
-        project_name: item.project_name,
+        board_id: item.board_id,
+        board_name: item.board_name,
         agent_id: item.agent_id,
         agent_name: item.agent_name,
         knowledge_type: type_to_str(item.knowledge_type).into(),
@@ -408,7 +408,7 @@ struct SimilarNeighborResponse {
     title: String,
     knowledge_type: String,
     scope: String,
-    project_id: Option<Uuid>,
+    board_id: Option<Uuid>,
     similarity: f64,
     status: String,
     embedding_status: String,
@@ -427,7 +427,7 @@ fn similar_neighbor_response(neighbor: SimilarKnowledgeNeighbor) -> SimilarNeigh
         title: neighbor.title,
         knowledge_type: neighbor.knowledge_type,
         scope: neighbor.scope,
-        project_id: neighbor.project_id,
+        board_id: neighbor.board_id,
         similarity: neighbor.similarity,
         status: neighbor.status,
         embedding_status: neighbor.embedding_status,
@@ -490,7 +490,7 @@ async fn edit_knowledge(
                 scope_from_str(value).ok_or_else(|| KnowledgeApiError::validation("invalid scope"))
             })
             .transpose()?,
-        project_id: body.project_id,
+        board_id: body.board_id,
         agent_id: body.agent_id,
         knowledge_type: body
             .knowledge_type
@@ -642,7 +642,7 @@ mod tests {
     fn rejects_team_scope() {
         let result = revision_input(RevisionBody {
             scope: "team".into(),
-            project_id: None,
+            board_id: None,
             agent_id: None,
             knowledge_type: "test_command".into(),
             title: "Test".into(),
@@ -669,16 +669,16 @@ mod tests {
             "expectedVersion": 1
         }))
         .unwrap();
-        assert_eq!(omitted.project_id, None);
+        assert_eq!(omitted.board_id, None);
         assert_eq!(omitted.agent_id, None);
 
         let cleared: EditBody = serde_json::from_value(serde_json::json!({
             "expectedVersion": 1,
-            "projectId": null,
+            "boardId": null,
             "agentId": null
         }))
         .unwrap();
-        assert_eq!(cleared.project_id, Some(None));
+        assert_eq!(cleared.board_id, Some(None));
         assert_eq!(cleared.agent_id, Some(None));
     }
 }

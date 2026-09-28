@@ -469,7 +469,7 @@ async fn execute_job(
         let knowledge_section = if state.config.knowledge.enabled
             && has_eligible(
                 pool,
-                ticket.ticket.project_id,
+                ticket.ticket.board_id,
                 run.agent_id,
                 &state.config.knowledge.retrieval,
             )
@@ -492,7 +492,7 @@ async fn execute_job(
                 .context("knowledge query embedding missing")?;
             let retrieved = retrieve(
                 pool,
-                ticket.ticket.project_id,
+                ticket.ticket.board_id,
                 run.agent_id,
                 query_vector,
                 &state.config.knowledge.retrieval,

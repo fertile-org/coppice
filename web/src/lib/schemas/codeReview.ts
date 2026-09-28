@@ -64,7 +64,7 @@ export const submitReviewSchema = z.object({
   ticketId: z.string().uuid().nullable().optional(),
   newTicket: z
     .object({
-      projectId: z.string().uuid(),
+      boardId: z.string().uuid(),
       title: z.string().min(1),
       description: z.string().optional(),
     })

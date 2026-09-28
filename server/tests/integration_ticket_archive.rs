@@ -6,7 +6,7 @@ use uuid::Uuid;
 
 async fn create_ticket(
     app: &axum::Router,
-    project_id: &str,
+    board_id: &str,
     cookie: &str,
     csrf: &str,
 ) -> serde_json::Value {
@@ -14,7 +14,7 @@ async fn create_ticket(
         .clone()
         .oneshot(common::json_request(
             "POST",
-            &format!("/api/projects/{project_id}/tickets"),
+            &format!("/api/boards/{board_id}/tickets"),
             r#"{"title":"Archive me","description":"soft archive"}"#,
             cookie,
             csrf,
@@ -33,8 +33,8 @@ async fn archive_and_unarchive_ticket() {
         "embedded test db unavailable"
     );
     let (app, cookie, csrf) = common::bootstrap_and_login().await;
-    let project_id = common::create_test_project(&app, &cookie, &csrf).await;
-    let ticket = create_ticket(&app, &project_id, &cookie, &csrf).await;
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
+    let ticket = create_ticket(&app, &board_id, &cookie, &csrf).await;
     let ticket_id = ticket["id"].as_str().unwrap();
     assert!(ticket["archivedAt"].is_null());
 
@@ -107,9 +107,9 @@ async fn default_list_excludes_archived_include_flag_includes() {
         "embedded test db unavailable"
     );
     let (app, cookie, csrf) = common::bootstrap_and_login().await;
-    let project_id = common::create_test_project(&app, &cookie, &csrf).await;
-    let active = create_ticket(&app, &project_id, &cookie, &csrf).await;
-    let to_archive = create_ticket(&app, &project_id, &cookie, &csrf).await;
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
+    let active = create_ticket(&app, &board_id, &cookie, &csrf).await;
+    let to_archive = create_ticket(&app, &board_id, &cookie, &csrf).await;
     let archived_id = to_archive["id"].as_str().unwrap();
 
     let archive = app
@@ -129,7 +129,7 @@ async fn default_list_excludes_archived_include_flag_includes() {
         .clone()
         .oneshot(common::json_request(
             "GET",
-            &format!("/api/projects/{project_id}/tickets"),
+            &format!("/api/boards/{board_id}/tickets"),
             "",
             &cookie,
             &csrf,
@@ -151,7 +151,7 @@ async fn default_list_excludes_archived_include_flag_includes() {
         .clone()
         .oneshot(common::json_request(
             "GET",
-            &format!("/api/projects/{project_id}/tickets?includeArchived=true"),
+            &format!("/api/boards/{board_id}/tickets?includeArchived=true"),
             "",
             &cookie,
             &csrf,
@@ -182,9 +182,9 @@ async fn reject_archive_while_active_run() {
     let (_git_dir, local_path) = common::create_temp_git_checkout();
     let repo_id =
         common::register_test_repo(&app, &local_path.display().to_string(), &cookie, &csrf).await;
-    let project_id = common::create_test_project(&app, &cookie, &csrf).await;
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
     let agent_id = common::create_test_agent_from_preset(&app, "Worker", &cookie, &csrf).await;
-    let ticket_id = common::create_test_ticket(&app, &project_id, &cookie, &csrf).await;
+    let ticket_id = common::create_test_ticket(&app, &board_id, &cookie, &csrf).await;
     common::set_ticket_repo(&app, &ticket_id, &repo_id, &cookie, &csrf).await;
     common::assign_agent_to_ticket(&app, &ticket_id, &agent_id, &cookie, &csrf).await;
 
@@ -223,8 +223,8 @@ async fn reject_mutations_while_archived() {
         "embedded test db unavailable"
     );
     let (app, cookie, csrf) = common::bootstrap_and_login().await;
-    let project_id = common::create_test_project(&app, &cookie, &csrf).await;
-    let ticket = create_ticket(&app, &project_id, &cookie, &csrf).await;
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
+    let ticket = create_ticket(&app, &board_id, &cookie, &csrf).await;
     let ticket_id = ticket["id"].as_str().unwrap();
 
     let archive = app
@@ -302,8 +302,8 @@ async fn archive_parent_does_not_archive_children() {
     );
     let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
     let pool = state.db.as_ref().expect("db pool");
-    let project_id = common::create_test_project(&app, &cookie, &csrf).await;
-    let parent = create_ticket(&app, &project_id, &cookie, &csrf).await;
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
+    let parent = create_ticket(&app, &board_id, &cookie, &csrf).await;
     let parent_id = Uuid::parse_str(parent["id"].as_str().unwrap()).unwrap();
 
     let parent_ticket = coppice_server::services::ticket_service::TicketService::new(pool)
@@ -353,7 +353,7 @@ async fn archive_parent_does_not_archive_children() {
         .clone()
         .oneshot(common::json_request(
             "GET",
-            &format!("/api/projects/{project_id}/tickets"),
+            &format!("/api/boards/{board_id}/tickets"),
             "",
             &cookie,
             &csrf,

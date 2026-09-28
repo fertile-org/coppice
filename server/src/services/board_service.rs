@@ -1,47 +1,47 @@
-use crate::domain::project::Project;
+use crate::domain::board::Board;
 use sqlx::PgPool;
 use sqlx::Row;
 use uuid::Uuid;
 
-pub struct ProjectService<'a> {
+pub struct BoardService<'a> {
     pool: &'a PgPool,
 }
 
 #[derive(Debug, thiserror::Error)]
-pub enum ProjectError {
-    #[error("project not found")]
-    ProjectNotFound,
+pub enum BoardError {
+    #[error("board not found")]
+    BoardNotFound,
     #[error("repo not found")]
     RepoNotFound,
     #[error(transparent)]
     Database(#[from] sqlx::Error),
 }
 
-impl<'a> ProjectService<'a> {
+impl<'a> BoardService<'a> {
     pub fn new(pool: &'a PgPool) -> Self {
         Self { pool }
     }
 
-    pub async fn list_projects(&self) -> Result<Vec<Project>, ProjectError> {
+    pub async fn list_boards(&self) -> Result<Vec<Board>, BoardError> {
         let rows = sqlx::query(
             r#"
             SELECT id, name, slug, created_at
-            FROM projects
+            FROM boards
             ORDER BY created_at ASC
             "#,
         )
         .fetch_all(self.pool)
         .await?;
 
-        Ok(rows.iter().map(row_to_project).collect())
+        Ok(rows.iter().map(row_to_board).collect())
     }
 
-    pub async fn create_project(&self, name: &str) -> Result<Project, ProjectError> {
+    pub async fn create_board(&self, name: &str) -> Result<Board, BoardError> {
         let id = Uuid::new_v4();
         let slug = slugify(name);
         let row = sqlx::query(
             r#"
-            INSERT INTO projects (id, name, slug)
+            INSERT INTO boards (id, name, slug)
             VALUES ($1, $2, $3)
             RETURNING id, name, slug, created_at
             "#,
@@ -52,55 +52,55 @@ impl<'a> ProjectService<'a> {
         .fetch_one(self.pool)
         .await?;
 
-        Ok(row_to_project(&row))
+        Ok(row_to_board(&row))
     }
 
-    pub async fn get_project(&self, project_id: Uuid) -> Result<Project, ProjectError> {
+    pub async fn get_board(&self, board_id: Uuid) -> Result<Board, BoardError> {
         let row = sqlx::query(
             r#"
             SELECT id, name, slug, created_at
-            FROM projects
+            FROM boards
             WHERE id = $1
             "#,
         )
-        .bind(project_id)
+        .bind(board_id)
         .fetch_optional(self.pool)
         .await?
-        .ok_or(ProjectError::ProjectNotFound)?;
+        .ok_or(BoardError::BoardNotFound)?;
 
-        Ok(row_to_project(&row))
+        Ok(row_to_board(&row))
     }
 
-    pub async fn update_project(
+    pub async fn update_board(
         &self,
-        project_id: Uuid,
+        board_id: Uuid,
         name: Option<&str>,
-    ) -> Result<Project, ProjectError> {
-        let current = self.get_project(project_id).await?;
+    ) -> Result<Board, BoardError> {
+        let current = self.get_board(board_id).await?;
         let name = name.unwrap_or(&current.name);
         let slug = slugify(name);
 
         let row = sqlx::query(
             r#"
-            UPDATE projects
+            UPDATE boards
             SET name = $2, slug = $3
             WHERE id = $1
             RETURNING id, name, slug, created_at
             "#,
         )
-        .bind(project_id)
+        .bind(board_id)
         .bind(name)
         .bind(&slug)
         .fetch_optional(self.pool)
         .await?
-        .ok_or(ProjectError::ProjectNotFound)?;
+        .ok_or(BoardError::BoardNotFound)?;
 
-        Ok(row_to_project(&row))
+        Ok(row_to_board(&row))
     }
 }
 
-fn row_to_project(row: &sqlx::postgres::PgRow) -> Project {
-    Project {
+fn row_to_board(row: &sqlx::postgres::PgRow) -> Board {
+    Board {
         id: row.get("id"),
         name: row.get("name"),
         slug: row.get("slug"),

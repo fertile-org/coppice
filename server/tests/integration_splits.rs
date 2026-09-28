@@ -18,10 +18,10 @@ async fn approve_splits_creates_children() {
 
     let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
     let pool = state.db.as_ref().expect("db pool");
-    let project_id = common::create_test_project(&app, &cookie, &csrf).await;
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
     let pm_id =
         common::create_agent_with_preset_key(&app, "pm", "PM Agent", &cookie, &csrf).await;
-    let ticket_id = common::create_test_ticket(&app, &project_id, &cookie, &csrf).await;
+    let ticket_id = common::create_test_ticket(&app, &board_id, &cookie, &csrf).await;
     let ticket_uuid = Uuid::parse_str(&ticket_id).expect("ticket uuid");
     let pm_uuid = Uuid::parse_str(&pm_id).expect("pm uuid");
 
@@ -115,7 +115,7 @@ async fn auto_split_creates_children_on_pm_run() {
     .await;
     let pool = state.db.as_ref().expect("db pool");
 
-    let project_id = common::create_test_project(&app, &cookie, &csrf).await;
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
     let (_git_dir, local_path) = common::create_temp_git_checkout();
     let repo_id =
         common::register_test_repo(&app, &local_path.display().to_string(), &cookie, &csrf).await;
@@ -130,7 +130,7 @@ async fn auto_split_creates_children_on_pm_run() {
     )
     .await;
 
-    let ticket_id = common::create_test_ticket(&app, &project_id, &cookie, &csrf).await;
+    let ticket_id = common::create_test_ticket(&app, &board_id, &cookie, &csrf).await;
     let ticket_uuid = Uuid::parse_str(&ticket_id).expect("ticket uuid");
     common::set_ticket_repo(&app, &ticket_id, &repo_id, &cookie, &csrf).await;
     common::assign_agent_to_ticket(&app, &ticket_id, &pm_id, &cookie, &csrf).await;

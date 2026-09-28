@@ -12,7 +12,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
 import { useAgents } from '../agents/useAgents';
 import { TicketDrawer } from '../tickets/TicketDrawer';
-import { setLastProjectId } from '../projects/useProjects';
+import { setLastBoardId } from '../boards/useBoards';
 import { BoardColumn } from './BoardColumn';
 import { BOARD_COLUMNS, isTicketStatus, type TicketStatus } from './columns';
 import { resolveAssigneeName, TicketCard } from './TicketCard';
@@ -36,19 +36,19 @@ function resolveDropStatus(
 }
 
 export function BoardPage() {
-  const { projectId } = useParams<{ projectId: string }>();
+  const { boardId } = useParams<{ boardId: string }>();
   const [searchParams, setSearchParams] = useSearchParams();
   const queryClient = useQueryClient();
   const selectedTicketId = searchParams.get('ticket');
   const [showArchived, setShowArchived] = useState(false);
 
   const { data: tickets, isLoading, isError, refetch } = useTickets(
-    projectId,
+    boardId,
     showArchived,
   );
   const { data: agents } = useAgents();
-  const createTicket = useCreateTicket(projectId ?? '');
-  const updateStatus = useUpdateTicketStatus(projectId ?? '', showArchived);
+  const createTicket = useCreateTicket(boardId ?? '');
+  const updateStatus = useUpdateTicketStatus(boardId ?? '', showArchived);
 
   const [activeTicket, setActiveTicket] = useState<Ticket | null>(null);
 
@@ -67,8 +67,8 @@ export function BoardPage() {
   );
 
   useEffect(() => {
-    if (projectId) setLastProjectId(projectId);
-  }, [projectId]);
+    if (boardId) setLastBoardId(boardId);
+  }, [boardId]);
 
   const ticketsById = useMemo(
     () => new Map((tickets ?? []).map((t) => [t.id, t])),
@@ -101,8 +101,8 @@ export function BoardPage() {
 
   function closeDrawer() {
     setSearchParams({});
-    if (projectId) {
-      void queryClient.invalidateQueries({ queryKey: ticketsQueryKey(projectId) });
+    if (boardId) {
+      void queryClient.invalidateQueries({ queryKey: ticketsQueryKey(boardId) });
     }
   }
 
@@ -114,7 +114,7 @@ export function BoardPage() {
   function handleDragEnd(event: DragEndEvent) {
     setActiveTicket(null);
     const { active, over } = event;
-    if (!over || !projectId) return;
+    if (!over || !boardId) return;
 
     const ticketId = String(active.id);
     const ticket = ticketsById.get(ticketId);
@@ -130,9 +130,9 @@ export function BoardPage() {
     await createTicket.mutateAsync(title);
   }
 
-  if (!projectId) {
+  if (!boardId) {
     return (
-      <p className="font-body text-sm text-danger">Missing project id.</p>
+      <p className="font-body text-sm text-danger">Missing board id.</p>
     );
   }
 

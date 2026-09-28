@@ -164,7 +164,7 @@ fn map_error(err: CommentError) -> StatusCode {
 
 fn map_ticket_error(err: TicketError) -> StatusCode {
     match err {
-        TicketError::TicketNotFound | TicketError::ProjectNotFound => StatusCode::NOT_FOUND,
+        TicketError::TicketNotFound | TicketError::BoardNotFound => StatusCode::NOT_FOUND,
         TicketError::InvalidStatus
         | TicketError::InvalidSubstatus
         | TicketError::InvalidPriority
@@ -286,7 +286,7 @@ async fn create_comment(
                 comment.id,
                 &parsed_mentions,
                 None,
-                ticket.ticket.project_id,
+                ticket.ticket.board_id,
             )
             .await
             .map_err(map_mention_error)?;

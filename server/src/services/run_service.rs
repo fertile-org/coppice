@@ -735,14 +735,14 @@ mod tests {
     }
 
     async fn insert_run(pool: &PgPool, status: RunStatus) -> Uuid {
-        let project_id = Uuid::new_v4();
-        sqlx::query("INSERT INTO projects (id, name, slug) VALUES ($1, $2, $3)")
-            .bind(project_id)
-            .bind("test project")
-            .bind(format!("test-{}", project_id))
+        let board_id = Uuid::new_v4();
+        sqlx::query("INSERT INTO boards (id, name, slug) VALUES ($1, $2, $3)")
+            .bind(board_id)
+            .bind("test board")
+            .bind(format!("test-{}", board_id))
             .execute(pool)
             .await
-            .expect("insert project");
+            .expect("insert board");
 
         let agent_id = Uuid::new_v4();
         sqlx::query(
@@ -766,13 +766,13 @@ mod tests {
         sqlx::query(
             r#"
             INSERT INTO tickets (
-                id, project_id, title, status, created_by, assignee_agent_id
+                id, board_id, title, status, created_by, assignee_agent_id
             )
             VALUES ($1, $2, $3, $4, $5, $6)
             "#,
         )
         .bind(ticket_id)
-        .bind(project_id)
+        .bind(board_id)
         .bind("test ticket")
         .bind("todo")
         .bind("test")

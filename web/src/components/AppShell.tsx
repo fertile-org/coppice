@@ -28,7 +28,7 @@ type NavItem = {
 };
 
 const NAV_ITEMS: NavItem[] = [
-  { to: '/projects', label: 'Projects', icon: LayoutGrid },
+  { to: '/boards', label: 'Boards', icon: LayoutGrid },
   { to: '/agents', label: 'Agents', icon: Bot },
   { to: '/chat', label: 'Chat', icon: MessageSquare },
   { to: '/knowledge', label: 'Knowledge', icon: BookOpen },
@@ -66,7 +66,7 @@ function isChatRoute(pathname: string): boolean {
 }
 
 function isBoardRoute(pathname: string): boolean {
-  return /^\/projects\/[^/]+\/board\/?$/.test(pathname);
+  return /^\/boards\/[^/]+\/?$/.test(pathname);
 }
 
 export function AppShell() {

@@ -4,7 +4,7 @@ import type { ChatSession } from './schemas/chat';
 
 const session: ChatSession = {
   id: '00000000-0000-4000-8000-000000000001',
-  projectId: null,
+  boardId: null,
   ownerUserId: '00000000-0000-4000-8000-000000000002',
   agentId: '00000000-0000-4000-8000-000000000010',
   repoId: null,

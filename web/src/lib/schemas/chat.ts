@@ -7,7 +7,7 @@ export const chatMessageRoleSchema = z.enum(['human', 'agent', 'system']);
 
 export const chatSessionSchema = z.object({
   id: z.string().uuid(),
-  projectId: z.string().uuid().nullable(),
+  boardId: z.string().uuid().nullable(),
   ownerUserId: z.string().uuid(),
   agentId: z.string().uuid(),
   repoId: z.string().uuid().nullable(),
@@ -72,7 +72,7 @@ export const postChatMessageResponseSchema = z.object({
 const chatCreatedTicketSchema = z
   .object({
     id: z.string().uuid(),
-    projectId: z.string().uuid(),
+    boardId: z.string().uuid(),
     title: z.string(),
     status: z.string(),
   })

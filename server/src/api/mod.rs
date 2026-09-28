@@ -12,7 +12,7 @@ mod health;
 mod jobs;
 mod knowledge;
 mod notifications;
-mod projects;
+mod boards;
 mod repos;
 mod tickets;
 mod tools;
@@ -29,7 +29,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .merge(auth::public_routes());
 
     let protected = auth::protected_routes()
-        .merge(projects::routes())
+        .merge(boards::routes())
         .merge(repos::routes())
         .merge(code_reviews::routes())
         .merge(tickets::routes())

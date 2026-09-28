@@ -8,7 +8,7 @@ import type { Ticket } from './useTickets';
 
 const ticket: Ticket = {
   id: 'ticket-1',
-  projectId: 'project-1',
+  boardId: 'board-1',
   title: 'Implement the board hierarchy',
   description: '',
   status: 'in_progress',

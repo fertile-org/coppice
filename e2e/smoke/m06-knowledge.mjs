@@ -106,14 +106,14 @@ async function expectJson(response, expectedStatus, label) {
   return response.json();
 }
 
-async function createProject(auth, suffix) {
+async function createBoard(auth, suffix) {
   return expectJson(
-    await api('POST', '/api/projects', {
+    await api('POST', '/api/boards', {
       ...auth,
       body: { name: `M06 Knowledge Smoke ${suffix}` },
     }),
     201,
-    'create project',
+    'create board',
   );
 }
 
@@ -158,9 +158,9 @@ async function createAgent(auth, suffix) {
   );
 }
 
-async function createTicket(projectId, title, description, auth) {
+async function createTicket(boardId, title, description, auth) {
   return expectJson(
-    await api('POST', `/api/projects/${projectId}/tickets`, {
+    await api('POST', `/api/boards/${boardId}/tickets`, {
       ...auth,
       body: { title, description },
     }),
@@ -215,20 +215,20 @@ async function main() {
   await bootstrapIfNeeded();
   const auth = await login();
   const suffix = `${Date.now()}-${Math.floor(Math.random() * 10_000)}`;
-  const project = await createProject(auth, suffix);
+  const board = await createBoard(auth, suffix);
   const repo = await registerRepo(auth);
   const agent = await createAgent(auth, suffix);
 
   const title = `M06 exact retrieval ${suffix}`;
   const description = `Use governed knowledge marker ${suffix} for this ticket.`;
-  const ticket = await createTicket(project.id, title, description, auth);
+  const ticket = await createTicket(board.id, title, description, auth);
 
   const candidate = await expectJson(
     await api('POST', '/api/knowledge', {
       ...auth,
       body: {
-        scope: 'project',
-        projectId: project.id,
+        scope: 'board',
+        boardId: board.id,
         agentId: null,
         knowledgeType: 'test_command',
         title: 'Draft retrieval title',
@@ -291,7 +291,7 @@ async function main() {
   const inbox = await expectJson(
     await api(
       'GET',
-      `/api/knowledge/inbox?projectId=${encodeURIComponent(project.id)}&limit=100`,
+      `/api/knowledge/inbox?boardId=${encodeURIComponent(board.id)}&limit=100`,
       auth,
     ),
     200,
@@ -353,7 +353,7 @@ async function main() {
   console.log(`smoke: audited exact revision on run ${run.id}`);
 
   const extractionTicket = await createTicket(
-    project.id,
+    board.id,
     `M06 extraction ${suffix}`,
     `Prefer Result over panic in public APIs. Extraction marker ${suffix}.`,
     auth,
@@ -370,7 +370,7 @@ async function main() {
     const page = await expectJson(
       await api(
         'GET',
-        `/api/knowledge/inbox?projectId=${encodeURIComponent(project.id)}&limit=100`,
+        `/api/knowledge/inbox?boardId=${encodeURIComponent(board.id)}&limit=100`,
         auth,
       ),
       200,
@@ -407,7 +407,7 @@ async function main() {
   const afterRepeat = await expectJson(
     await api(
       'GET',
-      `/api/knowledge/inbox?projectId=${encodeURIComponent(project.id)}&limit=100`,
+      `/api/knowledge/inbox?boardId=${encodeURIComponent(board.id)}&limit=100`,
       auth,
     ),
     200,

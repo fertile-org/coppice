@@ -22,7 +22,7 @@ import { filterChatSessions } from '../../lib/chatSessionSearch';
 import type { ChatSession, ChatSessionStatus } from '../../lib/schemas/chat';
 import { cn } from '../../lib/utils';
 import { useAgents } from '../agents/useAgents';
-import { useProjects } from '../projects/useProjects';
+import { useBoards } from '../boards/useBoards';
 import { useUploadAttachment } from '../tickets/useTicket';
 import { ChatMessageList } from './ChatMessageList';
 import { ChatSessionActions } from './ChatSessionActions';
@@ -138,14 +138,14 @@ function NewChatForm({
   onCreated: (sessionId: string) => void;
 }) {
   const { data: agents = [] } = useAgents();
-  const { data: projects = [] } = useProjects();
+  const { data: boards = [] } = useBoards();
   const createSession = useCreateChatSession();
   const enabledAgents = useMemo(
     () => agents.filter((agent) => agent.enabled),
     [agents],
   );
   const [agentId, setAgentId] = useState('');
-  const [projectId, setProjectId] = useState('');
+  const [boardId, setBoardId] = useState('');
   const [error, setError] = useState<string | null>(null);
 
   async function handleSubmit(event: FormEvent) {
@@ -158,7 +158,7 @@ function NewChatForm({
     try {
       const session = await createSession.mutateAsync({
         agentId,
-        projectId: projectId || null,
+        boardId: boardId || null,
       });
       onCreated(session.id);
     } catch (err) {
@@ -200,18 +200,18 @@ function NewChatForm({
       </div>
 
       <div className="space-y-2">
-        <Label htmlFor="chat-project">Project (optional)</Label>
+        <Label htmlFor="chat-board">Board (optional)</Label>
         <select
-          id="chat-project"
-          aria-label="Project (optional)"
+          id="chat-board"
+          aria-label="Board (optional)"
           className="field-control h-10 w-full px-3 font-body text-sm"
-          value={projectId}
-          onChange={(event) => setProjectId(event.target.value)}
+          value={boardId}
+          onChange={(event) => setBoardId(event.target.value)}
         >
-          <option value="">No project</option>
-          {projects.map((project) => (
-            <option key={project.id} value={project.id}>
-              {project.name}
+          <option value="">No board</option>
+          {boards.map((board) => (
+            <option key={board.id} value={board.id}>
+              {board.name}
             </option>
           ))}
         </select>

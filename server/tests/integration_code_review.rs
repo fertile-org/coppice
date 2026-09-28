@@ -36,8 +36,8 @@ async fn setup_repo_ticket_and_worktree(
     );
     let repo_id =
         common::register_test_repo(&app, &local_path.display().to_string(), &cookie, &csrf).await;
-    let project_id = common::create_test_project(&app, &cookie, &csrf).await;
-    let ticket_id = common::create_test_ticket(&app, &project_id, &cookie, &csrf).await;
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
+    let ticket_id = common::create_test_ticket(&app, &board_id, &cookie, &csrf).await;
     common::set_ticket_repo(&app, &ticket_id, &repo_id, &cookie, &csrf).await;
     let worktree_path = common::setup_worktree_with_commit(
         &local_path,
@@ -54,7 +54,7 @@ async fn setup_repo_ticket_and_worktree(
         repo_id,
         ticket_id,
         worktree_path.display().to_string(),
-        project_id,
+        board_id,
     )
 }
 
@@ -85,7 +85,7 @@ async fn list_worktrees_and_diff_for_repo() {
         return;
     }
 
-    let (_git_dir, _env, app, cookie, csrf, repo_id, ticket_id, worktree_path, _project_id) =
+    let (_git_dir, _env, app, cookie, csrf, repo_id, ticket_id, worktree_path, _board_id) =
         setup_repo_ticket_and_worktree().await;
 
     let worktrees_res = app
@@ -157,7 +157,7 @@ async fn submit_review_on_existing_ticket() {
         return;
     }
 
-    let (_git_dir, _env, app, cookie, csrf, repo_id, ticket_id, worktree_path, _project_id) =
+    let (_git_dir, _env, app, cookie, csrf, repo_id, ticket_id, worktree_path, _board_id) =
         setup_repo_ticket_and_worktree().await;
     let head_sha = fetch_diff_head_sha(&app, &repo_id, &worktree_path, &cookie, &csrf).await;
 
@@ -225,7 +225,7 @@ async fn submit_review_creates_ticket_when_missing() {
         return;
     }
 
-    let (_git_dir, _env, app, cookie, csrf, repo_id, _ticket_id, worktree_path, project_id) =
+    let (_git_dir, _env, app, cookie, csrf, repo_id, _ticket_id, worktree_path, board_id) =
         setup_repo_ticket_and_worktree().await;
     let head_sha = fetch_diff_head_sha(&app, &repo_id, &worktree_path, &cookie, &csrf).await;
 
@@ -240,7 +240,7 @@ async fn submit_review_creates_ticket_when_missing() {
                 "baseBranch": "main",
                 "headSha": head_sha,
                 "newTicket": {
-                    "projectId": project_id,
+                    "boardId": board_id,
                     "title": "Review follow-up",
                     "description": "Created from code review"
                 },
@@ -271,7 +271,7 @@ async fn submit_review_move_to_in_progress() {
         return;
     }
 
-    let (_git_dir, _env, app, cookie, csrf, repo_id, ticket_id, worktree_path, _project_id) =
+    let (_git_dir, _env, app, cookie, csrf, repo_id, ticket_id, worktree_path, _board_id) =
         setup_repo_ticket_and_worktree().await;
     let head_sha = fetch_diff_head_sha(&app, &repo_id, &worktree_path, &cookie, &csrf).await;
 
@@ -317,8 +317,8 @@ async fn reject_invalid_worktree_path() {
         common::bootstrap_and_login_with_state_and_workers("", |_| {}).await;
     let repo_id =
         common::register_test_repo(&app, &local_path.display().to_string(), &cookie, &csrf).await;
-    let project_id = common::create_test_project(&app, &cookie, &csrf).await;
-    let ticket_id = common::create_test_ticket(&app, &project_id, &cookie, &csrf).await;
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
+    let ticket_id = common::create_test_ticket(&app, &board_id, &cookie, &csrf).await;
     common::set_ticket_repo(&app, &ticket_id, &repo_id, &cookie, &csrf).await;
 
     let invalid_path = local_path.display().to_string();

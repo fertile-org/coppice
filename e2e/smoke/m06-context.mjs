@@ -122,19 +122,19 @@ async function api(method, path, { cookie, csrfToken, body } = {}) {
   return res;
 }
 
-async function createProject(auth) {
-  const res = await api('POST', '/api/projects', {
+async function createBoard(auth) {
+  const res = await api('POST', '/api/boards', {
     ...auth,
-    body: { name: 'M06 Smoke Project' },
+    body: { name: 'M06 Smoke Board' },
   });
 
   if (res.status !== 201) {
-    fail(`create project failed: ${res.status} ${await res.text()}`);
+    fail(`create board failed: ${res.status} ${await res.text()}`);
   }
 
-  const project = await res.json();
-  console.log(`smoke: created project ${project.id}`);
-  return project;
+  const board = await res.json();
+  console.log(`smoke: created board ${board.id}`);
+  return board;
 }
 
 async function registerRepo(auth) {
@@ -188,8 +188,8 @@ async function createAgentFromPresetKey(auth, presetKey, name) {
   return agent;
 }
 
-async function createTicket(projectId, auth) {
-  const res = await api('POST', `/api/projects/${projectId}/tickets`, {
+async function createTicket(boardId, auth) {
+  const res = await api('POST', `/api/boards/${boardId}/tickets`, {
     ...auth,
     body: {
       title: 'M06 smoke ticket',
@@ -282,10 +282,10 @@ async function main() {
 
   await bootstrapIfNeeded();
   const auth = await login();
-  const project = await createProject(auth);
+  const board = await createBoard(auth);
   const repo = await registerRepo(auth);
   const pm = await createAgentFromPresetKey(auth, 'pm', 'PM Agent');
-  const ticket = await createTicket(project.id, auth);
+  const ticket = await createTicket(board.id, auth);
 
   await setTicketRepo(ticket.id, repo.id, auth);
   await assignAgent(ticket.id, pm.id, auth);

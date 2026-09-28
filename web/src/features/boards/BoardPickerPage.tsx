@@ -2,12 +2,12 @@ import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ApiError } from '../../lib/api';
 import {
-  getLastProjectId,
-  setLastProjectId,
-  useCreateProject,
-  useProjects,
-  type Project,
-} from './useProjects';
+  getLastBoardId,
+  setLastBoardId,
+  useCreateBoard,
+  useBoards,
+  type Board,
+} from './useBoards';
 
 function formatCreatedAt(iso: string): string {
   const date = new Date(iso);
@@ -19,19 +19,19 @@ function formatCreatedAt(iso: string): string {
   });
 }
 
-function ProjectCard({
-  project,
+function BoardCard({
+  board,
   isRecent,
   onSelect,
 }: {
-  project: Project;
+  board: Board;
   isRecent: boolean;
-  onSelect: (project: Project) => void;
+  onSelect: (board: Board) => void;
 }) {
   return (
     <button
       type="button"
-      onClick={() => onSelect(project)}
+      onClick={() => onSelect(board)}
       className={[
         'group flex w-full flex-col rounded-lg border bg-surface-raised p-5 text-left shadow-card transition-all duration-fast',
         'hover:border-moss-400 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-muted',
@@ -52,19 +52,19 @@ function ProjectCard({
         )}
       </div>
       <h2 className="mt-3 font-display text-lg font-semibold text-bark-900 group-hover:text-moss-800">
-        {project.name}
+        {board.name}
       </h2>
-      <p className="mt-1 font-mono text-xs text-text-muted">{project.slug}</p>
-      {project.createdAt && (
+      <p className="mt-1 font-mono text-xs text-text-muted">{board.slug}</p>
+      {board.createdAt && (
         <p className="mt-4 font-body text-xs text-text-secondary">
-          Created {formatCreatedAt(project.createdAt)}
+          Created {formatCreatedAt(board.createdAt)}
         </p>
       )}
     </button>
   );
 }
 
-function NewProjectDialog({
+function NewBoardDialog({
   open,
   onClose,
 }: {
@@ -74,7 +74,7 @@ function NewProjectDialog({
   const nameRef = useRef<HTMLInputElement>(null);
   const [name, setName] = useState('');
   const [error, setError] = useState<string | null>(null);
-  const createProject = useCreateProject();
+  const createBoard = useCreateBoard();
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -103,21 +103,21 @@ function NewProjectDialog({
     e.preventDefault();
     const trimmed = name.trim();
     if (!trimmed) {
-      setError('Project name is required.');
+      setError('Board name is required.');
       return;
     }
 
     setError(null);
     try {
-      const project = await createProject.mutateAsync(trimmed);
-      setLastProjectId(project.id);
+      const board = await createBoard.mutateAsync(trimmed);
+      setLastBoardId(board.id);
       onClose();
-      navigate(`/projects/${project.id}/board`);
+      navigate(`/boards/${board.id}`);
     } catch (err) {
       if (err instanceof ApiError && err.status === 400) {
-        setError('Invalid project name.');
+        setError('Invalid board name.');
       } else {
-        setError('Unable to create project. Please try again.');
+        setError('Unable to create board. Please try again.');
       }
     }
   }
@@ -131,15 +131,15 @@ function NewProjectDialog({
       <div
         role="dialog"
         aria-modal="true"
-        aria-labelledby="new-project-title"
+        aria-labelledby="new-board-title"
         className="w-full max-w-md rounded-xl border border-border bg-paper-50 p-6 shadow-lg"
         onClick={(e) => e.stopPropagation()}
       >
         <h2
-          id="new-project-title"
+          id="new-board-title"
           className="font-display text-xl font-semibold text-bark-900"
         >
-          New project
+          New board
         </h2>
         <p className="mt-1 font-body text-sm text-text-secondary">
           Give your workspace a name to get started.
@@ -148,14 +148,14 @@ function NewProjectDialog({
         <form onSubmit={(e) => void handleSubmit(e)} className="mt-5 space-y-4">
           <div>
             <label
-              htmlFor="project-name"
+              htmlFor="board-name"
               className="mb-1 block font-body text-sm font-medium text-bark-800"
             >
               Name
             </label>
             <input
               ref={nameRef}
-              id="project-name"
+              id="board-name"
               type="text"
               required
               value={name}
@@ -178,17 +178,17 @@ function NewProjectDialog({
             <button
               type="button"
               onClick={onClose}
-              disabled={createProject.isPending}
+              disabled={createBoard.isPending}
               className="rounded-md border border-border px-4 py-2 font-body text-sm text-text-secondary transition-colors duration-fast hover:border-bark-300 hover:text-text-primary disabled:opacity-60"
             >
               Cancel
             </button>
             <button
               type="submit"
-              disabled={createProject.isPending}
+              disabled={createBoard.isPending}
               className="rounded-md bg-moss-600 px-4 py-2 font-body text-sm font-medium text-paper-50 transition-colors duration-fast hover:bg-moss-700 disabled:opacity-60"
             >
-              {createProject.isPending ? 'Creating…' : 'Create project'}
+              {createBoard.isPending ? 'Creating…' : 'Create board'}
             </button>
           </div>
         </form>
@@ -197,15 +197,15 @@ function NewProjectDialog({
   );
 }
 
-export function ProjectPickerPage() {
+export function BoardPickerPage() {
   const navigate = useNavigate();
-  const { data: projects, isLoading, isError, refetch } = useProjects();
+  const { data: boards, isLoading, isError, refetch } = useBoards();
   const [dialogOpen, setDialogOpen] = useState(false);
-  const lastProjectId = getLastProjectId();
+  const lastBoardId = getLastBoardId();
 
-  function handleSelectProject(project: Project) {
-    setLastProjectId(project.id);
-    navigate(`/projects/${project.id}/board`);
+  function handleSelectBoard(board: Board) {
+    setLastBoardId(board.id);
+    navigate(`/boards/${board.id}`);
   }
 
   return (
@@ -213,10 +213,10 @@ export function ProjectPickerPage() {
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <h1 className="font-display text-2xl font-semibold text-bark-900">
-            Projects
+            Boards
           </h1>
           <p className="mt-2 max-w-xl font-body text-text-secondary">
-            Select or create a project to open its board.
+            Select or create a board to get started.
           </p>
         </div>
         <button
@@ -224,20 +224,20 @@ export function ProjectPickerPage() {
           onClick={() => setDialogOpen(true)}
           className="rounded-md bg-moss-600 px-4 py-2 font-body text-sm font-medium text-paper-50 shadow-sm transition-colors duration-fast hover:bg-moss-700"
         >
-          New project
+          New board
         </button>
       </div>
 
       {isLoading && (
         <p className="mt-10 font-body text-sm text-text-muted">
-          Loading projects…
+          Loading boards…
         </p>
       )}
 
       {isError && (
         <div className="mt-10 rounded-lg border border-danger-muted bg-danger-muted/50 p-4">
           <p className="font-body text-sm text-danger">
-            Unable to load projects.
+            Unable to load boards.
           </p>
           <button
             type="button"
@@ -249,39 +249,39 @@ export function ProjectPickerPage() {
         </div>
       )}
 
-      {!isLoading && !isError && projects?.length === 0 && (
+      {!isLoading && !isError && boards?.length === 0 && (
         <div className="mt-10 rounded-xl border border-dashed border-bark-300 bg-paper-100 px-8 py-12 text-center">
           <p className="font-display text-lg font-semibold text-bark-800">
-            No projects yet
+            No boards yet
           </p>
           <p className="mt-2 font-body text-sm text-text-secondary">
-            Create your first project to open a board.
+            Create your first board to start tracking tickets.
           </p>
           <button
             type="button"
             onClick={() => setDialogOpen(true)}
             className="mt-6 rounded-md bg-moss-600 px-4 py-2 font-body text-sm font-medium text-paper-50 transition-colors duration-fast hover:bg-moss-700"
           >
-            Create project
+            Create board
           </button>
         </div>
       )}
 
-      {!isLoading && !isError && projects && projects.length > 0 && (
+      {!isLoading && !isError && boards && boards.length > 0 && (
         <ul className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {projects.map((project) => (
-            <li key={project.id}>
-              <ProjectCard
-                project={project}
-                isRecent={project.id === lastProjectId}
-                onSelect={handleSelectProject}
+          {boards.map((board) => (
+            <li key={board.id}>
+              <BoardCard
+                board={board}
+                isRecent={board.id === lastBoardId}
+                onSelect={handleSelectBoard}
               />
             </li>
           ))}
         </ul>
       )}
 
-      <NewProjectDialog
+      <NewBoardDialog
         open={dialogOpen}
         onClose={() => setDialogOpen(false)}
       />

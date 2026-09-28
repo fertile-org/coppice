@@ -13,8 +13,8 @@ async fn human_mention_does_not_change_ticket_status() {
     let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
     let pool = state.db.as_ref().expect("db pool");
 
-    let project_id = common::create_test_project(&app, &cookie, &csrf).await;
-    let ticket_id = common::create_test_ticket(&app, &project_id, &cookie, &csrf).await;
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
+    let ticket_id = common::create_test_ticket(&app, &board_id, &cookie, &csrf).await;
     let _agent_id =
         common::create_agent_with_preset_key(&app, "pm", "PM Agent", &cookie, &csrf).await;
 
@@ -93,8 +93,8 @@ async fn final_approve_requires_wait_for_final_review() {
         return;
     }
     let (app, cookie, csrf) = common::bootstrap_and_login().await;
-    let project_id = common::create_test_project(&app, &cookie, &csrf).await;
-    let ticket_id = common::create_test_ticket(&app, &project_id, &cookie, &csrf).await;
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
+    let ticket_id = common::create_test_ticket(&app, &board_id, &cookie, &csrf).await;
 
     let reject = app
         .clone()
@@ -174,7 +174,7 @@ async fn assign_on_ready_moves_ticket_to_in_progress() {
     let (_state, app, cookie, csrf, _env) =
         common::bootstrap_and_login_with_auto_start_workers().await;
 
-    let project_id = common::create_test_project(&app, &cookie, &csrf).await;
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
     let (_git_dir, local_path) = common::create_temp_git_checkout();
     let repo_id =
         common::register_test_repo(&app, &local_path.display().to_string(), &cookie, &csrf).await;
@@ -188,7 +188,7 @@ async fn assign_on_ready_moves_ticket_to_in_progress() {
     )
     .await;
 
-    let ticket_id = common::create_test_ticket(&app, &project_id, &cookie, &csrf).await;
+    let ticket_id = common::create_test_ticket(&app, &board_id, &cookie, &csrf).await;
     common::set_ticket_repo(&app, &ticket_id, &repo_id, &cookie, &csrf).await;
 
     let patch = app
@@ -230,7 +230,7 @@ async fn ready_tech_lead_human_agent_run_keeps_agent_mode_contract_and_git_behav
     let (state, app, cookie, csrf, _env) =
         common::bootstrap_and_login_with_auto_start_workers().await;
     let pool = state.db.as_ref().expect("db pool");
-    let project_id = common::create_test_project(&app, &cookie, &csrf).await;
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
     let (_git_dir, local_path) = common::create_temp_git_checkout();
     let repo_id =
         common::register_test_repo(&app, &local_path.display().to_string(), &cookie, &csrf).await;
@@ -242,7 +242,7 @@ async fn ready_tech_lead_human_agent_run_keeps_agent_mode_contract_and_git_behav
         &csrf,
     )
     .await;
-    let ticket_id = common::create_test_ticket(&app, &project_id, &cookie, &csrf).await;
+    let ticket_id = common::create_test_ticket(&app, &board_id, &cookie, &csrf).await;
     common::set_ticket_repo(&app, &ticket_id, &repo_id, &cookie, &csrf).await;
     let ready = app
         .clone()
@@ -331,7 +331,7 @@ async fn scope_b_mock_pipeline_reaches_final_review() {
     let (_state, app, cookie, csrf, _env) =
         common::bootstrap_and_login_with_auto_start_workers().await;
 
-    let project_id = common::create_test_project(&app, &cookie, &csrf).await;
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
     let (_git_dir, local_path) = common::create_temp_git_checkout();
     let repo_id =
         common::register_test_repo(&app, &local_path.display().to_string(), &cookie, &csrf).await;
@@ -349,7 +349,7 @@ async fn scope_b_mock_pipeline_reaches_final_review() {
     )
     .await;
 
-    let ticket_id = common::create_test_ticket(&app, &project_id, &cookie, &csrf).await;
+    let ticket_id = common::create_test_ticket(&app, &board_id, &cookie, &csrf).await;
     common::set_ticket_repo(&app, &ticket_id, &repo_id, &cookie, &csrf).await;
     common::assign_agent_to_ticket(&app, &ticket_id, &pm_id, &cookie, &csrf).await;
 
@@ -494,7 +494,7 @@ async fn ready_tech_lead_auto_handoff_queues_exactly_one_implementer_run() {
     let (state, app, cookie, csrf, _env) =
         common::bootstrap_and_login_with_auto_start_workers().await;
     let pool = state.db.as_ref().expect("db pool");
-    let project_id = common::create_test_project(&app, &cookie, &csrf).await;
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
     let (_git_dir, local_path) = common::create_temp_git_checkout();
     let repo_id =
         common::register_test_repo(&app, &local_path.display().to_string(), &cookie, &csrf).await;
@@ -510,7 +510,7 @@ async fn ready_tech_lead_auto_handoff_queues_exactly_one_implementer_run() {
     )
     .await;
 
-    let ticket_id = common::create_test_ticket(&app, &project_id, &cookie, &csrf).await;
+    let ticket_id = common::create_test_ticket(&app, &board_id, &cookie, &csrf).await;
     common::set_ticket_repo(&app, &ticket_id, &repo_id, &cookie, &csrf).await;
     let ready = app
         .clone()
@@ -596,7 +596,7 @@ async fn ready_tech_lead_manual_handoff_persists_recommendation_and_starts_nobod
         })
         .await;
     let pool = state.db.as_ref().expect("db pool");
-    let project_id = common::create_test_project(&app, &cookie, &csrf).await;
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
     let (_git_dir, local_path) = common::create_temp_git_checkout();
     let repo_id =
         common::register_test_repo(&app, &local_path.display().to_string(), &cookie, &csrf).await;
@@ -617,7 +617,7 @@ async fn ready_tech_lead_manual_handoff_persists_recommendation_and_starts_nobod
     )
     .await;
 
-    let ticket_id = common::create_test_ticket(&app, &project_id, &cookie, &csrf).await;
+    let ticket_id = common::create_test_ticket(&app, &board_id, &cookie, &csrf).await;
     common::set_ticket_repo(&app, &ticket_id, &repo_id, &cookie, &csrf).await;
     let ready = app
         .clone()
@@ -679,7 +679,7 @@ async fn ready_tech_lead_invalid_handoffs_stay_ready_and_start_nobody() {
     let (state, app, cookie, csrf, _env) =
         common::bootstrap_and_login_with_auto_start_workers().await;
     let pool = state.db.as_ref().expect("db pool");
-    let project_id = common::create_test_project(&app, &cookie, &csrf).await;
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
     let (_git_dir, local_path) = common::create_temp_git_checkout();
     let repo_id =
         common::register_test_repo(&app, &local_path.display().to_string(), &cookie, &csrf).await;
@@ -720,7 +720,7 @@ async fn ready_tech_lead_invalid_handoffs_stay_ready_and_start_nobody() {
             .await
             .expect("configure implementer availability");
 
-        let ticket_id = common::create_test_ticket(&app, &project_id, &cookie, &csrf).await;
+        let ticket_id = common::create_test_ticket(&app, &board_id, &cookie, &csrf).await;
         common::set_ticket_repo(&app, &ticket_id, &repo_id, &cookie, &csrf).await;
         let ready = app
             .clone()
@@ -800,7 +800,7 @@ async fn ready_tech_lead_clarification_resumes_same_refinement_contract() {
     let (state, app, cookie, csrf, _env) =
         common::bootstrap_and_login_with_auto_start_workers().await;
     let pool = state.db.as_ref().expect("db pool");
-    let project_id = common::create_test_project(&app, &cookie, &csrf).await;
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
     let (_git_dir, local_path) = common::create_temp_git_checkout();
     let repo_id =
         common::register_test_repo(&app, &local_path.display().to_string(), &cookie, &csrf).await;
@@ -828,7 +828,7 @@ async fn ready_tech_lead_clarification_resumes_same_refinement_contract() {
         .await
         .expect("select Tech Lead clarification fixtures");
 
-    let ticket_id = common::create_test_ticket(&app, &project_id, &cookie, &csrf).await;
+    let ticket_id = common::create_test_ticket(&app, &board_id, &cookie, &csrf).await;
     common::set_ticket_repo(&app, &ticket_id, &repo_id, &cookie, &csrf).await;
     let ready = app
         .clone()
@@ -928,7 +928,7 @@ async fn scope_continued_run_keeps_in_progress() {
         common::bootstrap_and_login_with_state_and_workers("backend_engineer/continued", |_| {})
             .await;
 
-    let project_id = common::create_test_project(&app, &cookie, &csrf).await;
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
     let (_git_dir, local_path) = common::create_temp_git_checkout();
     let repo_id =
         common::register_test_repo(&app, &local_path.display().to_string(), &cookie, &csrf).await;
@@ -941,7 +941,7 @@ async fn scope_continued_run_keeps_in_progress() {
     )
     .await;
 
-    let ticket_id = common::create_test_ticket(&app, &project_id, &cookie, &csrf).await;
+    let ticket_id = common::create_test_ticket(&app, &board_id, &cookie, &csrf).await;
     common::set_ticket_repo(&app, &ticket_id, &repo_id, &cookie, &csrf).await;
     common::assign_agent_to_ticket(&app, &ticket_id, &engineer_id, &cookie, &csrf).await;
 
@@ -1028,14 +1028,14 @@ async fn scope_pm_split_pending() {
     let (_state, app, cookie, csrf, _env) =
         common::bootstrap_and_login_with_state_and_workers("pm/split_pending", |_| {}).await;
 
-    let project_id = common::create_test_project(&app, &cookie, &csrf).await;
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
     let (_git_dir, local_path) = common::create_temp_git_checkout();
     let repo_id =
         common::register_test_repo(&app, &local_path.display().to_string(), &cookie, &csrf).await;
     let pm_id =
         common::create_agent_with_preset_key(&app, "pm", "PM Agent", &cookie, &csrf).await;
 
-    let ticket_id = common::create_test_ticket(&app, &project_id, &cookie, &csrf).await;
+    let ticket_id = common::create_test_ticket(&app, &board_id, &cookie, &csrf).await;
     common::set_ticket_repo(&app, &ticket_id, &repo_id, &cookie, &csrf).await;
     common::assign_agent_to_ticket(&app, &ticket_id, &pm_id, &cookie, &csrf).await;
 
@@ -1096,7 +1096,7 @@ async fn qc_defect_handoff_returns_to_engineer_without_committing() {
     let (_state, app, cookie, csrf, _env) =
         common::bootstrap_and_login_with_auto_start_workers().await;
 
-    let project_id = common::create_test_project(&app, &cookie, &csrf).await;
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
     let (_git_dir, local_path) = common::create_temp_git_checkout();
     let repo_id =
         common::register_test_repo(&app, &local_path.display().to_string(), &cookie, &csrf).await;
@@ -1112,7 +1112,7 @@ async fn qc_defect_handoff_returns_to_engineer_without_committing() {
     let qc_id =
         common::create_agent_with_preset_key(&app, "qc", "QC Agent", &cookie, &csrf).await;
 
-    let ticket_id = common::create_test_ticket(&app, &project_id, &cookie, &csrf).await;
+    let ticket_id = common::create_test_ticket(&app, &board_id, &cookie, &csrf).await;
     common::set_ticket_repo(&app, &ticket_id, &repo_id, &cookie, &csrf).await;
 
     // Place the ticket in QA and hand it to QC.

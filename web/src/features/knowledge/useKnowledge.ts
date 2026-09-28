@@ -25,7 +25,7 @@ export const KNOWLEDGE_QUERY_KEY = ['knowledge'] as const;
 
 export interface KnowledgeRevisionInput {
   scope: KnowledgeScope;
-  projectId: string | null;
+  boardId: string | null;
   agentId: string | null;
   knowledgeType: KnowledgeType;
   title: string;
@@ -38,7 +38,7 @@ export interface KnowledgeRevisionInput {
 
 export interface KnowledgeListFilter {
   status: KnowledgeStatus;
-  projectId?: string;
+  boardId?: string;
   knowledgeType?: KnowledgeType;
 }
 
@@ -47,7 +47,7 @@ async function fetchKnowledgePage(
   cursor: string | null,
 ): Promise<KnowledgePage> {
   const params = new URLSearchParams({ status: filter.status, limit: '24' });
-  if (filter.projectId) params.set('projectId', filter.projectId);
+  if (filter.boardId) params.set('boardId', filter.boardId);
   if (filter.knowledgeType) params.set('knowledgeType', filter.knowledgeType);
   if (cursor) params.set('cursor', cursor);
   const response = await apiFetch(`/api/knowledge?${params.toString()}`);
@@ -181,7 +181,7 @@ export function useEditKnowledge() {
         Pick<
           KnowledgeRevisionInput,
           | 'scope'
-          | 'projectId'
+          | 'boardId'
           | 'agentId'
           | 'knowledgeType'
           | 'title'

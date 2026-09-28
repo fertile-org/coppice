@@ -11,9 +11,9 @@ async fn setup_agent_ticket(
     csrf: &str,
     repo_id: &str,
 ) -> (String, String, String) {
-    let project_id = common::create_test_project(app, cookie, csrf).await;
+    let board_id = common::create_test_board(app, cookie, csrf).await;
     let agent_id = common::create_test_agent_from_preset(app, "Worker", cookie, csrf).await;
-    let ticket_id = common::create_test_ticket(app, &project_id, cookie, csrf).await;
+    let ticket_id = common::create_test_ticket(app, &board_id, cookie, csrf).await;
     common::set_ticket_repo(app, &ticket_id, &repo_id, cookie, csrf).await;
     common::assign_agent_to_ticket(app, &ticket_id, &agent_id, cookie, csrf).await;
     (ticket_id, agent_id, repo_id.to_string())
@@ -384,8 +384,8 @@ async fn reject_run_when_agent_provider_missing_config() {
 
     coppice_server::workers::health_worker::run_health_pass_once(&state).await;
 
-    let project_id = common::create_test_project(&app, &cookie, &csrf).await;
-    let ticket_id = common::create_test_ticket(&app, &project_id, &cookie, &csrf).await;
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
+    let ticket_id = common::create_test_ticket(&app, &board_id, &cookie, &csrf).await;
     let (_git_dir, local_path) = common::create_temp_git_checkout();
     let repo_id =
         common::register_test_repo(&app, &local_path.display().to_string(), &cookie, &csrf).await;

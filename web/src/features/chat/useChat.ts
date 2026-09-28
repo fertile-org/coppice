@@ -32,7 +32,7 @@ export function chatMessagesQueryKey(sessionId: string) {
 
 export interface CreateChatSessionInput {
   agentId: string;
-  projectId?: string | null;
+  boardId?: string | null;
   repoId?: string | null;
 }
 
@@ -42,7 +42,7 @@ export interface PostChatMessageResult {
 }
 
 export interface CreateTicketFromChatInput {
-  projectId: string;
+  boardId: string;
   title?: string;
   description?: string;
   repoId?: string | null;
@@ -53,12 +53,12 @@ export interface CreateKnowledgeFromChatInput {
   content?: string;
   knowledgeType?: KnowledgeType;
   scope?: KnowledgeScope;
-  projectId?: string;
+  boardId?: string;
 }
 
-async function fetchSessions(projectId?: string | null): Promise<ChatSession[]> {
+async function fetchSessions(boardId?: string | null): Promise<ChatSession[]> {
   const params = new URLSearchParams();
-  if (projectId) params.set('projectId', projectId);
+  if (boardId) params.set('boardId', boardId);
   const qs = params.toString();
   const res = await apiFetch(`/api/chat/sessions${qs ? `?${qs}` : ''}`);
   return chatSessionListSchema.parse(await res.json()).sessions;
@@ -75,7 +75,7 @@ async function createSession(input: CreateChatSessionInput): Promise<ChatSession
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       agentId: input.agentId,
-      projectId: input.projectId ?? null,
+      boardId: input.boardId ?? null,
       repoId: input.repoId ?? null,
     }),
   });
@@ -125,7 +125,7 @@ async function createTicketFromChat(
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      projectId: input.projectId,
+      boardId: input.boardId,
       title: input.title,
       description: input.description,
       repoId: input.repoId ?? undefined,
@@ -159,7 +159,7 @@ async function createKnowledgeFromChat(
         content: input.content,
         knowledgeType: input.knowledgeType,
         scope: input.scope,
-        projectId: input.projectId,
+        boardId: input.boardId,
       }),
     },
   );
@@ -175,10 +175,10 @@ async function cutoffSession(sessionId: string): Promise<CutoffSessionResponse> 
   return cutoffSessionResponseSchema.parse(await res.json());
 }
 
-export function useChatSessions(projectId?: string | null) {
+export function useChatSessions(boardId?: string | null) {
   return useQuery({
-    queryKey: [...CHAT_SESSIONS_QUERY_KEY, projectId ?? null],
-    queryFn: () => fetchSessions(projectId),
+    queryKey: [...CHAT_SESSIONS_QUERY_KEY, boardId ?? null],
+    queryFn: () => fetchSessions(boardId),
     refetchInterval: (query) =>
       query.state.data?.some((session) => session.hasActiveRun) ? 3000 : false,
   });
@@ -256,7 +256,7 @@ export function useCreateTicketFromChat(sessionId: string) {
       });
       void queryClient.invalidateQueries({ queryKey: CHAT_SESSIONS_QUERY_KEY });
       void queryClient.invalidateQueries({
-        queryKey: ['tickets', result.ticket.projectId],
+        queryKey: ['tickets', result.ticket.boardId],
       });
     },
   });

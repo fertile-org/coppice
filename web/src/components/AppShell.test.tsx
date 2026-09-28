@@ -63,7 +63,7 @@ describe('AppShell', () => {
 
   it('uses full-width main on non-chat routes', () => {
     render(
-      <MemoryRouter initialEntries={['/projects']}>
+      <MemoryRouter initialEntries={['/boards']}>
         <AppShell />
       </MemoryRouter>,
     );
@@ -79,7 +79,7 @@ describe('AppShell', () => {
 
   it('aligns sidebar brand and top bar heights', () => {
     render(
-      <MemoryRouter initialEntries={['/projects']}>
+      <MemoryRouter initialEntries={['/boards']}>
         <AppShell />
       </MemoryRouter>,
     );
@@ -136,7 +136,7 @@ describe('AppShell', () => {
 
   it('does not viewport-clamp non-chat routes', () => {
     render(
-      <MemoryRouter initialEntries={['/projects']}>
+      <MemoryRouter initialEntries={['/boards']}>
         <AppShell />
       </MemoryRouter>,
     );
@@ -150,7 +150,7 @@ describe('AppShell', () => {
   it('uses full-width main on board routes without chat viewport clamp', () => {
     render(
       <MemoryRouter
-        initialEntries={['/projects/00000000-0000-4000-8000-000000000001/board']}
+        initialEntries={['/boards/00000000-0000-4000-8000-000000000001']}
       >
         <AppShell />
       </MemoryRouter>,
@@ -170,10 +170,10 @@ describe('AppShell', () => {
     expect(root).not.toHaveClass('overflow-hidden');
   });
 
-  it('uses full-width main on non-board project routes', () => {
+  it('uses full-width main on non-board routes nested under a board', () => {
     render(
       <MemoryRouter
-        initialEntries={['/projects/00000000-0000-4000-8000-000000000001']}
+        initialEntries={['/boards/00000000-0000-4000-8000-000000000001/runs']}
       >
         <AppShell />
       </MemoryRouter>,
@@ -194,7 +194,7 @@ describe('AppShell', () => {
 
     const sidebar = screen.getByTestId('app-shell-sidebar');
     expect(sidebar).toHaveAttribute('data-collapsed', 'false');
-    expect(screen.getByRole('link', { name: 'Projects' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Boards' })).toBeInTheDocument();
     expect(
       screen.getByRole('button', { name: 'Collapse sidebar' }),
     ).toBeInTheDocument();
@@ -220,7 +220,7 @@ describe('AppShell', () => {
     sessionState.desktopMode = true;
 
     render(
-      <MemoryRouter initialEntries={['/projects']}>
+      <MemoryRouter initialEntries={['/boards']}>
         <AppShell />
       </MemoryRouter>,
     );

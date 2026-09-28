@@ -12,7 +12,7 @@ import {
   type KnowledgeScope,
   type KnowledgeType,
 } from '../../lib/schemas/knowledge';
-import { useProjects } from '../projects/useProjects';
+import { useBoards } from '../boards/useBoards';
 import { useOpenTicket } from '../tickets/useOpenTicket';
 import { ThinkingIndicator } from './ChatMessageList';
 import {
@@ -98,7 +98,7 @@ function CreateTicketDialog({
   session: ChatSession;
   onClose: () => void;
 }) {
-  const { data: projects = [] } = useProjects();
+  const { data: boards = [] } = useBoards();
   const createTicket = useCreateTicketFromChat(session.id);
   const {
     data: draft,
@@ -106,8 +106,8 @@ function CreateTicketDialog({
     isError: draftError,
   } = useDraftTicketFromChat(session.id);
   const openTicket = useOpenTicket();
-  const [projectId, setProjectId] = useState(
-    session.projectId ?? projects[0]?.id ?? '',
+  const [boardId, setBoardId] = useState(
+    session.boardId ?? boards[0]?.id ?? '',
   );
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
@@ -115,10 +115,10 @@ function CreateTicketDialog({
   const [draftApplied, setDraftApplied] = useState(false);
 
   useEffect(() => {
-    if (!projectId && projects[0]?.id) {
-      setProjectId(session.projectId ?? projects[0].id);
+    if (!boardId && boards[0]?.id) {
+      setBoardId(session.boardId ?? boards[0].id);
     }
-  }, [projectId, projects, session.projectId]);
+  }, [boardId, boards, session.boardId]);
 
   useEffect(() => {
     if (!draft || draftApplied) return;
@@ -129,14 +129,14 @@ function CreateTicketDialog({
 
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
-    if (!projectId) {
-      setError('Select a project.');
+    if (!boardId) {
+      setError('Select a board.');
       return;
     }
     setError(null);
     try {
       const result = await createTicket.mutateAsync({
-        projectId,
+        boardId,
         title: title.trim() || undefined,
         description: description.trim() || undefined,
       });
@@ -176,19 +176,19 @@ function CreateTicketDialog({
           )}
         </div>
         <div className="space-y-2">
-          <Label htmlFor="chat-ticket-project">Project</Label>
+          <Label htmlFor="chat-ticket-board">Board</Label>
           <select
-            id="chat-ticket-project"
-            aria-label="Project"
+            id="chat-ticket-board"
+            aria-label="Board"
             className="field-control h-10 w-full px-3 font-body text-sm"
-            value={projectId}
-            onChange={(event) => setProjectId(event.target.value)}
+            value={boardId}
+            onChange={(event) => setBoardId(event.target.value)}
             required
           >
-            <option value="">Select project</option>
-            {projects.map((project) => (
-              <option key={project.id} value={project.id}>
-                {project.name}
+            <option value="">Select board</option>
+            {boards.map((board) => (
+              <option key={board.id} value={board.id}>
+                {board.name}
               </option>
             ))}
           </select>
@@ -231,7 +231,7 @@ function CreateTicketDialog({
           </Button>
           <Button
             type="submit"
-            disabled={createTicket.isPending || draftLoading || !projectId}
+            disabled={createTicket.isPending || draftLoading || !boardId}
           >
             {createTicket.isPending ? 'Creating…' : 'Confirm create ticket'}
           </Button>
@@ -249,31 +249,31 @@ function CreateKnowledgeDialog({
   onClose: () => void;
 }) {
   const navigate = useNavigate();
-  const { data: projects = [] } = useProjects();
+  const { data: boards = [] } = useBoards();
   const createKnowledge = useCreateKnowledgeFromChat(session.id);
   const [title, setTitle] = useState('');
   const [content, setContent] = useState('');
   const [knowledgeType, setKnowledgeType] = useState<KnowledgeType>(
     'coding_convention',
   );
-  const [scope, setScope] = useState<KnowledgeScope>('project');
-  const [projectId, setProjectId] = useState(
-    session.projectId ?? projects[0]?.id ?? '',
+  const [scope, setScope] = useState<KnowledgeScope>('board');
+  const [boardId, setBoardId] = useState(
+    session.boardId ?? boards[0]?.id ?? '',
   );
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!projectId && projects[0]?.id) {
-      setProjectId(session.projectId ?? projects[0].id);
+    if (!boardId && boards[0]?.id) {
+      setBoardId(session.boardId ?? boards[0].id);
     }
-  }, [projectId, projects, session.projectId]);
+  }, [boardId, boards, session.boardId]);
 
-  const needsProject = scope === 'project' || scope === 'agent';
+  const needsBoard = scope === 'board' || scope === 'agent';
 
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
-    if (needsProject && !projectId) {
-      setError('Select a project for this scope.');
+    if (needsBoard && !boardId) {
+      setError('Select a board for this scope.');
       return;
     }
     setError(null);
@@ -283,7 +283,7 @@ function CreateKnowledgeDialog({
         content: content.trim() || undefined,
         knowledgeType,
         scope,
-        projectId: needsProject ? projectId : undefined,
+        boardId: needsBoard ? boardId : undefined,
       });
       onClose();
       navigate('/knowledge');
@@ -361,21 +361,21 @@ function CreateKnowledgeDialog({
             </select>
           </div>
         </div>
-        {needsProject && (
+        {needsBoard && (
           <div className="space-y-2">
-            <Label htmlFor="chat-knowledge-project">Project</Label>
+            <Label htmlFor="chat-knowledge-board">Board</Label>
             <select
-              id="chat-knowledge-project"
-              aria-label="Knowledge project"
+              id="chat-knowledge-board"
+              aria-label="Knowledge board"
               className="field-control h-10 w-full px-3 font-body text-sm"
-              value={projectId}
-              onChange={(event) => setProjectId(event.target.value)}
+              value={boardId}
+              onChange={(event) => setBoardId(event.target.value)}
               required
             >
-              <option value="">Select project</option>
-              {projects.map((project) => (
-                <option key={project.id} value={project.id}>
-                  {project.name}
+              <option value="">Select board</option>
+              {boards.map((board) => (
+                <option key={board.id} value={board.id}>
+                  {board.name}
                 </option>
               ))}
             </select>
@@ -393,7 +393,7 @@ function CreateKnowledgeDialog({
           <Button
             type="submit"
             disabled={
-              createKnowledge.isPending || (needsProject && !projectId)
+              createKnowledge.isPending || (needsBoard && !boardId)
             }
           >
             {createKnowledge.isPending

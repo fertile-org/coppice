@@ -105,8 +105,8 @@ impl<'a> RunOrchestrator<'a> {
         let original_description = ticket.ticket.description.clone();
         let agent = AgentService::new(self.pool).get(run.agent_id).await?;
         let agents = AgentService::new(self.pool).list_agents().await?;
-        let (project_agent_keys, project_agent_ids, project_implementer_keys) =
-            build_project_agent_maps(&agents);
+        let (board_agent_keys, board_agent_ids, board_implementer_keys) =
+            build_board_agent_maps(&agents);
 
         let agent_key = agent
             .preset_source
@@ -144,9 +144,9 @@ impl<'a> RunOrchestrator<'a> {
             job_type: run.job_type.clone(),
             run_outcome,
             contract: contract.clone(),
-            project_agent_keys,
-            project_agent_ids: project_agent_ids.clone(),
-            project_implementer_keys,
+            board_agent_keys,
+            board_agent_ids: board_agent_ids.clone(),
+            board_implementer_keys,
             auto_assign_enabled,
             clarification_round: ticket.ticket.clarification_round,
             context_profile: run.context_profile,
@@ -284,7 +284,7 @@ impl<'a> RunOrchestrator<'a> {
             &collaboration_targets.consultation_agent_ids,
             ticket.ticket.assignee_agent_id,
             ticket.ticket.pending_assign_recommendation.as_ref(),
-            &project_agent_ids,
+            &board_agent_ids,
             !technical_refinement_run,
         );
         let mention_svc = MentionService::new(self.pool);
@@ -836,7 +836,7 @@ fn enqueue_successful_consultation_jobs(
     consultation_agent_ids: &HashSet<Uuid>,
     current_assignee_id: Option<Uuid>,
     pending_recommendation: Option<&Value>,
-    project_agent_ids: &HashMap<String, Uuid>,
+    board_agent_ids: &HashMap<String, Uuid>,
     allow_consultation_dispatch: bool,
 ) -> SuccessfulMentionDispatch {
     let mut dispatch = SuccessfulMentionDispatch::default();
@@ -860,7 +860,7 @@ fn enqueue_successful_consultation_jobs(
         scheduled_agent_ids.insert(assignee_id);
     }
     if let Some(pending_id) =
-        pending_recommendation_target(pending_recommendation, project_agent_ids)
+        pending_recommendation_target(pending_recommendation, board_agent_ids)
     {
         scheduled_agent_ids.insert(pending_id);
     }
@@ -930,24 +930,24 @@ fn target_has_ownership(
     target_id: Uuid,
     current_assignee_id: Option<Uuid>,
     pending_recommendation: Option<&Value>,
-    project_agent_ids: &HashMap<String, Uuid>,
+    board_agent_ids: &HashMap<String, Uuid>,
 ) -> bool {
     current_assignee_id == Some(target_id)
-        || pending_recommendation_target(pending_recommendation, project_agent_ids)
+        || pending_recommendation_target(pending_recommendation, board_agent_ids)
             == Some(target_id)
 }
 
 fn pending_recommendation_target(
     pending_recommendation: Option<&Value>,
-    project_agent_ids: &HashMap<String, Uuid>,
+    board_agent_ids: &HashMap<String, Uuid>,
 ) -> Option<Uuid> {
     let pending_key = pending_recommendation?
         .get("recommendedAgentKey")?
         .as_str()?;
-    project_agent_ids.get(pending_key).copied()
+    board_agent_ids.get(pending_key).copied()
 }
 
-fn build_project_agent_maps(agents: &[Agent]) -> (Vec<String>, HashMap<String, Uuid>, Vec<String>) {
+fn build_board_agent_maps(agents: &[Agent]) -> (Vec<String>, HashMap<String, Uuid>, Vec<String>) {
     let mut keys = Vec::new();
 
     for agent in agents {
@@ -1032,7 +1032,7 @@ mod tests {
     }
 
     struct TestFixture {
-        project_id: Uuid,
+        board_id: Uuid,
         ticket_id: Uuid,
         run_id: Uuid,
         pm_agent_id: Uuid,
@@ -1040,14 +1040,14 @@ mod tests {
     }
 
     async fn insert_fixture(pool: &PgPool) -> TestFixture {
-        let project_id = Uuid::new_v4();
-        sqlx::query("INSERT INTO projects (id, name, slug) VALUES ($1, $2, $3)")
-            .bind(project_id)
-            .bind("orchestrator project")
-            .bind(format!("orch-{}", project_id))
+        let board_id = Uuid::new_v4();
+        sqlx::query("INSERT INTO boards (id, name, slug) VALUES ($1, $2, $3)")
+            .bind(board_id)
+            .bind("orchestrator board")
+            .bind(format!("orch-{}", board_id))
             .execute(pool)
             .await
-            .expect("insert project");
+            .expect("insert board");
 
         let pm_agent_id = Uuid::new_v4();
         sqlx::query(
@@ -1091,13 +1091,13 @@ mod tests {
         sqlx::query(
             r#"
             INSERT INTO tickets (
-                id, project_id, title, status, created_by, assignee_agent_id
+                id, board_id, title, status, created_by, assignee_agent_id
             )
             VALUES ($1, $2, $3, $4, $5, $6)
             "#,
         )
         .bind(ticket_id)
-        .bind(project_id)
+        .bind(board_id)
         .bind("orchestrator ticket")
         .bind("backlog")
         .bind("test")
@@ -1126,7 +1126,7 @@ mod tests {
         .expect("insert run");
 
         TestFixture {
-            project_id,
+            board_id,
             ticket_id,
             run_id,
             pm_agent_id,
@@ -1550,7 +1550,7 @@ mod tests {
     }
 
     #[test]
-    fn project_agent_maps_only_expose_enabled_implementer_aliases() {
+    fn board_agent_maps_only_expose_enabled_implementer_aliases() {
         let tech_lead_id = Uuid::from_u128(1);
         let engineer_id = Uuid::from_u128(2);
         let disabled_engineer_id = Uuid::from_u128(3);
@@ -1572,7 +1572,7 @@ mod tests {
         dual_lead.role = "Technical Lead Engineer".into();
 
         let (keys, agent_ids, implementer_keys) =
-            build_project_agent_maps(&[tech_lead, engineer, disabled, dual_lead]);
+            build_board_agent_maps(&[tech_lead, engineer, disabled, dual_lead]);
 
         assert!(keys.contains(&"tech_lead".to_string()));
         assert_eq!(agent_ids.get("backend_engineer"), Some(&engineer_id));
@@ -1594,12 +1594,12 @@ mod tests {
             job_type: "work_on_ticket".into(),
             run_outcome: RunOutcome::Succeeded,
             contract: pm_done_with_assign_to("backend_engineer"),
-            project_agent_keys: vec!["pm".into(), "backend_engineer".into()],
-            project_agent_ids: HashMap::from([
+            board_agent_keys: vec!["pm".into(), "backend_engineer".into()],
+            board_agent_ids: HashMap::from([
                 ("pm".into(), Uuid::from_u128(0x100)),
                 ("backend_engineer".into(), Uuid::from_u128(0x200)),
             ]),
-            project_implementer_keys: vec!["backend_engineer".into()],
+            board_implementer_keys: vec!["backend_engineer".into()],
             auto_assign_enabled: true,
             clarification_round: 0,
             context_profile: ContextProfile::HumanAgent,
@@ -2727,7 +2727,7 @@ mod tests {
                 comment.id,
                 &["backend_engineer".into()],
                 None,
-                fx.project_id,
+                fx.board_id,
             )
             .await
             .expect("create ordinary mention")
@@ -4042,7 +4042,7 @@ mod tests {
                 ordinary_comment.id,
                 &["pm".into()],
                 None,
-                fx.project_id,
+                fx.board_id,
             )
             .await
             .expect("create older ordinary mention")

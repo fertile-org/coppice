@@ -34,7 +34,7 @@ impl std::str::FromStr for ChatSessionStatus {
 #[derive(Debug, Clone)]
 pub struct ChatSession {
     pub id: Uuid,
-    pub project_id: Option<Uuid>,
+    pub board_id: Option<Uuid>,
     pub owner_user_id: Uuid,
     pub agent_id: Uuid,
     pub repo_id: Option<Uuid>,

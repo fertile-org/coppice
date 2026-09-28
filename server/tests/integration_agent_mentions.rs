@@ -25,7 +25,7 @@ async fn successful_attention_mention_persists_without_starting_response_run() {
     let (state, app, cookie, csrf, _env) =
         common::bootstrap_and_login_with_auto_start_workers().await;
     let pool = state.db.as_ref().expect("db pool");
-    let project_id = common::create_test_project(&app, &cookie, &csrf).await;
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
     let (_git_dir, local_path) = common::create_temp_git_checkout();
     let repo_id =
         common::register_test_repo(&app, &local_path.display().to_string(), &cookie, &csrf).await;
@@ -34,7 +34,7 @@ async fn successful_attention_mention_persists_without_starting_response_run() {
             .await;
     let pm_id = common::create_agent_with_preset_key(&app, "pm", "PM Agent", &cookie, &csrf).await;
 
-    let ticket_id = common::create_test_ticket(&app, &project_id, &cookie, &csrf).await;
+    let ticket_id = common::create_test_ticket(&app, &board_id, &cookie, &csrf).await;
     common::set_ticket_repo(&app, &ticket_id, &repo_id, &cookie, &csrf).await;
     common::assign_agent_to_ticket(&app, &ticket_id, &research_id, &cookie, &csrf).await;
 
@@ -109,7 +109,7 @@ async fn successful_work_consultation_runs_once_and_response_cannot_chain() {
     let (state, app, cookie, csrf, _env) =
         common::bootstrap_and_login_with_auto_start_worker_count(2).await;
     let pool = state.db.as_ref().expect("db pool");
-    let project_id = common::create_test_project(&app, &cookie, &csrf).await;
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
     let (_git_dir, local_path) = common::create_temp_git_checkout();
     let repo_id =
         common::register_test_repo(&app, &local_path.display().to_string(), &cookie, &csrf).await;
@@ -171,7 +171,7 @@ async fn successful_work_consultation_runs_once_and_response_cannot_chain() {
     .await
     .expect("create ordering assertion trigger");
 
-    let ticket_id = common::create_test_ticket(&app, &project_id, &cookie, &csrf).await;
+    let ticket_id = common::create_test_ticket(&app, &board_id, &cookie, &csrf).await;
     common::set_ticket_repo(&app, &ticket_id, &repo_id, &cookie, &csrf).await;
     common::assign_agent_to_ticket(&app, &ticket_id, &frontend_id, &cookie, &csrf).await;
 
@@ -305,7 +305,7 @@ async fn assert_queued_consultation_survives_target_change(
     let (state, app, cookie, csrf, _env) =
         common::bootstrap_and_login_with_auto_start_workers().await;
     let pool = state.db.as_ref().expect("db pool");
-    let project_id = common::create_test_project(&app, &cookie, &csrf).await;
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
     let (_git_dir, local_path) = common::create_temp_git_checkout();
     let repo_id =
         common::register_test_repo(&app, &local_path.display().to_string(), &cookie, &csrf).await;
@@ -364,7 +364,7 @@ async fn assert_queued_consultation_survives_target_change(
     .await
     .expect("create target mutation trigger");
 
-    let ticket_id = common::create_test_ticket(&app, &project_id, &cookie, &csrf).await;
+    let ticket_id = common::create_test_ticket(&app, &board_id, &cookie, &csrf).await;
     common::set_ticket_repo(&app, &ticket_id, &repo_id, &cookie, &csrf).await;
     common::assign_agent_to_ticket(&app, &ticket_id, &frontend_id, &cookie, &csrf).await;
 
@@ -460,7 +460,7 @@ async fn pending_pm_assignment_wins_over_same_target_consultation_request() {
     let (state, app, cookie, csrf, _env) =
         common::bootstrap_and_login_with_auto_start_workers().await;
     let pool = state.db.as_ref().expect("db pool");
-    let project_id = common::create_test_project(&app, &cookie, &csrf).await;
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
     let (_git_dir, local_path) = common::create_temp_git_checkout();
     let repo_id =
         common::register_test_repo(&app, &local_path.display().to_string(), &cookie, &csrf).await;
@@ -482,7 +482,7 @@ async fn pending_pm_assignment_wins_over_same_target_consultation_request() {
         .await
         .expect("select PM regression fixture");
 
-    let ticket_id = common::create_test_ticket(&app, &project_id, &cookie, &csrf).await;
+    let ticket_id = common::create_test_ticket(&app, &board_id, &cookie, &csrf).await;
     common::set_ticket_repo(&app, &ticket_id, &repo_id, &cookie, &csrf).await;
     common::assign_agent_to_ticket(&app, &ticket_id, &pm_id, &cookie, &csrf).await;
 
@@ -569,7 +569,7 @@ async fn stopping_live_run_defers_consultation_until_worker_exit_with_two_worker
     let (state, app, cookie, csrf, _env) =
         common::bootstrap_and_login_with_auto_start_worker_count(2).await;
     let pool = state.db.as_ref().expect("db pool");
-    let project_id = common::create_test_project(&app, &cookie, &csrf).await;
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
     let (_git_dir, local_path) = common::create_temp_git_checkout();
     let repo_id =
         common::register_test_repo(&app, &local_path.display().to_string(), &cookie, &csrf).await;
@@ -584,7 +584,7 @@ async fn stopping_live_run_defers_consultation_until_worker_exit_with_two_worker
     )
     .await;
 
-    let ticket_id = common::create_test_ticket(&app, &project_id, &cookie, &csrf).await;
+    let ticket_id = common::create_test_ticket(&app, &board_id, &cookie, &csrf).await;
     common::set_ticket_repo(&app, &ticket_id, &repo_id, &cookie, &csrf).await;
     let ticket_id = Uuid::parse_str(&ticket_id).expect("ticket UUID");
     let source_id = Uuid::parse_str(&source_id).expect("source agent UUID");
@@ -623,7 +623,7 @@ async fn stopping_live_run_defers_consultation_until_worker_exit_with_two_worker
             comment.id,
             &["backend_engineer".to_string()],
             None,
-            Uuid::parse_str(&project_id).expect("project UUID"),
+            Uuid::parse_str(&board_id).expect("board UUID"),
         )
         .await
         .expect("create pending mention");

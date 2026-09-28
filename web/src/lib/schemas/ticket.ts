@@ -91,7 +91,7 @@ export type PendingSplitRecommendation = z.infer<
 
 export const ticketSchema = z.object({
   id: z.string().uuid(),
-  projectId: z.string().uuid(),
+  boardId: z.string().uuid(),
   repoId: z.string().uuid().optional(),
   title: z.string(),
   description: z.string(),

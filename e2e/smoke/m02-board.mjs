@@ -2,7 +2,7 @@
 /**
  * M02 board API smoke test.
  *
- * Validates bootstrap/login, project creation, and ticket CRUD against a
+ * Validates bootstrap/login, board creation, and ticket CRUD against a
  * running Coppice server. Browser UI smoke (login page, drag-drop board)
  * runs locally via `make e2e-smoke` with compose services up.
  *
@@ -119,27 +119,27 @@ async function api(method, path, { cookie, csrfToken, body } = {}) {
   return res;
 }
 
-async function createProject(auth) {
-  const res = await api('POST', '/api/projects', {
+async function createBoard(auth) {
+  const res = await api('POST', '/api/boards', {
     ...auth,
-    body: { name: 'Smoke Test Project' },
+    body: { name: 'Smoke Test Board' },
   });
 
   if (res.status !== 201) {
-    fail(`create project failed: ${res.status} ${await res.text()}`);
+    fail(`create board failed: ${res.status} ${await res.text()}`);
   }
 
-  const project = await res.json();
-  if (!project.id) {
-    fail('create project response missing id');
+  const board = await res.json();
+  if (!board.id) {
+    fail('create board response missing id');
   }
 
-  console.log(`smoke: created project ${project.id}`);
-  return project;
+  console.log(`smoke: created board ${board.id}`);
+  return board;
 }
 
-async function createTicket(projectId, auth) {
-  const res = await api('POST', `/api/projects/${projectId}/tickets`, {
+async function createTicket(boardId, auth) {
+  const res = await api('POST', `/api/boards/${boardId}/tickets`, {
     ...auth,
     body: { title: 'Smoke ticket', description: 'M02 smoke test' },
   });
@@ -157,8 +157,8 @@ async function createTicket(projectId, auth) {
   return ticket;
 }
 
-async function listTickets(projectId, auth) {
-  const res = await api('GET', `/api/projects/${projectId}/tickets`, auth);
+async function listTickets(boardId, auth) {
+  const res = await api('GET', `/api/boards/${boardId}/tickets`, auth);
 
   if (!res.ok) {
     fail(`list tickets failed: ${res.status} ${await res.text()}`);
@@ -166,7 +166,7 @@ async function listTickets(projectId, auth) {
 
   const tickets = await res.json();
   if (!Array.isArray(tickets) || tickets.length < 1) {
-    fail('expected at least one ticket in project');
+    fail('expected at least one ticket in board');
   }
 
   console.log(`smoke: listed ${tickets.length} ticket(s)`);
@@ -191,9 +191,9 @@ async function main() {
 
   await bootstrapIfNeeded();
   const auth = await login();
-  const project = await createProject(auth);
-  await createTicket(project.id, auth);
-  await listTickets(project.id, auth);
+  const board = await createBoard(auth);
+  await createTicket(board.id, auth);
+  await listTickets(board.id, auth);
   await checkWebOptional();
 
   console.log('smoke: M02 board API flow passed');

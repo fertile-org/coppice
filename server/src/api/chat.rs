@@ -56,14 +56,14 @@ pub fn routes() -> Router<Arc<AppState>> {
 #[serde(rename_all = "camelCase")]
 struct CreateSessionBody {
     agent_id: Uuid,
-    project_id: Option<Uuid>,
+    board_id: Option<Uuid>,
     repo_id: Option<Uuid>,
 }
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct ListSessionsQuery {
-    project_id: Option<Uuid>,
+    board_id: Option<Uuid>,
 }
 
 #[derive(Deserialize)]
@@ -82,7 +82,7 @@ struct PostMessageBody {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct CreateTicketBody {
-    project_id: Uuid,
+    board_id: Uuid,
     title: Option<String>,
     description: Option<String>,
     repo_id: Option<Uuid>,
@@ -95,14 +95,14 @@ struct CreateKnowledgeBody {
     content: Option<String>,
     knowledge_type: Option<String>,
     scope: Option<String>,
-    project_id: Option<Uuid>,
+    board_id: Option<Uuid>,
 }
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct SessionResponse {
     id: Uuid,
-    project_id: Option<Uuid>,
+    board_id: Option<Uuid>,
     owner_user_id: Uuid,
     agent_id: Uuid,
     repo_id: Option<Uuid>,
@@ -202,7 +202,7 @@ fn map_error(err: ChatError) -> StatusCode {
 fn session_response(session: ChatSession) -> SessionResponse {
     SessionResponse {
         id: session.id,
-        project_id: session.project_id,
+        board_id: session.board_id,
         owner_user_id: session.owner_user_id,
         agent_id: session.agent_id,
         repo_id: session.repo_id,
@@ -278,7 +278,7 @@ async fn create_session(
 ) -> Result<(StatusCode, Json<SessionResponse>), StatusCode> {
     let pool = pool_from_state(&state)?;
     let session = ChatService::new(pool)
-        .create_session(user.id, body.agent_id, body.project_id, body.repo_id)
+        .create_session(user.id, body.agent_id, body.board_id, body.repo_id)
         .await
         .map_err(map_error)?;
     Ok((StatusCode::CREATED, Json(session_response(session))))
@@ -291,7 +291,7 @@ async fn list_sessions(
 ) -> Result<Json<SessionListResponse>, StatusCode> {
     let pool = pool_from_state(&state)?;
     let sessions = ChatService::new(pool)
-        .list_sessions(user.id, query.project_id)
+        .list_sessions(user.id, query.board_id)
         .await
         .map_err(map_error)?;
     Ok(Json(SessionListResponse {
@@ -380,7 +380,7 @@ async fn create_ticket(
             session_id,
             user.id,
             CreateTicketFromChatInput {
-                project_id: body.project_id,
+                board_id: body.board_id,
                 title: body.title.as_deref(),
                 description: body.description.as_deref(),
                 repo_id: body.repo_id,
@@ -444,7 +444,7 @@ async fn create_knowledge(
                 content: body.content.as_deref(),
                 knowledge_type: body.knowledge_type.as_deref(),
                 scope: body.scope.as_deref(),
-                project_id: body.project_id,
+                board_id: body.board_id,
             },
         )
         .await

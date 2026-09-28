@@ -2,7 +2,7 @@
 /**
  * M09 agent chat API smoke test.
  *
- * Validates session create (agent required, project optional), one mock
+ * Validates session create (agent required, board optional), one mock
  * conversation turn, and cutoff → child session with summary seed.
  *
  * Env:
@@ -163,14 +163,14 @@ async function createChatSession(agentId, auth) {
   if (!session.id) {
     fail('create chat session response missing id');
   }
-  if (session.projectId != null) {
-    fail(`expected unbound session projectId null, got ${session.projectId}`);
+  if (session.boardId != null) {
+    fail(`expected unbound session boardId null, got ${session.boardId}`);
   }
   if (session.status !== 'active') {
     fail(`expected active session, got ${session.status}`);
   }
 
-  console.log(`smoke: created chat session ${session.id} (project unbound)`);
+  console.log(`smoke: created chat session ${session.id} (board unbound)`);
   return session;
 }
 

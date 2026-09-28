@@ -14,7 +14,7 @@ import { AuthProvider } from './features/auth/AuthProvider';
 import { useSession } from './features/auth/useSession';
 import { LoginPage } from './features/auth/LoginPage';
 import { BoardPage } from './features/board/BoardPage';
-import { ProjectPickerPage } from './features/projects/ProjectPickerPage';
+import { BoardPickerPage } from './features/boards/BoardPickerPage';
 import { RepositoriesPage } from './features/repos/RepositoriesPage';
 import { UsersPage } from './features/users/UsersPage';
 import { CodeReviewPage } from './features/code/CodeReviewPage';
@@ -69,9 +69,9 @@ function App() {
             <Route path="/login" element={<LoginPage />} />
             <Route element={<ProtectedRoute />}>
               <Route element={<AppShell />}>
-                <Route path="/projects" element={<ProjectPickerPage />} />
+                <Route path="/boards" element={<BoardPickerPage />} />
                 <Route
-                  path="/projects/:projectId/board"
+                  path="/boards/:boardId"
                   element={<BoardPage />}
                 />
                 <Route path="/agents" element={<AgentsPage />} />
@@ -87,7 +87,7 @@ function App() {
               </Route>
               <Route path="/code" element={<CodeReviewPage />} />
             </Route>
-            <Route path="*" element={<Navigate to="/projects" replace />} />
+            <Route path="*" element={<Navigate to="/boards" replace />} />
           </Routes>
         </AuthProvider>
       </BrowserRouter>

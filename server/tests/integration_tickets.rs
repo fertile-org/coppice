@@ -10,13 +10,13 @@ async fn create_ticket_and_update_status() {
         return;
     }
     let (app, cookie, csrf) = common::bootstrap_and_login().await;
-    let project_id = common::create_test_project(&app, &cookie, &csrf).await;
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
 
     let res = app
         .clone()
         .oneshot(common::json_request(
             "POST",
-            &format!("/api/projects/{project_id}/tickets"),
+            &format!("/api/boards/{board_id}/tickets"),
             r#"{"title":"First ticket","description":"hello"}"#,
             &cookie,
             &csrf,
@@ -49,13 +49,13 @@ async fn reject_invalid_status() {
         return;
     }
     let (app, cookie, csrf) = common::bootstrap_and_login().await;
-    let project_id = common::create_test_project(&app, &cookie, &csrf).await;
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
 
     let res = app
         .clone()
         .oneshot(common::json_request(
             "POST",
-            &format!("/api/projects/{project_id}/tickets"),
+            &format!("/api/boards/{board_id}/tickets"),
             r#"{"title":"Ticket","description":""}"#,
             &cookie,
             &csrf,
@@ -87,13 +87,13 @@ async fn reject_done_with_waiting_substatus() {
         return;
     }
     let (app, cookie, csrf) = common::bootstrap_and_login().await;
-    let project_id = common::create_test_project(&app, &cookie, &csrf).await;
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
 
     let res = app
         .clone()
         .oneshot(common::json_request(
             "POST",
-            &format!("/api/projects/{project_id}/tickets"),
+            &format!("/api/boards/{board_id}/tickets"),
             r#"{"title":"Ticket","description":""}"#,
             &cookie,
             &csrf,

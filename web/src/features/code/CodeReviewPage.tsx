@@ -120,7 +120,7 @@ export function CodeReviewPage() {
   const headSha = diffSummary?.headSha ?? selectedWorktree?.headSha ?? '';
 
   const ticketBoardHref = ticket
-    ? `/projects/${ticket.projectId}/board?ticket=${ticket.id}`
+    ? `/boards/${ticket.boardId}?ticket=${ticket.id}`
     : undefined;
 
   if (!repoId) {

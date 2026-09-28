@@ -211,7 +211,7 @@ async fn list_connectors_returns_mock() {
 async fn deleting_agent_with_knowledge_provenance_returns_conflict_and_preserves_revision() {
     let _guard = common::DB_TEST_LOCK.lock().await;
     let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
-    let project_id = common::create_test_project(&app, &cookie, &csrf).await;
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
     let agent_id = common::create_agent_with_preset_key(
         &app,
         "backend_engineer",
@@ -227,7 +227,7 @@ async fn deleting_agent_with_knowledge_provenance_returns_conflict_and_preserves
             "/api/knowledge",
             &serde_json::json!({
                 "scope": "agent",
-                "projectId": project_id,
+                "boardId": board_id,
                 "agentId": agent_id,
                 "knowledgeType": "test_command",
                 "title": "Agent-specific command",
@@ -284,8 +284,8 @@ async fn deleting_agent_with_knowledge_provenance_returns_conflict_and_preserves
 async fn deleting_agent_with_run_sourced_knowledge_preserves_comment_and_review_provenance() {
     let _guard = common::DB_TEST_LOCK.lock().await;
     let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
-    let project_id = common::create_test_project(&app, &cookie, &csrf).await;
-    let ticket_id = common::create_test_ticket(&app, &project_id, &cookie, &csrf).await;
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
+    let ticket_id = common::create_test_ticket(&app, &board_id, &cookie, &csrf).await;
     let agent_id = common::create_agent_with_preset_key(
         &app,
         "backend_engineer",
@@ -331,8 +331,8 @@ async fn deleting_agent_with_run_sourced_knowledge_preserves_comment_and_review_
                 "POST",
                 "/api/knowledge",
                 &serde_json::json!({
-                    "scope": "project",
-                    "projectId": project_id,
+                    "scope": "board",
+                    "boardId": board_id,
                     "knowledgeType": "review_feedback",
                     "title": format!("Preserved {source_type} provenance"),
                     "content": "Keep the exact source comment and originating run.",
@@ -394,8 +394,8 @@ async fn deleting_agent_with_run_sourced_knowledge_preserves_comment_and_review_
 async fn deleting_agent_preserves_run_knowledge_usage_audit() {
     let _guard = common::DB_TEST_LOCK.lock().await;
     let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
-    let project_id = common::create_test_project(&app, &cookie, &csrf).await;
-    let ticket_id = common::create_test_ticket(&app, &project_id, &cookie, &csrf).await;
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
+    let ticket_id = common::create_test_ticket(&app, &board_id, &cookie, &csrf).await;
     let agent_id = common::create_agent_with_preset_key(
         &app,
         "backend_engineer",
@@ -410,8 +410,8 @@ async fn deleting_agent_preserves_run_knowledge_usage_audit() {
             "POST",
             "/api/knowledge",
             &serde_json::json!({
-                "scope": "project",
-                "projectId": project_id,
+                "scope": "board",
+                "boardId": board_id,
                 "knowledgeType": "test_command",
                 "title": "Audited command",
                 "content": "Keep the run and usage snapshot that consumed this revision.",

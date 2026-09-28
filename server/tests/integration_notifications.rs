@@ -104,8 +104,8 @@ async fn setup_ticket_with_agent(
     cookie: &str,
     csrf: &str,
 ) -> String {
-    let project_id = common::create_test_project(app, cookie, csrf).await;
-    let ticket_id = common::create_test_ticket(app, &project_id, cookie, csrf).await;
+    let board_id = common::create_test_board(app, cookie, csrf).await;
+    let ticket_id = common::create_test_ticket(app, &board_id, cookie, csrf).await;
     common::create_agent_with_preset_key(app, "backend_engineer", "Backend Engineer", cookie, csrf).await;
     ticket_id
 }
@@ -209,8 +209,8 @@ async fn run_finished_creates_notification_and_dedupes() {
     let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
     let pool = state.db.as_ref().expect("db pool").clone();
 
-    let project_id = common::create_test_project(&app, &cookie, &csrf).await;
-    let ticket_id = common::create_test_ticket(&app, &project_id, &cookie, &csrf).await;
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
+    let ticket_id = common::create_test_ticket(&app, &board_id, &cookie, &csrf).await;
     let agent_id =
         common::create_agent_with_preset_key(&app, "backend_engineer", "Backend Engineer", &cookie, &csrf).await;
 
@@ -301,8 +301,8 @@ async fn workflow_agent_mention_creates_notification() {
     let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
     let pool = state.db.as_ref().expect("db pool");
 
-    let project_id = common::create_test_project(&app, &cookie, &csrf).await;
-    let ticket_id = common::create_test_ticket(&app, &project_id, &cookie, &csrf).await;
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
+    let ticket_id = common::create_test_ticket(&app, &board_id, &cookie, &csrf).await;
     let engineer_id = common::create_agent_with_preset_key(
         &app,
         "backend_engineer",
@@ -648,8 +648,8 @@ async fn stopping_queued_run_creates_cancelled_notification() {
     }
     let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
     let pool = state.db.as_ref().expect("db pool");
-    let project_id = common::create_test_project(&app, &cookie, &csrf).await;
-    let ticket_id = common::create_test_ticket(&app, &project_id, &cookie, &csrf).await;
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
+    let ticket_id = common::create_test_ticket(&app, &board_id, &cookie, &csrf).await;
     let agent_id = common::create_agent_with_preset_key(
         &app,
         "backend_engineer",
@@ -710,8 +710,8 @@ async fn interrupted_run_creates_failed_notification() {
     }
     let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
     let pool = state.db.as_ref().expect("db pool");
-    let project_id = common::create_test_project(&app, &cookie, &csrf).await;
-    let ticket_id = common::create_test_ticket(&app, &project_id, &cookie, &csrf).await;
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
+    let ticket_id = common::create_test_ticket(&app, &board_id, &cookie, &csrf).await;
     let agent_id = common::create_agent_with_preset_key(
         &app,
         "backend_engineer",
@@ -823,8 +823,8 @@ async fn stopping_running_run_publishes_cancellation_once() {
     let (_git_dir, local_path) = common::create_temp_git_checkout();
     let repo_id =
         common::register_test_repo(&app, &local_path.display().to_string(), &cookie, &csrf).await;
-    let project_id = common::create_test_project(&app, &cookie, &csrf).await;
-    let ticket_id = common::create_test_ticket(&app, &project_id, &cookie, &csrf).await;
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
+    let ticket_id = common::create_test_ticket(&app, &board_id, &cookie, &csrf).await;
     let agent_id = common::create_agent_with_preset_key(
         &app,
         "backend_engineer",

@@ -64,7 +64,7 @@ impl WorkflowService {
                 .collect::<Vec<_>>();
             if !mention_agents.is_empty() {
                 let first_key = mention_agents[0].clone();
-                let metadata = if let Some(id) = ctx.project_agent_ids.get(&first_key) {
+                let metadata = if let Some(id) = ctx.board_agent_ids.get(&first_key) {
                     serde_json::json!({ "agentId": id, "agentKey": first_key })
                 } else {
                     serde_json::json!({ "agentKey": first_key })
@@ -72,7 +72,7 @@ impl WorkflowService {
                 action.substatus = Some(Some(Substatus::WaitingForAgent));
                 action.substatus_metadata = Some(Some(metadata));
                 for key in mention_agents {
-                    if let Some(&agent_id) = ctx.project_agent_ids.get(&key) {
+                    if let Some(&agent_id) = ctx.board_agent_ids.get(&key) {
                         action.enqueue_jobs.push(JobRequest {
                             job_type: "respond_to_mention".into(),
                             agent_id,
@@ -114,23 +114,23 @@ impl WorkflowService {
         }
 
         if let Some(assign_key) = assign_to_from_contract(&ctx.contract) {
-            let key_known = ctx.project_agent_keys.iter().any(|k| k == &assign_key);
+            let key_known = ctx.board_agent_keys.iter().any(|k| k == &assign_key);
             if ctx.auto_assign_enabled && !key_known {
-                // PM backlog refinement must assign a real project agent; implementer
+                // PM backlog refinement must assign a real board agent; implementer
                 // completion should still advance via the succeeded gate when assignTo
-                // is wrong or names an agent not on the project (e.g. frontend_engineer).
+                // is wrong or names an agent not on the board (e.g. frontend_engineer).
                 if unknown_assign_to_blocks_ticket(ctx.current_status, &ctx.agent_role) {
                     action.new_status = Some(TicketStatus::Blocked);
                     action.system_comments.push(unknown_assign_to_notice(
                         &assign_key,
-                        &ctx.project_agent_keys,
+                        &ctx.board_agent_keys,
                         true,
                     ));
                     return Ok(action);
                 }
                 action.system_comments.push(unknown_assign_to_notice(
                     &assign_key,
-                    &ctx.project_agent_keys,
+                    &ctx.board_agent_keys,
                     false,
                 ));
             } else if key_known || !ctx.auto_assign_enabled {
@@ -247,8 +247,8 @@ fn resolve_verification_handoff(ctx: &TransitionContext) -> Option<VerificationH
         .collect::<Vec<_>>();
     let agent_key = mention_agents
         .into_iter()
-        .find(|key| ctx.project_agent_ids.contains_key(key))?;
-    let agent_id = *ctx.project_agent_ids.get(&agent_key)?;
+        .find(|key| ctx.board_agent_ids.contains_key(key))?;
+    let agent_id = *ctx.board_agent_ids.get(&agent_key)?;
 
     Some(VerificationHandoff {
         agent_key,
@@ -276,7 +276,7 @@ fn resolve_ready_tech_lead_handoff(ctx: &TransitionContext) -> TransitionAction 
         action.system_comments.push(ready_handoff_notice(
             None,
             None,
-            &ctx.project_implementer_keys,
+            &ctx.board_implementer_keys,
         ));
         return action;
     };
@@ -285,42 +285,42 @@ fn resolve_ready_tech_lead_handoff(ctx: &TransitionContext) -> TransitionAction 
         action.system_comments.push(ready_handoff_notice(
             None,
             None,
-            &ctx.project_implementer_keys,
+            &ctx.board_implementer_keys,
         ));
         return action;
     }
 
-    if !ctx.project_agent_keys.iter().any(|key| key == assign_key) {
+    if !ctx.board_agent_keys.iter().any(|key| key == assign_key) {
         action.system_comments.push(ready_handoff_notice(
             Some(assign_key),
             Some("unknown or disabled"),
-            &ctx.project_implementer_keys,
+            &ctx.board_implementer_keys,
         ));
         return action;
     }
 
     if !ctx
-        .project_implementer_keys
+        .board_implementer_keys
         .iter()
         .any(|key| key == assign_key)
     {
         action.system_comments.push(ready_handoff_notice(
             Some(assign_key),
             Some("not an implementer"),
-            &ctx.project_implementer_keys,
+            &ctx.board_implementer_keys,
         ));
         return action;
     }
 
     if ctx
-        .project_agent_ids
+        .board_agent_ids
         .get(assign_key)
         .is_some_and(|target_id| Some(*target_id) == ctx.assignee_agent_id)
     {
         action.system_comments.push(ready_handoff_notice(
             Some(assign_key),
             Some("the current Tech Lead cannot hand off to itself"),
-            &ctx.project_implementer_keys,
+            &ctx.board_implementer_keys,
         ));
         return action;
     }
@@ -373,11 +373,11 @@ fn unknown_assign_to_notice(assign_key: &str, known_keys: &[String], blocked: bo
 
     if blocked {
         format!(
-            "Workflow blocked this ticket: the agent recommended assignee `{assign_key}`, which is not available on this project. Add or enable the agent, or re-run with a valid agent key. Available keys: {available}."
+            "Workflow blocked this ticket: the agent recommended assignee `{assign_key}`, which is not available on this board. Add or enable the agent, or re-run with a valid agent key. Available keys: {available}."
         )
     } else {
         format!(
-            "Workflow note: the agent returned assignTo `{assign_key}`, which is not on this project — ignored; status was advanced by workflow gates. Available keys: {available}."
+            "Workflow note: the agent returned assignTo `{assign_key}`, which is not on this board — ignored; status was advanced by workflow gates. Available keys: {available}."
         )
     }
 }
@@ -429,7 +429,7 @@ fn summary_from_contract(contract: &AgentRunResult) -> Option<String> {
 
 fn apply_assign_to(action: &mut TransitionAction, ctx: &TransitionContext, key: &str) {
     if ctx.auto_assign_enabled {
-        if let Some(&id) = ctx.project_agent_ids.get(key) {
+        if let Some(&id) = ctx.board_agent_ids.get(key) {
             action.new_assignee_id = Some(Some(id));
             action.pending_recommendation = Some(None);
         }
@@ -490,9 +490,9 @@ mod tests {
                 blockers: vec![],
                 split_tickets: vec![],
             },
-            project_agent_keys: vec!["pm".into()],
-            project_agent_ids: HashMap::from([("pm".into(), pm_agent_id())]),
-            project_implementer_keys: vec![],
+            board_agent_keys: vec!["pm".into()],
+            board_agent_ids: HashMap::from([("pm".into(), pm_agent_id())]),
+            board_implementer_keys: vec![],
             auto_assign_enabled: true,
             clarification_round: 0,
             context_profile: ContextProfile::Full,
@@ -551,8 +551,8 @@ mod tests {
             run_outcome: RunOutcome::Succeeded,
             auto_assign_enabled: false,
             contract: done_with_assign_to("engineer"),
-            project_agent_keys: vec!["pm".into(), "backend_engineer".into()],
-            project_agent_ids: agent_map(&[
+            board_agent_keys: vec!["pm".into(), "backend_engineer".into()],
+            board_agent_ids: agent_map(&[
                 ("pm", pm_agent_id()),
                 ("backend_engineer", engineer_agent_id()),
             ]),
@@ -571,8 +571,8 @@ mod tests {
             agent_role: "PM".into(),
             auto_assign_enabled: true,
             contract: done_with_assign_to("backend_engineer"),
-            project_agent_keys: vec!["pm".into(), "backend_engineer".into()],
-            project_agent_ids: agent_map(&[
+            board_agent_keys: vec!["pm".into(), "backend_engineer".into()],
+            board_agent_ids: agent_map(&[
                 ("pm", pm_agent_id()),
                 ("backend_engineer", engineer_agent_id()),
             ]),
@@ -593,12 +593,12 @@ mod tests {
             assignee_agent_id: Some(tech_lead_agent_id()),
             auto_assign_enabled: true,
             contract: done_with_assign_to("backend_engineer"),
-            project_agent_keys: vec!["tech_lead".into(), "backend_engineer".into()],
-            project_agent_ids: agent_map(&[
+            board_agent_keys: vec!["tech_lead".into(), "backend_engineer".into()],
+            board_agent_ids: agent_map(&[
                 ("tech_lead", tech_lead_agent_id()),
                 ("backend_engineer", engineer_agent_id()),
             ]),
-            project_implementer_keys: vec!["backend_engineer".into()],
+            board_implementer_keys: vec!["backend_engineer".into()],
             ..minimal_ctx()
         })
         .expect("resolve Ready Tech Lead handoff");
@@ -619,12 +619,12 @@ mod tests {
             assignee_agent_id: Some(tech_lead_agent_id()),
             auto_assign_enabled: false,
             contract: done_with_assign_to("backend_engineer"),
-            project_agent_keys: vec!["tech_lead".into(), "backend_engineer".into()],
-            project_agent_ids: agent_map(&[
+            board_agent_keys: vec!["tech_lead".into(), "backend_engineer".into()],
+            board_agent_ids: agent_map(&[
                 ("tech_lead", tech_lead_agent_id()),
                 ("backend_engineer", engineer_agent_id()),
             ]),
-            project_implementer_keys: vec!["backend_engineer".into()],
+            board_implementer_keys: vec!["backend_engineer".into()],
             ..minimal_ctx()
         })
         .expect("resolve manual Ready Tech Lead handoff");
@@ -647,12 +647,12 @@ mod tests {
             agent_role: "Technical Lead".into(),
             agent_key: "tech_lead".into(),
             assignee_agent_id: Some(tech_lead_agent_id()),
-            project_agent_keys: vec!["tech_lead".into(), "backend_engineer".into()],
-            project_agent_ids: agent_map(&[
+            board_agent_keys: vec!["tech_lead".into(), "backend_engineer".into()],
+            board_agent_ids: agent_map(&[
                 ("tech_lead", tech_lead_agent_id()),
                 ("backend_engineer", engineer_agent_id()),
             ]),
-            project_implementer_keys: vec!["backend_engineer".into()],
+            board_implementer_keys: vec!["backend_engineer".into()],
             ..minimal_ctx()
         })
         .expect("resolve missing Ready Tech Lead handoff");
@@ -676,12 +676,12 @@ mod tests {
             assignee_agent_id: Some(tech_lead_agent_id()),
             auto_assign_enabled: false,
             contract: done_with_assign_to("missing_engineer"),
-            project_agent_keys: vec!["tech_lead".into(), "backend_engineer".into()],
-            project_agent_ids: agent_map(&[
+            board_agent_keys: vec!["tech_lead".into(), "backend_engineer".into()],
+            board_agent_ids: agent_map(&[
                 ("tech_lead", tech_lead_agent_id()),
                 ("backend_engineer", engineer_agent_id()),
             ]),
-            project_implementer_keys: vec!["backend_engineer".into()],
+            board_implementer_keys: vec!["backend_engineer".into()],
             ..minimal_ctx()
         })
         .expect("resolve unknown Ready Tech Lead handoff");
@@ -704,13 +704,13 @@ mod tests {
             assignee_agent_id: Some(tech_lead_agent_id()),
             auto_assign_enabled: true,
             contract: done_with_assign_to("pm"),
-            project_agent_keys: vec!["pm".into(), "tech_lead".into(), "backend_engineer".into()],
-            project_agent_ids: agent_map(&[
+            board_agent_keys: vec!["pm".into(), "tech_lead".into(), "backend_engineer".into()],
+            board_agent_ids: agent_map(&[
                 ("pm", pm_agent_id()),
                 ("tech_lead", tech_lead_agent_id()),
                 ("backend_engineer", engineer_agent_id()),
             ]),
-            project_implementer_keys: vec!["backend_engineer".into()],
+            board_implementer_keys: vec!["backend_engineer".into()],
             ..minimal_ctx()
         })
         .expect("resolve non-implementer Ready Tech Lead handoff");
@@ -732,14 +732,14 @@ mod tests {
             assignee_agent_id: Some(tech_lead_agent_id()),
             auto_assign_enabled: true,
             contract: done_with_assign_to("tech_lead"),
-            project_agent_keys: vec!["tech_lead".into(), "backend_engineer".into()],
-            project_agent_ids: agent_map(&[
+            board_agent_keys: vec!["tech_lead".into(), "backend_engineer".into()],
+            board_agent_ids: agent_map(&[
                 ("tech_lead", tech_lead_agent_id()),
                 ("backend_engineer", engineer_agent_id()),
             ]),
             // Defend even if a caller accidentally classifies this dual-role agent
             // as an implementer.
-            project_implementer_keys: vec!["tech_lead".into(), "backend_engineer".into()],
+            board_implementer_keys: vec!["tech_lead".into(), "backend_engineer".into()],
             ..minimal_ctx()
         })
         .expect("resolve self-targeted Ready Tech Lead handoff");
@@ -761,8 +761,8 @@ mod tests {
             assignee_agent_id: Some(tech_lead_agent_id()),
             run_outcome: RunOutcome::Blocked,
             contract: blocked_with_mentions(&["pm"]),
-            project_agent_keys: vec!["pm".into(), "tech_lead".into()],
-            project_agent_ids: agent_map(&[
+            board_agent_keys: vec!["pm".into(), "tech_lead".into()],
+            board_agent_ids: agent_map(&[
                 ("pm", pm_agent_id()),
                 ("tech_lead", tech_lead_agent_id()),
             ]),
@@ -787,7 +787,7 @@ mod tests {
         let action = WorkflowService::resolve_transition(TransitionContext {
             auto_assign_enabled: true,
             contract: done_with_assign_to("frontend_engineer"),
-            project_agent_keys: vec!["pm".into()],
+            board_agent_keys: vec!["pm".into()],
             ..minimal_ctx()
         })
         .expect("resolve");
@@ -804,8 +804,8 @@ mod tests {
             agent_role: "Backend Engineer".into(),
             agent_key: "backend_engineer".into(),
             assignee_agent_id: Some(engineer_agent_id()),
-            project_agent_keys: vec!["backend_engineer".into()],
-            project_agent_ids: agent_map(&[("backend_engineer", engineer_agent_id())]),
+            board_agent_keys: vec!["backend_engineer".into()],
+            board_agent_ids: agent_map(&[("backend_engineer", engineer_agent_id())]),
             contract: AgentRunResult::Done {
                 summary: "Implemented".into(),
                 changed_files: vec![],
@@ -832,8 +832,8 @@ mod tests {
             agent_role: "Backend Engineer".into(),
             agent_key: "backend_engineer".into(),
             assignee_agent_id: Some(engineer_agent_id()),
-            project_agent_keys: vec!["backend_engineer".into()],
-            project_agent_ids: agent_map(&[("backend_engineer", engineer_agent_id())]),
+            board_agent_keys: vec!["backend_engineer".into()],
+            board_agent_ids: agent_map(&[("backend_engineer", engineer_agent_id())]),
             contract: AgentRunResult::Continued {
                 summary: "Checkpoint".into(),
                 progress_note: Some("Partial work".into()),
@@ -856,8 +856,8 @@ mod tests {
             agent_role: "Backend Engineer".into(),
             agent_key: "backend_engineer".into(),
             assignee_agent_id: Some(engineer_agent_id()),
-            project_agent_keys: vec!["backend_engineer".into()],
-            project_agent_ids: agent_map(&[("backend_engineer", engineer_agent_id())]),
+            board_agent_keys: vec!["backend_engineer".into()],
+            board_agent_ids: agent_map(&[("backend_engineer", engineer_agent_id())]),
             contract: AgentRunResult::Done {
                 summary: "Done".into(),
                 changed_files: vec![],
@@ -886,8 +886,8 @@ mod tests {
             assignee_agent_id: Some(engineer_agent_id()),
             auto_assign_enabled: true,
             contract: done_with_assign_to("frontend_engineer"),
-            project_agent_keys: vec!["backend_engineer".into()],
-            project_agent_ids: agent_map(&[("backend_engineer", engineer_agent_id())]),
+            board_agent_keys: vec!["backend_engineer".into()],
+            board_agent_ids: agent_map(&[("backend_engineer", engineer_agent_id())]),
             ..minimal_ctx()
         })
         .expect("resolve");
@@ -958,8 +958,8 @@ mod tests {
             agent_role: "Backend Engineer".into(),
             agent_key: "backend_engineer".into(),
             assignee_agent_id: Some(engineer_agent_id()),
-            project_agent_keys: vec!["backend_engineer".into()],
-            project_agent_ids: agent_map(&[("backend_engineer", engineer_agent_id())]),
+            board_agent_keys: vec!["backend_engineer".into()],
+            board_agent_ids: agent_map(&[("backend_engineer", engineer_agent_id())]),
             contract: AgentRunResult::Done {
                 summary: "Resume complete".into(),
                 changed_files: vec![],
@@ -1001,8 +1001,8 @@ mod tests {
                 blockers: vec!["Missing tests".into()],
                 split_tickets: vec![],
             },
-            project_agent_keys: vec!["qc".into(), "backend_engineer".into()],
-            project_agent_ids: agent_map(&[
+            board_agent_keys: vec!["qc".into(), "backend_engineer".into()],
+            board_agent_ids: agent_map(&[
                 ("qc", Uuid::from_u128(0x300)),
                 ("backend_engineer", engineer_agent_id()),
             ]),
@@ -1038,8 +1038,8 @@ mod tests {
                 blockers: vec![],
                 split_tickets: vec![],
             },
-            project_agent_keys: vec!["qc".into(), "backend_engineer".into()],
-            project_agent_ids: agent_map(&[
+            board_agent_keys: vec!["qc".into(), "backend_engineer".into()],
+            board_agent_ids: agent_map(&[
                 ("qc", Uuid::from_u128(0x300)),
                 ("backend_engineer", engineer_agent_id()),
             ]),
@@ -1062,8 +1062,8 @@ mod tests {
             assignee_agent_id: Some(Uuid::from_u128(0x400)),
             run_outcome: RunOutcome::Blocked,
             contract: blocked_with_mentions(&["backend_engineer"]),
-            project_agent_keys: vec!["tech_lead".into(), "backend_engineer".into()],
-            project_agent_ids: agent_map(&[
+            board_agent_keys: vec!["tech_lead".into(), "backend_engineer".into()],
+            board_agent_ids: agent_map(&[
                 ("tech_lead", Uuid::from_u128(0x400)),
                 ("backend_engineer", engineer_agent_id()),
             ]),
@@ -1097,8 +1097,8 @@ mod tests {
             assignee_agent_id: Some(engineer_agent_id()),
             run_outcome: RunOutcome::Blocked,
             contract: blocked_with_mentions(&["pm"]),
-            project_agent_keys: vec!["pm".into(), "backend_engineer".into()],
-            project_agent_ids: agent_map(&[
+            board_agent_keys: vec!["pm".into(), "backend_engineer".into()],
+            board_agent_ids: agent_map(&[
                 ("pm", pm_agent_id()),
                 ("backend_engineer", engineer_agent_id()),
             ]),

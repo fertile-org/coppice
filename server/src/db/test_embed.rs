@@ -495,14 +495,14 @@ mod tests {
             .await
             .expect("truncate first");
 
-        let project_id = uuid::Uuid::new_v4();
-        sqlx::query("INSERT INTO projects (id, name, slug) VALUES ($1, $2, $3)")
-            .bind(project_id)
-            .bind("isolated project")
-            .bind(format!("isolated-{project_id}"))
+        let board_id = uuid::Uuid::new_v4();
+        sqlx::query("INSERT INTO boards (id, name, slug) VALUES ($1, $2, $3)")
+            .bind(board_id)
+            .bind("isolated board")
+            .bind(format!("isolated-{board_id}"))
             .execute(&first)
             .await
-            .expect("insert project");
+            .expect("insert board");
 
         crate::db::truncate_test_workspace(&second)
             .await
@@ -510,12 +510,12 @@ mod tests {
 
         sqlx::query(
             r#"
-            INSERT INTO tickets (id, project_id, title, status, created_by)
+            INSERT INTO tickets (id, board_id, title, status, created_by)
             VALUES ($1, $2, $3, $4, $5)
             "#,
         )
         .bind(uuid::Uuid::new_v4())
-        .bind(project_id)
+        .bind(board_id)
         .bind("isolated ticket")
         .bind("backlog")
         .bind("test")
@@ -523,10 +523,10 @@ mod tests {
         .await
         .expect("first fixture survives second reset");
 
-        let second_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM projects")
+        let second_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM boards")
             .fetch_one(&second)
             .await
-            .expect("count second projects");
+            .expect("count second boards");
         assert_eq!(second_count, 0);
     }
 }

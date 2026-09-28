@@ -65,7 +65,7 @@ pub async fn truncate_workspace(pool: &sqlx::PgPool) {
             tickets,
             repos,
             agents,
-            projects,
+            boards,
             sessions,
             users
         RESTART IDENTITY CASCADE
@@ -544,13 +544,13 @@ pub async fn json_body(response: axum::response::Response) -> serde_json::Value 
     serde_json::from_slice(&body).unwrap()
 }
 
-pub async fn create_test_project(app: &Router, cookie: &str, csrf: &str) -> String {
+pub async fn create_test_board(app: &Router, cookie: &str, csrf: &str) -> String {
     let res = app
         .clone()
         .oneshot(json_request(
             "POST",
-            "/api/projects",
-            r#"{"name":"Test Project"}"#,
+            "/api/boards",
+            r#"{"name":"Test Board"}"#,
             cookie,
             csrf,
         ))
@@ -787,7 +787,7 @@ pub async fn poll_runs_until_count(
 
 pub async fn create_test_ticket(
     app: &Router,
-    project_id: &str,
+    board_id: &str,
     cookie: &str,
     csrf: &str,
 ) -> String {
@@ -795,7 +795,7 @@ pub async fn create_test_ticket(
         .clone()
         .oneshot(json_request(
             "POST",
-            &format!("/api/projects/{project_id}/tickets"),
+            &format!("/api/boards/{board_id}/tickets"),
             r#"{"title":"Test ticket","description":"details"}"#,
             cookie,
             csrf,

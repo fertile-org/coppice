@@ -8,7 +8,7 @@ Authenticated Coppice SPA with a Trello-like board, ticket and comment managemen
 
 - React / Vite SPA in `web/` (monorepo package; own `package.json`)
 - Login page; all routes except `/login` require valid session
-- Projects (CRUD); repo **metadata API stub** only — full **registered repository** registry ships in M03 retcon (global paths, admin UI)
+- Boards (CRUD); repo **metadata API stub** only — full **registered repository** registry ships in M03 retcon (global paths, admin UI)
 - Fixed board columns: Backlog, Ready, In Progress, In Review, In QA, Wait for Final Review, Done, Blocked
 - Ticket CRUD: title, description, status, priority, assignee, repo/branch badges
 - Drag-and-drop column moves (dnd-kit)
@@ -39,14 +39,14 @@ Authenticated Coppice SPA with a Trello-like board, ticket and comment managemen
 ```text
 server/src/
   api/
-    projects.rs
+    boards.rs
     repos.rs
     tickets.rs
     comments.rs
     agents.rs
     attachments.rs
   domain/
-    project.rs, repo.rs, ticket.rs, comment.rs, agent.rs, attachment.rs
+    board.rs, repo.rs, ticket.rs, comment.rs, agent.rs, attachment.rs
   services/
     ticket_service.rs, comment_service.rs, agent_service.rs
 ```
@@ -54,7 +54,7 @@ server/src/
 ### New database tables
 
 ```text
-projects
+boards
 repos
 agents
 agent_presets (seed data)
@@ -66,9 +66,9 @@ attachments
 ### API groups (M02)
 
 ```text
-GET/POST       /api/projects
-GET/PATCH      /api/projects/:id
-GET/PATCH/DELETE /api/repos/:id   (project-scoped list/create removed in M03 retcon → global /api/repos)
+GET/POST       /api/boards
+GET/PATCH      /api/boards/:id
+GET/PATCH/DELETE /api/repos/:id   (board-scoped list/create removed in M03 retcon → global /api/repos)
 
 GET/POST       /api/tickets
 GET/PATCH      /api/tickets/:id
@@ -91,7 +91,7 @@ web/src/features/
   board/         kanban columns, dnd-kit
   tickets/       detail drawer/page, comment thread
   agents/        list + edit form (React Hook Form + Zod)
-  projects/      minimal project picker
+  boards/        minimal board picker
 ```
 
 ## Docker Compose delta
@@ -130,7 +130,7 @@ Decision at implementation time: separate `web` container for dev, or build SPA 
 
 ### Integration tests
 
-- Create project → repo → ticket → comment thread
+- Create board → repo → ticket → comment thread
 - Drag status: PATCH status updates DB; invalid column rejected
 - Assign agent to ticket; verify assigneeAgentId
 - Attachment upload → file on volume + metadata row

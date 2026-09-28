@@ -101,7 +101,7 @@ services/context_budget.rs          ByteTokenCounter, untrusted delimiters, usag
 workers/knowledge_worker.rs         asynchronous embed and post-Done extraction jobs
 ```
 
-Only Full-profile runs retrieve knowledge. Query text is embedded via the configured provider; stored vectors and cosine ranking stay in Postgres. Relational eligibility (approved, active, embedded, unexpired, unsuperseded, confidence, project/agent scope) is materialized before cosine ranking. The bounded result is rendered as untrusted data and passed through the configured total context budget; mandatory safety and result-contract sections either survive or the run fails before provider invocation. Every included exact revision is inserted once into `knowledge_usage_logs` before the provider runs. Operator modes (`mock` vs local Ollama sidecar vs remote `openai_compatible`): [Knowledge configuration](operations.md#knowledge-configuration).
+Only Full-profile runs retrieve knowledge. Query text is embedded via the configured provider; stored vectors and cosine ranking stay in Postgres. Relational eligibility (approved, active, embedded, unexpired, unsuperseded, confidence, board/agent scope) is materialized before cosine ranking. The bounded result is rendered as untrusted data and passed through the configured total context budget; mandatory safety and result-contract sections either survive or the run fails before provider invocation. Every included exact revision is inserted once into `knowledge_usage_logs` before the provider runs. Operator modes (`mock` vs local Ollama sidecar vs remote `openai_compatible`): [Knowledge configuration](operations.md#knowledge-configuration).
 
 A database trigger idempotently enqueues `extract_ticket` when a ticket first enters Done. Default extraction is fail-closed: candidates remain Pending. Policy auto-save additionally requires an enabled explicit low-risk type allowlist and high confidence; high-impact types always require human approval.
 
@@ -113,7 +113,7 @@ The mock extractor applies the same reuse litmus as the Knowledge Inbox (`Would 
 
 ```text
 web/src/
-  features/     auth, board, tickets, agents, knowledge, projects, users
+  features/     auth, boards, board, tickets, agents, knowledge, users
   components/   AppShell, ProtectedRoute, shared UI
   lib/          api.ts (fetch + CSRF), schemas/ (Zod), query-client
   styles/       tokens.css (design tokens)
@@ -140,4 +140,4 @@ Visual design tokens and palette: `docs/web/DESIGN.md`.
 
 ## Milestone evolution
 
-Each milestone adds modules/tables/endpoints documented in `docs/milestones/M0N-*.md`. Through M06 the system includes projects, repositories, tickets, collaboration workflow, live agent runs, governed long-term knowledge, and bounded/auditable context assembly. **Next:** M07 trust and signals.
+Each milestone adds modules/tables/endpoints documented in `docs/milestones/M0N-*.md`. Through M06 the system includes boards, repositories, tickets, collaboration workflow, live agent runs, governed long-term knowledge, and bounded/auditable context assembly. **Next:** M07 trust and signals.

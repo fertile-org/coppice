@@ -34,7 +34,7 @@ pub(crate) fn map_code_review_error(err: CodeReviewError) -> StatusCode {
         CodeReviewError::PatchTooLarge => StatusCode::PAYLOAD_TOO_LARGE,
         CodeReviewError::Ticket(TicketError::Validation(_)) => StatusCode::BAD_REQUEST,
         CodeReviewError::Comment(CommentError::Validation(_)) => StatusCode::BAD_REQUEST,
-        CodeReviewError::Ticket(TicketError::ProjectNotFound) => StatusCode::NOT_FOUND,
+        CodeReviewError::Ticket(TicketError::BoardNotFound) => StatusCode::NOT_FOUND,
         CodeReviewError::Database(_)
         | CodeReviewError::Io(_)
         | CodeReviewError::Ticket(_)

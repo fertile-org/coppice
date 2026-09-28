@@ -1493,7 +1493,7 @@ The server should be optimized for low memory, safety, predictable process manag
 Example API groups:
 
 ```text
-/projects
+/boards
 /repos
 /tickets
 /tickets/:id/comments
@@ -1577,7 +1577,7 @@ worktrees
 ### Phase 1: Core Board and Agents
 
 ```text
-Projects/repos
+Boards/repos
 Tickets
 Comments
 Agents CRUD

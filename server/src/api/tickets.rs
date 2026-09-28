@@ -33,7 +33,7 @@ use uuid::Uuid;
 pub fn routes() -> Router<Arc<AppState>> {
     Router::new()
         .route(
-            "/api/projects/{project_id}/tickets",
+            "/api/boards/{board_id}/tickets",
             get(list_tickets).post(create_ticket),
         )
         .route(
@@ -93,7 +93,7 @@ pub fn routes() -> Router<Arc<AppState>> {
 #[serde(rename_all = "camelCase")]
 pub(crate) struct TicketResponse {
     id: Uuid,
-    project_id: Uuid,
+    board_id: Uuid,
     repo_id: Option<Uuid>,
     title: String,
     description: String,
@@ -179,7 +179,7 @@ pub(crate) fn ticket_to_response(item: TicketWithDisplay) -> TicketResponse {
         .and_then(|value| serde_json::from_value(value.clone()).ok());
     TicketResponse {
         id: ticket.id,
-        project_id: ticket.project_id,
+        board_id: ticket.board_id,
         repo_id: ticket.repo_id,
         title: ticket.title,
         description: ticket.description,
@@ -305,7 +305,7 @@ fn map_ticket_error_response(err: TicketError) -> RunAgentError {
 
 pub(crate) fn map_error(err: TicketError) -> StatusCode {
     match err {
-        TicketError::TicketNotFound | TicketError::ProjectNotFound => StatusCode::NOT_FOUND,
+        TicketError::TicketNotFound | TicketError::BoardNotFound => StatusCode::NOT_FOUND,
         TicketError::InvalidStatus
         | TicketError::InvalidSubstatus
         | TicketError::InvalidPriority
@@ -489,14 +489,14 @@ fn build_filters(query: ListTicketsQuery) -> Result<TicketFilters, TicketError> 
 async fn list_tickets(
     State(state): State<Arc<AppState>>,
     AuthUser { .. }: AuthUser,
-    Path(project_id): Path<Uuid>,
+    Path(board_id): Path<Uuid>,
     Query(query): Query<ListTicketsQuery>,
 ) -> Result<Json<Vec<TicketResponse>>, StatusCode> {
     let pool = pool_from_state(&state)?;
     let service = TicketService::new(pool);
     let filters = build_filters(query).map_err(map_error)?;
     let tickets = service
-        .list_by_project(project_id, &filters)
+        .list_by_board(board_id, &filters)
         .await
         .map_err(map_error)?;
     Ok(Json(
@@ -507,7 +507,7 @@ async fn list_tickets(
 async fn create_ticket(
     State(state): State<Arc<AppState>>,
     AuthUser { user, .. }: AuthUser,
-    Path(project_id): Path<Uuid>,
+    Path(board_id): Path<Uuid>,
     Json(body): Json<CreateTicketBody>,
 ) -> Result<(StatusCode, Json<TicketResponse>), StatusCode> {
     let pool = pool_from_state(&state)?;
@@ -518,7 +518,7 @@ async fn create_ticket(
     };
     let ticket = service
         .create(
-            project_id,
+            board_id,
             &body.title,
             &body.description,
             body.repo_id,

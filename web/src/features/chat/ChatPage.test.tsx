@@ -28,7 +28,7 @@ const mocks = vi.hoisted(() => ({
   openTicket: vi.fn(),
   sessions: [] as Array<{
     id: string;
-    projectId: string | null;
+    boardId: string | null;
     ownerUserId: string;
     agentId: string;
     repoId: string | null;
@@ -76,8 +76,8 @@ vi.mock('../agents/useAgents', () => ({
   }),
 }));
 
-vi.mock('../projects/useProjects', () => ({
-  useProjects: () => ({
+vi.mock('../boards/useBoards', () => ({
+  useBoards: () => ({
     data: [
       {
         id: '00000000-0000-4000-8000-000000000003',
@@ -172,7 +172,7 @@ function renderChat(path = '/chat') {
 
 const ACTIVE_SESSION = {
   id: '00000000-0000-4000-8000-000000000001',
-  projectId: '00000000-0000-4000-8000-000000000003',
+  boardId: '00000000-0000-4000-8000-000000000003',
   ownerUserId: '00000000-0000-4000-8000-000000000002',
   agentId: '00000000-0000-4000-8000-000000000010',
   repoId: null,
@@ -233,13 +233,13 @@ describe('ChatPage', () => {
     expect(within(list).queryByText('other topic')).not.toBeInTheDocument();
   });
 
-  it('shows new-chat controls for agent and optional project', () => {
+  it('shows new-chat controls for agent and optional board', () => {
     renderChat('/chat');
 
     expect(screen.getByTestId('new-chat-form')).toBeInTheDocument();
     const agent = screen.getByLabelText('Agent');
     expect(agent).toBeInTheDocument();
-    expect(screen.getByLabelText('Project (optional)')).toBeInTheDocument();
+    expect(screen.getByLabelText('Board (optional)')).toBeInTheDocument();
     expect(agent).toHaveTextContent('Backend Engineer');
     expect(agent).not.toHaveTextContent('Disabled Agent');
   });
@@ -247,7 +247,7 @@ describe('ChatPage', () => {
   it('creates a session then opens the transcript composer', async () => {
     mocks.createSession.mockResolvedValue({
       id: '00000000-0000-4000-8000-000000000001',
-      projectId: '00000000-0000-4000-8000-000000000003',
+      boardId: '00000000-0000-4000-8000-000000000003',
       ownerUserId: '00000000-0000-4000-8000-000000000002',
       agentId: '00000000-0000-4000-8000-000000000010',
       repoId: null,
@@ -261,7 +261,7 @@ describe('ChatPage', () => {
     fireEvent.change(screen.getByLabelText('Agent'), {
       target: { value: '00000000-0000-4000-8000-000000000010' },
     });
-    fireEvent.change(screen.getByLabelText('Project (optional)'), {
+    fireEvent.change(screen.getByLabelText('Board (optional)'), {
       target: { value: '00000000-0000-4000-8000-000000000003' },
     });
     fireEvent.click(screen.getByRole('button', { name: 'Start chat' }));
@@ -269,7 +269,7 @@ describe('ChatPage', () => {
     await waitFor(() => {
       expect(mocks.createSession).toHaveBeenCalledWith({
         agentId: '00000000-0000-4000-8000-000000000010',
-        projectId: '00000000-0000-4000-8000-000000000003',
+        boardId: '00000000-0000-4000-8000-000000000003',
       });
     });
   });
@@ -581,12 +581,12 @@ describe('ChatPage', () => {
     ).not.toBeDisabled();
   });
 
-  it('creates a ticket from chat after confirming project and title', async () => {
+  it('creates a ticket from chat after confirming board and title', async () => {
     mocks.sessions = [ACTIVE_SESSION];
     mocks.createTicket.mockResolvedValue({
       ticket: {
         id: '00000000-0000-4000-8000-000000000050',
-        projectId: '00000000-0000-4000-8000-000000000003',
+        boardId: '00000000-0000-4000-8000-000000000003',
         title: 'Fix chat cwd',
         status: 'backlog',
       },
@@ -619,7 +619,7 @@ describe('ChatPage', () => {
 
     await waitFor(() => {
       expect(mocks.createTicket).toHaveBeenCalledWith({
-        projectId: '00000000-0000-4000-8000-000000000003',
+        boardId: '00000000-0000-4000-8000-000000000003',
         title: 'Fix chat cwd',
         description: '## Context\n\nUnbound chat sessions need a safe cwd.',
       });
@@ -664,8 +664,8 @@ describe('ChatPage', () => {
         title: 'Resolve chat cwd under worktrees',
         content: undefined,
         knowledgeType: 'coding_convention',
-        scope: 'project',
-        projectId: '00000000-0000-4000-8000-000000000003',
+        scope: 'board',
+        boardId: '00000000-0000-4000-8000-000000000003',
       });
     });
     expect(await screen.findByText('Knowledge inbox')).toBeInTheDocument();

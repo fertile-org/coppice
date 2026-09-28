@@ -237,14 +237,14 @@ mod tests {
             return;
         };
 
-        let project_id = Uuid::new_v4();
-        sqlx::query("INSERT INTO projects (id, name, slug) VALUES ($1, $2, $3)")
-            .bind(project_id)
-            .bind("split project")
-            .bind(format!("split-{}", project_id))
+        let board_id = Uuid::new_v4();
+        sqlx::query("INSERT INTO boards (id, name, slug) VALUES ($1, $2, $3)")
+            .bind(board_id)
+            .bind("split board")
+            .bind(format!("split-{}", board_id))
             .execute(&pool)
             .await
-            .expect("insert project");
+            .expect("insert board");
 
         let pm_agent_id = Uuid::new_v4();
         sqlx::query(
@@ -269,13 +269,13 @@ mod tests {
         sqlx::query(
             r#"
             INSERT INTO tickets (
-                id, project_id, title, status, created_by, assignee_agent_id
+                id, board_id, title, status, created_by, assignee_agent_id
             )
             VALUES ($1, $2, $3, $4, $5, $6)
             "#,
         )
         .bind(parent_id)
-        .bind(project_id)
+        .bind(board_id)
         .bind("Epic ticket")
         .bind("backlog")
         .bind("test")
@@ -335,14 +335,14 @@ mod tests {
             return;
         };
 
-        let project_id = Uuid::new_v4();
-        sqlx::query("INSERT INTO projects (id, name, slug) VALUES ($1, $2, $3)")
-            .bind(project_id)
-            .bind("split auto project")
-            .bind(format!("split-auto-apply-{}", project_id))
+        let board_id = Uuid::new_v4();
+        sqlx::query("INSERT INTO boards (id, name, slug) VALUES ($1, $2, $3)")
+            .bind(board_id)
+            .bind("split auto board")
+            .bind(format!("split-auto-apply-{}", board_id))
             .execute(&pool)
             .await
-            .expect("insert project");
+            .expect("insert board");
 
         let pm_agent_id = Uuid::new_v4();
         sqlx::query(
@@ -367,13 +367,13 @@ mod tests {
         sqlx::query(
             r#"
             INSERT INTO tickets (
-                id, project_id, title, status, created_by, assignee_agent_id
+                id, board_id, title, status, created_by, assignee_agent_id
             )
             VALUES ($1, $2, $3, $4, $5, $6)
             "#,
         )
         .bind(parent_id)
-        .bind(project_id)
+        .bind(board_id)
         .bind("Epic ticket")
         .bind("backlog")
         .bind("test")
@@ -431,14 +431,14 @@ mod tests {
             return;
         };
 
-        let project_id = Uuid::new_v4();
-        sqlx::query("INSERT INTO projects (id, name, slug) VALUES ($1, $2, $3)")
-            .bind(project_id)
-            .bind("split auto project")
-            .bind(format!("split-auto-{}", project_id))
+        let board_id = Uuid::new_v4();
+        sqlx::query("INSERT INTO boards (id, name, slug) VALUES ($1, $2, $3)")
+            .bind(board_id)
+            .bind("split auto board")
+            .bind(format!("split-auto-{}", board_id))
             .execute(&pool)
             .await
-            .expect("insert project");
+            .expect("insert board");
 
         let pm_agent_id = Uuid::new_v4();
         sqlx::query(
@@ -482,13 +482,13 @@ mod tests {
         sqlx::query(
             r#"
             INSERT INTO tickets (
-                id, project_id, title, status, created_by, assignee_agent_id
+                id, board_id, title, status, created_by, assignee_agent_id
             )
             VALUES ($1, $2, $3, $4, $5, $6)
             "#,
         )
         .bind(parent_id)
-        .bind(project_id)
+        .bind(board_id)
         .bind("Epic ticket")
         .bind("backlog")
         .bind("test")

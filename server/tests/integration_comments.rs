@@ -16,8 +16,8 @@ async fn setup_ticket_with_repo_and_agents() -> (
     let pool = state.db.as_ref().expect("db pool").clone();
     let repo_id =
         common::register_test_repo(&app, &local_path.display().to_string(), &cookie, &csrf).await;
-    let project_id = common::create_test_project(&app, &cookie, &csrf).await;
-    let ticket_id = common::create_test_ticket(&app, &project_id, &cookie, &csrf).await;
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
+    let ticket_id = common::create_test_ticket(&app, &board_id, &cookie, &csrf).await;
     common::set_ticket_repo(&app, &ticket_id, &repo_id, &cookie, &csrf).await;
     common::create_agent_with_preset_key(&app, "pm", "PM Agent", &cookie, &csrf).await;
     common::create_agent_with_preset_key(
@@ -38,8 +38,8 @@ async fn upload_attachment_and_create_comment() {
         return;
     }
     let (app, cookie, csrf) = common::bootstrap_and_login().await;
-    let project_id = common::create_test_project(&app, &cookie, &csrf).await;
-    let ticket_id = common::create_test_ticket(&app, &project_id, &cookie, &csrf).await;
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
+    let ticket_id = common::create_test_ticket(&app, &board_id, &cookie, &csrf).await;
 
     let upload = app
         .clone()
@@ -265,9 +265,9 @@ async fn comment_linked_attachment_still_downloadable_by_other_user() {
         .unwrap();
     assert_eq!(create_member.status(), StatusCode::CREATED);
 
-    let project_id = common::create_test_project(&app, &admin_cookie, &admin_csrf).await;
+    let board_id = common::create_test_board(&app, &admin_cookie, &admin_csrf).await;
     let ticket_id =
-        common::create_test_ticket(&app, &project_id, &admin_cookie, &admin_csrf).await;
+        common::create_test_ticket(&app, &board_id, &admin_cookie, &admin_csrf).await;
 
     let upload = app
         .clone()

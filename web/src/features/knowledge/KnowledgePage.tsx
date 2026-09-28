@@ -27,7 +27,7 @@ import {
 } from '../../lib/schemas/knowledge';
 import { useAgents } from '../agents/useAgents';
 import { useSession } from '../auth/useSession';
-import { useProjects } from '../projects/useProjects';
+import { useBoards } from '../boards/useBoards';
 import { useOpenTicket } from '../tickets/useOpenTicket';
 import {
   CURATION_LITMUS,
@@ -75,7 +75,7 @@ const KNOWLEDGE_TYPES = knowledgeTypeSchema.options;
 
 interface CandidateFormState {
   scope: KnowledgeScope;
-  projectId: string;
+  boardId: string;
   agentId: string;
   knowledgeType: KnowledgeType;
   title: string;
@@ -84,8 +84,8 @@ interface CandidateFormState {
 }
 
 const EMPTY_CANDIDATE: CandidateFormState = {
-  scope: 'project',
-  projectId: '',
+  scope: 'board',
+  boardId: '',
   agentId: '',
   knowledgeType: 'coding_convention',
   title: '',
@@ -150,7 +150,7 @@ function embeddingPillClass(status: string): string {
 function candidateInput(form: CandidateFormState): KnowledgeRevisionInput {
   return {
     scope: form.scope,
-    projectId: form.scope === 'workspace' ? null : form.projectId,
+    boardId: form.scope === 'workspace' ? null : form.boardId,
     agentId: form.scope === 'agent' ? form.agentId : null,
     knowledgeType: form.knowledgeType,
     title: form.title.trim(),
@@ -163,7 +163,7 @@ function candidateInput(form: CandidateFormState): KnowledgeRevisionInput {
 }
 
 function ManualCandidateForm() {
-  const { data: projects } = useProjects();
+  const { data: boards } = useBoards();
   const { data: agents } = useAgents();
   const create = useCreateKnowledge();
   const [form, setForm] = useState<CandidateFormState>(EMPTY_CANDIDATE);
@@ -176,8 +176,8 @@ function ManualCandidateForm() {
 
   async function submit(event: FormEvent) {
     event.preventDefault();
-    if (form.scope !== 'workspace' && !form.projectId) {
-      setError('Choose a project for this scope.');
+    if (form.scope !== 'workspace' && !form.boardId) {
+      setError('Choose a board for this scope.');
       return;
     }
     if (form.scope === 'agent' && !form.agentId) {
@@ -193,7 +193,7 @@ function ManualCandidateForm() {
       await create.mutateAsync(candidateInput(form));
       setForm((previous) => ({
         ...EMPTY_CANDIDATE,
-        projectId: previous.projectId,
+        boardId: previous.boardId,
       }));
     } catch (cause) {
       setError(parseApiErrorMessage(cause, 'Unable to create candidate.'));
@@ -301,30 +301,30 @@ function ManualCandidateForm() {
             }
           >
             <option value="workspace">Workspace</option>
-            <option value="project">Project</option>
-            <option value="agent">Project + agent</option>
+            <option value="board">Board</option>
+            <option value="agent">Board + agent</option>
           </select>
         </div>
 
         {form.scope !== 'workspace' && (
           <div className="space-y-1.5">
-            <Label htmlFor="knowledge-project">Project</Label>
+            <Label htmlFor="knowledge-board">Board</Label>
             <select
-              id="knowledge-project"
+              id="knowledge-board"
               required
               className="field-control w-full px-3 py-2 font-body text-sm"
-              value={form.projectId}
+              value={form.boardId}
               onChange={(event) =>
                 setForm((value) => ({
                   ...value,
-                  projectId: event.target.value,
+                  boardId: event.target.value,
                 }))
               }
             >
-              <option value="">Choose a project</option>
-              {projects?.map((project) => (
-                <option key={project.id} value={project.id}>
-                  {project.name}
+              <option value="">Choose a board</option>
+              {boards?.map((board) => (
+                <option key={board.id} value={board.id}>
+                  {board.name}
                 </option>
               ))}
             </select>
@@ -579,8 +579,8 @@ function KnowledgeCard({
     item.scope === 'workspace'
       ? 'Workspace'
       : item.scope === 'agent'
-        ? `${item.projectName ?? 'Project'} · ${item.agentName ?? 'Agent'}`
-        : item.projectName ?? 'Project';
+        ? `${item.boardName ?? 'Board'} · ${item.agentName ?? 'Agent'}`
+        : item.boardName ?? 'Board';
   const hasExpiry = item.expiresAt !== null;
   const awaitingReplacementEmbedding =
     item.status === 'approved' &&
@@ -640,7 +640,7 @@ function KnowledgeCard({
           expectedVersion: item.version,
           replacement: {
             scope: item.scope,
-            projectId: item.projectId,
+            boardId: item.boardId,
             agentId: item.agentId,
             knowledgeType: item.knowledgeType,
             title: title.trim(),
@@ -673,7 +673,7 @@ function KnowledgeCard({
         expectedVersion: neighborItem.version,
         replacement: {
           scope: item.scope,
-          projectId: item.projectId,
+          boardId: item.boardId,
           agentId: item.agentId,
           knowledgeType: item.knowledgeType,
           title: item.title,
@@ -1010,21 +1010,21 @@ function KnowledgeCard({
 
 export function KnowledgePage() {
   const { user } = useSession();
-  const { data: projects } = useProjects();
+  const { data: boards } = useBoards();
   const openTicket = useOpenTicket();
   const [status, setStatus] = useState<KnowledgeStatus>('pending');
-  const [projectId, setProjectId] = useState('');
+  const [boardId, setBoardId] = useState('');
   const [knowledgeType, setKnowledgeType] = useState('');
   const [focusItemId, setFocusItemId] = useState<string | null>(null);
   const query = useKnowledge({
     status,
-    projectId: projectId || undefined,
+    boardId: boardId || undefined,
     knowledgeType: (knowledgeType || undefined) as KnowledgeType | undefined,
   });
   const items = query.data?.pages.flatMap((page) => page.items) ?? [];
 
   function openNeighbor(neighborId: string) {
-    setProjectId('');
+    setBoardId('');
     setKnowledgeType('');
     setFocusItemId(neighborId);
     setStatus('approved');
@@ -1086,15 +1086,15 @@ export function KnowledgePage() {
 
           <div className="mt-4 flex flex-wrap gap-3">
             <label className="min-w-48 flex-1 font-body text-xs font-medium text-text-secondary">
-              Project
+              Board
               <select
                 className="field-control mt-1 block w-full px-3 py-2 font-body text-sm"
-                value={projectId}
-                onChange={(event) => setProjectId(event.target.value)}
+                value={boardId}
+                onChange={(event) => setBoardId(event.target.value)}
               >
                 <option value="">All scopes</option>
-                {projects?.map((project) => (
-                  <option key={project.id} value={project.id}>{project.name}</option>
+                {boards?.map((board) => (
+                  <option key={board.id} value={board.id}>{board.name}</option>
                 ))}
               </select>
             </label>

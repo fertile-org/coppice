@@ -11,8 +11,8 @@ pub enum ChatAction {
         description: String,
         #[serde(default, rename = "repoId")]
         repo_id: Option<Uuid>,
-        #[serde(default, rename = "projectId")]
-        project_id: Option<Uuid>,
+        #[serde(default, rename = "boardId")]
+        board_id: Option<Uuid>,
     },
     CreateKnowledge {
         title: String,
@@ -21,8 +21,8 @@ pub enum ChatAction {
         knowledge_type: String,
         #[serde(default = "default_scope")]
         scope: String,
-        #[serde(default, rename = "projectId")]
-        project_id: Option<Uuid>,
+        #[serde(default, rename = "boardId")]
+        board_id: Option<Uuid>,
     },
     Cutoff,
 }
@@ -32,7 +32,7 @@ fn default_knowledge_type() -> String {
 }
 
 fn default_scope() -> String {
-    "project".into()
+    "board".into()
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -180,14 +180,14 @@ mod tests {
                     "type": "create_ticket",
                     "title": "Fix cwd",
                     "description": "Details",
-                    "projectId": "11111111-1111-1111-1111-111111111111"
+                    "boardId": "11111111-1111-1111-1111-111111111111"
                 },
                 {
                     "type": "create_knowledge",
                     "title": "Rule",
                     "content": "Always resolve chat cwd",
                     "knowledgeType": "coding_convention",
-                    "scope": "project"
+                    "scope": "board"
                 },
                 { "type": "cutoff" }
             ]
@@ -195,9 +195,9 @@ mod tests {
         let actions = parse_chat_actions(&value).expect("parse");
         assert_eq!(actions.len(), 3);
         match &actions[0] {
-            ChatAction::CreateTicket { title, project_id, .. } => {
+            ChatAction::CreateTicket { title, board_id, .. } => {
                 assert_eq!(title, "Fix cwd");
-                assert!(project_id.is_some());
+                assert!(board_id.is_some());
             }
             other => panic!("expected create_ticket, got {other:?}"),
         }

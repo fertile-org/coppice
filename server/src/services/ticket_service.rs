@@ -29,8 +29,8 @@ pub struct TicketFilters {
 pub enum TicketError {
     #[error("ticket not found")]
     TicketNotFound,
-    #[error("project not found")]
-    ProjectNotFound,
+    #[error("board not found")]
+    BoardNotFound,
     #[error("invalid status")]
     InvalidStatus,
     #[error("invalid substatus")]
@@ -49,7 +49,7 @@ pub enum TicketError {
 
 /// Columns returned by aliased ticket list queries (keep in sync with `row_to_ticket`).
 const TICKET_COLUMNS_ALIASED: &str = r#"
-                t.id, t.project_id, t.repo_id, t.title, t.description,
+                t.id, t.board_id, t.repo_id, t.title, t.description,
                 t.status, t.substatus, t.substatus_metadata, t.priority,
                 t.assignee_agent_id, t.owner_user_id, t.branch_name,
                 t.pending_assign_recommendation, t.parent_ticket_id,
@@ -69,19 +69,19 @@ impl<'a> TicketService<'a> {
         Self { pool }
     }
 
-    pub async fn list_by_project(
+    pub async fn list_by_board(
         &self,
-        project_id: Uuid,
+        board_id: Uuid,
         filters: &TicketFilters,
     ) -> Result<Vec<TicketWithDisplay>, TicketError> {
-        self.ensure_project_exists(project_id).await?;
+        self.ensure_board_exists(board_id).await?;
 
         let mut query = format!(
             r#"
             SELECT
                 {TICKET_COLUMNS_ALIASED}
             FROM tickets t
-            WHERE t.project_id = $1
+            WHERE t.board_id = $1
             "#,
         );
         let mut bind_index = 2;
@@ -98,7 +98,7 @@ impl<'a> TicketService<'a> {
         }
         query.push_str(" ORDER BY t.created_at ASC");
 
-        let mut q = sqlx::query(&query).bind(project_id);
+        let mut q = sqlx::query(&query).bind(board_id);
         if let Some(status) = filters.status {
             q = q.bind(status_to_str(status));
         }
@@ -107,7 +107,7 @@ impl<'a> TicketService<'a> {
         }
 
         let rows = q.fetch_all(self.pool).await?;
-        let active_ticket_ids = self.active_ticket_ids_for_project(project_id).await?;
+        let active_ticket_ids = self.active_ticket_ids_for_board(board_id).await?;
         let mut results = Vec::with_capacity(rows.len());
         for row in &rows {
             let ticket = row_to_ticket(row);
@@ -120,7 +120,7 @@ impl<'a> TicketService<'a> {
     #[allow(clippy::too_many_arguments)]
     pub async fn create(
         &self,
-        project_id: Uuid,
+        board_id: Uuid,
         title: &str,
         description: &str,
         repo_id: Option<Uuid>,
@@ -129,7 +129,7 @@ impl<'a> TicketService<'a> {
         created_by_id: Uuid,
     ) -> Result<TicketWithDisplay, TicketError> {
         self.create_with_source(
-            project_id,
+            board_id,
             title,
             description,
             repo_id,
@@ -144,7 +144,7 @@ impl<'a> TicketService<'a> {
     #[allow(clippy::too_many_arguments)]
     pub async fn create_with_source(
         &self,
-        project_id: Uuid,
+        board_id: Uuid,
         title: &str,
         description: &str,
         repo_id: Option<Uuid>,
@@ -153,7 +153,7 @@ impl<'a> TicketService<'a> {
         created_by_id: Uuid,
         source_chat_session_id: Option<Uuid>,
     ) -> Result<TicketWithDisplay, TicketError> {
-        self.ensure_project_exists(project_id).await?;
+        self.ensure_board_exists(board_id).await?;
 
         let id = Uuid::new_v4();
         let status = TicketStatus::Backlog;
@@ -162,12 +162,12 @@ impl<'a> TicketService<'a> {
         let row = sqlx::query(
             r#"
             INSERT INTO tickets (
-                id, project_id, repo_id, title, description, status, priority,
+                id, board_id, repo_id, title, description, status, priority,
                 created_by, created_by_id, source_chat_session_id
             )
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
             RETURNING
-                id, project_id, repo_id, title, description,
+                id, board_id, repo_id, title, description,
                 status, substatus, substatus_metadata, priority,
                 assignee_agent_id, owner_user_id, branch_name,
                 pending_assign_recommendation, parent_ticket_id,
@@ -176,7 +176,7 @@ impl<'a> TicketService<'a> {
             "#,
         )
         .bind(id)
-        .bind(project_id)
+        .bind(board_id)
         .bind(repo_id)
         .bind(title)
         .bind(description)
@@ -198,7 +198,7 @@ impl<'a> TicketService<'a> {
         description: &str,
         created_by_id: Uuid,
     ) -> Result<TicketWithDisplay, TicketError> {
-        self.ensure_project_exists(parent.project_id).await?;
+        self.ensure_board_exists(parent.board_id).await?;
 
         let id = Uuid::new_v4();
         let status = TicketStatus::Backlog;
@@ -206,12 +206,12 @@ impl<'a> TicketService<'a> {
         let row = sqlx::query(
             r#"
             INSERT INTO tickets (
-                id, project_id, repo_id, title, description, status,
+                id, board_id, repo_id, title, description, status,
                 parent_ticket_id, created_by, created_by_id
             )
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
             RETURNING
-                id, project_id, repo_id, title, description,
+                id, board_id, repo_id, title, description,
                 status, substatus, substatus_metadata, priority,
                 assignee_agent_id, owner_user_id, branch_name,
                 pending_assign_recommendation, parent_ticket_id,
@@ -220,7 +220,7 @@ impl<'a> TicketService<'a> {
             "#,
         )
         .bind(id)
-        .bind(parent.project_id)
+        .bind(parent.board_id)
         .bind(parent.repo_id)
         .bind(title)
         .bind(description)
@@ -249,7 +249,7 @@ impl<'a> TicketService<'a> {
             SET pending_split_recommendation = $2, updated_at = now()
             WHERE id = $1
             RETURNING
-                id, project_id, repo_id, title, description,
+                id, board_id, repo_id, title, description,
                 status, substatus, substatus_metadata, priority,
                 assignee_agent_id, owner_user_id, branch_name,
                 pending_assign_recommendation, parent_ticket_id,
@@ -272,7 +272,7 @@ impl<'a> TicketService<'a> {
         let row = sqlx::query(
             r#"
             SELECT
-                id, project_id, repo_id, title, description,
+                id, board_id, repo_id, title, description,
                 status, substatus, substatus_metadata, priority,
                 assignee_agent_id, owner_user_id, branch_name,
                 pending_assign_recommendation, parent_ticket_id,
@@ -338,7 +338,7 @@ impl<'a> TicketService<'a> {
                 updated_at = now()
             WHERE id = $1
             RETURNING
-                id, project_id, repo_id, title, description,
+                id, board_id, repo_id, title, description,
                 status, substatus, substatus_metadata, priority,
                 assignee_agent_id, owner_user_id, branch_name,
                 pending_assign_recommendation, parent_ticket_id,
@@ -396,7 +396,7 @@ impl<'a> TicketService<'a> {
                 updated_at = now()
             WHERE id = $1
             RETURNING
-                id, project_id, repo_id, title, description,
+                id, board_id, repo_id, title, description,
                 status, substatus, substatus_metadata, priority,
                 assignee_agent_id, owner_user_id, branch_name,
                 pending_assign_recommendation, parent_ticket_id,
@@ -473,7 +473,7 @@ impl<'a> TicketService<'a> {
                 updated_at = now()
             WHERE id = $1
             RETURNING
-                id, project_id, repo_id, title, description,
+                id, board_id, repo_id, title, description,
                 status, substatus, substatus_metadata, priority,
                 assignee_agent_id, owner_user_id, branch_name,
                 pending_assign_recommendation, parent_ticket_id,
@@ -505,7 +505,7 @@ impl<'a> TicketService<'a> {
             SET pending_assign_recommendation = NULL, updated_at = now()
             WHERE id = $1
             RETURNING
-                id, project_id, repo_id, title, description,
+                id, board_id, repo_id, title, description,
                 status, substatus, substatus_metadata, priority,
                 assignee_agent_id, owner_user_id, branch_name,
                 pending_assign_recommendation, parent_ticket_id,
@@ -531,7 +531,7 @@ impl<'a> TicketService<'a> {
             SET pending_split_recommendation = NULL, updated_at = now()
             WHERE id = $1
             RETURNING
-                id, project_id, repo_id, title, description,
+                id, board_id, repo_id, title, description,
                 status, substatus, substatus_metadata, priority,
                 assignee_agent_id, owner_user_id, branch_name,
                 pending_assign_recommendation, parent_ticket_id,
@@ -556,7 +556,7 @@ impl<'a> TicketService<'a> {
         let rows = sqlx::query(
             r#"
             SELECT
-                id, project_id, repo_id, title, description,
+                id, board_id, repo_id, title, description,
                 status, substatus, substatus_metadata, priority,
                 assignee_agent_id, owner_user_id, branch_name,
                 pending_assign_recommendation, parent_ticket_id,
@@ -592,7 +592,7 @@ impl<'a> TicketService<'a> {
             SET assignee_agent_id = $2, updated_at = now()
             WHERE id = $1
             RETURNING
-                id, project_id, repo_id, title, description,
+                id, board_id, repo_id, title, description,
                 status, substatus, substatus_metadata, priority,
                 assignee_agent_id, owner_user_id, branch_name,
                 pending_assign_recommendation, parent_ticket_id,
@@ -624,7 +624,7 @@ impl<'a> TicketService<'a> {
             SET archived_at = now(), updated_at = now()
             WHERE id = $1 AND archived_at IS NULL
             RETURNING
-                id, project_id, repo_id, title, description,
+                id, board_id, repo_id, title, description,
                 status, substatus, substatus_metadata, priority,
                 assignee_agent_id, owner_user_id, branch_name,
                 pending_assign_recommendation, parent_ticket_id,
@@ -652,7 +652,7 @@ impl<'a> TicketService<'a> {
             SET archived_at = NULL, updated_at = now()
             WHERE id = $1 AND archived_at IS NOT NULL
             RETURNING
-                id, project_id, repo_id, title, description,
+                id, board_id, repo_id, title, description,
                 status, substatus, substatus_metadata, priority,
                 assignee_agent_id, owner_user_id, branch_name,
                 pending_assign_recommendation, parent_ticket_id,
@@ -701,34 +701,34 @@ impl<'a> TicketService<'a> {
         Ok(row.get("last_activity_at"))
     }
 
-    async fn ensure_project_exists(&self, project_id: Uuid) -> Result<(), TicketError> {
+    async fn ensure_board_exists(&self, board_id: Uuid) -> Result<(), TicketError> {
         let exists = sqlx::query_scalar::<_, bool>(
-            "SELECT EXISTS(SELECT 1 FROM projects WHERE id = $1)",
+            "SELECT EXISTS(SELECT 1 FROM boards WHERE id = $1)",
         )
-        .bind(project_id)
+        .bind(board_id)
         .fetch_one(self.pool)
         .await?;
 
         if !exists {
-            return Err(TicketError::ProjectNotFound);
+            return Err(TicketError::BoardNotFound);
         }
         Ok(())
     }
 
-    async fn active_ticket_ids_for_project(
+    async fn active_ticket_ids_for_board(
         &self,
-        project_id: Uuid,
+        board_id: Uuid,
     ) -> Result<HashSet<Uuid>, TicketError> {
         let rows = sqlx::query_scalar::<_, Uuid>(
             r#"
             SELECT DISTINCT ar.ticket_id
             FROM agent_runs ar
             INNER JOIN tickets t ON t.id = ar.ticket_id
-            WHERE t.project_id = $1
+            WHERE t.board_id = $1
               AND ar.status IN ('queued', 'running')
             "#,
         )
-        .bind(project_id)
+        .bind(board_id)
         .fetch_all(self.pool)
         .await?;
         Ok(rows.into_iter().collect())
@@ -805,7 +805,7 @@ fn row_to_ticket(row: &sqlx::postgres::PgRow) -> Ticket {
 
     Ticket {
         id: row.get("id"),
-        project_id: row.get("project_id"),
+        board_id: row.get("board_id"),
         repo_id: row.get("repo_id"),
         title: row.get("title"),
         description: row.get("description"),

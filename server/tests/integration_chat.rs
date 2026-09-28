@@ -5,7 +5,7 @@ use std::time::Duration;
 use tower::ServiceExt;
 
 #[tokio::test]
-async fn create_session_requires_agent_project_optional() {
+async fn create_session_requires_agent_board_optional() {
     let _guard = common::DB_TEST_LOCK.lock().await;
     if !common::db_available().await {
         return;
@@ -20,7 +20,7 @@ async fn create_session_requires_agent_project_optional() {
         .oneshot(common::json_request(
             "POST",
             "/api/chat/sessions",
-            r#"{"projectId":null}"#,
+            r#"{"boardId":null}"#,
             &cookie,
             &csrf,
         ))
@@ -42,7 +42,7 @@ async fn create_session_requires_agent_project_optional() {
     assert_eq!(created.status(), StatusCode::CREATED);
     let body: serde_json::Value = common::json_body(created).await;
     assert_eq!(body["agentId"], agent_id);
-    assert!(body["projectId"].is_null());
+    assert!(body["boardId"].is_null());
     assert_eq!(body["status"], "active");
 }
 
@@ -650,7 +650,7 @@ async fn create_ticket_from_chat_sets_source_session() {
 
     let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
     let pool = state.db.as_ref().expect("db");
-    let project_id = common::create_test_project(&app, &cookie, &csrf).await;
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
     let agent_id =
         common::create_agent_with_preset_key(&app, "backend_engineer", "BE", &cookie, &csrf).await;
 
@@ -659,7 +659,7 @@ async fn create_ticket_from_chat_sets_source_session() {
         .oneshot(common::json_request(
             "POST",
             "/api/chat/sessions",
-            &format!(r#"{{"agentId":"{agent_id}","projectId":"{project_id}"}}"#),
+            &format!(r#"{{"agentId":"{agent_id}","boardId":"{board_id}"}}"#),
             &cookie,
             &csrf,
         ))
@@ -681,7 +681,7 @@ async fn create_ticket_from_chat_sets_source_session() {
         .await
         .unwrap();
 
-    let missing_project = app
+    let missing_board = app
         .clone()
         .oneshot(common::json_request(
             "POST",
@@ -692,14 +692,14 @@ async fn create_ticket_from_chat_sets_source_session() {
         ))
         .await
         .unwrap();
-    assert_eq!(missing_project.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(missing_board.status(), StatusCode::UNPROCESSABLE_ENTITY);
 
     let created_ticket = app
         .clone()
         .oneshot(common::json_request(
             "POST",
             &format!("/api/chat/sessions/{session_id}/create-ticket"),
-            &format!(r#"{{"projectId":"{project_id}","title":"Fix chat cwd"}}"#),
+            &format!(r#"{{"boardId":"{board_id}","title":"Fix chat cwd"}}"#),
             &cookie,
             &csrf,
         ))
@@ -736,7 +736,7 @@ async fn draft_ticket_from_chat_uses_agent_fixture() {
 
     let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
     let pool = state.db.as_ref().expect("db");
-    let project_id = common::create_test_project(&app, &cookie, &csrf).await;
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
     let agent_id =
         common::create_agent_with_preset_key(&app, "backend_engineer", "BE", &cookie, &csrf).await;
 
@@ -745,7 +745,7 @@ async fn draft_ticket_from_chat_uses_agent_fixture() {
         .oneshot(common::json_request(
             "POST",
             "/api/chat/sessions",
-            &format!(r#"{{"agentId":"{agent_id}","projectId":"{project_id}"}}"#),
+            &format!(r#"{{"agentId":"{agent_id}","boardId":"{board_id}"}}"#),
             &cookie,
             &csrf,
         ))
@@ -838,7 +838,7 @@ async fn draft_ticket_from_chat_falls_back_when_fixture_missing() {
     }
 
     let (app, cookie, csrf) = common::bootstrap_and_login().await;
-    let project_id = common::create_test_project(&app, &cookie, &csrf).await;
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
     // research has chat_turn-style fixtures for other jobs but no draft_ticket.json
     let agent_id =
         common::create_agent_with_preset_key(&app, "research", "Research", &cookie, &csrf).await;
@@ -848,7 +848,7 @@ async fn draft_ticket_from_chat_falls_back_when_fixture_missing() {
         .oneshot(common::json_request(
             "POST",
             "/api/chat/sessions",
-            &format!(r#"{{"agentId":"{agent_id}","projectId":"{project_id}"}}"#),
+            &format!(r#"{{"agentId":"{agent_id}","boardId":"{board_id}"}}"#),
             &cookie,
             &csrf,
         ))
@@ -900,7 +900,7 @@ async fn create_ticket_after_draft_confirm_sets_source_session() {
 
     let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
     let pool = state.db.as_ref().expect("db");
-    let project_id = common::create_test_project(&app, &cookie, &csrf).await;
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
     let agent_id =
         common::create_agent_with_preset_key(&app, "backend_engineer", "BE", &cookie, &csrf).await;
 
@@ -909,7 +909,7 @@ async fn create_ticket_after_draft_confirm_sets_source_session() {
         .oneshot(common::json_request(
             "POST",
             "/api/chat/sessions",
-            &format!(r#"{{"agentId":"{agent_id}","projectId":"{project_id}"}}"#),
+            &format!(r#"{{"agentId":"{agent_id}","boardId":"{board_id}"}}"#),
             &cookie,
             &csrf,
         ))
@@ -952,7 +952,7 @@ async fn create_ticket_after_draft_confirm_sets_source_session() {
             "POST",
             &format!("/api/chat/sessions/{session_id}/create-ticket"),
             &format!(
-                r#"{{"projectId":"{project_id}","title":{},"description":{}}}"#,
+                r#"{{"boardId":"{board_id}","title":{},"description":{}}}"#,
                 serde_json::to_string(title).unwrap(),
                 serde_json::to_string(description).unwrap(),
             ),
@@ -986,7 +986,7 @@ async fn create_knowledge_from_chat_is_pending_not_admin_route() {
     }
 
     let (app, cookie, csrf) = common::bootstrap_and_login().await;
-    let project_id = common::create_test_project(&app, &cookie, &csrf).await;
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
     let agent_id =
         common::create_agent_with_preset_key(&app, "backend_engineer", "BE", &cookie, &csrf).await;
 
@@ -995,7 +995,7 @@ async fn create_knowledge_from_chat_is_pending_not_admin_route() {
         .oneshot(common::json_request(
             "POST",
             "/api/chat/sessions",
-            &format!(r#"{{"agentId":"{agent_id}","projectId":"{project_id}"}}"#),
+            &format!(r#"{{"agentId":"{agent_id}","boardId":"{board_id}"}}"#),
             &cookie,
             &csrf,
         ))
@@ -1022,7 +1022,7 @@ async fn create_knowledge_from_chat_is_pending_not_admin_route() {
             "POST",
             &format!("/api/chat/sessions/{session_id}/create-knowledge"),
             &format!(
-                r#"{{"projectId":"{project_id}","title":"Chat cwd convention","knowledgeType":"coding_convention","scope":"project"}}"#
+                r#"{{"boardId":"{board_id}","title":"Chat cwd convention","knowledgeType":"coding_convention","scope":"board"}}"#
             ),
             &cookie,
             &csrf,

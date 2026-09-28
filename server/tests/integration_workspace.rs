@@ -11,12 +11,12 @@ async fn full_workspace_happy_path() {
     }
     let (app, cookie, csrf) = common::bootstrap_and_login().await;
 
-    let project_id = common::create_test_project(&app, &cookie, &csrf).await;
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
     let (_git_dir, local_path) = common::create_temp_git_checkout();
     let _repo_id =
         common::register_test_repo(&app, &local_path.display().to_string(), &cookie, &csrf).await;
     let agent_id = common::create_test_agent_from_preset(&app, "PM Bot", &cookie, &csrf).await;
-    let ticket_id = common::create_test_ticket(&app, &project_id, &cookie, &csrf).await;
+    let ticket_id = common::create_test_ticket(&app, &board_id, &cookie, &csrf).await;
 
     let assign = app
         .clone()
@@ -82,7 +82,7 @@ async fn full_workspace_happy_path() {
 }
 
 #[tokio::test]
-async fn projects_without_session_returns_401() {
+async fn boards_without_session_returns_401() {
     let _guard = common::DB_TEST_LOCK.lock().await;
     if !common::db_available().await {
         return;
@@ -94,7 +94,7 @@ async fn projects_without_session_returns_401() {
         .oneshot(
             axum::http::Request::builder()
                 .method("GET")
-                .uri("/api/projects")
+                .uri("/api/boards")
                 .body(axum::body::Body::empty())
                 .unwrap(),
         )

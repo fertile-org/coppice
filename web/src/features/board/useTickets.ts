@@ -13,7 +13,7 @@ export interface SubstatusDisplay {
 
 export interface Ticket {
   id: string;
-  projectId: string;
+  boardId: string;
   repoId?: string;
   title: string;
   description: string;
@@ -38,29 +38,29 @@ export interface Ticket {
   archivedAt?: string | null;
 }
 
-/** Prefix for all ticket-list queries for a project (any includeArchived variant). */
-export function ticketsQueryKey(projectId: string) {
-  return ['tickets', projectId] as const;
+/** Prefix for all ticket-list queries for a board (any includeArchived variant). */
+export function ticketsQueryKey(boardId: string) {
+  return ['tickets', boardId] as const;
 }
 
-function ticketsListQueryKey(projectId: string, includeArchived: boolean) {
-  return [...ticketsQueryKey(projectId), includeArchived] as const;
+function ticketsListQueryKey(boardId: string, includeArchived: boolean) {
+  return [...ticketsQueryKey(boardId), includeArchived] as const;
 }
 
 async function fetchTickets(
-  projectId: string,
+  boardId: string,
   includeArchived: boolean,
 ): Promise<Ticket[]> {
   const params = includeArchived ? '?includeArchived=true' : '';
-  const res = await apiFetch(`/api/projects/${projectId}/tickets${params}`);
+  const res = await apiFetch(`/api/boards/${boardId}/tickets${params}`);
   return res.json() as Promise<Ticket[]>;
 }
 
 async function createTicket(
-  projectId: string,
+  boardId: string,
   title: string,
 ): Promise<Ticket> {
-  const res = await apiFetch(`/api/projects/${projectId}/tickets`, {
+  const res = await apiFetch(`/api/boards/${boardId}/tickets`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ title }),
@@ -81,13 +81,13 @@ async function patchTicketStatus(
 }
 
 export function useTickets(
-  projectId: string | undefined,
+  boardId: string | undefined,
   includeArchived = false,
 ) {
   return useQuery({
-    queryKey: ticketsListQueryKey(projectId ?? '', includeArchived),
-    queryFn: () => fetchTickets(projectId!, includeArchived),
-    enabled: Boolean(projectId),
+    queryKey: ticketsListQueryKey(boardId ?? '', includeArchived),
+    queryFn: () => fetchTickets(boardId!, includeArchived),
+    enabled: Boolean(boardId),
     refetchInterval: (query) => {
       const tickets = query.state.data;
       if (tickets?.some((ticket) => ticket.hasActiveRun)) {
@@ -98,25 +98,25 @@ export function useTickets(
   });
 }
 
-export function useCreateTicket(projectId: string) {
+export function useCreateTicket(boardId: string) {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: (title: string) => createTicket(projectId, title),
+    mutationFn: (title: string) => createTicket(boardId, title),
     onSuccess: () => {
       void queryClient.invalidateQueries({
-        queryKey: ticketsQueryKey(projectId),
+        queryKey: ticketsQueryKey(boardId),
       });
     },
   });
 }
 
 export function useUpdateTicketStatus(
-  projectId: string,
+  boardId: string,
   includeArchived = false,
 ) {
   const queryClient = useQueryClient();
-  const listKey = ticketsListQueryKey(projectId, includeArchived);
+  const listKey = ticketsListQueryKey(boardId, includeArchived);
 
   return useMutation({
     mutationFn: ({
@@ -127,7 +127,7 @@ export function useUpdateTicketStatus(
       status: TicketStatus;
     }) => patchTicketStatus(ticketId, status),
     onMutate: async ({ ticketId, status }) => {
-      await queryClient.cancelQueries({ queryKey: ticketsQueryKey(projectId) });
+      await queryClient.cancelQueries({ queryKey: ticketsQueryKey(boardId) });
       const previous = queryClient.getQueryData<Ticket[]>(listKey);
       queryClient.setQueryData<Ticket[]>(listKey, (old) =>
         old?.map((ticket) =>
@@ -143,7 +143,7 @@ export function useUpdateTicketStatus(
     },
     onSettled: () => {
       void queryClient.invalidateQueries({
-        queryKey: ticketsQueryKey(projectId),
+        queryKey: ticketsQueryKey(boardId),
       });
     },
   });

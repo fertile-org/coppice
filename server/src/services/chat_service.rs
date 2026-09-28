@@ -20,7 +20,7 @@ use crate::services::context_builder::{
     build_draft_ticket_context, write_context_document, ContextInput,
 };
 use crate::services::knowledge_service::{KnowledgeError, KnowledgeService};
-use crate::services::project_service::{ProjectError, ProjectService};
+use crate::services::board_service::{BoardError, BoardService};
 use crate::services::repo_service::{RepoError, RepoService};
 use crate::services::run_service::{RunError, RunService};
 use crate::services::ticket_service::{TicketError, TicketService, TicketWithDisplay};
@@ -96,12 +96,12 @@ impl From<AgentError> for ChatError {
     }
 }
 
-impl From<ProjectError> for ChatError {
-    fn from(err: ProjectError) -> Self {
+impl From<BoardError> for ChatError {
+    fn from(err: BoardError) -> Self {
         match err {
-            ProjectError::ProjectNotFound => ChatError::Validation("project not found".into()),
-            ProjectError::RepoNotFound => ChatError::Validation("repo not found".into()),
-            ProjectError::Database(e) => ChatError::Database(e),
+            BoardError::BoardNotFound => ChatError::Validation("board not found".into()),
+            BoardError::RepoNotFound => ChatError::Validation("repo not found".into()),
+            BoardError::Database(e) => ChatError::Database(e),
         }
     }
 }
@@ -132,7 +132,7 @@ impl From<TicketError> for ChatError {
     fn from(err: TicketError) -> Self {
         match err {
             TicketError::TicketNotFound => ChatError::NotFound,
-            TicketError::ProjectNotFound => ChatError::Validation("project not found".into()),
+            TicketError::BoardNotFound => ChatError::Validation("board not found".into()),
             TicketError::Validation(msg) => ChatError::Validation(msg),
             TicketError::Database(e) => ChatError::Database(e),
             other => ChatError::Validation(other.to_string()),
@@ -176,7 +176,7 @@ pub struct CutoffResult {
 }
 
 pub struct CreateTicketFromChatInput<'a> {
-    pub project_id: Uuid,
+    pub board_id: Uuid,
     pub title: Option<&'a str>,
     pub description: Option<&'a str>,
     pub repo_id: Option<Uuid>,
@@ -202,7 +202,7 @@ pub struct CreateKnowledgeFromChatInput<'a> {
     pub content: Option<&'a str>,
     pub knowledge_type: Option<&'a str>,
     pub scope: Option<&'a str>,
-    pub project_id: Option<Uuid>,
+    pub board_id: Option<Uuid>,
 }
 
 impl<'a> ChatService<'a> {
@@ -214,10 +214,10 @@ impl<'a> ChatService<'a> {
         &self,
         owner_user_id: Uuid,
         agent_id: Uuid,
-        project_id: Option<Uuid>,
+        board_id: Option<Uuid>,
         repo_id: Option<Uuid>,
     ) -> Result<ChatSession, ChatError> {
-        self.create_session_inner(owner_user_id, agent_id, project_id, repo_id, None)
+        self.create_session_inner(owner_user_id, agent_id, board_id, repo_id, None)
             .await
     }
 
@@ -225,7 +225,7 @@ impl<'a> ChatService<'a> {
         &self,
         owner_user_id: Uuid,
         agent_id: Uuid,
-        project_id: Option<Uuid>,
+        board_id: Option<Uuid>,
         repo_id: Option<Uuid>,
         parent_session_id: Option<Uuid>,
     ) -> Result<ChatSession, ChatError> {
@@ -233,8 +233,8 @@ impl<'a> ChatService<'a> {
         if !agent.enabled {
             return Err(ChatError::Validation("agent is disabled".into()));
         }
-        if let Some(project_id) = project_id {
-            ProjectService::new(self.pool).get_project(project_id).await?;
+        if let Some(board_id) = board_id {
+            BoardService::new(self.pool).get_board(board_id).await?;
         }
         if let Some(repo_id) = repo_id {
             RepoService::new(self.pool).get(repo_id).await?;
@@ -244,17 +244,17 @@ impl<'a> ChatService<'a> {
         let row = sqlx::query(
             r#"
             INSERT INTO chat_sessions (
-                id, project_id, owner_user_id, agent_id, repo_id, parent_session_id, status
+                id, board_id, owner_user_id, agent_id, repo_id, parent_session_id, status
             )
             VALUES ($1, $2, $3, $4, $5, $6, $7)
             RETURNING
-                id, project_id, owner_user_id, agent_id, repo_id, parent_session_id, status,
+                id, board_id, owner_user_id, agent_id, repo_id, parent_session_id, status,
                 provider_session_id, provider_session_connector,
                 created_at, updated_at
             "#,
         )
         .bind(id)
-        .bind(project_id)
+        .bind(board_id)
         .bind(owner_user_id)
         .bind(agent_id)
         .bind(repo_id)
@@ -269,9 +269,9 @@ impl<'a> ChatService<'a> {
     pub async fn list_sessions(
         &self,
         owner_user_id: Uuid,
-        project_id: Option<Uuid>,
+        board_id: Option<Uuid>,
     ) -> Result<Vec<ChatSession>, ChatError> {
-        let rows = if let Some(project_id) = project_id {
+        let rows = if let Some(board_id) = board_id {
             sqlx::query(&format!(
                 r#"
                 SELECT {CHAT_SESSION_LIST_SELECT}
@@ -283,12 +283,12 @@ impl<'a> ChatService<'a> {
                     ORDER BY seq DESC
                     LIMIT 1
                 ) lm ON true
-                WHERE cs.owner_user_id = $1 AND cs.project_id = $2
+                WHERE cs.owner_user_id = $1 AND cs.board_id = $2
                 ORDER BY cs.updated_at DESC
                 "#,
             ))
             .bind(owner_user_id)
-            .bind(project_id)
+            .bind(board_id)
             .fetch_all(self.pool)
             .await?
         } else {
@@ -432,7 +432,7 @@ impl<'a> ChatService<'a> {
             SET status = $2, updated_at = now()
             WHERE id = $1 AND owner_user_id = $3
             RETURNING
-                id, project_id, owner_user_id, agent_id, repo_id, parent_session_id, status,
+                id, board_id, owner_user_id, agent_id, repo_id, parent_session_id, status,
                 provider_session_id, provider_session_connector,
                 created_at, updated_at
             "#,
@@ -813,7 +813,7 @@ impl<'a> ChatService<'a> {
         Ok(())
     }
 
-    /// Human-confirmed create ticket from chat context. Requires an explicit project.
+    /// Human-confirmed create ticket from chat context. Requires an explicit board.
     pub async fn create_ticket_from_chat(
         &self,
         session_id: Uuid,
@@ -821,8 +821,8 @@ impl<'a> ChatService<'a> {
         input: CreateTicketFromChatInput<'_>,
     ) -> Result<CreateTicketFromChatResult, ChatError> {
         let session = self.get_session(session_id, owner_user_id).await?;
-        ProjectService::new(self.pool)
-            .get_project(input.project_id)
+        BoardService::new(self.pool)
+            .get_board(input.board_id)
             .await?;
 
         let transcript = self.format_transcript(session_id).await?;
@@ -842,7 +842,7 @@ impl<'a> ChatService<'a> {
 
         let ticket = TicketService::new(self.pool)
             .create_with_source(
-                input.project_id,
+                input.board_id,
                 &title,
                 &description,
                 repo_id,
@@ -869,16 +869,16 @@ impl<'a> ChatService<'a> {
             )
             .await?;
 
-        if session.project_id.is_none() {
+        if session.board_id.is_none() {
             sqlx::query(
                 r#"
                 UPDATE chat_sessions
-                SET project_id = $2, updated_at = now()
+                SET board_id = $2, updated_at = now()
                 WHERE id = $1
                 "#,
             )
             .bind(session_id)
-            .bind(input.project_id)
+            .bind(input.board_id)
             .execute(self.pool)
             .await?;
         }
@@ -1054,22 +1054,22 @@ impl<'a> ChatService<'a> {
             None => KnowledgeType::CodingConvention,
         };
 
-        let scope_str = input.scope.unwrap_or("project");
+        let scope_str = input.scope.unwrap_or("board");
         let scope = scope_from_str(scope_str)
             .ok_or_else(|| ChatError::Validation("invalid scope".into()))?;
 
-        let project_id = match scope {
+        let board_id = match scope {
             KnowledgeScope::Workspace => None,
-            KnowledgeScope::Project | KnowledgeScope::Agent => {
-                let project_id = input.project_id.or(session.project_id).ok_or_else(|| {
+            KnowledgeScope::Board | KnowledgeScope::Agent => {
+                let board_id = input.board_id.or(session.board_id).ok_or_else(|| {
                     ChatError::Validation(
-                        "projectId is required for project-scoped knowledge".into(),
+                        "boardId is required for board-scoped knowledge".into(),
                     )
                 })?;
-                ProjectService::new(self.pool)
-                    .get_project(project_id)
+                BoardService::new(self.pool)
+                    .get_board(board_id)
                     .await?;
-                Some(project_id)
+                Some(board_id)
             }
         };
 
@@ -1081,7 +1081,7 @@ impl<'a> ChatService<'a> {
 
         let revision = KnowledgeRevisionInput {
             scope,
-            project_id,
+            board_id,
             agent_id,
             knowledge_type,
             title: title.clone(),
@@ -1141,7 +1141,7 @@ impl<'a> ChatService<'a> {
             .create_session_inner(
                 owner_user_id,
                 parent.agent_id,
-                parent.project_id,
+                parent.board_id,
                 parent.repo_id,
                 Some(session_id),
             )
@@ -1231,7 +1231,7 @@ fn draft_result(fields: DraftTicketFields, source: DraftTicketSource) -> DraftTi
 }
 
 const CHAT_SESSION_LIST_SELECT: &str = r"
-    cs.id, cs.project_id, cs.owner_user_id, cs.agent_id, cs.repo_id, cs.parent_session_id, cs.status,
+    cs.id, cs.board_id, cs.owner_user_id, cs.agent_id, cs.repo_id, cs.parent_session_id, cs.status,
     cs.provider_session_id, cs.provider_session_connector,
     cs.created_at, cs.updated_at,
     COALESCE(lm.body, '') AS last_message_body,
@@ -1255,7 +1255,7 @@ fn session_from_insert_row(row: &sqlx::postgres::PgRow) -> ChatSession {
     let status_str: String = row.get("status");
     ChatSession {
         id: row.get("id"),
-        project_id: row.get("project_id"),
+        board_id: row.get("board_id"),
         owner_user_id: row.get("owner_user_id"),
         agent_id: row.get("agent_id"),
         repo_id: row.get("repo_id"),
@@ -1280,7 +1280,7 @@ fn row_to_session(row: &sqlx::postgres::PgRow) -> ChatSession {
         .unwrap_or_else(|_| String::new());
     ChatSession {
         id: row.get("id"),
-        project_id: row.get("project_id"),
+        board_id: row.get("board_id"),
         owner_user_id: row.get("owner_user_id"),
         agent_id: row.get("agent_id"),
         repo_id: row.get("repo_id"),

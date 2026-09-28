@@ -29,8 +29,8 @@ const neighbor: SimilarNeighbor = {
   revisionId: '00000000-0000-4000-8000-000000000098',
   title: 'Existing feedback loop',
   knowledgeType: 'test_command',
-  scope: 'project',
-  projectId: '00000000-0000-4000-8000-000000000003',
+  scope: 'board',
+  boardId: '00000000-0000-4000-8000-000000000003',
   similarity: 0.98123,
   status: 'approved',
   embeddingStatus: 'ready',
@@ -43,9 +43,9 @@ const item: KnowledgeItem = {
   revisionId: '00000000-0000-4000-8000-000000000002',
   revisionNumber: 1,
   activeRevisionId: null,
-  scope: 'project',
-  projectId: '00000000-0000-4000-8000-000000000003',
-  projectName: 'Coppice',
+  scope: 'board',
+  boardId: '00000000-0000-4000-8000-000000000003',
+  boardName: 'Coppice',
   agentId: null,
   agentName: null,
   knowledgeType: 'test_command',
@@ -77,8 +77,8 @@ function mutation(mutateAsync: ReturnType<typeof vi.fn>) {
   return { mutateAsync, isPending: false };
 }
 
-vi.mock('../projects/useProjects', () => ({
-  useProjects: () => ({
+vi.mock('../boards/useBoards', () => ({
+  useBoards: () => ({
     data: [
       {
         id: '00000000-0000-4000-8000-000000000003',
@@ -316,7 +316,7 @@ describe('KnowledgePage', () => {
         expectedVersion: 7,
         replacement: {
           scope: item.scope,
-          projectId: item.projectId,
+          boardId: item.boardId,
           agentId: item.agentId,
           knowledgeType: item.knowledgeType,
           title: item.title,
@@ -352,7 +352,7 @@ describe('KnowledgePage', () => {
     });
   });
 
-  it('creates a typed and project-scoped manual candidate', async () => {
+  it('creates a typed and board-scoped manual candidate', async () => {
     render(<KnowledgePage />);
     const form = screen
       .getByRole('heading', { name: 'Manual candidate' })
@@ -369,15 +369,15 @@ describe('KnowledgePage', () => {
     fireEvent.change(controls.getByLabelText('Type'), {
       target: { value: 'test_command' },
     });
-    fireEvent.change(controls.getByLabelText('Project'), {
+    fireEvent.change(controls.getByLabelText('Board'), {
       target: { value: '00000000-0000-4000-8000-000000000003' },
     });
     fireEvent.click(controls.getByRole('button', { name: 'Add to Pending' }));
 
     await waitFor(() => {
       expect(mocks.create).toHaveBeenCalledWith({
-        scope: 'project',
-        projectId: '00000000-0000-4000-8000-000000000003',
+        scope: 'board',
+        boardId: '00000000-0000-4000-8000-000000000003',
         agentId: null,
         knowledgeType: 'test_command',
         title: 'Use the fast test target',
@@ -486,7 +486,7 @@ describe('KnowledgePage', () => {
         expectedVersion: approved.version,
         replacement: {
           scope: approved.scope,
-          projectId: approved.projectId,
+          boardId: approved.boardId,
           agentId: approved.agentId,
           knowledgeType: approved.knowledgeType,
           title: 'Replacement feedback loop',

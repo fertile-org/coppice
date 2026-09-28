@@ -115,7 +115,7 @@ minimum_confidence = "medium"
 minimum_similarity = 0.0
 default_page_size = 25
 max_page_size = 100
-max_active_per_project = 10000
+max_active_per_board = 10000
 max_active_workspace = 1000
 
 [knowledge.context_budget]

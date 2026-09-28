@@ -161,7 +161,7 @@ pub struct FilePatch {
 #[derive(Debug, Clone, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NewTicketInput {
-    pub project_id: Uuid,
+    pub board_id: Uuid,
     pub title: String,
     pub description: Option<String>,
 }
@@ -391,7 +391,7 @@ impl<'a> CodeReviewService<'a> {
             }
             let created = ticket_service
                 .create(
-                    new_ticket.project_id,
+                    new_ticket.board_id,
                     new_ticket.title.trim(),
                     new_ticket.description.as_deref().unwrap_or(""),
                     Some(input.repo_id),

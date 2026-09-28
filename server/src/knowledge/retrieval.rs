@@ -48,7 +48,7 @@ pub struct SimilarKnowledgeNeighbor {
     pub title: String,
     pub knowledge_type: String,
     pub scope: String,
-    pub project_id: Option<Uuid>,
+    pub board_id: Option<Uuid>,
     pub similarity: f64,
     pub status: String,
     pub embedding_status: String,
@@ -88,8 +88,8 @@ WITH eligible AS MATERIALIZED (
       AND (cardinality($7::text[]) = 0 OR r.knowledge_type = ANY($7::text[]))
       AND (
             r.scope = 'workspace'
-            OR (r.scope = 'project' AND r.project_id = $1)
-            OR (r.scope = 'agent' AND r.project_id = $1 AND r.agent_id = $2)
+            OR (r.scope = 'board' AND r.board_id = $1)
+            OR (r.scope = 'agent' AND r.board_id = $1 AND r.agent_id = $2)
           )
 ), ranked AS (
     SELECT eligible.*, (eligible.embedding <=> $4::vector) AS distance
@@ -115,7 +115,7 @@ WITH eligible AS MATERIALIZED (
         r.scope,
         r.knowledge_type,
         r.title,
-        r.project_id,
+        r.board_id,
         i.status,
         e.embedding
 "#,
@@ -132,14 +132,14 @@ SELECT
     scope,
     knowledge_type,
     title,
-    project_id,
+    board_id,
     status,
     1.0 - distance AS similarity
 FROM ranked
 WHERE 1.0 - distance >= $3
 ORDER BY
     CASE
-        WHEN $4::uuid IS NOT NULL AND project_id IS NOT DISTINCT FROM $4 THEN 0
+        WHEN $4::uuid IS NOT NULL AND board_id IS NOT DISTINCT FROM $4 THEN 0
         ELSE 1
     END ASC,
     CASE WHEN scope = $5 THEN 0 ELSE 1 END ASC,
@@ -151,7 +151,7 @@ LIMIT $6
 
 pub async fn has_eligible(
     pool: &PgPool,
-    project_id: Uuid,
+    board_id: Uuid,
     agent_id: Uuid,
     config: &KnowledgeRetrievalConfig,
 ) -> Result<bool, sqlx::Error> {
@@ -170,14 +170,14 @@ pub async fn has_eligible(
               AND (cardinality($4::text[]) = 0 OR r.knowledge_type = ANY($4::text[]))
               AND (
                     r.scope = 'workspace'
-                    OR (r.scope = 'project' AND r.project_id = $1)
-                    OR (r.scope = 'agent' AND r.project_id = $1 AND r.agent_id = $2)
+                    OR (r.scope = 'board' AND r.board_id = $1)
+                    OR (r.scope = 'agent' AND r.board_id = $1 AND r.agent_id = $2)
                   )
         )
         "#
     );
     sqlx::query_scalar(sql)
-        .bind(project_id)
+        .bind(board_id)
         .bind(agent_id)
         .bind(&config.minimum_confidence)
         .bind(&config.allowed_types)
@@ -187,7 +187,7 @@ pub async fn has_eligible(
 
 pub async fn retrieve(
     pool: &PgPool,
-    project_id: Uuid,
+    board_id: Uuid,
     agent_id: Uuid,
     query_vector: &[f32],
     config: &KnowledgeRetrievalConfig,
@@ -195,7 +195,7 @@ pub async fn retrieve(
     let vector = vector_literal(query_vector)?;
     let top_k = config.top_k.clamp(1, 20) as i64;
     let rows = sqlx::query(RETRIEVAL_QUERY_SQL)
-        .bind(project_id)
+        .bind(board_id)
         .bind(agent_id)
         .bind(&config.minimum_confidence)
         .bind(vector)
@@ -224,12 +224,12 @@ pub async fn retrieve(
 }
 
 /// Rank approved + embedding-ready neighbors for inbox review assist.
-/// Soft-prefers the pending item's project and scope; does not apply agent confidence/type filters.
+/// Soft-prefers the pending item's board and scope; does not apply agent confidence/type filters.
 pub async fn find_similar_inbox(
     pool: &PgPool,
     exclude_item_id: Uuid,
     query_vector: &[f32],
-    prefer_project_id: Option<Uuid>,
+    prefer_board_id: Option<Uuid>,
     prefer_scope: &str,
     limit: usize,
 ) -> Result<Vec<SimilarKnowledgeNeighbor>, RetrievalError> {
@@ -239,7 +239,7 @@ pub async fn find_similar_inbox(
         .bind(exclude_item_id)
         .bind(vector)
         .bind(INBOX_SIMILAR_MINIMUM_SIMILARITY)
-        .bind(prefer_project_id)
+        .bind(prefer_board_id)
         .bind(prefer_scope)
         .bind(limit)
         .fetch_all(pool)
@@ -252,7 +252,7 @@ pub async fn find_similar_inbox(
                 title: row.try_get("title")?,
                 knowledge_type: row.try_get("knowledge_type")?,
                 scope: row.try_get("scope")?,
-                project_id: row.try_get("project_id")?,
+                board_id: row.try_get("board_id")?,
                 similarity: row.try_get("similarity")?,
                 status: row.try_get("status")?,
                 embedding_status: "ready".into(),

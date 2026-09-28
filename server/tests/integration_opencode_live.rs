@@ -50,8 +50,8 @@ async fn live_ws_replays_snapshot_when_no_registry() {
     let addr = common::spawn_test_server(app.clone()).await;
 
     let agent_id = create_opencode_agent(&app, &cookie, &csrf).await;
-    let project_id = common::create_test_project(&app, &cookie, &csrf).await;
-    let ticket_id = common::create_test_ticket(&app, &project_id, &cookie, &csrf).await;
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
+    let ticket_id = common::create_test_ticket(&app, &board_id, &cookie, &csrf).await;
     let (_git_dir, local_path) = common::create_temp_git_checkout();
     let repo_id =
         common::register_test_repo(&app, &local_path.display().to_string(), &cookie, &csrf).await;

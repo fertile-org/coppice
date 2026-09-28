@@ -17,7 +17,7 @@ export function useOpenTicket() {
         ticket = (await response.json()) as Ticket;
         queryClient.setQueryData(ticketQueryKey(ticketId), ticket);
       }
-      navigate(`/projects/${ticket.projectId}/board?ticket=${ticketId}`);
+      navigate(`/boards/${ticket.boardId}?ticket=${ticketId}`);
     },
     [navigate, queryClient],
   );

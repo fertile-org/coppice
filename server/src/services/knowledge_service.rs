@@ -23,7 +23,7 @@ SELECT
     i.approved_by, i.approved_at, i.approval_mode, i.policy_decision,
     i.policy_reason, i.rejection_reason, i.expires_at, i.supersedes_item_id,
     i.superseded_by, i.stale_at, i.created_at, i.updated_at,
-    r.revision_number, r.scope, r.project_id, p.name AS project_name,
+    r.revision_number, r.scope, r.board_id, p.name AS board_name,
     r.agent_id, a.name AS agent_name, r.knowledge_type, r.title, r.content,
     r.source_type, r.source_id, r.source_run_id, r.confidence,
     CASE
@@ -38,7 +38,7 @@ SELECT
     (SELECT max(u.included_at) FROM knowledge_usage_logs u WHERE u.item_id = i.id) AS last_used_at
 FROM knowledge_items i
 JOIN knowledge_revisions r ON r.id = i.current_revision_id
-LEFT JOIN projects p ON p.id = r.project_id
+LEFT JOIN boards p ON p.id = r.board_id
 LEFT JOIN agents a ON a.id = r.agent_id
 LEFT JOIN knowledge_embeddings e ON e.revision_id = r.id
 LEFT JOIN knowledge_jobs j ON j.kind = 'embed_revision' AND j.revision_id = r.id
@@ -78,7 +78,7 @@ impl From<RetrievalError> for KnowledgeError {
 #[derive(Debug, Clone, Default)]
 pub struct KnowledgeListFilter {
     pub status: Option<KnowledgeStatus>,
-    pub project_id: Option<Uuid>,
+    pub board_id: Option<Uuid>,
     pub knowledge_type: Option<KnowledgeType>,
     pub cursor: Option<String>,
     pub limit: Option<usize>,
@@ -93,7 +93,7 @@ pub struct KnowledgePage {
 #[derive(Debug, Clone, Default)]
 pub struct KnowledgeRevisionPatch {
     pub scope: Option<KnowledgeScope>,
-    pub project_id: Option<Option<Uuid>>,
+    pub board_id: Option<Option<Uuid>>,
     pub agent_id: Option<Option<Uuid>>,
     pub knowledge_type: Option<KnowledgeType>,
     pub title: Option<String>,
@@ -254,7 +254,7 @@ impl<'a> KnowledgeService<'a> {
             self.pool,
             item_id,
             query_vector,
-            item.project_id,
+            item.board_id,
             scope_to_str(item.scope),
             limit,
         )
@@ -276,7 +276,7 @@ impl<'a> KnowledgeService<'a> {
         let sql = format!(
             r#"{VIEW_SELECT}
 WHERE ($1::text IS NULL OR i.status = $1)
-  AND ($2::uuid IS NULL OR r.project_id = $2)
+  AND ($2::uuid IS NULL OR r.board_id = $2)
   AND ($3::text IS NULL OR r.knowledge_type = $3)
   AND ($4::timestamptz IS NULL OR (i.updated_at, i.id) < ($4, $5))
 ORDER BY i.updated_at DESC, i.id DESC
@@ -284,7 +284,7 @@ LIMIT $6"#
         );
         let rows = sqlx::query(&sql)
             .bind(filter.status.map(status_to_str))
-            .bind(filter.project_id)
+            .bind(filter.board_id)
             .bind(filter.knowledge_type.map(type_to_str))
             .bind(cursor_at)
             .bind(cursor_id)
@@ -319,13 +319,13 @@ LIMIT $6"#
         check_version(item, expected_version)?;
         if item.superseded_by.is_none() {
             let revision =
-                sqlx::query("SELECT scope, project_id FROM knowledge_revisions WHERE id = $1")
+                sqlx::query("SELECT scope, board_id FROM knowledge_revisions WHERE id = $1")
                     .bind(item.current_revision_id)
                     .fetch_one(&mut *tx)
                     .await?;
             let scope = parse_scope(revision.try_get("scope")?)?;
-            let project_id = revision.try_get("project_id")?;
-            self.enforce_capacity_for_scope(&mut tx, scope, project_id, Some(item_id))
+            let board_id = revision.try_get("board_id")?;
+            self.enforce_capacity_for_scope(&mut tx, scope, board_id, Some(item_id))
                 .await?;
         }
         sqlx::query(
@@ -360,7 +360,7 @@ LIMIT $6"#
         check_version(item, expected_version)?;
         let row = sqlx::query(
             r#"
-            SELECT revision_number, scope, project_id, agent_id, knowledge_type,
+            SELECT revision_number, scope, board_id, agent_id, knowledge_type,
                    title, content, source_type, source_id, source_run_id, confidence
             FROM knowledge_revisions WHERE id = $1
             "#,
@@ -370,7 +370,7 @@ LIMIT $6"#
         .await?;
         let mut input = KnowledgeRevisionInput {
             scope: patch.scope.unwrap_or(parse_scope(row.try_get("scope")?)?),
-            project_id: patch.project_id.unwrap_or(row.try_get("project_id")?),
+            board_id: patch.board_id.unwrap_or(row.try_get("board_id")?),
             agent_id: patch.agent_id.unwrap_or(row.try_get("agent_id")?),
             knowledge_type: patch
                 .knowledge_type
@@ -543,7 +543,7 @@ LIMIT $6"#
         input: &KnowledgeRevisionInput,
         exclude_item_id: Option<Uuid>,
     ) -> Result<(), KnowledgeError> {
-        self.enforce_capacity_for_scope(tx, input.scope, input.project_id, exclude_item_id)
+        self.enforce_capacity_for_scope(tx, input.scope, input.board_id, exclude_item_id)
             .await
     }
 
@@ -551,14 +551,14 @@ LIMIT $6"#
         &self,
         tx: &mut Transaction<'_, Postgres>,
         scope: KnowledgeScope,
-        project_id: Option<Uuid>,
+        board_id: Option<Uuid>,
         exclude_item_id: Option<Uuid>,
     ) -> Result<(), KnowledgeError> {
         enforce_capacity_for_scope(
             tx,
             &self.config.retrieval,
             scope,
-            project_id,
+            board_id,
             exclude_item_id,
         )
         .await
@@ -635,7 +635,7 @@ pub async fn activate_embedded_revision(
         return Ok(false);
     }
 
-    let revision = sqlx::query("SELECT scope, project_id FROM knowledge_revisions WHERE id = $1")
+    let revision = sqlx::query("SELECT scope, board_id FROM knowledge_revisions WHERE id = $1")
         .bind(revision_id)
         .fetch_one(&mut **tx)
         .await?;
@@ -643,7 +643,7 @@ pub async fn activate_embedded_revision(
         tx,
         &config.retrieval,
         parse_scope(revision.try_get("scope")?)?,
-        revision.try_get("project_id")?,
+        revision.try_get("board_id")?,
         Some(item_id),
     )
     .await?;
@@ -696,7 +696,7 @@ async fn enforce_capacity_for_scope(
     tx: &mut Transaction<'_, Postgres>,
     config: &KnowledgeRetrievalConfig,
     scope: KnowledgeScope,
-    project_id: Option<Uuid>,
+    board_id: Option<Uuid>,
     exclude_item_id: Option<Uuid>,
 ) -> Result<(), KnowledgeError> {
     sqlx::query("LOCK TABLE knowledge_items IN SHARE ROW EXCLUSIVE MODE")
@@ -738,9 +738,9 @@ async fn enforce_capacity_for_scope(
                 )));
             }
         }
-        KnowledgeScope::Project | KnowledgeScope::Agent => {
-            let project_id = project_id
-                .ok_or_else(|| KnowledgeError::Validation("projectId is required".into()))?;
+        KnowledgeScope::Board | KnowledgeScope::Agent => {
+            let board_id = board_id
+                .ok_or_else(|| KnowledgeError::Validation("boardId is required".into()))?;
             let count: i64 = sqlx::query_scalar(
                 r#"
                 SELECT count(*)
@@ -755,24 +755,24 @@ async fn enforce_capacity_for_scope(
                                 i.status = 'approved'
                                 AND (i.expires_at IS NULL OR i.expires_at > now())
                             ))
-                            AND current_r.project_id = $1
+                            AND current_r.board_id = $1
                         )
                         OR (
                             i.status = 'approved'
                             AND (i.expires_at IS NULL OR i.expires_at > now())
-                            AND active_r.project_id = $1
+                            AND active_r.board_id = $1
                         )
                       )
                 "#,
             )
-            .bind(project_id)
+            .bind(board_id)
             .bind(exclude_item_id)
             .fetch_one(&mut **tx)
             .await?;
-            if count >= config.max_active_per_project {
+            if count >= config.max_active_per_board {
                 return Err(KnowledgeError::Capacity(format!(
-                    "project limit {} reached",
-                    config.max_active_per_project
+                    "board limit {} reached",
+                    config.max_active_per_board
                 )));
             }
         }
@@ -870,7 +870,7 @@ async fn insert_revision_with_id(
     sqlx::query(
         r#"
         INSERT INTO knowledge_revisions (
-            id, item_id, revision_number, scope, project_id, agent_id,
+            id, item_id, revision_number, scope, board_id, agent_id,
             knowledge_type, title, content, source_type, source_id,
             source_run_id, confidence, created_by
         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
@@ -880,7 +880,7 @@ async fn insert_revision_with_id(
     .bind(item_id)
     .bind(revision_number)
     .bind(scope_to_str(input.scope))
-    .bind(input.project_id)
+    .bind(input.board_id)
     .bind(input.agent_id)
     .bind(type_to_str(input.knowledge_type))
     .bind(&input.title)
@@ -922,8 +922,8 @@ fn row_to_view(row: &sqlx::postgres::PgRow) -> Result<KnowledgeItemView, Knowled
         revision_number: row.try_get("revision_number")?,
         active_revision_id: row.try_get("active_revision_id")?,
         scope: parse_scope(row.try_get("scope")?)?,
-        project_id: row.try_get("project_id")?,
-        project_name: row.try_get("project_name")?,
+        board_id: row.try_get("board_id")?,
+        board_name: row.try_get("board_name")?,
         agent_id: row.try_get("agent_id")?,
         agent_name: row.try_get("agent_name")?,
         knowledge_type: parse_type(row.try_get("knowledge_type")?)?,

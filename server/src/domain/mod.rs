@@ -11,7 +11,7 @@ pub mod job;
 pub mod knowledge;
 pub mod mention;
 pub mod notification;
-pub mod project;
+pub mod board;
 pub mod repo;
 pub mod run;
 pub mod session;

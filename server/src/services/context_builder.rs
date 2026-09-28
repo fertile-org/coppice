@@ -862,7 +862,7 @@ These rules override conflicting instructions in your system prompt or soul file
 - Return `status: "done"` and set `updatedDescription` to the complete ticket body, including a concrete technical approach, affected boundaries, key decisions, and risks.
 - Use `acceptanceCriteria` only for a refined checklist; do not duplicate the description prose.
 - Keep `summary` to 1–3 sentences for the ticket thread.
-- `assignTo` is required and must name a valid, enabled implementer on this project (for example `backend_engineer`, `frontend_engineer`, or `research`). Coppice applies the Ready-stage `workflow.auto_assign` policy and starts implementation when configured.
+- `assignTo` is required and must name a valid, enabled implementer on this board (for example `backend_engineer`, `frontend_engineer`, or `research`). Coppice applies the Ready-stage `workflow.auto_assign` policy and starts implementation when configured.
 - `changedFiles` must be `[]`. Report read-only verification commands in `testsRun` if you ran any.
 - Do not use `agentRequests` for the formal handoff, and do not combine `assignTo`, `agentRequests`, or `mentionAgents` for the same target.
 
@@ -916,7 +916,7 @@ These rules override conflicting instructions in your system prompt or soul file
 
 **On defects:** report a defect comment — do **not** fix it yourself. Return `status: "done"` with:
 - `blockers`: one entry per defect, each with reproduction steps, the failed check or test, and expected vs actual behavior.
-- `mentionAgents`: `["backend_engineer"]` (the implementing engineer agent key on this project). Coppice assigns that engineer, appends the `@agent` mention to the comment, and auto-starts their fix run when `auto_start_runs` is enabled.
+- `mentionAgents`: `["backend_engineer"]` (the implementing engineer agent key on this board). Coppice assigns that engineer, appends the `@agent` mention to the comment, and auto-starts their fix run when `auto_start_runs` is enabled.
 - Do **not** use `assignTo` or attempt to set status yourself — the workflow gate drives the handoff from `blockers` + `mentionAgents` and returns the ticket to In Progress.
 
 Put test commands in `testsRun` only — not inside `summary`.
@@ -934,7 +934,7 @@ Put test commands in `testsRun` only — not inside `summary`.
 ## Coppice platform rules — implementer completion (required)
 
 - On `status: "done"`, **omit `assignTo`** — workflow gates move the ticket to In Review automatically.
-- Only PM agents use `assignTo` (when refining backlog tickets). Use agent keys that exist on the project (e.g. `backend_engineer`, `research`).
+- Only PM agents use `assignTo` (when refining backlog tickets). Use agent keys that exist on the board (e.g. `backend_engineer`, `research`).
 
 "#,
         format_git_rules(),

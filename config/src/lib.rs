@@ -146,8 +146,8 @@ pub struct KnowledgeRetrievalConfig {
     pub default_page_size: usize,
     #[serde(default = "default_knowledge_list_max")]
     pub max_page_size: usize,
-    #[serde(default = "default_knowledge_project_capacity")]
-    pub max_active_per_project: i64,
+    #[serde(default = "default_knowledge_board_capacity")]
+    pub max_active_per_board: i64,
     #[serde(default = "default_knowledge_workspace_capacity")]
     pub max_active_workspace: i64,
 }
@@ -258,7 +258,7 @@ impl KnowledgeConfig {
                 "knowledge retrieval page sizes must satisfy 1 <= default <= max <= 100".into(),
             );
         }
-        if self.retrieval.max_active_per_project <= 0 || self.retrieval.max_active_workspace <= 0 {
+        if self.retrieval.max_active_per_board <= 0 || self.retrieval.max_active_workspace <= 0 {
             return Err("knowledge retrieval capacity limits must be greater than zero".into());
         }
         let budget = &self.context_budget;
@@ -339,7 +339,7 @@ impl Default for KnowledgeRetrievalConfig {
             minimum_similarity: 0.0,
             default_page_size: default_knowledge_list_limit(),
             max_page_size: default_knowledge_list_max(),
-            max_active_per_project: default_knowledge_project_capacity(),
+            max_active_per_board: default_knowledge_board_capacity(),
             max_active_workspace: default_knowledge_workspace_capacity(),
         }
     }
@@ -398,7 +398,7 @@ fn default_knowledge_list_limit() -> usize {
 fn default_knowledge_list_max() -> usize {
     100
 }
-fn default_knowledge_project_capacity() -> i64 {
+fn default_knowledge_board_capacity() -> i64 {
     10_000
 }
 fn default_knowledge_workspace_capacity() -> i64 {

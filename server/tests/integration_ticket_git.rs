@@ -79,8 +79,8 @@ async fn setup_repo_ticket_and_worktree() -> (
     );
     let repo_id =
         common::register_test_repo(&app, &local_path.display().to_string(), &cookie, &csrf).await;
-    let project_id = common::create_test_project(&app, &cookie, &csrf).await;
-    let ticket_id = common::create_test_ticket(&app, &project_id, &cookie, &csrf).await;
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
+    let ticket_id = common::create_test_ticket(&app, &board_id, &cookie, &csrf).await;
     common::set_ticket_repo(&app, &ticket_id, &repo_id, &cookie, &csrf).await;
     let worktree_path = common::setup_worktree_with_commit(
         &local_path,
@@ -291,8 +291,8 @@ async fn rebase_branch_missing_worktree_returns_bad_request() {
         common::bootstrap_and_login_with_state_and_workers("", |_| {}).await;
     let _repo_id =
         common::register_test_repo(&app, &local_path.display().to_string(), &cookie, &csrf).await;
-    let project_id = common::create_test_project(&app, &cookie, &csrf).await;
-    let ticket_id = common::create_test_ticket(&app, &project_id, &cookie, &csrf).await;
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
+    let ticket_id = common::create_test_ticket(&app, &board_id, &cookie, &csrf).await;
     common::set_ticket_repo(&app, &ticket_id, &_repo_id, &cookie, &csrf).await;
 
     // Create the ticket branch in the main checkout but no worktree.

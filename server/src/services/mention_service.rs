@@ -47,9 +47,9 @@ impl<'a> MentionService<'a> {
         comment_id: Uuid,
         keys: &[String],
         resume_agent_id: Option<Uuid>,
-        project_id: Uuid,
+        board_id: Uuid,
     ) -> Result<Vec<TicketMention>, MentionError> {
-        let _ = project_id;
+        let _ = board_id;
         let agent_map = self.build_agent_key_map().await?;
         let agent_ids = keys
             .iter()

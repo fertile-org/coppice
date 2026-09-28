@@ -83,7 +83,7 @@ pub async fn truncate_test_workspace(pool: &PgPool) -> anyhow::Result<()> {
             tickets,
             repos,
             agents,
-            projects,
+            boards,
             sessions,
             users
         RESTART IDENTITY CASCADE

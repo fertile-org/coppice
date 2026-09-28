@@ -9,7 +9,7 @@ export const knowledgeStatusSchema = z.enum([
 
 export const knowledgeScopeSchema = z.enum([
   'workspace',
-  'project',
+  'board',
   'agent',
 ]);
 
@@ -49,8 +49,8 @@ export const knowledgeItemSchema = z.object({
   revisionNumber: z.number().int().positive(),
   activeRevisionId: z.string().uuid().nullable(),
   scope: knowledgeScopeSchema,
-  projectId: z.string().uuid().nullable(),
-  projectName: z.string().nullable(),
+  boardId: z.string().uuid().nullable(),
+  boardName: z.string().nullable(),
   agentId: z.string().uuid().nullable(),
   agentName: z.string().nullable(),
   knowledgeType: knowledgeTypeSchema,
@@ -108,7 +108,7 @@ export const similarNeighborSchema = z.object({
   title: z.string(),
   knowledgeType: knowledgeTypeSchema,
   scope: knowledgeScopeSchema,
-  projectId: z.string().uuid().nullable(),
+  boardId: z.string().uuid().nullable(),
   similarity: z.number(),
   status: z.string(),
   embeddingStatus: z.string(),

@@ -8,7 +8,7 @@ Controlled agent memory: typed knowledge with pgvector retrieval, context budget
 
 - `KnowledgeItem` model (product design §13.3)
 - pgvector embeddings column; `EmbeddingProvider` trait + mock embedder in tests
-- Metadata-first retrieval: filter by project, agent, scope, type, confidence, approval, expiry — then vector similarity
+- Metadata-first retrieval: filter by board, agent, scope, type, confidence, approval, expiry — then vector similarity
 - Context builder extended with knowledge section and strict token budget (product design §13.7)
 - Knowledge admin screen: Pending / Approved / Rejected / Stale tabs
 - Ticket detail: **Knowledge Used** tab on runs
@@ -108,7 +108,7 @@ Operator default (`make compose-up`, profile `embeddings`): Ollama sidecar + ser
       COPPICE_KNOWLEDGE__EMBEDDING__DIMENSION: "768"
 ```
 
-Postgres uses an HNSW cosine index. M06 first materializes relational eligibility and then performs bounded, deterministic cosine ranking; this ordering is intentional for the documented 10,000-active-items-per-project envelope.
+Postgres uses an HNSW cosine index. M06 first materializes relational eligibility and then performs bounded, deterministic cosine ranking; this ordering is intentional for the documented 10,000-active-items-per-board envelope.
 
 ## Testing strategy
 
@@ -131,7 +131,7 @@ Postgres uses an HNSW cosine index. M06 first materializes relational eligibilit
 
 `make e2e-smoke-m06-knowledge`:
 
-1. Create, edit, approve, and wait for a project-scoped manual candidate to embed.
+1. Create, edit, approve, and wait for a board-scoped manual candidate to embed.
 2. Run an agent with an exact-match ticket and verify the exact revision appears once in Knowledge Used.
 3. Move a separate ticket to Done and verify deterministic extraction creates one Pending candidate even after a repeated Done update.
 4. Verify the `/knowledge` SPA route is served.

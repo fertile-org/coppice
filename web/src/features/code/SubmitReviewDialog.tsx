@@ -15,7 +15,7 @@ import { Textarea } from '../../components/ui/textarea';
 import type { InlineComment } from '../../lib/schemas/codeReview';
 import { apiFetch } from '../../lib/api';
 import { useAgents } from '../agents/useAgents';
-import { useProjects } from '../projects/useProjects';
+import { useBoards } from '../boards/useBoards';
 import { useTicket } from '../tickets/useTicket';
 import { formatReviewPreview } from './formatReviewPreview';
 import { useSubmitCodeReview } from './useCodeReview';
@@ -58,12 +58,12 @@ export function SubmitReviewDialog({
   const toast = useToast();
   const navigate = useNavigate();
   const submitReview = useSubmitCodeReview();
-  const { data: projects } = useProjects();
+  const { data: boards } = useBoards();
   const { data: ticket } = useTicket(ticketId);
   const { data: agents } = useAgents();
 
   const [summary, setSummary] = useState('');
-  const [projectId, setProjectId] = useState('');
+  const [boardId, setBoardId] = useState('');
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [workflowAction, setWorkflowAction] =
@@ -76,13 +76,13 @@ export function SubmitReviewDialog({
   useEffect(() => {
     if (!open) return;
     setSummary('');
-    setProjectId(projects?.[0]?.id ?? '');
+    setBoardId(boards?.[0]?.id ?? '');
     setTitle('');
     setDescription('');
     setWorkflowAction('none');
     setReassignAgentId(ticket?.assigneeAgentId ?? engineers[0]?.id ?? '');
     setError(null);
-  }, [open, projects, ticket?.assigneeAgentId, engineers]);
+  }, [open, boards, ticket?.assigneeAgentId, engineers]);
 
   useEffect(() => {
     if (!open) return;
@@ -117,12 +117,12 @@ export function SubmitReviewDialog({
 
   if (!open) return null;
 
-  async function resolveProjectId(resultTicketId: string): Promise<string | null> {
-    if (ticket?.projectId) return ticket.projectId;
+  async function resolveBoardId(resultTicketId: string): Promise<string | null> {
+    if (ticket?.boardId) return ticket.boardId;
     try {
       const res = await apiFetch(`/api/tickets/${resultTicketId}`);
-      const data = (await res.json()) as { projectId: string };
-      return data.projectId;
+      const data = (await res.json()) as { boardId: string };
+      return data.boardId;
     } catch {
       return null;
     }
@@ -136,8 +136,8 @@ export function SubmitReviewDialog({
     }
 
     if (!ticketId) {
-      if (!projectId) {
-        setError('Select a project.');
+      if (!boardId) {
+        setError('Select a board.');
         return;
       }
       if (!title.trim()) {
@@ -163,7 +163,7 @@ export function SubmitReviewDialog({
         newTicket: ticketId
           ? undefined
           : {
-              projectId,
+              boardId,
               title: title.trim(),
               description: description.trim() || undefined,
             },
@@ -179,11 +179,11 @@ export function SubmitReviewDialog({
       onSubmitted();
       onClose();
 
-      const resolvedProjectId = await resolveProjectId(result.ticketId);
+      const resolvedBoardId = await resolveBoardId(result.ticketId);
       toast.success('Review posted');
-      if (resolvedProjectId) {
+      if (resolvedBoardId) {
         navigate(
-          `/projects/${resolvedProjectId}/board?ticket=${result.ticketId}`,
+          `/boards/${resolvedBoardId}?ticket=${result.ticketId}`,
         );
       }
     } catch {
@@ -238,19 +238,19 @@ export function SubmitReviewDialog({
             {!ticketId && (
               <>
                 <div className="space-y-2">
-                  <Label htmlFor="review-project">Project</Label>
-                  <Select value={projectId} onValueChange={setProjectId}>
-                    <SelectTrigger id="review-project">
-                      <SelectValue placeholder="Select project…" />
+                  <Label htmlFor="review-board">Board</Label>
+                  <Select value={boardId} onValueChange={setBoardId}>
+                    <SelectTrigger id="review-board">
+                      <SelectValue placeholder="Select board…" />
                     </SelectTrigger>
                     <SelectContent>
-                      {(projects ?? []).map((project) => (
+                      {(boards ?? []).map((board) => (
                         <SelectItem
-                          key={project.id}
-                          value={project.id}
-                          textValue={project.name}
+                          key={board.id}
+                          value={board.id}
+                          textValue={board.name}
                         >
-                          {project.name}
+                          {board.name}
                         </SelectItem>
                       ))}
                     </SelectContent>

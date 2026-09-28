@@ -288,7 +288,7 @@ export function useAssignAgent(ticketId: string) {
     onSuccess: (ticket) => {
       queryClient.setQueryData(ticketQueryKey(ticketId), ticket);
       void queryClient.invalidateQueries({
-        queryKey: ['tickets', ticket.projectId],
+        queryKey: ['tickets', ticket.boardId],
       });
     },
   });
@@ -310,10 +310,10 @@ export function useApproveSplits(ticketId: string) {
     onSuccess: (children) => {
       queryClient.setQueryData(childrenQueryKey(ticketId), children);
       void queryClient.invalidateQueries({ queryKey: ticketQueryKey(ticketId) });
-      const projectId = children[0]?.projectId;
-      if (projectId) {
+      const boardId = children[0]?.boardId;
+      if (boardId) {
         void queryClient.invalidateQueries({
-          queryKey: ticketsQueryKey(projectId),
+          queryKey: ticketsQueryKey(boardId),
         });
       }
     },
@@ -339,7 +339,7 @@ export function useArchiveTicket(ticketId: string) {
     onSuccess: (ticket) => {
       queryClient.setQueryData(ticketQueryKey(ticketId), ticket);
       void queryClient.invalidateQueries({
-        queryKey: ticketsQueryKey(ticket.projectId),
+        queryKey: ticketsQueryKey(ticket.boardId),
       });
     },
   });
@@ -353,7 +353,7 @@ export function useUnarchiveTicket(ticketId: string) {
     onSuccess: (ticket) => {
       queryClient.setQueryData(ticketQueryKey(ticketId), ticket);
       void queryClient.invalidateQueries({
-        queryKey: ticketsQueryKey(ticket.projectId),
+        queryKey: ticketsQueryKey(ticket.boardId),
       });
     },
   });
@@ -367,7 +367,7 @@ export function useFinalApprove(ticketId: string) {
     onSuccess: (ticket) => {
       queryClient.setQueryData(ticketQueryKey(ticketId), ticket);
       void queryClient.invalidateQueries({
-        queryKey: ['tickets', ticket.projectId],
+        queryKey: ['tickets', ticket.boardId],
       });
       void queryClient.invalidateQueries({
         queryKey: commentsQueryKey(ticketId),

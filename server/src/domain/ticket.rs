@@ -16,7 +16,7 @@ pub enum TicketPriority {
 #[derive(Debug, Clone)]
 pub struct Ticket {
     pub id: Uuid,
-    pub project_id: Uuid,
+    pub board_id: Uuid,
     pub repo_id: Option<Uuid>,
     pub title: String,
     pub description: String,

@@ -126,7 +126,7 @@ export function UsersPage() {
   }
 
   if (user?.role !== 'admin') {
-    return <Navigate to="/projects" replace />;
+    return <Navigate to="/boards" replace />;
   }
 
   return (

@@ -9,7 +9,7 @@ pub const MAX_KNOWLEDGE_CONTENT_CHARS: usize = 12_000;
 #[serde(rename_all = "snake_case")]
 pub enum KnowledgeScope {
     Workspace,
-    Project,
+    Board,
     Agent,
 }
 
@@ -63,7 +63,7 @@ pub enum KnowledgeStatus {
 #[derive(Debug, Clone)]
 pub struct KnowledgeRevisionInput {
     pub scope: KnowledgeScope,
-    pub project_id: Option<Uuid>,
+    pub board_id: Option<Uuid>,
     pub agent_id: Option<Uuid>,
     pub knowledge_type: KnowledgeType,
     pub title: String,
@@ -83,8 +83,8 @@ pub struct KnowledgeItemView {
     pub revision_number: i32,
     pub active_revision_id: Option<Uuid>,
     pub scope: KnowledgeScope,
-    pub project_id: Option<Uuid>,
-    pub project_name: Option<String>,
+    pub board_id: Option<Uuid>,
+    pub board_name: Option<String>,
     pub agent_id: Option<Uuid>,
     pub agent_name: Option<String>,
     pub knowledge_type: KnowledgeType,
@@ -125,7 +125,7 @@ macro_rules! string_enum {
 
 string_enum!(scope_to_str, scope_from_str, KnowledgeScope, {
     KnowledgeScope::Workspace => "workspace",
-    KnowledgeScope::Project => "project",
+    KnowledgeScope::Board => "board",
     KnowledgeScope::Agent => "agent",
 });
 string_enum!(type_to_str, type_from_str, KnowledgeType, {
@@ -180,17 +180,17 @@ pub fn validate_revision(input: &mut KnowledgeRevisionInput) -> Result<(), Strin
         ));
     }
     match input.scope {
-        KnowledgeScope::Workspace if input.project_id.is_none() && input.agent_id.is_none() => {}
-        KnowledgeScope::Project if input.project_id.is_some() && input.agent_id.is_none() => {}
-        KnowledgeScope::Agent if input.project_id.is_some() && input.agent_id.is_some() => {}
+        KnowledgeScope::Workspace if input.board_id.is_none() && input.agent_id.is_none() => {}
+        KnowledgeScope::Board if input.board_id.is_some() && input.agent_id.is_none() => {}
+        KnowledgeScope::Agent if input.board_id.is_some() && input.agent_id.is_some() => {}
         KnowledgeScope::Workspace => {
-            return Err("workspace scope cannot set projectId or agentId".into())
+            return Err("workspace scope cannot set boardId or agentId".into())
         }
-        KnowledgeScope::Project => {
-            return Err("project scope requires projectId and forbids agentId".into())
+        KnowledgeScope::Board => {
+            return Err("board scope requires boardId and forbids agentId".into())
         }
         KnowledgeScope::Agent => {
-            return Err("agent scope requires both projectId and agentId".into())
+            return Err("agent scope requires both boardId and agentId".into())
         }
     }
     Ok(())
@@ -222,8 +222,8 @@ mod tests {
 
     fn valid_input() -> KnowledgeRevisionInput {
         KnowledgeRevisionInput {
-            scope: KnowledgeScope::Project,
-            project_id: Some(Uuid::new_v4()),
+            scope: KnowledgeScope::Board,
+            board_id: Some(Uuid::new_v4()),
             agent_id: None,
             knowledge_type: KnowledgeType::TestCommand,
             title: " Run tests ".into(),

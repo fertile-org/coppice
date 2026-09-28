@@ -53,9 +53,9 @@ vi.mock('@dnd-kit/core', () => ({
 }));
 
 vi.mock('./useTickets', () => ({
-  ticketsQueryKey: (projectId: string) => ['tickets', projectId],
+  ticketsQueryKey: (boardId: string) => ['tickets', boardId],
   useTickets: (
-    _projectId: string | undefined,
+    _boardId: string | undefined,
     includeArchived = false,
   ) => {
     ticketsState.lastIncludeArchived = includeArchived;
@@ -72,8 +72,8 @@ vi.mock('./useTickets', () => ({
   useUpdateTicketStatus: () => ({ mutateAsync: vi.fn() }),
 }));
 
-vi.mock('../projects/useProjects', () => ({
-  setLastProjectId: vi.fn(),
+vi.mock('../boards/useBoards', () => ({
+  setLastBoardId: vi.fn(),
 }));
 
 vi.mock('../agents/useAgents', () => ({
@@ -98,7 +98,7 @@ function makeTicket(
   overrides: Pick<Ticket, 'id' | 'title' | 'status'> & Partial<Ticket>,
 ): Ticket {
   return {
-    projectId: 'project-1',
+    boardId: 'board-1',
     description: '',
     createdBy: 'user',
     createdAt: '2026-08-03T00:00:00.000Z',
@@ -108,7 +108,7 @@ function makeTicket(
   };
 }
 
-function renderBoard(initialEntry = '/projects/project-1/board') {
+function renderBoard(initialEntry = '/boards/board-1') {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
@@ -116,7 +116,7 @@ function renderBoard(initialEntry = '/projects/project-1/board') {
     <MemoryRouter initialEntries={[initialEntry]}>
       <QueryClientProvider client={client}>
         <Routes>
-          <Route path="/projects/:projectId/board" element={<BoardPage />} />
+          <Route path="/boards/:boardId" element={<BoardPage />} />
         </Routes>
       </QueryClientProvider>
     </MemoryRouter>,
@@ -175,7 +175,7 @@ describe('BoardPage ticket hierarchy', () => {
   });
 
   it('passes the selected child parent from the existing board data to the drawer', () => {
-    renderBoard('/projects/project-1/board?ticket=middle');
+    renderBoard('/boards/board-1?ticket=middle');
 
     expect(screen.getByTestId('ticket-drawer-parent')).toHaveTextContent(
       'Root ticket',

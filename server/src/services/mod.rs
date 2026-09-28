@@ -17,7 +17,7 @@ pub mod mention_service;
 pub mod notification_service;
 pub mod git_ops;
 pub mod pr_create_url;
-pub mod project_service;
+pub mod board_service;
 pub mod repo_git_service;
 pub mod repo_service;
 pub mod repo_verifier;

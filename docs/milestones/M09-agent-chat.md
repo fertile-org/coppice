@@ -23,7 +23,7 @@ Hard rules:
 
 ### Data model
 
-- `chat_sessions` — project-scoped, human-owned; bound agent; optional bound repository; status (`active` / `archived` / `cutoff`); timestamps
+- `chat_sessions` — board-scoped, human-owned; bound agent; optional bound repository; status (`active` / `archived` / `cutoff`); timestamps
 - `chat_messages` — ordered turns (`human` \| `agent` \| `system`); body; optional linked `agent_run_id`; action payloads (create-ticket / create-knowledge results)
 - Session list + detail APIs; soft archive; hard delete out of scope for v1
 
@@ -72,7 +72,7 @@ No direct status workflow transitions from chat. No silent board moves.
 
 ### UI
 
-- New Chat area in SPA (project-scoped session list + transcript)
+- New Chat area in SPA (board-scoped session list + transcript)
 - Reuse `web/src/opencode-session/` **selectively**: message/part rendering and theme where it fits streamed assistant turns; do **not** fork the full OpenCode TUI session model as product identity
 - Composer: pick agent (+ optional repo); send message; show live turn; surface action results (ticket link, inbox item link)
 

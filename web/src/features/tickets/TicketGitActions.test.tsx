@@ -42,7 +42,7 @@ const baseGitInfo: TicketGitInfo = {
 function makeTicket(overrides: Partial<Ticket> = {}): Ticket {
   return {
     id: '00000000-0000-0000-0000-000000000001',
-    projectId: '00000000-0000-0000-0000-000000000002',
+    boardId: '00000000-0000-0000-0000-000000000002',
     repoId: '00000000-0000-0000-0000-000000000003',
     title: 'Test ticket',
     description: 'Ticket description',

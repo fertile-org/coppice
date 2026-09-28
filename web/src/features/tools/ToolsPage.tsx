@@ -14,7 +14,7 @@ export function ToolsPage() {
   const [error, setError] = useState<string | null>(null);
 
   if (user?.role !== 'admin') {
-    return <Navigate to="/projects" replace />;
+    return <Navigate to="/boards" replace />;
   }
 
   async function handleExport() {

@@ -143,12 +143,12 @@ async fn process_extraction(
     extractor: &Arc<dyn ExtractionProvider>,
 ) -> anyhow::Result<()> {
     let ticket_id = job.ticket_id.context("extraction job has no ticket")?;
-    let ticket = sqlx::query("SELECT project_id, title, description FROM tickets WHERE id = $1")
+    let ticket = sqlx::query("SELECT board_id, title, description FROM tickets WHERE id = $1")
         .bind(ticket_id)
         .fetch_optional(pool)
         .await?
         .context("ticket not found")?;
-    let project_id: Uuid = ticket.try_get("project_id")?;
+    let board_id: Uuid = ticket.try_get("board_id")?;
     let mut title: String = ticket.try_get("title")?;
     let mut description: String = ticket.try_get("description")?;
     let max_source_bytes = state.config.knowledge.extraction.max_source_bytes;
@@ -196,7 +196,7 @@ async fn process_extraction(
     comments.reverse();
     let input = ExtractionInput {
         ticket_id,
-        project_id,
+        board_id,
         title,
         description,
         comments,
@@ -214,8 +214,8 @@ async fn process_extraction(
         let (status, decision, reason) = policy_decision(&state.config.knowledge, &candidate);
         let source_id = validated_candidate_source_id(&input, &candidate)?;
         let revision = KnowledgeRevisionInput {
-            scope: KnowledgeScope::Project,
-            project_id: Some(project_id),
+            scope: KnowledgeScope::Board,
+            board_id: Some(board_id),
             agent_id: None,
             knowledge_type: candidate.knowledge_type,
             title: candidate.title,

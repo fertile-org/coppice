@@ -42,7 +42,7 @@ Agents execute work on tickets through the job queue and mock provider, using **
 ## Dependencies
 
 - M01: MockProvider, auth, Postgres
-- M02: tickets, agents, comments, projects
+- M02: tickets, agents, comments, boards
 
 ## Architecture notes
 
@@ -66,7 +66,7 @@ server/src/
 ### Database tables
 
 ```text
-repos                         # revised: local_path, no project_id
+repos                         # revised: local_path, no board_id
 agent_jobs
 agent_runs
 ```
@@ -86,7 +86,7 @@ POST  /api/agent-runs/:id/retry
 GET   /api/agent-jobs         (admin/debug)
 ```
 
-**Removed:** `GET/POST /api/projects/:id/repos`
+**Removed:** `GET/POST /api/boards/:id/repos`
 
 ### Filesystem layout
 

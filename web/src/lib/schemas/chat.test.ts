@@ -15,7 +15,7 @@ import {
 
 const session = {
   id: '00000000-0000-4000-8000-000000000001',
-  projectId: null,
+  boardId: null,
   ownerUserId: '00000000-0000-4000-8000-000000000002',
   agentId: '00000000-0000-4000-8000-000000000003',
   repoId: null,
@@ -42,9 +42,9 @@ const knowledgeItem = {
   revisionId: '00000000-0000-4000-8000-000000000081',
   revisionNumber: 1,
   activeRevisionId: null,
-  scope: 'project',
-  projectId: '00000000-0000-4000-8000-000000000003',
-  projectName: 'Coppice',
+  scope: 'board',
+  boardId: '00000000-0000-4000-8000-000000000003',
+  boardName: 'Coppice',
   agentId: null,
   agentName: null,
   knowledgeType: 'coding_convention',
@@ -83,7 +83,7 @@ describe('chat schemas', () => {
       sessions: [
         {
           id: '00000000-0000-4000-8000-000000000001',
-          projectId: null,
+          boardId: null,
           ownerUserId: '00000000-0000-4000-8000-000000000002',
           agentId: '00000000-0000-4000-8000-000000000010',
           repoId: null,
@@ -146,7 +146,7 @@ describe('chat schemas', () => {
       createTicketFromChatResponseSchema.parse({
         ticket: {
           id: '00000000-0000-4000-8000-000000000050',
-          projectId: '00000000-0000-4000-8000-000000000003',
+          boardId: '00000000-0000-4000-8000-000000000003',
           title: 'Fix chat cwd',
           status: 'backlog',
           hasActiveRun: false,

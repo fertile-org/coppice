@@ -29,14 +29,14 @@ use uuid::Uuid;
 
 async fn create_candidate(
     app: &Router,
-    project_id: &str,
+    board_id: &str,
     cookie: &str,
     csrf: &str,
     title: &str,
 ) -> serde_json::Value {
     let body = serde_json::json!({
-        "scope": "project",
-        "projectId": project_id,
+        "scope": "board",
+        "boardId": board_id,
         "knowledgeType": "test_command",
         "title": title,
         "content": "Run make test-unit before review.",
@@ -58,12 +58,12 @@ async fn create_candidate(
     common::json_body(response).await
 }
 
-async fn create_project_named(app: &Router, name: &str, cookie: &str, csrf: &str) -> String {
+async fn create_board_named(app: &Router, name: &str, cookie: &str, csrf: &str) -> String {
     let response = app
         .clone()
         .oneshot(common::json_request(
             "POST",
-            "/api/projects",
+            "/api/boards",
             &serde_json::json!({"name": name}).to_string(),
             cookie,
             csrf,
@@ -101,7 +101,7 @@ async fn mutate(
 }
 
 fn supersede_body(
-    project_id: &str,
+    board_id: &str,
     expected_version: i64,
     title: &str,
     content: &str,
@@ -109,8 +109,8 @@ fn supersede_body(
     serde_json::json!({
         "expectedVersion": expected_version,
         "replacement": {
-            "scope": "project",
-            "projectId": project_id,
+            "scope": "board",
+            "boardId": board_id,
             "knowledgeType": "test_command",
             "title": title,
             "content": content,
@@ -322,7 +322,7 @@ struct RetrievalSeed<'a> {
     label: &'a str,
     status: &'a str,
     scope: &'a str,
-    project_id: Option<Uuid>,
+    board_id: Option<Uuid>,
     agent_id: Option<Uuid>,
     confidence: &'a str,
     expired: bool,
@@ -348,7 +348,7 @@ async fn seed_retrieval_item(pool: &PgPool, seed: RetrievalSeed<'_>) -> (Uuid, U
     sqlx::query(
         r#"
         INSERT INTO knowledge_revisions (
-            id, item_id, revision_number, scope, project_id, agent_id,
+            id, item_id, revision_number, scope, board_id, agent_id,
             knowledge_type, title, content, source_type, confidence
         ) VALUES ($1, $2, 1, $3, $4, $5, 'test_command', $6, $7, 'human_note', $8)
         "#,
@@ -356,7 +356,7 @@ async fn seed_retrieval_item(pool: &PgPool, seed: RetrievalSeed<'_>) -> (Uuid, U
     .bind(revision_id)
     .bind(item_id)
     .bind(seed.scope)
-    .bind(seed.project_id)
+    .bind(seed.board_id)
     .bind(seed.agent_id)
     .bind(seed.label)
     .bind(format!("Retrieval matrix entry: {}", seed.label))
@@ -397,8 +397,8 @@ async fn seed_retrieval_item(pool: &PgPool, seed: RetrievalSeed<'_>) -> (Uuid, U
 
 async fn seed_retrieval_cardinality(
     tx: &mut Transaction<'_, Postgres>,
-    target_project_id: Uuid,
-    other_project_id: Uuid,
+    target_board_id: Uuid,
+    other_board_id: Uuid,
     target_approved: i32,
     other_approved: i32,
     rejected: i32,
@@ -410,7 +410,7 @@ async fn seed_retrieval_cardinality(
             item_id UUID NOT NULL,
             revision_id UUID NOT NULL,
             status TEXT NOT NULL,
-            project_id UUID NOT NULL
+            board_id UUID NOT NULL
         ) ON COMMIT DROP
         "#,
     )
@@ -423,7 +423,7 @@ async fn seed_retrieval_cardinality(
     sqlx::query(
         r#"
         INSERT INTO knowledge_plan_seed (
-            ordinal, item_id, revision_id, status, project_id
+            ordinal, item_id, revision_id, status, board_id
         )
         SELECT ordinal,
                gen_random_uuid(),
@@ -433,8 +433,8 @@ async fn seed_retrieval_cardinality(
         FROM generate_series(1, $5) AS ordinal
         "#,
     )
-    .bind(target_project_id)
-    .bind(other_project_id)
+    .bind(target_board_id)
+    .bind(other_board_id)
     .bind(target_approved)
     .bind(approved)
     .bind(total)
@@ -454,10 +454,10 @@ async fn seed_retrieval_cardinality(
     sqlx::query(
         r#"
         INSERT INTO knowledge_revisions (
-            id, item_id, revision_number, scope, project_id, knowledge_type,
+            id, item_id, revision_number, scope, board_id, knowledge_type,
             title, content, source_type, confidence
         )
-        SELECT revision_id, item_id, 1, 'project', project_id, 'test_command',
+        SELECT revision_id, item_id, 1, 'board', board_id, 'test_command',
                'Retrieval plan seed ' || ordinal,
                'Use the bounded retrieval plan.', 'human_note', 'high'
         FROM knowledge_plan_seed
@@ -503,7 +503,7 @@ async fn seed_retrieval_cardinality(
 
 async fn explain_production_retrieval(
     tx: &mut Transaction<'_, Postgres>,
-    project_id: Uuid,
+    board_id: Uuid,
     analyze: bool,
 ) -> Value {
     let options = if analyze {
@@ -513,7 +513,7 @@ async fn explain_production_retrieval(
     };
     let sql = format!("EXPLAIN ({options}) {RETRIEVAL_QUERY_SQL}");
     sqlx::query_scalar(&sql)
-        .bind(project_id)
+        .bind(board_id)
         .bind(Uuid::new_v4())
         .bind("low")
         .bind(unit_vector_literal())
@@ -571,8 +571,8 @@ fn find_plan_node<'a>(value: &'a Value, key: &str, expected: &str) -> Option<&'a
 async fn lifecycle_is_concurrency_safe_and_preserves_active_revision() {
     let _guard = common::DB_TEST_LOCK.lock().await;
     let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
-    let project_id = common::create_test_project(&app, &cookie, &csrf).await;
-    let created = create_candidate(&app, &project_id, &cookie, &csrf, "Unit test command").await;
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
+    let created = create_candidate(&app, &board_id, &cookie, &csrf, "Unit test command").await;
     let item_id = created["id"].as_str().unwrap();
     assert_eq!(created["status"], "pending");
     assert_eq!(created["version"], 1);
@@ -688,7 +688,7 @@ async fn lifecycle_is_concurrency_safe_and_preserves_active_revision() {
 async fn edit_distinguishes_omitted_and_explicitly_null_scope_ids() {
     let _guard = common::DB_TEST_LOCK.lock().await;
     let (_state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
-    let project_id = common::create_test_project(&app, &cookie, &csrf).await;
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
     let agent_id = common::create_agent_with_preset_key(
         &app,
         "backend_engineer",
@@ -703,7 +703,7 @@ async fn edit_distinguishes_omitted_and_explicitly_null_scope_ids() {
         "/api/knowledge",
         serde_json::json!({
             "scope": "agent",
-            "projectId": project_id,
+            "boardId": board_id,
             "agentId": agent_id,
             "knowledgeType": "test_command",
             "title": "Scoped command",
@@ -732,7 +732,7 @@ async fn edit_distinguishes_omitted_and_explicitly_null_scope_ids() {
     .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(preserved["scope"], "agent");
-    assert_eq!(preserved["projectId"], project_id);
+    assert_eq!(preserved["boardId"], board_id);
     assert_eq!(preserved["agentId"], agent_id);
 
     let (status, cleared) = mutate(
@@ -742,7 +742,7 @@ async fn edit_distinguishes_omitted_and_explicitly_null_scope_ids() {
         serde_json::json!({
             "expectedVersion": 2,
             "scope": "workspace",
-            "projectId": null,
+            "boardId": null,
             "agentId": null
         }),
         &cookie,
@@ -751,7 +751,7 @@ async fn edit_distinguishes_omitted_and_explicitly_null_scope_ids() {
     .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(cleared["scope"], "workspace");
-    assert!(cleared["projectId"].is_null());
+    assert!(cleared["boardId"].is_null());
     assert!(cleared["agentId"].is_null());
 }
 
@@ -759,9 +759,9 @@ async fn edit_distinguishes_omitted_and_explicitly_null_scope_ids() {
 async fn knowledge_list_has_stable_hard_limited_pages_and_auth_failures() {
     let _guard = common::DB_TEST_LOCK.lock().await;
     let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
-    let project_id = common::create_test_project(&app, &cookie, &csrf).await;
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
     for title in ["Pagination one", "Pagination two", "Pagination three"] {
-        create_candidate(&app, &project_id, &cookie, &csrf, title).await;
+        create_candidate(&app, &board_id, &cookie, &csrf, title).await;
     }
 
     let unauthenticated = app
@@ -796,7 +796,7 @@ async fn knowledge_list_has_stable_hard_limited_pages_and_auth_failures() {
     let first = service
         .list(KnowledgeListFilter {
             status: None,
-            project_id: None,
+            board_id: None,
             knowledge_type: None,
             cursor: None,
             limit: Some(1_000),
@@ -813,7 +813,7 @@ async fn knowledge_list_has_stable_hard_limited_pages_and_auth_failures() {
     let second = service
         .list(KnowledgeListFilter {
             status: None,
-            project_id: None,
+            board_id: None,
             knowledge_type: None,
             cursor: Some(cursor),
             limit: Some(1_000),
@@ -857,11 +857,11 @@ async fn knowledge_list_has_stable_hard_limited_pages_and_auth_failures() {
 async fn terminal_knowledge_edits_do_not_consume_active_capacity() {
     let _guard = common::DB_TEST_LOCK.lock().await;
     let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
-    let project_id = common::create_test_project(&app, &cookie, &csrf).await;
-    let live = create_candidate(&app, &project_id, &cookie, &csrf, "Live candidate").await;
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
+    let live = create_candidate(&app, &board_id, &cookie, &csrf, "Live candidate").await;
     let terminal = create_candidate(
         &app,
-        &project_id,
+        &board_id,
         &cookie,
         &csrf,
         "Rejected candidate to revise",
@@ -886,7 +886,7 @@ async fn terminal_knowledge_edits_do_not_consume_active_capacity() {
         .await
         .unwrap();
     let mut limited_config = state.config.knowledge.clone();
-    limited_config.retrieval.max_active_per_project = 1;
+    limited_config.retrieval.max_active_per_board = 1;
     let service = KnowledgeService::new(pool, &limited_config);
     let terminal_uuid = Uuid::parse_str(terminal_id).unwrap();
     let edited = service
@@ -916,9 +916,9 @@ async fn terminal_knowledge_edits_do_not_consume_active_capacity() {
 async fn cross_scope_edit_reserves_both_active_and_current_capacity() {
     let _guard = common::DB_TEST_LOCK.lock().await;
     let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
-    let project_a = common::create_test_project(&app, &cookie, &csrf).await;
-    let project_b = create_project_named(&app, "Capacity Project B", &cookie, &csrf).await;
-    let item = create_candidate(&app, &project_a, &cookie, &csrf, "Cross-scope capacity").await;
+    let board_a = common::create_test_board(&app, &cookie, &csrf).await;
+    let board_b = create_board_named(&app, "Capacity Board B", &cookie, &csrf).await;
+    let item = create_candidate(&app, &board_a, &cookie, &csrf, "Cross-scope capacity").await;
     let item_id = Uuid::parse_str(item["id"].as_str().unwrap()).unwrap();
     let (status, _) = mutate(
         &app,
@@ -938,7 +938,7 @@ async fn cross_scope_edit_reserves_both_active_and_current_capacity() {
         .await
         .unwrap();
     let mut config = state.config.knowledge.clone();
-    config.retrieval.max_active_per_project = 1;
+    config.retrieval.max_active_per_board = 1;
     let service = KnowledgeService::new(pool, &config);
     let edited = service
         .edit(
@@ -946,8 +946,8 @@ async fn cross_scope_edit_reserves_both_active_and_current_capacity() {
             2,
             admin_id,
             KnowledgeRevisionPatch {
-                scope: Some(KnowledgeScope::Project),
-                project_id: Some(Some(Uuid::parse_str(&project_b).unwrap())),
+                scope: Some(KnowledgeScope::Board),
+                board_id: Some(Some(Uuid::parse_str(&board_b).unwrap())),
                 content: Some("Replacement embedding has not completed.".into()),
                 ..KnowledgeRevisionPatch::default()
             },
@@ -956,17 +956,17 @@ async fn cross_scope_edit_reserves_both_active_and_current_capacity() {
         .unwrap();
     assert_ne!(edited.revision_id, edited.active_revision_id.unwrap());
 
-    for project_id in [&project_a, &project_b] {
+    for board_id in [&board_a, &board_b] {
         let error = service
             .create_manual(
                 admin_id,
                 KnowledgeRevisionInput {
-                    scope: KnowledgeScope::Project,
-                    project_id: Some(Uuid::parse_str(project_id).unwrap()),
+                    scope: KnowledgeScope::Board,
+                    board_id: Some(Uuid::parse_str(board_id).unwrap()),
                     agent_id: None,
                     knowledge_type: KnowledgeType::TestCommand,
-                    title: format!("Overflow {project_id}"),
-                    content: "This project already has a reserved active slot.".into(),
+                    title: format!("Overflow {board_id}"),
+                    content: "This board already has a reserved active slot.".into(),
                     source_type: KnowledgeSourceType::HumanNote,
                     source_id: None,
                     source_run_id: None,
@@ -983,9 +983,9 @@ async fn cross_scope_edit_reserves_both_active_and_current_capacity() {
 async fn activation_revalidates_capacity_before_replacing_the_active_revision() {
     let _guard = common::DB_TEST_LOCK.lock().await;
     let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
-    let project_id = common::create_test_project(&app, &cookie, &csrf).await;
-    let first = create_candidate(&app, &project_id, &cookie, &csrf, "Capacity occupant").await;
-    let second = create_candidate(&app, &project_id, &cookie, &csrf, "Activation candidate").await;
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
+    let first = create_candidate(&app, &board_id, &cookie, &csrf, "Capacity occupant").await;
+    let second = create_candidate(&app, &board_id, &cookie, &csrf, "Activation candidate").await;
 
     for candidate in [&first, &second] {
         let (status, _) = mutate(
@@ -1005,7 +1005,7 @@ async fn activation_revalidates_capacity_before_replacing_the_active_revision() 
     assert!(process_one_knowledge_job(&state).await.unwrap());
 
     let mut config = state.config.knowledge.clone();
-    config.retrieval.max_active_per_project = 1;
+    config.retrieval.max_active_per_board = 1;
     let second_item_id = Uuid::parse_str(second["id"].as_str().unwrap()).unwrap();
     let second_revision_id = Uuid::parse_str(second["revisionId"].as_str().unwrap()).unwrap();
     let mut tx = state.db.as_ref().unwrap().begin().await.unwrap();
@@ -1032,8 +1032,8 @@ async fn activation_revalidates_capacity_before_replacing_the_active_revision() 
 async fn supersession_waits_for_replacement_embedding() {
     let _guard = common::DB_TEST_LOCK.lock().await;
     let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
-    let project_id = common::create_test_project(&app, &cookie, &csrf).await;
-    let original = create_candidate(&app, &project_id, &cookie, &csrf, "Old rule").await;
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
+    let original = create_candidate(&app, &board_id, &cookie, &csrf, "Old rule").await;
     let original_id = original["id"].as_str().unwrap();
     let (_, _) = mutate(
         &app,
@@ -1049,8 +1049,8 @@ async fn supersession_waits_for_replacement_embedding() {
     let replacement_body = serde_json::json!({
         "expectedVersion": 2,
         "replacement": {
-            "scope": "project",
-            "projectId": project_id,
+            "scope": "board",
+            "boardId": board_id,
             "knowledgeType": "test_command",
             "title": "New rule",
             "content": "Run make test-smoke.",
@@ -1078,8 +1078,8 @@ async fn supersession_waits_for_replacement_embedding() {
         serde_json::json!({
             "expectedVersion": 2,
             "replacement": {
-                "scope": "project",
-                "projectId": project_id,
+                "scope": "board",
+                "boardId": board_id,
                 "knowledgeType": "test_command",
                 "title": "Conflicting rule",
                 "content": "This stale supersession must not be created.",
@@ -1132,11 +1132,11 @@ async fn supersession_waits_for_replacement_embedding() {
 async fn supersession_reapproval_activates_embedded_replacement_atomically() {
     let _guard = common::DB_TEST_LOCK.lock().await;
     let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
-    let project_id = common::create_test_project(&app, &cookie, &csrf).await;
-    let project_uuid = Uuid::parse_str(&project_id).unwrap();
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
+    let board_uuid = Uuid::parse_str(&board_id).unwrap();
     let original = create_candidate(
         &app,
-        &project_id,
+        &board_id,
         &cookie,
         &csrf,
         "Original superseded rule",
@@ -1164,8 +1164,8 @@ async fn supersession_reapproval_activates_embedded_replacement_atomically() {
         serde_json::json!({
             "expectedVersion": 2,
             "replacement": {
-                "scope": "project",
-                "projectId": project_id,
+                "scope": "board",
+                "boardId": board_id,
                 "knowledgeType": "test_command",
                 "title": "Replacement superseding rule",
                 "content": "Run make test-smoke before review.",
@@ -1235,7 +1235,7 @@ async fn supersession_reapproval_activates_embedded_replacement_atomically() {
     retrieval_config.top_k = 20;
     let before_reapproval = retrieve(
         pool,
-        project_uuid,
+        board_uuid,
         Uuid::new_v4(),
         &query[0],
         &retrieval_config,
@@ -1276,7 +1276,7 @@ async fn supersession_reapproval_activates_embedded_replacement_atomically() {
 
     let after_reapproval = retrieve(
         pool,
-        project_uuid,
+        board_uuid,
         Uuid::new_v4(),
         &query[0],
         &retrieval_config,
@@ -1291,10 +1291,10 @@ async fn supersession_reapproval_activates_embedded_replacement_atomically() {
 async fn supersession_rejects_a_new_candidate_for_an_already_retired_original() {
     let _guard = common::DB_TEST_LOCK.lock().await;
     let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
-    let project_id = common::create_test_project(&app, &cookie, &csrf).await;
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
     let original = create_candidate(
         &app,
-        &project_id,
+        &board_id,
         &cookie,
         &csrf,
         "Permanently retired original",
@@ -1319,8 +1319,8 @@ async fn supersession_rejects_a_new_candidate_for_an_already_retired_original() 
         serde_json::json!({
             "expectedVersion": expected_version,
             "replacement": {
-                "scope": "project",
-                "projectId": project_id,
+                "scope": "board",
+                "boardId": board_id,
                 "knowledgeType": "test_command",
                 "title": title,
                 "content": "An activated replacement permanently retires its original.",
@@ -1402,10 +1402,10 @@ async fn supersession_rejects_a_new_candidate_for_an_already_retired_original() 
 async fn supersession_rejects_a_second_live_replacement_at_the_current_version() {
     let _guard = common::DB_TEST_LOCK.lock().await;
     let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
-    let project_id = common::create_test_project(&app, &cookie, &csrf).await;
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
     let original = create_candidate(
         &app,
-        &project_id,
+        &board_id,
         &cookie,
         &csrf,
         "Singular replacement rule",
@@ -1430,8 +1430,8 @@ async fn supersession_rejects_a_second_live_replacement_at_the_current_version()
         serde_json::json!({
             "expectedVersion": expected_version,
             "replacement": {
-                "scope": "project",
-                "projectId": project_id,
+                "scope": "board",
+                "boardId": board_id,
                 "knowledgeType": "test_command",
                 "title": title,
                 "content": "Only one replacement may remain live.",
@@ -1567,10 +1567,10 @@ async fn supersession_rejects_a_second_live_replacement_at_the_current_version()
 async fn supersession_stale_never_activated_candidate_allows_a_successor() {
     let _guard = common::DB_TEST_LOCK.lock().await;
     let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
-    let project_id = common::create_test_project(&app, &cookie, &csrf).await;
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
     let original = create_candidate(
         &app,
-        &project_id,
+        &board_id,
         &cookie,
         &csrf,
         "Original with stale candidate",
@@ -1596,7 +1596,7 @@ async fn supersession_stale_never_activated_candidate_allows_a_successor() {
         "POST",
         &format!("/api/knowledge/{original_id}/supersede"),
         supersede_body(
-            &project_id,
+            &board_id,
             2,
             "Never activated stale candidate",
             "This candidate may be abandoned before activation.",
@@ -1626,7 +1626,7 @@ async fn supersession_stale_never_activated_candidate_allows_a_successor() {
         "POST",
         &format!("/api/knowledge/{original_id}/supersede"),
         supersede_body(
-            &project_id,
+            &board_id,
             3,
             "Successor after stale abandonment",
             "A stale never-activated candidate does not retire the original.",
@@ -1652,11 +1652,11 @@ async fn supersession_stale_never_activated_candidate_allows_a_successor() {
 async fn supersession_concurrent_reapproval_and_successor_creation_do_not_deadlock() {
     let _guard = common::DB_TEST_LOCK.lock().await;
     let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
-    let project_id = common::create_test_project(&app, &cookie, &csrf).await;
-    let project_uuid = Uuid::parse_str(&project_id).unwrap();
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
+    let board_uuid = Uuid::parse_str(&board_id).unwrap();
     let original = create_candidate(
         &app,
-        &project_id,
+        &board_id,
         &cookie,
         &csrf,
         "Original in supersession race",
@@ -1682,7 +1682,7 @@ async fn supersession_concurrent_reapproval_and_successor_creation_do_not_deadlo
         "POST",
         &format!("/api/knowledge/{original_id}/supersede"),
         supersede_body(
-            &project_id,
+            &board_id,
             2,
             "Rejected embedded candidate",
             "Reapproval races with creation of a successor.",
@@ -1735,7 +1735,7 @@ async fn supersession_concurrent_reapproval_and_successor_creation_do_not_deadlo
                     "POST",
                     &supersede_path,
                     supersede_body(
-                        &project_id,
+                        &board_id,
                         3,
                         "Concurrent successor",
                         "Exactly one racing candidate may remain live.",
@@ -1790,7 +1790,7 @@ async fn supersession_concurrent_reapproval_and_successor_creation_do_not_deadlo
     retrieval_config.top_k = 20;
     let retrieved = retrieve(
         pool,
-        project_uuid,
+        board_uuid,
         Uuid::new_v4(),
         &query[0],
         &retrieval_config,
@@ -1951,9 +1951,9 @@ async fn supersession_migration_repairs_legacy_competing_children_deterministica
 async fn retrieval_is_scoped_and_usage_is_logged_once() {
     let _guard = common::DB_TEST_LOCK.lock().await;
     let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
-    let project_id = common::create_test_project(&app, &cookie, &csrf).await;
-    let other_project_id =
-        create_project_named(&app, "Other Knowledge Project", &cookie, &csrf).await;
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
+    let other_board_id =
+        create_board_named(&app, "Other Knowledge Board", &cookie, &csrf).await;
     let agent_id = common::create_agent_with_preset_key(
         &app,
         "backend_engineer",
@@ -1962,8 +1962,8 @@ async fn retrieval_is_scoped_and_usage_is_logged_once() {
         &csrf,
     )
     .await;
-    let ticket_id = common::create_test_ticket(&app, &project_id, &cookie, &csrf).await;
-    let item = create_candidate(&app, &project_id, &cookie, &csrf, "Use smoke tests").await;
+    let ticket_id = common::create_test_ticket(&app, &board_id, &cookie, &csrf).await;
+    let item = create_candidate(&app, &board_id, &cookie, &csrf, "Use smoke tests").await;
     let item_id = item["id"].as_str().unwrap();
     mutate(
         &app,
@@ -1981,7 +1981,7 @@ async fn retrieval_is_scoped_and_usage_is_logged_once() {
     let query = provider.embed(&["Run tests".into()]).await.unwrap();
     let found = retrieve(
         state.db.as_ref().unwrap(),
-        Uuid::parse_str(&project_id).unwrap(),
+        Uuid::parse_str(&board_id).unwrap(),
         Uuid::parse_str(&agent_id).unwrap(),
         &query[0],
         &state.config.knowledge.retrieval,
@@ -1989,22 +1989,22 @@ async fn retrieval_is_scoped_and_usage_is_logged_once() {
     .await
     .unwrap();
     assert_eq!(found.len(), 1);
-    let wrong_project = retrieve(
+    let wrong_board = retrieve(
         state.db.as_ref().unwrap(),
-        Uuid::parse_str(&other_project_id).unwrap(),
+        Uuid::parse_str(&other_board_id).unwrap(),
         Uuid::parse_str(&agent_id).unwrap(),
         &query[0],
         &state.config.knowledge.retrieval,
     )
     .await
     .unwrap();
-    assert!(wrong_project.is_empty());
+    assert!(wrong_board.is_empty());
 
     let mut type_filtered = state.config.knowledge.retrieval.clone();
     type_filtered.allowed_types = vec!["bug_pattern".into()];
     assert!(!has_eligible(
         state.db.as_ref().unwrap(),
-        Uuid::parse_str(&project_id).unwrap(),
+        Uuid::parse_str(&board_id).unwrap(),
         Uuid::parse_str(&agent_id).unwrap(),
         &type_filtered,
     )
@@ -2012,7 +2012,7 @@ async fn retrieval_is_scoped_and_usage_is_logged_once() {
     .unwrap());
     let excluded_by_type = retrieve(
         state.db.as_ref().unwrap(),
-        Uuid::parse_str(&project_id).unwrap(),
+        Uuid::parse_str(&board_id).unwrap(),
         Uuid::parse_str(&agent_id).unwrap(),
         &query[0],
         &type_filtered,
@@ -2024,7 +2024,7 @@ async fn retrieval_is_scoped_and_usage_is_logged_once() {
     type_filtered.allowed_types = vec!["test_command".into()];
     assert!(has_eligible(
         state.db.as_ref().unwrap(),
-        Uuid::parse_str(&project_id).unwrap(),
+        Uuid::parse_str(&board_id).unwrap(),
         Uuid::parse_str(&agent_id).unwrap(),
         &type_filtered,
     )
@@ -2079,10 +2079,10 @@ async fn retrieval_is_scoped_and_usage_is_logged_once() {
 async fn retrieval_excludes_every_ineligible_lifecycle_and_scope_variant() {
     let _guard = common::DB_TEST_LOCK.lock().await;
     let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
-    let project_id =
-        Uuid::parse_str(&common::create_test_project(&app, &cookie, &csrf).await).unwrap();
-    let other_project_id = Uuid::parse_str(
-        &create_project_named(&app, "Retrieval Matrix Other", &cookie, &csrf).await,
+    let board_id =
+        Uuid::parse_str(&common::create_test_board(&app, &cookie, &csrf).await).unwrap();
+    let other_board_id = Uuid::parse_str(
+        &create_board_named(&app, "Retrieval Matrix Other", &cookie, &csrf).await,
     )
     .unwrap();
     let agent_id = Uuid::parse_str(
@@ -2109,10 +2109,10 @@ async fn retrieval_excludes_every_ineligible_lifecycle_and_scope_variant() {
     .unwrap();
     let pool = state.db.as_ref().unwrap();
     let base = RetrievalSeed {
-        label: "valid project",
+        label: "valid board",
         status: "approved",
-        scope: "project",
-        project_id: Some(project_id),
+        scope: "board",
+        board_id: Some(board_id),
         agent_id: None,
         confidence: "high",
         expired: false,
@@ -2120,13 +2120,13 @@ async fn retrieval_excludes_every_ineligible_lifecycle_and_scope_variant() {
         store_embedding: true,
     };
 
-    let valid_project = seed_retrieval_item(pool, base).await.0;
+    let valid_board = seed_retrieval_item(pool, base).await.0;
     let valid_workspace = seed_retrieval_item(
         pool,
         RetrievalSeed {
             label: "valid workspace",
             scope: "workspace",
-            project_id: None,
+            board_id: None,
             ..base
         },
     )
@@ -2166,8 +2166,8 @@ async fn retrieval_excludes_every_ineligible_lifecycle_and_scope_variant() {
             ..base
         },
         RetrievalSeed {
-            label: "wrong project",
-            project_id: Some(other_project_id),
+            label: "wrong board",
+            board_id: Some(other_board_id),
             ..base
         },
         RetrievalSeed {
@@ -2213,7 +2213,7 @@ async fn retrieval_excludes_every_ineligible_lifecycle_and_scope_variant() {
 
     let found = retrieve(
         pool,
-        project_id,
+        board_id,
         agent_id,
         &std::iter::once(1.0)
             .chain(std::iter::repeat_n(0.0, 1_535))
@@ -2228,7 +2228,7 @@ async fn retrieval_excludes_every_ineligible_lifecycle_and_scope_variant() {
         .collect::<std::collections::HashSet<_>>();
     assert_eq!(
         found_ids,
-        [valid_project, valid_workspace, valid_agent]
+        [valid_board, valid_workspace, valid_agent]
             .into_iter()
             .collect()
     );
@@ -2238,8 +2238,8 @@ async fn retrieval_excludes_every_ineligible_lifecycle_and_scope_variant() {
 async fn done_transition_schedules_idempotent_extraction_to_pending() {
     let _guard = common::DB_TEST_LOCK.lock().await;
     let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
-    let project_id = common::create_test_project(&app, &cookie, &csrf).await;
-    let ticket_id = common::create_test_ticket(&app, &project_id, &cookie, &csrf).await;
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
+    let ticket_id = common::create_test_ticket(&app, &board_id, &cookie, &csrf).await;
     let ticket_uuid = Uuid::parse_str(&ticket_id).unwrap();
     sqlx::query("UPDATE tickets SET status = 'done' WHERE id = $1")
         .bind(ticket_uuid)
@@ -2274,7 +2274,7 @@ async fn done_transition_schedules_idempotent_extraction_to_pending() {
         .clone()
         .oneshot(common::json_request(
             "GET",
-            &format!("/api/knowledge/inbox?projectId={project_id}"),
+            &format!("/api/knowledge/inbox?boardId={board_id}"),
             "",
             &cookie,
             &csrf,
@@ -2289,12 +2289,12 @@ async fn done_transition_schedules_idempotent_extraction_to_pending() {
 async fn mock_extraction_emits_pending_for_seeded_reusable_convention() {
     let _guard = common::DB_TEST_LOCK.lock().await;
     let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
-    let project_id = common::create_test_project(&app, &cookie, &csrf).await;
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
     let create = app
         .clone()
         .oneshot(common::json_request(
             "POST",
-            &format!("/api/projects/{project_id}/tickets"),
+            &format!("/api/boards/{board_id}/tickets"),
             r#"{"title":"API hardening","description":"Prefer Result over panic in public APIs."}"#,
             &cookie,
             &csrf,
@@ -2317,7 +2317,7 @@ async fn mock_extraction_emits_pending_for_seeded_reusable_convention() {
         .clone()
         .oneshot(common::json_request(
             "GET",
-            &format!("/api/knowledge/inbox?projectId={project_id}"),
+            &format!("/api/knowledge/inbox?boardId={board_id}"),
             "",
             &cookie,
             &csrf,
@@ -2341,8 +2341,8 @@ async fn mock_extraction_emits_pending_for_seeded_reusable_convention() {
 async fn extraction_preserves_typed_comment_and_review_source_ids() {
     let _guard = common::DB_TEST_LOCK.lock().await;
     let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
-    let project_id = common::create_test_project(&app, &cookie, &csrf).await;
-    let ticket_id = common::create_test_ticket(&app, &project_id, &cookie, &csrf).await;
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
+    let ticket_id = common::create_test_ticket(&app, &board_id, &cookie, &csrf).await;
     let ticket_id = Uuid::parse_str(&ticket_id).unwrap();
     let comment_id = Uuid::new_v4();
     let review_id = Uuid::new_v4();
@@ -2409,8 +2409,8 @@ async fn extraction_preserves_typed_comment_and_review_source_ids() {
 async fn extraction_byte_budget_prioritizes_the_newest_comments() {
     let _guard = common::DB_TEST_LOCK.lock().await;
     let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
-    let project_id = common::create_test_project(&app, &cookie, &csrf).await;
-    let ticket_id = common::create_test_ticket(&app, &project_id, &cookie, &csrf).await;
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
+    let ticket_id = common::create_test_ticket(&app, &board_id, &cookie, &csrf).await;
     let ticket_id = Uuid::parse_str(&ticket_id).unwrap();
     let oldest_comment_id = Uuid::new_v4();
     let newest_comment_id = Uuid::new_v4();
@@ -2460,8 +2460,8 @@ async fn extraction_byte_budget_prioritizes_the_newest_comments() {
 async fn extraction_byte_budget_includes_title_and_description() {
     let _guard = common::DB_TEST_LOCK.lock().await;
     let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
-    let project_id = common::create_test_project(&app, &cookie, &csrf).await;
-    let ticket_id = common::create_test_ticket(&app, &project_id, &cookie, &csrf).await;
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
+    let ticket_id = common::create_test_ticket(&app, &board_id, &cookie, &csrf).await;
     let ticket_id = Uuid::parse_str(&ticket_id).unwrap();
     let pool = state.db.as_ref().unwrap();
     sqlx::query("UPDATE tickets SET title = $2, description = $3 WHERE id = $1")
@@ -2499,17 +2499,17 @@ async fn extraction_byte_budget_includes_title_and_description() {
 async fn knowledge_query_plan_has_relational_indexes() {
     let _guard = common::DB_TEST_LOCK.lock().await;
     let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
-    let target_project_id =
-        Uuid::parse_str(&create_project_named(&app, "Retrieval target", &cookie, &csrf).await)
+    let target_board_id =
+        Uuid::parse_str(&create_board_named(&app, "Retrieval target", &cookie, &csrf).await)
             .unwrap();
-    let other_project_id =
-        Uuid::parse_str(&create_project_named(&app, "Retrieval noise", &cookie, &csrf).await)
+    let other_board_id =
+        Uuid::parse_str(&create_board_named(&app, "Retrieval noise", &cookie, &csrf).await)
             .unwrap();
     let pool = state.db.as_ref().unwrap();
     let mut tx = pool.begin().await.unwrap();
-    seed_retrieval_cardinality(&mut tx, target_project_id, other_project_id, 32, 512, 4_096).await;
+    seed_retrieval_cardinality(&mut tx, target_board_id, other_board_id, 32, 512, 4_096).await;
 
-    let explain = explain_production_retrieval(&mut tx, target_project_id, true).await;
+    let explain = explain_production_retrieval(&mut tx, target_board_id, true).await;
     let plan = &explain[0]["Plan"];
     let mut index_scans = Vec::new();
     collect_index_scan_names(plan, &mut index_scans);
@@ -2521,7 +2521,7 @@ async fn knowledge_query_plan_has_relational_indexes() {
     );
     assert!(
         index_scans.iter().any(|name| {
-            name == "knowledge_revisions_project_scope_idx" || name == "knowledge_revisions_pkey"
+            name == "knowledge_revisions_board_scope_idx" || name == "knowledge_revisions_pkey"
         }),
         "expected a relational revision index scan in {index_scans:?}\n{explain:#}"
     );
@@ -2574,8 +2574,8 @@ async fn knowledge_query_plan_has_relational_indexes() {
 async fn knowledge_ensure_dimension_rejects_nonempty_mismatch() {
     let _guard = common::DB_TEST_LOCK.lock().await;
     let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
-    let project_id =
-        Uuid::parse_str(&create_project_named(&app, "Dimension lock", &cookie, &csrf).await)
+    let board_id =
+        Uuid::parse_str(&create_board_named(&app, "Dimension lock", &cookie, &csrf).await)
             .unwrap();
     let pool = state.db.as_ref().unwrap();
 
@@ -2584,8 +2584,8 @@ async fn knowledge_ensure_dimension_rejects_nonempty_mismatch() {
         RetrievalSeed {
             label: "dim-lock",
             status: "approved",
-            scope: "project",
-            project_id: Some(project_id),
+            scope: "board",
+            board_id: Some(board_id),
             agent_id: None,
             confidence: "high",
             expired: false,
@@ -2629,20 +2629,20 @@ async fn knowledge_retrieval_capacity_p95_benchmark() {
         .await
         .unwrap();
     let mut tx = pool.begin().await.unwrap();
-    let project_id = Uuid::new_v4();
-    sqlx::query("INSERT INTO projects (id, name, slug) VALUES ($1, $2, $3)")
-        .bind(project_id)
+    let board_id = Uuid::new_v4();
+    sqlx::query("INSERT INTO boards (id, name, slug) VALUES ($1, $2, $3)")
+        .bind(board_id)
         .bind("M06 retrieval capacity benchmark")
-        .bind(format!("m06-retrieval-benchmark-{project_id}"))
+        .bind(format!("m06-retrieval-benchmark-{board_id}"))
         .execute(&mut *tx)
         .await
         .unwrap();
-    seed_retrieval_cardinality(&mut tx, project_id, project_id, 10_000, 0, 0).await;
+    seed_retrieval_cardinality(&mut tx, board_id, board_id, 10_000, 0, 0).await;
 
-    let _warmup = explain_production_retrieval(&mut tx, project_id, true).await;
+    let _warmup = explain_production_retrieval(&mut tx, board_id, true).await;
     let mut timings_ms = Vec::with_capacity(20);
     for _ in 0..20 {
-        let explain = explain_production_retrieval(&mut tx, project_id, true).await;
+        let explain = explain_production_retrieval(&mut tx, board_id, true).await;
         timings_ms.push(
             explain[0]["Execution Time"]
                 .as_f64()
@@ -2664,10 +2664,10 @@ async fn knowledge_retrieval_capacity_p95_benchmark() {
 async fn reclaimed_embedding_claim_cannot_persist_embedding_or_activation() {
     let _guard = common::DB_TEST_LOCK.lock().await;
     let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
-    let project_id = common::create_test_project(&app, &cookie, &csrf).await;
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
     let item = create_candidate(
         &app,
-        &project_id,
+        &board_id,
         &cookie,
         &csrf,
         "Fence stale embedding writes",
@@ -2717,8 +2717,8 @@ async fn reclaimed_embedding_claim_cannot_persist_embedding_or_activation() {
 async fn reclaimed_extraction_claim_cannot_persist_candidates() {
     let _guard = common::DB_TEST_LOCK.lock().await;
     let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
-    let project_id = common::create_test_project(&app, &cookie, &csrf).await;
-    let ticket_id = common::create_test_ticket(&app, &project_id, &cookie, &csrf).await;
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
+    let ticket_id = common::create_test_ticket(&app, &board_id, &cookie, &csrf).await;
     let ticket_id = Uuid::parse_str(&ticket_id).unwrap();
     let pool = state.db.as_ref().unwrap().clone();
     sqlx::query("UPDATE tickets SET status = 'done' WHERE id = $1")
@@ -2751,8 +2751,8 @@ async fn reclaimed_extraction_claim_cannot_persist_candidates() {
 async fn stale_knowledge_worker_cannot_overwrite_new_owner_state() {
     let _guard = common::DB_TEST_LOCK.lock().await;
     let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
-    let project_id = common::create_test_project(&app, &cookie, &csrf).await;
-    let ticket_id = common::create_test_ticket(&app, &project_id, &cookie, &csrf).await;
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
+    let ticket_id = common::create_test_ticket(&app, &board_id, &cookie, &csrf).await;
     let ticket_uuid = Uuid::parse_str(&ticket_id).unwrap();
     let pool = state.db.as_ref().unwrap();
     sqlx::query("UPDATE tickets SET status = 'done' WHERE id = $1")
@@ -2847,8 +2847,8 @@ async fn stale_knowledge_worker_cannot_overwrite_new_owner_state() {
 async fn current_knowledge_claim_marks_job_failed_at_max_attempts() {
     let _guard = common::DB_TEST_LOCK.lock().await;
     let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
-    let project_id = common::create_test_project(&app, &cookie, &csrf).await;
-    let ticket_id = common::create_test_ticket(&app, &project_id, &cookie, &csrf).await;
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
+    let ticket_id = common::create_test_ticket(&app, &board_id, &cookie, &csrf).await;
     let ticket_uuid = Uuid::parse_str(&ticket_id).unwrap();
     let pool = state.db.as_ref().unwrap();
     sqlx::query("UPDATE tickets SET status = 'done' WHERE id = $1")
@@ -2896,8 +2896,8 @@ async fn current_knowledge_claim_marks_job_failed_at_max_attempts() {
 async fn stale_max_attempt_knowledge_claim_is_failed_without_reexecution() {
     let _guard = common::DB_TEST_LOCK.lock().await;
     let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
-    let project_id = common::create_test_project(&app, &cookie, &csrf).await;
-    let ticket_id = common::create_test_ticket(&app, &project_id, &cookie, &csrf).await;
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
+    let ticket_id = common::create_test_ticket(&app, &board_id, &cookie, &csrf).await;
     let ticket_uuid = Uuid::parse_str(&ticket_id).unwrap();
     let pool = state.db.as_ref().unwrap();
     sqlx::query("UPDATE tickets SET status = 'done' WHERE id = $1")
@@ -2943,15 +2943,15 @@ async fn stale_max_attempt_knowledge_claim_is_failed_without_reexecution() {
 
 async fn create_candidate_with_content(
     app: &Router,
-    project_id: &str,
+    board_id: &str,
     cookie: &str,
     csrf: &str,
     title: &str,
     content: &str,
 ) -> serde_json::Value {
     let body = serde_json::json!({
-        "scope": "project",
-        "projectId": project_id,
+        "scope": "board",
+        "boardId": board_id,
         "knowledgeType": "test_command",
         "title": title,
         "content": content,
@@ -3033,19 +3033,19 @@ async fn get_similar(
 async fn similar_returns_identical_approved_neighbor_for_pending() {
     let _guard = common::DB_TEST_LOCK.lock().await;
     let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
-    let project_id = common::create_test_project(&app, &cookie, &csrf).await;
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
     let title = "Inbox duplicate assist title";
     let content = "Run make test-unit before review.";
 
     let neighbor = create_candidate_with_content(
-        &app, &project_id, &cookie, &csrf, title, content,
+        &app, &board_id, &cookie, &csrf, title, content,
     )
     .await;
     let neighbor_id = neighbor["id"].as_str().unwrap().to_string();
     let ready = approve_and_embed(&state, &app, &neighbor_id, 1, &cookie, &csrf).await;
 
     let pending = create_candidate_with_content(
-        &app, &project_id, &cookie, &csrf, title, content,
+        &app, &board_id, &cookie, &csrf, title, content,
     )
     .await;
     let pending_id = pending["id"].as_str().unwrap();
@@ -3059,7 +3059,7 @@ async fn similar_returns_identical_approved_neighbor_for_pending() {
     assert_eq!(items[0]["revisionId"], ready["activeRevisionId"]);
     assert_eq!(items[0]["title"], title);
     assert_eq!(items[0]["knowledgeType"], "test_command");
-    assert_eq!(items[0]["scope"], "project");
+    assert_eq!(items[0]["scope"], "board");
     assert_eq!(items[0]["status"], "approved");
     assert_eq!(items[0]["embeddingStatus"], "ready");
     assert!(items[0]["similarity"].as_f64().unwrap() >= 0.99);
@@ -3078,11 +3078,11 @@ async fn similar_returns_identical_approved_neighbor_for_pending() {
 async fn similar_returns_empty_for_dissimilar_pending() {
     let _guard = common::DB_TEST_LOCK.lock().await;
     let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
-    let project_id = common::create_test_project(&app, &cookie, &csrf).await;
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
 
     let neighbor = create_candidate_with_content(
         &app,
-        &project_id,
+        &board_id,
         &cookie,
         &csrf,
         "Approved neighbor title",
@@ -3094,7 +3094,7 @@ async fn similar_returns_empty_for_dissimilar_pending() {
 
     let pending = create_candidate_with_content(
         &app,
-        &project_id,
+        &board_id,
         &cookie,
         &csrf,
         "Totally unrelated guidance",
@@ -3112,15 +3112,15 @@ async fn similar_returns_empty_for_dissimilar_pending() {
 async fn similar_excludes_ineligible_neighbors_and_self() {
     let _guard = common::DB_TEST_LOCK.lock().await;
     let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
-    let project_id = common::create_test_project(&app, &cookie, &csrf).await;
-    let project_uuid = Uuid::parse_str(&project_id).unwrap();
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
+    let board_uuid = Uuid::parse_str(&board_id).unwrap();
     let pool = state.db.as_ref().unwrap();
     let title = "Eligibility matrix title";
     let content = "Shared eligibility content for inbox assist.";
     let query_text = format!("{title}\n\n{content}");
 
     let eligible = create_candidate_with_content(
-        &app, &project_id, &cookie, &csrf, title, content,
+        &app, &board_id, &cookie, &csrf, title, content,
     )
     .await;
     let eligible_id = eligible["id"].as_str().unwrap().to_string();
@@ -3132,7 +3132,7 @@ async fn similar_excludes_ineligible_neighbors_and_self() {
 
     async fn seed_variant(
         pool: &PgPool,
-        project_id: Uuid,
+        board_id: Uuid,
         title: &str,
         content: &str,
         status: &str,
@@ -3164,14 +3164,14 @@ async fn similar_excludes_ineligible_neighbors_and_self() {
         sqlx::query(
             r#"
             INSERT INTO knowledge_revisions (
-                id, item_id, revision_number, scope, project_id,
+                id, item_id, revision_number, scope, board_id,
                 knowledge_type, title, content, source_type, confidence
-            ) VALUES ($1, $2, 1, 'project', $3, 'test_command', $4, $5, 'human_note', 'high')
+            ) VALUES ($1, $2, 1, 'board', $3, 'test_command', $4, $5, 'human_note', 'high')
             "#,
         )
         .bind(revision_id)
         .bind(item_id)
-        .bind(project_id)
+        .bind(board_id)
         .bind(title)
         .bind(content)
         .execute(pool)
@@ -3209,21 +3209,21 @@ async fn similar_excludes_ineligible_neighbors_and_self() {
     }
 
     seed_variant(
-        pool, project_uuid, title, content, "rejected", true, true, false, None, &literal,
+        pool, board_uuid, title, content, "rejected", true, true, false, None, &literal,
     )
     .await;
     seed_variant(
-        pool, project_uuid, title, content, "stale", true, true, false, None, &literal,
+        pool, board_uuid, title, content, "stale", true, true, false, None, &literal,
     )
     .await;
     seed_variant(
-        pool, project_uuid, title, content, "approved", true, true, true, None, &literal,
+        pool, board_uuid, title, content, "approved", true, true, true, None, &literal,
     )
     .await;
     let eligible_uuid = Uuid::parse_str(&eligible_id).unwrap();
     seed_variant(
         pool,
-        project_uuid,
+        board_uuid,
         title,
         content,
         "approved",
@@ -3235,12 +3235,12 @@ async fn similar_excludes_ineligible_neighbors_and_self() {
     )
     .await;
     seed_variant(
-        pool, project_uuid, title, content, "approved", true, false, false, None, &literal,
+        pool, board_uuid, title, content, "approved", true, false, false, None, &literal,
     )
     .await;
 
     let pending = create_candidate_with_content(
-        &app, &project_id, &cookie, &csrf, title, content,
+        &app, &board_id, &cookie, &csrf, title, content,
     )
     .await;
     let pending_id = pending["id"].as_str().unwrap();
@@ -3256,8 +3256,8 @@ async fn similar_excludes_ineligible_neighbors_and_self() {
 async fn similar_authz_allows_member_read_and_rejects_unauthenticated() {
     let _guard = common::DB_TEST_LOCK.lock().await;
     let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
-    let project_id = common::create_test_project(&app, &cookie, &csrf).await;
-    let pending = create_candidate(&app, &project_id, &cookie, &csrf, "Authz pending").await;
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
+    let pending = create_candidate(&app, &board_id, &cookie, &csrf, "Authz pending").await;
     let pending_id = pending["id"].as_str().unwrap();
 
     let unauthenticated = app
@@ -3299,8 +3299,8 @@ async fn similar_authz_allows_member_read_and_rejects_unauthenticated() {
 async fn similar_rejects_non_pending_and_missing_items() {
     let _guard = common::DB_TEST_LOCK.lock().await;
     let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
-    let project_id = common::create_test_project(&app, &cookie, &csrf).await;
-    let created = create_candidate(&app, &project_id, &cookie, &csrf, "Approve first").await;
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
+    let created = create_candidate(&app, &board_id, &cookie, &csrf, "Approve first").await;
     let item_id = created["id"].as_str().unwrap();
     approve_and_embed(&state, &app, item_id, 1, &cookie, &csrf).await;
 

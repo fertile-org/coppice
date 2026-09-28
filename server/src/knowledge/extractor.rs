@@ -41,7 +41,7 @@ pub struct ExtractionComment {
 #[derive(Debug, Clone)]
 pub struct ExtractionInput {
     pub ticket_id: Uuid,
-    pub project_id: Uuid,
+    pub board_id: Uuid,
     pub title: String,
     pub description: String,
     pub comments: Vec<ExtractionComment>,
@@ -231,7 +231,7 @@ fn borderline_hint(text: &str) -> Option<&'static str> {
     }
 
     if lower.contains("everywhere")
-        || lower.contains("all projects")
+        || lower.contains("all boards")
         || lower.contains("all repos")
         || lower.contains("across the entire company")
     {
@@ -452,7 +452,7 @@ mod tests {
     fn input_with(title: &str, description: &str, comments: &[&str]) -> ExtractionInput {
         ExtractionInput {
             ticket_id: Uuid::new_v4(),
-            project_id: Uuid::new_v4(),
+            board_id: Uuid::new_v4(),
             title: title.into(),
             description: description.into(),
             comments: comments
