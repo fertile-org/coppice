@@ -57,6 +57,7 @@ Docker Compose bind-mounts `deploy/config/config.toml` at `COPPICE_CONFIG=/etc/c
 | | Agent / CI (`make compose-up`) | Human hot reload (`compose-local-up` + host API) |
 |--|--|--|
 | Postgres port | 5432 | 5433 |
+| Embedder | Ollama `:11434` (profile `embeddings`) | Same sidecar on host `:11434` |
 | API | Docker `:5000` | Host `:5000` |
 | Config source | `deploy/config/config.toml` + compose env | `./config.toml` on the host |
 | Migrations | Server auto-migrates on container start | `make migrate` (reads `config.toml`) |
@@ -65,7 +66,7 @@ Your gitignored repo-root `config.toml` (e.g. `database.url` → `:5433`) applie
 
 ## Local development (human)
 
-Postgres runs in Docker on port **5433**. API and web run on the host for hot reload.
+Postgres runs in Docker on port **5433**. The Ollama embedder sidecar listens on host **:11434** (Compose profile `embeddings`, Makefile default). API and web run on the host for hot reload.
 
 ```bash
 cp config.example.toml config.toml
@@ -85,7 +86,7 @@ make web-dev
 - API: http://localhost:5000/health
 - Web: http://localhost:5001 — login `admin@localhost` / `changeme`
 
-Tear down Postgres: `make compose-local-down`
+Tear down Postgres + embedder: `make compose-local-down`. First `compose-local-up` may take several minutes while Ollama pulls `nomic-embed-text` (~274MB). Opt out: `COMPOSE_PROFILES= make compose-local-up`.
 
 ## Release / installed binary
 
@@ -112,7 +113,7 @@ Set `COPPICE_SERVER_BIN` to override the API binary path.
 make compose-up    # copies deploy/config/config.toml if missing; auto-migrates + auto-bootstraps admin
 ```
 
-`make compose-up` enables Compose profile `embeddings` (Makefile default). That starts the **Ollama embedder sidecar** beside Postgres/server/web and points the server at it (`openai_compatible` → `nomic-embed-text`, dimension `768`). First boot pulls the model (~274MB, often 1–5+ minutes); weights persist in the `ollama_data` volume. The API does **not** wait on embedder health — knowledge embed jobs fail until the sidecar is ready. Opt out with `COMPOSE_PROFILES= make compose-up` (no Ollama container). Do **not** treat `deploy/docker-compose.local.yml` as the operator embedder default — that file is Postgres-only for human hot reload.
+`make compose-up` enables Compose profile `embeddings` (Makefile default). That starts the **Ollama embedder sidecar** beside Postgres/server/web and points the server at it (`openai_compatible` → `nomic-embed-text`, dimension `768`). First boot pulls the model (~274MB, often 1–5+ minutes); weights persist in the `ollama_data` volume. The API does **not** wait on embedder health — knowledge embed jobs fail until the sidecar is ready. Opt out with `COMPOSE_PROFILES= make compose-up` (no Ollama container). Human hot reload (`make compose-local-up`) starts the same sidecar on host `:11434`; root `config.example.toml` points at `http://127.0.0.1:11434/v1`.
 
 The **web** service is a production image: `yarn build` then **nginx** on `:5001` (static SPA, proxies `/api` and `/ws` to `server:5000`). For UI hot reload, use the human path (`make web-dev`), not Compose web.
 
@@ -193,8 +194,8 @@ Only the host-side mapping changes; container-internal ports and the `postgres` 
 
 | Target | What it does |
 |--------|----------------|
-| `make compose-local-up` | Start local Postgres only (port 5433) |
-| `make compose-local-down` | Stop local Postgres |
+| `make compose-local-up` | Start local Postgres (5433) + Ollama embedder (11434) |
+| `make compose-local-down` | Stop local Postgres + embedder |
 | `make server-dev` | API with `cargo watch` (hot reload) |
 | `make compose-up` | Default Docker stack (agents / CI) |
 | `make compose-down` | Stop default stack |
@@ -222,8 +223,8 @@ M06 settings live under `[knowledge]` in TOML. There are **three embedding modes
 
 | Mode | When | Provider config | Notes |
 |------|------|-----------------|-------|
-| **`mock`** | `make test`, knowledge unit/integration tests, e2e/CI smoke | `provider = "mock"` (Makefile forces this for smoke; host `config.example.toml` defaults here) | Deterministic hashed vectors; no download, no network, no GPU |
-| **Local Compose sidecar** | Operator default after `make compose-up` | `openai_compatible` → `http://embedder:11434/v1`, model `nomic-embed-text`, dimension `768`, placeholder `api_key` | Ollama service under Compose profile `embeddings`; first boot pulls ~274MB into `ollama_data` |
+| **`mock`** | `make test`, knowledge unit/integration tests, e2e/CI smoke | `provider = "mock"` (Makefile forces this for smoke) | Deterministic hashed vectors; no download, no network, no GPU |
+| **Local Compose sidecar** | Default after `make compose-up` or `make compose-local-up` | `openai_compatible` → `nomic-embed-text` @ `768`, placeholder `api_key`. Docker server: `http://embedder:11434/v1`. Host API: `http://127.0.0.1:11434/v1` (root `config.example.toml`) | Ollama under Compose profile `embeddings`; first boot pulls ~274MB into `ollama_data` |
 | **Remote `openai_compatible`** | Opt-in (OpenAI or any `/v1/embeddings` host) | Same provider string; set your `base_url`, `model`, `api_key`, and matching `dimension` | Disable or ignore the sidecar; point env/TOML at the remote host |
 
 **Retrieval split:** cosine ranking and HNSW live in **Postgres** (`knowledge_embeddings`). Query text still goes to the **configured embedding provider** first (mock, local Ollama, or remote). Provider downtime breaks new embeds and Full-run query embedding even though stored vectors remain in the DB.

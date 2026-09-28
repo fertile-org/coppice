@@ -93,7 +93,7 @@ domain/knowledge.rs                 types, scope and content validation, risk cl
 services/knowledge_service.rs       revision/lifecycle invariants and bounded keyset lists
 services/knowledge_job_service.rs   SKIP LOCKED queue, stale-lock reclaim, bounded retry
 knowledge/embedder.rs               EmbeddingProvider contract
-knowledge/mock_embedder.rs          deterministic vectors (tests / CI / host mock default)
+knowledge/mock_embedder.rs          deterministic vectors (tests / CI / smoke)
 knowledge/openai_embedder.rs        OpenAI-compatible /embeddings (local Ollama sidecar or remote)
 knowledge/retrieval.rs              relational eligibility CTE, then stable cosine rank
 knowledge/extractor.rs              deterministic bounded candidate extraction + policy
@@ -101,7 +101,7 @@ services/context_budget.rs          ByteTokenCounter, untrusted delimiters, usag
 workers/knowledge_worker.rs         asynchronous embed and post-Done extraction jobs
 ```
 
-Only Full-profile runs retrieve knowledge. Query text is embedded via the configured provider; stored vectors and cosine ranking stay in Postgres. Relational eligibility (approved, active, embedded, unexpired, unsuperseded, confidence, project/agent scope) is materialized before cosine ranking. The bounded result is rendered as untrusted data and passed through the configured total context budget; mandatory safety and result-contract sections either survive or the run fails before provider invocation. Every included exact revision is inserted once into `knowledge_usage_logs` before the provider runs. Operator modes (`mock` vs Compose Ollama sidecar vs remote `openai_compatible`): [Knowledge configuration](development.md#knowledge-configuration).
+Only Full-profile runs retrieve knowledge. Query text is embedded via the configured provider; stored vectors and cosine ranking stay in Postgres. Relational eligibility (approved, active, embedded, unexpired, unsuperseded, confidence, project/agent scope) is materialized before cosine ranking. The bounded result is rendered as untrusted data and passed through the configured total context budget; mandatory safety and result-contract sections either survive or the run fails before provider invocation. Every included exact revision is inserted once into `knowledge_usage_logs` before the provider runs. Operator modes (`mock` vs local Ollama sidecar vs remote `openai_compatible`): [Knowledge configuration](development.md#knowledge-configuration).
 
 A database trigger idempotently enqueues `extract_ticket` when a ticket first enters Done. Default extraction is fail-closed: candidates remain Pending. Policy auto-save additionally requires an enabled explicit low-risk type allowlist and high confidence; high-impact types always require human approval.
 

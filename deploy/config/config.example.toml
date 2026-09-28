@@ -85,8 +85,9 @@ stale_lock_secs = 300
 [knowledge.embedding]
 # Three modes (see docs/development.md#knowledge-configuration):
 #   mock — tests/CI/smoke only (Makefile forces PROVIDER=mock; no download)
-#   local sidecar — Compose default: openai_compatible → http://embedder:11434/v1
+#   local sidecar — default: openai_compatible → http://embedder:11434/v1
 #                   nomic-embed-text @ 768 (first boot pulls ~274MB into ollama_data)
+#                   Host hot-reload uses root config.example.toml → http://127.0.0.1:11434/v1
 #   remote openai_compatible — opt-in: set base_url/model/api_key/dimension to your host
 # Dimension must match the model and live vector(n); mismatch fails startup or the embed job.
 # Ranking stays in Postgres; query embedding still calls this provider.

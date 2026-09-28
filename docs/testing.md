@@ -127,7 +127,7 @@ make benchmark-m06-knowledge-retrieval
 ```
 
 Keep this benchmark separate from routine integration tests because constructing
-10,000 embeddings at the configured dimension (Compose sidecar default 768; host mock example 1536) and their HNSW entries is intentionally heavier
+10,000 embeddings at the configured dimension (Compose sidecar / host default 768) and their HNSW entries is intentionally heavier
 than the representative mixed-cardinality query-plan assertion.
 
 ## Agent / provider testing

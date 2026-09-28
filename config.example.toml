@@ -83,16 +83,19 @@ poll_interval_ms = 500
 stale_lock_secs = 300
 
 [knowledge.embedding]
-# Host/hot-reload default is mock (tests-friendly). Docker Compose install default is the
-# Ollama sidecar (deploy/config + profile embeddings) — not this file.
-# Remote opt-in: provider=openai_compatible + base_url/model/api_key + matching dimension.
-# See docs/development.md#knowledge-configuration.
-provider = "mock"
-model = "coppice-mock-1536"
-dimension = 1536 # must match live vector(n); empty table rewrites on startup when changed
-base_url = "https://api.openai.com/v1"
+# Three modes (see docs/development.md#knowledge-configuration):
+#   mock — tests/CI/smoke only (Makefile forces PROVIDER=mock; no download)
+#   local sidecar — default: openai_compatible → http://127.0.0.1:11434/v1
+#                   nomic-embed-text @ 768 (compose-local-up starts Ollama; first boot ~274MB)
+#   remote openai_compatible — opt-in: set base_url/model/api_key/dimension to your host
+# Dimension must match the model and live vector(n); mismatch fails startup or the embed job.
+# Ranking stays in Postgres; query embedding still calls this provider.
+provider = "openai_compatible"
+model = "nomic-embed-text"
+dimension = 768 # must match live vector(n); empty table rewrites on startup when changed
+base_url = "http://127.0.0.1:11434/v1"
 timeout_secs = 30
-# api_key = "..." # prefer COPPICE_KNOWLEDGE__EMBEDDING__API_KEY
+api_key = "ollama" # required by validation; Ollama ignores it. Prefer COPPICE_KNOWLEDGE__EMBEDDING__API_KEY
 
 [knowledge.extraction]
 provider = "mock"
