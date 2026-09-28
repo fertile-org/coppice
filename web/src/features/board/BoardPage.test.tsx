@@ -219,7 +219,7 @@ describe('BoardPage ticket hierarchy', () => {
     expect(within(ready).queryByText('Unknown agent')).toBeNull();
   });
 
-  it('hides archived tickets by default and shows them when toggled', () => {
+  it('hides archived tickets by default and shows them via the filter drawer', () => {
     ticketsState.active = [
       makeTicket({
         id: 'active-1',
@@ -242,12 +242,46 @@ describe('BoardPage ticket hierarchy', () => {
     expect(screen.queryByText('Archived ticket')).toBeNull();
     expect(ticketsState.lastIncludeArchived).toBe(false);
 
-    fireEvent.click(screen.getByRole('checkbox', { name: 'Show archived' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Filters' }));
+    fireEvent.click(screen.getByRole('radio', { name: 'Include archived' }));
 
     expect(ticketsState.lastIncludeArchived).toBe(true);
     expect(screen.getByText('Archived ticket')).toBeVisible();
     expect(
       within(screen.getByRole('region', { name: 'Done' })).getByText('Archived'),
+    ).toBeVisible();
+    expect(
+      screen.getByRole('button', { name: 'Filters, 1 active' }),
+    ).toBeVisible();
+  });
+
+  it('filters cards by search and status without hiding columns', () => {
+    ticketsState.active = [
+      makeTicket({
+        id: 'auth',
+        title: 'Auth login',
+        status: 'backlog',
+      }),
+      makeTicket({
+        id: 'billing',
+        title: 'Billing export',
+        status: 'ready',
+      }),
+    ];
+
+    renderBoard();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Filters' }));
+    fireEvent.change(screen.getByLabelText('Search'), {
+      target: { value: 'auth' },
+    });
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Backlog' }));
+
+    expect(screen.getByText('Auth login')).toBeVisible();
+    expect(screen.queryByText('Billing export')).toBeNull();
+    expect(screen.getByRole('region', { name: 'Ready' })).toBeVisible();
+    expect(
+      screen.getByRole('button', { name: 'Filters, 2 active' }),
     ).toBeVisible();
   });
 });

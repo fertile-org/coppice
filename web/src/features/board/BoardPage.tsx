@@ -13,6 +13,19 @@ import { useParams, useSearchParams } from 'react-router-dom';
 import { useAgents } from '../agents/useAgents';
 import { TicketDrawer } from '../tickets/TicketDrawer';
 import { setLastBoardId } from '../boards/useBoards';
+import {
+  BoardFilterButton,
+  BoardFilterDrawer,
+} from './BoardFilterDrawer';
+import {
+  countActiveBoardFilters,
+  DEFAULT_BOARD_FILTERS,
+  filterTickets,
+  includeArchivedForVisibility,
+  parseBoardFilters,
+  writeBoardFilters,
+  type BoardFilters,
+} from './boardFilters';
 import { BoardColumn } from './BoardColumn';
 import { BOARD_COLUMNS, isTicketStatus, type TicketStatus } from './columns';
 import { resolveAssigneeName, TicketCard } from './TicketCard';
@@ -40,15 +53,22 @@ export function BoardPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const queryClient = useQueryClient();
   const selectedTicketId = searchParams.get('ticket');
-  const [showArchived, setShowArchived] = useState(false);
+  const [filterOpen, setFilterOpen] = useState(false);
+
+  const filters = useMemo(
+    () => parseBoardFilters(searchParams),
+    [searchParams],
+  );
+  const includeArchived = includeArchivedForVisibility(filters.visibility);
+  const activeFilterCount = countActiveBoardFilters(filters);
 
   const { data: tickets, isLoading, isError, refetch } = useTickets(
     boardId,
-    showArchived,
+    includeArchived,
   );
   const { data: agents } = useAgents();
   const createTicket = useCreateTicket(boardId ?? '');
-  const updateStatus = useUpdateTicketStatus(boardId ?? '', showArchived);
+  const updateStatus = useUpdateTicketStatus(boardId ?? '', includeArchived);
 
   const [activeTicket, setActiveTicket] = useState<Ticket | null>(null);
 
@@ -70,6 +90,11 @@ export function BoardPage() {
     if (boardId) setLastBoardId(boardId);
   }, [boardId]);
 
+  const filteredTickets = useMemo(
+    () => filterTickets(tickets ?? [], filters),
+    [tickets, filters],
+  );
+
   const ticketsById = useMemo(
     () => new Map((tickets ?? []).map((t) => [t.id, t])),
     [tickets],
@@ -84,26 +109,56 @@ export function BoardPage() {
     const grouped = new Map<TicketStatus, Ticket[]>(
       BOARD_COLUMNS.map((c) => [c.status, []]),
     );
-    for (const ticket of tickets ?? []) {
+    for (const ticket of filteredTickets) {
       const list = grouped.get(ticket.status);
       if (list) list.push(ticket);
     }
     return grouped;
-  }, [tickets]);
+  }, [filteredTickets]);
 
   const selectedParentTicket = selectedTicketId
     ? (hierarchyIndex.get(selectedTicketId)?.parent ?? null)
     : null;
 
+  function updateFilters(next: BoardFilters) {
+    setSearchParams(writeBoardFilters(searchParams, next), { replace: true });
+  }
+
+  function clearFilters() {
+    setSearchParams(writeBoardFilters(searchParams, DEFAULT_BOARD_FILTERS), {
+      replace: true,
+    });
+  }
+
   function openTicket(ticketId: string) {
-    setSearchParams({ ticket: ticketId });
+    setFilterOpen(false);
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.set('ticket', ticketId);
+      return next;
+    });
   }
 
   function closeDrawer() {
-    setSearchParams({});
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.delete('ticket');
+      return next;
+    });
     if (boardId) {
       void queryClient.invalidateQueries({ queryKey: ticketsQueryKey(boardId) });
     }
+  }
+
+  function openFilters() {
+    if (selectedTicketId) {
+      setSearchParams((prev) => {
+        const next = new URLSearchParams(prev);
+        next.delete('ticket');
+        return next;
+      });
+    }
+    setFilterOpen(true);
   }
 
   function handleDragStart(event: DragStartEvent) {
@@ -147,15 +202,10 @@ export function BoardPage() {
             Drag tickets between columns to update status.
           </p>
         </div>
-        <label className="flex items-center gap-2 font-body text-sm text-text-secondary">
-          <input
-            type="checkbox"
-            checked={showArchived}
-            onChange={(e) => setShowArchived(e.target.checked)}
-            className="h-4 w-4 rounded border-border text-moss-600 focus:ring-moss-500"
-          />
-          Show archived
-        </label>
+        <BoardFilterButton
+          activeCount={activeFilterCount}
+          onClick={openFilters}
+        />
       </div>
 
       {isLoading && (
@@ -220,13 +270,21 @@ export function BoardPage() {
         </DndContext>
       )}
 
-      {selectedTicketId && (
+      {selectedTicketId && !filterOpen && (
         <TicketDrawer
           ticketId={selectedTicketId}
           parentTicket={selectedParentTicket}
           onClose={closeDrawer}
         />
       )}
+
+      <BoardFilterDrawer
+        open={filterOpen}
+        filters={filters}
+        onChange={updateFilters}
+        onClose={() => setFilterOpen(false)}
+        onClear={clearFilters}
+      />
     </div>
   );
 }
