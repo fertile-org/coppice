@@ -156,6 +156,135 @@ async fn post_message_runs_mock_chat_turn_and_persists_reply() {
 }
 
 #[tokio::test]
+async fn list_sessions_includes_message_preview() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+
+    let (app, cookie, csrf, _env) =
+        common::bootstrap_and_login_with_workers("backend_engineer/chat_turn").await;
+    let agent_id = common::create_agent_with_preset_key(
+        &app,
+        "backend_engineer",
+        "Backend Engineer",
+        &cookie,
+        &csrf,
+    )
+    .await;
+
+    let created = app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            "/api/chat/sessions",
+            &format!(r#"{{"agentId":"{agent_id}"}}"#),
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    let session: serde_json::Value = common::json_body(created).await;
+    let session_id = session["id"].as_str().unwrap();
+
+    let posted = app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            &format!("/api/chat/sessions/{session_id}/messages"),
+            r#"{"body":"What is the cwd policy?"}"#,
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(posted.status(), StatusCode::CREATED);
+
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
+    while tokio::time::Instant::now() < deadline {
+        let list = app
+            .clone()
+            .oneshot(common::json_request(
+                "GET",
+                "/api/chat/sessions",
+                "",
+                &cookie,
+                &csrf,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(list.status(), StatusCode::OK);
+        let body: serde_json::Value = common::json_body(list).await;
+        let preview = body["sessions"][0]["lastMessagePreview"]
+            .as_str()
+            .unwrap_or("");
+        if preview.contains("Mock chat reply") || preview.contains("cwd") {
+            assert!(!preview.is_empty());
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    panic!("expected session list preview after agent reply");
+}
+
+#[tokio::test]
+async fn list_sessions_has_active_run_while_turn_queued() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+
+    let (app, cookie, csrf) = common::bootstrap_and_login().await;
+    let agent_id =
+        common::create_agent_with_preset_key(&app, "backend_engineer", "BE", &cookie, &csrf)
+            .await;
+
+    let created = app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            "/api/chat/sessions",
+            &format!(r#"{{"agentId":"{agent_id}"}}"#),
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    let session: serde_json::Value = common::json_body(created).await;
+    let session_id = session["id"].as_str().unwrap();
+
+    let posted = app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            &format!("/api/chat/sessions/{session_id}/messages"),
+            r#"{"body":"Hello"}"#,
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(posted.status(), StatusCode::CREATED);
+
+    let list = app
+        .clone()
+        .oneshot(common::json_request(
+            "GET",
+            "/api/chat/sessions",
+            "",
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(list.status(), StatusCode::OK);
+    let body: serde_json::Value = common::json_body(list).await;
+    let row = &body["sessions"][0];
+    assert_eq!(row["hasActiveRun"], true);
+    assert!(row["activeRunId"].is_string());
+}
+
+#[tokio::test]
 async fn conversation_profile_refuses_write_capable_connectors() {
     use coppice_server::domain::context_profile::ContextProfile;
     use coppice_server::providers::{

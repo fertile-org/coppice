@@ -42,6 +42,11 @@ pub struct ChatSession {
     pub status: ChatSessionStatus,
     pub provider_session_id: Option<String>,
     pub provider_session_connector: Option<String>,
+    pub last_message_preview: String,
+    pub last_message_at: Option<OffsetDateTime>,
+    pub last_message_role: Option<String>,
+    pub has_active_run: bool,
+    pub active_run_id: Option<Uuid>,
     pub created_at: OffsetDateTime,
     pub updated_at: OffsetDateTime,
 }

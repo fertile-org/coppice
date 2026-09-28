@@ -108,6 +108,11 @@ struct SessionResponse {
     repo_id: Option<Uuid>,
     parent_session_id: Option<Uuid>,
     status: String,
+    last_message_preview: String,
+    last_message_at: Option<String>,
+    last_message_role: Option<String>,
+    has_active_run: bool,
+    active_run_id: Option<Uuid>,
     created_at: String,
     updated_at: String,
 }
@@ -203,6 +208,13 @@ fn session_response(session: ChatSession) -> SessionResponse {
         repo_id: session.repo_id,
         parent_session_id: session.parent_session_id,
         status: session.status.as_str().to_string(),
+        last_message_preview: session.last_message_preview,
+        last_message_at: session
+            .last_message_at
+            .map(|t| t.format(&Rfc3339).unwrap_or_default()),
+        last_message_role: session.last_message_role,
+        has_active_run: session.has_active_run,
+        active_run_id: session.active_run_id,
         created_at: session.created_at.format(&Rfc3339).unwrap_or_default(),
         updated_at: session.updated_at.format(&Rfc3339).unwrap_or_default(),
     }

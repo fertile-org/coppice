@@ -263,7 +263,7 @@ impl<'a> ChatService<'a> {
         .fetch_one(self.pool)
         .await?;
 
-        Ok(row_to_session(&row))
+        Ok(session_from_insert_row(&row))
     }
 
     pub async fn list_sessions(
@@ -272,33 +272,41 @@ impl<'a> ChatService<'a> {
         project_id: Option<Uuid>,
     ) -> Result<Vec<ChatSession>, ChatError> {
         let rows = if let Some(project_id) = project_id {
-            sqlx::query(
+            sqlx::query(&format!(
                 r#"
-                SELECT
-                    id, project_id, owner_user_id, agent_id, repo_id, parent_session_id, status,
-                    provider_session_id, provider_session_connector,
-                    created_at, updated_at
-                FROM chat_sessions
-                WHERE owner_user_id = $1 AND project_id = $2
-                ORDER BY updated_at DESC
+                SELECT {CHAT_SESSION_LIST_SELECT}
+                FROM chat_sessions cs
+                LEFT JOIN LATERAL (
+                    SELECT body, role, created_at
+                    FROM chat_messages
+                    WHERE session_id = cs.id
+                    ORDER BY seq DESC
+                    LIMIT 1
+                ) lm ON true
+                WHERE cs.owner_user_id = $1 AND cs.project_id = $2
+                ORDER BY cs.updated_at DESC
                 "#,
-            )
+            ))
             .bind(owner_user_id)
             .bind(project_id)
             .fetch_all(self.pool)
             .await?
         } else {
-            sqlx::query(
+            sqlx::query(&format!(
                 r#"
-                SELECT
-                    id, project_id, owner_user_id, agent_id, repo_id, parent_session_id, status,
-                    provider_session_id, provider_session_connector,
-                    created_at, updated_at
-                FROM chat_sessions
-                WHERE owner_user_id = $1
-                ORDER BY updated_at DESC
+                SELECT {CHAT_SESSION_LIST_SELECT}
+                FROM chat_sessions cs
+                LEFT JOIN LATERAL (
+                    SELECT body, role, created_at
+                    FROM chat_messages
+                    WHERE session_id = cs.id
+                    ORDER BY seq DESC
+                    LIMIT 1
+                ) lm ON true
+                WHERE cs.owner_user_id = $1
+                ORDER BY cs.updated_at DESC
                 "#,
-            )
+            ))
             .bind(owner_user_id)
             .fetch_all(self.pool)
             .await?
@@ -312,16 +320,20 @@ impl<'a> ChatService<'a> {
         session_id: Uuid,
         owner_user_id: Uuid,
     ) -> Result<ChatSession, ChatError> {
-        let row = sqlx::query(
+        let row = sqlx::query(&format!(
             r#"
-            SELECT
-                id, project_id, owner_user_id, agent_id, repo_id, parent_session_id, status,
-                provider_session_id, provider_session_connector,
-                created_at, updated_at
-            FROM chat_sessions
-            WHERE id = $1 AND owner_user_id = $2
+            SELECT {CHAT_SESSION_LIST_SELECT}
+            FROM chat_sessions cs
+            LEFT JOIN LATERAL (
+                SELECT body, role, created_at
+                FROM chat_messages
+                WHERE session_id = cs.id
+                ORDER BY seq DESC
+                LIMIT 1
+            ) lm ON true
+            WHERE cs.id = $1 AND cs.owner_user_id = $2
             "#,
-        )
+        ))
         .bind(session_id)
         .bind(owner_user_id)
         .fetch_optional(self.pool)
@@ -331,16 +343,20 @@ impl<'a> ChatService<'a> {
     }
 
     pub async fn get_session_by_id(&self, session_id: Uuid) -> Result<ChatSession, ChatError> {
-        let row = sqlx::query(
+        let row = sqlx::query(&format!(
             r#"
-            SELECT
-                id, project_id, owner_user_id, agent_id, repo_id, parent_session_id, status,
-                provider_session_id, provider_session_connector,
-                created_at, updated_at
-            FROM chat_sessions
-            WHERE id = $1
+            SELECT {CHAT_SESSION_LIST_SELECT}
+            FROM chat_sessions cs
+            LEFT JOIN LATERAL (
+                SELECT body, role, created_at
+                FROM chat_messages
+                WHERE session_id = cs.id
+                ORDER BY seq DESC
+                LIMIT 1
+            ) lm ON true
+            WHERE cs.id = $1
             "#,
-        )
+        ))
         .bind(session_id)
         .fetch_optional(self.pool)
         .await?
@@ -1214,7 +1230,28 @@ fn draft_result(fields: DraftTicketFields, source: DraftTicketSource) -> DraftTi
     }
 }
 
-fn row_to_session(row: &sqlx::postgres::PgRow) -> ChatSession {
+const CHAT_SESSION_LIST_SELECT: &str = r"
+    cs.id, cs.project_id, cs.owner_user_id, cs.agent_id, cs.repo_id, cs.parent_session_id, cs.status,
+    cs.provider_session_id, cs.provider_session_connector,
+    cs.created_at, cs.updated_at,
+    COALESCE(lm.body, '') AS last_message_body,
+    lm.role AS last_message_role,
+    lm.created_at AS last_message_at,
+    EXISTS (
+        SELECT 1 FROM agent_runs ar
+        WHERE ar.chat_session_id = cs.id
+          AND ar.status IN ('queued', 'running')
+    ) AS has_active_run,
+    (
+        SELECT ar.id FROM agent_runs ar
+        WHERE ar.chat_session_id = cs.id
+          AND ar.status IN ('queued', 'running')
+        ORDER BY ar.created_at DESC
+        LIMIT 1
+    ) AS active_run_id
+";
+
+fn session_from_insert_row(row: &sqlx::postgres::PgRow) -> ChatSession {
     let status_str: String = row.get("status");
     ChatSession {
         id: row.get("id"),
@@ -1226,6 +1263,36 @@ fn row_to_session(row: &sqlx::postgres::PgRow) -> ChatSession {
         status: ChatSessionStatus::from_str(&status_str).unwrap_or(ChatSessionStatus::Active),
         provider_session_id: row.try_get("provider_session_id").ok().flatten(),
         provider_session_connector: row.try_get("provider_session_connector").ok().flatten(),
+        last_message_preview: String::new(),
+        last_message_at: None,
+        last_message_role: None,
+        has_active_run: false,
+        active_run_id: None,
+        created_at: row.get("created_at"),
+        updated_at: row.get("updated_at"),
+    }
+}
+
+fn row_to_session(row: &sqlx::postgres::PgRow) -> ChatSession {
+    let status_str: String = row.get("status");
+    let last_message_body: String = row
+        .try_get("last_message_body")
+        .unwrap_or_else(|_| String::new());
+    ChatSession {
+        id: row.get("id"),
+        project_id: row.get("project_id"),
+        owner_user_id: row.get("owner_user_id"),
+        agent_id: row.get("agent_id"),
+        repo_id: row.get("repo_id"),
+        parent_session_id: row.try_get("parent_session_id").ok().flatten(),
+        status: ChatSessionStatus::from_str(&status_str).unwrap_or(ChatSessionStatus::Active),
+        provider_session_id: row.try_get("provider_session_id").ok().flatten(),
+        provider_session_connector: row.try_get("provider_session_connector").ok().flatten(),
+        last_message_preview: truncate_message_preview(&last_message_body),
+        last_message_at: row.try_get("last_message_at").ok().flatten(),
+        last_message_role: row.try_get("last_message_role").ok().flatten(),
+        has_active_run: row.try_get("has_active_run").unwrap_or(false),
+        active_run_id: row.try_get("active_run_id").ok().flatten(),
         created_at: row.get("created_at"),
         updated_at: row.get("updated_at"),
     }
