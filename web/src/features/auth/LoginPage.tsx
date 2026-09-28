@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from 'react';
 import { Navigate, useNavigate } from 'react-router-dom';
 import { apiFetch, ApiError } from '../../lib/api';
+import { ThemeToggle } from '../theme/ThemeToggle';
 import { useSession } from './useSession';
 
 interface LoginResponse {
@@ -46,7 +47,10 @@ export function LoginPage() {
   }
 
   return (
-    <div className="coppice-grain flex min-h-screen items-center justify-center bg-background px-4">
+    <div className="coppice-grain relative flex min-h-screen items-center justify-center bg-background px-4">
+      <div className="absolute right-4 top-4">
+        <ThemeToggle />
+      </div>
       <div className="w-full max-w-md rounded-xl border border-border bg-surface-raised p-8 shadow-card">
         <div className="mb-8 flex flex-col items-center gap-4 text-center">
           <img

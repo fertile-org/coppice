@@ -240,7 +240,7 @@ export function BoardFilterButton({
       <ListFilter className="size-4" aria-hidden="true" />
       Filter
       {activeCount > 0 ? (
-        <span className="inline-flex min-w-5 items-center justify-center rounded-md bg-moss-600 px-1.5 py-0.5 font-body text-xs font-medium text-white">
+        <span className="inline-flex min-w-5 items-center justify-center rounded-md bg-moss-600 px-1.5 py-0.5 font-body text-xs font-medium text-paper-50">
           {activeCount}
         </span>
       ) : null}

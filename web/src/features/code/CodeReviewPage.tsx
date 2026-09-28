@@ -390,7 +390,7 @@ function EmptyState({
       <p className="mt-2 font-body text-sm text-text-secondary">{description}</p>
       <Link
         to={actionHref}
-        className="mt-4 inline-flex rounded-md bg-accent px-4 py-2 font-body text-sm font-medium text-white hover:bg-accent-hover"
+        className="mt-4 inline-flex rounded-md bg-accent px-4 py-2 font-body text-sm font-medium text-accent-foreground hover:bg-accent-hover"
       >
         {actionLabel}
       </Link>

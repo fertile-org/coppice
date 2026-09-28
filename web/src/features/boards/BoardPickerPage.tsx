@@ -124,7 +124,7 @@ function NewBoardDialog({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-bark-950/40 px-4"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-overlay px-4"
       role="presentation"
       onClick={onClose}
     >

@@ -15,6 +15,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import { useSession } from '../features/auth/useSession';
 import { NotificationBell } from '../features/notifications/NotificationBell';
+import { ThemeToggle } from '../features/theme/ThemeToggle';
 import { useOpenTicket } from '../features/tickets/useOpenTicket';
 import { cn } from '../lib/utils';
 
@@ -195,19 +196,21 @@ export function AppShell() {
           className="flex h-14 shrink-0 items-center justify-end gap-2 border-b border-border bg-surface px-4 sm:gap-4 sm:px-6"
         >
           {!desktopMode && (
-            <>
-              <span className="mr-auto hidden truncate font-body text-sm text-text-secondary sm:inline">
-                {user?.email}
-              </span>
-              <button
-                type="button"
-                onClick={() => void logout()}
-                className="inline-flex items-center gap-2 rounded-md border border-border px-3 py-1.5 font-body text-sm text-text-secondary transition-colors duration-fast hover:border-border-strong hover:text-text-primary"
-              >
-                <LogOut className="h-4 w-4 shrink-0" aria-hidden />
-                Sign out
-              </button>
-            </>
+            <span className="mr-auto hidden truncate font-body text-sm text-text-secondary sm:inline">
+              {user?.email}
+            </span>
+          )}
+          {desktopMode && <span className="mr-auto" />}
+          <ThemeToggle />
+          {!desktopMode && (
+            <button
+              type="button"
+              onClick={() => void logout()}
+              className="inline-flex items-center gap-2 rounded-md border border-border px-3 py-1.5 font-body text-sm text-text-secondary transition-colors duration-fast hover:border-border-strong hover:text-text-primary"
+            >
+              <LogOut className="h-4 w-4 shrink-0" aria-hidden />
+              Sign out
+            </button>
           )}
           {user && (
             <NotificationBell userId={user.id} onOpenTicket={openTicket} />

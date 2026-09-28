@@ -24,17 +24,31 @@ Coppice is a self-hosted agent workspace with a Trello-like board. The visual la
 
 ## Color palette
 
+Light cream paper is the default forest-shed experience. Dark mode is an optional night-woodland remapping of the same tokens (`data-theme="dark"` on `<html>`), not a separate visual language.
+
 ### Core
 
 | Token | Hex | Use |
 |-------|-----|-----|
-| `--color-bark-900` | `#2a1f18` | Primary text |
-| `--color-bark-600` | `#6b5344` | Secondary text |
+| `--color-bark-900` | `#2a1f18` | Primary text (light) |
+| `--color-bark-600` | `#6b5344` | Secondary text (light) |
 | `--color-moss-600` | `#4a7c59` | Primary accent (buttons, links, focus) |
 | `--color-moss-700` | `#3d6b4f` | Accent hover |
-| `--color-paper-50` | `#faf7f2` | Page background |
-| `--color-paper-100` | `#f5f0e6` | Card/surface background |
-| `--color-surface-raised` | `#fffdf9` | Elevated panels |
+| `--color-paper-50` | `#faf7f2` | Page background (light) |
+| `--color-paper-100` | `#f5f0e6` | Card/surface background (light) |
+| `--color-surface-raised` | `#fffdf9` | Elevated panels (light) |
+
+### Dark theme (zinc / shadcn)
+
+Preference is stored in `localStorage` (`coppice.theme`: `system` | `light` | `dark`). An inline boot script in `index.html` sets `data-theme` before paint to avoid a flash. Dark mode follows a shadcn-style near-black zinc stack — `#09090b` canvas, zinc borders, bright foreground — with moss green kept as the brand accent. Modal scrims use `--color-overlay` / `--color-overlay-strong`.
+
+| Role | Feel | Hex |
+|------|------|-----|
+| Background | zinc-950 | `#09090b` |
+| Surfaces | zinc-900 / raised | `#18181b` / `#1c1c1f` |
+| Border | zinc-800 | `#27272a` |
+| Text | zinc-50 / zinc-400 | `#fafafa` / `#a1a1aa` |
+| Accent | moss | `#6b9b7a` |
 
 ### Rationale
 
@@ -130,5 +144,5 @@ Agent Chat uses the same moss agent bubbles for streaming and final replies. Liv
 
 - Purple gradients on white
 - Glassmorphism overload
-- Dark mode first (light paper is the default forest-shed experience)
+- Dark mode as the only default (light paper remains the default forest-shed experience; dark is opt-in / system)
 - Generic icon-only chrome with no warmth

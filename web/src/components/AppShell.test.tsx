@@ -2,6 +2,7 @@ import '@testing-library/jest-dom/vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { ThemeProvider } from '../features/theme/ThemeProvider';
 import { AppShell } from './AppShell';
 
 const sessionState = {
@@ -26,18 +27,25 @@ vi.mock('../features/tickets/useOpenTicket', () => ({
   useOpenTicket: () => vi.fn(),
 }));
 
+function renderShell(initialEntries: string[] = ['/']) {
+  return render(
+    <ThemeProvider>
+      <MemoryRouter initialEntries={initialEntries}>
+        <AppShell />
+      </MemoryRouter>
+    </ThemeProvider>,
+  );
+}
+
 describe('AppShell', () => {
   beforeEach(() => {
     localStorage.clear();
     sessionState.desktopMode = false;
+    document.documentElement.removeAttribute('data-theme');
   });
 
   it('keeps notification and sign-out controls in the same visual and focus order', () => {
-    render(
-      <MemoryRouter>
-        <AppShell />
-      </MemoryRouter>,
-    );
+    renderShell();
 
     const bell = screen.getByRole('button', { name: 'Notifications' });
     const signOut = screen.getByRole('button', { name: 'Sign out' });
@@ -48,12 +56,23 @@ describe('AppShell', () => {
     expect(bell.parentElement).not.toHaveClass('order-last');
   });
 
+  it('exposes a theme toggle that cycles preference', () => {
+    renderShell();
+
+    const toggle = screen.getByTestId('theme-toggle');
+    expect(toggle).toHaveAttribute('data-theme-preference', 'system');
+
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute('data-theme-preference', 'light');
+    expect(document.documentElement).toHaveAttribute('data-theme', 'light');
+
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute('data-theme-preference', 'dark');
+    expect(document.documentElement).toHaveAttribute('data-theme', 'dark');
+  });
+
   it('exposes Chat in the main nav', () => {
-    render(
-      <MemoryRouter>
-        <AppShell />
-      </MemoryRouter>,
-    );
+    renderShell();
 
     expect(screen.getByRole('link', { name: 'Chat' })).toHaveAttribute(
       'href',
@@ -62,11 +81,7 @@ describe('AppShell', () => {
   });
 
   it('uses full-width main on non-chat routes', () => {
-    render(
-      <MemoryRouter initialEntries={['/boards']}>
-        <AppShell />
-      </MemoryRouter>,
-    );
+    renderShell(['/boards']);
 
     const main = screen.getByTestId('app-shell-main');
     expect(main).toHaveAttribute('data-layout', 'default');
@@ -78,11 +93,7 @@ describe('AppShell', () => {
   });
 
   it('aligns sidebar brand and top bar heights', () => {
-    render(
-      <MemoryRouter initialEntries={['/boards']}>
-        <AppShell />
-      </MemoryRouter>,
-    );
+    renderShell(['/boards']);
 
     const brand = screen.getByTestId('app-shell-sidebar-brand');
     const topbar = screen.getByTestId('app-shell-topbar');
@@ -91,11 +102,7 @@ describe('AppShell', () => {
   });
 
   it('uses full-bleed main on /chat', () => {
-    render(
-      <MemoryRouter initialEntries={['/chat']}>
-        <AppShell />
-      </MemoryRouter>,
-    );
+    renderShell(['/chat']);
 
     const main = screen.getByTestId('app-shell-main');
     expect(main).toHaveAttribute('data-layout', 'chat');
@@ -104,13 +111,7 @@ describe('AppShell', () => {
   });
 
   it('uses full-bleed main on /chat/:sessionId', () => {
-    render(
-      <MemoryRouter
-        initialEntries={['/chat/00000000-0000-4000-8000-000000000001']}
-      >
-        <AppShell />
-      </MemoryRouter>,
-    );
+    renderShell(['/chat/00000000-0000-4000-8000-000000000001']);
 
     const main = screen.getByTestId('app-shell-main');
     expect(main).toHaveAttribute('data-layout', 'chat');
@@ -118,11 +119,7 @@ describe('AppShell', () => {
   });
 
   it('clamps chat routes to the viewport so document scroll cannot move chrome', () => {
-    render(
-      <MemoryRouter initialEntries={['/chat']}>
-        <AppShell />
-      </MemoryRouter>,
-    );
+    renderShell(['/chat']);
 
     const main = screen.getByTestId('app-shell-main');
     const root = screen.getByTestId('app-shell-root');
@@ -135,11 +132,7 @@ describe('AppShell', () => {
   });
 
   it('does not viewport-clamp non-chat routes', () => {
-    render(
-      <MemoryRouter initialEntries={['/boards']}>
-        <AppShell />
-      </MemoryRouter>,
-    );
+    renderShell(['/boards']);
 
     const root = screen.getByTestId('app-shell-root');
     expect(root).toHaveClass('min-h-screen');
@@ -148,13 +141,7 @@ describe('AppShell', () => {
   });
 
   it('uses full-width main on board routes without chat viewport clamp', () => {
-    render(
-      <MemoryRouter
-        initialEntries={['/boards/00000000-0000-4000-8000-000000000001']}
-      >
-        <AppShell />
-      </MemoryRouter>,
-    );
+    renderShell(['/boards/00000000-0000-4000-8000-000000000001']);
 
     const main = screen.getByTestId('app-shell-main');
     const root = screen.getByTestId('app-shell-root');
@@ -171,13 +158,7 @@ describe('AppShell', () => {
   });
 
   it('uses full-width main on non-board routes nested under a board', () => {
-    render(
-      <MemoryRouter
-        initialEntries={['/boards/00000000-0000-4000-8000-000000000001/runs']}
-      >
-        <AppShell />
-      </MemoryRouter>,
-    );
+    renderShell(['/boards/00000000-0000-4000-8000-000000000001/runs']);
 
     const main = screen.getByTestId('app-shell-main');
     expect(main).toHaveAttribute('data-layout', 'default');
@@ -186,11 +167,7 @@ describe('AppShell', () => {
   });
 
   it('renders an expanded sidebar by default with nav icons', () => {
-    render(
-      <MemoryRouter>
-        <AppShell />
-      </MemoryRouter>,
-    );
+    renderShell();
 
     const sidebar = screen.getByTestId('app-shell-sidebar');
     expect(sidebar).toHaveAttribute('data-collapsed', 'false');
@@ -201,11 +178,7 @@ describe('AppShell', () => {
   });
 
   it('collapses the sidebar when the toggle is used', () => {
-    render(
-      <MemoryRouter>
-        <AppShell />
-      </MemoryRouter>,
-    );
+    renderShell();
 
     fireEvent.click(screen.getByRole('button', { name: 'Collapse sidebar' }));
 
@@ -219,11 +192,7 @@ describe('AppShell', () => {
   it('hides account chrome and Users nav in desktop mode', () => {
     sessionState.desktopMode = true;
 
-    render(
-      <MemoryRouter initialEntries={['/boards']}>
-        <AppShell />
-      </MemoryRouter>,
-    );
+    renderShell(['/boards']);
 
     expect(screen.queryByText('admin@localhost')).not.toBeInTheDocument();
     expect(
@@ -236,5 +205,6 @@ describe('AppShell', () => {
       screen.getByRole('button', { name: 'Notifications' }),
     ).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Tools' })).toBeInTheDocument();
+    expect(screen.getByTestId('theme-toggle')).toBeInTheDocument();
   });
 });

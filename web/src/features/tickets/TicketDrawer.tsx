@@ -169,7 +169,7 @@ export function TicketDrawer({
   return (
     <div className="fixed inset-0 z-50 flex justify-end" role="presentation">
       <div
-        className="absolute inset-0 bg-bark-950/40 backdrop-blur-[1px]"
+        className="absolute inset-0 bg-overlay backdrop-blur-[1px]"
         onClick={onClose}
         aria-hidden="true"
       />
@@ -220,7 +220,7 @@ export function TicketDrawer({
                   onClick={() => void handleRunAgent()}
                   disabled={!canRunAgent || headerBusy}
                   title={runAgentDisabledReason ?? undefined}
-                  className="rounded-md bg-accent px-3 py-1.5 font-body text-sm font-medium text-white transition-colors duration-fast hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-50"
+                  className="rounded-md bg-accent px-3 py-1.5 font-body text-sm font-medium text-accent-foreground transition-colors duration-fast hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   {runAgent.isPending ? 'Starting…' : 'Run Agent'}
                 </button>
@@ -241,7 +241,7 @@ export function TicketDrawer({
                     type="button"
                     onClick={() => void handleFinalApprove()}
                     disabled={headerBusy}
-                    className="rounded-md bg-moss-700 px-3 py-1.5 font-body text-sm font-medium text-white transition-colors duration-fast hover:bg-moss-800 disabled:cursor-not-allowed disabled:opacity-50"
+                    className="rounded-md bg-moss-600 px-3 py-1.5 font-body text-sm font-medium text-paper-50 transition-colors duration-fast hover:bg-moss-500 disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     {finalApprove.isPending ? 'Approving…' : 'Final Approve'}
                   </button>

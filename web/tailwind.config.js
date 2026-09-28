@@ -22,6 +22,10 @@ export default {
           DEFAULT: 'var(--color-border)',
           strong: 'var(--color-border-strong)',
         },
+        overlay: {
+          DEFAULT: 'var(--color-overlay)',
+          strong: 'var(--color-overlay-strong)',
+        },
         text: {
           primary: 'var(--color-text-primary)',
           secondary: 'var(--color-text-secondary)',

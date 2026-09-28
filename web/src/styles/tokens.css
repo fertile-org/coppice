@@ -184,12 +184,138 @@
   --badge-status-disabled-bg: var(--color-bark-100);
   --badge-status-disabled-text: var(--color-bark-500);
 
+  /* ── Overlay / scrim (fixed dark — not remapped with bark) ── */
+  --color-overlay: rgba(28, 20, 16, 0.45);
+  --color-overlay-strong: rgba(14, 10, 8, 0.7);
+
   /* ── Motion ── */
   --duration-fast: 120ms;
   --duration-normal: 200ms;
   --duration-slow: 350ms;
   --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
   --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+
+  color-scheme: light;
+}
+
+/*
+ * Dark theme — shadcn-style near-black zinc.
+ * Cool neutral blacks (zinc-950 stack), bright foreground, moss accent for brand.
+ * Remaps palette scales so existing Tailwind classes keep their roles.
+ * Overlay scrims stay dark via --color-overlay*.
+ */
+[data-theme='dark'] {
+  /* Foreground / bark role — zinc snow on black */
+  --color-bark-950: #fafafa;
+  --color-bark-900: #f4f4f5; /* zinc-100 */
+  --color-bark-800: #e4e4e7; /* zinc-200 */
+  --color-bark-700: #d4d4d8; /* zinc-300 */
+  --color-bark-600: #a1a1aa; /* zinc-400 */
+  --color-bark-500: #71717a; /* zinc-500 */
+  --color-bark-400: #52525b; /* zinc-600 */
+  --color-bark-300: #3f3f46; /* zinc-700 */
+  --color-bark-200: #27272a; /* zinc-800 */
+  --color-bark-100: #18181b; /* zinc-900 */
+  --color-bark-50: #09090b; /* zinc-950 */
+
+  /* Moss stays green — slightly brighter for dark canvas */
+  --color-moss-950: #f4faf6;
+  --color-moss-900: #e8f4eb;
+  --color-moss-800: #d4ead9;
+  --color-moss-700: #b3d4bc;
+  --color-moss-600: #6b9b7a;
+  --color-moss-500: #8fb89a;
+  --color-moss-400: #4a7c59;
+  --color-moss-300: #2d5a3d;
+  --color-moss-200: #1f3328;
+  --color-moss-100: #16241c;
+  --color-moss-50: #101a14;
+
+  /* Zinc-950 stack → paper / surfaces */
+  --color-paper-50: #09090b; /* zinc-950 */
+  --color-paper-100: #18181b; /* zinc-900 */
+  --color-paper-200: #27272a; /* zinc-800 */
+  --color-paper-300: #3f3f46; /* zinc-700 */
+
+  --color-background: #09090b;
+  --color-surface: #18181b;
+  --color-surface-raised: #1c1c1f;
+  --color-field-bg: #0c0c0e;
+  --color-field-border: #3f3f46;
+  --color-field-bg-disabled: #18181b;
+  --color-field-border-disabled: #27272a;
+  --color-border: #27272a;
+  --color-border-strong: #3f3f46;
+
+  --color-text-primary: #fafafa;
+  --color-text-secondary: #a1a1aa;
+  --color-text-muted: #71717a;
+  --color-text-inverse: #09090b;
+
+  --color-accent: #6b9b7a;
+  --color-accent-hover: #8fb89a;
+  --color-accent-muted: #16241c;
+  --color-accent-foreground: #fafafa;
+
+  --color-danger: #f87171;
+  --color-danger-muted: #3f1d1d;
+  --color-warning: #fbbf24;
+  --color-warning-muted: #3f3210;
+  --color-info: #60a5fa;
+  --color-info-muted: #172554;
+  --color-success: #6b9b7a;
+  --color-success-muted: #16241c;
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.5);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.55);
+  --shadow-lg: 0 10px 28px rgba(0, 0, 0, 0.6);
+  --shadow-card: 0 1px 0 rgba(255, 255, 255, 0.04), 0 0 0 1px rgba(39, 39, 42, 1);
+
+  --grain-opacity: 0.012;
+
+  --column-backlog-bg: #1c1c1f;
+  --column-backlog-border: #3f3f46;
+  --column-backlog-accent: #a1a1aa;
+
+  --column-ready-bg: #122018;
+  --column-ready-border: #2d5a3d;
+  --column-ready-accent: #8fb89a;
+
+  --column-in-progress-bg: #111827;
+  --column-in-progress-border: #1e3a5f;
+  --column-in-progress-accent: #60a5fa;
+
+  --column-in-review-bg: #1a1224;
+  --column-in-review-border: #4c1d95;
+  --column-in-review-accent: #c4b5fd;
+
+  --column-in-qa-bg: #1c1910;
+  --column-in-qa-border: #854d0e;
+  --column-in-qa-accent: #fbbf24;
+
+  --column-wait-final-bg: #1c1610;
+  --column-wait-final-border: #9a3412;
+  --column-wait-final-accent: #fdba74;
+
+  --column-done-bg: #122018;
+  --column-done-border: #2d5a3d;
+  --column-done-accent: #8fb89a;
+
+  --column-blocked-bg: #1f1212;
+  --column-blocked-border: #7f1d1d;
+  --column-blocked-accent: #f87171;
+
+  --badge-priority-medium-text: #fbbf24;
+  --badge-priority-medium-border: #854d0e;
+  --badge-priority-high-bg: #1c1610;
+  --badge-priority-high-text: #fdba74;
+  --badge-priority-high-border: #9a3412;
+  --badge-agent-system-border: #1e3a5f;
+
+  --color-overlay: rgba(0, 0, 0, 0.7);
+  --color-overlay-strong: rgba(0, 0, 0, 0.85);
+
+  color-scheme: dark;
 }
 
 /* Grain overlay utility — apply to page shell */

@@ -28,7 +28,7 @@ export function RepoDrawer({
     <div className="fixed inset-0 z-50 flex justify-end" role="presentation">
       <div
         data-testid="repo-drawer-backdrop"
-        className="absolute inset-0 bg-bark-950/40 backdrop-blur-[1px]"
+        className="absolute inset-0 bg-overlay backdrop-blur-[1px]"
         onClick={onClose}
         aria-hidden="true"
       />

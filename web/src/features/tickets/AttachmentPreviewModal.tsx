@@ -34,7 +34,7 @@ export function AttachmentPreviewModal({
       role="presentation"
     >
       <div
-        className="absolute inset-0 bg-bark-950/60 backdrop-blur-[2px]"
+        className="absolute inset-0 bg-overlay-strong backdrop-blur-[2px]"
         onClick={onClose}
         aria-hidden="true"
       />
