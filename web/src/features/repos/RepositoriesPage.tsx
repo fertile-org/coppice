@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { Button } from '../../components/ui/button';
 import { ApiError } from '../../lib/api';
+import { isDesktopShell, pickDirectory } from '../../lib/desktop';
 import {
   createRepoSchema,
   updateRepoSchema,
@@ -11,11 +12,10 @@ import { useSession } from '../auth/useSession';
 import { DefaultBranchSyncControls } from './DefaultBranchSyncControls';
 import { RepoDrawer } from './RepoDrawer';
 import {
-  useClearForgeToken,
   useCreateRepo,
   useDeleteRepo,
+  useInspectRepoPath,
   useRepos,
-  useSetForgeToken,
   useUpdateRepo,
   useVerifyRepo,
 } from './useRepos';
@@ -113,6 +113,7 @@ function CreateRepoForm({ onCreated }: CreateRepoFormProps) {
         onLocalPathChange={setLocalPath}
         onRemoteUrlChange={setRemoteUrl}
         onDefaultBranchChange={setDefaultBranch}
+        autofillFromPath
         idPrefix="create"
       />
       {error && (
@@ -187,6 +188,7 @@ function EditRepoForm({ repo }: EditRepoFormProps) {
         onLocalPathChange={setLocalPath}
         onRemoteUrlChange={setRemoteUrl}
         onDefaultBranchChange={setDefaultBranch}
+        autofillFromPath
         idPrefix="edit"
       />
       {error && (
@@ -217,6 +219,8 @@ interface RepoFieldsProps {
   onLocalPathChange: (value: string) => void;
   onRemoteUrlChange: (value: string) => void;
   onDefaultBranchChange: (value: string) => void;
+  /** When true, autofill empty name/remote/branch after path browse or blur. */
+  autofillFromPath?: boolean;
   idPrefix: string;
 }
 
@@ -229,8 +233,41 @@ function RepoFields({
   onLocalPathChange,
   onRemoteUrlChange,
   onDefaultBranchChange,
+  autofillFromPath = false,
   idPrefix,
 }: RepoFieldsProps) {
+  const [desktop, setDesktop] = useState(false);
+  const inspectPath = useInspectRepoPath();
+
+  useEffect(() => {
+    setDesktop(isDesktopShell());
+  }, []);
+
+  async function applyInspect(path: string) {
+    if (!autofillFromPath || !path.trim()) return;
+    try {
+      const inspected = await inspectPath.mutateAsync(path.trim());
+      if (!name.trim() && inspected.suggestedName) {
+        onNameChange(inspected.suggestedName);
+      }
+      if (!remoteUrl.trim() && inspected.remoteUrl) {
+        onRemoteUrlChange(inspected.remoteUrl);
+      }
+      if (inspected.defaultBranch) {
+        onDefaultBranchChange(inspected.defaultBranch);
+      }
+    } catch {
+      /* path may be incomplete while typing */
+    }
+  }
+
+  async function handleBrowse() {
+    const selected = await pickDirectory();
+    if (!selected) return;
+    onLocalPathChange(selected);
+    await applyInspect(selected);
+  }
+
   return (
     <div className="space-y-3">
       <div>
@@ -252,20 +289,38 @@ function RepoFields({
       </div>
 
       <div>
-        <label
-          htmlFor={`${idPrefix}-repo-local-path`}
-          className="mb-1 block font-body text-sm font-medium text-bark-800"
-        >
-          Local path
-        </label>
+        <div className="mb-1 flex items-center justify-between gap-2">
+          <label
+            htmlFor={`${idPrefix}-repo-local-path`}
+            className="block font-body text-sm font-medium text-bark-800"
+          >
+            Local path
+          </label>
+          {desktop && (
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => void handleBrowse()}
+              disabled={inspectPath.isPending}
+            >
+              Browse…
+            </Button>
+          )}
+        </div>
+        {desktop && (
+          <p className="mb-1.5 font-body text-xs text-text-muted">
+            Prefer Browse to pick a local git checkout; path below is a fallback.
+          </p>
+        )}
         <input
           id={`${idPrefix}-repo-local-path`}
           type="text"
           required
           autoComplete="off"
-          placeholder="/repos/my-app"
+          placeholder={desktop ? '/Users/you/code/my-app' : '/repos/my-app'}
           value={localPath}
           onChange={(e) => onLocalPathChange(e.target.value)}
+          onBlur={() => void applyInspect(localPath)}
           className="field-control w-full px-3 py-2 font-mono text-sm"
         />
       </div>
@@ -280,13 +335,17 @@ function RepoFields({
         </label>
         <input
           id={`${idPrefix}-repo-remote-url`}
-          type="url"
+          type="text"
           autoComplete="off"
-          placeholder="https://github.com/org/repo.git"
+          spellCheck={false}
+          placeholder="git@github.com:org/repo.git"
           value={remoteUrl}
           onChange={(e) => onRemoteUrlChange(e.target.value)}
           className="field-control w-full px-3 py-2 font-mono text-sm"
         />
+        <p className="mt-1 font-body text-xs text-text-muted">
+          HTTPS or SSH (e.g. git@github.com:org/repo.git). Autofilled from origin when possible.
+        </p>
       </div>
 
       <div>
@@ -306,100 +365,6 @@ function RepoFields({
           className="field-control w-full px-3 py-2 font-body text-sm"
         />
       </div>
-    </div>
-  );
-}
-
-function ForgeTokenSection({ repo }: { repo: Repo }) {
-  const setToken = useSetForgeToken();
-  const clearToken = useClearForgeToken();
-  const [token, setTokenValue] = useState('');
-  const [message, setMessage] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  async function handleSave(e: FormEvent) {
-    e.preventDefault();
-    if (!token.trim()) {
-      setError('Paste a forge token.');
-      return;
-    }
-    setError(null);
-    setMessage(null);
-    try {
-      await setToken.mutateAsync({ id: repo.id, token: token.trim() });
-      setTokenValue('');
-      setMessage('Forge token saved. The value is not shown again.');
-    } catch {
-      setError('Unable to save forge token.');
-    }
-  }
-
-  async function handleClear() {
-    if (!repo.forgeTokenConfigured) return;
-    if (!window.confirm('Remove the forge token for this repository?')) return;
-    setError(null);
-    setMessage(null);
-    try {
-      await clearToken.mutateAsync(repo.id);
-      setMessage('Forge token removed.');
-    } catch {
-      setError('Unable to remove forge token.');
-    }
-  }
-
-  return (
-    <div className="space-y-3 border-t border-border pt-5">
-      <div>
-        <h3 className="font-display text-sm font-semibold text-bark-800">
-          Forge token
-        </h3>
-        <p className="mt-1 font-body text-sm text-text-muted">
-          GitHub PAT (or fine-grained token) for human-triggered push and create
-          PR. Value is stored encrypted and never shown again.
-        </p>
-      </div>
-      <form onSubmit={(e) => void handleSave(e)} className="space-y-3">
-        <div>
-          <label
-            htmlFor="forge-token"
-            className="font-body text-xs font-medium text-text-muted"
-          >
-            Token
-          </label>
-          <input
-            id="forge-token"
-            type="password"
-            autoComplete="off"
-            value={token}
-            onChange={(e) => setTokenValue(e.target.value)}
-            placeholder="ghp_…"
-            className="field-control mt-1 w-full px-3 py-2 font-mono text-sm"
-          />
-        </div>
-        <p className="font-body text-xs text-text-muted">
-          Status:{' '}
-          {repo.forgeTokenConfigured ? (
-            <span className="text-success">configured</span>
-          ) : (
-            <span className="text-warning">not configured</span>
-          )}
-        </p>
-        {error && <p className="font-body text-xs text-danger">{error}</p>}
-        {message && <p className="font-body text-xs text-success">{message}</p>}
-        <div className="flex flex-wrap gap-2">
-          <Button type="submit" loading={setToken.isPending}>
-            {setToken.isPending ? 'Saving…' : 'Save token'}
-          </Button>
-          <Button
-            type="button"
-            variant="secondary"
-            disabled={!repo.forgeTokenConfigured || clearToken.isPending}
-            onClick={() => void handleClear()}
-          >
-            {clearToken.isPending ? 'Removing…' : 'Clear'}
-          </Button>
-        </div>
-      </form>
     </div>
   );
 }
@@ -586,20 +551,6 @@ export function RepositoriesPage() {
                         <div className="mt-0.5 font-body text-xs text-text-muted">
                           Branch: {repo.defaultBranch}
                         </div>
-                        <div className="mt-1">
-                          <span
-                            className={[
-                              'inline-flex items-center rounded-full border px-2 py-0.5 font-body text-xs',
-                              repo.forgeTokenConfigured
-                                ? 'border-success-muted bg-success-muted text-success'
-                                : 'border-border bg-paper-100 text-text-muted',
-                            ].join(' ')}
-                          >
-                            {repo.forgeTokenConfigured
-                              ? 'token configured'
-                              : 'token not configured'}
-                          </span>
-                        </div>
                       </td>
                       <td className="max-w-[200px] truncate px-4 py-3 font-mono text-xs text-text-secondary">
                         {repo.localPath}
@@ -664,7 +615,7 @@ export function RepositoriesPage() {
         <RepoDrawer
           ariaLabel="Add repository"
           title="Add repository"
-          description="Register a local git checkout on the server."
+          description="Register a local git checkout. Pull/push use host git credentials."
           onClose={closeDrawer}
         >
           <CreateRepoForm onCreated={closeDrawer} />
@@ -675,12 +626,11 @@ export function RepositoriesPage() {
         <RepoDrawer
           ariaLabel="Edit repository"
           title="Edit repository"
-          description="Update metadata, forge token, and admin actions for this checkout."
+          description="Update metadata and sync the default branch with the remote."
           onClose={closeDrawer}
         >
           <div className="space-y-6">
             <EditRepoForm key={editingRepo.id} repo={editingRepo} />
-            <ForgeTokenSection key={`token-${editingRepo.id}`} repo={editingRepo} />
             <EditRepoActions repo={editingRepo} onRemoved={closeDrawer} />
           </div>
         </RepoDrawer>

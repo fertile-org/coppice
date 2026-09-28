@@ -83,18 +83,41 @@ describe('TicketGitActions', () => {
     expect(screen.queryByRole('button', { name: 'Push branch' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Create PR' })).not.toBeInTheDocument();
     expect(
+      screen.queryByRole('button', { name: 'Create PR via API' }),
+    ).not.toBeInTheDocument();
+    expect(
       screen.queryByRole('button', { name: 'Remove worktree' }),
     ).not.toBeInTheDocument();
   });
 
   it('shows Merge and other final actions only in wait_for_final_review', () => {
+    gitInfoState.data = {
+      ...baseGitInfo,
+      canCreatePr: false,
+      prCreateUrl: 'https://github.com/org/repo/compare/main...agent/TICKET-abc?expand=1',
+    };
     renderActions(makeTicket({ status: 'wait_for_final_review' }));
 
     expect(screen.getByRole('button', { name: 'Rebase…' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Merge…' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Push branch' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Create PR' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Open compare URL' })).toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: 'Create PR via API' }),
+    ).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Remove worktree' })).toBeInTheDocument();
+  });
+
+  it('shows API Create PR only when canCreatePr is true', () => {
+    gitInfoState.data = {
+      ...baseGitInfo,
+      canCreatePr: true,
+      prCreateUrl: 'https://github.com/org/repo/compare/main...agent/TICKET-abc?expand=1',
+    };
+    renderActions(makeTicket({ status: 'wait_for_final_review' }));
+
+    expect(screen.getByRole('button', { name: 'Open compare URL' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Create PR via API' })).toBeInTheDocument();
   });
 
   it('disables Rebase when worktree is missing', () => {

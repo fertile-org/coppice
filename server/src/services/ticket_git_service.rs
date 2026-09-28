@@ -6,9 +6,9 @@ use uuid::Uuid;
 
 use crate::crypto::SecretStore;
 use crate::services::git_ops::{
-    auth_https_remote, fetch_default_refspec, git_head_sha, git_ref_exists, git_status_clean,
-    list_local_branches, push_argv, push_gate, push_refspec, run_git, run_git_capture,
-    sanitize_token, GitOpsError,
+    fetch_default_refspec, git_head_sha, git_ref_exists, git_status_clean, list_local_branches,
+    network_remote, push_argv, push_gate, push_refspec, run_git, run_git_capture, sanitize_token,
+    GitOpsError,
 };
 use crate::services::pr_create_url::{
     build_pr_create_url, github_owner_repo, https_remote_url,
@@ -230,11 +230,8 @@ impl<'a> TicketGitService<'a> {
             &ctx.ticket_branch,
         );
         let forge_token_configured = ctx.forge_token_secret_id.is_some();
-        let (can_push, push_disabled_reason) = push_gate(
-            self.push_enabled,
-            ctx.remote_url.as_deref(),
-            forge_token_configured,
-        );
+        let (can_push, push_disabled_reason) =
+            push_gate(self.push_enabled, ctx.remote_url.as_deref());
         let (can_create_pr, create_pr_disabled_reason) = create_pr_gate(
             self.push_enabled,
             ctx.remote_url.as_deref(),
@@ -270,16 +267,10 @@ impl<'a> TicketGitService<'a> {
         if !self.push_enabled {
             return Err(TicketGitError::PushDisabled);
         }
-        let store = self.secret_store.ok_or(TicketGitError::NoForgeToken)?;
         let ctx = self.resolve_context(ticket_id).await?;
         let remote_url = ctx.remote_url.as_deref().ok_or(TicketGitError::NoRemoteUrl)?;
-        let secret_id = ctx
-            .forge_token_secret_id
-            .ok_or(TicketGitError::NoForgeToken)?;
-        let token = SecretService::new(self.pool, store)
-            .decrypt_by_id(secret_id)
-            .await?;
         let https = https_remote_url(remote_url).ok_or(TicketGitError::NoRemoteUrl)?;
+        let token = self.decrypt_forge_token(&ctx).await;
 
         if !git_ref_exists(&ctx.git_dir, &ctx.ticket_branch).await? {
             return Err(TicketGitError::TicketBranchMissing(ctx.ticket_branch));
@@ -301,7 +292,7 @@ impl<'a> TicketGitService<'a> {
             .await;
         }
 
-        let auth_remote = auth_https_remote(remote_url, token.trim())?;
+        let push_remote = network_remote(remote_url, token.as_deref())?;
 
         let cwd = if worktree_exists(&ctx.worktree_dir) {
             ctx.worktree_dir.as_path()
@@ -310,11 +301,15 @@ impl<'a> TicketGitService<'a> {
         };
 
         let refspec = push_refspec(&ctx.ticket_branch);
-        let args = push_argv(&auth_remote, &refspec);
+        let args = push_argv(&push_remote, &refspec);
         match run_git(cwd, &args).await {
             Ok(()) => {}
             Err(GitOpsError::Git(msg)) => {
-                return Err(TicketGitError::Git(sanitize_token(&msg, token.trim())));
+                let sanitized = match token.as_deref() {
+                    Some(t) => sanitize_token(&msg, t),
+                    None => msg,
+                };
+                return Err(TicketGitError::Git(sanitized));
             }
             Err(other) => return Err(other.into()),
         }
@@ -555,26 +550,21 @@ impl<'a> TicketGitService<'a> {
     /// Best-effort fetch so rebase can prefer `origin/<base>`. Failures never
     /// fail the rebase itself.
     async fn soft_fetch_for_rebase(&self, ctx: &TicketGitContext, base: &str) -> bool {
-        if let Some(token) = self.decrypt_forge_token(ctx).await {
-            if let Some(remote_url) = ctx.remote_url.as_deref() {
-                if let Ok(auth_remote) = auth_https_remote(remote_url, token.trim()) {
-                    let refspec = fetch_default_refspec(base);
-                    match run_git(
-                        &ctx.worktree_dir,
-                        &["fetch", &auth_remote, &refspec],
-                    )
-                    .await
-                    {
-                        Ok(()) => return true,
-                        Err(GitOpsError::Git(msg)) => {
-                            tracing::warn!(
-                                "authenticated fetch for rebase failed: {}",
-                                sanitize_token(&msg, token.trim())
-                            );
-                        }
-                        Err(err) => {
-                            tracing::warn!("authenticated fetch for rebase failed: {err}");
-                        }
+        if let Some(remote_url) = ctx.remote_url.as_deref() {
+            let token = self.decrypt_forge_token(ctx).await;
+            if let Ok(fetch_remote) = network_remote(remote_url, token.as_deref()) {
+                let refspec = fetch_default_refspec(base);
+                match run_git(&ctx.worktree_dir, &["fetch", &fetch_remote, &refspec]).await {
+                    Ok(()) => return true,
+                    Err(GitOpsError::Git(msg)) => {
+                        let sanitized = match token.as_deref() {
+                            Some(t) => sanitize_token(&msg, t),
+                            None => msg,
+                        };
+                        tracing::warn!("fetch for rebase failed: {sanitized}");
+                    }
+                    Err(err) => {
+                        tracing::warn!("fetch for rebase failed: {err}");
                     }
                 }
             }
@@ -626,9 +616,15 @@ fn create_pr_gate(
     remote_url: Option<&str>,
     forge_token_configured: bool,
 ) -> (bool, Option<String>) {
-    let (ok, reason) = push_gate(push_enabled, remote_url, forge_token_configured);
+    let (ok, reason) = push_gate(push_enabled, remote_url);
     if !ok {
         return (false, reason);
+    }
+    if !forge_token_configured {
+        return (
+            false,
+            Some("API create PR needs a forge token — use Open compare URL instead".into()),
+        );
     }
     if remote_url.and_then(github_owner_repo).is_none() {
         return (

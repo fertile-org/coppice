@@ -7,8 +7,8 @@ use uuid::Uuid;
 
 use crate::crypto::SecretStore;
 use crate::services::git_ops::{
-    ahead_behind, auth_https_remote, fetch_default_refspec, fetch_gate, git_rev_parse,
-    git_status_clean, push_argv, push_gate, push_refspec, run_git, sanitize_token, GitOpsError,
+    ahead_behind, fetch_default_refspec, fetch_gate, git_rev_parse, git_status_clean, network_remote,
+    push_argv, push_gate, push_refspec, run_git, sanitize_token, GitOpsError,
 };
 use crate::services::pr_create_url::https_remote_url;
 use crate::services::secret_service::SecretService;
@@ -160,14 +160,10 @@ impl<'a> RepoGitService<'a> {
         };
 
         let forge_token_configured = ctx.forge_token_secret_id.is_some();
-        let (can_fetch, fetch_disabled_reason) =
-            fetch_gate(ctx.remote_url.as_deref(), forge_token_configured);
+        let (can_fetch, fetch_disabled_reason) = fetch_gate(ctx.remote_url.as_deref());
 
-        let (config_ok, config_reason) = push_gate(
-            self.push_enabled,
-            ctx.remote_url.as_deref(),
-            forge_token_configured,
-        );
+        let (config_ok, config_reason) =
+            push_gate(self.push_enabled, ctx.remote_url.as_deref());
 
         let (can_push, push_disabled_reason) = default_branch_push_gate(
             config_ok,
@@ -217,24 +213,17 @@ impl<'a> RepoGitService<'a> {
             .as_deref()
             .filter(|s| !s.trim().is_empty())
             .ok_or(RepoGitError::NoRemoteUrl)?;
-        let secret_id = ctx
-            .forge_token_secret_id
-            .ok_or(RepoGitError::NoForgeToken)?;
-        let token = SecretService::new(self.pool, self.secret_store)
-            .decrypt_by_id(secret_id)
-            .await?;
-
-        let auth_remote = auth_https_remote(remote_url, token.trim())?;
+        let token = self.decrypt_forge_token_optional(&ctx).await;
+        let fetch_remote = network_remote(remote_url, token.as_deref())?;
         let refspec = fetch_default_refspec(&ctx.default_branch);
-        match run_git(
-            &ctx.git_dir,
-            &["fetch", &auth_remote, &refspec],
-        )
-        .await
-        {
+        match run_git(&ctx.git_dir, &["fetch", &fetch_remote, &refspec]).await {
             Ok(()) => {}
             Err(GitOpsError::Git(msg)) => {
-                return Err(RepoGitError::Git(sanitize_token(&msg, token.trim())));
+                let sanitized = match token.as_deref() {
+                    Some(t) => sanitize_token(&msg, t),
+                    None => msg,
+                };
+                return Err(RepoGitError::Git(sanitized));
             }
             Err(other) => return Err(other.into()),
         }
@@ -255,19 +244,14 @@ impl<'a> RepoGitService<'a> {
             .as_deref()
             .filter(|s| !s.trim().is_empty())
             .ok_or(RepoGitError::NoRemoteUrl)?;
-        let secret_id = ctx
-            .forge_token_secret_id
-            .ok_or(RepoGitError::NoForgeToken)?;
-        let token = SecretService::new(self.pool, self.secret_store)
-            .decrypt_by_id(secret_id)
-            .await?;
         let https = https_remote_url(remote_url).ok_or(RepoGitError::NoRemoteUrl)?;
+        let token = self.decrypt_forge_token_optional(&ctx).await;
 
         self.enforce_push_gates(&ctx).await?;
 
-        let auth_remote = auth_https_remote(remote_url, token.trim())?;
+        let push_remote = network_remote(remote_url, token.as_deref())?;
         let refspec = push_refspec(&ctx.default_branch);
-        let args = push_argv(&auth_remote, &refspec);
+        let args = push_argv(&push_remote, &refspec);
         debug_assert!(
             !args.iter().any(|a| *a == "--force"
                 || *a == "--force-with-lease"
@@ -279,7 +263,11 @@ impl<'a> RepoGitService<'a> {
         match run_git(&ctx.git_dir, &args).await {
             Ok(()) => {}
             Err(GitOpsError::Git(msg)) => {
-                return Err(RepoGitError::Git(sanitize_token(&msg, token.trim())));
+                let sanitized = match token.as_deref() {
+                    Some(t) => sanitize_token(&msg, t),
+                    None => msg,
+                };
+                return Err(RepoGitError::Git(sanitized));
             }
             Err(other) => return Err(other.into()),
         }
@@ -348,14 +336,9 @@ impl<'a> RepoGitService<'a> {
             .as_deref()
             .filter(|s| !s.trim().is_empty())
             .ok_or(RepoGitError::NoRemoteUrl)?;
-        let secret_id = ctx
-            .forge_token_secret_id
-            .ok_or(RepoGitError::NoForgeToken)?;
-        let token = SecretService::new(self.pool, self.secret_store)
-            .decrypt_by_id(secret_id)
-            .await?;
-        let auth_remote = auth_https_remote(remote_url, token.trim())?;
-        self.fetch_then_ff_pull(&ctx, &auth_remote, Some(token.trim()))
+        let token = self.decrypt_forge_token_optional(&ctx).await;
+        let fetch_remote = network_remote(remote_url, token.as_deref())?;
+        self.fetch_then_ff_pull(&ctx, &fetch_remote, token.as_deref())
             .await
     }
 
@@ -438,6 +421,14 @@ impl<'a> RepoGitService<'a> {
         Ok(())
     }
 
+    async fn decrypt_forge_token_optional(&self, ctx: &RepoGitContext) -> Option<String> {
+        let secret_id = ctx.forge_token_secret_id?;
+        SecretService::new(self.pool, self.secret_store)
+            .decrypt_by_id(secret_id)
+            .await
+            .ok()
+    }
+
     async fn enforce_pull_gates(&self, ctx: &RepoGitContext) -> Result<(), RepoGitError> {
         let status = self.build_status(ctx).await?;
         if !status.can_pull {
@@ -446,9 +437,6 @@ impl<'a> RepoGitService<'a> {
                 .unwrap_or_else(|| "Pull is not allowed".into());
             if ctx.remote_url.as_deref().map(str::trim).filter(|s| !s.is_empty()).is_none() {
                 return Err(RepoGitError::NoRemoteUrl);
-            }
-            if ctx.forge_token_secret_id.is_none() {
-                return Err(RepoGitError::NoForgeToken);
             }
             return Err(RepoGitError::Git(reason));
         }
@@ -466,9 +454,6 @@ impl<'a> RepoGitService<'a> {
             }
             if ctx.remote_url.as_deref().map(str::trim).filter(|s| !s.is_empty()).is_none() {
                 return Err(RepoGitError::NoRemoteUrl);
-            }
-            if ctx.forge_token_secret_id.is_none() {
-                return Err(RepoGitError::NoForgeToken);
             }
             return Err(RepoGitError::Git(reason));
         }
@@ -735,9 +720,9 @@ mod tests {
         assert_eq!(reason.as_deref(), Some("Fetch remote first"));
 
         let (ok, reason) =
-            default_branch_pull_gate(false, Some("Set a forge token".into()), true, Some(0), Some(1), None, true);
+            default_branch_pull_gate(false, Some("Set repository remote URL".into()), true, Some(0), Some(1), None, true);
         assert!(!ok);
-        assert!(reason.unwrap().contains("forge token"));
+        assert!(reason.unwrap().contains("remote URL"));
 
         let (ok, reason) =
             default_branch_pull_gate(true, None, true, Some(0), Some(1), None, false);

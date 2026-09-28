@@ -9,6 +9,14 @@ pub struct VerifyResult {
     pub error: Option<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InspectPathResult {
+    pub verification: VerifyResult,
+    pub suggested_name: Option<String>,
+    pub remote_url: Option<String>,
+    pub default_branch: Option<String>,
+}
+
 pub fn verify_local_path(path: &Path) -> VerifyResult {
     if path.as_os_str().is_empty() || !path.exists() {
         return VerifyResult {
@@ -49,6 +57,56 @@ pub fn verify_local_path(path: &Path) -> VerifyResult {
             status: VerificationStatus::Error,
             error: Some(err.to_string()),
         },
+    }
+}
+
+/// Probe a local path for registration autofill (name, origin URL, default branch).
+pub fn inspect_local_path(path: &Path) -> InspectPathResult {
+    let verification = verify_local_path(path);
+    let suggested_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .map(str::to_string);
+
+    if verification.status != VerificationStatus::Ready {
+        return InspectPathResult {
+            verification,
+            suggested_name,
+            remote_url: None,
+            default_branch: None,
+        };
+    }
+
+    let remote_url = git_stdout(path, &["remote", "get-url", "origin"]);
+    let default_branch = git_stdout(path, &["symbolic-ref", "--short", "HEAD"])
+        .or_else(|| git_stdout(path, &["rev-parse", "--abbrev-ref", "HEAD"]))
+        .filter(|branch| branch != "HEAD");
+
+    InspectPathResult {
+        verification,
+        suggested_name,
+        remote_url,
+        default_branch,
+    }
+}
+
+fn git_stdout(path: &Path, args: &[&str]) -> Option<String> {
+    let output = Command::new("git")
+        .args(["-C"])
+        .arg(path)
+        .args(args)
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let value = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if value.is_empty() {
+        None
+    } else {
+        Some(value)
     }
 }
 

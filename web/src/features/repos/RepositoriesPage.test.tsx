@@ -51,8 +51,7 @@ vi.mock('./useRepos', () => ({
   useUpdateRepo: () => mutation(mocks.update),
   useDeleteRepo: () => mutation(mocks.remove),
   useVerifyRepo: () => mutation(mocks.verify),
-  useSetForgeToken: () => mutation(mocks.setToken),
-  useClearForgeToken: () => mutation(mocks.clearToken),
+  useInspectRepoPath: () => mutation(vi.fn()),
   useDefaultBranchSync: () => ({ data: undefined, isLoading: false }),
   useFetchDefaultBranch: () => mutation(vi.fn()),
   usePushDefaultBranch: () => mutation(vi.fn()),
@@ -120,7 +119,7 @@ describe('RepositoriesPage', () => {
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 
-  it('opens an edit drawer with forge token, verify, remove, and sync controls', () => {
+  it('opens an edit drawer with verify, remove, and sync controls (no forge token)', () => {
     render(<RepositoriesPage />);
 
     fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
@@ -129,10 +128,10 @@ describe('RepositoriesPage', () => {
     expect(dialog).toBeVisible();
     expect(within(dialog).getByDisplayValue('coppice')).toBeVisible();
     expect(within(dialog).getByDisplayValue('/repos/coppice')).toBeVisible();
-    expect(within(dialog).getByLabelText('Token')).toBeVisible();
+    expect(within(dialog).queryByLabelText('Token')).not.toBeInTheDocument();
     expect(
-      within(dialog).getByRole('button', { name: 'Save token' }),
-    ).toBeVisible();
+      within(dialog).queryByRole('button', { name: 'Save token' }),
+    ).not.toBeInTheDocument();
     expect(within(dialog).getByRole('button', { name: 'Verify' })).toBeVisible();
     expect(within(dialog).getByRole('button', { name: 'Remove' })).toBeVisible();
     expect(within(dialog).getByTestId('default-branch-sync')).toBeVisible();

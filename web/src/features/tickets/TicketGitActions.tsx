@@ -414,7 +414,7 @@ export function TicketGitActions({ ticket }: TicketGitActionsProps) {
               disabled={busy || isLoading || isArchived || !gitInfo?.canPush}
               title={
                 gitInfo?.canPush
-                  ? 'Push ticket branch to origin using the repo forge token'
+                  ? 'Push ticket branch to origin using host git credentials'
                   : (gitInfo?.pushDisabledReason ?? 'Push unavailable')
               }
               onClick={() => void handlePush()}
@@ -422,35 +422,30 @@ export function TicketGitActions({ ticket }: TicketGitActionsProps) {
             >
               {pushBranch.isPending ? 'Pushing…' : 'Push branch'}
             </Button>
-            <Button
-              type="button"
-              variant="secondary"
-              disabled={busy || isLoading || isArchived || !gitInfo?.canCreatePr}
-              title={
-                gitInfo?.canCreatePr
-                  ? 'Push the ticket branch (if needed) and create a GitHub pull request'
-                  : (gitInfo?.createPrDisabledReason ??
-                    gitInfo?.prCreateUrl
-                      ? 'API create unavailable — use compare link if the branch is already pushed'
-                      : 'Create PR unavailable')
-              }
-              onClick={() => void handleCreatePr()}
-              className="w-full"
-            >
-              {createPr.isPending ? 'Creating…' : 'Create PR'}
-            </Button>
-            {gitInfo?.prCreateUrl && !gitInfo.canCreatePr && (
+            {gitInfo?.prCreateUrl && (
               <Button
                 type="button"
                 variant="secondary"
                 disabled={busy || isLoading || isArchived}
-                title="Open compare URL on the git host (branch must already be pushed)"
+                title="Open compare / new PR page on the git host (push the branch first)"
                 onClick={() => {
                   window.open(gitInfo.prCreateUrl!, '_blank', 'noopener,noreferrer');
                 }}
                 className="w-full"
               >
                 Open compare URL
+              </Button>
+            )}
+            {gitInfo?.canCreatePr && (
+              <Button
+                type="button"
+                variant="secondary"
+                disabled={busy || isLoading || isArchived}
+                title="Push the ticket branch (if needed) and create a GitHub pull request via API"
+                onClick={() => void handleCreatePr()}
+                className="w-full"
+              >
+                {createPr.isPending ? 'Creating…' : 'Create PR via API'}
               </Button>
             )}
             <Button

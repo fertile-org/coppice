@@ -9,6 +9,7 @@ use crate::services::repo_git_service::{
     DefaultBranchSyncStatus, PullDefaultBranchResult, PushDefaultBranchResult, RepoGitError,
     RepoGitService,
 };
+use crate::services::repo_verifier::inspect_local_path;
 use crate::services::repo_service::{RepoError, RepoService};
 use crate::AppState;
 use axum::{
@@ -19,6 +20,7 @@ use axum::{
     Json, Router,
 };
 use serde::{Deserialize, Serialize};
+use std::path::Path as FsPath;
 use std::sync::Arc;
 use time::format_description::well_known::Rfc3339;
 use uuid::Uuid;
@@ -26,6 +28,7 @@ use uuid::Uuid;
 pub fn routes() -> Router<Arc<AppState>> {
     Router::new()
         .route("/api/repos", get(list_repos).post(create_repo))
+        .route("/api/repos/inspect-path", post(inspect_path))
         .route(
             "/api/repos/{repo_id}",
             get(get_repo).patch(update_repo).delete(delete_repo),
@@ -106,6 +109,40 @@ struct UpdateRepoBody {
 
 fn default_branch() -> String {
     "main".to_string()
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct InspectPathBody {
+    local_path: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct InspectPathResponse {
+    suggested_name: Option<String>,
+    remote_url: Option<String>,
+    default_branch: Option<String>,
+    verification_status: String,
+    verification_error: Option<String>,
+}
+
+async fn inspect_path(
+    AdminUser(_): AdminUser,
+    Json(body): Json<InspectPathBody>,
+) -> Result<Json<InspectPathResponse>, StatusCode> {
+    let path = body.local_path.trim();
+    if path.is_empty() {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+    let inspected = inspect_local_path(FsPath::new(path));
+    Ok(Json(InspectPathResponse {
+        suggested_name: inspected.suggested_name,
+        remote_url: inspected.remote_url,
+        default_branch: inspected.default_branch,
+        verification_status: verification_status_to_str(inspected.verification.status).to_string(),
+        verification_error: inspected.verification.error,
+    }))
 }
 
 fn repo_to_response(repo: Repo) -> RepoResponse {

@@ -169,9 +169,9 @@ describe('DefaultBranchSyncControls', () => {
           canFetch: false,
           canPush: false,
           canPull: false,
-          fetchDisabledReason: 'Set a forge token in Settings → Repositories',
-          pushDisabledReason: 'Set a forge token in Settings → Repositories',
-          pullDisabledReason: 'Set a forge token in Settings → Repositories',
+          fetchDisabledReason: 'Set repository remote URL in Settings → Repositories',
+          pushDisabledReason: 'Set repository remote URL in Settings → Repositories',
+          pullDisabledReason: 'Set repository remote URL in Settings → Repositories',
         })}
       />,
     );
@@ -180,7 +180,7 @@ describe('DefaultBranchSyncControls', () => {
     expect(fetchBtn).toBeDisabled();
     expect(fetchBtn).toHaveAttribute(
       'title',
-      'Set a forge token in Settings → Repositories',
+      'Set repository remote URL in Settings → Repositories',
     );
   });
 

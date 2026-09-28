@@ -38,6 +38,12 @@ Host `config.toml` does not affect the Docker server. Do not run `make migrate` 
 
 Login APIs remain available for tools and future cloud hosting.
 
+### Repositories (desktop)
+
+- Electron shell exposes **Browse…** for local checkouts (`window.coppiceDesktop.pickDirectory`).
+- Pull / push / fetch use the checkout’s configured `origin` (SSH agent or credential helper). A stored forge token is optional and only used when present (legacy / API Create PR).
+- Ticket **Open compare URL** is the primary PR path; API Create PR stays available only when a forge token is configured.
+
 ## Default Docker stack (agents / smoke)
 
 ```bash

@@ -70,7 +70,7 @@ make desktop
 
 Default URL: `http://127.0.0.1:5001`. Override with `COPPICE_WEB_URL=...`. Smoke: `make desktop-test`.
 
-On Linux, the dev shell sets `ELECTRON_DISABLE_SANDBOX=1` so Electron does not require a root-owned `chrome-sandbox` binary. Packaged releases will use a proper sandbox setup.
+On Linux, the dev shell sets `ELECTRON_DISABLE_SANDBOX=1` so Electron does not require a root-owned `chrome-sandbox` binary. Packaged releases will use a proper sandbox setup. The shell preload (`desktop/preload.cjs`) exposes `window.coppiceDesktop.pickDirectory()` for Repositories **Browse…**.
 
 Bundled desktop (installers, auto-start DB/API) is **not** implemented yet — see **Desktop release** and **Desktop install** below.
 

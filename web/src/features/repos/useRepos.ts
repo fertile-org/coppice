@@ -129,6 +129,27 @@ async function pullDefaultBranch(
   return res.json() as Promise<PullDefaultBranchResult>;
 }
 
+async function inspectRepoPath(localPath: string): Promise<{
+  suggestedName: string | null;
+  remoteUrl: string | null;
+  defaultBranch: string | null;
+  verificationStatus: string;
+  verificationError: string | null;
+}> {
+  const res = await apiFetch('/api/repos/inspect-path', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ localPath }),
+  });
+  return res.json();
+}
+
+export function useInspectRepoPath() {
+  return useMutation({
+    mutationFn: inspectRepoPath,
+  });
+}
+
 export function useRepos() {
   return useQuery({
     queryKey: REPOS_QUERY_KEY,

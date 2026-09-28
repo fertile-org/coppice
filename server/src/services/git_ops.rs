@@ -14,11 +14,9 @@ pub enum GitOpsError {
 }
 
 /// Config / forge gate shared by ticket push and default-branch push.
-pub fn push_gate(
-    push_enabled: bool,
-    remote_url: Option<&str>,
-    forge_token_configured: bool,
-) -> (bool, Option<String>) {
+/// Network ops use host git credentials (SSH agent / credential helper) unless a
+/// forge token is optionally embedded; a token is **not** required to enable push.
+pub fn push_gate(push_enabled: bool, remote_url: Option<&str>) -> (bool, Option<String>) {
     if !push_enabled {
         return (
             false,
@@ -31,30 +29,15 @@ pub fn push_gate(
             Some("Set repository remote URL in Settings → Repositories".into()),
         );
     }
-    if !forge_token_configured {
-        return (
-            false,
-            Some("Set a forge token in Settings → Repositories".into()),
-        );
-    }
     (true, None)
 }
 
-/// Fetch needs remote + token only (not `git.push_enabled`).
-pub fn fetch_gate(
-    remote_url: Option<&str>,
-    forge_token_configured: bool,
-) -> (bool, Option<String>) {
+/// Fetch needs a configured remote only (not `git.push_enabled` or a forge token).
+pub fn fetch_gate(remote_url: Option<&str>) -> (bool, Option<String>) {
     if remote_url.map(str::trim).filter(|s| !s.is_empty()).is_none() {
         return (
             false,
             Some("Set repository remote URL in Settings → Repositories".into()),
-        );
-    }
-    if !forge_token_configured {
-        return (
-            false,
-            Some("Set a forge token in Settings → Repositories".into()),
         );
     }
     (true, None)
@@ -77,6 +60,19 @@ pub fn auth_https_remote(remote_url: &str, token: &str) -> Result<String, GitOps
         token.trim(),
         https.trim_start_matches("https://")
     ))
+}
+
+/// Remote argument for fetch/push: tokenized HTTPS when a forge token is set,
+/// otherwise the checkout's configured `origin` (SSH / credential helper).
+pub fn network_remote(remote_url: &str, forge_token: Option<&str>) -> Result<String, GitOpsError> {
+    if let Some(token) = forge_token.map(str::trim).filter(|t| !t.is_empty()) {
+        auth_https_remote(remote_url, token)
+    } else {
+        let _ = https_remote_url(remote_url).ok_or_else(|| {
+            GitOpsError::Git("repository remote_url is not a valid HTTPS/SSH git remote".into())
+        })?;
+        Ok("origin".to_string())
+    }
 }
 
 pub fn push_refspec(branch: &str) -> String {
@@ -260,17 +256,24 @@ mod tests {
 
     #[test]
     fn push_gate_reasons() {
-        assert!(!push_gate(false, Some("https://github.com/o/r"), true).0);
-        assert!(!push_gate(true, None, true).0);
-        assert!(!push_gate(true, Some("https://github.com/o/r"), false).0);
-        assert!(push_gate(true, Some("https://github.com/o/r"), true).0);
+        assert!(!push_gate(false, Some("https://github.com/o/r")).0);
+        assert!(!push_gate(true, None).0);
+        assert!(push_gate(true, Some("https://github.com/o/r")).0);
     }
 
     #[test]
     fn fetch_gate_ignores_push_enabled() {
-        assert!(fetch_gate(Some("https://github.com/o/r"), true).0);
-        assert!(!fetch_gate(None, true).0);
-        assert!(!fetch_gate(Some("https://github.com/o/r"), false).0);
+        assert!(fetch_gate(Some("https://github.com/o/r")).0);
+        assert!(!fetch_gate(None).0);
+    }
+
+    #[test]
+    fn network_remote_uses_origin_without_token() {
+        let remote = network_remote("https://github.com/o/r.git", None).unwrap();
+        assert_eq!(remote, "origin");
+        let authed =
+            network_remote("https://github.com/o/r.git", Some("ghs_secret")).unwrap();
+        assert!(authed.contains("x-access-token:ghs_secret@"));
     }
 
     #[test]
