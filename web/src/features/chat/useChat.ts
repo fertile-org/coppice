@@ -179,6 +179,8 @@ export function useChatSessions(projectId?: string | null) {
   return useQuery({
     queryKey: [...CHAT_SESSIONS_QUERY_KEY, projectId ?? null],
     queryFn: () => fetchSessions(projectId),
+    refetchInterval: (query) =>
+      query.state.data?.some((session) => session.hasActiveRun) ? 3000 : false,
   });
 }
 

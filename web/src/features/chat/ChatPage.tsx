@@ -1,3 +1,4 @@
+import { useQueryClient } from '@tanstack/react-query';
 import { MessageSquarePlus, Paperclip, X } from 'lucide-react';
 import {
   useCallback,
@@ -17,21 +18,23 @@ import {
   formatFileSize,
   isImageContentType,
 } from '../../lib/attachments';
+import { filterChatSessions } from '../../lib/chatSessionSearch';
 import type { ChatSession, ChatSessionStatus } from '../../lib/schemas/chat';
 import { cn } from '../../lib/utils';
 import { useAgents } from '../agents/useAgents';
 import { useProjects } from '../projects/useProjects';
 import { useUploadAttachment } from '../tickets/useTicket';
-import { ChatLiveTurn } from './ChatLiveTurn';
 import { ChatMessageList } from './ChatMessageList';
 import { ChatSessionActions } from './ChatSessionActions';
 import {
+  CHAT_SESSIONS_QUERY_KEY,
   useChatMessages,
   useChatSession,
   useChatSessions,
   useCreateChatSession,
   usePostChatMessage,
 } from './useChat';
+import { useChatRunLiveStream } from './useChatRunLiveStream';
 
 const CHAT_ATTACHMENT_ACCEPT =
   'image/png,image/jpeg,image/gif,image/webp,text/plain,text/markdown,text/csv,application/json,application/pdf,.md,.csv,.json,.pdf,.txt,.png,.jpg,.jpeg,.gif,.webp';
@@ -113,9 +116,18 @@ function SessionListItem({
       <div className="font-body text-sm font-medium text-text-primary">
         {agentName}
       </div>
-      <div className="mt-0.5 font-body text-xs text-text-secondary">
-        {formatSessionTime(session.updatedAt)} · {session.status}
+      <div className="mt-0.5 flex flex-wrap items-center gap-x-1.5 font-body text-xs text-text-secondary">
+        {session.hasActiveRun ? (
+          <span className="text-moss-700" data-testid="chat-session-active">
+            Replying…
+          </span>
+        ) : null}
+        <span>{formatSessionTime(session.updatedAt)}</span>
       </div>
+      <p className="truncate font-body text-xs text-text-muted">
+        {session.lastMessageRole === 'human' ? 'You: ' : ''}
+        {session.lastMessagePreview || 'No messages yet'}
+      </p>
     </Link>
   );
 }
@@ -427,14 +439,22 @@ function ChatComposer({
 }
 
 function ChatSessionPane({ sessionId }: { sessionId: string }) {
+  const queryClient = useQueryClient();
   const { data: agents = [] } = useAgents();
   const { data: session } = useChatSession(sessionId);
   const [activeRunId, setActiveRunId] = useState<string | null>(null);
-  const awaiting = Boolean(activeRunId);
+  const awaiting = Boolean(activeRunId) || Boolean(session?.hasActiveRun);
 
   const { data: messages = [], refetch } = useChatMessages(sessionId, {
     refetchInterval: awaiting ? 1500 : false,
   });
+
+  useEffect(() => {
+    if (activeRunId) return;
+    if (session?.hasActiveRun && session.activeRunId) {
+      setActiveRunId(session.activeRunId);
+    }
+  }, [activeRunId, session?.hasActiveRun, session?.activeRunId]);
 
   const agentName =
     agents.find((agent) => agent.id === session?.agentId)?.name ?? 'Agent';
@@ -442,7 +462,14 @@ function ChatSessionPane({ sessionId }: { sessionId: string }) {
   const onLiveFinished = useCallback(() => {
     setActiveRunId(null);
     void refetch();
-  }, [refetch]);
+    void queryClient.invalidateQueries({ queryKey: CHAT_SESSIONS_QUERY_KEY });
+  }, [queryClient, refetch]);
+
+  const live = useChatRunLiveStream(activeRunId, { onFinished: onLiveFinished });
+
+  const streamingAgent = activeRunId
+    ? { runId: activeRunId, text: live.text, error: live.error }
+    : undefined;
 
   const cutoff = session?.status === 'cutoff' || session?.status === 'archived';
 
@@ -477,10 +504,8 @@ function ChatSessionPane({ sessionId }: { sessionId: string }) {
         <ChatMessageList
           messages={messages}
           thinking={awaiting && !activeRunId}
+          streamingAgent={streamingAgent}
         />
-        {activeRunId ? (
-          <ChatLiveTurn runId={activeRunId} onFinished={onLiveFinished} />
-        ) : null}
       </div>
 
       {cutoff ? (
@@ -510,12 +535,18 @@ export function ChatPage() {
   const { data: agents = [] } = useAgents();
   const { data: sessions = [], isLoading } = useChatSessions();
   const [showNew, setShowNew] = useState(!sessionId);
+  const [search, setSearch] = useState('');
 
   const agentNameById = useMemo(() => {
     const map = new Map<string, string>();
     for (const agent of agents) map.set(agent.id, agent.name);
     return map;
   }, [agents]);
+
+  const visibleSessions = useMemo(
+    () => filterChatSessions(sessions, agentNameById, search),
+    [sessions, agentNameById, search],
+  );
 
   return (
     <div
@@ -549,17 +580,30 @@ export function ChatPage() {
         data-testid="chat-layout-grid"
       >
         <aside
-          className="min-h-0 space-y-2 overflow-y-auto lg:h-full lg:max-h-full lg:self-stretch"
+          className="flex min-h-0 flex-col gap-2 overflow-hidden lg:h-full lg:max-h-full lg:self-stretch"
           aria-label="Chat sessions"
           data-testid="chat-session-list"
         >
+          <input
+            type="search"
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            placeholder="Search chats…"
+            aria-label="Search chat sessions"
+            className="shrink-0 rounded-md border border-border bg-surface-raised px-2.5 py-1.5 font-body text-sm text-text-primary placeholder:text-text-muted"
+            data-testid="chat-session-search"
+          />
+          <div className="min-h-0 flex-1 space-y-2 overflow-y-auto">
           {isLoading && (
             <p className="font-body text-sm text-text-muted">Loading sessions…</p>
           )}
           {!isLoading && sessions.length === 0 && (
             <p className="font-body text-sm text-text-muted">No chats yet.</p>
           )}
-          {sessions.map((session) => (
+          {!isLoading && sessions.length > 0 && visibleSessions.length === 0 && (
+            <p className="font-body text-sm text-text-muted">No matching chats.</p>
+          )}
+          {visibleSessions.map((session) => (
             <SessionListItem
               key={session.id}
               session={session}
@@ -567,6 +611,7 @@ export function ChatPage() {
               active={session.id === sessionId}
             />
           ))}
+          </div>
         </aside>
 
         <section className="flex min-h-0 min-w-0 flex-col overflow-hidden lg:h-full">

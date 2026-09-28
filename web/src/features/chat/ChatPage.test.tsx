@@ -1,5 +1,6 @@
 import '@testing-library/jest-dom/vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiError } from '../../lib/api';
@@ -32,6 +33,10 @@ const mocks = vi.hoisted(() => ({
     agentId: string;
     repoId: string | null;
     status: 'active' | 'archived' | 'cutoff';
+    lastMessagePreview?: string;
+    lastMessageRole?: 'human' | 'agent' | 'system';
+    hasActiveRun?: boolean;
+    activeRunId?: string | null;
     createdAt: string;
     updatedAt: string;
   }>,
@@ -96,6 +101,7 @@ vi.mock('../tickets/useTicket', () => ({
 }));
 
 vi.mock('./useChat', () => ({
+  CHAT_SESSIONS_QUERY_KEY: ['chat-sessions'],
   useChatSessions: () => ({
     data: mocks.sessions,
     isLoading: false,
@@ -134,21 +140,33 @@ vi.mock('./useChat', () => ({
   }),
 }));
 
-vi.mock('./ChatLiveTurn', () => ({
-  ChatLiveTurn: ({ runId }: { runId: string }) => (
-    <div data-testid="chat-live-turn">live:{runId}</div>
-  ),
+vi.mock('./useChatRunLiveStream', () => ({
+  useChatRunLiveStream: (runId: string | null) => ({
+    text: runId ? 'Partial…' : '',
+    connection: 'open' as const,
+    error: null,
+    finished: false,
+    store: null,
+    consoleEntries: [],
+    awaiting: false,
+    thinkingLabel: 'Thinking…',
+    hasOpenCode: false,
+    hasConsole: false,
+  }),
 }));
 
 function renderChat(path = '/chat') {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
-    <MemoryRouter initialEntries={[path]}>
-      <Routes>
-        <Route path="/chat" element={<ChatPage />} />
-        <Route path="/chat/:sessionId" element={<ChatPage />} />
-        <Route path="/knowledge" element={<div>Knowledge inbox</div>} />
-      </Routes>
-    </MemoryRouter>,
+    <QueryClientProvider client={client}>
+      <MemoryRouter initialEntries={[path]}>
+        <Routes>
+          <Route path="/chat" element={<ChatPage />} />
+          <Route path="/chat/:sessionId" element={<ChatPage />} />
+          <Route path="/knowledge" element={<div>Knowledge inbox</div>} />
+        </Routes>
+      </MemoryRouter>
+    </QueryClientProvider>,
   );
 }
 
@@ -159,6 +177,8 @@ const ACTIVE_SESSION = {
   agentId: '00000000-0000-4000-8000-000000000010',
   repoId: null,
   status: 'active' as const,
+  lastMessagePreview: 'Prior message',
+  hasActiveRun: false,
   createdAt: '2026-09-08T00:00:00Z',
   updatedAt: '2026-09-08T00:00:00Z',
 };
@@ -190,6 +210,27 @@ describe('ChatPage', () => {
         static revokeObjectURL = vi.fn();
       },
     );
+  });
+
+  it('filters sessions with sidebar search', () => {
+    mocks.sessions = [
+      ACTIVE_SESSION,
+      {
+        ...ACTIVE_SESSION,
+        id: '00000000-0000-4000-8000-000000000099',
+        agentId: '00000000-0000-4000-8000-000000000011',
+        lastMessagePreview: 'other topic',
+      },
+    ];
+    renderChat('/chat');
+
+    const list = screen.getByTestId('chat-session-list');
+    expect(within(list).getAllByRole('link').length).toBe(2);
+    fireEvent.change(screen.getByTestId('chat-session-search'), {
+      target: { value: 'backend' },
+    });
+    expect(within(list).getByText('Backend Engineer')).toBeInTheDocument();
+    expect(within(list).queryByText('other topic')).not.toBeInTheDocument();
   });
 
   it('shows new-chat controls for agent and optional project', () => {
@@ -280,7 +321,8 @@ describe('ChatPage', () => {
 
     renderChat('/chat/00000000-0000-4000-8000-000000000001');
 
-    expect(await screen.findByText('Prior message')).toBeInTheDocument();
+    const transcript = await screen.findByTestId('chat-message-list');
+    expect(within(transcript).getByText('Prior message')).toBeInTheDocument();
     expect(screen.getByTestId('chat-session-pane')).toBeInTheDocument();
     expect(screen.getByTestId('chat-session-status')).toHaveTextContent(
       'Active',
@@ -297,9 +339,9 @@ describe('ChatPage', () => {
         body: 'What is cwd?',
       });
     });
-    expect(await screen.findByTestId('chat-live-turn')).toHaveTextContent(
-      'live:00000000-0000-4000-8000-000000000040',
-    );
+    expect(await screen.findByTestId('chat-streaming-bubble')).toBeInTheDocument();
+    expect(screen.queryByTestId('chat-live-turn')).toBeNull();
+    expect(screen.getByText(/Partial/)).toBeInTheDocument();
   });
 
   it('fills available height instead of a fixed 70vh/720px pane', () => {
@@ -322,7 +364,8 @@ describe('ChatPage', () => {
 
     const list = screen.getByTestId('chat-session-list');
     expect(list).toHaveClass('min-h-0');
-    expect(list).toHaveClass('overflow-y-auto');
+    expect(list).toHaveClass('overflow-hidden');
+    expect(list.querySelector('.overflow-y-auto')).toBeTruthy();
     expect(list).toHaveClass('lg:h-full');
 
     const grid = screen.getByTestId('chat-layout-grid');
@@ -822,7 +865,8 @@ describe('ChatPage', () => {
     await waitFor(() => {
       expect(mocks.postMessage).toHaveBeenCalledWith({ body: 'First' });
     });
-    expect(await screen.findByTestId('chat-live-turn')).toBeInTheDocument();
+    expect(await screen.findByTestId('chat-streaming-bubble')).toBeInTheDocument();
+    expect(screen.queryByTestId('chat-live-turn')).toBeNull();
 
     mocks.postMessage.mockClear();
     const disabledInput = screen.getByLabelText('Message');
