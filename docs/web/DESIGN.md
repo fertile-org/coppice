@@ -122,6 +122,10 @@ color: var(--color-text-primary);
 border: 1px solid var(--color-border);
 ```
 
+## Agent Chat transcript
+
+Agent Chat uses the same moss agent bubbles for streaming and final replies. Live runs stream inside the virtualized transcript row; the chat column does not use a separate below-list console block for conversation turns.
+
 ## What we are NOT
 
 - Purple gradients on white
