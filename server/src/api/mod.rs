@@ -15,6 +15,7 @@ mod notifications;
 mod projects;
 mod repos;
 mod tickets;
+mod tools;
 mod users;
 
 use axum::{middleware, Router};
@@ -43,6 +44,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .merge(knowledge::routes())
         .merge(users::routes())
         .merge(notifications::routes())
+        .merge(tools::routes())
         .layer(middleware::from_fn(csrf::csrf_middleware))
         .layer(middleware::from_fn_with_state(state.clone(), session::session_middleware));
 

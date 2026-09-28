@@ -1,0 +1,14 @@
+{
+  "name": "coppice-desktop",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Dev Electron shell — loads local Coppice web UI",
+  "main": "main.mjs",
+  "scripts": {
+    "start": "electron .",
+    "test": "node --test electron-smoke.test.mjs"
+  },
+  "devDependencies": {
+    "electron": "^35.0.0"
+  }
+}

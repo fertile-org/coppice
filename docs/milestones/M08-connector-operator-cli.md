@@ -120,5 +120,5 @@ cli/src/commands/connector/
 ## Related docs
 
 - [docs/providers/README.md](../providers/README.md) — Docker Compose (managed connectors)
-- [docs/development.md](../development.md)
+- [docs/operations.md](../operations.md)
 - `cli/`, `deploy/docker-compose.yml`, `deploy/Dockerfile.server`

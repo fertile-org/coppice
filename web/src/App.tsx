@@ -20,6 +20,7 @@ import { UsersPage } from './features/users/UsersPage';
 import { CodeReviewPage } from './features/code/CodeReviewPage';
 import { ChatPage } from './features/chat/ChatPage';
 import { KnowledgePage } from './features/knowledge/KnowledgePage';
+import { ToolsPage } from './features/tools/ToolsPage';
 import { useOpenTicket } from './features/tickets/useOpenTicket';
 import {
   useEventSocket,
@@ -82,6 +83,7 @@ function App() {
                   element={<RepositoriesPage />}
                 />
                 <Route path="/settings/users" element={<UsersPage />} />
+                <Route path="/tools" element={<ToolsPage />} />
               </Route>
               <Route path="/code" element={<CodeReviewPage />} />
             </Route>

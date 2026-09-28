@@ -3,6 +3,7 @@ pub mod agent_request;
 pub mod agent_service;
 pub mod artifact_service;
 pub mod auth_service;
+pub mod backup_service;
 pub mod chat_cwd;
 pub mod chat_service;
 pub mod code_review_service;

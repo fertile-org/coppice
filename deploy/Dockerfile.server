@@ -11,7 +11,7 @@ RUN corepack enable && corepack prepare yarn@1.22.22 --activate
 
 FROM debian:bookworm-slim
 RUN apt-get update && apt-get install -y \
-    ca-certificates curl git gosu make \
+    ca-certificates curl git gosu make postgresql-client \
     build-essential pkg-config \
     && rm -rf /var/lib/apt/lists/*
 

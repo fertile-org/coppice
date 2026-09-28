@@ -38,6 +38,10 @@ fs4 = { version = "0.13", optional = true }
 dirs = "6"
 aes-gcm = "0.11.0"
 base64 = "0.23.1"
+toml = "0.8"
+walkdir = "2"
+zip = "2"
+tempfile = "3"
 
 [features]
 embedded-test-db = ["dep:pg-embed", "dep:fs4"]

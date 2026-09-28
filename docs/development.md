@@ -1,272 +1,184 @@
-# Development Guide
+# Development, release, and install
 
-## Prerequisites
+Single guide for day-to-day development, shipping versions, and how end users get Coppice. Deeper operator topics (Compose for agents, knowledge modes, Makefile catalog) live in [operations.md](operations.md). Testing: [testing.md](testing.md).
 
-- Rust (stable) + `cargo`
-- `cargo-watch` for local API hot reload (`cargo install cargo-watch`)
-- Node.js 22 + Yarn (`corepack enable` or `brew install yarn`)
-- Docker + Compose (`docker compose` plugin or `docker-compose` standalone)
+---
 
-## Configuration
+## Local development
 
-Coppice uses TOML config files — not `.env` files.
+### Dependencies
 
-| Location | Priority | Purpose |
-|----------|----------|---------|
-| Built-in defaults | lowest | Sensible defaults in `coppice-config` |
-| `~/.config/coppice/config.toml` | middle | Per-user global settings (host installs) |
-| `./config.toml` (cwd) | higher | Host / hot-reload overrides (gitignored; from root `config.example.toml`) |
-| `deploy/config/config.toml` | Docker | Compose bind-mount (gitignored; from `deploy/config/config.example.toml`) |
-| `COPPICE_CONFIG` file | higher | Explicit file path |
-| Environment variables | highest | Container overrides (`DATABASE_URL`, `COPPICE_*`, …) |
+| Tool | Purpose |
+|------|---------|
+| Rust (stable) + `cargo` | API, CLI |
+| `cargo-watch` | `make server-dev` hot reload (`cargo install cargo-watch`) |
+| Node.js 22 + Yarn | Web SPA (`corepack enable` or install Yarn) |
+| Docker + Compose | Postgres, embedder, and/or full stack |
 
-**Host / hot-reload:**
+### Configuration (minimal)
 
-```bash
-cp config.example.toml config.toml
-```
+Coppice uses **TOML**, not `.env`.
 
-**Docker Compose:**
+- **Human hot reload:** `cp config.example.toml config.toml` — host API reads this; point `database.url` at local Postgres (`localhost:5433` with `make compose-local-up`). Root `config.example.toml` defaults knowledge embedding to the local Ollama sidecar on `http://127.0.0.1:11434/v1`.
+- **Docker stack:** `deploy/config/config.toml` (created from `deploy/config/config.example.toml` on `make compose-up`).
 
-```bash
-cp deploy/config/config.example.toml deploy/config/config.toml
-```
+See [operations.md — Configuration](operations.md#configuration) for paths, env overrides, and field reference.
 
-`make compose-up` creates `deploy/config/config.toml` from the example when missing. After editing that file, recreate the server (no image rebuild): `docker compose -f deploy/docker-compose.yml up -d --force-recreate server`.
+### Path A — Human hot reload (recommended for UI/API work)
 
-Key fields for local host dev (`./config.toml`):
-
-| Field | Purpose |
-|-------|---------|
-| `database.url` | Host → Docker Postgres on `localhost:5433` |
-| `server.port` | API listen port (`5000`) |
-| `auth.session_secret` | Session cookie signing |
-| `auth.bootstrap_password` | Shared secret for the HTTP `/api/auth/bootstrap` gate |
-| `auth.bootstrap_admin_email` | Optional: auto-create this admin on server start if users is empty |
-| `auth.bootstrap_admin_password` | Optional: login password for auto-created admin |
-| `storage.artifacts_dir` | Upload storage on host |
-| `agent.worktrees_path` | Agent worktrees on host |
-| `knowledge.embedding` | Provider/model and fixed migrated vector dimension |
-| `knowledge.retrieval` | Confidence, stable top-k/page bounds, and scope capacities |
-| `knowledge.context_budget` | Total and per-section token budgets for Full runs |
-
-Docker Compose bind-mounts `deploy/config/config.toml` at `COPPICE_CONFIG=/etc/coppice/config.toml`, plus env overrides in `deploy/docker-compose.yml`. The server container does **not** read the repo-root `config.toml`.
-
-### Agent stack vs human `config.toml`
-
-| | Agent / CI (`make compose-up`) | Human hot reload (`compose-local-up` + host API) |
-|--|--|--|
-| Postgres port | 5432 | 5433 |
-| Embedder | Ollama `:11434` (profile `embeddings`) | Same sidecar on host `:11434` |
-| API | Docker `:5000` | Host `:5000` |
-| Config source | `deploy/config/config.toml` + compose env | `./config.toml` on the host |
-| Migrations | Server auto-migrates on container start | `make migrate` (reads `config.toml`) |
-
-Your gitignored repo-root `config.toml` (e.g. `database.url` → `:5433`) applies only to **host** CLI and `coppice-server` when run on the host. It does not affect the Docker server. Avoid running host `make migrate` against the agent stack unless you override the URL, e.g. `DATABASE_URL=postgres://coppice:coppice@localhost:5432/coppice make migrate` — otherwise you may migrate the wrong database.
-
-## Local development (human)
-
-Postgres runs in Docker on port **5433**. The Ollama embedder sidecar listens on host **:11434** (Compose profile `embeddings`, Makefile default). API and web run on the host for hot reload.
+Postgres in Docker on **5433**; Ollama embedder on host **:11434** (`make compose-local-up`, profile `embeddings`). API and web on the host.
 
 ```bash
 cp config.example.toml config.toml
 
-# Step 1 — Database
 make compose-local-up
 make migrate
 
-# Step 2 — API (separate terminal)
+# Terminal 2
 make server-dev
-make bootstrap   # first time only (host config has no auto-bootstrap by default)
+make bootstrap    # first time only
 
-# Step 3 — Web (separate terminal)
+# Terminal 3
 make web-dev
 ```
 
-- API: http://localhost:5000/health
-- Web: http://localhost:5001 — login `admin@localhost` / `changeme`
+- API: http://localhost:5000/health  
+- Web: http://localhost:5001 (default login `admin@localhost` / `changeme` after bootstrap)  
+- Stop Postgres + embedder: `make compose-local-down`  
+- First `compose-local-up` may pull `nomic-embed-text` (~274MB). Opt out: `COMPOSE_PROFILES= make compose-local-up`.
 
-Tear down Postgres + embedder: `make compose-local-down`. First `compose-local-up` may take several minutes while Ollama pulls `nomic-embed-text` (~274MB). Opt out: `COMPOSE_PROFILES= make compose-local-up`.
-
-## Release / installed binary
+### Path B — Full stack in Docker (agents / smoke / production-like web)
 
 ```bash
-cp config.example.toml config.toml   # or ~/.config/coppice/config.toml
-coppice migrate
-coppice bootstrap admin --email admin@localhost --password changeme
-coppice server start   # API
-coppice web start      # SPA + /api proxy (recommended for self-hosting)
+make compose-up
 ```
 
-| Command | Role |
-|---------|------|
-| `coppice server start` | Runs `coppice-server` (API + workers) |
-| `coppice web start` | Serves `web/dist` and proxies `/api` to the API |
+- Web: http://localhost:5001 (nginx + built SPA, proxies `/api` and `/ws`)  
+- API: http://localhost:5000  
+- Stop: `make compose-down`
 
-Set `COPPICE_SERVER_BIN` to override the API binary path.
+Agents and CI use this path only — see [AGENTS.md](../AGENTS.md) and [operations.md](operations.md).
 
-**systemd:** example units in `deploy/systemd/`.
+### Path C — Desktop shell (development only)
 
-## Default stack (agents / smoke tests)
+Electron window around the running web UI. **Does not** start Postgres or the API.
 
 ```bash
-make compose-up    # copies deploy/config/config.toml if missing; auto-migrates + auto-bootstraps admin
+# Start Path A or B first, then:
+cd desktop
+npm install
+npm start
 ```
 
-`make compose-up` enables Compose profile `embeddings` (Makefile default). That starts the **Ollama embedder sidecar** beside Postgres/server/web and points the server at it (`openai_compatible` → `nomic-embed-text`, dimension `768`). First boot pulls the model (~274MB, often 1–5+ minutes); weights persist in the `ollama_data` volume. The API does **not** wait on embedder health — knowledge embed jobs fail until the sidecar is ready. Opt out with `COMPOSE_PROFILES= make compose-up` (no Ollama container). Human hot reload (`make compose-local-up`) starts the same sidecar on host `:11434`; root `config.example.toml` points at `http://127.0.0.1:11434/v1`.
+Default URL: `http://127.0.0.1:5001`. Override with `COPPICE_WEB_URL=...`. Smoke: `cd desktop && npm test`.
 
-The **web** service is a production image: `yarn build` then **nginx** on `:5001` (static SPA, proxies `/api` and `/ws` to `server:5000`). For UI hot reload, use the human path (`make web-dev`), not Compose web.
+Bundled desktop (installers, auto-start DB/API) is **not** implemented yet — see **Desktop release** and **Desktop install** below.
 
-Docker config (`deploy/config/config.toml`, from `config.example.toml` in that folder) can set `auth.bootstrap_admin_email` / `auth.bootstrap_admin_password`. Host installs without those fields still use `make bootstrap` (or `coppice bootstrap admin`) once.
+---
 
-Tear down: `make compose-down`
+## Release (build and publish)
 
-Always use Docker Compose via the Makefile — not standalone `docker run`.
+### Self-host tarball (server + web + CLI)
 
-### Agent dev toolchain
-
-The default **server** image ships build/verification tools so Cursor (and other real connectors) can run Coppice checks from a ticket worktree inside the container. Vendor CLIs (`agent`, `claude`, …) are **not** baked in — install those via the managed `/home/coppice` volume per [M08](milestones/M08-connector-operator-cli.md).
-
-| Tool | Version / source |
-|------|------------------|
-| `cargo` / `rustc` | 1.88 (copied from `rust:1.88-bookworm` builder stage) |
-| `make` | Debian `bookworm-slim` |
-| `node` / `npm` | 22 (`node:22-bookworm` stage) |
-| `yarn` | 1.22.22 (corepack) |
-
-Compose prepends `/usr/local/cargo/bin` to `PATH` (see `deploy/docker-compose.yml`) so agent child processes inherit `cargo`/`rustc` alongside connector binaries under `$HOME/.local/bin`.
-
-From a Coppice worktree mounted or checked out inside the server container:
+**Build** (from repo root):
 
 ```bash
-cargo --version && make --version && node --version && yarn --version
-make test-unit
+make test
+make clippy
 make web-test
-```
-
-**Image size** (measure after `docker compose -f deploy/docker-compose.yml build server` with `docker image inspect deploy-server --format '{{.Size}}'`; expected ranges from ticket sizing analysis):
-
-| Image | Size |
-|-------|------|
-| Baseline runtime (slim Debian + Coppice binaries only) | ~200–250 MB |
-| After dev toolchain (Rust + Node + build-essential) | ~800 MB–1.2 GB |
-
-Breakdown: +500–900 MB Rust std/toolchain, +100–150 MB Node, +150–250 MB build-essential/make. Build-time delta: +1–3 min for extra COPY/apt layers; the Rust release compile in the `builder` stage is unchanged.
-
-**Runtime caveats:**
-
-- First `make test-unit` in a worktree compiles the workspace (`target/` under the worktree volume bind-mount).
-- First run with `embedded-test-db` may download pg-embed binaries (requires outbound network; fails closed in air-gapped deploys).
-- After a full verification pass, run `make clean` in the worktree to reclaim disk (see [Disk usage / cleanup](#disk-usage--cleanup)).
-
-### Host repos for agents
-
-The server bind-mounts host git checkouts at `/repos`:
-
-| Env / path | Meaning |
-|------------|---------|
-| `COPPICE_REPOS_HOST` | Host directory (default `$HOME/coppice/repos`) |
-| `/repos/<name>` | Path to register in Settings → Repositories |
-| `COPPICE_UID` / `COPPICE_GID` | Host user the API runs as (default `1000`; `make compose-up` uses `id -u` / `id -g`) |
-
-Clone or symlink projects into that host directory, then register `/repos/<name>` (the in-container path). Coppice creates worktrees under `/data/worktrees`; it does not `git clone` from `remote_url`.
-
-The server entrypoint starts as root only long enough to `chown` `/data/*` volumes, then drops to `COPPICE_UID`/`COPPICE_GID` so Git ownership matches the bind mount and new files under `/repos` stay yours on the host. If an older root-owned run left files behind: `sudo chown -R "$(id -u):$(id -g)" ~/coppice/repos`.
-
-To use a real connector (Cursor, OpenCode, …), follow that connector’s **One-time setup** in [docs/providers/](providers/README.md) (run `coppice connector …` on the **server** container).
-
-### Host port overrides
-
-The default stack binds host ports 5432 / 5000 / 5001. If another project owns one of them (common on busy dev machines), override the host-side mapping without touching the file:
-
-```bash
-COPPICE_PG_PORT=55432 \
-COPPICE_SERVER_PORT=15000 \
-COPPICE_WEB_PORT=15001 \
-COPPICE_API_URL=http://localhost:15000 \
-COPPICE_WEB_URL=http://localhost:15001 \
-  make e2e-smoke
-```
-
-Only the host-side mapping changes; container-internal ports and the `postgres` service DNS are unaffected, so `DATABASE_URL` inside the stack stays the same. The smoke scripts read `COPPICE_API_URL` / `COPPICE_WEB_URL` (defaults `:5000` / `:5001`), so set those to match when you move the server/web ports.
-
-## Makefile targets
-
-| Target | What it does |
-|--------|----------------|
-| `make compose-local-up` | Start local Postgres (5433) + Ollama embedder (11434) |
-| `make compose-local-down` | Stop local Postgres + embedder |
-| `make server-dev` | API with `cargo watch` (hot reload) |
-| `make compose-up` | Default Docker stack (agents / CI) |
-| `make compose-down` | Stop default stack |
-| `make migrate` | `coppice migrate` (reads `config.toml` on host) |
-| `make bootstrap` | `coppice bootstrap admin` |
-| `make web-dev` | Host Vite hot reload (proxies to `:5000`); Compose web uses nginx instead |
-| `make test` | Full Rust suite (`cargo test --workspace --features embedded-test-db`) |
-| `make test-unit` | Lib tests only — use during agent runs (~5–15s warm) |
-| `make test-smoke` | Lib + smoke integration (`health`, `integration_comments`, `integration_tickets`) |
-| `make test-pg-reset` | Clear shared embedded Postgres session file |
-| `make clippy` | `cargo clippy --workspace -- -D warnings` |
-| `make clean` | `cargo clean` — remove `target/` build cache |
-| `make e2e-smoke-m06` | Context long-running smoke (`continued` + pending splits) |
-| `make e2e-smoke-m06-knowledge` | Governed knowledge lifecycle, retrieval, audit, extraction, and web-route smoke |
-| `make benchmark-m06-knowledge-retrieval` | Default-Compose 10,000-row retrieval benchmark; asserts p95 below 250 ms |
-| `make release-tar` | Self-contained release tarball |
-
-### Context long-running tasks
-
-Agents can return `status: "continued"` to checkpoint progress without leaving **In Progress** — the run succeeds and the next run picks up via resume context in `.agent/context.md`. PM agents may propose `splitTickets`; with default `auto_split = false` these appear as a **pending split recommendation** on the parent ticket until a human approves. See [context long-running design](superpowers/specs/2026-06-10-context-long-running-tasks-design.md).
-
-### Knowledge configuration
-
-M06 settings live under `[knowledge]` in TOML. There are **three embedding modes** — do not confuse CI mock with the Docker install default.
-
-| Mode | When | Provider config | Notes |
-|------|------|-----------------|-------|
-| **`mock`** | `make test`, knowledge unit/integration tests, e2e/CI smoke | `provider = "mock"` (Makefile forces this for smoke) | Deterministic hashed vectors; no download, no network, no GPU |
-| **Local Compose sidecar** | Default after `make compose-up` or `make compose-local-up` | `openai_compatible` → `nomic-embed-text` @ `768`, placeholder `api_key`. Docker server: `http://embedder:11434/v1`. Host API: `http://127.0.0.1:11434/v1` (root `config.example.toml`) | Ollama under Compose profile `embeddings`; first boot pulls ~274MB into `ollama_data` |
-| **Remote `openai_compatible`** | Opt-in (OpenAI or any `/v1/embeddings` host) | Same provider string; set your `base_url`, `model`, `api_key`, and matching `dimension` | Disable or ignore the sidecar; point env/TOML at the remote host |
-
-**Retrieval split:** cosine ranking and HNSW live in **Postgres** (`knowledge_embeddings`). Query text still goes to the **configured embedding provider** first (mock, local Ollama, or remote). Provider downtime breaks new embeds and Full-run query embedding even though stored vectors remain in the DB.
-
-**Dimension must match the model.** `knowledge.embedding.dimension` must equal the live `vector(n)` column and the provider’s output length. Startup requires the column type to match config; vectors are never padded or truncated. A provider response with the wrong length fails the embed job and leaves the previous active revision intact. Config/column mismatch with existing rows fails startup until embeddings are cleared and re-embedded.
-
-**Changing dimension:** set `knowledge.embedding.dimension` to the new size. If `knowledge_embeddings` is empty, startup rewrites the column (and HNSW index) to `vector(n)`. If rows already exist at another dimension, startup fails — run `DELETE FROM knowledge_embeddings`, restart so the column can be rewritten, then re-embed (approve/re-queue revisions). Do not mix dimensions in one column.
-
-The server does **not** wait for embedder health on Compose boot. Soft dependency: API stays up while nomic pulls or if the sidecar/profile is absent; embed jobs error until the endpoint is reachable. E2e Makefile targets clear `COMPOSE_PROFILES` and force `PROVIDER=mock` so CI stays deterministic.
-
-Knowledge embedding and extraction run on the dedicated `knowledge_jobs` queue. `knowledge.worker_count = 0` disables processing but leaves API reads available. Keep production limits in `knowledge.retrieval` and `knowledge.context_budget`; list endpoints and retrieval also enforce hard server caps.
-
-## Disk usage / cleanup
-
-Rust `target/` can grow to **8–16+ GB** during development (debug builds, many integration test binaries, heavy deps like sqlx/tokio/axum). It is gitignored and safe to delete.
-
-| Command | When |
-|---------|------|
-| `make clean` | After a full test pass when you are done with the task |
-| `cargo clean` | Same |
-
-Do **not** run `clean` before every incremental `cargo test` — the next build will recompile everything. **Agents:** run `make clean` once after your task’s workspace tests pass.
-
-Cursor’s agent sandbox may also cache builds under a separate `cargo-target` directory in the system temp folder. That cache is outside the repo; delete it manually if disk is tight (see Cursor docs / your temp dir).
-
-## CLI commands
-
-All CLI commands load the same config as the server:
-
-```bash
-coppice migrate
-coppice health
-coppice health --check-database
-coppice bootstrap admin --email <email> --password <password>
-coppice server start
-coppice web start
-```
-
-## Release build
-
-```bash
 make release-tar
 ```
 
-See `deploy/README-RELEASE.md` for running the tarball.
+**Artifact:** `dist/coppice-<os>-<arch>.tar.gz` containing `coppice-server`, `coppice-cli`, `web/dist/`, `config.example.toml`, `systemd/`.
+
+**Publish** (maintainers):
+
+1. Tag a version in git (e.g. `v0.2.0`).
+2. Run the build on each target OS/arch you support (or cross-compile where applicable).
+3. Upload each `dist/coppice-*.tar.gz` to a **GitHub Release** (or your artifact store) with release notes.
+4. Point users to [Install — Self-host tarball](#self-host-tarball).
+
+The tarball does **not** include PostgreSQL; operators bring their own Postgres 16 + pgvector.
+
+### Docker images (optional)
+
+For teams that deploy with Compose instead of the tarball:
+
+```bash
+docker compose -f deploy/docker-compose.yml build
+# Tag and push to your registry; document image tags in the release notes.
+```
+
+Smoke/CI uses the same compose file via `make compose-up` — not the tarball.
+
+### Desktop release (build and publish)
+
+| Stage | Status |
+|-------|--------|
+| Dev shell (`desktop/`, loads local URL) | Available |
+| Bundled Postgres + API on app start | Planned ([TODOS.md](../TODOS.md)) |
+| Installers (.dmg, .exe, .AppImage) + code signing | Planned |
+| Auto-update channel | Planned |
+
+**Build (today):** no end-user installer. Validate the shell with Path C above.
+
+**Publish (when Phase 2–3 land — planned pipeline):**
+
+1. `make release-tar` (or dedicated target) produces `coppice-server` + static web assets for embedding.
+2. Package with **electron-builder** (or similar) per OS: bundle server binary, pg embed/runtime, and data-dir defaults.
+3. CI matrix (macOS / Windows / Linux) produces signed artifacts.
+4. Upload installers to **GitHub Releases** (or store CDN); version matches git tag.
+5. Release notes: breaking changes, migration, embedding/knowledge limitations (no bundled Ollama — see [TODOS.md](../TODOS.md)).
+
+Until that ships, **do not** tell end users to install via `desktop/` — direct them to [Install](#install) paths below.
+
+---
+
+## Install
+
+How people run Coppice without cloning the repo.
+
+### Desktop install (end users)
+
+**Target experience (future):** download installer → open app → local Coppice runs (DB + API hidden) → no Docker, no login screen (single admin session).
+
+**Today:** not available. Use self-host tarball or Docker below.
+
+### Self-host tarball
+
+**You need:** PostgreSQL 16 with **pgvector**, and a machine to run two processes (API + web proxy).
+
+```bash
+tar -xzf coppice-<os>-<arch>.tar.gz -C /opt/coppice
+cd /opt/coppice
+
+cp config.example.toml config.toml
+# Edit: database.url, auth.session_secret, storage paths
+
+./coppice-cli migrate
+./coppice-cli bootstrap admin --email you@example.com --password '<strong-password>'
+
+./coppice-cli server start    # :5000
+./coppice-cli web start       # :5001 — open in browser
+```
+
+Optional: `mv coppice-cli coppice`. Config may also live in `~/.config/coppice/config.toml`.
+
+**Production:** example systemd units in `systemd/` inside the tarball — set `WorkingDirectory` and `ExecStart`, then `systemctl enable --now coppice-server coppice-web`.
+
+### Docker Compose
+
+For operators comfortable with containers:
+
+```bash
+# On a server with Docker; use published images or build from this repo
+cp deploy/config/config.example.toml deploy/config/config.toml
+# Edit deploy/config/config.toml and compose env as needed
+docker compose -f deploy/docker-compose.yml up -d
+```
+
+Open http://localhost:5001. Change default passwords and secrets before exposing to a network.
+
+### Backup and migration
+
+Admins: **Tools** in the app (`/tools`) or `GET /api/tools/backup/export` / `POST /api/tools/backup/import`. Archives are full-system backups (database, config snapshot, artifacts, worktrees) and are **sensitive**. Requires `pg_dump` / `psql` on the server host.

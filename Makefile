@@ -146,5 +146,4 @@ release-tar: web-build
 	cp -r web/dist dist/release/web/dist
 	cp config.example.toml dist/release/config.example.toml
 	cp -r deploy/systemd dist/release/systemd
-	cp deploy/README-RELEASE.md dist/release/
 	tar -czf dist/coppice-$$(uname -s | tr A-Z a-z)-$$(uname -m).tar.gz -C dist/release .

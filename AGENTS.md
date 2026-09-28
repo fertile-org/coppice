@@ -31,7 +31,7 @@
 
 | Topic | Doc |
 |-------|-----|
-| Local setup & commands | [docs/development.md](docs/development.md) |
+| Local setup & commands | [docs/development.md](docs/development.md), [docs/operations.md](docs/operations.md) |
 | Code layout & conventions | [docs/architecture.md](docs/architecture.md) |
 | Testing strategy | [docs/testing.md](docs/testing.md) |
 | Roadmap & acceptance criteria | [docs/milestones/README.md](docs/milestones/README.md) |

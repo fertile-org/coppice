@@ -21,7 +21,7 @@ Controlled agent memory: typed knowledge with pgvector retrieval, context budget
 
 - Capability-gated observation runs (M07)
 - Consolidation batch jobs (optional stretch; basic expiry sufficient for v1)
-- Remote multi-model embedding routing beyond a single configured `openai_compatible` endpoint (local Ollama sidecar is the Compose install default; see [Knowledge configuration](../development.md#knowledge-configuration))
+- Remote multi-model embedding routing beyond a single configured `openai_compatible` endpoint (local Ollama sidecar is the Compose install default; see [Knowledge configuration](../operations.md#knowledge-configuration))
 
 ## Dependencies
 

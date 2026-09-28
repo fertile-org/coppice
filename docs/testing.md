@@ -82,7 +82,7 @@ cargo test -p coppice-server --test integration_tickets  # one integration file
 make web-test               # frontend unit tests
 ```
 
-When finished with a task (after tests pass), run `make clean` to reclaim disk. See [development.md](development.md#disk-usage--cleanup).
+When finished with a task (after tests pass), run `make clean` to reclaim disk. See [operations.md](operations.md#disk-usage--cleanup).
 
 Run one integration file:
 
@@ -115,7 +115,7 @@ make e2e-smoke-m06              # context continuation + pending split behavior
 make e2e-smoke-m06-knowledge    # governance → embed → Full retrieval → audit → extraction
 ```
 
-Both use the default `deploy/docker-compose.yml` stack. E2e Makefile targets clear the `embeddings` Compose profile and force `COPPICE_KNOWLEDGE__EMBEDDING__PROVIDER=mock` so CI stays deterministic (no Ollama/GPU/model pulls). That mock path is for tests/smoke only — operator `make compose-up` enables the Ollama embedder sidecar by default (`nomic-embed-text` @ 768). Mode comparison and first-boot pull cost: [Knowledge configuration](development.md#knowledge-configuration).
+Both use the default `deploy/docker-compose.yml` stack. E2e Makefile targets clear the `embeddings` Compose profile and force `COPPICE_KNOWLEDGE__EMBEDDING__PROVIDER=mock` so CI stays deterministic (no Ollama/GPU/model pulls). That mock path is for tests/smoke only — operator `make compose-up` enables the Ollama embedder sidecar by default (`nomic-embed-text` @ 768). Mode comparison and first-boot pull cost: [Knowledge configuration](operations.md#knowledge-configuration).
 
 The supported 10,000-eligible-row retrieval envelope has a separate, non-CI
 default-Compose benchmark. It seeds rows inside a rolled-back transaction, runs

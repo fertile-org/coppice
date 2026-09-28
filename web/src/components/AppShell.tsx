@@ -9,6 +9,7 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   Users,
+  Wrench,
 } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
@@ -33,6 +34,7 @@ const NAV_ITEMS: NavItem[] = [
   { to: '/knowledge', label: 'Knowledge', icon: BookOpen },
   { to: '/settings/repositories', label: 'Repositories', icon: FolderGit2 },
   { to: '/settings/users', label: 'Users', icon: Users, adminOnly: true },
+  { to: '/tools', label: 'Tools', icon: Wrench, adminOnly: true },
 ];
 
 function readSidebarCollapsed(): boolean {

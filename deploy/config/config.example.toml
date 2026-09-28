@@ -83,7 +83,7 @@ poll_interval_ms = 500
 stale_lock_secs = 300
 
 [knowledge.embedding]
-# Three modes (see docs/development.md#knowledge-configuration):
+# Three modes (see docs/operations.md#knowledge-configuration):
 #   mock — tests/CI/smoke only (Makefile forces PROVIDER=mock; no download)
 #   local sidecar — default: openai_compatible → http://embedder:11434/v1
 #                   nomic-embed-text @ 768 (first boot pulls ~274MB into ollama_data)

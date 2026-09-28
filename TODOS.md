@@ -1,0 +1,29 @@
+# Coppice — planned work (desktop & platform)
+
+Tracking items discussed for the **Electron desktop** distribution and related platform work. Not a milestone spec; see `docs/milestones/` for shipped acceptance criteria.
+
+## Desktop app (Electron)
+
+- [ ] **Phase 1 — Dev shell**: `desktop/` runs Electron against local web URL while stack runs separately. See [docs/development.md](docs/development.md) (Path C — Desktop shell).
+- [ ] **Phase 2 — Bundled runtime**: On app start, spawn bundled **PostgreSQL 16 + pgvector** (same class of stack as `pg-embed` / test DB), run migrations, start `coppice-server`, serve built SPA; on quit, stop children cleanly.
+- [ ] **Phase 3 — Packaging**: Per-OS installers, code signing / notarization, auto-update channel, dynamic localhost ports, single-instance lock.
+- [ ] **Desktop auth**: Keep server auth model for cloud/self-hosted; Electron build **auto-establishes an admin session** (no login UI). Do not remove user APIs — gate UI only in desktop shell.
+- [ ] **Remote database (future)**: Optional `database.url` to external Postgres; default remains bundled data dir under app user data.
+- [ ] **Testing**: Run `cd desktop && npm test` (Playwright Electron) for shell smoke; full stack still validated via `make test` / `make e2e-smoke`. Electron does not replace CI Docker stack.
+
+## Knowledge embeddings (desktop & product)
+
+- [ ] **Do not bundle Ollama** in the desktop installer (size, GPU, ops).
+- [ ] **Design** a desktop-friendly embedding strategy: remote OpenAI-compatible API, optional user-installed embedder, mock/disabled mode with clear UX when search is unavailable, re-embed on restore, etc.
+- [ ] Document tradeoffs in a short design note before implementing (M07+ scope).
+
+## Backup & migration
+
+- [x] **Tools page** (`/tools`): admin export/import archive (DB + config snapshot + artifacts + worktrees). Uses host `pg_dump` / `psql` (added to server Docker image for compose).
+- [ ] **Desktop**: run import on restart or from a dedicated “maintenance mode” when server is stopped (safer than hot restore).
+- [ ] **Export secrets warning**: archives contain session secrets, forge tokens (encrypted at rest in DB), and `config.toml` — treat as sensitive.
+
+## Cloud (future)
+
+- [ ] Multi-user hosting with normal login and roles (reuse existing user model).
+- [ ] Separate from desktop single-user admin experience.
