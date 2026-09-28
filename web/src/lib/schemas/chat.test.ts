@@ -78,6 +78,25 @@ describe('chat schemas', () => {
     expect(chatSessionListSchema.parse({ sessions: [session] }).sessions).toHaveLength(1);
   });
 
+  it('parses session list with preview fields', () => {
+    chatSessionListSchema.parse({
+      sessions: [
+        {
+          id: '00000000-0000-4000-8000-000000000001',
+          projectId: null,
+          ownerUserId: '00000000-0000-4000-8000-000000000002',
+          agentId: '00000000-0000-4000-8000-000000000010',
+          repoId: null,
+          status: 'active',
+          createdAt: '2026-01-01T00:00:00Z',
+          updatedAt: '2026-01-01T00:00:00Z',
+          lastMessagePreview: 'Hello',
+          hasActiveRun: true,
+        },
+      ],
+    });
+  });
+
   it('parses messages and post-message responses', () => {
     expect(chatMessageSchema.parse(message).role).toBe('human');
     expect(chatMessageSchema.parse(message).attachmentIds).toEqual([]);

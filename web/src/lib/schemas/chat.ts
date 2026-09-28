@@ -13,6 +13,11 @@ export const chatSessionSchema = z.object({
   repoId: z.string().uuid().nullable(),
   parentSessionId: z.string().uuid().nullable().optional(),
   status: chatSessionStatusSchema,
+  lastMessagePreview: z.string().default(''),
+  lastMessageAt: z.string().nullable().optional(),
+  lastMessageRole: chatMessageRoleSchema.nullable().optional(),
+  hasActiveRun: z.boolean().default(false),
+  activeRunId: z.string().uuid().nullable().optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
 });
