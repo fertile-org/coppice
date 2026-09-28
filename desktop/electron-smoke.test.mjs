@@ -11,6 +11,7 @@ test('electron main module loads', async () => {
   const electronPath = path.join(__dirname, 'node_modules', 'electron', 'cli.js');
   const child = spawn(process.execPath, [electronPath, '--version'], {
     cwd: __dirname,
+    env: { ...process.env, ELECTRON_DISABLE_SANDBOX: '1' },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   const [code] = await once(child, 'close');

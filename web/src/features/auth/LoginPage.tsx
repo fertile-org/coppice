@@ -9,14 +9,14 @@ interface LoginResponse {
 }
 
 export function LoginPage() {
-  const { user, loading, establishSession } = useSession();
+  const { user, loading, desktopMode, establishSession } = useSession();
   const navigate = useNavigate();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
-  if (!loading && user) {
+  if (!loading && (user || desktopMode)) {
     return <Navigate to="/projects" replace />;
   }
 

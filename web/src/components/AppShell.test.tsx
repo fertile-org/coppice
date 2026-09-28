@@ -1,18 +1,21 @@
 import '@testing-library/jest-dom/vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { AppShell } from './AppShell';
 
+const sessionState = {
+  user: {
+    id: '00000000-0000-0000-0000-000000000001',
+    email: 'admin@localhost',
+    role: 'admin',
+  },
+  desktopMode: false,
+  logout: vi.fn(),
+};
+
 vi.mock('../features/auth/useSession', () => ({
-  useSession: () => ({
-    user: {
-      id: '00000000-0000-0000-0000-000000000001',
-      email: 'admin@localhost',
-      role: 'admin',
-    },
-    logout: vi.fn(),
-  }),
+  useSession: () => sessionState,
 }));
 
 vi.mock('../features/notifications/NotificationBell', () => ({
@@ -26,6 +29,7 @@ vi.mock('../features/tickets/useOpenTicket', () => ({
 describe('AppShell', () => {
   beforeEach(() => {
     localStorage.clear();
+    sessionState.desktopMode = false;
   });
 
   it('keeps notification and sign-out controls in the same visual and focus order', () => {
@@ -57,7 +61,7 @@ describe('AppShell', () => {
     );
   });
 
-  it('keeps the default max-width main on non-chat routes', () => {
+  it('uses full-width main on non-chat routes', () => {
     render(
       <MemoryRouter initialEntries={['/projects']}>
         <AppShell />
@@ -66,8 +70,24 @@ describe('AppShell', () => {
 
     const main = screen.getByTestId('app-shell-main');
     expect(main).toHaveAttribute('data-layout', 'default');
-    expect(main).toHaveClass('max-w-6xl');
+    expect(main).toHaveClass('w-full');
+    expect(main).toHaveClass('px-8');
+    expect(main).not.toHaveClass('max-w-6xl');
+    expect(main).not.toHaveClass('mx-auto');
     expect(main).not.toHaveAttribute('data-layout', 'chat');
+  });
+
+  it('aligns sidebar brand and top bar heights', () => {
+    render(
+      <MemoryRouter initialEntries={['/projects']}>
+        <AppShell />
+      </MemoryRouter>,
+    );
+
+    const brand = screen.getByTestId('app-shell-sidebar-brand');
+    const topbar = screen.getByTestId('app-shell-topbar');
+    expect(brand).toHaveClass('h-14');
+    expect(topbar).toHaveClass('h-14');
   });
 
   it('uses full-bleed main on /chat', () => {
@@ -150,7 +170,7 @@ describe('AppShell', () => {
     expect(root).not.toHaveClass('overflow-hidden');
   });
 
-  it('keeps default max-width on non-board project routes', () => {
+  it('uses full-width main on non-board project routes', () => {
     render(
       <MemoryRouter
         initialEntries={['/projects/00000000-0000-4000-8000-000000000001']}
@@ -161,7 +181,8 @@ describe('AppShell', () => {
 
     const main = screen.getByTestId('app-shell-main');
     expect(main).toHaveAttribute('data-layout', 'default');
-    expect(main).toHaveClass('max-w-6xl');
+    expect(main).toHaveClass('w-full');
+    expect(main).not.toHaveClass('max-w-6xl');
   });
 
   it('renders an expanded sidebar by default with nav icons', () => {
@@ -193,5 +214,27 @@ describe('AppShell', () => {
     expect(
       screen.getByRole('button', { name: 'Expand sidebar' }),
     ).toBeInTheDocument();
+  });
+
+  it('hides account chrome and Users nav in desktop mode', () => {
+    sessionState.desktopMode = true;
+
+    render(
+      <MemoryRouter initialEntries={['/projects']}>
+        <AppShell />
+      </MemoryRouter>,
+    );
+
+    expect(screen.queryByText('admin@localhost')).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: 'Sign out' }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('link', { name: 'Users' }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'Notifications' }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Tools' })).toBeInTheDocument();
   });
 });

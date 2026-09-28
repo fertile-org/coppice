@@ -24,6 +24,10 @@ pub enum AuthError {
     BootstrapNotAllowed,
     #[error("session not found")]
     SessionNotFound,
+    #[error("desktop mode disabled")]
+    DesktopModeDisabled,
+    #[error("no admin user")]
+    NoAdminUser,
     #[error(transparent)]
     Database(#[from] sqlx::Error),
     #[error("password hash error")]
@@ -117,6 +121,63 @@ impl<'a> AuthService<'a> {
 
         let user = row_to_user(&row);
         self.create_session(user).await
+    }
+
+    /// Mint a session for the local admin when `auth.desktop_mode` is enabled.
+    ///
+    /// Ensures an admin exists (via configured auto-bootstrap, or a default
+    /// `admin@localhost` account when the users table is empty), then creates
+    /// a normal session cookie bundle.
+    pub async fn desktop_session(&self, auth: &AuthConfig) -> Result<SessionBundle, AuthError> {
+        if !auth.desktop_mode {
+            return Err(AuthError::DesktopModeDisabled);
+        }
+
+        self.maybe_auto_bootstrap(auth).await?;
+
+        if let Some(user) = self.first_admin().await? {
+            return self.create_session(user).await;
+        }
+
+        let email = auth
+            .bootstrap_admin_email
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .unwrap_or("admin@localhost");
+        let password = auth
+            .bootstrap_admin_password
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .unwrap_or("changeme");
+
+        match self.bootstrap_admin(email, password).await {
+            Ok(user) => self.create_session(user).await,
+            Err(AuthError::BootstrapNotAllowed) => Err(AuthError::NoAdminUser),
+            Err(err) => Err(err),
+        }
+    }
+
+    async fn first_admin(&self) -> Result<Option<User>, AuthError> {
+        let row = sqlx::query(
+            r#"
+            SELECT id, email, role, created_at
+            FROM users
+            WHERE role = 'admin'
+            ORDER BY created_at ASC
+            LIMIT 1
+            "#,
+        )
+        .fetch_optional(self.pool)
+        .await?;
+
+        Ok(row.map(|row| User {
+            id: row.get("id"),
+            email: row.get("email"),
+            role: row.get("role"),
+            created_at: row.get("created_at"),
+        }))
     }
 
     pub async fn logout(&self, session_id: Uuid) -> Result<(), AuthError> {

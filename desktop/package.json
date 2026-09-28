@@ -5,7 +5,7 @@
   "description": "Dev Electron shell — loads local Coppice web UI",
   "main": "main.mjs",
   "scripts": {
-    "start": "electron .",
+    "start": "ELECTRON_DISABLE_SANDBOX=1 electron .",
     "test": "node --test electron-smoke.test.mjs"
   },
   "devDependencies": {

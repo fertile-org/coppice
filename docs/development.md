@@ -12,7 +12,7 @@ Single guide for day-to-day development, shipping versions, and how end users ge
 |------|---------|
 | Rust (stable) + `cargo` | API, CLI |
 | `cargo-watch` | `make server-dev` hot reload (`cargo install cargo-watch`) |
-| Node.js 22 + Yarn | Web SPA (`corepack enable` or install Yarn) |
+| Node.js 22 + Yarn | Web SPA and desktop shell (`corepack enable` or install Yarn) |
 | Docker + Compose | Postgres, embedder, and/or full stack |
 
 ### Configuration (minimal)
@@ -43,7 +43,7 @@ make web-dev
 ```
 
 - API: http://localhost:5000/health  
-- Web: http://localhost:5001 (default login `admin@localhost` / `changeme` after bootstrap)  
+- Web: http://localhost:5001 (default admin session when `auth.desktop_mode = true`; otherwise login `admin@localhost` / `changeme` after bootstrap)  
 - Stop Postgres + embedder: `make compose-local-down`  
 - First `compose-local-up` may pull `nomic-embed-text` (~274MB). Opt out: `COMPOSE_PROFILES= make compose-local-up`.
 
@@ -65,12 +65,12 @@ Electron window around the running web UI. **Does not** start Postgres or the AP
 
 ```bash
 # Start Path A or B first, then:
-cd desktop
-npm install
-npm start
+make desktop
 ```
 
-Default URL: `http://127.0.0.1:5001`. Override with `COPPICE_WEB_URL=...`. Smoke: `cd desktop && npm test`.
+Default URL: `http://127.0.0.1:5001`. Override with `COPPICE_WEB_URL=...`. Smoke: `make desktop-test`.
+
+On Linux, the dev shell sets `ELECTRON_DISABLE_SANDBOX=1` so Electron does not require a root-owned `chrome-sandbox` binary. Packaged releases will use a proper sandbox setup.
 
 Bundled desktop (installers, auto-start DB/API) is **not** implemented yet — see **Desktop release** and **Desktop install** below.
 
@@ -140,7 +140,7 @@ How people run Coppice without cloning the repo.
 
 ### Desktop install (end users)
 
-**Target experience (future):** download installer → open app → local Coppice runs (DB + API hidden) → no Docker, no login screen (single admin session).
+**Target experience:** download installer → open app → local Coppice runs (DB + API hidden) → no Docker, no login screen (single admin session via `auth.desktop_mode`).
 
 **Today:** not available. Use self-host tarball or Docker below.
 

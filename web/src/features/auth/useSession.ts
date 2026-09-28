@@ -9,6 +9,8 @@ export interface User {
 export interface SessionContextValue {
   user: User | null;
   loading: boolean;
+  /** Single-user desktop product — hide login/account chrome. */
+  desktopMode: boolean;
   establishSession: (user: User, csrfToken: string) => void;
   logout: () => Promise<void>;
 }

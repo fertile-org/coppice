@@ -18,7 +18,7 @@ export COMPOSE_PROFILES ?= embeddings
 # Deterministic knowledge embeddings for e2e — no Ollama image/model/GPU.
 SMOKE_EMBEDDING_ENV = COMPOSE_PROFILES= COPPICE_KNOWLEDGE__EMBEDDING__PROVIDER=mock COPPICE_KNOWLEDGE__EMBEDDING__DIMENSION=768
 
-.PHONY: compose-up compose-down compose-local-up compose-local-down server server-dev test test-unit test-smoke test-pg-reset clippy clean migrate bootstrap web-install web-test web-dev web-build e2e-smoke e2e-smoke-m03 e2e-smoke-m04 e2e-smoke-m05 e2e-smoke-m06 e2e-smoke-m06-knowledge e2e-smoke-m09 benchmark-m06-knowledge-retrieval release-tar
+.PHONY: compose-up compose-down compose-local-up compose-local-down server server-dev test test-unit test-smoke test-pg-reset clippy clean migrate bootstrap web-install web-test web-dev web-build desktop desktop-test e2e-smoke e2e-smoke-m03 e2e-smoke-m04 e2e-smoke-m05 e2e-smoke-m06 e2e-smoke-m06-knowledge e2e-smoke-m09 benchmark-m06-knowledge-retrieval release-tar
 
 CARGO_TEST = cargo test --features embedded-test-db
 
@@ -96,6 +96,13 @@ web-dev:
 
 web-build:
 	cd web && yarn install --frozen-lockfile && yarn build
+
+# Electron shell — requires Path A or B (web on :5001) already running.
+desktop:
+	cd desktop && yarn install && yarn start
+
+desktop-test:
+	cd desktop && yarn install --frozen-lockfile && yarn test
 
 e2e-smoke:
 	$(SMOKE_EMBEDDING_ENV) $(MAKE) compose-up

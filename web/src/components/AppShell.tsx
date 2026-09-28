@@ -70,12 +70,11 @@ function isBoardRoute(pathname: string): boolean {
 }
 
 export function AppShell() {
-  const { user, logout } = useSession();
+  const { user, logout, desktopMode } = useSession();
   const openTicket = useOpenTicket();
   const { pathname } = useLocation();
   const chatLayout = isChatRoute(pathname);
   const boardLayout = isBoardRoute(pathname);
-  const fullWidth = chatLayout || boardLayout;
 
   const [sidebarCollapsed, setSidebarCollapsed] = useState(readSidebarCollapsed);
 
@@ -94,9 +93,12 @@ export function AppShell() {
     setSidebarCollapsed((prev) => !prev);
   }, []);
 
-  const visibleNavItems = NAV_ITEMS.filter(
-    (item) => !item.adminOnly || user?.role === 'admin',
-  );
+  const visibleNavItems = NAV_ITEMS.filter((item) => {
+    if (desktopMode && item.to === '/settings/users') {
+      return false;
+    }
+    return !item.adminOnly || user?.role === 'admin';
+  });
 
   return (
     <div
@@ -116,8 +118,9 @@ export function AppShell() {
         aria-label="Application sidebar"
       >
         <div
+          data-testid="app-shell-sidebar-brand"
           className={cn(
-            'flex shrink-0 items-center border-b border-border py-4',
+            'flex h-14 shrink-0 items-center border-b border-border',
             sidebarCollapsed ? 'justify-center px-2' : 'gap-3 px-4',
           )}
         >
@@ -188,19 +191,24 @@ export function AppShell() {
         )}
       >
         <header
-          className="flex shrink-0 items-center justify-end gap-2 border-b border-border bg-surface px-4 py-3 sm:gap-4 sm:px-6"
+          data-testid="app-shell-topbar"
+          className="flex h-14 shrink-0 items-center justify-end gap-2 border-b border-border bg-surface px-4 sm:gap-4 sm:px-6"
         >
-          <span className="mr-auto hidden truncate font-body text-sm text-text-secondary sm:inline">
-            {user?.email}
-          </span>
-          <button
-            type="button"
-            onClick={() => void logout()}
-            className="inline-flex items-center gap-2 rounded-md border border-border px-3 py-1.5 font-body text-sm text-text-secondary transition-colors duration-fast hover:border-border-strong hover:text-text-primary"
-          >
-            <LogOut className="h-4 w-4 shrink-0" aria-hidden />
-            Sign out
-          </button>
+          {!desktopMode && (
+            <>
+              <span className="mr-auto hidden truncate font-body text-sm text-text-secondary sm:inline">
+                {user?.email}
+              </span>
+              <button
+                type="button"
+                onClick={() => void logout()}
+                className="inline-flex items-center gap-2 rounded-md border border-border px-3 py-1.5 font-body text-sm text-text-secondary transition-colors duration-fast hover:border-border-strong hover:text-text-primary"
+              >
+                <LogOut className="h-4 w-4 shrink-0" aria-hidden />
+                Sign out
+              </button>
+            </>
+          )}
           {user && (
             <NotificationBell userId={user.id} onOpenTicket={openTicket} />
           )}
@@ -210,10 +218,7 @@ export function AppShell() {
           className={cn(
             chatLayout
               ? 'flex min-h-0 flex-1 flex-col overflow-hidden px-4 py-4 sm:px-6 sm:py-5'
-              : boardLayout
-                ? 'px-8 py-8'
-                : 'mx-auto max-w-6xl px-8 py-8',
-            fullWidth && !chatLayout && 'max-w-none',
+              : 'w-full px-8 py-8',
           )}
           data-testid="app-shell-main"
           data-layout={chatLayout ? 'chat' : boardLayout ? 'board' : 'default'}

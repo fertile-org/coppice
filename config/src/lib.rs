@@ -591,6 +591,11 @@ pub struct AuthConfig {
     pub bootstrap_admin_email: Option<String>,
     #[serde(default)]
     pub bootstrap_admin_password: Option<String>,
+    /// Single-user desktop product: SPA auto-establishes an admin session and
+    /// hides login/account chrome. Keep off for multi-user / cloud hosting.
+    /// Only enable on loopback or otherwise trusted single-operator hosts.
+    #[serde(default)]
+    pub desktop_mode: bool,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -955,6 +960,7 @@ impl AppConfig {
                 cookie_secure: false,
                 bootstrap_admin_email: None,
                 bootstrap_admin_password: None,
+                desktop_mode: false,
             },
             storage: StorageConfig {
                 artifacts_dir: "./data/artifacts".into(),

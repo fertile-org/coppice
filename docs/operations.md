@@ -29,6 +29,15 @@ Coppice uses TOML config files — not `.env` files.
 
 Host `config.toml` does not affect the Docker server. Do not run `make migrate` against the wrong port.
 
+### Auth / desktop mode
+
+| Setting | Purpose |
+|---------|---------|
+| `auth.desktop_mode` | When `true`, SPA auto-calls `POST /api/auth/desktop-session` and hides login / account chrome / Users nav. Keep `false` for multi-user cloud. |
+| `auth.bootstrap_admin_email` / `password` | Create first admin on empty DB (required for desktop auto-session). |
+
+Login APIs remain available for tools and future cloud hosting.
+
 ## Default Docker stack (agents / smoke)
 
 ```bash
@@ -76,6 +85,7 @@ M06 settings under `[knowledge]` in TOML.
 | `make compose-up` / `down` | Full Docker stack |
 | `make migrate` / `bootstrap` | Host CLI (reads `./config.toml`) |
 | `make web-dev` / `web-build` | Vite dev / production build |
+| `make desktop` / `desktop-test` | Electron shell (needs web on :5001) / shell smoke |
 | `make test` / `test-unit` / `test-smoke` | Rust tests |
 | `make clippy` / `make clean` | Lint / reclaim `target/` |
 | `make release-tar` | Release tarball → `dist/` |

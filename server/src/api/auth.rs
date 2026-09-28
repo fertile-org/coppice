@@ -37,6 +37,8 @@ pub fn public_routes() -> Router<Arc<AppState>> {
     Router::new()
         .route("/api/auth/bootstrap", post(bootstrap))
         .route("/api/auth/login", post(login))
+        .route("/api/auth/capabilities", get(capabilities))
+        .route("/api/auth/desktop-session", post(desktop_session))
 }
 
 pub fn protected_routes() -> Router<Arc<AppState>> {
@@ -71,8 +73,20 @@ struct SessionResponse {
     csrf_token: String,
 }
 
+#[derive(Serialize)]
+struct CapabilitiesResponse {
+    #[serde(rename = "desktopMode")]
+    desktop_mode: bool,
+}
+
 pub fn pool_from_state(state: &AppState) -> Result<&sqlx::PgPool, StatusCode> {
     state.db.as_ref().ok_or(StatusCode::INTERNAL_SERVER_ERROR)
+}
+
+async fn capabilities(State(state): State<Arc<AppState>>) -> Json<CapabilitiesResponse> {
+    Json(CapabilitiesResponse {
+        desktop_mode: state.config.auth.desktop_mode,
+    })
 }
 
 async fn bootstrap(
@@ -118,22 +132,23 @@ async fn login(
             _ => StatusCode::INTERNAL_SERVER_ERROR,
         })?;
 
-    let cookie = session_cookie(&bundle.session_token, state.config.auth.cookie_secure);
-    let body = SessionResponse {
-        user: UserResponse {
-            id: bundle.user.id,
-            email: bundle.user.email,
-            role: bundle.user.role,
-        },
-        csrf_token: bundle.session.csrf_token,
-    };
+    Ok(session_response(&state, bundle))
+}
 
-    Ok((
-        StatusCode::OK,
-        [(SET_COOKIE, cookie)],
-        Json(body),
-    )
-        .into_response())
+async fn desktop_session(State(state): State<Arc<AppState>>) -> Result<Response, StatusCode> {
+    let pool = pool_from_state(&state)?;
+    let auth = AuthService::new(pool, &state.config.auth);
+
+    let bundle = auth
+        .desktop_session(&state.config.auth)
+        .await
+        .map_err(|err| match err {
+            AuthError::DesktopModeDisabled => StatusCode::NOT_FOUND,
+            AuthError::NoAdminUser | AuthError::BootstrapNotAllowed => StatusCode::FORBIDDEN,
+            _ => StatusCode::INTERNAL_SERVER_ERROR,
+        })?;
+
+    Ok(session_response(&state, bundle))
 }
 
 async fn me(AuthUser { user, session }: AuthUser) -> Json<SessionResponse> {
@@ -157,6 +172,28 @@ async fn logout(
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+fn session_response(
+    state: &AppState,
+    bundle: crate::domain::session::SessionBundle,
+) -> Response {
+    let cookie = session_cookie(&bundle.session_token, state.config.auth.cookie_secure);
+    let body = SessionResponse {
+        user: UserResponse {
+            id: bundle.user.id,
+            email: bundle.user.email,
+            role: bundle.user.role,
+        },
+        csrf_token: bundle.session.csrf_token,
+    };
+
+    (
+        StatusCode::OK,
+        [(SET_COOKIE, cookie)],
+        Json(body),
+    )
+        .into_response()
 }
 
 fn session_cookie(token: &str, secure: bool) -> String {

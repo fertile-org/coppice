@@ -7,9 +7,9 @@ Tracking items discussed for the **Electron desktop** distribution and related p
 - [ ] **Phase 1 — Dev shell**: `desktop/` runs Electron against local web URL while stack runs separately. See [docs/development.md](docs/development.md) (Path C — Desktop shell).
 - [ ] **Phase 2 — Bundled runtime**: On app start, spawn bundled **PostgreSQL 16 + pgvector** (same class of stack as `pg-embed` / test DB), run migrations, start `coppice-server`, serve built SPA; on quit, stop children cleanly.
 - [ ] **Phase 3 — Packaging**: Per-OS installers, code signing / notarization, auto-update channel, dynamic localhost ports, single-instance lock.
-- [ ] **Desktop auth**: Keep server auth model for cloud/self-hosted; Electron build **auto-establishes an admin session** (no login UI). Do not remove user APIs — gate UI only in desktop shell.
+- [x] **Desktop auth**: Keep server auth model for cloud/self-hosted; when `auth.desktop_mode` is on, SPA auto-establishes an admin session (no login UI / account chrome). User APIs remain for cloud later.
 - [ ] **Remote database (future)**: Optional `database.url` to external Postgres; default remains bundled data dir under app user data.
-- [ ] **Testing**: Run `cd desktop && npm test` (Playwright Electron) for shell smoke; full stack still validated via `make test` / `make e2e-smoke`. Electron does not replace CI Docker stack.
+- [ ] **Testing**: Run `make desktop-test` (Playwright Electron) for shell smoke; full stack still validated via `make test` / `make e2e-smoke`. Electron does not replace CI Docker stack.
 
 ## Knowledge embeddings (desktop & product)
 

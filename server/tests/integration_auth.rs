@@ -305,3 +305,101 @@ async fn me_without_session_is_unauthorized() {
         .unwrap();
     assert_eq!(response.status(), axum::http::StatusCode::UNAUTHORIZED);
 }
+
+#[tokio::test]
+async fn desktop_session_requires_desktop_mode() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        eprintln!("skipping: postgres not available");
+        return;
+    }
+    let state = test_state_with_db().await;
+    assert!(!state.config.auth.desktop_mode);
+    let app = coppice_server::app(state);
+
+    let caps = app
+        .clone()
+        .oneshot(
+            axum::http::Request::builder()
+                .uri("/api/auth/capabilities")
+                .body(axum::body::Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(caps.status(), axum::http::StatusCode::OK);
+    let caps_body = axum::body::to_bytes(caps.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let caps_json: serde_json::Value = serde_json::from_slice(&caps_body).unwrap();
+    assert_eq!(caps_json["desktopMode"], false);
+
+    let response = app
+        .oneshot(
+            axum::http::Request::builder()
+                .method("POST")
+                .uri("/api/auth/desktop-session")
+                .body(axum::body::Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), axum::http::StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn desktop_session_mints_admin_cookie_when_enabled() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        eprintln!("skipping: postgres not available");
+        return;
+    }
+    let state = test_state_with_db().await;
+    let mut app_state = (*state).clone();
+    app_state.config.auth.desktop_mode = true;
+    app_state.config.auth.bootstrap_admin_email = Some("desktop@localhost".into());
+    app_state.config.auth.bootstrap_admin_password = Some("desktop-secret".into());
+    let app = coppice_server::app(Arc::new(app_state));
+
+    let response = app
+        .clone()
+        .oneshot(
+            axum::http::Request::builder()
+                .method("POST")
+                .uri("/api/auth/desktop-session")
+                .body(axum::body::Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), axum::http::StatusCode::OK);
+
+    let set_cookie = response
+        .headers()
+        .get(axum::http::header::SET_COOKIE)
+        .expect("session cookie");
+    let session_token = parse_session_cookie(set_cookie.to_str().unwrap()).expect("token");
+
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["user"]["email"], "desktop@localhost");
+    assert_eq!(json["user"]["role"], "admin");
+    assert!(json["csrfToken"].as_str().is_some());
+
+    let me = app
+        .oneshot(
+            axum::http::Request::builder()
+                .uri("/api/auth/me")
+                .header(
+                    axum::http::header::COOKIE,
+                    format!("coppice_session={session_token}"),
+                )
+                .body(axum::body::Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(me.status(), axum::http::StatusCode::OK);
+}

@@ -11,10 +11,11 @@ url = "postgres://coppice:coppice@localhost:5433/coppice"
 session_secret = "dev-secret-change-me"
 bootstrap_password = "changeme"
 cookie_secure = false
-# Optional: create first admin on server start when users is empty.
-# Docker Compose uses deploy/config/config.toml (from config.example.toml there).
-# bootstrap_admin_email = "admin@localhost"
-# bootstrap_admin_password = "changeme"
+# Desktop product: open app as single local admin (no login UI). Set false for cloud/multi-user.
+desktop_mode = true
+# Create first admin on server start when users is empty (required for desktop_mode).
+bootstrap_admin_email = "admin@localhost"
+bootstrap_admin_password = "changeme"
 
 [storage]
 artifacts_dir = "./data/artifacts"
