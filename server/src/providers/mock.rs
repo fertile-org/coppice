@@ -114,6 +114,35 @@ impl AgentProvider for MockProvider {
             }
         }
 
+        if input.job_type == "chat_turn" {
+            if let Some(tx) = &input.session_created_tx {
+                let sid = input
+                    .resume_session_id
+                    .clone()
+                    .filter(|s| !s.is_empty())
+                    .unwrap_or_else(|| "mock-chat-session".to_string());
+                let _ = tx.send(sid);
+            }
+            if std::env::var("MOCK_CHAT_RESUME_FAIL").as_deref() == Ok("1")
+                && input
+                    .resume_session_id
+                    .as_ref()
+                    .is_some_and(|s| !s.is_empty())
+            {
+                return Err(ProviderError::ResumeSessionInvalid(
+                    "mock forced resume failure".into(),
+                ));
+            }
+            if std::env::var("MOCK_CHAT_EXPECT_SLIM").as_deref() == Ok("1") {
+                let body = std::fs::read_to_string(&input.context_path).map_err(ProviderError::Io)?;
+                if body.contains("# Conversation transcript") {
+                    return Err(ProviderError::InvalidFixture(
+                        "expected slim resume context".into(),
+                    ));
+                }
+            }
+        }
+
         let path = self.fixture_path(&input);
         let raw = std::fs::read_to_string(&path)
             .map_err(|_| ProviderError::FixtureNotFound(path.display().to_string()))?;

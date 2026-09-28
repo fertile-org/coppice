@@ -108,6 +108,59 @@ If you cannot answer, return `blocked` with a clear `summary`.
     )
 }
 
+pub fn build_conversation_resume_context(input: &ContextInput<'_>) -> String {
+    let human_message = input.latest_comments.unwrap_or("(No human message)");
+    let repository = input
+        .worktree_path
+        .map(|path| format!("\n# Working directory\n\n`{path}`\n"))
+        .unwrap_or_default();
+    format!(
+        r#"# Agent Chat (continued)
+
+You are replying in a human-owned exploratory chat session. Prior turns are in the provider session; answer using that context.
+
+# Agent
+
+**Name:** {name}
+**Role:** {role}
+
+{system_prompt}
+{repository}
+# Latest human message
+
+{human_message}
+
+# Coppice chat rules
+
+- You may inspect files with read-only tools when a repository is bound.
+- Do not write, edit, create, delete, rename, stage, commit, or push files.
+- Do not change tickets, workflow state, or knowledge.
+- Answer the latest human message directly and concisely.
+
+# Expected output contract
+
+Return one JSON object:
+
+```json
+{{
+  "status": "done",
+  "summary": "<markdown reply>",
+  "changedFiles": [],
+  "testsRun": [],
+  "blockers": []
+}}
+```
+
+If you cannot answer, return `blocked` with a clear `summary`.
+"#,
+        name = input.agent_name,
+        role = input.agent_role,
+        system_prompt = input.agent_system_prompt,
+        repository = repository,
+        human_message = human_message,
+    )
+}
+
 /// Minimal overlay for in-process chat → board ticket drafting (no transcript reply).
 pub fn build_draft_ticket_context(input: &ContextInput<'_>) -> String {
     let transcript = input.latest_comments.unwrap_or("(No previous messages)");
@@ -1492,5 +1545,37 @@ mod tests {
         assert!(md.contains("concise markdown summary"));
         assert!(md.contains("On-demand ticket data"));
         assert!(!md.contains("\"assignTo\""));
+    }
+
+    #[test]
+    fn conversation_resume_context_includes_only_latest_human_message() {
+        let input = ContextInput {
+            ticket_title: "Agent Chat",
+            ticket_description: "",
+            ticket_status: "n/a",
+            ticket_substatus: None,
+            agent_name: "BE",
+            agent_key: "backend_engineer",
+            agent_role: "Backend",
+            agent_skills: &[],
+            agent_responsibilities: &[],
+            agent_system_prompt: "Be helpful.",
+            repo_name: None,
+            repo_remote_url: None,
+            repo_default_branch: None,
+            worktree_path: Some("/tmp/chat"),
+            latest_comments: Some("What is the second question?"),
+            project_rules: None,
+            resume_context: None,
+            context_profile: ContextProfile::Conversation,
+            human_request: None,
+            ticket_id: None,
+            assignee_agent_key: None,
+            thread_excerpt: None,
+        };
+        let md = build_conversation_resume_context(&input);
+        assert!(md.contains("What is the second question?"));
+        assert!(!md.contains("# Conversation transcript"));
+        assert!(md.contains("# Latest human message"));
     }
 }

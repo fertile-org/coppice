@@ -89,6 +89,7 @@ List models: `opencode models zai-coding-plan` (inside the server container or o
 
 - **Live Session:** Structured UI (messages, tools, reasoning), not the mock/xterm console.
 - **Restart mid-run:** Coppice may replay a session snapshot and try to re-attach to `opencode serve`. If serve or the session is gone, the UI gets a non-recoverable end.
+- **Agent Chat:** Supported; later turns reuse the same OpenCode HTTP session (`prompt_async` on the stored session id) with a slim Coppice context file. No hard read-only tool allowlist — rely on chat rules and operator trust.
 - **Long context:** OpenCode can compact history within a single run. Across runs, prefer `continued` checkpoints ([context design](../superpowers/specs/2026-06-10-context-long-running-tasks-design.md)).
 - **CI / default Compose:** Stay on `mock` unless you deliberately enable OpenCode.
 

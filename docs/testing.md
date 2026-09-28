@@ -36,6 +36,14 @@ Vitest — schemas, API helpers, board column logic. No browser.
 | Integration | `server/tests/integration_*.rs` | Full HTTP stack against real Postgres; `integration_knowledge.rs` covers M06 lifecycle/retrieval/jobs/plans |
 | Health | `server/tests/health.rs` | Smoke without DB |
 
+### Agent Chat multi-turn (provider resume)
+
+`server/tests/integration_chat.rs` includes `chat_second_turn_*` and `chat_resume_fallback_succeeds`. Optional env for mock provider: `MOCK_CHAT_EXPECT_SLIM=1`, `MOCK_CHAT_RESUME_FAIL=1`.
+
+```bash
+cargo test -p coppice-server --features embedded-test-db --test integration_chat chat_second
+```
+
 ### Integration test conventions
 
 - Shared helpers: `server/tests/common/mod.rs`

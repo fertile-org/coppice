@@ -16,14 +16,17 @@ use crate::domain::substatus::TicketStatus;
 use crate::domain::ticket::{status_to_str, substatus_to_str};
 use crate::domain::workflow::is_ready_tech_lead_refinement;
 use crate::events::{publish_run_finished, AppEvent};
-use crate::providers::{AgentRunInput, ProviderError};
+use crate::providers::{
+    connector_supports_chat_resume, is_resume_session_invalid, AgentRunInput, AgentRunResult,
+    ProviderError,
+};
 use crate::services::agent_request::agent_request_for_target_from_comment;
 use crate::services::agent_service::AgentService;
 use crate::services::artifact_service::{ArtifactService, RunArtifactMeta, RunArtifactPaths};
 use crate::services::comment_service::CommentService;
 use crate::services::context_builder::{
-    write_agent_context_files, write_context_document, write_context_file, ContextInput,
-    HumanRequest,
+    build_conversation_context, build_conversation_resume_context, write_agent_context_files,
+    write_context_document, write_context_file, ContextInput, HumanRequest,
 };
 use crate::services::context_budget::{
     build_budgeted_context, record_usage, render_knowledge, ByteTokenCounter, KnowledgeSection,
@@ -763,16 +766,110 @@ async fn execute_job(
     Ok(())
 }
 
+fn spawn_chat_session_created_tx(
+    pool: PgPool,
+    run_id: uuid::Uuid,
+    connector_name: &str,
+) -> Option<watch::Sender<String>> {
+    if !connector_supports_chat_resume(connector_name) {
+        return None;
+    }
+    let (tx, mut rx) = watch::channel(String::new());
+    tokio::spawn(async move {
+        if rx.changed().await.is_ok() {
+            let sid = rx.borrow().clone();
+            if !sid.is_empty() {
+                let _ = RunService::new(&pool).set_session_id(run_id, &sid).await;
+            }
+        }
+    });
+    Some(tx)
+}
+
+fn chat_context_input_base<'a>(
+    agent: &'a crate::domain::agent::Agent,
+    agent_key: &'a str,
+    cwd_str: &'a str,
+    latest_comments: &'a str,
+) -> ContextInput<'a> {
+    ContextInput {
+        ticket_title: "Agent Chat",
+        ticket_description: "",
+        ticket_status: "n/a",
+        ticket_substatus: None,
+        agent_name: &agent.name,
+        agent_key,
+        agent_role: &agent.role,
+        agent_skills: &agent.skills,
+        agent_responsibilities: &agent.responsibilities,
+        agent_system_prompt: &agent.system_prompt,
+        repo_name: None,
+        repo_remote_url: None,
+        repo_default_branch: None,
+        worktree_path: Some(cwd_str),
+        latest_comments: Some(latest_comments),
+        project_rules: None,
+        resume_context: None,
+        context_profile: ContextProfile::Conversation,
+        human_request: None,
+        ticket_id: None,
+        assignee_agent_key: None,
+        thread_excerpt: None,
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn invoke_chat_provider(
+    state: &AppState,
+    pool: &PgPool,
+    run: &AgentRun,
+    agent: &crate::domain::agent::Agent,
+    agent_key: &str,
+    connector_name: &str,
+    context_path: &std::path::Path,
+    stream: Arc<crate::sessions::run_registry::RunStreamHandle>,
+    cancel_rx: watch::Receiver<bool>,
+    resume_session_id: Option<String>,
+) -> Result<AgentRunResult, ProviderError> {
+    let connector = state
+        .connector_registry
+        .get(connector_name)
+        .ok_or_else(|| {
+            ProviderError::InvalidInput(format!("agent connector not configured: {connector_name}"))
+        })?;
+    let session_created_tx = spawn_chat_session_created_tx(pool.clone(), run.id, connector_name);
+    connector
+        .run(AgentRunInput {
+            agent_id: run.agent_id.to_string(),
+            agent_key: agent_key.to_string(),
+            agent_role: agent.role.clone(),
+            job_type: run.job_type.clone(),
+            ticket_id: None,
+            ticket_status: None,
+            context_profile: ContextProfile::Conversation,
+            context_path: context_path.to_string_lossy().into_owned(),
+            run_id: Some(run.id.to_string()),
+            artifacts_dir: Some(state.config.storage.artifacts_dir.clone()),
+            model_provider: agent.model_provider.clone(),
+            model: agent.model.clone(),
+            stream: Some(stream),
+            cancel_rx: Some(cancel_rx),
+            session_created_tx,
+            resume_context: None,
+            resume_session_id,
+            read_only_tools: true,
+        })
+        .await
+}
+
 async fn execute_chat_turn(
     state: &AppState,
     pool: &PgPool,
     run_svc: &RunService<'_>,
     run: &crate::domain::run::AgentRun,
 ) -> anyhow::Result<()> {
-    use crate::providers::AgentRunResult;
     use crate::services::chat_cwd::resolve_chat_cwd;
     use crate::services::chat_service::ChatService;
-    use crate::services::context_builder::{write_context_file, ContextInput};
 
     let session_id = run
         .chat_session_id
@@ -815,79 +912,112 @@ async fn execute_chat_turn(
         .await
         .context("mark chat run running")?;
 
+    let connector_name = agent.connector.as_str();
+    let stored_resume = session.provider_session_id.clone().filter(|s| !s.is_empty());
+    let connector_matches = session.provider_session_connector.as_deref() == Some(connector_name);
+    let mut chat_resume_attempted = false;
+    let mut chat_resume_used = false;
+    let mut chat_resume_fallback = false;
+
     tracing::info!(
         run_id = %run.id,
         chat_session_id = %session_id,
         agent_id = %run.agent_id,
         cwd = %cwd_str,
+        connector = connector_name,
         "chat turn started"
     );
 
-    let transcript = ChatService::new(pool)
-        .format_transcript(session_id)
-        .await
-        .context("format chat transcript")?;
+    let human_body = if let Some(mid) = run.chat_message_id {
+        ChatService::new(pool)
+            .get_message_body(mid)
+            .await
+            .context("load triggering human message")?
+    } else {
+        String::new()
+    };
 
     ChatService::new(pool)
         .stage_attachments_into_cwd(session_id, &cwd)
         .await
         .context("stage chat attachments into cwd")?;
 
-    let context_input = ContextInput {
-        ticket_title: "Agent Chat",
-        ticket_description: "",
-        ticket_status: "n/a",
-        ticket_substatus: None,
-        agent_name: &agent.name,
-        agent_key: &agent_key,
-        agent_role: &agent.role,
-        agent_skills: &agent.skills,
-        agent_responsibilities: &agent.responsibilities,
-        agent_system_prompt: &agent.system_prompt,
-        repo_name: None,
-        repo_remote_url: None,
-        repo_default_branch: None,
-        worktree_path: Some(&cwd_str),
-        latest_comments: Some(&transcript),
-        project_rules: None,
-        resume_context: None,
-        context_profile: ContextProfile::Conversation,
-        human_request: None,
-        ticket_id: None,
-        assignee_agent_key: None,
-        thread_excerpt: None,
-    };
     let context_path = cwd.join(".agent").join("context.md");
-    write_context_file(&cwd, &context_input).context("write chat context")?;
 
-    let connector_name = &agent.connector;
-    let connector = state
-        .connector_registry
-        .get(connector_name)
-        .ok_or_else(|| anyhow::anyhow!("agent connector not configured: {connector_name}"))?;
-
-    let provider_result = connector
-        .run(AgentRunInput {
-            agent_id: run.agent_id.to_string(),
-            agent_key: agent_key.clone(),
-            agent_role: agent.role.clone(),
-            job_type: run.job_type.clone(),
-            ticket_id: None,
-            ticket_status: None,
-            context_profile: ContextProfile::Conversation,
-            context_path: context_path.to_string_lossy().into_owned(),
-            run_id: Some(run.id.to_string()),
-            artifacts_dir: Some(state.config.storage.artifacts_dir.clone()),
-            model_provider: agent.model_provider.clone(),
-            model: agent.model.clone(),
-            stream: Some(stream.clone()),
-            cancel_rx: Some(cancel_rx),
-            session_created_tx: None,
-            resume_context: None,
-            resume_session_id: None,
-            read_only_tools: true,
-        })
-        .await;
+    let provider_result = if stored_resume.is_some() && connector_matches {
+        chat_resume_attempted = true;
+        chat_resume_used = true;
+        let slim_input = chat_context_input_base(&agent, &agent_key, &cwd_str, &human_body);
+        let markdown = build_conversation_resume_context(&slim_input);
+        write_context_document(&cwd, &markdown).context("write slim chat context")?;
+        match invoke_chat_provider(
+            state,
+            pool,
+            run,
+            &agent,
+            &agent_key,
+            connector_name,
+            &context_path,
+            stream.clone(),
+            cancel_rx.clone(),
+            stored_resume.clone(),
+        )
+        .await
+        {
+            Ok(result) => Ok(result),
+            Err(err) if is_resume_session_invalid(&err) => {
+                chat_resume_used = false;
+                chat_resume_fallback = true;
+                tracing::info!(
+                    connector = connector_name,
+                    chat_resume_fallback = true,
+                    "chat resume invalid, using full transcript fallback"
+                );
+                let transcript = ChatService::new(pool)
+                    .format_transcript(session_id)
+                    .await
+                    .context("format chat transcript for fallback")?;
+                let full_input = chat_context_input_base(&agent, &agent_key, &cwd_str, &transcript);
+                let markdown = build_conversation_context(&full_input);
+                write_context_document(&cwd, &markdown).context("write full chat context fallback")?;
+                invoke_chat_provider(
+                    state,
+                    pool,
+                    run,
+                    &agent,
+                    &agent_key,
+                    connector_name,
+                    &context_path,
+                    stream.clone(),
+                    cancel_rx,
+                    None,
+                )
+                .await
+            }
+            Err(err) => Err(err),
+        }
+    } else {
+        let transcript = ChatService::new(pool)
+            .format_transcript(session_id)
+            .await
+            .context("format chat transcript")?;
+        let full_input = chat_context_input_base(&agent, &agent_key, &cwd_str, &transcript);
+        let markdown = build_conversation_context(&full_input);
+        write_context_document(&cwd, &markdown).context("write chat context")?;
+        invoke_chat_provider(
+            state,
+            pool,
+            run,
+            &agent,
+            &agent_key,
+            connector_name,
+            &context_path,
+            stream.clone(),
+            cancel_rx,
+            None,
+        )
+        .await
+    };
 
     let result = match provider_result {
         Ok(result) => result,
@@ -897,6 +1027,9 @@ async fn execute_chat_turn(
             return Err(JobCancelled.into());
         }
         Err(err) => {
+            let _ = ChatService::new(pool)
+                .clear_provider_session(session_id)
+                .await;
             best_effort_persist_artifacts(
                 state,
                 &stream,
@@ -934,9 +1067,36 @@ async fn execute_chat_turn(
         .await
         .context("finish chat run")?;
 
+    let mut provider_sid = run_session_id(pool, run.id).await;
+    if provider_sid.is_none() && connector_supports_chat_resume(connector_name) {
+        for _ in 0..50 {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+            provider_sid = run_session_id(pool, run.id).await;
+            if provider_sid.is_some() {
+                break;
+            }
+        }
+    }
+    if let Some(sid) = provider_sid {
+        ChatService::new(pool)
+            .set_provider_session(session_id, connector_name, &sid)
+            .await
+            .context("persist chat provider session id")?;
+    }
+
     let session_id_opt = run_session_id(pool, run.id).await;
     persist_artifacts(state, &stream, run.id, connector_name, session_id_opt)?;
     state.run_streams.remove(run.id);
+
+    tracing::info!(
+        connector = connector_name,
+        chat_resume_attempted,
+        chat_resume_used,
+        chat_resume_fallback,
+        run_id = %run.id,
+        chat_session_id = %session_id,
+        "chat turn finished"
+    );
 
     publish_run_finished(
         state,

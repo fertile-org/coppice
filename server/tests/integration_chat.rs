@@ -159,13 +159,13 @@ async fn post_message_runs_mock_chat_turn_and_persists_reply() {
 async fn conversation_profile_refuses_write_capable_connectors() {
     use coppice_server::domain::context_profile::ContextProfile;
     use coppice_server::providers::{
-        cursor::CursorProvider, AgentProvider, AgentRunInput, ProviderError,
+        kilo_code::KiloCodeProvider, AgentProvider, AgentRunInput, ProviderError,
     };
-    use coppice_config::CursorProviderConfig;
+    use coppice_config::KiloCodeProviderConfig;
 
-    let provider = CursorProvider::new(CursorProviderConfig {
+    let provider = KiloCodeProvider::new(KiloCodeProviderConfig {
         enabled: true,
-        command: "agent".into(),
+        command: "kilo".into(),
         model_providers: vec![],
         run_timeout_secs: 30,
     });
@@ -191,9 +191,325 @@ async fn conversation_profile_refuses_write_capable_connectors() {
             read_only_tools: true,
         })
         .await
-        .expect_err("cursor must fail closed for read-only chat");
+        .expect_err("kilo-code must fail closed for read-only chat");
     assert!(matches!(err, ProviderError::InvalidInput(_)));
     assert!(err.to_string().contains("read-only"));
+}
+
+#[tokio::test]
+async fn chat_second_turn_sets_provider_session_id() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+
+    let (state, app, cookie, csrf, _env) =
+        common::bootstrap_and_login_with_state_and_workers("backend_engineer/chat_turn", |_| {})
+            .await;
+    let pool = state.db.as_ref().expect("test db");
+    let agent_id = common::create_agent_with_preset_key(
+        &app,
+        "backend_engineer",
+        "Backend Engineer",
+        &cookie,
+        &csrf,
+    )
+    .await;
+
+    let created = app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            "/api/chat/sessions",
+            &format!(r#"{{"agentId":"{agent_id}"}}"#),
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    let session: serde_json::Value = common::json_body(created).await;
+    let session_id = session["id"].as_str().unwrap();
+
+    for body in ["First question?", "Second question?"] {
+        let posted = app
+            .clone()
+            .oneshot(common::json_request(
+                "POST",
+                &format!("/api/chat/sessions/{session_id}/messages"),
+                &format!(r#"{{"body":"{body}"}}"#),
+                &cookie,
+                &csrf,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(posted.status(), StatusCode::CREATED);
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
+        while tokio::time::Instant::now() < deadline {
+            let list = app
+                .clone()
+                .oneshot(common::json_request(
+                    "GET",
+                    &format!("/api/chat/sessions/{session_id}/messages"),
+                    "",
+                    &cookie,
+                    &csrf,
+                ))
+                .await
+                .unwrap();
+            let messages: serde_json::Value = common::json_body(list).await;
+            let count = messages["messages"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter(|m| m["role"] == "agent")
+                .count();
+            if count >= if body == "First question?" { 1 } else { 2 } {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    }
+
+    let session_uuid = uuid::Uuid::parse_str(session_id).unwrap();
+    let row: (Option<String>, Option<String>) = sqlx::query_as(
+        "SELECT provider_session_id, provider_session_connector FROM chat_sessions WHERE id = $1",
+    )
+    .bind(session_uuid)
+    .fetch_one(pool)
+    .await
+    .expect("session row");
+    assert_eq!(row.0.as_deref(), Some("mock-chat-session"));
+    assert_eq!(row.1.as_deref(), Some("mock"));
+}
+
+#[tokio::test]
+async fn chat_second_turn_uses_slim_context() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+
+    let (_state, app, cookie, csrf, _env) =
+        common::bootstrap_and_login_with_state_and_workers("backend_engineer/chat_turn", |_| {})
+            .await;
+    let agent_id = common::create_agent_with_preset_key(
+        &app,
+        "backend_engineer",
+        "Backend Engineer",
+        &cookie,
+        &csrf,
+    )
+    .await;
+
+    let created = app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            "/api/chat/sessions",
+            &format!(r#"{{"agentId":"{agent_id}"}}"#),
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    let session: serde_json::Value = common::json_body(created).await;
+    let session_id = session["id"].as_str().unwrap();
+
+    app.clone()
+        .oneshot(common::json_request(
+            "POST",
+            &format!("/api/chat/sessions/{session_id}/messages"),
+            r#"{"body":"First"}"#,
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
+    while tokio::time::Instant::now() < deadline {
+        let list = app
+            .clone()
+            .oneshot(common::json_request(
+                "GET",
+                &format!("/api/chat/sessions/{session_id}/messages"),
+                "",
+                &cookie,
+                &csrf,
+            ))
+            .await
+            .unwrap();
+        let messages: serde_json::Value = common::json_body(list).await;
+        if messages["messages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|m| m["role"] == "agent")
+        {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+
+    std::env::set_var("MOCK_CHAT_EXPECT_SLIM", "1");
+    let posted = app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            &format!("/api/chat/sessions/{session_id}/messages"),
+            r#"{"body":"Second"}"#,
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(posted.status(), StatusCode::CREATED);
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
+    while tokio::time::Instant::now() < deadline {
+        let list = app
+            .clone()
+            .oneshot(common::json_request(
+                "GET",
+                &format!("/api/chat/sessions/{session_id}/messages"),
+                "",
+                &cookie,
+                &csrf,
+            ))
+            .await
+            .unwrap();
+        let messages: serde_json::Value = common::json_body(list).await;
+        let agent_count = messages["messages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|m| m["role"] == "agent")
+            .count();
+        if agent_count >= 2 {
+            std::env::remove_var("MOCK_CHAT_EXPECT_SLIM");
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    std::env::remove_var("MOCK_CHAT_EXPECT_SLIM");
+    panic!("second agent reply not persisted");
+}
+
+#[tokio::test]
+async fn chat_resume_fallback_succeeds() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+
+    let (state, app, cookie, csrf, _env) =
+        common::bootstrap_and_login_with_state_and_workers("backend_engineer/chat_turn", |_| {})
+            .await;
+    let pool = state.db.as_ref().expect("test db");
+    let agent_id = common::create_agent_with_preset_key(
+        &app,
+        "backend_engineer",
+        "Backend Engineer",
+        &cookie,
+        &csrf,
+    )
+    .await;
+
+    let created = app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            "/api/chat/sessions",
+            &format!(r#"{{"agentId":"{agent_id}"}}"#),
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    let session: serde_json::Value = common::json_body(created).await;
+    let session_id = session["id"].as_str().unwrap();
+    let session_uuid = uuid::Uuid::parse_str(session_id).unwrap();
+
+    app.clone()
+        .oneshot(common::json_request(
+            "POST",
+            &format!("/api/chat/sessions/{session_id}/messages"),
+            r#"{"body":"First"}"#,
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
+    while tokio::time::Instant::now() < deadline {
+        let list = app
+            .clone()
+            .oneshot(common::json_request(
+                "GET",
+                &format!("/api/chat/sessions/{session_id}/messages"),
+                "",
+                &cookie,
+                &csrf,
+            ))
+            .await
+            .unwrap();
+        let messages: serde_json::Value = common::json_body(list).await;
+        if messages["messages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|m| m["role"] == "agent")
+        {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+
+    sqlx::query(
+        "UPDATE chat_sessions SET provider_session_id = 'stale-mock', provider_session_connector = 'mock' WHERE id = $1",
+    )
+    .bind(session_uuid)
+    .execute(pool)
+    .await
+    .expect("seed provider session");
+
+    std::env::set_var("MOCK_CHAT_RESUME_FAIL", "1");
+    app.clone()
+        .oneshot(common::json_request(
+            "POST",
+            &format!("/api/chat/sessions/{session_id}/messages"),
+            r#"{"body":"Second after fallback"}"#,
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
+    while tokio::time::Instant::now() < deadline {
+        let list = app
+            .clone()
+            .oneshot(common::json_request(
+                "GET",
+                &format!("/api/chat/sessions/{session_id}/messages"),
+                "",
+                &cookie,
+                &csrf,
+            ))
+            .await
+            .unwrap();
+        let messages: serde_json::Value = common::json_body(list).await;
+        let agent_count = messages["messages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|m| m["role"] == "agent")
+            .count();
+        if agent_count >= 2 {
+            std::env::remove_var("MOCK_CHAT_RESUME_FAIL");
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    std::env::remove_var("MOCK_CHAT_RESUME_FAIL");
+    panic!("fallback chat turn did not persist agent reply");
 }
 
 #[tokio::test]

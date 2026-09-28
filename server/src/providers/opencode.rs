@@ -1,7 +1,4 @@
-use super::{
-    refuse_unsupported_read_only, worktree_dir_from_context, AgentProvider, AgentRunInput,
-    AgentRunResult, ProviderError,
-};
+use super::{worktree_dir_from_context, AgentProvider, AgentRunInput, AgentRunResult, ProviderError};
 use crate::sessions::opencode_client::OpenCodeClient;
 use crate::sessions::opencode_events::coppice_run_prompt;
 use crate::sessions::opencode_serve::OpenCodeServeManager;
@@ -28,9 +25,6 @@ impl AgentProvider for OpenCodeProvider {
     }
 
     async fn run(&self, input: AgentRunInput) -> Result<AgentRunResult, ProviderError> {
-        if input.read_only_tools {
-            return Err(refuse_unsupported_read_only(self.id()));
-        }
         let worktree = worktree_dir_from_context(&input.context_path)?;
 
         let run_timeout = Duration::from_secs(self.config.run_timeout_secs);
@@ -40,6 +34,7 @@ impl AgentProvider for OpenCodeProvider {
                 &worktree,
                 input.model_provider.as_deref(),
                 input.model.as_deref(),
+                input.resume_session_id.as_deref(),
                 coppice_run_prompt(),
                 input.stream,
                 input.cancel_rx,

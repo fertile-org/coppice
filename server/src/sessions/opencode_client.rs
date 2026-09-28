@@ -93,15 +93,26 @@ impl OpenCodeClient {
         directory: &Path,
         model_provider: Option<&str>,
         model: Option<&str>,
+        resume_session_id: Option<&str>,
         prompt: &str,
         stream: Option<Arc<RunStreamHandle>>,
         cancel_rx: Option<watch::Receiver<bool>>,
         session_created_tx: Option<watch::Sender<String>>,
     ) -> Result<AgentRunResult, ProviderError> {
         let directory = Self::resolve_directory(directory)?;
-        let session_id = self
-            .create_session(&directory, model_provider, model)
-            .await?;
+        let session_id = if let Some(sid) = resume_session_id.filter(|s| !s.is_empty()) {
+            match self.session_status(&directory, sid).await? {
+                Some(_) => sid.to_string(),
+                None => {
+                    return Err(ProviderError::ResumeSessionInvalid(format!(
+                        "opencode session {sid} not found"
+                    )));
+                }
+            }
+        } else {
+            self.create_session(&directory, model_provider, model)
+                .await?
+        };
 
         if let Some(tx) = session_created_tx {
             let _ = tx.send(session_id.clone());
@@ -273,6 +284,10 @@ impl OpenCodeClient {
         let status = resp.status();
         if status == reqwest::StatusCode::NO_CONTENT || status.is_success() {
             Ok(())
+        } else if status == reqwest::StatusCode::NOT_FOUND {
+            Err(ProviderError::ResumeSessionInvalid(
+                "opencode prompt session not found".into(),
+            ))
         } else {
             let value: serde_json::Value = resp.json().await.unwrap_or(json!({}));
             Err(api_error("prompt session", status, value))

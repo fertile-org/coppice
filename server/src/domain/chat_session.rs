@@ -40,6 +40,8 @@ pub struct ChatSession {
     pub repo_id: Option<Uuid>,
     pub parent_session_id: Option<Uuid>,
     pub status: ChatSessionStatus,
+    pub provider_session_id: Option<String>,
+    pub provider_session_connector: Option<String>,
     pub created_at: OffsetDateTime,
     pub updated_at: OffsetDateTime,
 }

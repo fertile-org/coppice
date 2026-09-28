@@ -76,6 +76,7 @@ model_providers = ["cursor"]
 ## Behavior notes
 
 - **Live console:** Streams Cursor’s progress while the run is active. After a server restart mid-run, live reattach is not possible; Coppice replays the saved log and marks an interrupted run.
+- **Agent Chat:** Later turns use `--resume` with `--mode ask` (read-only); Coppice stores the session id on the chat session row.
 - **Continued tickets:** Follow-up runs can resume the same Cursor chat session when Coppice has a prior `session_id`.
 - **Worktrees:** Coppice owns git worktrees. It does not pass Cursor’s `-w` / `--worktree` flag.
 - **MCP:** Not injected by Coppice in this version.

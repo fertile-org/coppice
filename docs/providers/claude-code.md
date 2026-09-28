@@ -72,6 +72,7 @@ model_providers = ["sonnet", "opus", "haiku"]
 ## Behavior notes
 
 - **Live console:** Streams Claude Code output while the run is active. After a server restart mid-run, Coppice replays the saved log.
+- **Agent Chat:** Later turns pass `--resume` with a narrow read-only `--allowedTools` set; Coppice stores the session id on the chat session row.
 - **Continued tickets:** Follow-up runs can resume the same Claude session when Coppice has a prior `session_id`.
 - **Long context:** Within a single run, Claude Code may compact history near the model limit. Across runs, prefer checkpoint-style `continued` results (see [context design](../superpowers/specs/2026-06-10-context-long-running-tasks-design.md)).
 

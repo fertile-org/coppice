@@ -49,6 +49,21 @@ Design notes: [M08](../milestones/M08-connector-operator-cli.md).
 
 Unreachable or misconfigured agents are not used for new auto-assignments until fixed.
 
+## Agent Chat multi-turn (provider session resume)
+
+Agent Chat reuses the vendor session across human messages when possible. Coppice still stores the full transcript in Postgres; on later turns the worker passes `--resume` / OpenCode session reuse with a **slim** `.agent/context.md`. If resume fails, one automatic retry sends the full transcript (logged as `chat_resume_fallback`).
+
+| Connector | Resume | Read-only enforcement in chat |
+|-----------|--------|-------------------------------|
+| `mock` | Yes (CI) | Fixtures |
+| `claude-code` | `--resume` | `--allowedTools` read-only allowlist |
+| `cursor` | `--resume` | `--mode ask` |
+| `codex` | `codex exec resume` (best-effort) | Prompt + rules only; CLI uses bypass flag — see [codex.md](codex.md) |
+| `opencode` | HTTP session `prompt_async` | Prompt + rules only — see [opencode.md](opencode.md) |
+| `kilo-code` | — | Not supported for chat |
+
+Design: [Agent Chat provider session resume](../superpowers/specs/2026-09-28-agent-chat-provider-session-resume-design.md).
+
 ## Adding a connector
 
 See [architecture.md](../architecture.md) (server `providers/`, thin API handlers) and the existing docs above as templates. Prefer a dedicated provider module and live model listing when the CLI supports it.

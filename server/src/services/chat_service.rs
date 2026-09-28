@@ -233,6 +233,7 @@ impl<'a> ChatService<'a> {
             VALUES ($1, $2, $3, $4, $5, $6, $7)
             RETURNING
                 id, project_id, owner_user_id, agent_id, repo_id, parent_session_id, status,
+                provider_session_id, provider_session_connector,
                 created_at, updated_at
             "#,
         )
@@ -259,6 +260,7 @@ impl<'a> ChatService<'a> {
                 r#"
                 SELECT
                     id, project_id, owner_user_id, agent_id, repo_id, parent_session_id, status,
+                    provider_session_id, provider_session_connector,
                     created_at, updated_at
                 FROM chat_sessions
                 WHERE owner_user_id = $1 AND project_id = $2
@@ -274,6 +276,7 @@ impl<'a> ChatService<'a> {
                 r#"
                 SELECT
                     id, project_id, owner_user_id, agent_id, repo_id, parent_session_id, status,
+                    provider_session_id, provider_session_connector,
                     created_at, updated_at
                 FROM chat_sessions
                 WHERE owner_user_id = $1
@@ -297,6 +300,7 @@ impl<'a> ChatService<'a> {
             r#"
             SELECT
                 id, project_id, owner_user_id, agent_id, repo_id, parent_session_id, status,
+                provider_session_id, provider_session_connector,
                 created_at, updated_at
             FROM chat_sessions
             WHERE id = $1 AND owner_user_id = $2
@@ -315,6 +319,7 @@ impl<'a> ChatService<'a> {
             r#"
             SELECT
                 id, project_id, owner_user_id, agent_id, repo_id, parent_session_id, status,
+                provider_session_id, provider_session_connector,
                 created_at, updated_at
             FROM chat_sessions
             WHERE id = $1
@@ -325,6 +330,55 @@ impl<'a> ChatService<'a> {
         .await?
         .ok_or(ChatError::NotFound)?;
         Ok(row_to_session(&row))
+    }
+
+    pub async fn set_provider_session(
+        &self,
+        session_id: Uuid,
+        connector: &str,
+        provider_session_id: &str,
+    ) -> Result<(), ChatError> {
+        sqlx::query(
+            r#"
+            UPDATE chat_sessions
+            SET provider_session_id = $2,
+                provider_session_connector = $3,
+                updated_at = now()
+            WHERE id = $1
+            "#,
+        )
+        .bind(session_id)
+        .bind(provider_session_id)
+        .bind(connector)
+        .execute(self.pool)
+        .await?;
+        Ok(())
+    }
+
+    pub async fn clear_provider_session(&self, session_id: Uuid) -> Result<(), ChatError> {
+        sqlx::query(
+            r#"
+            UPDATE chat_sessions
+            SET provider_session_id = NULL,
+                provider_session_connector = NULL,
+                updated_at = now()
+            WHERE id = $1
+            "#,
+        )
+        .bind(session_id)
+        .execute(self.pool)
+        .await?;
+        Ok(())
+    }
+
+    pub async fn get_message_body(&self, message_id: Uuid) -> Result<String, ChatError> {
+        let body: Option<String> = sqlx::query_scalar(
+            r#"SELECT body FROM chat_messages WHERE id = $1"#,
+        )
+        .bind(message_id)
+        .fetch_optional(self.pool)
+        .await?;
+        body.ok_or(ChatError::NotFound)
     }
 
     pub async fn patch_session(
@@ -347,6 +401,7 @@ impl<'a> ChatService<'a> {
             WHERE id = $1 AND owner_user_id = $3
             RETURNING
                 id, project_id, owner_user_id, agent_id, repo_id, parent_session_id, status,
+                provider_session_id, provider_session_connector,
                 created_at, updated_at
             "#,
         )
@@ -1048,6 +1103,7 @@ impl<'a> ChatService<'a> {
         let parent = self
             .patch_session(session_id, owner_user_id, ChatSessionStatus::Cutoff)
             .await?;
+        self.clear_provider_session(session_id).await?;
 
         let child = self
             .create_session_inner(
@@ -1152,6 +1208,8 @@ fn row_to_session(row: &sqlx::postgres::PgRow) -> ChatSession {
         repo_id: row.get("repo_id"),
         parent_session_id: row.try_get("parent_session_id").ok().flatten(),
         status: ChatSessionStatus::from_str(&status_str).unwrap_or(ChatSessionStatus::Active),
+        provider_session_id: row.try_get("provider_session_id").ok().flatten(),
+        provider_session_connector: row.try_get("provider_session_connector").ok().flatten(),
         created_at: row.get("created_at"),
         updated_at: row.get("updated_at"),
     }

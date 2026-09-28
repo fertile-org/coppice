@@ -220,11 +220,11 @@ Rules:
 | `mock` | Yes (orchestrator/fixture) | **Supported** (CI) |
 | `claude-code` | Yes — narrow `--allowedTools` (omit Write/Edit/MultiEdit/NotebookEdit/Bash/TodoWrite/Task; keep Read/Glob/Grep; decide WebFetch/WebSearch as read-only OK) | **Supported** when enabled |
 | `cursor` | Yes — `--mode ask` (read-only Q&A; omit `--force`) | **Supported** when enabled |
-| `codex` | No (`--dangerously-bypass-…`) | **Unsupported** — fail closed |
+| `codex` | No (`--dangerously-bypass-…`) | **Supported** with documented risk — see [2026-09-28 provider session resume](./2026-09-28-agent-chat-provider-session-resume-design.md) |
 | `kilo-code` | No (`--auto`) | **Unsupported** — fail closed |
-| `opencode` | No proven read-only allowlist in-tree today | **Unsupported** — fail closed until implementer proves flags and updates this matrix |
+| `opencode` | No proven read-only allowlist in-tree today | **Supported** with documented risk — see [2026-09-28 provider session resume](./2026-09-28-agent-chat-provider-session-resume-design.md) |
 
-M07 sandbox is defense-in-depth, not a substitute for this matrix. Expanding chat-capable connectors is a follow-up after enforceable flags exist.
+M07 sandbox is defense-in-depth, not a substitute for this matrix. Multi-turn provider session resume is specified in the 2026-09-28 design gate.
 
 ## Streaming
 

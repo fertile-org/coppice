@@ -145,6 +145,28 @@ pub enum ProviderError {
     Io(#[from] std::io::Error),
     #[error("run cancelled")]
     Cancelled,
+    #[error("resume session invalid: {0}")]
+    ResumeSessionInvalid(String),
+}
+
+pub const CHAT_RESUME_CONNECTORS: &[&str] =
+    &["mock", "opencode", "claude-code", "cursor", "codex"];
+
+pub fn connector_supports_chat_resume(connector: &str) -> bool {
+    CHAT_RESUME_CONNECTORS.contains(&connector)
+}
+
+pub fn is_resume_session_invalid(err: &ProviderError) -> bool {
+    match err {
+        ProviderError::ResumeSessionInvalid(_) => true,
+        ProviderError::InvalidInput(msg) | ProviderError::InvalidFixture(msg) => {
+            let m = msg.to_ascii_lowercase();
+            ["session not found", "invalid resume", "unknown session"]
+                .iter()
+                .any(|needle| m.contains(needle))
+        }
+        _ => false,
+    }
 }
 
 #[async_trait]
@@ -190,6 +212,22 @@ pub fn absolute_existing_dir(path: &std::path::Path) -> Result<PathBuf, Provider
 mod tests {
     use super::*;
     use crate::providers::mock::{mock_env_lock, MockProvider};
+
+    #[test]
+    fn resume_invalid_detection() {
+        assert!(is_resume_session_invalid(&ProviderError::ResumeSessionInvalid("x".into())));
+        assert!(is_resume_session_invalid(
+            &ProviderError::InvalidInput("session not found".into())
+        ));
+        assert!(!is_resume_session_invalid(&ProviderError::Cancelled));
+    }
+
+    #[test]
+    fn chat_resume_connectors_include_all_vendor_chat_clis() {
+        for id in ["mock", "opencode", "claude-code", "cursor", "codex"] {
+            assert!(connector_supports_chat_resume(id));
+        }
+    }
 
     #[test]
     fn agent_run_result_deserializes_done_fixture() {

@@ -174,10 +174,10 @@ async function createChatSession(agentId, auth) {
   return session;
 }
 
-async function postHumanMessage(sessionId, auth) {
+async function postHumanMessage(sessionId, auth, text = 'What is the cwd policy for chat?') {
   const res = await api('POST', `/api/chat/sessions/${sessionId}/messages`, {
     ...auth,
-    body: { body: 'What is the cwd policy for chat?' },
+    body: { body: text },
   });
 
   if (res.status !== 201) {
@@ -288,6 +288,8 @@ async function main() {
   const agent = await createBackendEngineerAgent(auth);
   const session = await createChatSession(agent.id, auth);
   await postHumanMessage(session.id, auth);
+  await pollUntilAgentReply(session.id, auth);
+  await postHumanMessage(session.id, auth, 'Second turn for provider session reuse.');
   await pollUntilAgentReply(session.id, auth);
   await cutoffSession(session.id, auth);
   await assertParentRejectsMessages(session.id, auth);
