@@ -35,6 +35,22 @@ use std::time::Duration;
 use uuid::Uuid;
 
 const TRANSCRIPT_COMPACT_CHARS: usize = 4_000;
+pub const CHAT_MESSAGE_PREVIEW_MAX_LEN: usize = 120;
+
+/// Collapse whitespace and truncate to [`CHAT_MESSAGE_PREVIEW_MAX_LEN`] chars for session list previews.
+pub fn truncate_message_preview(body: &str) -> String {
+    let collapsed = body
+        .replace(['\r', '\n'], " ")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    if collapsed.chars().count() <= CHAT_MESSAGE_PREVIEW_MAX_LEN {
+        return collapsed;
+    }
+    let mut out: String = collapsed.chars().take(CHAT_MESSAGE_PREVIEW_MAX_LEN).collect();
+    out.push('…');
+    out
+}
 const DRAFT_TICKET_TIMEOUT: Duration = Duration::from_secs(45);
 const MAX_CHAT_ATTACHMENTS_PER_MESSAGE: usize = 5;
 
@@ -1235,6 +1251,14 @@ fn row_to_message(row: &sqlx::postgres::PgRow) -> ChatMessage {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn truncate_message_preview_caps_at_120() {
+        let long = "a".repeat(150);
+        let preview = truncate_message_preview(&long);
+        assert!(preview.chars().count() <= 121);
+        assert!(preview.ends_with('…'));
+    }
 
     #[test]
     fn chat_mime_allowlist_excludes_html_and_svg() {
