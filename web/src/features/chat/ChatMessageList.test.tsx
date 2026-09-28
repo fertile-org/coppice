@@ -102,6 +102,17 @@ describe('ChatMessageList', () => {
     expect(agent.className).toMatch(/bg-moss-50/);
   });
 
+  it('shows streaming agent row inside the virtualized list', () => {
+    renderList(
+      <ChatMessageList
+        messages={[]}
+        streamingAgent={{ runId: 'run-1', text: 'Partial…' }}
+      />,
+    );
+    expect(screen.getByText(/Partial/)).toBeInTheDocument();
+    expect(screen.getByTestId('chat-streaming-bubble')).toBeInTheDocument();
+  });
+
   it('virtualizes a long transcript in a scrollable log', () => {
     renderList(<ChatMessageList messages={messages} thinking />);
 

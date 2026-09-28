@@ -106,7 +106,41 @@ function ActionMetadataChip({ message }: { message: ChatMessage }) {
   return null;
 }
 
-export function ChatMessageBubble({ message }: { message: ChatMessage }) {
+export function ChatMessageBubble({
+  message,
+  streaming,
+  streamingText,
+}: {
+  message?: ChatMessage;
+  streaming?: boolean;
+  streamingText?: string;
+}) {
+  if (streaming) {
+    const text = streamingText?.trim() ?? '';
+    return (
+      <div className="flex w-full justify-start">
+        <article
+          data-role="agent"
+          aria-label="Agent"
+          aria-live="polite"
+          aria-busy="true"
+          className="max-w-[85%] rounded-2xl rounded-bl-md border border-moss-200 bg-moss-50 px-3 py-1.5 font-body text-sm text-text-primary"
+          data-testid="chat-streaming-bubble"
+        >
+          {text ? (
+            <div className="leading-snug text-text-primary">
+              <MarkdownContent>{text}</MarkdownContent>
+            </div>
+          ) : (
+            <ThinkingIndicator />
+          )}
+        </article>
+      </div>
+    );
+  }
+
+  if (!message) return null;
+
   const isHuman = message.role === 'human';
   const isSystem = message.role === 'system';
   const attachments =
@@ -169,14 +203,18 @@ export function ChatMessageBubble({ message }: { message: ChatMessage }) {
 export function ChatMessageList({
   messages,
   thinking,
+  streamingAgent,
 }: {
   messages: ChatMessage[];
   thinking?: boolean;
+  streamingAgent?: { runId: string; text: string; error?: string | null };
 }) {
   const parentRef = useRef<HTMLDivElement>(null);
+  const streamingRow = streamingAgent ? 1 : 0;
+  const rowCount = messages.length + streamingRow;
 
   const virtualizer = useVirtualizer({
-    count: messages.length,
+    count: rowCount,
     getScrollElement: () => parentRef.current,
     estimateSize: () => ESTIMATED_ROW_HEIGHT,
     measureElement: (element) => {
@@ -189,9 +227,9 @@ export function ChatMessageList({
   });
 
   useEffect(() => {
-    if (messages.length === 0) return;
-    virtualizer.scrollToIndex(messages.length - 1, { align: 'end' });
-  }, [messages.length, virtualizer]);
+    if (rowCount === 0) return;
+    virtualizer.scrollToIndex(rowCount - 1, { align: 'end' });
+  }, [rowCount, virtualizer, streamingAgent?.text]);
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-1.5">
@@ -216,12 +254,23 @@ export function ChatMessageList({
                 transform: `translateY(${item.start}px)`,
               }}
             >
-              <ChatMessageBubble message={messages[item.index]!} />
+              {item.index < messages.length ? (
+                <ChatMessageBubble message={messages[item.index]!} />
+              ) : (
+                <ChatMessageBubble
+                  streaming
+                  streamingText={
+                    streamingAgent?.error
+                      ? streamingAgent.error
+                      : streamingAgent?.text
+                  }
+                />
+              )}
             </div>
           ))}
         </div>
       </div>
-      {thinking ? <ThinkingIndicator /> : null}
+      {thinking && !streamingAgent ? <ThinkingIndicator /> : null}
     </div>
   );
 }
