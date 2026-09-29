@@ -250,26 +250,31 @@ async fn successful_work_consultation_runs_once_and_response_cannot_chain() {
     )
     .expect("read consultation context");
     let exact_request = "Verify the data assumptions used by the frontend implementation.";
+    let task_pos = context.find("# Task\n").expect("task section");
     let request_pos = context
         .find(exact_request)
         .expect("exact request in context");
     let rules_pos = context
-        .find("Coppice platform rules — consultation response")
+        .find("Do not take assignment")
         .expect("consultation rules");
-    let ticket_pos = context.find("# Ticket context").expect("ticket context");
-    let thread_pos = context.find("## Ticket thread").expect("ticket thread");
-    let role_pos = context.find("# Agent role").expect("agent role");
-    let contract_pos = context
-        .find("# Expected response-only result contract")
-        .expect("response contract");
+    let ticket_pos = context.find("## Ticket\n").expect("ticket summary");
+    let repo_pos = context.find("# Repository\n").expect("repository");
+    let skills_pos = context.find("# Skills\n").expect("skills");
+    let tools_pos = context.find("# Coppice tools\n").expect("tools");
+    assert!(task_pos < request_pos);
     assert!(request_pos < rules_pos);
     assert!(rules_pos < ticket_pos);
-    assert!(ticket_pos < thread_pos);
-    assert!(thread_pos < role_pos);
-    assert!(role_pos < contract_pos);
+    assert!(ticket_pos < repo_pos);
+    assert!(repo_pos < skills_pos);
+    assert!(skills_pos < tools_pos);
+    // Ticket thread and description arrive via tools, not embedded.
+    assert!(!context.contains("## Ticket thread"));
+    assert!(context.contains("`ticket_comments`"));
+    assert!(context.contains("`result_submit`"));
     assert!(context.contains("Do not edit"));
     assert!(context.contains("Do not commit"));
     assert!(context.contains("Do not take assignment"));
+    assert!(context.contains("Read-only run"));
 
     let ticket_uuid = uuid::Uuid::parse_str(&ticket_id).expect("ticket UUID");
     let handled_mentions = sqlx::query_scalar::<_, i64>(

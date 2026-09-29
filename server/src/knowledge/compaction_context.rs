@@ -196,29 +196,17 @@ fn write_contract(out: &mut String) {
     let _ = writeln!(out, "## Output\n");
     let _ = writeln!(
         out,
-        "Reply with a single fenced JSON block:\n\n\
-```json\n\
-{{\n\
-  \"status\": \"done\",\n\
-  \"summary\": \"Compacted N tickets into M candidates.\",\n\
-  \"knowledgeCandidates\": [\n\
-    {{\n\
-      \"type\": \"test_command\",\n\
-      \"scope\": \"board\",\n\
-      \"boardId\": \"<board id of every source ticket>\",\n\
-      \"agentId\": null,\n\
-      \"title\": \"Short imperative rule (max 160 chars)\",\n\
-      \"content\": \"The rule and why it holds.\",\n\
-      \"confidence\": \"high\",\n\
-      \"sourceTicketIds\": [\"<ticket id from this batch>\"],\n\
-      \"supersedesItemId\": null,\n\
-      \"requiresHumanApproval\": false\n\
-    }}\n\
-  ]\n\
-}}\n\
-```\n\n\
-`scope` is `board`, `workspace`, or `agent` (agent scope also needs `agentId`). \
-`confidence` is `low`, `medium`, or `high`. Every `sourceTicketIds` entry must be a ticket id listed above."
+        "Finish by calling `result_submit` with `status: \"done\"`, a `summary` such as \
+         \"Compacted N tickets into M candidates.\", and a `knowledgeCandidates` array; fix and \
+         resubmit if it returns errors. Each candidate has: `type`, `scope`, `boardId` (the board id \
+         of every source ticket), `agentId` (null unless agent scope), `title` (short imperative rule, \
+         max 160 chars), `content` (the rule and why it holds), `confidence`, `sourceTicketIds` (ticket \
+         ids from this batch), `supersedesItemId` (null unless replacing an item), and \
+         `requiresHumanApproval`.\n\n\
+         `scope` is `board`, `workspace`, or `agent` (agent scope also needs `agentId`). \
+         `confidence` is `low`, `medium`, or `high`. Every `sourceTicketIds` entry must be a ticket id listed above. \
+         Use `ticket_get` / `ticket_comments` for more detail on a listed ticket and `knowledge_search` \
+         to check existing knowledge."
     );
 }
 
@@ -373,7 +361,9 @@ mod tests {
         assert!(markdown.contains(&tickets[0].id.to_string()));
         assert!(markdown.contains("Mutations need X-CSRF-Token."));
         assert!(markdown.contains("comment 1"));
-        assert!(markdown.contains("\"knowledgeCandidates\""));
+        assert!(markdown.contains("`result_submit`"));
+        assert!(markdown.contains("`knowledgeCandidates`"));
+        assert!(!markdown.contains("```json"));
         assert!(markdown.contains("`performance_note`"));
     }
 

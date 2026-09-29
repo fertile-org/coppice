@@ -34,23 +34,6 @@ pub(crate) fn split_ticket_description(description: &str) -> (String, Option<Str
     }
 }
 
-pub(crate) fn build_ticket_json(
-    ticket: &TicketWithDisplay,
-    assignee_agent_key: Option<&str>,
-) -> Value {
-    let (description, acceptance_criteria) = split_ticket_description(&ticket.ticket.description);
-    json!({
-        "id": ticket.ticket.id,
-        "title": ticket.ticket.title,
-        "status": status_to_str(ticket.ticket.status),
-        "substatus": ticket.ticket.substatus.as_ref().map(|s| substatus_to_str(*s)),
-        "description": description,
-        "acceptance_criteria": acceptance_criteria,
-        "assignee_agent_id": ticket.ticket.assignee_agent_id,
-        "assignee_agent_key": assignee_agent_key,
-    })
-}
-
 pub(crate) fn build_comments_json(
     comments: &[Comment],
     agent_names: &HashMap<Uuid, String>,

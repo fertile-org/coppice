@@ -13,7 +13,6 @@ use crate::domain::context_profile::ContextProfile;
 use crate::mcp::grant::{grant_for_run, McpAccess};
 use crate::mcp::token::NewRunToolScope;
 use crate::mcp::tools::result::prefer_submitted_result;
-use crate::mcp::tools::tickets::{build_comments_json, build_runs_json, build_ticket_json};
 use crate::domain::run::{run_status_to_str, AgentRun, RunStatus};
 use crate::domain::slug::slugify;
 use crate::domain::substatus::TicketStatus;
@@ -28,13 +27,9 @@ use crate::services::agent_request::agent_request_for_target_from_comment;
 use crate::services::agent_service::AgentService;
 use crate::services::artifact_service::{ArtifactService, RunArtifactMeta, RunArtifactPaths};
 use crate::services::comment_service::CommentService;
+use crate::plugins::skills::required_skill;
 use crate::services::context_builder::{
-    build_conversation_context, build_conversation_resume_context, write_agent_context_files,
-    write_context_document, write_context_file, ContextInput, HumanRequest,
-};
-use crate::services::context_budget::{
-    build_budgeted_context, record_usage, render_knowledge, select_within_budget, ByteTokenCounter,
-    KnowledgeSection,
+    build_tool_first_context, write_context_document, ContextInput, HumanRequest,
 };
 use crate::services::job_service::JobService;
 use crate::services::mention_service::MentionService;
@@ -51,7 +46,6 @@ use crate::services::worktree_service::{
 use crate::util::error_format::format_job_error;
 use crate::util::truncate::truncate_with_ellipsis;
 use crate::AppState;
-use crate::knowledge::retrieval::{has_eligible, retrieve};
 use time::format_description::well_known::Rfc3339;
 
 mod compaction;
@@ -330,26 +324,6 @@ async fn execute_job(
     };
     let resume_context_ref = resume_context.as_deref();
 
-    let latest_comments_owned = if run.context_profile == ContextProfile::Full {
-        let comments = CommentService::new(pool)
-            .list_by_ticket(ticket_id)
-            .await
-            .context("load latest comments for full context")?;
-        ticket_thread::format_ticket_thread_with_limit(
-            &comments,
-            &agent_names,
-            state
-                .config
-                .knowledge
-                .context_budget
-                .latest_comments
-                .saturating_mul(4),
-        )
-    } else {
-        None
-    };
-    let latest_comments_ref = latest_comments_owned.as_deref();
-
     let thread_excerpt_owned = if run.context_profile == ContextProfile::HumanChat {
         let comments = CommentService::new(pool)
             .list_by_ticket(ticket_id)
@@ -455,13 +429,6 @@ async fn execute_job(
         .as_ref()
         .map(|s| substatus_to_str(*s));
     let worktree_path = paths.worktree_dir.to_string_lossy().into_owned();
-    let ticket_description = match run.context_profile {
-        ContextProfile::Full => ticket.ticket.description.as_str(),
-        ContextProfile::HumanAgent
-        | ContextProfile::HumanChat
-        | ContextProfile::Conversation
-        | ContextProfile::KnowledgeCompaction => "",
-    };
     let context_thread_excerpt = match run.context_profile {
         ContextProfile::Full if run.job_type == "work_on_ticket" => None,
         ContextProfile::Full => Some(consultation_request_ref.unwrap_or_default()),
@@ -472,7 +439,8 @@ async fn execute_job(
     };
     let context_input = ContextInput {
         ticket_title: &ticket.ticket.title,
-        ticket_description,
+        // Description, comments and history are fetched via MCP tools.
+        ticket_description: "",
         ticket_status: status_to_str(ticket.ticket.status),
         ticket_substatus,
         agent_name: &agent.name,
@@ -485,7 +453,7 @@ async fn execute_job(
         repo_remote_url: repo_remote_url.as_deref(),
         repo_default_branch: Some(&repo_default_branch),
         worktree_path: Some(&worktree_path),
-        latest_comments: latest_comments_ref,
+        latest_comments: None,
         project_rules: project_rules_ref,
         resume_context: resume_context_ref,
         context_profile: run.context_profile,
@@ -494,83 +462,19 @@ async fn execute_job(
         assignee_agent_key: assignee_agent_key_ref,
         thread_excerpt: context_thread_excerpt,
     };
-    if run.context_profile == ContextProfile::Full {
-        let counter = ByteTokenCounter;
-        let knowledge_section = if state.config.knowledge.enabled
-            && has_eligible(
-                pool,
-                ticket.ticket.board_id,
-                run.agent_id,
-                &state.config.knowledge.retrieval,
-            )
-            .await
-            .context("check eligible knowledge")?
-        {
-            let query_body: String = ticket.ticket.description.chars().take(32_000).collect();
-            let eligible = retrieve(
-                pool,
-                ticket.ticket.board_id,
-                run.agent_id,
-                &ticket.ticket.title,
-                &query_body,
-                &state.config.knowledge.retrieval,
-            )
-            .await
-            .context("retrieve knowledge")?;
-            let knowledge_budget = state.config.knowledge.context_budget.retrieved_knowledge;
-            let selected = select_within_budget(
-                eligible,
-                state.config.knowledge.retrieval.top_k,
-                knowledge_budget,
-                &counter,
-            );
-            render_knowledge(&selected, knowledge_budget, &counter)
-        } else {
-            KnowledgeSection::default()
-        };
-        let budgeted = build_budgeted_context(
-            &context_input,
-            &knowledge_section,
-            &state.config.knowledge.context_budget,
-            &counter,
-        )
-        .context("enforce agent context budget")?;
-        write_context_document(&paths.worktree_dir, &budgeted.markdown)
-            .context("write context file")?;
-        record_usage(pool, run.id, &budgeted.knowledge_entries)
-            .await
-            .context("record knowledge usage")?;
-        tracing::debug!(
-            run_id = %run.id,
-            tokens = budgeted.token_count,
-            token_counter = budgeted.token_counter,
-            knowledge_entries = budgeted.knowledge_entries.len(),
-            "wrote budgeted agent context"
-        );
-    } else {
-        write_context_file(&paths.worktree_dir, &context_input).context("write context file")?;
-    }
-
-    if run.context_profile != ContextProfile::Full {
-        let comments = CommentService::new(pool)
-            .list_by_ticket(ticket_id)
-            .await
-            .context("load comments for context snapshot")?;
-        let runs = RunService::new(pool)
-            .list_for_ticket(ticket_id)
-            .await
-            .context("load runs for context snapshot")?;
-        let ticket_json = build_ticket_json(&ticket, assignee_agent_key_ref);
-        let comments_json = build_comments_json(&comments, &agent_names);
-        let runs_json = build_runs_json(&runs, &agent_names, 10);
-        write_agent_context_files(
-            &paths.worktree_dir,
-            &ticket_json,
-            &comments_json,
-            &runs_json,
-        )
-        .context("write agent context files")?;
-    }
+    let skills = state.skills.skills_for(run.agent_id);
+    let required = required_skill(
+        run.context_profile,
+        &run.job_type,
+        Some(ticket.ticket.status),
+        &agent_key,
+        &agent.role,
+    );
+    write_context_document(
+        &paths.worktree_dir,
+        &build_tool_first_context(&context_input, &skills, required),
+    )
+    .context("write context file")?;
 
     if run_svc.is_cancelled(run.id).await? {
         return Err(JobCancelled.into());
@@ -838,6 +742,32 @@ fn chat_context_input_base<'a>(
     }
 }
 
+/// Writes the chat context. `resumed` sends only the latest human message (the
+/// provider session already holds earlier turns); otherwise `text` is the full
+/// transcript.
+fn write_chat_context(
+    state: &AppState,
+    run: &AgentRun,
+    agent: &crate::domain::agent::Agent,
+    agent_key: &str,
+    cwd: &std::path::Path,
+    text: &str,
+    resumed: bool,
+) -> std::io::Result<()> {
+    let cwd_str = cwd.to_string_lossy();
+    let mut input = chat_context_input_base(agent, agent_key, &cwd_str, text);
+    if resumed {
+        input.latest_comments = None;
+        input.human_request = Some(HumanRequest {
+            body: text,
+            posted_at: "",
+            mode_label: "Chat",
+        });
+    }
+    let skills = state.skills.skills_for(run.agent_id);
+    write_context_document(cwd, &build_tool_first_context(&input, &skills, None))
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn invoke_chat_provider(
     state: &AppState,
@@ -986,9 +916,8 @@ async fn execute_chat_turn(
     let provider_result = if stored_resume.is_some() && connector_matches {
         chat_resume_attempted = true;
         chat_resume_used = true;
-        let slim_input = chat_context_input_base(&agent, &agent_key, &cwd_str, &human_body);
-        let markdown = build_conversation_resume_context(&slim_input);
-        write_context_document(&cwd, &markdown).context("write slim chat context")?;
+        write_chat_context(state, run, &agent, &agent_key, &cwd, &human_body, true)
+            .context("write slim chat context")?;
         match invoke_chat_provider(
             state,
             pool,
@@ -1017,9 +946,8 @@ async fn execute_chat_turn(
                     .format_transcript(session_id)
                     .await
                     .context("format chat transcript for fallback")?;
-                let full_input = chat_context_input_base(&agent, &agent_key, &cwd_str, &transcript);
-                let markdown = build_conversation_context(&full_input);
-                write_context_document(&cwd, &markdown).context("write full chat context fallback")?;
+                write_chat_context(state, run, &agent, &agent_key, &cwd, &transcript, false)
+                    .context("write full chat context fallback")?;
                 invoke_chat_provider(
                     state,
                     pool,
@@ -1042,9 +970,8 @@ async fn execute_chat_turn(
             .format_transcript(session_id)
             .await
             .context("format chat transcript")?;
-        let full_input = chat_context_input_base(&agent, &agent_key, &cwd_str, &transcript);
-        let markdown = build_conversation_context(&full_input);
-        write_context_document(&cwd, &markdown).context("write chat context")?;
+        write_chat_context(state, run, &agent, &agent_key, &cwd, &transcript, false)
+            .context("write chat context")?;
         invoke_chat_provider(
             state,
             pool,

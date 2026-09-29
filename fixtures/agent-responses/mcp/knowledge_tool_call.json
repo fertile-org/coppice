@@ -1,0 +1,11 @@
+{
+  "status": "done",
+  "summary": "Mock run that searched project knowledge.",
+  "changedFiles": [],
+  "testsRun": [],
+  "mentionAgents": [],
+  "blockers": [],
+  "toolCalls": [
+    { "tool": "knowledge_search", "args": { "query": "zebrafish" } }
+  ]
+}

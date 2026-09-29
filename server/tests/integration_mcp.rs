@@ -1086,6 +1086,86 @@ async fn knowledge_search_returns_only_approved_and_logs_once() {
 }
 
 #[tokio::test]
+async fn run_context_is_slim_and_knowledge_arrives_only_via_search() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let (state, app, cookie, csrf, _env) =
+        common::bootstrap_and_login_with_gateway("mcp/knowledge_tool_call").await;
+    let (_git_dir, local_path) = common::create_temp_git_checkout();
+    let repo_id =
+        common::register_test_repo(&app, &local_path.display().to_string(), &cookie, &csrf).await;
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
+    let agent_id = common::create_test_agent_from_preset(&app, "Worker", &cookie, &csrf).await;
+    let ticket_id = common::create_test_ticket(&app, &board_id, &cookie, &csrf).await;
+    common::set_ticket_repo(&app, &ticket_id, &repo_id, &cookie, &csrf).await;
+    common::assign_agent_to_ticket(&app, &ticket_id, &agent_id, &cookie, &csrf).await;
+    let pool = state.db.clone().unwrap();
+    let approved = seed_knowledge(
+        &pool,
+        board_id.parse().unwrap(),
+        "Approved zebrafish tip",
+        "approved",
+    )
+    .await;
+    seed_knowledge(
+        &pool,
+        board_id.parse().unwrap(),
+        "Pending zebrafish tip",
+        "pending",
+    )
+    .await;
+
+    let res = app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            &format!("/api/tickets/{ticket_id}/run-agent"),
+            "",
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 201);
+    let body = common::json_body(res).await;
+    let run_id: Uuid = body["run"]["id"].as_str().unwrap().parse().unwrap();
+    wait_for_run_status(&pool, run_id, "succeeded").await;
+
+    // Usage is logged by the tool call only, and only for the approved revision.
+    let logged: Vec<Uuid> =
+        sqlx::query_scalar("SELECT revision_id FROM knowledge_usage_logs WHERE run_id = $1")
+            .bind(run_id)
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+    assert_eq!(logged, vec![approved]);
+    assert_eq!(
+        tool_call_rows(&pool, run_id).await,
+        vec![("knowledge_search".into(), "core".into(), "ok".into())]
+    );
+
+    let worktree: String = sqlx::query_scalar("SELECT worktree_path FROM agent_runs WHERE id = $1")
+        .bind(run_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    let agent_dir = std::path::Path::new(&worktree).join(".agent");
+    let context = std::fs::read_to_string(agent_dir.join("context.md")).unwrap();
+    for heading in ["# Agent", "# Task", "# Repository", "# Skills", "# Coppice tools"] {
+        assert!(context.contains(heading), "missing {heading}:\n{context}");
+    }
+    assert!(context.contains("Load `coppice-git` before starting."), "{context}");
+    assert!(context.contains("result_submit"));
+    assert!(!context.contains("Approved zebrafish tip"), "knowledge must not be pre-injected");
+    assert!(!context.contains("```json"));
+    for legacy in ["ticket.json", "comments.json", "runs.json"] {
+        assert!(!agent_dir.join(legacy).exists(), "{legacy} must not be written");
+    }
+}
+
+#[tokio::test]
 async fn comment_post_creates_agent_comment() {
     let _guard = common::DB_TEST_LOCK.lock().await;
     if !common::db_available().await {

@@ -74,7 +74,7 @@ services/run_service.rs   create/cancel/finish runs
 services/job_service.rs   enqueue, claim (SKIP LOCKED), mark done/failed
 services/repo_service.rs       global registered repos (local_path, verify)
 services/worktree_service.rs   worktree per (ticket, agent) from registered local_path
-services/context_builder.rs    write .agent/context.md into worktree
+services/context_builder.rs    write the slim tool-first .agent/context.md (agent, task, repo, skills, tool pointers)
 services/result_contract.rs    apply nextStatus, comments, blocker metadata
 workers/job_worker.rs     poll queue, run pipeline, spawn at server startup
 ```
@@ -106,7 +106,7 @@ workers/knowledge_compaction_scheduler.rs reconcile finished runs, scheduled and
 workers/job_worker/compaction.rs          executes `compact_knowledge` runs
 ```
 
-**Retrieval.** Only Full-profile runs retrieve knowledge. The query is the ticket title and description, normalized and OR-joined into a `to_tsquery('simple', …)`. Relational eligibility (approved, active, unexpired, unsuperseded, confidence, board/agent scope) is materialized first. If every eligible item fits the context budget, all are included in a stable order (score `0`); otherwise items are ranked by `ts_rank_cd`. Zero matches is not an error. The result is rendered as untrusted data inside the total context budget, and every included exact revision is logged once in `knowledge_usage_logs` before the provider runs.
+**Retrieval.** Knowledge is no longer injected into `.agent/context.md`; agents pull it on demand with the `knowledge_search` MCP tool (approved items only). The query is the agent's search text, normalized and OR-joined into a `to_tsquery('simple', …)`. Relational eligibility (approved, active, unexpired, unsuperseded, confidence, board/agent scope) is materialized first. Items are ranked by `ts_rank_cd`. Zero matches is not an error. The result is rendered as untrusted data, and every returned exact revision is logged once per run in `knowledge_usage_logs`.
 
 **Compaction.** A trigger queues a ticket when it enters Done and removes its unbatched row when it leaves Done. The scheduler starts a drain cycle every `knowledge.compaction.interval_secs` (or on Compact now) when an enabled compaction agent is configured. Each batch is one `compact_knowledge` run of that agent: read-only tools, a scratch directory, no repository, no knowledge retrieval, no ticket side effects. The agent returns `knowledgeCandidates`; invalid candidates (sources outside the batch, board mismatch, unknown types, limits) are dropped with reasons in the batch summary. Valid ones go through the fail-closed policy: workspace scope, supersessions, and high-impact types always need human approval. Success deletes the batch's queue rows and sends no notification. The scheduler's reconcile step fails batches whose run ended without applying a result: tickets return to the queue with `attempts + 1`, and a `knowledge_compaction_failed` notification goes to every user. Cancelled runs release tickets without an attempt or notification. Tickets at `max_attempts` wait for a manual Retry. Operator settings: [Knowledge configuration](operations.md#knowledge-configuration).
 

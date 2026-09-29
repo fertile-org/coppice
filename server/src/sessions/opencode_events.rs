@@ -3,9 +3,7 @@ use crate::sessions::session_snapshot::SessionSnapshot;
 use crate::sessions::TerminalFrame;
 use time::OffsetDateTime;
 
-const COPPICE_RUN_PROMPT: &str = "Read .agent/context.md and complete the task described there. \
-When finished, reply with ONLY a single JSON object matching the done or blocked contract \
-from that file — use real values from your work, not placeholder text.";
+const COPPICE_RUN_PROMPT: &str = "Read .agent/context.md and complete the task described there. When finished, call the coppice result_submit tool with your result.";
 
 pub fn coppice_run_prompt() -> &'static str {
     COPPICE_RUN_PROMPT
