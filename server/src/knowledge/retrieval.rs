@@ -138,45 +138,9 @@ LIMIT $5
 "#
 );
 
-pub async fn has_eligible(
-    pool: &PgPool,
-    board_id: Uuid,
-    agent_id: Uuid,
-    config: &KnowledgeRetrievalConfig,
-) -> Result<bool, sqlx::Error> {
-    let sql = concat!(
-        r#"
-        SELECT EXISTS (
-            SELECT 1
-"#,
-        eligible_knowledge_from!(),
-        r#"
-              AND CASE $3
-                    WHEN 'high' THEN r.confidence = 'high'
-                    WHEN 'medium' THEN r.confidence IN ('medium', 'high')
-                    ELSE r.confidence IN ('low', 'medium', 'high')
-                  END
-              AND (cardinality($4::text[]) = 0 OR r.knowledge_type = ANY($4::text[]))
-              AND (
-                    r.scope = 'workspace'
-                    OR (r.scope = 'board' AND r.board_id = $1)
-                    OR (r.scope = 'agent' AND r.board_id = $1 AND r.agent_id = $2)
-                  )
-        )
-        "#
-    );
-    sqlx::query_scalar(sql)
-        .bind(board_id)
-        .bind(agent_id)
-        .bind(&config.minimum_confidence)
-        .bind(&config.allowed_types)
-        .fetch_one(pool)
-        .await
-}
-
-/// Load the eligible set for a run, full-text matches first. Callers pick
-/// between "include everything" and "top matches" once the budget is known
-/// (see [`crate::services::context_budget::select_within_budget`]).
+/// Load the eligible set for a run, full-text matches first. Non-matching
+/// entries are included with score 0; callers wanting matches only filter on
+/// `score > 0`.
 pub async fn retrieve(
     pool: &PgPool,
     board_id: Uuid,

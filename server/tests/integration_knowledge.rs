@@ -4,7 +4,7 @@ use axum::{http::StatusCode, Router};
 use coppice_server::domain::knowledge::{
     KnowledgeConfidence, KnowledgeRevisionInput, KnowledgeScope, KnowledgeSourceType, KnowledgeType,
 };
-use coppice_server::knowledge::retrieval::{has_eligible, retrieve, RETRIEVAL_QUERY_SQL};
+use coppice_server::knowledge::retrieval::{retrieve, RETRIEVAL_QUERY_SQL};
 use coppice_server::services::context_budget::{record_usage, render_knowledge, ByteTokenCounter};
 use coppice_server::services::knowledge_service::{
     activate_revision, KnowledgeError, KnowledgeListFilter, KnowledgeRevisionPatch,
@@ -1619,14 +1619,6 @@ async fn retrieval_is_scoped_and_usage_is_logged_once() {
 
     let mut type_filtered = state.config.knowledge.retrieval.clone();
     type_filtered.allowed_types = vec!["bug_pattern".into()];
-    assert!(!has_eligible(
-        state.db.as_ref().unwrap(),
-        Uuid::parse_str(&board_id).unwrap(),
-        Uuid::parse_str(&agent_id).unwrap(),
-        &type_filtered,
-    )
-    .await
-    .unwrap());
     let excluded_by_type = retrieve(
         state.db.as_ref().unwrap(),
         Uuid::parse_str(&board_id).unwrap(),
@@ -1640,14 +1632,17 @@ async fn retrieval_is_scoped_and_usage_is_logged_once() {
     assert!(excluded_by_type.is_empty());
 
     type_filtered.allowed_types = vec!["test_command".into()];
-    assert!(has_eligible(
+    let included_by_type = retrieve(
         state.db.as_ref().unwrap(),
         Uuid::parse_str(&board_id).unwrap(),
         Uuid::parse_str(&agent_id).unwrap(),
+        "Run tests",
+        "",
         &type_filtered,
     )
     .await
-    .unwrap());
+    .unwrap();
+    assert_eq!(included_by_type.len(), 1);
 
     let run_id = Uuid::new_v4();
     sqlx::query(

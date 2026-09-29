@@ -1,6 +1,8 @@
 use crate::knowledge::retrieval::retrieve;
 use crate::mcp::tools::{ToolCtx, ToolError};
-use crate::services::context_budget::{record_usage, render_knowledge, ByteTokenCounter};
+use crate::services::context_budget::{
+    record_usage, render_knowledge, ByteTokenCounter, RenderedKnowledge, KNOWLEDGE_DATA_NOTE,
+};
 use serde_json::{json, Value};
 use uuid::Uuid;
 
@@ -32,10 +34,10 @@ pub async fn call_knowledge_search(ctx: &ToolCtx<'_>, args: Value) -> Result<Val
     let limit = parse_limit(&args)?;
 
     let Some(board_id) = ctx.scope.board_id else {
-        return Ok(json!({ "items": [] }));
+        return Ok(response(Vec::new()));
     };
     if !ctx.state.config.knowledge.enabled {
-        return Ok(json!({ "items": [] }));
+        return Ok(response(Vec::new()));
     }
 
     let query: String = query.chars().take(MAX_QUERY_CHARS).collect();
@@ -48,32 +50,38 @@ pub async fn call_knowledge_search(ctx: &ToolCtx<'_>, args: Value) -> Result<Val
         &ctx.state.config.knowledge.retrieval,
     )
     .await?;
+    // Retrieval returns the whole eligible set; non-matches carry score 0.
+    found.retain(|k| k.score > 0.0);
     found.truncate(limit);
 
-    log_usage(ctx, &found).await?;
+    // The tool returns whole entries, so render without a token cap.
+    let section = render_knowledge(&found, usize::MAX, &ByteTokenCounter);
+    log_usage(ctx, &section.entries).await?;
 
     let items: Vec<Value> = found
         .iter()
-        .map(|k| {
+        .zip(&section.entries)
+        .map(|(k, entry)| {
             json!({
                 "id": k.item_id,
                 "revisionId": k.revision_id,
                 "title": k.title,
                 "type": k.knowledge_type,
-                "content": k.content,
+                "content": entry.rendered_content,
             })
         })
         .collect();
-    Ok(json!({ "items": items }))
+    Ok(response(items))
 }
 
-/// Records each returned revision once per run (the context file and earlier
-/// searches may already have logged some).
-async fn log_usage(
-    ctx: &ToolCtx<'_>,
-    found: &[crate::knowledge::retrieval::RetrievedKnowledge],
-) -> Result<(), ToolError> {
-    if found.is_empty() {
+fn response(items: Vec<Value>) -> Value {
+    json!({ "note": KNOWLEDGE_DATA_NOTE, "items": items })
+}
+
+/// Records each returned revision once per run (earlier searches may already
+/// have logged some).
+async fn log_usage(ctx: &ToolCtx<'_>, entries: &[RenderedKnowledge]) -> Result<(), ToolError> {
+    if entries.is_empty() {
         return Ok(());
     }
     let logged: Vec<Uuid> =
@@ -82,19 +90,18 @@ async fn log_usage(
             .fetch_all(ctx.pool)
             .await?;
     let existing = i32::try_from(logged.len()).unwrap_or(i32::MAX);
-    let fresh: Vec<_> = found
+    let fresh: Vec<RenderedKnowledge> = entries
         .iter()
-        .filter(|k| !logged.contains(&k.revision_id))
-        .cloned()
+        .filter(|e| !logged.contains(&e.revision_id))
+        .enumerate()
+        .map(|(i, e)| RenderedKnowledge {
+            rank: existing.saturating_add(i32::try_from(i + 1).unwrap_or(i32::MAX)),
+            ..e.clone()
+        })
         .collect();
     if fresh.is_empty() {
         return Ok(());
     }
-    // The tool returns whole entries, so render without a token cap.
-    let mut section = render_knowledge(&fresh, usize::MAX, &ByteTokenCounter);
-    for entry in &mut section.entries {
-        entry.rank = entry.rank.saturating_add(existing);
-    }
-    record_usage(ctx.pool, ctx.scope.run_id, &section.entries).await?;
+    record_usage(ctx.pool, ctx.scope.run_id, &fresh).await?;
     Ok(())
 }

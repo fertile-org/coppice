@@ -84,7 +84,10 @@ impl CoreTool {
                 true,
             ),
             Self::KnowledgeSearch => (
-                "Search approved project knowledge relevant to this work.",
+                concat!(
+                    "Search approved project knowledge relevant to this work. ",
+                    crate::services::context_budget::knowledge_data_note!()
+                ),
                 object(
                     json!({
                         "query": { "type": "string" },
