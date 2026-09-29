@@ -99,6 +99,14 @@ async fn resolve_ticket(ctx: &ToolCtx<'_>, args: &Value) -> Result<TicketWithDis
             "ticket is not part of this compaction batch".into(),
         ));
     }
+    // A board-less scope (e.g. a chat session without a board) may only read
+    // its own ticket; compaction is bounded by its batch above.
+    if ctx.scope.board_id.is_none()
+        && ctx.scope.profile != ContextProfile::KnowledgeCompaction
+        && ctx.scope.ticket_id != Some(ticket_id)
+    {
+        return Err(ToolError::NotFound("ticket not on this board".into()));
+    }
 
     let ticket = TicketService::new(ctx.pool)
         .get(ticket_id)
@@ -245,9 +253,12 @@ pub async fn call_ticket_search(ctx: &ToolCtx<'_>, args: Value) -> Result<Value,
                 ToolError::InvalidArgs("status is not a valid ticket status".into())
             })?),
         };
+    let Some(board_id) = ctx.scope.board_id else {
+        return Ok(json!({ "tickets": [] }));
+    };
 
     let tickets = TicketService::new(ctx.pool)
-        .search(ctx.scope.board_id, query, status, limit as i64)
+        .search(Some(board_id), query, status, limit as i64)
         .await
         .map_err(|e| ToolError::Internal(e.into()))?;
     let agents = list_agents(ctx).await?;
