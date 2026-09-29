@@ -24,6 +24,66 @@ pub struct AppConfig {
     pub secrets: SecretsConfig,
     #[serde(default)]
     pub git: GitConfig,
+    #[serde(default)]
+    pub mcp: McpConfig,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct McpConfig {
+    /// Gateway URL handed to agent CLIs; defaults to the local server's `/mcp`.
+    #[serde(default)]
+    pub base_url: Option<String>,
+    #[serde(default = "default_mcp_call_timeout_secs")]
+    pub call_timeout_secs: u64,
+    #[serde(default = "default_mcp_max_output_bytes")]
+    pub max_output_bytes: usize,
+    #[serde(default = "default_mcp_comment_post_limit")]
+    pub comment_post_limit: u32,
+    #[serde(default = "default_mcp_token_ttl_secs")]
+    pub token_ttl_secs: u64,
+    #[serde(default = "default_mcp_builtin_plugins_dir")]
+    pub builtin_plugins_dir: String,
+}
+
+fn default_mcp_call_timeout_secs() -> u64 {
+    60
+}
+
+fn default_mcp_max_output_bytes() -> usize {
+    32768
+}
+
+fn default_mcp_comment_post_limit() -> u32 {
+    5
+}
+
+fn default_mcp_token_ttl_secs() -> u64 {
+    14400
+}
+
+fn default_mcp_builtin_plugins_dir() -> String {
+    "./data/builtin-plugins".into()
+}
+
+impl Default for McpConfig {
+    fn default() -> Self {
+        Self {
+            base_url: None,
+            call_timeout_secs: default_mcp_call_timeout_secs(),
+            max_output_bytes: default_mcp_max_output_bytes(),
+            comment_post_limit: default_mcp_comment_post_limit(),
+            token_ttl_secs: default_mcp_token_ttl_secs(),
+            builtin_plugins_dir: default_mcp_builtin_plugins_dir(),
+        }
+    }
+}
+
+impl McpConfig {
+    pub fn gateway_url(&self, server_port: u16) -> String {
+        self.base_url
+            .clone()
+            .unwrap_or_else(|| format!("http://127.0.0.1:{server_port}/mcp"))
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -922,6 +982,7 @@ impl AppConfig {
             knowledge: KnowledgeConfig::default(),
             secrets: SecretsConfig::default(),
             git: GitConfig::default(),
+            mcp: McpConfig::default(),
         }
     }
 }
@@ -937,6 +998,26 @@ mod tests {
     fn loads_defaults_without_files() {
         let cfg = AppConfig::load_defaults().expect("defaults");
         assert_eq!(cfg.server.port, 5000);
+    }
+
+    #[test]
+    fn mcp_defaults_apply_when_section_missing() {
+        #[derive(Deserialize)]
+        struct Wrapper {
+            #[serde(default)]
+            mcp: McpConfig,
+        }
+        let parsed: Wrapper = toml::from_str("").expect("parse");
+        assert_eq!(parsed.mcp.call_timeout_secs, 60);
+        assert_eq!(parsed.mcp.max_output_bytes, 32768);
+        assert_eq!(parsed.mcp.comment_post_limit, 5);
+        assert_eq!(parsed.mcp.token_ttl_secs, 14400);
+        assert_eq!(parsed.mcp.builtin_plugins_dir, "./data/builtin-plugins");
+        assert_eq!(parsed.mcp.gateway_url(5000), "http://127.0.0.1:5000/mcp");
+
+        let parsed: Wrapper = toml::from_str("[mcp]\nbase_url = \"http://x/mcp\"").expect("parse");
+        assert_eq!(parsed.mcp.gateway_url(5000), "http://x/mcp");
+        assert_eq!(parsed.mcp.call_timeout_secs, 60);
     }
 
     #[test]

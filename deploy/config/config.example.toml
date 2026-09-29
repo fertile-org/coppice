@@ -122,3 +122,12 @@ master_key = "dev-master-key-change-me"
 author_name = "Coppice"
 author_email = "coppice@localhost"
 push_enabled = true
+
+# MCP tool gateway for agent CLIs. base_url defaults to http://127.0.0.1:<server.port>/mcp.
+[mcp]
+# base_url = "http://host.docker.internal:5000/mcp"
+call_timeout_secs = 60
+max_output_bytes = 32768
+comment_post_limit = 5
+token_ttl_secs = 14400
+builtin_plugins_dir = "./data/builtin-plugins"
