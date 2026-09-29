@@ -66,7 +66,7 @@ The implementation plan's first task records baseline `context.md` sizes per pro
 | `plugins::manifest` | Parse Claude Code / Cursor plugin format and skills-only folders | — |
 | `plugins::git_install` | Background shallow clone / update into a plugin dir, record commit | `git` on PATH, host credentials |
 | `plugins::skills` (`SkillCatalog`) | Skill index for a run; load skill body + folder path | registry, `agent_plugins` |
-| `mcp::server` | Streamable HTTP MCP endpoint on the existing Axum app | `rmcp` |
+| `mcp::server` | Stateless Streamable HTTP MCP endpoint on the existing Axum app | Axum |
 | `mcp::token` | Mint / verify / revoke run tokens | `run_tool_tokens` |
 | `mcp::router` | Resolve the tool set for a token, dispatch, log, enforce limits | all tool sources |
 | `mcp::core_tools` | Core tool handlers → `ticket_service`, `comment_service`, `knowledge_service`, `result_contract`, chat actions | existing services |
@@ -78,7 +78,7 @@ Rules:
 
 - **Server owns state.** Core tools call services; no workflow logic in tool handlers or the SPA.
 - **Everything goes through the router.** Plugin tools are never wired directly into a connector.
-- **Library:** official Rust MCP SDK `rmcp` (server over Axum streamable HTTP; client for stdio children and remote HTTP).
+- **Protocol implementation:** the gateway is a small **stateless** MCP Streamable HTTP server written directly on Axum (POST JSON-RPC → `application/json` response; `GET` returns 405, which the MCP spec allows). Methods: `initialize`, `notifications/initialized`, `ping`, `tools/list`, `tools/call`. This keeps auth and scoping in plain Axum extractors. The official Rust SDK `rmcp` is used as the **client** for plugin MCP servers (Part 2).
 
 ## Plugin format and discovery
 
@@ -143,7 +143,6 @@ Tool names are short; clients present them as `coppice.<tool>` / `mcp__coppice__
 | `ticket_search` | Text/status search within the board |
 | `board_agents` | Enabled agents: key, name, role |
 | `knowledge_search` | Approved, in-scope, unexpired knowledge via existing FTS; each returned revision is logged once per run as Knowledge Used |
-| `knowledge_propose` | Creates a **Pending** Knowledge Inbox item with run provenance |
 | `skill_list` | Skills available to this run (name, description) |
 | `skill_load` | Skill body + absolute folder path; logged as Skills Used |
 | `comment_post` | Markdown note on the current ticket, authored by the agent; max 5 per run |
@@ -156,18 +155,20 @@ Tool names are short; clients present them as `coppice.<tool>` / `mcp__coppice__
 | `ticket_get`, `ticket_comments`, `ticket_runs` | ✓ | ✓ | ✓ | ✓ (board) | ✓ (batch tickets only) |
 | `ticket_search`, `board_agents` | ✓ | ✓ | ✓ | ✓ | — |
 | `knowledge_search` | ✓ | ✓ | ✓ | ✓ | ✓ |
-| `knowledge_propose` | ✓ | ✓ | — | — (use chat action) | — |
 | `skill_list`, `skill_load` | ✓ | ✓ | ✓ | ✓ | ✓ |
 | `comment_post` | ✓ | ✓ | — | — | — |
-| `result_submit` | done/blocked/continued | done/blocked | reply | reply + actions | compaction |
+| `result_submit` | done/blocked/continued | done/blocked | reply (done/blocked) | reply (done/blocked) | done + `knowledgeCandidates` |
 | Plugin tools | all | all | `readOnlyHint` only | `readOnlyHint` only | — |
 
 Change from M09: `knowledge_search` is allowed in `conversation`. It returns only approved knowledge on demand and does not bypass the Knowledge Inbox; M09's concern was pre-injecting retrieval into chat context.
 
+Not tools: chat actions (`create_ticket`, `create_knowledge`, `cutoff`) remain **human-triggered** SPA/API actions as in M09. Knowledge creation stays with the compaction agent (`knowledgeCandidates` in its result); regular runs get no knowledge-proposal tool.
+
 ### `result_submit`
 
-- Input: the same JSON shape each profile returns today (e.g. `done` / `blocked` / `continued` for `full`; reply + `create_ticket` / `create_knowledge` / `cutoff` for `conversation`; the compaction schema for `knowledge_compaction`).
-- The server validates by running the existing parsers in a **validate-only** mode (no side effects) and returns field-level errors as a tool error so the agent can resubmit.
+- Input: one schema for every profile — the existing `AgentRunResult` JSON (`status: done | blocked | continued` and its fields). Profiles restrict which statuses/fields are meaningful (table above).
+- The server validates with the existing pure functions (`result_contract::apply_agent_result` / `apply_consultation_result`) plus profile rules, with no side effects, and returns structural errors as a tool error so the agent can resubmit.
+- Targets the workflow would ignore (unknown / disabled / self / over-limit agents in `assignTo`, `mentionAgents`, `agentRequests`) are **warnings**, not errors — M05 semantics are unchanged; warnings let the agent fix them.
 - The latest valid submission is stored on the run (`agent_runs.submitted_result`). It is **applied when the run finishes**, through the same code path as today. Stop/cancel discards it.
 - Idempotent: resubmitting replaces the stored submission.
 - Fallback: if no valid submission exists at finish, the final-output JSON is parsed as today. If neither yields a valid result, the run fails with the existing "no result" error.
@@ -192,7 +193,7 @@ New run prompt: "Read .agent/context.md, complete the task, and call the `result
 
 - Minted at run start (and per chat turn): 256-bit random, only the SHA-256 hash stored in `run_tool_tokens` with `run_id`, `agent_id`, `ticket_id` / `chat_session_id`, `board_id`, `context_profile`, `plugin_ids` snapshot, `expires_at`, `revoked_at`.
 - Revoked on finish / stop / failure; hard expiry = run timeout + margin.
-- Sent as `Authorization: Bearer`, never in URLs or logs. The token value is passed to the connector via per-run config or env and never written into the worktree.
+- Sent as `Authorization: Bearer`, never in URLs or logs. The token reaches the connector through per-process environment (`COPPICE_MCP_URL`, `COPPICE_MCP_TOKEN`) or a per-run config file in the run's artifacts dir — never the worktree, a registered repo checkout, or the user's global CLI config.
 - `subject_kind` column (`run` now; `personal` reserved) keeps personal access tokens possible later without schema rework.
 
 ## Gateway endpoint
@@ -204,16 +205,22 @@ New run prompt: "Read .agent/context.md, complete the task, and call the `result
 
 ## Connector wiring
 
-Config files live in the run's artifacts dir where the CLI accepts a path, keeping worktrees clean. **Expected mechanisms below are verified in plan task 1 before any other implementation;** the verified table replaces this one.
+Wiring rules (apply to Docker, desktop, and cloud alike):
+
+1. Per-run configuration only: CLI flags, per-process env, or a config file in the run's artifacts dir referenced by flag/env.
+2. Never write into the worktree, a registered repo checkout (chat may run in one), or the user's global CLI config (desktop uses the real `$HOME`).
+3. Token only via `COPPICE_MCP_TOKEN` env or the per-run file.
+
+**Expected mechanisms below are verified in plan task 1 before any other implementation;** the verified table replaces this one.
 
 | Connector | Expected mechanism |
 |-----------|--------------------|
 | `claude-code` | `--mcp-config <run file> --strict-mcp-config`; allow `mcp__coppice__*` in `--allowedTools` |
-| `codex` | `-c mcp_servers.coppice.*` overrides (HTTP + bearer) or `coppice mcp-bridge` stdio |
-| `cursor` | `.cursor/mcp.json` in workspace, hidden via `.git/info/exclude`; MCP auto-approve flag |
-| `opencode` | Per-session project config in the session directory (shared `opencode serve` means config cannot be per-server) |
-| `kilo-code` | As OpenCode (fork), verified separately |
-| `mock` | Fixture field `toolCalls: [{ tool, args }]` executed through a real `rmcp` HTTP client against `/mcp` before returning the fixture result |
+| `codex` | `-c mcp_servers.coppice.url=…` + `-c mcp_servers.coppice.bearer_token_env_var="COPPICE_MCP_TOKEN"` |
+| `cursor` | Per-run MCP config via flag or config-dir env; if the CLI only reads workspace/global files, `cursor` is not tool-first until upstream supports it (decision recorded in task 1) |
+| `kilo-code` | Per-process config path env (`KILO_CONFIG` / fork equivalent) pointing at the run file |
+| `opencode` | Shared `opencode serve` cannot carry per-run env. If its API cannot attach a per-session MCP server with auth, switch the connector to per-run `opencode run` processes with a per-run config path (like `kilo-code`) |
+| `mock` | Fixture field `toolCalls: [{ tool, args }]` executed over HTTP JSON-RPC against `/mcp` before returning the fixture result |
 
 If the connector cannot reach the gateway, the run fails with `mcp_unavailable` — no silent fallback to the fat context.
 
@@ -304,8 +311,8 @@ Admin-only for all plugin and plugin-dir mutations; CSRF applies to all `/api` m
 - Mock run with `toolCalls` (`ticket_get` → `knowledge_search` → `skill_load` → `result_submit`) over real HTTP MCP produces the same ticket state as the equivalent legacy fixture.
 - Fallback: no `result_submit` → final JSON applied.
 - Token rejected after run finish.
-- `knowledge_propose` → Pending only; Knowledge Used and Skills Used recorded.
-- Chat turn: write plugin tools not listed; `create_ticket` action via `result_submit` works.
+- `knowledge_search` records Knowledge Used once per revision per run; `skill_load` records Skills Used.
+- Chat turn: write plugin tools not listed; `result_submit` reply becomes the agent chat message.
 - Stdio fixture MCP server (small Rust test binary) proxied end to end; crash → restart; unhealthy hides tools.
 - Plugin dirs, rescan, enable, agent assignment APIs; admin-only and CSRF enforced.
 - Context size assertion against recorded baseline.
@@ -321,6 +328,8 @@ Each real connector completes a ticket tool-first (tools called, `result_submit`
 
 ## Delivery order
 
+Plans: [Part 1 — tool-first harness](../plans/2026-09-29-m10-part1-tool-first-harness.md) covers steps 1–4; Part 2 (plugins) covers steps 5–7.
+
 1. **Connector verification:** stub `/mcp` with header token; prove all five real CLIs can connect and call a tool; record baseline context sizes. Update the wiring table.
 2. Gateway, tokens, core read tools, `result_submit`, `run_tool_calls`; mock `toolCalls`.
 3. Built-in `coppice` plugin skills, `SkillCatalog`, slim context builders, migrate role rules.
@@ -335,7 +344,7 @@ Each real connector completes a ticket tool-first (tools called, `result_submit`
 |------|------------|
 | Agent forgets `result_submit` | Final-JSON fallback; prompt + context one-liner |
 | Agent skips a required role skill | Must-rules remain one-liners in context; required skill named explicitly; Skills Used visible |
-| Connector MCP quirks / version drift | Verification is task 1; `mcp_unavailable` fails loudly; `coppice connector doctor` gains an MCP check |
+| Connector MCP quirks / version drift | Verification is task 1; `mcp_unavailable` fails loudly |
 | Shared plugin server state across runs | Documented; per-run instances possible later |
 | Arbitrary plugin code before M11 | Disabled by default, admin-only enable, explicit warning, M11 sandboxes processes |
 | Server-side git clone for plugins | Scoped exception; repositories rule unchanged |

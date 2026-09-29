@@ -17,7 +17,7 @@ Today each run gets a long `context.md` that pre-loads ticket data and spells ou
 - **Plugin sources:** multiple admin-chosen plugin directories (desktop Browse) + install from git URL into a plugin dir
 - **Enablement:** installed plugins are workspace-wide and start disabled; each agent selects whole plugins; presets ship defaults
 - **Gateway:** `/mcp` streamable HTTP endpoint with per-run tokens; each connector is configured with exactly one MCP server, `coppice`
-- **Core tools:** `ticket_get`, `ticket_comments`, `ticket_runs`, `ticket_search`, `board_agents`, `knowledge_search`, `knowledge_propose`, `skill_list`, `skill_load`, `comment_post`, `result_submit` — scoped per context profile
+- **Core tools:** `ticket_get`, `ticket_comments`, `ticket_runs`, `ticket_search`, `board_agents`, `knowledge_search`, `skill_list`, `skill_load`, `comment_post`, `result_submit` — scoped per context profile
 - **Built-in `coppice` plugin:** platform skills (collaboration, splitting, PM / Tech Lead / QC role rules) replacing prose in `context_builder.rs`
 - **Plugin MCP proxy:** stdio and remote HTTP servers, namespaced tools, health/restart, encrypted per-plugin settings
 - **One tool-first path** for all six connectors; final-JSON parsing kept only as a safety net; legacy fat context removed
