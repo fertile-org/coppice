@@ -6,6 +6,7 @@ pub mod db;
 pub mod domain;
 pub mod events;
 pub mod knowledge;
+pub mod mcp;
 pub mod middleware;
 pub mod providers;
 pub mod sessions;

@@ -211,16 +211,43 @@ Wiring rules (apply to Docker, desktop, and cloud alike):
 2. Never write into the worktree, a registered repo checkout (chat may run in one), or the user's global CLI config (desktop uses the real `$HOME`).
 3. Token only via `COPPICE_MCP_TOKEN` env or the per-run file.
 
-**Expected mechanisms below are verified in plan task 1 before any other implementation;** the verified table replaces this one.
+**Verification status (plan task 1, `server/examples/mcp_probe.rs`, Cursor Agent CLI `2026.09.28-64d2043`).** Only `cursor` was verified against a live CLI; it is the only connector CLI installed on the dev machine. The other rows remain *unverified — expected mechanism* and must be verified when their CLI is first wired (their plan tasks), applying the decision rules in the last column.
 
-| Connector | Expected mechanism |
-|-----------|--------------------|
-| `claude-code` | `--mcp-config <run file> --strict-mcp-config`; allow `mcp__coppice__*` in `--allowedTools` |
-| `codex` | `-c mcp_servers.coppice.url=…` + `-c mcp_servers.coppice.bearer_token_env_var="COPPICE_MCP_TOKEN"` |
-| `cursor` | Per-run MCP config via flag or config-dir env; if the CLI only reads workspace/global files, `cursor` is not tool-first until upstream supports it (decision recorded in task 1) |
-| `kilo-code` | Per-process config path env (`KILO_CONFIG` / fork equivalent) pointing at the run file |
-| `opencode` | Shared `opencode serve` cannot carry per-run env. If its API cannot attach a per-session MCP server with auth, switch the connector to per-run `opencode run` processes with a per-run config path (like `kilo-code`) |
-| `mock` | Fixture field `toolCalls: [{ tool, args }]` executed over HTTP JSON-RPC against `/mcp` before returning the fixture result |
+| Connector | Status | Mechanism |
+|-----------|--------|-----------|
+| `claude-code` | unverified — expected mechanism | `--mcp-config <run file> --strict-mcp-config`; allow `mcp__coppice__*` in `--allowedTools` |
+| `codex` | unverified — expected mechanism | `-c mcp_servers.coppice.url=…` + `-c mcp_servers.coppice.bearer_token_env_var="COPPICE_MCP_TOKEN"` |
+| `cursor` | **verified** | Per-run env only (below); tool-first is viable |
+| `kilo-code` | unverified — expected mechanism | Per-process config path env (`KILO_CONFIG` / fork equivalent) pointing at the run file |
+| `opencode` | unverified — expected mechanism | Shared `opencode serve` cannot carry per-run env. If its API cannot attach a per-session MCP server with auth, switch the connector to per-run `opencode run` processes with a per-run config path (like `kilo-code`) |
+| `mock` | n/a | Fixture field `toolCalls: [{ tool, args }]` executed over HTTP JSON-RPC against `/mcp` before returning the fixture result |
+
+### Cursor: verified mechanism
+
+The CLI reads MCP servers only from `<workspace>/.cursor/mcp.json` and `$HOME/.cursor/mcp.json` (Node `homedir()`, i.e. the `HOME` env var); `--plugin-dir` with `mcp.json` did **not** register servers (`agent mcp list` empty, model saw no tool). `CURSOR_CONFIG_DIR` alone does **not** relocate `mcp.json`. What works, with nothing written to the workspace or the user's real `~/.cursor` / `~/.config/cursor` config:
+
+```text
+<run dir>/home/.cursor/mcp.json     {"mcpServers":{"coppice":{"url":"http://<host>/mcp",
+                                     "headers":{"Authorization":"Bearer ${env:COPPICE_MCP_TOKEN}"}}}}
+<run dir>/cursor-config/cli-config.json
+                                    {"version":1,"permissions":{"allow":["Mcp(coppice:*)"],"deny":[]}}
+
+env: HOME=<run dir>/home
+     XDG_CONFIG_HOME=<real config home, default ~/.config>   # keeps auth.json (auth lives at $XDG_CONFIG_HOME/cursor/auth.json)
+     CURSOR_CONFIG_DIR=<run dir>/cursor-config               # otherwise permissions are read from the real $XDG_CONFIG_HOME/cursor/cli-config.json
+     COPPICE_MCP_TOKEN=<run token>
+argv: agent -p --mode ask --trust --output-format stream-json "<prompt>"
+```
+
+Results:
+
+- `${env:COPPICE_MCP_TOKEN}` header interpolation works (probe saw `authorized=true`); the client sends `Authorization` on every request.
+- Prompt "Call the coppice ping tool with message hello…" returned `pong hello` in `--mode ask` (read-only), for a fresh `HOME`. No `--force`/`--yolo` needed. `--approve-mcps` is **not** needed in `-p` mode with `--trust`.
+- **Without** the `Mcp(coppice:*)` allow rule, `-p` denies the call ("rejected at the approval prompt"), also with `--approve-mcps`. The rule must live in the `cli-config.json` that `CURSOR_CONFIG_DIR` points at; an allow rule placed in `$HOME/.cursor/cli-config.json` is ignored when `XDG_CONFIG_HOME` is set.
+- Tool-name form is `<server>-<tool>` (`coppice-ping`, stream-json `mcpToolCall.args.name`), not `mcp__coppice__ping`. The model discovers tools via a built-in MCP lookup (server `coppice`, tool `ping`), so the prompt need not list them.
+- Client `initialize` sends `protocolVersion: "2025-11-25"`, `capabilities.elicitation.form`; the gateway answers `2025-06-18` and the client accepts it. It opens `GET /mcp` after `notifications/initialized` (expects SSE); a `405` is tolerated. It re-initializes on several connections per run, so the gateway must be stateless per request (no `Mcp-Session-Id` requirement).
+- Side effects: overriding `HOME` also changes `HOME` for the agent's own shell commands (git identity, ssh keys, `gh` auth are not inherited). The connector must either keep such work in Coppice-owned steps (branch/commit/push are, per M07) or forward the needed git env (`GIT_CONFIG_GLOBAL`, `GIT_SSH_COMMAND`, …) explicitly. The CLI also writes its own state (`chats`, `statsig-cache.json`, and a default `cli-config.json` if absent) under `$XDG_CONFIG_HOME/cursor` when `CURSOR_CONFIG_DIR` is not set — always set it.
+- Decision: `cursor` **is tool-first** using the per-run `HOME` mechanism above.
 
 If the connector cannot reach the gateway, the run fails with `mcp_unavailable` — no silent fallback to the fat context.
 
