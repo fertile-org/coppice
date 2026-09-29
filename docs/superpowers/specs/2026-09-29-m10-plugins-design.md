@@ -1,0 +1,354 @@
+# M10 Plugins Design
+
+**Status:** Draft design gate — awaiting review  
+**Date:** 2026-09-29  
+**Owner/reviewer:** Technical Lead  
+**Milestone:** [M10 — Plugins](../../milestones/M10-plugins.md)
+
+## Decision summary
+
+Coppice keeps wrapping vendor CLIs (`claude-code`, `cursor`, `codex`, `opencode`, `kilo-code`, `mock`) and becomes the **single MCP gateway** for every run. Each run's connector is configured with exactly one MCP server, `coppice`, served by the Coppice server at `/mcp` and authenticated by a per-run token. Behind that endpoint:
+
+- **Core tools** expose Coppice itself (tickets, comments, agents, knowledge, results) as thin adapters over existing services.
+- **Skill tools** (`skill_list`, `skill_load`) serve skills from enabled plugins; the slim context carries only a skill index.
+- **Plugin tools** are proxied from plugin MCP servers (stdio children or remote HTTP) under namespaced names.
+
+Plugins use the existing **Claude Code / Cursor plugin format** (`.claude-plugin/plugin.json`, `skills/`, `.mcp.json`), so third-party plugins work unchanged. Admins register one or more **plugin directories** and can install from a **git URL** into one of them. Installed plugins are workspace-wide and start disabled; each agent selects whole plugins.
+
+Every connector moves to **one tool-first path**: a slim `context.md` plus `result_submit`. Parsing a final JSON object stays only as a safety net. The legacy fat context is deleted once all connectors pass.
+
+## Goals
+
+- Cut per-run context substantially (target ≥50% for `full` on fixture tickets) by moving data behind tools and the result contract into a validated tool schema.
+- One enforcement and audit point for all agent tool use, so M11 policy lands without rework.
+- Plugin UX: pick plugin directories, install from git, enable, assign to agents, see what each run used.
+- Work identically in Docker Compose, desktop (host process), and future cloud.
+- Keep workflow semantics exactly as today (M05 result contract, M06 inbox approval, M09 chat write-denial).
+
+## Non-goals
+
+- Coppice-owned agent loop calling LLM APIs directly.
+- Plugin storage (dropped from M10; revisit with a concrete use case).
+- Plugin `commands/`, `agents/`, `hooks/` — detected and listed as unsupported, never executed.
+- Marketplaces, plugin signing, remote catalogs.
+- Personal access tokens / external agents using Coppice MCP (token layer is designed to allow it later).
+- Sandboxing plugin processes, per-tool capability grants, secret scoping (M11).
+- Signals and observation tools (M12).
+
+## Current state (baseline)
+
+- `job_worker` writes `.agent/context.md` (from `context_builder.rs`, ~1.6k lines, five profiles: `full`, `human_agent`, `human_chat`, `conversation`, `knowledge_compaction`) plus `.agent/ticket.json`, `comments.json`, `runs.json`.
+- Run prompt (`COPPICE_RUN_PROMPT`): "Read .agent/context.md … reply with ONLY a single JSON object matching the done or blocked contract".
+- Result is parsed from the connector's final output into `AgentRunResult` and applied by `result_contract::apply_agent_result` / `apply_consultation_result`, and chat/compaction equivalents.
+- Read-only enforcement is per connector and uneven (`READ_ONLY_CAPABLE_CONNECTORS = mock, claude-code, cursor`).
+- Connectors spawn CLIs inside the server process environment (server container in Docker; host in desktop). OpenCode runs through a shared `opencode serve` process.
+
+The implementation plan's first task records baseline `context.md` sizes per profile on fixture tickets (via `context_budget`).
+
+## Architecture
+
+```text
+ connector CLI (claude / cursor / codex / opencode / kilo / mock)
+        │  one MCP server entry "coppice"  (streamable HTTP, Authorization: Bearer <run token>)
+        ▼
+ ┌──────────────────────── Coppice server ────────────────────────┐
+ │ /mcp ── RunTokenAuth ── ToolRouter ──┬─ core tools → services   │
+ │                                      ├─ skill tools → SkillCatalog
+ │                                      └─ plugin tools → McpProxy ──► plugin MCP servers
+ │ PluginRegistry ◄── plugin_dirs scan + git install               │
+ │ ToolCallLog (run_tool_calls)                                    │
+ └─────────────────────────────────────────────────────────────────┘
+```
+
+| Unit | Responsibility | Depends on |
+|------|----------------|------------|
+| `plugins::registry` | Scan plugin dirs, parse manifests, persist `plugins`, resolve shadowing, enable/disable | `plugin_dirs`, filesystem |
+| `plugins::manifest` | Parse Claude Code / Cursor plugin format and skills-only folders | — |
+| `plugins::git_install` | Background shallow clone / update into a plugin dir, record commit | `git` on PATH, host credentials |
+| `plugins::skills` (`SkillCatalog`) | Skill index for a run; load skill body + folder path | registry, `agent_plugins` |
+| `mcp::server` | Streamable HTTP MCP endpoint on the existing Axum app | `rmcp` |
+| `mcp::token` | Mint / verify / revoke run tokens | `run_tool_tokens` |
+| `mcp::router` | Resolve the tool set for a token, dispatch, log, enforce limits | all tool sources |
+| `mcp::core_tools` | Core tool handlers → `ticket_service`, `comment_service`, `knowledge_service`, `result_contract`, chat actions | existing services |
+| `mcp::proxy` | Lifecycle and multiplexing of plugin MCP servers; tool namespacing | `rmcp` client |
+| `providers::*` | Per-connector MCP wiring for the run | run token, `mcp.base_url` |
+| `cli mcp-bridge` | stdio ↔ HTTP bridge for stdio-only connectors | — |
+
+Rules:
+
+- **Server owns state.** Core tools call services; no workflow logic in tool handlers or the SPA.
+- **Everything goes through the router.** Plugin tools are never wired directly into a connector.
+- **Library:** official Rust MCP SDK `rmcp` (server over Axum streamable HTTP; client for stdio children and remote HTTP).
+
+## Plugin format and discovery
+
+### Accepted layouts
+
+1. **Plugin:** a directory containing `.claude-plugin/plugin.json` (name, version, description, optional author), with optional `skills/<name>/SKILL.md`, `.mcp.json`, `commands/`, `agents/`, `hooks/`.
+2. **Skills-only folder:** a directory with one or more `<name>/SKILL.md` (or a `skills/` subdirectory) and no `plugin.json`. Treated as a plugin named after the folder, version `0.0.0`.
+
+A plugin directory is scanned at depth 0 (the directory itself is a plugin) and depth 1 (each child is a plugin). Deeper nesting is ignored.
+
+### Skills
+
+- `SKILL.md` frontmatter `name` and `description` are required; missing either marks that skill invalid (plugin stays usable).
+- Skill identity for agents: `<plugin>:<skill>` (e.g. `superpowers:brainstorming`); the bundled `coppice` plugin's skills may be referenced unqualified.
+
+### MCP servers (`.mcp.json`)
+
+- Supported entries: stdio (`command`, `args`, `env`) and remote (`type: http` / `url`, `headers`). SSE-only remotes are listed as unsupported.
+- Placeholder substitution: `${CLAUDE_PLUGIN_ROOT}` → plugin path; `${VAR}` → plugin setting `VAR`, else server environment `VAR`, else the server fails to start with a clear error.
+
+### Unsupported parts
+
+`commands/`, `agents/`, `hooks/` are detected, listed on the plugin card as "not supported yet", and never executed.
+
+### Shadowing
+
+Plugin names are unique workspace-wide. If two dirs contain the same name, the dir earlier in admin-defined order wins; others are recorded with status `shadowed`.
+
+## Plugin lifecycle
+
+- **Plugin dirs:** admin adds by path (desktop: Electron Browse), orders, removes. A default dir under the Coppice data directory is created on first start (Docker: on a managed volume).
+- **Scan:** on server start, on dir add, and on explicit Rescan. Scan upserts `plugins` by (dir, relative path); plugins no longer on disk become `missing` (agent assignments kept).
+- **Git install:** `POST /api/plugins/install { gitUrl, ref?, pluginDirId }` → background job: shallow clone into `<dir>/<repo-name>`, record `git_url`, `git_ref`, `git_commit`, then scan. Update pulls and re-records the commit. Uses host git credentials (same posture as repositories). **This is an explicit exception** to the "no server-side git clone" rule, which continues to apply to repositories.
+- **Enablement:** installed plugins start `enabled = false`. Enabling is admin-only. Enabling a plugin with stdio MCP servers shows a warning that they run with server privileges until M11.
+- **Agent assignment:** `agent_plugins` (whole plugins only). Presets list default plugin names; applied when the plugin exists and is enabled. The bundled `coppice` plugin is always on and not listed in the picker.
+- **Plugin settings:** per-plugin env/header values, stored encrypted via the M07 `secrets` store; write-only in UI/API.
+
+## Built-in `coppice` plugin
+
+Shipped with the server (read-only, not in any user plugin dir). Contains platform skills that replace long prose in `context_builder.rs`:
+
+| Skill | Content moved from context today |
+|-------|----------------------------------|
+| `coppice-collaboration` | `mentionAgents` / `agentRequests` / `assignTo` semantics, one-hop consultation rules |
+| `coppice-splitting` | `splitTickets` / `continued` long-running guidance |
+| `coppice-pm-refinement` | PM refinement rules |
+| `coppice-tech-lead-review` | Ready refinement + In Review rules |
+| `coppice-qc-verification` | QC verification-only rules |
+| `coppice-git` | Worktree / commit rules beyond the one-liners |
+
+Must-never-miss rules stay as one line each in the slim context. When a role/stage skill applies, the context names it ("Load `coppice-qc-verification` before starting").
+
+## Core tools
+
+Tool names are short; clients present them as `coppice.<tool>` / `mcp__coppice__<tool>`. Exact JSON schemas are part of the implementation plan.
+
+| Tool | Behavior |
+|------|----------|
+| `ticket_get` | Current ticket by default; `ticketId` for another ticket on the same board. Title, description, acceptance criteria, status/substatus, assignee, repo, branch |
+| `ticket_comments` | Paginated (`limit`, `before`), newest first |
+| `ticket_runs` | Past run summaries for a ticket |
+| `ticket_search` | Text/status search within the board |
+| `board_agents` | Enabled agents: key, name, role |
+| `knowledge_search` | Approved, in-scope, unexpired knowledge via existing FTS; each returned revision is logged once per run as Knowledge Used |
+| `knowledge_propose` | Creates a **Pending** Knowledge Inbox item with run provenance |
+| `skill_list` | Skills available to this run (name, description) |
+| `skill_load` | Skill body + absolute folder path; logged as Skills Used |
+| `comment_post` | Markdown note on the current ticket, authored by the agent; max 5 per run |
+| `result_submit` | Final result for the run; schema depends on profile |
+
+### Profile → tool matrix
+
+| Tool | `full` | `human_agent` | `human_chat` | `conversation` | `knowledge_compaction` |
+|------|:-:|:-:|:-:|:-:|:-:|
+| `ticket_get`, `ticket_comments`, `ticket_runs` | ✓ | ✓ | ✓ | ✓ (board) | ✓ (batch tickets only) |
+| `ticket_search`, `board_agents` | ✓ | ✓ | ✓ | ✓ | — |
+| `knowledge_search` | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `knowledge_propose` | ✓ | ✓ | — | — (use chat action) | — |
+| `skill_list`, `skill_load` | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `comment_post` | ✓ | ✓ | — | — | — |
+| `result_submit` | done/blocked/continued | done/blocked | reply | reply + actions | compaction |
+| Plugin tools | all | all | `readOnlyHint` only | `readOnlyHint` only | — |
+
+Change from M09: `knowledge_search` is allowed in `conversation`. It returns only approved knowledge on demand and does not bypass the Knowledge Inbox; M09's concern was pre-injecting retrieval into chat context.
+
+### `result_submit`
+
+- Input: the same JSON shape each profile returns today (e.g. `done` / `blocked` / `continued` for `full`; reply + `create_ticket` / `create_knowledge` / `cutoff` for `conversation`; the compaction schema for `knowledge_compaction`).
+- The server validates by running the existing parsers in a **validate-only** mode (no side effects) and returns field-level errors as a tool error so the agent can resubmit.
+- The latest valid submission is stored on the run (`agent_runs.submitted_result`). It is **applied when the run finishes**, through the same code path as today. Stop/cancel discards it.
+- Idempotent: resubmitting replaces the stored submission.
+- Fallback: if no valid submission exists at finish, the final-output JSON is parsed as today. If neither yields a valid result, the run fails with the existing "no result" error.
+
+## Slim context
+
+`context.md` contains only:
+
+1. Agent identity (name, role, system prompt / soul).
+2. Task: job type, human request (if any), ticket headline (title, status, substatus, assignee).
+3. Worktree path and one-line git rules.
+4. Skill index (`name — description`), with any required skill called out.
+5. Platform one-liners, including: fetch details with `ticket_get` / `ticket_comments`; search knowledge with `knowledge_search`; finish by calling `result_submit`.
+
+Removed: embedded contract JSON, collaboration prose, role-rule blocks, `.agent/*.json` files, pre-injected knowledge, full thread excerpts.
+
+New run prompt: "Read .agent/context.md, complete the task, and call the `result_submit` tool when finished."
+
+`context_budget` keeps reporting sizes; the plan asserts the reduction target on fixture tickets.
+
+## Run tokens
+
+- Minted at run start (and per chat turn): 256-bit random, only the SHA-256 hash stored in `run_tool_tokens` with `run_id`, `agent_id`, `ticket_id` / `chat_session_id`, `board_id`, `context_profile`, `plugin_ids` snapshot, `expires_at`, `revoked_at`.
+- Revoked on finish / stop / failure; hard expiry = run timeout + margin.
+- Sent as `Authorization: Bearer`, never in URLs or logs. The token value is passed to the connector via per-run config or env and never written into the worktree.
+- `subject_kind` column (`run` now; `personal` reserved) keeps personal access tokens possible later without schema rework.
+
+## Gateway endpoint
+
+- `POST/GET /mcp` streamable HTTP on the existing server; not behind session/CSRF middleware (token auth instead).
+- Base URL from config `mcp.base_url`, default `http://127.0.0.1:<server.port>/mcp` — correct for Docker (CLIs run in the server container), desktop (host, dynamic port), and cloud.
+- Tool list per session is computed from the token: profile matrix ∩ agent's enabled plugins ∩ plugin health.
+- Limits: per-call timeout 60 s (configurable), output cap with truncation + pagination hint, `comment_post` cap, max concurrent calls per run.
+
+## Connector wiring
+
+Config files live in the run's artifacts dir where the CLI accepts a path, keeping worktrees clean. **Expected mechanisms below are verified in plan task 1 before any other implementation;** the verified table replaces this one.
+
+| Connector | Expected mechanism |
+|-----------|--------------------|
+| `claude-code` | `--mcp-config <run file> --strict-mcp-config`; allow `mcp__coppice__*` in `--allowedTools` |
+| `codex` | `-c mcp_servers.coppice.*` overrides (HTTP + bearer) or `coppice mcp-bridge` stdio |
+| `cursor` | `.cursor/mcp.json` in workspace, hidden via `.git/info/exclude`; MCP auto-approve flag |
+| `opencode` | Per-session project config in the session directory (shared `opencode serve` means config cannot be per-server) |
+| `kilo-code` | As OpenCode (fork), verified separately |
+| `mock` | Fixture field `toolCalls: [{ tool, args }]` executed through a real `rmcp` HTTP client against `/mcp` before returning the fixture result |
+
+If the connector cannot reach the gateway, the run fails with `mcp_unavailable` — no silent fallback to the fat context.
+
+Chat write-denial (M09) is unchanged for connector-native tools; Coppice tools follow the profile matrix.
+
+## Plugin MCP proxy
+
+- One managed instance per enabled plugin MCP server, **shared across runs**, started lazily on first `tools/list` that needs it.
+- Concurrent requests are multiplexed over the single client connection (JSON-RPC ids).
+- Crash → restart with exponential backoff; repeated failure marks the server `unhealthy` and hides its tools until the next successful health check.
+- Idle shutdown after a configurable period.
+- Tool list cached; refreshed on `notifications/tools/list_changed` and on restart.
+- Exposed names: `<plugin>__<tool>` (sanitized to MCP name rules); descriptions and `annotations` passed through.
+- Documented limitation: shared instances share state across runs; per-run instances can be added later if needed.
+
+## Data model
+
+```text
+plugin_dirs       (id, path, position, is_default, created_at)
+plugins           (id, plugin_dir_id, rel_path, name, version, description, source [local|git|builtin],
+                   git_url, git_ref, git_commit, manifest jsonb, status [ok|invalid|missing|shadowed],
+                   error, enabled, created_at, updated_at)
+plugin_settings   (plugin_id, key, secret_id)
+agent_plugins     (agent_id, plugin_id)
+run_tool_tokens   (id, token_hash, subject_kind, run_id, agent_id, ticket_id, chat_session_id, board_id,
+                   context_profile, plugin_ids, expires_at, revoked_at, created_at)
+run_tool_calls    (id, run_id, tool, source [core|skill|plugin], plugin_id, args_summary, status [ok|error|denied|timeout],
+                   error, duration_ms, created_at)
+agent_runs        + submitted_result jsonb
+```
+
+Skills Used is derived from `run_tool_calls` where `tool = skill_load`; Knowledge Used keeps its existing M06 table.
+
+## API
+
+```text
+GET    /api/plugin-dirs
+POST   /api/plugin-dirs
+PATCH  /api/plugin-dirs/:id            # reorder
+DELETE /api/plugin-dirs/:id
+POST   /api/plugins/rescan
+POST   /api/plugins/install            # { gitUrl, ref?, pluginDirId } → job id
+POST   /api/plugins/:id/update         # git pull
+GET    /api/plugins
+GET    /api/plugins/:id                # skills, MCP servers, tools, unsupported parts, status
+PATCH  /api/plugins/:id                # enable / disable
+PUT    /api/plugins/:id/settings       # write-only values
+POST   /api/plugins/:id/test           # start MCP servers, list tools
+GET    /api/agents/:id/plugins
+PUT    /api/agents/:id/plugins
+GET    /api/agent-runs/:id/tool-calls
+POST   /mcp                            # run token auth
+```
+
+Admin-only for all plugin and plugin-dir mutations; CSRF applies to all `/api` mutations.
+
+## UI
+
+- **Settings → Plugins:** plugin dirs (add / Browse / reorder / remove / Rescan), Install from git, plugin cards (name, version, source + commit, skill / MCP counts, unsupported parts, status, error, enable toggle, Update, Test), plugin detail (skills with descriptions, tools, settings).
+- **Agent form:** Plugins multi-select (enabled plugins only).
+- **Agent Run detail:** Tools & Skills tab (call log, Skills Used, Knowledge Used).
+- **Live console:** tool calls inline, reusing `web/src/opencode-session/tools/` renderers.
+
+## Error handling
+
+- Tool-level failures → MCP tool result with `isError: true` and an actionable message (e.g. `ticket not on this board`, `result invalid: assignTo references unknown agent "foo"`).
+- Auth failures → HTTP 401; revoked/expired tokens included.
+- Denied (tool not in the token's set) → tool error `denied`, logged.
+- Plugin server unavailable → tool error `plugin "<name>" unavailable`; run continues.
+- Timeouts → tool error `timeout`, logged.
+- Git install failures → job status `failed` with the git error shown on the card.
+- Invalid manifest → plugin `invalid` with error; skills-level errors mark only that skill.
+
+## Testing
+
+### Unit
+
+- Manifest parsing: plugin layout, skills-only layout, a fixture shaped like `superpowers`, invalid frontmatter, unsupported parts detection.
+- Shadowing and missing-plugin handling on rescan.
+- Placeholder substitution (`${CLAUDE_PLUGIN_ROOT}`, settings, env, missing var).
+- Token mint/verify/revoke/expiry; wrong board/ticket rejected.
+- Profile → tool matrix; `readOnlyHint` filtering for chat profiles.
+- `result_submit` validate-only paths for every profile, including field-level errors and idempotency.
+- Tool name sanitization and namespacing.
+
+### Integration (embedded Postgres, mock connector)
+
+- Mock run with `toolCalls` (`ticket_get` → `knowledge_search` → `skill_load` → `result_submit`) over real HTTP MCP produces the same ticket state as the equivalent legacy fixture.
+- Fallback: no `result_submit` → final JSON applied.
+- Token rejected after run finish.
+- `knowledge_propose` → Pending only; Knowledge Used and Skills Used recorded.
+- Chat turn: write plugin tools not listed; `create_ticket` action via `result_submit` works.
+- Stdio fixture MCP server (small Rust test binary) proxied end to end; crash → restart; unhealthy hides tools.
+- Plugin dirs, rescan, enable, agent assignment APIs; admin-only and CSRF enforced.
+- Context size assertion against recorded baseline.
+
+### Smoke
+
+- `make e2e-smoke-m10`: add a fixture plugin dir, enable plugin, assign to agent, run a mock ticket that uses core tools, a plugin skill, and a plugin MCP tool; verify Tools & Skills tab.
+- Existing `make e2e-smoke-m03`, `e2e-smoke-m06`, `e2e-smoke-m06-knowledge`, `e2e-smoke-m09` still pass.
+
+### Manual acceptance
+
+Each real connector completes a ticket tool-first (tools called, `result_submit` used) in the default Compose stack with managed connectors (M08).
+
+## Delivery order
+
+1. **Connector verification:** stub `/mcp` with header token; prove all five real CLIs can connect and call a tool; record baseline context sizes. Update the wiring table.
+2. Gateway, tokens, core read tools, `result_submit`, `run_tool_calls`; mock `toolCalls`.
+3. Built-in `coppice` plugin skills, `SkillCatalog`, slim context builders, migrate role rules.
+4. Wire all connectors; switch to tool-first; delete legacy fat-context builders and `.agent/*.json` once all six pass.
+5. Plugin dirs, scan, git install, enablement, agent assignment (API + UI + presets).
+6. Plugin MCP proxy, plugin settings, Test button.
+7. Tools & Skills tab, live console rendering, smoke, docs (`AGENTS.md`, `docs/architecture.md`, `docs/providers/`).
+
+## Risks
+
+| Risk | Mitigation |
+|------|------------|
+| Agent forgets `result_submit` | Final-JSON fallback; prompt + context one-liner |
+| Agent skips a required role skill | Must-rules remain one-liners in context; required skill named explicitly; Skills Used visible |
+| Connector MCP quirks / version drift | Verification is task 1; `mcp_unavailable` fails loudly; `coppice connector doctor` gains an MCP check |
+| Shared plugin server state across runs | Documented; per-run instances possible later |
+| Arbitrary plugin code before M11 | Disabled by default, admin-only enable, explicit warning, M11 sandboxes processes |
+| Server-side git clone for plugins | Scoped exception; repositories rule unchanged |
+
+## Acceptance criteria
+
+- [ ] Connector verification recorded; wiring table updated
+- [ ] Plugin dirs, scan, git install, enable, agent assignment work via UI and API
+- [ ] Claude Code / Cursor format plugins and skills-only folders load unchanged; unsupported parts listed
+- [ ] `/mcp` gateway with per-run tokens; core tools and `result_submit` per profile matrix
+- [ ] Plugin MCP servers proxied with namespacing, health, restart, settings
+- [ ] All six connectors run tool-first; legacy fat context removed
+- [ ] `full` context ≥50% smaller than baseline on fixture tickets
+- [ ] Knowledge Used, Skills Used, and tool calls visible in Agent Run detail
+- [ ] M05 / M06 / M09 behavior unchanged; existing smokes pass
+- [ ] `make test`, clippy, `make web-test`, `make e2e-smoke-m10` pass

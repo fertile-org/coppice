@@ -23,7 +23,7 @@ Carried over from the original M07 "Trust & signals" scope; observation runs now
 ### Workspace signals
 
 - `WorkspaceSignal` model (product design §15.2): agent, domain, title, severity, evidence, recommendation, status
-- Raised via `coppice-core` tool `signal_create` (M10) — evidence and recommendation are required by the tool schema
+- Raised via a new Coppice core tool `signal_create` on the M10 gateway — evidence and recommendation are required by the tool schema
 - Anti-spam (product design §15.6): max signals per agent per day, dedup window (same agent + dedup key updates the existing signal)
 
 ### Workspace Inbox

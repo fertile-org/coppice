@@ -39,7 +39,7 @@ See the [milestone strategy](../superpowers/specs/2026-06-07-coppice-milestone-s
 | M07 | [M07-trust-and-signals.md](./M07-trust-and-signals.md) | Git/PR actions + encrypted forge secrets (sandbox/signals split to M11/M12) |
 | M08 | [M08-connector-operator-cli.md](./M08-connector-operator-cli.md) | Managed HOME volume + `coppice connector` install/setup/doctor |
 | M09 | [M09-agent-chat.md](./M09-agent-chat.md) | Human↔agent chat sessions, conversation profile, cwd + write-denial |
-| M10 | [M10-plugins.md](./M10-plugins.md) | Plugins: MCP tools, skills, commands, storage; `coppice-core` tools; tool-first context |
+| M10 | [M10-plugins.md](./M10-plugins.md) | Plugins: Coppice MCP gateway, core tools, skills, plugin MCP servers; tool-first context |
 | M11 | [M11-security-and-sandbox.md](./M11-security-and-sandbox.md) | Capabilities, sandbox profiles, tool policy, scoped secrets, guided unblock, audit log |
 | M12 | [M12-role-owner-agents.md](./M12-role-owner-agents.md) | Role-owner agents: observation runs, workspace signals, Workspace Inbox |
 
