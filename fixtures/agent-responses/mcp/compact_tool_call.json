@@ -3,6 +3,6 @@
   "summary": "Nothing durable in these tickets.",
   "knowledgeCandidates": [],
   "toolCalls": [
-    { "tool": "ticket_runs", "args": {} }
+    { "tool": "ticket_runs", "args": { "ticketId": "{{ticket:0}}" } }
   ]
 }
