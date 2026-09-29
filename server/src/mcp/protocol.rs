@@ -5,7 +5,7 @@ use serde_json::{json, Value};
 
 pub const SERVER_NAME: &str = "coppice";
 
-const SUPPORTED_VERSIONS: [&str; 3] = ["2025-06-18", "2025-03-26", "2024-11-05"];
+const SUPPORTED_VERSIONS: [&str; 2] = ["2025-06-18", "2025-03-26"];
 const FALLBACK_VERSION: &str = "2025-06-18";
 
 const INVALID_REQUEST: i64 = -32600;
@@ -153,6 +153,13 @@ mod tests {
     #[tokio::test]
     async fn initialize_unknown_version_falls_back() {
         let body = json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"1999-01-01"}});
+        let res = handle_rpc(body, &FakeHost).await.unwrap();
+        assert_eq!(res["result"]["protocolVersion"], "2025-06-18");
+    }
+
+    #[tokio::test]
+    async fn initialize_legacy_version_falls_back() {
+        let body = json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05"}});
         let res = handle_rpc(body, &FakeHost).await.unwrap();
         assert_eq!(res["result"]["protocolVersion"], "2025-06-18");
     }

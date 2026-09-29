@@ -226,18 +226,29 @@ Wiring rules (apply to Docker, desktop, and cloud alike):
 
 The CLI reads MCP servers only from `<workspace>/.cursor/mcp.json` and `$HOME/.cursor/mcp.json` (Node `homedir()`, i.e. the `HOME` env var); `--plugin-dir` with `mcp.json` did **not** register servers (`agent mcp list` empty, model saw no tool). `CURSOR_CONFIG_DIR` alone does **not** relocate `mcp.json`. What works, with nothing written to the workspace or the user's real `~/.cursor` / `~/.config/cursor` config:
 
-```text
-<run dir>/home/.cursor/mcp.json     {"mcpServers":{"coppice":{"url":"http://<host>/mcp",
-                                     "headers":{"Authorization":"Bearer ${env:COPPICE_MCP_TOKEN}"}}}}
-<run dir>/cursor-config/cli-config.json
-                                    {"version":1,"permissions":{"allow":["Mcp(coppice:*)"],"deny":[]}}
+Exact setup used in the verification run. `<home dir>` and `<config dir>` are the per-run directories (verification used `/tmp/cur-home3` and `/tmp/cur-cfg3`); the token value is per run (verification used `probe-token`); the port varies (verification used `5099`). Everything else was used verbatim.
 
-env: HOME=<run dir>/home
-     XDG_CONFIG_HOME=<real config home, default ~/.config>   # keeps auth.json (auth lives at $XDG_CONFIG_HOME/cursor/auth.json)
-     CURSOR_CONFIG_DIR=<run dir>/cursor-config               # otherwise permissions are read from the real $XDG_CONFIG_HOME/cursor/cli-config.json
-     COPPICE_MCP_TOKEN=<run token>
-argv: agent -p --mode ask --trust --output-format stream-json "<prompt>"
+`<home dir>/.cursor/mcp.json`:
+
+```json
+{"mcpServers":{"coppice":{"url":"http://127.0.0.1:5099/mcp","headers":{"Authorization":"Bearer ${env:COPPICE_MCP_TOKEN}"}}}}
 ```
+
+`<config dir>/cli-config.json`:
+
+```json
+{"version":1,"permissions":{"allow":["Mcp(coppice:*)"],"deny":[]}}
+```
+
+Command (working directory: an empty scratch workspace, `/tmp/cur-ws`):
+
+```sh
+env HOME=<home dir> XDG_CONFIG_HOME=/home/hungnguyenba/.config CURSOR_CONFIG_DIR=<config dir> COPPICE_MCP_TOKEN=<run token> \
+  agent -p --mode ask --trust --output-format stream-json \
+  "Call the coppice ping tool with message hello and print the result."
+```
+
+`XDG_CONFIG_HOME=/home/hungnguyenba/.config` is the verifying user's real config home (the value `agent` uses when the variable is unset, `$HOME/.config` of the real user); it keeps `auth.json` reachable at `$XDG_CONFIG_HOME/cursor/auth.json`. The connector must pass the real user's config home here, because `HOME` no longer points at it. `CURSOR_CONFIG_DIR` makes permissions come from `<config dir>/cli-config.json` instead of the real `$XDG_CONFIG_HOME/cursor/cli-config.json`.
 
 Results:
 
