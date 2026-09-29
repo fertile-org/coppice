@@ -1279,6 +1279,24 @@ mod tests {
     }
 
     #[test]
+    fn mcp_builtin_plugins_dir_from_env() {
+        let _guard = ENV_LOCK.lock().expect("env lock");
+
+        const KEY: &str = "COPPICE_MCP__BUILTIN_PLUGINS_DIR";
+        let previous = std::env::var(KEY).ok();
+        std::env::set_var(KEY, "/data/builtin-plugins");
+
+        let cfg = AppConfig::load_defaults().expect("config should load");
+
+        match previous {
+            Some(value) => std::env::set_var(KEY, value),
+            None => std::env::remove_var(KEY),
+        }
+
+        assert_eq!(cfg.mcp.builtin_plugins_dir, "/data/builtin-plugins");
+    }
+
+    #[test]
     fn bootstrap_admin_fields_from_double_underscore_env() {
         let _guard = ENV_LOCK.lock().expect("env lock");
         const EMAIL: &str = "COPPICE_AUTH__BOOTSTRAP_ADMIN_EMAIL";

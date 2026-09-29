@@ -32,7 +32,7 @@ COPY --from=builder /app/target/release/coppice /usr/local/bin/coppice
 COPY deploy/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 # MockProvider resolves fixtures relative to compile-time CARGO_MANIFEST_DIR (/app/server).
-RUN mkdir -p /app/server /data/artifacts /data/worktrees /home/coppice
+RUN mkdir -p /app/server /data/artifacts /data/worktrees /data/builtin-plugins /home/coppice
 COPY server/agent_templates /app/server/agent_templates
 COPY fixtures /app/fixtures
 # Fallback only; Compose bind-mounts deploy/config/config.toml over this path.

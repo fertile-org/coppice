@@ -1,6 +1,6 @@
 ---
 name: coppice-collaboration
-description: How mentionAgents, agentRequests and assignTo work, including the one-hop consultation rules.
+description: mentionAgents / agentRequests / assignTo semantics, one-hop consultation rules, and completion rules for done results and handoffs (field roles, implementer completion).
 ---
 
 ## Coppice platform rules — collaboration fields (required)
@@ -10,3 +10,13 @@ description: How mentionAgents, agentRequests and assignTo work, including the o
 - `mentionAgents` and `agentRequests` share the per-run target limit. Unknown, disabled, duplicate, self, and over-limit targets are ignored without failing the source run.
 - `assignTo` is the only ownership or handoff field. Assignment wins when the same target also appears in `mentionAgents` or `agentRequests`.
 - Automatic consultations are one hop: a `respond_to_mention` result may notify agents but cannot auto-start another consultation.
+
+**Field roles (do not duplicate content across fields):**
+- `updatedDescription` — full ticket body (scope, context, constraints). Stored on the ticket.
+- `acceptanceCriteria` — checklist only. Stored under `## Acceptance criteria` on the ticket.
+- `summary` — short activity note for the comment thread (1–3 sentences). Do not paste the full spec, analysis tables, or acceptance checklist here when `updatedDescription` is set.
+
+## Coppice platform rules — implementer completion (required)
+
+- On `status: "done"`, **omit `assignTo`** — workflow gates move the ticket to In Review automatically.
+- Only PM agents use `assignTo` (when refining backlog tickets). Use agent keys that exist on the board (e.g. `backend_engineer`, `research`).

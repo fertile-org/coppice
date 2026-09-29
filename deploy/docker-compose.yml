@@ -40,6 +40,8 @@ services:
       DATABASE_URL: postgres://coppice:coppice@postgres:5432/coppice
       COPPICE_CONFIG: /etc/coppice/config.toml
       COPPICE_STORAGE__ARTIFACTS_DIR: /data/artifacts
+      # Regenerated on every start; must be writable by the non-root server user.
+      COPPICE_MCP__BUILTIN_PLUGINS_DIR: /data/builtin-plugins
       AGENT_DEFAULT_PROVIDER: mock
       WORKTREES_PATH: /data/worktrees
       AGENT_WORKER_COUNT: "2"
