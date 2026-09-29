@@ -58,24 +58,11 @@ impl RunToolHost {
         let timeout = Duration::from_secs(self.state.config.mcp.call_timeout_secs);
         match tokio::time::timeout(timeout, tools::dispatch(tool, &ctx, args)).await {
             Err(_) => error_output(CallStatus::Timeout, "timeout"),
-            Ok(Err(e)) => {
-                if let ToolError::Internal(inner) = &e {
+            Ok(result) => {
+                if let Err(ToolError::Internal(inner)) = &result {
                     tracing::error!(tool = tool.name(), run_id = %self.scope.run_id, error = ?inner, "mcp tool failed");
                 }
-                let message = e.message();
-                error_output(CallStatus::Error, &message)
-            }
-            Ok(Ok(value)) => {
-                let text =
-                    serde_json::to_string_pretty(&value).unwrap_or_else(|_| value.to_string());
-                (
-                    CallStatus::Ok,
-                    ToolOutput {
-                        text: truncate_output(text, self.state.config.mcp.max_output_bytes),
-                        is_error: false,
-                    },
-                    None,
-                )
+                classify(result, self.state.config.mcp.max_output_bytes)
             }
         }
     }
@@ -130,15 +117,50 @@ fn summarize_args(args: &Value) -> String {
     args.to_string().chars().take(ARGS_SUMMARY_CHARS).collect()
 }
 
+fn classify(
+    result: Result<Value, ToolError>,
+    max_output_bytes: usize,
+) -> (CallStatus, ToolOutput, Option<String>) {
+    match result {
+        Ok(value) => {
+            let text = serde_json::to_string_pretty(&value).unwrap_or_else(|_| value.to_string());
+            (
+                CallStatus::Ok,
+                ToolOutput {
+                    text: truncate_output(text, max_output_bytes),
+                    is_error: false,
+                },
+                None,
+            )
+        }
+        Err(e) => {
+            let status = match e {
+                ToolError::Denied(_) => CallStatus::Denied,
+                _ => CallStatus::Error,
+            };
+            error_output(status, &e.message())
+        }
+    }
+}
+
+/// The returned text, suffix included, never exceeds `max_bytes`.
 fn truncate_output(text: String, max_bytes: usize) -> String {
     if text.len() <= max_bytes {
         return text;
     }
-    let mut end = max_bytes;
+    let mut end = max_bytes.saturating_sub(TRUNCATION_SUFFIX.len());
     while !text.is_char_boundary(end) {
         end -= 1;
     }
-    format!("{}{}", &text[..end], TRUNCATION_SUFFIX)
+    let mut out = format!("{}{}", &text[..end], TRUNCATION_SUFFIX);
+    if out.len() > max_bytes {
+        let mut cut = max_bytes;
+        while !out.is_char_boundary(cut) {
+            cut -= 1;
+        }
+        out.truncate(cut);
+    }
+    out
 }
 
 #[async_trait]
@@ -185,10 +207,46 @@ mod tests {
     use super::*;
 
     #[test]
-    fn truncate_output_respects_limit_and_char_boundaries() {
+    fn truncate_output_stays_within_limit_and_char_boundaries() {
         assert_eq!(truncate_output("short".into(), 10), "short");
-        let out = truncate_output("ééé".into(), 3);
-        assert_eq!(out, format!("é{TRUNCATION_SUFFIX}"));
+
+        let max = TRUNCATION_SUFFIX.len() + 10;
+        let out = truncate_output("é".repeat(100), max);
+        assert!(out.len() <= max, "len {} > {max}", out.len());
+        assert!(out.ends_with(TRUNCATION_SUFFIX));
+        assert!(out.starts_with("ééééé"));
+
+        let ascii = truncate_output("x".repeat(500), max);
+        assert_eq!(ascii.len(), max);
+
+        let tiny = truncate_output("x".repeat(500), 5);
+        assert!(tiny.len() <= 5);
+    }
+
+    #[test]
+    fn handler_denied_is_logged_as_denied() {
+        let (status, output, error) = classify(Err(ToolError::Denied("nope".into())), 1000);
+        assert_eq!(status.as_str(), "denied");
+        assert!(output.is_error);
+        assert_eq!(output.text, "nope");
+        assert_eq!(error.as_deref(), Some("nope"));
+    }
+
+    #[test]
+    fn handler_errors_map_to_error_status() {
+        for e in [
+            ToolError::InvalidArgs("a".into()),
+            ToolError::NotFound("b".into()),
+            ToolError::Limit("c".into()),
+            ToolError::Internal(anyhow::anyhow!("boom")),
+        ] {
+            let (status, output, _) = classify(Err(e), 1000);
+            assert_eq!(status.as_str(), "error");
+            assert!(output.is_error);
+        }
+        let (status, output, _) = classify(Err(ToolError::Internal(anyhow::anyhow!("boom"))), 1000);
+        assert_eq!(status.as_str(), "error");
+        assert_eq!(output.text, "internal error");
     }
 
     #[test]
