@@ -1,6 +1,7 @@
 use crate::domain::comment::AuthorType;
 use crate::domain::context_profile::ContextProfile;
 use crate::domain::job::{job_status_to_str, JobStatus};
+use crate::domain::knowledge_compaction::JOB_TYPE_COMPACT_KNOWLEDGE;
 use crate::domain::repo::VerificationStatus;
 use crate::domain::run::{run_status_from_str, run_status_to_str, AgentRun, RunStatus};
 use crate::domain::slug::slugify;
@@ -578,6 +579,55 @@ impl<'a> RunService<'a> {
         .await?;
 
         tx.commit().await?;
+        Ok(row_to_run(&row))
+    }
+
+    /// Queue the agent run for a knowledge compaction batch inside the caller's
+    /// transaction so the batch and its run commit together.
+    pub async fn start_compaction_run_in_tx(
+        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        batch_id: Uuid,
+        agent_id: Uuid,
+    ) -> Result<AgentRun, RunError> {
+        let run_id = Uuid::new_v4();
+        let row = sqlx::query(
+            r#"
+            INSERT INTO agent_runs (
+                id, ticket_id, chat_session_id, compaction_batch_id,
+                agent_id, job_type, status, sandbox_profile_id, context_profile
+            )
+            VALUES ($1, NULL, NULL, $2, $3, $4, $5, $6, $7)
+            RETURNING
+                id, ticket_id, chat_session_id, chat_message_id,
+                agent_id, job_type, status, sandbox_profile_id,
+                worktree_path, branch_name, error_message, session_id,
+                context_profile, trigger_comment_id,
+                started_at, ended_at, created_at
+            "#,
+        )
+        .bind(run_id)
+        .bind(batch_id)
+        .bind(agent_id)
+        .bind(JOB_TYPE_COMPACT_KNOWLEDGE)
+        .bind(run_status_to_str(RunStatus::Queued))
+        .bind(PROFILE_ID)
+        .bind(ContextProfile::KnowledgeCompaction.as_str())
+        .fetch_one(&mut **tx)
+        .await?;
+
+        sqlx::query(
+            r#"
+            INSERT INTO agent_jobs (id, run_id, job_type, status)
+            VALUES ($1, $2, $3, $4)
+            "#,
+        )
+        .bind(Uuid::new_v4())
+        .bind(run_id)
+        .bind(JOB_TYPE_COMPACT_KNOWLEDGE)
+        .bind(job_status_to_str(JobStatus::Pending))
+        .execute(&mut **tx)
+        .await?;
+
         Ok(row_to_run(&row))
     }
 

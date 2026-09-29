@@ -68,7 +68,7 @@ async fn export_backup(
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let filename = format!("coppice-backup-{stamp}.zip");
-    Ok(Response::builder()
+    Response::builder()
         .status(StatusCode::OK)
         .header(header::CONTENT_TYPE, "application/zip")
         .header(
@@ -76,7 +76,7 @@ async fn export_backup(
             format!("attachment; filename=\"{filename}\""),
         )
         .body(Body::from(bytes))
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?)
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
 }
 
 async fn import_backup(
@@ -131,7 +131,7 @@ async fn import_backup(
         "missing file field".into(),
     ))?;
 
-    match BackupService::import_from_bytes(&state.config, &pool, &bytes).await {
+    match BackupService::import_from_bytes(&state.config, pool, &bytes).await {
         Ok(()) => Ok(Json(ImportBackupResponse {
             ok: true,
             message:

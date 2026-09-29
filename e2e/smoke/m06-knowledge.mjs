@@ -2,10 +2,11 @@
 /**
  * M06 governed knowledge API + web route smoke test.
  *
- * Proves the default stack can govern a manual candidate, embed and retrieve
- * its exact revision in a Full run, expose the run audit, and idempotently
- * extract a Pending coding_convention from a seeded reusable Done-ticket
- * description (outcome-only Done may yield zero candidates — valid success).
+ * Proves the default stack can govern a manual candidate, compact a Done
+ * ticket into a Pending candidate with the configured compaction agent
+ * (MockProvider fixtures, no notification on success), and retrieve both
+ * approved revisions via full-text search in a Full run with an exact audit.
+ * Restores the previous compaction agent setting when done.
  *
  * Env:
  *   COPPICE_API_URL            default http://localhost:5000
@@ -136,22 +137,18 @@ async function registerRepo(auth) {
   fail(`register repo failed: ${response.status} ${await response.text()}`);
 }
 
-async function createAgent(auth, suffix) {
+async function createAgent(auth, name, presetKey) {
   const presets = await expectJson(
     await api('GET', '/api/agent-presets', auth),
     200,
     'list presets',
   );
-  const presetId = presets.items?.[0]?.id;
-  if (!presetId) fail('no agent preset available');
+  const presetId = presets.items?.find((preset) => preset.key === presetKey)?.id;
+  if (!presetId) fail(`agent preset ${presetKey} not available`);
   return expectJson(
     await api('POST', '/api/agents', {
       ...auth,
-      body: {
-        name: `Knowledge Smoke Agent ${suffix}`,
-        presetId,
-        connector: 'mock',
-      },
+      body: { name, presetId, connector: 'mock' },
     }),
     201,
     'create agent',
@@ -209,20 +206,35 @@ async function poll(label, callback) {
   fail(`timed out waiting for ${label}; last=${JSON.stringify(last)}`);
 }
 
-async function main() {
-  console.log(`smoke: waiting for ${API}/health`);
-  await waitForHealth();
-  await bootstrapIfNeeded();
-  const auth = await login();
-  const suffix = `${Date.now()}-${Math.floor(Math.random() * 10_000)}`;
-  const board = await createBoard(auth, suffix);
-  const repo = await registerRepo(auth);
-  const agent = await createAgent(auth, suffix);
+async function inbox(boardId, auth) {
+  const page = await expectJson(
+    await api(
+      'GET',
+      `/api/knowledge/inbox?boardId=${encodeURIComponent(boardId)}&limit=100`,
+      auth,
+    ),
+    200,
+    'list knowledge inbox',
+  );
+  return page.items;
+}
 
-  const title = `M06 exact retrieval ${suffix}`;
-  const description = `Use governed knowledge marker ${suffix} for this ticket.`;
-  const ticket = await createTicket(board.id, title, description, auth);
+async function approve(item, auth) {
+  const approved = await expectJson(
+    await api('POST', `/api/knowledge/${item.id}/approve`, {
+      ...auth,
+      body: { expectedVersion: item.version },
+    }),
+    200,
+    'approve knowledge candidate',
+  );
+  if (approved.status !== 'approved' || approved.activeRevisionId !== approved.revisionId) {
+    fail(`approval did not activate the current revision: ${JSON.stringify(approved)}`);
+  }
+  return approved;
+}
 
+async function governManualCandidate(board, title, description, auth) {
   const candidate = await expectJson(
     await api('POST', '/api/knowledge', {
       ...auth,
@@ -242,18 +254,13 @@ async function main() {
     201,
     'create manual knowledge candidate',
   );
-  if (candidate.status !== 'pending' || candidate.embeddingStatus !== 'not_requested') {
+  if (candidate.status !== 'pending' || candidate.activeRevisionId !== null) {
     fail(`manual candidate bypassed governance: ${JSON.stringify(candidate)}`);
   }
-
   const edited = await expectJson(
     await api('PATCH', `/api/knowledge/${candidate.id}`, {
       ...auth,
-      body: {
-        expectedVersion: candidate.version,
-        title,
-        content: description,
-      },
+      body: { expectedVersion: candidate.version, title, content: description },
     }),
     200,
     'edit knowledge candidate',
@@ -261,51 +268,103 @@ async function main() {
   if (edited.revisionNumber !== 2 || edited.revisionId === candidate.revisionId) {
     fail('knowledge edit did not create an immutable replacement revision');
   }
-
-  const approved = await expectJson(
-    await api('POST', `/api/knowledge/${candidate.id}/approve`, {
-      ...auth,
-      body: { expectedVersion: edited.version },
-    }),
-    200,
-    'approve knowledge candidate',
-  );
-  if (approved.status !== 'approved') fail('approved item has wrong status');
-
-  const ready = await poll('knowledge embedding activation', async () => {
-    const current = await expectJson(
-      await api('GET', `/api/knowledge/${candidate.id}`, auth),
-      200,
-      'get knowledge item',
-    );
-    if (current.embeddingStatus === 'failed') {
-      fail(`embedding failed: ${current.embeddingError ?? 'unknown error'}`);
-    }
-    return current.embeddingStatus === 'ready' &&
-      current.activeRevisionId === current.revisionId
-      ? current
-      : null;
-  });
-  console.log(`smoke: activated knowledge revision ${ready.revisionId}`);
-
-  const inbox = await expectJson(
-    await api(
-      'GET',
-      `/api/knowledge/inbox?boardId=${encodeURIComponent(board.id)}&limit=100`,
-      auth,
-    ),
-    200,
-    'list knowledge inbox',
-  );
-  if (inbox.items.some((entry) => entry.id === candidate.id)) {
+  const approved = await approve(edited, auth);
+  if ((await inbox(board.id, auth)).some((entry) => entry.id === candidate.id)) {
     fail('approved knowledge remained in Pending inbox');
   }
+  console.log(`smoke: activated manual knowledge revision ${approved.revisionId}`);
+  return approved;
+}
 
+async function compactDoneTicket(board, compactor, suffix, auth) {
+  const startedAt = Date.now() - 1000;
+  await expectJson(
+    await api('PUT', '/api/settings/knowledge', {
+      ...auth,
+      body: { compactionAgentId: compactor.id },
+    }),
+    200,
+    'configure compaction agent',
+  );
+  const ticket = await createTicket(
+    board.id,
+    `M06 compaction ${suffix}`,
+    `Run make test-unit while iterating. Compaction marker ${suffix}.`,
+    auth,
+  );
+  await expectJson(
+    await api('PATCH', `/api/tickets/${ticket.id}/status`, {
+      ...auth,
+      body: { status: 'done' },
+    }),
+    200,
+    'transition compaction ticket to Done',
+  );
+
+  const candidate = await poll('compacted Pending candidate', async () => {
+    const status = await expectJson(
+      await api('GET', '/api/knowledge/compaction', auth),
+      200,
+      'get compaction status',
+    );
+    if (status.state === 'failed' && status.lastBatch?.errorMessage !== 'cancelled') {
+      fail(`compaction failed: ${status.lastBatch?.errorMessage ?? 'unknown error'}`);
+    }
+    if (status.state === 'idle' && status.queuedCount > 0) {
+      const response = await api('POST', '/api/knowledge/compaction/run', auth);
+      if (response.status !== 202 && response.status !== 409) {
+        fail(`compact now failed: ${response.status} ${await response.text()}`);
+      }
+    }
+    return (
+      (await inbox(board.id, auth)).find(
+        (entry) =>
+          entry.compactionBatchId &&
+          entry.sourceTicketIds.includes(ticket.id) &&
+          entry.knowledgeType === 'test_command',
+      ) ?? null
+    );
+  });
+  if (
+    candidate.status !== 'pending' ||
+    candidate.sourceType !== 'ticket' ||
+    candidate.policyDecision !== 'human_review' ||
+    candidate.compactionAgentName !== compactor.name
+  ) {
+    fail(`compaction candidate did not fail closed: ${JSON.stringify(candidate)}`);
+  }
+  const notifications = await expectJson(
+    await api('GET', '/api/notifications?filter=all&limit=100', auth),
+    200,
+    'list notifications',
+  );
+  if (
+    (notifications.items ?? []).some(
+      (entry) =>
+        new Date(entry.createdAt).getTime() >= startedAt &&
+        (entry.type === 'knowledge_compaction_failed' ||
+          (entry.type === 'agent_run_finished' && entry.ticketId === null)),
+    )
+  ) {
+    fail('successful compaction produced a notification');
+  }
+  const approved = await approve(candidate, auth);
+  console.log(`smoke: compacted and approved candidate ${approved.id}`);
+  return approved;
+}
+
+async function fullRunUses(board, repo, worker, items, suffix, auth) {
+  const ticket = await createTicket(
+    board.id,
+    `M06 retrieval ${suffix}: make test-unit`,
+    `Use governed knowledge marker ${suffix} and make test-unit while iterating.`,
+    auth,
+  );
   await patchTicket(ticket.id, { repoId: repo.id }, auth, 'attach repo');
   await expectJson(
     await api('POST', `/api/tickets/${ticket.id}/assign`, {
       ...auth,
-      body: { agentId: agent.id },
+      body: { agentId: worker.id },
     }),
     200,
     'assign agent',
@@ -325,108 +384,66 @@ async function main() {
     200,
     'get Knowledge Used',
   );
-  const exact = usage.items.filter(
-    (entry) =>
-      entry.itemId === candidate.id && entry.revisionId === ready.revisionId,
-  );
-  if (exact.length !== 1) {
-    fail(`expected exact knowledge revision once; usage=${JSON.stringify(usage)}`);
+  for (const item of items) {
+    const exact = usage.items.filter(
+      (entry) => entry.itemId === item.id && entry.revisionId === item.revisionId,
+    );
+    if (exact.length !== 1) {
+      fail(`expected revision ${item.revisionId} once; usage=${JSON.stringify(usage)}`);
+    }
+    if (
+      exact[0].tokenCount <= 0 ||
+      !exact[0].renderedContent.includes(item.title) ||
+      typeof exact[0].score !== 'number'
+    ) {
+      fail(`usage snapshot missing exact rendered content: ${JSON.stringify(exact[0])}`);
+    }
   }
-  if (
-    exact[0].tokenCount <= 0 ||
-    !exact[0].renderedContent.includes(title) ||
-    !exact[0].renderedContent.includes(description)
-  ) {
-    fail(`usage snapshot missing exact rendered content: ${JSON.stringify(exact[0])}`);
-  }
-  const usageAgain = await expectJson(
-    await api('GET', `/api/agent-runs/${run.id}/knowledge-used`, auth),
-    200,
-    'repeat Knowledge Used query',
-  );
-  if (
-    usageAgain.items.filter((entry) => entry.revisionId === ready.revisionId)
-      .length !== 1
-  ) {
-    fail('knowledge revision was logged more than once for a run');
-  }
-  console.log(`smoke: audited exact revision on run ${run.id}`);
+  console.log(`smoke: audited ${items.length} knowledge revisions on run ${run.id}`);
+}
 
-  const extractionTicket = await createTicket(
-    board.id,
-    `M06 extraction ${suffix}`,
-    `Prefer Result over panic in public APIs. Extraction marker ${suffix}.`,
+async function main() {
+  console.log(`smoke: waiting for ${API}/health`);
+  await waitForHealth();
+  await bootstrapIfNeeded();
+  const auth = await login();
+  const suffix = `${Date.now()}-${Math.floor(Math.random() * 10_000)}`;
+  const board = await createBoard(auth, suffix);
+  const repo = await registerRepo(auth);
+  const worker = await createAgent(auth, `Knowledge Smoke Worker ${suffix}`, 'research');
+  const compactor = await createAgent(
     auth,
+    `Knowledge Smoke Compactor ${suffix}`,
+    'backend_engineer',
   );
-  await expectJson(
-    await api('PATCH', `/api/tickets/${extractionTicket.id}/status`, {
-      ...auth,
-      body: { status: 'done' },
-    }),
+  const previous = await expectJson(
+    await api('GET', '/api/settings/knowledge', auth),
     200,
-    'transition extraction ticket to Done',
+    'get knowledge settings',
   );
-  const extracted = await poll('Pending extracted candidate', async () => {
-    const page = await expectJson(
-      await api(
-        'GET',
-        `/api/knowledge/inbox?boardId=${encodeURIComponent(board.id)}&limit=100`,
-        auth,
-      ),
-      200,
-      'poll knowledge inbox',
-    );
-    return (
-      page.items.find(
-        (entry) =>
-          entry.sourceType === 'agent_summary' &&
-          entry.sourceId === extractionTicket.id &&
-          entry.knowledgeType === 'coding_convention',
-      ) ?? null
-    );
-  });
-  if (
-    extracted.status !== 'pending' ||
-    extracted.policyDecision !== 'human_review' ||
-    extracted.embeddingStatus !== 'not_requested' ||
-    extracted.confidence !== 'high' ||
-    String(extracted.title || '').startsWith('Outcome:')
-  ) {
-    fail(`extraction policy did not fail closed: ${JSON.stringify(extracted)}`);
-  }
 
-  await expectJson(
-    await api('PATCH', `/api/tickets/${extractionTicket.id}/status`, {
-      ...auth,
-      body: { status: 'done' },
-    }),
-    200,
-    'repeat Done transition',
-  );
-  await new Promise((resolve) => setTimeout(resolve, 1000));
-  const afterRepeat = await expectJson(
-    await api(
-      'GET',
-      `/api/knowledge/inbox?boardId=${encodeURIComponent(board.id)}&limit=100`,
+  try {
+    const manual = await governManualCandidate(
+      board,
+      `M06 exact retrieval ${suffix}`,
+      `Use governed knowledge marker ${suffix} for this ticket.`,
       auth,
-    ),
-    200,
-    'verify idempotent extraction',
-  );
-  if (
-    afterRepeat.items.filter(
-      (entry) =>
-        entry.sourceType === 'agent_summary' &&
-        entry.sourceId === extractionTicket.id,
-    ).length !== 1
-  ) {
-    fail('repeating Done produced duplicate extracted knowledge');
+    );
+    const compacted = await compactDoneTicket(board, compactor, suffix, auth);
+    await fullRunUses(board, repo, worker, [manual, compacted], suffix, auth);
+  } finally {
+    await api('PUT', '/api/settings/knowledge', {
+      ...auth,
+      body: { compactionAgentId: previous.compactionAgentId },
+    });
   }
 
-  const webResponse = await fetch(`${WEB}/knowledge`);
-  const webBody = await webResponse.text();
-  if (!webResponse.ok || !webBody.includes('id="root"')) {
-    fail(`Knowledge web route unavailable: ${webResponse.status}`);
+  for (const route of ['/knowledge', '/agents']) {
+    const webResponse = await fetch(`${WEB}${route}`);
+    const webBody = await webResponse.text();
+    if (!webResponse.ok || !webBody.includes('id="root"')) {
+      fail(`web route ${route} unavailable: ${webResponse.status}`);
+    }
   }
 
   console.log('smoke: M06 governed knowledge flow passed');

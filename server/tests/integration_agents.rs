@@ -445,7 +445,7 @@ async fn deleting_agent_preserves_run_knowledge_usage_audit() {
     sqlx::query(
         r#"
         INSERT INTO knowledge_usage_logs (
-            id, run_id, item_id, revision_id, rank, similarity,
+            id, run_id, item_id, revision_id, rank, score,
             token_count, rendered_content
         ) VALUES ($1, $2, $3, $4, 1, 0.9, 12, 'immutable usage snapshot')
         "#,

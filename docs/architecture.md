@@ -21,7 +21,7 @@ server/src/
   services/     Business logic, DB queries, validation orchestration
   domain/       Entity types, enums, pure validation helpers
   db/           Pool setup, migration runner
-  knowledge/    Embedding, retrieval, extraction providers (M06)
+  knowledge/    Full-text retrieval, compaction context and candidate contract (M06)
   middleware/   Session auth, CSRF, admin checks
   providers/    AgentProvider trait + mock / opencode / claude-code / codex / cursor connectors
   workers/      In-process Tokio job workers (M03)
@@ -45,11 +45,11 @@ server/src/
 
 ## Database
 
-- PostgreSQL 16 + pgvector image.
+- PostgreSQL 16 (pgvector image, kept because early migrations create the extension; `unaccent` comes from contrib).
 - Migrations: `server/migrations/*.sql`, applied by `coppice migrate` and on test connect (`db::connect_and_migrate`).
 - No Redis; agent job queue uses Postgres `agent_jobs` (M03).
 - **M03 tables:** `agent_runs` (one row per ticket+agent execution; statuses `queued`/`running`/`completed`/`failed`/`cancelled`; unique partial index on active `(ticket_id, agent_id)`), `agent_jobs` (queue row per run; `FOR UPDATE SKIP LOCKED` claim by workers).
-- **M06 tables:** `knowledge_items` (mutable lifecycle pointer), immutable `knowledge_revisions`, `knowledge_embeddings` (typed `vector(n)` matching `knowledge.embedding.dimension` + HNSW cosine index), `knowledge_usage_logs` (unique run/revision audit snapshot), and `knowledge_jobs` (dedicated durable extraction/embedding queue). Knowledge work does not reuse run-bound `agent_jobs`.
+- **M06 tables:** `knowledge_items` (mutable lifecycle pointer), immutable `knowledge_revisions` (generated `search_vector` + GIN index), `knowledge_item_sources` (source tickets), `knowledge_usage_logs` (unique run/revision audit snapshot with full-text `score`), `workspace_settings` (compaction agent), and the compaction tables `knowledge_compaction_queue`, `knowledge_compaction_batches` (at most one queued/running), `knowledge_compaction_batch_tickets`. Compaction runs are ordinary `agent_runs` rows with `compaction_batch_id` set.
 
 ## Auth
 
@@ -85,27 +85,30 @@ workers/job_worker.rs     poll queue, run pipeline, spawn at server startup
 
 ## Governed knowledge (M06)
 
-Knowledge keeps lifecycle state separate from semantic content. An edit inserts an immutable revision and advances `current_revision_id`; `active_revision_id` changes only after that exact revision embeds successfully. This keeps the last usable revision active if a replacement embedding fails. Approve, edit, reject, supersede, stale, and expire operations require an optimistic `expectedVersion`.
+Knowledge keeps lifecycle state separate from content. An edit inserts an immutable revision and advances `current_revision_id`; approving (or editing an approved item) activates that revision immediately. Approve, edit, reject, supersede, stale, and expire operations require an optimistic `expectedVersion`.
 
 ```text
-api/knowledge.rs                    authenticated reads; admin + CSRF lifecycle writes
-domain/knowledge.rs                 types, scope and content validation, risk classification
-services/knowledge_service.rs       revision/lifecycle invariants and bounded keyset lists
-services/knowledge_job_service.rs   SKIP LOCKED queue, stale-lock reclaim, bounded retry
-knowledge/embedder.rs               EmbeddingProvider contract
-knowledge/mock_embedder.rs          deterministic vectors (tests / CI / smoke)
-knowledge/openai_embedder.rs        OpenAI-compatible /embeddings (local Ollama sidecar or remote)
-knowledge/retrieval.rs              relational eligibility CTE, then stable cosine rank
-knowledge/extractor.rs              deterministic bounded candidate extraction + policy
-services/context_budget.rs          ByteTokenCounter, untrusted delimiters, usage snapshots
-workers/knowledge_worker.rs         asynchronous embed and post-Done extraction jobs
+api/knowledge.rs                          authenticated reads; admin + CSRF lifecycle writes
+api/knowledge_compaction.rs               compaction status, Compact now, Retry, Cancel
+api/settings.rs                           GET/PUT compaction agent (PUT is admin-only)
+domain/knowledge.rs                       types, scope and content validation, risk classification
+domain/knowledge_compaction.rs            batch status/trigger, scheduling and byte-budget helpers
+services/knowledge_service.rs             revision/lifecycle invariants, compaction inserts, similar items
+services/knowledge_compaction_service.rs  queue, batches, drain cycles, completion, failure reconcile
+services/workspace_settings_service.rs    compaction agent setting (read-only connectors only)
+knowledge/fts.rs                          OR-joined tsquery builder (unaccent, simple config)
+knowledge/retrieval.rs                    eligibility CTE, include-all when it fits, else ts_rank_cd top-k
+knowledge/compaction_context.rs           bounded `.agent/context.md` for a compaction run
+knowledge/candidates.rs                   lenient parse + strict validation of `knowledgeCandidates`
+knowledge/policy.rs                       fail-closed approval policy
+services/context_budget.rs                ByteTokenCounter, untrusted delimiters, usage snapshots
+workers/knowledge_compaction_scheduler.rs reconcile finished runs, scheduled and drain cycles
+workers/job_worker/compaction.rs          executes `compact_knowledge` runs
 ```
 
-Only Full-profile runs retrieve knowledge. Query text is embedded via the configured provider; stored vectors and cosine ranking stay in Postgres. Relational eligibility (approved, active, embedded, unexpired, unsuperseded, confidence, board/agent scope) is materialized before cosine ranking. The bounded result is rendered as untrusted data and passed through the configured total context budget; mandatory safety and result-contract sections either survive or the run fails before provider invocation. Every included exact revision is inserted once into `knowledge_usage_logs` before the provider runs. Operator modes (`mock` vs local Ollama sidecar vs remote `openai_compatible`): [Knowledge configuration](operations.md#knowledge-configuration).
+**Retrieval.** Only Full-profile runs retrieve knowledge. The query is the ticket title and description, normalized and OR-joined into a `to_tsquery('simple', …)`. Relational eligibility (approved, active, unexpired, unsuperseded, confidence, board/agent scope) is materialized first. If every eligible item fits the context budget, all are included in a stable order (score `0`); otherwise items are ranked by `ts_rank_cd`. Zero matches is not an error. The result is rendered as untrusted data inside the total context budget, and every included exact revision is logged once in `knowledge_usage_logs` before the provider runs.
 
-A database trigger idempotently enqueues `extract_ticket` when a ticket first enters Done. Default extraction is fail-closed: candidates remain Pending. Policy auto-save additionally requires an enabled explicit low-risk type allowlist and high confidence; high-impact types always require human approval.
-
-The mock extractor applies the same reuse litmus as the Knowledge Inbox (`Would a different ticket next month still need this exact rule?` — see `web/src/features/knowledge/curationGuide.ts`): it keeps only candidates that look reusable, still-true, and scoped, and omits clear one-offs and ticket-outcome logs (`Outcome: …`, `Fixed ticket #N`, `Completed ticket: …`, LGTM). Empty extraction is a valid success. Borderline candidates may carry a `reuse_hint` token folded into `policy_reason` (e.g. `reuse_hint=borderline_vague`) without auto-approving.
+**Compaction.** A trigger queues a ticket when it enters Done and removes its unbatched row when it leaves Done. The scheduler starts a drain cycle every `knowledge.compaction.interval_secs` (or on Compact now) when an enabled compaction agent is configured. Each batch is one `compact_knowledge` run of that agent: read-only tools, a scratch directory, no repository, no knowledge retrieval, no ticket side effects. The agent returns `knowledgeCandidates`; invalid candidates (sources outside the batch, board mismatch, unknown types, limits) are dropped with reasons in the batch summary. Valid ones go through the fail-closed policy: workspace scope, supersessions, and high-impact types always need human approval. Success deletes the batch's queue rows and sends no notification. The scheduler's reconcile step fails batches whose run ended without applying a result: tickets return to the queue with `attempts + 1`, and a `knowledge_compaction_failed` notification goes to every user. Cancelled runs release tickets without an attempt or notification. Tickets at `max_attempts` wait for a manual Retry. Operator settings: [Knowledge configuration](operations.md#knowledge-configuration).
 
 **Config env:** `AGENT_DEFAULT_PROVIDER`, `WORKTREES_PATH`, `AGENT_WORKER_COUNT` (see `deploy/docker-compose.yml`). Operator bind-mounts host clones; register in-container paths in Settings → Repositories.
 

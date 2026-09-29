@@ -70,8 +70,10 @@ export const knowledgeItemSchema = z.object({
   supersedesItemId: z.string().uuid().nullable(),
   supersededBy: z.string().uuid().nullable(),
   staleAt: z.string().nullable(),
-  embeddingStatus: z.string(),
-  embeddingError: z.string().nullable(),
+  compactionBatchId: z.string().uuid().nullable(),
+  compactionAgentId: z.string().uuid().nullable(),
+  compactionAgentName: z.string().nullable(),
+  sourceTicketIds: z.array(z.string().uuid()),
   usageCount: z.number().int().nonnegative(),
   lastUsedAt: z.string().nullable(),
   createdAt: z.string(),
@@ -87,7 +89,7 @@ export const knowledgeUsageSchema = z.object({
   itemId: z.string().uuid(),
   revisionId: z.string().uuid(),
   rank: z.number().int().positive(),
-  similarity: z.number(),
+  score: z.number(),
   tokenCount: z.number().int().nonnegative(),
   renderedContent: z.string(),
   title: z.string(),
@@ -109,13 +111,57 @@ export const similarNeighborSchema = z.object({
   knowledgeType: knowledgeTypeSchema,
   scope: knowledgeScopeSchema,
   boardId: z.string().uuid().nullable(),
-  similarity: z.number(),
+  score: z.number(),
   status: z.string(),
-  embeddingStatus: z.string(),
 });
 
 export const similarListSchema = z.object({
   items: z.array(similarNeighborSchema),
+});
+
+export const compactionBatchSchema = z.object({
+  id: z.string().uuid(),
+  agentId: z.string().uuid(),
+  agentName: z.string().nullable(),
+  runId: z.string().uuid().nullable(),
+  status: z.enum(['queued', 'running', 'succeeded', 'failed']),
+  trigger: z.enum(['scheduled', 'manual', 'retry']),
+  ticketCount: z.number().int().nonnegative(),
+  candidateCount: z.number().int().nonnegative().nullable(),
+  summary: z.string().nullable(),
+  errorMessage: z.string().nullable(),
+  createdAt: z.string(),
+  startedAt: z.string().nullable(),
+  endedAt: z.string().nullable(),
+});
+
+export const compactionStateSchema = z.enum([
+  'not_configured',
+  'agent_disabled',
+  'running',
+  'failed',
+  'idle',
+]);
+
+export const compactionStatusSchema = z.object({
+  state: compactionStateSchema,
+  configured: z.boolean(),
+  agent: z
+    .object({
+      id: z.string().uuid(),
+      name: z.string(),
+      enabled: z.boolean(),
+      connector: z.string(),
+    })
+    .nullable(),
+  queuedCount: z.number().int().nonnegative(),
+  blockedCount: z.number().int().nonnegative(),
+  oldestQueuedAt: z.string().nullable(),
+  activeBatch: compactionBatchSchema.nullable(),
+  lastBatch: compactionBatchSchema.nullable(),
+  nextScheduledAt: z.string().nullable(),
+  intervalSecs: z.number().int().nonnegative(),
+  batchMaxTickets: z.number().int().positive(),
 });
 
 export type KnowledgeStatus = z.infer<typeof knowledgeStatusSchema>;
@@ -128,3 +174,6 @@ export type KnowledgePage = z.infer<typeof knowledgePageSchema>;
 export type KnowledgeUsage = z.infer<typeof knowledgeUsageSchema>;
 export type SimilarNeighbor = z.infer<typeof similarNeighborSchema>;
 export type SimilarList = z.infer<typeof similarListSchema>;
+export type CompactionBatch = z.infer<typeof compactionBatchSchema>;
+export type CompactionState = z.infer<typeof compactionStateSchema>;
+export type CompactionStatus = z.infer<typeof compactionStatusSchema>;

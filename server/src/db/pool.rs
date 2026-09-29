@@ -70,10 +70,12 @@ pub async fn truncate_test_workspace(pool: &PgPool) -> anyhow::Result<()> {
             chat_messages,
             chat_sessions,
             knowledge_usage_logs,
-            knowledge_embeddings,
-            knowledge_jobs,
+            knowledge_item_sources,
+            knowledge_compaction_batch_tickets,
+            knowledge_compaction_queue,
             knowledge_revisions,
             knowledge_items,
+            knowledge_compaction_batches,
             notifications,
             ticket_mentions,
             attachments,
@@ -87,6 +89,15 @@ pub async fn truncate_test_workspace(pool: &PgPool) -> anyhow::Result<()> {
             sessions,
             users
         RESTART IDENTITY CASCADE
+        "#,
+    )
+    .execute(pool)
+    .await?;
+    sqlx::query(
+        r#"
+        INSERT INTO workspace_settings (id) VALUES (TRUE)
+        ON CONFLICT (id) DO UPDATE
+        SET knowledge_compaction_agent_id = NULL, updated_by = NULL
         "#,
     )
     .execute(pool)

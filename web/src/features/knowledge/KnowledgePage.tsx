@@ -35,6 +35,7 @@ import {
   REJECT_PRESETS,
   guidanceForType,
 } from './curationGuide';
+import { CompactionStatusStrip } from './CompactionStatusStrip';
 import {
   fetchKnowledgeItem,
   useApproveKnowledge,
@@ -135,16 +136,6 @@ function statusPillClass(status: KnowledgeStatus): string {
     case 'stale':
       return `${base} border-border bg-paper-200 text-text-secondary`;
   }
-}
-
-function embeddingPillClass(status: string): string {
-  const base = 'rounded-full px-2 py-0.5 font-body text-xs font-medium';
-  if (status === 'ready') return `${base} bg-moss-100 text-moss-800`;
-  if (status === 'failed') return `${base} bg-danger-muted text-danger`;
-  if (status === 'processing' || status === 'pending') {
-    return `${base} bg-info-muted text-info`;
-  }
-  return `${base} bg-paper-200 text-text-muted`;
 }
 
 function candidateInput(form: CandidateFormState): KnowledgeRevisionInput {
@@ -496,8 +487,8 @@ function NearDuplicateAssist({
                   <p className="mt-0.5 font-body text-xs text-text-muted">
                     {TYPE_LABELS[neighbor.knowledgeType] ??
                       humanize(neighbor.knowledgeType)}{' '}
-                    · {humanize(neighbor.scope)} · similarity{' '}
-                    {neighbor.similarity.toFixed(3)}
+                    · {humanize(neighbor.scope)} · match{' '}
+                    {neighbor.score.toFixed(3)}
                   </p>
                 </div>
                 <button
@@ -582,10 +573,6 @@ function KnowledgeCard({
         ? `${item.boardName ?? 'Board'} · ${item.agentName ?? 'Agent'}`
         : item.boardName ?? 'Board';
   const hasExpiry = item.expiresAt !== null;
-  const awaitingReplacementEmbedding =
-    item.status === 'approved' &&
-    item.activeRevisionId !== null &&
-    item.activeRevisionId !== item.revisionId;
   const sourceCanOpen =
     (item.sourceType === 'ticket' || item.sourceType === 'agent_summary') &&
     item.sourceId;
@@ -721,6 +708,32 @@ function KnowledgeCard({
           <p className="mt-2 font-body text-sm leading-relaxed text-bark-700 whitespace-pre-wrap">
             {item.content}
           </p>
+          {item.sourceTicketIds.length > 0 && (
+            <div
+              data-testid="compaction-provenance"
+              className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-1 font-body text-xs text-text-secondary"
+            >
+              <span className="font-medium text-text-primary">
+                From {item.sourceTicketIds.length}{' '}
+                {item.sourceTicketIds.length === 1 ? 'ticket' : 'tickets'}
+              </span>
+              {item.sourceTicketIds.map((ticketId) => (
+                <button
+                  key={ticketId}
+                  type="button"
+                  onClick={() => void onOpenTicket(ticketId)}
+                  className="inline-flex items-center gap-1 rounded-md bg-paper-100 px-1.5 py-0.5 font-mono text-xs text-moss-700 hover:underline"
+                  aria-label={`Open source ticket ${shortId(ticketId)}`}
+                >
+                  {shortId(ticketId)}
+                  <ExternalLink className="size-3" aria-hidden="true" />
+                </button>
+              ))}
+              {item.compactionAgentName && (
+                <span>· Proposed by {item.compactionAgentName}</span>
+              )}
+            </div>
+          )}
           {item.status === 'pending' && (
             <p
               data-testid="pending-type-guidance"
@@ -738,9 +751,6 @@ function KnowledgeCard({
             </p>
           )}
         </div>
-        <span className={embeddingPillClass(item.embeddingStatus)}>
-          Embedding · {humanize(item.embeddingStatus)}
-        </span>
       </div>
 
       {item.status === 'pending' && (
@@ -762,14 +772,6 @@ function KnowledgeCard({
         />
       )}
 
-      {awaitingReplacementEmbedding && (
-        <div className="mt-4 flex gap-2 rounded-md border border-info-muted bg-info-muted/60 px-3 py-2">
-          <ShieldCheck className="mt-0.5 size-4 shrink-0 text-info" aria-hidden="true" />
-          <p className="font-body text-xs text-info">
-            Revision {item.revisionNumber} is being embedded. The previous revision remains active until it is ready.
-          </p>
-        </div>
-      )}
 
       <dl className="mt-4 grid gap-x-5 gap-y-3 border-t border-border pt-4 sm:grid-cols-2 xl:grid-cols-3">
         <div>
@@ -828,16 +830,13 @@ function KnowledgeCard({
         </div>
       )}
 
-      {(item.policyReason || item.rejectionReason || item.embeddingError) && (
+      {(item.policyReason || item.rejectionReason) && (
         <div className="mt-3 space-y-1 rounded-md border border-border bg-paper-50 px-3 py-2 font-body text-xs text-text-secondary">
           {item.policyReason && (
             <p><span className="font-medium">Policy:</span> {item.policyReason}</p>
           )}
           {item.rejectionReason && (
             <p><span className="font-medium">Rejected:</span> {item.rejectionReason}</p>
-          )}
-          {item.embeddingError && (
-            <p className="text-danger"><span className="font-medium">Embedding:</span> {item.embeddingError}</p>
           )}
         </div>
       )}
@@ -929,7 +928,7 @@ function KnowledgeCard({
             <p className="mt-0.5 font-body text-xs text-text-secondary">
               {mode === 'edit'
                 ? 'The previous revision remains in the audit history.'
-                : 'The current item stays usable until the replacement is approved and embedding-ready.'}
+                : 'The current item stays usable until the replacement is approved.'}
             </p>
           </div>
           <Input
@@ -1042,7 +1041,7 @@ export function KnowledgePage() {
             Knowledge
           </h1>
           <p className="mt-2 font-body text-sm leading-relaxed text-text-secondary">
-            Review durable facts before agents can use them. Every revision keeps its source, policy decision, embedding state, and run history.
+            Review durable facts before agents can use them. Every revision keeps its source, policy decision, and run history.
           </p>
         </div>
         <div className="max-w-xs rounded-lg border border-moss-200 bg-moss-50 px-3 py-2">
@@ -1057,6 +1056,8 @@ export function KnowledgePage() {
           </p>
         </div>
       </header>
+
+      <CompactionStatusStrip />
 
       <div className="mt-6 grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_19rem]">
         <section aria-label="Knowledge library" className="min-w-0">

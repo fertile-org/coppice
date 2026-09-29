@@ -4,6 +4,7 @@ import {
   formatNotificationDateTime,
   formatNotificationTimestamp,
   notificationBellLabel,
+  notificationPath,
 } from './notification-format';
 import {
   useMarkAllNotificationsRead,
@@ -16,7 +17,9 @@ import {
 interface NotificationBellProps {
   userId: string;
   onOpenTicket: (ticketId: string) => void | Promise<void>;
+  onOpenPath?: (path: string) => void;
 }
+
 
 function newestFirst(items: NotificationItem[]): NotificationItem[] {
   return [...items].sort((left, right) => {
@@ -87,7 +90,7 @@ function NotificationRow({
   );
 }
 
-export function NotificationBell({ userId, onOpenTicket }: NotificationBellProps) {
+export function NotificationBell({ userId, onOpenTicket, onOpenPath }: NotificationBellProps) {
   const [open, setOpen] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -152,7 +155,10 @@ export function NotificationBell({ userId, onOpenTicket }: NotificationBellProps
         },
       });
     }
-    if (notification.ticketId) {
+    const path = notificationPath(notification);
+    if (path) {
+      onOpenPath?.(path);
+    } else if (notification.ticketId) {
       void Promise.resolve()
         .then(() => onOpenTicket(notification.ticketId!))
         .catch(() => {
@@ -289,7 +295,7 @@ export function NotificationBell({ userId, onOpenTicket }: NotificationBellProps
                 No notifications yet
               </p>
               <p className="mt-1 font-body text-xs text-text-secondary">
-                Agent activity and mentions will appear here.
+                Agent activity, mentions, and compaction failures will appear here.
               </p>
             </div>
           )}

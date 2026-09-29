@@ -58,7 +58,7 @@ pub struct RenderedKnowledge {
     pub item_id: Uuid,
     pub revision_id: Uuid,
     pub rank: i32,
-    pub similarity: f64,
+    pub score: f64,
     pub token_count: i32,
     pub rendered_content: String,
 }
@@ -157,7 +157,7 @@ pub fn render_knowledge(
             item_id: item.item_id,
             revision_id: item.revision_id,
             rank,
-            similarity: item.similarity,
+            score: item.score,
             token_count: i32::try_from(entry_tokens).unwrap_or(i32::MAX),
             rendered_content: rendered,
         });
@@ -167,6 +167,31 @@ pub fn render_knowledge(
     } else {
         KnowledgeSection { markdown, entries }
     }
+}
+
+/// Include the whole eligible set when it fits the knowledge budget; otherwise
+/// keep only full-text matches, best first, capped at `top_k`.
+pub fn select_within_budget(
+    eligible: Vec<RetrievedKnowledge>,
+    top_k: usize,
+    max_tokens: usize,
+    counter: &dyn TokenCounter,
+) -> Vec<RetrievedKnowledge> {
+    if eligible.is_empty() {
+        return eligible;
+    }
+    if render_knowledge(&eligible, max_tokens, counter)
+        .entries
+        .len()
+        == eligible.len()
+    {
+        return eligible;
+    }
+    eligible
+        .into_iter()
+        .filter(|item| item.score > 0.0)
+        .take(top_k.clamp(1, 20))
+        .collect()
 }
 
 fn fit_knowledge_section(
@@ -375,7 +400,7 @@ pub async fn record_usage(
         sqlx::query(
             r#"
             INSERT INTO knowledge_usage_logs (
-                id, run_id, item_id, revision_id, rank, similarity,
+                id, run_id, item_id, revision_id, rank, score,
                 token_count, rendered_content
             ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
             ON CONFLICT (run_id, revision_id) DO NOTHING
@@ -386,7 +411,7 @@ pub async fn record_usage(
         .bind(entry.item_id)
         .bind(entry.revision_id)
         .bind(entry.rank)
-        .bind(entry.similarity)
+        .bind(entry.score)
         .bind(entry.token_count)
         .bind(&entry.rendered_content)
         .execute(&mut *tx)
@@ -428,6 +453,46 @@ mod tests {
         }
     }
 
+    fn retrieved(title: &str, content_len: usize, score: f64) -> RetrievedKnowledge {
+        RetrievedKnowledge {
+            item_id: Uuid::new_v4(),
+            revision_id: Uuid::new_v4(),
+            scope: "board".into(),
+            knowledge_type: "test_command".into(),
+            title: title.into(),
+            content: "x".repeat(content_len),
+            source_type: "ticket".into(),
+            source_id: None,
+            confidence: "high".into(),
+            score,
+            revision_created_at: time::OffsetDateTime::now_utc(),
+        }
+    }
+
+    #[test]
+    fn select_within_budget_includes_everything_when_it_fits() {
+        let counter = ByteTokenCounter;
+        let eligible = vec![retrieved("a", 10, 0.5), retrieved("b", 10, 0.0)];
+        let selected = select_within_budget(eligible, 1, 4_000, &counter);
+        assert_eq!(selected.len(), 2);
+    }
+
+    #[test]
+    fn select_within_budget_falls_back_to_top_matches() {
+        let counter = ByteTokenCounter;
+        let eligible = vec![
+            retrieved("a", 2_000, 0.9),
+            retrieved("b", 2_000, 0.4),
+            retrieved("c", 2_000, 0.0),
+        ];
+        let selected = select_within_budget(eligible, 1, 800, &counter);
+        assert_eq!(selected.len(), 1);
+        assert_eq!(selected[0].title, "a");
+
+        let unmatched = vec![retrieved("c", 4_000, 0.0), retrieved("d", 4_000, 0.0)];
+        assert!(select_within_budget(unmatched, 5, 800, &counter).is_empty());
+    }
+
     #[test]
     fn byte_counter_and_truncation_are_deterministic() {
         let counter = ByteTokenCounter;
@@ -453,7 +518,7 @@ mod tests {
                     item_id: Uuid::new_v4(),
                     revision_id: Uuid::new_v4(),
                     rank: 1,
-                    similarity: 1.0,
+                    score: 1.0,
                     token_count: 2_500,
                     rendered_content: "knowledge ".repeat(1_000),
                 }],
@@ -609,7 +674,7 @@ mod tests {
             item_id: Uuid::new_v4(),
             revision_id: Uuid::new_v4(),
             rank: 1,
-            similarity: 1.0,
+            score: 1.0,
             token_count: 250,
             rendered_content: format!(
                 "--- BEGIN UNTRUSTED KNOWLEDGE first ---\n{}\n--- END UNTRUSTED KNOWLEDGE first ---\n",
@@ -620,7 +685,7 @@ mod tests {
             item_id: Uuid::new_v4(),
             revision_id: Uuid::new_v4(),
             rank: 2,
-            similarity: 0.9,
+            score: 0.9,
             token_count: 250,
             rendered_content: format!(
                 "--- BEGIN UNTRUSTED KNOWLEDGE second ---\n{}\n--- END UNTRUSTED KNOWLEDGE second ---\n",

@@ -1,22 +1,21 @@
-use super::embedder::{vector_literal, EmbeddingError};
+use super::fts::build_tsquery;
 use crate::config::KnowledgeRetrievalConfig;
 use sqlx::{PgPool, Row};
 use time::OffsetDateTime;
 use uuid::Uuid;
 
-/// Inbox near-duplicate assist floor — separate from agent `minimum_similarity` (default 0.0).
-pub const INBOX_SIMILAR_MINIMUM_SIMILARITY: f64 = 0.75;
 pub const INBOX_SIMILAR_DEFAULT_LIMIT: usize = 5;
 pub const INBOX_SIMILAR_MAX_LIMIT: usize = 10;
+/// Upper bound on eligible rows loaded for one run; the context budget trims further.
+pub const MAX_ELIGIBLE_CANDIDATES: i64 = 200;
 
-/// Shared join + base predicates for approved, live, embedding-ready knowledge.
+/// Shared join + base predicates for approved, live knowledge.
 /// Agent retrieval adds confidence/type/scope filters on top; inbox assist does not.
 macro_rules! eligible_knowledge_from {
     () => {
         r#"
     FROM knowledge_items i
     JOIN knowledge_revisions r ON r.id = i.active_revision_id
-    JOIN knowledge_embeddings e ON e.revision_id = r.id
     WHERE i.status = 'approved'
       AND i.superseded_by IS NULL
       AND (i.expires_at IS NULL OR i.expires_at > now())
@@ -37,7 +36,8 @@ pub struct RetrievedKnowledge {
     pub source_type: String,
     pub source_id: Option<Uuid>,
     pub confidence: String,
-    pub similarity: f64,
+    /// Full-text rank; `0.0` when the entry did not match the query.
+    pub score: f64,
     pub revision_created_at: OffsetDateTime,
 }
 
@@ -49,17 +49,8 @@ pub struct SimilarKnowledgeNeighbor {
     pub knowledge_type: String,
     pub scope: String,
     pub board_id: Option<Uuid>,
-    pub similarity: f64,
+    pub score: f64,
     pub status: String,
-    pub embedding_status: String,
-}
-
-#[derive(Debug, thiserror::Error)]
-pub enum RetrievalError {
-    #[error(transparent)]
-    Database(#[from] sqlx::Error),
-    #[error(transparent)]
-    Embedding(#[from] EmbeddingError),
 }
 
 pub const RETRIEVAL_QUERY_SQL: &str = concat!(
@@ -76,7 +67,7 @@ WITH eligible AS MATERIALIZED (
         r.source_id,
         r.confidence,
         r.created_at AS revision_created_at,
-        e.embedding
+        r.search_vector
 "#,
     eligible_knowledge_from!(),
     r#"
@@ -85,23 +76,28 @@ WITH eligible AS MATERIALIZED (
             WHEN 'medium' THEN r.confidence IN ('medium', 'high')
             ELSE r.confidence IN ('low', 'medium', 'high')
           END
-      AND (cardinality($7::text[]) = 0 OR r.knowledge_type = ANY($7::text[]))
+      AND (cardinality($5::text[]) = 0 OR r.knowledge_type = ANY($5::text[]))
       AND (
             r.scope = 'workspace'
             OR (r.scope = 'board' AND r.board_id = $1)
             OR (r.scope = 'agent' AND r.board_id = $1 AND r.agent_id = $2)
           )
-), ranked AS (
-    SELECT eligible.*, (eligible.embedding <=> $4::vector) AS distance
-    FROM eligible
+), query AS (
+    SELECT CASE
+        WHEN $4::text IS NULL THEN NULL
+        ELSE to_tsquery('simple'::regconfig, coppice_unaccent($4::text))
+    END AS q
 )
 SELECT
     item_id, revision_id, scope, knowledge_type, title, content,
     source_type, source_id, confidence, revision_created_at,
-    1.0 - distance AS similarity
-FROM ranked
-WHERE 1.0 - distance >= $5
-ORDER BY distance ASC, revision_created_at DESC, item_id ASC
+    CASE
+        WHEN query.q IS NOT NULL AND eligible.search_vector @@ query.q
+            THEN ts_rank_cd(eligible.search_vector, query.q)::float8
+        ELSE 0.0::float8
+    END AS score
+FROM eligible CROSS JOIN query
+ORDER BY score DESC, revision_created_at DESC, item_id ASC
 LIMIT $6
 "#
 );
@@ -117,35 +113,28 @@ WITH eligible AS MATERIALIZED (
         r.title,
         r.board_id,
         i.status,
-        e.embedding
+        r.search_vector
 "#,
     eligible_knowledge_from!(),
     r#"
       AND i.id <> $1
-), ranked AS (
-    SELECT eligible.*, (eligible.embedding <=> $2::vector) AS distance
-    FROM eligible
+), query AS (
+    SELECT to_tsquery('simple'::regconfig, coppice_unaccent($2::text)) AS q
 )
 SELECT
-    item_id,
-    revision_id,
-    scope,
-    knowledge_type,
-    title,
-    board_id,
-    status,
-    1.0 - distance AS similarity
-FROM ranked
-WHERE 1.0 - distance >= $3
+    item_id, revision_id, scope, knowledge_type, title, board_id, status,
+    ts_rank_cd(eligible.search_vector, query.q)::float8 AS score
+FROM eligible CROSS JOIN query
+WHERE eligible.search_vector @@ query.q
 ORDER BY
     CASE
-        WHEN $4::uuid IS NOT NULL AND board_id IS NOT DISTINCT FROM $4 THEN 0
+        WHEN $3::uuid IS NOT NULL AND board_id IS NOT DISTINCT FROM $3 THEN 0
         ELSE 1
     END ASC,
-    CASE WHEN scope = $5 THEN 0 ELSE 1 END ASC,
-    distance ASC,
+    CASE WHEN scope = $4 THEN 0 ELSE 1 END ASC,
+    score DESC,
     item_id ASC
-LIMIT $6
+LIMIT $5
 "#
 );
 
@@ -185,23 +174,25 @@ pub async fn has_eligible(
         .await
 }
 
+/// Load the eligible set for a run, full-text matches first. Callers pick
+/// between "include everything" and "top matches" once the budget is known
+/// (see [`crate::services::context_budget::select_within_budget`]).
 pub async fn retrieve(
     pool: &PgPool,
     board_id: Uuid,
     agent_id: Uuid,
-    query_vector: &[f32],
+    query_title: &str,
+    query_body: &str,
     config: &KnowledgeRetrievalConfig,
-) -> Result<Vec<RetrievedKnowledge>, RetrievalError> {
-    let vector = vector_literal(query_vector)?;
-    let top_k = config.top_k.clamp(1, 20) as i64;
+) -> Result<Vec<RetrievedKnowledge>, sqlx::Error> {
+    let tsquery = build_tsquery(query_title, query_body);
     let rows = sqlx::query(RETRIEVAL_QUERY_SQL)
         .bind(board_id)
         .bind(agent_id)
         .bind(&config.minimum_confidence)
-        .bind(vector)
-        .bind(config.minimum_similarity as f64)
-        .bind(top_k)
+        .bind(tsquery)
         .bind(&config.allowed_types)
+        .bind(MAX_ELIGIBLE_CANDIDATES)
         .fetch_all(pool)
         .await?;
     rows.into_iter()
@@ -216,29 +207,31 @@ pub async fn retrieve(
                 source_type: row.try_get("source_type")?,
                 source_id: row.try_get("source_id")?,
                 confidence: row.try_get("confidence")?,
-                similarity: row.try_get("similarity")?,
+                score: row.try_get("score")?,
                 revision_created_at: row.try_get("revision_created_at")?,
             })
         })
         .collect()
 }
 
-/// Rank approved + embedding-ready neighbors for inbox review assist.
+/// Rank approved, live neighbors for inbox review assist by full-text match.
 /// Soft-prefers the pending item's board and scope; does not apply agent confidence/type filters.
 pub async fn find_similar_inbox(
     pool: &PgPool,
     exclude_item_id: Uuid,
-    query_vector: &[f32],
+    query_title: &str,
+    query_body: &str,
     prefer_board_id: Option<Uuid>,
     prefer_scope: &str,
     limit: usize,
-) -> Result<Vec<SimilarKnowledgeNeighbor>, RetrievalError> {
-    let vector = vector_literal(query_vector)?;
+) -> Result<Vec<SimilarKnowledgeNeighbor>, sqlx::Error> {
+    let Some(tsquery) = build_tsquery(query_title, query_body) else {
+        return Ok(Vec::new());
+    };
     let limit = limit.clamp(1, INBOX_SIMILAR_MAX_LIMIT) as i64;
     let rows = sqlx::query(INBOX_SIMILAR_QUERY_SQL)
         .bind(exclude_item_id)
-        .bind(vector)
-        .bind(INBOX_SIMILAR_MINIMUM_SIMILARITY)
+        .bind(tsquery)
         .bind(prefer_board_id)
         .bind(prefer_scope)
         .bind(limit)
@@ -253,9 +246,8 @@ pub async fn find_similar_inbox(
                 knowledge_type: row.try_get("knowledge_type")?,
                 scope: row.try_get("scope")?,
                 board_id: row.try_get("board_id")?,
-                similarity: row.try_get("similarity")?,
+                score: row.try_get("score")?,
                 status: row.try_get("status")?,
-                embedding_status: "ready".into(),
             })
         })
         .collect()
@@ -266,13 +258,14 @@ mod tests {
     use super::*;
 
     #[test]
-    fn inbox_limits_are_independent_of_agent_defaults() {
-        assert_eq!(INBOX_SIMILAR_MINIMUM_SIMILARITY, 0.75);
+    fn inbox_limits_and_shared_predicates() {
         assert_eq!(INBOX_SIMILAR_DEFAULT_LIMIT, 5);
         assert_eq!(INBOX_SIMILAR_MAX_LIMIT, 10);
         assert!(INBOX_SIMILAR_QUERY_SQL.contains("i.id <> $1"));
         assert!(INBOX_SIMILAR_QUERY_SQL.contains("i.status = 'approved'"));
         assert!(RETRIEVAL_QUERY_SQL.contains("i.status = 'approved'"));
+        assert!(RETRIEVAL_QUERY_SQL.contains("ts_rank_cd"));
+        assert!(!RETRIEVAL_QUERY_SQL.contains("<=>"));
         assert_eq!(ELIGIBLE_KNOWLEDGE_FROM, eligible_knowledge_from!());
     }
 }

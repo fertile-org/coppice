@@ -5,6 +5,7 @@ use uuid::Uuid;
 pub enum NotificationType {
     AgentRunFinished,
     AgentMentioned,
+    KnowledgeCompactionFailed,
 }
 
 impl NotificationType {
@@ -12,6 +13,7 @@ impl NotificationType {
         match self {
             NotificationType::AgentRunFinished => "agent_run_finished",
             NotificationType::AgentMentioned => "agent_mentioned",
+            NotificationType::KnowledgeCompactionFailed => "knowledge_compaction_failed",
         }
     }
 
@@ -19,6 +21,7 @@ impl NotificationType {
         match s {
             "agent_run_finished" => Some(NotificationType::AgentRunFinished),
             "agent_mentioned" => Some(NotificationType::AgentMentioned),
+            "knowledge_compaction_failed" => Some(NotificationType::KnowledgeCompactionFailed),
             _ => None,
         }
     }

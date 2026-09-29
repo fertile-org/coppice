@@ -9,6 +9,7 @@ pub mod comment;
 pub mod context_profile;
 pub mod job;
 pub mod knowledge;
+pub mod knowledge_compaction;
 pub mod mention;
 pub mod notification;
 pub mod board;

@@ -5,10 +5,9 @@ use crate::domain::knowledge::{
     validate_revision, KnowledgeConfidence, KnowledgeItemView, KnowledgeRevisionInput,
     KnowledgeScope, KnowledgeStatus, KnowledgeType,
 };
-use crate::knowledge::embedder::{EmbeddingError, EmbeddingProvider};
 use crate::knowledge::retrieval::{
     find_similar_inbox, SimilarKnowledgeNeighbor, INBOX_SIMILAR_DEFAULT_LIMIT,
-    INBOX_SIMILAR_MAX_LIMIT, RetrievalError,
+    INBOX_SIMILAR_MAX_LIMIT,
 };
 use sqlx::{PgPool, Postgres, Row, Transaction};
 use thiserror::Error;
@@ -26,22 +25,20 @@ SELECT
     r.revision_number, r.scope, r.board_id, p.name AS board_name,
     r.agent_id, a.name AS agent_name, r.knowledge_type, r.title, r.content,
     r.source_type, r.source_id, r.source_run_id, r.confidence,
-    CASE
-        WHEN e.revision_id IS NOT NULL THEN 'ready'
-        WHEN j.status = 'failed' THEN 'failed'
-        WHEN j.status = 'running' THEN 'processing'
-        WHEN j.status = 'pending' THEN 'pending'
-        ELSE 'not_requested'
-    END AS embedding_status,
-    j.last_error AS embedding_error,
+    i.compaction_batch_id, cb.agent_id AS compaction_agent_id,
+    ca.name AS compaction_agent_name,
+    ARRAY(
+        SELECT s.ticket_id FROM knowledge_item_sources s
+        WHERE s.item_id = i.id ORDER BY s.ticket_id
+    ) AS source_ticket_ids,
     (SELECT count(*) FROM knowledge_usage_logs u WHERE u.item_id = i.id) AS usage_count,
     (SELECT max(u.included_at) FROM knowledge_usage_logs u WHERE u.item_id = i.id) AS last_used_at
 FROM knowledge_items i
 JOIN knowledge_revisions r ON r.id = i.current_revision_id
 LEFT JOIN boards p ON p.id = r.board_id
 LEFT JOIN agents a ON a.id = r.agent_id
-LEFT JOIN knowledge_embeddings e ON e.revision_id = r.id
-LEFT JOIN knowledge_jobs j ON j.kind = 'embed_revision' AND j.revision_id = r.id
+LEFT JOIN knowledge_compaction_batches cb ON cb.id = i.compaction_batch_id
+LEFT JOIN agents ca ON ca.id = cb.agent_id
 "#;
 
 #[derive(Debug, Error)]
@@ -61,18 +58,16 @@ pub enum KnowledgeError {
     #[error("knowledge activation was blocked by a concurrent lifecycle change")]
     ActivationConflict,
     #[error(transparent)]
-    Embedding(#[from] EmbeddingError),
-    #[error(transparent)]
     Database(#[from] sqlx::Error),
 }
 
-impl From<RetrievalError> for KnowledgeError {
-    fn from(error: RetrievalError) -> Self {
-        match error {
-            RetrievalError::Database(error) => Self::Database(error),
-            RetrievalError::Embedding(error) => Self::Embedding(error),
-        }
-    }
+/// Provenance for an item proposed by a compaction batch.
+#[derive(Debug, Clone)]
+pub struct CompactionProvenance<'a> {
+    pub batch_id: Uuid,
+    pub candidate_index: i32,
+    pub source_ticket_ids: &'a [Uuid],
+    pub supersedes_item_id: Option<Uuid>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -144,38 +139,12 @@ impl<'a> KnowledgeService<'a> {
         self.get(item_id).await
     }
 
-    #[allow(clippy::too_many_arguments)]
-    pub async fn create_extracted(
-        &self,
-        extraction_job_id: Uuid,
-        candidate_index: i32,
-        input: KnowledgeRevisionInput,
-        status: KnowledgeStatus,
-        policy_decision: &str,
-        policy_reason: &str,
-    ) -> Result<Uuid, KnowledgeError> {
-        let mut tx = self.pool.begin().await?;
-        let item_id = self
-            .create_extracted_in_tx(
-                &mut tx,
-                extraction_job_id,
-                candidate_index,
-                input,
-                status,
-                policy_decision,
-                policy_reason,
-            )
-            .await?;
-        tx.commit().await?;
-        Ok(item_id)
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    pub async fn create_extracted_in_tx(
+    /// Insert one validated compaction candidate. Idempotent per
+    /// `(batch_id, candidate_index)`; policy-approved items activate immediately.
+    pub async fn create_from_compaction_in_tx(
         &self,
         tx: &mut Transaction<'_, Postgres>,
-        extraction_job_id: Uuid,
-        candidate_index: i32,
+        provenance: CompactionProvenance<'_>,
         mut input: KnowledgeRevisionInput,
         status: KnowledgeStatus,
         policy_decision: &str,
@@ -183,10 +152,10 @@ impl<'a> KnowledgeService<'a> {
     ) -> Result<Uuid, KnowledgeError> {
         validate_revision(&mut input).map_err(KnowledgeError::Validation)?;
         if let Some(existing) = sqlx::query_scalar::<_, Uuid>(
-            "SELECT id FROM knowledge_items WHERE extraction_job_id = $1 AND extraction_candidate_index = $2",
+            "SELECT id FROM knowledge_items WHERE compaction_batch_id = $1 AND compaction_candidate_index = $2",
         )
-        .bind(extraction_job_id)
-        .bind(candidate_index)
+        .bind(provenance.batch_id)
+        .bind(provenance.candidate_index)
         .fetch_optional(&mut **tx)
         .await?
         {
@@ -199,20 +168,29 @@ impl<'a> KnowledgeService<'a> {
                 tx,
                 Uuid::nil(),
                 &input,
-                None,
-                Some((extraction_job_id, candidate_index)),
+                provenance.supersedes_item_id,
+                Some((provenance.batch_id, provenance.candidate_index)),
                 status,
                 approval_mode,
                 Some((policy_decision, policy_reason)),
             )
             .await?;
+        for ticket_id in provenance.source_ticket_ids {
+            sqlx::query(
+                "INSERT INTO knowledge_item_sources (item_id, ticket_id) VALUES ($1, $2) ON CONFLICT DO NOTHING",
+            )
+            .bind(item_id)
+            .bind(ticket_id)
+            .execute(&mut **tx)
+            .await?;
+        }
         if status == KnowledgeStatus::Approved {
             let revision_id: Uuid =
                 sqlx::query_scalar("SELECT current_revision_id FROM knowledge_items WHERE id = $1")
                     .bind(item_id)
                     .fetch_one(&mut **tx)
                     .await?;
-            enqueue_embedding(tx, revision_id).await?;
+            activate_revision(tx, item_id, revision_id, self.config).await?;
         }
         Ok(item_id)
     }
@@ -227,13 +205,12 @@ impl<'a> KnowledgeService<'a> {
         row_to_view(&row)
     }
 
-    /// Near-duplicate assist for pending inbox review. Embeds the pending revision
-    /// ephemerally — never writes `knowledge_embeddings` for pending items.
+    /// Near-duplicate assist for pending inbox review via full-text match
+    /// against approved, live knowledge.
     pub async fn find_similar(
         &self,
         item_id: Uuid,
         limit: Option<usize>,
-        embedder: &dyn EmbeddingProvider,
     ) -> Result<Vec<SimilarKnowledgeNeighbor>, KnowledgeError> {
         let item = self.get(item_id).await?;
         if item.status != KnowledgeStatus::Pending {
@@ -245,15 +222,11 @@ impl<'a> KnowledgeService<'a> {
             .unwrap_or(INBOX_SIMILAR_DEFAULT_LIMIT)
             .clamp(1, INBOX_SIMILAR_MAX_LIMIT);
         let content: String = item.content.chars().take(32_000).collect();
-        let query_text = format!("{}\n\n{content}", item.title);
-        let vectors = embedder.embed(&[query_text]).await?;
-        let query_vector = vectors.first().ok_or_else(|| {
-            EmbeddingError::InvalidOutput("embedding provider returned no vector".into())
-        })?;
         Ok(find_similar_inbox(
             self.pool,
             item_id,
-            query_vector,
+            &item.title,
+            &content,
             item.board_id,
             scope_to_str(item.scope),
             limit,
@@ -342,8 +315,7 @@ LIMIT $6"#
         .execute(&mut *tx)
         .await
         .map_err(map_database_error)?;
-        enqueue_embedding(&mut tx, item.current_revision_id).await?;
-        activate_embedded_revision(&mut tx, item_id, item.current_revision_id, self.config).await?;
+        activate_revision(&mut tx, item_id, item.current_revision_id, self.config).await?;
         tx.commit().await?;
         self.get(item_id).await
     }
@@ -410,7 +382,7 @@ LIMIT $6"#
         .execute(&mut *tx)
         .await?;
         if item.status == KnowledgeStatus::Approved {
-            enqueue_embedding(&mut tx, revision_id).await?;
+            activate_revision(&mut tx, item_id, revision_id, self.config).await?;
         }
         tx.commit().await?;
         self.get(item_id).await
@@ -571,7 +543,7 @@ LIMIT $6"#
         user_id: Uuid,
         input: &KnowledgeRevisionInput,
         supersedes_item_id: Option<Uuid>,
-        extraction: Option<(Uuid, i32)>,
+        compaction: Option<(Uuid, i32)>,
         status: KnowledgeStatus,
         approval_mode: Option<&str>,
         policy: Option<(&str, &str)>,
@@ -580,12 +552,12 @@ LIMIT $6"#
         let revision_id = Uuid::new_v4();
         let created_by = (user_id != Uuid::nil()).then_some(user_id);
         let (policy_decision, policy_reason) = policy.unzip();
-        let (extraction_job_id, extraction_candidate_index) = extraction.unzip();
+        let (compaction_batch_id, compaction_candidate_index) = compaction.unzip();
         sqlx::query(
             r#"
             INSERT INTO knowledge_items (
                 id, status, approved_at, approval_mode, policy_decision, policy_reason,
-                supersedes_item_id, created_by, extraction_job_id, extraction_candidate_index
+                supersedes_item_id, created_by, compaction_batch_id, compaction_candidate_index
             ) VALUES (
                 $1, $2, CASE WHEN $2 = 'approved' THEN now() END, $3, $4, $5,
                 $6, $7, $8, $9
@@ -599,8 +571,8 @@ LIMIT $6"#
         .bind(policy_reason)
         .bind(supersedes_item_id)
         .bind(created_by)
-        .bind(extraction_job_id)
-        .bind(extraction_candidate_index)
+        .bind(compaction_batch_id)
+        .bind(compaction_candidate_index)
         .execute(&mut **tx)
         .await
         .map_err(map_database_error)?;
@@ -614,7 +586,9 @@ LIMIT $6"#
     }
 }
 
-pub async fn activate_embedded_revision(
+/// Make an approved item's current revision retrievable and complete any
+/// pending supersession in the same transaction.
+pub async fn activate_revision(
     tx: &mut Transaction<'_, Postgres>,
     item_id: Uuid,
     revision_id: Uuid,
@@ -623,15 +597,6 @@ pub async fn activate_embedded_revision(
     let candidate = lock_item_for_activation(tx, item_id).await?;
     if candidate.current_revision_id != revision_id || candidate.status != KnowledgeStatus::Approved
     {
-        return Ok(false);
-    }
-    let embedding_ready: bool = sqlx::query_scalar(
-        "SELECT EXISTS(SELECT 1 FROM knowledge_embeddings WHERE revision_id = $1)",
-    )
-    .bind(revision_id)
-    .fetch_one(&mut **tx)
-    .await?;
-    if !embedding_ready {
         return Ok(false);
     }
 
@@ -895,24 +860,6 @@ async fn insert_revision_with_id(
     Ok(())
 }
 
-pub async fn enqueue_embedding(
-    tx: &mut Transaction<'_, Postgres>,
-    revision_id: Uuid,
-) -> Result<(), sqlx::Error> {
-    sqlx::query(
-        r#"
-        INSERT INTO knowledge_jobs (id, kind, revision_id)
-        VALUES ($1, 'embed_revision', $2)
-        ON CONFLICT (revision_id) WHERE kind = 'embed_revision' DO NOTHING
-        "#,
-    )
-    .bind(Uuid::new_v4())
-    .bind(revision_id)
-    .execute(&mut **tx)
-    .await?;
-    Ok(())
-}
-
 fn row_to_view(row: &sqlx::postgres::PgRow) -> Result<KnowledgeItemView, KnowledgeError> {
     Ok(KnowledgeItemView {
         id: row.try_get("id")?,
@@ -943,8 +890,10 @@ fn row_to_view(row: &sqlx::postgres::PgRow) -> Result<KnowledgeItemView, Knowled
         supersedes_item_id: row.try_get("supersedes_item_id")?,
         superseded_by: row.try_get("superseded_by")?,
         stale_at: row.try_get("stale_at")?,
-        embedding_status: row.try_get("embedding_status")?,
-        embedding_error: row.try_get("embedding_error")?,
+        compaction_batch_id: row.try_get("compaction_batch_id")?,
+        compaction_agent_id: row.try_get("compaction_agent_id")?,
+        compaction_agent_name: row.try_get("compaction_agent_name")?,
+        source_ticket_ids: row.try_get("source_ticket_ids")?,
         usage_count: row.try_get("usage_count")?,
         last_used_at: row.try_get("last_used_at")?,
         created_at: row.try_get("created_at")?,

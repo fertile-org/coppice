@@ -29,7 +29,8 @@ use crate::services::context_builder::{
     write_context_document, write_context_file, ContextInput, HumanRequest,
 };
 use crate::services::context_budget::{
-    build_budgeted_context, record_usage, render_knowledge, ByteTokenCounter, KnowledgeSection,
+    build_budgeted_context, record_usage, render_knowledge, select_within_budget, ByteTokenCounter,
+    KnowledgeSection,
 };
 use crate::services::job_service::JobService;
 use crate::services::mention_service::MentionService;
@@ -46,11 +47,10 @@ use crate::services::worktree_service::{
 use crate::util::error_format::format_job_error;
 use crate::util::truncate::truncate_with_ellipsis;
 use crate::AppState;
-use crate::{
-    knowledge::embedding_provider,
-    knowledge::retrieval::{has_eligible, retrieve},
-};
+use crate::knowledge::retrieval::{has_eligible, retrieve};
 use time::format_description::well_known::Rfc3339;
+
+mod compaction;
 
 #[derive(Debug)]
 struct JobCancelled;
@@ -179,6 +179,10 @@ async fn execute_job(
 ) -> anyhow::Result<()> {
     if run_svc.is_cancelled(run.id).await? {
         return Err(JobCancelled.into());
+    }
+
+    if run.job_type == crate::domain::knowledge_compaction::JOB_TYPE_COMPACT_KNOWLEDGE {
+        return compaction::execute_compaction(state, pool, run_svc, run).await;
     }
 
     if run.job_type == "chat_turn" || run.context_profile == ContextProfile::Conversation {
@@ -432,13 +436,16 @@ async fn execute_job(
         ContextProfile::Full => ticket.ticket.description.as_str(),
         ContextProfile::HumanAgent
         | ContextProfile::HumanChat
-        | ContextProfile::Conversation => "",
+        | ContextProfile::Conversation
+        | ContextProfile::KnowledgeCompaction => "",
     };
     let context_thread_excerpt = match run.context_profile {
         ContextProfile::Full if run.job_type == "work_on_ticket" => None,
         ContextProfile::Full => Some(consultation_request_ref.unwrap_or_default()),
         ContextProfile::HumanChat => thread_excerpt_ref,
-        ContextProfile::HumanAgent | ContextProfile::Conversation => None,
+        ContextProfile::HumanAgent
+        | ContextProfile::Conversation
+        | ContextProfile::KnowledgeCompaction => None,
     };
     let context_input = ContextInput {
         ticket_title: &ticket.ticket.title,
@@ -476,38 +483,25 @@ async fn execute_job(
             .await
             .context("check eligible knowledge")?
         {
-            let provider = embedding_provider(&state.config.knowledge.embedding)
-                .context("configure knowledge embedding provider")?;
-            let query_text = format!(
-                "{}\n\n{}",
-                ticket.ticket.title,
-                ticket.ticket.description.chars().take(32_000).collect::<String>()
-            );
-            let query_vectors = provider
-                .embed(&[query_text])
-                .await
-                .context("embed knowledge retrieval query")?;
-            let query_vector = query_vectors
-                .first()
-                .context("knowledge query embedding missing")?;
-            let retrieved = retrieve(
+            let query_body: String = ticket.ticket.description.chars().take(32_000).collect();
+            let eligible = retrieve(
                 pool,
                 ticket.ticket.board_id,
                 run.agent_id,
-                query_vector,
+                &ticket.ticket.title,
+                &query_body,
                 &state.config.knowledge.retrieval,
             )
             .await
             .context("retrieve knowledge")?;
-            render_knowledge(
-                &retrieved,
-                state
-                    .config
-                    .knowledge
-                    .context_budget
-                    .retrieved_knowledge,
+            let knowledge_budget = state.config.knowledge.context_budget.retrieved_knowledge;
+            let selected = select_within_budget(
+                eligible,
+                state.config.knowledge.retrieval.top_k,
+                knowledge_budget,
                 &counter,
-            )
+            );
+            render_knowledge(&selected, knowledge_budget, &counter)
         } else {
             KnowledgeSection::default()
         };
@@ -1354,7 +1348,9 @@ fn human_request_mode_label(profile: ContextProfile) -> Option<&'static str> {
     match profile {
         ContextProfile::HumanAgent => Some("Agent"),
         ContextProfile::HumanChat => Some("Chat"),
-        ContextProfile::Full | ContextProfile::Conversation => None,
+        ContextProfile::Full
+        | ContextProfile::Conversation
+        | ContextProfile::KnowledgeCompaction => None,
     }
 }
 

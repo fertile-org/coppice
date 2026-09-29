@@ -64,6 +64,7 @@ function renderBell({
   items = [unreadNotification, readNotification],
   count = 1,
   onOpenTicket = vi.fn(),
+  onOpenPath = vi.fn(),
   primeList = true,
   primeCount = true,
   userId = USER_ID,
@@ -71,6 +72,7 @@ function renderBell({
   items?: NotificationItem[];
   count?: number;
   onOpenTicket?: (ticketId: string) => void | Promise<void>;
+  onOpenPath?: (path: string) => void;
   primeList?: boolean;
   primeCount?: boolean;
   userId?: string;
@@ -94,9 +96,14 @@ function renderBell({
   return {
     queryClient,
     onOpenTicket,
+    onOpenPath,
     ...render(
       <QueryClientProvider client={queryClient}>
-        <NotificationBell userId={userId} onOpenTicket={onOpenTicket} />
+        <NotificationBell
+          userId={userId}
+          onOpenTicket={onOpenTicket}
+          onOpenPath={onOpenPath}
+        />
       </QueryClientProvider>,
     ),
   };
@@ -107,6 +114,25 @@ afterEach(() => {
 });
 
 describe('NotificationBell', () => {
+  it('opens the Knowledge page for a failed compaction notification', async () => {
+    const failure: NotificationItem = {
+      ...unreadNotification,
+      id: '00000000-0000-0000-0000-000000000003',
+      type: 'knowledge_compaction_failed',
+      title: 'Knowledge compaction failed (Reviewer)',
+      body: 'connector exploded',
+      ticketId: null,
+    };
+    vi.stubGlobal('fetch', mockNotificationApi([failure], 1));
+    const { onOpenPath, onOpenTicket } = renderBell({ items: [failure] });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Notifications, 1 unread' }));
+    fireEvent.click(screen.getByRole('button', { name: /Knowledge compaction failed/ }));
+
+    await waitFor(() => expect(onOpenPath).toHaveBeenCalledWith('/knowledge'));
+    expect(onOpenTicket).not.toHaveBeenCalled();
+  });
+
   it('does not reuse notification state when the signed-in user changes', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       if (String(input).endsWith('/unread-count')) {

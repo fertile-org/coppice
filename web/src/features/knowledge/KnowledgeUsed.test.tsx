@@ -63,7 +63,7 @@ describe('KnowledgeUsed', () => {
           itemId: '00000000-0000-4000-8000-000000000001',
           revisionId: '00000000-0000-4000-8000-000000000002',
           rank: 1,
-          similarity: 0.91234,
+          score: 0.91234,
           tokenCount: 18,
           renderedContent: '<knowledge revision="exact">Do the safe thing.</knowledge>',
           title: 'Safe deployment',
@@ -77,7 +77,7 @@ describe('KnowledgeUsed', () => {
           itemId: '00000000-0000-4000-8000-000000000004',
           revisionId: '00000000-0000-4000-8000-000000000005',
           rank: 2,
-          similarity: 0.8,
+          score: 0,
           tokenCount: 12,
           renderedContent: '<knowledge revision="comment">Review this.</knowledge>',
           title: 'Review note',
@@ -103,7 +103,8 @@ describe('KnowledgeUsed', () => {
     expect(screen.getByText('Knowledge Used')).toBeVisible();
     expect(screen.getByText('1. Safe deployment')).toBeVisible();
     expect(screen.getByText('2. Review note')).toBeVisible();
-    expect(screen.getByText(/18 tokens · similarity 0.912/)).toBeVisible();
+    expect(screen.getByText(/18 tokens · match 0.912/)).toBeVisible();
+    expect(screen.getByText(/12 tokens · whole library fit the budget/)).toBeVisible();
     expect(screen.getByText('00000000-0000-4000-8000-000000000002')).toBeVisible();
     expect(screen.getByText('00000000-0000-4000-8000-000000000005')).toBeVisible();
     expect(screen.getByText(/Agent Summary/)).toBeVisible();

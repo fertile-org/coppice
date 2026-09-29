@@ -1,0 +1,26 @@
+{
+  "status": "done",
+  "summary": "Mock compaction: 2 candidates from the batch.",
+  "knowledgeCandidates": [
+    {
+      "type": "test_command",
+      "scope": "board",
+      "boardId": "{{board:last}}",
+      "agentId": null,
+      "title": "Use make test-unit while iterating",
+      "content": "Run make test-unit during development and reserve make test for final acceptance; the full suite takes several minutes.",
+      "confidence": "high",
+      "sourceTicketIds": ["{{ticket:last}}"],
+      "supersedesItemId": null,
+      "requiresHumanApproval": false
+    },
+    {
+      "type": "bug_pattern",
+      "scope": "board",
+      "title": "Mutations without X-CSRF-Token return 403",
+      "content": "Every mutating API request needs the X-CSRF-Token header from login; a missing token surfaces as an empty 403.",
+      "confidence": "medium",
+      "sourceTicketIds": ["{{ticket:0}}"]
+    }
+  ]
+}

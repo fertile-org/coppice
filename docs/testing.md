@@ -112,10 +112,10 @@ M06 keeps the existing context smoke and adds a distinct knowledge smoke:
 
 ```bash
 make e2e-smoke-m06              # context continuation + pending split behavior
-make e2e-smoke-m06-knowledge    # governance → embed → Full retrieval → audit → extraction
+make e2e-smoke-m06-knowledge    # governance → Done ticket → agent compaction → approve → Full retrieval → audit
 ```
 
-Both use the default `deploy/docker-compose.yml` stack. E2e Makefile targets clear the `embeddings` Compose profile and force `COPPICE_KNOWLEDGE__EMBEDDING__PROVIDER=mock` so CI stays deterministic (no Ollama/GPU/model pulls). That mock path is for tests/smoke only — operator `make compose-up` enables the Ollama embedder sidecar by default (`nomic-embed-text` @ 768). Mode comparison and first-boot pull cost: [Knowledge configuration](operations.md#knowledge-configuration).
+Both use the default `deploy/docker-compose.yml` stack. The knowledge smoke recreates the server with `MOCK_AGENT_RESPONSE` cleared so agent-keyed fixtures apply (`backend_engineer/compact_knowledge.json` for the compactor). It configures the compaction agent, moves a ticket to Done, triggers or waits for compaction, approves the candidate, and restores the previous setting. Compaction integration tests live in `server/tests/integration_knowledge_compaction.rs` and use the root `compact_knowledge_*.json` fixtures for empty, invalid-source, and malformed output.
 
 The supported 10,000-eligible-row retrieval envelope has a separate, non-CI
 default-Compose benchmark. It seeds rows inside a rolled-back transaction, runs
@@ -126,9 +126,9 @@ p95 PostgreSQL execution time remains below 250 ms:
 make benchmark-m06-knowledge-retrieval
 ```
 
-Keep this benchmark separate from routine integration tests because constructing
-10,000 embeddings at the configured dimension (Compose sidecar / host default 768) and their HNSW entries is intentionally heavier
-than the representative mixed-cardinality query-plan assertion.
+Keep this benchmark separate from routine integration tests because seeding
+10,000 revisions and their full-text GIN entries is intentionally heavier than
+the representative mixed-cardinality query-plan assertion.
 
 ## Agent / provider testing
 

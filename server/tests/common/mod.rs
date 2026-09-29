@@ -46,34 +46,9 @@ pub async fn prepare_test_pool_for_auth() -> sqlx::PgPool {
 }
 
 pub async fn truncate_workspace(pool: &sqlx::PgPool) {
-    sqlx::query(
-        r#"
-        TRUNCATE
-            chat_messages,
-            chat_sessions,
-            knowledge_usage_logs,
-            knowledge_embeddings,
-            knowledge_jobs,
-            knowledge_revisions,
-            knowledge_items,
-            notifications,
-            ticket_mentions,
-            attachments,
-            ticket_comments,
-            agent_jobs,
-            agent_runs,
-            tickets,
-            repos,
-            agents,
-            boards,
-            sessions,
-            users
-        RESTART IDENTITY CASCADE
-        "#,
-    )
-    .execute(pool)
-    .await
-    .expect("truncate workspace tables");
+    db::truncate_test_workspace(pool)
+        .await
+        .expect("truncate workspace tables");
 }
 
 #[allow(dead_code)]

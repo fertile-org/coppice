@@ -29,6 +29,7 @@ use tokio::sync::watch;
 use crate::domain::context_profile::ContextProfile;
 use crate::domain::substatus::TicketStatus;
 use crate::domain::workflow::SplitTicketSpec;
+pub use crate::knowledge::candidates::KnowledgeCandidateSpec;
 use crate::sessions::run_registry::RunStreamHandle;
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq)]
@@ -68,6 +69,14 @@ pub struct AgentRunInput {
 /// Read-only allowlist for connectors that can enforce it (claude-code).
 pub const CHAT_READ_ONLY_TOOLS: &str = "Read,Glob,Grep,WebFetch,WebSearch";
 
+/// Connectors whose adapters actually restrict tools when `read_only_tools` is set.
+/// Others either refuse (kilo-code) or ignore the flag (codex, opencode).
+pub const READ_ONLY_CAPABLE_CONNECTORS: &[&str] = &["mock", "claude-code", "cursor"];
+
+pub fn connector_enforces_read_only(connector: &str) -> bool {
+    READ_ONLY_CAPABLE_CONNECTORS.contains(&connector)
+}
+
 /// Fail closed when a connector cannot enforce read-only tools for chat turns.
 pub fn refuse_unsupported_read_only(connector_id: &str) -> ProviderError {
     ProviderError::InvalidInput(format!(
@@ -100,6 +109,8 @@ pub enum AgentRunResult {
         blockers: Vec<String>,
         #[serde(default, rename = "splitTickets")]
         split_tickets: Vec<SplitTicketSpec>,
+        #[serde(default, rename = "knowledgeCandidates")]
+        knowledge_candidates: Vec<KnowledgeCandidateSpec>,
     },
     Blocked {
         #[serde(rename = "blockerType")]

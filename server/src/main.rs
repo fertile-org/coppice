@@ -89,13 +89,6 @@ async fn main() -> anyhow::Result<()> {
         };
 
     let db = coppice_server::db::connect_and_migrate(&config.database.url).await?;
-    if config.knowledge.enabled {
-        coppice_server::knowledge::ensure_schema_dimension(
-            &db,
-            config.knowledge.embedding.dimension,
-        )
-        .await?;
-    }
     coppice_server::services::auth_service::AuthService::new(&db, &config.auth)
         .maybe_auto_bootstrap(&config.auth)
         .await
@@ -121,8 +114,10 @@ async fn main() -> anyhow::Result<()> {
     });
     sweep_orphaned_runs(&state).await;
     coppice_server::workers::job_worker::spawn_workers(state.clone());
-    coppice_server::workers::knowledge_worker::spawn_workers(state.clone())?;
     coppice_server::workers::health_worker::spawn_health_worker(state.clone());
+    coppice_server::workers::knowledge_compaction_scheduler::spawn_knowledge_compaction_scheduler(
+        state.clone(),
+    );
     coppice_server::workers::run_watchdog::spawn_run_watchdog(state.clone());
     let app = coppice_server::app(state);
     let addr: SocketAddr = format!("0.0.0.0:{}", config.server.port).parse()?;

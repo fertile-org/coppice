@@ -1,0 +1,22 @@
+{
+  "status": "done",
+  "summary": "One valid candidate, one citing a ticket outside the batch.",
+  "knowledgeCandidates": [
+    {
+      "type": "coding_convention",
+      "scope": "board",
+      "title": "Handlers stay thin",
+      "content": "API handlers delegate business rules to services.",
+      "confidence": "high",
+      "sourceTicketIds": ["{{ticket:0}}"]
+    },
+    {
+      "type": "coding_convention",
+      "scope": "board",
+      "title": "Cites an unknown ticket",
+      "content": "This candidate must be dropped.",
+      "confidence": "high",
+      "sourceTicketIds": ["00000000-0000-4000-8000-000000000000"]
+    }
+  ]
+}

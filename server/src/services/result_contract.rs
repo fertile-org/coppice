@@ -541,6 +541,7 @@ mod tests {
             agent_requests: vec![],
             blockers: vec!["Docs mismatch".into()],
             split_tickets: vec![],
+            knowledge_candidates: Vec::new(),
         };
         let applied = apply_agent_result(&result).expect("apply");
         assert!(applied.comment.body.contains("@backend_engineer"));
@@ -566,6 +567,7 @@ mod tests {
             }],
             blockers: vec![],
             split_tickets: vec![],
+            knowledge_candidates: Vec::new(),
         };
 
         let applied = apply_agent_result(&result).expect("apply");
@@ -598,6 +600,7 @@ mod tests {
             agent_requests: vec![],
             blockers: vec![],
             split_tickets: vec![],
+            knowledge_candidates: Vec::new(),
         };
 
         let applied = apply_agent_result(&result).expect("apply attention result");
@@ -627,6 +630,7 @@ mod tests {
                 acceptance_criteria: None,
                 assign_to: None,
             }],
+            knowledge_candidates: Vec::new(),
         };
 
         let applied = apply_consultation_result(&result).expect("apply consultation");
@@ -696,6 +700,7 @@ mod tests {
             agent_requests: vec![],
             blockers: vec![],
             split_tickets: vec![],
+            knowledge_candidates: Vec::new(),
         };
         let applied = apply_agent_result(&result).expect("apply");
         assert!(applied
@@ -718,6 +723,7 @@ mod tests {
             agent_requests: vec![],
             blockers: vec![],
             split_tickets: vec![],
+            knowledge_candidates: Vec::new(),
         };
         let applied = apply_agent_result(&result).expect("apply");
         assert!(applied.comment.body.contains("Refined scope."));
@@ -740,6 +746,7 @@ mod tests {
             agent_requests: vec![],
             blockers: vec![],
             split_tickets: vec![],
+            knowledge_candidates: Vec::new(),
         };
         let applied = apply_agent_result(&result).expect("apply");
         assert!(applied
@@ -773,6 +780,7 @@ mod tests {
             agent_requests: vec![],
             blockers: vec![],
             split_tickets: vec![],
+            knowledge_candidates: Vec::new(),
         };
         let applied = apply_agent_result(&result).expect("apply");
         assert_eq!(

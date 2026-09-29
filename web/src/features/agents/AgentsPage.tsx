@@ -18,6 +18,8 @@ import {
   type AgentPreset,
   type ConnectorOption,
 } from './useAgents';
+import { KnowledgeCompactionCard } from './KnowledgeCompactionCard';
+import { useKnowledgeSettings } from '../settings/useKnowledgeSettings';
 
 function formatDate(iso: string): string {
   const date = new Date(iso);
@@ -286,11 +288,13 @@ function EditAgentDialog({
 
 function AgentRow({
   agent,
+  isCompactor,
   onEdit,
   onToggleEnabled,
   toggling,
 }: {
   agent: Agent;
+  isCompactor: boolean;
   onEdit: (agent: Agent) => void;
   onToggleEnabled: (agent: Agent) => void;
   toggling: boolean;
@@ -298,8 +302,13 @@ function AgentRow({
   return (
     <tr className="border-b border-border last:border-b-0">
       <td className="px-4 py-3">
-        <div className="font-body text-sm font-medium text-text-primary">
+        <div className="flex flex-wrap items-center gap-2 font-body text-sm font-medium text-text-primary">
           {agent.name}
+          {isCompactor && (
+            <span className="inline-flex rounded-full bg-accent-muted px-2 py-0.5 font-body text-xs font-medium text-accent">
+              Knowledge compactor
+            </span>
+          )}
         </div>
         {agent.presetSource && (
           <div className="mt-0.5 font-mono text-xs text-text-muted">
@@ -367,6 +376,8 @@ export function AgentsPage() {
   const [editingAgent, setEditingAgent] = useState<Agent | null>(null);
   const [togglingId, setTogglingId] = useState<string | null>(null);
   const updateAgentMutation = useUpdateAgentMutation();
+  const { data: knowledgeSettings } = useKnowledgeSettings();
+  const compactorId = knowledgeSettings?.compactionAgentId ?? null;
 
   async function toggleEnabled(agent: Agent) {
     setTogglingId(agent.id);
@@ -424,6 +435,14 @@ export function AgentsPage() {
         </div>
       )}
 
+      {!isLoading && !isError && agents && (
+        <KnowledgeCompactionCard
+          agents={agents}
+          canCreateAgent={Boolean(canCreate) && !presetsLoading}
+          onCreateAgent={() => setCreateOpen(true)}
+        />
+      )}
+
       {!isLoading && !isError && agents?.length === 0 && (
         <div className="mt-10 rounded-xl border border-dashed border-bark-300 bg-paper-100 px-8 py-12 text-center">
           <p className="font-display text-lg font-semibold text-bark-800">
@@ -475,6 +494,7 @@ export function AgentsPage() {
                 <AgentRow
                   key={agent.id}
                   agent={agent}
+                  isCompactor={agent.id === compactorId}
                   onEdit={setEditingAgent}
                   onToggleEnabled={(a) => void toggleEnabled(a)}
                   toggling={togglingId === agent.id}

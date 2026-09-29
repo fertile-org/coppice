@@ -79,29 +79,16 @@ default = false
 
 [knowledge]
 enabled = true
-worker_count = 1
 poll_interval_ms = 500
-stale_lock_secs = 300
 
-[knowledge.embedding]
-# Three modes (see docs/operations.md#knowledge-configuration):
-#   mock — tests/CI/smoke only (Makefile forces PROVIDER=mock; no download)
-#   local sidecar — default: openai_compatible → http://127.0.0.1:11434/v1
-#                   nomic-embed-text @ 768 (compose-local-up starts Ollama; first boot ~274MB)
-#   remote openai_compatible — opt-in: set base_url/model/api_key/dimension to your host
-# Dimension must match the model and live vector(n); mismatch fails startup or the embed job.
-# Ranking stays in Postgres; query embedding still calls this provider.
-provider = "openai_compatible"
-model = "nomic-embed-text"
-dimension = 768 # must match live vector(n); empty table rewrites on startup when changed
-base_url = "http://127.0.0.1:11434/v1"
-timeout_secs = 30
-api_key = "ollama" # required by validation; Ollama ignores it. Prefer COPPICE_KNOWLEDGE__EMBEDDING__API_KEY
-
-[knowledge.extraction]
-provider = "mock"
-max_source_bytes = 24000
-max_candidates = 5
+# Done tickets queue automatically; the compaction agent is chosen in the UI
+# (Agents → Knowledge compaction). No agent selected means no compaction.
+[knowledge.compaction]
+interval_secs = 1800
+batch_max_tickets = 10
+batch_max_source_bytes = 200000
+max_candidates_per_batch = 20
+max_attempts = 3
 
 [knowledge.auto_save]
 enabled = false
@@ -112,7 +99,6 @@ minimum_confidence = "high"
 top_k = 8
 allowed_types = []
 minimum_confidence = "medium"
-minimum_similarity = 0.0
 default_page_size = 25
 max_page_size = 100
 max_active_per_board = 10000

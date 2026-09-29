@@ -86,6 +86,32 @@ impl MockProvider {
     }
 }
 
+/// Compaction fixtures cannot know batch ids ahead of time: replace
+/// `{{ticket:N}}` / `{{board:N}}` with the Nth ticket listed in the context,
+/// and `{{ticket:last}}` / `{{board:last}}` with the newest one.
+fn fill_compaction_placeholders(raw: &str, context_path: &str) -> String {
+    let context = std::fs::read_to_string(context_path).unwrap_or_default();
+    let listed = |prefix: &str| -> Vec<String> {
+        context
+            .lines()
+            .filter_map(|line| line.strip_prefix(prefix))
+            .filter_map(|rest| rest.split('`').next())
+            .map(str::to_string)
+            .collect()
+    };
+    let mut filled = raw.to_string();
+    for (kind, prefix) in [("ticket", "- id: `"), ("board", "- board: `")] {
+        let ids = listed(prefix);
+        if let Some(last) = ids.last() {
+            filled = filled.replace(&format!("{{{{{kind}:last}}}}"), last);
+        }
+        for (index, id) in ids.iter().enumerate() {
+            filled = filled.replace(&format!("{{{{{kind}:{index}}}}}"), id);
+        }
+    }
+    filled
+}
+
 fn has_resume_signal(context: &str) -> bool {
     let context = context.to_ascii_lowercase();
     context.contains("prior blocker")
@@ -146,6 +172,11 @@ impl AgentProvider for MockProvider {
         let path = self.fixture_path(&input);
         let raw = std::fs::read_to_string(&path)
             .map_err(|_| ProviderError::FixtureNotFound(path.display().to_string()))?;
+        let raw = if input.job_type == crate::domain::knowledge_compaction::JOB_TYPE_COMPACT_KNOWLEDGE {
+            fill_compaction_placeholders(&raw, &input.context_path)
+        } else {
+            raw
+        };
         let result: AgentRunResult = serde_json::from_str(&raw)
             .map_err(|err| ProviderError::InvalidFixture(err.to_string()))?;
         Self::maybe_write_stdout(&input)?;
@@ -505,5 +536,21 @@ mod tests {
         let content = std::fs::read_to_string(stdout_path).expect("read stdout");
         assert!(content.contains("Mock agent starting"));
         assert!(content.contains("Done."));
+    }
+
+    #[test]
+    fn fills_compaction_placeholders_from_the_context_document() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let context = dir.path().join("context.md");
+        std::fs::write(
+            &context,
+            "### A\n\n- id: `t-1`\n- board: `b-1` (Core)\n\n### B\n\n- id: `t-2`\n- board: `b-2` (Web)\n",
+        )
+        .expect("write context");
+        let filled = fill_compaction_placeholders(
+            "{{ticket:0}} {{board:0}} {{ticket:last}} {{board:last}} {{ticket:9}}",
+            &context.to_string_lossy(),
+        );
+        assert_eq!(filled, "t-1 b-1 t-2 b-2 {{ticket:9}}");
     }
 }

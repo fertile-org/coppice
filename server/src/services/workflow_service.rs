@@ -489,6 +489,7 @@ mod tests {
                 agent_requests: vec![],
                 blockers: vec![],
                 split_tickets: vec![],
+                knowledge_candidates: Vec::new(),
             },
             board_agent_keys: vec!["pm".into()],
             board_agent_ids: HashMap::from([("pm".into(), pm_agent_id())]),
@@ -512,6 +513,7 @@ mod tests {
             agent_requests: vec![],
             blockers: vec![],
             split_tickets: vec![],
+            knowledge_candidates: Vec::new(),
         }
     }
 
@@ -818,6 +820,7 @@ mod tests {
                 agent_requests: vec![],
                 blockers: vec![],
                 split_tickets: vec![],
+                knowledge_candidates: Vec::new(),
             },
             ..minimal_ctx()
         })
@@ -870,6 +873,7 @@ mod tests {
                 agent_requests: vec![],
                 blockers: vec![],
                 split_tickets: vec![],
+                knowledge_candidates: Vec::new(),
             },
             ..minimal_ctx()
         })
@@ -918,6 +922,7 @@ mod tests {
                 agent_requests: vec![],
                 blockers: vec![],
                 split_tickets: vec![],
+                knowledge_candidates: Vec::new(),
             },
             ..minimal_ctx()
         })
@@ -944,6 +949,7 @@ mod tests {
                 agent_requests: vec![],
                 blockers: vec![],
                 split_tickets: vec![],
+                knowledge_candidates: Vec::new(),
             },
             ..minimal_ctx()
         })
@@ -972,6 +978,7 @@ mod tests {
                 agent_requests: vec![],
                 blockers: vec![],
                 split_tickets: vec![],
+                knowledge_candidates: Vec::new(),
             },
             ..minimal_ctx()
         })
@@ -1000,6 +1007,7 @@ mod tests {
                 agent_requests: vec![],
                 blockers: vec!["Missing tests".into()],
                 split_tickets: vec![],
+                knowledge_candidates: Vec::new(),
             },
             board_agent_keys: vec!["qc".into(), "backend_engineer".into()],
             board_agent_ids: agent_map(&[
@@ -1037,6 +1045,7 @@ mod tests {
                 agent_requests: vec![],
                 blockers: vec![],
                 split_tickets: vec![],
+                knowledge_candidates: Vec::new(),
             },
             board_agent_keys: vec!["qc".into(), "backend_engineer".into()],
             board_agent_ids: agent_map(&[

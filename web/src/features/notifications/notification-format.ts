@@ -1,3 +1,9 @@
+/** In-app destination for notifications that are not about a ticket. */
+export function notificationPath(notification: { type: string }): string | null {
+  if (notification.type === 'knowledge_compaction_failed') return '/knowledge';
+  return null;
+}
+
 export function notificationBellLabel(unreadCount: number): string {
   if (unreadCount <= 0) {
     return 'Notifications, no unread notifications';

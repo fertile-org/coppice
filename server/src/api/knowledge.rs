@@ -4,7 +4,6 @@ use crate::domain::knowledge::{
     source_type_to_str, status_from_str, status_to_str, type_from_str, type_to_str,
     KnowledgeItemView, KnowledgeRevisionInput,
 };
-use crate::knowledge::embedding_provider;
 use crate::knowledge::retrieval::SimilarKnowledgeNeighbor;
 use crate::middleware::admin::AdminUser;
 use crate::services::knowledge_service::{
@@ -89,10 +88,6 @@ impl From<KnowledgeError> for KnowledgeApiError {
                 status: StatusCode::BAD_REQUEST,
                 message: error.to_string(),
             },
-            KnowledgeError::Embedding(embedding_error) => {
-                tracing::error!(error = %embedding_error, "knowledge embedding error");
-                Self::internal()
-            }
             KnowledgeError::Database(database_error) => {
                 tracing::error!(error = %database_error, "knowledge database error");
                 Self::internal()
@@ -219,8 +214,10 @@ pub(crate) struct KnowledgeResponse {
     supersedes_item_id: Option<Uuid>,
     superseded_by: Option<Uuid>,
     stale_at: Option<String>,
-    embedding_status: String,
-    embedding_error: Option<String>,
+    compaction_batch_id: Option<Uuid>,
+    compaction_agent_id: Option<Uuid>,
+    compaction_agent_name: Option<String>,
+    source_ticket_ids: Vec<Uuid>,
     usage_count: i64,
     last_used_at: Option<String>,
     created_at: String,
@@ -240,7 +237,7 @@ struct KnowledgeUsageResponse {
     item_id: Uuid,
     revision_id: Uuid,
     rank: i32,
-    similarity: f64,
+    score: f64,
     token_count: i32,
     rendered_content: String,
     title: String,
@@ -347,8 +344,10 @@ pub(crate) fn item_response(item: KnowledgeItemView) -> KnowledgeResponse {
         supersedes_item_id: item.supersedes_item_id,
         superseded_by: item.superseded_by,
         stale_at: format(item.stale_at),
-        embedding_status: item.embedding_status,
-        embedding_error: item.embedding_error,
+        compaction_batch_id: item.compaction_batch_id,
+        compaction_agent_id: item.compaction_agent_id,
+        compaction_agent_name: item.compaction_agent_name,
+        source_ticket_ids: item.source_ticket_ids,
         usage_count: item.usage_count,
         last_used_at: format(item.last_used_at),
         created_at: item.created_at.format(&Rfc3339).unwrap_or_default(),
@@ -409,9 +408,8 @@ struct SimilarNeighborResponse {
     knowledge_type: String,
     scope: String,
     board_id: Option<Uuid>,
-    similarity: f64,
+    score: f64,
     status: String,
-    embedding_status: String,
 }
 
 #[derive(Serialize)]
@@ -428,9 +426,8 @@ fn similar_neighbor_response(neighbor: SimilarKnowledgeNeighbor) -> SimilarNeigh
         knowledge_type: neighbor.knowledge_type,
         scope: neighbor.scope,
         board_id: neighbor.board_id,
-        similarity: neighbor.similarity,
+        score: neighbor.score,
         status: neighbor.status,
-        embedding_status: neighbor.embedding_status,
     }
 }
 
@@ -440,12 +437,8 @@ async fn similar_knowledge(
     Path(item_id): Path<Uuid>,
     Query(query): Query<SimilarQuery>,
 ) -> Result<Json<SimilarListResponse>, KnowledgeApiError> {
-    let embedder = embedding_provider(&state.config.knowledge.embedding).map_err(|error| {
-        tracing::error!(error = %error, "knowledge embedding provider configuration error");
-        KnowledgeApiError::internal()
-    })?;
     let items = KnowledgeService::new(pool(&state)?, &state.config.knowledge)
-        .find_similar(item_id, query.limit, embedder.as_ref())
+        .find_similar(item_id, query.limit)
         .await?
         .into_iter()
         .map(similar_neighbor_response)
@@ -597,7 +590,7 @@ async fn knowledge_used(
     }
     let rows = sqlx::query(
         r#"
-        SELECT u.item_id, u.revision_id, u.rank, u.similarity, u.token_count,
+        SELECT u.item_id, u.revision_id, u.rank, u.score, u.token_count,
                u.rendered_content, u.included_at, r.title, r.knowledge_type,
                r.scope, r.source_type, r.source_id
         FROM knowledge_usage_logs u
@@ -618,7 +611,7 @@ async fn knowledge_used(
                 item_id: row.try_get("item_id")?,
                 revision_id: row.try_get("revision_id")?,
                 rank: row.try_get("rank")?,
-                similarity: row.try_get("similarity")?,
+                score: row.try_get("score")?,
                 token_count: row.try_get("token_count")?,
                 rendered_content: row.try_get("rendered_content")?,
                 title: row.try_get("title")?,

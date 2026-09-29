@@ -49,7 +49,9 @@ pub fn build_context_md(input: &ContextInput) -> String {
         ContextProfile::Full => build_full_context(input),
         ContextProfile::HumanAgent => build_human_agent_context(input),
         ContextProfile::HumanChat => build_human_chat_context(input),
-        ContextProfile::Conversation => build_conversation_context(input),
+        ContextProfile::Conversation | ContextProfile::KnowledgeCompaction => {
+            build_conversation_context(input)
+        }
     };
 
     specialize_ready_tech_lead_contract(input, markdown)

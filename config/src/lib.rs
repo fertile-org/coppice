@@ -79,47 +79,31 @@ pub struct KnowledgeConfig {
     #[serde(default = "default_true")]
     pub enabled: bool,
     #[serde(default)]
-    pub embedding: EmbeddingConfig,
-    #[serde(default)]
-    pub extraction: ExtractionConfig,
+    pub compaction: KnowledgeCompactionConfig,
     #[serde(default)]
     pub auto_save: KnowledgeAutoSaveConfig,
     #[serde(default)]
     pub retrieval: KnowledgeRetrievalConfig,
     #[serde(default)]
     pub context_budget: ContextBudgetConfig,
-    #[serde(default = "default_knowledge_worker_count")]
-    pub worker_count: u32,
     #[serde(default = "default_knowledge_poll_interval_ms")]
     pub poll_interval_ms: u64,
-    #[serde(default = "default_knowledge_stale_lock_secs")]
-    pub stale_lock_secs: u64,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct EmbeddingConfig {
-    #[serde(default = "default_embedding_provider")]
-    pub provider: String,
-    #[serde(default = "default_embedding_model")]
-    pub model: String,
-    #[serde(default = "default_embedding_dimension")]
-    pub dimension: usize,
-    #[serde(default = "default_embedding_base_url")]
-    pub base_url: String,
-    #[serde(default)]
-    pub api_key: Option<String>,
-    #[serde(default = "default_embedding_timeout_secs")]
-    pub timeout_secs: u64,
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct ExtractionConfig {
-    #[serde(default = "default_extraction_provider")]
-    pub provider: String,
-    #[serde(default = "default_extraction_max_source_bytes")]
-    pub max_source_bytes: usize,
-    #[serde(default = "default_extraction_max_candidates")]
-    pub max_candidates: usize,
+pub struct KnowledgeCompactionConfig {
+    /// Periodic cadence measured from the later of the last cycle start and the
+    /// oldest waiting ticket.
+    #[serde(default = "default_compaction_interval_secs")]
+    pub interval_secs: u64,
+    #[serde(default = "default_compaction_batch_max_tickets")]
+    pub batch_max_tickets: usize,
+    #[serde(default = "default_compaction_batch_max_source_bytes")]
+    pub batch_max_source_bytes: usize,
+    #[serde(default = "default_compaction_max_candidates_per_batch")]
+    pub max_candidates_per_batch: usize,
+    #[serde(default = "default_compaction_max_attempts")]
+    pub max_attempts: i32,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -140,8 +124,6 @@ pub struct KnowledgeRetrievalConfig {
     pub allowed_types: Vec<String>,
     #[serde(default = "default_retrieval_min_confidence")]
     pub minimum_confidence: String,
-    #[serde(default)]
-    pub minimum_similarity: f32,
     #[serde(default = "default_knowledge_list_limit")]
     pub default_page_size: usize,
     #[serde(default = "default_knowledge_list_max")]
@@ -196,26 +178,14 @@ const KNOWLEDGE_TYPES: &[&str] = &[
 
 impl KnowledgeConfig {
     pub fn validate(&self) -> Result<(), String> {
-        if self.embedding.dimension == 0 {
-            return Err("knowledge.embedding.dimension must be greater than zero".into());
-        }
-        if !matches!(
-            self.embedding.provider.as_str(),
-            "mock" | "openai_compatible"
-        ) {
-            return Err("knowledge.embedding.provider must be mock or openai_compatible".into());
-        }
-        if self.embedding.provider == "openai_compatible"
-            && self
-                .embedding
-                .api_key
-                .as_deref()
-                .is_none_or(|key| key.trim().is_empty())
+        let compaction = &self.compaction;
+        if compaction.interval_secs == 0
+            || compaction.batch_max_tickets == 0
+            || compaction.batch_max_source_bytes == 0
+            || compaction.max_candidates_per_batch == 0
+            || compaction.max_attempts <= 0
         {
-            return Err("knowledge.embedding.api_key is required for openai_compatible".into());
-        }
-        if self.extraction.provider != "mock" {
-            return Err("knowledge.extraction.provider must be mock in M06".into());
+            return Err("knowledge.compaction values must be greater than zero".into());
         }
         if !matches!(self.auto_save.minimum_confidence.as_str(), "high") {
             return Err("knowledge.auto_save.minimum_confidence must be high".into());
@@ -285,37 +255,23 @@ impl Default for KnowledgeConfig {
     fn default() -> Self {
         Self {
             enabled: true,
-            embedding: EmbeddingConfig::default(),
-            extraction: ExtractionConfig::default(),
+            compaction: KnowledgeCompactionConfig::default(),
             auto_save: KnowledgeAutoSaveConfig::default(),
             retrieval: KnowledgeRetrievalConfig::default(),
             context_budget: ContextBudgetConfig::default(),
-            worker_count: default_knowledge_worker_count(),
             poll_interval_ms: default_knowledge_poll_interval_ms(),
-            stale_lock_secs: default_knowledge_stale_lock_secs(),
         }
     }
 }
 
-impl Default for EmbeddingConfig {
+impl Default for KnowledgeCompactionConfig {
     fn default() -> Self {
         Self {
-            provider: default_embedding_provider(),
-            model: default_embedding_model(),
-            dimension: default_embedding_dimension(),
-            base_url: default_embedding_base_url(),
-            api_key: None,
-            timeout_secs: default_embedding_timeout_secs(),
-        }
-    }
-}
-
-impl Default for ExtractionConfig {
-    fn default() -> Self {
-        Self {
-            provider: default_extraction_provider(),
-            max_source_bytes: default_extraction_max_source_bytes(),
-            max_candidates: default_extraction_max_candidates(),
+            interval_secs: default_compaction_interval_secs(),
+            batch_max_tickets: default_compaction_batch_max_tickets(),
+            batch_max_source_bytes: default_compaction_batch_max_source_bytes(),
+            max_candidates_per_batch: default_compaction_max_candidates_per_batch(),
+            max_attempts: default_compaction_max_attempts(),
         }
     }
 }
@@ -336,7 +292,6 @@ impl Default for KnowledgeRetrievalConfig {
             top_k: default_retrieval_top_k(),
             allowed_types: Vec::new(),
             minimum_confidence: default_retrieval_min_confidence(),
-            minimum_similarity: 0.0,
             default_page_size: default_knowledge_list_limit(),
             max_page_size: default_knowledge_list_max(),
             max_active_per_board: default_knowledge_board_capacity(),
@@ -359,29 +314,20 @@ impl Default for ContextBudgetConfig {
     }
 }
 
-fn default_embedding_provider() -> String {
-    "mock".into()
+fn default_compaction_interval_secs() -> u64 {
+    1_800
 }
-fn default_embedding_model() -> String {
-    "coppice-mock-1536".into()
+fn default_compaction_batch_max_tickets() -> usize {
+    10
 }
-fn default_embedding_dimension() -> usize {
-    1536
+fn default_compaction_batch_max_source_bytes() -> usize {
+    200_000
 }
-fn default_embedding_base_url() -> String {
-    "https://api.openai.com/v1".into()
+fn default_compaction_max_candidates_per_batch() -> usize {
+    20
 }
-fn default_embedding_timeout_secs() -> u64 {
-    30
-}
-fn default_extraction_provider() -> String {
-    "mock".into()
-}
-fn default_extraction_max_source_bytes() -> usize {
-    24_000
-}
-fn default_extraction_max_candidates() -> usize {
-    5
+fn default_compaction_max_attempts() -> i32 {
+    3
 }
 fn default_auto_save_confidence() -> String {
     "high".into()
@@ -404,14 +350,8 @@ fn default_knowledge_board_capacity() -> i64 {
 fn default_knowledge_workspace_capacity() -> i64 {
     1_000
 }
-fn default_knowledge_worker_count() -> u32 {
-    1
-}
 fn default_knowledge_poll_interval_ms() -> u64 {
     500
-}
-fn default_knowledge_stale_lock_secs() -> u64 {
-    300
 }
 fn default_context_max_tokens() -> usize {
     24_000
@@ -1293,14 +1233,54 @@ mod tests {
     fn knowledge_defaults_are_fail_closed_and_bounded() {
         let cfg = KnowledgeConfig::default();
         assert!(cfg.enabled);
-        assert_eq!(cfg.embedding.dimension, 1536);
-        assert_eq!(cfg.embedding.provider, "mock");
+        assert_eq!(cfg.compaction.interval_secs, 1_800);
+        assert_eq!(cfg.compaction.batch_max_tickets, 10);
+        assert_eq!(cfg.compaction.batch_max_source_bytes, 200_000);
+        assert_eq!(cfg.compaction.max_candidates_per_batch, 20);
+        assert_eq!(cfg.compaction.max_attempts, 3);
         assert!(!cfg.auto_save.enabled);
         assert!(cfg.auto_save.allowed_types.is_empty());
         assert_eq!(cfg.retrieval.top_k, 8);
         assert!(cfg.retrieval.allowed_types.is_empty());
         assert_eq!(cfg.retrieval.max_page_size, 100);
         assert_eq!(cfg.context_budget.max_tokens, 24_000);
+        assert!(cfg.validate().is_ok());
+    }
+
+    #[test]
+    fn knowledge_rejects_zero_compaction_values() {
+        let mut cfg = KnowledgeConfig::default();
+        cfg.compaction.batch_max_tickets = 0;
+        assert!(cfg.validate().is_err());
+
+        let mut cfg = KnowledgeConfig::default();
+        cfg.compaction.max_attempts = 0;
+        assert!(cfg.validate().is_err());
+
+        let mut cfg = KnowledgeConfig::default();
+        cfg.compaction.interval_secs = 0;
+        assert!(cfg.validate().is_err());
+    }
+
+    #[test]
+    fn knowledge_ignores_legacy_embedding_and_extraction_tables() {
+        let raw = r#"
+        enabled = true
+        worker_count = 1
+        stale_lock_secs = 300
+
+        [embedding]
+        provider = "openai_compatible"
+        dimension = 768
+
+        [extraction]
+        provider = "mock"
+
+        [compaction]
+        interval_secs = 60
+    "#;
+        let cfg: KnowledgeConfig = toml::from_str(raw).expect("legacy keys are ignored");
+        assert_eq!(cfg.compaction.interval_secs, 60);
         assert!(cfg.validate().is_ok());
     }
 
@@ -1348,24 +1328,24 @@ mod tests {
     #[test]
     fn knowledge_nested_values_load_from_double_underscore_env() {
         let _guard = ENV_LOCK.lock().expect("env lock");
-        const WORKERS: &str = "COPPICE_KNOWLEDGE__WORKER_COUNT";
+        const INTERVAL: &str = "COPPICE_KNOWLEDGE__COMPACTION__INTERVAL_SECS";
         const TOP_K: &str = "COPPICE_KNOWLEDGE__RETRIEVAL__TOP_K";
-        let previous_workers = std::env::var(WORKERS).ok();
+        let previous_workers = std::env::var(INTERVAL).ok();
         let previous_top_k = std::env::var(TOP_K).ok();
-        std::env::set_var(WORKERS, "7");
+        std::env::set_var(INTERVAL, "7");
         std::env::set_var(TOP_K, "3");
 
         let cfg = AppConfig::load_defaults().expect("knowledge env config should load");
 
         match previous_workers {
-            Some(value) => std::env::set_var(WORKERS, value),
-            None => std::env::remove_var(WORKERS),
+            Some(value) => std::env::set_var(INTERVAL, value),
+            None => std::env::remove_var(INTERVAL),
         }
         match previous_top_k {
             Some(value) => std::env::set_var(TOP_K, value),
             None => std::env::remove_var(TOP_K),
         }
-        assert_eq!(cfg.knowledge.worker_count, 7);
+        assert_eq!(cfg.knowledge.compaction.interval_secs, 7);
         assert_eq!(cfg.knowledge.retrieval.top_k, 3);
     }
 }

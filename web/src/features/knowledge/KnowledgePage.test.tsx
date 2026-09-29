@@ -31,9 +31,8 @@ const neighbor: SimilarNeighbor = {
   knowledgeType: 'test_command',
   scope: 'board',
   boardId: '00000000-0000-4000-8000-000000000003',
-  similarity: 0.98123,
+  score: 0.98123,
   status: 'approved',
-  embeddingStatus: 'ready',
 };
 
 const item: KnowledgeItem = {
@@ -65,8 +64,10 @@ const item: KnowledgeItem = {
   supersedesItemId: '00000000-0000-4000-8000-000000000006',
   supersededBy: null,
   staleAt: null,
-  embeddingStatus: 'not_requested',
-  embeddingError: null,
+  compactionBatchId: null,
+  compactionAgentId: null,
+  compactionAgentName: null,
+  sourceTicketIds: [],
   usageCount: 3,
   lastUsedAt: '2026-08-03T12:30:00Z',
   createdAt: '2026-08-03T11:00:00Z',
@@ -108,6 +109,10 @@ vi.mock('../auth/useSession', () => ({
 
 vi.mock('../tickets/useOpenTicket', () => ({
   useOpenTicket: () => mocks.openTicket,
+}));
+
+vi.mock('./CompactionStatusStrip', () => ({
+  CompactionStatusStrip: () => <div data-testid="compaction-strip-stub" />,
 }));
 
 vi.mock('./useKnowledge', () => ({
@@ -168,13 +173,38 @@ describe('KnowledgePage', () => {
       'true',
     );
     expect(screen.getByText('Fast feedback loop')).toBeVisible();
-    expect(screen.getByText('Embedding · Not Requested')).toBeVisible();
+    expect(screen.queryByText(/Embedding/)).toBeNull();
+    expect(screen.getByTestId('compaction-strip-stub')).toBeInTheDocument();
     expect(screen.getByText(/3 runs/)).toBeVisible();
     expect(screen.getByText(/Supersedes 00000000/)).toBeVisible();
     expect(screen.getByText(/Source run 00000000/)).toBeVisible();
 
     fireEvent.click(screen.getByRole('button', { name: 'Open' }));
     expect(mocks.openTicket).toHaveBeenCalledWith(item.sourceId);
+  });
+
+  it('shows compaction provenance with openable source tickets', () => {
+    mocks.items = [
+      {
+        ...item,
+        compactionBatchId: '00000000-0000-4000-8000-000000000020',
+        compactionAgentId: '00000000-0000-4000-8000-000000000010',
+        compactionAgentName: 'Backend Agent',
+        sourceTicketIds: [
+          '00000000-0000-4000-8000-000000000004',
+          'aaaaaaaa-0000-4000-8000-000000000021',
+        ],
+      },
+    ];
+    render(<KnowledgePage />);
+
+    const provenance = screen.getByTestId('compaction-provenance');
+    expect(provenance).toHaveTextContent('From 2 tickets');
+    expect(provenance).toHaveTextContent('Proposed by Backend Agent');
+    fireEvent.click(
+      within(provenance).getByRole('button', { name: 'Open source ticket aaaaaaaa' }),
+    );
+    expect(mocks.openTicket).toHaveBeenCalledWith('aaaaaaaa-0000-4000-8000-000000000021');
   });
 
   it('shows Pending inbox litmus and hides it on other tabs', () => {

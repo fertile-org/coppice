@@ -12,7 +12,7 @@ import {
   Wrench,
 } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
-import { NavLink, Outlet, useLocation } from 'react-router-dom';
+import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useSession } from '../features/auth/useSession';
 import { NotificationBell } from '../features/notifications/NotificationBell';
 import { ThemeToggle } from '../features/theme/ThemeToggle';
@@ -74,6 +74,7 @@ export function AppShell() {
   const { user, logout, desktopMode } = useSession();
   const openTicket = useOpenTicket();
   const { pathname } = useLocation();
+  const navigate = useNavigate();
   const chatLayout = isChatRoute(pathname);
   const boardLayout = isBoardRoute(pathname);
 
@@ -213,7 +214,11 @@ export function AppShell() {
             </button>
           )}
           {user && (
-            <NotificationBell userId={user.id} onOpenTicket={openTicket} />
+            <NotificationBell
+              userId={user.id}
+              onOpenTicket={openTicket}
+              onOpenPath={(path) => void navigate(path)}
+            />
           )}
         </header>
 

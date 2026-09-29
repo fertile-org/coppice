@@ -1,13 +1,7 @@
-# Local developer stack — Postgres + Ollama embedder (alternate host port 5433).
+# Local developer stack — Postgres (alternate host port 5433).
 # API and web run on the host for hot reload (make server-dev, make web-dev).
 #
 # Start: make compose-local-up
-#
-# Knowledge embeddings (human hot-reload default):
-#   Ollama sidecar (profile `embeddings`, Makefile default) on host :11434
-#   Point root config.toml at http://127.0.0.1:11434/v1 (see config.example.toml).
-#   First boot pulls nomic-embed-text (~274MB); cached in ollama_data.
-#   Opt out: COMPOSE_PROFILES= make compose-local-up
 
 name: coppice-local
 
@@ -28,33 +22,5 @@ services:
     volumes:
       - coppice_local_pgdata:/var/lib/postgresql/data
 
-  # Local OpenAI-compatible embedder (Ollama). Enabled when COMPOSE_PROFILES includes
-  # `embeddings` (Makefile default). Opt out: COMPOSE_PROFILES= make compose-local-up
-  embedder:
-    profiles: ["embeddings"]
-    image: ollama/ollama:latest
-    ports:
-      - "${COPPICE_EMBEDDER_PORT:-11434}:11434"
-    environment:
-      EMBEDDER_MODEL: ${EMBEDDER_MODEL:-nomic-embed-text}
-      # Set EMBEDDER_PULL_MODEL=0 to start Ollama without downloading weights.
-      EMBEDDER_PULL_MODEL: ${EMBEDDER_PULL_MODEL:-1}
-    volumes:
-      - ollama_data:/root/.ollama
-      - ./embedder-entrypoint.sh:/embedder-entrypoint.sh:ro
-    entrypoint: ["/bin/sh", "/embedder-entrypoint.sh"]
-    healthcheck:
-      # Healthy once the configured model is present (or pull was skipped and API is up).
-      test:
-        [
-          "CMD-SHELL",
-          'case "$${EMBEDDER_PULL_MODEL:-1}" in 0|false|FALSE|no|NO) ollama list >/dev/null 2>&1;; *) ollama show "$${EMBEDDER_MODEL:-nomic-embed-text}" >/dev/null 2>&1;; esac',
-        ]
-      interval: 10s
-      timeout: 10s
-      retries: 60
-      start_period: 20s
-
 volumes:
   coppice_local_pgdata:
-  ollama_data:

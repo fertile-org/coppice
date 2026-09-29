@@ -5,18 +5,12 @@ Tracking items discussed for the **Electron desktop** distribution and related p
 ## Desktop app (Electron)
 
 - [ ] **Phase 1 — Dev shell**: `desktop/` runs Electron against local web URL while stack runs separately. See [docs/development.md](docs/development.md) (Path C — Desktop shell).
-- [ ] **Phase 2 — Bundled runtime**: On app start, spawn bundled **PostgreSQL 16 + pgvector** (same class of stack as `pg-embed` / test DB), run migrations, start `coppice-server`, serve built SPA; on quit, stop children cleanly.
+- [ ] **Phase 2 — Bundled runtime**: On app start, spawn bundled **PostgreSQL 16** (same class of stack as `pg-embed` / test DB), run migrations, start `coppice-server`, serve built SPA; on quit, stop children cleanly.
 - [ ] **Phase 3 — Packaging**: Per-OS installers, code signing / notarization, auto-update channel, dynamic localhost ports, single-instance lock.
 - [x] **Desktop auth**: Keep server auth model for cloud/self-hosted; when `auth.desktop_mode` is on, SPA auto-establishes an admin session (no login UI / account chrome). User APIs remain for cloud later.
 - [x] **Repositories desktop UX**: Electron Browse for `local_path`; pull/push use host git credentials (forge token optional); ticket PR primary path is Open compare URL.
 - [ ] **Remote database (future)**: Optional `database.url` to external Postgres; default remains bundled data dir under app user data.
 - [ ] **Testing**: Run `make desktop-test` (Playwright Electron) for shell smoke; full stack still validated via `make test` / `make e2e-smoke`. Electron does not replace CI Docker stack.
-
-## Knowledge embeddings (desktop & product)
-
-- [ ] **Do not bundle Ollama** in the desktop installer (size, GPU, ops).
-- [ ] **Design** a desktop-friendly embedding strategy: remote OpenAI-compatible API, optional user-installed embedder, mock/disabled mode with clear UX when search is unavailable, re-embed on restore, etc.
-- [ ] Document tradeoffs in a short design note before implementing (M07+ scope).
 
 ## Backup & migration
 

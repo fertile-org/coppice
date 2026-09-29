@@ -144,6 +144,41 @@ impl<'a> NotificationService<'a> {
         .await
     }
 
+    /// Fan out a compaction-failure notification to every workspace user.
+    /// Idempotent per `(recipient, batch_id)`. Success never notifies.
+    pub async fn create_for_knowledge_compaction_failed(
+        &self,
+        batch_id: Uuid,
+        run_id: Option<Uuid>,
+        agent_id: Uuid,
+        error_message: &str,
+    ) -> Result<Vec<Uuid>, NotificationError> {
+        let agent_name: Option<String> = sqlx::query_scalar(
+            "SELECT name FROM agents WHERE id = $1",
+        )
+        .bind(agent_id)
+        .fetch_optional(self.pool)
+        .await?;
+        let title = format!(
+            "Knowledge compaction failed ({})",
+            agent_name.as_deref().unwrap_or("Agent")
+        );
+        let source_key = format!("knowledge_compaction_failed:{batch_id}");
+
+        self.fan_out(FanOutInput {
+            kind: NotificationType::KnowledgeCompactionFailed,
+            title: &title,
+            body: Some(error_message),
+            ticket_id: None,
+            run_id,
+            agent_id: Some(agent_id),
+            comment_id: None,
+            mention_id: None,
+            source_key: &source_key,
+        })
+        .await
+    }
+
     async fn fan_out(&self, input: FanOutInput<'_>) -> Result<Vec<Uuid>, NotificationError> {
         let user_ids: Vec<Uuid> =
             sqlx::query_scalar("SELECT id FROM users ORDER BY created_at")

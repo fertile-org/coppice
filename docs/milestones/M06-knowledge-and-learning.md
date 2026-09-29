@@ -4,6 +4,8 @@
 
 Controlled agent memory: typed knowledge with pgvector retrieval, context budget enforcement, learning extraction, and a human-governed Knowledge Inbox.
 
+> **Amendment (2026-09-28).** Embeddings and the extraction provider were removed with no fallback. Retrieval is Postgres full-text search, and extraction is done by an admin-selected agent that compacts Done tickets into Pending candidates in batches (scheduled plus manual Compact now, failure-only notifications). References below to pgvector, `EmbeddingProvider`, embedding status, and the Learning Extractor describe the original M06 delivery. Current design: [agent compaction + full-text search](../superpowers/specs/2026-09-28-knowledge-agent-compaction-fts-design.md); operator settings: [Knowledge configuration](../operations.md#knowledge-configuration).
+
 ## Product scope
 
 - `KnowledgeItem` model (product design §13.3)

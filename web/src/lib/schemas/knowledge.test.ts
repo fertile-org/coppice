@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  compactionStatusSchema,
   knowledgeItemSchema,
   knowledgeUsageListSchema,
   similarListSchema,
@@ -19,18 +20,17 @@ describe('knowledge schemas', () => {
           knowledgeType: 'test_command',
           scope: 'board',
           boardId: '00000000-0000-4000-8000-000000000003',
-          similarity: 0.97,
+          score: 0.97,
           status: 'approved',
-          embeddingStatus: 'ready',
         },
       ],
     });
     expect(parsed.items).toHaveLength(1);
-    expect(parsed.items[0].similarity).toBe(0.97);
+    expect(parsed.items[0].score).toBe(0.97);
     expect(similarListSchema.parse({ items: [] }).items).toEqual([]);
   });
 
-  it('parses lifecycle, provenance, embedding, and usage metadata', () => {
+  it('parses lifecycle, provenance, compaction, and usage metadata', () => {
     const parsed = knowledgeItemSchema.parse({
       id: ID,
       version: 3,
@@ -60,8 +60,10 @@ describe('knowledge schemas', () => {
       supersedesItemId: null,
       supersededBy: null,
       staleAt: null,
-      embeddingStatus: 'ready',
-      embeddingError: null,
+      compactionBatchId: '00000000-0000-4000-8000-000000000005',
+      compactionAgentId: '00000000-0000-4000-8000-000000000006',
+      compactionAgentName: 'Reviewer',
+      sourceTicketIds: ['00000000-0000-4000-8000-000000000007'],
       usageCount: 4,
       lastUsedAt: '2026-08-03T12:30:00Z',
       createdAt: '2026-08-03T11:00:00Z',
@@ -70,6 +72,7 @@ describe('knowledge schemas', () => {
 
     expect(parsed.revisionId).toBe(REVISION_ID);
     expect(parsed.usageCount).toBe(4);
+    expect(parsed.sourceTicketIds).toHaveLength(1);
   });
 
   it('rejects unknown types and preserves the exact used revision', () => {
@@ -80,7 +83,7 @@ describe('knowledge schemas', () => {
             itemId: ID,
             revisionId: REVISION_ID,
             rank: 1,
-            similarity: 0.91,
+            score: 0.91,
             tokenCount: 12,
             renderedContent: '<knowledge>exact revision</knowledge>',
             title: 'Fast tests',
@@ -93,5 +96,36 @@ describe('knowledge schemas', () => {
         ],
       }),
     ).toThrow();
+  });
+
+  it('parses compaction status with an active batch', () => {
+    const parsed = compactionStatusSchema.parse({
+      state: 'running',
+      configured: true,
+      agent: { id: ID, name: 'Reviewer', enabled: true, connector: 'mock' },
+      queuedCount: 0,
+      blockedCount: 0,
+      oldestQueuedAt: null,
+      activeBatch: {
+        id: REVISION_ID,
+        agentId: ID,
+        agentName: 'Reviewer',
+        runId: '00000000-0000-4000-8000-000000000008',
+        status: 'running',
+        trigger: 'manual',
+        ticketCount: 3,
+        candidateCount: null,
+        summary: null,
+        errorMessage: null,
+        createdAt: '2026-09-28T10:00:00Z',
+        startedAt: '2026-09-28T10:00:01Z',
+        endedAt: null,
+      },
+      lastBatch: null,
+      nextScheduledAt: null,
+      intervalSecs: 1800,
+      batchMaxTickets: 10,
+    });
+    expect(parsed.activeBatch?.ticketCount).toBe(3);
   });
 });

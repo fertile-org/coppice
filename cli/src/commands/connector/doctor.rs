@@ -305,7 +305,7 @@ mod tests {
         std::env::set_current_dir(dir.path().join("server")).unwrap();
         assert_eq!(
             repo_root_with_makefile().as_deref(),
-            Some(dir.path().as_path())
+            Some(dir.path())
         );
     }
 }

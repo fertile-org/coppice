@@ -13,20 +13,20 @@ Single guide for day-to-day development, shipping versions, and how end users ge
 | Rust (stable) + `cargo` | API, CLI |
 | `cargo-watch` | `make server-dev` hot reload (`cargo install cargo-watch`) |
 | Node.js 22 + Yarn | Web SPA and desktop shell (`corepack enable` or install Yarn) |
-| Docker + Compose | Postgres, embedder, and/or full stack |
+| Docker + Compose | Postgres and/or full stack |
 
 ### Configuration (minimal)
 
 Coppice uses **TOML**, not `.env`.
 
-- **Human hot reload:** `cp config.example.toml config.toml` — host API reads this; point `database.url` at local Postgres (`localhost:5433` with `make compose-local-up`). Root `config.example.toml` defaults knowledge embedding to the local Ollama sidecar on `http://127.0.0.1:11434/v1`.
+- **Human hot reload:** `cp config.example.toml config.toml` — host API reads this; point `database.url` at local Postgres (`localhost:5433` with `make compose-local-up`).
 - **Docker stack:** `deploy/config/config.toml` (created from `deploy/config/config.example.toml` on `make compose-up`).
 
 See [operations.md — Configuration](operations.md#configuration) for paths, env overrides, and field reference.
 
 ### Path A — Human hot reload (recommended for UI/API work)
 
-Postgres in Docker on **5433**; Ollama embedder on host **:11434** (`make compose-local-up`, profile `embeddings`). API and web on the host.
+Postgres in Docker on **5433** (`make compose-local-up`). API and web on the host.
 
 ```bash
 cp config.example.toml config.toml
@@ -44,8 +44,7 @@ make web-dev
 
 - API: http://localhost:5000/health  
 - Web: http://localhost:5001 (default admin session when `auth.desktop_mode = true`; otherwise login `admin@localhost` / `changeme` after bootstrap)  
-- Stop Postgres + embedder: `make compose-local-down`  
-- First `compose-local-up` may pull `nomic-embed-text` (~274MB). Opt out: `COMPOSE_PROFILES= make compose-local-up`.
+- Stop Postgres: `make compose-local-down`
 
 ### Path B — Full stack in Docker (agents / smoke / production-like web)
 
@@ -128,7 +127,7 @@ Smoke/CI uses the same compose file via `make compose-up` — not the tarball.
 2. Package with **electron-builder** (or similar) per OS: bundle server binary, pg embed/runtime, and data-dir defaults.
 3. CI matrix (macOS / Windows / Linux) produces signed artifacts.
 4. Upload installers to **GitHub Releases** (or store CDN); version matches git tag.
-5. Release notes: breaking changes, migration, embedding/knowledge limitations (no bundled Ollama — see [TODOS.md](../TODOS.md)).
+5. Release notes: breaking changes, migration, and known limitations.
 
 Until that ships, **do not** tell end users to install via `desktop/` — direct them to [Install](#install) paths below.
 

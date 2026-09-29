@@ -1147,6 +1147,7 @@ mod tests {
             agent_requests: vec![],
             blockers: vec![],
             split_tickets: vec![],
+            knowledge_candidates: Vec::new(),
         }
     }
 
@@ -1177,6 +1178,7 @@ mod tests {
             agent_requests: vec![],
             blockers: vec![],
             split_tickets: vec![],
+            knowledge_candidates: Vec::new(),
         }
     }
 
@@ -1200,6 +1202,7 @@ mod tests {
                 .collect(),
             blockers: vec![],
             split_tickets: vec![],
+            knowledge_candidates: Vec::new(),
         }
     }
 
@@ -1324,6 +1327,7 @@ mod tests {
             ],
             blockers: vec![],
             split_tickets: vec![],
+            knowledge_candidates: Vec::new(),
         };
 
         let targets = select_collaboration_targets(&contract, &agents, source_id);
@@ -1803,6 +1807,7 @@ mod tests {
                     assign_to: None,
                 },
             ],
+            knowledge_candidates: Vec::new(),
         };
         let apply = ApplyResult {
             run_status: RunStatus::Succeeded,
@@ -3314,6 +3319,7 @@ mod tests {
             agent_requests: vec![],
             blockers: vec!["Regression remains".into()],
             split_tickets: vec![],
+            knowledge_candidates: Vec::new(),
         };
         let workflow = WorkflowConfig {
             auto_start_runs: true,
@@ -3550,6 +3556,7 @@ mod tests {
                 acceptance_criteria: None,
                 assign_to: None,
             }],
+            knowledge_candidates: Vec::new(),
         };
         let mut malicious_apply =
             crate::services::result_contract::apply_agent_result(&response_contract)
@@ -4182,6 +4189,7 @@ mod tests {
                     agent_requests: vec![],
                     blockers: vec![],
                     split_tickets: vec![],
+                    knowledge_candidates: Vec::new(),
                 },
                 ApplyResult {
                     run_status: RunStatus::Succeeded,

@@ -1,6 +1,6 @@
 # Operations reference
 
-Compose for agents/CI, configuration detail, knowledge embedding modes, and Makefile catalog. For dev setup, release, and end-user install see [development.md](development.md).
+Compose for agents/CI, configuration detail, knowledge compaction settings, and Makefile catalog. For dev setup, release, and end-user install see [development.md](development.md).
 
 ## Configuration
 
@@ -22,7 +22,6 @@ Coppice uses TOML config files — not `.env` files.
 | | `make compose-up` | `compose-local-up` + host API |
 |--|--|--|
 | Postgres port | 5432 | 5433 |
-| Embedder | Ollama `:11434` (profile `embeddings`) | Same sidecar on host `:11434` |
 | API | Docker `:5000` | Host `:5000` |
 | Config | `deploy/config/config.toml` | `./config.toml` |
 | Migrations | Auto on container start | `make migrate` |
@@ -50,7 +49,7 @@ Login APIs remain available for tools and future cloud hosting.
 make compose-up
 ```
 
-`make compose-up` and `make compose-local-up` enable Compose profile `embeddings` (Ollama sidecar for knowledge). Opt out: `COMPOSE_PROFILES= make compose-up` or `COMPOSE_PROFILES= make compose-local-up`. Local stack: `deploy/docker-compose.local.yml`.
+Local stack: `deploy/docker-compose.local.yml`.
 
 ### Host repos for agents
 
@@ -72,21 +71,29 @@ COPPICE_API_URL=http://localhost:15000 COPPICE_WEB_URL=http://localhost:15001 \
 
 ## Knowledge configuration
 
-M06 settings under `[knowledge]` in TOML.
+Settings live under `[knowledge]` and `[knowledge.compaction]` in TOML. There is no embedding provider: retrieval is Postgres full-text search, and extraction is done by an agent.
 
-| Mode | When | Notes |
-|------|------|-------|
-| **`mock`** | `make test`, CI smoke | Deterministic; no network |
-| **Local sidecar** | Default `make compose-up` / `compose-local-up` + host `config.example.toml` | `openai_compatible` → `http://127.0.0.1:11434/v1` or `http://embedder:11434/v1` in Docker; `nomic-embed-text`, dim 768 |
-| **Remote `openai_compatible`** | Opt-in | Your `base_url`, `model`, `api_key`, matching `dimension` |
+| Key | Default | Meaning |
+|-----|---------|---------|
+| `knowledge.enabled` | `true` | Master switch for retrieval and the compaction scheduler |
+| `knowledge.poll_interval_ms` | `500` | Scheduler tick (reconcile finished runs, continue drain cycles) |
+| `knowledge.compaction.interval_secs` | `1800` | Time between scheduled compaction cycles |
+| `knowledge.compaction.batch_max_tickets` | `10` | Done tickets per batch (one agent run) |
+| `knowledge.compaction.batch_max_source_bytes` | `200000` | Byte budget for a batch's ticket snapshots |
+| `knowledge.compaction.max_candidates_per_batch` | `20` | Candidates kept from one run; extras are dropped |
+| `knowledge.compaction.max_attempts` | `3` | Failed attempts before a ticket waits for a manual Retry |
 
-`knowledge.embedding.dimension` must match the `vector(n)` column and provider output. Server does not wait for embedder health on boot.
+**Compaction agent.** An admin picks an existing agent on the Agents page (**Knowledge compaction** card, `PUT /api/settings/knowledge`). With no agent configured, Done tickets still queue but nothing is compacted. The agent runs read-only in a scratch directory under `WORKTREES_PATH/knowledge-compaction/`, so its connector must enforce read-only tools: `mock`, `claude-code`, or `cursor`. Other connectors are rejected when saving and fail closed if the connector changes later.
+
+**Lifecycle.** Moving a ticket to Done queues it. Every `interval_secs`, or on **Compact now** from the Knowledge page, a drain cycle runs batches until the queue is empty or a batch fails. Candidates land in the Pending inbox under the fail-closed approval policy. Success sends no notification. A failure fans out a `knowledge_compaction_failed` notification to every user, returns the tickets to the queue with one more attempt, and shows a Retry banner. Cancel releases the tickets without counting an attempt.
+
+Legacy `knowledge.embedding.*` and `knowledge.extraction.*` keys are ignored.
 
 ## Makefile targets
 
 | Target | What it does |
 |--------|----------------|
-| `make compose-local-up` / `down` | Local Postgres (:5433) + Ollama embedder (:11434) |
+| `make compose-local-up` / `down` | Local Postgres (:5433) |
 | `make server-dev` | API + cargo-watch |
 | `make compose-up` / `down` | Full Docker stack |
 | `make migrate` / `bootstrap` | Host CLI (reads `./config.toml`) |

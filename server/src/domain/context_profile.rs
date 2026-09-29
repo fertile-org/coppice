@@ -4,6 +4,7 @@ pub enum ContextProfile {
     HumanAgent,
     HumanChat,
     Conversation,
+    KnowledgeCompaction,
 }
 
 impl ContextProfile {
@@ -13,6 +14,7 @@ impl ContextProfile {
             Self::HumanAgent => "human_agent",
             Self::HumanChat => "human_chat",
             Self::Conversation => "conversation",
+            Self::KnowledgeCompaction => "knowledge_compaction",
         }
     }
 }
@@ -26,6 +28,7 @@ impl std::str::FromStr for ContextProfile {
             "human_agent" => Ok(Self::HumanAgent),
             "human_chat" => Ok(Self::HumanChat),
             "conversation" => Ok(Self::Conversation),
+            "knowledge_compaction" => Ok(Self::KnowledgeCompaction),
             other => Err(format!("unknown context profile: {other}")),
         }
     }
@@ -43,6 +46,7 @@ mod tests {
             ContextProfile::HumanAgent,
             ContextProfile::HumanChat,
             ContextProfile::Conversation,
+            ContextProfile::KnowledgeCompaction,
         ] {
             assert_eq!(ContextProfile::from_str(profile.as_str()), Ok(profile));
         }

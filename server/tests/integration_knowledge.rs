@@ -1,28 +1,17 @@
 mod common;
 
-use async_trait::async_trait;
 use axum::{http::StatusCode, Router};
 use coppice_server::domain::knowledge::{
     KnowledgeConfidence, KnowledgeRevisionInput, KnowledgeScope, KnowledgeSourceType, KnowledgeType,
 };
-use coppice_server::knowledge::embedder::EmbeddingError;
-use coppice_server::knowledge::extractor::{
-    ExtractedCandidate, ExtractionError, ExtractionInput, ExtractionProvider,
-    MockExtractionProvider,
-};
 use coppice_server::knowledge::retrieval::{has_eligible, retrieve, RETRIEVAL_QUERY_SQL};
-use coppice_server::knowledge::{embedder::EmbeddingProvider, embedding_provider};
 use coppice_server::services::context_budget::{record_usage, render_knowledge, ByteTokenCounter};
-use coppice_server::services::knowledge_job_service::KnowledgeJobService;
 use coppice_server::services::knowledge_service::{
-    activate_embedded_revision, KnowledgeError, KnowledgeListFilter, KnowledgeRevisionPatch,
+    activate_revision, KnowledgeError, KnowledgeListFilter, KnowledgeRevisionPatch,
     KnowledgeService,
 };
-use coppice_server::workers::knowledge_worker;
-use coppice_server::AppState;
 use serde_json::Value;
 use sqlx::{PgPool, Postgres, Transaction};
-use std::sync::Arc;
 use std::time::Duration;
 use tower::ServiceExt;
 use uuid::Uuid;
@@ -120,203 +109,6 @@ fn supersede_body(
     })
 }
 
-async fn process_one_knowledge_job(state: &Arc<AppState>) -> anyhow::Result<bool> {
-    let embedder = embedding_provider(&state.config.knowledge.embedding)?;
-    let extractor: Arc<dyn ExtractionProvider> = Arc::new(MockExtractionProvider);
-    knowledge_worker::process_one(state, "integration-knowledge", &embedder, &extractor).await
-}
-
-struct ReclaimingEmbeddingProvider {
-    pool: PgPool,
-    revision_id: Uuid,
-}
-
-#[async_trait]
-impl EmbeddingProvider for ReclaimingEmbeddingProvider {
-    async fn embed(&self, _texts: &[String]) -> Result<Vec<Vec<f32>>, EmbeddingError> {
-        sqlx::query(
-            "UPDATE knowledge_jobs SET locked_at = now() - interval '301 seconds' WHERE revision_id = $1 AND status = 'running'",
-        )
-        .bind(self.revision_id)
-        .execute(&self.pool)
-        .await
-        .map_err(|error| EmbeddingError::Request(error.to_string()))?;
-        KnowledgeJobService::new(&self.pool)
-            .claim_next("fresh-embedding-worker", 300)
-            .await
-            .map_err(|error| EmbeddingError::Request(error.to_string()))?
-            .ok_or_else(|| EmbeddingError::Request("failed to reclaim embedding job".into()))?;
-        Ok(vec![std::iter::once(1.0)
-            .chain(std::iter::repeat_n(0.0, 1_535))
-            .collect()])
-    }
-
-    fn provider_name(&self) -> &str {
-        "reclaiming-test"
-    }
-
-    fn model_name(&self) -> &str {
-        "reclaiming-test-1536"
-    }
-
-    fn dimension(&self) -> usize {
-        1_536
-    }
-}
-
-struct ReclaimingExtractionProvider {
-    pool: PgPool,
-    ticket_id: Uuid,
-}
-
-#[async_trait]
-impl ExtractionProvider for ReclaimingExtractionProvider {
-    async fn extract(
-        &self,
-        _input: &ExtractionInput,
-    ) -> Result<Vec<ExtractedCandidate>, ExtractionError> {
-        sqlx::query(
-            "UPDATE knowledge_jobs SET locked_at = now() - interval '301 seconds' WHERE ticket_id = $1 AND status = 'running'",
-        )
-        .bind(self.ticket_id)
-        .execute(&self.pool)
-        .await
-        .map_err(|error| ExtractionError::InvalidInput(error.to_string()))?;
-        KnowledgeJobService::new(&self.pool)
-            .claim_next("fresh-extraction-worker", 300)
-            .await
-            .map_err(|error| ExtractionError::InvalidInput(error.to_string()))?
-            .ok_or_else(|| {
-                ExtractionError::InvalidInput("failed to reclaim extraction job".into())
-            })?;
-        Ok(vec![ExtractedCandidate {
-            knowledge_type: KnowledgeType::ReviewFeedback,
-            title: "Stale extraction candidate".into(),
-            content: "A stale claim must never persist this candidate.".into(),
-            confidence: KnowledgeConfidence::High,
-            should_require_human_approval: true,
-            source_type: KnowledgeSourceType::AgentSummary,
-            source_id: None,
-            reuse_hint: None,
-        }])
-    }
-}
-
-struct CommentReviewExtractionProvider;
-
-#[async_trait]
-impl ExtractionProvider for CommentReviewExtractionProvider {
-    async fn extract(
-        &self,
-        input: &ExtractionInput,
-    ) -> Result<Vec<ExtractedCandidate>, ExtractionError> {
-        let comment = input
-            .comments
-            .iter()
-            .find(|comment| comment.source_type == KnowledgeSourceType::Comment)
-            .ok_or_else(|| ExtractionError::InvalidInput("comment source missing".into()))?;
-        let review = input
-            .comments
-            .iter()
-            .find(|comment| comment.source_type == KnowledgeSourceType::Review)
-            .ok_or_else(|| ExtractionError::InvalidInput("review source missing".into()))?;
-        Ok(vec![
-            ExtractedCandidate {
-                knowledge_type: KnowledgeType::BugPattern,
-                title: "Comment-sourced pattern".into(),
-                content: comment.body.clone(),
-                confidence: KnowledgeConfidence::High,
-                should_require_human_approval: true,
-                source_type: KnowledgeSourceType::Comment,
-                source_id: Some(comment.id),
-                reuse_hint: None,
-            },
-            ExtractedCandidate {
-                knowledge_type: KnowledgeType::ReviewFeedback,
-                title: "Review-sourced feedback".into(),
-                content: review.body.clone(),
-                confidence: KnowledgeConfidence::High,
-                should_require_human_approval: true,
-                source_type: KnowledgeSourceType::Review,
-                source_id: Some(review.id),
-                reuse_hint: None,
-            },
-        ])
-    }
-}
-
-struct OrderedCommentExtractionProvider {
-    expected_comment_ids: [Uuid; 2],
-    max_source_bytes: usize,
-}
-
-struct BoundedExtractionProvider {
-    max_source_bytes: usize,
-}
-
-#[async_trait]
-impl ExtractionProvider for BoundedExtractionProvider {
-    async fn extract(
-        &self,
-        input: &ExtractionInput,
-    ) -> Result<Vec<ExtractedCandidate>, ExtractionError> {
-        let total_bytes = input.title.len()
-            + input.description.len()
-            + input
-                .comments
-                .iter()
-                .map(|comment| comment.body.len())
-                .sum::<usize>();
-        if total_bytes > self.max_source_bytes {
-            return Err(ExtractionError::InvalidInput(format!(
-                "source snapshot used {total_bytes} bytes, above {}",
-                self.max_source_bytes
-            )));
-        }
-        Ok(Vec::new())
-    }
-}
-
-#[async_trait]
-impl ExtractionProvider for OrderedCommentExtractionProvider {
-    async fn extract(
-        &self,
-        input: &ExtractionInput,
-    ) -> Result<Vec<ExtractedCandidate>, ExtractionError> {
-        let total_bytes = input.title.len()
-            + input.description.len()
-            + input
-                .comments
-                .iter()
-                .map(|comment| comment.body.len())
-                .sum::<usize>();
-        if total_bytes > self.max_source_bytes {
-            return Err(ExtractionError::InvalidInput(format!(
-                "source snapshot used {total_bytes} bytes, above {}",
-                self.max_source_bytes
-            )));
-        }
-        let comment_ids = input
-            .comments
-            .iter()
-            .map(|comment| comment.id)
-            .collect::<Vec<_>>();
-        if comment_ids != self.expected_comment_ids {
-            return Err(ExtractionError::InvalidInput(
-                format!(
-                    "expected retained comments in chronological order {:?}, got {comment_ids:?}",
-                    self.expected_comment_ids
-                ),
-            ));
-        }
-        Ok(Vec::new())
-    }
-}
-
-fn unit_vector_literal() -> String {
-    format!("[1{}]", ",0".repeat(1_535))
-}
-
 #[derive(Clone, Copy)]
 struct RetrievalSeed<'a> {
     label: &'a str,
@@ -327,7 +119,6 @@ struct RetrievalSeed<'a> {
     confidence: &'a str,
     expired: bool,
     activate: bool,
-    store_embedding: bool,
 }
 
 async fn seed_retrieval_item(pool: &PgPool, seed: RetrievalSeed<'_>) -> (Uuid, Uuid) {
@@ -378,20 +169,6 @@ async fn seed_retrieval_item(pool: &PgPool, seed: RetrievalSeed<'_>) -> (Uuid, U
     .execute(pool)
     .await
     .unwrap();
-    if seed.store_embedding {
-        sqlx::query(
-            r#"
-            INSERT INTO knowledge_embeddings (
-                revision_id, provider, model, embedding_dimension, embedding
-            ) VALUES ($1, 'matrix', 'unit-vector', 1536, $2::vector)
-            "#,
-        )
-        .bind(revision_id)
-        .bind(unit_vector_literal())
-        .execute(pool)
-        .await
-        .unwrap();
-    }
     (item_id, revision_id)
 }
 
@@ -481,21 +258,7 @@ async fn seed_retrieval_cardinality(
     .execute(&mut **tx)
     .await
     .unwrap();
-    sqlx::query(
-        r#"
-        INSERT INTO knowledge_embeddings (
-            revision_id, provider, model, embedding_dimension, embedding
-        )
-        SELECT revision_id, 'benchmark', 'unit-vector', 1536, $1::vector
-        FROM knowledge_plan_seed
-        WHERE status = 'approved'
-        "#,
-    )
-    .bind(unit_vector_literal())
-    .execute(&mut **tx)
-    .await
-    .unwrap();
-    sqlx::query("ANALYZE knowledge_items, knowledge_revisions, knowledge_embeddings")
+    sqlx::query("ANALYZE knowledge_items, knowledge_revisions")
         .execute(&mut **tx)
         .await
         .unwrap();
@@ -516,10 +279,9 @@ async fn explain_production_retrieval(
         .bind(board_id)
         .bind(Uuid::new_v4())
         .bind("low")
-        .bind(unit_vector_literal())
-        .bind(-1.0_f64)
-        .bind(20_i64)
+        .bind(Some("retrieval | plan"))
         .bind(Vec::<String>::new())
+        .bind(200_i64)
         .fetch_one(&mut **tx)
         .await
         .unwrap()
@@ -570,7 +332,7 @@ fn find_plan_node<'a>(value: &'a Value, key: &str, expected: &str) -> Option<&'a
 #[tokio::test]
 async fn lifecycle_is_concurrency_safe_and_preserves_active_revision() {
     let _guard = common::DB_TEST_LOCK.lock().await;
-    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
+    let (_state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
     let board_id = common::create_test_board(&app, &cookie, &csrf).await;
     let created = create_candidate(&app, &board_id, &cookie, &csrf, "Unit test command").await;
     let item_id = created["id"].as_str().unwrap();
@@ -588,7 +350,7 @@ async fn lifecycle_is_concurrency_safe_and_preserves_active_revision() {
     .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(approved["status"], "approved");
-    assert_eq!(approved["embeddingStatus"], "pending");
+    assert_eq!(approved["activeRevisionId"], approved["revisionId"]);
 
     let (status, conflict) = mutate(
         &app,
@@ -604,22 +366,7 @@ async fn lifecycle_is_concurrency_safe_and_preserves_active_revision() {
         .as_str()
         .unwrap()
         .contains("current version is 2"));
-
-    assert!(process_one_knowledge_job(&state).await.unwrap());
-    let response = app
-        .clone()
-        .oneshot(common::json_request(
-            "GET",
-            &format!("/api/knowledge/{item_id}"),
-            "",
-            &cookie,
-            &csrf,
-        ))
-        .await
-        .unwrap();
-    let ready = common::json_body(response).await;
-    assert_eq!(ready["embeddingStatus"], "ready");
-    let old_active = ready["activeRevisionId"].as_str().unwrap().to_string();
+    let old_active = approved["activeRevisionId"].as_str().unwrap().to_string();
 
     let (status, edited) = mutate(
         &app,
@@ -637,23 +384,7 @@ async fn lifecycle_is_concurrency_safe_and_preserves_active_revision() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(edited["version"], 3);
     assert_ne!(edited["revisionId"], old_active);
-    assert_eq!(edited["activeRevisionId"], old_active);
-    assert_eq!(edited["embeddingStatus"], "pending");
-
-    assert!(process_one_knowledge_job(&state).await.unwrap());
-    let response = app
-        .clone()
-        .oneshot(common::json_request(
-            "GET",
-            &format!("/api/knowledge/{item_id}"),
-            "",
-            &cookie,
-            &csrf,
-        ))
-        .await
-        .unwrap();
-    let replaced = common::json_body(response).await;
-    assert_eq!(replaced["activeRevisionId"], replaced["revisionId"]);
+    assert_eq!(edited["activeRevisionId"], edited["revisionId"]);
 
     let (status, rejected) = mutate(
         &app,
@@ -681,7 +412,6 @@ async fn lifecycle_is_concurrency_safe_and_preserves_active_revision() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(reapproved["status"], "approved");
     assert_eq!(reapproved["activeRevisionId"], reapproved["revisionId"]);
-    assert_eq!(reapproved["embeddingStatus"], "ready");
 }
 
 #[tokio::test]
@@ -913,7 +643,7 @@ async fn terminal_knowledge_edits_do_not_consume_active_capacity() {
 }
 
 #[tokio::test]
-async fn cross_scope_edit_reserves_both_active_and_current_capacity() {
+async fn cross_scope_edit_moves_active_capacity_to_the_new_board() {
     let _guard = common::DB_TEST_LOCK.lock().await;
     let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
     let board_a = common::create_test_board(&app, &cookie, &csrf).await;
@@ -930,7 +660,6 @@ async fn cross_scope_edit_reserves_both_active_and_current_capacity() {
     )
     .await;
     assert_eq!(status, StatusCode::OK);
-    assert!(process_one_knowledge_job(&state).await.unwrap());
 
     let pool = state.db.as_ref().unwrap();
     let admin_id: Uuid = sqlx::query_scalar("SELECT id FROM users WHERE email = 'admin@localhost'")
@@ -948,35 +677,35 @@ async fn cross_scope_edit_reserves_both_active_and_current_capacity() {
             KnowledgeRevisionPatch {
                 scope: Some(KnowledgeScope::Board),
                 board_id: Some(Some(Uuid::parse_str(&board_b).unwrap())),
-                content: Some("Replacement embedding has not completed.".into()),
+                content: Some("Moved to board B.".into()),
                 ..KnowledgeRevisionPatch::default()
             },
         )
         .await
         .unwrap();
-    assert_ne!(edited.revision_id, edited.active_revision_id.unwrap());
+    assert_eq!(Some(edited.revision_id), edited.active_revision_id);
 
-    for board_id in [&board_a, &board_b] {
-        let error = service
-            .create_manual(
-                admin_id,
-                KnowledgeRevisionInput {
-                    scope: KnowledgeScope::Board,
-                    board_id: Some(Uuid::parse_str(board_id).unwrap()),
-                    agent_id: None,
-                    knowledge_type: KnowledgeType::TestCommand,
-                    title: format!("Overflow {board_id}"),
-                    content: "This board already has a reserved active slot.".into(),
-                    source_type: KnowledgeSourceType::HumanNote,
-                    source_id: None,
-                    source_run_id: None,
-                    confidence: KnowledgeConfidence::High,
-                },
-            )
-            .await
-            .expect_err("active and current scopes must both reserve capacity");
-        assert!(matches!(error, KnowledgeError::Capacity(_)));
-    }
+    let overflow = |board_id: &str| KnowledgeRevisionInput {
+        scope: KnowledgeScope::Board,
+        board_id: Some(Uuid::parse_str(board_id).unwrap()),
+        agent_id: None,
+        knowledge_type: KnowledgeType::TestCommand,
+        title: format!("Overflow {board_id}"),
+        content: "Capacity probe.".into(),
+        source_type: KnowledgeSourceType::HumanNote,
+        source_id: None,
+        source_run_id: None,
+        confidence: KnowledgeConfidence::High,
+    };
+    let error = service
+        .create_manual(admin_id, overflow(&board_b))
+        .await
+        .expect_err("board B holds the moved item");
+    assert!(matches!(error, KnowledgeError::Capacity(_)));
+    service
+        .create_manual(admin_id, overflow(&board_a))
+        .await
+        .expect("board A released its slot when the item moved");
 }
 
 #[tokio::test]
@@ -1002,26 +731,13 @@ async fn activation_revalidates_capacity_before_replacing_the_active_revision() 
         .await;
         assert_eq!(status, StatusCode::OK);
     }
-    assert!(process_one_knowledge_job(&state).await.unwrap());
 
     let mut config = state.config.knowledge.clone();
     config.retrieval.max_active_per_board = 1;
     let second_item_id = Uuid::parse_str(second["id"].as_str().unwrap()).unwrap();
     let second_revision_id = Uuid::parse_str(second["revisionId"].as_str().unwrap()).unwrap();
     let mut tx = state.db.as_ref().unwrap().begin().await.unwrap();
-    sqlx::query(
-        r#"
-        INSERT INTO knowledge_embeddings (
-            revision_id, provider, model, embedding_dimension, embedding
-        ) VALUES ($1, 'test', 'test-1536', 1536, $2::vector)
-        "#,
-    )
-    .bind(second_revision_id)
-    .bind(unit_vector_literal())
-    .execute(&mut *tx)
-    .await
-    .unwrap();
-    let error = activate_embedded_revision(&mut tx, second_item_id, second_revision_id, &config)
+    let error = activate_revision(&mut tx, second_item_id, second_revision_id, &config)
         .await
         .expect_err("activation must revalidate capacity under its transaction lock");
     assert!(matches!(error, KnowledgeError::Capacity(_)));
@@ -1029,7 +745,7 @@ async fn activation_revalidates_capacity_before_replacing_the_active_revision() 
 }
 
 #[tokio::test]
-async fn supersession_waits_for_replacement_embedding() {
+async fn supersession_completes_when_the_replacement_is_approved() {
     let _guard = common::DB_TEST_LOCK.lock().await;
     let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
     let board_id = common::create_test_board(&app, &cookie, &csrf).await;
@@ -1044,7 +760,6 @@ async fn supersession_waits_for_replacement_embedding() {
         &csrf,
     )
     .await;
-    process_one_knowledge_job(&state).await.unwrap();
 
     let replacement_body = serde_json::json!({
         "expectedVersion": 2,
@@ -1114,7 +829,6 @@ async fn supersession_waits_for_replacement_embedding() {
         &csrf,
     )
     .await;
-    process_one_knowledge_job(&state).await.unwrap();
 
     let original_after: Option<Uuid> =
         sqlx::query_scalar("SELECT superseded_by FROM knowledge_items WHERE id = $1")
@@ -1129,22 +843,15 @@ async fn supersession_waits_for_replacement_embedding() {
 }
 
 #[tokio::test]
-async fn supersession_reapproval_activates_embedded_replacement_atomically() {
+async fn supersession_approval_swaps_retrieval_to_the_replacement_atomically() {
     let _guard = common::DB_TEST_LOCK.lock().await;
     let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
     let board_id = common::create_test_board(&app, &cookie, &csrf).await;
     let board_uuid = Uuid::parse_str(&board_id).unwrap();
-    let original = create_candidate(
-        &app,
-        &board_id,
-        &cookie,
-        &csrf,
-        "Original superseded rule",
-    )
-    .await;
+    let original =
+        create_candidate(&app, &board_id, &cookie, &csrf, "Original superseded rule").await;
     let original_id = original["id"].as_str().unwrap();
     let original_uuid = Uuid::parse_str(original_id).unwrap();
-
     let (status, _) = mutate(
         &app,
         "POST",
@@ -1155,24 +862,17 @@ async fn supersession_reapproval_activates_embedded_replacement_atomically() {
     )
     .await;
     assert_eq!(status, StatusCode::OK);
-    assert!(process_one_knowledge_job(&state).await.unwrap());
 
     let (status, replacement) = mutate(
         &app,
         "POST",
         &format!("/api/knowledge/{original_id}/supersede"),
-        serde_json::json!({
-            "expectedVersion": 2,
-            "replacement": {
-                "scope": "board",
-                "boardId": board_id,
-                "knowledgeType": "test_command",
-                "title": "Replacement superseding rule",
-                "content": "Run make test-smoke before review.",
-                "sourceType": "human_note",
-                "confidence": "high"
-            }
-        }),
+        supersede_body(
+            &board_id,
+            2,
+            "Replacement superseding rule",
+            "Run make test-smoke before review.",
+        ),
         &cookie,
         &csrf,
     )
@@ -1181,7 +881,24 @@ async fn supersession_reapproval_activates_embedded_replacement_atomically() {
     let replacement_id = replacement["id"].as_str().unwrap();
     let replacement_uuid = Uuid::parse_str(replacement_id).unwrap();
 
-    let (status, _) = mutate(
+    let pool = state.db.as_ref().unwrap();
+    let mut retrieval_config = state.config.knowledge.retrieval.clone();
+    retrieval_config.top_k = 20;
+    let query = ("superseding rule", "Run make test-smoke before review.");
+    let before = retrieve(
+        pool,
+        board_uuid,
+        Uuid::new_v4(),
+        query.0,
+        query.1,
+        &retrieval_config,
+    )
+    .await
+    .unwrap();
+    assert_eq!(before.len(), 1);
+    assert_eq!(before[0].item_id, original_uuid);
+
+    let (status, approved) = mutate(
         &app,
         "POST",
         &format!("/api/knowledge/{replacement_id}/approve"),
@@ -1191,100 +908,29 @@ async fn supersession_reapproval_activates_embedded_replacement_atomically() {
     )
     .await;
     assert_eq!(status, StatusCode::OK);
-    let (status, _) = mutate(
-        &app,
-        "POST",
-        &format!("/api/knowledge/{replacement_id}/reject"),
-        serde_json::json!({"expectedVersion": 2, "reason": "review again"}),
-        &cookie,
-        &csrf,
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK);
+    assert_eq!(approved["activeRevisionId"], approved["revisionId"]);
 
-    assert!(process_one_knowledge_job(&state).await.unwrap());
-    let pool = state.db.as_ref().unwrap();
-    let blocked: (Option<Uuid>, String, Option<Uuid>, bool) = sqlx::query_as(
-        r#"
-        SELECT original.superseded_by, replacement.status,
-               replacement.active_revision_id,
-               EXISTS (
-                   SELECT 1 FROM knowledge_embeddings
-                   WHERE revision_id = replacement.current_revision_id
-               )
-        FROM knowledge_items original
-        JOIN knowledge_items replacement ON replacement.id = $2
-        WHERE original.id = $1
-        "#,
-    )
-    .bind(original_uuid)
-    .bind(replacement_uuid)
-    .fetch_one(pool)
-    .await
-    .unwrap();
-    assert_eq!(blocked, (None, "rejected".into(), None, true));
+    let original_link: Option<Uuid> =
+        sqlx::query_scalar("SELECT superseded_by FROM knowledge_items WHERE id = $1")
+            .bind(original_uuid)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    assert_eq!(original_link, Some(replacement_uuid));
 
-    let provider: Arc<dyn EmbeddingProvider> =
-        embedding_provider(&state.config.knowledge.embedding).unwrap();
-    let query = provider
-        .embed(&["Run make test-smoke before review.".into()])
-        .await
-        .unwrap();
-    let mut retrieval_config = state.config.knowledge.retrieval.clone();
-    retrieval_config.minimum_similarity = -1.0;
-    retrieval_config.top_k = 20;
-    let before_reapproval = retrieve(
+    let after = retrieve(
         pool,
         board_uuid,
         Uuid::new_v4(),
-        &query[0],
+        query.0,
+        query.1,
         &retrieval_config,
     )
     .await
     .unwrap();
-    assert_eq!(before_reapproval.len(), 1);
-    assert_eq!(before_reapproval[0].item_id, original_uuid);
-
-    let (status, reapproved) = mutate(
-        &app,
-        "POST",
-        &format!("/api/knowledge/{replacement_id}/approve"),
-        serde_json::json!({"expectedVersion": 3}),
-        &cookie,
-        &csrf,
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK);
-    assert_eq!(reapproved["status"], "approved");
-    assert_eq!(reapproved["activeRevisionId"], reapproved["revisionId"]);
-
-    let activated: (Option<Uuid>, String, bool) = sqlx::query_as(
-        r#"
-        SELECT original.superseded_by, replacement.status,
-               replacement.active_revision_id = replacement.current_revision_id
-        FROM knowledge_items original
-        JOIN knowledge_items replacement ON replacement.id = $2
-        WHERE original.id = $1
-        "#,
-    )
-    .bind(original_uuid)
-    .bind(replacement_uuid)
-    .fetch_one(pool)
-    .await
-    .unwrap();
-    assert_eq!(activated, (Some(replacement_uuid), "approved".into(), true));
-
-    let after_reapproval = retrieve(
-        pool,
-        board_uuid,
-        Uuid::new_v4(),
-        &query[0],
-        &retrieval_config,
-    )
-    .await
-    .unwrap();
-    assert_eq!(after_reapproval.len(), 1);
-    assert_eq!(after_reapproval[0].item_id, replacement_uuid);
+    assert_eq!(after.len(), 1);
+    assert_eq!(after[0].item_id, replacement_uuid);
+    assert!(after[0].score > 0.0);
 }
 
 #[tokio::test]
@@ -1313,7 +959,6 @@ async fn supersession_rejects_a_new_candidate_for_an_already_retired_original() 
     )
     .await;
     assert_eq!(status, StatusCode::OK);
-    assert!(process_one_knowledge_job(&state).await.unwrap());
 
     let replacement_body = |expected_version, title: &str| {
         serde_json::json!({
@@ -1352,7 +997,6 @@ async fn supersession_rejects_a_new_candidate_for_an_already_retired_original() 
     )
     .await;
     assert_eq!(status, StatusCode::OK);
-    assert!(process_one_knowledge_job(&state).await.unwrap());
 
     let (status, _) = mutate(
         &app,
@@ -1403,14 +1047,8 @@ async fn supersession_rejects_a_second_live_replacement_at_the_current_version()
     let _guard = common::DB_TEST_LOCK.lock().await;
     let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
     let board_id = common::create_test_board(&app, &cookie, &csrf).await;
-    let original = create_candidate(
-        &app,
-        &board_id,
-        &cookie,
-        &csrf,
-        "Singular replacement rule",
-    )
-    .await;
+    let original =
+        create_candidate(&app, &board_id, &cookie, &csrf, "Singular replacement rule").await;
     let original_id = original["id"].as_str().unwrap();
     let original_uuid = Uuid::parse_str(original_id).unwrap();
 
@@ -1424,7 +1062,6 @@ async fn supersession_rejects_a_second_live_replacement_at_the_current_version()
     )
     .await;
     assert_eq!(status, StatusCode::OK);
-    assert!(process_one_knowledge_job(&state).await.unwrap());
 
     let replacement_body = |expected_version, title: &str| {
         serde_json::json!({
@@ -1589,7 +1226,6 @@ async fn supersession_stale_never_activated_candidate_allows_a_successor() {
     )
     .await;
     assert_eq!(status, StatusCode::OK);
-    assert!(process_one_knowledge_job(&state).await.unwrap());
 
     let (status, first) = mutate(
         &app,
@@ -1675,7 +1311,6 @@ async fn supersession_concurrent_reapproval_and_successor_creation_do_not_deadlo
     )
     .await;
     assert_eq!(status, StatusCode::OK);
-    assert!(process_one_knowledge_job(&state).await.unwrap());
 
     let (status, abandoned) = mutate(
         &app,
@@ -1684,7 +1319,7 @@ async fn supersession_concurrent_reapproval_and_successor_creation_do_not_deadlo
         supersede_body(
             &board_id,
             2,
-            "Rejected embedded candidate",
+            "Rejected never-approved candidate",
             "Reapproval races with creation of a successor.",
         ),
         &cookie,
@@ -1698,24 +1333,13 @@ async fn supersession_concurrent_reapproval_and_successor_creation_do_not_deadlo
     let (status, _) = mutate(
         &app,
         "POST",
-        &format!("/api/knowledge/{abandoned_id}/approve"),
-        serde_json::json!({"expectedVersion": 1}),
-        &cookie,
-        &csrf,
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK);
-    let (status, _) = mutate(
-        &app,
-        "POST",
         &format!("/api/knowledge/{abandoned_id}/reject"),
-        serde_json::json!({"expectedVersion": 2, "reason": "abandoned before embedding"}),
+        serde_json::json!({"expectedVersion": 1, "reason": "abandoned before approval"}),
         &cookie,
         &csrf,
     )
     .await;
     assert_eq!(status, StatusCode::OK);
-    assert!(process_one_knowledge_job(&state).await.unwrap());
 
     let approve_path = format!("/api/knowledge/{abandoned_id}/approve");
     let supersede_path = format!("/api/knowledge/{original_id}/supersede");
@@ -1726,7 +1350,7 @@ async fn supersession_concurrent_reapproval_and_successor_creation_do_not_deadlo
                     &app,
                     "POST",
                     &approve_path,
-                    serde_json::json!({"expectedVersion": 3}),
+                    serde_json::json!({"expectedVersion": 2}),
                     &cookie,
                     &csrf,
                 ),
@@ -1782,18 +1406,13 @@ async fn supersession_concurrent_reapproval_and_successor_creation_do_not_deadlo
             .await
             .unwrap();
 
-    let provider: Arc<dyn EmbeddingProvider> =
-        embedding_provider(&state.config.knowledge.embedding).unwrap();
-    let query = provider.embed(&["supersession race".into()]).await.unwrap();
-    let mut retrieval_config = state.config.knowledge.retrieval.clone();
-    retrieval_config.minimum_similarity = -1.0;
-    retrieval_config.top_k = 20;
     let retrieved = retrieve(
         pool,
         board_uuid,
         Uuid::new_v4(),
-        &query[0],
-        &retrieval_config,
+        "supersession race",
+        "",
+        &state.config.knowledge.retrieval,
     )
     .await
     .unwrap();
@@ -1952,8 +1571,7 @@ async fn retrieval_is_scoped_and_usage_is_logged_once() {
     let _guard = common::DB_TEST_LOCK.lock().await;
     let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
     let board_id = common::create_test_board(&app, &cookie, &csrf).await;
-    let other_board_id =
-        create_board_named(&app, "Other Knowledge Board", &cookie, &csrf).await;
+    let other_board_id = create_board_named(&app, "Other Knowledge Board", &cookie, &csrf).await;
     let agent_id = common::create_agent_with_preset_key(
         &app,
         "backend_engineer",
@@ -1974,26 +1592,25 @@ async fn retrieval_is_scoped_and_usage_is_logged_once() {
         &csrf,
     )
     .await;
-    process_one_knowledge_job(&state).await.unwrap();
 
-    let provider: Arc<dyn EmbeddingProvider> =
-        embedding_provider(&state.config.knowledge.embedding).unwrap();
-    let query = provider.embed(&["Run tests".into()]).await.unwrap();
     let found = retrieve(
         state.db.as_ref().unwrap(),
         Uuid::parse_str(&board_id).unwrap(),
         Uuid::parse_str(&agent_id).unwrap(),
-        &query[0],
+        "Run tests",
+        "",
         &state.config.knowledge.retrieval,
     )
     .await
     .unwrap();
     assert_eq!(found.len(), 1);
+    assert!(found[0].score > 0.0, "\"run\" matches the item content");
     let wrong_board = retrieve(
         state.db.as_ref().unwrap(),
         Uuid::parse_str(&other_board_id).unwrap(),
         Uuid::parse_str(&agent_id).unwrap(),
-        &query[0],
+        "Run tests",
+        "",
         &state.config.knowledge.retrieval,
     )
     .await
@@ -2014,7 +1631,8 @@ async fn retrieval_is_scoped_and_usage_is_logged_once() {
         state.db.as_ref().unwrap(),
         Uuid::parse_str(&board_id).unwrap(),
         Uuid::parse_str(&agent_id).unwrap(),
-        &query[0],
+        "Run tests",
+        "",
         &type_filtered,
     )
     .await
@@ -2079,12 +1697,10 @@ async fn retrieval_is_scoped_and_usage_is_logged_once() {
 async fn retrieval_excludes_every_ineligible_lifecycle_and_scope_variant() {
     let _guard = common::DB_TEST_LOCK.lock().await;
     let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
-    let board_id =
-        Uuid::parse_str(&common::create_test_board(&app, &cookie, &csrf).await).unwrap();
-    let other_board_id = Uuid::parse_str(
-        &create_board_named(&app, "Retrieval Matrix Other", &cookie, &csrf).await,
-    )
-    .unwrap();
+    let board_id = Uuid::parse_str(&common::create_test_board(&app, &cookie, &csrf).await).unwrap();
+    let other_board_id =
+        Uuid::parse_str(&create_board_named(&app, "Retrieval Matrix Other", &cookie, &csrf).await)
+            .unwrap();
     let agent_id = Uuid::parse_str(
         &common::create_agent_with_preset_key(
             &app,
@@ -2117,7 +1733,6 @@ async fn retrieval_excludes_every_ineligible_lifecycle_and_scope_variant() {
         confidence: "high",
         expired: false,
         activate: true,
-        store_embedding: true,
     };
 
     let valid_board = seed_retrieval_item(pool, base).await.0;
@@ -2181,11 +1796,6 @@ async fn retrieval_excludes_every_ineligible_lifecycle_and_scope_variant() {
             activate: false,
             ..base
         },
-        RetrievalSeed {
-            label: "missing embedding",
-            store_embedding: false,
-            ..base
-        },
     ] {
         seed_retrieval_item(pool, seed).await;
     }
@@ -2215,9 +1825,8 @@ async fn retrieval_excludes_every_ineligible_lifecycle_and_scope_variant() {
         pool,
         board_id,
         agent_id,
-        &std::iter::once(1.0)
-            .chain(std::iter::repeat_n(0.0, 1_535))
-            .collect::<Vec<_>>(),
+        "valid",
+        "",
         &state.config.knowledge.retrieval,
     )
     .await
@@ -2231,267 +1840,6 @@ async fn retrieval_excludes_every_ineligible_lifecycle_and_scope_variant() {
         [valid_board, valid_workspace, valid_agent]
             .into_iter()
             .collect()
-    );
-}
-
-#[tokio::test]
-async fn done_transition_schedules_idempotent_extraction_to_pending() {
-    let _guard = common::DB_TEST_LOCK.lock().await;
-    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
-    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
-    let ticket_id = common::create_test_ticket(&app, &board_id, &cookie, &csrf).await;
-    let ticket_uuid = Uuid::parse_str(&ticket_id).unwrap();
-    sqlx::query("UPDATE tickets SET status = 'done' WHERE id = $1")
-        .bind(ticket_uuid)
-        .execute(state.db.as_ref().unwrap())
-        .await
-        .unwrap();
-    sqlx::query("UPDATE tickets SET status = 'done' WHERE id = $1")
-        .bind(ticket_uuid)
-        .execute(state.db.as_ref().unwrap())
-        .await
-        .unwrap();
-    let jobs: i64 = sqlx::query_scalar(
-        "SELECT count(*) FROM knowledge_jobs WHERE kind = 'extract_ticket' AND ticket_id = $1",
-    )
-    .bind(ticket_uuid)
-    .fetch_one(state.db.as_ref().unwrap())
-    .await
-    .unwrap();
-    assert_eq!(jobs, 1);
-
-    process_one_knowledge_job(&state).await.unwrap();
-    // Default ticket description ("details") is not reusable — empty extraction is success.
-    let job_status: String = sqlx::query_scalar(
-        "SELECT status FROM knowledge_jobs WHERE kind = 'extract_ticket' AND ticket_id = $1",
-    )
-    .bind(ticket_uuid)
-    .fetch_one(state.db.as_ref().unwrap())
-    .await
-    .unwrap();
-    assert_eq!(job_status, "completed");
-    let response = app
-        .clone()
-        .oneshot(common::json_request(
-            "GET",
-            &format!("/api/knowledge/inbox?boardId={board_id}"),
-            "",
-            &cookie,
-            &csrf,
-        ))
-        .await
-        .unwrap();
-    let inbox = common::json_body(response).await;
-    assert_eq!(inbox["items"].as_array().unwrap().len(), 0);
-}
-
-#[tokio::test]
-async fn mock_extraction_emits_pending_for_seeded_reusable_convention() {
-    let _guard = common::DB_TEST_LOCK.lock().await;
-    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
-    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
-    let create = app
-        .clone()
-        .oneshot(common::json_request(
-            "POST",
-            &format!("/api/boards/{board_id}/tickets"),
-            r#"{"title":"API hardening","description":"Prefer Result over panic in public APIs."}"#,
-            &cookie,
-            &csrf,
-        ))
-        .await
-        .unwrap();
-    assert_eq!(create.status(), StatusCode::CREATED);
-    let created = common::json_body(create).await;
-    let ticket_id = created["id"].as_str().unwrap().to_string();
-    let ticket_uuid = Uuid::parse_str(&ticket_id).unwrap();
-
-    sqlx::query("UPDATE tickets SET status = 'done' WHERE id = $1")
-        .bind(ticket_uuid)
-        .execute(state.db.as_ref().unwrap())
-        .await
-        .unwrap();
-    process_one_knowledge_job(&state).await.unwrap();
-
-    let response = app
-        .clone()
-        .oneshot(common::json_request(
-            "GET",
-            &format!("/api/knowledge/inbox?boardId={board_id}"),
-            "",
-            &cookie,
-            &csrf,
-        ))
-        .await
-        .unwrap();
-    let inbox = common::json_body(response).await;
-    assert_eq!(inbox["items"].as_array().unwrap().len(), 1);
-    assert_eq!(inbox["items"][0]["sourceId"], ticket_id);
-    assert_eq!(inbox["items"][0]["knowledgeType"], "coding_convention");
-    assert_eq!(inbox["items"][0]["status"], "pending");
-    assert_eq!(inbox["items"][0]["policyDecision"], "human_review");
-    assert_eq!(inbox["items"][0]["confidence"], "high");
-    assert!(!inbox["items"][0]["title"]
-        .as_str()
-        .unwrap()
-        .starts_with("Outcome:"));
-}
-
-#[tokio::test]
-async fn extraction_preserves_typed_comment_and_review_source_ids() {
-    let _guard = common::DB_TEST_LOCK.lock().await;
-    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
-    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
-    let ticket_id = common::create_test_ticket(&app, &board_id, &cookie, &csrf).await;
-    let ticket_id = Uuid::parse_str(&ticket_id).unwrap();
-    let comment_id = Uuid::new_v4();
-    let review_id = Uuid::new_v4();
-    sqlx::query(
-        r#"
-        INSERT INTO ticket_comments (id, ticket_id, author_type, body, intent, created_at)
-        VALUES
-            ($1, $3, 'human', 'Ordinary diagnostic comment.', 'progress_update', now() - interval '1 second'),
-            ($2, $3, 'agent', 'Review-specific correction.', 'review_feedback', now())
-        "#,
-    )
-    .bind(comment_id)
-    .bind(review_id)
-    .bind(ticket_id)
-    .execute(state.db.as_ref().unwrap())
-    .await
-    .unwrap();
-    sqlx::query(
-        "INSERT INTO knowledge_jobs (id, kind, ticket_id) VALUES ($1, 'extract_ticket', $2)",
-    )
-    .bind(Uuid::new_v4())
-    .bind(ticket_id)
-    .execute(state.db.as_ref().unwrap())
-    .await
-    .unwrap();
-
-    let embedder = embedding_provider(&state.config.knowledge.embedding).unwrap();
-    let extractor: Arc<dyn ExtractionProvider> = Arc::new(CommentReviewExtractionProvider);
-    assert!(
-        knowledge_worker::process_one(&state, "source-aware", &embedder, &extractor)
-            .await
-            .unwrap()
-    );
-
-    let rows = sqlx::query(
-        r#"
-        SELECT source_type, source_id
-        FROM knowledge_revisions
-        WHERE source_id IN ($1, $2)
-        ORDER BY source_type
-        "#,
-    )
-    .bind(comment_id)
-    .bind(review_id)
-    .fetch_all(state.db.as_ref().unwrap())
-    .await
-    .unwrap();
-    let sources = rows
-        .iter()
-        .map(|row| {
-            (
-                sqlx::Row::get::<String, _>(row, "source_type"),
-                sqlx::Row::get::<Uuid, _>(row, "source_id"),
-            )
-        })
-        .collect::<Vec<_>>();
-    assert_eq!(
-        sources,
-        vec![("comment".into(), comment_id), ("review".into(), review_id)]
-    );
-}
-
-#[tokio::test]
-async fn extraction_byte_budget_prioritizes_the_newest_comments() {
-    let _guard = common::DB_TEST_LOCK.lock().await;
-    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
-    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
-    let ticket_id = common::create_test_ticket(&app, &board_id, &cookie, &csrf).await;
-    let ticket_id = Uuid::parse_str(&ticket_id).unwrap();
-    let oldest_comment_id = Uuid::new_v4();
-    let newest_comment_id = Uuid::new_v4();
-    let pool = state.db.as_ref().unwrap();
-    sqlx::query(
-        r#"
-        INSERT INTO ticket_comments (id, ticket_id, author_type, body, intent, created_at)
-        VALUES
-            ($1, $3, 'human', $4, 'progress_update', now() - interval '1 second'),
-            ($2, $3, 'human', 'newest durable evidence', 'review_feedback', now())
-        "#,
-    )
-    .bind(oldest_comment_id)
-    .bind(newest_comment_id)
-    .bind(ticket_id)
-    .bind("old source material ".repeat(20))
-    .execute(pool)
-    .await
-    .unwrap();
-    sqlx::query("UPDATE tickets SET status = 'done' WHERE id = $1")
-        .bind(ticket_id)
-        .execute(pool)
-        .await
-        .unwrap();
-
-    let max_source_bytes = 128;
-    let mut bounded_state = state.as_ref().clone();
-    bounded_state.config.knowledge.extraction.max_source_bytes = max_source_bytes;
-    let embedder = embedding_provider(&bounded_state.config.knowledge.embedding).unwrap();
-    let extractor: Arc<dyn ExtractionProvider> = Arc::new(OrderedCommentExtractionProvider {
-        expected_comment_ids: [oldest_comment_id, newest_comment_id],
-        max_source_bytes,
-    });
-    assert!(
-        knowledge_worker::process_one(
-            &bounded_state,
-            "latest-source-worker",
-            &embedder,
-            &extractor,
-        )
-        .await
-        .unwrap()
-    );
-}
-
-#[tokio::test]
-async fn extraction_byte_budget_includes_title_and_description() {
-    let _guard = common::DB_TEST_LOCK.lock().await;
-    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
-    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
-    let ticket_id = common::create_test_ticket(&app, &board_id, &cookie, &csrf).await;
-    let ticket_id = Uuid::parse_str(&ticket_id).unwrap();
-    let pool = state.db.as_ref().unwrap();
-    sqlx::query("UPDATE tickets SET title = $2, description = $3 WHERE id = $1")
-        .bind(ticket_id)
-        .bind("long title ".repeat(40))
-        .bind("long description ".repeat(40))
-        .execute(pool)
-        .await
-        .unwrap();
-    sqlx::query("UPDATE tickets SET status = 'done' WHERE id = $1")
-        .bind(ticket_id)
-        .execute(pool)
-        .await
-        .unwrap();
-
-    let max_source_bytes = 64;
-    let mut bounded_state = state.as_ref().clone();
-    bounded_state.config.knowledge.extraction.max_source_bytes = max_source_bytes;
-    let embedder = embedding_provider(&bounded_state.config.knowledge.embedding).unwrap();
-    let extractor: Arc<dyn ExtractionProvider> =
-        Arc::new(BoundedExtractionProvider { max_source_bytes });
-    assert!(
-        knowledge_worker::process_one(
-            &bounded_state,
-            "bounded-source-worker",
-            &embedder,
-            &extractor,
-        )
-        .await
-        .unwrap()
     );
 }
 
@@ -2526,95 +1874,11 @@ async fn knowledge_query_plan_has_relational_indexes() {
         "expected a relational revision index scan in {index_scans:?}\n{explain:#}"
     );
 
-    let serialized_plan = plan.to_string();
-    let eligible_producer = find_plan_node(plan, "Subplan Name", "CTE eligible")
-        .expect("materialized eligible CTE producer");
     assert!(
-        !eligible_producer.to_string().contains("<=>"),
-        "vector distance must not run inside relational eligibility"
-    );
-    assert!(serialized_plan.contains("<=>"));
-    assert!(find_plan_node(plan, "CTE Name", "eligible").is_some());
-    assert!(
-        !serialized_plan.contains("knowledge_embeddings_hnsw_cosine_idx"),
-        "production plan must not rank globally before eligibility"
+        find_plan_node(plan, "CTE Name", "eligible").is_some(),
+        "full-text ranking must run over the materialized eligible set\n{explain:#}"
     );
     tx.rollback().await.unwrap();
-
-    coppice_server::knowledge::validate_schema_dimension(pool, 1536)
-        .await
-        .unwrap();
-    let mismatch = coppice_server::knowledge::validate_schema_dimension(pool, 512)
-        .await
-        .expect_err("configured dimension mismatch must stop startup");
-    assert!(mismatch.to_string().contains("vector(1536)"));
-
-    // Empty table: ensure may rewrite the typed column to match config, then restore.
-    let empty_count: i64 =
-        sqlx::query_scalar("SELECT COUNT(*)::bigint FROM knowledge_embeddings")
-            .fetch_one(pool)
-            .await
-            .unwrap();
-    assert_eq!(empty_count, 0, "ensure rewrite path requires an empty table");
-    coppice_server::knowledge::ensure_schema_dimension(pool, 768)
-        .await
-        .unwrap();
-    coppice_server::knowledge::validate_schema_dimension(pool, 768)
-        .await
-        .unwrap();
-    coppice_server::knowledge::ensure_schema_dimension(pool, 1536)
-        .await
-        .unwrap();
-    coppice_server::knowledge::validate_schema_dimension(pool, 1536)
-        .await
-        .unwrap();
-}
-
-#[tokio::test]
-async fn knowledge_ensure_dimension_rejects_nonempty_mismatch() {
-    let _guard = common::DB_TEST_LOCK.lock().await;
-    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
-    let board_id =
-        Uuid::parse_str(&create_board_named(&app, "Dimension lock", &cookie, &csrf).await)
-            .unwrap();
-    let pool = state.db.as_ref().unwrap();
-
-    let (item_id, _revision_id) = seed_retrieval_item(
-        pool,
-        RetrievalSeed {
-            label: "dim-lock",
-            status: "approved",
-            scope: "board",
-            board_id: Some(board_id),
-            agent_id: None,
-            confidence: "high",
-            expired: false,
-            activate: true,
-            store_embedding: true,
-        },
-    )
-    .await;
-
-    let err = coppice_server::knowledge::ensure_schema_dimension(pool, 768)
-        .await
-        .expect_err("non-empty mismatch must refuse rewrite");
-    let message = err.to_string();
-    assert!(message.contains("vector(1536)"), "{message}");
-    assert!(message.contains("Clear embeddings"), "{message}");
-    assert!(message.contains("re-embed"), "{message}");
-
-    sqlx::query(
-        "UPDATE knowledge_items SET current_revision_id = NULL, active_revision_id = NULL WHERE id = $1",
-    )
-    .bind(item_id)
-    .execute(pool)
-    .await
-    .unwrap();
-    sqlx::query("DELETE FROM knowledge_items WHERE id = $1")
-        .bind(item_id)
-        .execute(pool)
-        .await
-        .unwrap();
 }
 
 #[tokio::test]
@@ -2660,287 +1924,6 @@ async fn knowledge_retrieval_capacity_p95_benchmark() {
     tx.rollback().await.unwrap();
 }
 
-#[tokio::test]
-async fn reclaimed_embedding_claim_cannot_persist_embedding_or_activation() {
-    let _guard = common::DB_TEST_LOCK.lock().await;
-    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
-    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
-    let item = create_candidate(
-        &app,
-        &board_id,
-        &cookie,
-        &csrf,
-        "Fence stale embedding writes",
-    )
-    .await;
-    let item_id = item["id"].as_str().unwrap();
-    let revision_id = Uuid::parse_str(item["revisionId"].as_str().unwrap()).unwrap();
-    let (status, _) = mutate(
-        &app,
-        "POST",
-        &format!("/api/knowledge/{item_id}/approve"),
-        serde_json::json!({"expectedVersion": 1}),
-        &cookie,
-        &csrf,
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK);
-
-    let pool = state.db.as_ref().unwrap().clone();
-    let embedder: Arc<dyn EmbeddingProvider> = Arc::new(ReclaimingEmbeddingProvider {
-        pool: pool.clone(),
-        revision_id,
-    });
-    let extractor: Arc<dyn ExtractionProvider> = Arc::new(MockExtractionProvider);
-    let result =
-        knowledge_worker::process_one(&state, "stale-embedding-worker", &embedder, &extractor)
-            .await;
-    assert!(result.is_err(), "a worker that lost its claim must fail");
-
-    let embedding_count: i64 =
-        sqlx::query_scalar("SELECT count(*) FROM knowledge_embeddings WHERE revision_id = $1")
-            .bind(revision_id)
-            .fetch_one(&pool)
-            .await
-            .unwrap();
-    let active_revision_id: Option<Uuid> =
-        sqlx::query_scalar("SELECT active_revision_id FROM knowledge_items WHERE id = $1")
-            .bind(Uuid::parse_str(item_id).unwrap())
-            .fetch_one(&pool)
-            .await
-            .unwrap();
-    assert_eq!(embedding_count, 0);
-    assert_eq!(active_revision_id, None);
-}
-
-#[tokio::test]
-async fn reclaimed_extraction_claim_cannot_persist_candidates() {
-    let _guard = common::DB_TEST_LOCK.lock().await;
-    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
-    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
-    let ticket_id = common::create_test_ticket(&app, &board_id, &cookie, &csrf).await;
-    let ticket_id = Uuid::parse_str(&ticket_id).unwrap();
-    let pool = state.db.as_ref().unwrap().clone();
-    sqlx::query("UPDATE tickets SET status = 'done' WHERE id = $1")
-        .bind(ticket_id)
-        .execute(&pool)
-        .await
-        .unwrap();
-
-    let embedder = embedding_provider(&state.config.knowledge.embedding).unwrap();
-    let extractor: Arc<dyn ExtractionProvider> = Arc::new(ReclaimingExtractionProvider {
-        pool: pool.clone(),
-        ticket_id,
-    });
-    let result =
-        knowledge_worker::process_one(&state, "stale-extraction-worker", &embedder, &extractor)
-            .await;
-    assert!(result.is_err(), "a worker that lost its claim must fail");
-
-    let candidate_count: i64 = sqlx::query_scalar(
-        "SELECT count(*) FROM knowledge_items WHERE extraction_job_id = (SELECT id FROM knowledge_jobs WHERE ticket_id = $1)",
-    )
-    .bind(ticket_id)
-    .fetch_one(&pool)
-    .await
-    .unwrap();
-    assert_eq!(candidate_count, 0);
-}
-
-#[tokio::test]
-async fn stale_knowledge_worker_cannot_overwrite_new_owner_state() {
-    let _guard = common::DB_TEST_LOCK.lock().await;
-    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
-    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
-    let ticket_id = common::create_test_ticket(&app, &board_id, &cookie, &csrf).await;
-    let ticket_uuid = Uuid::parse_str(&ticket_id).unwrap();
-    let pool = state.db.as_ref().unwrap();
-    sqlx::query("UPDATE tickets SET status = 'done' WHERE id = $1")
-        .bind(ticket_uuid)
-        .execute(pool)
-        .await
-        .unwrap();
-
-    let service = KnowledgeJobService::new(pool);
-    let worker_id = "knowledge-worker-0";
-    let stale_claim = service
-        .claim_next(worker_id, 300)
-        .await
-        .unwrap()
-        .expect("extraction job");
-    sqlx::query(
-        "UPDATE knowledge_jobs SET locked_at = now() - interval '301 seconds' WHERE id = $1",
-    )
-    .bind(stale_claim.id)
-    .execute(pool)
-    .await
-    .unwrap();
-
-    let fresh_claim = service
-        .claim_next(worker_id, 300)
-        .await
-        .unwrap()
-        .expect("reclaimed extraction job");
-    assert_eq!(fresh_claim.id, stale_claim.id);
-    assert_eq!(fresh_claim.locked_by, worker_id);
-    assert_eq!(stale_claim.locked_by, worker_id);
-    assert_ne!(fresh_claim.claim_token, stale_claim.claim_token);
-
-    let expected_running = (
-        "running".to_string(),
-        Some(worker_id.to_string()),
-        Some(fresh_claim.claim_token),
-    );
-    let mut terminal_stale_claim = stale_claim.clone();
-    terminal_stale_claim.max_attempts = terminal_stale_claim.attempts;
-    let terminal_error = service
-        .mark_error(&terminal_stale_claim, "late terminal failure")
-        .await
-        .expect_err("stale terminal failure must report claim loss");
-    assert!(terminal_error.to_string().contains("claim"));
-    let after_terminal_error: (String, Option<String>, Option<Uuid>) =
-        sqlx::query_as("SELECT status, locked_by, claim_token FROM knowledge_jobs WHERE id = $1")
-            .bind(stale_claim.id)
-            .fetch_one(pool)
-            .await
-            .unwrap();
-    assert_eq!(after_terminal_error, expected_running);
-
-    let retry_error = service
-        .mark_error(&stale_claim, "late retryable failure")
-        .await
-        .expect_err("stale retry must report claim loss");
-    assert!(retry_error.to_string().contains("claim"));
-    let after_retryable_error: (String, Option<String>, Option<Uuid>) =
-        sqlx::query_as("SELECT status, locked_by, claim_token FROM knowledge_jobs WHERE id = $1")
-            .bind(stale_claim.id)
-            .fetch_one(pool)
-            .await
-            .unwrap();
-    assert_eq!(after_retryable_error, expected_running);
-
-    let completion_error = service
-        .mark_completed(&stale_claim)
-        .await
-        .expect_err("stale completion must report claim loss");
-    assert!(completion_error.to_string().contains("claim"));
-    let after_stale_completion: (String, Option<String>, Option<Uuid>) =
-        sqlx::query_as("SELECT status, locked_by, claim_token FROM knowledge_jobs WHERE id = $1")
-            .bind(stale_claim.id)
-            .fetch_one(pool)
-            .await
-            .unwrap();
-    assert_eq!(after_stale_completion, expected_running);
-
-    service.mark_completed(&fresh_claim).await.unwrap();
-    let completed: (String, Option<String>, Option<Uuid>, Option<String>) = sqlx::query_as(
-        "SELECT status, locked_by, claim_token, last_error FROM knowledge_jobs WHERE id = $1",
-    )
-    .bind(fresh_claim.id)
-    .fetch_one(pool)
-    .await
-    .unwrap();
-    assert_eq!(completed, ("completed".into(), None, None, None));
-}
-
-#[tokio::test]
-async fn current_knowledge_claim_marks_job_failed_at_max_attempts() {
-    let _guard = common::DB_TEST_LOCK.lock().await;
-    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
-    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
-    let ticket_id = common::create_test_ticket(&app, &board_id, &cookie, &csrf).await;
-    let ticket_uuid = Uuid::parse_str(&ticket_id).unwrap();
-    let pool = state.db.as_ref().unwrap();
-    sqlx::query("UPDATE tickets SET status = 'done' WHERE id = $1")
-        .bind(ticket_uuid)
-        .execute(pool)
-        .await
-        .unwrap();
-    sqlx::query("UPDATE knowledge_jobs SET max_attempts = 1 WHERE ticket_id = $1")
-        .bind(ticket_uuid)
-        .execute(pool)
-        .await
-        .unwrap();
-
-    let service = KnowledgeJobService::new(pool);
-    let claim = service
-        .claim_next("knowledge-worker-0", 300)
-        .await
-        .unwrap()
-        .expect("extraction job");
-    assert_eq!(claim.attempts, claim.max_attempts);
-    service
-        .mark_error(&claim, "terminal extraction failure")
-        .await
-        .unwrap();
-
-    let failed: (String, Option<String>, Option<String>, Option<Uuid>) = sqlx::query_as(
-        "SELECT status, last_error, locked_by, claim_token FROM knowledge_jobs WHERE id = $1",
-    )
-    .bind(claim.id)
-    .fetch_one(pool)
-    .await
-    .unwrap();
-    assert_eq!(
-        failed,
-        (
-            "failed".into(),
-            Some("terminal extraction failure".into()),
-            None,
-            None,
-        )
-    );
-}
-
-#[tokio::test]
-async fn stale_max_attempt_knowledge_claim_is_failed_without_reexecution() {
-    let _guard = common::DB_TEST_LOCK.lock().await;
-    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
-    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
-    let ticket_id = common::create_test_ticket(&app, &board_id, &cookie, &csrf).await;
-    let ticket_uuid = Uuid::parse_str(&ticket_id).unwrap();
-    let pool = state.db.as_ref().unwrap();
-    sqlx::query("UPDATE tickets SET status = 'done' WHERE id = $1")
-        .bind(ticket_uuid)
-        .execute(pool)
-        .await
-        .unwrap();
-    sqlx::query("UPDATE knowledge_jobs SET max_attempts = 1 WHERE ticket_id = $1")
-        .bind(ticket_uuid)
-        .execute(pool)
-        .await
-        .unwrap();
-
-    let service = KnowledgeJobService::new(pool);
-    let claim = service
-        .claim_next("knowledge-worker-0", 300)
-        .await
-        .unwrap()
-        .expect("first extraction claim");
-    assert_eq!(claim.attempts, claim.max_attempts);
-    sqlx::query(
-        "UPDATE knowledge_jobs SET locked_at = now() - interval '301 seconds' WHERE id = $1",
-    )
-    .bind(claim.id)
-    .execute(pool)
-    .await
-    .unwrap();
-
-    let reclaimed = service.claim_next("knowledge-worker-1", 300).await.unwrap();
-    assert!(
-        reclaimed.is_none(),
-        "exhausted stale claim must not run again"
-    );
-    let failed: (String, i32, Option<String>, Option<Uuid>) = sqlx::query_as(
-        "SELECT status, attempts, locked_by, claim_token FROM knowledge_jobs WHERE id = $1",
-    )
-    .bind(claim.id)
-    .fetch_one(pool)
-    .await
-    .unwrap();
-    assert_eq!(failed, ("failed".into(), 1, None, None));
-}
-
 async fn create_candidate_with_content(
     app: &Router,
     board_id: &str,
@@ -2973,8 +1956,7 @@ async fn create_candidate_with_content(
     common::json_body(response).await
 }
 
-async fn approve_and_embed(
-    state: &Arc<AppState>,
+async fn approve_item(
     app: &Router,
     item_id: &str,
     expected_version: i64,
@@ -2991,21 +1973,8 @@ async fn approve_and_embed(
     )
     .await;
     assert_eq!(status, StatusCode::OK);
-    assert!(process_one_knowledge_job(state).await.unwrap());
-    let response = app
-        .clone()
-        .oneshot(common::json_request(
-            "GET",
-            &format!("/api/knowledge/{item_id}"),
-            "",
-            cookie,
-            csrf,
-        ))
-        .await
-        .unwrap();
-    let ready = common::json_body(response).await;
-    assert_eq!(ready["embeddingStatus"], "ready");
-    ready
+    assert_eq!(approved["activeRevisionId"], approved["revisionId"]);
+    approved
 }
 
 async fn get_similar(
@@ -3032,24 +2001,19 @@ async fn get_similar(
 #[tokio::test]
 async fn similar_returns_identical_approved_neighbor_for_pending() {
     let _guard = common::DB_TEST_LOCK.lock().await;
-    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
+    let (_state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
     let board_id = common::create_test_board(&app, &cookie, &csrf).await;
     let title = "Inbox duplicate assist title";
     let content = "Run make test-unit before review.";
 
-    let neighbor = create_candidate_with_content(
-        &app, &board_id, &cookie, &csrf, title, content,
-    )
-    .await;
+    let neighbor =
+        create_candidate_with_content(&app, &board_id, &cookie, &csrf, title, content).await;
     let neighbor_id = neighbor["id"].as_str().unwrap().to_string();
-    let ready = approve_and_embed(&state, &app, &neighbor_id, 1, &cookie, &csrf).await;
+    let ready = approve_item(&app, &neighbor_id, 1, &cookie, &csrf).await;
 
-    let pending = create_candidate_with_content(
-        &app, &board_id, &cookie, &csrf, title, content,
-    )
-    .await;
+    let pending =
+        create_candidate_with_content(&app, &board_id, &cookie, &csrf, title, content).await;
     let pending_id = pending["id"].as_str().unwrap();
-    let pending_revision = Uuid::parse_str(pending["revisionId"].as_str().unwrap()).unwrap();
 
     let (status, body) = get_similar(&app, pending_id, "limit=5", &cookie, &csrf).await;
     assert_eq!(status, StatusCode::OK);
@@ -3061,23 +2025,13 @@ async fn similar_returns_identical_approved_neighbor_for_pending() {
     assert_eq!(items[0]["knowledgeType"], "test_command");
     assert_eq!(items[0]["scope"], "board");
     assert_eq!(items[0]["status"], "approved");
-    assert_eq!(items[0]["embeddingStatus"], "ready");
-    assert!(items[0]["similarity"].as_f64().unwrap() >= 0.99);
-
-    let embed_count: i64 = sqlx::query_scalar(
-        "SELECT count(*) FROM knowledge_embeddings WHERE revision_id = $1",
-    )
-    .bind(pending_revision)
-    .fetch_one(state.db.as_ref().unwrap())
-    .await
-    .unwrap();
-    assert_eq!(embed_count, 0, "pending embeddings must not be persisted");
+    assert!(items[0]["score"].as_f64().unwrap() > 0.0);
 }
 
 #[tokio::test]
 async fn similar_returns_empty_for_dissimilar_pending() {
     let _guard = common::DB_TEST_LOCK.lock().await;
-    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
+    let (_state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
     let board_id = common::create_test_board(&app, &cookie, &csrf).await;
 
     let neighbor = create_candidate_with_content(
@@ -3090,7 +2044,7 @@ async fn similar_returns_empty_for_dissimilar_pending() {
     )
     .await;
     let neighbor_id = neighbor["id"].as_str().unwrap();
-    approve_and_embed(&state, &app, neighbor_id, 1, &cookie, &csrf).await;
+    approve_item(&app, neighbor_id, 1, &cookie, &csrf).await;
 
     let pending = create_candidate_with_content(
         &app,
@@ -3117,18 +2071,11 @@ async fn similar_excludes_ineligible_neighbors_and_self() {
     let pool = state.db.as_ref().unwrap();
     let title = "Eligibility matrix title";
     let content = "Shared eligibility content for inbox assist.";
-    let query_text = format!("{title}\n\n{content}");
 
-    let eligible = create_candidate_with_content(
-        &app, &board_id, &cookie, &csrf, title, content,
-    )
-    .await;
+    let eligible =
+        create_candidate_with_content(&app, &board_id, &cookie, &csrf, title, content).await;
     let eligible_id = eligible["id"].as_str().unwrap().to_string();
-    approve_and_embed(&state, &app, &eligible_id, 1, &cookie, &csrf).await;
-
-    let embedder = embedding_provider(&state.config.knowledge.embedding).unwrap();
-    let vector = embedder.embed(&[query_text]).await.unwrap().remove(0);
-    let literal = coppice_server::knowledge::embedder::vector_literal(&vector).unwrap();
+    approve_item(&app, &eligible_id, 1, &cookie, &csrf).await;
 
     async fn seed_variant(
         pool: &PgPool,
@@ -3137,10 +2084,8 @@ async fn similar_excludes_ineligible_neighbors_and_self() {
         content: &str,
         status: &str,
         activate: bool,
-        store_embedding: bool,
         expired: bool,
         superseded_by: Option<Uuid>,
-        literal: &str,
     ) -> Uuid {
         let item_id = Uuid::new_v4();
         let revision_id = Uuid::new_v4();
@@ -3191,33 +2136,16 @@ async fn similar_excludes_ineligible_neighbors_and_self() {
         .execute(pool)
         .await
         .unwrap();
-        if store_embedding {
-            sqlx::query(
-                r#"
-                INSERT INTO knowledge_embeddings (
-                    revision_id, provider, model, embedding_dimension, embedding
-                ) VALUES ($1, 'mock', 'test', 1536, $2::vector)
-                "#,
-            )
-            .bind(revision_id)
-            .bind(literal)
-            .execute(pool)
-            .await
-            .unwrap();
-        }
         item_id
     }
 
     seed_variant(
-        pool, board_uuid, title, content, "rejected", true, true, false, None, &literal,
+        pool, board_uuid, title, content, "rejected", true, false, None,
     )
     .await;
+    seed_variant(pool, board_uuid, title, content, "stale", true, false, None).await;
     seed_variant(
-        pool, board_uuid, title, content, "stale", true, true, false, None, &literal,
-    )
-    .await;
-    seed_variant(
-        pool, board_uuid, title, content, "approved", true, true, true, None, &literal,
+        pool, board_uuid, title, content, "approved", true, true, None,
     )
     .await;
     let eligible_uuid = Uuid::parse_str(&eligible_id).unwrap();
@@ -3228,21 +2156,17 @@ async fn similar_excludes_ineligible_neighbors_and_self() {
         content,
         "approved",
         true,
-        true,
         false,
         Some(eligible_uuid),
-        &literal,
     )
     .await;
     seed_variant(
-        pool, board_uuid, title, content, "approved", true, false, false, None, &literal,
+        pool, board_uuid, title, content, "approved", false, false, None,
     )
     .await;
 
-    let pending = create_candidate_with_content(
-        &app, &board_id, &cookie, &csrf, title, content,
-    )
-    .await;
+    let pending =
+        create_candidate_with_content(&app, &board_id, &cookie, &csrf, title, content).await;
     let pending_id = pending["id"].as_str().unwrap();
 
     let (status, body) = get_similar(&app, pending_id, "limit=10", &cookie, &csrf).await;
@@ -3298,18 +2222,15 @@ async fn similar_authz_allows_member_read_and_rejects_unauthenticated() {
 #[tokio::test]
 async fn similar_rejects_non_pending_and_missing_items() {
     let _guard = common::DB_TEST_LOCK.lock().await;
-    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
+    let (_state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
     let board_id = common::create_test_board(&app, &cookie, &csrf).await;
     let created = create_candidate(&app, &board_id, &cookie, &csrf, "Approve first").await;
     let item_id = created["id"].as_str().unwrap();
-    approve_and_embed(&state, &app, item_id, 1, &cookie, &csrf).await;
+    approve_item(&app, item_id, 1, &cookie, &csrf).await;
 
     let (status, body) = get_similar(&app, item_id, "", &cookie, &csrf).await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
-    assert!(body["message"]
-        .as_str()
-        .unwrap()
-        .contains("pending"));
+    assert!(body["message"].as_str().unwrap().contains("pending"));
 
     let missing = Uuid::new_v4();
     let (status, _) = get_similar(&app, &missing.to_string(), "", &cookie, &csrf).await;

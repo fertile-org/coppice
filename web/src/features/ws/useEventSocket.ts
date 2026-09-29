@@ -5,6 +5,7 @@ import {
 } from '../tickets/useAgentRuns';
 import type { RunStatus } from '../../lib/schemas/agentRun';
 import { NOTIFICATIONS_QUERY_KEY } from '../notifications/useNotifications';
+import { COMPACTION_STATUS_QUERY_KEY } from '../knowledge/useCompaction';
 
 export interface AgentRunStartedPayload {
   type: 'agent_run.started';
@@ -94,6 +95,9 @@ function dispatchMessage(raw: string) {
   if (msg.type === 'notification.changed') {
     void queryClient.invalidateQueries({
       queryKey: NOTIFICATIONS_QUERY_KEY,
+    });
+    void queryClient.invalidateQueries({
+      queryKey: COMPACTION_STATUS_QUERY_KEY,
     });
   }
 

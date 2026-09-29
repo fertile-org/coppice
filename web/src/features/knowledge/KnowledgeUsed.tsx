@@ -74,8 +74,10 @@ export function KnowledgeUsed({
                     </p>
                     <p className="mt-0.5 font-body text-xs text-text-muted">
                       {humanize(usage.knowledgeType)} · {humanize(usage.scope)} ·{' '}
-                      {usage.tokenCount} tokens · similarity{' '}
-                      {usage.similarity.toFixed(3)}
+                      {usage.tokenCount} tokens ·{' '}
+                      {usage.score > 0
+                        ? `match ${usage.score.toFixed(3)}`
+                        : 'whole library fit the budget'}
                     </p>
                     <p className="mt-1 font-body text-xs text-text-secondary">
                       Revision{' '}
