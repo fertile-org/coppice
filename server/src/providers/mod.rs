@@ -196,9 +196,8 @@ pub enum ProviderError {
     #[error("invalid fixture: {0}")]
     InvalidFixture(String),
     /// The connector finished without a parseable final result. A result
-    /// submitted through `result_submit` may still exist. Displays like the
-    /// former `InvalidFixture` so failure messages are unchanged.
-    #[error("invalid fixture: {0}")]
+    /// submitted through `result_submit` may still exist.
+    #[error("no result submitted: {0}")]
     MissingResult(String),
     #[error("invalid input: {0}")]
     InvalidInput(String),
@@ -220,7 +219,9 @@ pub fn connector_supports_chat_resume(connector: &str) -> bool {
 pub fn is_resume_session_invalid(err: &ProviderError) -> bool {
     match err {
         ProviderError::ResumeSessionInvalid(_) => true,
-        ProviderError::InvalidInput(msg) | ProviderError::InvalidFixture(msg) => {
+        ProviderError::InvalidInput(msg)
+        | ProviderError::InvalidFixture(msg)
+        | ProviderError::MissingResult(msg) => {
             let m = msg.to_ascii_lowercase();
             ["session not found", "invalid resume", "unknown session"]
                 .iter()
@@ -307,6 +308,12 @@ mod tests {
         assert!(is_resume_session_invalid(
             &ProviderError::InvalidInput("session not found".into())
         ));
+        assert!(is_resume_session_invalid(&ProviderError::MissingResult(
+            "Error: unknown session abc".into()
+        )));
+        assert!(!is_resume_session_invalid(&ProviderError::MissingResult(
+            "no final result".into()
+        )));
         assert!(!is_resume_session_invalid(&ProviderError::Cancelled));
     }
 
