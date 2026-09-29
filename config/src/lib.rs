@@ -1002,22 +1002,21 @@ mod tests {
 
     #[test]
     fn mcp_defaults_apply_when_section_missing() {
-        #[derive(Deserialize)]
-        struct Wrapper {
-            #[serde(default)]
-            mcp: McpConfig,
-        }
-        let parsed: Wrapper = toml::from_str("").expect("parse");
-        assert_eq!(parsed.mcp.call_timeout_secs, 60);
-        assert_eq!(parsed.mcp.max_output_bytes, 32768);
-        assert_eq!(parsed.mcp.comment_post_limit, 5);
-        assert_eq!(parsed.mcp.token_ttl_secs, 14400);
-        assert_eq!(parsed.mcp.builtin_plugins_dir, "./data/builtin-plugins");
-        assert_eq!(parsed.mcp.gateway_url(5000), "http://127.0.0.1:5000/mcp");
+        const REQUIRED: &str = "[server]\nport=5000\n[database]\nurl=\"postgres://x\"\n[auth]\nsession_secret=\"s\"\nbootstrap_password=\"p\"\ncookie_secure=false\n[storage]\nartifacts_dir=\"/tmp\"\nmax_upload_bytes=1\n[agent]\ndefault_connector=\"mock\"\nworktrees_path=\"/tmp\"\nworker_count=1\n[web]\nport=5001\nstatic_dir=\"./web/dist\"";
 
-        let parsed: Wrapper = toml::from_str("[mcp]\nbase_url = \"http://x/mcp\"").expect("parse");
-        assert_eq!(parsed.mcp.gateway_url(5000), "http://x/mcp");
-        assert_eq!(parsed.mcp.call_timeout_secs, 60);
+        let cfg: AppConfig = toml::from_str(REQUIRED).expect("parse");
+        assert_eq!(cfg.mcp.call_timeout_secs, 60);
+        assert_eq!(cfg.mcp.max_output_bytes, 32768);
+        assert_eq!(cfg.mcp.comment_post_limit, 5);
+        assert_eq!(cfg.mcp.token_ttl_secs, 14400);
+        assert_eq!(cfg.mcp.builtin_plugins_dir, "./data/builtin-plugins");
+        assert_eq!(cfg.mcp.gateway_url(5000), "http://127.0.0.1:5000/mcp");
+
+        let cfg: AppConfig =
+            toml::from_str(&format!("[mcp]\nbase_url = \"http://x/mcp\"\n{REQUIRED}"))
+                .expect("parse");
+        assert_eq!(cfg.mcp.gateway_url(5000), "http://x/mcp");
+        assert_eq!(cfg.mcp.call_timeout_secs, 60);
     }
 
     #[test]
