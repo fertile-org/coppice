@@ -5,6 +5,7 @@ use crate::domain::knowledge_compaction::JOB_TYPE_COMPACT_KNOWLEDGE;
 use crate::domain::repo::VerificationStatus;
 use crate::domain::run::{run_status_from_str, run_status_to_str, AgentRun, RunStatus};
 use crate::domain::slug::slugify;
+use crate::mcp::token::TokenService;
 use crate::sandbox::permissive::PROFILE_ID;
 use crate::services::agent_service::AgentError;
 use crate::services::agent_service::AgentService;
@@ -309,7 +310,7 @@ impl<'a> RunService<'a> {
         let row = sqlx::query(
             r#"
             UPDATE agent_runs
-            SET status = $2, ended_at = now()
+            SET status = $2, ended_at = now(), submitted_result = NULL
             WHERE id = $1 AND status IN ('queued', 'running')
             RETURNING
                 id, ticket_id, agent_id, job_type, status, sandbox_profile_id,
@@ -324,9 +325,20 @@ impl<'a> RunService<'a> {
         .await?
         .ok_or_else(|| RunError::Validation("run is not active".into()))?;
 
+        // Cut off gateway access right away rather than waiting for the worker
+        // to notice the cancel; a stopped run's submission is already cleared.
+        self.revoke_run_tokens(run_id).await;
         JobService::new(self.pool).cancel_for_run(run_id).await?;
 
         Ok(row_to_run(&row))
+    }
+
+    /// Best effort: the run is already terminal, and the worker's own grant
+    /// revokes again when the connector returns.
+    async fn revoke_run_tokens(&self, run_id: Uuid) {
+        if let Err(err) = TokenService::new(self.pool).revoke_for_run(run_id).await {
+            tracing::warn!(%run_id, error = %err, "failed to revoke run tool token");
+        }
     }
 
     pub async fn retry(&self, run_id: Uuid) -> Result<AgentRun, RunError> {
@@ -670,7 +682,8 @@ impl<'a> RunService<'a> {
         let row = sqlx::query(
             r#"
             UPDATE agent_runs
-            SET status = $2, error_message = $3, ended_at = now()
+            SET status = $2, error_message = $3, ended_at = now(),
+                submitted_result = NULL
             WHERE id = $1 AND status IN ($4, $5)
             RETURNING
                 id, ticket_id, agent_id, job_type, status, sandbox_profile_id,
@@ -688,6 +701,7 @@ impl<'a> RunService<'a> {
         .await?
         .ok_or_else(|| RunError::Validation("run is not active".into()))?;
 
+        self.revoke_run_tokens(run_id).await;
         JobService::new(self.pool)
             .fail_active_jobs_for_run(run_id)
             .await?;

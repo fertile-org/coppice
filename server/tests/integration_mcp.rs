@@ -1313,3 +1313,90 @@ async fn final_json_fallback_without_submission() {
     );
     std::env::remove_var("MOCK_AGENT_RESPONSE");
 }
+
+// ---- Task 8: stop hardening ----
+
+#[tokio::test]
+async fn stopped_run_revokes_token_and_discards_submission() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let (state, app, cookie, csrf, _env) =
+        common::bootstrap_and_login_with_gateway("mcp/ticket_submit_then_hang").await;
+    let (_git_dir, local_path) = common::create_temp_git_checkout();
+    let repo_id =
+        common::register_test_repo(&app, &local_path.display().to_string(), &cookie, &csrf).await;
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
+    let agent_id = common::create_test_agent_from_preset(&app, "Worker", &cookie, &csrf).await;
+    let ticket_id = common::create_test_ticket(&app, &board_id, &cookie, &csrf).await;
+    common::set_ticket_repo(&app, &ticket_id, &repo_id, &cookie, &csrf).await;
+    common::assign_agent_to_ticket(&app, &ticket_id, &agent_id, &cookie, &csrf).await;
+
+    let res = app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            &format!("/api/tickets/{ticket_id}/run-agent"),
+            "",
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 201);
+    let body = common::json_body(res).await;
+    let run_id: Uuid = body["run"]["id"].as_str().unwrap().parse().unwrap();
+    let pool = state.db.clone().unwrap();
+
+    // Wait (bounded) until the agent has submitted its result and is now
+    // sitting in the post-tool-call delay.
+    let deadline = std::time::Instant::now() + Duration::from_secs(20);
+    while submitted_result(&pool, run_id).await.is_none() {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "timed out waiting for result_submit"
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    let live_token = common::mint_test_token(&state, run_id, ContextProfile::HumanAgent).await;
+
+    let stop = app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            &format!("/api/agent-runs/{run_id}/stop"),
+            "",
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(stop.status(), 200);
+
+    let url = state.config.mcp.base_url.clone().expect("gateway url");
+    let status = reqwest::Client::new()
+        .post(&url)
+        .bearer_auth(&live_token)
+        .json(&json!({"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}))
+        .send()
+        .await
+        .expect("mcp request")
+        .status();
+    assert_eq!(status, 401, "revoked token must be rejected");
+
+    assert!(token_rows(&pool, run_id).await.iter().all(|t| t.revoked));
+    assert!(
+        submitted_result(&pool, run_id).await.is_none(),
+        "submission must be discarded"
+    );
+
+    // Let the worker observe the cancel and clean up, then re-check nothing
+    // was applied from the discarded submission.
+    wait_for_run_status(&pool, run_id, "cancelled").await;
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert!(submitted_result(&pool, run_id).await.is_none());
+    let bodies = agent_comment_bodies(&pool, run_id).await;
+    assert!(bodies.is_empty(), "no agent result comment expected: {bodies:?}");
+    std::env::remove_var("MOCK_AGENT_RESPONSE");
+}
