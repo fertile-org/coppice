@@ -201,7 +201,7 @@ impl AgentProvider for KiloCodeProvider {
         }
 
         extract_result_from_text(&assistant_text).ok_or_else(|| {
-            ProviderError::InvalidFixture(
+            ProviderError::MissingResult(
                 "no result contract found in kilo-code output".into(),
             )
         })

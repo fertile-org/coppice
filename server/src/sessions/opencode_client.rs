@@ -171,7 +171,7 @@ impl OpenCodeClient {
         extract_result_from_messages(&messages)
             .or_else(|| extract_result_from_snapshot(&snapshot))
             .ok_or_else(|| {
-                ProviderError::InvalidFixture(
+                ProviderError::MissingResult(
                     "no result contract in opencode session messages or snapshot".into(),
                 )
             })

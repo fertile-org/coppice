@@ -152,6 +152,11 @@ pub enum ProviderError {
     FixtureNotFound(String),
     #[error("invalid fixture: {0}")]
     InvalidFixture(String),
+    /// The connector finished without a parseable final result. A result
+    /// submitted through `result_submit` may still exist. Displays like the
+    /// former `InvalidFixture` so failure messages are unchanged.
+    #[error("invalid fixture: {0}")]
+    MissingResult(String),
     #[error("invalid input: {0}")]
     InvalidInput(String),
     #[error("io error: {0}")]

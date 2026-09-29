@@ -1,0 +1,14 @@
+{
+  "status": "done",
+  "summary": "via stdout",
+  "changedFiles": [],
+  "testsRun": [],
+  "mentionAgents": [],
+  "blockers": [],
+  "toolCalls": [
+    {
+      "tool": "result_submit",
+      "args": { "status": "done", "summary": "via tool", "mentionAgents": [] }
+    }
+  ]
+}

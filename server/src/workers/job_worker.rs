@@ -12,6 +12,7 @@ use crate::domain::comment::{author_type_to_str, CommentIntent};
 use crate::domain::context_profile::ContextProfile;
 use crate::mcp::grant::{grant_for_run, McpAccess};
 use crate::mcp::token::NewRunToolScope;
+use crate::mcp::tools::result::prefer_submitted_result;
 use crate::mcp::tools::tickets::{build_comments_json, build_runs_json, build_ticket_json};
 use crate::domain::run::{run_status_to_str, AgentRun, RunStatus};
 use crate::domain::slug::slugify;
@@ -634,6 +635,7 @@ async fn execute_job(
         })
         .await;
     grant.revoke().await;
+    let provider_result = prefer_submitted_result(pool, run.id, provider_result).await;
 
     let result = match provider_result {
         Ok(result) => result,
@@ -1059,6 +1061,7 @@ async fn execute_chat_turn(
         .await
     };
     grant.revoke().await;
+    let provider_result = prefer_submitted_result(pool, run.id, provider_result).await;
 
     let result = match provider_result {
         Ok(result) => result,

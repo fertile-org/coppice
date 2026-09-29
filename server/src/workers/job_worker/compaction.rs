@@ -11,6 +11,7 @@ use crate::domain::slug::slugify;
 use crate::knowledge::compaction_context::load_compaction_context;
 use crate::mcp::grant::grant_for_run;
 use crate::mcp::token::NewRunToolScope;
+use crate::mcp::tools::result::prefer_submitted_result;
 use crate::providers::{
     connector_enforces_read_only, AgentRunInput, AgentRunResult, ProviderError,
     READ_ONLY_CAPABLE_CONNECTORS,
@@ -131,6 +132,7 @@ pub(super) async fn execute_compaction(
         })
         .await;
     grant.revoke().await;
+    let provider_result = prefer_submitted_result(pool, run.id, provider_result).await;
 
     let result = match provider_result {
         Ok(result) => result,

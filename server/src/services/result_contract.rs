@@ -1,4 +1,5 @@
 use crate::domain::comment::CommentIntent;
+use crate::domain::context_profile::ContextProfile;
 use crate::domain::run::RunStatus;
 use crate::domain::substatus::{Substatus, TicketStatus};
 use crate::providers::AgentRunResult;
@@ -191,6 +192,65 @@ pub fn apply_consultation_result(result: &AgentRunResult) -> Result<ApplyResult,
     }
 
     Ok(apply)
+}
+
+/// Validate a tool-submitted result against the rules of the run that submits it.
+/// The error text goes back to the agent, so it names the offending field.
+pub fn validate_for_profile(
+    result: &AgentRunResult,
+    profile: ContextProfile,
+    job_type: &str,
+) -> Result<(), String> {
+    match profile {
+        ContextProfile::Full if job_type == "respond_to_mention" => {
+            apply_consultation_result(result).map(|_| ())
+        }
+        ContextProfile::Full | ContextProfile::HumanAgent => {
+            apply_agent_result(result).map(|_| ())
+        }
+        ContextProfile::HumanChat | ContextProfile::Conversation => {
+            let has = |v: &Option<String>| v.as_deref().is_some_and(|s| !s.trim().is_empty());
+            match result {
+                AgentRunResult::Continued { .. } => {
+                    Err("status `continued` is not allowed in chat; use `done` or `blocked`".into())
+                }
+                AgentRunResult::Done {
+                    split_tickets,
+                    updated_description,
+                    assign_to,
+                    ..
+                } => {
+                    if !split_tickets.is_empty() {
+                        return Err("splitTickets is not allowed in chat".into());
+                    }
+                    if has(updated_description) {
+                        return Err("updatedDescription is not allowed in chat".into());
+                    }
+                    if has(assign_to) {
+                        return Err("assignTo is not allowed in chat".into());
+                    }
+                    Ok(())
+                }
+                AgentRunResult::Blocked {
+                    updated_description,
+                    assign_to,
+                    ..
+                } => {
+                    if has(updated_description) {
+                        return Err("updatedDescription is not allowed in chat".into());
+                    }
+                    if has(assign_to) {
+                        return Err("assignTo is not allowed in chat".into());
+                    }
+                    Ok(())
+                }
+            }
+        }
+        ContextProfile::KnowledgeCompaction => match result {
+            AgentRunResult::Done { .. } => Ok(()),
+            _ => Err("knowledge compaction must finish with status `done`".into()),
+        },
+    }
 }
 
 fn non_empty_opt(value: Option<&str>) -> Option<String> {
@@ -807,6 +867,127 @@ mod tests {
             .comment
             .body
             .contains("server/src/sessions/tmux_stream.rs"));
+    }
+
+    fn done_result() -> AgentRunResult {
+        AgentRunResult::Done {
+            summary: "Finished.".into(),
+            changed_files: vec![],
+            tests_run: vec![],
+            next_status: None,
+            assign_to: None,
+            updated_description: None,
+            acceptance_criteria: None,
+            mention_agents: vec![],
+            agent_requests: vec![],
+            blockers: vec![],
+            split_tickets: vec![],
+            knowledge_candidates: Vec::new(),
+        }
+    }
+
+    fn continued_result() -> AgentRunResult {
+        AgentRunResult::Continued {
+            summary: "More to do.".into(),
+            progress_note: None,
+            changed_files: vec![],
+            tests_run: vec![],
+            blockers: vec![],
+        }
+    }
+
+    #[test]
+    fn validate_for_profile_rejects_continued_in_chat() {
+        for profile in [ContextProfile::HumanChat, ContextProfile::Conversation] {
+            let err = validate_for_profile(&continued_result(), profile, "chat_turn")
+                .expect_err("continued must be rejected in chat");
+            assert!(err.contains("continued"), "{err}");
+            assert!(validate_for_profile(&done_result(), profile, "chat_turn").is_ok());
+        }
+        assert!(validate_for_profile(
+            &continued_result(),
+            ContextProfile::HumanAgent,
+            "work_on_ticket"
+        )
+        .is_ok());
+
+        let cases: [(&str, fn(&mut AgentRunResult)); 3] = [
+            ("updatedDescription", |r| {
+                if let AgentRunResult::Done {
+                    updated_description,
+                    ..
+                } = r
+                {
+                    *updated_description = Some("new body".into());
+                }
+            }),
+            ("assignTo", |r| {
+                if let AgentRunResult::Done { assign_to, .. } = r {
+                    *assign_to = Some("qc".into());
+                }
+            }),
+            ("splitTickets", |r| {
+                if let AgentRunResult::Done { split_tickets, .. } = r {
+                    split_tickets.push(crate::domain::workflow::SplitTicketSpec {
+                        title: "t".into(),
+                        description: "d".into(),
+                        acceptance_criteria: None,
+                        assign_to: None,
+                    });
+                }
+            }),
+        ];
+        for (field, mutate) in cases {
+            let mut result = done_result();
+            mutate(&mut result);
+            let err = validate_for_profile(&result, ContextProfile::Conversation, "chat_turn")
+                .expect_err("ticket-mutation field rejected in chat");
+            assert!(err.contains(field), "{err}");
+        }
+    }
+
+    #[test]
+    fn validate_for_profile_compaction_requires_done() {
+        assert!(validate_for_profile(
+            &done_result(),
+            ContextProfile::KnowledgeCompaction,
+            "compact_knowledge"
+        )
+        .is_ok());
+        for result in [
+            continued_result(),
+            load_fixture("blocked.json"),
+        ] {
+            let err = validate_for_profile(
+                &result,
+                ContextProfile::KnowledgeCompaction,
+                "compact_knowledge",
+            )
+            .expect_err("only done accepted");
+            assert!(err.contains("done"), "{err}");
+        }
+    }
+
+    #[test]
+    fn validate_for_profile_consultation_uses_consultation_rules() {
+        // Consultation runs ignore ticket-mutation fields instead of rejecting them,
+        // and `continued` is a legal (comment-only) consultation result.
+        let mut result = done_result();
+        if let AgentRunResult::Done {
+            updated_description,
+            ..
+        } = &mut result
+        {
+            *updated_description = Some("ignored".into());
+        }
+        assert!(validate_for_profile(&result, ContextProfile::Full, "respond_to_mention").is_ok());
+        assert!(validate_for_profile(
+            &continued_result(),
+            ContextProfile::Full,
+            "respond_to_mention"
+        )
+        .is_ok());
+        assert!(validate_for_profile(&result, ContextProfile::Full, "work_on_ticket").is_ok());
     }
 
     #[test]

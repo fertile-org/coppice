@@ -101,12 +101,7 @@ impl CoreTool {
             ),
             Self::ResultSubmit => (
                 "Submit the final result for this run. Returns validation errors and warnings; fix and resubmit if it reports errors.",
-                object(
-                    json!({
-                        "status": { "type": "string", "enum": ["done", "blocked", "continued"] },
-                    }),
-                    &["status"],
-                ),
+                object(result_submit_properties(), &["status", "summary"]),
                 false,
             ),
             Self::SkillList => (
@@ -127,6 +122,68 @@ impl CoreTool {
             read_only,
         }
     }
+}
+
+/// Shape of the run result. Deliberately permissive: the server-side
+/// deserializer and profile rules are the real validator, and report errors.
+fn result_submit_properties() -> Value {
+    let strings = |description: &str| {
+        json!({ "type": "array", "items": { "type": "string" }, "description": description })
+    };
+    json!({
+        "status": {
+            "type": "string",
+            "enum": ["done", "blocked", "continued"],
+            "description": "done = work finished; blocked = cannot proceed (needs blockerType and mentionAgents); continued = partial progress, more to do (tickets only).",
+        },
+        "summary": { "type": "string", "description": "Markdown summary of what happened." },
+        "changedFiles": strings("Paths changed (done/continued)."),
+        "testsRun": strings("Tests or checks run (done/continued)."),
+        "blockers": strings("Open blockers or caveats (done/continued)."),
+        "nextStatus": { "type": "string", "description": "Suggested next ticket status (advisory)." },
+        "assignTo": { "type": "string", "description": "Agent key to recommend for the next run (tickets only; see board_agents)." },
+        "updatedDescription": { "type": "string", "description": "Replacement ticket description (tickets only)." },
+        "acceptanceCriteria": { "type": "string", "description": "Acceptance criteria markdown (tickets only)." },
+        "mentionAgents": strings("Agent keys to ask for input. At most 2 per run. Required (may be empty) for blocked."),
+        "agentRequests": {
+            "type": "array",
+            "description": "Structured asks to other agents (done only).",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "agentKey": { "type": "string" },
+                    "intent": { "type": "string" },
+                    "request": { "type": "string" },
+                },
+            },
+        },
+        "splitTickets": {
+            "type": "array",
+            "description": "Follow-up tickets to propose (done, tickets only).",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "title": { "type": "string" },
+                    "description": { "type": "string" },
+                    "acceptanceCriteria": { "type": "string" },
+                    "assignTo": { "type": "string" },
+                },
+                "required": ["title", "description"],
+            },
+        },
+        "knowledgeCandidates": {
+            "type": "array",
+            "description": "Proposed knowledge items (knowledge compaction, done).",
+            "items": { "type": "object", "additionalProperties": true },
+        },
+        "blockerType": {
+            "type": "string",
+            "description": "Required for blocked: missing_capability, missing_secret, permission or error.",
+        },
+        "requiredCapabilities": strings("Capabilities needed (blocked)."),
+        "requiredSecrets": strings("Secret keys needed (blocked)."),
+        "progressNote": { "type": "string", "description": "What remains to do (continued)." },
+    })
 }
 
 fn ticket_id_prop() -> Value {

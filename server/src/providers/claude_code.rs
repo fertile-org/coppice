@@ -180,7 +180,7 @@ impl AgentProvider for ClaudeCodeProvider {
         }
 
         extract_result_from_text(&assistant_text).ok_or_else(|| {
-            ProviderError::InvalidFixture(
+            ProviderError::MissingResult(
                 "no result contract found in claude-code output".into(),
             )
         })

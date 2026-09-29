@@ -410,8 +410,13 @@ async fn token_rows(pool: &PgPool, run_id: Uuid) -> Vec<TokenRow> {
 /// Ticket run through the worker with the gateway listening; returns the run id.
 async fn run_ticket_with_tool_calls(
 ) -> (Arc<AppState>, Uuid, common::AgentTestEnv, tempfile::TempDir) {
-    let (state, app, cookie, csrf, env) =
-        common::bootstrap_and_login_with_gateway("mcp/ticket_tool_call").await;
+    run_ticket_with_fixture("mcp/ticket_tool_call").await
+}
+
+async fn run_ticket_with_fixture(
+    fixture: &str,
+) -> (Arc<AppState>, Uuid, common::AgentTestEnv, tempfile::TempDir) {
+    let (state, app, cookie, csrf, env) = common::bootstrap_and_login_with_gateway(fixture).await;
     let (git_dir, local_path) = common::create_temp_git_checkout();
     let repo_id =
         common::register_test_repo(&app, &local_path.display().to_string(), &cookie, &csrf).await;
@@ -1097,4 +1102,214 @@ async fn comment_post_cannot_target_other_ticket() {
         .await
         .unwrap();
     assert_eq!(on_other, 0);
+}
+
+// ---- Task 7: result_submit + finish-time preference ----
+
+async fn mark_running(pool: &PgPool, run_id: Uuid) {
+    sqlx::query("UPDATE agent_runs SET status = 'running' WHERE id = $1")
+        .bind(run_id)
+        .execute(pool)
+        .await
+        .unwrap();
+}
+
+async fn submitted_result(pool: &PgPool, run_id: Uuid) -> Option<Value> {
+    sqlx::query_scalar("SELECT submitted_result FROM agent_runs WHERE id = $1")
+        .bind(run_id)
+        .fetch_one(pool)
+        .await
+        .unwrap()
+}
+
+async fn agent_comment_bodies(pool: &PgPool, run_id: Uuid) -> Vec<String> {
+    sqlx::query_scalar(
+        "SELECT body FROM ticket_comments \
+         WHERE ticket_id = (SELECT ticket_id FROM agent_runs WHERE id = $1) \
+           AND author_type = 'agent'",
+    )
+    .bind(run_id)
+    .fetch_all(pool)
+    .await
+    .unwrap()
+}
+
+#[tokio::test]
+async fn result_submit_invalid_returns_errors() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let fx = run_fixture().await;
+    mark_running(&fx.pool, fx.scope.run_id).await;
+    let url = serve(&fx).await;
+    let token =
+        common::mint_test_token(&fx.state, fx.scope.run_id, ContextProfile::HumanAgent).await;
+
+    let (is_error, text) = call_tool(&url, &token, "result_submit", json!({"status": "nope"})).await;
+    assert!(is_error);
+    assert!(text.contains("nope") || text.contains("status"), "{text}");
+
+    let (is_error, text) = call_tool(&url, &token, "result_submit", json!({"status": "done"})).await;
+    assert!(is_error);
+    assert!(text.contains("summary"), "{text}");
+
+    // Profile rule: chat runs cannot submit `continued`.
+    let chat_token = mint_scope(
+        &fx,
+        NewRunToolScope {
+            ticket_id: None,
+            profile: ContextProfile::Conversation,
+            job_type: "chat_turn".into(),
+            ..fx.scope.clone()
+        },
+    )
+    .await;
+    let (is_error, text) = call_tool(
+        &url,
+        &chat_token,
+        "result_submit",
+        json!({"status": "continued", "summary": "later"}),
+    )
+    .await;
+    assert!(is_error);
+    assert!(text.contains("continued"), "{text}");
+
+    assert!(submitted_result(&fx.pool, fx.scope.run_id).await.is_none());
+}
+
+#[tokio::test]
+async fn result_submit_warns_on_unknown_targets() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let fx = run_fixture().await;
+    mark_running(&fx.pool, fx.scope.run_id).await;
+    let url = serve(&fx).await;
+    let token =
+        common::mint_test_token(&fx.state, fx.scope.run_id, ContextProfile::HumanAgent).await;
+
+    let out = call_tool_json(
+        &url,
+        &token,
+        "result_submit",
+        json!({"status": "done", "summary": "handoff", "assignTo": "nobody"}),
+    )
+    .await;
+    assert_eq!(out["accepted"], true);
+    let warnings = out["warnings"].as_array().unwrap();
+    assert!(
+        warnings.iter().any(|w| w.as_str().unwrap().contains("nobody")),
+        "{warnings:?}"
+    );
+    let stored = submitted_result(&fx.pool, fx.scope.run_id).await.expect("stored");
+    assert_eq!(stored["summary"], "handoff");
+    assert_eq!(stored["status"], "done");
+}
+
+#[tokio::test]
+async fn invalid_resubmission_keeps_previous_valid() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let fx = run_fixture().await;
+    mark_running(&fx.pool, fx.scope.run_id).await;
+    let url = serve(&fx).await;
+    let token =
+        common::mint_test_token(&fx.state, fx.scope.run_id, ContextProfile::HumanAgent).await;
+
+    let out = call_tool_json(
+        &url,
+        &token,
+        "result_submit",
+        json!({"status": "done", "summary": "first, valid"}),
+    )
+    .await;
+    assert_eq!(out["accepted"], true);
+
+    let (is_error, _) = call_tool(&url, &token, "result_submit", json!({"status": "done"})).await;
+    assert!(is_error);
+
+    let stored = submitted_result(&fx.pool, fx.scope.run_id).await.expect("stored");
+    assert_eq!(stored["summary"], "first, valid");
+
+    // A later valid submission replaces it.
+    call_tool_json(
+        &url,
+        &token,
+        "result_submit",
+        json!({"status": "done", "summary": "second, valid"}),
+    )
+    .await;
+    let stored = submitted_result(&fx.pool, fx.scope.run_id).await.expect("stored");
+    assert_eq!(stored["summary"], "second, valid");
+}
+
+#[tokio::test]
+async fn result_submit_rejected_when_run_not_running() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let fx = run_fixture().await;
+    sqlx::query("UPDATE agent_runs SET status = 'cancelled' WHERE id = $1")
+        .bind(fx.scope.run_id)
+        .execute(&fx.pool)
+        .await
+        .unwrap();
+    let url = serve(&fx).await;
+    let token =
+        common::mint_test_token(&fx.state, fx.scope.run_id, ContextProfile::HumanAgent).await;
+    let (is_error, _) = call_tool(
+        &url,
+        &token,
+        "result_submit",
+        json!({"status": "done", "summary": "too late"}),
+    )
+    .await;
+    assert!(is_error);
+    assert!(submitted_result(&fx.pool, fx.scope.run_id).await.is_none());
+}
+
+#[tokio::test]
+async fn submitted_result_wins_over_final_json() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let (state, run_id, _env, _git) = run_ticket_with_fixture("mcp/ticket_submit_result").await;
+    let pool = state.db.clone().unwrap();
+    let bodies = agent_comment_bodies(&pool, run_id).await;
+    assert!(
+        bodies.iter().any(|b| b.contains("via tool")),
+        "expected submitted summary in {bodies:?}"
+    );
+    assert!(
+        bodies.iter().all(|b| !b.contains("via stdout")),
+        "final JSON must not be used when a result was submitted: {bodies:?}"
+    );
+    assert_eq!(
+        tool_call_rows(&pool, run_id).await,
+        vec![("result_submit".into(), "core".into(), "ok".into())]
+    );
+    std::env::remove_var("MOCK_AGENT_RESPONSE");
+}
+
+#[tokio::test]
+async fn final_json_fallback_without_submission() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let (state, run_id, _env, _git) = run_ticket_with_fixture("done").await;
+    let pool = state.db.clone().unwrap();
+    assert!(submitted_result(&pool, run_id).await.is_none());
+    let bodies = agent_comment_bodies(&pool, run_id).await;
+    assert!(
+        bodies.iter().any(|b| b.contains("Mock implementation complete.")),
+        "{bodies:?}"
+    );
+    std::env::remove_var("MOCK_AGENT_RESPONSE");
 }

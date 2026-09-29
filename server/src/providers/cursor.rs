@@ -215,7 +215,7 @@ impl AgentProvider for CursorProvider {
         }
 
         extract_result_from_text(&assistant_text).ok_or_else(|| {
-            ProviderError::InvalidFixture(format!(
+            ProviderError::MissingResult(format!(
                 "no result contract found in `{command}` output{}",
                 format_stderr_suffix(&stderr_tail)
             ))
