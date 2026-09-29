@@ -1,11 +1,13 @@
 use super::cursor_console::CursorConsolePublisher;
 use super::{
-    worktree_dir_from_context, AgentProvider, AgentRunInput, AgentRunResult, ProviderError,
+    mcp_unavailable, run_dir, worktree_dir_from_context, AgentProvider, AgentRunInput,
+    AgentRunResult, ProviderError,
 };
+use crate::mcp::grant::McpAccess;
 use crate::sessions::opencode_events::{coppice_run_prompt, extract_result_from_text};
 use async_trait::async_trait;
 use coppice_config::CursorProviderConfig;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, BufReader};
@@ -52,6 +54,14 @@ impl AgentProvider for CursorProvider {
         // Auth is host-managed: the operator runs `agent login` wherever the
         // server runs. The child process inherits that environment directly.
         // Coppice does not inject or strip credentials.
+
+        if let Some(access) = &input.mcp {
+            let run_dir = run_dir(&input).ok_or_else(|| {
+                mcp_unavailable("cursor needs a run artifacts dir for its per-run HOME")
+            })?;
+            cmd.envs(cursor_mcp_setup(access, &run_dir, &HostEnv::from_process())?);
+            cmd.envs(access.env());
+        }
 
         tracing::info!(
             command,
@@ -285,6 +295,161 @@ fn cursor_cli_args(
     args
 }
 
+/// The host values the per-run environment is derived from, captured before
+/// `HOME` is overridden.
+struct HostEnv {
+    home: Option<PathBuf>,
+    xdg_config_home: Option<PathBuf>,
+    git_config_global: Option<String>,
+    gh_config_dir: Option<String>,
+}
+
+impl HostEnv {
+    fn from_process() -> Self {
+        Self {
+            home: std::env::var_os("HOME").map(PathBuf::from),
+            xdg_config_home: std::env::var_os("XDG_CONFIG_HOME").map(PathBuf::from),
+            git_config_global: std::env::var("GIT_CONFIG_GLOBAL").ok(),
+            gh_config_dir: std::env::var("GH_CONFIG_DIR").ok(),
+        }
+    }
+
+    /// Where the CLI keeps `cursor/auth.json`. `HOME` no longer points at it
+    /// once the run gets its own home, so it must be passed explicitly.
+    fn config_home(&self) -> Option<PathBuf> {
+        self.xdg_config_home
+            .clone()
+            .or_else(|| self.home.as_ref().map(|home| home.join(".config")))
+    }
+}
+
+/// `<run home>/.cursor/mcp.json`. Serialized from structs so the file matches
+/// the verified layout field for field.
+#[derive(serde::Serialize)]
+struct McpFile<'a> {
+    #[serde(rename = "mcpServers")]
+    mcp_servers: McpServers<'a>,
+}
+
+#[derive(serde::Serialize)]
+struct McpServers<'a> {
+    coppice: McpServer<'a>,
+}
+
+#[derive(serde::Serialize)]
+struct McpServer<'a> {
+    url: &'a str,
+    headers: McpHeaders,
+}
+
+#[derive(serde::Serialize)]
+struct McpHeaders {
+    #[serde(rename = "Authorization")]
+    authorization: &'static str,
+}
+
+impl<'a> McpFile<'a> {
+    fn for_gateway(url: &'a str) -> Self {
+        Self {
+            mcp_servers: McpServers {
+                coppice: McpServer {
+                    url,
+                    headers: McpHeaders {
+                        authorization: "Bearer ${env:COPPICE_MCP_TOKEN}",
+                    },
+                },
+            },
+        }
+    }
+}
+
+/// `<run config dir>/cli-config.json`.
+#[derive(serde::Serialize)]
+struct CliConfigFile {
+    version: u32,
+    permissions: CliPermissions,
+}
+
+#[derive(serde::Serialize)]
+struct CliPermissions {
+    allow: Vec<&'static str>,
+    deny: Vec<&'static str>,
+}
+
+impl CliConfigFile {
+    fn allowing_gateway() -> Self {
+        Self {
+            version: 1,
+            permissions: CliPermissions {
+                allow: vec!["Mcp(coppice:*)"],
+                deny: Vec::new(),
+            },
+        }
+    }
+}
+
+/// Verified mechanism (plan task 1): the CLI reads MCP servers only from the
+/// workspace and from `$HOME/.cursor/mcp.json`, and permissions only from
+/// `$CURSOR_CONFIG_DIR/cli-config.json`. Give the run its own `HOME` and config
+/// dir under the run's artifacts dir so nothing is written to the workspace or
+/// the operator's real `~/.cursor`.
+fn cursor_mcp_setup(
+    access: &McpAccess,
+    run_dir: &Path,
+    host: &HostEnv,
+) -> std::io::Result<Vec<(String, String)>> {
+    let home = run_dir.join("cursor-home");
+    let config_dir = run_dir.join("cursor-config");
+    std::fs::create_dir_all(home.join(".cursor"))?;
+    std::fs::create_dir_all(&config_dir)?;
+
+    // `${env:…}` is interpolated by the CLI, so the token never hits the file.
+    std::fs::write(
+        home.join(".cursor").join("mcp.json"),
+        serde_json::to_string(&McpFile::for_gateway(&access.url))?,
+    )?;
+    // Without this allow rule `-p` denies every gateway call at the approval prompt.
+    std::fs::write(
+        config_dir.join("cli-config.json"),
+        serde_json::to_string(&CliConfigFile::allowing_gateway())?,
+    )?;
+
+    let mut env = vec![
+        ("HOME".to_string(), home.display().to_string()),
+        (
+            "CURSOR_CONFIG_DIR".to_string(),
+            config_dir.display().to_string(),
+        ),
+    ];
+    let host_config_home = host.config_home();
+    if let Some(config_home) = &host_config_home {
+        env.push((
+            "XDG_CONFIG_HOME".to_string(),
+            config_home.display().to_string(),
+        ));
+    }
+    // The agent's own shell commands lose the real `HOME`; forward the git and
+    // gh config the run still needs, unless the operator already set them.
+    if host.git_config_global.is_none() {
+        if let Some(gitconfig) = host.home.as_ref().map(|home| home.join(".gitconfig")) {
+            if gitconfig.is_file() {
+                env.push((
+                    "GIT_CONFIG_GLOBAL".to_string(),
+                    gitconfig.display().to_string(),
+                ));
+            }
+        }
+    }
+    if host.gh_config_dir.is_none() {
+        if let Some(gh) = host_config_home.map(|config_home| config_home.join("gh")) {
+            if gh.is_dir() {
+                env.push(("GH_CONFIG_DIR".to_string(), gh.display().to_string()));
+            }
+        }
+    }
+    Ok(env)
+}
+
 fn is_cancelled(cancel_rx: &Option<watch::Receiver<bool>>) -> bool {
     cancel_rx.as_ref().is_some_and(|rx| *rx.borrow())
 }
@@ -415,6 +580,90 @@ mod tests {
     fn provider_id() {
         let provider = CursorProvider::new(CursorProviderConfig::default());
         assert_eq!(provider.id(), "cursor");
+    }
+
+    fn access() -> crate::mcp::grant::McpAccess {
+        crate::mcp::grant::McpAccess {
+            url: "http://127.0.0.1:5000/mcp".into(),
+            token: "super-secret-run-token".into(),
+        }
+    }
+
+    #[test]
+    fn cursor_mcp_setup_writes_per_run_home_and_config() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let real_home = tmp.path().join("real-home");
+        std::fs::create_dir_all(real_home.join(".config").join("gh")).expect("gh dir");
+        std::fs::write(real_home.join(".gitconfig"), "[user]\n").expect("gitconfig");
+        let run_dir = tmp.path().join("runs").join("run-1");
+
+        let host = HostEnv {
+            home: Some(real_home.clone()),
+            xdg_config_home: None,
+            git_config_global: None,
+            gh_config_dir: None,
+        };
+        let env = cursor_mcp_setup(&access(), &run_dir, &host).expect("setup");
+        let lookup = |key: &str| {
+            env.iter()
+                .find(|(k, _)| k == key)
+                .map(|(_, v)| v.clone())
+                .unwrap_or_else(|| panic!("missing {key}"))
+        };
+
+        let home = run_dir.join("cursor-home");
+        let config = run_dir.join("cursor-config");
+        assert_eq!(lookup("HOME"), home.display().to_string());
+        assert_eq!(lookup("CURSOR_CONFIG_DIR"), config.display().to_string());
+        assert_eq!(
+            lookup("XDG_CONFIG_HOME"),
+            real_home.join(".config").display().to_string()
+        );
+        assert_eq!(
+            lookup("GIT_CONFIG_GLOBAL"),
+            real_home.join(".gitconfig").display().to_string()
+        );
+        assert_eq!(
+            lookup("GH_CONFIG_DIR"),
+            real_home.join(".config").join("gh").display().to_string()
+        );
+
+        let mcp_raw = std::fs::read_to_string(home.join(".cursor").join("mcp.json")).expect("mcp");
+        assert_eq!(
+            mcp_raw,
+            r#"{"mcpServers":{"coppice":{"url":"http://127.0.0.1:5000/mcp","headers":{"Authorization":"Bearer ${env:COPPICE_MCP_TOKEN}"}}}}"#
+        );
+        assert!(!mcp_raw.contains("super-secret-run-token"));
+
+        let cli_raw = std::fs::read_to_string(config.join("cli-config.json")).expect("cli config");
+        assert_eq!(
+            cli_raw,
+            r#"{"version":1,"permissions":{"allow":["Mcp(coppice:*)"],"deny":[]}}"#
+        );
+    }
+
+    #[test]
+    fn cursor_mcp_setup_keeps_existing_host_config_paths() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let real_home = tmp.path().join("real-home");
+        let real_xdg = tmp.path().join("xdg");
+        std::fs::create_dir_all(real_xdg.join("gh")).expect("gh dir");
+        std::fs::create_dir_all(&real_home).expect("home");
+        let run_dir = tmp.path().join("runs").join("run-2");
+
+        let host = HostEnv {
+            home: Some(real_home),
+            xdg_config_home: Some(real_xdg.clone()),
+            git_config_global: Some("/etc/gitconfig".into()),
+            gh_config_dir: Some("/etc/gh".into()),
+        };
+        let env = cursor_mcp_setup(&access(), &run_dir, &host).expect("setup");
+        let lookup = |key: &str| env.iter().find(|(k, _)| k == key).map(|(_, v)| v.as_str());
+
+        assert_eq!(lookup("XDG_CONFIG_HOME"), Some(real_xdg.display().to_string().as_str()));
+        // Already-set host values win; the connector does not override them.
+        assert_eq!(lookup("GIT_CONFIG_GLOBAL"), None);
+        assert_eq!(lookup("GH_CONFIG_DIR"), None);
     }
 
     #[test]

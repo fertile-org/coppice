@@ -194,6 +194,9 @@ pub struct KnowledgeRetrievalConfig {
     pub max_active_workspace: i64,
 }
 
+/// Kept for config compatibility. Tool-first runs write a slim context and
+/// fetch the rest through the MCP gateway, so nothing reads these allocations
+/// today; existing `knowledge.context_budget.*` keys still load and validate.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ContextBudgetConfig {
     #[serde(default = "default_context_max_tokens")]

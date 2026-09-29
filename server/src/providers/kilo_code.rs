@@ -1,17 +1,44 @@
 use super::kilo_console::KiloConsolePublisher;
 use super::{
-    refuse_unsupported_read_only, worktree_dir_from_context, AgentProvider, AgentRunInput,
-    AgentRunResult, ProviderError,
+    mcp_unavailable, refuse_unsupported_read_only, run_dir, worktree_dir_from_context,
+    AgentProvider, AgentRunInput, AgentRunResult, ProviderError,
 };
+use crate::mcp::grant::McpAccess;
 use crate::sessions::opencode_events::{coppice_run_prompt, extract_result_from_text};
 use async_trait::async_trait;
 use coppice_config::KiloCodeProviderConfig;
 use serde_json::Value;
+use std::path::Path;
 use std::process::Stdio;
 use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 use tokio::sync::watch;
+
+/// Kilo spawns one `kilo run` process per run, so it takes the same shape as
+/// its OpenCode ancestor: a config file in the run's artifacts dir, pointed at
+/// by a per-process config-path env var, with `{env:…}` token interpolation.
+///
+/// Unverified against a live CLI — the env var name follows the OpenCode
+/// `OPENCODE_CONFIG` convention. See `docs/providers/README.md`.
+fn kilo_mcp_setup(access: &McpAccess, run_dir: &Path) -> std::io::Result<Vec<(String, String)>> {
+    std::fs::create_dir_all(run_dir)?;
+    let path = run_dir.join("kilo-config.json");
+    std::fs::write(
+        &path,
+        serde_json::to_string(&serde_json::json!({
+            "mcp": {
+                "coppice": {
+                    "type": "remote",
+                    "url": access.url,
+                    "enabled": true,
+                    "headers": { "Authorization": "Bearer {env:COPPICE_MCP_TOKEN}" },
+                }
+            }
+        }))?,
+    )?;
+    Ok(vec![("KILO_CONFIG".to_string(), path.display().to_string())])
+}
 
 /// Kilo Code CLI connector.
 ///
@@ -100,6 +127,14 @@ impl AgentProvider for KiloCodeProvider {
         // `kilo auth login`) wherever the server runs. The child process
         // inherits that environment directly — same model as claude-code and
         // codex. Coppice does not inject or strip credentials.
+
+        if let Some(access) = &input.mcp {
+            let run_dir = run_dir(&input).ok_or_else(|| {
+                mcp_unavailable("kilo-code needs a run artifacts dir for its MCP config")
+            })?;
+            cmd.envs(kilo_mcp_setup(access, &run_dir)?);
+            cmd.envs(access.env());
+        }
 
         let mut child = cmd.spawn().map_err(ProviderError::Io)?;
 
@@ -306,6 +341,35 @@ mod tests {
     fn provider_id() {
         let provider = KiloCodeProvider::new(KiloCodeProviderConfig::default());
         assert_eq!(provider.id(), "kilo-code");
+    }
+
+    #[test]
+    fn kilo_mcp_setup_writes_run_config_and_points_env_at_it() {
+        let access = crate::mcp::grant::McpAccess {
+            url: "http://127.0.0.1:5000/mcp".into(),
+            token: "super-secret-run-token".into(),
+        };
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let run_dir = tmp.path().join("runs").join("run-1");
+
+        let env = kilo_mcp_setup(&access, &run_dir).expect("setup");
+        let path = run_dir.join("kilo-config.json");
+        assert_eq!(
+            env,
+            vec![("KILO_CONFIG".to_string(), path.display().to_string())]
+        );
+
+        let raw = std::fs::read_to_string(&path).expect("read kilo-config.json");
+        let doc: Value = serde_json::from_str(&raw).expect("parse kilo-config.json");
+        let server = &doc["mcp"]["coppice"];
+        assert_eq!(server["type"], "remote");
+        assert_eq!(server["enabled"], true);
+        assert_eq!(server["url"], "http://127.0.0.1:5000/mcp");
+        assert_eq!(
+            server["headers"]["Authorization"],
+            "Bearer {env:COPPICE_MCP_TOKEN}"
+        );
+        assert!(!raw.contains("super-secret-run-token"));
     }
 
     #[test]

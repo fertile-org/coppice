@@ -4339,7 +4339,7 @@ mod tests {
         use crate::domain::context_profile::ContextProfile;
         use crate::providers::fixtures_root;
         use crate::services::context_builder::{
-            build_context_md, write_context_file, ContextInput,
+            build_tool_first_context, write_context_document, ContextInput,
         };
         use crate::services::result_contract::apply_agent_result;
 
@@ -4462,15 +4462,14 @@ mod tests {
             assignee_agent_key: None,
             thread_excerpt: None,
         };
-        write_context_file(worktree.path(), &context_input).expect("write context");
+        let built = build_tool_first_context(&context_input, &[], None);
+        write_context_document(worktree.path(), &built).expect("write context");
         let md = std::fs::read_to_string(worktree.path().join(".agent/context.md"))
             .expect("read context.md");
 
-        assert!(md.contains("# Previous attempt summary"));
+        assert_eq!(md, built);
+        assert!(md.contains("## Previous attempt summary"));
         assert!(md.contains("Implemented TmuxStream create/kill"));
         assert!(md.contains("tmux_stream.rs"));
-
-        let built = build_context_md(&context_input);
-        assert!(built.len() >= md.len());
     }
 }

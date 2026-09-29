@@ -1,4 +1,8 @@
-use super::{worktree_dir_from_context, AgentProvider, AgentRunInput, AgentRunResult, ProviderError};
+use super::{
+    mcp_unavailable, worktree_dir_from_context, AgentProvider, AgentRunInput, AgentRunResult,
+    ProviderError,
+};
+use crate::mcp::grant::McpAccess;
 use crate::sessions::opencode_client::OpenCodeClient;
 use crate::sessions::opencode_events::coppice_run_prompt;
 use crate::sessions::opencode_serve::OpenCodeServeManager;
@@ -25,6 +29,9 @@ impl AgentProvider for OpenCodeProvider {
     }
 
     async fn run(&self, input: AgentRunInput) -> Result<AgentRunResult, ProviderError> {
+        if let Some(access) = &input.mcp {
+            opencode_mcp_setup(access)?;
+        }
         let worktree = worktree_dir_from_context(&input.context_path)?;
 
         let run_timeout = Duration::from_secs(self.config.run_timeout_secs);
@@ -41,5 +48,31 @@ impl AgentProvider for OpenCodeProvider {
                 input.session_created_tx,
             )
             .await
+    }
+}
+
+/// The shared `opencode serve` process is started once for the whole server, so
+/// it cannot carry a per-run MCP server or a per-run bearer token. Rather than
+/// leak one run's token to every session, refuse the run.
+fn opencode_mcp_setup(_access: &McpAccess) -> Result<(), ProviderError> {
+    Err(mcp_unavailable("opencode has no per-run MCP configuration"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn opencode_mcp_setup_refuses_tool_first_runs() {
+        let access = McpAccess {
+            url: "http://127.0.0.1:5000/mcp".into(),
+            token: "super-secret-run-token".into(),
+        };
+        let err = opencode_mcp_setup(&access).expect_err("opencode cannot be tool-first");
+        assert!(matches!(err, ProviderError::InvalidInput(_)));
+        assert_eq!(
+            err.to_string(),
+            "invalid input: mcp_unavailable: opencode has no per-run MCP configuration"
+        );
     }
 }

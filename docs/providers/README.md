@@ -49,6 +49,27 @@ Design notes: [M08](../milestones/M08-connector-operator-cli.md).
 
 Unreachable or misconfigured agents are not used for new auto-assignments until fixed.
 
+## Coppice MCP gateway (tool-first runs)
+
+Every run gets a per-run bearer token for the Coppice MCP gateway at `POST /mcp`, handed to the CLI as `COPPICE_MCP_URL` / `COPPICE_MCP_TOKEN`. Connectors configure the gateway per run only — CLI flags, per-process env, or a config file in that run's artifacts dir (`<artifacts_dir>/runs/<run id>/`). Nothing is written to the worktree, a registered repo checkout, or the operator's global CLI config, and the token is never written to a file in plaintext (each config interpolates it from the environment). A connector that cannot be configured fails the run with `mcp_unavailable` — there is no fallback to the old fat context.
+
+| Connector | Status | Mechanism |
+|-----------|--------|-----------|
+| `mock` | n/a | Fixture `toolCalls` executed over HTTP JSON-RPC against `/mcp` |
+| `cursor` | **verified** (CLI `2026.09.28-64d2043`) | Per-run `HOME` with `.cursor/mcp.json`, plus `CURSOR_CONFIG_DIR` with a `cli-config.json` that allows `Mcp(coppice:*)` |
+| `claude-code` | unverified — expected mechanism | `--mcp-config <run dir>/mcp.json --strict-mcp-config`; `mcp__coppice__*` added to `--allowedTools` |
+| `codex` | unverified — expected mechanism | `-c mcp_servers.coppice.url=…` + `-c mcp_servers.coppice.bearer_token_env_var="COPPICE_MCP_TOKEN"` |
+| `kilo-code` | unverified — expected mechanism | `KILO_CONFIG` pointing at `<run dir>/kilo-config.json` (OpenCode-style `mcp` block, `{env:COPPICE_MCP_TOKEN}` header) |
+| `opencode` | **not tool-first** | Refuses with `mcp_unavailable` |
+
+Verify an unverified row when its CLI is first available: run one ticket and confirm `run_tool_calls` records `ticket_get` and `result_submit`. For `kilo-code` the env var name follows the OpenCode `OPENCODE_CONFIG` convention and may differ in the fork.
+
+**Cursor side effects.** Overriding `HOME` also changes it for the agent's own shell commands, so the connector forwards `XDG_CONFIG_HOME` (the operator's real config home, where `cursor/auth.json` lives) and, when they exist and are not already set, `GIT_CONFIG_GLOBAL` and `GH_CONFIG_DIR`.
+
+**OpenCode follow-up.** The shared `opencode serve` process is started once for the server, so it cannot carry a per-run MCP server or token. Making OpenCode tool-first means switching the connector to per-run `opencode run` processes with a per-run `OPENCODE_CONFIG`, like `kilo-code`.
+
+Design: [M10 plugins](../superpowers/specs/2026-09-29-m10-plugins-design.md).
+
 ## Agent Chat multi-turn (provider session resume)
 
 Agent Chat reuses the vendor session across human messages when possible. Coppice still stores the full transcript in Postgres; on later turns the worker passes `--resume` / OpenCode session reuse with a **slim** `.agent/context.md`. If resume fails, one automatic retry sends the full transcript (logged as `chat_resume_fallback`).

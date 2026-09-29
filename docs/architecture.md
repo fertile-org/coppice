@@ -22,6 +22,7 @@ server/src/
   domain/       Entity types, enums, pure validation helpers
   db/           Pool setup, migration runner
   knowledge/    Full-text retrieval, compaction context and candidate contract (M06)
+  mcp/          MCP gateway at /mcp: per-run tokens, tool catalog, tool handlers (M10)
   middleware/   Session auth, CSRF, admin checks
   providers/    AgentProvider trait + mock / opencode / claude-code / codex / cursor connectors
   workers/      In-process Tokio job workers (M03)
@@ -81,7 +82,26 @@ workers/job_worker.rs     poll queue, run pipeline, spawn at server startup
 
 **Registered repositories:** Admin registers operator-managed git checkouts via `local_path` (instance-wide). Optional `remote_url` for display and future PR APIs. Coppice does **not** `git clone`. See [M03 registered repositories spec](superpowers/specs/2026-06-08-m03-registered-repositories-design.md).
 
-**Run pipeline (worker):** claim pending job → load run/ticket/agent/repo → validate repo `local_path` → mark running → ensure worktree from registered path (`WORKTREES_PATH/TICKET-{id}-{agent}-{repo}/`) → write context file → call `AgentProvider::run` → apply result contract → finish run.
+**Run pipeline (worker):** claim pending job → load run/ticket/agent/repo → validate repo `local_path` → mark running → ensure worktree from registered path (`WORKTREES_PATH/TICKET-{id}-{agent}-{repo}/`) → write context file → mint a gateway token → call `AgentProvider::run` → apply result contract → revoke the token → finish run.
+
+## MCP gateway (M10)
+
+Runs are **tool-first**: `.agent/context.md` says who the agent is and what the task is, and everything else is pulled through tools instead of being embedded.
+
+```text
+mcp/server.rs      streamable HTTP endpoint at POST/GET /mcp (token auth, not session/CSRF)
+mcp/token.rs       mint, verify and revoke per-run tokens
+mcp/grant.rs       McpAccess (url + token) and the RunToolGrant lifetime guard
+mcp/catalog.rs     tool list per session: profile matrix ∩ enabled plugins
+mcp/tools/         ticket_get, ticket_comments, ticket_runs, board_agents, knowledge_search,
+                   comment_post, skill_list, skill_load, result_submit
+```
+
+The gateway is authenticated by a per-run bearer token, minted when the run starts and revoked when it finishes, fails, or is stopped. Base URL comes from `mcp.base_url` (default `http://127.0.0.1:<server.port>/mcp`), which is correct in Docker, on the desktop, and in the cloud because the CLIs run beside the server.
+
+Connectors receive the token as `COPPICE_MCP_TOKEN` and configure the gateway per run only — flags, per-process env, or a file under `<artifacts_dir>/runs/<run id>/`. Never the worktree, a registered repo checkout, or the operator's global CLI config. A connector that cannot be configured fails with `mcp_unavailable`. Per-connector mechanisms and verification status: [docs/providers/README.md](providers/README.md).
+
+Agents finish with `result_submit`; a submitted result wins over a final JSON blob in the transcript.
 
 ## Governed knowledge (M06)
 

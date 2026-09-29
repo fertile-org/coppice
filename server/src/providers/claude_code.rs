@@ -1,11 +1,13 @@
 use super::claude_console::ClaudeConsolePublisher;
 use super::{
-    worktree_dir_from_context, AgentProvider, AgentRunInput, AgentRunResult, ProviderError,
-    CHAT_READ_ONLY_TOOLS,
+    mcp_unavailable, run_dir, worktree_dir_from_context, AgentProvider, AgentRunInput,
+    AgentRunResult, ProviderError, CHAT_READ_ONLY_TOOLS, COPPICE_MCP_TOOLS,
 };
+use crate::mcp::grant::McpAccess;
 use crate::sessions::opencode_events::{coppice_run_prompt, extract_result_from_text};
 use async_trait::async_trait;
 use coppice_config::ClaudeCodeProviderConfig;
+use std::path::Path;
 use std::process::Stdio;
 use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, BufReader};
@@ -14,6 +16,44 @@ use tokio::sync::watch;
 
 const ALLOWED_TOOLS: &str =
     "Read,Write,Edit,MultiEdit,Bash,NotebookEdit,WebFetch,WebSearch,Glob,Grep,TodoWrite,Task";
+
+/// Per-run MCP config file (never the worktree or the user's `~/.claude.json`)
+/// plus the flags that make `claude` load it and nothing else.
+///
+/// Unverified against a live CLI — see `docs/providers/README.md`.
+fn claude_mcp_args(access: &McpAccess, run_dir: &Path) -> std::io::Result<Vec<String>> {
+    std::fs::create_dir_all(run_dir)?;
+    let path = run_dir.join("mcp.json");
+    // The token stays in the environment; the file only interpolates it.
+    let config = serde_json::json!({
+        "mcpServers": {
+            "coppice": {
+                "type": "http",
+                "url": access.url,
+                "headers": { "Authorization": "Bearer ${COPPICE_MCP_TOKEN}" },
+            }
+        }
+    });
+    std::fs::write(&path, serde_json::to_string(&config)?)?;
+    Ok(vec![
+        "--mcp-config".to_string(),
+        path.display().to_string(),
+        "--strict-mcp-config".to_string(),
+    ])
+}
+
+fn claude_allowed_tools(read_only_tools: bool, mcp: bool) -> String {
+    let base = if read_only_tools {
+        CHAT_READ_ONLY_TOOLS
+    } else {
+        ALLOWED_TOOLS
+    };
+    if mcp {
+        format!("{base},{COPPICE_MCP_TOOLS}")
+    } else {
+        base.to_string()
+    }
+}
 
 pub struct ClaudeCodeProvider {
     config: ClaudeCodeProviderConfig,
@@ -43,11 +83,10 @@ impl AgentProvider for ClaudeCodeProvider {
             .arg("stream-json")
             .arg("--verbose")
             .arg("--allowedTools")
-            .arg(if input.read_only_tools {
-                CHAT_READ_ONLY_TOOLS
-            } else {
-                ALLOWED_TOOLS
-            })
+            .arg(claude_allowed_tools(
+                input.read_only_tools,
+                input.mcp.is_some(),
+            ))
             .arg("--permission-mode")
             .arg("bypassPermissions")
             .current_dir(&worktree)
@@ -70,6 +109,16 @@ impl AgentProvider for ClaudeCodeProvider {
         // ANTHROPIC_API_KEY) wherever the server runs. The child process
         // inherits that environment directly — same model as the opencode
         // connector. Coppice does not inject or strip credentials.
+
+        if let Some(access) = &input.mcp {
+            let run_dir = run_dir(&input).ok_or_else(|| {
+                mcp_unavailable("claude-code needs a run artifacts dir for its MCP config")
+            })?;
+            for arg in claude_mcp_args(access, &run_dir)? {
+                cmd.arg(arg);
+            }
+            cmd.envs(access.env());
+        }
 
         let mut child = cmd
             .spawn()
@@ -284,6 +333,55 @@ mod tests {
     fn provider_id() {
         let provider = ClaudeCodeProvider::new(ClaudeCodeProviderConfig::default());
         assert_eq!(provider.id(), "claude-code");
+    }
+
+    fn access() -> crate::mcp::grant::McpAccess {
+        crate::mcp::grant::McpAccess {
+            url: "http://127.0.0.1:5000/mcp".into(),
+            token: "super-secret-run-token".into(),
+        }
+    }
+
+    #[test]
+    fn claude_mcp_args_write_run_file_outside_worktree() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let run_dir = tmp.path().join("runs").join("run-1");
+        let args = claude_mcp_args(&access(), &run_dir).expect("mcp args");
+
+        let path = run_dir.join("mcp.json");
+        assert_eq!(
+            args,
+            vec![
+                "--mcp-config".to_string(),
+                path.display().to_string(),
+                "--strict-mcp-config".to_string(),
+            ]
+        );
+
+        let raw = std::fs::read_to_string(&path).expect("read mcp.json");
+        let doc: serde_json::Value = serde_json::from_str(&raw).expect("parse mcp.json");
+        let server = &doc["mcpServers"]["coppice"];
+        assert_eq!(server["type"], "http");
+        assert_eq!(server["url"], "http://127.0.0.1:5000/mcp");
+        assert_eq!(
+            server["headers"]["Authorization"],
+            "Bearer ${COPPICE_MCP_TOKEN}"
+        );
+        assert!(!raw.contains("super-secret-run-token"));
+    }
+
+    #[test]
+    fn claude_allowed_tools_add_gateway_tools_in_both_modes() {
+        let ticket = claude_allowed_tools(false, true);
+        assert!(ticket.starts_with(ALLOWED_TOOLS));
+        assert!(ticket.ends_with(",mcp__coppice__*"));
+
+        let chat = claude_allowed_tools(true, true);
+        assert!(chat.starts_with(CHAT_READ_ONLY_TOOLS));
+        assert!(chat.ends_with(",mcp__coppice__*"));
+
+        assert_eq!(claude_allowed_tools(true, false), CHAT_READ_ONLY_TOOLS);
+        assert_eq!(claude_allowed_tools(false, false), ALLOWED_TOOLS);
     }
 
     #[test]

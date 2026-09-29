@@ -1,5 +1,6 @@
 use super::codex_console::CodexConsolePublisher;
 use super::{worktree_dir_from_context, AgentProvider, AgentRunInput, AgentRunResult, ProviderError};
+use crate::mcp::grant::McpAccess;
 use crate::sessions::opencode_events::{coppice_run_prompt, extract_result_from_text};
 use async_trait::async_trait;
 use coppice_config::CodexProviderConfig;
@@ -8,6 +9,20 @@ use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 use tokio::sync::watch;
+
+/// `-c` overrides that add the gateway as the `coppice` MCP server for this
+/// process only. The token is read by the CLI from `COPPICE_MCP_TOKEN`, so it
+/// never lands in argv or in `~/.codex/config.toml`.
+///
+/// Unverified against a live CLI — see `docs/providers/README.md`.
+fn codex_mcp_args(access: &McpAccess) -> Vec<String> {
+    vec![
+        "-c".to_string(),
+        format!("mcp_servers.coppice.url=\"{}\"", access.url),
+        "-c".to_string(),
+        "mcp_servers.coppice.bearer_token_env_var=\"COPPICE_MCP_TOKEN\"".to_string(),
+    ]
+}
 
 pub struct CodexProvider {
     config: CodexProviderConfig,
@@ -67,6 +82,13 @@ impl AgentProvider for CodexProvider {
         // Auth is host-managed: the operator runs `codex login` wherever the server runs.
         // The child process inherits that environment directly — same model as claude-code
         // and opencode. Coppice does not inject or strip credentials.
+
+        if let Some(access) = &input.mcp {
+            for arg in codex_mcp_args(access) {
+                cmd.arg(arg);
+            }
+            cmd.envs(access.env());
+        }
 
         let mut child = cmd
             .spawn()
@@ -338,6 +360,25 @@ mod tests {
     fn provider_id() {
         let provider = CodexProvider::new(CodexProviderConfig::default());
         assert_eq!(provider.id(), "codex");
+    }
+
+    #[test]
+    fn codex_mcp_args_use_env_bearer() {
+        let access = crate::mcp::grant::McpAccess {
+            url: "http://127.0.0.1:5000/mcp".into(),
+            token: "super-secret-run-token".into(),
+        };
+        let args = codex_mcp_args(&access);
+        assert_eq!(
+            args,
+            vec![
+                "-c".to_string(),
+                r#"mcp_servers.coppice.url="http://127.0.0.1:5000/mcp""#.to_string(),
+                "-c".to_string(),
+                r#"mcp_servers.coppice.bearer_token_env_var="COPPICE_MCP_TOKEN""#.to_string(),
+            ]
+        );
+        assert!(!args.join(" ").contains("super-secret-run-token"));
     }
 
     #[test]

@@ -71,6 +71,25 @@ pub struct AgentRunInput {
 /// Read-only allowlist for connectors that can enforce it (claude-code).
 pub const CHAT_READ_ONLY_TOOLS: &str = "Read,Glob,Grep,WebFetch,WebSearch";
 
+/// Allowlist pattern for the gateway's tools under connectors that namespace
+/// MCP tools as `mcp__<server>__<tool>` (claude-code).
+pub const COPPICE_MCP_TOOLS: &str = "mcp__coppice__*";
+
+/// Per-run artifacts directory, `<artifacts_dir>/runs/<run_id>/`. The only
+/// place a connector may write MCP configuration: never the worktree, a
+/// registered repo checkout, or the user's global CLI config.
+pub fn run_dir(input: &AgentRunInput) -> Option<PathBuf> {
+    let artifacts_dir = input.artifacts_dir.as_ref()?;
+    let run_id = input.run_id.as_ref()?;
+    Some(PathBuf::from(artifacts_dir).join("runs").join(run_id))
+}
+
+/// A run that has a gateway token but no way to hand it to the CLI must fail
+/// loudly — there is no fallback to the fat context.
+pub fn mcp_unavailable(reason: &str) -> ProviderError {
+    ProviderError::InvalidInput(format!("mcp_unavailable: {reason}"))
+}
+
 /// Connectors whose adapters actually restrict tools when `read_only_tools` is set.
 /// Others either refuse (kilo-code) or ignore the flag (codex, opencode).
 pub const READ_ONLY_CAPABLE_CONNECTORS: &[&str] = &["mock", "claude-code", "cursor"];
