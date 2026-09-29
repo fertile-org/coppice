@@ -1,0 +1,10 @@
+{
+  "status": "done",
+  "summary": "Mock chat reply after a gateway tool call.",
+  "changedFiles": [],
+  "testsRun": [],
+  "blockers": [],
+  "toolCalls": [
+    { "tool": "board_agents", "args": {} }
+  ]
+}

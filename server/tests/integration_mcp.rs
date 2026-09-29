@@ -3,12 +3,15 @@ mod common;
 use axum::Router;
 use coppice_server::domain::context_profile::ContextProfile;
 use coppice_server::mcp::token::{NewRunToolScope, TokenService};
+use coppice_server::services::knowledge_compaction_service::KnowledgeCompactionService;
 use coppice_server::services::run_service::RunService;
+use coppice_server::services::workspace_settings_service::WorkspaceSettingsService;
 use coppice_server::AppState;
 use serde_json::{json, Value};
 use sqlx::PgPool;
 use std::sync::Arc;
 use std::time::Duration;
+use tower::ServiceExt;
 use uuid::Uuid;
 
 struct RunFixture {
@@ -341,4 +344,224 @@ async fn mcp_unimplemented_tool_hides_internal_details() {
         rows,
         vec![("skill_list".into(), "skill".into(), "error".into())]
     );
+}
+
+// ---- Task 4: per-run token lifecycle + mock tool calls ----
+
+async fn wait_for_run_status(pool: &PgPool, run_id: Uuid, wanted: &str) {
+    let deadline = std::time::Instant::now() + Duration::from_secs(20);
+    loop {
+        let status: String = sqlx::query_scalar("SELECT status FROM agent_runs WHERE id = $1")
+            .bind(run_id)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+        if status == wanted {
+            return;
+        }
+        assert!(
+            !matches!(status.as_str(), "failed" | "cancelled" | "blocked") || status == wanted,
+            "run ended as {status}, wanted {wanted}"
+        );
+        assert!(
+            std::time::Instant::now() < deadline,
+            "timed out waiting for run {run_id} to be {wanted}; last={status}"
+        );
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+}
+
+struct TokenRow {
+    profile: String,
+    chat_session_id: Option<Uuid>,
+    ticket_id: Option<Uuid>,
+    board_id: Option<Uuid>,
+    compaction_ticket_ids: Vec<Uuid>,
+    revoked: bool,
+}
+
+async fn token_rows(pool: &PgPool, run_id: Uuid) -> Vec<TokenRow> {
+    let rows: Vec<(String, Option<Uuid>, Option<Uuid>, Option<Uuid>, Vec<Uuid>, bool)> =
+        sqlx::query_as(
+            "SELECT context_profile, chat_session_id, ticket_id, board_id, \
+             compaction_ticket_ids, revoked_at IS NOT NULL \
+             FROM run_tool_tokens WHERE run_id = $1",
+        )
+        .bind(run_id)
+        .fetch_all(pool)
+        .await
+        .unwrap();
+    rows.into_iter()
+        .map(
+            |(profile, chat_session_id, ticket_id, board_id, compaction_ticket_ids, revoked)| {
+                TokenRow {
+                    profile,
+                    chat_session_id,
+                    ticket_id,
+                    board_id,
+                    compaction_ticket_ids,
+                    revoked,
+                }
+            },
+        )
+        .collect()
+}
+
+/// Ticket run through the worker with the gateway listening; returns the run id.
+async fn run_ticket_with_tool_calls(
+) -> (Arc<AppState>, Uuid, common::AgentTestEnv, tempfile::TempDir) {
+    let (state, app, cookie, csrf, env) =
+        common::bootstrap_and_login_with_gateway("mcp/ticket_tool_call").await;
+    let (git_dir, local_path) = common::create_temp_git_checkout();
+    let repo_id =
+        common::register_test_repo(&app, &local_path.display().to_string(), &cookie, &csrf).await;
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
+    let agent_id = common::create_test_agent_from_preset(&app, "Worker", &cookie, &csrf).await;
+    let ticket_id = common::create_test_ticket(&app, &board_id, &cookie, &csrf).await;
+    common::set_ticket_repo(&app, &ticket_id, &repo_id, &cookie, &csrf).await;
+    common::assign_agent_to_ticket(&app, &ticket_id, &agent_id, &cookie, &csrf).await;
+
+    let res = app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            &format!("/api/tickets/{ticket_id}/run-agent"),
+            "",
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 201);
+    let body = common::json_body(res).await;
+    let run_id: Uuid = body["run"]["id"].as_str().unwrap().parse().unwrap();
+    let pool = state.db.clone().unwrap();
+    wait_for_run_status(&pool, run_id, "succeeded").await;
+    (state, run_id, env, git_dir)
+}
+
+#[tokio::test]
+async fn mock_run_executes_tool_calls_through_gateway() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let (state, run_id, _env, _git) = run_ticket_with_tool_calls().await;
+    let pool = state.db.clone().unwrap();
+    let rows = tool_call_rows(&pool, run_id).await;
+    assert_eq!(
+        rows,
+        vec![("board_agents".into(), "core".into(), "ok".into())]
+    );
+    let tokens = token_rows(&pool, run_id).await;
+    assert_eq!(tokens.len(), 1);
+    assert!(tokens[0].ticket_id.is_some());
+    assert!(tokens[0].board_id.is_some());
+}
+
+#[tokio::test]
+async fn token_revoked_after_run_finishes() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let (state, run_id, _env, _git) = run_ticket_with_tool_calls().await;
+    let pool = state.db.clone().unwrap();
+    // Revocation happens right after the connector returns, before the run is
+    // marked succeeded, so it must already be visible here.
+    let tokens = token_rows(&pool, run_id).await;
+    assert_eq!(tokens.len(), 1);
+    assert!(tokens[0].revoked, "token must be revoked once the run finished");
+}
+
+#[tokio::test]
+async fn chat_turn_and_compaction_get_scoped_tokens() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let (state, app, cookie, csrf, _env) =
+        common::bootstrap_and_login_with_gateway("mcp/chat_tool_call").await;
+    let pool = state.db.clone().unwrap();
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
+    let agent_id =
+        common::create_agent_with_preset_key(&app, "backend_engineer", "Backend", &cookie, &csrf)
+            .await;
+
+    // Chat turn.
+    let res = app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            "/api/chat/sessions",
+            &format!(r#"{{"agentId":"{agent_id}","boardId":"{board_id}"}}"#),
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 201);
+    let session_id = common::json_body(res).await["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let res = app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            &format!("/api/chat/sessions/{session_id}/messages"),
+            r#"{"body":"hello"}"#,
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 201);
+    let chat_run: Uuid = common::json_body(res).await["runId"]
+        .as_str()
+        .unwrap()
+        .parse()
+        .unwrap();
+    wait_for_run_status(&pool, chat_run, "succeeded").await;
+    let tokens = token_rows(&pool, chat_run).await;
+    assert_eq!(tokens.len(), 1);
+    assert_eq!(tokens[0].profile, "conversation");
+    assert_eq!(tokens[0].chat_session_id, Some(session_id.parse().unwrap()));
+    assert_eq!(tokens[0].board_id, Some(board_id.parse().unwrap()));
+    assert!(tokens[0].revoked);
+    assert_eq!(
+        tool_call_rows(&pool, chat_run).await,
+        vec![("board_agents".into(), "core".into(), "ok".into())]
+    );
+
+    // Knowledge compaction.
+    std::env::set_var("MOCK_AGENT_RESPONSE", "mcp/compact_tool_call");
+    let admin_id: Uuid = sqlx::query_scalar("SELECT id FROM users WHERE email = 'admin@localhost'")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    WorkspaceSettingsService::new(&pool)
+        .set_knowledge_compaction_agent(Some(agent_id.parse().unwrap()), admin_id)
+        .await
+        .unwrap();
+    let ticket_id: Uuid = common::create_test_ticket(&app, &board_id, &cookie, &csrf)
+        .await
+        .parse()
+        .unwrap();
+    sqlx::query("UPDATE tickets SET status = 'done' WHERE id = $1")
+        .bind(ticket_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let batch = KnowledgeCompactionService::new(&pool, &state.config.knowledge)
+        .start_manual(admin_id)
+        .await
+        .expect("start batch");
+    let compaction_run = batch.run_id.expect("batch run");
+    wait_for_run_status(&pool, compaction_run, "succeeded").await;
+    let tokens = token_rows(&pool, compaction_run).await;
+    assert_eq!(tokens.len(), 1);
+    assert_eq!(tokens[0].profile, "knowledge_compaction");
+    assert_eq!(tokens[0].compaction_ticket_ids, vec![ticket_id]);
+    assert!(tokens[0].revoked);
 }

@@ -330,6 +330,7 @@ mod tests {
             resume_context: None,
             resume_session_id: None,
                     read_only_tools: false,
+                    mcp: None,
         };
         assert_eq!(
             provider.model_arg(&input).as_deref(),
@@ -359,6 +360,7 @@ mod tests {
             resume_context: None,
             resume_session_id: None,
                     read_only_tools: false,
+                    mcp: None,
         };
         assert_eq!(
             provider.model_arg(&input).as_deref(),
@@ -388,6 +390,7 @@ mod tests {
             resume_context: None,
             resume_session_id: None,
                     read_only_tools: false,
+                    mcp: None,
         };
         assert!(provider.model_arg(&input).is_none());
     }

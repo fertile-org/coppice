@@ -486,6 +486,27 @@ where
     (state, app, cookie, csrf_token, env)
 }
 
+/// Workers plus a real listener: the gateway URL in the config points at the
+/// spawned server, so mock `toolCalls` reach `/mcp` over HTTP.
+pub async fn bootstrap_and_login_with_gateway(
+    mock_response: &str,
+) -> (Arc<AppState>, Router, String, String, AgentTestEnv) {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind gateway listener");
+    let addr = listener.local_addr().expect("gateway addr");
+    let (state, app, cookie, csrf, env) =
+        bootstrap_and_login_with_state_and_workers(mock_response, |config| {
+            config.mcp.base_url = Some(format!("http://{addr}/mcp"));
+        })
+        .await;
+    let served = app.clone();
+    tokio::spawn(async move {
+        axum::serve(listener, served).await.expect("serve gateway");
+    });
+    (state, app, cookie, csrf, env)
+}
+
 pub async fn bootstrap_and_login_with_workers(
     mock_response: &str,
 ) -> (Router, String, String, AgentTestEnv) {

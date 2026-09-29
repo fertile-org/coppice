@@ -318,6 +318,7 @@ async fn conversation_profile_refuses_write_capable_connectors() {
             resume_context: None,
             resume_session_id: None,
             read_only_tools: true,
+            mcp: None,
         })
         .await
         .expect_err("kilo-code must fail closed for read-only chat");

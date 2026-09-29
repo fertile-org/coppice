@@ -10,6 +10,8 @@ use tokio::sync::watch;
 
 use crate::domain::comment::{author_type_to_str, intent_to_str, Comment, CommentIntent};
 use crate::domain::context_profile::ContextProfile;
+use crate::mcp::grant::{grant_for_run, McpAccess};
+use crate::mcp::token::NewRunToolScope;
 use crate::domain::run::{run_status_to_str, AgentRun, RunStatus};
 use crate::domain::slug::slugify;
 use crate::domain::substatus::TicketStatus;
@@ -229,6 +231,25 @@ async fn execute_job(
         .mark_running(run.id)
         .await
         .context("mark run running")?;
+
+    // Dropped (and revoked in the background) on any early `?` return; revoked
+    // explicitly as soon as the connector returns.
+    let grant = grant_for_run(
+        state,
+        pool,
+        NewRunToolScope {
+            run_id: run.id,
+            agent_id: run.agent_id,
+            ticket_id: Some(ticket_id),
+            chat_session_id: None,
+            board_id: Some(ticket.ticket.board_id),
+            profile: run.context_profile,
+            job_type: run.job_type.clone(),
+            compaction_ticket_ids: Vec::new(),
+        },
+    )
+    .await
+    .context("mint run tool token")?;
 
     tracing::info!(
         run_id = %run.id,
@@ -608,8 +629,10 @@ async fn execute_job(
             resume_context,
             resume_session_id: load_resume_session_id(pool, run, connector_name).await,
                     read_only_tools: false,
+            mcp: Some(grant.access.clone()),
         })
         .await;
+    grant.revoke().await;
 
     let result = match provider_result {
         Ok(result) => result,
@@ -824,6 +847,7 @@ async fn invoke_chat_provider(
     stream: Arc<crate::sessions::run_registry::RunStreamHandle>,
     cancel_rx: watch::Receiver<bool>,
     resume_session_id: Option<String>,
+    mcp: McpAccess,
 ) -> Result<AgentRunResult, ProviderError> {
     let connector = state
         .connector_registry
@@ -852,6 +876,7 @@ async fn invoke_chat_provider(
             resume_context: None,
             resume_session_id,
             read_only_tools: true,
+            mcp: Some(mcp),
         })
         .await
 }
@@ -906,6 +931,23 @@ async fn execute_chat_turn(
         .await
         .context("mark chat run running")?;
 
+    let grant = grant_for_run(
+        state,
+        pool,
+        NewRunToolScope {
+            run_id: run.id,
+            agent_id: run.agent_id,
+            ticket_id: None,
+            chat_session_id: Some(session_id),
+            board_id: session.board_id,
+            profile: ContextProfile::Conversation,
+            job_type: run.job_type.clone(),
+            compaction_ticket_ids: Vec::new(),
+        },
+    )
+    .await
+    .context("mint chat tool token")?;
+
     let connector_name = agent.connector.as_str();
     let stored_resume = session.provider_session_id.clone().filter(|s| !s.is_empty());
     let connector_matches = session.provider_session_connector.as_deref() == Some(connector_name);
@@ -955,6 +997,7 @@ async fn execute_chat_turn(
             stream.clone(),
             cancel_rx.clone(),
             stored_resume.clone(),
+            grant.access.clone(),
         )
         .await
         {
@@ -985,6 +1028,7 @@ async fn execute_chat_turn(
                     stream.clone(),
                     cancel_rx,
                     None,
+                    grant.access.clone(),
                 )
                 .await
             }
@@ -1009,9 +1053,11 @@ async fn execute_chat_turn(
             stream.clone(),
             cancel_rx,
             None,
+            grant.access.clone(),
         )
         .await
     };
+    grant.revoke().await;
 
     let result = match provider_result {
         Ok(result) => result,

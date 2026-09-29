@@ -9,6 +9,8 @@ use crate::domain::context_profile::ContextProfile;
 use crate::domain::run::{AgentRun, RunStatus};
 use crate::domain::slug::slugify;
 use crate::knowledge::compaction_context::load_compaction_context;
+use crate::mcp::grant::grant_for_run;
+use crate::mcp::token::NewRunToolScope;
 use crate::providers::{
     connector_enforces_read_only, AgentRunInput, AgentRunResult, ProviderError,
     READ_ONLY_CAPABLE_CONNECTORS,
@@ -80,6 +82,29 @@ pub(super) async fn execute_compaction(
         .mark_running(run.id)
         .await
         .context("mark compaction run running")?;
+    let compaction_ticket_ids: Vec<Uuid> = sqlx::query_scalar(
+        "SELECT ticket_id FROM knowledge_compaction_batch_tickets WHERE batch_id = $1 ORDER BY ticket_id",
+    )
+    .bind(batch_id)
+    .fetch_all(pool)
+    .await
+    .context("load compaction batch tickets")?;
+    let grant = grant_for_run(
+        state,
+        pool,
+        NewRunToolScope {
+            run_id: run.id,
+            agent_id: run.agent_id,
+            ticket_id: None,
+            chat_session_id: None,
+            board_id: None,
+            profile: ContextProfile::KnowledgeCompaction,
+            job_type: run.job_type.clone(),
+            compaction_ticket_ids,
+        },
+    )
+    .await
+    .context("mint compaction tool token")?;
     tracing::info!(run_id = %run.id, %batch_id, connector = connector_name, "knowledge compaction started");
 
     let provider_result = connector
@@ -102,8 +127,10 @@ pub(super) async fn execute_compaction(
             resume_context: None,
             resume_session_id: None,
             read_only_tools: true,
+            mcp: Some(grant.access.clone()),
         })
         .await;
+    grant.revoke().await;
 
     let result = match provider_result {
         Ok(result) => result,

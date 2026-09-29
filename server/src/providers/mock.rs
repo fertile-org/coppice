@@ -2,6 +2,7 @@ use super::{fixtures_root, AgentProvider, AgentRunInput, AgentRunResult, Provide
 use crate::domain::ticket::status_to_str;
 use crate::domain::workflow::is_ready_tech_lead_refinement;
 use async_trait::async_trait;
+use serde::Deserialize;
 use std::path::PathBuf;
 
 pub struct MockProvider {
@@ -82,6 +83,32 @@ impl MockProvider {
             &stdout_path,
             "Mock agent starting...\nRunning tests...\nDone.\n",
         )?;
+        Ok(())
+    }
+
+    /// Tool-call results go to the same sidecar as the rest of the mock output.
+    fn append_tool_output(input: &AgentRunInput, outputs: &[String]) -> Result<(), ProviderError> {
+        if outputs.is_empty() || std::env::var("MOCK_AGENT_STDOUT").as_deref() != Ok("1") {
+            return Ok(());
+        }
+        let (Some(artifacts_dir), Some(run_id)) = (&input.artifacts_dir, &input.run_id) else {
+            return Ok(());
+        };
+        let stdout_path = PathBuf::from(artifacts_dir)
+            .join("runs")
+            .join(run_id)
+            .join("stdout.log");
+        if let Some(parent) = stdout_path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let mut file = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&stdout_path)?;
+        for text in outputs {
+            use std::io::Write;
+            writeln!(file, "tool result: {text}")?;
+        }
         Ok(())
     }
 }
@@ -177,10 +204,143 @@ impl AgentProvider for MockProvider {
         } else {
             raw
         };
-        let result: AgentRunResult = serde_json::from_str(&raw)
+        let mut value: serde_json::Value = serde_json::from_str(&raw)
+            .map_err(|err| ProviderError::InvalidFixture(err.to_string()))?;
+        let (tool_calls, delay_ms) = take_tool_directives(&mut value)?;
+        let result: AgentRunResult = serde_json::from_value(value)
             .map_err(|err| ProviderError::InvalidFixture(err.to_string()))?;
         Self::maybe_write_stdout(&input)?;
+        let outputs = run_tool_calls(&input, &tool_calls).await?;
+        Self::append_tool_output(&input, &outputs)?;
+        wait_after_tool_calls(&input, delay_ms).await?;
         Ok(result)
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct MockToolCall {
+    tool: String,
+    #[serde(default = "empty_args")]
+    args: serde_json::Value,
+}
+
+fn empty_args() -> serde_json::Value {
+    serde_json::json!({})
+}
+
+/// Pull the mock-only `toolCalls` / `delayMsAfterToolCalls` keys out of the fixture.
+fn take_tool_directives(
+    value: &mut serde_json::Value,
+) -> Result<(Vec<MockToolCall>, Option<u64>), ProviderError> {
+    let Some(object) = value.as_object_mut() else {
+        return Ok((Vec::new(), None));
+    };
+    let calls = match object.remove("toolCalls") {
+        Some(raw) => serde_json::from_value(raw)
+            .map_err(|err| ProviderError::InvalidFixture(format!("toolCalls: {err}")))?,
+        None => Vec::new(),
+    };
+    let delay = match object.remove("delayMsAfterToolCalls") {
+        Some(raw) => Some(raw.as_u64().ok_or_else(|| {
+            ProviderError::InvalidFixture("delayMsAfterToolCalls must be a u64".into())
+        })?),
+        None => None,
+    };
+    Ok((calls, delay))
+}
+
+fn mcp_unavailable(err: impl std::fmt::Display) -> ProviderError {
+    ProviderError::InvalidInput(format!("mcp_unavailable: {err}"))
+}
+
+/// Play the fixture's tool calls against the gateway: `initialize`, then one
+/// `tools/call` per entry, in order. Returns each call's text result.
+async fn run_tool_calls(
+    input: &AgentRunInput,
+    calls: &[MockToolCall],
+) -> Result<Vec<String>, ProviderError> {
+    let Some(mcp) = input.mcp.as_ref().filter(|_| !calls.is_empty()) else {
+        return Ok(Vec::new());
+    };
+    let client = reqwest::Client::new();
+    let rpc = |id: u64, method: &str, params: serde_json::Value| {
+        let request = client
+            .post(&mcp.url)
+            .bearer_auth(&mcp.token)
+            .json(&serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": id,
+                "method": method,
+                "params": params,
+            }));
+        async move {
+            let response = request.send().await.map_err(mcp_unavailable)?;
+            if !response.status().is_success() {
+                return Err(mcp_unavailable(format!("HTTP {}", response.status())));
+            }
+            response
+                .json::<serde_json::Value>()
+                .await
+                .map_err(mcp_unavailable)
+        }
+    };
+
+    rpc(
+        1,
+        "initialize",
+        serde_json::json!({
+            "protocolVersion": "2025-06-18",
+            "capabilities": {},
+            "clientInfo": { "name": "coppice-mock", "version": "0" },
+        }),
+    )
+    .await?;
+
+    let mut outputs = Vec::with_capacity(calls.len());
+    for (index, call) in calls.iter().enumerate() {
+        let response = rpc(
+            index as u64 + 2,
+            "tools/call",
+            serde_json::json!({ "name": call.tool, "arguments": call.args }),
+        )
+        .await?;
+        let text = response["result"]["content"][0]["text"]
+            .as_str()
+            .or_else(|| response["error"]["message"].as_str())
+            .unwrap_or_default()
+            .to_string();
+        outputs.push(text);
+    }
+    Ok(outputs)
+}
+
+/// Hold the run open (still cancellable) after its tool calls.
+async fn wait_after_tool_calls(
+    input: &AgentRunInput,
+    delay_ms: Option<u64>,
+) -> Result<(), ProviderError> {
+    let Some(delay_ms) = delay_ms else {
+        return Ok(());
+    };
+    let sleep = tokio::time::sleep(std::time::Duration::from_millis(delay_ms));
+    tokio::pin!(sleep);
+    let Some(mut cancel_rx) = input.cancel_rx.clone() else {
+        sleep.await;
+        return Ok(());
+    };
+    loop {
+        if *cancel_rx.borrow() {
+            return Err(ProviderError::Cancelled);
+        }
+        tokio::select! {
+            () = &mut sleep => return Ok(()),
+            changed = cancel_rx.changed() => {
+                if changed.is_err() {
+                    sleep.await;
+                    return Ok(());
+                }
+            }
+        }
     }
 }
 
@@ -261,6 +421,7 @@ mod tests {
             resume_context: None,
             resume_session_id: None,
             read_only_tools: false,
+            mcp: None,
         }
     }
 
@@ -516,6 +677,7 @@ mod tests {
                 resume_context: None,
                 resume_session_id: None,
                         read_only_tools: false,
+                        mcp: None,
         })
             .await
             .expect("mock run");
@@ -536,6 +698,78 @@ mod tests {
         let content = std::fs::read_to_string(stdout_path).expect("read stdout");
         assert!(content.contains("Mock agent starting"));
         assert!(content.contains("Done."));
+    }
+
+    #[tokio::test]
+    async fn tool_call_keys_are_stripped_and_skipped_without_mcp() {
+        let _lock = env_lock();
+        let _response_guard = EnvGuard::set("MOCK_AGENT_RESPONSE", "fx");
+        let dir = TempDir::new().expect("fixtures dir");
+        std::fs::write(
+            dir.path().join("fx.json"),
+            r#"{"status":"done","summary":"ok","toolCalls":[{"tool":"board_agents"}],"delayMsAfterToolCalls":1}"#,
+        )
+        .expect("write fixture");
+        let provider = MockProvider::new(dir.path().to_path_buf());
+        let result = provider
+            .run(base_input("pm", "work_on_ticket"))
+            .await
+            .expect("run");
+        assert!(matches!(result, AgentRunResult::Done { .. }));
+    }
+
+    #[tokio::test]
+    async fn unreachable_gateway_is_mcp_unavailable() {
+        let _lock = env_lock();
+        let _response_guard = EnvGuard::set("MOCK_AGENT_RESPONSE", "fx");
+        let dir = TempDir::new().expect("fixtures dir");
+        std::fs::write(
+            dir.path().join("fx.json"),
+            r#"{"status":"done","summary":"ok","toolCalls":[{"tool":"board_agents","args":{}}]}"#,
+        )
+        .expect("write fixture");
+        let closed = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+        let url = format!("http://{}/mcp", closed.local_addr().unwrap());
+        drop(closed);
+        let mut input = base_input("pm", "work_on_ticket");
+        input.mcp = Some(crate::mcp::grant::McpAccess {
+            url,
+            token: "t".into(),
+        });
+        let err = MockProvider::new(dir.path().to_path_buf())
+            .run(input)
+            .await
+            .expect_err("gateway down");
+        assert!(
+            matches!(&err, ProviderError::InvalidInput(m) if m.starts_with("mcp_unavailable")),
+            "{err:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn delay_after_tool_calls_honours_cancel() {
+        let _lock = env_lock();
+        let _response_guard = EnvGuard::set("MOCK_AGENT_RESPONSE", "fx");
+        let dir = TempDir::new().expect("fixtures dir");
+        std::fs::write(
+            dir.path().join("fx.json"),
+            r#"{"status":"done","summary":"ok","delayMsAfterToolCalls":60000}"#,
+        )
+        .expect("write fixture");
+        let (tx, rx) = tokio::sync::watch::channel(false);
+        let mut input = base_input("pm", "work_on_ticket");
+        input.cancel_rx = Some(rx);
+        let canceller = tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            let _ = tx.send(true);
+            tx
+        });
+        let err = MockProvider::new(dir.path().to_path_buf())
+            .run(input)
+            .await
+            .expect_err("cancelled");
+        assert!(matches!(err, ProviderError::Cancelled), "{err:?}");
+        let _ = canceller.await;
     }
 
     #[test]

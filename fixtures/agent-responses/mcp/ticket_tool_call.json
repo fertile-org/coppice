@@ -1,0 +1,12 @@
+{
+  "status": "done",
+  "summary": "Mock run that called a gateway tool.",
+  "changedFiles": [],
+  "testsRun": [],
+  "nextStatus": "In Review",
+  "mentionAgents": [],
+  "blockers": [],
+  "toolCalls": [
+    { "tool": "board_agents", "args": {} }
+  ]
+}

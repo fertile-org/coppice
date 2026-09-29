@@ -995,6 +995,7 @@ impl<'a> ChatService<'a> {
             resume_context: None,
             resume_session_id: None,
             read_only_tools: true,
+            mcp: None,
         };
 
         let provider_result =

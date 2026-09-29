@@ -64,6 +64,8 @@ pub struct AgentRunInput {
     pub resume_session_id: Option<String>,
     /// When true, connectors must enforce a read-only tool allowlist or fail closed.
     pub read_only_tools: bool,
+    /// Gateway URL + per-run token; `None` when no run/token exists (probes, drafts, tests).
+    pub mcp: Option<crate::mcp::grant::McpAccess>,
 }
 
 /// Read-only allowlist for connectors that can enforce it (claude-code).
@@ -308,6 +310,7 @@ mod tests {
                 resume_context: None,
                 resume_session_id: None,
                         read_only_tools: false,
+                        mcp: None,
         })
             .await
             .expect("mock run");

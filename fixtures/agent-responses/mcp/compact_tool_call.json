@@ -1,0 +1,8 @@
+{
+  "status": "done",
+  "summary": "Nothing durable in these tickets.",
+  "knowledgeCandidates": [],
+  "toolCalls": [
+    { "tool": "ticket_runs", "args": {} }
+  ]
+}
