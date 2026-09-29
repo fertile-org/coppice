@@ -1,4 +1,6 @@
 pub mod agents;
+pub mod comments;
+pub mod knowledge;
 pub mod tickets;
 
 use crate::mcp::catalog::CoreTool;
@@ -51,9 +53,9 @@ pub async fn dispatch(tool: CoreTool, ctx: &ToolCtx<'_>, args: Value) -> Result<
         CoreTool::TicketComments => tickets::call_ticket_comments(ctx, args).await,
         CoreTool::TicketRuns => tickets::call_ticket_runs(ctx, args).await,
         CoreTool::TicketSearch => tickets::call_ticket_search(ctx, args).await,
-        CoreTool::KnowledgeSearch
-        | CoreTool::CommentPost
-        | CoreTool::ResultSubmit
+        CoreTool::KnowledgeSearch => knowledge::call_knowledge_search(ctx, args).await,
+        CoreTool::CommentPost => comments::call_comment_post(ctx, args).await,
+        CoreTool::ResultSubmit
         | CoreTool::SkillList
         | CoreTool::SkillLoad => not_implemented(),
     }

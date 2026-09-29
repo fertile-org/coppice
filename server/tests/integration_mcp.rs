@@ -915,3 +915,186 @@ async fn ticket_search_matches_title_on_board() {
     assert!(is_error);
     assert!(text.contains("status"), "{text}");
 }
+
+// ---- Task 6: knowledge_search + comment_post ----
+
+async fn seed_knowledge(pool: &PgPool, board_id: Uuid, title: &str, status: &str) -> Uuid {
+    let item_id = Uuid::new_v4();
+    let revision_id = Uuid::new_v4();
+    let approved = status == "approved";
+    sqlx::query("INSERT INTO knowledge_items (id, status, version) VALUES ($1, $2, 1)")
+        .bind(item_id)
+        .bind(status)
+        .execute(pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        r#"
+        INSERT INTO knowledge_revisions (
+            id, item_id, revision_number, scope, board_id, agent_id,
+            knowledge_type, title, content, source_type, confidence
+        ) VALUES ($1, $2, 1, 'board', $3, NULL, 'test_command', $4, $5, 'human_note', 'high')
+        "#,
+    )
+    .bind(revision_id)
+    .bind(item_id)
+    .bind(board_id)
+    .bind(title)
+    .bind(format!("Zebrafish procedure: {title}"))
+    .execute(pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "UPDATE knowledge_items SET current_revision_id = $2, \
+         active_revision_id = CASE WHEN $3 THEN $2 ELSE NULL END WHERE id = $1",
+    )
+    .bind(item_id)
+    .bind(revision_id)
+    .bind(approved)
+    .execute(pool)
+    .await
+    .unwrap();
+    revision_id
+}
+
+#[tokio::test]
+async fn knowledge_search_returns_only_approved_and_logs_once() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let fx = run_fixture().await;
+    let url = serve(&fx).await;
+    let token =
+        common::mint_test_token(&fx.state, fx.scope.run_id, ContextProfile::HumanAgent).await;
+    let board_id = fx.scope.board_id.unwrap();
+    let approved = seed_knowledge(&fx.pool, board_id, "Approved zebrafish tip", "approved").await;
+    seed_knowledge(&fx.pool, board_id, "Pending zebrafish tip", "pending").await;
+
+    for _ in 0..2 {
+        let out =
+            call_tool_json(&url, &token, "knowledge_search", json!({"query": "zebrafish"})).await;
+        let items = out["items"].as_array().unwrap();
+        assert_eq!(items.len(), 1, "{out}");
+        assert_eq!(items[0]["revisionId"], approved.to_string());
+        assert_eq!(items[0]["title"], "Approved zebrafish tip");
+        assert_eq!(items[0]["type"], "test_command");
+        assert!(items[0]["content"].as_str().unwrap().contains("Zebrafish"));
+        assert!(items[0]["id"].is_string());
+    }
+
+    let logged: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM knowledge_usage_logs WHERE run_id = $1 AND revision_id = $2",
+    )
+    .bind(fx.scope.run_id)
+    .bind(approved)
+    .fetch_one(&fx.pool)
+    .await
+    .unwrap();
+    assert_eq!(logged, 1);
+
+    let (is_error, _) = call_tool(&url, &token, "knowledge_search", json!({"query": "  "})).await;
+    assert!(is_error);
+    let (is_error, _) = call_tool(&url, &token, "knowledge_search", json!({})).await;
+    assert!(is_error);
+}
+
+#[tokio::test]
+async fn comment_post_creates_agent_comment() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let fx = run_fixture().await;
+    let url = serve(&fx).await;
+    let token =
+        common::mint_test_token(&fx.state, fx.scope.run_id, ContextProfile::HumanAgent).await;
+    let mut events = fx.state.event_bus.subscribe();
+
+    let out = call_tool_json(&url, &token, "comment_post", json!({"body": "Progress note"})).await;
+    let comment_id: Uuid = out["commentId"].as_str().unwrap().parse().unwrap();
+
+    let (author_type, author_id, intent, body, ticket_id): (String, Option<Uuid>, String, String, Uuid) =
+        sqlx::query_as(
+            "SELECT author_type, author_id, intent, body, ticket_id FROM ticket_comments WHERE id = $1",
+        )
+        .bind(comment_id)
+        .fetch_one(&fx.pool)
+        .await
+        .unwrap();
+    assert_eq!(author_type, "agent");
+    assert_eq!(author_id, Some(fx.scope.agent_id));
+    assert_eq!(intent, "progress_update");
+    assert_eq!(body, "Progress note");
+    assert_eq!(Some(ticket_id), fx.scope.ticket_id);
+
+    let event = tokio::time::timeout(Duration::from_secs(2), events.recv())
+        .await
+        .expect("event")
+        .expect("recv");
+    let event = serde_json::to_value(&event).unwrap();
+    assert_eq!(event["type"], "comment.created");
+
+    let (is_error, _) = call_tool(&url, &token, "comment_post", json!({"body": "   "})).await;
+    assert!(is_error);
+}
+
+#[tokio::test]
+async fn comment_post_capped_per_run() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let fx = run_fixture().await;
+    let url = serve(&fx).await;
+    let token =
+        common::mint_test_token(&fx.state, fx.scope.run_id, ContextProfile::HumanAgent).await;
+    let limit = fx.state.config.mcp.comment_post_limit;
+    for i in 0..limit {
+        call_tool_json(&url, &token, "comment_post", json!({"body": format!("note {i}")})).await;
+    }
+    let (is_error, text) = call_tool(&url, &token, "comment_post", json!({"body": "one more"})).await;
+    assert!(is_error);
+    assert!(text.contains("limit reached"), "{text}");
+    let count: i64 = sqlx::query_scalar("SELECT count(*) FROM ticket_comments WHERE ticket_id = $1 AND author_type = 'agent'")
+        .bind(fx.scope.ticket_id.unwrap())
+        .fetch_one(&fx.pool)
+        .await
+        .unwrap();
+    assert_eq!(count, i64::from(limit));
+}
+
+#[tokio::test]
+async fn comment_post_cannot_target_other_ticket() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let fx = run_fixture().await;
+    let url = serve(&fx).await;
+    let token =
+        common::mint_test_token(&fx.state, fx.scope.run_id, ContextProfile::HumanAgent).await;
+    let board_id = fx.scope.board_id.unwrap().to_string();
+    let other = common::create_test_ticket(&fx.app, &board_id, &fx.cookie, &fx.csrf).await;
+
+    let out = call_tool_json(
+        &url,
+        &token,
+        "comment_post",
+        json!({"body": "stay put", "ticketId": other}),
+    )
+    .await;
+    let comment_id: Uuid = out["commentId"].as_str().unwrap().parse().unwrap();
+    let ticket_id: Uuid = sqlx::query_scalar("SELECT ticket_id FROM ticket_comments WHERE id = $1")
+        .bind(comment_id)
+        .fetch_one(&fx.pool)
+        .await
+        .unwrap();
+    assert_eq!(Some(ticket_id), fx.scope.ticket_id);
+    let on_other: i64 = sqlx::query_scalar("SELECT count(*) FROM ticket_comments WHERE ticket_id = $1::uuid AND author_type = 'agent'")
+        .bind(&other)
+        .fetch_one(&fx.pool)
+        .await
+        .unwrap();
+    assert_eq!(on_other, 0);
+}
