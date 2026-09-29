@@ -204,13 +204,23 @@ mod tests {
         materialize_builtin(dir.path()).unwrap();
         let stale = dir.path().join("coppice/skills/coppice-retired");
         std::fs::create_dir_all(&stale).unwrap();
-        std::fs::write(stale.join("SKILL.md"), "---\nname: x\ndescription: y\n---\nold").unwrap();
+        std::fs::write(
+            stale.join("SKILL.md"),
+            "---\nname: x\ndescription: y\n---\nold",
+        )
+        .unwrap();
         let sibling = dir.path().join("coppice/plugin.toml");
         std::fs::write(&sibling, "keep").unwrap();
         materialize_builtin(dir.path()).unwrap();
         assert!(!stale.exists());
         assert!(sibling.is_file());
-        assert_eq!(load_builtin(dir.path()).unwrap().skills_for(Uuid::new_v4()).len(), 6);
+        assert_eq!(
+            load_builtin(dir.path())
+                .unwrap()
+                .skills_for(Uuid::new_v4())
+                .len(),
+            6
+        );
     }
 
     #[test]
