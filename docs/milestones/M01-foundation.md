@@ -209,15 +209,15 @@ Not applicable for M01.
 
 ## Acceptance criteria
 
-- [ ] Monorepo layout exists: root `server/`, `web/` (stub), `cli/`, `deploy/`, `e2e/`, `fixtures/`, workspace `Cargo.toml`
-- [ ] `coppice health` and `coppice bootstrap admin` work against compose stack
-- [ ] `docker compose up` starts postgres and server without errors
-- [ ] `GET /health` returns 200
-- [ ] Admin bootstrap works; login returns httpOnly session cookie
-- [ ] Authenticated `/me` returns user; logout clears session
-- [ ] `MockProvider` trait exists and passes unit tests
-- [ ] pgvector extension is installed in Postgres (`CREATE EXTENSION vector` in migration)
-- [ ] CI pipeline passes on a clean checkout
+- [x] Monorepo layout exists: root `server/`, `web/` (stub), `cli/`, `deploy/`, `e2e/`, `fixtures/`, workspace `Cargo.toml`
+- [x] `coppice health` and `coppice bootstrap admin` work against compose stack
+- [x] `docker compose up` starts postgres and server without errors
+- [x] `GET /health` returns 200
+- [x] Admin bootstrap works; login returns httpOnly session cookie
+- [x] Authenticated `/me` returns user; logout clears session
+- [x] `MockProvider` trait exists and passes unit tests
+- [x] pgvector extension is installed in Postgres (`CREATE EXTENSION vector` in migration)
+- [x] CI pipeline passes on a clean checkout
 
 ## References
 

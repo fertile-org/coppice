@@ -143,4 +143,4 @@ Visual design tokens and palette: `docs/web/DESIGN.md`.
 
 ## Milestone evolution
 
-Each milestone adds modules/tables/endpoints documented in `docs/milestones/M0N-*.md`. Through M06 the system includes boards, repositories, tickets, collaboration workflow, live agent runs, governed long-term knowledge, and bounded/auditable context assembly. **Next:** M07 trust and signals.
+Each milestone adds modules/tables/endpoints documented in `docs/milestones/M0N-*.md`. Through M06 the system includes boards, repositories, tickets, collaboration workflow, live agent runs, governed long-term knowledge, and bounded/auditable context assembly. M07–M09 add git/PR actions with forge secrets, managed connectors, and Agent Chat. **Next:** M10 plugins, then M11 security & sandbox, then M12 role-owner agents.

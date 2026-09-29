@@ -21,7 +21,7 @@ Controlled agent memory: typed knowledge with pgvector retrieval, context budget
 
 ## Out of scope
 
-- Capability-gated observation runs (M07)
+- Capability-gated observation runs (M12)
 - Consolidation batch jobs (optional stretch; basic expiry sufficient for v1)
 - Remote multi-model embedding routing beyond a single configured `openai_compatible` endpoint (local Ollama sidecar is the Compose install default; see [Knowledge configuration](../operations.md#knowledge-configuration))
 
@@ -146,16 +146,16 @@ Postgres uses an HNSW cosine index. M06 first materializes relational eligibilit
 
 ## Acceptance criteria
 
-- [ ] The design gate is committed before persistence implementation.
-- [ ] Manual candidates support concurrency-safe approve, edit, reject, supersede, expire, and stale operations with immutable provenance.
-- [ ] Only active, embedding-ready, in-scope, confident, unexpired, and unsuperseded knowledge enters Full runs.
-- [ ] Relational filtering precedes bounded stable cosine ranking and representative query plans use the documented indexes.
-- [ ] Selected-token-counter context totals stay within configuration while mandatory safety and result-contract sections are preserved.
-- [ ] Every included exact revision is logged at most once per run and appears under Knowledge Used.
-- [ ] Done transitions durably and idempotently schedule deterministic extraction.
-- [ ] Default extraction is Pending; only explicitly allowlisted, high-confidence, low-risk types can auto-save.
-- [ ] Knowledge UI exposes Pending, Approved, Rejected, and Stale views plus source, embedding, expiry, supersession, and usage metadata.
-- [ ] Targeted Rust/web tests and the distinct default-Compose knowledge smoke pass without changing the existing M06 context smoke.
+- [x] The design gate is committed before persistence implementation.
+- [x] Manual candidates support concurrency-safe approve, edit, reject, supersede, expire, and stale operations with immutable provenance.
+- [x] Only active, embedding-ready, in-scope, confident, unexpired, and unsuperseded knowledge enters Full runs.
+- [x] Relational filtering precedes bounded stable cosine ranking and representative query plans use the documented indexes.
+- [x] Selected-token-counter context totals stay within configuration while mandatory safety and result-contract sections are preserved.
+- [x] Every included exact revision is logged at most once per run and appears under Knowledge Used.
+- [x] Done transitions durably and idempotently schedule deterministic extraction.
+- [x] Default extraction is Pending; only explicitly allowlisted, high-confidence, low-risk types can auto-save.
+- [x] Knowledge UI exposes Pending, Approved, Rejected, and Stale views plus source, embedding, expiry, supersession, and usage metadata.
+- [x] Targeted Rust/web tests and the distinct default-Compose knowledge smoke pass without changing the existing M06 context smoke.
 
 ## References
 

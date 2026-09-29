@@ -24,7 +24,7 @@ Observable agent runs through a live terminal stream in the browser, persisted l
 ## Out of scope
 
 - Workflow mentions (M05)
-- Strict sandbox command filtering (M07)
+- Strict sandbox command filtering (M11)
 - PTY driver without tmux (future option)
 
 ## Dependencies
@@ -119,13 +119,13 @@ No new services. Artifact volume from M02/M03 used for terminal logs.
 
 ## Acceptance criteria
 
-- [ ] Live Console displays streaming mock output during run
-- [ ] Terminal log persisted as filesystem artifact
-- [ ] Board updates without full page reload (WS events)
-- [ ] Stop terminates tmux session and run
-- [ ] WebSocket requires authentication
-- [ ] CI smoke E2E passes
-- [ ] Run finished → toast appears (success and failure cases); failure toast navigates to Agent Runs error detail
+- [x] Live Console displays streaming mock output during run
+- [x] Terminal log persisted as filesystem artifact
+- [x] Board updates without full page reload (WS events)
+- [x] Stop terminates tmux session and run
+- [x] WebSocket requires authentication
+- [x] CI smoke E2E passes
+- [x] Run finished → toast appears (success and failure cases); failure toast navigates to Agent Runs error detail
 
 ## References
 

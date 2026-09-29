@@ -2,7 +2,7 @@
 
 **Coppice** is a self-hosted agent workspace: Trello-like board, tickets, comments, and (from M03) agent execution. Philosophy and full product design live in `docs/philosophy/`.
 
-**Status:** M06 knowledge & learning is complete. M09 Agent Chat is implemented on main (sessions API, SPA Chat, actions, `make e2e-smoke-m09`). **Next implement:** [M07 — Trust & signals](docs/milestones/M07-trust-and-signals.md), then [M08](docs/milestones/M08-connector-operator-cli.md). M09 shipped ahead of the sequential gate; M07/M08 remain required before claiming full trust/connector readiness for real connectors.
+**Status:** M01–M09 are complete (M07 was narrowed to git/PR + forge secrets). **Next implement:** [M10 — Plugins](docs/milestones/M10-plugins.md), then [M11 — Security & sandbox](docs/milestones/M11-security-and-sandbox.md), then [M12 — Role-owner agents](docs/milestones/M12-role-owner-agents.md).
 
 ## Must read before coding
 
@@ -13,7 +13,7 @@
 5. **Agent tests use `MockProvider`.** No real CLI adapters in CI or automated tests until configured manually. Fixtures: `fixtures/agent-responses/`.
 6. **CI must pass.** `make test` (embedded Postgres, no Docker), `cargo clippy --workspace -- -D warnings`, and `make web-test`. Clippy warnings are errors. After a **successful** full Rust test pass for your task, run `make clean` to reclaim disk (`target/` can grow to 10+ GB). Do **not** run it before every incremental `cargo test` during development — only when you are done with the task.
 7. **Fast verification during work.** Do **not** run `make test` while iterating — the full suite often takes several minutes. Use `make test-unit` (lib only), `make test-smoke` (lib + a few integration files), targeted `cargo test -p coppice-server --features embedded-test-db <filter>`, or `make web-test`. Reserve `make test` for final acceptance. Rust tests do **not** require `make compose-up` or `DATABASE_URL`.
-8. **Repositories.** Admin registers git checkouts by `local_path` (Settings → Repositories). Coppice creates worktrees only — no server-side `git clone`. Optional `remote_url` for metadata/PR (M07). Bind-mount host repos into the server container in Docker.
+8. **Repositories.** Admin registers git checkouts by `local_path` (Settings → Repositories). Coppice creates worktrees only — no server-side `git clone`. Optional `remote_url` for metadata/PR (M07, done). Bind-mount host repos into the server container in Docker.
 9. **Agent execution env.** `AGENT_DEFAULT_PROVIDER` (default `mock`), `WORKTREES_PATH`, `AGENT_WORKER_COUNT`. Smoke: `make e2e-smoke-m03`. Context long-running (`continued`, `splitTickets`): [design spec](docs/superpowers/specs/2026-06-10-context-long-running-tasks-design.md); smoke: `make e2e-smoke-m06`. Governed knowledge: [design spec](docs/superpowers/specs/2026-08-03-m06-knowledge-and-learning-design.md), amended by [agent compaction + full-text search](docs/superpowers/specs/2026-09-28-knowledge-agent-compaction-fts-design.md) (no embeddings; an admin-selected agent compacts Done tickets in batches); smoke: `make e2e-smoke-m06-knowledge`. Real connectors: managed `$HOME` volume + `coppice connector …` ([M08](docs/milestones/M08-connector-operator-cli.md)) — not host CLI bind-mounts.
 
 ## Monorepo (quick map)

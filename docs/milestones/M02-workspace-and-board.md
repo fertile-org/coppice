@@ -155,12 +155,12 @@ Backend via `docker compose up`. Script in `e2e/smoke/m02-board.spec`:
 
 ## Acceptance criteria
 
-- [ ] Login gates SPA; session persists across refresh
-- [ ] Full board CRUD works via UI and API
-- [ ] Comments and attachments work on ticket detail
-- [ ] Agents can be created from presets and assigned manually
-- [ ] `docker compose up` yields working board with no extra setup
-- [ ] CI smoke E2E passes
+- [x] Login gates SPA; session persists across refresh
+- [x] Full board CRUD works via UI and API
+- [x] Comments and attachments work on ticket detail
+- [x] Agents can be created from presets and assigned manually
+- [x] `docker compose up` yields working board with no extra setup
+- [x] CI smoke E2E passes
 
 ## References
 

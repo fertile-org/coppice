@@ -27,7 +27,7 @@ Agents execute work on tickets through the job queue and mock provider, using **
 - Agent-authored comments from run output
 - Ticket detail: **Runs** tab; header **Run Agent** / **Stop**
 - `MockProvider` as default compose provider
-- Permissive default sandbox profile (until M07)
+- Permissive default sandbox profile (until M11)
 
 ## Out of scope
 
@@ -35,7 +35,7 @@ Agents execute work on tickets through the job queue and mock provider, using **
 - Live terminal streaming (M04)
 - Workflow rule engine and mention jobs (M05)
 - Knowledge injection into context (M06)
-- Strict capability/sandbox enforcement (M07)
+- Strict capability/sandbox enforcement (M11)
 - Real CLI adapters
 - Path allowlist roots (trust admin + git validation)
 
@@ -134,14 +134,14 @@ Server image needs `git` CLI (worktree commands). **No `repo_data` volume.**
 
 ## Acceptance criteria
 
-- [ ] Admin can register and verify repositories with `local_path`
-- [ ] Tickets in any project can use any registered repo
-- [ ] Agent run uses worktree from registered path (no server-side clone)
-- [ ] Mock agent run completes end-to-end
-- [ ] Result contract drives comment + status/substatus update
-- [ ] Stop and retry work via API and UI
-- [ ] All automated tests use MockProvider only
-- [ ] CI smoke E2E passes
+- [x] Admin can register and verify repositories with `local_path`
+- [x] Tickets in any project can use any registered repo
+- [x] Agent run uses worktree from registered path (no server-side clone)
+- [x] Mock agent run completes end-to-end
+- [x] Result contract drives comment + status/substatus update
+- [x] Stop and retry work via API and UI
+- [x] All automated tests use MockProvider only
+- [x] CI smoke E2E passes
 
 ## References
 

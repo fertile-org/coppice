@@ -75,7 +75,7 @@ Always target the **server** service (workers spawn CLIs there), never web.
 - Baking vendor CLIs into the default server image
 - Host bind-mounts as a supported path
 - Settings UI for connectors
-- Finishing remaining M07 sandbox/signals work
+- Sandbox / signals work (now M11 / M12)
 - CI using real connectors (continue `MockProvider`)
 
 ## Architecture
@@ -111,9 +111,9 @@ cli/src/commands/connector/
 - [x] Compose: `connector_data` → `/home/coppice`, `HOME=/home/coppice`, PATH prepends `.local/bin` and `.opencode/bin`
 - [x] `enable` updates Docker/`COPPICE_CONFIG` correctly
 - [x] `doctor` fails clearly when CLI or auth missing (unit-tested)
-- [ ] `doctor cursor` green after install + setup in Compose
+- [x] `doctor cursor` green after install + setup in Compose
 - [x] `doctor opencode` green after install + setup in Compose
-- [ ] Models API works after setup (`GET .../models`) without host mounts
+- [x] Models API works after setup (`GET .../models`) without host mounts
 - [x] Default `make compose-up` / CI smoke still mock-only
 - [x] No `compose-snippet` command
 
