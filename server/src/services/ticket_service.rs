@@ -117,6 +117,47 @@ impl<'a> TicketService<'a> {
         Ok(results)
     }
 
+    /// Case-insensitive title/description search over non-archived tickets, newest
+    /// activity first. `board_id: None` searches every board.
+    pub async fn search(
+        &self,
+        board_id: Option<Uuid>,
+        query: Option<&str>,
+        status: Option<TicketStatus>,
+        limit: i64,
+    ) -> Result<Vec<Ticket>, TicketError> {
+        let pattern = query
+            .map(str::trim)
+            .filter(|q| !q.is_empty())
+            .map(|q| {
+                let escaped = q
+                    .replace('\\', "\\\\")
+                    .replace('%', "\\%")
+                    .replace('_', "\\_");
+                format!("%{escaped}%")
+            });
+        let sql = format!(
+            r#"
+            SELECT {TICKET_COLUMNS_ALIASED}
+            FROM tickets t
+            WHERE t.archived_at IS NULL
+              AND ($1::uuid IS NULL OR t.board_id = $1)
+              AND ($2::text IS NULL OR t.title ILIKE $2 OR t.description ILIKE $2)
+              AND ($3::text IS NULL OR t.status = $3)
+            ORDER BY t.updated_at DESC, t.id
+            LIMIT $4
+            "#,
+        );
+        let rows = sqlx::query(&sql)
+            .bind(board_id)
+            .bind(pattern)
+            .bind(status.map(status_to_str))
+            .bind(limit)
+            .fetch_all(self.pool)
+            .await?;
+        Ok(rows.iter().map(row_to_ticket).collect())
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub async fn create(
         &self,

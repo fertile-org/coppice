@@ -1,4 +1,5 @@
 pub mod agents;
+pub mod tickets;
 
 use crate::mcp::catalog::CoreTool;
 use crate::mcp::token::RunToolScope;
@@ -46,11 +47,11 @@ fn not_implemented() -> Result<Value, ToolError> {
 pub async fn dispatch(tool: CoreTool, ctx: &ToolCtx<'_>, args: Value) -> Result<Value, ToolError> {
     match tool {
         CoreTool::BoardAgents => agents::call_board_agents(ctx, args).await,
-        CoreTool::TicketGet
-        | CoreTool::TicketComments
-        | CoreTool::TicketRuns
-        | CoreTool::TicketSearch
-        | CoreTool::KnowledgeSearch
+        CoreTool::TicketGet => tickets::call_ticket_get(ctx, args).await,
+        CoreTool::TicketComments => tickets::call_ticket_comments(ctx, args).await,
+        CoreTool::TicketRuns => tickets::call_ticket_runs(ctx, args).await,
+        CoreTool::TicketSearch => tickets::call_ticket_search(ctx, args).await,
+        CoreTool::KnowledgeSearch
         | CoreTool::CommentPost
         | CoreTool::ResultSubmit
         | CoreTool::SkillList

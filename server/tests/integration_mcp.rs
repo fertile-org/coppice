@@ -565,3 +565,353 @@ async fn chat_turn_and_compaction_get_scoped_tokens() {
     assert_eq!(tokens[0].compaction_ticket_ids, vec![ticket_id]);
     assert!(tokens[0].revoked);
 }
+
+// ---- Task 5: ticket read tools ----
+
+/// Calls a tool over HTTP; returns `(isError, text)`.
+async fn call_tool(url: &str, token: &str, name: &str, args: Value) -> (bool, String) {
+    let res = rpc(
+        url,
+        token,
+        "tools/call",
+        json!({"name": name, "arguments": args}),
+    )
+    .await;
+    (
+        res["result"]["isError"].as_bool().unwrap(),
+        res["result"]["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .to_string(),
+    )
+}
+
+async fn call_tool_json(url: &str, token: &str, name: &str, args: Value) -> Value {
+    let (is_error, text) = call_tool(url, token, name, args).await;
+    assert!(!is_error, "tool {name} failed: {text}");
+    serde_json::from_str(&text).unwrap()
+}
+
+async fn mint_scope(fx: &RunFixture, scope: NewRunToolScope) -> String {
+    TokenService::new(&fx.pool)
+        .mint(&scope, Duration::from_secs(60))
+        .await
+        .expect("mint token")
+}
+
+async fn create_other_board(fx: &RunFixture) -> String {
+    let res = fx
+        .app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            "/api/boards",
+            r#"{"name":"Other Board"}"#,
+            &fx.cookie,
+            &fx.csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 201);
+    common::json_body(res).await["id"]
+        .as_str()
+        .unwrap()
+        .to_string()
+}
+
+async fn set_ticket_title(pool: &PgPool, ticket_id: &str, title: &str) {
+    sqlx::query("UPDATE tickets SET title = $1 WHERE id = $2::uuid")
+        .bind(title)
+        .bind(ticket_id)
+        .execute(pool)
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn ticket_get_defaults_to_run_ticket() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let fx = run_fixture().await;
+    let url = serve(&fx).await;
+    let token =
+        common::mint_test_token(&fx.state, fx.scope.run_id, ContextProfile::HumanAgent).await;
+
+    let ticket = call_tool_json(&url, &token, "ticket_get", json!({})).await;
+    assert_eq!(ticket["id"], fx.scope.ticket_id.unwrap().to_string());
+    assert_eq!(ticket["title"], "Test ticket");
+    assert_eq!(ticket["description"], "details");
+    assert!(ticket["acceptanceCriteria"].is_null());
+    assert!(ticket["status"].is_string());
+    assert!(ticket["repo"]["name"].is_string());
+    assert!(ticket["repo"].get("local_path").is_none());
+    assert!(ticket.get("branch").is_some());
+
+    let explicit = call_tool_json(
+        &url,
+        &token,
+        "ticket_get",
+        json!({"ticketId": fx.scope.ticket_id.unwrap().to_string()}),
+    )
+    .await;
+    assert_eq!(explicit["id"], ticket["id"]);
+
+    let rows = tool_call_rows(&fx.pool, fx.scope.run_id).await;
+    assert_eq!(
+        rows,
+        vec![
+            ("ticket_get".into(), "core".into(), "ok".into()),
+            ("ticket_get".into(), "core".into(), "ok".into()),
+        ]
+    );
+}
+
+#[tokio::test]
+async fn ticket_get_other_board_is_not_found() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let fx = run_fixture().await;
+    let url = serve(&fx).await;
+    let token =
+        common::mint_test_token(&fx.state, fx.scope.run_id, ContextProfile::HumanAgent).await;
+
+    let other_board = create_other_board(&fx).await;
+    let other_ticket = common::create_test_ticket(&fx.app, &other_board, &fx.cookie, &fx.csrf).await;
+
+    for tool in ["ticket_get", "ticket_comments", "ticket_runs"] {
+        let (is_error, text) = call_tool(&url, &token, tool, json!({"ticketId": other_ticket})).await;
+        assert!(is_error, "{tool} should fail");
+        assert_eq!(text, "ticket not on this board");
+    }
+
+    let (is_error, text) = call_tool(
+        &url,
+        &token,
+        "ticket_get",
+        json!({"ticketId": Uuid::new_v4().to_string()}),
+    )
+    .await;
+    assert!(is_error);
+    assert_eq!(text, "ticket not found");
+
+    let (is_error, text) = call_tool(&url, &token, "ticket_get", json!({"ticketId": "nope"})).await;
+    assert!(is_error);
+    assert!(text.contains("ticketId"), "{text}");
+}
+
+#[tokio::test]
+async fn ticket_comments_pages_large_threads() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let fx = run_fixture().await;
+    let url = serve(&fx).await;
+    let token =
+        common::mint_test_token(&fx.state, fx.scope.run_id, ContextProfile::HumanAgent).await;
+    let ticket_id = fx.scope.ticket_id.unwrap();
+    sqlx::query(
+        r#"
+        INSERT INTO ticket_comments (id, ticket_id, author_type, body, intent, created_at)
+        SELECT gen_random_uuid(), $1, 'human', 'comment ' || n, 'progress_update',
+               now() - make_interval(secs => 1000 - n)
+        FROM generate_series(1, 500) AS n
+        "#,
+    )
+    .bind(ticket_id)
+    .execute(&fx.pool)
+    .await
+    .unwrap();
+
+    let page1 = call_tool_json(&url, &token, "ticket_comments", json!({})).await;
+    let comments1 = page1["comments"].as_array().unwrap();
+    assert_eq!(comments1.len(), 20);
+    assert_eq!(comments1[0]["body"], "comment 500");
+    let next = page1["nextBefore"].as_str().expect("nextBefore set");
+    assert_eq!(next, comments1[19]["id"].as_str().unwrap());
+
+    let page2 = call_tool_json(&url, &token, "ticket_comments", json!({"before": next})).await;
+    let comments2 = page2["comments"].as_array().unwrap();
+    assert_eq!(comments2.len(), 20);
+    assert_eq!(comments2[0]["body"], "comment 480");
+
+    let huge = call_tool_json(&url, &token, "ticket_comments", json!({"limit": 1000})).await;
+    assert_eq!(huge["comments"].as_array().unwrap().len(), 50);
+
+    let (is_error, text) = call_tool(
+        &url,
+        &token,
+        "ticket_comments",
+        json!({"before": Uuid::new_v4().to_string()}),
+    )
+    .await;
+    assert!(is_error);
+    assert!(text.contains("before"), "{text}");
+
+    // Oldest page: no further cursor.
+    let oldest = call_tool_json(&url, &token, "ticket_comments", json!({"limit": 50})).await;
+    let mut cursor = oldest["nextBefore"].as_str().map(str::to_string);
+    let mut seen = 50;
+    while let Some(before) = cursor {
+        let page =
+            call_tool_json(&url, &token, "ticket_comments", json!({"limit": 50, "before": before}))
+                .await;
+        seen += page["comments"].as_array().unwrap().len();
+        cursor = page["nextBefore"].as_str().map(str::to_string);
+    }
+    assert_eq!(seen, 500);
+}
+
+#[tokio::test]
+async fn ticket_runs_lists_recent_runs() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let fx = run_fixture().await;
+    let url = serve(&fx).await;
+    let token =
+        common::mint_test_token(&fx.state, fx.scope.run_id, ContextProfile::HumanAgent).await;
+
+    let out = call_tool_json(&url, &token, "ticket_runs", json!({"limit": 500})).await;
+    let runs = out["runs"].as_array().unwrap();
+    assert_eq!(runs.len(), 1);
+    assert_eq!(runs[0]["id"], fx.scope.run_id.to_string());
+    assert_eq!(runs[0]["agent"], "Worker");
+    assert_eq!(runs[0]["job_type"], "work_on_ticket");
+}
+
+#[tokio::test]
+async fn chat_ticket_tool_without_ticket_id_errors() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let fx = run_fixture().await;
+    let url = serve(&fx).await;
+    let token = mint_scope(
+        &fx,
+        NewRunToolScope {
+            ticket_id: None,
+            profile: ContextProfile::Conversation,
+            job_type: "chat_turn".into(),
+            ..fx.scope.clone()
+        },
+    )
+    .await;
+
+    for tool in ["ticket_get", "ticket_comments", "ticket_runs"] {
+        let (is_error, text) = call_tool(&url, &token, tool, json!({})).await;
+        assert!(is_error, "{tool} should fail");
+        assert!(text.contains("ticketId is required"), "{text}");
+    }
+    let rows = tool_call_rows(&fx.pool, fx.scope.run_id).await;
+    assert!(rows.iter().all(|(_, _, status)| status == "error"));
+
+    // With an explicit id on the same board it works.
+    let ticket = fx.scope.ticket_id.unwrap().to_string();
+    let out = call_tool_json(&url, &token, "ticket_get", json!({"ticketId": ticket})).await;
+    assert_eq!(out["title"], "Test ticket");
+}
+
+#[tokio::test]
+async fn compaction_token_limited_to_batch_tickets() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let fx = run_fixture().await;
+    let url = serve(&fx).await;
+    let batch_ticket = fx.scope.ticket_id.unwrap();
+    let board_id = fx.scope.board_id.unwrap().to_string();
+    let outside_ticket = common::create_test_ticket(&fx.app, &board_id, &fx.cookie, &fx.csrf).await;
+    let token = mint_scope(
+        &fx,
+        NewRunToolScope {
+            ticket_id: None,
+            profile: ContextProfile::KnowledgeCompaction,
+            job_type: "compact_knowledge".into(),
+            compaction_ticket_ids: vec![batch_ticket],
+            ..fx.scope.clone()
+        },
+    )
+    .await;
+
+    let ok = call_tool_json(
+        &url,
+        &token,
+        "ticket_get",
+        json!({"ticketId": batch_ticket.to_string()}),
+    )
+    .await;
+    assert_eq!(ok["id"], batch_ticket.to_string());
+
+    for tool in ["ticket_get", "ticket_comments", "ticket_runs"] {
+        let (is_error, text) =
+            call_tool(&url, &token, tool, json!({"ticketId": outside_ticket})).await;
+        assert!(is_error, "{tool} should be denied");
+        assert!(text.contains("compaction batch"), "{text}");
+    }
+
+    let rows = tool_call_rows(&fx.pool, fx.scope.run_id).await;
+    assert_eq!(rows[0].2, "ok");
+    assert!(rows[1..].iter().all(|(_, _, status)| status == "denied"));
+    assert_eq!(rows.len(), 4);
+}
+
+#[tokio::test]
+async fn ticket_search_matches_title_on_board() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let fx = run_fixture().await;
+    let url = serve(&fx).await;
+    let token =
+        common::mint_test_token(&fx.state, fx.scope.run_id, ContextProfile::HumanAgent).await;
+    let board_id = fx.scope.board_id.unwrap().to_string();
+
+    let matching = common::create_test_ticket(&fx.app, &board_id, &fx.cookie, &fx.csrf).await;
+    set_ticket_title(&fx.pool, &matching, "Payment gateway retries").await;
+    let archived = common::create_test_ticket(&fx.app, &board_id, &fx.cookie, &fx.csrf).await;
+    set_ticket_title(&fx.pool, &archived, "Payment archived").await;
+    sqlx::query("UPDATE tickets SET archived_at = now() WHERE id = $1::uuid")
+        .bind(&archived)
+        .execute(&fx.pool)
+        .await
+        .unwrap();
+    let other_board = create_other_board(&fx).await;
+    let elsewhere = common::create_test_ticket(&fx.app, &other_board, &fx.cookie, &fx.csrf).await;
+    set_ticket_title(&fx.pool, &elsewhere, "Payment on another board").await;
+
+    let out = call_tool_json(&url, &token, "ticket_search", json!({"query": "PAYMENT"})).await;
+    let tickets = out["tickets"].as_array().unwrap();
+    assert_eq!(tickets.len(), 1, "{out}");
+    assert_eq!(tickets[0]["id"], matching);
+    assert_eq!(tickets[0]["title"], "Payment gateway retries");
+    assert!(tickets[0]["status"].is_string());
+    assert!(tickets[0].get("assignee").is_some());
+
+    // Description match, status filter, and wildcard characters are literal.
+    let by_desc = call_tool_json(&url, &token, "ticket_search", json!({"query": "detail"})).await;
+    assert!(by_desc["tickets"].as_array().unwrap().len() >= 2);
+    let none = call_tool_json(
+        &url,
+        &token,
+        "ticket_search",
+        json!({"query": "payment", "status": "done"}),
+    )
+    .await;
+    assert!(none["tickets"].as_array().unwrap().is_empty());
+    let wildcard = call_tool_json(&url, &token, "ticket_search", json!({"query": "%"})).await;
+    assert!(wildcard["tickets"].as_array().unwrap().is_empty());
+
+    let (is_error, text) =
+        call_tool(&url, &token, "ticket_search", json!({"status": "bogus"})).await;
+    assert!(is_error);
+    assert!(text.contains("status"), "{text}");
+}

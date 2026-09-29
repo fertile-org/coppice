@@ -8,10 +8,11 @@ use sqlx::PgPool;
 use sqlx::Row;
 use tokio::sync::watch;
 
-use crate::domain::comment::{author_type_to_str, intent_to_str, Comment, CommentIntent};
+use crate::domain::comment::{author_type_to_str, CommentIntent};
 use crate::domain::context_profile::ContextProfile;
 use crate::mcp::grant::{grant_for_run, McpAccess};
 use crate::mcp::token::NewRunToolScope;
+use crate::mcp::tools::tickets::{build_comments_json, build_runs_json, build_ticket_json};
 use crate::domain::run::{run_status_to_str, AgentRun, RunStatus};
 use crate::domain::slug::slugify;
 use crate::domain::substatus::TicketStatus;
@@ -36,10 +37,10 @@ use crate::services::context_budget::{
 };
 use crate::services::job_service::JobService;
 use crate::services::mention_service::MentionService;
-use crate::services::result_contract::{self, ACCEPTANCE_CRITERIA_HEADER};
+use crate::services::result_contract;
 use crate::services::run_orchestrator::{load_run_continuation_context, RunOrchestrator};
-use crate::services::run_service::{AgentRunWithConnector, RunService};
-use crate::services::ticket_service::{TicketService, TicketWithDisplay};
+use crate::services::run_service::RunService;
+use crate::services::ticket_service::TicketService;
 use crate::services::ticket_thread;
 use crate::services::workflow_service::WorkflowService;
 use crate::services::worktree_service::{
@@ -560,7 +561,7 @@ async fn execute_job(
             .context("load runs for context snapshot")?;
         let ticket_json = build_ticket_json(&ticket, assignee_agent_key_ref);
         let comments_json = build_comments_json(&comments, &agent_names);
-        let runs_json = build_runs_json(&runs, &agent_names);
+        let runs_json = build_runs_json(&runs, &agent_names, 10);
         write_agent_context_files(
             &paths.worktree_dir,
             &ticket_json,
@@ -1398,76 +1399,6 @@ fn human_request_mode_label(profile: ContextProfile) -> Option<&'static str> {
         | ContextProfile::Conversation
         | ContextProfile::KnowledgeCompaction => None,
     }
-}
-
-fn split_ticket_description(description: &str) -> (String, Option<String>) {
-    if let Some(idx) = description.find(ACCEPTANCE_CRITERIA_HEADER) {
-        let body = description[..idx].trim_end().to_string();
-        let acceptance = description[idx..].trim().to_string();
-        (body, Some(acceptance))
-    } else {
-        (description.to_string(), None)
-    }
-}
-
-fn build_ticket_json(
-    ticket: &TicketWithDisplay,
-    assignee_agent_key: Option<&str>,
-) -> serde_json::Value {
-    let (description, acceptance_criteria) = split_ticket_description(&ticket.ticket.description);
-    serde_json::json!({
-        "id": ticket.ticket.id,
-        "title": ticket.ticket.title,
-        "status": status_to_str(ticket.ticket.status),
-        "substatus": ticket.ticket.substatus.as_ref().map(|s| substatus_to_str(*s)),
-        "description": description,
-        "acceptance_criteria": acceptance_criteria,
-        "assignee_agent_id": ticket.ticket.assignee_agent_id,
-        "assignee_agent_key": assignee_agent_key,
-    })
-}
-
-fn build_comments_json(
-    comments: &[Comment],
-    agent_names: &HashMap<uuid::Uuid, String>,
-) -> serde_json::Value {
-    comments
-        .iter()
-        .map(|comment| {
-            serde_json::json!({
-                "id": comment.id,
-                "author": ticket_thread::author_label(comment, agent_names),
-                "intent": intent_to_str(comment.intent),
-                "body": comment.body,
-                "created_at": comment.created_at.format(&Rfc3339).unwrap_or_default(),
-            })
-        })
-        .collect::<Vec<_>>()
-        .into()
-}
-
-fn build_runs_json(
-    runs: &[AgentRunWithConnector],
-    agent_names: &HashMap<uuid::Uuid, String>,
-) -> serde_json::Value {
-    runs.iter()
-        .take(10)
-        .map(|entry| {
-            let agent = agent_names
-                .get(&entry.run.agent_id)
-                .map(String::as_str)
-                .unwrap_or("Agent");
-            serde_json::json!({
-                "id": entry.run.id,
-                "agent": agent,
-                "job_type": entry.run.job_type,
-                "status": run_status_to_str(entry.run.status),
-                "started_at": entry.run.started_at.map(|t| t.format(&Rfc3339).unwrap_or_default()),
-                "ended_at": entry.run.ended_at.map(|t| t.format(&Rfc3339).unwrap_or_default()),
-            })
-        })
-        .collect::<Vec<_>>()
-        .into()
 }
 
 #[cfg(test)]
