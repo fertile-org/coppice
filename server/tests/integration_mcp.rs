@@ -1,13 +1,21 @@
 mod common;
 
+use axum::Router;
 use coppice_server::domain::context_profile::ContextProfile;
 use coppice_server::mcp::token::{NewRunToolScope, TokenService};
 use coppice_server::services::run_service::RunService;
+use coppice_server::AppState;
+use serde_json::{json, Value};
 use sqlx::PgPool;
+use std::sync::Arc;
 use std::time::Duration;
 use uuid::Uuid;
 
 struct RunFixture {
+    state: Arc<AppState>,
+    app: Router,
+    cookie: String,
+    csrf: String,
     pool: PgPool,
     scope: NewRunToolScope,
     _git_dir: tempfile::TempDir,
@@ -47,6 +55,10 @@ async fn run_fixture() -> RunFixture {
         compaction_ticket_ids: vec![Uuid::new_v4()],
     };
     RunFixture {
+        state,
+        app,
+        cookie,
+        csrf,
         pool,
         scope,
         _git_dir: git_dir,
@@ -130,4 +142,203 @@ async fn token_unknown_is_rejected() {
     let fx = run_fixture().await;
     let tokens = TokenService::new(&fx.pool);
     assert!(tokens.verify("deadbeef").await.expect("verify").is_none());
+}
+
+async fn rpc(url: &str, token: &str, method: &str, params: Value) -> Value {
+    reqwest::Client::new()
+        .post(url)
+        .bearer_auth(token)
+        .json(&json!({"jsonrpc":"2.0","id":1,"method":method,"params":params}))
+        .send()
+        .await
+        .expect("mcp request")
+        .json()
+        .await
+        .expect("mcp json")
+}
+
+async fn serve(fx: &RunFixture) -> String {
+    let addr = common::spawn_test_server(fx.app.clone()).await;
+    format!("http://{addr}/mcp")
+}
+
+async fn tool_call_rows(pool: &PgPool, run_id: Uuid) -> Vec<(String, String, String)> {
+    sqlx::query_as(
+        "SELECT tool, source, status FROM run_tool_calls WHERE run_id = $1 ORDER BY created_at",
+    )
+    .bind(run_id)
+    .fetch_all(pool)
+    .await
+    .unwrap()
+}
+
+#[tokio::test]
+async fn mcp_requires_bearer() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let fx = run_fixture().await;
+    let url = serve(&fx).await;
+    let body = json!({"jsonrpc":"2.0","id":1,"method":"ping"});
+    let client = reqwest::Client::new();
+
+    let res = client.post(&url).json(&body).send().await.unwrap();
+    assert_eq!(res.status(), 401);
+    assert_eq!(res.headers()["www-authenticate"], "Bearer");
+
+    let res = client
+        .post(&url)
+        .bearer_auth("wrong")
+        .json(&body)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 401);
+}
+
+#[tokio::test]
+async fn mcp_get_is_405() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let fx = run_fixture().await;
+    let url = serve(&fx).await;
+    let client = reqwest::Client::new();
+    assert_eq!(client.get(&url).send().await.unwrap().status(), 405);
+    assert_eq!(client.delete(&url).send().await.unwrap().status(), 405);
+}
+
+#[tokio::test]
+async fn mcp_notification_is_202() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let fx = run_fixture().await;
+    let url = serve(&fx).await;
+    let token =
+        common::mint_test_token(&fx.state, fx.scope.run_id, ContextProfile::HumanAgent).await;
+    let res = reqwest::Client::new()
+        .post(&url)
+        .bearer_auth(token)
+        .json(&json!({"jsonrpc":"2.0","method":"notifications/initialized"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 202);
+}
+
+#[tokio::test]
+async fn mcp_tools_list_is_profile_scoped() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let fx = run_fixture().await;
+    let url = serve(&fx).await;
+    let token =
+        common::mint_test_token(&fx.state, fx.scope.run_id, ContextProfile::HumanChat).await;
+    let res = rpc(&url, &token, "tools/list", json!({})).await;
+    let names: Vec<&str> = res["result"]["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t["name"].as_str().unwrap())
+        .collect();
+    assert!(names.contains(&"board_agents"));
+    assert!(names.contains(&"result_submit"));
+    assert!(!names.contains(&"comment_post"));
+}
+
+#[tokio::test]
+async fn mcp_board_agents_lists_enabled_agents() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let fx = run_fixture().await;
+    common::create_agent_with_preset_key(
+        &fx.app,
+        "backend_engineer",
+        "Backend One",
+        &fx.cookie,
+        &fx.csrf,
+    )
+    .await;
+    let url = serve(&fx).await;
+    let token =
+        common::mint_test_token(&fx.state, fx.scope.run_id, ContextProfile::HumanAgent).await;
+    let res = rpc(
+        &url,
+        &token,
+        "tools/call",
+        json!({"name": "board_agents", "arguments": {}}),
+    )
+    .await;
+    assert_eq!(res["result"]["isError"], false);
+    let text = res["result"]["content"][0]["text"].as_str().unwrap();
+    let parsed: Value = serde_json::from_str(text).unwrap();
+    let agents = parsed["agents"].as_array().unwrap();
+    assert!(agents
+        .iter()
+        .any(|a| a["key"] == "backend_engineer" && a["name"] == "Backend One"));
+    assert!(agents.iter().all(|a| a["role"].is_string()));
+
+    let rows = tool_call_rows(&fx.pool, fx.scope.run_id).await;
+    assert_eq!(
+        rows,
+        vec![("board_agents".into(), "core".into(), "ok".into())]
+    );
+}
+
+#[tokio::test]
+async fn mcp_denied_tool_is_logged() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let fx = run_fixture().await;
+    let url = serve(&fx).await;
+    let token =
+        common::mint_test_token(&fx.state, fx.scope.run_id, ContextProfile::HumanChat).await;
+    let res = rpc(
+        &url,
+        &token,
+        "tools/call",
+        json!({"name": "comment_post", "arguments": {"body": "hi"}}),
+    )
+    .await;
+    assert_eq!(res["result"]["isError"], true);
+    let rows = tool_call_rows(&fx.pool, fx.scope.run_id).await;
+    assert_eq!(
+        rows,
+        vec![("comment_post".into(), "core".into(), "denied".into())]
+    );
+}
+
+#[tokio::test]
+async fn mcp_unimplemented_tool_hides_internal_details() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let fx = run_fixture().await;
+    let url = serve(&fx).await;
+    let token = common::mint_test_token(&fx.state, fx.scope.run_id, ContextProfile::Full).await;
+    let res = rpc(
+        &url,
+        &token,
+        "tools/call",
+        json!({"name": "skill_list", "arguments": {}}),
+    )
+    .await;
+    assert_eq!(res["result"]["isError"], true);
+    assert_eq!(res["result"]["content"][0]["text"], "internal error");
+    let rows = tool_call_rows(&fx.pool, fx.scope.run_id).await;
+    assert_eq!(
+        rows,
+        vec![("skill_list".into(), "skill".into(), "error".into())]
+    );
 }

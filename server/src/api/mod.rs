@@ -28,7 +28,8 @@ use crate::AppState;
 pub fn router(state: Arc<AppState>) -> Router {
     let public = Router::new()
         .merge(health::routes())
-        .merge(auth::public_routes());
+        .merge(auth::public_routes())
+        .merge(crate::mcp::server::routes());
 
     let protected = auth::protected_routes()
         .merge(boards::routes())

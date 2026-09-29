@@ -1,0 +1,59 @@
+pub mod agents;
+
+use crate::mcp::catalog::CoreTool;
+use crate::mcp::token::RunToolScope;
+use crate::AppState;
+use serde_json::Value;
+use sqlx::PgPool;
+
+pub struct ToolCtx<'a> {
+    pub state: &'a AppState,
+    pub pool: &'a PgPool,
+    pub scope: &'a RunToolScope,
+}
+
+#[derive(Debug)]
+pub enum ToolError {
+    InvalidArgs(String),
+    NotFound(String),
+    Denied(String),
+    Limit(String),
+    Internal(anyhow::Error),
+}
+
+impl ToolError {
+    /// Text returned to the agent; internal details stay in tracing only.
+    pub fn message(&self) -> String {
+        match self {
+            Self::InvalidArgs(m) | Self::NotFound(m) | Self::Denied(m) | Self::Limit(m) => {
+                m.clone()
+            }
+            Self::Internal(_) => "internal error".to_string(),
+        }
+    }
+}
+
+impl From<sqlx::Error> for ToolError {
+    fn from(e: sqlx::Error) -> Self {
+        Self::Internal(e.into())
+    }
+}
+
+fn not_implemented() -> Result<Value, ToolError> {
+    Err(ToolError::Internal(anyhow::anyhow!("not implemented")))
+}
+
+pub async fn dispatch(tool: CoreTool, ctx: &ToolCtx<'_>, args: Value) -> Result<Value, ToolError> {
+    match tool {
+        CoreTool::BoardAgents => agents::call_board_agents(ctx, args).await,
+        CoreTool::TicketGet
+        | CoreTool::TicketComments
+        | CoreTool::TicketRuns
+        | CoreTool::TicketSearch
+        | CoreTool::KnowledgeSearch
+        | CoreTool::CommentPost
+        | CoreTool::ResultSubmit
+        | CoreTool::SkillList
+        | CoreTool::SkillLoad => not_implemented(),
+    }
+}

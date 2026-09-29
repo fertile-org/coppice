@@ -812,3 +812,39 @@ pub fn multipart_request(
         .body(Body::from(body))
         .unwrap()
 }
+
+/// Mints a gateway token for an existing run, scoped from the run's own agent/ticket/board.
+pub async fn mint_test_token(
+    state: &Arc<AppState>,
+    run_id: uuid::Uuid,
+    profile: coppice_server::domain::context_profile::ContextProfile,
+) -> String {
+    use coppice_server::mcp::token::{NewRunToolScope, TokenService};
+
+    let pool = state.db.as_ref().expect("db pool");
+    let (agent_id, ticket_id, job_type, board_id): (uuid::Uuid, uuid::Uuid, String, uuid::Uuid) =
+        sqlx::query_as(
+            "SELECT r.agent_id, r.ticket_id, r.job_type, t.board_id \
+             FROM agent_runs r JOIN tickets t ON t.id = r.ticket_id WHERE r.id = $1",
+        )
+        .bind(run_id)
+        .fetch_one(pool)
+        .await
+        .expect("run row");
+    TokenService::new(pool)
+        .mint(
+            &NewRunToolScope {
+                run_id,
+                agent_id,
+                ticket_id: Some(ticket_id),
+                chat_session_id: None,
+                board_id: Some(board_id),
+                profile,
+                job_type,
+                compaction_ticket_ids: vec![],
+            },
+            Duration::from_secs(60),
+        )
+        .await
+        .expect("mint token")
+}
