@@ -97,6 +97,37 @@ pub fn is_tech_lead_identity(agent_key: &str, agent_role: &str) -> bool {
         || role.contains("technical lead")
 }
 
+pub fn is_pm_identity(agent_key: &str, agent_role: &str) -> bool {
+    if agent_key.eq_ignore_ascii_case("pm") {
+        return true;
+    }
+    let role = agent_role.to_ascii_lowercase();
+    role == "pm" || role.contains("product manager")
+}
+
+pub fn is_reviewer_identity(agent_key: &str, agent_role: &str) -> bool {
+    if agent_key.eq_ignore_ascii_case("reviewer") {
+        return true;
+    }
+    agent_role.to_ascii_lowercase().contains("review")
+}
+
+pub fn is_in_review_review_task(ticket_status: &str, agent_key: &str, agent_role: &str) -> bool {
+    ticket_status.eq_ignore_ascii_case("in_review")
+        && (is_tech_lead_identity(agent_key, agent_role)
+            || is_reviewer_identity(agent_key, agent_role))
+}
+
+pub fn is_in_qa_qc_task(ticket_status: &str, agent_key: &str, agent_role: &str) -> bool {
+    if !ticket_status.eq_ignore_ascii_case("in_qa") {
+        return false;
+    }
+    if agent_key.eq_ignore_ascii_case("qc") {
+        return true;
+    }
+    agent_role.to_ascii_lowercase().contains("quality")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

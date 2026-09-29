@@ -7,6 +7,7 @@ pub mod domain;
 pub mod events;
 pub mod knowledge;
 pub mod mcp;
+pub mod plugins;
 pub mod middleware;
 pub mod providers;
 pub mod sessions;
@@ -36,6 +37,7 @@ pub struct AppState {
     pub opencode_serve: Option<Arc<crate::sessions::opencode_serve::OpenCodeServeManager>>,
     pub agent_templates: HashMap<String, String>,
     pub secret_store: crate::crypto::SecretStore,
+    pub skills: Arc<crate::plugins::skills::SkillCatalog>,
 }
 
 impl AppState {
@@ -60,6 +62,33 @@ impl AppState {
         &self.config.agent.default_connector
     }
 
+    /// Writes the embedded built-in plugins into `config.mcp.builtin_plugins_dir`
+    /// and loads the skill catalog from there. Called once at startup.
+    pub fn builtin_skills_from_config(
+        config: &AppConfig,
+    ) -> anyhow::Result<Arc<crate::plugins::skills::SkillCatalog>> {
+        let dir = std::path::Path::new(&config.mcp.builtin_plugins_dir);
+        crate::plugins::builtin::materialize_builtin(dir).map_err(|e| {
+            anyhow::anyhow!(
+                "failed to write built-in plugins to {}: {e}",
+                dir.display()
+            )
+        })?;
+        Ok(Arc::new(crate::plugins::skills::load_builtin(dir)?))
+    }
+
+    /// Built-in skills materialized once into a process-lifetime temp dir, so
+    /// tests never write into the repo or a configured plugins dir.
+    pub fn test_skills() -> Arc<crate::plugins::skills::SkillCatalog> {
+        static DIR: std::sync::OnceLock<tempfile::TempDir> = std::sync::OnceLock::new();
+        let dir = DIR.get_or_init(|| {
+            let dir = tempfile::tempdir().expect("builtin plugins tempdir");
+            crate::plugins::builtin::materialize_builtin(dir.path()).expect("materialize builtins");
+            dir
+        });
+        Arc::new(crate::plugins::skills::load_builtin(dir.path()).expect("load builtins"))
+    }
+
     pub fn load_agent_templates() -> HashMap<String, String> {
         let dir = crate::agent_templates::templates_dir();
         crate::agent_templates::load(&dir).expect("failed to load agent_templates from disk")
@@ -78,6 +107,7 @@ pub async fn test_state() -> Arc<AppState> {
         opencode_serve: None,
         agent_templates: AppState::load_agent_templates(),
         secret_store,
+        skills: AppState::test_skills(),
         config,
         db: None,
     })

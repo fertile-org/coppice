@@ -321,8 +321,40 @@ async fn mcp_denied_tool_is_logged() {
     );
 }
 
+/// Forces a real `ToolError::Internal` (unreachable database) and checks the
+/// agent only sees "internal error", never the sqlx/connection details.
 #[tokio::test]
-async fn mcp_unimplemented_tool_hides_internal_details() {
+async fn mcp_internal_error_hides_details() {
+    use coppice_server::mcp::host::RunToolHost;
+    use coppice_server::mcp::protocol::ToolHost;
+    use coppice_server::mcp::token::RunToolScope;
+
+    let mut state = (*coppice_server::test_state().await).clone();
+    state.db = Some(
+        sqlx::postgres::PgPoolOptions::new()
+            .acquire_timeout(Duration::from_secs(2))
+            .connect_lazy("postgres://nobody:secret@127.0.0.1:1/unreachable")
+            .expect("lazy pool"),
+    );
+    let scope = RunToolScope {
+        token_id: Uuid::new_v4(),
+        run_id: Uuid::new_v4(),
+        agent_id: Uuid::new_v4(),
+        ticket_id: None,
+        chat_session_id: None,
+        board_id: None,
+        profile: ContextProfile::Full,
+        job_type: "work_on_ticket".into(),
+        compaction_ticket_ids: vec![],
+    };
+    let host = RunToolHost::new(Arc::new(state), scope);
+    let out = host.call("board_agents", json!({})).await;
+    assert!(out.is_error);
+    assert_eq!(out.text, "internal error");
+}
+
+#[tokio::test]
+async fn skill_list_returns_builtin_skills() {
     let _guard = common::DB_TEST_LOCK.lock().await;
     if !common::db_available().await {
         return;
@@ -330,19 +362,68 @@ async fn mcp_unimplemented_tool_hides_internal_details() {
     let fx = run_fixture().await;
     let url = serve(&fx).await;
     let token = common::mint_test_token(&fx.state, fx.scope.run_id, ContextProfile::Full).await;
-    let res = rpc(
-        &url,
-        &token,
-        "tools/call",
-        json!({"name": "skill_list", "arguments": {}}),
-    )
-    .await;
-    assert_eq!(res["result"]["isError"], true);
-    assert_eq!(res["result"]["content"][0]["text"], "internal error");
-    let rows = tool_call_rows(&fx.pool, fx.scope.run_id).await;
+    let listed = call_tool_json(&url, &token, "skill_list", json!({})).await;
+    let ids: Vec<&str> = listed["skills"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|s| s["id"].as_str().unwrap())
+        .collect();
+    for id in [
+        "coppice-collaboration",
+        "coppice-splitting",
+        "coppice-pm-refinement",
+        "coppice-tech-lead-review",
+        "coppice-qc-verification",
+        "coppice-git",
+    ] {
+        assert!(ids.contains(&id), "missing {id} in {ids:?}");
+    }
+    assert!(listed["skills"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|s| !s["description"].as_str().unwrap().is_empty()));
     assert_eq!(
-        rows,
-        vec![("skill_list".into(), "skill".into(), "error".into())]
+        tool_call_rows(&fx.pool, fx.scope.run_id).await,
+        vec![("skill_list".into(), "skill".into(), "ok".into())]
+    );
+}
+
+#[tokio::test]
+async fn skill_load_returns_body_and_logs_skill_source() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let fx = run_fixture().await;
+    let url = serve(&fx).await;
+    let token = common::mint_test_token(&fx.state, fx.scope.run_id, ContextProfile::Full).await;
+
+    let loaded = call_tool_json(&url, &token, "skill_load", json!({"name": "coppice-git"})).await;
+    assert_eq!(loaded["id"], "coppice-git");
+    assert!(loaded["body"]
+        .as_str()
+        .unwrap()
+        .contains("Coppice platform rules — git (required)"));
+    let path = std::path::Path::new(loaded["path"].as_str().unwrap());
+    assert!(path.is_absolute());
+    assert!(path.join("SKILL.md").is_file());
+
+    let (is_error, text) =
+        call_tool(&url, &token, "skill_load", json!({"name": "no-such-skill"})).await;
+    assert!(is_error);
+    assert!(text.contains("no-such-skill"), "{text}");
+    let (is_error, _) = call_tool(&url, &token, "skill_load", json!({})).await;
+    assert!(is_error);
+
+    assert_eq!(
+        tool_call_rows(&fx.pool, fx.scope.run_id).await,
+        vec![
+            ("skill_load".into(), "skill".into(), "ok".into()),
+            ("skill_load".into(), "skill".into(), "error".into()),
+            ("skill_load".into(), "skill".into(), "error".into()),
+        ]
     );
 }
 

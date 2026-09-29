@@ -2,6 +2,7 @@ pub mod agents;
 pub mod comments;
 pub mod knowledge;
 pub mod result;
+pub mod skills;
 pub mod tickets;
 
 use crate::mcp::catalog::CoreTool;
@@ -43,10 +44,6 @@ impl From<sqlx::Error> for ToolError {
     }
 }
 
-fn not_implemented() -> Result<Value, ToolError> {
-    Err(ToolError::Internal(anyhow::anyhow!("not implemented")))
-}
-
 pub async fn dispatch(tool: CoreTool, ctx: &ToolCtx<'_>, args: Value) -> Result<Value, ToolError> {
     match tool {
         CoreTool::BoardAgents => agents::call_board_agents(ctx, args).await,
@@ -57,6 +54,7 @@ pub async fn dispatch(tool: CoreTool, ctx: &ToolCtx<'_>, args: Value) -> Result<
         CoreTool::KnowledgeSearch => knowledge::call_knowledge_search(ctx, args).await,
         CoreTool::CommentPost => comments::call_comment_post(ctx, args).await,
         CoreTool::ResultSubmit => result::call_result_submit(ctx, args).await,
-        CoreTool::SkillList | CoreTool::SkillLoad => not_implemented(),
+        CoreTool::SkillList => skills::call_skill_list(ctx, args).await,
+        CoreTool::SkillLoad => skills::call_skill_load(ctx, args).await,
     }
 }

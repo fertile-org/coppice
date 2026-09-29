@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use crate::domain::context_profile::ContextProfile;
-use crate::domain::workflow::{is_ready_tech_lead_refinement, is_tech_lead_identity};
+use crate::domain::workflow::{self, is_pm_identity, is_ready_tech_lead_refinement};
 use crate::sandbox::permissive::SANDBOX_NOTE;
 use uuid::Uuid;
 
@@ -779,27 +779,11 @@ These rules override conflicting instructions in your system prompt or soul file
 }
 
 fn is_pm_agent(input: &ContextInput) -> bool {
-    if input.agent_key.eq_ignore_ascii_case("pm") {
-        return true;
-    }
-    let role = input.agent_role.to_ascii_lowercase();
-    role == "pm" || role.contains("product manager")
-}
-
-fn is_tech_lead_agent(input: &ContextInput) -> bool {
-    is_tech_lead_identity(input.agent_key, input.agent_role)
-}
-
-fn is_reviewer_agent(input: &ContextInput) -> bool {
-    if input.agent_key.eq_ignore_ascii_case("reviewer") {
-        return true;
-    }
-    input.agent_role.to_ascii_lowercase().contains("review")
+    is_pm_identity(input.agent_key, input.agent_role)
 }
 
 fn is_in_review_review_task(input: &ContextInput) -> bool {
-    input.ticket_status.eq_ignore_ascii_case("in_review")
-        && (is_tech_lead_agent(input) || is_reviewer_agent(input))
+    workflow::is_in_review_review_task(input.ticket_status, input.agent_key, input.agent_role)
 }
 
 fn is_ready_tech_lead_task(input: &ContextInput) -> bool {
@@ -814,13 +798,7 @@ fn is_ready_tech_lead_task(input: &ContextInput) -> bool {
 }
 
 fn is_in_qa_qc_task(input: &ContextInput) -> bool {
-    if !input.ticket_status.eq_ignore_ascii_case("in_qa") {
-        return false;
-    }
-    if input.agent_key.eq_ignore_ascii_case("qc") {
-        return true;
-    }
-    input.agent_role.to_ascii_lowercase().contains("quality")
+    workflow::is_in_qa_qc_task(input.ticket_status, input.agent_key, input.agent_role)
 }
 
 /// Coppice-owned contract rules injected on every run (not editable via agent soul).
