@@ -1,6 +1,6 @@
 use super::cursor_console::CursorConsolePublisher;
 use super::{
-    mcp_unavailable, run_dir, worktree_dir_from_context, AgentProvider, AgentRunInput,
+    artifacts_path, mcp_unavailable, worktree_dir_from_context, AgentProvider, AgentRunInput,
     AgentRunResult, ProviderError,
 };
 use crate::mcp::grant::McpAccess;
@@ -56,10 +56,8 @@ impl AgentProvider for CursorProvider {
         // Coppice does not inject or strip credentials.
 
         if let Some(access) = &input.mcp {
-            let run_dir = run_dir(&input).ok_or_else(|| {
-                mcp_unavailable("cursor needs a run artifacts dir for its per-run HOME")
-            })?;
-            cmd.envs(cursor_mcp_setup(access, &run_dir, &HostEnv::from_process())?);
+            let state_dir = cursor_state_dir(&input)?;
+            cmd.envs(cursor_mcp_setup(access, &state_dir, &HostEnv::from_process())?);
             cmd.envs(access.env());
         }
 
@@ -388,18 +386,44 @@ impl CliConfigFile {
     }
 }
 
+/// Where this run's `HOME` and `CURSOR_CONFIG_DIR` live.
+///
+/// The CLI stores its `chats` state under `CURSOR_CONFIG_DIR`, so a directory
+/// keyed by run id would lose every previous turn and `--resume <sid>` would
+/// fail. Scope the directory to whatever the resume key is instead:
+///
+/// - chat turns resume by chat session → `chat-sessions/<chat session id>`
+/// - ticket runs resume the newest session for `(ticket, agent)` → `tickets/<ticket id>`
+/// - anything else has no resume and stays per run → `runs/<run id>`
+///
+/// Runs sharing a directory rewrite `mcp.json` and `cli-config.json` on every
+/// turn. Both are byte-identical across runs of the same server (neither holds
+/// the token), so concurrent runs on one ticket cannot corrupt each other.
+fn cursor_state_dir(input: &AgentRunInput) -> Result<PathBuf, ProviderError> {
+    let missing =
+        || mcp_unavailable("cursor has no run artifacts dir for its per-run HOME");
+    let artifacts_dir = input.artifacts_dir.as_deref().ok_or_else(missing)?;
+    let segments: [&str; 2] = match (&input.chat_session_id, &input.ticket_id, &input.run_id) {
+        (Some(chat_session_id), _, _) => ["chat-sessions", chat_session_id],
+        (None, Some(ticket_id), _) => ["tickets", ticket_id],
+        (None, None, Some(run_id)) => ["runs", run_id],
+        (None, None, None) => return Err(missing()),
+    };
+    Ok(artifacts_path(artifacts_dir, &segments)?)
+}
+
 /// Verified mechanism (plan task 1): the CLI reads MCP servers only from the
 /// workspace and from `$HOME/.cursor/mcp.json`, and permissions only from
 /// `$CURSOR_CONFIG_DIR/cli-config.json`. Give the run its own `HOME` and config
-/// dir under the run's artifacts dir so nothing is written to the workspace or
-/// the operator's real `~/.cursor`.
+/// dir under the artifacts dir so nothing is written to the workspace or the
+/// operator's real `~/.cursor`.
 fn cursor_mcp_setup(
     access: &McpAccess,
-    run_dir: &Path,
+    state_dir: &Path,
     host: &HostEnv,
 ) -> std::io::Result<Vec<(String, String)>> {
-    let home = run_dir.join("cursor-home");
-    let config_dir = run_dir.join("cursor-config");
+    let home = state_dir.join("cursor-home");
+    let config_dir = state_dir.join("cursor-config");
     std::fs::create_dir_all(home.join(".cursor"))?;
     std::fs::create_dir_all(&config_dir)?;
 
@@ -587,6 +611,74 @@ mod tests {
             url: "http://127.0.0.1:5000/mcp".into(),
             token: "super-secret-run-token".into(),
         }
+    }
+
+    fn run_input() -> AgentRunInput {
+        AgentRunInput {
+            agent_id: "agent-1".into(),
+            agent_key: "backend_engineer".into(),
+            agent_role: "Backend Engineer".into(),
+            job_type: "work_on_ticket".into(),
+            ticket_id: None,
+            ticket_status: None,
+            context_profile: crate::domain::context_profile::ContextProfile::Full,
+            context_path: "/tmp/wt/.agent/context.md".into(),
+            run_id: Some("run-1".into()),
+            chat_session_id: None,
+            artifacts_dir: Some("./data/artifacts".into()),
+            stream: None,
+            cancel_rx: None,
+            model_provider: None,
+            model: None,
+            session_created_tx: None,
+            resume_context: None,
+            resume_session_id: None,
+            read_only_tools: false,
+            mcp: None,
+        }
+    }
+
+    #[test]
+    fn cursor_state_dir_follows_the_resume_key() {
+        // Chat turns resume by chat session, so the CLI's `chats` state must
+        // outlive the run.
+        let mut chat = run_input();
+        chat.chat_session_id = Some("chat-9".into());
+        chat.ticket_id = Some("ticket-7".into());
+        let dir = cursor_state_dir(&chat).expect("chat dir");
+        assert!(dir.ends_with("data/artifacts/chat-sessions/chat-9"), "{dir:?}");
+
+        // Ticket runs resume the newest session for the ticket.
+        let mut ticket = run_input();
+        ticket.ticket_id = Some("ticket-7".into());
+        let dir = cursor_state_dir(&ticket).expect("ticket dir");
+        assert!(dir.ends_with("data/artifacts/tickets/ticket-7"), "{dir:?}");
+
+        // Everything else never resumes and stays per run.
+        let dir = cursor_state_dir(&run_input()).expect("run dir");
+        assert!(dir.ends_with("data/artifacts/runs/run-1"), "{dir:?}");
+    }
+
+    #[test]
+    fn cursor_state_dir_is_absolute_so_home_is_not_resolved_in_the_worktree() {
+        // The CLI is spawned with `current_dir(worktree)`; a relative HOME
+        // would land inside the repo checkout.
+        for input in [run_input(), {
+            let mut chat = run_input();
+            chat.chat_session_id = Some("chat-9".into());
+            chat
+        }] {
+            let dir = cursor_state_dir(&input).expect("state dir");
+            assert!(dir.is_absolute(), "{dir:?}");
+        }
+    }
+
+    #[test]
+    fn cursor_state_dir_without_artifacts_dir_is_mcp_unavailable() {
+        let mut input = run_input();
+        input.artifacts_dir = None;
+        let err = cursor_state_dir(&input).expect_err("no artifacts dir");
+        assert!(err.to_string().contains("mcp_unavailable: cursor"), "{err}");
     }
 
     #[test]

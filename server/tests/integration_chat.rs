@@ -309,6 +309,7 @@ async fn conversation_profile_refuses_write_capable_connectors() {
             context_profile: ContextProfile::Conversation,
             context_path: "/tmp/.agent/context.md".into(),
             run_id: None,
+            chat_session_id: None,
             artifacts_dir: None,
             stream: None,
             cancel_rx: None,

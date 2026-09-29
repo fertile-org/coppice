@@ -986,6 +986,7 @@ impl<'a> ChatService<'a> {
             context_profile: ContextProfile::Conversation,
             context_path: context_path.to_string_lossy().into_owned(),
             run_id: None,
+            chat_session_id: None,
             artifacts_dir: deps.artifacts_dir.map(str::to_string),
             model_provider: agent.model_provider.clone(),
             model: agent.model.clone(),

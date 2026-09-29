@@ -1,7 +1,7 @@
 use super::kilo_console::KiloConsolePublisher;
 use super::{
-    mcp_unavailable, refuse_unsupported_read_only, run_dir, worktree_dir_from_context,
-    AgentProvider, AgentRunInput, AgentRunResult, ProviderError,
+    refuse_unsupported_read_only, run_dir, worktree_dir_from_context, AgentProvider, AgentRunInput,
+    AgentRunResult, ProviderError,
 };
 use crate::mcp::grant::McpAccess;
 use crate::sessions::opencode_events::{coppice_run_prompt, extract_result_from_text};
@@ -129,9 +129,7 @@ impl AgentProvider for KiloCodeProvider {
         // codex. Coppice does not inject or strip credentials.
 
         if let Some(access) = &input.mcp {
-            let run_dir = run_dir(&input).ok_or_else(|| {
-                mcp_unavailable("kilo-code needs a run artifacts dir for its MCP config")
-            })?;
+            let run_dir = run_dir(&input, "kilo-code")?;
             cmd.envs(kilo_mcp_setup(access, &run_dir)?);
             cmd.envs(access.env());
         }
@@ -385,6 +383,7 @@ mod tests {
             context_profile: crate::domain::context_profile::ContextProfile::Full,
             context_path: "/tmp/.agent/context.md".into(),
             run_id: None,
+            chat_session_id: None,
             artifacts_dir: None,
             stream: None,
             cancel_rx: None,
@@ -415,6 +414,7 @@ mod tests {
             context_profile: crate::domain::context_profile::ContextProfile::Full,
             context_path: "/tmp/.agent/context.md".into(),
             run_id: None,
+            chat_session_id: None,
             artifacts_dir: None,
             stream: None,
             cancel_rx: None,
@@ -445,6 +445,7 @@ mod tests {
             context_profile: crate::domain::context_profile::ContextProfile::Full,
             context_path: "/tmp/.agent/context.md".into(),
             run_id: None,
+            chat_session_id: None,
             artifacts_dir: None,
             stream: None,
             cancel_rx: None,

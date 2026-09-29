@@ -21,7 +21,7 @@ pub type ProviderRegistry = ConnectorRegistry;
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use thiserror::Error;
 use tokio::sync::watch;
@@ -54,6 +54,9 @@ pub struct AgentRunInput {
     pub context_profile: ContextProfile,
     pub context_path: String,
     pub run_id: Option<String>,
+    /// Set on chat turns. Connectors that keep CLI state on disk key it by the
+    /// chat session so `--resume` finds the previous turn.
+    pub chat_session_id: Option<String>,
     pub artifacts_dir: Option<String>,
     pub stream: Option<Arc<RunStreamHandle>>,
     pub cancel_rx: Option<watch::Receiver<bool>>,
@@ -75,13 +78,34 @@ pub const CHAT_READ_ONLY_TOOLS: &str = "Read,Glob,Grep,WebFetch,WebSearch";
 /// MCP tools as `mcp__<server>__<tool>` (claude-code).
 pub const COPPICE_MCP_TOOLS: &str = "mcp__coppice__*";
 
-/// Per-run artifacts directory, `<artifacts_dir>/runs/<run_id>/`. The only
-/// place a connector may write MCP configuration: never the worktree, a
-/// registered repo checkout, or the user's global CLI config.
-pub fn run_dir(input: &AgentRunInput) -> Option<PathBuf> {
-    let artifacts_dir = input.artifacts_dir.as_ref()?;
-    let run_id = input.run_id.as_ref()?;
-    Some(PathBuf::from(artifacts_dir).join("runs").join(run_id))
+/// Build an **absolute** path under the artifacts dir.
+///
+/// `storage.artifacts_dir` is usually relative (`./data/artifacts`), and every
+/// subprocess connector spawns the CLI with `current_dir(worktree)`. A relative
+/// path handed to a child — `HOME`, `--mcp-config`, `KILO_CONFIG` — would
+/// resolve against the worktree, writing MCP config into the repo checkout and
+/// losing the gateway. Absolutize once, here, against the server's cwd.
+pub fn artifacts_path(artifacts_dir: &str, segments: &[&str]) -> std::io::Result<PathBuf> {
+    let base = if artifacts_dir.is_empty() {
+        Path::new(".")
+    } else {
+        Path::new(artifacts_dir)
+    };
+    let mut path = std::path::absolute(base)?;
+    path.extend(segments);
+    Ok(path)
+}
+
+/// Absolute `<artifacts_dir>/runs/<run_id>/`. The only place a connector may
+/// write per-run MCP configuration: never the worktree, a registered repo
+/// checkout, or the user's global CLI config.
+pub fn run_dir(input: &AgentRunInput, connector: &str) -> Result<PathBuf, ProviderError> {
+    let (Some(artifacts_dir), Some(run_id)) = (&input.artifacts_dir, &input.run_id) else {
+        return Err(mcp_unavailable(&format!(
+            "{connector} has no run artifacts dir for its MCP configuration"
+        )));
+    };
+    Ok(artifacts_path(artifacts_dir, &["runs", run_id])?)
 }
 
 /// A run that has a gateway token but no way to hand it to the CLI must fail
@@ -250,6 +274,33 @@ mod tests {
     use super::*;
     use crate::providers::mock::{mock_env_lock, MockProvider};
 
+    /// A run input with no run, no artifacts dir and no gateway — the shape a
+    /// probe or draft uses. Tests override just the fields they care about.
+    fn probe_input() -> AgentRunInput {
+        AgentRunInput {
+            agent_id: "agent-1".into(),
+            agent_key: "agent-1".into(),
+            agent_role: "Backend Engineer".into(),
+            job_type: "work_on_ticket".into(),
+            ticket_id: None,
+            ticket_status: None,
+            context_profile: ContextProfile::Full,
+            context_path: "/tmp".into(),
+            run_id: None,
+            chat_session_id: None,
+            artifacts_dir: None,
+            stream: None,
+            cancel_rx: None,
+            model_provider: None,
+            model: None,
+            session_created_tx: None,
+            resume_context: None,
+            resume_session_id: None,
+            read_only_tools: false,
+            mcp: None,
+        }
+    }
+
     #[test]
     fn resume_invalid_detection() {
         assert!(is_resume_session_invalid(&ProviderError::ResumeSessionInvalid("x".into())));
@@ -314,30 +365,7 @@ mod tests {
         let prev = std::env::var("MOCK_AGENT_RESPONSE").ok();
         std::env::set_var("MOCK_AGENT_RESPONSE", "done");
         let provider = MockProvider::default();
-        let result = provider
-            .run(AgentRunInput {
-                agent_id: "agent-1".into(),
-                agent_key: "agent-1".into(),
-                agent_role: "Backend Engineer".into(),
-                job_type: "work_on_ticket".into(),
-                ticket_id: None,
-                ticket_status: None,
-                context_profile: ContextProfile::Full,
-                context_path: "/tmp".into(),
-                run_id: None,
-                artifacts_dir: None,
-                stream: None,
-                cancel_rx: None,
-                model_provider: None,
-                model: None,
-                session_created_tx: None,
-                resume_context: None,
-                resume_session_id: None,
-                        read_only_tools: false,
-                        mcp: None,
-        })
-            .await
-            .expect("mock run");
+        let result = provider.run(probe_input()).await.expect("mock run");
         match result {
             AgentRunResult::Done { summary, .. } => {
                 assert_eq!(summary, "Mock implementation complete.");
@@ -367,6 +395,37 @@ mod tests {
     fn worktree_dir_from_context_rejects_bad_path() {
         let err = worktree_dir_from_context("context.md").expect_err("need parents");
         assert!(matches!(err, ProviderError::InvalidInput(_)));
+    }
+
+    #[test]
+    fn artifacts_path_absolutizes_relative_artifacts_dir() {
+        let path = artifacts_path("./data/artifacts", &["runs", "run-1"]).expect("path");
+        assert!(path.is_absolute(), "{path:?}");
+        assert!(path.ends_with("data/artifacts/runs/run-1"), "{path:?}");
+
+        let already = artifacts_path("/srv/artifacts", &["runs", "run-1"]).expect("path");
+        assert_eq!(already, std::path::Path::new("/srv/artifacts/runs/run-1"));
+    }
+
+    #[test]
+    fn run_dir_is_absolute_so_children_do_not_resolve_it_in_the_worktree() {
+        let mut input = probe_input();
+        input.artifacts_dir = Some("./data/artifacts".into());
+        input.run_id = Some("run-1".into());
+
+        let dir = run_dir(&input, "cursor").expect("run dir");
+        assert!(dir.is_absolute(), "{dir:?}");
+        assert!(dir.ends_with("data/artifacts/runs/run-1"), "{dir:?}");
+    }
+
+    #[test]
+    fn run_dir_without_artifacts_dir_is_mcp_unavailable() {
+        let input = probe_input();
+        let err = run_dir(&input, "cursor").expect_err("no artifacts dir");
+        assert!(
+            err.to_string().contains("mcp_unavailable: cursor has no run artifacts dir"),
+            "{err}"
+        );
     }
 
     #[test]

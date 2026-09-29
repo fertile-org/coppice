@@ -119,6 +119,7 @@ pub(super) async fn execute_compaction(
             context_profile: ContextProfile::KnowledgeCompaction,
             context_path: context_path.to_string_lossy().into_owned(),
             run_id: Some(run.id.to_string()),
+            chat_session_id: None,
             artifacts_dir: Some(state.config.storage.artifacts_dir.clone()),
             stream: Some(stream.clone()),
             cancel_rx: Some(cancel_rx),

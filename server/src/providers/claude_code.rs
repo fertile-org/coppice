@@ -1,7 +1,7 @@
 use super::claude_console::ClaudeConsolePublisher;
 use super::{
-    mcp_unavailable, run_dir, worktree_dir_from_context, AgentProvider, AgentRunInput,
-    AgentRunResult, ProviderError, CHAT_READ_ONLY_TOOLS, COPPICE_MCP_TOOLS,
+    run_dir, worktree_dir_from_context, AgentProvider, AgentRunInput, AgentRunResult,
+    ProviderError, CHAT_READ_ONLY_TOOLS, COPPICE_MCP_TOOLS,
 };
 use crate::mcp::grant::McpAccess;
 use crate::sessions::opencode_events::{coppice_run_prompt, extract_result_from_text};
@@ -111,9 +111,7 @@ impl AgentProvider for ClaudeCodeProvider {
         // connector. Coppice does not inject or strip credentials.
 
         if let Some(access) = &input.mcp {
-            let run_dir = run_dir(&input).ok_or_else(|| {
-                mcp_unavailable("claude-code needs a run artifacts dir for its MCP config")
-            })?;
+            let run_dir = run_dir(&input, "claude-code")?;
             for arg in claude_mcp_args(access, &run_dir)? {
                 cmd.arg(arg);
             }

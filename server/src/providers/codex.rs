@@ -75,6 +75,14 @@ impl AgentProvider for CodexProvider {
             None
         };
 
+        // Before `resume`, so the overrides bind to `exec` and not to the subcommand.
+        if let Some(access) = &input.mcp {
+            for arg in codex_mcp_args(access) {
+                cmd.arg(arg);
+            }
+            cmd.envs(access.env());
+        }
+
         if let Some(sid) = &resume {
             cmd.arg("resume").arg(sid);
         }
@@ -82,13 +90,6 @@ impl AgentProvider for CodexProvider {
         // Auth is host-managed: the operator runs `codex login` wherever the server runs.
         // The child process inherits that environment directly — same model as claude-code
         // and opencode. Coppice does not inject or strip credentials.
-
-        if let Some(access) = &input.mcp {
-            for arg in codex_mcp_args(access) {
-                cmd.arg(arg);
-            }
-            cmd.envs(access.env());
-        }
 
         let mut child = cmd
             .spawn()

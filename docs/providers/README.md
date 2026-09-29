@@ -56,7 +56,7 @@ Every run gets a per-run bearer token for the Coppice MCP gateway at `POST /mcp`
 | Connector | Status | Mechanism |
 |-----------|--------|-----------|
 | `mock` | n/a | Fixture `toolCalls` executed over HTTP JSON-RPC against `/mcp` |
-| `cursor` | **verified** (CLI `2026.09.28-64d2043`) | Per-run `HOME` with `.cursor/mcp.json`, plus `CURSOR_CONFIG_DIR` with a `cli-config.json` that allows `Mcp(coppice:*)` |
+| `cursor` | **verified** (CLI `2026.09.28-64d2043`) | Coppice-owned `HOME` with `.cursor/mcp.json`, plus `CURSOR_CONFIG_DIR` with a `cli-config.json` that allows `Mcp(coppice:*)` (see the state-directory note below) |
 | `claude-code` | unverified — expected mechanism | `--mcp-config <run dir>/mcp.json --strict-mcp-config`; `mcp__coppice__*` added to `--allowedTools` |
 | `codex` | unverified — expected mechanism | `-c mcp_servers.coppice.url=…` + `-c mcp_servers.coppice.bearer_token_env_var="COPPICE_MCP_TOKEN"` |
 | `kilo-code` | unverified — expected mechanism | `KILO_CONFIG` pointing at `<run dir>/kilo-config.json` (OpenCode-style `mcp` block, `{env:COPPICE_MCP_TOKEN}` header) |
@@ -64,7 +64,17 @@ Every run gets a per-run bearer token for the Coppice MCP gateway at `POST /mcp`
 
 Verify an unverified row when its CLI is first available: run one ticket and confirm `run_tool_calls` records `ticket_get` and `result_submit`. For `kilo-code` the env var name follows the OpenCode `OPENCODE_CONFIG` convention and may differ in the fork.
 
-**Cursor side effects.** Overriding `HOME` also changes it for the agent's own shell commands, so the connector forwards `XDG_CONFIG_HOME` (the operator's real config home, where `cursor/auth.json` lives) and, when they exist and are not already set, `GIT_CONFIG_GLOBAL` and `GH_CONFIG_DIR`.
+**Cursor state directory.** The CLI keeps its `chats` state under `CURSOR_CONFIG_DIR`, so the per-run home and config dirs are keyed by whatever `--resume` resolves against, not by run id:
+
+| Run | Directory under the artifacts dir |
+|-----|-----------------------------------|
+| Chat turn | `chat-sessions/<chat session id>/cursor-{home,config}` |
+| Ticket run | `tickets/<ticket id>/cursor-{home,config}` |
+| Anything else (no resume) | `runs/<run id>/cursor-{home,config}` |
+
+`mcp.json` and `cli-config.json` are rewritten every turn; neither holds the token, so runs sharing a directory cannot corrupt each other. All paths are absolutized first — `storage.artifacts_dir` is usually relative and the CLI is spawned with the worktree as its working directory.
+
+**Cursor side effects.** Overriding `HOME` also changes it for the agent's own shell commands, so the connector forwards `XDG_CONFIG_HOME` (the operator's real config home, where `cursor/auth.json` lives) and, when they exist and are not already set, `GIT_CONFIG_GLOBAL` and `GH_CONFIG_DIR`. Because `CURSOR_CONFIG_DIR` points at a Coppice-owned directory, permission rules in the operator's own `cli-config.json` do **not** apply to Coppice runs — only the `Mcp(coppice:*)` allow rule Coppice writes does.
 
 **OpenCode follow-up.** The shared `opencode serve` process is started once for the server, so it cannot carry a per-run MCP server or token. Making OpenCode tool-first means switching the connector to per-run `opencode run` processes with a per-run `OPENCODE_CONFIG`, like `kilo-code`.
 
