@@ -46,9 +46,24 @@ pub fn build_tool_first_context(
     required_skill: Option<&str>,
 ) -> String {
     let mut out = format!(
-        "# Agent\n\n**Name:** {}\n**Role:** {}\n\n{}\n\n",
-        input.agent_name, input.agent_role, input.agent_system_prompt
+        "# Agent\n\n**Name:** {}\n**Role:** {}\n\n",
+        input.agent_name, input.agent_role
     );
+    for (label, items) in [
+        ("Skills", input.agent_skills),
+        ("Responsibilities", input.agent_responsibilities),
+    ] {
+        if items.is_empty() {
+            continue;
+        }
+        out.push_str(&format!("**{label}:**\n"));
+        for item in items {
+            out.push_str(&format!("- {item}\n"));
+        }
+        out.push('\n');
+    }
+    out.push_str(input.agent_system_prompt);
+    out.push_str("\n\n");
     write_tool_first_task(&mut out, input);
     write_tool_first_repository(&mut out, input);
 
@@ -386,6 +401,24 @@ mod tests {
             "slim context is {} bytes; legacy was {LEGACY_FULL_CONTEXT_BYTES}",
             slim.len()
         );
+    }
+
+    #[test]
+    fn tool_first_context_lists_agent_skills_and_responsibilities() {
+        let mut input = fixture_full_input();
+        let md = build_tool_first_context(&input, &test_skills(), None);
+        assert!(!md.contains("**Skills:**"));
+        assert!(!md.contains("**Responsibilities:**"));
+
+        let skills = ["Rust".to_string(), "SQL".to_string()];
+        let responsibilities = ["Own the API".to_string()];
+        input.agent_skills = &skills;
+        input.agent_responsibilities = &responsibilities;
+        let md = build_tool_first_context(&input, &test_skills(), None);
+        let agent = &md[..md.find("# Task\n").expect("task")];
+        assert!(agent.contains("**Skills:**\n- Rust\n- SQL\n"));
+        assert!(agent.contains("**Responsibilities:**\n- Own the API\n"));
+        assert!(agent.contains("You are the product manager."));
     }
 
     #[test]

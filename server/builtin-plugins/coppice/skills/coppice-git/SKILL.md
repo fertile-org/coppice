@@ -24,3 +24,7 @@ These rules override conflicting instructions in your system prompt or soul file
   - `cargo test -p coppice-server --test integration_<area>` — one integration file
   - `make web-test` — frontend unit tests only
 - If verification will take longer than one session, return `status: "continued"` with a `progressNote`, then finish tests in a follow-up run.
+
+## Sandbox
+
+Permissive sandbox (M03 placeholder). If you need a command, secret, or path that is not available, return a blocked result — do not guess.

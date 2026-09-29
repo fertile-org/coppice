@@ -31,11 +31,18 @@ pub const BUILTIN_SKILLS: &[(&str, &str)] = &[
     ),
 ];
 
-/// Writes the embedded built-in skills to `<dir>/coppice/skills/<name>/SKILL.md`,
-/// overwriting existing files so an upgrade always refreshes them.
+/// Writes the embedded built-in skills to `<dir>/coppice/skills/<name>/SKILL.md`.
+/// The `coppice/skills` subtree is replaced wholesale so an upgrade both
+/// refreshes and prunes skills; the rest of `dir` is left alone.
 pub fn materialize_builtin(dir: &Path) -> io::Result<()> {
+    let skills_root = dir.join(BUILTIN_PLUGIN).join("skills");
+    match std::fs::remove_dir_all(&skills_root) {
+        Ok(()) => {}
+        Err(err) if err.kind() == io::ErrorKind::NotFound => {}
+        Err(err) => return Err(err),
+    }
     for (name, contents) in BUILTIN_SKILLS {
-        let skill_dir = dir.join(BUILTIN_PLUGIN).join("skills").join(name);
+        let skill_dir = skills_root.join(name);
         std::fs::create_dir_all(&skill_dir)?;
         std::fs::write(skill_dir.join("SKILL.md"), contents)?;
     }

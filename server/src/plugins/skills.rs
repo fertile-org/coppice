@@ -72,30 +72,13 @@ impl SkillCatalog {
         let mut builtin = Vec::new();
         for entry in std::fs::read_dir(&skills_dir)? {
             let path = entry?.path();
-            let skill_file = path.join("SKILL.md");
-            if !skill_file.is_file() {
-                continue;
+            match load_skill_dir(&path) {
+                Ok(Some(skill)) => builtin.push(skill),
+                Ok(None) => {}
+                Err(err) => {
+                    tracing::warn!(path = %path.display(), error = %format!("{err:#}"), "skipping unreadable built-in skill");
+                }
             }
-            let id = path
-                .file_name()
-                .and_then(|n| n.to_str())
-                .with_context(|| format!("skill dir name {}", path.display()))?
-                .to_string();
-            let text = std::fs::read_to_string(&skill_file)
-                .with_context(|| format!("read {}", skill_file.display()))?;
-            let (frontmatter, body) = parse_skill_file(&text)
-                .with_context(|| format!("parse {}", skill_file.display()))?;
-            if frontmatter.name != id {
-                tracing::warn!(skill = %id, name = %frontmatter.name, "skill frontmatter name differs from directory; using directory name");
-            }
-            builtin.push((
-                SkillInfo {
-                    id,
-                    description: frontmatter.description,
-                    path,
-                },
-                body,
-            ));
         }
         builtin.sort_by(|a, b| a.0.id.cmp(&b.0.id));
         Ok(SkillCatalog { builtin })
@@ -112,6 +95,33 @@ impl SkillCatalog {
 
 pub fn load_builtin(dir: &Path) -> anyhow::Result<SkillCatalog> {
     SkillCatalog::load_builtin(dir)
+}
+
+fn load_skill_dir(path: &Path) -> anyhow::Result<Option<(SkillInfo, String)>> {
+    let skill_file = path.join("SKILL.md");
+    if !skill_file.is_file() {
+        return Ok(None);
+    }
+    let id = path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .with_context(|| format!("skill dir name {}", path.display()))?
+        .to_string();
+    let text = std::fs::read_to_string(&skill_file)
+        .with_context(|| format!("read {}", skill_file.display()))?;
+    let (frontmatter, body) =
+        parse_skill_file(&text).with_context(|| format!("parse {}", skill_file.display()))?;
+    if frontmatter.name != id {
+        tracing::warn!(skill = %id, name = %frontmatter.name, "skill frontmatter name differs from directory; using directory name");
+    }
+    Ok(Some((
+        SkillInfo {
+            id,
+            description: frontmatter.description,
+            path: path.to_path_buf(),
+        },
+        body,
+    )))
 }
 
 /// The skill an agent must load before starting this kind of run, if any.
@@ -186,6 +196,33 @@ mod tests {
         std::fs::write(&file, "stale").unwrap();
         materialize_builtin(dir.path()).unwrap();
         assert_eq!(std::fs::read_to_string(file).unwrap(), BUILTIN_SKILLS[5].1);
+    }
+
+    #[test]
+    fn materialize_prunes_removed_skills_only_under_skills_dir() {
+        let dir = tempfile::tempdir().unwrap();
+        materialize_builtin(dir.path()).unwrap();
+        let stale = dir.path().join("coppice/skills/coppice-retired");
+        std::fs::create_dir_all(&stale).unwrap();
+        std::fs::write(stale.join("SKILL.md"), "---\nname: x\ndescription: y\n---\nold").unwrap();
+        let sibling = dir.path().join("coppice/plugin.toml");
+        std::fs::write(&sibling, "keep").unwrap();
+        materialize_builtin(dir.path()).unwrap();
+        assert!(!stale.exists());
+        assert!(sibling.is_file());
+        assert_eq!(load_builtin(dir.path()).unwrap().skills_for(Uuid::new_v4()).len(), 6);
+    }
+
+    #[test]
+    fn load_builtin_skips_malformed_skill() {
+        let dir = tempfile::tempdir().unwrap();
+        materialize_builtin(dir.path()).unwrap();
+        let bad = dir.path().join("coppice/skills/broken");
+        std::fs::create_dir_all(&bad).unwrap();
+        std::fs::write(bad.join("SKILL.md"), "no frontmatter here").unwrap();
+        let catalog = load_builtin(dir.path()).unwrap();
+        assert_eq!(catalog.skills_for(Uuid::new_v4()).len(), 6);
+        assert!(catalog.get(Uuid::new_v4(), "broken").is_none());
     }
 
     #[test]
