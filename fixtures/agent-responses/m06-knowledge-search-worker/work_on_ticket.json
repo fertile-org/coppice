@@ -1,0 +1,17 @@
+{
+  "status": "done",
+  "summary": "Mock run that searched project knowledge through the gateway.",
+  "changedFiles": [],
+  "testsRun": [],
+  "mentionAgents": [],
+  "blockers": [],
+  "toolCalls": [
+    {
+      "tool": "knowledge_search",
+      "args": {
+        "query": "governed knowledge marker exact retrieval make test-unit",
+        "limit": 20
+      }
+    }
+  ]
+}

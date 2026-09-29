@@ -5,8 +5,11 @@
  * Proves the default stack can govern a manual candidate, compact a Done
  * ticket into a Pending candidate with the configured compaction agent
  * (MockProvider fixtures, no notification on success), and retrieve both
- * approved revisions via full-text search in a Full run with an exact audit.
- * Restores the previous compaction agent setting when done.
+ * approved revisions through the `knowledge_search` MCP tool in a Full run with
+ * an exact audit. Knowledge is no longer injected into the run context: the
+ * worker agent's mock fixture (`m06-knowledge-search-worker/work_on_ticket.json`)
+ * calls `knowledge_search` through the gateway, which logs usage. Restores the
+ * previous compaction agent setting when done.
  *
  * Env:
  *   COPPICE_API_URL            default http://localhost:5000
@@ -25,6 +28,9 @@ const EMAIL = process.env.COPPICE_SMOKE_EMAIL ?? 'admin@localhost';
 const PASSWORD = process.env.COPPICE_SMOKE_PASSWORD ?? 'changeme';
 const SMOKE_REPO_PATH =
   process.env.COPPICE_SMOKE_REPO_PATH ?? '/tmp/smoke-repo';
+// Custom (preset-less) agent: its mock fixture key is the slug of this name, so
+// `fixtures/agent-responses/<slug>/work_on_ticket.json` drives knowledge_search.
+const SEARCH_WORKER_NAME = 'm06-knowledge-search-worker';
 
 const MAX_HEALTH_ATTEMPTS = 90;
 const HEALTH_INTERVAL_MS = 1000;
@@ -152,6 +158,22 @@ async function createAgent(auth, name, presetKey) {
     }),
     201,
     'create agent',
+  );
+}
+
+async function createSearchWorker(auth) {
+  return expectJson(
+    await api('POST', '/api/agents', {
+      ...auth,
+      body: {
+        name: SEARCH_WORKER_NAME,
+        role: 'Research',
+        systemPrompt: 'Search project knowledge, then report.',
+        connector: 'mock',
+      },
+    }),
+    201,
+    'create knowledge search worker',
   );
 }
 
@@ -384,6 +406,13 @@ async function fullRunUses(board, repo, worker, items, suffix, auth) {
     200,
     'get Knowledge Used',
   );
+  // Only approved revisions may be returned by knowledge_search: the pending
+  // compaction candidate (CSRF rule) must not appear in the audit.
+  for (const pending of await inbox(board.id, auth)) {
+    if (usage.items.some((entry) => entry.itemId === pending.id)) {
+      fail(`pending knowledge ${pending.id} was used by the run`);
+    }
+  }
   for (const item of items) {
     const exact = usage.items.filter(
       (entry) => entry.itemId === item.id && entry.revisionId === item.revisionId,
@@ -410,7 +439,7 @@ async function main() {
   const suffix = `${Date.now()}-${Math.floor(Math.random() * 10_000)}`;
   const board = await createBoard(auth, suffix);
   const repo = await registerRepo(auth);
-  const worker = await createAgent(auth, `Knowledge Smoke Worker ${suffix}`, 'research');
+  const worker = await createSearchWorker(auth);
   const compactor = await createAgent(
     auth,
     `Knowledge Smoke Compactor ${suffix}`,
@@ -436,6 +465,8 @@ async function main() {
       ...auth,
       body: { compactionAgentId: previous.compactionAgentId },
     });
+    // The fixed name would otherwise pile up duplicate agents across reruns.
+    await api('DELETE', `/api/agents/${worker.id}`, auth);
   }
 
   for (const route of ['/knowledge', '/agents']) {

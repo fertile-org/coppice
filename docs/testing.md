@@ -112,10 +112,10 @@ M06 keeps the existing context smoke and adds a distinct knowledge smoke:
 
 ```bash
 make e2e-smoke-m06              # context continuation + pending split behavior
-make e2e-smoke-m06-knowledge    # governance → Done ticket → agent compaction → approve → Full retrieval → audit
+make e2e-smoke-m06-knowledge    # governance → Done ticket → agent compaction → approve → `knowledge_search` in a Full run → audit
 ```
 
-Both use the default `deploy/docker-compose.yml` stack. The knowledge smoke recreates the server with `MOCK_AGENT_RESPONSE` cleared so agent-keyed fixtures apply (`backend_engineer/compact_knowledge.json` for the compactor). It configures the compaction agent, moves a ticket to Done, triggers or waits for compaction, approves the candidate, and restores the previous setting. Compaction integration tests live in `server/tests/integration_knowledge_compaction.rs` and use the root `compact_knowledge_*.json` fixtures for empty, invalid-source, and malformed output.
+Both use the default `deploy/docker-compose.yml` stack. The knowledge smoke recreates the server with `MOCK_AGENT_RESPONSE` cleared so agent-keyed fixtures apply (`backend_engineer/compact_knowledge.json` for the compactor; `m06-knowledge-search-worker/work_on_ticket.json` for a preset-less worker agent whose run calls `knowledge_search` through the gateway at `http://127.0.0.1:5000/mcp`, inside the server container). Knowledge is no longer injected into the run context, so usage is logged only by that tool call. It configures the compaction agent, moves a ticket to Done, triggers or waits for compaction, approves the candidate, and restores the previous setting. Compaction integration tests live in `server/tests/integration_knowledge_compaction.rs` and use the root `compact_knowledge_*.json` fixtures for empty, invalid-source, and malformed output.
 
 The supported 10,000-eligible-row retrieval envelope has a separate, non-CI
 default-Compose benchmark. It seeds rows inside a rolled-back transaction, runs

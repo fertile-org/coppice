@@ -1165,6 +1165,82 @@ async fn run_context_is_slim_and_knowledge_arrives_only_via_search() {
     }
 }
 
+/// Mirrors `e2e/smoke/m06-knowledge.mjs`: a preset-less agent whose slug selects
+/// `m06-knowledge-search-worker/work_on_ticket.json` (no MOCK_AGENT_RESPONSE
+/// override) drives `knowledge_search` through the gateway.
+#[tokio::test]
+async fn m06_smoke_fixture_logs_each_approved_revision_once() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let (state, app, cookie, csrf, _env) = common::bootstrap_and_login_with_gateway("").await;
+    let (_git_dir, local_path) = common::create_temp_git_checkout();
+    let repo_id =
+        common::register_test_repo(&app, &local_path.display().to_string(), &cookie, &csrf).await;
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
+    let created = app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            "/api/agents",
+            r#"{"name":"m06-knowledge-search-worker","role":"Research","systemPrompt":"Search project knowledge, then report.","connector":"mock"}"#,
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(created.status(), 201);
+    let agent_id = common::json_body(created).await["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let ticket_id = common::create_test_ticket(&app, &board_id, &cookie, &csrf).await;
+    common::set_ticket_repo(&app, &ticket_id, &repo_id, &cookie, &csrf).await;
+    common::assign_agent_to_ticket(&app, &ticket_id, &agent_id, &cookie, &csrf).await;
+
+    let pool = state.db.clone().unwrap();
+    let board: Uuid = board_id.parse().unwrap();
+    let manual = seed_knowledge(&pool, board, "M06 exact retrieval 1-2", "approved").await;
+    let compacted =
+        seed_knowledge(&pool, board, "Use make test-unit while iterating", "approved").await;
+    let pending = seed_knowledge(&pool, board, "Pending exact retrieval marker", "pending").await;
+
+    let res = app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            &format!("/api/tickets/{ticket_id}/run-agent"),
+            "",
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 201);
+    let run_id: Uuid = common::json_body(res).await["run"]["id"]
+        .as_str()
+        .unwrap()
+        .parse()
+        .unwrap();
+    wait_for_run_status(&pool, run_id, "succeeded").await;
+
+    let mut logged: Vec<Uuid> =
+        sqlx::query_scalar("SELECT revision_id FROM knowledge_usage_logs WHERE run_id = $1")
+            .bind(run_id)
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+    logged.sort();
+    let mut expected = vec![manual, compacted];
+    expected.sort();
+    assert_eq!(logged, expected, "pending revision {pending} must not be used");
+    assert_eq!(
+        tool_call_rows(&pool, run_id).await,
+        vec![("knowledge_search".into(), "core".into(), "ok".into())]
+    );
+}
+
 #[tokio::test]
 async fn comment_post_creates_agent_comment() {
     let _guard = common::DB_TEST_LOCK.lock().await;
