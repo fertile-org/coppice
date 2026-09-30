@@ -109,7 +109,7 @@ Plugin names are unique workspace-wide. If two dirs contain the same name, the d
 
 ## Plugin lifecycle
 
-- **Plugin dirs:** admin adds by path (desktop: Electron Browse), orders, removes. A default dir under the Coppice data directory is created on first start (Docker: on a managed volume).
+- **Plugin dirs:** admin adds by path (desktop: Electron Browse), orders, removes. A default dir (`[plugins] dir`, default `./data/plugins`; Docker `/data/plugins` on the `plugin_data` volume) is created on first start and cannot be removed.
 - **Scan:** on server start, on dir add, and on explicit Rescan. Scan upserts `plugins` by (dir, relative path); plugins no longer on disk become `missing` (agent assignments kept).
 - **Git install:** `POST /api/plugins/install { gitUrl, ref?, pluginDirId }` → background job: shallow clone into `<dir>/<repo-name>`, record `git_url`, `git_ref`, `git_commit`, then scan. Update pulls and re-records the commit. Uses host git credentials (same posture as repositories). **This is an explicit exception** to the "no server-side git clone" rule, which continues to apply to repositories.
 - **Enablement:** installed plugins start `enabled = false`. Enabling is admin-only. Enabling a plugin with stdio MCP servers shows a warning that they run with server privileges until M11.
@@ -292,6 +292,9 @@ plugins           (id, plugin_dir_id, rel_path, name, version, description, sour
                    error, enabled, created_at, updated_at)
 plugin_settings   (plugin_id, key, secret_id)
 agent_plugins     (agent_id, plugin_id)
+plugin_installs   (id, plugin_dir_id, kind [install|update], git_url, git_ref, plugin_id,
+                   status [running|succeeded|failed], error, created_at, finished_at)
+agent_presets     + default_plugins text[]
 run_tool_tokens   (id, token_hash, subject_kind, run_id, agent_id, ticket_id, chat_session_id, board_id,
                    context_profile, plugin_ids, expires_at, revoked_at, created_at)
 run_tool_calls    (id, run_id, tool, source [core|skill|plugin], plugin_id, args_summary, status [ok|error|denied|timeout],
@@ -310,6 +313,7 @@ PATCH  /api/plugin-dirs/:id            # reorder
 DELETE /api/plugin-dirs/:id
 POST   /api/plugins/rescan
 POST   /api/plugins/install            # { gitUrl, ref?, pluginDirId } → job id
+GET    /api/plugin-installs/:id        # install/update job status
 POST   /api/plugins/:id/update         # git pull
 GET    /api/plugins
 GET    /api/plugins/:id                # skills, MCP servers, tools, unsupported parts, status
