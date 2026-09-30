@@ -129,14 +129,19 @@ pub fn create_temp_git_checkout() -> (tempfile::TempDir, PathBuf) {
 
 /// Points the default plugin dir at a fresh per-test directory and runs the
 /// same plugin startup as `main.rs`, so tests never touch the repo's `./data`.
-async fn init_test_plugins(config: &mut AppConfig, pool: &sqlx::PgPool) {
+async fn init_test_plugins(
+    config: &mut AppConfig,
+    pool: &sqlx::PgPool,
+) -> Arc<coppice_server::plugins::skills::SkillCatalog> {
     static BASE: std::sync::OnceLock<tempfile::TempDir> = std::sync::OnceLock::new();
     let base = BASE.get_or_init(|| tempfile::tempdir().expect("plugins tempdir"));
     let dir = base.path().join(uuid::Uuid::new_v4().to_string());
     config.plugins.dir = dir.to_string_lossy().into_owned();
-    AppState::init_plugins(pool, config)
+    let skills = AppState::test_skills();
+    AppState::init_plugins(pool, config, &skills)
         .await
         .expect("init test plugins");
+    skills
 }
 
 async fn test_state_with_db() -> Arc<AppState> {
@@ -148,7 +153,7 @@ async fn test_state_with_db() -> Arc<AppState> {
         "/tmp/coppice-test-artifacts",
     );
     let mut config = AppConfig::load_defaults().expect("test config");
-    init_test_plugins(&mut config, &pool).await;
+    let skills = init_test_plugins(&mut config, &pool).await;
     let opencode_runs = AppState::test_opencode_runs();
     Arc::new(AppState {
         attachments: AppState::attachment_store_from_config(&config),
@@ -159,7 +164,7 @@ async fn test_state_with_db() -> Arc<AppState> {
         opencode_runs,
         agent_templates: coppice_server::AppState::load_agent_templates(),
         secret_store: coppice_server::crypto::SecretStore::from_master_key(&config.secrets.master_key),
-        skills: AppState::test_skills(),
+        skills,
         config,
         db: Some(pool),
     })
@@ -192,7 +197,7 @@ where
     let mut config = AppConfig::load_defaults().expect("test config");
     configure(&mut config);
     config.agent.worker_count = 1;
-    init_test_plugins(&mut config, &pool).await;
+    let skills = init_test_plugins(&mut config, &pool).await;
 
     let opencode_runs = AppState::test_opencode_runs();
     let state = Arc::new(AppState {
@@ -204,7 +209,7 @@ where
         opencode_runs,
         agent_templates: coppice_server::AppState::load_agent_templates(),
         secret_store: coppice_server::crypto::SecretStore::from_master_key(&config.secrets.master_key),
-        skills: AppState::test_skills(),
+        skills,
         config,
         db: Some(pool),
     });
@@ -237,7 +242,7 @@ where
     config.workflow.auto_start_runs = true;
     configure(&mut config);
     config.agent.worker_count = worker_count;
-    init_test_plugins(&mut config, &pool).await;
+    let skills = init_test_plugins(&mut config, &pool).await;
 
     let opencode_runs = AppState::test_opencode_runs();
     let state = Arc::new(AppState {
@@ -249,7 +254,7 @@ where
         opencode_runs,
         agent_templates: coppice_server::AppState::load_agent_templates(),
         secret_store: coppice_server::crypto::SecretStore::from_master_key(&config.secrets.master_key),
-        skills: AppState::test_skills(),
+        skills,
         config,
         db: Some(pool),
     });
@@ -885,6 +890,7 @@ pub async fn mint_test_token(
                 profile,
                 job_type,
                 compaction_ticket_ids: vec![],
+                plugin_ids: vec![],
             },
             Duration::from_secs(60),
         )

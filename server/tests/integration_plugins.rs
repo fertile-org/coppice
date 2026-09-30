@@ -466,3 +466,193 @@ async fn plugin_mutations_require_admin_and_csrf() {
         .unwrap();
     assert_eq!(res.status(), StatusCode::FORBIDDEN);
 }
+
+async fn sample_plugin_id(app: &Router, dir_id: &str, cookie: &str, csrf: &str) -> String {
+    let plugins = get(app, "/api/plugins", cookie, csrf).await;
+    find(&plugins, dir_id, "sample-plugin")["id"]
+        .as_str()
+        .unwrap()
+        .to_string()
+}
+
+async fn set_enabled(app: &Router, plugin_id: &str, enabled: bool, cookie: &str, csrf: &str) {
+    let (status, body) = send(
+        app,
+        "PATCH",
+        &format!("/api/plugins/{plugin_id}"),
+        json!({ "enabled": enabled }),
+        cookie,
+        csrf,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "set enabled: {body}");
+}
+
+async fn rescan(app: &Router, cookie: &str, csrf: &str) {
+    let (status, body) = send(app, "POST", "/api/plugins/rescan", Value::Null, cookie, csrf).await;
+    assert_eq!(status, StatusCode::OK, "rescan: {body}");
+}
+
+async fn run_plugin_ids(state: &coppice_server::AppState, agent_id: &str) -> Vec<uuid::Uuid> {
+    let pool = state.db.as_ref().unwrap();
+    coppice_server::services::plugin_service::PluginService::new(pool)
+        .run_plugin_ids(agent_id.parse().unwrap())
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+async fn set_agent_plugins_accepts_only_enabled_ok_plugins() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    require_db!();
+    let (_state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
+    let dir = plugin_dir_with(&["sample-plugin"]);
+    let dir_id = add_dir(&app, dir.path(), &cookie, &csrf).await["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let plugin_id = sample_plugin_id(&app, &dir_id, &cookie, &csrf).await;
+    let agent_id = common::create_test_agent_from_preset(&app, "Worker", &cookie, &csrf).await;
+    let uri = format!("/api/agents/{agent_id}/plugins");
+
+    assert_eq!(
+        get(&app, &uri, &cookie, &csrf).await,
+        json!({ "pluginIds": [] })
+    );
+    let (status, body) = send(
+        &app,
+        "PUT",
+        &uri,
+        json!({ "pluginIds": [plugin_id] }),
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    assert!(body["error"].is_string());
+
+    set_enabled(&app, &plugin_id, true, &cookie, &csrf).await;
+    let (status, body) = send(
+        &app,
+        "PUT",
+        &uri,
+        json!({ "pluginIds": [plugin_id] }),
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body, json!({ "pluginIds": [plugin_id] }));
+    assert_eq!(
+        get(&app, &uri, &cookie, &csrf).await,
+        json!({ "pluginIds": [plugin_id] })
+    );
+
+    let missing = format!("/api/agents/{}/plugins", uuid::Uuid::new_v4());
+    let (status, _) = send(&app, "GET", &missing, Value::Null, &cookie, &csrf).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    let (status, _) = send(
+        &app,
+        "PUT",
+        &missing,
+        json!({ "pluginIds": [] }),
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn missing_plugin_keeps_assignment_and_returns() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    require_db!();
+    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
+    let dir = plugin_dir_with(&["sample-plugin"]);
+    let dir_id = add_dir(&app, dir.path(), &cookie, &csrf).await["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let plugin_id = sample_plugin_id(&app, &dir_id, &cookie, &csrf).await;
+    set_enabled(&app, &plugin_id, true, &cookie, &csrf).await;
+    let agent_id = common::create_test_agent_from_preset(&app, "Worker", &cookie, &csrf).await;
+    let uri = format!("/api/agents/{agent_id}/plugins");
+    let (status, _) = send(
+        &app,
+        "PUT",
+        &uri,
+        json!({ "pluginIds": [plugin_id] }),
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let expected: uuid::Uuid = plugin_id.parse().unwrap();
+    assert_eq!(run_plugin_ids(&state, &agent_id).await, vec![expected]);
+
+    std::fs::remove_dir_all(dir.path().join("sample-plugin")).unwrap();
+    rescan(&app, &cookie, &csrf).await;
+    assert!(run_plugin_ids(&state, &agent_id).await.is_empty());
+    assert!(state.skills.get(&[expected], "sample-plugin:hello").is_none());
+    assert_eq!(
+        get(&app, &uri, &cookie, &csrf).await,
+        json!({ "pluginIds": [plugin_id] })
+    );
+
+    copy_tree(
+        &fixtures().join("sample-plugin"),
+        &dir.path().join("sample-plugin"),
+    );
+    rescan(&app, &cookie, &csrf).await;
+    assert_eq!(run_plugin_ids(&state, &agent_id).await, vec![expected]);
+    assert!(state.skills.get(&[expected], "sample-plugin:hello").is_some());
+}
+
+#[tokio::test]
+async fn preset_default_plugins_applied_when_enabled() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    require_db!();
+    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
+    let pool = state.db.clone().unwrap();
+    let presets = get(&app, "/api/agent-presets", &cookie, &csrf).await;
+    let preset_id: uuid::Uuid = presets["items"][0]["id"].as_str().unwrap().parse().unwrap();
+    sqlx::query("UPDATE agent_presets SET default_plugins = '{sample-plugin}' WHERE id = $1")
+        .bind(preset_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let dir = plugin_dir_with(&["sample-plugin"]);
+    let dir_id = add_dir(&app, dir.path(), &cookie, &csrf).await["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let plugin_id = sample_plugin_id(&app, &dir_id, &cookie, &csrf).await;
+    set_enabled(&app, &plugin_id, true, &cookie, &csrf).await;
+    let with_default = common::create_test_agent_from_preset(&app, "Worker", &cookie, &csrf).await;
+    let assigned = get(
+        &app,
+        &format!("/api/agents/{with_default}/plugins"),
+        &cookie,
+        &csrf,
+    )
+    .await;
+
+    set_enabled(&app, &plugin_id, false, &cookie, &csrf).await;
+    let without = common::create_test_agent_from_preset(&app, "Other", &cookie, &csrf).await;
+    let unassigned = get(
+        &app,
+        &format!("/api/agents/{without}/plugins"),
+        &cookie,
+        &csrf,
+    )
+    .await;
+
+    sqlx::query("UPDATE agent_presets SET default_plugins = '{}' WHERE id = $1")
+        .bind(preset_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert_eq!(assigned, json!({ "pluginIds": [plugin_id] }));
+    assert_eq!(unassigned, json!({ "pluginIds": [] }));
+}

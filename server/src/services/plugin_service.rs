@@ -2,6 +2,7 @@ use std::path::{Path, PathBuf};
 
 use crate::plugins::discover::{discover, Discovered};
 use crate::plugins::manifest::PluginManifest;
+use crate::plugins::skills::{PluginSkillSet, SkillCatalog};
 use sqlx::postgres::PgRow;
 use sqlx::{PgPool, Postgres, Row, Transaction};
 use uuid::Uuid;
@@ -21,6 +22,8 @@ pub struct PluginService<'a> {
 pub enum PluginError {
     #[error("plugin not found")]
     NotFound,
+    #[error("agent not found")]
+    AgentNotFound,
     #[error("{0}")]
     Validation(String),
     #[error("{0}")]
@@ -343,12 +346,143 @@ impl<'a> PluginService<'a> {
         .fetch_optional(self.pool)
         .await?
         .ok_or(PluginError::NotFound)?;
-        let dir = PathBuf::from(dir);
-        Ok(if rel_path.is_empty() {
-            dir
+        Ok(join_plugin_path(&dir, &rel_path))
+    }
+
+    /// Replaces the catalog's plugin skills with those of enabled `ok` plugins.
+    pub async fn refresh_catalog(&self, catalog: &SkillCatalog) -> Result<(), PluginError> {
+        let rows = sqlx::query(&format!(
+            r#"
+            SELECT {PLUGIN_COLUMNS}, d.path AS dir_path FROM plugins p
+            JOIN plugin_dirs d ON d.id = p.plugin_dir_id
+            WHERE p.enabled AND p.status = 'ok'
+            "#
+        ))
+        .fetch_all(self.pool)
+        .await?;
+        let sets = rows
+            .iter()
+            .filter_map(|row| {
+                let plugin = row_to_plugin(row);
+                let manifest = plugin.manifest.as_ref()?;
+                let root = join_plugin_path(&row.get::<String, _>("dir_path"), &plugin.rel_path);
+                match std::fs::canonicalize(&root) {
+                    Ok(root) => Some(PluginSkillSet::from_manifest(plugin.id, &root, manifest)),
+                    Err(err) => {
+                        tracing::warn!(plugin = %plugin.name, error = %err, "plugin root unavailable; skills not served");
+                        None
+                    }
+                }
+            })
+            .collect();
+        catalog.set_plugin_skills(sets);
+        Ok(())
+    }
+
+    /// Every assigned plugin, whatever its current status.
+    pub async fn agent_plugin_ids(&self, agent_id: Uuid) -> Result<Vec<Uuid>, PluginError> {
+        self.ensure_agent(agent_id).await?;
+        Ok(sqlx::query_scalar(
+            "SELECT plugin_id FROM agent_plugins WHERE agent_id = $1 ORDER BY plugin_id",
+        )
+        .bind(agent_id)
+        .fetch_all(self.pool)
+        .await?)
+    }
+
+    pub async fn set_agent_plugins(
+        &self,
+        agent_id: Uuid,
+        plugin_ids: &[Uuid],
+    ) -> Result<Vec<Uuid>, PluginError> {
+        self.ensure_agent(agent_id).await?;
+        let mut wanted = plugin_ids.to_vec();
+        wanted.sort();
+        wanted.dedup();
+        let usable: Vec<Uuid> = sqlx::query_scalar(
+            "SELECT id FROM plugins WHERE id = ANY($1) AND enabled AND status = 'ok'",
+        )
+        .bind(&wanted)
+        .fetch_all(self.pool)
+        .await?;
+        if let Some(bad) = wanted.iter().find(|id| !usable.contains(id)) {
+            return Err(PluginError::Validation(format!(
+                "plugin {bad} does not exist or is not enabled"
+            )));
+        }
+
+        let mut tx = self.pool.begin().await?;
+        sqlx::query("DELETE FROM agent_plugins WHERE agent_id = $1")
+            .bind(agent_id)
+            .execute(&mut *tx)
+            .await?;
+        sqlx::query(
+            "INSERT INTO agent_plugins (agent_id, plugin_id) SELECT $1, UNNEST($2::uuid[])",
+        )
+        .bind(agent_id)
+        .bind(&wanted)
+        .execute(&mut *tx)
+        .await?;
+        tx.commit().await?;
+        self.agent_plugin_ids(agent_id).await
+    }
+
+    /// Assigned plugins that are enabled and `ok` — the per-run token snapshot.
+    pub async fn run_plugin_ids(&self, agent_id: Uuid) -> Result<Vec<Uuid>, PluginError> {
+        Ok(sqlx::query_scalar(
+            r#"
+            SELECT p.id FROM agent_plugins ap JOIN plugins p ON p.id = ap.plugin_id
+            WHERE ap.agent_id = $1 AND p.enabled AND p.status = 'ok'
+            ORDER BY p.id
+            "#,
+        )
+        .bind(agent_id)
+        .fetch_all(self.pool)
+        .await?)
+    }
+
+    /// Assigns preset default plugins by name; names not enabled/`ok` are skipped.
+    pub async fn apply_preset_defaults(
+        &self,
+        agent_id: Uuid,
+        names: &[String],
+    ) -> Result<(), PluginError> {
+        if names.is_empty() {
+            return Ok(());
+        }
+        sqlx::query(
+            r#"
+            INSERT INTO agent_plugins (agent_id, plugin_id)
+            SELECT $1, id FROM plugins WHERE name = ANY($2) AND enabled AND status = 'ok'
+            ON CONFLICT DO NOTHING
+            "#,
+        )
+        .bind(agent_id)
+        .bind(names)
+        .execute(self.pool)
+        .await?;
+        Ok(())
+    }
+
+    async fn ensure_agent(&self, agent_id: Uuid) -> Result<(), PluginError> {
+        let exists: bool = sqlx::query_scalar("SELECT EXISTS (SELECT 1 FROM agents WHERE id = $1)")
+            .bind(agent_id)
+            .fetch_one(self.pool)
+            .await?;
+        if exists {
+            Ok(())
         } else {
-            dir.join(rel_path)
-        })
+            Err(PluginError::AgentNotFound)
+        }
+    }
+}
+
+fn join_plugin_path(dir: &str, rel_path: &str) -> PathBuf {
+    let dir = PathBuf::from(dir);
+    if rel_path.is_empty() {
+        dir
+    } else {
+        dir.join(rel_path)
     }
 }
 

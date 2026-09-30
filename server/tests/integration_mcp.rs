@@ -56,6 +56,7 @@ async fn run_fixture() -> RunFixture {
         profile: ContextProfile::HumanAgent,
         job_type: "work_on_ticket".into(),
         compaction_ticket_ids: vec![Uuid::new_v4()],
+        plugin_ids: vec![],
     };
     RunFixture {
         state,
@@ -346,6 +347,7 @@ async fn mcp_internal_error_hides_details() {
         profile: ContextProfile::Full,
         job_type: "work_on_ticket".into(),
         compaction_ticket_ids: vec![],
+        plugin_ids: vec![],
     };
     let host = RunToolHost::new(Arc::new(state), scope);
     let out = host.call("board_agents", json!({})).await;
@@ -1724,4 +1726,174 @@ async fn stopped_run_revokes_token_and_discards_submission() {
     let bodies = agent_comment_bodies(&pool, run_id).await;
     assert!(bodies.is_empty(), "no agent result comment expected: {bodies:?}");
     std::env::remove_var("MOCK_AGENT_RESPONSE");
+}
+
+// ---- M10: plugin skills served through the run token's plugin snapshot ----
+
+fn copy_tree(src: &std::path::Path, dst: &std::path::Path) {
+    std::fs::create_dir_all(dst).unwrap();
+    for entry in std::fs::read_dir(src).unwrap() {
+        let entry = entry.unwrap();
+        let target = dst.join(entry.file_name());
+        if entry.file_type().unwrap().is_dir() {
+            copy_tree(&entry.path(), &target);
+        } else {
+            std::fs::copy(entry.path(), target).unwrap();
+        }
+    }
+}
+
+async fn api(app: &Router, method: &str, uri: &str, body: Value, cookie: &str, csrf: &str) -> Value {
+    let res = app
+        .clone()
+        .oneshot(common::json_request(
+            method,
+            uri,
+            &body.to_string(),
+            cookie,
+            csrf,
+        ))
+        .await
+        .unwrap();
+    let status = res.status();
+    let body = common::json_body(res).await;
+    assert!(status.is_success(), "{method} {uri}: {status} {body}");
+    body
+}
+
+/// Ticket run with sample-plugin enabled; `assign` controls whether the
+/// agent gets it. Returns the run id and the plugin id.
+async fn run_ticket_with_sample_plugin(
+    assign: bool,
+) -> (Arc<AppState>, Uuid, Uuid, Vec<tempfile::TempDir>, common::AgentTestEnv) {
+    let (state, app, cookie, csrf, env) =
+        common::bootstrap_and_login_with_gateway("mcp/plugin_skill_tool_call").await;
+    let plugins = tempfile::tempdir().unwrap();
+    copy_tree(
+        &std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../fixtures/plugins/sample-plugin"),
+        &plugins.path().join("sample-plugin"),
+    );
+    let dir = api(
+        &app,
+        "POST",
+        "/api/plugin-dirs",
+        json!({ "path": plugins.path().to_string_lossy() }),
+        &cookie,
+        &csrf,
+    )
+    .await;
+    let listed = api(&app, "GET", "/api/plugins", Value::Null, &cookie, &csrf).await;
+    let plugin_id = listed
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|p| p["pluginDirId"] == dir["id"] && p["name"] == "sample-plugin")
+        .unwrap()["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    api(
+        &app,
+        "PATCH",
+        &format!("/api/plugins/{plugin_id}"),
+        json!({ "enabled": true }),
+        &cookie,
+        &csrf,
+    )
+    .await;
+
+    let (git_dir, local_path) = common::create_temp_git_checkout();
+    let repo_id =
+        common::register_test_repo(&app, &local_path.display().to_string(), &cookie, &csrf).await;
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
+    let agent_id = common::create_test_agent_from_preset(&app, "Worker", &cookie, &csrf).await;
+    if assign {
+        api(
+            &app,
+            "PUT",
+            &format!("/api/agents/{agent_id}/plugins"),
+            json!({ "pluginIds": [plugin_id] }),
+            &cookie,
+            &csrf,
+        )
+        .await;
+    }
+    let ticket_id = common::create_test_ticket(&app, &board_id, &cookie, &csrf).await;
+    common::set_ticket_repo(&app, &ticket_id, &repo_id, &cookie, &csrf).await;
+    common::assign_agent_to_ticket(&app, &ticket_id, &agent_id, &cookie, &csrf).await;
+
+    let body = api(
+        &app,
+        "POST",
+        &format!("/api/tickets/{ticket_id}/run-agent"),
+        Value::Null,
+        &cookie,
+        &csrf,
+    )
+    .await;
+    let run_id: Uuid = body["run"]["id"].as_str().unwrap().parse().unwrap();
+    let pool = state.db.clone().unwrap();
+    wait_for_run_status(&pool, run_id, "succeeded").await;
+    (
+        state,
+        run_id,
+        plugin_id.parse().unwrap(),
+        vec![plugins, git_dir],
+        env,
+    )
+}
+
+async fn token_plugin_ids(pool: &PgPool, run_id: Uuid) -> Vec<Uuid> {
+    sqlx::query_scalar("SELECT plugin_ids FROM run_tool_tokens WHERE run_id = $1")
+        .bind(run_id)
+        .fetch_one(pool)
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+async fn mock_run_loads_plugin_skill_over_mcp() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let (state, run_id, plugin_id, _dirs, _env) = run_ticket_with_sample_plugin(true).await;
+    let pool = state.db.clone().unwrap();
+    assert_eq!(
+        tool_call_rows(&pool, run_id).await,
+        vec![
+            ("skill_list".into(), "skill".into(), "ok".into()),
+            ("skill_load".into(), "skill".into(), "ok".into()),
+            ("result_submit".into(), "core".into(), "ok".into()),
+        ]
+    );
+    assert_eq!(token_plugin_ids(&pool, run_id).await, vec![plugin_id]);
+    assert_eq!(
+        submitted_result(&pool, run_id).await.unwrap()["summary"],
+        "via tool"
+    );
+}
+
+#[tokio::test]
+async fn plugin_skill_not_assigned_is_not_found() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let (state, run_id, _plugin_id, _dirs, _env) = run_ticket_with_sample_plugin(false).await;
+    let pool = state.db.clone().unwrap();
+    assert_eq!(
+        tool_call_rows(&pool, run_id).await,
+        vec![
+            ("skill_list".into(), "skill".into(), "ok".into()),
+            ("skill_load".into(), "skill".into(), "error".into()),
+            ("result_submit".into(), "core".into(), "ok".into()),
+        ]
+    );
+    assert!(token_plugin_ids(&pool, run_id).await.is_empty());
+    assert_eq!(
+        submitted_result(&pool, run_id).await.unwrap()["summary"],
+        "via tool"
+    );
 }

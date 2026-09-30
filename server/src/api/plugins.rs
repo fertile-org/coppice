@@ -28,6 +28,10 @@ pub fn routes() -> Router<Arc<AppState>> {
             "/api/plugins/{plugin_id}",
             get(get_plugin).patch(set_enabled),
         )
+        .route(
+            "/api/agents/{agent_id}/plugins",
+            get(get_agent_plugins).put(set_agent_plugins),
+        )
 }
 
 #[derive(Serialize)]
@@ -75,6 +79,12 @@ struct SetEnabledBody {
     enabled: bool,
 }
 
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AgentPluginsBody {
+    plugin_ids: Vec<Uuid>,
+}
+
 struct ApiError(StatusCode, String);
 
 impl IntoResponse for ApiError {
@@ -86,7 +96,7 @@ impl IntoResponse for ApiError {
 impl From<PluginError> for ApiError {
     fn from(err: PluginError) -> Self {
         let status = match &err {
-            PluginError::NotFound => StatusCode::NOT_FOUND,
+            PluginError::NotFound | PluginError::AgentNotFound => StatusCode::NOT_FOUND,
             PluginError::Validation(_) => StatusCode::BAD_REQUEST,
             PluginError::Conflict(_) => StatusCode::CONFLICT,
             PluginError::Db(_) | PluginError::Io(_) => {
@@ -160,7 +170,9 @@ async fn add_dir(
     Json(body): Json<AddDirBody>,
 ) -> Result<(StatusCode, Json<PluginDirResponse>), ApiError> {
     let pool = pool_from_state(&state)?;
-    let dir = PluginService::new(pool).add_dir(&body.path).await?;
+    let service = PluginService::new(pool);
+    let dir = service.add_dir(&body.path).await?;
+    service.refresh_catalog(&state.skills).await?;
     Ok((StatusCode::CREATED, Json(dir_response(dir))))
 }
 
@@ -171,9 +183,9 @@ async fn move_dir(
     Json(body): Json<MoveDirBody>,
 ) -> Result<Json<Vec<PluginDirResponse>>, ApiError> {
     let pool = pool_from_state(&state)?;
-    let dirs = PluginService::new(pool)
-        .move_dir(dir_id, body.position)
-        .await?;
+    let service = PluginService::new(pool);
+    let dirs = service.move_dir(dir_id, body.position).await?;
+    service.refresh_catalog(&state.skills).await?;
     Ok(Json(dirs.into_iter().map(dir_response).collect()))
 }
 
@@ -183,7 +195,9 @@ async fn remove_dir(
     Path(dir_id): Path<Uuid>,
 ) -> Result<StatusCode, ApiError> {
     let pool = pool_from_state(&state)?;
-    PluginService::new(pool).remove_dir(dir_id).await?;
+    let service = PluginService::new(pool);
+    service.remove_dir(dir_id).await?;
+    service.refresh_catalog(&state.skills).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -192,7 +206,10 @@ async fn rescan(
     AdminUser(_): AdminUser,
 ) -> Result<Json<Vec<PluginResponse>>, ApiError> {
     let pool = pool_from_state(&state)?;
-    Ok(plugins_response(PluginService::new(pool).rescan().await?))
+    let service = PluginService::new(pool);
+    let plugins = service.rescan().await?;
+    service.refresh_catalog(&state.skills).await?;
+    Ok(plugins_response(plugins))
 }
 
 async fn list_plugins(
@@ -222,8 +239,31 @@ async fn set_enabled(
     Json(body): Json<SetEnabledBody>,
 ) -> Result<Json<PluginResponse>, ApiError> {
     let pool = pool_from_state(&state)?;
-    let plugin = PluginService::new(pool)
-        .set_enabled(plugin_id, body.enabled)
-        .await?;
+    let service = PluginService::new(pool);
+    let plugin = service.set_enabled(plugin_id, body.enabled).await?;
+    service.refresh_catalog(&state.skills).await?;
     Ok(Json(plugin_response(plugin)))
+}
+
+async fn get_agent_plugins(
+    State(state): State<Arc<AppState>>,
+    AuthUser { .. }: AuthUser,
+    Path(agent_id): Path<Uuid>,
+) -> Result<Json<AgentPluginsBody>, ApiError> {
+    let pool = pool_from_state(&state)?;
+    let plugin_ids = PluginService::new(pool).agent_plugin_ids(agent_id).await?;
+    Ok(Json(AgentPluginsBody { plugin_ids }))
+}
+
+async fn set_agent_plugins(
+    State(state): State<Arc<AppState>>,
+    AuthUser { .. }: AuthUser,
+    Path(agent_id): Path<Uuid>,
+    Json(body): Json<AgentPluginsBody>,
+) -> Result<Json<AgentPluginsBody>, ApiError> {
+    let pool = pool_from_state(&state)?;
+    let plugin_ids = PluginService::new(pool)
+        .set_agent_plugins(agent_id, &body.plugin_ids)
+        .await?;
+    Ok(Json(AgentPluginsBody { plugin_ids }))
 }

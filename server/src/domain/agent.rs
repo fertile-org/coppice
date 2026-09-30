@@ -8,6 +8,7 @@ pub struct AgentPreset {
     pub role: String,
     pub skills: Vec<String>,
     pub responsibilities: Vec<String>,
+    pub default_plugins: Vec<String>,
 }
 
 #[derive(Debug, Clone)]

@@ -5,7 +5,7 @@ pub async fn call_skill_list(ctx: &ToolCtx<'_>, _args: Value) -> Result<Value, T
     let skills: Vec<Value> = ctx
         .state
         .skills
-        .skills_for(ctx.scope.agent_id)
+        .skills_for(&ctx.scope.plugin_ids)
         .into_iter()
         .map(|s| json!({ "id": s.id, "description": s.description }))
         .collect();
@@ -22,7 +22,7 @@ pub async fn call_skill_load(ctx: &ToolCtx<'_>, args: Value) -> Result<Value, To
     let (info, body) = ctx
         .state
         .skills
-        .get(ctx.scope.agent_id, name)
+        .get(&ctx.scope.plugin_ids, name)
         .ok_or_else(|| ToolError::NotFound(format!("skill \"{name}\" not found")))?;
     Ok(json!({
         "id": info.id,

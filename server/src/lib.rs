@@ -84,9 +84,14 @@ impl AppState {
         Ok(Arc::new(crate::plugins::skills::load_builtin(dir)?))
     }
 
-    /// Records the default plugin dir (fatal on failure) and scans all plugin
-    /// dirs; scan failures are logged so the server still starts.
-    pub async fn init_plugins(db: &PgPool, config: &AppConfig) -> anyhow::Result<()> {
+    /// Records the default plugin dir (fatal on failure), scans all plugin
+    /// dirs and loads enabled plugin skills; scan failures are logged so the
+    /// server still starts.
+    pub async fn init_plugins(
+        db: &PgPool,
+        config: &AppConfig,
+        skills: &crate::plugins::skills::SkillCatalog,
+    ) -> anyhow::Result<()> {
         let service = crate::services::plugin_service::PluginService::new(db);
         service
             .ensure_default_dir(&config.plugins.dir)
@@ -99,6 +104,9 @@ impl AppState {
             })?;
         if let Err(err) = service.rescan().await {
             tracing::warn!(error = %err, "plugin scan failed");
+        }
+        if let Err(err) = service.refresh_catalog(skills).await {
+            tracing::warn!(error = %err, "loading plugin skills failed");
         }
         Ok(())
     }

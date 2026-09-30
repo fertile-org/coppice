@@ -67,8 +67,8 @@ async fn main() -> anyhow::Result<()> {
     coppice_server::agent_templates::ensure_all_presets_have_templates(&db, &agent_templates)
         .await
         .map_err(|e| anyhow::anyhow!("agent template validation failed: {e}"))?;
-    coppice_server::AppState::init_plugins(&db, &config).await?;
     let skills = coppice_server::AppState::builtin_skills_from_config(&config)?;
+    coppice_server::AppState::init_plugins(&db, &config, &skills).await?;
     let state = Arc::new(coppice_server::AppState {
         attachments: coppice_server::AppState::attachment_store_from_config(&config),
         connector_registry: coppice_server::AppState::connector_registry_from_config(

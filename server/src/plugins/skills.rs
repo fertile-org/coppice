@@ -5,8 +5,11 @@ use crate::domain::workflow::{
     is_in_qa_qc_task, is_in_review_review_task, is_pm_identity, is_ready_tech_lead_refinement,
 };
 use crate::plugins::builtin::BUILTIN_PLUGIN;
+use crate::plugins::manifest::PluginManifest;
 use anyhow::Context;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::sync::RwLock;
 use uuid::Uuid;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -17,9 +20,49 @@ pub struct SkillInfo {
     pub path: PathBuf,
 }
 
+/// Served skills of one enabled plugin. `SkillInfo.id` is `<plugin>:<skill>`.
+#[derive(Debug, Clone)]
+pub struct PluginSkillSet {
+    pub plugin_id: Uuid,
+    pub plugin_name: String,
+    /// Canonical plugin root; skill bodies must resolve inside it.
+    pub root: PathBuf,
+    pub skills: Vec<SkillInfo>,
+}
+
+impl PluginSkillSet {
+    /// Valid skills only; for duplicate names the first by `rel_path` wins.
+    pub fn from_manifest(plugin_id: Uuid, root: &Path, manifest: &PluginManifest) -> Self {
+        let mut entries: Vec<_> = manifest
+            .skills
+            .iter()
+            .filter(|s| s.error.is_none())
+            .collect();
+        entries.sort_by(|a, b| a.rel_path.cmp(&b.rel_path));
+        let mut seen = HashSet::new();
+        let mut skills: Vec<SkillInfo> = entries
+            .into_iter()
+            .filter(|s| seen.insert(s.name.as_str()))
+            .map(|s| SkillInfo {
+                id: format!("{}:{}", manifest.name, s.name),
+                description: s.description.clone(),
+                path: root.join(&s.rel_path),
+            })
+            .collect();
+        skills.sort_by(|a, b| a.id.cmp(&b.id));
+        PluginSkillSet {
+            plugin_id,
+            plugin_name: manifest.name.clone(),
+            root: root.to_path_buf(),
+            skills,
+        }
+    }
+}
+
 #[derive(Debug, Default)]
 pub struct SkillCatalog {
     builtin: Vec<(SkillInfo, String)>,
+    plugins: RwLock<HashMap<Uuid, PluginSkillSet>>,
 }
 
 pub(crate) struct Frontmatter {
@@ -81,16 +124,70 @@ impl SkillCatalog {
             }
         }
         builtin.sort_by(|a, b| a.0.id.cmp(&b.0.id));
-        Ok(SkillCatalog { builtin })
+        Ok(SkillCatalog {
+            builtin,
+            plugins: RwLock::default(),
+        })
     }
 
-    pub fn skills_for(&self, _agent_id: Uuid) -> Vec<SkillInfo> {
-        self.builtin.iter().map(|(i, _)| i.clone()).collect()
+    pub fn set_plugin_skills(&self, sets: Vec<PluginSkillSet>) {
+        let sets = sets.into_iter().map(|s| (s.plugin_id, s)).collect();
+        *self.plugins.write().unwrap_or_else(|e| e.into_inner()) = sets;
     }
 
-    pub fn get(&self, _agent_id: Uuid, id: &str) -> Option<(SkillInfo, String)> {
-        self.builtin.iter().find(|(i, _)| i.id == id).cloned()
+    /// Built-ins first, then skills of the snapshot's plugins sorted by id.
+    pub fn skills_for(&self, plugin_ids: &[Uuid]) -> Vec<SkillInfo> {
+        let mut skills: Vec<SkillInfo> = self.builtin.iter().map(|(i, _)| i.clone()).collect();
+        let mut from_plugins: Vec<SkillInfo> = {
+            let plugins = self.plugins.read().unwrap_or_else(|e| e.into_inner());
+            plugin_ids
+                .iter()
+                .filter_map(|id| plugins.get(id))
+                .flat_map(|set| set.skills.iter().cloned())
+                .collect()
+        };
+        from_plugins.sort_by(|a, b| a.id.cmp(&b.id));
+        skills.extend(from_plugins);
+        skills
     }
+
+    /// Plugin skill bodies are read from disk on every call.
+    pub fn get(&self, plugin_ids: &[Uuid], id: &str) -> Option<(SkillInfo, String)> {
+        let builtin_id = id
+            .strip_prefix(BUILTIN_PLUGIN)
+            .and_then(|rest| rest.strip_prefix(':'))
+            .unwrap_or(id);
+        if let Some(found) = self.builtin.iter().find(|(i, _)| i.id == builtin_id) {
+            return Some(found.clone());
+        }
+        let (info, root) = {
+            let plugins = self.plugins.read().unwrap_or_else(|e| e.into_inner());
+            plugin_ids
+                .iter()
+                .filter_map(|pid| plugins.get(pid))
+                .find_map(|set| {
+                    set.skills
+                        .iter()
+                        .find(|s| s.id == id)
+                        .map(|s| (s.clone(), set.root.clone()))
+                })?
+        };
+        match read_plugin_skill_body(&root, &info.path) {
+            Ok(body) => Some((info, body)),
+            Err(err) => {
+                tracing::warn!(skill = %info.id, error = %format!("{err:#}"), "plugin skill unavailable");
+                None
+            }
+        }
+    }
+}
+
+fn read_plugin_skill_body(root: &Path, skill_dir: &Path) -> anyhow::Result<String> {
+    let root = std::fs::canonicalize(root)?;
+    let skill_file = std::fs::canonicalize(skill_dir.join("SKILL.md"))?;
+    anyhow::ensure!(skill_file.starts_with(&root), "path escapes plugin root");
+    let text = std::fs::read_to_string(&skill_file)?;
+    Ok(parse_skill_file(&text)?.1)
 }
 
 pub fn load_builtin(dir: &Path) -> anyhow::Result<SkillCatalog> {
@@ -160,6 +257,7 @@ pub fn required_skill(
 mod tests {
     use super::*;
     use crate::plugins::builtin::{materialize_builtin, BUILTIN_SKILLS};
+    use crate::plugins::manifest::SkillEntry;
 
     fn catalog() -> (tempfile::TempDir, SkillCatalog) {
         let dir = tempfile::tempdir().unwrap();
@@ -171,7 +269,7 @@ mod tests {
     #[test]
     fn builtin_skills_parse_frontmatter() {
         let (_dir, catalog) = catalog();
-        let skills = catalog.skills_for(Uuid::new_v4());
+        let skills = catalog.skills_for(&[]);
         assert_eq!(skills.len(), 6);
         for (id, _) in BUILTIN_SKILLS {
             let info = skills
@@ -181,11 +279,162 @@ mod tests {
             assert!(!info.description.trim().is_empty(), "{id} description");
             assert!(info.path.is_absolute(), "{id} path");
             assert!(info.path.join("SKILL.md").is_file(), "{id} SKILL.md");
-            let (_, body) = catalog.get(Uuid::new_v4(), id).unwrap();
+            let (_, body) = catalog.get(&[], id).unwrap();
             assert!(!body.trim().is_empty(), "{id} body");
             assert!(!body.starts_with("---"), "{id} body includes frontmatter");
         }
-        assert!(catalog.get(Uuid::new_v4(), "nope").is_none());
+        assert!(catalog.get(&[], "nope").is_none());
+    }
+
+    fn sample_plugin_set(dir: &tempfile::TempDir) -> PluginSkillSet {
+        let root = dir.path().join("sample-plugin");
+        copy_tree(
+            &Path::new(env!("CARGO_MANIFEST_DIR")).join("../fixtures/plugins/sample-plugin"),
+            &root,
+        );
+        let root = std::fs::canonicalize(root).unwrap();
+        let manifest = crate::plugins::manifest::parse_plugin(&root).unwrap();
+        PluginSkillSet::from_manifest(Uuid::new_v4(), &root, &manifest)
+    }
+
+    fn copy_tree(src: &Path, dst: &Path) {
+        std::fs::create_dir_all(dst).unwrap();
+        for entry in std::fs::read_dir(src).unwrap() {
+            let entry = entry.unwrap();
+            let target = dst.join(entry.file_name());
+            if entry.file_type().unwrap().is_dir() {
+                copy_tree(&entry.path(), &target);
+            } else {
+                std::fs::copy(entry.path(), target).unwrap();
+            }
+        }
+    }
+
+    #[test]
+    fn plugin_skills_are_namespaced_and_scoped_to_snapshot() {
+        let (_dir, catalog) = catalog();
+        let plugins = tempfile::tempdir().unwrap();
+        let set = sample_plugin_set(&plugins);
+        let id = set.plugin_id;
+        catalog.set_plugin_skills(vec![set]);
+
+        let ids: Vec<String> = catalog
+            .skills_for(&[id])
+            .into_iter()
+            .map(|s| s.id)
+            .collect();
+        assert_eq!(ids.len(), 7, "{ids:?}");
+        assert_eq!(ids.last().map(String::as_str), Some("sample-plugin:hello"));
+        assert!(!ids.iter().any(|i| i.contains("broken")), "{ids:?}");
+
+        let builtins = catalog.skills_for(&[]);
+        assert_eq!(builtins.len(), 6);
+        assert!(builtins.iter().all(|s| !s.id.contains(':')));
+    }
+
+    #[test]
+    fn builtin_resolves_with_and_without_coppice_prefix() {
+        let (_dir, catalog) = catalog();
+        let (plain, body) = catalog.get(&[], "coppice-git").unwrap();
+        let (prefixed, prefixed_body) = catalog.get(&[], "coppice:coppice-git").unwrap();
+        assert_eq!(plain, prefixed);
+        assert_eq!(body, prefixed_body);
+    }
+
+    #[test]
+    fn plugin_skill_body_reflects_disk_changes() {
+        let (_dir, catalog) = catalog();
+        let plugins = tempfile::tempdir().unwrap();
+        let set = sample_plugin_set(&plugins);
+        let id = set.plugin_id;
+        let skill_file = set.root.join("skills/hello/SKILL.md");
+        catalog.set_plugin_skills(vec![set]);
+
+        let (info, body) = catalog.get(&[id], "sample-plugin:hello").unwrap();
+        assert_eq!(info.id, "sample-plugin:hello");
+        assert_eq!(info.description, "Says hello");
+        assert_eq!(body.trim(), "Say hello to the user.");
+
+        std::fs::write(
+            &skill_file,
+            "---\nname: hello\ndescription: Says hello\n---\nWave instead.\n",
+        )
+        .unwrap();
+        let (_, body) = catalog.get(&[id], "sample-plugin:hello").unwrap();
+        assert_eq!(body.trim(), "Wave instead.");
+    }
+
+    #[test]
+    fn plugin_skill_not_in_snapshot_is_none() {
+        let (_dir, catalog) = catalog();
+        let plugins = tempfile::tempdir().unwrap();
+        let set = sample_plugin_set(&plugins);
+        catalog.set_plugin_skills(vec![set]);
+        assert!(catalog.get(&[], "sample-plugin:hello").is_none());
+        assert!(catalog
+            .get(&[Uuid::new_v4()], "sample-plugin:hello")
+            .is_none());
+    }
+
+    #[test]
+    fn plugin_skill_escaping_root_is_none() {
+        let (_dir, catalog) = catalog();
+        let plugins = tempfile::tempdir().unwrap();
+        let set = sample_plugin_set(&plugins);
+        let id = set.plugin_id;
+        let skill_dir = set.root.join("skills/hello");
+        catalog.set_plugin_skills(vec![set]);
+
+        let outside = tempfile::tempdir().unwrap();
+        std::fs::write(
+            outside.path().join("SKILL.md"),
+            "---\nname: hello\ndescription: x\n---\nsecret",
+        )
+        .unwrap();
+        std::fs::remove_dir_all(&skill_dir).unwrap();
+        std::os::unix::fs::symlink(outside.path(), &skill_dir).unwrap();
+        assert!(catalog.get(&[id], "sample-plugin:hello").is_none());
+    }
+
+    #[test]
+    fn duplicate_skill_names_keep_first_by_rel_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = std::fs::canonicalize(dir.path()).unwrap();
+        let manifest = crate::plugins::manifest::PluginManifest {
+            skills: vec![
+                SkillEntry {
+                    name: "dup".into(),
+                    description: "second".into(),
+                    rel_path: "z/dup".into(),
+                    error: None,
+                },
+                SkillEntry {
+                    name: "dup".into(),
+                    description: "first".into(),
+                    rel_path: "a/dup".into(),
+                    error: None,
+                },
+            ],
+            ..sample_manifest()
+        };
+        let set = PluginSkillSet::from_manifest(Uuid::new_v4(), &root, &manifest);
+        assert_eq!(set.skills.len(), 1);
+        assert_eq!(set.skills[0].id, "p:dup");
+        assert_eq!(set.skills[0].description, "first");
+        assert_eq!(set.skills[0].path, root.join("a/dup"));
+    }
+
+    fn sample_manifest() -> crate::plugins::manifest::PluginManifest {
+        crate::plugins::manifest::PluginManifest {
+            name: "p".into(),
+            version: "0.0.0".into(),
+            description: String::new(),
+            author: None,
+            layout: crate::plugins::manifest::PluginLayout::SkillsOnly,
+            skills: Vec::new(),
+            mcp_servers: Vec::new(),
+            unsupported: Vec::new(),
+        }
     }
 
     #[test]
@@ -214,13 +463,7 @@ mod tests {
         materialize_builtin(dir.path()).unwrap();
         assert!(!stale.exists());
         assert!(sibling.is_file());
-        assert_eq!(
-            load_builtin(dir.path())
-                .unwrap()
-                .skills_for(Uuid::new_v4())
-                .len(),
-            6
-        );
+        assert_eq!(load_builtin(dir.path()).unwrap().skills_for(&[]).len(), 6);
     }
 
     #[test]
@@ -231,8 +474,8 @@ mod tests {
         std::fs::create_dir_all(&bad).unwrap();
         std::fs::write(bad.join("SKILL.md"), "no frontmatter here").unwrap();
         let catalog = load_builtin(dir.path()).unwrap();
-        assert_eq!(catalog.skills_for(Uuid::new_v4()).len(), 6);
-        assert!(catalog.get(Uuid::new_v4(), "broken").is_none());
+        assert_eq!(catalog.skills_for(&[]).len(), 6);
+        assert!(catalog.get(&[], "broken").is_none());
     }
 
     #[test]

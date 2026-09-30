@@ -1,4 +1,5 @@
 use crate::domain::agent::{Agent, AgentPreset};
+use crate::services::plugin_service::PluginService;
 use sqlx::PgPool;
 use sqlx::Row;
 use uuid::Uuid;
@@ -29,7 +30,7 @@ impl<'a> AgentService<'a> {
     pub async fn list_presets(&self) -> Result<Vec<AgentPreset>, AgentError> {
         let rows = sqlx::query(
             r#"
-            SELECT id, key, role, skills, responsibilities
+            SELECT id, key, role, skills, responsibilities, default_plugins
             FROM agent_presets
             ORDER BY key ASC
             "#,
@@ -77,7 +78,7 @@ impl<'a> AgentService<'a> {
     pub async fn get_preset(&self, preset_id: Uuid) -> Result<AgentPreset, AgentError> {
         let row = sqlx::query(
             r#"
-            SELECT id, key, role, skills, responsibilities
+            SELECT id, key, role, skills, responsibilities, default_plugins
             FROM agent_presets
             WHERE id = $1
             "#,
@@ -116,19 +117,27 @@ impl<'a> AgentService<'a> {
         }
 
         let preset = self.get_preset(preset_id).await?;
-        self.insert_agent(
-            name,
-            &preset.role,
-            &preset.skills,
-            &preset.responsibilities,
-            system_prompt,
-            connector.unwrap_or("mock"),
-            model_provider,
-            model,
-            enabled.unwrap_or(true),
-            Some(&preset.key),
-        )
-        .await
+        let agent = self
+            .insert_agent(
+                name,
+                &preset.role,
+                &preset.skills,
+                &preset.responsibilities,
+                system_prompt,
+                connector.unwrap_or("mock"),
+                model_provider,
+                model,
+                enabled.unwrap_or(true),
+                Some(&preset.key),
+            )
+            .await?;
+        if let Err(err) = PluginService::new(self.pool)
+            .apply_preset_defaults(agent.id, &preset.default_plugins)
+            .await
+        {
+            tracing::warn!(agent_id = %agent.id, error = %err, "failed to apply preset default plugins");
+        }
+        Ok(agent)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -351,6 +360,7 @@ fn row_to_preset(row: &sqlx::postgres::PgRow) -> AgentPreset {
         role: row.get("role"),
         skills: row.get("skills"),
         responsibilities: row.get("responsibilities"),
+        default_plugins: row.get("default_plugins"),
     }
 }
 

@@ -33,6 +33,7 @@ use crate::services::context_builder::{
 };
 use crate::services::job_service::JobService;
 use crate::services::mention_service::MentionService;
+use crate::services::plugin_service::PluginService;
 use crate::services::result_contract;
 use crate::services::run_orchestrator::{load_run_continuation_context, RunOrchestrator};
 use crate::services::run_service::RunService;
@@ -228,6 +229,10 @@ async fn execute_job(
         .await
         .context("mark run running")?;
 
+    let plugin_ids = PluginService::new(pool)
+        .run_plugin_ids(run.agent_id)
+        .await
+        .unwrap_or_default();
     // Dropped (and revoked in the background) on any early `?` return; revoked
     // explicitly as soon as the connector returns.
     let grant = grant_for_run(
@@ -242,6 +247,7 @@ async fn execute_job(
             profile: run.context_profile,
             job_type: run.job_type.clone(),
             compaction_ticket_ids: Vec::new(),
+            plugin_ids: plugin_ids.clone(),
         },
     )
     .await
@@ -462,7 +468,7 @@ async fn execute_job(
         assignee_agent_key: assignee_agent_key_ref,
         thread_excerpt: context_thread_excerpt,
     };
-    let skills = state.skills.skills_for(run.agent_id);
+    let skills = state.skills.skills_for(&plugin_ids);
     let required = required_skill(
         run.context_profile,
         &run.job_type,
@@ -748,7 +754,7 @@ fn chat_context_input_base<'a>(
 /// transcript.
 fn write_chat_context(
     state: &AppState,
-    run: &AgentRun,
+    plugin_ids: &[uuid::Uuid],
     agent: &crate::domain::agent::Agent,
     agent_key: &str,
     cwd: &std::path::Path,
@@ -765,7 +771,7 @@ fn write_chat_context(
             mode_label: "Chat",
         });
     }
-    let skills = state.skills.skills_for(run.agent_id);
+    let skills = state.skills.skills_for(plugin_ids);
     write_context_document(cwd, &build_tool_first_context(&input, &skills, None))
 }
 
@@ -866,6 +872,10 @@ async fn execute_chat_turn(
         .await
         .context("mark chat run running")?;
 
+    let plugin_ids = PluginService::new(pool)
+        .run_plugin_ids(run.agent_id)
+        .await
+        .unwrap_or_default();
     let grant = grant_for_run(
         state,
         pool,
@@ -878,6 +888,7 @@ async fn execute_chat_turn(
             profile: ContextProfile::Conversation,
             job_type: run.job_type.clone(),
             compaction_ticket_ids: Vec::new(),
+            plugin_ids: plugin_ids.clone(),
         },
     )
     .await
@@ -918,8 +929,16 @@ async fn execute_chat_turn(
     let provider_result = if stored_resume.is_some() && connector_matches {
         chat_resume_attempted = true;
         chat_resume_used = true;
-        write_chat_context(state, run, &agent, &agent_key, &cwd, &human_body, true)
-            .context("write slim chat context")?;
+        write_chat_context(
+            state,
+            &plugin_ids,
+            &agent,
+            &agent_key,
+            &cwd,
+            &human_body,
+            true,
+        )
+        .context("write slim chat context")?;
         match invoke_chat_provider(
             state,
             pool,
@@ -948,8 +967,16 @@ async fn execute_chat_turn(
                     .format_transcript(session_id)
                     .await
                     .context("format chat transcript for fallback")?;
-                write_chat_context(state, run, &agent, &agent_key, &cwd, &transcript, false)
-                    .context("write full chat context fallback")?;
+                write_chat_context(
+                    state,
+                    &plugin_ids,
+                    &agent,
+                    &agent_key,
+                    &cwd,
+                    &transcript,
+                    false,
+                )
+                .context("write full chat context fallback")?;
                 invoke_chat_provider(
                     state,
                     pool,
@@ -972,8 +999,16 @@ async fn execute_chat_turn(
             .format_transcript(session_id)
             .await
             .context("format chat transcript")?;
-        write_chat_context(state, run, &agent, &agent_key, &cwd, &transcript, false)
-            .context("write chat context")?;
+        write_chat_context(
+            state,
+            &plugin_ids,
+            &agent,
+            &agent_key,
+            &cwd,
+            &transcript,
+            false,
+        )
+        .context("write chat context")?;
         invoke_chat_provider(
             state,
             pool,

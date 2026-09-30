@@ -1,0 +1,16 @@
+{
+  "status": "done",
+  "summary": "via stdout",
+  "changedFiles": [],
+  "testsRun": [],
+  "mentionAgents": [],
+  "blockers": [],
+  "toolCalls": [
+    { "tool": "skill_list", "args": {} },
+    { "tool": "skill_load", "args": { "name": "sample-plugin:hello" } },
+    {
+      "tool": "result_submit",
+      "args": { "status": "done", "summary": "via tool", "mentionAgents": [] }
+    }
+  ]
+}

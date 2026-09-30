@@ -16,6 +16,7 @@ pub struct NewRunToolScope {
     pub profile: ContextProfile,
     pub job_type: String,
     pub compaction_ticket_ids: Vec<Uuid>,
+    pub plugin_ids: Vec<Uuid>,
 }
 
 #[derive(Debug, Clone)]
@@ -29,6 +30,7 @@ pub struct RunToolScope {
     pub profile: ContextProfile,
     pub job_type: String,
     pub compaction_ticket_ids: Vec<Uuid>,
+    pub plugin_ids: Vec<Uuid>,
 }
 
 pub struct TokenService<'a> {
@@ -59,11 +61,11 @@ impl<'a> TokenService<'a> {
             INSERT INTO run_tool_tokens (
                 id, token_hash, subject_kind, run_id, agent_id, ticket_id,
                 chat_session_id, board_id, context_profile, job_type,
-                compaction_ticket_ids, expires_at
+                compaction_ticket_ids, plugin_ids, expires_at
             )
             VALUES (
-                $1, $2, 'run', $3, $4, $5, $6, $7, $8, $9, $10,
-                now() + make_interval(secs => $11)
+                $1, $2, 'run', $3, $4, $5, $6, $7, $8, $9, $10, $11,
+                now() + make_interval(secs => $12)
             )
             "#,
         )
@@ -77,6 +79,7 @@ impl<'a> TokenService<'a> {
         .bind(scope.profile.as_str())
         .bind(&scope.job_type)
         .bind(&scope.compaction_ticket_ids)
+        .bind(&scope.plugin_ids)
         .bind(ttl.as_secs_f64())
         .execute(self.pool)
         .await?;
@@ -89,7 +92,7 @@ impl<'a> TokenService<'a> {
         let row = sqlx::query(
             r#"
             SELECT id, run_id, agent_id, ticket_id, chat_session_id, board_id,
-                   context_profile, job_type, compaction_ticket_ids
+                   context_profile, job_type, compaction_ticket_ids, plugin_ids
             FROM run_tool_tokens
             WHERE token_hash = $1
               AND subject_kind = 'run'
@@ -118,6 +121,7 @@ impl<'a> TokenService<'a> {
             profile,
             job_type: row.get("job_type"),
             compaction_ticket_ids: row.get("compaction_ticket_ids"),
+            plugin_ids: row.get("plugin_ids"),
         }))
     }
 
