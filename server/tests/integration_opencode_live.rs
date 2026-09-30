@@ -130,3 +130,73 @@ async fn live_ws_replays_snapshot_when_no_registry() {
         "interrupted: server restarted during run"
     );
 }
+
+async fn insert_running_opencode_run(
+    state: &coppice_server::AppState,
+    app: &axum::Router,
+    cookie: &str,
+    csrf: &str,
+) -> (Uuid, tempfile::TempDir) {
+    let agent_id = create_opencode_agent(app, cookie, csrf).await;
+    let board_id = common::create_test_board(app, cookie, csrf).await;
+    let ticket_id = common::create_test_ticket(app, &board_id, cookie, csrf).await;
+    let (git_dir, local_path) = common::create_temp_git_checkout();
+
+    let run_id = Uuid::new_v4();
+    sqlx::query(
+        r#"
+        INSERT INTO agent_runs (
+            id, ticket_id, agent_id, job_type, status, sandbox_profile_id,
+            worktree_path, session_id, started_at
+        )
+        VALUES ($1, $2, $3, 'work_on_ticket', 'running', 'permissive-default', $4, 'ses-1', now())
+        "#,
+    )
+    .bind(run_id)
+    .bind(Uuid::parse_str(&ticket_id).unwrap())
+    .bind(Uuid::parse_str(&agent_id).unwrap())
+    .bind(local_path.display().to_string())
+    .execute(state.db.as_ref().unwrap())
+    .await
+    .expect("insert running opencode run");
+    (run_id, git_dir)
+}
+
+async fn run_status(state: &coppice_server::AppState, run_id: Uuid) -> String {
+    sqlx::query_scalar("SELECT status::text FROM agent_runs WHERE id = $1")
+        .bind(run_id)
+        .fetch_one(state.db.as_ref().unwrap())
+        .await
+        .expect("run status")
+}
+
+#[tokio::test]
+async fn watchdog_keeps_worker_owned_run_without_opencode_server() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
+    let (run_id, _git_dir) = insert_running_opencode_run(&state, &app, &cookie, &csrf).await;
+    let _stream = state.run_streams.register(run_id);
+    assert!(state.opencode_runs.base_url(&run_id.to_string()).is_none());
+
+    coppice_server::workers::run_watchdog::run_watchdog_pass_once(&state).await;
+
+    assert_eq!(run_status(&state, run_id).await, "running");
+}
+
+#[tokio::test]
+async fn watchdog_interrupts_orphaned_run_without_opencode_server() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
+    let (run_id, _git_dir) = insert_running_opencode_run(&state, &app, &cookie, &csrf).await;
+    assert!(state.run_streams.get(run_id).is_none());
+
+    coppice_server::workers::run_watchdog::run_watchdog_pass_once(&state).await;
+
+    assert_eq!(run_status(&state, run_id).await, "failed");
+}

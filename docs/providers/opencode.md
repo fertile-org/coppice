@@ -1,6 +1,6 @@
 # OpenCode
 
-Use [OpenCode](https://opencode.ai) as a Coppice connector. Coppice starts `opencode serve` and drives each ticket run through OpenCode’s HTTP/SSE API. The ticket drawer shows a **Live Session** (messages and tools), not a raw terminal.
+Use [OpenCode](https://opencode.ai) as a Coppice connector. Coppice starts a dedicated `opencode serve` for each run and drives it through OpenCode’s HTTP/SSE API. The ticket drawer shows a **Live Session** (messages and tools), not a raw terminal.
 
 **Connector id:** `opencode`
 
@@ -28,7 +28,7 @@ docker compose -f deploy/docker-compose.yml exec -it -u "$(id -u):$(id -g)" serv
 | Step | Notes |
 |------|--------|
 | `enable` | Turns the connector on in `deploy/config/config.toml` — also set `model_providers` to IDs from `opencode auth list` (see below) |
-| recreate server | Picks up config; starts `opencode serve` when OpenCode is enabled |
+| recreate server | Picks up config; registers the connector when OpenCode is enabled |
 | `install` | Installs `opencode` into `/home/coppice/.opencode/bin` |
 | `setup` | Runs `opencode auth login` |
 | `doctor` | Prints `doctor: ok` when binary + auth look healthy |
@@ -41,8 +41,7 @@ After login, put provider IDs into config (example):
 [agent.connectors.opencode]
 enabled = true
 command = "opencode"
-serve_hostname = "127.0.0.1"
-serve_port = 4096
+serve_hostname = "127.0.0.1"   # per-run servers listen here on a free port
 model_providers = ["zai-coding-plan"]
 # run_timeout_secs = 3600   # optional; default 1800 (30 min)
 ```
@@ -82,29 +81,31 @@ List models: `opencode models zai-coding-plan` (inside the server container or o
 | Binary missing | Re-run `install`; PATH should include `/home/coppice/.opencode/bin` |
 | Auth missing | Re-run `setup` (`opencode auth login`) |
 | Agent health `missing_config` | Add the agent’s model provider id to `model_providers`, recreate server |
-| Live Session empty / run fails | Confirm `opencode serve` is up (enabled connector + recreate); check `doctor` |
+| Live Session empty / run fails | Check the run error (a per-run `opencode serve` that fails to start names the cause) and `doctor` |
 | Run times out on long tests | Raise `run_timeout_secs`, or prefer shorter agent test commands |
 
 ## Behavior notes
 
 - **Live Session:** Structured UI (messages, tools, reasoning), not the mock/xterm console.
-- **Restart mid-run:** Coppice may replay a session snapshot and try to re-attach to `opencode serve`. If serve or the session is gone, the UI gets a non-recoverable end.
+- **Restart mid-run:** The per-run `opencode serve` does not survive a Coppice restart, so active OpenCode runs are marked interrupted; the Live Session replays the stored snapshot and ends non-recoverable. Chat and resume still continue the stored session id — OpenCode keeps sessions in its shared data dir.
 - **Agent Chat:** Supported; later turns reuse the same OpenCode HTTP session (`prompt_async` on the stored session id) with a slim Coppice context file. No hard read-only tool allowlist — rely on chat rules and operator trust.
 - **Long context:** OpenCode can compact history within a single run. Across runs, prefer `continued` checkpoints ([context design](../superpowers/specs/2026-06-10-context-long-running-tasks-design.md)).
 - **CI / default Compose:** Stay on `mock` unless you deliberately enable OpenCode.
 
 ## How Coppice runs OpenCode (reference)
 
-When enabled, the server starts `opencode serve` and per run uses:
+Each run (and each chat turn) spawns `opencode serve --hostname <serve_hostname> --port <free port>` with `OPENCODE_CONFIG=<artifacts_dir>/runs/<run id>/opencode.json` (runs without a gateway token, such as drafts, use a temp file). That file registers the Coppice MCP gateway as the remote server `coppice` with header `Authorization: Bearer {env:COPPICE_MCP_TOKEN}`; the token is only in the process environment, never on disk. `OPENCODE_CONFIG` merges with the global OpenCode config, so your models and auth still apply. The process is killed when the run finishes, fails, or is cancelled, and on server shutdown. `serve_port` is ignored (kept so older config files still parse).
+
+Against that process, each run uses:
 
 - `POST /session?directory=<worktree>`
 - `POST /session/{id}/prompt_async`
 - `GET /event?directory=<worktree>` (SSE → Live Session)
 - `GET /session/{id}/message` (parse result contract)
 
-`directory` must be the ticket worktree absolute path on the same host as serve (e.g. `/data/worktrees/...`).
+`directory` must be the ticket worktree absolute path on the same host as the server (e.g. `/data/worktrees/...`).
 
-Optional manual check:
+Optional manual check (against your own `opencode serve --port 4096`):
 
 ```bash
 opencode run --attach http://127.0.0.1:4096 \
@@ -130,7 +131,6 @@ Coppice does not call compact APIs itself. Leave auto-compaction on for normal u
 
 ### Future
 
-- Idle shutdown/restart of `opencode serve` when no jobs are running
 - `attach_url` to use an externally managed serve instance
 
 More: [providers README](README.md), [M08](../milestones/M08-connector-operator-cli.md).

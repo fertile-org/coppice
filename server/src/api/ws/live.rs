@@ -316,6 +316,12 @@ async fn handle_opencode_recovery(
     };
 
     let Some(base_url) = state.opencode_runs.base_url(&run_id.to_string()) else {
+        if state.run_streams.get(run_id).is_some() {
+            return RecoveryOutcome {
+                recoverable: Some(true),
+                reason: None,
+            };
+        }
         return mark_recovery_interrupted(state, run_id, "server restarted during run").await;
     };
 

@@ -20,12 +20,12 @@ pub fn spawn_run_watchdog(state: Arc<AppState>) {
         let mut interval = tokio::time::interval(Duration::from_secs(WATCHDOG_INTERVAL_SECS));
         loop {
             interval.tick().await;
-            run_watchdog_pass(&state).await;
+            run_watchdog_pass_once(&state).await;
         }
     });
 }
 
-async fn run_watchdog_pass(state: &AppState) {
+pub async fn run_watchdog_pass_once(state: &AppState) {
     let Some(pool) = state.db.as_ref() else {
         return;
     };
@@ -80,6 +80,13 @@ async fn run_watchdog_pass(state: &AppState) {
         };
 
         let Some(base_url) = state.opencode_runs.base_url(&run.id.to_string()) else {
+            // The worker stops the server before recording the final status and
+            // drops the stream only afterwards; while it owns the run, a missing
+            // server is not a lost one.
+            if state.run_streams.get(run.id).is_some() {
+                publish_heartbeat(state, run.id, None, elapsed_secs);
+                continue;
+            }
             tracing::warn!(
                 run_id = %run.id,
                 ticket_id = ?run.ticket_id,
