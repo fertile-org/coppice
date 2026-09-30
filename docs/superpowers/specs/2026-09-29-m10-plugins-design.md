@@ -1,6 +1,6 @@
 # M10 Plugins Design
 
-**Status:** Draft design gate — awaiting review  
+**Status:** Approved — Part 1 (steps 1–4) merged; Part 2 split into 2a and 2b (see Delivery order)  
 **Date:** 2026-09-29  
 **Owner/reviewer:** Technical Lead  
 **Milestone:** [M10 — Plugins](../../milestones/M10-plugins.md)
@@ -219,7 +219,7 @@ Wiring rules (apply to Docker, desktop, and cloud alike):
 | `codex` | unverified — expected mechanism | `-c mcp_servers.coppice.url=…` + `-c mcp_servers.coppice.bearer_token_env_var="COPPICE_MCP_TOKEN"` |
 | `cursor` | **verified** | Per-run env only (below); tool-first is viable |
 | `kilo-code` | unverified — expected mechanism | Per-process config path env (`KILO_CONFIG` / fork equivalent) pointing at the run file |
-| `opencode` | unverified — expected mechanism | Shared `opencode serve` cannot carry per-run env. If its API cannot attach a per-session MCP server with auth, switch the connector to per-run `opencode run` processes with a per-run config path (like `kilo-code`) |
+| `opencode` | Part 1: returns `mcp_unavailable`. Part 2a: unverified — decided mechanism | Shared `opencode serve` cannot carry per-run env. Part 2a replaces it with a **per-run `opencode serve`** (below) |
 | `mock` | n/a | Fixture field `toolCalls: [{ tool, args }]` executed over HTTP JSON-RPC against `/mcp` before returning the fixture result |
 
 ### Cursor: verified mechanism
@@ -259,6 +259,15 @@ Results:
 - Client `initialize` sends `protocolVersion: "2025-11-25"`, `capabilities.elicitation.form`; the gateway answers `2025-06-18` and the client accepts it. It opens `GET /mcp` after `notifications/initialized` (expects SSE); a `405` is tolerated. It re-initializes on several connections per run, so the gateway must be stateless per request (no `Mcp-Session-Id` requirement).
 - Side effects: overriding `HOME` also changes `HOME` for the agent's own shell commands (git identity, ssh keys, `gh` auth are not inherited). The connector must either keep such work in Coppice-owned steps (branch/commit/push are, per M07) or forward the needed git env (`GIT_CONFIG_GLOBAL`, `GIT_SSH_COMMAND`, …) explicitly. The CLI also writes its own state (`chats`, `statsig-cache.json`, and a default `cli-config.json` if absent) under `$XDG_CONFIG_HOME/cursor` when `CURSOR_CONFIG_DIR` is not set — always set it.
 - Decision: `cursor` **is tool-first** using the per-run `HOME` mechanism above.
+
+### OpenCode: per-run `opencode serve` (Part 2a)
+
+Rejected alternatives: per-run `opencode run` (loses the session/event API the OpenCode live console depends on) and a shared server with per-run MCP servers registered through its API (MCP tools are global to the server, so concurrent runs would see each other's tools and tokens).
+
+- Each run (and each chat turn that has no live session process) spawns its own `opencode serve` on a free loopback port with `OPENCODE_CONFIG=<run dir>/opencode.json`. The file registers one remote MCP server `coppice` at `mcp.base_url` with header `Authorization: Bearer {env:COPPICE_MCP_TOKEN}`; the token is passed only in the process environment.
+- The existing `opencode_client` / `opencode_events` code talks to that process unchanged; only process ownership moves from the global `opencode_serve` singleton to the run.
+- The process is killed on finish, stop, cancel, and failure (same paths that revoke the token), with a `Drop` backstop. Chat sessions that resume keep a per-session state directory, like Cursor's `chat-sessions/<chat_session_id>`.
+- Plan 2a task 1 verifies this against a live OpenCode CLI installed with `coppice connector install opencode` in the default Compose stack (the exact config key names and `{env:…}` interpolation). If verification fails, stop and revisit this decision before continuing.
 
 If the connector cannot reach the gateway, the run fails with `mcp_unavailable` — no silent fallback to the fat context.
 
@@ -366,7 +375,12 @@ Each real connector completes a ticket tool-first (tools called, `result_submit`
 
 ## Delivery order
 
-Plans: [Part 1 — tool-first harness](../plans/2026-09-29-m10-part1-tool-first-harness.md) covers steps 1–4; Part 2 (plugins) covers steps 5–7.
+Plans: [Part 1 — tool-first harness](../plans/2026-09-29-m10-part1-tool-first-harness.md) covers steps 1–4 (merged). Part 2 is split into two plans:
+
+- **Part 2a — plugins and plugin skills:** OpenCode per-run `opencode serve` (verification first), then step 5: migration (`plugin_dirs`, `plugins`, `agent_plugins`, `run_tool_tokens.plugin_ids` — the snapshot column was not added in Part 1), manifest parsing and scan (shadowing, missing, rescan, unsupported parts), git install/update job, enable/disable, agent assignment and presets, `SkillCatalog` serving built-in + snapshot plugin skills as `<plugin>:<skill>`, Settings → Plugins and the agent-form picker, integration tests with a mock run calling `skill_load` on a plugin skill.
+- **Part 2b — plugin MCP and observability:** steps 6–7: `plugin_settings` (encrypted), `mcp::proxy` over `rmcp` (stdio + HTTP, namespacing, shared instances, restart/backoff, unhealthy, idle shutdown, `readOnlyHint` filtering for chat profiles), Test button, Tools & Skills tab, live-console tool calls, `make e2e-smoke-m10`, docs.
+
+Live verification of `claude-code`, `codex`, and `kilo-code` wiring remains a manual acceptance item (needs their CLIs installed), not a plan task.
 
 1. **Connector verification:** stub `/mcp` with header token; prove all five real CLIs can connect and call a tool; record baseline context sizes. Update the wiring table.
 2. Gateway, tokens, core read tools, `result_submit`, `run_tool_calls`; mock `toolCalls`.
