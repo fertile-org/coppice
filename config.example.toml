@@ -133,3 +133,10 @@ max_output_bytes = 32768
 comment_post_limit = 5
 token_ttl_secs = 14400
 builtin_plugins_dir = "./data/builtin-plugins"
+
+# User plugin dirs. The default dir is created on start and cannot be removed;
+# Docker uses /data/plugins (plugin_data volume) via COPPICE_PLUGINS__DIR.
+# [plugins]
+# dir = "./data/plugins"
+# allow_file_git_urls = false
+# git_timeout_secs = 300

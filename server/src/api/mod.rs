@@ -13,6 +13,7 @@ mod jobs;
 mod knowledge;
 mod knowledge_compaction;
 mod notifications;
+mod plugins;
 mod boards;
 mod repos;
 mod settings;
@@ -50,6 +51,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .merge(users::routes())
         .merge(notifications::routes())
         .merge(tools::routes())
+        .merge(plugins::routes())
         .layer(middleware::from_fn(csrf::csrf_middleware))
         .layer(middleware::from_fn_with_state(state.clone(), session::session_middleware));
 

@@ -26,6 +26,37 @@ pub struct AppConfig {
     pub git: GitConfig,
     #[serde(default)]
     pub mcp: McpConfig,
+    #[serde(default)]
+    pub plugins: PluginsConfig,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct PluginsConfig {
+    /// Default plugin dir; created on start and cannot be removed.
+    #[serde(default = "default_plugins_dir")]
+    pub dir: String,
+    #[serde(default)]
+    pub allow_file_git_urls: bool,
+    #[serde(default = "default_plugins_git_timeout_secs")]
+    pub git_timeout_secs: u64,
+}
+
+fn default_plugins_dir() -> String {
+    "./data/plugins".into()
+}
+
+fn default_plugins_git_timeout_secs() -> u64 {
+    300
+}
+
+impl Default for PluginsConfig {
+    fn default() -> Self {
+        Self {
+            dir: default_plugins_dir(),
+            allow_file_git_urls: false,
+            git_timeout_secs: default_plugins_git_timeout_secs(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -987,6 +1018,7 @@ impl AppConfig {
             secrets: SecretsConfig::default(),
             git: GitConfig::default(),
             mcp: McpConfig::default(),
+            plugins: PluginsConfig::default(),
         }
     }
 }
@@ -1298,6 +1330,30 @@ mod tests {
         }
 
         assert_eq!(cfg.mcp.builtin_plugins_dir, "/data/builtin-plugins");
+    }
+
+    #[test]
+    fn plugins_defaults_and_dir_from_env() {
+        let _guard = ENV_LOCK.lock().expect("env lock");
+
+        let defaults = PluginsConfig::default();
+        assert_eq!(defaults.dir, "./data/plugins");
+        assert!(!defaults.allow_file_git_urls);
+        assert_eq!(defaults.git_timeout_secs, 300);
+
+        const KEY: &str = "COPPICE_PLUGINS__DIR";
+        let previous = std::env::var(KEY).ok();
+        std::env::set_var(KEY, "/data/plugins");
+
+        let cfg = AppConfig::load_defaults().expect("config should load");
+
+        match previous {
+            Some(value) => std::env::set_var(KEY, value),
+            None => std::env::remove_var(KEY),
+        }
+
+        assert_eq!(cfg.plugins.dir, "/data/plugins");
+        assert_eq!(cfg.plugins.git_timeout_secs, 300);
     }
 
     #[test]

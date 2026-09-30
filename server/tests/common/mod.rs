@@ -127,6 +127,18 @@ pub fn create_temp_git_checkout() -> (tempfile::TempDir, PathBuf) {
     (dir, path)
 }
 
+/// Points the default plugin dir at a fresh per-test directory and runs the
+/// same plugin startup as `main.rs`, so tests never touch the repo's `./data`.
+async fn init_test_plugins(config: &mut AppConfig, pool: &sqlx::PgPool) {
+    static BASE: std::sync::OnceLock<tempfile::TempDir> = std::sync::OnceLock::new();
+    let base = BASE.get_or_init(|| tempfile::tempdir().expect("plugins tempdir"));
+    let dir = base.path().join(uuid::Uuid::new_v4().to_string());
+    config.plugins.dir = dir.to_string_lossy().into_owned();
+    AppState::init_plugins(pool, config)
+        .await
+        .expect("init test plugins");
+}
+
 async fn test_state_with_db() -> Arc<AppState> {
     std::env::remove_var("MOCK_AGENT_RESPONSE");
     let pool = prepare_test_pool().await;
@@ -135,7 +147,8 @@ async fn test_state_with_db() -> Arc<AppState> {
         "COPPICE_STORAGE__ARTIFACTS_DIR",
         "/tmp/coppice-test-artifacts",
     );
-    let config = AppConfig::load_defaults().expect("test config");
+    let mut config = AppConfig::load_defaults().expect("test config");
+    init_test_plugins(&mut config, &pool).await;
     let opencode_runs = AppState::test_opencode_runs();
     Arc::new(AppState {
         attachments: AppState::attachment_store_from_config(&config),
@@ -179,6 +192,7 @@ where
     let mut config = AppConfig::load_defaults().expect("test config");
     configure(&mut config);
     config.agent.worker_count = 1;
+    init_test_plugins(&mut config, &pool).await;
 
     let opencode_runs = AppState::test_opencode_runs();
     let state = Arc::new(AppState {
@@ -223,6 +237,7 @@ where
     config.workflow.auto_start_runs = true;
     configure(&mut config);
     config.agent.worker_count = worker_count;
+    init_test_plugins(&mut config, &pool).await;
 
     let opencode_runs = AppState::test_opencode_runs();
     let state = Arc::new(AppState {

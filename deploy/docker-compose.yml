@@ -43,6 +43,8 @@ services:
       # The server rewrites coppice/skills here on every start; must be writable
       # by the non-root server user.
       COPPICE_MCP__BUILTIN_PLUGINS_DIR: /data/builtin-plugins
+      # Default plugin dir (cannot be removed in Settings → Plugins).
+      COPPICE_PLUGINS__DIR: /data/plugins
       AGENT_DEFAULT_PROVIDER: mock
       WORKTREES_PATH: /data/worktrees
       AGENT_WORKER_COUNT: "2"
@@ -60,6 +62,7 @@ services:
     volumes:
       - artifact_data:/data/artifacts
       - worktree_data:/data/worktrees
+      - plugin_data:/data/plugins
       - connector_data:/home/coppice
       # Operator-edited Docker config (gitignored). Writable so `coppice connector enable` works.
       - ./config/config.toml:/etc/coppice/config.toml
@@ -82,4 +85,5 @@ volumes:
   coppice_pgdata:
   artifact_data:
   worktree_data:
+  plugin_data:
   connector_data:

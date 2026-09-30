@@ -84,6 +84,25 @@ impl AppState {
         Ok(Arc::new(crate::plugins::skills::load_builtin(dir)?))
     }
 
+    /// Records the default plugin dir (fatal on failure) and scans all plugin
+    /// dirs; scan failures are logged so the server still starts.
+    pub async fn init_plugins(db: &PgPool, config: &AppConfig) -> anyhow::Result<()> {
+        let service = crate::services::plugin_service::PluginService::new(db);
+        service
+            .ensure_default_dir(&config.plugins.dir)
+            .await
+            .map_err(|e| {
+                anyhow::anyhow!(
+                    "failed to set up default plugin dir {}: {e}",
+                    config.plugins.dir
+                )
+            })?;
+        if let Err(err) = service.rescan().await {
+            tracing::warn!(error = %err, "plugin scan failed");
+        }
+        Ok(())
+    }
+
     /// Built-in skills materialized once into a process-lifetime temp dir, so
     /// tests never write into the repo or a configured plugins dir.
     pub fn test_skills() -> Arc<crate::plugins::skills::SkillCatalog> {
