@@ -43,8 +43,8 @@ Today each run gets a long `context.md` that pre-loads ticket data and spells ou
 ## Acceptance criteria
 
 - [ ] Design spec + implementation plan committed; connector verification recorded
-- [ ] Plugin dirs, scan, git install, enable, agent assignment work via UI and API
-- [ ] Claude Code / Cursor format plugins and skills-only folders load unchanged; unsupported parts listed
+- [x] Plugin dirs, scan, git install, enable, agent assignment work via UI and API
+- [x] Claude Code / Cursor format plugins and skills-only folders load unchanged; unsupported parts listed
 - [ ] `/mcp` gateway with per-run tokens; core tools and `result_submit` per profile matrix
 - [ ] Plugin MCP servers proxied with namespacing, health, restart, settings
 - [ ] All six connectors run tool-first; legacy fat context removed

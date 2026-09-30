@@ -103,6 +103,27 @@ Connectors receive the token as `COPPICE_MCP_TOKEN` and configure the gateway pe
 
 Agents finish with `result_submit`; a submitted result wins over a final JSON blob in the transcript.
 
+## Plugins and skills (M10)
+
+Plugins are Claude Code / Cursor format folders (or skills-only folders) that load unchanged. Parsing and filesystem work live in `plugins/`; state, rules, and enablement live in the service.
+
+```text
+plugins/manifest.rs         parse a plugin folder; list unsupported parts (commands, hooks, …)
+plugins/discover.rs         scan one plugin dir (the dir itself, else each direct child)
+plugins/git_install.rs      URL allowlist + shallow clone (the only server-side git clone)
+plugins/skills.rs           SkillCatalog: served skills of enabled plugins, ids `<plugin>:<skill>`
+plugins/builtin.rs          embedded built-in skills written to mcp.builtin_plugins_dir on start
+services/plugin_service.rs  plugin dirs, rescan + shadowing, enable, installs, agent assignment
+api/plugins.rs              /api/plugin-dirs, /api/plugins, /api/plugin-installs, /api/agents/{id}/plugins
+sessions/opencode_run_server.rs  one `opencode serve` per OpenCode run
+```
+
+- **Dirs and scan.** Admin-ordered plugin dirs; the default dir (`[plugins] dir`) always exists. A rescan upserts one row per plugin; a name already found in an earlier dir is `shadowed`, a vanished folder is `missing`, a bad manifest is `invalid`. Only `enabled` + `ok` plugins are assignable or served.
+- **Catalog.** After any mutation the in-memory `SkillCatalog` is refreshed (serialized) from enabled `ok` plugins. A failed refresh is logged; the next one catches up.
+- **Token snapshot.** When a run starts, the worker reads the agent's assigned plugins that are enabled and `ok` and stores those ids in the run's MCP token scope. `skill_list` / `skill_load` serve built-in skills plus the catalog entries of that snapshot, so plugins assigned mid-run are not picked up until the next run. Disabling a plugin removes it from the catalog at once, including for in-flight runs.
+- **Assignment.** `PUT /api/agents/{id}/plugins` replaces the set and rejects any id that is not enabled + `ok`. Preset `default_plugins` (names) are assigned on agent create, skipping unavailable ones.
+- **OpenCode.** Each OpenCode run gets its own `opencode serve` process with a per-run `OPENCODE_CONFIG` pointing at the gateway; the token stays in that process's env. The process is killed when the run ends.
+
 ## Governed knowledge (M06)
 
 Knowledge keeps lifecycle state separate from content. An edit inserts an immutable revision and advances `current_revision_id`; approving (or editing an approved item) activates that revision immediately. Approve, edit, reject, supersede, stale, and expire operations require an optimistic `expectedVersion`.
@@ -136,7 +157,7 @@ workers/job_worker/compaction.rs          executes `compact_knowledge` runs
 
 ```text
 web/src/
-  features/     auth, boards, board, tickets, agents, knowledge, users
+  features/     auth, boards, board, tickets, agents, knowledge, plugins, users
   components/   AppShell, ProtectedRoute, shared UI
   lib/          api.ts (fetch + CSRF), schemas/ (Zod), query-client
   styles/       tokens.css (design tokens)
@@ -146,6 +167,7 @@ web/src/
 - **Data:** TanStack Query hooks per feature (`useTickets`, `useAgents`, …).
 - **API client:** `lib/api.ts` — `credentials: 'include'`, CSRF header on writes.
 - **Board:** fixed columns in `features/board/columns.ts`; dnd-kit for drag-and-drop.
+- **Plugins:** Settings → Plugins manages dirs, rescan, git installs, and enablement. The agent form has a Plugins checkbox list (enabled `ok` plugins only); assigned plugins that became unavailable are shown disabled and dropped on save.
 - **Knowledge:** `/knowledge` has Pending, Approved, Rejected, and Stale views with provenance and lifecycle controls. Expanded Agent Run details load the immutable **Knowledge Used** audit.
 - **Forms:** React Hook Form + Zod schemas in `lib/schemas/`.
 

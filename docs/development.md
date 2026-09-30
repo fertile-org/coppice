@@ -73,6 +73,14 @@ On Linux, the dev shell sets `ELECTRON_DISABLE_SANDBOX=1` so Electron does not r
 
 Bundled desktop (installers, auto-start DB/API) is **not** implemented yet — see **Desktop release** and **Desktop install** below.
 
+### Plugins (M10)
+
+Admins manage plugins in **Settings → Plugins**. Claude Code / Cursor format plugins and skills-only folders load unchanged; parts Coppice does not support yet (commands, hooks, …) are listed on each plugin card.
+
+- **Plugin dirs.** The default dir comes from `[plugins] dir` (default `./data/plugins`). In Docker it is `/data/plugins` on the `plugin_data` volume (`COPPICE_PLUGINS__DIR`). It is created on start and cannot be removed. Add more dirs by path and order them; a plugin name found in an earlier dir shadows the same name in later dirs. Click **Rescan** after changing folders on disk.
+- **Install from git.** Enter a URL (optional ref) and a target dir; the server shallow-clones it into that dir and rescans. Allowed: `https://` (no userinfo), `ssh://`, and `git@host:path`. `file://` URLs are rejected unless `[plugins] allow_file_git_urls = true` (default `false`; meant for tests and local experiments). Clones time out after `[plugins] git_timeout_secs` (default 300). **Update** re-pulls a git-installed plugin.
+- **Enable and assign.** New plugins start disabled. Enable a plugin, then tick it under **Plugins** in the agent form. Its skills reach runs as `<plugin>:<skill>` through the `skill_list` / `skill_load` MCP tools.
+
 ---
 
 ## Release (build and publish)
