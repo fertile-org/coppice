@@ -1,7 +1,10 @@
 use crate::api::auth::{pool_from_state, AuthUser};
 use crate::middleware::admin::AdminUser;
+use crate::plugins::git_install;
 use crate::plugins::manifest::{McpServerEntry, SkillEntry};
-use crate::services::plugin_service::{PluginDir, PluginError, PluginRow, PluginService};
+use crate::services::plugin_service::{
+    PluginDir, PluginError, PluginInstall, PluginRow, PluginService,
+};
 use crate::AppState;
 use axum::{
     extract::{Path, State},
@@ -12,7 +15,9 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use std::future::Future;
 use std::sync::Arc;
+use std::time::Duration;
 use uuid::Uuid;
 
 pub fn routes() -> Router<Arc<AppState>> {
@@ -24,10 +29,13 @@ pub fn routes() -> Router<Arc<AppState>> {
         )
         .route("/api/plugins", get(list_plugins))
         .route("/api/plugins/rescan", post(rescan))
+        .route("/api/plugins/install", post(install))
         .route(
             "/api/plugins/{plugin_id}",
             get(get_plugin).patch(set_enabled),
         )
+        .route("/api/plugins/{plugin_id}/update", post(update))
+        .route("/api/plugin-installs/{install_id}", get(get_install))
         .route(
             "/api/agents/{agent_id}/plugins",
             get(get_agent_plugins).put(set_agent_plugins),
@@ -64,6 +72,28 @@ struct PluginResponse {
     unsupported: Vec<String>,
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PluginInstallResponse {
+    id: Uuid,
+    plugin_dir_id: Uuid,
+    kind: String,
+    git_url: String,
+    git_ref: Option<String>,
+    plugin_id: Option<Uuid>,
+    status: String,
+    error: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct InstallBody {
+    git_url: String,
+    #[serde(rename = "ref")]
+    git_ref: Option<String>,
+    plugin_dir_id: Uuid,
+}
+
 #[derive(Deserialize)]
 struct AddDirBody {
     path: String,
@@ -96,7 +126,9 @@ impl IntoResponse for ApiError {
 impl From<PluginError> for ApiError {
     fn from(err: PluginError) -> Self {
         let status = match &err {
-            PluginError::NotFound | PluginError::AgentNotFound => StatusCode::NOT_FOUND,
+            PluginError::NotFound | PluginError::AgentNotFound | PluginError::InstallNotFound => {
+                StatusCode::NOT_FOUND
+            }
             PluginError::Validation(_) => StatusCode::BAD_REQUEST,
             PluginError::Conflict(_) => StatusCode::CONFLICT,
             PluginError::Db(_) | PluginError::Io(_) => {
@@ -161,6 +193,100 @@ fn plugin_response(plugin: PluginRow) -> PluginResponse {
 
 fn plugins_response(plugins: Vec<PluginRow>) -> Json<Vec<PluginResponse>> {
     Json(plugins.into_iter().map(plugin_response).collect())
+}
+
+fn install_response(install: PluginInstall) -> Json<PluginInstallResponse> {
+    Json(PluginInstallResponse {
+        id: install.id,
+        plugin_dir_id: install.plugin_dir_id,
+        kind: install.kind,
+        git_url: install.git_url,
+        git_ref: install.git_ref,
+        plugin_id: install.plugin_id,
+        status: install.status,
+        error: install.error,
+    })
+}
+
+/// Runs `job` in the background, then records its outcome; nothing borrowed
+/// from the request may be captured.
+fn spawn_git_job<F>(state: Arc<AppState>, install_id: Uuid, dest_rel: String, job: F)
+where
+    F: Future<Output = Result<String, String>> + Send + 'static,
+{
+    tokio::spawn(async move {
+        let result = job.await;
+        let Some(pool) = state.db.as_ref() else {
+            return;
+        };
+        if let Err(err) = PluginService::new(pool)
+            .finish_install(install_id, result, &dest_rel, &state.skills)
+            .await
+        {
+            tracing::error!(install = %install_id, error = %err, "failed to finish plugin install");
+        }
+    });
+}
+
+fn folder_name(path: &std::path::Path) -> String {
+    path.file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_default()
+}
+
+async fn install(
+    State(state): State<Arc<AppState>>,
+    AdminUser(_): AdminUser,
+    Json(body): Json<InstallBody>,
+) -> Result<(StatusCode, Json<PluginInstallResponse>), ApiError> {
+    let pool = pool_from_state(&state)?;
+    let cfg = &state.config.plugins;
+    let (install, dest) = PluginService::new(pool)
+        .start_install(
+            &body.git_url,
+            body.git_ref.as_deref(),
+            body.plugin_dir_id,
+            cfg,
+        )
+        .await?;
+    let (url, git_ref) = (install.git_url.clone(), install.git_ref.clone());
+    let (allow_file, timeout) = (
+        cfg.allow_file_git_urls,
+        Duration::from_secs(cfg.git_timeout_secs),
+    );
+    spawn_git_job(state.clone(), install.id, folder_name(&dest), async move {
+        git_install::clone(&url, git_ref.as_deref(), &dest, allow_file, timeout).await
+    });
+    Ok((StatusCode::ACCEPTED, install_response(install)))
+}
+
+async fn update(
+    State(state): State<Arc<AppState>>,
+    AdminUser(_): AdminUser,
+    Path(plugin_id): Path<Uuid>,
+) -> Result<(StatusCode, Json<PluginInstallResponse>), ApiError> {
+    let pool = pool_from_state(&state)?;
+    let cfg = &state.config.plugins;
+    let (install, root) = PluginService::new(pool).start_update(plugin_id).await?;
+    let git_ref = install.git_ref.clone();
+    let (allow_file, timeout) = (
+        cfg.allow_file_git_urls,
+        Duration::from_secs(cfg.git_timeout_secs),
+    );
+    spawn_git_job(state.clone(), install.id, folder_name(&root), async move {
+        git_install::update(&root, git_ref.as_deref(), allow_file, timeout).await
+    });
+    Ok((StatusCode::ACCEPTED, install_response(install)))
+}
+
+async fn get_install(
+    State(state): State<Arc<AppState>>,
+    AuthUser { .. }: AuthUser,
+    Path(install_id): Path<Uuid>,
+) -> Result<Json<PluginInstallResponse>, ApiError> {
+    let pool = pool_from_state(&state)?;
+    let install = PluginService::new(pool).get_install(install_id).await?;
+    Ok(install_response(install))
 }
 
 async fn list_dirs(

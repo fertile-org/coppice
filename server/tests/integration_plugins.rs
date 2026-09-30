@@ -437,6 +437,16 @@ async fn plugin_mutations_require_admin_and_csrf() {
             json!({ "enabled": true }),
         ),
         ("POST", "/api/plugins/rescan".to_string(), Value::Null),
+        (
+            "POST",
+            "/api/plugins/install".to_string(),
+            json!({ "gitUrl": "https://github.com/a/b.git", "pluginDirId": uuid::Uuid::new_v4() }),
+        ),
+        (
+            "POST",
+            format!("/api/plugins/{plugin_id}/update"),
+            Value::Null,
+        ),
     ];
     for (method, uri, body) in &attempts {
         let (status, _) = send(
@@ -693,4 +703,373 @@ async fn disabling_assigned_plugin_stops_serving_its_skills() {
     set_enabled(&app, &plugin_id, false, &cookie, &csrf).await;
     assert!(!served(&state));
     assert!(state.skills.get(&[id], "sample-plugin:hello").is_none());
+}
+
+fn git(dir: &Path, args: &[&str]) -> String {
+    let out = std::process::Command::new("git")
+        .args([
+            "-c",
+            "user.name=Coppice Test",
+            "-c",
+            "user.email=test@localhost",
+            "-c",
+            "init.defaultBranch=main",
+            "-c",
+            "commit.gpgsign=false",
+        ])
+        .args(args)
+        .current_dir(dir)
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .output()
+        .expect("run git");
+    assert!(
+        out.status.success(),
+        "git {args:?}: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    String::from_utf8_lossy(&out.stdout).trim().to_string()
+}
+
+/// A working copy of `sample-plugin` pushed to a bare repo named `sample-plugin.git`.
+struct PluginRepo {
+    _tmp: tempfile::TempDir,
+    work: std::path::PathBuf,
+    bare: std::path::PathBuf,
+}
+
+impl PluginRepo {
+    fn new() -> Self {
+        let tmp = tempfile::tempdir().unwrap();
+        let work = tmp.path().join("work");
+        copy_tree(&fixtures().join("sample-plugin"), &work);
+        git(&work, &["init", "-q"]);
+        git(&work, &["add", "-A"]);
+        git(&work, &["commit", "-q", "-m", "initial"]);
+        let bare = tmp.path().join("sample-plugin.git");
+        git(
+            tmp.path(),
+            &["clone", "-q", "--bare", "work", "sample-plugin.git"],
+        );
+        git(&work, &["remote", "add", "origin", bare.to_str().unwrap()]);
+        Self {
+            _tmp: tmp,
+            work,
+            bare,
+        }
+    }
+
+    fn url(&self) -> String {
+        format!("file://{}", self.bare.display())
+    }
+
+    fn head(&self) -> String {
+        git(&self.bare, &["rev-parse", "HEAD"])
+    }
+
+    fn push_new_skill(&self, name: &str) {
+        let skill = self.work.join(format!("skills/{name}/SKILL.md"));
+        std::fs::create_dir_all(skill.parent().unwrap()).unwrap();
+        std::fs::write(
+            &skill,
+            format!("---\nname: {name}\ndescription: Says {name}\n---\nSay {name}.\n"),
+        )
+        .unwrap();
+        git(&self.work, &["add", "-A"]);
+        git(&self.work, &["commit", "-q", "-m", name]);
+        git(
+            &self.work,
+            &["push", "-q", "origin", "HEAD:refs/heads/main"],
+        );
+    }
+}
+
+async fn install_app() -> (
+    std::sync::Arc<coppice_server::AppState>,
+    Router,
+    String,
+    String,
+) {
+    common::bootstrap_and_login_with_state_config(|config| {
+        config.plugins.allow_file_git_urls = true;
+    })
+    .await
+}
+
+async fn default_dir(app: &Router, cookie: &str, csrf: &str) -> (String, std::path::PathBuf) {
+    let dirs = get(app, "/api/plugin-dirs", cookie, csrf).await;
+    let dir = dirs
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|d| d["isDefault"] == true)
+        .unwrap();
+    (
+        dir["id"].as_str().unwrap().to_string(),
+        std::path::PathBuf::from(dir["path"].as_str().unwrap()),
+    )
+}
+
+async fn post_install(
+    app: &Router,
+    git_url: &str,
+    dir_id: &str,
+    cookie: &str,
+    csrf: &str,
+) -> (StatusCode, Value) {
+    send(
+        app,
+        "POST",
+        "/api/plugins/install",
+        json!({ "gitUrl": git_url, "pluginDirId": dir_id }),
+        cookie,
+        csrf,
+    )
+    .await
+}
+
+async fn wait_install(app: &Router, install_id: &str, cookie: &str, csrf: &str) -> Value {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    loop {
+        let install = get(
+            app,
+            &format!("/api/plugin-installs/{install_id}"),
+            cookie,
+            csrf,
+        )
+        .await;
+        if install["status"] != "running" {
+            return install;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "install still running: {install}"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+}
+
+async fn install_sample(
+    app: &Router,
+    repo: &PluginRepo,
+    dir_id: &str,
+    cookie: &str,
+    csrf: &str,
+) -> Value {
+    let (status, install) = post_install(app, &repo.url(), dir_id, cookie, csrf).await;
+    assert_eq!(status, StatusCode::ACCEPTED, "install: {install}");
+    assert_eq!(install["status"], "running");
+    assert_eq!(install["kind"], "install");
+    let done = wait_install(app, install["id"].as_str().unwrap(), cookie, csrf).await;
+    assert_eq!(done["status"], "succeeded", "install: {done}");
+    done
+}
+
+#[tokio::test]
+async fn install_from_git_clones_scans_and_records_commit() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    require_db!();
+    let (_state, app, cookie, csrf) = install_app().await;
+    let repo = PluginRepo::new();
+    let (dir_id, dir_path) = default_dir(&app, &cookie, &csrf).await;
+
+    let done = install_sample(&app, &repo, &dir_id, &cookie, &csrf).await;
+    assert!(done["error"].is_null());
+    let plugin_id = done["pluginId"].as_str().unwrap();
+
+    let plugin = get(&app, &format!("/api/plugins/{plugin_id}"), &cookie, &csrf).await;
+    assert_eq!(plugin["name"], "sample-plugin");
+    assert_eq!(plugin["relPath"], "sample-plugin");
+    assert_eq!(plugin["pluginDirId"], dir_id.as_str());
+    assert_eq!(plugin["status"], "ok");
+    assert_eq!(plugin["source"], "git");
+    assert_eq!(plugin["gitUrl"], repo.url());
+    assert_eq!(plugin["gitCommit"], repo.head());
+    assert_eq!(plugin["enabled"], false);
+    assert!(dir_path
+        .join("sample-plugin/.claude-plugin/plugin.json")
+        .is_file());
+}
+
+#[tokio::test]
+async fn install_into_existing_dest_is_conflict() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    require_db!();
+    let (_state, app, cookie, csrf) = install_app().await;
+    let repo = PluginRepo::new();
+    let (dir_id, _) = default_dir(&app, &cookie, &csrf).await;
+    install_sample(&app, &repo, &dir_id, &cookie, &csrf).await;
+
+    let (status, body) = post_install(&app, &repo.url(), &dir_id, &cookie, &csrf).await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert!(body["error"].is_string());
+}
+
+#[tokio::test]
+async fn install_rejects_invalid_url_and_file_urls_when_disallowed() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    require_db!();
+    let (_state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
+    let (dir_id, _) = default_dir(&app, &cookie, &csrf).await;
+    for url in ["--upload-pack=touch x", "file:///tmp/x.git"] {
+        let (status, body) = post_install(&app, url, &dir_id, &cookie, &csrf).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{url}: {body}");
+    }
+    let (status, body) = send(
+        &app,
+        "POST",
+        "/api/plugins/install",
+        json!({ "gitUrl": "https://github.com/a/b.git", "ref": "--output=x", "pluginDirId": dir_id }),
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+}
+
+#[tokio::test]
+async fn install_failure_is_reported() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    require_db!();
+    let (_state, app, cookie, csrf) = install_app().await;
+    let (dir_id, dir_path) = default_dir(&app, &cookie, &csrf).await;
+
+    let (status, install) = post_install(
+        &app,
+        "file:///nonexistent/repo.git",
+        &dir_id,
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(status, StatusCode::ACCEPTED, "{install}");
+    let done = wait_install(&app, install["id"].as_str().unwrap(), &cookie, &csrf).await;
+    assert_eq!(done["status"], "failed");
+    assert!(!done["error"].as_str().unwrap().is_empty(), "{done}");
+    assert!(done["pluginId"].is_null());
+
+    let plugins = get(&app, "/api/plugins", &cookie, &csrf).await;
+    assert!(plugins_in_dir(&plugins, &dir_id).is_empty());
+    assert!(!dir_path.join("repo").exists());
+}
+
+#[tokio::test]
+async fn update_pulls_new_commit() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    require_db!();
+    let (state, app, cookie, csrf) = install_app().await;
+    let repo = PluginRepo::new();
+    let (dir_id, _) = default_dir(&app, &cookie, &csrf).await;
+    let installed = install_sample(&app, &repo, &dir_id, &cookie, &csrf).await;
+    let plugin_id = installed["pluginId"].as_str().unwrap().to_string();
+    let first_commit = repo.head();
+    set_enabled(&app, &plugin_id, true, &cookie, &csrf).await;
+    let id: uuid::Uuid = plugin_id.parse().unwrap();
+    assert!(state.skills.get(&[id], "sample-plugin:goodbye").is_none());
+
+    repo.push_new_skill("goodbye");
+    let (status, update) = send(
+        &app,
+        "POST",
+        &format!("/api/plugins/{plugin_id}/update"),
+        Value::Null,
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(status, StatusCode::ACCEPTED, "{update}");
+    assert_eq!(update["kind"], "update");
+    let done = wait_install(&app, update["id"].as_str().unwrap(), &cookie, &csrf).await;
+    assert_eq!(done["status"], "succeeded", "{done}");
+    assert_eq!(done["pluginId"], plugin_id.as_str());
+
+    let plugin = get(&app, &format!("/api/plugins/{plugin_id}"), &cookie, &csrf).await;
+    assert_ne!(plugin["gitCommit"], first_commit.as_str());
+    assert_eq!(plugin["gitCommit"], repo.head());
+    assert_eq!(plugin["enabled"], true);
+    assert!(plugin["skills"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|s| s["name"] == "goodbye"));
+    assert!(state.skills.get(&[id], "sample-plugin:goodbye").is_some());
+}
+
+#[tokio::test]
+async fn update_of_local_plugin_is_rejected() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    require_db!();
+    let (_state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
+    let dir = plugin_dir_with(&["sample-plugin"]);
+    let dir_id = add_dir(&app, dir.path(), &cookie, &csrf).await["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let plugin_id = sample_plugin_id(&app, &dir_id, &cookie, &csrf).await;
+    let (status, body) = send(
+        &app,
+        "POST",
+        &format!("/api/plugins/{plugin_id}/update"),
+        Value::Null,
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+}
+
+#[tokio::test]
+async fn stale_running_install_failed_on_startup() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    require_db!();
+    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
+    let pool = state.db.clone().unwrap();
+    let (dir_id, _) = default_dir(&app, &cookie, &csrf).await;
+    let install_id = uuid::Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO plugin_installs (id, plugin_dir_id, kind, git_url, status) VALUES ($1, $2, 'install', 'https://h/a/b.git', 'running')",
+    )
+    .bind(install_id)
+    .bind(dir_id.parse::<uuid::Uuid>().unwrap())
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let failed = coppice_server::services::plugin_service::PluginService::new(&pool)
+        .fail_stale_installs()
+        .await
+        .unwrap();
+    assert_eq!(failed, 1);
+    let install = get(
+        &app,
+        &format!("/api/plugin-installs/{install_id}"),
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(install["status"], "failed");
+    assert_eq!(install["error"], "server restarted");
+}
+
+#[tokio::test]
+async fn install_of_non_plugin_repo_fails_and_removes_clone() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    require_db!();
+    let (_state, app, cookie, csrf) = install_app().await;
+    let (dir_id, dir_path) = default_dir(&app, &cookie, &csrf).await;
+    let tmp = tempfile::tempdir().unwrap();
+    let work = tmp.path().join("work");
+    std::fs::create_dir_all(&work).unwrap();
+    std::fs::write(work.join("README.md"), "not a plugin\n").unwrap();
+    git(&work, &["init", "-q"]);
+    git(&work, &["add", "-A"]);
+    git(&work, &["commit", "-q", "-m", "initial"]);
+    git(tmp.path(), &["clone", "-q", "--bare", "work", "plain.git"]);
+    let url = format!("file://{}", tmp.path().join("plain.git").display());
+
+    let (status, install) = post_install(&app, &url, &dir_id, &cookie, &csrf).await;
+    assert_eq!(status, StatusCode::ACCEPTED, "{install}");
+    let done = wait_install(&app, install["id"].as_str().unwrap(), &cookie, &csrf).await;
+    assert_eq!(done["status"], "failed");
+    assert_eq!(done["error"], "cloned repository is not a plugin");
+    assert!(!dir_path.join("plain").exists());
 }

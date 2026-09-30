@@ -69,6 +69,10 @@ async fn main() -> anyhow::Result<()> {
         .map_err(|e| anyhow::anyhow!("agent template validation failed: {e}"))?;
     let skills = coppice_server::AppState::builtin_skills_from_config(&config)?;
     coppice_server::AppState::init_plugins(&db, &config, &skills).await?;
+    coppice_server::services::plugin_service::PluginService::new(&db)
+        .fail_stale_installs()
+        .await
+        .map_err(|e| anyhow::anyhow!("failed to mark stale plugin installs: {e}"))?;
     let state = Arc::new(coppice_server::AppState {
         attachments: coppice_server::AppState::attachment_store_from_config(&config),
         connector_registry: coppice_server::AppState::connector_registry_from_config(

@@ -145,6 +145,13 @@ async fn init_test_plugins(
 }
 
 async fn test_state_with_db() -> Arc<AppState> {
+    test_state_with_db_config(|_| {}).await
+}
+
+async fn test_state_with_db_config<F>(configure: F) -> Arc<AppState>
+where
+    F: FnOnce(&mut AppConfig),
+{
     std::env::remove_var("MOCK_AGENT_RESPONSE");
     let pool = prepare_test_pool().await;
 
@@ -153,6 +160,7 @@ async fn test_state_with_db() -> Arc<AppState> {
         "/tmp/coppice-test-artifacts",
     );
     let mut config = AppConfig::load_defaults().expect("test config");
+    configure(&mut config);
     let skills = init_test_plugins(&mut config, &pool).await;
     let opencode_runs = AppState::test_opencode_runs();
     Arc::new(AppState {
@@ -332,7 +340,16 @@ pub async fn bootstrap_and_login() -> (Router, String, String) {
 }
 
 pub async fn bootstrap_and_login_with_state() -> (Arc<AppState>, Router, String, String) {
-    let state = test_state_with_db().await;
+    bootstrap_and_login_with_state_config(|_| {}).await
+}
+
+pub async fn bootstrap_and_login_with_state_config<F>(
+    configure: F,
+) -> (Arc<AppState>, Router, String, String)
+where
+    F: FnOnce(&mut AppConfig),
+{
+    let state = test_state_with_db_config(configure).await;
     let app = coppice_server::app(state.clone());
 
     app.clone()

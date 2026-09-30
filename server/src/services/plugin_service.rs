@@ -1,6 +1,8 @@
 use std::path::{Path, PathBuf};
 
+use crate::config::PluginsConfig;
 use crate::plugins::discover::{discover, Discovered};
+use crate::plugins::git_install::{repo_dir_name, validate_git_url, validate_ref};
 use crate::plugins::manifest::PluginManifest;
 use crate::plugins::skills::{PluginSkillSet, SkillCatalog};
 use sqlx::postgres::PgRow;
@@ -8,6 +10,8 @@ use sqlx::{PgPool, Postgres, Row, Transaction};
 use uuid::Uuid;
 
 const DIR_COLUMNS: &str = "id, path, position, is_default";
+
+const INSTALL_COLUMNS: &str = "id, plugin_dir_id, kind, git_url, git_ref, plugin_id, status, error";
 
 const PLUGIN_COLUMNS: &str = r#"
     p.id, p.plugin_dir_id, p.rel_path, p.name, p.version, p.description, p.source,
@@ -24,6 +28,8 @@ pub enum PluginError {
     NotFound,
     #[error("agent not found")]
     AgentNotFound,
+    #[error("plugin install not found")]
+    InstallNotFound,
     #[error("{0}")]
     Validation(String),
     #[error("{0}")]
@@ -58,6 +64,18 @@ pub struct PluginRow {
     pub status: String,
     pub error: Option<String>,
     pub enabled: bool,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct PluginInstall {
+    pub id: Uuid,
+    pub plugin_dir_id: Uuid,
+    pub kind: String,
+    pub git_url: String,
+    pub git_ref: Option<String>,
+    pub plugin_id: Option<Uuid>,
+    pub status: String,
+    pub error: Option<String>,
 }
 
 impl<'a> PluginService<'a> {
@@ -380,6 +398,211 @@ impl<'a> PluginService<'a> {
         Ok(())
     }
 
+    /// Validates a git install and records it as `running`; the caller clones
+    /// into the returned destination and then calls `finish_install`.
+    pub async fn start_install(
+        &self,
+        git_url: &str,
+        git_ref: Option<&str>,
+        plugin_dir_id: Uuid,
+        cfg: &PluginsConfig,
+    ) -> Result<(PluginInstall, PathBuf), PluginError> {
+        let git_url = git_url.trim();
+        validate_git_url(git_url, cfg.allow_file_git_urls).map_err(PluginError::Validation)?;
+        let git_ref = git_ref.map(str::trim).filter(|r| !r.is_empty());
+        if let Some(git_ref) = git_ref {
+            validate_ref(git_ref).map_err(PluginError::Validation)?;
+        }
+        let name = repo_dir_name(git_url).map_err(PluginError::Validation)?;
+
+        let mut tx = self.pool.begin().await?;
+        lock_plugin_state(&mut tx).await?;
+        let dir_path: String = sqlx::query_scalar("SELECT path FROM plugin_dirs WHERE id = $1")
+            .bind(plugin_dir_id)
+            .fetch_optional(&mut *tx)
+            .await?
+            .ok_or_else(|| {
+                PluginError::Validation(format!("plugin dir {plugin_dir_id} does not exist"))
+            })?;
+        let dest = Path::new(&dir_path).join(&name);
+        let running_urls: Vec<String> = sqlx::query_scalar(
+            "SELECT git_url FROM plugin_installs WHERE plugin_dir_id = $1 AND kind = 'install' AND status = 'running'",
+        )
+        .bind(plugin_dir_id)
+        .fetch_all(&mut *tx)
+        .await?;
+        let in_flight = running_urls
+            .iter()
+            .any(|url| repo_dir_name(url).as_deref() == Ok(name.as_str()));
+        if in_flight || dest.symlink_metadata().is_ok() {
+            return Err(PluginError::Conflict(format!(
+                "{} already exists in the plugin dir",
+                dest.display()
+            )));
+        }
+        let install =
+            insert_install(&mut tx, plugin_dir_id, "install", git_url, git_ref, None).await?;
+        tx.commit().await?;
+        Ok((install, dest))
+    }
+
+    /// Records a `running` update of a git-installed plugin at its stored ref
+    /// and returns the plugin root to update in place.
+    pub async fn start_update(
+        &self,
+        plugin_id: Uuid,
+    ) -> Result<(PluginInstall, PathBuf), PluginError> {
+        let plugin = self.get_plugin(plugin_id).await?;
+        let git_url = match (plugin.source.as_str(), &plugin.git_url) {
+            ("git", Some(url)) => url.clone(),
+            _ => {
+                return Err(PluginError::Validation(format!(
+                    "plugin {} was not installed from git",
+                    plugin.name
+                )))
+            }
+        };
+
+        let mut tx = self.pool.begin().await?;
+        lock_plugin_state(&mut tx).await?;
+        let running: bool = sqlx::query_scalar(
+            "SELECT EXISTS (SELECT 1 FROM plugin_installs WHERE plugin_id = $1 AND status = 'running')",
+        )
+        .bind(plugin_id)
+        .fetch_one(&mut *tx)
+        .await?;
+        if running {
+            return Err(PluginError::Conflict(format!(
+                "an update of plugin {} is already running",
+                plugin.name
+            )));
+        }
+        let install = insert_install(
+            &mut tx,
+            plugin.plugin_dir_id,
+            "update",
+            &git_url,
+            plugin.git_ref.as_deref(),
+            Some(plugin_id),
+        )
+        .await?;
+        tx.commit().await?;
+        Ok((install, self.plugin_path(plugin_id).await?))
+    }
+
+    /// Records the git outcome. On success rescans, stamps git metadata on the
+    /// plugin at `(plugin_dir_id, dest_rel)` and refreshes the skill catalog;
+    /// a fresh install is always left disabled.
+    pub async fn finish_install(
+        &self,
+        id: Uuid,
+        result: Result<String, String>,
+        dest_rel: &str,
+        catalog: &SkillCatalog,
+    ) -> Result<PluginInstall, PluginError> {
+        let install = self.get_install(id).await?;
+        let commit = match result {
+            Ok(commit) => commit,
+            Err(err) => return self.fail_install(id, &err).await,
+        };
+        if let Err(err) = self.rescan().await {
+            self.fail_install(id, &err.to_string()).await?;
+            return Err(err);
+        }
+
+        let is_install = install.kind == "install";
+        let mut tx = self.pool.begin().await?;
+        let plugin_id: Option<Uuid> = sqlx::query_scalar(
+            r#"
+            UPDATE plugins SET
+                source = 'git', git_url = $3, git_ref = $4, git_commit = $5,
+                enabled = enabled AND NOT $6, updated_at = now()
+            WHERE plugin_dir_id = $1 AND rel_path = $2 AND status <> 'missing'
+            RETURNING id
+            "#,
+        )
+        .bind(install.plugin_dir_id)
+        .bind(dest_rel)
+        .bind(&install.git_url)
+        .bind(&install.git_ref)
+        .bind(&commit)
+        .bind(is_install)
+        .fetch_optional(&mut *tx)
+        .await?;
+        let Some(plugin_id) = plugin_id else {
+            tx.rollback().await?;
+            if !is_install {
+                return self
+                    .fail_install(id, "updated repository is not a plugin")
+                    .await;
+            }
+            let dir_path: String = sqlx::query_scalar("SELECT path FROM plugin_dirs WHERE id = $1")
+                .bind(install.plugin_dir_id)
+                .fetch_one(self.pool)
+                .await?;
+            let dest = Path::new(&dir_path).join(dest_rel);
+            if let Err(err) = std::fs::remove_dir_all(&dest) {
+                tracing::warn!(dest = %dest.display(), error = %err, "failed to remove non-plugin clone");
+            }
+            return self
+                .fail_install(id, "cloned repository is not a plugin")
+                .await;
+        };
+        sqlx::query(
+            r#"
+            UPDATE plugin_installs SET status = 'succeeded', plugin_id = $2, error = NULL,
+                finished_at = now()
+            WHERE id = $1
+            "#,
+        )
+        .bind(id)
+        .bind(plugin_id)
+        .execute(&mut *tx)
+        .await?;
+        tx.commit().await?;
+
+        if let Err(err) = self.refresh_catalog(catalog).await {
+            tracing::error!(error = %err, "failed to refresh plugin skill catalog");
+        }
+        self.get_install(id).await
+    }
+
+    pub async fn get_install(&self, id: Uuid) -> Result<PluginInstall, PluginError> {
+        let row = sqlx::query(&format!(
+            "SELECT {INSTALL_COLUMNS} FROM plugin_installs WHERE id = $1"
+        ))
+        .bind(id)
+        .fetch_optional(self.pool)
+        .await?
+        .ok_or(PluginError::InstallNotFound)?;
+        Ok(row_to_install(&row))
+    }
+
+    /// Installs cannot outlive the process that ran them.
+    pub async fn fail_stale_installs(&self) -> Result<u64, PluginError> {
+        Ok(sqlx::query(
+            r#"
+            UPDATE plugin_installs SET status = 'failed', error = 'server restarted',
+                finished_at = now()
+            WHERE status = 'running'
+            "#,
+        )
+        .execute(self.pool)
+        .await?
+        .rows_affected())
+    }
+
+    async fn fail_install(&self, id: Uuid, error: &str) -> Result<PluginInstall, PluginError> {
+        sqlx::query(
+            "UPDATE plugin_installs SET status = 'failed', error = $2, finished_at = now() WHERE id = $1",
+        )
+        .bind(id)
+        .bind(error)
+        .execute(self.pool)
+        .await?;
+        self.get_install(id).await
+    }
+
     /// Every assigned plugin, whatever its current status.
     pub async fn agent_plugin_ids(&self, agent_id: Uuid) -> Result<Vec<Uuid>, PluginError> {
         self.ensure_agent(agent_id).await?;
@@ -567,6 +790,45 @@ async fn upsert_discovered(
     .execute(&mut **tx)
     .await?;
     Ok(())
+}
+
+async fn insert_install(
+    tx: &mut Transaction<'_, Postgres>,
+    plugin_dir_id: Uuid,
+    kind: &str,
+    git_url: &str,
+    git_ref: Option<&str>,
+    plugin_id: Option<Uuid>,
+) -> Result<PluginInstall, sqlx::Error> {
+    let row = sqlx::query(&format!(
+        r#"
+        INSERT INTO plugin_installs (id, plugin_dir_id, kind, git_url, git_ref, plugin_id, status)
+        VALUES ($1, $2, $3, $4, $5, $6, 'running')
+        RETURNING {INSTALL_COLUMNS}
+        "#
+    ))
+    .bind(Uuid::new_v4())
+    .bind(plugin_dir_id)
+    .bind(kind)
+    .bind(git_url)
+    .bind(git_ref)
+    .bind(plugin_id)
+    .fetch_one(&mut **tx)
+    .await?;
+    Ok(row_to_install(&row))
+}
+
+fn row_to_install(row: &PgRow) -> PluginInstall {
+    PluginInstall {
+        id: row.get("id"),
+        plugin_dir_id: row.get("plugin_dir_id"),
+        kind: row.get("kind"),
+        git_url: row.get("git_url"),
+        git_ref: row.get("git_ref"),
+        plugin_id: row.get("plugin_id"),
+        status: row.get("status"),
+        error: row.get("error"),
+    }
 }
 
 fn canonical_string(path: &Path) -> Result<String, PluginError> {
