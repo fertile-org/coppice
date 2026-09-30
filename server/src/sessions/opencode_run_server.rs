@@ -132,9 +132,13 @@ impl OpenCodeRunServers {
         base_url: String,
         mut child: Child,
     ) -> anyhow::Result<OpenCodeRunLease> {
-        {
+        let conflict = {
             let mut runs = self.lock();
-            if !runs.contains_key(key) {
+            if runs.contains_key(key) {
+                format!("an opencode serve for run {key} is already running")
+            } else if let Some((owner, _)) = runs.iter().find(|(_, run)| run.base_url == base_url) {
+                format!("{base_url} is already serving run {owner}")
+            } else {
                 runs.insert(
                     key.to_string(),
                     RunServer {
@@ -148,10 +152,10 @@ impl OpenCodeRunServers {
                     base_url,
                 });
             }
-        }
+        };
         let _ = child.start_kill();
         let _ = child.wait().await;
-        anyhow::bail!("an opencode serve for run {key} is already running")
+        anyhow::bail!(conflict)
     }
 
     fn take(&self, key: &str) -> Option<RunServer> {
@@ -159,7 +163,9 @@ impl OpenCodeRunServers {
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, HashMap<String, RunServer>> {
-        self.runs.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+        self.runs
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 }
 
@@ -221,13 +227,29 @@ impl Unhealthy {
 /// OpenCode can accept a request while still booting and never answer it, so
 /// each probe has a short timeout and is retried until the overall deadline.
 async fn wait_for_healthy(base_url: &str, child: &mut Child) -> Result<(), Unhealthy> {
+    wait_for_healthy_with(child, || async {
+        probe_health(base_url).await.unwrap_or(false)
+    })
+    .await
+}
+
+async fn wait_for_healthy_with<F, Fut>(child: &mut Child, mut probe: F) -> Result<(), Unhealthy>
+where
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = bool>,
+{
     let deadline = tokio::time::Instant::now() + HEALTH_DEADLINE;
     loop {
         if let Ok(Some(status)) = child.try_wait() {
             return Err(Unhealthy::Exited(status));
         }
-        if probe_health(base_url).await.unwrap_or(false) {
-            return Ok(());
+        if probe().await {
+            // A healthy answer may come from another run's server that took
+            // our port, in which case our child has died of EADDRINUSE.
+            return match child.try_wait() {
+                Ok(Some(status)) => Err(Unhealthy::Exited(status)),
+                _ => Ok(()),
+            };
         }
         if tokio::time::Instant::now() >= deadline {
             return Err(Unhealthy::TimedOut);
@@ -266,5 +288,54 @@ mod tests {
     #[test]
     fn run_config_without_access_has_no_mcp() {
         assert!(opencode_run_config(None).get("mcp").is_none());
+    }
+
+    fn sleeper(secs: &str) -> Child {
+        tokio::process::Command::new("sleep")
+            .arg(secs)
+            .kill_on_drop(true)
+            .spawn()
+            .expect("spawn sleep")
+    }
+
+    #[tokio::test]
+    async fn healthy_probe_from_another_process_is_not_accepted_once_child_exited() {
+        let mut child = sleeper("0.2");
+        let result = wait_for_healthy_with(&mut child, || async {
+            tokio::time::sleep(Duration::from_millis(800)).await;
+            true
+        })
+        .await;
+        assert!(matches!(result, Err(Unhealthy::Exited(_))));
+    }
+
+    #[tokio::test]
+    async fn healthy_probe_with_running_child_is_accepted() {
+        let mut child = sleeper("5");
+        let result = wait_for_healthy_with(&mut child, || async { true }).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn register_rejects_base_url_owned_by_another_run() {
+        let servers = OpenCodeRunServers::new("opencode".into(), "127.0.0.1".into());
+        let base_url = "http://127.0.0.1:1".to_string();
+        let lease = servers
+            .register("run-a", base_url.clone(), sleeper("5"))
+            .await
+            .expect("first register");
+
+        let err = servers
+            .register("run-b", base_url.clone(), sleeper("5"))
+            .await
+            .err()
+            .expect("duplicate base_url must be rejected");
+        assert!(err.to_string().contains(&base_url), "{err}");
+        assert_eq!(
+            servers.base_url("run-a").as_deref(),
+            Some(base_url.as_str())
+        );
+        assert_eq!(servers.base_url("run-b"), None);
+        lease.stop().await;
     }
 }
