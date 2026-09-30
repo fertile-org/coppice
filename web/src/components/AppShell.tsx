@@ -8,6 +8,7 @@ import {
   MessageSquare,
   PanelLeftClose,
   PanelLeftOpen,
+  Puzzle,
   Users,
   Wrench,
 } from 'lucide-react';
@@ -34,6 +35,7 @@ const NAV_ITEMS: NavItem[] = [
   { to: '/chat', label: 'Chat', icon: MessageSquare },
   { to: '/knowledge', label: 'Knowledge', icon: BookOpen },
   { to: '/settings/repositories', label: 'Repositories', icon: FolderGit2 },
+  { to: '/settings/plugins', label: 'Plugins', icon: Puzzle, adminOnly: true },
   { to: '/settings/users', label: 'Users', icon: Users, adminOnly: true },
   { to: '/tools', label: 'Tools', icon: Wrench, adminOnly: true },
 ];
