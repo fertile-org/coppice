@@ -67,6 +67,7 @@ const shadowedPlugin: Plugin = {
   gitUrl: null,
   gitCommit: null,
   status: 'shadowed',
+  enabled: false,
   error: 'shadowed by /data/plugins/shadowed-plugin',
   unsupported: [],
 };
@@ -118,7 +119,8 @@ describe('PluginsPage', () => {
       }
       if (path.startsWith('/api/plugins/') && method === 'PATCH') {
         const body = JSON.parse(init.body as string) as { enabled: boolean };
-        return Promise.resolve(json({ ...samplePlugin, enabled: body.enabled }));
+        const target = plugins.find((p) => path === `/api/plugins/${p.id}`)!;
+        return Promise.resolve(json({ ...target, enabled: body.enabled }));
       }
       if (path === '/api/plugins/install' && method === 'POST') {
         return Promise.resolve(json({ ...installPoll, status: 'running', error: null }, 202));
@@ -148,6 +150,25 @@ describe('PluginsPage', () => {
       await screen.findByRole('switch', { name: 'Enable shadowed-plugin' }),
     ).toBeDisabled();
     expect(screen.getByRole('switch', { name: 'Enable sample-plugin' })).toBeEnabled();
+  });
+
+  it('an enabled shadowed plugin can still be disabled', async () => {
+    plugins = [samplePlugin, { ...shadowedPlugin, enabled: true }];
+    renderPage();
+
+    const toggle = await screen.findByRole('switch', { name: 'Enable shadowed-plugin' });
+    expect(toggle).toBeEnabled();
+    fireEvent.click(toggle);
+
+    await waitFor(() =>
+      expect(mocks.apiFetch).toHaveBeenCalledWith(
+        `/api/plugins/${shadowedPlugin.id}`,
+        expect.objectContaining({
+          method: 'PATCH',
+          body: JSON.stringify({ enabled: false }),
+        }),
+      ),
+    );
   });
 
   it('toggling enable sends PATCH', async () => {

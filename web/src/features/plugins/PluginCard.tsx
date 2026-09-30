@@ -3,7 +3,7 @@ import { useState } from 'react';
 import { Button } from '../../components/ui/button';
 import type { Plugin, PluginStatus } from '../../lib/schemas/plugin';
 import { cn } from '../../lib/utils';
-import { pluginErrorMessage } from './pluginError';
+import { parseApiErrorMessage } from '../../lib/api';
 import { usePluginInstall, useSetPluginEnabled, useUpdatePlugin } from './usePlugins';
 
 function statusPillClass(status: PluginStatus): string {
@@ -32,7 +32,7 @@ export function PluginCard({ plugin }: PluginCardProps) {
   const setEnabled = useSetPluginEnabled();
   const updatePlugin = useUpdatePlugin();
   const { data: update } = usePluginInstall(updateId);
-  const canEnable = plugin.status === 'ok';
+  const canToggle = plugin.enabled || plugin.status === 'ok';
   const updating = updatePlugin.isPending || update?.status === 'running';
 
   async function handleToggle() {
@@ -40,7 +40,7 @@ export function PluginCard({ plugin }: PluginCardProps) {
     try {
       await setEnabled.mutateAsync({ id: plugin.id, enabled: !plugin.enabled });
     } catch (err) {
-      setError(pluginErrorMessage(err, 'Unable to update plugin.'));
+      setError(parseApiErrorMessage(err, 'Unable to update plugin.'));
     }
   }
 
@@ -50,7 +50,7 @@ export function PluginCard({ plugin }: PluginCardProps) {
       const started = await updatePlugin.mutateAsync(plugin.id);
       setUpdateId(started.id);
     } catch (err) {
-      setError(pluginErrorMessage(err, 'Unable to start update.'));
+      setError(parseApiErrorMessage(err, 'Unable to start update.'));
     }
   }
 
@@ -115,8 +115,8 @@ export function PluginCard({ plugin }: PluginCardProps) {
             role="switch"
             aria-checked={plugin.enabled}
             aria-label={`Enable ${plugin.name}`}
-            title={canEnable ? undefined : 'Only plugins with status ok can be enabled'}
-            disabled={!canEnable || setEnabled.isPending}
+            title={canToggle ? undefined : 'Only plugins with status ok can be enabled'}
+            disabled={!canToggle || setEnabled.isPending}
             onClick={() => void handleToggle()}
             className={cn(
               'relative inline-flex h-5 w-9 shrink-0 items-center rounded-full border border-border transition-colors duration-fast disabled:cursor-not-allowed disabled:opacity-50',

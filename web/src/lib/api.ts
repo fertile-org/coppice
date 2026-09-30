@@ -26,9 +26,12 @@ export function parseApiErrorMessage(
     return fallback;
   }
   try {
-    const parsed = JSON.parse(trimmed) as { message?: unknown };
+    const parsed = JSON.parse(trimmed) as { message?: unknown; error?: unknown };
     if (typeof parsed.message === 'string' && parsed.message.trim()) {
       return parsed.message.trim();
+    }
+    if (typeof parsed.error === 'string' && parsed.error.trim()) {
+      return parsed.error.trim();
     }
   } catch {
     // Plain-text error body

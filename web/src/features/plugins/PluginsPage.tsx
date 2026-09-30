@@ -6,7 +6,7 @@ import { isDesktopShell, pickDirectory } from '../../lib/desktop';
 import type { PluginDir } from '../../lib/schemas/plugin';
 import { useSession } from '../auth/useSession';
 import { PluginCard } from './PluginCard';
-import { pluginErrorMessage } from './pluginError';
+import { parseApiErrorMessage } from '../../lib/api';
 import {
   useAddPluginDir,
   useInstallPlugin,
@@ -42,7 +42,7 @@ function PluginDirsSection({ dirs }: { dirs: PluginDir[] }) {
       await action();
       return true;
     } catch (err) {
-      setError(pluginErrorMessage(err, fallback));
+      setError(parseApiErrorMessage(err, fallback));
       return false;
     }
   }
@@ -227,7 +227,7 @@ function InstallSection({ dirs }: { dirs: PluginDir[] }) {
       });
       setInstallId(started.id);
     } catch (err) {
-      setError(pluginErrorMessage(err, 'Unable to start install.'));
+      setError(parseApiErrorMessage(err, 'Unable to start install.'));
     }
   }
 
