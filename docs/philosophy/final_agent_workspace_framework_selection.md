@@ -11,11 +11,12 @@
 | Backend server | **Rust** | Main orchestrator, API, workers, sandbox/session control. Low memory, safe process handling. |
 | HTTP API | **Axum** | Lightweight, async, production-ready Rust web framework. |
 | Async runtime | **Tokio** | Required for async HTTP, WebSocket, process streaming, workers. |
-| Database | **PostgreSQL** | Primary relational database from v1. Avoid SQLite migration cost. |
-| Vector search | **pgvector** | Store and query agent/project/team knowledge embeddings inside PostgreSQL. |
-| Frontend | **React SPA** | Independent UI client consuming HTTP + WebSocket APIs. |
+| Database | **PostgreSQL** | Primary relational database from v1, bundled with the desktop app. Avoid SQLite migration cost. |
+| Knowledge search | **PostgreSQL full-text search** | `tsvector` + GIN index, ranked with `ts_rank_cd`. No embeddings or vector store. |
+| Frontend | **React SPA** | Independent UI client consuming HTTP + WebSocket APIs, loaded in the Electron window. |
 | Frontend build tool | **Vite** | Fast, simple SPA development/build. |
-| Deployment | **Docker Compose** | Simple self-hosted deployment: server + Postgres + optional web container. |
+| Distribution | **Electron desktop app** | Single installer. The app starts bundled Postgres and the Rust server on localhost, serves the SPA, and stops them on quit. No Docker or setup for end users. |
+| Dev / CI stack | **Docker Compose** | Developer and CI environment only (server + Postgres + web). Not an end-user install path. |
 
 ---
 
@@ -41,7 +42,7 @@
 | PTY future option | **portable-pty** | Optional later replacement/addition to tmux driver. |
 | Secrets encryption | **age** or **ring** | Encrypt stored secrets. Simpler v1 can use OS/env-provided master key. |
 | Password/auth hashing | **argon2** | Only if user login is implemented. |
-| API auth | **session cookie or bearer token** | For self-hosted v1, simple bearer token is acceptable. |
+| API auth | **session cookie + CSRF** | In desktop mode the SPA gets a single admin session automatically (no login screen). Multi-user auth stays available for a future remote/team mode. |
 
 ---
 
@@ -50,11 +51,11 @@
 | Responsibility | Selection | Notes |
 |---|---|---|
 | Main DB | **PostgreSQL 16+** | Stable base version. |
-| Vector extension | **pgvector** | Use official pgvector image or install extension manually. |
-| Embedding storage | `vector(n)` column | Dimension depends on configured embedding model. |
-| Metadata filtering | PostgreSQL columns/indexes | Filter by project, agent, scope, type, confidence, expiry before vector ranking. |
+| Full-text index | Generated `search_vector` column + GIN index | On immutable knowledge revisions; `simple` config with `unaccent`. |
+| Metadata filtering | PostgreSQL columns/indexes | Filter by project, agent, scope, type, confidence, expiry before full-text ranking. |
+| Data location | App user data directory | Bundled Postgres data dir and artifacts live under the OS app-data folder. |
 | Heavy files | Local filesystem | Store terminal logs, screenshots, diffs, artifacts outside DB. |
-| Future object storage | S3-compatible storage | Optional later for attachments/artifacts. |
+| Remote database (future) | Optional external Postgres URL | Opt-in only; the bundled database stays the default. |
 
 ---
 
@@ -121,14 +122,13 @@
 
 ---
 
-## 8. Embedding Provider
+## 8. Knowledge Learning
 
 | Responsibility | Selection | Notes |
 |---|---|---|
-| Provider abstraction | `EmbeddingProvider` interface | Do not hardcode one vendor. |
-| Default v1 | OpenAI-compatible embeddings API | Works with many providers/proxies. |
-| Config | Base URL + API key + model + dimension | Dimension must match pgvector column/index strategy. |
-| Local future option | Ollama/local embedding model | Optional later. |
+| Learning | **Knowledge compaction agent** | Admin picks one existing agent; it compacts Done tickets in periodic batches into Knowledge Inbox candidates. No separate AI stack to configure. |
+| Retrieval for agents | **`knowledge_search` MCP tool** | Agents fetch approved knowledge on demand; each returned revision is logged as Knowledge Used. |
+| Embeddings | **Not used** | Removed: they added a second AI config, an extra service, and a DB column tied to model dimension. |
 
 ---
 
@@ -166,7 +166,11 @@ agent-workspace/
       api/
       ws/
 
-  deploy/
+  desktop/
+    main.mjs          # Electron main: starts bundled Postgres + server, opens window
+    preload.cjs       # Narrow bridge (e.g. native folder picker)
+
+  deploy/             # Dev / CI only
     docker-compose.yml
     server.Dockerfile
     web.Dockerfile
@@ -185,7 +189,7 @@ Backend:
 - Tokio
 - SQLx
 - PostgreSQL 16+
-- pgvector
+- PostgreSQL full-text search for knowledge
 - tmux session driver
 - Postgres-backed job queue
 - local filesystem artifact storage
@@ -200,10 +204,13 @@ Frontend:
 - Radix UI / shadcn/ui
 - React Hook Form + Zod
 
-Deployment:
-- Docker Compose
-- server + postgres
-- optional separate web container, or serve SPA from Rust server
+Distribution:
+- Electron desktop app
+- bundles Rust server + PostgreSQL + built SPA
+- per-OS installers (.dmg, .exe, .AppImage)
+
+Dev / CI:
+- Docker Compose (server + postgres + web)
 ```
 
 ---
@@ -217,11 +224,12 @@ Avoid these initially:
 - Redis queue
 - Kafka/NATS
 - microservices
-- separate vector database
-- Electron desktop app
+- vector database, pgvector, or embedding service
+- Docker or any manual setup required from end users
+- hosted cloud backend requirement
 - complex Jira-like workflow engine UI
 - local LLM hosting requirement
 - strong VM sandbox from day one
 ```
 
-These can be added later only when the simple self-hosted version is stable.
+These can be added later only when the simple local desktop version is stable.

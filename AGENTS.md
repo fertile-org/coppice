@@ -1,6 +1,6 @@
 # Coppice — Agent Guide
 
-**Coppice** is a self-hosted agent workspace: Trello-like board, tickets, comments, and (from M03) agent execution. Philosophy and full product design live in `docs/philosophy/`.
+**Coppice** is a local desktop agent workspace: Trello-like board, tickets, comments, and (from M03) agent execution. It ships as an Electron app that bundles PostgreSQL, the Rust server and the SPA, so end users install nothing else (bundling is planned in `TODOS.md`; Docker Compose remains the dev/CI stack). Philosophy and full product design live in `docs/philosophy/`.
 
 **Status:** M01–M09 are complete (M07 was narrowed to git/PR + forge secrets). [M10 — Plugins](docs/milestones/M10-plugins.md) Part 1 (tool-first harness: MCP gateway `/mcp`, core tools, built-in skills) is implemented. **Next implement:** M10 Part 2 (plugin dirs, git install, plugin MCP proxy, UI), then [M11 — Security & sandbox](docs/milestones/M11-security-and-sandbox.md), then [M12 — Role-owner agents](docs/milestones/M12-role-owner-agents.md).
 

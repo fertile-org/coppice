@@ -2,16 +2,18 @@
 
 ## 1. Product Summary
 
-This product is a lightweight, self-hosted workspace for managing AI agents as engineering teammates. It combines a Trello-like board, ticket comments, agent assignment, live terminal sessions, controlled long-term memory, sandboxed capabilities, secrets, and proactive agent signals.
+This product is a lightweight, local desktop application for managing AI agents as engineering teammates. It combines a Trello-like board, ticket comments, agent assignment, live terminal sessions, controlled long-term memory, sandboxed capabilities, secrets, and proactive agent signals.
 
 The product is not intended to be a heavy Jira replacement or a generic chat-based multi-agent playground. It is a practical control plane for AI coding and engineering agents that work through visible tickets, communicate through comments, operate inside explicit sandboxes, learn reusable project knowledge, and stop at human approval gates.
 
-The intended user is a solo senior engineer, small engineering team, or self-hosted AI-heavy development workflow that uses tools such as Claude Code, Codex CLI, OpenCode, OpenClaw, or similar CLI-based coding agents.
+The intended user is a solo senior engineer, small engineering team, or AI-heavy development workflow that uses tools such as Claude Code, Codex CLI, OpenCode, OpenClaw, or similar CLI-based coding agents already installed on their machine.
+
+The product ships as a single Electron desktop app. The database, backend, and UI are bundled inside it, so the user downloads, opens, and starts working — no Docker, no server setup, no login screen. Code, secrets, knowledge, and agent runs stay on the user's machine, and agents work directly on the user's local git checkouts.
 
 The core product identity:
 
 ```text
-A lightweight Trello-like workspace where AI agents can work on assigned tickets, ask each other questions, raise proactive engineering concerns, use bounded tools and credentials, learn project knowledge, and stop at human final review.
+A lightweight Trello-like desktop workspace where AI agents can work on assigned tickets, ask each other questions, raise proactive engineering concerns, use bounded tools and credentials, learn project knowledge, and stop at human final review.
 ```
 
 ## 2. Core Differentiation
@@ -37,10 +39,11 @@ The product's strongest values are:
 1. Workflow-first engineering process, not only agent assignment.
 2. Ticket comments as the official inter-agent communication protocol.
 3. Live terminal visibility for CLI-based agents.
-4. Controlled self-learning through typed knowledge and pgvector retrieval.
+4. Controlled self-learning through typed, human-governed knowledge and full-text retrieval.
 5. Capability-based sandboxing and secret access.
 6. Proactive workspace signals from role-owner agents.
 7. Human final review as a first-class safety gate.
+8. Zero-setup local desktop app: install, open, work.
 
 ## 3. Product Principles
 
@@ -69,6 +72,12 @@ If an agent lacks a required capability, it should explicitly create a blocker i
 ### 3.5 Memory Hygiene
 
 Agents should learn from work progress, but not by saving everything forever. Knowledge must be typed, scoped, filtered, ranked, expired, and auditable.
+
+### 3.6 Local-First, Zero Setup
+
+Installing the product must be as easy as installing any desktop app. The user should not need Docker, a database, a server, or an account to get started.
+
+Everything runs locally: the bundled database and backend start with the app and stop when it quits. The user brings the agent CLIs and subscriptions they already have; the product does not lock them into one agent vendor or a hosted service.
 
 ## 4. Main Product Areas
 
@@ -530,7 +539,7 @@ Agent Run
   -> CLI process
   -> terminal output stream
   -> WebSocket
-  -> browser terminal UI
+  -> terminal view in the app window
 ```
 
 The UI should call this feature:
@@ -631,7 +640,7 @@ QC Agent example:
 @frontend-agent The save button remains clickable during loading. Screenshot attached.
 ```
 
-The screenshot is stored as an attachment. A short textual summary may be embedded into knowledge later, but the raw image should remain an artifact.
+The screenshot is stored as an attachment. A short textual summary may be added to knowledge later, but the raw image should remain an artifact.
 
 ## 13. Knowledge and Self-Learning
 
@@ -714,11 +723,11 @@ KnowledgeItem {
 }
 ```
 
-### 13.4 Vector Storage
+### 13.4 Knowledge Storage and Retrieval
 
-The product should use PostgreSQL with pgvector from v1.
+Knowledge lives in PostgreSQL and is retrieved with Postgres full-text search. There are no embeddings, no vector store, and no separate embedding service or model to configure.
 
-Knowledge retrieval needs relational filters plus vector similarity:
+Retrieval applies relational filters first, then ranks by full-text relevance:
 
 ```text
 project_id
@@ -729,23 +738,30 @@ confidence
 approval status
 expiry
 superseded status
-vector similarity
-usage signals
+full-text relevance
 ```
 
-### 13.5 Learning Extractor
+Agents pull knowledge on demand through the `knowledge_search` tool on the Coppice MCP gateway. Only approved knowledge is returned, zero matches is not an error, and every returned item is logged as Knowledge Used for that run.
 
-After a ticket is completed or a significant signal is resolved, a Learning Extractor should propose candidate knowledge.
+Typed, human-curated knowledge is short and precise, so keyword search is enough. It works with zero configuration and never fails an agent run.
+
+### 13.5 Knowledge Compaction Agent
+
+Learning is done by an agent the user already configured, not by a separate extraction pipeline. A workspace admin picks one existing agent as the **knowledge compaction agent**.
 
 Flow:
 
 ```text
-Completed work
-  -> read ticket, comments, review, test report, final human feedback
-  -> propose candidate knowledge
-  -> auto-save low-risk items or send to Knowledge Inbox
-  -> embed approved/saved knowledge
+Ticket moves to Done
+  -> ticket is queued for compaction
+  -> compaction agent processes the queue in periodic batches (or on "Compact now")
+  -> reads tickets, comments, reviews, and final human feedback across the batch
+  -> proposes candidate knowledge through a strict result contract
+  -> candidates are validated and sent to the Knowledge Inbox
+  -> approved knowledge is searchable immediately
 ```
+
+Batching gives the agent cross-ticket context for deduplication. If no compaction agent is configured, Done tickets still queue up, so choosing an agent later compacts the backlog. Success is silent; failure notifies.
 
 Example candidate:
 
@@ -795,12 +811,11 @@ sections:
   ticket: 5000
   latest_comments: 4000
   project_rules: 3000
-  retrieved_knowledge: 4000
   previous_attempt_summary: 2000
   output_contract: 1000
 ```
 
-Retrieval should use metadata filters first, then vector search, then reranking.
+Retrieval should use metadata filters first, then full-text ranking. Knowledge is not pre-injected into the run context; agents fetch it with `knowledge_search` when they need it, which keeps the starting context slim.
 
 ## 14. Capabilities, Sandbox Profiles, and Secrets
 
@@ -1465,7 +1480,7 @@ Secret injection
 Comment/mention handling
 Workspace signals
 Knowledge retrieval
-Learning extraction
+Knowledge compaction
 Artifact management
 Audit logging
 ```
@@ -1477,16 +1492,18 @@ The frontend should not implement workflow rules.
 Although this document is product-focused, the intended architecture is:
 
 ```text
-Backend: Rust server
-Database: PostgreSQL + pgvector
-Frontend: lightweight React SPA
-Communication: HTTP API + WebSocket
+Distribution: Electron desktop app (bundles everything below)
+Backend: Rust server, started by the app on localhost
+Database: bundled PostgreSQL, data stored in the app's user data directory
+Frontend: lightweight React SPA, loaded in the Electron window
+Communication: HTTP API + WebSocket over localhost
 Agent execution: CLI providers inside sandbox sessions
-Artifacts: filesystem first, object storage later
-Deployment: Docker Compose
+Artifacts: local filesystem
 ```
 
-The server should be optimized for low memory, safety, predictable process management, and long-running reliability.
+The server should be optimized for low memory, fast startup, safety, predictable process management, and clean shutdown when the app quits.
+
+The backend and UI stay separate (API-first) even inside the desktop app. That keeps workflow rules on the server and leaves the door open for an optional remote or team mode later, but the default experience is always single-user and local.
 
 ## 22. API Surface Overview
 
@@ -1550,7 +1567,8 @@ agent_jobs
 agent_runs
 workflow_rules
 knowledge_items
-knowledge_embeddings
+knowledge_revisions
+knowledge_compaction_queue
 knowledge_usage_logs
 workspace_signals
 capabilities
@@ -1559,7 +1577,7 @@ secrets metadata
 blockers
 ```
 
-Use filesystem/object storage for heavy data:
+Use the local filesystem (under the app's user data directory) for heavy data:
 
 ```text
 terminal logs
@@ -1590,10 +1608,9 @@ PostgreSQL schema
 
 ```text
 Knowledge items
-pgvector embeddings
 Manual project rules
-Basic retrieval
-Context builder includes knowledge
+Full-text retrieval
+Knowledge search tool for agents
 ```
 
 ### Phase 3: Agent Runner
@@ -1646,10 +1663,10 @@ Convert signal to ticket
 Signal deduplication and snooze
 ```
 
-### Phase 8: Learning Extractor and Memory Hygiene
+### Phase 8: Knowledge Compaction and Memory Hygiene
 
 ```text
-Candidate knowledge extraction
+Compaction agent proposes candidate knowledge
 Knowledge approval inbox
 Usage logging
 Expiry/supersede
@@ -1769,7 +1786,7 @@ Human final review
 The final product should be positioned as:
 
 ```text
-A self-hosted agent workspace where AI teammates do assigned work, monitor their owned domains, ask for missing access, and raise proactive engineering concerns inside strict sandboxes.
+A local desktop agent workspace where AI teammates do assigned work, monitor their owned domains, ask for missing access, and raise proactive engineering concerns inside strict sandboxes.
 ```
 
 Shorter version:
