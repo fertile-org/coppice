@@ -6,6 +6,7 @@ import {
   listFromLines,
   presetToFormValues,
   type AgentFormValues,
+  type PluginAssignmentState,
 } from './AgentForm';
 import {
   fetchAgentPlugins,
@@ -254,8 +255,20 @@ function EditAgentDialog({
   );
   const [error, setError] = useState<string | null>(null);
   const updateAgent = useUpdateAgent(agent.id);
-  const { data: assignedPluginIds } = useAgentPlugins(agent.id);
+  const {
+    data: assignedPluginIds,
+    error: assignedPluginsError,
+    isSuccess: assignedPluginsLoaded,
+  } = useAgentPlugins(agent.id);
   const setAgentPlugins = useSetAgentPlugins();
+  const pluginAssignment: PluginAssignmentState = assignedPluginsLoaded
+    ? { status: 'ready' }
+    : assignedPluginsError
+      ? {
+          status: 'error',
+          message: parseApiErrorMessage(assignedPluginsError, 'please try again.'),
+        }
+      : { status: 'loading' };
 
   const pluginsPrefilled = useRef(false);
 
@@ -351,6 +364,7 @@ function EditAgentDialog({
             connectorOptions={connectorOptions}
             isPending={updateAgent.isPending || setAgentPlugins.isPending}
             error={error}
+            pluginAssignment={pluginAssignment}
           />
         </div>
       </div>
@@ -588,6 +602,7 @@ export function AgentsPage() {
 
       {editingAgent && (
         <EditAgentDialog
+          key={editingAgent.id}
           agent={editingAgent}
           onClose={() => setEditingAgent(null)}
           connectorOptions={connectorOptions}

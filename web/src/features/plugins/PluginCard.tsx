@@ -114,7 +114,7 @@ export function PluginCard({ plugin }: PluginCardProps) {
             type="button"
             role="switch"
             aria-checked={plugin.enabled}
-            aria-label={`Enable ${plugin.name}`}
+            aria-label={`${plugin.enabled ? 'Disable' : 'Enable'} ${plugin.name}`}
             title={canToggle ? undefined : 'Only plugins with status ok can be enabled'}
             disabled={!canToggle || setEnabled.isPending}
             onClick={() => void handleToggle()}

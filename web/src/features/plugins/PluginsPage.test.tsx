@@ -156,7 +156,7 @@ describe('PluginsPage', () => {
     plugins = [samplePlugin, { ...shadowedPlugin, enabled: true }];
     renderPage();
 
-    const toggle = await screen.findByRole('switch', { name: 'Enable shadowed-plugin' });
+    const toggle = await screen.findByRole('switch', { name: 'Disable shadowed-plugin' });
     expect(toggle).toBeEnabled();
     fireEvent.click(toggle);
 

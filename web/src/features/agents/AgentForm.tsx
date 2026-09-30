@@ -21,6 +21,12 @@ export interface AgentFormValues {
   pluginIds: string[];
 }
 
+/** Whether the agent's current plugin assignment is known, so picks can be edited. */
+export type PluginAssignmentState =
+  | { status: 'ready' }
+  | { status: 'loading' }
+  | { status: 'error'; message: string };
+
 function isAssignable(plugin: Plugin): boolean {
   return plugin.enabled && plugin.status === 'ok';
 }
@@ -79,6 +85,7 @@ interface AgentFormProps {
   isPending?: boolean;
   error?: string | null;
   submitLabel?: string;
+  pluginAssignment?: PluginAssignmentState;
 }
 
 export function AgentForm({
@@ -91,6 +98,7 @@ export function AgentForm({
   isPending = false,
   error = null,
   submitLabel,
+  pluginAssignment = { status: 'ready' },
 }: AgentFormProps) {
   const [localError, setLocalError] = useState<string | null>(null);
   const showModelFields = values.connector !== 'mock';
@@ -209,13 +217,24 @@ export function AgentForm({
         />
       </div>
 
-      <fieldset>
+      <fieldset disabled={pluginAssignment.status !== 'ready'}>
         <legend className="mb-1 block font-body text-sm font-medium text-bark-800">
           Plugins
           <span className="ml-1 font-normal text-text-muted">
             (skills exposed as plugin:skill)
           </span>
         </legend>
+        {pluginAssignment.status === 'loading' && (
+          <p className="mb-1.5 font-body text-sm text-text-muted">
+            Loading assigned plugins…
+          </p>
+        )}
+        {pluginAssignment.status === 'error' && (
+          <p className="mb-1.5 font-body text-sm text-danger">
+            Plugin changes are unavailable. Could not load this agent&apos;s
+            plugins: {pluginAssignment.message}
+          </p>
+        )}
         {pluginsLoading ? (
           <p className="font-body text-sm text-text-muted">Loading plugins…</p>
         ) : assignablePlugins.length === 0 && unavailableAssigned.length === 0 ? (

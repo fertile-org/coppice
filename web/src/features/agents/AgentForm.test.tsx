@@ -3,7 +3,11 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { useState } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Plugin } from '../../lib/schemas/plugin';
-import { AgentForm, type AgentFormValues } from './AgentForm';
+import {
+  AgentForm,
+  type AgentFormValues,
+  type PluginAssignmentState,
+} from './AgentForm';
 
 const mocks = vi.hoisted(() => ({
   plugins: [] as Plugin[],
@@ -74,9 +78,11 @@ function baseValues(overrides: Partial<AgentFormValues> = {}): AgentFormValues {
 function Harness({
   initial,
   onSubmit,
+  pluginAssignment,
 }: {
   initial: AgentFormValues;
   onSubmit: (values: AgentFormValues) => void;
+  pluginAssignment?: PluginAssignmentState;
 }) {
   const [values, setValues] = useState(initial);
   return (
@@ -87,6 +93,7 @@ function Harness({
       onSubmit={onSubmit}
       onCancel={() => {}}
       connectorOptions={[{ id: 'mock' }]}
+      pluginAssignment={pluginAssignment}
     />
   );
 }
@@ -132,5 +139,33 @@ describe('AgentForm plugins picker', () => {
 
     await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
     expect(onSubmit.mock.calls[0][0].pluginIds).toEqual([pluginA.id]);
+  });
+
+  it('disables plugin picks while assigned plugins are loading', () => {
+    render(
+      <Harness
+        initial={baseValues()}
+        onSubmit={vi.fn()}
+        pluginAssignment={{ status: 'loading' }}
+      />,
+    );
+
+    expect(screen.getByRole('checkbox', { name: /alpha-plugin/ })).toBeDisabled();
+    expect(screen.getByText(/Loading assigned plugins/)).toBeInTheDocument();
+  });
+
+  it('disables plugin picks and shows the error when assigned plugins fail to load', () => {
+    render(
+      <Harness
+        initial={baseValues()}
+        onSubmit={vi.fn()}
+        pluginAssignment={{ status: 'error', message: 'boom' }}
+      />,
+    );
+
+    expect(screen.getByRole('checkbox', { name: /alpha-plugin/ })).toBeDisabled();
+    expect(
+      screen.getByText(/Could not load this agent's plugins: boom/),
+    ).toBeInTheDocument();
   });
 });
