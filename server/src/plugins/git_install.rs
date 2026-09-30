@@ -7,7 +7,8 @@ use tokio::time::Instant;
 
 const NETWORK_SCHEMES: [&str; 2] = ["https://", "ssh://"];
 
-/// Accepts `https`/`ssh` URLs without passwords and scp-like `user@host:path`;
+/// Accepts `https` URLs without userinfo, `ssh` URLs without passwords and
+/// scp-like `user@host:path`;
 /// `file://` only when `allow_file`. Anything else (options, `ext::`
 /// transports, bare local paths) is rejected.
 pub fn validate_git_url(url: &str, allow_file: bool) -> Result<(), String> {
@@ -35,8 +36,13 @@ pub fn validate_git_url(url: &str, allow_file: bool) -> Result<(), String> {
     }
     if let Some(scheme) = NETWORK_SCHEMES.iter().find(|s| url.starts_with(*s)) {
         let authority = url[scheme.len()..].split('/').next().unwrap_or_default();
-        let (userinfo, host) = authority.rsplit_once('@').unwrap_or(("", authority));
-        if userinfo.contains(':') {
+        let userinfo_and_host = authority.rsplit_once('@');
+        let host = userinfo_and_host.map_or(authority, |(_, host)| host);
+        let has_credentials = match userinfo_and_host {
+            Some((userinfo, _)) => *scheme == "https://" || userinfo.contains(':'),
+            None => false,
+        };
+        if has_credentials {
             return Err("credentials in git URLs are not allowed; use host git credentials".into());
         }
         return if host.is_empty() || host.starts_with('-') {
@@ -272,6 +278,8 @@ mod tests {
     fn validate_git_url_rejects_credentials() {
         for url in [
             "https://user:secret@github.com/a/b.git",
+            "https://ghp_abc@github.com/a/b.git",
+            "https://user@github.com/a/b.git",
             "ssh://git:secret@host/a/b",
         ] {
             assert_eq!(
