@@ -219,7 +219,7 @@ Wiring rules (apply to Docker, desktop, and cloud alike):
 | `codex` | unverified — expected mechanism | `-c mcp_servers.coppice.url=…` + `-c mcp_servers.coppice.bearer_token_env_var="COPPICE_MCP_TOKEN"` |
 | `cursor` | **verified** | Per-run env only (below); tool-first is viable |
 | `kilo-code` | unverified — expected mechanism | Per-process config path env (`KILO_CONFIG` / fork equivalent) pointing at the run file |
-| `opencode` | Part 1: returns `mcp_unavailable`. Part 2a: unverified — decided mechanism | Shared `opencode serve` cannot carry per-run env. Part 2a replaces it with a **per-run `opencode serve`** (below) |
+| `opencode` | Part 1: returns `mcp_unavailable`. Part 2a: **verified** (OpenCode `1.18.33`) | Shared `opencode serve` cannot carry per-run env. Part 2a replaces it with a **per-run `opencode serve`** (below) |
 | `mock` | n/a | Fixture field `toolCalls: [{ tool, args }]` executed over HTTP JSON-RPC against `/mcp` before returning the fixture result |
 
 ### Cursor: verified mechanism
@@ -266,8 +266,22 @@ Rejected alternatives: per-run `opencode run` (loses the session/event API the O
 
 - Each run (and each chat turn that has no live session process) spawns its own `opencode serve` on a free loopback port with `OPENCODE_CONFIG=<run dir>/opencode.json`. The file registers one remote MCP server `coppice` at `mcp.base_url` with header `Authorization: Bearer {env:COPPICE_MCP_TOKEN}`; the token is passed only in the process environment.
 - The existing `opencode_client` / `opencode_events` code talks to that process unchanged; only process ownership moves from the global `opencode_serve` singleton to the run.
-- The process is killed on finish, stop, cancel, and failure (same paths that revoke the token), with a `Drop` backstop. Chat sessions that resume keep a per-session state directory, like Cursor's `chat-sessions/<chat_session_id>`.
-- Plan 2a task 1 verifies this against a live OpenCode CLI installed with `coppice connector install opencode` in the default Compose stack (the exact config key names and `{env:…}` interpolation). If verification fails, stop and revisit this decision before continuing.
+- The process is killed on finish, stop, cancel, and failure (same paths that revoke the token), with a `Drop` backstop. Resume needs no per-session directory: OpenCode keeps sessions in its shared data dir, so a new per-run process continues an existing session id.
+**Verification (plan 2a task 1, OpenCode `1.18.33` installed with `coppice connector install opencode` in the default Compose server container, `server/examples/mcp_probe.rs` on the host at `HOST=0.0.0.0`, free model `opencode/big-pickle`).** Per-run file, used verbatim except the URL:
+
+```json
+{"$schema":"https://opencode.ai/config.json","mcp":{"coppice":{"type":"remote","url":"http://172.19.0.1:5099/mcp","enabled":true,"headers":{"Authorization":"Bearer {env:COPPICE_MCP_TOKEN}"}}}}
+```
+
+Command: `env OPENCODE_CONFIG=<run dir>/opencode.json COPPICE_MCP_TOKEN=<token> opencode serve --hostname 127.0.0.1 --port <free port>`, driven with `opencode run --attach http://127.0.0.1:<port> -m opencode/big-pickle --format json "Call the coppice ping tool …"`.
+
+- `{env:COPPICE_MCP_TOKEN}` header interpolation works: every probe request (`initialize`, `notifications/initialized`, `GET /mcp`, `tools/list`, `tools/call`) had `authorized=true`; `GET /mcp?directory=<ws>` on the serve reports `{"coppice":{"status":"connected"}}`. Result `pong hello`. Client `protocolVersion` `2025-11-25`, accepts the gateway's answer.
+- Tool-name form in the event stream: `coppice_ping` (`<server>_<tool>`).
+- `OPENCODE_CONFIG` merges with the global config: the managed install's models/auth still apply.
+- Concurrency: two and three `opencode serve` processes on different ports with separate config files run at the same time; each run called only its own gateway (`pong hello` / `pong world`).
+- Resume: a session created on process B, B killed, prompted with `--session <id>` on process A in the same directory — accepted and continued (sessions live in the shared `$HOME/.local/share/opencode/opencode.db`).
+- No permission prompt for MCP tools in serve mode; nothing written into the workspace.
+- Startup quirk: an HTTP request sent while the process is still booting can be accepted and never answered. Health checks must use a short per-request timeout and retry (the existing `/doc` probe uses 2 s).
 
 If the connector cannot reach the gateway, the run fails with `mcp_unavailable` — no silent fallback to the fat context.
 

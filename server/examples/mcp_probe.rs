@@ -1,6 +1,6 @@
 //! Dev probe: a standalone MCP endpoint used to verify how agent CLIs attach per-run MCP servers.
 //!
-//! Run: `PORT=5099 cargo run -p coppice-server --example mcp_probe`
+//! Run: `PORT=5099 cargo run -p coppice-server --example mcp_probe` (`HOST=0.0.0.0` to reach it from a container)
 //! Requires `Authorization: Bearer probe-token` on `POST /mcp`.
 
 use axum::{
@@ -80,7 +80,8 @@ async fn main() {
         .route("/mcp", post(mcp_post))
         .route("/mcp", get(|| async { StatusCode::METHOD_NOT_ALLOWED }))
         .layer(middleware::from_fn(log_and_auth));
-    let addr = format!("127.0.0.1:{port}");
+    let host = std::env::var("HOST").unwrap_or_else(|_| "127.0.0.1".into());
+    let addr = format!("{host}:{port}");
     let listener = tokio::net::TcpListener::bind(&addr).await.expect("bind");
     eprintln!("mcp_probe listening on http://{addr}/mcp (Bearer {TOKEN})");
     axum::serve(listener, app).await.expect("serve");
