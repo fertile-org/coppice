@@ -462,6 +462,11 @@ impl<'a> PluginService<'a> {
                 )))
             }
         };
+        if plugin.status == "missing" {
+            return Err(PluginError::Validation(
+                "plugin folder is missing; rescan or reinstall".into(),
+            ));
+        }
 
         let mut tx = self.pool.begin().await?;
         lock_plugin_state(&mut tx).await?;
@@ -505,10 +510,7 @@ impl<'a> PluginService<'a> {
             Ok(commit) => commit,
             Err(err) => return self.fail_install(id, &err).await,
         };
-        if let Err(err) = self.rescan().await {
-            self.fail_install(id, &err.to_string()).await?;
-            return Err(err);
-        }
+        self.rescan().await?;
 
         let is_install = install.kind == "install";
         let mut tx = self.pool.begin().await?;
@@ -565,6 +567,59 @@ impl<'a> PluginService<'a> {
             tracing::error!(error = %err, "failed to refresh plugin skill catalog");
         }
         self.get_install(id).await
+    }
+
+    /// Entry point for background git jobs. If recording the outcome fails, the
+    /// install is still failed (best effort) and a fresh clone removed, so a
+    /// stuck `running` row cannot block a reinstall.
+    pub async fn complete_git_job(
+        &self,
+        id: Uuid,
+        result: Result<String, String>,
+        dest_rel: &str,
+        catalog: &SkillCatalog,
+    ) {
+        let Err(err) = self.finish_install(id, result, dest_rel, catalog).await else {
+            return;
+        };
+        tracing::error!(install = %id, error = %err, "failed to finish plugin install");
+        if let Err(abandon_err) = self
+            .abandon_install(id, &format!("internal error: {err}"), dest_rel)
+            .await
+        {
+            tracing::error!(install = %id, error = %abandon_err, "failed to mark plugin install failed");
+        }
+    }
+
+    async fn abandon_install(
+        &self,
+        id: Uuid,
+        error: &str,
+        dest_rel: &str,
+    ) -> Result<(), PluginError> {
+        let abandoned: Option<(String, String)> = sqlx::query_as(
+            r#"
+            UPDATE plugin_installs i SET status = 'failed', error = $2, finished_at = now()
+            FROM plugin_dirs d
+            WHERE i.id = $1 AND i.status = 'running' AND d.id = i.plugin_dir_id
+            RETURNING i.kind, d.path
+            "#,
+        )
+        .bind(id)
+        .bind(error)
+        .fetch_optional(self.pool)
+        .await?;
+        let Some((kind, dir_path)) = abandoned else {
+            return Ok(());
+        };
+        if kind == "install" {
+            let dest = Path::new(&dir_path).join(dest_rel);
+            if let Err(err) = std::fs::remove_dir_all(&dest) {
+                tracing::warn!(dest = %dest.display(), error = %err, "failed to remove abandoned clone");
+            }
+            self.rescan().await?;
+        }
+        Ok(())
     }
 
     pub async fn get_install(&self, id: Uuid) -> Result<PluginInstall, PluginError> {

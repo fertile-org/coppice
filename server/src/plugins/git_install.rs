@@ -5,9 +5,9 @@ use std::time::Duration;
 use tokio::process::Command;
 use tokio::time::Instant;
 
-const NETWORK_SCHEMES: [&str; 4] = ["https://", "http://", "ssh://", "git://"];
+const NETWORK_SCHEMES: [&str; 2] = ["https://", "ssh://"];
 
-/// Accepts `https`/`http`/`ssh`/`git` URLs and scp-like `user@host:path`;
+/// Accepts `https`/`ssh` URLs without passwords and scp-like `user@host:path`;
 /// `file://` only when `allow_file`. Anything else (options, `ext::`
 /// transports, bare local paths) is rejected.
 pub fn validate_git_url(url: &str, allow_file: bool) -> Result<(), String> {
@@ -35,7 +35,10 @@ pub fn validate_git_url(url: &str, allow_file: bool) -> Result<(), String> {
     }
     if let Some(scheme) = NETWORK_SCHEMES.iter().find(|s| url.starts_with(*s)) {
         let authority = url[scheme.len()..].split('/').next().unwrap_or_default();
-        let host = authority.rsplit('@').next().unwrap_or_default();
+        let (userinfo, host) = authority.rsplit_once('@').unwrap_or(("", authority));
+        if userinfo.contains(':') {
+            return Err("credentials in git URLs are not allowed; use host git credentials".into());
+        }
         return if host.is_empty() || host.starts_with('-') {
             Err("git URL must include a host".into())
         } else {
@@ -48,7 +51,7 @@ pub fn validate_git_url(url: &str, allow_file: bool) -> Result<(), String> {
     if is_scp_like(url) {
         Ok(())
     } else {
-        Err("git URL must be https://, ssh://, git:// or user@host:path".into())
+        Err("git URL must be https://, ssh:// or user@host:path".into())
     }
 }
 
@@ -56,11 +59,14 @@ fn is_scp_like(url: &str) -> bool {
     let Some((user_host, path)) = url.split_once(':') else {
         return false;
     };
-    let host = user_host.split_once('@').map_or(
-        user_host,
-        |(user, host)| if user.is_empty() { "" } else { host },
-    );
-    !host.is_empty()
+    let Some((user, host)) = user_host.split_once('@') else {
+        return false;
+    };
+    !user.is_empty()
+        && user
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
+        && !host.is_empty()
         && !host.starts_with('-')
         && host
             .chars()
@@ -247,10 +253,34 @@ mod tests {
             "ext::sh -c x",
             "file:///tmp/x",
             "",
+            "http://h/a.git",
+            "git://h/a.git",
+            "host:path",
+            "a/b@host:path",
+            "git@-host:path",
+            "ssh://-oProxyCommand=x/a",
+            "-host:path",
+            "https://h/a\n.git",
+            "https://h/x::y",
         ] {
             assert!(validate_git_url(url, false).is_err(), "{url}");
         }
         assert_eq!(validate_git_url("file:///tmp/x", true), Ok(()));
+    }
+
+    #[test]
+    fn validate_git_url_rejects_credentials() {
+        for url in [
+            "https://user:secret@github.com/a/b.git",
+            "ssh://git:secret@host/a/b",
+        ] {
+            assert_eq!(
+                validate_git_url(url, false),
+                Err("credentials in git URLs are not allowed; use host git credentials".into()),
+                "{url}"
+            );
+        }
+        assert_eq!(validate_git_url("ssh://git@host/a/b", false), Ok(()));
     }
 
     #[test]

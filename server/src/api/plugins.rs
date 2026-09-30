@@ -219,12 +219,9 @@ where
         let Some(pool) = state.db.as_ref() else {
             return;
         };
-        if let Err(err) = PluginService::new(pool)
-            .finish_install(install_id, result, &dest_rel, &state.skills)
-            .await
-        {
-            tracing::error!(install = %install_id, error = %err, "failed to finish plugin install");
-        }
+        PluginService::new(pool)
+            .complete_git_job(install_id, result, &dest_rel, &state.skills)
+            .await;
     });
 }
 

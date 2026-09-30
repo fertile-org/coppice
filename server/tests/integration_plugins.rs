@@ -1073,3 +1073,89 @@ async fn install_of_non_plugin_repo_fails_and_removes_clone() {
     assert_eq!(done["error"], "cloned repository is not a plugin");
     assert!(!dir_path.join("plain").exists());
 }
+
+#[tokio::test]
+async fn post_clone_failure_marks_install_failed_and_removes_clone() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    require_db!();
+    let (state, app, cookie, csrf) = install_app().await;
+    let pool = state.db.clone().unwrap();
+    let repo = PluginRepo::new();
+    let (dir_id, _) = default_dir(&app, &cookie, &csrf).await;
+    let service = coppice_server::services::plugin_service::PluginService::new(&pool);
+    let (install, dest) = service
+        .start_install(
+            &repo.url(),
+            None,
+            dir_id.parse().unwrap(),
+            &state.config.plugins,
+        )
+        .await
+        .unwrap();
+    let commit = coppice_server::plugins::git_install::clone(
+        &repo.url(),
+        None,
+        &dest,
+        true,
+        std::time::Duration::from_secs(30),
+    )
+    .await
+    .unwrap();
+
+    sqlx::query(
+        "CREATE FUNCTION coppice_test_fail_git() RETURNS trigger AS $$ BEGIN RAISE EXCEPTION 'forced failure'; END $$ LANGUAGE plpgsql",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "CREATE TRIGGER coppice_test_fail_git BEFORE UPDATE ON plugins FOR EACH ROW WHEN (NEW.source = 'git') EXECUTE FUNCTION coppice_test_fail_git()",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    service
+        .complete_git_job(install.id, Ok(commit), "sample-plugin", &state.skills)
+        .await;
+    sqlx::query("DROP TRIGGER coppice_test_fail_git ON plugins")
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("DROP FUNCTION coppice_test_fail_git()")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let failed = service.get_install(install.id).await.unwrap();
+    assert_eq!(failed.status, "failed");
+    let error = failed.error.unwrap();
+    assert!(error.starts_with("internal error: "), "{error}");
+    assert!(!dest.exists());
+
+    install_sample(&app, &repo, &dir_id, &cookie, &csrf).await;
+}
+
+#[tokio::test]
+async fn update_of_missing_plugin_is_rejected() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    require_db!();
+    let (_state, app, cookie, csrf) = install_app().await;
+    let repo = PluginRepo::new();
+    let (dir_id, dir_path) = default_dir(&app, &cookie, &csrf).await;
+    let installed = install_sample(&app, &repo, &dir_id, &cookie, &csrf).await;
+    let plugin_id = installed["pluginId"].as_str().unwrap();
+    std::fs::remove_dir_all(dir_path.join("sample-plugin")).unwrap();
+    rescan(&app, &cookie, &csrf).await;
+
+    let (status, body) = send(
+        &app,
+        "POST",
+        &format!("/api/plugins/{plugin_id}/update"),
+        Value::Null,
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    assert_eq!(body["error"], "plugin folder is missing; rescan or reinstall");
+}
