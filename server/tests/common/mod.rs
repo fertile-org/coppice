@@ -128,6 +128,7 @@ pub fn create_temp_git_checkout() -> (tempfile::TempDir, PathBuf) {
 }
 
 async fn test_state_with_db() -> Arc<AppState> {
+    std::env::remove_var("MOCK_AGENT_RESPONSE");
     let pool = prepare_test_pool().await;
 
     std::env::set_var(

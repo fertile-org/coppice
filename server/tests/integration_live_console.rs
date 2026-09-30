@@ -194,23 +194,22 @@ async fn completed_codex_run_replays_structured_fixture_events_in_order() {
         return;
     }
 
-    let (app, cookie, csrf, _env) = common::bootstrap_and_login_with_workers("done").await;
+    let (state, app, cookie, csrf, _env) =
+        common::bootstrap_and_login_with_state_and_workers("done", |_| {}).await;
+    let pool = state.db.clone().expect("db pool");
     let addr = common::spawn_test_server(app.clone()).await;
     let (_git_dir, local_path) = common::create_temp_git_checkout();
     let repo_id =
         common::register_test_repo(&app, &local_path.display().to_string(), &cookie, &csrf).await;
     let (ticket_id, agent_id, _) = setup_agent_ticket(&app, &cookie, &csrf, &repo_id).await;
 
-    let pool = coppice_server::db::shared_test_pool()
-        .await
-        .expect("shared test pool");
     let parsed_agent_id = uuid::Uuid::parse_str(&agent_id).expect("valid agent id");
     sqlx::query("UPDATE agents SET connector = 'codex' WHERE id = $1")
         .bind(parsed_agent_id)
         .execute(&pool)
         .await
         .expect("set Codex connector");
-    let run_id = insert_run_row(&ticket_id, &agent_id, "succeeded").await;
+    let run_id = insert_run_row(&pool, &ticket_id, &agent_id, "succeeded").await;
 
     let fixture_path =
         std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../fixtures/codex/done.jsonl");
@@ -338,17 +337,14 @@ async fn events_ws_receives_run_finished() {
 /// transitioned to running before the client connected" without racing the
 /// worker (which finishes mock runs in milliseconds).
 async fn insert_run_row(
+    pool: &sqlx::PgPool,
     ticket_id: &str,
     agent_id: &str,
     status: &str,
 ) -> String {
-    use coppice_server::db;
     let run_id = uuid::Uuid::new_v4();
     let ticket_id = uuid::Uuid::parse_str(ticket_id).expect("valid ticket id");
     let agent_id = uuid::Uuid::parse_str(agent_id).expect("valid agent id");
-    let pool = db::shared_test_pool()
-        .await
-        .expect("shared test pool");
     sqlx::query(
         r#"
         INSERT INTO agent_runs (
@@ -363,7 +359,7 @@ async fn insert_run_row(
     .bind("work_on_ticket")
     .bind(status)
     .bind("permissive-default")
-    .execute(&pool)
+    .execute(pool)
     .await
     .expect("insert active run");
     run_id.to_string()
@@ -376,7 +372,9 @@ async fn events_ws_late_subscriber_learns_running_status() {
         return;
     }
 
-    let (app, cookie, csrf, _env) = common::bootstrap_and_login_with_workers("done").await;
+    let (state, app, cookie, csrf, _env) =
+        common::bootstrap_and_login_with_state_and_workers("done", |_| {}).await;
+    let pool = state.db.clone().expect("db pool");
     let addr = common::spawn_test_server(app.clone()).await;
 
     let (_git_dir, local_path) = common::create_temp_git_checkout();
@@ -387,7 +385,7 @@ async fn events_ws_late_subscriber_learns_running_status() {
     // A run already transitioned to `running` before the client connects — no
     // agent_run.started broadcast is pending. The snapshot-on-connect path must
     // surface current truth.
-    let run_id = insert_run_row(&ticket_id, &agent_id, "running").await;
+    let run_id = insert_run_row(&pool, &ticket_id, &agent_id, "running").await;
 
     let ws_url = format!("ws://{addr}/ws/events");
     let ws = connect_ws(&ws_url, Some(&cookie)).await;

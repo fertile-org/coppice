@@ -289,10 +289,14 @@ mod tests {
     fn doctor_warns_when_makefile_present_but_make_missing() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("Makefile"), "test:\n").unwrap();
-        with_env_vars(&[("PATH", Some("/usr/bin".into()))], || {
+        let empty_bin = dir.path().join("empty-bin");
+        std::fs::create_dir_all(&empty_bin).unwrap();
+        with_env_vars(&[("PATH", Some(empty_bin.display().to_string()))], || {
+            let prev_cwd = std::env::current_dir().unwrap();
             std::env::set_current_dir(dir.path()).unwrap();
             assert!(repo_root_with_makefile().is_some());
             assert!(which::which("make").is_err());
+            std::env::set_current_dir(prev_cwd).unwrap();
         });
     }
 
@@ -302,10 +306,12 @@ mod tests {
         std::fs::create_dir_all(dir.path().join(".git")).unwrap();
         std::fs::write(dir.path().join("Makefile"), "test:\n").unwrap();
         std::fs::create_dir_all(dir.path().join("server")).unwrap();
-        std::env::set_current_dir(dir.path().join("server")).unwrap();
-        assert_eq!(
-            repo_root_with_makefile().as_deref(),
-            Some(dir.path())
-        );
+        with_env_vars(&[], || {
+            let prev_cwd = std::env::current_dir().unwrap();
+            std::env::set_current_dir(dir.path().join("server")).unwrap();
+            let found = repo_root_with_makefile();
+            std::env::set_current_dir(prev_cwd).unwrap();
+            assert_eq!(found.as_deref(), Some(dir.path()));
+        });
     }
 }

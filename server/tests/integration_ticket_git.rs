@@ -286,7 +286,7 @@ async fn rebase_branch_missing_worktree_returns_bad_request() {
         return;
     }
 
-    let (git_dir, local_path) = common::create_temp_git_checkout();
+    let (_git_dir, local_path) = common::create_temp_git_checkout();
     let (_state, app, cookie, csrf, _env) =
         common::bootstrap_and_login_with_state_and_workers("", |_| {}).await;
     let _repo_id =
@@ -306,7 +306,6 @@ async fn rebase_branch_missing_worktree_returns_bad_request() {
         .output()
         .expect("git branch");
     assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
-    drop(git_dir);
 
     let res = app
         .clone()

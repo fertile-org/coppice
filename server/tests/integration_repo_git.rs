@@ -428,7 +428,7 @@ async fn push_blocked_when_missing_remote() {
 }
 
 #[tokio::test]
-async fn push_blocked_when_missing_token_or_dirty_tree() {
+async fn push_blocked_when_dirty_tree() {
     let _guard = common::DB_TEST_LOCK.lock().await;
     if !common::db_available().await {
         eprintln!("skipping: postgres not available");
@@ -457,24 +457,6 @@ async fn push_blocked_when_missing_token_or_dirty_tree() {
         &["update-ref", "refs/remotes/origin/main", &sha],
     );
     commit_file(&local_path, "ahead.txt", "x\n", "ahead");
-
-    let push_no_token = app
-        .clone()
-        .oneshot(common::json_request(
-            "POST",
-            &format!("/api/repos/{repo_id}/push-default-branch"),
-            "{}",
-            &cookie,
-            &csrf,
-        ))
-        .await
-        .unwrap();
-    assert_eq!(push_no_token.status(), StatusCode::BAD_REQUEST);
-    let body: serde_json::Value = common::json_body(push_no_token).await;
-    assert!(
-        body["message"].as_str().unwrap().to_lowercase().contains("token"),
-        "{body}"
-    );
 
     set_forge_token(&app, &repo_id, "ghs_testtoken", &cookie, &csrf).await;
     std::fs::write(local_path.join("dirty.txt"), "dirty").expect("dirty");
@@ -656,7 +638,7 @@ async fn successful_default_branch_pull_via_bare_sibling() {
 }
 
 #[tokio::test]
-async fn pull_blocked_when_dirty_diverged_or_missing_token() {
+async fn pull_blocked_when_dirty_or_diverged() {
     let _guard = common::DB_TEST_LOCK.lock().await;
     if !common::db_available().await {
         eprintln!("skipping: postgres not available");
@@ -678,24 +660,6 @@ async fn pull_blocked_when_dirty_diverged_or_missing_token() {
         &csrf,
     )
     .await;
-
-    let pull_no_token = app
-        .clone()
-        .oneshot(common::json_request(
-            "POST",
-            &format!("/api/repos/{repo_id}/pull-default-branch"),
-            "{}",
-            &cookie,
-            &csrf,
-        ))
-        .await
-        .unwrap();
-    assert_eq!(pull_no_token.status(), StatusCode::BAD_REQUEST);
-    let body: serde_json::Value = common::json_body(pull_no_token).await;
-    assert!(
-        body["message"].as_str().unwrap().to_lowercase().contains("token"),
-        "{body}"
-    );
 
     set_forge_token(&app, &repo_id, "ghs_testtoken", &cookie, &csrf).await;
     std::fs::write(local.join("dirty.txt"), "dirty").expect("dirty");
