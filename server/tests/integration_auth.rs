@@ -13,13 +13,14 @@ async fn test_state_with_db() -> Arc<AppState> {
         "/tmp/coppice-test-artifacts",
     );
     let config = AppConfig::load_defaults().expect("test config");
+    let opencode_runs = AppState::test_opencode_runs();
     Arc::new(AppState {
         attachments: AppState::attachment_store_from_config(&config),
-        connector_registry: AppState::connector_registry_from_config(&config, None),
+        connector_registry: AppState::connector_registry_from_config(&config, opencode_runs.clone()),
         agent_health: Arc::new(coppice_server::services::agent_health::AgentHealthRegistry::new()),
         run_streams: Arc::new(coppice_server::sessions::run_registry::RunStreamRegistry::new()),
         event_bus: Arc::new(coppice_server::events::bus::EventBus::new()),
-        opencode_serve: None,
+        opencode_runs,
         agent_templates: coppice_server::AppState::load_agent_templates(),
         secret_store: coppice_server::crypto::SecretStore::from_master_key(&config.secrets.master_key),
         skills: AppState::test_skills(),

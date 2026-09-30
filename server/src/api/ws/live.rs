@@ -315,14 +315,11 @@ async fn handle_opencode_recovery(
         }
     };
 
-    let Some(serve) = state.opencode_serve.as_ref() else {
-        return RecoveryOutcome {
-            recoverable: Some(false),
-            reason: Some("opencode serve not available".into()),
-        };
+    let Some(base_url) = state.opencode_runs.base_url(&run_id.to_string()) else {
+        return mark_recovery_interrupted(state, run_id, "server restarted during run").await;
     };
 
-    let client = OpenCodeClient::new(serve.base_url());
+    let client = OpenCodeClient::new(&base_url);
     let directory = std::path::Path::new(&worktree_path);
 
     let (event_tx, mut event_rx) = tokio::sync::mpsc::channel(256);

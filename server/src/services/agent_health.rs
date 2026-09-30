@@ -3,7 +3,6 @@ use uuid::Uuid;
 
 use crate::domain::agent::Agent;
 use crate::providers::ConnectorRegistry;
-use crate::sessions::opencode_serve::OpenCodeServeManager;
 
 pub use crate::domain::agent_health::{health_status_to_str, AgentHealthStatus};
 
@@ -65,7 +64,6 @@ impl AgentHealthRegistry {
 pub async fn evaluate_agent_health(
     agent: &Agent,
     registry: &ConnectorRegistry,
-    opencode_serve: Option<&OpenCodeServeManager>,
 ) -> (AgentHealthStatus, Option<String>) {
     if !registry.has(&agent.connector) {
         return (
@@ -147,33 +145,12 @@ pub async fn evaluate_agent_health(
                     );
                 }
             }
-            let Some(serve) = opencode_serve else {
-                return (
-                    AgentHealthStatus::Unhealthy,
-                    Some("opencode serve is not running".into()),
-                );
-            };
-            match check_opencode_healthy(serve.base_url()).await {
-                Ok(()) => (AgentHealthStatus::Healthy, None),
-                Err(err) => (AgentHealthStatus::Unhealthy, Some(err.to_string())),
-            }
+            (AgentHealthStatus::Healthy, None)
         }
         other => (
             AgentHealthStatus::MissingConfig,
             Some(format!("Unknown connector: {other}")),
         ),
-    }
-}
-
-async fn check_opencode_healthy(base_url: &str) -> anyhow::Result<()> {
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(5))
-        .build()?;
-    let resp = client.get(format!("{base_url}/doc")).send().await?;
-    if resp.status().is_success() {
-        Ok(())
-    } else {
-        anyhow::bail!("opencode serve returned {}", resp.status());
     }
 }
 

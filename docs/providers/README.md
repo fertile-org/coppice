@@ -60,7 +60,7 @@ Every run gets a per-run bearer token for the Coppice MCP gateway at `POST /mcp`
 | `claude-code` | unverified — expected mechanism | `--mcp-config <run dir>/mcp.json --strict-mcp-config`; `mcp__coppice__*` added to `--allowedTools` |
 | `codex` | unverified — expected mechanism | `-c mcp_servers.coppice.url=…` + `-c mcp_servers.coppice.bearer_token_env_var="COPPICE_MCP_TOKEN"` |
 | `kilo-code` | unverified — expected mechanism | `KILO_CONFIG` pointing at `<run dir>/kilo-config.json` (OpenCode-style `mcp` block, `{env:COPPICE_MCP_TOKEN}` header) |
-| `opencode` | **not tool-first** | Refuses with `mcp_unavailable` |
+| `opencode` | **verified** (`1.18.33`) | Per-run `opencode serve` with `OPENCODE_CONFIG=<run dir>/opencode.json` (remote `coppice` MCP server, `{env:COPPICE_MCP_TOKEN}` header) |
 
 Verify an unverified row when its CLI is first available: run one ticket and confirm `run_tool_calls` records `ticket_get` and `result_submit`. For `kilo-code` the env var name follows the OpenCode `OPENCODE_CONFIG` convention and may differ in the fork.
 
@@ -76,7 +76,7 @@ Verify an unverified row when its CLI is first available: run one ticket and con
 
 **Cursor side effects.** Overriding `HOME` also changes it for the agent's own shell commands, so the connector forwards `XDG_CONFIG_HOME` (the operator's real config home, where `cursor/auth.json` lives) and, when they exist and are not already set, `GIT_CONFIG_GLOBAL` and `GH_CONFIG_DIR`. Because `CURSOR_CONFIG_DIR` points at a Coppice-owned directory, permission rules in the operator's own `cli-config.json` do **not** apply to Coppice runs — only the `Mcp(coppice:*)` allow rule Coppice writes does.
 
-**OpenCode follow-up.** The shared `opencode serve` process is started once for the server, so it cannot carry a per-run MCP server or token. Making OpenCode tool-first means switching the connector to per-run `opencode run` processes with a per-run `OPENCODE_CONFIG`, like `kilo-code`.
+**OpenCode per-run server.** Each run (and each chat turn) spawns its own `opencode serve` on a free port on `serve_hostname`, with `OPENCODE_CONFIG` pointing at `<artifacts_dir>/runs/<run id>/opencode.json` (runs without a gateway token, such as drafts, use a temp file). The process is killed when the run ends, is cancelled, or fails, and on server shutdown. `serve_port` is ignored. Sessions live in OpenCode's shared data dir, so a later run's process resumes an existing session id. A per-run server does not survive a Coppice restart, so active OpenCode runs are marked interrupted on startup.
 
 Design: [M10 plugins](../superpowers/specs/2026-09-29-m10-plugins-design.md).
 

@@ -5,7 +5,6 @@ use tracing_subscriber::EnvFilter;
 use coppice_server::events::mark_run_interrupted;
 use coppice_server::services::run_orchestrator::RunOrchestrator;
 use coppice_server::services::run_service::RunService;
-use coppice_server::sessions::opencode_client::OpenCodeClient;
 use coppice_server::AppState;
 
 async fn interrupt_orphaned_run(state: &AppState, run_id: uuid::Uuid) {
@@ -32,33 +31,11 @@ async fn sweep_orphaned_runs(state: &AppState) {
         return;
     };
 
+    // No per-run `opencode serve` survives a restart, so OpenCode runs are
+    // orphaned just like every other connector's.
     for run in runs {
         if state.run_streams.get(run.id).is_some() {
             continue;
-        }
-        if let (Some(session_id), Some(worktree)) = (&run.session_id, &run.worktree_path) {
-            let connector = run_svc
-                .agent_connector_for_run(run.agent_id)
-                .await
-                .ok()
-                .flatten();
-            if connector.as_deref() == Some("opencode") {
-                if let Some(serve) = state.opencode_serve.as_ref() {
-                    let client = OpenCodeClient::new(serve.base_url());
-                    let alive = client
-                        .session_status(std::path::Path::new(worktree), session_id)
-                        .await
-                        .ok()
-                        .flatten()
-                        .is_some();
-                    if !alive {
-                        interrupt_orphaned_run(state, run.id).await;
-                    }
-                } else {
-                    interrupt_orphaned_run(state, run.id).await;
-                }
-                continue;
-            }
         }
         interrupt_orphaned_run(state, run.id).await;
     }
@@ -76,17 +53,10 @@ async fn main() -> anyhow::Result<()> {
     let config = coppice_server::AppConfig::load()
         .map_err(|e| anyhow::anyhow!("failed to load config: {e}"))?;
 
-    let opencode_serve =
-        if config.agent.connectors.opencode.enabled || config.agent.default_connector == "opencode" {
-            Some(
-                coppice_server::sessions::opencode_serve::OpenCodeServeManager::start(
-                    &config.agent.connectors.opencode,
-                )
-                .await?,
-            )
-        } else {
-            None
-        };
+    let opencode_runs = coppice_server::sessions::opencode_run_server::OpenCodeRunServers::new(
+        config.agent.connectors.opencode.command.clone(),
+        config.agent.connectors.opencode.serve_hostname.clone(),
+    );
 
     let db = coppice_server::db::connect_and_migrate(&config.database.url).await?;
     coppice_server::services::auth_service::AuthService::new(&db, &config.auth)
@@ -102,12 +72,12 @@ async fn main() -> anyhow::Result<()> {
         attachments: coppice_server::AppState::attachment_store_from_config(&config),
         connector_registry: coppice_server::AppState::connector_registry_from_config(
             &config,
-            opencode_serve.clone(),
+            opencode_runs.clone(),
         ),
         agent_health: Arc::new(coppice_server::services::agent_health::AgentHealthRegistry::new()),
         run_streams: Arc::new(coppice_server::sessions::run_registry::RunStreamRegistry::new()),
         event_bus: Arc::new(coppice_server::events::bus::EventBus::new()),
-        opencode_serve: opencode_serve.clone(),
+        opencode_runs: opencode_runs.clone(),
         agent_templates,
         secret_store: coppice_server::crypto::SecretStore::from_master_key(&config.secrets.master_key),
         skills,
@@ -128,9 +98,7 @@ async fn main() -> anyhow::Result<()> {
     axum::serve(listener, app)
         .with_graceful_shutdown(async move {
             tokio::signal::ctrl_c().await.ok();
-            if let Some(serve) = opencode_serve {
-                serve.shutdown().await;
-            }
+            opencode_runs.shutdown_all().await;
         })
         .await?;
     Ok(())

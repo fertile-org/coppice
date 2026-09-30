@@ -34,7 +34,7 @@ pub struct AppState {
     pub agent_health: Arc<crate::services::agent_health::AgentHealthRegistry>,
     pub run_streams: Arc<crate::sessions::run_registry::RunStreamRegistry>,
     pub event_bus: Arc<crate::events::bus::EventBus>,
-    pub opencode_serve: Option<Arc<crate::sessions::opencode_serve::OpenCodeServeManager>>,
+    pub opencode_runs: Arc<crate::sessions::opencode_run_server::OpenCodeRunServers>,
     pub agent_templates: HashMap<String, String>,
     pub secret_store: crate::crypto::SecretStore,
     pub skills: Arc<crate::plugins::skills::SkillCatalog>,
@@ -50,12 +50,19 @@ impl AppState {
 
     pub fn connector_registry_from_config(
         config: &AppConfig,
-        opencode_serve: Option<Arc<crate::sessions::opencode_serve::OpenCodeServeManager>>,
+        opencode_runs: Arc<crate::sessions::opencode_run_server::OpenCodeRunServers>,
     ) -> Arc<crate::providers::ConnectorRegistry> {
         Arc::new(crate::providers::ConnectorRegistry::from_config(
             config,
-            opencode_serve,
+            opencode_runs,
         ))
+    }
+
+    pub fn test_opencode_runs() -> Arc<crate::sessions::opencode_run_server::OpenCodeRunServers> {
+        crate::sessions::opencode_run_server::OpenCodeRunServers::new(
+            "opencode".into(),
+            "127.0.0.1".into(),
+        )
     }
 
     pub fn default_connector_id(&self) -> &str {
@@ -98,13 +105,14 @@ impl AppState {
 pub async fn test_state() -> Arc<AppState> {
     let config = AppConfig::load_defaults().expect("test config");
     let secret_store = crate::crypto::SecretStore::from_master_key(&config.secrets.master_key);
+    let opencode_runs = AppState::test_opencode_runs();
     Arc::new(AppState {
         attachments: AppState::attachment_store_from_config(&config),
-        connector_registry: AppState::connector_registry_from_config(&config, None),
+        connector_registry: AppState::connector_registry_from_config(&config, opencode_runs.clone()),
         agent_health: Arc::new(crate::services::agent_health::AgentHealthRegistry::new()),
         run_streams: Arc::new(crate::sessions::run_registry::RunStreamRegistry::new()),
         event_bus: Arc::new(crate::events::bus::EventBus::new()),
-        opencode_serve: None,
+        opencode_runs,
         agent_templates: AppState::load_agent_templates(),
         secret_store,
         skills: AppState::test_skills(),

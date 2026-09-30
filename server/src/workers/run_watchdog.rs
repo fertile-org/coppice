@@ -1,6 +1,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use sqlx::PgPool;
 use time::OffsetDateTime;
 use uuid::Uuid;
 
@@ -78,16 +79,17 @@ async fn run_watchdog_pass(state: &AppState) {
             continue;
         };
 
-        let Some(serve) = state.opencode_serve.as_ref() else {
+        let Some(base_url) = state.opencode_runs.base_url(&run.id.to_string()) else {
             tracing::warn!(
                 run_id = %run.id,
                 ticket_id = ?run.ticket_id,
-                "opencode run active but serve is unavailable"
+                "opencode server missing while run is active; marking interrupted"
             );
+            interrupt_run(state, pool, run.id, "opencode server lost during run").await;
             continue;
         };
 
-        let client = OpenCodeClient::new(serve.base_url());
+        let client = OpenCodeClient::new(&base_url);
         let directory = std::path::Path::new(worktree);
         match client.session_status(directory, session_id).await {
             Ok(Some(session_status)) => {
@@ -109,22 +111,7 @@ async fn run_watchdog_pass(state: &AppState) {
                     elapsed_secs,
                     "opencode session missing while run is active; marking interrupted"
                 );
-                match mark_run_interrupted(state, run.id, "opencode session lost during run").await
-                {
-                    Ok(interrupted) => {
-                        RunOrchestrator::new(pool, &state.config.workflow)
-                            .handle_terminal_run(&interrupted)
-                            .await;
-                    }
-                    Err(err) => {
-                        tracing::warn!(
-                            error = %err,
-                            run_id = %run.id,
-                            ticket_id = ?run.ticket_id,
-                            "failed to mark watchdog-observed run interrupted"
-                        );
-                    }
-                }
+                interrupt_run(state, pool, run.id, "opencode session lost during run").await;
             }
             Err(err) => {
                 tracing::warn!(
@@ -135,6 +122,23 @@ async fn run_watchdog_pass(state: &AppState) {
                     "failed to poll opencode session status"
                 );
             }
+        }
+    }
+}
+
+async fn interrupt_run(state: &AppState, pool: &PgPool, run_id: Uuid, reason: &str) {
+    match mark_run_interrupted(state, run_id, reason).await {
+        Ok(interrupted) => {
+            RunOrchestrator::new(pool, &state.config.workflow)
+                .handle_terminal_run(&interrupted)
+                .await;
+        }
+        Err(err) => {
+            tracing::warn!(
+                error = %err,
+                %run_id,
+                "failed to mark watchdog-observed run interrupted"
+            );
         }
     }
 }

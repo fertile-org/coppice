@@ -645,6 +645,7 @@ pub struct OpenCodeConnectorConfig {
     pub command: String,
     #[serde(default = "default_opencode_host")]
     pub serve_hostname: String,
+    /// Ignored since M10 Part 2a (each run gets a free port); kept so existing config files still parse.
     #[serde(default = "default_opencode_port")]
     pub serve_port: u16,
     /// Max seconds Coppice waits for an OpenCode session to reach idle before failing the run.

@@ -123,10 +123,10 @@ async fn live_ws_replays_snapshot_when_no_registry() {
     };
     let end_json: serde_json::Value = serde_json::from_str(&end_text).unwrap();
     assert_eq!(end_json["type"], "end");
-    assert_eq!(end_json["status"], "running");
+    assert_eq!(end_json["status"], "failed");
     assert_eq!(end_json["recoverable"], false);
     assert_eq!(
         end_json["reason"].as_str().unwrap(),
-        "opencode serve not available"
+        "interrupted: server restarted during run"
     );
 }

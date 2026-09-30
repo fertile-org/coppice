@@ -30,7 +30,9 @@ health_check_interval_secs = 60
 [agent.connectors.opencode]
 enabled = false
 command = "opencode"
+# Each run spawns its own `opencode serve` on a free port on this host.
 serve_hostname = "127.0.0.1"
+# Ignored since M10 Part 2a (each run gets a free port); kept so existing config files still parse.
 serve_port = 4096
 # Max seconds Coppice waits for OpenCode session idle (default 1800 = 30 min).
 # run_timeout_secs = 3600
