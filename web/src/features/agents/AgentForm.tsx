@@ -5,6 +5,8 @@ import type {
   ConnectorOption,
 } from './useAgents';
 import { useModelProviders, useModels } from './useAgents';
+import { usePlugins } from '../plugins/usePlugins';
+import type { Plugin } from '../../lib/schemas/plugin';
 
 export interface AgentFormValues {
   name: string;
@@ -16,6 +18,11 @@ export interface AgentFormValues {
   modelProvider: string;
   model: string;
   enabled: boolean;
+  pluginIds: string[];
+}
+
+function isAssignable(plugin: Plugin): boolean {
+  return plugin.enabled && plugin.status === 'ok';
 }
 
 function linesFromList(items: string[]): string {
@@ -40,6 +47,7 @@ export function agentToFormValues(agent: Agent): AgentFormValues {
     modelProvider: agent.modelProvider ?? '',
     model: agent.model ?? '',
     enabled: agent.enabled,
+    pluginIds: [],
   };
 }
 
@@ -57,6 +65,7 @@ export function presetToFormValues(
     modelProvider: '',
     model: '',
     enabled: true,
+    pluginIds: [],
   };
 }
 
@@ -91,6 +100,14 @@ export function AgentForm({
     showModelFields ? values.connector : undefined,
     showModelFields ? values.modelProvider : undefined,
   );
+  const { data: plugins, isLoading: pluginsLoading } = usePlugins();
+  const assignablePlugins = (plugins ?? []).filter(isAssignable);
+  const assignableIds = new Set(assignablePlugins.map((p) => p.id));
+  const unavailableAssigned = plugins
+    ? values.pluginIds
+        .filter((id) => !assignableIds.has(id))
+        .map((id) => ({ id, name: plugins.find((p) => p.id === id)?.name ?? id }))
+    : [];
 
   useEffect(() => {
     setLocalError(null);
@@ -111,6 +128,13 @@ export function AgentForm({
     onChange({ ...values, modelProvider, model: '' });
   }
 
+  function togglePlugin(id: string, checked: boolean) {
+    const pluginIds = checked
+      ? [...values.pluginIds, id]
+      : values.pluginIds.filter((existing) => existing !== id);
+    onChange({ ...values, pluginIds });
+  }
+
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     if (!values.name.trim()) {
@@ -122,7 +146,10 @@ export function AgentForm({
       return;
     }
     setLocalError(null);
-    await onSubmit(values);
+    const pluginIds = plugins
+      ? values.pluginIds.filter((id) => assignableIds.has(id))
+      : values.pluginIds;
+    await onSubmit({ ...values, pluginIds });
   }
 
   const displayError = error ?? localError;
@@ -181,6 +208,64 @@ export function AgentForm({
           className="field-control w-full resize-y px-3 py-2 font-body text-sm"
         />
       </div>
+
+      <fieldset>
+        <legend className="mb-1 block font-body text-sm font-medium text-bark-800">
+          Plugins
+          <span className="ml-1 font-normal text-text-muted">
+            (skills exposed as plugin:skill)
+          </span>
+        </legend>
+        {pluginsLoading ? (
+          <p className="font-body text-sm text-text-muted">Loading plugins…</p>
+        ) : assignablePlugins.length === 0 && unavailableAssigned.length === 0 ? (
+          <p className="font-body text-sm text-text-muted">
+            No enabled plugins. Enable plugins in Settings → Plugins.
+          </p>
+        ) : (
+          <ul className="space-y-1.5">
+            {assignablePlugins.map((plugin) => (
+              <li key={plugin.id}>
+                <label className="flex items-start gap-2">
+                  <input
+                    type="checkbox"
+                    checked={values.pluginIds.includes(plugin.id)}
+                    onChange={(e) => togglePlugin(plugin.id, e.target.checked)}
+                    className="mt-0.5 h-4 w-4 rounded border-border text-moss-600 focus:ring-moss-500"
+                  />
+                  <span className="font-body text-sm text-text-primary">
+                    {plugin.name}
+                    {plugin.skills.length > 0 && (
+                      <span className="ml-1 text-text-muted">
+                        ({plugin.skills.length}{' '}
+                        {plugin.skills.length === 1 ? 'skill' : 'skills'})
+                      </span>
+                    )}
+                  </span>
+                </label>
+              </li>
+            ))}
+            {unavailableAssigned.map((plugin) => (
+              <li key={plugin.id}>
+                <label className="flex items-start gap-2 opacity-70">
+                  <input
+                    type="checkbox"
+                    checked
+                    disabled
+                    className="mt-0.5 h-4 w-4 rounded border-border"
+                  />
+                  <span className="font-body text-sm text-text-secondary">
+                    {plugin.name}
+                    <span className="ml-1 text-amber-900">
+                      — unavailable; will be removed on save
+                    </span>
+                  </span>
+                </label>
+              </li>
+            ))}
+          </ul>
+        )}
+      </fieldset>
 
       <div>
         <label

@@ -161,6 +161,53 @@ export function useUpdateAgent(agentId: string) {
   });
 }
 
+export function agentPluginsQueryKey(agentId: string) {
+  return ['agents', agentId, 'plugins'] as const;
+}
+
+async function fetchAgentPlugins(agentId: string): Promise<string[]> {
+  const res = await apiFetch(`/api/agents/${agentId}/plugins`);
+  const data = (await res.json()) as { pluginIds: string[] };
+  return data.pluginIds;
+}
+
+async function setAgentPlugins({
+  agentId,
+  pluginIds,
+}: {
+  agentId: string;
+  pluginIds: string[];
+}): Promise<string[]> {
+  const res = await apiFetch(`/api/agents/${agentId}/plugins`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ pluginIds }),
+  });
+  const data = (await res.json()) as { pluginIds: string[] };
+  return data.pluginIds;
+}
+
+export function useAgentPlugins(agentId: string | undefined) {
+  return useQuery({
+    queryKey: agentPluginsQueryKey(agentId ?? ''),
+    queryFn: () => fetchAgentPlugins(agentId!),
+    enabled: Boolean(agentId),
+  });
+}
+
+export function useSetAgentPlugins() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: setAgentPlugins,
+    onSuccess: (pluginIds, { agentId }) => {
+      queryClient.setQueryData(agentPluginsQueryKey(agentId), pluginIds);
+    },
+  });
+}
+
+export { fetchAgentPlugins };
+
 export function useUpdateAgentMutation() {
   const queryClient = useQueryClient();
 

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { ApiError } from '../../lib/api';
+import { ApiError, parseApiErrorMessage } from '../../lib/api';
 import {
   AgentForm,
   agentToFormValues,
@@ -8,8 +8,11 @@ import {
   type AgentFormValues,
 } from './AgentForm';
 import {
+  fetchAgentPlugins,
+  useAgentPlugins,
   useAgentPresets,
   useAgents,
+  useSetAgentPlugins,
   useConnectors,
   useCreateAgent,
   useUpdateAgent,
@@ -29,6 +32,12 @@ function formatDate(iso: string): string {
     day: 'numeric',
     year: 'numeric',
   });
+}
+
+function sameIds(a: string[], b: string[]): boolean {
+  if (a.length !== b.length) return false;
+  const set = new Set(a);
+  return b.every((id) => set.has(id));
 }
 
 function HealthBadge({
@@ -77,10 +86,13 @@ function CreateAgentDialog({
     systemPromptTemplate: '',
   }));
   const [error, setError] = useState<string | null>(null);
+  const [createdAgentId, setCreatedAgentId] = useState<string | null>(null);
   const createAgent = useCreateAgent();
+  const setAgentPlugins = useSetAgentPlugins();
 
   useEffect(() => {
     if (!open) return;
+    setCreatedAgentId(null);
     const first = presets[0];
     setPresetId(first?.id ?? '');
     setValues(presetToFormValues(first ?? {
@@ -111,28 +123,57 @@ function CreateAgentDialog({
     setPresetId(nextPresetId);
     const preset = presets.find((p) => p.id === nextPresetId);
     if (preset) {
-      setValues((prev) => presetToFormValues(preset, prev.name));
+      setValues((prev) => ({
+        ...presetToFormValues(preset, prev.name),
+        pluginIds: prev.pluginIds,
+      }));
     }
+  }
+
+  async function assignPlugins(agentId: string, pluginIds: string[]) {
+    if (pluginIds.length === 0) return;
+    // Preset defaults were assigned server-side on create; add picks on top.
+    const current = await fetchAgentPlugins(agentId);
+    await setAgentPlugins.mutateAsync({
+      agentId,
+      pluginIds: [...new Set([...current, ...pluginIds])],
+    });
   }
 
   async function handleSubmit(formValues: AgentFormValues) {
     setError(null);
+    let agentId = createdAgentId;
+    if (!agentId) {
+      try {
+        const agent = await createAgent.mutateAsync({
+          name: formValues.name.trim(),
+          presetId: presetId || undefined,
+          systemPrompt: formValues.systemPrompt,
+          connector: formValues.connector,
+          modelProvider: formValues.modelProvider || undefined,
+          model: formValues.model || undefined,
+        });
+        agentId = agent.id;
+        setCreatedAgentId(agentId);
+      } catch (err) {
+        if (err instanceof ApiError && err.status === 400) {
+          setError('Invalid agent configuration.');
+        } else {
+          setError('Unable to create agent. Please try again.');
+        }
+        return;
+      }
+    }
     try {
-      await createAgent.mutateAsync({
-        name: formValues.name.trim(),
-        presetId: presetId || undefined,
-        systemPrompt: formValues.systemPrompt,
-        connector: formValues.connector,
-        modelProvider: formValues.modelProvider || undefined,
-        model: formValues.model || undefined,
-      });
+      await assignPlugins(agentId, formValues.pluginIds);
       onClose();
     } catch (err) {
-      if (err instanceof ApiError && err.status === 400) {
-        setError('Invalid agent configuration.');
-      } else {
-        setError('Unable to create agent. Please try again.');
-      }
+      setError(
+        `Agent created, but plugins could not be assigned: ${parseApiErrorMessage(
+          err,
+          'please try again.',
+        )}`,
+      );
     }
   }
 
@@ -189,8 +230,9 @@ function CreateAgentDialog({
             onSubmit={handleSubmit}
             onCancel={onClose}
             connectorOptions={connectorOptions}
-            isPending={createAgent.isPending}
+            isPending={createAgent.isPending || setAgentPlugins.isPending}
             error={error}
+            submitLabel={createdAgentId ? 'Retry plugin assignment' : undefined}
           />
         </div>
       </div>
@@ -212,11 +254,24 @@ function EditAgentDialog({
   );
   const [error, setError] = useState<string | null>(null);
   const updateAgent = useUpdateAgent(agent.id);
+  const { data: assignedPluginIds } = useAgentPlugins(agent.id);
+  const setAgentPlugins = useSetAgentPlugins();
+
+  const pluginsPrefilled = useRef(false);
 
   useEffect(() => {
-    setValues(agentToFormValues(agent));
+    setValues((prev) => ({
+      ...agentToFormValues(agent),
+      pluginIds: prev.pluginIds,
+    }));
     setError(null);
   }, [agent]);
+
+  useEffect(() => {
+    if (!assignedPluginIds || pluginsPrefilled.current) return;
+    pluginsPrefilled.current = true;
+    setValues((prev) => ({ ...prev, pluginIds: assignedPluginIds }));
+  }, [assignedPluginIds]);
 
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
@@ -240,10 +295,27 @@ function EditAgentDialog({
         model: formValues.model || undefined,
         enabled: formValues.enabled,
       });
-      onClose();
     } catch {
       setError('Unable to save agent.');
+      return;
     }
+    if (assignedPluginIds && !sameIds(assignedPluginIds, formValues.pluginIds)) {
+      try {
+        await setAgentPlugins.mutateAsync({
+          agentId: agent.id,
+          pluginIds: formValues.pluginIds,
+        });
+      } catch (err) {
+        setError(
+          `Agent saved, but plugins could not be updated: ${parseApiErrorMessage(
+            err,
+            'please try again.',
+          )}`,
+        );
+        return;
+      }
+    }
+    onClose();
   }
 
   return (
@@ -277,7 +349,7 @@ function EditAgentDialog({
             onSubmit={handleSubmit}
             onCancel={onClose}
             connectorOptions={connectorOptions}
-            isPending={updateAgent.isPending}
+            isPending={updateAgent.isPending || setAgentPlugins.isPending}
             error={error}
           />
         </div>
