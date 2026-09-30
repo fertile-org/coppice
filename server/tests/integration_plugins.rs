@@ -346,7 +346,7 @@ async fn same_name_in_two_dirs_second_is_shadowed() {
 async fn reorder_then_rescan_flips_winner_and_unserves_loser() {
     let _guard = common::DB_TEST_LOCK.lock().await;
     require_db!();
-    let (_state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
+    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
     let a = plugin_dir_with(&["sample-plugin"]);
     let b = plugin_dir_with(&["sample-plugin"]);
     let a_id = add_dir(&app, a.path(), &cookie, &csrf).await["id"]
@@ -374,6 +374,8 @@ async fn reorder_then_rescan_flips_winner_and_unserves_loser() {
     .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(enabled["enabled"], true);
+    let a_uuid: uuid::Uuid = a_plugin.parse().unwrap();
+    assert!(state.skills.get(&[a_uuid], "sample-plugin:hello").is_some());
 
     let (status, dirs) = send(
         &app,
@@ -399,6 +401,12 @@ async fn reorder_then_rescan_flips_winner_and_unserves_loser() {
     let loser = find(&plugins, &a_id, "sample-plugin");
     assert_eq!(loser["status"], "shadowed");
     assert_eq!(loser["enabled"], true);
+    assert!(state.skills.get(&[a_uuid], "sample-plugin:hello").is_none());
+    assert!(!state
+        .skills
+        .skills_for(&[a_uuid])
+        .iter()
+        .any(|s| s.id == "sample-plugin:hello"));
 }
 
 #[tokio::test]
@@ -499,7 +507,15 @@ async fn set_enabled(app: &Router, plugin_id: &str, enabled: bool, cookie: &str,
 }
 
 async fn rescan(app: &Router, cookie: &str, csrf: &str) {
-    let (status, body) = send(app, "POST", "/api/plugins/rescan", Value::Null, cookie, csrf).await;
+    let (status, body) = send(
+        app,
+        "POST",
+        "/api/plugins/rescan",
+        Value::Null,
+        cookie,
+        csrf,
+    )
+    .await;
     assert_eq!(status, StatusCode::OK, "rescan: {body}");
 }
 
@@ -603,7 +619,10 @@ async fn missing_plugin_keeps_assignment_and_returns() {
     std::fs::remove_dir_all(dir.path().join("sample-plugin")).unwrap();
     rescan(&app, &cookie, &csrf).await;
     assert!(run_plugin_ids(&state, &agent_id).await.is_empty());
-    assert!(state.skills.get(&[expected], "sample-plugin:hello").is_none());
+    assert!(state
+        .skills
+        .get(&[expected], "sample-plugin:hello")
+        .is_none());
     assert_eq!(
         get(&app, &uri, &cookie, &csrf).await,
         json!({ "pluginIds": [plugin_id] })
@@ -615,7 +634,10 @@ async fn missing_plugin_keeps_assignment_and_returns() {
     );
     rescan(&app, &cookie, &csrf).await;
     assert_eq!(run_plugin_ids(&state, &agent_id).await, vec![expected]);
-    assert!(state.skills.get(&[expected], "sample-plugin:hello").is_some());
+    assert!(state
+        .skills
+        .get(&[expected], "sample-plugin:hello")
+        .is_some());
 }
 
 #[tokio::test]
@@ -703,6 +725,67 @@ async fn disabling_assigned_plugin_stops_serving_its_skills() {
     set_enabled(&app, &plugin_id, false, &cookie, &csrf).await;
     assert!(!served(&state));
     assert!(state.skills.get(&[id], "sample-plugin:hello").is_none());
+}
+
+#[tokio::test]
+async fn repointing_default_dir_forgets_old_plugins() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    require_db!();
+    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
+    let pool = state.db.clone().unwrap();
+    let old_dir = Path::new(&state.config.plugins.dir);
+    copy_tree(
+        &fixtures().join("sample-plugin"),
+        &old_dir.join("sample-plugin"),
+    );
+    rescan(&app, &cookie, &csrf).await;
+    let dirs = get(&app, "/api/plugin-dirs", &cookie, &csrf).await;
+    let dir_id = dirs[0]["id"].as_str().unwrap().to_string();
+    let old_plugin = sample_plugin_id(&app, &dir_id, &cookie, &csrf).await;
+    set_enabled(&app, &old_plugin, true, &cookie, &csrf).await;
+    sqlx::query(
+        "UPDATE plugins SET source = 'git', git_url = 'https://example.com/x.git', git_commit = 'abc' WHERE id = $1",
+    )
+    .bind(old_plugin.parse::<uuid::Uuid>().unwrap())
+    .execute(&pool)
+    .await
+    .unwrap();
+    let agent_id = common::create_test_agent_from_preset(&app, "Worker", &cookie, &csrf).await;
+    let (status, _) = send(
+        &app,
+        "PUT",
+        &format!("/api/agents/{agent_id}/plugins"),
+        json!({ "pluginIds": [old_plugin] }),
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let new_dir = plugin_dir_with(&["sample-plugin"]);
+    let service = coppice_server::services::plugin_service::PluginService::new(&pool);
+    let repointed = service
+        .ensure_default_dir(&new_dir.path().to_string_lossy())
+        .await
+        .unwrap();
+    assert_eq!(repointed.id.to_string(), dir_id);
+    let enabled: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM plugins WHERE plugin_dir_id = $1 AND enabled")
+            .bind(repointed.id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(enabled, 0);
+    assert!(run_plugin_ids(&state, &agent_id).await.is_empty());
+
+    rescan(&app, &cookie, &csrf).await;
+    let plugins = get(&app, "/api/plugins", &cookie, &csrf).await;
+    let fresh = find(&plugins, &dir_id, "sample-plugin");
+    assert_ne!(fresh["id"], old_plugin.as_str());
+    assert_eq!(fresh["enabled"], false);
+    assert_eq!(fresh["source"], "local");
+    assert!(fresh["gitUrl"].is_null());
+    assert!(fresh["gitCommit"].is_null());
 }
 
 fn git(dir: &Path, args: &[&str]) -> String {
@@ -1157,5 +1240,8 @@ async fn update_of_missing_plugin_is_rejected() {
     )
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
-    assert_eq!(body["error"], "plugin folder is missing; rescan or reinstall");
+    assert_eq!(
+        body["error"],
+        "plugin folder is missing; rescan or reinstall"
+    );
 }

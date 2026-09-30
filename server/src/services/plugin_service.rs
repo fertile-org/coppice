@@ -84,7 +84,10 @@ impl<'a> PluginService<'a> {
     }
 
     /// Creates the configured default dir on disk and records it. When the
-    /// configured path changes, the existing default row is repointed.
+    /// configured path changes, the existing default row is repointed and its
+    /// plugins are forgotten, so a different plugin at the same rel_path in the
+    /// new dir cannot inherit `enabled` or git metadata. The caller rescans and
+    /// refreshes the skill catalog afterwards.
     pub async fn ensure_default_dir(&self, path: &str) -> Result<PluginDir, PluginError> {
         std::fs::create_dir_all(path)?;
         let canonical = canonical_string(Path::new(path))?;
@@ -112,6 +115,10 @@ impl<'a> PluginService<'a> {
         let dir = match current {
             Some(dir) if dir.path == canonical => dir,
             Some(dir) => {
+                sqlx::query("DELETE FROM plugins WHERE plugin_dir_id = $1")
+                    .bind(dir.id)
+                    .execute(&mut *tx)
+                    .await?;
                 sqlx::query("UPDATE plugin_dirs SET path = $2 WHERE id = $1")
                     .bind(dir.id)
                     .bind(&canonical)
@@ -447,11 +454,11 @@ impl<'a> PluginService<'a> {
     }
 
     /// Records a `running` update of a git-installed plugin at its stored ref
-    /// and returns the plugin root to update in place.
+    /// and returns the plugin root to update in place and its stored rel_path.
     pub async fn start_update(
         &self,
         plugin_id: Uuid,
-    ) -> Result<(PluginInstall, PathBuf), PluginError> {
+    ) -> Result<(PluginInstall, PathBuf, String), PluginError> {
         let plugin = self.get_plugin(plugin_id).await?;
         let git_url = match (plugin.source.as_str(), &plugin.git_url) {
             ("git", Some(url)) => url.clone(),
@@ -492,7 +499,7 @@ impl<'a> PluginService<'a> {
         )
         .await?;
         tx.commit().await?;
-        Ok((install, self.plugin_path(plugin_id).await?))
+        Ok((install, self.plugin_path(plugin_id).await?, plugin.rel_path))
     }
 
     /// Records the git outcome. On success rescans, stamps git metadata on the

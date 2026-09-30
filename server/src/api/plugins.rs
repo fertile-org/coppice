@@ -264,13 +264,13 @@ async fn update(
 ) -> Result<(StatusCode, Json<PluginInstallResponse>), ApiError> {
     let pool = pool_from_state(&state)?;
     let cfg = &state.config.plugins;
-    let (install, root) = PluginService::new(pool).start_update(plugin_id).await?;
+    let (install, root, rel_path) = PluginService::new(pool).start_update(plugin_id).await?;
     let git_ref = install.git_ref.clone();
     let (allow_file, timeout) = (
         cfg.allow_file_git_urls,
         Duration::from_secs(cfg.git_timeout_secs),
     );
-    spawn_git_job(state.clone(), install.id, folder_name(&root), async move {
+    spawn_git_job(state.clone(), install.id, rel_path, async move {
         git_install::update(&root, git_ref.as_deref(), allow_file, timeout).await
     });
     Ok((StatusCode::ACCEPTED, install_response(install)))
