@@ -1,0 +1,1 @@
+{"mcpServers":{"echo":{"command":"echo-mcp"},"remote":{"type":"http","url":"https://example.com/mcp"},"old":{"type":"sse","url":"https://example.com/sse"}}}

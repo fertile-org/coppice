@@ -22,13 +22,13 @@ pub struct SkillCatalog {
     builtin: Vec<(SkillInfo, String)>,
 }
 
-struct Frontmatter {
-    name: String,
-    description: String,
+pub(crate) struct Frontmatter {
+    pub(crate) name: String,
+    pub(crate) description: String,
 }
 
 /// Splits `---\n<yaml>\n---\n<body>`; reads the flat `name` / `description` keys.
-fn parse_skill_file(text: &str) -> anyhow::Result<(Frontmatter, String)> {
+pub(crate) fn parse_skill_file(text: &str) -> anyhow::Result<(Frontmatter, String)> {
     let text = text.replace("\r\n", "\n");
     let rest = text
         .strip_prefix("---\n")
