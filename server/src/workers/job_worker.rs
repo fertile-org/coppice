@@ -229,10 +229,7 @@ async fn execute_job(
         .await
         .context("mark run running")?;
 
-    let plugin_ids = PluginService::new(pool)
-        .run_plugin_ids(run.agent_id)
-        .await
-        .unwrap_or_default();
+    let plugin_ids = run_plugin_snapshot(pool, run).await;
     // Dropped (and revoked in the background) on any early `?` return; revoked
     // explicitly as soon as the connector returns.
     let grant = grant_for_run(
@@ -717,6 +714,17 @@ fn spawn_chat_session_created_tx(
     Some(tx)
 }
 
+/// A failed lookup runs without plugin skills rather than failing the run.
+pub(super) async fn run_plugin_snapshot(pool: &PgPool, run: &AgentRun) -> Vec<uuid::Uuid> {
+    PluginService::new(pool)
+        .run_plugin_ids(run.agent_id)
+        .await
+        .unwrap_or_else(|err| {
+            tracing::warn!(run_id = %run.id, agent_id = %run.agent_id, error = %err, "failed to load run plugins; running without plugin skills");
+            Vec::new()
+        })
+}
+
 fn chat_context_input_base<'a>(
     agent: &'a crate::domain::agent::Agent,
     agent_key: &'a str,
@@ -872,10 +880,7 @@ async fn execute_chat_turn(
         .await
         .context("mark chat run running")?;
 
-    let plugin_ids = PluginService::new(pool)
-        .run_plugin_ids(run.agent_id)
-        .await
-        .unwrap_or_default();
+    let plugin_ids = run_plugin_snapshot(pool, run).await;
     let grant = grant_for_run(
         state,
         pool,

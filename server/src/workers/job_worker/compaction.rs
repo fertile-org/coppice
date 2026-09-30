@@ -19,7 +19,6 @@ use crate::providers::{
 use crate::services::agent_service::AgentService;
 use crate::services::context_builder::write_context_document;
 use crate::services::knowledge_compaction_service::KnowledgeCompactionService;
-use crate::services::plugin_service::PluginService;
 use crate::services::run_service::RunService;
 use crate::AppState;
 
@@ -91,10 +90,7 @@ pub(super) async fn execute_compaction(
     .fetch_all(pool)
     .await
     .context("load compaction batch tickets")?;
-    let plugin_ids = PluginService::new(pool)
-        .run_plugin_ids(run.agent_id)
-        .await
-        .unwrap_or_default();
+    let plugin_ids = super::run_plugin_snapshot(pool, run).await;
     let grant = grant_for_run(
         state,
         pool,

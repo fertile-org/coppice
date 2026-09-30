@@ -117,6 +117,14 @@ impl From<StatusCode> for ApiError {
     }
 }
 
+/// The mutation has already committed, so a failed refresh is logged rather
+/// than reported; the next refresh picks the change up.
+async fn refresh_skills(service: &PluginService<'_>, state: &AppState) {
+    if let Err(err) = service.refresh_catalog(&state.skills).await {
+        tracing::error!(error = %err, "failed to refresh plugin skill catalog");
+    }
+}
+
 fn dir_response(dir: PluginDir) -> PluginDirResponse {
     PluginDirResponse {
         id: dir.id,
@@ -172,7 +180,7 @@ async fn add_dir(
     let pool = pool_from_state(&state)?;
     let service = PluginService::new(pool);
     let dir = service.add_dir(&body.path).await?;
-    service.refresh_catalog(&state.skills).await?;
+    refresh_skills(&service, &state).await;
     Ok((StatusCode::CREATED, Json(dir_response(dir))))
 }
 
@@ -185,7 +193,7 @@ async fn move_dir(
     let pool = pool_from_state(&state)?;
     let service = PluginService::new(pool);
     let dirs = service.move_dir(dir_id, body.position).await?;
-    service.refresh_catalog(&state.skills).await?;
+    refresh_skills(&service, &state).await;
     Ok(Json(dirs.into_iter().map(dir_response).collect()))
 }
 
@@ -197,7 +205,7 @@ async fn remove_dir(
     let pool = pool_from_state(&state)?;
     let service = PluginService::new(pool);
     service.remove_dir(dir_id).await?;
-    service.refresh_catalog(&state.skills).await?;
+    refresh_skills(&service, &state).await;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -208,7 +216,7 @@ async fn rescan(
     let pool = pool_from_state(&state)?;
     let service = PluginService::new(pool);
     let plugins = service.rescan().await?;
-    service.refresh_catalog(&state.skills).await?;
+    refresh_skills(&service, &state).await;
     Ok(plugins_response(plugins))
 }
 
@@ -241,7 +249,10 @@ async fn set_enabled(
     let pool = pool_from_state(&state)?;
     let service = PluginService::new(pool);
     let plugin = service.set_enabled(plugin_id, body.enabled).await?;
-    service.refresh_catalog(&state.skills).await?;
+    if !plugin.enabled {
+        state.skills.remove_plugin(plugin.id).await;
+    }
+    refresh_skills(&service, &state).await;
     Ok(Json(plugin_response(plugin)))
 }
 

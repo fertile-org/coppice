@@ -351,6 +351,7 @@ impl<'a> PluginService<'a> {
 
     /// Replaces the catalog's plugin skills with those of enabled `ok` plugins.
     pub async fn refresh_catalog(&self, catalog: &SkillCatalog) -> Result<(), PluginError> {
+        let _refresh = catalog.lock_refresh().await;
         let rows = sqlx::query(&format!(
             r#"
             SELECT {PLUGIN_COLUMNS}, d.path AS dir_path FROM plugins p

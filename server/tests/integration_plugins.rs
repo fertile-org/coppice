@@ -656,3 +656,41 @@ async fn preset_default_plugins_applied_when_enabled() {
     assert_eq!(assigned, json!({ "pluginIds": [plugin_id] }));
     assert_eq!(unassigned, json!({ "pluginIds": [] }));
 }
+
+#[tokio::test]
+async fn disabling_assigned_plugin_stops_serving_its_skills() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    require_db!();
+    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
+    let dir = plugin_dir_with(&["sample-plugin"]);
+    let dir_id = add_dir(&app, dir.path(), &cookie, &csrf).await["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let plugin_id = sample_plugin_id(&app, &dir_id, &cookie, &csrf).await;
+    set_enabled(&app, &plugin_id, true, &cookie, &csrf).await;
+    let agent_id = common::create_test_agent_from_preset(&app, "Worker", &cookie, &csrf).await;
+    let (status, _) = send(
+        &app,
+        "PUT",
+        &format!("/api/agents/{agent_id}/plugins"),
+        json!({ "pluginIds": [plugin_id] }),
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let id: uuid::Uuid = plugin_id.parse().unwrap();
+    let served = |state: &coppice_server::AppState| {
+        state
+            .skills
+            .skills_for(&[id])
+            .iter()
+            .any(|s| s.id == "sample-plugin:hello")
+    };
+    assert!(served(&state));
+
+    set_enabled(&app, &plugin_id, false, &cookie, &csrf).await;
+    assert!(!served(&state));
+    assert!(state.skills.get(&[id], "sample-plugin:hello").is_none());
+}

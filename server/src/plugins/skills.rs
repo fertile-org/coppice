@@ -63,6 +63,7 @@ impl PluginSkillSet {
 pub struct SkillCatalog {
     builtin: Vec<(SkillInfo, String)>,
     plugins: RwLock<HashMap<Uuid, PluginSkillSet>>,
+    refresh: tokio::sync::Mutex<()>,
 }
 
 pub(crate) struct Frontmatter {
@@ -127,7 +128,24 @@ impl SkillCatalog {
         Ok(SkillCatalog {
             builtin,
             plugins: RwLock::default(),
+            refresh: tokio::sync::Mutex::default(),
         })
+    }
+
+    /// Held across a refresh's DB read and swap so the last refresh to take it
+    /// installs the newest state.
+    pub async fn lock_refresh(&self) -> tokio::sync::MutexGuard<'_, ()> {
+        self.refresh.lock().await
+    }
+
+    /// Stops serving one plugin's skills; waits for any in-flight refresh so a
+    /// stale snapshot cannot re-add it afterwards.
+    pub async fn remove_plugin(&self, plugin_id: Uuid) {
+        let _refresh = self.lock_refresh().await;
+        self.plugins
+            .write()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(&plugin_id);
     }
 
     pub fn set_plugin_skills(&self, sets: Vec<PluginSkillSet>) {
@@ -374,6 +392,20 @@ mod tests {
         assert!(catalog
             .get(&[Uuid::new_v4()], "sample-plugin:hello")
             .is_none());
+    }
+
+    #[tokio::test]
+    async fn remove_plugin_stops_serving_its_skills() {
+        let (_dir, catalog) = catalog();
+        let plugins = tempfile::tempdir().unwrap();
+        let set = sample_plugin_set(&plugins);
+        let id = set.plugin_id;
+        catalog.set_plugin_skills(vec![set]);
+        assert!(catalog.get(&[id], "sample-plugin:hello").is_some());
+
+        catalog.remove_plugin(id).await;
+        assert_eq!(catalog.skills_for(&[id]).len(), 6);
+        assert!(catalog.get(&[id], "sample-plugin:hello").is_none());
     }
 
     #[test]
