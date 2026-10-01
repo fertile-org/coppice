@@ -146,6 +146,8 @@ The health check becomes one generic rule (connector configured; `model_provider
 
 `GET /api/connectors` returns, per configured connector: `{ id, displayName, console, caps: { readOnlyTools, chatResume } }` (additive; `id` unchanged). The web keeps the list in its connectors query and `TicketDrawer` picks the live view from `console` (`OpenCodeSession` → `LiveSession`, `Structured` → `ClaudeLiveConsole`, `Plain` → `LiveConsole`). Runs whose connector is no longer configured fall back to `Plain`.
 
+As built, the one deliberate behavior change: the knowledge compaction live view (`CompactionStatusStrip`) also follows the connector's `console` kind (`OpenCodeSession` → session view, `Structured` → structured console) instead of always using the plain console. The web schema also parses an unknown `console` value as `plain` so one new kind cannot break the whole connector list.
+
 ### CLI
 
 `coppice connector …` uses `connectors::all()` / `get()`. `ConnectorId`, `ConnectorMeta`, and `CONNECTORS` are deleted. Output of `list`, `doctor`, `install`, `setup`, `enable` is unchanged.
@@ -205,7 +207,7 @@ A test-only fake CLI binary (feature `embedded-test-db`, like `fake-opencode`) c
 4. Factory entry in `FACTORIES`.
 5. Wiring renderer only if it needs a new `McpWiring` style.
 
-`docs/architecture.md` carries this checklist. As built, it also lists the remaining manual touchpoints (literal-scan test ids, `READ_ONLY_CAPABLE_CONNECTORS`, console replay prefixes in `job_worker.rs`, per-id CLI arms, example configs).
+`docs/architecture.md` carries this checklist. As built, it also lists the remaining manual touchpoints (the `AgentConnectorsConfig::enabled(id)` arm, `READ_ONLY_CAPABLE_CONNECTORS`, per-id CLI arms, example configs). The literal-scan test derives its ids from `coppice_connectors::all()`, and the worker persists any `<name>.console.<kind>` event, so neither needs a per-connector edit.
 
 ## Gateway tool sources
 

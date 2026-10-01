@@ -96,7 +96,7 @@ Connector facts live in one static table, `connectors/src/lib.rs` (`coppice_conn
 - **Server.** Behavior checks read the descriptor (`caps`, `console`), never a connector-id string. A unit test in `providers/registry.rs` fails on connector-id literals in `server/src` outside `providers/`, `sessions/opencode*`, and tests.
 - **Registry.** `providers/registry.rs` has one `FACTORIES` list of `ConnectorFactory { id, build }`; `build(&AppConfig, &FactoryDeps)` returns `None` when the connector is disabled, else `BuiltConnector { provider, models }`. Startup asserts factories and descriptors match one-to-one.
 - **Models.** `ModelCatalog` (`providers/models.rs`) reports `model_providers()` from config and `list_models(model_provider)`. Agent health checks that an agent's `model_provider` is in `model_providers()` unless `checks_model_provider()` is false (mock). `GET …/models` maps errors to 502 `"{id} models: {err}"`.
-- **API / web.** `GET /api/connectors` returns `{ id, displayName, console, caps: { readOnlyTools, chatResume } }` per configured connector; `TicketDrawer` picks the live view from `console` (unknown connector → plain).
+- **API / web.** `GET /api/connectors` returns `{ id, displayName, console, caps: { readOnlyTools, chatResume } }` per configured connector; `TicketDrawer` picks the live view from `console` (unknown connector → plain). The web schema parses an unknown `console` value as `plain` rather than rejecting the list; the wire strings (`openCodeSession`, `structured`, `plain`) are pinned by a test in the connectors crate.
 - **CLI.** `coppice connector …` iterates `coppice_connectors::all()` / `get()` for ids, binaries, and auth hints, but per-connector behavior (config section, install steps, setup and doctor probes) is still matched by id in `cli/src/commands/connector/` — see the checklist below.
 - **MCP wiring.** `mcp/wiring.rs` `McpServerSpec::from_access` renders the gateway entry in each style (`claude_json`, `cursor_mcp_json`, `cursor_cli_config`, `opencode_json`, `kilo_json`, `codex_args`). The server name `coppice` and token env `COPPICE_MCP_TOKEN` live only there and in `mcp/grant.rs` (`McpAccess::env`).
 - **CLI runner.** `providers/cli_runner.rs` `run_cli(CliInvocation, &mut dyn LineHandler, RunIo)` (or `run_cli_with_stdin` to feed a prompt on stdin) spawns with `kill_on_drop`, mirrors stderr to the adapter's tracing target (keeping the first 40 lines), races cancel and deadline, forwards the first session id, and returns `CliExit` or `CliError`. Adapters keep their own error wording by mapping those, then read final text from their `LineHandler`. OpenCode and mock are custom `AgentProvider`s.
@@ -104,15 +104,15 @@ Connector facts live in one static table, `connectors/src/lib.rs` (`coppice_conn
 ### Adding a connector
 
 1. Descriptor entry in `connectors/src/lib.rs` (plus an id constant).
-2. Config struct + field in `AgentConnectorsConfig` (`config/src/lib.rs`), and an `[agent.connectors.<id>]` section in `config.example.toml` and `deploy/config/config.example.toml`.
-3. Adapter in `server/src/providers/`: a `CliInvocation` builder + `LineHandler` driven by `run_cli` (or a custom `AgentProvider`), and a `ModelCatalog`.
+2. Config struct + field in `AgentConnectorsConfig` (`config/src/lib.rs`) and an arm in `AgentConnectorsConfig::enabled(id)` (a config test fails for any descriptor id without one; `coppice connector list` reads it), and an `[agent.connectors.<id>]` section in `config.example.toml` and `deploy/config/config.example.toml`.
+3. Adapter in `server/src/providers/`: a `CliInvocation` builder + `LineHandler` driven by `run_cli` (or a custom `AgentProvider`), and a `ModelCatalog`. A structured console publisher must type its events `<name>.console.<kind>` (e.g. `codex.console.tool`); the worker persists exactly that shape for replay.
 4. Factory entry in `FACTORIES`.
 5. A `McpServerSpec` renderer only if it needs a new `McpWiring` style.
-6. Add the id to the `IDS` list in the `no_connector_literals_outside_providers` test (`providers/registry.rs`).
-7. If `caps.read_only_tools` is true, add it to `READ_ONLY_CAPABLE_CONNECTORS` (`providers/mod.rs`; a test checks it matches the descriptors).
-8. If its console publisher emits `<prefix>.console.*` events, add the prefix to the replay filter in `workers/job_worker.rs` (the `claude.` / `codex.` / `kilo.` / `cursor.console.` check) so they are persisted.
-9. CLI arms in `cli/src/commands/connector/`: `list.rs` (id → config `enabled`, otherwise always shown disabled), `enable.rs` (connectors that get a default `command`), `install.rs`, `setup.rs`, and `doctor.rs` (per-id install, setup, and probe steps).
-10. A doc in `docs/providers/` and a row in its README.
+6. If `caps.read_only_tools` is true, add it to `READ_ONLY_CAPABLE_CONNECTORS` (`providers/mod.rs`; a test checks it matches the descriptors).
+7. CLI arms in `cli/src/commands/connector/`: `enable.rs` (connectors that get a default `command`), `install.rs`, `setup.rs`, and `doctor.rs` (per-id install, setup, and probe steps).
+8. A doc in `docs/providers/` and a row in its README.
+
+The connector-id literal scan in `providers/registry.rs` derives its ids from `coppice_connectors::all()`, so it needs no edit.
 
 A new `ConsoleKind` also needs branches in `web/src/lib/schemas/connector.ts`, `web/src/features/runs/LiveRunView.tsx`, and `server/src/api/ws/live.rs`.
 
