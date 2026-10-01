@@ -1,7 +1,9 @@
 use clap::Args;
 use coppice_config::AppConfig;
 
-use super::registry::{auth_present, binary_on_path, home_dir, CONNECTORS};
+use coppice_connectors::{CLAUDE_CODE, CODEX, CURSOR, KILO_CODE, MOCK, OPENCODE};
+
+use super::registry::{auth_present, binary_on_path, home_dir};
 
 #[derive(Args)]
 pub struct ListArgs {}
@@ -14,15 +16,11 @@ pub fn run(_args: ListArgs) -> anyhow::Result<()> {
         "{:<14} {:<8} {:<10} {:<8} HINT",
         "ID", "ENABLED", "BINARY", "AUTH"
     );
-    for meta in CONNECTORS {
-        if meta.id == super::ConnectorId::Mock {
+    for meta in coppice_connectors::all() {
+        if meta.id == MOCK {
             println!(
                 "{:<14} {:<8} {:<10} {:<8} {}",
-                meta.id.as_str(),
-                "yes",
-                "n/a",
-                "n/a",
-                meta.auth_hint
+                meta.id, "yes", "n/a", "n/a", meta.install.auth_hint
             );
             continue;
         }
@@ -30,12 +28,12 @@ pub fn run(_args: ListArgs) -> anyhow::Result<()> {
         let enabled = config
             .as_ref()
             .map(|c| match meta.id {
-                super::ConnectorId::Cursor => c.agent.connectors.cursor.enabled,
-                super::ConnectorId::ClaudeCode => c.agent.connectors.claude_code.enabled,
-                super::ConnectorId::Codex => c.agent.connectors.codex.enabled,
-                super::ConnectorId::KiloCode => c.agent.connectors.kilo_code.enabled,
-                super::ConnectorId::OpenCode => c.agent.connectors.opencode.enabled,
-                super::ConnectorId::Mock => true,
+                CURSOR => c.agent.connectors.cursor.enabled,
+                CLAUDE_CODE => c.agent.connectors.claude_code.enabled,
+                CODEX => c.agent.connectors.codex.enabled,
+                KILO_CODE => c.agent.connectors.kilo_code.enabled,
+                OPENCODE => c.agent.connectors.opencode.enabled,
+                _ => false,
             })
             .unwrap_or(false);
 
@@ -52,11 +50,11 @@ pub fn run(_args: ListArgs) -> anyhow::Result<()> {
 
         println!(
             "{:<14} {:<8} {:<10} {:<8} {}",
-            meta.id.as_str(),
+            meta.id,
             if enabled { "yes" } else { "no" },
             binary,
             auth,
-            meta.auth_hint
+            meta.install.auth_hint
         );
     }
 

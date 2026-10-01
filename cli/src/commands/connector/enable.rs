@@ -3,7 +3,9 @@ use std::path::{Path, PathBuf};
 use clap::Args;
 use toml_edit::{value, Array, DocumentMut, Item, Table};
 
-use super::registry::{meta, parse_id, ConnectorId};
+use coppice_connectors::{ConnectorDescriptor, CURSOR, KILO_CODE, MOCK, OPENCODE};
+
+use super::registry::parse_id;
 
 #[derive(Args)]
 pub struct EnableArgs {
@@ -15,8 +17,8 @@ pub struct EnableArgs {
 }
 
 pub fn run(args: EnableArgs) -> anyhow::Result<()> {
-    let id = parse_id(&args.id)?;
-    if id == ConnectorId::Mock {
+    let m = parse_id(&args.id)?;
+    if m.id == MOCK {
         println!("mock is always available; nothing to enable");
         return Ok(());
     }
@@ -32,13 +34,13 @@ pub fn run(args: EnableArgs) -> anyhow::Result<()> {
         .parse::<DocumentMut>()
         .map_err(|e| anyhow::anyhow!("invalid TOML in {}: {e}", path.display()))?;
 
-    enable_in_doc(&mut doc, id)?;
+    enable_in_doc(&mut doc, m)?;
 
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
     std::fs::write(&path, doc.to_string())?;
-    println!("enabled {} in {}", id, path.display());
+    println!("enabled {} in {}", m.id, path.display());
     println!("Restart the server (or recreate the Compose service) to pick up config changes.");
     Ok(())
 }
@@ -62,8 +64,7 @@ pub fn resolve_config_path(explicit: Option<&Path>) -> anyhow::Result<PathBuf> {
     Ok(local)
 }
 
-pub fn enable_in_doc(doc: &mut DocumentMut, id: ConnectorId) -> anyhow::Result<()> {
-    let m = meta(id);
+pub fn enable_in_doc(doc: &mut DocumentMut, m: &ConnectorDescriptor) -> anyhow::Result<()> {
     let agent = doc
         .entry("agent")
         .or_insert(Item::Table(Table::new()))
@@ -78,7 +79,7 @@ pub fn enable_in_doc(doc: &mut DocumentMut, id: ConnectorId) -> anyhow::Result<(
     connectors.set_implicit(true);
 
     let table = connectors
-        .entry(id.config_key())
+        .entry(m.id)
         .or_insert(Item::Table(Table::new()))
         .as_table_mut()
         .ok_or_else(|| anyhow::anyhow!("connector table must be a table"))?;
@@ -87,10 +88,7 @@ pub fn enable_in_doc(doc: &mut DocumentMut, id: ConnectorId) -> anyhow::Result<(
 
     let needs_providers = match table.get("model_providers") {
         None => true,
-        Some(Item::Value(v)) => v
-            .as_array()
-            .map(|a| a.is_empty())
-            .unwrap_or(true),
+        Some(Item::Value(v)) => v.as_array().map(|a| a.is_empty()).unwrap_or(true),
         _ => true,
     };
     if needs_providers && !m.default_model_providers.is_empty() {
@@ -101,11 +99,7 @@ pub fn enable_in_doc(doc: &mut DocumentMut, id: ConnectorId) -> anyhow::Result<(
         table["model_providers"] = value(arr);
     }
 
-    if matches!(
-        id,
-        ConnectorId::Cursor | ConnectorId::KiloCode | ConnectorId::OpenCode
-    ) && table.get("command").is_none()
-    {
+    if matches!(m.id, CURSOR | KILO_CODE | OPENCODE) && table.get("command").is_none() {
         table["command"] = value(m.binary);
     }
 
@@ -115,11 +109,16 @@ pub fn enable_in_doc(doc: &mut DocumentMut, id: ConnectorId) -> anyhow::Result<(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use coppice_connectors::CLAUDE_CODE;
+
+    fn connector(id: &str) -> &'static ConnectorDescriptor {
+        coppice_connectors::get(id).unwrap()
+    }
 
     #[test]
     fn enable_creates_cursor_section() {
         let mut doc = DocumentMut::new();
-        enable_in_doc(&mut doc, ConnectorId::Cursor).unwrap();
+        enable_in_doc(&mut doc, connector(CURSOR)).unwrap();
         let text = doc.to_string();
         assert!(text.contains("[agent.connectors.cursor]"));
         assert!(text.contains("enabled = true"));
@@ -137,8 +136,8 @@ model_providers = ["cursor"]
 "#
         .parse::<DocumentMut>()
         .unwrap();
-        enable_in_doc(&mut doc, ConnectorId::Cursor).unwrap();
-        enable_in_doc(&mut doc, ConnectorId::Cursor).unwrap();
+        enable_in_doc(&mut doc, connector(CURSOR)).unwrap();
+        enable_in_doc(&mut doc, connector(CURSOR)).unwrap();
         let table = doc["agent"]["connectors"]["cursor"].as_table().unwrap();
         assert_eq!(table["enabled"].as_bool(), Some(true));
         assert_eq!(
@@ -155,7 +154,7 @@ model_providers = ["cursor"]
     #[test]
     fn enable_claude_sets_providers() {
         let mut doc = DocumentMut::new();
-        enable_in_doc(&mut doc, ConnectorId::ClaudeCode).unwrap();
+        enable_in_doc(&mut doc, connector(CLAUDE_CODE)).unwrap();
         let text = doc.to_string();
         assert!(text.contains("[agent.connectors.claude-code]"));
         assert!(text.contains("sonnet"));

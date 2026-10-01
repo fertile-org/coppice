@@ -3,9 +3,9 @@ use std::process::Command;
 
 use clap::Args;
 
-use super::registry::{
-    auth_present, binary_on_path, home_dir, meta, parse_id, ConnectorId,
-};
+use coppice_connectors::{CLAUDE_CODE, CODEX, CURSOR, KILO_CODE, MOCK, OPENCODE};
+
+use super::registry::{auth_present, binary_on_path, home_dir, parse_id};
 
 #[derive(Args)]
 pub struct DoctorArgs {
@@ -13,13 +13,13 @@ pub struct DoctorArgs {
 }
 
 pub fn run(args: DoctorArgs) -> anyhow::Result<()> {
-    let id = parse_id(&args.id)?;
-    if id == ConnectorId::Mock {
+    let m = parse_id(&args.id)?;
+    let id = m.id;
+    if id == MOCK {
         println!("mock: ok (built-in)");
         return Ok(());
     }
 
-    let m = meta(id);
     let home = home_dir();
     let mut failed = false;
 
@@ -33,10 +33,7 @@ pub fn run(args: DoctorArgs) -> anyhow::Result<()> {
     match binary_path {
         Some(path) => println!("binary: ok ({})", path.display()),
         None => {
-            println!(
-                "binary: MISSING (`{}` not on PATH)",
-                m.binary
-            );
+            println!("binary: MISSING (`{}` not on PATH)", m.binary);
             println!(
                 "  next: coppice connector install {id}  (ensure PATH includes $HOME/.local/bin and $HOME/.opencode/bin)"
             );
@@ -49,36 +46,36 @@ pub fn run(args: DoctorArgs) -> anyhow::Result<()> {
             Ok(()) => {
                 println!("models probe: ok");
                 if auth_ok {
-                    println!("auth: ok ({})", m.auth_hint);
+                    println!("auth: ok ({})", m.install.auth_hint);
                 } else if probe_proves_auth(id) {
                     println!("auth: ok (via models/auth probe)");
                 } else {
                     println!("auth: MISSING");
                     println!("  next: coppice connector setup {id}");
-                    println!("  hint: {}", m.auth_hint);
+                    println!("  hint: {}", m.install.auth_hint);
                     failed = true;
                 }
             }
             Err(e) => {
                 if auth_ok {
-                    println!("auth: ok ({})", m.auth_hint);
+                    println!("auth: ok ({})", m.install.auth_hint);
                     println!("models probe: FAIL ({e})");
                     failed = true;
                 } else {
                     println!("auth: MISSING");
                     println!("  next: coppice connector setup {id}");
-                    println!("  hint: {}", m.auth_hint);
+                    println!("  hint: {}", m.install.auth_hint);
                     println!("models probe: FAIL ({e})");
                     failed = true;
                 }
             }
         }
     } else if auth_ok {
-        println!("auth: ok ({})", m.auth_hint);
+        println!("auth: ok ({})", m.install.auth_hint);
     } else {
         println!("auth: MISSING");
         println!("  next: coppice connector setup {id}");
-        println!("  hint: {}", m.auth_hint);
+        println!("  hint: {}", m.install.auth_hint);
         failed = true;
     }
 
@@ -115,38 +112,38 @@ fn repo_root_with_makefile() -> Option<PathBuf> {
     start.join("Makefile").is_file().then_some(start)
 }
 
-fn probe_proves_auth(id: ConnectorId) -> bool {
-    matches!(id, ConnectorId::Cursor | ConnectorId::OpenCode)
+fn probe_proves_auth(id: &str) -> bool {
+    matches!(id, CURSOR | OPENCODE)
 }
 
-fn probe_models(id: ConnectorId, binary: &str) -> anyhow::Result<()> {
+fn probe_models(id: &str, binary: &str) -> anyhow::Result<()> {
     let mut cmd = match id {
-        ConnectorId::Cursor => {
+        CURSOR => {
             let mut c = Command::new(binary);
             c.arg("models");
             c
         }
-        ConnectorId::ClaudeCode => {
+        CLAUDE_CODE => {
             let mut c = Command::new(binary);
             c.arg("--version");
             c
         }
-        ConnectorId::Codex => {
+        CODEX => {
             let mut c = Command::new(binary);
             c.arg("--version");
             c
         }
-        ConnectorId::KiloCode => {
+        KILO_CODE => {
             let mut c = Command::new(binary);
             c.arg("--version");
             c
         }
-        ConnectorId::OpenCode => {
+        OPENCODE => {
             let mut c = Command::new(binary);
             c.args(["auth", "list"]);
             c
         }
-        ConnectorId::Mock => return Ok(()),
+        _ => return Ok(()),
     };
 
     let output = cmd.output()?;
@@ -158,7 +155,14 @@ fn probe_models(id: ConnectorId, binary: &str) -> anyhow::Result<()> {
         } else {
             stdout.trim().to_string()
         };
-        anyhow::bail!("{}", if msg.is_empty() { "command failed".into() } else { msg });
+        anyhow::bail!(
+            "{}",
+            if msg.is_empty() {
+                "command failed".into()
+            } else {
+                msg
+            }
+        );
     }
     Ok(())
 }
@@ -174,12 +178,7 @@ mod tests {
         let _guard = ENV_LOCK.lock().expect("env lock");
         let saved: Vec<(String, Option<String>)> = vars
             .iter()
-            .map(|(key, _)| {
-                (
-                    (*key).to_string(),
-                    std::env::var(*key).ok(),
-                )
-            })
+            .map(|(key, _)| ((*key).to_string(), std::env::var(*key).ok()))
             .collect();
         for (key, val) in vars {
             match val {
@@ -198,11 +197,11 @@ mod tests {
 
     #[test]
     fn probe_proves_auth_only_for_cursor_and_opencode() {
-        assert!(probe_proves_auth(ConnectorId::Cursor));
-        assert!(probe_proves_auth(ConnectorId::OpenCode));
-        assert!(!probe_proves_auth(ConnectorId::ClaudeCode));
-        assert!(!probe_proves_auth(ConnectorId::Codex));
-        assert!(!probe_proves_auth(ConnectorId::KiloCode));
+        assert!(probe_proves_auth(CURSOR));
+        assert!(probe_proves_auth(OPENCODE));
+        assert!(!probe_proves_auth(CLAUDE_CODE));
+        assert!(!probe_proves_auth(CODEX));
+        assert!(!probe_proves_auth(KILO_CODE));
     }
 
     #[test]
@@ -211,8 +210,11 @@ mod tests {
         let bin = dir.path().join("bin");
         std::fs::create_dir_all(&bin).unwrap();
         let claude = bin.join("claude");
-        std::fs::write(&claude, "#!/bin/sh\n[ \"$1\" = \"--version\" ] && exit 0\nexit 1\n")
-            .unwrap();
+        std::fs::write(
+            &claude,
+            "#!/bin/sh\n[ \"$1\" = \"--version\" ] && exit 0\nexit 1\n",
+        )
+        .unwrap();
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;

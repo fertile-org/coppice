@@ -2,7 +2,9 @@ use std::process::{Command, Stdio};
 
 use clap::Args;
 
-use super::registry::{binary_on_path, meta, parse_id, ConnectorId};
+use coppice_connectors::{CLAUDE_CODE, CODEX, CURSOR, KILO_CODE, MOCK, OPENCODE};
+
+use super::registry::{binary_on_path, parse_id};
 
 #[derive(Args)]
 pub struct SetupArgs {
@@ -10,13 +12,13 @@ pub struct SetupArgs {
 }
 
 pub fn run(args: SetupArgs) -> anyhow::Result<()> {
-    let id = parse_id(&args.id)?;
-    if id == ConnectorId::Mock {
+    let m = parse_id(&args.id)?;
+    let id = m.id;
+    if id == MOCK {
         println!("mock needs no setup");
         return Ok(());
     }
 
-    let m = meta(id);
     if binary_on_path(m.binary).is_none() {
         anyhow::bail!(
             "`{}` not on PATH. Run: coppice connector install {id}",
@@ -25,15 +27,15 @@ pub fn run(args: SetupArgs) -> anyhow::Result<()> {
     }
 
     match id {
-        ConnectorId::Cursor => {
+        CURSOR => {
             println!("Running `agent login` — copy any URL into a browser on your machine.");
             run_interactive(m.binary, &["login"])?;
         }
-        ConnectorId::Codex => {
+        CODEX => {
             println!("Running `codex login --device-auth`.");
             run_interactive(m.binary, &["login", "--device-auth"])?;
         }
-        ConnectorId::ClaudeCode => {
+        CLAUDE_CODE => {
             println!("Claude in Docker: prefer ANTHROPIC_API_KEY or setup-token (browser OAuth is unreliable).");
             if std::env::var_os("ANTHROPIC_API_KEY").is_some_and(|v| !v.is_empty()) {
                 println!("ANTHROPIC_API_KEY is set; skipping interactive login.");
@@ -48,11 +50,11 @@ pub fn run(args: SetupArgs) -> anyhow::Result<()> {
                 }
             }
         }
-        ConnectorId::OpenCode => {
+        OPENCODE => {
             println!("Running `opencode auth login`.");
             run_interactive(m.binary, &["auth", "login"])?;
         }
-        ConnectorId::KiloCode => {
+        KILO_CODE => {
             println!("Kilo: try `kilo auth login` or open the TUI and use /connect.");
             // Best-effort; vendor UX varies.
             if run_interactive(m.binary, &["auth", "login"]).is_err() {
@@ -62,7 +64,7 @@ pub fn run(args: SetupArgs) -> anyhow::Result<()> {
                 );
             }
         }
-        ConnectorId::Mock => {}
+        _ => {}
     }
 
     println!("setup finished for {id}. Run: coppice connector doctor {id}");

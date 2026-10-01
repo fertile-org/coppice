@@ -2,7 +2,11 @@ use std::process::{Command, Stdio};
 
 use clap::Args;
 
-use super::registry::{binary_on_path, home_dir, meta, parse_id, ConnectorId};
+use coppice_connectors::{
+    ConnectorDescriptor, CLAUDE_CODE, CODEX, CURSOR, KILO_CODE, MOCK, OPENCODE,
+};
+
+use super::registry::{binary_on_path, home_dir, parse_id};
 
 #[derive(Args)]
 pub struct InstallArgs {
@@ -10,8 +14,9 @@ pub struct InstallArgs {
 }
 
 pub fn run(args: InstallArgs) -> anyhow::Result<()> {
-    let id = parse_id(&args.id)?;
-    if id == ConnectorId::Mock {
+    let m = parse_id(&args.id)?;
+    let id = m.id;
+    if id == MOCK {
         println!("mock needs no install");
         return Ok(());
     }
@@ -27,30 +32,29 @@ pub fn run(args: InstallArgs) -> anyhow::Result<()> {
     std::env::set_var("HOME", &home);
 
     match id {
-        ConnectorId::Cursor => install_cursor(&home)?,
-        ConnectorId::ClaudeCode => {
+        CURSOR => install_cursor(&home)?,
+        CLAUDE_CODE => {
             defer_or_hint(
-                id,
+                m,
                 "Install Claude Code into this HOME, e.g. follow https://docs.anthropic.com/en/docs/claude-code — binaries should land on $HOME/.local/bin.",
             )?;
         }
-        ConnectorId::Codex => {
+        CODEX => {
             defer_or_hint(
-                id,
+                m,
                 "Install Codex into this HOME (npm/cargo/vendor script) so `codex` is on $HOME/.local/bin.",
             )?;
         }
-        ConnectorId::KiloCode => {
+        KILO_CODE => {
             defer_or_hint(
-                id,
+                m,
                 "Install `@kilocode/cli` into this HOME (e.g. npm install -g with prefix under $HOME).",
             )?;
         }
-        ConnectorId::OpenCode => install_opencode(&home)?,
-        ConnectorId::Mock => {}
+        OPENCODE => install_opencode(&home)?,
+        _ => {}
     }
 
-    let m = meta(id);
     match binary_on_path(m.binary) {
         Some(p) => println!("install ok: {} -> {}", m.binary, p.display()),
         None => {
@@ -60,7 +64,7 @@ pub fn run(args: InstallArgs) -> anyhow::Result<()> {
                 local_bin.display(),
                 opencode_bin.display()
             );
-            if matches!(id, ConnectorId::Cursor | ConnectorId::OpenCode) {
+            if matches!(id, CURSOR | OPENCODE) {
                 anyhow::bail!(msg);
             }
             println!("{msg}");
@@ -124,8 +128,8 @@ fn install_opencode(home: &std::path::Path) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn defer_or_hint(id: ConnectorId, hint: &str) -> anyhow::Result<()> {
-    let m = meta(id);
+fn defer_or_hint(m: &ConnectorDescriptor, hint: &str) -> anyhow::Result<()> {
+    let id = m.id;
     if binary_on_path(m.binary).is_some() {
         println!("`{}` already on PATH", m.binary);
         return Ok(());

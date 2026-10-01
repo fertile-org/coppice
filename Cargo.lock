@@ -529,6 +529,7 @@ dependencies = [
  "axum",
  "clap",
  "coppice-config",
+ "coppice-connectors",
  "directories",
  "reqwest 0.12.28",
  "serde",
@@ -549,6 +550,13 @@ dependencies = [
  "figment",
  "serde",
  "toml",
+]
+
+[[package]]
+name = "coppice-connectors"
+version = "0.1.0"
+dependencies = [
+ "serde",
 ]
 
 [[package]]

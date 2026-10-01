@@ -1,5 +1,5 @@
 [workspace]
-members = ["config", "server", "cli"]
+members = ["config", "connectors", "server", "cli"]
 resolver = "2"
 
 [workspace.package]

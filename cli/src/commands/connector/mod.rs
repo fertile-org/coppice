@@ -7,8 +7,6 @@ mod setup;
 
 use clap::{Args, Subcommand};
 
-pub use registry::ConnectorId;
-
 #[derive(Args)]
 pub struct ConnectorArgs {
     #[command(subcommand)]

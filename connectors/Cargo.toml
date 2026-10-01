@@ -1,0 +1,11 @@
+[package]
+name = "coppice-connectors"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "coppice_connectors"
+path = "src/lib.rs"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
