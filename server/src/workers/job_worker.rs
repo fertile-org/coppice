@@ -1159,6 +1159,15 @@ fn best_effort_persist_artifacts(
     }
 }
 
+/// Structured console events are typed `<connector>.console.<kind>`.
+fn is_console_event_type(ty: &str) -> bool {
+    let mut parts = ty.split('.');
+    matches!(
+        (parts.next(), parts.next(), parts.next(), parts.next()),
+        (Some(prefix), Some("console"), Some(kind), None) if !prefix.is_empty() && !kind.is_empty()
+    )
+}
+
 fn persist_artifacts_to_dir(
     artifacts_dir: &str,
     stream: &crate::sessions::run_registry::RunStreamHandle,
@@ -1184,12 +1193,7 @@ fn persist_artifacts_to_dir(
                 if event
                     .get("type")
                     .and_then(|v| v.as_str())
-                    .is_some_and(|ty| {
-                        ty.starts_with("claude.console.")
-                            || ty.starts_with("codex.console.")
-                            || ty.starts_with("kilo.console.")
-                            || ty.starts_with("cursor.console.")
-                    }) =>
+                    .is_some_and(is_console_event_type) =>
             {
                 console_events.push(event.clone());
             }
@@ -1590,6 +1594,45 @@ mod tests {
         // (it should not normally occur, but the guard must not over-reach).
         let qc = test_agent("QC", Some("qc"));
         assert!(should_finalize_worktree_git(&qc, TicketStatus::InProgress));
+    }
+
+    #[test]
+    fn console_event_type_filter() {
+        for ty in [
+            "claude.console.session",
+            "claude.console.thinking",
+            "claude.console.text",
+            "claude.console.result",
+            "claude.console.tool",
+            "codex.console.session",
+            "codex.console.thinking",
+            "codex.console.text",
+            "codex.console.result",
+            "codex.console.tool",
+            "cursor.console.session",
+            "cursor.console.text",
+            "cursor.console.result",
+            "cursor.console.tool",
+            "kilo.console.text",
+            "kilo.console.result",
+        ] {
+            assert!(is_console_event_type(ty), "{ty}");
+        }
+        for ty in [
+            "unrelated.event",
+            "session.updated",
+            "session.idle",
+            "message.part.updated",
+            "message.part.delta",
+            "console.text",
+            ".console.text",
+            "claude.console.",
+            "claude.console",
+            "a.b.console.text",
+            "claude.console.text.extra",
+        ] {
+            assert!(!is_console_event_type(ty), "{ty}");
+        }
     }
 
     #[test]

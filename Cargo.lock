@@ -546,6 +546,7 @@ dependencies = [
 name = "coppice-config"
 version = "0.1.0"
 dependencies = [
+ "coppice-connectors",
  "directories",
  "figment",
  "serde",
@@ -557,6 +558,7 @@ name = "coppice-connectors"
 version = "0.1.0"
 dependencies = [
  "serde",
+ "serde_json",
 ]
 
 [[package]]

@@ -668,6 +668,22 @@ pub struct AgentConnectorsConfig {
     pub cursor: CursorConnectorConfig,
 }
 
+impl AgentConnectorsConfig {
+    /// `enabled` flag for a connector id; `mock` is always enabled.
+    /// `None` means the id has no config section here.
+    pub fn enabled(&self, id: &str) -> Option<bool> {
+        match id {
+            "mock" => Some(true),
+            "opencode" => Some(self.opencode.enabled),
+            "claude-code" => Some(self.claude_code.enabled),
+            "codex" => Some(self.codex.enabled),
+            "kilo-code" => Some(self.kilo_code.enabled),
+            "cursor" => Some(self.cursor.enabled),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct OpenCodeConnectorConfig {
     #[serde(default = "default_false")]
@@ -1029,6 +1045,23 @@ mod tests {
     use std::sync::Mutex;
 
     static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    #[test]
+    fn connector_enabled_covers_every_known_connector() {
+        let mut connectors = AgentConnectorsConfig::default();
+        for d in coppice_connectors::all() {
+            assert!(
+                connectors.enabled(d.id).is_some(),
+                "AgentConnectorsConfig::enabled has no arm for `{}`",
+                d.id
+            );
+        }
+        assert_eq!(connectors.enabled("nope"), None);
+        assert_eq!(connectors.enabled(coppice_connectors::MOCK), Some(true));
+        assert_eq!(connectors.enabled(coppice_connectors::CODEX), Some(false));
+        connectors.codex.enabled = true;
+        assert_eq!(connectors.enabled(coppice_connectors::CODEX), Some(true));
+    }
 
     #[test]
     fn loads_defaults_without_files() {

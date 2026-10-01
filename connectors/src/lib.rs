@@ -388,6 +388,37 @@ mod tests {
         assert!(opencode.install.auth_env.is_empty());
     }
 
+    /// `web/src/lib/schemas/connector.ts` parses these exact strings.
+    #[test]
+    fn console_kind_wire_strings() {
+        let wire = |k: ConsoleKind| serde_json::to_string(&k).unwrap();
+        assert_eq!(wire(ConsoleKind::OpenCodeSession), r#""openCodeSession""#);
+        assert_eq!(wire(ConsoleKind::Structured), r#""structured""#);
+        assert_eq!(wire(ConsoleKind::Plain), r#""plain""#);
+    }
+
+    #[test]
+    fn capabilities_wire_field_names() {
+        let value = serde_json::to_value(Capabilities {
+            read_only_tools: true,
+            chat_resume: false,
+            session_events: true,
+            run_resume: false,
+            run_server: true,
+        })
+        .unwrap();
+        assert_eq!(
+            value,
+            serde_json::json!({
+                "readOnlyTools": true,
+                "chatResume": false,
+                "sessionEvents": true,
+                "runResume": false,
+                "runServer": true,
+            })
+        );
+    }
+
     #[test]
     fn get_unknown_is_none() {
         assert!(get("nope").is_none());

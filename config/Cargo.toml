@@ -9,4 +9,5 @@ figment = { version = "0.10", features = ["toml", "env"] }
 serde = { version = "1", features = ["derive"] }
 
 [dev-dependencies]
+coppice-connectors = { path = "../connectors" }
 toml = "0.8"

@@ -239,14 +239,10 @@ mod tests {
     /// the descriptor or uses the `coppice_connectors` id constants.
     #[test]
     fn no_connector_literals_outside_providers() {
-        const IDS: &[&str] = &[
-            "mock",
-            "claude-code",
-            "cursor",
-            "codex",
-            "kilo-code",
-            "opencode",
-        ];
+        let needles: Vec<String> = coppice_connectors::all()
+            .iter()
+            .map(|d| format!("\"{}\"", d.id))
+            .collect();
         let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
         let mut hits = Vec::new();
         for entry in walkdir::WalkDir::new(&src) {
@@ -265,8 +261,8 @@ mod tests {
                 if line.trim_start().starts_with("#[cfg(test)]") {
                     break;
                 }
-                for id in IDS {
-                    if line.contains(&format!("\"{id}\"")) {
+                for needle in &needles {
+                    if line.contains(needle.as_str()) {
                         hits.push(format!("{rel_str}:{}: {}", idx + 1, line.trim()));
                     }
                 }
