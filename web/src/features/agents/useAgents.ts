@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiFetch } from '../../lib/api';
 import type { CreateAgentInput, UpdateAgentInput } from '../../lib/schemas/agent';
+import { connectorListSchema, type Connector } from '../../lib/schemas/connector';
 
 export const AGENTS_QUERY_KEY = ['agents'] as const;
 export const AGENT_PRESETS_QUERY_KEY = ['agent-presets'] as const;
@@ -96,14 +97,15 @@ export function useAgents() {
   });
 }
 
+export async function fetchConnectors(): Promise<Connector[]> {
+  const res = await apiFetch('/api/connectors');
+  return connectorListSchema.parse(await res.json()).items;
+}
+
 export function useConnectors() {
   return useQuery({
     queryKey: CONNECTORS_QUERY_KEY,
-    queryFn: async () => {
-      const res = await apiFetch('/api/connectors');
-      const data = (await res.json()) as { items: ConnectorOption[] };
-      return data.items;
-    },
+    queryFn: fetchConnectors,
   });
 }
 

@@ -1,8 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { TicketParentSummary } from '../board/ticketHierarchy';
-import { ClaudeLiveConsole } from '../runs/ClaudeLiveConsole';
-import { LiveConsole } from '../runs/LiveConsole';
-import { LiveSession } from '../runs/LiveSession';
+import { useConnectors } from '../agents/useAgents';
+import { LiveRunView } from '../runs/LiveRunView';
 import { TicketDetailPanel } from './TicketDetailPanel';
 import { TicketMetadataPanel } from './TicketMetadataPanel';
 import { TicketRunsTab } from './TicketRunsTab';
@@ -46,6 +45,7 @@ export function TicketDrawer({
   const { data: ticket, isLoading, isError, refetch } = useTicket(ticketId);
   const { data: repos } = useRepos();
   const { data: runs } = useAgentRuns(ticketId);
+  const { data: connectors } = useConnectors();
   const runAgent = useRunAgent(ticketId);
   const stopRun = useStopRun(ticketId);
   const finalApprove = useFinalApprove(ticketId);
@@ -72,15 +72,9 @@ export function TicketDrawer({
   const shouldReconnectLiveRun = liveRun
     ? shouldPollRunForReconciliation(liveRun)
     : false;
-  const LiveView =
-    liveRun?.connector === 'opencode'
-      ? LiveSession
-      : liveRun?.connector === 'claude-code' ||
-          liveRun?.connector === 'codex' ||
-          liveRun?.connector === 'kilo-code' ||
-          liveRun?.connector === 'cursor'
-        ? ClaudeLiveConsole
-        : LiveConsole;
+  const liveConsole = connectors?.find(
+    (c) => c.id === liveRun?.connector,
+  )?.console;
   const runAgentDisabledReason = isArchived
     ? 'Unarchive this ticket before running an agent.'
     : !ticket?.assigneeAgentId
@@ -354,7 +348,8 @@ export function TicketDrawer({
 
           {ticket && tab === 'live' && (
             <div className="flex h-full min-h-0 flex-col px-6 py-5">
-              <LiveView
+              <LiveRunView
+                console={liveConsole}
                 runId={liveRun?.id ?? null}
                 runStatus={liveRun?.status ?? null}
                 shouldReconnect={shouldReconnectLiveRun}

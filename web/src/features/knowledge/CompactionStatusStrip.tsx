@@ -4,8 +4,8 @@ import { useNavigate } from 'react-router-dom';
 import { Button } from '../../components/ui/button';
 import { ApiError } from '../../lib/api';
 import type { CompactionBatch, CompactionStatus } from '../../lib/schemas/knowledge';
-import { ClaudeLiveConsole } from '../runs/ClaudeLiveConsole';
-import { LiveConsole } from '../runs/LiveConsole';
+import { useConnectors } from '../agents/useAgents';
+import { LiveRunView } from '../runs/LiveRunView';
 import { formatNotificationTimestamp } from '../notifications/notification-format';
 import { formatInterval, pluralTickets } from './compactionFormat';
 import {
@@ -59,8 +59,8 @@ function RunDialog({
     document.addEventListener('keydown', onKeyDown);
     return () => document.removeEventListener('keydown', onKeyDown);
   }, [onClose]);
-  const LiveView =
-    connector === 'claude-code' || connector === 'cursor' ? ClaudeLiveConsole : LiveConsole;
+  const { data: connectors } = useConnectors();
+  const liveConsole = connectors?.find((c) => c.id === connector)?.console;
   const active = batch.status === 'queued' || batch.status === 'running';
   return (
     <div
@@ -89,7 +89,8 @@ function RunDialog({
           </button>
         </div>
         <div className="min-h-[20rem] flex-1 overflow-auto">
-          <LiveView
+          <LiveRunView
+            console={liveConsole}
             runId={batch.runId}
             runStatus={active ? batch.status : batch.status === 'succeeded' ? 'succeeded' : 'failed'}
             shouldReconnect={active}

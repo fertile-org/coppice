@@ -8,6 +8,7 @@ import { TicketDrawer } from './TicketDrawer';
 import type { Ticket } from '../board/useTickets';
 import type { TicketParentSummary } from '../board/ticketHierarchy';
 import type { AgentRun } from '../../lib/schemas/agentRun';
+import type { Connector } from '../../lib/schemas/connector';
 
 const ticketState: { ticket: Ticket } = {
   ticket: {
@@ -30,6 +31,41 @@ const runsState: { runs: AgentRun[] } = {
 const childrenState: { children: Ticket[] } = {
   children: [],
 };
+
+const ALL_CONNECTORS: Connector[] = [
+  {
+    id: 'mock',
+    displayName: 'Mock',
+    console: 'plain',
+    caps: { readOnlyTools: true, chatResume: true },
+  },
+  {
+    id: 'cursor',
+    displayName: 'Cursor',
+    console: 'structured',
+    caps: { readOnlyTools: true, chatResume: true },
+  },
+  {
+    id: 'kilo-code',
+    displayName: 'Kilo Code',
+    console: 'structured',
+    caps: { readOnlyTools: false, chatResume: false },
+  },
+  {
+    id: 'opencode',
+    displayName: 'OpenCode',
+    console: 'openCodeSession',
+    caps: { readOnlyTools: false, chatResume: true },
+  },
+];
+
+const connectorsState: { connectors: Connector[] | undefined } = {
+  connectors: ALL_CONNECTORS,
+};
+
+vi.mock('../agents/useAgents', () => ({
+  useConnectors: () => ({ data: connectorsState.connectors }),
+}));
 
 const archiveMocks = vi.hoisted(() => ({
   archive: vi.fn(),
@@ -124,6 +160,7 @@ describe('TicketDrawer', () => {
   beforeEach(() => {
     runsState.runs = [];
     childrenState.children = [];
+    connectorsState.connectors = ALL_CONNECTORS;
     archiveMocks.archive.mockReset();
     archiveMocks.unarchive.mockReset();
     archiveMocks.archive.mockResolvedValue(undefined);
@@ -255,6 +292,73 @@ describe('TicketDrawer', () => {
     fireEvent.click(screen.getByRole('tab', { name: 'Live Console' }));
 
     expect(screen.getByText('Claude live console')).toBeInTheDocument();
+  });
+
+  function runOn(connector: string): AgentRun {
+    return {
+      id: '00000000-0000-0000-0000-000000000010',
+      ticketId: ticketState.ticket.id,
+      agentId: '00000000-0000-0000-0000-000000000011',
+      jobType: 'agent_run',
+      status: 'running',
+      sandboxProfileId: 'default',
+      errorMessage: null,
+      worktreePath: null,
+      branchName: null,
+      startedAt: '2026-06-08T00:00:00.000Z',
+      endedAt: null,
+      createdAt: '2026-06-08T00:00:00.000Z',
+      connector,
+    };
+  }
+
+  function descriptor(id: string, console: Connector['console']): Connector {
+    return {
+      id,
+      displayName: id,
+      console,
+      caps: { readOnlyTools: false, chatResume: false },
+    };
+  }
+
+  it('uses OpenCode session view for openCodeSession', () => {
+    connectorsState.connectors = [descriptor('acme-session', 'openCodeSession')];
+    runsState.runs = [runOn('acme-session')];
+
+    renderDrawer();
+    fireEvent.click(screen.getByRole('tab', { name: 'Live Console' }));
+
+    expect(screen.getByText('Live session')).toBeInTheDocument();
+  });
+
+  it('uses structured console for structured', () => {
+    connectorsState.connectors = [descriptor('acme-structured', 'structured')];
+    runsState.runs = [runOn('acme-structured')];
+
+    renderDrawer();
+    fireEvent.click(screen.getByRole('tab', { name: 'Live Console' }));
+
+    expect(screen.getByText('Claude live console')).toBeInTheDocument();
+  });
+
+  it('unknown connector falls back to plain console', () => {
+    connectorsState.connectors = [descriptor('mock', 'plain')];
+    runsState.runs = [runOn('opencode')];
+
+    renderDrawer();
+    fireEvent.click(screen.getByRole('tab', { name: 'Live Console' }));
+
+    expect(screen.getByText('Live console')).toBeInTheDocument();
+  });
+
+  it('uses plain console while connectors are loading', () => {
+    connectorsState.connectors = undefined;
+    runsState.runs = [runOn('cursor')];
+
+    renderDrawer();
+    fireEvent.click(screen.getByRole('tab', { name: 'Live Console' }));
+
+    expect(screen.getByText('Live console')).toBeInTheDocument();
   });
 
   it('opens a child ticket parent in the same drawer route', () => {

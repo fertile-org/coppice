@@ -2,6 +2,7 @@ import '@testing-library/jest-dom/vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { Connector } from '../../lib/schemas/connector';
 import type { CompactionBatch, CompactionStatus } from '../../lib/schemas/knowledge';
 import { CompactionStatusStrip } from './CompactionStatusStrip';
 
@@ -29,6 +30,20 @@ vi.mock('../runs/ClaudeLiveConsole', () => ({
   ClaudeLiveConsole: ({ runId }: { runId: string | null }) => (
     <div data-testid="live-console">claude console {runId}</div>
   ),
+}));
+
+vi.mock('../runs/LiveSession', () => ({
+  LiveSession: ({ runId }: { runId: string | null }) => (
+    <div data-testid="live-console">session {runId}</div>
+  ),
+}));
+
+const connectorsState = vi.hoisted(() => ({
+  connectors: undefined as Connector[] | undefined,
+}));
+
+vi.mock('../agents/useAgents', () => ({
+  useConnectors: () => ({ data: connectorsState.connectors }),
 }));
 
 const AGENT = {
@@ -93,6 +108,14 @@ function renderStrip() {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  connectorsState.connectors = [
+    {
+      id: 'mock',
+      displayName: 'Mock',
+      console: 'plain',
+      caps: { readOnlyTools: true, chatResume: true },
+    },
+  ];
   mocks.run.mockResolvedValue(batch({ status: 'queued' }));
   mocks.retry.mockResolvedValue(batch({ status: 'queued', trigger: 'retry' }));
   mocks.cancel.mockResolvedValue(batch({ status: 'failed', errorMessage: 'cancelled' }));
@@ -155,6 +178,26 @@ describe('CompactionStatusStrip', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Close' }));
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
     await waitFor(() => expect(mocks.cancel).toHaveBeenCalled());
+  });
+
+  it('uses the structured console when the agent connector is structured', () => {
+    connectorsState.connectors = [
+      {
+        id: 'acme-structured',
+        displayName: 'Acme',
+        console: 'structured',
+        caps: { readOnlyTools: true, chatResume: true },
+      },
+    ];
+    mocks.status = status({
+      state: 'running',
+      queuedCount: 0,
+      agent: { ...AGENT, connector: 'acme-structured' },
+      activeBatch: batch(),
+    });
+    renderStrip();
+    fireEvent.click(screen.getByRole('button', { name: 'View run' }));
+    expect(screen.getByRole('dialog')).toHaveTextContent(`claude console ${RUN_ID}`);
   });
 
   it('shows a failure banner with retry', async () => {
