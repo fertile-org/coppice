@@ -5,12 +5,14 @@
 use serde_json::Value;
 use std::path::PathBuf;
 use std::process::{ExitStatus, Stdio};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, AsyncRead, BufReader};
 use tokio::process::Command;
 use tokio::sync::watch;
 
 const STDERR_TAIL_LINES: usize = 40;
+const STDERR_DRAIN_AFTER_KILL: Duration = Duration::from_secs(1);
 
 pub struct CliInvocation {
     pub program: String,
@@ -100,7 +102,8 @@ pub async fn run_cli_with_stdin(
     });
     let stdout = child.stdout.take().expect("piped stdout");
     let stderr = child.stderr.take().expect("piped stderr");
-    let stderr_task = tokio::spawn(pump_stderr(stderr, io.stderr_target));
+    let stderr_tail = Arc::new(Mutex::new(Vec::new()));
+    let mut stderr_task = tokio::spawn(pump_stderr(stderr, io.stderr_target, stderr_tail.clone()));
 
     let mut reader = BufReader::new(stdout).lines();
     let deadline = tokio::time::Instant::now() + inv.timeout;
@@ -125,7 +128,14 @@ pub async fn run_cli_with_stdin(
 
             _ = tokio::time::sleep_until(deadline) => {
                 let _ = child.kill().await;
-                let stderr_tail = stderr_task.await.unwrap_or_default();
+                // A grandchild can hold the inherited stderr pipe open past the kill.
+                if tokio::time::timeout(STDERR_DRAIN_AFTER_KILL, &mut stderr_task)
+                    .await
+                    .is_err()
+                {
+                    stderr_task.abort();
+                }
+                let stderr_tail = std::mem::take(&mut *stderr_tail.lock().unwrap());
                 return Err(CliError::TimedOut { stderr_tail });
             }
 
@@ -162,7 +172,8 @@ pub async fn run_cli_with_stdin(
     if let Some(task) = stdin_task {
         let _ = task.await;
     }
-    let stderr_tail = stderr_task.await.unwrap_or_default();
+    let _ = stderr_task.await;
+    let stderr_tail = std::mem::take(&mut *stderr_tail.lock().unwrap());
     Ok(CliExit {
         status,
         stderr_tail,
@@ -171,9 +182,12 @@ pub async fn run_cli_with_stdin(
 
 /// Mirrors stderr to tracing and keeps the first lines for error messages.
 /// Tracing targets must be compile-time constants, hence the dispatch.
-async fn pump_stderr(stderr: impl AsyncRead + Unpin, target: &'static str) -> Vec<String> {
+async fn pump_stderr(
+    stderr: impl AsyncRead + Unpin,
+    target: &'static str,
+    tail: Arc<Mutex<Vec<String>>>,
+) {
     let mut reader = BufReader::new(stderr).lines();
-    let mut lines = Vec::new();
     while let Ok(Some(line)) = reader.next_line().await {
         match target {
             "claude_code.stderr" => tracing::debug!(target: "claude_code.stderr", "{line}"),
@@ -182,11 +196,11 @@ async fn pump_stderr(stderr: impl AsyncRead + Unpin, target: &'static str) -> Ve
             "kilo_code.stderr" => tracing::debug!(target: "kilo_code.stderr", "{line}"),
             _ => tracing::debug!(target: "cli_runner.stderr", source = target, "{line}"),
         }
+        let mut lines = tail.lock().unwrap();
         if lines.len() < STDERR_TAIL_LINES {
             lines.push(line);
         }
     }
-    lines
 }
 
 fn is_cancelled(cancel_rx: &Option<watch::Receiver<bool>>) -> bool {

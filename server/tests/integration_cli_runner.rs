@@ -152,6 +152,48 @@ async fn run_cli_timeout_kills_child_and_returns_tail() {
 }
 
 #[tokio::test]
+async fn run_cli_timeout_returns_even_if_grandchild_holds_stderr() {
+    let mut handler = Recorder::default();
+    let started = std::time::Instant::now();
+    let result = run_cli(
+        fake_cli(
+            &[
+                ("FAKE_CLI_GRANDCHILD_SLEEP_MS", "30000"),
+                ("FAKE_CLI_STDERR", "boom"),
+                ("FAKE_CLI_SLEEP_MS", "30000"),
+            ],
+            Duration::from_millis(300),
+        ),
+        &mut handler,
+        io(),
+    )
+    .await;
+    let elapsed = started.elapsed();
+
+    let grandchild = handler
+        .seen
+        .lock()
+        .unwrap()
+        .iter()
+        .find_map(|v| v["grandchild_pid"].as_u64());
+    if let Some(pid) = grandchild {
+        let _ = std::process::Command::new("kill")
+            .arg(pid.to_string())
+            .status();
+    }
+
+    assert!(grandchild.is_some(), "fake-cli reported its grandchild");
+    assert!(
+        elapsed < Duration::from_millis(300) + Duration::from_secs(3),
+        "timeout took {elapsed:?}"
+    );
+    match result {
+        Err(CliError::TimedOut { stderr_tail }) => assert_eq!(stderr_tail, vec!["boom"]),
+        other => panic!("expected TimedOut, got {other:?}"),
+    }
+}
+
+#[tokio::test]
 async fn run_cli_returns_status_and_tail() {
     let stderr: String = (0..50).map(|i| format!("line {i}\n")).collect();
     let mut handler = Recorder::default();

@@ -1,6 +1,8 @@
 //! Stand-in for a streaming agent CLI in integration tests, driven by env:
 //! `FAKE_CLI_PRINT_PID` (print `{"pid":N}` first), `FAKE_CLI_ECHO_STDIN`
-//! (print `{"stdin":"..."}` with all of stdin), `FAKE_CLI_LINES`
+//! (print `{"stdin":"..."}` with all of stdin), `FAKE_CLI_GRANDCHILD_SLEEP_MS`
+//! (spawn a `sleep` grandchild inheriting stdio, print `{"grandchild_pid":N}`),
+//! `FAKE_CLI_LINES`
 //! (newline-separated stdout lines), `FAKE_CLI_STDERR` (newline-separated
 //! stderr lines), `FAKE_CLI_SLEEP_MS` (sleep after printing), `FAKE_CLI_EXIT`.
 
@@ -10,6 +12,16 @@ fn main() {
     let mut stdout = std::io::stdout();
     if std::env::var_os("FAKE_CLI_PRINT_PID").is_some() {
         writeln!(stdout, "{{\"pid\":{}}}", std::process::id()).expect("write pid");
+    }
+    if let Some(ms) = std::env::var("FAKE_CLI_GRANDCHILD_SLEEP_MS")
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+    {
+        let grandchild = std::process::Command::new("sleep")
+            .arg(format!("{}", ms as f64 / 1000.0))
+            .spawn()
+            .expect("spawn grandchild");
+        writeln!(stdout, "{{\"grandchild_pid\":{}}}", grandchild.id()).expect("write pid");
     }
     if std::env::var_os("FAKE_CLI_ECHO_STDIN").is_some() {
         let mut input = String::new();
