@@ -1,5 +1,6 @@
 pub mod claude_code;
 pub mod claude_console;
+pub mod cli_runner;
 pub mod codex;
 pub mod codex_console;
 pub mod codex_models;

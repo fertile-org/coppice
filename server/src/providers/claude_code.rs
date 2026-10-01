@@ -1,4 +1,5 @@
 use super::claude_console::ClaudeConsolePublisher;
+use super::cli_runner::{run_cli, CliError, CliInvocation, LineHandler, LineStep, RunIo};
 use super::{
     run_dir, worktree_dir_from_context, AgentProvider, AgentRunInput, AgentRunResult,
     ProviderError, CHAT_READ_ONLY_TOOLS,
@@ -6,14 +7,12 @@ use super::{
 use crate::mcp::grant::McpAccess;
 use crate::mcp::wiring::{claude_tool_pattern, McpServerSpec};
 use crate::sessions::opencode_events::{coppice_run_prompt, extract_result_from_text};
+use crate::sessions::run_registry::RunStreamHandle;
 use async_trait::async_trait;
 use coppice_config::ClaudeCodeProviderConfig;
 use std::path::Path;
-use std::process::Stdio;
+use std::sync::Arc;
 use std::time::Duration;
-use tokio::io::{AsyncBufReadExt, BufReader};
-use tokio::process::Command;
-use tokio::sync::watch;
 
 const ALLOWED_TOOLS: &str =
     "Read,Write,Edit,MultiEdit,Bash,NotebookEdit,WebFetch,WebSearch,Glob,Grep,TodoWrite,Task";
@@ -68,32 +67,28 @@ impl AgentProvider for ClaudeCodeProvider {
 
         let run_timeout = Duration::from_secs(self.config.run_timeout_secs);
 
-        let mut cmd = Command::new("claude");
-        cmd.arg("-p")
-            .arg(coppice_run_prompt())
-            .arg("--output-format")
-            .arg("stream-json")
-            .arg("--verbose")
-            .arg("--allowedTools")
-            .arg(claude_allowed_tools(
-                input.read_only_tools,
-                input.mcp.is_some(),
-            ))
-            .arg("--permission-mode")
-            .arg("bypassPermissions")
-            .current_dir(&worktree)
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
+        let mut args = vec![
+            "-p".to_string(),
+            coppice_run_prompt().to_string(),
+            "--output-format".to_string(),
+            "stream-json".to_string(),
+            "--verbose".to_string(),
+            "--allowedTools".to_string(),
+            claude_allowed_tools(input.read_only_tools, input.mcp.is_some()),
+            "--permission-mode".to_string(),
+            "bypassPermissions".to_string(),
+        ];
 
         if let Some(model) = &input.model {
-            cmd.arg("--model").arg(model);
+            args.push("--model".to_string());
+            args.push(model.clone());
         }
 
         // Resume a previous claude-code session if we have its session_id.
         if let Some(sid) = &input.resume_session_id {
             if !sid.is_empty() {
-                cmd.arg("--resume").arg(sid);
+                args.push("--resume".to_string());
+                args.push(sid.clone());
             }
         }
 
@@ -102,136 +97,86 @@ impl AgentProvider for ClaudeCodeProvider {
         // inherits that environment directly — same model as the opencode
         // connector. Coppice does not inject or strip credentials.
 
+        let mut env = Vec::new();
         if let Some(access) = &input.mcp {
             let run_dir = run_dir(&input, "claude-code")?;
-            for arg in claude_mcp_args(access, &run_dir)? {
-                cmd.arg(arg);
-            }
-            cmd.envs(access.env());
+            args.extend(claude_mcp_args(access, &run_dir)?);
+            env.extend(access.env().map(|(k, v)| (k.to_string(), v)));
         }
 
-        let mut child = cmd.spawn().map_err(ProviderError::Io)?;
+        let invocation = CliInvocation {
+            program: "claude".to_string(),
+            args,
+            env,
+            cwd: worktree,
+            timeout: run_timeout,
+        };
+        let mut handler = ClaudeLines {
+            stream: input.stream.clone(),
+            console: ClaudeConsolePublisher::new(),
+            assistant_text: String::new(),
+        };
+        let io = RunIo {
+            cancel_rx: input.cancel_rx,
+            session_created_tx: input.session_created_tx,
+            stderr_target: "claude_code.stderr",
+        };
 
-        let stdout = child.stdout.take().expect("piped stdout");
-        let mut stderr = child.stderr.take().expect("piped stderr");
-
-        let mut reader = BufReader::new(stdout).lines();
-        let deadline = tokio::time::Instant::now() + run_timeout;
-        let mut cancel_rx = input.cancel_rx;
-
-        // Pump stderr to tracing so we don't lose diagnostics.
-        let stderr_task = tokio::spawn(async move {
-            let mut reader = BufReader::new(&mut stderr).lines();
-            while let Ok(Some(line)) = reader.next_line().await {
-                tracing::debug!(target: "claude_code.stderr", "{line}");
+        let exit = match run_cli(invocation, &mut handler, io).await {
+            Ok(exit) => exit,
+            Err(CliError::Spawn(e) | CliError::Io(e)) => return Err(ProviderError::Io(e)),
+            Err(CliError::Cancelled) => return Err(ProviderError::Cancelled),
+            Err(CliError::TimedOut { .. }) => {
+                return Err(ProviderError::InvalidFixture(format!(
+                    "claude-code run timed out after {}s",
+                    run_timeout.as_secs()
+                )));
             }
-        });
+        };
 
-        let mut assistant_text = String::new();
-        let mut session_sent = false;
-        let mut console = ClaudeConsolePublisher::new();
-
-        loop {
-            if is_cancelled(&cancel_rx) {
-                let _ = child.kill().await;
-                return Err(ProviderError::Cancelled);
-            }
-
-            tokio::select! {
-                biased;
-
-                _ = wait_cancel(&mut cancel_rx) => {
-                    if is_cancelled(&cancel_rx) {
-                        let _ = child.kill().await;
-                        return Err(ProviderError::Cancelled);
-                    }
-                }
-
-                _ = tokio::time::sleep_until(deadline) => {
-                    let _ = child.kill().await;
-                    return Err(ProviderError::InvalidFixture(format!(
-                        "claude-code run timed out after {}s",
-                        run_timeout.as_secs()
-                    )));
-                }
-
-                line = reader.next_line() => {
-                    match line {
-                        Ok(Some(raw)) => {
-                            let Ok(value) = serde_json::from_str::<serde_json::Value>(&raw) else {
-                                continue;
-                            };
-
-                            // Capture session_id early for the job worker.
-                            if !session_sent {
-                                if let Some(sid) = value
-                                    .get("session_id")
-                                    .and_then(|v| v.as_str())
-                                    .filter(|s| !s.is_empty())
-                                {
-                                    if let Some(tx) = &input.session_created_tx {
-                                        let _ = tx.send(sid.to_string());
-                                    }
-                                    session_sent = true;
-                                }
-                            }
-
-                            // Forward structured console events to the run stream.
-                            if let Some(stream) = &input.stream {
-                                console.handle_stream_json(stream, &value);
-                            }
-
-                            // Accumulate assistant text.
-                            if let Some(text) = extract_assistant_text(&value) {
-                                assistant_text.push_str(&text);
-                            }
-
-                            // Terminal result event — extract final text.
-                            if value.get("type").and_then(|v| v.as_str()) == Some("result") {
-                                if let Some(final_text) =
-                                    value.get("result").and_then(|v| v.as_str())
-                                {
-                                    assistant_text = final_text.to_string();
-                                }
-                                break;
-                            }
-                        }
-                        Ok(None) => break,
-                        Err(e) => {
-                            let _ = child.kill().await;
-                            return Err(ProviderError::Io(e));
-                        }
-                    }
-                }
-            }
-        }
-
-        // Wait for the process to exit.
-        let status = child.wait().await.map_err(ProviderError::Io)?;
-        let _ = stderr_task.await;
-
-        if !status.success() {
+        if !exit.status.success() {
             return Err(ProviderError::InvalidFixture(format!(
-                "claude-code exited with status {status}"
+                "claude-code exited with status {}",
+                exit.status
             )));
         }
 
-        extract_result_from_text(&assistant_text).ok_or_else(|| {
+        extract_result_from_text(&handler.assistant_text).ok_or_else(|| {
             ProviderError::MissingResult("no result contract found in claude-code output".into())
         })
     }
 }
 
-fn is_cancelled(cancel_rx: &Option<watch::Receiver<bool>>) -> bool {
-    cancel_rx.as_ref().is_some_and(|rx| *rx.borrow())
+/// Forwards console events and accumulates assistant text; the `result`
+/// event is terminal and its `result` field replaces the accumulated text.
+struct ClaudeLines {
+    stream: Option<Arc<RunStreamHandle>>,
+    console: ClaudeConsolePublisher,
+    assistant_text: String,
 }
 
-async fn wait_cancel(cancel_rx: &mut Option<watch::Receiver<bool>>) {
-    match cancel_rx {
-        Some(rx) => {
-            let _ = rx.changed().await;
+impl LineHandler for ClaudeLines {
+    fn on_json(&mut self, value: &serde_json::Value) -> LineStep {
+        let session_id = value
+            .get("session_id")
+            .and_then(|v| v.as_str())
+            .map(str::to_string);
+
+        if let Some(stream) = &self.stream {
+            self.console.handle_stream_json(stream, value);
         }
-        None => std::future::pending::<()>().await,
+
+        if let Some(text) = extract_assistant_text(value) {
+            self.assistant_text.push_str(&text);
+        }
+
+        let stop = value.get("type").and_then(|v| v.as_str()) == Some("result");
+        if stop {
+            if let Some(final_text) = value.get("result").and_then(|v| v.as_str()) {
+                self.assistant_text = final_text.to_string();
+            }
+        }
+        LineStep { session_id, stop }
     }
 }
 

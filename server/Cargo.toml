@@ -16,6 +16,11 @@ name = "fake-opencode"
 path = "tests/support/fake_opencode.rs"
 required-features = ["embedded-test-db"]
 
+[[bin]]
+name = "fake-cli"
+path = "tests/support/fake_cli.rs"
+required-features = ["embedded-test-db"]
+
 [dependencies]
 coppice-config = { path = "../config" }
 coppice-connectors = { path = "../connectors" }

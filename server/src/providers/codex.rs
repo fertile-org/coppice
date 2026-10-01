@@ -1,3 +1,6 @@
+use super::cli_runner::{
+    run_cli_with_stdin, CliError, CliInvocation, LineHandler, LineStep, RunIo,
+};
 use super::codex_console::CodexConsolePublisher;
 use super::{
     worktree_dir_from_context, AgentProvider, AgentRunInput, AgentRunResult, ProviderError,
@@ -5,13 +8,11 @@ use super::{
 use crate::mcp::grant::McpAccess;
 use crate::mcp::wiring::McpServerSpec;
 use crate::sessions::opencode_events::{coppice_run_prompt, extract_result_from_text};
+use crate::sessions::run_registry::RunStreamHandle;
 use async_trait::async_trait;
 use coppice_config::CodexProviderConfig;
-use std::process::Stdio;
+use std::sync::Arc;
 use std::time::Duration;
-use tokio::io::{AsyncBufReadExt, BufReader};
-use tokio::process::Command;
-use tokio::sync::watch;
 
 /// `-c` overrides that add the gateway as the `coppice` MCP server for this
 /// process only. The token is read by the CLI from `COPPICE_MCP_TOKEN`, so it
@@ -46,18 +47,17 @@ impl AgentProvider for CodexProvider {
         // Build the codex exec command.
         // Codex CLI uses `codex exec` for non-interactive mode with `--json` for structured output.
         // The prompt is passed via stdin since codex exec reads from stdin when no prompt arg is given.
-        let mut cmd = Command::new("codex");
-        cmd.arg("exec")
-            .arg("--json")
-            .arg("--dangerously-bypass-approvals-and-sandbox")
-            .arg("-C")
-            .arg(&worktree)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
+        let mut args = vec![
+            "exec".to_string(),
+            "--json".to_string(),
+            "--dangerously-bypass-approvals-and-sandbox".to_string(),
+            "-C".to_string(),
+            worktree.display().to_string(),
+        ];
 
         if let Some(model) = &input.model {
-            cmd.arg("-m").arg(model);
+            args.push("-m".to_string());
+            args.push(model.clone());
         }
 
         // Resume: if we have a session_id, use the resume subcommand.
@@ -73,150 +73,100 @@ impl AgentProvider for CodexProvider {
             None
         };
 
+        let mut env = Vec::new();
         // Before `resume`, so the overrides bind to `exec` and not to the subcommand.
         if let Some(access) = &input.mcp {
-            for arg in codex_mcp_args(access) {
-                cmd.arg(arg);
-            }
-            cmd.envs(access.env());
+            args.extend(codex_mcp_args(access));
+            env.extend(access.env().map(|(k, v)| (k.to_string(), v)));
         }
 
         if let Some(sid) = &resume {
-            cmd.arg("resume").arg(sid);
+            args.push("resume".to_string());
+            args.push(sid.clone());
         }
 
         // Auth is host-managed: the operator runs `codex login` wherever the server runs.
         // The child process inherits that environment directly — same model as claude-code
         // and opencode. Coppice does not inject or strip credentials.
 
-        let mut child = cmd.spawn().map_err(ProviderError::Io)?;
+        let invocation = CliInvocation {
+            program: "codex".to_string(),
+            args,
+            env,
+            // Codex takes its root from `-C`; the process keeps the server's cwd.
+            cwd: std::env::current_dir().map_err(ProviderError::Io)?,
+            timeout: run_timeout,
+        };
+        let mut handler = CodexLines {
+            stream: input.stream.clone(),
+            console: CodexConsolePublisher::new(),
+            assistant_text: String::new(),
+        };
+        let io = RunIo {
+            cancel_rx: input.cancel_rx,
+            session_created_tx: input.session_created_tx,
+            stderr_target: "codex.stderr",
+        };
 
-        let mut stdin = child.stdin.take().expect("piped stdin");
-        let stdout = child.stdout.take().expect("piped stdout");
-        let mut stderr = child.stderr.take().expect("piped stderr");
-
-        // Write the prompt to stdin.
-        let prompt = coppice_run_prompt();
-        let stdin_task = tokio::spawn(async move {
-            use tokio::io::AsyncWriteExt;
-            let _ = stdin.write_all(prompt.as_bytes()).await;
-            let _ = stdin.shutdown().await;
-        });
-
-        let mut reader = BufReader::new(stdout).lines();
-        let deadline = tokio::time::Instant::now() + run_timeout;
-        let mut cancel_rx = input.cancel_rx;
-
-        // Pump stderr to tracing so we don't lose diagnostics.
-        let stderr_task = tokio::spawn(async move {
-            let mut reader = BufReader::new(&mut stderr).lines();
-            while let Ok(Some(line)) = reader.next_line().await {
-                tracing::debug!(target: "codex.stderr", "{line}");
+        let exit = match run_cli_with_stdin(
+            invocation,
+            Some(coppice_run_prompt().to_string()),
+            &mut handler,
+            io,
+        )
+        .await
+        {
+            Ok(exit) => exit,
+            Err(CliError::Spawn(e) | CliError::Io(e)) => return Err(ProviderError::Io(e)),
+            Err(CliError::Cancelled) => return Err(ProviderError::Cancelled),
+            Err(CliError::TimedOut { .. }) => {
+                return Err(ProviderError::InvalidFixture(format!(
+                    "codex run timed out after {}s",
+                    run_timeout.as_secs()
+                )));
             }
-        });
+        };
 
-        let mut assistant_text = String::new();
-        let mut session_sent = false;
-        let mut console = CodexConsolePublisher::new();
-
-        loop {
-            if is_cancelled(&cancel_rx) {
-                let _ = child.kill().await;
-                return Err(ProviderError::Cancelled);
-            }
-
-            tokio::select! {
-                biased;
-
-                _ = wait_cancel(&mut cancel_rx) => {
-                    if is_cancelled(&cancel_rx) {
-                        let _ = child.kill().await;
-                        return Err(ProviderError::Cancelled);
-                    }
-                }
-
-                _ = tokio::time::sleep_until(deadline) => {
-                    let _ = child.kill().await;
-                    return Err(ProviderError::InvalidFixture(format!(
-                        "codex run timed out after {}s",
-                        run_timeout.as_secs()
-                    )));
-                }
-
-                line = reader.next_line() => {
-                    match line {
-                        Ok(Some(raw)) => {
-                            let Ok(value) = serde_json::from_str::<serde_json::Value>(&raw) else {
-                                continue;
-                            };
-
-                            // Capture thread_id early for the job worker.
-                            // Codex uses "thread_id" instead of "session_id".
-                            if !session_sent {
-                                if let Some(sid) = value
-                                    .get("thread_id")
-                                    .and_then(|v| v.as_str())
-                                    .filter(|s| !s.is_empty())
-                                {
-                                    if let Some(tx) = &input.session_created_tx {
-                                        let _ = tx.send(sid.to_string());
-                                    }
-                                    session_sent = true;
-                                }
-                            }
-
-                            // Forward structured console events to the run stream.
-                            if let Some(stream) = &input.stream {
-                                console.handle_json(stream, &value);
-                            }
-
-                            // Accumulate assistant text.
-                            if let Some(text) = extract_assistant_text(&value) {
-                                assistant_text.push_str(&text);
-                            }
-
-                            // Terminal event — turn.completed indicates the run is finished.
-                            if value.get("type").and_then(|v| v.as_str()) == Some("turn.completed") {
-                                break;
-                            }
-                        }
-                        Ok(None) => break,
-                        Err(e) => {
-                            let _ = child.kill().await;
-                            return Err(ProviderError::Io(e));
-                        }
-                    }
-                }
-            }
-        }
-
-        // Wait for the process to exit.
-        let status = child.wait().await.map_err(ProviderError::Io)?;
-        let _ = stdin_task.await;
-        let _ = stderr_task.await;
-
-        if !status.success() {
+        if !exit.status.success() {
             return Err(ProviderError::InvalidFixture(format!(
-                "codex exited with status {status}"
+                "codex exited with status {}",
+                exit.status
             )));
         }
 
-        extract_result_from_text(&assistant_text).ok_or_else(|| {
+        extract_result_from_text(&handler.assistant_text).ok_or_else(|| {
             ProviderError::MissingResult("no result contract found in codex output".into())
         })
     }
 }
 
-fn is_cancelled(cancel_rx: &Option<watch::Receiver<bool>>) -> bool {
-    cancel_rx.as_ref().is_some_and(|rx| *rx.borrow())
+/// Forwards console events and accumulates agent messages; `turn.completed`
+/// is terminal. Codex reports its session as `thread_id`.
+struct CodexLines {
+    stream: Option<Arc<RunStreamHandle>>,
+    console: CodexConsolePublisher,
+    assistant_text: String,
 }
 
-async fn wait_cancel(cancel_rx: &mut Option<watch::Receiver<bool>>) {
-    match cancel_rx {
-        Some(rx) => {
-            let _ = rx.changed().await;
+impl LineHandler for CodexLines {
+    fn on_json(&mut self, value: &serde_json::Value) -> LineStep {
+        let session_id = value
+            .get("thread_id")
+            .and_then(|v| v.as_str())
+            .map(str::to_string);
+
+        if let Some(stream) = &self.stream {
+            self.console.handle_json(stream, value);
         }
-        None => std::future::pending::<()>().await,
+
+        if let Some(text) = extract_assistant_text(value) {
+            self.assistant_text.push_str(&text);
+        }
+
+        LineStep {
+            session_id,
+            stop: value.get("type").and_then(|v| v.as_str()) == Some("turn.completed"),
+        }
     }
 }
 
