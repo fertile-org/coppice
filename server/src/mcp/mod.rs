@@ -5,3 +5,4 @@ pub mod protocol;
 pub mod server;
 pub mod token;
 pub mod tools;
+pub mod wiring;

@@ -1,9 +1,10 @@
 use super::claude_console::ClaudeConsolePublisher;
 use super::{
     run_dir, worktree_dir_from_context, AgentProvider, AgentRunInput, AgentRunResult,
-    ProviderError, CHAT_READ_ONLY_TOOLS, COPPICE_MCP_TOOLS,
+    ProviderError, CHAT_READ_ONLY_TOOLS,
 };
 use crate::mcp::grant::McpAccess;
+use crate::mcp::wiring::{claude_tool_pattern, McpServerSpec};
 use crate::sessions::opencode_events::{coppice_run_prompt, extract_result_from_text};
 use async_trait::async_trait;
 use coppice_config::ClaudeCodeProviderConfig;
@@ -25,16 +26,7 @@ fn claude_mcp_args(access: &McpAccess, run_dir: &Path) -> std::io::Result<Vec<St
     std::fs::create_dir_all(run_dir)?;
     let path = run_dir.join("mcp.json");
     // The token stays in the environment; the file only interpolates it.
-    let config = serde_json::json!({
-        "mcpServers": {
-            "coppice": {
-                "type": "http",
-                "url": access.url,
-                "headers": { "Authorization": "Bearer ${COPPICE_MCP_TOKEN}" },
-            }
-        }
-    });
-    std::fs::write(&path, serde_json::to_string(&config)?)?;
+    std::fs::write(&path, McpServerSpec::from_access(access).claude_json())?;
     Ok(vec![
         "--mcp-config".to_string(),
         path.display().to_string(),
@@ -49,7 +41,7 @@ fn claude_allowed_tools(read_only_tools: bool, mcp: bool) -> String {
         ALLOWED_TOOLS
     };
     if mcp {
-        format!("{base},{COPPICE_MCP_TOOLS}")
+        format!("{base},{}", claude_tool_pattern())
     } else {
         base.to_string()
     }
@@ -118,9 +110,7 @@ impl AgentProvider for ClaudeCodeProvider {
             cmd.envs(access.env());
         }
 
-        let mut child = cmd
-            .spawn()
-            .map_err(ProviderError::Io)?;
+        let mut child = cmd.spawn().map_err(ProviderError::Io)?;
 
         let stdout = child.stdout.take().expect("piped stdout");
         let mut stderr = child.stderr.take().expect("piped stderr");
@@ -227,9 +217,7 @@ impl AgentProvider for ClaudeCodeProvider {
         }
 
         extract_result_from_text(&assistant_text).ok_or_else(|| {
-            ProviderError::MissingResult(
-                "no result contract found in claude-code output".into(),
-            )
+            ProviderError::MissingResult("no result contract found in claude-code output".into())
         })
     }
 }
@@ -261,12 +249,17 @@ fn extract_assistant_text(value: &serde_json::Value) -> Option<String> {
             }
         }
     }
-    if text.is_empty() { None } else { Some(text) }
+    if text.is_empty() {
+        None
+    } else {
+        Some(text)
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::mcp::protocol::SERVER_NAME;
     use std::path::PathBuf;
 
     fn fixtures_root() -> PathBuf {
@@ -275,8 +268,8 @@ mod tests {
 
     #[test]
     fn extract_result_from_stream_json_done_fixture() {
-        let raw = std::fs::read_to_string(fixtures_root().join("done.jsonl"))
-            .expect("read done.jsonl");
+        let raw =
+            std::fs::read_to_string(fixtures_root().join("done.jsonl")).expect("read done.jsonl");
         let mut assistant_text = String::new();
         for line in raw.lines() {
             let Ok(value) = serde_json::from_str::<serde_json::Value>(line) else {
@@ -358,7 +351,7 @@ mod tests {
 
         let raw = std::fs::read_to_string(&path).expect("read mcp.json");
         let doc: serde_json::Value = serde_json::from_str(&raw).expect("parse mcp.json");
-        let server = &doc["mcpServers"]["coppice"];
+        let server = &doc["mcpServers"][SERVER_NAME];
         assert_eq!(server["type"], "http");
         assert_eq!(server["url"], "http://127.0.0.1:5000/mcp");
         assert_eq!(
@@ -384,8 +377,8 @@ mod tests {
 
     #[test]
     fn session_id_extracted_from_init_event() {
-        let raw = std::fs::read_to_string(fixtures_root().join("done.jsonl"))
-            .expect("read done.jsonl");
+        let raw =
+            std::fs::read_to_string(fixtures_root().join("done.jsonl")).expect("read done.jsonl");
         let mut session_sent = false;
         let mut captured_id = None::<String>;
         for line in raw.lines() {
@@ -419,9 +412,7 @@ mod tests {
         }
     }
 
-    fn collect_console_events(
-        messages: &[crate::sessions::LiveMessage],
-    ) -> Vec<serde_json::Value> {
+    fn collect_console_events(messages: &[crate::sessions::LiveMessage]) -> Vec<serde_json::Value> {
         messages
             .iter()
             .filter_map(|msg| match msg {
@@ -435,8 +426,8 @@ mod tests {
     fn streaming_pipeline_publishes_console_events() {
         use crate::sessions::run_registry::RunStreamRegistry;
 
-        let raw = std::fs::read_to_string(fixtures_root().join("done.jsonl"))
-            .expect("read done.jsonl");
+        let raw =
+            std::fs::read_to_string(fixtures_root().join("done.jsonl")).expect("read done.jsonl");
 
         let registry = RunStreamRegistry::new();
         let handle = registry.register(uuid::Uuid::new_v4());
@@ -506,8 +497,8 @@ mod tests {
         use crate::sessions::run_registry::RunStreamRegistry;
         use crate::sessions::LiveMessage;
 
-        let raw = std::fs::read_to_string(fixtures_root().join("done.jsonl"))
-            .expect("read done.jsonl");
+        let raw =
+            std::fs::read_to_string(fixtures_root().join("done.jsonl")).expect("read done.jsonl");
 
         let registry = RunStreamRegistry::new();
         let handle = registry.register(uuid::Uuid::new_v4());
@@ -516,8 +507,6 @@ mod tests {
 
         let tail = handle.buffered_tail();
         assert_eq!(tail.len(), 4);
-        assert!(tail
-            .iter()
-            .all(|m| matches!(m, LiveMessage::Event { .. })));
+        assert!(tail.iter().all(|m| matches!(m, LiveMessage::Event { .. })));
     }
 }

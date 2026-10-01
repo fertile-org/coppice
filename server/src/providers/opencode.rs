@@ -43,10 +43,7 @@ impl AgentProvider for OpenCodeProvider {
         if let Some(parent) = config_path.parent() {
             std::fs::create_dir_all(parent)?;
         }
-        std::fs::write(
-            &config_path,
-            opencode_run_config(input.mcp.as_ref()).to_string(),
-        )?;
+        std::fs::write(&config_path, opencode_run_config(input.mcp.as_ref()))?;
 
         let key = input
             .run_id
@@ -140,7 +137,10 @@ mod tests {
         let input = tool_first_input(worktree.path(), Some(artifacts.path()));
 
         let path = run_config_path(&input).expect("config path");
-        assert_eq!(path, run_dir(&input, "opencode").unwrap().join("opencode.json"));
+        assert_eq!(
+            path,
+            run_dir(&input, "opencode").unwrap().join("opencode.json")
+        );
 
         let worktree_dir = std::path::Path::new(&input.context_path)
             .parent()
@@ -160,7 +160,8 @@ mod tests {
 
         let err = provider.run(input).await.expect_err("no run dir");
         assert!(
-            err.to_string().starts_with("invalid input: mcp_unavailable:"),
+            err.to_string()
+                .starts_with("invalid input: mcp_unavailable:"),
             "{err}"
         );
     }

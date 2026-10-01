@@ -4,6 +4,7 @@ use super::{
     AgentRunResult, ProviderError,
 };
 use crate::mcp::grant::McpAccess;
+use crate::mcp::wiring::McpServerSpec;
 use crate::sessions::opencode_events::{coppice_run_prompt, extract_result_from_text};
 use async_trait::async_trait;
 use coppice_config::CursorProviderConfig;
@@ -57,7 +58,11 @@ impl AgentProvider for CursorProvider {
 
         if let Some(access) = &input.mcp {
             let state_dir = cursor_state_dir(&input)?;
-            cmd.envs(cursor_mcp_setup(access, &state_dir, &HostEnv::from_process())?);
+            cmd.envs(cursor_mcp_setup(
+                access,
+                &state_dir,
+                &HostEnv::from_process(),
+            )?);
             cmd.envs(access.env());
         }
 
@@ -231,9 +236,7 @@ impl AgentProvider for CursorProvider {
     }
 }
 
-async fn stderr_tail_from_task(
-    stderr_task: tokio::task::JoinHandle<Vec<String>>,
-) -> Vec<String> {
+async fn stderr_tail_from_task(stderr_task: tokio::task::JoinHandle<Vec<String>>) -> Vec<String> {
     stderr_task.await.unwrap_or_default()
 }
 
@@ -321,71 +324,6 @@ impl HostEnv {
     }
 }
 
-/// `<run home>/.cursor/mcp.json`. Serialized from structs so the file matches
-/// the verified layout field for field.
-#[derive(serde::Serialize)]
-struct McpFile<'a> {
-    #[serde(rename = "mcpServers")]
-    mcp_servers: McpServers<'a>,
-}
-
-#[derive(serde::Serialize)]
-struct McpServers<'a> {
-    coppice: McpServer<'a>,
-}
-
-#[derive(serde::Serialize)]
-struct McpServer<'a> {
-    url: &'a str,
-    headers: McpHeaders,
-}
-
-#[derive(serde::Serialize)]
-struct McpHeaders {
-    #[serde(rename = "Authorization")]
-    authorization: &'static str,
-}
-
-impl<'a> McpFile<'a> {
-    fn for_gateway(url: &'a str) -> Self {
-        Self {
-            mcp_servers: McpServers {
-                coppice: McpServer {
-                    url,
-                    headers: McpHeaders {
-                        authorization: "Bearer ${env:COPPICE_MCP_TOKEN}",
-                    },
-                },
-            },
-        }
-    }
-}
-
-/// `<run config dir>/cli-config.json`.
-#[derive(serde::Serialize)]
-struct CliConfigFile {
-    version: u32,
-    permissions: CliPermissions,
-}
-
-#[derive(serde::Serialize)]
-struct CliPermissions {
-    allow: Vec<&'static str>,
-    deny: Vec<&'static str>,
-}
-
-impl CliConfigFile {
-    fn allowing_gateway() -> Self {
-        Self {
-            version: 1,
-            permissions: CliPermissions {
-                allow: vec!["Mcp(coppice:*)"],
-                deny: Vec::new(),
-            },
-        }
-    }
-}
-
 /// Where this run's `HOME` and `CURSOR_CONFIG_DIR` live.
 ///
 /// The CLI stores its `chats` state under `CURSOR_CONFIG_DIR`, so a directory
@@ -400,8 +338,7 @@ impl CliConfigFile {
 /// turn. Both are byte-identical across runs of the same server (neither holds
 /// the token), so concurrent runs on one ticket cannot corrupt each other.
 fn cursor_state_dir(input: &AgentRunInput) -> Result<PathBuf, ProviderError> {
-    let missing =
-        || mcp_unavailable("cursor has no run artifacts dir for its per-run HOME");
+    let missing = || mcp_unavailable("cursor has no run artifacts dir for its per-run HOME");
     let artifacts_dir = input.artifacts_dir.as_deref().ok_or_else(missing)?;
     let segments: [&str; 2] = match (&input.chat_session_id, &input.ticket_id, &input.run_id) {
         (Some(chat_session_id), _, _) => ["chat-sessions", chat_session_id],
@@ -428,15 +365,13 @@ fn cursor_mcp_setup(
     std::fs::create_dir_all(&config_dir)?;
 
     // `${env:…}` is interpolated by the CLI, so the token never hits the file.
+    let spec = McpServerSpec::from_access(access);
     std::fs::write(
         home.join(".cursor").join("mcp.json"),
-        serde_json::to_string(&McpFile::for_gateway(&access.url))?,
+        spec.cursor_mcp_json(),
     )?;
     // Without this allow rule `-p` denies every gateway call at the approval prompt.
-    std::fs::write(
-        config_dir.join("cli-config.json"),
-        serde_json::to_string(&CliConfigFile::allowing_gateway())?,
-    )?;
+    std::fs::write(config_dir.join("cli-config.json"), spec.cursor_cli_config())?;
 
     let mut env = vec![
         ("HOME".to_string(), home.display().to_string()),
@@ -545,8 +480,8 @@ mod tests {
 
     #[test]
     fn extract_result_from_stream_json_done_fixture() {
-        let raw = std::fs::read_to_string(fixtures_root().join("done.jsonl"))
-            .expect("read done.jsonl");
+        let raw =
+            std::fs::read_to_string(fixtures_root().join("done.jsonl")).expect("read done.jsonl");
         let mut assistant_text = String::new();
         for line in raw.lines() {
             let Ok(value) = serde_json::from_str::<serde_json::Value>(line) else {
@@ -646,7 +581,10 @@ mod tests {
         chat.chat_session_id = Some("chat-9".into());
         chat.ticket_id = Some("ticket-7".into());
         let dir = cursor_state_dir(&chat).expect("chat dir");
-        assert!(dir.ends_with("data/artifacts/chat-sessions/chat-9"), "{dir:?}");
+        assert!(
+            dir.ends_with("data/artifacts/chat-sessions/chat-9"),
+            "{dir:?}"
+        );
 
         // Ticket runs resume the newest session for the ticket.
         let mut ticket = run_input();
@@ -721,17 +659,12 @@ mod tests {
         );
 
         let mcp_raw = std::fs::read_to_string(home.join(".cursor").join("mcp.json")).expect("mcp");
-        assert_eq!(
-            mcp_raw,
-            r#"{"mcpServers":{"coppice":{"url":"http://127.0.0.1:5000/mcp","headers":{"Authorization":"Bearer ${env:COPPICE_MCP_TOKEN}"}}}}"#
-        );
+        let spec = McpServerSpec::from_access(&access());
+        assert_eq!(mcp_raw, spec.cursor_mcp_json());
         assert!(!mcp_raw.contains("super-secret-run-token"));
 
         let cli_raw = std::fs::read_to_string(config.join("cli-config.json")).expect("cli config");
-        assert_eq!(
-            cli_raw,
-            r#"{"version":1,"permissions":{"allow":["Mcp(coppice:*)"],"deny":[]}}"#
-        );
+        assert_eq!(cli_raw, spec.cursor_cli_config());
     }
 
     #[test]
@@ -752,7 +685,10 @@ mod tests {
         let env = cursor_mcp_setup(&access(), &run_dir, &host).expect("setup");
         let lookup = |key: &str| env.iter().find(|(k, _)| k == key).map(|(_, v)| v.as_str());
 
-        assert_eq!(lookup("XDG_CONFIG_HOME"), Some(real_xdg.display().to_string().as_str()));
+        assert_eq!(
+            lookup("XDG_CONFIG_HOME"),
+            Some(real_xdg.display().to_string().as_str())
+        );
         // Already-set host values win; the connector does not override them.
         assert_eq!(lookup("GIT_CONFIG_GLOBAL"), None);
         assert_eq!(lookup("GH_CONFIG_DIR"), None);
@@ -760,8 +696,8 @@ mod tests {
 
     #[test]
     fn session_id_extracted_from_init_event() {
-        let raw = std::fs::read_to_string(fixtures_root().join("done.jsonl"))
-            .expect("read done.jsonl");
+        let raw =
+            std::fs::read_to_string(fixtures_root().join("done.jsonl")).expect("read done.jsonl");
         let mut session_sent = false;
         let mut captured_id = None::<String>;
         for line in raw.lines() {
@@ -784,8 +720,8 @@ mod tests {
 
     #[test]
     fn error_result_is_rejected() {
-        let raw = std::fs::read_to_string(fixtures_root().join("error.jsonl"))
-            .expect("read error.jsonl");
+        let raw =
+            std::fs::read_to_string(fixtures_root().join("error.jsonl")).expect("read error.jsonl");
         let mut saw_error = false;
         let mut assistant_text = String::new();
         for line in raw.lines() {
@@ -825,9 +761,7 @@ mod tests {
         }
     }
 
-    fn collect_console_events(
-        messages: &[crate::sessions::LiveMessage],
-    ) -> Vec<serde_json::Value> {
+    fn collect_console_events(messages: &[crate::sessions::LiveMessage]) -> Vec<serde_json::Value> {
         messages
             .iter()
             .filter_map(|msg| match msg {
@@ -841,8 +775,8 @@ mod tests {
     fn streaming_pipeline_publishes_console_events() {
         use crate::sessions::run_registry::RunStreamRegistry;
 
-        let raw = std::fs::read_to_string(fixtures_root().join("done.jsonl"))
-            .expect("read done.jsonl");
+        let raw =
+            std::fs::read_to_string(fixtures_root().join("done.jsonl")).expect("read done.jsonl");
 
         let registry = RunStreamRegistry::new();
         let handle = registry.register(uuid::Uuid::new_v4());
@@ -850,11 +784,7 @@ mod tests {
         publish_fixture_lines(&handle, &raw);
 
         let events = collect_console_events(&handle.buffered_tail());
-        assert_eq!(
-            events.len(),
-            4,
-            "session + 2 text + result"
-        );
+        assert_eq!(events.len(), 4, "session + 2 text + result");
         assert_eq!(events[0]["type"], "cursor.console.session");
         assert_eq!(events[1]["type"], "cursor.console.text");
         assert!(events[1]["markdown"]

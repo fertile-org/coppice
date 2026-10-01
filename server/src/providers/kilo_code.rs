@@ -4,6 +4,7 @@ use super::{
     AgentRunResult, ProviderError,
 };
 use crate::mcp::grant::McpAccess;
+use crate::mcp::wiring::McpServerSpec;
 use crate::sessions::opencode_events::{coppice_run_prompt, extract_result_from_text};
 use async_trait::async_trait;
 use coppice_config::KiloCodeProviderConfig;
@@ -24,20 +25,11 @@ use tokio::sync::watch;
 fn kilo_mcp_setup(access: &McpAccess, run_dir: &Path) -> std::io::Result<Vec<(String, String)>> {
     std::fs::create_dir_all(run_dir)?;
     let path = run_dir.join("kilo-config.json");
-    std::fs::write(
-        &path,
-        serde_json::to_string(&serde_json::json!({
-            "mcp": {
-                "coppice": {
-                    "type": "remote",
-                    "url": access.url,
-                    "enabled": true,
-                    "headers": { "Authorization": "Bearer {env:COPPICE_MCP_TOKEN}" },
-                }
-            }
-        }))?,
-    )?;
-    Ok(vec![("KILO_CONFIG".to_string(), path.display().to_string())])
+    std::fs::write(&path, McpServerSpec::from_access(access).kilo_json())?;
+    Ok(vec![(
+        "KILO_CONFIG".to_string(),
+        path.display().to_string(),
+    )])
 }
 
 /// Kilo Code CLI connector.
@@ -234,9 +226,7 @@ impl AgentProvider for KiloCodeProvider {
         }
 
         extract_result_from_text(&assistant_text).ok_or_else(|| {
-            ProviderError::MissingResult(
-                "no result contract found in kilo-code output".into(),
-            )
+            ProviderError::MissingResult("no result contract found in kilo-code output".into())
         })
     }
 }
@@ -329,6 +319,7 @@ pub(crate) fn extract_assistant_text(value: &Value) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::mcp::protocol::SERVER_NAME;
     use std::path::PathBuf;
 
     fn fixtures_root() -> PathBuf {
@@ -359,7 +350,7 @@ mod tests {
 
         let raw = std::fs::read_to_string(&path).expect("read kilo-config.json");
         let doc: Value = serde_json::from_str(&raw).expect("parse kilo-config.json");
-        let server = &doc["mcp"]["coppice"];
+        let server = &doc["mcp"][SERVER_NAME];
         assert_eq!(server["type"], "remote");
         assert_eq!(server["enabled"], true);
         assert_eq!(server["url"], "http://127.0.0.1:5000/mcp");
@@ -392,8 +383,8 @@ mod tests {
             session_created_tx: None,
             resume_context: None,
             resume_session_id: None,
-                    read_only_tools: false,
-                    mcp: None,
+            read_only_tools: false,
+            mcp: None,
         };
         assert_eq!(
             provider.model_arg(&input).as_deref(),
@@ -423,8 +414,8 @@ mod tests {
             session_created_tx: None,
             resume_context: None,
             resume_session_id: None,
-                    read_only_tools: false,
-                    mcp: None,
+            read_only_tools: false,
+            mcp: None,
         };
         assert_eq!(
             provider.model_arg(&input).as_deref(),
@@ -454,8 +445,8 @@ mod tests {
             session_created_tx: None,
             resume_context: None,
             resume_session_id: None,
-                    read_only_tools: false,
-                    mcp: None,
+            read_only_tools: false,
+            mcp: None,
         };
         assert!(provider.model_arg(&input).is_none());
     }
@@ -466,10 +457,7 @@ mod tests {
             "type": "session.updated",
             "properties": {"sessionID": "kilo_sess_123"}
         });
-        assert_eq!(
-            extract_session_id(&event).as_deref(),
-            Some("kilo_sess_123")
-        );
+        assert_eq!(extract_session_id(&event).as_deref(), Some("kilo_sess_123"));
     }
 
     #[test]
@@ -478,10 +466,7 @@ mod tests {
             "type": "session.idle",
             "properties": {"session": {"id": "kilo_sess_456"}}
         });
-        assert_eq!(
-            extract_session_id(&event).as_deref(),
-            Some("kilo_sess_456")
-        );
+        assert_eq!(extract_session_id(&event).as_deref(), Some("kilo_sess_456"));
     }
 
     #[test]
@@ -519,8 +504,8 @@ mod tests {
 
     #[test]
     fn extract_result_from_stream_json_done_fixture() {
-        let raw = std::fs::read_to_string(fixtures_root().join("done.jsonl"))
-            .expect("read done.jsonl");
+        let raw =
+            std::fs::read_to_string(fixtures_root().join("done.jsonl")).expect("read done.jsonl");
         let mut assistant_text = String::new();
         for line in raw.lines() {
             let Ok(value) = serde_json::from_str::<Value>(line) else {
@@ -563,8 +548,8 @@ mod tests {
 
     #[test]
     fn session_id_extracted_from_fixture() {
-        let raw = std::fs::read_to_string(fixtures_root().join("done.jsonl"))
-            .expect("read done.jsonl");
+        let raw =
+            std::fs::read_to_string(fixtures_root().join("done.jsonl")).expect("read done.jsonl");
         let mut captured_id = None::<String>;
         for line in raw.lines() {
             let Ok(value) = serde_json::from_str::<Value>(line) else {
@@ -578,9 +563,7 @@ mod tests {
         assert_eq!(captured_id.as_deref(), Some("kilo_sess_abc123"));
     }
 
-    fn collect_console_events(
-        messages: &[crate::sessions::LiveMessage],
-    ) -> Vec<serde_json::Value> {
+    fn collect_console_events(messages: &[crate::sessions::LiveMessage]) -> Vec<serde_json::Value> {
         messages
             .iter()
             .filter_map(|msg| match msg {
@@ -607,8 +590,8 @@ mod tests {
     fn streaming_pipeline_publishes_console_events() {
         use crate::sessions::run_registry::RunStreamRegistry;
 
-        let raw = std::fs::read_to_string(fixtures_root().join("done.jsonl"))
-            .expect("read done.jsonl");
+        let raw =
+            std::fs::read_to_string(fixtures_root().join("done.jsonl")).expect("read done.jsonl");
 
         let registry = RunStreamRegistry::new();
         let handle = registry.register(uuid::Uuid::new_v4());
@@ -623,7 +606,10 @@ mod tests {
             .unwrap()
             .contains("Reading .agent/context.md"));
         assert_eq!(events[1]["type"], "kilo.console.result");
-        assert_eq!(events[1]["contract"]["summary"], "Kilo feature implementation complete.");
+        assert_eq!(
+            events[1]["contract"]["summary"],
+            "Kilo feature implementation complete."
+        );
     }
 
     #[test]

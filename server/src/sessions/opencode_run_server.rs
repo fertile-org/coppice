@@ -10,25 +10,18 @@ use std::time::Duration;
 use tokio::process::Child;
 
 use crate::mcp::grant::McpAccess;
+use crate::mcp::wiring::{opencode_base_json, McpServerSpec};
 
 const START_ATTEMPTS: u32 = 3;
 const HEALTH_DEADLINE: Duration = Duration::from_secs(30);
 
 /// The per-run `OPENCODE_CONFIG`. The token stays in the process environment;
 /// OpenCode interpolates `{env:COPPICE_MCP_TOKEN}` into the header.
-pub fn opencode_run_config(access: Option<&McpAccess>) -> serde_json::Value {
-    let mut config = serde_json::json!({ "$schema": "https://opencode.ai/config.json" });
-    if let Some(access) = access {
-        config["mcp"] = serde_json::json!({
-            "coppice": {
-                "type": "remote",
-                "url": access.url,
-                "enabled": true,
-                "headers": { "Authorization": "Bearer {env:COPPICE_MCP_TOKEN}" },
-            }
-        });
+pub fn opencode_run_config(access: Option<&McpAccess>) -> String {
+    match access {
+        Some(access) => McpServerSpec::from_access(access).opencode_json(),
+        None => opencode_base_json(),
     }
-    config
 }
 
 struct RunServer {
@@ -269,6 +262,7 @@ async fn probe_health(base_url: &str) -> anyhow::Result<bool> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::mcp::protocol::SERVER_NAME;
 
     #[test]
     fn run_config_registers_coppice_remote_server_without_plaintext_token() {
@@ -276,18 +270,21 @@ mod tests {
             url: "http://127.0.0.1:5000/mcp".into(),
             token: "secret-run-token".into(),
         };
-        let cfg = opencode_run_config(Some(&access));
-        assert_eq!(cfg["mcp"]["coppice"]["url"], "http://127.0.0.1:5000/mcp");
+        let raw = opencode_run_config(Some(&access));
+        let cfg: serde_json::Value = serde_json::from_str(&raw).expect("parse config");
+        assert_eq!(cfg["mcp"][SERVER_NAME]["url"], "http://127.0.0.1:5000/mcp");
         assert_eq!(
-            cfg["mcp"]["coppice"]["headers"]["Authorization"],
+            cfg["mcp"][SERVER_NAME]["headers"]["Authorization"],
             "Bearer {env:COPPICE_MCP_TOKEN}"
         );
-        assert!(!cfg.to_string().contains("secret-run-token"));
+        assert!(!raw.contains("secret-run-token"));
     }
 
     #[test]
     fn run_config_without_access_has_no_mcp() {
-        assert!(opencode_run_config(None).get("mcp").is_none());
+        let cfg: serde_json::Value =
+            serde_json::from_str(&opencode_run_config(None)).expect("parse config");
+        assert!(cfg.get("mcp").is_none());
     }
 
     fn sleeper(secs: &str) -> Child {

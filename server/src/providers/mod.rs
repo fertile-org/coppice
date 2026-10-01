@@ -81,10 +81,6 @@ pub struct AgentRunInput {
 /// Read-only allowlist for connectors that can enforce it (claude-code).
 pub const CHAT_READ_ONLY_TOOLS: &str = "Read,Glob,Grep,WebFetch,WebSearch";
 
-/// Allowlist pattern for the gateway's tools under connectors that namespace
-/// MCP tools as `mcp__<server>__<tool>` (claude-code).
-pub const COPPICE_MCP_TOOLS: &str = "mcp__coppice__*";
-
 /// Build an **absolute** path under the artifacts dir.
 ///
 /// `storage.artifacts_dir` is usually relative (`./data/artifacts`), and every
@@ -313,10 +309,12 @@ mod tests {
 
     #[test]
     fn resume_invalid_detection() {
-        assert!(is_resume_session_invalid(&ProviderError::ResumeSessionInvalid("x".into())));
         assert!(is_resume_session_invalid(
-            &ProviderError::InvalidInput("session not found".into())
+            &ProviderError::ResumeSessionInvalid("x".into())
         ));
+        assert!(is_resume_session_invalid(&ProviderError::InvalidInput(
+            "session not found".into()
+        )));
         assert!(is_resume_session_invalid(&ProviderError::MissingResult(
             "Error: unknown session abc".into()
         )));
@@ -458,7 +456,8 @@ mod tests {
         let input = probe_input();
         let err = run_dir(&input, "cursor").expect_err("no artifacts dir");
         assert!(
-            err.to_string().contains("mcp_unavailable: cursor has no run artifacts dir"),
+            err.to_string()
+                .contains("mcp_unavailable: cursor has no run artifacts dir"),
             "{err}"
         );
     }

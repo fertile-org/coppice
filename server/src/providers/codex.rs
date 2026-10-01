@@ -1,6 +1,9 @@
 use super::codex_console::CodexConsolePublisher;
-use super::{worktree_dir_from_context, AgentProvider, AgentRunInput, AgentRunResult, ProviderError};
+use super::{
+    worktree_dir_from_context, AgentProvider, AgentRunInput, AgentRunResult, ProviderError,
+};
 use crate::mcp::grant::McpAccess;
+use crate::mcp::wiring::McpServerSpec;
 use crate::sessions::opencode_events::{coppice_run_prompt, extract_result_from_text};
 use async_trait::async_trait;
 use coppice_config::CodexProviderConfig;
@@ -16,12 +19,7 @@ use tokio::sync::watch;
 ///
 /// Unverified against a live CLI — see `docs/providers/README.md`.
 fn codex_mcp_args(access: &McpAccess) -> Vec<String> {
-    vec![
-        "-c".to_string(),
-        format!("mcp_servers.coppice.url=\"{}\"", access.url),
-        "-c".to_string(),
-        "mcp_servers.coppice.bearer_token_env_var=\"COPPICE_MCP_TOKEN\"".to_string(),
-    ]
+    McpServerSpec::from_access(access).codex_args()
 }
 
 pub struct CodexProvider {
@@ -91,9 +89,7 @@ impl AgentProvider for CodexProvider {
         // The child process inherits that environment directly — same model as claude-code
         // and opencode. Coppice does not inject or strip credentials.
 
-        let mut child = cmd
-            .spawn()
-            .map_err(ProviderError::Io)?;
+        let mut child = cmd.spawn().map_err(ProviderError::Io)?;
 
         let mut stdin = child.stdin.take().expect("piped stdin");
         let stdout = child.stdout.take().expect("piped stdout");
@@ -206,9 +202,7 @@ impl AgentProvider for CodexProvider {
         }
 
         extract_result_from_text(&assistant_text).ok_or_else(|| {
-            ProviderError::MissingResult(
-                "no result contract found in codex output".into(),
-            )
+            ProviderError::MissingResult("no result contract found in codex output".into())
         })
     }
 }
@@ -241,7 +235,10 @@ fn extract_assistant_text(value: &serde_json::Value) -> Option<String> {
             .filter(|id| !id.trim().is_empty())?;
         let item_type = item.get("type").and_then(|v| v.as_str())?;
         if item_type == "agent_message" {
-            return item.get("text").and_then(|v| v.as_str()).map(str::to_string);
+            return item
+                .get("text")
+                .and_then(|v| v.as_str())
+                .map(str::to_string);
         }
     }
     None
@@ -258,8 +255,8 @@ mod tests {
 
     #[test]
     fn extract_result_from_stream_json_done_fixture() {
-        let raw = std::fs::read_to_string(fixtures_root().join("done.jsonl"))
-            .expect("read done.jsonl");
+        let raw =
+            std::fs::read_to_string(fixtures_root().join("done.jsonl")).expect("read done.jsonl");
         let mut assistant_text = String::new();
         for line in raw.lines() {
             let Ok(value) = serde_json::from_str::<serde_json::Value>(line) else {
@@ -370,22 +367,14 @@ mod tests {
             token: "super-secret-run-token".into(),
         };
         let args = codex_mcp_args(&access);
-        assert_eq!(
-            args,
-            vec![
-                "-c".to_string(),
-                r#"mcp_servers.coppice.url="http://127.0.0.1:5000/mcp""#.to_string(),
-                "-c".to_string(),
-                r#"mcp_servers.coppice.bearer_token_env_var="COPPICE_MCP_TOKEN""#.to_string(),
-            ]
-        );
+        assert_eq!(args, McpServerSpec::from_access(&access).codex_args());
         assert!(!args.join(" ").contains("super-secret-run-token"));
     }
 
     #[test]
     fn thread_id_extracted_from_thread_started_event() {
-        let raw = std::fs::read_to_string(fixtures_root().join("done.jsonl"))
-            .expect("read done.jsonl");
+        let raw =
+            std::fs::read_to_string(fixtures_root().join("done.jsonl")).expect("read done.jsonl");
         let mut captured_id = None::<String>;
         for line in raw.lines() {
             let Ok(value) = serde_json::from_str::<serde_json::Value>(line) else {
