@@ -8,10 +8,11 @@ Coppice is a monorepo with three deliverables and shared deploy/test tooling:
 server/   Rust API — Axum, SQLx, Tokio
 web/      React SPA — Vite, TanStack Query, Tailwind
 cli/      Rust operator CLI (workspace member)
+connectors/  Static connector descriptors shared by server, CLI, and web (via the API)
 deploy/   Docker Compose, Dockerfiles, default config
 ```
 
-Rust workspace: root `Cargo.toml` with members `server`, `cli`. `web/` is an independent Node package.
+Rust workspace: root `Cargo.toml` with members `config`, `connectors`, `server`, `cli`. `web/` is an independent Node package.
 
 ## Server layers
 
@@ -24,7 +25,8 @@ server/src/
   knowledge/    Full-text retrieval, compaction context and candidate contract (M06)
   mcp/          MCP gateway at /mcp: per-run tokens, tool catalog, tool handlers (M10)
   middleware/   Session auth, CSRF, admin checks
-  providers/    AgentProvider trait + mock / opencode / claude-code / codex / cursor connectors
+  providers/    AgentProvider trait, connector factories, CLI runner, mock / opencode / claude-code / codex / cursor / kilo-code adapters
+  plugins/      Plugin folder parsing (capability parsers), discovery, skill catalog (M10)
   workers/      In-process Tokio job workers (M03)
   storage/      Filesystem artifact store (attachments)
   config/       Figment-based AppConfig
@@ -65,12 +67,15 @@ All agent execution goes through `AgentProvider`; orchestration lives in service
 
 ```text
 providers/mod.rs          trait + AgentRunResult contract
-providers/registry.rs     ConnectorRegistry — builds providers from config
+providers/registry.rs     FACTORIES + ConnectorRegistry — builds providers and model catalogs from config
+providers/models.rs       ModelCatalog per connector (configured model providers, model listing)
+providers/cli_runner.rs   shared subprocess loop for the streaming-JSON CLI adapters
 providers/mock.rs         deterministic fixtures from fixtures/agent-responses/
 providers/opencode.rs     HTTP serve-mode connector (host testing, API keys)
 providers/claude_code.rs  subprocess connector (claude -p, host-managed auth)
 providers/codex.rs         subprocess connector (codex exec, host-managed auth)
 providers/cursor.rs        subprocess connector (agent -p, host-managed auth)
+providers/kilo_code.rs     subprocess connector (kilo run, host-managed auth)
 services/run_service.rs   create/cancel/finish runs
 services/job_service.rs   enqueue, claim (SKIP LOCKED), mark done/failed
 services/repo_service.rs       global registered repos (local_path, verify)
@@ -84,6 +89,27 @@ workers/job_worker.rs     poll queue, run pipeline, spawn at server startup
 
 **Run pipeline (worker):** claim pending job → load run/ticket/agent/repo → validate repo `local_path` → mark running → ensure worktree from registered path (`WORKTREES_PATH/TICKET-{id}-{agent}-{repo}/`) → write context file → mint a gateway token → call `AgentProvider::run` → apply result contract → revoke the token → finish run.
 
+## Connector layer
+
+Connector facts live in one static table, `connectors/src/lib.rs` (`coppice_connectors::all()` / `get(id)`, id constants such as `MOCK`). Each `ConnectorDescriptor` carries the id (matches `[agent.connectors.<id>]` and `agents.connector`), display name, binary, install/auth hints, default model providers, `mcp_wiring` (`McpWiring`), `mcp_tool_names` (`ToolNameStyle`, console labels only), `console` (`ConsoleKind`: `OpenCodeSession` / `Structured` / `Plain`), and `caps` (`read_only_tools`, `chat_resume`, `session_events`, `run_resume`, `run_server`). The crate depends only on `serde`.
+
+- **Server.** Behavior checks read the descriptor (`caps`, `console`), never a connector-id string. A unit test in `providers/registry.rs` fails on connector-id literals in `server/src` outside `providers/`, `sessions/opencode*`, and tests.
+- **Registry.** `providers/registry.rs` has one `FACTORIES` list of `ConnectorFactory { id, build }`; `build(&AppConfig, &FactoryDeps)` returns `None` when the connector is disabled, else `BuiltConnector { provider, models }`. Startup asserts factories and descriptors match one-to-one.
+- **Models.** `ModelCatalog` (`providers/models.rs`) reports `model_providers()` from config and `list_models(model_provider)`. Agent health checks that an agent's `model_provider` is in `model_providers()` unless `checks_model_provider()` is false (mock). `GET …/models` maps errors to 502 `"{id} models: {err}"`.
+- **API / web.** `GET /api/connectors` returns `{ id, displayName, console, caps: { readOnlyTools, chatResume } }` per configured connector; `TicketDrawer` picks the live view from `console` (unknown connector → plain).
+- **CLI.** `coppice connector …` reads `coppice_connectors::all()` / `get()`.
+- **MCP wiring.** `mcp/wiring.rs` `McpServerSpec::from_access` renders the gateway entry in each style (`claude_json`, `cursor_mcp_json`, `cursor_cli_config`, `opencode_json`, `kilo_json`, `codex_args`). The server name `coppice` and token env `COPPICE_MCP_TOKEN` live only there and in `mcp/grant.rs` (`McpAccess::env`).
+- **CLI runner.** `providers/cli_runner.rs` `run_cli(CliInvocation, &mut dyn LineHandler, RunIo)` (or `run_cli_with_stdin` to feed a prompt on stdin) spawns with `kill_on_drop`, mirrors stderr to the adapter's tracing target (keeping the first 40 lines), races cancel and deadline, forwards the first session id, and returns `CliExit` or `CliError`. Adapters keep their own error wording by mapping those, then read final text from their `LineHandler`. OpenCode and mock are custom `AgentProvider`s.
+
+### Adding a connector
+
+1. Descriptor entry in `connectors/src/lib.rs` (plus an id constant).
+2. Config struct + field in `AgentConnectorsConfig` (`config/src/lib.rs`).
+3. Adapter in `server/src/providers/`: a `CliInvocation` builder + `LineHandler` driven by `run_cli` (or a custom `AgentProvider`), and a `ModelCatalog`.
+4. Factory entry in `FACTORIES`.
+5. A `McpServerSpec` renderer only if it needs a new `McpWiring` style.
+6. A doc in `docs/providers/` and a row in its README.
+
 ## MCP gateway (M10)
 
 Runs are **tool-first**: `.agent/context.md` says who the agent is and what the task is, and everything else is pulled through tools instead of being embedded.
@@ -92,10 +118,20 @@ Runs are **tool-first**: `.agent/context.md` says who the agent is and what the 
 mcp/server.rs      streamable HTTP endpoint at POST/GET /mcp (token auth, not session/CSRF)
 mcp/token.rs       mint, verify and revoke per-run tokens
 mcp/grant.rs       McpAccess (url + token) and the RunToolGrant lifetime guard
-mcp/catalog.rs     tool list per session: profile matrix ∩ enabled plugins
+mcp/catalog.rs     core tools per context profile (profile matrix)
+mcp/source.rs      ToolSource trait; CoreToolSource, SkillToolSource
+mcp/registry.rs    ToolRegistry: merge sources, profile filter, denial, limits, call logging
+mcp/host.rs        RunToolHost: one token's view of the registry (ToolHost impl)
+mcp/wiring.rs      McpServerSpec rendered per connector wiring style
 mcp/tools/         ticket_get, ticket_comments, ticket_runs, board_agents, knowledge_search,
                    comment_post, skill_list, skill_load, result_submit
 ```
+
+**Tool sources.** Tools come from an ordered list of `ToolSource`s (`kind`, async `list(scope)`, `call(ctx, tool, args)` → `ToolResult` of text/image content blocks). `ToolRegistry::builtin()` (held in `AppState::tools`) registers Core, then Skill; plugin MCP tools become a third source in M10 Part 2b. `ToolRegistry::call(state, scope, name, args)` is the only router: it merges sources (duplicate name → first wins, warned once), drops non-read-only tools for `human_chat` / `conversation` except `result_submit`, denies unknown names with `denied: tool "<name>" is not available for this run`, applies `mcp.call_timeout_secs` and `mcp.max_output_bytes`, and logs each call to `run_tool_calls` with `source` (`core` / `skill` / `plugin`) and `plugin_id` for plugin-owned tools.
+
+### Adding a tool source
+
+Implement `ToolSource` in `mcp/` and add it to the list in `ToolRegistry::builtin()`. Router, tokens, protocol, and logging stay untouched. Sources that do I/O in `list` (e.g. a plugin MCP server) should bound it, since every `tools/list` and call resolves all sources.
 
 The gateway is authenticated by a per-run bearer token, minted when the run starts and revoked when it finishes, fails, or is stopped. Base URL comes from `mcp.base_url` (default `http://127.0.0.1:<server.port>/mcp`), which is correct in Docker, on the desktop, and in the cloud because the CLIs run beside the server.
 
@@ -108,7 +144,8 @@ Agents finish with `result_submit`; a submitted result wins over a final JSON bl
 Plugins are Claude Code / Cursor format folders (or skills-only folders) that load unchanged. Parsing and filesystem work live in `plugins/`; state, rules, and enablement live in the service.
 
 ```text
-plugins/manifest.rs         parse a plugin folder; list unsupported parts (commands, hooks, …)
+plugins/manifest.rs         parse_plugin: plugin.json + one CapabilityParser per capability
+plugins/capability.rs       skills, mcpServers (full stdio/http spec), agents/commands/hooks (unsupported)
 plugins/discover.rs         scan one plugin dir (the dir itself, else each direct child)
 plugins/git_install.rs      URL allowlist + shallow clone (the only server-side git clone)
 plugins/skills.rs           SkillCatalog: served skills of enabled plugins, ids `<plugin>:<skill>`
@@ -123,6 +160,13 @@ sessions/opencode_run_server.rs  one `opencode serve` per OpenCode run
 - **Token snapshot.** When a run starts, the worker reads the agent's assigned plugins that are enabled and `ok` and stores those ids in the run's MCP token scope. `skill_list` / `skill_load` serve built-in skills plus the catalog entries of that snapshot, so plugins assigned mid-run are not picked up until the next run. Disabling a plugin removes it from the catalog at once, including for in-flight runs.
 - **Assignment.** `PUT /api/agents/{id}/plugins` replaces the set and rejects any id that is not enabled + `ok`. Preset `default_plugins` (names) are assigned on agent create, skipping unavailable ones.
 - **OpenCode.** Each OpenCode run gets its own `opencode serve` process with a per-run `OPENCODE_CONFIG` pointing at the gateway; the token stays in that process's env. The process is killed when the run ends.
+- **Capabilities.** `parse_plugin` runs one `CapabilityParser` (`KEY`, `parse(root, plugin_json, layout)`) per capability. A parser returns `CapabilityOutcome::Absent`, `Supported(output)`, `Unsupported(reason)` (recorded in the manifest's `unsupported` as `{ key, reason }`), or `Invalid(reason)` (the whole plugin is `invalid`). `McpServersCapability` reads `.mcp.json`, else the inline `plugin.json` `mcpServers` object (`.mcp.json` wins), into `McpServerEntry { name, transport: Stdio | Http | Unsupported { kind }, error }` with `${…}` placeholders kept verbatim. An unreadable/non-JSON `.mcp.json` or a non-object `mcpServers` makes the plugin invalid; a malformed single entry becomes `Unsupported { kind: "unknown" }` with `error` set. Older stored manifests still deserialize until the startup rescan rewrites them. The plugins API keeps `mcpServers: [{ name, kind }]` and `unsupported: [key]` — commands, env, URLs, and headers are never exposed.
+
+### Adding a plugin capability
+
+1. A `CapabilityParser` in `plugins/capability.rs`, called from `parse_plugin`, and a `PluginManifest` field.
+2. Optionally a `ToolSource` that serves it at run time, scoped by `scope.plugin_ids`.
+3. The plugin card renders the new section.
 
 ## Governed knowledge (M06)
 
@@ -175,7 +219,7 @@ Visual design tokens and palette: `docs/web/DESIGN.md`.
 
 ## CLI
 
-`cli/` — operator CLI: migrate, health, bootstrap, `server start`, `web start`. Shares TOML config with the server. `coppice web start` serves the built SPA and proxies `/api` to the API.
+`cli/` — operator CLI: migrate, health, bootstrap, `server start`, `web start`, `connector …` (install/doctor/list from the `connectors` descriptors). Shares TOML config with the server. `coppice web start` serves the built SPA and proxies `/api` to the API.
 
 ## Config & artifacts
 

@@ -23,6 +23,7 @@
 | `server/` | Rust API (Axum, SQLx) |
 | `web/` | React SPA (Vite, TanStack Query) |
 | `cli/` | Operator CLI (`coppice migrate`, `bootstrap`, `health`, `connector`) |
+| `connectors/` | Static connector descriptors (ids, capabilities, MCP wiring, console kind) shared by server and CLI |
 | `deploy/` | Docker Compose + Dockerfiles |
 | `e2e/` | Browser smoke tests |
 | `docs/` | Philosophy, milestones, dev docs |

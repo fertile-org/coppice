@@ -12,6 +12,8 @@ Coppice runs agents through **connectors**. Each connector talks to a different 
 | `kilo-code` | [kilo-code.md](kilo-code.md) | Kilo CLI (`kilo`) |
 | `shell` | [shell.md](shell.md) | Deferred |
 
+**Source of truth.** Connector facts (id, binary, auth hints, MCP wiring style, live console kind, capabilities such as chat resume and read-only enforcement) live in one descriptor table, [`connectors/src/lib.rs`](../../connectors/src/lib.rs), read by the server, the `coppice connector` CLI, and the web (through `GET /api/connectors`). The tables on this page describe it; when they disagree, the descriptor wins. Layer overview: [architecture.md § Connector layer](../architecture.md#connector-layer).
+
 ## Connectors vs model providers vs models
 
 | Layer | Example | Where you set it |
@@ -97,4 +99,4 @@ Design: [Agent Chat provider session resume](../superpowers/specs/2026-09-28-age
 
 ## Adding a connector
 
-See [architecture.md](../architecture.md) (server `providers/`, thin API handlers) and the existing docs above as templates. Prefer a dedicated provider module and live model listing when the CLI supports it.
+Follow the checklist in [architecture.md § Adding a connector](../architecture.md#adding-a-connector): descriptor entry, config struct, adapter (`run_cli` + `LineHandler`, or a custom `AgentProvider`) with a `ModelCatalog`, `FACTORIES` entry, and a wiring renderer only for a new MCP style. Use the existing docs above as templates. Prefer live model listing when the CLI supports it.

@@ -134,10 +134,11 @@ pub struct BuiltConnector {
 pub trait ModelCatalog: Send + Sync {
     fn model_providers(&self) -> &[String];                 // from the connector's config
     async fn list_models(&self, model_provider: &str) -> anyhow::Result<Vec<ModelInfo>>;
+    fn checks_model_provider(&self) -> bool { true }        // as built: false for mock
 }
 ```
 
-The health check becomes one generic rule (connector configured; `model_provider`, when set, is in `model_providers()`), with today's messages. `GET …/models` maps errors to 502 with `"{id} models: {err}"` (today's wording for every connector).
+The health check becomes one generic rule (connector configured; `model_provider`, when set, is in `model_providers()` unless `checks_model_provider()` is false), with today's messages. `GET …/models` maps errors to 502 with `"{id} models: {err}"` (today's wording for every connector).
 
 `ConnectorRegistry::from_config` iterates one `FACTORIES` list. A startup assertion (and unit test) checks every factory id has a descriptor and every descriptor has a factory. `model_providers_for` and the five `*_model_providers` fields go away.
 
@@ -167,6 +168,8 @@ impl McpServerSpec {
 }
 ```
 
+As built, there is no `McpServerSpec::env`: the token env stays `McpAccess::env()` in `mcp/grant.rs` (the other allowed home of `"COPPICE_MCP_TOKEN"`).
+
 Snapshot tests pin each renderer to the exact bytes adapters write today, then adapters switch to the renderer. The server name `"coppice"` and the token env name exist only here (and in `protocol::SERVER_NAME`, which the spec reuses).
 
 ### CLI runner
@@ -184,6 +187,7 @@ pub trait LineHandler: Send {
 }
 
 pub async fn run_cli(inv: CliInvocation, handler: &mut dyn LineHandler, io: RunIo) -> Result<CliExit, CliError>;
+// As built: run_cli_with_stdin(inv, stdin: Option<String>, handler, io) also exists (codex feeds the prompt on stdin).
 // RunIo: cancel_rx, session_created_tx, stderr_target (tracing target, e.g. "cursor.stderr")
 // CliExit { status: ExitStatus, stderr_tail: Vec<String> /* first 40 lines */ }
 // CliError: Spawn(io::Error) | Cancelled | TimedOut { stderr_tail } | Io(io::Error)
@@ -244,7 +248,7 @@ pub struct ToolResult { pub content: Vec<ToolContent>, pub is_error: bool }
 - **Limits:** per-call timeout, output cap with the existing truncation suffix (applied to text blocks).
 - **Logging:** `run_tool_calls` gets `source` from the tool and `plugin_id` when set.
 
-`ToolHost::list` becomes `async fn list(&self) -> Vec<ToolDefinition>`; `ToolHost::call` returns `ToolResult`; `protocol.rs` renders content blocks (`{type:"text",text}` / `{type:"image",data,mimeType}`).
+As built, `ToolRegistry::call(state, scope, name, args)` takes the app state and token scope and builds the `ToolCtx` itself (after the denial check). `ToolHost::list` becomes `async fn list(&self) -> Vec<ToolDefinition>`; `ToolHost::call` returns `ToolResult`; `protocol.rs` renders content blocks (`{type:"text",text}` / `{type:"image",data,mimeType}`).
 
 ### Adding a tool source (after this plan)
 
@@ -255,7 +259,7 @@ Implement `ToolSource`, register it in the registry builder. Router, tokens, pro
 `server/src/plugins/capability.rs`:
 
 ```rust
-pub enum CapabilityOutcome<T> { Absent, Supported(T), Unsupported(String /* reason */) }
+pub enum CapabilityOutcome<T> { Absent, Supported(T), Unsupported(String /* reason */), Invalid(String /* plugin is invalid */) }
 
 pub trait CapabilityParser {
     type Output;
@@ -276,7 +280,7 @@ pub trait CapabilityParser {
   }
   ```
 
-  Values keep their `${…}` placeholders (substituted only when Part 2b starts a server). A malformed `.mcp.json` keeps today's ruling: the plugin is `invalid`.
+  Values keep their `${…}` placeholders (substituted only when Part 2b starts a server). A malformed `.mcp.json` keeps today's ruling: the plugin is `invalid`. As built: `.mcp.json` wins over the inline object; an unreadable/non-JSON `.mcp.json` or a non-object `mcpServers` returns `Invalid` (plugin `invalid`); a malformed single entry becomes `Unsupported { kind: "unknown" }` with `error` set.
 - `CommandsCapability`, `AgentsCapability`, `HooksCapability` — report `Unsupported("not supported yet")` when the directory exists.
 
 `parse_plugin` calls each parser and assembles the typed `PluginManifest` (`skills`, `mcp_servers`, `unsupported: Vec<UnsupportedPart { key, reason }>`). Old stored manifests (`mcpServers[].kind`, `unsupported: [String]`) still deserialize (missing `transport` → `Unsupported { kind: "unknown" }`; a string unsupported entry → `{ key, reason: "not supported yet" }`) until the startup rescan rewrites them.
