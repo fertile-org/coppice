@@ -352,7 +352,149 @@ async fn mcp_internal_error_hides_details() {
     let host = RunToolHost::new(Arc::new(state), scope);
     let out = host.call("board_agents", json!({})).await;
     assert!(out.is_error);
-    assert_eq!(out.text, "internal error");
+    assert_eq!(result_text(&out), "internal error");
+}
+
+fn result_text(result: &coppice_server::mcp::protocol::ToolResult) -> &str {
+    use coppice_server::mcp::protocol::ToolContent;
+    match result.content.as_slice() {
+        [ToolContent::Text(text)] => text,
+        other => panic!("expected one text block, got {other:?}"),
+    }
+}
+
+async fn tool_call_sources(
+    pool: &PgPool,
+    run_id: Uuid,
+) -> Vec<(String, String, String, Option<Uuid>)> {
+    sqlx::query_as(
+        "SELECT tool, source, status, plugin_id FROM run_tool_calls WHERE run_id = $1 ORDER BY created_at",
+    )
+    .bind(run_id)
+    .fetch_all(pool)
+    .await
+    .unwrap()
+}
+
+fn host_scope(
+    fx: &RunFixture,
+    profile: ContextProfile,
+) -> coppice_server::mcp::token::RunToolScope {
+    coppice_server::mcp::token::RunToolScope {
+        token_id: Uuid::new_v4(),
+        run_id: fx.scope.run_id,
+        agent_id: fx.scope.agent_id,
+        ticket_id: fx.scope.ticket_id,
+        chat_session_id: None,
+        board_id: fx.scope.board_id,
+        profile,
+        job_type: "work_on_ticket".into(),
+        compaction_ticket_ids: vec![],
+        plugin_ids: vec![],
+    }
+}
+
+struct FakePluginSource {
+    plugin_id: Uuid,
+}
+
+#[async_trait::async_trait]
+impl coppice_server::mcp::source::ToolSource for FakePluginSource {
+    fn kind(&self) -> coppice_server::mcp::source::SourceKind {
+        coppice_server::mcp::source::SourceKind::Plugin
+    }
+
+    async fn list(
+        &self,
+        _scope: &coppice_server::mcp::token::RunToolScope,
+    ) -> Vec<coppice_server::mcp::source::SourcedTool> {
+        vec![coppice_server::mcp::source::SourcedTool {
+            def: coppice_server::mcp::protocol::ToolDefinition {
+                name: "plugin_echo".into(),
+                description: "Echo".into(),
+                input_schema: json!({"type": "object"}),
+                read_only: true,
+            },
+            source: coppice_server::mcp::source::SourceKind::Plugin,
+            plugin_id: Some(self.plugin_id),
+            key: "fake/echo".into(),
+        }]
+    }
+
+    async fn call(
+        &self,
+        _ctx: &coppice_server::mcp::tools::ToolCtx<'_>,
+        tool: &coppice_server::mcp::source::SourcedTool,
+        args: Value,
+    ) -> Result<coppice_server::mcp::protocol::ToolResult, coppice_server::mcp::tools::ToolError>
+    {
+        Ok(coppice_server::mcp::protocol::ToolResult::text(
+            format!("{} {}", tool.key, args["msg"].as_str().unwrap_or("")),
+            false,
+        ))
+    }
+}
+
+#[tokio::test]
+async fn denied_text_unchanged() {
+    use coppice_server::mcp::host::RunToolHost;
+    use coppice_server::mcp::protocol::ToolHost;
+
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let fx = run_fixture().await;
+    let host = RunToolHost::new(fx.state.clone(), host_scope(&fx, ContextProfile::HumanChat));
+    let out = host.call("nope", json!({})).await;
+    assert!(out.is_error);
+    assert_eq!(
+        result_text(&out),
+        "denied: tool \"nope\" is not available for this run"
+    );
+    assert_eq!(
+        tool_call_sources(&fx.pool, fx.scope.run_id).await,
+        vec![("nope".into(), "core".into(), "denied".into(), None)]
+    );
+}
+
+#[tokio::test]
+async fn fake_source_call_logs_source_and_plugin_id() {
+    use coppice_server::mcp::host::RunToolHost;
+    use coppice_server::mcp::protocol::ToolHost;
+    use coppice_server::mcp::registry::ToolRegistry;
+    use coppice_server::mcp::source::{CoreToolSource, SkillToolSource};
+
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let fx = run_fixture().await;
+    let plugin_id = Uuid::new_v4();
+    let mut state = (*fx.state).clone();
+    state.tools = Arc::new(ToolRegistry::new(vec![
+        Arc::new(CoreToolSource),
+        Arc::new(SkillToolSource),
+        Arc::new(FakePluginSource { plugin_id }),
+    ]));
+    let host = RunToolHost::new(Arc::new(state), host_scope(&fx, ContextProfile::Full));
+
+    let names: Vec<String> = host.list().await.into_iter().map(|d| d.name).collect();
+    assert!(names.contains(&"plugin_echo".to_string()), "{names:?}");
+    assert!(names.contains(&"board_agents".to_string()), "{names:?}");
+
+    let out = host.call("plugin_echo", json!({"msg": "hi"})).await;
+    assert!(!out.is_error);
+    assert_eq!(result_text(&out), "fake/echo hi");
+    assert_eq!(
+        tool_call_sources(&fx.pool, fx.scope.run_id).await,
+        vec![(
+            "plugin_echo".into(),
+            "plugin".into(),
+            "ok".into(),
+            Some(plugin_id)
+        )]
+    );
 }
 
 #[tokio::test]
@@ -427,6 +569,12 @@ async fn skill_load_returns_body_and_logs_skill_source() {
             ("skill_load".into(), "skill".into(), "error".into()),
         ]
     );
+    assert!(tool_call_sources(&fx.pool, fx.scope.run_id)
+        .await
+        .iter()
+        .all(|(tool, source, _, plugin_id)| tool == "skill_load"
+            && source == "skill"
+            && plugin_id.is_none()));
 }
 
 // ---- Task 4: per-run token lifecycle + mock tool calls ----

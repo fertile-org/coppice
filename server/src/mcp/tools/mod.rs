@@ -54,7 +54,5 @@ pub async fn dispatch(tool: CoreTool, ctx: &ToolCtx<'_>, args: Value) -> Result<
         CoreTool::KnowledgeSearch => knowledge::call_knowledge_search(ctx, args).await,
         CoreTool::CommentPost => comments::call_comment_post(ctx, args).await,
         CoreTool::ResultSubmit => result::call_result_submit(ctx, args).await,
-        CoreTool::SkillList => skills::call_skill_list(ctx, args).await,
-        CoreTool::SkillLoad => skills::call_skill_load(ctx, args).await,
     }
 }

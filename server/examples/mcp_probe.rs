@@ -11,7 +11,7 @@ use axum::{
     routing::{get, post},
     Json, Router,
 };
-use coppice_server::mcp::protocol::{handle_rpc, ToolDefinition, ToolHost, ToolOutput};
+use coppice_server::mcp::protocol::{handle_rpc, ToolDefinition, ToolHost, ToolResult};
 use serde_json::{json, Value};
 
 const TOKEN: &str = "probe-token";
@@ -20,7 +20,7 @@ struct ProbeHost;
 
 #[async_trait::async_trait]
 impl ToolHost for ProbeHost {
-    fn list(&self) -> Vec<ToolDefinition> {
+    async fn list(&self) -> Vec<ToolDefinition> {
         vec![ToolDefinition {
             name: "ping".into(),
             description: "Reply with pong and the given message.".into(),
@@ -33,18 +33,12 @@ impl ToolHost for ProbeHost {
         }]
     }
 
-    async fn call(&self, name: &str, args: Value) -> ToolOutput {
+    async fn call(&self, name: &str, args: Value) -> ToolResult {
         if name != "ping" {
-            return ToolOutput {
-                text: format!("unknown tool {name}"),
-                is_error: true,
-            };
+            return ToolResult::text(format!("unknown tool {name}"), true);
         }
         let message = args.get("message").and_then(Value::as_str).unwrap_or("");
-        ToolOutput {
-            text: format!("pong {message}"),
-            is_error: false,
-        }
+        ToolResult::text(format!("pong {message}"), false)
     }
 }
 

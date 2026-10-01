@@ -86,6 +86,7 @@ async fn main() -> anyhow::Result<()> {
         agent_templates,
         secret_store: coppice_server::crypto::SecretStore::from_master_key(&config.secrets.master_key),
         skills,
+        tools: coppice_server::AppState::builtin_tool_registry(),
         config: config.clone(),
         db: Some(db),
     });

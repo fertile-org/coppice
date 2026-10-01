@@ -12,11 +12,20 @@ pub enum CoreTool {
     KnowledgeSearch,
     CommentPost,
     ResultSubmit,
-    SkillList,
-    SkillLoad,
 }
 
 impl CoreTool {
+    const ALL: [Self; 8] = [
+        Self::BoardAgents,
+        Self::TicketGet,
+        Self::TicketComments,
+        Self::TicketRuns,
+        Self::TicketSearch,
+        Self::KnowledgeSearch,
+        Self::CommentPost,
+        Self::ResultSubmit,
+    ];
+
     pub fn name(self) -> &'static str {
         match self {
             Self::BoardAgents => "board_agents",
@@ -27,13 +36,11 @@ impl CoreTool {
             Self::KnowledgeSearch => "knowledge_search",
             Self::CommentPost => "comment_post",
             Self::ResultSubmit => "result_submit",
-            Self::SkillList => "skill_list",
-            Self::SkillLoad => "skill_load",
         }
     }
 
-    pub fn is_skill(self) -> bool {
-        matches!(self, Self::SkillList | Self::SkillLoad)
+    pub fn from_name(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|t| t.name() == name)
     }
 
     pub fn definition(self) -> ToolDefinition {
@@ -106,16 +113,6 @@ impl CoreTool {
                 "Submit the final result for this run. Returns validation errors and warnings; fix and resubmit if it reports errors.",
                 object(result_submit_properties(), &["status", "summary"]),
                 false,
-            ),
-            Self::SkillList => (
-                "List skills available to this run (name, description).",
-                object(json!({}), &[]),
-                true,
-            ),
-            Self::SkillLoad => (
-                "Load a skill's instructions and its absolute folder path.",
-                object(json!({ "name": { "type": "string" } }), &["name"]),
-                true,
             ),
         };
         ToolDefinition {
@@ -193,7 +190,7 @@ fn ticket_id_prop() -> Value {
     json!({ "type": "string", "description": "Ticket id; defaults to the current ticket." })
 }
 
-fn object(properties: Value, required: &[&str]) -> Value {
+pub(crate) fn object(properties: Value, required: &[&str]) -> Value {
     json!({
         "type": "object",
         "properties": properties,
@@ -214,8 +211,6 @@ pub fn core_tools_for(profile: ContextProfile) -> Vec<CoreTool> {
             KnowledgeSearch,
             CommentPost,
             ResultSubmit,
-            SkillList,
-            SkillLoad,
         ],
         ContextProfile::HumanChat | ContextProfile::Conversation => vec![
             BoardAgents,
@@ -225,16 +220,12 @@ pub fn core_tools_for(profile: ContextProfile) -> Vec<CoreTool> {
             TicketSearch,
             KnowledgeSearch,
             ResultSubmit,
-            SkillList,
-            SkillLoad,
         ],
         ContextProfile::KnowledgeCompaction => vec![
             TicketGet,
             TicketComments,
             TicketRuns,
             KnowledgeSearch,
-            SkillList,
-            SkillLoad,
             ResultSubmit,
         ],
     }
@@ -262,8 +253,6 @@ mod tests {
             "knowledge_search",
             "comment_post",
             "result_submit",
-            "skill_list",
-            "skill_load",
         ];
         assert_eq!(names(ContextProfile::Full), all);
         assert_eq!(names(ContextProfile::HumanAgent), all);
@@ -283,8 +272,6 @@ mod tests {
                 "ticket_comments",
                 "ticket_runs",
                 "knowledge_search",
-                "skill_list",
-                "skill_load",
                 "result_submit",
             ]
         );
@@ -300,5 +287,13 @@ mod tests {
         }
         assert!(!CoreTool::CommentPost.definition().read_only);
         assert!(CoreTool::TicketGet.definition().read_only);
+    }
+
+    #[test]
+    fn from_name_roundtrips() {
+        for tool in CoreTool::ALL {
+            assert_eq!(CoreTool::from_name(tool.name()), Some(tool));
+        }
+        assert_eq!(CoreTool::from_name("skill_list"), None);
     }
 }

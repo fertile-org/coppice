@@ -38,6 +38,7 @@ pub struct AppState {
     pub agent_templates: HashMap<String, String>,
     pub secret_store: crate::crypto::SecretStore,
     pub skills: Arc<crate::plugins::skills::SkillCatalog>,
+    pub tools: Arc<crate::mcp::registry::ToolRegistry>,
 }
 
 impl AppState {
@@ -126,6 +127,11 @@ impl AppState {
         Arc::new(crate::plugins::skills::load_builtin(dir.path()).expect("load builtins"))
     }
 
+    /// MCP gateway router over the core and skill tool sources.
+    pub fn builtin_tool_registry() -> Arc<crate::mcp::registry::ToolRegistry> {
+        Arc::new(crate::mcp::registry::ToolRegistry::builtin())
+    }
+
     pub fn load_agent_templates() -> HashMap<String, String> {
         let dir = crate::agent_templates::templates_dir();
         crate::agent_templates::load(&dir).expect("failed to load agent_templates from disk")
@@ -146,6 +152,7 @@ pub async fn test_state() -> Arc<AppState> {
         agent_templates: AppState::load_agent_templates(),
         secret_store,
         skills: AppState::test_skills(),
+        tools: AppState::builtin_tool_registry(),
         config,
         db: None,
     })

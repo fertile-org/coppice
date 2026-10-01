@@ -31,25 +31,47 @@ impl ToolDefinition {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ToolContent {
+    Text(String),
+    Image { data: String, mime_type: String },
+}
+
+impl ToolContent {
+    fn to_mcp(&self) -> Value {
+        match self {
+            Self::Text(text) => json!({ "type": "text", "text": text }),
+            Self::Image { data, mime_type } => {
+                json!({ "type": "image", "data": data, "mimeType": mime_type })
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
-pub struct ToolOutput {
-    pub text: String,
+pub struct ToolResult {
+    pub content: Vec<ToolContent>,
     pub is_error: bool,
 }
 
-impl ToolOutput {
+impl ToolResult {
+    pub fn text(text: impl Into<String>, is_error: bool) -> Self {
+        Self {
+            content: vec![ToolContent::Text(text.into())],
+            is_error,
+        }
+    }
+
     fn to_mcp(&self) -> Value {
-        json!({
-            "content": [{ "type": "text", "text": self.text }],
-            "isError": self.is_error,
-        })
+        let content: Vec<Value> = self.content.iter().map(ToolContent::to_mcp).collect();
+        json!({ "content": content, "isError": self.is_error })
     }
 }
 
 #[async_trait]
 pub trait ToolHost: Send + Sync {
-    fn list(&self) -> Vec<ToolDefinition>;
-    async fn call(&self, name: &str, args: Value) -> ToolOutput;
+    async fn list(&self) -> Vec<ToolDefinition>;
+    async fn call(&self, name: &str, args: Value) -> ToolResult;
 }
 
 fn ok(id: Value, result: Value) -> Value {
@@ -96,7 +118,12 @@ pub async fn handle_rpc(body: Value, host: &dyn ToolHost) -> Option<Value> {
         }
         "ping" => ok(id, json!({})),
         "tools/list" => {
-            let tools: Vec<Value> = host.list().iter().map(ToolDefinition::to_mcp).collect();
+            let tools: Vec<Value> = host
+                .list()
+                .await
+                .iter()
+                .map(ToolDefinition::to_mcp)
+                .collect();
             ok(id, json!({ "tools": tools }))
         }
         "tools/call" => {
@@ -124,7 +151,7 @@ mod tests {
 
     #[async_trait]
     impl ToolHost for FakeHost {
-        fn list(&self) -> Vec<ToolDefinition> {
+        async fn list(&self) -> Vec<ToolDefinition> {
             vec![ToolDefinition {
                 name: "look".into(),
                 description: "Look".into(),
@@ -132,11 +159,8 @@ mod tests {
                 read_only: true,
             }]
         }
-        async fn call(&self, _name: &str, _args: Value) -> ToolOutput {
-            ToolOutput {
-                text: "hi".into(),
-                is_error: true,
-            }
+        async fn call(&self, _name: &str, _args: Value) -> ToolResult {
+            ToolResult::text("hi", true)
         }
     }
 
@@ -187,6 +211,41 @@ mod tests {
         assert_eq!(res["result"]["content"][0]["type"], "text");
         assert_eq!(res["result"]["content"][0]["text"], "hi");
         assert_eq!(res["result"]["isError"], true);
+    }
+
+    struct ImageHost;
+
+    #[async_trait]
+    impl ToolHost for ImageHost {
+        async fn list(&self) -> Vec<ToolDefinition> {
+            vec![]
+        }
+        async fn call(&self, _name: &str, _args: Value) -> ToolResult {
+            ToolResult {
+                content: vec![
+                    ToolContent::Text("caption".into()),
+                    ToolContent::Image {
+                        data: "iVBORw0KGgo=".into(),
+                        mime_type: "image/png".into(),
+                    },
+                ],
+                is_error: false,
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn image_content_rendered() {
+        let body = json!({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"shot"}});
+        let res = handle_rpc(body, &ImageHost).await.unwrap();
+        assert_eq!(
+            res["result"]["content"],
+            json!([
+                {"type": "text", "text": "caption"},
+                {"type": "image", "data": "iVBORw0KGgo=", "mimeType": "image/png"},
+            ])
+        );
+        assert_eq!(res["result"]["isError"], false);
     }
 
     #[tokio::test]

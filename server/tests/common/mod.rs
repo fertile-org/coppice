@@ -173,6 +173,7 @@ where
         agent_templates: coppice_server::AppState::load_agent_templates(),
         secret_store: coppice_server::crypto::SecretStore::from_master_key(&config.secrets.master_key),
         skills,
+        tools: AppState::builtin_tool_registry(),
         config,
         db: Some(pool),
     })
@@ -218,6 +219,7 @@ where
         agent_templates: coppice_server::AppState::load_agent_templates(),
         secret_store: coppice_server::crypto::SecretStore::from_master_key(&config.secrets.master_key),
         skills,
+        tools: AppState::builtin_tool_registry(),
         config,
         db: Some(pool),
     });
@@ -263,6 +265,7 @@ where
         agent_templates: coppice_server::AppState::load_agent_templates(),
         secret_store: coppice_server::crypto::SecretStore::from_master_key(&config.secrets.master_key),
         skills,
+        tools: AppState::builtin_tool_registry(),
         config,
         db: Some(pool),
     });

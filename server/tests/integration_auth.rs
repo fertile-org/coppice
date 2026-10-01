@@ -24,6 +24,7 @@ async fn test_state_with_db() -> Arc<AppState> {
         agent_templates: coppice_server::AppState::load_agent_templates(),
         secret_store: coppice_server::crypto::SecretStore::from_master_key(&config.secrets.master_key),
         skills: AppState::test_skills(),
+        tools: AppState::builtin_tool_registry(),
         config,
         db: Some(pool),
     })
