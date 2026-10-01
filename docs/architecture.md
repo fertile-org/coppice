@@ -97,18 +97,24 @@ Connector facts live in one static table, `connectors/src/lib.rs` (`coppice_conn
 - **Registry.** `providers/registry.rs` has one `FACTORIES` list of `ConnectorFactory { id, build }`; `build(&AppConfig, &FactoryDeps)` returns `None` when the connector is disabled, else `BuiltConnector { provider, models }`. Startup asserts factories and descriptors match one-to-one.
 - **Models.** `ModelCatalog` (`providers/models.rs`) reports `model_providers()` from config and `list_models(model_provider)`. Agent health checks that an agent's `model_provider` is in `model_providers()` unless `checks_model_provider()` is false (mock). `GET …/models` maps errors to 502 `"{id} models: {err}"`.
 - **API / web.** `GET /api/connectors` returns `{ id, displayName, console, caps: { readOnlyTools, chatResume } }` per configured connector; `TicketDrawer` picks the live view from `console` (unknown connector → plain).
-- **CLI.** `coppice connector …` reads `coppice_connectors::all()` / `get()`.
+- **CLI.** `coppice connector …` iterates `coppice_connectors::all()` / `get()` for ids, binaries, and auth hints, but per-connector behavior (config section, install steps, setup and doctor probes) is still matched by id in `cli/src/commands/connector/` — see the checklist below.
 - **MCP wiring.** `mcp/wiring.rs` `McpServerSpec::from_access` renders the gateway entry in each style (`claude_json`, `cursor_mcp_json`, `cursor_cli_config`, `opencode_json`, `kilo_json`, `codex_args`). The server name `coppice` and token env `COPPICE_MCP_TOKEN` live only there and in `mcp/grant.rs` (`McpAccess::env`).
 - **CLI runner.** `providers/cli_runner.rs` `run_cli(CliInvocation, &mut dyn LineHandler, RunIo)` (or `run_cli_with_stdin` to feed a prompt on stdin) spawns with `kill_on_drop`, mirrors stderr to the adapter's tracing target (keeping the first 40 lines), races cancel and deadline, forwards the first session id, and returns `CliExit` or `CliError`. Adapters keep their own error wording by mapping those, then read final text from their `LineHandler`. OpenCode and mock are custom `AgentProvider`s.
 
 ### Adding a connector
 
 1. Descriptor entry in `connectors/src/lib.rs` (plus an id constant).
-2. Config struct + field in `AgentConnectorsConfig` (`config/src/lib.rs`).
+2. Config struct + field in `AgentConnectorsConfig` (`config/src/lib.rs`), and an `[agent.connectors.<id>]` section in `config.example.toml` and `deploy/config/config.example.toml`.
 3. Adapter in `server/src/providers/`: a `CliInvocation` builder + `LineHandler` driven by `run_cli` (or a custom `AgentProvider`), and a `ModelCatalog`.
 4. Factory entry in `FACTORIES`.
 5. A `McpServerSpec` renderer only if it needs a new `McpWiring` style.
-6. A doc in `docs/providers/` and a row in its README.
+6. Add the id to the `IDS` list in the `no_connector_literals_outside_providers` test (`providers/registry.rs`).
+7. If `caps.read_only_tools` is true, add it to `READ_ONLY_CAPABLE_CONNECTORS` (`providers/mod.rs`; a test checks it matches the descriptors).
+8. If its console publisher emits `<prefix>.console.*` events, add the prefix to the replay filter in `workers/job_worker.rs` (the `claude.` / `codex.` / `kilo.` / `cursor.console.` check) so they are persisted.
+9. CLI arms in `cli/src/commands/connector/`: `list.rs` (id → config `enabled`, otherwise always shown disabled), `enable.rs` (connectors that get a default `command`), `install.rs`, `setup.rs`, and `doctor.rs` (per-id install, setup, and probe steps).
+10. A doc in `docs/providers/` and a row in its README.
+
+A new `ConsoleKind` also needs branches in `web/src/lib/schemas/connector.ts`, `web/src/features/runs/LiveRunView.tsx`, and `server/src/api/ws/live.rs`.
 
 ## MCP gateway (M10)
 
@@ -131,7 +137,7 @@ mcp/tools/         ticket_get, ticket_comments, ticket_runs, board_agents, knowl
 
 ### Adding a tool source
 
-Implement `ToolSource` in `mcp/` and add it to the list in `ToolRegistry::builtin()`. Router, tokens, protocol, and logging stay untouched. Sources that do I/O in `list` (e.g. a plugin MCP server) should bound it, since every `tools/list` and call resolves all sources.
+Implement `ToolSource` in `mcp/` and add it to the list in `ToolRegistry::builtin()`. `builtin()` takes no arguments, so a source that needs runtime handles is constructed where the registry is built (`AppState::builtin_tool_registry()` in `lib.rs`, used by `main.rs` and `server/tests/common/mod.rs`) and passed to `ToolRegistry::new`. A new `SourceKind` also needs a migration widening the `run_tool_calls.source` check (`'core', 'skill', 'plugin'` in `028_mcp_gateway.sql`). Router, tokens, protocol, and logging stay untouched. Sources that do I/O in `list` (e.g. a plugin MCP server) should bound it, since every `tools/list` and call resolves all sources.
 
 The gateway is authenticated by a per-run bearer token, minted when the run starts and revoked when it finishes, fails, or is stopped. Base URL comes from `mcp.base_url` (default `http://127.0.0.1:<server.port>/mcp`), which is correct in Docker, on the desktop, and in the cloud because the CLIs run beside the server.
 
@@ -164,9 +170,9 @@ sessions/opencode_run_server.rs  one `opencode serve` per OpenCode run
 
 ### Adding a plugin capability
 
-1. A `CapabilityParser` in `plugins/capability.rs`, called from `parse_plugin`, and a `PluginManifest` field.
+1. A `CapabilityParser` in `plugins/capability.rs`, added to the explicit `ctx.parse::<…>()` call list in `parse_plugin` (`plugins/manifest.rs`), and a `PluginManifest` field.
 2. Optionally a `ToolSource` that serves it at run time, scoped by `scope.plugin_ids`.
-3. The plugin card renders the new section.
+3. Expose it in the plugin response DTO in `api/plugins.rs` (no secrets), `web/src/lib/schemas/plugin.ts`, and render it in `web/src/features/plugins/PluginCard.tsx`.
 
 ## Governed knowledge (M06)
 

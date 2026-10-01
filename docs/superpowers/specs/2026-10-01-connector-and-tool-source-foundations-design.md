@@ -201,11 +201,11 @@ A test-only fake CLI binary (feature `embedded-test-db`, like `fake-opencode`) c
 
 1. Descriptor entry in `connectors`.
 2. Config struct + field in `AgentConnectorsConfig`.
-3. Adapter: `CliInvocation` builder + `LineHandler` (or a custom `AgentProvider`), optional `ModelCatalog`.
+3. Adapter: `CliInvocation` builder + `LineHandler` (or a custom `AgentProvider`), and a `ModelCatalog` (required: `BuiltConnector.models` is not optional).
 4. Factory entry in `FACTORIES`.
 5. Wiring renderer only if it needs a new `McpWiring` style.
 
-`docs/architecture.md` carries this checklist.
+`docs/architecture.md` carries this checklist. As built, it also lists the remaining manual touchpoints (literal-scan test ids, `READ_ONLY_CAPABLE_CONNECTORS`, console replay prefixes in `job_worker.rs`, per-id CLI arms, example configs).
 
 ## Gateway tool sources
 
