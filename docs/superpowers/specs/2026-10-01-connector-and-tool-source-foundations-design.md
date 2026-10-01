@@ -83,7 +83,10 @@ pub struct Capabilities {
     pub chat_resume: bool,       // chat turns may resume the CLI session
     pub session_events: bool,    // adapter reports a session id while running
     pub run_resume: bool,        // work_on_ticket runs may resume a prior session id
+    pub run_server: bool,        // keeps a per-run server process the watchdog tracks (opencode)
 }
+
+pub const MOCK: &str = "mock";   // id constants for identity references (defaults, test helpers)
 
 pub fn all() -> &'static [ConnectorDescriptor];
 pub fn get(id: &str) -> Option<&'static ConnectorDescriptor>;
@@ -91,14 +94,14 @@ pub fn get(id: &str) -> Option<&'static ConnectorDescriptor>;
 
 Baseline values (must equal today's behavior):
 
-| id | mcp_wiring | mcp_tool_names | console | read_only_tools | chat_resume | session_events | run_resume |
-|----|-----------|----------------|---------|:-:|:-:|:-:|:-:|
-| `mock` | MockHttp | None | Plain | ✓ | ✓ | — | — |
-| `claude-code` | ClaudeJson | McpDoubleUnderscore (`mcp__coppice__<tool>`) | Structured | ✓ | ✓ | ✓ | ✓ |
-| `cursor` | CursorHome | Dash (`coppice-<tool>`) | Structured | ✓ | ✓ | ✓ | ✓ |
-| `codex` | CodexFlags | ServerToolFields (`server`, `tool`) | Structured | — | ✓ | ✓ | — |
-| `kilo-code` | KiloJson | Underscore | Structured | — | — | ✓ | — |
-| `opencode` | OpenCodeJson | Underscore (`coppice_<tool>`) | OpenCodeSession | — | ✓ | ✓ | — |
+| id | mcp_wiring | mcp_tool_names | console | read_only_tools | chat_resume | session_events | run_resume | run_server |
+|----|-----------|----------------|---------|:-:|:-:|:-:|:-:|:-:|
+| `mock` | MockHttp | None | Plain | ✓ | ✓ | — | — | — |
+| `claude-code` | ClaudeJson | McpDoubleUnderscore (`mcp__coppice__<tool>`) | Structured | ✓ | ✓ | ✓ | ✓ | — |
+| `cursor` | CursorHome | Dash (`coppice-<tool>`) | Structured | ✓ | ✓ | ✓ | ✓ | — |
+| `codex` | CodexFlags | ServerToolFields (`server`, `tool`) | Structured | — | ✓ | ✓ | — | — |
+| `kilo-code` | KiloJson | Underscore | Structured | — | — | ✓ | — | — |
+| `opencode` | OpenCodeJson | Underscore (`coppice_<tool>`) | OpenCodeSession | — | ✓ | ✓ | — | ✓ |
 
 The kilo-code tool-name style is unverified (no live CLI); `Underscore` follows its OpenCode fork. The value only affects console labels.
 
@@ -109,9 +112,11 @@ Every connector-id string check outside adapter files becomes a descriptor looku
 - `connector_enforces_read_only`, `connector_supports_chat_resume` → `caps`.
 - `job_worker` session-event and resume checks → `caps.session_events`, `caps.run_resume`.
 - `api/ws/live.rs` structured/opencode choice → `console`.
+- `run_watchdog` OpenCode check → `caps.run_server`.
+- Identity references that are not behavior (the `"mock"` fallback in `agent_service`, test helpers) use the crate's id constants.
 - Per-connector model listing and validation (`api/connectors.rs`, `services/agent_health.rs`) move behind a `ModelCatalog` trait returned by the adapter factory (below); the API and health worker call the trait.
 
-A unit test scans `server/src` (excluding `providers/<adapter>.rs`, console parsers, model modules, and tests) for the literal connector ids and fails if any remain. The allowlist lives in the test.
+A unit test scans non-test code in `server/src` (each file up to its first `#[cfg(test)]`; excluding `providers/` and `sessions/opencode*`) for string literals equal to a connector id and fails if any remain. The allowlist lives in the test.
 
 ### Registry
 
@@ -122,9 +127,17 @@ pub struct ConnectorFactory {
 }
 pub struct BuiltConnector {
     pub provider: Arc<dyn AgentProvider>,
-    pub models: Option<Arc<dyn ModelCatalog>>,
+    pub models: Arc<dyn ModelCatalog>,
+}
+
+#[async_trait]
+pub trait ModelCatalog: Send + Sync {
+    fn model_providers(&self) -> &[String];                 // from the connector's config
+    async fn list_models(&self, model_provider: &str) -> anyhow::Result<Vec<ModelInfo>>;
 }
 ```
+
+The health check becomes one generic rule (connector configured; `model_provider`, when set, is in `model_providers()`), with today's messages. `GET …/models` maps errors to 502 with `"{id} models: {err}"` (today's wording for every connector).
 
 `ConnectorRegistry::from_config` iterates one `FACTORIES` list. A startup assertion (and unit test) checks every factory id has a descriptor and every descriptor has a factory. `model_providers_for` and the five `*_model_providers` fields go away.
 
@@ -164,16 +177,19 @@ Snapshot tests pin each renderer to the exact bytes adapters write today, then a
 pub struct CliInvocation { pub program: String, pub args: Vec<String>, pub env: Vec<(String, String)>, pub cwd: PathBuf, pub timeout: Duration }
 
 pub trait LineHandler: Send {
-    /// One stdout line. Return events for the console, an optional session id, and/or final text.
-    fn on_line(&mut self, line: &str) -> LineOutcome;
-    fn finish(&mut self) -> Option<String>; // final text when the stream ends
+    /// One parsed JSON stdout line (non-JSON lines are skipped by the runner).
+    /// The handler forwards console events, accumulates text, and says whether
+    /// the stream reached its terminal event.
+    fn on_json(&mut self, value: &Value) -> LineStep;   // LineStep { session_id: Option<String>, stop: bool }
 }
 
-pub async fn run_cli(inv: CliInvocation, handler: &mut dyn LineHandler, io: RunIo) -> Result<String, ProviderError>;
-// RunIo: stream handle, cancel_rx, session_created_tx
+pub async fn run_cli(inv: CliInvocation, handler: &mut dyn LineHandler, io: RunIo) -> Result<CliExit, CliError>;
+// RunIo: cancel_rx, session_created_tx, stderr_target (tracing target, e.g. "cursor.stderr")
+// CliExit { status: ExitStatus, stderr_tail: Vec<String> /* first 40 lines */ }
+// CliError: Spawn(io::Error) | Cancelled | TimedOut { stderr_tail } | Io(io::Error)
 ```
 
-`run_cli` spawns with `kill_on_drop`, pumps stderr into the run stream as today, races deadline and cancel, forwards the first session id once, and returns final text; adapters still call `extract_result_from_text`. Each adapter keeps its argument building, per-run dirs (Cursor `HOME`), and its line handler (the existing console publishers become `LineHandler`s). OpenCode (serve process + HTTP events) and mock stay custom `AgentProvider`s that use only the descriptor and the wiring spec.
+`run_cli` spawns with `kill_on_drop`, mirrors stderr to tracing under the adapter's target while keeping the first 40 lines, races deadline and cancel (killing the child on either), forwards the first session id once, and returns the exit status and stderr tail. Adapters keep **their exact error wording** by mapping `CliError` / `CliExit` themselves (e.g. claude-code's `"claude-code run timed out after {n}s"`, cursor's `` "`{command}` timed out after {n}s{stderr suffix}" `` and its accept-result-despite-non-zero-exit rule), then read final text from their handler and call `extract_result_from_text`. Each adapter keeps its argument building, per-run dirs (Cursor `HOME`), and its handler (wrapping the existing console publisher). OpenCode (serve process + HTTP events) and mock stay custom `AgentProvider`s that use only the descriptor and the wiring spec.
 
 A test-only fake CLI binary (feature `embedded-test-db`, like `fake-opencode`) covers cancel, timeout, stderr capture, session-id capture, non-zero exit, and final-text fallback.
 
@@ -263,7 +279,9 @@ pub trait CapabilityParser {
   Values keep their `${…}` placeholders (substituted only when Part 2b starts a server). A malformed `.mcp.json` keeps today's ruling: the plugin is `invalid`.
 - `CommandsCapability`, `AgentsCapability`, `HooksCapability` — report `Unsupported("not supported yet")` when the directory exists.
 
-`parse_plugin` calls each parser and assembles the typed `PluginManifest` (`skills`, `mcp_servers`, `unsupported: Vec<UnsupportedPart { key, reason }>`). Old stored manifests (`mcpServers[].kind`, `unsupported: [String]`) still deserialize via serde defaults/untagged fallback until the startup rescan rewrites them. The web plugin schema accepts both shapes for one release.
+`parse_plugin` calls each parser and assembles the typed `PluginManifest` (`skills`, `mcp_servers`, `unsupported: Vec<UnsupportedPart { key, reason }>`). Old stored manifests (`mcpServers[].kind`, `unsupported: [String]`) still deserialize (missing `transport` → `Unsupported { kind: "unknown" }`; a string unsupported entry → `{ key, reason: "not supported yet" }`) until the startup rescan rewrites them.
+
+The plugins API response shape is **unchanged**: `mcpServers: [{ name, kind }]` with `kind` derived from the transport (`stdio` / `http` / the unsupported kind), and `unsupported: [key]`. Commands, env values, URLs, and headers are not exposed by the API (they can carry secrets). No web change.
 
 ### Adding a plugin capability (after this plan)
 
@@ -312,7 +330,7 @@ Unchanged user-visible errors. New internal failures:
 4. `McpServerSpec` renderers (snapshots first), adapters switched.
 5. `cli_runner` + fake CLI; claude-code, codex, cursor, kilo-code migrated one at a time.
 6. `ToolSource`, `ToolRegistry`, core + skill sources, async `list`, content blocks, `source`/`plugin_id` logging.
-7. Capability parsers; full `McpServerEntry`; manifest back-compat; web schema accepts both shapes.
+7. Capability parsers; full `McpServerEntry`; manifest back-compat; plugins API shape unchanged.
 8. Docs (`docs/architecture.md` checklists, `docs/providers/README.md`), final verification.
 
 ## Risks
@@ -322,7 +340,7 @@ Unchanged user-visible errors. New internal failures:
 | Refactor silently changes a connector's CLI invocation or MCP file | Renderer snapshots pin bytes; adapters migrated one per task with their existing tests |
 | Runner changes cancel/timeout semantics | Fake-CLI tests for each path before migrating adapters |
 | Tool registry changes the visible tool list | Existing gateway tests unchanged; explicit test that core lists per profile are identical |
-| Old stored manifests break the plugin page | Serde fallback + startup rescan; web schema accepts both shapes |
+| Old stored manifests break the plugin page | Serde fallback + startup rescan; API response shape unchanged |
 | Scope creep into Part 2b | Proxy, settings, Test button, Tools & Skills tab stay in Part 2b |
 
 ## Acceptance criteria
