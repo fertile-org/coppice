@@ -60,7 +60,10 @@ impl AppState {
 
     pub fn test_opencode_runs() -> Arc<crate::sessions::opencode_run_server::OpenCodeRunServers> {
         crate::sessions::opencode_run_server::OpenCodeRunServers::new(
-            "opencode".into(),
+            crate::providers::descriptor(coppice_connectors::OPENCODE)
+                .expect("opencode descriptor")
+                .binary
+                .into(),
             "127.0.0.1".into(),
         )
     }

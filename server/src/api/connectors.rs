@@ -7,6 +7,7 @@ use axum::{
     routing::get,
     Json, Router,
 };
+use coppice_connectors::ConsoleKind;
 use serde::Serialize;
 use std::sync::Arc;
 
@@ -24,8 +25,19 @@ pub fn routes() -> Router<Arc<AppState>> {
 }
 
 #[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 struct ConnectorResponse {
     id: String,
+    display_name: &'static str,
+    console: ConsoleKind,
+    caps: ConnectorCapsResponse,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ConnectorCapsResponse {
+    read_only_tools: bool,
+    chat_resume: bool,
 }
 
 #[derive(Serialize)]
@@ -78,10 +90,7 @@ impl IntoResponse for ModelsApiError {
 }
 
 fn models_gateway_err(context: &str, err: impl std::fmt::Display) -> ModelsApiError {
-    ModelsApiError::Message(
-        StatusCode::BAD_GATEWAY,
-        format!("{context}: {err}"),
-    )
+    ModelsApiError::Message(StatusCode::BAD_GATEWAY, format!("{context}: {err}"))
 }
 
 async fn list_connectors(
@@ -92,7 +101,18 @@ async fn list_connectors(
         .connector_registry
         .configured_ids()
         .into_iter()
-        .map(|id| ConnectorResponse { id })
+        .filter_map(|id| {
+            let descriptor = crate::providers::descriptor(&id)?;
+            Some(ConnectorResponse {
+                id,
+                display_name: descriptor.display_name,
+                console: descriptor.console,
+                caps: ConnectorCapsResponse {
+                    read_only_tools: descriptor.caps.read_only_tools,
+                    chat_resume: descriptor.caps.chat_resume,
+                },
+            })
+        })
         .collect();
     Json(ConnectorListResponse { items })
 }
@@ -107,7 +127,9 @@ async fn list_model_providers(
     }
     let items = state
         .connector_registry
-        .model_providers_for(&connector_id)
+        .models(&connector_id)
+        .map(|models| models.model_providers().to_vec())
+        .unwrap_or_default()
         .into_iter()
         .map(|id| ModelProviderResponse { id })
         .collect();
@@ -128,158 +150,21 @@ async fn list_models(
     {
         return Err(ModelsApiError::Status(StatusCode::NOT_FOUND));
     }
-    match connector_id.as_str() {
-        "opencode" => {
-            let command = &state.config.agent.connectors.opencode.command;
-            let models = crate::providers::opencode_models::list_opencode_models(
-                command,
-                &model_provider_id,
-            )
-            .await
-            .map_err(|err| models_gateway_err("opencode models", err))?;
-            Ok(Json(ModelListResponse {
-                items: models
-                    .into_iter()
-                    .map(|m| ModelResponse {
-                        id: m.id,
-                        name: m.name,
-                    })
-                    .collect(),
-            }))
-        }
-        "claude-code" => {
-            let models = known_claude_code_models(&model_provider_id);
-            Ok(Json(ModelListResponse {
-                items: models
-                    .into_iter()
-                    .map(|m| ModelResponse {
-                        id: m.id.to_string(),
-                        name: m.name.to_string(),
-                    })
-                    .collect(),
-            }))
-        }
-        "codex" => {
-            let models = crate::providers::codex_models::list_codex_models(&model_provider_id)
-                .await
-                .map_err(|err| models_gateway_err("codex models", err))?;
-            Ok(Json(ModelListResponse {
-                items: models
-                    .into_iter()
-                    .map(|m| ModelResponse {
-                        id: m.id,
-                        name: m.name,
-                    })
-                    .collect(),
-            }))
-        }
-        "kilo-code" => {
-            let command = &state.config.agent.connectors.kilo_code.command;
-            let models = crate::providers::kilo_models::list_kilo_models(
-                command,
-                &model_provider_id,
-            )
-            .await
-            .map_err(|err| models_gateway_err("kilo-code models", err))?;
-            Ok(Json(ModelListResponse {
-                items: models
-                    .into_iter()
-                    .map(|m| ModelResponse {
-                        id: m.id,
-                        name: m.name,
-                    })
-                    .collect(),
-            }))
-        }
-        "cursor" => {
-            if model_provider_id != "cursor" {
-                return Ok(Json(ModelListResponse { items: vec![] }));
-            }
-            let command = &state.config.agent.connectors.cursor.command;
-            let models = crate::providers::cursor_models::list_cursor_models(command)
-                .await
-                .map_err(|err| models_gateway_err("cursor models", err))?;
-            Ok(Json(ModelListResponse {
-                items: models
-                    .into_iter()
-                    .map(|m| ModelResponse {
-                        id: m.id,
-                        name: m.name,
-                    })
-                    .collect(),
-            }))
-        }
-        "mock" => Ok(Json(ModelListResponse { items: vec![] })),
-        _ => Err(ModelsApiError::Status(StatusCode::NOT_FOUND)),
-    }
-}
-
-struct KnownModel {
-    id: &'static str,
-    name: &'static str,
-}
-
-/// Curated Claude Code model IDs (Anthropic API / subscription CLI).
-/// No live CLI catalog exists yet; refresh from https://platform.claude.com/docs/en/about-claude/models/overview
-/// Fable 5 is intentionally omitted (not permitted in this deployment).
-fn known_claude_code_models(provider_id: &str) -> Vec<KnownModel> {
-    match provider_id {
-        "sonnet" => vec![
-            KnownModel {
-                id: "claude-sonnet-4-6",
-                name: "Claude Sonnet 4.6",
-            },
-            KnownModel {
-                id: "sonnet[1m]",
-                name: "Sonnet 4.6 (1M context)",
-            },
-            KnownModel {
-                id: "claude-sonnet-4-5-20250929",
-                name: "Claude Sonnet 4.5",
-            },
-        ],
-        "opus" => vec![
-            KnownModel {
-                id: "claude-opus-4-8",
-                name: "Claude Opus 4.8",
-            },
-            KnownModel {
-                id: "opus[1m]",
-                name: "Opus 4.8 (1M context)",
-            },
-            KnownModel {
-                id: "claude-opus-4-7",
-                name: "Claude Opus 4.7",
-            },
-            KnownModel {
-                id: "claude-opus-4-6",
-                name: "Claude Opus 4.6",
-            },
-        ],
-        "haiku" => vec![
-            KnownModel {
-                id: "claude-haiku-4-5-20251001",
-                name: "Claude Haiku 4.5",
-            },
-            KnownModel {
-                id: "claude-haiku-4-5",
-                name: "Claude Haiku 4.5 (alias)",
-            },
-        ],
-        _ => vec![],
-    }
-}
-
-#[cfg(test)]
-mod claude_code_models_tests {
-    use super::*;
-
-    #[test]
-    fn claude_code_models_include_current_opus_and_exclude_fable() {
-        let opus = known_claude_code_models("opus");
-        assert!(opus.iter().any(|m| m.id == "claude-opus-4-8"));
-        assert!(!opus.iter().any(|m| m.id.contains("fable")));
-        let sonnet = known_claude_code_models("sonnet");
-        assert!(sonnet.iter().any(|m| m.id == "claude-sonnet-4-6"));
-    }
+    let catalog = state
+        .connector_registry
+        .models(&connector_id)
+        .ok_or(ModelsApiError::Status(StatusCode::NOT_FOUND))?;
+    let models = catalog
+        .list_models(&model_provider_id)
+        .await
+        .map_err(|err| models_gateway_err(&format!("{connector_id} models"), err))?;
+    Ok(Json(ModelListResponse {
+        items: models
+            .into_iter()
+            .map(|m| ModelResponse {
+                id: m.id,
+                name: m.name,
+            })
+            .collect(),
+    }))
 }

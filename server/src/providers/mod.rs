@@ -10,11 +10,18 @@ pub mod kilo_code;
 pub mod kilo_console;
 pub mod kilo_models;
 pub mod mock;
+pub mod models;
 pub mod opencode;
 pub mod opencode_models;
 pub mod registry;
 
+pub use coppice_connectors::ConnectorDescriptor;
+pub use models::{ModelCatalog, ModelInfo};
 pub use registry::ConnectorRegistry;
+
+pub fn descriptor(id: &str) -> Option<&'static ConnectorDescriptor> {
+    coppice_connectors::get(id)
+}
 
 /// Temporary alias for gradual migration.
 pub type ProviderRegistry = ConnectorRegistry;
@@ -114,12 +121,17 @@ pub fn mcp_unavailable(reason: &str) -> ProviderError {
     ProviderError::InvalidInput(format!("mcp_unavailable: {reason}"))
 }
 
-/// Connectors whose adapters actually restrict tools when `read_only_tools` is set.
-/// Others either refuse (kilo-code) or ignore the flag (codex, opencode).
-pub const READ_ONLY_CAPABLE_CONNECTORS: &[&str] = &["mock", "claude-code", "cursor"];
+/// Connectors whose descriptor has `caps.read_only_tools`, in the order shown
+/// to users (settings API, compaction error). Others either refuse (kilo-code)
+/// or ignore the flag (codex, opencode).
+pub const READ_ONLY_CAPABLE_CONNECTORS: &[&str] = &[
+    coppice_connectors::MOCK,
+    coppice_connectors::CLAUDE_CODE,
+    coppice_connectors::CURSOR,
+];
 
 pub fn connector_enforces_read_only(connector: &str) -> bool {
-    READ_ONLY_CAPABLE_CONNECTORS.contains(&connector)
+    descriptor(connector).is_some_and(|d| d.caps.read_only_tools)
 }
 
 /// Fail closed when a connector cannot enforce read-only tools for chat turns.
@@ -209,11 +221,8 @@ pub enum ProviderError {
     ResumeSessionInvalid(String),
 }
 
-pub const CHAT_RESUME_CONNECTORS: &[&str] =
-    &["mock", "opencode", "claude-code", "cursor", "codex"];
-
 pub fn connector_supports_chat_resume(connector: &str) -> bool {
-    CHAT_RESUME_CONNECTORS.contains(&connector)
+    descriptor(connector).is_some_and(|d| d.caps.chat_resume)
 }
 
 pub fn is_resume_session_invalid(err: &ProviderError) -> bool {
@@ -322,6 +331,25 @@ mod tests {
         for id in ["mock", "opencode", "claude-code", "cursor", "codex"] {
             assert!(connector_supports_chat_resume(id));
         }
+        assert!(!connector_supports_chat_resume("kilo-code"));
+        assert!(!connector_supports_chat_resume("unknown"));
+    }
+
+    #[test]
+    fn read_only_capable_connectors_match_descriptor_caps() {
+        let mut listed: Vec<_> = READ_ONLY_CAPABLE_CONNECTORS.to_vec();
+        listed.sort();
+        let mut from_caps: Vec<_> = coppice_connectors::all()
+            .iter()
+            .filter(|d| d.caps.read_only_tools)
+            .map(|d| d.id)
+            .collect();
+        from_caps.sort();
+        assert_eq!(listed, from_caps);
+        for id in READ_ONLY_CAPABLE_CONNECTORS {
+            assert!(connector_enforces_read_only(id));
+        }
+        assert!(!connector_enforces_read_only("codex"));
     }
 
     #[test]

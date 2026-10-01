@@ -65,7 +65,7 @@ pub async fn evaluate_agent_health(
     agent: &Agent,
     registry: &ConnectorRegistry,
 ) -> (AgentHealthStatus, Option<String>) {
-    if !registry.has(&agent.connector) {
+    let Some(models) = registry.models(&agent.connector) else {
         return (
             AgentHealthStatus::MissingConfig,
             Some(format!(
@@ -73,85 +73,19 @@ pub async fn evaluate_agent_health(
                 agent.connector
             )),
         );
+    };
+    if let Some(ref mp) = agent.model_provider {
+        if models.checks_model_provider() && !models.model_providers().contains(mp) {
+            return (
+                AgentHealthStatus::MissingConfig,
+                Some(format!(
+                    "Model provider '{}' is not configured on this server",
+                    mp
+                )),
+            );
+        }
     }
-
-    match agent.connector.as_str() {
-        "mock" => (AgentHealthStatus::Healthy, None),
-        "claude-code" => {
-            if let Some(ref mp) = agent.model_provider {
-                if !registry.has_model_provider("claude-code", mp) {
-                    return (
-                        AgentHealthStatus::MissingConfig,
-                        Some(format!(
-                            "Model provider '{}' is not configured on this server",
-                            mp
-                        )),
-                    );
-                }
-            }
-            (AgentHealthStatus::Healthy, None)
-        }
-        "codex" => {
-            if let Some(ref mp) = agent.model_provider {
-                if !registry.has_model_provider("codex", mp) {
-                    return (
-                        AgentHealthStatus::MissingConfig,
-                        Some(format!(
-                            "Model provider '{}' is not configured on this server",
-                            mp
-                        )),
-                    );
-                }
-            }
-            (AgentHealthStatus::Healthy, None)
-        }
-        "kilo-code" => {
-            if let Some(ref mp) = agent.model_provider {
-                if !registry.has_model_provider("kilo-code", mp) {
-                    return (
-                        AgentHealthStatus::MissingConfig,
-                        Some(format!(
-                            "Model provider '{}' is not configured on this server",
-                            mp
-                        )),
-                    );
-                }
-            }
-            (AgentHealthStatus::Healthy, None)
-        }
-        "cursor" => {
-            if let Some(ref mp) = agent.model_provider {
-                if !registry.has_model_provider("cursor", mp) {
-                    return (
-                        AgentHealthStatus::MissingConfig,
-                        Some(format!(
-                            "Model provider '{}' is not configured on this server",
-                            mp
-                        )),
-                    );
-                }
-            }
-            (AgentHealthStatus::Healthy, None)
-        }
-        "opencode" => {
-            if let Some(ref mp) = agent.model_provider {
-                if !registry.has_model_provider("opencode", mp) {
-                    return (
-                        AgentHealthStatus::MissingConfig,
-                        Some(format!(
-                            "Model provider '{}' is not configured on this server",
-                            mp
-                        )),
-                    );
-                }
-            }
-            (AgentHealthStatus::Healthy, None)
-        }
-        other => (
-            AgentHealthStatus::MissingConfig,
-            Some(format!("Unknown connector: {other}")),
-        ),
-    }
+    (AgentHealthStatus::Healthy, None)
 }
 
 #[cfg(test)]
@@ -164,6 +98,69 @@ mod tests {
             health_status_to_str(AgentHealthStatus::MissingConfig),
             "missing_config"
         );
+    }
+
+    fn agent(connector: &str, model_provider: Option<&str>) -> Agent {
+        let now = time::OffsetDateTime::now_utc();
+        Agent {
+            id: Uuid::new_v4(),
+            name: "Bot".into(),
+            role: "Developer".into(),
+            skills: vec![],
+            responsibilities: vec![],
+            system_prompt: "x".into(),
+            connector: connector.into(),
+            model_provider: model_provider.map(Into::into),
+            model: None,
+            enabled: true,
+            preset_source: None,
+            created_at: now,
+            updated_at: now,
+        }
+    }
+
+    fn registry(config: &crate::config::AppConfig) -> ConnectorRegistry {
+        ConnectorRegistry::from_config(
+            config,
+            crate::sessions::opencode_run_server::OpenCodeRunServers::new(
+                "opencode".into(),
+                "127.0.0.1".into(),
+            ),
+        )
+    }
+
+    #[tokio::test]
+    async fn health_unconfigured_connector_message_unchanged() {
+        let mut config = crate::config::AppConfig::load_defaults().expect("config");
+        let reg = registry(&config);
+        let (status, detail) = evaluate_agent_health(&agent("cursor", None), &reg).await;
+        assert_eq!(status, AgentHealthStatus::MissingConfig);
+        assert_eq!(
+            detail.as_deref(),
+            Some("Connector 'cursor' is not configured on this server")
+        );
+
+        config.agent.connectors.cursor.enabled = true;
+        config.agent.connectors.cursor.model_providers = vec!["cursor".into()];
+        let reg = registry(&config);
+        let (status, detail) = evaluate_agent_health(&agent("cursor", Some("x")), &reg).await;
+        assert_eq!(status, AgentHealthStatus::MissingConfig);
+        assert_eq!(
+            detail.as_deref(),
+            Some("Model provider 'x' is not configured on this server")
+        );
+        let (status, detail) = evaluate_agent_health(&agent("cursor", Some("cursor")), &reg).await;
+        assert_eq!(status, AgentHealthStatus::Healthy);
+        assert_eq!(detail, None);
+    }
+
+    #[tokio::test]
+    async fn health_mock_ignores_model_provider() {
+        let config = crate::config::AppConfig::load_defaults().expect("config");
+        let reg = registry(&config);
+        let (status, detail) = evaluate_agent_health(&agent("mock", Some("x")), &reg).await;
+        assert_eq!(status, AgentHealthStatus::Healthy);
+        assert_eq!(detail, None);
     }
 
     #[test]

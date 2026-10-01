@@ -15,6 +15,7 @@ use axum::{
     http::{HeaderMap, StatusCode},
     response::IntoResponse,
 };
+use coppice_connectors::ConsoleKind;
 use futures_util::{SinkExt, StreamExt};
 use std::sync::Arc;
 use std::time::Duration;
@@ -115,10 +116,12 @@ async fn handle_live_socket(state: Arc<AppState>, run_id: Uuid, socket: WebSocke
         .await
         .ok()
         .flatten();
-    let is_opencode = connector.as_deref() == Some("opencode");
-    let is_structured_console = connector
+    let console = connector
         .as_deref()
-        .is_some_and(|connector| matches!(connector, "claude-code" | "codex" | "kilo-code" | "cursor"));
+        .and_then(crate::providers::descriptor)
+        .map(|d| d.console);
+    let is_opencode = console == Some(ConsoleKind::OpenCodeSession);
+    let is_structured_console = console == Some(ConsoleKind::Structured);
 
     let stream_handle = if let Some(handle) = state.run_streams.get(run_id) {
         Some(handle)

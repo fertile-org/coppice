@@ -496,11 +496,8 @@ async fn execute_job(
         .get(connector_name)
         .ok_or_else(|| anyhow::anyhow!("agent connector not configured: {connector_name}"))?;
 
-    let session_created_tx = if connector_name == "opencode"
-        || connector_name == "claude-code"
-        || connector_name == "cursor"
-        || connector_name == "codex"
-        || connector_name == "kilo-code"
+    let session_created_tx = if crate::providers::descriptor(connector_name)
+        .is_some_and(|d| d.caps.session_events)
     {
         let (tx, mut rx) = watch::channel(String::new());
         let pool = pool.clone();
@@ -1309,8 +1306,9 @@ async fn run_session_id(pool: &PgPool, run_id: uuid::Uuid) -> Option<String> {
         .and_then(|r| r.session_id)
 }
 
-/// For claude-code and cursor continuation runs, look up the previous run's session_id
-/// so the connector can pass `--resume <session_id>` to maintain conversation context.
+/// For continuation runs on connectors with `caps.run_resume` (claude-code, cursor), look
+/// up the previous run's session_id so the connector can pass `--resume <session_id>` to
+/// maintain conversation context.
 ///
 /// Note: codex session resume is not implemented here. The codex connector includes
 /// the `--resume` flag in its command invocation, but session resume is documented
@@ -1321,7 +1319,7 @@ async fn load_resume_session_id(
     run: &crate::domain::run::AgentRun,
     connector_name: &str,
 ) -> Option<String> {
-    if connector_name != "claude-code" && connector_name != "cursor" {
+    if !crate::providers::descriptor(connector_name).is_some_and(|d| d.caps.run_resume) {
         return None;
     }
     if run.job_type != "work_on_ticket" {

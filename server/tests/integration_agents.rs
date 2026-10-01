@@ -208,6 +208,76 @@ async fn list_connectors_returns_mock() {
 }
 
 #[tokio::test]
+async fn list_connectors_returns_console_and_caps() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let (app, cookie, csrf) = common::bootstrap_and_login().await;
+
+    let res = app
+        .clone()
+        .oneshot(common::json_request("GET", "/api/connectors", "", &cookie, &csrf))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let body: serde_json::Value = common::json_body(res).await;
+    let mock = body["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|i| i["id"] == "mock")
+        .expect("mock connector listed")
+        .clone();
+    assert_eq!(
+        mock,
+        serde_json::json!({
+            "id": "mock",
+            "displayName": coppice_connectors::get("mock").unwrap().display_name,
+            "console": "plain",
+            "caps": { "readOnlyTools": true, "chatResume": true }
+        })
+    );
+}
+
+#[tokio::test]
+async fn list_connectors_mock_model_providers_and_models() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let (app, cookie, csrf) = common::bootstrap_and_login().await;
+
+    let res = app
+        .clone()
+        .oneshot(common::json_request(
+            "GET",
+            "/api/connectors/mock/model-providers",
+            "",
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let body: serde_json::Value = common::json_body(res).await;
+    assert_eq!(body, serde_json::json!({ "items": [] }));
+
+    for path in [
+        "/api/connectors/mock/model-providers/x/models",
+        "/api/connectors/cursor/model-providers",
+        "/api/connectors/cursor/model-providers/cursor/models",
+    ] {
+        let res = app
+            .clone()
+            .oneshot(common::json_request("GET", path, "", &cookie, &csrf))
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::NOT_FOUND, "{path}");
+    }
+}
+
+#[tokio::test]
 async fn deleting_agent_with_knowledge_provenance_returns_conflict_and_preserves_revision() {
     let _guard = common::DB_TEST_LOCK.lock().await;
     let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;

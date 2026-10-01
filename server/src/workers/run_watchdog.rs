@@ -56,7 +56,11 @@ pub async fn run_watchdog_pass_once(state: &AppState) {
             continue;
         };
 
-        if connector.as_deref() != Some("opencode") {
+        let run_server = connector
+            .as_deref()
+            .and_then(crate::providers::descriptor)
+            .is_some_and(|d| d.caps.run_server);
+        if !run_server {
             tracing::debug!(
                 run_id = %run.id,
                 ticket_id = ?run.ticket_id,
