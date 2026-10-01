@@ -1,0 +1,1 @@
+{"name":"inline-mcp","version":"0.1.0","mcpServers":{"fs":{"command":"${CLAUDE_PLUGIN_ROOT}/bin/fs","args":["--root","${ROOT}"],"env":{"TOKEN":"${API_TOKEN}"}}}}

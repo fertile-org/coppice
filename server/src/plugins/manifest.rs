@@ -1,14 +1,12 @@
 use crate::plugins::builtin::BUILTIN_PLUGIN;
-use crate::plugins::skills::parse_skill_file;
+use crate::plugins::capability::{
+    AgentsCapability, CapabilityOutcome, CapabilityParser, CommandsCapability, HooksCapability,
+    McpServersCapability, SkillsCapability, PLUGIN_JSON,
+};
+pub use crate::plugins::capability::{McpServerEntry, McpServerTransport, UnsupportedPart};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::path::{Component, Path};
-
-const PLUGIN_JSON: &str = ".claude-plugin/plugin.json";
-const MCP_JSON: &str = ".mcp.json";
-const ESCAPES_ROOT: &str = "path escapes plugin root";
-/// Kept sorted: `PluginManifest::unsupported` preserves this order.
-const UNSUPPORTED_DIRS: [&str; 3] = ["agents", "commands", "hooks"];
+use std::path::Path;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -20,7 +18,7 @@ pub struct PluginManifest {
     pub layout: PluginLayout,
     pub skills: Vec<SkillEntry>,
     pub mcp_servers: Vec<McpServerEntry>,
-    pub unsupported: Vec<String>,
+    pub unsupported: Vec<UnsupportedPart>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -39,29 +37,16 @@ pub struct SkillEntry {
     pub error: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct McpServerEntry {
-    pub name: String,
-    pub kind: McpServerKind,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub enum McpServerKind {
-    Stdio,
-    Http,
-    Sse,
-    Unknown,
-}
-
 #[derive(Deserialize)]
 struct RawPluginJson {
     name: Option<String>,
     version: Option<String>,
     description: Option<String>,
     author: Option<RawAuthor>,
-    skills: Option<OneOrMany>,
+    /// Type-checked here so a bad `skills` value invalidates the plugin;
+    /// `SkillsCapability` reads it from the raw JSON.
+    #[serde(rename = "skills")]
+    _skills: Option<OneOrMany>,
 }
 
 #[derive(Deserialize)]
@@ -71,6 +56,7 @@ enum RawAuthor {
     Object { name: Option<String> },
 }
 
+#[allow(dead_code)]
 #[derive(Deserialize)]
 #[serde(untagged)]
 enum OneOrMany {
@@ -103,67 +89,92 @@ pub fn parse_plugin(root: &Path) -> Result<PluginManifest, String> {
     let root =
         std::fs::canonicalize(root).map_err(|e| format!("plugin root {}: {e}", root.display()))?;
     let manifest_path = root.join(PLUGIN_JSON);
-    if !manifest_path.is_file() {
+    let (mut manifest, plugin_json) = if !manifest_path.is_file() {
         let name = root
             .file_name()
             .and_then(|n| n.to_str())
             .unwrap_or_default()
             .to_string();
         check_name(&name)?;
-        let skills_dir = if root.join("skills").is_dir() {
-            "skills"
-        } else {
-            ""
-        };
-        return Ok(PluginManifest {
+        let manifest = PluginManifest {
             name,
             version: "0.0.0".into(),
             description: String::new(),
             author: None,
             layout: PluginLayout::SkillsOnly,
-            skills: sorted_skills(skills_in(&root, skills_dir)),
+            skills: Vec::new(),
             mcp_servers: Vec::new(),
             unsupported: Vec::new(),
-        });
-    }
-
-    let text =
-        std::fs::read_to_string(&manifest_path).map_err(|e| format!("read {PLUGIN_JSON}: {e}"))?;
-    let raw: RawPluginJson =
-        serde_json::from_str(&text).map_err(|e| format!("invalid {PLUGIN_JSON}: {e}"))?;
-    let name = raw
-        .name
-        .filter(|n| !n.is_empty())
-        .ok_or_else(|| format!("{PLUGIN_JSON}: `name` is required"))?;
-    check_name(&name)?;
-    let skill_dirs = match raw.skills {
-        None => vec!["skills".to_string()],
-        Some(OneOrMany::One(dir)) => vec![dir],
-        Some(OneOrMany::Many(dirs)) => dirs,
+        };
+        (manifest, None)
+    } else {
+        let text = std::fs::read_to_string(&manifest_path)
+            .map_err(|e| format!("read {PLUGIN_JSON}: {e}"))?;
+        let raw: RawPluginJson =
+            serde_json::from_str(&text).map_err(|e| format!("invalid {PLUGIN_JSON}: {e}"))?;
+        let name = raw
+            .name
+            .filter(|n| !n.is_empty())
+            .ok_or_else(|| format!("{PLUGIN_JSON}: `name` is required"))?;
+        check_name(&name)?;
+        let manifest = PluginManifest {
+            name,
+            version: raw.version.unwrap_or_else(|| "0.0.0".into()),
+            description: raw.description.unwrap_or_default(),
+            author: match raw.author {
+                Some(RawAuthor::Name(name)) => Some(name),
+                Some(RawAuthor::Object { name }) => name,
+                None => None,
+            }
+            .filter(|a| !a.is_empty()),
+            layout: PluginLayout::Plugin,
+            skills: Vec::new(),
+            mcp_servers: Vec::new(),
+            unsupported: Vec::new(),
+        };
+        let value: Value =
+            serde_json::from_str(&text).map_err(|e| format!("invalid {PLUGIN_JSON}: {e}"))?;
+        (manifest, Some(value))
     };
-    let skills = skill_dirs
-        .iter()
-        .flat_map(|dir| skills_in(&root, dir))
-        .collect();
-    Ok(PluginManifest {
-        name,
-        version: raw.version.unwrap_or_else(|| "0.0.0".into()),
-        description: raw.description.unwrap_or_default(),
-        author: match raw.author {
-            Some(RawAuthor::Name(name)) => Some(name),
-            Some(RawAuthor::Object { name }) => name,
-            None => None,
+
+    let mut ctx = Capabilities {
+        root: &root,
+        plugin_json: plugin_json.as_ref(),
+        layout: manifest.layout,
+        unsupported: &mut manifest.unsupported,
+    };
+    let skills = ctx.parse::<SkillsCapability>()?;
+    let mcp_servers = ctx.parse::<McpServersCapability>()?;
+    ctx.parse::<AgentsCapability>()?;
+    ctx.parse::<CommandsCapability>()?;
+    ctx.parse::<HooksCapability>()?;
+    manifest.skills = skills.unwrap_or_default();
+    manifest.mcp_servers = mcp_servers.unwrap_or_default();
+    Ok(manifest)
+}
+
+struct Capabilities<'a> {
+    root: &'a Path,
+    plugin_json: Option<&'a Value>,
+    layout: PluginLayout,
+    unsupported: &'a mut Vec<UnsupportedPart>,
+}
+
+impl Capabilities<'_> {
+    fn parse<P: CapabilityParser>(&mut self) -> Result<Option<P::Output>, String> {
+        match P::parse(self.root, self.plugin_json, self.layout) {
+            CapabilityOutcome::Absent => Ok(None),
+            CapabilityOutcome::Supported(output) => Ok(Some(output)),
+            CapabilityOutcome::Unsupported(reason) => {
+                self.unsupported.push(UnsupportedPart {
+                    key: P::KEY.into(),
+                    reason,
+                });
+                Ok(None)
+            }
+            CapabilityOutcome::Invalid(reason) => Err(reason),
         }
-        .filter(|a| !a.is_empty()),
-        layout: PluginLayout::Plugin,
-        skills: sorted_skills(skills),
-        mcp_servers: mcp_servers(&root)?,
-        unsupported: UNSUPPORTED_DIRS
-            .iter()
-            .filter(|d| root.join(d).exists())
-            .map(|d| d.to_string())
-            .collect(),
-    })
+    }
 }
 
 fn check_name(name: &str) -> Result<(), String> {
@@ -176,127 +187,10 @@ fn check_name(name: &str) -> Result<(), String> {
     }
 }
 
-fn sorted_skills(mut skills: Vec<SkillEntry>) -> Vec<SkillEntry> {
-    skills.sort_by(|a, b| {
-        a.name
-            .cmp(&b.name)
-            .then_with(|| a.rel_path.cmp(&b.rel_path))
-    });
-    skills
-}
-
-fn escaped(name: &str, rel_path: &str) -> SkillEntry {
-    SkillEntry {
-        name: name.to_string(),
-        description: String::new(),
-        rel_path: rel_path.to_string(),
-        error: Some(ESCAPES_ROOT.into()),
-    }
-}
-
-/// Skills are `<root>/<rel_dir>/<name>/SKILL.md`; `root` must be canonical.
-fn skills_in(root: &Path, rel_dir: &str) -> Vec<SkillEntry> {
-    let rel_dir = rel_dir.trim_end_matches('/');
-    let dir = root.join(rel_dir);
-    let canonical = match std::fs::canonicalize(&dir) {
-        Ok(canonical) => canonical,
-        Err(_)
-            if Path::new(rel_dir).is_absolute()
-                || Path::new(rel_dir)
-                    .components()
-                    .any(|c| c == Component::ParentDir) =>
-        {
-            return vec![escaped(rel_dir, rel_dir)];
-        }
-        Err(_) => return Vec::new(),
-    };
-    if !canonical.starts_with(root) {
-        return vec![escaped(rel_dir, rel_dir)];
-    }
-    let Ok(entries) = std::fs::read_dir(&canonical) else {
-        return Vec::new();
-    };
-    entries
-        .flatten()
-        .filter_map(|entry| {
-            let name = entry.file_name().to_str()?.to_string();
-            let rel_path = if rel_dir.is_empty() {
-                name.clone()
-            } else {
-                format!("{rel_dir}/{name}")
-            };
-            load_skill(root, &canonical.join(&name), name, rel_path)
-        })
-        .collect()
-}
-
-fn load_skill(root: &Path, dir: &Path, name: String, rel_path: String) -> Option<SkillEntry> {
-    let canonical = std::fs::canonicalize(dir).ok()?;
-    if !canonical.is_dir() {
-        return None;
-    }
-    if !canonical.starts_with(root) {
-        return Some(escaped(&name, &rel_path));
-    }
-    let skill_file = std::fs::canonicalize(canonical.join("SKILL.md")).ok()?;
-    if !skill_file.starts_with(root) {
-        return Some(escaped(&name, &rel_path));
-    }
-    let parsed = std::fs::read_to_string(&skill_file)
-        .map_err(anyhow::Error::from)
-        .and_then(|text| parse_skill_file(&text));
-    let (description, error) = match parsed {
-        Ok((frontmatter, _)) => (frontmatter.description, None),
-        Err(err) => (String::new(), Some(format!("{err:#}"))),
-    };
-    Some(SkillEntry {
-        name,
-        description,
-        rel_path,
-        error,
-    })
-}
-
-fn mcp_servers(root: &Path) -> Result<Vec<McpServerEntry>, String> {
-    let path = root.join(MCP_JSON);
-    if !path.is_file() {
-        return Ok(Vec::new());
-    }
-    let text = std::fs::read_to_string(&path).map_err(|e| format!("read {MCP_JSON}: {e}"))?;
-    let value: Value =
-        serde_json::from_str(&text).map_err(|e| format!("invalid {MCP_JSON}: {e}"))?;
-    let Some(servers) = value.get("mcpServers") else {
-        return Ok(Vec::new());
-    };
-    let servers = servers
-        .as_object()
-        .ok_or_else(|| format!("{MCP_JSON}: `mcpServers` must be an object"))?;
-    let mut entries: Vec<_> = servers
-        .iter()
-        .map(|(name, config)| McpServerEntry {
-            name: name.clone(),
-            kind: mcp_kind(config),
-        })
-        .collect();
-    entries.sort_by(|a, b| a.name.cmp(&b.name));
-    Ok(entries)
-}
-
-fn mcp_kind(config: &Value) -> McpServerKind {
-    if config.get("command").is_some() {
-        return McpServerKind::Stdio;
-    }
-    match config.get("type").map(Value::as_str) {
-        Some(Some("http")) => McpServerKind::Http,
-        Some(Some("sse")) => McpServerKind::Sse,
-        None if config.get("url").is_some() => McpServerKind::Http,
-        _ => McpServerKind::Unknown,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::BTreeMap;
     use std::path::PathBuf;
 
     fn fixture(name: &str) -> PathBuf {
@@ -333,12 +227,21 @@ mod tests {
         assert_eq!(hello.rel_path, "skills/hello");
         assert_eq!(hello.description, "Says hello");
         assert!(skill(&m, "broken").error.is_some());
-        assert_eq!(m.unsupported, vec!["commands", "hooks"]);
-        let kind = |n: &str| m.mcp_servers.iter().find(|s| s.name == n).unwrap().kind;
+        assert_eq!(unsupported_keys(&m), vec!["commands", "hooks"]);
+        let kind = |n: &str| {
+            m.mcp_servers
+                .iter()
+                .find(|s| s.name == n)
+                .unwrap()
+                .api_kind()
+                .to_string()
+        };
         assert_eq!(m.mcp_servers.len(), 3);
-        assert_eq!(kind("echo"), McpServerKind::Stdio);
-        assert_eq!(kind("remote"), McpServerKind::Http);
-        assert_eq!(kind("old"), McpServerKind::Sse);
+        assert_eq!(kind("echo"), "stdio");
+        assert_eq!(kind("remote"), "http");
+        assert_eq!(kind("old"), "sse");
+        let names: Vec<_> = m.mcp_servers.iter().map(|s| s.name.as_str()).collect();
+        assert_eq!(names, ["echo", "old", "remote"]);
 
         let json = serde_json::to_value(&m).unwrap();
         assert_eq!(json["layout"], "plugin");
@@ -375,7 +278,130 @@ mod tests {
         assert!(m.skills.iter().all(|s| s.error.is_none()), "{:?}", m.skills);
         skill(&m, "brainstorming");
         skill(&m, "writing-plans");
-        assert_eq!(m.unsupported, vec!["agents"]);
+        assert_eq!(unsupported_keys(&m), vec!["agents"]);
+    }
+
+    fn unsupported_keys(m: &PluginManifest) -> Vec<&str> {
+        m.unsupported.iter().map(|u| u.key.as_str()).collect()
+    }
+
+    #[test]
+    fn inline_plugin_json_mcp_servers() {
+        let m = parse_plugin(&fixture("inline-mcp")).unwrap();
+        assert_eq!(m.name, "inline-mcp");
+        assert_eq!(
+            m.mcp_servers,
+            vec![McpServerEntry {
+                name: "fs".into(),
+                transport: McpServerTransport::Stdio {
+                    command: "${CLAUDE_PLUGIN_ROOT}/bin/fs".into(),
+                    args: vec!["--root".into(), "${ROOT}".into()],
+                    env: BTreeMap::from([("TOKEN".into(), "${API_TOKEN}".into())]),
+                },
+                error: None,
+            }]
+        );
+    }
+
+    #[test]
+    fn mcp_json_wins_over_inline_mcp_servers() {
+        let dir = tempfile::tempdir().unwrap();
+        write(
+            &dir.path().join(".claude-plugin/plugin.json"),
+            r#"{"name":"p","mcpServers":{"inline":{"command":"a"}}}"#,
+        );
+        write(
+            &dir.path().join(".mcp.json"),
+            r#"{"mcpServers":{"file":{"command":"b"}}}"#,
+        );
+        let m = parse_plugin(dir.path()).unwrap();
+        let names: Vec<_> = m.mcp_servers.iter().map(|s| s.name.as_str()).collect();
+        assert_eq!(names, ["file"]);
+    }
+
+    #[test]
+    fn malformed_mcp_json_marks_plugin_invalid() {
+        let dir = tempfile::tempdir().unwrap();
+        write(
+            &dir.path().join(".claude-plugin/plugin.json"),
+            r#"{"name":"p"}"#,
+        );
+        write(&dir.path().join(".mcp.json"), "{");
+        let err = parse_plugin(dir.path()).unwrap_err();
+        assert!(err.starts_with("invalid .mcp.json: "), "{err}");
+
+        write(&dir.path().join(".mcp.json"), r#"{"mcpServers":[]}"#);
+        let err = parse_plugin(dir.path()).unwrap_err();
+        assert_eq!(err, ".mcp.json: `mcpServers` must be an object");
+
+        std::fs::remove_file(dir.path().join(".mcp.json")).unwrap();
+        write(
+            &dir.path().join(".claude-plugin/plugin.json"),
+            r#"{"name":"p","mcpServers":"nope"}"#,
+        );
+        let err = parse_plugin(dir.path()).unwrap_err();
+        assert_eq!(
+            err,
+            ".claude-plugin/plugin.json: `mcpServers` must be an object"
+        );
+    }
+
+    #[test]
+    fn unsupported_dirs_reported() {
+        let dir = tempfile::tempdir().unwrap();
+        write(
+            &dir.path().join(".claude-plugin/plugin.json"),
+            r#"{"name":"p"}"#,
+        );
+        for d in ["hooks", "commands", "agents"] {
+            std::fs::create_dir_all(dir.path().join(d)).unwrap();
+        }
+        let m = parse_plugin(dir.path()).unwrap();
+        let reason = "not supported yet".to_string();
+        assert_eq!(
+            m.unsupported,
+            ["agents", "commands", "hooks"]
+                .map(|key| UnsupportedPart {
+                    key: key.into(),
+                    reason: reason.clone(),
+                })
+                .to_vec()
+        );
+    }
+
+    #[test]
+    fn old_manifest_json_deserializes() {
+        let old = serde_json::json!({
+            "name": "p",
+            "version": "1.0.0",
+            "description": "",
+            "author": null,
+            "layout": "plugin",
+            "skills": [{"name": "hello", "description": "Hi", "relPath": "skills/hello", "error": null}],
+            "mcpServers": [{"name": "fs", "kind": "stdio"}],
+            "unsupported": ["commands"],
+        });
+        let m: PluginManifest = serde_json::from_value(old).unwrap();
+        assert_eq!(m.skills.len(), 1);
+        assert_eq!(m.skills[0].rel_path, "skills/hello");
+        assert_eq!(m.mcp_servers[0].name, "fs");
+        assert_eq!(
+            m.mcp_servers[0].transport,
+            McpServerTransport::Unsupported {
+                kind: "unknown".into()
+            }
+        );
+        assert_eq!(m.mcp_servers[0].error, None);
+        assert_eq!(m.unsupported[0].key, "commands");
+        assert_eq!(m.unsupported[0].reason, "not supported yet");
+    }
+
+    #[test]
+    fn new_manifest_json_round_trips() {
+        let m = parse_plugin(&fixture("inline-mcp")).unwrap();
+        let json = serde_json::to_value(&m).unwrap();
+        assert_eq!(json["mcpServers"][0]["transport"]["type"], "stdio");
+        assert_eq!(serde_json::from_value::<PluginManifest>(json).unwrap(), m);
     }
 
     #[test]

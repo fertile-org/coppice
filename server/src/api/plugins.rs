@@ -1,7 +1,7 @@
 use crate::api::auth::{pool_from_state, AuthUser};
 use crate::middleware::admin::AdminUser;
 use crate::plugins::git_install;
-use crate::plugins::manifest::{McpServerEntry, SkillEntry};
+use crate::plugins::manifest::SkillEntry;
 use crate::services::plugin_service::{
     PluginDir, PluginError, PluginInstall, PluginRow, PluginService,
 };
@@ -68,8 +68,15 @@ struct PluginResponse {
     error: Option<String>,
     enabled: bool,
     skills: Vec<SkillEntry>,
-    mcp_servers: Vec<McpServerEntry>,
+    mcp_servers: Vec<McpServerResponse>,
     unsupported: Vec<String>,
+}
+
+/// Commands, env, URLs, and headers can carry secrets and are never exposed.
+#[derive(Serialize)]
+struct McpServerResponse {
+    name: String,
+    kind: String,
 }
 
 #[derive(Serialize)]
@@ -169,7 +176,18 @@ fn dir_response(dir: PluginDir) -> PluginDirResponse {
 fn plugin_response(plugin: PluginRow) -> PluginResponse {
     let (skills, mcp_servers, unsupported) = plugin
         .manifest
-        .map(|m| (m.skills, m.mcp_servers, m.unsupported))
+        .map(|m| {
+            let mcp_servers = m
+                .mcp_servers
+                .iter()
+                .map(|s| McpServerResponse {
+                    name: s.name.clone(),
+                    kind: s.api_kind().to_string(),
+                })
+                .collect();
+            let unsupported = m.unsupported.into_iter().map(|u| u.key).collect();
+            (m.skills, mcp_servers, unsupported)
+        })
         .unwrap_or_default();
     PluginResponse {
         id: plugin.id,

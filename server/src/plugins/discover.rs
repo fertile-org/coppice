@@ -69,9 +69,25 @@ mod tests {
     fn discover_depth1_children() {
         let found = discover(&fixtures()).unwrap();
         let rel: Vec<_> = found.iter().map(|d| d.rel_path.as_str()).collect();
-        assert_eq!(rel, ["sample-plugin", "skills-only", "superpowers-like"]);
+        assert_eq!(
+            rel,
+            [
+                "inline-mcp",
+                "sample-plugin",
+                "skills-only",
+                "superpowers-like"
+            ]
+        );
         let names: Vec<_> = found.iter().map(|d| d.name.as_str()).collect();
-        assert_eq!(names, ["sample-plugin", "skills-only", "superpowers-like"]);
+        assert_eq!(
+            names,
+            [
+                "inline-mcp",
+                "sample-plugin",
+                "skills-only",
+                "superpowers-like"
+            ]
+        );
         assert!(found.iter().all(|d| d.result.is_ok()));
     }
 

@@ -210,6 +210,55 @@ async fn add_dir_scans_plugins_disabled_by_default() {
     assert_eq!(single["name"], "sample-plugin");
 }
 
+fn collect_keys(value: &Value, keys: &mut Vec<String>) {
+    match value {
+        Value::Object(map) => {
+            for (key, child) in map {
+                keys.push(key.clone());
+                collect_keys(child, keys);
+            }
+        }
+        Value::Array(items) => items.iter().for_each(|item| collect_keys(item, keys)),
+        _ => {}
+    }
+}
+
+#[tokio::test]
+async fn plugins_api_shape_unchanged() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    require_db!();
+    let (_state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
+    let dir = plugin_dir_with(&["sample-plugin", "inline-mcp"]);
+    let dir_id = add_dir(&app, dir.path(), &cookie, &csrf).await["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let plugins = get(&app, "/api/plugins", &cookie, &csrf).await;
+    let sample = find(&plugins, &dir_id, "sample-plugin");
+    assert_eq!(
+        sample["mcpServers"],
+        json!([
+            { "name": "echo", "kind": "stdio" },
+            { "name": "old", "kind": "sse" },
+            { "name": "remote", "kind": "http" },
+        ])
+    );
+    assert_eq!(sample["unsupported"], json!(["commands", "hooks"]));
+    let inline = find(&plugins, &dir_id, "inline-mcp");
+    assert_eq!(inline["status"], "ok");
+    assert_eq!(
+        inline["mcpServers"],
+        json!([{ "name": "fs", "kind": "stdio" }])
+    );
+
+    let mut keys = Vec::new();
+    collect_keys(&plugins, &mut keys);
+    for secret in ["command", "args", "env", "url", "headers", "transport"] {
+        assert!(!keys.iter().any(|k| k == secret), "`{secret}` exposed");
+    }
+}
+
 #[tokio::test]
 async fn add_dir_rejects_relative_missing_and_duplicate() {
     let _guard = common::DB_TEST_LOCK.lock().await;
