@@ -1,3 +1,5 @@
+#![cfg(feature = "embedded-test-db")]
+
 use coppice_server::providers::cli_runner::{
     run_cli, run_cli_with_stdin, CliError, CliInvocation, LineHandler, LineStep, RunIo,
 };

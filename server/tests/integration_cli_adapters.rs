@@ -1,4 +1,5 @@
 //! Cursor and kilo-code adapters driven end to end against the `fake-cli` bin.
+#![cfg(feature = "embedded-test-db")]
 
 use coppice_config::{CursorProviderConfig, KiloCodeProviderConfig};
 use coppice_server::domain::context_profile::ContextProfile;

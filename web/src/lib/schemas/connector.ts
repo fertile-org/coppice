@@ -11,7 +11,8 @@ export type ConnectorConsole = z.infer<typeof connectorConsoleSchema>;
 export const connectorSchema = z.object({
   id: z.string(),
   displayName: z.string(),
-  console: connectorConsoleSchema,
+  // Unknown kinds fall back so one new connector cannot break the whole list.
+  console: connectorConsoleSchema.catch('plain'),
   caps: z.object({
     readOnlyTools: z.boolean(),
     chatResume: z.boolean(),

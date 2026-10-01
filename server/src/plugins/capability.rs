@@ -210,6 +210,7 @@ fn mcp_transport(config: &Map<String, Value>) -> Result<McpServerTransport, Stri
     let is_stdio = match kind {
         Some("stdio") => true,
         Some("http") => false,
+        Some(other) if other.trim().is_empty() => return Ok(unknown_transport()),
         Some(other) => {
             return Ok(McpServerTransport::Unsupported { kind: other.into() });
         }
@@ -434,6 +435,16 @@ mod tests {
                 kind: "unknown".into()
             }
         );
+    }
+
+    #[test]
+    fn mcp_blank_type_is_unknown() {
+        for ty in ["", "   "] {
+            let t = transport(&format!(
+                r#"{{"mcpServers":{{"x":{{"type":"{ty}","command":"x"}}}}}}"#
+            ));
+            assert_eq!(t, unknown_transport(), "type {ty:?}");
+        }
     }
 
     #[test]

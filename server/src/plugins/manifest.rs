@@ -370,6 +370,18 @@ mod tests {
     }
 
     #[test]
+    fn non_string_skills_marks_plugin_invalid() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("p");
+        write(&root.join(PLUGIN_JSON), r#"{"name":"p","skills":7}"#);
+        let err = parse_plugin(&root).unwrap_err();
+        assert!(
+            err.starts_with(&format!("invalid {PLUGIN_JSON}: ")),
+            "{err}"
+        );
+    }
+
+    #[test]
     fn old_manifest_json_deserializes() {
         let old = serde_json::json!({
             "name": "p",

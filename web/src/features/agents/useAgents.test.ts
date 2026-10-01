@@ -44,7 +44,7 @@ describe('fetchConnectors', () => {
     });
   });
 
-  it('rejects an unknown console kind', async () => {
+  it('keeps the list when a console kind is unknown (falls back to plain)', async () => {
     apiFetch.mockResolvedValue(
       new Response(
         JSON.stringify({
@@ -55,11 +55,22 @@ describe('fetchConnectors', () => {
               console: 'fancy',
               caps: { readOnlyTools: false, chatResume: false },
             },
+            {
+              id: 'opencode',
+              displayName: 'OpenCode',
+              console: 'openCodeSession',
+              caps: { readOnlyTools: false, chatResume: true },
+            },
           ],
         }),
       ),
     );
 
-    await expect(fetchConnectors()).rejects.toThrow();
+    const items = await fetchConnectors();
+
+    expect(items.map((c) => [c.id, c.console])).toEqual([
+      ['x', 'plain'],
+      ['opencode', 'openCodeSession'],
+    ]);
   });
 });
