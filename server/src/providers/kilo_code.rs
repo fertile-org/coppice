@@ -1,3 +1,4 @@
+use super::cli_runner::{run_cli, CliError, CliInvocation, LineHandler, LineStep, RunIo};
 use super::kilo_console::KiloConsolePublisher;
 use super::{
     refuse_unsupported_read_only, run_dir, worktree_dir_from_context, AgentProvider, AgentRunInput,
@@ -6,15 +7,13 @@ use super::{
 use crate::mcp::grant::McpAccess;
 use crate::mcp::wiring::McpServerSpec;
 use crate::sessions::opencode_events::{coppice_run_prompt, extract_result_from_text};
+use crate::sessions::run_registry::RunStreamHandle;
 use async_trait::async_trait;
 use coppice_config::KiloCodeProviderConfig;
 use serde_json::Value;
 use std::path::Path;
-use std::process::Stdio;
+use std::sync::Arc;
 use std::time::Duration;
-use tokio::io::{AsyncBufReadExt, BufReader};
-use tokio::process::Command;
-use tokio::sync::watch;
 
 /// Kilo spawns one `kilo run` process per run, so it takes the same shape as
 /// its OpenCode ancestor: a config file in the run's artifacts dir, pointed at
@@ -92,26 +91,25 @@ impl AgentProvider for KiloCodeProvider {
         // emits raw JSON events on stdout. `--auto` auto-approves permissions
         // for non-interactive / pipeline usage. There is no documented `-C`
         // working-directory flag on `kilo run`, so we set the process CWD.
-        let mut cmd = Command::new(&self.config.command);
-        cmd.arg("run")
-            .arg("--format")
-            .arg("json")
-            .arg("--auto")
-            .arg(coppice_run_prompt())
-            .current_dir(&worktree)
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
+        let mut args = vec![
+            "run".to_string(),
+            "--format".to_string(),
+            "json".to_string(),
+            "--auto".to_string(),
+            coppice_run_prompt().to_string(),
+        ];
 
         if let Some(model) = self.model_arg(&input) {
-            cmd.arg("--model").arg(model);
+            args.push("--model".to_string());
+            args.push(model);
         }
 
         // Resume a previous Kilo session if we have its id. `kilo run -s <id>`
         // is documented for resuming a specific session.
         if let Some(sid) = &input.resume_session_id {
             if !sid.is_empty() {
-                cmd.arg("--session").arg(sid);
+                args.push("--session".to_string());
+                args.push(sid.clone());
             }
         }
 
@@ -120,127 +118,79 @@ impl AgentProvider for KiloCodeProvider {
         // inherits that environment directly — same model as claude-code and
         // codex. Coppice does not inject or strip credentials.
 
+        let mut env = Vec::new();
         if let Some(access) = &input.mcp {
             let run_dir = run_dir(&input, "kilo-code")?;
-            cmd.envs(kilo_mcp_setup(access, &run_dir)?);
-            cmd.envs(access.env());
+            env.extend(kilo_mcp_setup(access, &run_dir)?);
+            env.extend(access.env().map(|(k, v)| (k.to_string(), v)));
         }
 
-        let mut child = cmd.spawn().map_err(ProviderError::Io)?;
+        let invocation = CliInvocation {
+            program: self.config.command.clone(),
+            args,
+            env,
+            cwd: worktree,
+            timeout: run_timeout,
+        };
+        let mut handler = KiloLines {
+            stream: input.stream.clone(),
+            console: KiloConsolePublisher::new(),
+            assistant_text: String::new(),
+        };
+        let io = RunIo {
+            cancel_rx: input.cancel_rx,
+            session_created_tx: input.session_created_tx,
+            stderr_target: "kilo_code.stderr",
+        };
 
-        let stdout = child.stdout.take().expect("piped stdout");
-        let mut stderr = child.stderr.take().expect("piped stderr");
-
-        let mut reader = BufReader::new(stdout).lines();
-        let deadline = tokio::time::Instant::now() + run_timeout;
-        let mut cancel_rx = input.cancel_rx;
-
-        // Pump stderr to tracing so we don't lose diagnostics.
-        let stderr_task = tokio::spawn(async move {
-            let mut reader = BufReader::new(&mut stderr).lines();
-            while let Ok(Some(line)) = reader.next_line().await {
-                tracing::debug!(target: "kilo_code.stderr", "{line}");
+        let exit = match run_cli(invocation, &mut handler, io).await {
+            Ok(exit) => exit,
+            Err(CliError::Spawn(e) | CliError::Io(e)) => return Err(ProviderError::Io(e)),
+            Err(CliError::Cancelled) => return Err(ProviderError::Cancelled),
+            Err(CliError::TimedOut { .. }) => {
+                return Err(ProviderError::InvalidFixture(format!(
+                    "kilo-code run timed out after {}s",
+                    run_timeout.as_secs()
+                )));
             }
-        });
+        };
 
-        let mut assistant_text = String::new();
-        let mut session_sent = false;
-        let mut console = KiloConsolePublisher::new();
-
-        loop {
-            if is_cancelled(&cancel_rx) {
-                let _ = child.kill().await;
-                return Err(ProviderError::Cancelled);
-            }
-
-            tokio::select! {
-                biased;
-
-                _ = wait_cancel(&mut cancel_rx) => {
-                    if is_cancelled(&cancel_rx) {
-                        let _ = child.kill().await;
-                        return Err(ProviderError::Cancelled);
-                    }
-                }
-
-                _ = tokio::time::sleep_until(deadline) => {
-                    let _ = child.kill().await;
-                    return Err(ProviderError::InvalidFixture(format!(
-                        "kilo-code run timed out after {}s",
-                        run_timeout.as_secs()
-                    )));
-                }
-
-                line = reader.next_line() => {
-                    match line {
-                        Ok(Some(raw)) => {
-                            let Ok(value) = serde_json::from_str::<Value>(&raw) else {
-                                continue;
-                            };
-
-                            // Capture session id early for the job worker.
-                            if !session_sent {
-                                if let Some(sid) = extract_session_id(&value) {
-                                    if let Some(tx) = &input.session_created_tx {
-                                        let _ = tx.send(sid);
-                                    }
-                                    session_sent = true;
-                                }
-                            }
-
-                            // Forward structured console events to the run stream.
-                            if let Some(stream) = &input.stream {
-                                console.handle_json(stream, &value);
-                            }
-
-                            // Accumulate assistant text.
-                            if let Some(text) = extract_assistant_text(&value) {
-                                assistant_text.push_str(&text);
-                            }
-
-                            // Terminal event. Kilo/OpenCode use session.idle /
-                            // session.finished to signal end of turn. We also break
-                            // on stdout EOF (Ok(None)) below as a backstop.
-                            if is_terminal_event(&value) {
-                                break;
-                            }
-                        }
-                        Ok(None) => break,
-                        Err(e) => {
-                            let _ = child.kill().await;
-                            return Err(ProviderError::Io(e));
-                        }
-                    }
-                }
-            }
-        }
-
-        // Wait for the process to exit.
-        let status = child.wait().await.map_err(ProviderError::Io)?;
-        let _ = stderr_task.await;
-
-        if !status.success() {
+        if !exit.status.success() {
             return Err(ProviderError::InvalidFixture(format!(
-                "kilo-code exited with status {status}"
+                "kilo-code exited with status {}",
+                exit.status
             )));
         }
 
-        extract_result_from_text(&assistant_text).ok_or_else(|| {
+        extract_result_from_text(&handler.assistant_text).ok_or_else(|| {
             ProviderError::MissingResult("no result contract found in kilo-code output".into())
         })
     }
 }
 
-fn is_cancelled(cancel_rx: &Option<watch::Receiver<bool>>) -> bool {
-    cancel_rx.as_ref().is_some_and(|rx| *rx.borrow())
+/// Forwards console events and accumulates assistant text. Kilo/OpenCode use
+/// `session.idle` / `session.finished` to signal end of turn; stdout EOF is
+/// the backstop.
+struct KiloLines {
+    stream: Option<Arc<RunStreamHandle>>,
+    console: KiloConsolePublisher,
+    assistant_text: String,
 }
 
-async fn wait_cancel(cancel_rx: &mut Option<watch::Receiver<bool>>) {
-    match cancel_rx {
-        Some(rx) => {
-            let _ = rx.changed().await;
+impl LineHandler for KiloLines {
+    fn on_json(&mut self, value: &Value) -> LineStep {
+        if let Some(stream) = &self.stream {
+            self.console.handle_json(stream, value);
         }
-        None => std::future::pending::<()>().await,
+
+        if let Some(text) = extract_assistant_text(value) {
+            self.assistant_text.push_str(&text);
+        }
+
+        LineStep {
+            session_id: extract_session_id(value),
+            stop: is_terminal_event(value),
+        }
     }
 }
 

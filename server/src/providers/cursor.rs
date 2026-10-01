@@ -1,3 +1,4 @@
+use super::cli_runner::{run_cli, CliError, CliExit, CliInvocation, LineHandler, LineStep, RunIo};
 use super::cursor_console::CursorConsolePublisher;
 use super::{
     artifacts_path, mcp_unavailable, worktree_dir_from_context, AgentProvider, AgentRunInput,
@@ -6,14 +7,12 @@ use super::{
 use crate::mcp::grant::McpAccess;
 use crate::mcp::wiring::McpServerSpec;
 use crate::sessions::opencode_events::{coppice_run_prompt, extract_result_from_text};
+use crate::sessions::run_registry::RunStreamHandle;
 use async_trait::async_trait;
 use coppice_config::CursorProviderConfig;
 use std::path::{Path, PathBuf};
-use std::process::Stdio;
+use std::sync::Arc;
 use std::time::Duration;
-use tokio::io::{AsyncBufReadExt, BufReader};
-use tokio::process::Command;
-use tokio::sync::watch;
 
 pub struct CursorProvider {
     config: CursorProviderConfig,
@@ -37,33 +36,26 @@ impl AgentProvider for CursorProvider {
         let run_timeout = Duration::from_secs(self.config.run_timeout_secs);
         let command = self.config.command.as_str();
 
-        let mut cmd = Command::new(command);
-        for arg in cursor_cli_args(
+        let args = cursor_cli_args(
             &worktree,
             input.read_only_tools,
             input.model.as_deref(),
             input.resume_session_id.as_deref(),
-        ) {
-            cmd.arg(arg);
-        }
-        cmd.current_dir(&worktree)
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .kill_on_drop(true);
+        );
 
         // Auth is host-managed: the operator runs `agent login` wherever the
         // server runs. The child process inherits that environment directly.
         // Coppice does not inject or strip credentials.
 
+        let mut env = Vec::new();
         if let Some(access) = &input.mcp {
             let state_dir = cursor_state_dir(&input)?;
-            cmd.envs(cursor_mcp_setup(
+            env.extend(cursor_mcp_setup(
                 access,
                 &state_dir,
                 &HostEnv::from_process(),
             )?);
-            cmd.envs(access.env());
+            env.extend(access.env().map(|(k, v)| (k.to_string(), v)));
         }
 
         tracing::info!(
@@ -75,135 +67,52 @@ impl AgentProvider for CursorProvider {
             "starting cursor connector subprocess"
         );
 
-        let mut child = cmd.spawn().map_err(|err| {
-            ProviderError::Io(std::io::Error::new(
-                err.kind(),
-                format!(
-                    "failed to spawn `{command}` (cwd {}): {err}",
-                    worktree.display()
-                ),
-            ))
-        })?;
+        let invocation = CliInvocation {
+            program: command.to_string(),
+            args,
+            env,
+            cwd: worktree.clone(),
+            timeout: run_timeout,
+        };
+        let mut handler = CursorLines {
+            stream: input.stream.clone(),
+            console: CursorConsolePublisher::new(),
+            assistant_text: String::new(),
+            result_error: None,
+            saw_result_event: false,
+        };
+        let io = RunIo {
+            cancel_rx: input.cancel_rx,
+            session_created_tx: input.session_created_tx,
+            stderr_target: "cursor.stderr",
+        };
 
-        let stdout = child.stdout.take().expect("piped stdout");
-        let stderr = child.stderr.take().expect("piped stderr");
-
-        let mut reader = BufReader::new(stdout).lines();
-        let deadline = tokio::time::Instant::now() + run_timeout;
-        let mut cancel_rx = input.cancel_rx;
-
-        // Collect stderr for failure messages; also mirror to tracing.
-        let stderr_task = tokio::spawn(async move {
-            let mut reader = BufReader::new(stderr).lines();
-            let mut lines = Vec::new();
-            while let Ok(Some(line)) = reader.next_line().await {
-                tracing::debug!(target: "cursor.stderr", "{line}");
-                if lines.len() < 40 {
-                    lines.push(line);
-                }
+        let CliExit {
+            status,
+            stderr_tail,
+        } = match run_cli(invocation, &mut handler, io).await {
+            Ok(exit) => exit,
+            Err(CliError::Spawn(err)) => {
+                return Err(ProviderError::Io(std::io::Error::new(
+                    err.kind(),
+                    format!(
+                        "failed to spawn `{command}` (cwd {}): {err}",
+                        worktree.display()
+                    ),
+                )));
             }
-            lines
-        });
-
-        let mut assistant_text = String::new();
-        let mut session_sent = false;
-        let mut result_error: Option<String> = None;
-        let mut saw_result_event = false;
-        let mut console = CursorConsolePublisher::new();
-
-        loop {
-            if is_cancelled(&cancel_rx) {
-                let _ = child.kill().await;
-                return Err(ProviderError::Cancelled);
+            Err(CliError::Io(e)) => return Err(ProviderError::Io(e)),
+            Err(CliError::Cancelled) => return Err(ProviderError::Cancelled),
+            Err(CliError::TimedOut { stderr_tail }) => {
+                return Err(ProviderError::InvalidFixture(format!(
+                    "`{command}` timed out after {}s{}",
+                    run_timeout.as_secs(),
+                    format_stderr_suffix(&stderr_tail)
+                )));
             }
+        };
 
-            tokio::select! {
-                biased;
-
-                _ = wait_cancel(&mut cancel_rx) => {
-                    if is_cancelled(&cancel_rx) {
-                        let _ = child.kill().await;
-                        return Err(ProviderError::Cancelled);
-                    }
-                }
-
-                _ = tokio::time::sleep_until(deadline) => {
-                    let _ = child.kill().await;
-                    let stderr_tail = stderr_tail_from_task(stderr_task).await;
-                    return Err(ProviderError::InvalidFixture(format!(
-                        "`{command}` timed out after {}s{}",
-                        run_timeout.as_secs(),
-                        format_stderr_suffix(&stderr_tail)
-                    )));
-                }
-
-                line = reader.next_line() => {
-                    match line {
-                        Ok(Some(raw)) => {
-                            let Ok(value) = serde_json::from_str::<serde_json::Value>(&raw) else {
-                                continue;
-                            };
-
-                            // Capture session_id early for the job worker.
-                            if !session_sent {
-                                if let Some(sid) = value
-                                    .get("session_id")
-                                    .and_then(|v| v.as_str())
-                                    .filter(|s| !s.is_empty())
-                                {
-                                    if let Some(tx) = &input.session_created_tx {
-                                        let _ = tx.send(sid.to_string());
-                                    }
-                                    session_sent = true;
-                                }
-                            }
-
-                            // Forward structured console events to the run stream.
-                            if let Some(stream) = &input.stream {
-                                console.handle_stream_json(stream, &value);
-                            }
-
-                            // Accumulate assistant text.
-                            if let Some(text) = extract_assistant_text(&value) {
-                                assistant_text.push_str(&text);
-                            }
-
-                            // Terminal result event.
-                            if value.get("type").and_then(|v| v.as_str()) == Some("result") {
-                                saw_result_event = true;
-                                if result_event_is_error(&value) {
-                                    result_error = Some(
-                                        value
-                                            .get("result")
-                                            .and_then(|v| v.as_str())
-                                            .unwrap_or("cursor run failed")
-                                            .to_string(),
-                                    );
-                                    break;
-                                }
-                                if let Some(final_text) =
-                                    value.get("result").and_then(|v| v.as_str())
-                                {
-                                    assistant_text = final_text.to_string();
-                                }
-                                break;
-                            }
-                        }
-                        Ok(None) => break,
-                        Err(e) => {
-                            let _ = child.kill().await;
-                            return Err(ProviderError::Io(e));
-                        }
-                    }
-                }
-            }
-        }
-
-        // Wait for the process to exit.
-        let status = child.wait().await.map_err(ProviderError::Io)?;
-        let stderr_tail = stderr_tail_from_task(stderr_task).await;
-
-        if let Some(msg) = result_error {
+        if let Some(msg) = handler.result_error {
             return Err(ProviderError::InvalidFixture(format!(
                 "`{command}` result error: {msg}{}",
                 format_stderr_suffix(&stderr_tail)
@@ -211,14 +120,14 @@ impl AgentProvider for CursorProvider {
         }
 
         // Prefer a successful stream result over a weird non-zero exit.
-        if !status.success() && !saw_result_event {
+        if !status.success() && !handler.saw_result_event {
             return Err(ProviderError::InvalidFixture(format!(
                 "`{command}` exited with {status} (cwd {}){}",
                 worktree.display(),
                 format_stderr_suffix(&stderr_tail)
             )));
         }
-        if !status.success() && saw_result_event {
+        if !status.success() && handler.saw_result_event {
             tracing::warn!(
                 command,
                 %status,
@@ -227,7 +136,7 @@ impl AgentProvider for CursorProvider {
             );
         }
 
-        extract_result_from_text(&assistant_text).ok_or_else(|| {
+        extract_result_from_text(&handler.assistant_text).ok_or_else(|| {
             ProviderError::MissingResult(format!(
                 "no result contract found in `{command}` output{}",
                 format_stderr_suffix(&stderr_tail)
@@ -236,8 +145,49 @@ impl AgentProvider for CursorProvider {
     }
 }
 
-async fn stderr_tail_from_task(stderr_task: tokio::task::JoinHandle<Vec<String>>) -> Vec<String> {
-    stderr_task.await.unwrap_or_default()
+/// Forwards console events and accumulates assistant text; the `result` event
+/// is terminal and, unless it is an error, replaces the accumulated text.
+struct CursorLines {
+    stream: Option<Arc<RunStreamHandle>>,
+    console: CursorConsolePublisher,
+    assistant_text: String,
+    result_error: Option<String>,
+    saw_result_event: bool,
+}
+
+impl LineHandler for CursorLines {
+    fn on_json(&mut self, value: &serde_json::Value) -> LineStep {
+        let session_id = value
+            .get("session_id")
+            .and_then(|v| v.as_str())
+            .map(str::to_string);
+
+        if let Some(stream) = &self.stream {
+            self.console.handle_stream_json(stream, value);
+        }
+
+        if let Some(text) = extract_assistant_text(value) {
+            self.assistant_text.push_str(&text);
+        }
+
+        let stop = value.get("type").and_then(|v| v.as_str()) == Some("result");
+        if stop {
+            self.saw_result_event = true;
+            if result_event_is_error(value) {
+                self.result_error = Some(
+                    value
+                        .get("result")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("cursor run failed")
+                        .to_string(),
+                );
+            } else if let Some(final_text) = value.get("result").and_then(|v| v.as_str()) {
+                self.assistant_text = final_text.to_string();
+            }
+        }
+
+        LineStep { session_id, stop }
+    }
 }
 
 fn format_stderr_suffix(lines: &[String]) -> String {
@@ -407,19 +357,6 @@ fn cursor_mcp_setup(
         }
     }
     Ok(env)
-}
-
-fn is_cancelled(cancel_rx: &Option<watch::Receiver<bool>>) -> bool {
-    cancel_rx.as_ref().is_some_and(|rx| *rx.borrow())
-}
-
-async fn wait_cancel(cancel_rx: &mut Option<watch::Receiver<bool>>) {
-    match cancel_rx {
-        Some(rx) => {
-            let _ = rx.changed().await;
-        }
-        None => std::future::pending::<()>().await,
-    }
 }
 
 fn extract_assistant_text(value: &serde_json::Value) -> Option<String> {

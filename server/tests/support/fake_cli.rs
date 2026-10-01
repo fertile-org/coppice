@@ -5,10 +5,19 @@
 //! `FAKE_CLI_LINES`
 //! (newline-separated stdout lines), `FAKE_CLI_STDERR` (newline-separated
 //! stderr lines), `FAKE_CLI_SLEEP_MS` (sleep after printing), `FAKE_CLI_EXIT`.
+//! Any of these may also come from a JSON object in `./.fake-cli-env.json`,
+//! for callers (connector adapters) that spawn the bin without custom env.
 
 use std::io::{Read, Write};
 
 fn main() {
+    if let Ok(raw) = std::fs::read_to_string(".fake-cli-env.json") {
+        let vars: std::collections::HashMap<String, String> =
+            serde_json::from_str(&raw).expect("parse .fake-cli-env.json");
+        for (key, value) in vars {
+            std::env::set_var(key, value);
+        }
+    }
     let mut stdout = std::io::stdout();
     if std::env::var_os("FAKE_CLI_PRINT_PID").is_some() {
         writeln!(stdout, "{{\"pid\":{}}}", std::process::id()).expect("write pid");
