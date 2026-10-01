@@ -1,6 +1,6 @@
 # M10 Plugins Design
 
-**Status:** Approved — Part 1 (steps 1–4) merged; Part 2 split into 2a and 2b (see Delivery order)  
+**Status:** Approved — Part 1 (steps 1–4) and Part 2a merged; foundations plan precedes Part 2b (see Delivery order)  
 **Date:** 2026-09-29  
 **Owner/reviewer:** Technical Lead  
 **Milestone:** [M10 — Plugins](../../milestones/M10-plugins.md)
@@ -297,6 +297,14 @@ Chat write-denial (M09) is unchanged for connector-native tools; Coppice tools f
 - Exposed names: `<plugin>__<tool>` (sanitized to MCP name rules); descriptions and `annotations` passed through.
 - Documented limitation: shared instances share state across runs; per-run instances can be added later if needed.
 
+Structure (amended 2026-10-01, on the [foundations](2026-10-01-connector-and-tool-source-foundations-design.md)):
+
+- `PluginMcpSource` is the third `ToolSource` in the gateway `ToolRegistry`. It lists tools only for plugins in the token's `plugin_ids` snapshot that are still enabled and `ok`, and only for servers that are healthy. The router's chat read-only filter (`readOnlyHint`) applies to it like every source; calls are logged with `source = plugin` and `plugin_id`.
+- `McpServerPool` owns the shared instances (lazy start, multiplexing, restart with backoff, unhealthy, idle shutdown, tool-list cache). It starts servers from the full `McpServerEntry` kept by the `mcpServers` capability parser, substituting placeholders at start.
+- Transports sit behind a small `McpTransport` trait built on the `rmcp` client: stdio and streamable HTTP now; a new transport (e.g. SSE) is one implementation.
+- Live console: each structured console parser splits gateway tool names with its connector descriptor's `ToolNameStyle`, so Coppice and plugin tools render the same way in every console.
+- Enabling a plugin that has stdio MCP servers shows the server-privileges warning (until M11).
+
 ## Data model
 
 ```text
@@ -396,7 +404,8 @@ Each real connector completes a ticket tool-first (tools called, `result_submit`
 Plans: [Part 1 — tool-first harness](../plans/2026-09-29-m10-part1-tool-first-harness.md) covers steps 1–4 (merged). Part 2 is split into two plans:
 
 - **Part 2a — plugins and plugin skills:** OpenCode per-run `opencode serve` (verification first), then step 5: migration (`plugin_dirs`, `plugins`, `agent_plugins`, `run_tool_tokens.plugin_ids` — the snapshot column was not added in Part 1), manifest parsing and scan (shadowing, missing, rescan, unsupported parts), git install/update job, enable/disable, agent assignment and presets, `SkillCatalog` serving built-in + snapshot plugin skills as `<plugin>:<skill>`, Settings → Plugins and the agent-form picker, integration tests with a mock run calling `skill_load` on a plugin skill.
-- **Part 2b — plugin MCP and observability:** steps 6–7: `plugin_settings` (encrypted), `mcp::proxy` over `rmcp` (stdio + HTTP, namespacing, shared instances, restart/backoff, unhealthy, idle shutdown, `readOnlyHint` filtering for chat profiles), Test button, Tools & Skills tab, live-console tool calls, `make e2e-smoke-m10`, docs.
+- **Foundations (between 2a and 2b):** [Connector and tool-source foundations](2026-10-01-connector-and-tool-source-foundations-design.md) — connector descriptors, MCP wiring renderers, shared CLI runner, gateway `ToolSource` registry, plugin capability parsers. No behavior change. Part 2b depends on it.
+- **Part 2b — plugin MCP and observability:** built on the foundations (see "Plugin MCP proxy"). Steps 6–7: `plugin_settings` (encrypted), `mcp::proxy` over `rmcp` (stdio + HTTP, namespacing, shared instances, restart/backoff, unhealthy, idle shutdown, `readOnlyHint` filtering for chat profiles), Test button, Tools & Skills tab, live-console tool calls, `make e2e-smoke-m10`, docs.
 
 Live verification of `claude-code`, `codex`, and `kilo-code` wiring remains a manual acceptance item (needs their CLIs installed), not a plan task.
 
