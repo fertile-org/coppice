@@ -21,6 +21,11 @@ name = "fake-cli"
 path = "tests/support/fake_cli.rs"
 required-features = ["embedded-test-db"]
 
+[[bin]]
+name = "fake-mcp"
+path = "tests/support/fake_mcp.rs"
+required-features = ["embedded-test-db"]
+
 [dependencies]
 coppice-config = { path = "../config" }
 coppice-connectors = { path = "../connectors" }
@@ -53,6 +58,7 @@ toml = "0.8"
 walkdir = "2"
 zip = "2"
 tempfile = "3"
+rmcp = { version = "3.5", default-features = false, features = ["client", "transport-child-process", "transport-streamable-http-client-reqwest", "reqwest"] }
 
 [features]
 embedded-test-db = ["dep:pg-embed", "dep:fs4"]

@@ -2,9 +2,10 @@
 
 use crate::plugins::capability::{McpServerEntry, McpServerTransport};
 use std::collections::{BTreeMap, BTreeSet};
+use std::fmt;
 use std::path::Path;
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Clone, PartialEq, Eq, Hash)]
 pub enum ResolvedTransport {
     Stdio {
         command: String,
@@ -22,6 +23,22 @@ impl ResolvedTransport {
         match self {
             ResolvedTransport::Stdio { .. } => "stdio",
             ResolvedTransport::Http { .. } => "http",
+        }
+    }
+}
+
+/// Kind plus env/header names only: values, command, args, and url may hold secrets.
+impl fmt::Debug for ResolvedTransport {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ResolvedTransport::Stdio { env, .. } => f
+                .debug_struct("Stdio")
+                .field("env", &env.keys().collect::<Vec<_>>())
+                .finish_non_exhaustive(),
+            ResolvedTransport::Http { headers, .. } => f
+                .debug_struct("Http")
+                .field("headers", &headers.keys().collect::<Vec<_>>())
+                .finish_non_exhaustive(),
         }
     }
 }
@@ -314,6 +331,36 @@ mod tests {
         ];
         let keys: Vec<_> = placeholder_keys(&entries).into_iter().collect();
         assert_eq!(keys, ["ARG", "CMD", "ENV_VAL", "HDR", "HOST", "X"]);
+    }
+
+    #[test]
+    fn debug_shows_only_kind_and_names() {
+        let stdio = ResolvedTransport::Stdio {
+            command: "/bin/cmd-secret".into(),
+            args: vec!["--token=arg-secret".into()],
+            env: settings(&[("API_TOKEN", "env-secret")]),
+        };
+        let shown = format!("{stdio:?}");
+        assert!(
+            shown.contains("Stdio") && shown.contains("API_TOKEN"),
+            "{shown}"
+        );
+        for secret in ["cmd-secret", "arg-secret", "env-secret"] {
+            assert!(!shown.contains(secret), "{shown}");
+        }
+
+        let http = ResolvedTransport::Http {
+            url: "https://u:url-pass@h/mcp?k=url-query".into(),
+            headers: settings(&[("Authorization", "Bearer hdr-secret")]),
+        };
+        let shown = format!("{http:?}");
+        assert!(
+            shown.contains("Http") && shown.contains("Authorization"),
+            "{shown}"
+        );
+        for secret in ["url-pass", "url-query", "hdr-secret"] {
+            assert!(!shown.contains(secret), "{shown}");
+        }
     }
 
     #[test]
