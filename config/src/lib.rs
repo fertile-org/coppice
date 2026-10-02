@@ -39,6 +39,12 @@ pub struct PluginsConfig {
     pub allow_file_git_urls: bool,
     #[serde(default = "default_plugins_git_timeout_secs")]
     pub git_timeout_secs: u64,
+    #[serde(default = "default_plugins_mcp_start_timeout_secs")]
+    pub mcp_start_timeout_secs: u64,
+    #[serde(default = "default_plugins_mcp_list_timeout_secs")]
+    pub mcp_list_timeout_secs: u64,
+    #[serde(default = "default_plugins_mcp_idle_shutdown_secs")]
+    pub mcp_idle_shutdown_secs: u64,
 }
 
 fn default_plugins_dir() -> String {
@@ -49,12 +55,27 @@ fn default_plugins_git_timeout_secs() -> u64 {
     300
 }
 
+fn default_plugins_mcp_start_timeout_secs() -> u64 {
+    20
+}
+
+fn default_plugins_mcp_list_timeout_secs() -> u64 {
+    10
+}
+
+fn default_plugins_mcp_idle_shutdown_secs() -> u64 {
+    600
+}
+
 impl Default for PluginsConfig {
     fn default() -> Self {
         Self {
             dir: default_plugins_dir(),
             allow_file_git_urls: false,
             git_timeout_secs: default_plugins_git_timeout_secs(),
+            mcp_start_timeout_secs: default_plugins_mcp_start_timeout_secs(),
+            mcp_list_timeout_secs: default_plugins_mcp_list_timeout_secs(),
+            mcp_idle_shutdown_secs: default_plugins_mcp_idle_shutdown_secs(),
         }
     }
 }
@@ -1373,6 +1394,9 @@ mod tests {
         assert_eq!(defaults.dir, "./data/plugins");
         assert!(!defaults.allow_file_git_urls);
         assert_eq!(defaults.git_timeout_secs, 300);
+        assert_eq!(defaults.mcp_start_timeout_secs, 20);
+        assert_eq!(defaults.mcp_list_timeout_secs, 10);
+        assert_eq!(defaults.mcp_idle_shutdown_secs, 600);
 
         const KEY: &str = "COPPICE_PLUGINS__DIR";
         let previous = std::env::var(KEY).ok();
@@ -1387,6 +1411,7 @@ mod tests {
 
         assert_eq!(cfg.plugins.dir, "/data/plugins");
         assert_eq!(cfg.plugins.git_timeout_secs, 300);
+        assert_eq!(cfg.plugins.mcp_idle_shutdown_secs, 600);
     }
 
     #[test]

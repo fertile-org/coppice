@@ -67,4 +67,5 @@ embedded-test-db = ["dep:pg-embed", "dep:fs4"]
 http = "1"
 http-body-util = "0.1"
 tempfile = "3"
+tokio = { version = "1", features = ["test-util"] }
 tokio-tungstenite = { version = "0.26", features = ["rustls-tls-webpki-roots"] }

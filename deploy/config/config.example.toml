@@ -140,3 +140,7 @@ builtin_plugins_dir = "./data/builtin-plugins"
 # dir = "./data/plugins"
 # allow_file_git_urls = false
 # git_timeout_secs = 300
+# Plugin MCP servers: start/list timeouts and idle shutdown of shared instances.
+# mcp_start_timeout_secs = 20
+# mcp_list_timeout_secs = 10
+# mcp_idle_shutdown_secs = 600

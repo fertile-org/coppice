@@ -7,13 +7,16 @@ use axum::routing::post;
 use axum::{Json, Router};
 use coppice_server::mcp::protocol::{ToolContent, ToolResult};
 use coppice_server::mcp::proxy::{
-    HttpTransport, McpConnection, McpTransport, ProxyError, StdioTransport, Transports,
+    HttpTransport, McpConnection, McpServerPool, McpTransport, PoolConfig, PoolError,
+    PoolServerSpec, ProxyError, ServerHealth, ServerKey, StdioTransport, Transports,
 };
+use coppice_server::plugins::capability::{McpServerEntry, McpServerTransport};
 use coppice_server::plugins::placeholders::ResolvedTransport;
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
 use std::path::Path;
 use std::time::Duration;
+use uuid::Uuid;
 
 fn map(pairs: &[(&str, &str)]) -> BTreeMap<String, String> {
     pairs
@@ -314,4 +317,84 @@ async fn assert_error_hides_secrets(spec: &ResolvedTransport) {
     for secret in ["h-val", "u-pass", "q-secret", "user:"] {
         assert!(!message.contains(secret), "{secret} leaked in {message}");
     }
+}
+
+fn pool_spec(root: &Path) -> PoolServerSpec {
+    PoolServerSpec {
+        key: ServerKey {
+            plugin_id: Uuid::new_v4(),
+            server: "fake".into(),
+        },
+        plugin_name: "demo".into(),
+        plugin_root: root.to_path_buf(),
+        entry: McpServerEntry {
+            name: "fake".into(),
+            transport: McpServerTransport::Stdio {
+                command: env!("CARGO_BIN_EXE_fake-mcp").into(),
+                args: Vec::new(),
+                env: map(&[("FAKE_MCP_PID_FILE", "${CLAUDE_PLUGIN_ROOT}/pid.txt")]),
+            },
+            error: None,
+        },
+        settings: BTreeMap::new(),
+    }
+}
+
+fn test_pool() -> McpServerPool {
+    McpServerPool::new(
+        Transports::builtin(),
+        PoolConfig {
+            start_timeout: Duration::from_secs(20),
+            idle_shutdown: Duration::from_secs(600),
+            backoff_initial: Duration::from_millis(200),
+            backoff_max: Duration::from_secs(1),
+            unhealthy_after: 3,
+        },
+    )
+}
+
+async fn pool_echo(pool: &McpServerPool, spec: &PoolServerSpec, text: &str) -> String {
+    match pool.call(spec, "echo", json!({ "text": text })).await {
+        Ok(result) => text_of(&result),
+        Err(e) => panic!("pool call failed: {e}"),
+    }
+}
+
+fn read_pid(root: &Path) -> String {
+    std::fs::read_to_string(root.join("pid.txt")).expect("pid file")
+}
+
+#[tokio::test]
+async fn pool_shares_one_process_across_callers() {
+    let dir = tempfile::tempdir().unwrap();
+    let pool = test_pool();
+    let spec = pool_spec(dir.path());
+    let (a, b) = tokio::join!(pool_echo(&pool, &spec, "a"), pool_echo(&pool, &spec, "b"));
+    assert_eq!((a.as_str(), b.as_str()), ("a", "b"));
+    let pid = read_pid(dir.path());
+    assert_eq!(pool_echo(&pool, &spec, "c").await, "c");
+    assert_eq!(read_pid(dir.path()), pid);
+    assert_eq!(pool.health(&spec.key), ServerHealth::Ready);
+    pool.stop_plugin(spec.key.plugin_id).await;
+    assert_eq!(pool.health(&spec.key), ServerHealth::Stopped);
+}
+
+#[tokio::test]
+async fn pool_restarts_crashed_stdio_server() {
+    let dir = tempfile::tempdir().unwrap();
+    let pool = test_pool();
+    let spec = pool_spec(dir.path());
+    assert_eq!(pool_echo(&pool, &spec, "a").await, "a");
+    let first = read_pid(dir.path());
+
+    assert_eq!(
+        pool.call(&spec, "crash", json!({})).await.err(),
+        Some(PoolError::Unavailable)
+    );
+    assert_eq!(pool.health(&spec.key), ServerHealth::Backoff);
+    tokio::time::sleep(Duration::from_millis(300)).await;
+
+    assert_eq!(pool_echo(&pool, &spec, "b").await, "b");
+    assert_ne!(read_pid(dir.path()), first);
+    pool.stop_plugin(spec.key.plugin_id).await;
 }
