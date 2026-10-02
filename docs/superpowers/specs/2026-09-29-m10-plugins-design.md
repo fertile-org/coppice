@@ -1,6 +1,6 @@
 # M10 Plugins Design
 
-**Status:** Approved — Part 1 (steps 1–4) and Part 2a merged; foundations plan precedes Part 2b (see Delivery order)  
+**Status:** Approved — Part 1 (steps 1–4), Part 2a, and the foundations merged; Part 2b designed in [Part 2b design](2026-10-02-m10-part2b-plugin-mcp-design.md)  
 **Date:** 2026-09-29  
 **Owner/reviewer:** Technical Lead  
 **Milestone:** [M10 — Plugins](../../milestones/M10-plugins.md)
@@ -97,7 +97,7 @@ A plugin directory is scanned at depth 0 (the directory itself is a plugin) and 
 ### MCP servers (`.mcp.json`)
 
 - Supported entries: stdio (`command`, `args`, `env`) and remote (`type: http` / `url`, `headers`). SSE-only remotes are listed as unsupported.
-- Placeholder substitution: `${CLAUDE_PLUGIN_ROOT}` → plugin path; `${VAR}` → plugin setting `VAR`, else server environment `VAR`, else the server fails to start with a clear error.
+- Placeholder substitution: `${CLAUDE_PLUGIN_ROOT}` → plugin path; `${VAR}` → plugin setting `VAR`, else server environment `VAR`, else the server fails to start with a clear error. *Amended 2026-10-02:* the server-environment fallback excludes `COPPICE_*`, `DATABASE_URL`, and `SECRETS_MASTER_KEY`, and stdio children get a minimal environment — see [Part 2b design](2026-10-02-m10-part2b-plugin-mcp-design.md).
 
 ### Unsupported parts
 
@@ -405,7 +405,7 @@ Plans: [Part 1 — tool-first harness](../plans/2026-09-29-m10-part1-tool-first-
 
 - **Part 2a — plugins and plugin skills:** OpenCode per-run `opencode serve` (verification first), then step 5: migration (`plugin_dirs`, `plugins`, `agent_plugins`, `run_tool_tokens.plugin_ids` — the snapshot column was not added in Part 1), manifest parsing and scan (shadowing, missing, rescan, unsupported parts), git install/update job, enable/disable, agent assignment and presets, `SkillCatalog` serving built-in + snapshot plugin skills as `<plugin>:<skill>`, Settings → Plugins and the agent-form picker, integration tests with a mock run calling `skill_load` on a plugin skill.
 - **Foundations (between 2a and 2b):** [Connector and tool-source foundations](2026-10-01-connector-and-tool-source-foundations-design.md) — connector descriptors, MCP wiring renderers, shared CLI runner, gateway `ToolSource` registry, plugin capability parsers. No behavior change. Part 2b depends on it.
-- **Part 2b — plugin MCP and observability:** built on the foundations (see "Plugin MCP proxy"). Steps 6–7: `plugin_settings` (encrypted), `mcp::proxy` over `rmcp` (stdio + HTTP, namespacing, shared instances, restart/backoff, unhealthy, idle shutdown, `readOnlyHint` filtering for chat profiles), Test button, Tools & Skills tab, live-console tool calls, `make e2e-smoke-m10`, docs.
+- **Part 2b — plugin MCP and observability:** built on the foundations (see "Plugin MCP proxy"); detailed in [Part 2b design](2026-10-02-m10-part2b-plugin-mcp-design.md). Steps 6–7: `plugin_settings` (encrypted), `mcp::proxy` over `rmcp` (stdio + HTTP, namespacing, shared instances, restart/backoff, unhealthy, idle shutdown, `readOnlyHint` filtering for chat profiles), Test button, Tools & Skills tab, live-console tool calls, `make e2e-smoke-m10`, docs.
 
 Live verification of `claude-code`, `codex`, and `kilo-code` wiring remains a manual acceptance item (needs their CLIs installed), not a plan task.
 
