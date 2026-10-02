@@ -3,7 +3,8 @@
 //! `FAKE_MCP_START_FAIL=1` (exit 1 before reading), `FAKE_MCP_TOOLS_CHANGED=1`
 //! (after the first `tools/call`, add tool `extra` and send
 //! `notifications/tools/list_changed`), `FAKE_MCP_PID_FILE` (write own pid,
-//! relative to cwd), `FAKE_MCP_INIT_SLEEP_MS` (sleep before answering `initialize`).
+//! relative to cwd), `FAKE_MCP_INIT_SLEEP_MS` (sleep before answering `initialize`),
+//! `FAKE_MCP_STDERR_GARBAGE=1` (invalid UTF-8 on stderr at startup and on every `tools/call`).
 
 use serde_json::{json, Value};
 use std::io::{BufRead, Write};
@@ -44,6 +45,13 @@ fn send(out: &mut impl Write, msg: Value) {
     out.flush().expect("flush stdout");
 }
 
+fn stderr_garbage() {
+    let mut err = std::io::stderr();
+    err.write_all(b"fake-mcp: \xff\xfe\xfd not utf-8\n")
+        .expect("write stderr");
+    err.flush().expect("flush stderr");
+}
+
 fn main() {
     if std::env::var("FAKE_MCP_START_FAIL").as_deref() == Ok("1") {
         eprintln!("fake-mcp: start failure requested");
@@ -56,6 +64,10 @@ fn main() {
     let init_sleep_ms = std::env::var("FAKE_MCP_INIT_SLEEP_MS")
         .ok()
         .and_then(|v| v.parse::<u64>().ok());
+    let garbage = std::env::var("FAKE_MCP_STDERR_GARBAGE").as_deref() == Ok("1");
+    if garbage {
+        stderr_garbage();
+    }
     let mut extra = false;
     let mut out = std::io::stdout().lock();
     eprintln!("fake-mcp: ready");
@@ -83,6 +95,9 @@ fn main() {
             }
             "tools/list" => json!({ "tools": tools(extra) }),
             "tools/call" => {
+                if garbage {
+                    stderr_garbage();
+                }
                 let args = &params["arguments"];
                 let result = match params["name"].as_str().unwrap_or_default() {
                     "echo" | "extra" => text_result(args["text"].as_str().unwrap_or_default()),

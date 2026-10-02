@@ -103,6 +103,20 @@ async fn stdio_env_is_minimal() {
 }
 
 #[tokio::test]
+async fn stdio_survives_non_utf8_stderr() {
+    let dir = tempfile::tempdir().unwrap();
+    let conn = connect_stdio(&[("FAKE_MCP_STDERR_GARBAGE", "1")], dir.path()).await;
+    for text in ["one", "two"] {
+        assert_eq!(
+            call_text(&*conn, "echo", json!({ "text": text })).await,
+            text
+        );
+        assert!(!conn.is_closed());
+    }
+    conn.close().await;
+}
+
+#[tokio::test]
 async fn stdio_cwd_is_plugin_root() {
     let dir = tempfile::tempdir().unwrap();
     let conn = connect_stdio(&[("FAKE_MCP_PID_FILE", "pid.txt")], dir.path()).await;
