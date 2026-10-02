@@ -2,19 +2,23 @@ use crate::api::auth::{pool_from_state, AuthUser};
 use crate::middleware::admin::AdminUser;
 use crate::plugins::git_install;
 use crate::plugins::manifest::SkillEntry;
+use crate::plugins::placeholders::placeholder_keys;
 use crate::services::plugin_service::{
     PluginDir, PluginError, PluginInstall, PluginRow, PluginService,
 };
+use crate::services::plugin_settings_service::{PluginSettingsError, PluginSettingsService};
 use crate::AppState;
 use axum::{
     extract::{Path, State},
     http::StatusCode,
     response::{IntoResponse, Response},
-    routing::{get, patch, post},
+    routing::{get, patch, post, put},
     Json, Router,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use sqlx::PgPool;
+use std::collections::{BTreeMap, BTreeSet};
 use std::future::Future;
 use std::sync::Arc;
 use std::time::Duration;
@@ -35,6 +39,7 @@ pub fn routes() -> Router<Arc<AppState>> {
             get(get_plugin).patch(set_enabled),
         )
         .route("/api/plugins/{plugin_id}/update", post(update))
+        .route("/api/plugins/{plugin_id}/settings", put(set_settings))
         .route("/api/plugin-installs/{install_id}", get(get_install))
         .route(
             "/api/agents/{agent_id}/plugins",
@@ -70,6 +75,7 @@ struct PluginResponse {
     skills: Vec<SkillEntry>,
     mcp_servers: Vec<McpServerResponse>,
     unsupported: Vec<String>,
+    settings: Vec<PluginSettingResponse>,
 }
 
 /// Commands, env, URLs, and headers can carry secrets and are never exposed.
@@ -77,6 +83,19 @@ struct PluginResponse {
 struct McpServerResponse {
     name: String,
     kind: String,
+}
+
+/// Setting values are write-only.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PluginSettingResponse {
+    key: String,
+    configured: bool,
+}
+
+#[derive(Deserialize)]
+struct SettingsBody {
+    values: BTreeMap<String, String>,
 }
 
 #[derive(Serialize)]
@@ -150,6 +169,23 @@ impl From<PluginError> for ApiError {
     }
 }
 
+impl From<PluginSettingsError> for ApiError {
+    fn from(err: PluginSettingsError) -> Self {
+        match err {
+            PluginSettingsError::UnknownKey(_) => {
+                ApiError(StatusCode::BAD_REQUEST, err.to_string())
+            }
+            PluginSettingsError::Secret(_) | PluginSettingsError::Db(_) => {
+                tracing::error!(error = %err, "plugin settings request failed");
+                ApiError(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "An internal error occurred.".into(),
+                )
+            }
+        }
+    }
+}
+
 impl From<StatusCode> for ApiError {
     fn from(status: StatusCode) -> Self {
         ApiError(status, status.canonical_reason().unwrap_or("error").into())
@@ -173,7 +209,23 @@ fn dir_response(dir: PluginDir) -> PluginDirResponse {
     }
 }
 
-fn plugin_response(plugin: PluginRow) -> PluginResponse {
+/// A plugin without a manifest has no setting keys.
+fn allowed_setting_keys(plugin: &PluginRow) -> BTreeSet<String> {
+    plugin
+        .manifest
+        .as_ref()
+        .map(|m| placeholder_keys(&m.mcp_servers))
+        .unwrap_or_default()
+}
+
+fn plugin_response(plugin: PluginRow, configured: &BTreeSet<String>) -> PluginResponse {
+    let settings = allowed_setting_keys(&plugin)
+        .into_iter()
+        .map(|key| PluginSettingResponse {
+            configured: configured.contains(&key),
+            key,
+        })
+        .collect();
     let (skills, mcp_servers, unsupported) = plugin
         .manifest
         .map(|m| {
@@ -206,11 +258,39 @@ fn plugin_response(plugin: PluginRow) -> PluginResponse {
         skills,
         mcp_servers,
         unsupported,
+        settings,
     }
 }
 
-fn plugins_response(plugins: Vec<PluginRow>) -> Json<Vec<PluginResponse>> {
-    Json(plugins.into_iter().map(plugin_response).collect())
+async fn single_response(
+    state: &AppState,
+    pool: &PgPool,
+    plugin: PluginRow,
+) -> Result<Json<PluginResponse>, ApiError> {
+    let configured = PluginSettingsService::new(pool, &state.secret_store)
+        .configured_keys(plugin.id)
+        .await?;
+    Ok(Json(plugin_response(plugin, &configured)))
+}
+
+async fn plugins_response(
+    state: &AppState,
+    pool: &PgPool,
+    plugins: Vec<PluginRow>,
+) -> Result<Json<Vec<PluginResponse>>, ApiError> {
+    let configured = PluginSettingsService::new(pool, &state.secret_store)
+        .configured_keys_by_plugin()
+        .await?;
+    let none = BTreeSet::new();
+    Ok(Json(
+        plugins
+            .into_iter()
+            .map(|p| {
+                let keys = configured.get(&p.id).unwrap_or(&none);
+                plugin_response(p, keys)
+            })
+            .collect(),
+    ))
 }
 
 fn install_response(install: PluginInstall) -> Json<PluginInstallResponse> {
@@ -358,7 +438,7 @@ async fn rescan(
     let service = PluginService::new(pool);
     let plugins = service.rescan().await?;
     refresh_skills(&service, &state).await;
-    Ok(plugins_response(plugins))
+    plugins_response(&state, pool, plugins).await
 }
 
 async fn list_plugins(
@@ -366,9 +446,8 @@ async fn list_plugins(
     AuthUser { .. }: AuthUser,
 ) -> Result<Json<Vec<PluginResponse>>, ApiError> {
     let pool = pool_from_state(&state)?;
-    Ok(plugins_response(
-        PluginService::new(pool).list_plugins().await?,
-    ))
+    let plugins = PluginService::new(pool).list_plugins().await?;
+    plugins_response(&state, pool, plugins).await
 }
 
 async fn get_plugin(
@@ -378,7 +457,21 @@ async fn get_plugin(
 ) -> Result<Json<PluginResponse>, ApiError> {
     let pool = pool_from_state(&state)?;
     let plugin = PluginService::new(pool).get_plugin(plugin_id).await?;
-    Ok(Json(plugin_response(plugin)))
+    single_response(&state, pool, plugin).await
+}
+
+async fn set_settings(
+    State(state): State<Arc<AppState>>,
+    AdminUser(_): AdminUser,
+    Path(plugin_id): Path<Uuid>,
+    Json(body): Json<SettingsBody>,
+) -> Result<Json<PluginResponse>, ApiError> {
+    let pool = pool_from_state(&state)?;
+    let plugin = PluginService::new(pool).get_plugin(plugin_id).await?;
+    PluginSettingsService::new(pool, &state.secret_store)
+        .set(plugin_id, &allowed_setting_keys(&plugin), body.values)
+        .await?;
+    single_response(&state, pool, plugin).await
 }
 
 async fn set_enabled(
@@ -394,7 +487,7 @@ async fn set_enabled(
         state.skills.remove_plugin(plugin.id).await;
     }
     refresh_skills(&service, &state).await;
-    Ok(Json(plugin_response(plugin)))
+    single_response(&state, pool, plugin).await
 }
 
 async fn get_agent_plugins(

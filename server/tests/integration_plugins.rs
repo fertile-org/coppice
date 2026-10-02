@@ -534,6 +534,200 @@ async fn plugin_mutations_require_admin_and_csrf() {
     assert_eq!(res.status(), StatusCode::FORBIDDEN);
 }
 
+/// Adds a dir holding `inline-mcp` (setting keys `API_TOKEN`, `ROOT`); returns its plugin id.
+async fn inline_mcp_plugin(app: &Router, cookie: &str, csrf: &str) -> (tempfile::TempDir, String) {
+    let dir = plugin_dir_with(&["inline-mcp"]);
+    let dir_id = add_dir(app, dir.path(), cookie, csrf).await["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let plugins = get(app, "/api/plugins", cookie, csrf).await;
+    let id = find(&plugins, &dir_id, "inline-mcp")["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    (dir, id)
+}
+
+async fn put_settings(
+    app: &Router,
+    plugin_id: &str,
+    values: Value,
+    cookie: &str,
+    csrf: &str,
+) -> (StatusCode, Value) {
+    send(
+        app,
+        "PUT",
+        &format!("/api/plugins/{plugin_id}/settings"),
+        json!({ "values": values }),
+        cookie,
+        csrf,
+    )
+    .await
+}
+
+async fn count(pool: &sqlx::PgPool, sql: &str, bind: &str) -> i64 {
+    sqlx::query_scalar(sql)
+        .bind(bind)
+        .fetch_one(pool)
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+async fn settings_put_marks_configured() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    require_db!();
+    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
+    let pool = state.db.clone().unwrap();
+    let (_dir, id) = inline_mcp_plugin(&app, &cookie, &csrf).await;
+
+    let (status, body) =
+        put_settings(&app, &id, json!({ "API_TOKEN": "tok" }), &cookie, &csrf).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(
+        body["settings"],
+        json!([
+            { "key": "API_TOKEN", "configured": true },
+            { "key": "ROOT", "configured": false },
+        ])
+    );
+    let plugin_uuid: uuid::Uuid = id.parse().unwrap();
+    let rows: i64 = sqlx::query_scalar("SELECT count(*) FROM plugin_settings WHERE plugin_id = $1")
+        .bind(plugin_uuid)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(rows, 1);
+    let name = format!("plugin-setting-{id}-API_TOKEN");
+    assert_eq!(
+        count(&pool, "SELECT count(*) FROM secrets WHERE name = $1", &name).await,
+        1
+    );
+
+    let detail = get(&app, &format!("/api/plugins/{id}"), &cookie, &csrf).await;
+    assert_eq!(detail["settings"], body["settings"]);
+}
+
+#[tokio::test]
+async fn settings_empty_value_clears() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    require_db!();
+    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
+    let pool = state.db.clone().unwrap();
+    let (_dir, id) = inline_mcp_plugin(&app, &cookie, &csrf).await;
+
+    let (status, _) = put_settings(&app, &id, json!({ "API_TOKEN": "tok" }), &cookie, &csrf).await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, body) = put_settings(&app, &id, json!({ "API_TOKEN": "" }), &cookie, &csrf).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(
+        body["settings"],
+        json!([
+            { "key": "API_TOKEN", "configured": false },
+            { "key": "ROOT", "configured": false },
+        ])
+    );
+    let name = format!("plugin-setting-{id}-API_TOKEN");
+    assert_eq!(
+        count(&pool, "SELECT count(*) FROM secrets WHERE name = $1", &name).await,
+        0
+    );
+}
+
+#[tokio::test]
+async fn settings_unknown_key_rejected() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    require_db!();
+    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
+    let pool = state.db.clone().unwrap();
+    let (_dir, id) = inline_mcp_plugin(&app, &cookie, &csrf).await;
+
+    let (status, body) = put_settings(
+        &app,
+        &id,
+        json!({ "API_TOKEN": "tok", "NOPE": "x" }),
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    assert_eq!(body["error"], "unknown setting \"NOPE\"");
+    let name = format!("plugin-setting-{id}-API_TOKEN");
+    assert_eq!(
+        count(&pool, "SELECT count(*) FROM secrets WHERE name = $1", &name).await,
+        0
+    );
+}
+
+#[tokio::test]
+async fn settings_values_never_returned() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    require_db!();
+    let (_state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
+    let (_dir, id) = inline_mcp_plugin(&app, &cookie, &csrf).await;
+
+    let (status, put) = put_settings(
+        &app,
+        &id,
+        json!({ "API_TOKEN": "s3cr3t-value" }),
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let list = get(&app, "/api/plugins", &cookie, &csrf).await;
+    let detail = get(&app, &format!("/api/plugins/{id}"), &cookie, &csrf).await;
+    for body in [&put, &list, &detail] {
+        assert!(!body.to_string().contains("s3cr3t-value"), "{body}");
+    }
+}
+
+#[tokio::test]
+async fn settings_requires_admin() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    require_db!();
+    let (_state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
+    let (_dir, id) = inline_mcp_plugin(&app, &cookie, &csrf).await;
+    let (status, _) = send(
+        &app,
+        "POST",
+        "/api/users",
+        json!({ "email": "member@localhost", "password": "secret123" }),
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    let (member_cookie, member_csrf) = login_as(&app, "member@localhost", "secret123").await;
+
+    let (status, _) = put_settings(
+        &app,
+        &id,
+        json!({ "API_TOKEN": "tok" }),
+        &member_cookie,
+        &member_csrf,
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("PUT")
+                .uri(format!("/api/plugins/{id}/settings"))
+                .header("content-type", "application/json")
+                .header(header::COOKIE, &cookie)
+                .body(Body::from(r#"{"values":{"API_TOKEN":"tok"}}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::FORBIDDEN);
+}
+
 async fn sample_plugin_id(app: &Router, dir_id: &str, cookie: &str, csrf: &str) -> String {
     let plugins = get(app, "/api/plugins", cookie, csrf).await;
     find(&plugins, dir_id, "sample-plugin")["id"]
