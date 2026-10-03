@@ -76,6 +76,8 @@ List models: `opencode models zai-coding-plan` (inside the server container or o
 
 ## If something goes wrong
 
+Start at **Tools → Connectors** (admin): it shows whether `opencode` is found, whether auth is detected or verified by the `opencode auth list` probe, the probe output, the last real run, and **Test connection** runs a real gateway check with a failure reason ([diagnostics](README.md#diagnostics-tools--connectors)).
+
 | Symptom | What to try |
 |---------|-------------|
 | Binary missing | Re-run `install`; PATH should include `/home/coppice/.opencode/bin` |

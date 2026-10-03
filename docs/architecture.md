@@ -53,6 +53,7 @@ server/src/
 - No Redis; agent job queue uses Postgres `agent_jobs` (M03).
 - **M03 tables:** `agent_runs` (one row per ticket+agent execution; statuses `queued`/`running`/`completed`/`failed`/`cancelled`; unique partial index on active `(ticket_id, agent_id)`), `agent_jobs` (queue row per run; `FOR UPDATE SKIP LOCKED` claim by workers).
 - **M06 tables:** `knowledge_items` (mutable lifecycle pointer), immutable `knowledge_revisions` (generated `search_vector` + GIN index), `knowledge_item_sources` (source tickets), `knowledge_usage_logs` (unique run/revision audit snapshot with full-text `score`), `workspace_settings` (compaction agent), and the compaction tables `knowledge_compaction_queue`, `knowledge_compaction_batches` (at most one queued/running), `knowledge_compaction_batch_tickets`. Compaction runs are ordinary `agent_runs` rows with `compaction_batch_id` set.
+- **Connector checks:** `connector_checks` (Test connection; at most one `queued`/`running` per connector). A check's run is an `agent_runs` row with `connector_check_id` set; every run has exactly one owner (`ticket_id`, `chat_session_id`, `compaction_batch_id`, or `connector_check_id`).
 
 ## Auth
 
@@ -97,19 +98,23 @@ Connector facts live in one static table, `connectors/src/lib.rs` (`coppice_conn
 - **Registry.** `providers/registry.rs` has one `FACTORIES` list of `ConnectorFactory { id, build }`; `build(&AppConfig, &FactoryDeps)` returns `None` when the connector is disabled, else `BuiltConnector { provider, models }`. Startup asserts factories and descriptors match one-to-one.
 - **Models.** `ModelCatalog` (`providers/models.rs`) reports `model_providers()` from config and `list_models(model_provider)`. Agent health checks that an agent's `model_provider` is in `model_providers()` unless `checks_model_provider()` is false (mock). `GET …/models` maps errors to 502 `"{id} models: {err}"`.
 - **API / web.** `GET /api/connectors` returns `{ id, displayName, console, caps: { readOnlyTools, chatResume } }` per configured connector; `TicketDrawer` picks the live view from `console` (unknown connector → plain). The web schema parses an unknown `console` value as `plain` rather than rejecting the list; the wire strings (`openCodeSession`, `structured`, `plain`) are pinned by a test in the connectors crate.
-- **CLI.** `coppice connector …` iterates `coppice_connectors::all()` / `get()` for ids, binaries, and auth hints, but per-connector behavior (config section, install steps, setup and doctor probes) is still matched by id in `cli/src/commands/connector/` — see the checklist below.
+- **CLI.** `coppice connector …` iterates `coppice_connectors::all()` / `get()` for ids, binaries, and auth hints. `doctor` and `list` run the shared probe library (below), so they need no per-connector code; config section, install steps, and setup are still matched by id in `cli/src/commands/connector/` — see the checklist below.
+- **Probes.** `coppice_connectors::probe` (std only) answers "installed, logged in, probe ok?" for one descriptor: `probe(descriptor, &ProbeEnv { home, path, command_override, env_lookup }, timeout)` → `ProbeReport { binary, auth_env_set, auth_paths_found, probe, probe_proves_auth }`. The binary is the config `command` when set, else the descriptor `binary`; bare names are searched on `path`. The probe command is the descriptor's `install.probe_args` (cursor `models`, opencode `auth list`, the rest `--version`), run with only `PATH` and `HOME` set, stdin null, killed at the timeout. Output is capped (first line ≤ 200 chars on success, message ≤ 500 on failure) with any auth env value redacted; the report carries env **names** and HOME-relative auth path names only. `install.probe_proves_auth` (cursor, opencode) marks probes that only succeed when logged in. `install.docs_url` is the vendor install link shown on the page.
+- **Server PATH.** `main.rs` calls `augment_path(HOME, PATH)` before the Tokio runtime starts, prepending each existing directory in `COMMON_BIN_DIRS_HOME` (`~/.local/bin`, `~/.opencode/bin`, `~/.npm-global/bin`, `~/.bun/bin`) and `COMMON_BIN_DIRS_ABS` (`/opt/homebrew/bin`, `/usr/local/bin`) that is not already on PATH. Desktop launchers often omit these; because the whole process uses the result, a binary the page reports as found is the one real runs spawn.
+- **Diagnostics (Tools → Connectors).** `services/connector_probe_service.rs` keeps probe results in memory (`AppState.connector_probes`), filled for every connector except `mock` by a startup task and refreshed per connector by Run check; probes run in `spawn_blocking` with a 10 s timeout. Disabled connectors are probed too. A connector whose startup probe has not finished reports `probedAt: null` (`cli.found: false`, probe `not_run`). Each status also carries the latest finished non-check run of an agent on that connector (with whether it made an `ok` `ticket_get` / `result_submit` call) and the latest connector check. Routes, all admin-only (`mock` and unknown ids → 404, POSTs need `X-CSRF-Token`): `GET /api/tools/connectors`, `POST /api/tools/connectors/{id}/check`, `POST /api/tools/connectors/{id}/test` → `{ checkId, runId }`, `GET /api/tools/connector-checks/{id}`.
+- **Check runs (Test connection).** A `connector_checks` row (migration `032_connector_checks.sql`; `queued` / `running` / `passed` / `failed`) owns one `agent_runs` row (`connector_check_id`, `job_type = connector_check`, profile `connector_check`, no plugins), the way a compaction batch owns its run. `services/connector_check_service.rs` validates that the agent uses the connector and that the connector is enabled (400 otherwise) and allows one active check per connector (unique index; a second start → 409). `workers/job_worker/connector_check.rs` runs the agent's provider in a scratch dir `<artifacts_dir>/runs/<run id>/check/` holding only a fixed `.agent/context.md`, with a timeout of `min(connector run timeout, 180 s)`, then deletes the dir. No ticket, comment, workflow, notification, knowledge, or repository is touched. The check **passes** when the run succeeds, `run_tool_calls` has an `ok` `ticket_get` and an `ok` `result_submit`, and the outcome is `done`; otherwise it **fails** with the first reason that applies: the run error (e.g. `mcp_unavailable`, a timeout), `ticket_get was not called`, `result_submit was not called`, or `result was <outcome>`. `result_submit` accepts any outcome in this profile and the **first** submission wins (later ones are denied), so a check cannot be rescued by resubmitting. Failure text is capped at 500 chars with the run token and connector auth env values redacted. At startup, checks left `queued` / `running` by a previous process are failed with `server restarted`.
 - **MCP wiring.** `mcp/wiring.rs` `McpServerSpec::from_access` renders the gateway entry in each style (`claude_json`, `cursor_mcp_json`, `cursor_cli_config`, `opencode_json`, `kilo_json`, `codex_args`). The server name `coppice` and token env `COPPICE_MCP_TOKEN` live only there and in `mcp/grant.rs` (`McpAccess::env`).
 - **CLI runner.** `providers/cli_runner.rs` `run_cli(CliInvocation, &mut dyn LineHandler, RunIo)` (or `run_cli_with_stdin` to feed a prompt on stdin) spawns with `kill_on_drop`, mirrors stderr to the adapter's tracing target (keeping the first 40 lines), races cancel and deadline, forwards the first session id, and returns `CliExit` or `CliError`. Adapters keep their own error wording by mapping those, then read final text from their `LineHandler`. OpenCode and mock are custom `AgentProvider`s.
 
 ### Adding a connector
 
-1. Descriptor entry in `connectors/src/lib.rs` (plus an id constant).
+1. Descriptor entry in `connectors/src/lib.rs` (plus an id constant), including `install.probe_args`, `probe_proves_auth`, and `docs_url` — the CLI `doctor` and the Tools → Connectors page need nothing else.
 2. Config struct + field in `AgentConnectorsConfig` (`config/src/lib.rs`) and an arm in `AgentConnectorsConfig::enabled(id)` (a config test fails for any descriptor id without one; `coppice connector list` reads it), and an `[agent.connectors.<id>]` section in `config.example.toml` and `deploy/config/config.example.toml`.
 3. Adapter in `server/src/providers/`: a `CliInvocation` builder + `LineHandler` driven by `run_cli` (or a custom `AgentProvider`), and a `ModelCatalog`. A structured console publisher must type its events `<name>.console.<kind>` (e.g. `codex.console.tool`); the worker persists exactly that shape for replay.
 4. Factory entry in `FACTORIES`.
 5. A `McpServerSpec` renderer only if it needs a new `McpWiring` style.
 6. If `caps.read_only_tools` is true, add it to `READ_ONLY_CAPABLE_CONNECTORS` (`providers/mod.rs`; a test checks it matches the descriptors).
-7. CLI arms in `cli/src/commands/connector/`: `enable.rs` (connectors that get a default `command`), `install.rs`, `setup.rs`, and `doctor.rs` (per-id install, setup, and probe steps).
+7. CLI arms in `cli/src/commands/connector/`: `enable.rs` (connectors that get a default `command`), `install.rs`, and `setup.rs` (per-id install and setup steps).
 8. A doc in `docs/providers/` and a row in its README.
 
 The connector-id literal scan in `providers/registry.rs` derives its ids from `coppice_connectors::all()`, so it needs no edit.
@@ -133,6 +138,19 @@ mcp/proxy/         plugin MCP servers: McpTransport seam, stdio + HTTP, shared p
 mcp/tools/         ticket_get, ticket_comments, ticket_runs, board_agents, knowledge_search,
                    comment_post, skill_list, skill_load, result_submit
 ```
+
+**Profile → tool matrix** (`mcp/catalog.rs` `core_tools_for`; skills come from `SkillToolSource`, plugin tools from `PluginMcpSource`):
+
+| Tool | `full` / `human_agent` | `human_chat` / `conversation` | `knowledge_compaction` | `connector_check` |
+|------|:-:|:-:|:-:|:-:|
+| `ticket_get` | ✓ | ✓ | ✓ (batch tickets) | ✓ (fixed synthetic ticket, no DB read) |
+| `ticket_comments`, `ticket_runs` | ✓ | ✓ | ✓ (batch tickets) | — |
+| `ticket_search`, `board_agents` | ✓ | ✓ | — | — |
+| `knowledge_search` | ✓ | ✓ | ✓ | — |
+| `comment_post` | ✓ | — | — | — |
+| `result_submit` | ✓ | ✓ (reply) | ✓ (`done` + candidates) | ✓ (any outcome; first wins) |
+| `skill_list`, `skill_load` | ✓ | ✓ | ✓ | — |
+| Plugin tools | assigned | assigned, `readOnlyHint` only | — | — |
 
 **Tool sources.** Tools come from an ordered list of `ToolSource`s (`kind`, async `list(scope)`, `call(ctx, tool, args)` → `ToolResult` of text/image content blocks). `ToolRegistry::builtin()` registers Core, then Skill; `AppState::build_tool_registry` (held in `AppState::tools`) adds `PluginMcpSource` third when a database is present. `ToolRegistry` bounds each source's `list` by a list timeout (`[plugins] mcp_list_timeout_secs`, default 10 s): a source that times out contributes no tools for that request and is logged, while core tools are unaffected. `ToolRegistry::call(state, scope, name, args)` is the only router: it merges sources (duplicate name → first wins, warned once), drops non-read-only tools for `human_chat` / `conversation` except `result_submit`, denies unknown names with `denied: tool "<name>" is not available for this run`, applies `mcp.call_timeout_secs` and `mcp.max_output_bytes`, and logs each call to `run_tool_calls` with `source` (`core` / `skill` / `plugin`) and `plugin_id` for plugin-owned tools.
 
@@ -241,7 +259,7 @@ workers/job_worker/compaction.rs          executes `compact_knowledge` runs
 
 ```text
 web/src/
-  features/     auth, boards, board, tickets, agents, knowledge, plugins, users
+  features/     auth, boards, board, tickets, agents, knowledge, plugins, tools, users
   components/   AppShell, ProtectedRoute, shared UI
   lib/          api.ts (fetch + CSRF), schemas/ (Zod), query-client
   styles/       tokens.css (design tokens)
@@ -252,6 +270,7 @@ web/src/
 - **API client:** `lib/api.ts` — `credentials: 'include'`, CSRF header on writes.
 - **Board:** fixed columns in `features/board/columns.ts`; dnd-kit for drag-and-drop.
 - **Plugins:** Settings → Plugins manages dirs, rescan, git installs, and enablement. The agent form has a Plugins checkbox list (enabled `ok` plugins only); assigned plugins that became unavailable are shown disabled and dropped on save.
+- **Tools:** `/tools` (admin) has **Backup** and **Connectors** tabs; the tab is kept in the URL (`/tools?tab=connectors`). Connectors shows one card per connector except `mock` from `GET /api/tools/connectors`; Run check re-probes one card, and Test connection picks an agent on that connector, starts a check, and polls it until passed/failed.
 - **Knowledge:** `/knowledge` has Pending, Approved, Rejected, and Stale views with provenance and lifecycle controls. Expanded Agent Run details load the immutable **Knowledge Used** audit.
 - **Forms:** React Hook Form + Zod schemas in `lib/schemas/`.
 

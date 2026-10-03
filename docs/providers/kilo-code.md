@@ -64,6 +64,8 @@ model_providers = ["anthropic", "openai"]
 
 ## If something goes wrong
 
+Start at **Tools → Connectors** (admin): it shows whether `kilo` is found, which auth is detected, the probe output, the last real run, and **Test connection** runs a real gateway check with a failure reason ([diagnostics](README.md#diagnostics-tools--connectors)). A check failing with `mcp_unavailable` or `ticket_get was not called` suggests the CLI ignores `KILO_CONFIG` (see the [providers README](README.md#coppice-mcp-gateway-tool-first-runs)).
+
 | Symptom | What to try |
 |---------|-------------|
 | Binary missing | Install `@kilocode/cli` so `kilo` is on PATH under `/home/coppice` |

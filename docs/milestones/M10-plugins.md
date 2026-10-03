@@ -53,7 +53,7 @@ Today each run gets a long `context.md` that pre-loads ticket data and spells ou
 - [ ] M05 / M06 / M09 behavior unchanged; existing smokes pass
 - [x] CI mock path green; `make e2e-smoke-m10` passes
 
-Open (2026-10-03): live verification of the `claude-code`, `codex`, and `kilo-code` gateway wiring needs their CLIs (only `cursor` and `opencode` are verified). Of the existing smokes, `make e2e-smoke-m05` fails on a reused database (handoff picks an older same-key agent); the others pass.
+Open (2026-10-03): live verification of the `claude-code`, `codex`, and `kilo-code` gateway wiring needs their CLIs (only `cursor` and `opencode` are verified). Record it from **Tools → Connectors → Test connection** ([connector diagnostics](../superpowers/specs/2026-10-03-connector-diagnostics-design.md), [how to verify](../providers/README.md#diagnostics-tools--connectors)) and update the status table in the providers README. Of the existing smokes, `make e2e-smoke-m05` fails on a reused database (handoff picks an older same-key agent); the others pass.
 
 ## References
 

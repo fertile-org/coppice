@@ -31,6 +31,7 @@ Pattern for every connector:
 1. `enable` → recreate the server  
 2. `install` → `setup` → `doctor`  
 3. Create an agent in the UI and pick connector / provider / model  
+4. Verify from **Tools → Connectors → Test connection** (see [Diagnostics](#diagnostics-tools--connectors))  
 
 Binaries and login state live in a Compose volume at `/home/coppice`. You do not mount host `~/.local` / `~/.config` for CLIs. Default Compose stays on `mock` for CI.
 
@@ -64,7 +65,36 @@ Every run gets a per-run bearer token for the Coppice MCP gateway at `POST /mcp`
 | `kilo-code` | unverified — expected mechanism | `KILO_CONFIG` pointing at `<run dir>/kilo-config.json` (OpenCode-style `mcp` block, `{env:COPPICE_MCP_TOKEN}` header) |
 | `opencode` | **verified** (`1.18.33`) | Per-run `opencode serve` with `OPENCODE_CONFIG=<run dir>/opencode.json` (remote `coppice` MCP server, `{env:COPPICE_MCP_TOKEN}` header) |
 
-Verify an unverified row when its CLI is first available: run one ticket and confirm `run_tool_calls` records `ticket_get` and `result_submit`. For `kilo-code` the env var name follows the OpenCode `OPENCODE_CONFIG` convention and may differ in the fork.
+Verify an unverified row when its CLI is first available: create an agent on that connector, then use **Tools → Connectors → Test connection** (below). A pass means the run called `ticket_get` and `result_submit` through the gateway; record the CLI version in the table. For `kilo-code` the env var name follows the OpenCode `OPENCODE_CONFIG` convention and may differ in the fork — a check failing with `mcp_unavailable` points there.
+
+## Diagnostics (Tools → Connectors)
+
+Admins open **Tools → Connectors** (`/tools?tab=connectors`) to see, per connector except `mock`:
+
+| Row | Meaning |
+|-----|---------|
+| Enabled | From config (read-only). A disabled connector shows `coppice connector enable <id>`; restart the server after enabling. Disabled connectors are still probed. |
+| CLI | **Found** with the resolved path, or **Not installed**. |
+| Auth | **Detected** (which auth env var **names** are set and which auth files under HOME exist — never values or file contents), **Verified by probe** (cursor and opencode, whose probe only succeeds when logged in), or **Not found**. |
+| Probe | Shown when the CLI is found: the first line of the probe output (e.g. the version), **Failed** with up to 500 chars of output, or **Timed out** (10 s). |
+| Last real run | The latest finished non-check run of an agent on this connector, with whether it made an `ok` `ticket_get` and `result_submit` call. |
+| Last test | The latest Test connection: time, passed/failed, and the failure reason. |
+
+When the CLI or auth is missing, the card shows the connector's auth hint and a vendor install docs link. Coppice never installs a CLI or runs a login from the page — use the `coppice connector …` steps above.
+
+Probes run at server startup and on **Run check**; the page shows the cached result and does not probe on every load. Until the startup probe finishes a card shows "Checking…".
+
+**Test connection** runs a real agent run through the production path (provider adapter, per-run MCP wiring, token, gateway, `run_tool_calls`). Pick an agent that uses the connector (create one on the Agents page first). The run gets a scratch directory and a two-tool profile — `ticket_get` returns a fixed synthetic ticket and `result_submit` — so it never reads or changes a real ticket, repository, comment, or notification. It times out after the connector's `run_timeout_secs` or 180 s, whichever is shorter. The check passes when the run calls both tools and submits `done`; otherwise it fails with the first reason that applies:
+
+| Failure | Likely cause |
+|---------|--------------|
+| The run error (e.g. `mcp_unavailable`, `connection check timed out after …`) | CLI could not be configured or started, not logged in, or the model never finished |
+| `ticket_get was not called` | The CLI did not see the Coppice MCP server (wiring) or ignored it |
+| `result_submit was not called` | The agent stopped before submitting |
+| `result was <outcome>` | The agent's first submission was not `done` (only the first one counts) |
+| `server restarted` | The server restarted while the check was queued or running |
+
+Only one check per connector runs at a time. The CLI still has `coppice connector doctor <id>` with the same local checks for terminal use.
 
 **Cursor state directory.** The CLI keeps its `chats` state under `CURSOR_CONFIG_DIR`, so the per-run home and config dirs are keyed by whatever `--resume` resolves against, not by run id:
 
@@ -111,4 +141,4 @@ Design: [Agent Chat provider session resume](../superpowers/specs/2026-09-28-age
 
 ## Adding a connector
 
-Follow the checklist in [architecture.md § Adding a connector](../architecture.md#adding-a-connector): descriptor entry, config struct and example config sections, adapter (`run_cli` + `LineHandler`, or a custom `AgentProvider`) with a `ModelCatalog`, `FACTORIES` entry, a wiring renderer only for a new MCP style, plus the remaining manual touchpoints it lists (the config `enabled(id)` arm, read-only list, per-id CLI arms in `enable.rs` / `install.rs` / `setup.rs` / `doctor.rs`). Use the existing docs above as templates. Prefer live model listing when the CLI supports it.
+Follow the checklist in [architecture.md § Adding a connector](../architecture.md#adding-a-connector): descriptor entry (including probe args, `probe_proves_auth`, and `docs_url`, which drive `doctor` and the Connectors page), config struct and example config sections, adapter (`run_cli` + `LineHandler`, or a custom `AgentProvider`) with a `ModelCatalog`, `FACTORIES` entry, a wiring renderer only for a new MCP style, plus the remaining manual touchpoints it lists (the config `enabled(id)` arm, read-only list, per-id CLI arms in `enable.rs` / `install.rs` / `setup.rs`). Use the existing docs above as templates. Prefer live model listing when the CLI supports it.

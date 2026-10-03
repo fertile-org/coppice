@@ -1,6 +1,6 @@
 # Connector diagnostics (Tools → Connectors) — design
 
-**Status:** approved design, 2026-10-03. Follow-up to [M10](../../milestones/M10-plugins.md): the UI tool used to record connector verification ("All six connectors run tool-first").
+**Status:** implemented 2026-10-03 (branch `connector-diagnostics`); manual acceptance with real `claude-code` / `kilo-code` CLIs pending. Follow-up to [M10](../../milestones/M10-plugins.md): the UI tool used to record connector verification ("All six connectors run tool-first").
 
 ## Why
 
@@ -86,7 +86,7 @@ Migration:
 1. `POST /api/tools/connectors/{id}/test {agentId}` — admin, CSRF. Validates the agent exists, `agent.connector == id`, the connector is enabled, and no `queued`/`running` check exists for this connector (409 otherwise). Inserts the check (`queued`) and an agent run with `job_type = "connector_check"`, profile `connector_check`, `plugin_ids = []`, enqueued on the normal job queue. Returns `{ checkId, runId }`.
 2. The job worker dispatches `connector_check` to `workers/job_worker/connector_check.rs` (mirroring `compaction.rs`): creates a scratch worktree under `<artifacts_dir>/runs/<run id>/check/` with `.agent/context.md`, runs the agent's provider with the slim check context, then deletes the scratch dir. No repository, branch, or ticket is touched. Run timeout is `min(connector run timeout, 180 s)`.
 3. Check context (short, fixed): identity line, "This is a Coppice connection check. Call the `ticket_get` tool, then call `result_submit` with outcome `done` and summary `connection ok`."
-4. Profile `connector_check` exposes only `ticket_get` and `result_submit` (core source; no skills, no plugins). `ticket_get` in this profile returns a fixed synthetic ticket (`{ "title": "Coppice connection check", "description": "Submit a done result with summary 'connection ok'." }`) and never reads the database tickets. `result_submit` accepts `done` (other outcomes are recorded but fail the check).
+4. Profile `connector_check` exposes only `ticket_get` and `result_submit` (core source; no skills, no plugins). `ticket_get` in this profile returns a fixed synthetic ticket (`{ "title": "Coppice connection check", "description": "Submit a done result with summary 'connection ok'." }`) and never reads the database tickets. `result_submit` accepts any outcome; the first submission wins and later ones are denied, and a non-`done` outcome fails the check.
 5. On run finish the worker sets the check: **passed** iff the run succeeded **and** `run_tool_calls` has an `ok` `ticket_get` and an `ok` `result_submit`; otherwise **failed** with the first applicable reason: the run's error message (e.g. `mcp_unavailable`, timeout), `"ticket_get was not called"`, `"result_submit was not called"`, or `"result was <outcome>"`. Failure text is ≤ 500 chars and never includes the MCP token or env values.
 6. Check runs bypass board/workflow logic: no ticket comments, no status transitions, no notifications, no knowledge capture, no handoffs.
 
@@ -126,9 +126,9 @@ Enable toggle / runtime config reload, CLI install, in-app login, storing vendor
 
 ## Acceptance criteria
 
-- [ ] Tools page has Backup and Connectors tabs; Connectors shows enabled / CLI / auth / probe / last run / last test per non-mock connector.
-- [ ] Run check re-probes one connector; Test connection runs a real check run and reports passed/failed with a reason.
-- [ ] Probe code lives in `coppice_connectors::probe`; CLI `doctor`/`list` use it with unchanged output.
-- [ ] Server PATH is augmented at startup with existing common bin dirs.
-- [ ] No env values, file contents, or tokens in any response or log.
-- [ ] `make test`, clippy, `make web-test` pass; existing smokes unaffected.
+- [x] Tools page has Backup and Connectors tabs; Connectors shows enabled / CLI / auth / probe / last run / last test per non-mock connector.
+- [x] Run check re-probes one connector; Test connection runs a real check run and reports passed/failed with a reason.
+- [x] Probe code lives in `coppice_connectors::probe`; CLI `doctor`/`list` use it with unchanged output.
+- [x] Server PATH is augmented at startup with existing common bin dirs.
+- [x] No env values, file contents, or tokens in any response or log.
+- [x] `make test`, clippy, `make web-test` pass; existing smokes unaffected.

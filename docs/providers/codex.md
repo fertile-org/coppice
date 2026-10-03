@@ -63,6 +63,8 @@ model_providers = ["openai", "azure"]
 
 ## If something goes wrong
 
+Start at **Tools → Connectors** (admin): it shows whether `codex` is found, which auth is detected, the probe output, the last real run, and **Test connection** runs a real gateway check with a failure reason ([diagnostics](README.md#diagnostics-tools--connectors)).
+
 | Symptom | What to try |
 |---------|-------------|
 | Binary missing | Install `codex` into `/home/coppice/.local/bin` (or your host PATH) |

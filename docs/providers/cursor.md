@@ -66,6 +66,8 @@ model_providers = ["cursor"]
 
 ## If something goes wrong
 
+Start at **Tools → Connectors** (admin): it shows whether `agent` is found, whether auth is detected or verified by the `agent models` probe, the probe output, the last real run, and **Test connection** runs a real gateway check with a failure reason ([diagnostics](README.md#diagnostics-tools--connectors)).
+
 | Symptom | What to try |
 |---------|-------------|
 | `doctor` says binary missing | Re-run `install`, or confirm PATH includes `/home/coppice/.local/bin` inside the server container |
