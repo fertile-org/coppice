@@ -411,7 +411,8 @@ impl<'a> PluginService<'a> {
     }
 
     /// One spec per MCP server of each plugin in `plugin_ids`, with decrypted
-    /// settings. `enabled_only` keeps only enabled `ok` plugins.
+    /// settings. `enabled_only` keeps only enabled `ok` plugins and skips (with a
+    /// warning) plugins whose settings cannot be decrypted; otherwise that is an error.
     pub async fn server_specs_for(
         &self,
         plugin_ids: &[Uuid],
@@ -444,7 +445,14 @@ impl<'a> PluginService<'a> {
                 continue;
             }
             let root = join_plugin_path(&row.get::<String, _>("dir_path"), &plugin.rel_path);
-            let values = settings.decrypted(plugin.id).await?;
+            let values = match settings.decrypted(plugin.id).await {
+                Ok(values) => values,
+                Err(err) if enabled_only => {
+                    tracing::warn!(plugin = %plugin.name, error = %err, "plugin settings unreadable; MCP servers skipped");
+                    continue;
+                }
+                Err(err) => return Err(err.into()),
+            };
             specs.extend(manifest.mcp_servers.iter().map(|entry| PoolServerSpec {
                 key: ServerKey {
                     plugin_id: plugin.id,

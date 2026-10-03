@@ -155,6 +155,7 @@ impl AppState {
             sources.push(Arc::new(crate::mcp::proxy::PluginMcpSource::new(
                 plugin_mcp,
                 Arc::new(catalog),
+                list_timeout * 4 / 5,
             )));
         }
         Arc::new(crate::mcp::registry::ToolRegistry::new(sources).with_list_timeout(list_timeout))

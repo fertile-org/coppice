@@ -1,7 +1,8 @@
 //! Plugin MCP servers as the gateway's third tool source.
 
 use super::naming::exposed_name;
-use super::pool::{McpServerPool, PoolError, PoolServerSpec};
+use super::pool::{McpServerPool, PoolError, PoolServerSpec, ServerHealth};
+use super::transport::RemoteTool;
 use crate::crypto::SecretStore;
 use crate::domain::context_profile::ContextProfile;
 use crate::mcp::protocol::{ToolDefinition, ToolResult};
@@ -14,6 +15,7 @@ use async_trait::async_trait;
 use serde_json::Value;
 use sqlx::PgPool;
 use std::sync::Arc;
+use std::time::Duration;
 use uuid::Uuid;
 
 #[async_trait]
@@ -50,11 +52,33 @@ impl PluginServerCatalog for DbPluginServerCatalog {
 pub struct PluginMcpSource {
     pool: Arc<McpServerPool>,
     catalog: Arc<dyn PluginServerCatalog>,
+    server_timeout: Duration,
 }
 
 impl PluginMcpSource {
-    pub fn new(pool: Arc<McpServerPool>, catalog: Arc<dyn PluginServerCatalog>) -> Self {
-        Self { pool, catalog }
+    /// `server_timeout` bounds each server's tool listing; keep it below the
+    /// registry list timeout so one slow server cannot drop the whole source.
+    pub fn new(
+        pool: Arc<McpServerPool>,
+        catalog: Arc<dyn PluginServerCatalog>,
+        server_timeout: Duration,
+    ) -> Self {
+        Self {
+            pool,
+            catalog,
+            server_timeout,
+        }
+    }
+
+    /// A server another request is already starting is skipped rather than
+    /// awaited, so a slow start does not stall every gateway request.
+    async fn server_tools(&self, spec: &PoolServerSpec) -> Result<Vec<RemoteTool>, PoolError> {
+        if self.pool.health(&spec.key) == ServerHealth::Starting {
+            return Err(PoolError::Unavailable);
+        }
+        tokio::time::timeout(self.server_timeout, self.pool.tools(spec))
+            .await
+            .unwrap_or(Err(PoolError::Timeout))
     }
 
     async fn invoke(&self, tool: &SourcedTool, args: Value) -> Result<ToolResult, ToolError> {
@@ -80,10 +104,21 @@ impl PluginMcpSource {
     }
 }
 
+/// Only placeholder and transport errors carry a message worth showing the agent.
 fn unavailable(plugin: &str, err: &PoolError) -> ToolResult {
-    let text = match err {
-        PoolError::Config(message) => format!("plugin \"{plugin}\" unavailable: {message}"),
-        _ => format!("plugin \"{plugin}\" unavailable"),
+    let detail = match err {
+        PoolError::Config(message) => Some(message),
+        PoolError::Unhealthy(message)
+            if message.starts_with("missing setting")
+                || message.starts_with("unsupported transport") =>
+        {
+            Some(message)
+        }
+        _ => None,
+    };
+    let text = match detail {
+        Some(message) => format!("plugin \"{plugin}\" unavailable: {message}"),
+        None => format!("plugin \"{plugin}\" unavailable"),
     };
     ToolResult::text(text, true)
 }
@@ -112,7 +147,7 @@ impl ToolSource for PluginMcpSource {
         let listed = futures_util::future::join_all(
             specs
                 .iter()
-                .map(|spec| async move { (spec, self.pool.tools(spec).await) }),
+                .map(|spec| async move { (spec, self.server_tools(spec).await) }),
         )
         .await;
         let mut tools = Vec::new();
@@ -181,20 +216,58 @@ mod tests {
         }
     }
 
-    struct FailingTransport;
+    /// Command `slow` hangs in `connect`, `fast` serves one `echo` tool, anything else fails.
+    struct ScriptedTransport;
+
+    struct EchoConn;
 
     #[async_trait]
-    impl McpTransport for FailingTransport {
+    impl McpConnection for EchoConn {
+        async fn list_tools(&self) -> Result<Vec<RemoteTool>, ProxyError> {
+            Ok(vec![RemoteTool {
+                name: "echo".into(),
+                description: "Echo".into(),
+                input_schema: serde_json::json!({ "type": "object" }),
+                read_only: true,
+            }])
+        }
+
+        async fn call_tool(&self, name: &str, _args: Value) -> Result<ToolResult, ProxyError> {
+            Ok(ToolResult::text(name, false))
+        }
+
+        fn take_tools_changed(&self) -> bool {
+            false
+        }
+
+        fn is_closed(&self) -> bool {
+            false
+        }
+
+        async fn close(&self) {}
+    }
+
+    #[async_trait]
+    impl McpTransport for ScriptedTransport {
         fn kind(&self) -> &'static str {
             "stdio"
         }
 
         async fn connect(
             &self,
-            _spec: &ResolvedTransport,
+            spec: &ResolvedTransport,
             _cwd: &Path,
         ) -> Result<Box<dyn McpConnection>, ProxyError> {
-            Err(ProxyError::Start("boom".into()))
+            match spec {
+                ResolvedTransport::Stdio { command, .. } if command == "fast" => {
+                    Ok(Box::new(EchoConn))
+                }
+                ResolvedTransport::Stdio { command, .. } if command == "slow" => {
+                    tokio::time::sleep(Duration::from_secs(10)).await;
+                    Err(ProxyError::Start("slow".into()))
+                }
+                _ => Err(ProxyError::Start("boom".into())),
+            }
         }
     }
 
@@ -223,7 +296,7 @@ mod tests {
 
     fn make_source(specs: Vec<PoolServerSpec>) -> (PluginMcpSource, Arc<FakeCatalog>) {
         let mut transports = Transports::default();
-        transports.register(Arc::new(FailingTransport));
+        transports.register(Arc::new(ScriptedTransport));
         let cfg = PoolConfig {
             start_timeout: Duration::from_secs(5),
             idle_shutdown: Duration::from_secs(600),
@@ -238,6 +311,7 @@ mod tests {
         let source = PluginMcpSource::new(
             Arc::new(McpServerPool::new(transports, cfg)),
             catalog.clone(),
+            Duration::from_millis(200),
         );
         (source, catalog)
     }
@@ -308,5 +382,95 @@ mod tests {
         let (source, catalog) = make_source(vec![spec(BTreeMap::new())]);
         assert!(source.list(&scope(ContextProfile::Full)).await.is_empty());
         assert_eq!(catalog.queries.load(Ordering::SeqCst), 1);
+    }
+
+    fn server(plugin_id: Uuid, name: &str, command: &str) -> PoolServerSpec {
+        let mut spec = spec(BTreeMap::new());
+        spec.key.plugin_id = plugin_id;
+        spec.plugin_name = name.into();
+        spec.entry.transport = McpServerTransport::Stdio {
+            command: command.into(),
+            args: Vec::new(),
+            env: BTreeMap::new(),
+        };
+        spec
+    }
+
+    #[tokio::test]
+    async fn slow_server_skipped_within_budget_and_not_awaited_while_starting() {
+        let fast = Uuid::from_u128(1);
+        let slow = Uuid::from_u128(2);
+        let (source, _) = make_source(vec![
+            server(fast, "fast", "fast"),
+            server(slow, "slow", "slow"),
+        ]);
+        let mut scope = scope(ContextProfile::Full);
+        scope.plugin_ids = vec![fast, slow];
+
+        let started = std::time::Instant::now();
+        let names: Vec<String> = source
+            .list(&scope)
+            .await
+            .into_iter()
+            .map(|t| t.def.name)
+            .collect();
+        assert!(
+            started.elapsed() < Duration::from_secs(1),
+            "{:?}",
+            started.elapsed()
+        );
+        assert_eq!(names, vec!["fast__echo".to_string()]);
+
+        let started = std::time::Instant::now();
+        let names: Vec<String> = source
+            .list(&scope)
+            .await
+            .into_iter()
+            .map(|t| t.def.name)
+            .collect();
+        assert!(
+            started.elapsed() < Duration::from_millis(100),
+            "starting server was awaited: {:?}",
+            started.elapsed()
+        );
+        assert_eq!(names, vec!["fast__echo".to_string()]);
+    }
+
+    #[test]
+    fn unhealthy_placeholder_errors_stay_actionable() {
+        let text = |err: PoolError| match unavailable("p", &err).content.as_slice() {
+            [ToolContent::Text(text)] => text.clone(),
+            other => panic!("{other:?}"),
+        };
+        assert_eq!(
+            text(PoolError::Unhealthy("missing setting \"X\"".into())),
+            "plugin \"p\" unavailable: missing setting \"X\""
+        );
+        assert_eq!(
+            text(PoolError::Unhealthy("unsupported transport \"sse\"".into())),
+            "plugin \"p\" unavailable: unsupported transport \"sse\""
+        );
+        assert_eq!(
+            text(PoolError::Unhealthy(
+                "MCP server failed to start: boom".into()
+            )),
+            "plugin \"p\" unavailable"
+        );
+        assert_eq!(text(PoolError::Timeout), "plugin \"p\" unavailable");
+    }
+
+    #[tokio::test]
+    async fn unhealthy_after_config_error_keeps_setting_message() {
+        let env = [("TOKEN".to_string(), "${X}".to_string())].into();
+        let (source, _) = make_source(vec![spec(env)]);
+        for _ in 0..2 {
+            let result = source.invoke(&echo_tool(), Value::Null).await.unwrap();
+            assert_eq!(
+                result.content,
+                vec![ToolContent::Text(
+                    "plugin \"mcp-fake\" unavailable: missing setting \"X\"".into()
+                )]
+            );
+        }
     }
 }

@@ -2397,3 +2397,93 @@ async fn unassigned_plugin_tools_not_listed() {
     assert!(names.contains(&"ticket_get".to_string()));
     assert!(!has_mcp_fake_tool(&names), "{names:?}");
 }
+
+#[tokio::test]
+async fn slow_plugin_server_does_not_hide_healthy_plugin_tools() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let (fx, fast_id, _fast_dir) = queued_run_with_mcp_plugin("mcp-fake").await;
+    let (slow_id, _slow_dir) = add_mcp_plugin(&fx.app, &fx.cookie, &fx.csrf, "mcp-fake-slow").await;
+    let list_timeout = Duration::from_millis(1500);
+    let mut state = (*fx.state).clone();
+    state.tools = AppState::build_tool_registry(
+        state.db.as_ref(),
+        &state.secret_store,
+        state.plugin_mcp.clone(),
+        list_timeout,
+    );
+    let addr = common::spawn_test_server(coppice_server::app(Arc::new(state))).await;
+    let url = format!("http://{addr}/mcp");
+    let token = common::mint_test_token_with_plugins(
+        &fx.state,
+        fx.scope.run_id,
+        ContextProfile::Full,
+        vec![fast_id, slow_id],
+    )
+    .await;
+
+    let started = std::time::Instant::now();
+    let names = tool_names(&url, &token).await;
+    assert!(
+        started.elapsed() < list_timeout,
+        "tools/list took {:?}",
+        started.elapsed()
+    );
+    assert!(names.contains(&"mcp-fake__echo".to_string()), "{names:?}");
+    assert!(names.contains(&"ticket_get".to_string()));
+    assert!(!names.iter().any(|n| n.starts_with("mcp-fake-slow__")));
+
+    let started = std::time::Instant::now();
+    let (is_error, text) = call_tool(&url, &token, "ticket_get", json!({})).await;
+    assert!(!is_error, "{text}");
+    assert!(
+        started.elapsed() < Duration::from_millis(500),
+        "core call stalled behind the slow start: {:?}",
+        started.elapsed()
+    );
+}
+
+#[tokio::test]
+async fn undecryptable_plugin_settings_skip_only_that_plugin() {
+    use coppice_server::services::plugin_service::PluginService;
+
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let (fx, good_id, _good_dir) = queued_run_with_mcp_plugin("mcp-fake").await;
+    let (bad_id, _bad_dir) = add_mcp_plugin(&fx.app, &fx.cookie, &fx.csrf, "mcp-fake-slow").await;
+    let corrupted =
+        sqlx::query("UPDATE secrets SET ciphertext = '\\x00'::bytea WHERE name LIKE $1")
+            .bind(format!("plugin-setting-{bad_id}-%"))
+            .execute(&fx.pool)
+            .await
+            .unwrap()
+            .rows_affected();
+    assert_eq!(corrupted, 1);
+
+    let plugins = PluginService::new(&fx.pool);
+    let specs = plugins
+        .server_specs_for(&[good_id, bad_id], &fx.state.secret_store, true)
+        .await
+        .expect("enabled specs");
+    let ids: Vec<Uuid> = specs.iter().map(|s| s.key.plugin_id).collect();
+    assert_eq!(ids, vec![good_id]);
+    assert!(plugins
+        .server_specs_for(&[bad_id], &fx.state.secret_store, false)
+        .await
+        .is_err());
+
+    let url = serve(&fx).await;
+    let token = common::mint_test_token_with_plugins(
+        &fx.state,
+        fx.scope.run_id,
+        ContextProfile::Full,
+        vec![good_id, bad_id],
+    )
+    .await;
+    let names = tool_names(&url, &token).await;
+    assert!(names.contains(&"mcp-fake__echo".to_string()), "{names:?}");
+}
