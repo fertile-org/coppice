@@ -1,6 +1,6 @@
 # Standard Skills Repos and Plugin Marketplaces — Design
 
-**Status:** approved design (2026-10-04). Extends [M10 plugins](2026-09-29-m10-plugins-design.md) (Plugin format and discovery, Plugin lifecycle). User guide: [docs/plugins.md](../../plugins.md).
+**Status:** implemented (2026-10-04) on branch `standard-skills`; manual acceptance (real repositories) pending. See [Implementation notes](#implementation-notes) for deviations from the design. Extends [M10 plugins](2026-09-29-m10-plugins-design.md) (Plugin format and discovery, Plugin lifecycle). User guide: [docs/plugins.md](../../plugins.md).
 
 ## Goal
 
@@ -145,11 +145,23 @@ From a container directory, walk up to **3 levels** deep (`c/<a>/SKILL.md`, `c/<
 - Bundled skill files (`scripts/`, `references/`) inside a sandbox — M11.
 - Plugin `commands/`, `agents/`, `hooks/` (still unsupported).
 
+## Implementation notes
+
+Amendments decided during implementation; the code and [docs/plugins.md](../../plugins.md) follow these where they differ from the sections above.
+
+- **Detection at depth 0.** A registered plugin directory itself (`is_plugin_dir_root`) is one plugin only with `plugin.json`, `marketplace.json`, a root `SKILL.md`, or a container dir (`skills/`, `.agents/skills/`, …) yielding a skill. The one-level `*/SKILL.md` root search does not apply there; children of the directory use the full rule (`is_plugin_root`, including the one-level search). Otherwise a single-skill git clone inside a plugin directory would collapse the whole directory into one plugin.
+- **Symlink escapes.** Skills reached through a symlink resolving outside the plugin root are listed with error `path escapes plugin root` (not silently dropped).
+- **Marketplace errors.** Besides the two errors above: `marketplace entry "<name>": no plugin or skills found at source` (target has neither `plugin.json` nor a skills package), `marketplace entry "<name>": source must be a path or an object` (missing / other type), and `marketplace entry "<name>": invalid plugin name` (empty, invalid, or reserved entry name). Error rows and external rows use rel_path `<marketplace rel>#<entry>`; only successful in-repo rows use the joined source path. Entries resolving to the same rel_path: the first wins.
+- **`git-subdir`.** The URL is the entry's `url` (shorthand expanded); the path is recorded in the kind (`git-subdir:<path>`), not appended to the URL.
+- **Row name.** The target's `plugin.json` name if present, else the entry name; skills-only targets validate the entry name, not the folder name.
+- **Skill names.** A skill's name is its folder name (a root `SKILL.md` takes the plugin folder's name). Duplicate names: only error-free skills claim a name, so an erroring skill never shadows a valid one.
+- **Installs.** `plugin_installs.plugin_id` records the first produced row by rel_path; `plugin_ids` lists all.
+
 ## Acceptance criteria
 
-- [ ] Repos in `npx skills` layouts (root `SKILL.md`, `skills/` flat or catalog, `.agents/skills`, `.claude/skills`) install via git and via plugin directory.
-- [ ] Marketplace repos expand into one plugin per in-repo entry; remote entries listed as `external` with an install shortcut.
-- [ ] Multi-line YAML descriptions parse correctly.
-- [ ] One Update refreshes every plugin from the same clone.
-- [ ] Admins can switch individual skills off; disabled skills are invisible to agents immediately.
-- [ ] `docs/plugins.md` and `docs/architecture.md` updated; `make test`, clippy, `make web-test` pass; `make e2e-smoke-m10` passes.
+- [x] Repos in `npx skills` layouts (root `SKILL.md`, `skills/` flat or catalog, `.agents/skills`, `.claude/skills`) install via git and via plugin directory.
+- [x] Marketplace repos expand into one plugin per in-repo entry; remote entries listed as `external` with an install shortcut.
+- [x] Multi-line YAML descriptions parse correctly.
+- [x] One Update refreshes every plugin from the same clone.
+- [x] Admins can switch individual skills off; disabled skills are invisible to agents immediately.
+- [ ] `docs/plugins.md` and `docs/architecture.md` updated; `make test`, clippy, `make web-test` pass; `make e2e-smoke-m10` passes. (Docs, tests, clippy, web tests done; smoke not yet run — ports held by a local dev stack.)

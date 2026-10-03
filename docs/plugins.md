@@ -16,14 +16,28 @@ A plugin is not a rule set and does not change workflow, statuses, or permission
 
 `commands/`, `agents/`, and `hooks/` folders are detected and listed as **Not supported yet**; they never run.
 
+### Supported layouts
+
+Coppice reads repositories the way the rest of the ecosystem publishes them, without restructuring:
+
+| Layout | Recognized by | Becomes |
+|--------|---------------|---------|
+| Claude Code plugin | `.claude-plugin/plugin.json` | One plugin. Skills are searched in `skills/` (or the `skills` paths in `plugin.json`). |
+| Skills repo (`npx skills add` layout) | A root `SKILL.md`, or `SKILL.md` files in `skills/`, `skills/.curated/`, `skills/.experimental/`, `skills/.system/`, `.agents/skills/`, `.claude/skills/`, or one level below the folder (`<name>/SKILL.md`) | One plugin named after the folder, version `0.0.0`. A root `SKILL.md` makes the whole folder a single skill. |
+| Claude Code marketplace | `.claude-plugin/marketplace.json` | One plugin per entry in its `plugins` list (see below). |
+
+Skills are found up to 3 folders deep inside each skills folder (`skills/<category>/<group>/<name>/SKILL.md` at most). A folder with a `SKILL.md` is one skill; nothing below it is searched. Folders starting with `.` and `node_modules` are skipped. A skill's name is its folder name.
+
+**Marketplaces.** Each `plugins` entry with a path `source` (`"./plugins/foo"`, `"plugins/foo"`, or `"./"`) is read as a plugin or skills folder inside the repository. It is named by its `plugin.json` `name`, or else the entry `name`, and its card shows `From marketplace <name>`. Entries whose `source` is an object (`github`, `git-subdir`, `url`, `npm`, …) live in another repository and are not fetched: they appear with status `external`, a link to their repository when Coppice can derive one, and an **Install from git** button that fills in the install form. If two entries point at the same path, the first one is used.
+
 ## Using plugins
 
 ### 1. Add a plugin
 
 On **Plugins → Add plugins**, either:
 
-- **Install from git:** paste a repository URL (and optionally a branch or tag) and pick a target directory. The server clones it with its own git credentials. Git-installed plugins get an **Update** button.
-- **Add a plugin directory:** a folder on the server's machine. Coppice scans the folder itself (if it is a plugin) and each direct subfolder (one plugin per subfolder). Deeper folders are ignored. Press **Rescan** after changing files. In the desktop app, **Browse…** opens a folder picker.
+- **Install from git:** paste a repository URL (and optionally a branch or tag) and pick a target directory. The server clones it with its own git credentials into `<directory>/<repo name>`. Any supported layout works; a marketplace or skills repo can produce several plugins, and the success message lists them (`Installed <repo>: 3 plugins (a, b, c)`). A repository with no plugin, skills, or marketplace is removed again and the install fails. Git-installed plugins get an **Update** button.
+- **Add a plugin directory:** a folder on the server's machine. If the folder itself is a plugin, skills repo, or marketplace, it is read as that. Otherwise each direct subfolder that is one becomes a plugin. For the directory itself, `<name>/SKILL.md` subfolders do not count (only a root `SKILL.md` or skills in `skills/`, `.agents/skills/`, … do), so a directory holding several single-skill clones lists each clone as its own plugin. Deeper folders are ignored. Press **Rescan** after changing files. In the desktop app, **Browse…** opens a folder picker.
 
 Directories are scanned in order. If two plugins have the same name, the one in the earlier directory is used and the other is marked `shadowed`. Use the arrows to reorder.
 
@@ -36,6 +50,8 @@ Plugins start **disabled**. On the plugin card:
 1. If the card lists **Settings**, enter the values and **Save**. Each setting shows where its value would come from: `setting` (saved here), `env` (the server's environment variable of the same name), `default` (the plugin's built-in default), or `missing` (the server will not start until you set it).
 2. Press **Test** to start the plugin's MCP servers and list their tools. This works while disabled.
 3. Turn on the switch to enable it.
+
+**Switching skills off.** Each skill on the card has its own switch; the header reads `Skills (12 of 30 on)` when some are off. A switched-off skill is hidden from every agent that has the plugin, at once (including running runs): it is left out of the skill list, and `skill_load` reports it as not found. The setting is workspace-wide, kept by skill name across rescans and updates. The built-in `coppice` skills cannot be switched off.
 
 A plugin with **stdio** servers runs a program on the server's machine with the server's privileges (sandboxing comes in M11). Enabling or testing such a plugin asks for confirmation, and also names any settings whose value would come from the server's environment. Only install plugins you trust.
 
@@ -64,6 +80,9 @@ Open a ticket's **Runs** tab and expand a run. **Tools & Skills** lists every to
 | `shadowed` | A plugin with the same name in an earlier directory is used instead. |
 | `missing` | The folder is gone. Agent assignments are kept and return when the folder does. |
 | `invalid` | The plugin could not be read; the card shows the error. |
+| `external` | A marketplace entry that lives in another repository. It cannot be enabled, tested, updated, or attached; install it separately (**Install from git** on the card). |
+
+**Update** pulls the whole cloned repository once and refreshes every plugin that came from it (the button's tooltip says `Updates all N plugins from this repository` when there are several). Their MCP servers are stopped. Plugins whose entry disappeared become `missing`; new entries appear disabled.
 
 | Server health | Meaning |
 |---------------|---------|
@@ -77,9 +96,18 @@ Open a ticket's **Runs** tab and expand a run. **Tools & Skills** lists every to
 
 | Symptom | Fix |
 |---------|-----|
-| Plugin does not appear | Is it directly in a plugin directory (or one level down)? Press **Rescan**. |
+| Plugin does not appear | Is it the plugin directory itself or a direct subfolder of it? Are its skills within 3 levels of a skills folder? Press **Rescan**. |
+| Install fails with `no plugin, skills, or marketplace found in this repository` | The repository has none of the supported layouts at its root. Installing a subfolder of a repository is not supported. |
 | `invalid` with a JSON error | Fix `plugin.json` or `.mcp.json` and rescan. |
-| A skill shows an error | `SKILL.md` needs frontmatter with both `name` and `description`. The rest of the plugin still works. |
+| `invalid marketplace.json: …` | The marketplace file is not valid JSON, or `plugins` is not an array. |
+| `marketplace entry "<name>": source must stay inside the repository` | The entry's path is absolute, contains `..`, or resolves outside the marketplace folder. |
+| `marketplace entry "<name>": source path does not exist` | The entry's path is not a folder in the repository. |
+| `marketplace entry "<name>": no plugin or skills found at source` | The folder exists but has no `plugin.json` and no `SKILL.md` in a supported place. |
+| `marketplace entry "<name>": source must be a path or an object` | `source` is missing or has another type. |
+| `marketplace entry "<name>": invalid plugin name` | The entry name is empty, reserved (`coppice`), or not `A-Z a-z 0-9 . _ -` (starting with a letter or digit, at most 64 characters). |
+| A skill shows an error | `SKILL.md` needs YAML frontmatter with both `name` and `description` (`invalid frontmatter YAML: …` means the block does not parse). The rest of the plugin still works. |
+| A skill shows `duplicate skill name` | Another skill in the same plugin has the same folder name; the first by path is used. |
+| A skill shows `path escapes plugin root` | The skill folder or its `SKILL.md` is a symlink pointing outside the plugin. |
 | Test says `missing setting "X"` | Enter setting `X` on the card, or give it a default in `.mcp.json`. |
 | Test fails to start a stdio server | Is the command installed and on the server's PATH (in Docker: inside the server container)? |
 | Agent never uses the plugin | Is it enabled **and** selected on that agent? Check the run's **Tools & Skills** tab. |
@@ -113,7 +141,9 @@ hello-coppice/
 
 `name` must be unique across your plugin directories; it prefixes every tool (`hello-coppice__greet`) and skill (`hello-coppice:greeting-style`). Keep it short, lowercase, with `-` or `_`.
 
-**Skills-only folder:** a folder with `<name>/SKILL.md` files (or a `skills/` subfolder) and no `plugin.json` also works. Its name is the folder name and its version is `0.0.0`.
+**Skills-only folder:** a folder with no `plugin.json` but skills in any layout from [Supported layouts](#supported-layouts) (a root `SKILL.md`, `skills/`, `.agents/skills/`, `.claude/skills/`, or `<name>/SKILL.md` subfolders) also works. Its name is the folder name and its version is `0.0.0`.
+
+**Marketplace:** to publish several plugins from one repository, add `.claude-plugin/marketplace.json` with a `plugins` array of `{ "name": "...", "source": "./plugins/foo" }` entries. Each entry becomes its own plugin; one **Update** refreshes them all.
 
 ### Skills
 
@@ -129,7 +159,8 @@ description: How to greet people in ticket comments. Load before writing a greet
 ...
 ```
 
-- Frontmatter `name` and `description` are required, as flat `key: value` lines.
+- The frontmatter is YAML; `name` and `description` are required non-empty strings. Other keys (`license`, `allowed-tools`, …) are ignored. Multi-line descriptions (`>` or `|`) are joined into one line.
+- The skill's id is `<plugin>:<folder name>`; if `name` differs from the folder name, the folder name is used.
 - The description is all the agent sees until it loads the skill, so say **when** to use it.
 - Keep the body focused on one task. Refer to tools by their full `<plugin>__<tool>` name.
 
