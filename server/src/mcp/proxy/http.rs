@@ -150,13 +150,18 @@ impl McpTransport for HttpTransport {
         spec: &ResolvedTransport,
         _cwd: &Path,
     ) -> Result<Box<dyn McpConnection>, ProxyError> {
-        let ResolvedTransport::Http { url, headers } = spec else {
+        let ResolvedTransport::Http {
+            url,
+            headers,
+            secrets,
+        } = spec
+        else {
             return Err(ProxyError::Start(format!(
                 "http transport cannot open a {} server",
                 spec.kind()
             )));
         };
-        let redactor = redactor(url, headers);
+        let redactor = redactor(url, headers, secrets);
         let parsed = Url::parse(url).map_err(|_| ProxyError::Start("invalid url".into()))?;
         if !matches!(parsed.scheme(), "http" | "https") {
             return Err(ProxyError::Start(format!(
@@ -176,7 +181,7 @@ impl McpTransport for HttpTransport {
         let config =
             StreamableHttpClientTransportConfig::with_uri(url.as_str()).custom_headers(custom);
         let transport = StreamableHttpClientTransport::with_client(UrlFreeClient::new()?, config);
-        client::connect(transport, redactor).await
+        client::connect(transport, redactor, Redactor::for_output(secrets)).await
     }
 }
 
@@ -185,8 +190,9 @@ const SHOWN_URL: &str = "<server url>";
 /// Shorter host labels and path segments are too common to redact safely.
 const MIN_URL_PART_LEN: usize = 4;
 
-/// Any part of the URL may come from a setting, so none of it is shown.
-fn redactor(url: &str, headers: &BTreeMap<String, String>) -> Redactor {
+/// Any part of the URL may come from a setting, so none of it is shown. `secrets`
+/// go last so URL parts keep the `<server url>` replacement.
+fn redactor(url: &str, headers: &BTreeMap<String, String>, secrets: &[String]) -> Redactor {
     let mut redactor = headers
         .values()
         .fold(Redactor::default(), |r, value| r.secret(value))
@@ -220,7 +226,7 @@ fn redactor(url: &str, headers: &BTreeMap<String, String>) -> Redactor {
         }
         Err(_) => redactor = redactor.secret(url),
     }
-    redactor
+    secrets.iter().fold(redactor, |r, value| r.secret(value))
 }
 
 /// Host and path segments as written, before URL normalization re-encodes them.
@@ -242,7 +248,7 @@ mod tests {
     fn redacts_credentials_and_headers() {
         let url = "https://alice:pw-1@example.com:8443/mcp/v1?key=q-1#frag-1";
         let headers = BTreeMap::from([("Authorization".to_string(), "Bearer h-1".to_string())]);
-        let redactor = redactor(url, &headers);
+        let redactor = redactor(url, &headers, &[]);
         let message = redactor.apply(&format!(
             "error sending request for url ({url}): auth Bearer h-1 rejected for alice"
         ));
@@ -256,7 +262,7 @@ mod tests {
     #[test]
     fn hides_every_part_of_the_url() {
         let url = "https://hooks.example.com:8443/hooks/p4th s3cr3t/mcp";
-        let redactor = redactor(url, &BTreeMap::new());
+        let redactor = redactor(url, &BTreeMap::new(), &[]);
         for leaked in [
             url,
             "https://hooks.example.com:8443/hooks/p4th%20s3cr3t/mcp",
@@ -272,5 +278,35 @@ mod tests {
                 assert!(!message.contains(part), "{part} leaked in {message}");
             }
         }
+    }
+
+    #[test]
+    fn bare_secret_from_bearer_header_is_redacted() {
+        use crate::plugins::capability::McpServerTransport;
+        use crate::plugins::placeholders::{resolve, ResolveCtx};
+
+        let transport = McpServerTransport::Http {
+            url: "https://example.com/mcp".into(),
+            headers: BTreeMap::from([(
+                "Authorization".to_string(),
+                "Bearer ${API_TOKEN}".to_string(),
+            )]),
+        };
+        let settings = BTreeMap::from([("API_TOKEN".to_string(), "tk-1".to_string())]);
+        let ctx = ResolveCtx {
+            plugin_root: Path::new("/p"),
+            settings: &settings,
+            env: &|_| None,
+        };
+        let ResolvedTransport::Http {
+            url,
+            headers,
+            secrets,
+        } = resolve(&transport, &ctx).unwrap()
+        else {
+            panic!("expected http");
+        };
+        let message = redactor(&url, &headers, &secrets).apply("token tk-1 rejected");
+        assert_eq!(message, "token [redacted] rejected");
     }
 }

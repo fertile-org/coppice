@@ -32,6 +32,7 @@ fn fake_mcp(env: &[(&str, &str)]) -> ResolvedTransport {
         command: env!("CARGO_BIN_EXE_fake-mcp").into(),
         args: Vec::new(),
         env: map(env),
+        secrets: Vec::new(),
     }
 }
 
@@ -108,6 +109,33 @@ async fn stdio_env_is_minimal() {
 }
 
 #[tokio::test]
+async fn stdio_tool_output_redacts_secrets() {
+    let dir = tempfile::tempdir().unwrap();
+    let spec = ResolvedTransport::Stdio {
+        command: env!("CARGO_BIN_EXE_fake-mcp").into(),
+        args: Vec::new(),
+        env: map(&[("LEAK", "--token=long-s3cr3t"), ("SHORT", "ab")]),
+        secrets: vec!["long-s3cr3t".into(), "ab".into()],
+    };
+    let conn = match StdioTransport.connect(&spec, dir.path()).await {
+        Ok(conn) => conn,
+        Err(e) => panic!("connect failed: {e}"),
+    };
+    for error in [false, true] {
+        let args = json!({ "name": "LEAK", "wrap": true, "error": error });
+        let result = conn.call_tool("env", args).await.expect("call_tool");
+        assert_eq!(result.is_error, error);
+        assert_eq!(text_of(&result), "token=--token=[redacted]; done");
+    }
+    // Values shorter than the output minimum are left alone.
+    assert_eq!(
+        call_text(&*conn, "env", json!({ "name": "SHORT" })).await,
+        "ab"
+    );
+    conn.close().await;
+}
+
+#[tokio::test]
 async fn stdio_survives_non_utf8_stderr() {
     let dir = tempfile::tempdir().unwrap();
     let conn = connect_stdio(&[("FAKE_MCP_STDERR_GARBAGE", "1")], dir.path()).await;
@@ -161,6 +189,7 @@ async fn stdio_start_failure_is_start_error() {
             .into_owned(),
         args: Vec::new(),
         env: BTreeMap::new(),
+        secrets: Vec::new(),
     };
     assert!(matches!(
         StdioTransport.connect(&missing, dir.path()).await,
@@ -271,6 +300,7 @@ async fn http_lists_and_calls_with_headers() {
     let spec = ResolvedTransport::Http {
         url: format!("http://{host}/mcp"),
         headers: map(&[("Authorization", "Bearer h-val")]),
+        secrets: Vec::new(),
     };
     let dir = tempfile::tempdir().unwrap();
     let conn = match HttpTransport.connect(&spec, dir.path()).await {
@@ -294,6 +324,7 @@ async fn http_error_hides_header_value() {
     let spec = ResolvedTransport::Http {
         url: format!("http://user:u-pass@{host}/mcp?token=q-secret"),
         headers: map(&[("Authorization", "Bearer h-val")]),
+        secrets: Vec::new(),
     };
     assert_error_hides_secrets(&spec).await;
 
@@ -303,6 +334,7 @@ async fn http_error_hides_header_value() {
     let refused = ResolvedTransport::Http {
         url: format!("http://user:u-pass@127.0.0.1:{port}/mcp?token=q-secret"),
         headers: map(&[("Authorization", "Bearer h-val")]),
+        secrets: Vec::new(),
     };
     assert_error_hides_secrets(&refused).await;
 
@@ -310,6 +342,7 @@ async fn http_error_hides_header_value() {
     let refused = ResolvedTransport::Http {
         url: path_secret.clone(),
         headers: map(&[("Authorization", "Bearer h-val")]),
+        secrets: Vec::new(),
     };
     let message = assert_error_hides_secrets(&refused).await;
     for leaked in ["p4th-s3cr3t", path_secret.as_str(), "/hooks/"] {
@@ -392,6 +425,7 @@ async fn http_transport_logs_never_show_the_url() {
     let refused = ResolvedTransport::Http {
         url: secret_url(unused_port().await),
         headers: map(&[("Authorization", "Bearer h-val")]),
+        secrets: Vec::new(),
     };
     assert!(HttpTransport.connect(&refused, dir.path()).await.is_err());
 
@@ -405,6 +439,7 @@ async fn http_transport_logs_never_show_the_url() {
     let live = ResolvedTransport::Http {
         url: secret_url(port),
         headers: BTreeMap::new(),
+        secrets: Vec::new(),
     };
     let conn = match HttpTransport.connect(&live, dir.path()).await {
         Ok(conn) => conn,

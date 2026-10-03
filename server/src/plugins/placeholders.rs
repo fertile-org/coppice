@@ -5,16 +5,20 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::path::Path;
 
+/// `secrets` are the values substituted from settings or the server environment
+/// (sorted, deduplicated) so transports can scrub them from errors and tool output.
 #[derive(Clone, PartialEq, Eq, Hash)]
 pub enum ResolvedTransport {
     Stdio {
         command: String,
         args: Vec<String>,
         env: BTreeMap<String, String>,
+        secrets: Vec<String>,
     },
     Http {
         url: String,
         headers: BTreeMap<String, String>,
+        secrets: Vec<String>,
     },
 }
 
@@ -23,6 +27,14 @@ impl ResolvedTransport {
         match self {
             ResolvedTransport::Stdio { .. } => "stdio",
             ResolvedTransport::Http { .. } => "http",
+        }
+    }
+
+    pub fn secrets(&self) -> &[String] {
+        match self {
+            ResolvedTransport::Stdio { secrets, .. } | ResolvedTransport::Http { secrets, .. } => {
+                secrets
+            }
         }
     }
 }
@@ -78,11 +90,13 @@ pub fn resolve(
     transport: &McpServerTransport,
     ctx: &ResolveCtx,
 ) -> Result<ResolvedTransport, String> {
+    let mut secrets = Vec::new();
     let mut lookup = |name: &str, default: Option<&str>| {
         if name == PLUGIN_ROOT {
             return Ok(ctx.plugin_root.to_string_lossy().into_owned());
         }
-        ctx.settings
+        let value = ctx
+            .settings
             .get(name)
             .cloned()
             .filter(|v| !v.is_empty())
@@ -91,27 +105,41 @@ pub fn resolve(
                     .then(|| (ctx.env)(name))
                     .flatten()
                     .filter(|v| !v.is_empty())
-            })
-            .or_else(|| default.map(str::to_string))
+            });
+        if let Some(value) = value {
+            secrets.push(value.clone());
+            return Ok(value);
+        }
+        default
+            .map(str::to_string)
             .ok_or_else(|| format!("missing setting \"{name}\""))
     };
-    match transport {
-        McpServerTransport::Stdio { command, args, env } => Ok(ResolvedTransport::Stdio {
+    let mut resolved = match transport {
+        McpServerTransport::Stdio { command, args, env } => ResolvedTransport::Stdio {
             command: expand(command, &mut lookup)?,
             args: args
                 .iter()
                 .map(|a| expand(a, &mut lookup))
                 .collect::<Result<_, _>>()?,
             env: expand_values(env, &mut lookup)?,
-        }),
-        McpServerTransport::Http { url, headers } => Ok(ResolvedTransport::Http {
+            secrets: Vec::new(),
+        },
+        McpServerTransport::Http { url, headers } => ResolvedTransport::Http {
             url: expand(url, &mut lookup)?,
             headers: expand_values(headers, &mut lookup)?,
-        }),
+            secrets: Vec::new(),
+        },
         McpServerTransport::Unsupported { kind } => {
-            Err(format!("unsupported transport \"{kind}\""))
+            return Err(format!("unsupported transport \"{kind}\""))
         }
+    };
+    secrets.sort();
+    secrets.dedup();
+    match &mut resolved {
+        ResolvedTransport::Stdio { secrets: s, .. }
+        | ResolvedTransport::Http { secrets: s, .. } => *s = secrets,
     }
+    Ok(resolved)
 }
 
 fn transport_values(transport: &McpServerTransport) -> Vec<&str> {
@@ -238,6 +266,7 @@ mod tests {
                 command: "/p/bin/fs".into(),
                 args: vec!["--home".into(), "/home/x".into()],
                 env: settings(&[("TOKEN", "tok")]),
+                secrets: vec!["/home/x".into(), "tok".into()],
             }
         );
 
@@ -252,8 +281,26 @@ mod tests {
             ResolvedTransport::Http {
                 url: "https://h//home/x".into(),
                 headers: settings(&[("Authorization", "Bearer from-env")]),
+                secrets: vec!["/home/x".into(), "from-env".into()],
             }
         );
+    }
+
+    #[test]
+    fn secrets_are_setting_and_env_values_only() {
+        let env = |name: &str| (name == "FROM_ENV").then(|| "env-val".to_string());
+        let transport = stdio(
+            "${CLAUDE_PLUGIN_ROOT}/bin",
+            &[
+                "--token=${TOKEN}",
+                "${PORT:-8080}",
+                "${TOKEN}",
+                "${FROM_ENV}",
+            ],
+            &[],
+        );
+        let resolved = resolve_with(&transport, &settings(&[("TOKEN", "set-val")]), &env).unwrap();
+        assert_eq!(resolved.secrets(), ["env-val", "set-val"]);
     }
 
     #[test]
@@ -339,6 +386,7 @@ mod tests {
             command: "/bin/cmd-secret".into(),
             args: vec!["--token=arg-secret".into()],
             env: settings(&[("API_TOKEN", "env-secret")]),
+            secrets: vec!["arg-secret".into(), "env-secret".into()],
         };
         let shown = format!("{stdio:?}");
         assert!(
@@ -352,6 +400,7 @@ mod tests {
         let http = ResolvedTransport::Http {
             url: "https://u:url-pass@h/mcp?k=url-query".into(),
             headers: settings(&[("Authorization", "Bearer hdr-secret")]),
+            secrets: vec!["hdr-secret".into()],
         };
         let shown = format!("{http:?}");
         assert!(

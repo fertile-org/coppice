@@ -71,7 +71,13 @@ impl McpTransport for StdioTransport {
         spec: &ResolvedTransport,
         cwd: &Path,
     ) -> Result<Box<dyn McpConnection>, ProxyError> {
-        let ResolvedTransport::Stdio { command, args, env } = spec else {
+        let ResolvedTransport::Stdio {
+            command,
+            args,
+            env,
+            secrets,
+        } = spec
+        else {
             return Err(ProxyError::Start(format!(
                 "stdio transport cannot open a {} server",
                 spec.kind()
@@ -80,7 +86,7 @@ impl McpTransport for StdioTransport {
         let redactor = std::iter::once(command)
             .chain(args)
             .chain(env.values())
-            .fold(Redactor::default(), |r, value| r.secret(value));
+            .fold(Redactor::for_errors(secrets), |r, value| r.secret(value));
 
         let mut cmd = tokio::process::Command::new(command);
         cmd.args(args).env_clear();
@@ -101,7 +107,7 @@ impl McpTransport for StdioTransport {
                 tracing::debug!(target: "coppice::plugin_mcp", %line, "mcp server stderr");
             }));
         }
-        client::connect(process, redactor).await
+        client::connect(process, redactor, Redactor::for_output(secrets)).await
     }
 }
 

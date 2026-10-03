@@ -567,7 +567,9 @@ fn fingerprint(resolved: &ResolvedTransport, cwd: &Path) -> [u8; 32] {
     hash_str(&mut hasher, resolved.kind());
     hash_str(&mut hasher, &cwd.to_string_lossy());
     match resolved {
-        ResolvedTransport::Stdio { command, args, env } => {
+        ResolvedTransport::Stdio {
+            command, args, env, ..
+        } => {
             hash_str(&mut hasher, command);
             hasher.update((args.len() as u64).to_le_bytes());
             for arg in args {
@@ -575,7 +577,7 @@ fn fingerprint(resolved: &ResolvedTransport, cwd: &Path) -> [u8; 32] {
             }
             hash_map(&mut hasher, env);
         }
-        ResolvedTransport::Http { url, headers } => {
+        ResolvedTransport::Http { url, headers, .. } => {
             hash_str(&mut hasher, url);
             hash_map(&mut hasher, headers);
         }

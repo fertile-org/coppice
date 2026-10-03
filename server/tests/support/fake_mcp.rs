@@ -1,5 +1,6 @@
 //! Stand-in MCP server over stdio (newline-delimited JSON-RPC) for proxy tests.
-//! Tools: `echo`, `write_note`, `env`, `sleep`, `crash`. Env switches:
+//! Tools: `echo`, `write_note`, `env` (`wrap: true` answers `token=<value>; done`,
+//! `error: true` marks the result `isError`), `sleep`, `crash`. Env switches:
 //! `FAKE_MCP_START_FAIL=1` (exit 1 before reading), `FAKE_MCP_TOOLS_CHANGED=1`
 //! (after the first `tools/call`, add tool `extra` and send
 //! `notifications/tools/list_changed`), `FAKE_MCP_PID_FILE` (write own pid,
@@ -104,7 +105,15 @@ fn main() {
                     "write_note" => text_result("noted"),
                     "env" => {
                         let name = args["name"].as_str().unwrap_or_default();
-                        text_result(&std::env::var(name).unwrap_or_else(|_| "<unset>".into()))
+                        let value = std::env::var(name).unwrap_or_else(|_| "<unset>".into());
+                        let text = if args["wrap"] == true {
+                            format!("token={value}; done")
+                        } else {
+                            value
+                        };
+                        let mut result = text_result(&text);
+                        result["isError"] = (args["error"] == true).into();
+                        result
                     }
                     "sleep" => {
                         let ms = args["ms"].as_u64().unwrap_or(0);

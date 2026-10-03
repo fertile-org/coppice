@@ -2082,6 +2082,49 @@ async fn add_mcp_plugin(
             .join(name),
         &plugins.path().join(name),
     );
+    let plugin_id = register_mcp_plugin(app, cookie, csrf, &plugins, name, json!({})).await;
+    (plugin_id, plugins)
+}
+
+/// Writes plugin `name` with one fake-mcp server whose env is `env`, then
+/// registers it like `add_mcp_plugin` with the extra `settings`.
+async fn add_inline_mcp_plugin(
+    app: &Router,
+    cookie: &str,
+    csrf: &str,
+    name: &str,
+    env: Value,
+    settings: Value,
+) -> (Uuid, tempfile::TempDir) {
+    let plugins = tempfile::tempdir().unwrap();
+    let root = plugins.path().join(name);
+    std::fs::create_dir_all(root.join(".claude-plugin")).unwrap();
+    std::fs::write(
+        root.join(".claude-plugin/plugin.json"),
+        json!({ "name": name }).to_string(),
+    )
+    .unwrap();
+    std::fs::write(
+        root.join(".mcp.json"),
+        json!({ "mcpServers": { "fake": { "command": "${FAKE_MCP_BIN}", "env": env } } })
+            .to_string(),
+    )
+    .unwrap();
+    let plugin_id = register_mcp_plugin(app, cookie, csrf, &plugins, name, settings).await;
+    (plugin_id, plugins)
+}
+
+/// Adds `plugins` as a plugin dir, saves `settings` plus `FAKE_MCP_BIN`, and
+/// enables plugin `name`.
+async fn register_mcp_plugin(
+    app: &Router,
+    cookie: &str,
+    csrf: &str,
+    plugins: &tempfile::TempDir,
+    name: &str,
+    mut settings: Value,
+) -> Uuid {
+    settings["FAKE_MCP_BIN"] = env!("CARGO_BIN_EXE_fake-mcp").into();
     let dir = api(
         app,
         "POST",
@@ -2105,7 +2148,7 @@ async fn add_mcp_plugin(
         app,
         "PUT",
         &format!("/api/plugins/{plugin_id}/settings"),
-        json!({ "values": { "FAKE_MCP_BIN": env!("CARGO_BIN_EXE_fake-mcp") } }),
+        json!({ "values": settings }),
         cookie,
         csrf,
     )
@@ -2119,7 +2162,7 @@ async fn add_mcp_plugin(
         csrf,
     )
     .await;
-    (plugin_id.parse().unwrap(), plugins)
+    plugin_id.parse().unwrap()
 }
 
 async fn tool_names(url: &str, token: &str) -> Vec<String> {
@@ -2505,6 +2548,64 @@ async fn undecryptable_plugin_settings_skip_only_that_plugin() {
     .await;
     let names = tool_names(&url, &token).await;
     assert!(names.contains(&"mcp-fake__echo".to_string()), "{names:?}");
+}
+
+#[tokio::test]
+async fn plugin_tool_output_redacts_setting_values() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let fx = run_fixture().await;
+    let secret = "sup3r-s3cr3t-t0ken";
+    let (plugin_id, _dir) = add_inline_mcp_plugin(
+        &fx.app,
+        &fx.cookie,
+        &fx.csrf,
+        "mcp-leaky",
+        json!({ "LEAK_VAL": "${LEAKY_TOKEN}" }),
+        json!({ "LEAKY_TOKEN": secret }),
+    )
+    .await;
+    let url = serve(&fx).await;
+    let token = common::mint_test_token_with_plugins(
+        &fx.state,
+        fx.scope.run_id,
+        ContextProfile::Full,
+        vec![plugin_id],
+    )
+    .await;
+    for error in [false, true] {
+        let args = json!({ "name": "LEAK_VAL", "wrap": true, "error": error });
+        assert_eq!(
+            call_tool(&url, &token, "mcp-leaky__env", args).await,
+            (error, "token=[redacted]; done".to_string())
+        );
+    }
+
+    let rows: Vec<(String, Option<String>)> = sqlx::query_as(
+        "SELECT status, error FROM run_tool_calls WHERE run_id = $1 AND tool = 'mcp-leaky__env' \
+         ORDER BY created_at",
+    )
+    .bind(fx.scope.run_id)
+    .fetch_all(&fx.pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        rows,
+        vec![
+            ("ok".to_string(), None),
+            (
+                "error".to_string(),
+                Some("token=[redacted]; done".to_string())
+            ),
+        ]
+    );
+    let (status, body) = get_tool_calls(&fx.app, fx.scope.run_id, &fx.cookie, &fx.csrf).await;
+    assert_eq!(status, 200, "{body}");
+    let shown = body.to_string();
+    assert!(shown.contains("token=[redacted]; done"), "{shown}");
+    assert!(!shown.contains(secret), "{shown}");
 }
 
 // ---- M10 Part 2b: per-run tool-call log API ----

@@ -20,6 +20,8 @@ use tokio::sync::Mutex;
 const CLOSE_TIMEOUT: Duration = Duration::from_secs(5);
 const MAX_LIST_PAGES: usize = 100;
 const REDACTED: &str = "[redacted]";
+/// Shorter setting values are too likely to occur naturally in tool output.
+const MIN_OUTPUT_SECRET_LEN: usize = 6;
 
 /// Scrubs resolved secrets (env/header values, credentialed URLs) out of error text.
 #[derive(Clone, Default)]
@@ -29,6 +31,21 @@ pub(super) struct Redactor {
 }
 
 impl Redactor {
+    /// Redacts setting and server-env values of any length; for error text.
+    pub(super) fn for_errors(secrets: &[String]) -> Self {
+        secrets
+            .iter()
+            .fold(Self::default(), |r, value| r.secret(value))
+    }
+
+    /// Redacts setting and server-env values long enough to be unambiguous; for tool output.
+    pub(super) fn for_output(secrets: &[String]) -> Self {
+        secrets
+            .iter()
+            .filter(|value| value.len() >= MIN_OUTPUT_SECRET_LEN)
+            .fold(Self::default(), |r, value| r.secret(value))
+    }
+
     pub(super) fn secret(self, value: &str) -> Self {
         self.replace(value, REDACTED)
     }
@@ -76,12 +93,15 @@ pub(super) struct RmcpConnection {
     tools_changed: Arc<AtomicBool>,
     closed: AtomicBool,
     redactor: Redactor,
+    output: Redactor,
 }
 
-/// Runs the `initialize` handshake over `transport`.
+/// Runs the `initialize` handshake over `transport`. `redactor` scrubs error text,
+/// `output` the text blocks of tool results.
 pub(super) async fn connect<T, E, A>(
     transport: T,
     redactor: Redactor,
+    output: Redactor,
 ) -> Result<Box<dyn McpConnection>, ProxyError>
 where
     T: IntoTransport<RoleClient, E, A>,
@@ -101,6 +121,7 @@ where
         tools_changed,
         closed: AtomicBool::new(false),
         redactor,
+        output,
     }))
 }
 
@@ -167,7 +188,7 @@ impl McpConnection for RmcpConnection {
             .await
             .map_err(|e| self.map_err(e))?
         {
-            CallToolResponse::Complete(result) => Ok(tool_result(result)),
+            CallToolResponse::Complete(result) => Ok(tool_result(result, &self.output)),
             _ => Err(ProxyError::Protocol(
                 "unsupported tools/call response".into(),
             )),
@@ -203,17 +224,23 @@ fn remote_tool(tool: Tool) -> RemoteTool {
     }
 }
 
-fn tool_result(result: CallToolResult) -> ToolResult {
+/// Text of both normal and `isError` results is redacted: error text is persisted
+/// in `run_tool_calls.error` and shown in the UI.
+fn tool_result(result: CallToolResult, redactor: &Redactor) -> ToolResult {
     ToolResult {
-        content: result.content.into_iter().map(tool_content).collect(),
+        content: result
+            .content
+            .into_iter()
+            .map(|block| tool_content(block, redactor))
+            .collect(),
         is_error: result.is_error.unwrap_or(false),
     }
 }
 
-fn tool_content(block: ContentBlock) -> ToolContent {
+fn tool_content(block: ContentBlock, redactor: &Redactor) -> ToolContent {
     let unsupported = |kind: &str| ToolContent::Text(format!("[unsupported content: {kind}]"));
     match block {
-        ContentBlock::Text(text) => ToolContent::Text(text.text),
+        ContentBlock::Text(text) => ToolContent::Text(redactor.apply(&text.text)),
         ContentBlock::Image(image) => ToolContent::Image {
             data: image.data,
             mime_type: image.mime_type,
@@ -252,7 +279,7 @@ mod tests {
             "isError": true,
         });
         let result: CallToolResult = serde_json::from_value(json).unwrap();
-        let mapped = tool_result(result);
+        let mapped = tool_result(result, &Redactor::default());
         assert!(mapped.is_error);
         assert_eq!(
             mapped.content,
@@ -264,6 +291,38 @@ mod tests {
                 },
                 ToolContent::Text("[unsupported content: audio]".into()),
             ]
+        );
+    }
+
+    #[test]
+    fn tool_result_text_is_redacted_for_ok_and_error() {
+        let secrets = vec!["s3cr3t-value".to_string(), "abc".to_string()];
+        let redactor = Redactor::for_output(&secrets);
+        for is_error in [false, true] {
+            let json = serde_json::json!({
+                "content": [
+                    { "type": "text", "text": "token=s3cr3t-value abc" },
+                    { "type": "image", "data": "AAA", "mimeType": "image/png" },
+                ],
+                "isError": is_error,
+            });
+            let result: CallToolResult = serde_json::from_value(json).unwrap();
+            let mapped = tool_result(result, &redactor);
+            assert_eq!(mapped.is_error, is_error);
+            assert_eq!(
+                mapped.content,
+                vec![
+                    ToolContent::Text("token=[redacted] abc".into()),
+                    ToolContent::Image {
+                        data: "AAA".into(),
+                        mime_type: "image/png".into()
+                    },
+                ]
+            );
+        }
+        assert_eq!(
+            Redactor::for_errors(&secrets).apply("token=s3cr3t-value abc"),
+            "token=[redacted] [redacted]"
         );
     }
 
