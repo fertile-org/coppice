@@ -41,12 +41,24 @@ async fn sweep_orphaned_runs(state: &AppState) {
     }
 }
 
+/// rmcp logs plugin-controlled content (notifications, peer info) below warn, so it
+/// stays at warn unless the operator's `RUST_LOG` names it.
+fn log_directives(rust_log: Option<&str>) -> String {
+    let base = rust_log.filter(|s| !s.trim().is_empty()).unwrap_or("info");
+    if base.contains("rmcp") {
+        base.to_string()
+    } else {
+        format!("{base},rmcp=warn")
+    }
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    let rust_log = std::env::var(EnvFilter::DEFAULT_ENV).ok();
     tracing_subscriber::fmt()
         .with_env_filter(
-            EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| EnvFilter::new("info")),
+            EnvFilter::try_new(log_directives(rust_log.as_deref()))
+                .unwrap_or_else(|_| EnvFilter::new(log_directives(None))),
         )
         .init();
 
@@ -120,4 +132,17 @@ async fn main() -> anyhow::Result<()> {
         })
         .await?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::log_directives;
+
+    #[test]
+    fn rmcp_defaults_to_warn_unless_named() {
+        assert_eq!(log_directives(None), "info,rmcp=warn");
+        assert_eq!(log_directives(Some(" ")), "info,rmcp=warn");
+        assert_eq!(log_directives(Some("debug")), "debug,rmcp=warn");
+        assert_eq!(log_directives(Some("info,rmcp=debug")), "info,rmcp=debug");
+    }
 }
