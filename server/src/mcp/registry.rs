@@ -276,6 +276,9 @@ fn allowed_for(profile: ContextProfile, def: &ToolDefinition) -> bool {
         ContextProfile::Full | ContextProfile::HumanAgent | ContextProfile::KnowledgeCompaction => {
             true
         }
+        ContextProfile::ConnectorCheck => crate::mcp::catalog::core_tools_for(profile)
+            .into_iter()
+            .any(|tool| tool.name() == def.name),
     }
 }
 
@@ -508,12 +511,14 @@ mod tests {
             "skill_load",
             "result_submit",
         ];
+        let check = vec!["ticket_get", "result_submit"];
         for (profile, expected) in [
             (ContextProfile::Full, &full),
             (ContextProfile::HumanAgent, &full),
             (ContextProfile::HumanChat, &chat),
             (ContextProfile::Conversation, &chat),
             (ContextProfile::KnowledgeCompaction, &compaction),
+            (ContextProfile::ConnectorCheck, &check),
         ] {
             let mut got = names(&registry, profile).await;
             got.sort();

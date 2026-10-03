@@ -93,6 +93,7 @@ fn tool_first_job_label(input: &ContextInput<'_>) -> &'static str {
     match input.context_profile {
         ContextProfile::Conversation => "Agent chat reply",
         ContextProfile::KnowledgeCompaction => "Knowledge compaction",
+        ContextProfile::ConnectorCheck => "Connection check",
         ContextProfile::HumanChat => "Human chat reply",
         ContextProfile::HumanAgent => "Human-requested work",
         ContextProfile::Full => match full_context_kind(input) {
@@ -294,6 +295,15 @@ fn is_ready_tech_lead_task(input: &ContextInput) -> bool {
 
 fn is_in_qa_qc_task(input: &ContextInput) -> bool {
     workflow::is_in_qa_qc_task(input.ticket_status, input.agent_key, input.agent_role)
+}
+
+/// Fixed context for a connector check run: identity line plus the two tool calls.
+pub fn connector_check_context(agent_name: &str) -> String {
+    format!(
+        "# Agent\n\n**Name:** {agent_name}\n\n# Task\n\n**Job:** Connection check\n\n\
+         This is a Coppice connection check. Call the `ticket_get` tool, then call \
+         `result_submit` with outcome `done` and summary `connection ok`.\n"
+    )
 }
 
 pub fn write_context_document(worktree: &Path, markdown: &str) -> std::io::Result<()> {
@@ -584,5 +594,15 @@ mod tests {
         assert!(slim.contains("What is the second question?"));
         assert!(!slim.contains("# Conversation transcript"));
         assert!(!slim.contains("First question"));
+    }
+
+    #[test]
+    fn connector_check_context_is_fixed() {
+        let context = connector_check_context("Checker");
+        assert!(context.contains("**Name:** Checker"));
+        assert!(context.contains(
+            "This is a Coppice connection check. Call the `ticket_get` tool, then call `result_submit` with outcome `done` and summary `connection ok`."
+        ));
+        assert!(!context.contains("skill_load"));
     }
 }

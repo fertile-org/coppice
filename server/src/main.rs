@@ -142,6 +142,16 @@ async fn run() -> anyhow::Result<()> {
     }
     plugin_mcp.spawn_reaper();
     sweep_orphaned_runs(&state).await;
+    if let Some(pool) = state.db.as_ref() {
+        match coppice_server::services::connector_check_service::ConnectorCheckService::new(pool)
+            .fail_stale()
+            .await
+        {
+            Ok(0) => {}
+            Ok(count) => tracing::info!(count, "marked stale connector checks failed"),
+            Err(err) => tracing::warn!(error = %err, "failed to mark stale connector checks"),
+        }
+    }
     coppice_server::workers::job_worker::spawn_workers(state.clone());
     coppice_server::workers::health_worker::spawn_health_worker(state.clone());
     coppice_server::workers::knowledge_compaction_scheduler::spawn_knowledge_compaction_scheduler(

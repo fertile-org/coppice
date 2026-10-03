@@ -250,6 +250,10 @@ pub fn validate_for_profile(
             AgentRunResult::Done { .. } => Ok(()),
             _ => Err("knowledge compaction must finish with status `done`".into()),
         },
+        ContextProfile::ConnectorCheck => match result {
+            AgentRunResult::Done { .. } => Ok(()),
+            _ => Err("a connection check must finish with status `done`".into()),
+        },
     }
 }
 

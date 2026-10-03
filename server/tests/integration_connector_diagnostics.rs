@@ -3,6 +3,7 @@ mod common;
 use axum::body::Body;
 use axum::http::{header, Request, StatusCode};
 use axum::Router;
+use coppice_server::services::connector_check_service::ConnectorCheckService;
 use coppice_server::services::connector_probe_service::{last_real_runs, ConnectorProbes};
 use coppice_server::AppState;
 use serde_json::Value;
@@ -368,4 +369,573 @@ async fn wait_for_run_end(pool: &PgPool, run_id: Uuid) {
         );
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
+}
+
+async fn send_json(
+    app: &Router,
+    method: &str,
+    uri: &str,
+    body: &str,
+    cookie: &str,
+    csrf: &str,
+) -> (StatusCode, Value) {
+    let res = app
+        .clone()
+        .oneshot(common::json_request(method, uri, body, cookie, csrf))
+        .await
+        .unwrap();
+    let status = res.status();
+    let bytes = http_body_util::BodyExt::collect(res.into_body())
+        .await
+        .unwrap()
+        .to_bytes();
+    (
+        status,
+        serde_json::from_slice(&bytes).unwrap_or(Value::Null),
+    )
+}
+
+async fn admin_id(pool: &PgPool) -> Uuid {
+    sqlx::query_scalar("SELECT id FROM users WHERE email = 'admin@localhost'")
+        .fetch_one(pool)
+        .await
+        .unwrap()
+}
+
+async fn count(pool: &PgPool, sql: &str) -> i64 {
+    sqlx::query_scalar(sql).fetch_one(pool).await.unwrap()
+}
+
+async fn set_agent_connector(pool: &PgPool, agent_id: Uuid, connector: &str) {
+    sqlx::query("UPDATE agents SET connector = $2 WHERE id = $1")
+        .bind(agent_id)
+        .bind(connector)
+        .execute(pool)
+        .await
+        .unwrap();
+}
+
+async fn wait_for_check_end(pool: &PgPool, check_id: Uuid) -> String {
+    let deadline = std::time::Instant::now() + Duration::from_secs(20);
+    loop {
+        let status: String =
+            sqlx::query_scalar("SELECT status FROM connector_checks WHERE id = $1")
+                .bind(check_id)
+                .fetch_one(pool)
+                .await
+                .unwrap();
+        if !matches!(status.as_str(), "queued" | "running") {
+            return status;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "timed out waiting for check {check_id}; last={status}"
+        );
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+}
+
+/// Gateway + workers with `mock_response`, one mock agent, and a check started
+/// through the service (the HTTP route hides `mock`).
+async fn run_mock_check(
+    mock_response: &str,
+) -> (
+    Arc<AppState>,
+    Router,
+    String,
+    String,
+    Uuid,
+    Uuid,
+    common::AgentTestEnv,
+) {
+    let (state, app, cookie, csrf, env) =
+        common::bootstrap_and_login_with_gateway(mock_response).await;
+    let pool = state.db.clone().unwrap();
+    let agent_id: Uuid = common::create_test_agent_from_preset(&app, "Checker", &cookie, &csrf)
+        .await
+        .parse()
+        .unwrap();
+    let (check_id, run_id) = ConnectorCheckService::new(&pool)
+        .start(
+            &state.config,
+            coppice_connectors::MOCK,
+            agent_id,
+            admin_id(&pool).await,
+        )
+        .await
+        .expect("start check");
+    wait_for_check_end(&pool, check_id).await;
+    (state, app, cookie, csrf, check_id, run_id, env)
+}
+
+#[tokio::test]
+async fn check_run_passes_with_gateway_calls() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let (state, app, cookie, csrf, _env) =
+        common::bootstrap_and_login_with_gateway("mcp/connector_check").await;
+    let pool = state.db.clone().unwrap();
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
+    common::create_test_ticket(&app, &board_id, &cookie, &csrf).await;
+    let agent_id: Uuid = common::create_test_agent_from_preset(&app, "Checker", &cookie, &csrf)
+        .await
+        .parse()
+        .unwrap();
+    let tickets_before = count(&pool, "SELECT COUNT(*) FROM tickets").await;
+    let comments_before = count(&pool, "SELECT COUNT(*) FROM ticket_comments").await;
+    let tickets_updated: Vec<String> =
+        sqlx::query_scalar("SELECT updated_at::text FROM tickets ORDER BY id")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+
+    let (check_id, run_id) = ConnectorCheckService::new(&pool)
+        .start(
+            &state.config,
+            coppice_connectors::MOCK,
+            agent_id,
+            admin_id(&pool).await,
+        )
+        .await
+        .expect("start check");
+    assert_eq!(wait_for_check_end(&pool, check_id).await, "passed");
+
+    let (status, body) = send(
+        &app,
+        "GET",
+        &format!("/api/tools/connector-checks/{check_id}"),
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["id"], check_id.to_string());
+    assert_eq!(body["connector"], coppice_connectors::MOCK);
+    assert_eq!(body["agentId"], agent_id.to_string());
+    assert_eq!(body["status"], "passed");
+    assert!(body["failure"].is_null(), "{body}");
+    assert_eq!(body["runId"], run_id.to_string());
+    assert!(body["createdAt"].is_string());
+    assert!(body["finishedAt"].is_string());
+    let calls = body["toolCalls"].as_array().expect("toolCalls");
+    for tool in ["ticket_get", "result_submit"] {
+        assert!(
+            calls
+                .iter()
+                .any(|c| c["tool"] == tool && c["status"] == "ok"),
+            "{tool} missing in {body}"
+        );
+    }
+
+    let run_status: String = sqlx::query_scalar("SELECT status FROM agent_runs WHERE id = $1")
+        .bind(run_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(run_status, "succeeded");
+    assert_eq!(
+        count(&pool, "SELECT COUNT(*) FROM tickets").await,
+        tickets_before
+    );
+    assert_eq!(
+        count(&pool, "SELECT COUNT(*) FROM ticket_comments").await,
+        comments_before
+    );
+    assert_eq!(count(&pool, "SELECT COUNT(*) FROM notifications").await, 0);
+    let tickets_after: Vec<String> =
+        sqlx::query_scalar("SELECT updated_at::text FROM tickets ORDER BY id")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+    assert_eq!(tickets_after, tickets_updated);
+
+    let (_, list) = send(&app, "GET", "/api/tools/connectors", &cookie, &csrf).await;
+    assert!(list.as_array().unwrap().iter().all(|e| e["id"] != "mock"));
+    std::env::remove_var("MOCK_AGENT_RESPONSE");
+}
+
+#[tokio::test]
+async fn check_run_fails_without_ticket_get() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let (state, _app, _cookie, _csrf, check_id, _run_id, _env) =
+        run_mock_check("mcp/connector_check_skip_ticket").await;
+    let detail = ConnectorCheckService::new(state.db.as_ref().unwrap())
+        .get(check_id)
+        .await
+        .unwrap();
+    assert_eq!(detail.status, "failed");
+    assert_eq!(detail.failure.as_deref(), Some("ticket_get was not called"));
+    std::env::remove_var("MOCK_AGENT_RESPONSE");
+}
+
+#[tokio::test]
+async fn check_provider_error_marks_failed() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let (state, _app, _cookie, _csrf, check_id, run_id, _env) =
+        run_mock_check("mcp/connector_check_missing_fixture").await;
+    let pool = state.db.clone().unwrap();
+    let detail = ConnectorCheckService::new(&pool)
+        .get(check_id)
+        .await
+        .unwrap();
+    assert_eq!(detail.status, "failed");
+    let failure = detail.failure.expect("failure reason");
+    assert!(!failure.trim().is_empty());
+    assert!(failure.chars().count() <= 500);
+    let token_hashes: Vec<String> =
+        sqlx::query_scalar("SELECT token_hash FROM run_tool_tokens WHERE run_id = $1")
+            .bind(run_id)
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+    for hash in token_hashes {
+        assert!(!failure.contains(&hash));
+    }
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        let run_status: String = sqlx::query_scalar("SELECT status FROM agent_runs WHERE id = $1")
+            .bind(run_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        if run_status == "failed" {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "run not failed: {run_status}"
+        );
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    std::env::remove_var("MOCK_AGENT_RESPONSE");
+}
+
+#[tokio::test]
+async fn check_ticket_get_is_synthetic() {
+    use coppice_server::domain::context_profile::ContextProfile;
+    use coppice_server::mcp::token::{NewRunToolScope, TokenService};
+
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
+    let pool = state.db.clone().unwrap();
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
+    let ticket_id = common::create_test_ticket(&app, &board_id, &cookie, &csrf).await;
+    let agent_id: Uuid = common::create_test_agent_from_preset(&app, "Checker", &cookie, &csrf)
+        .await
+        .parse()
+        .unwrap();
+    let (_check_id, run_id) = ConnectorCheckService::new(&pool)
+        .start(
+            &state.config,
+            coppice_connectors::MOCK,
+            agent_id,
+            admin_id(&pool).await,
+        )
+        .await
+        .expect("start check");
+    let token = TokenService::new(&pool)
+        .mint(
+            &NewRunToolScope {
+                run_id,
+                agent_id,
+                ticket_id: None,
+                chat_session_id: None,
+                board_id: None,
+                profile: ContextProfile::ConnectorCheck,
+                job_type: "connector_check".into(),
+                compaction_ticket_ids: vec![],
+                plugin_ids: vec![],
+            },
+            Duration::from_secs(60),
+        )
+        .await
+        .expect("mint token");
+    let addr = common::spawn_test_server(app.clone()).await;
+    let url = format!("http://{addr}/mcp");
+    let rpc = |method: &'static str, params: Value| {
+        let url = url.clone();
+        let token = token.clone();
+        async move {
+            reqwest::Client::new()
+                .post(&url)
+                .bearer_auth(&token)
+                .json(&serde_json::json!({"jsonrpc":"2.0","id":1,"method":method,"params":params}))
+                .send()
+                .await
+                .expect("mcp request")
+                .json::<Value>()
+                .await
+                .expect("mcp json")
+        }
+    };
+
+    let listed = rpc("tools/list", serde_json::json!({})).await;
+    let mut names: Vec<&str> = listed["result"]["tools"]
+        .as_array()
+        .expect("tools")
+        .iter()
+        .map(|t| t["name"].as_str().unwrap())
+        .collect();
+    names.sort();
+    assert_eq!(names, vec!["result_submit", "ticket_get"]);
+
+    for args in [
+        serde_json::json!({}),
+        serde_json::json!({ "ticketId": ticket_id }),
+    ] {
+        let res = rpc(
+            "tools/call",
+            serde_json::json!({ "name": "ticket_get", "arguments": args }),
+        )
+        .await;
+        assert_eq!(res["result"]["isError"], false, "{res}");
+        let ticket: Value =
+            serde_json::from_str(res["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+        assert_eq!(ticket["title"], "Coppice connection check");
+        assert_eq!(
+            ticket["description"],
+            "Submit a done result with summary 'connection ok'."
+        );
+    }
+
+    let res = rpc(
+        "tools/call",
+        serde_json::json!({ "name": "ticket_comments", "arguments": { "ticketId": ticket_id } }),
+    )
+    .await;
+    assert!(
+        res["result"]["isError"] == true || res.get("error").is_some(),
+        "ticket_comments must be unavailable: {res}"
+    );
+}
+
+#[tokio::test]
+async fn test_route_validation() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state_config(|config| {
+        config.agent.connectors.kilo_code.enabled = true;
+    })
+    .await;
+    let pool = state.db.clone().unwrap();
+    let mock_agent = common::create_test_agent_from_preset(&app, "Mocky", &cookie, &csrf).await;
+    let codex_agent: Uuid = common::create_test_agent_from_preset(&app, "Codexy", &cookie, &csrf)
+        .await
+        .parse()
+        .unwrap();
+    set_agent_connector(&pool, codex_agent, coppice_connectors::CODEX).await;
+    let kilo_agent: Uuid = common::create_test_agent_from_preset(&app, "Kiloy", &cookie, &csrf)
+        .await
+        .parse()
+        .unwrap();
+    set_agent_connector(&pool, kilo_agent, KILO).await;
+    let body = |agent: &dyn std::fmt::Display| format!(r#"{{"agentId":"{agent}"}}"#);
+    let test_uri = |id: &str| format!("/api/tools/connectors/{id}/test");
+
+    let (status, _) = send_json(
+        &app,
+        "POST",
+        &test_uri(KILO),
+        &body(&mock_agent),
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "wrong connector agent");
+
+    let (status, _) = send_json(
+        &app,
+        "POST",
+        &test_uri(coppice_connectors::CODEX),
+        &body(&codex_agent),
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "disabled connector");
+
+    for id in ["mock", "nope"] {
+        let (status, _) = send_json(
+            &app,
+            "POST",
+            &test_uri(id),
+            &body(&mock_agent),
+            &cookie,
+            &csrf,
+        )
+        .await;
+        assert_eq!(status, StatusCode::NOT_FOUND, "{id}");
+    }
+    let (status, _) = send_json(
+        &app,
+        "POST",
+        &test_uri(KILO),
+        &body(&Uuid::new_v4()),
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "unknown agent");
+
+    let (status, started) = send_json(
+        &app,
+        "POST",
+        &test_uri(KILO),
+        &body(&kilo_agent),
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{started}");
+    let check_id = started["checkId"].as_str().expect("checkId").to_string();
+    let run_id = started["runId"].as_str().expect("runId").to_string();
+    let (status, _) = send_json(
+        &app,
+        "POST",
+        &test_uri(KILO),
+        &body(&kilo_agent),
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "active check");
+
+    let (status, detail) = send(
+        &app,
+        "GET",
+        &format!("/api/tools/connector-checks/{check_id}"),
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(detail["status"], "queued");
+    assert_eq!(detail["runId"], run_id);
+    assert_eq!(detail["toolCalls"], serde_json::json!([]));
+    let (status, _) = send(
+        &app,
+        "GET",
+        &format!("/api/tools/connector-checks/{}", Uuid::new_v4()),
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+
+    let (_, list) = send(&app, "GET", "/api/tools/connectors", &cookie, &csrf).await;
+    let last = &entry(&list, KILO)["lastCheck"];
+    assert_eq!(last["id"], check_id);
+    assert_eq!(last["status"], "queued");
+    assert!(last["failure"].is_null());
+    assert!(last["createdAt"].is_string());
+
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(test_uri(KILO))
+                .header(header::COOKIE, &cookie)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(body(&kilo_agent)))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::FORBIDDEN, "missing CSRF");
+
+    sqlx::query("UPDATE users SET role = 'member' WHERE email = 'admin@localhost'")
+        .execute(&pool)
+        .await
+        .unwrap();
+    let (status, _) = send_json(
+        &app,
+        "POST",
+        &test_uri(KILO),
+        &body(&kilo_agent),
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "non-admin test");
+    let (status, _) = send(
+        &app,
+        "GET",
+        &format!("/api/tools/connector-checks/{check_id}"),
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "non-admin detail");
+}
+
+#[tokio::test]
+async fn stale_checks_failed_on_startup() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
+    let pool = state.db.clone().unwrap();
+    let agent_id: Uuid = common::create_test_agent_from_preset(&app, "Checker", &cookie, &csrf)
+        .await
+        .parse()
+        .unwrap();
+    let service = ConnectorCheckService::new(&pool);
+    let (check_id, _run_id) = service
+        .start(
+            &state.config,
+            coppice_connectors::MOCK,
+            agent_id,
+            admin_id(&pool).await,
+        )
+        .await
+        .expect("start check");
+    sqlx::query("UPDATE connector_checks SET status = 'running' WHERE id = $1")
+        .bind(check_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    assert_eq!(service.fail_stale().await.unwrap(), 1);
+    let detail = service.get(check_id).await.unwrap();
+    assert_eq!(detail.status, "failed");
+    assert_eq!(detail.failure.as_deref(), Some("server restarted"));
+    assert!(detail.finished_at.is_some());
+    assert_eq!(service.fail_stale().await.unwrap(), 0);
+}
+
+#[tokio::test]
+async fn last_real_run_ignores_check_runs() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let (state, _app, _cookie, _csrf, check_id, _run_id, _env) =
+        run_mock_check("mcp/connector_check").await;
+    let pool = state.db.clone().unwrap();
+    let detail = ConnectorCheckService::new(&pool)
+        .get(check_id)
+        .await
+        .unwrap();
+    assert_eq!(detail.status, "passed");
+    let runs = last_real_runs(&pool).await.expect("last runs");
+    assert!(
+        !runs.contains_key(coppice_connectors::MOCK),
+        "check run counted as a real run"
+    );
+    std::env::remove_var("MOCK_AGENT_RESPONSE");
 }

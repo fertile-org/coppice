@@ -92,6 +92,11 @@ async fn resolve_ticket(ctx: &ToolCtx<'_>, args: &Value) -> Result<TicketWithDis
         })?,
     };
 
+    if ctx.scope.profile == ContextProfile::ConnectorCheck {
+        return Err(ToolError::Denied(
+            "connection checks cannot read tickets".into(),
+        ));
+    }
     if ctx.scope.profile == ContextProfile::KnowledgeCompaction
         && !ctx.scope.compaction_ticket_ids.contains(&ticket_id)
     {
@@ -162,6 +167,12 @@ fn assignee_key(agents: &[crate::domain::agent::Agent], id: Option<Uuid>) -> Opt
 }
 
 pub async fn call_ticket_get(ctx: &ToolCtx<'_>, args: Value) -> Result<Value, ToolError> {
+    if ctx.scope.profile == ContextProfile::ConnectorCheck {
+        return Ok(json!({
+            "title": "Coppice connection check",
+            "description": "Submit a done result with summary 'connection ok'.",
+        }));
+    }
     let ticket = resolve_ticket(ctx, &args).await?;
     let agents = list_agents(ctx).await?;
     let (description, acceptance_criteria) = split_ticket_description(&ticket.ticket.description);

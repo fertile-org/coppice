@@ -1,0 +1,15 @@
+{
+  "status": "done",
+  "summary": "connection ok",
+  "changedFiles": [],
+  "testsRun": [],
+  "mentionAgents": [],
+  "blockers": [],
+  "toolCalls": [
+    { "tool": "ticket_get", "args": {} },
+    {
+      "tool": "result_submit",
+      "args": { "status": "done", "summary": "connection ok", "mentionAgents": [] }
+    }
+  ]
+}

@@ -228,6 +228,7 @@ pub fn core_tools_for(profile: ContextProfile) -> Vec<CoreTool> {
             KnowledgeSearch,
             ResultSubmit,
         ],
+        ContextProfile::ConnectorCheck => vec![TicketGet, ResultSubmit],
     }
 }
 
@@ -274,6 +275,14 @@ mod tests {
                 "knowledge_search",
                 "result_submit",
             ]
+        );
+    }
+
+    #[test]
+    fn connector_check_profile_has_two_tools() {
+        assert_eq!(
+            names(ContextProfile::ConnectorCheck),
+            vec!["ticket_get", "result_submit"]
         );
     }
 

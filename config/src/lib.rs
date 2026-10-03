@@ -731,6 +731,18 @@ impl AgentConnectorsConfig {
             _ => None,
         }
     }
+
+    /// Configured `run_timeout_secs`; `None` for connectors without one (`mock`).
+    pub fn run_timeout_secs(&self, id: &str) -> Option<u64> {
+        match id {
+            "opencode" => Some(self.opencode.run_timeout_secs),
+            "claude-code" => Some(self.claude_code.run_timeout_secs),
+            "codex" => Some(self.codex.run_timeout_secs),
+            "kilo-code" => Some(self.kilo_code.run_timeout_secs),
+            "cursor" => Some(self.cursor.run_timeout_secs),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -1345,6 +1357,16 @@ mod tests {
         assert_eq!(cfg.command("nope"), None);
         cfg.cursor.command = "cursor-agent".into();
         assert_eq!(cfg.command("cursor"), Some("cursor-agent"));
+    }
+
+    #[test]
+    fn run_timeout_for_connectors() {
+        let mut cfg = AgentConnectorsConfig::default();
+        assert_eq!(cfg.run_timeout_secs("kilo-code"), Some(600));
+        assert_eq!(cfg.run_timeout_secs("mock"), None);
+        assert_eq!(cfg.run_timeout_secs("nope"), None);
+        cfg.claude_code.run_timeout_secs = 42;
+        assert_eq!(cfg.run_timeout_secs("claude-code"), Some(42));
     }
 
     #[test]

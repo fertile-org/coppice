@@ -1,3 +1,4 @@
+use crate::domain::context_profile::ContextProfile;
 use crate::mcp::catalog::{core_tools_for, CoreTool};
 use crate::mcp::protocol::ToolDefinition;
 pub use crate::mcp::protocol::{ToolContent, ToolResult};
@@ -113,7 +114,10 @@ impl ToolSource for SkillToolSource {
         SourceKind::Skill
     }
 
-    async fn list(&self, _scope: &RunToolScope) -> Vec<SourcedTool> {
+    async fn list(&self, scope: &RunToolScope) -> Vec<SourcedTool> {
+        if scope.profile == ContextProfile::ConnectorCheck {
+            return Vec::new();
+        }
         skills::definitions()
             .into_iter()
             .map(|def| sourced(def, SourceKind::Skill))

@@ -1,5 +1,8 @@
 //! Cached local connector probes and the admin Tools → Connectors status view.
 
+use crate::services::connector_check_service::{
+    CheckError as ConnectorCheckError, CheckSummary, ConnectorCheckService,
+};
 use crate::AppConfig;
 use coppice_connectors::probe::{probe, ProbeEnv, ProbeOutcome, ProbeReport};
 use coppice_connectors::ConnectorDescriptor;
@@ -149,7 +152,7 @@ pub async fn last_real_runs(pool: &PgPool) -> Result<HashMap<String, LastRun>, s
                  EXISTS (SELECT 1 FROM run_tool_calls c \
                          WHERE c.run_id = r.id AND c.tool = 'result_submit' AND c.status = 'ok') \
              FROM agent_runs r JOIN agents a ON a.id = r.agent_id \
-             WHERE r.status NOT IN ('queued', 'running') \
+             WHERE r.status NOT IN ('queued', 'running') AND r.connector_check_id IS NULL \
              ORDER BY a.connector, COALESCE(r.ended_at, r.created_at) DESC, r.id",
     )
     .fetch_all(pool)
@@ -185,7 +188,7 @@ pub struct ConnectorStatusResponse {
     pub auth_hint: &'static str,
     pub docs_url: &'static str,
     pub last_run: Option<LastRunResponse>,
-    pub last_check: Option<serde_json::Value>,
+    pub last_check: Option<CheckSummary>,
     pub probed_at: Option<String>,
 }
 
@@ -243,6 +246,7 @@ pub fn connector_status(
     config: &AppConfig,
     cached: Option<&CachedProbe>,
     last_run: Option<&LastRun>,
+    last_check: Option<&CheckSummary>,
 ) -> ConnectorStatusResponse {
     let report = cached.map(|c| &c.report);
     ConnectorStatusResponse {
@@ -264,7 +268,7 @@ pub fn connector_status(
         auth_hint: descriptor.install.auth_hint,
         docs_url: descriptor.install.docs_url,
         last_run: last_run.map(LastRunResponse::from),
-        last_check: None,
+        last_check: last_check.cloned(),
         probed_at: cached.map(|c| c.probed_at.format(&Rfc3339).unwrap_or_default()),
     }
 }
@@ -308,13 +312,36 @@ pub async fn list_statuses(
     config: &AppConfig,
     pool: Option<&PgPool>,
 ) -> Result<Vec<ConnectorStatusResponse>, sqlx::Error> {
-    let runs = match pool {
-        Some(pool) => last_real_runs(pool).await?,
-        None => HashMap::new(),
-    };
+    let (runs, checks) = run_history(pool).await?;
     Ok(diagnosable_descriptors()
-        .map(|d| connector_status(d, config, probes.get(d.id).as_ref(), runs.get(d.id)))
+        .map(|d| {
+            connector_status(
+                d,
+                config,
+                probes.get(d.id).as_ref(),
+                runs.get(d.id),
+                checks.get(d.id),
+            )
+        })
         .collect())
+}
+
+type RunHistory = (HashMap<String, LastRun>, HashMap<String, CheckSummary>);
+
+/// Last real run and latest connector check per connector.
+async fn run_history(pool: Option<&PgPool>) -> Result<RunHistory, sqlx::Error> {
+    let Some(pool) = pool else {
+        return Ok((HashMap::new(), HashMap::new()));
+    };
+    let runs = last_real_runs(pool).await?;
+    let checks = ConnectorCheckService::new(pool)
+        .latest_by_connector()
+        .await
+        .map_err(|err| match err {
+            ConnectorCheckError::Database(err) => err,
+            other => sqlx::Error::Protocol(other.to_string()),
+        })?;
+    Ok((runs, checks))
 }
 
 pub enum CheckError {
@@ -335,15 +362,13 @@ pub async fn check_connector(
         .refresh(config, id)
         .await
         .ok_or(CheckError::ProbeFailed)?;
-    let runs = match pool {
-        Some(pool) => last_real_runs(pool).await.map_err(CheckError::Db)?,
-        None => HashMap::new(),
-    };
+    let (runs, checks) = run_history(pool).await.map_err(CheckError::Db)?;
     Ok(connector_status(
         descriptor,
         config,
         Some(&cached),
         runs.get(id),
+        checks.get(id),
     ))
 }
 

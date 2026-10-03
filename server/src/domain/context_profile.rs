@@ -5,6 +5,7 @@ pub enum ContextProfile {
     HumanChat,
     Conversation,
     KnowledgeCompaction,
+    ConnectorCheck,
 }
 
 impl ContextProfile {
@@ -15,6 +16,7 @@ impl ContextProfile {
             Self::HumanChat => "human_chat",
             Self::Conversation => "conversation",
             Self::KnowledgeCompaction => "knowledge_compaction",
+            Self::ConnectorCheck => "connector_check",
         }
     }
 }
@@ -29,6 +31,7 @@ impl std::str::FromStr for ContextProfile {
             "human_chat" => Ok(Self::HumanChat),
             "conversation" => Ok(Self::Conversation),
             "knowledge_compaction" => Ok(Self::KnowledgeCompaction),
+            "connector_check" => Ok(Self::ConnectorCheck),
             other => Err(format!("unknown context profile: {other}")),
         }
     }
@@ -47,6 +50,7 @@ mod tests {
             ContextProfile::HumanChat,
             ContextProfile::Conversation,
             ContextProfile::KnowledgeCompaction,
+            ContextProfile::ConnectorCheck,
         ] {
             assert_eq!(ContextProfile::from_str(profile.as_str()), Ok(profile));
         }

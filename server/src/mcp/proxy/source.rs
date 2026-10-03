@@ -149,7 +149,10 @@ fn listable(spec: &PoolServerSpec) -> bool {
 }
 
 fn exposes_plugins(scope: &RunToolScope) -> bool {
-    scope.profile != ContextProfile::KnowledgeCompaction && !scope.plugin_ids.is_empty()
+    !matches!(
+        scope.profile,
+        ContextProfile::KnowledgeCompaction | ContextProfile::ConnectorCheck
+    ) && !scope.plugin_ids.is_empty()
 }
 
 #[async_trait]

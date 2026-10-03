@@ -84,6 +84,7 @@ pub async fn truncate_test_workspace(pool: &PgPool) -> anyhow::Result<()> {
             ticket_comments,
             agent_jobs,
             agent_runs,
+            connector_checks,
             tickets,
             repos,
             plugin_installs,

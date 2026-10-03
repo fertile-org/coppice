@@ -27,6 +27,7 @@ use crate::services::agent_request::agent_request_for_target_from_comment;
 use crate::services::agent_service::AgentService;
 use crate::services::artifact_service::{ArtifactService, RunArtifactMeta, RunArtifactPaths};
 use crate::services::comment_service::CommentService;
+use crate::services::connector_check_service::ConnectorCheckService;
 use crate::plugins::skills::required_skill;
 use crate::services::context_builder::{
     build_tool_first_context, write_context_document, ContextInput, HumanRequest,
@@ -50,6 +51,7 @@ use crate::AppState;
 use time::format_description::well_known::Rfc3339;
 
 mod compaction;
+mod connector_check;
 
 #[derive(Debug)]
 struct JobCancelled;
@@ -106,6 +108,12 @@ async fn process_one(state: &AppState, worker_id: &str) -> anyhow::Result<()> {
         job_svc
             .mark_failed(job.id, "stale job for inactive run")
             .await?;
+        if let Err(err) = ConnectorCheckService::new(pool)
+            .fail_for_run(run.id, "stale job for inactive run")
+            .await
+        {
+            tracing::warn!(run_id = %run.id, error = %err, "failed to fail connector check for stale job");
+        }
         return Ok(());
     }
 
@@ -176,6 +184,11 @@ async fn execute_job(
     run_svc: &RunService<'_>,
     run: &crate::domain::run::AgentRun,
 ) -> anyhow::Result<()> {
+    // Checks own their cancellation handling so the check row is always finished.
+    if run.job_type == crate::domain::connector_check::JOB_TYPE_CONNECTOR_CHECK {
+        return connector_check::execute_connector_check(state, pool, run_svc, run).await;
+    }
+
     if run_svc.is_cancelled(run.id).await? {
         return Err(JobCancelled.into());
     }
@@ -438,7 +451,8 @@ async fn execute_job(
         ContextProfile::HumanChat => thread_excerpt_ref,
         ContextProfile::HumanAgent
         | ContextProfile::Conversation
-        | ContextProfile::KnowledgeCompaction => None,
+        | ContextProfile::KnowledgeCompaction
+        | ContextProfile::ConnectorCheck => None,
     };
     let context_input = ContextInput {
         ticket_title: &ticket.ticket.title,
@@ -1371,7 +1385,8 @@ fn human_request_mode_label(profile: ContextProfile) -> Option<&'static str> {
         ContextProfile::HumanChat => Some("Chat"),
         ContextProfile::Full
         | ContextProfile::Conversation
-        | ContextProfile::KnowledgeCompaction => None,
+        | ContextProfile::KnowledgeCompaction
+        | ContextProfile::ConnectorCheck => None,
     }
 }
 

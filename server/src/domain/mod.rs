@@ -6,6 +6,7 @@ pub mod chat_action;
 pub mod chat_message;
 pub mod chat_session;
 pub mod comment;
+pub mod connector_check;
 pub mod context_profile;
 pub mod job;
 pub mod knowledge;
