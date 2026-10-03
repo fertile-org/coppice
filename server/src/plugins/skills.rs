@@ -31,12 +31,18 @@ pub struct PluginSkillSet {
 }
 
 impl PluginSkillSet {
-    /// Valid skills only; for duplicate names the first by `rel_path` wins.
-    pub fn from_manifest(plugin_id: Uuid, root: &Path, manifest: &PluginManifest) -> Self {
+    /// Valid skills not named in `disabled`; for duplicate names the first by
+    /// `rel_path` wins.
+    pub fn from_manifest(
+        plugin_id: Uuid,
+        root: &Path,
+        manifest: &PluginManifest,
+        disabled: &[String],
+    ) -> Self {
         let mut entries: Vec<_> = manifest
             .skills
             .iter()
-            .filter(|s| s.error.is_none())
+            .filter(|s| s.error.is_none() && !disabled.contains(&s.name))
             .collect();
         entries.sort_by(|a, b| a.rel_path.cmp(&b.rel_path));
         let mut seen = HashSet::new();
@@ -305,7 +311,7 @@ mod tests {
         );
         let root = std::fs::canonicalize(root).unwrap();
         let manifest = crate::plugins::manifest::parse_plugin(&root).unwrap();
-        PluginSkillSet::from_manifest(Uuid::new_v4(), &root, &manifest)
+        PluginSkillSet::from_manifest(Uuid::new_v4(), &root, &manifest, &[])
     }
 
     fn copy_tree(src: &Path, dst: &Path) {
@@ -442,11 +448,30 @@ mod tests {
             ],
             ..sample_manifest()
         };
-        let set = PluginSkillSet::from_manifest(Uuid::new_v4(), &root, &manifest);
+        let set = PluginSkillSet::from_manifest(Uuid::new_v4(), &root, &manifest, &[]);
         assert_eq!(set.skills.len(), 1);
         assert_eq!(set.skills[0].id, "p:dup");
         assert_eq!(set.skills[0].description, "first");
         assert_eq!(set.skills[0].path, root.join("a/dup"));
+    }
+
+    #[test]
+    fn from_manifest_skips_disabled() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = std::fs::canonicalize(dir.path()).unwrap();
+        let skill = |name: &str| SkillEntry {
+            name: name.into(),
+            description: name.into(),
+            rel_path: format!("skills/{name}"),
+            error: None,
+        };
+        let manifest = crate::plugins::manifest::PluginManifest {
+            skills: vec![skill("a"), skill("b")],
+            ..sample_manifest()
+        };
+        let set = PluginSkillSet::from_manifest(Uuid::new_v4(), &root, &manifest, &["b".into()]);
+        let ids: Vec<_> = set.skills.iter().map(|s| s.id.as_str()).collect();
+        assert_eq!(ids, ["p:a"]);
     }
 
     fn sample_manifest() -> crate::plugins::manifest::PluginManifest {

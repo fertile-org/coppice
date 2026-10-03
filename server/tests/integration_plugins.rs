@@ -2529,3 +2529,258 @@ async fn update_of_pre_migration_git_plugin_still_works() {
     assert_eq!(plugin["gitCommit"], repo.head());
     assert_eq!(plugin["gitRoot"], "sample-plugin");
 }
+
+// ---- Skill switches ----
+
+async fn put_skill(
+    app: &Router,
+    plugin_id: &str,
+    skill: &str,
+    enabled: bool,
+    cookie: &str,
+    csrf: &str,
+) -> (StatusCode, Value) {
+    send(
+        app,
+        "PUT",
+        &format!("/api/plugins/{plugin_id}/skills/{skill}"),
+        json!({ "enabled": enabled }),
+        cookie,
+        csrf,
+    )
+    .await
+}
+
+fn skill_enabled(plugin: &Value, name: &str) -> bool {
+    plugin["skills"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|s| s["name"] == name)
+        .unwrap_or_else(|| panic!("skill {name} missing: {plugin}"))["enabled"]
+        .as_bool()
+        .unwrap()
+}
+
+/// Starts a ticket run for `agent_id`; the temp dir holds its repo checkout.
+async fn start_agent_run(
+    state: &coppice_server::AppState,
+    app: &Router,
+    agent_id: &str,
+    cookie: &str,
+    csrf: &str,
+) -> (tempfile::TempDir, uuid::Uuid) {
+    let (git_dir, local_path) = common::create_temp_git_checkout();
+    let repo_id =
+        common::register_test_repo(app, &local_path.display().to_string(), cookie, csrf).await;
+    let board_id = common::create_test_board(app, cookie, csrf).await;
+    let ticket_id = common::create_test_ticket(app, &board_id, cookie, csrf).await;
+    common::set_ticket_repo(app, &ticket_id, &repo_id, cookie, csrf).await;
+    let run = coppice_server::services::run_service::RunService::new(state.db.as_ref().unwrap())
+        .start_run_for_agent(
+            ticket_id.parse().unwrap(),
+            agent_id.parse().unwrap(),
+            "work_on_ticket",
+            Default::default(),
+        )
+        .await
+        .expect("start run");
+    (git_dir, run.id)
+}
+
+async fn mcp_tool(url: &str, token: &str, name: &str, args: Value) -> (bool, String) {
+    let res: Value = reqwest::Client::new()
+        .post(url)
+        .bearer_auth(token)
+        .json(&json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": { "name": name, "arguments": args },
+        }))
+        .send()
+        .await
+        .expect("mcp request")
+        .json()
+        .await
+        .expect("mcp json");
+    (
+        res["result"]["isError"].as_bool().unwrap(),
+        res["result"]["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .to_string(),
+    )
+}
+
+async fn mcp_skill_ids(url: &str, token: &str) -> Vec<String> {
+    let (is_error, text) = mcp_tool(url, token, "skill_list", json!({})).await;
+    assert!(!is_error, "skill_list failed: {text}");
+    let listed: Value = serde_json::from_str(&text).unwrap();
+    listed["skills"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|s| s["id"].as_str().unwrap().to_string())
+        .collect()
+}
+
+#[tokio::test]
+async fn skill_switch_hides_skill_from_agents() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    require_db!();
+    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
+    let (_dir, plugin_id) = fixture_plugin(&app, "superpowers-like", &cookie, &csrf).await;
+    set_enabled(&app, &plugin_id, true, &cookie, &csrf).await;
+    let agent_id = common::create_test_agent_from_preset(&app, "Worker", &cookie, &csrf).await;
+    let (status, body) = send(
+        &app,
+        "PUT",
+        &format!("/api/agents/{agent_id}/plugins"),
+        json!({ "pluginIds": [plugin_id] }),
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let id: uuid::Uuid = plugin_id.parse().unwrap();
+    let (_git, run_id) = start_agent_run(&state, &app, &agent_id, &cookie, &csrf).await;
+    let token = common::mint_test_token_with_plugins(
+        &state,
+        run_id,
+        coppice_server::domain::context_profile::ContextProfile::Full,
+        vec![id],
+    )
+    .await;
+    let addr = common::spawn_test_server(app.clone()).await;
+    let url = format!("http://{addr}/mcp");
+    let skill = "superpowers-like:brainstorming";
+    let served = |state: &coppice_server::AppState| {
+        state.skills.skills_for(&[id]).iter().any(|s| s.id == skill)
+    };
+    assert!(mcp_skill_ids(&url, &token).await.iter().any(|s| s == skill));
+
+    let (status, plugin) =
+        put_skill(&app, &plugin_id, "brainstorming", false, &cookie, &csrf).await;
+    assert_eq!(status, StatusCode::OK, "{plugin}");
+    assert!(!skill_enabled(&plugin, "brainstorming"), "{plugin}");
+    assert!(skill_enabled(&plugin, "writing-plans"), "{plugin}");
+    let listed = mcp_skill_ids(&url, &token).await;
+    assert!(!listed.iter().any(|s| s == skill), "{listed:?}");
+    assert!(
+        listed.iter().any(|s| s == "superpowers-like:writing-plans"),
+        "{listed:?}"
+    );
+    let (is_error, text) = mcp_tool(&url, &token, "skill_load", json!({ "name": skill })).await;
+    assert!(is_error, "{text}");
+    assert!(text.contains("not found"), "{text}");
+    assert!(!served(&state));
+
+    let (status, plugin) = put_skill(&app, &plugin_id, "brainstorming", true, &cookie, &csrf).await;
+    assert_eq!(status, StatusCode::OK, "{plugin}");
+    assert!(skill_enabled(&plugin, "brainstorming"), "{plugin}");
+    assert!(mcp_skill_ids(&url, &token).await.iter().any(|s| s == skill));
+    assert!(served(&state));
+}
+
+#[tokio::test]
+async fn skill_switch_unknown_is_404() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    require_db!();
+    let (_state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
+    let (_dir, plugin_id) = fixture_plugin(&app, "superpowers-like", &cookie, &csrf).await;
+
+    let (status, body) = put_skill(&app, &plugin_id, "no-such-skill", false, &cookie, &csrf).await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
+    let unknown = uuid::Uuid::new_v4().to_string();
+    let (status, body) = put_skill(&app, &unknown, "brainstorming", false, &cookie, &csrf).await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
+}
+
+#[tokio::test]
+async fn skill_switch_requires_admin_and_csrf() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    require_db!();
+    let (_state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
+    let (_dir, plugin_id) = fixture_plugin(&app, "superpowers-like", &cookie, &csrf).await;
+    let (status, _) = send(
+        &app,
+        "POST",
+        "/api/users",
+        json!({ "email": "member@localhost", "password": "secret123" }),
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    let (member_cookie, member_csrf) = login_as(&app, "member@localhost", "secret123").await;
+
+    let (status, _) = put_skill(
+        &app,
+        &plugin_id,
+        "brainstorming",
+        false,
+        &member_cookie,
+        &member_csrf,
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("PUT")
+                .uri(format!("/api/plugins/{plugin_id}/skills/brainstorming"))
+                .header("content-type", "application/json")
+                .header(header::COOKIE, &cookie)
+                .body(Body::from(r#"{"enabled":false}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::FORBIDDEN);
+    let plugin = get(&app, &format!("/api/plugins/{plugin_id}"), &cookie, &csrf).await;
+    assert!(skill_enabled(&plugin, "brainstorming"), "{plugin}");
+}
+
+#[tokio::test]
+async fn disabled_skills_survive_rescan_and_prune_removed() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    require_db!();
+    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
+    let pool = state.db.clone().unwrap();
+    let (dir, plugin_id) = fixture_plugin(&app, "superpowers-like", &cookie, &csrf).await;
+    let uri = format!("/api/plugins/{plugin_id}");
+    let disabled = || async {
+        sqlx::query_scalar::<_, Vec<String>>("SELECT disabled_skills FROM plugins WHERE id = $1")
+            .bind(plugin_id.parse::<uuid::Uuid>().unwrap())
+            .fetch_one(&pool)
+            .await
+            .unwrap()
+    };
+
+    let (status, body) = put_skill(&app, &plugin_id, "writing-plans", false, &cookie, &csrf).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let (status, body) = put_skill(&app, &plugin_id, "writing-plans", false, &cookie, &csrf).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(disabled().await, ["writing-plans"]);
+
+    rescan(&app, &cookie, &csrf).await;
+    let plugin = get(&app, &uri, &cookie, &csrf).await;
+    assert!(!skill_enabled(&plugin, "writing-plans"), "{plugin}");
+    assert_eq!(disabled().await, ["writing-plans"]);
+
+    let skill_dir = dir.path().join("superpowers-like/skills/writing-plans");
+    std::fs::remove_dir_all(&skill_dir).unwrap();
+    rescan(&app, &cookie, &csrf).await;
+    assert!(disabled().await.is_empty());
+
+    copy_tree(
+        &fixtures().join("superpowers-like/skills/writing-plans"),
+        &skill_dir,
+    );
+    rescan(&app, &cookie, &csrf).await;
+    let plugin = get(&app, &uri, &cookie, &csrf).await;
+    assert!(skill_enabled(&plugin, "writing-plans"), "{plugin}");
+}

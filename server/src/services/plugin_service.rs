@@ -420,6 +420,40 @@ impl<'a> PluginService<'a> {
         Ok(plugin)
     }
 
+    /// Switches one manifest skill on or off by name.
+    pub async fn set_skill_enabled(
+        &self,
+        plugin_id: Uuid,
+        skill: &str,
+        enabled: bool,
+    ) -> Result<PluginRow, PluginError> {
+        let plugin = self.get_plugin(plugin_id).await?;
+        let known = plugin
+            .manifest
+            .as_ref()
+            .is_some_and(|m| m.skills.iter().any(|s| s.name == skill));
+        if !known {
+            return Err(PluginError::NotFound);
+        }
+        sqlx::query(
+            r#"
+            UPDATE plugins SET
+                disabled_skills = CASE WHEN $3
+                    THEN array_remove(disabled_skills, $2)
+                    ELSE array_append(array_remove(disabled_skills, $2), $2)
+                END,
+                updated_at = now()
+            WHERE id = $1
+            "#,
+        )
+        .bind(plugin_id)
+        .bind(skill)
+        .bind(enabled)
+        .execute(self.pool)
+        .await?;
+        self.get_plugin(plugin_id).await
+    }
+
     pub async fn plugin_path(&self, id: Uuid) -> Result<PathBuf, PluginError> {
         let (dir, rel_path): (String, String) = sqlx::query_as(
             "SELECT d.path, p.rel_path FROM plugins p JOIN plugin_dirs d ON d.id = p.plugin_dir_id WHERE p.id = $1",
@@ -450,7 +484,12 @@ impl<'a> PluginService<'a> {
                 let manifest = plugin.manifest.as_ref()?;
                 let root = join_plugin_path(&row.get::<String, _>("dir_path"), &plugin.rel_path);
                 match std::fs::canonicalize(&root) {
-                    Ok(root) => Some(PluginSkillSet::from_manifest(plugin.id, &root, manifest)),
+                    Ok(root) => Some(PluginSkillSet::from_manifest(
+                        plugin.id,
+                        &root,
+                        manifest,
+                        &plugin.disabled_skills,
+                    )),
                     Err(err) => {
                         tracing::warn!(plugin = %plugin.name, error = %err, "plugin root unavailable; skills not served");
                         None
@@ -1075,6 +1114,10 @@ async fn upsert_discovered(
             Some(err.clone()),
         ),
     };
+    let skill_names: Vec<&str> = match &discovered.result {
+        Ok(manifest) => manifest.skills.iter().map(|s| s.name.as_str()).collect(),
+        Err(_) => Vec::new(),
+    };
     sqlx::query(
         r#"
         INSERT INTO plugins
@@ -1087,6 +1130,13 @@ async fn upsert_discovered(
             manifest = EXCLUDED.manifest,
             status = EXCLUDED.status,
             error = EXCLUDED.error,
+            disabled_skills = CASE WHEN EXCLUDED.status = 'ok'
+                THEN ARRAY(
+                    SELECT s FROM unnest(plugins.disabled_skills) AS s
+                    WHERE s = ANY($10::text[])
+                )
+                ELSE plugins.disabled_skills
+            END,
             updated_at = now()
         "#,
     )
@@ -1099,6 +1149,7 @@ async fn upsert_discovered(
     .bind(manifest)
     .bind(status)
     .bind(error)
+    .bind(skill_names)
     .execute(&mut **tx)
     .await?;
     Ok(())

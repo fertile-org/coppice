@@ -44,6 +44,10 @@ pub fn routes() -> Router<Arc<AppState>> {
         .route("/api/plugins/{plugin_id}/update", post(update))
         .route("/api/plugins/{plugin_id}/settings", put(set_settings))
         .route("/api/plugins/{plugin_id}/test", post(test_plugin))
+        .route(
+            "/api/plugins/{plugin_id}/skills/{skill}",
+            put(set_skill_enabled),
+        )
         .route("/api/plugin-installs/{install_id}", get(get_install))
         .route(
             "/api/agents/{agent_id}/plugins",
@@ -649,6 +653,23 @@ async fn set_enabled(
         state.plugin_mcp.stop_plugin(plugin.id).await;
     }
     sync_plugins(&service, &state).await;
+    single_response(&state, pool, plugin).await
+}
+
+async fn set_skill_enabled(
+    State(state): State<Arc<AppState>>,
+    AdminUser(_): AdminUser,
+    Path((plugin_id, skill)): Path<(Uuid, String)>,
+    Json(body): Json<SetEnabledBody>,
+) -> Result<Json<PluginResponse>, ApiError> {
+    let pool = pool_from_state(&state)?;
+    let service = PluginService::new(pool);
+    let plugin = service
+        .set_skill_enabled(plugin_id, &skill, body.enabled)
+        .await?;
+    if let Err(err) = service.refresh_catalog(&state.skills).await {
+        tracing::error!(error = %err, "failed to refresh plugin skill catalog");
+    }
     single_response(&state, pool, plugin).await
 }
 
