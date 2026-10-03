@@ -20,6 +20,24 @@ pub struct PluginManifest {
     pub skills: Vec<SkillEntry>,
     pub mcp_servers: Vec<McpServerEntry>,
     pub unsupported: Vec<UnsupportedPart>,
+    #[serde(default)]
+    pub marketplace: Option<MarketplaceRef>,
+    #[serde(default)]
+    pub external: Option<ExternalSource>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MarketplaceRef {
+    pub name: String,
+}
+
+/// A marketplace entry hosted outside the scanned folder; never fetched.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExternalSource {
+    pub kind: String,
+    pub url: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -111,6 +129,8 @@ pub fn parse_plugin(root: &Path) -> Result<PluginManifest, String> {
             skills: Vec::new(),
             mcp_servers: Vec::new(),
             unsupported: Vec::new(),
+            marketplace: None,
+            external: None,
         };
         (manifest, None)
     } else {
@@ -137,6 +157,8 @@ pub fn parse_plugin(root: &Path) -> Result<PluginManifest, String> {
             skills: Vec::new(),
             mcp_servers: Vec::new(),
             unsupported: Vec::new(),
+            marketplace: None,
+            external: None,
         };
         let value: Value =
             serde_json::from_str(&text).map_err(|e| format!("invalid {PLUGIN_JSON}: {e}"))?;
@@ -435,6 +457,8 @@ mod tests {
         assert_eq!(m.mcp_servers[0].error, None);
         assert_eq!(m.unsupported[0].key, "commands");
         assert_eq!(m.unsupported[0].reason, "not supported yet");
+        assert_eq!(m.marketplace, None);
+        assert_eq!(m.external, None);
     }
 
     #[test]

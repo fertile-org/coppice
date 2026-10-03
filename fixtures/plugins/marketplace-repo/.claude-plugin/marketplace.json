@@ -1,0 +1,29 @@
+{
+  "name": "acme-market",
+  "owner": { "name": "Acme" },
+  "plugins": [
+    {
+      "name": "alpha",
+      "source": "./plugins/alpha",
+      "description": "Alpha plugin"
+    },
+    {
+      "name": "beta-skills",
+      "source": "./plugins/beta",
+      "description": "Beta skills package"
+    },
+    {
+      "name": "remote-one",
+      "source": { "source": "github", "repo": "acme/remote-one" },
+      "description": "Hosted elsewhere"
+    },
+    {
+      "name": "escape",
+      "source": "../x"
+    },
+    {
+      "name": "ghost",
+      "source": "./plugins/ghost"
+    }
+  ]
+}

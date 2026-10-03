@@ -1,4 +1,7 @@
+use crate::plugins::capability::MARKETPLACE_JSON;
 use crate::plugins::manifest::{is_plugin_dir_root, is_plugin_root, parse_plugin, PluginManifest};
+use crate::plugins::marketplace::expand_marketplace;
+use std::collections::HashSet;
 use std::path::Path;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -10,8 +13,12 @@ pub struct Discovered {
 
 /// Scans `dir` itself (rel_path `""`) and, only if it is not a plugin, each direct child.
 /// `dir` is judged by [`is_plugin_dir_root`], children by [`is_plugin_root`].
+/// A folder with `marketplace.json` yields its entries instead of itself.
 pub fn discover(dir: &Path) -> std::io::Result<Vec<Discovered>> {
     if is_plugin_dir_root(dir) {
+        if dir.join(MARKETPLACE_JSON).is_file() {
+            return Ok(dedupe(expand_marketplace(dir, "")));
+        }
         let folder = std::fs::canonicalize(dir)?
             .file_name()
             .and_then(|n| n.to_str())
@@ -25,12 +32,33 @@ pub fn discover(dir: &Path) -> std::io::Result<Vec<Discovered>> {
         let Some(folder) = path.file_name().and_then(|n| n.to_str()) else {
             continue;
         };
-        if path.is_dir() && is_plugin_root(&path) {
+        if !path.is_dir() || !is_plugin_root(&path) {
+            continue;
+        }
+        if path.join(MARKETPLACE_JSON).is_file() {
+            found.extend(expand_marketplace(&path, folder));
+        } else {
             found.push(discovered(&path, folder.to_string(), folder.to_string()));
         }
     }
-    found.sort_by(|a, b| a.rel_path.cmp(&b.rel_path));
-    Ok(found)
+    Ok(dedupe(found))
+}
+
+/// Keeps the first row per `rel_path`, then sorts by it.
+fn dedupe(found: Vec<Discovered>) -> Vec<Discovered> {
+    let mut seen = HashSet::new();
+    let mut kept: Vec<_> = found
+        .into_iter()
+        .filter(|d| {
+            let first = seen.insert(d.rel_path.clone());
+            if !first {
+                tracing::warn!(rel_path = %d.rel_path, name = %d.name, "duplicate plugin path; keeping the first");
+            }
+            first
+        })
+        .collect();
+    kept.sort_by(|a, b| a.rel_path.cmp(&b.rel_path));
+    kept
 }
 
 fn discovered(path: &Path, rel_path: String, folder: String) -> Discovered {
@@ -70,22 +98,83 @@ mod tests {
     fn discover_depth1_children() {
         let found = discover(&fixtures()).unwrap();
         let expected = [
-            "inline-mcp",
-            "m10-smoke",
-            "mcp-fake",
-            "mcp-fake-slow",
-            "mcp-http",
-            "sample-plugin",
-            "single-skill",
-            "skills-catalog",
-            "skills-only",
-            "superpowers-like",
+            ("inline-mcp", "inline-mcp", true),
+            ("m10-smoke", "m10-smoke", true),
+            ("marketplace-repo#escape", "escape", false),
+            ("marketplace-repo#ghost", "ghost", false),
+            ("marketplace-repo#remote-one", "remote-one", true),
+            ("marketplace-repo/plugins/alpha", "alpha", true),
+            ("marketplace-repo/plugins/beta", "beta-skills", true),
+            ("mcp-fake", "mcp-fake", true),
+            ("mcp-fake-slow", "mcp-fake-slow", true),
+            ("mcp-http", "mcp-http", true),
+            ("sample-plugin", "sample-plugin", true),
+            ("single-skill", "single-skill", true),
+            ("skills-catalog", "skills-catalog", true),
+            ("skills-only", "skills-only", true),
+            ("superpowers-like", "superpowers-like", true),
         ];
+        let actual: Vec<_> = found
+            .iter()
+            .map(|d| (d.rel_path.as_str(), d.name.as_str(), d.result.is_ok()))
+            .collect();
+        assert_eq!(actual, expected, "{found:?}");
+    }
+
+    #[test]
+    fn discover_expands_marketplace_child() {
+        let dir = tempfile::tempdir().unwrap();
+        let market = dir.path().join("marketplace-repo");
+        copy_tree(&fixtures().join("marketplace-repo"), &market);
+        write(
+            &dir.path().join("other/.claude-plugin/plugin.json"),
+            r#"{"name":"other"}"#,
+        );
+        let found = discover(dir.path()).unwrap();
         let rel: Vec<_> = found.iter().map(|d| d.rel_path.as_str()).collect();
-        assert_eq!(rel, expected);
-        let names: Vec<_> = found.iter().map(|d| d.name.as_str()).collect();
-        assert_eq!(names, expected);
-        assert!(found.iter().all(|d| d.result.is_ok()));
+        assert_eq!(
+            rel,
+            [
+                "marketplace-repo#escape",
+                "marketplace-repo#ghost",
+                "marketplace-repo#remote-one",
+                "marketplace-repo/plugins/alpha",
+                "marketplace-repo/plugins/beta",
+                "other",
+            ]
+        );
+        assert!(found.iter().all(|d| d.rel_path != "marketplace-repo"));
+    }
+
+    #[test]
+    fn discover_plugin_dir_marketplace_skips_itself() {
+        let dir = tempfile::tempdir().unwrap();
+        copy_tree(&fixtures().join("marketplace-repo"), dir.path());
+        let found = discover(dir.path()).unwrap();
+        let rel: Vec<_> = found.iter().map(|d| d.rel_path.as_str()).collect();
+        assert_eq!(
+            rel,
+            [
+                "#escape",
+                "#ghost",
+                "#remote-one",
+                "plugins/alpha",
+                "plugins/beta"
+            ]
+        );
+    }
+
+    fn copy_tree(from: &Path, to: &Path) {
+        std::fs::create_dir_all(to).unwrap();
+        for entry in std::fs::read_dir(from).unwrap() {
+            let entry = entry.unwrap();
+            let target = to.join(entry.file_name());
+            if entry.file_type().unwrap().is_dir() {
+                copy_tree(&entry.path(), &target);
+            } else {
+                std::fs::copy(entry.path(), &target).unwrap();
+            }
+        }
     }
 
     #[test]

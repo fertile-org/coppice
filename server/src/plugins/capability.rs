@@ -146,7 +146,7 @@ impl CapabilityParser for SkillsCapability {
         skills.sort_by(|a, b| a.rel_path.cmp(&b.rel_path));
         let mut seen = HashSet::new();
         for skill in &mut skills {
-            if !seen.insert(skill.name.clone()) && skill.error.is_none() {
+            if skill.error.is_none() && !seen.insert(skill.name.clone()) {
                 skill.error = Some(DUPLICATE_NAME.into());
             }
         }
@@ -573,6 +573,20 @@ mod tests {
             by_path("skills/a/x").error.as_deref(),
             Some("duplicate skill name")
         );
+    }
+
+    #[test]
+    fn broken_skill_does_not_claim_name() {
+        let dir = tempfile::tempdir().unwrap();
+        let broken = dir.path().join(".claude/skills/x");
+        std::fs::create_dir_all(&broken).unwrap();
+        std::fs::write(broken.join("SKILL.md"), "no frontmatter").unwrap();
+        write_skill(&dir.path().join("skills/x"), "x");
+        let skills = skills(dir.path(), None, PluginLayout::SkillsOnly);
+        assert_eq!(skills.len(), 2, "{skills:?}");
+        let by_path = |p: &str| skills.iter().find(|s| s.rel_path == p).unwrap();
+        assert!(by_path(".claude/skills/x").error.is_some());
+        assert_eq!(by_path("skills/x").error, None);
     }
 
     #[test]

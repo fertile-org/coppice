@@ -3,6 +3,7 @@ pub mod capability;
 pub mod discover;
 pub mod git_install;
 pub mod manifest;
+pub mod marketplace;
 pub mod placeholders;
 pub mod skill_walk;
 pub mod skills;

@@ -459,6 +459,8 @@ mod tests {
             skills: Vec::new(),
             mcp_servers: Vec::new(),
             unsupported: Vec::new(),
+            marketplace: None,
+            external: None,
         }
     }
 
