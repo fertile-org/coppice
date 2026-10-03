@@ -62,6 +62,7 @@ tempfile = "3"
 rmcp = { version = "3.5", default-features = false, features = ["client", "transport-child-process", "transport-streamable-http-client-reqwest", "reqwest"] }
 # The reqwest major rmcp's `StreamableHttpClient` is implemented for.
 reqwest-mcp = { package = "reqwest", version = "0.13", default-features = false }
+yaml-rust2 = "0.13.0"
 
 [features]
 embedded-test-db = ["dep:pg-embed", "dep:fs4"]

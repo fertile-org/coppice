@@ -66,12 +66,14 @@ pub struct SkillCatalog {
     refresh: tokio::sync::Mutex<()>,
 }
 
+#[derive(Debug)]
 pub(crate) struct Frontmatter {
     pub(crate) name: String,
     pub(crate) description: String,
 }
 
-/// Splits `---\n<yaml>\n---\n<body>`; reads the flat `name` / `description` keys.
+/// Splits `---\n<yaml>\n---\n<body>`; reads the string `name` / `description`
+/// keys, collapsing description whitespace to single spaces.
 pub(crate) fn parse_skill_file(text: &str) -> anyhow::Result<(Frontmatter, String)> {
     let text = text.replace("\r\n", "\n");
     let rest = text
@@ -83,25 +85,16 @@ pub(crate) fn parse_skill_file(text: &str) -> anyhow::Result<(Frontmatter, Strin
     let (yaml, after) = rest.split_at(end);
     let body = after["\n---".len()..].trim_start_matches('\n').to_string();
 
-    let (mut name, mut description) = (None, None);
-    for line in yaml.lines() {
-        let Some((key, value)) = line.split_once(':') else {
-            continue;
-        };
-        let value = value
-            .trim()
-            .trim_matches(|c| c == '"' || c == '\'')
-            .to_string();
-        match key.trim() {
-            "name" => name = Some(value),
-            "description" => description = Some(value),
-            _ => {}
-        }
-    }
-    let name = name
+    let docs = yaml_rust2::YamlLoader::load_from_str(yaml)
+        .map_err(|err| anyhow::anyhow!("invalid frontmatter YAML: {err}"))?;
+    let doc = docs.first();
+    let field = |key: &str| doc.and_then(|d| d[key].as_str());
+    let name = field("name")
+        .map(|n| n.trim().to_string())
         .filter(|n| !n.is_empty())
         .context("frontmatter `name` is required")?;
-    let description = description
+    let description = field("description")
+        .map(|d| d.split_whitespace().collect::<Vec<_>>().join(" "))
         .filter(|d| !d.is_empty())
         .context("frontmatter `description` is required")?;
     Ok((Frontmatter { name, description }, body))
@@ -508,6 +501,54 @@ mod tests {
         let catalog = load_builtin(dir.path()).unwrap();
         assert_eq!(catalog.skills_for(&[]).len(), 6);
         assert!(catalog.get(&[], "broken").is_none());
+    }
+
+    #[test]
+    fn frontmatter_folded_description_is_one_line() {
+        let (fm, body) = parse_skill_file(
+            "---\nname: pdf\ndescription: >\n  Fill PDF forms.\n  Use for PDFs.\n---\nBody\n",
+        )
+        .unwrap();
+        assert_eq!(fm.name, "pdf");
+        assert_eq!(fm.description, "Fill PDF forms. Use for PDFs.");
+        assert_eq!(body, "Body\n");
+    }
+
+    #[test]
+    fn frontmatter_literal_description_collapses() {
+        let (fm, _) =
+            parse_skill_file("---\nname: a\ndescription: |\n  line one\n  line two\n---\n")
+                .unwrap();
+        assert_eq!(fm.description, "line one line two");
+    }
+
+    #[test]
+    fn frontmatter_quoted_and_extra_keys() {
+        let (fm, _) = parse_skill_file(
+            "---\nname: \"a-b\"\ndescription: 'Says: hi'\nlicense: MIT\nmetadata:\n  x: 1\n---\n",
+        )
+        .unwrap();
+        assert_eq!(
+            (fm.name.as_str(), fm.description.as_str()),
+            ("a-b", "Says: hi")
+        );
+    }
+
+    #[test]
+    fn frontmatter_crlf_ok() {
+        assert!(parse_skill_file("---\r\nname: a\r\ndescription: d\r\n---\r\nB").is_ok());
+    }
+
+    #[test]
+    fn frontmatter_errors() {
+        let err = |t: &str| format!("{:#}", parse_skill_file(t).unwrap_err());
+        assert!(err("---\ndescription: d\n---\n").contains("frontmatter `name` is required"));
+        assert!(err("---\nname: a\n---\n").contains("frontmatter `description` is required"));
+        assert!(err("---\nname: [1, 2]\ndescription: d\n---\n")
+            .contains("frontmatter `name` is required"));
+        assert!(err("---\nname: a\ndescription: d\n  bad: [\n---\n")
+            .contains("invalid frontmatter YAML"));
+        assert!(err("no frontmatter").contains("SKILL.md must start with YAML frontmatter"));
     }
 
     #[test]
