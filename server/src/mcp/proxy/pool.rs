@@ -86,8 +86,8 @@ impl PoolConfig {
 }
 
 const REAP_INTERVAL: Duration = Duration::from_secs(30);
-const CLOSED: &str = "MCP connection closed";
-const START_TIMED_OUT: &str = "MCP server start timed out";
+const CLOSED: &str = "server exited or closed the connection";
+const START_ABORTED: &str = "start task failed";
 
 struct Instance {
     conn: Arc<dyn McpConnection>,
@@ -237,6 +237,13 @@ impl McpServerPool {
             instance.conn.close().await;
         }
         self.tools(spec).await
+    }
+
+    /// Redacted reason for the last failure; cleared by a successful start or a stop.
+    pub fn last_error(&self, key: &ServerKey) -> Option<String> {
+        let slot = self.slots.lock().unwrap().get(key).cloned()?;
+        let slot = slot.lock().unwrap();
+        (!slot.last_error.is_empty()).then(|| slot.last_error.clone())
     }
 
     pub fn health(&self, key: &ServerKey) -> ServerHealth {
@@ -407,41 +414,31 @@ impl McpServerPool {
         slot.phase = Phase::Starting(rx.clone());
         let cfg = self.cfg.clone();
         tokio::spawn(async move {
-            let outcome =
-                match tokio::time::timeout(cfg.start_timeout, transport.connect(&resolved, &cwd))
-                    .await
-                {
-                    Ok(Ok(conn)) => Ok(conn),
-                    Ok(Err(err)) => Err((PoolError::Unavailable, err.to_string())),
-                    Err(_) => Err((PoolError::Timeout, START_TIMED_OUT.to_string())),
-                };
-            let (result, orphan) = {
-                let mut slot = slot_ref.lock().unwrap();
-                if slot.generation != generation {
-                    (Err(PoolError::Unavailable), outcome.ok())
-                } else {
-                    match outcome {
-                        Ok(conn) => {
-                            let instance = Arc::new(Instance {
-                                conn: Arc::from(conn),
-                                tools: tokio::sync::Mutex::new(None),
-                            });
-                            slot.phase = Phase::Ready(instance.clone());
-                            slot.failures = 0;
-                            slot.last_error.clear();
-                            (Ok(instance), None)
-                        }
-                        Err((err, message)) => {
-                            slot.record_failure(&cfg, message);
-                            (Err(err), None)
-                        }
-                    }
-                }
+            let mut guard = StartGuard {
+                slot_ref,
+                generation,
+                cfg,
+                tx: Some(tx),
             };
-            if let Some(conn) = orphan {
-                conn.close().await;
+            let outcome = match tokio::time::timeout(
+                guard.cfg.start_timeout,
+                transport.connect(&resolved, &cwd),
+            )
+            .await
+            {
+                Ok(Ok(conn)) => Ok(conn),
+                Ok(Err(err)) => Err((PoolError::Unavailable, err.to_string())),
+                Err(_) => Err((
+                    PoolError::Timeout,
+                    format!(
+                        "start timed out after {}s",
+                        guard.cfg.start_timeout.as_secs()
+                    ),
+                )),
+            };
+            if let Some(orphan) = guard.finish(outcome) {
+                orphan.close().await;
             }
-            let _ = tx.send(Some(result));
         });
         rx
     }
@@ -476,6 +473,69 @@ impl McpServerPool {
         if failed {
             close_detached(instance.clone());
         }
+    }
+}
+
+/// Owns a start's result channel: a start task that panics or is aborted before
+/// reporting still counts as a failed start instead of wedging the slot in `Starting`.
+struct StartGuard {
+    slot_ref: SlotRef,
+    generation: u64,
+    cfg: PoolConfig,
+    tx: Option<watch::Sender<StartResult>>,
+}
+
+impl StartGuard {
+    /// Installs the outcome; returns a connection that a stop or restart superseded.
+    fn finish(
+        &mut self,
+        outcome: Result<Box<dyn McpConnection>, (PoolError, String)>,
+    ) -> Option<Box<dyn McpConnection>> {
+        let (result, orphan) = {
+            let mut slot = self.slot_ref.lock().unwrap();
+            if slot.generation != self.generation {
+                (Err(PoolError::Unavailable), outcome.ok())
+            } else {
+                match outcome {
+                    Ok(conn) => {
+                        let instance = Arc::new(Instance {
+                            conn: Arc::from(conn),
+                            tools: tokio::sync::Mutex::new(None),
+                        });
+                        slot.phase = Phase::Ready(instance.clone());
+                        slot.failures = 0;
+                        slot.last_error.clear();
+                        (Ok(instance), None)
+                    }
+                    Err((err, message)) => {
+                        slot.record_failure(&self.cfg, message);
+                        (Err(err), None)
+                    }
+                }
+            }
+        };
+        if let Some(tx) = self.tx.take() {
+            let _ = tx.send(Some(result));
+        }
+        orphan
+    }
+}
+
+impl Drop for StartGuard {
+    fn drop(&mut self) {
+        let Some(tx) = self.tx.take() else {
+            return;
+        };
+        {
+            let mut slot = self
+                .slot_ref
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            if slot.generation == self.generation && matches!(slot.phase, Phase::Starting(_)) {
+                slot.record_failure(&self.cfg, START_ABORTED.into());
+            }
+        }
+        let _ = tx.send(Some(Err(PoolError::Unavailable)));
     }
 }
 
@@ -548,6 +608,7 @@ mod tests {
     struct Fake {
         connects: AtomicUsize,
         fail_starts: AtomicBool,
+        panic_on_connect: AtomicBool,
         connect_delay_ms: AtomicU64,
         close_on_call: AtomicBool,
         conns: Mutex<Vec<Arc<FakeConn>>>,
@@ -585,6 +646,9 @@ mod tests {
             let delay = self.0.connect_delay_ms.load(Ordering::SeqCst);
             if delay > 0 {
                 tokio::time::sleep(Duration::from_millis(delay)).await;
+            }
+            if self.0.panic_on_connect.load(Ordering::SeqCst) {
+                panic!("fake connect panicked");
             }
             if self.0.fail_starts.load(Ordering::SeqCst) {
                 return Err(ProxyError::Start("boom".into()));
@@ -920,6 +984,84 @@ mod tests {
             .is_err());
         assert_eq!(pool.health(&spec.key), ServerHealth::Ready);
         assert!(pool.call(&spec, "echo", Value::Null).await.is_ok());
+        assert_eq!(fake.connects(), 1);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn panicked_start_counts_as_failure() {
+        let (pool, fake) = pool();
+        fake.panic_on_connect.store(true, Ordering::SeqCst);
+        assert_eq!(pool.tools(&spec()).await, Err(PoolError::Unavailable));
+        assert_eq!(pool.health(&spec().key), ServerHealth::Backoff);
+        assert_eq!(
+            pool.last_error(&spec().key).as_deref(),
+            Some("start task failed")
+        );
+        fake.panic_on_connect.store(false, Ordering::SeqCst);
+        tokio::time::advance(Duration::from_secs(1)).await;
+        assert_eq!(pool.tools(&spec()).await.unwrap().len(), 1);
+        assert_eq!(pool.health(&spec().key), ServerHealth::Ready);
+        assert_eq!(fake.connects(), 2);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn last_error_records_failures_without_secrets() {
+        let (pool, fake) = pool();
+        let key = spec().key;
+        assert_eq!(pool.last_error(&key), None);
+
+        fake.fail_starts.store(true, Ordering::SeqCst);
+        let _ = pool.tools(&spec()).await;
+        let message = pool.last_error(&key).unwrap();
+        assert_eq!(message, "MCP server failed to start: boom");
+        assert!(!message.contains("tok"));
+
+        fake.fail_starts.store(false, Ordering::SeqCst);
+        tokio::time::advance(Duration::from_secs(1)).await;
+        pool.tools(&spec()).await.unwrap();
+        assert_eq!(pool.last_error(&key), None);
+
+        fake.close_on_call.store(true, Ordering::SeqCst);
+        let _ = pool.call(&spec(), "echo", Value::Null).await;
+        assert_eq!(
+            pool.last_error(&key).as_deref(),
+            Some("server exited or closed the connection")
+        );
+        fake.close_on_call.store(false, Ordering::SeqCst);
+
+        fake.connect_delay_ms.store(30_000, Ordering::SeqCst);
+        tokio::time::advance(Duration::from_secs(1)).await;
+        assert_eq!(pool.tools(&spec()).await, Err(PoolError::Timeout));
+        assert_eq!(
+            pool.last_error(&key).as_deref(),
+            Some("start timed out after 20s")
+        );
+
+        let missing = spec_for(Uuid::nil(), "main", None);
+        let _ = pool.tools(&missing).await;
+        assert_eq!(
+            pool.last_error(&key).as_deref(),
+            Some("missing setting \"API_TOKEN\"")
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn stop_plugin_during_start_closes_orphan() {
+        let (pool, fake) = pool();
+        fake.connect_delay_ms.store(3000, Ordering::SeqCst);
+        let waiter = {
+            let pool = pool.clone();
+            tokio::spawn(async move { pool.tools(&spec()).await })
+        };
+        tokio::time::sleep(Duration::from_secs(1)).await;
+        assert_eq!(pool.health(&spec().key), ServerHealth::Starting);
+        pool.stop_plugin(Uuid::nil()).await;
+        assert_eq!(pool.health(&spec().key), ServerHealth::Stopped);
+
+        assert_eq!(waiter.await.unwrap(), Err(PoolError::Unavailable));
+        assert!(fake.conn(0).closed.load(Ordering::SeqCst));
+        assert_eq!(pool.health(&spec().key), ServerHealth::Stopped);
+        assert_eq!(pool.last_error(&spec().key), None);
         assert_eq!(fake.connects(), 1);
     }
 }
