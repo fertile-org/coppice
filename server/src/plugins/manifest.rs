@@ -1,9 +1,10 @@
 use crate::plugins::builtin::BUILTIN_PLUGIN;
 use crate::plugins::capability::{
     AgentsCapability, CapabilityOutcome, CapabilityParser, CommandsCapability, HooksCapability,
-    McpServersCapability, SkillsCapability, PLUGIN_JSON,
+    McpServersCapability, SkillsCapability, MARKETPLACE_JSON, PLUGIN_JSON,
 };
 pub use crate::plugins::capability::{McpServerEntry, McpServerTransport, UnsupportedPart};
+use crate::plugins::skill_walk::{has_contained_skills, has_skills_package};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::path::Path;
@@ -66,12 +67,17 @@ enum OneOrMany {
 
 pub fn is_plugin_root(root: &Path) -> bool {
     root.join(PLUGIN_JSON).is_file()
-        || root.join("skills").is_dir()
-        || std::fs::read_dir(root).is_ok_and(|entries| {
-            entries
-                .flatten()
-                .any(|e| e.path().join("SKILL.md").is_file())
-        })
+        || root.join(MARKETPLACE_JSON).is_file()
+        || has_skills_package(root)
+}
+
+/// Whether a registered plugin dir is itself one plugin. Unlike
+/// [`is_plugin_root`], children holding `SKILL.md` do not count, so a
+/// single-skill child stays its own plugin.
+pub fn is_plugin_dir_root(root: &Path) -> bool {
+    root.join(PLUGIN_JSON).is_file()
+        || root.join(MARKETPLACE_JSON).is_file()
+        || has_contained_skills(root)
 }
 
 /// `^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`
@@ -267,6 +273,29 @@ mod tests {
         assert!(m.unsupported.is_empty());
         assert!(m.mcp_servers.is_empty());
         assert_eq!(serde_json::to_value(&m).unwrap()["layout"], "skillsOnly");
+    }
+
+    #[test]
+    fn is_plugin_root_cases() {
+        assert!(is_plugin_root(&fixture("single-skill")));
+        assert!(is_plugin_root(&fixture("skills-catalog")));
+        let dir = tempfile::tempdir().unwrap();
+        write(
+            &dir.path().join("claude/.claude/skills/s/SKILL.md"),
+            "---\nname: s\ndescription: S\n---\n",
+        );
+        assert!(is_plugin_root(&dir.path().join("claude")));
+        write(
+            &dir.path().join("market/.claude-plugin/marketplace.json"),
+            r#"{"plugins":[]}"#,
+        );
+        assert!(is_plugin_root(&dir.path().join("market")));
+        std::fs::create_dir_all(dir.path().join("empty")).unwrap();
+        assert!(!is_plugin_root(&dir.path().join("empty")));
+        write(&dir.path().join("readme/README.md"), "# hi");
+        assert!(!is_plugin_root(&dir.path().join("readme")));
+        std::fs::create_dir_all(dir.path().join("bare/skills")).unwrap();
+        assert!(!is_plugin_root(&dir.path().join("bare")));
     }
 
     #[test]

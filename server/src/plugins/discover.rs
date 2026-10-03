@@ -1,4 +1,4 @@
-use crate::plugins::manifest::{is_plugin_root, parse_plugin, PluginManifest};
+use crate::plugins::manifest::{is_plugin_dir_root, is_plugin_root, parse_plugin, PluginManifest};
 use std::path::Path;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -9,8 +9,9 @@ pub struct Discovered {
 }
 
 /// Scans `dir` itself (rel_path `""`) and, only if it is not a plugin, each direct child.
+/// `dir` is judged by [`is_plugin_dir_root`], children by [`is_plugin_root`].
 pub fn discover(dir: &Path) -> std::io::Result<Vec<Discovered>> {
-    if is_plugin_root(dir) {
+    if is_plugin_dir_root(dir) {
         let folder = std::fs::canonicalize(dir)?
             .file_name()
             .and_then(|n| n.to_str())
@@ -75,6 +76,8 @@ mod tests {
             "mcp-fake-slow",
             "mcp-http",
             "sample-plugin",
+            "single-skill",
+            "skills-catalog",
             "skills-only",
             "superpowers-like",
         ];
@@ -83,6 +86,23 @@ mod tests {
         let names: Vec<_> = found.iter().map(|d| d.name.as_str()).collect();
         assert_eq!(names, expected);
         assert!(found.iter().all(|d| d.result.is_ok()));
+    }
+
+    #[test]
+    fn discover_single_skill_child_does_not_make_dir_a_plugin() {
+        let dir = tempfile::tempdir().unwrap();
+        write(
+            &dir.path().join("a/SKILL.md"),
+            "---\nname: a\ndescription: A\n---\nbody",
+        );
+        write(
+            &dir.path().join("b/.claude-plugin/plugin.json"),
+            r#"{"name":"b"}"#,
+        );
+        let found = discover(dir.path()).unwrap();
+        let rel: Vec<_> = found.iter().map(|d| d.rel_path.as_str()).collect();
+        assert_eq!(rel, ["a", "b"]);
+        assert!(found.iter().all(|d| d.result.is_ok()), "{found:?}");
     }
 
     #[test]

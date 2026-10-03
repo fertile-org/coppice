@@ -1,13 +1,17 @@
 use crate::plugins::manifest::{PluginLayout, SkillEntry};
+use crate::plugins::skill_walk::{walk, SKILL_CONTAINERS};
 use crate::plugins::skills::parse_skill_file;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::path::{Component, Path};
 
 pub(crate) const PLUGIN_JSON: &str = ".claude-plugin/plugin.json";
+pub(crate) const MARKETPLACE_JSON: &str = ".claude-plugin/marketplace.json";
 const MCP_JSON: &str = ".mcp.json";
+const SKILL_MD: &str = "SKILL.md";
 const ESCAPES_ROOT: &str = "path escapes plugin root";
+const DUPLICATE_NAME: &str = "duplicate skill name";
 const NOT_SUPPORTED_YET: &str = "not supported yet";
 
 pub enum CapabilityOutcome<T> {
@@ -110,23 +114,42 @@ impl CapabilityParser for SkillsCapability {
         plugin_json: Option<&Value>,
         layout: PluginLayout,
     ) -> CapabilityOutcome<Vec<SkillEntry>> {
-        let skill_dirs = match layout {
-            PluginLayout::SkillsOnly if root.join("skills").is_dir() => vec!["skills".into()],
-            PluginLayout::SkillsOnly => vec![String::new()],
+        if layout == PluginLayout::SkillsOnly && root.join(SKILL_MD).is_file() {
+            let name = root
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or_default()
+                .to_string();
+            let skills = load_skill(root, root, name, String::new());
+            return CapabilityOutcome::Supported(skills.into_iter().collect());
+        }
+        let containers: Vec<(String, usize)> = match layout {
+            PluginLayout::SkillsOnly => SKILL_CONTAINERS
+                .iter()
+                .map(|c| (c.to_string(), 3))
+                .chain([(String::new(), 1)])
+                .collect(),
             PluginLayout::Plugin => match plugin_json.and_then(|j| j.get(Self::KEY)) {
-                None => vec!["skills".into()],
-                Some(Value::String(dir)) => vec![dir.clone()],
+                None => vec![("skills".into(), 3)],
+                Some(Value::String(dir)) => vec![(dir.clone(), 3)],
                 Some(Value::Array(dirs)) => dirs
                     .iter()
-                    .filter_map(|d| d.as_str().map(str::to_string))
+                    .filter_map(|d| d.as_str().map(|d| (d.to_string(), 3)))
                     .collect(),
                 Some(_) => Vec::new(),
             },
         };
-        let mut skills: Vec<_> = skill_dirs
+        let mut skills: Vec<_> = containers
             .iter()
-            .flat_map(|dir| skills_in(root, dir))
+            .flat_map(|(dir, depth)| skills_in(root, dir, *depth))
             .collect();
+        skills.sort_by(|a, b| a.rel_path.cmp(&b.rel_path));
+        let mut seen = HashSet::new();
+        for skill in &mut skills {
+            if !seen.insert(skill.name.clone()) && skill.error.is_none() {
+                skill.error = Some(DUPLICATE_NAME.into());
+            }
+        }
         skills.sort_by(|a, b| {
             a.name
                 .cmp(&b.name)
@@ -305,8 +328,9 @@ fn escaped(name: &str, rel_path: &str) -> SkillEntry {
     }
 }
 
-/// Skills are `<root>/<rel_dir>/<name>/SKILL.md`; `root` must be canonical.
-fn skills_in(root: &Path, rel_dir: &str) -> Vec<SkillEntry> {
+/// Skills are dirs with `SKILL.md` up to `max_depth` levels below
+/// `<root>/<rel_dir>`; `root` must be canonical.
+fn skills_in(root: &Path, rel_dir: &str, max_depth: usize) -> Vec<SkillEntry> {
     let rel_dir = rel_dir.trim_end_matches('/');
     let dir = root.join(rel_dir);
     let canonical = match std::fs::canonicalize(&dir) {
@@ -324,21 +348,24 @@ fn skills_in(root: &Path, rel_dir: &str) -> Vec<SkillEntry> {
     if !canonical.starts_with(root) {
         return vec![escaped(rel_dir, rel_dir)];
     }
-    let Ok(entries) = std::fs::read_dir(&canonical) else {
-        return Vec::new();
-    };
-    entries
-        .flatten()
-        .filter_map(|entry| {
-            let name = entry.file_name().to_str()?.to_string();
-            let rel_path = if rel_dir.is_empty() {
-                name.clone()
-            } else {
-                format!("{rel_dir}/{name}")
-            };
-            load_skill(root, &canonical.join(&name), name, rel_path)
-        })
-        .collect()
+    let walk = walk(root, rel_dir, max_depth);
+    let skills = walk.skills.into_iter().filter_map(|rel_path| {
+        load_skill(
+            root,
+            &root.join(&rel_path),
+            last_segment(&rel_path),
+            rel_path,
+        )
+    });
+    let escapes = walk
+        .escaped
+        .into_iter()
+        .map(|rel_path| escaped(&last_segment(&rel_path), &rel_path));
+    skills.chain(escapes).collect()
+}
+
+fn last_segment(rel_path: &str) -> String {
+    rel_path.rsplit('/').next().unwrap_or_default().to_string()
 }
 
 fn load_skill(root: &Path, dir: &Path, name: String, rel_path: String) -> Option<SkillEntry> {
@@ -479,6 +506,85 @@ mod tests {
             McpServersCapability::parse(dir.path(), None, PluginLayout::Plugin),
             CapabilityOutcome::Absent
         ));
+    }
+
+    fn fixture(name: &str) -> std::path::PathBuf {
+        std::fs::canonicalize(
+            Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../fixtures/plugins")
+                .join(name),
+        )
+        .unwrap()
+    }
+
+    fn skills(root: &Path, plugin_json: Option<&Value>, layout: PluginLayout) -> Vec<SkillEntry> {
+        let root = std::fs::canonicalize(root).unwrap();
+        match SkillsCapability::parse(&root, plugin_json, layout) {
+            CapabilityOutcome::Supported(skills) => skills,
+            _ => panic!("expected supported skills"),
+        }
+    }
+
+    fn write_skill(dir: &Path, name: &str) {
+        std::fs::create_dir_all(dir).unwrap();
+        std::fs::write(
+            dir.join("SKILL.md"),
+            format!("---\nname: {name}\ndescription: About {name}\n---\nbody"),
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn skills_package_single_root_skill() {
+        let skills = skills(&fixture("single-skill"), None, PluginLayout::SkillsOnly);
+        assert_eq!(
+            skills,
+            vec![SkillEntry {
+                name: "single-skill".into(),
+                description: "A repository that is one skill".into(),
+                rel_path: String::new(),
+                error: None,
+            }]
+        );
+    }
+
+    #[test]
+    fn skills_package_catalog_and_agent_dirs() {
+        let skills = skills(&fixture("skills-catalog"), None, PluginLayout::SkillsOnly);
+        let names: Vec<_> = skills.iter().map(|s| s.name.as_str()).collect();
+        assert_eq!(names, ["agent-one", "design", "pdf"]);
+        let pdf = &skills[2];
+        assert_eq!(pdf.rel_path, "skills/docs/pdf");
+        assert_eq!(pdf.description, "Fill PDF forms. Use for PDFs.");
+        assert_eq!(skills[0].rel_path, ".agents/skills/agent-one");
+        assert!(skills.iter().all(|s| s.error.is_none()), "{skills:?}");
+    }
+
+    #[test]
+    fn duplicate_skill_names_marked() {
+        let dir = tempfile::tempdir().unwrap();
+        write_skill(&dir.path().join("skills/a/x"), "x");
+        write_skill(&dir.path().join(".claude/skills/x"), "x");
+        let skills = skills(dir.path(), None, PluginLayout::SkillsOnly);
+        assert_eq!(skills.len(), 2, "{skills:?}");
+        let by_path = |p: &str| skills.iter().find(|s| s.rel_path == p).unwrap();
+        assert_eq!(by_path(".claude/skills/x").error, None);
+        assert_eq!(
+            by_path("skills/a/x").error.as_deref(),
+            Some("duplicate skill name")
+        );
+    }
+
+    #[test]
+    fn plugin_layout_skills_use_walker() {
+        let dir = tempfile::tempdir().unwrap();
+        write_skill(&dir.path().join("skills/cat/s"), "s");
+        let plugin_json = serde_json::json!({"name": "p"});
+        let skills = skills(dir.path(), Some(&plugin_json), PluginLayout::Plugin);
+        assert_eq!(skills.len(), 1, "{skills:?}");
+        assert_eq!(skills[0].name, "s");
+        assert_eq!(skills[0].rel_path, "skills/cat/s");
+        assert_eq!(skills[0].error, None);
     }
 
     #[test]
