@@ -152,6 +152,7 @@ struct PluginInstallResponse {
     git_url: String,
     git_ref: Option<String>,
     plugin_id: Option<Uuid>,
+    plugin_ids: Vec<Uuid>,
     status: String,
     error: Option<String>,
 }
@@ -396,20 +397,22 @@ fn install_response(install: PluginInstall) -> Json<PluginInstallResponse> {
         git_url: install.git_url,
         git_ref: install.git_ref,
         plugin_id: install.plugin_id,
+        plugin_ids: install.plugin_ids,
         status: install.status,
         error: install.error,
     })
 }
 
 /// Runs `job` in the background, then records its outcome; nothing borrowed
-/// from the request may be captured. A successful update of `updated_plugin`
-/// stops its MCP servers so they restart from the new checkout; the rescan may
-/// also have taken other plugins out of `ok`.
+/// from the request may be captured. A successful update stops the MCP servers
+/// of every plugin from the clone — `updated` plus those the finished install
+/// records — so they restart from the new checkout; the rescan may also have
+/// taken other plugins out of `ok`.
 fn spawn_git_job<F>(
     state: Arc<AppState>,
     install_id: Uuid,
     dest_rel: String,
-    updated_plugin: Option<Uuid>,
+    updated: Vec<Uuid>,
     job: F,
 ) where
     F: Future<Output = Result<String, String>> + Send + 'static,
@@ -424,8 +427,15 @@ fn spawn_git_job<F>(
         service
             .complete_git_job(install_id, result, &dest_rel, &state.skills)
             .await;
-        if let (true, Some(plugin_id)) = (succeeded, updated_plugin) {
-            state.plugin_mcp.stop_plugin(plugin_id).await;
+        if succeeded && !updated.is_empty() {
+            let mut stop: BTreeSet<Uuid> = updated.into_iter().collect();
+            match service.get_install(install_id).await {
+                Ok(install) => stop.extend(install.plugin_ids),
+                Err(err) => tracing::error!(error = %err, "failed to read finished plugin update"),
+            }
+            for plugin_id in stop {
+                state.plugin_mcp.stop_plugin(plugin_id).await;
+            }
         }
         stop_unusable_servers(&service, &state).await;
     });
@@ -461,7 +471,7 @@ async fn install(
     let job = async move {
         git_install::clone(&url, git_ref.as_deref(), &dest, allow_file, timeout).await
     };
-    spawn_git_job(state.clone(), install.id, dest_rel, None, job);
+    spawn_git_job(state.clone(), install.id, dest_rel, Vec::new(), job);
     Ok((StatusCode::ACCEPTED, install_response(install)))
 }
 
@@ -472,15 +482,15 @@ async fn update(
 ) -> Result<(StatusCode, Json<PluginInstallResponse>), ApiError> {
     let pool = pool_from_state(&state)?;
     let cfg = &state.config.plugins;
-    let (install, root, rel_path) = PluginService::new(pool).start_update(plugin_id).await?;
-    let git_ref = install.git_ref.clone();
+    let (install, root, git_root) = PluginService::new(pool).start_update(plugin_id).await?;
+    let (git_ref, updated) = (install.git_ref.clone(), install.plugin_ids.clone());
     let (allow_file, timeout) = (
         cfg.allow_file_git_urls,
         Duration::from_secs(cfg.git_timeout_secs),
     );
     let job =
         async move { git_install::update(&root, git_ref.as_deref(), allow_file, timeout).await };
-    spawn_git_job(state.clone(), install.id, rel_path, Some(plugin_id), job);
+    spawn_git_job(state.clone(), install.id, git_root, updated, job);
     Ok((StatusCode::ACCEPTED, install_response(install)))
 }
 

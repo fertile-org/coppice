@@ -18,7 +18,14 @@ use uuid::Uuid;
 
 const DIR_COLUMNS: &str = "id, path, position, is_default";
 
-const INSTALL_COLUMNS: &str = "id, plugin_dir_id, kind, git_url, git_ref, plugin_id, status, error";
+const INSTALL_COLUMNS: &str =
+    "id, plugin_dir_id, kind, git_url, git_ref, plugin_id, plugin_ids, status, error";
+
+/// Matches rows of dir `$1` produced from the clone folder `$2`: the folder
+/// itself, in-repo entries (`<root>/…`) and external or error entries (`<root>#…`).
+const CLONE_ROWS: &str = "plugin_dir_id = $1 AND (rel_path = $2 OR left(rel_path, length($2) + 1) IN ($2 || '/', $2 || '#'))";
+
+const NO_PLUGIN_IN_REPO: &str = "no plugin, skills, or marketplace found in this repository";
 
 const PLUGIN_COLUMNS: &str = r#"
     p.id, p.plugin_dir_id, p.rel_path, p.name, p.version, p.description, p.source,
@@ -111,6 +118,7 @@ pub struct PluginInstall {
     pub git_url: String,
     pub git_ref: Option<String>,
     pub plugin_id: Option<Uuid>,
+    pub plugin_ids: Vec<Uuid>,
     pub status: String,
     pub error: Option<String>,
 }
@@ -628,13 +636,14 @@ impl<'a> PluginService<'a> {
             )));
         }
         let install =
-            insert_install(&mut tx, plugin_dir_id, "install", git_url, git_ref, None).await?;
+            insert_install(&mut tx, plugin_dir_id, "install", git_url, git_ref, &[]).await?;
         tx.commit().await?;
         Ok((install, dest))
     }
 
-    /// Records a `running` update of a git-installed plugin at its stored ref
-    /// and returns the plugin root to update in place and its stored rel_path.
+    /// Records a `running` update of the clone a git-installed plugin came from,
+    /// at its stored ref, and returns the clone folder to update in place and its
+    /// rel path (`git_root`, or the plugin's rel_path for rows predating it).
     pub async fn start_update(
         &self,
         plugin_id: Uuid,
@@ -660,12 +669,22 @@ impl<'a> PluginService<'a> {
             ));
         }
 
+        let root = plugin.git_root.clone().unwrap_or(plugin.rel_path.clone());
+
         let mut tx = self.pool.begin().await?;
         lock_plugin_state(&mut tx).await?;
+        let rows: Vec<(Uuid, String)> = sqlx::query_as(&format!(
+            "SELECT id, status FROM plugins WHERE {CLONE_ROWS} ORDER BY rel_path"
+        ))
+        .bind(plugin.plugin_dir_id)
+        .bind(&root)
+        .fetch_all(&mut *tx)
+        .await?;
+        let all_ids: Vec<Uuid> = rows.iter().map(|(id, _)| *id).collect();
         let running: bool = sqlx::query_scalar(
-            "SELECT EXISTS (SELECT 1 FROM plugin_installs WHERE plugin_id = $1 AND status = 'running')",
+            "SELECT EXISTS (SELECT 1 FROM plugin_installs WHERE plugin_ids && $1 AND status = 'running')",
         )
-        .bind(plugin_id)
+        .bind(&all_ids)
         .fetch_one(&mut *tx)
         .await?;
         if running {
@@ -674,22 +693,31 @@ impl<'a> PluginService<'a> {
                 plugin.name
             )));
         }
+        let ids: Vec<Uuid> = rows
+            .into_iter()
+            .filter(|(_, status)| status != "missing")
+            .map(|(id, _)| id)
+            .collect();
         let install = insert_install(
             &mut tx,
             plugin.plugin_dir_id,
             "update",
             &git_url,
             plugin.git_ref.as_deref(),
-            Some(plugin_id),
+            &ids,
         )
         .await?;
+        let dir_path: String = sqlx::query_scalar("SELECT path FROM plugin_dirs WHERE id = $1")
+            .bind(plugin.plugin_dir_id)
+            .fetch_one(&mut *tx)
+            .await?;
         tx.commit().await?;
-        Ok((install, self.plugin_path(plugin_id).await?, plugin.rel_path))
+        Ok((install, join_plugin_path(&dir_path, &root), root))
     }
 
-    /// Records the git outcome. On success rescans, stamps git metadata on the
-    /// plugin at `(plugin_dir_id, dest_rel)` and refreshes the skill catalog;
-    /// a fresh install is always left disabled.
+    /// Records the git outcome. On success rescans, stamps git metadata on every
+    /// row the clone folder `dest_rel` produced and refreshes the skill catalog;
+    /// a fresh install leaves them all disabled.
     pub async fn finish_install(
         &self,
         id: Uuid,
@@ -706,29 +734,30 @@ impl<'a> PluginService<'a> {
 
         let is_install = install.kind == "install";
         let mut tx = self.pool.begin().await?;
-        let plugin_id: Option<Uuid> = sqlx::query_scalar(
+        let plugin_ids: Vec<Uuid> = sqlx::query_scalar(&format!(
             r#"
-            UPDATE plugins SET
-                source = 'git', git_url = $3, git_ref = $4, git_commit = $5, git_root = $2,
-                enabled = enabled AND NOT $6, updated_at = now()
-            WHERE plugin_dir_id = $1 AND rel_path = $2 AND status <> 'missing'
-            RETURNING id
-            "#,
-        )
+            WITH stamped AS (
+                UPDATE plugins SET
+                    source = 'git', git_url = $3, git_ref = $4, git_commit = $5, git_root = $2,
+                    enabled = enabled AND NOT $6, updated_at = now()
+                WHERE {CLONE_ROWS} AND status <> 'missing'
+                RETURNING id, rel_path
+            )
+            SELECT id FROM stamped ORDER BY rel_path
+            "#
+        ))
         .bind(install.plugin_dir_id)
         .bind(dest_rel)
         .bind(&install.git_url)
         .bind(&install.git_ref)
         .bind(&commit)
         .bind(is_install)
-        .fetch_optional(&mut *tx)
+        .fetch_all(&mut *tx)
         .await?;
-        let Some(plugin_id) = plugin_id else {
+        let Some(&plugin_id) = plugin_ids.first() else {
             tx.rollback().await?;
             if !is_install {
-                return self
-                    .fail_install(id, "updated repository is not a plugin")
-                    .await;
+                return self.fail_install(id, NO_PLUGIN_IN_REPO).await;
             }
             let dir_path: String = sqlx::query_scalar("SELECT path FROM plugin_dirs WHERE id = $1")
                 .bind(install.plugin_dir_id)
@@ -738,19 +767,18 @@ impl<'a> PluginService<'a> {
             if let Err(err) = std::fs::remove_dir_all(&dest) {
                 tracing::warn!(dest = %dest.display(), error = %err, "failed to remove non-plugin clone");
             }
-            return self
-                .fail_install(id, "cloned repository is not a plugin")
-                .await;
+            return self.fail_install(id, NO_PLUGIN_IN_REPO).await;
         };
         sqlx::query(
             r#"
             UPDATE plugin_installs SET status = 'succeeded', plugin_id = $2,
-                plugin_ids = ARRAY[$2]::uuid[], error = NULL, finished_at = now()
+                plugin_ids = $3, error = NULL, finished_at = now()
             WHERE id = $1
             "#,
         )
         .bind(id)
         .bind(plugin_id)
+        .bind(&plugin_ids)
         .execute(&mut *tx)
         .await?;
         tx.commit().await?;
@@ -1082,12 +1110,13 @@ async fn insert_install(
     kind: &str,
     git_url: &str,
     git_ref: Option<&str>,
-    plugin_id: Option<Uuid>,
+    plugin_ids: &[Uuid],
 ) -> Result<PluginInstall, sqlx::Error> {
     let row = sqlx::query(&format!(
         r#"
-        INSERT INTO plugin_installs (id, plugin_dir_id, kind, git_url, git_ref, plugin_id, status)
-        VALUES ($1, $2, $3, $4, $5, $6, 'running')
+        INSERT INTO plugin_installs
+            (id, plugin_dir_id, kind, git_url, git_ref, plugin_id, plugin_ids, status)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, 'running')
         RETURNING {INSTALL_COLUMNS}
         "#
     ))
@@ -1096,7 +1125,8 @@ async fn insert_install(
     .bind(kind)
     .bind(git_url)
     .bind(git_ref)
-    .bind(plugin_id)
+    .bind(plugin_ids.first())
+    .bind(plugin_ids)
     .fetch_one(&mut **tx)
     .await?;
     Ok(row_to_install(&row))
@@ -1110,6 +1140,7 @@ fn row_to_install(row: &PgRow) -> PluginInstall {
         git_url: row.get("git_url"),
         git_ref: row.get("git_ref"),
         plugin_id: row.get("plugin_id"),
+        plugin_ids: row.get("plugin_ids"),
         status: row.get("status"),
         error: row.get("error"),
     }

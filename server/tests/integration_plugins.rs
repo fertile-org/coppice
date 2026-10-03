@@ -1213,8 +1213,12 @@ impl PluginRepo {
             format!("---\nname: {name}\ndescription: Says {name}\n---\nSay {name}.\n"),
         )
         .unwrap();
+        self.push_all(name);
+    }
+
+    fn push_all(&self, message: &str) {
         git(&self.work, &["add", "-A"]);
-        git(&self.work, &["commit", "-q", "-m", name]);
+        git(&self.work, &["commit", "-q", "-m", message]);
         git(
             &self.work,
             &["push", "-q", "origin", "HEAD:refs/heads/main"],
@@ -1490,7 +1494,7 @@ async fn stale_running_install_failed_on_startup() {
 }
 
 #[tokio::test]
-async fn install_of_non_plugin_repo_fails_and_removes_clone() {
+async fn install_of_repo_without_skills_fails() {
     let _guard = common::DB_TEST_LOCK.lock().await;
     require_db!();
     let (_state, app, cookie, csrf) = install_app().await;
@@ -1509,7 +1513,10 @@ async fn install_of_non_plugin_repo_fails_and_removes_clone() {
     assert_eq!(status, StatusCode::ACCEPTED, "{install}");
     let done = wait_install(&app, install["id"].as_str().unwrap(), &cookie, &csrf).await;
     assert_eq!(done["status"], "failed");
-    assert_eq!(done["error"], "cloned repository is not a plugin");
+    assert_eq!(
+        done["error"],
+        "no plugin, skills, or marketplace found in this repository"
+    );
     assert!(!dir_path.join("plain").exists());
 }
 
@@ -2268,4 +2275,257 @@ async fn marketplace_external(
         .unwrap()
         .to_string();
     (dir, id)
+}
+
+async fn post_update(app: &Router, plugin_id: &str, cookie: &str, csrf: &str) -> Value {
+    let (status, update) = send(
+        app,
+        "POST",
+        &format!("/api/plugins/{plugin_id}/update"),
+        Value::Null,
+        cookie,
+        csrf,
+    )
+    .await;
+    assert_eq!(status, StatusCode::ACCEPTED, "{update}");
+    let done = wait_install(app, update["id"].as_str().unwrap(), cookie, csrf).await;
+    assert_eq!(done["status"], "succeeded", "{done}");
+    done
+}
+
+/// Rows of `dir_id` whose rel path is the clone folder `root` or lies inside it.
+fn clone_rows<'a>(plugins: &'a Value, dir_id: &str, root: &str) -> Vec<&'a Value> {
+    plugins_in_dir(plugins, dir_id)
+        .into_iter()
+        .filter(|p| {
+            let rel = p["relPath"].as_str().unwrap();
+            rel == root
+                || rel.starts_with(&format!("{root}/"))
+                || rel.starts_with(&format!("{root}#"))
+        })
+        .collect()
+}
+
+fn write_marketplace(repo: &PluginRepo, entries: Value) {
+    std::fs::write(
+        repo.work.join(".claude-plugin/marketplace.json"),
+        json!({ "name": "acme-market", "owner": { "name": "Acme" }, "plugins": entries })
+            .to_string(),
+    )
+    .unwrap();
+}
+
+#[tokio::test]
+async fn install_marketplace_repo_creates_sibling_rows() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    require_db!();
+    let (_state, app, cookie, csrf) = install_app().await;
+    let repo = PluginRepo::of("marketplace-repo");
+    let (dir_id, _) = default_dir(&app, &cookie, &csrf).await;
+
+    let done = install_sample(&app, &repo, &dir_id, &cookie, &csrf).await;
+    let ids: Vec<&str> = done["pluginIds"]
+        .as_array()
+        .unwrap_or_else(|| panic!("pluginIds missing: {done}"))
+        .iter()
+        .map(|id| id.as_str().unwrap())
+        .collect();
+    assert_eq!(ids.len(), 5, "{done}");
+    assert_eq!(done["pluginId"], ids[0]);
+
+    let plugins = get(&app, "/api/plugins", &cookie, &csrf).await;
+    let rows = clone_rows(&plugins, &dir_id, "marketplace-repo");
+    assert_eq!(rows.len(), 5, "{plugins}");
+    let mut row_ids: Vec<&str> = rows.iter().map(|p| p["id"].as_str().unwrap()).collect();
+    let mut sorted_ids = ids.clone();
+    row_ids.sort();
+    sorted_ids.sort();
+    assert_eq!(row_ids, sorted_ids);
+    let mut names: Vec<&str> = rows.iter().map(|p| p["name"].as_str().unwrap()).collect();
+    names.sort();
+    assert_eq!(
+        names,
+        ["alpha", "beta-skills", "escape", "ghost", "remote-one"]
+    );
+    for row in rows {
+        assert_eq!(row["gitRoot"], "marketplace-repo", "{row}");
+        assert_eq!(row["source"], "git", "{row}");
+        assert_eq!(row["gitUrl"], repo.url(), "{row}");
+        assert_eq!(row["gitCommit"], repo.head(), "{row}");
+        assert_eq!(row["enabled"], false, "{row}");
+    }
+}
+
+#[tokio::test]
+async fn install_skills_catalog_repo() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    require_db!();
+    let (_state, app, cookie, csrf) = install_app().await;
+    let repo = PluginRepo::of("skills-catalog");
+    let (dir_id, _) = default_dir(&app, &cookie, &csrf).await;
+
+    let done = install_sample(&app, &repo, &dir_id, &cookie, &csrf).await;
+    assert_eq!(done["pluginIds"].as_array().unwrap().len(), 1, "{done}");
+    let plugin_id = done["pluginId"].as_str().unwrap();
+    assert_eq!(done["pluginIds"][0], plugin_id);
+    let plugin = get(&app, &format!("/api/plugins/{plugin_id}"), &cookie, &csrf).await;
+    assert_eq!(plugin["status"], "ok", "{plugin}");
+    assert_eq!(plugin["gitRoot"], "skills-catalog");
+    assert_eq!(plugin["skills"].as_array().unwrap().len(), 3, "{plugin}");
+}
+
+#[tokio::test]
+async fn update_refreshes_all_siblings_and_stops_servers() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    require_db!();
+    let (state, app, cookie, csrf) = install_app().await;
+    let repo = PluginRepo::of("marketplace-repo");
+    std::fs::write(
+        repo.work.join("plugins/alpha/.mcp.json"),
+        json!({ "mcpServers": { "fake": { "command": env!("CARGO_BIN_EXE_fake-mcp") } } })
+            .to_string(),
+    )
+    .unwrap();
+    repo.push_all("alpha mcp");
+    let (dir_id, _) = default_dir(&app, &cookie, &csrf).await;
+    install_sample(&app, &repo, &dir_id, &cookie, &csrf).await;
+    let first_commit = repo.head();
+
+    let plugins = get(&app, "/api/plugins", &cookie, &csrf).await;
+    let alpha_id = find(&plugins, &dir_id, "alpha")["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let beta_id = find(&plugins, &dir_id, "beta-skills")["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    set_enabled(&app, &alpha_id, true, &cookie, &csrf).await;
+    let (status, body) = post_test(&app, &alpha_id, &cookie, &csrf).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(fake_server_health(&state, &alpha_id), "ready");
+
+    let mut entries: Value = serde_json::from_str(
+        &std::fs::read_to_string(repo.work.join(".claude-plugin/marketplace.json")).unwrap(),
+    )
+    .unwrap();
+    let mut list = entries["plugins"].take();
+    list.as_array_mut()
+        .unwrap()
+        .push(json!({ "name": "gamma", "source": "./plugins/gamma" }));
+    write_marketplace(&repo, list);
+    let gamma = repo.work.join("plugins/gamma/skills/gamma-skill/SKILL.md");
+    std::fs::create_dir_all(gamma.parent().unwrap()).unwrap();
+    std::fs::write(
+        &gamma,
+        "---\nname: gamma-skill\ndescription: Gamma skill\n---\nDo gamma.\n",
+    )
+    .unwrap();
+    std::fs::write(
+        repo.work.join("plugins/alpha/skills/alpha-skill/SKILL.md"),
+        "---\nname: alpha-skill\ndescription: Alpha skill v2\n---\nDo alpha v2.\n",
+    )
+    .unwrap();
+    repo.push_all("gamma");
+    assert_ne!(repo.head(), first_commit);
+
+    let done = post_update(&app, &beta_id, &cookie, &csrf).await;
+    assert_eq!(done["pluginIds"].as_array().unwrap().len(), 6, "{done}");
+
+    let plugins = get(&app, "/api/plugins", &cookie, &csrf).await;
+    let rows = clone_rows(&plugins, &dir_id, "marketplace-repo");
+    assert_eq!(rows.len(), 6, "{plugins}");
+    for row in &rows {
+        assert_eq!(row["gitCommit"], repo.head(), "{row}");
+        assert_eq!(row["gitRoot"], "marketplace-repo", "{row}");
+    }
+    let gamma = find(&plugins, &dir_id, "gamma");
+    assert_eq!(gamma["status"], "ok", "{gamma}");
+    assert_eq!(gamma["enabled"], false);
+    assert_eq!(gamma["source"], "git");
+    let alpha = find(&plugins, &dir_id, "alpha");
+    assert_eq!(alpha["enabled"], true);
+    assert_eq!(alpha["skills"][0]["description"], "Alpha skill v2");
+
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while fake_server_health(&state, &alpha_id) != "stopped" {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "alpha server still running after update"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+}
+
+#[tokio::test]
+async fn update_removed_entry_becomes_missing() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    require_db!();
+    let (_state, app, cookie, csrf) = install_app().await;
+    let repo = PluginRepo::of("marketplace-repo");
+    let (dir_id, _) = default_dir(&app, &cookie, &csrf).await;
+    install_sample(&app, &repo, &dir_id, &cookie, &csrf).await;
+    let plugins = get(&app, "/api/plugins", &cookie, &csrf).await;
+    let alpha_id = find(&plugins, &dir_id, "alpha")["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let beta_id = find(&plugins, &dir_id, "beta-skills")["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    set_enabled(&app, &beta_id, true, &cookie, &csrf).await;
+    let agent_id = common::create_test_agent_from_preset(&app, "Worker", &cookie, &csrf).await;
+    let uri = format!("/api/agents/{agent_id}/plugins");
+    let (status, body) = send(
+        &app,
+        "PUT",
+        &uri,
+        json!({ "pluginIds": [beta_id] }),
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    write_marketplace(
+        &repo,
+        json!([{ "name": "alpha", "source": "./plugins/alpha" }]),
+    );
+    std::fs::remove_dir_all(repo.work.join("plugins/beta")).unwrap();
+    repo.push_all("drop beta");
+
+    let done = post_update(&app, &alpha_id, &cookie, &csrf).await;
+    assert_eq!(done["pluginIds"], json!([alpha_id]), "{done}");
+    let beta = get(&app, &format!("/api/plugins/{beta_id}"), &cookie, &csrf).await;
+    assert_eq!(beta["status"], "missing", "{beta}");
+    assert_eq!(
+        get(&app, &uri, &cookie, &csrf).await,
+        json!({ "pluginIds": [beta_id] })
+    );
+}
+
+#[tokio::test]
+async fn update_of_pre_migration_git_plugin_still_works() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    require_db!();
+    let (state, app, cookie, csrf) = install_app().await;
+    let pool = state.db.clone().unwrap();
+    let repo = PluginRepo::new();
+    let (dir_id, _) = default_dir(&app, &cookie, &csrf).await;
+    let installed = install_sample(&app, &repo, &dir_id, &cookie, &csrf).await;
+    let plugin_id = installed["pluginId"].as_str().unwrap().to_string();
+    sqlx::query("UPDATE plugins SET git_root = NULL")
+        .execute(&pool)
+        .await
+        .unwrap();
+    let before = get(&app, &format!("/api/plugins/{plugin_id}"), &cookie, &csrf).await;
+    assert!(before["gitRoot"].is_null());
+
+    repo.push_new_skill("goodbye");
+    let done = post_update(&app, &plugin_id, &cookie, &csrf).await;
+    assert_eq!(done["pluginIds"], json!([plugin_id]), "{done}");
+    let plugin = get(&app, &format!("/api/plugins/{plugin_id}"), &cookie, &csrf).await;
+    assert_eq!(plugin["gitCommit"], repo.head());
+    assert_eq!(plugin["gitRoot"], "sample-plugin");
 }
