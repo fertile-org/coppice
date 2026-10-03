@@ -538,6 +538,30 @@ async fn pool_shares_one_process_across_callers() {
 }
 
 #[tokio::test]
+async fn pool_shutdown_all_stops_every_server() {
+    let (a, b) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let pool = test_pool();
+    let specs = [pool_spec(a.path()), pool_spec(b.path())];
+    for spec in &specs {
+        assert_eq!(pool_echo(&pool, spec, "x").await, "x");
+    }
+    let procs: Vec<_> = [a.path(), b.path()]
+        .iter()
+        .map(|root| Path::new("/proc").join(read_pid(root).trim()))
+        .collect();
+
+    pool.shutdown_all().await;
+    for spec in &specs {
+        assert_eq!(pool.health(&spec.key), ServerHealth::Stopped);
+    }
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
+    while procs.iter().any(|p| p.exists()) {
+        assert!(tokio::time::Instant::now() < deadline, "server still alive");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+}
+
+#[tokio::test]
 async fn pool_health_reflects_server_killed_while_idle() {
     let dir = tempfile::tempdir().unwrap();
     let pool = test_pool();

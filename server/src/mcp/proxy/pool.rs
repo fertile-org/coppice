@@ -292,6 +292,16 @@ impl McpServerPool {
         close_all(stale).await;
     }
 
+    /// Stops every instance, e.g. on server shutdown.
+    pub async fn shutdown_all(&self) {
+        let stale: Vec<_> = self
+            .all_slots()
+            .into_iter()
+            .filter_map(|(_, slot)| slot.lock().unwrap().reset())
+            .collect();
+        close_all(stale).await;
+    }
+
     pub async fn reap_idle(&self) {
         let now = Instant::now();
         let stale: Vec<_> = self
@@ -983,6 +993,23 @@ mod tests {
         assert_eq!(pool.health(&specs[0].key), ServerHealth::Stopped);
         assert_eq!(pool.health(&specs[1].key), ServerHealth::Stopped);
         assert_eq!(pool.health(&specs[2].key), ServerHealth::Ready);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn shutdown_all_closes_every_server() {
+        let (pool, fake) = pool();
+        let specs = [
+            spec_for(Uuid::from_u128(1), "one", Some("t")),
+            spec_for(Uuid::from_u128(2), "one", Some("t")),
+        ];
+        for spec in &specs {
+            pool.tools(spec).await.unwrap();
+        }
+        pool.shutdown_all().await;
+        for (index, spec) in specs.iter().enumerate() {
+            assert!(fake.conn(index).closed.load(Ordering::SeqCst));
+            assert_eq!(pool.health(&spec.key), ServerHealth::Stopped);
+        }
     }
 
     #[tokio::test(start_paused = true)]

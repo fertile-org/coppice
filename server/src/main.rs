@@ -116,6 +116,7 @@ async fn main() -> anyhow::Result<()> {
         .with_graceful_shutdown(async move {
             tokio::signal::ctrl_c().await.ok();
             opencode_runs.shutdown_all().await;
+            plugin_mcp.shutdown_all().await;
         })
         .await?;
     Ok(())
