@@ -1722,6 +1722,85 @@ async fn disable_stops_plugin_servers() {
     assert_eq!(detail["mcpServers"][0]["health"], "stopped");
 }
 
+fn fake_server_health(state: &coppice_server::AppState, plugin_id: &str) -> &'static str {
+    state
+        .plugin_mcp
+        .health(&coppice_server::mcp::proxy::ServerKey {
+            plugin_id: plugin_id.parse().unwrap(),
+            server: "fake".into(),
+        })
+        .as_str()
+}
+
+/// Enabled `mcp-fake` with its server running.
+async fn running_fake_mcp_plugin(
+    state: &coppice_server::AppState,
+    app: &Router,
+    cookie: &str,
+    csrf: &str,
+) -> (tempfile::TempDir, String) {
+    let (dir, id) = fake_mcp_plugin(app, cookie, csrf).await;
+    set_enabled(app, &id, true, cookie, csrf).await;
+    let (status, body) = post_test(app, &id, cookie, csrf).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(fake_server_health(state, &id), "ready");
+    (dir, id)
+}
+
+#[tokio::test]
+async fn rescan_to_missing_stops_plugin_servers() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    require_db!();
+    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
+    let (dir, id) = running_fake_mcp_plugin(&state, &app, &cookie, &csrf).await;
+
+    std::fs::remove_dir_all(dir.path().join("mcp-fake")).unwrap();
+    rescan(&app, &cookie, &csrf).await;
+    let detail = get(&app, &format!("/api/plugins/{id}"), &cookie, &csrf).await;
+    assert_eq!(detail["status"], "missing");
+    assert_eq!(fake_server_health(&state, &id), "stopped");
+}
+
+#[tokio::test]
+async fn rescan_to_invalid_stops_plugin_servers() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    require_db!();
+    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
+    let (dir, id) = running_fake_mcp_plugin(&state, &app, &cookie, &csrf).await;
+
+    std::fs::write(
+        dir.path().join("mcp-fake/.claude-plugin/plugin.json"),
+        "{ not json",
+    )
+    .unwrap();
+    rescan(&app, &cookie, &csrf).await;
+    let detail = get(&app, &format!("/api/plugins/{id}"), &cookie, &csrf).await;
+    assert_eq!(detail["status"], "invalid");
+    assert_eq!(fake_server_health(&state, &id), "stopped");
+}
+
+#[tokio::test]
+async fn remove_dir_stops_plugin_servers() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    require_db!();
+    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
+    let (_dir, id) = running_fake_mcp_plugin(&state, &app, &cookie, &csrf).await;
+    let detail = get(&app, &format!("/api/plugins/{id}"), &cookie, &csrf).await;
+    let dir_id = detail["pluginDirId"].as_str().unwrap().to_string();
+
+    let (status, body) = send(
+        &app,
+        "DELETE",
+        &format!("/api/plugin-dirs/{dir_id}"),
+        Value::Null,
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT, "{body}");
+    assert_eq!(fake_server_health(&state, &id), "stopped");
+}
+
 #[tokio::test]
 async fn test_reports_undecryptable_settings_per_server() {
     let _guard = common::DB_TEST_LOCK.lock().await;

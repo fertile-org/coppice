@@ -7,7 +7,7 @@ use crate::plugins::placeholders::{resolve, server_env_allowed, ResolveCtx, Reso
 use coppice_config::PluginsConfig;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -283,20 +283,24 @@ impl McpServerPool {
     }
 
     pub async fn stop_plugin(&self, plugin_id: Uuid) {
-        let stale: Vec<_> = self
-            .all_slots()
-            .into_iter()
-            .filter(|(key, _)| key.plugin_id == plugin_id)
-            .filter_map(|(_, slot)| slot.lock().unwrap().reset())
-            .collect();
-        close_all(stale).await;
+        self.stop_where(|id| id == plugin_id).await;
+    }
+
+    /// Stops the instances of every plugin not in `keep`.
+    pub async fn retain_plugins(&self, keep: &HashSet<Uuid>) {
+        self.stop_where(|id| !keep.contains(&id)).await;
     }
 
     /// Stops every instance, e.g. on server shutdown.
     pub async fn shutdown_all(&self) {
+        self.stop_where(|_| true).await;
+    }
+
+    async fn stop_where(&self, stop: impl Fn(Uuid) -> bool) {
         let stale: Vec<_> = self
             .all_slots()
             .into_iter()
+            .filter(|(key, _)| stop(key.plugin_id))
             .filter_map(|(_, slot)| slot.lock().unwrap().reset())
             .collect();
         close_all(stale).await;
@@ -993,6 +997,21 @@ mod tests {
         assert_eq!(pool.health(&specs[0].key), ServerHealth::Stopped);
         assert_eq!(pool.health(&specs[1].key), ServerHealth::Stopped);
         assert_eq!(pool.health(&specs[2].key), ServerHealth::Ready);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn retain_plugins_stops_the_others() {
+        let (pool, fake) = pool();
+        let (a, b) = (Uuid::from_u128(1), Uuid::from_u128(2));
+        let specs = [spec_for(a, "one", Some("t")), spec_for(b, "one", Some("t"))];
+        for spec in &specs {
+            pool.tools(spec).await.unwrap();
+        }
+        pool.retain_plugins(&HashSet::from([a])).await;
+        assert!(!fake.conn(0).closed.load(Ordering::SeqCst));
+        assert!(fake.conn(1).closed.load(Ordering::SeqCst));
+        assert_eq!(pool.health(&specs[0].key), ServerHealth::Ready);
+        assert_eq!(pool.health(&specs[1].key), ServerHealth::Stopped);
     }
 
     #[tokio::test(start_paused = true)]

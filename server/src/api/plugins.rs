@@ -223,11 +223,20 @@ impl From<StatusCode> for ApiError {
     }
 }
 
-/// The mutation has already committed, so a failed refresh is logged rather
-/// than reported; the next refresh picks the change up.
-async fn refresh_skills(service: &PluginService<'_>, state: &AppState) {
+/// Refreshes the skill catalog and stops the MCP servers of plugins that are no
+/// longer `ok` (missing, invalid, shadowed, or removed). The mutation has already
+/// committed, so failures are logged rather than reported.
+async fn sync_plugins(service: &PluginService<'_>, state: &AppState) {
     if let Err(err) = service.refresh_catalog(&state.skills).await {
         tracing::error!(error = %err, "failed to refresh plugin skill catalog");
+    }
+    stop_unusable_servers(service, state).await;
+}
+
+async fn stop_unusable_servers(service: &PluginService<'_>, state: &AppState) {
+    match service.ok_plugin_ids().await {
+        Ok(ok) => state.plugin_mcp.retain_plugins(&ok).await,
+        Err(err) => tracing::error!(error = %err, "failed to list ok plugins"),
     }
 }
 
@@ -359,7 +368,8 @@ fn install_response(install: PluginInstall) -> Json<PluginInstallResponse> {
 
 /// Runs `job` in the background, then records its outcome; nothing borrowed
 /// from the request may be captured. A successful update of `updated_plugin`
-/// stops its MCP servers so they restart from the new checkout.
+/// stops its MCP servers so they restart from the new checkout; the rescan may
+/// also have taken other plugins out of `ok`.
 fn spawn_git_job<F>(
     state: Arc<AppState>,
     install_id: Uuid,
@@ -375,12 +385,14 @@ fn spawn_git_job<F>(
         let Some(pool) = state.db.as_ref() else {
             return;
         };
-        PluginService::new(pool)
+        let service = PluginService::new(pool);
+        service
             .complete_git_job(install_id, result, &dest_rel, &state.skills)
             .await;
         if let (true, Some(plugin_id)) = (succeeded, updated_plugin) {
             state.plugin_mcp.stop_plugin(plugin_id).await;
         }
+        stop_unusable_servers(&service, &state).await;
     });
 }
 
@@ -464,7 +476,7 @@ async fn add_dir(
     let pool = pool_from_state(&state)?;
     let service = PluginService::new(pool);
     let dir = service.add_dir(&body.path).await?;
-    refresh_skills(&service, &state).await;
+    sync_plugins(&service, &state).await;
     Ok((StatusCode::CREATED, Json(dir_response(dir))))
 }
 
@@ -477,7 +489,7 @@ async fn move_dir(
     let pool = pool_from_state(&state)?;
     let service = PluginService::new(pool);
     let dirs = service.move_dir(dir_id, body.position).await?;
-    refresh_skills(&service, &state).await;
+    sync_plugins(&service, &state).await;
     Ok(Json(dirs.into_iter().map(dir_response).collect()))
 }
 
@@ -489,7 +501,7 @@ async fn remove_dir(
     let pool = pool_from_state(&state)?;
     let service = PluginService::new(pool);
     service.remove_dir(dir_id).await?;
-    refresh_skills(&service, &state).await;
+    sync_plugins(&service, &state).await;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -500,7 +512,7 @@ async fn rescan(
     let pool = pool_from_state(&state)?;
     let service = PluginService::new(pool);
     let plugins = service.rescan().await?;
-    refresh_skills(&service, &state).await;
+    sync_plugins(&service, &state).await;
     plugins_response(&state, pool, plugins).await
 }
 
@@ -587,7 +599,7 @@ async fn set_enabled(
         state.skills.remove_plugin(plugin.id).await;
         state.plugin_mcp.stop_plugin(plugin.id).await;
     }
-    refresh_skills(&service, &state).await;
+    sync_plugins(&service, &state).await;
     single_response(&state, pool, plugin).await
 }
 

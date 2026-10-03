@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use crate::config::PluginsConfig;
@@ -360,6 +361,13 @@ impl<'a> PluginService<'a> {
         .fetch_all(self.pool)
         .await?;
         Ok(rows.iter().map(row_to_plugin).collect())
+    }
+
+    pub async fn ok_plugin_ids(&self) -> Result<HashSet<Uuid>, PluginError> {
+        let ids: Vec<Uuid> = sqlx::query_scalar("SELECT id FROM plugins WHERE status = 'ok'")
+            .fetch_all(self.pool)
+            .await?;
+        Ok(ids.into_iter().collect())
     }
 
     pub async fn get_plugin(&self, id: Uuid) -> Result<PluginRow, PluginError> {
