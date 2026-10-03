@@ -261,27 +261,29 @@ export function AgentForm({
           </p>
         ) : (
           <ul className="space-y-1.5">
-            {assignablePlugins.map((plugin) => (
-              <li key={plugin.id}>
-                <label className="flex items-start gap-2">
-                  <input
-                    type="checkbox"
-                    checked={values.pluginIds.includes(plugin.id)}
-                    onChange={(e) => togglePlugin(plugin.id, e.target.checked)}
-                    className="mt-0.5 h-4 w-4 rounded border-border text-moss-600 focus:ring-moss-500"
-                  />
-                  <span className="font-body text-sm text-text-primary">
-                    {plugin.name}
-                    {plugin.skills.length > 0 && (
-                      <span className="ml-1 text-text-muted">
-                        ({plugin.skills.length}{' '}
-                        {plugin.skills.length === 1 ? 'skill' : 'skills'})
-                      </span>
-                    )}
-                  </span>
-                </label>
-              </li>
-            ))}
+            {assignablePlugins.map((plugin) => {
+              const skillCount = plugin.skills.filter((skill) => skill.enabled).length;
+              return (
+                <li key={plugin.id}>
+                  <label className="flex items-start gap-2">
+                    <input
+                      type="checkbox"
+                      checked={values.pluginIds.includes(plugin.id)}
+                      onChange={(e) => togglePlugin(plugin.id, e.target.checked)}
+                      className="mt-0.5 h-4 w-4 rounded border-border text-moss-600 focus:ring-moss-500"
+                    />
+                    <span className="font-body text-sm text-text-primary">
+                      {plugin.name}
+                      {skillCount > 0 && (
+                        <span className="ml-1 text-text-muted">
+                          ({skillCount} {skillCount === 1 ? 'skill' : 'skills'})
+                        </span>
+                      )}
+                    </span>
+                  </label>
+                </li>
+              );
+            })}
             {unavailableAssigned.map((plugin) => (
               <li key={plugin.id}>
                 <label className="flex items-start gap-2 opacity-70">

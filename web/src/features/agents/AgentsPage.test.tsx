@@ -72,6 +72,9 @@ function plugin(overrides: Partial<Plugin>): Plugin {
     mcpServers: [],
     settings: [],
     unsupported: [],
+    marketplace: null,
+    external: null,
+    gitRoot: null,
     ...overrides,
   };
 }

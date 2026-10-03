@@ -91,6 +91,22 @@ async function setPluginEnabled({
   return pluginSchema.parse(await res.json());
 }
 
+async function setSkillEnabled(
+  pluginId: string,
+  skill: string,
+  enabled: boolean,
+): Promise<Plugin> {
+  const res = await apiFetch(
+    `/api/plugins/${pluginId}/skills/${encodeURIComponent(skill)}`,
+    {
+      method: 'PUT',
+      headers: JSON_HEADERS,
+      body: JSON.stringify({ enabled }),
+    },
+  );
+  return pluginSchema.parse(await res.json());
+}
+
 async function setPluginSettings(
   id: string,
   values: Record<string, string>,
@@ -203,6 +219,19 @@ export function useSetPluginEnabled() {
     mutationFn: setPluginEnabled,
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: PLUGINS_QUERY_KEY });
+    },
+  });
+}
+
+export function useSetSkillEnabled(pluginId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ skill, enabled }: { skill: string; enabled: boolean }) =>
+      setSkillEnabled(pluginId, skill, enabled),
+    onSuccess: (updated) => {
+      queryClient.setQueryData<Plugin[]>(PLUGINS_QUERY_KEY, (list) =>
+        list?.map((p) => (p.id === updated.id ? updated : p)),
+      );
     },
   });
 }

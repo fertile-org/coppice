@@ -1,9 +1,9 @@
 import { ArrowDown, ArrowUp } from 'lucide-react';
-import { useState, type FormEvent } from 'react';
+import { useRef, useState, type FormEvent, type RefObject } from 'react';
 import { Navigate } from 'react-router-dom';
 import { Button } from '../../components/ui/button';
 import { isDesktopShell, pickDirectory } from '../../lib/desktop';
-import type { PluginDir } from '../../lib/schemas/plugin';
+import type { Plugin, PluginDir, PluginInstall } from '../../lib/schemas/plugin';
 import { useSession } from '../auth/useSession';
 import { PluginCard } from './PluginCard';
 import { PluginsGuide } from './PluginsGuide';
@@ -201,8 +201,41 @@ function PluginDirsSection({ dirs }: { dirs: PluginDir[] }) {
   );
 }
 
-function InstallSection({ dirs }: { dirs: PluginDir[] }) {
-  const [gitUrl, setGitUrl] = useState('');
+function lastPathSegment(path: string): string {
+  return path.replace(/[/\\]+$/, '').split(/[/\\:]/).pop() ?? path;
+}
+
+/** The clone's folder name, or the repository name from its URL. */
+function repoFolder(install: PluginInstall, produced: Plugin[]): string {
+  const gitRoot = produced.find((plugin) => plugin.gitRoot)?.gitRoot;
+  if (gitRoot) return lastPathSegment(gitRoot);
+  return lastPathSegment(install.gitUrl).replace(/\.git$/, '');
+}
+
+function installSuccessMessage(install: PluginInstall, plugins: Plugin[]): string {
+  if (install.pluginIds.length <= 1) return `Installed ${install.gitUrl}.`;
+  const produced = install.pluginIds
+    .map((id) => plugins.find((plugin) => plugin.id === id))
+    .filter((plugin): plugin is Plugin => plugin !== undefined);
+  const names = produced.length > 0 ? ` (${produced.map((p) => p.name).join(', ')})` : '';
+  return `Installed ${repoFolder(install, produced)}: ${install.pluginIds.length} plugins${names}`;
+}
+
+interface InstallSectionProps {
+  dirs: PluginDir[];
+  plugins: Plugin[];
+  gitUrl: string;
+  onGitUrlChange: (url: string) => void;
+  sectionRef: RefObject<HTMLElement | null>;
+}
+
+function InstallSection({
+  dirs,
+  plugins,
+  gitUrl,
+  onGitUrlChange: setGitUrl,
+  sectionRef,
+}: InstallSectionProps) {
   const [ref, setRef] = useState('');
   const [pluginDirId, setPluginDirId] = useState('');
   const [installId, setInstallId] = useState<string | null>(null);
@@ -240,7 +273,7 @@ function InstallSection({ dirs }: { dirs: PluginDir[] }) {
   }
 
   return (
-    <section className="space-y-3">
+    <section ref={sectionRef} className="space-y-3">
       <div>
         <SubHeading>Install from git</SubHeading>
         <p className="mt-1 font-body text-sm text-text-secondary">
@@ -319,7 +352,9 @@ function InstallSection({ dirs }: { dirs: PluginDir[] }) {
         </p>
       )}
       {install?.status === 'succeeded' && (
-        <p className="font-body text-sm text-success">Installed {install.gitUrl}.</p>
+        <p className="font-body text-sm text-success">
+          {installSuccessMessage(install, plugins)}
+        </p>
       )}
       {install?.status === 'failed' && (
         <p role="alert" className={ERROR_CLASS}>
@@ -339,6 +374,13 @@ export function PluginsPage() {
   const { user, loading } = useSession();
   const dirsQuery = usePluginDirs();
   const pluginsQuery = usePlugins();
+  const [gitUrl, setGitUrl] = useState('');
+  const installRef = useRef<HTMLElement>(null);
+
+  function handleInstallFromGit(url: string) {
+    setGitUrl(url);
+    installRef.current?.scrollIntoView?.({ behavior: 'smooth', block: 'start' });
+  }
 
   if (loading) {
     return <p className="font-body text-sm text-text-muted">Loading session…</p>;
@@ -352,6 +394,12 @@ export function PluginsPage() {
   const plugins = pluginsQuery.data ?? [];
   const isLoading = dirsQuery.isLoading || pluginsQuery.isLoading;
   const isError = dirsQuery.isError || pluginsQuery.isError;
+  const clonePluginCounts = new Map<string, number>();
+  for (const plugin of plugins) {
+    if (plugin.gitRoot) {
+      clonePluginCounts.set(plugin.gitRoot, (clonePluginCounts.get(plugin.gitRoot) ?? 0) + 1);
+    }
+  }
 
   return (
     <div className="space-y-8">
@@ -398,14 +446,27 @@ export function PluginsPage() {
             ) : (
               <div className="space-y-3">
                 {plugins.map((plugin) => (
-                  <PluginCard key={plugin.id} plugin={plugin} />
+                  <PluginCard
+                    key={plugin.id}
+                    plugin={plugin}
+                    onInstallFromGit={handleInstallFromGit}
+                    siblingCount={
+                      plugin.gitRoot ? clonePluginCounts.get(plugin.gitRoot) : undefined
+                    }
+                  />
                 ))}
               </div>
             )}
           </section>
           <section className="space-y-6">
             <SectionHeading>Add plugins</SectionHeading>
-            <InstallSection dirs={dirs} />
+            <InstallSection
+              dirs={dirs}
+              plugins={plugins}
+              gitUrl={gitUrl}
+              onGitUrlChange={setGitUrl}
+              sectionRef={installRef}
+            />
             <PluginDirsSection dirs={dirs} />
           </section>
         </>

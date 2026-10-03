@@ -1,6 +1,7 @@
 import '@testing-library/jest-dom/vitest';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import type { ComponentProps } from 'react';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { setCsrfToken } from '../../lib/api';
@@ -31,6 +32,9 @@ const plugin: Plugin = {
     { key: 'ROOT', configured: false, source: 'missing' },
   ],
   unsupported: [],
+  marketplace: null,
+  external: null,
+  gitRoot: null,
 };
 
 const testResult: PluginTestResult = {
@@ -64,14 +68,17 @@ function json(body: unknown, status = 200) {
   });
 }
 
-function renderCard(target: Plugin = plugin) {
+function renderCard(
+  target: Plugin = plugin,
+  props: Partial<Omit<ComponentProps<typeof PluginCard>, 'plugin'>> = {},
+) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
   return render(
     <QueryClientProvider client={client}>
       <MemoryRouter>
-        <PluginCard plugin={target} />
+        <PluginCard plugin={target} {...props} />
       </MemoryRouter>
     </QueryClientProvider>,
   );
@@ -390,7 +397,13 @@ describe('PluginCard', () => {
     renderCard({
       ...plugin,
       skills: [
-        { name: 'review', description: 'Review code', relPath: 'skills/review/SKILL.md', error: null },
+        {
+          name: 'review',
+          description: 'Review code',
+          relPath: 'skills/review/SKILL.md',
+          error: null,
+          enabled: true,
+        },
       ],
     });
 
@@ -403,5 +416,123 @@ describe('PluginCard', () => {
     const raw: Partial<Plugin> = { ...plugin };
     delete raw.settings;
     expect(pluginSchema.parse(raw).settings).toEqual([]);
+  });
+
+  it('new plugin fields default when absent', () => {
+    const raw: Record<string, unknown> = {
+      ...plugin,
+      skills: [{ name: 'a', description: '', relPath: 'skills/a/SKILL.md', error: null }],
+    };
+    delete raw.marketplace;
+    delete raw.external;
+    delete raw.gitRoot;
+    const parsed = pluginSchema.parse(raw);
+    expect(parsed.marketplace).toBeNull();
+    expect(parsed.external).toBeNull();
+    expect(parsed.gitRoot).toBeNull();
+    expect(parsed.skills[0].enabled).toBe(true);
+    expect(pluginSchema.parse({ ...plugin, status: 'external' }).status).toBe('external');
+  });
+
+  it('skill switches show the on count and PUT the change', async () => {
+    const withSkills: Plugin = {
+      ...plugin,
+      skills: [
+        { name: 'a', description: '', relPath: 'skills/a/SKILL.md', error: null, enabled: true },
+        { name: 'b', description: '', relPath: 'skills/b/SKILL.md', error: null, enabled: false },
+      ],
+    };
+    fetchMock.mockImplementation((path: string, init: RequestInit = {}) => {
+      if (path === `/api/plugins/${plugin.id}/skills/b` && init.method === 'PUT') {
+        return Promise.resolve(json(withSkills));
+      }
+      if (path === '/api/plugins') return Promise.resolve(json([withSkills]));
+      return Promise.reject(new Error(`unexpected ${init.method ?? 'GET'} ${path}`));
+    });
+    renderCard(withSkills);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Skills (1 of 2 on)' }));
+    expect(screen.getByRole('switch', { name: 'Disable a' })).toBeVisible();
+    fireEvent.click(screen.getByRole('switch', { name: 'Enable b' }));
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        `/api/plugins/${plugin.id}/skills/b`,
+        expect.anything(),
+      ),
+    );
+    const init = callFor(`/api/plugins/${plugin.id}/skills/b`);
+    expect(init.method).toBe('PUT');
+    expect(JSON.parse(init.body as string)).toEqual({ enabled: true });
+    expect((init.headers as Record<string, string>)['X-CSRF-Token']).toBe('csrf-token');
+  });
+
+  it('skills header shows a plain count when all are on', () => {
+    renderCard({
+      ...plugin,
+      skills: [
+        { name: 'a', description: '', relPath: 'skills/a/SKILL.md', error: null, enabled: true },
+      ],
+    });
+
+    expect(screen.getByRole('button', { name: 'Skills (1)' })).toBeVisible();
+  });
+
+  it('external plugin card shows the source and offers install', () => {
+    const onInstallFromGit = vi.fn();
+    const url = 'https://github.com/acme/r.git';
+    renderCard(
+      {
+        ...plugin,
+        status: 'external',
+        enabled: false,
+        mcpServers: [],
+        settings: [],
+        external: { kind: 'github', url },
+      },
+      { onInstallFromGit },
+    );
+
+    expect(screen.getByText(`Lives in another repository: ${url}`)).toBeVisible();
+    expect(screen.getByText('external')).toHaveAttribute(
+      'title',
+      'Lives in another repository; install it separately.',
+    );
+    expect(screen.queryByRole('switch')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Test' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Install from git' }));
+    expect(onInstallFromGit).toHaveBeenCalledWith(url);
+  });
+
+  it('external plugin without a url names its source kind', () => {
+    renderCard({
+      ...plugin,
+      status: 'external',
+      enabled: false,
+      mcpServers: [],
+      settings: [],
+      external: { kind: 'npm', url: null },
+    });
+
+    expect(screen.getByText('Source: npm')).toBeVisible();
+    expect(screen.queryByRole('button', { name: 'Install from git' })).not.toBeInTheDocument();
+  });
+
+  it('marketplace plugins show where they came from', () => {
+    renderCard({ ...plugin, marketplace: { name: 'acme-market' } });
+
+    expect(screen.getByText('From marketplace acme-market')).toBeVisible();
+  });
+
+  it('update tooltip names sibling count', () => {
+    renderCard(
+      { ...plugin, source: 'git', gitUrl: 'https://x/r.git', gitRoot: '/data/plugins/r' },
+      { siblingCount: 3 },
+    );
+
+    expect(screen.getByRole('button', { name: 'Update' })).toHaveAttribute(
+      'title',
+      'Updates all 3 plugins from this repository',
+    );
   });
 });

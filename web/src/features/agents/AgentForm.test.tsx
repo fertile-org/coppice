@@ -42,6 +42,9 @@ function plugin(overrides: Partial<Plugin>): Plugin {
     mcpServers: [],
     settings: [],
     unsupported: [],
+    marketplace: null,
+    external: null,
+    gitRoot: null,
     ...overrides,
   };
 }
@@ -125,6 +128,22 @@ describe('AgentForm plugins picker', () => {
     expect(screen.getByRole('checkbox', { name: /alpha-plugin/ })).toBeEnabled();
     expect(screen.queryByRole('checkbox', { name: /beta-plugin/ })).toBeNull();
     expect(screen.queryByRole('checkbox', { name: /gamma-plugin/ })).toBeNull();
+  });
+
+  it('agent picker counts enabled skills only', () => {
+    const skill = (name: string, enabled: boolean) => ({
+      name,
+      description: '',
+      relPath: `skills/${name}/SKILL.md`,
+      error: null,
+      enabled,
+    });
+    mocks.plugins = [
+      { ...pluginA, skills: [skill('a', true), skill('b', false), skill('c', true)] },
+    ];
+    render(<Harness initial={baseValues()} onSubmit={vi.fn()} />);
+
+    expect(screen.getByText('(2 skills)')).toBeInTheDocument();
   });
 
   it('submits selected plugin ids', async () => {

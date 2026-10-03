@@ -9,7 +9,13 @@ export const pluginDirSchema = z.object({
 
 export type PluginDir = z.infer<typeof pluginDirSchema>;
 
-export const pluginStatusSchema = z.enum(['ok', 'invalid', 'missing', 'shadowed']);
+export const pluginStatusSchema = z.enum([
+  'ok',
+  'invalid',
+  'missing',
+  'shadowed',
+  'external',
+]);
 
 export type PluginStatus = z.infer<typeof pluginStatusSchema>;
 
@@ -18,6 +24,7 @@ export const pluginSkillSchema = z.object({
   description: z.string(),
   relPath: z.string(),
   error: z.string().nullable(),
+  enabled: z.boolean().default(true),
 });
 
 export type PluginSkill = z.infer<typeof pluginSkillSchema>;
@@ -72,6 +79,12 @@ export const pluginSchema = z.object({
   mcpServers: z.array(pluginMcpServerSchema),
   settings: z.array(pluginSettingSchema).default([]),
   unsupported: z.array(z.string()),
+  marketplace: z.object({ name: z.string() }).nullable().default(null),
+  external: z
+    .object({ kind: z.string(), url: z.string().nullable() })
+    .nullable()
+    .default(null),
+  gitRoot: z.string().nullable().default(null),
 });
 
 export type Plugin = z.infer<typeof pluginSchema>;
@@ -110,6 +123,7 @@ export const pluginInstallSchema = z.object({
   gitUrl: z.string(),
   gitRef: z.string().nullable(),
   pluginId: z.string().uuid().nullable(),
+  pluginIds: z.array(z.string().uuid()).default([]),
   status: pluginInstallStatusSchema,
   error: z.string().nullable(),
 });

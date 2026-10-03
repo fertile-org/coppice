@@ -53,11 +53,15 @@ const samplePlugin: Plugin = {
       description: 'Review code',
       relPath: 'skills/review/SKILL.md',
       error: null,
+      enabled: true,
     },
   ],
   mcpServers: [{ name: 'docs', kind: 'stdio', health: 'stopped' }],
   settings: [],
   unsupported: ['commands', 'hooks'],
+  marketplace: null,
+  external: null,
+  gitRoot: null,
 };
 
 const STDIO_WARNING =
@@ -114,6 +118,7 @@ describe('PluginsPage', () => {
       gitUrl: 'https://github.com/org/missing.git',
       gitRef: 'v1',
       pluginId: null,
+      pluginIds: [],
       status: 'failed',
       error: 'repository not found',
     };
@@ -300,6 +305,88 @@ describe('PluginsPage', () => {
       (h) => h.textContent,
     );
     expect(headings).toEqual(['Installed plugins', 'Add plugins']);
+  });
+
+  it('Install from git on an external card fills the install form', async () => {
+    const url = 'https://github.com/acme/r.git';
+    plugins = [
+      {
+        ...samplePlugin,
+        id: '00000000-0000-4000-8000-000000000012',
+        name: 'remote-plugin',
+        source: 'local',
+        status: 'external',
+        skills: [],
+        mcpServers: [],
+        unsupported: [],
+        external: { kind: 'github', url },
+      },
+    ];
+    renderPage();
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Install from git' }));
+
+    expect(screen.getByLabelText('Git URL')).toHaveValue(url);
+  });
+
+  it('install success lists every plugin from the clone', async () => {
+    const alpha: Plugin = {
+      ...samplePlugin,
+      id: '00000000-0000-4000-8000-0000000000a1',
+      name: 'alpha',
+      gitRoot: '/data/plugins/marketplace-repo',
+    };
+    const beta: Plugin = {
+      ...alpha,
+      id: '00000000-0000-4000-8000-0000000000a2',
+      name: 'beta-skills',
+    };
+    installPoll = {
+      ...installPoll,
+      gitUrl: 'https://github.com/acme/marketplace-repo.git',
+      gitRef: null,
+      pluginId: alpha.id,
+      pluginIds: [alpha.id, beta.id],
+      status: 'succeeded',
+      error: null,
+    };
+    renderPage();
+
+    fireEvent.change(await screen.findByLabelText('Git URL'), {
+      target: { value: 'https://github.com/acme/marketplace-repo.git' },
+    });
+    plugins = [alpha, beta];
+    fireEvent.click(screen.getByRole('button', { name: 'Install' }));
+
+    expect(
+      await screen.findByText('Installed marketplace-repo: 2 plugins (alpha, beta-skills)'),
+    ).toBeVisible();
+    const update = within(screen.getByTestId(`plugin-card-${alpha.id}`)).getByRole(
+      'button',
+      { name: 'Update' },
+    );
+    expect(update).toHaveAttribute('title', 'Updates all 2 plugins from this repository');
+  });
+
+  it('single-plugin install keeps the plain success message', async () => {
+    installPoll = {
+      ...installPoll,
+      gitUrl: 'https://github.com/org/sample-plugin.git',
+      pluginId: samplePlugin.id,
+      pluginIds: [samplePlugin.id],
+      status: 'succeeded',
+      error: null,
+    };
+    renderPage();
+
+    fireEvent.change(await screen.findByLabelText('Git URL'), {
+      target: { value: 'https://github.com/org/sample-plugin.git' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Install' }));
+
+    expect(
+      await screen.findByText('Installed https://github.com/org/sample-plugin.git.'),
+    ).toBeVisible();
   });
 
   it('default directory cannot be removed', async () => {
