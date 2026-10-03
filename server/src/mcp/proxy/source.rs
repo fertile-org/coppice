@@ -1,7 +1,7 @@
 //! Plugin MCP servers as the gateway's third tool source.
 
 use super::naming::exposed_name;
-use super::pool::{McpServerPool, PoolError, PoolServerSpec, ServerHealth};
+use super::pool::{McpServerPool, PoolError, PoolServerSpec};
 use super::transport::RemoteTool;
 use crate::crypto::SecretStore;
 use crate::domain::context_profile::ContextProfile;
@@ -70,12 +70,8 @@ impl PluginMcpSource {
         }
     }
 
-    /// A server another request is already starting is skipped rather than
-    /// awaited, so a slow start does not stall every gateway request.
+    /// Concurrent listers share an in-flight start, each waiting at most the budget.
     async fn server_tools(&self, spec: &PoolServerSpec) -> Result<Vec<RemoteTool>, PoolError> {
-        if self.pool.health(&spec.key) == ServerHealth::Starting {
-            return Err(PoolError::Unavailable);
-        }
         tokio::time::timeout(self.server_timeout, self.pool.tools(spec))
             .await
             .unwrap_or(Err(PoolError::Timeout))
@@ -216,7 +212,8 @@ mod tests {
         }
     }
 
-    /// Command `slow` hangs in `connect`, `fast` serves one `echo` tool, anything else fails.
+    /// Command `slow` hangs in `connect`, `starting` serves one `echo` tool after
+    /// 100 ms, `fast` serves it at once, anything else fails.
     struct ScriptedTransport;
 
     struct EchoConn;
@@ -260,6 +257,10 @@ mod tests {
         ) -> Result<Box<dyn McpConnection>, ProxyError> {
             match spec {
                 ResolvedTransport::Stdio { command, .. } if command == "fast" => {
+                    Ok(Box::new(EchoConn))
+                }
+                ResolvedTransport::Stdio { command, .. } if command == "starting" => {
+                    tokio::time::sleep(Duration::from_millis(100)).await;
                     Ok(Box::new(EchoConn))
                 }
                 ResolvedTransport::Stdio { command, .. } if command == "slow" => {
@@ -397,7 +398,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn slow_server_skipped_within_budget_and_not_awaited_while_starting() {
+    async fn slow_server_skipped_after_bounded_wait() {
         let fast = Uuid::from_u128(1);
         let slow = Uuid::from_u128(2);
         let (source, _) = make_source(vec![
@@ -428,12 +429,26 @@ mod tests {
             .into_iter()
             .map(|t| t.def.name)
             .collect();
+        let waited = started.elapsed();
         assert!(
-            started.elapsed() < Duration::from_millis(100),
-            "starting server was awaited: {:?}",
-            started.elapsed()
+            waited >= Duration::from_millis(150) && waited < Duration::from_secs(1),
+            "still-starting server should be awaited up to the budget: {waited:?}"
         );
         assert_eq!(names, vec!["fast__echo".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn concurrent_listers_share_a_start_that_finishes_within_budget() {
+        let plugin = Uuid::from_u128(3);
+        let (source, _) = make_source(vec![server(plugin, "late", "starting")]);
+        let mut scope = scope(ContextProfile::Full);
+        scope.plugin_ids = vec![plugin];
+        let names = |tools: Vec<SourcedTool>| -> Vec<String> {
+            tools.into_iter().map(|t| t.def.name).collect()
+        };
+        let (first, second) = tokio::join!(source.list(&scope), source.list(&scope));
+        assert_eq!(names(first), vec!["late__echo".to_string()]);
+        assert_eq!(names(second), vec!["late__echo".to_string()]);
     }
 
     #[test]

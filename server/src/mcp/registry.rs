@@ -71,20 +71,26 @@ impl ToolRegistry {
             .collect()
     }
 
+    async fn list_source(&self, source: &dyn ToolSource, scope: &RunToolScope) -> Vec<SourcedTool> {
+        match tokio::time::timeout(self.list_timeout, source.list(scope)).await {
+            Ok(tools) => tools,
+            Err(_) => {
+                tracing::warn!(
+                    source = source.kind().as_str(),
+                    "tool source list timed out"
+                );
+                Vec::new()
+            }
+        }
+    }
+
     /// Merged tool set for `scope`, each paired with the index of its source.
     async fn resolve(&self, scope: &RunToolScope) -> Vec<(usize, SourcedTool)> {
-        let listed = futures_util::future::join_all(self.sources.iter().map(|source| async move {
-            match tokio::time::timeout(self.list_timeout, source.list(scope)).await {
-                Ok(tools) => tools,
-                Err(_) => {
-                    tracing::warn!(
-                        source = source.kind().as_str(),
-                        "tool source list timed out"
-                    );
-                    Vec::new()
-                }
-            }
-        }))
+        let listed = futures_util::future::join_all(
+            self.sources
+                .iter()
+                .map(|source| self.list_source(source.as_ref(), scope)),
+        )
         .await;
         let mut seen = HashSet::new();
         let mut merged = Vec::new();
@@ -99,6 +105,22 @@ impl ToolRegistry {
         }
         merged.retain(|(_, tool)| allowed_for(scope.profile, &tool.def));
         merged
+    }
+
+    /// Same answer as `resolve` for one name, but stops at the first source that
+    /// has it, so core calls never wait on later (e.g. plugin) sources.
+    async fn find(&self, scope: &RunToolScope, name: &str) -> Option<(usize, SourcedTool)> {
+        for (index, source) in self.sources.iter().enumerate() {
+            let found = self
+                .list_source(source.as_ref(), scope)
+                .await
+                .into_iter()
+                .find(|tool| tool.def.name == name);
+            if let Some(tool) = found {
+                return allowed_for(scope.profile, &tool.def).then_some((index, tool));
+            }
+        }
+        None
     }
 
     fn warn_duplicate(&self, tool: &SourcedTool) {
@@ -136,12 +158,7 @@ impl ToolRegistry {
         args: Value,
     ) -> ToolResult {
         let started = Instant::now();
-        let found = self
-            .resolve(scope)
-            .await
-            .into_iter()
-            .find(|(_, tool)| tool.def.name == name);
-        let Some((index, tool)) = found else {
+        let Some((index, tool)) = self.find(scope, name).await else {
             let message = format!("denied: tool \"{name}\" is not available for this run");
             let entry = CallLog {
                 tool: name,
@@ -517,6 +534,63 @@ mod tests {
         assert!(!want.is_empty());
         assert_eq!(got, want);
         assert_eq!(DEFAULT_LIST_TIMEOUT, std::time::Duration::from_secs(10));
+    }
+
+    struct CountingSource {
+        inner: Arc<dyn ToolSource>,
+        lists: std::sync::atomic::AtomicUsize,
+    }
+
+    #[async_trait]
+    impl ToolSource for CountingSource {
+        fn kind(&self) -> SourceKind {
+            self.inner.kind()
+        }
+        async fn list(&self, scope: &RunToolScope) -> Vec<SourcedTool> {
+            self.lists.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            self.inner.list(scope).await
+        }
+        async fn call(
+            &self,
+            ctx: &ToolCtx<'_>,
+            tool: &SourcedTool,
+            args: Value,
+        ) -> Result<ToolResult, ToolError> {
+            self.inner.call(ctx, tool, args).await
+        }
+    }
+
+    #[tokio::test]
+    async fn call_lookup_stops_at_first_source_with_the_name() {
+        let later = Arc::new(CountingSource {
+            inner: fake(SourceKind::Plugin, vec![("x", true), ("writer", false)]),
+            lists: std::sync::atomic::AtomicUsize::new(0),
+        });
+        let registry = ToolRegistry::new(vec![
+            fake(SourceKind::Core, vec![("a", true), ("x", true)]),
+            later.clone(),
+        ]);
+        let lists = || later.lists.load(std::sync::atomic::Ordering::SeqCst);
+        let full = scope(ContextProfile::Full);
+
+        let (index, tool) = registry.find(&full, "a").await.unwrap();
+        assert_eq!((index, tool.source), (0, SourceKind::Core));
+        assert_eq!(lists(), 0, "core lookup must not list later sources");
+
+        let (index, tool) = registry.find(&full, "x").await.unwrap();
+        assert_eq!((index, tool.source), (0, SourceKind::Core));
+        assert_eq!(tool.def.description, "x from core");
+        assert_eq!(lists(), 0);
+
+        let (index, tool) = registry.find(&full, "writer").await.unwrap();
+        assert_eq!((index, tool.source), (1, SourceKind::Plugin));
+        assert_eq!(lists(), 1);
+
+        assert!(registry
+            .find(&scope(ContextProfile::HumanChat), "writer")
+            .await
+            .is_none());
+        assert!(registry.find(&full, "missing").await.is_none());
     }
 
     #[test]
