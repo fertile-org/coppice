@@ -13,7 +13,10 @@ export function PluginSettingsForm({ pluginId, settings }: PluginSettingsFormPro
   const [values, setValues] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
   const saveSettings = useSetPluginSettings(pluginId);
-  const typed = Object.fromEntries(Object.entries(values).filter(([, value]) => value !== ''));
+  const knownKeys = new Set(settings.map((s) => s.key));
+  const typed = Object.fromEntries(
+    Object.entries(values).filter(([key, value]) => value !== '' && knownKeys.has(key)),
+  );
 
   async function submit(payload: Record<string, string>) {
     setError(null);
@@ -68,7 +71,14 @@ export function PluginSettingsForm({ pluginId, settings }: PluginSettingsFormPro
                     size="sm"
                     aria-label={`Clear ${key}`}
                     disabled={saveSettings.isPending}
-                    onClick={() => void submit({ [key]: '' })}
+                    onClick={() =>
+                      void submit({ [key]: '' }).then((ok) => {
+                        if (!ok) return;
+                        setValues((prev) =>
+                          Object.fromEntries(Object.entries(prev).filter(([k]) => k !== key)),
+                        );
+                      })
+                    }
                   >
                     Clear
                   </Button>
