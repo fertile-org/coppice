@@ -1,5 +1,6 @@
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { Button } from '../../components/ui/button';
 import type {
   Plugin,
@@ -38,6 +39,22 @@ function confirmStart(plugin: Plugin): boolean {
   ].filter((risk): risk is string => risk !== null);
   return risks.length === 0 || window.confirm(`${risks.join(' ')} Enable anyway?`);
 }
+
+const STATUS_HINTS: Record<PluginStatus, string> = {
+  ok: 'Loaded and ready to enable.',
+  shadowed:
+    'Another plugin with the same name in an earlier plugin directory is used instead.',
+  missing: 'The folder is gone from disk. Agent assignments are kept until it returns.',
+  invalid: 'The plugin could not be read. See the error below.',
+};
+
+const HEALTH_HINTS: Record<PluginMcpServerHealth, string> = {
+  stopped: 'Not running. Starts when an agent run or Test needs it.',
+  starting: 'Starting up.',
+  ready: 'Running; its tools are available to agents.',
+  backoff: 'Failed recently; Coppice will retry shortly.',
+  unhealthy: 'Failed repeatedly; its tools are hidden. Fix the cause, then press Test.',
+};
 
 function healthClass(health: PluginMcpServerHealth): string {
   switch (health) {
@@ -92,12 +109,18 @@ function McpServersSection({ plugin }: { plugin: Plugin }) {
           >
             <span className="font-mono text-xs text-text-primary">{server.name}</span>
             <span className="font-body text-xs text-text-muted">{server.kind}</span>
-            <span className={cn('font-body text-xs', healthClass(server.health))}>
+            <span
+              title={HEALTH_HINTS[server.health]}
+              className={cn('font-body text-xs', healthClass(server.health))}
+            >
               {server.health}
             </span>
           </li>
         ))}
       </ul>
+      <p className="mt-1 font-body text-xs text-text-muted">
+        {`Agents call these tools as ${plugin.name}__<tool>.`}
+      </p>
       {testPlugin.data && <PluginTestResults result={testPlugin.data} />}
       {error && (
         <p role="alert" className="mt-2 font-body text-xs text-danger">
@@ -169,7 +192,12 @@ export function PluginCard({ plugin }: PluginCardProps) {
               {plugin.name}
             </h3>
             <span className="font-mono text-xs text-text-muted">{plugin.version}</span>
-            <span className={statusPillClass(plugin.status)}>{plugin.status}</span>
+            <span
+              title={STATUS_HINTS[plugin.status]}
+              className={statusPillClass(plugin.status)}
+            >
+              {plugin.status}
+            </span>
           </div>
           {plugin.description && (
             <p className="mt-1 font-body text-sm text-text-secondary">
@@ -237,6 +265,20 @@ export function PluginCard({ plugin }: PluginCardProps) {
         </div>
       </div>
 
+      {plugin.enabled && plugin.status === 'ok' && (
+        <p className="mt-2 font-body text-xs text-text-secondary">
+          <Link
+            to={`/agents?plugin=${plugin.id}`}
+            className="font-medium text-moss-700 underline-offset-2 hover:underline"
+          >
+            Give it to an agent →
+          </Link>{' '}
+          <span className="text-text-muted">
+            {`Opens Agents with ${plugin.name} pre-selected.`}
+          </span>
+        </p>
+      )}
+
       {update?.status === 'failed' && (
         <p role="alert" className="mt-2 font-body text-xs text-danger">
           Update failed: {update.error ?? 'unknown error'}
@@ -269,21 +311,27 @@ export function PluginCard({ plugin }: PluginCardProps) {
             Skills
           </button>
           {expanded && (
-            <ul className="mt-2 space-y-2 border-t border-border pt-2">
-              {plugin.skills.map((skill) => (
-                <li key={skill.relPath}>
-                  <p className="font-mono text-xs text-text-primary">{skill.name}</p>
-                  {skill.description && (
-                    <p className="font-body text-xs text-text-secondary">
-                      {skill.description}
-                    </p>
-                  )}
-                  {skill.error && (
-                    <p className="font-body text-xs text-danger">{skill.error}</p>
-                  )}
-                </li>
-              ))}
-            </ul>
+            <div className="mt-2 border-t border-border pt-2">
+              <p className="font-body text-xs text-text-muted">
+                An agent sees each skill’s name and description, and loads one when it
+                needs it.
+              </p>
+              <ul className="mt-2 space-y-2">
+                {plugin.skills.map((skill) => (
+                  <li key={skill.relPath}>
+                    <p className="font-mono text-xs text-text-primary">{skill.name}</p>
+                    {skill.description && (
+                      <p className="font-body text-xs text-text-secondary">
+                        {skill.description}
+                      </p>
+                    )}
+                    {skill.error && (
+                      <p className="font-body text-xs text-danger">{skill.error}</p>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </div>
           )}
         </div>
       )}

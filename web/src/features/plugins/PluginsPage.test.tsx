@@ -1,6 +1,7 @@
 import '@testing-library/jest-dom/vitest';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Plugin, PluginDir, PluginInstall } from '../../lib/schemas/plugin';
 import { PluginsPage } from './PluginsPage';
@@ -93,7 +94,9 @@ function renderPage() {
   });
   return render(
     <QueryClientProvider client={client}>
-      <PluginsPage />
+      <MemoryRouter>
+        <PluginsPage />
+      </MemoryRouter>
     </QueryClientProvider>,
   );
 }
@@ -101,6 +104,7 @@ function renderPage() {
 describe('PluginsPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    localStorage.clear();
     dirs = [defaultDir, extraDir];
     plugins = [samplePlugin, shadowedPlugin];
     installPoll = {
@@ -255,6 +259,47 @@ describe('PluginsPage', () => {
     });
 
     expect(await screen.findByText(/repository not found/)).toBeVisible();
+  });
+
+  it('guide is open when no plugins are installed and explains the flow', async () => {
+    plugins = [];
+    renderPage();
+
+    const toggle = await screen.findByRole('button', { name: 'How plugins work' });
+    expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    const guide = screen.getByTestId('plugins-guide');
+    expect(within(guide).getByText('Skills')).toBeVisible();
+    expect(within(guide).getByText('Tools')).toBeVisible();
+    expect(within(guide).getByText('Settings')).toBeVisible();
+    expect(within(guide).getByRole('link', { name: 'Agents' })).toHaveAttribute(
+      'href',
+      '/agents',
+    );
+    expect(screen.getByText(/examples\/plugins/, { selector: 'p *' })).toBeVisible();
+  });
+
+  it('guide starts collapsed when plugins exist and remembers the choice', async () => {
+    const view = renderPage();
+
+    const toggle = await screen.findByRole('button', { name: 'How plugins work' });
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByTestId('plugins-guide')).not.toBeInTheDocument();
+
+    fireEvent.click(toggle);
+    expect(screen.getByTestId('plugins-guide')).toBeVisible();
+
+    view.unmount();
+    renderPage();
+    expect(await screen.findByTestId('plugins-guide')).toBeVisible();
+  });
+
+  it('installed plugins come before the add sections', async () => {
+    renderPage();
+
+    const headings = (await screen.findAllByRole('heading', { level: 2 })).map(
+      (h) => h.textContent,
+    );
+    expect(headings).toEqual(['Installed plugins', 'Add plugins']);
   });
 
   it('default directory cannot be removed', async () => {

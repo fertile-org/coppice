@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "hello": {
+      "command": "node",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/server/index.mjs"],
+      "env": {
+        "HELLO_GREETING": "${HELLO_GREETING:-Hello}"
+      }
+    }
+  }
+}

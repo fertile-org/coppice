@@ -141,6 +141,13 @@ export function ConnectorStatusList({ connector }: { connector: ConnectorStatus 
       <Row label="Auth">
         <AuthValue connector={connector} />
       </Row>
+      {connector.probedAt && (
+        <Row label="Checked">
+          <span title={connector.probedAt} className="text-text-secondary">
+            {formatRelativeTime(connector.probedAt)}
+          </span>
+        </Row>
+      )}
       <Row label="Last real run">
         <LastRunValue run={connector.lastRun} />
       </Row>

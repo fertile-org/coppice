@@ -1991,3 +1991,46 @@ async fn update_stops_plugin_servers() {
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
     }
 }
+
+#[tokio::test]
+async fn example_hello_coppice_plugin_loads_and_tests() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    require_db!();
+    let (_state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
+    let examples = Path::new(env!("CARGO_MANIFEST_DIR")).join("../examples/plugins");
+    let dir = tempfile::tempdir().unwrap();
+    copy_tree(&examples, dir.path());
+    let dir_id = add_dir(&app, dir.path(), &cookie, &csrf).await["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let plugins = get(&app, "/api/plugins", &cookie, &csrf).await;
+    let plugin = find(&plugins, &dir_id, "hello-coppice");
+    assert_eq!(plugin["status"], "ok", "{plugin}");
+    assert_eq!(plugin["version"], "0.1.0");
+    assert_eq!(plugin["unsupported"], json!([]));
+    let skills = plugin["skills"].as_array().unwrap();
+    assert_eq!(skills.len(), 1, "{plugin}");
+    assert_eq!(skills[0]["name"], "greeting-style");
+    assert!(skills[0]["error"].is_null(), "{plugin}");
+    assert_eq!(plugin["mcpServers"][0]["name"], "hello");
+    assert_eq!(plugin["mcpServers"][0]["kind"], "stdio");
+    assert_eq!(
+        plugin["settings"],
+        json!([{ "key": "HELLO_GREETING", "configured": false, "source": "default" }])
+    );
+
+    if std::process::Command::new("node").arg("--version").output().is_err() {
+        eprintln!("skipping example MCP test: node not installed");
+        return;
+    }
+    let id = plugin["id"].as_str().unwrap().to_string();
+    let (status, body) = post_test(&app, &id, &cookie, &csrf).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let server = &body["servers"][0];
+    assert_eq!(server["status"], "ok", "{body}");
+    let greet = &server["tools"][0];
+    assert_eq!(greet["exposedName"], "hello-coppice__greet", "{body}");
+    assert_eq!(greet["readOnly"], true);
+}

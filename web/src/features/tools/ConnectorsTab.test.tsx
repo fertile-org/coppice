@@ -238,6 +238,22 @@ describe('ConnectorsTab', () => {
     expect((init.headers as Record<string, string>)['X-CSRF-Token']).toBe('csrf-token');
   });
 
+  it('run check with an unchanged result updates the checked time', async () => {
+    stubApi((path, init) =>
+      path === '/api/tools/connectors/codex/check' && init.method === 'POST'
+        ? json({ ...codex, probedAt: new Date().toISOString() })
+        : undefined,
+    );
+    renderTab();
+
+    const codexCard = await card('codex');
+    expect(codexCard.queryByText('now')).not.toBeInTheDocument();
+    fireEvent.click(codexCard.getByRole('button', { name: 'Run check' }));
+
+    expect(await codexCard.findByText('now')).toBeVisible();
+    expect(codexCard.getByText('Checked')).toBeVisible();
+  });
+
   it('run check failure shows the error on the card', async () => {
     stubApi((path, init) =>
       path === '/api/tools/connectors/codex/check' && init.method === 'POST'

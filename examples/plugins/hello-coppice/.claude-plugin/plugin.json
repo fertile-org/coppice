@@ -1,0 +1,6 @@
+{
+  "name": "hello-coppice",
+  "version": "0.1.0",
+  "description": "Example plugin: one skill and one MCP tool that greets people.",
+  "author": { "name": "Coppice" }
+}

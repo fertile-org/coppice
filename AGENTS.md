@@ -35,6 +35,7 @@
 | Local setup & commands | [docs/development.md](docs/development.md), [docs/operations.md](docs/operations.md) |
 | Code layout & conventions | [docs/architecture.md](docs/architecture.md) |
 | Testing strategy | [docs/testing.md](docs/testing.md) |
+| Using & writing plugins | [docs/plugins.md](docs/plugins.md), example: `examples/plugins/hello-coppice` |
 | Roadmap & acceptance criteria | [docs/milestones/README.md](docs/milestones/README.md) |
 | Product principles & UX | [docs/philosophy/final_agent_workspace_product_design.md](docs/philosophy/final_agent_workspace_product_design.md) |
 | Stack choices | [docs/philosophy/final_agent_workspace_framework_selection.md](docs/philosophy/final_agent_workspace_framework_selection.md) |

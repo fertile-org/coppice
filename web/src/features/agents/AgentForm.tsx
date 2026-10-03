@@ -1,12 +1,13 @@
-import { useEffect, useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { Link } from 'react-router-dom';
 import type {
   Agent,
   AgentPreset,
   ConnectorOption,
 } from './useAgents';
 import { useModelProviders, useModels } from './useAgents';
+import { isAssignable } from '../plugins/assignable';
 import { usePlugins } from '../plugins/usePlugins';
-import type { Plugin } from '../../lib/schemas/plugin';
 
 export interface AgentFormValues {
   name: string;
@@ -26,10 +27,6 @@ export type PluginAssignmentState =
   | { status: 'ready' }
   | { status: 'loading' }
   | { status: 'error'; message: string };
-
-function isAssignable(plugin: Plugin): boolean {
-  return plugin.enabled && plugin.status === 'ok';
-}
 
 function linesFromList(items: string[]): string {
   return items.join('\n');
@@ -86,6 +83,8 @@ interface AgentFormProps {
   error?: string | null;
   submitLabel?: string;
   pluginAssignment?: PluginAssignmentState;
+  /** Scrolls to and highlights the plugin picker (plugin deep link). */
+  focusPlugins?: boolean;
 }
 
 export function AgentForm({
@@ -99,8 +98,10 @@ export function AgentForm({
   error = null,
   submitLabel,
   pluginAssignment = { status: 'ready' },
+  focusPlugins = false,
 }: AgentFormProps) {
   const [localError, setLocalError] = useState<string | null>(null);
+  const pluginsRef = useRef<HTMLFieldSetElement>(null);
   const showModelFields = values.connector !== 'mock';
   const { data: modelProviderOptions = [], isLoading: modelProvidersLoading } =
     useModelProviders(showModelFields ? values.connector : undefined);
@@ -120,6 +121,10 @@ export function AgentForm({
   useEffect(() => {
     setLocalError(null);
   }, [values]);
+
+  useEffect(() => {
+    if (focusPlugins) pluginsRef.current?.scrollIntoView?.({ block: 'center' });
+  }, [focusPlugins]);
 
   function updateField<K extends keyof AgentFormValues>(
     key: K,
@@ -217,7 +222,13 @@ export function AgentForm({
         />
       </div>
 
-      <fieldset disabled={pluginAssignment.status !== 'ready'}>
+      <fieldset
+        ref={pluginsRef}
+        disabled={pluginAssignment.status !== 'ready'}
+        className={
+          focusPlugins ? 'rounded-md p-2 ring-2 ring-accent ring-offset-2' : undefined
+        }
+      >
         <legend className="mb-1 block font-body text-sm font-medium text-bark-800">
           Plugins
           <span className="ml-1 font-normal text-text-muted">
@@ -239,7 +250,14 @@ export function AgentForm({
           <p className="font-body text-sm text-text-muted">Loading plugins…</p>
         ) : assignablePlugins.length === 0 && unavailableAssigned.length === 0 ? (
           <p className="font-body text-sm text-text-muted">
-            No enabled plugins. Enable plugins in Settings → Plugins.
+            No enabled plugins. Enable plugins on the{' '}
+            <Link
+              to="/settings/plugins"
+              className="font-medium text-moss-700 underline-offset-2 hover:underline"
+            >
+              Plugins
+            </Link>{' '}
+            page.
           </p>
         ) : (
           <ul className="space-y-1.5">

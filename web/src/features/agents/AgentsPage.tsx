@@ -1,5 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { ApiError, parseApiErrorMessage } from '../../lib/api';
+import { isAssignable } from '../plugins/assignable';
+import { usePlugins } from '../plugins/usePlugins';
 import {
   AgentForm,
   agentToFormValues,
@@ -188,7 +191,7 @@ function CreateAgentDialog({
         role="dialog"
         aria-modal="true"
         aria-labelledby="create-agent-title"
-        className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-xl border border-border bg-paper-50 p-6 shadow-lg"
+        className="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-xl border border-border bg-paper-50 p-6 shadow-lg"
         onClick={(e) => e.stopPropagation()}
       >
         <h2
@@ -245,10 +248,12 @@ function EditAgentDialog({
   agent,
   onClose,
   connectorOptions,
+  preselectPluginId,
 }: {
   agent: Agent;
   onClose: () => void;
   connectorOptions: ConnectorOption[];
+  preselectPluginId?: string;
 }) {
   const [values, setValues] = useState<AgentFormValues>(() =>
     agentToFormValues(agent),
@@ -283,8 +288,12 @@ function EditAgentDialog({
   useEffect(() => {
     if (!assignedPluginIds || pluginsPrefilled.current) return;
     pluginsPrefilled.current = true;
-    setValues((prev) => ({ ...prev, pluginIds: assignedPluginIds }));
-  }, [assignedPluginIds]);
+    const pluginIds =
+      preselectPluginId && !assignedPluginIds.includes(preselectPluginId)
+        ? [...assignedPluginIds, preselectPluginId]
+        : assignedPluginIds;
+    setValues((prev) => ({ ...prev, pluginIds }));
+  }, [assignedPluginIds, preselectPluginId]);
 
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
@@ -341,7 +350,7 @@ function EditAgentDialog({
         role="dialog"
         aria-modal="true"
         aria-labelledby="edit-agent-title"
-        className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-xl border border-border bg-paper-50 p-6 shadow-lg"
+        className="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-xl border border-border bg-paper-50 p-6 shadow-lg"
         onClick={(e) => e.stopPropagation()}
       >
         <h2
@@ -365,9 +374,46 @@ function EditAgentDialog({
             isPending={updateAgent.isPending || setAgentPlugins.isPending}
             error={error}
             pluginAssignment={pluginAssignment}
+            focusPlugins={Boolean(preselectPluginId)}
           />
         </div>
       </div>
+    </div>
+  );
+}
+
+function PluginDeepLinkBanner({
+  pluginName,
+  onDone,
+}: {
+  pluginName: string | null;
+  onDone: () => void;
+}) {
+  return (
+    <div
+      data-testid="plugin-deeplink-banner"
+      className={[
+        'mt-6 flex flex-wrap items-center justify-between gap-3 rounded-lg border px-4 py-3 font-body text-sm',
+        pluginName
+          ? 'border-accent-muted bg-accent-muted/40 text-text-primary'
+          : 'border-warning-muted bg-warning-muted/30 text-text-secondary',
+      ].join(' ')}
+    >
+      {pluginName ? (
+        <p>
+          Adding <span className="font-mono font-medium">{pluginName}</span>: click Edit on
+          an agent, then Save.
+        </p>
+      ) : (
+        <p>That plugin is not enabled or not available, so nothing is pre-selected.</p>
+      )}
+      <button
+        type="button"
+        onClick={onDone}
+        className="rounded-md border border-border px-2.5 py-1 text-xs text-text-secondary transition-colors duration-fast hover:text-text-primary"
+      >
+        Done
+      </button>
     </div>
   );
 }
@@ -386,7 +432,18 @@ function AgentRow({
   toggling: boolean;
 }) {
   return (
-    <tr className="border-b border-border last:border-b-0">
+    <tr
+      tabIndex={0}
+      aria-label={`Edit ${agent.name}`}
+      onClick={() => onEdit(agent)}
+      onKeyDown={(e) => {
+        if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) {
+          e.preventDefault();
+          onEdit(agent);
+        }
+      }}
+      className="cursor-pointer border-b border-border transition-colors duration-fast last:border-b-0 hover:bg-paper-100 focus-visible:bg-paper-100 focus-visible:outline-none"
+    >
       <td className="px-4 py-3">
         <div className="flex flex-wrap items-center gap-2 font-body text-sm font-medium text-text-primary">
           {agent.name}
@@ -435,7 +492,10 @@ function AgentRow({
         <div className="flex items-center justify-end gap-2">
           <button
             type="button"
-            onClick={() => onToggleEnabled(agent)}
+            onClick={(e) => {
+              e.stopPropagation();
+              onToggleEnabled(agent);
+            }}
             disabled={toggling}
             className="rounded-md border border-border px-2.5 py-1 font-body text-xs text-text-secondary transition-colors duration-fast hover:text-text-primary disabled:opacity-50"
           >
@@ -443,7 +503,10 @@ function AgentRow({
           </button>
           <button
             type="button"
-            onClick={() => onEdit(agent)}
+            onClick={(e) => {
+              e.stopPropagation();
+              onEdit(agent);
+            }}
             className="rounded-md border border-border px-2.5 py-1 font-body text-xs text-text-secondary transition-colors duration-fast hover:text-text-primary"
           >
             Edit
@@ -464,6 +527,23 @@ export function AgentsPage() {
   const updateAgentMutation = useUpdateAgentMutation();
   const { data: knowledgeSettings } = useKnowledgeSettings();
   const compactorId = knowledgeSettings?.compactionAgentId ?? null;
+  const [searchParams, setSearchParams] = useSearchParams();
+  const deepLinkPluginId = searchParams.get('plugin');
+  const { data: plugins, isLoading: pluginsLoading } = usePlugins();
+  const deepLinkPlugin = deepLinkPluginId
+    ? plugins?.find((p) => p.id === deepLinkPluginId && isAssignable(p))
+    : undefined;
+
+  function clearDeepLink() {
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        next.delete('plugin');
+        return next;
+      },
+      { replace: true },
+    );
+  }
 
   async function toggleEnabled(agent: Agent) {
     setTogglingId(agent.id);
@@ -501,6 +581,13 @@ export function AgentsPage() {
           New agent
         </button>
       </div>
+
+      {deepLinkPluginId && !pluginsLoading && (
+        <PluginDeepLinkBanner
+          pluginName={deepLinkPlugin?.name ?? null}
+          onDone={clearDeepLink}
+        />
+      )}
 
       {isLoading && (
         <p className="mt-10 font-body text-sm text-text-muted">
@@ -606,6 +693,7 @@ export function AgentsPage() {
           agent={editingAgent}
           onClose={() => setEditingAgent(null)}
           connectorOptions={connectorOptions}
+          preselectPluginId={deepLinkPlugin?.id}
         />
       )}
     </div>

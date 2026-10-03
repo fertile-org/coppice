@@ -1,6 +1,7 @@
 import '@testing-library/jest-dom/vitest';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { setCsrfToken } from '../../lib/api';
 import { pluginSchema, type Plugin, type PluginTestResult } from '../../lib/schemas/plugin';
@@ -69,7 +70,9 @@ function renderCard(target: Plugin = plugin) {
   });
   return render(
     <QueryClientProvider client={client}>
-      <PluginCard plugin={target} />
+      <MemoryRouter>
+        <PluginCard plugin={target} />
+      </MemoryRouter>
     </QueryClientProvider>,
   );
 }
@@ -352,6 +355,48 @@ describe('PluginCard', () => {
     });
     expect(parsed.mcpServers[0].health).toBe('stopped');
     expect(parsed.mcpServers[0].kind).toBe('unknown');
+  });
+
+  it('status pill and server health explain themselves', () => {
+    renderCard({ ...plugin, status: 'shadowed' });
+
+    expect(screen.getByText('shadowed')).toHaveAttribute(
+      'title',
+      expect.stringMatching(/earlier plugin directory/),
+    );
+    expect(screen.getByText('unhealthy')).toHaveAttribute(
+      'title',
+      expect.stringMatching(/Test/),
+    );
+  });
+
+  it('enabled plugin points to the Agents page', () => {
+    renderCard();
+
+    expect(screen.getByRole('link', { name: /Give it to an agent/ })).toHaveAttribute(
+      'href',
+      `/agents?plugin=${plugin.id}`,
+    );
+    expect(screen.getByText(/mcp-fake pre-selected/)).toBeVisible();
+  });
+
+  it('disabled plugin does not show the attach link', () => {
+    renderCard({ ...plugin, enabled: false });
+
+    expect(screen.queryByRole('link', { name: /Give it to an agent/ })).not.toBeInTheDocument();
+  });
+
+  it('explains how agents see tools and skills', () => {
+    renderCard({
+      ...plugin,
+      skills: [
+        { name: 'review', description: 'Review code', relPath: 'skills/review/SKILL.md', error: null },
+      ],
+    });
+
+    expect(screen.getByText(/mcp-fake__<tool>/)).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: /Skills/ }));
+    expect(screen.getByText(/loads one when it needs it/)).toBeVisible();
   });
 
   it('settings default to empty when absent', () => {

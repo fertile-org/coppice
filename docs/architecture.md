@@ -168,7 +168,7 @@ Agents finish with `result_submit`; a submitted result wins over a final JSON bl
 
 ### Plugin MCP proxy
 
-Plugin MCP servers (`.mcp.json` stdio and streamable HTTP entries) are proxied through the gateway as `<plugin>__<tool>`. `rmcp` is used only as a client inside the transports.
+Plugin MCP servers (`.mcp.json` stdio and streamable HTTP entries) are proxied through the gateway as `<plugin>__<tool>`. `rmcp` is used only as a client inside the transports. The user-facing guide (plugin format, settings, writing a plugin) is [plugins.md](plugins.md); `examples/plugins/hello-coppice` is a working example covered by `integration_plugins.rs`.
 
 ```text
 mcp/proxy/transport.rs  McpTransport (kind, connect) → McpConnection; Transports registry; ProxyError

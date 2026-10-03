@@ -6,6 +6,7 @@ import { isDesktopShell, pickDirectory } from '../../lib/desktop';
 import type { PluginDir } from '../../lib/schemas/plugin';
 import { useSession } from '../auth/useSession';
 import { PluginCard } from './PluginCard';
+import { PluginsGuide } from './PluginsGuide';
 import { parseApiErrorMessage } from '../../lib/api';
 import {
   useAddPluginDir,
@@ -24,6 +25,12 @@ const ERROR_CLASS =
 function SectionHeading({ children }: { children: string }) {
   return (
     <h2 className="font-display text-lg font-semibold text-bark-900">{children}</h2>
+  );
+}
+
+function SubHeading({ children }: { children: string }) {
+  return (
+    <h3 className="font-display text-base font-semibold text-bark-900">{children}</h3>
   );
 }
 
@@ -75,10 +82,11 @@ function PluginDirsSection({ dirs }: { dirs: PluginDir[] }) {
     <section className="space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <SectionHeading>Plugin directories</SectionHeading>
+          <SubHeading>Plugin directories</SubHeading>
           <p className="mt-1 font-body text-sm text-text-secondary">
-            Scanned in order; a plugin in an earlier directory shadows one with the
-            same name later.
+            Folders Coppice scans for plugins: each folder can be a plugin itself or hold
+            one plugin per subfolder. Scanned in order; if two plugins share a name, the
+            one in the earlier folder wins. Press Rescan after changing files.
           </p>
         </div>
         <Button
@@ -233,7 +241,13 @@ function InstallSection({ dirs }: { dirs: PluginDir[] }) {
 
   return (
     <section className="space-y-3">
-      <SectionHeading>Install from git</SectionHeading>
+      <div>
+        <SubHeading>Install from git</SubHeading>
+        <p className="mt-1 font-body text-sm text-text-secondary">
+          Clones the repository into a plugin directory using the server’s git
+          credentials. Plugins installed this way get an Update button.
+        </p>
+      </div>
       <form
         onSubmit={(e) => void handleSubmit(e)}
         className="grid gap-3 rounded-xl border border-border bg-surface-raised p-4 shadow-card sm:grid-cols-[2fr_1fr_1fr_auto] sm:items-end"
@@ -344,10 +358,12 @@ export function PluginsPage() {
       <div>
         <h1 className="font-display text-2xl font-semibold text-bark-900">Plugins</h1>
         <p className="mt-2 max-w-xl font-body text-text-secondary">
-          Skill bundles scanned from plugin directories. Enable a plugin, then attach
-          it to agents.
+          Plugins add skills and tools to your agents. Add a plugin, enable it, then
+          attach it to the agents that should use it.
         </p>
       </div>
+
+      {!isLoading && !isError && <PluginsGuide hasPlugins={plugins.length > 0} />}
 
       {isLoading && (
         <p className="font-body text-sm text-text-muted">Loading plugins…</p>
@@ -371,13 +387,13 @@ export function PluginsPage() {
 
       {!isLoading && !isError && (
         <>
-          <PluginDirsSection dirs={dirs} />
-          <InstallSection dirs={dirs} />
           <section className="space-y-3">
             <SectionHeading>Installed plugins</SectionHeading>
             {plugins.length === 0 ? (
               <p className="rounded-xl border border-border bg-surface-raised px-4 py-8 text-center font-body text-sm text-text-muted shadow-card">
-                No plugins found. Add a directory or install one from git.
+                No plugins yet. Install one from git or add a plugin directory below. To try
+                one out, add the <code className="font-mono">examples/plugins</code> folder
+                from the Coppice repository.
               </p>
             ) : (
               <div className="space-y-3">
@@ -386,6 +402,11 @@ export function PluginsPage() {
                 ))}
               </div>
             )}
+          </section>
+          <section className="space-y-6">
+            <SectionHeading>Add plugins</SectionHeading>
+            <InstallSection dirs={dirs} />
+            <PluginDirsSection dirs={dirs} />
           </section>
         </>
       )}

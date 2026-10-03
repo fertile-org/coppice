@@ -1,6 +1,7 @@
 import '@testing-library/jest-dom/vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { useState } from 'react';
+import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Plugin } from '../../lib/schemas/plugin';
 import {
@@ -102,6 +103,20 @@ function Harness({
 describe('AgentForm plugins picker', () => {
   beforeEach(() => {
     mocks.plugins = [pluginA, pluginB, pluginC];
+  });
+
+  it('empty plugin list links to the Plugins page', () => {
+    mocks.plugins = [pluginB];
+    render(
+      <MemoryRouter>
+        <Harness initial={baseValues()} onSubmit={vi.fn()} />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByRole('link', { name: 'Plugins' })).toHaveAttribute(
+      'href',
+      '/settings/plugins',
+    );
   });
 
   it('lists only enabled ok plugins', () => {
