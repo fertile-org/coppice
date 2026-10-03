@@ -1,10 +1,13 @@
 use crate::api::auth::{pool_from_state, AuthUser};
+use crate::mcp::proxy::{McpServerPool, ServerHealth, ServerKey};
 use crate::middleware::admin::AdminUser;
+use crate::plugins::capability::{McpServerEntry, McpServerTransport};
 use crate::plugins::git_install;
 use crate::plugins::manifest::SkillEntry;
 use crate::plugins::placeholders::placeholder_keys;
 use crate::services::plugin_service::{
-    PluginDir, PluginError, PluginInstall, PluginRow, PluginService,
+    PluginDir, PluginError, PluginInstall, PluginRow, PluginService, ServerTestOutcome,
+    ServerTestResult,
 };
 use crate::services::plugin_settings_service::{PluginSettingsError, PluginSettingsService};
 use crate::AppState;
@@ -40,6 +43,7 @@ pub fn routes() -> Router<Arc<AppState>> {
         )
         .route("/api/plugins/{plugin_id}/update", post(update))
         .route("/api/plugins/{plugin_id}/settings", put(set_settings))
+        .route("/api/plugins/{plugin_id}/test", post(test_plugin))
         .route("/api/plugin-installs/{install_id}", get(get_install))
         .route(
             "/api/agents/{agent_id}/plugins",
@@ -83,6 +87,31 @@ struct PluginResponse {
 struct McpServerResponse {
     name: String,
     kind: String,
+    health: &'static str,
+}
+
+#[derive(Serialize)]
+struct PluginTestResponse {
+    servers: Vec<ServerTestResponse>,
+}
+
+#[derive(Serialize)]
+struct ServerTestResponse {
+    name: String,
+    kind: String,
+    status: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error: Option<String>,
+    tools: Vec<TestedToolResponse>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TestedToolResponse {
+    name: String,
+    exposed_name: String,
+    description: String,
+    read_only: bool,
 }
 
 /// Setting values are write-only.
@@ -218,7 +247,22 @@ fn allowed_setting_keys(plugin: &PluginRow) -> BTreeSet<String> {
         .unwrap_or_default()
 }
 
-fn plugin_response(plugin: PluginRow, configured: &BTreeSet<String>) -> PluginResponse {
+fn server_health(mcp: &McpServerPool, plugin_id: Uuid, entry: &McpServerEntry) -> &'static str {
+    if let McpServerTransport::Unsupported { .. } = entry.transport {
+        return ServerHealth::Stopped.as_str();
+    }
+    mcp.health(&ServerKey {
+        plugin_id,
+        server: entry.name.clone(),
+    })
+    .as_str()
+}
+
+fn plugin_response(
+    plugin: PluginRow,
+    configured: &BTreeSet<String>,
+    mcp: &McpServerPool,
+) -> PluginResponse {
     let settings = allowed_setting_keys(&plugin)
         .into_iter()
         .map(|key| PluginSettingResponse {
@@ -235,6 +279,7 @@ fn plugin_response(plugin: PluginRow, configured: &BTreeSet<String>) -> PluginRe
                 .map(|s| McpServerResponse {
                     name: s.name.clone(),
                     kind: s.api_kind().to_string(),
+                    health: server_health(mcp, plugin.id, s),
                 })
                 .collect();
             let unsupported = m.unsupported.into_iter().map(|u| u.key).collect();
@@ -270,7 +315,11 @@ async fn single_response(
     let configured = PluginSettingsService::new(pool, &state.secret_store)
         .configured_keys(plugin.id)
         .await?;
-    Ok(Json(plugin_response(plugin, &configured)))
+    Ok(Json(plugin_response(
+        plugin,
+        &configured,
+        &state.plugin_mcp,
+    )))
 }
 
 async fn plugins_response(
@@ -287,7 +336,7 @@ async fn plugins_response(
             .into_iter()
             .map(|p| {
                 let keys = configured.get(&p.id).unwrap_or(&none);
-                plugin_response(p, keys)
+                plugin_response(p, keys, &state.plugin_mcp)
             })
             .collect(),
     ))
@@ -307,19 +356,29 @@ fn install_response(install: PluginInstall) -> Json<PluginInstallResponse> {
 }
 
 /// Runs `job` in the background, then records its outcome; nothing borrowed
-/// from the request may be captured.
-fn spawn_git_job<F>(state: Arc<AppState>, install_id: Uuid, dest_rel: String, job: F)
-where
+/// from the request may be captured. A successful update of `updated_plugin`
+/// stops its MCP servers so they restart from the new checkout.
+fn spawn_git_job<F>(
+    state: Arc<AppState>,
+    install_id: Uuid,
+    dest_rel: String,
+    updated_plugin: Option<Uuid>,
+    job: F,
+) where
     F: Future<Output = Result<String, String>> + Send + 'static,
 {
     tokio::spawn(async move {
         let result = job.await;
+        let succeeded = result.is_ok();
         let Some(pool) = state.db.as_ref() else {
             return;
         };
         PluginService::new(pool)
             .complete_git_job(install_id, result, &dest_rel, &state.skills)
             .await;
+        if let (true, Some(plugin_id)) = (succeeded, updated_plugin) {
+            state.plugin_mcp.stop_plugin(plugin_id).await;
+        }
     });
 }
 
@@ -349,9 +408,11 @@ async fn install(
         cfg.allow_file_git_urls,
         Duration::from_secs(cfg.git_timeout_secs),
     );
-    spawn_git_job(state.clone(), install.id, folder_name(&dest), async move {
+    let dest_rel = folder_name(&dest);
+    let job = async move {
         git_install::clone(&url, git_ref.as_deref(), &dest, allow_file, timeout).await
-    });
+    };
+    spawn_git_job(state.clone(), install.id, dest_rel, None, job);
     Ok((StatusCode::ACCEPTED, install_response(install)))
 }
 
@@ -368,9 +429,9 @@ async fn update(
         cfg.allow_file_git_urls,
         Duration::from_secs(cfg.git_timeout_secs),
     );
-    spawn_git_job(state.clone(), install.id, rel_path, async move {
-        git_install::update(&root, git_ref.as_deref(), allow_file, timeout).await
-    });
+    let job =
+        async move { git_install::update(&root, git_ref.as_deref(), allow_file, timeout).await };
+    spawn_git_job(state.clone(), install.id, rel_path, Some(plugin_id), job);
     Ok((StatusCode::ACCEPTED, install_response(install)))
 }
 
@@ -474,6 +535,43 @@ async fn set_settings(
     single_response(&state, pool, plugin).await
 }
 
+async fn test_plugin(
+    State(state): State<Arc<AppState>>,
+    AdminUser(_): AdminUser,
+    Path(plugin_id): Path<Uuid>,
+) -> Result<Json<PluginTestResponse>, ApiError> {
+    let pool = pool_from_state(&state)?;
+    let results = PluginService::new(pool)
+        .test_servers(plugin_id, &state.secret_store, &state.plugin_mcp)
+        .await?;
+    Ok(Json(PluginTestResponse {
+        servers: results.into_iter().map(server_test_response).collect(),
+    }))
+}
+
+fn server_test_response(result: ServerTestResult) -> ServerTestResponse {
+    let (status, error, tools) = match result.outcome {
+        ServerTestOutcome::Ok(tools) => ("ok", None, tools),
+        ServerTestOutcome::Error(error) => ("error", Some(error), Vec::new()),
+        ServerTestOutcome::Unsupported { error } => ("unsupported", error, Vec::new()),
+    };
+    ServerTestResponse {
+        name: result.name,
+        kind: result.kind,
+        status,
+        error,
+        tools: tools
+            .into_iter()
+            .map(|t| TestedToolResponse {
+                name: t.name,
+                exposed_name: t.exposed_name,
+                description: t.description,
+                read_only: t.read_only,
+            })
+            .collect(),
+    }
+}
+
 async fn set_enabled(
     State(state): State<Arc<AppState>>,
     AdminUser(_): AdminUser,
@@ -485,6 +583,7 @@ async fn set_enabled(
     let plugin = service.set_enabled(plugin_id, body.enabled).await?;
     if !plugin.enabled {
         state.skills.remove_plugin(plugin.id).await;
+        state.plugin_mcp.stop_plugin(plugin.id).await;
     }
     refresh_skills(&service, &state).await;
     single_response(&state, pool, plugin).await

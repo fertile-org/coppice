@@ -239,9 +239,9 @@ async fn plugins_api_shape_unchanged() {
     assert_eq!(
         sample["mcpServers"],
         json!([
-            { "name": "echo", "kind": "stdio" },
-            { "name": "old", "kind": "sse" },
-            { "name": "remote", "kind": "http" },
+            { "name": "echo", "kind": "stdio", "health": "stopped" },
+            { "name": "old", "kind": "sse", "health": "stopped" },
+            { "name": "remote", "kind": "http", "health": "stopped" },
         ])
     );
     assert_eq!(sample["unsupported"], json!(["commands", "hooks"]));
@@ -249,7 +249,7 @@ async fn plugins_api_shape_unchanged() {
     assert_eq!(inline["status"], "ok");
     assert_eq!(
         inline["mcpServers"],
-        json!([{ "name": "fs", "kind": "stdio" }])
+        json!([{ "name": "fs", "kind": "stdio", "health": "stopped" }])
     );
 
     let mut keys = Vec::new();
@@ -1056,7 +1056,7 @@ fn git(dir: &Path, args: &[&str]) -> String {
     String::from_utf8_lossy(&out.stdout).trim().to_string()
 }
 
-/// A working copy of `sample-plugin` pushed to a bare repo named `sample-plugin.git`.
+/// A working copy of a fixture plugin pushed to a bare repo named `<fixture>.git`.
 struct PluginRepo {
     _tmp: tempfile::TempDir,
     work: std::path::PathBuf,
@@ -1065,17 +1065,19 @@ struct PluginRepo {
 
 impl PluginRepo {
     fn new() -> Self {
+        Self::of("sample-plugin")
+    }
+
+    fn of(fixture: &str) -> Self {
         let tmp = tempfile::tempdir().unwrap();
         let work = tmp.path().join("work");
-        copy_tree(&fixtures().join("sample-plugin"), &work);
+        copy_tree(&fixtures().join(fixture), &work);
         git(&work, &["init", "-q"]);
         git(&work, &["add", "-A"]);
         git(&work, &["commit", "-q", "-m", "initial"]);
-        let bare = tmp.path().join("sample-plugin.git");
-        git(
-            tmp.path(),
-            &["clone", "-q", "--bare", "work", "sample-plugin.git"],
-        );
+        let bare_name = format!("{fixture}.git");
+        let bare = tmp.path().join(&bare_name);
+        git(tmp.path(), &["clone", "-q", "--bare", "work", &bare_name]);
         git(&work, &["remote", "add", "origin", bare.to_str().unwrap()]);
         Self {
             _tmp: tmp,
@@ -1487,4 +1489,286 @@ async fn update_of_missing_plugin_is_rejected() {
         body["error"],
         "plugin folder is missing; rescan or reinstall"
     );
+}
+
+// ---- M10 Part 2b: MCP Test endpoint, server health ----
+
+/// Adds a dir holding the named fixture plugin; returns its id (left disabled).
+async fn fixture_plugin(
+    app: &Router,
+    name: &str,
+    cookie: &str,
+    csrf: &str,
+) -> (tempfile::TempDir, String) {
+    let dir = plugin_dir_with(&[name]);
+    let dir_id = add_dir(app, dir.path(), cookie, csrf).await["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let plugins = get(app, "/api/plugins", cookie, csrf).await;
+    let id = find(&plugins, &dir_id, name)["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    (dir, id)
+}
+
+async fn post_test(app: &Router, plugin_id: &str, cookie: &str, csrf: &str) -> (StatusCode, Value) {
+    send(
+        app,
+        "POST",
+        &format!("/api/plugins/{plugin_id}/test"),
+        Value::Null,
+        cookie,
+        csrf,
+    )
+    .await
+}
+
+async fn fake_mcp_plugin(app: &Router, cookie: &str, csrf: &str) -> (tempfile::TempDir, String) {
+    let (dir, id) = fixture_plugin(app, "mcp-fake", cookie, csrf).await;
+    let (status, body) = put_settings(
+        app,
+        &id,
+        json!({ "FAKE_MCP_BIN": env!("CARGO_BIN_EXE_fake-mcp") }),
+        cookie,
+        csrf,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    (dir, id)
+}
+
+#[tokio::test]
+async fn test_lists_tools_while_disabled() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    require_db!();
+    let (_state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
+    let (_dir, id) = fake_mcp_plugin(&app, &cookie, &csrf).await;
+
+    let (status, body) = post_test(&app, &id, &cookie, &csrf).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let server = &body["servers"][0];
+    assert_eq!(server["name"], "fake");
+    assert_eq!(server["kind"], "stdio");
+    assert_eq!(server["status"], "ok", "{body}");
+    assert!(server.get("error").is_none(), "{body}");
+    let echo = server["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|t| t["name"] == "echo")
+        .unwrap_or_else(|| panic!("echo missing: {body}"));
+    assert_eq!(echo["exposedName"], "mcp-fake__echo");
+    assert_eq!(echo["readOnly"], true);
+    assert_eq!(echo["description"], "Echo args.text");
+
+    let detail = get(&app, &format!("/api/plugins/{id}"), &cookie, &csrf).await;
+    assert_eq!(detail["enabled"], false);
+    assert_eq!(detail["mcpServers"][0]["health"], "ready", "{detail}");
+}
+
+#[tokio::test]
+async fn test_reports_missing_setting() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    require_db!();
+    let (_state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
+    let (_dir, id) = fixture_plugin(&app, "mcp-fake", &cookie, &csrf).await;
+
+    let (status, body) = post_test(&app, &id, &cookie, &csrf).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let server = &body["servers"][0];
+    assert_eq!(server["status"], "error", "{body}");
+    assert_eq!(server["error"], "missing setting \"FAKE_MCP_BIN\"");
+    assert_eq!(server["tools"], json!([]));
+}
+
+#[tokio::test]
+async fn test_marks_unsupported() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    require_db!();
+    let (_state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
+    let (_dir, id) = fixture_plugin(&app, "sample-plugin", &cookie, &csrf).await;
+
+    let (status, body) = post_test(&app, &id, &cookie, &csrf).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let names: Vec<_> = body["servers"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|s| s["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(names, ["echo", "old", "remote"]);
+    let old = &body["servers"][1];
+    assert_eq!(old["kind"], "sse");
+    assert_eq!(old["status"], "unsupported");
+    assert!(old.get("error").is_none(), "{body}");
+    assert_eq!(old["tools"], json!([]));
+
+    let detail = get(&app, &format!("/api/plugins/{id}"), &cookie, &csrf).await;
+    assert_eq!(detail["mcpServers"][1]["health"], "stopped");
+}
+
+#[tokio::test]
+async fn test_response_has_no_secret_values() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    require_db!();
+    let (_state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
+    let (_dir, id) = fixture_plugin(&app, "mcp-http", &cookie, &csrf).await;
+    let (status, _) = put_settings(
+        &app,
+        &id,
+        json!({ "API_KEY": "hdr-s3cr3t" }),
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (status, body) = post_test(&app, &id, &cookie, &csrf).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["servers"][0]["status"], "error", "{body}");
+    assert!(body["servers"][0]["error"].is_string(), "{body}");
+    assert!(!body.to_string().contains("hdr-s3cr3t"), "{body}");
+    let mut keys = Vec::new();
+    collect_keys(&body, &mut keys);
+    for secret in ["command", "args", "env", "url", "headers", "transport"] {
+        assert!(!keys.iter().any(|k| k == secret), "`{secret}` exposed");
+    }
+}
+
+#[tokio::test]
+async fn test_requires_admin() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    require_db!();
+    let (_state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
+    let (_dir, id) = fixture_plugin(&app, "sample-plugin", &cookie, &csrf).await;
+    let (status, _) = send(
+        &app,
+        "POST",
+        "/api/users",
+        json!({ "email": "member@localhost", "password": "secret123" }),
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    let (member_cookie, member_csrf) = login_as(&app, "member@localhost", "secret123").await;
+
+    let (status, _) = post_test(&app, &id, &member_cookie, &member_csrf).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn test_unknown_plugin_404_and_not_ok_409() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    require_db!();
+    let (_state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
+    let (status, _) = post_test(&app, &uuid::Uuid::new_v4().to_string(), &cookie, &csrf).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+
+    let (dir, id) = fixture_plugin(&app, "sample-plugin", &cookie, &csrf).await;
+    std::fs::remove_dir_all(dir.path().join("sample-plugin")).unwrap();
+    rescan(&app, &cookie, &csrf).await;
+    let (status, body) = post_test(&app, &id, &cookie, &csrf).await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert_eq!(body["error"], "plugin is not ok");
+}
+
+#[tokio::test]
+async fn disable_stops_plugin_servers() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    require_db!();
+    let (_state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
+    let (_dir, id) = fake_mcp_plugin(&app, &cookie, &csrf).await;
+    set_enabled(&app, &id, true, &cookie, &csrf).await;
+    let (status, body) = post_test(&app, &id, &cookie, &csrf).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let detail = get(&app, &format!("/api/plugins/{id}"), &cookie, &csrf).await;
+    assert_eq!(detail["mcpServers"][0]["health"], "ready");
+
+    set_enabled(&app, &id, false, &cookie, &csrf).await;
+    let detail = get(&app, &format!("/api/plugins/{id}"), &cookie, &csrf).await;
+    assert_eq!(detail["mcpServers"][0]["health"], "stopped");
+}
+
+#[tokio::test]
+async fn test_reports_undecryptable_settings_per_server() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    require_db!();
+    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
+    let pool = state.db.clone().unwrap();
+    let (_dir, id) = fake_mcp_plugin(&app, &cookie, &csrf).await;
+    let corrupted =
+        sqlx::query("UPDATE secrets SET ciphertext = '\\x00'::bytea WHERE name LIKE $1")
+            .bind(format!("plugin-setting-{id}-%"))
+            .execute(&pool)
+            .await
+            .unwrap()
+            .rows_affected();
+    assert_eq!(corrupted, 1);
+
+    let (status, body) = post_test(&app, &id, &cookie, &csrf).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(
+        body["servers"],
+        json!([{
+            "name": "fake",
+            "kind": "stdio",
+            "status": "error",
+            "error": "plugin settings could not be decrypted",
+            "tools": [],
+        }])
+    );
+}
+
+#[tokio::test]
+async fn update_stops_plugin_servers() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    require_db!();
+    let (_state, app, cookie, csrf) = install_app().await;
+    let repo = PluginRepo::of("mcp-fake");
+    let (dir_id, _) = default_dir(&app, &cookie, &csrf).await;
+    let installed = install_sample(&app, &repo, &dir_id, &cookie, &csrf).await;
+    let plugin_id = installed["pluginId"].as_str().unwrap().to_string();
+    let (status, body) = put_settings(
+        &app,
+        &plugin_id,
+        json!({ "FAKE_MCP_BIN": env!("CARGO_BIN_EXE_fake-mcp") }),
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let (status, body) = post_test(&app, &plugin_id, &cookie, &csrf).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let detail = get(&app, &format!("/api/plugins/{plugin_id}"), &cookie, &csrf).await;
+    assert_eq!(detail["mcpServers"][0]["health"], "ready");
+
+    repo.push_new_skill("goodbye");
+    let (status, update) = send(
+        &app,
+        "POST",
+        &format!("/api/plugins/{plugin_id}/update"),
+        Value::Null,
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(status, StatusCode::ACCEPTED, "{update}");
+    let done = wait_install(&app, update["id"].as_str().unwrap(), &cookie, &csrf).await;
+    assert_eq!(done["status"], "succeeded", "{done}");
+
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    loop {
+        let detail = get(&app, &format!("/api/plugins/{plugin_id}"), &cookie, &csrf).await;
+        if detail["mcpServers"][0]["health"] == "stopped" {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "server still running after update: {detail}"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
 }

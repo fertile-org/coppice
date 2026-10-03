@@ -2,7 +2,9 @@ use std::path::{Path, PathBuf};
 
 use crate::config::PluginsConfig;
 use crate::crypto::SecretStore;
-use crate::mcp::proxy::{PoolServerSpec, ServerKey};
+use crate::mcp::proxy::naming::exposed_name;
+use crate::mcp::proxy::{McpServerPool, PoolError, PoolServerSpec, ServerKey};
+use crate::plugins::capability::McpServerTransport;
 use crate::plugins::discover::{discover, Discovered};
 use crate::plugins::git_install::{repo_dir_name, validate_git_url, validate_ref};
 use crate::plugins::manifest::PluginManifest;
@@ -69,6 +71,31 @@ pub struct PluginRow {
     pub status: String,
     pub error: Option<String>,
     pub enabled: bool,
+}
+
+const UNDECRYPTABLE_SETTINGS: &str = "plugin settings could not be decrypted";
+
+/// Outcome of testing one MCP server; carries names and redacted errors only.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ServerTestResult {
+    pub name: String,
+    pub kind: String,
+    pub outcome: ServerTestOutcome,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum ServerTestOutcome {
+    Ok(Vec<TestedTool>),
+    Error(String),
+    Unsupported { error: Option<String> },
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct TestedTool {
+    pub name: String,
+    pub exposed_name: String,
+    pub description: String,
+    pub read_only: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -467,6 +494,46 @@ impl<'a> PluginService<'a> {
         Ok(specs)
     }
 
+    /// Specs for every MCP server of one plugin, whether or not it is enabled.
+    pub async fn server_specs(
+        &self,
+        plugin_id: Uuid,
+        store: &SecretStore,
+    ) -> Result<Vec<PoolServerSpec>, PluginError> {
+        self.server_specs_for(&[plugin_id], store, false).await
+    }
+
+    /// Restarts every MCP server of an `ok` plugin (enabled or not) and lists
+    /// its tools; results follow manifest order.
+    pub async fn test_servers(
+        &self,
+        plugin_id: Uuid,
+        store: &SecretStore,
+        mcp: &McpServerPool,
+    ) -> Result<Vec<ServerTestResult>, PluginError> {
+        let plugin = self.get_plugin(plugin_id).await?;
+        if plugin.status != "ok" {
+            return Err(PluginError::Conflict("plugin is not ok".into()));
+        }
+        let entries = plugin.manifest.map(|m| m.mcp_servers).unwrap_or_default();
+        let specs = match self.server_specs(plugin_id, store).await {
+            Ok(specs) => specs,
+            Err(PluginError::Settings(err)) => {
+                tracing::warn!(plugin = %plugin.name, error = %err, "plugin settings unreadable; MCP test skipped");
+                return Ok(entries
+                    .iter()
+                    .map(|entry| ServerTestResult {
+                        name: entry.name.clone(),
+                        kind: entry.api_kind().to_string(),
+                        outcome: ServerTestOutcome::Error(UNDECRYPTABLE_SETTINGS.into()),
+                    })
+                    .collect());
+            }
+            Err(err) => return Err(err),
+        };
+        Ok(futures_util::future::join_all(specs.iter().map(|spec| test_server(mcp, spec))).await)
+    }
+
     /// Validates a git install and records it as `running`; the caller clones
     /// into the returned destination and then calls `finish_install`.
     pub async fn start_install(
@@ -822,6 +889,39 @@ impl<'a> PluginService<'a> {
         } else {
             Err(PluginError::AgentNotFound)
         }
+    }
+}
+
+async fn test_server(mcp: &McpServerPool, spec: &PoolServerSpec) -> ServerTestResult {
+    let outcome = if let McpServerTransport::Unsupported { .. } = spec.entry.transport {
+        ServerTestOutcome::Unsupported {
+            error: spec.entry.error.clone(),
+        }
+    } else {
+        match mcp.test(spec).await {
+            Ok(tools) => ServerTestOutcome::Ok(
+                tools
+                    .into_iter()
+                    .map(|tool| TestedTool {
+                        exposed_name: exposed_name(&spec.plugin_name, &tool.name),
+                        name: tool.name,
+                        description: tool.description,
+                        read_only: tool.read_only,
+                    })
+                    .collect(),
+            ),
+            Err(PoolError::Config(message) | PoolError::Unhealthy(message)) => {
+                ServerTestOutcome::Error(message)
+            }
+            Err(err) => ServerTestOutcome::Error(
+                mcp.last_error(&spec.key).unwrap_or_else(|| err.to_string()),
+            ),
+        }
+    };
+    ServerTestResult {
+        name: spec.entry.name.clone(),
+        kind: spec.entry.api_kind().to_string(),
+        outcome,
     }
 }
 
