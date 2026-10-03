@@ -52,8 +52,27 @@ fn log_directives(rust_log: Option<&str>) -> String {
     }
 }
 
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
+/// Desktop launchers often omit common bin dirs; probes and runs share this PATH.
+fn augment_process_path() {
+    let Some(home) = std::env::var_os("HOME") else {
+        return;
+    };
+    let current = std::env::var_os("PATH").unwrap_or_default();
+    let path = coppice_connectors::probe::augment_path(std::path::Path::new(&home), &current);
+    std::env::set_var("PATH", path);
+}
+
+/// PATH is set before the tokio runtime exists, so no other thread can read
+/// the environment concurrently.
+fn main() -> anyhow::Result<()> {
+    augment_process_path();
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()?
+        .block_on(run())
+}
+
+async fn run() -> anyhow::Result<()> {
     let rust_log = std::env::var(EnvFilter::DEFAULT_ENV).ok();
     tracing_subscriber::fmt()
         .with_env_filter(
@@ -109,9 +128,18 @@ async fn main() -> anyhow::Result<()> {
         skills,
         tools,
         plugin_mcp: plugin_mcp.clone(),
+        connector_probes: Arc::new(
+            coppice_server::services::connector_probe_service::ConnectorProbes::new(),
+        ),
         config: config.clone(),
         db: Some(db),
     });
+    {
+        let state = state.clone();
+        tokio::spawn(async move {
+            state.connector_probes.refresh_all(&state.config).await;
+        });
+    }
     plugin_mcp.spawn_reaper();
     sweep_orphaned_runs(&state).await;
     coppice_server::workers::job_worker::spawn_workers(state.clone());

@@ -27,6 +27,9 @@ async fn test_state_with_db() -> Arc<AppState> {
         skills: AppState::test_skills(),
         tools: gateway.tools,
         plugin_mcp: gateway.plugin_mcp,
+        connector_probes: Arc::new(
+            coppice_server::services::connector_probe_service::ConnectorProbes::new(),
+        ),
         config,
         db: Some(pool),
     })

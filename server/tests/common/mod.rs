@@ -4,6 +4,7 @@ use axum::{
     Router,
 };
 use coppice_server::middleware::session::parse_session_cookie;
+use coppice_server::services::connector_probe_service::ConnectorProbes;
 use coppice_server::{db, AppConfig, AppState};
 use http_body_util::BodyExt;
 use std::net::SocketAddr;
@@ -202,6 +203,7 @@ where
         skills,
         tools: gateway.tools,
         plugin_mcp: gateway.plugin_mcp,
+        connector_probes: Arc::new(ConnectorProbes::new()),
         config,
         db: Some(pool),
     })
@@ -250,6 +252,7 @@ where
         skills,
         tools: gateway.tools,
         plugin_mcp: gateway.plugin_mcp,
+        connector_probes: Arc::new(ConnectorProbes::new()),
         config,
         db: Some(pool),
     });
@@ -298,6 +301,7 @@ where
         skills,
         tools: gateway.tools,
         plugin_mcp: gateway.plugin_mcp,
+        connector_probes: Arc::new(ConnectorProbes::new()),
         config,
         db: Some(pool),
     });

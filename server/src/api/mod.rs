@@ -18,6 +18,7 @@ mod boards;
 mod repos;
 mod settings;
 mod tickets;
+mod tool_connectors;
 mod tools;
 mod users;
 
@@ -51,6 +52,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .merge(users::routes())
         .merge(notifications::routes())
         .merge(tools::routes())
+        .merge(tool_connectors::routes())
         .merge(plugins::routes())
         .layer(middleware::from_fn(csrf::csrf_middleware))
         .layer(middleware::from_fn_with_state(state.clone(), session::session_middleware));

@@ -8,6 +8,7 @@ pub mod chat_cwd;
 pub mod chat_service;
 pub mod code_review_service;
 pub mod comment_service;
+pub mod connector_probe_service;
 pub mod context_builder;
 pub mod context_budget;
 pub mod job_service;

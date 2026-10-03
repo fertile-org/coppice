@@ -40,6 +40,7 @@ pub struct AppState {
     pub skills: Arc<crate::plugins::skills::SkillCatalog>,
     pub tools: Arc<crate::mcp::registry::ToolRegistry>,
     pub plugin_mcp: Arc<crate::mcp::proxy::McpServerPool>,
+    pub connector_probes: Arc<crate::services::connector_probe_service::ConnectorProbes>,
 }
 
 impl AppState {
@@ -200,6 +201,9 @@ pub async fn test_state() -> Arc<AppState> {
         skills: AppState::test_skills(),
         tools,
         plugin_mcp,
+        connector_probes: Arc::new(
+            crate::services::connector_probe_service::ConnectorProbes::new(),
+        ),
         config,
         db: None,
     })
