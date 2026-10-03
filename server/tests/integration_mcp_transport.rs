@@ -1,7 +1,8 @@
 #![cfg(feature = "embedded-test-db")]
 
+use axum::body::Bytes;
 use axum::extract::State;
-use axum::http::{HeaderMap, StatusCode};
+use axum::http::{HeaderMap, Method, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::post;
 use axum::{Json, Router};
@@ -15,6 +16,7 @@ use coppice_server::plugins::placeholders::ResolvedTransport;
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
 use std::path::Path;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use uuid::Uuid;
 
@@ -312,6 +314,116 @@ async fn http_error_hides_header_value() {
     let message = assert_error_hides_secrets(&refused).await;
     for leaked in ["p4th-s3cr3t", path_secret.as_str(), "/hooks/"] {
         assert!(!message.contains(leaked), "{leaked} leaked in {message}");
+    }
+}
+
+#[derive(Clone, Default)]
+struct LogCapture(Arc<Mutex<Vec<u8>>>);
+
+impl std::io::Write for LogCapture {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.0.lock().unwrap().extend_from_slice(buf);
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+impl LogCapture {
+    fn text(&self) -> String {
+        String::from_utf8_lossy(&self.0.lock().unwrap()).into_owned()
+    }
+}
+
+/// Every event on this thread, at every level, from every target (rmcp included).
+fn capture_logs() -> (LogCapture, tracing::subscriber::DefaultGuard) {
+    let logs = LogCapture::default();
+    let writer = logs.clone();
+    let subscriber = tracing_subscriber::fmt()
+        .with_max_level(tracing::Level::TRACE)
+        .with_ansi(false)
+        .with_writer(move || writer.clone())
+        .finish();
+    (logs, tracing::subscriber::set_default(subscriber))
+}
+
+async fn unused_port() -> u16 {
+    let unused = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    unused.local_addr().unwrap().port()
+}
+
+/// Accepts any path, hands out a session on `initialize`, and has no SSE stream.
+async fn session_stub(method: Method, body: Bytes) -> Response {
+    if method == Method::DELETE {
+        return StatusCode::OK.into_response();
+    }
+    if method != Method::POST {
+        return StatusCode::METHOD_NOT_ALLOWED.into_response();
+    }
+    let msg: Value = serde_json::from_slice(&body).unwrap_or_default();
+    let Some(id) = msg.get("id").cloned() else {
+        return StatusCode::ACCEPTED.into_response();
+    };
+    let result = match msg["method"].as_str() {
+        Some("initialize") => json!({
+            "protocolVersion": msg["params"]["protocolVersion"],
+            "capabilities": { "tools": {} },
+            "serverInfo": { "name": "stub", "version": "0" },
+        }),
+        _ => json!({ "tools": [] }),
+    };
+    (
+        [("mcp-session-id", "s-1")],
+        Json(json!({ "jsonrpc": "2.0", "id": id, "result": result })),
+    )
+        .into_response()
+}
+
+#[tokio::test]
+async fn http_transport_logs_never_show_the_url() {
+    let (logs, _guard) = capture_logs();
+    let dir = tempfile::tempdir().unwrap();
+    let secret_url = |port: u16| {
+        format!("http://user:u-pass@127.0.0.1:{port}/hooks/p4th-s3cr3t/mcp?token=q-secret")
+    };
+
+    let refused = ResolvedTransport::Http {
+        url: secret_url(unused_port().await),
+        headers: map(&[("Authorization", "Bearer h-val")]),
+    };
+    assert!(HttpTransport.connect(&refused, dir.path()).await.is_err());
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let server = tokio::spawn(async move {
+        axum::serve(listener, Router::new().fallback(session_stub))
+            .await
+            .unwrap()
+    });
+    let live = ResolvedTransport::Http {
+        url: secret_url(port),
+        headers: BTreeMap::new(),
+    };
+    let conn = match HttpTransport.connect(&live, dir.path()).await {
+        Ok(conn) => conn,
+        Err(e) => panic!("connect failed: {e}"),
+    };
+    assert!(conn.list_tools().await.unwrap().is_empty());
+    server.abort();
+    let _ = server.await;
+    // Session cleanup (DELETE) now hits a closed port and rmcp logs the failure.
+    conn.close().await;
+    tokio::time::sleep(Duration::from_millis(200)).await;
+
+    let text = logs.text();
+    assert!(
+        text.contains("fail to delete session"),
+        "expected rmcp's cleanup failure to be logged:\n{text}"
+    );
+    for leaked in ["u-pass", "q-secret", "p4th-s3cr3t", "for url ("] {
+        assert!(!text.contains(leaked), "{leaked} leaked in logs:\n{text}");
     }
 }
 

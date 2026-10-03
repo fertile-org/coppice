@@ -6,10 +6,136 @@ use crate::plugins::placeholders::ResolvedTransport;
 use async_trait::async_trait;
 use reqwest::header::{HeaderName, HeaderValue};
 use reqwest::Url;
-use rmcp::transport::streamable_http_client::StreamableHttpClientTransportConfig;
+use rmcp::model::ClientJsonRpcMessage;
+use rmcp::transport::common::client_side_sse::BoxedSseResponse;
+use rmcp::transport::streamable_http_client::{
+    StreamableHttpClient, StreamableHttpClientTransportConfig, StreamableHttpError,
+    StreamableHttpPostResponse,
+};
 use rmcp::transport::StreamableHttpClientTransport;
 use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
+use std::sync::Arc;
+
+type HttpResult<T> = Result<T, StreamableHttpError<reqwest_mcp::Error>>;
+
+/// rmcp's reqwest client with the URL stripped from every error: rmcp logs these
+/// errors itself, and reqwest's `Display` appends the full URL.
+#[derive(Clone)]
+struct UrlFreeClient(reqwest_mcp::Client);
+
+impl UrlFreeClient {
+    /// Same settings as rmcp's default client: no idle pooling, no redirects.
+    fn new() -> Result<Self, ProxyError> {
+        reqwest_mcp::Client::builder()
+            .pool_max_idle_per_host(0)
+            .redirect(reqwest_mcp::redirect::Policy::none())
+            .build()
+            .map(Self)
+            .map_err(|e| ProxyError::Start(format!("http client: {}", e.without_url())))
+    }
+}
+
+fn without_url<T>(result: HttpResult<T>) -> HttpResult<T> {
+    result.map_err(|err| match err {
+        StreamableHttpError::Client(e) => StreamableHttpError::Client(e.without_url()),
+        other => other,
+    })
+}
+
+impl StreamableHttpClient for UrlFreeClient {
+    type Error = reqwest_mcp::Error;
+
+    async fn post_message(
+        &self,
+        uri: Arc<str>,
+        message: ClientJsonRpcMessage,
+        session_id: Option<Arc<str>>,
+        auth_header: Option<String>,
+        custom_headers: HashMap<HeaderName, HeaderValue>,
+    ) -> HttpResult<StreamableHttpPostResponse> {
+        without_url(
+            self.0
+                .post_message(uri, message, session_id, auth_header, custom_headers)
+                .await,
+        )
+    }
+
+    async fn post_message_with_max_sse_event_size(
+        &self,
+        uri: Arc<str>,
+        message: ClientJsonRpcMessage,
+        session_id: Option<Arc<str>>,
+        auth_header: Option<String>,
+        custom_headers: HashMap<HeaderName, HeaderValue>,
+        max_sse_event_size: usize,
+    ) -> HttpResult<StreamableHttpPostResponse> {
+        without_url(
+            self.0
+                .post_message_with_max_sse_event_size(
+                    uri,
+                    message,
+                    session_id,
+                    auth_header,
+                    custom_headers,
+                    max_sse_event_size,
+                )
+                .await,
+        )
+    }
+
+    async fn delete_session(
+        &self,
+        uri: Arc<str>,
+        session_id: Arc<str>,
+        auth_header: Option<String>,
+        custom_headers: HashMap<HeaderName, HeaderValue>,
+    ) -> HttpResult<()> {
+        without_url(
+            self.0
+                .delete_session(uri, session_id, auth_header, custom_headers)
+                .await,
+        )
+    }
+
+    async fn get_stream(
+        &self,
+        uri: Arc<str>,
+        session_id: Option<Arc<str>>,
+        last_event_id: Option<String>,
+        auth_header: Option<String>,
+        custom_headers: HashMap<HeaderName, HeaderValue>,
+    ) -> HttpResult<BoxedSseResponse> {
+        without_url(
+            self.0
+                .get_stream(uri, session_id, last_event_id, auth_header, custom_headers)
+                .await,
+        )
+    }
+
+    async fn get_stream_with_max_sse_event_size(
+        &self,
+        uri: Arc<str>,
+        session_id: Option<Arc<str>>,
+        last_event_id: Option<String>,
+        auth_header: Option<String>,
+        custom_headers: HashMap<HeaderName, HeaderValue>,
+        max_sse_event_size: usize,
+    ) -> HttpResult<BoxedSseResponse> {
+        without_url(
+            self.0
+                .get_stream_with_max_sse_event_size(
+                    uri,
+                    session_id,
+                    last_event_id,
+                    auth_header,
+                    custom_headers,
+                    max_sse_event_size,
+                )
+                .await,
+        )
+    }
+}
 
 pub struct HttpTransport;
 
@@ -49,7 +175,8 @@ impl McpTransport for HttpTransport {
         }
         let config =
             StreamableHttpClientTransportConfig::with_uri(url.as_str()).custom_headers(custom);
-        client::connect(StreamableHttpClientTransport::from_config(config), redactor).await
+        let transport = StreamableHttpClientTransport::with_client(UrlFreeClient::new()?, config);
+        client::connect(transport, redactor).await
     }
 }
 
