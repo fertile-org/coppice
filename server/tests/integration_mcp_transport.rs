@@ -538,6 +538,34 @@ async fn pool_shares_one_process_across_callers() {
 }
 
 #[tokio::test]
+async fn pool_health_reflects_server_killed_while_idle() {
+    let dir = tempfile::tempdir().unwrap();
+    let pool = test_pool();
+    let spec = pool_spec(dir.path());
+    assert_eq!(pool_echo(&pool, &spec, "a").await, "a");
+    assert_eq!(pool.health(&spec.key), ServerHealth::Ready);
+
+    let killed = std::process::Command::new("kill")
+        .args(["-9", read_pid(dir.path()).trim()])
+        .status()
+        .unwrap();
+    assert!(killed.success());
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    while pool.health(&spec.key) == ServerHealth::Ready {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "killed server still reported ready"
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert_eq!(pool.health(&spec.key), ServerHealth::Backoff);
+    assert_eq!(
+        pool.last_error(&spec.key).as_deref(),
+        Some("server exited or closed the connection")
+    );
+}
+
+#[tokio::test]
 async fn pool_restarts_crashed_stdio_server() {
     let dir = tempfile::tempdir().unwrap();
     let pool = test_pool();

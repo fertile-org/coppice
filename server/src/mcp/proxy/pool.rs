@@ -154,6 +154,19 @@ impl Slot {
         }
     }
 
+    /// A `Ready` instance whose connection closed counts as a failure; returns it to close.
+    fn take_closed(&mut self, cfg: &PoolConfig) -> Option<Arc<Instance>> {
+        let Phase::Ready(instance) = &self.phase else {
+            return None;
+        };
+        if !instance.conn.is_closed() {
+            return None;
+        }
+        let instance = instance.clone();
+        self.record_failure(cfg, CLOSED.into());
+        Some(instance)
+    }
+
     fn record_failure(&mut self, cfg: &PoolConfig, error: String) {
         self.failures += 1;
         self.last_error = error;
@@ -246,18 +259,27 @@ impl McpServerPool {
         (!slot.last_error.is_empty()).then(|| slot.last_error.clone())
     }
 
+    /// A server that exited while idle is counted as failed here, as the next call would.
     pub fn health(&self, key: &ServerKey) -> ServerHealth {
         let Some(slot) = self.slots.lock().unwrap().get(key).cloned() else {
             return ServerHealth::Stopped;
         };
-        let slot = slot.lock().unwrap();
-        match slot.phase {
-            Phase::Stopped => ServerHealth::Stopped,
-            Phase::Starting(_) => ServerHealth::Starting,
-            Phase::Ready(_) => ServerHealth::Ready,
-            Phase::Backoff(_) => ServerHealth::Backoff,
-            Phase::Unhealthy => ServerHealth::Unhealthy,
+        let (health, closed) = {
+            let mut slot = slot.lock().unwrap();
+            let closed = slot.take_closed(&self.cfg);
+            let health = match slot.phase {
+                Phase::Stopped => ServerHealth::Stopped,
+                Phase::Starting(_) => ServerHealth::Starting,
+                Phase::Ready(_) => ServerHealth::Ready,
+                Phase::Backoff(_) => ServerHealth::Backoff,
+                Phase::Unhealthy => ServerHealth::Unhealthy,
+            };
+            (health, closed)
+        };
+        if let Some(instance) = closed {
+            close_detached(instance);
         }
+        health
     }
 
     pub async fn stop_plugin(&self, plugin_id: Uuid) {
@@ -361,9 +383,8 @@ impl McpServerPool {
                 Phase::Ready(instance) if !instance.conn.is_closed() => {
                     Step::Done(Ok(instance.clone()))
                 }
-                Phase::Ready(instance) => {
-                    stale = Some(instance.clone());
-                    slot.record_failure(&self.cfg, CLOSED.into());
+                Phase::Ready(_) => {
+                    stale = slot.take_closed(&self.cfg);
                     Step::Done(Err(PoolError::Unavailable))
                 }
                 Phase::Starting(rx) => Step::Wait(rx.clone()),
@@ -540,8 +561,11 @@ impl Drop for StartGuard {
 }
 
 /// Closes on a spawned task so a cancelled caller cannot interrupt shutdown.
+/// Outside a runtime (sync `health` callers) the instance is just dropped.
 fn close_detached(instance: Arc<Instance>) {
-    tokio::spawn(async move { instance.conn.close().await });
+    if let Ok(runtime) = tokio::runtime::Handle::try_current() {
+        runtime.spawn(async move { instance.conn.close().await });
+    }
 }
 
 async fn close_all(instances: Vec<Arc<Instance>>) {
@@ -1053,6 +1077,25 @@ mod tests {
             pool.last_error(&key).as_deref(),
             Some("missing setting \"API_TOKEN\"")
         );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn health_reports_idle_crash_as_failure() {
+        let (pool, fake) = pool();
+        pool.tools(&spec()).await.unwrap();
+        assert_eq!(pool.health(&spec().key), ServerHealth::Ready);
+        fake.conn(0).closed.store(true, Ordering::SeqCst);
+        assert_eq!(pool.health(&spec().key), ServerHealth::Backoff);
+        assert_eq!(
+            pool.last_error(&spec().key).as_deref(),
+            Some("server exited or closed the connection")
+        );
+        assert_eq!(pool.health(&spec().key), ServerHealth::Backoff);
+
+        tokio::time::advance(Duration::from_secs(1)).await;
+        pool.tools(&spec()).await.unwrap();
+        assert_eq!(fake.connects(), 2);
+        assert_eq!(pool.health(&spec().key), ServerHealth::Ready);
     }
 
     #[tokio::test(start_paused = true)]
