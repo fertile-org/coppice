@@ -1,10 +1,13 @@
 use std::path::{Path, PathBuf};
 
 use crate::config::PluginsConfig;
+use crate::crypto::SecretStore;
+use crate::mcp::proxy::{PoolServerSpec, ServerKey};
 use crate::plugins::discover::{discover, Discovered};
 use crate::plugins::git_install::{repo_dir_name, validate_git_url, validate_ref};
 use crate::plugins::manifest::PluginManifest;
 use crate::plugins::skills::{PluginSkillSet, SkillCatalog};
+use crate::services::plugin_settings_service::{PluginSettingsError, PluginSettingsService};
 use sqlx::postgres::PgRow;
 use sqlx::{PgPool, Postgres, Row, Transaction};
 use uuid::Uuid;
@@ -38,6 +41,8 @@ pub enum PluginError {
     Db(#[from] sqlx::Error),
     #[error(transparent)]
     Io(#[from] std::io::Error),
+    #[error(transparent)]
+    Settings(#[from] PluginSettingsError),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -403,6 +408,55 @@ impl<'a> PluginService<'a> {
             .collect();
         catalog.set_plugin_skills(sets);
         Ok(())
+    }
+
+    /// One spec per MCP server of each plugin in `plugin_ids`, with decrypted
+    /// settings. `enabled_only` keeps only enabled `ok` plugins.
+    pub async fn server_specs_for(
+        &self,
+        plugin_ids: &[Uuid],
+        store: &SecretStore,
+        enabled_only: bool,
+    ) -> Result<Vec<PoolServerSpec>, PluginError> {
+        if plugin_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let rows = sqlx::query(&format!(
+            r#"
+            SELECT {PLUGIN_COLUMNS}, d.path AS dir_path FROM plugins p
+            JOIN plugin_dirs d ON d.id = p.plugin_dir_id
+            WHERE p.id = ANY($1) AND (NOT $2 OR (p.enabled AND p.status = 'ok'))
+            ORDER BY d.position, p.rel_path
+            "#
+        ))
+        .bind(plugin_ids)
+        .bind(enabled_only)
+        .fetch_all(self.pool)
+        .await?;
+        let settings = PluginSettingsService::new(self.pool, store);
+        let mut specs = Vec::new();
+        for row in &rows {
+            let plugin = row_to_plugin(row);
+            let Some(manifest) = plugin.manifest.as_ref() else {
+                continue;
+            };
+            if manifest.mcp_servers.is_empty() {
+                continue;
+            }
+            let root = join_plugin_path(&row.get::<String, _>("dir_path"), &plugin.rel_path);
+            let values = settings.decrypted(plugin.id).await?;
+            specs.extend(manifest.mcp_servers.iter().map(|entry| PoolServerSpec {
+                key: ServerKey {
+                    plugin_id: plugin.id,
+                    server: entry.name.clone(),
+                },
+                plugin_name: plugin.name.clone(),
+                plugin_root: root.clone(),
+                entry: entry.clone(),
+                settings: values.clone(),
+            }));
+        }
+        Ok(specs)
     }
 
     /// Validates a git install and records it as `running`; the caller clones

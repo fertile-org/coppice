@@ -73,6 +73,15 @@ async fn main() -> anyhow::Result<()> {
         .fail_stale_installs()
         .await
         .map_err(|e| anyhow::anyhow!("failed to mark stale plugin installs: {e}"))?;
+    let secret_store =
+        coppice_server::crypto::SecretStore::from_master_key(&config.secrets.master_key);
+    let plugin_mcp = coppice_server::AppState::plugin_mcp_from_config(&config);
+    let tools = coppice_server::AppState::build_tool_registry(
+        Some(&db),
+        &secret_store,
+        plugin_mcp.clone(),
+        coppice_server::AppState::list_timeout_from_config(&config),
+    );
     let state = Arc::new(coppice_server::AppState {
         attachments: coppice_server::AppState::attachment_store_from_config(&config),
         connector_registry: coppice_server::AppState::connector_registry_from_config(
@@ -84,12 +93,14 @@ async fn main() -> anyhow::Result<()> {
         event_bus: Arc::new(coppice_server::events::bus::EventBus::new()),
         opencode_runs: opencode_runs.clone(),
         agent_templates,
-        secret_store: coppice_server::crypto::SecretStore::from_master_key(&config.secrets.master_key),
+        secret_store,
         skills,
-        tools: coppice_server::AppState::builtin_tool_registry(),
+        tools,
+        plugin_mcp: plugin_mcp.clone(),
         config: config.clone(),
         db: Some(db),
     });
+    plugin_mcp.spawn_reaper();
     sweep_orphaned_runs(&state).await;
     coppice_server::workers::job_worker::spawn_workers(state.clone());
     coppice_server::workers::health_worker::spawn_health_worker(state.clone());

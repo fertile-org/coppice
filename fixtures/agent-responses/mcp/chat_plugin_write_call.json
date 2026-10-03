@@ -1,0 +1,14 @@
+{
+  "status": "done",
+  "summary": "Mock chat reply after a denied plugin write.",
+  "changedFiles": [],
+  "testsRun": [],
+  "blockers": [],
+  "toolCalls": [
+    { "tool": "mcp-fake__write_note", "args": {} },
+    {
+      "tool": "result_submit",
+      "args": { "status": "done", "summary": "Mock chat reply after a denied plugin write." }
+    }
+  ]
+}

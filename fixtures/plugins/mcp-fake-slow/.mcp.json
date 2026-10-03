@@ -1,0 +1,1 @@
+{"mcpServers":{"fake":{"command":"${FAKE_MCP_BIN}","env":{"FAKE_MCP_INIT_SLEEP_MS":"5000"}}}}

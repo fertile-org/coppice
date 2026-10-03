@@ -144,6 +144,32 @@ async fn init_test_plugins(
     skills
 }
 
+/// Secret store plus the production tool registry (with the plugin MCP source).
+pub struct GatewayParts {
+    pub secret_store: coppice_server::crypto::SecretStore,
+    pub tools: Arc<coppice_server::mcp::registry::ToolRegistry>,
+    pub plugin_mcp: Arc<coppice_server::mcp::proxy::McpServerPool>,
+}
+
+impl GatewayParts {
+    pub fn new(config: &AppConfig, pool: &sqlx::PgPool) -> Self {
+        let secret_store =
+            coppice_server::crypto::SecretStore::from_master_key(&config.secrets.master_key);
+        let plugin_mcp = AppState::plugin_mcp_from_config(config);
+        let tools = AppState::build_tool_registry(
+            Some(pool),
+            &secret_store,
+            plugin_mcp.clone(),
+            AppState::list_timeout_from_config(config),
+        );
+        Self {
+            secret_store,
+            tools,
+            plugin_mcp,
+        }
+    }
+}
+
 async fn test_state_with_db() -> Arc<AppState> {
     test_state_with_db_config(|_| {}).await
 }
@@ -163,6 +189,7 @@ where
     configure(&mut config);
     let skills = init_test_plugins(&mut config, &pool).await;
     let opencode_runs = AppState::test_opencode_runs();
+    let gateway = GatewayParts::new(&config, &pool);
     Arc::new(AppState {
         attachments: AppState::attachment_store_from_config(&config),
         connector_registry: AppState::connector_registry_from_config(&config, opencode_runs.clone()),
@@ -171,9 +198,10 @@ where
         event_bus: Arc::new(coppice_server::events::bus::EventBus::new()),
         opencode_runs,
         agent_templates: coppice_server::AppState::load_agent_templates(),
-        secret_store: coppice_server::crypto::SecretStore::from_master_key(&config.secrets.master_key),
+        secret_store: gateway.secret_store,
         skills,
-        tools: AppState::builtin_tool_registry(),
+        tools: gateway.tools,
+        plugin_mcp: gateway.plugin_mcp,
         config,
         db: Some(pool),
     })
@@ -209,6 +237,7 @@ where
     let skills = init_test_plugins(&mut config, &pool).await;
 
     let opencode_runs = AppState::test_opencode_runs();
+    let gateway = GatewayParts::new(&config, &pool);
     let state = Arc::new(AppState {
         attachments: AppState::attachment_store_from_config(&config),
         connector_registry: AppState::connector_registry_from_config(&config, opencode_runs.clone()),
@@ -217,9 +246,10 @@ where
         event_bus: Arc::new(coppice_server::events::bus::EventBus::new()),
         opencode_runs,
         agent_templates: coppice_server::AppState::load_agent_templates(),
-        secret_store: coppice_server::crypto::SecretStore::from_master_key(&config.secrets.master_key),
+        secret_store: gateway.secret_store,
         skills,
-        tools: AppState::builtin_tool_registry(),
+        tools: gateway.tools,
+        plugin_mcp: gateway.plugin_mcp,
         config,
         db: Some(pool),
     });
@@ -255,6 +285,7 @@ where
     let skills = init_test_plugins(&mut config, &pool).await;
 
     let opencode_runs = AppState::test_opencode_runs();
+    let gateway = GatewayParts::new(&config, &pool);
     let state = Arc::new(AppState {
         attachments: AppState::attachment_store_from_config(&config),
         connector_registry: AppState::connector_registry_from_config(&config, opencode_runs.clone()),
@@ -263,9 +294,10 @@ where
         event_bus: Arc::new(coppice_server::events::bus::EventBus::new()),
         opencode_runs,
         agent_templates: coppice_server::AppState::load_agent_templates(),
-        secret_store: coppice_server::crypto::SecretStore::from_master_key(&config.secrets.master_key),
+        secret_store: gateway.secret_store,
         skills,
-        tools: AppState::builtin_tool_registry(),
+        tools: gateway.tools,
+        plugin_mcp: gateway.plugin_mcp,
         config,
         db: Some(pool),
     });
@@ -887,6 +919,16 @@ pub async fn mint_test_token(
     run_id: uuid::Uuid,
     profile: coppice_server::domain::context_profile::ContextProfile,
 ) -> String {
+    mint_test_token_with_plugins(state, run_id, profile, vec![]).await
+}
+
+/// Like `mint_test_token`, with the given plugin snapshot.
+pub async fn mint_test_token_with_plugins(
+    state: &Arc<AppState>,
+    run_id: uuid::Uuid,
+    profile: coppice_server::domain::context_profile::ContextProfile,
+    plugin_ids: Vec<uuid::Uuid>,
+) -> String {
     use coppice_server::mcp::token::{NewRunToolScope, TokenService};
 
     let pool = state.db.as_ref().expect("db pool");
@@ -910,7 +952,7 @@ pub async fn mint_test_token(
                 profile,
                 job_type,
                 compaction_ticket_ids: vec![],
-                plugin_ids: vec![],
+                plugin_ids,
             },
             Duration::from_secs(60),
         )

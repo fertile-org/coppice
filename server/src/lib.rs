@@ -39,6 +39,7 @@ pub struct AppState {
     pub secret_store: crate::crypto::SecretStore,
     pub skills: Arc<crate::plugins::skills::SkillCatalog>,
     pub tools: Arc<crate::mcp::registry::ToolRegistry>,
+    pub plugin_mcp: Arc<crate::mcp::proxy::McpServerPool>,
 }
 
 impl AppState {
@@ -127,9 +128,36 @@ impl AppState {
         Arc::new(crate::plugins::skills::load_builtin(dir.path()).expect("load builtins"))
     }
 
-    /// MCP gateway router over the core and skill tool sources.
-    pub fn builtin_tool_registry() -> Arc<crate::mcp::registry::ToolRegistry> {
-        Arc::new(crate::mcp::registry::ToolRegistry::builtin())
+    pub fn plugin_mcp_from_config(config: &AppConfig) -> Arc<crate::mcp::proxy::McpServerPool> {
+        Arc::new(crate::mcp::proxy::McpServerPool::new(
+            crate::mcp::proxy::Transports::builtin(),
+            crate::mcp::proxy::PoolConfig::from_plugins(&config.plugins),
+        ))
+    }
+
+    pub fn list_timeout_from_config(config: &AppConfig) -> std::time::Duration {
+        std::time::Duration::from_secs(config.plugins.mcp_list_timeout_secs)
+    }
+
+    /// MCP gateway router over the core, skill, and (with a database) plugin MCP tool sources.
+    pub fn build_tool_registry(
+        db: Option<&PgPool>,
+        secret_store: &crate::crypto::SecretStore,
+        plugin_mcp: Arc<crate::mcp::proxy::McpServerPool>,
+        list_timeout: std::time::Duration,
+    ) -> Arc<crate::mcp::registry::ToolRegistry> {
+        use crate::mcp::source::{CoreToolSource, SkillToolSource, ToolSource};
+        let mut sources: Vec<Arc<dyn ToolSource>> =
+            vec![Arc::new(CoreToolSource), Arc::new(SkillToolSource)];
+        if let Some(db) = db {
+            let catalog =
+                crate::mcp::proxy::DbPluginServerCatalog::new(db.clone(), secret_store.clone());
+            sources.push(Arc::new(crate::mcp::proxy::PluginMcpSource::new(
+                plugin_mcp,
+                Arc::new(catalog),
+            )));
+        }
+        Arc::new(crate::mcp::registry::ToolRegistry::new(sources).with_list_timeout(list_timeout))
     }
 
     pub fn load_agent_templates() -> HashMap<String, String> {
@@ -142,6 +170,13 @@ pub async fn test_state() -> Arc<AppState> {
     let config = AppConfig::load_defaults().expect("test config");
     let secret_store = crate::crypto::SecretStore::from_master_key(&config.secrets.master_key);
     let opencode_runs = AppState::test_opencode_runs();
+    let plugin_mcp = AppState::plugin_mcp_from_config(&config);
+    let tools = AppState::build_tool_registry(
+        None,
+        &secret_store,
+        plugin_mcp.clone(),
+        AppState::list_timeout_from_config(&config),
+    );
     Arc::new(AppState {
         attachments: AppState::attachment_store_from_config(&config),
         connector_registry: AppState::connector_registry_from_config(&config, opencode_runs.clone()),
@@ -152,7 +187,8 @@ pub async fn test_state() -> Arc<AppState> {
         agent_templates: AppState::load_agent_templates(),
         secret_store,
         skills: AppState::test_skills(),
-        tools: AppState::builtin_tool_registry(),
+        tools,
+        plugin_mcp,
         config,
         db: None,
     })

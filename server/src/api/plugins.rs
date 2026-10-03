@@ -157,7 +157,7 @@ impl From<PluginError> for ApiError {
             }
             PluginError::Validation(_) => StatusCode::BAD_REQUEST,
             PluginError::Conflict(_) => StatusCode::CONFLICT,
-            PluginError::Db(_) | PluginError::Io(_) => {
+            PluginError::Db(_) | PluginError::Io(_) | PluginError::Settings(_) => {
                 tracing::error!(error = %err, "plugin request failed");
                 return ApiError(
                     StatusCode::INTERNAL_SERVER_ERROR,

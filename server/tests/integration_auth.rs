@@ -14,6 +14,7 @@ async fn test_state_with_db() -> Arc<AppState> {
     );
     let config = AppConfig::load_defaults().expect("test config");
     let opencode_runs = AppState::test_opencode_runs();
+    let gateway = common::GatewayParts::new(&config, &pool);
     Arc::new(AppState {
         attachments: AppState::attachment_store_from_config(&config),
         connector_registry: AppState::connector_registry_from_config(&config, opencode_runs.clone()),
@@ -22,9 +23,10 @@ async fn test_state_with_db() -> Arc<AppState> {
         event_bus: Arc::new(coppice_server::events::bus::EventBus::new()),
         opencode_runs,
         agent_templates: coppice_server::AppState::load_agent_templates(),
-        secret_store: coppice_server::crypto::SecretStore::from_master_key(&config.secrets.master_key),
+        secret_store: gateway.secret_store,
         skills: AppState::test_skills(),
-        tools: AppState::builtin_tool_registry(),
+        tools: gateway.tools,
+        plugin_mcp: gateway.plugin_mcp,
         config,
         db: Some(pool),
     })

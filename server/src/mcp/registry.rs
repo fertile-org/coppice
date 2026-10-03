@@ -14,6 +14,7 @@ const TRUNCATION_SUFFIX: &str = "\n…[truncated: use limit/before to page]";
 const ARGS_SUMMARY_CHARS: usize = 200;
 /// The chat reply path; allowed on read-only profiles despite writing.
 const REPLY_TOOL: &str = "result_submit";
+pub const DEFAULT_LIST_TIMEOUT: Duration = Duration::from_secs(10);
 
 #[derive(Clone, Copy)]
 enum CallStatus {
@@ -38,6 +39,7 @@ impl CallStatus {
 /// applies the profile filter, enforces limits, and logs every call.
 pub struct ToolRegistry {
     sources: Vec<Arc<dyn ToolSource>>,
+    list_timeout: Duration,
     warned_duplicates: Mutex<HashSet<String>>,
 }
 
@@ -45,8 +47,15 @@ impl ToolRegistry {
     pub fn new(sources: Vec<Arc<dyn ToolSource>>) -> Self {
         Self {
             sources,
+            list_timeout: DEFAULT_LIST_TIMEOUT,
             warned_duplicates: Mutex::new(HashSet::new()),
         }
+    }
+
+    /// Bounds each source's `list`; a source that overruns contributes no tools.
+    pub fn with_list_timeout(mut self, list_timeout: Duration) -> Self {
+        self.list_timeout = list_timeout;
+        self
     }
 
     /// Core, then skill tools.
@@ -64,10 +73,23 @@ impl ToolRegistry {
 
     /// Merged tool set for `scope`, each paired with the index of its source.
     async fn resolve(&self, scope: &RunToolScope) -> Vec<(usize, SourcedTool)> {
+        let listed = futures_util::future::join_all(self.sources.iter().map(|source| async move {
+            match tokio::time::timeout(self.list_timeout, source.list(scope)).await {
+                Ok(tools) => tools,
+                Err(_) => {
+                    tracing::warn!(
+                        source = source.kind().as_str(),
+                        "tool source list timed out"
+                    );
+                    Vec::new()
+                }
+            }
+        }))
+        .await;
         let mut seen = HashSet::new();
         let mut merged = Vec::new();
-        for (index, source) in self.sources.iter().enumerate() {
-            for tool in source.list(scope).await {
+        for (index, tools) in listed.into_iter().enumerate() {
+            for tool in tools {
                 if seen.insert(tool.def.name.clone()) {
                     merged.push((index, tool));
                 } else {
@@ -458,6 +480,43 @@ mod tests {
                 vec!["reader", "result_submit"]
             );
         }
+    }
+
+    struct HungSource;
+
+    #[async_trait]
+    impl ToolSource for HungSource {
+        fn kind(&self) -> SourceKind {
+            SourceKind::Plugin
+        }
+        async fn list(&self, _scope: &RunToolScope) -> Vec<SourcedTool> {
+            tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+            Vec::new()
+        }
+        async fn call(
+            &self,
+            _ctx: &ToolCtx<'_>,
+            _tool: &SourcedTool,
+            _args: Value,
+        ) -> Result<ToolResult, ToolError> {
+            unreachable!("hung source is never resolved")
+        }
+    }
+
+    #[tokio::test]
+    async fn hung_source_list_times_out_core_tools_intact() {
+        let registry = ToolRegistry::new(vec![Arc::new(CoreToolSource), Arc::new(HungSource)])
+            .with_list_timeout(std::time::Duration::from_millis(100));
+        let started = std::time::Instant::now();
+        let got = names(&registry, ContextProfile::Full).await;
+        assert!(started.elapsed() < std::time::Duration::from_secs(1));
+        let want: Vec<String> = crate::mcp::catalog::core_tools_for(ContextProfile::Full)
+            .into_iter()
+            .map(|t| t.definition().name)
+            .collect();
+        assert!(!want.is_empty());
+        assert_eq!(got, want);
+        assert_eq!(DEFAULT_LIST_TIMEOUT, std::time::Duration::from_secs(10));
     }
 
     #[test]

@@ -1,0 +1,15 @@
+{
+  "status": "done",
+  "summary": "via stdout",
+  "changedFiles": [],
+  "testsRun": [],
+  "mentionAgents": [],
+  "blockers": [],
+  "toolCalls": [
+    { "tool": "mcp-fake__echo", "args": { "text": "hi" } },
+    {
+      "tool": "result_submit",
+      "args": { "status": "done", "summary": "via tool", "mentionAgents": [] }
+    }
+  ]
+}

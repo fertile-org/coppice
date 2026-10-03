@@ -2045,3 +2045,355 @@ async fn plugin_skill_not_assigned_is_not_found() {
         "via tool"
     );
 }
+
+// ---- M10 Part 2b: plugin MCP servers as the third tool source ----
+
+/// Adds `fixtures/plugins/<name>` as a plugin dir, points `FAKE_MCP_BIN` at the
+/// fake server, and enables the plugin. Returns the plugin id.
+async fn add_mcp_plugin(
+    app: &Router,
+    cookie: &str,
+    csrf: &str,
+    name: &str,
+) -> (Uuid, tempfile::TempDir) {
+    let plugins = tempfile::tempdir().unwrap();
+    copy_tree(
+        &std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../fixtures/plugins")
+            .join(name),
+        &plugins.path().join(name),
+    );
+    let dir = api(
+        app,
+        "POST",
+        "/api/plugin-dirs",
+        json!({ "path": plugins.path().to_string_lossy() }),
+        cookie,
+        csrf,
+    )
+    .await;
+    let listed = api(app, "GET", "/api/plugins", Value::Null, cookie, csrf).await;
+    let plugin_id = listed
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|p| p["pluginDirId"] == dir["id"] && p["name"] == name)
+        .unwrap()["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    api(
+        app,
+        "PUT",
+        &format!("/api/plugins/{plugin_id}/settings"),
+        json!({ "values": { "FAKE_MCP_BIN": env!("CARGO_BIN_EXE_fake-mcp") } }),
+        cookie,
+        csrf,
+    )
+    .await;
+    api(
+        app,
+        "PATCH",
+        &format!("/api/plugins/{plugin_id}"),
+        json!({ "enabled": true }),
+        cookie,
+        csrf,
+    )
+    .await;
+    (plugin_id.parse().unwrap(), plugins)
+}
+
+async fn tool_names(url: &str, token: &str) -> Vec<String> {
+    let res = rpc(url, token, "tools/list", json!({})).await;
+    res["result"]["tools"]
+        .as_array()
+        .unwrap_or_else(|| panic!("tools/list failed: {res}"))
+        .iter()
+        .map(|t| t["name"].as_str().unwrap().to_string())
+        .collect()
+}
+
+fn has_mcp_fake_tool(names: &[String]) -> bool {
+    names.iter().any(|n| n.starts_with("mcp-fake__"))
+}
+
+struct McpPluginRun {
+    state: Arc<AppState>,
+    app: Router,
+    cookie: String,
+    csrf: String,
+    url: String,
+    run_id: Uuid,
+    board_id: String,
+    agent_id: String,
+    plugin_id: Uuid,
+    _dirs: Vec<tempfile::TempDir>,
+    _env: common::AgentTestEnv,
+}
+
+/// Ticket run through the worker with `mcp-fake` enabled and assigned to the agent.
+async fn run_ticket_with_mcp_plugin(fixture: &str) -> McpPluginRun {
+    let (state, app, cookie, csrf, env) = common::bootstrap_and_login_with_gateway(fixture).await;
+    let (plugin_id, plugins) = add_mcp_plugin(&app, &cookie, &csrf, "mcp-fake").await;
+    let (git_dir, local_path) = common::create_temp_git_checkout();
+    let repo_id =
+        common::register_test_repo(&app, &local_path.display().to_string(), &cookie, &csrf).await;
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
+    let agent_id = common::create_test_agent_from_preset(&app, "Worker", &cookie, &csrf).await;
+    api(
+        &app,
+        "PUT",
+        &format!("/api/agents/{agent_id}/plugins"),
+        json!({ "pluginIds": [plugin_id] }),
+        &cookie,
+        &csrf,
+    )
+    .await;
+    let ticket_id = common::create_test_ticket(&app, &board_id, &cookie, &csrf).await;
+    common::set_ticket_repo(&app, &ticket_id, &repo_id, &cookie, &csrf).await;
+    common::assign_agent_to_ticket(&app, &ticket_id, &agent_id, &cookie, &csrf).await;
+    let body = api(
+        &app,
+        "POST",
+        &format!("/api/tickets/{ticket_id}/run-agent"),
+        Value::Null,
+        &cookie,
+        &csrf,
+    )
+    .await;
+    let run_id: Uuid = body["run"]["id"].as_str().unwrap().parse().unwrap();
+    let pool = state.db.clone().unwrap();
+    wait_for_run_status(&pool, run_id, "succeeded").await;
+    let url = state.config.mcp.base_url.clone().expect("gateway url");
+    McpPluginRun {
+        state,
+        app,
+        cookie,
+        csrf,
+        url,
+        run_id,
+        board_id,
+        agent_id,
+        plugin_id,
+        _dirs: vec![plugins, git_dir],
+        _env: env,
+    }
+}
+
+#[tokio::test]
+async fn plugin_mcp_tool_listed_and_called() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let fx = run_ticket_with_mcp_plugin("mcp/plugin_mcp_tool_call").await;
+    let pool = fx.state.db.clone().unwrap();
+    assert_eq!(token_plugin_ids(&pool, fx.run_id).await, vec![fx.plugin_id]);
+    let rows: Vec<(String, String, Option<Uuid>, String)> = sqlx::query_as(
+        "SELECT tool, source, plugin_id, status FROM run_tool_calls WHERE run_id = $1 ORDER BY created_at",
+    )
+    .bind(fx.run_id)
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        rows,
+        vec![
+            (
+                "mcp-fake__echo".into(),
+                "plugin".into(),
+                Some(fx.plugin_id),
+                "ok".into()
+            ),
+            ("result_submit".into(), "core".into(), None, "ok".into()),
+        ]
+    );
+    assert_eq!(
+        submitted_result(&pool, fx.run_id).await.unwrap()["summary"],
+        "via tool"
+    );
+
+    let token = common::mint_test_token_with_plugins(
+        &fx.state,
+        fx.run_id,
+        ContextProfile::Full,
+        vec![fx.plugin_id],
+    )
+    .await;
+    let res = rpc(&fx.url, &token, "tools/list", json!({})).await;
+    let tools = res["result"]["tools"].as_array().unwrap();
+    let echo = tools
+        .iter()
+        .find(|t| t["name"] == "mcp-fake__echo")
+        .unwrap_or_else(|| panic!("mcp-fake__echo not listed: {res}"));
+    assert_eq!(echo["annotations"]["readOnlyHint"], true);
+    assert_eq!(echo["description"], "Echo args.text");
+    assert!(tools.iter().any(|t| t["name"] == "mcp-fake__write_note"));
+    assert_eq!(
+        call_tool(
+            &fx.url,
+            &token,
+            "mcp-fake__echo",
+            json!({ "text": "again" })
+        )
+        .await,
+        (false, "again".to_string())
+    );
+}
+
+#[tokio::test]
+async fn chat_profile_lists_only_read_only_plugin_tools() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let fx = run_ticket_with_mcp_plugin("mcp/plugin_mcp_tool_call").await;
+    let pool = fx.state.db.clone().unwrap();
+    let token = common::mint_test_token_with_plugins(
+        &fx.state,
+        fx.run_id,
+        ContextProfile::HumanChat,
+        vec![fx.plugin_id],
+    )
+    .await;
+    let names = tool_names(&fx.url, &token).await;
+    assert!(names.contains(&"mcp-fake__echo".to_string()), "{names:?}");
+    assert!(names.contains(&"mcp-fake__env".to_string()), "{names:?}");
+    assert!(
+        !names.contains(&"mcp-fake__write_note".to_string()),
+        "{names:?}"
+    );
+
+    std::env::set_var("MOCK_AGENT_RESPONSE", "mcp/chat_plugin_write_call");
+    let session = api(
+        &fx.app,
+        "POST",
+        "/api/chat/sessions",
+        json!({ "agentId": fx.agent_id, "boardId": fx.board_id }),
+        &fx.cookie,
+        &fx.csrf,
+    )
+    .await;
+    let session_id = session["id"].as_str().unwrap();
+    let message = api(
+        &fx.app,
+        "POST",
+        &format!("/api/chat/sessions/{session_id}/messages"),
+        json!({ "body": "write a note" }),
+        &fx.cookie,
+        &fx.csrf,
+    )
+    .await;
+    let chat_run: Uuid = message["runId"].as_str().unwrap().parse().unwrap();
+    wait_for_run_status(&pool, chat_run, "succeeded").await;
+    std::env::remove_var("MOCK_AGENT_RESPONSE");
+    assert_eq!(token_plugin_ids(&pool, chat_run).await, vec![fx.plugin_id]);
+    assert_eq!(
+        tool_call_rows(&pool, chat_run).await,
+        vec![
+            (
+                "mcp-fake__write_note".into(),
+                "core".into(),
+                "denied".into()
+            ),
+            ("result_submit".into(), "core".into(), "ok".into()),
+        ]
+    );
+}
+
+/// Queued (not executed) run plus a gateway server; the plugin is enabled but
+/// not assigned, so tests choose the token's plugin snapshot themselves.
+async fn queued_run_with_mcp_plugin(name: &str) -> (RunFixture, Uuid, tempfile::TempDir) {
+    let fx = run_fixture().await;
+    let (plugin_id, dir) = add_mcp_plugin(&fx.app, &fx.cookie, &fx.csrf, name).await;
+    (fx, plugin_id, dir)
+}
+
+#[tokio::test]
+async fn plugin_source_hung_server_does_not_block_list() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let (fx, plugin_id, _dir) = queued_run_with_mcp_plugin("mcp-fake-slow").await;
+    let mut state = (*fx.state).clone();
+    state.tools = AppState::build_tool_registry(
+        state.db.as_ref(),
+        &state.secret_store,
+        state.plugin_mcp.clone(),
+        Duration::from_millis(300),
+    );
+    let addr = common::spawn_test_server(coppice_server::app(Arc::new(state))).await;
+    let url = format!("http://{addr}/mcp");
+    let token = common::mint_test_token_with_plugins(
+        &fx.state,
+        fx.scope.run_id,
+        ContextProfile::Full,
+        vec![plugin_id],
+    )
+    .await;
+
+    let started = std::time::Instant::now();
+    let names = tool_names(&url, &token).await;
+    assert!(
+        started.elapsed() < Duration::from_secs(2),
+        "tools/list took {:?}",
+        started.elapsed()
+    );
+    for core in ["ticket_get", "result_submit", "skill_load"] {
+        assert!(names.contains(&core.to_string()), "{names:?}");
+    }
+    assert!(!names.iter().any(|n| n.starts_with("mcp-fake-slow__")));
+}
+
+#[tokio::test]
+async fn disabled_plugin_tools_vanish_mid_run() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let (fx, plugin_id, _dir) = queued_run_with_mcp_plugin("mcp-fake").await;
+    let url = serve(&fx).await;
+    let token = common::mint_test_token_with_plugins(
+        &fx.state,
+        fx.scope.run_id,
+        ContextProfile::Full,
+        vec![plugin_id],
+    )
+    .await;
+    assert!(tool_names(&url, &token)
+        .await
+        .contains(&"mcp-fake__echo".to_string()));
+
+    api(
+        &fx.app,
+        "PATCH",
+        &format!("/api/plugins/{plugin_id}"),
+        json!({ "enabled": false }),
+        &fx.cookie,
+        &fx.csrf,
+    )
+    .await;
+    assert!(!has_mcp_fake_tool(&tool_names(&url, &token).await));
+    assert_eq!(
+        call_tool(&url, &token, "mcp-fake__echo", json!({ "text": "hi" })).await,
+        (
+            true,
+            "denied: tool \"mcp-fake__echo\" is not available for this run".to_string()
+        )
+    );
+}
+
+#[tokio::test]
+async fn unassigned_plugin_tools_not_listed() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let (fx, _plugin_id, _dir) = queued_run_with_mcp_plugin("mcp-fake").await;
+    let url = serve(&fx).await;
+    let token = common::mint_test_token(&fx.state, fx.scope.run_id, ContextProfile::Full).await;
+    let names = tool_names(&url, &token).await;
+    assert!(names.contains(&"ticket_get".to_string()));
+    assert!(!has_mcp_fake_tool(&names), "{names:?}");
+}
