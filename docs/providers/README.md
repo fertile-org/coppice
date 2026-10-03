@@ -82,7 +82,7 @@ Verify an unverified row when its CLI is first available: run one ticket and con
 
 **Plugin tools.** Plugin MCP servers are proxied through the same `coppice` server as `<plugin>__<tool>`, so connectors need no per-plugin wiring. See [architecture.md § Plugin MCP proxy](../architecture.md#plugin-mcp-proxy).
 
-**Console tool titles.** Each live console renders gateway calls as `coppice · <tool>` for core tools and `<plugin> · <tool>` for plugin tools. The connector's descriptor `mcp_tool_names` (`ToolNameStyle`) says how its CLI spells gateway tool names; `coppice_connectors::gateway_tool` strips that prefix and splits plugin from tool on the first `__`. A new connector's console needs only the right style — no console code.
+**Console tool titles.** Each live console renders gateway calls as `coppice · <tool>` for core tools and `<plugin> · <tool>` for plugin tools. The connector's descriptor `mcp_tool_names` (`ToolNameStyle`) says how its CLI spells gateway tool names; `coppice_connectors::gateway_tool` (or `gateway_tool_from_fields` for connectors that report the server as a separate field, like codex) strips that prefix and splits plugin from tool on the first `__`. A new connector's console needs only the right style — no console code.
 
 | `ToolNameStyle` | CLI spelling | Connectors |
 |-----------------|--------------|------------|
