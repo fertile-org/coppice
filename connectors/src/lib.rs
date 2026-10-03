@@ -2,6 +2,8 @@
 
 use serde::Serialize;
 
+pub mod probe;
+
 pub const MOCK: &str = "mock";
 pub const CURSOR: &str = "cursor";
 pub const CLAUDE_CODE: &str = "claude-code";
@@ -31,6 +33,12 @@ pub struct InstallInfo {
     pub auth_paths: &'static [&'static str],
     /// Optional env vars that count as authenticated.
     pub auth_env: &'static [&'static str],
+    /// Cheap local command run against the binary; empty means no probe.
+    pub probe_args: &'static [&'static str],
+    /// A successful probe proves auth (it needs credentials to succeed).
+    pub probe_proves_auth: bool,
+    /// Vendor install docs; empty for the built-in.
+    pub docs_url: &'static str,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -157,6 +165,9 @@ const CONNECTORS: &[ConnectorDescriptor] = &[
             auth_hint: "built-in; no setup",
             auth_paths: &[],
             auth_env: &[],
+            probe_args: &[],
+            probe_proves_auth: false,
+            docs_url: "",
         },
         default_model_providers: &[],
         mcp_wiring: McpWiring::MockHttp,
@@ -178,6 +189,9 @@ const CONNECTORS: &[ConnectorDescriptor] = &[
             auth_hint: "agent login (copy URL)",
             auth_paths: &[".config/cursor/auth.json", ".cursor/auth.json"],
             auth_env: &[],
+            probe_args: &["models"],
+            probe_proves_auth: true,
+            docs_url: "https://cursor.com/docs/cli/installation",
         },
         default_model_providers: &["cursor"],
         mcp_wiring: McpWiring::CursorHome,
@@ -199,6 +213,9 @@ const CONNECTORS: &[ConnectorDescriptor] = &[
             auth_hint: "ANTHROPIC_API_KEY or claude setup-token",
             auth_paths: &[".claude", ".config/claude"],
             auth_env: &["ANTHROPIC_API_KEY"],
+            probe_args: &["--version"],
+            probe_proves_auth: false,
+            docs_url: "https://docs.anthropic.com/en/docs/claude-code/setup",
         },
         default_model_providers: &["sonnet", "opus", "haiku"],
         mcp_wiring: McpWiring::ClaudeJson,
@@ -220,6 +237,9 @@ const CONNECTORS: &[ConnectorDescriptor] = &[
             auth_hint: "codex login --device-auth",
             auth_paths: &[".codex"],
             auth_env: &["OPENAI_API_KEY"],
+            probe_args: &["--version"],
+            probe_proves_auth: false,
+            docs_url: "https://developers.openai.com/codex/cli",
         },
         default_model_providers: &["openai"],
         mcp_wiring: McpWiring::CodexFlags,
@@ -241,6 +261,9 @@ const CONNECTORS: &[ConnectorDescriptor] = &[
             auth_hint: "kilo auth / TUI /connect",
             auth_paths: &[".local/share/opencode", ".kilocode"],
             auth_env: &[],
+            probe_args: &["--version"],
+            probe_proves_auth: false,
+            docs_url: "https://kilo.ai/docs/cli",
         },
         default_model_providers: &["anthropic"],
         mcp_wiring: McpWiring::KiloJson,
@@ -264,6 +287,9 @@ const CONNECTORS: &[ConnectorDescriptor] = &[
             // After login; do NOT list `.opencode` (install tree).
             auth_paths: &[".local/share/opencode"],
             auth_env: &[],
+            probe_args: &["auth", "list"],
+            probe_proves_auth: true,
+            docs_url: "https://opencode.ai/docs/",
         },
         default_model_providers: &[],
         mcp_wiring: McpWiring::OpenCodeJson,
