@@ -91,7 +91,7 @@ Probes run at server startup and on **Run check**; the page shows the cached res
 | The run error (e.g. `mcp_unavailable`, `connection check timed out after …`) | CLI could not be configured or started, not logged in, or the model never finished |
 | `ticket_get was not called` | The CLI did not see the Coppice MCP server (wiring) or ignored it |
 | `result_submit was not called` | The agent stopped before submitting |
-| `result was <outcome>` | The agent's first submission was not `done` (only the first one counts) |
+| `result was <outcome>` | The agent's first valid submission was not `done` (only the first one counts) |
 | `server restarted` | The server restarted while the check was queued or running |
 
 Only one check per connector runs at a time. The CLI still has `coppice connector doctor <id>` with the same local checks for terminal use.

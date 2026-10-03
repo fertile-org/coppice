@@ -61,13 +61,13 @@ pub fn probe(d: &ConnectorDescriptor, env: &ProbeEnv, timeout: Duration) -> Prob
 
 - The probe command moves into the descriptor: `InstallInfo` gains `probe_args: &'static [&'static str]` (cursor `["models"]`, claude-code / codex / kilo-code `["--version"]`, opencode `["auth","list"]`), `probe_proves_auth: bool` (cursor, opencode), and `docs_url: &'static str`. Adding a connector stays a descriptor entry.
 - Binary resolution: `command_override` if set, else `d.binary`; absolute or relative paths are used as given, bare names are searched in `env.path`.
-- The probe child gets `env.path` and `HOME=env.home`, stdin null, and is killed at `timeout`. Output is lossy-decoded and capped (first line ≤ 200 chars for `Ok`; message ≤ 500 chars for `Failed`).
+- The probe child inherits the server environment with `PATH=env.path` and `HOME=env.home` overridden, stdin null, and is killed at `timeout`. Output is lossy-decoded and capped (first line ≤ 200 chars for `Ok`; message ≤ 500 chars for `Failed`).
 - `auth_present` (from `cli/src/commands/connector/registry.rs`) moves here unchanged in behavior; `ProbeReport` exposes which names matched instead of a bool.
 - The CLI `doctor` and `list` call `probe` and keep their current output text and exit codes. Their unit tests move or are kept alongside.
 
 ### Desktop PATH
 
-macOS apps launched from Finder (and some Linux launchers) do not inherit the login shell's PATH, so a `claude` in `~/.local/bin` or Homebrew is invisible. At server startup, `augment_path(home)` prepends every existing directory from a fixed list that is not already on PATH: `~/.local/bin`, `~/.opencode/bin`, `~/.npm-global/bin`, `~/.bun/bin`, `/opt/homebrew/bin`, `/usr/local/bin`. The server sets its own process PATH once, so probes and real runs resolve binaries identically ("found" on the page means a run finds it too). The list lives in `coppice_connectors::probe::COMMON_BIN_DIRS`.
+macOS apps launched from Finder (and some Linux launchers) do not inherit the login shell's PATH, so a `claude` in `~/.local/bin` or Homebrew is invisible. At server startup, `augment_path(home, current)` prepends every existing directory from a fixed list that is not already on PATH: `~/.local/bin`, `~/.opencode/bin`, `~/.npm-global/bin`, `~/.bun/bin`, `/opt/homebrew/bin`, `/usr/local/bin`. The server sets its own process PATH once, so probes and real runs resolve binaries identically ("found" on the page means a run finds it too). The list lives in `coppice_connectors::probe::COMMON_BIN_DIRS_HOME` (relative to HOME) and `COMMON_BIN_DIRS_ABS`.
 
 ## Test connection (check runs)
 
@@ -86,7 +86,7 @@ Migration:
 1. `POST /api/tools/connectors/{id}/test {agentId}` — admin, CSRF. Validates the agent exists, `agent.connector == id`, the connector is enabled, and no `queued`/`running` check exists for this connector (409 otherwise). Inserts the check (`queued`) and an agent run with `job_type = "connector_check"`, profile `connector_check`, `plugin_ids = []`, enqueued on the normal job queue. Returns `{ checkId, runId }`.
 2. The job worker dispatches `connector_check` to `workers/job_worker/connector_check.rs` (mirroring `compaction.rs`): creates a scratch worktree under `<artifacts_dir>/runs/<run id>/check/` with `.agent/context.md`, runs the agent's provider with the slim check context, then deletes the scratch dir. No repository, branch, or ticket is touched. Run timeout is `min(connector run timeout, 180 s)`.
 3. Check context (short, fixed): identity line, "This is a Coppice connection check. Call the `ticket_get` tool, then call `result_submit` with outcome `done` and summary `connection ok`."
-4. Profile `connector_check` exposes only `ticket_get` and `result_submit` (core source; no skills, no plugins). `ticket_get` in this profile returns a fixed synthetic ticket (`{ "title": "Coppice connection check", "description": "Submit a done result with summary 'connection ok'." }`) and never reads the database tickets. `result_submit` accepts any outcome; the first submission wins and later ones are denied, and a non-`done` outcome fails the check.
+4. Profile `connector_check` exposes only `ticket_get` and `result_submit` (core source; no skills, no plugins). `ticket_get` in this profile returns a fixed synthetic ticket (`{ "title": "Coppice connection check", "description": "Submit a done result with summary 'connection ok'." }`) and never reads the database tickets. `result_submit` accepts any outcome; the first valid submission wins and later ones are denied, and a non-`done` outcome fails the check.
 5. On run finish the worker sets the check: **passed** iff the run succeeded **and** `run_tool_calls` has an `ok` `ticket_get` and an `ok` `result_submit`; otherwise **failed** with the first applicable reason: the run's error message (e.g. `mcp_unavailable`, timeout), `"ticket_get was not called"`, `"result_submit was not called"`, or `"result was <outcome>"`. Failure text is ≤ 500 chars and never includes the MCP token or env values.
 6. Check runs bypass board/workflow logic: no ticket comments, no status transitions, no notifications, no knowledge capture, no handoffs.
 
@@ -131,4 +131,4 @@ Enable toggle / runtime config reload, CLI install, in-app login, storing vendor
 - [x] Probe code lives in `coppice_connectors::probe`; CLI `doctor`/`list` use it with unchanged output.
 - [x] Server PATH is augmented at startup with existing common bin dirs.
 - [x] No env values, file contents, or tokens in any response or log.
-- [x] `make test`, clippy, `make web-test` pass; existing smokes unaffected.
+- [x] `make test`, clippy, `make web-test` pass; existing smokes unaffected (verified: e2e-smoke, e2e-smoke-m10; m02 smoke is not idempotent on a reused DB).

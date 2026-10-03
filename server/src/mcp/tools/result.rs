@@ -11,7 +11,8 @@ use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
 
 /// Validates and stores the run's structured result. The latest *valid*
-/// submission wins; invalid ones are rejected and never overwrite it.
+/// submission wins, except in connector-check runs, which keep the first
+/// stored one; invalid ones are rejected and never overwrite it.
 pub async fn call_result_submit(ctx: &ToolCtx<'_>, args: Value) -> Result<Value, ToolError> {
     let result: AgentRunResult = serde_json::from_value(args)
         .map_err(|e| ToolError::InvalidArgs(format!("invalid result: {e}")))?;
