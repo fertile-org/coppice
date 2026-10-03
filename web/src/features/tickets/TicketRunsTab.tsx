@@ -1,6 +1,7 @@
-import { useState } from 'react';
+import { useId, useState } from 'react';
 import { useAgents } from '../agents/useAgents';
 import { KnowledgeUsed } from '../knowledge/KnowledgeUsed';
+import { RunToolsAndSkills } from '../runs/RunToolsAndSkills';
 import type { AgentRun, RunStatus } from '../../lib/schemas/agentRun';
 import { useOpenTicket } from './useOpenTicket';
 import { useAgentRuns } from './useAgentRuns';
@@ -151,12 +152,81 @@ function RunRow({
       >
         {detailsExpanded ? 'Hide run details' : 'Show run details'}
       </button>
-      <KnowledgeUsed
-        runId={run.id}
-        enabled={detailsExpanded}
-        onOpenTicket={openTicket}
-      />
+      {detailsExpanded && (
+        <RunDetailsTabs runId={run.id} onOpenTicket={openTicket} />
+      )}
     </article>
+  );
+}
+
+type RunDetailsTab = 'tools' | 'knowledge';
+
+const RUN_DETAILS_TABS: { key: RunDetailsTab; label: string }[] = [
+  { key: 'tools', label: 'Tools & Skills' },
+  { key: 'knowledge', label: 'Knowledge Used' },
+];
+
+function RunDetailsTabs({
+  runId,
+  onOpenTicket,
+}: {
+  runId: string;
+  onOpenTicket: (ticketId: string) => void | Promise<void>;
+}) {
+  const [tab, setTab] = useState<RunDetailsTab>('tools');
+  const idPrefix = useId();
+  const tabId = (key: RunDetailsTab) => `${idPrefix}-tab-${key}`;
+  const panelId = (key: RunDetailsTab) => `${idPrefix}-panel-${key}`;
+
+  return (
+    <div className="mt-3 border-t border-border pt-2">
+      <div
+        role="tablist"
+        aria-label="Run details"
+        className="flex gap-1 border-b border-border"
+      >
+        {RUN_DETAILS_TABS.map(({ key, label }) => (
+          <button
+            key={key}
+            id={tabId(key)}
+            type="button"
+            role="tab"
+            aria-selected={tab === key}
+            aria-controls={panelId(key)}
+            onClick={() => setTab(key)}
+            className={[
+              'border-b-2 px-3 py-2 font-body text-xs transition-colors duration-fast',
+              tab === key
+                ? 'border-accent text-accent'
+                : 'border-transparent text-text-secondary hover:text-text-primary',
+            ].join(' ')}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+      <div
+        id={panelId('tools')}
+        role="tabpanel"
+        aria-labelledby={tabId('tools')}
+        hidden={tab !== 'tools'}
+        className="pt-3"
+      >
+        <RunToolsAndSkills runId={runId} enabled={tab === 'tools'} />
+      </div>
+      <div
+        id={panelId('knowledge')}
+        role="tabpanel"
+        aria-labelledby={tabId('knowledge')}
+        hidden={tab !== 'knowledge'}
+      >
+        <KnowledgeUsed
+          runId={runId}
+          enabled={tab === 'knowledge'}
+          onOpenTicket={onOpenTicket}
+        />
+      </div>
+    </div>
   );
 }
 

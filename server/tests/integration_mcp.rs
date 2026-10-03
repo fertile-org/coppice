@@ -1914,6 +1914,22 @@ async fn api(app: &Router, method: &str, uri: &str, body: Value, cookie: &str, c
 async fn run_ticket_with_sample_plugin(
     assign: bool,
 ) -> (Arc<AppState>, Uuid, Uuid, Vec<tempfile::TempDir>, common::AgentTestEnv) {
+    let run = sample_plugin_run(assign).await;
+    (run.state, run.run_id, run.plugin_id, run.dirs, run.env)
+}
+
+struct SamplePluginRun {
+    state: Arc<AppState>,
+    app: Router,
+    cookie: String,
+    csrf: String,
+    run_id: Uuid,
+    plugin_id: Uuid,
+    dirs: Vec<tempfile::TempDir>,
+    env: common::AgentTestEnv,
+}
+
+async fn sample_plugin_run(assign: bool) -> SamplePluginRun {
     let (state, app, cookie, csrf, env) =
         common::bootstrap_and_login_with_gateway("mcp/plugin_skill_tool_call").await;
     let plugins = tempfile::tempdir().unwrap();
@@ -1983,13 +1999,16 @@ async fn run_ticket_with_sample_plugin(
     let run_id: Uuid = body["run"]["id"].as_str().unwrap().parse().unwrap();
     let pool = state.db.clone().unwrap();
     wait_for_run_status(&pool, run_id, "succeeded").await;
-    (
+    SamplePluginRun {
         state,
+        app,
+        cookie,
+        csrf,
         run_id,
-        plugin_id.parse().unwrap(),
-        vec![plugins, git_dir],
+        plugin_id: plugin_id.parse().unwrap(),
+        dirs: vec![plugins, git_dir],
         env,
-    )
+    }
 }
 
 async fn token_plugin_ids(pool: &PgPool, run_id: Uuid) -> Vec<Uuid> {
@@ -2486,4 +2505,204 @@ async fn undecryptable_plugin_settings_skip_only_that_plugin() {
     .await;
     let names = tool_names(&url, &token).await;
     assert!(names.contains(&"mcp-fake__echo".to_string()), "{names:?}");
+}
+
+// ---- M10 Part 2b: per-run tool-call log API ----
+
+async fn get_tool_calls(
+    app: &Router,
+    run_id: Uuid,
+    cookie: &str,
+    csrf: &str,
+) -> (axum::http::StatusCode, Value) {
+    let res = app
+        .clone()
+        .oneshot(common::json_request(
+            "GET",
+            &format!("/api/agent-runs/{run_id}/tool-calls"),
+            "",
+            cookie,
+            csrf,
+        ))
+        .await
+        .unwrap();
+    let status = res.status();
+    (status, common::json_body(res).await)
+}
+
+async fn insert_tool_call(
+    pool: &PgPool,
+    run_id: Uuid,
+    tool: &str,
+    plugin_id: Option<Uuid>,
+    args_summary: &str,
+    status: &str,
+    offset_secs: i32,
+) {
+    let source = if plugin_id.is_some() {
+        "plugin"
+    } else {
+        "skill"
+    };
+    sqlx::query(
+        "INSERT INTO run_tool_calls \
+         (id, run_id, tool, source, plugin_id, args_summary, status, error, duration_ms, created_at) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, \
+                 CASE WHEN $7 = 'ok' THEN NULL ELSE 'boom' END, 12, \
+                 now() + make_interval(secs => $8))",
+    )
+    .bind(Uuid::new_v4())
+    .bind(run_id)
+    .bind(tool)
+    .bind(source)
+    .bind(plugin_id)
+    .bind(args_summary)
+    .bind(status)
+    .bind(f64::from(offset_secs))
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
+async fn tool_calls_listed_with_skills_used() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let run = sample_plugin_run(true).await;
+    let (status, body) = get_tool_calls(&run.app, run.run_id, &run.cookie, &run.csrf).await;
+    assert_eq!(status, 200, "{body}");
+    let items = body["items"].as_array().unwrap();
+    let tools: Vec<&str> = items.iter().map(|i| i["tool"].as_str().unwrap()).collect();
+    assert_eq!(tools, ["skill_list", "skill_load", "result_submit"]);
+    let sources: Vec<&str> = items
+        .iter()
+        .map(|i| i["source"].as_str().unwrap())
+        .collect();
+    assert_eq!(sources, ["skill", "skill", "core"]);
+    for item in items {
+        assert_eq!(item["status"], "ok");
+        assert!(item["id"].is_string());
+        assert!(item["durationMs"].is_i64());
+        assert!(item["argsSummary"].is_string());
+        assert!(item["createdAt"].is_string());
+        assert!(item["pluginId"].is_null());
+        assert!(item["pluginName"].is_null());
+        assert!(item["error"].is_null());
+    }
+    assert_eq!(body["skillsUsed"], json!(["sample-plugin:hello"]));
+}
+
+#[tokio::test]
+async fn tool_calls_plugin_name_joined() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let run = sample_plugin_run(true).await;
+    let pool = run.state.db.clone().unwrap();
+    insert_tool_call(
+        &pool,
+        run.run_id,
+        "sample-plugin__echo",
+        Some(run.plugin_id),
+        r#"{"text":"hi"}"#,
+        "error",
+        60,
+    )
+    .await;
+    // Truncated summary, failed load, and a repeat are not new skills.
+    insert_tool_call(
+        &pool,
+        run.run_id,
+        "skill_load",
+        None,
+        r#"{"name":"cut"#,
+        "ok",
+        61,
+    )
+    .await;
+    insert_tool_call(
+        &pool,
+        run.run_id,
+        "skill_load",
+        None,
+        r#"{"name":"failed-skill"}"#,
+        "error",
+        62,
+    )
+    .await;
+    insert_tool_call(
+        &pool,
+        run.run_id,
+        "skill_load",
+        None,
+        r#"{"name":"coppice-git"}"#,
+        "ok",
+        63,
+    )
+    .await;
+    insert_tool_call(
+        &pool,
+        run.run_id,
+        "skill_load",
+        None,
+        r#"{"name":"sample-plugin:hello"}"#,
+        "ok",
+        64,
+    )
+    .await;
+
+    let (status, body) = get_tool_calls(&run.app, run.run_id, &run.cookie, &run.csrf).await;
+    assert_eq!(status, 200, "{body}");
+    let plugin_row = body["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|i| i["source"] == "plugin")
+        .unwrap_or_else(|| panic!("no plugin row: {body}"));
+    assert_eq!(plugin_row["tool"], "sample-plugin__echo");
+    assert_eq!(plugin_row["pluginId"], run.plugin_id.to_string());
+    assert_eq!(plugin_row["pluginName"], "sample-plugin");
+    assert_eq!(plugin_row["status"], "error");
+    assert_eq!(plugin_row["error"], "boom");
+    assert_eq!(plugin_row["durationMs"], 12);
+    assert_eq!(
+        body["skillsUsed"],
+        json!(["sample-plugin:hello", "coppice-git"])
+    );
+}
+
+#[tokio::test]
+async fn tool_calls_unknown_run_404() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let (app, cookie, csrf) = common::bootstrap_and_login().await;
+    let (status, body) = get_tool_calls(&app, Uuid::new_v4(), &cookie, &csrf).await;
+    assert_eq!(status, 404);
+    assert_eq!(body["message"], "agent run not found");
+}
+
+#[tokio::test]
+async fn tool_calls_requires_auth() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let fx = run_fixture().await;
+    let res = fx
+        .app
+        .clone()
+        .oneshot(
+            axum::http::Request::builder()
+                .uri(format!("/api/agent-runs/{}/tool-calls", fx.scope.run_id))
+                .body(axum::body::Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 401);
 }

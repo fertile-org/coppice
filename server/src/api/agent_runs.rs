@@ -3,14 +3,17 @@ use crate::domain::run::{run_status_to_str, AgentRun};
 use crate::events::publish_run_finished;
 use crate::services::run_orchestrator::RunOrchestrator;
 use crate::services::run_service::{AgentRunWithConnector, RunError, RunService};
+use crate::services::run_tool_call_service::{RunToolCallRow, RunToolCallService};
 use crate::AppState;
 use axum::{
     extract::{Path, State},
     http::StatusCode,
+    response::{IntoResponse, Response},
     routing::{get, post},
     Json, Router,
 };
 use serde::Serialize;
+use serde_json::json;
 use std::sync::Arc;
 use time::format_description::well_known::Rfc3339;
 use uuid::Uuid;
@@ -20,6 +23,58 @@ pub fn routes() -> Router<Arc<AppState>> {
         .route("/api/agent-runs/{run_id}", get(get_run))
         .route("/api/agent-runs/{run_id}/stop", post(stop_run))
         .route("/api/agent-runs/{run_id}/retry", post(retry_run))
+        .route("/api/agent-runs/{run_id}/tool-calls", get(list_tool_calls))
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ToolCallResponse {
+    id: Uuid,
+    tool: String,
+    source: String,
+    plugin_id: Option<Uuid>,
+    plugin_name: Option<String>,
+    status: String,
+    error: Option<String>,
+    duration_ms: i32,
+    args_summary: String,
+    created_at: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ToolCallsResponse {
+    items: Vec<ToolCallResponse>,
+    skills_used: Vec<String>,
+}
+
+fn tool_call_response(row: RunToolCallRow) -> ToolCallResponse {
+    ToolCallResponse {
+        id: row.id,
+        tool: row.tool,
+        source: row.source,
+        plugin_id: row.plugin_id,
+        plugin_name: row.plugin_name,
+        status: row.status,
+        error: row.error,
+        duration_ms: row.duration_ms,
+        args_summary: row.args_summary,
+        created_at: row.created_at.format(&Rfc3339).unwrap_or_default(),
+    }
+}
+
+struct MessageError(StatusCode, &'static str);
+
+impl IntoResponse for MessageError {
+    fn into_response(self) -> Response {
+        (self.0, Json(json!({ "message": self.1 }))).into_response()
+    }
+}
+
+impl From<StatusCode> for MessageError {
+    fn from(status: StatusCode) -> Self {
+        MessageError(status, "internal error")
+    }
 }
 
 #[derive(Serialize)]
@@ -161,7 +216,31 @@ async fn retry_run(
         .agent_connector_for_run(run.agent_id)
         .await
         .map_err(map_error)?;
-    Ok((StatusCode::CREATED, Json(single_run_response(run, connector))))
+    Ok((
+        StatusCode::CREATED,
+        Json(single_run_response(run, connector)),
+    ))
+}
+
+async fn list_tool_calls(
+    State(state): State<Arc<AppState>>,
+    AuthUser { .. }: AuthUser,
+    Path(run_id): Path<Uuid>,
+) -> Result<Json<ToolCallsResponse>, MessageError> {
+    let pool = pool_from_state(&state)?;
+    let service = RunToolCallService::new(pool);
+    let internal = |err: sqlx::Error| {
+        tracing::error!(error = %err, "tool-call log query failed");
+        MessageError(StatusCode::INTERNAL_SERVER_ERROR, "internal error")
+    };
+    if !service.run_exists(run_id).await.map_err(internal)? {
+        return Err(MessageError(StatusCode::NOT_FOUND, "agent run not found"));
+    }
+    let calls = service.list_for_run(run_id).await.map_err(internal)?;
+    Ok(Json(ToolCallsResponse {
+        items: calls.items.into_iter().map(tool_call_response).collect(),
+        skills_used: calls.skills_used,
+    }))
 }
 
 #[cfg(test)]
