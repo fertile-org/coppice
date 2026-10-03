@@ -40,9 +40,16 @@ export const pluginMcpServerSchema = z.object({
 
 export type PluginMcpServer = z.infer<typeof pluginMcpServerSchema>;
 
+export const pluginSettingSourceSchema = z
+  .enum(['setting', 'env', 'default', 'missing'])
+  .catch('missing');
+
+export type PluginSettingSource = z.infer<typeof pluginSettingSourceSchema>;
+
 export const pluginSettingSchema = z.object({
   key: z.string(),
   configured: z.boolean(),
+  source: pluginSettingSourceSchema,
 });
 
 export type PluginSetting = z.infer<typeof pluginSettingSchema>;

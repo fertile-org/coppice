@@ -4,7 +4,7 @@ use crate::middleware::admin::AdminUser;
 use crate::plugins::capability::{McpServerEntry, McpServerTransport};
 use crate::plugins::git_install;
 use crate::plugins::manifest::SkillEntry;
-use crate::plugins::placeholders::placeholder_keys;
+use crate::plugins::placeholders::{placeholder_keys, setting_sources, SettingSource};
 use crate::services::plugin_service::{
     PluginDir, PluginError, PluginInstall, PluginRow, PluginService, ServerTestOutcome,
     ServerTestResult,
@@ -116,12 +116,13 @@ struct TestedToolResponse {
     read_only: bool,
 }
 
-/// Setting values are write-only.
+/// Setting values are write-only; `source` comes from presence only.
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct PluginSettingResponse {
     key: String,
     configured: bool,
+    source: &'static str,
 }
 
 #[derive(Deserialize)]
@@ -274,11 +275,17 @@ fn plugin_response(
     configured: &BTreeSet<String>,
     mcp: &McpServerPool,
 ) -> PluginResponse {
-    let settings = allowed_setting_keys(&plugin)
+    let entries = plugin
+        .manifest
+        .as_ref()
+        .map(|m| m.mcp_servers.as_slice())
+        .unwrap_or_default();
+    let settings = setting_sources(entries, configured, &|name| std::env::var(name).ok())
         .into_iter()
-        .map(|key| PluginSettingResponse {
-            configured: configured.contains(&key),
+        .map(|(key, source)| PluginSettingResponse {
             key,
+            configured: source == SettingSource::Setting,
+            source: source.as_str(),
         })
         .collect();
     let (skills, mcp_servers, unsupported) = plugin

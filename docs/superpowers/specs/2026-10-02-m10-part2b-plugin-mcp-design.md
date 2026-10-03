@@ -22,7 +22,7 @@ Proxy plugin MCP servers (stdio and streamable HTTP) through the Coppice gateway
 - Table `plugin_settings (plugin_id → plugins ON DELETE CASCADE, key, secret_id → secrets ON DELETE CASCADE, updated_at, PRIMARY KEY (plugin_id, key))`.
 - Values are stored with the M07 `SecretService` under the secret name `plugin-setting-<plugin_id>-<key>`.
 - **Keys** are the `${VAR}` names used in the plugin's MCP entries (command, args, env values, url, header values), excluding `CLAUDE_PLUGIN_ROOT`. Unknown keys are rejected (`unknown setting "<key>"`).
-- `PUT /api/plugins/:id/settings` (admin, CSRF) with `{ "values": { "<KEY>": "<value>" } }`; an empty string clears the key. Values are write-only: plugin responses carry `settings: [{ key, configured }]`.
+- `PUT /api/plugins/:id/settings` (admin, CSRF) with `{ "values": { "<KEY>": "<value>" } }`; an empty string clears the key. Values are write-only: plugin responses carry `settings: [{ key, configured, source }]`, where `source` (`setting | env | default | missing`) is computed from presence only.
 
 ## Placeholder resolution
 

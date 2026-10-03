@@ -589,8 +589,8 @@ async fn settings_put_marks_configured() {
     assert_eq!(
         body["settings"],
         json!([
-            { "key": "API_TOKEN", "configured": true },
-            { "key": "ROOT", "configured": false },
+            { "key": "API_TOKEN", "configured": true, "source": "setting" },
+            { "key": "ROOT", "configured": false, "source": "missing" },
         ])
     );
     let plugin_uuid: uuid::Uuid = id.parse().unwrap();
@@ -625,8 +625,8 @@ async fn settings_empty_value_clears() {
     assert_eq!(
         body["settings"],
         json!([
-            { "key": "API_TOKEN", "configured": false },
-            { "key": "ROOT", "configured": false },
+            { "key": "API_TOKEN", "configured": false, "source": "missing" },
+            { "key": "ROOT", "configured": false, "source": "missing" },
         ])
     );
     let name = format!("plugin-setting-{id}-API_TOKEN");
@@ -634,6 +634,67 @@ async fn settings_empty_value_clears() {
         count(&pool, "SELECT count(*) FROM secrets WHERE name = $1", &name).await,
         0
     );
+}
+
+#[tokio::test]
+async fn settings_report_their_source_without_values() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    require_db!();
+    let (_state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
+    let home = std::env::var("HOME").expect("HOME is set for tests");
+    assert!(!home.is_empty());
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("env-sources");
+    std::fs::create_dir_all(root.join(".claude-plugin")).unwrap();
+    std::fs::write(
+        root.join(".claude-plugin/plugin.json"),
+        json!({ "name": "env-sources", "mcpServers": { "remote": {
+            "type": "http",
+            "url": "http://127.0.0.1:9/${HOME}/${PORT_NUM:-8080}",
+            "headers": {
+                "Authorization": "Bearer ${API_TOKEN}",
+                "X-Db": "${DATABASE_URL}",
+            },
+        } } })
+        .to_string(),
+    )
+    .unwrap();
+    let dir_id = add_dir(&app, dir.path(), &cookie, &csrf).await["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let plugins = get(&app, "/api/plugins", &cookie, &csrf).await;
+    let id = find(&plugins, &dir_id, "env-sources")["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let (status, body) =
+        put_settings(&app, &id, json!({ "API_TOKEN": "tok" }), &cookie, &csrf).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(
+        body["settings"],
+        json!([
+            { "key": "API_TOKEN", "configured": true, "source": "setting" },
+            { "key": "DATABASE_URL", "configured": false, "source": "missing" },
+            { "key": "HOME", "configured": false, "source": "env" },
+            { "key": "PORT_NUM", "configured": false, "source": "default" },
+        ])
+    );
+    let list = get(&app, "/api/plugins", &cookie, &csrf).await;
+    assert_eq!(
+        find(&list, &dir_id, "env-sources")["settings"],
+        body["settings"]
+    );
+    for shown in [&body, &list] {
+        let text = shown.to_string();
+        assert!(
+            !text.contains(&format!("\"{home}\"")),
+            "server env value exposed"
+        );
+        assert!(!text.contains("tok\""), "setting value exposed");
+        assert!(!text.contains("8080"), "default value exposed");
+    }
 }
 
 #[tokio::test]
@@ -1604,7 +1665,11 @@ async fn test_of_disabled_plugin_leaves_no_process_running() {
     let dir = tempfile::tempdir().unwrap();
     let root = dir.path().join("mcp-pid");
     std::fs::create_dir_all(root.join(".claude-plugin")).unwrap();
-    std::fs::write(root.join(".claude-plugin/plugin.json"), r#"{"name":"mcp-pid"}"#).unwrap();
+    std::fs::write(
+        root.join(".claude-plugin/plugin.json"),
+        r#"{"name":"mcp-pid"}"#,
+    )
+    .unwrap();
     std::fs::write(
         root.join(".mcp.json"),
         json!({ "mcpServers": { "fake": {
@@ -1631,7 +1696,10 @@ async fn test_of_disabled_plugin_leaves_no_process_running() {
     let proc_path = Path::new("/proc").join(pid.trim());
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
     while proc_path.exists() {
-        assert!(std::time::Instant::now() < deadline, "tested server still running");
+        assert!(
+            std::time::Instant::now() < deadline,
+            "tested server still running"
+        );
         tokio::time::sleep(std::time::Duration::from_millis(20)).await;
     }
     assert_eq!(fake_server_health(&state, &id), "stopped");

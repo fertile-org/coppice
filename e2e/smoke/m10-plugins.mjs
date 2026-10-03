@@ -197,11 +197,11 @@ async function saveSetting(pluginId, auth) {
     'save plugin settings',
   );
   const setting = plugin.settings?.find((s) => s.key === 'GREETING');
-  if (setting?.configured !== true) {
+  if (setting?.configured !== true || setting?.source !== 'setting') {
     fail('setting GREETING not reported as configured');
   }
-  if (Object.keys(setting).sort().join(',') !== 'configured,key') {
-    fail('plugin settings response exposes more than key and configured');
+  if (Object.keys(setting).sort().join(',') !== 'configured,key,source') {
+    fail('plugin settings response exposes more than key, configured, and source');
   }
   console.log('smoke: saved setting GREETING');
 }

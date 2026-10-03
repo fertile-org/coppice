@@ -71,10 +71,15 @@ pub fn server_env_allowed(name: &str) -> bool {
 
 /// Setting keys referenced by the entries' command, args, env values, url, and header values.
 pub fn placeholder_keys(entries: &[McpServerEntry]) -> BTreeSet<String> {
-    let mut keys = BTreeSet::new();
-    let mut collect = |name: &str, _default: Option<&str>| {
+    placeholder_defaults(entries).into_keys().collect()
+}
+
+/// Each setting key, and whether every reference to it carries a `:-` default.
+fn placeholder_defaults(entries: &[McpServerEntry]) -> BTreeMap<String, bool> {
+    let mut keys = BTreeMap::new();
+    let mut collect = |name: &str, default: Option<&str>| {
         if name != PLUGIN_ROOT {
-            keys.insert(name.to_string());
+            *keys.entry(name.to_string()).or_insert(true) &= default.is_some();
         }
         Ok(String::new())
     };
@@ -84,6 +89,51 @@ pub fn placeholder_keys(entries: &[McpServerEntry]) -> BTreeSet<String> {
         }
     }
     keys
+}
+
+/// Where a setting key's value comes from when a server starts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SettingSource {
+    Setting,
+    Env,
+    Default,
+    Missing,
+}
+
+impl SettingSource {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            SettingSource::Setting => "setting",
+            SettingSource::Env => "env",
+            SettingSource::Default => "default",
+            SettingSource::Missing => "missing",
+        }
+    }
+}
+
+/// The source `resolve` would use for each setting key, from presence only:
+/// a stored setting, else an allowed non-empty server env var, else a default
+/// present at every reference.
+pub fn setting_sources(
+    entries: &[McpServerEntry],
+    configured: &BTreeSet<String>,
+    env: &dyn Fn(&str) -> Option<String>,
+) -> BTreeMap<String, SettingSource> {
+    placeholder_defaults(entries)
+        .into_iter()
+        .map(|(key, has_default)| {
+            let source = if configured.contains(&key) {
+                SettingSource::Setting
+            } else if server_env_allowed(&key) && env(&key).is_some_and(|v| !v.is_empty()) {
+                SettingSource::Env
+            } else if has_default {
+                SettingSource::Default
+            } else {
+                SettingSource::Missing
+            };
+            (key, source)
+        })
+        .collect()
 }
 
 pub fn resolve(
@@ -378,6 +428,57 @@ mod tests {
         ];
         let keys: Vec<_> = placeholder_keys(&entries).into_iter().collect();
         assert_eq!(keys, ["ARG", "CMD", "ENV_VAL", "HDR", "HOST", "X"]);
+    }
+
+    #[test]
+    fn setting_sources_follow_resolution_order() {
+        let entries = vec![McpServerEntry {
+            name: "a".into(),
+            transport: stdio(
+                "${CLAUDE_PLUGIN_ROOT}/${SET}",
+                &[
+                    "${FROM_ENV}",
+                    "${EMPTY_ENV}",
+                    "${PORT:-8080}",
+                    "${HALF:-x}",
+                    "${HALF}",
+                    "${NONE}",
+                    "${DATABASE_URL}",
+                    "${SET_AND_ENV}",
+                ],
+                &[],
+            ),
+            error: None,
+        }];
+        let configured: BTreeSet<String> = ["SET", "SET_AND_ENV"].map(String::from).into();
+        let env = |name: &str| match name {
+            "FROM_ENV" | "SET_AND_ENV" | "DATABASE_URL" | "PORT" => Some("v".to_string()),
+            "EMPTY_ENV" => Some(String::new()),
+            _ => None,
+        };
+        let sources = setting_sources(&entries, &configured, &env);
+        let shown: Vec<_> = sources
+            .iter()
+            .map(|(k, s)| (k.as_str(), s.as_str()))
+            .collect();
+        assert_eq!(
+            shown,
+            [
+                ("DATABASE_URL", "missing"),
+                ("EMPTY_ENV", "missing"),
+                ("FROM_ENV", "env"),
+                ("HALF", "missing"),
+                ("NONE", "missing"),
+                ("PORT", "env"),
+                ("SET", "setting"),
+                ("SET_AND_ENV", "setting"),
+            ]
+        );
+        let no_env = |_: &str| None;
+        assert_eq!(
+            setting_sources(&entries, &configured, &no_env).get("PORT"),
+            Some(&SettingSource::Default)
+        );
     }
 
     #[test]

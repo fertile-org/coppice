@@ -26,8 +26,8 @@ const plugin: Plugin = {
     { name: 'remote', kind: 'http', health: 'ready' },
   ],
   settings: [
-    { key: 'API_TOKEN', configured: true },
-    { key: 'ROOT', configured: false },
+    { key: 'API_TOKEN', configured: true, source: 'setting' },
+    { key: 'ROOT', configured: false, source: 'missing' },
   ],
   unsupported: [],
 };
@@ -91,6 +91,9 @@ describe('PluginCard', () => {
       const method = init.method ?? 'GET';
       if (path === `/api/plugins/${plugin.id}/settings` && method === 'PUT') {
         return Promise.resolve(json(plugin));
+      }
+      if (path === `/api/plugins/${plugin.id}` && method === 'PATCH') {
+        return Promise.resolve(json({ ...plugin, enabled: true }));
       }
       if (path === `/api/plugins/${plugin.id}/test` && method === 'POST') {
         return Promise.resolve(json(testResult));
@@ -206,6 +209,107 @@ describe('PluginCard', () => {
   it('testing an enabled plugin does not confirm', async () => {
     const confirm = vi.spyOn(window, 'confirm');
     renderCard();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Test' }));
+
+    expect(await screen.findByTestId('plugin-test-results')).toBeVisible();
+    expect(confirm).not.toHaveBeenCalled();
+    confirm.mockRestore();
+  });
+
+  it('shows where unset settings come from', () => {
+    renderCard({
+      ...plugin,
+      settings: [
+        { key: 'API_TOKEN', configured: true, source: 'setting' },
+        { key: 'GITHUB_TOKEN', configured: false, source: 'env' },
+        { key: 'PORT', configured: false, source: 'default' },
+        { key: 'ROOT', configured: false, source: 'missing' },
+      ],
+    });
+
+    const row = (key: string) => within(screen.getByTestId(`plugin-setting-${key}`));
+    expect(row('API_TOKEN').getByText('Configured')).toBeVisible();
+    expect(row('API_TOKEN').queryByText('From server env')).not.toBeInTheDocument();
+    expect(row('GITHUB_TOKEN').getByText('From server env')).toBeVisible();
+    expect(row('GITHUB_TOKEN').queryByText('Configured')).not.toBeInTheDocument();
+    expect(row('PORT').getByText('Default')).toBeVisible();
+    expect(row('ROOT').getByText('Missing')).toBeVisible();
+  });
+
+  it('unknown setting source falls back to missing', () => {
+    const parsed = pluginSchema.parse({
+      ...plugin,
+      settings: [{ key: 'X', configured: false, source: 'vault' }],
+    });
+    expect(parsed.settings[0].source).toBe('missing');
+  });
+
+  it('enabling a plugin with env-sourced settings names those keys', async () => {
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    renderCard({
+      ...plugin,
+      enabled: false,
+      mcpServers: [{ name: 'remote', kind: 'http', health: 'stopped' }],
+      settings: [
+        { key: 'API_TOKEN', configured: true, source: 'setting' },
+        { key: 'GITHUB_TOKEN', configured: false, source: 'env' },
+      ],
+    });
+
+    fireEvent.click(screen.getByRole('switch', { name: 'Enable mcp-fake' }));
+
+    await waitFor(() => expect(callFor(`/api/plugins/${plugin.id}`).method).toBe('PATCH'));
+    expect(confirm).toHaveBeenCalledWith(
+      "Setting GITHUB_TOKEN is not set here, so the Coppice server's environment value for it will be sent to the plugin. Enable anyway?",
+    );
+    confirm.mockRestore();
+  });
+
+  it('stdio and env risks share one confirmation; cancel sends nothing', () => {
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
+    renderCard({
+      ...plugin,
+      enabled: false,
+      settings: [
+        { key: 'A', configured: false, source: 'env' },
+        { key: 'B', configured: false, source: 'env' },
+      ],
+    });
+
+    fireEvent.click(screen.getByRole('switch', { name: 'Enable mcp-fake' }));
+
+    expect(confirm).toHaveBeenCalledTimes(1);
+    expect(confirm).toHaveBeenCalledWith(
+      "This plugin starts local MCP servers that run with the Coppice server's privileges until sandboxing lands (M11). Settings A, B are not set here, so the Coppice server's environment values for them will be sent to the plugin. Enable anyway?",
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
+    confirm.mockRestore();
+  });
+
+  it('testing a disabled http plugin with env-sourced settings asks first', () => {
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
+    renderCard({
+      ...plugin,
+      enabled: false,
+      mcpServers: [{ name: 'remote', kind: 'http', health: 'stopped' }],
+      settings: [{ key: 'GITHUB_TOKEN', configured: false, source: 'env' }],
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Test' }));
+
+    expect(confirm).toHaveBeenCalledWith(expect.stringContaining('GITHUB_TOKEN'));
+    expect(fetchMock).not.toHaveBeenCalled();
+    confirm.mockRestore();
+  });
+
+  it('testing a disabled http plugin without env-sourced settings does not confirm', async () => {
+    const confirm = vi.spyOn(window, 'confirm');
+    renderCard({
+      ...plugin,
+      enabled: false,
+      mcpServers: [{ name: 'remote', kind: 'http', health: 'stopped' }],
+    });
 
     fireEvent.click(screen.getByRole('button', { name: 'Test' }));
 

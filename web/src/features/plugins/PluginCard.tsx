@@ -17,15 +17,26 @@ import {
   useUpdatePlugin,
 } from './usePlugins';
 
-const STDIO_WARNING =
-  "This plugin starts local MCP servers that run with the Coppice server's privileges until sandboxing lands (M11). Enable anyway?";
+const STDIO_RISK =
+  "This plugin starts local MCP servers that run with the Coppice server's privileges until sandboxing lands (M11).";
+
+/** Names keys only; the values never reach the browser. */
+function envRisk(keys: string[]): string {
+  const list = keys.join(', ');
+  return keys.length === 1
+    ? `Setting ${list} is not set here, so the Coppice server's environment value for it will be sent to the plugin.`
+    : `Settings ${list} are not set here, so the Coppice server's environment values for them will be sent to the plugin.`;
+}
 
 /** Starting a disabled plugin's servers (enable or Test) needs the admin's consent. */
 function confirmStart(plugin: Plugin): boolean {
-  if (plugin.enabled || !plugin.mcpServers.some((server) => server.kind === 'stdio')) {
-    return true;
-  }
-  return window.confirm(STDIO_WARNING);
+  if (plugin.enabled) return true;
+  const envKeys = plugin.settings.filter((s) => s.source === 'env').map((s) => s.key);
+  const risks = [
+    plugin.mcpServers.some((server) => server.kind === 'stdio') ? STDIO_RISK : null,
+    envKeys.length > 0 ? envRisk(envKeys) : null,
+  ].filter((risk): risk is string => risk !== null);
+  return risks.length === 0 || window.confirm(`${risks.join(' ')} Enable anyway?`);
 }
 
 function healthClass(health: PluginMcpServerHealth): string {
