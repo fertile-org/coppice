@@ -720,6 +720,17 @@ impl AgentConnectorsConfig {
             _ => None,
         }
     }
+
+    /// Configured `command` for connectors that have one; `None` means use the
+    /// descriptor binary.
+    pub fn command(&self, id: &str) -> Option<&str> {
+        match id {
+            "opencode" => Some(&self.opencode.command),
+            "kilo-code" => Some(&self.kilo_code.command),
+            "cursor" => Some(&self.cursor.command),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -1320,6 +1331,20 @@ mod tests {
         assert_eq!(cfg.command, "agent");
         assert_eq!(cfg.run_timeout_secs, 600);
         assert!(cfg.model_providers.is_empty());
+    }
+
+    #[test]
+    fn command_for_connectors() {
+        let mut cfg = AgentConnectorsConfig::default();
+        assert_eq!(cfg.command("kilo-code"), Some("kilo"));
+        assert_eq!(cfg.command("cursor"), Some("agent"));
+        assert_eq!(cfg.command("opencode"), Some("opencode"));
+        assert_eq!(cfg.command("claude-code"), None);
+        assert_eq!(cfg.command("codex"), None);
+        assert_eq!(cfg.command("mock"), None);
+        assert_eq!(cfg.command("nope"), None);
+        cfg.cursor.command = "cursor-agent".into();
+        assert_eq!(cfg.command("cursor"), Some("cursor-agent"));
     }
 
     #[test]

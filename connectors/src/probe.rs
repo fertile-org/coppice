@@ -227,7 +227,7 @@ fn run_probe_command(
             .into_iter()
             .find(|t| !t.is_empty())
             .map(str::to_string)
-            .unwrap_or_else(|| format!("command failed ({status})"));
+            .unwrap_or_else(|| "command failed".to_string());
         ProbeOutcome::Failed {
             message: finish(&message, secrets, FAILED_MESSAGE_MAX),
         }
@@ -457,6 +457,20 @@ mod tests {
             }
             other => panic!("expected Failed, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn probe_failed_without_output_says_command_failed() {
+        let tmp = TempDir::new("silent");
+        write_script(&tmp.path().join("claude"), "exit 3");
+        let d = get(CLAUDE_CODE).unwrap();
+        let r = run_probe(d, tmp.path(), tmp.path(), &no_env, Duration::from_secs(10));
+        assert_eq!(
+            r.probe,
+            ProbeOutcome::Failed {
+                message: "command failed".into()
+            }
+        );
     }
 
     #[test]
