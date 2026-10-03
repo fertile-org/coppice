@@ -1,6 +1,8 @@
 use crate::domain::context_profile::ContextProfile;
 use crate::mcp::protocol::{ToolContent, ToolDefinition, ToolResult};
-use crate::mcp::source::{CoreToolSource, SkillToolSource, SourceKind, SourcedTool, ToolSource};
+use crate::mcp::source::{
+    CoreToolSource, SkillToolSource, SourceKind, SourcedTool, ToolSource, UnlistedClaim,
+};
 use crate::mcp::token::RunToolScope;
 use crate::mcp::tools::{ToolCtx, ToolError};
 use crate::AppState;
@@ -15,6 +17,15 @@ const ARGS_SUMMARY_CHARS: usize = 200;
 /// The chat reply path; allowed on read-only profiles despite writing.
 const REPLY_TOOL: &str = "result_submit";
 pub const DEFAULT_LIST_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// Why `find` returned no tool.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Miss {
+    /// Listed, but not allowed for the scope's profile.
+    Filtered,
+    /// No source listed the name.
+    Unlisted,
+}
 
 #[derive(Clone, Copy)]
 enum CallStatus {
@@ -109,7 +120,7 @@ impl ToolRegistry {
 
     /// Same answer as `resolve` for one name, but stops at the first source that
     /// has it, so core calls never wait on later (e.g. plugin) sources.
-    async fn find(&self, scope: &RunToolScope, name: &str) -> Option<(usize, SourcedTool)> {
+    async fn find(&self, scope: &RunToolScope, name: &str) -> Result<(usize, SourcedTool), Miss> {
         for (index, source) in self.sources.iter().enumerate() {
             let found = self
                 .list_source(source.as_ref(), scope)
@@ -117,7 +128,25 @@ impl ToolRegistry {
                 .into_iter()
                 .find(|tool| tool.def.name == name);
             if let Some(tool) = found {
-                return allowed_for(scope.profile, &tool.def).then_some((index, tool));
+                return if allowed_for(scope.profile, &tool.def) {
+                    Ok((index, tool))
+                } else {
+                    Err(Miss::Filtered)
+                };
+            }
+        }
+        Err(Miss::Unlisted)
+    }
+
+    /// First source that claims an unlisted `name`, each bounded like `list`.
+    async fn claim(&self, scope: &RunToolScope, name: &str) -> Option<(SourceKind, UnlistedClaim)> {
+        for source in &self.sources {
+            let claim = tokio::time::timeout(self.list_timeout, source.claim_unlisted(scope, name))
+                .await
+                .ok()
+                .flatten();
+            if let Some(claim) = claim {
+                return Some((source.kind(), claim));
             }
         }
         None
@@ -158,19 +187,36 @@ impl ToolRegistry {
         args: Value,
     ) -> ToolResult {
         let started = Instant::now();
-        let Some((index, tool)) = self.find(scope, name).await else {
-            let message = format!("denied: tool \"{name}\" is not available for this run");
-            let entry = CallLog {
-                tool: name,
-                source: SourceKind::Core,
-                plugin_id: None,
-                args: &args,
-                status: CallStatus::Denied,
-                error: Some(&message),
-                started,
-            };
-            log_call(state, scope, entry).await;
-            return ToolResult::text(message, true);
+        let (index, tool) = match self.find(scope, name).await {
+            Ok(found) => found,
+            Err(miss) => {
+                let claim = match miss {
+                    Miss::Unlisted => self.claim(scope, name).await,
+                    Miss::Filtered => None,
+                };
+                let (source, plugin_id, status, message) = match claim {
+                    Some((source, claim)) => {
+                        (source, claim.plugin_id, CallStatus::Error, claim.message)
+                    }
+                    None => (
+                        SourceKind::Core,
+                        None,
+                        CallStatus::Denied,
+                        format!("denied: tool \"{name}\" is not available for this run"),
+                    ),
+                };
+                let entry = CallLog {
+                    tool: name,
+                    source,
+                    plugin_id,
+                    args: &args,
+                    status,
+                    error: Some(&message),
+                    started,
+                };
+                log_call(state, scope, entry).await;
+                return ToolResult::text(message, true);
+            }
         };
 
         let (status, result, error) = self
@@ -341,7 +387,7 @@ mod tests {
     use super::*;
     use crate::domain::context_profile::ContextProfile;
     use crate::mcp::protocol::{ToolContent, ToolDefinition, ToolResult};
-    use crate::mcp::source::{SourceKind, SourcedTool, ToolSource};
+    use crate::mcp::source::{SourceKind, SourcedTool, ToolSource, UnlistedClaim};
     use crate::mcp::token::RunToolScope;
     use crate::mcp::tools::{ToolCtx, ToolError};
     use async_trait::async_trait;
@@ -586,11 +632,65 @@ mod tests {
         assert_eq!((index, tool.source), (1, SourceKind::Plugin));
         assert_eq!(lists(), 1);
 
-        assert!(registry
-            .find(&scope(ContextProfile::HumanChat), "writer")
-            .await
-            .is_none());
-        assert!(registry.find(&full, "missing").await.is_none());
+        assert_eq!(
+            registry
+                .find(&scope(ContextProfile::HumanChat), "writer")
+                .await
+                .err(),
+            Some(Miss::Filtered)
+        );
+        assert_eq!(
+            registry.find(&full, "missing").await.err(),
+            Some(Miss::Unlisted)
+        );
+    }
+
+    struct ClaimingSource;
+
+    #[async_trait]
+    impl ToolSource for ClaimingSource {
+        fn kind(&self) -> SourceKind {
+            SourceKind::Plugin
+        }
+        async fn list(&self, _scope: &RunToolScope) -> Vec<SourcedTool> {
+            Vec::new()
+        }
+        async fn call(
+            &self,
+            _ctx: &ToolCtx<'_>,
+            _tool: &SourcedTool,
+            _args: Value,
+        ) -> Result<ToolResult, ToolError> {
+            unreachable!("claiming source lists nothing")
+        }
+        async fn claim_unlisted(&self, _scope: &RunToolScope, name: &str) -> Option<UnlistedClaim> {
+            name.starts_with("p__").then(|| UnlistedClaim {
+                plugin_id: Some(Uuid::from_u128(5)),
+                message: "plugin \"p\" unavailable".into(),
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn unlisted_names_are_claimed_by_their_source() {
+        let registry = ToolRegistry::new(vec![
+            Arc::new(CoreToolSource),
+            Arc::new(SkillToolSource),
+            Arc::new(ClaimingSource),
+        ]);
+        let full = scope(ContextProfile::Full);
+        assert_eq!(
+            registry.claim(&full, "p__tool").await,
+            Some((
+                SourceKind::Plugin,
+                UnlistedClaim {
+                    plugin_id: Some(Uuid::from_u128(5)),
+                    message: "plugin \"p\" unavailable".into(),
+                }
+            ))
+        );
+        assert_eq!(registry.claim(&full, "nope").await, None);
+        assert_eq!(ToolRegistry::builtin().claim(&full, "p__tool").await, None);
     }
 
     #[test]

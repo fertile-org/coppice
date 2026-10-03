@@ -35,6 +35,15 @@ pub struct SourcedTool {
     pub key: String,
 }
 
+/// A source's claim on a tool name it did not list, e.g. a tool of a plugin whose
+/// server is down.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UnlistedClaim {
+    pub plugin_id: Option<Uuid>,
+    /// Tool error shown to the agent and logged.
+    pub message: String,
+}
+
 #[async_trait]
 pub trait ToolSource: Send + Sync {
     fn kind(&self) -> SourceKind;
@@ -45,6 +54,11 @@ pub trait ToolSource: Send + Sync {
         tool: &SourcedTool,
         args: Value,
     ) -> Result<ToolResult, ToolError>;
+    /// Called when no source listed `name`, so the failed call is logged against
+    /// the source that owns it rather than as an unknown core tool.
+    async fn claim_unlisted(&self, _scope: &RunToolScope, _name: &str) -> Option<UnlistedClaim> {
+        None
+    }
 }
 
 fn json_result(value: Value) -> ToolResult {

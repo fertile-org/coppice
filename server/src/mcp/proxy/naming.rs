@@ -17,6 +17,17 @@ pub fn exposed_name(plugin: &str, tool: &str) -> String {
     format!("{}_{}", &name[..KEPT_PREFIX], &hash[..HASH_HEX])
 }
 
+/// Whether `name` has the shape of an `exposed_name(plugin, _)`, hashed or not.
+pub fn is_exposed_by(plugin: &str, name: &str) -> bool {
+    let prefix = format!("{}__", sanitize(plugin));
+    if name.len() > prefix.len() && name.len() <= MAX_EXPOSED_LEN && name.starts_with(&prefix) {
+        return true;
+    }
+    prefix.len() > KEPT_PREFIX
+        && name.len() == MAX_EXPOSED_LEN
+        && name.starts_with(&prefix[..KEPT_PREFIX])
+}
+
 /// Output is ASCII, so byte slicing above stays on char boundaries.
 fn sanitize(part: &str) -> String {
     part.chars()
@@ -63,5 +74,23 @@ mod tests {
         let other = exposed_name(&plugin, &format!("{}x", "t".repeat(27)));
         assert_eq!(&other[..41], &name[..41]);
         assert_ne!(other, name);
+    }
+
+    #[test]
+    fn is_exposed_by_matches_plain_and_hashed_names() {
+        assert!(is_exposed_by(
+            "my.plugin",
+            &exposed_name("my.plugin", "do it")
+        ));
+        assert!(is_exposed_by("my.plugin", "my_plugin__anything"));
+        assert!(!is_exposed_by("my.plugin", "my_plugin__"));
+        assert!(!is_exposed_by("my", "my_plugin__x"));
+        assert!(!is_exposed_by("github", "ticket_get"));
+
+        let long = "p".repeat(45);
+        let hashed = exposed_name(&long, "tool");
+        assert_eq!(hashed.len(), MAX_EXPOSED_LEN);
+        assert!(is_exposed_by(&long, &hashed));
+        assert!(!is_exposed_by(&"q".repeat(45), &hashed));
     }
 }

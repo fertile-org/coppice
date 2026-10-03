@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use crate::config::PluginsConfig;
 use crate::crypto::SecretStore;
 use crate::mcp::proxy::naming::exposed_name;
-use crate::mcp::proxy::{McpServerPool, PoolError, PoolServerSpec, ServerKey};
+use crate::mcp::proxy::{McpServerPool, PluginServerNames, PoolError, PoolServerSpec, ServerKey};
 use crate::plugins::capability::McpServerTransport;
 use crate::plugins::discover::{discover, Discovered};
 use crate::plugins::git_install::{repo_dir_name, validate_git_url, validate_ref};
@@ -493,6 +493,38 @@ impl<'a> PluginService<'a> {
             }));
         }
         Ok(specs)
+    }
+
+    /// Names of the enabled `ok` plugins among `plugin_ids` that declare MCP servers,
+    /// with their server names. Settings are not read.
+    pub async fn mcp_server_names_for(
+        &self,
+        plugin_ids: &[Uuid],
+    ) -> Result<Vec<PluginServerNames>, PluginError> {
+        if plugin_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let rows = sqlx::query(&format!(
+            r#"
+            SELECT {PLUGIN_COLUMNS} FROM plugins p
+            WHERE p.id = ANY($1) AND p.enabled AND p.status = 'ok'
+            "#
+        ))
+        .bind(plugin_ids)
+        .fetch_all(self.pool)
+        .await?;
+        Ok(rows
+            .iter()
+            .map(row_to_plugin)
+            .filter_map(|plugin| {
+                let manifest = plugin.manifest?;
+                (!manifest.mcp_servers.is_empty()).then(|| PluginServerNames {
+                    plugin_id: plugin.id,
+                    plugin_name: plugin.name,
+                    servers: manifest.mcp_servers.into_iter().map(|e| e.name).collect(),
+                })
+            })
+            .collect())
     }
 
     /// Specs for every MCP server of one plugin, whether or not it is enabled.

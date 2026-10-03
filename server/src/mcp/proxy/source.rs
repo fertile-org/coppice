@@ -1,12 +1,12 @@
 //! Plugin MCP servers as the gateway's third tool source.
 
-use super::naming::exposed_name;
-use super::pool::{McpServerPool, PoolError, PoolServerSpec};
+use super::naming::{exposed_name, is_exposed_by};
+use super::pool::{McpServerPool, PoolError, PoolServerSpec, ServerKey};
 use super::transport::RemoteTool;
 use crate::crypto::SecretStore;
 use crate::domain::context_profile::ContextProfile;
 use crate::mcp::protocol::{ToolDefinition, ToolResult};
-use crate::mcp::source::{SourceKind, SourcedTool, ToolSource};
+use crate::mcp::source::{SourceKind, SourcedTool, ToolSource, UnlistedClaim};
 use crate::mcp::token::RunToolScope;
 use crate::mcp::tools::{ToolCtx, ToolError};
 use crate::plugins::capability::McpServerTransport;
@@ -18,10 +18,19 @@ use std::sync::Arc;
 use std::time::Duration;
 use uuid::Uuid;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PluginServerNames {
+    pub plugin_id: Uuid,
+    pub plugin_name: String,
+    pub servers: Vec<String>,
+}
+
 #[async_trait]
 pub trait PluginServerCatalog: Send + Sync {
     /// Servers of the usable plugins among `plugin_ids`; empty on lookup failure.
     async fn servers_for(&self, plugin_ids: &[Uuid]) -> Vec<PoolServerSpec>;
+    /// Same plugins as `servers_for`, names only (no settings decrypted).
+    async fn server_names_for(&self, plugin_ids: &[Uuid]) -> Vec<PluginServerNames>;
 }
 
 /// Enabled `ok` plugins from the database, settings decrypted.
@@ -44,6 +53,16 @@ impl PluginServerCatalog for DbPluginServerCatalog {
             .await
             .unwrap_or_else(|err| {
                 tracing::warn!(error = %err, "failed to load plugin MCP servers");
+                Vec::new()
+            })
+    }
+
+    async fn server_names_for(&self, plugin_ids: &[Uuid]) -> Vec<PluginServerNames> {
+        PluginService::new(&self.pool)
+            .mcp_server_names_for(plugin_ids)
+            .await
+            .unwrap_or_else(|err| {
+                tracing::warn!(error = %err, "failed to load plugin MCP server names");
                 Vec::new()
             })
     }
@@ -101,8 +120,8 @@ impl PluginMcpSource {
 }
 
 /// Only placeholder and transport errors carry a message worth showing the agent.
-fn unavailable(plugin: &str, err: &PoolError) -> ToolResult {
-    let detail = match err {
+fn actionable(err: &PoolError) -> Option<&str> {
+    match err {
         PoolError::Config(message) => Some(message),
         PoolError::Unhealthy(message)
             if message.starts_with("missing setting")
@@ -111,16 +130,26 @@ fn unavailable(plugin: &str, err: &PoolError) -> ToolResult {
             Some(message)
         }
         _ => None,
-    };
-    let text = match detail {
+    }
+}
+
+fn unavailable_message(plugin: &str, detail: Option<&str>) -> String {
+    match detail {
         Some(message) => format!("plugin \"{plugin}\" unavailable: {message}"),
         None => format!("plugin \"{plugin}\" unavailable"),
-    };
-    ToolResult::text(text, true)
+    }
+}
+
+fn unavailable(plugin: &str, err: &PoolError) -> ToolResult {
+    ToolResult::text(unavailable_message(plugin, actionable(err)), true)
 }
 
 fn listable(spec: &PoolServerSpec) -> bool {
     !matches!(spec.entry.transport, McpServerTransport::Unsupported { .. })
+}
+
+fn exposes_plugins(scope: &RunToolScope) -> bool {
+    scope.profile != ContextProfile::KnowledgeCompaction && !scope.plugin_ids.is_empty()
 }
 
 #[async_trait]
@@ -130,7 +159,7 @@ impl ToolSource for PluginMcpSource {
     }
 
     async fn list(&self, scope: &RunToolScope) -> Vec<SourcedTool> {
-        if scope.profile == ContextProfile::KnowledgeCompaction || scope.plugin_ids.is_empty() {
+        if !exposes_plugins(scope) {
             return Vec::new();
         }
         let specs: Vec<PoolServerSpec> = self
@@ -179,6 +208,37 @@ impl ToolSource for PluginMcpSource {
     ) -> Result<ToolResult, ToolError> {
         self.invoke(tool, args).await
     }
+
+    /// Claims `<plugin>__*` names of the token's usable plugins; their servers
+    /// failed to list, so the call reports the plugin as unavailable.
+    async fn claim_unlisted(&self, scope: &RunToolScope, name: &str) -> Option<UnlistedClaim> {
+        if !exposes_plugins(scope) {
+            return None;
+        }
+        let owner = self
+            .catalog
+            .server_names_for(&scope.plugin_ids)
+            .await
+            .into_iter()
+            .filter(|plugin| is_exposed_by(&plugin.plugin_name, name))
+            .max_by_key(|plugin| plugin.plugin_name.len())?;
+        let errors: Vec<PoolError> = owner
+            .servers
+            .iter()
+            .filter_map(|server| {
+                self.pool.last_error(&ServerKey {
+                    plugin_id: owner.plugin_id,
+                    server: server.clone(),
+                })
+            })
+            .map(PoolError::Unhealthy)
+            .collect();
+        let detail = errors.iter().find_map(actionable);
+        Some(UnlistedClaim {
+            plugin_id: Some(owner.plugin_id),
+            message: unavailable_message(&owner.plugin_name, detail),
+        })
+    }
 }
 
 #[cfg(test)]
@@ -209,6 +269,25 @@ mod tests {
                 .filter(|spec| plugin_ids.contains(&spec.key.plugin_id))
                 .cloned()
                 .collect()
+        }
+
+        async fn server_names_for(&self, plugin_ids: &[Uuid]) -> Vec<PluginServerNames> {
+            let mut names: Vec<PluginServerNames> = Vec::new();
+            for spec in self
+                .specs
+                .iter()
+                .filter(|spec| plugin_ids.contains(&spec.key.plugin_id))
+            {
+                match names.iter_mut().find(|n| n.plugin_id == spec.key.plugin_id) {
+                    Some(entry) => entry.servers.push(spec.key.server.clone()),
+                    None => names.push(PluginServerNames {
+                        plugin_id: spec.key.plugin_id,
+                        plugin_name: spec.plugin_name.clone(),
+                        servers: vec![spec.key.server.clone()],
+                    }),
+                }
+            }
+            names
         }
     }
 
@@ -472,6 +551,47 @@ mod tests {
             "plugin \"p\" unavailable"
         );
         assert_eq!(text(PoolError::Timeout), "plugin \"p\" unavailable");
+    }
+
+    #[tokio::test]
+    async fn claims_unlisted_tools_of_snapshot_plugins_only() {
+        let (source, _) = make_source(vec![spec(BTreeMap::new())]);
+        let full = scope(ContextProfile::Full);
+        assert!(source.list(&full).await.is_empty());
+        assert_eq!(
+            source.claim_unlisted(&full, "mcp-fake__echo").await,
+            Some(UnlistedClaim {
+                plugin_id: Some(PLUGIN),
+                message: "plugin \"mcp-fake\" unavailable".into(),
+            })
+        );
+        assert_eq!(source.claim_unlisted(&full, "ticket_get").await, None);
+        assert_eq!(source.claim_unlisted(&full, "other__echo").await, None);
+
+        let mut other = scope(ContextProfile::Full);
+        other.plugin_ids = vec![Uuid::from_u128(99)];
+        assert_eq!(source.claim_unlisted(&other, "mcp-fake__echo").await, None);
+        let compaction = scope(ContextProfile::KnowledgeCompaction);
+        assert_eq!(
+            source.claim_unlisted(&compaction, "mcp-fake__echo").await,
+            None
+        );
+    }
+
+    #[tokio::test]
+    async fn claim_keeps_missing_setting_detail() {
+        let env = [("TOKEN".to_string(), "${X}".to_string())].into();
+        let (source, _) = make_source(vec![spec(env)]);
+        let full = scope(ContextProfile::Full);
+        assert!(source.list(&full).await.is_empty());
+        let claim = source
+            .claim_unlisted(&full, "mcp-fake__echo")
+            .await
+            .unwrap();
+        assert_eq!(
+            claim.message,
+            "plugin \"mcp-fake\" unavailable: missing setting \"X\""
+        );
     }
 
     #[tokio::test]

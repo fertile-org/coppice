@@ -2608,6 +2608,99 @@ async fn plugin_tool_output_redacts_setting_values() {
     assert!(!shown.contains(secret), "{shown}");
 }
 
+#[tokio::test]
+async fn down_plugin_server_call_is_blamed_on_the_plugin() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let fx = run_fixture().await;
+    let (plugin_id, _dir) = add_inline_mcp_plugin(
+        &fx.app,
+        &fx.cookie,
+        &fx.csrf,
+        "mcp-broken",
+        json!({ "FAKE_MCP_START_FAIL": "1" }),
+        json!({}),
+    )
+    .await;
+    let url = serve(&fx).await;
+    let token = |profile, plugin_ids| {
+        common::mint_test_token_with_plugins(&fx.state, fx.scope.run_id, profile, plugin_ids)
+    };
+    let full = token(ContextProfile::Full, vec![plugin_id]).await;
+    assert!(!tool_names(&url, &full)
+        .await
+        .iter()
+        .any(|n| n.starts_with("mcp-broken__")));
+    let unavailable = (true, "plugin \"mcp-broken\" unavailable".to_string());
+    assert_eq!(
+        call_tool(&url, &full, "mcp-broken__echo", json!({ "text": "hi" })).await,
+        unavailable
+    );
+    assert_eq!(
+        call_tool(&url, &full, "no_such_tool", json!({})).await,
+        (
+            true,
+            "denied: tool \"no_such_tool\" is not available for this run".to_string()
+        )
+    );
+    // A token whose snapshot lacks the plugin gets nothing attributed to it.
+    let without = token(ContextProfile::Full, vec![]).await;
+    assert_eq!(
+        call_tool(&url, &without, "mcp-broken__echo", json!({})).await,
+        (
+            true,
+            "denied: tool \"mcp-broken__echo\" is not available for this run".to_string()
+        )
+    );
+    // A read-only chat token still only gets the error; nothing runs.
+    let chat = token(ContextProfile::HumanChat, vec![plugin_id]).await;
+    assert_eq!(
+        call_tool(&url, &chat, "mcp-broken__write_note", json!({})).await,
+        (true, "plugin \"mcp-broken\" unavailable".to_string())
+    );
+
+    type CallRow = (String, String, Option<Uuid>, String, Option<String>);
+    let rows: Vec<CallRow> = sqlx::query_as(
+        "SELECT tool, source, plugin_id, status, error FROM run_tool_calls \
+         WHERE run_id = $1 ORDER BY created_at",
+    )
+    .bind(fx.scope.run_id)
+    .fetch_all(&fx.pool)
+    .await
+    .unwrap();
+    let plugin_row = |tool: &str| {
+        (
+            tool.to_string(),
+            "plugin".to_string(),
+            Some(plugin_id),
+            "error".to_string(),
+            Some("plugin \"mcp-broken\" unavailable".to_string()),
+        )
+    };
+    let denied_row = |tool: &str| {
+        (
+            tool.to_string(),
+            "core".to_string(),
+            None,
+            "denied".to_string(),
+            Some(format!(
+                "denied: tool \"{tool}\" is not available for this run"
+            )),
+        )
+    };
+    assert_eq!(
+        rows,
+        vec![
+            plugin_row("mcp-broken__echo"),
+            denied_row("no_such_tool"),
+            denied_row("mcp-broken__echo"),
+            plugin_row("mcp-broken__write_note"),
+        ]
+    );
+}
+
 // ---- M10 Part 2b: per-run tool-call log API ----
 
 async fn get_tool_calls(

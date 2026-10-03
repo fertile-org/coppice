@@ -12,6 +12,6 @@ mod transport;
 
 pub use http::HttpTransport;
 pub use pool::{McpServerPool, PoolConfig, PoolError, PoolServerSpec, ServerHealth, ServerKey};
-pub use source::{DbPluginServerCatalog, PluginMcpSource, PluginServerCatalog};
+pub use source::{DbPluginServerCatalog, PluginMcpSource, PluginServerCatalog, PluginServerNames};
 pub use stdio::StdioTransport;
 pub use transport::{McpConnection, McpTransport, ProxyError, RemoteTool, Transports};
