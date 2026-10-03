@@ -9,6 +9,7 @@ import {
   type ConnectorStatus,
 } from '../../lib/schemas/connectorDiagnostics';
 import { ConnectorsTab } from './ConnectorsTab';
+import { connectorStatusesRefetchInterval } from './useConnectorDiagnostics';
 
 const PROBED_AT = '2026-10-03T10:00:00Z';
 const CHECK_ID = '00000000-0000-4000-8000-0000000000c1';
@@ -189,6 +190,29 @@ describe('ConnectorsTab', () => {
     expect(claudeCard.queryByText('Not installed')).not.toBeInTheDocument();
   });
 
+  it('polls statuses until startup probes finish', async () => {
+    let lists = 0;
+    stubApi((path, init) => {
+      if (path === '/api/tools/connectors' && (init.method ?? 'GET') === 'GET') {
+        lists += 1;
+        return json([lists === 1 ? { ...claude, probedAt: null } : claude]);
+      }
+      return undefined;
+    });
+    renderTab();
+
+    const claudeCard = await card('claude-code');
+    expect(claudeCard.getAllByText('Checking…').length).toBeGreaterThan(0);
+    expect(await claudeCard.findByText('Not installed', {}, { timeout: 5000 })).toBeVisible();
+    expect(lists).toBe(2);
+  }, 10_000);
+
+  it('status refetch interval only while a probe is pending', () => {
+    expect(connectorStatusesRefetchInterval(undefined)).toBe(false);
+    expect(connectorStatusesRefetchInterval([claude, codex])).toBe(false);
+    expect(connectorStatusesRefetchInterval([claude, { ...codex, probedAt: null }])).toBe(2_000);
+  });
+
   it('shows last real run', async () => {
     renderTab();
 
@@ -276,6 +300,36 @@ describe('ConnectorsTab', () => {
     await waitFor(() =>
       expect(callsFor('/api/tools/connectors', 'GET').length).toBeGreaterThan(1),
     );
+  });
+
+  it('test connection start refreshes statuses', async () => {
+    stubApi((path, init) => {
+      if (path === '/api/tools/connectors/codex/test' && init.method === 'POST') {
+        return json({ checkId: CHECK_ID, runId: RUN_ID });
+      }
+      if (path === `/api/tools/connector-checks/${CHECK_ID}`) {
+        return json(check('running'));
+      }
+      return undefined;
+    });
+    renderTab();
+
+    const codexCard = await card('codex');
+    await waitFor(() =>
+      expect(codexCard.getByRole('button', { name: 'Test connection' })).toBeEnabled(),
+    );
+    expect(callsFor('/api/tools/connectors', 'GET')).toHaveLength(1);
+    fireEvent.click(codexCard.getByRole('button', { name: 'Test connection' }));
+    fireEvent.change(codexCard.getByLabelText('Agent'), {
+      target: { value: CODEX_AGENT_B },
+    });
+    fireEvent.click(codexCard.getByRole('button', { name: 'Start test' }));
+
+    await waitFor(() =>
+      expect(callsFor('/api/tools/connectors', 'GET')).toHaveLength(2),
+    );
+    const result = within(await screen.findByTestId('connector-test-result-codex'));
+    expect(await result.findByText('Running…')).toBeVisible();
   });
 
   it('test connection shows failure reason', async () => {

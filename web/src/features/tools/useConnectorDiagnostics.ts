@@ -18,6 +18,7 @@ export function connectorCheckQueryKey(id: string) {
 }
 
 const CHECK_POLL_MS = 2_000;
+const PROBE_POLL_MS = 2_000;
 
 export function isActiveCheck(status: ConnectorCheck['status'] | undefined): boolean {
   return status === 'queued' || status === 'running';
@@ -47,10 +48,18 @@ async function fetchConnectorCheck(id: string): Promise<ConnectorCheck> {
   return connectorCheckSchema.parse(await res.json());
 }
 
+/** Polls while any startup probe is still pending (`probedAt` null). */
+export function connectorStatusesRefetchInterval(
+  list: ConnectorStatus[] | undefined,
+): number | false {
+  return list?.some((item) => item.probedAt == null) ? PROBE_POLL_MS : false;
+}
+
 export function useConnectorStatuses() {
   return useQuery({
     queryKey: TOOL_CONNECTORS_QUERY_KEY,
     queryFn: fetchConnectorStatuses,
+    refetchInterval: (query) => connectorStatusesRefetchInterval(query.state.data),
   });
 }
 
@@ -67,8 +76,12 @@ export function useRecheckConnector(id: string) {
 }
 
 export function useStartConnectorTest(id: string) {
+  const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (agentId: string) => startConnectorTest(id, agentId),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: TOOL_CONNECTORS_QUERY_KEY });
+    },
   });
 }
 
