@@ -619,6 +619,124 @@ async fn check_provider_error_marks_failed() {
 }
 
 #[tokio::test]
+async fn check_failed_run_error_message_is_sanitized() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    const SECRET: &str = "connector_check_missing_fixture";
+    let previous = std::env::var("ANTHROPIC_API_KEY").ok();
+    std::env::set_var("ANTHROPIC_API_KEY", SECRET);
+    let (state, _app, _cookie, _csrf, check_id, run_id, _env) =
+        run_mock_check("mcp/connector_check_missing_fixture").await;
+    let pool = state.db.clone().unwrap();
+    wait_for_run_end(&pool, run_id).await;
+    match previous {
+        Some(value) => std::env::set_var("ANTHROPIC_API_KEY", value),
+        None => std::env::remove_var("ANTHROPIC_API_KEY"),
+    }
+    std::env::remove_var("MOCK_AGENT_RESPONSE");
+
+    let failure = ConnectorCheckService::new(&pool)
+        .get(check_id)
+        .await
+        .unwrap()
+        .failure
+        .expect("check failure");
+    let error_message: String =
+        sqlx::query_scalar("SELECT error_message FROM agent_runs WHERE id = $1")
+            .bind(run_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    for text in [&failure, &error_message] {
+        assert!(!text.contains(SECRET), "secret leaked: {text}");
+        assert!(text.contains("[redacted]"), "{text}");
+        assert!(text.chars().count() <= 500);
+    }
+}
+
+#[tokio::test]
+async fn check_fails_when_agent_connector_changed() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let (state, app, cookie, csrf, _env) =
+        common::bootstrap_and_login_with_gateway("mcp/connector_check").await;
+    let pool = state.db.clone().unwrap();
+    let agent_id: Uuid = common::create_test_agent_from_preset(&app, "Checker", &cookie, &csrf)
+        .await
+        .parse()
+        .unwrap();
+    let check_id = Uuid::new_v4();
+    let mut tx = pool.begin().await.unwrap();
+    sqlx::query("UPDATE agents SET connector = $2 WHERE id = $1")
+        .bind(agent_id)
+        .bind(KILO)
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+    sqlx::query(
+        "INSERT INTO connector_checks (id, connector, agent_id, status, created_by) \
+         VALUES ($1, $2, $3, 'queued', $4)",
+    )
+    .bind(check_id)
+    .bind(coppice_connectors::MOCK)
+    .bind(agent_id)
+    .bind(admin_id(&pool).await)
+    .execute(&mut *tx)
+    .await
+    .unwrap();
+    let run = coppice_server::services::run_service::RunService::create_connector_check_run(
+        &mut tx, check_id, agent_id,
+    )
+    .await
+    .unwrap();
+    tx.commit().await.unwrap();
+
+    assert_eq!(wait_for_check_end(&pool, check_id).await, "failed");
+    wait_for_run_end(&pool, run.id).await;
+    let detail = ConnectorCheckService::new(&pool)
+        .get(check_id)
+        .await
+        .unwrap();
+    assert_eq!(
+        detail.failure.as_deref(),
+        Some("agent connector changed (expected mock, got kilo-code)")
+    );
+    assert!(detail.tool_calls.is_empty(), "{:?}", detail.tool_calls);
+    let (status, error_message): (String, Option<String>) =
+        sqlx::query_as("SELECT status, error_message FROM agent_runs WHERE id = $1")
+            .bind(run.id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(status, "failed");
+    assert_eq!(
+        error_message.as_deref(),
+        Some("agent connector changed (expected mock, got kilo-code)")
+    );
+    std::env::remove_var("MOCK_AGENT_RESPONSE");
+}
+
+#[tokio::test]
+async fn fail_for_run_leaves_finished_check_alone() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let (state, _app, _cookie, _csrf, check_id, run_id, _env) =
+        run_mock_check("mcp/connector_check").await;
+    let service = ConnectorCheckService::new(state.db.as_ref().unwrap());
+    service.fail_for_run(run_id, "late failure").await.unwrap();
+    let detail = service.get(check_id).await.unwrap();
+    assert_eq!(detail.status, "passed");
+    assert!(detail.failure.is_none());
+    std::env::remove_var("MOCK_AGENT_RESPONSE");
+}
+
+#[tokio::test]
 async fn check_ticket_get_is_synthetic() {
     use coppice_server::domain::context_profile::ContextProfile;
     use coppice_server::mcp::token::{NewRunToolScope, TokenService};

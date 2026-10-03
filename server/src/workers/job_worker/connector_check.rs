@@ -32,13 +32,15 @@ pub(super) async fn execute_connector_check(
     run_svc: &RunService<'_>,
     run: &AgentRun,
 ) -> anyhow::Result<()> {
-    let check_id: Uuid = sqlx::query_scalar::<_, Option<Uuid>>(
-        "SELECT connector_check_id FROM agent_runs WHERE id = $1",
+    let (check_id, expected_connector): (Option<Uuid>, Option<String>) = sqlx::query_as(
+        "SELECT r.connector_check_id, c.connector FROM agent_runs r \
+         LEFT JOIN connector_checks c ON c.id = r.connector_check_id WHERE r.id = $1",
     )
     .bind(run.id)
     .fetch_one(pool)
-    .await?
-    .context("connector check run has no connector_check_id")?;
+    .await?;
+    let check_id = check_id.context("connector check run has no connector_check_id")?;
+    let expected_connector = expected_connector.context("connector check not found")?;
     let checks = ConnectorCheckService::new(pool);
     let scratch = PathBuf::from(&state.config.storage.artifacts_dir)
         .join("runs")
@@ -53,6 +55,7 @@ pub(super) async fn execute_connector_check(
         run,
         &checks,
         check_id,
+        &expected_connector,
         &scratch,
         &mut secrets,
     )
@@ -63,17 +66,17 @@ pub(super) async fn execute_connector_check(
     let secret_refs: Vec<&str> = secrets.iter().map(String::as_str).collect();
     let (passed, failure, result) = match outcome {
         Ok(Ok(())) => (true, None, Ok(())),
-        Ok(Err(reason)) => (false, Some(reason), Ok(())),
+        Ok(Err(reason)) => (false, Some(sanitize_failure(&reason, &secret_refs)), Ok(())),
+        Err(err) if err.downcast_ref::<JobCancelled>().is_some() => {
+            (false, Some("run cancelled".to_string()), Err(err))
+        }
         Err(err) => {
-            let reason = if err.downcast_ref::<JobCancelled>().is_some() {
-                "run cancelled".to_string()
-            } else {
-                format_job_error(&err)
-            };
-            (false, Some(reason), Err(err))
+            // The worker stores and logs the returned error, and the raw chain
+            // may echo the run token or an auth env value.
+            let reason = sanitize_failure(&format_job_error(&err), &secret_refs);
+            (false, Some(reason.clone()), Err(anyhow::anyhow!(reason)))
         }
     };
-    let failure = failure.map(|f| sanitize_failure(&f, &secret_refs));
     if let Err(err) = checks.finish(check_id, passed, failure.as_deref()).await {
         tracing::warn!(run_id = %run.id, %check_id, error = %err, "failed to record connector check result");
     }
@@ -90,6 +93,7 @@ async fn run_check(
     run: &AgentRun,
     checks: &ConnectorCheckService<'_>,
     check_id: Uuid,
+    expected_connector: &str,
     scratch: &Path,
     secrets: &mut Vec<String>,
 ) -> anyhow::Result<Result<(), String>> {
@@ -101,6 +105,11 @@ async fn run_check(
         .await
         .context("load agent")?;
     let connector_name = agent.connector.as_str();
+    if connector_name != expected_connector {
+        anyhow::bail!(
+            "agent connector changed (expected {expected_connector}, got {connector_name})"
+        );
+    }
     let connector = state
         .connector_registry
         .get(connector_name)
@@ -251,6 +260,14 @@ async fn run_check(
     .await
     .context("load connector check tool calls")?;
     Ok(evaluate_check(ticket_get_ok, result_submit_ok, outcome))
+}
+
+/// Failure text for a check run error raised outside `execute_connector_check`
+/// (no run token exists yet), with auth env values redacted and capped.
+pub(super) fn sanitize_run_error(err: &anyhow::Error) -> String {
+    let secrets = auth_env_values();
+    let secret_refs: Vec<&str> = secrets.iter().map(String::as_str).collect();
+    sanitize_failure(&format_job_error(err), &secret_refs)
 }
 
 /// Values of every connector auth env var set in this process, so failure

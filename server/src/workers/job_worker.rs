@@ -132,7 +132,21 @@ async fn process_one(state: &AppState, worker_id: &str) -> anyhow::Result<()> {
         }
         Err(err) => {
             state.run_streams.remove(run.id);
+            let is_check = run.job_type == crate::domain::connector_check::JOB_TYPE_CONNECTOR_CHECK;
+            let message = if is_check {
+                connector_check::sanitize_run_error(&err)
+            } else {
+                format_job_error(&err)
+            };
+            let err = if is_check {
+                anyhow::anyhow!(message.clone())
+            } else {
+                err
+            };
             if run_svc.is_cancelled(run.id).await.unwrap_or(false) {
+                if is_check {
+                    fail_check_for_run(pool, run.id, "run cancelled").await;
+                }
                 job_svc.mark_cancelled(job.id).await?;
                 if let Ok(cancelled_run) = run_svc.get(run.id).await {
                     RunOrchestrator::new(pool, &state.config.workflow)
@@ -140,7 +154,9 @@ async fn process_one(state: &AppState, worker_id: &str) -> anyhow::Result<()> {
                         .await;
                 }
             } else {
-                let message = format_job_error(&err);
+                if is_check {
+                    fail_check_for_run(pool, run.id, &message).await;
+                }
                 match fail_job(pool, run.id, job.id, &message).await {
                     Ok(failed_run) => {
                         RunOrchestrator::new(pool, &state.config.workflow)
@@ -176,6 +192,16 @@ async fn process_one(state: &AppState, worker_id: &str) -> anyhow::Result<()> {
     }
 
     Ok(())
+}
+
+/// Finish a check left active by an error raised before the check executor ran.
+async fn fail_check_for_run(pool: &PgPool, run_id: uuid::Uuid, failure: &str) {
+    if let Err(err) = ConnectorCheckService::new(pool)
+        .fail_for_run(run_id, failure)
+        .await
+    {
+        tracing::warn!(%run_id, error = %err, "failed to fail connector check");
+    }
 }
 
 async fn execute_job(
