@@ -67,6 +67,23 @@ fn default_plugins_mcp_idle_shutdown_secs() -> u64 {
     600
 }
 
+/// Lower bound for the plugin MCP timings: zero would disable starts, listing, or idle reaping.
+const MIN_PLUGINS_MCP_SECS: u64 = 1;
+
+impl PluginsConfig {
+    pub fn mcp_start_timeout(&self) -> std::time::Duration {
+        std::time::Duration::from_secs(self.mcp_start_timeout_secs.max(MIN_PLUGINS_MCP_SECS))
+    }
+
+    pub fn mcp_list_timeout(&self) -> std::time::Duration {
+        std::time::Duration::from_secs(self.mcp_list_timeout_secs.max(MIN_PLUGINS_MCP_SECS))
+    }
+
+    pub fn mcp_idle_shutdown(&self) -> std::time::Duration {
+        std::time::Duration::from_secs(self.mcp_idle_shutdown_secs.max(MIN_PLUGINS_MCP_SECS))
+    }
+}
+
 impl Default for PluginsConfig {
     fn default() -> Self {
         Self {
@@ -1412,6 +1429,26 @@ mod tests {
         assert_eq!(cfg.plugins.dir, "/data/plugins");
         assert_eq!(cfg.plugins.git_timeout_secs, 300);
         assert_eq!(cfg.plugins.mcp_idle_shutdown_secs, 600);
+    }
+
+    #[test]
+    fn plugins_mcp_timings_are_at_least_one_second() {
+        use std::time::Duration;
+
+        let defaults = PluginsConfig::default();
+        assert_eq!(defaults.mcp_start_timeout(), Duration::from_secs(20));
+        assert_eq!(defaults.mcp_list_timeout(), Duration::from_secs(10));
+        assert_eq!(defaults.mcp_idle_shutdown(), Duration::from_secs(600));
+
+        let zeros = PluginsConfig {
+            mcp_start_timeout_secs: 0,
+            mcp_list_timeout_secs: 0,
+            mcp_idle_shutdown_secs: 0,
+            ..PluginsConfig::default()
+        };
+        assert_eq!(zeros.mcp_start_timeout(), Duration::from_secs(1));
+        assert_eq!(zeros.mcp_list_timeout(), Duration::from_secs(1));
+        assert_eq!(zeros.mcp_idle_shutdown(), Duration::from_secs(1));
     }
 
     #[test]

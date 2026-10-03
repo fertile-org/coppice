@@ -129,14 +129,24 @@ impl AppState {
     }
 
     pub fn plugin_mcp_from_config(config: &AppConfig) -> Arc<crate::mcp::proxy::McpServerPool> {
+        let pool_config = crate::mcp::proxy::PoolConfig::from_plugins(&config.plugins);
+        let call_timeout = std::time::Duration::from_secs(config.mcp.call_timeout_secs);
+        if pool_config.idle_shutdown < call_timeout {
+            tracing::warn!(
+                idle_shutdown_secs = pool_config.idle_shutdown.as_secs(),
+                call_timeout_secs = call_timeout.as_secs(),
+                "plugins.mcp_idle_shutdown_secs is below mcp.call_timeout_secs; \
+                 idle plugin MCP servers may be stopped during a long tool call"
+            );
+        }
         Arc::new(crate::mcp::proxy::McpServerPool::new(
             crate::mcp::proxy::Transports::builtin(),
-            crate::mcp::proxy::PoolConfig::from_plugins(&config.plugins),
+            pool_config,
         ))
     }
 
     pub fn list_timeout_from_config(config: &AppConfig) -> std::time::Duration {
-        std::time::Duration::from_secs(config.plugins.mcp_list_timeout_secs)
+        config.plugins.mcp_list_timeout()
     }
 
     /// MCP gateway router over the core, skill, and (with a database) plugin MCP tool sources.

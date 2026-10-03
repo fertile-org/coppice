@@ -76,8 +76,8 @@ pub struct PoolConfig {
 impl PoolConfig {
     pub fn from_plugins(cfg: &PluginsConfig) -> Self {
         Self {
-            start_timeout: Duration::from_secs(cfg.mcp_start_timeout_secs),
-            idle_shutdown: Duration::from_secs(cfg.mcp_idle_shutdown_secs),
+            start_timeout: cfg.mcp_start_timeout(),
+            idle_shutdown: cfg.mcp_idle_shutdown(),
             backoff_initial: Duration::from_secs(1),
             backoff_max: Duration::from_secs(60),
             unhealthy_after: 3,
@@ -763,6 +763,14 @@ mod tests {
         assert_eq!(cfg.unhealthy_after, 3);
         assert_eq!(ServerHealth::Backoff.as_str(), "backoff");
         assert_eq!(PoolError::Unavailable.to_string(), "unavailable");
+
+        let zeros = PoolConfig::from_plugins(&PluginsConfig {
+            mcp_start_timeout_secs: 0,
+            mcp_idle_shutdown_secs: 0,
+            ..PluginsConfig::default()
+        });
+        assert_eq!(zeros.start_timeout, Duration::from_secs(1));
+        assert_eq!(zeros.idle_shutdown, Duration::from_secs(1));
     }
 
     #[tokio::test(start_paused = true)]
