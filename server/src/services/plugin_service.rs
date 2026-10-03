@@ -10,6 +10,7 @@ use crate::plugins::git_install::{repo_dir_name, validate_git_url, validate_ref}
 use crate::plugins::manifest::PluginManifest;
 use crate::plugins::skills::{PluginSkillSet, SkillCatalog};
 use crate::services::plugin_settings_service::{PluginSettingsError, PluginSettingsService};
+use crate::services::secret_service::SecretError;
 use sqlx::postgres::PgRow;
 use sqlx::{PgPool, Postgres, Row, Transaction};
 use uuid::Uuid;
@@ -518,7 +519,9 @@ impl<'a> PluginService<'a> {
         let entries = plugin.manifest.map(|m| m.mcp_servers).unwrap_or_default();
         let specs = match self.server_specs(plugin_id, store).await {
             Ok(specs) => specs,
-            Err(PluginError::Settings(err)) => {
+            Err(PluginError::Settings(PluginSettingsError::Secret(err)))
+                if !matches!(err, SecretError::Database(_)) =>
+            {
                 tracing::warn!(plugin = %plugin.name, error = %err, "plugin settings unreadable; MCP test skipped");
                 return Ok(entries
                     .iter()

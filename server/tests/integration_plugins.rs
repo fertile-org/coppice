@@ -1618,7 +1618,7 @@ async fn test_response_has_no_secret_values() {
     let (status, _) = put_settings(
         &app,
         &id,
-        json!({ "API_KEY": "hdr-s3cr3t" }),
+        json!({ "API_KEY": "hdr-s3cr3t", "HOOK_TOKEN": "p4th-s3cr3t" }),
         &cookie,
         &csrf,
     )
@@ -1629,7 +1629,9 @@ async fn test_response_has_no_secret_values() {
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(body["servers"][0]["status"], "error", "{body}");
     assert!(body["servers"][0]["error"].is_string(), "{body}");
-    assert!(!body.to_string().contains("hdr-s3cr3t"), "{body}");
+    for leaked in ["hdr-s3cr3t", "p4th-s3cr3t", "127.0.0.1:9", "/hooks/"] {
+        assert!(!body.to_string().contains(leaked), "{leaked} in {body}");
+    }
     let mut keys = Vec::new();
     collect_keys(&body, &mut keys);
     for secret in ["command", "args", "env", "url", "headers", "transport"] {

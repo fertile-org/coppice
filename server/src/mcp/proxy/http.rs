@@ -53,26 +53,39 @@ impl McpTransport for HttpTransport {
     }
 }
 
-/// Scheme, host, port, and path only — no userinfo, query, or fragment.
-fn display_url(url: &Url) -> String {
-    let mut shown = format!("{}://{}", url.scheme(), url.host_str().unwrap_or_default());
-    if let Some(port) = url.port() {
-        shown.push_str(&format!(":{port}"));
-    }
-    shown.push_str(url.path());
-    shown
-}
+const SHOWN_URL: &str = "<server url>";
 
+/// Shorter host labels and path segments are too common to redact safely.
+const MIN_URL_PART_LEN: usize = 4;
+
+/// Any part of the URL may come from a setting, so none of it is shown.
 fn redactor(url: &str, headers: &BTreeMap<String, String>) -> Redactor {
     let mut redactor = headers
         .values()
-        .fold(Redactor::default(), |r, value| r.secret(value));
+        .fold(Redactor::default(), |r, value| r.secret(value))
+        .replace(url, SHOWN_URL);
     match Url::parse(url) {
         Ok(parsed) => {
-            let shown = display_url(&parsed);
+            let host = parsed.host_str().unwrap_or_default();
+            let authority = match parsed.port() {
+                Some(port) => format!("{host}:{port}"),
+                None => host.to_string(),
+            };
+            let origin = format!("{}://{authority}", parsed.scheme());
+            let host_path = format!("{authority}{}", parsed.path());
             redactor = redactor
-                .replace(url, &shown)
-                .replace(parsed.as_str(), &shown)
+                .replace(parsed.as_str(), SHOWN_URL)
+                .replace(&format!("{origin}{}", parsed.path()), SHOWN_URL)
+                .replace(&origin, SHOWN_URL)
+                .replace(&host_path, SHOWN_URL)
+                .replace(&authority, SHOWN_URL);
+            let normalized = parsed.path_segments().into_iter().flatten();
+            for part in normalized.chain([host]).chain(raw_url_parts(url)) {
+                if part.len() >= MIN_URL_PART_LEN {
+                    redactor = redactor.replace(part, SHOWN_URL);
+                }
+            }
+            redactor = redactor
                 .secret(parsed.username())
                 .secret(parsed.password().unwrap_or_default())
                 .secret(parsed.query().unwrap_or_default())
@@ -81,6 +94,17 @@ fn redactor(url: &str, headers: &BTreeMap<String, String>) -> Redactor {
         Err(_) => redactor = redactor.secret(url),
     }
     redactor
+}
+
+/// Host and path segments as written, before URL normalization re-encodes them.
+fn raw_url_parts(url: &str) -> impl Iterator<Item = &str> {
+    let rest = url.split_once("://").map_or(url, |(_, rest)| rest);
+    let rest = rest.split(['?', '#']).next().unwrap_or_default();
+    let rest = rest.rsplit_once('@').map_or(rest, |(_, host)| host);
+    rest.split('/').flat_map(|part| {
+        let host = part.rsplit_once(':').map(|(host, _)| host);
+        [Some(part), host].into_iter().flatten()
+    })
 }
 
 #[cfg(test)]
@@ -97,8 +121,29 @@ mod tests {
         ));
         assert_eq!(
             message,
-            "error sending request for url (https://example.com:8443/mcp/v1): \
+            "error sending request for url (<server url>): \
              auth [redacted] rejected for [redacted]"
         );
+    }
+
+    #[test]
+    fn hides_every_part_of_the_url() {
+        let url = "https://hooks.example.com:8443/hooks/p4th s3cr3t/mcp";
+        let redactor = redactor(url, &BTreeMap::new());
+        for leaked in [
+            url,
+            "https://hooks.example.com:8443/hooks/p4th%20s3cr3t/mcp",
+            "hooks.example.com:8443/hooks/p4th%20s3cr3t/mcp",
+            "https://hooks.example.com:8443",
+            "connect to hooks.example.com failed",
+            "segment p4th s3cr3t",
+            "segment p4th%20s3cr3t",
+            "segment hooks",
+        ] {
+            let message = redactor.apply(leaked);
+            for part in ["hooks", "example.com", "p4th", "s3cr3t", "8443"] {
+                assert!(!message.contains(part), "{part} leaked in {message}");
+            }
+        }
     }
 }

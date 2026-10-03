@@ -1,1 +1,1 @@
-{"mcpServers":{"api":{"type":"http","url":"http://127.0.0.1:9/mcp","headers":{"Authorization":"Bearer ${API_KEY}"}}}}
+{"mcpServers":{"api":{"type":"http","url":"http://127.0.0.1:9/hooks/${HOOK_TOKEN}/mcp","headers":{"Authorization":"Bearer ${API_KEY}"}}}}

@@ -303,9 +303,19 @@ async fn http_error_hides_header_value() {
         headers: map(&[("Authorization", "Bearer h-val")]),
     };
     assert_error_hides_secrets(&refused).await;
+
+    let path_secret = format!("http://127.0.0.1:{port}/hooks/p4th-s3cr3t/mcp");
+    let refused = ResolvedTransport::Http {
+        url: path_secret.clone(),
+        headers: map(&[("Authorization", "Bearer h-val")]),
+    };
+    let message = assert_error_hides_secrets(&refused).await;
+    for leaked in ["p4th-s3cr3t", path_secret.as_str(), "/hooks/"] {
+        assert!(!message.contains(leaked), "{leaked} leaked in {message}");
+    }
 }
 
-async fn assert_error_hides_secrets(spec: &ResolvedTransport) {
+async fn assert_error_hides_secrets(spec: &ResolvedTransport) -> String {
     let dir = tempfile::tempdir().unwrap();
     let message = match HttpTransport.connect(spec, dir.path()).await {
         Err(e) => e.to_string(),
@@ -317,6 +327,7 @@ async fn assert_error_hides_secrets(spec: &ResolvedTransport) {
     for secret in ["h-val", "u-pass", "q-secret", "user:"] {
         assert!(!message.contains(secret), "{secret} leaked in {message}");
     }
+    message
 }
 
 fn pool_spec(root: &Path) -> PoolServerSpec {

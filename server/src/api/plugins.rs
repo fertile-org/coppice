@@ -91,11 +91,13 @@ struct McpServerResponse {
 }
 
 #[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 struct PluginTestResponse {
     servers: Vec<ServerTestResponse>,
 }
 
 #[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 struct ServerTestResponse {
     name: String,
     kind: String,
