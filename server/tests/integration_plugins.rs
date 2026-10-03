@@ -1593,7 +1593,48 @@ async fn test_lists_tools_while_disabled() {
 
     let detail = get(&app, &format!("/api/plugins/{id}"), &cookie, &csrf).await;
     assert_eq!(detail["enabled"], false);
-    assert_eq!(detail["mcpServers"][0]["health"], "ready", "{detail}");
+    assert_eq!(detail["mcpServers"][0]["health"], "stopped", "{detail}");
+}
+
+#[tokio::test]
+async fn test_of_disabled_plugin_leaves_no_process_running() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    require_db!();
+    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("mcp-pid");
+    std::fs::create_dir_all(root.join(".claude-plugin")).unwrap();
+    std::fs::write(root.join(".claude-plugin/plugin.json"), r#"{"name":"mcp-pid"}"#).unwrap();
+    std::fs::write(
+        root.join(".mcp.json"),
+        json!({ "mcpServers": { "fake": {
+            "command": env!("CARGO_BIN_EXE_fake-mcp"),
+            "env": { "FAKE_MCP_PID_FILE": "${CLAUDE_PLUGIN_ROOT}/pid.txt" },
+        } } })
+        .to_string(),
+    )
+    .unwrap();
+    let dir_id = add_dir(&app, dir.path(), &cookie, &csrf).await["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let plugins = get(&app, "/api/plugins", &cookie, &csrf).await;
+    let id = find(&plugins, &dir_id, "mcp-pid")["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let (status, body) = post_test(&app, &id, &cookie, &csrf).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["servers"][0]["status"], "ok", "{body}");
+    let pid = std::fs::read_to_string(root.join("pid.txt")).unwrap();
+    let proc_path = Path::new("/proc").join(pid.trim());
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+    while proc_path.exists() {
+        assert!(std::time::Instant::now() < deadline, "tested server still running");
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    assert_eq!(fake_server_health(&state, &id), "stopped");
 }
 
 #[tokio::test]
@@ -1849,6 +1890,7 @@ async fn update_stops_plugin_servers() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{body}");
+    set_enabled(&app, &plugin_id, true, &cookie, &csrf).await;
     let (status, body) = post_test(&app, &plugin_id, &cookie, &csrf).await;
     assert_eq!(status, StatusCode::OK, "{body}");
     let detail = get(&app, &format!("/api/plugins/{plugin_id}"), &cookie, &csrf).await;

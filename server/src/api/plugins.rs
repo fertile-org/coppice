@@ -555,9 +555,13 @@ async fn test_plugin(
     Path(plugin_id): Path<Uuid>,
 ) -> Result<Json<PluginTestResponse>, ApiError> {
     let pool = pool_from_state(&state)?;
-    let results = PluginService::new(pool)
+    let service = PluginService::new(pool);
+    let results = service
         .test_servers(plugin_id, &state.secret_store, &state.plugin_mcp)
         .await?;
+    if !service.get_plugin(plugin_id).await?.enabled {
+        state.plugin_mcp.stop_plugin(plugin_id).await;
+    }
     Ok(Json(PluginTestResponse {
         servers: results.into_iter().map(server_test_response).collect(),
     }))

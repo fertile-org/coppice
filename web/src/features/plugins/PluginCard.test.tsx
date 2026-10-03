@@ -51,6 +51,9 @@ const testResult: PluginTestResult = {
   ],
 };
 
+const STDIO_WARNING =
+  "This plugin starts local MCP servers that run with the Coppice server's privileges until sandboxing lands (M11). Enable anyway?";
+
 const fetchMock = vi.fn();
 
 function json(body: unknown, status = 200) {
@@ -175,6 +178,40 @@ describe('PluginCard', () => {
     const init = callFor(`/api/plugins/${plugin.id}/test`);
     expect(init.method).toBe('POST');
     expect((init.headers as Record<string, string>)['X-CSRF-Token']).toBe('csrf-token');
+  });
+
+  it('testing a disabled stdio plugin asks first; cancel sends nothing', () => {
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
+    renderCard({ ...plugin, enabled: false });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Test' }));
+
+    expect(confirm).toHaveBeenCalledWith(STDIO_WARNING);
+    expect(fetchMock).not.toHaveBeenCalled();
+    confirm.mockRestore();
+  });
+
+  it('testing a disabled stdio plugin posts after confirmation', async () => {
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    renderCard({ ...plugin, enabled: false });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Test' }));
+
+    expect(await screen.findByTestId('plugin-test-results')).toBeVisible();
+    expect(confirm).toHaveBeenCalledWith(STDIO_WARNING);
+    expect(callFor(`/api/plugins/${plugin.id}/test`).method).toBe('POST');
+    confirm.mockRestore();
+  });
+
+  it('testing an enabled plugin does not confirm', async () => {
+    const confirm = vi.spyOn(window, 'confirm');
+    renderCard();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Test' }));
+
+    expect(await screen.findByTestId('plugin-test-results')).toBeVisible();
+    expect(confirm).not.toHaveBeenCalled();
+    confirm.mockRestore();
   });
 
   it('shows unsupported servers and test conflicts', async () => {

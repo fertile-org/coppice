@@ -20,6 +20,14 @@ import {
 const STDIO_WARNING =
   "This plugin starts local MCP servers that run with the Coppice server's privileges until sandboxing lands (M11). Enable anyway?";
 
+/** Starting a disabled plugin's servers (enable or Test) needs the admin's consent. */
+function confirmStart(plugin: Plugin): boolean {
+  if (plugin.enabled || !plugin.mcpServers.some((server) => server.kind === 'stdio')) {
+    return true;
+  }
+  return window.confirm(STDIO_WARNING);
+}
+
 function healthClass(health: PluginMcpServerHealth): string {
   switch (health) {
     case 'ready':
@@ -40,6 +48,7 @@ function McpServersSection({ plugin }: { plugin: Plugin }) {
   const testPlugin = useTestPlugin(plugin.id);
 
   async function handleTest() {
+    if (!confirmStart(plugin)) return;
     setError(null);
     testPlugin.reset();
     try {
@@ -119,13 +128,7 @@ export function PluginCard({ plugin }: PluginCardProps) {
 
   async function handleToggle() {
     setError(null);
-    if (
-      !plugin.enabled &&
-      plugin.mcpServers.some((server) => server.kind === 'stdio') &&
-      !window.confirm(STDIO_WARNING)
-    ) {
-      return;
-    }
+    if (!confirmStart(plugin)) return;
     try {
       await setEnabled.mutateAsync({ id: plugin.id, enabled: !plugin.enabled });
     } catch (err) {
