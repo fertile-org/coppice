@@ -39,6 +39,7 @@ function plugin(overrides: Partial<Plugin>): Plugin {
     enabled: true,
     skills: [],
     mcpServers: [],
+    settings: [],
     unsupported: [],
     ...overrides,
   };

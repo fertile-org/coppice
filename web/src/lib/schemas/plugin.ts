@@ -22,12 +22,30 @@ export const pluginSkillSchema = z.object({
 
 export type PluginSkill = z.infer<typeof pluginSkillSchema>;
 
+export const pluginMcpServerKindSchema = z
+  .enum(['stdio', 'http', 'sse', 'unknown'])
+  .catch('unknown');
+
+export const pluginMcpServerHealthSchema = z
+  .enum(['stopped', 'starting', 'ready', 'backoff', 'unhealthy'])
+  .catch('stopped');
+
+export type PluginMcpServerHealth = z.infer<typeof pluginMcpServerHealthSchema>;
+
 export const pluginMcpServerSchema = z.object({
   name: z.string(),
-  kind: z.enum(['stdio', 'http', 'sse', 'unknown']),
+  kind: pluginMcpServerKindSchema,
+  health: pluginMcpServerHealthSchema,
 });
 
 export type PluginMcpServer = z.infer<typeof pluginMcpServerSchema>;
+
+export const pluginSettingSchema = z.object({
+  key: z.string(),
+  configured: z.boolean(),
+});
+
+export type PluginSetting = z.infer<typeof pluginSettingSchema>;
 
 export const pluginSchema = z.object({
   id: z.string().uuid(),
@@ -45,10 +63,34 @@ export const pluginSchema = z.object({
   enabled: z.boolean(),
   skills: z.array(pluginSkillSchema),
   mcpServers: z.array(pluginMcpServerSchema),
+  settings: z.array(pluginSettingSchema).default([]),
   unsupported: z.array(z.string()),
 });
 
 export type Plugin = z.infer<typeof pluginSchema>;
+
+export const pluginTestToolSchema = z.object({
+  name: z.string(),
+  exposedName: z.string(),
+  description: z.string(),
+  readOnly: z.boolean(),
+});
+
+export const pluginTestServerSchema = z.object({
+  name: z.string(),
+  kind: pluginMcpServerKindSchema,
+  status: z.enum(['ok', 'error', 'unsupported']),
+  error: z.string().nullish(),
+  tools: z.array(pluginTestToolSchema).default([]),
+});
+
+export type PluginTestServer = z.infer<typeof pluginTestServerSchema>;
+
+export const pluginTestResultSchema = z.object({
+  servers: z.array(pluginTestServerSchema),
+});
+
+export type PluginTestResult = z.infer<typeof pluginTestResultSchema>;
 
 export const pluginInstallStatusSchema = z.enum(['running', 'succeeded', 'failed']);
 

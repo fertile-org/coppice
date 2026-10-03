@@ -54,9 +54,13 @@ const samplePlugin: Plugin = {
       error: null,
     },
   ],
-  mcpServers: [{ name: 'docs', kind: 'stdio' }],
+  mcpServers: [{ name: 'docs', kind: 'stdio', health: 'stopped' }],
+  settings: [],
   unsupported: ['commands', 'hooks'],
 };
+
+const STDIO_WARNING =
+  "This plugin starts local MCP servers that run with the Coppice server's privileges until sandboxing lands (M11). Enable anyway?";
 
 const shadowedPlugin: Plugin = {
   ...samplePlugin,
@@ -171,7 +175,41 @@ describe('PluginsPage', () => {
     );
   });
 
+  it('enabling plugin with stdio server asks for confirmation', async () => {
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
+    renderPage();
+
+    fireEvent.click(await screen.findByRole('switch', { name: 'Enable sample-plugin' }));
+
+    expect(confirm).toHaveBeenCalledWith(STDIO_WARNING);
+    expect(mocks.apiFetch).not.toHaveBeenCalledWith(
+      `/api/plugins/${samplePlugin.id}`,
+      expect.objectContaining({ method: 'PATCH' }),
+    );
+    confirm.mockRestore();
+  });
+
+  it('enabling plugin with only http servers does not confirm', async () => {
+    plugins = [
+      { ...samplePlugin, mcpServers: [{ name: 'docs', kind: 'http', health: 'stopped' }] },
+    ];
+    const confirm = vi.spyOn(window, 'confirm');
+    renderPage();
+
+    fireEvent.click(await screen.findByRole('switch', { name: 'Enable sample-plugin' }));
+
+    await waitFor(() =>
+      expect(mocks.apiFetch).toHaveBeenCalledWith(
+        `/api/plugins/${samplePlugin.id}`,
+        expect.objectContaining({ method: 'PATCH', body: JSON.stringify({ enabled: true }) }),
+      ),
+    );
+    expect(confirm).not.toHaveBeenCalled();
+    confirm.mockRestore();
+  });
+
   it('toggling enable sends PATCH', async () => {
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
     renderPage();
 
     fireEvent.click(await screen.findByRole('switch', { name: 'Enable sample-plugin' }));
@@ -185,6 +223,8 @@ describe('PluginsPage', () => {
         }),
       ),
     );
+    expect(confirm).toHaveBeenCalledWith(STDIO_WARNING);
+    confirm.mockRestore();
   });
 
   it('install posts git url and shows failure', async () => {

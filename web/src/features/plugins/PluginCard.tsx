@@ -1,10 +1,92 @@
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import { useState } from 'react';
 import { Button } from '../../components/ui/button';
-import type { Plugin, PluginStatus } from '../../lib/schemas/plugin';
+import type {
+  Plugin,
+  PluginMcpServerHealth,
+  PluginStatus,
+} from '../../lib/schemas/plugin';
 import { cn } from '../../lib/utils';
 import { parseApiErrorMessage } from '../../lib/api';
-import { usePluginInstall, useSetPluginEnabled, useUpdatePlugin } from './usePlugins';
+import { PluginSettingsForm } from './PluginSettingsForm';
+import { PluginTestResults } from './PluginTestResults';
+import {
+  usePluginInstall,
+  useSetPluginEnabled,
+  useTestPlugin,
+  useUpdatePlugin,
+} from './usePlugins';
+
+const STDIO_WARNING =
+  "This plugin starts local MCP servers that run with the Coppice server's privileges until sandboxing lands (M11). Enable anyway?";
+
+function healthClass(health: PluginMcpServerHealth): string {
+  switch (health) {
+    case 'ready':
+      return 'text-success';
+    case 'starting':
+      return 'text-info';
+    case 'backoff':
+      return 'text-warning';
+    case 'unhealthy':
+      return 'text-danger';
+    case 'stopped':
+      return 'text-text-muted';
+  }
+}
+
+function McpServersSection({ plugin }: { plugin: Plugin }) {
+  const [error, setError] = useState<string | null>(null);
+  const testPlugin = useTestPlugin(plugin.id);
+
+  async function handleTest() {
+    setError(null);
+    testPlugin.reset();
+    try {
+      await testPlugin.mutateAsync();
+    } catch (err) {
+      setError(parseApiErrorMessage(err, 'Test failed.'));
+    }
+  }
+
+  return (
+    <div className="mt-3 border-t border-border pt-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="font-body text-xs font-medium text-text-secondary">MCP servers</p>
+        <Button
+          type="button"
+          variant="secondary"
+          size="sm"
+          loading={testPlugin.isPending}
+          onClick={() => void handleTest()}
+        >
+          Test
+        </Button>
+      </div>
+      <ul className="mt-2 space-y-1">
+        {plugin.mcpServers.map((server) => (
+          <li
+            key={server.name}
+            data-testid={`plugin-mcp-server-${server.name}`}
+            className="flex items-center gap-2"
+          >
+            <span className="font-mono text-xs text-text-primary">{server.name}</span>
+            <span className="font-body text-xs text-text-muted">{server.kind}</span>
+            <span className={cn('font-body text-xs', healthClass(server.health))}>
+              {server.health}
+            </span>
+          </li>
+        ))}
+      </ul>
+      {testPlugin.data && <PluginTestResults result={testPlugin.data} />}
+      {error && (
+        <p role="alert" className="mt-2 font-body text-xs text-danger">
+          {error}
+        </p>
+      )}
+    </div>
+  );
+}
 
 function statusPillClass(status: PluginStatus): string {
   const base =
@@ -37,6 +119,13 @@ export function PluginCard({ plugin }: PluginCardProps) {
 
   async function handleToggle() {
     setError(null);
+    if (
+      !plugin.enabled &&
+      plugin.mcpServers.some((server) => server.kind === 'stdio') &&
+      !window.confirm(STDIO_WARNING)
+    ) {
+      return;
+    }
     try {
       await setEnabled.mutateAsync({ id: plugin.id, enabled: !plugin.enabled });
     } catch (err) {
@@ -143,6 +232,11 @@ export function PluginCard({ plugin }: PluginCardProps) {
         <p role="alert" className="mt-2 font-body text-xs text-danger">
           {error}
         </p>
+      )}
+
+      {plugin.mcpServers.length > 0 && <McpServersSection plugin={plugin} />}
+      {plugin.settings.length > 0 && (
+        <PluginSettingsForm pluginId={plugin.id} settings={plugin.settings} />
       )}
 
       {plugin.skills.length > 0 && (

@@ -6,10 +6,12 @@ import {
   pluginDirSchema,
   pluginInstallSchema,
   pluginSchema,
+  pluginTestResultSchema,
   type InstallPluginInput,
   type Plugin,
   type PluginDir,
   type PluginInstall,
+  type PluginTestResult,
 } from '../../lib/schemas/plugin';
 
 export const PLUGIN_DIRS_QUERY_KEY = ['plugin-dirs'] as const;
@@ -87,6 +89,23 @@ async function setPluginEnabled({
     body: JSON.stringify({ enabled }),
   });
   return pluginSchema.parse(await res.json());
+}
+
+async function setPluginSettings(
+  id: string,
+  values: Record<string, string>,
+): Promise<Plugin> {
+  const res = await apiFetch(`/api/plugins/${id}/settings`, {
+    method: 'PUT',
+    headers: JSON_HEADERS,
+    body: JSON.stringify({ values }),
+  });
+  return pluginSchema.parse(await res.json());
+}
+
+async function testPlugin(id: string): Promise<PluginTestResult> {
+  const res = await apiFetch(`/api/plugins/${id}/test`, { method: 'POST' });
+  return pluginTestResultSchema.parse(await res.json());
 }
 
 async function installPlugin(body: InstallPluginInput): Promise<PluginInstall> {
@@ -183,6 +202,26 @@ export function useSetPluginEnabled() {
   return useMutation({
     mutationFn: setPluginEnabled,
     onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: PLUGINS_QUERY_KEY });
+    },
+  });
+}
+
+export function useSetPluginSettings(pluginId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (values: Record<string, string>) => setPluginSettings(pluginId, values),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: PLUGINS_QUERY_KEY });
+    },
+  });
+}
+
+export function useTestPlugin(pluginId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () => testPlugin(pluginId),
+    onSettled: () => {
       void queryClient.invalidateQueries({ queryKey: PLUGINS_QUERY_KEY });
     },
   });
