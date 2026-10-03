@@ -637,6 +637,34 @@ async fn settings_empty_value_clears() {
 }
 
 #[tokio::test]
+async fn deleting_plugin_deletes_its_setting_secrets() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    require_db!();
+    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
+    let pool = state.db.clone().unwrap();
+    let (_dir, id) = inline_mcp_plugin(&app, &cookie, &csrf).await;
+    let (status, _) = put_settings(
+        &app,
+        &id,
+        json!({ "API_TOKEN": "tok", "ROOT": "/r" }),
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let pattern = format!("plugin-setting-{id}-%");
+    let secrets = "SELECT count(*) FROM secrets WHERE name LIKE $1";
+    assert_eq!(count(&pool, secrets, &pattern).await, 2);
+
+    sqlx::query("DELETE FROM plugins WHERE id = $1")
+        .bind(id.parse::<uuid::Uuid>().unwrap())
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert_eq!(count(&pool, secrets, &pattern).await, 0);
+}
+
+#[tokio::test]
 async fn settings_unknown_key_rejected() {
     let _guard = common::DB_TEST_LOCK.lock().await;
     require_db!();
