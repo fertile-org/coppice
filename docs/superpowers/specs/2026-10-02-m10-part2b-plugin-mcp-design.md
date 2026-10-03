@@ -1,6 +1,6 @@
 # M10 Part 2b — Plugin MCP Proxy and Observability Design
 
-**Status:** Approved (2026-10-02)  
+**Status:** Implemented (approved 2026-10-02; acceptance verified 2026-10-03)  
 **Parent:** [M10 Plugins design](2026-09-29-m10-plugins-design.md) — "Plugin MCP proxy", steps 6–7  
 **Builds on:** [Connector and tool-source foundations](2026-10-01-connector-and-tool-source-foundations-design.md) (merged)
 
@@ -85,10 +85,10 @@ Per-run plugin server instances, SSE transport, sandboxing and secret scoping (M
 
 ## Acceptance criteria
 
-- [ ] Plugin settings encrypted, write-only, keys derived from placeholders
-- [ ] stdio and HTTP plugin MCP servers proxied as `<plugin>__<tool>`, shared across runs, with restart/backoff, unhealthy, idle shutdown, list-changed refresh
-- [ ] A hung or failing plugin server never blocks core tools
-- [ ] Chat profiles see only `readOnlyHint` plugin tools; compaction sees none
-- [ ] Test button and stdio privilege warning
-- [ ] Tool calls and Skills Used visible per run; gateway tool names rendered in Claude, Cursor, Codex, and OpenCode consoles
-- [ ] `make test`, clippy, `make web-test`, `make e2e-smoke-m10`, `make e2e-smoke-m03` pass
+- [x] Plugin settings encrypted, write-only, keys derived from placeholders
+- [x] stdio and HTTP plugin MCP servers proxied as `<plugin>__<tool>`, shared across runs, with restart/backoff, unhealthy, idle shutdown, list-changed refresh
+- [x] A hung or failing plugin server never blocks core tools
+- [x] Chat profiles see only `readOnlyHint` plugin tools; compaction sees none
+- [x] Test button and stdio privilege warning
+- [x] Tool calls and Skills Used visible per run; gateway tool names rendered in Claude, Cursor, Codex, and OpenCode consoles
+- [x] `make test`, clippy, `make web-test`, `make e2e-smoke-m10`, `make e2e-smoke-m03` pass

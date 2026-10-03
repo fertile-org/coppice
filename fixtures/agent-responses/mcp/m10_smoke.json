@@ -1,0 +1,17 @@
+{
+  "status": "done",
+  "summary": "via stdout",
+  "changedFiles": [],
+  "testsRun": [],
+  "mentionAgents": [],
+  "blockers": [],
+  "toolCalls": [
+    { "tool": "ticket_get", "args": {} },
+    { "tool": "skill_load", "args": { "name": "m10-smoke:greet" } },
+    { "tool": "m10-smoke__echo", "args": { "text": "hi" } },
+    {
+      "tool": "result_submit",
+      "args": { "status": "done", "summary": "M10 smoke greeted via plugin tool.", "mentionAgents": [] }
+    }
+  ]
+}

@@ -125,7 +125,7 @@ async function api(method, path, { cookie, csrfToken, body } = {}) {
 async function createBoard(auth) {
   const res = await api('POST', '/api/boards', {
     ...auth,
-    body: { name: 'M03 Smoke Board' },
+    body: { name: `M03 Smoke Board ${Date.now().toString(36)}` },
   });
 
   if (res.status !== 201) {

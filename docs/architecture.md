@@ -129,11 +129,12 @@ mcp/source.rs      ToolSource trait; CoreToolSource, SkillToolSource
 mcp/registry.rs    ToolRegistry: merge sources, profile filter, denial, limits, call logging
 mcp/host.rs        RunToolHost: one token's view of the registry (ToolHost impl)
 mcp/wiring.rs      McpServerSpec rendered per connector wiring style
+mcp/proxy/         plugin MCP servers: McpTransport seam, stdio + HTTP, shared pool, PluginMcpSource
 mcp/tools/         ticket_get, ticket_comments, ticket_runs, board_agents, knowledge_search,
                    comment_post, skill_list, skill_load, result_submit
 ```
 
-**Tool sources.** Tools come from an ordered list of `ToolSource`s (`kind`, async `list(scope)`, `call(ctx, tool, args)` → `ToolResult` of text/image content blocks). `ToolRegistry::builtin()` (held in `AppState::tools`) registers Core, then Skill; plugin MCP tools become a third source in M10 Part 2b. `ToolRegistry::call(state, scope, name, args)` is the only router: it merges sources (duplicate name → first wins, warned once), drops non-read-only tools for `human_chat` / `conversation` except `result_submit`, denies unknown names with `denied: tool "<name>" is not available for this run`, applies `mcp.call_timeout_secs` and `mcp.max_output_bytes`, and logs each call to `run_tool_calls` with `source` (`core` / `skill` / `plugin`) and `plugin_id` for plugin-owned tools.
+**Tool sources.** Tools come from an ordered list of `ToolSource`s (`kind`, async `list(scope)`, `call(ctx, tool, args)` → `ToolResult` of text/image content blocks). `ToolRegistry::builtin()` registers Core, then Skill; `AppState::build_tool_registry` (held in `AppState::tools`) adds `PluginMcpSource` third when a database is present. `ToolRegistry` bounds each source's `list` by a list timeout (`[plugins] mcp_list_timeout_secs`, default 10 s): a source that times out contributes no tools for that request and is logged, while core tools are unaffected. `ToolRegistry::call(state, scope, name, args)` is the only router: it merges sources (duplicate name → first wins, warned once), drops non-read-only tools for `human_chat` / `conversation` except `result_submit`, denies unknown names with `denied: tool "<name>" is not available for this run`, applies `mcp.call_timeout_secs` and `mcp.max_output_bytes`, and logs each call to `run_tool_calls` with `source` (`core` / `skill` / `plugin`) and `plugin_id` for plugin-owned tools.
 
 ### Adding a tool source
 
@@ -144,6 +145,39 @@ The gateway is authenticated by a per-run bearer token, minted when the run star
 Connectors receive the token as `COPPICE_MCP_TOKEN` and configure the gateway per run only — flags, per-process env, or a file under `<artifacts_dir>/runs/<run id>/`. Never the worktree, a registered repo checkout, or the operator's global CLI config. A connector that cannot be configured fails with `mcp_unavailable`. Per-connector mechanisms and verification status: [docs/providers/README.md](providers/README.md).
 
 Agents finish with `result_submit`; a submitted result wins over a final JSON blob in the transcript.
+
+**Observability.** `GET /api/agent-runs/{id}/tool-calls` returns the run's `run_tool_calls` oldest first (`tool`, `source`, `pluginId`, `pluginName`, `status`, `error`, `durationMs`, `argsSummary`) plus `skillsUsed` (distinct `name` of successful `skill_load` calls, first-use order). The ticket Runs tab shows them in the run row's **Tools & Skills** tab next to **Knowledge Used**. Live consoles title gateway calls `coppice · <tool>` or `<plugin> · <tool>` using `coppice_connectors::gateway_tool` and the connector's `ToolNameStyle`.
+
+### Plugin MCP proxy
+
+Plugin MCP servers (`.mcp.json` stdio and streamable HTTP entries) are proxied through the gateway as `<plugin>__<tool>`. `rmcp` is used only as a client inside the transports.
+
+```text
+mcp/proxy/transport.rs  McpTransport (kind, connect) → McpConnection; Transports registry; ProxyError
+mcp/proxy/stdio.rs      StdioTransport: child process, minimal env, stderr → tracing (coppice::plugin_mcp)
+mcp/proxy/http.rs       HttpTransport: streamable HTTP with resolved headers
+mcp/proxy/pool.rs       McpServerPool: one shared instance per (plugin_id, server) across runs
+mcp/proxy/source.rs     PluginMcpSource (third ToolSource) + DbPluginServerCatalog
+mcp/proxy/naming.rs     exposed tool names
+plugins/placeholders.rs pure ${VAR} resolution (resolve, placeholder_keys)
+services/plugin_settings_service.rs  encrypted, write-only plugin settings
+```
+
+- **Pool.** Lazy start on first `tools` / `call` / `test`, in a spawned task bounded by `mcp_start_timeout_secs` (default 20) so a caller's timeout never cancels a start. Each instance is keyed by a fingerprint of the resolved transport; a different fingerprint (settings or manifest changed) restarts it. Health: `stopped | starting | ready | backoff | unhealthy`. A failed start or closed connection is a failure with exponential backoff (1 s doubling to 60 s); three in a row → `unhealthy` (tools hidden, calls fail) until a Test or a fingerprint change. A placeholder error is `unhealthy` at once. The tool cache refreshes on `notifications/tools/list_changed` and on restart. A reaper stops instances idle for `mcp_idle_shutdown_secs` (default 600). Disabling or git-updating a plugin calls `stop_plugin`. Concurrent calls share one connection.
+- **Source.** `PluginMcpSource` lists only plugins in the token's `plugin_ids` snapshot that are still enabled and `ok`, with decrypted settings; nothing for `knowledge_compaction`. Unsupported, unhealthy, and failing servers are skipped (logged). Descriptions and `readOnlyHint` pass through, so chat profiles see only read-only plugin tools via the registry's filter. Calls are logged with `source = plugin` and `plugin_id`. A call to a down server returns `plugin "<name>" unavailable` (plus `: missing setting "X"` for placeholder errors).
+- **Names.** Each part of `<plugin>__<tool>` is sanitized to `[A-Za-z0-9_-]`; names over 50 chars become the first 41 chars + `_` + 8 hex chars of SHA-256 of the unsanitized name, so `mcp__coppice__<name>` stays within 64.
+- **Settings.** Keys are the `${VAR}` names used in an entry's command, args, env values, url, and header values (excluding `CLAUDE_PLUGIN_ROOT`); unknown keys are rejected. Values are stored with `SecretService` as `plugin-setting-<plugin_id>-<key>` and are write-only: the API returns `settings: [{ key, configured }]`.
+- **Placeholders.** Resolved only when a server starts; stored manifests keep them. `${CLAUDE_PLUGIN_ROOT}` → plugin root. `${NAME}` / `${NAME:-default}` → plugin setting, else server environment (never names starting with `COPPICE_`, nor `DATABASE_URL` / `SECRETS_MASTER_KEY`), else `default`, else the start fails with `missing setting "NAME"`. An unterminated `${` is kept verbatim.
+- **stdio children.** Environment cleared, then `PATH`, `HOME`, `LANG`, `TMPDIR` from the server when set, then the entry's resolved `env`; cwd is the plugin root; `kill_on_drop`. They run with the server's privileges until M11, so enabling a plugin with stdio servers asks for confirmation.
+- **No secret leaves the server.** Plugin responses, Test results, tool results, logs, and errors never contain command, args, env, URL, header, or setting values (`ResolvedTransport`'s `Debug` prints kind and key names only).
+- **Test.** `POST /api/plugins/{id}/test` (admin, allowed while disabled) restarts every server of the plugin and returns per-server `status` (`ok | error | unsupported`) and tools; success clears `unhealthy`. Plugin responses carry `mcpServers[].health`.
+
+### Adding an MCP transport
+
+1. Implement `McpTransport` (`kind()`, `connect(spec, cwd)` completing the MCP `initialize` handshake) and its `McpConnection` in `mcp/proxy/`. Error text must never include resolved env values, header values, or credentialed URLs.
+2. Register it in `Transports::builtin()` (`mcp/proxy/transport.rs`).
+3. If the kind is new to manifests, add the variant to `McpServerTransport` (`plugins/capability.rs`, parsed from `.mcp.json`) and to `ResolvedTransport` + `resolve` / `transport_values` (`plugins/placeholders.rs`); the pool picks the transport by `ResolvedTransport::kind()`.
+4. Test it against a loopback stub server, as `server/tests/integration_mcp_transport.rs` does for stdio (`server/tests/support/fake_mcp.rs`) and HTTP — no network beyond loopback.
 
 ## Plugins and skills (M10)
 

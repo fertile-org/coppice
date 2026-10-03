@@ -1,6 +1,6 @@
 # M10 Plugins Design
 
-**Status:** Approved — Part 1 (steps 1–4), Part 2a, and the foundations merged; Part 2b designed in [Part 2b design](2026-10-02-m10-part2b-plugin-mcp-design.md)  
+**Status:** Approved — Part 1 (steps 1–4), Part 2a, the foundations, and [Part 2b](2026-10-02-m10-part2b-plugin-mcp-design.md) (steps 6–7) implemented. Remaining: live verification of the `claude-code`, `codex`, and `kilo-code` wiring (manual acceptance)  
 **Date:** 2026-09-29  
 **Owner/reviewer:** Technical Lead  
 **Milestone:** [M10 — Plugins](../../milestones/M10-plugins.md)
@@ -97,7 +97,7 @@ A plugin directory is scanned at depth 0 (the directory itself is a plugin) and 
 ### MCP servers (`.mcp.json`)
 
 - Supported entries: stdio (`command`, `args`, `env`) and remote (`type: http` / `url`, `headers`). SSE-only remotes are listed as unsupported.
-- Placeholder substitution: `${CLAUDE_PLUGIN_ROOT}` → plugin path; `${VAR}` → plugin setting `VAR`, else server environment `VAR`, else the server fails to start with a clear error. *Amended 2026-10-02:* the server-environment fallback excludes `COPPICE_*`, `DATABASE_URL`, and `SECRETS_MASTER_KEY`, and stdio children get a minimal environment — see [Part 2b design](2026-10-02-m10-part2b-plugin-mcp-design.md).
+- Placeholder substitution: `${CLAUDE_PLUGIN_ROOT}` → plugin path; `${VAR}` → plugin setting `VAR`, else server environment `VAR`, else the server fails to start with a clear error. *Amended 2026-10-02:* the server-environment fallback excludes `COPPICE_*`, `DATABASE_URL`, and `SECRETS_MASTER_KEY`; `${VAR:-default}` uses `default` when both are absent; the error is `missing setting "VAR"`; stdio children get a minimal environment (`PATH`, `HOME`, `LANG`, `TMPDIR` plus the entry's `env`) — see [Part 2b design](2026-10-02-m10-part2b-plugin-mcp-design.md).
 
 ### Unsupported parts
 

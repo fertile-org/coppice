@@ -45,13 +45,15 @@ Today each run gets a long `context.md` that pre-loads ticket data and spells ou
 - [ ] Design spec + implementation plan committed; connector verification recorded
 - [x] Plugin dirs, scan, git install, enable, agent assignment work via UI and API
 - [x] Claude Code / Cursor format plugins and skills-only folders load unchanged; unsupported parts listed
-- [ ] `/mcp` gateway with per-run tokens; core tools and `result_submit` per profile matrix
-- [ ] Plugin MCP servers proxied with namespacing, health, restart, settings
+- [x] `/mcp` gateway with per-run tokens; core tools and `result_submit` per profile matrix
+- [x] Plugin MCP servers proxied with namespacing, health, restart, settings
 - [ ] All six connectors run tool-first; legacy fat context removed
-- [ ] `full` context ≥50% smaller than baseline on fixture tickets
-- [ ] Knowledge Used, Skills Used, and tool calls visible in Agent Run detail
+- [x] `full` context ≥50% smaller than baseline on fixture tickets
+- [x] Knowledge Used, Skills Used, and tool calls visible in Agent Run detail
 - [ ] M05 / M06 / M09 behavior unchanged; existing smokes pass
-- [ ] CI mock path green; `make e2e-smoke-m10` passes
+- [x] CI mock path green; `make e2e-smoke-m10` passes
+
+Open (2026-10-03): live verification of the `claude-code`, `codex`, and `kilo-code` gateway wiring needs their CLIs (only `cursor` and `opencode` are verified). Of the existing smokes, `make e2e-smoke-m04` and `make e2e-smoke-m05` fail on a reused database (auto-start races the explicit run start; handoff picks an older same-key agent); the others pass.
 
 ## References
 

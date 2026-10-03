@@ -117,6 +117,14 @@ make e2e-smoke-m06-knowledge    # governance → Done ticket → agent compactio
 
 Both use the default `deploy/docker-compose.yml` stack. The knowledge smoke recreates the server with `MOCK_AGENT_RESPONSE` cleared so agent-keyed fixtures apply (`backend_engineer/compact_knowledge.json` for the compactor; `m06-knowledge-search-worker/work_on_ticket.json` for a preset-less worker agent whose run calls `knowledge_search` through the gateway at `http://127.0.0.1:5000/mcp`, inside the server container). Knowledge is no longer injected into the run context, so usage is logged only by that tool call. It configures the compaction agent, moves a ticket to Done, triggers or waits for compaction, approves the candidate, and restores the previous setting. Compaction integration tests live in `server/tests/integration_knowledge_compaction.rs` and use the root `compact_knowledge_*.json` fixtures for empty, invalid-source, and malformed output.
 
+M10 plugin MCP smoke:
+
+```bash
+make e2e-smoke-m10   # plugin dir → setting → Test → enable → assign → mock run → tool-call log
+```
+
+It recreates the server with `MOCK_AGENT_RESPONSE=mcp/m10_smoke`, adds `/app/fixtures/plugins/m10-smoke` (baked into the server image) as a plugin dir, and runs a ticket whose mock run calls `ticket_get`, `skill_load` (`m10-smoke:greet`), `m10-smoke__echo` (a `node` stdio MCP server), and `result_submit`; it then checks all four are `ok` in `GET /api/agent-runs/{id}/tool-calls`, with `source = plugin` for the echo call. It is rerunnable on an existing database (timestamped board and agent names).
+
 The supported 10,000-eligible-row retrieval envelope has a separate, non-CI
 default-Compose benchmark. It seeds rows inside a rolled-back transaction, runs
 the production retrieval query 20 times after warmup, and fails unless measured

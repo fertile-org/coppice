@@ -13,7 +13,7 @@ BOOTSTRAP_PASSWORD = changeme
 export COPPICE_UID ?= $(shell id -u)
 export COPPICE_GID ?= $(shell id -g)
 
-.PHONY: compose-up compose-down compose-local-up compose-local-down server server-dev test test-unit test-smoke test-pg-reset clippy clean migrate bootstrap web-install web-test web-dev web-build desktop desktop-test e2e-smoke e2e-smoke-m03 e2e-smoke-m04 e2e-smoke-m05 e2e-smoke-m06 e2e-smoke-m06-knowledge e2e-smoke-m09 benchmark-m06-knowledge-retrieval release-tar
+.PHONY: compose-up compose-down compose-local-up compose-local-down server server-dev test test-unit test-smoke test-pg-reset clippy clean migrate bootstrap web-install web-test web-dev web-build desktop desktop-test e2e-smoke e2e-smoke-m03 e2e-smoke-m04 e2e-smoke-m05 e2e-smoke-m06 e2e-smoke-m06-knowledge e2e-smoke-m09 e2e-smoke-m10 benchmark-m06-knowledge-retrieval release-tar
 
 CARGO_TEST = cargo test --features embedded-test-db
 
@@ -105,6 +105,7 @@ e2e-smoke:
 
 e2e-smoke-m03:
 	$(MAKE) compose-up
+	MOCK_AGENT_RESPONSE=done WORKFLOW_AUTO_START_RUNS=false $(COMPOSE) up -d --force-recreate --no-deps server
 	$(SMOKE_REPO_SETUP)
 	node e2e/smoke/m03-agent-run.mjs
 
@@ -134,6 +135,12 @@ e2e-smoke-m09:
 	$(MAKE) compose-up
 	MOCK_AGENT_RESPONSE=backend_engineer/chat_turn $(COMPOSE) up -d --force-recreate --no-deps server
 	node e2e/smoke/m09-chat.mjs
+
+e2e-smoke-m10:
+	$(MAKE) compose-up
+	MOCK_AGENT_RESPONSE=mcp/m10_smoke WORKFLOW_AUTO_START_RUNS=false $(COMPOSE) up -d --force-recreate --no-deps server
+	$(SMOKE_REPO_SETUP_IF_MISSING)
+	node e2e/smoke/m10-plugins.mjs
 
 benchmark-m06-knowledge-retrieval:
 	$(MAKE) compose-up

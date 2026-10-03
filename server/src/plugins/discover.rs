@@ -70,6 +70,7 @@ mod tests {
         let found = discover(&fixtures()).unwrap();
         let expected = [
             "inline-mcp",
+            "m10-smoke",
             "mcp-fake",
             "mcp-fake-slow",
             "mcp-http",

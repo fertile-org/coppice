@@ -80,7 +80,19 @@ Verify an unverified row when its CLI is first available: run one ticket and con
 
 **OpenCode per-run server.** Each run (and each chat turn) spawns its own `opencode serve` on a free port on `serve_hostname`, with `OPENCODE_CONFIG` pointing at `<artifacts_dir>/runs/<run id>/opencode.json` (runs without a gateway token, such as drafts, use a temp file). The process is killed when the run ends, is cancelled, or fails, and on server shutdown. `serve_port` is ignored. Sessions live in OpenCode's shared data dir, so a later run's process resumes an existing session id. A per-run server does not survive a Coppice restart, so active OpenCode runs are marked interrupted on startup.
 
-Design: [M10 plugins](../superpowers/specs/2026-09-29-m10-plugins-design.md).
+**Plugin tools.** Plugin MCP servers are proxied through the same `coppice` server as `<plugin>__<tool>`, so connectors need no per-plugin wiring. See [architecture.md § Plugin MCP proxy](../architecture.md#plugin-mcp-proxy).
+
+**Console tool titles.** Each live console renders gateway calls as `coppice · <tool>` for core tools and `<plugin> · <tool>` for plugin tools. The connector's descriptor `mcp_tool_names` (`ToolNameStyle`) says how its CLI spells gateway tool names; `coppice_connectors::gateway_tool` strips that prefix and splits plugin from tool on the first `__`. A new connector's console needs only the right style — no console code.
+
+| `ToolNameStyle` | CLI spelling | Connectors |
+|-----------------|--------------|------------|
+| `McpDoubleUnderscore` | `mcp__coppice__<tool>` | `claude-code` |
+| `Dash` | `coppice-<tool>` | `cursor` |
+| `Underscore` | `coppice_<tool>` | `opencode`, `kilo-code` (Kilo emits no tool events) |
+| `ServerToolFields` | separate `server` / `tool` fields | `codex` |
+| `None` | — | `mock` |
+
+Design: [M10 plugins](../superpowers/specs/2026-09-29-m10-plugins-design.md), [Part 2b plugin MCP](../superpowers/specs/2026-10-02-m10-part2b-plugin-mcp-design.md).
 
 ## Agent Chat multi-turn (provider session resume)
 
