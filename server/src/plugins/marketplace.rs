@@ -2,7 +2,7 @@ use crate::plugins::builtin::BUILTIN_PLUGIN;
 use crate::plugins::capability::{MARKETPLACE_JSON, PLUGIN_JSON};
 use crate::plugins::discover::Discovered;
 use crate::plugins::manifest::{
-    is_valid_plugin_name, parse_plugin, ExternalSource, MarketplaceRef, PluginLayout,
+    is_valid_plugin_name, parse_plugin_named, ExternalSource, MarketplaceRef, PluginLayout,
     PluginManifest,
 };
 use crate::plugins::skill_walk::has_skills_package;
@@ -12,7 +12,8 @@ use std::path::{Component, Path};
 const ESCAPES_REPO: &str = "source must stay inside the repository";
 
 /// One row per `plugins` entry of `<folder>/.claude-plugin/marketplace.json`.
-/// Rows are named after their entry; entries are never expanded as marketplaces.
+/// In-repo rows take the target's `plugin.json` name, else the entry name;
+/// entries are never expanded as marketplaces.
 pub fn expand_marketplace(folder: &Path, folder_rel: &str) -> Vec<Discovered> {
     let (market, entries) = match read_marketplace(folder) {
         Ok(parsed) => parsed,
@@ -78,13 +79,12 @@ fn expand_entry(
             let Some(rel) = normalize_source(source) else {
                 return row(remote_rel, Err(ESCAPES_REPO.into()));
             };
-            match in_repo_manifest(folder, &rel) {
+            match in_repo_manifest(folder, &rel, &name) {
                 Ok(mut manifest) => {
-                    manifest.name = name.clone();
                     manifest.marketplace = Some(market.clone());
                     Discovered {
                         rel_path: join_rel(folder_rel, &rel),
-                        name: name.clone(),
+                        name: manifest.name.clone(),
                         result: Ok(manifest),
                     }
                 }
@@ -139,7 +139,7 @@ fn join_rel(folder_rel: &str, rel: &str) -> String {
     }
 }
 
-fn in_repo_manifest(folder: &Path, rel: &str) -> Result<PluginManifest, String> {
+fn in_repo_manifest(folder: &Path, rel: &str, entry_name: &str) -> Result<PluginManifest, String> {
     let target = folder.join(rel);
     if !target.is_dir() {
         return Err("source path does not exist".into());
@@ -154,7 +154,7 @@ fn in_repo_manifest(folder: &Path, rel: &str) -> Result<PluginManifest, String> 
     if !target.join(PLUGIN_JSON).is_file() && !has_skills_package(&target) {
         return Err("no plugin or skills found at source".into());
     }
-    parse_plugin(&target)
+    parse_plugin_named(&target, Some(entry_name))
 }
 
 fn external_source(source: &Map<String, Value>) -> ExternalSource {
@@ -213,6 +213,7 @@ mod tests {
     use crate::plugins::capability::{MARKETPLACE_JSON, PLUGIN_JSON};
     use crate::plugins::discover::discover;
     use crate::plugins::manifest::{ExternalSource, PluginLayout};
+    use crate::plugins::skills::PluginSkillSet;
     use std::path::PathBuf;
 
     fn fixture(name: &str) -> PathBuf {
@@ -445,6 +446,47 @@ mod tests {
             err("m#nosrc"),
             "marketplace entry \"nosrc\": source must be a path or an object"
         );
+    }
+
+    #[test]
+    fn plugin_json_name_wins_over_entry_name() {
+        let dir = tempfile::tempdir().unwrap();
+        let folder = dir.path().join("m");
+        write(&folder.join("p").join(PLUGIN_JSON), r#"{"name":"foo"}"#);
+        write_skill(&folder.join("p/skills/s"), "s");
+        market(
+            &folder,
+            serde_json::json!([{ "name": "bar", "source": "./p" }]),
+        );
+        let rows = expand_marketplace(&folder, "m");
+        assert_eq!(rows.len(), 1, "{rows:?}");
+        assert_eq!(rows[0].name, "foo");
+        let manifest = rows[0].result.as_ref().unwrap();
+        assert_eq!(manifest.name, "foo");
+        let root = std::fs::canonicalize(folder.join("p")).unwrap();
+        let set = PluginSkillSet::from_manifest(uuid::Uuid::new_v4(), &root, manifest);
+        let ids: Vec<_> = set.skills.iter().map(|s| s.id.as_str()).collect();
+        assert_eq!(ids, ["foo:s"]);
+    }
+
+    #[test]
+    fn skills_only_target_uses_entry_name_not_folder_name() {
+        let dir = tempfile::tempdir().unwrap();
+        let folder = dir.path().join("m");
+        write_skill(&folder.join("Bad Folder/skills/s"), "s");
+        market(
+            &folder,
+            serde_json::json!([{ "name": "good", "source": "./Bad Folder" }]),
+        );
+        let rows = expand_marketplace(&folder, "m");
+        assert_eq!(rows[0].rel_path, "m/Bad Folder");
+        assert_eq!(rows[0].name, "good");
+        let manifest = rows[0].result.as_ref().unwrap();
+        assert_eq!(manifest.name, "good");
+        let root = std::fs::canonicalize(folder.join("Bad Folder")).unwrap();
+        let set = PluginSkillSet::from_manifest(uuid::Uuid::new_v4(), &root, manifest);
+        let ids: Vec<_> = set.skills.iter().map(|s| s.id.as_str()).collect();
+        assert_eq!(ids, ["good:s"]);
     }
 
     #[test]

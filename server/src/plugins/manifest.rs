@@ -110,15 +110,27 @@ pub fn is_valid_plugin_name(name: &str) -> bool {
 }
 
 pub fn parse_plugin(root: &Path) -> Result<PluginManifest, String> {
+    parse_plugin_named(root, None)
+}
+
+/// Like [`parse_plugin`], but a skills-only plugin is named `skills_only_name`
+/// instead of its folder; a `plugin.json` name always wins.
+pub(crate) fn parse_plugin_named(
+    root: &Path,
+    skills_only_name: Option<&str>,
+) -> Result<PluginManifest, String> {
     let root =
         std::fs::canonicalize(root).map_err(|e| format!("plugin root {}: {e}", root.display()))?;
     let manifest_path = root.join(PLUGIN_JSON);
     let (mut manifest, plugin_json) = if !manifest_path.is_file() {
-        let name = root
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or_default()
-            .to_string();
+        let name = match skills_only_name {
+            Some(name) => name.to_string(),
+            None => root
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or_default()
+                .to_string(),
+        };
         check_name(&name)?;
         let manifest = PluginManifest {
             name,
