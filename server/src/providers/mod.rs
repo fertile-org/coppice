@@ -16,12 +16,17 @@ pub mod opencode;
 pub mod opencode_models;
 pub mod registry;
 
-pub use coppice_connectors::ConnectorDescriptor;
+pub use coppice_connectors::{ConnectorDescriptor, ToolNameStyle};
 pub use models::{ModelCatalog, ModelInfo};
 pub use registry::ConnectorRegistry;
 
 pub fn descriptor(id: &str) -> Option<&'static ConnectorDescriptor> {
     coppice_connectors::get(id)
+}
+
+/// How the connector names gateway tools in its output; drives console titles.
+pub fn tool_name_style(id: &str) -> ToolNameStyle {
+    descriptor(id).map_or(ToolNameStyle::None, |d| d.mcp_tool_names)
 }
 
 /// Temporary alias for gradual migration.

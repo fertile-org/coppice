@@ -2,6 +2,7 @@ mod common;
 
 use axum::http::{header, StatusCode};
 use coppice_server::providers::codex_console::CodexConsolePublisher;
+use coppice_server::providers::ToolNameStyle;
 use coppice_server::services::artifact_service::{ArtifactService, RunArtifactPaths};
 use coppice_server::sessions::run_registry::RunStreamRegistry;
 use coppice_server::sessions::LiveMessage;
@@ -216,7 +217,7 @@ async fn completed_codex_run_replays_structured_fixture_events_in_order() {
     let raw = std::fs::read_to_string(fixture_path).expect("read Codex fixture");
     let registry = RunStreamRegistry::new();
     let handle = registry.register(uuid::Uuid::new_v4());
-    let mut publisher = CodexConsolePublisher::new();
+    let mut publisher = CodexConsolePublisher::new(ToolNameStyle::ServerToolFields);
     for line in raw.lines() {
         let value = serde_json::from_str(line).expect("valid Codex fixture event");
         publisher.handle_json(&handle, &value);

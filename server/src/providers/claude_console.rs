@@ -1,24 +1,22 @@
+use crate::mcp::protocol::SERVER_NAME;
 use crate::providers::AgentRunResult;
 use crate::sessions::opencode_events::extract_result_from_text;
 use crate::sessions::{LiveMessage, run_registry::RunStreamHandle};
+use coppice_connectors::{gateway_tool, ToolNameStyle};
 use serde_json::{json, Value};
 use std::sync::Arc;
 
 /// Structured live-console events for Claude Code (rendered like OpenCode session UI).
 pub struct ClaudeConsolePublisher {
     contract_published: bool,
-}
-
-impl Default for ClaudeConsolePublisher {
-    fn default() -> Self {
-        Self::new()
-    }
+    tool_names: ToolNameStyle,
 }
 
 impl ClaudeConsolePublisher {
-    pub fn new() -> Self {
+    pub fn new(tool_names: ToolNameStyle) -> Self {
         Self {
             contract_published: false,
+            tool_names,
         }
     }
 
@@ -134,7 +132,10 @@ impl ClaudeConsolePublisher {
             return;
         };
         let input = block.get("input").unwrap_or(&Value::Null);
-        let (variant, title) = tool_title(name, input);
+        let (variant, title) = match gateway_tool(self.tool_names, SERVER_NAME, name) {
+            Some(tool) => ("action", tool.title(SERVER_NAME)),
+            None => tool_title(name, input),
+        };
         emit(
             stream,
             json!({
@@ -227,12 +228,16 @@ mod tests {
     use super::*;
     use crate::sessions::run_registry::RunStreamRegistry;
 
+    fn publisher() -> ClaudeConsolePublisher {
+        ClaudeConsolePublisher::new(coppice_connectors::ToolNameStyle::McpDoubleUnderscore)
+    }
+
     #[test]
     fn publishes_session_and_tool_events() {
         let registry = RunStreamRegistry::new();
         let handle = registry.register(uuid::Uuid::new_v4());
         let mut rx = handle.subscribe();
-        let mut publisher = ClaudeConsolePublisher::new();
+        let mut publisher = publisher();
 
         publisher.handle_stream_json(
             &handle,
@@ -267,12 +272,44 @@ mod tests {
         assert_eq!(events[1]["title"], "Read src/main.rs");
     }
 
+    fn tool_start_event(name: &str, input: Value) -> Value {
+        let registry = RunStreamRegistry::new();
+        let handle = registry.register(uuid::Uuid::new_v4());
+        let mut rx = handle.subscribe();
+        let mut publisher = publisher();
+        publisher.handle_stream_json(
+            &handle,
+            &json!({
+                "type": "assistant",
+                "message": {"content": [{"type": "tool_use", "id": "tu_1", "name": name, "input": input}]}
+            }),
+        );
+        match rx.try_recv() {
+            Ok(LiveMessage::Event { event }) => event,
+            _ => panic!("expected a tool event"),
+        }
+    }
+
+    #[test]
+    fn claude_console_titles_gateway_tool() {
+        let event = tool_start_event("mcp__coppice__github__create_issue", json!({}));
+        assert_eq!(event["title"], "github · create_issue");
+        assert_eq!(event["variant"], "action");
+
+        let event = tool_start_event("mcp__coppice__ticket_get", json!({}));
+        assert_eq!(event["title"], "coppice · ticket_get");
+
+        let event = tool_start_event("Bash", json!({"command": "ls"}));
+        assert_eq!(event["title"], "ls");
+        assert_eq!(event["variant"], "shell");
+    }
+
     #[test]
     fn duplicate_result_contract_is_skipped() {
         let registry = RunStreamRegistry::new();
         let handle = registry.register(uuid::Uuid::new_v4());
         let mut rx = handle.subscribe();
-        let mut publisher = ClaudeConsolePublisher::new();
+        let mut publisher = publisher();
         let contract = r#"{"status":"done","summary":"Done.","changedFiles":[],"testsRun":[],"blockers":[]}"#;
 
         publisher.handle_stream_json(

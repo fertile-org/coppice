@@ -58,6 +58,73 @@ pub enum ToolNameStyle {
     None,
 }
 
+/// A tool call routed through the Coppice gateway: a core tool (`plugin: None`)
+/// or a plugin tool exposed as `<plugin>__<tool>`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GatewayTool {
+    pub plugin: Option<String>,
+    pub tool: String,
+}
+
+impl GatewayTool {
+    /// Console label: `coppice · ticket_get` or `github · create_issue`.
+    pub fn title(&self, server: &str) -> String {
+        format!(
+            "{} · {}",
+            self.plugin.as_deref().unwrap_or(server),
+            self.tool
+        )
+    }
+
+    /// Core tool names never contain `__`, so the first one separates the plugin.
+    fn from_exposed(exposed: &str) -> Option<Self> {
+        if exposed.is_empty() {
+            return None;
+        }
+        Some(match exposed.split_once("__") {
+            Some((plugin, tool)) if !plugin.is_empty() && !tool.is_empty() => Self {
+                plugin: Some(plugin.to_string()),
+                tool: tool.to_string(),
+            },
+            _ => Self {
+                plugin: None,
+                tool: exposed.to_string(),
+            },
+        })
+    }
+}
+
+/// Parse a connector's tool name for gateway `server` according to its style.
+/// `ServerToolFields` connectors use [`gateway_tool_from_fields`] instead.
+pub fn gateway_tool(style: ToolNameStyle, server: &str, name: &str) -> Option<GatewayTool> {
+    let exposed = match style {
+        ToolNameStyle::McpDoubleUnderscore => name
+            .strip_prefix("mcp__")
+            .and_then(|rest| rest.strip_prefix(server))
+            .and_then(|rest| rest.strip_prefix("__")),
+        ToolNameStyle::Dash => name
+            .strip_prefix(server)
+            .and_then(|rest| rest.strip_prefix('-')),
+        ToolNameStyle::Underscore => name
+            .strip_prefix(server)
+            .and_then(|rest| rest.strip_prefix('_')),
+        ToolNameStyle::ServerToolFields | ToolNameStyle::None => None,
+    }?;
+    GatewayTool::from_exposed(exposed)
+}
+
+/// Gateway tool for connectors that report `server` and `tool` separately.
+pub fn gateway_tool_from_fields(
+    server: &str,
+    field_server: &str,
+    tool: &str,
+) -> Option<GatewayTool> {
+    if field_server != server {
+        return None;
+    }
+    GatewayTool::from_exposed(tool)
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum ConsoleKind {
@@ -416,6 +483,101 @@ mod tests {
                 "runResume": false,
                 "runServer": true,
             })
+        );
+    }
+
+    fn core(tool: &str) -> Option<GatewayTool> {
+        Some(GatewayTool {
+            plugin: None,
+            tool: tool.to_string(),
+        })
+    }
+
+    fn plugin(plugin: &str, tool: &str) -> Option<GatewayTool> {
+        Some(GatewayTool {
+            plugin: Some(plugin.to_string()),
+            tool: tool.to_string(),
+        })
+    }
+
+    #[test]
+    fn gateway_tool_per_style() {
+        use ToolNameStyle::*;
+        assert_eq!(
+            gateway_tool(McpDoubleUnderscore, "coppice", "mcp__coppice__ticket_get"),
+            core("ticket_get")
+        );
+        assert_eq!(
+            gateway_tool(
+                McpDoubleUnderscore,
+                "coppice",
+                "mcp__coppice__github__create_issue"
+            ),
+            plugin("github", "create_issue")
+        );
+        assert_eq!(
+            gateway_tool(McpDoubleUnderscore, "coppice", "mcp__other__x"),
+            Option::None
+        );
+        assert_eq!(
+            gateway_tool(Dash, "coppice", "coppice-ticket_get"),
+            core("ticket_get")
+        );
+        assert_eq!(
+            gateway_tool(Underscore, "coppice", "coppice_github__create_issue"),
+            plugin("github", "create_issue")
+        );
+        assert_eq!(
+            gateway_tool(Underscore, "coppice", "coppice_"),
+            Option::None
+        );
+        for name in [
+            "mcp__coppice__ticket_get",
+            "coppice-ticket_get",
+            "coppice_ticket_get",
+        ] {
+            assert_eq!(gateway_tool(None, "coppice", name), Option::None);
+            assert_eq!(
+                gateway_tool(ServerToolFields, "coppice", name),
+                Option::None
+            );
+        }
+        for style in [
+            McpDoubleUnderscore,
+            Dash,
+            Underscore,
+            ServerToolFields,
+            None,
+        ] {
+            assert_eq!(gateway_tool(style, "coppice", "Bash"), Option::None);
+        }
+    }
+
+    #[test]
+    fn gateway_tool_from_fields_codex() {
+        assert_eq!(
+            gateway_tool_from_fields("coppice", "coppice", "github__create_issue"),
+            plugin("github", "create_issue")
+        );
+        assert_eq!(
+            gateway_tool_from_fields("coppice", "coppice", "ticket_get"),
+            core("ticket_get")
+        );
+        assert_eq!(
+            gateway_tool_from_fields("coppice", "other", "github__create_issue"),
+            Option::None
+        );
+    }
+
+    #[test]
+    fn title_format() {
+        assert_eq!(
+            core("ticket_get").unwrap().title("coppice"),
+            "coppice · ticket_get"
+        );
+        assert_eq!(
+            plugin("github", "create_issue").unwrap().title("coppice"),
+            "github · create_issue"
         );
     }
 

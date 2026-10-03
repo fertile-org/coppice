@@ -76,7 +76,7 @@ impl AgentProvider for CursorProvider {
         };
         let mut handler = CursorLines {
             stream: input.stream.clone(),
-            console: CursorConsolePublisher::new(),
+            console: CursorConsolePublisher::new(super::tool_name_style(self.id())),
             assistant_text: String::new(),
             result_error: None,
             saw_result_event: false,
@@ -689,7 +689,7 @@ mod tests {
         handle: &std::sync::Arc<crate::sessions::run_registry::RunStreamHandle>,
         raw: &str,
     ) {
-        let mut console = CursorConsolePublisher::new();
+        let mut console = CursorConsolePublisher::new(crate::providers::ToolNameStyle::Dash);
         for line in raw.lines() {
             let Ok(value) = serde_json::from_str::<serde_json::Value>(line) else {
                 continue;

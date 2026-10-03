@@ -1,24 +1,22 @@
+use crate::mcp::protocol::SERVER_NAME;
 use crate::providers::AgentRunResult;
 use crate::sessions::opencode_events::extract_result_from_text;
 use crate::sessions::{LiveMessage, run_registry::RunStreamHandle};
+use coppice_connectors::{gateway_tool, ToolNameStyle};
 use serde_json::{json, Value};
 use std::sync::Arc;
 
 /// Structured live-console events for Cursor CLI (rendered like OpenCode session UI).
 pub struct CursorConsolePublisher {
     contract_published: bool,
-}
-
-impl Default for CursorConsolePublisher {
-    fn default() -> Self {
-        Self::new()
-    }
+    tool_names: ToolNameStyle,
 }
 
 impl CursorConsolePublisher {
-    pub fn new() -> Self {
+    pub fn new(tool_names: ToolNameStyle) -> Self {
         Self {
             contract_published: false,
+            tool_names,
         }
     }
 
@@ -84,7 +82,15 @@ impl CursorConsolePublisher {
         let Some((tool_key, payload)) = find_tool_payload(tool_call) else {
             return;
         };
-        let (variant, title) = tool_title(tool_key, payload);
+        let gateway = payload
+            .get("args")
+            .and_then(|args| args.get("name"))
+            .and_then(Value::as_str)
+            .and_then(|name| gateway_tool(self.tool_names, SERVER_NAME, name));
+        let (variant, title) = match gateway {
+            Some(tool) => ("action", tool.title(SERVER_NAME)),
+            None => tool_title(tool_key, payload),
+        };
 
         match subtype {
             "started" => {
@@ -446,6 +452,31 @@ mod tests {
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../fixtures/cursor")
     }
 
+    fn console() -> CursorConsolePublisher {
+        CursorConsolePublisher::new(coppice_connectors::ToolNameStyle::Dash)
+    }
+
+    #[test]
+    fn cursor_console_titles_gateway_tool() {
+        let registry = RunStreamRegistry::new();
+        let handle = registry.register(uuid::Uuid::new_v4());
+        let mut console = console();
+        console.handle_stream_json(
+            &handle,
+            &json!({
+                "type": "tool_call",
+                "subtype": "started",
+                "call_id": "mcp_1",
+                "tool_call": {
+                    "mcpToolCall": {"args": {"name": "coppice-ticket_get", "args": {"id": "T-1"}}}
+                }
+            }),
+        );
+        let tool = last_tool(&handle);
+        assert_eq!(tool["title"], "coppice · ticket_get");
+        assert_eq!(tool["variant"], "action");
+    }
+
     fn collect_events(
         handle: &std::sync::Arc<crate::sessions::run_registry::RunStreamHandle>,
     ) -> Vec<serde_json::Value> {
@@ -464,7 +495,7 @@ mod tests {
         let raw = std::fs::read_to_string(fixtures_root().join("done.jsonl")).unwrap();
         let registry = RunStreamRegistry::new();
         let handle = registry.register(uuid::Uuid::new_v4());
-        let mut console = CursorConsolePublisher::new();
+        let mut console = console();
         for line in raw.lines() {
             let value: serde_json::Value = serde_json::from_str(line).unwrap();
             console.handle_stream_json(&handle, &value);
@@ -485,7 +516,7 @@ mod tests {
         let raw = std::fs::read_to_string(fixtures_root().join("agentic.jsonl")).unwrap();
         let registry = RunStreamRegistry::new();
         let handle = registry.register(uuid::Uuid::new_v4());
-        let mut console = CursorConsolePublisher::new();
+        let mut console = console();
         for line in raw.lines() {
             let value: serde_json::Value = serde_json::from_str(line).unwrap();
             console.handle_stream_json(&handle, &value);
@@ -511,7 +542,7 @@ mod tests {
     fn ignores_thinking_and_user_events() {
         let registry = RunStreamRegistry::new();
         let handle = registry.register(uuid::Uuid::new_v4());
-        let mut console = CursorConsolePublisher::new();
+        let mut console = console();
         console.handle_stream_json(
             &handle,
             &serde_json::json!({
@@ -531,7 +562,7 @@ mod tests {
     fn duplicate_result_contract_is_skipped() {
         let registry = RunStreamRegistry::new();
         let handle = registry.register(uuid::Uuid::new_v4());
-        let mut console = CursorConsolePublisher::new();
+        let mut console = console();
         let contract =
             r#"{"status":"done","summary":"Done.","changedFiles":[],"testsRun":[],"blockers":[]}"#;
 
@@ -589,7 +620,7 @@ mod tests {
     fn nonzero_exit_with_stdout_publishes_output() {
         let registry = RunStreamRegistry::new();
         let handle = registry.register(uuid::Uuid::new_v4());
-        let mut console = CursorConsolePublisher::new();
+        let mut console = console();
 
         publish_completed_shell(
             &mut console,
@@ -607,7 +638,7 @@ mod tests {
     fn nonzero_exit_with_stderr_and_stdout_publishes_stderr_first() {
         let registry = RunStreamRegistry::new();
         let handle = registry.register(uuid::Uuid::new_v4());
-        let mut console = CursorConsolePublisher::new();
+        let mut console = console();
 
         publish_completed_shell(
             &mut console,
@@ -631,7 +662,7 @@ mod tests {
     fn nonzero_exit_with_empty_streams_publishes_exit_code_fallback() {
         let registry = RunStreamRegistry::new();
         let handle = registry.register(uuid::Uuid::new_v4());
-        let mut console = CursorConsolePublisher::new();
+        let mut console = console();
 
         publish_completed_shell(
             &mut console,
@@ -649,7 +680,7 @@ mod tests {
     fn result_error_message_and_string_error_are_published() {
         let registry = RunStreamRegistry::new();
         let handle = registry.register(uuid::Uuid::new_v4());
-        let mut console = CursorConsolePublisher::new();
+        let mut console = console();
 
         console.handle_stream_json(
             &handle,
@@ -696,7 +727,7 @@ mod tests {
     fn result_failure_string_and_object_message_are_published() {
         let registry = RunStreamRegistry::new();
         let handle = registry.register(uuid::Uuid::new_v4());
-        let mut console = CursorConsolePublisher::new();
+        let mut console = console();
 
         publish_completed_shell(
             &mut console,
@@ -725,7 +756,7 @@ mod tests {
     fn successful_tool_still_publishes_stdout_as_completed() {
         let registry = RunStreamRegistry::new();
         let handle = registry.register(uuid::Uuid::new_v4());
-        let mut console = CursorConsolePublisher::new();
+        let mut console = console();
 
         publish_completed_shell(
             &mut console,
@@ -743,7 +774,7 @@ mod tests {
     fn generic_tool_call_failed_merges_stderr_and_exit_code() {
         let registry = RunStreamRegistry::new();
         let handle = registry.register(uuid::Uuid::new_v4());
-        let mut console = CursorConsolePublisher::new();
+        let mut console = console();
 
         publish_completed_shell(
             &mut console,
@@ -779,7 +810,7 @@ mod tests {
     fn generic_failure_phrase_with_exit_code_only_publishes_exit_code() {
         let registry = RunStreamRegistry::new();
         let handle = registry.register(uuid::Uuid::new_v4());
-        let mut console = CursorConsolePublisher::new();
+        let mut console = console();
 
         publish_completed_shell(
             &mut console,
@@ -808,7 +839,7 @@ mod tests {
     fn generic_error_without_streams_falls_back_to_args_summary() {
         let registry = RunStreamRegistry::new();
         let handle = registry.register(uuid::Uuid::new_v4());
-        let mut console = CursorConsolePublisher::new();
+        let mut console = console();
 
         console.handle_stream_json(
             &handle,
@@ -839,7 +870,7 @@ mod tests {
     fn nested_error_object_and_object_stream_text_are_extracted() {
         let registry = RunStreamRegistry::new();
         let handle = registry.register(uuid::Uuid::new_v4());
-        let mut console = CursorConsolePublisher::new();
+        let mut console = console();
 
         publish_completed_shell(
             &mut console,
@@ -868,7 +899,7 @@ mod tests {
     fn specific_error_message_is_not_diluted_by_args_summary() {
         let registry = RunStreamRegistry::new();
         let handle = registry.register(uuid::Uuid::new_v4());
-        let mut console = CursorConsolePublisher::new();
+        let mut console = console();
 
         console.handle_stream_json(
             &handle,

@@ -1642,7 +1642,8 @@ mod tests {
         let raw = std::fs::read_to_string(fixture_path).expect("read Codex fixture");
         let registry = RunStreamRegistry::new();
         let handle = registry.register(uuid::Uuid::new_v4());
-        let mut publisher = CodexConsolePublisher::new();
+        let mut publisher =
+            CodexConsolePublisher::new(crate::providers::ToolNameStyle::ServerToolFields);
 
         for line in raw.lines() {
             let value = serde_json::from_str(line).expect("valid Codex fixture event");
@@ -1692,7 +1693,7 @@ mod tests {
         let raw = std::fs::read_to_string(fixture_path).expect("read Cursor fixture");
         let registry = RunStreamRegistry::new();
         let handle = registry.register(uuid::Uuid::new_v4());
-        let mut publisher = CursorConsolePublisher::new();
+        let mut publisher = CursorConsolePublisher::new(crate::providers::ToolNameStyle::Dash);
 
         for line in raw.lines() {
             let value = serde_json::from_str(line).expect("valid Cursor fixture event");

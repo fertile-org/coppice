@@ -4,6 +4,8 @@ import { sessionTheme } from '../theme/session-theme';
 import { ApplyPatch } from '../tools/ApplyPatch';
 import { Bash } from '../tools/Bash';
 import { Edit } from '../tools/Edit';
+import { GatewayTool } from '../tools/GatewayTool';
+import { parseGatewayTool } from '../tools/gateway-tool';
 import { Glob } from '../tools/Glob';
 import { Grep } from '../tools/Grep';
 import { List } from '../tools/List';
@@ -41,6 +43,8 @@ function UnknownTool({ part }: { part: ToolPartType }) {
 }
 
 export function ToolPart({ part }: { part: ToolPartType }) {
+  const gateway = parseGatewayTool(part.tool);
+  if (gateway) return <GatewayTool part={part} name={gateway} />;
   const Component = TOOL_MAP[part.tool] ?? UnknownTool;
   return <Component part={part} />;
 }

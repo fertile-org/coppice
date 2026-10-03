@@ -113,7 +113,7 @@ impl AgentProvider for ClaudeCodeProvider {
         };
         let mut handler = ClaudeLines {
             stream: input.stream.clone(),
-            console: ClaudeConsolePublisher::new(),
+            console: ClaudeConsolePublisher::new(super::tool_name_style(self.id())),
             assistant_text: String::new(),
         };
         let io = RunIo {
@@ -348,7 +348,9 @@ mod tests {
         handle: &std::sync::Arc<crate::sessions::run_registry::RunStreamHandle>,
         raw: &str,
     ) {
-        let mut console = crate::providers::claude_console::ClaudeConsolePublisher::new();
+        let mut console = crate::providers::claude_console::ClaudeConsolePublisher::new(
+            crate::providers::ToolNameStyle::McpDoubleUnderscore,
+        );
         for line in raw.lines() {
             let Ok(value) = serde_json::from_str::<serde_json::Value>(line) else {
                 continue;

@@ -1,6 +1,8 @@
+use crate::mcp::protocol::SERVER_NAME;
 use crate::providers::AgentRunResult;
 use crate::sessions::opencode_events::extract_result_from_text;
 use crate::sessions::{run_registry::RunStreamHandle, LiveMessage};
+use coppice_connectors::{gateway_tool, gateway_tool_from_fields, ToolNameStyle};
 use serde_json::{json, Value};
 use std::sync::Arc;
 
@@ -8,6 +10,7 @@ use std::sync::Arc;
 pub struct CodexConsolePublisher {
     contract_published: bool,
     synthetic_error_id: u64,
+    tool_names: ToolNameStyle,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -17,17 +20,12 @@ enum ItemLifecycle {
     Completed,
 }
 
-impl Default for CodexConsolePublisher {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl CodexConsolePublisher {
-    pub fn new() -> Self {
+    pub fn new(tool_names: ToolNameStyle) -> Self {
         Self {
             contract_published: false,
             synthetic_error_id: 0,
+            tool_names,
         }
     }
 
@@ -271,14 +269,15 @@ impl CodexConsolePublisher {
             .then(|| item.get("error")?.get("message")?.as_str())
             .flatten()
             .filter(|text| !text.trim().is_empty());
-        emit_tool(
-            stream,
-            id,
-            "action",
-            &format!("MCP {server}.{tool}"),
-            status,
-            output,
+        let gateway = match self.tool_names {
+            ToolNameStyle::ServerToolFields => gateway_tool_from_fields(SERVER_NAME, server, tool),
+            style => gateway_tool(style, SERVER_NAME, tool),
+        };
+        let title = gateway.map_or_else(
+            || format!("MCP {server}.{tool}"),
+            |tool| tool.title(SERVER_NAME),
         );
+        emit_tool(stream, id, "action", &title, status, output);
     }
 
     fn handle_collab_tool_call(
@@ -470,10 +469,49 @@ mod tests {
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../fixtures/codex")
     }
 
+    fn publisher() -> CodexConsolePublisher {
+        CodexConsolePublisher::new(coppice_connectors::ToolNameStyle::ServerToolFields)
+    }
+
+    fn mcp_title(server: &str, tool: &str) -> Value {
+        let registry = RunStreamRegistry::new();
+        let handle = registry.register(uuid::Uuid::new_v4());
+        let mut publisher = publisher();
+        publisher.handle_json(
+            &handle,
+            &json!({
+                "type": "item.started",
+                "item": {
+                    "id": "mcp_1",
+                    "type": "mcp_tool_call",
+                    "server": server,
+                    "tool": tool,
+                    "status": "in_progress"
+                }
+            }),
+        );
+        match handle.buffered_tail().into_iter().next() {
+            Some(LiveMessage::Event { event }) => event,
+            _ => panic!("expected a tool event"),
+        }
+    }
+
+    #[test]
+    fn codex_console_titles_gateway_tool() {
+        let event = mcp_title("coppice", "github__create_issue");
+        assert_eq!(event["title"], "github · create_issue");
+        assert_eq!(event["variant"], "action");
+        assert_eq!(
+            mcp_title("coppice", "ticket_get")["title"],
+            "coppice · ticket_get"
+        );
+        assert_eq!(mcp_title("other", "tool")["title"], "MCP other.tool");
+    }
+
     fn published_fixture_events() -> Vec<Value> {
         let registry = RunStreamRegistry::new();
         let handle = registry.register(uuid::Uuid::new_v4());
-        let mut publisher = CodexConsolePublisher::new();
+        let mut publisher = publisher();
         let raw = std::fs::read_to_string(fixtures_root().join("done.jsonl"))
             .expect("read Codex done fixture");
 
@@ -497,7 +535,7 @@ mod tests {
         let registry = RunStreamRegistry::new();
         let handle = registry.register(uuid::Uuid::new_v4());
         let mut rx = handle.subscribe();
-        let mut publisher = CodexConsolePublisher::new();
+        let mut publisher = publisher();
 
         publisher.handle_json(
             &handle,
@@ -534,7 +572,7 @@ mod tests {
         let registry = RunStreamRegistry::new();
         let handle = registry.register(uuid::Uuid::new_v4());
         let mut rx = handle.subscribe();
-        let mut publisher = CodexConsolePublisher::new();
+        let mut publisher = publisher();
 
         publisher.handle_json(
             &handle,
@@ -565,7 +603,7 @@ mod tests {
     fn failed_and_declined_commands_publish_error_status() {
         let registry = RunStreamRegistry::new();
         let handle = registry.register(uuid::Uuid::new_v4());
-        let mut publisher = CodexConsolePublisher::new();
+        let mut publisher = publisher();
 
         for value in [
             json!({
@@ -649,7 +687,7 @@ mod tests {
     fn publishes_collaboration_web_search_todo_and_error_items() {
         let registry = RunStreamRegistry::new();
         let handle = registry.register(uuid::Uuid::new_v4());
-        let mut publisher = CodexConsolePublisher::new();
+        let mut publisher = publisher();
         let values = [
             json!({
                 "type": "item.started",
@@ -785,7 +823,7 @@ mod tests {
     fn reasoning_that_looks_like_a_contract_is_not_published_as_result() {
         let registry = RunStreamRegistry::new();
         let handle = registry.register(uuid::Uuid::new_v4());
-        let mut publisher = CodexConsolePublisher::new();
+        let mut publisher = publisher();
         let contract =
             r#"{"status":"done","summary":"Final.","changedFiles":[],"testsRun":[],"blockers":[]}"#;
 
@@ -821,7 +859,7 @@ mod tests {
     fn unknown_and_malformed_events_are_ignored() {
         let registry = RunStreamRegistry::new();
         let handle = registry.register(uuid::Uuid::new_v4());
-        let mut publisher = CodexConsolePublisher::new();
+        let mut publisher = publisher();
 
         for value in [
             json!({"type": "future.event", "secret": "must not be logged"}),
@@ -854,7 +892,7 @@ mod tests {
         let registry = RunStreamRegistry::new();
         let handle = registry.register(uuid::Uuid::new_v4());
         let mut rx = handle.subscribe();
-        let mut publisher = CodexConsolePublisher::new();
+        let mut publisher = publisher();
 
         let contract =
             r#"{"status":"done","summary":"Done.","changedFiles":[],"testsRun":[],"blockers":[]}"#;
@@ -884,7 +922,7 @@ mod tests {
         let registry = RunStreamRegistry::new();
         let handle = registry.register(uuid::Uuid::new_v4());
         let mut rx = handle.subscribe();
-        let mut publisher = CodexConsolePublisher::new();
+        let mut publisher = publisher();
         let contract =
             r#"{"status":"done","summary":"Done.","changedFiles":[],"testsRun":[],"blockers":[]}"#;
 

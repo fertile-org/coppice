@@ -99,7 +99,7 @@ impl AgentProvider for CodexProvider {
         };
         let mut handler = CodexLines {
             stream: input.stream.clone(),
-            console: CodexConsolePublisher::new(),
+            console: CodexConsolePublisher::new(super::tool_name_style(self.id())),
             assistant_text: String::new(),
         };
         let io = RunIo {
