@@ -245,6 +245,28 @@ async fn plugins_api_shape_unchanged() {
         ])
     );
     assert_eq!(sample["unsupported"], json!(["commands", "hooks"]));
+    for key in ["marketplace", "external", "gitRoot"] {
+        assert!(sample[key].is_null(), "{key}: {sample}");
+        assert!(sample.get(key).is_some(), "`{key}` missing: {sample}");
+    }
+    let hello = sample["skills"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|s| s["name"] == "hello")
+        .unwrap();
+    let mut skill_keys: Vec<&str> = hello
+        .as_object()
+        .unwrap()
+        .keys()
+        .map(String::as_str)
+        .collect();
+    skill_keys.sort();
+    assert_eq!(
+        skill_keys,
+        ["description", "enabled", "error", "name", "relPath"]
+    );
+    assert_eq!(hello["enabled"], true);
     let inline = find(&plugins, &dir_id, "inline-mcp");
     assert_eq!(inline["status"], "ok");
     assert_eq!(
@@ -2033,4 +2055,217 @@ async fn example_hello_coppice_plugin_loads_and_tests() {
     let greet = &server["tools"][0];
     assert_eq!(greet["exposedName"], "hello-coppice__greet", "{body}");
     assert_eq!(greet["readOnly"], true);
+}
+
+#[tokio::test]
+async fn marketplace_dir_lists_rows_and_external() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    require_db!();
+    let (_state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
+    let dir = plugin_dir_with(&["marketplace-repo"]);
+    let dir_id = add_dir(&app, dir.path(), &cookie, &csrf).await["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let plugins = get(&app, "/api/plugins", &cookie, &csrf).await;
+    assert_eq!(plugins_in_dir(&plugins, &dir_id).len(), 5, "{plugins}");
+
+    let alpha = find(&plugins, &dir_id, "alpha");
+    assert_eq!(alpha["status"], "ok", "{alpha}");
+    assert_eq!(alpha["relPath"], "marketplace-repo/plugins/alpha");
+    assert_eq!(alpha["marketplace"], json!({ "name": "acme-market" }));
+    assert!(alpha["external"].is_null());
+
+    let beta = find(&plugins, &dir_id, "beta-skills");
+    assert_eq!(beta["status"], "ok", "{beta}");
+    assert_eq!(beta["marketplace"]["name"], "acme-market");
+    assert_eq!(beta["skills"][0]["name"], "beta-skill");
+
+    let remote = find(&plugins, &dir_id, "remote-one");
+    assert_eq!(remote["status"], "external", "{remote}");
+    assert_eq!(remote["relPath"], "marketplace-repo#remote-one");
+    assert_eq!(remote["description"], "Hosted elsewhere");
+    assert_eq!(
+        remote["external"],
+        json!({ "kind": "github", "url": "https://github.com/acme/remote-one.git" })
+    );
+    assert_eq!(remote["marketplace"]["name"], "acme-market");
+    assert_eq!(remote["enabled"], false);
+    assert_eq!(remote["skills"], json!([]));
+    assert_eq!(remote["mcpServers"], json!([]));
+
+    for name in ["escape", "ghost"] {
+        let row = find(&plugins, &dir_id, name);
+        assert_eq!(row["status"], "invalid", "{row}");
+        assert!(row["error"].is_string());
+    }
+}
+
+#[tokio::test]
+async fn skills_catalog_and_single_skill_dirs() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    require_db!();
+    let (_state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
+    let dir = plugin_dir_with(&["skills-catalog", "single-skill"]);
+    let dir_id = add_dir(&app, dir.path(), &cookie, &csrf).await["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let plugins = get(&app, "/api/plugins", &cookie, &csrf).await;
+    let catalog = find(&plugins, &dir_id, "skills-catalog");
+    assert_eq!(catalog["status"], "ok", "{catalog}");
+    let skills = catalog["skills"].as_array().unwrap();
+    let mut names: Vec<&str> = skills.iter().map(|s| s["name"].as_str().unwrap()).collect();
+    names.sort();
+    assert_eq!(names, ["agent-one", "design", "pdf"], "{catalog}");
+    assert!(skills.iter().all(|s| s["enabled"] == true), "{catalog}");
+
+    let single = find(&plugins, &dir_id, "single-skill");
+    assert_eq!(single["status"], "ok", "{single}");
+    let skills = single["skills"].as_array().unwrap();
+    assert_eq!(skills.len(), 1, "{single}");
+    assert_eq!(skills[0]["name"], "single-skill");
+    assert_eq!(skills[0]["relPath"], "");
+    assert_eq!(skills[0]["enabled"], true);
+}
+
+#[tokio::test]
+async fn single_skill_plugin_is_served_to_assigned_agent() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    require_db!();
+    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
+    let (_dir, plugin_id) = fixture_plugin(&app, "single-skill", &cookie, &csrf).await;
+    set_enabled(&app, &plugin_id, true, &cookie, &csrf).await;
+    let agent_id = common::create_test_agent_from_preset(&app, "Worker", &cookie, &csrf).await;
+    let (status, body) = send(
+        &app,
+        "PUT",
+        &format!("/api/agents/{agent_id}/plugins"),
+        json!({ "pluginIds": [plugin_id] }),
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    let id: uuid::Uuid = plugin_id.parse().unwrap();
+    assert_eq!(run_plugin_ids(&state, &agent_id).await, vec![id]);
+    let listed: Vec<String> = state
+        .skills
+        .skills_for(&[id])
+        .into_iter()
+        .map(|s| s.id)
+        .collect();
+    assert!(
+        listed.iter().any(|s| s == "single-skill:single-skill"),
+        "{listed:?}"
+    );
+    let (_, body) = state
+        .skills
+        .get(&[id], "single-skill:single-skill")
+        .expect("single skill loadable");
+    assert!(body.contains("Run `scripts/run.sh`."), "{body}");
+}
+
+#[tokio::test]
+async fn external_cannot_be_enabled_tested_or_updated() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    require_db!();
+    let (_state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
+    let (_dir, plugin_id) = marketplace_external(&app, &cookie, &csrf).await;
+
+    let (status, body) = send(
+        &app,
+        "PATCH",
+        &format!("/api/plugins/{plugin_id}"),
+        json!({ "enabled": true }),
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert_eq!(body["error"], "external plugins cannot be enabled");
+
+    let (status, body) = post_test(&app, &plugin_id, &cookie, &csrf).await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+
+    let (status, body) = send(
+        &app,
+        "POST",
+        &format!("/api/plugins/{plugin_id}/update"),
+        Value::Null,
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert_eq!(
+        body["error"],
+        "external plugins are installed from their own repository"
+    );
+}
+
+#[tokio::test]
+async fn external_not_assignable_to_agents() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    require_db!();
+    let (_state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
+    let (_dir, plugin_id) = marketplace_external(&app, &cookie, &csrf).await;
+    let agent_id = common::create_test_agent_from_preset(&app, "Worker", &cookie, &csrf).await;
+    let uri = format!("/api/agents/{agent_id}/plugins");
+
+    let (status, body) = send(
+        &app,
+        "PUT",
+        &uri,
+        json!({ "pluginIds": [plugin_id] }),
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    assert_eq!(
+        get(&app, &uri, &cookie, &csrf).await,
+        json!({ "pluginIds": [] })
+    );
+}
+
+#[tokio::test]
+async fn git_install_sets_git_root() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    require_db!();
+    let (_state, app, cookie, csrf) = install_app().await;
+    let repo = PluginRepo::new();
+    let (dir_id, _) = default_dir(&app, &cookie, &csrf).await;
+    let done = install_sample(&app, &repo, &dir_id, &cookie, &csrf).await;
+    let plugin_id = done["pluginId"].as_str().unwrap();
+    let plugin = get(&app, &format!("/api/plugins/{plugin_id}"), &cookie, &csrf).await;
+    assert_eq!(plugin["gitRoot"], "sample-plugin");
+    assert_eq!(plugin["gitRoot"], plugin["relPath"]);
+
+    let (_dir, local_id) = fixture_plugin(&app, "skills-only", &cookie, &csrf).await;
+    let local = get(&app, &format!("/api/plugins/{local_id}"), &cookie, &csrf).await;
+    assert_eq!(local["source"], "local");
+    assert!(local.get("gitRoot").is_some(), "{local}");
+    assert!(local["gitRoot"].is_null());
+}
+
+async fn marketplace_external(
+    app: &Router,
+    cookie: &str,
+    csrf: &str,
+) -> (tempfile::TempDir, String) {
+    let dir = plugin_dir_with(&["marketplace-repo"]);
+    let dir_id = add_dir(app, dir.path(), cookie, csrf).await["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let plugins = get(app, "/api/plugins", cookie, csrf).await;
+    let id = find(&plugins, &dir_id, "remote-one")["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    (dir, id)
 }

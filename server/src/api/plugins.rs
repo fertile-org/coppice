@@ -3,7 +3,7 @@ use crate::mcp::proxy::{McpServerPool, ServerHealth, ServerKey};
 use crate::middleware::admin::AdminUser;
 use crate::plugins::capability::{McpServerEntry, McpServerTransport};
 use crate::plugins::git_install;
-use crate::plugins::manifest::SkillEntry;
+use crate::plugins::manifest::{ExternalSource, MarketplaceRef};
 use crate::plugins::placeholders::{placeholder_keys, setting_sources, SettingSource};
 use crate::services::plugin_service::{
     PluginDir, PluginError, PluginInstall, PluginRow, PluginService, ServerTestOutcome,
@@ -73,13 +73,26 @@ struct PluginResponse {
     git_url: Option<String>,
     git_ref: Option<String>,
     git_commit: Option<String>,
+    git_root: Option<String>,
     status: String,
     error: Option<String>,
     enabled: bool,
-    skills: Vec<SkillEntry>,
+    marketplace: Option<MarketplaceRef>,
+    external: Option<ExternalSource>,
+    skills: Vec<SkillResponse>,
     mcp_servers: Vec<McpServerResponse>,
     unsupported: Vec<String>,
     settings: Vec<PluginSettingResponse>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SkillResponse {
+    name: String,
+    description: String,
+    rel_path: String,
+    error: Option<String>,
+    enabled: bool,
 }
 
 /// Commands, env, URLs, and headers can carry secrets and are never exposed.
@@ -288,9 +301,21 @@ fn plugin_response(
             source: source.as_str(),
         })
         .collect();
-    let (skills, mcp_servers, unsupported) = plugin
+    let disabled = &plugin.disabled_skills;
+    let (skills, mcp_servers, unsupported, marketplace, external) = plugin
         .manifest
         .map(|m| {
+            let skills = m
+                .skills
+                .into_iter()
+                .map(|s| SkillResponse {
+                    enabled: !disabled.contains(&s.name),
+                    name: s.name,
+                    description: s.description,
+                    rel_path: s.rel_path,
+                    error: s.error,
+                })
+                .collect();
             let mcp_servers = m
                 .mcp_servers
                 .iter()
@@ -301,7 +326,7 @@ fn plugin_response(
                 })
                 .collect();
             let unsupported = m.unsupported.into_iter().map(|u| u.key).collect();
-            (m.skills, mcp_servers, unsupported)
+            (skills, mcp_servers, unsupported, m.marketplace, m.external)
         })
         .unwrap_or_default();
     PluginResponse {
@@ -315,9 +340,12 @@ fn plugin_response(
         git_url: plugin.git_url,
         git_ref: plugin.git_ref,
         git_commit: plugin.git_commit,
+        git_root: plugin.git_root,
         status: plugin.status,
         error: plugin.error,
         enabled: plugin.enabled,
+        marketplace,
+        external,
         skills,
         mcp_servers,
         unsupported,

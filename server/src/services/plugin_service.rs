@@ -22,7 +22,8 @@ const INSTALL_COLUMNS: &str = "id, plugin_dir_id, kind, git_url, git_ref, plugin
 
 const PLUGIN_COLUMNS: &str = r#"
     p.id, p.plugin_dir_id, p.rel_path, p.name, p.version, p.description, p.source,
-    p.git_url, p.git_ref, p.git_commit, p.manifest::text AS manifest, p.status, p.error, p.enabled
+    p.git_url, p.git_ref, p.git_commit, p.manifest::text AS manifest, p.status, p.error, p.enabled,
+    p.git_root, p.disabled_skills
 "#;
 
 pub struct PluginService<'a> {
@@ -73,6 +74,8 @@ pub struct PluginRow {
     pub status: String,
     pub error: Option<String>,
     pub enabled: bool,
+    pub git_root: Option<String>,
+    pub disabled_skills: Vec<String>,
 }
 
 const UNDECRYPTABLE_SETTINGS: &str = "plugin settings could not be decrypted";
@@ -395,6 +398,11 @@ impl<'a> PluginService<'a> {
         .await?
         .rows_affected();
         let plugin = self.get_plugin(id).await?;
+        if updated == 0 && plugin.status == "external" {
+            return Err(PluginError::Conflict(
+                "external plugins cannot be enabled".into(),
+            ));
+        }
         if updated == 0 {
             return Err(PluginError::Conflict(format!(
                 "plugin {} has status `{}` and cannot be enabled",
@@ -632,6 +640,11 @@ impl<'a> PluginService<'a> {
         plugin_id: Uuid,
     ) -> Result<(PluginInstall, PathBuf, String), PluginError> {
         let plugin = self.get_plugin(plugin_id).await?;
+        if plugin.status == "external" {
+            return Err(PluginError::Conflict(
+                "external plugins are installed from their own repository".into(),
+            ));
+        }
         let git_url = match (plugin.source.as_str(), &plugin.git_url) {
             ("git", Some(url)) => url.clone(),
             _ => {
@@ -696,7 +709,7 @@ impl<'a> PluginService<'a> {
         let plugin_id: Option<Uuid> = sqlx::query_scalar(
             r#"
             UPDATE plugins SET
-                source = 'git', git_url = $3, git_ref = $4, git_commit = $5,
+                source = 'git', git_url = $3, git_ref = $4, git_commit = $5, git_root = $2,
                 enabled = enabled AND NOT $6, updated_at = now()
             WHERE plugin_dir_id = $1 AND rel_path = $2 AND status <> 'missing'
             RETURNING id
@@ -731,8 +744,8 @@ impl<'a> PluginService<'a> {
         };
         sqlx::query(
             r#"
-            UPDATE plugin_installs SET status = 'succeeded', plugin_id = $2, error = NULL,
-                finished_at = now()
+            UPDATE plugin_installs SET status = 'succeeded', plugin_id = $2,
+                plugin_ids = ARRAY[$2]::uuid[], error = NULL, finished_at = now()
             WHERE id = $1
             "#,
         )
@@ -1019,7 +1032,11 @@ async fn upsert_discovered(
             manifest.version.clone(),
             manifest.description.clone(),
             serde_json::to_string(manifest).expect("manifest serializes"),
-            "ok",
+            if manifest.external.is_some() {
+                "external"
+            } else {
+                "ok"
+            },
             None,
         ),
         Err(err) => (
@@ -1132,5 +1149,7 @@ fn row_to_plugin(row: &PgRow) -> PluginRow {
         status: row.get("status"),
         error: row.get("error"),
         enabled: row.get("enabled"),
+        git_root: row.get("git_root"),
+        disabled_skills: row.get("disabled_skills"),
     }
 }
