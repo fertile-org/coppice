@@ -111,6 +111,7 @@ e2e-smoke-m03:
 
 e2e-smoke-m04:
 	$(MAKE) compose-up
+	MOCK_AGENT_RESPONSE=done WORKFLOW_AUTO_START_RUNS=false $(COMPOSE) up -d --force-recreate --no-deps server
 	$(SMOKE_REPO_SETUP)
 	node e2e/smoke/m04-live-console.mjs
 
