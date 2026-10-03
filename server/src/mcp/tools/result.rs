@@ -1,3 +1,4 @@
+use crate::domain::context_profile::ContextProfile;
 use crate::mcp::tools::{ToolCtx, ToolError};
 use crate::providers::{AgentRunResult, ProviderError};
 use crate::services::agent_service::AgentService;
@@ -18,15 +19,24 @@ pub async fn call_result_submit(ctx: &ToolCtx<'_>, args: Value) -> Result<Value,
         .map_err(ToolError::InvalidArgs)?;
 
     let stored = serde_json::to_value(&result).map_err(|e| ToolError::Internal(e.into()))?;
+    // A connection check is decided by its first submitted outcome.
+    let first_wins = ctx.scope.profile == ContextProfile::ConnectorCheck;
     let updated = sqlx::query(
-        "UPDATE agent_runs SET submitted_result = $1 WHERE id = $2 AND status = 'running'",
+        "UPDATE agent_runs SET submitted_result = $1 \
+         WHERE id = $2 AND status = 'running' AND (NOT $3 OR submitted_result IS NULL)",
     )
     .bind(stored)
     .bind(ctx.scope.run_id)
+    .bind(first_wins)
     .execute(ctx.pool)
     .await?
     .rows_affected();
     if updated == 0 {
+        if first_wins && run_is_running(ctx.pool, ctx.scope.run_id).await? {
+            return Err(ToolError::Denied(
+                "a result was already submitted for this check".into(),
+            ));
+        }
         return Err(ToolError::Denied("this run is no longer running".into()));
     }
 
@@ -38,6 +48,14 @@ pub async fn call_result_submit(ctx: &ToolCtx<'_>, args: Value) -> Result<Value,
     let warnings = target_warnings(&result, &keys, ctx.scope.agent_id);
 
     Ok(json!({ "accepted": true, "warnings": warnings }))
+}
+
+async fn run_is_running(pool: &PgPool, run_id: Uuid) -> Result<bool, sqlx::Error> {
+    sqlx::query_scalar("SELECT status = 'running' FROM agent_runs WHERE id = $1")
+        .bind(run_id)
+        .fetch_optional(pool)
+        .await
+        .map(|running: Option<bool>| running.unwrap_or(false))
 }
 
 /// Advisory checks on the agents a result points at; nothing here rejects.

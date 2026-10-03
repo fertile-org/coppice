@@ -939,3 +939,52 @@ async fn last_real_run_ignores_check_runs() {
     );
     std::env::remove_var("MOCK_AGENT_RESPONSE");
 }
+
+#[tokio::test]
+async fn check_records_non_done_result_and_fails_with_its_name() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let (state, _app, _cookie, _csrf, check_id, _run_id, _env) =
+        run_mock_check("mcp/connector_check_blocked").await;
+    let detail = ConnectorCheckService::new(state.db.as_ref().unwrap())
+        .get(check_id)
+        .await
+        .unwrap();
+    assert_eq!(detail.status, "failed");
+    assert_eq!(detail.failure.as_deref(), Some("result was blocked"));
+    assert!(
+        detail
+            .tool_calls
+            .iter()
+            .any(|c| c.tool == "result_submit" && c.status == "ok"),
+        "blocked submission must be recorded: {:?}",
+        detail.tool_calls
+    );
+    std::env::remove_var("MOCK_AGENT_RESPONSE");
+}
+
+#[tokio::test]
+async fn check_first_submitted_outcome_wins() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let (state, _app, _cookie, _csrf, check_id, _run_id, _env) =
+        run_mock_check("mcp/connector_check_blocked_then_done").await;
+    let detail = ConnectorCheckService::new(state.db.as_ref().unwrap())
+        .get(check_id)
+        .await
+        .unwrap();
+    assert_eq!(detail.status, "failed");
+    assert_eq!(detail.failure.as_deref(), Some("result was blocked"));
+    let submits: Vec<&str> = detail
+        .tool_calls
+        .iter()
+        .filter(|c| c.tool == "result_submit")
+        .map(|c| c.status.as_str())
+        .collect();
+    assert_eq!(submits, vec!["ok", "denied"]);
+    std::env::remove_var("MOCK_AGENT_RESPONSE");
+}

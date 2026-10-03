@@ -1,0 +1,24 @@
+{
+  "status": "done",
+  "summary": "connection ok",
+  "changedFiles": [],
+  "testsRun": [],
+  "mentionAgents": [],
+  "blockers": [],
+  "toolCalls": [
+    { "tool": "ticket_get", "args": {} },
+    {
+      "tool": "result_submit",
+      "args": {
+        "status": "blocked",
+        "summary": "cannot continue",
+        "blockerType": "error",
+        "mentionAgents": []
+      }
+    },
+    {
+      "tool": "result_submit",
+      "args": { "status": "done", "summary": "connection ok", "mentionAgents": [] }
+    }
+  ]
+}
