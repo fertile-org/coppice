@@ -930,6 +930,11 @@ impl AppConfig {
         Self::load_figment(Self::apply_env(Self::defaults_figment()))
     }
 
+    /// Load defaults → `path` only; ignores global/local config files and environment.
+    pub fn load_file_only(path: &Path) -> Result<Self, Box<figment::Error>> {
+        Self::load_figment(Self::merge_file(Self::defaults_figment(), path))
+    }
+
     pub fn local_config_path() -> PathBuf {
         std::env::current_dir()
             .unwrap_or_else(|_| PathBuf::from("."))
@@ -1128,6 +1133,19 @@ mod tests {
     fn loads_defaults_without_files() {
         let cfg = AppConfig::load_defaults().expect("defaults");
         assert_eq!(cfg.server.port, 5000);
+    }
+
+    #[test]
+    fn load_file_only_reads_file_over_defaults() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("config.toml");
+        std::fs::write(&path, "[server]\nport = 4321\n").expect("write config");
+
+        let cfg = AppConfig::load_file_only(&path).expect("config should load");
+
+        assert_eq!(cfg.server.port, 4321);
+        assert_eq!(cfg.web.port, 5001);
+        assert_eq!(cfg.agent.default_connector, "mock");
     }
 
     #[test]

@@ -3,6 +3,8 @@ pub mod api;
 pub mod config;
 pub mod crypto;
 pub mod db;
+#[cfg(unix)]
+pub mod desktop;
 pub mod domain;
 pub mod events;
 pub mod knowledge;

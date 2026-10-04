@@ -10,4 +10,5 @@ serde = { version = "1", features = ["derive"] }
 
 [dev-dependencies]
 coppice-connectors = { path = "../connectors" }
+tempfile = "3"
 toml = "0.8"

@@ -577,6 +577,7 @@ dependencies = [
  "directories",
  "figment",
  "serde",
+ "tempfile",
  "toml",
 ]
 
