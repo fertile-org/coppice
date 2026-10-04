@@ -360,6 +360,7 @@ fn percent_encode(value: &str) -> String {
 mod tests {
     use super::*;
     use std::os::unix::fs::PermissionsExt;
+    use std::os::unix::process::CommandExt;
 
     fn postgres_in(dir: &tempfile::TempDir) -> DesktopPostgres {
         let layout = DataLayout::new(&dir.path().join("Application Support").join("Coppice"));
@@ -491,17 +492,22 @@ mod tests {
         fn new(dir: &tempfile::TempDir, fail_fast: bool) -> Self {
             let pg = postgres_in(dir);
             std::fs::create_dir_all(&pg.pg_bin).unwrap();
+            // A script (not a renamed binary) so `ps -o comm=` reports `postgres`;
+            // no `exec`, which would rename the process to `sleep`.
             let fake_postgres = dir.path().join("postgres");
-            let sleep = std::process::Command::new("sh")
-                .args(["-c", "command -v sleep"])
-                .output()
+            std::fs::write(&fake_postgres, "#!/bin/sh\nwhile :; do sleep 1; done\n").unwrap();
+            std::fs::set_permissions(&fake_postgres, std::fs::Permissions::from_mode(0o755))
                 .unwrap();
-            let sleep = String::from_utf8(sleep.stdout).unwrap();
-            std::fs::copy(sleep.trim(), &fake_postgres).unwrap();
             let process = std::process::Command::new(&fake_postgres)
-                .arg("60")
+                .process_group(0)
                 .spawn()
                 .unwrap();
+            for _ in 0..50 {
+                if is_live_postgres(process.id()).unwrap() {
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(20));
+            }
             let pid_file = pg.pg_data.join("postmaster.pid");
             std::fs::write(&pid_file, format!("{}\n", process.id())).unwrap();
 
@@ -518,6 +524,17 @@ mod tests {
             Self { pg, log, process }
         }
 
+        fn assert_alive(&mut self) {
+            assert!(
+                self.process.try_wait().unwrap().is_none(),
+                "fake postgres exited"
+            );
+            assert!(
+                is_live_postgres(self.process.id()).unwrap(),
+                "fake postgres not seen as postgres"
+            );
+        }
+
         fn calls(&self) -> Vec<String> {
             std::fs::read_to_string(&self.log)
                 .unwrap_or_default()
@@ -529,6 +546,10 @@ mod tests {
 
     impl Drop for FakeRunningPostgres {
         fn drop(&mut self) {
+            // The whole group, so the script's `sleep` child goes too.
+            let _ = std::process::Command::new("kill")
+                .args(["-KILL", "--", &format!("-{}", self.process.id())])
+                .status();
             let _ = self.process.kill();
             let _ = self.process.wait();
         }
@@ -537,18 +558,22 @@ mod tests {
     #[tokio::test]
     async fn stop_uses_bounded_fast_shutdown() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let fake = FakeRunningPostgres::new(&dir, false);
+        let mut fake = FakeRunningPostgres::new(&dir, false);
+        fake.assert_alive();
 
         fake.pg.stop().await.expect("fast stop");
+        fake.assert_alive();
         assert_eq!(fake.calls(), ["fast -w -t 5 stop"]);
     }
 
     #[tokio::test]
     async fn stop_falls_back_to_immediate_when_fast_fails() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let fake = FakeRunningPostgres::new(&dir, true);
+        let mut fake = FakeRunningPostgres::new(&dir, true);
+        fake.assert_alive();
 
         fake.pg.stop().await.expect("immediate stop");
+        fake.assert_alive();
         assert_eq!(
             fake.calls(),
             ["fast -w -t 5 stop", "immediate -w -t 3 stop"]
