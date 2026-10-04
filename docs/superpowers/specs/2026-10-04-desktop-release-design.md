@@ -127,7 +127,7 @@ Trigger: `push` of tags matching `v*`.
 | `build` (matrix) | `macos-14` (arm64), `macos-13` (x64; swap for GitHub's successor Intel image if `macos-13` is retired), `ubuntu-22.04` (x64), `ubuntu-22.04-arm` (arm64) | `cargo build --release --locked -p coppice-server`; downloads the pinned Postgres bundle and verifies SHA-256; assembles resources; sets the version; runs electron-builder; **headless smoke** (below); uploads the installer to the draft release. |
 | `finalize` | ubuntu | Downloads the four installers, uploads `SHA256SUMS`. |
 
-**Headless smoke** (each matrix entry, against the packaged resources): run `coppice-server desktop` with a temp data dir, wait for `COPPICE_READY`, `GET /api/health` returns ok, `GET /` returns the SPA `index.html`, SIGTERM, assert exit 0 and no `postgres` process remains; run it a second time on the same data dir to prove restart.
+**Headless smoke** (each matrix entry, against the packaged resources): run `coppice-server desktop` with a temp data dir, wait for `COPPICE_READY`, `GET /health` returns ok, `GET /` returns the SPA `index.html`, SIGTERM, assert exit 0 and no `postgres` process remains; run it a second time on the same data dir to prove restart.
 
 Linux builds use Ubuntu 22.04 so the binaries run on older glibc. Caches: Rust (`Swatinem/rust-cache`), Yarn, and the Postgres bundle.
 
@@ -148,7 +148,7 @@ Pinned in `desktop/postgres.lock.json`: version, and per target the download URL
 | Stale `postmaster.pid` | Removed when the PID is not a live postgres process; then start normally. |
 | Postgres major mismatch | Child exits with a clear message; Electron failure window shows it. Data untouched. |
 | `initdb` failure / disk full | Child exits non-zero; failure window with log tail and Open logs folder. |
-| `git` missing (macOS without Command Line Tools) | App starts; Repositories and Connectors show "git not found" with an install hint. |
+| `git` missing (macOS without Command Line Tools) | App starts; Settings → Repositories shows "git not found" with an install hint. |
 | Agent CLI missing | Connectors page shows it missing (existing diagnostics). |
 | Electron crash | Child sees stdin EOF and shuts down cleanly. |
 | Update check offline / rate-limited | Silently skipped. |
