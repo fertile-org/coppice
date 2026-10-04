@@ -14,13 +14,16 @@ test('isNewer compares semver with rc ordering', () => {
 
 test('checkForUpdate returns the newer release', async () => {
   let requested;
-  const fetchImpl = async (url) => {
+  let options;
+  const fetchImpl = async (url, opts) => {
     requested = url;
+    options = opts;
     return { ok: true, json: () => ({ tag_name: 'v9.0.0', html_url: 'u' }) };
   };
   const result = await checkForUpdate({ repo: 'fertile-org/coppice', currentVersion: '1.0.0', fetchImpl });
   assert.deepEqual(result, { version: '9.0.0', url: 'u' });
   assert.equal(requested, 'https://api.github.com/repos/fertile-org/coppice/releases/latest');
+  assert.ok(options.signal instanceof AbortSignal, 'fetch is bounded by an abort signal');
 });
 
 test('checkForUpdate returns null when not newer, on non-200, or on error', async () => {

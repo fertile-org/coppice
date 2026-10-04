@@ -14,10 +14,19 @@ function openExternally(url) {
 
 /** Keeps `win` on `origin`; http(s) links elsewhere open in the system browser. */
 export function restrictNavigation(win, origin) {
-  win.webContents.on('will-navigate', (event, url) => {
-    if (origin && isSameOrigin(url, origin)) return;
+  const allowed = (url) => Boolean(origin) && isSameOrigin(url, origin);
+  win.webContents.on('will-navigate', (event) => {
+    if (allowed(event.url)) return;
     event.preventDefault();
-    openExternally(url);
+    openExternally(event.url);
+  });
+  win.webContents.on('will-frame-navigate', (event) => {
+    if (event.isMainFrame || allowed(event.url)) return;
+    event.preventDefault();
+  });
+  win.webContents.on('will-redirect', (event) => {
+    if (allowed(event.url)) return;
+    event.preventDefault();
   });
   win.webContents.setWindowOpenHandler(({ url }) => {
     openExternally(url);

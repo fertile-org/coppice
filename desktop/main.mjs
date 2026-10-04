@@ -13,7 +13,7 @@ const UPDATE_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const RELEASE_REPO = JSON.parse(fs.readFileSync(path.join(__dirname, 'package.json'), 'utf8'))
   .coppice.releaseRepo;
 
-if (process.env.COPPICE_DESKTOP_USER_DATA) {
+if (!app.isPackaged && process.env.COPPICE_DESKTOP_USER_DATA) {
   app.setPath('userData', path.resolve(process.env.COPPICE_DESKTOP_USER_DATA));
 }
 
@@ -65,7 +65,7 @@ ipcMain.handle('coppice:error-action', (event, action) => {
   if (action === 'open-logs') {
     void shell.openPath(logsDir());
   } else if (action === 'retry') {
-    void launchServer();
+    void ensureLaunch();
   } else if (action === 'quit') {
     app.quit();
   }
@@ -78,6 +78,12 @@ function startUpdateChecks() {
   };
   check();
   updateTimer = setInterval(check, UPDATE_INTERVAL_MS);
+  updateTimer.unref?.();
+}
+
+function stopUpdateChecks() {
+  if (updateTimer) clearInterval(updateTimer);
+  updateTimer = null;
 }
 
 function closeWindow(win) {
@@ -108,42 +114,73 @@ function openMainWindow(url) {
 }
 
 let shellPathPromise = null;
+let launching = null;
+
+function showSplash() {
+  if (!splashWindow || splashWindow.isDestroyed()) {
+    splashWindow = createSplashWindow();
+  } else {
+    splashWindow.focus();
+  }
+}
+
+/** At most one launch runs at a time; two servers must never share the data dir. */
+function ensureLaunch() {
+  if (launching) {
+    showSplash();
+  } else {
+    launching = launchServer().finally(() => {
+      launching = null;
+    });
+  }
+  return launching;
+}
 
 async function launchServer() {
-  const previous = [splashWindow, errorWindow];
-  splashWindow = createSplashWindow();
+  const previousError = errorWindow;
   errorWindow = null;
-  previous.forEach(closeWindow);
+  showSplash();
+  closeWindow(previousError);
 
-  shellPathPromise ??= resolveLoginShellPath();
-  const PATH = await shellPathPromise;
-  if (quitting) return;
-
-  const resources = resourcesDir();
-  const current = startServer({
-    command: path.join(resources, 'bin', 'coppice-server'),
-    args: ['desktop', '--data-dir', app.getPath('userData'), '--resources', resources],
-    env: { ...process.env, PATH },
-    logFile: path.join(logsDir(), 'server.log'),
-  });
-  server = current;
-
+  let current = null;
   let url;
   try {
+    shellPathPromise ??= resolveLoginShellPath();
+    const PATH = await shellPathPromise;
+    if (quitting) return;
+
+    const resources = resourcesDir();
+    if (server) void server.stop();
+    current = startServer({
+      command: path.join(resources, 'bin', 'coppice-server'),
+      args: ['desktop', '--data-dir', app.getPath('userData'), '--resources', resources],
+      env: { ...process.env, PATH },
+      logFile: path.join(logsDir(), 'server.log'),
+    });
+    server = current;
     url = await current.ready;
   } catch (err) {
-    await current.stop();
-    if (current === server && !quitting) showError(err.message, current.lastLines(50));
+    if (current) await current.stop();
+    if (current && current !== server) return;
+    if (!quitting) showError(err.message, current?.lastLines(50) ?? []);
     return;
   }
-  if (current !== server || quitting) return;
+  if (current !== server) {
+    void current.stop();
+    return;
+  }
+  if (quitting) return;
 
   serverUrl = url;
   openMainWindow(url);
   startUpdateChecks();
 
   void current.exited.then((code) => {
-    if (current !== server || quitting) return;
+    if (current !== server) {
+      void current.stop();
+      return;
+    }
+    if (quitting) return;
     serverUrl = null;
     void current.stop();
     showError(`Coppice server stopped unexpectedly (exit code ${code}).`, current.lastLines(50));
@@ -175,7 +212,7 @@ app.on('before-quit', (event) => {
   quitting = true;
   if (readyToQuit || !server) return;
   event.preventDefault();
-  if (updateTimer) clearInterval(updateTimer);
+  stopUpdateChecks();
   void server.stop().finally(() => {
     readyToQuit = true;
     app.quit();
@@ -194,13 +231,13 @@ if (DEV_URL) {
 } else {
   app.on('second-instance', focusExistingWindow);
   app.whenReady().then(() => {
-    void launchServer();
+    void ensureLaunch();
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length > 0) return;
-      if (serverUrl) {
+      if (serverUrl && !launching) {
         openMainWindow(serverUrl);
       } else {
-        void launchServer();
+        void ensureLaunch();
       }
     });
   });

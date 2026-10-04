@@ -27,6 +27,7 @@ export async function checkForUpdate({ repo, currentVersion, fetchImpl = fetch }
   try {
     const res = await fetchImpl(`https://api.github.com/repos/${repo}/releases/latest`, {
       headers: { Accept: 'application/vnd.github+json' },
+      signal: AbortSignal.timeout(10_000),
     });
     if (!res.ok) return null;
     const body = await res.json();

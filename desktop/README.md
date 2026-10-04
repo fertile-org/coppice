@@ -27,6 +27,7 @@ resources/
 
 Then `yarn start`. Set `COPPICE_DESKTOP_USER_DATA=/tmp/coppice-test` to use a throwaway data directory
 instead of the OS default (`~/.config/coppice-desktop`, `~/Library/Application Support/coppice-desktop`).
+This variable only applies to unpackaged runs from a checkout; packaged apps ignore it.
 
 ## Tests
 

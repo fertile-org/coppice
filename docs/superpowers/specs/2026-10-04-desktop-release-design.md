@@ -103,11 +103,11 @@ On `before-quit`: SIGTERM the child, wait up to 15 s, then SIGKILL. macOS keeps 
 
 ### Security
 
-`contextIsolation: true`, `sandbox: true`, no `nodeIntegration`. Navigation is restricted to the server origin; other URLs open in the system browser via `shell.openExternal`. Preload exposes only `pickDirectory()` (existing) and `appInfo()` → `{ version, platform, arch }`.
+`contextIsolation: true`, `sandbox: true`, no `nodeIntegration`. Navigation is restricted to the server origin; other URLs open in the system browser via `shell.openExternal`. Preload exposes only `pickDirectory()` (existing), `appInfo()` → `{ version, platform, arch }`, and `getUpdateInfo()` → `{ version, url } | null` (the cached update check). The splash and error windows are local pages; the error window gets its own minimal preload (log details + Open logs / Retry / Quit), never the main window's bridge.
 
 ### Update banner
 
-On launch and every 24 h, `GET https://api.github.com/repos/fertile-org/coppice/releases/latest` (unauthenticated; the repo slug is a build-time constant in `desktop/package.json` → `coppice.releaseRepo`). If its tag is a newer semver than `app.getVersion()`, show a dismissible bar: "Coppice X.Y.Z is available — Download", opening the release page externally. Network errors are ignored. Drafts and pre-releases are not returned by this endpoint, so users only see published stable releases.
+On launch and every 24 h, `GET https://api.github.com/repos/fertile-org/coppice/releases/latest` (unauthenticated; the repo slug is a build-time constant in `desktop/package.json` → `coppice.releaseRepo`). If its tag is a newer semver than `app.getVersion()`, show a dismissible bar: "Coppice X.Y.Z is available — Download", opening the release page externally. Network errors are ignored (requests time out after 10 s). The main process caches the latest result; the web banner reads it via `getUpdateInfo()` when it mounts, so a newer release found by the 24 h re-check appears after the next reload or relaunch. Dismissal is remembered per version (`localStorage` `coppice.dismissedUpdate`). Drafts and pre-releases are not returned by this endpoint, so users only see published stable releases.
 
 ### Dev mode
 

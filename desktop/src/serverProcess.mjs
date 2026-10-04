@@ -3,6 +3,7 @@ import { parseReadyLine } from './readyLine.mjs';
 import { createRotatingLog } from './rotatingLog.mjs';
 
 const RING_SIZE = 500;
+const KILL_WAIT_MS = 2000;
 
 function createLineSplitter(onLine) {
   let pending = '';
@@ -30,6 +31,7 @@ export function startServer({
   logFile,
   timeoutMs = 60000,
   graceMs = 15000,
+  drainMs = 2000,
 }) {
   const log = createRotatingLog(logFile);
   const ring = [];
@@ -39,7 +41,6 @@ export function startServer({
     stdio: ['pipe', 'pipe', 'pipe'],
   });
 
-  let exitCode;
   let settled = false;
   let resolveReady;
   let rejectReady;
@@ -80,51 +81,75 @@ export function startServer({
     settle(rejectReady, new Error(`coppice-server timed out after ${timeoutMs} ms without a ready line`));
   }, timeoutMs);
 
+  let childGone = false;
+  let resolveChildExit;
+  const childExit = new Promise((resolve) => {
+    resolveChildExit = resolve;
+  });
+
+  // `exited` follows the child's 'exit', then waits up to `drainMs` for 'close' so trailing
+  // output is still captured; a grandchild holding the pipes cannot delay it further.
   const exited = new Promise((resolve) => {
-    child.on('error', (err) => {
-      onLine(`failed to start ${command}: ${err.message}`);
-      settle(rejectReady, new Error(`failed to start coppice-server: ${err.message}`));
-      exitCode = null;
-      log.close();
-      resolve(null);
-    });
-    child.on('close', (code, signal) => {
+    let done = false;
+    let drainTimer;
+    function finish(code, signal) {
+      if (done) return;
+      done = true;
+      clearTimeout(drainTimer);
       for (const splitter of splitters) splitter.flush();
-      exitCode = code;
       const how = code === null ? `signal ${signal}` : `code ${code}`;
       settle(rejectReady, new Error(`coppice-server exited with ${how} before it was ready`));
       log.close();
       resolve(code);
+    }
+    child.on('error', (err) => {
+      onLine(`failed to start ${command}: ${err.message}`);
+      settle(rejectReady, new Error(`failed to start coppice-server: ${err.message}`));
+      childGone = true;
+      resolveChildExit();
+      finish(null, null);
     });
+    child.on('exit', (code, signal) => {
+      childGone = true;
+      resolveChildExit();
+      drainTimer = setTimeout(() => finish(code, signal), drainMs);
+    });
+    child.on('close', (code, signal) => finish(code, signal));
   });
+
+  function within(promise, ms) {
+    let timer;
+    return Promise.race([
+      promise.then(() => true),
+      new Promise((resolve) => {
+        timer = setTimeout(() => resolve(false), ms);
+      }),
+    ]).finally(() => clearTimeout(timer));
+  }
+
+  function killGroup() {
+    if (child.pid === undefined) return;
+    try {
+      process.kill(-child.pid, 'SIGKILL');
+    } catch (err) {
+      if (err.code !== 'ESRCH') throw err;
+    }
+  }
 
   let stopping = null;
 
   async function doStop() {
     settle(rejectReady, new Error('coppice-server stopped before it was ready'));
-    if (exitCode === undefined && child.pid !== undefined) {
+    if (!childGone && child.pid !== undefined) {
       child.stdin.end();
       child.kill('SIGTERM');
-      let graceTimer;
-      const timedOut = await Promise.race([
-        exited.then(() => false),
-        new Promise((resolve) => {
-          graceTimer = setTimeout(() => resolve(true), graceMs);
-        }),
-      ]);
-      clearTimeout(graceTimer);
-      if (timedOut) {
+      if (!(await within(childExit, graceMs))) {
         child.kill('SIGKILL');
-        await exited;
+        await within(childExit, KILL_WAIT_MS);
       }
     }
-    if (child.pid !== undefined) {
-      try {
-        process.kill(-child.pid, 'SIGKILL');
-      } catch (err) {
-        if (err.code !== 'ESRCH') throw err;
-      }
-    }
+    killGroup();
+    await within(exited, KILL_WAIT_MS);
   }
 
   return {

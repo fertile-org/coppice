@@ -86,6 +86,53 @@ test('ready rejects when the command cannot be spawned', async () => {
   await server.stop();
 });
 
+/** A SIGKILLed orphan stays visible to kill(pid, 0) until init reaps it. */
+async function waitGone(pid, ms = 2000) {
+  const deadline = Date.now() + ms;
+  while (isAlive(pid) && Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, 20));
+  }
+  return !isAlive(pid);
+}
+
+function grandchildPid(server) {
+  const line = server.lastLines(500).find((l) => l.startsWith('GRANDCHILD pid='));
+  assert.ok(line, 'fake server reported its grandchild');
+  return Number(line.slice('GRANDCHILD pid='.length));
+}
+
+test('stop is prompt even when a grandchild holds the output pipes', async () => {
+  const server = start('grandchild');
+  await server.ready;
+  const sleeper = grandchildPid(server);
+  const started = Date.now();
+  await server.stop();
+  assert.ok(Date.now() - started < 1500, `stop took ${Date.now() - started} ms`);
+  assert.equal(await server.exited, 0);
+  assert.equal(await waitGone(sleeper), true);
+});
+
+test('exited resolves when the child exits but a grandchild keeps the pipes open', async () => {
+  const server = start('grandchild-exit', { drainMs: 200 });
+  const started = Date.now();
+  await assert.rejects(server.ready, /5/);
+  assert.equal(await server.exited, 5);
+  assert.ok(Date.now() - started < 1500, `exit detection took ${Date.now() - started} ms`);
+  const sleeper = grandchildPid(server);
+  await server.stop();
+  assert.equal(await waitGone(sleeper), true);
+});
+
+test('an unwritable log location does not break the server', async (t) => {
+  t.mock.method(console, 'error', () => {});
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'coppice-server-test-'));
+  fs.writeFileSync(path.join(dir, 'file'), '');
+  const server = start('ready', { logFile: path.join(dir, 'file', 'logs', 'server.log') });
+  assert.equal(await server.ready, 'http://127.0.0.1:5123');
+  assert.ok(server.lastLines().includes('INFO starting fake server'));
+  await server.stop();
+});
+
 test('lastLines returns the most recent n lines', async () => {
   const server = start('exit-early');
   await assert.rejects(server.ready);

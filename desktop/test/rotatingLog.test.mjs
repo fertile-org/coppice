@@ -41,6 +41,36 @@ test('appends to an existing log across instances', () => {
   assert.equal(fs.readFileSync(file, 'utf8'), 'first\nsecond\n');
 });
 
+function silenceConsoleError(t) {
+  const calls = [];
+  t.mock.method(console, 'error', (...args) => calls.push(args));
+  return calls;
+}
+
+test('unwritable directory yields a no-op logger instead of throwing', (t) => {
+  const calls = silenceConsoleError(t);
+  const dir = tmpDir();
+  const notADir = path.join(dir, 'file');
+  fs.writeFileSync(notADir, '');
+  const log = createRotatingLog(path.join(notADir, 'logs', 'server.log'));
+  log.write('hello\n');
+  log.close();
+  assert.equal(calls.length, 1);
+});
+
+test('rotation failure disables file logging after one error', (t) => {
+  const calls = silenceConsoleError(t);
+  const dir = tmpDir();
+  const file = path.join(dir, 'server.log');
+  const log = createRotatingLog(file, { maxBytes: 5 });
+  fs.rmSync(dir, { recursive: true, force: true });
+  log.write('0123456789\n');
+  log.write('more\n');
+  log.write('and more\n');
+  log.close();
+  assert.equal(calls.length, 1);
+});
+
 test('write after close is ignored', () => {
   const dir = tmpDir();
   const file = path.join(dir, 'server.log');
