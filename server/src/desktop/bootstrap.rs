@@ -1,5 +1,5 @@
 use std::io::{self, Write};
-use std::os::unix::fs::OpenOptionsExt;
+use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 
 use rand::RngCore;
@@ -18,8 +18,10 @@ pub struct DesktopSecrets {
     pub admin_password: String,
 }
 
-/// One file per secret in `dir`; generated on first run (mode `0600`) and reused after.
+/// One file per secret in `dir` (made `0700`); generated on first run (mode
+/// `0600`) and reused after.
 pub fn load_or_create_secrets(dir: &Path) -> io::Result<DesktopSecrets> {
+    std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700))?;
     Ok(DesktopSecrets {
         session_secret: load_or_create_secret(&dir.join("session_secret"))?,
         master_key: load_or_create_secret(&dir.join("master_key"))?,
@@ -29,27 +31,18 @@ pub fn load_or_create_secrets(dir: &Path) -> io::Result<DesktopSecrets> {
 }
 
 fn load_or_create_secret(path: &Path) -> io::Result<String> {
+    // Only a crash during the non-atomic writes of earlier versions leaves an
+    // empty file, before anything could have been encrypted with it.
+    if std::fs::metadata(path).is_ok_and(|meta| meta.len() == 0) {
+        std::fs::remove_file(path)?;
+    }
     let mut bytes = [0u8; SECRET_BYTES];
     rand::rngs::OsRng.fill_bytes(&mut bytes);
     let value = hex::encode(bytes);
-    match std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .mode(0o600)
-        .open(path)
-    {
-        Ok(mut file) => {
-            if let Err(err) = file
-                .write_all(value.as_bytes())
-                .and_then(|()| file.sync_all())
-            {
-                let _ = std::fs::remove_file(path);
-                return Err(err);
-            }
-            Ok(value)
-        }
-        Err(err) if err.kind() == io::ErrorKind::AlreadyExists => read_secret(path),
-        Err(err) => Err(err),
+    if write_new_file(path, &value, 0o600)? {
+        Ok(value)
+    } else {
+        read_secret(path)
     }
 }
 
@@ -72,14 +65,28 @@ fn read_secret(path: &Path) -> io::Result<String> {
 /// Writes the desktop `config.toml` if missing; returns true when created.
 /// An existing file is never touched so user edits survive upgrades.
 pub fn ensure_config_file(layout: &DataLayout) -> io::Result<bool> {
-    let contents = generated_config(layout)?;
-    match std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(&layout.config_file)
-    {
-        Ok(mut file) => {
-            file.write_all(contents.as_bytes())?;
+    if layout.config_file.exists() {
+        return Ok(false);
+    }
+    write_new_file(&layout.config_file, &generated_config(layout)?, 0o644)
+}
+
+/// Creates `path` with `contents` unless it exists; returns true when created.
+/// The data is written and synced to a temp file in the same directory, then
+/// hard-linked into place, so `path` only ever appears complete after a crash.
+fn write_new_file(path: &Path, contents: &str, mode: u32) -> io::Result<bool> {
+    let dir = path
+        .parent()
+        .ok_or_else(|| io::Error::other(format!("{} has no parent", path.display())))?;
+    let mut temp = tempfile::Builder::new()
+        .prefix(".coppice-")
+        .permissions(std::fs::Permissions::from_mode(mode))
+        .tempfile_in(dir)?;
+    temp.write_all(contents.as_bytes())?;
+    temp.as_file().sync_all()?;
+    match std::fs::hard_link(temp.path(), path) {
+        Ok(()) => {
+            std::fs::File::open(dir)?.sync_all()?;
             Ok(true)
         }
         Err(err) if err.kind() == io::ErrorKind::AlreadyExists => Ok(false),
@@ -248,13 +255,98 @@ mod tests {
     #[test]
     fn corrupt_secret_file_is_an_error_naming_the_file() {
         let dir = tempfile::tempdir().expect("tempdir");
-        std::fs::write(dir.path().join("master_key"), "").unwrap();
+        std::fs::write(dir.path().join("master_key"), "not-hex\n").unwrap();
 
-        let err = load_or_create_secrets(dir.path()).expect_err("empty secret must fail");
+        let err = load_or_create_secrets(dir.path()).expect_err("corrupt secret must fail");
         assert!(err.to_string().contains("master_key"), "{err}");
         assert_eq!(
             std::fs::read_to_string(dir.path().join("master_key")).unwrap(),
-            ""
+            "not-hex\n"
+        );
+    }
+
+    fn file_names(dir: &Path) -> Vec<String> {
+        let mut names: Vec<String> = std::fs::read_dir(dir)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        names.sort();
+        names
+    }
+
+    #[test]
+    fn zero_length_secret_left_by_a_crash_is_regenerated() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let first = load_or_create_secrets(dir.path()).expect("create");
+        std::fs::write(dir.path().join("master_key"), "").unwrap();
+
+        let second = load_or_create_secrets(dir.path()).expect("regenerate");
+        assert_eq!(second.master_key.len(), 64);
+        assert_ne!(second.master_key, first.master_key);
+        assert_eq!(second.session_secret, first.session_secret);
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("master_key")).unwrap(),
+            second.master_key
+        );
+        let mode = std::fs::metadata(dir.path().join("master_key"))
+            .unwrap()
+            .permissions()
+            .mode();
+        assert_eq!(mode & 0o777, 0o600);
+    }
+
+    #[test]
+    fn secrets_dir_is_private_and_holds_no_temp_files() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let secrets_dir = dir.path().join("secrets");
+        std::fs::create_dir_all(&secrets_dir).unwrap();
+        std::fs::set_permissions(&secrets_dir, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        load_or_create_secrets(&secrets_dir).expect("create");
+        let mode = std::fs::metadata(&secrets_dir)
+            .unwrap()
+            .permissions()
+            .mode();
+        assert_eq!(mode & 0o777, 0o700);
+        assert_eq!(
+            file_names(&secrets_dir),
+            [
+                "admin_password",
+                "master_key",
+                "pg_password",
+                "session_secret"
+            ]
+        );
+    }
+
+    #[test]
+    fn write_new_file_never_replaces_and_leaves_no_temp_file() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("config.toml");
+
+        assert!(write_new_file(&path, "complete\n", 0o644).expect("create"));
+        assert!(!write_new_file(&path, "other\n", 0o644).expect("exists"));
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "complete\n");
+        assert_eq!(file_names(dir.path()), ["config.toml"]);
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, 0o644);
+    }
+
+    #[test]
+    fn ensure_config_file_leaves_only_the_complete_file() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let layout = layout_in(&dir);
+
+        assert!(ensure_config_file(&layout).expect("create"));
+        let contents = std::fs::read_to_string(&layout.config_file).unwrap();
+        assert_eq!(contents, generated_config(&layout).unwrap());
+        let config_dir = layout.config_file.parent().unwrap();
+        assert!(
+            file_names(config_dir)
+                .iter()
+                .all(|name| !name.starts_with('.')),
+            "{:?}",
+            file_names(config_dir)
         );
     }
 
