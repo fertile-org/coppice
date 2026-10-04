@@ -12,6 +12,12 @@ use super::layout::{DataLayout, ResourceLayout};
 
 const SUPERUSER: &str = "coppice";
 const START_TIMEOUT_SECS: &str = "60";
+const START_LOG_TAIL_LINES: usize = 20;
+/// TCP on loopback only; no Unix socket (macOS socket path length limits).
+const LOOPBACK_SETTINGS: [(&str, &str); 2] = [
+    ("listen_addresses", "127.0.0.1"),
+    ("unix_socket_directories", ""),
+];
 
 /// The bundled Postgres cluster in `D/pg/data`, run from `R/postgres`.
 #[derive(Debug, Clone)]
@@ -85,21 +91,46 @@ impl DesktopPostgres {
                 .args(["-U", SUPERUSER])
                 .arg(format!("--pwfile={}", pwfile.path().display()))
                 .args(["-A", "scram-sha-256", "-E", "UTF8", "--locale=C"]);
+            for (key, value) in LOOPBACK_SETTINGS {
+                cmd.arg("-c").arg(format!("{key}={value}"));
+            }
         })
         .await?;
-
-        let conf_path = self.pg_data.join("postgresql.conf");
-        let mut conf = std::fs::OpenOptions::new()
-            .append(true)
-            .open(&conf_path)
-            .with_context(|| format!("open {}", conf_path.display()))?;
-        conf.write_all(
-            b"\n# Coppice desktop: TCP on loopback only, no Unix socket.\n\
-              listen_addresses = '127.0.0.1'\n\
-              unix_socket_directories = ''\n",
-        )
-        .with_context(|| format!("append {}", conf_path.display()))?;
         Ok(true)
+    }
+
+    /// Appends any loopback-only setting that `postgresql.conf` does not
+    /// currently end up with, so an edited or half-initialised config can
+    /// never expose Postgres beyond `127.0.0.1` or open a Unix socket.
+    pub fn ensure_loopback_config(&self) -> anyhow::Result<()> {
+        let path = self.pg_data.join("postgresql.conf");
+        let conf =
+            std::fs::read_to_string(&path).with_context(|| format!("read {}", path.display()))?;
+        let missing: String = LOOPBACK_SETTINGS
+            .iter()
+            .filter(|(key, value)| last_setting(&conf, key).as_deref() != Some(*value))
+            .map(|(key, value)| format!("{key} = '{value}'\n"))
+            .collect();
+        if missing.is_empty() {
+            return Ok(());
+        }
+        let separator = if conf.is_empty() || conf.ends_with('\n') {
+            ""
+        } else {
+            "\n"
+        };
+        let mut file = std::fs::OpenOptions::new()
+            .append(true)
+            .open(&path)
+            .with_context(|| format!("open {}", path.display()))?;
+        file.write_all(
+            format!(
+                "{separator}# Coppice desktop: TCP on loopback only, no Unix socket.\n{missing}"
+            )
+            .as_bytes(),
+        )
+        .and_then(|()| file.sync_all())
+        .with_context(|| format!("append {}", path.display()))
     }
 
     /// Removes `postmaster.pid` left by a crashed server; returns true when removed.
@@ -124,17 +155,25 @@ impl DesktopPostgres {
     }
 
     pub async fn start(&self, port: u16) -> anyhow::Result<()> {
-        self.run("pg_ctl", |cmd| {
-            cmd.arg("-D")
-                .arg(&self.pg_data)
-                .arg("-l")
-                .arg(&self.pg_log)
-                .arg("-o")
-                .arg(format!("-p {port}"))
-                .args(["-w", "-t", START_TIMEOUT_SECS, "start"]);
-        })
-        .await
-        .with_context(|| format!("postgres failed to start; see {}", self.pg_log.display()))?;
+        self.ensure_loopback_config()?;
+        let result = self
+            .run("pg_ctl", |cmd| {
+                cmd.arg("-D")
+                    .arg(&self.pg_data)
+                    .arg("-l")
+                    .arg(&self.pg_log)
+                    .arg("-o")
+                    .arg(format!("-p {port}"))
+                    .args(["-w", "-t", START_TIMEOUT_SECS, "start"]);
+            })
+            .await;
+        if let Err(err) = result {
+            let tail = log_tail(&self.pg_log, START_LOG_TAIL_LINES);
+            return Err(err.context(format!(
+                "postgres failed to start; last lines of {}:\n{tail}",
+                self.pg_log.display()
+            )));
+        }
         Ok(())
     }
 
@@ -178,6 +217,7 @@ impl DesktopPostgres {
 
     /// Fast shutdown; Ok when the server is not running.
     pub async fn stop(&self) -> anyhow::Result<()> {
+        self.clear_stale_pid()?;
         if !self.pg_data.join("postmaster.pid").exists() {
             return Ok(());
         }
@@ -202,15 +242,56 @@ impl DesktopPostgres {
             .await
             .with_context(|| format!("run {}", self.pg_bin.join(bin).display()))?;
         if !output.status.success() {
-            bail!(
-                "{bin} exited with {}: {}{}",
-                output.status,
-                String::from_utf8_lossy(&output.stderr).trim(),
-                String::from_utf8_lossy(&output.stdout).trim()
-            );
+            bail!(failure_message(
+                bin,
+                &output.status.to_string(),
+                &String::from_utf8_lossy(&output.stderr),
+                &String::from_utf8_lossy(&output.stdout),
+            ));
         }
         Ok(output)
     }
+}
+
+fn failure_message(bin: &str, status: &str, stderr: &str, stdout: &str) -> String {
+    let mut message = format!("{bin} exited with {status}");
+    let streams: Vec<&str> = [stderr.trim(), stdout.trim()]
+        .into_iter()
+        .filter(|s| !s.is_empty())
+        .collect();
+    if !streams.is_empty() {
+        message.push_str(":\n");
+        message.push_str(&streams.join("\n"));
+    }
+    message
+}
+
+/// Last `lines` lines of `path`; empty when unreadable.
+fn log_tail(path: &Path, lines: usize) -> String {
+    let contents = std::fs::read_to_string(path).unwrap_or_default();
+    let all: Vec<&str> = contents.lines().collect();
+    all[all.len().saturating_sub(lines)..].join("\n")
+}
+
+/// Effective value of `key` in a `postgresql.conf` body: the last uncommented
+/// assignment wins, quotes stripped.
+fn last_setting(conf: &str, key: &str) -> Option<String> {
+    conf.lines().rev().find_map(|line| parse_setting(line, key))
+}
+
+fn parse_setting(line: &str, key: &str) -> Option<String> {
+    let rest = line.trim_start().strip_prefix(key)?;
+    if !rest.starts_with(|c: char| c == '=' || c.is_whitespace()) {
+        return None;
+    }
+    let rest = rest.trim_start();
+    let rest = rest.strip_prefix('=').unwrap_or(rest).trim_start();
+    if let Some(quoted) = rest.strip_prefix('\'') {
+        let end = quoted.find('\'')?;
+        return Some(quoted[..end].to_string());
+    }
+    let value = rest.split('#').next().unwrap_or("").trim();
+    Some(value.to_string())
 }
 
 /// Major version from `postgres --version`, e.g. `postgres (PostgreSQL) 16.4` → 16.
@@ -310,6 +391,108 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         let pg = postgres_in(&dir);
         assert!(!pg.clear_stale_pid().expect("clear"));
+    }
+
+    const LOOPBACK_CONF: &str = "listen_addresses = '127.0.0.1'\nunix_socket_directories = ''\n";
+
+    fn conf_after_ensure(dir: &tempfile::TempDir, initial: &str) -> String {
+        let pg = postgres_in(dir);
+        let conf = pg.pg_data.join("postgresql.conf");
+        std::fs::write(&conf, initial).unwrap();
+        pg.ensure_loopback_config().expect("ensure loopback");
+        std::fs::read_to_string(&conf).unwrap()
+    }
+
+    fn assert_loopback_only(conf: &str) {
+        assert_eq!(
+            last_setting(conf, "listen_addresses").as_deref(),
+            Some("127.0.0.1"),
+            "{conf}"
+        );
+        assert_eq!(
+            last_setting(conf, "unix_socket_directories").as_deref(),
+            Some(""),
+            "{conf}"
+        );
+    }
+
+    #[test]
+    fn ensure_loopback_config_appends_missing_settings() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let conf = conf_after_ensure(&dir, "max_connections = 100\n");
+        assert!(conf.starts_with("max_connections = 100\n"));
+        assert_loopback_only(&conf);
+    }
+
+    #[test]
+    fn ensure_loopback_config_leaves_present_settings_untouched() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let initial = format!("#listen_addresses = 'localhost'\n{LOOPBACK_CONF}port = 5432 # x\n");
+        assert_eq!(conf_after_ensure(&dir, &initial), initial);
+    }
+
+    #[test]
+    fn ensure_loopback_config_appends_when_only_commented_out() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let initial = "#listen_addresses = '127.0.0.1'\n#unix_socket_directories = ''\n";
+        let conf = conf_after_ensure(&dir, initial);
+        assert!(conf.len() > initial.len());
+        assert_loopback_only(&conf);
+    }
+
+    #[test]
+    fn ensure_loopback_config_overrides_later_conflicting_value() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let initial = format!("{LOOPBACK_CONF}listen_addresses = '*'\n");
+        assert_loopback_only(&conf_after_ensure(&dir, &initial));
+    }
+
+    #[tokio::test]
+    async fn stop_with_stale_pid_is_ok_without_pg_ctl() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let pg = postgres_in(&dir);
+        let pid_file = pg.pg_data.join("postmaster.pid");
+        std::fs::write(&pid_file, "999999\n").unwrap();
+
+        pg.stop().await.expect("stale pid means not running");
+        assert!(!pid_file.exists());
+    }
+
+    #[test]
+    fn last_setting_ignores_comments_and_similar_keys() {
+        let conf = "listen_addresses='a' # c\nlisten_addresses_x = 'b'\n# listen_addresses = 'c'\n";
+        assert_eq!(last_setting(conf, "listen_addresses").as_deref(), Some("a"));
+        assert_eq!(last_setting("port = 5 # x\n", "port").as_deref(), Some("5"));
+        assert_eq!(last_setting("", "port"), None);
+    }
+
+    #[test]
+    fn failure_message_omits_empty_streams() {
+        assert_eq!(
+            failure_message("initdb", "1", "  ", ""),
+            "initdb exited with 1"
+        );
+        assert_eq!(
+            failure_message("initdb", "1", "bad\n", " out "),
+            "initdb exited with 1:\nbad\nout"
+        );
+        assert_eq!(
+            failure_message("initdb", "1", "", "out"),
+            "initdb exited with 1:\nout"
+        );
+    }
+
+    #[test]
+    fn log_tail_keeps_last_lines() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let log = dir.path().join("postgres.log");
+        let lines: Vec<String> = (1..=30).map(|i| format!("line {i}")).collect();
+        std::fs::write(&log, lines.join("\n")).unwrap();
+
+        let tail = log_tail(&log, 20);
+        assert!(tail.starts_with("line 11\n"), "{tail}");
+        assert!(tail.ends_with("line 30"), "{tail}");
+        assert_eq!(log_tail(&dir.path().join("missing.log"), 20), "");
     }
 
     #[test]
