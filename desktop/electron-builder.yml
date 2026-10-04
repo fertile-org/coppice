@@ -1,0 +1,33 @@
+appId: dev.coppice.app
+productName: Coppice
+artifactName: Coppice-${version}-${os}-${arch}.${ext}
+directories:
+  output: dist
+  buildResources: build
+files:
+  - main.mjs
+  - preload.cjs
+  - src/**
+  - static/**
+  - package.json
+extraResources:
+  - from: resources
+    to: .
+mac:
+  target: dmg
+  category: public.app-category.developer-tools
+  hardenedRuntime: true
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.plist
+  notarize: false
+linux:
+  target: deb
+  category: Development
+  maintainer: Coppice Maintainers <coppice@users.noreply.github.com>
+  executableName: coppice
+deb:
+  depends:
+    - git
+  afterInstall: build/linux/after-install.sh
+  afterRemove: build/linux/after-remove.sh
+  appArmorProfile: build/linux/apparmor-coppice

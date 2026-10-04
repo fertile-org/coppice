@@ -13,7 +13,7 @@ BOOTSTRAP_PASSWORD = changeme
 export COPPICE_UID ?= $(shell id -u)
 export COPPICE_GID ?= $(shell id -g)
 
-.PHONY: compose-up compose-down compose-local-up compose-local-down server server-dev test test-unit test-smoke test-pg-reset clippy clean migrate bootstrap web-install web-test web-dev web-build desktop desktop-test e2e-smoke e2e-smoke-m03 e2e-smoke-m04 e2e-smoke-m05 e2e-smoke-m06 e2e-smoke-m06-knowledge e2e-smoke-m09 e2e-smoke-m10 benchmark-m06-knowledge-retrieval release-tar
+.PHONY: compose-up compose-down compose-local-up compose-local-down server server-dev test test-unit test-smoke test-pg-reset clippy clean migrate bootstrap web-install web-test web-dev web-build desktop desktop-test desktop-dist-dir desktop-smoke e2e-smoke e2e-smoke-m03 e2e-smoke-m04 e2e-smoke-m05 e2e-smoke-m06 e2e-smoke-m06-knowledge e2e-smoke-m09 e2e-smoke-m10 benchmark-m06-knowledge-retrieval release-tar
 
 CARGO_TEST = cargo test --features embedded-test-db
 
@@ -98,6 +98,24 @@ desktop:
 
 desktop-test:
 	cd desktop && yarn install --frozen-lockfile && yarn test
+
+# POSTGRES_DIR=<dir with bin/lib/share> skips the pinned download (e.g. a pg-embed cache).
+DESKTOP_PG_DIR = $(abspath $(or $(POSTGRES_DIR),desktop/.cache/postgres-host))
+DESKTOP_RESOURCES = $(firstword $(wildcard desktop/dist/linux*-unpacked/resources desktop/dist/mac*/Coppice.app/Contents/Resources))
+
+desktop-dist-dir:
+	cargo build --release --locked -p coppice-server
+	cd web && yarn install --frozen-lockfile && yarn build
+	cd desktop && yarn install --frozen-lockfile
+ifndef POSTGRES_DIR
+	cd desktop && node scripts/fetch-postgres.mjs --out $(DESKTOP_PG_DIR)
+endif
+	cd desktop && node scripts/assemble-resources.mjs --server-bin ../target/release/coppice-server --web-dist ../web/dist --postgres $(DESKTOP_PG_DIR)
+	cd desktop && yarn dist:dir
+
+desktop-smoke:
+	@test -n "$(DESKTOP_RESOURCES)" || { echo "no packaged build under desktop/dist; run make desktop-dist-dir" >&2; exit 1; }
+	cd desktop && node scripts/headless-smoke.mjs --resources $(abspath $(DESKTOP_RESOURCES))
 
 e2e-smoke:
 	$(MAKE) compose-up

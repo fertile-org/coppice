@@ -42,6 +42,47 @@ jobs:
       - run: corepack enable && corepack prepare yarn@1.22.22 --activate
       - run: cd web && yarn install --frozen-lockfile && yarn test
 
+  # Packages the desktop app unpacked (no installer) to catch packaging breakage
+  # before a release tag; Ubuntu 22.04 matches the release build's glibc.
+  desktop:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: yarn
+          cache-dependency-path: |
+            web/yarn.lock
+            desktop/yarn.lock
+      - run: corepack enable && corepack prepare yarn@1.22.22 --activate
+      - name: Cache Postgres bundle and Electron downloads
+        uses: actions/cache@v4
+        with:
+          path: |
+            desktop/.cache/postgres
+            ~/.cache/electron
+            ~/.cache/electron-builder
+          key: desktop-${{ runner.os }}-${{ hashFiles('desktop/postgres.lock.json', 'desktop/yarn.lock') }}
+      - name: Build server
+        run: cargo build --release --locked -p coppice-server
+      - name: Build web
+        run: cd web && yarn install --frozen-lockfile && yarn build
+      - name: Install desktop dependencies
+        run: cd desktop && yarn install --frozen-lockfile
+      - name: Fetch Postgres
+        run: cd desktop && node scripts/fetch-postgres.mjs --target x86_64-unknown-linux-gnu --out .cache/postgres-host
+      - name: Assemble resources
+        run: cd desktop && yarn assemble --server-bin ../target/release/coppice-server --web-dist ../web/dist --postgres .cache/postgres-host
+      - name: Package (unpacked)
+        run: cd desktop && yarn dist:dir
+      - name: Headless smoke
+        run: cd desktop && yarn smoke:headless --resources dist/linux-unpacked/resources
+      - name: Desktop tests
+        run: make desktop-test
+
   # Guard against lockfile/toolchain drift: extract the rust version pinned in
   # deploy/Dockerfile.server and confirm the committed Cargo.lock compiles with
   # that exact toolchain. Catches regressions like time@0.3.47 (MSRV 1.88)

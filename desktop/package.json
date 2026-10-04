@@ -3,16 +3,27 @@
   "private": true,
   "version": "0.1.0",
   "description": "Coppice desktop app — Electron shell around the bundled Coppice server",
+  "homepage": "https://github.com/fertile-org/coppice",
+  "author": {
+    "name": "Coppice Maintainers",
+    "email": "coppice@users.noreply.github.com"
+  },
   "main": "main.mjs",
+  "desktopName": "coppice.desktop",
   "coppice": {
     "releaseRepo": "fertile-org/coppice"
   },
   "scripts": {
     "start": "ELECTRON_DISABLE_SANDBOX=1 electron .",
     "fetch-postgres": "node scripts/fetch-postgres.mjs",
+    "assemble": "node scripts/assemble-resources.mjs",
+    "dist": "node scripts/dist.mjs",
+    "dist:dir": "node scripts/dist.mjs --dir",
+    "smoke:headless": "node scripts/headless-smoke.mjs",
     "test": "node --test 'test/*.test.mjs' electron-smoke.test.mjs"
   },
   "devDependencies": {
-    "electron": "^35.0.0"
+    "electron": "^35.0.0",
+    "electron-builder": "26.15.3"
   }
 }
