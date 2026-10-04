@@ -12,6 +12,8 @@ use super::layout::{DataLayout, ResourceLayout};
 
 const SUPERUSER: &str = "coppice";
 const START_TIMEOUT_SECS: &str = "60";
+const FAST_STOP_TIMEOUT_SECS: &str = "5";
+const IMMEDIATE_STOP_TIMEOUT_SECS: &str = "3";
 const START_LOG_TAIL_LINES: usize = 20;
 /// TCP on loopback only; no Unix socket (macOS socket path length limits).
 const LOOPBACK_SETTINGS: [(&str, &str); 2] = [
@@ -215,16 +217,34 @@ impl DesktopPostgres {
         ))
     }
 
-    /// Fast shutdown; Ok when the server is not running.
+    /// Fast shutdown, falling back to immediate; Ok when the server is not running.
+    /// Bounded by `FAST_STOP_TIMEOUT_SECS + IMMEDIATE_STOP_TIMEOUT_SECS`.
     pub async fn stop(&self) -> anyhow::Result<()> {
-        self.clear_stale_pid()?;
-        if !self.pg_data.join("postmaster.pid").exists() {
+        if !self.is_running()? {
             return Ok(());
         }
+        let Err(fast) = self.pg_ctl_stop("fast", FAST_STOP_TIMEOUT_SECS).await else {
+            return Ok(());
+        };
+        tracing::warn!(error = %format!("{fast:#}"), "fast postgres stop failed; trying immediate");
+        if !self.is_running()? {
+            return Ok(());
+        }
+        self.pg_ctl_stop("immediate", IMMEDIATE_STOP_TIMEOUT_SECS)
+            .await
+            .with_context(|| format!("fast stop failed first: {fast:#}"))
+    }
+
+    fn is_running(&self) -> anyhow::Result<bool> {
+        self.clear_stale_pid()?;
+        Ok(self.pg_data.join("postmaster.pid").exists())
+    }
+
+    async fn pg_ctl_stop(&self, mode: &str, timeout_secs: &str) -> anyhow::Result<()> {
         self.run("pg_ctl", |cmd| {
             cmd.arg("-D")
                 .arg(&self.pg_data)
-                .args(["-m", "fast", "-w", "stop"]);
+                .args(["-m", mode, "-w", "-t", timeout_secs, "stop"]);
         })
         .await?;
         Ok(())
@@ -456,6 +476,83 @@ mod tests {
 
         pg.stop().await.expect("stale pid means not running");
         assert!(!pid_file.exists());
+    }
+
+    /// A live process named `postgres` recorded in `postmaster.pid`, plus a fake
+    /// `pg_ctl` that logs its arguments, fails `fast` stops when `fail_fast`,
+    /// and otherwise removes the pid file like a real stop.
+    struct FakeRunningPostgres {
+        pg: DesktopPostgres,
+        log: PathBuf,
+        process: std::process::Child,
+    }
+
+    impl FakeRunningPostgres {
+        fn new(dir: &tempfile::TempDir, fail_fast: bool) -> Self {
+            let pg = postgres_in(dir);
+            std::fs::create_dir_all(&pg.pg_bin).unwrap();
+            let fake_postgres = dir.path().join("postgres");
+            let sleep = std::process::Command::new("sh")
+                .args(["-c", "command -v sleep"])
+                .output()
+                .unwrap();
+            let sleep = String::from_utf8(sleep.stdout).unwrap();
+            std::fs::copy(sleep.trim(), &fake_postgres).unwrap();
+            let process = std::process::Command::new(&fake_postgres)
+                .arg("60")
+                .spawn()
+                .unwrap();
+            let pid_file = pg.pg_data.join("postmaster.pid");
+            std::fs::write(&pid_file, format!("{}\n", process.id())).unwrap();
+
+            let log = dir.path().join("pg_ctl.log");
+            let fast_exit = if fail_fast { "exit 1" } else { "" };
+            let script = format!(
+                "#!/bin/sh\necho \"$*\" >> '{log}'\ncase \"$*\" in *fast*) {fast_exit};; esac\nrm -f '{pid}'\n",
+                log = log.display(),
+                pid = pid_file.display(),
+            );
+            let pg_ctl = pg.pg_bin.join("pg_ctl");
+            std::fs::write(&pg_ctl, script).unwrap();
+            std::fs::set_permissions(&pg_ctl, std::fs::Permissions::from_mode(0o755)).unwrap();
+            Self { pg, log, process }
+        }
+
+        fn calls(&self) -> Vec<String> {
+            std::fs::read_to_string(&self.log)
+                .unwrap_or_default()
+                .lines()
+                .map(|line| line.split(" -m ").nth(1).unwrap_or(line).to_string())
+                .collect()
+        }
+    }
+
+    impl Drop for FakeRunningPostgres {
+        fn drop(&mut self) {
+            let _ = self.process.kill();
+            let _ = self.process.wait();
+        }
+    }
+
+    #[tokio::test]
+    async fn stop_uses_bounded_fast_shutdown() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let fake = FakeRunningPostgres::new(&dir, false);
+
+        fake.pg.stop().await.expect("fast stop");
+        assert_eq!(fake.calls(), ["fast -w -t 5 stop"]);
+    }
+
+    #[tokio::test]
+    async fn stop_falls_back_to_immediate_when_fast_fails() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let fake = FakeRunningPostgres::new(&dir, true);
+
+        fake.pg.stop().await.expect("immediate stop");
+        assert_eq!(
+            fake.calls(),
+            ["fast -w -t 5 stop", "immediate -w -t 3 stop"]
+        );
     }
 
     #[test]

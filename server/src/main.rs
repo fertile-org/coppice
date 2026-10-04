@@ -65,7 +65,7 @@ fn run_desktop(args: desktop::DesktopArgs) -> anyhow::Result<()> {
             init_tracing();
             desktop::run(args).await
         });
-        runtime.shutdown_timeout(Duration::from_secs(5));
+        runtime.shutdown_timeout(Duration::from_secs(1));
         result
     });
     if let Err(err) = result {

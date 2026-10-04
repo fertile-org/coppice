@@ -5,16 +5,22 @@ use std::path::{Path, PathBuf};
 use std::process::{ExitStatus, Stdio};
 use std::time::Duration;
 
-use tokio::io::{AsyncBufReadExt, BufReader};
-use tokio::process::{Child, Command};
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::process::{Child, ChildStdin, Command};
 
 const READY_TIMEOUT: Duration = Duration::from_secs(120);
 const EXIT_TIMEOUT: Duration = Duration::from_secs(30);
+/// Electron SIGKILLs the server this long after SIGTERM.
+const SIGTERM_GRACE: Duration = Duration::from_secs(15);
 const INDEX_HTML: &str = "<!doctype html><title>coppice desktop test</title>\n";
 
 /// A running `coppice-server desktop`; killed (and its Postgres stopped) if dropped early.
 struct DesktopProcess {
     child: Child,
+    /// Held outside `child`: `Child::wait` closes the child's stdin, which
+    /// would trigger the stdin-EOF shutdown instead of the one under test.
+    stdin: Option<ChildStdin>,
+    rest_of_stdout: Option<tokio::task::JoinHandle<Vec<String>>>,
     url: String,
     pg_bin: PathBuf,
     pg_lib: PathBuf,
@@ -35,8 +41,11 @@ impl DesktopProcess {
             .spawn()
             .expect("spawn coppice-server desktop");
         let stdout = child.stdout.take().expect("piped stdout");
+        let stdin = child.stdin.take();
         let mut process = Self {
             child,
+            stdin,
+            rest_of_stdout: None,
             url: String::new(),
             pg_bin: resources.join("postgres").join("bin"),
             pg_lib: resources.join("postgres").join("lib"),
@@ -55,17 +64,30 @@ impl DesktopProcess {
         })
         .await
         .expect("COPPICE_READY within 120 s");
-        tokio::spawn(async move {
+        process.rest_of_stdout = Some(tokio::spawn(async move {
+            let mut rest = Vec::new();
             while let Ok(Some(line)) = lines.next_line().await {
                 println!("[desktop] {line}");
+                rest.push(line);
             }
-        });
+            rest
+        }));
         process.url = url;
         process
     }
 
+    /// Stdout after the ready line; call once the child has exited.
+    async fn stdout_after_ready(&mut self) -> String {
+        let task = self.rest_of_stdout.take().expect("stdout reader");
+        tokio::time::timeout(EXIT_TIMEOUT, task)
+            .await
+            .expect("stdout closes after exit")
+            .expect("stdout reader")
+            .join("\n")
+    }
+
     fn close_stdin(&mut self) {
-        drop(self.child.stdin.take());
+        drop(self.stdin.take());
     }
 
     fn sigterm(&self) {
@@ -77,10 +99,10 @@ impl DesktopProcess {
         assert!(status.success());
     }
 
-    async fn wait_exit(&mut self) -> ExitStatus {
-        tokio::time::timeout(EXIT_TIMEOUT, self.child.wait())
+    async fn wait_exit(&mut self, timeout: Duration) -> ExitStatus {
+        tokio::time::timeout(timeout, self.child.wait())
             .await
-            .expect("exit within 30 s")
+            .unwrap_or_else(|_| panic!("exit within {timeout:?}"))
             .expect("wait child")
     }
 }
@@ -133,6 +155,21 @@ async fn assert_serving(url: &str) {
     assert_eq!(index.text().await.expect("index body"), INDEX_HTML);
 }
 
+/// A login request whose body never finishes arriving, so graceful shutdown
+/// cannot drain it; the returned stream keeps it open.
+async fn hold_request_open(url: &str) -> tokio::net::TcpStream {
+    let addr = url.strip_prefix("http://").expect("http url");
+    let mut stream = tokio::net::TcpStream::connect(addr).await.expect("connect");
+    let head = format!(
+        "POST /api/auth/login HTTP/1.1\r\nHost: {addr}\r\n\
+         Content-Type: application/json\r\nContent-Length: 1024\r\n\r\n{{\"email\":"
+    );
+    stream.write_all(head.as_bytes()).await.expect("send head");
+    stream.flush().await.expect("flush");
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    stream
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn desktop_starts_serves_and_stops_postgres_on_shutdown() {
     let pg_install = coppice_server::db::embedded_pg_install_dir()
@@ -149,9 +186,11 @@ async fn desktop_starts_serves_and_stops_postgres_on_shutdown() {
     assert!(first.url.starts_with("http://127.0.0.1:"), "{}", first.url);
     assert_serving(&first.url).await;
     first.close_stdin();
-    let status = first.wait_exit().await;
+    let status = first.wait_exit(EXIT_TIMEOUT).await;
     assert_eq!(status.code(), Some(0), "stdin EOF exit: {status}");
     assert!(!pid_file.exists(), "postgres still running after stdin EOF");
+    let log = first.stdout_after_ready().await;
+    assert!(log.contains("stdin closed"), "{log}");
     drop(first);
 
     let config_file = data_dir.join("config.toml");
@@ -165,8 +204,12 @@ async fn desktop_starts_serves_and_stops_postgres_on_shutdown() {
         std::fs::read(data_dir.join("secrets").join("master_key")).unwrap(),
         master_key_before
     );
+    let _in_flight = hold_request_open(&second.url).await;
     second.sigterm();
-    let status = second.wait_exit().await;
+    let status = second.wait_exit(SIGTERM_GRACE).await;
     assert_eq!(status.code(), Some(0), "SIGTERM exit: {status}");
     assert!(!pid_file.exists(), "postgres still running after SIGTERM");
+    let log = second.stdout_after_ready().await;
+    assert!(log.contains("SIGTERM received"), "{log}");
+    assert!(log.contains("did not drain in time"), "{log}");
 }

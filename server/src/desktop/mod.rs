@@ -11,8 +11,10 @@ use std::ffi::OsString;
 use std::io::Write;
 use std::net::SocketAddr;
 use std::path::Path;
+use std::time::Duration;
 
 use anyhow::{bail, Context};
+use tokio::sync::watch;
 
 pub use args::{parse_desktop_args, DesktopArgs};
 pub use shutdown::desktop_shutdown_signal;
@@ -23,6 +25,8 @@ use layout::{DataLayout, ResourceLayout};
 use postgres::DesktopPostgres;
 
 const DATABASE_NAME: &str = "coppice";
+/// How long in-flight requests and plugin/OpenCode shutdown get after a signal.
+const DRAIN_TIMEOUT: Duration = Duration::from_secs(6);
 
 /// A loopback port that was free a moment ago; the caller binds it next.
 pub fn free_loopback_port() -> std::io::Result<u16> {
@@ -56,11 +60,30 @@ fn prepend_path(dir: &Path, current: &std::ffi::OsStr) -> anyhow::Result<OsStrin
     std::env::join_paths(paths).with_context(|| format!("cannot add {} to PATH", dir.display()))
 }
 
+/// Not printed when shutdown was requested during startup: Electron is
+/// already tearing down and must not load the UI.
+fn ready_announcement(addr: SocketAddr, shutdown_requested: bool) -> Option<String> {
+    (!shutdown_requested).then(|| ready_line(addr))
+}
+
+async fn shutdown_requested(mut requested: watch::Receiver<bool>) {
+    // A dropped sender also ends the wait, which is the safe direction.
+    let _ = requested.wait_for(|requested| *requested).await;
+}
+
 /// Runs the desktop server until [`desktop_shutdown_signal`] fires. Postgres is
 /// stopped on every exit path once it has started.
+///
+/// Electron SIGKILLs the server 15 s after SIGTERM, so shutdown is bounded:
+/// serving gets [`DRAIN_TIMEOUT`] (6 s) to drain, then `pg_ctl stop` takes at
+/// most 5 s fast + 3 s immediate, and `main` gives the runtime 1 s to wind down.
 pub async fn run(args: DesktopArgs) -> anyhow::Result<()> {
     // Polled from the start so a signal during startup still shuts down cleanly.
-    let shutdown = tokio::spawn(desktop_shutdown_signal());
+    let (requested_tx, requested) = watch::channel(false);
+    tokio::spawn(async move {
+        desktop_shutdown_signal().await;
+        let _ = requested_tx.send(true);
+    });
 
     let resources = ResourceLayout::new(&args.resources);
     resources.validate().map_err(anyhow::Error::msg)?;
@@ -86,10 +109,16 @@ pub async fn run(args: DesktopArgs) -> anyhow::Result<()> {
     pg.clear_stale_pid()?;
     let pg_port = start_postgres(&pg).await?;
 
-    let served = serve_with_postgres(&pg, pg_port, &layout, &resources, &secrets, async move {
-        let _ = shutdown.await;
-    })
-    .await;
+    let served = tokio::select! {
+        served = serve_with_postgres(&pg, pg_port, &layout, &resources, &secrets, requested.clone()) => served,
+        () = async {
+            shutdown_requested(requested.clone()).await;
+            tokio::time::sleep(DRAIN_TIMEOUT).await;
+        } => {
+            tracing::warn!(timeout = ?DRAIN_TIMEOUT, "server did not drain in time; stopping postgres anyway");
+            Ok(())
+        }
+    };
     let stopped = pg.stop().await.context("stop postgres");
     match (served, stopped) {
         (Err(err), Err(stop_err)) => {
@@ -116,7 +145,9 @@ async fn start_postgres(pg: &DesktopPostgres) -> anyhow::Result<u16> {
     Ok(port)
 }
 
-/// `pg_ctl start -w` can time out with the server still coming up.
+/// `pg_ctl start -w` can time out with the server still coming up. Before the
+/// retry this also stops a Postgres left running on this data dir by a
+/// previous SIGKILLed session (its live pid makes `start` fail), so keep it.
 async fn stop_after_failed_start(pg: &DesktopPostgres) {
     if let Err(err) = pg.stop().await {
         tracing::warn!(error = %format!("{err:#}"), "stop after failed postgres start");
@@ -129,7 +160,7 @@ async fn serve_with_postgres(
     layout: &DataLayout,
     resources: &ResourceLayout,
     secrets: &DesktopSecrets,
-    shutdown: impl std::future::Future<Output = ()> + Send + 'static,
+    requested: watch::Receiver<bool>,
 ) -> anyhow::Result<()> {
     let pg_url = pg
         .ensure_database(pg_port, &secrets.pg_password, DATABASE_NAME)
@@ -141,13 +172,19 @@ async fn serve_with_postgres(
     let config = bootstrap::desktop_config(layout, secrets, &pg_url, port)?;
     let options = ServeOptions {
         static_web_dir: Some(resources.web.clone()),
-        on_ready: Some(Box::new(|addr| {
-            let mut stdout = std::io::stdout().lock();
-            let _ = writeln!(stdout, "{}", ready_line(addr));
-            let _ = stdout.flush();
+        on_ready: Some(Box::new({
+            let requested = requested.clone();
+            move |addr| {
+                let Some(line) = ready_announcement(addr, *requested.borrow()) else {
+                    return;
+                };
+                let mut stdout = std::io::stdout().lock();
+                let _ = writeln!(stdout, "{line}");
+                let _ = stdout.flush();
+            }
         })),
     };
-    serve(config, listener, options, shutdown).await
+    serve(config, listener, options, shutdown_requested(requested)).await
 }
 
 #[cfg(test)]
@@ -167,6 +204,16 @@ mod tests {
         assert_eq!(path, "/r/postgres/bin:/usr/bin:/bin");
         let path = prepend_path(Path::new("/r/postgres/bin"), "".as_ref()).unwrap();
         assert_eq!(path, "/r/postgres/bin");
+    }
+
+    #[test]
+    fn ready_announcement_is_skipped_once_shutdown_was_requested() {
+        let addr: SocketAddr = "127.0.0.1:5123".parse().unwrap();
+        assert_eq!(
+            ready_announcement(addr, false).as_deref(),
+            Some("COPPICE_READY url=http://127.0.0.1:5123")
+        );
+        assert_eq!(ready_announcement(addr, true), None);
     }
 
     #[test]
