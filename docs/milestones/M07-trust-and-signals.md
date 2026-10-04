@@ -6,8 +6,8 @@ Minimal, human-triggered git/PR actions on ticket worktrees, backed by encrypted
 
 > **Scope change (2026-09-29).** This milestone was originally "Trust & signals". The unimplemented parts were split out into their own milestones:
 >
-> - Capabilities, sandbox profiles, secret scoping/injection, guided unblock, audit log → [M11 — Security & sandbox](./M11-security-and-sandbox.md)
-> - Workspace signals, Workspace Inbox, Run Observation → [M12 — Role-owner agents](./M12-role-owner-agents.md)
+> - Capabilities, sandbox profiles, secret scoping/injection, guided unblock, audit log → [M12 — Security & sandbox](./M12-security-and-sandbox.md)
+> - Workspace signals, Workspace Inbox, Run Observation → [M13 — Role-owner agents](./M13-role-owner-agents.md)
 >
 > Both now follow [M10 — Plugins](./M10-plugins.md). M07 is closed with the scope below.
 
@@ -28,8 +28,8 @@ Minimal, human-triggered git/PR actions on ticket worktrees, backed by encrypted
 
 ## Out of scope (moved)
 
-- Sandbox enforcement, capabilities, secret injection into runs, blocker unblock flow, audit log → M11
-- Proactive signals, Workspace Inbox, observation runs → M12
+- Sandbox enforcement, capabilities, secret injection into runs, blocker unblock flow, audit log → M12
+- Proactive signals, Workspace Inbox, observation runs → M13
 - GitLab integration, autonomous merge/deploy
 
 ## Implementation
@@ -53,5 +53,5 @@ server/src/
 ## References
 
 - Product design §14 (secrets), §24
-- [M11 — Security & sandbox](./M11-security-and-sandbox.md)
-- [M12 — Role-owner agents](./M12-role-owner-agents.md)
+- [M12 — Security & sandbox](./M12-security-and-sandbox.md)
+- [M13 — Role-owner agents](./M13-role-owner-agents.md)

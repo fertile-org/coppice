@@ -22,9 +22,9 @@ Inter-agent coordination through ticket comments, `@mentions`, explicit workflow
 
 ## Out of scope
 
-- Missing-capability blocker UI (M11) — capability blockers may set status but guided unblock is M11
+- Missing-capability blocker UI (M12) — capability blockers may set status but guided unblock is M12
 - Knowledge-informed context (M06)
-- Proactive signals (M12)
+- Proactive signals (M13)
 
 ## Dependencies
 

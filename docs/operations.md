@@ -37,6 +37,8 @@ Host `config.toml` does not affect the Docker server. Do not run `make migrate` 
 
 Login APIs remain available for tools and future cloud hosting.
 
+The installed desktop app (`coppice-server desktop`) forces `auth.desktop_mode = true` and generates its own `config.toml` in the app data dir on first run (never overwritten afterwards); see [architecture.md — Desktop mode](architecture.md#desktop-mode-m11).
+
 ### Repositories (desktop)
 
 - Electron shell exposes **Browse…** for local checkouts (`window.coppiceDesktop.pickDirectory`).
@@ -104,7 +106,8 @@ Two conditions stop the server at startup (`AppState::init_plugins`): the config
 | `make compose-up` / `down` | Full Docker stack |
 | `make migrate` / `bootstrap` | Host CLI (reads `./config.toml`) |
 | `make web-dev` / `web-build` | Vite dev / production build |
-| `make desktop` / `desktop-test` | Electron shell (needs web on :5001) / shell smoke |
+| `make desktop` / `desktop-test` | Electron dev shell (needs web on :5001) / desktop unit tests + shell smoke |
+| `make desktop-dist-dir` / `desktop-smoke` | Unpacked desktop package under `desktop/dist/` (`POSTGRES_DIR=` skips the Postgres download) / headless smoke against it |
 | `make test` / `test-unit` / `test-smoke` | Rust tests |
 | `make clippy` / `make clean` | Lint / reclaim `target/` |
 | `make release-tar` | Release tarball → `dist/` |

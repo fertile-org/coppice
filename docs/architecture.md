@@ -9,10 +9,11 @@ server/   Rust API — Axum, SQLx, Tokio
 web/      React SPA — Vite, TanStack Query, Tailwind
 cli/      Rust operator CLI (workspace member)
 connectors/  Static connector descriptors shared by server, CLI, and web (via the API)
+desktop/  Electron shell + electron-builder packaging (M11)
 deploy/   Docker Compose, Dockerfiles, default config
 ```
 
-Rust workspace: root `Cargo.toml` with members `config`, `connectors`, `server`, `cli`. `web/` is an independent Node package.
+Rust workspace: root `Cargo.toml` with members `config`, `connectors`, `db-migrations`, `server`, `cli`. `web/` is an independent Node package.
 
 ## Server layers
 
@@ -30,6 +31,7 @@ server/src/
   workers/      In-process Tokio job workers (M03)
   storage/      Filesystem artifact store (attachments)
   config/       Figment-based AppConfig
+  desktop/      `coppice-server desktop`: data dir, secrets, bundled Postgres, bounded shutdown (M11)
 ```
 
 **Request flow:** `api/*` → `services/*` → SQLx / `storage/*`. Handlers extract auth via `AuthUser`, get a pool from `AppState`, call a service, map errors to HTTP status.
@@ -186,7 +188,7 @@ services/plugin_settings_service.rs  encrypted, write-only plugin settings
 - **Names.** Each part of `<plugin>__<tool>` is sanitized to `[A-Za-z0-9_-]`; names over 50 chars become the first 41 chars + `_` + 8 hex chars of SHA-256 of the unsanitized name, so `mcp__coppice__<name>` stays within 64.
 - **Settings.** Keys are the `${VAR}` names used in an entry's command, args, env values, url, and header values (excluding `CLAUDE_PLUGIN_ROOT`); unknown keys are rejected. Values are stored with `SecretService` as `plugin-setting-<plugin_id>-<key>` and are write-only: the API returns `settings: [{ key, configured, source }]`. `source` is where the value would come from at start, from presence only (never the value): `setting` (stored; `configured` is true exactly then), `env` (an allowed, non-empty server environment variable, same rule as resolution), `default` (every reference has `:-default`), or `missing`. Deleting a `plugin_settings` row (directly or via the plugin cascade) deletes its secret (trigger).
 - **Placeholders.** Resolved only when a server starts; stored manifests keep them. `${CLAUDE_PLUGIN_ROOT}` → plugin root. `${NAME}` / `${NAME:-default}` → plugin setting, else server environment (never names starting with `COPPICE_`, nor `DATABASE_URL` / `SECRETS_MASTER_KEY`), else `default`, else the start fails with `missing setting "NAME"`. An unterminated `${` is kept verbatim.
-- **stdio children.** Environment cleared, then `PATH`, `HOME`, `LANG`, `TMPDIR` from the server when set, then the entry's resolved `env`; cwd is the plugin root; `kill_on_drop`. They run with the server's privileges until M11, so enabling or testing a disabled plugin with stdio servers asks for confirmation. The same confirmation names any `env`-sourced setting keys (keys only), since the server's environment values will be sent to the plugin; both warnings share one dialog.
+- **stdio children.** Environment cleared, then `PATH`, `HOME`, `LANG`, `TMPDIR` from the server when set, then the entry's resolved `env`; cwd is the plugin root; `kill_on_drop`. They run with the server's privileges until M12, so enabling or testing a disabled plugin with stdio servers asks for confirmation. The same confirmation names any `env`-sourced setting keys (keys only), since the server's environment values will be sent to the plugin; both warnings share one dialog.
 - **No secret leaves the server.** Plugin responses, Test results, tool results, logs, and errors never contain command, args, env, URL, header, or setting values (`ResolvedTransport`'s `Debug` prints kind and key names only).
 - **Test.** `POST /api/plugins/{id}/test` (admin, allowed while disabled) restarts every server of the plugin and returns per-server `status` (`ok | error | unsupported`) and tools; success clears `unhealthy`. Plugin responses carry `mcpServers[].health`.
 
@@ -296,8 +298,19 @@ Visual design tokens and palette: `docs/web/DESIGN.md`.
 
 - Host/release: `config.toml` (see root `config.example.toml`); Docker Compose: `deploy/config/config.toml` (see `deploy/config/config.example.toml`), bind-mounted as `COPPICE_CONFIG`
 - Attachments: filesystem under `storage.artifacts_dir` (compose volume `artifact_data`)
-- Static SPA (release): `coppice web start` via `[web].static_dir`
+- Static SPA (release): `coppice web start` via `[web].static_dir`; desktop mode serves it from the API origin (below)
+
+## Desktop mode (M11)
+
+`coppice-server desktop --data-dir <D> --resources <R>` ([design](superpowers/specs/2026-10-04-desktop-release-design.md)) is the single child process of the Electron shell (`desktop/main.mjs`).
+
+- **Data dir `D`** (Electron `userData`): `config.toml` and `secrets/` generated once and never overwritten, Postgres cluster in `pg/data`, storage dirs, `logs/`.
+- **Resources `R`:** `bin/coppice-server`, a pinned Postgres 16 bundle (`desktop/postgres.lock.json`), `web/`, agent templates. `R/postgres/bin` goes first on `PATH` so Tools → Backup uses the bundled `pg_dump` / `psql`.
+- **Postgres:** `initdb` on first run, major-version check, stale `postmaster.pid` cleanup, TCP on `127.0.0.1` and a free port only.
+- **Server:** binds `127.0.0.1` on a free port, forces `auth.desktop_mode`, serves `R/web` with SPA fallback on the API origin (`static_web.rs`), then prints `COPPICE_READY url=…` once.
+- **Shutdown** on SIGTERM, SIGINT, or stdin EOF (Electron died), bounded to Electron's 15 s window: 6 s drain, `pg_ctl stop` fast (5 s) then immediate (3 s), 1 s for the runtime.
+- **Electron** resolves the login-shell `PATH` for agent CLIs, writes child output to `logs/server.log` (10 MB × 3), shows a failure window if the ready line does not arrive, and polls GitHub `releases/latest` for the update banner.
 
 ## Milestone evolution
 
-Each milestone adds modules/tables/endpoints documented in `docs/milestones/M0N-*.md`. Through M06 the system includes boards, repositories, tickets, collaboration workflow, live agent runs, governed long-term knowledge, and bounded/auditable context assembly. M07–M09 add git/PR actions with forge secrets, managed connectors, and Agent Chat. **Next:** M10 plugins, then M11 security & sandbox, then M12 role-owner agents.
+Each milestone adds modules/tables/endpoints documented in `docs/milestones/M0N-*.md`. Through M06 the system includes boards, repositories, tickets, collaboration workflow, live agent runs, governed long-term knowledge, and bounded/auditable context assembly. M07–M09 add git/PR actions with forge secrets, managed connectors, and Agent Chat. M10 adds plugins and the MCP gateway; M11 the desktop app and release pipeline. **Next:** M12 security & sandbox, then M13 role-owner agents.

@@ -31,8 +31,24 @@ so the two never share a database or the single-instance lock. Set
 `COPPICE_DESKTOP_USER_DATA=/tmp/coppice-test` to use a throwaway data directory instead.
 This variable only applies to unpackaged runs from a checkout; packaged apps ignore it.
 
+## Packaged build
+
+From the repo root:
+
+```bash
+make desktop-dist-dir    # release server + web build, fetch pinned Postgres, assemble resources/, electron-builder --dir
+make desktop-smoke       # headless smoke against the packaged resources (two runs on one data dir)
+```
+
+`POSTGRES_DIR=<dir with bin/lib/share>` skips the pinned download in `postgres.lock.json`
+(e.g. `make desktop-dist-dir POSTGRES_DIR=$HOME/.cache/pg-embed/linux/amd64/16.12.0`). The unpacked app lands in
+`dist/linux-unpacked/` or `dist/mac*/Coppice.app`; `yarn dist` then builds the `.dmg` / `.deb` for the host.
+Packaged apps keep their data in `Coppice` (`~/.config/Coppice`, `~/Library/Application Support/Coppice`).
+Tagged releases are built by `.github/workflows/release.yml` — see
+[docs/development.md](../docs/development.md#desktop-release-tag-and-publish).
+
 ## Tests
 
 ```bash
-yarn test
+yarn test               # or `make desktop-test` from the repo root
 ```

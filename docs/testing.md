@@ -2,7 +2,7 @@
 
 ## CI (`.github/workflows/ci.yml`)
 
-Two jobs on every push/PR to `main`:
+Jobs on every push/PR to `main` (Rust, Web, and Desktop below, plus a Docker toolchain check):
 
 ### Rust
 
@@ -27,6 +27,10 @@ cd web && yarn install --frozen-lockfile && yarn test
 ```
 
 Vitest — schemas, API helpers, board column logic. No browser.
+
+### Desktop
+
+On `ubuntu-22.04`: release server + web build, fetch the pinned Postgres bundle, assemble resources, `yarn dist:dir` (unpacked, no installer), the **headless smoke** against the packaged resources (two `coppice-server desktop` runs on one data dir: ready line, `/health`, SPA `index.html`, SIGTERM exits 0 with Postgres stopped), then `make desktop-test` (Node unit tests for the shell and release scripts). Locally: `make desktop-test`, or `make desktop-dist-dir desktop-smoke` (`POSTGRES_DIR=` skips the download). The tag-triggered release workflow runs the same headless smoke on every installer target. Rust coverage of desktop mode: `server/tests/integration_desktop.rs`.
 
 ## Rust test layers
 
@@ -157,6 +161,7 @@ the representative mixed-cardinality query-plan assertion.
 make test          # embedded Postgres — no compose required
 make clippy
 make web-test
+make desktop-test  # when touching desktop/ or desktop mode
 ```
 
 Optional before E2E: `make compose-up` (Docker stack for browser smoke only).

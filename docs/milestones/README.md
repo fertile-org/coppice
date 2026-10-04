@@ -12,6 +12,7 @@ Coppice is a **monorepo**. Each part has its own top-level folder:
 server/   # Rust API + workers
 web/      # React SPA
 cli/      # Rust operator CLI (`coppice`)
+desktop/  # Electron shell + installer packaging
 deploy/   # docker-compose + Dockerfiles
 e2e/      # browser test scripts
 docs/     # philosophy + milestone specs
@@ -35,15 +36,16 @@ See the [milestone strategy](../superpowers/specs/2026-06-07-coppice-milestone-s
 | M03 | [M03-agent-execution.md](./M03-agent-execution.md) | Registered repos, job queue, worktrees, mock runs |
 | M04 | [M04-live-console.md](./M04-live-console.md) | Live terminal, WebSocket, log artifacts |
 | M05 | [M05-workflow-and-collaboration.md](./M05-workflow-and-collaboration.md) | Workflow rules, mentions, final review |
-| M06 | [M06-knowledge-and-learning.md](./M06-knowledge-and-learning.md) | pgvector, retrieval, learning inbox |
-| M07 | [M07-trust-and-signals.md](./M07-trust-and-signals.md) | Git/PR actions + encrypted forge secrets (sandbox/signals split to M11/M12) |
+| M06 | [M06-knowledge-and-learning.md](./M06-knowledge-and-learning.md) | Knowledge retrieval (now full-text search), learning inbox |
+| M07 | [M07-trust-and-signals.md](./M07-trust-and-signals.md) | Git/PR actions + encrypted forge secrets (sandbox/signals split to M12/M13) |
 | M08 | [M08-connector-operator-cli.md](./M08-connector-operator-cli.md) | Managed HOME volume + `coppice connector` install/setup/doctor |
 | M09 | [M09-agent-chat.md](./M09-agent-chat.md) | Human↔agent chat sessions, conversation profile, cwd + write-denial |
 | M10 | [M10-plugins.md](./M10-plugins.md) | Plugins: Coppice MCP gateway, core tools, skills, plugin MCP servers; tool-first context |
-| M11 | [M11-security-and-sandbox.md](./M11-security-and-sandbox.md) | Capabilities, sandbox profiles, tool policy, scoped secrets, guided unblock, audit log |
-| M12 | [M12-role-owner-agents.md](./M12-role-owner-agents.md) | Role-owner agents: observation runs, workspace signals, Workspace Inbox |
+| M11 | [M11-desktop-release.md](./M11-desktop-release.md) | Desktop app: bundled Postgres + server, Electron shell, `.dmg` / `.deb` from a git tag |
+| M12 | [M12-security-and-sandbox.md](./M12-security-and-sandbox.md) | Capabilities, sandbox profiles, tool policy, scoped secrets, guided unblock, audit log |
+| M13 | [M13-role-owner-agents.md](./M13-role-owner-agents.md) | Role-owner agents: observation runs, workspace signals, Workspace Inbox |
 
-M01–M09 are complete. **Next:** M10 → M11 → M12.
+M01–M09 are complete. M10 and M11 are implemented pending manual acceptance (M11 also needs its live tag check). **Next:** M12 → M13.
 
 ## Philosophy references
 

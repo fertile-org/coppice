@@ -27,7 +27,7 @@ Agents execute work on tickets through the job queue and mock provider, using **
 - Agent-authored comments from run output
 - Ticket detail: **Runs** tab; header **Run Agent** / **Stop**
 - `MockProvider` as default compose provider
-- Permissive default sandbox profile (until M11)
+- Permissive default sandbox profile (until M12)
 
 ## Out of scope
 
@@ -35,7 +35,7 @@ Agents execute work on tickets through the job queue and mock provider, using **
 - Live terminal streaming (M04)
 - Workflow rule engine and mention jobs (M05)
 - Knowledge injection into context (M06)
-- Strict capability/sandbox enforcement (M11)
+- Strict capability/sandbox enforcement (M12)
 - Real CLI adapters
 - Path allowlist roots (trust admin + git validation)
 

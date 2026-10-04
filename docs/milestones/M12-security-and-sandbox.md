@@ -1,8 +1,8 @@
-# M11 — Security & Sandbox
+# M12 — Security & Sandbox
 
 ## Goal
 
-Production-ready trust boundaries for agent runs and plugins: capabilities, sandbox profiles, scoped secret injection, capability blockers with guided unblock, and an audit log. After M11, every process an agent starts and every tool it calls (M10) is checked against policy.
+Production-ready trust boundaries for agent runs and plugins: capabilities, sandbox profiles, scoped secret injection, capability blockers with guided unblock, and an audit log. After M12, every process an agent starts and every tool it calls (M10) is checked against policy.
 
 Carried over from the original M07 "Trust & signals" scope, extended to cover M10 plugins and tools.
 
@@ -55,7 +55,7 @@ Ticket UI shows: Allow command | Add secret | Grant capability | Enable tool | R
 ## Out of scope
 
 - Container sandbox v2, Kubernetes runner
-- Workspace signals / observation runs (M12)
+- Workspace signals / observation runs (M13)
 - Autonomous merge/deploy
 
 ## Dependencies

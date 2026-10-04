@@ -20,7 +20,7 @@ import {
 } from './usePlugins';
 
 const STDIO_RISK =
-  "This plugin starts local MCP servers that run with the Coppice server's privileges until sandboxing lands (M11).";
+  "This plugin starts local MCP servers that run with the Coppice server's privileges until sandboxing lands (M12).";
 
 /** Names keys only; the values never reach the browser. */
 function envRisk(keys: string[]): string {

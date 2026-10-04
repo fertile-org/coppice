@@ -4,14 +4,16 @@ Tracking items discussed for the **Electron desktop** distribution and related p
 
 ## Desktop app (Electron)
 
-- [ ] **Phase 1 — Dev shell**: `desktop/` runs Electron against local web URL while stack runs separately. See [docs/development.md](docs/development.md) (Path C — Desktop shell).
-- [ ] **Phase 2 — Bundled runtime**: On app start, spawn bundled **PostgreSQL 16** (same class of stack as `pg-embed` / test DB), run migrations, start `coppice-server`, serve built SPA; on quit, stop children cleanly.
-- [ ] **Phase 3 — Packaging**: Per-OS installers, code signing / notarization, auto-update channel, dynamic localhost ports, single-instance lock.
+- [x] **Phase 1 — Dev shell**: `desktop/` runs Electron against local web URL while stack runs separately. See [docs/development.md](docs/development.md) (Path C — Desktop shell).
+- [x] **Phase 2 — Bundled runtime**: On app start, spawn bundled **PostgreSQL 16** (same class of stack as `pg-embed` / test DB), run migrations, start `coppice-server`, serve built SPA; on quit, stop children cleanly. Delivered as `coppice-server desktop` ([M11](docs/milestones/M11-desktop-release.md)).
+- [x] **Phase 3 — Packaging**: macOS `.dmg` / Linux `.deb` from a git tag, optional code signing / notarization, dynamic localhost ports, single-instance lock, update-available banner ([M11](docs/milestones/M11-desktop-release.md); live tag check and manual install acceptance still open).
+- [ ] **Auto-update (future)**: Download and install new versions in-app; today the app only shows a "new version available → Download" banner.
+- [ ] **Windows installer (future)**: Not built today.
 - [x] **Desktop auth**: Keep server auth model for cloud/self-hosted; when `auth.desktop_mode` is on, SPA auto-establishes an admin session (no login UI / account chrome). User APIs remain for cloud later.
 - [x] **Repositories desktop UX**: Electron Browse for `local_path`; pull/push use host git credentials (forge token optional); ticket PR primary path is Open compare URL.
 - [ ] **Agent CLI setup research (future)**: Desktop v1 runs the user's own installed agent CLIs with their existing logins (real `$HOME`, login-shell `PATH`). Research how other desktop agent tools find, install, and authenticate CLIs (bundled CLIs, in-app install/login flows, isolated homes) and adopt a more convenient approach if one exists.
 - [ ] **Remote database (future)**: Optional `database.url` to external Postgres; default remains bundled data dir under app user data.
-- [ ] **Testing**: Run `make desktop-test` (Playwright Electron) for shell smoke; full stack still validated via `make test` / `make e2e-smoke`. Electron does not replace CI Docker stack.
+- [x] **Testing**: `make desktop-test` (shell unit tests + Electron smoke) and the headless smoke against the packaged build (`make desktop-smoke`, PR CI `desktop` job); full stack still validated via `make test` / `make e2e-smoke`. Electron does not replace CI Docker stack.
 
 ## Backup & migration
 

@@ -57,7 +57,7 @@ const testResult: PluginTestResult = {
 };
 
 const STDIO_WARNING =
-  "This plugin starts local MCP servers that run with the Coppice server's privileges until sandboxing lands (M11). Enable anyway?";
+  "This plugin starts local MCP servers that run with the Coppice server's privileges until sandboxing lands (M12). Enable anyway?";
 
 const fetchMock = vi.fn();
 
@@ -291,7 +291,7 @@ describe('PluginCard', () => {
 
     expect(confirm).toHaveBeenCalledTimes(1);
     expect(confirm).toHaveBeenCalledWith(
-      "This plugin starts local MCP servers that run with the Coppice server's privileges until sandboxing lands (M11). Settings A, B are not set here, so the Coppice server's environment values for them will be sent to the plugin. Enable anyway?",
+      "This plugin starts local MCP servers that run with the Coppice server's privileges until sandboxing lands (M12). Settings A, B are not set here, so the Coppice server's environment values for them will be sent to the plugin. Enable anyway?",
     );
     expect(fetchMock).not.toHaveBeenCalled();
     confirm.mockRestore();

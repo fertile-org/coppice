@@ -4,6 +4,8 @@
 
 Establish the **monorepo skeleton** and runnable Coppice backend: PostgreSQL (pgvector-ready), session auth API, the `AgentProvider` trait with `MockProvider`, a minimal `cli/` crate, and a CI test harness. No product UI.
 
+> **Amendment (M11).** pgvector was removed: migration 001 no longer creates the `vector` extension and Compose uses plain `postgres:16`. References to pgvector below describe the original M01 delivery.
+
 ## Product scope
 
 ### Monorepo scaffold (M01)
@@ -143,7 +145,7 @@ cli/src/
 ```yaml
 services:
   postgres:
-    image: pgvector/pgvector:pg16
+    image: postgres:16
     environment:
       POSTGRES_DB: coppice
       POSTGRES_USER: coppice

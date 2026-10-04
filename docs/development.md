@@ -69,9 +69,9 @@ make desktop
 
 Default URL: `http://127.0.0.1:5001`. Override with `COPPICE_WEB_URL=...`. Smoke: `make desktop-test`.
 
-On Linux, the dev shell sets `ELECTRON_DISABLE_SANDBOX=1` so Electron does not require a root-owned `chrome-sandbox` binary. Packaged releases will use a proper sandbox setup. The shell preload (`desktop/preload.cjs`) exposes `window.coppiceDesktop.pickDirectory()` for Repositories **Browse…**.
+On Linux, the dev shell sets `ELECTRON_DISABLE_SANDBOX=1` so Electron does not require a root-owned `chrome-sandbox` binary; the packaged `.deb` sets up `chrome-sandbox` and an AppArmor profile at install time. The shell preload (`desktop/preload.cjs`) exposes `window.coppiceDesktop.pickDirectory()` for Repositories **Browse…**.
 
-Bundled desktop (installers, auto-start DB/API) is **not** implemented yet — see **Desktop release** and **Desktop install** below.
+To run the **bundled** app (own Postgres + server, no stack needed) from a checkout, see [desktop/README.md](../desktop/README.md). `make desktop-dist-dir` builds the unpacked package and `make desktop-smoke` runs the headless smoke against it.
 
 ### Plugins (M10)
 
@@ -118,26 +118,29 @@ docker compose -f deploy/docker-compose.yml build
 
 Smoke/CI uses the same compose file via `make compose-up` — not the tarball.
 
-### Desktop release (build and publish)
+### Desktop release (tag and publish)
 
-| Stage | Status |
-|-------|--------|
-| Dev shell (`desktop/`, loads local URL) | Available |
-| Bundled Postgres + API on app start | Planned ([TODOS.md](../TODOS.md)) |
-| Installers (.dmg, .exe, .AppImage) + code signing | Planned |
-| Auto-update channel | Planned |
+Desktop installers are built by `.github/workflows/release.yml` ([design](superpowers/specs/2026-10-04-desktop-release-design.md)). Four targets: macOS arm64 and x64 `.dmg`, Linux amd64 and arm64 `.deb`. No Windows, no auto-update.
 
-**Build (today):** no end-user installer. Validate the shell with Path C above.
+**Cut a release** (maintainers):
 
-**Publish (when Phase 2–3 land — planned pipeline):**
+1. Make sure `main` is green, then push a tag: `git tag v0.2.0 && git push origin v0.2.0`. Use `vX.Y.Z-rc.N` for a release candidate; any other tag shape fails the `prepare` job.
+2. The workflow sets the app version from the tag, builds the server, web, and installers on `macos-15`, `macos-15-intel`, `ubuntu-22.04`, and `ubuntu-22.04-arm`, runs the headless smoke on each, and uploads `Coppice-<version>-mac-arm64.dmg`, `Coppice-<version>-mac-x64.dmg`, `Coppice-<version>-linux-amd64.deb`, `Coppice-<version>-linux-arm64.deb`, and `SHA256SUMS` to a **draft** release (marked pre-release for `-rc` tags). Notes are generated since the previous tag, plus the install section from `.github/release-notes/install.md`.
+3. Review the draft on GitHub and click **Publish**. Re-running the workflow for the same tag reuses the draft and replaces its files.
 
-1. `make release-tar` (or dedicated target) produces `coppice-server` + static web assets for embedding.
-2. Package with **electron-builder** (or similar) per OS: bundle server binary, pg embed/runtime, and data-dir defaults.
-3. CI matrix (macOS / Windows / Linux) produces signed artifacts.
-4. Upload installers to **GitHub Releases** (or store CDN); version matches git tag.
-5. Release notes: breaking changes, migration, and known limitations.
+Installed apps check `releases/latest` of `fertile-org/coppice` on launch and every 24 h and show a "new version available" banner. Drafts and pre-releases are never offered.
 
-Until that ships, **do not** tell end users to install via `desktop/` — direct them to [Install](#install) paths below.
+**Enable macOS signing and notarization:** add these repository secrets; no code change is needed. Without `CSC_LINK`, mac builds are unsigned and the release notes include the `xattr` workaround.
+
+| Secret | Value |
+|--------|-------|
+| `CSC_LINK` | Base64 of the Developer ID Application `.p12` |
+| `CSC_KEY_PASSWORD` | Password of that `.p12` |
+| `APPLE_API_KEY` | Contents of the App Store Connect API key (`AuthKey_XXXX.p8`) |
+| `APPLE_API_KEY_ID` | Key ID of that API key |
+| `APPLE_API_ISSUER` | Issuer ID (UUID) of that API key |
+
+**Build locally:** `make desktop-dist-dir` (unpacked, host platform; `POSTGRES_DIR=<dir with bin/lib/share>` skips the pinned Postgres download), then `make desktop-smoke`. After that, `cd desktop && yarn dist` builds the installer for the host platform from the same assembled resources.
 
 ---
 
@@ -147,9 +150,25 @@ How people run Coppice without cloning the repo.
 
 ### Desktop install (end users)
 
-**Target experience:** download installer → open app → local Coppice runs (DB + API hidden) → no Docker, no login screen (single admin session via `auth.desktop_mode`).
+Download the installer from the GitHub Release. Coppice bundles its own database and server, so there is no Docker, no Postgres, and no login screen (single admin session via `auth.desktop_mode`). Agents run on your machine with your own tools: install **Git** and the agent CLIs you plan to use (for example `claude` or `codex`) and log in to each of them first. Coppice finds them through your login shell's `PATH`.
 
-**Today:** not available. Use self-host tarball or Docker below.
+**macOS** (Apple silicon: `mac-arm64`, Intel: `mac-x64`): open `Coppice-<version>-mac-<arch>.dmg`, drag **Coppice** to **Applications**, and launch it. If the build is not signed, macOS says Coppice "can't be opened" or "is damaged"; run once:
+
+```bash
+xattr -dr com.apple.quarantine /Applications/Coppice.app
+```
+
+Alternatively, after the first blocked launch open **System Settings → Privacy & Security** and click **Open Anyway**.
+
+**Linux** (Ubuntu 22.04+ / Debian 12+, `amd64` or `arm64`):
+
+```bash
+sudo apt install ./Coppice-<version>-linux-<arch>.deb
+```
+
+Then start **Coppice** from the applications menu, or run `coppice`.
+
+**Data and logs:** `~/Library/Application Support/Coppice` on macOS, `~/.config/Coppice` on Linux (`config.toml`, `secrets/`, the Postgres cluster in `pg/data`, `logs/server.log`). Uninstalling leaves them in place. The `secrets/` files encrypt forge and plugin settings; losing them loses those secrets. Verify downloads with `SHA256SUMS` from the release (`sha256sum --check --ignore-missing SHA256SUMS`, or `shasum -a 256 …` on macOS).
 
 ### Self-host tarball
 
@@ -188,4 +207,4 @@ Open http://localhost:5001. Change default passwords and secrets before exposing
 
 ### Backup and migration
 
-Admins: **Tools** in the app (`/tools`) or `GET /api/tools/backup/export` / `POST /api/tools/backup/import`. Archives are full-system backups (database, config snapshot, artifacts, worktrees) and are **sensitive**. Requires `pg_dump` / `psql` on the server host.
+Admins: **Tools** in the app (`/tools`) or `GET /api/tools/backup/export` / `POST /api/tools/backup/import`. Archives are full-system backups (database, config snapshot, artifacts, worktrees) and are **sensitive**. Requires `pg_dump` / `psql` on the server host (the desktop app uses its bundled copies).
