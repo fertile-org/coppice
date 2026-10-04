@@ -12,8 +12,8 @@ use super::layout::{DataLayout, ResourceLayout};
 
 const SUPERUSER: &str = "coppice";
 const START_TIMEOUT_SECS: &str = "60";
-const FAST_STOP_TIMEOUT_SECS: &str = "5";
-const IMMEDIATE_STOP_TIMEOUT_SECS: &str = "3";
+pub(super) const FAST_STOP_TIMEOUT_SECS: &str = "5";
+pub(super) const IMMEDIATE_STOP_TIMEOUT_SECS: &str = "3";
 const START_LOG_TAIL_LINES: usize = 20;
 /// TCP on loopback only; no Unix socket (macOS socket path length limits).
 const LOOPBACK_SETTINGS: [(&str, &str); 2] = [

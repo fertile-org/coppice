@@ -308,7 +308,7 @@ Visual design tokens and palette: `docs/web/DESIGN.md`.
 - **Resources `R`:** `bin/coppice-server`, a pinned Postgres 16 bundle (`desktop/postgres.lock.json`), `web/`, agent templates. The server exports `COPPICE_PG_BIN_DIR` / `COPPICE_PG_LIB_DIR` (`R/postgres/bin`, `R/postgres/lib`) so Tools → Backup runs the bundled `pg_dump` / `psql` by absolute path (with `LD_LIBRARY_PATH` on Linux for that command only); `PATH` is left alone, so agents keep the user's own `psql`.
 - **Postgres:** `initdb` on first run, major-version check, stale `postmaster.pid` cleanup, TCP on `127.0.0.1` and a free port only.
 - **Server:** binds `127.0.0.1` on a free port, forces `auth.desktop_mode`, serves `R/web` with SPA fallback on the API origin (`static_web.rs`), then prints `COPPICE_READY url=…` once.
-- **Shutdown** on SIGTERM, SIGINT, or stdin EOF (Electron died), bounded to Electron's 15 s window: 6 s drain, `pg_ctl stop` fast (5 s) then immediate (3 s), 1 s for the runtime.
+- **Shutdown** on SIGTERM, SIGINT, or stdin EOF (Electron died), bounded to Electron's 15 s window: 5 s drain, `pg_ctl stop` fast (5 s) then immediate (3 s), 1 s for the runtime (14 s worst case).
 - **Electron** resolves the login-shell `PATH` for agent CLIs, writes child output to `logs/server.log` (10 MB × 3), shows a failure window if the ready line does not arrive, and polls GitHub `releases/latest` for the update banner.
 
 ## Milestone evolution

@@ -25,7 +25,7 @@ use postgres::DesktopPostgres;
 
 const DATABASE_NAME: &str = "coppice";
 /// How long in-flight requests and plugin/OpenCode shutdown get after a signal.
-const DRAIN_TIMEOUT: Duration = Duration::from_secs(6);
+const DRAIN_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// A loopback port that was free a moment ago; the caller binds it next.
 pub fn free_loopback_port() -> std::io::Result<u16> {
@@ -64,8 +64,9 @@ async fn shutdown_requested(mut requested: watch::Receiver<bool>) {
 /// stopped on every exit path once it has started.
 ///
 /// Electron SIGKILLs the server 15 s after SIGTERM, so shutdown is bounded:
-/// serving gets [`DRAIN_TIMEOUT`] (6 s) to drain, then `pg_ctl stop` takes at
-/// most 5 s fast + 3 s immediate, and `main` gives the runtime 1 s to wind down.
+/// serving gets [`DRAIN_TIMEOUT`] (5 s) to drain, then `pg_ctl stop` takes at
+/// most 5 s fast + 3 s immediate, and `main` gives the runtime 1 s to wind down
+/// (14 s worst case, leaving 1 s of margin).
 pub async fn run(args: DesktopArgs) -> anyhow::Result<()> {
     // Polled from the start so a signal during startup still shuts down cleanly.
     let (requested_tx, requested) = watch::channel(false);
@@ -185,6 +186,20 @@ mod tests {
         let port = free_loopback_port().expect("port");
         assert_ne!(port, 0);
         std::net::TcpListener::bind(("127.0.0.1", port)).expect("bind free port");
+    }
+
+    #[test]
+    fn shutdown_budget_fits_electron_grace() {
+        let pg_stop: u64 = [
+            postgres::FAST_STOP_TIMEOUT_SECS,
+            postgres::IMMEDIATE_STOP_TIMEOUT_SECS,
+        ]
+        .iter()
+        .map(|secs| secs.parse::<u64>().unwrap())
+        .sum();
+        let runtime_wind_down = 1;
+        let electron_grace = 15;
+        assert!(DRAIN_TIMEOUT.as_secs() + pg_stop + runtime_wind_down < electron_grace);
     }
 
     #[test]
