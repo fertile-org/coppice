@@ -165,7 +165,7 @@ impl DesktopPostgres {
                     .arg("-l")
                     .arg(&self.pg_log)
                     .arg("-o")
-                    .arg(format!("-p {port}"))
+                    .arg(server_options(port))
                     .args(["-w", "-t", START_TIMEOUT_SECS, "start"]);
             })
             .await;
@@ -271,6 +271,17 @@ impl DesktopPostgres {
         }
         Ok(output)
     }
+}
+
+/// `pg_ctl -o` value. Command-line settings beat every config file (includes,
+/// `postgresql.auto.conf`), so loopback holds whatever the files say. pg_ctl
+/// passes this through `/bin/sh`, where an unquoted `name=` is an empty value.
+fn server_options(port: u16) -> String {
+    let mut options = format!("-p {port}");
+    for (key, value) in LOOPBACK_SETTINGS {
+        options.push_str(&format!(" -c {key}={value}"));
+    }
+    options
 }
 
 fn failure_message(bin: &str, status: &str, stderr: &str, stdout: &str) -> String {
@@ -577,6 +588,14 @@ mod tests {
         assert_eq!(
             fake.calls(),
             ["fast -w -t 5 stop", "immediate -w -t 3 stop"]
+        );
+    }
+
+    #[test]
+    fn server_options_force_loopback_on_every_start() {
+        assert_eq!(
+            server_options(5433),
+            "-p 5433 -c listen_addresses=127.0.0.1 -c unix_socket_directories="
         );
     }
 
