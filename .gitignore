@@ -11,3 +11,5 @@ deploy/config/config.toml
 /data/
 dist
 .agent/
+
+/.worktrees/
