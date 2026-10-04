@@ -19,6 +19,7 @@ import { NotificationBell } from '../features/notifications/NotificationBell';
 import { ThemeToggle } from '../features/theme/ThemeToggle';
 import { useOpenTicket } from '../features/tickets/useOpenTicket';
 import { cn } from '../lib/utils';
+import { BrandLogo } from './BrandLogo';
 
 const SIDEBAR_COLLAPSED_KEY = 'coppice.sidebar.collapsed';
 
@@ -128,14 +129,7 @@ export function AppShell() {
             sidebarCollapsed ? 'justify-center px-2' : 'gap-3 px-4',
           )}
         >
-          <img
-            src="/logo.webp"
-            srcSet="/logo.webp 1x, /logo@2x.webp 2x"
-            alt="Coppice"
-            width={32}
-            height={32}
-            className="h-8 w-8 shrink-0"
-          />
+          <BrandLogo size={32} className="h-8 w-8 shrink-0" />
           {!sidebarCollapsed && (
             <span className="font-display text-lg font-semibold tracking-tight text-text-primary">
               Coppice

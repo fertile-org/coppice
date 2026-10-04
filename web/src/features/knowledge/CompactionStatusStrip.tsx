@@ -1,7 +1,13 @@
 import { AlertTriangle, Loader2, PauseCircle, Sparkles, X } from 'lucide-react';
-import { useEffect, useState, type ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '../../components/ui/button';
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogTitle,
+} from '../../components/ui/dialog';
 import { ApiError } from '../../lib/api';
 import type { CompactionBatch, CompactionStatus } from '../../lib/schemas/knowledge';
 import { useConnectors } from '../agents/useAgents';
@@ -44,49 +50,35 @@ function actionError(error: unknown): string {
 }
 
 function RunDialog({
+  open,
   batch,
   connector,
   onClose,
 }: {
+  open: boolean;
   batch: CompactionBatch;
   connector: string | null;
   onClose: () => void;
 }) {
-  useEffect(() => {
-    function onKeyDown(event: KeyboardEvent) {
-      if (event.key === 'Escape') onClose();
-    }
-    document.addEventListener('keydown', onKeyDown);
-    return () => document.removeEventListener('keydown', onKeyDown);
-  }, [onClose]);
   const { data: connectors } = useConnectors();
   const liveConsole = connectors?.find((c) => c.id === connector)?.console;
   const active = batch.status === 'queued' || batch.status === 'running';
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-overlay px-4"
-      role="presentation"
-      onClick={onClose}
-    >
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="compaction-run-title"
-        className="flex max-h-[85vh] w-full max-w-3xl flex-col overflow-hidden rounded-xl border border-border bg-paper-50 shadow-lg"
-        onClick={(event) => event.stopPropagation()}
+    <Dialog open={open} onOpenChange={(next) => !next && onClose()}>
+      <DialogContent
+        aria-describedby={undefined}
+        className="flex max-h-[85vh] max-w-3xl flex-col overflow-hidden p-0"
       >
         <div className="flex items-center justify-between gap-3 border-b border-border px-5 py-3">
-          <h2 id="compaction-run-title" className="font-display text-lg font-semibold text-bark-900">
+          <DialogTitle className="text-lg">
             Compaction run · {pluralTickets(batch.ticketCount)}
-          </h2>
-          <button
-            type="button"
+          </DialogTitle>
+          <DialogClose
             aria-label="Close"
-            onClick={onClose}
             className="rounded-md p-1 text-text-secondary hover:bg-paper-200 hover:text-text-primary"
           >
             <X className="size-4" aria-hidden="true" />
-          </button>
+          </DialogClose>
         </div>
         <div className="min-h-[20rem] flex-1 overflow-auto">
           <LiveRunView
@@ -97,8 +89,8 @@ function RunDialog({
             startedAt={batch.startedAt}
           />
         </div>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -141,6 +133,7 @@ export function CompactionStatusStrip() {
   const retry = useRetryCompaction();
   const cancel = useCancelCompaction();
   const [viewBatch, setViewBatch] = useState<CompactionBatch | null>(null);
+  const [runOpen, setRunOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   if (!status) return null;
@@ -152,6 +145,11 @@ export function CompactionStatusStrip() {
     } catch (err) {
       setError(actionError(err));
     }
+  }
+
+  function openRun(batch: CompactionBatch) {
+    setViewBatch(batch);
+    setRunOpen(true);
   }
 
   const busy = compactNow.isPending || retry.isPending || cancel.isPending;
@@ -199,7 +197,7 @@ export function CompactionStatusStrip() {
             actions={
               <>
                 {batch.runId && (
-                  <Button type="button" size="sm" variant="secondary" onClick={() => setViewBatch(batch)}>
+                  <Button type="button" size="sm" variant="secondary" onClick={() => openRun(batch)}>
                     View run
                   </Button>
                 )}
@@ -244,7 +242,7 @@ export function CompactionStatusStrip() {
                   </Button>
                 )}
                 {batch.runId && (
-                  <Button type="button" size="sm" variant="secondary" onClick={() => setViewBatch(batch)}>
+                  <Button type="button" size="sm" variant="secondary" onClick={() => openRun(batch)}>
                     View run
                   </Button>
                 )}
@@ -311,9 +309,10 @@ export function CompactionStatusStrip() {
       )}
       {viewBatch && (
         <RunDialog
+          open={runOpen}
           batch={viewBatch}
           connector={status.agent?.connector ?? null}
-          onClose={() => setViewBatch(null)}
+          onClose={() => setRunOpen(false)}
         />
       )}
     </>

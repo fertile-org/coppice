@@ -5,6 +5,7 @@ import type {
   KnowledgeItem,
   SimilarNeighbor,
 } from '../../lib/schemas/knowledge';
+import { selectComboboxOption } from '../../test/combobox';
 import { REJECT_PRESETS, guidanceForType } from './curationGuide';
 import { KnowledgePage } from './KnowledgePage';
 
@@ -22,6 +23,9 @@ const mocks = vi.hoisted(() => ({
   expire: vi.fn(),
   openTicket: vi.fn(),
   fetchKnowledgeItem: vi.fn(),
+  role: 'admin' as 'admin' | 'member',
+  hasNextPage: false,
+  toast: { success: vi.fn(), error: vi.fn() },
 }));
 
 const neighbor: SimilarNeighbor = {
@@ -104,7 +108,11 @@ vi.mock('../agents/useAgents', () => ({
 }));
 
 vi.mock('../auth/useSession', () => ({
-  useSession: () => ({ user: { role: 'admin' } }),
+  useSession: () => ({ user: { role: mocks.role } }),
+}));
+
+vi.mock('../../components/ToastProvider', () => ({
+  useToast: () => mocks.toast,
 }));
 
 vi.mock('../tickets/useOpenTicket', () => ({
@@ -122,7 +130,7 @@ vi.mock('./useKnowledge', () => ({
       data: { pages: [{ items: mocks.items, nextCursor: null }] },
       isLoading: false,
       isError: false,
-      hasNextPage: false,
+      hasNextPage: mocks.hasNextPage,
       isFetchingNextPage: false,
       refetch: vi.fn(),
       fetchNextPage: vi.fn(),
@@ -153,6 +161,8 @@ describe('KnowledgePage', () => {
     mocks.items = [item];
     mocks.similarItems = [];
     mocks.similarEnabled = null;
+    mocks.role = 'admin';
+    mocks.hasNextPage = false;
     mocks.create.mockResolvedValue(item);
     mocks.approve.mockResolvedValue({ ...item, status: 'approved' });
     mocks.fetchKnowledgeItem.mockResolvedValue({
@@ -382,13 +392,13 @@ describe('KnowledgePage', () => {
     });
   });
 
-  it('creates a typed and board-scoped manual candidate', async () => {
+  it('creates a typed and board-scoped candidate from the Add knowledge modal', async () => {
     render(<KnowledgePage />);
-    const form = screen
-      .getByRole('heading', { name: 'Manual candidate' })
-      .closest('form');
-    expect(form).not.toBeNull();
-    const controls = within(form!);
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Add knowledge' }));
+    const dialog = screen.getByRole('dialog', { name: 'Add knowledge' });
+    const controls = within(dialog);
 
     fireEvent.change(controls.getByLabelText('Title'), {
       target: { value: 'Use the fast test target' },
@@ -396,12 +406,10 @@ describe('KnowledgePage', () => {
     fireEvent.change(controls.getByLabelText('Knowledge'), {
       target: { value: 'Run make test-unit before the full suite.' },
     });
-    fireEvent.change(controls.getByLabelText('Type'), {
-      target: { value: 'test_command' },
-    });
-    fireEvent.change(controls.getByLabelText('Board'), {
-      target: { value: '00000000-0000-4000-8000-000000000003' },
-    });
+    selectComboboxOption(controls.getByLabelText('Type'), 'Test command');
+    expect(controls.getByLabelText('Type')).toHaveTextContent('Test command');
+    selectComboboxOption(controls.getByLabelText('Board'), 'Coppice');
+    expect(controls.getByLabelText('Board')).toHaveTextContent('Coppice');
     fireEvent.click(controls.getByRole('button', { name: 'Add to Pending' }));
 
     await waitFor(() => {
@@ -418,19 +426,152 @@ describe('KnowledgePage', () => {
         confidence: 'medium',
       });
     });
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    });
+    expect(mocks.toast.success).toHaveBeenCalledWith('Knowledge added to Pending.');
+  });
+
+  it('creates agent-scoped knowledge with scope, agent, and confidence comboboxes', async () => {
+    render(<KnowledgePage />);
+    fireEvent.click(screen.getByRole('button', { name: 'Add knowledge' }));
+    const controls = within(screen.getByRole('dialog'));
+
+    fireEvent.change(controls.getByLabelText('Title'), { target: { value: 'Agent rule' } });
+    fireEvent.change(controls.getByLabelText('Knowledge'), {
+      target: { value: 'Backend agent runs cargo clippy.' },
+    });
+    selectComboboxOption(controls.getByLabelText('Scope'), /Board \+ agent/);
+    selectComboboxOption(controls.getByLabelText('Board'), 'Coppice');
+    selectComboboxOption(controls.getByLabelText('Agent'), 'Backend Agent');
+    selectComboboxOption(controls.getByLabelText('Confidence'), 'High');
+    fireEvent.click(controls.getByRole('button', { name: 'Add to Pending' }));
+
+    await waitFor(() => {
+      expect(mocks.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          scope: 'agent',
+          boardId: '00000000-0000-4000-8000-000000000003',
+          agentId: '00000000-0000-4000-8000-000000000010',
+          confidence: 'high',
+        }),
+      );
+    });
+  });
+
+  it('keeps validation and server errors inside the modal', async () => {
+    mocks.create.mockRejectedValueOnce(new Error('boom'));
+    render(<KnowledgePage />);
+    fireEvent.click(screen.getByRole('button', { name: 'Add knowledge' }));
+    const controls = within(screen.getByRole('dialog'));
+
+    fireEvent.change(controls.getByLabelText('Title'), { target: { value: 'Rule' } });
+    fireEvent.change(controls.getByLabelText('Knowledge'), { target: { value: 'Body' } });
+    fireEvent.click(controls.getByRole('button', { name: 'Add to Pending' }));
+    expect(controls.getByRole('alert')).toHaveTextContent('Choose a board for this scope.');
+    expect(mocks.create).not.toHaveBeenCalled();
+
+    selectComboboxOption(controls.getByLabelText('Board'), 'Coppice');
+    fireEvent.click(controls.getByRole('button', { name: 'Add to Pending' }));
+    await waitFor(() => {
+      expect(controls.getByRole('alert')).toHaveTextContent('Unable to create candidate.');
+    });
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+    expect(mocks.toast.success).not.toHaveBeenCalled();
+  });
+
+  it('resets the create form each time the modal opens', async () => {
+    render(<KnowledgePage />);
+    fireEvent.click(screen.getByRole('button', { name: 'Add knowledge' }));
+    fireEvent.change(within(screen.getByRole('dialog')).getByLabelText('Title'), {
+      target: { value: 'Draft' },
+    });
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Cancel' }));
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Add knowledge' }));
+    expect(within(screen.getByRole('dialog')).getByLabelText('Title')).toHaveValue('');
+  });
+
+  it('filters by board and type comboboxes and searches loaded items', () => {
+    mocks.items = [
+      item,
+      {
+        ...item,
+        id: '00000000-0000-4000-8000-000000000031',
+        title: 'Security header rule',
+        content: 'Always set CSP.',
+        knowledgeType: 'security_rule',
+      },
+    ];
+    render(<KnowledgePage />);
+
+    const board = screen.getByRole('combobox', { name: 'Filter by board' });
+    selectComboboxOption(board, 'Coppice');
+    expect(board).toHaveTextContent('Coppice');
+    expect(mocks.filter).toMatchObject({ boardId: '00000000-0000-4000-8000-000000000003' });
+
+    const type = screen.getByRole('combobox', { name: 'Filter by type' });
+    selectComboboxOption(type, 'Test command');
+    expect(type).toHaveTextContent('Test command');
+    expect(mocks.filter).toMatchObject({ knowledgeType: 'test_command' });
+
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Search knowledge' }), {
+      target: { value: 'csp' },
+    });
+    expect(screen.getByText('Security header rule')).toBeVisible();
+    expect(screen.queryByText('Fast feedback loop')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Clear filters' }));
+    expect(screen.getByText('Fast feedback loop')).toBeVisible();
+    expect(board).toHaveTextContent('All scopes');
+    expect(mocks.filter).toMatchObject({ boardId: undefined, knowledgeType: undefined });
+  });
+
+  it('shows empty states with an Add knowledge call to action', () => {
+    mocks.items = [];
+    render(<KnowledgePage />);
+
+    expect(screen.getByRole('heading', { name: 'No pending knowledge' })).toBeVisible();
+    expect(screen.getAllByRole('button', { name: 'Add knowledge' })).toHaveLength(2);
+
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Search knowledge' }), {
+      target: { value: 'nothing' },
+    });
+    expect(screen.getByRole('heading', { name: 'No matching knowledge' })).toBeVisible();
+    fireEvent.click(screen.getAllByRole('button', { name: 'Clear filters' })[1]);
+    expect(screen.getByRole('heading', { name: 'No pending knowledge' })).toBeVisible();
+
+    fireEvent.click(screen.getAllByRole('button', { name: 'Add knowledge' })[1]);
+    expect(screen.getByRole('dialog', { name: 'Add knowledge' })).toBeInTheDocument();
+  });
+
+  it('is read-only for non-admins', () => {
+    mocks.role = 'member';
+    render(<KnowledgePage />);
+
+    expect(screen.queryByRole('button', { name: 'Add knowledge' })).not.toBeInTheDocument();
+    expect(screen.getByText(/Read-only/)).toBeVisible();
+    expect(screen.queryByRole('button', { name: 'Edit' })).not.toBeInTheDocument();
   });
 
   it('sends optimistic versions for edit and rejection actions', async () => {
     render(<KnowledgePage />);
 
     fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
-    fireEvent.change(screen.getByLabelText('Revision title'), {
+    const editor = within(screen.getByRole('dialog', { name: 'Create a new revision' }));
+    expect(editor.getByLabelText('Title')).toHaveValue(item.title);
+    expect(editor.getByLabelText('Confidence')).toHaveTextContent('High');
+    expect(editor.queryByLabelText('Scope')).not.toBeInTheDocument();
+    fireEvent.change(editor.getByLabelText('Title'), {
       target: { value: 'Updated feedback loop' },
     });
-    fireEvent.change(screen.getByLabelText('Revision content'), {
+    fireEvent.change(editor.getByLabelText('Knowledge'), {
       target: { value: 'Run the focused tests before review.' },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Save revision' }));
+    fireEvent.click(editor.getByRole('button', { name: 'Save revision' }));
     await waitFor(() => {
       expect(mocks.edit).toHaveBeenCalledWith({
         id: item.id,
@@ -442,8 +583,13 @@ describe('KnowledgePage', () => {
         },
       });
     });
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    });
+    expect(mocks.toast.success).toHaveBeenCalledWith('Revision saved.');
 
     fireEvent.click(screen.getByRole('button', { name: 'Reject' }));
+    expect(screen.getByRole('dialog', { name: 'Reject candidate' })).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText('Reason (optional)'), {
       target: { value: 'Too specific to this incident.' },
     });
@@ -455,6 +601,10 @@ describe('KnowledgePage', () => {
         reason: 'Too specific to this incident.',
       });
     });
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    });
+    expect(mocks.toast.success).toHaveBeenCalledWith('Candidate rejected.');
   });
 
   it('populates reject reason from presets and submits clear prose', async () => {
@@ -503,13 +653,16 @@ describe('KnowledgePage', () => {
     render(<KnowledgePage />);
 
     fireEvent.click(screen.getByRole('button', { name: 'Supersede' }));
-    fireEvent.change(screen.getByLabelText('Revision title'), {
+    const editor = within(
+      screen.getByRole('dialog', { name: 'Create replacement candidate' }),
+    );
+    fireEvent.change(editor.getByLabelText('Title'), {
       target: { value: 'Replacement feedback loop' },
     });
-    fireEvent.change(screen.getByLabelText('Revision content'), {
+    fireEvent.change(editor.getByLabelText('Knowledge'), {
       target: { value: 'Use the replacement command.' },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Create replacement' }));
+    fireEvent.click(editor.getByRole('button', { name: 'Create replacement' }));
     await waitFor(() => {
       expect(mocks.supersede).toHaveBeenCalledWith({
         id: approved.id,
@@ -527,6 +680,9 @@ describe('KnowledgePage', () => {
           confidence: approved.confidence,
         },
       });
+    });
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     });
 
     fireEvent.click(screen.getByRole('button', { name: 'Mark stale' }));

@@ -4,6 +4,7 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { setCsrfToken } from '../../lib/api';
+import { selectComboboxOption } from '../../test/combobox';
 import {
   connectorStatusSchema,
   type ConnectorStatus,
@@ -298,9 +299,7 @@ describe('ConnectorsTab', () => {
       expect(codexCard.getByRole('button', { name: 'Test connection' })).toBeEnabled(),
     );
     fireEvent.click(codexCard.getByRole('button', { name: 'Test connection' }));
-    fireEvent.change(codexCard.getByLabelText('Agent'), {
-      target: { value: CODEX_AGENT_B },
-    });
+    selectComboboxOption(codexCard.getByLabelText('Agent'), 'Codex QA · gpt-5-mini');
     fireEvent.click(codexCard.getByRole('button', { name: 'Start test' }));
 
     await waitFor(() =>
@@ -336,9 +335,7 @@ describe('ConnectorsTab', () => {
     );
     expect(callsFor('/api/tools/connectors', 'GET')).toHaveLength(1);
     fireEvent.click(codexCard.getByRole('button', { name: 'Test connection' }));
-    fireEvent.change(codexCard.getByLabelText('Agent'), {
-      target: { value: CODEX_AGENT_B },
-    });
+    selectComboboxOption(codexCard.getByLabelText('Agent'), 'Codex QA · gpt-5-mini');
     fireEvent.click(codexCard.getByRole('button', { name: 'Start test' }));
 
     await waitFor(() =>
@@ -365,7 +362,7 @@ describe('ConnectorsTab', () => {
       expect(openCard.getByRole('button', { name: 'Test connection' })).toBeEnabled(),
     );
     fireEvent.click(openCard.getByRole('button', { name: 'Test connection' }));
-    expect(openCard.getByLabelText('Agent')).toHaveValue(OPENCODE_AGENT);
+    expect(openCard.getByLabelText('Agent')).toHaveTextContent('Open Dev');
     fireEvent.click(openCard.getByRole('button', { name: 'Start test' }));
 
     const result = within(await screen.findByTestId('connector-test-result-opencode'));

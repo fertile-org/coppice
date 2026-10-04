@@ -4,6 +4,7 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Plugin, PluginDir, PluginInstall } from '../../lib/schemas/plugin';
+import { selectComboboxOption } from '../../test/combobox';
 import { PluginsPage } from './PluginsPage';
 
 const mocks = vi.hoisted(() => ({
@@ -243,9 +244,7 @@ describe('PluginsPage', () => {
       target: { value: 'https://github.com/org/missing.git' },
     });
     fireEvent.change(screen.getByLabelText(/^Ref/), { target: { value: 'v1' } });
-    fireEvent.change(screen.getByLabelText('Target directory'), {
-      target: { value: extraDir.id },
-    });
+    selectComboboxOption(screen.getByLabelText('Target directory'), extraDir.path);
     fireEvent.click(screen.getByRole('button', { name: 'Install' }));
 
     await waitFor(() =>

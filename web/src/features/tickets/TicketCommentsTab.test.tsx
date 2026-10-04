@@ -47,6 +47,7 @@ describe('TicketCommentsTab', () => {
   it('suggests distinct mentions by full agent name when presets match', () => {
     renderComments();
 
+    fireEvent.click(screen.getByRole('button', { name: 'Markdown source' }));
     const textarea = screen.getByPlaceholderText('Write a comment in markdown…');
     fireEvent.change(textarea, { target: { value: '@pm' } });
 
@@ -56,5 +57,32 @@ describe('TicketCommentsTab', () => {
     expect(within(listbox).getByText('PM Opencode')).toBeInTheDocument();
     expect(within(listbox).getByText('@pm-opencode')).toBeInTheDocument();
     expect(within(listbox).queryAllByText('@pm')).toHaveLength(0);
+  });
+
+  it('completes a mention into the comment body', () => {
+    renderComments();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Markdown source' }));
+    const textarea = screen.getByPlaceholderText<HTMLTextAreaElement>(
+      'Write a comment in markdown…',
+    );
+    fireEvent.change(textarea, { target: { value: 'hi @pm' } });
+    const listbox = screen.getByRole('listbox', { name: 'Agent mentions' });
+    fireEvent.click(within(listbox).getByText('PM Codex'));
+
+    expect(textarea.value).toBe('hi @pm-codex ');
+    expect(
+      screen.queryByRole('listbox', { name: 'Agent mentions' }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('renders the rich-text comment editor by default', () => {
+    renderComments();
+
+    expect(screen.getByRole('textbox', { name: 'Comment' })).toHaveAttribute(
+      'contenteditable',
+      'true',
+    );
+    expect(screen.getByRole('button', { name: 'Post comment' })).toBeDisabled();
   });
 });

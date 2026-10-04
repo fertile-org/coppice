@@ -1,6 +1,14 @@
-import { useEffect, type ReactNode } from 'react';
+import type { ReactNode } from 'react';
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetTitle,
+} from '../../components/ui/sheet';
 
 export interface RepoDrawerProps {
+  /** Keep the drawer mounted and toggle this so the exit animation plays. */
+  open?: boolean;
   ariaLabel: string;
   title: string;
   description?: string;
@@ -10,44 +18,27 @@ export interface RepoDrawerProps {
 
 /** Form-scale right drawer (TicketDrawer mechanics, narrower panel). */
 export function RepoDrawer({
+  open = true,
   ariaLabel,
   title,
   description,
   onClose,
   children,
 }: RepoDrawerProps) {
-  useEffect(() => {
-    function onKeyDown(e: KeyboardEvent) {
-      if (e.key === 'Escape') onClose();
-    }
-    document.addEventListener('keydown', onKeyDown);
-    return () => document.removeEventListener('keydown', onKeyDown);
-  }, [onClose]);
-
   return (
-    <div className="fixed inset-0 z-50 flex justify-end" role="presentation">
-      <div
-        data-testid="repo-drawer-backdrop"
-        className="absolute inset-0 bg-overlay backdrop-blur-[1px]"
-        onClick={onClose}
-        aria-hidden="true"
-      />
-      <div
-        role="dialog"
-        aria-modal="true"
+    <Sheet open={open} onOpenChange={(next) => !next && onClose()}>
+      <SheetContent
         aria-label={ariaLabel}
-        className="relative flex h-full w-full max-w-lg animate-fade-in flex-col bg-surface-raised shadow-2xl"
-        onClick={(e) => e.stopPropagation()}
+        aria-labelledby={undefined}
+        {...(description ? {} : { 'aria-describedby': undefined })}
+        className="max-w-lg"
+        overlayProps={{ 'data-testid': 'repo-drawer-backdrop' }}
       >
         <header className="flex shrink-0 items-start justify-between gap-4 border-b border-border px-6 py-4">
           <div className="min-w-0">
-            <h2 className="font-display text-xl font-semibold text-bark-900">
-              {title}
-            </h2>
+            <SheetTitle>{title}</SheetTitle>
             {description && (
-              <p className="mt-1 font-body text-sm text-text-secondary">
-                {description}
-              </p>
+              <SheetDescription className="mt-1">{description}</SheetDescription>
             )}
           </div>
           <button
@@ -59,7 +50,7 @@ export function RepoDrawer({
           </button>
         </header>
         <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">{children}</div>
-      </div>
-    </div>
+      </SheetContent>
+    </Sheet>
   );
 }

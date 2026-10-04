@@ -1,3 +1,5 @@
+import animate from 'tailwindcss-animate'
+
 /** @type {import('tailwindcss').Config} */
 export default {
   content: ['./index.html', './src/**/*.{js,ts,jsx,tsx}'],
@@ -173,12 +175,44 @@ export default {
           '0%': { width: '100%' },
           '100%': { width: '0%' },
         },
+        // `scale` / `translate` are individual transform properties so they
+        // compose with the centering `transform` on dialog content.
+        'overlay-in': {
+          from: { opacity: '0' },
+          to: { opacity: '1' },
+        },
+        'overlay-out': {
+          from: { opacity: '1' },
+          to: { opacity: '0' },
+        },
+        'dialog-in': {
+          from: { opacity: '0', scale: '0.95', translate: '0 0.5rem' },
+          to: { opacity: '1', scale: '1', translate: '0 0' },
+        },
+        'dialog-out': {
+          from: { opacity: '1', scale: '1', translate: '0 0' },
+          to: { opacity: '0', scale: '0.95', translate: '0 0.25rem' },
+        },
+        'sheet-in-right': {
+          from: { translate: '100% 0' },
+          to: { translate: '0 0' },
+        },
+        'sheet-out-right': {
+          from: { translate: '0 0' },
+          to: { translate: '100% 0' },
+        },
       },
       animation: {
         'fade-in': 'fade-in 200ms var(--ease-out) forwards',
         'toast-progress': 'toast-progress linear forwards',
+        'overlay-in': 'overlay-in 150ms var(--ease-out)',
+        'overlay-out': 'overlay-out 120ms ease-in forwards',
+        'dialog-in': 'dialog-in 190ms var(--ease-out)',
+        'dialog-out': 'dialog-out 130ms ease-in forwards',
+        'sheet-in-right': 'sheet-in-right 240ms var(--ease-out)',
+        'sheet-out-right': 'sheet-out-right 180ms ease-in forwards',
       },
     },
   },
-  plugins: [],
+  plugins: [animate],
 }

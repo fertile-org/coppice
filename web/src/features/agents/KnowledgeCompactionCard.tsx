@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useLocation } from 'react-router-dom';
+import { Combobox } from '../../components/ui/combobox';
 import { ApiError } from '../../lib/api';
 import { useSession } from '../auth/useSession';
 import { formatInterval, pluralTickets } from '../knowledge/compactionFormat';
@@ -42,7 +43,7 @@ export function KnowledgeCompactionCard({
   const statusQuery = useCompactionStatus();
   const update = useUpdateKnowledgeSettings();
   const sectionRef = useRef<HTMLElement>(null);
-  const selectRef = useRef<HTMLSelectElement>(null);
+  const selectRef = useRef<HTMLButtonElement>(null);
   const savedId = settingsQuery.data?.compactionAgentId ?? '';
   const [draft, setDraft] = useState<string | null>(null);
   const selected = draft ?? savedId;
@@ -113,19 +114,20 @@ export function KnowledgeCompactionCard({
               Compaction agent
             </label>
             {isAdmin ? (
-              <select
+              <Combobox
                 ref={selectRef}
                 id="compaction-agent"
                 value={selected}
                 disabled={agents.length === 0 || update.isPending}
-                onChange={(event) => {
-                  setDraft(event.target.value);
+                onValueChange={(value) => {
+                  setDraft(value);
                   setError(null);
                 }}
-                className="field-control w-full px-3 py-2 font-body text-sm"
-              >
-                <option value="">None — compaction off</option>
-                {options.map((agent) => {
+                clearable
+                clearLabel="None — compaction off"
+                placeholder="None — compaction off"
+                searchPlaceholder="Search agents…"
+                options={options.map((agent) => {
                   const capable = canRunCompaction(agent);
                   const suffix = [
                     !agent.enabled ? '(disabled)' : null,
@@ -133,17 +135,13 @@ export function KnowledgeCompactionCard({
                   ]
                     .filter(Boolean)
                     .join(' ');
-                  return (
-                    <option
-                      key={agent.id}
-                      value={agent.id}
-                      disabled={!capable && agent.id !== savedId}
-                    >
-                      {agent.name} ({agent.connector}){suffix ? ` ${suffix}` : ''}
-                    </option>
-                  );
+                  return {
+                    value: agent.id,
+                    label: `${agent.name} (${agent.connector})${suffix ? ` ${suffix}` : ''}`,
+                    disabled: !capable && agent.id !== savedId,
+                  };
                 })}
-              </select>
+              />
             ) : (
               <p
                 id="compaction-agent"

@@ -1,5 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
+import { Combobox } from '../../components/ui/combobox';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogTitle,
+} from '../../components/ui/dialog';
 import { ApiError, parseApiErrorMessage } from '../../lib/api';
 import { isAssignable } from '../plugins/assignable';
 import { usePlugins } from '../plugins/usePlugins';
@@ -79,7 +86,7 @@ function CreateAgentDialog({
   presets: AgentPreset[];
   connectorOptions: ConnectorOption[];
 }) {
-  const presetRef = useRef<HTMLSelectElement>(null);
+  const presetRef = useRef<HTMLButtonElement>(null);
   const [presetId, setPresetId] = useState('');
   const [values, setValues] = useState<AgentFormValues>(presetToFormValues(presets[0] ?? {
     id: '',
@@ -111,17 +118,6 @@ function CreateAgentDialog({
     const timer = window.setTimeout(() => presetRef.current?.focus(), 0);
     return () => window.clearTimeout(timer);
   }, [open, presets]);
-
-  useEffect(() => {
-    if (!open) return;
-    function onKeyDown(e: KeyboardEvent) {
-      if (e.key === 'Escape') onClose();
-    }
-    document.addEventListener('keydown', onKeyDown);
-    return () => document.removeEventListener('keydown', onKeyDown);
-  }, [open, onClose]);
-
-  if (!open) return null;
 
   function handlePresetChange(nextPresetId: string) {
     setPresetId(nextPresetId);
@@ -182,27 +178,12 @@ function CreateAgentDialog({
   }
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-overlay px-4"
-      role="presentation"
-      onClick={onClose}
-    >
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="create-agent-title"
-        className="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-xl border border-border bg-paper-50 p-6 shadow-lg"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <h2
-          id="create-agent-title"
-          className="font-display text-xl font-semibold text-bark-900"
-        >
-          New agent
-        </h2>
-        <p className="mt-1 font-body text-sm text-text-secondary">
+    <Dialog open={open} onOpenChange={(next) => !next && onClose()}>
+      <DialogContent className="max-h-[90vh] max-w-3xl overflow-y-auto">
+        <DialogTitle>New agent</DialogTitle>
+        <DialogDescription className="mt-1">
           Choose a preset to prefill role and prompt, then name your agent.
-        </p>
+        </DialogDescription>
 
         <div className="mt-5">
           <label
@@ -211,19 +192,17 @@ function CreateAgentDialog({
           >
             Preset
           </label>
-          <select
+          <Combobox
             ref={presetRef}
             id="agent-preset"
             value={presetId}
-            onChange={(e) => handlePresetChange(e.target.value)}
-            className="field-control w-full px-3 py-2 font-body text-sm"
-          >
-            {presets.map((preset) => (
-              <option key={preset.id} value={preset.id}>
-                {preset.key} — {preset.role}
-              </option>
-            ))}
-          </select>
+            onValueChange={handlePresetChange}
+            searchPlaceholder="Search presets…"
+            options={presets.map((preset) => ({
+              value: preset.id,
+              label: `${preset.key} — ${preset.role}`,
+            }))}
+          />
         </div>
 
         <div className="mt-4">
@@ -239,17 +218,19 @@ function CreateAgentDialog({
             submitLabel={createdAgentId ? 'Retry plugin assignment' : undefined}
           />
         </div>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 
 function EditAgentDialog({
+  open,
   agent,
   onClose,
   connectorOptions,
   preselectPluginId,
 }: {
+  open: boolean;
   agent: Agent;
   onClose: () => void;
   connectorOptions: ConnectorOption[];
@@ -295,14 +276,6 @@ function EditAgentDialog({
     setValues((prev) => ({ ...prev, pluginIds }));
   }, [assignedPluginIds, preselectPluginId]);
 
-  useEffect(() => {
-    function onKeyDown(e: KeyboardEvent) {
-      if (e.key === 'Escape') onClose();
-    }
-    document.addEventListener('keydown', onKeyDown);
-    return () => document.removeEventListener('keydown', onKeyDown);
-  }, [onClose]);
-
   async function handleSubmit(formValues: AgentFormValues) {
     setError(null);
     try {
@@ -341,27 +314,12 @@ function EditAgentDialog({
   }
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-overlay px-4"
-      role="presentation"
-      onClick={onClose}
-    >
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="edit-agent-title"
-        className="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-xl border border-border bg-paper-50 p-6 shadow-lg"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <h2
-          id="edit-agent-title"
-          className="font-display text-xl font-semibold text-bark-900"
-        >
-          Edit agent
-        </h2>
-        <p className="mt-1 font-body text-sm text-text-secondary">
+    <Dialog open={open} onOpenChange={(next) => !next && onClose()}>
+      <DialogContent className="max-h-[90vh] max-w-3xl overflow-y-auto">
+        <DialogTitle>Edit agent</DialogTitle>
+        <DialogDescription className="mt-1">
           Update {agent.name}&apos;s configuration.
-        </p>
+        </DialogDescription>
 
         <div className="mt-5">
           <AgentForm
@@ -377,8 +335,8 @@ function EditAgentDialog({
             focusPlugins={Boolean(preselectPluginId)}
           />
         </div>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -523,6 +481,8 @@ export function AgentsPage() {
   const { data: connectorOptions = [] } = useConnectors();
   const [createOpen, setCreateOpen] = useState(false);
   const [editingAgent, setEditingAgent] = useState<Agent | null>(null);
+  const [editOpen, setEditOpen] = useState(false);
+  const [editSession, setEditSession] = useState(0);
   const [togglingId, setTogglingId] = useState<string | null>(null);
   const updateAgentMutation = useUpdateAgentMutation();
   const { data: knowledgeSettings } = useKnowledgeSettings();
@@ -543,6 +503,12 @@ export function AgentsPage() {
       },
       { replace: true },
     );
+  }
+
+  function openEdit(agent: Agent) {
+    setEditingAgent(agent);
+    setEditSession((n) => n + 1);
+    setEditOpen(true);
   }
 
   async function toggleEnabled(agent: Agent) {
@@ -668,7 +634,7 @@ export function AgentsPage() {
                   key={agent.id}
                   agent={agent}
                   isCompactor={agent.id === compactorId}
-                  onEdit={setEditingAgent}
+                  onEdit={openEdit}
                   onToggleEnabled={(a) => void toggleEnabled(a)}
                   toggling={togglingId === agent.id}
                 />
@@ -689,9 +655,10 @@ export function AgentsPage() {
 
       {editingAgent && (
         <EditAgentDialog
-          key={editingAgent.id}
+          key={`${editingAgent.id}:${editSession}`}
+          open={editOpen}
           agent={editingAgent}
-          onClose={() => setEditingAgent(null)}
+          onClose={() => setEditOpen(false)}
           connectorOptions={connectorOptions}
           preselectPluginId={deepLinkPlugin?.id}
         />

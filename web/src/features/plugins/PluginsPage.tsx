@@ -2,6 +2,7 @@ import { ArrowDown, ArrowUp } from 'lucide-react';
 import { useRef, useState, type FormEvent, type RefObject } from 'react';
 import { Navigate } from 'react-router-dom';
 import { Button } from '../../components/ui/button';
+import { Combobox } from '../../components/ui/combobox';
 import { isDesktopShell, pickDirectory } from '../../lib/desktop';
 import type { Plugin, PluginDir, PluginInstall } from '../../lib/schemas/plugin';
 import { useSession } from '../auth/useSession';
@@ -328,18 +329,14 @@ function InstallSection({
           >
             Target directory
           </label>
-          <select
+          <Combobox
             id="plugin-target-dir"
             value={targetDirId}
-            onChange={(e) => setPluginDirId(e.target.value)}
-            className="field-control w-full px-3 py-2 font-mono text-sm"
-          >
-            {dirs.map((dir) => (
-              <option key={dir.id} value={dir.id}>
-                {dir.path}
-              </option>
-            ))}
-          </select>
+            onValueChange={setPluginDirId}
+            triggerClassName="font-mono"
+            searchPlaceholder="Search directories…"
+            options={dirs.map((dir) => ({ value: dir.id, label: dir.path }))}
+          />
         </div>
         <Button type="submit" loading={running}>
           Install

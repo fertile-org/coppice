@@ -11,6 +11,7 @@ import {
 } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { Button } from '../../components/ui/button';
+import { Combobox } from '../../components/ui/combobox';
 import { Label } from '../../components/ui/label';
 import { Textarea } from '../../components/ui/textarea';
 import { parseApiErrorMessage } from '../../lib/api';
@@ -183,38 +184,32 @@ function NewChatForm({
 
       <div className="space-y-2">
         <Label htmlFor="chat-agent">Agent</Label>
-        <select
+        <Combobox
           id="chat-agent"
           aria-label="Agent"
-          className="field-control h-10 w-full px-3 font-body text-sm"
           value={agentId}
-          onChange={(event) => setAgentId(event.target.value)}
-        >
-          <option value="">Select agent</option>
-          {enabledAgents.map((agent) => (
-            <option key={agent.id} value={agent.id}>
-              {agent.name}
-            </option>
-          ))}
-        </select>
+          onValueChange={setAgentId}
+          placeholder="Select agent"
+          searchPlaceholder="Search agents…"
+          options={enabledAgents.map((agent) => ({
+            value: agent.id,
+            label: agent.name,
+          }))}
+        />
       </div>
 
       <div className="space-y-2">
         <Label htmlFor="chat-board">Board (optional)</Label>
-        <select
+        <Combobox
           id="chat-board"
           aria-label="Board (optional)"
-          className="field-control h-10 w-full px-3 font-body text-sm"
           value={boardId}
-          onChange={(event) => setBoardId(event.target.value)}
-        >
-          <option value="">No board</option>
-          {boards.map((board) => (
-            <option key={board.id} value={board.id}>
-              {board.name}
-            </option>
-          ))}
-        </select>
+          onValueChange={setBoardId}
+          placeholder="No board"
+          searchPlaceholder="Search boards…"
+          clearable
+          options={boards.map((board) => ({ value: board.id, label: board.name }))}
+        />
       </div>
 
       {error && (

@@ -4,6 +4,7 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiError } from '../../lib/api';
+import { openCombobox, selectComboboxOption } from '../../test/combobox';
 import { ChatPage } from './ChatPage';
 
 const mocks = vi.hoisted(() => ({
@@ -240,8 +241,9 @@ describe('ChatPage', () => {
     const agent = screen.getByLabelText('Agent');
     expect(agent).toBeInTheDocument();
     expect(screen.getByLabelText('Board (optional)')).toBeInTheDocument();
-    expect(agent).toHaveTextContent('Backend Engineer');
-    expect(agent).not.toHaveTextContent('Disabled Agent');
+    const options = openCombobox(agent);
+    expect(within(options).getByRole('option', { name: 'Backend Engineer' })).toBeInTheDocument();
+    expect(within(options).queryByRole('option', { name: 'Disabled Agent' })).toBeNull();
   });
 
   it('creates a session then opens the transcript composer', async () => {
@@ -258,12 +260,8 @@ describe('ChatPage', () => {
 
     renderChat('/chat');
 
-    fireEvent.change(screen.getByLabelText('Agent'), {
-      target: { value: '00000000-0000-4000-8000-000000000010' },
-    });
-    fireEvent.change(screen.getByLabelText('Board (optional)'), {
-      target: { value: '00000000-0000-4000-8000-000000000003' },
-    });
+    selectComboboxOption(screen.getByLabelText('Agent'), 'Backend Engineer');
+    selectComboboxOption(screen.getByLabelText('Board (optional)'), 'Coppice');
     fireEvent.click(screen.getByRole('button', { name: 'Start chat' }));
 
     await waitFor(() => {

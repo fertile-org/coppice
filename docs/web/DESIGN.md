@@ -124,6 +124,7 @@ Column headers use accent color for the status dot; cards sit on `--color-surfac
 - Column drag: subtle lift (`--shadow-lg`) + slight scale
 - Page enter: staggered fade-up on board columns (future)
 - Prefer CSS transitions; reserve JS animation for dnd-kit
+- Modals and drawers: build on `components/ui/dialog.tsx` / `sheet.tsx` (Radix). Overlay fades ~150ms, dialog content fades + zooms from 95% (~190ms), sheets slide in from the right (~240ms); exits are faster, and nothing animates under `prefers-reduced-motion`. Control them with `open` / `onOpenChange` rather than conditional rendering so the exit animation plays.
 
 ## Implementation
 

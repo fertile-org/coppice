@@ -1,4 +1,3 @@
-import { useEffect } from 'react';
 import { X } from 'lucide-react';
 import {
   attachmentUrl,
@@ -7,52 +6,43 @@ import {
   type AttachmentMeta,
 } from '../../lib/attachments';
 import { Button } from '../../components/ui/button';
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogTitle,
+} from '../../components/ui/dialog';
 
 interface AttachmentPreviewModalProps {
+  /** Keep the modal mounted and toggle this so the exit animation plays. */
+  open?: boolean;
   attachment: AttachmentMeta;
   onClose: () => void;
 }
 
 export function AttachmentPreviewModal({
+  open = true,
   attachment,
   onClose,
 }: AttachmentPreviewModalProps) {
   const isImage = isImageContentType(attachment.contentType);
   const url = attachmentUrl(attachment.id);
 
-  useEffect(() => {
-    function onKeyDown(e: KeyboardEvent) {
-      if (e.key === 'Escape') onClose();
-    }
-    document.addEventListener('keydown', onKeyDown);
-    return () => document.removeEventListener('keydown', onKeyDown);
-  }, [onClose]);
-
   return (
-    <div
-      className="fixed inset-0 z-[110] flex items-center justify-center p-4"
-      role="presentation"
-    >
-      <div
-        className="absolute inset-0 bg-overlay-strong backdrop-blur-[2px]"
-        onClick={onClose}
-        aria-hidden="true"
-      />
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-label={attachment.filename}
-        className="relative flex max-h-[90vh] w-full max-w-4xl flex-col overflow-hidden rounded-xl border border-border bg-surface-raised shadow-2xl"
-        onClick={(e) => e.stopPropagation()}
+    <Dialog open={open} onOpenChange={(next) => !next && onClose()}>
+      <DialogContent
+        className="z-[110] flex max-h-[90vh] max-w-4xl flex-col overflow-hidden bg-surface-raised p-0 shadow-2xl"
+        overlayClassName="z-[110] bg-overlay-strong backdrop-blur-[2px]"
       >
         <header className="flex shrink-0 items-center justify-between gap-3 border-b border-border px-4 py-3">
           <div className="min-w-0">
-            <p className="truncate font-body text-sm font-medium text-text-primary">
+            <DialogTitle className="truncate font-body text-sm font-medium text-text-primary">
               {attachment.filename}
-            </p>
-            <p className="font-body text-xs text-text-muted">
+            </DialogTitle>
+            <DialogDescription className="text-xs text-text-muted">
               {formatFileSize(attachment.sizeBytes)}
-            </p>
+            </DialogDescription>
           </div>
           <div className="flex shrink-0 items-center gap-2">
             <Button variant="secondary" size="sm" asChild>
@@ -60,14 +50,12 @@ export function AttachmentPreviewModal({
                 Download
               </a>
             </Button>
-            <button
-              type="button"
-              onClick={onClose}
+            <DialogClose
               className="rounded-md border border-border p-1.5 text-text-secondary transition-colors duration-fast hover:text-text-primary"
               aria-label="Close preview"
             >
               <X className="size-4" />
-            </button>
+            </DialogClose>
           </div>
         </header>
 
@@ -91,7 +79,7 @@ export function AttachmentPreviewModal({
             </div>
           )}
         </div>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }

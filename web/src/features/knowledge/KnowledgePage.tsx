@@ -1,54 +1,26 @@
-import {
-  BookOpen,
-  Check,
-  Clock3,
-  ExternalLink,
-  FileClock,
-  GitBranch,
-  Plus,
-  ShieldCheck,
-  Sparkles,
-  X,
-} from 'lucide-react';
-import { useMemo, useState, type FormEvent } from 'react';
+import { BookOpen, Lightbulb, Plus, Search, SearchX, ShieldCheck } from 'lucide-react';
+import { useId, useMemo, useState, type ReactNode } from 'react';
 import { Button } from '../../components/ui/button';
+import { Combobox } from '../../components/ui/combobox';
 import { Input } from '../../components/ui/input';
-import { Label } from '../../components/ui/label';
-import { Textarea } from '../../components/ui/textarea';
-import { parseApiErrorMessage } from '../../lib/api';
-import {
-  knowledgeTypeSchema,
-  type KnowledgeConfidence,
-  type KnowledgeItem,
-  type KnowledgeScope,
-  type KnowledgeStatus,
-  type KnowledgeType,
-  type SimilarNeighbor,
+import type {
+  KnowledgeItem,
+  KnowledgeStatus,
+  KnowledgeType,
 } from '../../lib/schemas/knowledge';
-import { useAgents } from '../agents/useAgents';
 import { useSession } from '../auth/useSession';
 import { useBoards } from '../boards/useBoards';
 import { useOpenTicket } from '../tickets/useOpenTicket';
-import {
-  CURATION_LITMUS,
-  CURATION_TRUST_FRAMING,
-  REJECT_PRESETS,
-  guidanceForType,
-} from './curationGuide';
+import { CURATION_LITMUS, CURATION_TRUST_FRAMING } from './curationGuide';
 import { CompactionStatusStrip } from './CompactionStatusStrip';
+import { KnowledgeCard } from './KnowledgeCard';
 import {
-  fetchKnowledgeItem,
-  useApproveKnowledge,
-  useCreateKnowledge,
-  useEditKnowledge,
-  useExpireKnowledge,
-  useKnowledge,
-  useMarkKnowledgeStale,
-  useRejectKnowledge,
-  useSimilarKnowledge,
-  useSupersedeKnowledge,
-  type KnowledgeRevisionInput,
-} from './useKnowledge';
+  KnowledgeFormDialog,
+  RejectKnowledgeDialog,
+  type KnowledgeFormMode,
+} from './KnowledgeDialogs';
+import { TYPE_LABELS, TYPE_OPTIONS, scopeLabel } from './knowledgeFormat';
+import { useKnowledge } from './useKnowledge';
 
 const STATUS_TABS: Array<{ value: KnowledgeStatus; label: string }> = [
   { value: 'pending', label: 'Pending' },
@@ -57,1138 +29,348 @@ const STATUS_TABS: Array<{ value: KnowledgeStatus; label: string }> = [
   { value: 'stale', label: 'Stale' },
 ];
 
-const TYPE_LABELS: Record<KnowledgeType, string> = {
-  coding_convention: 'Coding convention',
-  architecture_rule: 'Architecture rule',
-  bug_pattern: 'Bug pattern',
-  test_command: 'Test command',
-  review_feedback: 'Review feedback',
-  dependency_note: 'Dependency note',
-  api_contract: 'API contract',
-  workflow_rule: 'Workflow rule',
-  human_preference: 'Human preference',
-  operational_runbook: 'Operational runbook',
-  security_rule: 'Security rule',
-  performance_note: 'Performance note',
+const EMPTY_COPY: Record<KnowledgeStatus, string> = {
+  pending: 'New manual and extracted candidates will wait here for review.',
+  approved: 'Approved knowledge is what agents can retrieve during runs.',
+  rejected: 'Rejected candidates stay here with their reason for the audit trail.',
+  stale: 'Knowledge marked stale is kept here until it is superseded or re-approved.',
 };
 
-const KNOWLEDGE_TYPES = knowledgeTypeSchema.options;
-
-interface CandidateFormState {
-  scope: KnowledgeScope;
-  boardId: string;
-  agentId: string;
-  knowledgeType: KnowledgeType;
-  title: string;
-  content: string;
-  confidence: KnowledgeConfidence;
+function matchesSearch(item: KnowledgeItem, terms: string[]): boolean {
+  if (terms.length === 0) return true;
+  const haystack = [
+    item.title,
+    item.content,
+    TYPE_LABELS[item.knowledgeType],
+    scopeLabel(item),
+  ]
+    .join(' ')
+    .toLowerCase();
+  return terms.every((term) => haystack.includes(term));
 }
-
-const EMPTY_CANDIDATE: CandidateFormState = {
-  scope: 'board',
-  boardId: '',
-  agentId: '',
-  knowledgeType: 'coding_convention',
-  title: '',
-  content: '',
-  confidence: 'medium',
-};
-
-function formatDate(value: string | null): string {
-  if (!value) return 'Never';
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleString(undefined, {
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit',
-  });
-}
-
-function humanize(value: string): string {
-  return value
-    .split('_')
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-    .join(' ');
-}
-
-function shortId(value: string): string {
-  return value.slice(0, 8);
-}
-
-function duplicateRejectReason(neighborTitle: string, neighborId: string): string {
-  const preset = REJECT_PRESETS.find((entry) => entry.id === 'duplicate')!;
-  return `${preset.reasonText.slice(0, -1)}: "${neighborTitle}" (${shortId(neighborId)}).`;
-}
-
-function statusPillClass(status: KnowledgeStatus): string {
-  const base =
-    'rounded-full border px-2 py-0.5 font-body text-xs font-medium';
-  switch (status) {
-    case 'pending':
-      return `${base} border-warning-muted bg-warning-muted text-warning`;
-    case 'approved':
-      return `${base} border-success-muted bg-success-muted text-success`;
-    case 'rejected':
-      return `${base} border-danger-muted bg-danger-muted text-danger`;
-    case 'stale':
-      return `${base} border-border bg-paper-200 text-text-secondary`;
-  }
-}
-
-function candidateInput(form: CandidateFormState): KnowledgeRevisionInput {
-  return {
-    scope: form.scope,
-    boardId: form.scope === 'workspace' ? null : form.boardId,
-    agentId: form.scope === 'agent' ? form.agentId : null,
-    knowledgeType: form.knowledgeType,
-    title: form.title.trim(),
-    content: form.content.trim(),
-    sourceType: 'human_note',
-    sourceId: null,
-    sourceRunId: null,
-    confidence: form.confidence,
-  };
-}
-
-function ManualCandidateForm() {
-  const { data: boards } = useBoards();
-  const { data: agents } = useAgents();
-  const create = useCreateKnowledge();
-  const [form, setForm] = useState<CandidateFormState>(EMPTY_CANDIDATE);
-  const [error, setError] = useState<string | null>(null);
-
-  const availableAgents = useMemo(
-    () => agents?.filter((agent) => agent.enabled) ?? [],
-    [agents],
-  );
-
-  async function submit(event: FormEvent) {
-    event.preventDefault();
-    if (form.scope !== 'workspace' && !form.boardId) {
-      setError('Choose a board for this scope.');
-      return;
-    }
-    if (form.scope === 'agent' && !form.agentId) {
-      setError('Choose an agent for agent-scoped knowledge.');
-      return;
-    }
-    if (!form.title.trim() || !form.content.trim()) {
-      setError('Title and content are required.');
-      return;
-    }
-    setError(null);
-    try {
-      await create.mutateAsync(candidateInput(form));
-      setForm((previous) => ({
-        ...EMPTY_CANDIDATE,
-        boardId: previous.boardId,
-      }));
-    } catch (cause) {
-      setError(parseApiErrorMessage(cause, 'Unable to create candidate.'));
-    }
-  }
-
-  return (
-    <form
-      onSubmit={(event) => void submit(event)}
-      className="rounded-xl border border-border bg-surface-raised p-5 shadow-card"
-    >
-      <div className="flex items-center gap-2">
-        <Plus className="size-4 text-moss-600" aria-hidden="true" />
-        <h2 className="font-display text-lg font-semibold text-bark-900">
-          Manual candidate
-        </h2>
-      </div>
-      <p className="mt-1 font-body text-sm text-text-secondary">
-        New notes begin in Pending so their scope and wording can be reviewed.
-      </p>
-
-      <div className="mt-5 space-y-4">
-        <div className="space-y-1.5">
-          <Label htmlFor="knowledge-title">Title</Label>
-          <Input
-            id="knowledge-title"
-            required
-            maxLength={160}
-            value={form.title}
-            onChange={(event) =>
-              setForm((value) => ({ ...value, title: event.target.value }))
-            }
-            placeholder="Run unit tests before review"
-          />
-        </div>
-
-        <div className="space-y-1.5">
-          <Label htmlFor="knowledge-content">Knowledge</Label>
-          <Textarea
-            id="knowledge-content"
-            required
-            maxLength={12000}
-            rows={6}
-            value={form.content}
-            onChange={(event) =>
-              setForm((value) => ({ ...value, content: event.target.value }))
-            }
-            placeholder="State the durable fact or instruction, including when it applies."
-          />
-        </div>
-
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1">
-          <div className="space-y-1.5">
-            <Label htmlFor="knowledge-type">Type</Label>
-            <select
-              id="knowledge-type"
-              className="field-control w-full px-3 py-2 font-body text-sm"
-              value={form.knowledgeType}
-              onChange={(event) =>
-                setForm((value) => ({
-                  ...value,
-                  knowledgeType: event.target.value as KnowledgeType,
-                }))
-              }
-            >
-              {KNOWLEDGE_TYPES.map((type) => (
-                <option key={type} value={type}>
-                  {TYPE_LABELS[type]}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="knowledge-confidence">Confidence</Label>
-            <select
-              id="knowledge-confidence"
-              className="field-control w-full px-3 py-2 font-body text-sm"
-              value={form.confidence}
-              onChange={(event) =>
-                setForm((value) => ({
-                  ...value,
-                  confidence: event.target.value as KnowledgeConfidence,
-                }))
-              }
-            >
-              <option value="low">Low</option>
-              <option value="medium">Medium</option>
-              <option value="high">High</option>
-            </select>
-          </div>
-        </div>
-
-        <div className="space-y-1.5">
-          <Label htmlFor="knowledge-scope">Scope</Label>
-          <select
-            id="knowledge-scope"
-            className="field-control w-full px-3 py-2 font-body text-sm"
-            value={form.scope}
-            onChange={(event) =>
-              setForm((value) => ({
-                ...value,
-                scope: event.target.value as KnowledgeScope,
-                agentId: '',
-              }))
-            }
-          >
-            <option value="workspace">Workspace</option>
-            <option value="board">Board</option>
-            <option value="agent">Board + agent</option>
-          </select>
-        </div>
-
-        {form.scope !== 'workspace' && (
-          <div className="space-y-1.5">
-            <Label htmlFor="knowledge-board">Board</Label>
-            <select
-              id="knowledge-board"
-              required
-              className="field-control w-full px-3 py-2 font-body text-sm"
-              value={form.boardId}
-              onChange={(event) =>
-                setForm((value) => ({
-                  ...value,
-                  boardId: event.target.value,
-                }))
-              }
-            >
-              <option value="">Choose a board</option>
-              {boards?.map((board) => (
-                <option key={board.id} value={board.id}>
-                  {board.name}
-                </option>
-              ))}
-            </select>
-          </div>
-        )}
-
-        {form.scope === 'agent' && (
-          <div className="space-y-1.5">
-            <Label htmlFor="knowledge-agent">Agent</Label>
-            <select
-              id="knowledge-agent"
-              required
-              className="field-control w-full px-3 py-2 font-body text-sm"
-              value={form.agentId}
-              onChange={(event) =>
-                setForm((value) => ({
-                  ...value,
-                  agentId: event.target.value,
-                }))
-              }
-            >
-              <option value="">Choose an agent</option>
-              {availableAgents.map((agent) => (
-                <option key={agent.id} value={agent.id}>
-                  {agent.name}
-                </option>
-              ))}
-            </select>
-          </div>
-        )}
-      </div>
-
-      {error && (
-        <p
-          role="alert"
-          className="mt-4 rounded-md bg-danger-muted px-3 py-2 font-body text-sm text-danger"
-        >
-          {error}
-        </p>
-      )}
-
-      <Button type="submit" loading={create.isPending} className="mt-5 w-full">
-        Add to Pending
-      </Button>
-    </form>
-  );
-}
-
-type EditorMode = 'edit' | 'supersede' | 'reject' | null;
 
 function PendingInboxGuidance() {
   return (
     <aside
       aria-label="Pending inbox guidance"
-      className="rounded-xl border border-moss-200 bg-moss-50 px-4 py-3"
+      className="flex gap-3 rounded-lg border border-moss-200 bg-moss-50 px-4 py-3"
     >
-      <p className="font-display text-sm font-semibold text-bark-900">
-        {CURATION_LITMUS}
-      </p>
-      <p className="mt-1.5 font-body text-xs leading-relaxed text-text-secondary">
-        {CURATION_TRUST_FRAMING}
-      </p>
-      <p className="mt-2 font-body text-xs text-text-muted">
-        Use the approve/reject examples on each card to keep curation consistent.
-      </p>
+      <Lightbulb className="mt-0.5 size-4 shrink-0 text-moss-700" aria-hidden="true" />
+      <div className="min-w-0">
+        <p className="font-display text-sm font-semibold text-bark-900">{CURATION_LITMUS}</p>
+        <p className="mt-1 font-body text-xs leading-relaxed text-text-secondary">
+          {CURATION_TRUST_FRAMING} Use the approve/reject examples on each card to keep
+          curation consistent.
+        </p>
+      </div>
     </aside>
   );
 }
 
-function RejectPresetRow({
-  onSelect,
+function EmptyState({
+  icon,
+  title,
+  description,
+  children,
 }: {
-  onSelect: (reasonText: string) => void;
+  icon: ReactNode;
+  title: string;
+  description: string;
+  children?: ReactNode;
 }) {
   return (
-    <div
-      role="group"
-      aria-label="Reject reason presets"
-      className="flex flex-wrap gap-1.5"
-    >
-      {REJECT_PRESETS.map((preset) => (
-        <button
-          key={preset.id}
-          type="button"
-          onClick={() => onSelect(preset.reasonText)}
-          className="rounded-md border border-danger-muted bg-surface-raised px-2 py-1 font-body text-xs font-medium text-danger transition-colors hover:bg-danger-muted/40"
-        >
-          {preset.label}
-        </button>
-      ))}
+    <div className="rounded-xl border border-dashed border-border bg-paper-100 px-8 py-12 text-center">
+      <div className="mx-auto flex size-10 items-center justify-center rounded-full bg-moss-50 text-moss-600">
+        {icon}
+      </div>
+      <h2 className="mt-3 font-display text-lg font-semibold text-bark-800">{title}</h2>
+      <p className="mx-auto mt-1 max-w-md font-body text-sm text-text-secondary">
+        {description}
+      </p>
+      {children && (
+        <div className="mt-5 flex flex-wrap justify-center gap-2">{children}</div>
+      )}
     </div>
-  );
-}
-
-function NearDuplicateAssist({
-  item,
-  canGovern,
-  busy,
-  onOpenNeighbor,
-  onApproveAnyway,
-  onRejectDuplicate,
-  onStartSupersede,
-}: {
-  item: KnowledgeItem;
-  canGovern: boolean;
-  busy: boolean;
-  onOpenNeighbor: (neighborId: string) => void;
-  onApproveAnyway: () => void;
-  onRejectDuplicate: (neighbor: SimilarNeighbor) => void;
-  onStartSupersede: (neighbor: SimilarNeighbor) => void;
-}) {
-  const similar = useSimilarKnowledge(item.id, item.status === 'pending');
-  const neighbors = similar.data?.items ?? [];
-
-  return (
-    <section
-      aria-label="Near-duplicate assist"
-      className="mt-4 rounded-lg border border-moss-200 bg-moss-50/70 p-4"
-    >
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h3 className="font-display text-sm font-semibold text-bark-900">
-            Near duplicates
-          </h3>
-          <p className="mt-0.5 font-body text-xs text-text-secondary">
-            Close approved neighbors before you confirm this pending item.
-          </p>
-        </div>
-        {canGovern && (
-          <Button
-            type="button"
-            size="sm"
-            disabled={busy}
-            onClick={onApproveAnyway}
-          >
-            <Check className="size-3.5" aria-hidden="true" />
-            Approve anyway
-          </Button>
-        )}
-      </div>
-
-      {similar.isLoading && (
-        <p className="mt-3 font-body text-xs text-text-muted">
-          Checking for close matches…
-        </p>
-      )}
-      {similar.isError && (
-        <p className="mt-3 font-body text-xs text-danger">
-          Unable to load similar knowledge.
-        </p>
-      )}
-      {!similar.isLoading && !similar.isError && neighbors.length === 0 && (
-        <p className="mt-3 font-body text-sm text-text-secondary">
-          No close matches
-        </p>
-      )}
-      {neighbors.length > 0 && (
-        <ul className="mt-3 space-y-3">
-          {neighbors.map((neighbor) => (
-            <li
-              key={neighbor.itemId}
-              className="rounded-md border border-border bg-surface-raised px-3 py-2"
-            >
-              <div className="flex flex-wrap items-start justify-between gap-2">
-                <div className="min-w-0">
-                  <p className="font-body text-sm font-medium text-bark-900">
-                    {neighbor.title}
-                  </p>
-                  <p className="mt-0.5 font-body text-xs text-text-muted">
-                    {TYPE_LABELS[neighbor.knowledgeType] ??
-                      humanize(neighbor.knowledgeType)}{' '}
-                    · {humanize(neighbor.scope)} · match{' '}
-                    {neighbor.score.toFixed(3)}
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => onOpenNeighbor(neighbor.itemId)}
-                  className="inline-flex items-center gap-1 font-body text-xs font-medium text-moss-700 hover:underline"
-                >
-                  Open
-                  <ExternalLink className="size-3" aria-hidden="true" />
-                </button>
-              </div>
-              {canGovern && (
-                <div className="mt-2 flex flex-wrap gap-2">
-                  <Button
-                    type="button"
-                    variant="destructive"
-                    size="sm"
-                    disabled={busy}
-                    onClick={() => onRejectDuplicate(neighbor)}
-                  >
-                    Reject as duplicate
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    size="sm"
-                    disabled={busy}
-                    onClick={() => onStartSupersede(neighbor)}
-                  >
-                    Start supersede
-                  </Button>
-                </div>
-              )}
-            </li>
-          ))}
-        </ul>
-      )}
-    </section>
-  );
-}
-
-function KnowledgeCard({
-  item,
-  canGovern,
-  focused,
-  onOpenTicket,
-  onOpenNeighbor,
-}: {
-  item: KnowledgeItem;
-  canGovern: boolean;
-  focused?: boolean;
-  onOpenTicket: (ticketId: string) => void | Promise<void>;
-  onOpenNeighbor: (neighborId: string) => void;
-}) {
-  const approve = useApproveKnowledge();
-  const reject = useRejectKnowledge();
-  const edit = useEditKnowledge();
-  const supersede = useSupersedeKnowledge();
-  const markStale = useMarkKnowledgeStale();
-  const expire = useExpireKnowledge();
-  const [mode, setMode] = useState<EditorMode>(null);
-  const [title, setTitle] = useState(item.title);
-  const [content, setContent] = useState(item.content);
-  const [confidence, setConfidence] =
-    useState<KnowledgeConfidence>(item.confidence);
-  const [reason, setReason] = useState('');
-  const [error, setError] = useState<string | null>(null);
-  const typeGuidance = guidanceForType(item.knowledgeType);
-
-  const busy =
-    approve.isPending ||
-    reject.isPending ||
-    edit.isPending ||
-    supersede.isPending ||
-    markStale.isPending ||
-    expire.isPending;
-
-  const scopeLabel =
-    item.scope === 'workspace'
-      ? 'Workspace'
-      : item.scope === 'agent'
-        ? `${item.boardName ?? 'Board'} · ${item.agentName ?? 'Agent'}`
-        : item.boardName ?? 'Board';
-  const hasExpiry = item.expiresAt !== null;
-  const sourceCanOpen =
-    (item.sourceType === 'ticket' || item.sourceType === 'agent_summary') &&
-    item.sourceId;
-
-  async function run(action: () => Promise<unknown>) {
-    setError(null);
-    try {
-      await action();
-      setMode(null);
-    } catch (cause) {
-      setError(
-        parseApiErrorMessage(
-          cause,
-          'Unable to update this knowledge item. Refresh and try again.',
-        ),
-      );
-    }
-  }
-
-  function openEditor(nextMode: Exclude<EditorMode, 'reject' | null>) {
-    setTitle(item.title);
-    setContent(item.content);
-    setConfidence(item.confidence);
-    setError(null);
-    setMode(nextMode);
-  }
-
-  async function saveEditor(event: FormEvent) {
-    event.preventDefault();
-    if (!title.trim() || !content.trim()) {
-      setError('Title and content are required.');
-      return;
-    }
-    if (mode === 'edit') {
-      await run(() =>
-        edit.mutateAsync({
-          id: item.id,
-          expectedVersion: item.version,
-          patch: {
-            title: title.trim(),
-            content: content.trim(),
-            confidence,
-          },
-        }),
-      );
-      return;
-    }
-    if (mode === 'supersede') {
-      await run(() =>
-        supersede.mutateAsync({
-          id: item.id,
-          expectedVersion: item.version,
-          replacement: {
-            scope: item.scope,
-            boardId: item.boardId,
-            agentId: item.agentId,
-            knowledgeType: item.knowledgeType,
-            title: title.trim(),
-            content: content.trim(),
-            sourceType: 'human_note',
-            sourceId: null,
-            sourceRunId: null,
-            confidence,
-          },
-        }),
-      );
-    }
-  }
-
-  async function rejectAsDuplicate(neighbor: SimilarNeighbor) {
-    await run(() =>
-      reject.mutateAsync({
-        id: item.id,
-        expectedVersion: item.version,
-        reason: duplicateRejectReason(neighbor.title, neighbor.itemId),
-      }),
-    );
-  }
-
-  async function startSupersede(neighbor: SimilarNeighbor) {
-    await run(async () => {
-      const neighborItem = await fetchKnowledgeItem(neighbor.itemId);
-      await supersede.mutateAsync({
-        id: neighbor.itemId,
-        expectedVersion: neighborItem.version,
-        replacement: {
-          scope: item.scope,
-          boardId: item.boardId,
-          agentId: item.agentId,
-          knowledgeType: item.knowledgeType,
-          title: item.title,
-          content: item.content,
-          sourceType: item.sourceType,
-          sourceId: item.sourceId,
-          sourceRunId: item.sourceRunId,
-          confidence: item.confidence,
-        },
-      });
-      await reject.mutateAsync({
-        id: item.id,
-        expectedVersion: item.version,
-        reason: duplicateRejectReason(neighbor.title, neighbor.itemId),
-      });
-    });
-  }
-
-  return (
-    <article
-      id={`knowledge-item-${item.id}`}
-      data-focused={focused ? 'true' : undefined}
-      className={
-        focused
-          ? 'rounded-xl border border-moss-400 bg-surface-raised p-5 shadow-card ring-2 ring-moss-200'
-          : 'rounded-xl border border-border bg-surface-raised p-5 shadow-card'
-      }
-    >
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className={statusPillClass(item.status)}>
-              {humanize(item.status)}
-            </span>
-            <span className="font-body text-xs font-medium uppercase tracking-wide text-moss-700">
-              {TYPE_LABELS[item.knowledgeType]}
-            </span>
-            <span className="font-body text-xs text-text-muted">
-              {humanize(item.confidence)} confidence
-            </span>
-          </div>
-          <h2 className="mt-2 font-display text-xl font-semibold text-bark-900">
-            {item.title}
-          </h2>
-          <p className="mt-2 font-body text-sm leading-relaxed text-bark-700 whitespace-pre-wrap">
-            {item.content}
-          </p>
-          {item.sourceTicketIds.length > 0 && (
-            <div
-              data-testid="compaction-provenance"
-              className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-1 font-body text-xs text-text-secondary"
-            >
-              <span className="font-medium text-text-primary">
-                From {item.sourceTicketIds.length}{' '}
-                {item.sourceTicketIds.length === 1 ? 'ticket' : 'tickets'}
-              </span>
-              {item.sourceTicketIds.map((ticketId) => (
-                <button
-                  key={ticketId}
-                  type="button"
-                  onClick={() => void onOpenTicket(ticketId)}
-                  className="inline-flex items-center gap-1 rounded-md bg-paper-100 px-1.5 py-0.5 font-mono text-xs text-moss-700 hover:underline"
-                  aria-label={`Open source ticket ${shortId(ticketId)}`}
-                >
-                  {shortId(ticketId)}
-                  <ExternalLink className="size-3" aria-hidden="true" />
-                </button>
-              ))}
-              {item.compactionAgentName && (
-                <span>· Proposed by {item.compactionAgentName}</span>
-              )}
-            </div>
-          )}
-          {item.status === 'pending' && (
-            <p
-              data-testid="pending-type-guidance"
-              className="mt-3 font-body text-xs leading-relaxed text-text-secondary"
-            >
-              <span className="font-medium text-moss-800">
-                {typeGuidance.approveExample}
-              </span>
-              <span className="mx-1.5 text-text-muted" aria-hidden="true">
-                ·
-              </span>
-              <span className="font-medium text-danger">
-                {typeGuidance.rejectExample}
-              </span>
-            </p>
-          )}
-        </div>
-      </div>
-
-      {item.status === 'pending' && (
-        <NearDuplicateAssist
-          item={item}
-          canGovern={canGovern}
-          busy={busy}
-          onOpenNeighbor={onOpenNeighbor}
-          onApproveAnyway={() =>
-            void run(() =>
-              approve.mutateAsync({
-                id: item.id,
-                expectedVersion: item.version,
-              }),
-            )
-          }
-          onRejectDuplicate={(neighbor) => void rejectAsDuplicate(neighbor)}
-          onStartSupersede={(neighbor) => void startSupersede(neighbor)}
-        />
-      )}
-
-
-      <dl className="mt-4 grid gap-x-5 gap-y-3 border-t border-border pt-4 sm:grid-cols-2 xl:grid-cols-3">
-        <div>
-          <dt className="font-body text-xs uppercase tracking-wide text-text-muted">Scope</dt>
-          <dd className="mt-0.5 font-body text-sm text-text-secondary">{scopeLabel}</dd>
-        </div>
-        <div>
-          <dt className="font-body text-xs uppercase tracking-wide text-text-muted">Source</dt>
-          <dd className="mt-0.5 flex items-center gap-2 font-body text-sm text-text-secondary">
-            {humanize(item.sourceType)}
-            {sourceCanOpen && (
-              <button
-                type="button"
-                onClick={() => void onOpenTicket(item.sourceId!)}
-                className="inline-flex items-center gap-1 text-xs font-medium text-moss-700 hover:underline"
-              >
-                Open
-                <ExternalLink className="size-3" aria-hidden="true" />
-              </button>
-            )}
-          </dd>
-        </div>
-        <div>
-          <dt className="font-body text-xs uppercase tracking-wide text-text-muted">Revision</dt>
-          <dd className="mt-0.5 font-body text-sm text-text-secondary">
-            {item.revisionNumber} · version {item.version}
-          </dd>
-        </div>
-        <div>
-          <dt className="font-body text-xs uppercase tracking-wide text-text-muted">Expiry</dt>
-          <dd className="mt-0.5 font-body text-sm text-text-secondary">
-            {formatDate(item.expiresAt)}
-          </dd>
-        </div>
-        <div>
-          <dt className="font-body text-xs uppercase tracking-wide text-text-muted">Usage</dt>
-          <dd className="mt-0.5 font-body text-sm text-text-secondary">
-            {item.usageCount} runs · last {formatDate(item.lastUsedAt)}
-          </dd>
-        </div>
-        <div>
-          <dt className="font-body text-xs uppercase tracking-wide text-text-muted">Updated</dt>
-          <dd className="mt-0.5 font-body text-sm text-text-secondary">{formatDate(item.updatedAt)}</dd>
-        </div>
-      </dl>
-
-      {(item.supersedesItemId || item.supersededBy || item.sourceRunId) && (
-        <div className="mt-4 flex flex-wrap gap-x-5 gap-y-1 rounded-md bg-paper-100 px-3 py-2 font-mono text-xs text-text-secondary">
-          {item.supersedesItemId && (
-            <span>Supersedes {shortId(item.supersedesItemId)}</span>
-          )}
-          {item.supersededBy && (
-            <span>Superseded by {shortId(item.supersededBy)}</span>
-          )}
-          {item.sourceRunId && <span>Source run {shortId(item.sourceRunId)}</span>}
-        </div>
-      )}
-
-      {(item.policyReason || item.rejectionReason) && (
-        <div className="mt-3 space-y-1 rounded-md border border-border bg-paper-50 px-3 py-2 font-body text-xs text-text-secondary">
-          {item.policyReason && (
-            <p><span className="font-medium">Policy:</span> {item.policyReason}</p>
-          )}
-          {item.rejectionReason && (
-            <p><span className="font-medium">Rejected:</span> {item.rejectionReason}</p>
-          )}
-        </div>
-      )}
-
-      {canGovern && !item.supersededBy && (
-        <div className="mt-4 flex flex-wrap gap-2 border-t border-border pt-4">
-          {item.status !== 'approved' && item.status !== 'pending' && (
-            <Button
-              type="button"
-              size="sm"
-              loading={approve.isPending}
-              disabled={busy}
-              onClick={() => void run(() => approve.mutateAsync({ id: item.id, expectedVersion: item.version }))}
-            >
-              <Check className="size-3.5" aria-hidden="true" />
-              Approve
-            </Button>
-          )}
-          <Button
-            type="button"
-            variant="secondary"
-            size="sm"
-            disabled={busy}
-            onClick={() => openEditor('edit')}
-          >
-            Edit
-          </Button>
-          {item.status === 'pending' && (
-            <Button
-              type="button"
-              variant="destructive"
-              size="sm"
-              disabled={busy}
-              onClick={() => {
-                setReason('');
-                setError(null);
-                setMode('reject');
-              }}
-            >
-              <X className="size-3.5" aria-hidden="true" />
-              Reject
-            </Button>
-          )}
-          {(item.status === 'approved' || item.status === 'stale') && (
-            <Button
-              type="button"
-              variant="secondary"
-              size="sm"
-              disabled={busy}
-              onClick={() => openEditor('supersede')}
-            >
-              <GitBranch className="size-3.5" aria-hidden="true" />
-              Supersede
-            </Button>
-          )}
-          {item.status === 'approved' && (
-            <Button
-              type="button"
-              variant="secondary"
-              size="sm"
-              disabled={busy}
-              onClick={() => void run(() => markStale.mutateAsync({ id: item.id, expectedVersion: item.version }))}
-            >
-              <FileClock className="size-3.5" aria-hidden="true" />
-              Mark stale
-            </Button>
-          )}
-          {!hasExpiry && (
-            <Button
-              type="button"
-              variant="secondary"
-              size="sm"
-              disabled={busy}
-              onClick={() => void run(() => expire.mutateAsync({ id: item.id, expectedVersion: item.version }))}
-            >
-              <Clock3 className="size-3.5" aria-hidden="true" />
-              Expire now
-            </Button>
-          )}
-        </div>
-      )}
-
-      {(mode === 'edit' || mode === 'supersede') && (
-        <form onSubmit={(event) => void saveEditor(event)} className="mt-4 space-y-3 rounded-lg border border-moss-200 bg-moss-50 p-4">
-          <div>
-            <h3 className="font-display text-sm font-semibold text-bark-900">
-              {mode === 'edit' ? 'Create a new revision' : 'Create replacement candidate'}
-            </h3>
-            <p className="mt-0.5 font-body text-xs text-text-secondary">
-              {mode === 'edit'
-                ? 'The previous revision remains in the audit history.'
-                : 'The current item stays usable until the replacement is approved.'}
-            </p>
-          </div>
-          <Input
-            aria-label="Revision title"
-            required
-            maxLength={160}
-            value={title}
-            onChange={(event) => setTitle(event.target.value)}
-          />
-          <Textarea
-            aria-label="Revision content"
-            required
-            maxLength={12000}
-            rows={5}
-            value={content}
-            onChange={(event) => setContent(event.target.value)}
-          />
-          <select
-            aria-label="Revision confidence"
-            className="field-control w-full px-3 py-2 font-body text-sm"
-            value={confidence}
-            onChange={(event) => setConfidence(event.target.value as KnowledgeConfidence)}
-          >
-            <option value="low">Low confidence</option>
-            <option value="medium">Medium confidence</option>
-            <option value="high">High confidence</option>
-          </select>
-          <div className="flex gap-2">
-            <Button type="submit" size="sm" loading={edit.isPending || supersede.isPending}>
-              {mode === 'edit' ? 'Save revision' : 'Create replacement'}
-            </Button>
-            <Button type="button" variant="ghost" size="sm" onClick={() => setMode(null)}>
-              Cancel
-            </Button>
-          </div>
-        </form>
-      )}
-
-      {mode === 'reject' && (
-        <form
-          onSubmit={(event) => {
-            event.preventDefault();
-            void run(() => reject.mutateAsync({
-              id: item.id,
-              expectedVersion: item.version,
-              reason: reason.trim() || null,
-            }));
-          }}
-          className="mt-4 space-y-3 rounded-lg border border-danger-muted bg-danger-muted/30 p-4"
-        >
-          <Label htmlFor={`reject-${item.id}`}>Reason (optional)</Label>
-          <RejectPresetRow onSelect={setReason} />
-          <Textarea
-            id={`reject-${item.id}`}
-            value={reason}
-            onChange={(event) => setReason(event.target.value)}
-            placeholder="Why should this candidate not be used?"
-          />
-          <div className="flex gap-2">
-            <Button type="submit" variant="destructive" size="sm" loading={reject.isPending}>
-              Reject candidate
-            </Button>
-            <Button type="button" variant="ghost" size="sm" onClick={() => setMode(null)}>
-              Cancel
-            </Button>
-          </div>
-        </form>
-      )}
-
-      {error && (
-        <p role="alert" className="mt-3 rounded-md bg-danger-muted px-3 py-2 font-body text-sm text-danger">
-          {error}
-        </p>
-      )}
-    </article>
   );
 }
 
 export function KnowledgePage() {
   const { user } = useSession();
+  const canGovern = user?.role === 'admin';
   const { data: boards } = useBoards();
   const openTicket = useOpenTicket();
+  const idPrefix = useId();
   const [status, setStatus] = useState<KnowledgeStatus>('pending');
   const [boardId, setBoardId] = useState('');
   const [knowledgeType, setKnowledgeType] = useState('');
+  const [search, setSearch] = useState('');
   const [focusItemId, setFocusItemId] = useState<string | null>(null);
+  const [formOpen, setFormOpen] = useState(false);
+  const [formMode, setFormMode] = useState<KnowledgeFormMode>('create');
+  const [formItem, setFormItem] = useState<KnowledgeItem | null>(null);
+  const [rejectOpen, setRejectOpen] = useState(false);
+  const [rejectItem, setRejectItem] = useState<KnowledgeItem | null>(null);
+
   const query = useKnowledge({
     status,
     boardId: boardId || undefined,
     knowledgeType: (knowledgeType || undefined) as KnowledgeType | undefined,
   });
-  const items = query.data?.pages.flatMap((page) => page.items) ?? [];
+  const items = useMemo(
+    () => query.data?.pages.flatMap((page) => page.items) ?? [],
+    [query.data],
+  );
+  const searchTerms = useMemo(
+    () => search.trim().toLowerCase().split(/\s+/).filter(Boolean),
+    [search],
+  );
+  const visibleItems = useMemo(
+    () => items.filter((item) => matchesSearch(item, searchTerms)),
+    [items, searchTerms],
+  );
+  const boardOptions = useMemo(
+    () => boards?.map((board) => ({ value: board.id, label: board.name })) ?? [],
+    [boards],
+  );
 
-  function openNeighbor(neighborId: string) {
+  const hasFilters = searchTerms.length > 0 || boardId !== '' || knowledgeType !== '';
+  const tabId = (value: KnowledgeStatus) => `${idPrefix}-tab-${value}`;
+  const panelId = `${idPrefix}-panel`;
+
+  function clearFilters() {
+    setSearch('');
     setBoardId('');
     setKnowledgeType('');
+  }
+
+  function selectStatus(next: KnowledgeStatus) {
+    setFocusItemId(null);
+    setStatus(next);
+  }
+
+  function openNeighbor(neighborId: string) {
+    clearFilters();
     setFocusItemId(neighborId);
     setStatus('approved');
   }
 
+  function openForm(mode: KnowledgeFormMode, item: KnowledgeItem | null = null) {
+    setFormMode(mode);
+    setFormItem(item);
+    setFormOpen(true);
+  }
+
+  function openReject(item: KnowledgeItem) {
+    setRejectItem(item);
+    setRejectOpen(true);
+  }
+
+  const addButton = canGovern ? (
+    <Button type="button" onClick={() => openForm('create')}>
+      <Plus className="size-4" aria-hidden="true" />
+      Add knowledge
+    </Button>
+  ) : null;
+
   return (
     <div>
-      <header className="flex flex-wrap items-end justify-between gap-5 border-b border-border pb-6">
-        <div className="max-w-2xl">
-          <div className="flex items-center gap-2 font-body text-xs font-medium uppercase tracking-[0.16em] text-moss-700">
-            <Sparkles className="size-4" aria-hidden="true" />
-            Governed memory
-          </div>
-          <h1 className="mt-2 font-display text-3xl font-semibold tracking-tight text-bark-950">
-            Knowledge
-          </h1>
-          <p className="mt-2 font-body text-sm leading-relaxed text-text-secondary">
-            Review durable facts before agents can use them. Every revision keeps its source, policy decision, and run history.
+      <header className="flex flex-wrap items-start justify-between gap-4">
+        <div className="min-w-0 max-w-2xl">
+          <h1 className="font-display text-2xl font-semibold text-bark-900">Knowledge</h1>
+          <p className="mt-2 font-body text-text-secondary">
+            Review durable facts before agents can use them. Every revision keeps its
+            source, policy decision, and run history.
           </p>
+          <span
+            title={CURATION_TRUST_FRAMING}
+            className="mt-3 inline-flex items-center gap-1.5 rounded-full border border-moss-200 bg-moss-50 px-2.5 py-0.5 font-body text-xs font-medium text-moss-800"
+          >
+            <ShieldCheck className="size-3.5" aria-hidden="true" />
+            Human-governed · fail-closed
+          </span>
         </div>
-        <div className="max-w-xs rounded-lg border border-moss-200 bg-moss-50 px-3 py-2">
-          <div className="flex items-center gap-2">
-            <ShieldCheck className="size-4 shrink-0 text-moss-700" aria-hidden="true" />
-            <span className="font-body text-xs font-medium text-moss-800">
-              Human-governed · fail-closed
-            </span>
-          </div>
-          <p className="mt-1.5 font-body text-xs leading-relaxed text-moss-800/90">
-            {CURATION_TRUST_FRAMING}
+        {canGovern ? (
+          addButton
+        ) : (
+          <p className="flex max-w-xs items-start gap-2 rounded-lg border border-border bg-surface px-3 py-2 font-body text-xs text-text-secondary">
+            <ShieldCheck className="mt-0.5 size-4 shrink-0 text-moss-600" aria-hidden="true" />
+            Read-only. An administrator can create candidates and govern their lifecycle.
           </p>
-        </div>
+        )}
       </header>
 
       <CompactionStatusStrip />
 
-      <div className="mt-6 grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_19rem]">
-        <section aria-label="Knowledge library" className="min-w-0">
-          <div className="rounded-xl border border-border bg-surface p-2 shadow-sm">
-            <div role="tablist" aria-label="Knowledge status" className="grid grid-cols-4 gap-1">
-              {STATUS_TABS.map((tab) => (
-                <button
-                  key={tab.value}
-                  type="button"
-                  role="tab"
-                  aria-selected={status === tab.value}
-                  onClick={() => {
-                    setFocusItemId(null);
-                    setStatus(tab.value);
-                  }}
-                  className={
-                    status === tab.value
-                      ? 'rounded-md bg-surface-raised px-3 py-2 font-body text-sm font-medium text-bark-900 shadow-sm'
-                      : 'rounded-md px-3 py-2 font-body text-sm text-text-secondary transition-colors hover:bg-paper-200 hover:text-bark-900'
-                  }
-                >
-                  {tab.label}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div className="mt-4 flex flex-wrap gap-3">
-            <label className="min-w-48 flex-1 font-body text-xs font-medium text-text-secondary">
-              Board
-              <select
-                className="field-control mt-1 block w-full px-3 py-2 font-body text-sm"
-                value={boardId}
-                onChange={(event) => setBoardId(event.target.value)}
-              >
-                <option value="">All scopes</option>
-                {boards?.map((board) => (
-                  <option key={board.id} value={board.id}>{board.name}</option>
-                ))}
-              </select>
-            </label>
-            <label className="min-w-48 flex-1 font-body text-xs font-medium text-text-secondary">
-              Type
-              <select
-                className="field-control mt-1 block w-full px-3 py-2 font-body text-sm"
-                value={knowledgeType}
-                onChange={(event) => setKnowledgeType(event.target.value)}
-              >
-                <option value="">All types</option>
-                {KNOWLEDGE_TYPES.map((type) => (
-                  <option key={type} value={type}>{TYPE_LABELS[type]}</option>
-                ))}
-              </select>
-            </label>
-          </div>
-
-          {status === 'pending' && (
-            <div className="mt-4">
-              <PendingInboxGuidance />
-            </div>
-          )}
-
-          {query.isLoading && (
-            <div className="mt-5 rounded-xl border border-dashed border-border bg-paper-50 p-10 text-center">
-              <BookOpen className="mx-auto size-6 text-text-muted" aria-hidden="true" />
-              <p className="mt-2 font-body text-sm text-text-muted">Loading knowledge…</p>
-            </div>
-          )}
-          {query.isError && (
-            <div className="mt-5 rounded-xl border border-danger-muted bg-danger-muted/30 p-5">
-              <p className="font-body text-sm text-danger">Unable to load knowledge.</p>
-              <Button type="button" variant="secondary" size="sm" className="mt-3" onClick={() => void query.refetch()}>
-                Try again
-              </Button>
-            </div>
-          )}
-          {!query.isLoading && !query.isError && items.length === 0 && (
-            <div className="mt-5 rounded-xl border border-dashed border-border bg-paper-50 p-10 text-center">
-              <BookOpen className="mx-auto size-7 text-moss-500" aria-hidden="true" />
-              <h2 className="mt-3 font-display text-lg font-semibold text-bark-800">
-                No {status} knowledge
-              </h2>
-              <p className="mt-1 font-body text-sm text-text-muted">
-                {status === 'pending'
-                  ? 'New manual and extracted candidates will wait here for review.'
-                  : 'Items will appear here as their lifecycle changes.'}
-              </p>
-            </div>
-          )}
-          {items.length > 0 && (
-            <div className="mt-5 space-y-4">
-              {items.map((item) => (
-                <KnowledgeCard
-                  key={item.id}
-                  item={item}
-                  canGovern={user?.role === 'admin'}
-                  focused={focusItemId === item.id}
-                  onOpenTicket={openTicket}
-                  onOpenNeighbor={openNeighbor}
-                />
-              ))}
-            </div>
-          )}
-          {query.hasNextPage && (
-            <div className="mt-5 flex justify-center">
-              <Button
-                type="button"
-                variant="secondary"
-                loading={query.isFetchingNextPage}
-                onClick={() => void query.fetchNextPage()}
-              >
-                Load more
-              </Button>
-            </div>
-          )}
-        </section>
-
-        <aside className="lg:sticky lg:top-6">
-          {user?.role === 'admin' ? (
-            <ManualCandidateForm />
-          ) : (
-            <div className="rounded-xl border border-border bg-surface p-5">
-              <ShieldCheck className="size-5 text-moss-600" aria-hidden="true" />
-              <h2 className="mt-2 font-display text-base font-semibold text-bark-900">Read-only knowledge</h2>
-              <p className="mt-1 font-body text-sm text-text-secondary">
-                An administrator can create candidates and govern their lifecycle.
-              </p>
-            </div>
-          )}
-        </aside>
+      <div
+        role="tablist"
+        aria-label="Knowledge status"
+        className="mt-6 flex gap-1 overflow-x-auto border-b border-border"
+      >
+        {STATUS_TABS.map((tab) => (
+          <button
+            key={tab.value}
+            id={tabId(tab.value)}
+            type="button"
+            role="tab"
+            aria-selected={status === tab.value}
+            aria-controls={panelId}
+            onClick={() => selectStatus(tab.value)}
+            className={[
+              '-mb-px shrink-0 border-b-2 px-3 py-2 font-body text-sm transition-colors duration-fast',
+              status === tab.value
+                ? 'border-accent font-medium text-accent'
+                : 'border-transparent text-text-secondary hover:text-text-primary',
+            ].join(' ')}
+          >
+            {tab.label}
+          </button>
+        ))}
       </div>
+
+      <section
+        id={panelId}
+        role="tabpanel"
+        aria-labelledby={tabId(status)}
+        className="mt-4 space-y-4"
+      >
+        <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
+          <div className="relative min-w-0 flex-1 sm:min-w-64">
+            <Search
+              className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-text-muted"
+              aria-hidden="true"
+            />
+            <Input
+              type="search"
+              aria-label="Search knowledge"
+              placeholder="Search title, content, type, or scope…"
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              className="h-10 pl-9"
+            />
+          </div>
+          <Combobox
+            aria-label="Filter by board"
+            className="sm:w-52"
+            value={boardId}
+            onValueChange={setBoardId}
+            options={boardOptions}
+            clearable
+            clearLabel="All scopes"
+            placeholder="All scopes"
+            searchPlaceholder="Search boards…"
+            emptyText="No boards found."
+          />
+          <Combobox
+            aria-label="Filter by type"
+            className="sm:w-52"
+            value={knowledgeType}
+            onValueChange={setKnowledgeType}
+            options={TYPE_OPTIONS}
+            clearable
+            clearLabel="All types"
+            placeholder="All types"
+            searchPlaceholder="Search types…"
+          />
+          {hasFilters && (
+            <Button type="button" variant="ghost" size="sm" onClick={clearFilters}>
+              Clear filters
+            </Button>
+          )}
+        </div>
+
+        {status === 'pending' && <PendingInboxGuidance />}
+
+        {query.isLoading && (
+          <div className="rounded-xl border border-dashed border-border bg-paper-100 p-10 text-center">
+            <BookOpen className="mx-auto size-6 text-text-muted" aria-hidden="true" />
+            <p className="mt-2 font-body text-sm text-text-muted">Loading knowledge…</p>
+          </div>
+        )}
+
+        {query.isError && (
+          <div className="rounded-xl border border-danger-muted bg-danger-muted/30 p-5">
+            <p className="font-body text-sm text-danger">Unable to load knowledge.</p>
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              className="mt-3"
+              onClick={() => void query.refetch()}
+            >
+              Try again
+            </Button>
+          </div>
+        )}
+
+        {!query.isLoading && !query.isError && visibleItems.length === 0 &&
+          (hasFilters ? (
+            <EmptyState
+              icon={<SearchX className="size-5" aria-hidden="true" />}
+              title="No matching knowledge"
+              description={
+                query.hasNextPage
+                  ? 'Nothing loaded so far matches your search. Load more or adjust the filters.'
+                  : 'Nothing matches your search and filters on this tab.'
+              }
+            >
+              <Button type="button" variant="secondary" onClick={clearFilters}>
+                Clear filters
+              </Button>
+              {addButton}
+            </EmptyState>
+          ) : (
+            <EmptyState
+              icon={<BookOpen className="size-5" aria-hidden="true" />}
+              title={`No ${status} knowledge`}
+              description={EMPTY_COPY[status]}
+            >
+              {addButton}
+            </EmptyState>
+          ))}
+
+        {visibleItems.length > 0 && (
+          <div className="space-y-4">
+            {visibleItems.map((item) => (
+              <KnowledgeCard
+                key={item.id}
+                item={item}
+                canGovern={canGovern}
+                focused={focusItemId === item.id}
+                onOpenTicket={openTicket}
+                onOpenNeighbor={openNeighbor}
+                onEdit={(target) => openForm('edit', target)}
+                onSupersede={(target) => openForm('supersede', target)}
+                onReject={openReject}
+              />
+            ))}
+          </div>
+        )}
+
+        {query.hasNextPage && (
+          <div className="flex justify-center">
+            <Button
+              type="button"
+              variant="secondary"
+              loading={query.isFetchingNextPage}
+              onClick={() => void query.fetchNextPage()}
+            >
+              Load more
+            </Button>
+          </div>
+        )}
+      </section>
+
+      <KnowledgeFormDialog
+        open={formOpen}
+        mode={formMode}
+        item={formItem}
+        onOpenChange={setFormOpen}
+      />
+      <RejectKnowledgeDialog
+        open={rejectOpen}
+        item={rejectItem}
+        onOpenChange={setRejectOpen}
+      />
     </div>
   );
 }

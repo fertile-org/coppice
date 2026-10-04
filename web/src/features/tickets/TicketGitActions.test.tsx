@@ -128,10 +128,9 @@ describe('TicketGitActions', () => {
   });
 
   it('renders nothing without a linked repo', () => {
-    const { container } = renderActions(
-      makeTicket({ repoId: undefined, status: 'in_progress' }),
-    );
-    expect(container).toBeEmptyDOMElement();
+    renderActions(makeTicket({ repoId: undefined, status: 'in_progress' }));
+    expect(screen.queryByText('Git actions')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button')).not.toBeInTheDocument();
   });
 
   it('shows toast and inline error when rebase fails', async () => {

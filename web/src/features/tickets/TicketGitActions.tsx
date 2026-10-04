@@ -2,14 +2,14 @@ import { useEffect, useState, type FormEvent } from 'react';
 import { apiErrorToastMessage, parseApiErrorMessage } from '../../lib/api';
 import { useToast } from '../../components/ToastProvider';
 import { Button } from '../../components/ui/button';
-import { Label } from '../../components/ui/label';
+import { Combobox } from '../../components/ui/combobox';
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '../../components/ui/select';
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogTitle,
+} from '../../components/ui/dialog';
+import { Label } from '../../components/ui/label';
 import type { Ticket } from '../board/useTickets';
 import {
   useCreateTicketPr,
@@ -55,17 +55,6 @@ function MergeBranchDialog({
     }
   }, [open, defaultBranch]);
 
-  useEffect(() => {
-    if (!open) return;
-    function onKeyDown(e: KeyboardEvent) {
-      if (e.key === 'Escape') onClose();
-    }
-    document.addEventListener('keydown', onKeyDown);
-    return () => document.removeEventListener('keydown', onKeyDown);
-  }, [open, onClose]);
-
-  if (!open) return null;
-
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     if (!baseBranch) {
@@ -90,44 +79,25 @@ function MergeBranchDialog({
   const options = branches.length > 0 ? branches : [defaultBranch];
 
   return (
-    <div
-      className="fixed inset-0 z-[60] flex items-center justify-center bg-overlay px-4"
-      role="presentation"
-      onClick={onClose}
-    >
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="merge-branch-title"
-        className="w-full max-w-md rounded-xl border border-border bg-paper-50 p-6 shadow-lg"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <h2
-          id="merge-branch-title"
-          className="font-display text-xl font-semibold text-bark-900"
-        >
-          Merge ticket branch
-        </h2>
-        <p className="mt-1 font-body text-sm text-text-secondary">
+    <Dialog open={open} onOpenChange={(next) => !next && onClose()}>
+      <DialogContent className="z-[60] max-w-md" overlayClassName="z-[60]">
+        <DialogTitle>Merge ticket branch</DialogTitle>
+        <DialogDescription className="mt-1">
           Merge <span className="font-mono text-xs">{ticketBranch}</span> into a
           base branch. You can run this multiple times.
-        </p>
+        </DialogDescription>
 
         <form onSubmit={(e) => void handleSubmit(e)} className="mt-5 space-y-4">
           <div className="space-y-2">
             <Label htmlFor="merge-base-branch">Base branch</Label>
-            <Select value={baseBranch} onValueChange={setBaseBranch}>
-              <SelectTrigger id="merge-base-branch">
-                <SelectValue placeholder="Select branch…" />
-              </SelectTrigger>
-              <SelectContent>
-                {options.map((branch) => (
-                  <SelectItem key={branch} value={branch} textValue={branch}>
-                    {branch}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <Combobox
+              id="merge-base-branch"
+              value={baseBranch}
+              onValueChange={setBaseBranch}
+              placeholder="Select branch…"
+              searchPlaceholder="Search branches…"
+              options={options.map((branch) => ({ value: branch, label: branch }))}
+            />
           </div>
 
           {error && (
@@ -145,8 +115,8 @@ function MergeBranchDialog({
             </Button>
           </div>
         </form>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -177,17 +147,6 @@ function RebaseBranchDialog({
     }
   }, [open, defaultBranch]);
 
-  useEffect(() => {
-    if (!open) return;
-    function onKeyDown(e: KeyboardEvent) {
-      if (e.key === 'Escape') onClose();
-    }
-    document.addEventListener('keydown', onKeyDown);
-    return () => document.removeEventListener('keydown', onKeyDown);
-  }, [open, onClose]);
-
-  if (!open) return null;
-
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     if (!baseBranch) {
@@ -214,44 +173,25 @@ function RebaseBranchDialog({
   const options = branches.length > 0 ? branches : [defaultBranch];
 
   return (
-    <div
-      className="fixed inset-0 z-[60] flex items-center justify-center bg-overlay px-4"
-      role="presentation"
-      onClick={onClose}
-    >
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="rebase-branch-title"
-        className="w-full max-w-md rounded-xl border border-border bg-paper-50 p-6 shadow-lg"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <h2
-          id="rebase-branch-title"
-          className="font-display text-xl font-semibold text-bark-900"
-        >
-          Rebase ticket branch
-        </h2>
-        <p className="mt-1 font-body text-sm text-text-secondary">
+    <Dialog open={open} onOpenChange={(next) => !next && onClose()}>
+      <DialogContent className="z-[60] max-w-md" overlayClassName="z-[60]">
+        <DialogTitle>Rebase ticket branch</DialogTitle>
+        <DialogDescription className="mt-1">
           Rebase <span className="font-mono text-xs">{ticketBranch}</span> onto a
           base branch in the ticket worktree. The worktree must be clean.
-        </p>
+        </DialogDescription>
 
         <form onSubmit={(e) => void handleSubmit(e)} className="mt-5 space-y-4">
           <div className="space-y-2">
             <Label htmlFor="rebase-base-branch">Base branch</Label>
-            <Select value={baseBranch} onValueChange={setBaseBranch}>
-              <SelectTrigger id="rebase-base-branch">
-                <SelectValue placeholder="Select branch…" />
-              </SelectTrigger>
-              <SelectContent>
-                {options.map((branch) => (
-                  <SelectItem key={branch} value={branch} textValue={branch}>
-                    {branch}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <Combobox
+              id="rebase-base-branch"
+              value={baseBranch}
+              onValueChange={setBaseBranch}
+              placeholder="Select branch…"
+              searchPlaceholder="Search branches…"
+              options={options.map((branch) => ({ value: branch, label: branch }))}
+            />
           </div>
 
           {error && (
@@ -272,8 +212,8 @@ function RebaseBranchDialog({
             </Button>
           </div>
         </form>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 

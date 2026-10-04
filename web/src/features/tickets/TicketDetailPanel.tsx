@@ -3,11 +3,11 @@ import { useSearchParams } from 'react-router-dom';
 import { GitBranch } from 'lucide-react';
 import type { TicketParentSummary } from '../board/ticketHierarchy';
 import type { Ticket } from '../board/useTickets';
+import { MarkdownEditor } from '../../components/MarkdownEditor';
 import { TicketMarkdown } from '../../components/TicketMarkdown';
 import { useToast } from '../../components/ToastProvider';
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
-import { Textarea } from '../../components/ui/textarea';
 import { TicketStatusBadge } from './TicketStatusBadge';
 import { TicketCommentsTab } from './TicketCommentsTab';
 import { useTicketChildren, useUpdateTicket } from './useTicket';
@@ -125,11 +125,16 @@ export function TicketDetailPanel({
         )}
 
         {editing ? (
-          <Textarea
+          <MarkdownEditor
             value={description}
-            onChange={(e) => setDescription(e.target.value)}
+            onChange={setDescription}
             placeholder="Describe the ticket in markdown…"
-            className="min-h-[200px] font-mono text-sm leading-relaxed"
+            aria-label="Ticket description"
+            minHeight={200}
+            disabled={saving}
+            onSubmit={() => {
+              if (!saving && title.trim().length > 0) void handleSave();
+            }}
           />
         ) : (
           <div className="min-h-[200px] overflow-y-auto rounded-md border border-border bg-surface px-4 py-3">

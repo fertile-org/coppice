@@ -116,8 +116,12 @@ export function BoardPage() {
     return grouped;
   }, [filteredTickets]);
 
-  const selectedParentTicket = selectedTicketId
-    ? (hierarchyIndex.get(selectedTicketId)?.parent ?? null)
+  const [shownTicketId, setShownTicketId] = useState(selectedTicketId);
+  if (selectedTicketId && selectedTicketId !== shownTicketId) {
+    setShownTicketId(selectedTicketId);
+  }
+  const shownParentTicket = shownTicketId
+    ? (hierarchyIndex.get(shownTicketId)?.parent ?? null)
     : null;
 
   function updateFilters(next: BoardFilters) {
@@ -270,10 +274,11 @@ export function BoardPage() {
         </DndContext>
       )}
 
-      {selectedTicketId && !filterOpen && (
+      {shownTicketId && (
         <TicketDrawer
-          ticketId={selectedTicketId}
-          parentTicket={selectedParentTicket}
+          open={Boolean(selectedTicketId) && !filterOpen}
+          ticketId={shownTicketId}
+          parentTicket={shownParentTicket}
           onClose={closeDrawer}
         />
       )}

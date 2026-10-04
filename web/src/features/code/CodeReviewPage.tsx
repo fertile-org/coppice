@@ -1,13 +1,8 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
+import { BrandLogo } from '../../components/BrandLogo';
 import { Button } from '../../components/ui/button';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '../../components/ui/select';
+import { Combobox } from '../../components/ui/combobox';
 import { useRepos } from '../repos/useRepos';
 import { useTicket } from '../tickets/useTicket';
 import { ChangedFilesPanel } from './ChangedFilesPanel';
@@ -157,14 +152,7 @@ export function CodeReviewPage() {
       <header className="shrink-0 border-b border-border bg-surface px-6 py-3">
         <div className="flex flex-wrap items-center gap-4">
           <Link to="/settings/repositories" className="flex items-center gap-2">
-            <img
-              src="/logo.webp"
-              srcSet="/logo.webp 1x, /logo@2x.webp 2x"
-              alt="Coppice"
-              width={28}
-              height={28}
-              className="h-7 w-7 shrink-0"
-            />
+            <BrandLogo size={28} className="h-7 w-7 shrink-0" />
             <span className="font-display text-lg font-semibold text-text-primary">
               Code review
             </span>
@@ -180,47 +168,38 @@ export function CodeReviewPage() {
               </span>
             </div>
 
-            <Select
+            <Combobox
+              aria-label="Worktree"
               value={selectedWorktreePath ?? ''}
               onValueChange={(value) => syncParams({ worktree: value })}
               disabled={!worktrees?.length}
-            >
-              <SelectTrigger className="w-[min(100vw-3rem,20rem)]">
-                <SelectValue placeholder="Select worktree…" />
-              </SelectTrigger>
-              <SelectContent>
-                {(worktrees ?? []).map((worktree) => (
-                  <SelectItem
-                    key={worktree.path}
-                    value={worktree.path}
-                    textValue={worktree.path}
-                  >
-                    {worktreeLabel(
-                      worktree.path,
-                      worktree.branch,
-                      worktree.ticketTitle,
-                    )}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+              placeholder="Select worktree…"
+              searchPlaceholder="Search worktrees…"
+              className="w-[min(100vw-3rem,20rem)]"
+              options={(worktrees ?? []).map((worktree) => ({
+                value: worktree.path,
+                label: worktreeLabel(
+                  worktree.path,
+                  worktree.branch,
+                  worktree.ticketTitle,
+                ),
+              }))}
+            />
 
-            <Select
+            <Combobox
+              aria-label="Base branch"
               value={baseBranch}
               onValueChange={(value) => syncParams({ baseBranch: value })}
               disabled={!branchesData?.branches.length}
-            >
-              <SelectTrigger className="w-40">
-                <SelectValue placeholder="Base branch" />
-              </SelectTrigger>
-              <SelectContent>
-                {(branchesData?.branches ?? [defaultBranch]).map((branch) => (
-                  <SelectItem key={branch} value={branch} textValue={branch}>
-                    {branch}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+              placeholder="Base branch"
+              searchPlaceholder="Search branches…"
+              className="w-40"
+              contentClassName="min-w-[14rem]"
+              options={(branchesData?.branches ?? [defaultBranch]).map((branch) => ({
+                value: branch,
+                label: branch,
+              }))}
+            />
 
             <div className="flex rounded-md border border-border bg-surface-raised p-0.5">
               <button
@@ -348,13 +327,7 @@ function PageShell({
       <header className="border-b border-border bg-surface px-6 py-3">
         <div className="flex items-center gap-3">
           <Link to="/settings/repositories" className="flex items-center gap-2">
-            <img
-              src="/logo.webp"
-              alt="Coppice"
-              width={28}
-              height={28}
-              className="h-7 w-7"
-            />
+            <BrandLogo size={28} className="h-7 w-7" />
             <span className="font-display text-lg font-semibold text-text-primary">
               Code review
             </span>

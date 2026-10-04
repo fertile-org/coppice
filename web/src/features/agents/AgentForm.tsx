@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { Link } from 'react-router-dom';
+import { Combobox } from '../../components/ui/combobox';
 import type {
   Agent,
   AgentPreset,
@@ -347,18 +348,13 @@ export function AgentForm({
         >
           Connector
         </label>
-        <select
+        <Combobox
           id="agent-connector"
           value={values.connector}
-          onChange={(e) => handleConnectorChange(e.target.value)}
-          className="field-control w-full px-3 py-2 font-body text-sm"
-        >
-          {connectorOptions.map((c) => (
-            <option key={c.id} value={c.id}>
-              {c.id}
-            </option>
-          ))}
-        </select>
+          onValueChange={handleConnectorChange}
+          searchPlaceholder="Search connectors…"
+          options={connectorOptions.map((c) => ({ value: c.id, label: c.id }))}
+        />
       </div>
 
       {showModelFields && (
@@ -370,22 +366,16 @@ export function AgentForm({
             >
               Model provider
             </label>
-            <select
+            <Combobox
               id="agent-model-provider"
               value={values.modelProvider}
-              onChange={(e) => handleModelProviderChange(e.target.value)}
+              onValueChange={handleModelProviderChange}
               disabled={modelProvidersLoading}
-              className="field-control w-full px-3 py-2 font-body text-sm disabled:opacity-60"
-            >
-              <option value="">
-                {modelProvidersLoading ? 'Loading…' : 'Select model provider'}
-              </option>
-              {modelProviderOptions.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.id}
-                </option>
-              ))}
-            </select>
+              placeholder={modelProvidersLoading ? 'Loading…' : 'Select model provider'}
+              searchPlaceholder="Search providers…"
+              clearable
+              options={modelProviderOptions.map((p) => ({ value: p.id, label: p.id }))}
+            />
           </div>
 
           <div>
@@ -395,22 +385,16 @@ export function AgentForm({
             >
               Model
             </label>
-            <select
+            <Combobox
               id="agent-model"
               value={values.model}
-              onChange={(e) => updateField('model', e.target.value)}
+              onValueChange={(value) => updateField('model', value)}
               disabled={!values.modelProvider || modelsLoading}
-              className="field-control w-full px-3 py-2 font-body text-sm disabled:opacity-60"
-            >
-              <option value="">
-                {modelsLoading ? 'Loading…' : 'Select model'}
-              </option>
-              {modelOptions.map((m) => (
-                <option key={m.id} value={m.id}>
-                  {m.name}
-                </option>
-              ))}
-            </select>
+              placeholder={modelsLoading ? 'Loading…' : 'Select model'}
+              searchPlaceholder="Search models…"
+              clearable
+              options={modelOptions.map((m) => ({ value: m.id, label: m.name }))}
+            />
           </div>
         </>
       )}

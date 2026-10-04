@@ -1,8 +1,9 @@
 import '@testing-library/jest-dom/vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { KnowledgeSettings } from '../../lib/schemas/settings';
+import { openCombobox, selectComboboxOption } from '../../test/combobox';
 import { KnowledgeCompactionCard } from './KnowledgeCompactionCard';
 import type { Agent } from './useAgents';
 
@@ -111,18 +112,19 @@ describe('KnowledgeCompactionCard', () => {
   it('defaults to off and saves the chosen agent', async () => {
     renderCard([reviewer, coder]);
     const select = screen.getByLabelText('Compaction agent');
-    expect(select).toHaveDisplayValue('None — compaction off');
+    expect(select).toHaveTextContent('None — compaction off');
     expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
 
-    fireEvent.change(select, { target: { value: reviewer.id } });
+    selectComboboxOption(select, /Reviewer \(claude-code\)/);
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
     await waitFor(() => expect(mocks.update).toHaveBeenCalledWith(reviewer.id));
   });
 
   it('marks connectors without read-only mode as unusable', () => {
     renderCard([reviewer, coder]);
-    const option = screen.getByRole('option', { name: /Coder \(codex\)/ });
-    expect(option).toBeDisabled();
+    const list = openCombobox(screen.getByLabelText('Compaction agent'));
+    const option = within(list).getByRole('option', { name: /Coder \(codex\)/ });
+    expect(option).toHaveAttribute('aria-disabled', 'true');
     expect(option).toHaveTextContent('Cannot run compaction (no read-only mode)');
   });
 
@@ -130,7 +132,9 @@ describe('KnowledgeCompactionCard', () => {
     const disabled = agent({ enabled: false });
     mocks.settings = settings(disabled);
     renderCard([disabled]);
-    expect(screen.getByRole('option', { name: /Reviewer \(claude-code\) \(disabled\)/ })).toBeInTheDocument();
+    expect(screen.getByLabelText('Compaction agent')).toHaveTextContent(
+      'Reviewer (claude-code) (disabled)',
+    );
     expect(screen.getByText('This agent is disabled; compaction is paused.')).toBeVisible();
   });
 

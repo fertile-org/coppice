@@ -248,10 +248,10 @@ describe('BoardPage ticket hierarchy', () => {
     expect(ticketsState.lastIncludeArchived).toBe(true);
     expect(screen.getByText('Archived ticket')).toBeVisible();
     expect(
-      within(screen.getByRole('region', { name: 'Done' })).getByText('Archived'),
+      within(screen.getByRole('region', { name: 'Done', hidden: true })).getByText('Archived'),
     ).toBeVisible();
     expect(
-      screen.getByRole('button', { name: 'Filters, 1 active' }),
+      screen.getByRole('button', { name: 'Filters, 1 active', hidden: true }),
     ).toBeVisible();
   });
 
@@ -279,9 +279,9 @@ describe('BoardPage ticket hierarchy', () => {
 
     expect(screen.getByText('Auth login')).toBeVisible();
     expect(screen.queryByText('Billing export')).toBeNull();
-    expect(screen.getByRole('region', { name: 'Ready' })).toBeVisible();
+    expect(screen.getByRole('region', { name: 'Ready', hidden: true })).toBeVisible();
     expect(
-      screen.getByRole('button', { name: 'Filters, 2 active' }),
+      screen.getByRole('button', { name: 'Filters, 2 active', hidden: true }),
     ).toBeVisible();
   });
 });

@@ -41,13 +41,14 @@ function ToastViewport({
   toasts: ToastItem[];
   onDismiss: (id: string) => void;
 }) {
-  if (toasts.length === 0) return null;
-
+  // Always mounted: modal dialogs leave pre-existing `aria-live` regions
+  // un-hidden, so toasts raised while a dialog is open are still announced.
   return (
     <div
       aria-live="polite"
       aria-relevant="additions"
-      className="pointer-events-none fixed right-4 top-10 z-[100] flex w-full max-w-sm flex-col gap-2"
+      data-toast-region=""
+      className="pointer-events-none fixed bottom-4 right-4 z-[100] flex w-full max-w-sm flex-col gap-2"
     >
       {toasts.map((toast) => (
         <ToastMessage key={toast.id} toast={toast} onDismiss={onDismiss} />

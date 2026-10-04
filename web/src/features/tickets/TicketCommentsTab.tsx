@@ -1,17 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { X } from 'lucide-react';
+import {
+  MarkdownEditor,
+  type MarkdownEditorHandle,
+} from '../../components/MarkdownEditor';
 import { TicketMarkdown } from '../../components/TicketMarkdown';
 import { useToast } from '../../components/ToastProvider';
 import { formatFileSize, isImageContentType } from '../../lib/attachments';
 import type { MentionMode } from '../../lib/schemas/ticket';
 import { Button } from '../../components/ui/button';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '../../components/ui/select';
+import { Combobox } from '../../components/ui/combobox';
 import { CommentAttachments } from './CommentAttachments';
 import { useAgents, type Agent } from '../agents/useAgents';
 import {
@@ -95,8 +93,7 @@ interface MentionMatch {
   query: string;
 }
 
-function mentionMatchAtCursor(text: string, cursor: number): MentionMatch | null {
-  const before = text.slice(0, cursor);
+function mentionMatchBeforeCursor(before: string): MentionMatch | null {
   const atIndex = before.lastIndexOf('@');
   if (atIndex === -1) return null;
 
@@ -141,7 +138,8 @@ export function TicketCommentsTab({ ticketId }: TicketCommentsTabProps) {
   const createComment = useCreateComment(ticketId);
   const uploadAttachment = useUploadAttachment();
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const formRef = useRef<HTMLFormElement>(null);
+  const editorRef = useRef<MarkdownEditorHandle>(null);
 
   const [body, setBody] = useState('');
   const [mentionMode, setMentionMode] = useState<MentionMode>('agent');
@@ -168,38 +166,14 @@ export function TicketCommentsTab({ ticketId }: TicketCommentsTabProps) {
     setPendingFiles((current) => [...current, ...next]);
   }
 
-  function syncMentionMatch(value: string, cursor: number) {
-    setMentionMatch(mentionMatchAtCursor(value, cursor));
-  }
-
-  function handleBodyChange(e: React.ChangeEvent<HTMLTextAreaElement>) {
-    const value = e.target.value;
-    setBody(value);
-    syncMentionMatch(value, e.target.selectionStart);
-  }
-
-  function handleBodySelect(e: React.SyntheticEvent<HTMLTextAreaElement>) {
-    syncMentionMatch(e.currentTarget.value, e.currentTarget.selectionStart);
-  }
-
   function insertMention(key: string) {
     if (!mentionMatch) return;
 
-    const cursor = textareaRef.current?.selectionStart ?? body.length;
-    const before = body.slice(0, mentionMatch.start);
-    const after = body.slice(cursor);
-    const next = `${before}@${key} ${after}`;
-    const nextCursor = before.length + key.length + 2;
-
-    setBody(next);
+    editorRef.current?.replaceTextBeforeCursor(
+      mentionMatch.query.length + 1,
+      `@${key} `,
+    );
     setMentionMatch(null);
-
-    requestAnimationFrame(() => {
-      const textarea = textareaRef.current;
-      if (!textarea) return;
-      textarea.focus();
-      textarea.setSelectionRange(nextCursor, nextCursor);
-    });
   }
 
   const filteredMentionKeys = useMemo(() => {
@@ -268,6 +242,7 @@ export function TicketCommentsTab({ ticketId }: TicketCommentsTabProps) {
   return (
     <div className="flex h-full flex-col gap-4">
       <form
+        ref={formRef}
         onSubmit={(e) => void handleSubmit(e)}
         className="shrink-0 space-y-3 border-b border-border pb-4"
       >
@@ -279,22 +254,18 @@ export function TicketCommentsTab({ ticketId }: TicketCommentsTabProps) {
 
         <div className="space-y-2">
           <div className="group relative w-fit">
-            <Select
+            <Combobox
+              aria-label="Mention mode"
+              aria-describedby="mention-mode-tooltip"
               value={mentionMode}
               onValueChange={(value) => setMentionMode(value as MentionMode)}
-            >
-              <SelectTrigger
-                aria-label="Mention mode"
-                aria-describedby="mention-mode-tooltip"
-                className="h-8 w-[6.75rem] shrink-0"
-              >
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="agent">Agent</SelectItem>
-                <SelectItem value="chat">Chat</SelectItem>
-              </SelectContent>
-            </Select>
+              className="w-[6.75rem] shrink-0"
+              triggerClassName="h-8"
+              options={[
+                { value: 'agent', label: 'Agent' },
+                { value: 'chat', label: 'Chat' },
+              ]}
+            />
             <span
               id="mention-mode-tooltip"
               role="tooltip"
@@ -305,15 +276,18 @@ export function TicketCommentsTab({ ticketId }: TicketCommentsTabProps) {
           </div>
 
           <div className="relative">
-            <textarea
-              ref={textareaRef}
+            <MarkdownEditor
+              ref={editorRef}
               value={body}
-              onChange={handleBodyChange}
-              onSelect={handleBodySelect}
-              onClick={handleBodySelect}
-              rows={4}
+              onChange={setBody}
+              onTextBeforeCursorChange={(text) =>
+                setMentionMatch(mentionMatchBeforeCursor(text))
+              }
+              onSubmit={() => formRef.current?.requestSubmit()}
               placeholder="Write a comment in markdown…"
-              className="field-control w-full px-3 py-2 font-body text-sm"
+              aria-label="Comment"
+              minHeight={96}
+              disabled={isBusy}
             />
 
             {mentionMatch && filteredMentionKeys.length > 0 && (

@@ -2,15 +2,15 @@ import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useToast } from '../../components/ToastProvider';
 import { Button } from '../../components/ui/button';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogTitle,
+} from '../../components/ui/dialog';
 import { Input } from '../../components/ui/input';
 import { Label } from '../../components/ui/label';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '../../components/ui/select';
+import { Combobox } from '../../components/ui/combobox';
 import { Textarea } from '../../components/ui/textarea';
 import type { InlineComment } from '../../lib/schemas/codeReview';
 import { apiFetch } from '../../lib/api';
@@ -84,15 +84,6 @@ export function SubmitReviewDialog({
     setError(null);
   }, [open, boards, ticket?.assigneeAgentId, engineers]);
 
-  useEffect(() => {
-    if (!open) return;
-    function onKeyDown(e: KeyboardEvent) {
-      if (e.key === 'Escape') onClose();
-    }
-    document.addEventListener('keydown', onKeyDown);
-    return () => document.removeEventListener('keydown', onKeyDown);
-  }, [open, onClose]);
-
   const preview = useMemo(
     () =>
       formatReviewPreview(
@@ -114,8 +105,6 @@ export function SubmitReviewDialog({
       inlineComments,
     ],
   );
-
-  if (!open) return null;
 
   async function resolveBoardId(resultTicketId: string): Promise<string | null> {
     if (ticket?.boardId) return ticket.boardId;
@@ -193,29 +182,17 @@ export function SubmitReviewDialog({
   }
 
   return (
-    <div
-      className="fixed inset-0 z-[60] flex items-center justify-center bg-overlay px-4"
-      role="presentation"
-      onClick={onClose}
-    >
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="submit-review-title"
-        className="flex max-h-[90vh] w-full max-w-2xl flex-col overflow-hidden rounded-xl border border-border bg-paper-50 shadow-lg"
-        onClick={(e) => e.stopPropagation()}
+    <Dialog open={open} onOpenChange={(next) => !next && onClose()}>
+      <DialogContent
+        className="z-[60] flex max-h-[90vh] max-w-2xl flex-col overflow-hidden p-0"
+        overlayClassName="z-[60]"
       >
         <div className="border-b border-border px-6 py-4">
-          <h2
-            id="submit-review-title"
-            className="font-display text-xl font-semibold text-bark-900"
-          >
-            Submit review
-          </h2>
-          <p className="mt-1 font-body text-sm text-text-secondary">
+          <DialogTitle>Submit review</DialogTitle>
+          <DialogDescription className="mt-1">
             Post a combined review comment
             {ticketId ? ' on the linked ticket' : ' as a new ticket'}.
-          </p>
+          </DialogDescription>
         </div>
 
         <form
@@ -239,22 +216,17 @@ export function SubmitReviewDialog({
               <>
                 <div className="space-y-2">
                   <Label htmlFor="review-board">Board</Label>
-                  <Select value={boardId} onValueChange={setBoardId}>
-                    <SelectTrigger id="review-board">
-                      <SelectValue placeholder="Select board…" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {(boards ?? []).map((board) => (
-                        <SelectItem
-                          key={board.id}
-                          value={board.id}
-                          textValue={board.name}
-                        >
-                          {board.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  <Combobox
+                    id="review-board"
+                    value={boardId}
+                    onValueChange={setBoardId}
+                    placeholder="Select board…"
+                    searchPlaceholder="Search boards…"
+                    options={(boards ?? []).map((board) => ({
+                      value: board.id,
+                      label: board.name,
+                    }))}
+                  />
                 </div>
 
                 <div className="space-y-2">
@@ -286,59 +258,35 @@ export function SubmitReviewDialog({
             {ticketId && (
               <div className="space-y-2">
                 <Label htmlFor="review-workflow">Workflow action</Label>
-                <Select
+                <Combobox
+                  id="review-workflow"
                   value={workflowAction}
                   onValueChange={(value) =>
                     setWorkflowAction(value as WorkflowAction)
                   }
-                >
-                  <SelectTrigger id="review-workflow">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none" textValue="Comment only">
-                      Comment only
-                    </SelectItem>
-                    <SelectItem
-                      value="move_to_in_progress"
-                      textValue="Move to In Progress"
-                    >
-                      Move to In Progress
-                    </SelectItem>
-                    <SelectItem
-                      value="reassign_engineer"
-                      textValue="Reassign engineer"
-                    >
-                      Reassign engineer
-                    </SelectItem>
-                  </SelectContent>
-                </Select>
+                  options={[
+                    { value: 'none', label: 'Comment only' },
+                    { value: 'move_to_in_progress', label: 'Move to In Progress' },
+                    { value: 'reassign_engineer', label: 'Reassign engineer' },
+                  ]}
+                />
               </div>
             )}
 
             {ticketId && workflowAction === 'reassign_engineer' && (
               <div className="space-y-2">
                 <Label htmlFor="review-engineer">Engineer</Label>
-                <Select
+                <Combobox
+                  id="review-engineer"
                   value={reassignAgentId}
                   onValueChange={setReassignAgentId}
-                >
-                  <SelectTrigger id="review-engineer">
-                    <SelectValue placeholder="Select engineer…" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {engineers.map((agent) => (
-                      <SelectItem
-                        key={agent.id}
-                        value={agent.id}
-                        textValue={agent.name}
-                      >
-                        {agent.name}
-                        {agent.role ? ` · ${agent.role}` : ''}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                  placeholder="Select engineer…"
+                  searchPlaceholder="Search engineers…"
+                  options={engineers.map((agent) => ({
+                    value: agent.id,
+                    label: agent.role ? `${agent.name} · ${agent.role}` : agent.name,
+                  }))}
+                />
               </div>
             )}
 
@@ -365,7 +313,7 @@ export function SubmitReviewDialog({
             </Button>
           </div>
         </form>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }

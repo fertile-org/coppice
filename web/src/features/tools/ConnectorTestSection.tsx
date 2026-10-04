@@ -1,6 +1,7 @@
 import { useId, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Button } from '../../components/ui/button';
+import { Combobox } from '../../components/ui/combobox';
 import { ApiError, parseApiErrorMessage } from '../../lib/api';
 import type {
   ConnectorCheck,
@@ -116,19 +117,19 @@ export function ConnectorTestSection({ connector }: { connector: ConnectorStatus
             <label htmlFor={selectId} className="mb-1 block font-body text-xs text-text-secondary">
               Agent
             </label>
-            <select
+            <Combobox
               id={selectId}
               value={selected}
-              onChange={(e) => setAgentId(e.target.value)}
-              className="field-control px-2 py-1 font-body text-sm"
-            >
-              {matching.length > 1 && <option value="">Choose an agent</option>}
-              {matching.map((agent) => (
-                <option key={agent.id} value={agent.id}>
-                  {agent.model ? `${agent.name} · ${agent.model}` : agent.name}
-                </option>
-              ))}
-            </select>
+              onValueChange={setAgentId}
+              placeholder="Choose an agent"
+              searchPlaceholder="Search agents…"
+              className="min-w-[14rem]"
+              triggerClassName="h-9"
+              options={matching.map((agent) => ({
+                value: agent.id,
+                label: agent.model ? `${agent.name} · ${agent.model}` : agent.name,
+              }))}
+            />
           </div>
           <Button
             type="button"

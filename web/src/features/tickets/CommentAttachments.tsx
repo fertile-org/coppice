@@ -14,6 +14,7 @@ interface CommentAttachmentsProps {
 
 export function CommentAttachments({ attachments }: CommentAttachmentsProps) {
   const [preview, setPreview] = useState<AttachmentMeta | null>(null);
+  const [previewOpen, setPreviewOpen] = useState(false);
 
   if (attachments.length === 0) return null;
 
@@ -28,7 +29,10 @@ export function CommentAttachments({ attachments }: CommentAttachmentsProps) {
             <li key={attachment.id}>
               <button
                 type="button"
-                onClick={() => setPreview(attachment)}
+                onClick={() => {
+                  setPreview(attachment);
+                  setPreviewOpen(true);
+                }}
                 className="group block overflow-hidden rounded-md border border-border bg-surface transition-colors duration-fast hover:border-accent"
                 title={attachment.filename}
               >
@@ -61,8 +65,9 @@ export function CommentAttachments({ attachments }: CommentAttachmentsProps) {
 
       {preview && (
         <AttachmentPreviewModal
+          open={previewOpen}
           attachment={preview}
-          onClose={() => setPreview(null)}
+          onClose={() => setPreviewOpen(false)}
         />
       )}
     </>

@@ -41,8 +41,6 @@ export function BoardFilterDrawer({
   onClose,
   onClear,
 }: BoardFilterDrawerProps) {
-  if (!open) return null;
-
   function toggleStatus(status: TicketStatus) {
     const has = filters.statuses.includes(status);
     onChange({
@@ -55,6 +53,7 @@ export function BoardFilterDrawer({
 
   return (
     <RepoDrawer
+      open={open}
       ariaLabel="Board filters"
       title="Filters"
       description="Narrow which tickets appear on the board."

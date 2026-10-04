@@ -1,5 +1,5 @@
 import '@testing-library/jest-dom/vitest';
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Repo } from '../../lib/schemas/repo';
 import { RepositoriesPage } from './RepositoriesPage';
@@ -96,7 +96,7 @@ describe('RepositoriesPage', () => {
     expect(screen.queryByTestId('default-branch-sync')).not.toBeInTheDocument();
   });
 
-  it('opens a create drawer from Add repository and closes on Escape and backdrop', () => {
+  it('opens a create drawer from Add repository and closes on Escape and backdrop', async () => {
     render(<RepositoriesPage />);
 
     fireEvent.click(screen.getByRole('button', { name: 'Add repository' }));
@@ -115,8 +115,11 @@ describe('RepositoriesPage', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Add repository' }));
     expect(screen.getByRole('dialog', { name: 'Add repository' })).toBeVisible();
 
-    fireEvent.click(screen.getByTestId('repo-drawer-backdrop'));
-    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    const backdrop = screen.getByTestId('repo-drawer-backdrop');
+    await waitFor(() => {
+      fireEvent.pointerDown(backdrop);
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    });
   });
 
   it('opens an edit drawer with verify, remove, and sync controls (no forge token)', () => {

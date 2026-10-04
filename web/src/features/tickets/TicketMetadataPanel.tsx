@@ -3,15 +3,9 @@ import { BOARD_COLUMNS, type TicketStatus } from '../board/columns';
 import type { Ticket } from '../board/useTickets';
 import { useToast } from '../../components/ToastProvider';
 import { Button } from '../../components/ui/button';
+import { Combobox } from '../../components/ui/combobox';
 import { Input } from '../../components/ui/input';
 import { Label } from '../../components/ui/label';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '../../components/ui/select';
 import {
   SUBSTATUSES,
   SUBSTATUS_LABELS,
@@ -215,28 +209,24 @@ export function TicketMetadataPanel({ ticket }: TicketMetadataPanelProps) {
       )}
       <div className="space-y-2">
         <Label htmlFor="ticket-assignee">Assignee</Label>
-        <Select
-          value={assigneeId || '__none__'}
+        <Combobox
+          id="ticket-assignee"
+          value={assigneeId}
           onValueChange={(value) => {
-            setAssigneeId(value === '__none__' ? '' : value);
+            setAssigneeId(value);
             setAssignError(null);
           }}
           disabled={formDisabled}
-        >
-          <SelectTrigger id="ticket-assignee">
-            <SelectValue placeholder="Unassigned" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="__none__">Unassigned</SelectItem>
-            {agents
-              ?.filter((agent) => agent.enabled)
-              .map((agent) => (
-                <SelectItem key={agent.id} value={agent.id} textValue={agent.name}>
-                  {agent.name} ({agent.role})
-                </SelectItem>
-              ))}
-          </SelectContent>
-        </Select>
+          placeholder="Unassigned"
+          searchPlaceholder="Search agents…"
+          clearable
+          options={(agents ?? [])
+            .filter((agent) => agent.enabled)
+            .map((agent) => ({
+              value: agent.id,
+              label: `${agent.name} (${agent.role})`,
+            }))}
+        />
         {assignedAgent && (
           <p className="font-body text-xs text-text-muted">
             Assigned to {assignedAgent.name}
@@ -340,30 +330,22 @@ export function TicketMetadataPanel({ ticket }: TicketMetadataPanelProps) {
 
       <div className="space-y-2">
         <Label htmlFor="ticket-repo">Repository</Label>
-        <Select
-          value={repoId || '__none__'}
-          onValueChange={(v) => setRepoId(v === '__none__' ? '' : v)}
+        <Combobox
+          id="ticket-repo"
+          value={repoId}
+          onValueChange={setRepoId}
           disabled={formDisabled}
-        >
-          <SelectTrigger id="ticket-repo">
-            <SelectValue placeholder="None" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="__none__">None</SelectItem>
-            {repos?.map((repo) => (
-              <SelectItem
-                key={repo.id}
-                value={repo.id}
-                textValue={repo.name}
-              >
-                {repo.name}
-                {repo.verificationStatus !== 'ready'
-                  ? ` (${repo.verificationStatus.replaceAll('_', ' ')})`
-                  : ''}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+          placeholder="None"
+          searchPlaceholder="Search repositories…"
+          clearable
+          options={(repos ?? []).map((repo) => ({
+            value: repo.id,
+            label:
+              repo.verificationStatus !== 'ready'
+                ? `${repo.name} (${repo.verificationStatus.replaceAll('_', ' ')})`
+                : repo.name,
+          }))}
+        />
         <Button
           type="button"
           variant="secondary"
@@ -384,100 +366,78 @@ export function TicketMetadataPanel({ ticket }: TicketMetadataPanelProps) {
 
       <div className="space-y-2">
         <Label htmlFor="ticket-status">Status</Label>
-        <Select
+        <Combobox
+          id="ticket-status"
           value={status}
           onValueChange={(value) => setStatus(value as TicketStatus)}
           disabled={formDisabled}
-        >
-          <SelectTrigger id="ticket-status" className="h-auto min-h-10 py-2">
-            <SelectValue>
-              <TicketStatusBadge status={status} />
-            </SelectValue>
-          </SelectTrigger>
-          <SelectContent>
-            {BOARD_COLUMNS.map((column) => (
-              <SelectItem
-                key={column.status}
-                value={column.status}
-                textValue={column.label}
-              >
-                <TicketStatusBadge status={column.status} />
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+          triggerClassName="h-auto min-h-10 py-2"
+          searchPlaceholder="Search statuses…"
+          options={BOARD_COLUMNS.map((column) => ({
+            value: column.status,
+            label: column.label,
+          }))}
+          renderLabel={(option) => (
+            <TicketStatusBadge status={option.value as TicketStatus} />
+          )}
+        />
       </div>
 
       <div className="space-y-2">
         <Label htmlFor="ticket-priority">Priority</Label>
-        <Select
-          value={priority || '__none__'}
-          onValueChange={(v) => setPriority(v === '__none__' ? '' : v)}
+        <Combobox
+          id="ticket-priority"
+          value={priority}
+          onValueChange={setPriority}
           disabled={formDisabled}
-        >
-          <SelectTrigger id="ticket-priority">
-            <SelectValue placeholder="None" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="__none__">None</SelectItem>
-            {ticketPrioritySchema.options.map((p) => (
-              <SelectItem key={p} value={p} className="capitalize">
-                {p}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+          placeholder="None"
+          clearable
+          options={ticketPrioritySchema.options.map((p) => ({
+            value: p,
+            label: p.charAt(0).toUpperCase() + p.slice(1),
+          }))}
+        />
       </div>
 
       <div className="space-y-2">
         <Label htmlFor="ticket-substatus">Substatus</Label>
-        <Select
-          value={substatus || '__none__'}
+        <Combobox
+          id="ticket-substatus"
+          value={substatus}
           onValueChange={(value) => {
-            const next = value === '__none__' ? '' : (value as Substatus);
+            const next = value as Substatus | '';
             setSubstatus(next);
             if (!next) setMetadata({});
           }}
           disabled={formDisabled}
-        >
-          <SelectTrigger id="ticket-substatus">
-            <SelectValue placeholder="None" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="__none__">None</SelectItem>
-            {SUBSTATUSES.map((value) => (
-              <SelectItem key={value} value={value} textValue={SUBSTATUS_LABELS[value]}>
-                {SUBSTATUS_LABELS[value]}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+          placeholder="None"
+          searchPlaceholder="Search substatuses…"
+          clearable
+          options={SUBSTATUSES.map((value) => ({
+            value,
+            label: SUBSTATUS_LABELS[value],
+          }))}
+        />
       </div>
 
       {activeSubstatus === 'waiting_for_agent' && (
         <div className="space-y-2">
           <Label htmlFor="substatus-agent">Agent</Label>
-          <Select
-            value={String(metadata.agentId ?? '__none__')}
-            onValueChange={(value) =>
-              updateMetadataField('agentId', value === '__none__' ? '' : value)
-            }
+          <Combobox
+            id="substatus-agent"
+            value={String(metadata.agentId ?? '')}
+            onValueChange={(value) => updateMetadataField('agentId', value)}
             disabled={formDisabled}
-          >
-            <SelectTrigger id="substatus-agent">
-              <SelectValue placeholder="Select agent…" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="__none__">Select agent…</SelectItem>
-              {agents
-                ?.filter((agent) => agent.enabled)
-                .map((agent) => (
-                  <SelectItem key={agent.id} value={agent.id} textValue={agent.name}>
-                    {agent.name} ({agent.role})
-                  </SelectItem>
-                ))}
-            </SelectContent>
-          </Select>
+            placeholder="Select agent…"
+            searchPlaceholder="Search agents…"
+            clearable
+            options={(agents ?? [])
+              .filter((agent) => agent.enabled)
+              .map((agent) => ({
+                value: agent.id,
+                label: `${agent.name} (${agent.role})`,
+              }))}
+          />
         </div>
       )}
 

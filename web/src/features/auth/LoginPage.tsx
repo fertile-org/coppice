@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from 'react';
 import { Navigate, useNavigate } from 'react-router-dom';
+import { BrandLogo } from '../../components/BrandLogo';
 import { apiFetch, ApiError } from '../../lib/api';
 import { ThemeToggle } from '../theme/ThemeToggle';
 import { useSession } from './useSession';
@@ -53,14 +54,7 @@ export function LoginPage() {
       </div>
       <div className="w-full max-w-md rounded-xl border border-border bg-surface-raised p-8 shadow-card">
         <div className="mb-8 flex flex-col items-center gap-4 text-center">
-          <img
-            src="/logo.webp"
-            srcSet="/logo.webp 1x, /logo@2x.webp 2x"
-            alt="Coppice"
-            width={72}
-            height={72}
-            className="h-[4.5rem] w-[4.5rem] shrink-0"
-          />
+          <BrandLogo size={72} className="h-[4.5rem] w-[4.5rem] shrink-0" />
           <h1 className="font-display text-2xl font-semibold tracking-tight text-text-primary">
             Coppice
           </h1>

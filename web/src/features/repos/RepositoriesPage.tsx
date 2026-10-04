@@ -444,6 +444,8 @@ export function RepositoriesPage() {
     drawer.type === 'edit'
       ? (repos?.find((repo) => repo.id === drawer.repoId) ?? null)
       : null;
+  const [shownEditRepo, setShownEditRepo] = useState(editingRepo);
+  if (editingRepo && editingRepo !== shownEditRepo) setShownEditRepo(editingRepo);
 
   useEffect(() => {
     if (drawer.type === 'edit' && repos && !editingRepo) {
@@ -611,8 +613,9 @@ export function RepositoriesPage() {
         )}
       </div>
 
-      {isAdmin && drawer.type === 'create' && (
+      {isAdmin && (
         <RepoDrawer
+          open={drawer.type === 'create'}
           ariaLabel="Add repository"
           title="Add repository"
           description="Register a local git checkout. Pull/push use host git credentials."
@@ -622,16 +625,17 @@ export function RepositoriesPage() {
         </RepoDrawer>
       )}
 
-      {isAdmin && drawer.type === 'edit' && editingRepo && (
+      {isAdmin && shownEditRepo && (
         <RepoDrawer
+          open={drawer.type === 'edit' && Boolean(editingRepo)}
           ariaLabel="Edit repository"
           title="Edit repository"
           description="Update metadata and sync the default branch with the remote."
           onClose={closeDrawer}
         >
           <div className="space-y-6">
-            <EditRepoForm key={editingRepo.id} repo={editingRepo} />
-            <EditRepoActions repo={editingRepo} onRemoved={closeDrawer} />
+            <EditRepoForm key={shownEditRepo.id} repo={shownEditRepo} />
+            <EditRepoActions repo={shownEditRepo} onRemoved={closeDrawer} />
           </div>
         </RepoDrawer>
       )}

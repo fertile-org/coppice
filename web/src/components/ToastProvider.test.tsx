@@ -84,7 +84,7 @@ describe('ToastProvider', () => {
     expect(screen.queryByText('Saved successfully')).not.toBeInTheDocument();
   });
 
-  it('positions the toast viewport with top-10 clearance', () => {
+  it('positions the toast viewport in the bottom-right corner', () => {
     let api: ReturnType<typeof useToast> | null = null;
 
     renderWithToast((toast) => {
@@ -96,7 +96,7 @@ describe('ToastProvider', () => {
     });
 
     const status = screen.getByRole('status');
-    expect(status.parentElement).toHaveClass('top-10');
+    expect(status.parentElement).toHaveClass('bottom-4', 'right-4');
   });
 
   it('shows progress only for non-persistent toasts', () => {
