@@ -133,7 +133,7 @@ Trigger: `push` of tags matching `v*`.
 
 **Headless smoke** (each matrix entry, against the packaged resources): run `coppice-server desktop` with a temp data dir, wait for `COPPICE_READY`, `GET /health` returns ok, `GET /` returns the SPA `index.html`, SIGTERM, assert exit 0 and no `postgres` process remains; run it a second time on the same data dir to prove restart.
 
-Linux builds use Ubuntu 22.04 so the binaries run on older glibc. Caches: Rust (`Swatinem/rust-cache`), Yarn, and the Postgres bundle.
+Linux builds use Ubuntu 22.04 so the binaries run on older glibc: the `.deb` supports glibc 2.35+ (Ubuntu 22.04+, Debian 12+), since the server is built there and non-glibc shared libraries the Postgres bundle needs are copied from it. Caches: Rust (`Swatinem/rust-cache`), Yarn, and the Postgres bundle.
 
 ### Postgres bundle
 

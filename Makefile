@@ -101,7 +101,6 @@ desktop-test:
 
 # POSTGRES_DIR=<dir with bin/lib/share> skips the pinned download (e.g. a pg-embed cache).
 DESKTOP_PG_DIR = $(abspath $(or $(POSTGRES_DIR),desktop/.cache/postgres-host))
-DESKTOP_RESOURCES = $(firstword $(wildcard desktop/dist/linux*-unpacked/resources desktop/dist/mac*/Coppice.app/Contents/Resources))
 
 desktop-dist-dir:
 	cargo build --release --locked -p coppice-server
@@ -113,9 +112,11 @@ endif
 	cd desktop && node scripts/assemble-resources.mjs --server-bin ../target/release/coppice-server --web-dist ../web/dist --postgres $(DESKTOP_PG_DIR)
 	cd desktop && yarn dist:dir
 
+# Resolved when the recipe runs so `make desktop-dist-dir desktop-smoke` works in one go.
 desktop-smoke:
-	@test -n "$(DESKTOP_RESOURCES)" || { echo "no packaged build under desktop/dist; run make desktop-dist-dir" >&2; exit 1; }
-	cd desktop && node scripts/headless-smoke.mjs --resources $(abspath $(DESKTOP_RESOURCES))
+	@resources=$$(ls -d desktop/dist/linux*-unpacked/resources desktop/dist/mac*/Coppice.app/Contents/Resources 2>/dev/null | head -n 1); \
+	test -n "$$resources" || { echo "no packaged build under desktop/dist; run make desktop-dist-dir" >&2; exit 1; }; \
+	cd desktop && node scripts/headless-smoke.mjs --resources "$(CURDIR)/$$resources"
 
 e2e-smoke:
 	$(MAKE) compose-up

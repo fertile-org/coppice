@@ -1,6 +1,6 @@
 {
   "version": "16.15.0",
-  "source": "theseus-rs/postgresql-binaries 16.15.0. x86_64-unknown-linux-gnu verified on Ubuntu 22.04: initdb, pg_ctl, postgres, pg_dump, psql, unaccent present, all report 16.15. Linux builds need glibc >= 2.34 and system libxml2.so.2 (postgres) and libreadline.so.8 (psql); macOS builds link only OS libs plus bundled OpenSSL. zonky rejected: no pg_dump/psql.",
+  "source": "theseus-rs/postgresql-binaries 16.15.0. x86_64-unknown-linux-gnu verified on Ubuntu 22.04: initdb, pg_ctl, postgres, pg_dump, psql, unaccent present, all report 16.15. Linux binaries need glibc >= 2.34 and libxml2.so.2 (postgres) / libreadline.so.8 (psql), which assemble-resources bundles from the build host; since the server and those libs are built on / copied from Ubuntu 22.04, the packaged app's effective minimum is glibc 2.35; macOS builds link only OS libs plus bundled OpenSSL. zonky rejected: no pg_dump/psql.",
   "targets": {
     "aarch64-apple-darwin": {
       "url": "https://github.com/theseus-rs/postgresql-binaries/releases/download/16.15.0/postgresql-16.15.0-aarch64-apple-darwin.tar.gz",

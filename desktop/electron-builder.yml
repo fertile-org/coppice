@@ -19,14 +19,28 @@ mac:
   hardenedRuntime: true
   entitlements: build/entitlements.mac.plist
   entitlementsInherit: build/entitlements.mac.plist
+  icon: build/icon.png
   notarize: false
 linux:
   target: deb
   category: Development
   maintainer: Coppice Maintainers <coppice@users.noreply.github.com>
   executableName: coppice
+  # Per-size PNGs: hicolor has no 1024x1024 directory, so a single 1024 icon is never found.
+  icon: build/icons
+  synopsis: Local desktop agent workspace
 deb:
+  # electron-builder's default deb depends (app-builder-lib FpmTarget) are replaced, not merged.
   depends:
+    - libgtk-3-0
+    - libnotify4
+    - libnss3
+    - libxss1
+    - libxtst6
+    - xdg-utils
+    - libatspi2.0-0
+    - libuuid1
+    - libsecret-1-0
     - git
   afterInstall: build/linux/after-install.sh
   afterRemove: build/linux/after-remove.sh

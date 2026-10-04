@@ -7,9 +7,13 @@ import { after, before, describe, it } from 'node:test';
 import {
   assembleResources,
   isBaseLib,
+  machoDepProblems,
   missingLibsMessage,
   parseLdd,
+  parseOtoolL,
+  parseOtoolLoadCommands,
   planLibCopies,
+  unresolvedMachoMessage,
 } from '../scripts/assemble-resources.mjs';
 
 const LDD_POSTGRES = `\tlinux-vdso.so.1 (0x00007ffd0b5f2000)
@@ -54,6 +58,10 @@ describe('isBaseLib', () => {
       'libresolv.so.2',
       'libgcc_s.so.1',
       'libstdc++.so.6',
+      'libmvec.so.1',
+      'libanl.so.1',
+      'libnsl.so.1',
+      'libBrokenLocale.so.1',
     ]) {
       assert.ok(isBaseLib(name), name);
     }
@@ -151,7 +159,7 @@ describe('assembleResources', () => {
 
     out = join(dir, 'out');
     await mkdir(join(out, 'stale'), { recursive: true });
-    await assembleResources({ serverBin, webDist: web, postgres: pg, out, repoRoot: repo, bundleLibs: false });
+    await assembleResources({ serverBin, webDist: web, postgres: pg, out, repoRoot: repo, platform: 'linux' });
   });
 
   after(async () => {
@@ -185,5 +193,122 @@ describe('assembleResources', () => {
     ]) {
       assert.ok(!(await exists(join(out, rel))), rel);
     }
+  });
+});
+
+const PG = '/r/postgres';
+
+const OTOOL_L_LIBPQ = `${PG}/lib/libpq.5.dylib:
+\t@loader_path/../lib/libpq.5.dylib (compatibility version 5.0.0, current version 5.16.0)
+\t@loader_path/../lib/libssl.3.dylib (compatibility version 3.0.0, current version 3.0.0)
+\t/usr/lib/libSystem.B.dylib (compatibility version 1.0.0, current version 1345.100.2)
+`;
+
+const OTOOL_LOAD_COMMANDS = `${PG}/lib/libpq.5.dylib:
+Load command 3
+          cmd LC_ID_DYLIB
+      cmdsize 64
+         name @loader_path/../lib/libpq.5.dylib (offset 24)
+   time stamp 1 Thu Jan  1 07:00:01 1970
+Load command 12
+          cmd LC_LOAD_DYLIB
+      cmdsize 64
+         name @loader_path/../lib/libssl.3.dylib (offset 24)
+Load command 14
+          cmd LC_RPATH
+      cmdsize 32
+         path @loader_path/../lib (offset 12)
+Load command 15
+          cmd LC_RPATH
+      cmdsize 32
+         path /opt/homebrew/lib (offset 12)
+`;
+
+describe('parseOtoolL', () => {
+  it('lists dependencies without the file header line', () => {
+    assert.deepEqual(parseOtoolL(OTOOL_L_LIBPQ), [
+      '@loader_path/../lib/libpq.5.dylib',
+      '@loader_path/../lib/libssl.3.dylib',
+      '/usr/lib/libSystem.B.dylib',
+    ]);
+  });
+
+  it('merges the per-architecture sections of a universal binary', () => {
+    const out = `${PG}/bin/postgres (architecture x86_64):
+\t/usr/lib/libSystem.B.dylib (compatibility version 1.0.0, current version 1.0.0)
+${PG}/bin/postgres (architecture arm64):
+\t/usr/lib/libSystem.B.dylib (compatibility version 1.0.0, current version 1.0.0)
+\t/usr/lib/libz.1.dylib (compatibility version 1.0.0, current version 1.2.12)
+`;
+    assert.deepEqual(parseOtoolL(out), ['/usr/lib/libSystem.B.dylib', '/usr/lib/libz.1.dylib']);
+  });
+});
+
+describe('parseOtoolLoadCommands', () => {
+  it('reads the install name and LC_RPATH entries', () => {
+    assert.deepEqual(parseOtoolLoadCommands(OTOOL_LOAD_COMMANDS), {
+      id: '@loader_path/../lib/libpq.5.dylib',
+      rpaths: ['@loader_path/../lib', '/opt/homebrew/lib'],
+    });
+  });
+
+  it('has no id for executables', () => {
+    assert.deepEqual(parseOtoolLoadCommands(`${PG}/bin/postgres:\nLoad command 0\n      cmd LC_SEGMENT_64\n`), {
+      id: null,
+      rpaths: [],
+    });
+  });
+});
+
+describe('machoDepProblems', () => {
+  const present = new Set([`${PG}/lib/libpq.5.dylib`, `${PG}/lib/libssl.3.dylib`, `${PG}/lib/libcrypto.3.dylib`]);
+  const check = (file, deps, { id = null, rpaths = [] } = {}) =>
+    machoDepProblems({ file, deps, id, rpaths, pgDir: PG, exists: (p) => present.has(p) });
+
+  it('accepts system libraries, its own install name and @loader_path refs into postgres/lib', () => {
+    assert.deepEqual(
+      check(`${PG}/lib/libpq.5.dylib`, parseOtoolL(OTOOL_L_LIBPQ), parseOtoolLoadCommands(OTOOL_LOAD_COMMANDS)),
+      [],
+    );
+    assert.deepEqual(
+      check(`${PG}/bin/psql`, [
+        '@loader_path/../lib/libpq.5.dylib',
+        '@executable_path/../lib/libssl.3.dylib',
+        '/System/Library/Frameworks/CoreFoundation.framework/Versions/A/CoreFoundation',
+      ]),
+      [],
+    );
+  });
+
+  it('resolves @rpath through LC_RPATH, or by basename in postgres/lib without one', () => {
+    assert.deepEqual(check(`${PG}/bin/postgres`, ['@rpath/libcrypto.3.dylib'], { rpaths: ['@loader_path/../lib'] }), []);
+    assert.deepEqual(check(`${PG}/lib/pgcrypto.dylib`, ['@rpath/libcrypto.3.dylib']), []);
+    assert.deepEqual(check(`${PG}/bin/postgres`, ['@rpath/libcrypto.3.dylib'], { rpaths: ['/opt/homebrew/lib'] }), [
+      { file: `${PG}/bin/postgres`, dep: '@rpath/libcrypto.3.dylib' },
+    ]);
+  });
+
+  it('rejects libraries outside the bundle or missing from it', () => {
+    assert.deepEqual(
+      check(`${PG}/bin/postgres`, [
+        '/opt/homebrew/opt/icu4c/lib/libicuuc.74.dylib',
+        '@loader_path/../lib/libxml2.2.dylib',
+        '@loader_path/../../outside/libssl.3.dylib',
+        '/usr/local/lib/libreadline.8.dylib',
+      ]),
+      [
+        { file: `${PG}/bin/postgres`, dep: '/opt/homebrew/opt/icu4c/lib/libicuuc.74.dylib' },
+        { file: `${PG}/bin/postgres`, dep: '@loader_path/../lib/libxml2.2.dylib' },
+        { file: `${PG}/bin/postgres`, dep: '@loader_path/../../outside/libssl.3.dylib' },
+        { file: `${PG}/bin/postgres`, dep: '/usr/local/lib/libreadline.8.dylib' },
+      ],
+    );
+  });
+});
+
+describe('unresolvedMachoMessage', () => {
+  it('names each offending file and dependency', () => {
+    const msg = unresolvedMachoMessage([{ file: 'bin/postgres', dep: '/opt/homebrew/lib/libicuuc.74.dylib' }]);
+    assert.match(msg, /bin\/postgres -> \/opt\/homebrew\/lib\/libicuuc\.74\.dylib/);
   });
 });

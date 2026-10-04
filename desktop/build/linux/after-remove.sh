@@ -5,6 +5,12 @@ APP_DIR=/opt/Coppice
 EXECUTABLE=coppice
 APPARMOR_TARGET=/etc/apparmor.d/coppice
 
+# Upgrades also run the old package's postrm; the new postinst re-registers everything.
+case "$1" in
+    remove|purge) ;;
+    *) exit 0 ;;
+esac
+
 if type update-alternatives >/dev/null 2>&1; then
     update-alternatives --remove "$EXECUTABLE" "$APP_DIR/$EXECUTABLE" || true
 else
