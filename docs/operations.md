@@ -33,6 +33,7 @@ Host `config.toml` does not affect the Docker server. Do not run `make migrate` 
 | Setting | Purpose |
 |---------|---------|
 | `auth.desktop_mode` | When `true`, SPA auto-calls `POST /api/auth/desktop-session` and hides login / account chrome / Users nav. Keep `false` for multi-user cloud. |
+| `auth.desktop_allowed_hosts` | With `desktop_mode`, only requests whose `Host` (and, on `desktop-session`, `Origin`) matches one of these `host:port` values are served — blocks DNS rebinding. Empty (default) disables the check, as Docker/dev proxies rewrite `Host`; the desktop app sets `127.0.0.1:<port>` and `localhost:<port>`. |
 | `auth.bootstrap_admin_email` / `password` | Create first admin on empty DB (required for desktop auto-session). |
 
 Login APIs remain available for tools and future cloud hosting.

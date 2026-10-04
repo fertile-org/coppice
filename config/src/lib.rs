@@ -668,6 +668,12 @@ pub struct AuthConfig {
     /// Only enable on loopback or otherwise trusted single-operator hosts.
     #[serde(default)]
     pub desktop_mode: bool,
+    /// With [`Self::desktop_mode`], only requests whose `Host` is one of these
+    /// `host:port` values are served, which blocks DNS rebinding onto the
+    /// credential-less desktop session. Empty disables the check (Docker/dev,
+    /// where proxies rewrite `Host`); the desktop app sets its loopback origins.
+    #[serde(default)]
+    pub desktop_allowed_hosts: Vec<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -1078,6 +1084,7 @@ impl AppConfig {
                 bootstrap_admin_email: None,
                 bootstrap_admin_password: None,
                 desktop_mode: false,
+                desktop_allowed_hosts: Vec::new(),
             },
             storage: StorageConfig {
                 artifacts_dir: "./data/artifacts".into(),

@@ -10,6 +10,7 @@ Tracking items discussed for the **Electron desktop** distribution and related p
 - [ ] **Auto-update (future)**: Download and install new versions in-app; today the app only shows a "new version available → Download" banner.
 - [ ] **Windows installer (future)**: Not built today.
 - [x] **Desktop auth**: Keep server auth model for cloud/self-hosted; when `auth.desktop_mode` is on, SPA auto-establishes an admin session (no login UI / account chrome). User APIs remain for cloud later.
+- [ ] **Desktop session from other local users (M12)**: the `Host`/`Origin` guard blocks DNS rebinding, but any other OS user on the machine can still call `POST /api/auth/desktop-session` on the loopback port and get an admin session. Address in [M12 — Security & sandbox](docs/milestones/M12-security-and-sandbox.md), e.g. a per-launch token Electron passes to the server and the SPA.
 - [x] **Repositories desktop UX**: Electron Browse for `local_path`; pull/push use host git credentials (forge token optional); ticket PR primary path is Open compare URL.
 - [ ] **Agent CLI setup research (future)**: Desktop v1 runs the user's own installed agent CLIs with their existing logins (real `$HOME`, login-shell `PATH`). Research how other desktop agent tools find, install, and authenticate CLIs (bundled CLIs, in-app install/login flows, isolated homes) and adopt a more convenient approach if one exists.
 - [ ] **Remote database (future)**: Optional `database.url` to external Postgres; default remains bundled data dir under app user data.

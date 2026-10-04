@@ -140,6 +140,10 @@ pub fn desktop_config(
     config.server.port = server_port;
     config.database.url = pg_url.to_string();
     config.auth.desktop_mode = true;
+    config.auth.desktop_allowed_hosts = vec![
+        format!("127.0.0.1:{server_port}"),
+        format!("localhost:{server_port}"),
+    ];
     config.auth.cookie_secure = false;
     config.auth.session_secret = secrets.session_secret.clone();
     config.auth.bootstrap_admin_email = Some(DESKTOP_ADMIN_EMAIL.into());
@@ -266,7 +270,7 @@ mod tests {
         contents = contents.replace("[mcp]\n", "[mcp]\nbase_url = \"http://elsewhere/mcp\"\n");
         assert!(contents.contains("http://elsewhere/mcp"));
         contents.push_str(
-            "\n[server]\nport = 1\n\n[auth]\ndesktop_mode = false\ncookie_secure = true\n",
+            "\n[server]\nport = 1\n\n[auth]\ndesktop_mode = false\ncookie_secure = true\ndesktop_allowed_hosts = [\"evil.example:1\"]\n",
         );
         std::fs::write(&layout.config_file, contents).unwrap();
 
@@ -276,6 +280,10 @@ mod tests {
         assert_eq!(cfg.server.port, 43210);
         assert_eq!(cfg.database.url, pg_url);
         assert!(cfg.auth.desktop_mode);
+        assert_eq!(
+            cfg.auth.desktop_allowed_hosts,
+            ["127.0.0.1:43210", "localhost:43210"]
+        );
         assert!(!cfg.auth.cookie_secure);
         assert_eq!(cfg.auth.session_secret, secrets.session_secret);
         assert_eq!(

@@ -135,7 +135,13 @@ async fn login(
     Ok(session_response(&state, bundle))
 }
 
-async fn desktop_session(State(state): State<Arc<AppState>>) -> Result<Response, StatusCode> {
+async fn desktop_session(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+) -> Result<Response, StatusCode> {
+    if !crate::middleware::host_guard::origin_allowed(&state.config.auth, &headers) {
+        return Err(StatusCode::FORBIDDEN);
+    }
     let pool = pool_from_state(&state)?;
     let auth = AuthService::new(pool, &state.config.auth);
 
