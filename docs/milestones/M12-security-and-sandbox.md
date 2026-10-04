@@ -117,7 +117,7 @@ Compose delta: `SECRETS_MASTER_KEY`, `SANDBOX_ENFORCE=true`; optional `postgres-
 
 ### Smoke
 
-`make e2e-smoke-m11`: agent with restrictive sandbox (no `pnpm`) → blocked badge → grant via guided unblock UI → retry → succeeded.
+`make e2e-smoke-m12`: agent with restrictive sandbox (no `pnpm`) → blocked badge → grant via guided unblock UI → retry → succeeded.
 
 ## Acceptance criteria
 

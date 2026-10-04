@@ -82,7 +82,7 @@ POST  /api/agents/:id/run-observation
 
 ### Smoke
 
-`make e2e-smoke-m12`: Run Observation on DBA mock agent → signal appears in Workspace Inbox → Create Ticket → ticket on board.
+`make e2e-smoke-m13`: Run Observation on DBA mock agent → signal appears in Workspace Inbox → Create Ticket → ticket on board.
 
 ## Acceptance criteria
 

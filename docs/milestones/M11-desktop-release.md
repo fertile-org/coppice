@@ -36,9 +36,9 @@ Ship Coppice as a desktop app: the user downloads one installer, opens it, and C
 Delivered and covered by automated tests or PR CI:
 
 - [x] `coppice-server desktop` first run, ready line, health, SPA serving, SIGTERM / stdin-EOF shutdown with no leftover Postgres, and restart on the same data dir (`server/tests/integration_desktop.rs`, unit tests in `server/src/desktop/`)
-- [x] Fresh databases migrate on plain Postgres 16; databases carrying the old checksums for 001 and 013 are fixed up and migrate (`server/src/db/checksum_fixup.rs`, `make test` on embedded plain Postgres)
+- [x] Fresh databases migrate on plain Postgres 16; databases carrying the old checksums for 001 and 013 are fixed up and migrate (`REWRITTEN_MIGRATIONS` / `fix_rewritten_migration_checksums` in `db-migrations/src/lib.rs`, tested by `server/src/db/checksum_fixup.rs`; `make test` on embedded plain Postgres)
 - [x] Electron shell: ready-line parsing, login-shell `PATH` with timeout fallback, rotating log, navigation guard, update check and semver comparison, userData paths (`make desktop-test`); web update banner (`make web-test`)
-- [x] Unpacked Linux package builds and passes the headless smoke twice on one data dir (PR CI `desktop` job, `make desktop-dist-dir desktop-smoke`)
+- [x] Unpacked Linux package builds and passes the headless smoke twice on one data dir (local `make desktop-dist-dir desktop-smoke` run; a green PR CI `desktop` job is still pending)
 - [x] Release workflow validates tags and renders install notes with or without the unsigned-macOS section (`release-version` / `render-notes` tests)
 
 From the spec (need the live tag check or manual acceptance):
