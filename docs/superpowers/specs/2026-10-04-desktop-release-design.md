@@ -126,9 +126,9 @@ Trigger: `push` of tags matching `v*`.
 
 | Job | Runs on | Does |
 |---|---|---|
-| `prepare` | ubuntu | Validates the tag (`vX.Y.Z` or `vX.Y.Z-rc.N`); creates a draft release (pre-release for `-rc`) with generated notes since the previous tag plus a fixed install section (includes the macOS `xattr -cr /Applications/Coppice.app` step when signing secrets are absent). |
+| `prepare` | ubuntu | Validates the tag (`vX.Y.Z` or `vX.Y.Z-rc.N`); creates a draft release (pre-release for `-rc`) with generated notes since the previous tag plus a fixed install section (includes the macOS right-click → Open / `xattr -dr com.apple.quarantine /Applications/Coppice.app` step when signing secrets are absent). |
 | `web` | ubuntu | `yarn install --frozen-lockfile && yarn build` in `web/`; uploads `web/dist` as a workflow artifact. |
-| `build` (matrix) | `macos-14` (arm64), `macos-13` (x64; swap for GitHub's successor Intel image if `macos-13` is retired), `ubuntu-22.04` (x64), `ubuntu-22.04-arm` (arm64) | `cargo build --release --locked -p coppice-server`; downloads the pinned Postgres bundle and verifies SHA-256; assembles resources; sets the version; runs electron-builder; **headless smoke** (below); uploads the installer to the draft release. |
+| `build` (matrix) | `macos-15` (arm64), `macos-15-intel` (x64; GitHub's last x86_64 macOS image, available until Aug 2027), `ubuntu-22.04` (x64), `ubuntu-22.04-arm` (arm64) | `cargo build --release --locked -p coppice-server`; downloads the pinned Postgres bundle and verifies SHA-256; assembles resources; sets the version; runs electron-builder; **headless smoke** (below); uploads the installer to the draft release. |
 | `finalize` | ubuntu | Downloads the four installers, uploads `SHA256SUMS`. |
 
 **Headless smoke** (each matrix entry, against the packaged resources): run `coppice-server desktop` with a temp data dir, wait for `COPPICE_READY`, `GET /health` returns ok, `GET /` returns the SPA `index.html`, SIGTERM, assert exit 0 and no `postgres` process remains; run it a second time on the same data dir to prove restart.

@@ -48,6 +48,11 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
+      - name: Install libraries the Postgres bundle links
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libxml2 libxslt1.1 libreadline8 libxxhash0 liblz4-1 libzstd1 libssl3 libgssapi-krb5-2
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - uses: actions/setup-node@v4
@@ -102,7 +107,7 @@ jobs:
           echo "Dockerfile.server pins rust ${TOOLCHAIN}; checking Cargo.lock compiles against it"
           # --locked => fail if Cargo.lock would need to change.
           # --workspace => cover every workspace member the lockfile resolves.
-          docker run --rm -v "$PWD":/app -w /app rust:${TOOLCHAIN}-bookworm \
+          docker run --rm -v "$PWD":/app -w /app "rust:${TOOLCHAIN}-bookworm" \
             sh -c 'cargo check --locked --workspace --all-targets --target-dir /tmp/check-target'
 
   e2e:

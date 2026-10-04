@@ -1,0 +1,193 @@
+name: Release
+
+# Pushing vX.Y.Z or vX.Y.Z-rc.N builds the four desktop installers into a draft
+# GitHub Release; a maintainer reviews it and clicks Publish. Re-running for the
+# same tag reuses the draft and replaces its files.
+#
+# macOS signing and notarization switch on when these repository secrets exist
+# (no code change needed):
+#   CSC_LINK          base64 of the Developer ID Application .p12
+#   CSC_KEY_PASSWORD  password of that .p12
+#   APPLE_API_KEY     contents of the App Store Connect API key (AuthKey_XXXX.p8);
+#                     the build writes it to a file because notarytool takes a path
+#   APPLE_API_KEY_ID  key ID of that API key
+#   APPLE_API_ISSUER  issuer ID (UUID) of that API key
+
+on:
+  push:
+    tags: ['v*']
+
+concurrency: release-${{ github.ref }}
+
+permissions:
+  contents: write
+
+env:
+  GH_REPO: ${{ github.repository }}
+  TAG: ${{ github.ref_name }}
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      prerelease: ${{ steps.version.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Validate tag
+        id: version
+        run: node desktop/scripts/release-version.mjs "$TAG" >> "$GITHUB_OUTPUT"
+      - name: Render install notes
+        env:
+          MAC_UNSIGNED: ${{ secrets.CSC_LINK == '' }}
+        run: >-
+          node desktop/scripts/render-notes.mjs
+          --template .github/release-notes/install.md
+          --out "$RUNNER_TEMP/install.md"
+          --mac-unsigned "$MAC_UNSIGNED"
+      - name: Create draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PRERELEASE: ${{ steps.version.outputs.prerelease }}
+        run: |
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG already exists; reusing it"
+            exit 0
+          fi
+          args=(--draft --verify-tag --generate-notes --notes-file "$RUNNER_TEMP/install.md")
+          if [ "$PRERELEASE" = true ]; then args+=(--prerelease); fi
+          gh release create "$TAG" "${args[@]}"
+
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: yarn
+          cache-dependency-path: web/yarn.lock
+      - run: corepack enable && corepack prepare yarn@1.22.22 --activate
+      - run: cd web && yarn install --frozen-lockfile && yarn build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: web-dist
+          path: web/dist
+          if-no-files-found: error
+
+  build:
+    needs: [prepare, web]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            target: aarch64-apple-darwin
+          # GitHub's last x86_64 macOS image (available until Aug 2027).
+          - runner: macos-15-intel
+            target: x86_64-apple-darwin
+          # Ubuntu 22.04 sets the glibc floor (2.35) of the .deb.
+          - runner: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+          - runner: ubuntu-22.04-arm
+            target: aarch64-unknown-linux-gnu
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install libraries the Postgres bundle links
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libxml2 libxslt1.1 libreadline8 libxxhash0 liblz4-1 libzstd1 libssl3 libgssapi-krb5-2
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: yarn
+          cache-dependency-path: desktop/yarn.lock
+      - run: corepack enable && corepack prepare yarn@1.22.22 --activate
+      - name: Cache Postgres bundle and Electron downloads
+        uses: actions/cache@v4
+        with:
+          path: |
+            desktop/.cache/postgres
+            ~/.cache/electron
+            ~/.cache/electron-builder
+            ~/Library/Caches/electron
+            ~/Library/Caches/electron-builder
+          key: desktop-${{ matrix.target }}-${{ hashFiles('desktop/postgres.lock.json', 'desktop/yarn.lock') }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: web-dist
+          path: web/dist
+      - name: Build server
+        run: cargo build --release --locked -p coppice-server
+      - name: Install desktop dependencies
+        run: cd desktop && yarn install --frozen-lockfile
+      - name: Fetch Postgres
+        run: cd desktop && node scripts/fetch-postgres.mjs --target ${{ matrix.target }} --out .cache/postgres-host
+      - name: Assemble resources
+        run: cd desktop && yarn assemble --server-bin ../target/release/coppice-server --web-dist ../web/dist --postgres .cache/postgres-host
+      - name: Set version from tag
+        run: node desktop/scripts/release-version.mjs "$TAG"
+      - name: Write notarization key
+        if: runner.os == 'macOS'
+        env:
+          APPLE_API_KEY_CONTENT: ${{ secrets.APPLE_API_KEY }}
+        run: |
+          if [ -z "$APPLE_API_KEY_CONTENT" ]; then exit 0; fi
+          key="$RUNNER_TEMP/AuthKey.p8"
+          printf '%s\n' "$APPLE_API_KEY_CONTENT" > "$key"
+          chmod 600 "$key"
+          echo "APPLE_API_KEY=$key" >> "$GITHUB_ENV"
+      - name: Package (macOS)
+        if: runner.os == 'macOS'
+        env:
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+        run: cd desktop && yarn dist
+      - name: Package (Linux)
+        if: runner.os == 'Linux'
+        run: cd desktop && yarn dist
+      - name: Headless smoke
+        run: make desktop-smoke
+      - name: Upload installer
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          shopt -s nullglob
+          files=(desktop/dist/*.dmg desktop/dist/*.deb)
+          if [ "${#files[@]}" -ne 1 ]; then
+            echo "expected exactly one installer, found: ${files[*]}" >&2
+            exit 1
+          fi
+          gh release upload "$TAG" "${files[0]}" --clobber
+
+  finalize:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Upload SHA256SUMS
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir installers && cd installers
+          gh release download "$TAG" --pattern '*.dmg' --pattern '*.deb'
+          shopt -s nullglob
+          files=(*.dmg *.deb)
+          if [ "${#files[@]}" -lt 4 ]; then
+            echo "expected 4 installers on the release, found ${#files[@]}: ${files[*]}" >&2
+            exit 1
+          fi
+          sha256sum "${files[@]}" > SHA256SUMS
+          cat SHA256SUMS
+          gh release upload "$TAG" SHA256SUMS --clobber
