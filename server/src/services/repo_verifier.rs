@@ -55,8 +55,16 @@ pub fn verify_local_path(path: &Path) -> VerifyResult {
         }
         Err(err) => VerifyResult {
             status: VerificationStatus::Error,
-            error: Some(err.to_string()),
+            error: Some(git_spawn_error_message(&err)),
         },
+    }
+}
+
+pub(crate) fn git_spawn_error_message(err: &std::io::Error) -> String {
+    if err.kind() == std::io::ErrorKind::NotFound {
+        "git not found — install Git (macOS: run xcode-select --install)".to_string()
+    } else {
+        err.to_string()
     }
 }
 
@@ -115,6 +123,21 @@ mod tests {
     use super::*;
     use std::process::Command;
     use uuid::Uuid;
+
+    #[test]
+    fn git_spawn_error_message_explains_missing_git() {
+        let err = std::io::Error::from(std::io::ErrorKind::NotFound);
+        assert_eq!(
+            git_spawn_error_message(&err),
+            "git not found — install Git (macOS: run xcode-select --install)"
+        );
+    }
+
+    #[test]
+    fn git_spawn_error_message_passes_other_errors_through() {
+        let err = std::io::Error::from(std::io::ErrorKind::PermissionDenied);
+        assert_eq!(git_spawn_error_message(&err), err.to_string());
+    }
 
     #[test]
     fn missing_path_returns_path_missing() {

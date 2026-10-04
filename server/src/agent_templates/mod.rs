@@ -14,7 +14,15 @@ pub enum AgentTemplateError {
 }
 
 pub fn templates_dir() -> std::path::PathBuf {
-    std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("agent_templates")
+    templates_dir_from(std::env::var("COPPICE_AGENT_TEMPLATES_DIR").ok().as_deref())
+}
+
+/// Packaged builds have no source tree, so the env override must win when set.
+pub fn templates_dir_from(env: Option<&str>) -> std::path::PathBuf {
+    match env {
+        Some(dir) if !dir.is_empty() => std::path::PathBuf::from(dir),
+        _ => std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("agent_templates"),
+    }
 }
 
 /// Load all `*.md` files; map key = file stem (e.g. `pm.md` → `"pm"`).
@@ -66,5 +74,16 @@ mod tests {
         let pm = templates.get("pm").expect("pm template");
         assert!(pm.contains("# SOUL"));
         assert!(pm.contains("## Mission"));
+    }
+
+    #[test]
+    fn templates_dir_from_uses_env_override() {
+        assert_eq!(templates_dir_from(Some("/x/t")), PathBuf::from("/x/t"));
+    }
+
+    #[test]
+    fn templates_dir_from_falls_back_to_source_tree() {
+        assert!(templates_dir_from(Some("")).ends_with("agent_templates"));
+        assert!(templates_dir_from(None).ends_with("agent_templates"));
     }
 }

@@ -249,7 +249,15 @@ pub trait AgentProvider: Send + Sync {
 }
 
 pub fn fixtures_root() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../fixtures/agent-responses")
+    fixtures_root_from(std::env::var("COPPICE_MOCK_FIXTURES_DIR").ok().as_deref())
+}
+
+/// Packaged builds have no source tree, so the env override must win when set.
+pub fn fixtures_root_from(env: Option<&str>) -> PathBuf {
+    match env {
+        Some(dir) if !dir.is_empty() => PathBuf::from(dir),
+        _ => PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../fixtures/agent-responses"),
+    }
 }
 
 /// Resolve the ticket worktree directory from `.agent/context.md` and return an
@@ -311,6 +319,17 @@ mod tests {
             read_only_tools: false,
             mcp: None,
         }
+    }
+
+    #[test]
+    fn fixtures_root_from_uses_env_override() {
+        assert_eq!(fixtures_root_from(Some("/x/f")), PathBuf::from("/x/f"));
+    }
+
+    #[test]
+    fn fixtures_root_from_falls_back_to_source_tree() {
+        assert!(fixtures_root_from(Some("")).ends_with("fixtures/agent-responses"));
+        assert!(fixtures_root_from(None).ends_with("fixtures/agent-responses"));
     }
 
     #[test]
