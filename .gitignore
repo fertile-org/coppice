@@ -13,3 +13,7 @@ dist
 .agent/
 
 /.worktrees/
+
+/desktop/resources/
+/desktop/.cache/
+/desktop/dist/

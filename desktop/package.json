@@ -6,7 +6,8 @@
   "main": "main.mjs",
   "scripts": {
     "start": "ELECTRON_DISABLE_SANDBOX=1 electron .",
-    "test": "node --test electron-smoke.test.mjs"
+    "fetch-postgres": "node scripts/fetch-postgres.mjs",
+    "test": "node --test 'test/*.test.mjs' electron-smoke.test.mjs"
   },
   "devDependencies": {
     "electron": "^35.0.0"
