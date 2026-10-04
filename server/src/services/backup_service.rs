@@ -1,8 +1,9 @@
 use crate::AppConfig;
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
+use std::ffi::OsString;
 use std::io::{Read, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use thiserror::Error;
 use time::OffsetDateTime;
@@ -127,8 +128,50 @@ fn validate_manifest(extract_root: &Path) -> Result<(), BackupError> {
     Ok(())
 }
 
+/// Set by the desktop app to its bundled Postgres `bin` / `lib` directories.
+pub const PG_BIN_DIR_ENV: &str = "COPPICE_PG_BIN_DIR";
+pub const PG_LIB_DIR_ENV: &str = "COPPICE_PG_LIB_DIR";
+
+#[derive(Debug)]
+struct PgTool {
+    program: PathBuf,
+    lib_dir: Option<PathBuf>,
+}
+
+/// The bundled binary when [`PG_BIN_DIR_ENV`] is set, else `name` on `PATH`.
+fn resolve_pg_tool(name: &str, env: impl Fn(&str) -> Option<OsString>) -> PgTool {
+    let dir = |key| {
+        env(key)
+            .filter(|value| !value.is_empty())
+            .map(PathBuf::from)
+    };
+    match dir(PG_BIN_DIR_ENV) {
+        Some(bin) => PgTool {
+            program: bin.join(name),
+            lib_dir: dir(PG_LIB_DIR_ENV),
+        },
+        None => PgTool {
+            program: PathBuf::from(name),
+            lib_dir: None,
+        },
+    }
+}
+
+/// Bundled Linux libraries carry no RUNPATH, so the bundled tools need
+/// `LD_LIBRARY_PATH`; set on this command only so other children are unaffected.
+fn pg_command(name: &str) -> std::process::Command {
+    let tool = resolve_pg_tool(name, |key| std::env::var_os(key));
+    #[cfg_attr(not(target_os = "linux"), allow(unused_mut))]
+    let mut cmd = std::process::Command::new(&tool.program);
+    #[cfg(target_os = "linux")]
+    if let Some(lib) = &tool.lib_dir {
+        cmd.env("LD_LIBRARY_PATH", lib);
+    }
+    cmd
+}
+
 fn run_pg_dump(database_url: &str, out_path: &Path) -> Result<(), BackupError> {
-    let output = std::process::Command::new("pg_dump")
+    let output = pg_command("pg_dump")
         .args([
             "--dbname",
             database_url,
@@ -162,7 +205,7 @@ async fn terminate_other_sessions(pool: &PgPool) -> Result<(), BackupError> {
 }
 
 fn run_psql_file(database_url: &str, sql_path: &Path) -> Result<(), BackupError> {
-    let child = std::process::Command::new("psql")
+    let child = pg_command("psql")
         .args([
             "--dbname",
             database_url,
@@ -284,5 +327,38 @@ mod tests {
         let json = serde_json::to_string(&manifest).unwrap();
         let parsed: BackupManifest = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed.format_version, BACKUP_FORMAT_VERSION);
+    }
+
+    fn env_of<'a>(vars: &'a [(&'a str, &'a str)]) -> impl Fn(&str) -> Option<OsString> + 'a {
+        move |name| {
+            vars.iter()
+                .find(|(key, _)| *key == name)
+                .map(|(_, value)| OsString::from(value))
+        }
+    }
+
+    #[test]
+    fn pg_tool_uses_path_lookup_without_bundle_env() {
+        let tool = resolve_pg_tool("pg_dump", env_of(&[]));
+        assert_eq!(tool.program, PathBuf::from("pg_dump"));
+        assert_eq!(tool.lib_dir, None);
+
+        let tool = resolve_pg_tool("psql", env_of(&[(PG_BIN_DIR_ENV, "")]));
+        assert_eq!(tool.program, PathBuf::from("psql"));
+    }
+
+    #[test]
+    fn pg_tool_uses_bundled_binary_and_libs_when_set() {
+        let env = [
+            (PG_BIN_DIR_ENV, "/r/postgres/bin"),
+            (PG_LIB_DIR_ENV, "/r/postgres/lib"),
+        ];
+        let tool = resolve_pg_tool("pg_dump", env_of(&env));
+        assert_eq!(tool.program, PathBuf::from("/r/postgres/bin/pg_dump"));
+        assert_eq!(tool.lib_dir, Some(PathBuf::from("/r/postgres/lib")));
+
+        let tool = resolve_pg_tool("psql", env_of(&env[..1]));
+        assert_eq!(tool.program, PathBuf::from("/r/postgres/bin/psql"));
+        assert_eq!(tool.lib_dir, None);
     }
 }

@@ -7,10 +7,8 @@ pub mod layout;
 pub mod postgres;
 pub mod shutdown;
 
-use std::ffi::OsString;
 use std::io::Write;
 use std::net::SocketAddr;
-use std::path::Path;
 use std::time::Duration;
 
 use anyhow::{bail, Context};
@@ -20,6 +18,7 @@ pub use args::{parse_desktop_args, DesktopArgs};
 pub use shutdown::desktop_shutdown_signal;
 
 use crate::serve::{serve, ServeOptions};
+use crate::services::backup_service::{PG_BIN_DIR_ENV, PG_LIB_DIR_ENV};
 use bootstrap::DesktopSecrets;
 use layout::{DataLayout, ResourceLayout};
 use postgres::DesktopPostgres;
@@ -39,25 +38,15 @@ pub fn ready_line(addr: SocketAddr) -> String {
     format!("COPPICE_READY url=http://127.0.0.1:{}", addr.port())
 }
 
-/// Points resource lookups at the bundle and puts its `pg_dump`/`psql` first
-/// on `PATH`. Must run before the tokio runtime starts any threads.
-pub fn set_process_env(args: &DesktopArgs) -> anyhow::Result<()> {
+/// Points resource lookups and backup's `pg_dump`/`psql` at the bundle.
+/// `PATH` is untouched so agents keep the user's own Postgres tools. Must run
+/// before the tokio runtime starts any threads.
+pub fn set_process_env(args: &DesktopArgs) {
     let resources = ResourceLayout::new(&args.resources);
-    let path = prepend_path(
-        &resources.pg_bin,
-        &std::env::var_os("PATH").unwrap_or_default(),
-    )?;
     std::env::set_var("COPPICE_AGENT_TEMPLATES_DIR", &resources.agent_templates);
     std::env::set_var("COPPICE_MOCK_FIXTURES_DIR", &resources.mock_fixtures);
-    std::env::set_var("PATH", path);
-    Ok(())
-}
-
-fn prepend_path(dir: &Path, current: &std::ffi::OsStr) -> anyhow::Result<OsString> {
-    // An empty entry would put the working directory on PATH.
-    let existing = std::env::split_paths(current).filter(|p| !p.as_os_str().is_empty());
-    let paths = std::iter::once(dir.to_path_buf()).chain(existing);
-    std::env::join_paths(paths).with_context(|| format!("cannot add {} to PATH", dir.display()))
+    std::env::set_var(PG_BIN_DIR_ENV, &resources.pg_bin);
+    std::env::set_var(PG_LIB_DIR_ENV, &resources.pg_lib);
 }
 
 /// Not printed when shutdown was requested during startup: Electron is
@@ -196,14 +185,6 @@ mod tests {
         let port = free_loopback_port().expect("port");
         assert_ne!(port, 0);
         std::net::TcpListener::bind(("127.0.0.1", port)).expect("bind free port");
-    }
-
-    #[test]
-    fn prepend_path_puts_dir_first() {
-        let path = prepend_path(Path::new("/r/postgres/bin"), "/usr/bin:/bin".as_ref()).unwrap();
-        assert_eq!(path, "/r/postgres/bin:/usr/bin:/bin");
-        let path = prepend_path(Path::new("/r/postgres/bin"), "".as_ref()).unwrap();
-        assert_eq!(path, "/r/postgres/bin");
     }
 
     #[test]

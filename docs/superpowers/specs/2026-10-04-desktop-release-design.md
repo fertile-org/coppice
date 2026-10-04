@@ -54,7 +54,7 @@ Electron passes `D` = its `userData` path (`~/Library/Application Support/Coppic
 5. **Database:** create the `coppice` database if missing, then run migrations.
 6. **Stop** (see Shutdown): `pg_ctl stop -m fast`.
 
-Backup / restore (Tools → Backup) use `postgres/bin/pg_dump` and `psql` from the bundle.
+Backup / restore (Tools → Backup) use `postgres/bin/pg_dump` and `psql` from the bundle, found through `COPPICE_PG_BIN_DIR` / `COPPICE_PG_LIB_DIR` (not `PATH`, so agents keep the user's own `psql`).
 
 ### Server behaviour in desktop mode
 
@@ -68,7 +68,7 @@ Backup / restore (Tools → Backup) use `postgres/bin/pg_dump` and `psql` from t
 
 Triggered by SIGTERM, SIGINT, or stdin reaching EOF (the parent Electron process died). Order: stop accepting requests → drain in-flight requests and shut down OpenCode / plugin MCP servers → `pg_ctl stop -m fast` → exit 0. stdin EOF guarantees no orphaned Postgres when Electron crashes. A signal during startup suppresses the `COPPICE_READY` line and shuts down the same way.
 
-Shutdown is bounded to fit Electron's 15 s SIGTERM→SIGKILL window: draining gets 6 s (after which Postgres is stopped anyway), `pg_ctl stop -m fast -w -t 5` falls back to `pg_ctl stop -m immediate -w -t 3`, and the runtime gets 1 s to wind down (6 + 5 + 3 + 1 = 15 s worst case).
+Shutdown is bounded to fit Electron's 15 s SIGTERM→SIGKILL window: draining gets 5 s (after which Postgres is stopped anyway), `pg_ctl stop -m fast -w -t 5` falls back to `pg_ctl stop -m immediate -w -t 3`, and the runtime gets 1 s to wind down (5 + 5 + 3 + 1 = 14 s worst case, leaving 1 s of margin).
 
 Accepted deviation: active agent runs are not marked interrupted at shutdown. Agent CLI children die via `kill_on_drop`, and the startup sweep marks orphaned runs interrupted on the next launch.
 

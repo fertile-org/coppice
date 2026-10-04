@@ -59,8 +59,8 @@ fn main() -> anyhow::Result<()> {
 
 /// Electron shows stderr when startup fails, so the full error chain goes there.
 fn run_desktop(args: desktop::DesktopArgs) -> anyhow::Result<()> {
-    let result = desktop::set_process_env(&args).and_then(|()| {
-        let runtime = runtime()?;
+    desktop::set_process_env(&args);
+    let result = runtime().map_err(anyhow::Error::from).and_then(|runtime| {
         let result = runtime.block_on(async {
             init_tracing();
             desktop::run(args).await
