@@ -21,6 +21,10 @@ mac:
   entitlementsInherit: build/entitlements.mac.plist
   icon: build/icon.png
   notarize: false
+  # Regexes tested (unanchored) against each file's absolute path while signing;
+  # Postgres share/ is data (timezones, SQL, locales), not Mach-O.
+  signIgnore:
+    - /Contents/Resources/postgres/share/
 linux:
   target: deb
   category: Development
