@@ -49,7 +49,7 @@ server/src/
 ## Database
 
 - Plain PostgreSQL 16 (no pgvector; `unaccent` comes from contrib).
-- Migrations: `server/migrations/*.sql`, applied by `coppice migrate` and on test connect (`db::connect_and_migrate`). Migrations 001 and 013 were rewritten in place to drop pgvector; `db::checksum_fixup` updates their recorded checksums on older databases before sqlx runs.
+- Migrations: `server/migrations/*.sql`, applied by `coppice migrate` and on test connect (`db::connect_and_migrate`). Migrations 001 and 013 were rewritten in place to drop pgvector; `coppice_migrations::run_migrations` (crate `db-migrations/`, shared by server and CLI) updates their recorded checksums on older databases before sqlx runs.
 - No Redis; agent job queue uses Postgres `agent_jobs` (M03).
 - **M03 tables:** `agent_runs` (one row per ticket+agent execution; statuses `queued`/`running`/`completed`/`failed`/`cancelled`; unique partial index on active `(ticket_id, agent_id)`), `agent_jobs` (queue row per run; `FOR UPDATE SKIP LOCKED` claim by workers).
 - **M06 tables:** `knowledge_items` (mutable lifecycle pointer), immutable `knowledge_revisions` (generated `search_vector` + GIN index), `knowledge_item_sources` (source tickets), `knowledge_usage_logs` (unique run/revision audit snapshot with full-text `score`), `workspace_settings` (compaction agent), and the compaction tables `knowledge_compaction_queue`, `knowledge_compaction_batches` (at most one queued/running), `knowledge_compaction_batch_tickets`. Compaction runs are ordinary `agent_runs` rows with `compaction_batch_id` set.

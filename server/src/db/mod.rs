@@ -1,5 +1,7 @@
-mod checksum_fixup;
 mod pool;
+
+#[cfg(all(test, feature = "embedded-test-db"))]
+mod checksum_fixup;
 
 #[cfg(feature = "embedded-test-db")]
 mod test_embed;

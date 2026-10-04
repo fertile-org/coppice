@@ -10,6 +10,7 @@ path = "src/main.rs"
 [dependencies]
 coppice-config = { path = "../config" }
 coppice-connectors = { path = "../connectors" }
+coppice-migrations = { path = "../db-migrations" }
 axum = "0.8"
 clap = { version = "4", features = ["derive"] }
 tokio = { version = "1", features = ["full"] }

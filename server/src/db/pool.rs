@@ -3,7 +3,7 @@ use std::time::Duration;
 use sqlx::postgres::PgPoolOptions;
 use sqlx::PgPool;
 
-pub(crate) static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations");
+use coppice_migrations::run_migrations;
 
 pub async fn connect_and_migrate(database_url: &str) -> anyhow::Result<PgPool> {
     let pool = PgPoolOptions::new()
@@ -41,13 +41,13 @@ pub async fn shared_test_pool() -> anyhow::Result<PgPool> {
 }
 
 pub(crate) async fn migrate_pool(pool: &PgPool) -> anyhow::Result<()> {
-    crate::db::checksum_fixup::fix_rewritten_migration_checksums(pool).await?;
-    MIGRATOR.run(pool).await?;
-    Ok(())
+    run_migrations(pool).await
 }
 
 #[cfg(feature = "embedded-test-db")]
 pub(crate) fn test_migration_fingerprint() -> u64 {
+    use coppice_migrations::MIGRATOR;
+
     const FNV_OFFSET_BASIS: u64 = 0xcbf2_9ce4_8422_2325;
     const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
 

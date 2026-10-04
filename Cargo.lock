@@ -557,6 +557,7 @@ dependencies = [
  "clap",
  "coppice-config",
  "coppice-connectors",
+ "coppice-migrations",
  "directories",
  "reqwest 0.12.28",
  "serde",
@@ -588,6 +589,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "coppice-migrations"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "sqlx",
+ "tracing",
+]
+
+[[package]]
 name = "coppice-server"
 version = "0.1.0"
 dependencies = [
@@ -599,6 +609,7 @@ dependencies = [
  "base64 0.23.1",
  "coppice-config",
  "coppice-connectors",
+ "coppice-migrations",
  "dashmap",
  "dirs",
  "fs4",

@@ -3,6 +3,7 @@ WORKDIR /app
 COPY Cargo.toml Cargo.lock ./
 COPY config ./config
 COPY connectors ./connectors
+COPY db-migrations ./db-migrations
 COPY server ./server
 COPY cli ./cli
 RUN cargo build --release -p coppice-server -p coppice-cli

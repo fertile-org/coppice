@@ -30,6 +30,7 @@ required-features = ["embedded-test-db"]
 [dependencies]
 coppice-config = { path = "../config" }
 coppice-connectors = { path = "../connectors" }
+coppice-migrations = { path = "../db-migrations" }
 axum = { version = "0.8", features = ["multipart", "ws"] }
 futures-util = "0.3"
 tokio = { version = "1", features = ["full"] }
