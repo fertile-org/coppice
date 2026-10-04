@@ -55,6 +55,7 @@ make compose-up
 - Web: http://localhost:5001 (nginx + built SPA, proxies `/api` and `/ws`)  
 - API: http://localhost:5000  
 - Stop: `make compose-down`
+- Upgrading an old volume: Postgres runs on plain `postgres:16` (no pgvector). A volume last migrated before migration 027 must be migrated once on the old `pgvector/pgvector:pg16` image (start the current server against it) before switching to `postgres:16`; migration 034 then drops the leftover `vector` extension.
 
 Agents and CI use this path only — see [AGENTS.md](../AGENTS.md) and [operations.md](operations.md).
 

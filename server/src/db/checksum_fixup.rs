@@ -64,8 +64,21 @@ async fn fixup_leaves_unknown_checksums() {
     assert_eq!(stored_checksum(&pool, 1).await, vec![0u8; 48]);
 }
 
+/// pgvector cannot be installed here (no `vector.so`), so databases that still
+/// carry the extension are covered only by checking the migration exists. It
+/// must come after 027, which drops the last `vector` columns.
+#[test]
+fn a_migration_drops_leftover_vector_extension() {
+    assert!(
+        MIGRATOR
+            .iter()
+            .any(|m| m.version > 27 && m.sql.contains("DROP EXTENSION IF EXISTS vector;")),
+        "no migration after 027 drops the vector extension"
+    );
+}
+
 #[tokio::test]
-async fn fresh_database_has_no_vector_extension() {
+async fn migrated_database_has_no_vector_extension() {
     let pool = shared_test_pool().await.expect("pool");
     let count: i64 =
         sqlx::query_scalar("SELECT count(*) FROM pg_extension WHERE extname = 'vector'")

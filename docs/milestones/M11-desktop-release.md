@@ -12,7 +12,7 @@ Ship Coppice as a desktop app: the user downloads one installer, opens it, and C
 ## Product scope
 
 - **Server desktop mode:** `coppice-server desktop --data-dir <D> --resources <R>` owns a bundled Postgres 16 (initdb on first run, version check, stale-lock cleanup), generates `config.toml` and secrets once, binds `127.0.0.1` on free ports, serves the SPA from the same origin, forces `auth.desktop_mode`, prints `COPPICE_READY url=…`, and shuts down within Electron's 15 s window on SIGTERM, SIGINT, or stdin EOF
-- **pgvector removed:** migrations 001 and 013 rewritten; existing databases get a checksum fix-up; Docker Compose uses plain `postgres:16`
+- **pgvector removed:** migrations 001 and 013 rewritten; existing databases get a checksum fix-up; migration 034 drops the leftover `vector` extension; Docker Compose uses plain `postgres:16`
 - **Electron shell:** single instance, splash, failure window (log tail, Open logs folder, Retry, Quit), login-shell `PATH`, rotating `server.log`, origin-restricted navigation, update banner (GitHub latest release, every 24 h, notify only)
 - **Packaging:** electron-builder `.dmg` (hardened runtime, optional signing + notarization) and `.deb` (`Depends: git`, setuid `chrome-sandbox`, AppArmor profile); bundled Postgres libraries checked for a closed dependency set
 - **Release pipeline:** tag `vX.Y.Z` / `vX.Y.Z-rc.N` → draft release (pre-release for `-rc`) with four installers, headless smoke per target, and `SHA256SUMS`
@@ -49,7 +49,7 @@ From the spec (need the live tag check or manual acceptance):
 - [ ] No Coppice or Postgres process remains after quit; nothing listens on non-loopback interfaces
 - [ ] macOS signing and notarization activate by adding secrets only
 - [ ] The update banner appears when a newer published release exists
-- [ ] Docker Compose and CI pass on plain Postgres 16 (no pgvector); existing databases migrate after the checksum fix-up — Rust CI passes; a real Docker Compose run on an existing pgvector volume is still pending
+- [ ] Docker Compose and CI pass on plain Postgres 16 (no pgvector); existing databases migrate after the checksum fix-up — Rust CI passes; a real Docker Compose run on an existing pgvector volume is still pending. Volumes last migrated before 027 must first be migrated once on the old `pgvector/pgvector:pg16` image, then switched to `postgres:16`
 
 ### Live tag check (after merge to `main`)
 
