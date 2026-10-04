@@ -11,4 +11,6 @@ pub use pool::{
 };
 
 #[cfg(feature = "embedded-test-db")]
-pub use test_embed::{embedded_test_pool, session_database_url, use_external_test_db};
+pub use test_embed::{
+    embedded_pg_install_dir, embedded_test_pool, session_database_url, use_external_test_db,
+};

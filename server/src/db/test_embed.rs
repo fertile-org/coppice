@@ -15,6 +15,8 @@ use tokio::sync::OnceCell;
 #[cfg(feature = "embedded-test-db")]
 use fs4::fs_std::FileExt;
 #[cfg(feature = "embedded-test-db")]
+use pg_embed::pg_access::PgAccess;
+#[cfg(feature = "embedded-test-db")]
 use pg_embed::pg_enums::PgAuthMethod;
 #[cfg(feature = "embedded-test-db")]
 use pg_embed::pg_fetch::{PgFetchSettings, PG_V16};
@@ -249,16 +251,7 @@ async fn resolve_shared_session_url() -> anyhow::Result<String> {
         }
     }
 
-    let session_dir = session_dir_path();
-    std::fs::create_dir_all(&session_dir)?;
-    let lock_path = session_dir.join("leader.lock");
-    let lock_file = OpenOptions::new()
-        .create(true)
-        .write(true)
-        .truncate(false)
-        .open(&lock_path)?;
-
-    lock_file.lock_exclusive()?;
+    let _leader = lock_session_leader()?;
 
     if let Some(session) = read_session_file() {
         if session_reachable(&session).await {
@@ -269,6 +262,37 @@ async fn resolve_shared_session_url() -> anyhow::Result<String> {
     let session = start_shared_embedded_pg().await?;
     write_session_file(&session)?;
     Ok(session.database_url())
+}
+
+/// Held while downloading binaries or starting the shared cluster, across processes.
+#[cfg(feature = "embedded-test-db")]
+fn lock_session_leader() -> anyhow::Result<File> {
+    let session_dir = session_dir_path();
+    std::fs::create_dir_all(&session_dir)?;
+    let lock_file = OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(false)
+        .open(session_dir.join("leader.lock"))?;
+    lock_file.lock_exclusive()?;
+    Ok(lock_file)
+}
+
+#[cfg(feature = "embedded-test-db")]
+fn pg_fetch_settings() -> PgFetchSettings {
+    PgFetchSettings {
+        version: PG_V16,
+        ..Default::default()
+    }
+}
+
+/// pg-embed's cached Postgres install (`bin/`, `lib/`, `share/`), downloaded if missing.
+#[cfg(feature = "embedded-test-db")]
+pub async fn embedded_pg_install_dir() -> anyhow::Result<PathBuf> {
+    let _leader = lock_session_leader()?;
+    let access = PgAccess::new(&pg_fetch_settings(), &session_dir_path().join("cluster")).await?;
+    access.maybe_acquire_postgres().await?;
+    Ok(access.cache_dir)
 }
 
 #[cfg(feature = "embedded-test-db")]
@@ -297,12 +321,7 @@ async fn start_shared_embedded_pg() -> anyhow::Result<TestPgSession> {
         migration_dir: None,
     };
 
-    let fetch_settings = PgFetchSettings {
-        version: PG_V16,
-        ..Default::default()
-    };
-
-    let mut pg = PgEmbed::new(pg_settings, fetch_settings).await?;
+    let mut pg = PgEmbed::new(pg_settings, pg_fetch_settings()).await?;
     pg.setup().await?;
     pg.start_db().await?;
     if !pg.database_exists(TEST_DB).await.unwrap_or(false) {
