@@ -1,5 +1,18 @@
+export type DesktopAppInfo = {
+  version: string;
+  platform: string;
+  arch: string;
+};
+
+export type DesktopUpdateInfo = {
+  version: string;
+  url: string;
+};
+
 export type CoppiceDesktopBridge = {
   pickDirectory: () => Promise<string | null>;
+  appInfo?: () => Promise<DesktopAppInfo>;
+  getUpdateInfo?: () => Promise<DesktopUpdateInfo | null>;
 };
 
 declare global {

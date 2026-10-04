@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; style-src 'self'; script-src 'self'"
+    />
+    <title>Coppice could not start</title>
+    <link rel="stylesheet" href="shell.css" />
+    <script src="error.js" defer></script>
+  </head>
+  <body class="error">
+    <main>
+      <h1>Coppice could not start</h1>
+      <p id="message"></p>
+      <pre id="log" aria-label="Last log lines"></pre>
+      <div class="actions">
+        <button type="button" data-action="open-logs">Open logs folder</button>
+        <button type="button" data-action="quit">Quit</button>
+        <button type="button" data-action="retry" class="primary">Retry</button>
+      </div>
+    </main>
+  </body>
+</html>

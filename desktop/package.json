@@ -1,9 +1,12 @@
 {
   "name": "coppice-desktop",
   "private": true,
-  "version": "0.0.0",
-  "description": "Dev Electron shell — loads local Coppice web UI",
+  "version": "0.1.0",
+  "description": "Coppice desktop app — Electron shell around the bundled Coppice server",
   "main": "main.mjs",
+  "coppice": {
+    "releaseRepo": "fertile-org/coppice"
+  },
   "scripts": {
     "start": "ELECTRON_DISABLE_SANDBOX=1 electron .",
     "fetch-postgres": "node scripts/fetch-postgres.mjs",
