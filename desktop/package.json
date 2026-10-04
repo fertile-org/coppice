@@ -1,5 +1,6 @@
 {
   "name": "coppice-desktop",
+  "productName": "Coppice",
   "private": true,
   "version": "0.1.0",
   "description": "Coppice desktop app — Electron shell around the bundled Coppice server",
