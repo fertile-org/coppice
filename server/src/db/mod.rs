@@ -1,3 +1,4 @@
+mod checksum_fixup;
 mod pool;
 
 #[cfg(feature = "embedded-test-db")]

@@ -105,7 +105,7 @@ make release-tar
 3. Upload each `dist/coppice-*.tar.gz` to a **GitHub Release** (or your artifact store) with release notes.
 4. Point users to [Install — Self-host tarball](#self-host-tarball).
 
-The tarball does **not** include PostgreSQL; operators bring their own Postgres 16 + pgvector.
+The tarball does **not** include PostgreSQL; operators bring their own Postgres 16.
 
 ### Docker images (optional)
 
@@ -153,7 +153,7 @@ How people run Coppice without cloning the repo.
 
 ### Self-host tarball
 
-**You need:** PostgreSQL 16 with **pgvector**, and a machine to run two processes (API + web proxy).
+**You need:** PostgreSQL 16 and a machine to run two processes (API + web proxy).
 
 ```bash
 tar -xzf coppice-<os>-<arch>.tar.gz -C /opt/coppice

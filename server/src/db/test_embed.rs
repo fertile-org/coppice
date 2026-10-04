@@ -1,7 +1,7 @@
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Write};
 use std::net::TcpListener;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
@@ -25,7 +25,6 @@ const TEST_DB: &str = "coppice_test";
 const TEMPLATE_DATABASE_PREFIX: &str = "coppice_template_";
 const CASE_DATABASE_PREFIX: &str = "coppice_case_";
 const TEST_DATABASE_LOCK: i64 = 0x434f_5050_4943_4554;
-const PGVECTOR_RELEASE: &str = "v0.16.105";
 const TEST_USER: &str = "coppice";
 const TEST_PASSWORD: &str = "coppice";
 
@@ -305,13 +304,6 @@ async fn start_shared_embedded_pg() -> anyhow::Result<TestPgSession> {
 
     let mut pg = PgEmbed::new(pg_settings, fetch_settings).await?;
     pg.setup().await?;
-
-    let pgvector_root = ensure_pgvector_extension().await?;
-    pg.install_extension(&pgvector_root.join("lib")).await?;
-    pg.install_extension(&pgvector_root.join("share/extension"))
-        .await?;
-    stage_extension_libs_in_postgresql_libdir(&pg, &pgvector_root.join("lib")).await?;
-
     pg.start_db().await?;
     if !pg.database_exists(TEST_DB).await.unwrap_or(false) {
         pg.create_database(TEST_DB).await?;
@@ -353,115 +345,6 @@ fn write_session_file(session: &TestPgSession) -> anyhow::Result<()> {
 
 fn pick_free_port() -> anyhow::Result<u16> {
     Ok(TcpListener::bind("127.0.0.1:0")?.local_addr()?.port())
-}
-
-#[cfg(feature = "embedded-test-db")]
-fn pgvector_target_triple() -> anyhow::Result<&'static str> {
-    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
-    return Ok("aarch64-apple-darwin");
-    #[cfg(all(target_os = "macos", target_arch = "x86_64"))]
-    return Ok("x86_64-apple-darwin");
-    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
-    return Ok("x86_64-unknown-linux-gnu");
-    #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
-    return Ok("x86_64-pc-windows-msvc");
-    #[cfg(not(any(
-        all(target_os = "macos", target_arch = "aarch64"),
-        all(target_os = "macos", target_arch = "x86_64"),
-        all(target_os = "linux", target_arch = "x86_64"),
-        all(target_os = "windows", target_arch = "x86_64"),
-    )))]
-    anyhow::bail!("unsupported platform for embedded pgvector; set COPPICE_TEST_USE_EXTERNAL_DB=1");
-}
-
-#[cfg(feature = "embedded-test-db")]
-async fn ensure_pgvector_extension() -> anyhow::Result<PathBuf> {
-    let target = pgvector_target_triple()?;
-    let cache_root = dirs::cache_dir()
-        .unwrap_or_else(std::env::temp_dir)
-        .join("coppice")
-        .join("pgvector")
-        .join(PGVECTOR_RELEASE)
-        .join(target);
-
-    let control = cache_root.join("share/extension/vector.control");
-    if control.exists() {
-        return Ok(cache_root);
-    }
-
-    std::fs::create_dir_all(&cache_root)?;
-
-    let archive_name = format!("pgvector-{target}-pg16.tar.gz");
-    let url = format!(
-        "https://github.com/portalcorp/pgvector_compiled/releases/download/{PGVECTOR_RELEASE}/{archive_name}"
-    );
-
-    let response = reqwest::get(&url).await.map_err(|e| {
-        anyhow::anyhow!("failed to download pgvector from {url}: {e} (network required once)")
-    })?;
-
-    if !response.status().is_success() {
-        anyhow::bail!(
-            "failed to download pgvector ({}) from {url}; set COPPICE_TEST_USE_EXTERNAL_DB=1 to use external Postgres",
-            response.status()
-        );
-    }
-
-    let bytes = response.bytes().await?;
-    let archive_path = cache_root.parent().unwrap().join(&archive_name);
-    tokio::fs::write(&archive_path, &bytes).await?;
-    extract_tar_gz(&archive_path, &cache_root)?;
-
-    if !control.exists() {
-        anyhow::bail!(
-            "pgvector archive did not contain share/extension/vector.control; check cache at {}",
-            cache_root.display()
-        );
-    }
-
-    Ok(cache_root)
-}
-
-#[cfg(feature = "embedded-test-db")]
-async fn stage_extension_libs_in_postgresql_libdir(
-    pg: &PgEmbed,
-    extension_lib_dir: &Path,
-) -> anyhow::Result<()> {
-    let pg_lib_dir = pg.pg_access.cache_dir.join("lib/postgresql");
-    tokio::fs::create_dir_all(&pg_lib_dir).await?;
-    for entry in std::fs::read_dir(extension_lib_dir)? {
-        let entry = entry?;
-        let path = entry.path();
-        if !path.is_file() {
-            continue;
-        }
-        let is_lib = path
-            .extension()
-            .and_then(|e| e.to_str())
-            .is_some_and(|ext| matches!(ext, "so" | "dylib" | "dll"));
-        if !is_lib {
-            continue;
-        }
-        if let Some(name) = path.file_name() {
-            tokio::fs::copy(&path, pg_lib_dir.join(name)).await?;
-        }
-    }
-    Ok(())
-}
-
-#[cfg(feature = "embedded-test-db")]
-fn extract_tar_gz(archive: &Path, dest: &Path) -> anyhow::Result<()> {
-    let status = std::process::Command::new("tar")
-        .args(["-xzf"])
-        .arg(archive)
-        .arg("-C")
-        .arg(dest)
-        .status()?;
-
-    if !status.success() {
-        anyhow::bail!("tar failed extracting {}", archive.display());
-    }
-    Ok(())
 }
 
 #[cfg(test)]

@@ -3,7 +3,7 @@ use std::time::Duration;
 use sqlx::postgres::PgPoolOptions;
 use sqlx::PgPool;
 
-static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations");
+pub(crate) static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations");
 
 pub async fn connect_and_migrate(database_url: &str) -> anyhow::Result<PgPool> {
     let pool = PgPoolOptions::new()
@@ -41,6 +41,7 @@ pub async fn shared_test_pool() -> anyhow::Result<PgPool> {
 }
 
 pub(crate) async fn migrate_pool(pool: &PgPool) -> anyhow::Result<()> {
+    crate::db::checksum_fixup::fix_rewritten_migration_checksums(pool).await?;
     MIGRATOR.run(pool).await?;
     Ok(())
 }

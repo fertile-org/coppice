@@ -16,7 +16,7 @@ cargo test --workspace --features embedded-test-db
 cargo clippy --workspace -- -D warnings
 ```
 
-Locally, use `make test` (same flags). First run may download Postgres + pgvector binaries (network once); later runs use cache.
+Locally, use `make test` (same flags). First run may download Postgres binaries (network once); later runs use cache.
 
 For host `make migrate` / dev server, ensure `config.toml` (or `DATABASE_URL`) matches the Postgres you started: `compose-up` → `:5432`, `compose-local-up` → `:5433`.
 

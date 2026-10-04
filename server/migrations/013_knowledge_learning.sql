@@ -89,12 +89,9 @@ CREATE TABLE knowledge_embeddings (
     provider TEXT NOT NULL,
     model TEXT NOT NULL,
     embedding_dimension INT NOT NULL CHECK (embedding_dimension = 1536),
-    embedding vector(1536) NOT NULL,
+    embedding real[] NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
-
-CREATE INDEX knowledge_embeddings_hnsw_cosine_idx
-    ON knowledge_embeddings USING hnsw (embedding vector_cosine_ops);
 
 CREATE TABLE knowledge_usage_logs (
     id UUID PRIMARY KEY,
