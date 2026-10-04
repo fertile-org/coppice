@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // Renders the release install notes. Lines between `{{MAC_UNSIGNED}}` and
 // `{{/MAC_UNSIGNED}}` (each marker on its own line) are kept, markers stripped,
-// when the macOS build is unsigned; otherwise the block is dropped.
+// when the macOS build is unsigned; otherwise the block is dropped. Runs of
+// blank lines are collapsed to one.
 //
 //   node scripts/render-notes.mjs --template <file> --out <file> --mac-unsigned <true|false>
 
@@ -29,7 +30,7 @@ export function renderNotes(template, { macUnsigned }) {
     }
   });
   if (inBlock) throw new Error(`unclosed ${OPEN}`);
-  return out.join('\n');
+  return out.join('\n').replace(/\n{3,}/g, '\n\n');
 }
 
 async function main() {

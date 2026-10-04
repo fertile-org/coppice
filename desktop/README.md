@@ -25,8 +25,10 @@ resources/
   fixtures/agent-responses/     # fixtures/agent-responses
 ```
 
-Then `yarn start`. Set `COPPICE_DESKTOP_USER_DATA=/tmp/coppice-test` to use a throwaway data directory
-instead of the OS default (`~/.config/Coppice`, `~/Library/Application Support/Coppice`).
+Then `yarn start`. Unpackaged runs keep their data in `Coppice-dev` (`~/.config/Coppice-dev`,
+`~/Library/Application Support/Coppice-dev`), separate from an installed app's `Coppice` directory,
+so the two never share a database or the single-instance lock. Set
+`COPPICE_DESKTOP_USER_DATA=/tmp/coppice-test` to use a throwaway data directory instead.
 This variable only applies to unpackaged runs from a checkout; packaged apps ignore it.
 
 ## Tests

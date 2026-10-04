@@ -23,7 +23,7 @@ describe('renderNotes', () => {
   });
 
   it('removes the block entirely when the mac build is signed', () => {
-    assert.equal(renderNotes(template, { macUnsigned: false }), '## Install\n\n\nLinux: apt install.\n');
+    assert.equal(renderNotes(template, { macUnsigned: false }), '## Install\n\nLinux: apt install.\n');
   });
 
   it('handles several blocks', () => {

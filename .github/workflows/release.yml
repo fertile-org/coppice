@@ -20,7 +20,7 @@ on:
 concurrency: release-${{ github.ref }}
 
 permissions:
-  contents: write
+  contents: read
 
 env:
   GH_REPO: ${{ github.repository }}
@@ -29,11 +29,15 @@ env:
 jobs:
   prepare:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     outputs:
       version: ${{ steps.version.outputs.version }}
       prerelease: ${{ steps.version.outputs.prerelease }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
@@ -62,9 +66,12 @@ jobs:
           gh release create "$TAG" "${args[@]}"
 
   web:
+    needs: prepare
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
@@ -95,8 +102,12 @@ jobs:
           - runner: ubuntu-22.04-arm
             target: aarch64-unknown-linux-gnu
     runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - name: Install libraries the Postgres bundle links
         if: runner.os == 'Linux'
         run: |
@@ -175,6 +186,8 @@ jobs:
   finalize:
     needs: build
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - name: Upload SHA256SUMS
         env:
@@ -184,8 +197,8 @@ jobs:
           gh release download "$TAG" --pattern '*.dmg' --pattern '*.deb'
           shopt -s nullglob
           files=(*.dmg *.deb)
-          if [ "${#files[@]}" -lt 4 ]; then
-            echo "expected 4 installers on the release, found ${#files[@]}: ${files[*]}" >&2
+          if [ "${#files[@]}" -ne 4 ]; then
+            echo "expected exactly 4 installers on the release, found ${#files[@]}: ${files[*]}" >&2
             exit 1
           fi
           sha256sum "${files[@]}" > SHA256SUMS

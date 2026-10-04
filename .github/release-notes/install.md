@@ -8,11 +8,13 @@ Coppice bundles its own database and server, so you don't need Docker or Postgre
 2. Launch Coppice from Applications. The first launch takes a few seconds while it creates its database.
 
 {{MAC_UNSIGNED}}
-> **This build is not signed by Apple.** macOS will say Coppice "can't be opened" or "is damaged". Either right-click Coppice in Applications, choose **Open** and confirm, or run once:
+> **This build is not signed by Apple.** macOS will say Coppice "can't be opened" or "is damaged". The reliable fix is to run once:
 >
 > ```sh
 > xattr -dr com.apple.quarantine /Applications/Coppice.app
 > ```
+>
+> Alternatively, after the first blocked launch open **System Settings → Privacy & Security**, click **Open Anyway** next to the Coppice message, and confirm.
 {{/MAC_UNSIGNED}}
 
 ### Linux (Ubuntu 22.04+ / Debian 12+, `amd64` or `arm64`)

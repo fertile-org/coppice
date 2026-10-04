@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { startServer } from './src/serverProcess.mjs';
 import { resolveLoginShellPath } from './src/shellPath.mjs';
 import { checkForUpdate } from './src/updateCheck.mjs';
+import { devUserDataPath } from './src/userDataPath.mjs';
 import { createErrorWindow, createMainWindow, createSplashWindow } from './src/windows.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -13,9 +14,12 @@ const UPDATE_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const RELEASE_REPO = JSON.parse(fs.readFileSync(path.join(__dirname, 'package.json'), 'utf8'))
   .coppice.releaseRepo;
 
-if (!app.isPackaged && process.env.COPPICE_DESKTOP_USER_DATA) {
-  app.setPath('userData', path.resolve(process.env.COPPICE_DESKTOP_USER_DATA));
-}
+const devUserData = devUserDataPath({
+  isPackaged: app.isPackaged,
+  env: process.env,
+  appData: app.getPath('appData'),
+});
+if (devUserData) app.setPath('userData', devUserData);
 
 let mainWindow = null;
 let splashWindow = null;
