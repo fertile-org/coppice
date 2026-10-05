@@ -179,7 +179,7 @@ e2e-smoke-m10:
 	$(SMOKE_REPO_SETUP_IF_MISSING)
 	node e2e/smoke/m10-plugins.mjs
 
-# Marketing board PNG for static/screenshot.png. Not part of CI.
+# Marketing board PNG for static/screenshot.png and the site hero. Not part of CI.
 # Overlay forces auth.desktop_mode and disables auto-start so the shot matches
 # the Electron app (no login, no account email, no Sign out).
 screenshot:

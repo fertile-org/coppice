@@ -68,7 +68,7 @@ Agents and CI use this path only — see [AGENTS.md](../AGENTS.md) and [operatio
 make screenshot
 ```
 
-Regenerates [`static/screenshot.png`](../static/screenshot.png) for the README and marketing site. It starts the default Compose stack with [`deploy/docker-compose.screenshot.yml`](../deploy/docker-compose.screenshot.yml), which forces `auth.desktop_mode` and turns off workflow auto-start, seeds a board (columns, cards, and role agents) through the API, and captures the board with Playwright.
+Regenerates [`static/screenshot.png`](../static/screenshot.png) for the README and copies that same file to [`website/public/assets/hero-screenshot.png`](../website/public/assets/hero-screenshot.png) for the marketing site. It starts the default Compose stack with [`deploy/docker-compose.screenshot.yml`](../deploy/docker-compose.screenshot.yml), which forces `auth.desktop_mode` and turns off workflow auto-start, seeds a board (columns, cards, and role agents) through the API, and captures the board with Playwright. The overlay does not enable the `mock-provider` feature.
 
 The capture matches the installed Electron app: no login screen, and the top bar does not show the bootstrap admin email or Sign out. Seeding does not start agent runs and does not change packaged desktop builds. The target is intentionally outside CI so pull requests are not gated on pixels.
 

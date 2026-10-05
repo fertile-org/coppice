@@ -5,7 +5,8 @@
  * Assumes the default Compose stack is already up with desktop mode forced
  * (`make screenshot` does that via deploy/docker-compose.screenshot.yml).
  * Seeds a board through the HTTP API — no agent runs — then opens the SPA
- * and writes static/screenshot.png.
+ * and writes static/screenshot.png. The same PNG is copied to the Astro
+ * hero at website/public/assets/hero-screenshot.png.
  *
  * The shot must match the Electron app: login is bypassed, and the top bar
  * must not show the bootstrap admin email or Sign out.
@@ -16,7 +17,7 @@
  *   COPPICE_SCREENSHOT_OUT  default <repo>/static/screenshot.png
  */
 
-import { mkdir } from 'node:fs/promises';
+import { copyFile, mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
@@ -30,6 +31,13 @@ const REPO_ROOT = path.resolve(
 const OUT =
   process.env.COPPICE_SCREENSHOT_OUT ??
   path.join(REPO_ROOT, 'static', 'screenshot.png');
+const HERO = path.join(
+  REPO_ROOT,
+  'website',
+  'public',
+  'assets',
+  'hero-screenshot.png',
+);
 
 const MAX_HEALTH_ATTEMPTS = 90;
 const HEALTH_INTERVAL_MS = 1000;
@@ -334,6 +342,11 @@ async function capture(boardId) {
       animations: 'disabled',
     });
     console.log(`screenshot: wrote ${OUT}`);
+    if (path.resolve(OUT) !== path.resolve(HERO)) {
+      await mkdir(path.dirname(HERO), { recursive: true });
+      await copyFile(OUT, HERO);
+      console.log(`screenshot: wrote ${HERO}`);
+    }
   } finally {
     await browser.close();
   }
