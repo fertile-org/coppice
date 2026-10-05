@@ -296,18 +296,64 @@ async function pollTicketUntil(ticketId, auth, label, timeoutMs, predicate) {
   );
 }
 
+function formatRuns(runs) {
+  if (!runs.length) {
+    return 'none';
+  }
+  return runs
+    .map((run) => {
+      const error = run.errorMessage ? ` error=${run.errorMessage}` : '';
+      return `${run.jobType}/${run.status} agent=${run.agentId}${error}`;
+    })
+    .join('; ');
+}
+
 async function pollRunsUntil(ticketId, auth, label, timeoutMs, predicate) {
   const deadline = Date.now() + timeoutMs;
+  let last = [];
 
   while (Date.now() < deadline) {
     const runs = await listRuns(ticketId, auth);
+    last = runs;
     if (predicate(runs)) {
       return runs;
     }
     await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
   }
 
-  fail(`timed out waiting for runs condition: ${label}`);
+  fail(
+    `timed out waiting for runs condition: ${label}; runs: ${formatRuns(last)}`,
+  );
+}
+
+// CI runs m02, then m03, then this script against one database. Presets are
+// ordered by key, so m03's agent is the earliest `backend_engineer`. Handoffs
+// resolve `assignTo` to that earliest enabled agent, and this script would
+// wait on its own engineer id forever. Disable leftovers first.
+async function disablePreexistingAgents(auth) {
+  const res = await api('GET', '/api/agents', auth);
+  if (!res.ok) {
+    fail(`list agents failed: ${res.status} ${await res.text()}`);
+  }
+  const body = await res.json();
+  const agents = Array.isArray(body.items) ? body.items : [];
+  const enabled = agents.filter((agent) => agent.enabled);
+  for (const agent of enabled) {
+    const patch = await api('PATCH', `/api/agents/${agent.id}`, {
+      ...auth,
+      body: { enabled: false },
+    });
+    if (!patch.ok) {
+      fail(
+        `disable pre-existing agent ${agent.id} failed: ${patch.status} ${await patch.text()}`,
+      );
+    }
+  }
+  if (enabled.length > 0) {
+    console.log(
+      `smoke: disabled ${enabled.length} pre-existing agent(s) so preset-key handoffs stay on this run`,
+    );
+  }
 }
 
 async function finalApprove(ticketId, auth) {
@@ -329,6 +375,7 @@ async function main() {
 
   await bootstrapIfNeeded();
   const auth = await login();
+  await disablePreexistingAgents(auth);
   const board = await createBoard(auth);
   const repo = await registerRepo(auth);
   const pm = await createAgentFromPresetKey(auth, 'pm', 'PM Agent');

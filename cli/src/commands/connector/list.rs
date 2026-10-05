@@ -109,8 +109,18 @@ mod tests {
         let text = String::from_utf8(buf).unwrap();
         let lines: Vec<&str> = text.lines().collect();
         assert_eq!(lines[0], "ID             ENABLED  BINARY     AUTH     HINT");
+        if coppice_connectors::get(coppice_connectors::MOCK).is_some() {
+            assert!(
+                lines.contains(&"mock           yes      n/a        n/a      built-in; no setup"),
+                "missing mock row in:\n{text}"
+            );
+        } else {
+            assert!(
+                lines.iter().all(|line| !line.starts_with("mock ")),
+                "release builds must not list mock:\n{text}"
+            );
+        }
         for want in [
-            "mock           yes      n/a        n/a      built-in; no setup",
             "cursor         no       missing    missing  agent login (copy URL)",
             "claude-code    no       ok         missing  ANTHROPIC_API_KEY or claude setup-token",
             "codex          no       missing    ok       codex login --device-auth",

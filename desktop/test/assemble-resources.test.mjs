@@ -7,6 +7,7 @@ import { after, before, describe, it } from 'node:test';
 import {
   assembleResources,
   isBaseLib,
+  mockProviderMarkersIn,
   machoDepProblems,
   missingLibsMessage,
   parseLdd,
@@ -115,6 +116,43 @@ describe('missingLibsMessage', () => {
   });
 });
 
+describe('mockProviderMarkersIn', () => {
+  it('finds mock-provider strings and ignores a clean binary', () => {
+    assert.deepEqual(mockProviderMarkersIn(Buffer.from('#!/bin/sh\n')), []);
+    assert.deepEqual(mockProviderMarkersIn('MOCK_AGENT_RESPONSE=done'), ['MOCK_AGENT_RESPONSE']);
+  });
+
+  it('assembleResources refuses a server binary that still contains the mock provider', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'assemble-mock-'));
+    try {
+      const repo = join(root, 'repo');
+      await mkdir(join(repo, 'server', 'agent_templates'), { recursive: true });
+      await writeFile(join(repo, 'server', 'agent_templates', 'pm.md'), 'pm');
+      const serverBin = join(root, 'coppice-server');
+      await writeFile(serverBin, 'prefix MOCK_AGENT_RESPONSE suffix');
+      const web = join(root, 'web');
+      await mkdir(web);
+      await writeFile(join(web, 'index.html'), '<div id="root"></div>');
+      const pg = join(root, 'pg');
+      await mkdir(join(pg, 'bin'), { recursive: true });
+      await assert.rejects(
+        () =>
+          assembleResources({
+            serverBin,
+            webDist: web,
+            postgres: pg,
+            out: join(root, 'out'),
+            repoRoot: repo,
+            platform: 'test',
+          }),
+        /mock provider/,
+      );
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+});
+
 describe('assembleResources', () => {
   let dir;
   let out;
@@ -133,8 +171,6 @@ describe('assembleResources', () => {
     const repo = join(dir, 'repo');
     await mkdir(join(repo, 'server', 'agent_templates'), { recursive: true });
     await writeFile(join(repo, 'server', 'agent_templates', 'pm.md'), 'pm');
-    await mkdir(join(repo, 'fixtures', 'agent-responses'), { recursive: true });
-    await writeFile(join(repo, 'fixtures', 'agent-responses', 'done.json'), '{}');
 
     const serverBin = join(dir, 'coppice-server');
     await writeFile(serverBin, '#!/bin/sh\n');
@@ -169,7 +205,7 @@ describe('assembleResources', () => {
   it('lays out the resources the desktop runtime expects', async () => {
     assert.equal(await readFile(join(out, 'web', 'index.html'), 'utf8'), '<div id="root"></div>');
     assert.equal(await readFile(join(out, 'agent-templates', 'pm.md'), 'utf8'), 'pm');
-    assert.equal(await readFile(join(out, 'fixtures', 'agent-responses', 'done.json'), 'utf8'), '{}');
+    assert.ok(!(await exists(join(out, 'fixtures', 'agent-responses'))));
     assert.ok(await exists(join(out, 'postgres', 'lib', 'unaccent.so')));
     assert.ok(await exists(join(out, 'postgres', 'share', 'extension', 'unaccent.control')));
     assert.ok(!(await exists(join(out, 'stale'))));

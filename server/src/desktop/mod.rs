@@ -44,7 +44,6 @@ pub fn ready_line(addr: SocketAddr) -> String {
 pub fn set_process_env(args: &DesktopArgs) {
     let resources = ResourceLayout::new(&args.resources);
     std::env::set_var("COPPICE_AGENT_TEMPLATES_DIR", &resources.agent_templates);
-    std::env::set_var("COPPICE_MOCK_FIXTURES_DIR", &resources.mock_fixtures);
     std::env::set_var(PG_BIN_DIR_ENV, &resources.pg_bin);
     std::env::set_var(PG_LIB_DIR_ENV, &resources.pg_lib);
 }

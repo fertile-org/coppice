@@ -117,6 +117,7 @@ impl<'a> AgentService<'a> {
         }
 
         let preset = self.get_preset(preset_id).await?;
+        let connector = resolve_new_connector(connector)?;
         let agent = self
             .insert_agent(
                 name,
@@ -124,7 +125,7 @@ impl<'a> AgentService<'a> {
                 &preset.skills,
                 &preset.responsibilities,
                 system_prompt,
-                connector.unwrap_or(coppice_connectors::MOCK),
+                connector,
                 model_provider,
                 model,
                 enabled.unwrap_or(true),
@@ -170,13 +171,14 @@ impl<'a> AgentService<'a> {
             }
         }
 
+        let connector = resolve_new_connector(connector)?;
         self.insert_agent(
             name,
             role,
             skills,
             responsibilities,
             system_prompt,
-            connector.unwrap_or(coppice_connectors::MOCK),
+            connector,
             model_provider,
             model,
             enabled.unwrap_or(true),
@@ -353,6 +355,23 @@ impl<'a> AgentService<'a> {
     }
 }
 
+/// Dev/test builds default a missing connector to mock. Release builds refuse
+/// it: the mock provider is not compiled in, so it must not be stored either.
+fn resolve_new_connector(connector: Option<&str>) -> Result<&str, AgentError> {
+    #[cfg(feature = "mock-provider")]
+    let connector = connector.unwrap_or(coppice_connectors::MOCK);
+    #[cfg(not(feature = "mock-provider"))]
+    let connector =
+        connector.ok_or_else(|| AgentError::Validation("connector is required".into()))?;
+    #[cfg(not(feature = "mock-provider"))]
+    if connector == coppice_connectors::MOCK {
+        return Err(AgentError::Validation(
+            "connector `mock` is not available in this build".into(),
+        ));
+    }
+    Ok(connector)
+}
+
 fn row_to_preset(row: &sqlx::postgres::PgRow) -> AgentPreset {
     AgentPreset {
         id: row.get("id"),
@@ -385,6 +404,15 @@ fn row_to_agent(row: &sqlx::postgres::PgRow) -> Agent {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(not(feature = "mock-provider"))]
+    #[test]
+    fn release_build_rejects_mock_connector() {
+        let missing = resolve_new_connector(None).expect_err("connector required");
+        assert!(missing.to_string().contains("required"), "{missing}");
+        let mock = resolve_new_connector(Some(coppice_connectors::MOCK)).expect_err("no mock");
+        assert!(mock.to_string().contains("not available"), "{mock}");
+    }
 
     #[tokio::test]
     async fn list_presets_has_ten_entries() {

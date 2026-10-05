@@ -19,10 +19,10 @@ To run the bundled mode from a checkout, populate `desktop/resources/` (gitignor
 ```
 resources/
   bin/coppice-server            # cargo build --release -p coppice-server
+                                # (no --features mock-provider; the mock connector is test/dev only)
   postgres/{bin,lib,share}      # yarn fetch-postgres --target <triple> --out resources/postgres
   web/                          # web/dist after `yarn build`
   agent-templates/              # server/agent_templates
-  fixtures/agent-responses/     # fixtures/agent-responses
 ```
 
 Then `yarn start`. Unpackaged runs keep their data in `Coppice-dev` (`~/.config/Coppice-dev`,

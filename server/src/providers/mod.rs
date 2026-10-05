@@ -10,6 +10,7 @@ pub mod cursor_models;
 pub mod kilo_code;
 pub mod kilo_console;
 pub mod kilo_models;
+#[cfg(feature = "mock-provider")]
 pub mod mock;
 pub mod models;
 pub mod opencode;
@@ -127,6 +128,7 @@ pub fn mcp_unavailable(reason: &str) -> ProviderError {
 /// to users (settings API, compaction error). Others either refuse (kilo-code)
 /// or ignore the flag (codex, opencode).
 pub const READ_ONLY_CAPABLE_CONNECTORS: &[&str] = &[
+    #[cfg(feature = "mock-provider")]
     coppice_connectors::MOCK,
     coppice_connectors::CLAUDE_CODE,
     coppice_connectors::CURSOR,
@@ -248,11 +250,13 @@ pub trait AgentProvider: Send + Sync {
     async fn run(&self, input: AgentRunInput) -> Result<AgentRunResult, ProviderError>;
 }
 
+#[cfg(any(test, feature = "mock-provider"))]
 pub fn fixtures_root() -> PathBuf {
     fixtures_root_from(std::env::var("COPPICE_MOCK_FIXTURES_DIR").ok().as_deref())
 }
 
 /// Packaged builds have no source tree, so the env override must win when set.
+#[cfg(any(test, feature = "mock-provider"))]
 pub fn fixtures_root_from(env: Option<&str>) -> PathBuf {
     match env {
         Some(dir) if !dir.is_empty() => PathBuf::from(dir),
@@ -292,6 +296,7 @@ pub fn absolute_existing_dir(path: &std::path::Path) -> Result<PathBuf, Provider
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(feature = "mock-provider")]
     use crate::providers::mock::{mock_env_lock, MockProvider};
 
     /// A run input with no run, no artifacts dir and no gateway — the shape a
@@ -351,7 +356,11 @@ mod tests {
 
     #[test]
     fn chat_resume_connectors_include_all_vendor_chat_clis() {
-        for id in ["mock", "opencode", "claude-code", "cursor", "codex"] {
+        #[cfg(feature = "mock-provider")]
+        assert!(connector_supports_chat_resume("mock"));
+        #[cfg(not(feature = "mock-provider"))]
+        assert!(!connector_supports_chat_resume("mock"));
+        for id in ["opencode", "claude-code", "cursor", "codex"] {
             assert!(connector_supports_chat_resume(id));
         }
         assert!(!connector_supports_chat_resume("kilo-code"));
@@ -417,6 +426,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "mock-provider")]
     #[tokio::test]
     async fn mock_provider_returns_done_fixture_via_env_override() {
         let _lock = mock_env_lock();

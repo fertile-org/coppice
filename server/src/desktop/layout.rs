@@ -56,7 +56,6 @@ pub struct ResourceLayout {
     pub pg_lib: PathBuf,
     pub web: PathBuf,
     pub agent_templates: PathBuf,
-    pub mock_fixtures: PathBuf,
 }
 
 impl ResourceLayout {
@@ -67,7 +66,6 @@ impl ResourceLayout {
             pg_lib: root.join("postgres").join("lib"),
             web: root.join("web"),
             agent_templates: root.join("agent-templates"),
-            mock_fixtures: root.join("fixtures").join("agent-responses"),
         }
     }
 

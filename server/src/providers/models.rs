@@ -24,8 +24,10 @@ pub trait ModelCatalog: Send + Sync {
 }
 
 /// The mock connector has no model providers and ignores an agent's choice.
+#[cfg(feature = "mock-provider")]
 pub struct MockModels;
 
+#[cfg(feature = "mock-provider")]
 #[async_trait]
 impl ModelCatalog for MockModels {
     fn model_providers(&self) -> &[String] {
@@ -238,6 +240,7 @@ mod tests {
         assert!(models.list_models("other").await.expect("empty").is_empty());
     }
 
+    #[cfg(feature = "mock-provider")]
     #[tokio::test]
     async fn mock_lists_nothing_and_skips_provider_check() {
         assert!(MockModels.list_models("x").await.expect("empty").is_empty());
