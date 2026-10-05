@@ -68,11 +68,15 @@ Agents and CI use this path only — see [AGENTS.md](../AGENTS.md) and [operatio
 make screenshot
 ```
 
-Regenerates [`static/screenshot.png`](../static/screenshot.png) for the README and copies that same file to [`website/public/assets/hero-screenshot.png`](../website/public/assets/hero-screenshot.png) for the marketing site. It starts the default Compose stack with [`deploy/docker-compose.screenshot.yml`](../deploy/docker-compose.screenshot.yml), which forces `auth.desktop_mode` and turns off workflow auto-start, seeds a board (columns, cards, and role agents) through the API, and captures the board with Playwright. The overlay does not enable the `mock-provider` feature.
+Regenerates the marketing stills and a looping GIF. The board frame is [`static/screenshot.png`](../static/screenshot.png) for the README and the same file at [`website/public/assets/hero-screenshot.png`](../website/public/assets/hero-screenshot.png). The other frames land in [`static/screenshots/`](../static/screenshots/). The GIF is [`static/marketing.gif`](../static/marketing.gif) and [`website/public/assets/marketing.gif`](../website/public/assets/marketing.gif).
 
-The capture matches the installed Electron app: no login screen, and the top bar does not show the bootstrap admin email or Sign out. Seeding does not start agent runs and does not change packaged desktop builds. The target is intentionally outside CI so pull requests are not gated on pixels.
+Frame order, three seconds each: final-review diff, board, agent console, chat, plugins. The board crop stays 1440×900, the same window as the hero. There is no Plan Review column.
 
-Requires Docker and Node 22. The first run installs Playwright's Chromium under `e2e/`. On Linux, if Chromium is missing system libraries, install them once with `cd e2e && sudo yarn playwright install-deps chromium` (or the script falls back to a local Google Chrome). Re-run `make screenshot` after board UI changes and commit the new PNG.
+It starts Compose project `coppice-screenshot` (its own volumes, ports 5432/5000/5001) with [`deploy/docker-compose.screenshot.yml`](../deploy/docker-compose.screenshot.yml), which forces `auth.desktop_mode` and turns off workflow auto-start. The seed builds a board, a Wait for Final Review diff, a finished Live Console transcript, two chats, and two plugins. The overlay does not enable the `mock-provider` feature, and the frames must not show it.
+
+The capture matches the installed Electron app: no login screen, and the top bar does not show the bootstrap admin email or Sign out. Seeding does not start agent runs and does not change packaged desktop builds. The target is intentionally outside CI so pull requests are not gated on pixels. Stop a dev stack on those ports first; this project does not share its database.
+
+Requires Docker, Node 22, and `ffmpeg`. The first run installs Playwright's Chromium under `e2e/`. On Linux, if Chromium is missing system libraries, install them once with `cd e2e && sudo yarn playwright install-deps chromium` (or the script falls back to a local Google Chrome). Re-run `make screenshot` after UI changes and commit the new PNG, stills, and GIF.
 
 ### Path C — Desktop shell (development only)
 

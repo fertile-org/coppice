@@ -1,0 +1,6 @@
+{
+  "name": "desktop-packaging",
+  "version": "1.4.0",
+  "description": "How to bundle Postgres with the desktop app and keep it on loopback.",
+  "author": { "name": "Coppice" }
+}
