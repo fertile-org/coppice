@@ -42,9 +42,9 @@ const HERO = path.join(
 const MAX_HEALTH_ATTEMPTS = 90;
 const HEALTH_INTERVAL_MS = 1000;
 
-// Wide enough for every board column plus the sidebar, close to the
-// previous marketing crop (static/screenshot.png was 2878×1386).
-const VIEWPORT = { width: 2880, height: 1440 };
+// Normal laptop frame so the marketing PNG stays readable. Column widths
+// stay as in the app (w-72); this is the window size, not a stretched board.
+const VIEWPORT = { width: 1440, height: 900 };
 
 const AGENTS = [
   { name: 'PM', role: 'pm' },
