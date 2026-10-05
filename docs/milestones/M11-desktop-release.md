@@ -7,7 +7,7 @@ Ship Coppice as a desktop app: the user downloads one installer, opens it, and C
 ## Why before Security and Role-owner agents
 
 - Coppice is meant to be a local desktop app; until it installs like one, every later milestone is only reachable by people who run the Docker stack.
-- M12 (Security & sandbox) and M13 (Role-owner agents) build on the same server, so packaging it first means they ship to users the moment they land.
+- M13 (Security & sandbox) and M14 (Role-owner agents) build on the same server, so packaging it first means they ship to users the moment they land. The public cut of this desktop is [M12 — Beta Release](./M12-beta-release.md).
 
 ## Product scope
 
@@ -57,7 +57,7 @@ From the spec (need the live tag check or manual acceptance):
 
 ### Manual acceptance
 
-- [ ] Install the arm64 `.dmg` on a Mac and the x64 `.deb` on a fresh Ubuntu 24.04: app opens to the board without login; create a board, register a repo, run a mock-agent ticket to Done.
+- [ ] Install the arm64 `.dmg` on a Mac and the x64 `.deb` on a fresh Ubuntu 24.04: app opens to the board without login; create a board, register a repo, and take a ticket to Done with a real connector. MockProvider is not in desktop or release builds, so a mock-to-Done run is not a valid install check ([mock](../providers/mock.md)).
 - [ ] Quit → no `coppice-server` or `postgres` processes; relaunch → data present.
 - [ ] `lsof -iTCP -sTCP:LISTEN -P | grep -i -e coppice -e postgres` shows only `127.0.0.1` listeners.
 - [ ] Banner: run an installed build whose version is lower than the latest published stable release (e.g. install `0.1.0-rc.1` after publishing `0.1.0`) → banner appears; Download opens the release page in the browser.
@@ -66,4 +66,5 @@ From the spec (need the live tag check or manual acceptance):
 
 - [Implementation plan](../superpowers/plans/2026-10-04-desktop-release.md)
 - [desktop/README.md](../../desktop/README.md)
-- [M12 — Security & sandbox](./M12-security-and-sandbox.md)
+- [M12 — Beta Release](./M12-beta-release.md)
+- [M13 — Security & sandbox](./M13-security-and-sandbox.md)

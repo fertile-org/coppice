@@ -1,10 +1,12 @@
-# M13 — Role-owner Agents (signals & Workspace Inbox)
+# M14 — Role-owner Agents (signals & Workspace Inbox)
 
 ## Goal
 
-Let agents that own a role or domain (DBA, QC, Tech Lead, …) **proactively** inspect their area and raise evidence-backed signals into a Workspace Inbox, where humans turn them into tickets or dismiss them. After M13, Coppice matches the full product design for self-hosted v1.
+Let agents that own a role or domain (DBA, QC, Tech Lead, …) **proactively** inspect their area and raise evidence-backed signals into a Workspace Inbox, where humans turn them into tickets or dismiss them. After M14, Coppice matches the full product design for self-hosted v1.
 
-Carried over from the original M07 "Trust & signals" scope; observation runs now use M10 plugin tools and run under M12 capabilities.
+Carried over from the original M07 "Trust & signals" scope; observation runs now use M10 plugin tools and run under M13 capabilities.
+
+This is not the public-beta hero. [M12 — Beta Release](./M12-beta-release.md) ships the gated desktop board first.
 
 ## Product scope
 
@@ -18,7 +20,7 @@ Carried over from the original M07 "Trust & signals" scope; observation runs now
 - New run kind `observe_domain` with its own context profile (read-oriented, no ticket)
 - Manual **Run Observation** button per role-owner agent (scheduled cron out of scope)
 - Uses plugin tools to inspect state (repo, board, knowledge, domain plugins such as a read-only DB tool)
-- Capability-gated by M12: observation needs the grants its tools/commands require; missing ones produce a blocker signal
+- Capability-gated by M13: observation needs the grants its tools/commands require; missing ones produce a blocker signal
 
 ### Workspace signals
 
@@ -42,7 +44,7 @@ Carried over from the original M07 "Trust & signals" scope; observation runs now
 
 - M06: knowledge available to observations via `knowledge_search`
 - M10: `signal_create` tool, domain plugins
-- M12: capabilities/secrets gate what observations can touch; Grant Capability / Add Secret actions
+- M13: capabilities/secrets gate what observations can touch; Grant Capability / Add Secret actions
 
 ## Architecture notes
 
@@ -82,12 +84,12 @@ POST  /api/agents/:id/run-observation
 
 ### Smoke
 
-`make e2e-smoke-m13`: Run Observation on DBA mock agent → signal appears in Workspace Inbox → Create Ticket → ticket on board.
+`make e2e-smoke-m14`: Run Observation on DBA mock agent → signal appears in Workspace Inbox → Create Ticket → ticket on board.
 
 ## Acceptance criteria
 
 - [ ] Role-owner agents with owned domains; Run Observation available only for them
-- [ ] Observation runs use plugin tools and respect M12 capabilities
+- [ ] Observation runs use plugin tools and respect M13 capabilities
 - [ ] Workspace Inbox shows proactive signals with evidence and recommendation
 - [ ] Anti-spam limits and dedup enforced
 - [ ] Acknowledge / dismiss / snooze / convert-to-ticket work
@@ -99,8 +101,9 @@ POST  /api/agents/:id/run-observation
 
 - Product design §15 (proactive signals), §26 (end-to-end scenarios), §24 Phase 6–9
 - [M10 — Plugins](./M10-plugins.md)
-- [M12 — Security & sandbox](./M12-security-and-sandbox.md)
+- [M12 — Beta Release](./M12-beta-release.md)
+- [M13 — Security & sandbox](./M13-security-and-sandbox.md)
 
 ## v1 complete
 
-When M13 acceptance criteria pass, Coppice implements the full philosophy product design for self-hosted v1.
+When M14 acceptance criteria pass, Coppice implements the full philosophy product design for self-hosted v1.

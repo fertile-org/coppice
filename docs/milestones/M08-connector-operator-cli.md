@@ -75,7 +75,7 @@ Always target the **server** service (workers spawn CLIs there), never web.
 - Baking vendor CLIs into the default server image
 - Host bind-mounts as a supported path
 - Settings UI for connectors
-- Sandbox / signals work (now M12 / M13)
+- Sandbox / signals work (now M13 / M14)
 - CI using real connectors (continue `MockProvider`)
 
 ## Architecture

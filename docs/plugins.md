@@ -53,7 +53,7 @@ Plugins start **disabled**. On the plugin card:
 
 **Switching skills off.** Each skill on the card has its own switch; the header reads `Skills (12 of 30 on)` when some are off. A switched-off skill is hidden from every agent that has the plugin, at once (including running runs): it is left out of the skill list, and `skill_load` reports it as not found. The setting is workspace-wide, kept by skill name across rescans and updates. The built-in `coppice` skills cannot be switched off.
 
-A plugin with **stdio** servers runs a program on the server's machine with the server's privileges (sandboxing comes in M12). Enabling or testing such a plugin asks for confirmation, and also names any settings whose value would come from the server's environment. Only install plugins you trust.
+A plugin with **stdio** servers runs a program on the server's machine with the server's privileges (sandboxing comes in M13). Enabling or testing such a plugin asks for confirmation, and also names any settings whose value would come from the server's environment. Only install plugins you trust.
 
 ### 3. Attach it to agents
 

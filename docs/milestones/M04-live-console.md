@@ -24,7 +24,7 @@ Observable agent runs through a live terminal stream in the browser, persisted l
 ## Out of scope
 
 - Workflow mentions (M05)
-- Strict sandbox command filtering (M12)
+- Strict sandbox command filtering (M13)
 - PTY driver without tmux (future option)
 
 ## Dependencies

@@ -1,8 +1,8 @@
-# M12 — Security & Sandbox
+# M13 — Security & Sandbox
 
 ## Goal
 
-Production-ready trust boundaries for agent runs and plugins: capabilities, sandbox profiles, scoped secret injection, capability blockers with guided unblock, and an audit log. After M12, every process an agent starts and every tool it calls (M10) is checked against policy.
+Production-ready trust boundaries for agent runs and plugins: capabilities, sandbox profiles, scoped secret injection, capability blockers with guided unblock, and an audit log. After M13, every process an agent starts and every tool it calls (M10) is checked against policy.
 
 Carried over from the original M07 "Trust & signals" scope, extended to cover M10 plugins and tools.
 
@@ -55,7 +55,7 @@ Ticket UI shows: Allow command | Add secret | Grant capability | Enable tool | R
 ## Out of scope
 
 - Container sandbox v2, Kubernetes runner
-- Workspace signals / observation runs (M13)
+- Workspace signals / observation runs (M14)
 - Autonomous merge/deploy
 
 ## Dependencies
@@ -117,7 +117,7 @@ Compose delta: `SECRETS_MASTER_KEY`, `SANDBOX_ENFORCE=true`; optional `postgres-
 
 ### Smoke
 
-`make e2e-smoke-m12`: agent with restrictive sandbox (no `pnpm`) → blocked badge → grant via guided unblock UI → retry → succeeded.
+`make e2e-smoke-m13`: agent with restrictive sandbox (no `pnpm`) → blocked badge → grant via guided unblock UI → retry → succeeded.
 
 ## Acceptance criteria
 
@@ -134,3 +134,5 @@ Compose delta: `SECRETS_MASTER_KEY`, `SANDBOX_ENFORCE=true`; optional `postgres-
 - Product design §14 (capabilities, sandbox, secrets), §18 (permissions)
 - Framework selection §4 (sandbox v1), §2 (secrets encryption)
 - [M10 — Plugins](./M10-plugins.md)
+- [M12 — Beta Release](./M12-beta-release.md) ships before this milestone
+- [M14 — Role-owner agents](./M14-role-owner-agents.md)
