@@ -6,6 +6,8 @@ use crate::domain::knowledge_compaction::JOB_TYPE_COMPACT_KNOWLEDGE;
 use crate::domain::repo::VerificationStatus;
 use crate::domain::run::{run_status_from_str, run_status_to_str, AgentRun, RunStatus};
 use crate::domain::slug::slugify;
+use crate::domain::substatus::{validate_status_substatus_combo, TicketStatus};
+use crate::domain::ticket::{status_from_str, status_to_str, substatus_from_str};
 use crate::mcp::token::TokenService;
 use crate::sandbox::permissive::PROFILE_ID;
 use crate::services::agent_service::AgentError;
@@ -16,7 +18,7 @@ use crate::services::mention_service::MentionError;
 use crate::services::notification_service::NotificationService;
 use crate::services::repo_service::RepoService;
 use crate::services::result_contract::ApplyResult;
-use crate::services::ticket_service::{TicketError, TicketService, TicketWithDisplay};
+use crate::services::ticket_service::{TicketError, TicketService};
 use crate::services::workflow_service::WorkflowService;
 use sqlx::PgPool;
 use sqlx::Row;
@@ -166,6 +168,8 @@ impl<'a> RunService<'a> {
             )));
         }
 
+        let (agent_key, agent_role) = self.agent_key_and_role(agent_id).await?;
+
         let mut tx = self.pool.begin().await?;
         let run_id = Uuid::new_v4();
 
@@ -214,46 +218,19 @@ impl<'a> RunService<'a> {
         .execute(&mut *tx)
         .await?;
 
-        tx.commit().await?;
-
-        self.apply_run_start_status(
+        Self::apply_queued_run_start_status(
+            &mut tx,
             ticket_id,
-            agent_id,
+            &agent_key,
+            &agent_role,
             JOB_TYPE_WORK_ON_TICKET,
             ContextProfile::Full,
         )
         .await?;
 
-        Ok(row_to_run(&row))
-    }
+        tx.commit().await?;
 
-    async fn apply_run_start_status(
-        &self,
-        ticket_id: Uuid,
-        agent_id: Uuid,
-        job_type: &str,
-        context_profile: ContextProfile,
-    ) -> Result<Option<TicketWithDisplay>, RunError> {
-        let ticket_svc = TicketService::new(self.pool);
-        let ticket = ticket_svc.get(ticket_id).await?;
-        let agent = AgentService::new(self.pool).get(agent_id).await?;
-        let agent_key = agent
-            .preset_source
-            .clone()
-            .unwrap_or_else(|| slugify(&agent.name));
-        let Some(new_status) = WorkflowService::resolve_run_start_transition(
-            ticket.ticket.status,
-            &agent_key,
-            &agent.role,
-            job_type,
-            context_profile,
-        ) else {
-            return Ok(None);
-        };
-        let updated = ticket_svc
-            .update_status(ticket_id, new_status, None, None)
-            .await?;
-        Ok(Some(updated))
+        Ok(row_to_run(&row))
     }
 
     pub async fn get(&self, run_id: Uuid) -> Result<AgentRun, RunError> {
@@ -479,6 +456,8 @@ impl<'a> RunService<'a> {
             )));
         }
 
+        let (agent_key, agent_role) = self.agent_key_and_role(agent_id).await?;
+
         let mut tx = self.pool.begin().await?;
         let run_id = Uuid::new_v4();
 
@@ -527,12 +506,81 @@ impl<'a> RunService<'a> {
         .execute(&mut *tx)
         .await?;
 
+        Self::apply_queued_run_start_status(
+            &mut tx,
+            ticket_id,
+            &agent_key,
+            &agent_role,
+            job_type,
+            options.context_profile,
+        )
+        .await?;
+
         tx.commit().await?;
 
-        self.apply_run_start_status(ticket_id, agent_id, job_type, options.context_profile)
-            .await?;
-
         Ok(row_to_run(&row))
+    }
+
+    async fn agent_key_and_role(&self, agent_id: Uuid) -> Result<(String, String), RunError> {
+        let agent = AgentService::new(self.pool).get(agent_id).await?;
+        let agent_key = agent
+            .preset_source
+            .clone()
+            .unwrap_or_else(|| slugify(&agent.name));
+        Ok((agent_key, agent.role))
+    }
+
+    /// Move Ready/Backlog implementer work to `in_progress` in the same
+    /// transaction that inserts the queued run. A later update would let other
+    /// connections observe the run while the ticket is still `ready`.
+    async fn apply_queued_run_start_status(
+        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        ticket_id: Uuid,
+        agent_key: &str,
+        agent_role: &str,
+        job_type: &str,
+        context_profile: ContextProfile,
+    ) -> Result<(), RunError> {
+        let row = sqlx::query(
+            r#"
+            SELECT status, substatus, substatus_metadata
+            FROM tickets
+            WHERE id = $1
+            FOR UPDATE
+            "#,
+        )
+        .bind(ticket_id)
+        .fetch_optional(&mut **tx)
+        .await?
+        .ok_or_else(|| RunError::Validation("ticket not found".into()))?;
+
+        let status_str: String = row.get("status");
+        let current = status_from_str(&status_str).unwrap_or(TicketStatus::Backlog);
+        let substatus_str: Option<String> = row.get("substatus");
+        let substatus = substatus_str.as_deref().and_then(substatus_from_str);
+        let substatus_metadata: Option<serde_json::Value> = row.get("substatus_metadata");
+        let Some(new_status) = WorkflowService::resolve_run_start_transition(
+            current,
+            agent_key,
+            agent_role,
+            job_type,
+            context_profile,
+        ) else {
+            return Ok(());
+        };
+
+        if let Some(msg) =
+            validate_status_substatus_combo(new_status, substatus, &substatus_metadata)
+        {
+            return Err(RunError::Validation(msg.to_string()));
+        }
+
+        sqlx::query("UPDATE tickets SET status = $2, updated_at = now() WHERE id = $1")
+            .bind(ticket_id)
+            .bind(status_to_str(new_status))
+            .execute(&mut **tx)
+            .await?;
+        Ok(())
     }
 
     pub async fn start_chat_turn(
@@ -1044,6 +1092,166 @@ mod tests {
             RunStatus::Cancelled
         );
     }
+
+    /// The run row and `Ready → in_progress` commit together. A deferred check
+    /// sees the ticket at commit time, which is the first moment another
+    /// connection can see the run.
+    #[tokio::test]
+    async fn ready_implementer_run_is_in_progress_when_the_run_commits() {
+        let Some(pool) = test_pool().await else {
+            return;
+        };
+        install_ready_run_visibility_check(&pool).await;
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().to_path_buf();
+        std::process::Command::new("git")
+            .args(["init", "-b", "main"])
+            .current_dir(&path)
+            .output()
+            .expect("git init");
+        std::fs::write(path.join("README.md"), "# test\n").expect("write readme");
+        std::process::Command::new("git")
+            .args(["add", "README.md"])
+            .current_dir(&path)
+            .output()
+            .expect("git add");
+        std::process::Command::new("git")
+            .args(["commit", "-m", "initial"])
+            .env("GIT_AUTHOR_NAME", "test")
+            .env("GIT_AUTHOR_EMAIL", "test@localhost")
+            .env("GIT_COMMITTER_NAME", "test")
+            .env("GIT_COMMITTER_EMAIL", "test@localhost")
+            .current_dir(&path)
+            .output()
+            .expect("git commit");
+
+        let board_id = Uuid::new_v4();
+        sqlx::query("INSERT INTO boards (id, name, slug) VALUES ($1, $2, $3)")
+            .bind(board_id)
+            .bind("handoff board")
+            .bind(format!("handoff-{}", board_id))
+            .execute(&pool)
+            .await
+            .expect("insert board");
+
+        let agent_id = Uuid::new_v4();
+        sqlx::query(
+            r#"
+            INSERT INTO agents (
+                id, name, role, skills, responsibilities, system_prompt, connector, preset_source
+            )
+            VALUES ($1, $2, $3, '{}', '{}', $4, $5, $6)
+            "#,
+        )
+        .bind(agent_id)
+        .bind("Ready Backend Engineer")
+        .bind("Backend Engineer")
+        .bind("prompt")
+        .bind("mock")
+        .bind("backend_engineer")
+        .execute(&pool)
+        .await
+        .expect("insert agent");
+
+        let repo_id = Uuid::new_v4();
+        sqlx::query(
+            r#"
+            INSERT INTO repos (id, name, local_path, default_branch, verification_status)
+            VALUES ($1, $2, $3, $4, $5)
+            "#,
+        )
+        .bind(repo_id)
+        .bind("handoff-repo")
+        .bind(path.to_string_lossy().as_ref())
+        .bind("main")
+        .bind("ready")
+        .execute(&pool)
+        .await
+        .expect("insert repo");
+
+        let ticket_id = Uuid::new_v4();
+        sqlx::query(
+            r#"
+            INSERT INTO tickets (
+                id, board_id, repo_id, title, status, created_by, assignee_agent_id
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
+            "#,
+        )
+        .bind(ticket_id)
+        .bind(board_id)
+        .bind(repo_id)
+        .bind("handoff ticket")
+        .bind("ready")
+        .bind("test")
+        .bind(agent_id)
+        .execute(&pool)
+        .await
+        .expect("insert ticket");
+
+        RunService::new(&pool)
+            .start_run_for_agent(
+                ticket_id,
+                agent_id,
+                JOB_TYPE_WORK_ON_TICKET,
+                StartRunOptions::default(),
+            )
+            .await
+            .expect("queue implementer run");
+
+        let status: String = sqlx::query_scalar("SELECT status FROM tickets WHERE id = $1")
+            .bind(ticket_id)
+            .fetch_one(&pool)
+            .await
+            .expect("ticket status");
+        assert_eq!(status, "in_progress");
+    }
+}
+
+#[cfg(test)]
+async fn install_ready_run_visibility_check(pool: &PgPool) {
+    sqlx::query(
+        r#"
+        CREATE OR REPLACE FUNCTION coppice_test_ready_run_visible()
+        RETURNS trigger
+        LANGUAGE plpgsql AS $$
+        BEGIN
+            IF NEW.job_type = 'work_on_ticket'
+               AND NEW.ticket_id IS NOT NULL
+               AND EXISTS (
+                   SELECT 1
+                   FROM tickets
+                   JOIN agents ON agents.id = NEW.agent_id
+                   WHERE tickets.id = NEW.ticket_id
+                     AND tickets.status = 'ready'
+                     AND agents.role ILIKE '%engineer%'
+                     AND COALESCE(agents.preset_source, '') <> 'tech_lead'
+               )
+            THEN
+                RAISE EXCEPTION 'work run committed while ticket still ready';
+            END IF;
+            RETURN NEW;
+        END;
+        $$
+        "#,
+    )
+    .execute(pool)
+    .await
+    .expect("install ready-run visibility function");
+
+    sqlx::query(
+        r#"
+        CREATE CONSTRAINT TRIGGER coppice_test_ready_run_visible
+        AFTER INSERT ON agent_runs
+        DEFERRABLE INITIALLY DEFERRED
+        FOR EACH ROW
+        EXECUTE FUNCTION coppice_test_ready_run_visible()
+        "#,
+    )
+    .execute(pool)
+    .await
+    .expect("install ready-run visibility trigger");
 }
 
 fn row_to_run(row: &sqlx::postgres::PgRow) -> AgentRun {
