@@ -57,6 +57,25 @@ pub struct AgentTestEnv {
     pub worktrees: tempfile::TempDir,
 }
 
+/// Repo-local identity for checkouts whose commits are created or replayed by
+/// the server (`git rebase`, `git commit`). Git 2.55 refuses an empty committer
+/// name, and CI runners have none. Env vars on the test process do not reach
+/// the server's git subprocess; this config does, including from worktrees.
+pub fn configure_test_git_identity(dir: &Path) {
+    for (key, value) in [("user.name", "test"), ("user.email", "test@localhost")] {
+        let output = Command::new("git")
+            .args(["config", key, value])
+            .current_dir(dir)
+            .output()
+            .unwrap_or_else(|_| panic!("git config {key}"));
+        assert!(
+            output.status.success(),
+            "git config {key} failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+}
+
 pub fn setup_worktree_with_commit(
     git_dir: &Path,
     worktrees_root: &Path,
@@ -110,6 +129,7 @@ pub fn create_temp_git_checkout() -> (tempfile::TempDir, PathBuf) {
         .current_dir(&path)
         .output()
         .expect("git init");
+    configure_test_git_identity(&path);
     std::fs::write(path.join("README.md"), "# test\n").expect("write readme");
     Command::new("git")
         .args(["add", "README.md"])
