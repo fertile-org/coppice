@@ -106,10 +106,15 @@ In **Settings → Repositories**, register the **in-container** path (for exampl
 
 Default passwords and session secrets are for local use only — change them before exposing the stack on a real server. More detail: [docs/development.md](docs/development.md) (install & release) and [docs/operations.md](docs/operations.md) (Compose & config).
 
+## Public site
+
+User-facing download and docs pages live in [`website/`](website/) (Astro). After GitHub Pages is enabled, the planned URL is `https://fertile-org.github.io/coppice/` — see [website/README.md](website/README.md). Guides for contributing stay in [`docs/`](docs/).
+
 ## Learn more
 
 | Topic | Doc |
 |-------|-----|
+| Public site & user docs | [website/](website/) |
 | Development, release & install | [docs/development.md](docs/development.md) |
 | Compose, config & Makefile | [docs/operations.md](docs/operations.md) |
 | Product principles | [docs/philosophy/final_agent_workspace_product_design.md](docs/philosophy/final_agent_workspace_product_design.md) |

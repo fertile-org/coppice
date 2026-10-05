@@ -13,7 +13,7 @@ BOOTSTRAP_PASSWORD = changeme
 export COPPICE_UID ?= $(shell id -u)
 export COPPICE_GID ?= $(shell id -g)
 
-.PHONY: compose-up compose-down compose-local-up compose-local-down server server-dev tools test test-unit test-smoke test-pg-reset clippy clean migrate bootstrap web-install web-test web-dev web-build desktop desktop-test desktop-dist-dir desktop-smoke e2e-smoke e2e-smoke-m03 e2e-smoke-m04 e2e-smoke-m05 e2e-smoke-m06 e2e-smoke-m06-knowledge e2e-smoke-m09 e2e-smoke-m10 benchmark-m06-knowledge-retrieval release-tar
+.PHONY: compose-up compose-down compose-local-up compose-local-down server server-dev tools test test-unit test-smoke test-pg-reset clippy clean migrate bootstrap web-install web-test web-dev web-build website-install website-dev website-build desktop desktop-test desktop-dist-dir desktop-smoke e2e-smoke e2e-smoke-m03 e2e-smoke-m04 e2e-smoke-m05 e2e-smoke-m06 e2e-smoke-m06-knowledge e2e-smoke-m09 e2e-smoke-m10 benchmark-m06-knowledge-retrieval release-tar
 
 CARGO_TEST = cargo test --features embedded-test-db
 
@@ -183,6 +183,15 @@ benchmark-m06-knowledge-retrieval:
 	$(MAKE) compose-up
 	COPPICE_RETRIEVAL_BENCHMARK_DATABASE_URL=postgres://coppice:coppice@127.0.0.1:$${COPPICE_PG_PORT:-5432}/coppice \
 		cargo test -p coppice-server --features embedded-test-db --test integration_knowledge knowledge_retrieval_capacity_p95_benchmark -- --ignored --nocapture --test-threads 1
+
+website-install:
+	cd website && npm install
+
+website-dev:
+	cd website && npm run dev
+
+website-build:
+	cd website && npm run build
 
 release-tar: web-build
 	cargo build --release -p coppice-server -p coppice-cli

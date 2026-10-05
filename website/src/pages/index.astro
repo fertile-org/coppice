@@ -1,0 +1,117 @@
+---
+import Base from '../layouts/Base.astro';
+import DownloadLinks from '../components/DownloadLinks.astro';
+import { withBase } from '../lib/url';
+
+const description =
+  'Agents plan, you approve. Agents build, you review. On your machine, with the agent CLIs you already pay for.';
+
+const features = [
+  ['Local-first', 'Runs on your machine. Your repos, your CLIs, your data.'],
+  [
+    'BYO agent CLIs',
+    'Claude Code, Codex, OpenCode, Cursor CLI, Gemini CLI, and similar — tools you already pay for.',
+  ],
+  [
+    'Visible work',
+    'Comments, run logs, and a live terminal on the ticket. No hidden agent-to-agent side channels.',
+  ],
+  ['Human gates', 'Plan Review and Final Review are the product, not optional extras.'],
+  [
+    'Knowledge hygiene',
+    'Typed, scoped memory with human approval — not a dumping ground of embeddings.',
+  ],
+  [
+    'Controlled autonomy',
+    'Agents plan and execute; sensitive steps stop at you. Sandbox hardening is next.',
+  ],
+];
+---
+
+<Base title="Coppice" description={description}>
+  <div class="shell landing">
+    <header class="promise">
+      <h1>Agents plan, you approve. Agents build, you review.</h1>
+      <p class="lede">On your machine, with the agent CLIs you already pay for.</p>
+    </header>
+
+    <figure class="hero-shot">
+      <img
+        src={withBase('/assets/hero-screenshot.png')}
+        width="2880"
+        height="1440"
+        alt="Coppice board — tickets across Backlog through Final Review"
+      />
+    </figure>
+
+    <div id="download">
+      <DownloadLinks showDocs />
+    </div>
+
+    <section class="block" aria-labelledby="what-it-is">
+      <h2 id="what-it-is">What it is</h2>
+      <p>
+        Coppice is a local desktop app — a Trello-like board where your installed coding agents work tickets
+        in isolated git worktrees, talk in visible ticket comments, and stop for your review.
+      </p>
+      <p>Download, open, work. No Docker. No server. No account.</p>
+    </section>
+
+    <section class="block" aria-labelledby="what-it-is-not">
+      <h2 id="what-it-is-not">What it is not</h2>
+      <ul class="plain-list">
+        <li>Not a cloud coding service</li>
+        <li>Not a Jira replacement</li>
+        <li>Not “tell the agent and get the finished product”</li>
+      </ul>
+    </section>
+
+    <section class="block" aria-labelledby="two-gates">
+      <h2 id="two-gates">The two gates</h2>
+      <ol class="gates">
+        <li>
+          <p><strong>Plan Review</strong> — a PM agent drafts the plan; you approve or comment before anyone writes code.</p>
+        </li>
+        <li>
+          <p>
+            <strong>Final Review</strong> — you open the in-app diff; feedback stays on the ticket; nothing is done until you say so.
+          </p>
+        </li>
+      </ol>
+      <p>Nothing starts without a human action. Agents may propose tickets; approving one counts.</p>
+    </section>
+
+    <section class="block" aria-labelledby="why">
+      <h2 id="why">Why Coppice</h2>
+      <div class="feature-grid">
+        {
+          features.map(([title, body]) => (
+            <article>
+              <h3>{title}</h3>
+              <p>{body}</p>
+            </article>
+          ))
+        }
+      </div>
+    </section>
+
+    <section class="block who" aria-labelledby="who">
+      <h2 id="who">Who it’s for</h2>
+      <p>
+        Solo senior engineers and small teams who already run coding agents — and want to manage them like a team:
+        create or approve tickets, check the plan, review the diff.
+      </p>
+    </section>
+
+    <section class="block" aria-labelledby="get-started">
+      <h2 id="get-started">Get started</h2>
+      <DownloadLinks />
+      <p class="closer">Put your agents on a board. Keep the gates.</p>
+      <p class="closer-links">
+        <a href={withBase('/docs')}>Docs</a>
+        <span aria-hidden="true">·</span>
+        <a href="https://github.com/fertile-org/coppice">GitHub</a>
+      </p>
+    </section>
+  </div>
+</Base>

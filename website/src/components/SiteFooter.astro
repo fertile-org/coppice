@@ -1,0 +1,25 @@
+---
+import { withBase } from '../lib/url';
+
+const links = [
+  { href: '/docs', label: 'Docs' },
+  { href: '/docs/install', label: 'Install' },
+  { href: '/docs/concepts', label: 'Concepts' },
+  { href: '/docs/providers', label: 'Providers' },
+  { href: '/docs/faq', label: 'FAQ' },
+];
+---
+
+<footer class="site-footer">
+  <div class="shell footer-inner">
+    <p>Put your agents on a board. Keep the gates.</p>
+    <nav aria-label="Footer">
+      {
+        links.map((link) => (
+          <a href={withBase(link.href)}>{link.label}</a>
+        ))
+      }
+      <a href="https://github.com/fertile-org/coppice">GitHub</a>
+    </nav>
+  </div>
+</footer>

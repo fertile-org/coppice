@@ -1,0 +1,42 @@
+---
+import Base from './Base.astro';
+import { withBase } from '../lib/url';
+
+interface Props {
+  frontmatter: {
+    title: string;
+    description: string;
+  };
+}
+
+const { frontmatter } = Astro.props;
+const pathname = Astro.url.pathname.replace(/\/$/, '') || '/';
+const links = [
+  { href: '/docs', label: 'Docs' },
+  { href: '/docs/install', label: 'Install' },
+  { href: '/docs/concepts', label: 'Concepts' },
+  { href: '/docs/providers', label: 'Providers' },
+  { href: '/docs/faq', label: 'FAQ' },
+];
+---
+
+<Base title={frontmatter.title} description={frontmatter.description}>
+  <div class="shell docs-shell">
+    <nav class="docs-nav" aria-label="Documentation">
+      {
+        links.map((link) => {
+          const href = withBase(link.href).replace(/\/$/, '');
+          const current = pathname === href;
+          return (
+            <a href={href} aria-current={current ? 'page' : undefined}>
+              {link.label}
+            </a>
+          );
+        })
+      }
+    </nav>
+    <article class="prose">
+      <slot />
+    </article>
+  </div>
+</Base>
