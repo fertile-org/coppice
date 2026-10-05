@@ -7,7 +7,7 @@ description: "Board, gates, worktrees, and how agents work tickets."
 # Concepts
 
 ## The board
-Coppice is a Trello-like board for coding work. Tickets move through stages such as Backlog → Ready → In Progress → Review → Done (and Blocked when stuck). Everything important about a ticket lives on the card: comments, run logs, and a live terminal.
+Coppice is a Trello-like board for coding work. Tickets move through stages such as Backlog → Ready → Plan Review → In Progress → In Review → In QA → Wait for Final Review → Done (and Blocked when stuck). Everything important about a ticket lives on the card: comments, run logs, and a live terminal.
 
 ## You are the manager
 You create or approve tickets, check that the agent understood you at planning, and review the code before work is done. Agents plan and build; you approve and review.
