@@ -62,6 +62,18 @@ make compose-up
 
 Agents and CI use this path only — see [AGENTS.md](../AGENTS.md) and [operations.md](operations.md).
 
+### Marketing screenshots
+
+```bash
+make screenshot
+```
+
+Regenerates [`static/screenshot.png`](../static/screenshot.png) for the README and copies that same file to [`website/public/assets/hero-screenshot.png`](../website/public/assets/hero-screenshot.png) for the marketing site. It starts the default Compose stack with [`deploy/docker-compose.screenshot.yml`](../deploy/docker-compose.screenshot.yml), which forces `auth.desktop_mode` and turns off workflow auto-start, seeds a board (columns, cards, and role agents) through the API, and captures the board with Playwright. The overlay does not enable the `mock-provider` feature.
+
+The capture matches the installed Electron app: no login screen, and the top bar does not show the bootstrap admin email or Sign out. Seeding does not start agent runs and does not change packaged desktop builds. The target is intentionally outside CI so pull requests are not gated on pixels.
+
+Requires Docker and Node 22. The first run installs Playwright's Chromium under `e2e/`. On Linux, if Chromium is missing system libraries, install them once with `cd e2e && sudo yarn playwright install-deps chromium` (or the script falls back to a local Google Chrome). Re-run `make screenshot` after board UI changes and commit the new PNG.
+
 ### Path C — Desktop shell (development only)
 
 Electron window around the running web UI. **Does not** start Postgres or the API.

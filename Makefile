@@ -13,7 +13,7 @@ BOOTSTRAP_PASSWORD = changeme
 export COPPICE_UID ?= $(shell id -u)
 export COPPICE_GID ?= $(shell id -g)
 
-.PHONY: compose-up compose-down compose-local-up compose-local-down server server-dev tools test test-unit test-smoke test-pg-reset clippy clean migrate bootstrap web-install web-test web-dev web-build website-install website-dev website-build desktop desktop-test desktop-dist-dir desktop-smoke e2e-smoke e2e-smoke-m03 e2e-smoke-m04 e2e-smoke-m05 e2e-smoke-m06 e2e-smoke-m06-knowledge e2e-smoke-m09 e2e-smoke-m10 benchmark-m06-knowledge-retrieval release-tar
+.PHONY: compose-up compose-down compose-local-up compose-local-down server server-dev tools test test-unit test-smoke test-pg-reset clippy clean migrate bootstrap web-install web-test web-dev web-build website-install website-dev website-build desktop desktop-test desktop-dist-dir desktop-smoke e2e-smoke e2e-smoke-m03 e2e-smoke-m04 e2e-smoke-m05 e2e-smoke-m06 e2e-smoke-m06-knowledge e2e-smoke-m09 e2e-smoke-m10 screenshot benchmark-m06-knowledge-retrieval release-tar
 
 CARGO_TEST = cargo test --features embedded-test-db
 
@@ -178,6 +178,17 @@ e2e-smoke-m10:
 	MOCK_AGENT_RESPONSE=mcp/m10_smoke WORKFLOW_AUTO_START_RUNS=false $(COMPOSE) up -d --force-recreate --no-deps server
 	$(SMOKE_REPO_SETUP_IF_MISSING)
 	node e2e/smoke/m10-plugins.mjs
+
+# Marketing board PNG for static/screenshot.png and the site hero. Not part of CI.
+# Overlay forces auth.desktop_mode and disables auto-start so the shot matches
+# the Electron app (no login, no account email, no Sign out).
+screenshot:
+	@test -f deploy/config/config.toml || cp deploy/config/config.example.toml deploy/config/config.toml
+	$(COMPOSE) -f deploy/docker-compose.screenshot.yml up -d --build
+	$(COMPOSE) -f deploy/docker-compose.screenshot.yml up -d --force-recreate --no-deps server
+	cd e2e && yarn install --frozen-lockfile
+	cd e2e && yarn playwright install chromium
+	node e2e/screenshot/capture.mjs
 
 benchmark-m06-knowledge-retrieval:
 	$(MAKE) compose-up

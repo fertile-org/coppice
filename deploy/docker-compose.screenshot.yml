@@ -1,0 +1,8 @@
+# Overlay for `make screenshot` only. Not used by `make compose-up` or CI.
+# Forces the desktop product session so the SPA skips login and hides the
+# account email and Sign out, matching `coppice-server desktop`.
+services:
+  server:
+    environment:
+      COPPICE_AUTH__DESKTOP_MODE: "true"
+      WORKFLOW_AUTO_START_RUNS: "false"

@@ -167,3 +167,5 @@ make desktop-test  # when touching desktop/ or desktop mode
 Optional before E2E: `make compose-up` (Docker stack for browser smoke only).
 
 Optional before UI-heavy changes: `make e2e-smoke`.
+
+Marketing board capture (`make screenshot`) is separate from these smokes and from CI. It forces desktop mode and writes `static/screenshot.png` plus the site hero `website/public/assets/hero-screenshot.png`. See [development.md — Marketing screenshots](development.md#marketing-screenshots).

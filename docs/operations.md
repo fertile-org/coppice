@@ -114,6 +114,7 @@ Two conditions stop the server at startup (`AppState::init_plugins`): the config
 | `make clippy` / `make clean` | Lint / reclaim `target/` |
 | `make release-tar` | Release tarball → `dist/` |
 | `make e2e-smoke*` | Browser/stack smokes |
+| `make screenshot` | Desktop-mode marketing board PNG → `static/screenshot.png` and the site hero (not CI) |
 
 ## Disk usage / cleanup
 
