@@ -78,6 +78,37 @@ pub(crate) struct Frontmatter {
     pub(crate) description: String,
 }
 
+const MAX_FRONTMATTER_BYTES: usize = 16 * 1024;
+
+#[derive(Default)]
+struct AliasDetector {
+    found: bool,
+}
+
+impl yaml_rust2::parser::EventReceiver for AliasDetector {
+    fn on_event(&mut self, event: yaml_rust2::Event) {
+        if matches!(event, yaml_rust2::Event::Alias(_)) {
+            self.found = true;
+        }
+    }
+}
+
+/// Plugin skills come from untrusted git repos. `YamlLoader` expands aliases
+/// by cloning, so a few KB of nested aliases ("billion laughs") would exhaust
+/// memory; the event parser reports each alias once without expanding it.
+fn reject_unsafe_frontmatter(yaml: &str) -> Result<(), &'static str> {
+    if yaml.len() > MAX_FRONTMATTER_BYTES {
+        return Err("frontmatter is larger than 16 KB");
+    }
+    let mut detector = AliasDetector::default();
+    // Syntax errors are reported by the loader with its own message.
+    let _ = yaml_rust2::parser::Parser::new_from_str(yaml).load(&mut detector, true);
+    if detector.found {
+        return Err("aliases are not supported");
+    }
+    Ok(())
+}
+
 /// Splits `---\n<yaml>\n---\n<body>`; reads the string `name` / `description`
 /// keys, collapsing description whitespace to single spaces.
 pub(crate) fn parse_skill_file(text: &str) -> anyhow::Result<(Frontmatter, String)> {
@@ -91,6 +122,8 @@ pub(crate) fn parse_skill_file(text: &str) -> anyhow::Result<(Frontmatter, Strin
     let (yaml, after) = rest.split_at(end);
     let body = after["\n---".len()..].trim_start_matches('\n').to_string();
 
+    reject_unsafe_frontmatter(yaml)
+        .map_err(|reason| anyhow::anyhow!("invalid frontmatter YAML: {reason}"))?;
     let docs = yaml_rust2::YamlLoader::load_from_str(yaml)
         .map_err(|err| anyhow::anyhow!("invalid frontmatter YAML: {err}"))?;
     let doc = docs.first();
@@ -576,6 +609,46 @@ mod tests {
         assert!(err("---\nname: a\ndescription: d\n  bad: [\n---\n")
             .contains("invalid frontmatter YAML"));
         assert!(err("no frontmatter").contains("SKILL.md must start with YAML frontmatter"));
+    }
+
+    #[test]
+    fn frontmatter_alias_bomb_is_rejected_quickly() {
+        let mut yaml =
+            String::from("name: a\ndescription: d\nl0: &l0 [x, x, x, x, x, x, x, x, x]\n");
+        for i in 1..12 {
+            let prev = i - 1;
+            yaml.push_str(&format!(
+                "l{i}: &l{i} [*l{prev}, *l{prev}, *l{prev}, *l{prev}, *l{prev}, *l{prev}, *l{prev}, *l{prev}, *l{prev}]\n"
+            ));
+        }
+        let started = std::time::Instant::now();
+        let err = format!(
+            "{:#}",
+            parse_skill_file(&format!("---\n{yaml}---\nBody")).unwrap_err()
+        );
+        assert!(started.elapsed() < std::time::Duration::from_secs(1));
+        assert_eq!(err, "invalid frontmatter YAML: aliases are not supported");
+    }
+
+    #[test]
+    fn frontmatter_larger_than_16_kb_is_rejected() {
+        let filler = format!("x: \"{}\"\n", "a".repeat(16 * 1024));
+        let err = format!(
+            "{:#}",
+            parse_skill_file(&format!("---\nname: a\ndescription: d\n{filler}---\nBody"))
+                .unwrap_err()
+        );
+        assert_eq!(
+            err,
+            "invalid frontmatter YAML: frontmatter is larger than 16 KB"
+        );
+    }
+
+    #[test]
+    fn frontmatter_with_anchor_but_no_alias_still_parses() {
+        let (fm, body) = parse_skill_file("---\nname: &n a\ndescription: d\n---\nBody\n").unwrap();
+        assert_eq!((fm.name.as_str(), fm.description.as_str()), ("a", "d"));
+        assert_eq!(body, "Body\n");
     }
 
     #[test]
