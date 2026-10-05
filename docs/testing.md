@@ -16,7 +16,7 @@ cargo nextest run --workspace --features embedded-test-db --profile ci
 cargo clippy --workspace -- -D warnings
 ```
 
-Locally, use `make test` (same flags; install [cargo-nextest](https://nexte.st) or it falls back to the slow serial runner). First run may download Postgres binaries (network once); later runs use cache.
+Locally, use `make test` (same flags; install [cargo-nextest](https://nexte.st) with `make tools` or it falls back to the slow serial runner). First run may download Postgres binaries (network once); later runs use cache.
 
 For host `make migrate` / dev server, ensure `config.toml` (or `DATABASE_URL`) matches the Postgres you started: `compose-up` → `:5432`, `compose-local-up` → `:5433`.
 
@@ -70,11 +70,11 @@ make test
 | Cause | Effect |
 |-------|--------|
 | **Many integration binaries** | Each links the full server; cold compile is ~2 min |
-| **Serial runner** | `cargo test -- --test-threads 1` runs ~1100 tests one by one (~6 min); nextest runs them in parallel (~1 min on 16 cores) |
+| **Serial runner** | `cargo test -- --test-threads 1` runs ~1100 tests one by one (~6 min); nextest runs them in parallel (~25 s on 16 cores) |
 | **Password hashing** | Argon2 is unusably slow unoptimized and every integration test logs in, so the root `Cargo.toml` builds `argon2`/`blake2` at `opt-level = 3` in the dev profile |
 | **Git-heavy tests** (`integration_plugins`, `integration_repo_git`) | Create and clone real repos, ~1 s each |
 
-**Typical wall times** (warm build, 16 cores): `make test` ~1 min of test execution; serial fallback ~6 min.
+**Typical wall times** (warm build, 16 cores): `make test` ~25 s of test execution; serial fallback ~6 min.
 
 **Agent / OpenCode runs:** prefer fast iteration during a ticket:
 

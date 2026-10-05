@@ -11,7 +11,10 @@ Single guide for day-to-day development, shipping versions, and how end users ge
 | Tool | Purpose |
 |------|---------|
 | Rust (stable) + `cargo` | API, CLI |
-| `cargo-watch` | `make server-dev` hot reload (`cargo install cargo-watch`) |
+| `cargo-nextest` | Parallel `make test` / `make test-smoke`; without it they fall back to the slow serial runner |
+| `cargo-watch` | `make server-dev` hot reload |
+
+Install the cargo tools with `make tools` (`cargo install --locked cargo-nextest cargo-watch`; prebuilt nextest binaries: [nexte.st](https://nexte.st/docs/installation/pre-built-binaries/)).
 | Node.js 22 + Yarn | Web SPA and desktop shell (`corepack enable` or install Yarn) |
 | Docker + Compose | Postgres and/or full stack |
 

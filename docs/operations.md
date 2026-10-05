@@ -103,13 +103,14 @@ Two conditions stop the server at startup (`AppState::init_plugins`): the config
 | Target | What it does |
 |--------|----------------|
 | `make compose-local-up` / `down` | Local Postgres (:5433) |
+| `make tools` | Install cargo-nextest + cargo-watch |
 | `make server-dev` | API + cargo-watch |
 | `make compose-up` / `down` | Full Docker stack |
 | `make migrate` / `bootstrap` | Host CLI (reads `./config.toml`) |
 | `make web-dev` / `web-build` | Vite dev / production build |
 | `make desktop` / `desktop-test` | Electron dev shell (needs web on :5001) / desktop unit tests + shell smoke |
 | `make desktop-dist-dir` / `desktop-smoke` | Unpacked desktop package under `desktop/dist/` (`POSTGRES_DIR=` skips the Postgres download) / headless smoke against it |
-| `make test` / `test-unit` / `test-smoke` | Rust tests |
+| `make test` / `test-unit` / `test-smoke` | Rust tests (parallel with cargo-nextest) |
 | `make clippy` / `make clean` | Lint / reclaim `target/` |
 | `make release-tar` | Release tarball → `dist/` |
 | `make e2e-smoke*` | Browser/stack smokes |

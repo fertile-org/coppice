@@ -13,7 +13,7 @@ BOOTSTRAP_PASSWORD = changeme
 export COPPICE_UID ?= $(shell id -u)
 export COPPICE_GID ?= $(shell id -g)
 
-.PHONY: compose-up compose-down compose-local-up compose-local-down server server-dev test test-unit test-smoke test-pg-reset clippy clean migrate bootstrap web-install web-test web-dev web-build desktop desktop-test desktop-dist-dir desktop-smoke e2e-smoke e2e-smoke-m03 e2e-smoke-m04 e2e-smoke-m05 e2e-smoke-m06 e2e-smoke-m06-knowledge e2e-smoke-m09 e2e-smoke-m10 benchmark-m06-knowledge-retrieval release-tar
+.PHONY: compose-up compose-down compose-local-up compose-local-down server server-dev tools test test-unit test-smoke test-pg-reset clippy clean migrate bootstrap web-install web-test web-dev web-build desktop desktop-test desktop-dist-dir desktop-smoke e2e-smoke e2e-smoke-m03 e2e-smoke-m04 e2e-smoke-m05 e2e-smoke-m06 e2e-smoke-m06-knowledge e2e-smoke-m09 e2e-smoke-m10 benchmark-m06-knowledge-retrieval release-tar
 
 CARGO_TEST = cargo test --features embedded-test-db
 
@@ -56,6 +56,10 @@ migrate:
 
 bootstrap:
 	cargo run -p coppice-cli -- bootstrap admin --email $(BOOTSTRAP_EMAIL) --password $(BOOTSTRAP_PASSWORD)
+
+# Cargo dev tools: nextest (parallel tests), cargo-watch (server-dev).
+tools:
+	cargo install --locked cargo-nextest cargo-watch
 
 # Full suite in parallel via cargo-nextest (one process and database per test, ~1 min warm).
 # Falls back to the serial cargo test runner when nextest is not installed.
