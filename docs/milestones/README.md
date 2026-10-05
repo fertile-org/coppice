@@ -15,7 +15,8 @@ cli/      # Rust operator CLI (`coppice`)
 desktop/  # Electron shell + installer packaging
 deploy/   # docker-compose + Dockerfiles
 e2e/      # browser test scripts
-docs/     # philosophy + milestone specs
+docs/     # contributor docs (philosophy, milestones, development)
+website/  # Astro marketing site + user docs (M12)
 ```
 
 See the [milestone strategy](../superpowers/specs/2026-06-07-coppice-milestone-strategy-design.md) for full layout and package boundaries.
@@ -25,7 +26,7 @@ See the [milestone strategy](../superpowers/specs/2026-06-07-coppice-milestone-s
 1. Read the [milestone strategy](../superpowers/specs/2026-06-07-coppice-milestone-strategy-design.md) for overall decisions.
 2. Implement milestones **in order** — each builds on the prior.
 3. Do not skip acceptance criteria; cumulative `docker compose up` must work after each milestone.
-4. Use `MockProvider` for all automated agent tests until real CLI adapters are configured manually.
+4. Use `MockProvider` for automated agent tests, and for Compose/dev builds that enable the `mock-provider` feature. Desktop installers and release builds do not ship it ([mock provider](../providers/mock.md)). Real CLI adapters are configured manually.
 
 ## Milestones
 
@@ -37,15 +38,16 @@ See the [milestone strategy](../superpowers/specs/2026-06-07-coppice-milestone-s
 | M04 | [M04-live-console.md](./M04-live-console.md) | Live terminal, WebSocket, log artifacts |
 | M05 | [M05-workflow-and-collaboration.md](./M05-workflow-and-collaboration.md) | Workflow rules, mentions, final review |
 | M06 | [M06-knowledge-and-learning.md](./M06-knowledge-and-learning.md) | Knowledge retrieval (now full-text search), learning inbox |
-| M07 | [M07-trust-and-signals.md](./M07-trust-and-signals.md) | Git/PR actions + encrypted forge secrets (sandbox/signals split to M12/M13) |
+| M07 | [M07-trust-and-signals.md](./M07-trust-and-signals.md) | Git/PR actions + encrypted forge secrets (sandbox/signals split to M13/M14) |
 | M08 | [M08-connector-operator-cli.md](./M08-connector-operator-cli.md) | Managed HOME volume + `coppice connector` install/setup/doctor |
 | M09 | [M09-agent-chat.md](./M09-agent-chat.md) | Human↔agent chat sessions, conversation profile, cwd + write-denial |
 | M10 | [M10-plugins.md](./M10-plugins.md) | Plugins: Coppice MCP gateway, core tools, skills, plugin MCP servers; tool-first context |
 | M11 | [M11-desktop-release.md](./M11-desktop-release.md) | Desktop app: bundled Postgres + server, Electron shell, `.dmg` / `.deb` from a git tag |
-| M12 | [M12-security-and-sandbox.md](./M12-security-and-sandbox.md) | Capabilities, sandbox profiles, tool policy, scoped secrets, guided unblock, audit log |
-| M13 | [M13-role-owner-agents.md](./M13-role-owner-agents.md) | Role-owner agents: observation runs, workspace signals, Workspace Inbox |
+| M12 | [M12-beta-release.md](./M12-beta-release.md) | Public beta: Astro site + user docs, Electron-first README, macOS arm64 `.dmg` and Linux x64 `.deb`, honest Beta labeling |
+| M13 | [M13-security-and-sandbox.md](./M13-security-and-sandbox.md) | Capabilities, sandbox profiles, tool policy, scoped secrets, guided unblock, audit log |
+| M14 | [M14-role-owner-agents.md](./M14-role-owner-agents.md) | Role-owner agents: observation runs, workspace signals, Workspace Inbox |
 
-M01–M09 are complete. M10 and M11 are implemented pending manual acceptance (M11 also needs its live tag check). **Next:** M12 → M13.
+M01–M09 are complete. M10 and M11 are implemented pending manual acceptance (M10 connector verification; M11 live tag check and a real-connector install — MockProvider is not in desktop or release builds). **Next:** M12 → M13 → M14.
 
 ## Philosophy references
 

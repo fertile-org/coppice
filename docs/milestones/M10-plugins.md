@@ -8,8 +8,8 @@ Today each run gets a long `context.md` that pre-loads ticket data and spells ou
 
 ## Why before Security and Role-owner agents
 
-- M12 (Security & sandbox) enforces policy at the gateway — one choke point instead of per-connector rules.
-- M13 (Role-owner agents) raises signals through a tool, not another bespoke result-contract field.
+- M13 (Security & sandbox) enforces policy at the gateway — one choke point instead of per-connector rules.
+- M14 (Role-owner agents) raises signals through a tool, not another bespoke result-contract field.
 
 ## Product scope
 
@@ -29,8 +29,8 @@ Today each run gets a long `context.md` that pre-loads ticket data and spells ou
 - Plugin storage; plugin `commands/`, `agents/`, `hooks/` (listed as unsupported)
 - Marketplaces, signing
 - Personal access tokens / external agents using Coppice MCP (token layer designed to allow it later)
-- Sandboxing plugin processes, per-tool grants, secret scoping (M12)
-- Signals / observation tools (M13)
+- Sandboxing plugin processes, per-tool grants, secret scoping (M13)
+- Signals / observation tools (M14)
 
 ## Dependencies
 
@@ -57,5 +57,7 @@ Open (2026-10-03): live verification of the `claude-code`, `codex`, and `kilo-co
 
 ## References
 
-- [M12 — Security & sandbox](./M12-security-and-sandbox.md)
+- [M12 — Beta Release](./M12-beta-release.md)
+- [M13 — Security & sandbox](./M13-security-and-sandbox.md)
+- [M14 — Role-owner agents](./M14-role-owner-agents.md)
 - [Model Context Protocol](https://modelcontextprotocol.io)

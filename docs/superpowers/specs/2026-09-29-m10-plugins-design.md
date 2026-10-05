@@ -20,7 +20,7 @@ Every connector moves to **one tool-first path**: a slim `context.md` plus `resu
 ## Goals
 
 - Cut per-run context substantially (target ≥50% for `full` on fixture tickets) by moving data behind tools and the result contract into a validated tool schema.
-- One enforcement and audit point for all agent tool use, so M11 policy lands without rework.
+- One enforcement and audit point for all agent tool use, so M13 policy lands without rework. (This design originally said M11, before Desktop and Beta Release shifted the numbers.)
 - Plugin UX: pick plugin directories, install from git, enable, assign to agents, see what each run used.
 - Work identically in Docker Compose, desktop (host process), and future cloud.
 - Keep workflow semantics exactly as today (M05 result contract, M06 inbox approval, M09 chat write-denial).
@@ -32,8 +32,8 @@ Every connector moves to **one tool-first path**: a slim `context.md` plus `resu
 - Plugin `commands/`, `agents/`, `hooks/` — detected and listed as unsupported, never executed.
 - Marketplaces, plugin signing, remote catalogs.
 - Personal access tokens / external agents using Coppice MCP (token layer is designed to allow it later).
-- Sandboxing plugin processes, per-tool capability grants, secret scoping (M11).
-- Signals and observation tools (M12).
+- Sandboxing plugin processes, per-tool capability grants, secret scoping (M13 — this design originally said M11).
+- Signals and observation tools (M14 — this design originally said M12).
 
 ## Current state (baseline)
 

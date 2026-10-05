@@ -295,7 +295,7 @@ Packaged builds have no source tree, so the two production uses of `CARGO_MANIFE
 
 **Files:**
 - Create: `docs/milestones/M11-desktop-release.md` (goal, link to spec, the spec's acceptance criteria as checkboxes)
-- Rename: `docs/milestones/M11-security-and-sandbox.md` → `M12-security-and-sandbox.md`; `M12-role-owner-agents.md` → `M13-role-owner-agents.md` (update their titles)
+- Rename: `docs/milestones/M11-security-and-sandbox.md` → `M12-security-and-sandbox.md`; `M12-role-owner-agents.md` → `M13-role-owner-agents.md` (update their titles). Superseded 2026-10-05: Beta Release is `M12-beta-release.md`; these files are now `M13-security-and-sandbox.md` and `M14-role-owner-agents.md`.
 - Modify: `docs/milestones/README.md`, `AGENTS.md` (status / next-implement lines and links), any doc linking the old filenames (`rg -l "M11-security|M12-role"`)
 - Modify: `docs/development.md` (replace "Desktop release" and "Desktop install" with: cutting a release, enabling macOS signing (the five secrets), end-user install for `.dmg` incl. unsigned `xattr` step and `.deb` via `sudo apt install ./Coppice-*.deb`)
 - Modify: `desktop/README.md` (dev vs packaged run, `make desktop-dist-dir`)

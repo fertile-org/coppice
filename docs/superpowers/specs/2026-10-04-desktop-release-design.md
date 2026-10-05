@@ -1,6 +1,6 @@
 # Desktop release (.dmg / .deb from a git tag) — design
 
-**Status:** approved design 2026-10-04; not implemented. Becomes milestone **M11 — Desktop release**; Security & sandbox and Role-owner agents move to M12 and M13.
+**Status:** approved design 2026-10-04; implemented as [M11 — Desktop release](../../milestones/M11-desktop-release.md). **Numbering (2026-10-05):** Beta Release is [M12](../../milestones/M12-beta-release.md); Security & sandbox is [M13](../../milestones/M13-security-and-sandbox.md); Role-owner agents are [M14](../../milestones/M14-role-owner-agents.md). The renumber in this spec (Security → M12, Role-owners → M13) is the earlier move, superseded by that insert.
 
 ## Why
 
@@ -168,7 +168,7 @@ Pinned in `desktop/postgres.lock.json`: version, and per target the download URL
 
 ## Docs
 
-- New `docs/milestones/M11-desktop-release.md`; rename Security & sandbox → M12 and Role-owner agents → M13 (files, `docs/milestones/README.md`, `AGENTS.md`, cross-links).
+- New `docs/milestones/M11-desktop-release.md`; rename Security & sandbox → M12 and Role-owner agents → M13 (files, `docs/milestones/README.md`, `AGENTS.md`, cross-links). Superseded 2026-10-05: those milestones are now M13 and M14, with Beta Release as M12.
 - `docs/development.md`: replace "Desktop release" / "Desktop install" with how to cut a release (tag, review draft, publish), how to enable macOS signing (which secrets), and end-user install steps.
 - `TODOS.md`: tick Phase 2 and Phase 3 items covered here.
 - Drop the pgvector requirement from install docs and compose.
