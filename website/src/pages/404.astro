@@ -1,0 +1,18 @@
+---
+import Base from '../layouts/Base.astro';
+import { withBase } from '../lib/url';
+---
+
+<Base title="Page not found" description="This page is not part of the Coppice site.">
+  <div class="shell landing">
+    <header class="promise">
+      <h1>Page not found.</h1>
+      <p class="lede">This page is not part of the Coppice site.</p>
+      <p class="closer-links">
+        <a href={withBase('/')}>Home</a>
+        <span aria-hidden="true">·</span>
+        <a href={withBase('/docs')}>Docs</a>
+      </p>
+    </header>
+  </div>
+</Base>

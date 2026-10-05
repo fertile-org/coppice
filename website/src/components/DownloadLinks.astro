@@ -1,0 +1,23 @@
+---
+import { withBase } from '../lib/url';
+
+interface Props {
+  showDocs?: boolean;
+}
+
+const { showDocs = false } = Astro.props;
+
+// Placeholders until the beta tag is published. Point these at the GitHub Release
+// assets only — macOS arm64 .dmg and Linux x64 .deb:
+//   Coppice-<version>-mac-arm64.dmg
+//   Coppice-<version>-linux-x64.deb
+// Do not add Windows, macOS Intel, or Linux arm64 links.
+const macHref = '#';
+const linuxHref = '#';
+---
+
+<div class="download-row">
+  <a class="btn" href={macHref}>Download for macOS (Apple Silicon)</a>
+  <a class="btn btn-secondary" href={linuxHref}>Download for Linux (.deb)</a>
+  {showDocs && <a class="text-link" href={withBase('/docs')}>Read the docs</a>}
+</div>
