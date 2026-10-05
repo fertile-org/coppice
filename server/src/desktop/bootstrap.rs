@@ -114,7 +114,9 @@ fn generated_config(layout: &DataLayout) -> io::Result<String> {
             table(vec![
                 (
                     "default_connector",
-                    toml::Value::String(coppice_connectors::MOCK.into()),
+                    // A real connector id. It stays unregistered until the user
+                    // sets `enabled = true`. Desktop builds have no mock connector.
+                    toml::Value::String(coppice_connectors::CLAUDE_CODE.into()),
                 ),
                 ("worktrees_path", path(&layout.worktrees)),
             ]),
@@ -129,7 +131,10 @@ fn generated_config(layout: &DataLayout) -> io::Result<String> {
     Ok(format!(
         "# Coppice desktop configuration. Edits here survive upgrades.\n\
          # Secrets (session secret, encryption key, passwords) live in secrets/, not here.\n\
-         # The server port, database URL and auth mode are set by the desktop app at startup.\n\n\
+         # The server port, database URL and auth mode are set by the desktop app at startup.\n\
+         # This build has no mock connector. Enable a real one, for example:\n\
+         # [agent.connectors.claude-code]\n\
+         # enabled = true\n\n\
          {body}"
     ))
 }
@@ -212,7 +217,11 @@ mod tests {
             Path::new(&cfg.mcp.builtin_plugins_dir),
             layout.builtin_plugins.as_path()
         );
-        assert_eq!(cfg.agent.default_connector, "mock");
+        assert_eq!(cfg.agent.default_connector, "claude-code");
+        assert!(
+            !contents.contains("default_connector = \"mock\""),
+            "desktop config must not select the mock connector"
+        );
     }
 
     #[test]

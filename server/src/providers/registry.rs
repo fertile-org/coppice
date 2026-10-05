@@ -1,17 +1,21 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use coppice_connectors::{CLAUDE_CODE, CODEX, CURSOR, KILO_CODE, MOCK, OPENCODE};
+#[cfg(feature = "mock-provider")]
+use coppice_connectors::MOCK;
+use coppice_connectors::{CLAUDE_CODE, CODEX, CURSOR, KILO_CODE, OPENCODE};
 
 use crate::config::AppConfig;
 use crate::providers::claude_code::ClaudeCodeProvider;
 use crate::providers::codex::CodexProvider;
 use crate::providers::cursor::CursorProvider;
 use crate::providers::kilo_code::KiloCodeProvider;
+#[cfg(feature = "mock-provider")]
 use crate::providers::mock::MockProvider;
+#[cfg(feature = "mock-provider")]
+use crate::providers::models::MockModels;
 use crate::providers::models::{
-    ClaudeCodeModels, CodexModels, CursorModels, KiloCodeModels, MockModels, ModelCatalog,
-    OpenCodeModels,
+    ClaudeCodeModels, CodexModels, CursorModels, KiloCodeModels, ModelCatalog, OpenCodeModels,
 };
 use crate::providers::opencode::OpenCodeProvider;
 use crate::providers::AgentProvider;
@@ -35,6 +39,7 @@ pub struct ConnectorFactory {
 
 /// One entry per `coppice_connectors` descriptor.
 pub static FACTORIES: &[ConnectorFactory] = &[
+    #[cfg(feature = "mock-provider")]
     ConnectorFactory {
         id: MOCK,
         build: build_mock,
@@ -61,6 +66,7 @@ pub static FACTORIES: &[ConnectorFactory] = &[
     },
 ];
 
+#[cfg(feature = "mock-provider")]
 fn build_mock(_config: &AppConfig, _deps: &FactoryDeps) -> Option<BuiltConnector> {
     Some(BuiltConnector {
         provider: Arc::new(MockProvider::default()),
@@ -283,11 +289,14 @@ mod tests {
         let registry = ConnectorRegistry::from_config(&config, runs());
         let models = registry.models("opencode").expect("opencode catalog");
         assert_eq!(models.model_providers(), ["zai-coding-plan".to_string()]);
+        #[cfg(feature = "mock-provider")]
         assert!(registry
             .models("mock")
             .expect("mock catalog")
             .model_providers()
             .is_empty());
+        #[cfg(not(feature = "mock-provider"))]
+        assert!(registry.models("mock").is_none());
         assert!(registry.models("cursor").is_none());
     }
 
@@ -295,7 +304,10 @@ mod tests {
     fn lists_configured_provider_ids() {
         let config = AppConfig::load_defaults().expect("config");
         let registry = ConnectorRegistry::from_config(&config, runs());
+        #[cfg(feature = "mock-provider")]
         assert!(registry.has("mock"));
+        #[cfg(not(feature = "mock-provider"))]
+        assert!(!registry.has("mock"));
         assert!(!registry.has("opencode"));
     }
 
@@ -383,6 +395,21 @@ mod tests {
         let registry = ConnectorRegistry::from_config(&config, runs());
         assert!(registry.has("cursor"));
         assert_eq!(providers_of(&registry, "cursor"), vec!["cursor"]);
+    }
+
+    /// End-user binaries are built without `mock-provider`. The connector must
+    /// be absent from the registry and from the descriptor list.
+    #[cfg(not(feature = "mock-provider"))]
+    #[test]
+    fn release_build_does_not_register_mock() {
+        let config = AppConfig::load_defaults().expect("config");
+        let registry = ConnectorRegistry::from_config(&config, runs());
+        assert!(!registry.has(coppice_connectors::MOCK));
+        assert!(coppice_connectors::get(coppice_connectors::MOCK).is_none());
+        assert!(registry
+            .configured_ids()
+            .iter()
+            .all(|id| id != coppice_connectors::MOCK));
     }
 
     #[test]

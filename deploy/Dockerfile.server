@@ -6,7 +6,9 @@ COPY connectors ./connectors
 COPY db-migrations ./db-migrations
 COPY server ./server
 COPY cli ./cli
-RUN cargo build --release -p coppice-server -p coppice-cli
+# Compose is the dev/CI stack and runs MockProvider smokes. Desktop installers
+# and `make release-tar` omit this feature so end-user binaries cannot run it.
+RUN cargo build --release -p coppice-server -p coppice-cli --features mock-provider
 
 FROM node:22-bookworm AS node
 RUN corepack enable && corepack prepare yarn@1.22.22 --activate

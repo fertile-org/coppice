@@ -157,6 +157,7 @@ pub struct Capabilities {
 }
 
 const CONNECTORS: &[ConnectorDescriptor] = &[
+    #[cfg(feature = "mock")]
     ConnectorDescriptor {
         id: MOCK,
         display_name: "Mock",
@@ -324,10 +325,11 @@ mod tests {
         let ids: Vec<&str> = all().iter().map(|d| d.id).collect();
         let unique: HashSet<&str> = ids.iter().copied().collect();
         assert_eq!(unique.len(), ids.len(), "duplicate connector ids: {ids:?}");
-        assert_eq!(
-            ids,
-            vec![MOCK, CURSOR, CLAUDE_CODE, CODEX, KILO_CODE, OPENCODE]
-        );
+        #[cfg(feature = "mock")]
+        let expected = vec![MOCK, CURSOR, CLAUDE_CODE, CODEX, KILO_CODE, OPENCODE];
+        #[cfg(not(feature = "mock"))]
+        let expected = vec![CURSOR, CLAUDE_CODE, CODEX, KILO_CODE, OPENCODE];
+        assert_eq!(ids, expected);
         assert_eq!(
             [MOCK, CLAUDE_CODE, CURSOR, CODEX, KILO_CODE, OPENCODE],
             [
@@ -375,6 +377,7 @@ mod tests {
         use ConsoleKind::*;
         use McpWiring::*;
         use ToolNameStyle::*;
+        #[cfg(feature = "mock")]
         assert_row(
             MOCK,
             MockHttp,
@@ -429,12 +432,17 @@ mod tests {
 
     #[test]
     fn install_info_moved_verbatim() {
-        let mock = get(MOCK).unwrap();
-        assert_eq!(mock.binary, "mock");
-        assert!(mock.default_model_providers.is_empty());
-        assert_eq!(mock.install.auth_hint, "built-in; no setup");
-        assert!(mock.install.auth_paths.is_empty());
-        assert!(mock.install.auth_env.is_empty());
+        #[cfg(feature = "mock")]
+        {
+            let mock = get(MOCK).unwrap();
+            assert_eq!(mock.binary, "mock");
+            assert!(mock.default_model_providers.is_empty());
+            assert_eq!(mock.install.auth_hint, "built-in; no setup");
+            assert!(mock.install.auth_paths.is_empty());
+            assert!(mock.install.auth_env.is_empty());
+        }
+        #[cfg(not(feature = "mock"))]
+        assert!(get(MOCK).is_none());
 
         let cursor = get(CURSOR).unwrap();
         assert_eq!(cursor.binary, "agent");

@@ -126,17 +126,11 @@ fn build_resources(root: &Path, pg_install: &Path) -> PathBuf {
     let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
     let resources = root.join("resources");
     std::fs::create_dir_all(resources.join("web")).unwrap();
-    std::fs::create_dir_all(resources.join("fixtures")).unwrap();
     symlink(pg_install, resources.join("postgres")).unwrap();
     std::fs::write(resources.join("web").join("index.html"), INDEX_HTML).unwrap();
     symlink(
         manifest.join("agent_templates"),
         resources.join("agent-templates"),
-    )
-    .unwrap();
-    symlink(
-        manifest.join("../fixtures/agent-responses"),
-        resources.join("fixtures").join("agent-responses"),
     )
     .unwrap();
     resources

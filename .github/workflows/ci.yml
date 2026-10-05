@@ -28,7 +28,11 @@ jobs:
       - name: Test
         run: cargo test --workspace --features embedded-test-db
       - name: Clippy
-        run: cargo clippy --workspace -- -D warnings
+        run: |
+          cargo clippy --workspace -- -D warnings
+          cargo clippy --workspace --features mock-provider -- -D warnings
+      - name: Release build excludes the mock provider
+        run: cargo test -p coppice-server --lib release_build
 
   web:
     runs-on: ubuntu-latest

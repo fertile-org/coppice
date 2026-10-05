@@ -635,9 +635,12 @@ mod tests {
                 d.id
             );
         }
-        let mock = get(MOCK).unwrap();
-        assert!(mock.install.probe_args.is_empty());
-        assert_eq!(mock.install.docs_url, "");
+        #[cfg(feature = "mock")]
+        {
+            let mock = get(MOCK).unwrap();
+            assert!(mock.install.probe_args.is_empty());
+            assert_eq!(mock.install.docs_url, "");
+        }
         let proves: Vec<&str> = all()
             .iter()
             .filter(|d| d.install.probe_proves_auth)

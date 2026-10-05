@@ -223,8 +223,13 @@ mod tests {
     fn doctor_output_mock() {
         let dir = tempfile::tempdir().unwrap();
         let d = doctor("mock", dir.path(), &[], &[]);
-        assert_eq!(d.lines, vec!["mock: ok (built-in)"]);
-        assert_eq!(d.result, Ok(()));
+        if coppice_connectors::get(coppice_connectors::MOCK).is_some() {
+            assert_eq!(d.lines, vec!["mock: ok (built-in)"]);
+            assert_eq!(d.result, Ok(()));
+        } else {
+            assert!(d.result.is_err(), "release builds do not include mock");
+            assert!(d.lines.is_empty());
+        }
     }
 
     #[test]

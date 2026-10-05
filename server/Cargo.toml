@@ -67,7 +67,11 @@ reqwest-mcp = { package = "reqwest", version = "0.13", default-features = false 
 yaml-rust2 = "0.13.0"
 
 [features]
-embedded-test-db = ["dep:pg-embed", "dep:fs4"]
+# Fixture-driven agent connector. Tests opt in via embedded-test-db. Docker
+# Compose passes it explicitly. Desktop and release-tar builds do not, so
+# MockProvider is neither compiled nor selectable there.
+mock-provider = ["coppice-connectors/mock"]
+embedded-test-db = ["dep:pg-embed", "dep:fs4", "mock-provider"]
 
 [dev-dependencies]
 http = "1"

@@ -1,6 +1,10 @@
 #!/usr/bin/env node
 // Assembles the packaged resources directory (electron-builder extraResources):
-//   <out>/{bin/coppice-server, postgres/{bin,lib,share}, web/, agent-templates/, fixtures/agent-responses/}
+//   <out>/{bin/coppice-server, postgres/{bin,lib,share}, web/, agent-templates/}
+//
+// The server binary must be built without `--features mock-provider`. Fixture
+// responses are not packaged; a binary that still contains the mock provider
+// is rejected.
 //
 // On Linux the shared libraries the Postgres binaries link against are copied
 // into postgres/lib (the server runs them with LD_LIBRARY_PATH=postgres/lib),
@@ -16,7 +20,7 @@
 
 import { spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { chmod, copyFile, cp, lstat, mkdir, open, readdir, rm } from 'node:fs/promises';
+import { chmod, copyFile, cp, lstat, mkdir, open, readFile, readdir, rm } from 'node:fs/promises';
 import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
@@ -151,6 +155,14 @@ export function machoDepProblems({ file, deps, id, rpaths, pgDir, exists }) {
   return problems;
 }
 
+/** Strings that exist only in a server built with the mock provider. */
+export const MOCK_PROVIDER_MARKERS = ['Mock agent starting', 'MOCK_AGENT_RESPONSE', 'built-in; no setup'];
+
+export function mockProviderMarkersIn(binary) {
+  const text = Buffer.isBuffer(binary) ? binary.toString('latin1') : String(binary);
+  return MOCK_PROVIDER_MARKERS.filter((marker) => text.includes(marker));
+}
+
 export function unresolvedMachoMessage(problems) {
   const lines = problems.map(({ file, dep }) => `  ${file} -> ${dep}`);
   return `bundled postgres links libraries outside the bundle (only /usr/lib, /System/Library and postgres/lib are allowed):\n${lines.join('\n')}`;
@@ -278,6 +290,14 @@ export async function assembleResources({
   await rm(out, { recursive: true, force: true });
   await mkdir(join(out, 'bin'), { recursive: true });
 
+  const serverBytes = await readFile(serverBin);
+  const leaked = mockProviderMarkersIn(serverBytes);
+  if (leaked.length > 0) {
+    throw new Error(
+      `coppice-server includes the mock provider (${leaked.join(', ')}). Desktop packages must be built without --features mock-provider`,
+    );
+  }
+
   const server = join(out, 'bin', 'coppice-server');
   await copyFile(serverBin, server);
   await chmod(server, 0o755);
@@ -298,9 +318,6 @@ export async function assembleResources({
 
   await cp(webDist, join(out, 'web'), { recursive: true });
   await cp(join(repoRoot, 'server', 'agent_templates'), join(out, 'agent-templates'), { recursive: true });
-  await cp(join(repoRoot, 'fixtures', 'agent-responses'), join(out, 'fixtures', 'agent-responses'), {
-    recursive: true,
-  });
 }
 
 async function main() {

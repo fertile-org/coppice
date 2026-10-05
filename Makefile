@@ -42,14 +42,14 @@ compose-local-down:
 	$(COMPOSE_LOCAL) down
 
 server:
-	cargo run -p coppice-server
+	cargo run -p coppice-server --features mock-provider
 
 server-dev:
 	@command -v cargo-watch >/dev/null 2>&1 || { \
 		echo "cargo-watch is required for API hot reload. Install with: cargo install cargo-watch"; \
 		exit 1; \
 	}
-	cargo watch -q -c -x 'run -p coppice-server'
+	cargo watch -q -c -x 'run -p coppice-server --features mock-provider'
 
 migrate:
 	cargo run -p coppice-cli -- migrate
@@ -76,6 +76,7 @@ test-pg-reset:
 
 clippy:
 	cargo clippy --workspace -- -D warnings
+	cargo clippy --workspace --features mock-provider -- -D warnings
 
 clean:
 	cargo clean
@@ -102,6 +103,7 @@ desktop-test:
 # POSTGRES_DIR=<dir with bin/lib/share> skips the pinned download (e.g. a pg-embed cache).
 DESKTOP_PG_DIR = $(abspath $(or $(POSTGRES_DIR),desktop/.cache/postgres-host))
 
+# Release binary without mock-provider: assemble-resources rejects a binary that still contains it.
 desktop-dist-dir:
 	cargo build --release --locked -p coppice-server
 	cd web && yarn install --frozen-lockfile && yarn build
