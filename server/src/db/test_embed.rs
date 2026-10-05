@@ -24,9 +24,10 @@ use pg_embed::pg_fetch::{PgFetchSettings, PG_V16};
 use pg_embed::postgres::{PgEmbed, PgSettings};
 
 const TEST_DB: &str = "coppice_test";
-const TEMPLATE_DATABASE_PREFIX: &str = "coppice_template_";
+const TEMPLATE_DATABASE_PREFIX: &str = "coppice_template_v2_";
 const CASE_DATABASE_PREFIX: &str = "coppice_case_";
 const TEST_DATABASE_LOCK: i64 = 0x434f_5050_4943_4554;
+const CASE_DATABASE_GRACE: Duration = Duration::from_secs(60);
 const TEST_USER: &str = "coppice";
 const TEST_PASSWORD: &str = "coppice";
 
@@ -95,21 +96,40 @@ async fn template_database(session_url: &str) -> anyhow::Result<String> {
                 "{TEMPLATE_DATABASE_PREFIX}{:016x}",
                 crate::db::pool::test_migration_fingerprint()
             );
+            // The template only appears under its final name once fully
+            // migrated, so cloning processes never connect to it: Postgres
+            // refuses `CREATE DATABASE ... TEMPLATE` while it has connections.
             let mut admin = admin_connection(session_url).await?;
-            acquire_test_database_lock(&mut admin).await?;
-
-            if !database_exists(&mut admin, &template).await? {
-                create_database(&mut admin, &template, None).await?;
+            if database_exists(&mut admin, &template).await? {
+                return Ok(template);
             }
 
-            let pool = connect_database_pool(session_url, &template, 2)
+            acquire_test_database_lock(&mut admin).await?;
+            if database_exists(&mut admin, &template).await? {
+                return Ok(template);
+            }
+
+            let building = format!("{template}_building");
+            drop_database(&mut admin, &building).await?;
+            create_database(&mut admin, &building, None).await?;
+            let pool = connect_database_pool(session_url, &building, 2)
                 .await
-                .with_context(|| format!("connect test template database {template}"))?;
+                .with_context(|| format!("connect test template database {building}"))?;
             let migration_result = crate::db::pool::migrate_pool(&pool)
                 .await
-                .with_context(|| format!("migrate test template database {template}"));
+                .with_context(|| format!("migrate test template database {building}"));
             pool.close().await;
             migration_result?;
+
+            let rename = format!(
+                "ALTER DATABASE {} RENAME TO {}",
+                quote_identifier(&building),
+                quote_identifier(&template)
+            );
+            sqlx::query(&rename)
+                .execute(&mut admin)
+                .await
+                .with_context(|| format!("publish test template database {template}"))?;
 
             Ok::<String, anyhow::Error>(template)
         })
@@ -119,11 +139,11 @@ async fn template_database(session_url: &str) -> anyhow::Result<String> {
 
 async fn clone_case_database(session_url: &str, template: &str) -> anyhow::Result<PgPool> {
     let mut admin = admin_connection(session_url).await?;
-    acquire_test_database_lock(&mut admin).await?;
     cleanup_inactive_case_databases(&mut admin).await?;
 
     let case = format!(
-        "{CASE_DATABASE_PREFIX}{}_{}",
+        "{CASE_DATABASE_PREFIX}{}_{}_{}",
+        unix_millis(),
         std::process::id(),
         CASE_COUNTER.fetch_add(1, Ordering::Relaxed)
     );
@@ -186,6 +206,31 @@ async fn database_exists(admin: &mut PgConnection, database: &str) -> anyhow::Re
         .with_context(|| format!("check whether test database {database} exists"))
 }
 
+fn unix_millis() -> u128 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_millis())
+        .unwrap_or_default()
+}
+
+/// A case database is stale once it has no connections and is older than
+/// `CASE_DATABASE_GRACE` — younger ones may belong to a test that created
+/// it but has not connected yet. Names without a timestamp are stale.
+fn case_database_is_stale(name: &str, now_millis: u128) -> bool {
+    let created = name
+        .strip_prefix(CASE_DATABASE_PREFIX)
+        .and_then(|rest| rest.split('_').next())
+        .and_then(|millis| millis.parse::<u128>().ok());
+    match created {
+        Some(created) if created > 1_000_000_000_000 => {
+            now_millis.saturating_sub(created) > CASE_DATABASE_GRACE.as_millis()
+        }
+        _ => true,
+    }
+}
+
+/// Lock-free so parallel test processes can clone concurrently; a racing
+/// drop of the same database is harmless and ignored.
 async fn cleanup_inactive_case_databases(admin: &mut PgConnection) -> anyhow::Result<()> {
     let inactive: Vec<String> = sqlx::query_scalar(
         r#"
@@ -204,8 +249,11 @@ async fn cleanup_inactive_case_databases(admin: &mut PgConnection) -> anyhow::Re
     .await
     .context("list inactive embedded test databases")?;
 
+    let now = unix_millis();
     for database in inactive {
-        drop_database(admin, &database).await?;
+        if case_database_is_stale(&database, now) {
+            let _ = drop_database(admin, &database).await;
+        }
     }
     Ok(())
 }
@@ -430,5 +478,16 @@ mod tests {
             .await
             .expect("count second boards");
         assert_eq!(second_count, 0);
+    }
+
+    #[test]
+    fn case_database_staleness_honours_grace_and_legacy_names() {
+        let now = 1_800_000_000_000u128;
+        let fresh = format!("{}{}_42_0", super::CASE_DATABASE_PREFIX, now - 5_000);
+        let old = format!("{}{}_42_0", super::CASE_DATABASE_PREFIX, now - 120_000);
+        let legacy = format!("{}4242_7", super::CASE_DATABASE_PREFIX);
+        assert!(!super::case_database_is_stale(&fresh, now));
+        assert!(super::case_database_is_stale(&old, now));
+        assert!(super::case_database_is_stale(&legacy, now));
     }
 }

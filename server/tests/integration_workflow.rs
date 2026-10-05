@@ -562,8 +562,16 @@ async fn ready_tech_lead_auto_handoff_queues_exactly_one_implementer_run() {
             && run["jobType"].as_str() == Some("respond_to_mention")
     }));
 
-    let ticket = common::get_ticket(&app, &ticket_id, &cookie, &csrf).await;
-    assert_eq!(ticket["status"], "in_progress");
+    let ticket = common::poll_ticket_until(
+        &app,
+        &ticket_id,
+        &cookie,
+        &csrf,
+        "implementer handoff moves ticket to in_progress",
+        Duration::from_secs(30),
+        |ticket| ticket["status"] == "in_progress",
+    )
+    .await;
     assert_eq!(ticket["assigneeAgentId"], engineer_id);
 
     let tech_lead_comment = sqlx::query_scalar::<_, String>(

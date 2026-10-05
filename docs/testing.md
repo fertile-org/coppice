@@ -12,11 +12,11 @@ Rust tests use **embedded PostgreSQL** (`pg-embed`) — no Docker Postgres servi
 export SESSION_SECRET=ci-test-secret
 export COPPICE_BOOTSTRAP_PASSWORD=changeme
 
-cargo test --workspace --features embedded-test-db
+cargo nextest run --workspace --features embedded-test-db --profile ci
 cargo clippy --workspace -- -D warnings
 ```
 
-Locally, use `make test` (same flags). First run may download Postgres binaries (network once); later runs use cache.
+Locally, use `make test` (same flags; install [cargo-nextest](https://nexte.st) or it falls back to the slow serial runner). First run may download Postgres binaries (network once); later runs use cache.
 
 For host `make migrate` / dev server, ensure `config.toml` (or `DATABASE_URL`) matches the Postgres you started: `compose-up` → `:5432`, `compose-local-up` → `:5433`.
 
@@ -54,7 +54,8 @@ cargo test -p coppice-server --features embedded-test-db --test integration_chat
 - **No Docker Postgres required** for `cargo test` / `make test`. Tests start in-process PostgreSQL via `pg-embed` (real SQL, same migrations).
 - Escape hatch for debugging against compose: `COPPICE_TEST_USE_EXTERNAL_DB=1` + `DATABASE_URL=postgres://coppice:coppice@127.0.0.1:5433/coppice`. This path uses the caller's shared database, so run database tests serially.
 - One embedded PostgreSQL process is shared across test binaries. Migrations run once per fingerprinted template; each pool clones a fresh database from that template, so library tests are safe under Rust's parallel runner.
-- `DB_TEST_LOCK` still serializes integration cases that also coordinate process environment or filesystem state; `truncate_workspace()` preserves the external-database escape hatch.
+- `make test` and CI use cargo-nextest, which runs every test in its own process, so tests that set process environment (`MOCK_AGENT_RESPONSE`, …) don't race. `DB_TEST_LOCK` only matters under plain `cargo test`, which runs a binary's tests as threads of one process; `truncate_workspace()` preserves the external-database escape hatch.
+- `.config/nextest.toml` kills any test still running after 2 minutes, so a hang fails the run instead of stalling it.
 - Auth: `login_and_csrf()` performs bootstrap login, returns session cookie + CSRF token
 - Artifact dir: `/tmp/coppice-test-artifacts`
 
@@ -64,23 +65,22 @@ Run all server tests:
 make test
 ```
 
-### Why `cargo test --workspace` is slow
+### Test speed
 
 | Cause | Effect |
 |-------|--------|
-| **12 integration binaries** | Each links the full server; cold compile is minutes |
-| **`DB_TEST_LOCK`** | Integration cases that share process or filesystem state still run serially within each binary |
-| **Workflow pipeline test** (`scope_b_mock_pipeline_reaches_final_review`) | Full multi-agent mock pipeline ~30s alone |
-| **Agent-run tests** | Spawn job workers + poll for run completion |
-| **Postgres down / wrong port** | Eliminated: embedded PG is always up when `embedded-test-db` feature is enabled |
+| **Many integration binaries** | Each links the full server; cold compile is ~2 min |
+| **Serial runner** | `cargo test -- --test-threads 1` runs ~1100 tests one by one (~6 min); nextest runs them in parallel (~1 min on 16 cores) |
+| **Password hashing** | Argon2 is unusably slow unoptimized and every integration test logs in, so the root `Cargo.toml` builds `argon2`/`blake2` at `opt-level = 3` in the dev profile |
+| **Git-heavy tests** (`integration_plugins`, `integration_repo_git`) | Create and clone real repos, ~1 s each |
 
-**Typical wall times** (Postgres up, warm build): unit tests ~1 min; full integration suite ~15–25 min.
+**Typical wall times** (warm build, 16 cores): `make test` ~1 min of test execution; serial fallback ~6 min.
 
-**Agent / OpenCode runs:** do not use `make test` during a ticket. Use fast iteration instead:
+**Agent / OpenCode runs:** prefer fast iteration during a ticket:
 
 ```bash
 make test-unit              # parallel lib tests only (~seconds)
-make test-smoke             # lib + 3 integration smoke files (~<60s warm)
+make test-smoke             # lib + 3 integration smoke files (~10s warm with nextest)
 cargo test -p coppice-server result_contract   # one module
 cargo test -p coppice-server --test integration_tickets  # one integration file
 make web-test               # frontend unit tests

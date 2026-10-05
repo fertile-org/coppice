@@ -57,9 +57,15 @@ migrate:
 bootstrap:
 	cargo run -p coppice-cli -- bootstrap admin --email $(BOOTSTRAP_EMAIL) --password $(BOOTSTRAP_PASSWORD)
 
-# Full suite — one shared embedded Postgres for all binaries (~2–3 min warm).
+# Full suite in parallel via cargo-nextest (one process and database per test, ~1 min warm).
+# Falls back to the serial cargo test runner when nextest is not installed.
 test:
-	$(CARGO_TEST) --workspace -- --test-threads 1
+	@if cargo nextest --version >/dev/null 2>&1; then \
+		cargo nextest run --features embedded-test-db --workspace; \
+	else \
+		echo "cargo-nextest not found; running serially (install: https://nexte.st)"; \
+		$(CARGO_TEST) --workspace -- --test-threads 1; \
+	fi
 
 # Unit tests only — isolated databases allow default parallelism (~5–15s warm).
 test-unit:
@@ -67,8 +73,13 @@ test-unit:
 
 # Smoke integration — lib + health + comments + tickets (~target <60s warm).
 test-smoke:
-	$(CARGO_TEST) --workspace --lib -q -- --test-threads 1
-	$(CARGO_TEST) -p coppice-server --test health --test integration_comments --test integration_tickets -q
+	@if cargo nextest --version >/dev/null 2>&1; then \
+		cargo nextest run --features embedded-test-db --workspace --lib && \
+		cargo nextest run --features embedded-test-db -p coppice-server --test health --test integration_comments --test integration_tickets; \
+	else \
+		$(CARGO_TEST) --workspace --lib -q -- --test-threads 1 && \
+		$(CARGO_TEST) -p coppice-server --test health --test integration_comments --test integration_tickets -q; \
+	fi
 
 # Drop session file so the next test run starts a fresh embedded Postgres (old process may linger).
 test-pg-reset:

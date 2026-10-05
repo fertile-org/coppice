@@ -1,0 +1,9 @@
+# Each test runs in its own process with its own cloned database, so the
+# suite is safe to run in parallel. See docs/testing.md.
+
+[profile.default]
+# Flag tests slower than 30s; kill them after 2 minutes so a hang fails fast.
+slow-timeout = { period = "30s", terminate-after = 4 }
+
+[profile.ci]
+fail-fast = false

@@ -25,8 +25,9 @@ jobs:
             ~/.cache/coppice
             ~/.embedded-postgres
           key: pg-embed-${{ runner.os }}-${{ hashFiles('server/Cargo.toml') }}
+      - uses: taiki-e/install-action@nextest
       - name: Test
-        run: cargo test --workspace --features embedded-test-db
+        run: cargo nextest run --workspace --features embedded-test-db --profile ci
       - name: Clippy
         run: |
           cargo clippy --workspace -- -D warnings
