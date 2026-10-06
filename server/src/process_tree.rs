@@ -62,6 +62,11 @@ pub fn active() -> std::sync::Arc<ProcessRegistry> {
     std::sync::Arc::clone(&slot.lock().unwrap_or_else(|err| err.into_inner()))
 }
 
+/// Run ids recorded on process trees this process still tracks.
+pub fn tracked_run_ids() -> Vec<String> {
+    active().tracked_run_ids()
+}
+
 /// SIGTERM then SIGKILL for every agent tree this process still tracks.
 pub async fn shutdown_running_agents() {
     active().stop_all("server shutdown").await;
@@ -224,6 +229,20 @@ impl ProcessRegistry {
 
     pub async fn stop_all(&self, reason: &str) -> Vec<StopReport> {
         self.stop_records(self.snapshot(), reason).await
+    }
+
+    /// Distinct non-empty run ids on the in-memory records.
+    pub fn tracked_run_ids(&self) -> Vec<String> {
+        let mut ids = Vec::new();
+        for record in self.lock().iter() {
+            let Some(run_id) = record.run_id.as_ref() else {
+                continue;
+            };
+            if !run_id.is_empty() && !ids.contains(run_id) {
+                ids.push(run_id.clone());
+            }
+        }
+        ids
     }
 
     pub async fn stop_pid(&self, pid: u32, reason: &str) {
