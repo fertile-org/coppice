@@ -16,7 +16,10 @@ use coppice_server::services::comment_service::CommentService;
 use coppice_server::services::run_service::RunService;
 use coppice_server::services::ticket_service::TicketService;
 use tokio::process::Command;
+use tokio::sync::Mutex;
 use uuid::Uuid;
+
+static QUIT_TEST_LOCK: Mutex<()> = Mutex::const_new(());
 
 struct KillGroup(u32);
 
@@ -30,7 +33,7 @@ impl Drop for KillGroup {
     }
 }
 
-async fn insert_in_progress_run(pool: &sqlx::PgPool) -> (Uuid, Uuid) {
+async fn insert_running_ticket(pool: &sqlx::PgPool, status: &str) -> (Uuid, Uuid) {
     let board_id = Uuid::new_v4();
     sqlx::query("INSERT INTO boards (id, name, slug) VALUES ($1, $2, $3)")
         .bind(board_id)
@@ -61,11 +64,12 @@ async fn insert_in_progress_run(pool: &sqlx::PgPool) -> (Uuid, Uuid) {
         INSERT INTO tickets (
             id, board_id, title, status, created_by, assignee_agent_id
         )
-        VALUES ($1, $2, 'mid-run', 'in_progress', 'test', $3)
+        VALUES ($1, $2, 'mid-run', $3, 'test', $4)
         "#,
     )
     .bind(ticket_id)
     .bind(board_id)
+    .bind(status)
     .bind(agent_id)
     .execute(pool)
     .await
@@ -157,9 +161,11 @@ async fn assert_blocked_with_quit_comment(
         .get(ticket_id)
         .await
         .expect("ticket");
-    assert_ne!(
-        ticket.ticket.status,
-        TicketStatus::InProgress,
+    assert!(
+        !matches!(
+            ticket.ticket.status,
+            TicketStatus::InProgress | TicketStatus::InReview | TicketStatus::InQa
+        ),
         "ticket stayed {}",
         status_to_str(ticket.ticket.status)
     );
@@ -186,10 +192,11 @@ async fn assert_blocked_with_quit_comment(
 
 #[tokio::test]
 async fn graceful_shutdown_and_crash_reap_block_in_progress_tickets() {
+    let _guard = QUIT_TEST_LOCK.lock().await;
     let state = common::bootstrap_and_login_with_state().await.0;
     let pool = state.db.as_ref().expect("db");
 
-    let (grace_ticket, grace_run) = insert_in_progress_run(pool).await;
+    let (grace_ticket, grace_run) = insert_running_ticket(pool, "in_progress").await;
     let grace_dir = tempfile::tempdir().expect("grace dir");
     process_tree::install(grace_dir.path().join("agent-processes.json"));
     let (grace_leader, grace_child) = spawn_tracked_sleeper(grace_dir.path(), grace_run).await;
@@ -208,7 +215,7 @@ async fn graceful_shutdown_and_crash_reap_block_in_progress_tickets() {
     );
     assert_blocked_with_quit_comment(pool, grace_ticket, grace_run, GRACEFUL_QUIT_REASON).await;
 
-    let (crash_ticket, crash_run) = insert_in_progress_run(pool).await;
+    let (crash_ticket, crash_run) = insert_running_ticket(pool, "in_progress").await;
     let crash_dir = tempfile::tempdir().expect("crash dir");
     let crash_path = crash_dir.path().join("agent-processes.json");
     process_tree::install(&crash_path);
@@ -233,4 +240,28 @@ async fn graceful_shutdown_and_crash_reap_block_in_progress_tickets() {
     );
     assert_blocked_with_quit_comment(pool, crash_ticket, crash_run, "server restarted during run")
         .await;
+}
+
+#[tokio::test]
+async fn graceful_shutdown_blocks_in_review_and_in_qa_tickets() {
+    let _guard = QUIT_TEST_LOCK.lock().await;
+    let state = common::bootstrap_and_login_with_state().await.0;
+    let pool = state.db.as_ref().expect("db");
+
+    for status in ["in_review", "in_qa"] {
+        let (ticket_id, run_id) = insert_running_ticket(pool, status).await;
+        let dir = tempfile::tempdir().expect("dir");
+        process_tree::install(dir.path().join("agent-processes.json"));
+        let (leader, child) = spawn_tracked_sleeper(dir.path(), run_id).await;
+        let _cleanup = KillGroup(leader);
+        assert!(process_alive(child), "{status} child was not running");
+
+        shutdown_agent_sessions(&state).await;
+
+        assert!(
+            wait_dead(child).await,
+            "{status} background {child} survived quit"
+        );
+        assert_blocked_with_quit_comment(pool, ticket_id, run_id, GRACEFUL_QUIT_REASON).await;
+    }
 }

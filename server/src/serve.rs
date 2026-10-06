@@ -32,7 +32,7 @@ pub struct ServeOptions {
 async fn interrupt_orphaned_run(state: &AppState, run_id: uuid::Uuid, reason: &str) {
     match mark_run_interrupted(state, run_id, reason).await {
         Ok(interrupted) => {
-            block_ticket_left_in_progress(state, &interrupted).await;
+            block_working_ticket(state, &interrupted).await;
             if let Some(pool) = state.db.as_ref() {
                 RunOrchestrator::new(pool, &state.config.workflow)
                     .handle_terminal_run(&interrupted)
@@ -45,9 +45,20 @@ async fn interrupt_orphaned_run(state: &AppState, run_id: uuid::Uuid, reason: &s
     }
 }
 
-/// In Progress means an agent is working. Once that run is interrupted, Blocked
-/// is the existing column for work that cannot continue until a person acts.
-async fn block_ticket_left_in_progress(state: &AppState, run: &crate::domain::run::AgentRun) {
+/// In Progress, In Review, and In QA mean an agent is working. Reviewer,
+/// tech-lead, and QC runs stay in those columns, and a person can drag a
+/// ticket there while a run is still live. Once that run is interrupted,
+/// Blocked is the existing column for work that cannot continue until a
+/// person acts. Wait for Final Review, Done, Ready, Backlog, and an already
+/// Blocked ticket stay put; the quit comment is still added.
+fn quit_blocks_status(status: TicketStatus) -> bool {
+    matches!(
+        status,
+        TicketStatus::InProgress | TicketStatus::InReview | TicketStatus::InQa
+    )
+}
+
+async fn block_working_ticket(state: &AppState, run: &crate::domain::run::AgentRun) {
     let Some(pool) = state.db.as_ref() else {
         return;
     };
@@ -56,7 +67,7 @@ async fn block_ticket_left_in_progress(state: &AppState, run: &crate::domain::ru
     };
     let ticket_svc = TicketService::new(pool);
     match ticket_svc.get(ticket_id).await {
-        Ok(ticket) if ticket.ticket.status == TicketStatus::InProgress => {
+        Ok(ticket) if quit_blocks_status(ticket.ticket.status) => {
             match ticket_svc
                 .update_status(
                     ticket_id,
@@ -110,7 +121,7 @@ async fn block_ticket_left_in_progress(state: &AppState, run: &crate::domain::ru
 
 /// Marks every run whose process tree this process is about to stop, then
 /// stops those trees. Database updates happen first so a worker unblocked by
-/// SIGTERM cannot finish the run and leave the ticket In Progress.
+/// SIGTERM cannot finish the run and leave the ticket in a working column.
 pub async fn shutdown_agent_sessions(state: &AppState) {
     let mut seen = std::collections::HashSet::new();
     for raw in crate::process_tree::tracked_run_ids() {
