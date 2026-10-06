@@ -1,9 +1,11 @@
 #!/usr/bin/env node
 // Renders every committed Coppice icon from assets/brand/coppice-logo.svg.
+// The marketing-site favicon is the separate sprout in coppice-favicon.svg,
+// so a 16px tab icon stays readable. The header logo and app icon keep the tree.
 //
 //   make gen-icons
 //
-// The SVG is a trace of the old 1254px raster, not an official designer file.
+// The tree SVG is a trace of the old 1254px raster, not an official designer file.
 // Drop in a replacement SVG at the same path and run this again.
 //
 // Linux icons are transparent. macOS (desktop/build/icon.png) and the Apple
@@ -17,6 +19,7 @@ import { Resvg } from '@resvg/resvg-js';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const sourcePath = join(root, 'assets/brand/coppice-logo.svg');
+const faviconSourcePath = join(root, 'assets/brand/coppice-favicon.svg');
 
 // Apple's macOS app-icon mask is a squircle of about this corner radius.
 const MAC_CORNER_RATIO = 0.2237;
@@ -123,8 +126,19 @@ function main() {
   writeFileSync(join(root, 'web/public/favicon.ico'), pngsToIco([favicon16, favicon32]));
   writePng(join(root, 'web/public/apple-touch-icon.png'), renderPng(framed(180), 180));
   writeFileSync(join(root, 'web/public/favicon.svg'), source);
-  writeFileSync(join(root, 'website/public/favicon.svg'), source);
+  writeFileSync(join(root, 'website/public/logo.svg'), source);
+
+  const favicon = readFileSync(faviconSourcePath, 'utf8');
+  const site16 = renderPng(favicon, 16);
+  const site32 = renderPng(favicon, 32);
+  const site48 = renderPng(favicon, 48);
+  writeFileSync(join(root, 'website/public/favicon.svg'), favicon);
+  writePng(join(root, 'website/public/favicon-32x32.png'), site32);
+  writeFileSync(join(root, 'website/public/favicon.ico'), pngsToIco([site16, site32, site48]));
+  writePng(join(root, 'website/public/apple-touch-icon.png'), renderPng(favicon, 180));
+
   console.log('rendered icons from assets/brand/coppice-logo.svg');
+  console.log('rendered website favicon from assets/brand/coppice-favicon.svg');
 }
 
 main();
