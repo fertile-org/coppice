@@ -27,6 +27,8 @@ pub fn opencode_run_config(access: Option<&McpAccess>) -> String {
 struct RunServer {
     base_url: String,
     child: Child,
+    /// Pid of the session leader, when this process was spawned by Coppice.
+    group_pid: Option<u32>,
 }
 
 pub struct OpenCodeRunServers {
@@ -56,18 +58,28 @@ impl OpenCodeRunServers {
         loop {
             let port = free_port(&self.hostname)?;
             let base_url = format!("http://{}:{port}", self.hostname);
-            let mut child = self.spawn(port, config_path, &env)?;
+            let (mut child, group_pid) = self.spawn(key, port, config_path, &env)?;
 
             match wait_for_healthy(&base_url, &mut child).await {
-                Ok(()) => return self.register(key, base_url, child).await,
+                Ok(()) => return self.register(key, base_url, child, Some(group_pid)).await,
                 // Another process can grab the port between probing and binding.
                 Err(Unhealthy::Exited(_)) if attempt < START_ATTEMPTS => {
                     tracing::warn!(%base_url, attempt, "opencode serve exited during startup; retrying");
+                    release_group(
+                        group_pid,
+                        &mut child,
+                        "opencode serve exited during startup",
+                    )
+                    .await;
                     attempt += 1;
                 }
                 Err(err) => {
-                    let _ = child.start_kill();
-                    let _ = child.wait().await;
+                    release_group(
+                        group_pid,
+                        &mut child,
+                        "opencode serve failed to become healthy",
+                    )
+                    .await;
                     return Err(err.into_error(&base_url));
                 }
             }
@@ -81,29 +93,38 @@ impl OpenCodeRunServers {
     pub async fn shutdown_all(&self) {
         let runs: Vec<RunServer> = self.lock().drain().map(|(_, run)| run).collect();
         for mut run in runs {
-            let _ = run.child.start_kill();
-            let _ = run.child.wait().await;
+            release_run(&mut run, "server shutdown").await;
         }
     }
 
     fn spawn(
         &self,
+        key: &str,
         port: u16,
         config_path: &Path,
         env: &[(&'static str, String)],
-    ) -> anyhow::Result<Child> {
-        tokio::process::Command::new(&self.command)
-            .args([
-                "serve",
-                "--hostname",
-                &self.hostname,
-                "--port",
-                &port.to_string(),
-            ])
-            .env("OPENCODE_CONFIG", config_path)
-            .envs(env.iter().map(|(k, v)| (*k, v.as_str())))
-            .kill_on_drop(true)
-            .spawn()
+    ) -> anyhow::Result<(Child, u32)> {
+        let mut cmd = tokio::process::Command::new(&self.command);
+        cmd.args([
+            "serve",
+            "--hostname",
+            &self.hostname,
+            "--port",
+            &port.to_string(),
+        ])
+        .env("OPENCODE_CONFIG", config_path)
+        .envs(env.iter().map(|(k, v)| (*k, v.as_str())));
+        crate::process_tree::active()
+            .spawn(
+                &mut cmd,
+                crate::process_tree::SpawnMeta {
+                    command: self.command.clone(),
+                    label: "opencode",
+                    run_id: Some(key.to_string()),
+                    task_log_dir: config_path.parent().map(std::path::Path::to_path_buf),
+                },
+            )
+            .map(|tracked| tracked.detach())
             .map_err(|err| {
                 if err.kind() == std::io::ErrorKind::NotFound {
                     anyhow::anyhow!(
@@ -124,6 +145,7 @@ impl OpenCodeRunServers {
         key: &str,
         base_url: String,
         mut child: Child,
+        group_pid: Option<u32>,
     ) -> anyhow::Result<OpenCodeRunLease> {
         let conflict = {
             let mut runs = self.lock();
@@ -137,6 +159,7 @@ impl OpenCodeRunServers {
                     RunServer {
                         base_url: base_url.clone(),
                         child,
+                        group_pid,
                     },
                 );
                 return Ok(OpenCodeRunLease {
@@ -146,6 +169,9 @@ impl OpenCodeRunServers {
                 });
             }
         };
+        if let Some(pid) = group_pid {
+            crate::process_tree::active().kill_pid_now(pid, "opencode serve registration conflict");
+        }
         let _ = child.start_kill();
         let _ = child.wait().await;
         anyhow::bail!(conflict)
@@ -177,8 +203,7 @@ impl OpenCodeRunLease {
 
     pub async fn stop(self) {
         if let Some(mut run) = self.servers.take(&self.key) {
-            let _ = run.child.start_kill();
-            let _ = run.child.wait().await;
+            release_run(&mut run, "opencode run ended").await;
         }
     }
 }
@@ -186,9 +211,26 @@ impl OpenCodeRunLease {
 impl Drop for OpenCodeRunLease {
     fn drop(&mut self) {
         if let Some(mut run) = self.servers.take(&self.key) {
+            if let Some(pid) = run.group_pid.take() {
+                crate::process_tree::active().kill_pid_now(pid, "opencode run dropped");
+            }
             let _ = run.child.start_kill();
         }
     }
+}
+
+async fn release_run(run: &mut RunServer, reason: &str) {
+    if let Some(pid) = run.group_pid.take() {
+        crate::process_tree::active().stop_pid(pid, reason).await;
+    }
+    let _ = run.child.start_kill();
+    let _ = run.child.wait().await;
+}
+
+async fn release_group(pid: u32, child: &mut Child, reason: &str) {
+    crate::process_tree::active().stop_pid(pid, reason).await;
+    let _ = child.start_kill();
+    let _ = child.wait().await;
 }
 
 fn free_port(hostname: &str) -> anyhow::Result<u16> {
@@ -318,12 +360,12 @@ mod tests {
         let servers = OpenCodeRunServers::new("opencode".into(), "127.0.0.1".into());
         let base_url = "http://127.0.0.1:1".to_string();
         let lease = servers
-            .register("run-a", base_url.clone(), sleeper("5"))
+            .register("run-a", base_url.clone(), sleeper("5"), None)
             .await
             .expect("first register");
 
         let err = servers
-            .register("run-b", base_url.clone(), sleeper("5"))
+            .register("run-b", base_url.clone(), sleeper("5"), None)
             .await
             .err()
             .expect("duplicate base_url must be rejected");

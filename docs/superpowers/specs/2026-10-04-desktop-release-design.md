@@ -70,7 +70,7 @@ Triggered by SIGTERM, SIGINT, or stdin reaching EOF (the parent Electron process
 
 Shutdown is bounded to fit Electron's 15 s SIGTERM→SIGKILL window: draining gets 5 s (after which Postgres is stopped anyway), `pg_ctl stop -m fast -w -t 5` falls back to `pg_ctl stop -m immediate -w -t 3`, and the runtime gets 1 s to wind down (5 + 5 + 3 + 1 = 14 s worst case, leaving 1 s of margin).
 
-Accepted deviation: active agent runs are not marked interrupted at shutdown. Agent CLI children die via `kill_on_drop`, and the startup sweep marks orphaned runs interrupted on the next launch.
+Accepted deviation: active agent runs are not marked interrupted at shutdown. The server SIGTERMs each agent process group and SIGKILLs it after a few seconds; the startup sweep marks orphaned runs interrupted on the next launch and reaps any agent pid that survived a crash, after checking its start token and command.
 
 ## pgvector removal
 

@@ -73,6 +73,8 @@ impl AgentProvider for CursorProvider {
             env,
             cwd: worktree.clone(),
             timeout: run_timeout,
+            run_id: input.run_id.clone(),
+            artifacts_dir: input.artifacts_dir.clone(),
         };
         let mut handler = CursorLines {
             stream: input.stream.clone(),

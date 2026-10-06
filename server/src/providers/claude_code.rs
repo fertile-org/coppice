@@ -110,6 +110,8 @@ impl AgentProvider for ClaudeCodeProvider {
             env,
             cwd: worktree,
             timeout: run_timeout,
+            run_id: input.run_id.clone(),
+            artifacts_dir: input.artifacts_dir.clone(),
         };
         let mut handler = ClaudeLines {
             stream: input.stream.clone(),

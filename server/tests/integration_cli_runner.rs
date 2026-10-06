@@ -1,5 +1,6 @@
 #![cfg(feature = "embedded-test-db")]
 
+use coppice_server::process_tree::process_alive;
 use coppice_server::providers::cli_runner::{
     run_cli, run_cli_with_stdin, CliError, CliInvocation, LineHandler, LineStep, RunIo,
 };
@@ -18,6 +19,8 @@ fn fake_cli(env: &[(&str, &str)], timeout: Duration) -> CliInvocation {
             .collect(),
         cwd: std::env::temp_dir(),
         timeout,
+        run_id: None,
+        artifacts_dir: None,
     }
 }
 
@@ -126,10 +129,101 @@ async fn run_cli_cancel_kills_child() {
     assert!(matches!(result, Err(CliError::Cancelled)), "{result:?}");
 
     tokio::time::sleep(Duration::from_millis(100)).await;
+    assert!(wait_dead(pid as u32).await, "child {pid} still running");
+}
+
+#[tokio::test]
+async fn run_cli_cancel_kills_background_child() {
+    let (cancel_tx, cancel_rx) = watch::channel(false);
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let mut handler = Recorder { seen: seen.clone() };
+    let task = tokio::spawn(async move {
+        run_cli(
+            fake_cli(
+                &[
+                    ("FAKE_CLI_BACKGROUND_SLEEP_SECS", "1000"),
+                    ("FAKE_CLI_SLEEP_MS", "30000"),
+                ],
+                Duration::from_secs(60),
+            ),
+            &mut handler,
+            RunIo {
+                cancel_rx: Some(cancel_rx),
+                ..io()
+            },
+        )
+        .await
+    });
+
+    let background = tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            if let Some(pid) = seen
+                .lock()
+                .unwrap()
+                .iter()
+                .find_map(|value| value["background_pid"].as_u64())
+            {
+                return pid as u32;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .expect("fake-cli printed its background pid");
+    assert!(process_alive(background));
+
+    cancel_tx.send(true).unwrap();
+    let result = tokio::time::timeout(Duration::from_secs(5), task)
+        .await
+        .expect("cancel returns within 5s")
+        .expect("join");
+    assert!(matches!(result, Err(CliError::Cancelled)), "{result:?}");
     assert!(
-        !std::path::Path::new(&format!("/proc/{pid}")).exists(),
-        "child {pid} still running"
+        wait_dead(background).await,
+        "background {background} still running after cancel"
     );
+}
+
+#[tokio::test]
+async fn run_cli_completion_kills_background_child_and_logs_it() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let mut invocation = fake_cli(
+        &[("FAKE_CLI_BACKGROUND_SLEEP_SECS", "1000")],
+        Duration::from_secs(10),
+    );
+    invocation.run_id = Some("run-complete".into());
+    invocation.artifacts_dir = Some(dir.path().display().to_string());
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let mut handler = Recorder { seen: seen.clone() };
+
+    let exit = run_cli(invocation, &mut handler, io())
+        .await
+        .expect("run_cli");
+    assert!(exit.status.success());
+
+    let background = seen
+        .lock()
+        .unwrap()
+        .iter()
+        .find_map(|value| value["background_pid"].as_u64())
+        .expect("background pid") as u32;
+    assert!(
+        wait_dead(background).await,
+        "background {background} still running after the run ended"
+    );
+    let log = std::fs::read_to_string(
+        dir.path()
+            .join("runs")
+            .join("run-complete")
+            .join("process-stops.log"),
+    )
+    .expect("task log");
+    assert!(log.contains("\"runId\":\"run-complete\""), "{log}");
+    assert!(
+        log.contains("\"outcome\":\"terminated\"") || log.contains("\"outcome\":\"killed\""),
+        "{log}"
+    );
+    assert!(log.contains("\"reason\":\"run ended\""), "{log}");
 }
 
 #[tokio::test]
@@ -178,13 +272,13 @@ async fn run_cli_timeout_returns_even_if_grandchild_holds_stderr() {
         .unwrap()
         .iter()
         .find_map(|v| v["grandchild_pid"].as_u64());
-    if let Some(pid) = grandchild {
-        let _ = std::process::Command::new("kill")
-            .arg(pid.to_string())
-            .status();
-    }
 
     assert!(grandchild.is_some(), "fake-cli reported its grandchild");
+    let grandchild = grandchild.expect("grandchild") as u32;
+    assert!(
+        wait_dead(grandchild).await,
+        "grandchild {grandchild} still running after timeout"
+    );
     assert!(
         elapsed < Duration::from_millis(300) + Duration::from_secs(3),
         "timeout took {elapsed:?}"
@@ -239,4 +333,17 @@ async fn run_cli_with_stdin_writes_and_closes_stdin() {
 
     let seen = handler.seen.lock().unwrap();
     assert_eq!(seen[0]["stdin"], "the prompt");
+}
+
+async fn wait_dead(pid: u32) -> bool {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
+    loop {
+        if !process_alive(pid) {
+            return true;
+        }
+        if tokio::time::Instant::now() >= deadline {
+            return false;
+        }
+        tokio::time::sleep(Duration::from_millis(30)).await;
+    }
 }

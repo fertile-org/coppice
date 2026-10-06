@@ -60,6 +60,9 @@ pub async fn serve(
     options: ServeOptions,
     shutdown: impl Future<Output = ()> + Send + 'static,
 ) -> anyhow::Result<()> {
+    crate::process_tree::install_from_artifacts(&config.storage.artifacts_dir);
+    crate::process_tree::reap_orphaned_agents().await;
+
     let opencode_runs = crate::sessions::opencode_run_server::OpenCodeRunServers::new(
         config.agent.connectors.opencode.command.clone(),
         config.agent.connectors.opencode.serve_hostname.clone(),
@@ -148,6 +151,9 @@ pub async fn serve(
     axum::serve(listener, app)
         .with_graceful_shutdown(async move {
             shutdown.await;
+            // Agent CLIs are in their own sessions, so they outlive this
+            // process group. Stop them before the runtime drops the workers.
+            crate::process_tree::shutdown_running_agents().await;
             opencode_runs.shutdown_all().await;
             plugin_mcp.shutdown_all().await;
         })

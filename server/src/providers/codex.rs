@@ -96,6 +96,8 @@ impl AgentProvider for CodexProvider {
             // Codex takes its root from `-C`; the process keeps the server's cwd.
             cwd: std::env::current_dir().map_err(ProviderError::Io)?,
             timeout: run_timeout,
+            run_id: input.run_id.clone(),
+            artifacts_dir: input.artifacts_dir.clone(),
         };
         let mut handler = CodexLines {
             stream: input.stream.clone(),

@@ -2,6 +2,8 @@
 //! `FAKE_CLI_PRINT_PID` (print `{"pid":N}` first), `FAKE_CLI_ECHO_STDIN`
 //! (print `{"stdin":"..."}` with all of stdin), `FAKE_CLI_GRANDCHILD_SLEEP_MS`
 //! (spawn a `sleep` grandchild inheriting stdio, print `{"grandchild_pid":N}`),
+//! `FAKE_CLI_BACKGROUND_SLEEP_SECS` (spawn `sleep` with stdio closed so it
+//! outlives this process, print `{"background_pid":N}`),
 //! `FAKE_CLI_LINES`
 //! (newline-separated stdout lines), `FAKE_CLI_STDERR` (newline-separated
 //! stderr lines), `FAKE_CLI_SLEEP_MS` (sleep after printing), `FAKE_CLI_EXIT`.
@@ -31,6 +33,22 @@ fn main() {
             .spawn()
             .expect("spawn grandchild");
         writeln!(stdout, "{{\"grandchild_pid\":{}}}", grandchild.id()).expect("write pid");
+    }
+    if let Some(secs) = std::env::var("FAKE_CLI_BACKGROUND_SLEEP_SECS")
+        .ok()
+        .filter(|value| !value.is_empty())
+    {
+        let background = std::process::Command::new("sleep")
+            .arg(secs)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .expect("spawn background sleep");
+        writeln!(stdout, "{{\"background_pid\":{}}}", background.id()).expect("write pid");
+        // `process::exit` skips destructors; forget so a normal return cannot
+        // reap or kill the sleeper either. It stays in this process group.
+        std::mem::forget(background);
     }
     if std::env::var_os("FAKE_CLI_ECHO_STDIN").is_some() {
         let mut input = String::new();
