@@ -179,13 +179,15 @@ e2e-smoke-m10:
 	$(SMOKE_REPO_SETUP_IF_MISSING)
 	node e2e/smoke/m10-plugins.mjs
 
-# Marketing board PNG for static/screenshot.png and the site hero. Not part of CI.
-# Overlay forces auth.desktop_mode and disables auto-start so the shot matches
-# the Electron app (no login, no account email, no Sign out).
+# Marketing stills and GIF. Not part of CI.
+# Own Compose project (coppice-screenshot) so the seed does not touch a dev
+# database. Overlay forces auth.desktop_mode and disables auto-start so the
+# shot matches the Electron app (no login, no account email, no Sign out).
+SCREENSHOT_COMPOSE = $(COMPOSE) -p coppice-screenshot -f deploy/docker-compose.screenshot.yml
 screenshot:
 	@test -f deploy/config/config.toml || cp deploy/config/config.example.toml deploy/config/config.toml
-	$(COMPOSE) -f deploy/docker-compose.screenshot.yml up -d --build
-	$(COMPOSE) -f deploy/docker-compose.screenshot.yml up -d --force-recreate --no-deps server
+	$(SCREENSHOT_COMPOSE) up -d --build
+	$(SCREENSHOT_COMPOSE) up -d --force-recreate --no-deps server
 	cd e2e && yarn install --frozen-lockfile
 	cd e2e && yarn playwright install chromium
 	node e2e/screenshot/capture.mjs

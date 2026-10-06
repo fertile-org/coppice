@@ -1,4 +1,6 @@
 # Overlay for `make screenshot` only. Not used by `make compose-up` or CI.
+# The screenshot target uses Compose project `coppice-screenshot` so this
+# stack does not share the dev database or volumes.
 # Forces the desktop product session so the SPA skips login and hides the
 # account email and Sign out, matching `coppice-server desktop`.
 services:
@@ -6,3 +8,5 @@ services:
     environment:
       COPPICE_AUTH__DESKTOP_MODE: "true"
       WORKFLOW_AUTO_START_RUNS: "false"
+      # A home path, so the Plugins frame does not show the container /data dir.
+      COPPICE_PLUGINS__DIR: /home/coppice/plugins

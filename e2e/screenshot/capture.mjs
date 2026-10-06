@@ -1,26 +1,36 @@
 #!/usr/bin/env node
 /**
- * Marketing board screenshot.
+ * Marketing screenshots and GIF.
  *
- * Assumes the default Compose stack is already up with desktop mode forced
- * (`make screenshot` does that via deploy/docker-compose.screenshot.yml).
- * Seeds a board through the HTTP API — no agent runs — then opens the SPA
- * and writes static/screenshot.png. The same PNG is copied to the Astro
- * hero at website/public/assets/hero-screenshot.png.
+ * Assumes the screenshot Compose project is already up (`make screenshot`).
+ * That project forces desktop mode and does not enable extra mock-provider
+ * config. The script seeds a board, a final-review diff, a finished live
+ * console, chat transcripts, and plugins, then captures five 1440×900 frames:
  *
- * The shot must match the Electron app: login is bypassed, and the top bar
- * must not show the bootstrap admin email or Sign out.
+ *   1. Final Review — code review diff for the Wait for Final Review ticket
+ *   2. Board — same crop as the static hero
+ *   3. Agent console — Live Console tab
+ *   4. Chat
+ *   5. Plugins
+ *
+ * The board frame is also written to static/screenshot.png and
+ * website/public/assets/hero-screenshot.png. The GIF is
+ * static/marketing.gif and website/public/assets/marketing.gif.
  *
  * Env:
  *   COPPICE_API_URL         default http://localhost:5000
  *   COPPICE_WEB_URL         default http://localhost:5001
  *   COPPICE_SCREENSHOT_OUT  default <repo>/static/screenshot.png
+ *   COPPICE_GIF_DELAY_SEC   default 3
  */
 
-import { copyFile, mkdir } from 'node:fs/promises';
+import { copyFile, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { spawn } from 'node:child_process';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
+import { resetMarketingWorkspace, seedMarketingScenes } from './seed.mjs';
 
 const API = process.env.COPPICE_API_URL ?? 'http://localhost:5000';
 const WEB = process.env.COPPICE_WEB_URL ?? 'http://localhost:5001';
@@ -38,6 +48,16 @@ const HERO = path.join(
   'assets',
   'hero-screenshot.png',
 );
+const STILLS_DIR = path.join(REPO_ROOT, 'static', 'screenshots');
+const GIF_OUT = path.join(REPO_ROOT, 'static', 'marketing.gif');
+const GIF_SITE = path.join(
+  REPO_ROOT,
+  'website',
+  'public',
+  'assets',
+  'marketing.gif',
+);
+const FRAME_DELAY_SEC = Number(process.env.COPPICE_GIF_DELAY_SEC ?? '3');
 
 const MAX_HEALTH_ATTEMPTS = 90;
 const HEALTH_INTERVAL_MS = 1000;
@@ -144,6 +164,14 @@ const COLUMN_LABELS = [
   'Blocked',
 ];
 
+const FRAME_ORDER = [
+  '01-final-review',
+  '02-board',
+  '03-agent-console',
+  '04-chat',
+  '05-plugins',
+];
+
 function fail(message) {
   console.error(`screenshot: ${message}`);
   process.exit(1);
@@ -221,23 +249,31 @@ async function api(method, apiPath, auth, body) {
     fail(`${method} ${apiPath} failed: ${res.status} ${await res.text()}`);
   }
   if (res.status === 204) return null;
-  return res.json();
+  const text = await res.text();
+  if (!text) return null;
+  return JSON.parse(text);
 }
 
 async function ensureAgents(auth) {
   const listed = await api('GET', '/api/agents', auth);
-  const byName = new Map((listed.items ?? []).map((agent) => [agent.name, agent.id]));
+  const byName = new Map((listed.items ?? []).map((agent) => [agent.name, agent]));
   const ids = {};
   for (const agent of AGENTS) {
     const existing = byName.get(agent.name);
     if (existing) {
-      ids[agent.name] = existing;
+      if (existing.connector !== 'claude-code') {
+        await api('PATCH', `/api/agents/${existing.id}`, auth, {
+          connector: 'claude-code',
+        });
+      }
+      ids[agent.name] = existing.id;
       continue;
     }
     const created = await api('POST', '/api/agents', auth, {
       name: agent.name,
       role: agent.role,
       systemPrompt: 'Marketing screenshot agent. Do not run.',
+      connector: 'claude-code',
       enabled: true,
     });
     ids[agent.name] = created.id;
@@ -249,6 +285,7 @@ async function ensureAgents(auth) {
 async function seedBoard(auth, agentIds) {
   const board = await api('POST', '/api/boards', auth, { name: 'Coppice' });
   console.log(`screenshot: created board ${board.id}`);
+  const tickets = [];
   for (const ticket of TICKETS) {
     const created = await api('POST', `/api/boards/${board.id}/tickets`, auth, {
       title: ticket.title,
@@ -263,9 +300,10 @@ async function seedBoard(auth, agentIds) {
     const agentId = agentIds[ticket.agent];
     if (!agentId) fail(`missing agent ${ticket.agent}`);
     await api('POST', `/api/tickets/${created.id}/assign`, auth, { agentId });
+    tickets.push({ id: created.id, title: ticket.title, status: ticket.status });
   }
   console.log(`screenshot: seeded ${TICKETS.length} tickets`);
-  return board.id;
+  return { boardId: board.id, tickets };
 }
 
 async function launchBrowser() {
@@ -280,7 +318,215 @@ async function launchBrowser() {
   }
 }
 
-async function capture(boardId) {
+async function preparePage(page) {
+  await page
+    .waitForFunction(() => document.fonts.check('16px Roboto'), null, {
+      timeout: 8_000,
+    })
+    .catch(() => {
+      console.warn(
+        'screenshot: Roboto did not load; the PNG may use a fallback font',
+      );
+    });
+  await page.evaluate(() => document.fonts.ready);
+  await assertDesktopChrome(page);
+  await page.addStyleTag({
+    content:
+      'html,body{overflow:hidden!important}*{scrollbar-width:none!important}*{caret-color:transparent!important}::-webkit-scrollbar{display:none!important}',
+  });
+}
+
+async function assertDesktopChrome(page) {
+  const topbar = page.getByTestId('app-shell-topbar');
+  if (await topbar.count()) {
+    const topbarText = await topbar.innerText();
+    if (/sign out/i.test(topbarText) || topbarText.includes('@')) {
+      fail(
+        `account chrome is still visible in the top bar: ${JSON.stringify(topbarText)}`,
+      );
+    }
+  }
+  const bodyText = await page.locator('body').innerText();
+  if (/sign out/i.test(bodyText) || bodyText.includes('admin@localhost')) {
+    fail('account chrome is still visible on the page');
+  }
+  if (/mock-provider|MockProvider/i.test(bodyText)) {
+    fail('mock-provider chrome is visible on the page');
+  }
+  if (await page.getByRole('button', { name: 'Sign in' }).count()) {
+    fail('login screen is showing; desktop_mode did not bypass it');
+  }
+}
+
+async function shoot(page, name) {
+  const file = path.join(STILLS_DIR, `${name}.png`);
+  await page.screenshot({
+    path: file,
+    type: 'png',
+    animations: 'disabled',
+  });
+  console.log(`screenshot: wrote ${file}`);
+  return file;
+}
+
+async function captureFrames(page, scene) {
+  const frames = {};
+
+  const review = new URL('/code', WEB);
+  review.searchParams.set('repoId', scene.repoId);
+  review.searchParams.set('ticketId', scene.finalReviewTicketId);
+  review.searchParams.set('worktree', scene.worktree);
+  review.searchParams.set('baseBranch', 'main');
+  await page.goto(review.href, { waitUntil: 'domcontentloaded' });
+  await page.getByText('Code review', { exact: true }).waitFor({ timeout: 30_000 });
+  await page
+    .getByRole('link', { name: 'Ticket: Bundle Postgres with the desktop app' })
+    .waitFor();
+  await page.getByRole('heading', { name: 'Changed files' }).waitFor();
+  await page.getByText('desktop/src/postgres.ts').waitFor();
+  await page.getByText('initdb').first().waitFor();
+  if (await page.getByText('Plan Review').count()) {
+    fail('Plan Review is visible on the final-review frame');
+  }
+  await preparePage(page);
+  frames['01-final-review'] = await shoot(page, '01-final-review');
+
+  await page.goto(`${WEB}/boards/${scene.boardId}`, { waitUntil: 'domcontentloaded' });
+  await page.getByRole('heading', { name: 'Board', level: 1 }).waitFor({
+    timeout: 30_000,
+  });
+  for (const label of COLUMN_LABELS) {
+    await page.getByRole('region', { name: label }).waitFor();
+  }
+  await page.getByText('Proxy plugin tools through the gateway').waitFor();
+  if (await page.getByRole('region', { name: 'Plan Review' }).count()) {
+    fail('Plan Review column is on the board');
+  }
+  if (await page.getByText('Plan Review', { exact: true }).count()) {
+    fail('Plan Review label is on the board');
+  }
+  await preparePage(page);
+  frames['02-board'] = await shoot(page, '02-board');
+  await mkdir(path.dirname(OUT), { recursive: true });
+  await copyFile(frames['02-board'], OUT);
+  console.log(`screenshot: wrote ${OUT}`);
+  if (path.resolve(OUT) !== path.resolve(HERO)) {
+    await mkdir(path.dirname(HERO), { recursive: true });
+    await copyFile(OUT, HERO);
+    console.log(`screenshot: wrote ${HERO}`);
+  }
+
+  await page.goto(
+    `${WEB}/boards/${scene.boardId}?ticket=${scene.consoleTicketId}`,
+    { waitUntil: 'domcontentloaded' },
+  );
+  await page.getByRole('tab', { name: 'Live Console' }).waitFor({ timeout: 30_000 });
+  await page.getByRole('tab', { name: 'Live Console' }).click();
+  await page.getByText('Claude Code session started').waitFor({ timeout: 20_000 });
+  await page.getByText('Read server/src/api/ws/live.rs').waitFor();
+  const consoleText = await page.locator('body').innerText();
+  if (/interrupted/i.test(consoleText)) {
+    fail(`live console was interrupted: ${consoleText.slice(0, 500)}`);
+  }
+  await preparePage(page);
+  frames['03-agent-console'] = await shoot(page, '03-agent-console');
+
+  await page.goto(`${WEB}/chat/${scene.chatSessionId}`, {
+    waitUntil: 'domcontentloaded',
+  });
+  await page.getByTestId('chat-message-list').waitFor({ timeout: 30_000 });
+  await page.getByText('Postgres 16 on 127.0.0.1').waitFor();
+  await page.getByText('Split the billing migration').first().waitFor();
+  await preparePage(page);
+  frames['04-chat'] = await shoot(page, '04-chat');
+
+  await page.goto(`${WEB}/settings/plugins`, { waitUntil: 'domcontentloaded' });
+  await page.getByRole('heading', { name: 'Plugins', level: 1 }).waitFor({
+    timeout: 30_000,
+  });
+  await page.getByRole('heading', { name: 'desktop-packaging' }).waitFor();
+  await page.getByRole('heading', { name: 'review-checklist' }).waitFor();
+  await page.getByText('stdio').waitFor();
+  await preparePage(page);
+  frames['05-plugins'] = await shoot(page, '05-plugins');
+
+  return FRAME_ORDER.map((name) => frames[name]);
+}
+
+function ffmpeg(args) {
+  return new Promise((resolve, reject) => {
+    const child = spawn('ffmpeg', args, { stdio: ['ignore', 'ignore', 'pipe'] });
+    let stderr = '';
+    child.stderr.on('data', (chunk) => {
+      stderr += chunk;
+    });
+    child.on('error', (error) => {
+      if (error.code === 'ENOENT') {
+        reject(new Error('ffmpeg is required to assemble the marketing GIF'));
+        return;
+      }
+      reject(error);
+    });
+    child.on('close', (code) => {
+      if (code !== 0) reject(new Error(`ffmpeg failed (${code}): ${stderr}`));
+      else resolve();
+    });
+  });
+}
+
+async function writeGif(framePaths) {
+  if (!Number.isFinite(FRAME_DELAY_SEC) || FRAME_DELAY_SEC <= 0) {
+    fail(`invalid COPPICE_GIF_DELAY_SEC: ${process.env.COPPICE_GIF_DELAY_SEC}`);
+  }
+  const scratch = await mkdtemp(path.join(tmpdir(), 'coppice-gif-'));
+  const listPath = path.join(scratch, 'frames.txt');
+  const lines = [];
+  for (const frame of framePaths) {
+    lines.push(`file '${frame}'`);
+    lines.push(`duration ${FRAME_DELAY_SEC}`);
+  }
+  // concat demuxer holds each duration until the next file, so repeat the last.
+  lines.push(`file '${framePaths[framePaths.length - 1]}'`);
+  await writeFile(listPath, `${lines.join('\n')}\n`);
+
+  const palette = path.join(scratch, 'palette.png');
+  await ffmpeg([
+    '-y',
+    '-f',
+    'concat',
+    '-safe',
+    '0',
+    '-i',
+    listPath,
+    '-vf',
+    'fps=10,scale=1440:900:flags=lanczos,palettegen=max_colors=192',
+    palette,
+  ]);
+  await mkdir(path.dirname(GIF_OUT), { recursive: true });
+  await ffmpeg([
+    '-y',
+    '-f',
+    'concat',
+    '-safe',
+    '0',
+    '-i',
+    listPath,
+    '-i',
+    palette,
+    '-lavfi',
+    'fps=10,scale=1440:900:flags=lanczos[x];[x][1:v]paletteuse=dither=bayer:bayer_scale=3',
+    '-loop',
+    '0',
+    GIF_OUT,
+  ]);
+  await mkdir(path.dirname(GIF_SITE), { recursive: true });
+  await copyFile(GIF_OUT, GIF_SITE);
+  await rm(scratch, { recursive: true, force: true });
+  console.log(`screenshot: wrote ${GIF_OUT}`);
+  console.log(`screenshot: wrote ${GIF_SITE}`);
+}
+
+async function capture(scene) {
   const browser = await launchBrowser();
   try {
     const context = await browser.newContext({
@@ -288,65 +534,18 @@ async function capture(boardId) {
       deviceScaleFactor: 1,
       colorScheme: 'light',
       reducedMotion: 'reduce',
+      locale: 'en-US',
+      timezoneId: 'UTC',
     });
     await context.addInitScript(() => {
       localStorage.setItem('coppice.theme', 'light');
       localStorage.setItem('coppice.sidebar.collapsed', '0');
+      localStorage.setItem('coppice.plugins.guideOpen', '0');
     });
     const page = await context.newPage();
-    await page.goto(`${WEB}/boards/${boardId}`, { waitUntil: 'domcontentloaded' });
-
-    await page.getByRole('heading', { name: 'Board', level: 1 }).waitFor({
-      timeout: 30_000,
-    });
-    for (const label of COLUMN_LABELS) {
-      await page.getByRole('region', { name: label }).waitFor();
-    }
-    await page.getByText('Proxy plugin tools through the gateway').waitFor();
-
-    await page
-      .waitForFunction(() => document.fonts.check('16px Roboto'), null, {
-        timeout: 8_000,
-      })
-      .catch(() => {
-        console.warn(
-          'screenshot: Roboto did not load; the PNG may use a fallback font',
-        );
-      });
-    await page.evaluate(() => document.fonts.ready);
-
-    const topbar = page.getByTestId('app-shell-topbar');
-    const topbarText = await topbar.innerText();
-    if (/sign out/i.test(topbarText) || topbarText.includes('@')) {
-      fail(
-        `account chrome is still visible in the top bar: ${JSON.stringify(topbarText)}`,
-      );
-    }
-    const bodyText = await page.locator('body').innerText();
-    if (/sign out/i.test(bodyText) || bodyText.includes('admin@localhost')) {
-      fail('account chrome is still visible on the page');
-    }
-    if (await page.getByRole('button', { name: 'Sign in' }).count()) {
-      fail('login screen is showing; desktop_mode did not bypass it');
-    }
-
-    await page.addStyleTag({
-      content:
-        'html,body{overflow:hidden!important}*{scrollbar-width:none!important}*{caret-color:transparent!important}',
-    });
-
-    await mkdir(path.dirname(OUT), { recursive: true });
-    await page.screenshot({
-      path: OUT,
-      type: 'png',
-      animations: 'disabled',
-    });
-    console.log(`screenshot: wrote ${OUT}`);
-    if (path.resolve(OUT) !== path.resolve(HERO)) {
-      await mkdir(path.dirname(HERO), { recursive: true });
-      await copyFile(OUT, HERO);
-      console.log(`screenshot: wrote ${HERO}`);
-    }
+    await mkdir(STILLS_DIR, { recursive: true });
+    const frames = await captureFrames(page, scene);
+    await writeGif(frames);
   } finally {
     await browser.close();
   }
@@ -358,9 +557,11 @@ async function main() {
   await waitForOk(WEB, 'web');
   await requireDesktopMode();
   const auth = await desktopSession();
+  await resetMarketingWorkspace();
   const agentIds = await ensureAgents(auth);
-  const boardId = await seedBoard(auth, agentIds);
-  await capture(boardId);
+  const { boardId, tickets } = await seedBoard(auth, agentIds);
+  const scene = await seedMarketingScenes(api, auth, agentIds, boardId, tickets);
+  await capture({ ...scene, boardId });
 }
 
 main().catch((err) => {
