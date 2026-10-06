@@ -21,6 +21,11 @@ use uuid::Uuid;
 
 static QUIT_TEST_LOCK: Mutex<()> = Mutex::const_new(());
 
+/// Past `TERM_GRACE` (3s) and the 2s death wait, so a process that is still
+/// alive was not signaled. Far under nextest's kill window, so a missed
+/// signal cannot occupy CI for the old 1000s stub.
+const STUB_SLEEP_SECS: u64 = 20;
+
 struct KillGroup(u32);
 
 impl Drop for KillGroup {
@@ -102,7 +107,7 @@ async fn insert_running_ticket(pool: &sqlx::PgPool, status: &str) -> (Uuid, Uuid
 async fn spawn_tracked_sleeper(dir: &Path, run_id: Uuid) -> (u32, u32) {
     let pid_file = dir.join("child.pid");
     let script = format!(
-        "sleep 1000 >/dev/null 2>&1 & echo $! > '{}'; wait",
+        "sleep {STUB_SLEEP_SECS} >/dev/null 2>&1 & echo $! > '{}'; wait",
         pid_file.display()
     );
     let mut cmd = Command::new("sh");
@@ -208,7 +213,13 @@ async fn graceful_shutdown_and_crash_reap_block_in_progress_tickets() {
     let _grace_cleanup = KillGroup(grace_leader);
     assert!(process_alive(grace_child));
 
+    let started = tokio::time::Instant::now();
     shutdown_agent_sessions(&state).await;
+    assert!(
+        started.elapsed() < Duration::from_secs(5),
+        "quit shutdown took {:?}, longer than TERM_GRACE",
+        started.elapsed()
+    );
 
     assert!(
         wait_dead(grace_leader).await,
@@ -232,8 +243,14 @@ async fn graceful_shutdown_and_crash_reap_block_in_progress_tickets() {
     // The process that spawned the agent is gone. The next launch installs the
     // same record file, reaps the orphan, then sweeps runs still marked active.
     process_tree::install(&crash_path);
+    let started = tokio::time::Instant::now();
     process_tree::reap_orphaned_agents().await;
     sweep_orphaned_runs(&state).await;
+    assert!(
+        started.elapsed() < Duration::from_secs(5),
+        "restart reap took {:?}, longer than TERM_GRACE",
+        started.elapsed()
+    );
 
     assert!(
         wait_dead(crash_leader).await,
@@ -261,7 +278,13 @@ async fn graceful_shutdown_blocks_in_review_and_in_qa_tickets() {
         let _cleanup = KillGroup(leader);
         assert!(process_alive(child), "{status} child was not running");
 
+        let started = tokio::time::Instant::now();
         shutdown_agent_sessions(&state).await;
+        assert!(
+            started.elapsed() < Duration::from_secs(5),
+            "{status} quit shutdown took {:?}, longer than TERM_GRACE",
+            started.elapsed()
+        );
 
         assert!(
             wait_dead(child).await,

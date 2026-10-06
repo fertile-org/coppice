@@ -141,7 +141,7 @@ async fn run_cli_cancel_kills_background_child() {
         run_cli(
             fake_cli(
                 &[
-                    ("FAKE_CLI_BACKGROUND_SLEEP_SECS", "1000"),
+                    ("FAKE_CLI_BACKGROUND_SLEEP_SECS", "20"),
                     ("FAKE_CLI_SLEEP_MS", "30000"),
                 ],
                 Duration::from_secs(60),
@@ -188,7 +188,7 @@ async fn run_cli_cancel_kills_background_child() {
 async fn run_cli_completion_kills_background_child_and_logs_it() {
     let dir = tempfile::tempdir().expect("tempdir");
     let mut invocation = fake_cli(
-        &[("FAKE_CLI_BACKGROUND_SLEEP_SECS", "1000")],
+        &[("FAKE_CLI_BACKGROUND_SLEEP_SECS", "20")],
         Duration::from_secs(10),
     );
     invocation.run_id = Some("run-complete".into());

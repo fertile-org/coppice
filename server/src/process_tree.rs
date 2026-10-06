@@ -1002,8 +1002,10 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         let registry = registry(dir.path());
         let pid_file = dir.path().join("child.pid");
+        // 20s outlives the grace period. stop_all signals the group; it does
+        // not block until this sleep exits.
         let script = format!(
-            "sleep 1000 >/dev/null 2>&1 & echo $! > '{}'; wait",
+            "sleep 20 >/dev/null 2>&1 & echo $! > '{}'; wait",
             pid_file.display()
         );
         let tracked = registry
@@ -1044,7 +1046,7 @@ mod tests {
         let registry = ProcessRegistry::with_grace(&path, Duration::from_millis(400));
         let pid_file = dir.path().join("child.pid");
         let script = format!(
-            "sleep 1000 >/dev/null 2>&1 & echo $! > '{}'; wait",
+            "sleep 20 >/dev/null 2>&1 & echo $! > '{}'; wait",
             pid_file.display()
         );
         let tracked = registry
@@ -1080,7 +1082,7 @@ mod tests {
         let registry = ProcessRegistry::with_grace(&path, Duration::from_millis(400));
         let pid_file = dir.path().join("child.pid");
         let script = format!(
-            "sleep 1000 >/dev/null 2>&1 & echo $! > '{}'",
+            "sleep 20 >/dev/null 2>&1 & echo $! > '{}'",
             pid_file.display()
         );
         let tracked = registry
@@ -1116,7 +1118,7 @@ mod tests {
         let path = dir.path().join("agent-processes.json");
         let registry = ProcessRegistry::open(&path);
         let tracked = registry
-            .spawn(&mut shell("sleep 1000"), meta(dir.path()))
+            .spawn(&mut shell("sleep 20"), meta(dir.path()))
             .expect("spawn");
         let leader = tracked.id();
         let pgid = tracked.record.pgid;
@@ -1171,7 +1173,7 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         let registry = registry(dir.path());
         let tracked = registry
-            .spawn(&mut shell("sleep 1000"), meta(dir.path()))
+            .spawn(&mut shell("sleep 20"), meta(dir.path()))
             .expect("spawn");
         let _cleanup = KillGroup(tracked.record.pgid);
         let mut bystander = std::process::Command::new("sleep")
@@ -1239,7 +1241,7 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         install(dir.path().join("agent-processes.json"));
         let tracked = active()
-            .spawn(&mut shell("sleep 1000"), meta(dir.path()))
+            .spawn(&mut shell("sleep 20"), meta(dir.path()))
             .expect("spawn");
         let leader = tracked.id();
         let _cleanup = KillGroup(tracked.record.pgid);
