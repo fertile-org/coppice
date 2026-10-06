@@ -1,12 +1,12 @@
 ---
 layout: ../../layouts/Docs.astro
 title: Docs
-description: "Coppice is a local desktop board for the coding agent CLIs you already use. These docs are the primary guide for installing and using it."
+description: "Coppice lets you run several coding agents at once without babysitting them: queue work as tickets, let agents build on their own branches, and review every diff before it counts. Start with Install to run your first ticket."
 ---
 
 # Docs
 
-Coppice is a local desktop board for the coding agent CLIs you already use. These docs are the primary guide for installing and using it.
+Coppice lets you run several coding agents at once without babysitting them: queue work as tickets, let agents build on their own branches, and review every diff before it counts. Start with Install to run your first ticket.
 
 | Guide | |
 | --- | --- |

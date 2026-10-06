@@ -5,26 +5,32 @@ import HeroMedia from '../components/HeroMedia.astro';
 import { withBase } from '../lib/url';
 
 const description =
-  'Agents plan, you approve. Agents build, you review. On your machine, with the agent CLIs you already pay for.';
+  'Run several coding agents at once without babysitting them. Review every diff before it counts. Local, open source, with the agent CLIs you already pay for.';
 
 const features = [
-  ['Local-first', 'Runs on your machine. Your repos, your CLIs, your data.'],
   [
-    'BYO agent CLIs',
-    'Claude Code, Codex, Cursor, OpenCode, and Kilo Code — tools you already pay for.',
+    'Stop tab-hopping between terminals.',
+    "Every agent's work is a card on one board. Blocked tickets and work waiting for your review stand out, so you know where you're needed.",
   ],
   [
-    'Visible work',
-    'Comments, run logs, and a live terminal on the ticket. No hidden agent-to-agent side channels.',
-  ],
-  ['Human gates', 'You decide what starts and what ships. Final Review is the product, not an optional extra.'],
-  [
-    'Knowledge hygiene',
-    'Typed, scoped memory with human approval — not a dumping ground of embeddings.',
+    'Catch mistakes before they land.',
+    'Every change waits for you as a diff in the app. Nothing counts as done until you accept it.',
   ],
   [
-    'Controlled autonomy',
-    'Agents plan and execute; sensitive steps stop at you. Sandbox hardening is next.',
+    'No second subscription.',
+    'Coppice drives the CLIs you already pay for: Claude Code, Codex, Cursor, OpenCode and Kilo Code.',
+  ],
+  [
+    'No Coppice cloud.',
+    'Your repos, tickets and history stay on your machine. Only your CLIs talk to their own model providers.',
+  ],
+  [
+    'See exactly what happened.',
+    'Every thought, tool call and comment is on the ticket. There are no hidden side channels between agents.',
+  ],
+  [
+    'Memory that stays useful.',
+    'Project knowledge an agent wants to keep needs your approval, so later tickets get context, not noise.',
   ],
 ];
 ---
@@ -32,8 +38,11 @@ const features = [
 <Base title="Coppice" description={description}>
   <div class="shell landing">
     <header class="promise">
-      <h1>Agents plan, you approve. Agents build, you review.</h1>
-      <p class="lede">On your machine, with the agent CLIs you already pay for.</p>
+      <h1>Run a team of coding agents without babysitting them.</h1>
+      <p class="lede">
+        Queue work as tickets. Claude Code, Codex and the others build in parallel, each on its own branch. You
+        step in to review the diff, and nothing counts as done until you approve it.
+      </p>
     </header>
 
     <HeroMedia />
@@ -44,13 +53,28 @@ const features = [
       <DownloadLinks showDocs />
     </div>
 
-    <section class="block" aria-labelledby="what-it-is">
-      <h2 id="what-it-is">What it is</h2>
-      <p>
-        Coppice is a local desktop app — a Trello-like board where your installed coding agents work tickets
-        in isolated git worktrees, talk in visible ticket comments, and stop for your review.
-      </p>
-      <p>Download, open, work. No Docker. No server. No account.</p>
+    <section class="block" aria-labelledby="how-it-works">
+      <h2 id="how-it-works">How it works</h2>
+      <ol class="gates">
+        <li>
+          <p>
+            <strong>Hand off the work.</strong> Write a ticket, or approve one an agent suggests, and move it to Ready.
+          </p>
+        </li>
+        <li>
+          <p>
+            <strong>Let agents build.</strong> Each ticket gets its own git worktree, so parallel agents never touch your
+            main checkout. Follow any run live.
+          </p>
+        </li>
+        <li>
+          <p>
+            <strong>Review what shipped.</strong> Read the diff in the app, comment on any line, and accept it when it's
+            right.
+          </p>
+        </li>
+      </ol>
+      <p>Download, open, work. Nothing to set up: no Docker, no Coppice account.</p>
     </section>
 
     <section class="block" aria-labelledby="what-it-is-not">
@@ -64,13 +88,14 @@ const features = [
 
     <section class="block" aria-labelledby="two-gates">
       <h2 id="two-gates">The two gates</h2>
+      <p>Agents are fast at building the wrong thing. Coppice puts you at the two moments that catch it.</p>
       <ol class="gates">
         <li>
           <p><strong>Plan Review</strong> (coming soon): a PM agent drafts the plan, and you approve or comment before anyone writes code.</p>
         </li>
         <li>
           <p>
-            <strong>Final Review</strong> — you open the in-app diff; feedback stays on the ticket; nothing is done until you say so.
+            <strong>Final Review</strong>: you read the diff in the app, feedback stays on the ticket, and nothing is done until you say so.
           </p>
         </li>
       </ol>
@@ -94,8 +119,8 @@ const features = [
     <section class="block who" aria-labelledby="who">
       <h2 id="who">Who it’s for</h2>
       <p>
-        Solo senior engineers and small teams who already run coding agents — and want to manage them like a team:
-        create or approve tickets, check the plan, review the diff.
+        Engineers and small teams who already run coding agents and are tired of watching terminals. If you want to hand
+        off more work without losing control of what ships, Coppice is for you.
       </p>
     </section>
 
