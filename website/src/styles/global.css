@@ -208,6 +208,10 @@ a:hover {
   margin: 1.75rem 0 0;
 }
 
+.hero-shot .hero-still {
+  display: none;
+}
+
 .hero-shot video,
 .hero-shot img {
   display: block;
@@ -575,6 +579,14 @@ a:hover {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .hero-shot .hero-video {
+    display: none;
+  }
+
+  .hero-shot .hero-still {
+    display: block;
+  }
+
   html {
     scroll-behavior: auto;
   }

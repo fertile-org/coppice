@@ -1,8 +1,9 @@
 ---
 import { withBase } from '../lib/url';
 
-const alt =
+const videoAlt =
   'Coppice in five frames: a code diff waiting for final review, the ticket board, a Claude Code run in the live console, a chat with an agent, and the plugins page.';
+const stillAlt = 'Coppice board with tickets from Backlog through In Review';
 
 const captions = [
   'Final Review: Agents build, you review. Read the diff, comment on any line, and nothing is done until you accept it.',
@@ -14,6 +15,13 @@ const captions = [
 ---
 
 <figure class="hero-shot">
+  <img
+    class="hero-still"
+    src={withBase('/assets/hero-screenshot.png')}
+    width="1440"
+    height="900"
+    alt={stillAlt}
+  />
   <video
     class="hero-video"
     width="1440"
@@ -23,7 +31,7 @@ const captions = [
     playsinline
     preload="none"
     poster={withBase('/assets/hero-screenshot.png')}
-    aria-label={alt}
+    aria-label={videoAlt}
   >
     <source src={withBase('/assets/marketing.webm')} type="video/webm" />
     <source src={withBase('/assets/marketing.mp4')} type="video/mp4" />
@@ -34,7 +42,7 @@ const captions = [
       src={withBase('/assets/marketing.vtt')}
       default
     />
-    <img src={withBase('/assets/marketing.gif')} width="1440" height="900" alt={alt} />
+    <img src={withBase('/assets/marketing.gif')} width="1440" height="900" alt={videoAlt} />
   </video>
   <figcaption>
     <ol class="hero-captions">

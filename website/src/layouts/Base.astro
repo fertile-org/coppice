@@ -17,6 +17,7 @@ const canonicalPath = Astro.url.pathname
   .replace(/\.html$/, '');
 const canonical = Astro.site ? new URL(canonicalPath || '/', Astro.site).href : undefined;
 const image = Astro.site ? new URL(withBase('/assets/hero-screenshot.png'), Astro.site).href : undefined;
+const imageAlt = 'Coppice board with tickets from Backlog through In Review';
 ---
 
 <!doctype html>
@@ -36,6 +37,7 @@ const image = Astro.site ? new URL(withBase('/assets/hero-screenshot.png'), Astr
     <meta property="og:description" content={description} />
     <meta property="og:type" content="website" />
     {image && <meta property="og:image" content={image} />}
+    {image && <meta property="og:image:alt" content={imageAlt} />}
   </head>
   <body>
     <a class="skip" href="#content">Skip to content</a>
