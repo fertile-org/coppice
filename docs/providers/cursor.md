@@ -30,7 +30,7 @@ What each step does:
 | Step | What you should see |
 |------|---------------------|
 | `enable` | Writes `enabled = true` into `deploy/config/config.toml` |
-| recreate server | Picks up the config change |
+| recreate server | Needed after `coppice connector enable` or a hand-edit. The in-app Connectors switch and saving an agent apply immediately |
 | `install` | Downloads `agent` into the container’s home volume |
 | `setup` | Runs `agent login` — copy the printed URL into a browser on your machine, finish login, return to the terminal |
 | `doctor` | Prints `doctor: ok` when the CLI and login look healthy |
@@ -72,8 +72,8 @@ Start at **Tools → Connectors** (admin): it shows whether `agent` is found, wh
 |---------|-------------|
 | `doctor` says binary missing | Re-run `install`, or confirm PATH includes `/home/coppice/.local/bin` inside the server container |
 | `doctor` says auth missing / models fail | Re-run `setup` and finish the browser login |
-| Agents UI has no models / API errors | Same as auth missing; also recreate the server after `enable` |
-| Changes to config.toml ignored | `docker compose … up -d --force-recreate server` |
+| Agents UI has no models / API errors | Same as auth missing. Saving the agent turns the connector on; a hand-edit is read on the next server start |
+| Changes to config.toml ignored | Hand-edits apply on the next server start (`docker compose … up -d --force-recreate server`). The in-app switch does not need that |
 
 ## Behavior notes
 

@@ -3,6 +3,7 @@
 use serde::Serialize;
 
 pub mod probe;
+pub mod sign_in;
 
 pub const MOCK: &str = "mock";
 pub const CURSOR: &str = "cursor";

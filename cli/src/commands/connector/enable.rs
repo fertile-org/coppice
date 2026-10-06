@@ -1,8 +1,9 @@
 use std::path::{Path, PathBuf};
 
 use clap::Args;
-use toml_edit::{value, Array, DocumentMut, Item, Table};
+use toml_edit::DocumentMut;
 
+use coppice_config::connector_file::{set_connector_enabled, ConnectorFilePatch};
 use coppice_connectors::{ConnectorDescriptor, CURSOR, KILO_CODE, MOCK, OPENCODE};
 
 use super::registry::parse_id;
@@ -41,7 +42,9 @@ pub fn run(args: EnableArgs) -> anyhow::Result<()> {
     }
     std::fs::write(&path, doc.to_string())?;
     println!("enabled {} in {}", m.id, path.display());
-    println!("Restart the server (or recreate the Compose service) to pick up config changes.");
+    println!(
+        "A running server reads this file the next time it starts. In the app, the Connectors toggle and saving an agent apply immediately."
+    );
     Ok(())
 }
 
@@ -65,45 +68,17 @@ pub fn resolve_config_path(explicit: Option<&Path>) -> anyhow::Result<PathBuf> {
 }
 
 pub fn enable_in_doc(doc: &mut DocumentMut, m: &ConnectorDescriptor) -> anyhow::Result<()> {
-    let agent = doc
-        .entry("agent")
-        .or_insert(Item::Table(Table::new()))
-        .as_table_mut()
-        .ok_or_else(|| anyhow::anyhow!("[agent] must be a table"))?;
-
-    let connectors = agent
-        .entry("connectors")
-        .or_insert(Item::Table(Table::new()))
-        .as_table_mut()
-        .ok_or_else(|| anyhow::anyhow!("[agent.connectors] must be a table"))?;
-    connectors.set_implicit(true);
-
-    let table = connectors
-        .entry(m.id)
-        .or_insert(Item::Table(Table::new()))
-        .as_table_mut()
-        .ok_or_else(|| anyhow::anyhow!("connector table must be a table"))?;
-
-    table["enabled"] = value(true);
-
-    let needs_providers = match table.get("model_providers") {
-        None => true,
-        Some(Item::Value(v)) => v.as_array().map(|a| a.is_empty()).unwrap_or(true),
-        _ => true,
-    };
-    if needs_providers && !m.default_model_providers.is_empty() {
-        let mut arr = Array::new();
-        for p in m.default_model_providers {
-            arr.push(p.to_string());
-        }
-        table["model_providers"] = value(arr);
-    }
-
-    if matches!(m.id, CURSOR | KILO_CODE | OPENCODE) && table.get("command").is_none() {
-        table["command"] = value(m.binary);
-    }
-
-    Ok(())
+    let command_if_missing = matches!(m.id, CURSOR | KILO_CODE | OPENCODE).then_some(m.binary);
+    set_connector_enabled(
+        doc,
+        &ConnectorFilePatch {
+            id: m.id,
+            enabled: true,
+            default_model_providers: m.default_model_providers,
+            command_if_missing,
+        },
+    )
+    .map_err(|err| anyhow::anyhow!(err))
 }
 
 #[cfg(test)]

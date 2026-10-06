@@ -17,7 +17,7 @@ async fn test_state_with_db() -> Arc<AppState> {
     let gateway = common::GatewayParts::new(&config, &pool);
     Arc::new(AppState {
         attachments: AppState::attachment_store_from_config(&config),
-        connector_registry: AppState::connector_registry_from_config(&config, opencode_runs.clone()),
+        connectors: AppState::connectors_runtime(&config, opencode_runs.clone()),
         agent_health: Arc::new(coppice_server::services::agent_health::AgentHealthRegistry::new()),
         run_streams: Arc::new(coppice_server::sessions::run_registry::RunStreamRegistry::new()),
         event_bus: Arc::new(coppice_server::events::bus::EventBus::new()),

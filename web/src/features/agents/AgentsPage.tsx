@@ -7,7 +7,9 @@ import {
   DialogDescription,
   DialogTitle,
 } from '../../components/ui/dialog';
+import { useToast } from '../../components/ToastProvider';
 import { ApiError, parseApiErrorMessage } from '../../lib/api';
+import { turnedOnToast } from '../tools/connectorCopy';
 import { isAssignable } from '../plugins/assignable';
 import { usePlugins } from '../plugins/usePlugins';
 import {
@@ -75,6 +77,10 @@ function HealthBadge({
   );
 }
 
+function firstReadyConnector(options: ConnectorOption[]): string {
+  return options.find((option) => option.readiness === 'ready')?.id ?? '';
+}
+
 function CreateAgentDialog({
   open,
   onClose,
@@ -100,6 +106,7 @@ function CreateAgentDialog({
   const [createdAgentId, setCreatedAgentId] = useState<string | null>(null);
   const createAgent = useCreateAgent();
   const setAgentPlugins = useSetAgentPlugins();
+  const toast = useToast();
 
   useEffect(() => {
     if (!open) return;
@@ -124,7 +131,7 @@ function CreateAgentDialog({
     const preset = presets.find((p) => p.id === nextPresetId);
     if (preset) {
       setValues((prev) => ({
-        ...presetToFormValues(preset, prev.name),
+        ...presetToFormValues(preset, prev.name, prev.connector),
         pluginIds: prev.pluginIds,
       }));
     }
@@ -153,6 +160,9 @@ function CreateAgentDialog({
           modelProvider: formValues.modelProvider || undefined,
           model: formValues.model || undefined,
         });
+        if (agent.connectorTurnedOn?.displayName) {
+          toast.success(turnedOnToast(agent.connectorTurnedOn.displayName));
+        }
         agentId = agent.id;
         setCreatedAgentId(agentId);
       } catch (err) {
@@ -208,7 +218,11 @@ function CreateAgentDialog({
         <div className="mt-4">
           <AgentForm
             mode="create"
-            values={values}
+            values={
+              values.connector
+                ? values
+                : { ...values, connector: firstReadyConnector(connectorOptions) }
+            }
             onChange={setValues}
             onSubmit={handleSubmit}
             onCancel={onClose}
@@ -241,6 +255,7 @@ function EditAgentDialog({
   );
   const [error, setError] = useState<string | null>(null);
   const updateAgent = useUpdateAgent(agent.id);
+  const toast = useToast();
   const {
     data: assignedPluginIds,
     error: assignedPluginsError,
@@ -279,7 +294,7 @@ function EditAgentDialog({
   async function handleSubmit(formValues: AgentFormValues) {
     setError(null);
     try {
-      await updateAgent.mutateAsync({
+      const agent = await updateAgent.mutateAsync({
         name: formValues.name.trim(),
         role: formValues.role.trim(),
         skills: listFromLines(formValues.skills),
@@ -290,6 +305,9 @@ function EditAgentDialog({
         model: formValues.model || undefined,
         enabled: formValues.enabled,
       });
+      if (agent.connectorTurnedOn?.displayName) {
+        toast.success(turnedOnToast(agent.connectorTurnedOn.displayName));
+      }
     } catch {
       setError('Unable to save agent.');
       return;

@@ -1,6 +1,7 @@
 pub mod agent_templates;
 pub mod api;
 pub mod config;
+pub mod connectors_runtime;
 pub mod crypto;
 pub mod db;
 #[cfg(unix)]
@@ -9,13 +10,13 @@ pub mod domain;
 pub mod events;
 pub mod knowledge;
 pub mod mcp;
-pub mod plugins;
 pub mod middleware;
+pub mod plugins;
 pub mod providers;
-pub mod sessions;
 pub mod sandbox;
 pub mod serve;
 pub mod services;
+pub mod sessions;
 pub mod static_web;
 pub mod storage;
 pub mod util;
@@ -34,7 +35,9 @@ pub struct AppState {
     pub config: AppConfig,
     pub db: Option<PgPool>,
     pub attachments: AttachmentStore,
-    pub connector_registry: Arc<crate::providers::ConnectorRegistry>,
+    /// Connector enablement and the provider registry. Rebuilt when a connector
+    /// is turned on or off, without restarting the process.
+    pub connectors: Arc<crate::connectors_runtime::ConnectorsRuntime>,
     pub agent_health: Arc<crate::services::agent_health::AgentHealthRegistry>,
     pub run_streams: Arc<crate::sessions::run_registry::RunStreamRegistry>,
     pub event_bus: Arc<crate::events::bus::EventBus>,
@@ -65,6 +68,17 @@ impl AppState {
         ))
     }
 
+    pub fn connectors_runtime(
+        config: &AppConfig,
+        opencode_runs: Arc<crate::sessions::opencode_run_server::OpenCodeRunServers>,
+    ) -> Arc<crate::connectors_runtime::ConnectorsRuntime> {
+        Arc::new(crate::connectors_runtime::ConnectorsRuntime::new(
+            config.clone(),
+            opencode_runs,
+            None,
+        ))
+    }
+
     pub fn test_opencode_runs() -> Arc<crate::sessions::opencode_run_server::OpenCodeRunServers> {
         crate::sessions::opencode_run_server::OpenCodeRunServers::new(
             crate::providers::descriptor(coppice_connectors::OPENCODE)
@@ -86,10 +100,7 @@ impl AppState {
     ) -> anyhow::Result<Arc<crate::plugins::skills::SkillCatalog>> {
         let dir = std::path::Path::new(&config.mcp.builtin_plugins_dir);
         crate::plugins::builtin::materialize_builtin(dir).map_err(|e| {
-            anyhow::anyhow!(
-                "failed to write built-in plugins to {}: {e}",
-                dir.display()
-            )
+            anyhow::anyhow!("failed to write built-in plugins to {}: {e}", dir.display())
         })?;
         Ok(Arc::new(crate::plugins::skills::load_builtin(dir)?))
     }
@@ -195,7 +206,7 @@ pub async fn test_state() -> Arc<AppState> {
     );
     Arc::new(AppState {
         attachments: AppState::attachment_store_from_config(&config),
-        connector_registry: AppState::connector_registry_from_config(&config, opencode_runs.clone()),
+        connectors: AppState::connectors_runtime(&config, opencode_runs.clone()),
         agent_health: Arc::new(crate::services::agent_health::AgentHealthRegistry::new()),
         run_streams: Arc::new(crate::sessions::run_registry::RunStreamRegistry::new()),
         event_bus: Arc::new(crate::events::bus::EventBus::new()),

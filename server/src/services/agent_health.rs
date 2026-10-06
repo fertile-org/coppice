@@ -68,10 +68,7 @@ pub async fn evaluate_agent_health(
     let Some(models) = registry.models(&agent.connector) else {
         return (
             AgentHealthStatus::MissingConfig,
-            Some(format!(
-                "Connector '{}' is not configured on this server",
-                agent.connector
-            )),
+            Some(missing_connector_detail(&agent.connector)),
         );
     };
     if let Some(ref mp) = agent.model_provider {
@@ -86,6 +83,17 @@ pub async fn evaluate_agent_health(
         }
     }
     (AgentHealthStatus::Healthy, None)
+}
+
+/// Known connectors that are not in the registry are turned off. Anything else
+/// keeps the historical "not configured" wording.
+pub fn missing_connector_detail(id: &str) -> String {
+    match coppice_connectors::get(id) {
+        Some(descriptor) if descriptor.id != coppice_connectors::MOCK => {
+            crate::connectors_runtime::turned_off_message(descriptor.display_name)
+        }
+        _ => format!("Connector '{id}' is not configured on this server"),
+    }
 }
 
 #[cfg(test)]
@@ -130,14 +138,21 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn health_unconfigured_connector_message_unchanged() {
+    async fn health_disabled_connector_says_turned_off() {
         let mut config = crate::config::AppConfig::load_defaults().expect("config");
         let reg = registry(&config);
         let (status, detail) = evaluate_agent_health(&agent("cursor", None), &reg).await;
         assert_eq!(status, AgentHealthStatus::MissingConfig);
         assert_eq!(
             detail.as_deref(),
-            Some("Connector 'cursor' is not configured on this server")
+            Some(
+                "Cursor is turned off. Turn it on in Tools → Connectors, or switch this agent to another connector."
+            )
+        );
+        let (_status, detail) = evaluate_agent_health(&agent("not-a-connector", None), &reg).await;
+        assert_eq!(
+            detail.as_deref(),
+            Some("Connector 'not-a-connector' is not configured on this server")
         );
 
         config.agent.connectors.cursor.enabled = true;

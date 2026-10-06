@@ -28,7 +28,7 @@ docker compose -f deploy/docker-compose.yml exec -it -u "$(id -u):$(id -g)" serv
 | Step | Notes |
 |------|--------|
 | `enable` | Writes `enabled = true` into `deploy/config/config.toml` |
-| recreate server | Picks up the config change |
+| recreate server | Needed after `coppice connector enable` or a hand-edit. The in-app Connectors switch and saving an agent apply immediately |
 | `install` | Usually manual — e.g. install `@kilocode/cli` so `kilo` lands under `/home/coppice` on PATH |
 | `setup` | Follow vendor auth (`kilo auth login` or open `kilo` and use `/connect`) |
 | `doctor` | Prints `doctor: ok` when the CLI and auth look healthy |
@@ -71,10 +71,11 @@ Start at **Tools → Connectors** (admin): it shows whether `kilo` is found, whi
 | Binary missing | Install `@kilocode/cli` so `kilo` is on PATH under `/home/coppice` |
 | Auth missing | Re-run `setup` or authenticate in the Kilo TUI (`/connect`) |
 | No models in UI | Confirm `kilo models <provider>` works inside the server container |
-| Config ignored | Recreate/restart the server after `enable` |
+| Config ignored | `coppice connector enable` and hand-edits apply on the next server start. The in-app switch does not need a restart |
 
 ## Behavior notes
 
+- **Sign-in:** Kilo has no cheap non-interactive auth check (`kilo auth` opens a TUI). A found binary is not labeled Ready or "Found, not signed in".
 - **Live console:** Streams assistant output while the run is active. After a server restart mid-run, Coppice replays the saved log.
 - **Continued tickets:** Prefer checkpoint-style `continued` runs. Worker-wired session resume for Kilo is not fully connected yet.
 - **Daemon / serve:** Coppice uses the **subprocess** path (`kilo run`), not `kilo serve` / daemon HTTP APIs (compatibility not confirmed).

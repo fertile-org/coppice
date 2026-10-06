@@ -132,7 +132,9 @@ fn generated_config(layout: &DataLayout) -> io::Result<String> {
         "# Coppice desktop configuration. Edits here survive upgrades.\n\
          # Secrets (session secret, encryption key, passwords) live in secrets/, not here.\n\
          # The server port, database URL and auth mode are set by the desktop app at startup.\n\
-         # This build has no mock connector. Enable a real one, for example:\n\
+         # This build has no mock connector. Nothing is turned on until you save an agent\n\
+         # that uses one, or turn it on in Tools → Connectors. A hand-written section\n\
+         # is read the next time the server starts:\n\
          # [agent.connectors.claude-code]\n\
          # enabled = true\n\n\
          {body}"

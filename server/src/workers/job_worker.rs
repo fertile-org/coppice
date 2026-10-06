@@ -531,10 +531,11 @@ async fn execute_job(
         .into_owned();
 
     let connector_name = &agent.connector;
-    let connector = state
-        .connector_registry
-        .get(connector_name)
-        .ok_or_else(|| anyhow::anyhow!("agent connector not configured: {connector_name}"))?;
+    let connector = state.connectors.registry().get(connector_name).ok_or_else(|| {
+        anyhow::anyhow!(crate::connectors_runtime::connector_unavailable_message(
+            connector_name
+        ))
+    })?;
 
     let session_created_tx = if crate::providers::descriptor(connector_name)
         .is_some_and(|d| d.caps.session_events)
@@ -834,12 +835,11 @@ async fn invoke_chat_provider(
     resume_session_id: Option<String>,
     mcp: McpAccess,
 ) -> Result<AgentRunResult, ProviderError> {
-    let connector = state
-        .connector_registry
-        .get(connector_name)
-        .ok_or_else(|| {
-            ProviderError::InvalidInput(format!("agent connector not configured: {connector_name}"))
-        })?;
+    let connector = state.connectors.registry().get(connector_name).ok_or_else(|| {
+        ProviderError::InvalidInput(crate::connectors_runtime::connector_unavailable_message(
+            connector_name,
+        ))
+    })?;
     let session_created_tx = spawn_chat_session_created_tx(pool.clone(), run.id, connector_name);
     connector
         .run(AgentRunInput {

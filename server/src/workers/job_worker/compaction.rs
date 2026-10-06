@@ -49,10 +49,9 @@ pub(super) async fn execute_compaction(
             READ_ONLY_CAPABLE_CONNECTORS.join(", ")
         );
     }
-    let connector = state
-        .connector_registry
-        .get(connector_name)
-        .with_context(|| format!("agent connector not configured: {connector_name}"))?;
+    let connector = state.connectors.registry().get(connector_name).with_context(|| {
+        crate::connectors_runtime::connector_unavailable_message(connector_name)
+    })?;
     let agent_key = agent
         .preset_source
         .clone()

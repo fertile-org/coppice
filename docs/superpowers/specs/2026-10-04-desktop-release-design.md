@@ -31,7 +31,7 @@ Electron passes `D` = its `userData` path (`~/Library/Application Support/Coppic
 
 | Path | Contents |
 |---|---|
-| `config.toml` | Generated on first run from desktop defaults; never overwritten afterwards (user edits survive upgrades). |
+| `config.toml` | Generated on first run from desktop defaults. Later launches do not replace the file. Connector on/off from the app is patched in place so comments and other keys survive. |
 | `secrets/` | Session secret and the encryption key for forge / plugin settings, generated on first run, files mode `0600`. Losing them loses encrypted secrets. |
 | `pg/data` | Postgres cluster. |
 | `artifacts/`, `worktrees/`, `plugins/` | Storage paths referenced by the generated config. |

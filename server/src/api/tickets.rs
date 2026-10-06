@@ -12,6 +12,8 @@ use crate::events::bus::AppEvent;
 use crate::services::comment_service::CommentService;
 use crate::services::workflow_service::WorkflowService;
 use crate::domain::agent_health::AgentHealthStatus;
+use crate::services::agent_health::missing_connector_detail;
+use crate::services::agent_service::{AgentError, AgentService};
 use crate::services::run_service::{RunError, RunService};
 use crate::services::split_service::{SplitError, SplitService};
 use crate::services::ticket_git_service::{TicketGitError, TicketGitInfo, TicketGitService};
@@ -658,6 +660,19 @@ async fn run_agent(
     TicketService::ensure_not_archived(&ticket.ticket).map_err(map_ticket_error_response)?;
 
     if let Some(agent_id) = ticket.ticket.assignee_agent_id {
+        let agent = AgentService::new(pool).get(agent_id).await.map_err(|err| match err {
+            AgentError::AgentNotFound => RunAgentError::Status(StatusCode::NOT_FOUND),
+            other => {
+                tracing::warn!(error = %other, "load assignee for run failed");
+                RunAgentError::Status(StatusCode::INTERNAL_SERVER_ERROR)
+            }
+        })?;
+        if !state.connectors.registry().has(&agent.connector) {
+            return Err(RunAgentError::Message(
+                StatusCode::BAD_REQUEST,
+                missing_connector_detail(&agent.connector),
+            ));
+        }
         let health = state.agent_health.get(agent_id);
         if health.status == AgentHealthStatus::MissingConfig {
             return Err(RunAgentError::Message(

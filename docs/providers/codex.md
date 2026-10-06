@@ -28,7 +28,7 @@ docker compose -f deploy/docker-compose.yml exec -it -u "$(id -u):$(id -g)" serv
 | Step | Notes |
 |------|--------|
 | `enable` | Writes `enabled = true` into `deploy/config/config.toml` |
-| recreate server | Picks up the config change |
+| recreate server | Needed after `coppice connector enable` or a hand-edit. The in-app Connectors switch and saving an agent apply immediately |
 | `install` | May still print manual steps — put `codex` on PATH under `/home/coppice` if install is not automated yet |
 | `setup` | Runs `codex login --device-auth` (follow the device-code / URL prompts) |
 | `doctor` | Prints `doctor: ok` when the CLI and auth look healthy |
@@ -70,7 +70,7 @@ Start at **Tools → Connectors** (admin): it shows whether `codex` is found, wh
 | Binary missing | Install `codex` into `/home/coppice/.local/bin` (or your host PATH) |
 | Auth missing | Re-run `setup` (`codex login --device-auth`) |
 | No models in UI | Confirm login, then check `doctor` |
-| Config ignored | Recreate/restart the server after `enable` |
+| Config ignored | `coppice connector enable` and hand-edits apply on the next server start. The in-app switch does not need a restart |
 
 ## Behavior notes
 

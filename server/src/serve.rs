@@ -14,6 +14,8 @@ pub struct ServeOptions {
     pub static_web_dir: Option<PathBuf>,
     /// Called with the bound address once workers are running, before serving.
     pub on_ready: Option<Box<dyn FnOnce(SocketAddr) + Send>>,
+    /// Config file the Connectors toggle and agent save patch in place.
+    pub config_path: Option<PathBuf>,
 }
 
 async fn interrupt_orphaned_run(state: &AppState, run_id: uuid::Uuid) {
@@ -86,12 +88,11 @@ pub async fn serve(
         plugin_mcp.clone(),
         AppState::list_timeout_from_config(&config),
     );
+    let connectors = AppState::connectors_runtime(&config, opencode_runs.clone());
+    connectors.set_config_path(options.config_path.clone());
     let state = Arc::new(AppState {
         attachments: AppState::attachment_store_from_config(&config),
-        connector_registry: AppState::connector_registry_from_config(
-            &config,
-            opencode_runs.clone(),
-        ),
+        connectors,
         agent_health: Arc::new(crate::services::agent_health::AgentHealthRegistry::new()),
         run_streams: Arc::new(crate::sessions::run_registry::RunStreamRegistry::new()),
         event_bus: Arc::new(crate::events::bus::EventBus::new()),
@@ -110,7 +111,10 @@ pub async fn serve(
     {
         let state = state.clone();
         tokio::spawn(async move {
-            state.connector_probes.refresh_all(&state.config).await;
+            state
+                .connector_probes
+                .refresh_all(&state.connectors.config())
+                .await;
         });
     }
     plugin_mcp.spawn_reaper();

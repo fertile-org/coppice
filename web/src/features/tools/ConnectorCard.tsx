@@ -1,10 +1,17 @@
 import { useState } from 'react';
 import { Button } from '../../components/ui/button';
+import {
+  Dialog,
+  DialogContent,
+  DialogTitle,
+} from '../../components/ui/dialog';
 import { parseApiErrorMessage } from '../../lib/api';
 import type { ConnectorStatus } from '../../lib/schemas/connectorDiagnostics';
+import { useAgents } from '../agents/useAgents';
 import { ConnectorStatusList } from './ConnectorStatusList';
 import { ConnectorTestSection } from './ConnectorTestSection';
-import { useRecheckConnector } from './useConnectorDiagnostics';
+import { turnOffConfirm } from './connectorCopy';
+import { useRecheckConnector, useSetConnectorEnabled } from './useConnectorDiagnostics';
 
 function enabledPillClass(enabled: boolean): string {
   const base =
@@ -23,7 +30,12 @@ function needsHelp(connector: ConnectorStatus): boolean {
 
 export function ConnectorCard({ connector }: { connector: ConnectorStatus }) {
   const recheck = useRecheckConnector(connector.id);
+  const setEnabled = useSetConnectorEnabled();
+  const agents = useAgents();
   const [error, setError] = useState<string | null>(null);
+  const [confirming, setConfirming] = useState(false);
+  const users = (agents.data ?? []).filter((agent) => agent.connector === connector.id).length;
+  const countKnown = agents.isSuccess;
 
   async function handleRecheck() {
     setError(null);
@@ -32,6 +44,29 @@ export function ConnectorCard({ connector }: { connector: ConnectorStatus }) {
     } catch (err) {
       setError(parseApiErrorMessage(err, 'Check failed.'));
     }
+  }
+
+  async function applyEnabled(enabled: boolean) {
+    setError(null);
+    setConfirming(false);
+    try {
+      await setEnabled.mutateAsync({ id: connector.id, enabled });
+    } catch (err) {
+      setError(parseApiErrorMessage(err, 'Could not update this connector.'));
+    }
+  }
+
+  function handleToggle() {
+    if (connector.enabled) {
+      if (!countKnown) return;
+      if (users > 0) {
+        setConfirming(true);
+        return;
+      }
+      void applyEnabled(false);
+      return;
+    }
+    void applyEnabled(true);
   }
 
   return (
@@ -45,9 +80,17 @@ export function ConnectorCard({ connector }: { connector: ConnectorStatus }) {
             {connector.displayName}
           </h3>
           <span className="font-mono text-xs text-text-muted">{connector.id}</span>
-          <span className={enabledPillClass(connector.enabled)}>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={connector.enabled}
+            aria-label={`Enabled ${connector.displayName}`}
+            disabled={setEnabled.isPending || (connector.enabled && !countKnown)}
+            onClick={handleToggle}
+            className={enabledPillClass(connector.enabled)}
+          >
             {connector.enabled ? 'Enabled' : 'Disabled'}
-          </span>
+          </button>
         </div>
         <Button
           type="button"
@@ -60,17 +103,24 @@ export function ConnectorCard({ connector }: { connector: ConnectorStatus }) {
         </Button>
       </div>
 
-      {!connector.enabled && (
-        <p className="mt-2 font-body text-xs text-text-secondary">
-          Enable it with{' '}
-          <code className="font-mono text-text-primary">
-            {`coppice connector enable ${connector.id}`}
-          </code>
-          , then restart the server.
-        </p>
-      )}
-
       <ConnectorStatusList connector={connector} />
+
+      <Dialog open={confirming} onOpenChange={(open) => !open && setConfirming(false)}>
+        <DialogContent>
+          <DialogTitle className="sr-only">Turn off {connector.displayName}</DialogTitle>
+          <p className="font-body text-sm text-text-primary">
+            {turnOffConfirm(connector.displayName, users)}
+          </p>
+          <div className="mt-4 flex justify-end gap-2">
+            <Button type="button" variant="secondary" onClick={() => setConfirming(false)}>
+              Cancel
+            </Button>
+            <Button type="button" variant="destructive" onClick={() => void applyEnabled(false)}>
+              Turn off
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {needsHelp(connector) && (
         <div className="mt-3 rounded-md border border-warning-muted bg-warning-muted/30 px-3 py-2 font-body text-xs text-text-secondary">

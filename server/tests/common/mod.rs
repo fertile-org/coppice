@@ -213,7 +213,7 @@ where
     let gateway = GatewayParts::new(&config, &pool);
     Arc::new(AppState {
         attachments: AppState::attachment_store_from_config(&config),
-        connector_registry: AppState::connector_registry_from_config(&config, opencode_runs.clone()),
+        connectors: AppState::connectors_runtime(&config, opencode_runs.clone()),
         agent_health: Arc::new(coppice_server::services::agent_health::AgentHealthRegistry::new()),
         run_streams: Arc::new(coppice_server::sessions::run_registry::RunStreamRegistry::new()),
         event_bus: Arc::new(coppice_server::events::bus::EventBus::new()),
@@ -262,7 +262,7 @@ where
     let gateway = GatewayParts::new(&config, &pool);
     let state = Arc::new(AppState {
         attachments: AppState::attachment_store_from_config(&config),
-        connector_registry: AppState::connector_registry_from_config(&config, opencode_runs.clone()),
+        connectors: AppState::connectors_runtime(&config, opencode_runs.clone()),
         agent_health: Arc::new(coppice_server::services::agent_health::AgentHealthRegistry::new()),
         run_streams: Arc::new(coppice_server::sessions::run_registry::RunStreamRegistry::new()),
         event_bus: Arc::new(coppice_server::events::bus::EventBus::new()),
@@ -311,7 +311,7 @@ where
     let gateway = GatewayParts::new(&config, &pool);
     let state = Arc::new(AppState {
         attachments: AppState::attachment_store_from_config(&config),
-        connector_registry: AppState::connector_registry_from_config(&config, opencode_runs.clone()),
+        connectors: AppState::connectors_runtime(&config, opencode_runs.clone()),
         agent_health: Arc::new(coppice_server::services::agent_health::AgentHealthRegistry::new()),
         run_streams: Arc::new(coppice_server::sessions::run_registry::RunStreamRegistry::new()),
         event_bus: Arc::new(coppice_server::events::bus::EventBus::new()),
@@ -884,12 +884,7 @@ pub async fn poll_runs_until_count(
     }
 }
 
-pub async fn create_test_ticket(
-    app: &Router,
-    board_id: &str,
-    cookie: &str,
-    csrf: &str,
-) -> String {
+pub async fn create_test_ticket(app: &Router, board_id: &str, cookie: &str, csrf: &str) -> String {
     let res = app
         .clone()
         .oneshot(json_request(

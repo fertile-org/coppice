@@ -149,6 +149,29 @@ async fn agent_with_unknown_provider_gets_missing_config_health() {
         .await
         .unwrap();
     assert_eq!(create_res.status(), StatusCode::CREATED);
+    let created: serde_json::Value = common::json_body(create_res).await;
+    assert_eq!(created["connectorTurnedOn"]["displayName"], "OpenCode");
+    assert!(state
+        .connectors
+        .registry()
+        .has(coppice_connectors::OPENCODE));
+
+    let off = app
+        .clone()
+        .oneshot(common::json_request(
+            "PATCH",
+            "/api/tools/connectors/opencode",
+            r#"{"enabled":false}"#,
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(off.status(), StatusCode::OK);
+    assert!(!state
+        .connectors
+        .registry()
+        .has(coppice_connectors::OPENCODE));
 
     coppice_server::workers::health_worker::run_health_pass_once(&state).await;
 
@@ -174,7 +197,7 @@ async fn agent_with_unknown_provider_gets_missing_config_health() {
     assert!(agent["healthDetail"]
         .as_str()
         .unwrap()
-        .contains("not configured"));
+        .contains("turned off"));
 }
 
 #[tokio::test]
@@ -217,7 +240,13 @@ async fn list_connectors_returns_console_and_caps() {
 
     let res = app
         .clone()
-        .oneshot(common::json_request("GET", "/api/connectors", "", &cookie, &csrf))
+        .oneshot(common::json_request(
+            "GET",
+            "/api/connectors",
+            "",
+            &cookie,
+            &csrf,
+        ))
         .await
         .unwrap();
     assert_eq!(res.status(), StatusCode::OK);
@@ -229,13 +258,17 @@ async fn list_connectors_returns_console_and_caps() {
         .find(|i| i["id"] == "mock")
         .expect("mock connector listed")
         .clone();
+    let descriptor = coppice_connectors::get("mock").unwrap();
     assert_eq!(
         mock,
         serde_json::json!({
             "id": "mock",
-            "displayName": coppice_connectors::get("mock").unwrap().display_name,
+            "displayName": descriptor.display_name,
             "console": "plain",
-            "caps": { "readOnlyTools": true, "chatResume": true }
+            "caps": { "readOnlyTools": true, "chatResume": true },
+            "enabled": true,
+            "readiness": "ready",
+            "docsUrl": descriptor.install.docs_url
         })
     );
 }

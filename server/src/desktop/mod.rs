@@ -161,6 +161,7 @@ async fn serve_with_postgres(
     let config = bootstrap::desktop_config(layout, secrets, &pg_url, port)?;
     let options = ServeOptions {
         static_web_dir: Some(resources.web.clone()),
+        config_path: Some(layout.config_file.clone()),
         on_ready: Some(Box::new({
             let requested = requested.clone();
             move |addr| {

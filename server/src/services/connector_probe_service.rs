@@ -5,6 +5,7 @@ use crate::services::connector_check_service::{
 };
 use crate::AppConfig;
 use coppice_connectors::probe::{probe, ProbeEnv, ProbeOutcome, ProbeReport};
+use coppice_connectors::sign_in::{assess, Readiness};
 use coppice_connectors::ConnectorDescriptor;
 use serde::Serialize;
 use sqlx::PgPool;
@@ -17,12 +18,14 @@ use time::OffsetDateTime;
 use uuid::Uuid;
 
 const PROBE_TIMEOUT: Duration = Duration::from_secs(10);
+const SIGN_IN_TIMEOUT: Duration = Duration::from_secs(3);
 
 pub type EnvLookup = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
 
 #[derive(Debug, Clone)]
 pub struct CachedProbe {
     pub report: ProbeReport,
+    pub readiness: Readiness,
     pub probed_at: OffsetDateTime,
 }
 
@@ -65,7 +68,7 @@ impl ConnectorProbes {
         let descriptor = diagnosable(id)?;
         let command = config.agent.connectors.command(id).map(str::to_string);
         let lookup = self.env_lookup.clone();
-        let report = tokio::task::spawn_blocking(move || {
+        let probed = tokio::task::spawn_blocking(move || {
             let home = std::env::var_os("HOME")
                 .map(PathBuf::from)
                 .unwrap_or_default();
@@ -76,11 +79,13 @@ impl ConnectorProbes {
                 command_override: command.as_deref(),
                 env_lookup: &*lookup,
             };
-            probe(descriptor, &env, PROBE_TIMEOUT)
+            let report = probe(descriptor, &env, PROBE_TIMEOUT);
+            let readiness = assess(descriptor, &env, report.binary.as_deref(), SIGN_IN_TIMEOUT);
+            (report, readiness)
         })
         .await;
-        let report = match report {
-            Ok(report) => report,
+        let (report, readiness) = match probed {
+            Ok(probed) => probed,
             Err(err) => {
                 tracing::warn!(connector = id, error = %err, "connector probe task failed");
                 return None;
@@ -88,6 +93,7 @@ impl ConnectorProbes {
         };
         let cached = CachedProbe {
             report,
+            readiness,
             probed_at: OffsetDateTime::now_utc(),
         };
         self.cache
@@ -190,6 +196,8 @@ pub struct ConnectorStatusResponse {
     pub last_run: Option<LastRunResponse>,
     pub last_check: Option<CheckSummary>,
     pub probed_at: Option<String>,
+    /// `null` until this connector has been probed.
+    pub readiness: Option<Readiness>,
 }
 
 #[derive(Debug, Serialize)]
@@ -270,6 +278,7 @@ pub fn connector_status(
         last_run: last_run.map(LastRunResponse::from),
         last_check: last_check.cloned(),
         probed_at: cached.map(|c| c.probed_at.format(&Rfc3339).unwrap_or_default()),
+        readiness: cached.map(|c| c.readiness),
     }
 }
 

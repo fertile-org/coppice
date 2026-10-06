@@ -63,6 +63,25 @@ export function useConnectorStatuses() {
   });
 }
 
+export function useSetConnectorEnabled() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, enabled }: { id: string; enabled: boolean }) => {
+      const res = await apiFetch(`/api/tools/connectors/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled }),
+      });
+      return connectorStatusSchema.parse(await res.json());
+    },
+    onSuccess: (fresh) => {
+      queryClient.setQueryData<ConnectorStatus[]>(TOOL_CONNECTORS_QUERY_KEY, (list) =>
+        list?.map((item) => (item.id === fresh.id ? fresh : item)),
+      );
+    },
+  });
+}
+
 export function useRecheckConnector(id: string) {
   const queryClient = useQueryClient();
   return useMutation({

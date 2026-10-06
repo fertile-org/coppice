@@ -7,7 +7,8 @@ use axum::{
     routing::get,
     Json, Router,
 };
-use coppice_connectors::ConsoleKind;
+use coppice_connectors::sign_in::Readiness;
+use coppice_connectors::{ConsoleKind, MOCK};
 use serde::Serialize;
 use std::sync::Arc;
 
@@ -31,6 +32,10 @@ struct ConnectorResponse {
     display_name: &'static str,
     console: ConsoleKind,
     caps: ConnectorCapsResponse,
+    enabled: bool,
+    /// `null` until the startup probe finishes. Mock is always `ready`.
+    readiness: Option<Readiness>,
+    docs_url: &'static str,
 }
 
 #[derive(Serialize)]
@@ -97,21 +102,34 @@ async fn list_connectors(
     State(state): State<Arc<AppState>>,
     AuthUser { .. }: AuthUser,
 ) -> Json<ConnectorListResponse> {
-    let items = state
-        .connector_registry
-        .configured_ids()
-        .into_iter()
-        .filter_map(|id| {
-            let descriptor = crate::providers::descriptor(&id)?;
-            Some(ConnectorResponse {
-                id,
+    let config = state.connectors.config();
+    let items = coppice_connectors::all()
+        .iter()
+        .map(|descriptor| {
+            let readiness = if descriptor.id == MOCK {
+                Some(Readiness::Ready)
+            } else {
+                state
+                    .connector_probes
+                    .get(descriptor.id)
+                    .map(|cached| cached.readiness)
+            };
+            ConnectorResponse {
+                id: descriptor.id.to_string(),
                 display_name: descriptor.display_name,
                 console: descriptor.console,
                 caps: ConnectorCapsResponse {
                     read_only_tools: descriptor.caps.read_only_tools,
                     chat_resume: descriptor.caps.chat_resume,
                 },
-            })
+                enabled: config
+                    .agent
+                    .connectors
+                    .enabled(descriptor.id)
+                    .unwrap_or(false),
+                readiness,
+                docs_url: descriptor.install.docs_url,
+            }
         })
         .collect();
     Json(ConnectorListResponse { items })
@@ -122,11 +140,11 @@ async fn list_model_providers(
     AuthUser { .. }: AuthUser,
     Path(connector_id): Path<String>,
 ) -> Result<Json<ModelProviderListResponse>, StatusCode> {
-    if !state.connector_registry.has(&connector_id) {
+    let registry = state.connectors.registry();
+    if !registry.has(&connector_id) {
         return Err(StatusCode::NOT_FOUND);
     }
-    let items = state
-        .connector_registry
+    let items = registry
         .models(&connector_id)
         .map(|models| models.model_providers().to_vec())
         .unwrap_or_default()
@@ -141,17 +159,14 @@ async fn list_models(
     AuthUser { .. }: AuthUser,
     Path((connector_id, model_provider_id)): Path<(String, String)>,
 ) -> Result<Json<ModelListResponse>, ModelsApiError> {
-    if !state.connector_registry.has(&connector_id) {
+    let registry = state.connectors.registry();
+    if !registry.has(&connector_id) {
         return Err(ModelsApiError::Status(StatusCode::NOT_FOUND));
     }
-    if !state
-        .connector_registry
-        .has_model_provider(&connector_id, &model_provider_id)
-    {
+    if !registry.has_model_provider(&connector_id, &model_provider_id) {
         return Err(ModelsApiError::Status(StatusCode::NOT_FOUND));
     }
-    let catalog = state
-        .connector_registry
+    let catalog = registry
         .models(&connector_id)
         .ok_or(ModelsApiError::Status(StatusCode::NOT_FOUND))?;
     let models = catalog

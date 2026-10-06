@@ -83,9 +83,17 @@ async fn run() -> anyhow::Result<()> {
 
     let addr: SocketAddr = format!("0.0.0.0:{}", config.server.port).parse()?;
     let listener = tokio::net::TcpListener::bind(addr).await?;
-    serve(config, listener, ServeOptions::default(), async {
-        tokio::signal::ctrl_c().await.ok();
-    })
+    serve(
+        config,
+        listener,
+        ServeOptions {
+            config_path: Some(coppice_server::AppConfig::writable_config_path()),
+            ..ServeOptions::default()
+        },
+        async {
+            tokio::signal::ctrl_c().await.ok();
+        },
+    )
     .await
 }
 

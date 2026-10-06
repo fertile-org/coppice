@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiFetch } from '../../lib/api';
 import type { CreateAgentInput, UpdateAgentInput } from '../../lib/schemas/agent';
 import { connectorListSchema, type Connector } from '../../lib/schemas/connector';
+import { TOOL_CONNECTORS_QUERY_KEY } from '../tools/useConnectorDiagnostics';
 
 export const AGENTS_QUERY_KEY = ['agents'] as const;
 export const AGENT_PRESETS_QUERY_KEY = ['agent-presets'] as const;
@@ -32,10 +33,13 @@ export interface Agent {
   presetSource?: string;
   createdAt: string;
   updatedAt: string;
+  connectorTurnedOn?: { id: string; displayName: string } | null;
 }
 
 export interface ConnectorOption {
   id: string;
+  displayName?: string;
+  readiness?: 'ready' | 'found_not_signed_in' | 'not_on_path' | 'found' | null;
 }
 
 export interface ModelProviderOption {
@@ -106,7 +110,20 @@ export function useConnectors() {
   return useQuery({
     queryKey: CONNECTORS_QUERY_KEY,
     queryFn: fetchConnectors,
+    refetchInterval: (query) =>
+      query.state.data?.some((item) => item.id !== 'mock' && item.readiness == null)
+        ? 2_000
+        : false,
   });
+}
+
+function invalidateIfConnectorTurnedOn(
+  queryClient: ReturnType<typeof useQueryClient>,
+  agent: Agent,
+) {
+  if (!agent.connectorTurnedOn) return;
+  void queryClient.invalidateQueries({ queryKey: CONNECTORS_QUERY_KEY });
+  void queryClient.invalidateQueries({ queryKey: TOOL_CONNECTORS_QUERY_KEY });
 }
 
 export function useModelProviders(connectorId: string | undefined) {
@@ -146,8 +163,9 @@ export function useCreateAgent() {
 
   return useMutation({
     mutationFn: createAgent,
-    onSuccess: () => {
+    onSuccess: (agent) => {
       void queryClient.invalidateQueries({ queryKey: AGENTS_QUERY_KEY });
+      invalidateIfConnectorTurnedOn(queryClient, agent);
     },
   });
 }
@@ -157,8 +175,9 @@ export function useUpdateAgent(agentId: string) {
 
   return useMutation({
     mutationFn: (body: UpdateAgentInput) => updateAgent(agentId, body),
-    onSuccess: () => {
+    onSuccess: (agent) => {
       void queryClient.invalidateQueries({ queryKey: AGENTS_QUERY_KEY });
+      invalidateIfConnectorTurnedOn(queryClient, agent);
     },
   });
 }

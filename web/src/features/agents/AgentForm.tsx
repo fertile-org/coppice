@@ -1,6 +1,13 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { Link } from 'react-router-dom';
 import { Combobox } from '../../components/ui/combobox';
+import {
+  INSTALL_GUIDE_URL,
+  NO_READY_CONNECTOR_HINT,
+  notOnPathHint,
+  notSignedInHint,
+  readinessLabel,
+} from '../tools/connectorCopy';
 import type {
   Agent,
   AgentPreset,
@@ -58,6 +65,7 @@ export function agentToFormValues(agent: Agent): AgentFormValues {
 export function presetToFormValues(
   preset: AgentPreset,
   name = '',
+  connector = '',
 ): AgentFormValues {
   return {
     name,
@@ -65,12 +73,60 @@ export function presetToFormValues(
     skills: linesFromList(preset.skills),
     responsibilities: linesFromList(preset.responsibilities),
     systemPrompt: preset.systemPromptTemplate,
-    connector: 'mock',
+    connector,
     modelProvider: '',
     model: '',
     enabled: true,
     pluginIds: [],
   };
+}
+
+function connectorOptionLabel(option: ConnectorOption): string {
+  const name = option.displayName ?? option.id;
+  const status = readinessLabel(option.readiness);
+  return status ? `${name} — ${status}` : name;
+}
+
+function ConnectorHints({
+  values,
+  connectorOptions,
+}: {
+  values: AgentFormValues;
+  connectorOptions: ConnectorOption[];
+}) {
+  const selected = connectorOptions.find((option) => option.id === values.connector);
+  const name = selected?.displayName ?? selected?.id ?? '';
+  const stillChecking = connectorOptions.some(
+    (option) => option.id !== 'mock' && option.readiness == null,
+  );
+  const noneReady =
+    connectorOptions.length > 0 &&
+    !stillChecking &&
+    !connectorOptions.some((option) => option.readiness === 'ready');
+
+  return (
+    <>
+      {noneReady && (
+        <p className="mt-2 font-body text-xs text-text-secondary">{NO_READY_CONNECTOR_HINT}</p>
+      )}
+      {selected?.readiness === 'not_on_path' && (
+        <p className="mt-2 font-body text-xs text-text-secondary">
+          {notOnPathHint(name)}{' '}
+          <a
+            href={INSTALL_GUIDE_URL}
+            target="_blank"
+            rel="noreferrer"
+            className="font-medium text-moss-700 underline-offset-2 hover:underline"
+          >
+            Install guide
+          </a>
+        </p>
+      )}
+      {selected?.readiness === 'found_not_signed_in' && (
+        <p className="mt-2 font-body text-xs text-text-secondary">{notSignedInHint(name)}</p>
+      )}
+    </>
+  );
 }
 
 interface AgentFormProps {
@@ -157,6 +213,10 @@ export function AgentForm({
     }
     if (mode === 'edit' && !values.role.trim()) {
       setLocalError('Role is required.');
+      return;
+    }
+    if (!values.connector) {
+      setLocalError('Choose a connector.');
       return;
     }
     setLocalError(null);
@@ -353,8 +413,12 @@ export function AgentForm({
           value={values.connector}
           onValueChange={handleConnectorChange}
           searchPlaceholder="Search connectors…"
-          options={connectorOptions.map((c) => ({ value: c.id, label: c.id }))}
+          options={connectorOptions.map((option) => ({
+            value: option.id,
+            label: connectorOptionLabel(option),
+          }))}
         />
+        <ConnectorHints values={values} connectorOptions={connectorOptions} />
       </div>
 
       {showModelFields && (

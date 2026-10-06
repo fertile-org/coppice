@@ -28,7 +28,7 @@ docker compose -f deploy/docker-compose.yml exec -it -u "$(id -u):$(id -g)" serv
 | Step | Notes |
 |------|--------|
 | `enable` | Turns the connector on in `deploy/config/config.toml` — also set `model_providers` to IDs from `opencode auth list` (see below) |
-| recreate server | Picks up config; registers the connector when OpenCode is enabled |
+| recreate server | Needed after `coppice connector enable` or a hand-edit. The in-app Connectors switch and saving an agent apply immediately. OpenCode is registered only when `enabled = true` |
 | `install` | Installs `opencode` into `/home/coppice/.opencode/bin` |
 | `setup` | Runs `opencode auth login` |
 | `doctor` | Prints `doctor: ok` when binary + auth look healthy |
@@ -82,7 +82,7 @@ Start at **Tools → Connectors** (admin): it shows whether `opencode` is found,
 |---------|-------------|
 | Binary missing | Re-run `install`; PATH should include `/home/coppice/.opencode/bin` |
 | Auth missing | Re-run `setup` (`opencode auth login`) |
-| Agent health `missing_config` | Add the agent’s model provider id to `model_providers`, recreate server |
+| Agent health `missing_config` | If the message says OpenCode is turned off, turn it on in Tools → Connectors or save the agent again. If it names a model provider, add that id to `model_providers` (a hand-edit is read on the next server start) |
 | Live Session empty / run fails | Check the run error (a per-run `opencode serve` that fails to start names the cause) and `doctor` |
 | Run times out on long tests | Raise `run_timeout_secs`, or prefer shorter agent test commands |
 

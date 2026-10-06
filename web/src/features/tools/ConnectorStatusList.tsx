@@ -2,6 +2,7 @@ import { useState, type ReactNode } from 'react';
 import type { ConnectorStatus, LastRun } from '../../lib/schemas/connectorDiagnostics';
 import { useOpenTicket } from '../tickets/useOpenTicket';
 import { CHECK_STATUS_LABELS, checkStatusClass, formatRelativeTime } from './connectorFormat';
+import { readinessLabel } from './connectorCopy';
 
 const CHECKING = <span className="text-text-muted">Checking…</span>;
 
@@ -16,10 +17,14 @@ function Row({ label, children }: { label: string; children: ReactNode }) {
 
 function CliValue({ connector }: { connector: ConnectorStatus }) {
   if (!connector.probedAt) return CHECKING;
-  if (!connector.cli.found) return <span className="text-warning">Not installed</span>;
+  const label = readinessLabel(connector.readiness);
   return (
     <>
-      <span className="text-success">Found</span>
+      {label && (
+        <span className={connector.readiness === 'ready' ? 'text-success' : 'text-warning'}>
+          {label}
+        </span>
+      )}
       {connector.cli.path && (
         <p className="truncate font-mono text-xs" title={connector.cli.path}>
           {connector.cli.path}
