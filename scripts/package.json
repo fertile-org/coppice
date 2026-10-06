@@ -1,0 +1,9 @@
+{
+  "name": "coppice-icon-gen",
+  "private": true,
+  "type": "module",
+  "description": "Renders Coppice app icons from assets/brand/coppice-logo.svg",
+  "dependencies": {
+    "@resvg/resvg-js": "2.6.2"
+  }
+}

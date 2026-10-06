@@ -1,13 +1,15 @@
-import { app, BrowserWindow, shell } from 'electron';
+import { BrowserWindow, shell } from 'electron';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isExternalHttpUrl, isSameOrigin } from './navigation.mjs';
 
 const DESKTOP_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const STATIC_DIR = path.join(DESKTOP_DIR, 'static');
-// Packaged Linux builds take the icon from the .desktop entry; build/ is not shipped.
-const DEV_LINUX_ICON =
-  process.platform === 'linux' && !app.isPackaged ? path.join(DESKTOP_DIR, 'build', 'icon.png') : undefined;
+// Running-window icon on Linux. static/ is inside the packaged app (Electron 35
+// reads PNGs from the asar). The .desktop Icon= is what the launcher uses once
+// StartupWMClass matches; this covers dev runs and the window before that match.
+const LINUX_WINDOW_ICON =
+  process.platform === 'linux' ? path.join(STATIC_DIR, 'icon.png') : undefined;
 
 function openExternally(url) {
   if (isExternalHttpUrl(url)) {
@@ -42,7 +44,7 @@ export function createMainWindow({ origin }) {
     width: 1280,
     height: 840,
     show: false,
-    icon: DEV_LINUX_ICON,
+    icon: LINUX_WINDOW_ICON,
     webPreferences: {
       // CommonJS preload — Electron's ESM (.mjs) preload support is unreliable.
       preload: path.join(DESKTOP_DIR, 'preload.cjs'),
@@ -66,6 +68,7 @@ export function createSplashWindow() {
     frame: false,
     resizable: false,
     show: false,
+    icon: LINUX_WINDOW_ICON,
     webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true },
   });
   restrictNavigation(win, null);
@@ -79,7 +82,7 @@ export function createErrorWindow() {
     width: 760,
     height: 520,
     show: false,
-    icon: DEV_LINUX_ICON,
+    icon: LINUX_WINDOW_ICON,
     title: 'Coppice could not start',
     webPreferences: {
       preload: path.join(STATIC_DIR, 'error-preload.cjs'),

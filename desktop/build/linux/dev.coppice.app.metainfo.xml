@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>dev.coppice.app</id>
+  <!-- License of this metainfo file, not of Coppice. No project license is set. -->
+  <metadata_license>CC0-1.0</metadata_license>
+  <name>Coppice</name>
+  <summary>Local board for your AI agent team</summary>
+  <description>
+    <p>Agents plan, you approve. Agents build, you review. Coppice runs on your machine with the agent CLIs you already pay for, like Claude Code and Codex. No account, no Docker.</p>
+  </description>
+  <icon type="stock">coppice</icon>
+  <url type="homepage">https://fertile-org.github.io/coppice/</url>
+  <developer id="io.github.fertile-org">
+    <name>fertile-org</name>
+  </developer>
+  <launchable type="desktop-id">coppice.desktop</launchable>
+  <screenshots>
+    <screenshot type="default">
+      <caption>The Coppice board</caption>
+      <image type="source" width="1440" height="900">https://fertile-org.github.io/coppice/assets/hero-screenshot.png</image>
+    </screenshot>
+  </screenshots>
+  <releases>
+    <release version="0.1.0" date="2026-10-06"/>
+  </releases>
+  <content_rating type="oars-1.1"/>
+  <categories>
+    <category>Development</category>
+  </categories>
+</component>
