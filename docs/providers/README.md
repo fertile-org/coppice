@@ -48,7 +48,7 @@ Design notes: [M08](../milestones/M08-connector-operator-cli.md).
 | `unknown` | Check not run yet |
 | `healthy` | Connector reachable and model provider configured |
 | `unreachable` | Connector/CLI not usable |
-| `missing_config` | Model provider missing from connector `model_providers` |
+| `missing_config` | Connector turned off, or model provider missing from connector `model_providers` |
 
 Unreachable or misconfigured agents are not used for new auto-assignments until fixed.
 
@@ -73,16 +73,20 @@ Admins open **Tools → Connectors** (`/tools?tab=connectors`) to see, per conne
 
 | Row | Meaning |
 |-----|---------|
-| Enabled | From config (read-only). A disabled connector shows `coppice connector enable <id>`; restart the server after enabling. Disabled connectors are still probed. |
-| CLI | **Found** with the resolved path, or **Not installed**. |
-| Auth | **Detected** (which auth env var **names** are set and which auth files under HOME exist — never values or file contents), **Verified by probe** (cursor and opencode, whose probe only succeeds when logged in), or **Not found**. |
+| Enabled | A switch. Turning it on or off is written into `config.toml` (comments and other keys kept) and the running server picks it up immediately. Saving an agent on a turned-off connector turns that connector on the same way. `coppice connector enable` and hand-edits apply the next time the server starts. |
+| CLI | **Ready** (binary found and sign-in verified), **Found, not signed in**, or **Not on your PATH**. A binary with no reliable sign-in check shows the path and no status claim. |
+| Auth | **Detected** (which auth env var **names** are set and which auth files under HOME exist — never values or file contents), **Verified by probe**, or **Not found**. This row is separate from the CLI status above. |
 | Probe | Shown when the CLI is found: the first line of the probe output (e.g. the version), **Failed** with up to 500 chars of output, or **Timed out** (10 s). |
 | Last real run | The latest finished non-check run of an agent on this connector, with whether it made an `ok` `ticket_get` and `result_submit` call. |
 | Last test | The latest Test connection: time, passed/failed, and the failure reason. |
 
 When the CLI or auth is missing, the card shows the connector's auth hint and a vendor install docs link. Coppice never installs a CLI or runs a login from the page — use the `coppice connector …` steps above.
 
-Probes run at server startup and on **Run check**; the page shows the cached result and does not probe on every load. Until the startup probe finishes a card shows "Checking…".
+Probes run at server startup, on **Run check**, and again when **Test connection** starts (the test itself is not delayed for the probe). The page shows the cached result and does not probe on every load. Until the startup probe finishes a card shows "Checking…".
+
+Sign-in is a separate cheap check (a few seconds, no browser, no prompt, no model call): credential files or the CLI's own non-interactive status command. **Kilo Code has no such check** — `kilo auth` is a TUI — so a found `kilo` binary is never labeled "Found, not signed in" or "Ready" from auth. Cursor, Claude Code, Codex, and OpenCode do have a check.
+
+Turning a connector off does not stop a run that is already in progress. A queued run, a new ticket run, chat, a connector test, and knowledge compaction fail immediately with a message that names the connector and points at Tools → Connectors. Agent health shows the same message.
 
 **Test connection** runs a real agent run through the production path (provider adapter, per-run MCP wiring, token, gateway, `run_tool_calls`). Pick an agent that uses the connector (create one on the Agents page first). The run gets a scratch directory and a two-tool profile — `ticket_get` returns a fixed synthetic ticket and `result_submit` — so it never reads or changes a real ticket, repository, comment, or notification. It times out after the connector's `run_timeout_secs` or 180 s, whichever is shorter. The check passes when the run calls both tools and submits `done`; otherwise it fails with the first reason that applies:
 

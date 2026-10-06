@@ -91,8 +91,7 @@ async fn run_agent_applies_done_fixture() {
     let (_git_dir, local_path) = common::create_temp_git_checkout();
     let repo_id =
         common::register_test_repo(&app, &local_path.display().to_string(), &cookie, &csrf).await;
-    let (ticket_id, _agent_id, _repo_id) =
-        setup_agent_ticket(&app, &cookie, &csrf, &repo_id).await;
+    let (ticket_id, _agent_id, _repo_id) = setup_agent_ticket(&app, &cookie, &csrf, &repo_id).await;
 
     let (status, body) = post_run_agent(&app, &ticket_id, &cookie, &csrf).await;
     assert_eq!(status, StatusCode::CREATED);
@@ -157,8 +156,7 @@ async fn run_agent_applies_blocked_fixture() {
     let (_git_dir, local_path) = common::create_temp_git_checkout();
     let repo_id =
         common::register_test_repo(&app, &local_path.display().to_string(), &cookie, &csrf).await;
-    let (ticket_id, _agent_id, _repo_id) =
-        setup_agent_ticket(&app, &cookie, &csrf, &repo_id).await;
+    let (ticket_id, _agent_id, _repo_id) = setup_agent_ticket(&app, &cookie, &csrf, &repo_id).await;
 
     let (status, _) = post_run_agent(&app, &ticket_id, &cookie, &csrf).await;
     assert_eq!(status, StatusCode::CREATED);
@@ -220,8 +218,7 @@ async fn reject_second_run_while_active() {
     let (_git_dir, local_path) = common::create_temp_git_checkout();
     let repo_id =
         common::register_test_repo(&app, &local_path.display().to_string(), &cookie, &csrf).await;
-    let (ticket_id, _agent_id, _repo_id) =
-        setup_agent_ticket(&app, &cookie, &csrf, &repo_id).await;
+    let (ticket_id, _agent_id, _repo_id) = setup_agent_ticket(&app, &cookie, &csrf, &repo_id).await;
 
     let (status, _) = post_run_agent(&app, &ticket_id, &cookie, &csrf).await;
     assert_eq!(status, StatusCode::CREATED);
@@ -241,8 +238,7 @@ async fn stop_queued_run_cancels() {
     let (_git_dir, local_path) = common::create_temp_git_checkout();
     let repo_id =
         common::register_test_repo(&app, &local_path.display().to_string(), &cookie, &csrf).await;
-    let (ticket_id, _agent_id, _repo_id) =
-        setup_agent_ticket(&app, &cookie, &csrf, &repo_id).await;
+    let (ticket_id, _agent_id, _repo_id) = setup_agent_ticket(&app, &cookie, &csrf, &repo_id).await;
 
     let (status, body) = post_run_agent(&app, &ticket_id, &cookie, &csrf).await;
     assert_eq!(status, StatusCode::CREATED);
@@ -286,8 +282,7 @@ async fn reject_run_when_repo_path_missing() {
     let (git_dir, local_path) = common::create_temp_git_checkout();
     let repo_id =
         common::register_test_repo(&app, &local_path.display().to_string(), &cookie, &csrf).await;
-    let (ticket_id, _agent_id, _repo_id) =
-        setup_agent_ticket(&app, &cookie, &csrf, &repo_id).await;
+    let (ticket_id, _agent_id, _repo_id) = setup_agent_ticket(&app, &cookie, &csrf, &repo_id).await;
 
     drop(git_dir);
 
@@ -307,12 +302,14 @@ async fn retry_after_failed_creates_new_run() {
     let (_git_dir, local_path) = common::create_temp_git_checkout();
     let repo_id =
         common::register_test_repo(&app, &local_path.display().to_string(), &cookie, &csrf).await;
-    let (ticket_id, _agent_id, _repo_id) =
-        setup_agent_ticket(&app, &cookie, &csrf, &repo_id).await;
+    let (ticket_id, _agent_id, _repo_id) = setup_agent_ticket(&app, &cookie, &csrf, &repo_id).await;
 
     let (status, body) = post_run_agent(&app, &ticket_id, &cookie, &csrf).await;
     assert_eq!(status, StatusCode::CREATED);
-    let failed_run_id = body.as_ref().unwrap()["run"]["id"].as_str().unwrap().to_string();
+    let failed_run_id = body.as_ref().unwrap()["run"]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
 
     let failed_run = poll_run_until(
         &app,
@@ -382,6 +379,19 @@ async fn reject_run_when_agent_provider_missing_config() {
     let agent: serde_json::Value = common::json_body(create_res).await;
     let agent_id = agent["id"].as_str().unwrap();
 
+    let off = app
+        .clone()
+        .oneshot(common::json_request(
+            "PATCH",
+            "/api/tools/connectors/opencode",
+            r#"{"enabled":false}"#,
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(off.status(), StatusCode::OK);
+
     coppice_server::workers::health_worker::run_health_pass_once(&state).await;
 
     let board_id = common::create_test_board(&app, &cookie, &csrf).await;
@@ -397,6 +407,6 @@ async fn reject_run_when_agent_provider_missing_config() {
     let body = body.unwrap();
     assert_eq!(
         body["message"].as_str().unwrap(),
-        "Connector 'opencode' is not configured on this server"
+        "OpenCode is turned off. Turn it on in Tools → Connectors, or switch this agent to another connector."
     );
 }

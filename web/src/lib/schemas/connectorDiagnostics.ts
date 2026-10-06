@@ -60,6 +60,9 @@ export const connectorStatusSchema = z.object({
   lastRun: lastRunSchema.nullish(),
   lastCheck: checkSummarySchema.nullish(),
   probedAt: z.string().nullish(),
+  readiness: z
+    .enum(['ready', 'found_not_signed_in', 'not_on_path', 'found'])
+    .nullish(),
 });
 
 export type ConnectorStatus = z.infer<typeof connectorStatusSchema>;

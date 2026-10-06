@@ -76,8 +76,7 @@ fn build_mock(_config: &AppConfig, _deps: &FactoryDeps) -> Option<BuiltConnector
 
 fn build_opencode(config: &AppConfig, deps: &FactoryDeps) -> Option<BuiltConnector> {
     let cfg = &config.agent.connectors.opencode;
-    // Also on when it is the default connector, even if not explicitly enabled.
-    if !cfg.enabled && config.agent.default_connector != OPENCODE {
+    if !cfg.enabled {
         return None;
     }
     Some(BuiltConnector {
@@ -232,12 +231,12 @@ mod tests {
     }
 
     #[test]
-    fn opencode_enabled_when_default_connector() {
+    fn opencode_stays_off_when_it_is_only_the_default() {
         let mut config = AppConfig::load_defaults().expect("config");
         config.agent.connectors.opencode.enabled = false;
-        config.agent.default_connector = "opencode".into();
+        config.agent.default_connector = OPENCODE.into();
         let registry = ConnectorRegistry::from_config(&config, runs());
-        assert!(registry.has("opencode"));
+        assert!(!registry.has(OPENCODE));
     }
 
     /// Connector ids may only appear as string literals in adapter code

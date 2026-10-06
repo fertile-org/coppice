@@ -36,12 +36,36 @@ describe('fetchConnectors', () => {
 
     expect(apiFetch).toHaveBeenCalledWith('/api/connectors');
     expect(items.map((c) => c.id)).toEqual(['opencode', 'mock']);
-    expect(items[0]).toEqual({
+    expect(items[0]).toMatchObject({
       id: 'opencode',
       displayName: 'OpenCode',
       console: 'openCodeSession',
       caps: { readOnlyTools: false, chatResume: true },
     });
+  });
+
+  it('parses readiness on each connector', async () => {
+    apiFetch.mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          items: [
+            {
+              id: 'claude-code',
+              displayName: 'Claude Code',
+              console: 'structured',
+              caps: { readOnlyTools: true, chatResume: true },
+              enabled: false,
+              readiness: 'not_on_path',
+              docsUrl: 'https://example.test/claude',
+            },
+          ],
+        }),
+      ),
+    );
+
+    const items = await fetchConnectors();
+    expect(items[0]?.readiness).toBe('not_on_path');
+    expect(items[0]?.enabled).toBe(false);
   });
 
   it('keeps the list when a console kind is unknown (falls back to plain)', async () => {

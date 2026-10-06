@@ -2,6 +2,7 @@ import '@testing-library/jest-dom/vitest';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, useLocation } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { ToastProvider } from '../../components/ToastProvider';
 import type { Plugin } from '../../lib/schemas/plugin';
 import { AgentsPage } from './AgentsPage';
 import type { Agent } from './useAgents';
@@ -89,10 +90,12 @@ function SearchProbe() {
 
 function renderPage(url: string) {
   return render(
-    <MemoryRouter initialEntries={[url]}>
-      <AgentsPage />
-      <SearchProbe />
-    </MemoryRouter>,
+    <ToastProvider>
+      <MemoryRouter initialEntries={[url]}>
+        <AgentsPage />
+        <SearchProbe />
+      </MemoryRouter>
+    </ToastProvider>,
   );
 }
 

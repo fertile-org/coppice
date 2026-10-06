@@ -30,8 +30,8 @@ pub async fn run_health_pass_once(state: &AppState) {
 
     for agent in agents {
         state.agent_health.ensure_agent(agent.id);
-        let (status, detail) =
-            evaluate_agent_health(&agent, state.connector_registry.as_ref()).await;
+        let registry = state.connectors.registry();
+        let (status, detail) = evaluate_agent_health(&agent, registry.as_ref()).await;
         state.agent_health.set(agent.id, status, detail);
     }
 }

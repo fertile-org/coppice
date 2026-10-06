@@ -28,7 +28,7 @@ docker compose -f deploy/docker-compose.yml exec -it -u "$(id -u):$(id -g)" serv
 | Step | Notes |
 |------|--------|
 | `enable` | Writes `enabled = true` into `deploy/config/config.toml` (and default model providers when missing) |
-| recreate server | Picks up the config change |
+| recreate server | Needed after `coppice connector enable` or a hand-edit. The in-app Connectors switch and saving an agent apply immediately |
 | `install` | May still print manual steps — put the `claude` binary on PATH under `/home/coppice` if install is not automated yet |
 | `setup` | Prefers `ANTHROPIC_API_KEY` or `claude setup-token` (paste). Browser OAuth is unreliable in containers |
 | `doctor` | Prints `doctor: ok` when the CLI and auth look healthy |
@@ -69,7 +69,7 @@ Start at **Tools → Connectors** (admin): it shows whether `claude` is found, w
 |---------|-------------|
 | Binary missing | Install `claude` into `/home/coppice/.local/bin` (or your host PATH) |
 | Auth missing | Set `ANTHROPIC_API_KEY` on the server, or re-run `setup` / `setup-token` |
-| Config ignored | Recreate/restart the server after `enable` |
+| Config ignored | `coppice connector enable` and hand-edits apply on the next server start. The in-app switch does not need a restart |
 
 ## Behavior notes
 

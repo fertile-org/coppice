@@ -204,3 +204,44 @@ describe('AgentForm plugins picker', () => {
     ).toBeInTheDocument();
   });
 });
+
+describe('AgentForm connector hints', () => {
+  it('shows the install hint and the no-ready hint', () => {
+    render(
+      <MemoryRouter>
+        <AgentForm
+          mode="create"
+          values={baseValues({ connector: 'claude-code', name: 'Ada' })}
+          onChange={() => {}}
+          onSubmit={vi.fn()}
+          onCancel={() => {}}
+          connectorOptions={[
+            {
+              id: 'claude-code',
+              displayName: 'Claude Code',
+              readiness: 'not_on_path',
+            },
+            {
+              id: 'codex',
+              displayName: 'Codex',
+              readiness: 'found_not_signed_in',
+            },
+          ]}
+        />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByText('Claude Code — Not on your PATH')).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "Claude Code isn't installed on this machine yet. Install it and sign in, then this agent can run tickets. You can still save now.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Install guide' })).toHaveAttribute(
+      'href',
+      'https://fertile-org.github.io/coppice/docs/providers',
+    );
+    expect(screen.getByRole('link', { name: 'Install guide' })).toHaveAttribute('target', '_blank');
+    expect(screen.getByText(/No agent CLI is ready yet/)).toBeInTheDocument();
+  });
+});

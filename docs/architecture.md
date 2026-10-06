@@ -304,7 +304,7 @@ Visual design tokens and palette: `docs/web/DESIGN.md`.
 
 `coppice-server desktop --data-dir <D> --resources <R>` ([design](superpowers/specs/2026-10-04-desktop-release-design.md)) is the single child process of the Electron shell (`desktop/main.mjs`).
 
-- **Data dir `D`** (Electron `userData`): `config.toml` and `secrets/` generated once and never overwritten, Postgres cluster in `pg/data`, storage dirs, `logs/`.
+- **Data dir `D`** (Electron `userData`): `config.toml` is generated once; later connector on/off changes patch that file in place and keep comments and other keys. `secrets/` is generated once and never overwritten. Postgres cluster in `pg/data`, storage dirs, `logs/`.
 - **Resources `R`:** `bin/coppice-server`, a pinned Postgres 16 bundle (`desktop/postgres.lock.json`), `web/`, agent templates. The server exports `COPPICE_PG_BIN_DIR` / `COPPICE_PG_LIB_DIR` (`R/postgres/bin`, `R/postgres/lib`) so Tools → Backup runs the bundled `pg_dump` / `psql` by absolute path (with `LD_LIBRARY_PATH` on Linux for that command only); `PATH` is left alone, so agents keep the user's own `psql`.
 - **Postgres:** `initdb` on first run, major-version check, stale `postmaster.pid` cleanup, TCP on `127.0.0.1` and a free port only.
 - **Server:** binds `127.0.0.1` on a free port, forces `auth.desktop_mode`, serves `R/web` with SPA fallback on the API origin (`static_web.rs`), then prints `COPPICE_READY url=…` once.

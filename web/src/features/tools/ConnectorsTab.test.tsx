@@ -20,7 +20,7 @@ const CODEX_AGENT_B = '00000000-0000-4000-8000-0000000000a2';
 const OPENCODE_AGENT = '00000000-0000-4000-8000-0000000000a3';
 
 function connector(overrides: Partial<ConnectorStatus>): ConnectorStatus {
-  return {
+  const merged: ConnectorStatus = {
     id: 'x',
     displayName: 'X',
     enabled: true,
@@ -31,8 +31,13 @@ function connector(overrides: Partial<ConnectorStatus>): ConnectorStatus {
     lastRun: null,
     lastCheck: null,
     probedAt: PROBED_AT,
+    readiness: 'found',
     ...overrides,
   };
+  if (overrides.readiness === undefined && merged.probedAt) {
+    merged.readiness = merged.cli.found ? 'found' : 'not_on_path';
+  }
+  return merged;
 }
 
 const kilo = connector({
@@ -162,12 +167,15 @@ describe('ConnectorsTab', () => {
     expect(kiloCard.getByText('kilo 9.9.9')).toBeVisible();
     expect(kiloCard.getByText(/KILO_API_KEY/)).toBeVisible();
     expect(kiloCard.getByText(/\.kilocode/)).toBeVisible();
-    expect(kiloCard.getByText('coppice connector enable kilo-code')).toBeVisible();
-    expect(kiloCard.getByText(/then restart the server/)).toBeVisible();
+    expect(kiloCard.queryByText(/restart the server/)).not.toBeInTheDocument();
+    expect(kiloCard.getByRole('switch', { name: 'Enabled Kilo Code' })).toHaveAttribute(
+      'aria-checked',
+      'false',
+    );
     expect(kiloCard.getByRole('button', { name: 'Test connection' })).toBeDisabled();
 
     const claudeCard = await card('claude-code');
-    expect(claudeCard.getByText('Not installed')).toBeVisible();
+    expect(claudeCard.getByText('Not on your PATH')).toBeVisible();
     expect(
       claudeCard.getByText('Run claude login or set ANTHROPIC_API_KEY'),
     ).toBeVisible();
@@ -188,7 +196,7 @@ describe('ConnectorsTab', () => {
 
     const claudeCard = await card('claude-code');
     expect(claudeCard.getAllByText('Checking…').length).toBeGreaterThan(0);
-    expect(claudeCard.queryByText('Not installed')).not.toBeInTheDocument();
+    expect(claudeCard.queryByText('Not on your PATH')).not.toBeInTheDocument();
   });
 
   it('polls statuses until startup probes finish', async () => {
@@ -204,7 +212,7 @@ describe('ConnectorsTab', () => {
 
     const claudeCard = await card('claude-code');
     expect(claudeCard.getAllByText('Checking…').length).toBeGreaterThan(0);
-    expect(await claudeCard.findByText('Not installed', {}, { timeout: 5000 })).toBeVisible();
+    expect(await claudeCard.findByText('Not on your PATH', {}, { timeout: 5000 })).toBeVisible();
     expect(lists).toBe(2);
   }, 10_000);
 
@@ -388,6 +396,36 @@ describe('ConnectorsTab', () => {
     expect(await openCard.findByRole('alert')).toHaveTextContent(
       'A test is already running for this connector.',
     );
+  });
+
+  it('confirms before turning off a connector that agents use', async () => {
+    stubApi((path, init) => {
+      if (path === '/api/tools/connectors/codex' && init.method === 'PATCH') {
+        return json({ ...codex, enabled: false });
+      }
+      return undefined;
+    });
+    renderTab();
+
+    const codexCard = await card('codex');
+    const toggle = await codexCard.findByRole('switch', { name: 'Enabled Codex' });
+    await waitFor(() => expect(toggle).toBeEnabled());
+    fireEvent.click(toggle);
+
+    expect(
+      await screen.findByText(
+        "Turn off Codex? 2 agents use it and can't run tickets until you turn it back on or switch them to another connector.",
+      ),
+    ).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(callsFor('/api/tools/connectors/codex', 'PATCH')).toHaveLength(0);
+
+    fireEvent.click(toggle);
+    fireEvent.click(await screen.findByRole('button', { name: 'Turn off' }));
+    await waitFor(() => expect(callsFor('/api/tools/connectors/codex', 'PATCH')).toHaveLength(1));
+    expect(JSON.parse(String(callsFor('/api/tools/connectors/codex', 'PATCH')[0][1].body))).toEqual({
+      enabled: false,
+    });
   });
 
   it('unknown statuses fall back', () => {

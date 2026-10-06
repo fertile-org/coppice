@@ -1,3 +1,5 @@
+pub mod connector_file;
+
 use figment::{
     providers::{Env, Format, Serialized, Toml},
     Figment,
@@ -738,6 +740,67 @@ impl AgentConnectorsConfig {
         }
     }
 
+    /// Sets `enabled`. When turning a connector on, empty `model_providers` are
+    /// filled from `default_model_providers`. Returns whether the flag changed.
+    /// `mock` and unknown ids are errors.
+    pub fn set_enabled_flag(
+        &mut self,
+        id: &str,
+        enabled: bool,
+        default_model_providers: &[&str],
+    ) -> Result<bool, &'static str> {
+        fn apply(
+            flag: &mut bool,
+            providers: &mut Vec<String>,
+            enabled: bool,
+            defaults: &[&str],
+        ) -> bool {
+            let changed = *flag != enabled;
+            *flag = enabled;
+            if enabled && providers.is_empty() {
+                *providers = defaults
+                    .iter()
+                    .map(|provider| (*provider).to_string())
+                    .collect();
+            }
+            changed
+        }
+        match id {
+            "opencode" => Ok(apply(
+                &mut self.opencode.enabled,
+                &mut self.opencode.model_providers,
+                enabled,
+                default_model_providers,
+            )),
+            "claude-code" => Ok(apply(
+                &mut self.claude_code.enabled,
+                &mut self.claude_code.model_providers,
+                enabled,
+                default_model_providers,
+            )),
+            "codex" => Ok(apply(
+                &mut self.codex.enabled,
+                &mut self.codex.model_providers,
+                enabled,
+                default_model_providers,
+            )),
+            "kilo-code" => Ok(apply(
+                &mut self.kilo_code.enabled,
+                &mut self.kilo_code.model_providers,
+                enabled,
+                default_model_providers,
+            )),
+            "cursor" => Ok(apply(
+                &mut self.cursor.enabled,
+                &mut self.cursor.model_providers,
+                enabled,
+                default_model_providers,
+            )),
+            "mock" => Err("mock"),
+            _ => Err("unknown"),
+        }
+    }
+
     /// Configured `run_timeout_secs`; `None` for connectors without one (`mock`).
     pub fn run_timeout_secs(&self, id: &str) -> Option<u64> {
         match id {
@@ -945,6 +1008,26 @@ impl AppConfig {
         std::env::current_dir()
             .unwrap_or_else(|_| PathBuf::from("."))
             .join(LOCAL_CONFIG_FILE)
+    }
+
+    /// File the desktop app and `coppice connector enable` write.
+    /// `COPPICE_CONFIG` wins, then `./config.toml`, then `deploy/config/config.toml`,
+    /// otherwise `./config.toml` even if it does not exist yet.
+    pub fn writable_config_path() -> PathBuf {
+        if let Ok(path) = std::env::var("COPPICE_CONFIG") {
+            if !path.is_empty() {
+                return PathBuf::from(path);
+            }
+        }
+        let local = Self::local_config_path();
+        if local.is_file() {
+            return local;
+        }
+        let deploy = PathBuf::from("deploy/config/config.toml");
+        if deploy.is_file() {
+            return deploy;
+        }
+        local
     }
 
     pub fn global_config_path() -> PathBuf {

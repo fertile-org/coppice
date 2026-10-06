@@ -1,4 +1,5 @@
 use crate::api::auth::{pool_from_state, AuthUser};
+use crate::connectors_runtime::ConnectorConfigError;
 use crate::domain::agent::{Agent, AgentPreset};
 use crate::services::agent_health::{health_status_to_str, AgentHealthRegistry};
 use crate::services::agent_service::{AgentError, AgentService};
@@ -21,9 +22,7 @@ pub fn routes() -> Router<Arc<AppState>> {
         .route("/api/agents", get(list_agents).post(create_agent))
         .route(
             "/api/agents/{agent_id}",
-            get(get_agent)
-                .patch(update_agent)
-                .delete(delete_agent),
+            get(get_agent).patch(update_agent).delete(delete_agent),
         )
 }
 
@@ -56,6 +55,15 @@ struct AgentResponse {
     preset_source: Option<String>,
     created_at: String,
     updated_at: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    connector_turned_on: Option<ConnectorTurnedOnResponse>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ConnectorTurnedOnResponse {
+    id: String,
+    display_name: &'static str,
 }
 
 #[derive(Serialize)]
@@ -100,10 +108,7 @@ struct UpdateAgentBody {
 }
 
 fn preset_to_response(preset: AgentPreset, templates: &HashMap<String, String>) -> PresetResponse {
-    let system_prompt_template = templates
-        .get(&preset.key)
-        .cloned()
-        .unwrap_or_default();
+    let system_prompt_template = templates.get(&preset.key).cloned().unwrap_or_default();
     PresetResponse {
         id: preset.id,
         key: preset.key,
@@ -115,6 +120,14 @@ fn preset_to_response(preset: AgentPreset, templates: &HashMap<String, String>) 
 }
 
 fn agent_to_response(agent: Agent, health: &AgentHealthRegistry) -> AgentResponse {
+    agent_to_response_with_turn_on(agent, health, None)
+}
+
+fn agent_to_response_with_turn_on(
+    agent: Agent,
+    health: &AgentHealthRegistry,
+    connector_turned_on: Option<ConnectorTurnedOnResponse>,
+) -> AgentResponse {
     let record = health.get(agent.id);
     AgentResponse {
         id: agent.id,
@@ -132,6 +145,36 @@ fn agent_to_response(agent: Agent, health: &AgentHealthRegistry) -> AgentRespons
         preset_source: agent.preset_source,
         created_at: agent.created_at.format(&Rfc3339).unwrap_or_default(),
         updated_at: agent.updated_at.format(&Rfc3339).unwrap_or_default(),
+        connector_turned_on,
+    }
+}
+
+/// Turn a real connector on when an agent is saved with it. Mock and unknown
+/// ids are left alone. `None` means nothing was switched on.
+fn turn_on_for_save(
+    state: &AppState,
+    connector: Option<&str>,
+) -> Result<Option<ConnectorTurnedOnResponse>, StatusCode> {
+    let Some(id) = connector else {
+        return Ok(None);
+    };
+    let Some(descriptor) = coppice_connectors::get(id) else {
+        return Ok(None);
+    };
+    if descriptor.id == coppice_connectors::MOCK {
+        return Ok(None);
+    }
+    match state.connectors.set_enabled(descriptor.id, true) {
+        Ok(change) if change.changed => Ok(Some(ConnectorTurnedOnResponse {
+            id: change.id.to_string(),
+            display_name: change.display_name,
+        })),
+        Ok(_) => Ok(None),
+        Err(ConnectorConfigError::Unknown | ConnectorConfigError::Mock) => Ok(None),
+        Err(err) => {
+            tracing::warn!(error = %err, connector = descriptor.id, "failed to turn connector on");
+            Err(StatusCode::INTERNAL_SERVER_ERROR)
+        }
     }
 }
 
@@ -181,6 +224,7 @@ async fn create_agent(
 ) -> Result<(StatusCode, Json<AgentResponse>), StatusCode> {
     let pool = pool_from_state(&state)?;
     let service = AgentService::new(pool);
+    let turned_on = turn_on_for_save(&state, body.connector.as_deref())?;
 
     let agent = if let Some(preset_id) = body.preset_id {
         let preset = service.get_preset(preset_id).await.map_err(map_error)?;
@@ -205,10 +249,7 @@ async fn create_agent(
             .await
             .map_err(map_error)?
     } else {
-        let role = body
-            .role
-            .as_deref()
-            .ok_or(StatusCode::BAD_REQUEST)?;
+        let role = body.role.as_deref().ok_or(StatusCode::BAD_REQUEST)?;
         let system_prompt = body
             .system_prompt
             .as_deref()
@@ -229,7 +270,14 @@ async fn create_agent(
             .map_err(map_error)?
     };
 
-    Ok((StatusCode::CREATED, Json(agent_to_response(agent, &state.agent_health))))
+    Ok((
+        StatusCode::CREATED,
+        Json(agent_to_response_with_turn_on(
+            agent,
+            &state.agent_health,
+            turned_on,
+        )),
+    ))
 }
 
 async fn get_agent(
@@ -251,6 +299,11 @@ async fn update_agent(
 ) -> Result<Json<AgentResponse>, StatusCode> {
     let pool = pool_from_state(&state)?;
     let service = AgentService::new(pool);
+    let turned_on = if body.connector.is_some() {
+        turn_on_for_save(&state, body.connector.as_deref())?
+    } else {
+        None
+    };
     let agent = service
         .update(
             agent_id,
@@ -266,7 +319,11 @@ async fn update_agent(
         )
         .await
         .map_err(map_error)?;
-    Ok(Json(agent_to_response(agent, &state.agent_health)))
+    Ok(Json(agent_to_response_with_turn_on(
+        agent,
+        &state.agent_health,
+        turned_on,
+    )))
 }
 
 async fn delete_agent(

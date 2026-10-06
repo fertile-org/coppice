@@ -406,6 +406,7 @@ async fn draft_ticket(
     Path(session_id): Path<Uuid>,
 ) -> Result<Json<DraftTicketResponse>, StatusCode> {
     let pool = pool_from_state(&state)?;
+    let registry = state.connectors.registry();
     let result = ChatService::new(pool)
         .draft_ticket_from_chat(
             session_id,
@@ -413,7 +414,7 @@ async fn draft_ticket(
             DraftTicketDeps {
                 worktrees_path: std::path::Path::new(&state.config.agent.worktrees_path),
                 artifacts_dir: Some(state.config.storage.artifacts_dir.as_str()),
-                connector_registry: state.connector_registry.as_ref(),
+                connector_registry: registry.as_ref(),
                 timeout: DRAFT_TICKET_HTTP_TIMEOUT,
             },
         )

@@ -579,6 +579,7 @@ dependencies = [
  "serde",
  "tempfile",
  "toml",
+ "toml_edit",
 ]
 
 [[package]]
@@ -587,6 +588,7 @@ version = "0.1.0"
 dependencies = [
  "serde",
  "serde_json",
+ "tempfile",
 ]
 
 [[package]]
@@ -633,6 +635,7 @@ dependencies = [
  "tokio",
  "tokio-tungstenite 0.26.2",
  "toml",
+ "toml_edit",
  "tower",
  "tower-http",
  "tracing",
