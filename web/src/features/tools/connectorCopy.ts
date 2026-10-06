@@ -1,6 +1,6 @@
 /** Verbatim product copy for connector status, hints, and the turn-off confirm. */
 
-export const INSTALL_GUIDE_URL = 'https://fertile-org.github.io/coppice/docs/providers';
+export const INSTALL_GUIDE_URL = 'https://getcoppice.vercel.app/docs/providers';
 
 export const NO_READY_CONNECTOR_HINT =
   "No agent CLI is ready yet. Pick the one you plan to use, and save now. It will work once it's installed and signed in.";

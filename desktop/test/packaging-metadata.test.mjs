@@ -62,8 +62,8 @@ describe('AppStream metainfo', () => {
     assert.match(xml, /<name>Coppice<\/name>/);
     assert.match(xml, /<summary>Local board for your AI agent team<\/summary>/);
     assert.match(xml, /<p>Agents plan, you approve\./);
-    assert.match(xml, /<url type="homepage">https:\/\/fertile-org\.github\.io\/coppice\/<\/url>/);
-    assert.match(xml, /width="1440" height="900">https:\/\/fertile-org\.github\.io\/coppice\/assets\/hero-screenshot\.png/);
+    assert.match(xml, /<url type="homepage">https:\/\/getcoppice\.vercel\.app\/<\/url>/);
+    assert.match(xml, /width="1440" height="900">https:\/\/getcoppice\.vercel\.app\/assets\/hero-screenshot\.png/);
     assert.match(xml, /<caption>The Coppice board<\/caption>/);
     assert.match(xml, /<launchable type="desktop-id">coppice\.desktop<\/launchable>/);
     assert.match(xml, /<name>fertile-org<\/name>/);
@@ -76,6 +76,6 @@ describe('AppStream metainfo', () => {
     const existing = '<release version="1.2.3" date="2020-01-02"/>';
     assert.equal(releaseDateFor('1.2.3', existing, '2026-10-06'), '2020-01-02');
     assert.equal(releaseDateFor('1.2.4', existing, '2026-10-06'), '2026-10-06');
-    assert.equal(SCREENSHOT, 'https://fertile-org.github.io/coppice/assets/hero-screenshot.png');
+    assert.equal(SCREENSHOT, 'https://getcoppice.vercel.app/assets/hero-screenshot.png');
   });
 });

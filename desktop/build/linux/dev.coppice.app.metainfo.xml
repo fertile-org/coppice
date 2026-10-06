@@ -9,7 +9,7 @@
     <p>Agents plan, you approve. Agents build, you review. Coppice runs on your machine with the agent CLIs you already pay for, like Claude Code and Codex. No account, no Docker.</p>
   </description>
   <icon type="stock">coppice</icon>
-  <url type="homepage">https://fertile-org.github.io/coppice/</url>
+  <url type="homepage">https://getcoppice.vercel.app/</url>
   <developer id="io.github.fertile-org">
     <name>fertile-org</name>
   </developer>
@@ -17,7 +17,7 @@
   <screenshots>
     <screenshot type="default">
       <caption>The Coppice board</caption>
-      <image type="source" width="1440" height="900">https://fertile-org.github.io/coppice/assets/hero-screenshot.png</image>
+      <image type="source" width="1440" height="900">https://getcoppice.vercel.app/assets/hero-screenshot.png</image>
     </screenshot>
   </screenshots>
   <releases>

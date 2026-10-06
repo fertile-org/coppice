@@ -4,7 +4,7 @@
   "private": true,
   "version": "0.1.0",
   "description": "Agents plan, you approve. Agents build, you review. Coppice runs on your machine with the agent CLIs you already pay for, like Claude Code and Codex. No account, no Docker.",
-  "homepage": "https://fertile-org.github.io/coppice/",
+  "homepage": "https://getcoppice.vercel.app/",
   "author": {
     "name": "Coppice Maintainers",
     "email": "coppice@users.noreply.github.com"

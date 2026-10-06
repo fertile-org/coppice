@@ -239,7 +239,7 @@ describe('AgentForm connector hints', () => {
     ).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Install guide' })).toHaveAttribute(
       'href',
-      'https://fertile-org.github.io/coppice/docs/providers',
+      'https://getcoppice.vercel.app/docs/providers',
     );
     expect(screen.getByRole('link', { name: 'Install guide' })).toHaveAttribute('target', '_blank');
     expect(screen.getByText(/No agent CLI is ready yet/)).toBeInTheDocument();
