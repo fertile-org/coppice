@@ -43,6 +43,7 @@ linux:
       # desktop file is coppice.desktop. StartupWMClass has to be that same id.
       StartupWMClass: coppice
 deb:
+  # package.json "license" is passed to fpm as --license (Debian control License).
   # rc.1 and rc.2 shipped this package name. Keeping it lets a newer deb replace
   # the installed package instead of sitting beside it.
   packageName: coppice-desktop

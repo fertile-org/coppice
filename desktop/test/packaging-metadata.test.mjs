@@ -41,6 +41,7 @@ describe('desktop package copy', () => {
     assertAscii('description', LONG_DESCRIPTION);
     assertAscii('homepage', HOMEPAGE);
     assert.equal(pkg.homepage, HOMEPAGE);
+    assert.equal(pkg.license, 'Apache-2.0');
   });
 
   it('points StartupWMClass at the Electron window class and ships metainfo', () => {
@@ -68,7 +69,8 @@ describe('AppStream metainfo', () => {
     assert.match(xml, /<launchable type="desktop-id">coppice\.desktop<\/launchable>/);
     assert.match(xml, /<name>fertile-org<\/name>/);
     assert.match(xml, /<release version="0\.1\.0-rc\.2" date="2026-10-06"\/>/);
-    assert.doesNotMatch(xml, /project_license/);
+    assert.match(xml, /<metadata_license>CC0-1\.0<\/metadata_license>/);
+    assert.match(xml, /<project_license>Apache-2\.0<\/project_license>/);
     assertAscii('metainfo', xml);
   });
 

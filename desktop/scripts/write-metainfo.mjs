@@ -1,9 +1,8 @@
 #!/usr/bin/env node
 // Writes the AppStream metainfo that electron-builder installs to
 // /usr/share/metainfo. The release version comes from desktop/package.json
-// (release-version.mjs updates that file before dist). There is no project
-// license field: the owner has not chosen one. metadata_license covers this
-// XML file only, which AppStream requires.
+// (release-version.mjs updates that file before dist). project_license is
+// Coppice itself (Apache-2.0). metadata_license covers this XML file only.
 
 import { readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
@@ -39,8 +38,9 @@ export function renderMetainfo({ version, date }) {
   return `<?xml version="1.0" encoding="UTF-8"?>
 <component type="desktop-application">
   <id>dev.coppice.app</id>
-  <!-- License of this metainfo file, not of Coppice. No project license is set. -->
+  <!-- metadata_license is this XML file. project_license is Coppice. -->
   <metadata_license>CC0-1.0</metadata_license>
+  <project_license>Apache-2.0</project_license>
   <name>Coppice</name>
   <summary>${escapeXml(SUMMARY)}</summary>
   <description>
