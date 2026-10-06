@@ -1,0 +1,76 @@
+---
+import { withBase } from '../lib/url';
+
+const alt =
+  'Coppice in five frames: a code diff waiting for final review, the ticket board, a Claude Code run in the live console, a chat with an agent, and the plugins page.';
+
+const captions = [
+  'Final Review: Agents build, you review. Read the diff, comment on any line, and nothing is done until you accept it.',
+  'Board: Your agent team works from one board on your machine, with no account and no Docker.',
+  'Agent console: Agents run on the CLIs you already pay for. Follow every thought, tool call and test, live or afterwards.',
+  'Chat: Ask an agent anything before you approve, then turn the answer into a ticket.',
+  'Plugins: Plugins give agents skills and MCP tools. Add one, switch it on, and attach it to the agents that need it.',
+];
+---
+
+<figure class="hero-shot">
+  <video
+    class="hero-video"
+    width="1440"
+    height="900"
+    muted
+    loop
+    playsinline
+    preload="none"
+    poster={withBase('/assets/hero-screenshot.png')}
+    aria-label={alt}
+  >
+    <source src={withBase('/assets/marketing.webm')} type="video/webm" />
+    <source src={withBase('/assets/marketing.mp4')} type="video/mp4" />
+    <track
+      kind="captions"
+      srclang="en"
+      label="English"
+      src={withBase('/assets/marketing.vtt')}
+      default
+    />
+    <img src={withBase('/assets/marketing.gif')} width="1440" height="900" alt={alt} />
+  </video>
+  <figcaption>
+    <ol class="hero-captions">
+      {
+        captions.map((caption) => {
+          const splitAt = caption.indexOf(': ');
+          const label = caption.slice(0, splitAt + 1);
+          const rest = caption.slice(splitAt + 1);
+          return (
+            <li>
+              <strong>{label}</strong>
+              {rest}
+            </li>
+          );
+        })
+      }
+    </ol>
+  </figcaption>
+</figure>
+<script is:inline>
+  const video = document.querySelector('.hero-video');
+  if (video) {
+    const motion = window.matchMedia('(prefers-reduced-motion: reduce)');
+    const sync = () => {
+      if (motion.matches) {
+        video.autoplay = false;
+        video.preload = 'none';
+        video.pause();
+        return;
+      }
+      video.muted = true;
+      video.preload = 'auto';
+      const play = video.play();
+      if (play && typeof play.catch === 'function') play.catch(() => {});
+    };
+    sync();
+    motion.addEventListener('change', sync);
+  }
+</script>

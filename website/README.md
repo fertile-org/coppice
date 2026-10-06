@@ -36,21 +36,22 @@ Or `make website-dev` / `make website-build`.
 
 ## Deploy
 
-No repository secrets are required.
+Public site: [https://getcoppice.vercel.app/](https://getcoppice.vercel.app/), served from the domain root. No repository secrets are required for the build.
 
-Planned URL: `https://fertile-org.github.io/coppice/`
-
-1. In the repo settings, set **Pages → Build and deployment → Source** to **GitHub Actions**.
-2. Run the **Website** workflow manually (**Actions → Website → Run workflow**) with **Deploy to GitHub Pages at /coppice** checked.
-
-That dispatch rebuilds with `SITE_BASE=/coppice` and `SITE_URL=https://fertile-org.github.io`, then deploys `website/dist` with the built-in `GITHUB_TOKEN` (`pages: write` and `id-token: write`). Pull requests only build and upload the `website` artifact, with `base` `/`, so opening the artifact does not require the `/coppice` prefix.
-
-A custom domain can use the same artifact shape as local preview:
+`BASE_PATH` (or the older `SITE_BASE`) sets Astro `base`. Leave it unset to build for `/`. `SITE_URL` sets the canonical origin when you want absolute OG and canonical URLs.
 
 ```bash
 cd website
 npm ci
-SITE_URL=https://example.com npm run build
+SITE_URL=https://getcoppice.vercel.app npm run build
+npm run check:links
 ```
 
-Leave `SITE_BASE` unset (it defaults to `/`). Point the host at `website/dist`.
+Vercel should use `website/` as the project root. `website/vercel.json` turns on clean URLs so `/docs` serves `docs.html`.
+
+GitHub Pages is an optional manual deploy, still at `/coppice`:
+
+1. In the repo settings, set **Pages → Build and deployment → Source** to **GitHub Actions**.
+2. Run the **Website** workflow manually (**Actions → Website → Run workflow**) with **Deploy to GitHub Pages at /coppice** checked.
+
+That dispatch rebuilds with `BASE_PATH=/coppice` and `SITE_URL=https://fertile-org.github.io`, rewrites `docs.html` into `docs/index.html` (Pages does not apply Vercel clean URLs), then deploys `website/dist` with the built-in `GITHUB_TOKEN` (`pages: write` and `id-token: write`). Pull requests only build and upload the `website` artifact, with `base` `/`.

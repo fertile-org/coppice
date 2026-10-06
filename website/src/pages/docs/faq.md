@@ -7,7 +7,7 @@ description: "Beta scope, what’s next, and what Coppice is not."
 # FAQ
 
 ## Is Coppice production-ready?
-No. This is a **Beta**. Use it if you want an early local agent board with real human gates. Capability sandbox hardening is the next milestone (M13). Do not treat Beta as production-hardened.
+No, not yet. Coppice is in beta, for early users who want a local agent board with real human gates. Agents run with your local permissions for now, and stronger sandboxing is coming in a later release.
 
 ## Do I need Docker or an account?
 No. Download the desktop app, open it, and work. No Docker, no server setup, no login.
@@ -28,8 +28,8 @@ That is not Coppice’s product. The wedge is the manager workflow: approve the 
 Not in this Beta. macOS (Apple Silicon) and Linux (x64) only.
 
 ## What’s next on the roadmap?
-- **M13** — security and capability sandbox  
-- **M14** — role-owner agents (propose and signal; humans still approve) and scheduling  
+- Next: security and sandboxing for agents
+- Role-owner agents (propose and signal; humans still approve) and scheduling  
 
 ## Where do contributors look?
 Architecture, development, and testing docs stay in the [GitHub repo](https://github.com/fertile-org/coppice/tree/main/docs). This site is for using Coppice.

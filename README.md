@@ -29,7 +29,7 @@ Bring the CLIs you already use — Claude Code, Codex, OpenCode, Cursor CLI, Kil
 
 ## Get started
 
-Product docs are the site in [`website/`](website/): the landing page and the user guides. The planned public URL is [https://fertile-org.github.io/coppice/](https://fertile-org.github.io/coppice/) until a custom domain is chosen.
+Product docs are the site in [`website/`](website/): the landing page and the user guides. The public site is [https://getcoppice.vercel.app/](https://getcoppice.vercel.app/).
 
 Download buttons go live when a beta git tag publishes GitHub Release assets for the `.dmg` and the `.deb`. Until that release exists, the site documents the install and leaves the download buttons inactive.
 

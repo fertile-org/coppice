@@ -112,9 +112,9 @@ a:hover {
 }
 
 .mark {
-  width: 1.35rem;
-  height: 1.35rem;
-  color: var(--color-moss-700);
+  display: block;
+  width: auto;
+  height: 36px;
 }
 
 .primary-nav {
@@ -137,6 +137,19 @@ a:hover {
   text-underline-offset: 0.28em;
 }
 
+.primary-nav a.btn,
+.primary-nav a.btn:hover,
+.primary-nav a.btn:focus,
+.primary-nav a.btn:focus-visible {
+  color: var(--color-paper-50);
+}
+
+.primary-nav a.btn:hover,
+.primary-nav a.btn:focus-visible {
+  background: var(--color-bark-700);
+  border-color: var(--color-bark-700);
+}
+
 .beta-banner {
   background: var(--color-wheat);
   border-bottom: 1px solid var(--color-wheat-line);
@@ -152,6 +165,11 @@ a:hover {
   color: var(--color-bark-900);
   font-size: 0.95rem;
   line-height: 1.45;
+}
+
+.beta-banner-inner span {
+  flex: 1 1 18rem;
+  min-width: min(100%, 16rem);
 }
 
 .beta-banner strong {
@@ -190,13 +208,33 @@ a:hover {
   margin: 1.75rem 0 0;
 }
 
+.hero-shot video,
 .hero-shot img {
   display: block;
   width: 100%;
+  height: auto;
+  aspect-ratio: 1440 / 900;
   border: 1px solid var(--color-bark-200);
   border-radius: 14px;
   background: var(--color-paper-100);
   box-shadow: var(--shadow-shot);
+}
+
+.hero-captions {
+  margin: 0.85rem 0 0;
+  padding-left: 1.3rem;
+  max-width: 42rem;
+}
+
+.hero-captions li {
+  margin: 0.4rem 0 0;
+  color: var(--color-bark-900);
+  font-size: 0.98rem;
+}
+
+.hero-captions li::marker {
+  color: var(--color-bark-700);
+  font-weight: 650;
 }
 
 .download-row {
@@ -210,7 +248,7 @@ a:hover {
 .download-note {
   flex-basis: 100%;
   margin: 0;
-  color: var(--color-bark-600);
+  color: var(--color-bark-700);
   font-size: 0.98rem;
 }
 
@@ -515,7 +553,11 @@ a:hover {
 
 @media (max-width: 640px) {
   .shell {
-    width: min(var(--shell), calc(100% - 1.5rem));
+    width: min(var(--shell), calc(100% - 2rem));
+  }
+
+  .mark {
+    height: 32px;
   }
 
   .download-row .btn {

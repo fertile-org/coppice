@@ -1,0 +1,16 @@
+WEBVTT
+
+00:00:00.000 --> 00:00:03.000
+Final Review: Agents build, you review. Read the diff, comment on any line, and nothing is done until you accept it.
+
+00:00:03.000 --> 00:00:06.000
+Board: Your agent team works from one board on your machine, with no account and no Docker.
+
+00:00:06.000 --> 00:00:09.000
+Agent console: Agents run on the CLIs you already pay for. Follow every thought, tool call and test, live or afterwards.
+
+00:00:09.000 --> 00:00:12.000
+Chat: Ask an agent anything before you approve, then turn the answer into a ticket.
+
+00:00:12.000 --> 00:00:15.000
+Plugins: Plugins give agents skills and MCP tools. Add one, switch it on, and attach it to the agents that need it.

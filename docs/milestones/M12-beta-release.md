@@ -24,7 +24,7 @@ Ship this before the capability sandbox ([M13 — Security & sandbox](./M13-secu
 
 - Capability sandbox, tool policy, scoped secret injection, guided unblock, audit log (M13)
 - Role-owner observation runs, workspace signals, Workspace Inbox (M14)
-- A custom domain. `https://fertile-org.github.io/coppice/` is enough until one is chosen
+- A custom domain. [https://getcoppice.vercel.app/](https://getcoppice.vercel.app/) is the public site until one is chosen
 - Choosing or pushing the beta git tag as part of the docs-only renumber. The tag is a release action
 - Windows, auto-update, or in-app CLI install
 
@@ -46,8 +46,8 @@ These are checkable with the repo, GitHub Releases, and GitHub Pages. They do no
 - [ ] Landing and docs use the positioning one-liner above and name **Plan Review** and **Wait for Final Review**. Role-owner agents are not the hero; any mention points at M14.
 - [ ] The only download targets named for the beta are macOS Apple Silicon `.dmg` and Linux x64 `.deb`.
 - [ ] Before a beta git tag's GitHub Release contains those assets, download CTAs do not link to a missing file. After that release exists, each CTA returns the matching asset (HTTP 200, expected filename).
-- [ ] With Pages enabled from the repo's website workflow, `https://fertile-org.github.io/coppice/` serves the built site. A custom domain is not required.
-- [ ] Root [README.md](../../README.md) leads with the Electron desktop app, points at `website/` and `https://fertile-org.github.io/coppice/` as the product docs, and points contributors at [AGENTS.md](../../AGENTS.md) and [docs/development.md](../development.md). Docker Compose is the contributor/dev path.
+- [ ] [https://getcoppice.vercel.app/](https://getcoppice.vercel.app/) serves the built site at the domain root. A custom domain is not required. The website workflow can still deploy GitHub Pages at `/coppice` when that dispatch is run.
+- [ ] Root [README.md](../../README.md) leads with the Electron desktop app, points at `website/` and `https://getcoppice.vercel.app/` as the product docs, and points contributors at [AGENTS.md](../../AGENTS.md) and [docs/development.md](../development.md). Docker Compose is the contributor/dev path.
 - [ ] The README image is `static/screenshot.png`. The README text does not tell the reader to sign in as `admin@localhost` or to look for a Sign out control on that shot.
 - [ ] A desktop installer and a `make release-tar` build do not list or run the `mock` connector. Automated tests, and Compose/dev with `--features mock-provider`, still can ([mock](../providers/mock.md)).
 - [ ] The M11 live tag check has passed, and manual install acceptance on both the arm64 `.dmg` and the x64 `.deb` used a real connector through to Done.

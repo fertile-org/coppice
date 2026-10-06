@@ -27,7 +27,10 @@ const image = Astro.site ? new URL(withBase('/assets/hero-screenshot.png'), Astr
     <title>{fullTitle}</title>
     <meta name="description" content={description} />
     <meta name="theme-color" content="#faf7f2" />
+    <link rel="icon" href={withBase('/favicon.ico')} sizes="any" />
     <link rel="icon" href={withBase('/favicon.svg')} type="image/svg+xml" />
+    <link rel="icon" href={withBase('/favicon-32x32.png')} type="image/png" sizes="32x32" />
+    <link rel="apple-touch-icon" href={withBase('/apple-touch-icon.png')} />
     {canonical && <link rel="canonical" href={canonical} />}
     <meta property="og:title" content={fullTitle} />
     <meta property="og:description" content={description} />

@@ -1,6 +1,7 @@
 ---
 import Base from '../layouts/Base.astro';
 import DownloadLinks from '../components/DownloadLinks.astro';
+import HeroMedia from '../components/HeroMedia.astro';
 import { withBase } from '../lib/url';
 
 const description =
@@ -35,14 +36,7 @@ const features = [
       <p class="lede">On your machine, with the agent CLIs you already pay for.</p>
     </header>
 
-    <figure class="hero-shot">
-      <img
-        src={withBase('/assets/hero-screenshot.png')}
-        width="2880"
-        height="1440"
-        alt="Coppice board — tickets across Backlog through Final Review"
-      />
-    </figure>
+    <HeroMedia />
 
     <div id="download">
       <DownloadLinks showDocs />
