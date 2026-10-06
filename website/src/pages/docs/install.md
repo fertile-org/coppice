@@ -25,9 +25,9 @@ After the beta tag, assets will also appear on [GitHub Releases](https://github.
 ## First run
 1. Install and open Coppice.
 2. Point it at a local git checkout you already have on disk.
-3. **Connect your agent CLI.** Pick your agent CLI when you create an agent, and Coppice turns it on. Each one shows whether it's Ready, Found, not signed in, or Not on your PATH. Sign in to the CLI in your terminal first, the same way you normally would.
+3. **Connect your agent CLI.** Pick your agent CLI when you create an agent, and Coppice turns it on. Each one shows whether it's **Ready**, **Found, not signed in**, or **Not on your PATH**. Sign in to the CLI in your terminal first, the same way you normally would.
 
-   Kilo Code has no sign-in check, so it is not shown as Ready.
+   Coppice can't check Kilo Code's sign-in, so it shows no status. Make sure you're signed in to it in your terminal.
 
    To turn a connector off later, use the toggle in Tools → Connectors, or set `enabled = false` for it in your Coppice `config.toml`:
 

@@ -6,9 +6,9 @@ description: "Which agent CLIs Coppice talks to."
 
 # Providers
 
-**Connect your agent CLI.** Pick your agent CLI when you create an agent, and Coppice turns it on. Each one shows whether it's Ready, Found, not signed in, or Not on your PATH. Sign in to the CLI in your terminal first, the same way you normally would.
+**Connect your agent CLI.** Pick your agent CLI when you create an agent, and Coppice turns it on. Each one shows whether it's **Ready**, **Found, not signed in**, or **Not on your PATH**. Sign in to the CLI in your terminal first, the same way you normally would.
 
-Kilo Code has no sign-in check, so it is not shown as Ready.
+Coppice can't check Kilo Code's sign-in, so it shows no status. Make sure you're signed in to it in your terminal.
 
 Coppice talks to coding agent CLIs you install yourself. Bring the tools you already use; Coppice does not sell model access.
 
@@ -21,7 +21,7 @@ Exact wiring may expand — check the app’s provider settings for the live lis
 | Codex | OpenAI’s agent CLI |
 | Cursor | Cursor’s CLI agent |
 | OpenCode | Open-source coding agent |
-| Kilo Code | No sign-in check, so it is not shown as Ready. |
+| Kilo Code | Kilo’s agent CLI |
 
 ## How connection works
 1. Install and authenticate the CLI the normal way for that tool.
