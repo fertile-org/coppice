@@ -241,6 +241,12 @@ a:hover {
   font-weight: 650;
 }
 
+.hero-support {
+  margin: 1.05rem 0 0;
+  color: var(--color-bark-900);
+  font-size: 1.05rem;
+}
+
 .download-row {
   display: flex;
   flex-wrap: wrap;
@@ -508,11 +514,30 @@ a:hover {
   gap: 0.8rem 1.5rem;
 }
 
+.footer-copy {
+  display: grid;
+  gap: 0.35rem;
+}
+
 .footer-inner p {
   margin: 0;
   font-family: var(--font-display);
   font-size: 1.15rem;
   letter-spacing: -0.02em;
+}
+
+.footer-inner p.footer-license {
+  max-width: 36rem;
+  color: var(--color-bark-900);
+  font-family: var(--font-body);
+  font-size: 0.98rem;
+  font-weight: 400;
+  letter-spacing: 0;
+}
+
+.footer-license a {
+  color: var(--color-moss-700);
+  font-weight: 650;
 }
 
 .site-footer nav {
