@@ -25,8 +25,16 @@ After the beta tag, assets will also appear on [GitHub Releases](https://github.
 ## First run
 1. Install and open Coppice.
 2. Point it at a local git checkout you already have on disk.
-3. Connect an agent CLI you already use (see [Providers](/docs/providers)).
-4. Create a ticket (or approve a proposed one), move it to Ready, and walk Plan Review → execution → Final Review.
+3. **Connect your agent CLI.** Pick your agent CLI when you create an agent, and Coppice turns it on. Each one shows whether it's Ready, Found, not signed in, or Not on your PATH. Sign in to the CLI in your terminal first, the same way you normally would.
+
+   Kilo Code has no sign-in check, so it is not shown as Ready.
+
+   To turn a connector off later, use the toggle in Tools → Connectors, or set `enabled = false` for it in your Coppice `config.toml`:
+
+   - macOS: `~/Library/Application Support/Coppice/config.toml`
+   - Linux: `~/.config/Coppice/config.toml`
+
+4. Create a ticket (or approve a proposed one) and move it to Ready. Agents take it through In Progress, In Review and In QA, then it waits for your Final Review.
 
 ## Requirements
 - A local git repository you can write to (Coppice uses isolated worktrees)
