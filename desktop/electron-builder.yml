@@ -32,8 +32,24 @@ linux:
   executableName: coppice
   # Per-size PNGs: hicolor has no 1024x1024 directory, so a single 1024 icon is never found.
   icon: build/icons
-  synopsis: Local desktop agent workspace
+  # Debian short description (first line of control Description). The long
+  # description is package.json "description".
+  synopsis: Local board for your AI agent team
+  desktop:
+    entry:
+      # Electron 35 sets WM_CLASS to ("coppice", "Coppice"): the instance is the
+      # lowercased productName, the class is productName. desktopName
+      # "coppice.desktop" sets the Wayland app_id to coppice, and the installed
+      # desktop file is coppice.desktop. StartupWMClass has to be that same id.
+      StartupWMClass: coppice
 deb:
+  # package.json "license" is passed to fpm as --license (Debian control License).
+  # rc.1 and rc.2 shipped this package name. Keeping it lets a newer deb replace
+  # the installed package instead of sitting beside it.
+  packageName: coppice-desktop
+  # Installed as /usr/share/metainfo/dev.coppice.app.metainfo.xml (fpm src=dest).
+  fpm:
+    - build/linux/dev.coppice.app.metainfo.xml=/usr/share/metainfo/dev.coppice.app.metainfo.xml
   # electron-builder's default deb depends (app-builder-lib FpmTarget) are replaced, not merged.
   depends:
     - libgtk-3-0

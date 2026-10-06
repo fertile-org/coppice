@@ -8,6 +8,7 @@ import { spawn } from 'node:child_process';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
+import { writeMetainfo } from './write-metainfo.mjs';
 
 const desktopDir = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -39,6 +40,7 @@ export function builderArgs(env, { dir, platform }) {
 }
 
 function main() {
+  writeMetainfo(desktopDir);
   const { values } = parseArgs({ options: { dir: { type: 'boolean', default: false } } });
   const { args, env } = builderArgs(process.env, { dir: values.dir, platform: process.platform });
   const bin = join(desktopDir, 'node_modules', '.bin', 'electron-builder');

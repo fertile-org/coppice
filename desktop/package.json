@@ -3,8 +3,9 @@
   "productName": "Coppice",
   "private": true,
   "version": "0.1.0",
-  "description": "Coppice desktop app — Electron shell around the bundled Coppice server",
-  "homepage": "https://github.com/fertile-org/coppice",
+  "description": "Agents plan, you approve. Agents build, you review. Coppice runs on your machine with the agent CLIs you already pay for, like Claude Code and Codex. No account, no Docker.",
+  "homepage": "https://getcoppice.vercel.app/",
+  "license": "Apache-2.0",
   "author": {
     "name": "Coppice Maintainers",
     "email": "coppice@users.noreply.github.com"

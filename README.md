@@ -36,3 +36,7 @@ Download buttons go live when a beta git tag publishes GitHub Release assets for
 ## Contributors
 
 Docker Compose is how contributors and CI run the stack. Start with [AGENTS.md](AGENTS.md) and [docs/development.md](docs/development.md). The roadmap is [docs/milestones/README.md](docs/milestones/README.md).
+
+## License
+
+Coppice is open source under the [Apache 2.0 license](LICENSE).

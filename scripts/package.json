@@ -1,0 +1,10 @@
+{
+  "name": "coppice-icon-gen",
+  "private": true,
+  "license": "Apache-2.0",
+  "type": "module",
+  "description": "Renders Coppice app icons from assets/brand/coppice-logo.svg",
+  "dependencies": {
+    "@resvg/resvg-js": "2.6.2"
+  }
+}
