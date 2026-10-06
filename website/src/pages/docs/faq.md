@@ -10,7 +10,7 @@ description: "Beta scope, what’s next, and what Coppice is not."
 No, not yet. Coppice is in beta, for early users who want a local agent board with real human gates. Agents run with your local permissions for now, and stronger sandboxing is coming in a later release.
 
 ## Do I need Docker or an account?
-No. Download the desktop app, open it, and work. No Docker, no server setup, no login.
+No. Download the desktop app, open it, and work. No Docker, no server setup, no Coppice account.
 
 ## Is this a Jira / Linear replacement?
 No. Coppice is a board for driving coding agents, not a full company issue tracker.

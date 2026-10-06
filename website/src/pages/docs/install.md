@@ -1,12 +1,12 @@
 ---
 layout: ../../layouts/Docs.astro
 title: Install
-description: "Coppice Beta ships as a desktop app. No Docker, no server, no account."
+description: "Coppice Beta ships as a desktop app. No Docker, no server, no Coppice account."
 ---
 
 # Install
 
-Coppice Beta ships as a desktop app. No Docker, no server, no account.
+Coppice Beta ships as a desktop app. No Docker, no server, no Coppice account.
 
 ## Supported platforms
 | Platform | Package |
