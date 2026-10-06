@@ -251,6 +251,10 @@ a:hover {
   font-size: 1.05rem;
 }
 
+#download {
+  scroll-margin-top: 5.25rem;
+}
+
 .download-row {
   display: flex;
   flex-wrap: wrap;
@@ -314,6 +318,10 @@ a:hover {
   margin-top: 3.25rem;
 }
 
+.pair-follow {
+  margin-top: 1.75rem;
+}
+
 .block h2,
 .prose h2 {
   margin: 0 0 0.75rem;
@@ -331,48 +339,55 @@ a:hover {
 }
 
 .plain-list,
-.gates {
+.steps {
   margin: 0;
   padding: 0;
   list-style: none;
 }
 
 .plain-list li,
-.gates li {
+.steps li {
   margin: 0;
   padding: 0.85rem 0;
   border-top: 1px solid var(--color-bark-200);
 }
 
 .plain-list li:last-child,
-.gates li:last-child {
+.steps li:last-child {
   border-bottom: 1px solid var(--color-bark-200);
 }
 
-.gates {
-  counter-reset: gate;
+.steps {
+  counter-reset: step;
   margin-bottom: 1rem;
 }
 
-.gates li {
+.steps li {
   display: grid;
   grid-template-columns: auto 1fr;
   gap: 0.9rem;
   align-items: baseline;
 }
 
-.gates li::before {
-  counter-increment: gate;
-  content: counter(gate);
+.steps li::before {
+  counter-increment: step;
+  content: counter(step);
   color: var(--color-moss-700);
   font-family: var(--font-display);
   font-size: 1.35rem;
   font-weight: 560;
 }
 
-.gates li p {
+.steps li p {
   margin: 0;
   max-width: none;
+}
+
+.steps li p.coming-soon {
+  margin-top: 0.4rem;
+  color: var(--color-bark-700);
+  font-size: 0.98rem;
+  font-style: italic;
 }
 
 .feature-grid {
@@ -403,20 +418,6 @@ a:hover {
   margin: 0;
   max-width: none;
   color: var(--color-bark-700);
-}
-
-.who {
-  padding: 1.25rem 1.3rem 1.35rem;
-  border-radius: 16px;
-  background: var(--color-moss-100);
-}
-
-.who h2 {
-  margin-bottom: 0.45rem;
-}
-
-.who p {
-  margin: 0;
 }
 
 .closer {
@@ -575,12 +576,6 @@ a:hover {
     display: grid;
     gap: 0.45rem;
     overflow: visible;
-  }
-}
-
-@media (min-width: 980px) {
-  .feature-grid {
-    grid-template-columns: 1fr 1fr 1fr;
   }
 }
 

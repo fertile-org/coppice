@@ -7,7 +7,7 @@ import { withBase } from '../lib/url';
 const description =
   'Run several coding agents at once without babysitting them. Review every diff before it counts. Local, open source, with the agent CLIs you already pay for.';
 
-const features = [
+const reasons = [
   [
     'Stop tab-hopping between terminals.',
     "Every agent's work is a card on one board. Blocked tickets and work waiting for your review stand out, so you know where you're needed.",
@@ -23,14 +23,6 @@ const features = [
   [
     'No Coppice cloud.',
     'Your repos, tickets and history stay on your machine. Only your CLIs talk to their own model providers.',
-  ],
-  [
-    'See exactly what happened.',
-    'Every thought, tool call and comment is on the ticket. There are no hidden side channels between agents.',
-  ],
-  [
-    'Memory that stays useful.',
-    'Project knowledge an agent wants to keep needs your approval, so later tickets get context, not noise.',
   ],
 ];
 ---
@@ -55,11 +47,17 @@ const features = [
 
     <section class="block" aria-labelledby="how-it-works">
       <h2 id="how-it-works">How it works</h2>
-      <ol class="gates">
+      <ol class="steps">
         <li>
-          <p>
-            <strong>Hand off the work.</strong> Write a ticket, or approve one an agent suggests, and move it to Ready.
-          </p>
+          <div>
+            <p>
+              <strong>Hand off the work.</strong> Write a ticket, or approve one an agent suggests, and move it to Ready.
+            </p>
+            <p class="coming-soon">
+              (Plan Review coming soon: a PM agent will draft the plan first, and you'll approve it before anyone writes
+              code.)
+            </p>
+          </div>
         </li>
         <li>
           <p>
@@ -69,44 +67,19 @@ const features = [
         </li>
         <li>
           <p>
-            <strong>Review what shipped.</strong> Read the diff in the app, comment on any line, and accept it when it's
-            right.
+            <strong>Final Review.</strong> Read the diff in the app, comment on any line, and nothing counts as done until
+            you accept it.
           </p>
         </li>
       </ol>
       <p>Download, open, work. Nothing to set up: no Docker, no Coppice account.</p>
     </section>
 
-    <section class="block" aria-labelledby="what-it-is-not">
-      <h2 id="what-it-is-not">What it is not</h2>
-      <ul class="plain-list">
-        <li>Not a cloud coding service</li>
-        <li>Not a Jira replacement</li>
-        <li>Not “tell the agent and get the finished product”</li>
-      </ul>
-    </section>
-
-    <section class="block" aria-labelledby="two-gates">
-      <h2 id="two-gates">The two gates</h2>
-      <p>Agents are fast at building the wrong thing. Coppice puts you at the two moments that catch it.</p>
-      <ol class="gates">
-        <li>
-          <p><strong>Plan Review</strong> (coming soon): a PM agent drafts the plan, and you approve or comment before anyone writes code.</p>
-        </li>
-        <li>
-          <p>
-            <strong>Final Review</strong>: you read the diff in the app, feedback stays on the ticket, and nothing is done until you say so.
-          </p>
-        </li>
-      </ol>
-      <p>Nothing starts without a human action. Agents may propose tickets; approving one counts.</p>
-    </section>
-
     <section class="block" aria-labelledby="why">
       <h2 id="why">Why Coppice</h2>
       <div class="feature-grid">
         {
-          features.map(([title, body]) => (
+          reasons.map(([title, body]) => (
             <article>
               <h3>{title}</h3>
               <p>{body}</p>
@@ -116,16 +89,21 @@ const features = [
       </div>
     </section>
 
-    <section class="block who" aria-labelledby="who">
-      <h2 id="who">Who it’s for</h2>
-      <p>
-        Engineers and small teams who already run coding agents and are tired of watching terminals. If you want to hand
-        off more work without losing control of what ships, Coppice is for you.
-      </p>
+    <section class="block pair-follow" aria-labelledby="what-it-is-not">
+      <h2 id="what-it-is-not">What it is not</h2>
+      <ul class="plain-list">
+        <li>Not a cloud coding service</li>
+        <li>Not a Jira replacement</li>
+        <li>Not “tell the agent and get the finished product”</li>
+      </ul>
     </section>
 
     <section class="block" aria-labelledby="get-started">
       <h2 id="get-started">Get started</h2>
+      <p>
+        For engineers and small teams who already run coding agents and want to hand off more work without losing
+        control of what ships.
+      </p>
       <DownloadLinks />
       <p class="closer">Put your agents on a board. Keep the gates.</p>
       <p class="closer-links">
