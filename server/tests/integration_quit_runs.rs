@@ -26,8 +26,13 @@ struct KillGroup(u32);
 impl Drop for KillGroup {
     fn drop(&mut self) {
         if self.0 > 1 {
+            // procps-ng 4 treats `kill -KILL -PGID` as a flag, so the group stays
+            // alive. `--` makes the negative id an operand.
             let _ = std::process::Command::new("kill")
-                .args(["-KILL", &format!("-{}", self.0)])
+                .args(["-s", "KILL", "--", &format!("-{}", self.0)])
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
                 .status();
         }
     }
