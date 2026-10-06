@@ -34,8 +34,11 @@ jobs:
     runs-on: ubuntu-latest
     env:
       ASTRO_TELEMETRY_DISABLED: '1'
-      # Project Pages lives at https://<org>.github.io/coppice/. PR artifacts
-      # stay at base `/` so they can be opened from the root of any static host.
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
+      # The public site is https://getcoppice.vercel.app/ at the domain root.
+      # Project Pages (manual dispatch only) still lives at /coppice.
+      # PR artifacts stay at base `/` so they open from the root of any static host.
+      BASE_PATH: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.deploy == 'true' && '/coppice' || '/' }}
       SITE_BASE: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.deploy == 'true' && '/coppice' || '/' }}
       SITE_URL: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.deploy == 'true' && 'https://fertile-org.github.io' || '' }}
     steps:
@@ -48,12 +51,27 @@ jobs:
       - name: Install and build
         working-directory: website
         run: npm ci && npm run build
+      - name: Check internal links
+        working-directory: website
+        run: npm run check:links
+      - name: Directory indexes for GitHub Pages
+        if: github.event_name == 'workflow_dispatch' && github.event.inputs.deploy == 'true'
+        working-directory: website
+        run: node scripts/to-directory-indexes.mjs dist && npm run check:links -- --host-style=directory
       - uses: actions/upload-artifact@v4
         with:
           name: website
           path: website/dist
           if-no-files-found: error
           retention-days: 14
+      - name: Check GitHub Pages base
+        if: github.event_name != 'workflow_dispatch' || github.event.inputs.deploy != 'true'
+        working-directory: website
+        env:
+          BASE_PATH: /coppice
+          SITE_BASE: /coppice
+          SITE_URL: https://fertile-org.github.io
+        run: npm run build && npm run check:links && node scripts/to-directory-indexes.mjs dist && npm run check:links -- --host-style=directory
 
   deploy:
     if: github.event_name == 'workflow_dispatch' && github.event.inputs.deploy == 'true'

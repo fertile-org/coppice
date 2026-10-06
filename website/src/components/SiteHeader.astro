@@ -11,11 +11,7 @@ const homeActive = pathname === homePath;
 <header class="site-header">
   <div class="shell header-inner">
     <a class:list={['brand', { active: homeActive }]} href={withBase('/')}>
-      <svg class="mark" viewBox="0 0 32 32" aria-hidden="true">
-        <path d="M16 27V13" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"></path>
-        <path d="M16 18.2c-4.2-.6-6.4-3.6-6.6-7.2 3.4.2 5.8 2.2 6.6 7.2z" fill="currentColor"></path>
-        <path d="M16 16.4c3.6-.8 6.6-2.8 7.6-6.2-3.6.1-6.2 1.8-7.6 6.2z" fill="currentColor" opacity="0.72"></path>
-      </svg>
+      <img class="mark" src={withBase('/favicon.svg')} width="34" height="36" alt="" />
       <span>Coppice</span>
     </a>
     <nav class="primary-nav" aria-label="Primary">
