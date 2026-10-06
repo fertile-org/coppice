@@ -2,8 +2,6 @@
 
 **Beta.** Run a team of coding agents without babysitting them.
 
-**Agents plan, you approve. Agents build, you review. On your machine, with the agent CLIs you already pay for.**
-
 <p align="center">
   <img src="static/screenshot.png" alt="Coppice board with tickets across the workflow columns" width="900" />
 </p>
