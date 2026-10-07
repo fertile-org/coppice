@@ -4,7 +4,7 @@ use crate::domain::substatus::{
 };
 use crate::domain::workflow::{PendingRecommendation, PendingSplitRecommendation};
 use crate::services::human_review_service::{HumanReview, HumanReviewService};
-use crate::services::workflow_service::WorkflowService;
+use crate::services::workflow_service::{PlanEntry, WorkflowService};
 use crate::domain::ticket::{
     priority_from_str, priority_to_str, status_from_str, status_to_str, substatus_from_str,
     substatus_to_str, Ticket, TicketPriority,
@@ -61,6 +61,8 @@ const TICKET_COLUMNS_ALIASED: &str = r#"
                 t.assignee_agent_id, t.owner_user_id, t.branch_name,
                 t.pending_assign_recommendation, t.parent_ticket_id,
                 t.pending_split_recommendation, t.clarification_round,
+                t.skip_planning, t.content_version,
+                t.approved_plan_comment_id, t.approved_plan_content_version,
                 t.created_by, t.created_by_id, t.created_at, t.updated_at, t.archived_at
 "#;
 
@@ -221,6 +223,8 @@ impl<'a> TicketService<'a> {
                 assignee_agent_id, owner_user_id, branch_name,
                 pending_assign_recommendation, parent_ticket_id,
                 pending_split_recommendation, clarification_round,
+                skip_planning, content_version,
+                approved_plan_comment_id, approved_plan_content_version,
                 created_by, created_by_id, created_at, updated_at, archived_at
             "#,
         )
@@ -265,6 +269,8 @@ impl<'a> TicketService<'a> {
                 assignee_agent_id, owner_user_id, branch_name,
                 pending_assign_recommendation, parent_ticket_id,
                 pending_split_recommendation, clarification_round,
+                skip_planning, content_version,
+                approved_plan_comment_id, approved_plan_content_version,
                 created_by, created_by_id, created_at, updated_at, archived_at
             "#,
         )
@@ -303,6 +309,8 @@ impl<'a> TicketService<'a> {
                 assignee_agent_id, owner_user_id, branch_name,
                 pending_assign_recommendation, parent_ticket_id,
                 pending_split_recommendation, clarification_round,
+                skip_planning, content_version,
+                approved_plan_comment_id, approved_plan_content_version,
                 created_by, created_by_id, created_at, updated_at, archived_at
             "#,
         )
@@ -326,6 +334,8 @@ impl<'a> TicketService<'a> {
                 assignee_agent_id, owner_user_id, branch_name,
                 pending_assign_recommendation, parent_ticket_id,
                 pending_split_recommendation, clarification_round,
+                skip_planning, content_version,
+                approved_plan_comment_id, approved_plan_content_version,
                 created_by, created_by_id, created_at, updated_at, archived_at
             FROM tickets
             WHERE id = $1
@@ -351,6 +361,8 @@ impl<'a> TicketService<'a> {
         priority: Option<Option<TicketPriority>>,
         branch_name: Option<Option<&str>>,
         owner_user_id: Option<Option<Uuid>>,
+        skip_planning: Option<bool>,
+        human_edit: bool,
     ) -> Result<TicketWithDisplay, TicketError> {
         let current = self.get(ticket_id).await?;
         Self::ensure_not_archived(&current.ticket)?;
@@ -373,6 +385,10 @@ impl<'a> TicketService<'a> {
             None => current.ticket.owner_user_id,
         };
         let priority_str = priority.map(priority_to_str);
+        let content_changed = human_edit
+            && (*title != current.ticket.title || description != current.ticket.description);
+        let version_delta: i32 = i32::from(content_changed);
+        let skip_planning = skip_planning.unwrap_or(current.ticket.skip_planning);
 
         let row = sqlx::query(
             r#"
@@ -384,6 +400,8 @@ impl<'a> TicketService<'a> {
                 priority = $5,
                 branch_name = $6,
                 owner_user_id = $7,
+                content_version = content_version + $8,
+                skip_planning = $9,
                 updated_at = now()
             WHERE id = $1
             RETURNING
@@ -392,6 +410,8 @@ impl<'a> TicketService<'a> {
                 assignee_agent_id, owner_user_id, branch_name,
                 pending_assign_recommendation, parent_ticket_id,
                 pending_split_recommendation, clarification_round,
+                skip_planning, content_version,
+                approved_plan_comment_id, approved_plan_content_version,
                 created_by, created_by_id, created_at, updated_at, archived_at
             "#,
         )
@@ -402,6 +422,8 @@ impl<'a> TicketService<'a> {
         .bind(priority_str)
         .bind(&branch_name)
         .bind(owner_user_id)
+        .bind(version_delta)
+        .bind(skip_planning)
         .fetch_optional(self.pool)
         .await?
         .ok_or(TicketError::TicketNotFound)?;
@@ -462,8 +484,9 @@ impl<'a> TicketService<'a> {
                 }
             }
             StatusWrite::Direct => {
+                let plan = self.plan_entry(&current.ticket).await?;
                 if let Some(msg) =
-                    WorkflowService::direct_status_change_error(current.ticket.status, status)
+                    WorkflowService::direct_status_change_error(current.ticket.status, status, plan)
                 {
                     return Err(TicketError::Validation(msg.to_string()));
                 }
@@ -501,6 +524,8 @@ impl<'a> TicketService<'a> {
                 assignee_agent_id, owner_user_id, branch_name,
                 pending_assign_recommendation, parent_ticket_id,
                 pending_split_recommendation, clarification_round,
+                skip_planning, content_version,
+                approved_plan_comment_id, approved_plan_content_version,
                 created_by, created_by_id, created_at, updated_at, archived_at
             "#,
         )
@@ -552,8 +577,9 @@ impl<'a> TicketService<'a> {
         let clarification_round =
             current.ticket.clarification_round.saturating_add(clarification_round_delta);
 
+        let plan = self.plan_entry(&current.ticket).await?;
         if let Some(msg) =
-            WorkflowService::direct_status_change_error(current.ticket.status, status)
+            WorkflowService::direct_status_change_error(current.ticket.status, status, plan)
         {
             return Err(TicketError::Validation(msg.to_string()));
         }
@@ -584,6 +610,8 @@ impl<'a> TicketService<'a> {
                 assignee_agent_id, owner_user_id, branch_name,
                 pending_assign_recommendation, parent_ticket_id,
                 pending_split_recommendation, clarification_round,
+                skip_planning, content_version,
+                approved_plan_comment_id, approved_plan_content_version,
                 created_by, created_by_id, created_at, updated_at, archived_at
             "#,
         )
@@ -616,6 +644,8 @@ impl<'a> TicketService<'a> {
                 assignee_agent_id, owner_user_id, branch_name,
                 pending_assign_recommendation, parent_ticket_id,
                 pending_split_recommendation, clarification_round,
+                skip_planning, content_version,
+                approved_plan_comment_id, approved_plan_content_version,
                 created_by, created_by_id, created_at, updated_at, archived_at
             "#,
         )
@@ -642,6 +672,8 @@ impl<'a> TicketService<'a> {
                 assignee_agent_id, owner_user_id, branch_name,
                 pending_assign_recommendation, parent_ticket_id,
                 pending_split_recommendation, clarification_round,
+                skip_planning, content_version,
+                approved_plan_comment_id, approved_plan_content_version,
                 created_by, created_by_id, created_at, updated_at, archived_at
             "#,
         )
@@ -667,6 +699,8 @@ impl<'a> TicketService<'a> {
                 assignee_agent_id, owner_user_id, branch_name,
                 pending_assign_recommendation, parent_ticket_id,
                 pending_split_recommendation, clarification_round,
+                skip_planning, content_version,
+                approved_plan_comment_id, approved_plan_content_version,
                 created_by, created_by_id, created_at, updated_at, archived_at
             FROM tickets
             WHERE parent_ticket_id = $1
@@ -703,6 +737,8 @@ impl<'a> TicketService<'a> {
                 assignee_agent_id, owner_user_id, branch_name,
                 pending_assign_recommendation, parent_ticket_id,
                 pending_split_recommendation, clarification_round,
+                skip_planning, content_version,
+                approved_plan_comment_id, approved_plan_content_version,
                 created_by, created_by_id, created_at, updated_at, archived_at
             "#,
         )
@@ -735,6 +771,8 @@ impl<'a> TicketService<'a> {
                 assignee_agent_id, owner_user_id, branch_name,
                 pending_assign_recommendation, parent_ticket_id,
                 pending_split_recommendation, clarification_round,
+                skip_planning, content_version,
+                approved_plan_comment_id, approved_plan_content_version,
                 created_by, created_by_id, created_at, updated_at, archived_at
             "#,
         )
@@ -763,6 +801,8 @@ impl<'a> TicketService<'a> {
                 assignee_agent_id, owner_user_id, branch_name,
                 pending_assign_recommendation, parent_ticket_id,
                 pending_split_recommendation, clarification_round,
+                skip_planning, content_version,
+                approved_plan_comment_id, approved_plan_content_version,
                 created_by, created_by_id, created_at, updated_at, archived_at
             "#,
         )
@@ -899,6 +939,51 @@ impl<'a> TicketService<'a> {
     }
 }
 
+impl<'a> TicketService<'a> {
+    pub async fn plan_entry(&self, ticket: &Ticket) -> Result<PlanEntry, TicketError> {
+        if ticket.skip_planning {
+            return Ok(PlanEntry {
+                skip_planning: true,
+                approved_for_current_version: false,
+            });
+        }
+        Ok(PlanEntry {
+            skip_planning: false,
+            approved_for_current_version: self.approved_plan_is_current(ticket).await?,
+        })
+    }
+
+    pub async fn approved_plan_is_current(&self, ticket: &Ticket) -> Result<bool, TicketError> {
+        let (Some(approved_id), Some(approved_version)) = (
+            ticket.approved_plan_comment_id,
+            ticket.approved_plan_content_version,
+        ) else {
+            return Ok(false);
+        };
+        if approved_version != ticket.content_version {
+            return Ok(false);
+        }
+        let row = sqlx::query(
+            r#"
+            SELECT id, plan_content_version
+            FROM ticket_comments
+            WHERE ticket_id = $1 AND intent = 'plan'
+            ORDER BY created_at DESC, id DESC
+            LIMIT 1
+            "#,
+        )
+        .bind(ticket.id)
+        .fetch_optional(self.pool)
+        .await?;
+        let Some(row) = row else {
+            return Ok(false);
+        };
+        let id: Uuid = row.get("id");
+        let version: Option<i32> = row.get("plan_content_version");
+        Ok(id == approved_id && version == Some(ticket.content_version))
+    }
+}
+
 fn row_to_ticket(row: &sqlx::postgres::PgRow) -> Ticket {
     let status_str: String = row.get("status");
     let status = status_from_str(&status_str).unwrap_or(TicketStatus::Backlog);
@@ -928,6 +1013,10 @@ fn row_to_ticket(row: &sqlx::postgres::PgRow) -> Ticket {
         parent_ticket_id: row.get("parent_ticket_id"),
         pending_split_recommendation: row.get("pending_split_recommendation"),
         clarification_round: row.get("clarification_round"),
+        skip_planning: row.get("skip_planning"),
+        content_version: row.get("content_version"),
+        approved_plan_comment_id: row.get("approved_plan_comment_id"),
+        approved_plan_content_version: row.get("approved_plan_content_version"),
         created_by: row.get("created_by"),
         created_by_id: row.get("created_by_id"),
         created_at: row.get("created_at"),

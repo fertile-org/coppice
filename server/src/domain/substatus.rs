@@ -7,6 +7,7 @@ use uuid::Uuid;
 pub enum TicketStatus {
     Backlog,
     Ready,
+    PlanReview,
     InProgress,
     InReview,
     InQa,

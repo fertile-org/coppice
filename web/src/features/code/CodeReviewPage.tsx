@@ -4,6 +4,7 @@ import { BrandLogo } from '../../components/BrandLogo';
 import { Button } from '../../components/ui/button';
 import { Combobox } from '../../components/ui/combobox';
 import { useRepos } from '../repos/useRepos';
+import { PlanChecklist } from '../plan/PlanChecklist';
 import { useTicket } from '../tickets/useTicket';
 import { ChangedFilesPanel } from './ChangedFilesPanel';
 import { DiffViewer, type InlineCommentDraft } from './DiffViewer';
@@ -275,7 +276,16 @@ export function CodeReviewPage() {
           actionLabel="Go to Repositories"
         />
       ) : (
-        <div className="grid min-h-0 flex-1 grid-cols-[minmax(220px,280px)_1fr]">
+        <div
+          className={
+            ticket?.status === 'wait_for_final_review' && ticket.approvedPlan
+              ? 'grid min-h-0 flex-1 grid-cols-[minmax(200px,240px)_minmax(220px,280px)_1fr]'
+              : 'grid min-h-0 flex-1 grid-cols-[minmax(220px,280px)_1fr]'
+          }
+        >
+          {ticket?.status === 'wait_for_final_review' && ticket.approvedPlan && (
+            <PlanChecklist plan={ticket.approvedPlan} />
+          )}
           <ChangedFilesPanel
             files={diffSummary?.files ?? []}
             selectedPath={selectedFile}

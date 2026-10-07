@@ -10,6 +10,8 @@ use crate::domain::workflow::{PendingRecommendation, PendingSplitRecommendation}
 use crate::domain::comment::{AuthorType, CommentIntent};
 use crate::events::bus::AppEvent;
 use crate::services::comment_service::CommentService;
+use crate::copy::plan::PLAN_REQUIRED;
+use crate::services::planning_service::PlanningService;
 use crate::services::workflow_service::{WorkflowService, DONE_REQUIRES_ACCEPT};
 use crate::domain::agent_health::AgentHealthStatus;
 use crate::services::agent_health::missing_connector_detail;
@@ -49,6 +51,11 @@ pub fn routes() -> Router<Arc<AppState>> {
             get(get_ticket).patch(update_ticket),
         )
         .route("/api/tickets/{ticket_id}/status", axum::routing::patch(update_status))
+        .route("/api/tickets/{ticket_id}/approve-plan", post(approve_plan))
+        .route(
+            "/api/tickets/{ticket_id}/plan-changes",
+            post(ask_for_plan_changes),
+        )
         .route("/api/tickets/{ticket_id}/assign", post(assign_agent))
         .route("/api/tickets/{ticket_id}/run-agent", post(run_agent))
         .route("/api/tickets/{ticket_id}/runs", get(list_runs))
@@ -131,10 +138,21 @@ pub(crate) struct TicketResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     pending_split_recommendation: Option<PendingSplitRecommendation>,
     clarification_round: i32,
+    skip_planning: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    approved_plan: Option<ApprovedPlanResponse>,
     has_active_run: bool,
     archived_at: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     human_review: Option<HumanReviewResponse>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ApprovedPlanResponse {
+    comment_id: Uuid,
+    markdown: String,
+    steps: Vec<String>,
 }
 
 #[derive(Serialize)]
@@ -166,6 +184,7 @@ struct UpdateTicketBody {
     priority: Option<String>,
     branch_name: Option<String>,
     owner_user_id: Option<Uuid>,
+    skip_planning: Option<bool>,
 }
 
 #[derive(Deserialize)]
@@ -224,6 +243,8 @@ pub(crate) fn ticket_to_response(item: TicketWithDisplay) -> TicketResponse {
         parent_ticket_id: ticket.parent_ticket_id,
         pending_split_recommendation,
         clarification_round: ticket.clarification_round,
+        skip_planning: ticket.skip_planning,
+        approved_plan: None,
         has_active_run: item.has_active_run,
         archived_at: ticket
             .archived_at
@@ -634,7 +655,7 @@ async fn get_ticket(
     let pool = pool_from_state(&state)?;
     let service = TicketService::new(pool);
     let ticket = service.get(ticket_id).await.map_err(map_error)?;
-    Ok(Json(ticket_to_response(ticket)))
+    Ok(Json(with_approved_plan(pool, ticket).await.map_err(map_error)?))
 }
 
 async fn archive_ticket(
@@ -684,6 +705,8 @@ async fn update_ticket(
             priority,
             body.branch_name.as_deref().map(Some),
             body.owner_user_id.map(Some),
+            body.skip_planning,
+            true,
         )
         .await
         .map_err(map_error)?;
@@ -708,7 +731,9 @@ impl IntoResponse for UpdateStatusError {
 
 fn map_update_status_error(err: TicketError) -> UpdateStatusError {
     match err {
-        TicketError::Validation(message) if message == DONE_REQUIRES_ACCEPT => {
+        TicketError::Validation(message)
+            if message == DONE_REQUIRES_ACCEPT || message == PLAN_REQUIRED =>
+        {
             UpdateStatusError::Message(StatusCode::BAD_REQUEST, message)
         }
         other => UpdateStatusError::Status(map_error(other)),
@@ -729,11 +754,101 @@ async fn update_status(
         None => None,
     };
     let substatus_metadata = body.substatus_metadata.map(Some);
-    let ticket = service
+    let previous = service
+        .get(ticket_id)
+        .await
+        .map_err(map_update_status_error)?;
+    let mut ticket = service
         .update_status(ticket_id, status, substatus, substatus_metadata)
         .await
         .map_err(map_update_status_error)?;
+    if previous.ticket.status != TicketStatus::Ready
+        && ticket.ticket.status == TicketStatus::Ready
+    {
+        if let Err(err) = PlanningService::new(pool).start_for_ready(ticket_id).await {
+            tracing::warn!(error = %err, %ticket_id, "planning run did not start");
+        }
+        ticket = service
+            .get(ticket_id)
+            .await
+            .map_err(map_update_status_error)?;
+    }
     Ok(Json(ticket_to_response(ticket)))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PlanChangesBody {
+    comment: String,
+}
+
+async fn approve_plan(
+    State(state): State<Arc<AppState>>,
+    AuthUser { .. }: AuthUser,
+    Path(ticket_id): Path<Uuid>,
+) -> Result<Json<TicketResponse>, UpdateStatusError> {
+    let pool = pool_from_state(&state).map_err(UpdateStatusError::Status)?;
+    PlanningService::new(pool)
+        .approve(ticket_id)
+        .await
+        .map_err(map_plan_error)?;
+    let ticket = TicketService::new(pool)
+        .get(ticket_id)
+        .await
+        .map_err(map_update_status_error)?;
+    Ok(Json(with_approved_plan(pool, ticket).await.map_err(map_update_status_error)?))
+}
+
+async fn ask_for_plan_changes(
+    State(state): State<Arc<AppState>>,
+    AuthUser { .. }: AuthUser,
+    Path(ticket_id): Path<Uuid>,
+    Json(body): Json<PlanChangesBody>,
+) -> Result<Json<TicketResponse>, UpdateStatusError> {
+    let pool = pool_from_state(&state).map_err(UpdateStatusError::Status)?;
+    PlanningService::new(pool)
+        .ask_for_changes(ticket_id, &body.comment)
+        .await
+        .map_err(map_plan_error)?;
+    let ticket = TicketService::new(pool)
+        .get(ticket_id)
+        .await
+        .map_err(map_update_status_error)?;
+    Ok(Json(ticket_to_response(ticket)))
+}
+
+fn map_plan_error(err: crate::services::planning_service::PlanError) -> UpdateStatusError {
+    match err {
+        crate::services::planning_service::PlanError::Validation(message) => {
+            UpdateStatusError::Message(StatusCode::BAD_REQUEST, message)
+        }
+        crate::services::planning_service::PlanError::Database(err) => {
+            tracing::warn!(error = %err, "plan request failed");
+            UpdateStatusError::Status(StatusCode::INTERNAL_SERVER_ERROR)
+        }
+    }
+}
+
+async fn with_approved_plan(
+    pool: &sqlx::PgPool,
+    ticket: TicketWithDisplay,
+) -> Result<TicketResponse, TicketError> {
+    let plan = PlanningService::new(pool)
+        .approved_plan(ticket.ticket.id)
+        .await
+        .map_err(|err| match err {
+            crate::services::planning_service::PlanError::Database(err) => TicketError::Database(err),
+            crate::services::planning_service::PlanError::Validation(message) => {
+                TicketError::Validation(message)
+            }
+        })?;
+    let mut response = ticket_to_response(ticket);
+    response.approved_plan = plan.map(|plan| ApprovedPlanResponse {
+        comment_id: plan.comment_id,
+        markdown: plan.markdown,
+        steps: plan.steps,
+    });
+    Ok(response)
 }
 
 async fn assign_agent(

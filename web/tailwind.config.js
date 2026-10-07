@@ -99,6 +99,11 @@ export default {
             border: 'var(--column-ready-border)',
             accent: 'var(--column-ready-accent)',
           },
+          'plan-review': {
+            bg: 'var(--column-plan-review-bg)',
+            border: 'var(--column-plan-review-border)',
+            accent: 'var(--column-plan-review-accent)',
+          },
           'in-progress': {
             bg: 'var(--column-in-progress-bg)',
             border: 'var(--column-in-progress-border)',

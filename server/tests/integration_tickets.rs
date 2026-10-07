@@ -104,6 +104,7 @@ async fn reject_done_with_waiting_substatus() {
 
     let ticket: serde_json::Value = common::json_body(res).await;
     let ticket_id = ticket["id"].as_str().unwrap();
+    common::skip_planning(&app, ticket_id, &cookie, &csrf).await;
 
     let set_substatus = app
         .clone()

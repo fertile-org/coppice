@@ -114,7 +114,7 @@ impl ToolRegistry {
                 }
             }
         }
-        merged.retain(|(_, tool)| allowed_for(scope.profile, &tool.def));
+        merged.retain(|(_, tool)| allowed_for(scope.profile, &scope.job_type, &tool.def));
         merged
     }
 
@@ -128,7 +128,7 @@ impl ToolRegistry {
                 .into_iter()
                 .find(|tool| tool.def.name == name);
             if let Some(tool) = found {
-                return if allowed_for(scope.profile, &tool.def) {
+                return if allowed_for(scope.profile, &scope.job_type, &tool.def) {
                     Ok((index, tool))
                 } else {
                     Err(Miss::Filtered)
@@ -268,7 +268,10 @@ impl ToolRegistry {
     }
 }
 
-fn allowed_for(profile: ContextProfile, def: &ToolDefinition) -> bool {
+fn allowed_for(profile: ContextProfile, job_type: &str, def: &ToolDefinition) -> bool {
+    if job_type == crate::domain::workflow::JOB_TYPE_PLAN_TICKET {
+        return def.read_only || def.name == REPLY_TOOL;
+    }
     match profile {
         ContextProfile::HumanChat | ContextProfile::Conversation => {
             def.read_only || def.name == REPLY_TOOL

@@ -1,0 +1,9 @@
+{
+  "status": "done",
+  "summary": "## Plan\n\n### Approach\nShip the parser first.\n\n### Steps\n- [ ] Add the column\n\n### Risks\nNone.\n\n### Out of scope\nNone.\n",
+  "changedFiles": ["plan-leak.txt"],
+  "testsRun": [],
+  "mentionAgents": [],
+  "blockers": [],
+  "writeScratchFiles": ["plan-leak.txt"]
+}

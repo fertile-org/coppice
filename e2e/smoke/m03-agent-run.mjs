@@ -252,6 +252,22 @@ async function assignAgent(ticketId, agentId, auth) {
   }
 }
 
+async function skipPlanning(ticketId, auth) {
+  const res = await api('PATCH', `/api/tickets/${ticketId}`, {
+    ...auth,
+    body: { skipPlanning: true },
+  });
+
+  if (!res.ok) {
+    fail(`skip planning failed: ${res.status} ${await res.text()}`);
+  }
+
+  const ticket = await res.json();
+  if (ticket.skipPlanning !== true) {
+    fail('skip planning was not enabled');
+  }
+}
+
 async function runAgent(ticketId, auth) {
   const res = await api('POST', `/api/tickets/${ticketId}/run-agent`, auth);
 
@@ -342,6 +358,7 @@ async function main() {
 
   await setTicketRepo(ticket.id, repo.id, auth);
   await assignAgent(ticket.id, agent.id, auth);
+  await skipPlanning(ticket.id, auth);
   await runAgent(ticket.id, auth);
   await pollRunUntilSucceeded(ticket.id, auth);
 

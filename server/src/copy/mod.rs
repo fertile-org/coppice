@@ -2,3 +2,4 @@
 //! The web app renders what the API returns; do not duplicate them there.
 
 pub mod conflict;
+pub mod plan;

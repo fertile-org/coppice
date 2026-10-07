@@ -1,4 +1,7 @@
-use super::{fixtures_root, AgentProvider, AgentRunInput, AgentRunResult, ProviderError};
+use super::{
+    fixtures_root, worktree_dir_from_context, AgentProvider, AgentRunInput, AgentRunResult,
+    ProviderError,
+};
 use crate::domain::ticket::status_to_str;
 use crate::domain::workflow::is_ready_tech_lead_refinement;
 use async_trait::async_trait;
@@ -187,7 +190,8 @@ impl AgentProvider for MockProvider {
                 ));
             }
             if std::env::var("MOCK_CHAT_EXPECT_SLIM").as_deref() == Ok("1") {
-                let body = std::fs::read_to_string(&input.context_path).map_err(ProviderError::Io)?;
+                let body =
+                    std::fs::read_to_string(&input.context_path).map_err(ProviderError::Io)?;
                 if body.contains("# Conversation transcript") {
                     return Err(ProviderError::InvalidFixture(
                         "expected slim resume context".into(),
@@ -199,13 +203,16 @@ impl AgentProvider for MockProvider {
         let path = self.fixture_path(&input);
         let raw = std::fs::read_to_string(&path)
             .map_err(|_| ProviderError::FixtureNotFound(path.display().to_string()))?;
-        let raw = if input.job_type == crate::domain::knowledge_compaction::JOB_TYPE_COMPACT_KNOWLEDGE {
-            fill_compaction_placeholders(&raw, &input.context_path)
-        } else {
-            raw
-        };
+        let raw =
+            if input.job_type == crate::domain::knowledge_compaction::JOB_TYPE_COMPACT_KNOWLEDGE {
+                fill_compaction_placeholders(&raw, &input.context_path)
+            } else {
+                raw
+            };
         let mut value: serde_json::Value = serde_json::from_str(&raw)
             .map_err(|err| ProviderError::InvalidFixture(err.to_string()))?;
+        let scratch_files = take_scratch_writes(&mut value)?;
+        write_scratch_files(&input, &scratch_files)?;
         let (tool_calls, delay_ms) = take_tool_directives(&mut value)?;
         let result: AgentRunResult = serde_json::from_value(value)
             .map_err(|err| ProviderError::InvalidFixture(err.to_string()))?;
@@ -226,6 +233,42 @@ struct MockToolCall {
 
 fn empty_args() -> serde_json::Value {
     serde_json::json!({})
+}
+
+fn take_scratch_writes(value: &mut serde_json::Value) -> Result<Vec<String>, ProviderError> {
+    let Some(object) = value.as_object_mut() else {
+        return Ok(Vec::new());
+    };
+    match object.remove("writeScratchFiles") {
+        Some(raw) => serde_json::from_value(raw)
+            .map_err(|err| ProviderError::InvalidFixture(format!("writeScratchFiles: {err}"))),
+        None => Ok(Vec::new()),
+    }
+}
+
+fn write_scratch_files(input: &AgentRunInput, files: &[String]) -> Result<(), ProviderError> {
+    if files.is_empty() {
+        return Ok(());
+    }
+    let worktree = worktree_dir_from_context(&input.context_path)?;
+    for rel in files {
+        let rel_path = std::path::Path::new(rel);
+        if rel_path.is_absolute()
+            || rel_path
+                .components()
+                .any(|component| matches!(component, std::path::Component::ParentDir))
+        {
+            return Err(ProviderError::InvalidFixture(format!(
+                "writeScratchFiles path `{rel}`"
+            )));
+        }
+        let dest = worktree.join(rel_path);
+        if let Some(parent) = dest.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::fs::write(dest, "plan-scratch-write\n")?;
+    }
+    Ok(())
 }
 
 /// Pull the mock-only `toolCalls` / `delayMsAfterToolCalls` keys out of the fixture.
@@ -678,9 +721,9 @@ mod tests {
                 session_created_tx: None,
                 resume_context: None,
                 resume_session_id: None,
-                        read_only_tools: false,
-                        mcp: None,
-        })
+                read_only_tools: false,
+                mcp: None,
+            })
             .await
             .expect("mock run");
 

@@ -112,6 +112,7 @@ impl OpenCodeRunServers {
         let port_arg = port.to_string();
         let args = contract.argv(&coppice_connectors::LaunchSubst {
             read_only: false,
+            plan: false,
             worktree: "",
             hostname: &self.hostname,
             port: &port_arg,

@@ -8,6 +8,8 @@ import { TicketMarkdown } from '../../components/TicketMarkdown';
 import { useToast } from '../../components/ToastProvider';
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
+import { PlanChecklist } from '../plan/PlanChecklist';
+import { PlanReviewActions } from '../plan/PlanReviewActions';
 import { TicketStatusBadge } from './TicketStatusBadge';
 import { TicketCommentsTab } from './TicketCommentsTab';
 import { useTicketChildren, useUpdateTicket } from './useTicket';
@@ -148,6 +150,14 @@ export function TicketDetailPanel({
           </div>
         )}
       </div>
+
+      {ticket.status === 'plan_review' && !isArchived && (
+        <PlanReviewActions ticketId={ticket.id} boardId={ticket.boardId} />
+      )}
+
+      {ticket.status === 'wait_for_final_review' && ticket.approvedPlan && (
+        <PlanChecklist plan={ticket.approvedPlan} />
+      )}
 
       {parentTicket && ticket.parentTicketId === parentTicket.id && (
         <section className="border-t border-border pt-6">

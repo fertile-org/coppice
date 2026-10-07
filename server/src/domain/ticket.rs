@@ -31,6 +31,10 @@ pub struct Ticket {
     pub parent_ticket_id: Option<Uuid>,
     pub pending_split_recommendation: Option<Value>,
     pub clarification_round: i32,
+    pub skip_planning: bool,
+    pub content_version: i32,
+    pub approved_plan_comment_id: Option<Uuid>,
+    pub approved_plan_content_version: Option<i32>,
     pub created_by: String,
     pub created_by_id: Option<Uuid>,
     pub created_at: OffsetDateTime,
@@ -42,6 +46,7 @@ pub fn status_to_str(status: TicketStatus) -> &'static str {
     match status {
         TicketStatus::Backlog => "backlog",
         TicketStatus::Ready => "ready",
+        TicketStatus::PlanReview => "plan_review",
         TicketStatus::InProgress => "in_progress",
         TicketStatus::InReview => "in_review",
         TicketStatus::InQa => "in_qa",
@@ -55,6 +60,7 @@ pub fn status_from_str(s: &str) -> Option<TicketStatus> {
     match s {
         "backlog" => Some(TicketStatus::Backlog),
         "ready" => Some(TicketStatus::Ready),
+        "plan_review" => Some(TicketStatus::PlanReview),
         "in_progress" => Some(TicketStatus::InProgress),
         "in_review" => Some(TicketStatus::InReview),
         "in_qa" => Some(TicketStatus::InQa),

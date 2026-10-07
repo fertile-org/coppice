@@ -570,7 +570,9 @@ impl<'a> RunService<'a> {
     ) -> Result<(), RunError> {
         let row = sqlx::query(
             r#"
-            SELECT status, substatus, substatus_metadata
+            SELECT status, substatus, substatus_metadata,
+                   skip_planning, content_version,
+                   approved_plan_comment_id, approved_plan_content_version
             FROM tickets
             WHERE id = $1
             FOR UPDATE
@@ -595,6 +597,46 @@ impl<'a> RunService<'a> {
         ) else {
             return Ok(());
         };
+
+        if new_status == TicketStatus::InProgress {
+            let skip_planning: bool = row.get("skip_planning");
+            let content_version: i32 = row.get("content_version");
+            let approved_id: Option<Uuid> = row.get("approved_plan_comment_id");
+            let approved_version: Option<i32> = row.get("approved_plan_content_version");
+            let approved = if skip_planning {
+                false
+            } else {
+                match (approved_id, approved_version) {
+                    (Some(comment_id), Some(version)) if version == content_version => {
+                        let latest: Option<(Uuid, Option<i32>)> = sqlx::query_as(
+                            r#"
+                            SELECT id, plan_content_version
+                            FROM ticket_comments
+                            WHERE ticket_id = $1 AND intent = 'plan'
+                            ORDER BY created_at DESC, id DESC
+                            LIMIT 1
+                            "#,
+                        )
+                        .bind(ticket_id)
+                        .fetch_optional(&mut **tx)
+                        .await?;
+                        latest.is_some_and(|(id, plan_version)| {
+                            id == comment_id && plan_version == Some(content_version)
+                        })
+                    }
+                    _ => false,
+                }
+            };
+            let plan = crate::services::workflow_service::PlanEntry {
+                skip_planning,
+                approved_for_current_version: approved,
+            };
+            if let Some(msg) =
+                WorkflowService::direct_status_change_error(current, new_status, plan)
+            {
+                return Err(RunError::Validation(msg.to_string()));
+            }
+        }
 
         if let Some(msg) =
             validate_status_substatus_combo(new_status, substatus, &substatus_metadata)
@@ -1201,9 +1243,9 @@ mod tests {
         sqlx::query(
             r#"
             INSERT INTO tickets (
-                id, board_id, repo_id, title, status, created_by, assignee_agent_id
+                id, board_id, repo_id, title, status, created_by, assignee_agent_id, skip_planning
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, true)
             "#,
         )
         .bind(ticket_id)

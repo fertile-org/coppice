@@ -1,0 +1,10 @@
+{
+  "status": "done",
+  "summary": "## Plan\n\n### Approach\nShip the parser first.\n\n### Steps\n- [ ] Add the column\n\n### Risks\nNone.\n\n### Out of scope\nNone.\n",
+  "changedFiles": [],
+  "testsRun": [],
+  "mentionAgents": [],
+  "blockers": [],
+  "writeScratchFiles": ["plan-leak.txt"],
+  "delayMsAfterToolCalls": 20000
+}

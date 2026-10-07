@@ -203,6 +203,9 @@ pub fn validate_for_profile(
     profile: ContextProfile,
     job_type: &str,
 ) -> Result<(), String> {
+    if job_type == crate::domain::workflow::JOB_TYPE_PLAN_TICKET {
+        return validate_plan_result(result);
+    }
     match profile {
         ContextProfile::Full if job_type == "respond_to_mention" => {
             apply_consultation_result(result).map(|_| ())
@@ -254,6 +257,44 @@ pub fn validate_for_profile(
         },
         // Any outcome is recorded; a non-`done` one fails the check.
         ContextProfile::ConnectorCheck => Ok(()),
+    }
+}
+
+fn validate_plan_result(result: &AgentRunResult) -> Result<(), String> {
+    use crate::copy::plan::{
+        PLAN_ASSIGN_REJECTED, PLAN_CHANGED_FILES_REJECTED, PLAN_DESCRIPTION_REJECTED,
+        PLAN_MUST_FINISH, PLAN_SPLIT_REJECTED,
+    };
+    match result {
+        AgentRunResult::Done {
+            summary,
+            changed_files,
+            updated_description,
+            assign_to,
+            split_tickets,
+            ..
+        } => {
+            if !changed_files.is_empty() {
+                return Err(PLAN_CHANGED_FILES_REJECTED.into());
+            }
+            if updated_description
+                .as_deref()
+                .is_some_and(|value| !value.trim().is_empty())
+            {
+                return Err(PLAN_DESCRIPTION_REJECTED.into());
+            }
+            if assign_to.as_deref().is_some_and(|value| !value.trim().is_empty()) {
+                return Err(PLAN_ASSIGN_REJECTED.into());
+            }
+            if !split_tickets.is_empty() {
+                return Err(PLAN_SPLIT_REJECTED.into());
+            }
+            if summary.trim().is_empty() {
+                return Err(PLAN_MUST_FINISH.into());
+            }
+            Ok(())
+        }
+        _ => Err(PLAN_MUST_FINISH.into()),
     }
 }
 
