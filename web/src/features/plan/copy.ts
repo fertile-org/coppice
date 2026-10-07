@@ -7,7 +7,7 @@ export const PLAN_COPY = {
   sending: 'Sending…',
   askPlaceholder: 'What should change?',
   skipPlanning: 'Skip planning',
-  skipFailed: 'Unable to update planning.',
+  skipFailed: "Couldn't change Skip planning. Try again.",
   approvedPlan: 'Approved plan',
   noSteps: 'This plan has no steps.',
 } as const;

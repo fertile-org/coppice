@@ -4,21 +4,26 @@
 //! and planning runs post the plan comment from [`format_plan`].
 
 /// Refused drag or status write into In Progress.
-pub const PLAN_REQUIRED: &str = "Approve the plan before moving this ticket to In Progress.";
+pub const PLAN_REQUIRED: &str =
+    "Approve the plan, or turn on Skip planning, before moving this ticket to In Progress.";
 
 /// Posted when Ready has nobody to write the plan.
-pub const NO_PLANNER: &str = "This ticket has no assignee to write the plan.";
+pub const NO_PLANNER: &str = "Assign an agent to this ticket to write the plan.";
 
 /// Ask for changes while a planning run is still active.
-pub const PLAN_ALREADY_RUNNING: &str = "A plan is already being written for this ticket.";
+pub const PLAN_ALREADY_RUNNING: &str =
+    "The plan is still being written. Ask for changes once it's done.";
 
-pub const APPROVE_ONLY_FROM_PLAN_REVIEW: &str = "Approve the plan from Plan Review.";
+pub const APPROVE_ONLY_FROM_PLAN_REVIEW: &str =
+    "You can approve a plan only while the ticket is in Plan Review.";
 
-pub const NO_PLAN_YET: &str = "There is no plan to approve yet.";
+pub const NO_PLAN_YET: &str = "There's no plan to approve yet.";
 
-pub const PLAN_STALE: &str = "The ticket changed after this plan was written. Ask for a new plan.";
+pub const PLAN_STALE: &str =
+    "The ticket changed after this plan was written. Ask for changes to get a new plan.";
 
-pub const ASK_ONLY_FROM_PLAN_REVIEW: &str = "Ask for plan changes from Plan Review.";
+pub const ASK_ONLY_FROM_PLAN_REVIEW: &str =
+    "You can ask for plan changes only while the ticket is in Plan Review.";
 
 pub const ASK_COMMENT_REQUIRED: &str = "Write what should change in the plan.";
 
@@ -26,14 +31,15 @@ pub const ASK_COMMENT_REQUIRED: &str = "Write what should change in the plan.";
 pub const PLAN_APPROVED_NOTE: &str = "Plan approved.";
 
 pub const IMPLEMENTATION_NOT_STARTED: &str =
-    "The plan is approved. Assign an agent with a ready repository to start the work.";
+    "The plan is approved, but work couldn't start. Check that the ticket has an assignee and its repository is ready.";
 
 /// Posted when Skip planning cannot start work.
-pub const WORK_NOT_STARTED: &str = "Assign an agent with a ready repository to start the work.";
+pub const WORK_NOT_STARTED: &str =
+    "Work couldn't start. Check that the ticket has an assignee and its repository is ready.";
 
 /// Posted when a plan run leaves files in its scratch worktree.
 pub const PLAN_CHANGES_DISCARDED: &str =
-    "The plan run changed files. Those changes were discarded.";
+    "The plan run changed some files. Coppice discarded them, and your ticket's code is unchanged.";
 
 pub const PLAN_HEADING: &str = "## Plan";
 pub const APPROACH_HEADING: &str = "### Approach";
@@ -44,7 +50,8 @@ pub const NONE: &str = "None.";
 pub const FOLLOW_APPROACH_STEP: &str = "Follow the approach above.";
 pub const EMPTY_APPROACH: &str = "No approach was written.";
 
-pub const PLAN_TASK: &str = "Write a plan for this ticket. Do not edit files, do not commit, and do not create or change a branch.";
+pub const PLAN_TASK: &str =
+    "Write a plan for this ticket. Do not edit files, commit, push, or create or change a branch.";
 
 pub const PLAN_FORMAT_INSTRUCTION: &str = "Put the plan in `summary` when you call `result_submit` with status `done`. Use exactly this markdown:";
 
@@ -151,7 +158,7 @@ mod tests {
     fn instructions_forbid_writes_and_include_changes() {
         let text = plan_instructions(Some("Drop the migration."));
         assert!(text.contains(PLAN_TASK));
-        assert!(text.contains("Do not edit files"));
+        assert!(text.contains("Do not edit files, commit, push, or create or change a branch."));
         assert!(text.contains(CHANGES_REQUESTED_HEADING));
         assert!(text.contains("Drop the migration."));
         assert!(text.contains(PLAN_FORMAT_INSTRUCTION));

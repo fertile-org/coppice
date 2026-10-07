@@ -70,7 +70,8 @@ const ticket: Ticket = {
   lastActivityAt: '2026-08-03T00:00:00.000Z',
 };
 
-const message = 'Approve the plan before moving this ticket to In Progress.';
+const message =
+  'Approve the plan, or turn on Skip planning, before moving this ticket to In Progress.';
 
 function jsonResponse(body: unknown) {
   return new Response(JSON.stringify(body), {
