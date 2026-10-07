@@ -89,7 +89,7 @@ pub fn format_plan(summary: &str) -> String {
         summary
     };
     format!(
-        "{PLAN_HEADING}\n\n{APPROACH_HEADING}\n{approach}\n\n{STEPS_HEADING}\n- [ ] {FOLLOW_APPROACH_STEP}\n\n{RISKS_HEADING}\n{NONE}\n\n{OUT_OF_SCOPE_HEADING}\n{NONE}\n"
+        "{PLAN_HEADING}\n\n{APPROACH_HEADING}\n{approach}\n\n{STEPS_HEADING}\n- [ ] {FOLLOW_APPROACH_STEP}\n\n{RISKS_HEADING}\n{NONE}\n\n{OUT_OF_SCOPE_HEADING}\n{NONE}"
     )
 }
 

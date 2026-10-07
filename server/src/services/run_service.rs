@@ -1243,9 +1243,9 @@ mod tests {
         sqlx::query(
             r#"
             INSERT INTO tickets (
-                id, board_id, repo_id, title, status, created_by, assignee_agent_id
+                id, board_id, repo_id, title, status, created_by, assignee_agent_id, skip_planning
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, true)
             "#,
         )
         .bind(ticket_id)
