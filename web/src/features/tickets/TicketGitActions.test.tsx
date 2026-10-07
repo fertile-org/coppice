@@ -148,7 +148,7 @@ describe('TicketGitActions', () => {
     renderActions(makeTicket({ status: 'done' }));
     fireEvent.click(screen.getByRole('button', { name: 'Merge…' }));
     const dialog = await screen.findByRole('dialog', { name: 'Merge ticket branch' });
-    fireEvent.click(screen.getByRole('button', { name: 'Merge', exact: true }));
+    fireEvent.click(screen.getByRole('button', { name: /^Merge$/ }));
 
     await waitFor(() => {
       expect(dialog).toHaveTextContent(message);
