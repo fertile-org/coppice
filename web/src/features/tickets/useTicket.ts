@@ -389,7 +389,8 @@ export function useMergeTicketBranch(ticketId: string) {
 
   return useMutation({
     mutationFn: (baseBranch: string) => postMergeBranch(ticketId, baseBranch),
-    onSuccess: () => {
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: ticketQueryKey(ticketId) });
       void queryClient.invalidateQueries({ queryKey: gitInfoQueryKey(ticketId) });
       void queryClient.invalidateQueries({ queryKey: commentsQueryKey(ticketId) });
     },
@@ -401,7 +402,8 @@ export function useRebaseTicketBranch(ticketId: string) {
 
   return useMutation({
     mutationFn: (baseBranch?: string) => postRebaseBranch(ticketId, baseBranch),
-    onSuccess: () => {
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: ticketQueryKey(ticketId) });
       void queryClient.invalidateQueries({ queryKey: gitInfoQueryKey(ticketId) });
       void queryClient.invalidateQueries({ queryKey: commentsQueryKey(ticketId) });
     },
@@ -425,7 +427,8 @@ export function usePushTicketBranch(ticketId: string) {
 
   return useMutation({
     mutationFn: () => postPushBranch(ticketId),
-    onSuccess: () => {
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: ticketQueryKey(ticketId) });
       void queryClient.invalidateQueries({ queryKey: gitInfoQueryKey(ticketId) });
       void queryClient.invalidateQueries({ queryKey: commentsQueryKey(ticketId) });
     },

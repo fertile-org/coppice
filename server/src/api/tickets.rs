@@ -16,6 +16,7 @@ use crate::services::agent_health::missing_connector_detail;
 use crate::services::agent_service::{AgentError, AgentService};
 use crate::services::run_service::{RunError, RunService};
 use crate::services::split_service::{SplitError, SplitService};
+use crate::services::human_review_service::{short_commit_sha, HumanReviewService};
 use crate::services::ticket_git_service::{TicketGitError, TicketGitInfo, TicketGitService};
 use crate::services::ticket_service::{TicketError, TicketFilters, TicketService, TicketWithDisplay};
 use crate::AppState;
@@ -123,6 +124,18 @@ pub(crate) struct TicketResponse {
     clarification_round: i32,
     has_active_run: bool,
     archived_at: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    human_review: Option<HumanReviewResponse>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct HumanReviewResponse {
+    head_sha: String,
+    short_sha: String,
+    stale: bool,
+    comment_ids: Vec<Uuid>,
+    run_ids: Vec<Uuid>,
 }
 
 #[derive(Deserialize)]
@@ -206,6 +219,16 @@ pub(crate) fn ticket_to_response(item: TicketWithDisplay) -> TicketResponse {
         archived_at: ticket
             .archived_at
             .map(|ts| ts.format(&Rfc3339).unwrap_or_default()),
+        human_review: item.human_review.map(|review| {
+            let short_sha = short_commit_sha(&review.head_sha).to_string();
+            HumanReviewResponse {
+                head_sha: review.head_sha,
+                short_sha,
+                stale: review.stale,
+                comment_ids: review.comment_ids,
+                run_ids: review.run_ids,
+            }
+        }),
     }
 }
 
@@ -379,6 +402,14 @@ fn map_ticket_git_error_response(err: TicketGitError) -> TicketGitApiError {
         TicketGitError::NotGitHub => (
             StatusCode::BAD_REQUEST,
             "Create PR via API requires a GitHub remote_url.".into(),
+        ),
+        TicketGitError::ReviewShaMismatch => (
+            StatusCode::CONFLICT,
+            "Not merged. This isn't the commit you reviewed.".into(),
+        ),
+        TicketGitError::ReviewAcceptanceMissing => (
+            StatusCode::CONFLICT,
+            "Not merged. Accept again so Coppice knows which commit you reviewed.".into(),
         ),
         TicketGitError::Git(msg) => (StatusCode::BAD_REQUEST, msg),
         TicketGitError::GitHubApi(msg) => (StatusCode::BAD_REQUEST, format!("GitHub API: {msg}")),
@@ -715,20 +746,64 @@ async fn list_runs(
     Ok(Json(runs_list_response(runs)))
 }
 
+enum FinalApproveError {
+    Status(StatusCode),
+    Message(StatusCode, String),
+}
+
+impl IntoResponse for FinalApproveError {
+    fn into_response(self) -> Response {
+        match self {
+            FinalApproveError::Status(code) => code.into_response(),
+            FinalApproveError::Message(code, message) => {
+                (code, Json(ApiMessageResponse { message })).into_response()
+            }
+        }
+    }
+}
+
+impl From<TicketGitApiError> for FinalApproveError {
+    fn from(err: TicketGitApiError) -> Self {
+        match err {
+            TicketGitApiError::Message(code, message) => FinalApproveError::Message(code, message),
+        }
+    }
+}
+
 async fn final_approve(
     State(state): State<Arc<AppState>>,
     AuthUser { user, .. }: AuthUser,
     Path(ticket_id): Path<Uuid>,
-) -> Result<Json<TicketResponse>, StatusCode> {
-    let pool = pool_from_state(&state)?;
+) -> Result<Json<TicketResponse>, FinalApproveError> {
+    let pool = pool_from_state(&state).map_err(FinalApproveError::Status)?;
     let ticket_svc = TicketService::new(pool);
-    let ticket = ticket_svc.get(ticket_id).await.map_err(map_error)?;
+    let ticket = ticket_svc
+        .get(ticket_id)
+        .await
+        .map_err(map_error)
+        .map_err(FinalApproveError::Status)?;
     let next = WorkflowService::final_approve(ticket.ticket.status)
-        .map_err(|_| StatusCode::BAD_REQUEST)?;
+        .map_err(|_| FinalApproveError::Status(StatusCode::BAD_REQUEST))?;
+
+    match ticket_git_service(&state, pool)
+        .reviewed_head_sha(ticket_id)
+        .await
+    {
+        Ok(Some(head_sha)) => {
+            HumanReviewService::new(pool)
+                .record_acceptance(ticket_id, user.id, &head_sha)
+                .await
+                .map_err(|_| FinalApproveError::Status(StatusCode::INTERNAL_SERVER_ERROR))?;
+        }
+        Ok(None) => {}
+        Err(err) => return Err(map_ticket_git_error_response(err).into()),
+    }
+
     let updated = ticket_svc
         .update_status(ticket_id, next, Some(None), Some(None))
         .await
-        .map_err(map_error)?;
+        .map_err(map_error)
+        .map_err(FinalApproveError::Status)?;
 
     create_git_action_comment(
         pool,
@@ -737,10 +812,17 @@ async fn final_approve(
         user.id,
         "Accepted: ticket moved to **Done**.",
     )
-    .await?;
+    .await
+    .map_err(FinalApproveError::Status)?;
 
     crate::events::publish_ticket_updated(&state.event_bus, &updated);
     Ok(Json(ticket_to_response(updated)))
+}
+
+async fn publish_ticket_state(state: &AppState, pool: &sqlx::PgPool, ticket_id: Uuid) {
+    if let Ok(ticket) = TicketService::new(pool).get(ticket_id).await {
+        crate::events::publish_ticket_updated(&state.event_bus, &ticket);
+    }
 }
 
 async fn ticket_git_info(
@@ -781,8 +863,9 @@ async fn merge_ticket_branch(
     })?;
     let merge = ticket_git_service(&state, pool)
         .merge_ticket_branch(ticket_id, body.base_branch.trim())
-        .await
-        .map_err(map_ticket_git_error_response)?;
+        .await;
+    publish_ticket_state(&state, pool, ticket_id).await;
+    let merge = merge.map_err(map_ticket_git_error_response)?;
 
     let short_sha = merge.head_sha.get(..7).unwrap_or(&merge.head_sha);
     let comment_body = format!(
@@ -825,8 +908,9 @@ async fn rebase_ticket_branch(
         .filter(|s| !s.is_empty());
     let rebase = ticket_git_service(&state, pool)
         .rebase_ticket_branch(ticket_id, base)
-        .await
-        .map_err(map_ticket_git_error_response)?;
+        .await;
+    publish_ticket_state(&state, pool, ticket_id).await;
+    let rebase = rebase.map_err(map_ticket_git_error_response)?;
 
     let short_sha = rebase.head_sha.get(..7).unwrap_or(&rebase.head_sha);
     let comment_body = format!(
@@ -905,8 +989,9 @@ async fn push_ticket_branch(
     })?;
     let push = ticket_git_service(&state, pool)
         .push_branch(ticket_id)
-        .await
-        .map_err(map_ticket_git_error_response)?;
+        .await;
+    publish_ticket_state(&state, pool, ticket_id).await;
+    let push = push.map_err(map_ticket_git_error_response)?;
 
     let comment_body = format!(
         "**Push:** branch `{}` → `{}`",

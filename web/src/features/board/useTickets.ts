@@ -11,6 +11,14 @@ export interface SubstatusDisplay {
   detail?: string;
 }
 
+export interface HumanReview {
+  headSha: string;
+  shortSha: string;
+  stale: boolean;
+  commentIds: string[];
+  runIds: string[];
+}
+
 export interface Ticket {
   id: string;
   boardId: string;
@@ -36,6 +44,7 @@ export interface Ticket {
   clarificationRound?: number;
   hasActiveRun?: boolean;
   archivedAt?: string | null;
+  humanReview?: HumanReview | null;
 }
 
 /** Prefix for all ticket-list queries for a board (any includeArchived variant). */

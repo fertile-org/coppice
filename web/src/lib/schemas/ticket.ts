@@ -121,6 +121,16 @@ export const ticketSchema = z.object({
   clarificationRound: z.number().optional(),
   hasActiveRun: z.boolean().optional(),
   archivedAt: z.string().nullable().optional(),
+  humanReview: z
+    .object({
+      headSha: z.string(),
+      shortSha: z.string(),
+      stale: z.boolean(),
+      commentIds: z.array(z.string().uuid()),
+      runIds: z.array(z.string().uuid()),
+    })
+    .nullable()
+    .optional(),
 });
 
 export type TicketResponse = z.infer<typeof ticketSchema>;

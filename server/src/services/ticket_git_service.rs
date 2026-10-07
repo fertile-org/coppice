@@ -6,9 +6,12 @@ use uuid::Uuid;
 
 use crate::crypto::SecretStore;
 use crate::services::git_ops::{
-    fetch_default_refspec, git_head_sha, git_ref_exists, git_status_clean, list_local_branches,
-    network_remote, push_argv, push_gate, push_refspec, run_git, run_git_capture, sanitize_token,
-    GitOpsError,
+    fetch_default_refspec, git_head_sha, git_ref_exists, git_rev_parse, git_status_clean,
+    list_local_branches, network_remote, push_argv, push_gate, push_refspec, run_git,
+    run_git_capture, sanitize_token, GitOpsError,
+};
+use crate::services::human_review_service::{
+    normalize_sha, reviewed_sha_matches, HumanReviewError, HumanReviewService,
 };
 use crate::services::pr_create_url::{
     build_pr_create_url, github_owner_repo, https_remote_url,
@@ -118,6 +121,10 @@ pub enum TicketGitError {
     Git(String),
     #[error("github api error: {0}")]
     GitHubApi(String),
+    #[error("Not merged. This isn't the commit you reviewed.")]
+    ReviewShaMismatch,
+    #[error("Not merged. Accept again so Coppice knows which commit you reviewed.")]
+    ReviewAcceptanceMissing,
     #[error(transparent)]
     Ticket(#[from] TicketError),
     #[error(transparent)]
@@ -128,6 +135,14 @@ pub enum TicketGitError {
     Database(#[from] sqlx::Error),
     #[error(transparent)]
     Secret(#[from] crate::services::secret_service::SecretError),
+}
+
+impl From<HumanReviewError> for TicketGitError {
+    fn from(err: HumanReviewError) -> Self {
+        match err {
+            HumanReviewError::Database(err) => TicketGitError::Database(err),
+        }
+    }
 }
 
 impl From<GitOpsError> for TicketGitError {
@@ -292,6 +307,10 @@ impl<'a> TicketGitService<'a> {
             .await;
         }
 
+        if let Err(err) = self.note_branch_head(ticket_id).await {
+            tracing::warn!(error = %err, "human review check after push prep failed");
+        }
+
         let push_remote = network_remote(remote_url, token.as_deref())?;
 
         let cwd = if worktree_exists(&ctx.worktree_dir) {
@@ -401,6 +420,80 @@ impl<'a> TicketGitService<'a> {
         })
     }
 
+    /// Head of the ticket branch. `Ok(None)` when the ticket has no repository.
+    pub async fn reviewed_head_sha(
+        &self,
+        ticket_id: Uuid,
+    ) -> Result<Option<String>, TicketGitError> {
+        let ctx = match self.resolve_context(ticket_id).await {
+            Ok(ctx) => ctx,
+            Err(TicketGitError::NoRepo) => return Ok(None),
+            Err(err) => return Err(err),
+        };
+        Ok(Some(Self::branch_tip(&ctx).await?))
+    }
+
+    /// If the live branch tip is not the accepted commit, mark that acceptance
+    /// stale and move the ticket back to In Review.
+    pub async fn note_branch_head(&self, ticket_id: Uuid) -> Result<bool, TicketGitError> {
+        let ctx = match self.resolve_context(ticket_id).await {
+            Ok(ctx) => ctx,
+            Err(TicketGitError::NoRepo) => return Ok(false),
+            Err(err) => return Err(err),
+        };
+        let head = match Self::branch_tip(&ctx).await {
+            Ok(head) => head,
+            Err(TicketGitError::TicketBranchMissing(_)) => return Ok(false),
+            Err(err) => return Err(err),
+        };
+        Ok(HumanReviewService::new(self.pool)
+            .observe_head(ticket_id, &head)
+            .await?)
+    }
+
+    async fn branch_tip(ctx: &TicketGitContext) -> Result<String, TicketGitError> {
+        if let Some(sha) = git_rev_parse(&ctx.git_dir, &ctx.ticket_branch).await? {
+            let sha = normalize_sha(&sha);
+            if !sha.is_empty() {
+                return Ok(sha);
+            }
+        }
+        if worktree_exists(&ctx.worktree_dir) {
+            let sha = normalize_sha(&git_head_sha(&ctx.worktree_dir).await?);
+            if !sha.is_empty() {
+                return Ok(sha);
+            }
+        }
+        Err(TicketGitError::TicketBranchMissing(
+            ctx.ticket_branch.clone(),
+        ))
+    }
+
+    async fn ensure_merge_matches_review(
+        &self,
+        ticket_id: Uuid,
+        head_sha: &str,
+    ) -> Result<(), TicketGitError> {
+        let review = HumanReviewService::new(self.pool).get(ticket_id).await?;
+        let Some(review) = review else {
+            // Legacy ticket: accepted or otherwise Done before an acceptance
+            // row existed. Send it back for one fresh Accept. Do not invent a row.
+            HumanReviewService::new(self.pool)
+                .return_for_acceptance(ticket_id)
+                .await?;
+            return Err(TicketGitError::ReviewAcceptanceMissing);
+        };
+        if !review.stale && reviewed_sha_matches(&review.head_sha, head_sha) {
+            return Ok(());
+        }
+        if !review.stale {
+            HumanReviewService::new(self.pool)
+                .observe_head(ticket_id, head_sha)
+                .await?;
+        }
+        Err(TicketGitError::ReviewShaMismatch)
+    }
+
     pub async fn merge_ticket_branch(
         &self,
         ticket_id: Uuid,
@@ -429,6 +522,11 @@ impl<'a> TicketGitService<'a> {
         if !git_ref_exists(&ctx.git_dir, &ctx.ticket_branch).await? {
             return Err(TicketGitError::TicketBranchMissing(ctx.ticket_branch));
         }
+
+        // Re-read the branch tip after any pre-merge checkpoint. Merge only
+        // the commit that was accepted in Human Review.
+        let head = Self::branch_tip(&ctx).await?;
+        self.ensure_merge_matches_review(ticket_id, &head).await?;
 
         if !git_status_clean(&ctx.git_dir).await? {
             return Err(TicketGitError::Git(
@@ -462,6 +560,12 @@ impl<'a> TicketGitService<'a> {
                 return Err(TicketGitError::Git(msg));
             }
         };
+
+        // The ticket-branch commit that was merged. Written here, with the
+        // successful merge, and not derived from the activity comment.
+        HumanReviewService::new(self.pool)
+            .record_merge(ticket_id, &head)
+            .await?;
 
         let head_sha = git_head_sha(&ctx.git_dir).await?;
 
@@ -514,6 +618,9 @@ impl<'a> TicketGitService<'a> {
         match rebase_output {
             Ok(_) => {
                 let head_sha = git_head_sha(&ctx.worktree_dir).await?;
+                if let Err(err) = self.note_branch_head(ticket_id).await {
+                    tracing::warn!(error = %err, "human review check after rebase failed");
+                }
                 let message = format!(
                     "Rebased `{}` onto `{}`",
                     ctx.ticket_branch, onto_ref

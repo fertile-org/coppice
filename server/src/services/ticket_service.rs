@@ -3,6 +3,7 @@ use crate::domain::substatus::{
     TicketStatus,
 };
 use crate::domain::workflow::{PendingRecommendation, PendingSplitRecommendation};
+use crate::services::human_review_service::{HumanReview, HumanReviewService};
 use crate::domain::ticket::{
     priority_from_str, priority_to_str, status_from_str, status_to_str, substatus_from_str,
     substatus_to_str, Ticket, TicketPriority,
@@ -62,6 +63,7 @@ pub struct TicketWithDisplay {
     pub substatus_display: Option<SubstatusDisplay>,
     pub last_activity_at: OffsetDateTime,
     pub has_active_run: bool,
+    pub human_review: Option<HumanReview>,
 }
 
 impl<'a> TicketService<'a> {
@@ -822,12 +824,14 @@ impl<'a> TicketService<'a> {
             agent_name.as_deref(),
         );
         let last_activity_at = self.compute_last_activity_at(ticket.id).await?;
+        let human_review = HumanReviewService::new(self.pool).get(ticket.id).await?;
 
         Ok(TicketWithDisplay {
             ticket,
             substatus_display,
             last_activity_at,
             has_active_run,
+            human_review,
         })
     }
 }
