@@ -96,7 +96,7 @@ Start at **Tools → Connectors** (admin): it shows whether `opencode` is found,
 
 ## How Coppice runs OpenCode (reference)
 
-Each run (and each chat turn) spawns `opencode serve --hostname <serve_hostname> --port <free port>` with `OPENCODE_CONFIG=<artifacts_dir>/runs/<run id>/opencode.json` (runs without a gateway token, such as drafts, use a temp file). That file registers the Coppice MCP gateway as the remote server `coppice` with header `Authorization: Bearer {env:COPPICE_MCP_TOKEN}`; the token is only in the process environment, never on disk. `OPENCODE_CONFIG` merges with the global OpenCode config, so your models and auth still apply. The process is killed when the run finishes, fails, or is cancelled, and on server shutdown. `serve_port` is ignored (kept so older config files still parse).
+Each run (and each chat turn) spawns `opencode serve --hostname <serve_hostname> --port <free port>` (pinned on the connector descriptor; `serve` has no permission-mode flag) with `OPENCODE_CONFIG=<artifacts_dir>/runs/<run id>/opencode.json` (runs without a gateway token, such as drafts, use a temp file). That file registers the Coppice MCP gateway as the remote server `coppice` with header `Authorization: Bearer {env:COPPICE_MCP_TOKEN}`; the token is only in the process environment, never on disk. `OPENCODE_CONFIG` merges with the global OpenCode config, so your models and auth still apply. The process is killed when the run finishes, fails, or is cancelled, and on server shutdown. `serve_port` is ignored (kept so older config files still parse).
 
 Against that process, each run uses:
 

@@ -21,6 +21,8 @@ fn fake_cli(env: &[(&str, &str)], timeout: Duration) -> CliInvocation {
         timeout,
         run_id: None,
         artifacts_dir: None,
+        result_before_exit: false,
+        result_exit_grace: None,
     }
 }
 
@@ -224,6 +226,69 @@ async fn run_cli_completion_kills_background_child_and_logs_it() {
         "{log}"
     );
     assert!(log.contains("\"reason\":\"run ended\""), "{log}");
+}
+
+#[tokio::test]
+async fn run_cli_reaps_lingering_process_after_result() {
+    let mut invocation = fake_cli(
+        &[
+            ("FAKE_CLI_PRINT_PID", "1"),
+            ("FAKE_CLI_LINES", r#"{"type":"result","result":"ok"}"#),
+            ("FAKE_CLI_SLEEP_MS", "30000"),
+        ],
+        Duration::from_secs(30),
+    );
+    invocation.result_before_exit = true;
+    invocation.result_exit_grace = Some(Duration::from_millis(200));
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let mut handler = Recorder { seen: seen.clone() };
+    let started = std::time::Instant::now();
+    let exit = run_cli(invocation, &mut handler, io())
+        .await
+        .expect("run_cli");
+    assert!(
+        started.elapsed() < Duration::from_secs(8),
+        "lingering process held the run open"
+    );
+    assert!(exit.had_terminal_result);
+    assert!(exit.stopped_after_result);
+    let pid = seen.lock().unwrap()[0]["pid"].as_u64().expect("pid") as u32;
+    assert!(wait_dead(pid).await, "child {pid} still running");
+}
+
+#[tokio::test]
+async fn run_cli_cancel_during_result_grace() {
+    let (cancel_tx, cancel_rx) = watch::channel(false);
+    let mut invocation = fake_cli(
+        &[
+            ("FAKE_CLI_LINES", r#"{"type":"result"}"#),
+            ("FAKE_CLI_SLEEP_MS", "30000"),
+        ],
+        Duration::from_secs(30),
+    );
+    invocation.result_before_exit = true;
+    invocation.result_exit_grace = Some(Duration::from_secs(10));
+    let mut handler = Recorder::default();
+    let task = tokio::spawn(async move {
+        run_cli(
+            invocation,
+            &mut handler,
+            RunIo {
+                cancel_rx: Some(cancel_rx),
+                ..io()
+            },
+        )
+        .await
+    });
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    cancel_tx.send(true).unwrap();
+    let started = std::time::Instant::now();
+    let result = tokio::time::timeout(Duration::from_secs(3), task)
+        .await
+        .expect("cancel during grace returns")
+        .expect("join");
+    assert!(started.elapsed() < Duration::from_secs(3));
+    assert!(matches!(result, Err(CliError::Cancelled)), "{result:?}");
 }
 
 #[tokio::test]

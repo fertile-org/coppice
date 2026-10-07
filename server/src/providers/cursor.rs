@@ -1,4 +1,8 @@
-use super::cli_runner::{run_cli, CliError, CliExit, CliInvocation, LineHandler, LineStep, RunIo};
+use super::cli_runner::{
+    log_launch, run_cli, run_log_dir, CliError, CliExit, CliInvocation, LineHandler, LineStep,
+    RunIo,
+};
+use super::cli_version;
 use super::cursor_console::CursorConsolePublisher;
 use super::{
     artifacts_path, mcp_unavailable, worktree_dir_from_context, AgentProvider, AgentRunInput,
@@ -35,12 +39,17 @@ impl AgentProvider for CursorProvider {
 
         let run_timeout = Duration::from_secs(self.config.run_timeout_secs);
         let command = self.config.command.as_str();
+        let contract = coppice_connectors::get(coppice_connectors::CURSOR)
+            .expect("cursor descriptor")
+            .run_contract;
+        let version = cli_version::detect(command).await;
 
         let args = cursor_cli_args(
             &worktree,
             input.read_only_tools,
             input.model.as_deref(),
             input.resume_session_id.as_deref(),
+            cli_version::for_gate(&version),
         );
 
         // Auth is host-managed: the operator runs `agent login` wherever the
@@ -58,23 +67,27 @@ impl AgentProvider for CursorProvider {
             env.extend(access.env().map(|(k, v)| (k.to_string(), v)));
         }
 
-        tracing::info!(
+        log_launch(
             command,
-            cwd = %worktree.display(),
-            model = input.model.as_deref().unwrap_or(""),
-            resume = input.resume_session_id.as_deref().unwrap_or(""),
-            read_only_tools = input.read_only_tools,
-            "starting cursor connector subprocess"
+            &version,
+            &args,
+            run_log_dir(input.artifacts_dir.as_deref(), input.run_id.as_deref()).as_deref(),
         );
 
         let invocation = CliInvocation {
             program: command.to_string(),
             args,
             env,
-            cwd: worktree.clone(),
+            cwd: if contract.process_cwd_is_worktree {
+                worktree.clone()
+            } else {
+                std::env::current_dir().map_err(ProviderError::Io)?
+            },
             timeout: run_timeout,
             run_id: input.run_id.clone(),
             artifacts_dir: input.artifacts_dir.clone(),
+            result_before_exit: contract.result_before_exit,
+            result_exit_grace: None,
         };
         let mut handler = CursorLines {
             stream: input.stream.clone(),
@@ -92,6 +105,8 @@ impl AgentProvider for CursorProvider {
         let CliExit {
             status,
             stderr_tail,
+            had_terminal_result,
+            stopped_after_result: _,
         } = match run_cli(invocation, &mut handler, io).await {
             Ok(exit) => exit,
             Err(CliError::Spawn(err)) => {
@@ -122,7 +137,8 @@ impl AgentProvider for CursorProvider {
         }
 
         // Prefer a successful stream result over a weird non-zero exit.
-        if !status.success() && !handler.saw_result_event {
+        // A process that outlives the result is stopped and is not a failure.
+        if !status.success() && !handler.saw_result_event && !had_terminal_result {
             return Err(ProviderError::InvalidFixture(format!(
                 "`{command}` exited with {status} (cwd {}){}",
                 worktree.display(),
@@ -215,24 +231,20 @@ fn cursor_cli_args(
     read_only_tools: bool,
     model: Option<&str>,
     resume_session_id: Option<&str>,
+    version: Option<&str>,
 ) -> Vec<String> {
-    let mut args = vec![
-        "-p".to_string(),
-        coppice_run_prompt().to_string(),
-        "--trust".to_string(),
-    ];
-    if read_only_tools {
-        args.push("--mode".to_string());
-        args.push("ask".to_string());
-    } else {
-        args.push("--force".to_string());
-    }
-    args.extend([
-        "--output-format".to_string(),
-        "stream-json".to_string(),
-        "--workspace".to_string(),
-        worktree.display().to_string(),
-    ]);
+    let contract = coppice_connectors::get(coppice_connectors::CURSOR)
+        .expect("cursor descriptor")
+        .run_contract;
+    let worktree_arg = worktree.display().to_string();
+    let pinned = contract.argv(&coppice_connectors::LaunchSubst {
+        read_only: read_only_tools,
+        worktree: &worktree_arg,
+        hostname: "",
+        port: "",
+        version,
+    });
+    let mut args = contract.with_prompt(pinned, coppice_run_prompt());
     if let Some(model) = model {
         if !model.is_empty() {
             args.push("--model".to_string());
@@ -403,7 +415,7 @@ mod tests {
 
     #[test]
     fn chat_turns_use_ask_mode_without_force() {
-        let args = cursor_cli_args(Path::new("/tmp/chat"), true, Some("auto"), None);
+        let args = cursor_cli_args(Path::new("/tmp/chat"), true, Some("auto"), None, None);
         assert!(args.windows(2).any(|w| w == ["--mode", "ask"]));
         assert!(!args.iter().any(|a| a == "--force"));
         assert!(args.windows(2).any(|w| w == ["--model", "auto"]));
@@ -411,7 +423,7 @@ mod tests {
 
     #[test]
     fn ticket_turns_use_force_without_ask_mode() {
-        let args = cursor_cli_args(Path::new("/tmp/wt"), false, None, Some("sess-1"));
+        let args = cursor_cli_args(Path::new("/tmp/wt"), false, None, Some("sess-1"), None);
         assert!(args.iter().any(|a| a == "--force"));
         assert!(!args.windows(2).any(|w| w == ["--mode", "ask"]));
         assert!(args.windows(2).any(|w| w == ["--resume", "sess-1"]));

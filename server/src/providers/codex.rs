@@ -1,6 +1,8 @@
 use super::cli_runner::{
-    run_cli_with_stdin, CliError, CliInvocation, LineHandler, LineStep, RunIo,
+    log_launch, run_cli_with_stdin, run_log_dir, CliError, CliInvocation, LineHandler, LineStep,
+    RunIo,
 };
+use super::cli_version;
 use super::codex_console::CodexConsolePublisher;
 use super::{
     worktree_dir_from_context, AgentProvider, AgentRunInput, AgentRunResult, ProviderError,
@@ -43,17 +45,21 @@ impl AgentProvider for CodexProvider {
         let worktree = worktree_dir_from_context(&input.context_path)?;
 
         let run_timeout = Duration::from_secs(self.config.run_timeout_secs);
-
-        // Build the codex exec command.
-        // Codex CLI uses `codex exec` for non-interactive mode with `--json` for structured output.
-        // The prompt is passed via stdin since codex exec reads from stdin when no prompt arg is given.
-        let mut args = vec![
-            "exec".to_string(),
-            "--json".to_string(),
-            "--dangerously-bypass-approvals-and-sandbox".to_string(),
-            "-C".to_string(),
-            worktree.display().to_string(),
-        ];
+        let descriptor =
+            coppice_connectors::get(coppice_connectors::CODEX).expect("codex descriptor");
+        let contract = descriptor.run_contract;
+        let program = descriptor.binary.to_string();
+        let version = cli_version::detect(&program).await;
+        let worktree_arg = worktree.display().to_string();
+        // The prompt stays on stdin. Pinned flags, including a version-gated
+        // `--no-daemon`, come from the descriptor.
+        let mut args = contract.argv(&coppice_connectors::LaunchSubst {
+            read_only: input.read_only_tools,
+            worktree: &worktree_arg,
+            hostname: "",
+            port: "",
+            version: cli_version::for_gate(&version),
+        });
 
         if let Some(model) = &input.model {
             args.push("-m".to_string());
@@ -89,15 +95,27 @@ impl AgentProvider for CodexProvider {
         // The child process inherits that environment directly — same model as claude-code
         // and opencode. Coppice does not inject or strip credentials.
 
+        log_launch(
+            &program,
+            &version,
+            &args,
+            run_log_dir(input.artifacts_dir.as_deref(), input.run_id.as_deref()).as_deref(),
+        );
         let invocation = CliInvocation {
-            program: "codex".to_string(),
+            program,
             args,
             env,
-            // Codex takes its root from `-C`; the process keeps the server's cwd.
-            cwd: std::env::current_dir().map_err(ProviderError::Io)?,
+            cwd: if contract.process_cwd_is_worktree {
+                worktree
+            } else {
+                // Codex takes its root from `-C`; the process keeps the server's cwd.
+                std::env::current_dir().map_err(ProviderError::Io)?
+            },
             timeout: run_timeout,
             run_id: input.run_id.clone(),
             artifacts_dir: input.artifacts_dir.clone(),
+            result_before_exit: contract.result_before_exit,
+            result_exit_grace: None,
         };
         let mut handler = CodexLines {
             stream: input.stream.clone(),
@@ -129,7 +147,7 @@ impl AgentProvider for CodexProvider {
             }
         };
 
-        if !exit.status.success() {
+        if !exit.status.success() && !exit.had_terminal_result {
             return Err(ProviderError::InvalidFixture(format!(
                 "codex exited with status {}",
                 exit.status

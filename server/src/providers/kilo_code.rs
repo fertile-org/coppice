@@ -1,4 +1,7 @@
-use super::cli_runner::{run_cli, CliError, CliInvocation, LineHandler, LineStep, RunIo};
+use super::cli_runner::{
+    log_launch, run_cli, run_log_dir, CliError, CliInvocation, LineHandler, LineStep, RunIo,
+};
+use super::cli_version;
 use super::kilo_console::KiloConsolePublisher;
 use super::{
     refuse_unsupported_read_only, run_dir, worktree_dir_from_context, AgentProvider, AgentRunInput,
@@ -86,18 +89,21 @@ impl AgentProvider for KiloCodeProvider {
         let worktree = worktree_dir_from_context(&input.context_path)?;
 
         let run_timeout = Duration::from_secs(self.config.run_timeout_secs);
-
-        // `kilo run` accepts the message as a positional arg. `--format json`
-        // emits raw JSON events on stdout. `--auto` auto-approves permissions
-        // for non-interactive / pipeline usage. There is no documented `-C`
-        // working-directory flag on `kilo run`, so we set the process CWD.
-        let mut args = vec![
-            "run".to_string(),
-            "--format".to_string(),
-            "json".to_string(),
-            "--auto".to_string(),
-            coppice_run_prompt().to_string(),
-        ];
+        let contract = coppice_connectors::get(coppice_connectors::KILO_CODE)
+            .expect("kilo-code descriptor")
+            .run_contract;
+        let version = cli_version::detect(&self.config.command).await;
+        let worktree_arg = worktree.display().to_string();
+        // Pinned flags (including `--dir`) come from the descriptor. The prompt
+        // is appended after them; model and session stay dynamic.
+        let pinned = contract.argv(&coppice_connectors::LaunchSubst {
+            read_only: input.read_only_tools,
+            worktree: &worktree_arg,
+            hostname: "",
+            port: "",
+            version: cli_version::for_gate(&version),
+        });
+        let mut args = contract.with_prompt(pinned, coppice_run_prompt());
 
         if let Some(model) = self.model_arg(&input) {
             args.push("--model".to_string());
@@ -125,14 +131,26 @@ impl AgentProvider for KiloCodeProvider {
             env.extend(access.env().map(|(k, v)| (k.to_string(), v)));
         }
 
+        log_launch(
+            &self.config.command,
+            &version,
+            &args,
+            run_log_dir(input.artifacts_dir.as_deref(), input.run_id.as_deref()).as_deref(),
+        );
         let invocation = CliInvocation {
             program: self.config.command.clone(),
             args,
             env,
-            cwd: worktree,
+            cwd: if contract.process_cwd_is_worktree {
+                worktree
+            } else {
+                std::env::current_dir().map_err(ProviderError::Io)?
+            },
             timeout: run_timeout,
             run_id: input.run_id.clone(),
             artifacts_dir: input.artifacts_dir.clone(),
+            result_before_exit: contract.result_before_exit,
+            result_exit_grace: None,
         };
         let mut handler = KiloLines {
             stream: input.stream.clone(),
@@ -157,7 +175,7 @@ impl AgentProvider for KiloCodeProvider {
             }
         };
 
-        if !exit.status.success() {
+        if !exit.status.success() && !exit.had_terminal_result {
             return Err(ProviderError::InvalidFixture(format!(
                 "kilo-code exited with status {}",
                 exit.status

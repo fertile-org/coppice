@@ -58,7 +58,8 @@ impl OpenCodeRunServers {
         loop {
             let port = free_port(&self.hostname)?;
             let base_url = format!("http://{}:{port}", self.hostname);
-            let (mut child, group_pid) = self.spawn(key, port, config_path, &env)?;
+            let version = crate::providers::cli_version::detect(&self.command).await;
+            let (mut child, group_pid) = self.spawn(key, port, config_path, &env, &version)?;
 
             match wait_for_healthy(&base_url, &mut child).await {
                 Ok(()) => return self.register(key, base_url, child, Some(group_pid)).await,
@@ -103,17 +104,29 @@ impl OpenCodeRunServers {
         port: u16,
         config_path: &Path,
         env: &[(&'static str, String)],
+        version: &str,
     ) -> anyhow::Result<(Child, u32)> {
+        let contract = coppice_connectors::get(coppice_connectors::OPENCODE)
+            .expect("opencode descriptor")
+            .run_contract;
+        let port_arg = port.to_string();
+        let args = contract.argv(&coppice_connectors::LaunchSubst {
+            read_only: false,
+            worktree: "",
+            hostname: &self.hostname,
+            port: &port_arg,
+            version: crate::providers::cli_version::for_gate(version),
+        });
+        crate::providers::cli_runner::log_launch(
+            &self.command,
+            version,
+            &args,
+            config_path.parent(),
+        );
         let mut cmd = tokio::process::Command::new(&self.command);
-        cmd.args([
-            "serve",
-            "--hostname",
-            &self.hostname,
-            "--port",
-            &port.to_string(),
-        ])
-        .env("OPENCODE_CONFIG", config_path)
-        .envs(env.iter().map(|(k, v)| (*k, v.as_str())));
+        cmd.args(&args)
+            .env("OPENCODE_CONFIG", config_path)
+            .envs(env.iter().map(|(k, v)| (*k, v.as_str())));
         crate::process_tree::active()
             .spawn(
                 &mut cmd,
@@ -130,8 +143,7 @@ impl OpenCodeRunServers {
                     anyhow::anyhow!(
                         "opencode binary `{}` not found on PATH. Install it where the server runs, \
                          or disable OpenCode in config.toml \
-                         (agent.connectors.opencode.enabled = false and \
-                         agent.default_connector = \"mock\" or another connector)",
+                         (agent.connectors.opencode.enabled = false)",
                         self.command
                     )
                 } else {

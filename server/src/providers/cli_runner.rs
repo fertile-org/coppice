@@ -26,7 +26,20 @@ pub struct CliInvocation {
     pub run_id: Option<String>,
     /// `<artifacts_dir>/runs/<run_id>/process-stops.log` receives stop lines.
     pub artifacts_dir: Option<String>,
+    /// When true, a terminal stdout event ends the run without waiting out a
+    /// process that stays alive after the result. The flag comes from the
+    /// connector's `run_contract`.
+    pub result_before_exit: bool,
+    /// How long to wait for exit after a result before stopping the group.
+    /// `None` uses [`RESULT_EXIT_GRACE`].
+    pub result_exit_grace: Option<Duration>,
 }
+
+/// After a structured result, wait this long for the CLI to exit, then stop
+/// the process group. Claude Code 2.1.292+ keeps running while background
+/// commands finish; the same grace covers every streaming CLI that sets
+/// `result_before_exit`. The run timeout still applies when no result arrives.
+pub const RESULT_EXIT_GRACE: Duration = Duration::from_secs(2);
 
 pub trait LineHandler: Send {
     /// One parsed JSON stdout line (non-JSON lines are skipped by the runner).
@@ -53,6 +66,11 @@ pub struct CliExit {
     pub status: ExitStatus,
     /// First 40 stderr lines.
     pub stderr_tail: Vec<String>,
+    /// The runner stopped on a terminal result under [`CliInvocation::result_before_exit`].
+    /// A non-zero status in that case is not a failed run.
+    pub had_terminal_result: bool,
+    /// The process was still alive after the grace period and was stopped.
+    pub stopped_after_result: bool,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -124,10 +142,11 @@ pub async fn run_cli_with_stdin(
     let deadline = tokio::time::Instant::now() + inv.timeout;
     let mut cancel_rx = io.cancel_rx;
     let mut session_sent = false;
+    let mut stopped_on_result = false;
 
     loop {
         if is_cancelled(&cancel_rx) {
-            tracked.shutdown("cancelled").await;
+            let _ = tracked.shutdown("cancelled").await;
             return Err(CliError::Cancelled);
         }
 
@@ -136,13 +155,13 @@ pub async fn run_cli_with_stdin(
 
             _ = wait_cancel(&mut cancel_rx) => {
                 if is_cancelled(&cancel_rx) {
-                    tracked.shutdown("cancelled").await;
+                    let _ = tracked.shutdown("cancelled").await;
                     return Err(CliError::Cancelled);
                 }
             }
 
             _ = tokio::time::sleep_until(deadline) => {
-                tracked.shutdown("timed out").await;
+                let _ = tracked.shutdown("timed out").await;
                 // A grandchild can hold the inherited stderr pipe open past the kill.
                 if tokio::time::timeout(STDERR_DRAIN_AFTER_KILL, &mut stderr_task)
                     .await
@@ -170,12 +189,13 @@ pub async fn run_cli_with_stdin(
                             }
                         }
                         if step.stop {
+                            stopped_on_result = true;
                             break;
                         }
                     }
                     Ok(None) => break,
                     Err(e) => {
-                        tracked.shutdown("io error").await;
+                        let _ = tracked.shutdown("io error").await;
                         return Err(CliError::Io(e));
                     }
                 }
@@ -183,10 +203,98 @@ pub async fn run_cli_with_stdin(
         }
     }
 
+    if stopped_on_result && inv.result_before_exit {
+        return finish_after_result(
+            &mut tracked,
+            &mut cancel_rx,
+            stdin_task,
+            &mut stderr_task,
+            &stderr_tail,
+            inv.result_exit_grace.unwrap_or(RESULT_EXIT_GRACE),
+        )
+        .await;
+    }
+
     let status = tracked
         .wait_and_reap("run ended")
         .await
         .map_err(CliError::Io)?;
+    finish_ok(
+        stdin_task,
+        &mut stderr_task,
+        &stderr_tail,
+        status,
+        false,
+        false,
+    )
+    .await
+}
+
+enum AfterResult {
+    Cancelled,
+    Exited(ExitStatus),
+    Grace,
+}
+
+/// The structured result is in. Give the process a short chance to exit, then
+/// stop the group. Cancel during the grace is still a cancel.
+async fn finish_after_result(
+    tracked: &mut crate::process_tree::TrackedProcess,
+    cancel_rx: &mut Option<watch::Receiver<bool>>,
+    stdin_task: Option<tokio::task::JoinHandle<()>>,
+    stderr_task: &mut tokio::task::JoinHandle<()>,
+    stderr_tail: &Arc<Mutex<Vec<String>>>,
+    grace: Duration,
+) -> Result<CliExit, CliError> {
+    let outcome = tokio::select! {
+        biased;
+        _ = wait_cancel(cancel_rx) => AfterResult::Cancelled,
+        status = tracked.wait_and_reap("run ended") => {
+            AfterResult::Exited(status.map_err(CliError::Io)?)
+        }
+        _ = tokio::time::sleep(grace) => AfterResult::Grace,
+    };
+    match outcome {
+        AfterResult::Cancelled => {
+            let _ = tracked.shutdown("cancelled").await;
+            Err(CliError::Cancelled)
+        }
+        AfterResult::Exited(status) => {
+            finish_ok(stdin_task, stderr_task, stderr_tail, status, true, false).await
+        }
+        AfterResult::Grace => {
+            let status = tracked
+                .shutdown("result delivered; process still running")
+                .await
+                .map_err(CliError::Io)?;
+            if tokio::time::timeout(STDERR_DRAIN_AFTER_KILL, &mut *stderr_task)
+                .await
+                .is_err()
+            {
+                stderr_task.abort();
+            }
+            let tail = std::mem::take(&mut *stderr_tail.lock().unwrap());
+            if let Some(task) = stdin_task {
+                let _ = task.await;
+            }
+            Ok(CliExit {
+                status,
+                stderr_tail: tail,
+                had_terminal_result: true,
+                stopped_after_result: true,
+            })
+        }
+    }
+}
+
+async fn finish_ok(
+    stdin_task: Option<tokio::task::JoinHandle<()>>,
+    stderr_task: &mut tokio::task::JoinHandle<()>,
+    stderr_tail: &Arc<Mutex<Vec<String>>>,
+    status: ExitStatus,
+    had_terminal_result: bool,
+    stopped_after_result: bool,
+) -> Result<CliExit, CliError> {
     if let Some(task) = stdin_task {
         let _ = task.await;
     }
@@ -195,7 +303,39 @@ pub async fn run_cli_with_stdin(
     Ok(CliExit {
         status,
         stderr_tail,
+        had_terminal_result,
+        stopped_after_result,
     })
+}
+
+/// One run-log line: binary name, version token, and the argv that was launched.
+/// Env values are not included.
+pub fn log_launch(
+    program: &str,
+    version: &str,
+    args: &[String],
+    log_dir: Option<&std::path::Path>,
+) {
+    let name = std::path::Path::new(program)
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or(program);
+    let line = format!("{name} {version} · flags: {}", args.join(" "));
+    tracing::info!(target: "cli_runner", "{line}");
+    let Some(dir) = log_dir else {
+        return;
+    };
+    if let Err(err) = (|| {
+        std::fs::create_dir_all(dir)?;
+        let mut file = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(dir.join("run.log"))?;
+        use std::io::Write;
+        writeln!(file, "{line}")
+    })() {
+        tracing::debug!(%err, "failed to write run.log");
+    }
 }
 
 /// Mirrors stderr to tracing and keeps the first lines for error messages.
@@ -222,7 +362,11 @@ async fn pump_stderr(
 }
 
 fn task_log_dir(inv: &CliInvocation) -> Option<PathBuf> {
-    let (Some(dir), Some(run_id)) = (&inv.artifacts_dir, &inv.run_id) else {
+    run_log_dir(inv.artifacts_dir.as_deref(), inv.run_id.as_deref())
+}
+
+pub fn run_log_dir(artifacts_dir: Option<&str>, run_id: Option<&str>) -> Option<PathBuf> {
+    let (Some(dir), Some(run_id)) = (artifacts_dir, run_id) else {
         return None;
     };
     if dir.is_empty() || run_id.is_empty() {
@@ -241,5 +385,25 @@ async fn wait_cancel(cancel_rx: &mut Option<watch::Receiver<bool>>) {
             let _ = rx.changed().await;
         }
         None => std::future::pending::<()>().await,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn log_launch_writes_version_and_flags_only() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let log_dir = dir.path().join("runs").join("r1");
+        log_launch(
+            "/usr/bin/claude",
+            "2.1.292",
+            &["-p".into(), "--verbose".into()],
+            Some(&log_dir),
+        );
+        let text = std::fs::read_to_string(log_dir.join("run.log")).expect("run.log");
+        assert_eq!(text, "claude 2.1.292 · flags: -p --verbose\n");
+        assert!(!text.contains("ANTHROPIC"));
     }
 }

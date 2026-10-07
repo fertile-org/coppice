@@ -89,6 +89,32 @@ fn invalid_fixture(err: ProviderError) -> String {
 }
 
 #[tokio::test]
+async fn cursor_returns_done_while_process_keeps_running() {
+    let lines = fixture("cursor/done.jsonl");
+    let artifacts = tempfile::tempdir().expect("artifacts");
+    let wt = worktree(&[("FAKE_CLI_LINES", &lines), ("FAKE_CLI_SLEEP_MS", "30000")]);
+    let mut input = run_input(wt.path());
+    input.artifacts_dir = Some(artifacts.path().display().to_string());
+    let started = Instant::now();
+    let result = cursor(60).run(input).await.expect("cursor run");
+    assert!(
+        started.elapsed() < Duration::from_secs(10),
+        "ticket would wait on process exit"
+    );
+    match result {
+        AgentRunResult::Done { summary, .. } => assert_eq!(summary, "Implemented the feature."),
+        other => panic!("expected done, got {other:?}"),
+    }
+    let log = std::fs::read_to_string(artifacts.path().join("runs").join("run-1").join("run.log"))
+        .expect("run.log");
+    assert!(log.contains("unknown · flags:"), "{log}");
+    assert!(log.contains("--force"), "{log}");
+    assert!(log.contains("--output-format"), "{log}");
+    assert!(log.contains("--workspace"), "{log}");
+    assert!(!log.contains("FAKE_CLI"), "{log}");
+}
+
+#[tokio::test]
 async fn cursor_accepts_result_despite_nonzero_exit() {
     let lines = fixture("cursor/done.jsonl");
     let wt = worktree(&[("FAKE_CLI_LINES", &lines), ("FAKE_CLI_EXIT", "1")]);
@@ -230,6 +256,21 @@ async fn cursor_cancel_returns_cancelled() {
 }
 
 #[tokio::test]
+async fn kilo_returns_done_while_process_keeps_running() {
+    let lines = fixture("kilo-code/done.jsonl");
+    let wt = worktree(&[("FAKE_CLI_LINES", &lines), ("FAKE_CLI_SLEEP_MS", "30000")]);
+    let started = Instant::now();
+    let result = kilo(60).run(run_input(wt.path())).await.expect("kilo run");
+    assert!(started.elapsed() < Duration::from_secs(10));
+    match result {
+        AgentRunResult::Done { summary, .. } => {
+            assert_eq!(summary, "Kilo feature implementation complete.")
+        }
+        other => panic!("expected done, got {other:?}"),
+    }
+}
+
+#[tokio::test]
 async fn kilo_stops_on_session_idle() {
     // A later contract would win if the stream were read past `session.idle`.
     let blocked = fixture("kilo-code/blocked.jsonl");
@@ -267,9 +308,26 @@ async fn kilo_timeout_message() {
 }
 
 #[tokio::test]
-async fn kilo_nonzero_exit_message() {
+async fn kilo_accepts_result_despite_nonzero_exit() {
     let lines = fixture("kilo-code/done.jsonl");
     let wt = worktree(&[("FAKE_CLI_LINES", &lines), ("FAKE_CLI_EXIT", "2")]);
+
+    let result = kilo(30).run(run_input(wt.path())).await.expect("kilo run");
+
+    match result {
+        AgentRunResult::Done { summary, .. } => {
+            assert_eq!(summary, "Kilo feature implementation complete.")
+        }
+        other => panic!("expected done, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn kilo_nonzero_exit_without_result_message() {
+    let wt = worktree(&[
+        ("FAKE_CLI_LINES", r#"{"type":"session.updated"}"#),
+        ("FAKE_CLI_EXIT", "2"),
+    ]);
 
     let err = kilo(30)
         .run(run_input(wt.path()))

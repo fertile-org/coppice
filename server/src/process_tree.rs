@@ -453,12 +453,22 @@ impl TrackedProcess {
         self.child.as_mut()?.stderr.take()
     }
 
-    pub async fn shutdown(&mut self, reason: &str) {
+    pub async fn shutdown(&mut self, reason: &str) -> io::Result<std::process::ExitStatus> {
         self.registry.stop_pid(self.record.pid, reason).await;
-        if let Some(child) = self.child.as_mut() {
-            let _ = child.wait().await;
-        }
+        let status = if let Some(child) = self.child.as_mut() {
+            match child.wait().await {
+                Ok(status) => status,
+                // `stop_pid` may already have reaped the zombie with `waitpid`.
+                Err(err) if err.raw_os_error() == Some(libc::ECHILD) => {
+                    std::os::unix::process::ExitStatusExt::from_raw(libc::SIGTERM)
+                }
+                Err(err) => return Err(err),
+            }
+        } else {
+            return Err(io::Error::other("agent process handle missing"));
+        };
         self.armed = false;
+        Ok(status)
     }
 
     pub async fn wait_and_reap(&mut self, reason: &str) -> io::Result<std::process::ExitStatus> {

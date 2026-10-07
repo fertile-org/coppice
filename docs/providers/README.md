@@ -10,11 +10,11 @@ A connector is how Coppice drives one agent CLI. The board, tickets and worktree
 
 | Connector | id | Command | How Coppice runs it | Sign-in check | Guide |
 | --- | --- | --- | --- | --- | --- |
-| Claude Code | `claude-code` | `claude` | Subprocess in the worktree: `claude -p … --output-format stream-json` | `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN` set, or `~/.claude/.credentials.json`; otherwise `claude auth status` | [claude-code.md](claude-code.md) |
-| Codex | `codex` | `codex` | Subprocess: `codex exec --json` | `OPENAI_API_KEY` set, or `~/.codex/auth.json`; otherwise `codex login status` | [codex.md](codex.md) |
-| Cursor | `cursor` | `agent` | Subprocess: `agent -p … --output-format stream-json` | `~/.config/cursor/auth.json` or `~/.cursor/auth.json`. Neither means not signed in | [cursor.md](cursor.md) |
-| OpenCode | `opencode` | `opencode` | A fresh `opencode serve` per run, driven over HTTP/SSE. The ticket shows a Live Session | `~/.local/share/opencode/auth.json`; otherwise `opencode auth list` | [opencode.md](opencode.md) |
-| Kilo Code | `kilo-code` | `kilo` | Subprocess: `kilo run --format json --auto` | None. `kilo auth` is interactive, so Coppice never runs it | [kilo-code.md](kilo-code.md) |
+| Claude Code | `claude-code` | `claude` | Subprocess in the worktree: `claude -p … --output-format stream-json --verbose --permission-mode bypassPermissions` | `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN` set, or `~/.claude/.credentials.json`; otherwise `claude auth status` | [claude-code.md](claude-code.md) |
+| Codex | `codex` | `codex` | Subprocess: `codex exec --json --dangerously-bypass-approvals-and-sandbox -C <worktree>` (`--no-daemon` when the CLI is ≥ 0.156) | `OPENAI_API_KEY` set, or `~/.codex/auth.json`; otherwise `codex login status` | [codex.md](codex.md) |
+| Cursor | `cursor` | `agent` | Subprocess in the worktree: `agent -p … --trust --force --output-format stream-json --workspace <worktree>` | `~/.config/cursor/auth.json` or `~/.cursor/auth.json`. Neither means not signed in | [cursor.md](cursor.md) |
+| OpenCode | `opencode` | `opencode` | A fresh `opencode serve --hostname … --port …` per run, driven over HTTP/SSE. The ticket shows a Live Session | `~/.local/share/opencode/auth.json`; otherwise `opencode auth list` | [opencode.md](opencode.md) |
+| Kilo Code | `kilo-code` | `kilo` | Subprocess in the worktree: `kilo run --format json --auto --dir <worktree>` | None. `kilo auth` is interactive, so Coppice never runs it | [kilo-code.md](kilo-code.md) |
 
 ### Detection and status
 
@@ -45,7 +45,7 @@ Each connector has a `[agent.connectors.<id>]` section in `config.toml`:
 | `run_timeout_secs` | all | `600`; `opencode` `1800` |
 | `serve_hostname` | `opencode` | `127.0.0.1` (each run's server picks a free port; `serve_port` is ignored) |
 
-`[agent] default_connector` sets the default for new agents. Each agent can override its connector, model provider and model on the Agents page.
+Each agent picks its connector, model provider, and model on the Agents page. There is no default-connector setting. With the `mock-provider` feature, creating an agent that omits a connector uses `mock`. Old `default_connector` / `default_provider` keys and `AGENT_DEFAULT_PROVIDER` are ignored.
 
 Where the config lives:
 
@@ -115,7 +115,7 @@ To try a real CLI, run Coppice from source or in Docker, create an agent on that
 
 ## Docker (optional, for development)
 
-`make compose-up` builds and starts the full stack (web on `http://localhost:5001`; see [development.md](../development.md)). The Compose image includes `mock-provider` and defaults agents to `mock`, so smoke tests run without a CLI.
+`make compose-up` builds and starts the full stack (web on `http://localhost:5001`; see [development.md](../development.md)). The Compose image includes `mock-provider`, so creating an agent without a connector uses `mock` and smoke tests run without a CLI.
 
 To use a real connector inside the container, install it and sign in there. CLIs and their sign-ins live in the `connector_data` volume at `/home/coppice`, not in your host home.
 

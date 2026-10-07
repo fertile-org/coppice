@@ -10,12 +10,7 @@ Desktop installers and `make release-tar` are built without the `mock-provider` 
 
 ## Use it
 
-Default in Compose (`AGENT_DEFAULT_PROVIDER` / `default_connector` = `mock`). No install or login.
-
-```toml
-[agent]
-default_connector = "mock"
-```
+No install or login. With the `mock-provider` feature (Compose, `make server`, CI), creating an agent that omits a connector uses `mock`.
 
 Optional: `MOCK_AGENT_RESPONSE=blocked` to exercise blocked outcomes.
 
