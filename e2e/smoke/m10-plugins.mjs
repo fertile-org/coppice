@@ -135,6 +135,20 @@ async function expectJson(res, status, label) {
   return res.json();
 }
 
+async function skipPlanning(ticketId, auth) {
+  const ticket = await expectJson(
+    await api('PATCH', `/api/tickets/${ticketId}`, {
+      ...auth,
+      body: { skipPlanning: true },
+    }),
+    200,
+    'skip planning',
+  );
+  if (ticket.skipPlanning !== true) {
+    fail('skip planning was not enabled');
+  }
+}
+
 async function ensurePluginDir(auth) {
   const res = await api('POST', '/api/plugin-dirs', {
     ...auth,
@@ -415,6 +429,7 @@ async function main() {
   const agent = await createAgent(plugin.id, suffix, auth);
   const repo = await registerRepo(auth);
   const ticket = await createTicket(repo.id, agent.id, suffix, auth);
+  await skipPlanning(ticket.id, auth);
   const runId = await runAgent(ticket.id, auth);
   await pollRunUntilSucceeded(runId, auth);
   await assertToolCalls(runId, plugin.id, auth);

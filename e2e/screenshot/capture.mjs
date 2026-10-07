@@ -292,6 +292,14 @@ async function seedBoard(auth, agentIds) {
       description: ticket.description,
       priority: ticket.priority,
     });
+    if (ticket.status === 'in_progress') {
+      const skipped = await api('PATCH', `/api/tickets/${created.id}`, auth, {
+        skipPlanning: true,
+      });
+      if (skipped.skipPlanning !== true) {
+        fail('skip planning was not enabled');
+      }
+    }
     if (ticket.status === 'done') {
       await api('PATCH', `/api/tickets/${created.id}/status`, auth, {
         status: 'wait_for_final_review',

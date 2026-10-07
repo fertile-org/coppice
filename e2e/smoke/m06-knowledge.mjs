@@ -391,6 +391,15 @@ async function fullRunUses(board, repo, worker, items, suffix, auth) {
     auth,
   );
   await patchTicket(ticket.id, { repoId: repo.id }, auth, 'attach repo');
+  const skipped = await patchTicket(
+    ticket.id,
+    { skipPlanning: true },
+    auth,
+    'skip planning',
+  );
+  if (skipped.skipPlanning !== true) {
+    fail('skip planning was not enabled');
+  }
   await expectJson(
     await api('POST', `/api/tickets/${ticket.id}/assign`, {
       ...auth,
