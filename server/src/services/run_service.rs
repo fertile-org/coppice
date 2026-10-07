@@ -253,6 +253,33 @@ impl<'a> RunService<'a> {
         Ok(row_to_run(&row))
     }
 
+    pub async fn active_for_ticket_agent(
+        &self,
+        ticket_id: Uuid,
+        agent_id: Uuid,
+    ) -> Result<Option<AgentRun>, RunError> {
+        let row = sqlx::query(
+            r#"
+            SELECT
+                id, ticket_id, chat_session_id, chat_message_id, agent_id, job_type, status,
+                sandbox_profile_id, worktree_path, branch_name, error_message, session_id,
+                context_profile, trigger_comment_id,
+                started_at, ended_at, created_at
+            FROM agent_runs
+            WHERE ticket_id = $1
+              AND agent_id = $2
+              AND status IN ('queued', 'running')
+            ORDER BY created_at DESC
+            LIMIT 1
+            "#,
+        )
+        .bind(ticket_id)
+        .bind(agent_id)
+        .fetch_optional(self.pool)
+        .await?;
+        Ok(row.as_ref().map(row_to_run))
+    }
+
     pub async fn list_for_ticket(
         &self,
         ticket_id: Uuid,

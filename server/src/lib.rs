@@ -2,6 +2,7 @@ pub mod agent_templates;
 pub mod api;
 pub mod config;
 pub mod connectors_runtime;
+pub mod copy;
 pub mod crypto;
 pub mod db;
 #[cfg(unix)]
