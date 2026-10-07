@@ -10,7 +10,8 @@
     "build": "astro build",
     "preview": "astro preview --host 127.0.0.1",
     "check:links": "node scripts/check-links.mjs",
-    "check:a11y": "node scripts/check-a11y.mjs"
+    "check:a11y": "node scripts/check-a11y.mjs",
+    "check:code": "node scripts/check-code-blocks.mjs"
   },
   "dependencies": {
     "@astrojs/markdown-remark": "^7.3.1",
