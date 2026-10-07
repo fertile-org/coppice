@@ -407,6 +407,10 @@ fn map_ticket_git_error_response(err: TicketGitError) -> TicketGitApiError {
             StatusCode::CONFLICT,
             "Not merged. This isn't the commit you reviewed.".into(),
         ),
+        TicketGitError::ReviewAcceptanceMissing => (
+            StatusCode::CONFLICT,
+            "Not merged. Accept again so Coppice knows which commit you reviewed.".into(),
+        ),
         TicketGitError::Git(msg) => (StatusCode::BAD_REQUEST, msg),
         TicketGitError::GitHubApi(msg) => (StatusCode::BAD_REQUEST, format!("GitHub API: {msg}")),
         TicketGitError::Ticket(e) => {

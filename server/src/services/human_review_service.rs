@@ -117,11 +117,35 @@ impl<'a> HumanReviewService<'a> {
         Ok(())
     }
 
+    /// Move a ticket that has no acceptance row back to Wait for Human Review
+    /// so Accept can record one. Does not insert a review row. A ticket already
+    /// in that column is left unchanged.
+    pub async fn return_for_acceptance(&self, ticket_id: Uuid) -> Result<(), HumanReviewError> {
+        let status = crate::domain::ticket::status_to_str(TicketStatus::WaitForFinalReview);
+        sqlx::query(
+            r#"
+            UPDATE tickets
+            SET status = $2,
+                substatus = NULL,
+                substatus_metadata = NULL,
+                updated_at = now()
+            WHERE id = $1
+              AND archived_at IS NULL
+              AND status <> $2
+            "#,
+        )
+        .bind(ticket_id)
+        .bind(status)
+        .execute(self.pool)
+        .await?;
+        Ok(())
+    }
+
     /// A commit landed that is not the accepted one. Mark the acceptance stale
     /// and move Done / Wait for Human Review back to In Review.
     ///
-    /// A ticket whose acceptance has `merged_at` set is left alone: the row is
-    /// not updated and the status is not changed.
+    /// No acceptance row: no-op. Nothing is inserted and the status is unchanged.
+    /// A ticket whose acceptance has `merged_at` set is also left alone.
     ///
     /// Returns whether this call invalidated a live acceptance.
     pub async fn observe_head(

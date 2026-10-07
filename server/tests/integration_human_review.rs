@@ -9,6 +9,8 @@ use tower::ServiceExt;
 use uuid::Uuid;
 
 const MERGE_REFUSED: &str = "Not merged. This isn't the commit you reviewed.";
+const ACCEPT_AGAIN: &str =
+    "Not merged. Accept again so Coppice knows which commit you reviewed.";
 
 fn git_env_commit(dir: &Path, message: &str) {
     let output = Command::new("git")
@@ -88,20 +90,25 @@ async fn setup() -> Fixture {
     }
 }
 
-async fn set_wait_for_human_review(fx: &Fixture) {
+async fn set_status(fx: &Fixture, status: &str) {
+    let payload = serde_json::json!({ "status": status });
     let res = fx
         .app
         .clone()
         .oneshot(common::json_request(
             "PATCH",
             &format!("/api/tickets/{}/status", fx.ticket_id),
-            r#"{"status":"wait_for_final_review"}"#,
+            &payload.to_string(),
             &fx.cookie,
             &fx.csrf,
         ))
         .await
         .unwrap();
-    assert_eq!(res.status(), StatusCode::OK);
+    assert_eq!(res.status(), StatusCode::OK, "set status {status}");
+}
+
+async fn set_wait_for_human_review(fx: &Fixture) {
+    set_status(fx, "wait_for_final_review").await;
 }
 
 async fn final_approve(fx: &Fixture) -> serde_json::Value {
@@ -463,9 +470,115 @@ async fn merge_without_acceptance_is_refused() {
         .unwrap();
     assert_eq!(res.status(), StatusCode::CONFLICT);
     let body = common::json_body(res).await;
-    assert_eq!(body["message"], MERGE_REFUSED);
+    assert_eq!(body["message"], ACCEPT_AGAIN);
     assert_eq!(git_rev_parse(&fx.local_path, "main"), main_before);
     let ticket = get_ticket(&fx).await;
     assert_eq!(ticket["status"], "wait_for_final_review");
     assert!(ticket["humanReview"].is_null());
+    assert_eq!(human_review_row_count(&fx).await, 0);
+}
+
+#[tokio::test]
+async fn legacy_done_ticket_without_acceptance_stays_done_when_branch_moves() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let fx = setup().await;
+    set_status(&fx, "done").await;
+    assert_eq!(human_review_row_count(&fx).await, 0);
+    let before = git_rev_parse(&fx.worktree_path, "HEAD");
+    commit_file(
+        &fx.worktree_path,
+        "legacy-follow-up.txt",
+        "later\n",
+        "legacy follow-up",
+    );
+    assert_ne!(git_rev_parse(&fx.worktree_path, "HEAD"), before);
+
+    let pool = fx.state.db.clone().expect("pool");
+    let changed =
+        TicketGitService::new(&pool, PathBuf::from(&fx.state.config.agent.worktrees_path))
+            .note_branch_head(Uuid::parse_str(&fx.ticket_id).unwrap())
+            .await
+            .expect("note branch head");
+    assert!(!changed);
+
+    let ticket = get_ticket(&fx).await;
+    assert_eq!(ticket["status"], "done");
+    assert!(ticket["humanReview"].is_null());
+    assert_eq!(human_review_row_count(&fx).await, 0);
+}
+
+#[tokio::test]
+async fn legacy_done_ticket_without_acceptance_must_accept_before_merge() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let fx = setup().await;
+    set_status(&fx, "done").await;
+    let head = git_rev_parse(&fx.worktree_path, "HEAD");
+    let main_before = git_rev_parse(&fx.local_path, "main");
+
+    let res = fx
+        .app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            &format!("/api/tickets/{}/merge-branch", fx.ticket_id),
+            r#"{"baseBranch":"main"}"#,
+            &fx.cookie,
+            &fx.csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::CONFLICT);
+    let body = common::json_body(res).await;
+    assert_eq!(body["message"], ACCEPT_AGAIN);
+    assert_eq!(git_rev_parse(&fx.local_path, "main"), main_before);
+
+    let ticket = get_ticket(&fx).await;
+    assert_eq!(ticket["status"], "wait_for_final_review");
+    assert!(ticket["humanReview"].is_null());
+    assert_eq!(human_review_row_count(&fx).await, 0);
+
+    let approved = final_approve(&fx).await;
+    assert_eq!(approved["status"], "done");
+    assert_eq!(approved["humanReview"]["headSha"], head);
+    assert_eq!(approved["humanReview"]["stale"], false);
+
+    let res = fx
+        .app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            &format!("/api/tickets/{}/merge-branch", fx.ticket_id),
+            r#"{"baseBranch":"main"}"#,
+            &fx.cookie,
+            &fx.csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK, "merge after accept");
+    let merged = common::json_body(res).await;
+    assert!(merged["merge"]["message"]
+        .as_str()
+        .unwrap()
+        .contains("Merged"));
+    assert_eq!(stored_merged_sha(&fx).await.as_deref(), Some(head.as_str()));
+    let ticket = get_ticket(&fx).await;
+    assert_eq!(ticket["status"], "done");
+    assert_eq!(ticket["humanReview"]["stale"], false);
+}
+
+async fn human_review_row_count(fx: &Fixture) -> i64 {
+    let pool = fx.state.db.clone().expect("pool");
+    sqlx::query_scalar(
+        "SELECT COUNT(*) FROM ticket_human_reviews WHERE ticket_id = $1",
+    )
+    .bind(Uuid::parse_str(&fx.ticket_id).unwrap())
+    .fetch_one(&pool)
+    .await
+    .expect("review row count")
 }

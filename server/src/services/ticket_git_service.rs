@@ -123,6 +123,8 @@ pub enum TicketGitError {
     GitHubApi(String),
     #[error("Not merged. This isn't the commit you reviewed.")]
     ReviewShaMismatch,
+    #[error("Not merged. Accept again so Coppice knows which commit you reviewed.")]
+    ReviewAcceptanceMissing,
     #[error(transparent)]
     Ticket(#[from] TicketError),
     #[error(transparent)]
@@ -473,13 +475,18 @@ impl<'a> TicketGitService<'a> {
         head_sha: &str,
     ) -> Result<(), TicketGitError> {
         let review = HumanReviewService::new(self.pool).get(ticket_id).await?;
-        let matches = review.as_ref().is_some_and(|review| {
-            !review.stale && reviewed_sha_matches(&review.head_sha, head_sha)
-        });
-        if matches {
+        let Some(review) = review else {
+            // Legacy ticket: accepted or otherwise Done before an acceptance
+            // row existed. Send it back for one fresh Accept. Do not invent a row.
+            HumanReviewService::new(self.pool)
+                .return_for_acceptance(ticket_id)
+                .await?;
+            return Err(TicketGitError::ReviewAcceptanceMissing);
+        };
+        if !review.stale && reviewed_sha_matches(&review.head_sha, head_sha) {
             return Ok(());
         }
-        if review.is_some_and(|review| !review.stale) {
+        if !review.stale {
             HumanReviewService::new(self.pool)
                 .observe_head(ticket_id, head_sha)
                 .await?;

@@ -9,6 +9,7 @@ import { TicketGitActions } from './TicketGitActions';
 import type { TicketGitInfo } from './useTicket';
 
 const rebaseMutateAsync = vi.fn();
+const mergeMutateAsync = vi.fn();
 const gitInfoState: { data: TicketGitInfo | undefined; isLoading: boolean } = {
   data: undefined,
   isLoading: false,
@@ -19,7 +20,10 @@ vi.mock('./useTicket', () => ({
     data: gitInfoState.data,
     isLoading: gitInfoState.isLoading,
   }),
-  useMergeTicketBranch: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useMergeTicketBranch: () => ({
+    mutateAsync: mergeMutateAsync,
+    isPending: false,
+  }),
   useRebaseTicketBranch: () => ({
     mutateAsync: rebaseMutateAsync,
     isPending: false,
@@ -71,6 +75,7 @@ function renderActions(ticket: Ticket) {
 describe('TicketGitActions', () => {
   beforeEach(() => {
     rebaseMutateAsync.mockReset();
+    mergeMutateAsync.mockReset();
     gitInfoState.data = { ...baseGitInfo };
     gitInfoState.isLoading = false;
   });
@@ -131,6 +136,23 @@ describe('TicketGitActions', () => {
     renderActions(makeTicket({ repoId: undefined, status: 'in_progress' }));
     expect(screen.queryByText('Git actions')).not.toBeInTheDocument();
     expect(screen.queryByRole('button')).not.toBeInTheDocument();
+  });
+
+  it('shows the accept-again message when merge is refused', async () => {
+    const message =
+      "Not merged. Accept again so Coppice knows which commit you reviewed.";
+    mergeMutateAsync.mockRejectedValue(
+      new ApiError(409, JSON.stringify({ message })),
+    );
+
+    renderActions(makeTicket({ status: 'done' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Merge…' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Merge ticket branch' });
+    fireEvent.click(screen.getByRole('button', { name: 'Merge', exact: true }));
+
+    await waitFor(() => {
+      expect(dialog).toHaveTextContent(message);
+    });
   });
 
   it('shows toast and inline error when rebase fails', async () => {
