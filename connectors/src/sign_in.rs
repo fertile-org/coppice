@@ -26,8 +26,8 @@ pub enum Readiness {
     Ready,
     /// Binary found, and a reliable check says there is no sign-in.
     FoundNotSignedIn,
-    /// Binary found, but sign-in could not be verified. Do not claim the user
-    /// is signed out.
+    /// Binary found, but sign-in could not be verified. The UI says
+    /// "Found (sign-in not checked)" and does not claim the user is signed out.
     Found,
 }
 

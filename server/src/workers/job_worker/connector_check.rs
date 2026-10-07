@@ -2,6 +2,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use anyhow::Context;
+use coppice_connectors::probe::{probe, ProbeEnv, ProbeOutcome};
 use sqlx::PgPool;
 use uuid::Uuid;
 
@@ -20,6 +21,8 @@ use crate::services::context_builder::{connector_check_context, write_context_do
 use crate::services::run_service::RunService;
 use crate::util::error_format::format_job_error;
 use crate::AppState;
+
+const VERSION_PROBE_TIMEOUT: Duration = Duration::from_secs(10);
 
 const MAX_CHECK_TIMEOUT_SECS: u64 = 180;
 
@@ -110,9 +113,18 @@ async fn run_check(
             "agent connector changed (expected {expected_connector}, got {connector_name})"
         );
     }
-    let connector = state.connectors.registry().get(connector_name).with_context(|| {
-        crate::connectors_runtime::connector_unavailable_message(connector_name)
-    })?;
+    // Kilo refuses the read-only tool turn every other connector uses here.
+    // A version command can succeed or fail on its own; it does not touch tools.
+    if connector_name == coppice_connectors::KILO_CODE {
+        return run_kilo_version_check(state, run_svc, run, checks, check_id).await;
+    }
+    let connector = state
+        .connectors
+        .registry()
+        .get(connector_name)
+        .with_context(|| {
+            crate::connectors_runtime::connector_unavailable_message(connector_name)
+        })?;
     let agent_key = agent
         .preset_source
         .clone()
@@ -261,6 +273,78 @@ async fn run_check(
     Ok(evaluate_check(ticket_get_ok, result_submit_ok, outcome))
 }
 
+/// `kilo --version` (the descriptor probe). `Ok` only when that command exits 0.
+fn kilo_connection_verdict(outcome: &ProbeOutcome) -> Result<(), String> {
+    match outcome {
+        ProbeOutcome::Ok { .. } => Ok(()),
+        ProbeOutcome::Failed { message } if message.trim().is_empty() => {
+            Err("kilo --version failed".into())
+        }
+        ProbeOutcome::Failed { message } => Err(message.clone()),
+        ProbeOutcome::TimedOut => Err("kilo --version timed out".into()),
+        ProbeOutcome::NotRun => Err("kilo was not found".into()),
+    }
+}
+
+async fn run_kilo_version_check(
+    state: &AppState,
+    run_svc: &RunService<'_>,
+    run: &AgentRun,
+    checks: &ConnectorCheckService<'_>,
+    check_id: Uuid,
+) -> anyhow::Result<Result<(), String>> {
+    run_svc
+        .mark_running(run.id)
+        .await
+        .context("mark connector check run running")?;
+    checks
+        .mark_running(check_id)
+        .await
+        .context("mark connector check running")?;
+    let command = state
+        .config
+        .agent
+        .connectors
+        .command(coppice_connectors::KILO_CODE)
+        .map(str::to_string);
+    let outcome = tokio::task::spawn_blocking(move || probe_kilo_version(command.as_deref()))
+        .await
+        .context("kilo version probe task")?;
+    match kilo_connection_verdict(&outcome) {
+        Ok(()) => {
+            run_svc
+                .finish_run(run.id, RunStatus::Succeeded, None, None)
+                .await
+                .context("finish kilo version check")?;
+            Ok(Ok(()))
+        }
+        Err(reason) => Err(anyhow::anyhow!(reason)),
+    }
+}
+
+fn probe_kilo_version(command: Option<&str>) -> ProbeOutcome {
+    let Some(descriptor) = coppice_connectors::get(coppice_connectors::KILO_CODE) else {
+        return ProbeOutcome::NotRun;
+    };
+    let home = std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .unwrap_or_default();
+    let path = std::env::var_os("PATH").unwrap_or_default();
+    let env = ProbeEnv {
+        home: &home,
+        path: &path,
+        command_override: command,
+        env_lookup: &process_auth_env,
+    };
+    probe(descriptor, &env, VERSION_PROBE_TIMEOUT).probe
+}
+
+fn process_auth_env(key: &str) -> Option<String> {
+    std::env::var_os(key)
+        .filter(|value| !value.is_empty())
+        .map(|value| value.to_string_lossy().into_owned())
+}
+
 /// Failure text for a check run error raised outside `execute_connector_check`
 /// (no run token exists yet), with auth env values redacted and capped.
 pub(super) fn sanitize_run_error(err: &anyhow::Error) -> String {
@@ -278,4 +362,39 @@ fn auth_env_values() -> Vec<String> {
         .filter_map(|name| std::env::var(name).ok())
         .filter(|value| !value.is_empty())
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn kilo_version_check_passes_only_when_the_command_succeeds() {
+        assert!(kilo_connection_verdict(&ProbeOutcome::Ok {
+            first_line: "kilo 1.2.3".into(),
+        })
+        .is_ok());
+        assert_eq!(
+            kilo_connection_verdict(&ProbeOutcome::Failed {
+                message: "kilo: version check failed".into(),
+            })
+            .unwrap_err(),
+            "kilo: version check failed"
+        );
+        assert_eq!(
+            kilo_connection_verdict(&ProbeOutcome::Failed {
+                message: "  ".into(),
+            })
+            .unwrap_err(),
+            "kilo --version failed"
+        );
+        assert_eq!(
+            kilo_connection_verdict(&ProbeOutcome::TimedOut).unwrap_err(),
+            "kilo --version timed out"
+        );
+        assert_eq!(
+            kilo_connection_verdict(&ProbeOutcome::NotRun).unwrap_err(),
+            "kilo was not found"
+        );
+    }
 }

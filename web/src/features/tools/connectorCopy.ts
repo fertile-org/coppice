@@ -7,7 +7,7 @@ export const NO_READY_CONNECTOR_HINT =
 
 export type ConnectorReadiness = 'ready' | 'found_not_signed_in' | 'not_on_path' | 'found';
 
-/** User-facing status. `found` and a missing value make no sign-in claim. */
+/** User-facing status. A missing value makes no sign-in claim. */
 export function readinessLabel(readiness: ConnectorReadiness | null | undefined): string | null {
   switch (readiness) {
     case 'ready':
@@ -16,9 +16,20 @@ export function readinessLabel(readiness: ConnectorReadiness | null | undefined)
       return 'Found, not signed in';
     case 'not_on_path':
       return 'Not on your PATH';
+    case 'found':
+      return 'Found (sign-in not checked)';
     default:
       return null;
   }
+}
+
+/** Chat turns are read-only. Kilo Code refuses that, and it has no safe write-blocked mode. */
+export const KILO_CHAT_UNAVAILABLE =
+  "Chat isn't available for Kilo Code yet, because Chat runs read-only and Kilo Code can't.";
+
+export function chatUnavailableMessage(connectorId: string | null | undefined): string | null {
+  if (connectorId === 'kilo-code') return KILO_CHAT_UNAVAILABLE;
+  return null;
 }
 
 export function notOnPathHint(name: string): string {

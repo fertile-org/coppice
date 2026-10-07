@@ -67,11 +67,19 @@ vi.mock('../agents/useAgents', () => ({
         id: '00000000-0000-4000-8000-000000000010',
         name: 'Backend Engineer',
         enabled: true,
+        connector: 'claude-code',
       },
       {
         id: '00000000-0000-4000-8000-000000000011',
         name: 'Disabled Agent',
         enabled: false,
+        connector: 'claude-code',
+      },
+      {
+        id: '00000000-0000-4000-8000-000000000012',
+        name: 'Kilo Agent',
+        enabled: true,
+        connector: 'kilo-code',
       },
     ],
   }),
@@ -244,6 +252,38 @@ describe('ChatPage', () => {
     const options = openCombobox(agent);
     expect(within(options).getByRole('option', { name: 'Backend Engineer' })).toBeInTheDocument();
     expect(within(options).queryByRole('option', { name: 'Disabled Agent' })).toBeNull();
+  });
+
+  it('disables chat for a Kilo Code agent', () => {
+    renderChat('/chat');
+
+    selectComboboxOption(screen.getByLabelText('Agent'), 'Kilo Agent');
+
+    expect(
+      screen.getByText(
+        "Chat isn't available for Kilo Code yet, because Chat runs read-only and Kilo Code can't.",
+      ),
+    ).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Start chat' })).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Start chat' }));
+    expect(mocks.createSession).not.toHaveBeenCalled();
+  });
+
+  it('hides the composer for an existing Kilo Code chat', () => {
+    mocks.sessions = [
+      {
+        ...ACTIVE_SESSION,
+        agentId: '00000000-0000-4000-8000-000000000012',
+      },
+    ];
+    renderChat(`/chat/${ACTIVE_SESSION.id}`);
+
+    expect(
+      screen.getByText(
+        "Chat isn't available for Kilo Code yet, because Chat runs read-only and Kilo Code can't.",
+      ),
+    ).toBeVisible();
+    expect(screen.queryByTestId('chat-composer')).not.toBeInTheDocument();
   });
 
   it('creates a session then opens the transcript composer', async () => {

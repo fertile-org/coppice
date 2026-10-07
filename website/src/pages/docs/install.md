@@ -27,7 +27,7 @@ After the beta tag, assets will also appear on [GitHub Releases](https://github.
 2. Point it at a local git checkout you already have on disk.
 3. **Connect your agent CLI.** Pick your agent CLI when you create an agent, and Coppice turns it on. Each one shows whether it's **Ready**, **Found, not signed in**, or **Not on your PATH**. Sign in to the CLI in your terminal first, the same way you normally would.
 
-   Coppice can find Kilo Code but can't check its sign-in, so it shows no status. Make sure you're signed in to Kilo Code in your terminal.
+   Kilo Code shows **Found (sign-in not checked)**: Coppice can find it but can't check its sign-in. Make sure you're signed in to Kilo Code in your terminal.
 
    To turn a connector off later, use the toggle in Tools → Connectors, or set `enabled = false` for it in your Coppice `config.toml`:
 

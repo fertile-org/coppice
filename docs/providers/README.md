@@ -89,7 +89,7 @@ Plugin MCP tools are proxied through the same gateway as `<plugin>__<tool>`, so 
 
 Tools → Connectors shows each connector's switch, CLI readiness, detected auth (env var names and file paths only, never values), probe output, last real run, and last test.
 
-**Test connection** runs a real agent run through the production path against a synthetic ticket in a scratch directory. It passes when the agent calls `ticket_get` and `result_submit` and submits `done`. The check runs with read-only tools, so on `kilo-code` it fails with the read-only refusal above.
+**Test connection** runs a real agent run through the production path against a synthetic ticket in a scratch directory. It passes when the agent calls `ticket_get` and `result_submit` and submits `done`. That check uses read-only tools. `kilo-code` refuses those, so its Test connection runs `kilo --version` instead and passes or fails with that command's own result.
 
 `coppice connector doctor <id>` runs the same local checks from a terminal.
 
