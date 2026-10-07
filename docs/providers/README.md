@@ -1,148 +1,134 @@
-# Agent connectors
+# Connectors: developer guide
 
-Coppice runs agents through **connectors**. Each connector talks to a different CLI or service (Cursor, Claude Code, OpenCode, …). Tickets, the board, and worktrees stay the same; you pick a connector per agent.
+This page is for building Coppice from source, running it in Docker, or adding a connector. Using the desktop app? Start with [providers.md](../providers.md).
 
-| Connector | Doc | Notes |
-|-----------|-----|--------|
-| `mock` | [mock.md](mock.md) | Default for CI and Compose smoke — no real CLI |
-| `cursor` | [cursor.md](cursor.md) | Cursor Agent CLI (`agent`) |
-| `claude-code` | [claude-code.md](claude-code.md) | Claude Code CLI (`claude`) |
-| `codex` | [codex.md](codex.md) | OpenAI Codex CLI (`codex`) |
-| `opencode` | [opencode.md](opencode.md) | OpenCode serve + Live Session UI |
-| `kilo-code` | [kilo-code.md](kilo-code.md) | Kilo CLI (`kilo`) |
-| `shell` | [shell.md](shell.md) | Deferred |
+A connector is how Coppice drives one agent CLI. The board, tickets and worktrees work the same for every connector; each agent picks one.
 
-**Source of truth.** Connector facts (id, binary, auth hints, MCP wiring style, live console kind, capabilities such as chat resume and read-only enforcement) live in one descriptor table, [`connectors/src/lib.rs`](../../connectors/src/lib.rs), read by the server, the `coppice connector` CLI, and the web (through `GET /api/connectors`). The tables on this page describe it; when they disagree, the descriptor wins. Layer overview: [architecture.md § Connector layer](../architecture.md#connector-layer).
+**Source of truth.** [`connectors/src/lib.rs`](../../connectors/src/lib.rs) holds one descriptor per connector: id, display name, binary, sign-in hints, probe, MCP wiring, console kind and capabilities. The server, the `coppice connector` CLI and the web app (through `GET /api/connectors`) all read it. If this page and the descriptor disagree, the descriptor wins.
 
-## Connectors vs model providers vs models
+## The connectors
 
-| Layer | Example | Where you set it |
-|-------|---------|------------------|
-| Connector | `cursor`, `opencode` | Agent in the UI, and `[agent.connectors.*]` in config |
-| Model provider | `cursor`, `zai-coding-plan` | `model_providers = [...]` in connector config |
-| Model | a specific model id | Per agent in the UI (fetched live after login) |
+| Connector | id | Command | How Coppice runs it | Sign-in check | Guide |
+| --- | --- | --- | --- | --- | --- |
+| Claude Code | `claude-code` | `claude` | Subprocess in the worktree: `claude -p … --output-format stream-json` | `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN` set, or `~/.claude/.credentials.json`; otherwise `claude auth status` | [claude-code.md](claude-code.md) |
+| Codex | `codex` | `codex` | Subprocess: `codex exec --json` | `OPENAI_API_KEY` set, or `~/.codex/auth.json`; otherwise `codex login status` | [codex.md](codex.md) |
+| Cursor | `cursor` | `agent` | Subprocess: `agent -p … --output-format stream-json` | `~/.config/cursor/auth.json` or `~/.cursor/auth.json`. Neither means not signed in | [cursor.md](cursor.md) |
+| OpenCode | `opencode` | `opencode` | A fresh `opencode serve` per run, driven over HTTP/SSE. The ticket shows a Live Session | `~/.local/share/opencode/auth.json`; otherwise `opencode auth list` | [opencode.md](opencode.md) |
+| Kilo Code | `kilo-code` | `kilo` | Subprocess: `kilo run --format json --auto` | None. `kilo auth` is interactive, so Coppice never runs it | [kilo-code.md](kilo-code.md) |
 
-## Docker Compose
+### Detection and status
 
-To use a real connector, follow that connector’s doc **One-time setup** section (run `coppice connector …` on the **server** container). Example for Cursor: [cursor.md § One-time setup](cursor.md#one-time-setup-docker-compose).
+At startup, the server adds common bin dirs to its `PATH` if they exist and aren't already there: `~/.local/bin`, `~/.opencode/bin`, `~/.npm-global/bin`, `~/.bun/bin`, `/opt/homebrew/bin` and `/usr/local/bin`. The desktop app also passes in the `PATH` from your login shell. Probes and runs use this same `PATH`.
 
-Pattern for every connector:
+For each connector, Coppice resolves the binary (the `command` key if set, otherwise the descriptor binary). It runs the probe (10 s cap), then the sign-in check: env var names, credential files, or the CLI's own status command (3 s cap). The sign-in check never opens a browser, prompts, or calls a model. The result is shown in the agent form and in Tools → Connectors:
 
-1. `enable` → recreate the server  
-2. `install` → `setup` → `doctor`  
-3. Create an agent in the UI and pick connector / provider / model  
-4. Verify from **Tools → Connectors → Test connection** (see [Diagnostics](#diagnostics-tools--connectors))  
+| Readiness | Label | When |
+| --- | --- | --- |
+| `ready` | Ready | Binary found and sign-in verified |
+| `found_not_signed_in` | Found, not signed in | Binary found and a reliable check says no sign-in |
+| `not_on_path` | Not on your PATH | Binary not found |
+| `found` | *(no label)* | Binary found, sign-in can't be checked |
 
-Binaries and login state live in a Compose volume at `/home/coppice`. You do not mount host `~/.local` / `~/.config` for CLIs. Default Compose stays on `mock` for CI.
+Kilo Code is always `found` once `kilo` is on `PATH`. Coppice makes no sign-in claim for it.
 
-Design notes: [M08](../milestones/M08-connector-operator-cli.md).
+Probes run at server start, on **Run check**, and when **Test connection** starts. They don't run on every page load.
 
-## Per-agent choice
+## Configuration
 
-`[agent] default_connector` sets the default. Each agent can override connector, model provider, and model on the Agents page. At run time the worker uses that agent’s values.
+Each connector has a `[agent.connectors.<id>]` section in `config.toml`:
 
-**Health** (separate from enabled/disabled):
+| Key | Connectors | Default |
+| --- | --- | --- |
+| `enabled` | all | `false` |
+| `command` | `cursor` (`agent`), `opencode` (`opencode`), `kilo-code` (`kilo`) | Claude Code and Codex always run `claude` / `codex` |
+| `model_providers` | all | Empty. Turning a connector on fills an empty list from the descriptor: `claude-code` → `sonnet, opus, haiku`; `codex` → `openai`; `cursor` → `cursor`; `kilo-code` → `anthropic`; `opencode` → none (list IDs from `opencode auth list` yourself) |
+| `run_timeout_secs` | all | `600`; `opencode` `1800` |
+| `serve_hostname` | `opencode` | `127.0.0.1` (each run's server picks a free port; `serve_port` is ignored) |
 
-| Health | Meaning |
-|--------|---------|
-| `unknown` | Check not run yet |
-| `healthy` | Connector reachable and model provider configured |
-| `unreachable` | Connector/CLI not usable |
-| `missing_config` | Connector turned off, or model provider missing from connector `model_providers` |
+`[agent] default_connector` sets the default for new agents. Each agent can override its connector, model provider and model on the Agents page.
 
-Unreachable or misconfigured agents are not used for new auto-assignments until fixed.
+Where the config lives:
+
+| How you run Coppice | File |
+| --- | --- |
+| Desktop app | `config.toml` in the app data dir (`~/Library/Application Support/Coppice/` on macOS, `~/.config/Coppice/` on Linux). Only this file is read |
+| From source | Defaults, then `~/.config/coppice/config.toml`, then `./config.toml`, then `COPPICE_CONFIG`, then environment variables (last wins) |
+| Docker Compose | `deploy/config/config.toml`, mounted at `/etc/coppice/config.toml` |
+
+The Tools → Connectors switch and saving an agent both turn a connector on immediately. They write into `config.toml` and keep comments and other keys. `coppice connector enable` and hand edits apply the next time the server starts.
+
+## Chat and session resume
+
+Agent Chat turns run with read-only tools. Coppice stores the full transcript itself. When a connector supports resume, later turns reuse the CLI session with a slim context; if resume fails, one retry sends the full transcript.
+
+| Connector | Chat session resume | Read-only tools in chat |
+| --- | --- | --- |
+| `claude-code` | `--resume` | Enforced with an `--allowedTools` read-only list |
+| `cursor` | `--resume` | Enforced with `--mode ask` |
+| `codex` | `codex exec resume` (best effort) | Not enforced by the CLI; prompt and rules only |
+| `opencode` | Reuses the OpenCode session | Not enforced by the CLI; prompt and rules only |
+| `kilo-code` | Skipped | Can't be enforced, so the run is refused: ``connector `kilo-code` cannot enforce read-only tools for conversation chat turns`` |
+
+Ticket runs can resume a prior session on `claude-code` and `cursor`. The other connectors start a fresh session and continue from the ticket checkpoint.
 
 ## Coppice MCP gateway (tool-first runs)
 
-Every run gets a per-run bearer token for the Coppice MCP gateway at `POST /mcp`, handed to the CLI as `COPPICE_MCP_URL` / `COPPICE_MCP_TOKEN`. Connectors configure the gateway per run only — CLI flags, per-process env, or a config file in that run's artifacts dir (`<artifacts_dir>/runs/<run id>/`). Nothing is written to the worktree, a registered repo checkout, or the operator's global CLI config, and the token is never written to a file in plaintext (each config interpolates it from the environment). A connector that cannot be configured fails the run with `mcp_unavailable` — there is no fallback to the old fat context.
+Every run gets a per-run token for the Coppice MCP gateway at `POST /mcp`, handed to the CLI as `COPPICE_MCP_URL` / `COPPICE_MCP_TOKEN`. Each connector wires the gateway for that run only, through flags, process env, or a file under `<artifacts_dir>/runs/<run id>/`. Nothing is written to the worktree, a registered repo, or your global CLI config. The token is never written to a file. If a connector can't be wired, the run fails with `mcp_unavailable`.
 
-| Connector | Status | Mechanism |
-|-----------|--------|-----------|
-| `mock` | n/a | Fixture `toolCalls` executed over HTTP JSON-RPC against `/mcp` |
-| `cursor` | **verified** (CLI `2026.09.28-64d2043`) | Coppice-owned `HOME` with `.cursor/mcp.json`, plus `CURSOR_CONFIG_DIR` with a `cli-config.json` that allows `Mcp(coppice:*)` (see the state-directory note below) |
-| `claude-code` | unverified — expected mechanism | `--mcp-config <run dir>/mcp.json --strict-mcp-config`; `mcp__coppice__*` added to `--allowedTools` |
-| `codex` | unverified — expected mechanism | `-c mcp_servers.coppice.url=…` + `-c mcp_servers.coppice.bearer_token_env_var="COPPICE_MCP_TOKEN"` |
-| `kilo-code` | unverified — expected mechanism | `KILO_CONFIG` pointing at `<run dir>/kilo-config.json` (OpenCode-style `mcp` block, `{env:COPPICE_MCP_TOKEN}` header) |
-| `opencode` | **verified** (`1.18.33`) | Per-run `opencode serve` with `OPENCODE_CONFIG=<run dir>/opencode.json` (remote `coppice` MCP server, `{env:COPPICE_MCP_TOKEN}` header) |
+| Connector | Mechanism | Checked against a live CLI |
+| --- | --- | --- |
+| `claude-code` | `--mcp-config <run dir>/mcp.json --strict-mcp-config`, plus `mcp__coppice__*` in `--allowedTools` | Not yet |
+| `codex` | `-c mcp_servers.coppice.url=…` and `-c mcp_servers.coppice.bearer_token_env_var="COPPICE_MCP_TOKEN"` | Not yet |
+| `cursor` | Coppice-owned `HOME` with `.cursor/mcp.json`, and `CURSOR_CONFIG_DIR` with a `cli-config.json` allowing `Mcp(coppice:*)` | Yes (`2026.09.28-64d2043`) |
+| `opencode` | `OPENCODE_CONFIG=<run dir>/opencode.json` for the per-run `opencode serve` | Yes (`1.18.33`) |
+| `kilo-code` | `KILO_CONFIG=<run dir>/kilo-config.json` (name follows OpenCode's convention; may differ in Kilo) | Not yet |
 
-Verify an unverified row when its CLI is first available: create an agent on that connector, then use **Tools → Connectors → Test connection** (below). A pass means the run called `ticket_get` and `result_submit` through the gateway; record the CLI version in the table. For `kilo-code` the env var name follows the OpenCode `OPENCODE_CONFIG` convention and may differ in the fork — a check failing with `mcp_unavailable` points there.
+Plugin MCP tools are proxied through the same gateway as `<plugin>__<tool>`, so connectors need no per-plugin wiring. More in [architecture.md](../architecture.md#plugin-mcp-proxy).
 
 ## Diagnostics (Tools → Connectors)
 
-Admins open **Tools → Connectors** (`/tools?tab=connectors`) to see, per connector except `mock`:
+Tools → Connectors shows each connector's switch, CLI readiness, detected auth (env var names and file paths only, never values), probe output, last real run, and last test.
 
-| Row | Meaning |
-|-----|---------|
-| Enabled | A switch. Turning it on or off is written into `config.toml` (comments and other keys kept) and the running server picks it up immediately. Saving an agent on a turned-off connector turns that connector on the same way. `coppice connector enable` and hand-edits apply the next time the server starts. |
-| CLI | **Ready** (binary found and sign-in verified), **Found, not signed in**, or **Not on your PATH**. A binary with no reliable sign-in check shows the path and no status claim. |
-| Auth | **Detected** (which auth env var **names** are set and which auth files under HOME exist — never values or file contents), **Verified by probe**, or **Not found**. This row is separate from the CLI status above. |
-| Probe | Shown when the CLI is found: the first line of the probe output (e.g. the version), **Failed** with up to 500 chars of output, or **Timed out** (10 s). |
-| Last real run | The latest finished non-check run of an agent on this connector, with whether it made an `ok` `ticket_get` and `result_submit` call. |
-| Last test | The latest Test connection: time, passed/failed, and the failure reason. |
+**Test connection** runs a real agent run through the production path against a synthetic ticket in a scratch directory. It passes when the agent calls `ticket_get` and `result_submit` and submits `done`. The check runs with read-only tools, so on `kilo-code` it fails with the read-only refusal above.
 
-When the CLI or auth is missing, the card shows the connector's auth hint and a vendor install docs link. Coppice never installs a CLI or runs a login from the page — use the `coppice connector …` steps above.
+`coppice connector doctor <id>` runs the same local checks from a terminal.
 
-Probes run at server startup, on **Run check**, and again when **Test connection** starts (the test itself is not delayed for the probe). The page shows the cached result and does not probe on every load. Until the startup probe finishes a card shows "Checking…".
+## Tests
 
-Sign-in is a separate cheap check (a few seconds, no browser, no prompt, no model call): credential files or the CLI's own non-interactive status command. **Kilo Code has no such check** — `kilo auth` is a TUI — so a found `kilo` binary is never labeled "Found, not signed in" or "Ready" from auth. Cursor, Claude Code, Codex, and OpenCode do have a check.
+No real agent CLI runs in CI or automated tests.
 
-Turning a connector off does not stop a run that is already in progress. A queued run, a new ticket run, chat, a connector test, and knowledge compaction fail immediately with a message that names the connector and points at Tools → Connectors. Agent health shows the same message.
+- `MockProvider` (`server/src/providers/mock.rs`) is a test-only provider. It replays JSON fixtures from `fixtures/agent-responses/` (pick one with `MOCK_AGENT_RESPONSE`). It's compiled only with the `mock-provider` Cargo feature, which `embedded-test-db`, `make server`, CI and the Docker Compose image turn on. Desktop installers and release builds leave it out, and CI runs the `release_build` tests to check that. It isn't something users pick.
+- Adapters are tested against stand-in binaries: `fake-cli` (Cursor and Kilo Code) and `fake-opencode`.
 
-**Test connection** runs a real agent run through the production path (provider adapter, per-run MCP wiring, token, gateway, `run_tool_calls`). Pick an agent that uses the connector (create one on the Agents page first). The run gets a scratch directory and a two-tool profile — `ticket_get` returns a fixed synthetic ticket and `result_submit` — so it never reads or changes a real ticket, repository, comment, or notification. It times out after the connector's `run_timeout_secs` or 180 s, whichever is shorter. The check passes when the run calls both tools and submits `done`; otherwise it fails with the first reason that applies:
+| Command | What it runs |
+| --- | --- |
+| `make test` | Full Rust suite (`cargo nextest run --features embedded-test-db --workspace`; falls back to serial `cargo test`) |
+| `make test-unit` | Library tests only |
+| `make clippy` | Clippy with and without `mock-provider` |
+| `make web-test` | Web app tests |
+| `cargo test -p coppice-connectors` | Descriptors, probe, sign-in checks |
+| `cargo test --features embedded-test-db -p coppice-server --test integration_cli_adapters` | Cursor and Kilo Code adapters against `fake-cli` |
+| `cargo test --features embedded-test-db -p coppice-server --test integration_opencode_run_server` | Per-run `opencode serve` against `fake-opencode` |
+| `cargo test --features embedded-test-db -p coppice-server --test integration_connector_diagnostics` | Connectors API and Test connection |
 
-| Failure | Likely cause |
-|---------|--------------|
-| The run error (e.g. `mcp_unavailable`, `connection check timed out after …`) | CLI could not be configured or started, not logged in, or the model never finished |
-| `ticket_get was not called` | The CLI did not see the Coppice MCP server (wiring) or ignored it |
-| `result_submit was not called` | The agent stopped before submitting |
-| `result was <outcome>` | The agent's first valid submission was not `done` (only the first one counts) |
-| `server restarted` | The server restarted while the check was queued or running |
+To try a real CLI, run Coppice from source or in Docker, create an agent on that connector, and use **Test connection**.
 
-Only one check per connector runs at a time. The CLI still has `coppice connector doctor <id>` with the same local checks for terminal use.
+## Docker (optional, for development)
 
-**Cursor state directory.** The CLI keeps its `chats` state under `CURSOR_CONFIG_DIR`, so the per-run home and config dirs are keyed by whatever `--resume` resolves against, not by run id:
+`make compose-up` builds and starts the full stack (web on `http://localhost:5001`; see [development.md](../development.md)). The Compose image includes `mock-provider` and defaults agents to `mock`, so smoke tests run without a CLI.
 
-| Run | Directory under the artifacts dir |
-|-----|-----------------------------------|
-| Chat turn | `chat-sessions/<chat session id>/cursor-{home,config}` |
-| Ticket run | `tickets/<ticket id>/cursor-{home,config}` |
-| Anything else (no resume) | `runs/<run id>/cursor-{home,config}` |
+To use a real connector inside the container, install it and sign in there. CLIs and their sign-ins live in the `connector_data` volume at `/home/coppice`, not in your host home.
 
-`mcp.json` and `cli-config.json` are rewritten every turn; neither holds the token, so runs sharing a directory cannot corrupt each other. All paths are absolutized first — `storage.artifacts_dir` is usually relative and the CLI is spawned with the worktree as its working directory.
+```bash
+docker compose -f deploy/docker-compose.yml exec -it -u "$(id -u):$(id -g)" server coppice connector enable <id>
+docker compose -f deploy/docker-compose.yml up -d --force-recreate server
+docker compose -f deploy/docker-compose.yml exec -it -u "$(id -u):$(id -g)" server coppice connector install <id>
+docker compose -f deploy/docker-compose.yml exec -it -u "$(id -u):$(id -g)" server coppice connector setup <id>
+docker compose -f deploy/docker-compose.yml exec -it -u "$(id -u):$(id -g)" server coppice connector doctor <id>
+```
 
-**Cursor side effects.** Overriding `HOME` also changes it for the agent's own shell commands, so the connector forwards `XDG_CONFIG_HOME` (the operator's real config home, where `cursor/auth.json` lives) and, when they exist and are not already set, `GIT_CONFIG_GLOBAL` and `GH_CONFIG_DIR`. Because `CURSOR_CONFIG_DIR` points at a Coppice-owned directory, permission rules in the operator's own `cli-config.json` do **not** apply to Coppice runs — only the `Mcp(coppice:*)` allow rule Coppice writes does.
-
-**OpenCode per-run server.** Each run (and each chat turn) spawns its own `opencode serve` on a free port on `serve_hostname`, with `OPENCODE_CONFIG` pointing at `<artifacts_dir>/runs/<run id>/opencode.json` (runs without a gateway token, such as drafts, use a temp file). The process is killed when the run ends, is cancelled, or fails, and on server shutdown. `serve_port` is ignored. Sessions live in OpenCode's shared data dir, so a later run's process resumes an existing session id. A per-run server does not survive a Coppice restart, so active OpenCode runs are marked interrupted on startup.
-
-**Plugin tools.** Plugin MCP servers are proxied through the same `coppice` server as `<plugin>__<tool>`, so connectors need no per-plugin wiring. See [architecture.md § Plugin MCP proxy](../architecture.md#plugin-mcp-proxy).
-
-**Console tool titles.** Each live console renders gateway calls as `coppice · <tool>` for core tools and `<plugin> · <tool>` for plugin tools. The connector's descriptor `mcp_tool_names` (`ToolNameStyle`) says how its CLI spells gateway tool names; `coppice_connectors::gateway_tool` (or `gateway_tool_from_fields` for connectors that report the server as a separate field, like codex) strips that prefix and splits plugin from tool on the first `__`. A new connector's console needs only the right style — no console code.
-
-| `ToolNameStyle` | CLI spelling | Connectors |
-|-----------------|--------------|------------|
-| `McpDoubleUnderscore` | `mcp__coppice__<tool>` | `claude-code` |
-| `Dash` | `coppice-<tool>` | `cursor` |
-| `Underscore` | `coppice_<tool>` | `opencode`, `kilo-code` (Kilo emits no tool events) |
-| `ServerToolFields` | separate `server` / `tool` fields | `codex` |
-| `None` | — | `mock` |
-
-Design: [M10 plugins](../superpowers/specs/2026-09-29-m10-plugins-design.md), [Part 2b plugin MCP](../superpowers/specs/2026-10-02-m10-part2b-plugin-mcp-design.md).
-
-## Agent Chat multi-turn (provider session resume)
-
-Agent Chat reuses the vendor session across human messages when possible. Coppice still stores the full transcript in Postgres; on later turns the worker passes `--resume` / OpenCode session reuse with a **slim** `.agent/context.md`. If resume fails, one automatic retry sends the full transcript (logged as `chat_resume_fallback`).
-
-| Connector | Resume | Read-only enforcement in chat |
-|-----------|--------|-------------------------------|
-| `mock` | Yes (CI) | Fixtures |
-| `claude-code` | `--resume` | `--allowedTools` read-only allowlist |
-| `cursor` | `--resume` | `--mode ask` |
-| `codex` | `codex exec resume` (best-effort) | Prompt + rules only; CLI uses bypass flag — see [codex.md](codex.md) |
-| `opencode` | HTTP session `prompt_async` | Prompt + rules only — see [opencode.md](opencode.md) |
-| `kilo-code` | — | Not supported for chat |
-
-Design: [Agent Chat provider session resume](../superpowers/specs/2026-09-28-agent-chat-provider-session-resume-design.md).
+`install` runs the vendor installer for Cursor and OpenCode and prints a hint for the others. `setup` runs the vendor sign-in. Outside Docker, the same `coppice connector list | enable | install | setup | doctor` commands work on your host. `enable` writes to `--config`, otherwise `COPPICE_CONFIG`, otherwise `./config.toml` or `deploy/config/config.toml` if present.
 
 ## Adding a connector
 
-Follow the checklist in [architecture.md § Adding a connector](../architecture.md#adding-a-connector): descriptor entry (including probe args, `probe_proves_auth`, and `docs_url`, which drive `doctor` and the Connectors page), config struct and example config sections, adapter (`run_cli` + `LineHandler`, or a custom `AgentProvider`) with a `ModelCatalog`, `FACTORIES` entry, a wiring renderer only for a new MCP style, plus the remaining manual touchpoints it lists (the config `enabled(id)` arm, read-only list, per-id CLI arms in `enable.rs` / `install.rs` / `setup.rs`). Use the existing docs above as templates. Prefer live model listing when the CLI supports it.
+Follow [architecture.md § Adding a connector](../architecture.md#adding-a-connector): a descriptor entry, a config struct and example section, an adapter with a `ModelCatalog`, a `FACTORIES` entry, and the per-id arms it lists. Add a guide in this folder and a row in the table above.

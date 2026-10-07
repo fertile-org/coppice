@@ -1,5 +1,7 @@
 # Mock
 
+This connector is for CI and automated tests only. It is not an end-user connector.
+
 Built-in connector for CI, automated tests, and default Docker Compose. No real CLI or API keys. Returns canned results from `fixtures/agent-responses/` (for example `done.json`, `blocked.json`).
 
 Desktop installers and `make release-tar` are built without the `mock-provider` feature, so this connector is not compiled, not listed, and not packaged with those builds. Opt in for local `cargo run` with `--features mock-provider` (`make server` does).
