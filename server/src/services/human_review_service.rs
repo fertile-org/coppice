@@ -13,10 +13,6 @@ use uuid::Uuid;
 use crate::domain::substatus::TicketStatus;
 use crate::services::workflow_service::WorkflowService;
 
-/// Prefix of the system comment written when a ticket branch is merged.
-/// That comment is the merged mark. Acceptance for a merged ticket stays as recorded.
-pub const MERGED_COMMENT_PREFIX: &str = "**Merge:**";
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HumanReview {
     pub ticket_id: Uuid,
@@ -81,7 +77,9 @@ impl<'a> HumanReviewService<'a> {
                 stale = false,
                 accepted_by = EXCLUDED.accepted_by,
                 accepted_at = now(),
-                invalidated_at = NULL
+                invalidated_at = NULL,
+                merged_sha = NULL,
+                merged_at = NULL
             RETURNING ticket_id, head_sha, comment_ids, run_ids, stale, accepted_by, accepted_at
             "#,
         )
@@ -96,11 +94,34 @@ impl<'a> HumanReviewService<'a> {
         Ok(row_to_review(&row))
     }
 
+    /// Record that the accepted commit was merged. System-written by the merge
+    /// path only. A later acceptance clears this.
+    pub async fn record_merge(
+        &self,
+        ticket_id: Uuid,
+        merged_sha: &str,
+    ) -> Result<(), HumanReviewError> {
+        let merged_sha = normalize_sha(merged_sha);
+        sqlx::query(
+            r#"
+            UPDATE ticket_human_reviews
+            SET merged_sha = $2, merged_at = now()
+            WHERE ticket_id = $1
+            RETURNING ticket_id
+            "#,
+        )
+        .bind(ticket_id)
+        .bind(&merged_sha)
+        .fetch_one(self.pool)
+        .await?;
+        Ok(())
+    }
+
     /// A commit landed that is not the accepted one. Mark the acceptance stale
     /// and move Done / Wait for Human Review back to In Review.
     ///
-    /// A ticket that is already merged is left alone: the acceptance row is not
-    /// updated and the status is not changed.
+    /// A ticket whose acceptance has `merged_at` set is left alone: the row is
+    /// not updated and the status is not changed.
     ///
     /// Returns whether this call invalidated a live acceptance.
     pub async fn observe_head(
@@ -110,31 +131,13 @@ impl<'a> HumanReviewService<'a> {
     ) -> Result<bool, HumanReviewError> {
         let head_sha = normalize_sha(head_sha);
         let mut tx = self.pool.begin().await?;
-        let merged: bool = sqlx::query_scalar(
-            r#"
-            SELECT EXISTS (
-                SELECT 1
-                FROM ticket_comments
-                WHERE ticket_id = $1
-                  AND intent = 'system_event'
-                  AND left(body, char_length($2::text)) = $2
-            )
-            "#,
-        )
-        .bind(ticket_id)
-        .bind(MERGED_COMMENT_PREFIX)
-        .fetch_one(&mut *tx)
-        .await?;
-        if merged {
-            tx.rollback().await?;
-            return Ok(false);
-        }
         let updated = sqlx::query(
             r#"
             UPDATE ticket_human_reviews
             SET stale = true, invalidated_at = now()
             WHERE ticket_id = $1
               AND stale = false
+              AND merged_at IS NULL
               AND lower(head_sha) <> lower($2)
             "#,
         )

@@ -388,6 +388,55 @@ async fn merged_ticket_is_not_marked_stale_when_branch_moves() {
     assert_eq!(ticket["status"], "done");
     assert_eq!(ticket["humanReview"]["stale"], false);
     assert_eq!(ticket["humanReview"]["headSha"], approved_sha);
+    assert_eq!(
+        stored_merged_sha(&fx).await.as_deref(),
+        Some(approved_sha.as_str())
+    );
+}
+
+#[tokio::test]
+async fn user_merge_comment_does_not_keep_review_fresh() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let fx = setup().await;
+    set_wait_for_human_review(&fx).await;
+    let approved_sha = git_rev_parse(&fx.worktree_path, "HEAD");
+    final_approve(&fx).await;
+    post_comment(&fx, "**Merge:** into main", "progress_update").await;
+    assert!(stored_merged_sha(&fx).await.is_none());
+
+    commit_file(
+        &fx.worktree_path,
+        "after-comment.txt",
+        "later commit\n",
+        "after comment",
+    );
+    let pool = fx.state.db.clone().expect("pool");
+    let changed =
+        TicketGitService::new(&pool, PathBuf::from(&fx.state.config.agent.worktrees_path))
+            .note_branch_head(Uuid::parse_str(&fx.ticket_id).unwrap())
+            .await
+            .expect("note branch head");
+    assert!(changed);
+
+    let ticket = get_ticket(&fx).await;
+    assert_eq!(ticket["status"], "in_review");
+    assert_eq!(ticket["humanReview"]["stale"], true);
+    assert_eq!(ticket["humanReview"]["headSha"], approved_sha);
+    assert!(stored_merged_sha(&fx).await.is_none());
+}
+
+async fn stored_merged_sha(fx: &Fixture) -> Option<String> {
+    let pool = fx.state.db.clone().expect("pool");
+    sqlx::query_scalar(
+        "SELECT merged_sha FROM ticket_human_reviews WHERE ticket_id = $1",
+    )
+    .bind(Uuid::parse_str(&fx.ticket_id).unwrap())
+    .fetch_one(&pool)
+    .await
+    .expect("merged_sha")
 }
 
 #[tokio::test]
