@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Deliver strict status-gate orchestration, `@mention` clarification/resume, per-status `auto_assign` (default true, backlog false), human Final Approve, and a MockProvider-driven CI smoke path that uses the same worker pipeline as OpenCode.
+**Goal:** Deliver strict status-gate orchestration, `@mention` clarification/resume, per-status `auto_assign` (default true, backlog false), a human Accept action, and a MockProvider-driven CI smoke path that uses the same worker pipeline as OpenCode.
 
 **Architecture:** After each run, a post-run orchestrator parses the result contract (comment/substatus only — not `nextStatus`), calls `WorkflowService::resolve_transition` for gate moves and assignee/recommendation, then `MentionService` for jobs, then enqueues follow-up work when `auto_start_runs` is enabled. Transition rules live in Rust, not YAML.
 
@@ -34,7 +34,7 @@
 | `server/src/api/comments.rs` | Human `@mention` → MentionService on create |
 | `server/src/events/bus.rs` | `agent.mentioned` event |
 | `fixtures/agent-responses/{key}/{job-type}.json` | Scope B mock fixtures |
-| `web/src/features/tickets/TicketDrawer.tsx` | Final Approve button |
+| `web/src/features/tickets/TicketDrawer.tsx` | Accept button |
 | `web/src/features/tickets/TicketMetadataPanel.tsx` | Pending recommendation badge |
 | `web/src/lib/schemas/ticket.ts` | New ticket fields |
 | `e2e/smoke/m05-workflow.mjs` | CI smoke scope B |
@@ -847,7 +847,7 @@ if author_type == AuthorType::Human {
 
 Add `AppEvent::AgentMentioned` variant.
 
-- [ ] **Step 2: Final approve endpoint**
+- [ ] **Step 2: Accept endpoint**
 
 ```rust
 // POST /api/tickets/:id/final-approve
@@ -994,7 +994,7 @@ git commit -m "docs(server): context contract documents assignTo instead of next
 
 ---
 
-### Task 13: Frontend — recommendation, Final Approve, substatus
+### Task 13: Frontend — recommendation, Accept, substatus
 
 **Files:**
 - Modify: `web/src/lib/schemas/ticket.ts`
@@ -1028,19 +1028,19 @@ When `ticket.pendingAssignRecommendation` present:
 </p>
 ```
 
-- [ ] **Step 3: Final Approve button in drawer header**
+- [ ] **Step 3: Accept button in drawer header**
 
 When `ticket.status === 'wait_for_final_review'`:
 
 ```tsx
-<Button onClick={() => finalApprove.mutate(ticket.id)}>Final Approve</Button>
+<Button onClick={() => finalApprove.mutate(ticket.id)}>Accept</Button>
 ```
 
 Add `useFinalApprove` mutation → `POST /api/tickets/:id/final-approve`.
 
 - [ ] **Step 4: Vitest**
 
-Assert Final Approve button renders only in `wait_for_final_review`.
+Assert the Accept button renders only in `wait_for_final_review`.
 
 - [ ] **Step 5: Run web tests**
 
@@ -1050,7 +1050,7 @@ Run: `cd web && yarn test`
 
 ```bash
 git add web/src/lib/schemas/ticket.ts web/src/features/tickets/
-git commit -m "feat(web): pending recommendation badge and Final Approve action"
+git commit -m "feat(web): pending recommendation badge and Accept action"
 ```
 
 ---
@@ -1177,7 +1177,7 @@ git commit -m "chore(m05): update docs and mark design spec approved"
 | Mentions + clarification/resume | 6, 7, 9, 10 |
 | `respond_to_mention` no status move (case 3) | 5, 10 |
 | Missing assignTo agent → Blocked (case 4) | 5 |
-| Final Approve gate | 5, 10, 13 |
+| Accept gate | 5, 10, 13 |
 | MockProvider fixtures + CI smoke | 11, 14, 15 |
 | `auto_start_runs`; no assignee → no run | 2, 9 |
 | Communication limits | 9 (constants) |

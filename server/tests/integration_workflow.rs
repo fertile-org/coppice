@@ -160,7 +160,7 @@ async fn final_approve_requires_wait_for_final_review() {
         final_comment["body"]
             .as_str()
             .unwrap_or("")
-            .contains("Final approval")
+            .contains("Accepted: ticket moved to **Done**.")
     );
 }
 

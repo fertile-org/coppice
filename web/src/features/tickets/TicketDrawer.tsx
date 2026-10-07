@@ -134,7 +134,7 @@ function TicketDrawerPanel({
     try {
       await finalApprove.mutateAsync();
     } catch {
-      setActionError('Unable to final approve ticket.');
+      setActionError('Unable to accept ticket.');
     }
   }
 
@@ -235,7 +235,7 @@ function TicketDrawerPanel({
                   disabled={headerBusy}
                   className="rounded-md bg-moss-600 px-3 py-1.5 font-body text-sm font-medium text-paper-50 transition-colors duration-fast hover:bg-moss-500 disabled:cursor-not-allowed disabled:opacity-50"
                 >
-                  {finalApprove.isPending ? 'Approving…' : 'Final Approve'}
+                  {finalApprove.isPending ? 'Accepting…' : 'Accept'}
                 </button>
               )}
 
