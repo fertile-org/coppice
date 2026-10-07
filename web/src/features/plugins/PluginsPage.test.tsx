@@ -66,7 +66,7 @@ const samplePlugin: Plugin = {
 };
 
 const STDIO_WARNING =
-  "This plugin starts local MCP servers that run with the Coppice server's privileges until sandboxing lands (M13). Enable anyway?";
+  "Local MCP servers run on your computer with your computer's privileges. Stronger sandboxing is coming in a later release. Enable anyway?";
 
 const shadowedPlugin: Plugin = {
   ...samplePlugin,

@@ -20,14 +20,14 @@ import {
 } from './usePlugins';
 
 const STDIO_RISK =
-  "This plugin starts local MCP servers that run with the Coppice server's privileges until sandboxing lands (M13).";
+  "Local MCP servers run on your computer with your computer's privileges. Stronger sandboxing is coming in a later release.";
 
 /** Names keys only; the values never reach the browser. */
 function envRisk(keys: string[]): string {
   const list = keys.join(', ');
   return keys.length === 1
-    ? `Setting ${list} is not set here, so the Coppice server's environment value for it will be sent to the plugin.`
-    : `Settings ${list} are not set here, so the Coppice server's environment values for them will be sent to the plugin.`;
+    ? `Setting ${list} is not set here, so your computer's environment value for it will be sent to the plugin.`
+    : `Settings ${list} are not set here, so your computer's environment values for them will be sent to the plugin.`;
 }
 
 /** Starting a disabled plugin's servers (enable or Test) needs the admin's consent. */

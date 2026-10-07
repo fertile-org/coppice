@@ -57,7 +57,7 @@ const testResult: PluginTestResult = {
 };
 
 const STDIO_WARNING =
-  "This plugin starts local MCP servers that run with the Coppice server's privileges until sandboxing lands (M13). Enable anyway?";
+  "Local MCP servers run on your computer with your computer's privileges. Stronger sandboxing is coming in a later release. Enable anyway?";
 
 const fetchMock = vi.fn();
 
@@ -271,7 +271,7 @@ describe('PluginCard', () => {
 
     await waitFor(() => expect(callFor(`/api/plugins/${plugin.id}`).method).toBe('PATCH'));
     expect(confirm).toHaveBeenCalledWith(
-      "Setting GITHUB_TOKEN is not set here, so the Coppice server's environment value for it will be sent to the plugin. Enable anyway?",
+      "Setting GITHUB_TOKEN is not set here, so your computer's environment value for it will be sent to the plugin. Enable anyway?",
     );
     confirm.mockRestore();
   });
@@ -291,7 +291,7 @@ describe('PluginCard', () => {
 
     expect(confirm).toHaveBeenCalledTimes(1);
     expect(confirm).toHaveBeenCalledWith(
-      "This plugin starts local MCP servers that run with the Coppice server's privileges until sandboxing lands (M13). Settings A, B are not set here, so the Coppice server's environment values for them will be sent to the plugin. Enable anyway?",
+      "Local MCP servers run on your computer with your computer's privileges. Stronger sandboxing is coming in a later release. Settings A, B are not set here, so your computer's environment values for them will be sent to the plugin. Enable anyway?",
     );
     expect(fetchMock).not.toHaveBeenCalled();
     confirm.mockRestore();
