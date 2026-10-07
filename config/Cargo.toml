@@ -8,9 +8,10 @@ license.workspace = true
 directories = "5"
 figment = { version = "0.10", features = ["toml", "env"] }
 serde = { version = "1", features = ["derive"] }
+sha2 = "0.10"
+toml = "0.8"
 toml_edit = "0.22"
 
 [dev-dependencies]
 coppice-connectors = { path = "../connectors" }
 tempfile = "3"
-toml = "0.8"

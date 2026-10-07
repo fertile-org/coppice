@@ -5,12 +5,48 @@ use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 
 use coppice_config::connector_file::{write_toml_atomic, ConnectorFilePatch};
+use coppice_config::settings_file::{self, ConfigDocument, ConfigTextError, SaveError};
 use coppice_config::AppConfig;
 use coppice_connectors::{ConnectorDescriptor, CURSOR, KILO_CODE, MOCK, OPENCODE};
 use toml_edit::DocumentMut;
 
 use crate::providers::ConnectorRegistry;
 use crate::sessions::opencode_run_server::OpenCodeRunServers;
+
+#[derive(Debug)]
+pub struct SavedConfigFile {
+    pub revision: String,
+    pub restart_required: bool,
+    pub backup_available: bool,
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum ConfigFileError {
+    #[error("config file is not available")]
+    NoPath,
+    #[error("{message}")]
+    Invalid {
+        line: u32,
+        column: u32,
+        message: String,
+    },
+    #[error("config changed on disk")]
+    Conflict { text: String, revision: String },
+    #[error("config backup is missing")]
+    BackupMissing,
+    #[error(transparent)]
+    Io(#[from] std::io::Error),
+}
+
+impl From<ConfigTextError> for ConfigFileError {
+    fn from(error: ConfigTextError) -> Self {
+        Self::Invalid {
+            line: error.line,
+            column: error.column,
+            message: error.message,
+        }
+    }
+}
 
 #[derive(Debug, thiserror::Error)]
 pub enum ConnectorConfigError {
@@ -82,6 +118,59 @@ impl ConnectorsRuntime {
 
     pub fn set_config_path(&self, path: Option<PathBuf>) {
         self.inner.write().unwrap_or_else(|e| e.into_inner()).path = path;
+    }
+
+    pub fn config_path(&self) -> Option<PathBuf> {
+        self.inner
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .path
+            .clone()
+    }
+
+    /// The config file the process writes, plus its current text.
+    pub fn read_config_document(&self) -> Result<(PathBuf, ConfigDocument), ConfigFileError> {
+        let path = self.config_path().ok_or(ConfigFileError::NoPath)?;
+        let document = settings_file::read_config_document(&path)?;
+        Ok((path, document))
+    }
+
+    pub fn read_backup_text(&self) -> Result<String, ConfigFileError> {
+        let path = self.config_path().ok_or(ConfigFileError::NoPath)?;
+        settings_file::read_backup_text(&path)?.ok_or(ConfigFileError::BackupMissing)
+    }
+
+    /// Write `text` exactly, then rebuild the connector registry from it.
+    ///
+    /// Connector settings apply in this process. Anything else is reported as
+    /// needing a restart. The file is not rewritten a second time.
+    pub fn save_config_text(
+        &self,
+        text: &str,
+        base_revision: &str,
+    ) -> Result<SavedConfigFile, ConfigFileError> {
+        let mut guard = self.inner.write().unwrap_or_else(|e| e.into_inner());
+        let path = guard.path.clone().ok_or(ConfigFileError::NoPath)?;
+        let outcome =
+            settings_file::save_config_verbatim(&path, text, base_revision).map_err(|error| {
+                match error {
+                    SaveError::Invalid(error) => ConfigFileError::from(error),
+                    SaveError::Conflict { text, revision } => {
+                        ConfigFileError::Conflict { text, revision }
+                    }
+                    SaveError::Io(error) => ConfigFileError::Io(error),
+                }
+            })?;
+        guard.config.agent.connectors = outcome.parsed.agent.connectors;
+        guard.registry = Arc::new(ConnectorRegistry::from_config(
+            &guard.config,
+            self.opencode_runs.clone(),
+        ));
+        Ok(SavedConfigFile {
+            revision: outcome.revision,
+            restart_required: outcome.restart_required,
+            backup_available: outcome.backup_available,
+        })
     }
 
     /// Turn a connector on or off. A no-op when the flag already matches.
@@ -268,5 +357,28 @@ mod tests {
             rt.set_enabled("nope", true),
             Err(ConnectorConfigError::Unknown)
         ));
+    }
+
+    #[test]
+    fn settings_save_keeps_comments_and_enables_the_connector() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        let original = "# keep me\n[agent.connectors.claude-code]\nenabled = false\n";
+        std::fs::write(&path, original).unwrap();
+        let rt = runtime(Some(path.clone()));
+        let revision = coppice_config::settings_file::content_revision(original.as_bytes());
+        let next = "# keep me\n[agent.connectors.claude-code]\nenabled = true\n";
+
+        let saved = rt.save_config_text(next, &revision).unwrap();
+
+        assert!(!saved.restart_required);
+        assert!(saved.backup_available);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), next);
+        assert_eq!(
+            std::fs::read_to_string(path.with_file_name("config.toml.bak")).unwrap(),
+            original
+        );
+        assert!(rt.registry().has(coppice_connectors::CLAUDE_CODE));
+        assert!(rt.config().agent.connectors.claude_code.enabled);
     }
 }

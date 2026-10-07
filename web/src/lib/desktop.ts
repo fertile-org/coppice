@@ -13,6 +13,9 @@ export type CoppiceDesktopBridge = {
   pickDirectory: () => Promise<string | null>;
   appInfo?: () => Promise<DesktopAppInfo>;
   getUpdateInfo?: () => Promise<DesktopUpdateInfo | null>;
+  /** `process.platform` from the Electron shell (`darwin`, `linux`, …). */
+  platform?: string;
+  showItemInFolder?: (filePath: string) => Promise<void>;
 };
 
 declare global {
@@ -30,4 +33,12 @@ export async function pickDirectory(): Promise<string | null> {
     return null;
   }
   return window.coppiceDesktop.pickDirectory();
+}
+
+export function revealFileLabel(platform: string | undefined): string {
+  return platform === 'darwin' ? 'Reveal in Finder' : 'Reveal in file manager';
+}
+
+export async function revealFileInFolder(filePath: string): Promise<void> {
+  await window.coppiceDesktop?.showItemInFolder?.(filePath);
 }

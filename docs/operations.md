@@ -38,7 +38,7 @@ Host `config.toml` does not affect the Docker server. Do not run `make migrate` 
 
 Login APIs remain available for tools and future cloud hosting.
 
-The installed desktop app (`coppice-server desktop`) forces `auth.desktop_mode = true` and generates its own `config.toml` in the app data dir on first run. That file is not replaced on later launches; connector on/off from the app is patched into it. See [architecture.md — Desktop mode](architecture.md#desktop-mode-m11).
+The installed desktop app (`coppice-server desktop`) forces `auth.desktop_mode = true` and generates its own `config.toml` in the app data dir on first run. That file is not replaced on later launches; connector on/off from the app is patched into it. Admins can open the same file under Settings. A save is checked before it is written, keeps comments and formatting, and stores the previous good copy as `config.toml.bak`. Connector changes apply immediately. Other keys apply after a restart. See [architecture.md — Desktop mode](architecture.md#desktop-mode-m11).
 
 ### Repositories (desktop)
 

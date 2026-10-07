@@ -1,4 +1,5 @@
 pub mod connector_file;
+pub mod settings_file;
 
 use figment::{
     providers::{Env, Format, Serialized, Toml},
@@ -10,7 +11,7 @@ use std::path::{Path, PathBuf};
 pub const LOCAL_CONFIG_FILE: &str = "config.toml";
 pub const GLOBAL_CONFIG_DIR: &str = "coppice";
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct AppConfig {
     pub server: ServerConfig,
     pub database: DatabaseConfig,
@@ -32,7 +33,7 @@ pub struct AppConfig {
     pub plugins: PluginsConfig,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct PluginsConfig {
     /// Default plugin dir; created on start and cannot be removed.
     #[serde(default = "default_plugins_dir")]
@@ -99,7 +100,7 @@ impl Default for PluginsConfig {
     }
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct McpConfig {
     /// Gateway URL handed to agent CLIs; defaults to the local server's `/mcp`.
     #[serde(default)]
@@ -157,7 +158,7 @@ impl McpConfig {
     }
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct SecretsConfig {
     /// Material for AES-256-GCM key derivation (SHA-256). Change in production.
     #[serde(default = "default_secrets_master_key")]
@@ -176,7 +177,7 @@ impl Default for SecretsConfig {
     }
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct GitConfig {
     #[serde(default = "default_git_author_name")]
     pub author_name: String,
@@ -205,7 +206,7 @@ impl Default for GitConfig {
     }
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct KnowledgeConfig {
     #[serde(default = "default_true")]
     pub enabled: bool,
@@ -221,7 +222,7 @@ pub struct KnowledgeConfig {
     pub poll_interval_ms: u64,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct KnowledgeCompactionConfig {
     /// Periodic cadence measured from the later of the last cycle start and the
     /// oldest waiting ticket.
@@ -237,7 +238,7 @@ pub struct KnowledgeCompactionConfig {
     pub max_attempts: i32,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct KnowledgeAutoSaveConfig {
     #[serde(default)]
     pub enabled: bool,
@@ -247,7 +248,7 @@ pub struct KnowledgeAutoSaveConfig {
     pub minimum_confidence: String,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct KnowledgeRetrievalConfig {
     #[serde(default = "default_retrieval_top_k")]
     pub top_k: usize,
@@ -268,7 +269,7 @@ pub struct KnowledgeRetrievalConfig {
 /// Kept for config compatibility. Tool-first runs write a slim context and
 /// fetch the rest through the MCP gateway, so nothing reads these allocations
 /// today; existing `knowledge.context_budget.*` keys still load and validate.
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct ContextBudgetConfig {
     #[serde(default = "default_context_max_tokens")]
     pub max_tokens: usize,
@@ -509,7 +510,7 @@ fn default_context_output_tokens() -> usize {
     1_000
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct WorkflowConfig {
     #[serde(default)]
     pub auto_start_runs: bool,
@@ -519,7 +520,7 @@ pub struct WorkflowConfig {
     pub auto_split: AutoSplitConfig,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct AutoAssignConfig {
     #[serde(default = "default_true")]
     pub default: bool,
@@ -598,7 +599,7 @@ impl AutoAssignConfig {
     }
 }
 
-#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[derive(Debug, Clone, PartialEq, Default, Deserialize, Serialize)]
 pub struct AutoSplitConfig {
     #[serde(default = "default_false")]
     pub default: bool,
@@ -637,24 +638,24 @@ impl AutoSplitConfig {
     }
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct WebConfig {
     pub port: u16,
     pub static_dir: String,
     pub api_url: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct ServerConfig {
     pub port: u16,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct DatabaseConfig {
     pub url: String,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct AuthConfig {
     pub session_secret: String,
     pub bootstrap_password: String,
@@ -678,13 +679,13 @@ pub struct AuthConfig {
     pub desktop_allowed_hosts: Vec<String>,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct StorageConfig {
     pub artifacts_dir: String,
     pub max_upload_bytes: u64,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct AgentConfig {
     #[serde(alias = "default_provider")]
     pub default_connector: String,
@@ -700,7 +701,7 @@ fn default_health_check_interval() -> u32 {
     60
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize, Default)]
 pub struct AgentConnectorsConfig {
     #[serde(default)]
     pub opencode: OpenCodeConnectorConfig,
@@ -814,7 +815,7 @@ impl AgentConnectorsConfig {
     }
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct OpenCodeConnectorConfig {
     #[serde(default = "default_false")]
     pub enabled: bool,
@@ -869,7 +870,7 @@ impl Default for OpenCodeConnectorConfig {
     }
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct ClaudeCodeConnectorConfig {
     #[serde(default = "default_false")]
     pub enabled: bool,
@@ -881,7 +882,7 @@ pub struct ClaudeCodeConnectorConfig {
 
 pub type ClaudeCodeProviderConfig = ClaudeCodeConnectorConfig;
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct CodexConnectorConfig {
     #[serde(default = "default_false")]
     pub enabled: bool,
@@ -921,7 +922,7 @@ impl Default for ClaudeCodeConnectorConfig {
     }
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct KiloCodeConnectorConfig {
     #[serde(default = "default_false")]
     pub enabled: bool,
@@ -954,7 +955,7 @@ impl Default for KiloCodeConnectorConfig {
     }
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct CursorConnectorConfig {
     #[serde(default = "default_false")]
     pub enabled: bool,
