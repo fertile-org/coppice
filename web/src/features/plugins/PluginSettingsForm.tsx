@@ -12,7 +12,7 @@ function SourceBadge({ source }: { source: PluginSettingSource }) {
       return (
         <span
           className={`${BADGE} border-info-muted bg-info-muted text-info`}
-          title="Not set here; the value comes from the Coppice server's environment"
+          title="This value comes from an environment variable Coppice could see when it opened."
         >
           From your environment
         </span>
