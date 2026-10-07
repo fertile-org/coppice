@@ -44,7 +44,7 @@ See the [milestone strategy](../superpowers/specs/2026-06-07-coppice-milestone-s
 | M10 | [M10-plugins.md](./M10-plugins.md) | Plugins: Coppice MCP gateway, core tools, skills, plugin MCP servers; tool-first context |
 | M11 | [M11-desktop-release.md](./M11-desktop-release.md) | Desktop app: bundled Postgres + server, Electron shell, `.dmg` / `.deb` from a git tag |
 | M12 | [M12-beta-release.md](./M12-beta-release.md) | Public beta: Astro site + user docs, Electron-first README, macOS arm64 `.dmg` and Linux x64 `.deb`, honest Beta labeling |
-| M13 | [M13-security-and-sandbox.md](./M13-security-and-sandbox.md) | Capabilities, sandbox profiles, tool policy, scoped secrets, guided unblock, audit log |
+| M13 | [M13-security-and-sandbox.md](./M13-security-and-sandbox.md) | Fail-closed file and network limits, permission prompts, scoped secrets, guided unblock, audit log |
 | M14 | [M14-role-owner-agents.md](./M14-role-owner-agents.md) | Role-owner agents: observation runs, workspace signals, Workspace Inbox |
 
 M01–M09 are complete. M10 and M11 are implemented pending manual acceptance (M10 connector verification; M11 live tag check and a real-connector install — MockProvider is not in desktop or release builds). **Next:** M12 → M13 → M14.
