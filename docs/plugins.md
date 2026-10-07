@@ -1,6 +1,6 @@
 # Plugins
 
-Plugins add **skills** and **tools** to Coppice agents. This guide covers using plugins from the **Plugins** page (sidebar, admins only) and writing your own. For how the gateway and proxy work inside the server, see [architecture.md](architecture.md) (MCP gateway, plugin MCP proxy).
+Want an agent to follow your checklist, or call a tool it doesn't have? Plugins add **skills** and **tools** to Coppice agents. This guide covers the **Plugins** page in the sidebar and writing your own plugin. Contributors: how Coppice wires plugin tools into agent runs is in [architecture.md](architecture.md) (MCP gateway, plugin MCP proxy).
 
 ## What a plugin is
 
@@ -37,7 +37,7 @@ Skills are found up to 3 folders deep inside each skills folder (`skills/<catego
 On **Plugins → Add plugins**, either:
 
 - **Install from git:** paste a repository URL (and optionally a branch or tag) and pick a target directory. Coppice clones it with your computer's git credentials into `<directory>/<repo name>`. Any supported layout works; a marketplace or skills repo can produce several plugins, and the success message lists them (`Installed <repo>: 3 plugins (a, b, c)`). A repository with no plugin, skills, or marketplace is removed again and the install fails. Git-installed plugins get an **Update** button.
-- **Add a plugin directory:** a folder on your computer, such as `~/coppice-plugins`. If the folder itself is a plugin, skills repo, or marketplace, it is read as that. Otherwise each direct subfolder that is one becomes a plugin. For the directory itself, `<name>/SKILL.md` subfolders do not count (only a root `SKILL.md` or skills in `skills/`, `.agents/skills/`, … do), so a directory holding several single-skill clones lists each clone as its own plugin. Deeper folders are ignored. Press **Rescan** after changing files. In the desktop app, **Browse…** opens a folder picker.
+- **Add a plugin directory:** a folder on your computer, such as `~/coppice-plugins`. If the folder itself is a plugin, skills repo, or marketplace, it is read as that. Otherwise each direct subfolder that is one becomes a plugin. For the directory itself, `<name>/SKILL.md` subfolders do not count (only a root `SKILL.md` or skills in `skills/`, `.agents/skills/`, … do), so a directory holding several single-skill clones lists each clone as its own plugin. Deeper folders are ignored. Press **Rescan** after changing files. **Browse…** opens a folder picker.
 
 Directories are scanned in order. If two plugins have the same name, the one in the earlier directory is used and the other is marked `shadowed`. Use the arrows to reorder.
 
@@ -47,13 +47,17 @@ To try the flow, add the [`examples/plugins`](https://github.com/fertile-org/cop
 
 Plugins start **disabled**. On the plugin card:
 
-1. If the card lists **Settings**, enter the values and **Save**. Each setting shows where its value would come from: `setting` (saved here), `env` (the server's environment variable of the same name), `default` (the plugin's built-in default), or `missing` (the server will not start until you set it).
+1. If the card lists **Settings**, enter the values and **Save**. If you haven't saved a value, a badge shows where it would come from: **From your environment** (an environment variable with the same name that Coppice was started with), **Default** (the plugin's built-in default), or **Missing** (the plugin's MCP server won't start until you set it). If you open Coppice from the Dock or your app menu, variables set in your shell profile may not reach it, so enter the value on the card instead.
 2. Press **Test** to start the plugin's MCP servers and list their tools. This works while disabled.
 3. Turn on the switch to enable it.
 
 **Switching skills off.** Each skill on the card has its own switch; the header reads `Skills (12 of 30 on)` when some are off. A switched-off skill is hidden from every agent that has the plugin, at once (including running runs): it is left out of the skill list, and `skill_load` reports it as not found. The setting is workspace-wide, kept by skill name across rescans and updates. The built-in `coppice` skills cannot be switched off.
 
-A plugin with **stdio** servers runs a program on your computer with your computer's privileges (stronger sandboxing is coming in a later release). Enabling or testing such a plugin asks for confirmation, and also names any settings whose value would come from your computer's environment. Only install plugins you trust.
+A plugin with local (**stdio**) MCP servers runs programs on your computer with your computer's privileges (stronger sandboxing is coming in a later release). Before you turn one on, or test it while it's off, Coppice asks you to confirm:
+
+> Local MCP servers run on your computer with your computer's privileges. Stronger sandboxing is coming in a later release.
+
+The same prompt names any settings whose value would come from your computer's environment. Only install plugins you trust.
 
 ### 3. Attach it to agents
 
@@ -109,7 +113,7 @@ Open a ticket's **Runs** tab and expand a run. **Tools & Skills** lists every to
 | A skill shows `duplicate skill name` | Another skill in the same plugin has the same folder name; the first by path is used. |
 | A skill shows `path escapes plugin root` | The skill folder or its `SKILL.md` is a symlink pointing outside the plugin. |
 | Test says `missing setting "X"` | Enter setting `X` on the card, or give it a default in `.mcp.json`. |
-| Test fails to start a stdio server | Is the command installed and on your computer's PATH (in Docker: inside the server container)? |
+| Test fails to start a stdio server | Is the command installed and on your PATH? Coppice reads your PATH from your login shell when it opens, so quit and reopen Coppice after installing something new. |
 | Agent never uses the plugin | Is it enabled **and** selected on that agent? Check the run's **Tools & Skills** tab. |
 
 ## Writing a plugin
@@ -181,7 +185,7 @@ description: How to greet people in ticket comments. Load before writing a greet
 ```
 
 - The working directory is the plugin folder; `${CLAUDE_PLUGIN_ROOT}` is its absolute path.
-- The process gets a minimal environment: `PATH`, `HOME`, `LANG`, `TMPDIR` from the server, plus the entry's `env`. Pass everything else through `env`.
+- The process gets a minimal environment: `PATH`, `HOME`, `LANG`, `TMPDIR` from Coppice, plus the entry's `env`. Pass everything else through `env`.
 - stdout is for MCP messages only; log to stderr.
 
 **Remote (HTTP):** streamable HTTP MCP endpoints.
@@ -202,14 +206,14 @@ SSE-only servers (`"type": "sse"`) are listed as unsupported. `mcpServers` may a
 
 ### Settings and placeholders
 
-Every `${NAME}` in `command`, `args`, `env` values, `url`, or `headers` values becomes a setting on the plugin card. When the server starts, each is resolved in order:
+Every `${NAME}` in `command`, `args`, `env` values, `url`, or `headers` values becomes a setting on the plugin card. When the plugin's MCP server starts, each is resolved in order:
 
 1. the value saved on the card;
-2. the server's environment variable `NAME` (never names starting with `COPPICE_`, nor `DATABASE_URL` or `SECRETS_MASTER_KEY`);
+2. an environment variable `NAME` that Coppice was started with (never names starting with `COPPICE_`, nor `DATABASE_URL` or `SECRETS_MASTER_KEY`);
 3. the default in `${NAME:-default}`;
-4. otherwise the server fails to start with `missing setting "NAME"`.
+4. otherwise that MCP server fails to start with `missing setting "NAME"`.
 
-Use a default for optional values; leave secrets without one so the admin must set them.
+Use a default for optional values. Leave secrets without one, so each person enters their own on the card.
 
 ### Tools
 
@@ -222,7 +226,7 @@ Use a default for optional values; leave secrets without one so the admin must s
 ### Develop and test locally
 
 1. Put your plugin in a folder and add that folder (or its parent) as a plugin directory.
-2. Press **Test** on the card after each change to `.mcp.json` or the server code; it restarts the plugin's servers. Press **Rescan** after adding or renaming skills or editing `plugin.json`.
+2. Press **Test** on the card after each change to `.mcp.json` or your MCP server's code; it restarts the plugin's servers. Press **Rescan** after adding or renaming skills or editing `plugin.json`.
 3. Attach the plugin to an agent and run a ticket. Check **Tools & Skills** on the run.
 
 You can also talk to a stdio server by hand:

@@ -240,8 +240,8 @@ describe('PluginCard', () => {
 
     const row = (key: string) => within(screen.getByTestId(`plugin-setting-${key}`));
     expect(row('API_TOKEN').getByText('Configured')).toBeVisible();
-    expect(row('API_TOKEN').queryByText('From server env')).not.toBeInTheDocument();
-    expect(row('GITHUB_TOKEN').getByText('From server env')).toBeVisible();
+    expect(row('API_TOKEN').queryByText('From your environment')).not.toBeInTheDocument();
+    expect(row('GITHUB_TOKEN').getByText('From your environment')).toBeVisible();
     expect(row('GITHUB_TOKEN').queryByText('Configured')).not.toBeInTheDocument();
     expect(row('PORT').getByText('Default')).toBeVisible();
     expect(row('ROOT').getByText('Missing')).toBeVisible();
