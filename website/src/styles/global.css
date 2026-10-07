@@ -441,6 +441,11 @@ a:hover {
   padding-block: 2.25rem 4.5rem;
 }
 
+.docs-nav,
+.prose {
+  min-width: 0;
+}
+
 .docs-nav {
   display: flex;
   gap: 0.4rem 1rem;
@@ -504,6 +509,41 @@ a:hover {
   background: var(--color-paper-100);
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 0.92em;
+  font-variant-ligatures: none;
+  font-feature-settings: "liga" 0, "calt" 0;
+}
+
+/* Shiki wraps fences in <pre class="astro-code"><code>. The inline-code
+   background fragments onto each line and hides the light token colors. */
+.prose pre,
+.prose .astro-code {
+  max-width: 100%;
+  margin-inline: 0;
+  padding: 0.75rem 0.9rem;
+  overflow-x: auto;
+  font-variant-ligatures: none;
+  font-feature-settings: "liga" 0, "calt" 0;
+}
+
+.prose pre code,
+.prose .astro-code code {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: inherit;
+  font-variant-ligatures: none;
+  font-feature-settings: "liga" 0, "calt" 0;
+}
+
+.prose pre span,
+.prose .astro-code span {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background-color: transparent;
+  font-variant-ligatures: none;
+  font-feature-settings: "liga" 0, "calt" 0;
 }
 
 .site-footer {
