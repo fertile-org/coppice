@@ -9,6 +9,7 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   Puzzle,
+  Settings,
   Users,
   Wrench,
 } from 'lucide-react';
@@ -40,6 +41,7 @@ const NAV_ITEMS: NavItem[] = [
   { to: '/settings/plugins', label: 'Plugins', icon: Puzzle, adminOnly: true },
   { to: '/settings/users', label: 'Users', icon: Users, adminOnly: true },
   { to: '/tools', label: 'Tools', icon: Wrench, adminOnly: true },
+  { to: '/settings', label: 'Settings', icon: Settings, adminOnly: true },
 ];
 
 function readSidebarCollapsed(): boolean {

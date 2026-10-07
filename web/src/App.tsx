@@ -21,6 +21,7 @@ import { UsersPage } from './features/users/UsersPage';
 import { CodeReviewPage } from './features/code/CodeReviewPage';
 import { ChatPage } from './features/chat/ChatPage';
 import { KnowledgePage } from './features/knowledge/KnowledgePage';
+import { SettingsPage } from './features/settings/SettingsPage';
 import { ToolsPage } from './features/tools/ToolsPage';
 import { useOpenTicket } from './features/tickets/useOpenTicket';
 import {
@@ -85,6 +86,7 @@ function App() {
                 />
                 <Route path="/settings/plugins" element={<PluginsPage />} />
                 <Route path="/settings/users" element={<UsersPage />} />
+                <Route path="/settings" element={<SettingsPage />} />
                 <Route path="/tools" element={<ToolsPage />} />
               </Route>
               <Route path="/code" element={<CodeReviewPage />} />
