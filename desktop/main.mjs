@@ -40,6 +40,11 @@ function logsDir() {
   return path.join(app.getPath('userData'), 'logs');
 }
 
+ipcMain.handle('coppice:show-item-in-folder', (_event, filePath) => {
+  if (typeof filePath !== 'string' || filePath.length === 0) return;
+  shell.showItemInFolder(filePath);
+});
+
 ipcMain.handle('coppice:pick-directory', async (event) => {
   const win = BrowserWindow.fromWebContents(event.sender);
   const result = await dialog.showOpenDialog(win ?? undefined, {

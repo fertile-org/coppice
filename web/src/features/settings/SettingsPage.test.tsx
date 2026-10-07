@@ -2,7 +2,7 @@ import '@testing-library/jest-dom/vitest';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiError } from '../../lib/api';
 import { SettingsPage } from './SettingsPage';
 
@@ -67,7 +67,12 @@ function renderPage() {
 }
 
 describe('SettingsPage', () => {
+  afterEach(() => {
+    delete window.coppiceDesktop;
+  });
+
   beforeEach(() => {
+    delete window.coppiceDesktop;
     mocks.apiFetch.mockReset();
     mocks.apiFetch.mockImplementation((path: string) => {
       if (path === '/api/settings/config') {
@@ -188,6 +193,36 @@ describe('SettingsPage', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Reload' }));
     expect(screen.getByRole('textbox', { name: 'config.toml' })).toHaveValue('# from disk\n');
     expect(screen.queryByRole('status')).not.toBeInTheDocument();
+  });
+
+  it('shows Reveal only when the desktop bridge exists', async () => {
+    const browser = renderPage();
+    await screen.findByTestId('config-path');
+    expect(screen.queryByRole('button', { name: 'Reveal in Finder' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Reveal in file manager' })).not.toBeInTheDocument();
+    browser.unmount();
+
+    const showItemInFolder = vi.fn(async () => undefined);
+    window.coppiceDesktop = {
+      pickDirectory: vi.fn(async () => null),
+      showItemInFolder,
+      platform: 'darwin',
+    };
+    const mac = renderPage();
+    await screen.findByTestId('config-path');
+    fireEvent.click(screen.getByRole('button', { name: 'Reveal in Finder' }));
+    expect(showItemInFolder).toHaveBeenCalledWith(disk.path);
+    expect(screen.queryByRole('button', { name: 'Reveal in file manager' })).not.toBeInTheDocument();
+    mac.unmount();
+
+    window.coppiceDesktop = {
+      pickDirectory: vi.fn(async () => null),
+      showItemInFolder: vi.fn(async () => undefined),
+      platform: 'linux',
+    };
+    renderPage();
+    expect(await screen.findByRole('button', { name: 'Reveal in file manager' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Reveal in Finder' })).not.toBeInTheDocument();
   });
 
   it('loads the last good version into the editor without saving', async () => {

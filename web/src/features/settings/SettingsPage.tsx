@@ -4,6 +4,7 @@ import { Navigate } from 'react-router-dom';
 import { z } from 'zod';
 import { Button } from '../../components/ui/button';
 import { ApiError, apiFetch, parseApiErrorMessage } from '../../lib/api';
+import { isDesktopShell, revealFileInFolder, revealFileLabel } from '../../lib/desktop';
 import { useSession } from '../auth/useSession';
 import { TomlEditor } from './TomlEditor';
 
@@ -63,6 +64,7 @@ function jsonBody(error: ApiError): unknown {
 
 export function SettingsPage() {
   const { user, loading } = useSession();
+  const [desktop] = useState(isDesktopShell);
   const queryClient = useQueryClient();
   const configQuery = useQuery({
     queryKey: CONFIG_QUERY_KEY,
@@ -230,12 +232,25 @@ export function SettingsPage() {
       ) : (
         <>
           {disk && (
-            <p
-              data-testid="config-path"
-              className="break-all font-mono text-xs text-text-secondary"
-            >
-              {disk.path}
-            </p>
+            <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+              <p
+                data-testid="config-path"
+                className="break-all font-mono text-xs text-text-secondary"
+              >
+                {disk.path}
+              </p>
+              {desktop && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="h-auto px-1 py-0 text-xs"
+                  onClick={() => void revealFileInFolder(disk.path)}
+                >
+                  {revealFileLabel(window.coppiceDesktop?.platform)}
+                </Button>
+              )}
+            </div>
           )}
 
           {conflict && (
