@@ -19,6 +19,12 @@ export interface HumanReview {
   runIds: string[];
 }
 
+export interface ApprovedPlan {
+  commentId: string;
+  markdown: string;
+  steps: string[];
+}
+
 export interface Ticket {
   id: string;
   boardId: string;
@@ -43,6 +49,8 @@ export interface Ticket {
   pendingSplitRecommendation?: PendingSplitRecommendation | null;
   clarificationRound?: number;
   hasActiveRun?: boolean;
+  skipPlanning?: boolean;
+  approvedPlan?: ApprovedPlan | null;
   archivedAt?: string | null;
   humanReview?: HumanReview | null;
 }

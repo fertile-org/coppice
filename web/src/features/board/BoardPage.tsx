@@ -188,7 +188,6 @@ export function BoardPage() {
     void updateStatus
       .mutateAsync({ ticketId, status: targetStatus })
       .catch((err: unknown) => {
-        if (targetStatus !== 'done') return;
         toast.error(apiErrorToastMessage(parseApiErrorMessage(err)));
       });
   }

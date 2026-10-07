@@ -70,6 +70,7 @@ Each column has a distinct but harmonious tint — muted, not saturated traffic 
 |--------|------------|--------|-----------|
 | Backlog | Warm stone `#e8e4df` | `#6b6560` | Untouched wood, waiting |
 | Ready | Light moss `#e0ebe4` | `#4a7c59` | Sprouts ready to plant |
+| Plan Review | Cool mist `#e7eef6` | `#3d5a78` | The plan, waiting for a yes |
 | In Progress | Sky-slate `#dce8f0` | `#3d6b8b` | Work under open canopy |
 | In Review | Soft violet `#ede5f5` | `#6b4f8b` | Second eyes, twilight |
 | In QA | Harvest wheat `#f5edd6` | `#9a7b2e` | Testing the harvest |

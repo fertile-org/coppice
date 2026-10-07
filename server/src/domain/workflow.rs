@@ -5,6 +5,9 @@ use serde_json::Value;
 use std::collections::HashMap;
 use uuid::Uuid;
 
+/// Planning run. It does not create a worktree or commit.
+pub const JOB_TYPE_PLAN_TICKET: &str = "plan_ticket";
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RunOutcome {
     Succeeded,

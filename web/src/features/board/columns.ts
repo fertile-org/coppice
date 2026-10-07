@@ -1,6 +1,9 @@
+import { PLAN_COPY } from '../plan/copy';
+
 export type TicketStatus =
   | 'backlog'
   | 'ready'
+  | 'plan_review'
   | 'in_progress'
   | 'in_review'
   | 'in_qa'
@@ -11,6 +14,7 @@ export type TicketStatus =
 export type ColumnColorKey =
   | 'backlog'
   | 'ready'
+  | 'plan-review'
   | 'in-progress'
   | 'in-review'
   | 'in-qa'
@@ -27,6 +31,7 @@ export interface BoardColumnDef {
 export const BOARD_COLUMNS: BoardColumnDef[] = [
   { status: 'backlog', label: 'Backlog', colorKey: 'backlog' },
   { status: 'ready', label: 'Ready', colorKey: 'ready' },
+  { status: 'plan_review', label: PLAN_COPY.column, colorKey: 'plan-review' },
   { status: 'in_progress', label: 'In Progress', colorKey: 'in-progress' },
   { status: 'in_review', label: 'In Review', colorKey: 'in-review' },
   { status: 'in_qa', label: 'In QA', colorKey: 'in-qa' },
@@ -61,6 +66,11 @@ export const COLUMN_COLOR_CLASSES: Record<
     bg: 'bg-column-ready-bg',
     border: 'border-column-ready-border',
     accent: 'text-column-ready-accent',
+  },
+  'plan-review': {
+    bg: 'bg-column-plan-review-bg',
+    border: 'border-column-plan-review-border',
+    accent: 'text-column-plan-review-accent',
   },
   'in-progress': {
     bg: 'bg-column-in-progress-bg',

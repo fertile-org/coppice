@@ -47,6 +47,7 @@ impl AgentProvider for CursorProvider {
         let args = cursor_cli_args(
             &worktree,
             input.read_only_tools,
+            input.job_type == crate::domain::workflow::JOB_TYPE_PLAN_TICKET,
             input.model.as_deref(),
             input.resume_session_id.as_deref(),
             cli_version::for_gate(&version),
@@ -229,6 +230,7 @@ fn format_stderr_suffix(lines: &[String]) -> String {
 fn cursor_cli_args(
     worktree: &Path,
     read_only_tools: bool,
+    plan: bool,
     model: Option<&str>,
     resume_session_id: Option<&str>,
     version: Option<&str>,
@@ -239,6 +241,7 @@ fn cursor_cli_args(
     let worktree_arg = worktree.display().to_string();
     let pinned = contract.argv(&coppice_connectors::LaunchSubst {
         read_only: read_only_tools,
+        plan,
         worktree: &worktree_arg,
         hostname: "",
         port: "",
@@ -415,7 +418,7 @@ mod tests {
 
     #[test]
     fn chat_turns_use_ask_mode_without_force() {
-        let args = cursor_cli_args(Path::new("/tmp/chat"), true, Some("auto"), None, None);
+        let args = cursor_cli_args(Path::new("/tmp/chat"), true, false, Some("auto"), None, None);
         assert!(args.windows(2).any(|w| w == ["--mode", "ask"]));
         assert!(!args.iter().any(|a| a == "--force"));
         assert!(args.windows(2).any(|w| w == ["--model", "auto"]));
@@ -423,7 +426,7 @@ mod tests {
 
     #[test]
     fn ticket_turns_use_force_without_ask_mode() {
-        let args = cursor_cli_args(Path::new("/tmp/wt"), false, None, Some("sess-1"), None);
+        let args = cursor_cli_args(Path::new("/tmp/wt"), false, false, None, Some("sess-1"), None);
         assert!(args.iter().any(|a| a == "--force"));
         assert!(!args.windows(2).any(|w| w == ["--mode", "ask"]));
         assert!(args.windows(2).any(|w| w == ["--resume", "sess-1"]));

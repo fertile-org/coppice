@@ -53,6 +53,7 @@ use time::format_description::well_known::Rfc3339;
 
 mod compaction;
 mod connector_check;
+mod plan;
 
 #[derive(Debug)]
 struct JobCancelled;
@@ -222,6 +223,10 @@ async fn execute_job(
 
     if run.job_type == crate::domain::knowledge_compaction::JOB_TYPE_COMPACT_KNOWLEDGE {
         return compaction::execute_compaction(state, pool, run_svc, run).await;
+    }
+
+    if run.job_type == crate::domain::workflow::JOB_TYPE_PLAN_TICKET {
+        return plan::execute_plan(state, pool, run_svc, run).await;
     }
 
     if run.job_type == "chat_turn" || run.context_profile == ContextProfile::Conversation {

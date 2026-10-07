@@ -885,6 +885,18 @@ pub async fn poll_runs_until_count(
 }
 
 pub async fn create_test_ticket(app: &Router, board_id: &str, cookie: &str, csrf: &str) -> String {
+    let id = create_unplanned_ticket(app, board_id, cookie, csrf).await;
+    skip_planning(app, &id, cookie, csrf).await;
+    id
+}
+
+/// A ticket that still requires an approved plan before In Progress.
+pub async fn create_unplanned_ticket(
+    app: &Router,
+    board_id: &str,
+    cookie: &str,
+    csrf: &str,
+) -> String {
     let res = app
         .clone()
         .oneshot(json_request(
@@ -899,6 +911,21 @@ pub async fn create_test_ticket(app: &Router, board_id: &str, cookie: &str, csrf
     assert_eq!(res.status(), StatusCode::CREATED);
     let body: serde_json::Value = json_body(res).await;
     body["id"].as_str().unwrap().to_string()
+}
+
+pub async fn skip_planning(app: &Router, ticket_id: &str, cookie: &str, csrf: &str) {
+    let res = app
+        .clone()
+        .oneshot(json_request(
+            "PATCH",
+            &format!("/api/tickets/{ticket_id}"),
+            r#"{"skipPlanning":true}"#,
+            cookie,
+            csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
 }
 
 pub fn multipart_request(

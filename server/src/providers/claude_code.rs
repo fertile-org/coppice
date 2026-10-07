@@ -75,9 +75,12 @@ impl AgentProvider for ClaudeCodeProvider {
         let program = descriptor.binary.to_string();
         let version = cli_version::detect(&program).await;
         let worktree_arg = worktree.display().to_string();
+        let planning = input.job_type == crate::domain::workflow::JOB_TYPE_PLAN_TICKET;
+        let read_only_tools = input.read_only_tools || planning;
         let mut args = contract.with_prompt(
             contract.argv(&coppice_connectors::LaunchSubst {
-                read_only: input.read_only_tools,
+                read_only: read_only_tools,
+                plan: planning,
                 worktree: &worktree_arg,
                 hostname: "",
                 port: "",
@@ -86,10 +89,7 @@ impl AgentProvider for ClaudeCodeProvider {
             coppice_run_prompt(),
         );
         args.push("--allowedTools".to_string());
-        args.push(claude_allowed_tools(
-            input.read_only_tools,
-            input.mcp.is_some(),
-        ));
+        args.push(claude_allowed_tools(read_only_tools, input.mcp.is_some()));
 
         if let Some(model) = &input.model {
             args.push("--model".to_string());

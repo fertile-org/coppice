@@ -65,12 +65,18 @@ pub struct RunContract {
     /// grace period then stops a process that stays alive.
     pub result_before_exit: bool,
     pub prompt: PromptPlace,
+    /// Argv that selects a native plan mode known not to write files or branches.
+    /// `None` means planning stays prompt-based and must not invent a plan flag.
+    pub plan_mode: Option<&'static [&'static str]>,
 }
 
 /// Values substituted into `{worktree}`, `{hostname}`, and `{port}` tokens.
 #[derive(Debug, Clone, Copy)]
 pub struct LaunchSubst<'a> {
     pub read_only: bool,
+    /// When true, replace the permission-mode argv with [`RunContract::plan_mode`]
+    /// if that mode is pinned. Otherwise the prompt carries the plan.
+    pub plan: bool,
     pub worktree: &'a str,
     pub hostname: &'a str,
     pub port: &'a str,
@@ -85,17 +91,25 @@ impl RunContract {
         for flag in self.leading {
             push_flag(&mut out, flag, subst);
         }
-        push_tokens(
-            &mut out,
-            self.permission_mode.args(subst.read_only),
-            subst,
-            self.permission_mode.min_version,
-            self.permission_mode.gate,
-        );
+        let (permission_args, min_version, gate) = self.permission_args(subst);
+        push_tokens(&mut out, permission_args, subst, min_version, gate);
         for flag in self.trailing {
             push_flag(&mut out, flag, subst);
         }
         out
+    }
+
+    fn permission_args(self, subst: &LaunchSubst<'_>) -> (&'static [&'static str], Option<&'static str>, bool) {
+        if subst.plan {
+            if let Some(plan) = self.plan_mode {
+                return (plan, None, false);
+            }
+        }
+        (
+            self.permission_mode.args(subst.read_only),
+            self.permission_mode.min_version,
+            self.permission_mode.gate,
+        )
     }
 
     /// Place the prompt according to [`RunContract::prompt`].
@@ -147,6 +161,7 @@ pub const MOCK: RunContract = RunContract {
     process_cwd_is_worktree: false,
     result_before_exit: false,
     prompt: PromptPlace::None,
+    plan_mode: None,
 };
 
 pub const CLAUDE_CODE: RunContract = RunContract {
@@ -173,6 +188,8 @@ pub const CLAUDE_CODE: RunContract = RunContract {
     process_cwd_is_worktree: true,
     result_before_exit: true,
     prompt: PromptPlace::AfterDashP,
+    // Plan mode is read-only: it replaces bypassPermissions on a planning run.
+    plan_mode: Some(&["--permission-mode", "plan"]),
 };
 
 pub const CODEX: RunContract = RunContract {
@@ -199,6 +216,7 @@ pub const CODEX: RunContract = RunContract {
     process_cwd_is_worktree: false,
     result_before_exit: true,
     prompt: PromptPlace::None,
+    plan_mode: None,
 };
 
 pub const CURSOR: RunContract = RunContract {
@@ -229,6 +247,7 @@ pub const CURSOR: RunContract = RunContract {
     process_cwd_is_worktree: true,
     result_before_exit: true,
     prompt: PromptPlace::AfterDashP,
+    plan_mode: None,
 };
 
 pub const KILO_CODE: RunContract = RunContract {
@@ -250,6 +269,7 @@ pub const KILO_CODE: RunContract = RunContract {
     process_cwd_is_worktree: true,
     result_before_exit: true,
     prompt: PromptPlace::Append,
+    plan_mode: None,
 };
 
 pub const OPENCODE: RunContract = RunContract {
@@ -275,6 +295,7 @@ pub const OPENCODE: RunContract = RunContract {
     process_cwd_is_worktree: false,
     result_before_exit: false,
     prompt: PromptPlace::None,
+    plan_mode: None,
 };
 
 fn push_flag(out: &mut Vec<String>, flag: &PinnedFlag, subst: &LaunchSubst<'_>) {
@@ -384,6 +405,7 @@ mod tests {
     fn subst<'a>(version: Option<&'a str>, read_only: bool) -> LaunchSubst<'a> {
         LaunchSubst {
             read_only,
+            plan: false,
             worktree: "/wt",
             hostname: "127.0.0.1",
             port: "4096",
@@ -498,5 +520,24 @@ mod tests {
         let argv = OPENCODE.argv(&subst(Some("1.2.3"), false));
         assert_eq!(argv, ["serve", "--hostname", "127.0.0.1", "--port", "4096"]);
         assert!(OPENCODE.permission_mode.write.is_empty());
+    }
+
+    #[test]
+    fn only_claude_code_pins_a_native_plan_mode() {
+        assert!(CODEX.plan_mode.is_none());
+        assert!(CURSOR.plan_mode.is_none());
+        assert!(KILO_CODE.plan_mode.is_none());
+        assert!(OPENCODE.plan_mode.is_none());
+        assert!(MOCK.plan_mode.is_none());
+
+        let mut planned = subst(None, false);
+        planned.plan = true;
+        let argv = CLAUDE_CODE.argv(&planned);
+        assert!(argv.windows(2).any(|w| w == ["--permission-mode", "plan"]));
+        assert!(!argv.iter().any(|arg| arg == "bypassPermissions"));
+
+        let write = CLAUDE_CODE.argv(&subst(None, false));
+        assert!(write.windows(2).any(|w| w == ["--permission-mode", "bypassPermissions"]));
+        assert!(!write.iter().any(|arg| arg == "plan"));
     }
 }

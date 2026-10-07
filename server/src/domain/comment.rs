@@ -23,6 +23,7 @@ pub enum CommentIntent {
     QaPassed,
     Blocked,
     SystemEvent,
+    Plan,
 }
 
 #[derive(Debug, Clone)]
@@ -36,6 +37,8 @@ pub struct Comment {
     pub mentions: serde_json::Value,
     pub attachment_ids: Vec<Uuid>,
     pub created_at: OffsetDateTime,
+    /// Set on plan comments: the ticket content version this plan was written for.
+    pub plan_content_version: Option<i32>,
 }
 
 pub fn author_type_to_str(author_type: AuthorType) -> &'static str {
@@ -67,6 +70,7 @@ pub fn intent_to_str(intent: CommentIntent) -> &'static str {
         CommentIntent::QaPassed => "qa_passed",
         CommentIntent::Blocked => "blocked",
         CommentIntent::SystemEvent => "system_event",
+        CommentIntent::Plan => "plan",
     }
 }
 
@@ -82,6 +86,7 @@ pub fn intent_from_str(s: &str) -> Option<CommentIntent> {
         "qa_passed" => Some(CommentIntent::QaPassed),
         "blocked" => Some(CommentIntent::Blocked),
         "system_event" => Some(CommentIntent::SystemEvent),
+        "plan" => Some(CommentIntent::Plan),
         _ => None,
     }
 }

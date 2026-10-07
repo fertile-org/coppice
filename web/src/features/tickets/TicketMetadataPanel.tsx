@@ -16,6 +16,7 @@ import {
   type Substatus,
 } from '../../lib/schemas/substatus';
 import { ticketPrioritySchema } from '../../lib/schemas/ticket';
+import { PLAN_COPY } from '../plan/copy';
 import { useRepos } from '../repos/useRepos';
 import { useAgentRuns } from './useAgentRuns';
 import { TicketStatusBadge } from './TicketStatusBadge';
@@ -402,6 +403,23 @@ export function TicketMetadataPanel({ ticket }: TicketMetadataPanelProps) {
             <TicketStatusBadge status={option.value as TicketStatus} />
           )}
         />
+        <label className="flex items-center gap-2 font-body text-xs text-text-muted">
+          <input
+            type="checkbox"
+            checked={Boolean(ticket.skipPlanning)}
+            disabled={formDisabled}
+            onChange={(event) => {
+              void updateTicket
+                .mutateAsync({ skipPlanning: event.target.checked })
+                .catch((err: unknown) => {
+                  toast.error(
+                    parseApiErrorMessage(err, PLAN_COPY.skipFailed),
+                  );
+                });
+            }}
+          />
+          {PLAN_COPY.skipPlanning}
+        </label>
       </div>
 
       <div className="space-y-2">

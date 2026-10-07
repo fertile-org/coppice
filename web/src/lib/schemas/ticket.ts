@@ -4,6 +4,7 @@ import { substatusSchema } from './substatus';
 export const ticketStatusSchema = z.enum([
   'backlog',
   'ready',
+  'plan_review',
   'in_progress',
   'in_review',
   'in_qa',
@@ -24,6 +25,7 @@ export const updateTicketSchema = z.object({
   repoId: z.string().uuid().optional().nullable(),
   priority: ticketPrioritySchema.optional().nullable(),
   branchName: z.string().optional().nullable(),
+  skipPlanning: z.boolean().optional(),
 });
 
 export type UpdateTicketInput = z.infer<typeof updateTicketSchema>;

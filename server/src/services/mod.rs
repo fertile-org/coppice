@@ -18,6 +18,7 @@ pub mod knowledge_compaction_service;
 pub mod knowledge_service;
 pub mod mention_service;
 pub mod notification_service;
+pub mod planning_service;
 pub mod git_ops;
 pub mod human_review_service;
 pub mod plugin_service;

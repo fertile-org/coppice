@@ -151,6 +151,7 @@ mod tests {
             mentions: serde_json::json!([]),
             attachment_ids: vec![],
             created_at: OffsetDateTime::now_utc(),
+            plan_content_version: None,
         }
     }
 

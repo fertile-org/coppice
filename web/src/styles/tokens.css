@@ -126,6 +126,10 @@
   --column-ready-border: #8fb89a;
   --column-ready-accent: #4a7c59;
 
+  --column-plan-review-bg: #e7eef6;
+  --column-plan-review-border: #9bb0c9;
+  --column-plan-review-accent: #3d5a78;
+
   --column-in-progress-bg: #dce8f0;
   --column-in-progress-border: #7ba3c4;
   --column-in-progress-accent: #3d6b8b;
@@ -280,6 +284,10 @@
   --column-ready-bg: #122018;
   --column-ready-border: #2d5a3d;
   --column-ready-accent: #8fb89a;
+
+  --column-plan-review-bg: #121820;
+  --column-plan-review-border: #3d5a78;
+  --column-plan-review-accent: #9bb0c9;
 
   --column-in-progress-bg: #111827;
   --column-in-progress-border: #1e3a5f;

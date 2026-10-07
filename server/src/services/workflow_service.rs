@@ -15,6 +15,26 @@ pub const MAX_MENTIONS_PER_RUN: u32 = 2;
 /// Direct status writes cannot enter Done. Accept is the only route.
 pub const DONE_REQUIRES_ACCEPT: &str = "A ticket moves to Done only when you accept it.";
 
+/// Whether a status write may enter In Progress.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PlanEntry {
+    pub skip_planning: bool,
+    pub approved_for_current_version: bool,
+}
+
+impl PlanEntry {
+    pub const fn open() -> Self {
+        Self {
+            skip_planning: true,
+            approved_for_current_version: false,
+        }
+    }
+
+    pub const fn allows_in_progress(self) -> bool {
+        self.skip_planning || self.approved_for_current_version
+    }
+}
+
 pub struct WorkflowService;
 
 impl WorkflowService {
@@ -31,9 +51,13 @@ impl WorkflowService {
                 | (Backlog, InProgress)
                 | (Backlog, InReview)
                 | (Backlog, Blocked)
+                | (Ready, PlanReview)
                 | (Ready, InProgress)
                 | (Ready, InReview)
                 | (Ready, Blocked)
+                | (PlanReview, InProgress)
+                | (PlanReview, Ready)
+                | (PlanReview, Blocked)
                 | (InProgress, InReview)
                 | (InProgress, Blocked)
                 | (InReview, InQa)
@@ -54,12 +78,18 @@ impl WorkflowService {
     pub fn direct_status_change_error(
         from: TicketStatus,
         to: TicketStatus,
+        plan: PlanEntry,
     ) -> Option<&'static str> {
-        if from == to || to != TicketStatus::Done || Self::is_legal_transition(from, to) {
-            None
-        } else {
-            Some(DONE_REQUIRES_ACCEPT)
+        if from == to {
+            return None;
         }
+        if to == TicketStatus::Done {
+            return Some(DONE_REQUIRES_ACCEPT);
+        }
+        if to == TicketStatus::InProgress && !plan.allows_in_progress() {
+            return Some(crate::copy::plan::PLAN_REQUIRED);
+        }
+        None
     }
 
     /// A new commit after acceptance sends the card back to In Review.
@@ -579,6 +609,7 @@ mod tests {
         let statuses = [
             Backlog,
             Ready,
+            PlanReview,
             InProgress,
             InReview,
             InQa,
@@ -591,7 +622,7 @@ mod tests {
                 !WorkflowService::is_legal_transition(from, Done),
                 "{from:?} -> Done"
             );
-            let err = WorkflowService::direct_status_change_error(from, Done);
+            let err = WorkflowService::direct_status_change_error(from, Done, PlanEntry::open());
             if from == Done {
                 assert_eq!(err, None);
             } else {
@@ -599,10 +630,47 @@ mod tests {
             }
         }
         assert_eq!(
-            WorkflowService::direct_status_change_error(Backlog, Ready),
+            WorkflowService::direct_status_change_error(Backlog, Ready, PlanEntry::open()),
             None
         );
         assert_eq!(WorkflowService::final_approve(WaitForFinalReview), Ok(Done));
+    }
+
+    #[test]
+    fn in_progress_requires_an_approved_plan_unless_skipped() {
+        use TicketStatus::*;
+        let blocked = PlanEntry {
+            skip_planning: false,
+            approved_for_current_version: false,
+        };
+        let approved = PlanEntry {
+            skip_planning: false,
+            approved_for_current_version: true,
+        };
+        assert_eq!(
+            WorkflowService::direct_status_change_error(Ready, InProgress, blocked),
+            Some(crate::copy::plan::PLAN_REQUIRED)
+        );
+        assert_eq!(
+            WorkflowService::direct_status_change_error(Backlog, InProgress, blocked),
+            Some(crate::copy::plan::PLAN_REQUIRED)
+        );
+        assert_eq!(
+            WorkflowService::direct_status_change_error(PlanReview, InProgress, blocked),
+            Some(crate::copy::plan::PLAN_REQUIRED)
+        );
+        assert_eq!(
+            WorkflowService::direct_status_change_error(Ready, InProgress, approved),
+            None
+        );
+        assert_eq!(
+            WorkflowService::direct_status_change_error(Ready, InProgress, PlanEntry::open()),
+            None
+        );
+        assert_eq!(
+            WorkflowService::direct_status_change_error(InProgress, InProgress, blocked),
+            None
+        );
     }
 
     #[test]
@@ -611,6 +679,7 @@ mod tests {
         let statuses = [
             Backlog,
             Ready,
+            PlanReview,
             InProgress,
             InReview,
             InQa,

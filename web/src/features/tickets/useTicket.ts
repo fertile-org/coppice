@@ -3,6 +3,7 @@ import { apiFetch } from '../../lib/api';
 import type { CreateCommentInput, UpdateStatusInput, UpdateTicketInput } from '../../lib/schemas/ticket';
 import { ticketsQueryKey, type Ticket } from '../board/useTickets';
 import type { TicketStatus } from '../board/columns';
+import { PLAN_COPY } from '../plan/copy';
 import { agentRunsQueryKey, upsertAgentRunInCache } from './useAgentRuns';
 import type { AgentRun } from '../../lib/schemas/agentRun';
 
@@ -551,6 +552,7 @@ export function statusLabel(status: TicketStatus): string {
   const labels: Record<TicketStatus, string> = {
     backlog: 'Backlog',
     ready: 'Ready',
+    plan_review: PLAN_COPY.column,
     in_progress: 'In Progress',
     in_review: 'In Review',
     in_qa: 'In QA',

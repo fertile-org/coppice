@@ -55,6 +55,7 @@ impl AgentProvider for CodexProvider {
         // `--no-daemon`, come from the descriptor.
         let mut args = contract.argv(&coppice_connectors::LaunchSubst {
             read_only: input.read_only_tools,
+            plan: input.job_type == crate::domain::workflow::JOB_TYPE_PLAN_TICKET,
             worktree: &worktree_arg,
             hostname: "",
             port: "",

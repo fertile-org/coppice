@@ -37,7 +37,7 @@ impl<'a> CommentService<'a> {
             r#"
             SELECT
                 id, ticket_id, author_type, author_id, body, intent,
-                mentions, attachment_ids, created_at
+                mentions, attachment_ids, created_at, plan_content_version
             FROM ticket_comments
             WHERE id = $1
             "#,
@@ -57,7 +57,7 @@ impl<'a> CommentService<'a> {
             r#"
             SELECT
                 id, ticket_id, author_type, author_id, body, intent,
-                mentions, attachment_ids, created_at
+                mentions, attachment_ids, created_at, plan_content_version
             FROM ticket_comments
             WHERE ticket_id = $1
             ORDER BY created_at DESC
@@ -103,7 +103,7 @@ impl<'a> CommentService<'a> {
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
             RETURNING
                 id, ticket_id, author_type, author_id, body, intent,
-                mentions, attachment_ids, created_at
+                mentions, attachment_ids, created_at, plan_content_version
             "#,
         )
         .bind(id)
@@ -285,6 +285,7 @@ fn row_to_comment(row: &sqlx::postgres::PgRow) -> Comment {
         mentions: row.get("mentions"),
         attachment_ids: row.get("attachment_ids"),
         created_at: row.get("created_at"),
+        plan_content_version: row.get("plan_content_version"),
     }
 }
 

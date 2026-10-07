@@ -70,7 +70,7 @@ make screenshot
 
 Regenerates the marketing stills and a looping GIF. The board frame is [`static/screenshot.png`](../static/screenshot.png) for the README and the same file at [`website/public/assets/hero-screenshot.png`](../website/public/assets/hero-screenshot.png). The other frames land in [`static/screenshots/`](../static/screenshots/). The GIF is [`static/marketing.gif`](../static/marketing.gif) and [`website/public/assets/marketing.gif`](../website/public/assets/marketing.gif).
 
-Frame order, three seconds each: final-review diff, board, agent console, chat, plugins. The board crop stays 1440×900, the same window as the hero. There is no Plan Review column.
+Frame order, three seconds each: final-review diff, board, agent console, chat, plugins. The board crop stays 1440×900, the same window as the hero. The board includes a Plan Review column between Ready and In Progress.
 
 It starts Compose project `coppice-screenshot` (its own volumes, ports 5432/5000/5001) with [`deploy/docker-compose.screenshot.yml`](../deploy/docker-compose.screenshot.yml), which forces `auth.desktop_mode` and turns off workflow auto-start. The seed builds a board, a Wait for Human Review diff, a finished Live Console transcript, two chats, and two plugins. The overlay does not enable the `mock-provider` feature, and the frames must not show it.
 
