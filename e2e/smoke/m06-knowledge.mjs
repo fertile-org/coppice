@@ -317,10 +317,18 @@ async function compactDoneTicket(board, compactor, suffix, auth) {
   await expectJson(
     await api('PATCH', `/api/tickets/${ticket.id}/status`, {
       ...auth,
-      body: { status: 'done' },
+      body: { status: 'wait_for_final_review' },
     }),
     200,
-    'transition compaction ticket to Done',
+    'move compaction ticket to Human Review',
+  );
+  await expectJson(
+    await api('POST', `/api/tickets/${ticket.id}/final-approve`, {
+      ...auth,
+      body: {},
+    }),
+    200,
+    'accept compaction ticket',
   );
 
   const candidate = await poll('compacted Pending candidate', async () => {

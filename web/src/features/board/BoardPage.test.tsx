@@ -3,6 +3,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { ToastProvider } from '../../components/ToastProvider';
 import { BoardPage } from './BoardPage';
 import type { Ticket } from './useTickets';
 
@@ -115,9 +116,11 @@ function renderBoard(initialEntry = '/boards/board-1') {
   return render(
     <MemoryRouter initialEntries={[initialEntry]}>
       <QueryClientProvider client={client}>
-        <Routes>
-          <Route path="/boards/:boardId" element={<BoardPage />} />
-        </Routes>
+        <ToastProvider>
+          <Routes>
+            <Route path="/boards/:boardId" element={<BoardPage />} />
+          </Routes>
+        </ToastProvider>
       </QueryClientProvider>
     </MemoryRouter>,
   );

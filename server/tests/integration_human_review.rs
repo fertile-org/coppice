@@ -111,6 +111,16 @@ async fn set_wait_for_human_review(fx: &Fixture) {
     set_status(fx, "wait_for_final_review").await;
 }
 
+/// A Done row from before Accept recorded a reviewed commit. Not a product path.
+async fn seed_legacy_done(fx: &Fixture) {
+    let pool = fx.state.db.clone().expect("pool");
+    sqlx::query("UPDATE tickets SET status = 'done', updated_at = now() WHERE id = $1")
+        .bind(Uuid::parse_str(&fx.ticket_id).unwrap())
+        .execute(&pool)
+        .await
+        .expect("seed legacy done");
+}
+
 async fn final_approve(fx: &Fixture) -> serde_json::Value {
     let res = fx
         .app
@@ -485,7 +495,7 @@ async fn legacy_done_ticket_without_acceptance_stays_done_when_branch_moves() {
         return;
     }
     let fx = setup().await;
-    set_status(&fx, "done").await;
+    seed_legacy_done(&fx).await;
     assert_eq!(human_review_row_count(&fx).await, 0);
     let before = git_rev_parse(&fx.worktree_path, "HEAD");
     commit_file(
@@ -517,7 +527,7 @@ async fn legacy_done_ticket_without_acceptance_must_accept_before_merge() {
         return;
     }
     let fx = setup().await;
-    set_status(&fx, "done").await;
+    seed_legacy_done(&fx).await;
     let head = git_rev_parse(&fx.worktree_path, "HEAD");
     let main_before = git_rev_parse(&fx.local_path, "main");
 

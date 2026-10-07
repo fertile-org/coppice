@@ -12,11 +12,19 @@ use time::OffsetDateTime;
 pub const MAX_CLARIFICATION_ROUNDS: i32 = 3;
 pub const MAX_MENTIONS_PER_RUN: u32 = 2;
 
+/// Direct status writes cannot enter Done. Accept is the only route.
+pub const DONE_REQUIRES_ACCEPT: &str = "Accept the ticket to move it to Done.";
+
 pub struct WorkflowService;
 
 impl WorkflowService {
+    /// Column moves a workflow may apply. Entering Done is not one of them;
+    /// Accept uses [`Self::final_approve`].
     pub fn is_legal_transition(from: TicketStatus, to: TicketStatus) -> bool {
         use TicketStatus::*;
+        if to == Done {
+            return false;
+        }
         matches!(
             (from, to),
             (Backlog, Ready)
@@ -36,10 +44,22 @@ impl WorkflowService {
                 | (Blocked, Ready)
                 | (Blocked, InProgress)
                 | (Blocked, Backlog)
-                | (WaitForFinalReview, Done)
                 | (WaitForFinalReview, InReview)
                 | (Done, InReview)
         )
+    }
+
+    /// Refusal for a direct status write that would enter Done.
+    /// Staying on Done, and every other column move, is unchanged.
+    pub fn direct_status_change_error(
+        from: TicketStatus,
+        to: TicketStatus,
+    ) -> Option<&'static str> {
+        if from == to || to != TicketStatus::Done || Self::is_legal_transition(from, to) {
+            None
+        } else {
+            Some(DONE_REQUIRES_ACCEPT)
+        }
     }
 
     /// A new commit after acceptance sends the card back to In Review.
@@ -551,6 +571,95 @@ mod tests {
             TicketStatus::Backlog,
             TicketStatus::Done,
         ));
+    }
+
+    #[test]
+    fn no_direct_transition_enters_done() {
+        use TicketStatus::*;
+        let statuses = [
+            Backlog,
+            Ready,
+            InProgress,
+            InReview,
+            InQa,
+            WaitForFinalReview,
+            Done,
+            Blocked,
+        ];
+        for from in statuses {
+            assert!(
+                !WorkflowService::is_legal_transition(from, Done),
+                "{from:?} -> Done"
+            );
+            let err = WorkflowService::direct_status_change_error(from, Done);
+            if from == Done {
+                assert_eq!(err, None);
+            } else {
+                assert_eq!(err, Some(DONE_REQUIRES_ACCEPT));
+            }
+        }
+        assert_eq!(
+            WorkflowService::direct_status_change_error(Backlog, Ready),
+            None
+        );
+        assert_eq!(WorkflowService::final_approve(WaitForFinalReview), Ok(Done));
+    }
+
+    #[test]
+    fn workflow_gates_never_enter_done() {
+        use TicketStatus::*;
+        let statuses = [
+            Backlog,
+            Ready,
+            InProgress,
+            InReview,
+            InQa,
+            WaitForFinalReview,
+            Done,
+            Blocked,
+        ];
+        let roles = [
+            "PM",
+            "Backend Engineer",
+            "Reviewer",
+            "Technical Lead",
+            "QC",
+            "Researcher",
+        ];
+        for current_status in statuses {
+            for role in roles {
+                let mut ctx = minimal_ctx();
+                ctx.current_status = current_status;
+                ctx.agent_role = role.into();
+                ctx.contract = AgentRunResult::Done {
+                    summary: "finished".into(),
+                    changed_files: vec![],
+                    tests_run: vec![],
+                    next_status: Some("Done".into()),
+                    assign_to: None,
+                    updated_description: None,
+                    acceptance_criteria: None,
+                    mention_agents: vec![],
+                    agent_requests: vec![],
+                    blockers: vec![],
+                    split_tickets: vec![],
+                    knowledge_candidates: Vec::new(),
+                };
+                if let Ok(action) = WorkflowService::resolve_transition(ctx) {
+                    assert_ne!(action.new_status, Some(Done), "{current_status:?} / {role}");
+                }
+                assert_ne!(
+                    WorkflowService::resolve_run_start_transition(
+                        current_status,
+                        "backend_engineer",
+                        role,
+                        "work_on_ticket",
+                        ContextProfile::Full,
+                    ),
+                    Some(Done)
+                );
+            }
+        }
     }
 
     #[test]
