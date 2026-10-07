@@ -25,7 +25,7 @@ No. Human Review is a first-class gate. You open the diff and decide.
 That is not Coppice’s product. Coppice is built for managing agents: you start the work, and you accept every change.
 
 ## Windows?
-Not in this Beta. macOS (Apple Silicon) and Linux (x64) only.
+Windows 11 should be able to run the Linux x64 build through WSL, but we haven't tested it yet. See [Windows 11 (through WSL)](/docs/install#windows-11-through-wsl). If you try it, please [tell us how it went on GitHub](https://github.com/fertile-org/coppice/issues). A native Windows app isn't planned for this beta.
 
 ## What’s next on the roadmap?
 - Next: security and sandboxing for agents
