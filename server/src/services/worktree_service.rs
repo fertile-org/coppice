@@ -248,6 +248,62 @@ pub struct PlanScratchSource {
     pub fallback_branch: String,
 }
 
+/// Branches, tags, and remotes of a repo, as `git for-each-ref` and `git remote -v` print them.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RepoRefSnapshot {
+    for_each_ref: String,
+    remotes: String,
+}
+
+impl RepoRefSnapshot {
+    /// `None` when both commands printed the same text.
+    pub fn diff(&self, after: &Self) -> Option<String> {
+        if self == after {
+            return None;
+        }
+        let mut out = String::new();
+        if self.for_each_ref != after.for_each_ref {
+            push_command_diff(
+                &mut out,
+                "git for-each-ref refs/heads refs/tags refs/remotes",
+                &self.for_each_ref,
+                &after.for_each_ref,
+            );
+        }
+        if self.remotes != after.remotes {
+            push_command_diff(&mut out, "git remote -v", &self.remotes, &after.remotes);
+        }
+        Some(out)
+    }
+}
+
+fn push_command_diff(out: &mut String, command: &str, before: &str, after: &str) {
+    out.push_str(command);
+    out.push('\n');
+    out.push_str("--- before\n");
+    out.push_str(before);
+    if !before.is_empty() && !before.ends_with('\n') {
+        out.push('\n');
+    }
+    out.push_str("+++ after\n");
+    out.push_str(after);
+    if !after.is_empty() && !after.ends_with('\n') {
+        out.push('\n');
+    }
+}
+
+/// Snapshot `refs/heads`, `refs/tags`, `refs/remotes`, and `git remote -v`.
+pub async fn snapshot_repo_refs(git_dir: &Path) -> Result<RepoRefSnapshot, WorktreeError> {
+    Ok(RepoRefSnapshot {
+        for_each_ref: git_output(
+            git_dir,
+            &["for-each-ref", "refs/heads", "refs/tags", "refs/remotes"],
+        )
+        .await?,
+        remotes: git_output(git_dir, &["remote", "-v"]).await?,
+    })
+}
+
 /// A detached git worktree for one plan run. Dropping it does not commit or push.
 pub struct PlanScratch {
     path: PathBuf,
@@ -423,6 +479,29 @@ fn path_to_string(path: &Path) -> Result<String, WorktreeError> {
             format!("path is not valid UTF-8: {}", path.display()),
         ))
     })
+}
+
+async fn git_output(git_dir: &Path, args: &[&str]) -> Result<String, WorktreeError> {
+    let output = tokio::process::Command::new("git")
+        .current_dir(git_dir)
+        .args(args)
+        .output()
+        .await
+        .map_err(|err| {
+            WorktreeError::Io(std::io::Error::new(
+                err.kind(),
+                format!("repository not accessible at {}: {err}", git_dir.display()),
+            ))
+        })?;
+    if output.status.success() {
+        Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+    } else {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        Err(WorktreeError::GitCommandFailed {
+            command: format!("git {}", args.join(" ")),
+            stderr,
+        })
+    }
 }
 
 async fn run_git_in(git_dir: &Path, args: &[&str]) -> Result<(), WorktreeError> {
@@ -636,6 +715,24 @@ mod tests {
         let branch_sha = git_sha(&repo, "agent/TICKET-abc");
         assert_ne!(branch_sha, main_sha);
 
+        std::process::Command::new("git")
+            .current_dir(&repo)
+            .args(["tag", "v1"])
+            .status()
+            .expect("tag");
+        std::process::Command::new("git")
+            .current_dir(&repo)
+            .args(["remote", "add", "origin", "https://example.test/repo.git"])
+            .status()
+            .expect("remote");
+        let refs_before = snapshot_repo_refs(&repo).await.expect("refs before");
+        assert!(refs_before.for_each_ref.contains("refs/heads/main"));
+        assert!(refs_before
+            .for_each_ref
+            .contains("refs/heads/agent/TICKET-abc"));
+        assert!(refs_before.for_each_ref.contains("refs/tags/v1"));
+        assert!(refs_before.remotes.contains("origin"));
+
         let worktrees = tmp.path().join("worktrees");
         let run_id = Uuid::from_u128(7);
         let scratch = PlanScratch::create(
@@ -677,6 +774,56 @@ mod tests {
             .output()
             .expect("worktree list");
         assert!(!String::from_utf8_lossy(&listed.stdout).contains("plan-scratch"));
+        let refs_after = snapshot_repo_refs(&repo).await.expect("refs after");
+        assert_eq!(refs_before.diff(&refs_after), None);
+    }
+
+    #[tokio::test]
+    async fn repo_ref_snapshot_diff_names_a_new_tag_or_remote() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let repo = tmp.path().join("repo");
+        std::fs::create_dir(&repo).expect("repo");
+        init_repo(&repo);
+        std::process::Command::new("git")
+            .current_dir(&repo)
+            .args(["tag", "v1"])
+            .status()
+            .expect("tag");
+        std::process::Command::new("git")
+            .current_dir(&repo)
+            .args(["remote", "add", "origin", "https://example.test/repo.git"])
+            .status()
+            .expect("remote");
+        let before = snapshot_repo_refs(&repo).await.expect("before");
+        let again = snapshot_repo_refs(&repo).await.expect("again");
+        assert_eq!(before.diff(&again), None);
+
+        std::process::Command::new("git")
+            .current_dir(&repo)
+            .args(["tag", "v2"])
+            .status()
+            .expect("tag v2");
+        let after_tag = snapshot_repo_refs(&repo).await.expect("after tag");
+        let tag_diff = before.diff(&after_tag).expect("tag diff");
+        assert!(tag_diff.contains("git for-each-ref refs/heads refs/tags refs/remotes"));
+        assert!(tag_diff.contains("refs/tags/v2"));
+        assert!(!tag_diff.contains("git remote -v"));
+
+        std::process::Command::new("git")
+            .current_dir(&repo)
+            .args([
+                "remote",
+                "add",
+                "upstream",
+                "https://example.test/upstream.git",
+            ])
+            .status()
+            .expect("upstream");
+        let after_remote = snapshot_repo_refs(&repo).await.expect("after remote");
+        let remote_diff = after_tag.diff(&after_remote).expect("remote diff");
+        assert!(remote_diff.starts_with("git remote -v\n"));
+        assert!(remote_diff.contains("upstream"));
+        assert!(!remote_diff.contains("git for-each-ref"));
     }
 
     #[tokio::test]

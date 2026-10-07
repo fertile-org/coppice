@@ -773,3 +773,103 @@ async fn plan_run_removes_scratch_when_the_run_is_cancelled() {
     assert_discard_note(&app, &ticket_id, &cookie, &csrf).await;
     snapshot_ticket_git(&git);
 }
+
+fn git_raw(dir: &Path, args: &[&str]) -> String {
+    let output = Command::new("git")
+        .args(args)
+        .current_dir(dir)
+        .output()
+        .expect("git");
+    assert!(
+        output.status.success(),
+        "git {args:?} failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8(output.stdout).expect("git snapshot is utf-8")
+}
+
+fn repo_ref_snapshot(dir: &Path) -> (String, String) {
+    (
+        git_raw(
+            dir,
+            &["for-each-ref", "refs/heads", "refs/tags", "refs/remotes"],
+        ),
+        git_raw(dir, &["remote", "-v"]),
+    )
+}
+
+#[tokio::test]
+async fn plan_run_leaves_branches_tags_and_remotes_unchanged() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let (state, app, cookie, csrf, _env) =
+        common::bootstrap_and_login_with_auto_start_workers().await;
+    let (ticket_id, git) = open_planned_repo(&app, &state, "plan_writer", &cookie, &csrf).await;
+    let status = Command::new("git")
+        .args(["tag", "v1"])
+        .current_dir(&git.repo)
+        .status()
+        .expect("tag");
+    assert!(status.success());
+    let status = Command::new("git")
+        .args(["remote", "add", "origin", "https://example.test/repo.git"])
+        .current_dir(&git.repo)
+        .status()
+        .expect("remote");
+    assert!(status.success());
+    let status = Command::new("git")
+        .args(["update-ref", "refs/remotes/origin/main", &git.main_sha])
+        .current_dir(&git.repo)
+        .status()
+        .expect("remote-tracking ref");
+    assert!(status.success());
+    let before = repo_ref_snapshot(&git.repo);
+    assert!(before.0.contains("refs/heads/main"));
+    assert!(before.0.contains("refs/heads/agent/"));
+    assert!(before.0.contains("refs/tags/v1"));
+    assert!(before.0.contains("refs/remotes/origin/main"));
+    assert!(before.1.contains("origin"));
+    assert!(before.1.contains("(fetch)"));
+    assert!(before.1.contains("(push)"));
+
+    let ready = app
+        .clone()
+        .oneshot(common::json_request(
+            "PATCH",
+            &format!("/api/tickets/{ticket_id}/status"),
+            r#"{"status":"ready"}"#,
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(ready.status(), StatusCode::OK);
+    let ticket = common::poll_ticket_until(
+        &app,
+        &ticket_id,
+        &cookie,
+        &csrf,
+        "plan review without ref changes",
+        Duration::from_secs(20),
+        |ticket| ticket["status"] == "plan_review",
+    )
+    .await;
+    assert_eq!(ticket["status"], "plan_review");
+    let after = repo_ref_snapshot(&git.repo);
+    assert_eq!(before, after, "plan run changed branches, tags, or remotes");
+    snapshot_ticket_git(&git);
+
+    let listed = runs(&app, &ticket_id, &cookie, &csrf).await;
+    let run_id = plan_runs(&listed)[0]["id"].as_str().expect("run id");
+    let log_path = PathBuf::from(&state.config.storage.artifacts_dir)
+        .join("runs")
+        .join(run_id)
+        .join("terminal.log");
+    let log = std::fs::read_to_string(&log_path).unwrap_or_default();
+    assert!(
+        !log.contains("git for-each-ref refs/heads refs/tags refs/remotes\n"),
+        "unchanged refs were written to the run log:\n{log}"
+    );
+}

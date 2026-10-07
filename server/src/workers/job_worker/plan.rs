@@ -17,6 +17,7 @@ use crate::providers::{
     connector_enforces_read_only, AgentProvider, AgentRunInput, AgentRunResult, ProviderError,
 };
 use crate::services::agent_service::AgentService;
+use crate::services::artifact_service::{ArtifactService, RunArtifactPaths};
 use crate::services::comment_service::CommentService;
 use crate::services::context_builder::{
     build_tool_first_context, write_context_document, ContextInput,
@@ -27,11 +28,13 @@ use crate::services::result_contract::{self, ApplyComment, ApplyResult, ApplyTic
 use crate::services::run_orchestrator::RunOrchestrator;
 use crate::services::run_service::RunService;
 use crate::services::ticket_service::TicketService;
-use crate::services::worktree_service::{compute_paths, PlanScratch, PlanScratchSource};
+use crate::services::worktree_service::{
+    compute_paths, snapshot_repo_refs, PlanScratch, PlanScratchSource, RepoRefSnapshot,
+};
 use crate::AppState;
 
 /// Run a `plan_ticket` job in a detached scratch worktree.
-/// The ticket worktree is not created or modified. Nothing is committed or pushed.
+/// Planning never changes your ticket's code.
 pub(super) async fn execute_plan(
     state: &AppState,
     pool: &PgPool,
@@ -60,65 +63,130 @@ pub(super) async fn execute_plan(
         .clone()
         .unwrap_or_else(|| slugify(&agent.name));
 
-    let scratch = open_plan_scratch(state, pool, ticket_id, ticket.ticket.repo_id, run.id).await?;
-    let cwd = scratch.path().to_path_buf();
-    let outcome = drive_plan_run(
-        state,
-        pool,
-        run_svc,
-        run,
-        &PlanDrive {
-            ticket: &ticket,
-            connector: connector.as_ref(),
-            agent: &agent,
-            agent_key: &agent_key,
-            cwd: &cwd,
-        },
+    let source = plan_scratch_source(state, pool, ticket_id, ticket.ticket.repo_id).await?;
+    let git_dir = source.as_ref().map(|source| source.git_dir.clone());
+    let refs_before = snapshot_plan_refs(git_dir.as_deref(), ticket_id).await;
+    let created = PlanScratch::create(
+        Path::new(&state.config.agent.worktrees_path),
+        run.id,
+        source,
+    )
+    .await
+    .context("create plan scratch worktree");
+    let outcome = match created {
+        Ok(scratch) => {
+            let cwd = scratch.path().to_path_buf();
+            let outcome = drive_plan_run(
+                state,
+                pool,
+                run_svc,
+                run,
+                &PlanDrive {
+                    ticket: &ticket,
+                    connector: connector.as_ref(),
+                    agent: &agent,
+                    agent_key: &agent_key,
+                    cwd: &cwd,
+                },
+            )
+            .await;
+            if scratch.discard().await {
+                note_discarded_plan_changes(pool, ticket_id).await;
+            }
+            outcome
+        }
+        Err(err) => Err(err),
+    };
+    record_plan_ref_changes(
+        &state.config.storage.artifacts_dir,
+        run.id,
+        git_dir.as_deref(),
+        refs_before.as_ref(),
     )
     .await;
-    if scratch.discard().await {
-        note_discarded_plan_changes(pool, ticket_id).await;
-    }
     outcome
 }
 
-async fn open_plan_scratch(
+async fn snapshot_plan_refs(
+    git_dir: Option<&Path>,
+    ticket_id: uuid::Uuid,
+) -> Option<RepoRefSnapshot> {
+    let dir = git_dir?;
+    match snapshot_repo_refs(dir).await {
+        Ok(snapshot) => Some(snapshot),
+        Err(err) => {
+            tracing::warn!(error = %err, %ticket_id, "plan run could not snapshot repo refs");
+            None
+        }
+    }
+}
+
+/// When branches, tags, or remotes moved, append the command diff to the run log.
+async fn record_plan_ref_changes(
+    artifacts_dir: &str,
+    run_id: uuid::Uuid,
+    git_dir: Option<&Path>,
+    before: Option<&RepoRefSnapshot>,
+) {
+    let (Some(git_dir), Some(before)) = (git_dir, before) else {
+        return;
+    };
+    let after = match snapshot_repo_refs(git_dir).await {
+        Ok(after) => after,
+        Err(err) => {
+            tracing::warn!(error = %err, %run_id, "plan run could not snapshot repo refs");
+            return;
+        }
+    };
+    let Some(diff) = before.diff(&after) else {
+        return;
+    };
+    append_plan_ref_diff(artifacts_dir, run_id, &diff);
+}
+
+fn append_plan_ref_diff(artifacts_dir: &str, run_id: uuid::Uuid, diff: &str) {
+    let paths = RunArtifactPaths::new(artifacts_dir, &run_id.to_string());
+    let mut bytes = std::fs::read(&paths.terminal_log).unwrap_or_default();
+    if !bytes.is_empty() && !bytes.ends_with(b"\n") {
+        bytes.push(b'\n');
+    }
+    bytes.extend_from_slice(diff.as_bytes());
+    if !bytes.ends_with(b"\n") {
+        bytes.push(b'\n');
+    }
+    if let Err(err) = ArtifactService::write_terminal_log(&paths, &bytes) {
+        tracing::warn!(error = %err, %run_id, "plan run could not write ref diff to the run log");
+    }
+}
+
+async fn plan_scratch_source(
     state: &AppState,
     pool: &PgPool,
     ticket_id: uuid::Uuid,
     repo_id: Option<uuid::Uuid>,
-    run_id: uuid::Uuid,
-) -> anyhow::Result<PlanScratch> {
-    let source = if let Some(repo_id) = repo_id {
-        let repo = RepoService::new(pool)
-            .get(repo_id)
-            .await
-            .context("load repo")?;
-        let paths = compute_paths(
-            Path::new(&state.config.agent.worktrees_path),
-            &repo.name,
-            ticket_id,
-        );
-        let fallback_branch = if repo.default_branch.is_empty() {
-            "main".to_string()
-        } else {
-            repo.default_branch
-        };
-        Some(PlanScratchSource {
-            git_dir: PathBuf::from(repo.local_path),
-            ticket_branch: paths.branch_name,
-            fallback_branch,
-        })
-    } else {
-        None
+) -> anyhow::Result<Option<PlanScratchSource>> {
+    let Some(repo_id) = repo_id else {
+        return Ok(None);
     };
-    PlanScratch::create(
+    let repo = RepoService::new(pool)
+        .get(repo_id)
+        .await
+        .context("load repo")?;
+    let paths = compute_paths(
         Path::new(&state.config.agent.worktrees_path),
-        run_id,
-        source,
-    )
-    .await
-    .context("create plan scratch worktree")
+        &repo.name,
+        ticket_id,
+    );
+    let fallback_branch = if repo.default_branch.is_empty() {
+        "main".to_string()
+    } else {
+        repo.default_branch
+    };
+    Ok(Some(PlanScratchSource {
+        git_dir: PathBuf::from(repo.local_path),
+        ticket_branch: paths.branch_name,
+        fallback_branch,
+    }))
 }
 
 async fn note_discarded_plan_changes(pool: &PgPool, ticket_id: uuid::Uuid) {
@@ -374,4 +442,29 @@ async fn drive_plan_run(
 
     tracing::info!(run_id = %run.id, %ticket_id, "planning run finished");
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::append_plan_ref_diff;
+    use crate::services::artifact_service::{ArtifactService, RunArtifactPaths};
+    use uuid::Uuid;
+
+    #[test]
+    fn ref_diff_is_appended_to_the_run_log() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let artifacts = dir.path().to_str().expect("utf8");
+        let run_id = Uuid::from_u128(9);
+        let paths = RunArtifactPaths::new(artifacts, &run_id.to_string());
+        ArtifactService::write_terminal_log(&paths, b"Mock agent starting...\n").expect("log");
+        append_plan_ref_diff(
+            artifacts,
+            run_id,
+            "git remote -v\n--- before\n\n+++ after\norigin\thttps://example.test/repo.git (fetch)\n",
+        );
+        let log = std::fs::read_to_string(&paths.terminal_log).expect("read log");
+        assert!(log.starts_with("Mock agent starting...\n"));
+        assert!(log.contains("git remote -v\n--- before\n"));
+        assert!(log.contains("origin"));
+    }
 }
