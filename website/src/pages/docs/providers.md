@@ -30,4 +30,4 @@ Exact wiring may expand — check the app’s provider settings for the live lis
 
 ## What Coppice does not do
 - It does not run a cloud coding service
-- It does not merge code without your Human Review.
+- It does not merge code without your Human Review
