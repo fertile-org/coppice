@@ -2,20 +2,20 @@
 //!
 //! Replace these strings word for word. The API sends them to the web app.
 
-/// "rebasing onto" in [`conflict_message`].
-pub const REBASE_ACTION: &str = "rebasing onto";
-/// "merging into" in [`conflict_message`].
-pub const MERGE_ACTION: &str = "merging into";
+/// "rebase onto" in [`conflict_message`].
+pub const REBASE_ACTION: &str = "rebase onto";
+/// "merge into" in [`conflict_message`].
+pub const MERGE_ACTION: &str = "merge into";
 
-pub const NO_ASSIGNEE: &str = "This ticket has no assignee.";
+pub const NO_ASSIGNEE: &str = "Assign an agent to this ticket to resolve the conflicts.";
 
 pub const REREVIEW_NOTE: &str =
-    "Once this is resolved, the ticket comes back to Human Review. Accept it again before it can merge.";
+    "When the conflicts are resolved, the ticket goes back to In Review. You'll need to accept it again before it merges.";
 
 pub const INVALID_FILE_LIST: &str = "The conflict file list is invalid.";
 
 pub fn connector_not_ready_reason(assignee: &str) -> String {
-    format!("{assignee}'s connector isn't ready.")
+    format!("{assignee}'s connector isn't ready. Check it in Tools → Connectors.")
 }
 
 pub fn ask_to_resolve_label(assignee: &str) -> String {
@@ -30,7 +30,7 @@ pub fn conflict_message(action: &str, branch: &str, files: &[String]) -> String 
         files.join(", ")
     };
     format!(
-        "Conflict while {action} {branch}. These files conflict: {listed}. The branch is unchanged."
+        "Couldn't {action} {branch} because these files conflict: {listed}. Nothing was changed."
     )
 }
 
@@ -63,7 +63,11 @@ mod tests {
     fn drafted_strings() {
         assert_eq!(
             conflict_message(REBASE_ACTION, "main", &["README.md".into()]),
-            "Conflict while rebasing onto main. These files conflict: README.md. The branch is unchanged."
+            "Couldn't rebase onto main because these files conflict: README.md. Nothing was changed."
+        );
+        assert_eq!(
+            conflict_message(MERGE_ACTION, "main", &["README.md".into()]),
+            "Couldn't merge into main because these files conflict: README.md. Nothing was changed."
         );
         assert_eq!(
             conflict_message(
@@ -71,17 +75,20 @@ mod tests {
                 "main",
                 &["README.md".into(), "src/lib.rs".into()]
             ),
-            "Conflict while merging into main. These files conflict: README.md, src/lib.rs. The branch is unchanged."
+            "Couldn't merge into main because these files conflict: README.md, src/lib.rs. Nothing was changed."
         );
         assert_eq!(ask_to_resolve_label("Ada"), "Ask Ada to resolve");
-        assert_eq!(NO_ASSIGNEE, "This ticket has no assignee.");
+        assert_eq!(
+            NO_ASSIGNEE,
+            "Assign an agent to this ticket to resolve the conflicts."
+        );
         assert_eq!(
             connector_not_ready_reason("Ada"),
-            "Ada's connector isn't ready."
+            "Ada's connector isn't ready. Check it in Tools → Connectors."
         );
         assert_eq!(
             REREVIEW_NOTE,
-            "Once this is resolved, the ticket comes back to Human Review. Accept it again before it can merge."
+            "When the conflicts are resolved, the ticket goes back to In Review. You'll need to accept it again before it merges."
         );
     }
 

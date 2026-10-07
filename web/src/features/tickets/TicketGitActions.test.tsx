@@ -190,13 +190,16 @@ describe('TicketGitActions', () => {
   });
 
   const conflictMessage =
-    'Conflict while rebasing onto main. These files conflict: README.md. The branch is unchanged.';
+    "Couldn't rebase onto main because these files conflict: README.md. Nothing was changed.";
   const rereviewNote =
-    'Once this is resolved, the ticket comes back to Human Review. Accept it again before it can merge.';
+    "When the conflicts are resolved, the ticket goes back to In Review. You'll need to accept it again before it merges.";
 
-  function conflictBody(overrides: Record<string, unknown> = {}) {
+  function conflictBody(
+    overrides: Record<string, unknown> = {},
+    message = conflictMessage,
+  ) {
     return JSON.stringify({
-      message: conflictMessage,
+      message,
       conflict: {
         operation: 'rebase',
         baseBranch: 'main',
@@ -245,12 +248,17 @@ describe('TicketGitActions', () => {
   });
 
   it('offers to ask the assignee from the merge dialog', async () => {
+    const mergeMessage =
+      "Couldn't merge into main because these files conflict: README.md. Nothing was changed.";
     mergeMutateAsync.mockRejectedValue(
       new ApiError(
         400,
-        conflictBody({
-          operation: 'merge',
-        }),
+        conflictBody(
+          {
+            operation: 'merge',
+          },
+          mergeMessage,
+        ),
       ),
     );
 
@@ -262,7 +270,7 @@ describe('TicketGitActions', () => {
     const ask = await within(dialog).findByRole('button', {
       name: 'Ask Ada to resolve',
     });
-    expect(dialog).toHaveTextContent(conflictMessage);
+    expect(dialog).toHaveTextContent(mergeMessage);
     expect(ask.parentElement).toBe(
       within(dialog).getByRole('button', { name: 'Cancel' }).parentElement,
     );
@@ -270,7 +278,7 @@ describe('TicketGitActions', () => {
   });
 
   it('hides the ask button when there is no assignee', async () => {
-    const reason = 'This ticket has no assignee.';
+    const reason = 'Assign an agent to this ticket to resolve the conflicts.';
     rebaseMutateAsync.mockRejectedValue(
       new ApiError(
         400,
@@ -295,7 +303,7 @@ describe('TicketGitActions', () => {
   });
 
   it("hides the ask button when the assignee's connector is not ready", async () => {
-    const reason = "Ada's connector isn't ready.";
+    const reason = "Ada's connector isn't ready. Check it in Tools → Connectors.";
     rebaseMutateAsync.mockRejectedValue(
       new ApiError(
         400,
