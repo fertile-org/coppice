@@ -99,6 +99,7 @@ vi.mock('./useTicket', () => ({
   useTicketGitInfo: () => ({ data: undefined, isLoading: false }),
   useMergeTicketBranch: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useRebaseTicketBranch: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useResolveConflict: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useRemoveWorktree: () => ({ mutateAsync: vi.fn(), isPending: false }),
   usePushTicketBranch: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useCreateTicketPr: () => ({ mutateAsync: vi.fn(), isPending: false }),

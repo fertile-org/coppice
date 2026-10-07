@@ -22,6 +22,16 @@ fn git_env_commit(dir: &Path, message: &str) {
     );
 }
 
+fn git_abbrev_ref(dir: &Path) -> String {
+    let output = Command::new("git")
+        .args(["rev-parse", "--abbrev-ref", "HEAD"])
+        .current_dir(dir)
+        .output()
+        .expect("git rev-parse abbrev");
+    assert!(output.status.success());
+    String::from_utf8_lossy(&output.stdout).trim().to_string()
+}
+
 fn git_rev_parse(dir: &Path, rev: &str) -> String {
     let output = Command::new("git")
         .args(["rev-parse", rev])
@@ -249,6 +259,9 @@ async fn rebase_branch_conflict_aborts_and_leaves_clean_worktree() {
     git_env_commit(&worktree_path, "feature conflict");
 
     let tip_before = git_rev_parse(&worktree_path, "HEAD");
+    let branch_before = git_abbrev_ref(&worktree_path);
+    let main_before = git_rev_parse(&local_path, "HEAD");
+    let main_branch_before = git_abbrev_ref(&local_path);
 
     let res = app
         .clone()
@@ -264,9 +277,27 @@ async fn rebase_branch_conflict_aborts_and_leaves_clean_worktree() {
     assert_eq!(res.status(), StatusCode::BAD_REQUEST);
     let body: serde_json::Value = common::json_body(res).await;
     let message = body["message"].as_str().unwrap_or("");
-    assert!(
-        message.to_lowercase().contains("conflict") || message.contains("README"),
+    assert_eq!(
+        message,
+        coppice_server::copy::conflict::conflict_message(
+            coppice_server::copy::conflict::REBASE_ACTION,
+            "main",
+            &["README.md".into()],
+        ),
         "unexpected message: {message}"
+    );
+    assert_eq!(body["conflict"]["files"], serde_json::json!(["README.md"]));
+    assert_eq!(body["conflict"]["operation"], "rebase");
+    assert_eq!(body["conflict"]["baseBranch"], "main");
+    assert_eq!(body["conflict"]["canAskAssignee"], false);
+    assert_eq!(
+        body["conflict"]["unavailableReason"],
+        coppice_server::copy::conflict::NO_ASSIGNEE
+    );
+    assert!(body["conflict"]["askLabel"].is_null());
+    assert_eq!(
+        body["conflict"]["rereviewNote"],
+        coppice_server::copy::conflict::REREVIEW_NOTE
     );
 
     assert!(!git_rebase_in_progress(&worktree_path));
@@ -275,8 +306,133 @@ async fn rebase_branch_conflict_aborts_and_leaves_clean_worktree() {
         "worktree should be clean after abort: {}",
         git_status_porcelain(&worktree_path)
     );
-    // Tip should be back to the pre-rebase commit (abort restores it).
+    // Tip and branch are back to the pre-rebase commit (abort restores them).
     assert_eq!(git_rev_parse(&worktree_path, "HEAD"), tip_before);
+    assert_eq!(git_abbrev_ref(&worktree_path), branch_before);
+    assert_eq!(git_rev_parse(&local_path, "HEAD"), main_before);
+    assert_eq!(git_abbrev_ref(&local_path), main_branch_before);
+    assert_eq!(count_runs(&app, &ticket_id, &cookie, &csrf).await, 0);
+}
+
+async fn count_runs(app: &axum::Router, ticket_id: &str, cookie: &str, csrf: &str) -> usize {
+    let res = app
+        .clone()
+        .oneshot(common::json_request(
+            "GET",
+            &format!("/api/tickets/{ticket_id}/runs"),
+            "",
+            cookie,
+            csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let body: serde_json::Value = common::json_body(res).await;
+    body["runs"].as_array().unwrap().len()
+}
+
+#[tokio::test]
+async fn merge_branch_conflict_aborts_and_leaves_branch_unchanged() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+
+    let (_git_keep, _env, app, cookie, csrf, ticket_id, local_path, worktree_path) =
+        setup_repo_ticket_and_worktree().await;
+
+    std::fs::write(local_path.join("README.md"), "# test\nmain side\n").expect("write main");
+    Command::new("git")
+        .args(["add", "README.md"])
+        .current_dir(&local_path)
+        .output()
+        .expect("git add");
+    git_env_commit(&local_path, "main conflict");
+
+    std::fs::write(worktree_path.join("README.md"), "# test\nfeature side\n").expect("write wt");
+    Command::new("git")
+        .args(["add", "README.md"])
+        .current_dir(&worktree_path)
+        .output()
+        .expect("git add");
+    git_env_commit(&worktree_path, "feature conflict");
+
+    let status = app
+        .clone()
+        .oneshot(common::json_request(
+            "PATCH",
+            &format!("/api/tickets/{ticket_id}/status"),
+            r#"{"status":"wait_for_final_review"}"#,
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(status.status(), StatusCode::OK);
+    let approve = app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            &format!("/api/tickets/{ticket_id}/final-approve"),
+            "{}",
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(approve.status(), StatusCode::OK, "final approve");
+
+    let tip_before = git_rev_parse(&worktree_path, "HEAD");
+    let main_before = git_rev_parse(&local_path, "HEAD");
+    let main_branch_before = git_abbrev_ref(&local_path);
+    let worktree_branch_before = git_abbrev_ref(&worktree_path);
+
+    let res = app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            &format!("/api/tickets/{ticket_id}/merge-branch"),
+            r#"{"baseBranch":"main"}"#,
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+    let body: serde_json::Value = common::json_body(res).await;
+    assert_eq!(
+        body["message"],
+        coppice_server::copy::conflict::conflict_message(
+            coppice_server::copy::conflict::MERGE_ACTION,
+            "main",
+            &["README.md".into()],
+        )
+    );
+    assert_eq!(body["conflict"]["files"], serde_json::json!(["README.md"]));
+    assert_eq!(body["conflict"]["operation"], "merge");
+    assert!(!local_path.join(".git").join("MERGE_HEAD").exists());
+    assert_eq!(git_rev_parse(&local_path, "HEAD"), main_before);
+    assert_eq!(git_abbrev_ref(&local_path), main_branch_before);
+    assert!(git_status_porcelain(&local_path).trim().is_empty());
+    assert_eq!(git_rev_parse(&worktree_path, "HEAD"), tip_before);
+    assert_eq!(git_abbrev_ref(&worktree_path), worktree_branch_before);
+    assert!(git_status_porcelain(&worktree_path).trim().is_empty());
+    assert_eq!(count_runs(&app, &ticket_id, &cookie, &csrf).await, 0);
+
+    let ticket = app
+        .clone()
+        .oneshot(common::json_request(
+            "GET",
+            &format!("/api/tickets/{ticket_id}"),
+            "",
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    let ticket: serde_json::Value = common::json_body(ticket).await;
+    assert_eq!(ticket["status"], "done");
+    assert_eq!(ticket["humanReview"]["stale"], false);
 }
 
 #[tokio::test]
