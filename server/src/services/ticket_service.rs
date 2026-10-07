@@ -4,6 +4,7 @@ use crate::domain::substatus::{
 };
 use crate::domain::workflow::{PendingRecommendation, PendingSplitRecommendation};
 use crate::services::human_review_service::{HumanReview, HumanReviewService};
+use crate::services::workflow_service::WorkflowService;
 use crate::domain::ticket::{
     priority_from_str, priority_to_str, status_from_str, status_to_str, substatus_from_str,
     substatus_to_str, Ticket, TicketPriority,
@@ -17,6 +18,11 @@ use uuid::Uuid;
 
 pub struct TicketService<'a> {
     pool: &'a PgPool,
+}
+
+enum StatusWrite {
+    Direct,
+    Accept,
 }
 
 #[derive(Debug, Default)]
@@ -410,8 +416,59 @@ impl<'a> TicketService<'a> {
         substatus: Option<Option<Substatus>>,
         substatus_metadata: Option<Option<Value>>,
     ) -> Result<TicketWithDisplay, TicketError> {
+        self.write_status(
+            ticket_id,
+            status,
+            substatus,
+            substatus_metadata,
+            StatusWrite::Direct,
+        )
+        .await
+    }
+
+    /// Accept is the only status write that may enter Done.
+    pub async fn accept_to_done(
+        &self,
+        ticket_id: Uuid,
+    ) -> Result<TicketWithDisplay, TicketError> {
+        self.write_status(
+            ticket_id,
+            TicketStatus::Done,
+            Some(None),
+            Some(None),
+            StatusWrite::Accept,
+        )
+        .await
+    }
+
+    async fn write_status(
+        &self,
+        ticket_id: Uuid,
+        status: TicketStatus,
+        substatus: Option<Option<Substatus>>,
+        substatus_metadata: Option<Option<Value>>,
+        write: StatusWrite,
+    ) -> Result<TicketWithDisplay, TicketError> {
         let current = self.get(ticket_id).await?;
         Self::ensure_not_archived(&current.ticket)?;
+        match write {
+            StatusWrite::Accept => {
+                let approved = WorkflowService::final_approve(current.ticket.status)
+                    .map_err(|msg| TicketError::Validation(msg.to_string()))?;
+                if status != approved {
+                    return Err(TicketError::Validation(
+                        "final approve requires wait_for_final_review".into(),
+                    ));
+                }
+            }
+            StatusWrite::Direct => {
+                if let Some(msg) =
+                    WorkflowService::direct_status_change_error(current.ticket.status, status)
+                {
+                    return Err(TicketError::Validation(msg.to_string()));
+                }
+            }
+        }
         let substatus = match substatus {
             Some(value) => value,
             None => current.ticket.substatus,
@@ -494,6 +551,12 @@ impl<'a> TicketService<'a> {
         };
         let clarification_round =
             current.ticket.clarification_round.saturating_add(clarification_round_delta);
+
+        if let Some(msg) =
+            WorkflowService::direct_status_change_error(current.ticket.status, status)
+        {
+            return Err(TicketError::Validation(msg.to_string()));
+        }
 
         if let Some(msg) =
             validate_status_substatus_combo(status, substatus, &substatus_metadata)

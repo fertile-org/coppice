@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { BOARD_COLUMNS, type TicketStatus } from '../board/columns';
 import type { HumanReview, Ticket } from '../board/useTickets';
 import { useToast } from '../../components/ToastProvider';
+import { apiErrorToastMessage, parseApiErrorMessage } from '../../lib/api';
 import { Button } from '../../components/ui/button';
 import { Combobox } from '../../components/ui/combobox';
 import { Input } from '../../components/ui/input';
@@ -193,11 +194,13 @@ export function TicketMetadataPanel({ ticket }: TicketMetadataPanelProps) {
       }
 
       toast.success('Metadata saved');
-    } catch {
+    } catch (err) {
       setAssigneeId(ticket.assigneeAgentId ?? '');
-      setError('Unable to save metadata.');
+      setStatus(ticket.status);
+      const message = parseApiErrorMessage(err, '');
+      setError(message || 'Unable to save metadata.');
       setAssignError(assigneeChanged ? 'Unable to update assignee.' : null);
-      toast.error('Unable to save metadata');
+      toast.error(message ? apiErrorToastMessage(message) : 'Unable to save metadata');
     } finally {
       setIsSaving(false);
     }

@@ -10,7 +10,7 @@ use crate::domain::workflow::{PendingRecommendation, PendingSplitRecommendation}
 use crate::domain::comment::{AuthorType, CommentIntent};
 use crate::events::bus::AppEvent;
 use crate::services::comment_service::CommentService;
-use crate::services::workflow_service::WorkflowService;
+use crate::services::workflow_service::{WorkflowService, DONE_REQUIRES_ACCEPT};
 use crate::domain::agent_health::AgentHealthStatus;
 use crate::services::agent_health::missing_connector_detail;
 use crate::services::agent_service::{AgentError, AgentService};
@@ -690,24 +690,49 @@ async fn update_ticket(
     Ok(Json(ticket_to_response(ticket)))
 }
 
+enum UpdateStatusError {
+    Status(StatusCode),
+    Message(StatusCode, String),
+}
+
+impl IntoResponse for UpdateStatusError {
+    fn into_response(self) -> Response {
+        match self {
+            UpdateStatusError::Status(code) => code.into_response(),
+            UpdateStatusError::Message(code, message) => {
+                (code, Json(ApiMessageResponse { message })).into_response()
+            }
+        }
+    }
+}
+
+fn map_update_status_error(err: TicketError) -> UpdateStatusError {
+    match err {
+        TicketError::Validation(message) if message == DONE_REQUIRES_ACCEPT => {
+            UpdateStatusError::Message(StatusCode::BAD_REQUEST, message)
+        }
+        other => UpdateStatusError::Status(map_error(other)),
+    }
+}
+
 async fn update_status(
     State(state): State<Arc<AppState>>,
     AuthUser { .. }: AuthUser,
     Path(ticket_id): Path<Uuid>,
     Json(body): Json<UpdateStatusBody>,
-) -> Result<Json<TicketResponse>, StatusCode> {
-    let pool = pool_from_state(&state)?;
+) -> Result<Json<TicketResponse>, UpdateStatusError> {
+    let pool = pool_from_state(&state).map_err(UpdateStatusError::Status)?;
     let service = TicketService::new(pool);
-    let status = parse_status(&body.status).map_err(map_error)?;
+    let status = parse_status(&body.status).map_err(map_update_status_error)?;
     let substatus = match body.substatus {
-        Some(s) => Some(Some(parse_substatus(&s).map_err(map_error)?)),
+        Some(s) => Some(Some(parse_substatus(&s).map_err(map_update_status_error)?)),
         None => None,
     };
     let substatus_metadata = body.substatus_metadata.map(Some);
     let ticket = service
         .update_status(ticket_id, status, substatus, substatus_metadata)
         .await
-        .map_err(map_error)?;
+        .map_err(map_update_status_error)?;
     Ok(Json(ticket_to_response(ticket)))
 }
 
@@ -847,7 +872,7 @@ async fn final_approve(
         .await
         .map_err(map_error)
         .map_err(FinalApproveError::Status)?;
-    let next = WorkflowService::final_approve(ticket.ticket.status)
+    WorkflowService::final_approve(ticket.ticket.status)
         .map_err(|_| FinalApproveError::Status(StatusCode::BAD_REQUEST))?;
 
     match ticket_git_service(&state, pool)
@@ -865,7 +890,7 @@ async fn final_approve(
     }
 
     let updated = ticket_svc
-        .update_status(ticket_id, next, Some(None), Some(None))
+        .accept_to_done(ticket_id)
         .await
         .map_err(map_error)
         .map_err(FinalApproveError::Status)?;

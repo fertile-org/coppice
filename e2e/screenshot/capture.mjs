@@ -292,7 +292,12 @@ async function seedBoard(auth, agentIds) {
       description: ticket.description,
       priority: ticket.priority,
     });
-    if (ticket.status !== 'backlog') {
+    if (ticket.status === 'done') {
+      await api('PATCH', `/api/tickets/${created.id}/status`, auth, {
+        status: 'wait_for_final_review',
+      });
+      await api('POST', `/api/tickets/${created.id}/final-approve`, auth, {});
+    } else if (ticket.status !== 'backlog') {
       await api('PATCH', `/api/tickets/${created.id}/status`, auth, {
         status: ticket.status,
       });

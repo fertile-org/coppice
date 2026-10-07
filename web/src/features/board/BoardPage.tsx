@@ -10,6 +10,8 @@ import {
 import { useQueryClient } from '@tanstack/react-query';
 import { useEffect, useMemo, useState } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
+import { useToast } from '../../components/ToastProvider';
+import { apiErrorToastMessage, parseApiErrorMessage } from '../../lib/api';
 import { useAgents } from '../agents/useAgents';
 import { TicketDrawer } from '../tickets/TicketDrawer';
 import { setLastBoardId } from '../boards/useBoards';
@@ -67,6 +69,7 @@ export function BoardPage() {
     includeArchived,
   );
   const { data: agents } = useAgents();
+  const toast = useToast();
   const createTicket = useCreateTicket(boardId ?? '');
   const updateStatus = useUpdateTicketStatus(boardId ?? '', includeArchived);
 
@@ -182,7 +185,12 @@ export function BoardPage() {
     const targetStatus = resolveDropStatus(over.id, ticketsById);
     if (!targetStatus || targetStatus === ticket.status) return;
 
-    void updateStatus.mutateAsync({ ticketId, status: targetStatus });
+    void updateStatus
+      .mutateAsync({ ticketId, status: targetStatus })
+      .catch((err: unknown) => {
+        if (targetStatus !== 'done') return;
+        toast.error(apiErrorToastMessage(parseApiErrorMessage(err)));
+      });
   }
 
   async function handleQuickAdd(title: string) {
