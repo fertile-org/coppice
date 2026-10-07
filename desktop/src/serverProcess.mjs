@@ -4,6 +4,10 @@ import { createRotatingLog } from './rotatingLog.mjs';
 
 const RING_SIZE = 500;
 const KILL_WAIT_MS = 2000;
+// Coppice-server stops agent sessions itself on SIGTERM (they are not in this
+// process group). This wait covers that cleanup plus Postgres shutdown, which
+// the server bounds to 14 s. Do not shorten it.
+export const SERVER_STOP_GRACE_MS = 15000;
 
 function createLineSplitter(onLine) {
   let pending = '';
@@ -30,7 +34,7 @@ export function startServer({
   env = process.env,
   logFile,
   timeoutMs = 60000,
-  graceMs = 15000,
+  graceMs = SERVER_STOP_GRACE_MS,
   drainMs = 2000,
 }) {
   const log = createRotatingLog(logFile);
@@ -140,6 +144,9 @@ export function startServer({
 
   async function doStop() {
     settle(rejectReady, new Error('coppice-server stopped before it was ready'));
+    // SIGTERM the server and wait. Agent CLIs run in their own sessions, so
+    // only the server can SIGTERM those groups and then SIGKILL them. The
+    // group kill below does not reach a session the agent created with setsid.
     if (!childGone && child.pid !== undefined) {
       child.stdin.end();
       child.kill('SIGTERM');

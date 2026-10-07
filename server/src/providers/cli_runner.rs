@@ -11,6 +11,8 @@ use tokio::io::{AsyncBufReadExt, AsyncRead, BufReader};
 use tokio::process::Command;
 use tokio::sync::watch;
 
+use crate::process_tree::{active, SpawnMeta};
+
 const STDERR_TAIL_LINES: usize = 40;
 const STDERR_DRAIN_AFTER_KILL: Duration = Duration::from_secs(1);
 
@@ -20,6 +22,10 @@ pub struct CliInvocation {
     pub env: Vec<(String, String)>,
     pub cwd: PathBuf,
     pub timeout: Duration,
+    /// Recorded on the process-group entry so task logs name the run.
+    pub run_id: Option<String>,
+    /// `<artifacts_dir>/runs/<run_id>/process-stops.log` receives stop lines.
+    pub artifacts_dir: Option<String>,
 }
 
 pub trait LineHandler: Send {
@@ -87,21 +93,30 @@ pub async fn run_cli_with_stdin(
             Stdio::null()
         })
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .kill_on_drop(true);
+        .stderr(Stdio::piped());
 
-    let mut child = cmd.spawn().map_err(CliError::Spawn)?;
+    let mut tracked = active()
+        .spawn(
+            &mut cmd,
+            SpawnMeta {
+                command: inv.program.clone(),
+                label: "cli",
+                run_id: inv.run_id.clone(),
+                task_log_dir: task_log_dir(&inv),
+            },
+        )
+        .map_err(CliError::Spawn)?;
 
     let stdin_task = stdin.map(|input| {
-        let mut pipe = child.stdin.take().expect("piped stdin");
+        let mut pipe = tracked.take_stdin().expect("piped stdin");
         tokio::spawn(async move {
             use tokio::io::AsyncWriteExt;
             let _ = pipe.write_all(input.as_bytes()).await;
             let _ = pipe.shutdown().await;
         })
     });
-    let stdout = child.stdout.take().expect("piped stdout");
-    let stderr = child.stderr.take().expect("piped stderr");
+    let stdout = tracked.take_stdout().expect("piped stdout");
+    let stderr = tracked.take_stderr().expect("piped stderr");
     let stderr_tail = Arc::new(Mutex::new(Vec::new()));
     let mut stderr_task = tokio::spawn(pump_stderr(stderr, io.stderr_target, stderr_tail.clone()));
 
@@ -112,7 +127,7 @@ pub async fn run_cli_with_stdin(
 
     loop {
         if is_cancelled(&cancel_rx) {
-            let _ = child.kill().await;
+            tracked.shutdown("cancelled").await;
             return Err(CliError::Cancelled);
         }
 
@@ -121,13 +136,13 @@ pub async fn run_cli_with_stdin(
 
             _ = wait_cancel(&mut cancel_rx) => {
                 if is_cancelled(&cancel_rx) {
-                    let _ = child.kill().await;
+                    tracked.shutdown("cancelled").await;
                     return Err(CliError::Cancelled);
                 }
             }
 
             _ = tokio::time::sleep_until(deadline) => {
-                let _ = child.kill().await;
+                tracked.shutdown("timed out").await;
                 // A grandchild can hold the inherited stderr pipe open past the kill.
                 if tokio::time::timeout(STDERR_DRAIN_AFTER_KILL, &mut stderr_task)
                     .await
@@ -160,7 +175,7 @@ pub async fn run_cli_with_stdin(
                     }
                     Ok(None) => break,
                     Err(e) => {
-                        let _ = child.kill().await;
+                        tracked.shutdown("io error").await;
                         return Err(CliError::Io(e));
                     }
                 }
@@ -168,7 +183,10 @@ pub async fn run_cli_with_stdin(
         }
     }
 
-    let status = child.wait().await.map_err(CliError::Io)?;
+    let status = tracked
+        .wait_and_reap("run ended")
+        .await
+        .map_err(CliError::Io)?;
     if let Some(task) = stdin_task {
         let _ = task.await;
     }
@@ -201,6 +219,16 @@ async fn pump_stderr(
             lines.push(line);
         }
     }
+}
+
+fn task_log_dir(inv: &CliInvocation) -> Option<PathBuf> {
+    let (Some(dir), Some(run_id)) = (&inv.artifacts_dir, &inv.run_id) else {
+        return None;
+    };
+    if dir.is_empty() || run_id.is_empty() {
+        return None;
+    }
+    Some(PathBuf::from(dir).join("runs").join(run_id))
 }
 
 fn is_cancelled(cancel_rx: &Option<watch::Receiver<bool>>) -> bool {

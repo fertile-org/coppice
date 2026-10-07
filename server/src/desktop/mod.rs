@@ -24,7 +24,9 @@ use layout::{DataLayout, ResourceLayout};
 use postgres::DesktopPostgres;
 
 const DATABASE_NAME: &str = "coppice";
-/// How long in-flight requests and plugin/OpenCode shutdown get after a signal.
+/// How long in-flight requests, agent-tree shutdown, and plugin/OpenCode
+/// shutdown get after a signal. Agent groups get 3 s of that for SIGTERM
+/// before SIGKILL (`process_tree::TERM_GRACE`); a dropped drain SIGKILLs them.
 const DRAIN_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// A loopback port that was free a moment ago; the caller binds it next.

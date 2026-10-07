@@ -12,6 +12,7 @@ pub mod knowledge;
 pub mod mcp;
 pub mod middleware;
 pub mod plugins;
+pub mod process_tree;
 pub mod providers;
 pub mod sandbox;
 pub mod serve;

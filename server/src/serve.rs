@@ -3,10 +3,21 @@ use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use crate::events::mark_run_interrupted;
+use crate::domain::comment::{AuthorType, CommentIntent};
+use crate::domain::substatus::{Substatus, TicketStatus};
+use crate::events::{mark_run_interrupted, publish_ticket_updated};
+use crate::services::comment_service::CommentService;
 use crate::services::run_orchestrator::RunOrchestrator;
 use crate::services::run_service::RunService;
+use crate::services::ticket_service::TicketService;
 use crate::{AppConfig, AppState};
+
+/// Ticket comment left when a run is stopped because Coppice quit, including
+/// a crash discovered on the next launch.
+pub const RUN_STOPPED_BECAUSE_QUIT: &str = "This run was stopped because Coppice quit.";
+
+/// Stored as `interrupted: Coppice quit` on a graceful SIGTERM/SIGINT shutdown.
+pub const GRACEFUL_QUIT_REASON: &str = "Coppice quit";
 
 #[derive(Default)]
 pub struct ServeOptions {
@@ -18,9 +29,10 @@ pub struct ServeOptions {
     pub config_path: Option<PathBuf>,
 }
 
-async fn interrupt_orphaned_run(state: &AppState, run_id: uuid::Uuid) {
-    match mark_run_interrupted(state, run_id, "server restarted during run").await {
+async fn interrupt_orphaned_run(state: &AppState, run_id: uuid::Uuid, reason: &str) {
+    match mark_run_interrupted(state, run_id, reason).await {
         Ok(interrupted) => {
+            block_working_ticket(state, &interrupted).await;
             if let Some(pool) = state.db.as_ref() {
                 RunOrchestrator::new(pool, &state.config.workflow)
                     .handle_terminal_run(&interrupted)
@@ -33,7 +45,97 @@ async fn interrupt_orphaned_run(state: &AppState, run_id: uuid::Uuid) {
     }
 }
 
-async fn sweep_orphaned_runs(state: &AppState) {
+/// In Progress, In Review, and In QA mean an agent is working. Reviewer,
+/// tech-lead, and QC runs stay in those columns, and a person can drag a
+/// ticket there while a run is still live. Once that run is interrupted,
+/// Blocked is the existing column for work that cannot continue until a
+/// person acts. Wait for Final Review, Done, Ready, Backlog, and an already
+/// Blocked ticket stay put; the quit comment is still added.
+fn quit_blocks_status(status: TicketStatus) -> bool {
+    matches!(
+        status,
+        TicketStatus::InProgress | TicketStatus::InReview | TicketStatus::InQa
+    )
+}
+
+async fn block_working_ticket(state: &AppState, run: &crate::domain::run::AgentRun) {
+    let Some(pool) = state.db.as_ref() else {
+        return;
+    };
+    let Some(ticket_id) = run.ticket_id else {
+        return;
+    };
+    let ticket_svc = TicketService::new(pool);
+    match ticket_svc.get(ticket_id).await {
+        Ok(ticket) if quit_blocks_status(ticket.ticket.status) => {
+            match ticket_svc
+                .update_status(
+                    ticket_id,
+                    TicketStatus::Blocked,
+                    Some(Some(Substatus::BlockedByError)),
+                    Some(None),
+                )
+                .await
+            {
+                Ok(updated) => publish_ticket_updated(&state.event_bus, &updated),
+                Err(err) => {
+                    tracing::warn!(
+                        error = %err,
+                        %ticket_id,
+                        run_id = %run.id,
+                        "failed to move interrupted run's ticket to Blocked"
+                    );
+                }
+            }
+        }
+        Ok(_) => {}
+        Err(err) => {
+            tracing::warn!(
+                error = %err,
+                %ticket_id,
+                run_id = %run.id,
+                "failed to load ticket for interrupted run"
+            );
+        }
+    }
+    if let Err(err) = CommentService::new(pool)
+        .create(
+            ticket_id,
+            AuthorType::System,
+            None,
+            RUN_STOPPED_BECAUSE_QUIT,
+            CommentIntent::SystemEvent,
+            &[],
+            &[],
+        )
+        .await
+    {
+        tracing::warn!(
+            error = %err,
+            %ticket_id,
+            run_id = %run.id,
+            "failed to comment that the run was stopped because Coppice quit"
+        );
+    }
+}
+
+/// Marks every run whose process tree this process is about to stop, then
+/// stops those trees. Database updates happen first so a worker unblocked by
+/// SIGTERM cannot finish the run and leave the ticket in a working column.
+pub async fn shutdown_agent_sessions(state: &AppState) {
+    let mut seen = std::collections::HashSet::new();
+    for raw in crate::process_tree::tracked_run_ids() {
+        let Ok(run_id) = uuid::Uuid::parse_str(&raw) else {
+            continue;
+        };
+        if seen.insert(run_id) {
+            interrupt_orphaned_run(state, run_id, GRACEFUL_QUIT_REASON).await;
+        }
+    }
+    crate::process_tree::shutdown_running_agents().await;
+}
+
+pub async fn sweep_orphaned_runs(state: &AppState) {
     let Some(pool) = state.db.as_ref() else {
         return;
     };
@@ -48,7 +150,7 @@ async fn sweep_orphaned_runs(state: &AppState) {
         if state.run_streams.get(run.id).is_some() {
             continue;
         }
-        interrupt_orphaned_run(state, run.id).await;
+        interrupt_orphaned_run(state, run.id, "server restarted during run").await;
     }
 }
 
@@ -60,6 +162,9 @@ pub async fn serve(
     options: ServeOptions,
     shutdown: impl Future<Output = ()> + Send + 'static,
 ) -> anyhow::Result<()> {
+    crate::process_tree::install_from_artifacts(&config.storage.artifacts_dir);
+    crate::process_tree::reap_orphaned_agents().await;
+
     let opencode_runs = crate::sessions::opencode_run_server::OpenCodeRunServers::new(
         config.agent.connectors.opencode.command.clone(),
         config.agent.connectors.opencode.serve_hostname.clone(),
@@ -136,6 +241,7 @@ pub async fn serve(
     );
     crate::workers::run_watchdog::spawn_run_watchdog(state.clone());
 
+    let shutdown_state = state.clone();
     let mut app = crate::app(state);
     if let Some(dir) = options.static_web_dir.as_deref() {
         app = crate::static_web::with_static_web(app, dir);
@@ -148,6 +254,10 @@ pub async fn serve(
     axum::serve(listener, app)
         .with_graceful_shutdown(async move {
             shutdown.await;
+            // Agent CLIs are in their own sessions, so they outlive this
+            // process group. Mark their runs interrupted before signaling,
+            // then stop the trees before the runtime drops the workers.
+            shutdown_agent_sessions(&shutdown_state).await;
             opencode_runs.shutdown_all().await;
             plugin_mcp.shutdown_all().await;
         })

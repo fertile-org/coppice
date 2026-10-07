@@ -90,11 +90,35 @@ async fn run() -> anyhow::Result<()> {
             config_path: Some(coppice_server::AppConfig::writable_config_path()),
             ..ServeOptions::default()
         },
-        async {
-            tokio::signal::ctrl_c().await.ok();
-        },
+        server_shutdown_signal(),
     )
     .await
+}
+
+/// Docker stop and a terminal both need to reach the agent-tree cleanup in
+/// `serve`. SIGINT alone (ctrl-c) misses `SIGTERM`.
+async fn server_shutdown_signal() {
+    use tokio::signal::unix::{signal, SignalKind};
+    let mut terminate = match signal(SignalKind::terminate()) {
+        Ok(stream) => stream,
+        Err(err) => {
+            tracing::warn!(error = %err, "cannot listen for SIGTERM");
+            let _ = tokio::signal::ctrl_c().await;
+            return;
+        }
+    };
+    let mut interrupt = match signal(SignalKind::interrupt()) {
+        Ok(stream) => stream,
+        Err(err) => {
+            tracing::warn!(error = %err, "cannot listen for SIGINT");
+            let _ = terminate.recv().await;
+            return;
+        }
+    };
+    tokio::select! {
+        _ = terminate.recv() => tracing::info!("SIGTERM received; shutting down"),
+        _ = interrupt.recv() => tracing::info!("SIGINT received; shutting down"),
+    }
 }
 
 #[cfg(test)]

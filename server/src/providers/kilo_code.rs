@@ -131,6 +131,8 @@ impl AgentProvider for KiloCodeProvider {
             env,
             cwd: worktree,
             timeout: run_timeout,
+            run_id: input.run_id.clone(),
+            artifacts_dir: input.artifacts_dir.clone(),
         };
         let mut handler = KiloLines {
             stream: input.stream.clone(),

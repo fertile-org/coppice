@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { startServer } from '../src/serverProcess.mjs';
+import { SERVER_STOP_GRACE_MS, startServer } from '../src/serverProcess.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const FAKE = path.join(__dirname, 'fixtures', 'fake-server.mjs');
@@ -33,6 +33,10 @@ function isAlive(pid) {
     return false;
   }
 }
+
+test('stop grace leaves the server time to stop agent process groups', () => {
+  assert.equal(SERVER_STOP_GRACE_MS, 15000);
+});
 
 test('ready resolves to the URL; stop exits 0 and logs are teed', async () => {
   const logFile = tmpLog();
