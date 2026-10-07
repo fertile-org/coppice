@@ -13,6 +13,10 @@ use uuid::Uuid;
 use crate::domain::substatus::TicketStatus;
 use crate::services::workflow_service::WorkflowService;
 
+/// Prefix of the system comment written when a ticket branch is merged.
+/// That comment is the merged mark. Acceptance for a merged ticket stays as recorded.
+pub const MERGED_COMMENT_PREFIX: &str = "**Merge:**";
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HumanReview {
     pub ticket_id: Uuid,
@@ -95,6 +99,9 @@ impl<'a> HumanReviewService<'a> {
     /// A commit landed that is not the accepted one. Mark the acceptance stale
     /// and move Done / Wait for Human Review back to In Review.
     ///
+    /// A ticket that is already merged is left alone: the acceptance row is not
+    /// updated and the status is not changed.
+    ///
     /// Returns whether this call invalidated a live acceptance.
     pub async fn observe_head(
         &self,
@@ -103,6 +110,25 @@ impl<'a> HumanReviewService<'a> {
     ) -> Result<bool, HumanReviewError> {
         let head_sha = normalize_sha(head_sha);
         let mut tx = self.pool.begin().await?;
+        let merged: bool = sqlx::query_scalar(
+            r#"
+            SELECT EXISTS (
+                SELECT 1
+                FROM ticket_comments
+                WHERE ticket_id = $1
+                  AND intent = 'system_event'
+                  AND left(body, char_length($2::text)) = $2
+            )
+            "#,
+        )
+        .bind(ticket_id)
+        .bind(MERGED_COMMENT_PREFIX)
+        .fetch_one(&mut *tx)
+        .await?;
+        if merged {
+            tx.rollback().await?;
+            return Ok(false);
+        }
         let updated = sqlx::query(
             r#"
             UPDATE ticket_human_reviews

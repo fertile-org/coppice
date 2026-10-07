@@ -344,6 +344,53 @@ async fn new_commit_invalidates_review_and_returns_to_in_review() {
 }
 
 #[tokio::test]
+async fn merged_ticket_is_not_marked_stale_when_branch_moves() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let fx = setup().await;
+    set_wait_for_human_review(&fx).await;
+    let approved_sha = git_rev_parse(&fx.worktree_path, "HEAD");
+    final_approve(&fx).await;
+
+    let res = fx
+        .app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            &format!("/api/tickets/{}/merge-branch", fx.ticket_id),
+            r#"{"baseBranch":"main"}"#,
+            &fx.cookie,
+            &fx.csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK, "merge");
+
+    commit_file(
+        &fx.worktree_path,
+        "after-merge.txt",
+        "later commit\n",
+        "after merge",
+    );
+    assert_ne!(git_rev_parse(&fx.worktree_path, "HEAD"), approved_sha);
+
+    let pool = fx.state.db.clone().expect("pool");
+    let changed =
+        TicketGitService::new(&pool, PathBuf::from(&fx.state.config.agent.worktrees_path))
+            .note_branch_head(Uuid::parse_str(&fx.ticket_id).unwrap())
+            .await
+            .expect("note branch head");
+    assert!(!changed);
+
+    let ticket = get_ticket(&fx).await;
+    assert_eq!(ticket["status"], "done");
+    assert_eq!(ticket["humanReview"]["stale"], false);
+    assert_eq!(ticket["humanReview"]["headSha"], approved_sha);
+}
+
+#[tokio::test]
 async fn merge_without_acceptance_is_refused() {
     let _guard = common::DB_TEST_LOCK.lock().await;
     if !common::db_available().await {

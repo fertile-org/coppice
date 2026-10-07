@@ -16,7 +16,9 @@ use crate::services::agent_health::missing_connector_detail;
 use crate::services::agent_service::{AgentError, AgentService};
 use crate::services::run_service::{RunError, RunService};
 use crate::services::split_service::{SplitError, SplitService};
-use crate::services::human_review_service::{short_commit_sha, HumanReviewService};
+use crate::services::human_review_service::{
+    short_commit_sha, HumanReviewService, MERGED_COMMENT_PREFIX,
+};
 use crate::services::ticket_git_service::{TicketGitError, TicketGitInfo, TicketGitService};
 use crate::services::ticket_service::{TicketError, TicketFilters, TicketService, TicketWithDisplay};
 use crate::AppState;
@@ -865,7 +867,7 @@ async fn merge_ticket_branch(
 
     let short_sha = merge.head_sha.get(..7).unwrap_or(&merge.head_sha);
     let comment_body = format!(
-        "**Merge:** {} (`{short_sha}` on `{}`)",
+        "{MERGED_COMMENT_PREFIX} {} (`{short_sha}` on `{}`)",
         merge.message, merge.base_branch
     );
     create_git_action_comment(pool, &state, ticket_id, user.id, &comment_body)
