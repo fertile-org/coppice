@@ -3,7 +3,7 @@
   "productName": "Coppice",
   "private": true,
   "version": "0.1.0",
-  "description": "Agents plan, you approve. Agents build, you review. Coppice runs on your machine with the agent CLIs you already pay for, like Claude Code and Codex. No account, no Docker.",
+  "description": "Run a team of coding agents without babysitting them. Coppice runs on your computer with the agent CLIs you already pay for, like Claude Code and Codex. No Coppice account, no Docker.",
   "homepage": "https://getcoppice.vercel.app/",
   "license": "Apache-2.0",
   "author": {

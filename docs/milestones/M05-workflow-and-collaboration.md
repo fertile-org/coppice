@@ -16,7 +16,7 @@ Inter-agent coordination through ticket comments, `@mentions`, explicit workflow
 - Communication limits: max clarification rounds, max mentions per run, escalate to human (product design §9.4)
 - Rich substatuses displayed on cards (product design §5.1)
 - Columns used: full set including Wait for Final Review
-- Human **Final Approve** action moves ticket to Done
+- Human **Accept** action moves ticket to Done
 - Resolve Blocker action for non-capability blockers
 - Mock agents scripted with different roles return role-appropriate result contracts in tests
 
@@ -150,7 +150,7 @@ No new services. Optional workflow config mount:
 - Ready Tech Lead manual approval, automatic implementer assignment, missing/unknown/disabled targets, and blocked clarification/resume
 - Mention: engineer blocks with @pm-agent → PM job → answer → engineer resume job
 - Communication limit exceeded → escalates to waiting_for_human
-- Final Approve requires ticket in Wait for Final Review
+- Accept requires the ticket to be in Wait for Final Review
 
 ### E2E smoke (CI)
 
@@ -159,7 +159,7 @@ No new services. Optional workflow config mount:
 1. Assign PM mock and approve its pending Tech Lead recommendation
 2. Verify Tech Lead refinement hands off exactly one implementer run
 3. Run through the scripted implementation/clarification sequence to Wait for Final Review
-4. Click Final Approve → ticket in Done column
+4. Click Accept → ticket in Done column
 
 ### E2E full (local)
 
@@ -174,7 +174,7 @@ No new services. Optional workflow config mount:
 - [x] Successful attention mentions notify without executing; structured consultations are response-only and one hop
 - [x] Ready Tech Lead refinement is no-code, requires a valid implementer handoff, and preserves clarification/resume
 - [x] Clarification/resume cycle works with round limits
-- [x] Human Final Approve is required before Done
+- [x] Human Accept is required before Done
 - [x] CI smoke E2E passes full mock pipeline
 
 ## References

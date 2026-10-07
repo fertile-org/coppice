@@ -188,10 +188,10 @@ describe('TicketDrawer', () => {
     expect(dialog.className).toMatch(/w-\[90%\]/);
   });
 
-  it('shows Final Approve only when status is wait_for_final_review', () => {
+  it('shows Accept only when status is wait_for_final_review', () => {
     ticketState.ticket = { ...ticketState.ticket, status: 'backlog' };
     const { unmount } = renderDrawer();
-    expect(screen.queryByRole('button', { name: 'Final Approve' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Accept' })).toBeNull();
     unmount();
 
     ticketState.ticket = {
@@ -200,7 +200,7 @@ describe('TicketDrawer', () => {
     };
     renderDrawer();
     expect(
-      screen.getByRole('button', { name: 'Final Approve' }),
+      screen.getByRole('button', { name: 'Accept' }),
     ).toBeInTheDocument();
   });
 
@@ -236,7 +236,7 @@ describe('TicketDrawer', () => {
     renderDrawer();
 
     expect(screen.queryByRole('button', { name: 'Archive' })).toBeNull();
-    expect(screen.queryByRole('button', { name: 'Final Approve' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Accept' })).toBeNull();
     expect(
       screen.getByText(/This ticket is archived/i),
     ).toBeVisible();

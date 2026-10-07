@@ -18,7 +18,7 @@ CI proves the full collaboration slice via **MockProvider** on the same orchestr
 | Topic | Decision |
 |-------|----------|
 | Primary success story | Full mock pipeline in CI; MockProvider behaves like a real agent |
-| M05 scope | **B** — PM → Engineer → `@mention` clarification → resume → Wait for Final Review → human Final Approve (no Review/QA roles in CI smoke) |
+| M05 scope | **B** — PM → Engineer → `@mention` clarification → resume → Wait for Final Review → human Accept (no Review/QA roles in CI smoke) |
 | Run trigger | `auto_start_runs` config: `false` locally, `true` in CI compose |
 | Assignee gate | **No assignee → no run** (ever) |
 | First assignment | Human assigns the first agent only; no `on_ticket_created` auto-assign |
@@ -38,7 +38,7 @@ CI proves the full collaboration slice via **MockProvider** on the same orchestr
 ```text
 Backlog → Ready → In Progress → In Review → In QA → Wait for Final Review → Done
                                                               ↑
-                                                    human Final Approve only
+                                                    human Accept only
 
 Blocked — side branch from any status; human or agent resolution returns to prior gate
 ```
@@ -98,7 +98,7 @@ Backlog
   Engineer runs → succeeded → In Review
   … pipeline continues with auto_assign=true …
   → Wait for Final Review
-  human Final Approve → Done
+  human Accept → Done
 ```
 
 ### Case 2 — Direct engineer path
@@ -145,7 +145,7 @@ PM → Ready + pending recommendation (or CI pre-assigns Engineer after PM)
 Engineer → blocked + mentionAgents: [pm]
 PM respond_to_mention → clarification answer
 Engineer resume (work_on_ticket) → Wait for Final Review
-human Final Approve → Done
+human Accept → Done
 ```
 
 MockProvider fixtures drive each step; same `job_worker` → `provider.run()` → `finish_with_apply` → `WorkflowService` path as OpenCode.
@@ -395,7 +395,7 @@ environment:
 | Surface | Change |
 |---------|--------|
 | Board card | Substatus badge (`Waiting for PM`, `Blocked — missing agent`, etc.) |
-| Ticket drawer | **Final Approve** when `wait_for_final_review` |
+| Ticket drawer | **Accept** when `wait_for_final_review` |
 | Ticket drawer | **Pending recommendation** badge when `pending_assign_recommendation` set |
 | Comments | `@agent` rendered as chips |
 | Mentions | Ignore action on pending mentions (admin/owner) |
@@ -427,7 +427,7 @@ Migration: `00N_workflow_collaboration.sql`
 - Case 3: respond_to_mention → no status change
 - Case 4: assignTo missing agent → Blocked
 - auto_assign true at Ready → assignTo applied immediately
-- Final Approve gate only from Wait for Final Review
+- Accept gate only from Wait for Final Review
 
 ### Integration tests
 
@@ -440,7 +440,7 @@ Migration: `00N_workflow_collaboration.sql`
 1. Login → create ticket → assign repo → assign PM
 2. With auto_start: PM completes → Ready + recommendation visible
 3. Assign Engineer → blocked → PM answers → resume → Wait for Final Review
-4. Final Approve → Done
+4. Accept → Done
 
 ### E2E full (local)
 
@@ -470,7 +470,7 @@ Migration: `00N_workflow_collaboration.sql`
 - [ ] Mentions create jobs; clarification/resume works with round limits
 - [ ] `respond_to_mention` does not move status (case 3)
 - [ ] Missing `assignTo` agent → Blocked (case 4)
-- [ ] Human Final Approve required before Done
+- [ ] Human Accept required before Done
 - [ ] MockProvider role/job fixtures; CI smoke passes scope B pipeline
 - [ ] `auto_start_runs` configurable; no assignee → no run
 

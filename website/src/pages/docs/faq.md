@@ -22,7 +22,7 @@ No. Agents run via CLIs on your machine, on your repos. Category contrast: cloud
 No. Human Review is a first-class gate. You open the diff and decide.
 
 ## What about “set and forget” autopilots?
-That is not Coppice’s product. The wedge is the manager workflow: approve the plan, approve the diff.
+That is not Coppice’s product. Coppice is built for managing agents: you start the work, and you accept every change.
 
 ## Windows?
 Not in this Beta. macOS (Apple Silicon) and Linux (x64) only.

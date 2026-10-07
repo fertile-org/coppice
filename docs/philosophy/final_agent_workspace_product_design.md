@@ -216,7 +216,7 @@ Create Worktree
 View Diff
 Push Branch
 Create PR
-Final Approve
+Accept
 Convert Signal to Ticket
 Resolve Blocker
 ```

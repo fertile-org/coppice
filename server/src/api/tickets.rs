@@ -735,7 +735,7 @@ async fn final_approve(
         &state,
         ticket_id,
         user.id,
-        "Final approval: ticket moved to **Done**.",
+        "Accepted: ticket moved to **Done**.",
     )
     .await?;
 
