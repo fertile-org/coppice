@@ -95,49 +95,38 @@ fn write_new_file(path: &Path, contents: &str, mode: u32) -> io::Result<bool> {
 }
 
 fn generated_config(layout: &DataLayout) -> io::Result<String> {
-    let path = |p: &Path| toml::Value::String(p.to_string_lossy().into_owned());
-    let table = |entries: Vec<(&str, toml::Value)>| {
-        toml::Value::Table(
-            entries
-                .into_iter()
-                .map(|(k, v)| (k.to_string(), v))
-                .collect(),
-        )
-    };
-    let doc = table(vec![
-        (
-            "storage",
-            table(vec![("artifacts_dir", path(&layout.artifacts))]),
-        ),
-        (
-            "agent",
-            table(vec![
-                (
-                    "default_connector",
-                    // A real connector id. It stays unregistered until the user
-                    // sets `enabled = true`. Desktop builds have no mock connector.
-                    toml::Value::String(coppice_connectors::CLAUDE_CODE.into()),
-                ),
-                ("worktrees_path", path(&layout.worktrees)),
-            ]),
-        ),
-        ("plugins", table(vec![("dir", path(&layout.plugins))])),
-        (
-            "mcp",
-            table(vec![("builtin_plugins_dir", path(&layout.builtin_plugins))]),
-        ),
-    ]);
-    let body = toml::to_string(&doc).map_err(io::Error::other)?;
+    // Written by hand so each section keeps its comment; toml::to_string drops
+    // comments. toml::Value quotes and escapes paths (spaces, backslashes).
+    let quoted = |s: &str| toml::Value::String(s.to_owned()).to_string();
+    let path = |p: &Path| quoted(&p.to_string_lossy());
     Ok(format!(
-        "# Coppice desktop configuration. Edits here survive upgrades.\n\
-         # Secrets (session secret, encryption key, passwords) live in secrets/, not here.\n\
-         # The server port, database URL and auth mode are set by the desktop app at startup.\n\
-         # This build has no mock connector. Nothing is turned on until you save an agent\n\
-         # that uses one, or turn it on in Tools → Connectors. A hand-written section\n\
-         # is read the next time the server starts:\n\
-         # [agent.connectors.claude-code]\n\
-         # enabled = true\n\n\
-         {body}"
+        "# Coppice settings. Your edits are kept when Coppice updates.\n\
+         # Passwords and keys live in secrets/, not in this file.\n\
+         # The app picks its own port and database, so they aren't set here.\n\
+         # After each save, Settings tells you if Coppice needs a restart.\n\
+         \n\
+         # How agents run.\n\
+         [agent]\n\
+         # Coppice gives each ticket its own git worktree in this folder.\n\
+         worktrees_path = {worktrees}\n\
+         \n\
+         # Logs and other files from agent runs and chats.\n\
+         [storage]\n\
+         artifacts_dir = {artifacts}\n\
+         \n\
+         # Your default plugin folder. Coppice always looks here for plugins.\n\
+         [plugins]\n\
+         # Add more folders on the Plugins page. This one can't be removed there.\n\
+         dir = {plugins}\n\
+         \n\
+         # Skills that ship with Coppice.\n\
+         [mcp]\n\
+         # Coppice rewrites coppice/skills here on every start. Edits there are lost.\n\
+         builtin_plugins_dir = {builtin_plugins}\n",
+        worktrees = path(&layout.worktrees),
+        artifacts = path(&layout.artifacts),
+        plugins = path(&layout.plugins),
+        builtin_plugins = path(&layout.builtin_plugins),
     ))
 }
 
@@ -219,11 +208,27 @@ mod tests {
             Path::new(&cfg.mcp.builtin_plugins_dir),
             layout.builtin_plugins.as_path()
         );
-        assert_eq!(cfg.agent.default_connector, "claude-code");
         assert!(
-            !contents.contains("default_connector = \"mock\""),
-            "desktop config must not select the mock connector"
+            !contents.contains("default_connector"),
+            "starter file omits default_connector"
         );
+        assert_eq!(cfg.agent.default_connector, "mock");
+        coppice_config::settings_file::validate_config_text(&contents).expect("settings validation");
+    }
+
+    #[test]
+    fn config_with_default_connector_still_validates() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let layout = layout_in(&dir);
+        let text = generated_config(&layout)
+            .unwrap()
+            .replace("[agent]\n", "[agent]\ndefault_connector = \"claude-code\"\n");
+        assert!(text.contains("default_connector = \"claude-code\""));
+        let parsed = coppice_config::settings_file::validate_config_text(&text).expect("validates");
+        assert_eq!(parsed.agent.default_connector, "claude-code");
+        std::fs::write(&layout.config_file, &text).unwrap();
+        let cfg = AppConfig::load_file_only(&layout.config_file).expect("loads");
+        assert_eq!(cfg.agent.default_connector, "claude-code");
     }
 
     #[test]

@@ -23,7 +23,7 @@ Installers for the beta are **macOS Apple Silicon** (`.dmg`) and **Linux x64** (
 
 Stronger sandboxing for agents is coming in a later release. Role-owner agents that watch a domain and raise signals come after this beta. This beta is the gated board above.
 
-Bring the CLIs you already use — Claude Code, Codex, Cursor, OpenCode and Kilo Code. Install and sign in to them the usual way. Coppice finds them on your login shell `PATH`. Mock agents are for automated tests and for Compose/dev builds that turn on the `mock-provider` feature. Desktop and release builds leave that feature off.
+Bring the CLIs you already use — Claude Code, Codex, Cursor, OpenCode and Kilo Code. Install and sign in to them the usual way. Coppice finds them on your login shell `PATH`.
 
 ## Get started
 

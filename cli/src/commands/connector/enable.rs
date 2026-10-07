@@ -3,7 +3,9 @@ use std::path::{Path, PathBuf};
 use clap::Args;
 use toml_edit::DocumentMut;
 
-use coppice_config::connector_file::{set_connector_enabled, ConnectorFilePatch};
+use coppice_config::connector_file::{
+    set_connector_enabled, write_toml_atomic, ConnectorFilePatch,
+};
 use coppice_connectors::{ConnectorDescriptor, CURSOR, KILO_CODE, MOCK, OPENCODE};
 
 use super::registry::parse_id;
@@ -37,10 +39,7 @@ pub fn run(args: EnableArgs) -> anyhow::Result<()> {
 
     enable_in_doc(&mut doc, m)?;
 
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    std::fs::write(&path, doc.to_string())?;
+    write_toml_atomic(&path, &doc.to_string())?;
     println!("enabled {} in {}", m.id, path.display());
     println!(
         "A running server reads this file the next time it starts. In the app, the Connectors toggle and saving an agent apply immediately."
@@ -123,6 +122,29 @@ model_providers = ["cursor"]
                 .filter_map(|v| v.as_str())
                 .collect::<Vec<_>>(),
             vec!["cursor"]
+        );
+    }
+
+    #[test]
+    fn enable_file_keeps_comments() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(&path, "# keep me\n[server]\nport = 1\n").unwrap();
+        run(EnableArgs {
+            id: CLAUDE_CODE.into(),
+            config: Some(path.clone()),
+        })
+        .unwrap();
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(text.contains("# keep me"), "{text}");
+        assert!(text.contains("enabled = true"), "{text}");
+        assert!(
+            std::fs::read_dir(dir.path()).unwrap().all(|entry| !entry
+                .unwrap()
+                .file_name()
+                .to_string_lossy()
+                .contains("writing")),
+            "atomic write must not leave a temp file"
         );
     }
 

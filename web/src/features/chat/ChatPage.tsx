@@ -21,6 +21,7 @@ import {
 } from '../../lib/attachments';
 import { filterChatSessions } from '../../lib/chatSessionSearch';
 import type { ChatSession, ChatSessionStatus } from '../../lib/schemas/chat';
+import { chatUnavailableMessage } from '../tools/connectorCopy';
 import { cn } from '../../lib/utils';
 import { useAgents } from '../agents/useAgents';
 import { useBoards } from '../boards/useBoards';
@@ -148,6 +149,8 @@ function NewChatForm({
   const [agentId, setAgentId] = useState('');
   const [boardId, setBoardId] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const selected = enabledAgents.find((agent) => agent.id === agentId);
+  const chatBlock = chatUnavailableMessage(selected?.connector);
 
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
@@ -156,6 +159,7 @@ function NewChatForm({
       setError('Select an agent.');
       return;
     }
+    if (chatUnavailableMessage(selected?.connector)) return;
     try {
       const session = await createSession.mutateAsync({
         agentId,
@@ -212,13 +216,19 @@ function NewChatForm({
         />
       </div>
 
+      {chatBlock && (
+        <p className="font-body text-sm text-text-secondary" role="status">
+          {chatBlock}
+        </p>
+      )}
+
       {error && (
         <p className="font-body text-sm text-danger" role="alert">
           {error}
         </p>
       )}
 
-      <Button type="submit" disabled={createSession.isPending}>
+      <Button type="submit" disabled={createSession.isPending || Boolean(chatBlock)}>
         {createSession.isPending ? 'Starting…' : 'Start chat'}
       </Button>
     </form>
@@ -451,8 +461,9 @@ function ChatSessionPane({ sessionId }: { sessionId: string }) {
     }
   }, [activeRunId, session?.hasActiveRun, session?.activeRunId]);
 
-  const agentName =
-    agents.find((agent) => agent.id === session?.agentId)?.name ?? 'Agent';
+  const agent = agents.find((item) => item.id === session?.agentId);
+  const agentName = agent?.name ?? 'Agent';
+  const chatBlock = chatUnavailableMessage(agent?.connector);
 
   const onLiveFinished = useCallback(() => {
     setActiveRunId(null);
@@ -512,6 +523,13 @@ function ChatSessionPane({ sessionId }: { sessionId: string }) {
           <Link to="/chat" className="text-accent hover:underline">
             Start a new chat
           </Link>
+        </p>
+      ) : chatBlock ? (
+        <p
+          className="shrink-0 border-t border-border bg-paper-50/90 px-4 py-3 font-body text-sm text-text-secondary"
+          role="status"
+        >
+          {chatBlock}
         </p>
       ) : (
         <ChatComposer

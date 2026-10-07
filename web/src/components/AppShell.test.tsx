@@ -41,6 +41,7 @@ describe('AppShell', () => {
   beforeEach(() => {
     localStorage.clear();
     sessionState.desktopMode = false;
+    sessionState.user = { ...sessionState.user, role: 'admin' };
     document.documentElement.removeAttribute('data-theme');
   });
 
@@ -205,6 +206,29 @@ describe('AppShell', () => {
       screen.getByRole('button', { name: 'Notifications' }),
     ).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Tools' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Settings' })).toHaveAttribute(
+      'href',
+      '/settings',
+    );
     expect(screen.getByTestId('theme-toggle')).toBeInTheDocument();
+  });
+
+  it('highlights Settings only on its own page', () => {
+    renderShell(['/settings/plugins']);
+
+    expect(screen.getByRole('link', { name: 'Plugins' })).toHaveAttribute('aria-current', 'page');
+    expect(screen.getByRole('link', { name: 'Settings' })).not.toHaveAttribute(
+      'aria-current',
+      'page',
+    );
+  });
+
+  it('hides Settings from members', () => {
+    sessionState.user = { ...sessionState.user, role: 'member' };
+
+    renderShell(['/boards']);
+
+    expect(screen.queryByRole('link', { name: 'Settings' })).not.toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Boards' })).toBeInTheDocument();
   });
 });

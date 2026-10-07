@@ -142,6 +142,7 @@ async fn connectors_lists_non_mock_descriptors() {
     assert_eq!(k["cli"]["path"], kilo.script().display().to_string());
     assert_eq!(k["cli"]["probe"]["status"], "ok");
     assert_eq!(k["cli"]["probe"]["detail"], "kilo 9.9.9");
+    assert_eq!(k["readiness"], "found");
     assert!(k["auth"]["envSet"].is_array());
     assert!(k["auth"]["pathsFound"].is_array());
     assert!(k["authHint"].is_string());
@@ -1104,5 +1105,103 @@ async fn check_first_submitted_outcome_wins() {
         .map(|c| c.status.as_str())
         .collect();
     assert_eq!(submits, vec!["ok", "denied"]);
+    std::env::remove_var("MOCK_AGENT_RESPONSE");
+}
+
+fn write_version_script(dir: &Path, body: &str) -> PathBuf {
+    let script = dir.join("kilo");
+    std::fs::write(&script, format!("#!/bin/sh\n{body}\n")).expect("write kilo script");
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755))
+            .expect("chmod kilo script");
+    }
+    for _ in 0..50 {
+        match std::process::Command::new(&script)
+            .arg("--version")
+            .output()
+        {
+            Ok(_) => return script,
+            Err(_) => std::thread::sleep(Duration::from_millis(20)),
+        }
+    }
+    panic!("version script never became executable");
+}
+
+async fn run_kilo_version_check(body: &str) -> (Arc<AppState>, Uuid, tempfile::TempDir) {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let script = write_version_script(dir.path(), body);
+    let (state, app, cookie, csrf, _env) = common::bootstrap_and_login_with_state_and_workers(
+        "mcp/connector_check",
+        configure_kilo(&script),
+    )
+    .await;
+    let pool = state.db.clone().unwrap();
+    let agent_id: Uuid =
+        common::create_test_agent_from_preset(&app, "Kilo Checker", &cookie, &csrf)
+            .await
+            .parse()
+            .unwrap();
+    set_agent_connector(&pool, agent_id, KILO).await;
+    let (check_id, _run_id) = ConnectorCheckService::new(&pool)
+        .start(&state.config, KILO, agent_id, admin_id(&pool).await)
+        .await
+        .expect("start kilo check");
+    wait_for_check_end(&pool, check_id).await;
+    (state, check_id, dir)
+}
+
+#[tokio::test]
+async fn kilo_test_connection_passes_when_version_exits_zero() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let (state, check_id, _dir) = run_kilo_version_check(
+        r#"case "$1" in
+  --version) echo "kilo 1.2.3"; exit 0 ;;
+  *) echo "unexpected: $*" >&2; exit 2 ;;
+esac"#,
+    )
+    .await;
+    let detail = ConnectorCheckService::new(state.db.as_ref().unwrap())
+        .get(check_id)
+        .await
+        .unwrap();
+    assert_eq!(detail.status, "passed", "{:?}", detail.failure);
+    assert!(detail.failure.is_none(), "{:?}", detail.failure);
+    assert!(
+        detail.tool_calls.is_empty(),
+        "version check must not run tools: {:?}",
+        detail.tool_calls
+    );
+    std::env::remove_var("MOCK_AGENT_RESPONSE");
+}
+
+#[tokio::test]
+async fn kilo_test_connection_fails_when_version_exits_nonzero() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let (state, check_id, _dir) = run_kilo_version_check(
+        r#"case "$1" in
+  --version) echo "kilo: version check failed" >&2; exit 1 ;;
+  *) echo "unexpected: $*" >&2; exit 2 ;;
+esac"#,
+    )
+    .await;
+    let detail = ConnectorCheckService::new(state.db.as_ref().unwrap())
+        .get(check_id)
+        .await
+        .unwrap();
+    assert_eq!(detail.status, "failed");
+    let failure = detail.failure.expect("failure reason");
+    assert!(failure.contains("kilo: version check failed"), "{failure}");
+    assert!(
+        !failure.contains("read-only"),
+        "version check must not be the read-only tool turn: {failure}"
+    );
+    assert!(detail.tool_calls.is_empty(), "{:?}", detail.tool_calls);
     std::env::remove_var("MOCK_AGENT_RESPONSE");
 }
