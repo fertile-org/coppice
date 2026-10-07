@@ -30,6 +30,7 @@ type NavItem = {
   label: string;
   icon: LucideIcon;
   adminOnly?: boolean;
+  end?: boolean;
 };
 
 const NAV_ITEMS: NavItem[] = [
@@ -41,7 +42,7 @@ const NAV_ITEMS: NavItem[] = [
   { to: '/settings/plugins', label: 'Plugins', icon: Puzzle, adminOnly: true },
   { to: '/settings/users', label: 'Users', icon: Users, adminOnly: true },
   { to: '/tools', label: 'Tools', icon: Wrench, adminOnly: true },
-  { to: '/settings', label: 'Settings', icon: Settings, adminOnly: true },
+  { to: '/settings', label: 'Settings', icon: Settings, adminOnly: true, end: true },
 ];
 
 function readSidebarCollapsed(): boolean {
@@ -144,10 +145,11 @@ export function AppShell() {
           className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto p-2"
           aria-label="Main"
         >
-          {visibleNavItems.map(({ to, label, icon: Icon }) => (
+          {visibleNavItems.map(({ to, label, icon: Icon, end }) => (
             <NavLink
               key={to}
               to={to}
+              end={end}
               aria-label={sidebarCollapsed ? label : undefined}
               title={sidebarCollapsed ? label : undefined}
               className={({ isActive }) =>

@@ -46,7 +46,8 @@ type ConfigFile = z.infer<typeof configFileSchema>;
 const CONFIG_QUERY_KEY = ['settings-config'] as const;
 
 function invalidSaveMessage(line: number, message: string): string {
-  return `Not saved. Line ${line}: ${message}. Your file is unchanged.`;
+  const detail = message.endsWith('.') ? message.slice(0, -1) : message;
+  return `Not saved. Line ${line}: ${detail}. Your file is unchanged.`;
 }
 
 async function readConfig(): Promise<ConfigFile> {
@@ -97,7 +98,7 @@ export function SettingsPage() {
   const backupAvailable = disk?.backupAvailable ?? false;
 
   if (loading) {
-    return <p className="font-body text-sm text-text-muted">Loading session…</p>;
+    return <p className="font-body text-sm text-text-muted">Loading…</p>;
   }
 
   if (user?.role !== 'admin') {
@@ -282,7 +283,10 @@ export function SettingsPage() {
           />
 
           {status && (
-            <p role="alert" className={invalid ? ERROR_CLASS : 'font-body text-sm text-text-primary'}>
+            <p
+              role={status === SAVED || status === SAVED_RESTART ? 'status' : 'alert'}
+              className={invalid ? ERROR_CLASS : 'font-body text-sm text-text-primary'}
+            >
               {status}
             </p>
           )}

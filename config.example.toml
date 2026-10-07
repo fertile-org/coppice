@@ -22,7 +22,6 @@ artifacts_dir = "./data/artifacts"
 max_upload_bytes = 10485760
 
 [agent]
-# Desktop installers and `make release-tar` omit it; set a real connector there.
 default_connector = "mock"
 worktrees_path = "./data/worktrees"
 worker_count = 2

@@ -104,7 +104,7 @@ describe('SettingsPage', () => {
           JSON.stringify({
             line: 3,
             column: 8,
-            message: 'invalid type: found string "nope", expected u16',
+            message: 'invalid type: found string "nope", expected u16.',
           }),
         );
       }
@@ -143,8 +143,8 @@ describe('SettingsPage', () => {
     await screen.findByRole('textbox', { name: 'config.toml' });
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
-    expect(await screen.findByRole('alert')).toHaveTextContent('Saved.');
-    expect(screen.getByRole('alert')).not.toHaveTextContent('Restart');
+    expect(await screen.findByRole('status')).toHaveTextContent('Saved.');
+    expect(screen.getByRole('status')).not.toHaveTextContent('Restart');
   });
 
   it('says to restart when a saved key needs it', async () => {
@@ -162,7 +162,7 @@ describe('SettingsPage', () => {
     await screen.findByRole('textbox', { name: 'config.toml' });
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
-    expect(await screen.findByRole('alert')).toHaveTextContent(
+    expect(await screen.findByRole('status')).toHaveTextContent(
       'Saved. Restart Coppice to apply.',
     );
   });

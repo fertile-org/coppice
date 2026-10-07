@@ -213,6 +213,16 @@ describe('AppShell', () => {
     expect(screen.getByTestId('theme-toggle')).toBeInTheDocument();
   });
 
+  it('highlights Settings only on its own page', () => {
+    renderShell(['/settings/plugins']);
+
+    expect(screen.getByRole('link', { name: 'Plugins' })).toHaveAttribute('aria-current', 'page');
+    expect(screen.getByRole('link', { name: 'Settings' })).not.toHaveAttribute(
+      'aria-current',
+      'page',
+    );
+  });
+
   it('hides Settings from members', () => {
     sessionState.user = { ...sessionState.user, role: 'member' };
 
