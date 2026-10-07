@@ -7,8 +7,7 @@
 pub const PLAN_REQUIRED: &str = "Approve the plan before moving this ticket to In Progress.";
 
 /// Posted when Ready has nobody to write the plan.
-pub const NO_PLANNER: &str =
-    "No PM agent is available, and this ticket has no assignee to write the plan.";
+pub const NO_PLANNER: &str = "This ticket has no assignee to write the plan.";
 
 /// Ask for changes while a planning run is still active.
 pub const PLAN_ALREADY_RUNNING: &str = "A plan is already being written for this ticket.";
@@ -28,6 +27,9 @@ pub const PLAN_APPROVED_NOTE: &str = "Plan approved.";
 
 pub const IMPLEMENTATION_NOT_STARTED: &str =
     "The plan is approved. Assign an agent with a ready repository to start the work.";
+
+/// Posted when Skip planning cannot start work.
+pub const WORK_NOT_STARTED: &str = "Assign an agent with a ready repository to start the work.";
 
 pub const PLAN_HEADING: &str = "## Plan";
 pub const APPROACH_HEADING: &str = "### Approach";
@@ -101,7 +103,10 @@ pub fn plan_template() -> String {
 
 /// Instructions appended to a planning run. `changes` is the human comment.
 pub fn plan_instructions(changes: Option<&str>) -> String {
-    let mut out = format!("{PLAN_TASK}\n\n{PLAN_FORMAT_INSTRUCTION}\n\n{}\n", plan_template());
+    let mut out = format!(
+        "{PLAN_TASK}\n\n{PLAN_FORMAT_INSTRUCTION}\n\n{}\n",
+        plan_template()
+    );
     if let Some(changes) = changes.map(str::trim).filter(|text| !text.is_empty()) {
         out.push_str(&format!("\n{CHANGES_REQUESTED_HEADING}\n\n{changes}\n"));
     }

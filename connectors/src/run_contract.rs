@@ -65,8 +65,10 @@ pub struct RunContract {
     /// grace period then stops a process that stays alive.
     pub result_before_exit: bool,
     pub prompt: PromptPlace,
-    /// Argv that selects a native plan mode known not to write files or branches.
-    /// `None` means planning stays prompt-based and must not invent a plan flag.
+    /// Argv for a read-only plan run. Replaces [`PermissionMode`] when
+    /// [`LaunchSubst::plan`] is set. `None` means this CLI has no plan or ask
+    /// mode, so planning stays prompt-only and must not invent a flag.
+    /// A later milestone can tighten this field.
     pub plan_mode: Option<&'static [&'static str]>,
 }
 
@@ -74,8 +76,8 @@ pub struct RunContract {
 #[derive(Debug, Clone, Copy)]
 pub struct LaunchSubst<'a> {
     pub read_only: bool,
-    /// When true, replace the permission-mode argv with [`RunContract::plan_mode`]
-    /// if that mode is pinned. Otherwise the prompt carries the plan.
+    /// When true, use [`RunContract::plan_mode`] for the permission argv when
+    /// that mode is pinned. Otherwise the prompt carries the plan.
     pub plan: bool,
     pub worktree: &'a str,
     pub hostname: &'a str,
@@ -99,7 +101,10 @@ impl RunContract {
         out
     }
 
-    fn permission_args(self, subst: &LaunchSubst<'_>) -> (&'static [&'static str], Option<&'static str>, bool) {
+    fn permission_args(
+        self,
+        subst: &LaunchSubst<'_>,
+    ) -> (&'static [&'static str], Option<&'static str>, bool) {
         if subst.plan {
             if let Some(plan) = self.plan_mode {
                 return (plan, None, false);
@@ -247,7 +252,9 @@ pub const CURSOR: RunContract = RunContract {
     process_cwd_is_worktree: true,
     result_before_exit: true,
     prompt: PromptPlace::AfterDashP,
-    plan_mode: None,
+    // Read-only plan invocation. Same `--mode ask` as read-only chat, pinned
+    // here so a planning run uses it instead of `--force`.
+    plan_mode: Some(&["--mode", "ask"]),
 };
 
 pub const KILO_CODE: RunContract = RunContract {
@@ -523,21 +530,40 @@ mod tests {
     }
 
     #[test]
-    fn only_claude_code_pins_a_native_plan_mode() {
+    fn read_only_plan_invocation_is_pinned_per_connector() {
+        assert_eq!(
+            CLAUDE_CODE.plan_mode,
+            Some(&["--permission-mode", "plan"][..])
+        );
+        assert_eq!(CURSOR.plan_mode, Some(&["--mode", "ask"][..]));
         assert!(CODEX.plan_mode.is_none());
-        assert!(CURSOR.plan_mode.is_none());
         assert!(KILO_CODE.plan_mode.is_none());
         assert!(OPENCODE.plan_mode.is_none());
         assert!(MOCK.plan_mode.is_none());
 
         let mut planned = subst(None, false);
         planned.plan = true;
-        let argv = CLAUDE_CODE.argv(&planned);
-        assert!(argv.windows(2).any(|w| w == ["--permission-mode", "plan"]));
-        assert!(!argv.iter().any(|arg| arg == "bypassPermissions"));
+        let claude = CLAUDE_CODE.argv(&planned);
+        assert!(claude
+            .windows(2)
+            .any(|w| w == ["--permission-mode", "plan"]));
+        assert!(!claude.iter().any(|arg| arg == "bypassPermissions"));
+
+        let cursor = CURSOR.argv(&planned);
+        assert!(cursor.windows(2).any(|w| w == ["--mode", "ask"]));
+        assert!(!cursor.iter().any(|arg| arg == "--force"));
 
         let write = CLAUDE_CODE.argv(&subst(None, false));
-        assert!(write.windows(2).any(|w| w == ["--permission-mode", "bypassPermissions"]));
+        assert!(write
+            .windows(2)
+            .any(|w| w == ["--permission-mode", "bypassPermissions"]));
         assert!(!write.iter().any(|arg| arg == "plan"));
+
+        let codex = CODEX.argv(&planned);
+        assert!(codex
+            .iter()
+            .any(|arg| arg == "--dangerously-bypass-approvals-and-sandbox"));
+        let kilo = KILO_CODE.argv(&planned);
+        assert!(kilo.iter().any(|arg| arg == "--auto"));
     }
 }

@@ -12,7 +12,7 @@
 
 Work stops for you in two places:
 
-1. **Plan Review.** A PM agent writes the plan. You approve it, or ask for changes in the ticket comments, before implementation starts.
+1. **Plan Review.** The assignee writes the plan. You approve it, or ask for changes in the ticket comments, before implementation starts. Skip planning on a ticket sends it straight to In Progress.
 2. **Wait for Human Review.** You review the diff. The ticket stays in this column until you accept it.
 
 You start the work — create a ticket, or approve one an agent proposed. Agents plan and build between those gates.

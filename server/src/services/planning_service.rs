@@ -1,26 +1,27 @@
 //! Planning runs and the Plan Review gate.
 //!
-//! A human move to Ready starts one `plan_ticket` run. The plan is a ticket
-//! comment. Implementation starts only after that plan is approved for the
-//! ticket's current content version, unless planning is skipped.
+//! A human move to Ready starts one `plan_ticket` run for the ticket's assignee.
+//! The plan is a ticket comment. Implementation starts only after that plan is
+//! approved for the ticket's current content version. Skip planning sends the
+//! ticket straight from Ready to In Progress.
 
 use crate::copy::plan::{
-    self, format_plan, ASK_COMMENT_REQUIRED, ASK_ONLY_FROM_PLAN_REVIEW,
-    APPROVE_ONLY_FROM_PLAN_REVIEW, IMPLEMENTATION_NOT_STARTED, NO_PLANNER, NO_PLAN_YET,
-    PLAN_ALREADY_RUNNING, PLAN_APPROVED_NOTE, PLAN_STALE,
+    self, format_plan, APPROVE_ONLY_FROM_PLAN_REVIEW, ASK_COMMENT_REQUIRED,
+    ASK_ONLY_FROM_PLAN_REVIEW, IMPLEMENTATION_NOT_STARTED, NO_PLANNER, NO_PLAN_YET,
+    PLAN_ALREADY_RUNNING, PLAN_APPROVED_NOTE, PLAN_STALE, WORK_NOT_STARTED,
 };
+use crate::domain::agent::Agent;
 use crate::domain::comment::{AuthorType, Comment, CommentIntent};
 use crate::domain::context_profile::ContextProfile;
 use crate::domain::job::{job_status_to_str, JobStatus};
 use crate::domain::run::{run_status_to_str, RunStatus};
 use crate::domain::substatus::TicketStatus;
-use crate::domain::workflow::{is_pm_identity, JOB_TYPE_PLAN_TICKET};
+use crate::domain::workflow::JOB_TYPE_PLAN_TICKET;
 use crate::sandbox::permissive::PROFILE_ID;
 use crate::services::agent_service::AgentService;
 use crate::services::comment_service::CommentService;
 use crate::services::run_service::{RunError, RunService};
 use crate::services::ticket_service::{TicketError, TicketService};
-use crate::domain::agent::Agent;
 use sqlx::PgPool;
 use sqlx::Row;
 use uuid::Uuid;
@@ -83,9 +84,25 @@ impl<'a> PlanningService<'a> {
     }
 
     /// Start planning after a human moves the ticket to Ready.
+    /// Skip planning moves that ticket to In Progress and starts the work.
     /// A second call while a planning run is queued or running is a no-op.
     pub async fn start_for_ready(&self, ticket_id: Uuid) -> Result<StartOutcome, PlanError> {
+        let ticket = TicketService::new(self.pool).get(ticket_id).await?;
+        if ticket.ticket.skip_planning {
+            self.advance_skipped(ticket_id).await?;
+            return Ok(StartOutcome::Skipped);
+        }
         self.start(ticket_id, None).await
+    }
+
+    async fn advance_skipped(&self, ticket_id: Uuid) -> Result<(), PlanError> {
+        let ticket = TicketService::new(self.pool).get(ticket_id).await?;
+        if ticket.ticket.status != TicketStatus::InProgress {
+            TicketService::new(self.pool)
+                .update_status(ticket_id, TicketStatus::InProgress, None, None)
+                .await?;
+        }
+        self.start_implementation(ticket_id, WORK_NOT_STARTED).await
     }
 
     async fn start(
@@ -101,10 +118,11 @@ impl<'a> PlanningService<'a> {
             return Ok(StartOutcome::AlreadyRunning(existing));
         }
 
-        let agents = AgentService::new(self.pool).list_agents().await.map_err(|err| {
-            PlanError::Validation(err.to_string())
-        })?;
-        let Some(planner) = choose_planner(&agents, ticket.ticket.assignee_agent_id) else {
+        let agents = AgentService::new(self.pool)
+            .list_agents()
+            .await
+            .map_err(|err| PlanError::Validation(err.to_string()))?;
+        let Some(planner) = planner_for_ticket(&agents, ticket.ticket.assignee_agent_id) else {
             CommentService::new(self.pool)
                 .create(
                     ticket_id,
@@ -188,7 +206,10 @@ impl<'a> PlanningService<'a> {
             )
             .await?;
         self.bind_plan_comment(ticket_id, comment.id).await?;
-        CommentService::new(self.pool).get(comment.id).await.map_err(Into::into)
+        CommentService::new(self.pool)
+            .get(comment.id)
+            .await
+            .map_err(Into::into)
     }
 
     /// Stamp the newest plan comment and move Ready into Plan Review.
@@ -201,13 +222,11 @@ impl<'a> PlanningService<'a> {
 
     async fn bind_plan_comment(&self, ticket_id: Uuid, comment_id: Uuid) -> Result<(), PlanError> {
         let ticket = TicketService::new(self.pool).get(ticket_id).await?;
-        sqlx::query(
-            "UPDATE ticket_comments SET plan_content_version = $2 WHERE id = $1",
-        )
-        .bind(comment_id)
-        .bind(ticket.ticket.content_version)
-        .execute(self.pool)
-        .await?;
+        sqlx::query("UPDATE ticket_comments SET plan_content_version = $2 WHERE id = $1")
+            .bind(comment_id)
+            .bind(ticket.ticket.content_version)
+            .execute(self.pool)
+            .await?;
         sqlx::query(
             r#"
             UPDATE tickets
@@ -276,7 +295,8 @@ impl<'a> PlanningService<'a> {
             )
             .await?;
 
-        self.start_implementation(ticket_id).await?;
+        self.start_implementation(ticket_id, IMPLEMENTATION_NOT_STARTED)
+            .await?;
         Ok(())
     }
 
@@ -343,7 +363,11 @@ impl<'a> PlanningService<'a> {
         }))
     }
 
-    async fn start_implementation(&self, ticket_id: Uuid) -> Result<(), PlanError> {
+    async fn start_implementation(
+        &self,
+        ticket_id: Uuid,
+        missing_note: &str,
+    ) -> Result<(), PlanError> {
         let ticket = TicketService::new(self.pool).get(ticket_id).await?;
         if ticket.ticket.assignee_agent_id.is_none() || ticket.ticket.repo_id.is_none() {
             CommentService::new(self.pool)
@@ -351,7 +375,7 @@ impl<'a> PlanningService<'a> {
                     ticket_id,
                     AuthorType::System,
                     None,
-                    IMPLEMENTATION_NOT_STARTED,
+                    missing_note,
                     CommentIntent::SystemEvent,
                     &[],
                     &[],
@@ -367,7 +391,7 @@ impl<'a> PlanningService<'a> {
                         ticket_id,
                         AuthorType::System,
                         None,
-                        IMPLEMENTATION_NOT_STARTED,
+                        missing_note,
                         CommentIntent::SystemEvent,
                         &[],
                         &[],
@@ -423,28 +447,13 @@ impl<'a> PlanningService<'a> {
     }
 }
 
-/// PM-role agent first (the assignee when they are a PM, otherwise the oldest
-/// enabled PM). Otherwise the assignee. Otherwise nobody.
-pub fn choose_planner(agents: &[Agent], assignee_id: Option<Uuid>) -> Option<&Agent> {
-    let enabled: Vec<&Agent> = agents.iter().filter(|agent| agent.enabled).collect();
-    if let Some(assignee_id) = assignee_id {
-        if let Some(assignee) = enabled.iter().copied().find(|agent| agent.id == assignee_id) {
-            if is_pm_agent(assignee) {
-                return Some(assignee);
-            }
-        }
-    }
-    let mut pms: Vec<&Agent> = enabled.iter().copied().filter(|agent| is_pm_agent(agent)).collect();
-    pms.sort_by_key(|agent| agent.created_at);
-    if let Some(pm) = pms.first() {
-        return Some(*pm);
-    }
-    assignee_id.and_then(|id| enabled.into_iter().find(|agent| agent.id == id))
-}
-
-fn is_pm_agent(agent: &Agent) -> bool {
-    let key = agent.preset_source.as_deref().unwrap_or("");
-    is_pm_identity(key, &agent.role)
+/// The agent who writes the plan. Today that is the ticket's assignee.
+/// M14 can replace this with a dedicated planner.
+pub fn planner_for_ticket(agents: &[Agent], assignee_id: Option<Uuid>) -> Option<&Agent> {
+    let assignee_id = assignee_id?;
+    agents
+        .iter()
+        .find(|agent| agent.enabled && agent.id == assignee_id)
 }
 
 #[cfg(test)]
@@ -471,46 +480,33 @@ mod tests {
     }
 
     #[test]
-    fn planner_prefers_the_pm_over_the_assignee() {
-        let pm = agent(1, "PM", "pm", true, 20);
-        let engineer = agent(2, "Backend Engineer", "backend_engineer", true, 10);
-        let agents = [engineer.clone(), pm.clone()];
-        let chosen = choose_planner(&agents, Some(engineer.id));
-        assert_eq!(chosen.map(|agent| agent.id), Some(pm.id));
-    }
-
-    #[test]
-    fn planner_uses_the_assignee_when_they_are_the_pm() {
-        let pm = agent(1, "PM", "pm", true, 20);
-        let other = agent(3, "Product Manager", "other", true, 5);
-        let agents = [other.clone(), pm.clone()];
-        let chosen = choose_planner(&agents, Some(pm.id));
-        assert_eq!(chosen.map(|agent| agent.id), Some(pm.id));
-    }
-
-    #[test]
-    fn planner_falls_back_to_the_assignee() {
+    fn planner_is_the_enabled_assignee() {
         let engineer = agent(2, "Backend Engineer", "backend_engineer", true, 10);
         let agents = [engineer.clone()];
-        let chosen = choose_planner(&agents, Some(engineer.id));
+        let chosen = planner_for_ticket(&agents, Some(engineer.id));
         assert_eq!(chosen.map(|agent| agent.id), Some(engineer.id));
     }
 
     #[test]
-    fn planner_is_none_without_a_pm_or_assignee() {
+    fn planner_is_none_without_an_assignee() {
         let engineer = agent(2, "Backend Engineer", "backend_engineer", true, 10);
-        assert!(choose_planner(&[engineer], None).is_none());
-        let disabled = agent(1, "PM", "pm", false, 1);
-        assert!(choose_planner(&[disabled], None).is_none());
+        assert!(planner_for_ticket(&[engineer], None).is_none());
     }
 
     #[test]
-    fn oldest_enabled_pm_wins_when_the_assignee_is_not_a_pm() {
-        let newer = agent(4, "PM", "pm", true, 50);
-        let older = agent(5, "Product Manager", "pm_two", true, 3);
+    fn planner_is_none_when_the_assignee_is_disabled() {
+        let disabled = agent(2, "Backend Engineer", "backend_engineer", false, 10);
+        let id = disabled.id;
+        assert!(planner_for_ticket(&[disabled], Some(id)).is_none());
+    }
+
+    #[test]
+    fn planner_ignores_a_pm_who_is_not_the_assignee() {
+        let pm = agent(1, "PM", "pm", true, 1);
         let engineer = agent(2, "Backend Engineer", "backend_engineer", true, 10);
-        let agents = [newer.clone(), engineer.clone(), older.clone()];
-        let chosen = choose_planner(&agents, Some(engineer.id));
-        assert_eq!(chosen.map(|agent| agent.id), Some(older.id));
+        let agents = [pm, engineer.clone()];
+        let chosen = planner_for_ticket(&agents, Some(engineer.id));
+        assert_eq!(chosen.map(|agent| agent.id), Some(engineer.id));
+        assert!(planner_for_ticket(&agents, None).is_none());
     }
 }

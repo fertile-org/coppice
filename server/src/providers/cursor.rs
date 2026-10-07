@@ -225,8 +225,8 @@ fn format_stderr_suffix(lines: &[String]) -> String {
 
 /// Build `agent` CLI argv (excluding the binary name).
 ///
-/// Ticket runs use `--force` (write-capable). Chat turns use `--mode ask`
-/// (Cursor's read-only Q&A mode) and omit `--force`.
+/// Ticket runs use `--force` (write-capable). Chat turns and plan runs use
+/// `--mode ask` (Cursor's read-only mode) and omit `--force`.
 fn cursor_cli_args(
     worktree: &Path,
     read_only_tools: bool,
@@ -418,7 +418,14 @@ mod tests {
 
     #[test]
     fn chat_turns_use_ask_mode_without_force() {
-        let args = cursor_cli_args(Path::new("/tmp/chat"), true, false, Some("auto"), None, None);
+        let args = cursor_cli_args(
+            Path::new("/tmp/chat"),
+            true,
+            false,
+            Some("auto"),
+            None,
+            None,
+        );
         assert!(args.windows(2).any(|w| w == ["--mode", "ask"]));
         assert!(!args.iter().any(|a| a == "--force"));
         assert!(args.windows(2).any(|w| w == ["--model", "auto"]));
@@ -426,10 +433,24 @@ mod tests {
 
     #[test]
     fn ticket_turns_use_force_without_ask_mode() {
-        let args = cursor_cli_args(Path::new("/tmp/wt"), false, false, None, Some("sess-1"), None);
+        let args = cursor_cli_args(
+            Path::new("/tmp/wt"),
+            false,
+            false,
+            None,
+            Some("sess-1"),
+            None,
+        );
         assert!(args.iter().any(|a| a == "--force"));
         assert!(!args.windows(2).any(|w| w == ["--mode", "ask"]));
         assert!(args.windows(2).any(|w| w == ["--resume", "sess-1"]));
+    }
+
+    #[test]
+    fn plan_runs_use_ask_mode_without_force() {
+        let args = cursor_cli_args(Path::new("/tmp/plan"), false, true, None, None, None);
+        assert!(args.windows(2).any(|w| w == ["--mode", "ask"]));
+        assert!(!args.iter().any(|a| a == "--force"));
     }
 
     #[test]

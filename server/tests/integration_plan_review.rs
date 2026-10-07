@@ -3,6 +3,7 @@ mod common;
 use axum::http::StatusCode;
 use coppice_server::copy::plan::{
     NO_PLANNER, PLAN_ALREADY_RUNNING, PLAN_APPROVED_NOTE, PLAN_REQUIRED, PLAN_STALE,
+    WORK_NOT_STARTED,
 };
 use coppice_server::services::planning_service::PlanningService;
 use std::time::Duration;
@@ -93,7 +94,7 @@ async fn drag_and_api_refuse_in_progress_without_an_approved_plan() {
 }
 
 #[tokio::test]
-async fn skip_planning_allows_in_progress_and_does_not_start_a_plan() {
+async fn skip_planning_goes_straight_from_ready_to_in_progress() {
     let _guard = common::DB_TEST_LOCK.lock().await;
     if !common::db_available().await {
         return;
@@ -104,21 +105,7 @@ async fn skip_planning_allows_in_progress_and_does_not_start_a_plan() {
     common::create_agent_with_preset_key(&app, "pm", "PM", &cookie, &csrf).await;
     common::skip_planning(&app, &ticket_id, &cookie, &csrf).await;
 
-    let ready = app
-        .clone()
-        .oneshot(common::json_request(
-            "PATCH",
-            &format!("/api/tickets/{ticket_id}/status"),
-            r#"{"status":"ready"}"#,
-            &cookie,
-            &csrf,
-        ))
-        .await
-        .unwrap();
-    assert_eq!(ready.status(), StatusCode::OK);
-    assert!(plan_runs(&runs(&app, &ticket_id, &cookie, &csrf).await).is_empty());
-
-    let progress = app
+    let direct = app
         .clone()
         .oneshot(common::json_request(
             "PATCH",
@@ -129,13 +116,31 @@ async fn skip_planning_allows_in_progress_and_does_not_start_a_plan() {
         ))
         .await
         .unwrap();
-    assert_eq!(progress.status(), StatusCode::OK);
-    let ticket = common::get_ticket(&app, &ticket_id, &cookie, &csrf).await;
+    assert_eq!(direct.status(), StatusCode::OK);
+
+    let other = common::create_unplanned_ticket(&app, &board_id, &cookie, &csrf).await;
+    common::skip_planning(&app, &other, &cookie, &csrf).await;
+    let ready = app
+        .clone()
+        .oneshot(common::json_request(
+            "PATCH",
+            &format!("/api/tickets/{other}/status"),
+            r#"{"status":"ready"}"#,
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(ready.status(), StatusCode::OK);
+    let ticket = common::get_ticket(&app, &other, &cookie, &csrf).await;
     assert_eq!(ticket["status"], "in_progress");
+    assert!(plan_runs(&runs(&app, &other, &cookie, &csrf).await).is_empty());
+    let notes = comments(&app, &other, &cookie, &csrf).await;
+    assert!(notes.iter().any(|note| note["body"] == WORK_NOT_STARTED));
 }
 
 #[tokio::test]
-async fn ready_starts_one_plan_run_for_the_pm() {
+async fn ready_starts_one_plan_run_for_the_assignee() {
     let _guard = common::DB_TEST_LOCK.lock().await;
     if !common::db_available().await {
         return;
@@ -178,7 +183,8 @@ async fn ready_starts_one_plan_run_for_the_pm() {
     let listed = runs(&app, &ticket_id, &cookie, &csrf).await;
     let plans = plan_runs(&listed);
     assert_eq!(plans.len(), 1);
-    assert_eq!(plans[0]["agentId"], pm_id);
+    assert_eq!(plans[0]["agentId"], engineer_id);
+    assert_ne!(plans[0]["agentId"], pm_id);
 }
 
 #[tokio::test]
@@ -253,7 +259,11 @@ async fn post_plan(
     csrf: &str,
 ) {
     PlanningService::new(pool)
-        .record_plan(Uuid::parse_str(ticket_id).unwrap(), agent_id, CANONICAL_PLAN)
+        .record_plan(
+            Uuid::parse_str(ticket_id).unwrap(),
+            agent_id,
+            CANONICAL_PLAN,
+        )
         .await
         .expect("record plan");
     let moved = app
@@ -280,6 +290,7 @@ async fn ask_for_changes_revises_the_plan_and_refuses_a_second_request() {
     let board_id = common::create_test_board(&app, &cookie, &csrf).await;
     let pm_id = common::create_agent_with_preset_key(&app, "pm", "PM", &cookie, &csrf).await;
     let ticket_id = common::create_unplanned_ticket(&app, &board_id, &cookie, &csrf).await;
+    common::assign_agent_to_ticket(&app, &ticket_id, &pm_id, &cookie, &csrf).await;
     let pool = state.db.as_ref().expect("db");
     post_plan(
         &app,
@@ -306,8 +317,13 @@ async fn ask_for_changes_revises_the_plan_and_refuses_a_second_request() {
     let ticket = common::get_ticket(&app, &ticket_id, &cookie, &csrf).await;
     assert_eq!(ticket["status"], "plan_review");
     let thread = comments(&app, &ticket_id, &cookie, &csrf).await;
-    assert!(thread.iter().any(|note| note["body"] == "Drop the migration."));
-    assert_eq!(plan_runs(&runs(&app, &ticket_id, &cookie, &csrf).await).len(), 1);
+    assert!(thread
+        .iter()
+        .any(|note| note["body"] == "Drop the migration."));
+    assert_eq!(
+        plan_runs(&runs(&app, &ticket_id, &cookie, &csrf).await).len(),
+        1
+    );
 
     let again = app
         .oneshot(common::json_request(
@@ -409,8 +425,9 @@ async fn a_planning_run_posts_the_plan_and_moves_to_plan_review() {
     let (_state, app, cookie, csrf, _env) =
         common::bootstrap_and_login_with_auto_start_workers().await;
     let board_id = common::create_test_board(&app, &cookie, &csrf).await;
-    common::create_agent_with_preset_key(&app, "pm", "PM", &cookie, &csrf).await;
+    let pm_id = common::create_agent_with_preset_key(&app, "pm", "PM", &cookie, &csrf).await;
     let ticket_id = common::create_unplanned_ticket(&app, &board_id, &cookie, &csrf).await;
+    common::assign_agent_to_ticket(&app, &ticket_id, &pm_id, &cookie, &csrf).await;
 
     let ready = app
         .clone()
@@ -444,5 +461,8 @@ async fn a_planning_run_posts_the_plan_and_moves_to_plan_review() {
     let body = plan["body"].as_str().unwrap();
     assert!(body.contains("## Plan"));
     assert!(body.contains("- [ ] Add the column"));
-    assert_eq!(plan_runs(&runs(&app, &ticket_id, &cookie, &csrf).await).len(), 1);
+    assert_eq!(
+        plan_runs(&runs(&app, &ticket_id, &cookie, &csrf).await).len(),
+        1
+    );
 }

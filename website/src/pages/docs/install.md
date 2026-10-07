@@ -65,7 +65,7 @@ Keep your repos in your Linux home folder, for example `~/code/my-app`, not unde
    - macOS: `~/Library/Application Support/Coppice/config.toml`
    - Linux: `~/.config/Coppice/config.toml`
 
-4. Create a ticket (or approve a proposed one) and move it to Ready. A plan lands in Plan Review for you to approve, then agents take it through In Progress, In Review and In QA, and it waits for your Human Review.
+4. Create a ticket (or approve a proposed one) and move it to Ready. Agents take it through In Progress, In Review and In QA, then it waits for your Human Review.
 
 ## Requirements
 - A local git repository you can write to (Coppice uses isolated worktrees)
