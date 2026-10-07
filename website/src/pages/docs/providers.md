@@ -32,8 +32,9 @@ The agent form lists every connector with its status:
 | **Ready** | Coppice found the command and your sign-in. |
 | **Found, not signed in** | Coppice found the command, but you aren't signed in. Sign in from your terminal. |
 | **Not on your PATH** | Coppice can't find the command. Install it, or check your PATH. |
+| **Found (sign-in not checked)** | Coppice found the command but can't check sign-in (Kilo Code). |
 
-Coppice can find Kilo Code but can't check its sign-in, so it shows no status. Make sure you're signed in to Kilo Code in your terminal.
+Kilo Code shows **Found (sign-in not checked)**: Coppice can find it but can't check its sign-in. Make sure you're signed in to Kilo Code in your terminal.
 
 You can save an agent before its CLI is ready. It starts working tickets once the CLI is installed and signed in. If you installed the CLI after opening Coppice, quit and reopen Coppice so it finds the new command.
 

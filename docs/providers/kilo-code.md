@@ -64,7 +64,7 @@ model_providers = ["anthropic", "openai"]
 
 ## If something goes wrong
 
-Start at **Tools → Connectors** (admin): it shows whether `kilo` is found, which auth is detected, the probe output, the last real run, and **Test connection** runs a real gateway check with a failure reason ([diagnostics](README.md#diagnostics-tools--connectors)). A check failing with `mcp_unavailable` or `ticket_get was not called` suggests the CLI ignores `KILO_CONFIG` (see the [providers README](README.md#coppice-mcp-gateway-tool-first-runs)).
+Start at **Tools → Connectors** (admin): it shows whether `kilo` is found, which auth is detected, the probe output, the last real run, and **Test connection** runs `kilo --version` and reports whether that command succeeded ([diagnostics](README.md#diagnostics-tools--connectors)). A ticket run failing with `mcp_unavailable` suggests the CLI ignores `KILO_CONFIG` (see the [providers README](README.md#coppice-mcp-gateway-tool-first-runs)).
 
 | Symptom | What to try |
 |---------|-------------|
@@ -75,7 +75,7 @@ Start at **Tools → Connectors** (admin): it shows whether `kilo` is found, whi
 
 ## Behavior notes
 
-- **Sign-in:** Kilo has no cheap non-interactive auth check (`kilo auth` opens a TUI). A found binary is not labeled Ready or "Found, not signed in".
+- **Sign-in:** Kilo has no cheap non-interactive auth check (`kilo auth` opens a TUI). A found binary is labeled **Found (sign-in not checked)**, not Ready or "Found, not signed in".
 - **Live console:** Streams assistant output while the run is active. After a server restart mid-run, Coppice replays the saved log.
 - **Continued tickets:** Prefer checkpoint-style `continued` runs. Worker-wired session resume for Kilo is not fully connected yet.
 - **Daemon / serve:** Coppice uses the **subprocess** path (`kilo run`), not `kilo serve` / daemon HTTP APIs (compatibility not confirmed).
