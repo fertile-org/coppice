@@ -133,7 +133,7 @@ fn generated_config(layout: &DataLayout) -> io::Result<String> {
          # Open this file in Settings. Comments are kept.\n\
          # Secrets (session secret, encryption key, passwords) live in secrets/, not here.\n\
          # The server port, database URL and auth mode are set by the desktop app at startup.\n\
-         # This build has no mock connector. Nothing is turned on until you save an agent\n\
+         # Nothing is turned on until you save an agent\n\
          # that uses one, or turn it on in Tools → Connectors. Connector on/off applies\n\
          # immediately. Other changes apply after you restart Coppice.\n\
          # [agent.connectors.claude-code]\n\
