@@ -34,7 +34,7 @@ The agent form lists every connector with its status:
 | **Not on your PATH** | Coppice can't find the command. Install it, or check your PATH. |
 | **Found (sign-in not checked)** | Coppice found the command but can't check sign-in (Kilo Code). |
 
-Kilo Code shows **Found (sign-in not checked)**: Coppice can find it but can't check its sign-in. Make sure you're signed in to Kilo Code in your terminal.
+Kilo Code shows **Found (sign-in not checked)**: Coppice can find it but can't check its sign-in. Make sure you're signed in to Kilo Code in your terminal. Chat isn't available for Kilo Code yet. Test connection checks that the `kilo` command runs.
 
 You can save an agent before its CLI is ready. It starts working tickets once the CLI is installed and signed in. If you installed the CLI after opening Coppice, quit and reopen Coppice so it finds the new command.
 
