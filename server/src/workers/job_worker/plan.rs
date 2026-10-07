@@ -1,11 +1,11 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use anyhow::Context;
 use sqlx::PgPool;
 
 use super::{best_effort_persist_artifacts, JobCancelled};
-use crate::copy::plan::{self, PLAN_MUST_FINISH};
-use crate::domain::comment::{author_type_to_str, CommentIntent};
+use crate::copy::plan::{self, PLAN_CHANGES_DISCARDED, PLAN_MUST_FINISH};
+use crate::domain::comment::{author_type_to_str, AuthorType, CommentIntent};
 use crate::domain::run::{AgentRun, RunStatus};
 use crate::domain::slug::slugify;
 use crate::domain::ticket::status_to_str;
@@ -14,7 +14,7 @@ use crate::mcp::grant::grant_for_run;
 use crate::mcp::token::NewRunToolScope;
 use crate::mcp::tools::result::prefer_submitted_result;
 use crate::providers::{
-    connector_enforces_read_only, AgentRunInput, AgentRunResult, ProviderError,
+    connector_enforces_read_only, AgentProvider, AgentRunInput, AgentRunResult, ProviderError,
 };
 use crate::services::agent_service::AgentService;
 use crate::services::comment_service::CommentService;
@@ -22,13 +22,16 @@ use crate::services::context_builder::{
     build_tool_first_context, write_context_document, ContextInput,
 };
 use crate::services::planning_service::PlanningService;
+use crate::services::repo_service::RepoService;
 use crate::services::result_contract::{self, ApplyComment, ApplyResult, ApplyTicketUpdate};
 use crate::services::run_orchestrator::RunOrchestrator;
 use crate::services::run_service::RunService;
 use crate::services::ticket_service::TicketService;
+use crate::services::worktree_service::{compute_paths, PlanScratch, PlanScratchSource};
 use crate::AppState;
 
-/// Run a `plan_ticket` job in a scratch directory. No worktree, no branch, no commit.
+/// Run a `plan_ticket` job in a detached scratch worktree.
+/// The ticket worktree is not created or modified. Nothing is committed or pushed.
 pub(super) async fn execute_plan(
     state: &AppState,
     pool: &PgPool,
@@ -45,30 +48,133 @@ pub(super) async fn execute_plan(
         .await
         .context("load agent")?;
     let connector_name = agent.connector.as_str();
-    let connector = state.connectors.registry().get(connector_name).with_context(|| {
-        crate::connectors_runtime::connector_unavailable_message(connector_name)
-    })?;
+    let connector = state
+        .connectors
+        .registry()
+        .get(connector_name)
+        .with_context(|| {
+            crate::connectors_runtime::connector_unavailable_message(connector_name)
+        })?;
     let agent_key = agent
         .preset_source
         .clone()
         .unwrap_or_else(|| slugify(&agent.name));
 
-    let cwd = PathBuf::from(&state.config.agent.worktrees_path)
-        .join("plan-scratch")
-        .join(run.id.to_string());
-    std::fs::create_dir_all(&cwd).context("create plan scratch directory")?;
+    let scratch = open_plan_scratch(state, pool, ticket_id, ticket.ticket.repo_id, run.id).await?;
+    let cwd = scratch.path().to_path_buf();
+    let outcome = drive_plan_run(
+        state,
+        pool,
+        run_svc,
+        run,
+        &PlanDrive {
+            ticket: &ticket,
+            connector: connector.as_ref(),
+            agent: &agent,
+            agent_key: &agent_key,
+            cwd: &cwd,
+        },
+    )
+    .await;
+    if scratch.discard().await {
+        note_discarded_plan_changes(pool, ticket_id).await;
+    }
+    outcome
+}
+
+async fn open_plan_scratch(
+    state: &AppState,
+    pool: &PgPool,
+    ticket_id: uuid::Uuid,
+    repo_id: Option<uuid::Uuid>,
+    run_id: uuid::Uuid,
+) -> anyhow::Result<PlanScratch> {
+    let source = if let Some(repo_id) = repo_id {
+        let repo = RepoService::new(pool)
+            .get(repo_id)
+            .await
+            .context("load repo")?;
+        let paths = compute_paths(
+            Path::new(&state.config.agent.worktrees_path),
+            &repo.name,
+            ticket_id,
+        );
+        let fallback_branch = if repo.default_branch.is_empty() {
+            "main".to_string()
+        } else {
+            repo.default_branch
+        };
+        Some(PlanScratchSource {
+            git_dir: PathBuf::from(repo.local_path),
+            ticket_branch: paths.branch_name,
+            fallback_branch,
+        })
+    } else {
+        None
+    };
+    PlanScratch::create(
+        Path::new(&state.config.agent.worktrees_path),
+        run_id,
+        source,
+    )
+    .await
+    .context("create plan scratch worktree")
+}
+
+async fn note_discarded_plan_changes(pool: &PgPool, ticket_id: uuid::Uuid) {
+    if let Err(err) = CommentService::new(pool)
+        .create(
+            ticket_id,
+            AuthorType::System,
+            None,
+            PLAN_CHANGES_DISCARDED,
+            CommentIntent::SystemEvent,
+            &[],
+            &[],
+        )
+        .await
+    {
+        tracing::warn!(error = %err, %ticket_id, "failed to note discarded plan changes");
+    }
+}
+
+struct PlanDrive<'a> {
+    ticket: &'a crate::services::ticket_service::TicketWithDisplay,
+    connector: &'a dyn AgentProvider,
+    agent: &'a crate::domain::agent::Agent,
+    agent_key: &'a str,
+    cwd: &'a Path,
+}
+
+async fn drive_plan_run(
+    state: &AppState,
+    pool: &PgPool,
+    run_svc: &RunService<'_>,
+    run: &AgentRun,
+    drive: &PlanDrive<'_>,
+) -> anyhow::Result<()> {
+    let ticket = drive.ticket;
+    let agent = drive.agent;
+    let agent_key = drive.agent_key;
+    let cwd = drive.cwd;
+    let connector = drive.connector;
+    let connector_name = agent.connector.as_str();
+    let ticket_id = ticket.ticket.id;
 
     let agents = AgentService::new(pool)
         .list_agents()
         .await
         .context("load agents")?;
     let assignee_key = ticket.ticket.assignee_agent_id.and_then(|id| {
-        agents.iter().find(|candidate| candidate.id == id).map(|candidate| {
-            candidate
-                .preset_source
-                .clone()
-                .unwrap_or_else(|| slugify(&candidate.name))
-        })
+        agents
+            .iter()
+            .find(|candidate| candidate.id == id)
+            .map(|candidate| {
+                candidate
+                    .preset_source
+                    .clone()
+                    .unwrap_or_else(|| slugify(&candidate.name))
+            })
     });
 
     let changes = if let Some(comment_id) = run.trigger_comment_id {
@@ -89,7 +195,7 @@ pub(super) async fn execute_plan(
         ticket_status: status_to_str(ticket.ticket.status),
         ticket_substatus: None,
         agent_name: &agent.name,
-        agent_key: &agent_key,
+        agent_key,
         agent_role: &agent.role,
         agent_skills: &agent.skills,
         agent_responsibilities: &agent.responsibilities,
@@ -113,7 +219,7 @@ pub(super) async fn execute_plan(
     let mut markdown = build_tool_first_context(&context_input, &skills, None);
     markdown.push_str("\n# Plan\n\n");
     markdown.push_str(&plan::plan_instructions(changes.as_deref()));
-    write_context_document(&cwd, &markdown).context("write plan context")?;
+    write_context_document(cwd, &markdown).context("write plan context")?;
     let context_path = cwd.join(".agent").join("context.md");
 
     let stream = state.run_streams.register(run.id);
@@ -146,7 +252,7 @@ pub(super) async fn execute_plan(
     let provider_result = connector
         .run(AgentRunInput {
             agent_id: run.agent_id.to_string(),
-            agent_key,
+            agent_key: agent_key.to_string(),
             agent_role: agent.role.clone(),
             job_type: run.job_type.clone(),
             ticket_id: Some(ticket_id.to_string()),
@@ -173,7 +279,14 @@ pub(super) async fn execute_plan(
     let result = match provider_result {
         Ok(result) => result,
         Err(ProviderError::Cancelled) => {
-            best_effort_persist_artifacts(state, &stream, run.id, connector_name, None, "after cancel");
+            best_effort_persist_artifacts(
+                state,
+                &stream,
+                run.id,
+                connector_name,
+                None,
+                "after cancel",
+            );
             state.run_streams.remove(run.id);
             return Err(JobCancelled.into());
         }
@@ -231,10 +344,6 @@ pub(super) async fn execute_plan(
         .bind_latest_plan(ticket_id)
         .await
         .context("bind plan comment")?;
-
-    if let Err(err) = std::fs::remove_dir_all(&cwd) {
-        tracing::debug!(error = %err, path = %cwd.display(), "failed to remove plan scratch directory");
-    }
 
     let updated = TicketService::new(pool)
         .get(ticket_id)

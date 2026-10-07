@@ -9,11 +9,7 @@ pub struct WorktreePaths {
 }
 
 /// One worktree and branch per ticket — shared by all agents working sequentially on it.
-pub fn compute_paths(
-    worktrees_root: &Path,
-    repo_name: &str,
-    ticket_id: Uuid,
-) -> WorktreePaths {
+pub fn compute_paths(worktrees_root: &Path, repo_name: &str, ticket_id: Uuid) -> WorktreePaths {
     let repo_slug = crate::domain::slug::slugify(repo_name);
     let ticket_id_str = ticket_id.to_string();
     let ticket_short = ticket_id_str.split('-').next().unwrap_or("ticket");
@@ -67,11 +63,7 @@ pub async fn finalize_worktree_git(
     let dirty = worktree_dirty_excluding_agent(worktree).await?;
     let newly_committed = if dirty {
         // Never commit Coppice-injected runtime context under .agent/
-        run_git_in(
-            worktree,
-            &["add", "-A", "--", ".", ":!.agent"],
-        )
-        .await?;
+        run_git_in(worktree, &["add", "-A", "--", ".", ":!.agent"]).await?;
         match author {
             Some(author) => {
                 let name_cfg = format!("user.name={}", author.name);
@@ -107,17 +99,17 @@ pub async fn finalize_worktree_git(
 }
 
 pub fn format_git_comment_footer(state: &WorktreeGitState) -> String {
-    let short_sha = state
-        .head_sha
-        .get(..7)
-        .unwrap_or(state.head_sha.as_str());
+    let short_sha = state.head_sha.get(..7).unwrap_or(state.head_sha.as_str());
     let action = if state.newly_committed {
         "committed"
     } else {
         "no new changes (HEAD"
     };
     if state.newly_committed {
-        format!("\n\n---\n**Git:** branch `{branch}` · {action} `{short_sha}`", branch = state.branch)
+        format!(
+            "\n\n---\n**Git:** branch `{branch}` · {action} `{short_sha}`",
+            branch = state.branch
+        )
     } else {
         format!(
             "\n\n---\n**Git:** branch `{branch}` · {action} `{short_sha}`)",
@@ -229,7 +221,9 @@ impl WorktreeService {
         let path = path_to_string(worktree_dir)?;
         match run_git_in(git_dir, &["worktree", "add", "-b", branch, &path]).await {
             Ok(()) => Ok(()),
-            Err(WorktreeError::GitCommandFailed { stderr, .. }) if branch_already_exists(&stderr) => {
+            Err(WorktreeError::GitCommandFailed { stderr, .. })
+                if branch_already_exists(&stderr) =>
+            {
                 run_git_in(git_dir, &["worktree", "add", &path, branch]).await
             }
             Err(err) => Err(err),
@@ -241,13 +235,194 @@ fn branch_already_exists(stderr: &str) -> bool {
     stderr.contains("already exists")
 }
 
+/// Where a plan run works. Never the ticket worktree.
+pub fn plan_scratch_dir(worktrees_root: &Path, run_id: Uuid) -> PathBuf {
+    worktrees_root.join("plan-scratch").join(run_id.to_string())
+}
+
+/// The repo a plan scratch is detached from, when the ticket has one.
+pub struct PlanScratchSource {
+    pub git_dir: PathBuf,
+    pub ticket_branch: String,
+    /// Used when `main` does not exist. Usually the repo's default branch.
+    pub fallback_branch: String,
+}
+
+/// A detached git worktree for one plan run. Dropping it does not commit or push.
+pub struct PlanScratch {
+    path: PathBuf,
+    source_git_dir: Option<PathBuf>,
+}
+
+impl PlanScratch {
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    /// Detach at the ticket branch head, or `main` when that branch does not exist yet.
+    /// With no source repo, init a private detached repo that is not a ticket worktree.
+    pub async fn create(
+        worktrees_root: &Path,
+        run_id: Uuid,
+        source: Option<PlanScratchSource>,
+    ) -> Result<Self, WorktreeError> {
+        let path = plan_scratch_dir(worktrees_root, run_id);
+        if let Some(parent) = path.parent() {
+            tokio::fs::create_dir_all(parent).await?;
+        }
+        let source_git_dir = if let Some(source) = source {
+            let rev = plan_base_rev(
+                &source.git_dir,
+                &source.ticket_branch,
+                &source.fallback_branch,
+            )
+            .await?;
+            if path.exists() {
+                let _ = remove_linked_worktree(&source.git_dir, &path).await;
+            }
+            add_detached_worktree(&source.git_dir, &path, &rev).await?;
+            Some(source.git_dir)
+        } else {
+            init_detached_scratch(&path).await?;
+            None
+        };
+        Ok(Self {
+            path,
+            source_git_dir,
+        })
+    }
+
+    /// True when `git status --porcelain` shows anything besides the injected `.agent` context.
+    /// Removes the worktree either way. Does not commit or push.
+    pub async fn discard(self) -> bool {
+        let dirty = scratch_has_changes(&self.path).await;
+        self.remove().await;
+        dirty
+    }
+
+    async fn remove(self) {
+        if let Some(git_dir) = &self.source_git_dir {
+            if let Err(err) = remove_linked_worktree(git_dir, &self.path).await {
+                tracing::warn!(
+                    error = %err,
+                    path = %self.path.display(),
+                    "failed to remove plan scratch worktree"
+                );
+            }
+        }
+        if self.path.exists() {
+            if let Err(err) = tokio::fs::remove_dir_all(&self.path).await {
+                tracing::warn!(
+                    error = %err,
+                    path = %self.path.display(),
+                    "failed to delete plan scratch directory"
+                );
+            }
+        }
+    }
+}
+
+async fn plan_base_rev(
+    git_dir: &Path,
+    ticket_branch: &str,
+    fallback_branch: &str,
+) -> Result<String, WorktreeError> {
+    if local_branch_exists(git_dir, ticket_branch).await? {
+        return git_ref_sha(git_dir, ticket_branch).await;
+    }
+    if local_branch_exists(git_dir, "main").await? {
+        return git_ref_sha(git_dir, "main").await;
+    }
+    if fallback_branch != "main" && local_branch_exists(git_dir, fallback_branch).await? {
+        return git_ref_sha(git_dir, fallback_branch).await;
+    }
+    Err(WorktreeError::GitCommandFailed {
+        command: "git rev-parse".into(),
+        stderr: format!("no plan base: missing `{ticket_branch}` and `main`"),
+    })
+}
+
+async fn local_branch_exists(git_dir: &Path, branch: &str) -> Result<bool, WorktreeError> {
+    let spec = format!("refs/heads/{branch}");
+    let output = tokio::process::Command::new("git")
+        .current_dir(git_dir)
+        .args(["show-ref", "--verify", "--quiet", &spec])
+        .output()
+        .await
+        .map_err(WorktreeError::from)?;
+    Ok(output.status.success())
+}
+
+async fn add_detached_worktree(
+    git_dir: &Path,
+    worktree: &Path,
+    rev: &str,
+) -> Result<(), WorktreeError> {
+    let path = path_to_string(worktree)?;
+    run_git_in(git_dir, &["worktree", "add", "--detach", &path, rev]).await
+}
+
+async fn remove_linked_worktree(git_dir: &Path, worktree: &Path) -> Result<(), WorktreeError> {
+    let path = path_to_string(worktree)?;
+    let removed = run_git_in(git_dir, &["worktree", "remove", "--force", &path]).await;
+    if worktree.exists() {
+        tokio::fs::remove_dir_all(worktree).await?;
+    }
+    let _ = run_git_in(git_dir, &["worktree", "prune"]).await;
+    removed
+}
+
+async fn init_detached_scratch(path: &Path) -> Result<(), WorktreeError> {
+    if path.exists() {
+        tokio::fs::remove_dir_all(path).await?;
+    }
+    tokio::fs::create_dir_all(path).await?;
+    run_git_in(path, &["init", "-b", "main"]).await?;
+    run_git_in(
+        path,
+        &[
+            "-c",
+            "user.name=Coppice",
+            "-c",
+            "user.email=coppice@localhost",
+            "commit",
+            "--allow-empty",
+            "-m",
+            "plan scratch",
+        ],
+    )
+    .await?;
+    run_git_in(path, &["checkout", "--detach"]).await
+}
+
+async fn scratch_has_changes(worktree: &Path) -> bool {
+    let output = match tokio::process::Command::new("git")
+        .current_dir(worktree)
+        .args(["status", "--porcelain"])
+        .output()
+        .await
+    {
+        Ok(output) if output.status.success() => output,
+        _ => return false,
+    };
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .any(|line| !porcelain_line_is_agent_context(line))
+}
+
+fn porcelain_line_is_agent_context(line: &str) -> bool {
+    let path = line.get(3..).unwrap_or("").trim();
+    let path = path.rsplit(" -> ").next().unwrap_or(path).trim_matches('"');
+    path == ".agent" || path.starts_with(".agent/")
+}
+
 fn path_to_string(path: &Path) -> Result<String, WorktreeError> {
-    path.to_str()
-        .map(str::to_string)
-        .ok_or_else(|| WorktreeError::Io(std::io::Error::new(
+    path.to_str().map(str::to_string).ok_or_else(|| {
+        WorktreeError::Io(std::io::Error::new(
             std::io::ErrorKind::InvalidInput,
             format!("path is not valid UTF-8: {}", path.display()),
-        )))
+        ))
+    })
 }
 
 async fn run_git_in(git_dir: &Path, args: &[&str]) -> Result<(), WorktreeError> {
@@ -259,10 +434,7 @@ async fn run_git_in(git_dir: &Path, args: &[&str]) -> Result<(), WorktreeError> 
         .map_err(|err| {
             WorktreeError::Io(std::io::Error::new(
                 err.kind(),
-                format!(
-                    "repository not accessible at {}: {err}",
-                    git_dir.display()
-                ),
+                format!("repository not accessible at {}: {err}", git_dir.display()),
             ))
         })?;
 
@@ -393,5 +565,150 @@ mod tests {
         };
         let msg = err.to_string();
         assert!(msg.contains("fatal: not a git repository"));
+    }
+
+    fn git_sha(dir: &Path, rev: &str) -> String {
+        let output = std::process::Command::new("git")
+            .current_dir(dir)
+            .args(["rev-parse", rev])
+            .output()
+            .expect("rev-parse");
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8_lossy(&output.stdout).trim().to_string()
+    }
+
+    fn init_repo(path: &Path) {
+        std::process::Command::new("git")
+            .args(["init", "-b", "main"])
+            .current_dir(path)
+            .status()
+            .expect("git init");
+        std::process::Command::new("git")
+            .current_dir(path)
+            .args(["config", "user.email", "test@example.com"])
+            .status()
+            .expect("email");
+        std::process::Command::new("git")
+            .current_dir(path)
+            .args(["config", "user.name", "Test"])
+            .status()
+            .expect("name");
+        std::fs::write(path.join("README.md"), "keep\n").expect("readme");
+        std::process::Command::new("git")
+            .current_dir(path)
+            .args(["add", "README.md"])
+            .status()
+            .expect("add");
+        std::process::Command::new("git")
+            .current_dir(path)
+            .args(["commit", "-m", "initial"])
+            .status()
+            .expect("commit");
+    }
+
+    #[tokio::test]
+    async fn plan_scratch_detaches_at_the_ticket_branch_and_discards_writes() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let repo = tmp.path().join("repo");
+        std::fs::create_dir(&repo).expect("repo");
+        init_repo(&repo);
+        let main_sha = git_sha(&repo, "main");
+        std::process::Command::new("git")
+            .current_dir(&repo)
+            .args(["checkout", "-b", "agent/TICKET-abc"])
+            .status()
+            .expect("branch");
+        std::fs::write(repo.join("feature.txt"), "feature\n").expect("feature");
+        std::process::Command::new("git")
+            .current_dir(&repo)
+            .args(["add", "feature.txt"])
+            .status()
+            .expect("add feature");
+        std::process::Command::new("git")
+            .current_dir(&repo)
+            .args(["commit", "-m", "feature"])
+            .status()
+            .expect("commit feature");
+        let branch_sha = git_sha(&repo, "agent/TICKET-abc");
+        assert_ne!(branch_sha, main_sha);
+
+        let worktrees = tmp.path().join("worktrees");
+        let run_id = Uuid::from_u128(7);
+        let scratch = PlanScratch::create(
+            &worktrees,
+            run_id,
+            Some(PlanScratchSource {
+                git_dir: repo.clone(),
+                ticket_branch: "agent/TICKET-abc".into(),
+                fallback_branch: "main".into(),
+            }),
+        )
+        .await
+        .expect("scratch");
+        let scratch_path = scratch.path().to_path_buf();
+        assert_ne!(scratch_path, repo);
+        assert!(!scratch_path.starts_with(&repo));
+        assert_eq!(git_sha(&scratch_path, "HEAD"), branch_sha);
+        let head_name = std::process::Command::new("git")
+            .current_dir(&scratch_path)
+            .args(["rev-parse", "--abbrev-ref", "HEAD"])
+            .output()
+            .expect("abbrev-ref");
+        assert_eq!(String::from_utf8_lossy(&head_name.stdout).trim(), "HEAD");
+
+        std::fs::create_dir_all(scratch_path.join(".agent")).expect("agent dir");
+        std::fs::write(scratch_path.join(".agent").join("context.md"), "ctx").expect("ctx");
+        assert!(!scratch_has_changes(&scratch_path).await);
+        std::fs::write(scratch_path.join("leak.txt"), "nope\n").expect("leak");
+        assert!(scratch_has_changes(&scratch_path).await);
+
+        assert!(scratch.discard().await);
+        assert!(!scratch_path.exists());
+        assert_eq!(git_sha(&repo, "agent/TICKET-abc"), branch_sha);
+        assert_eq!(git_sha(&repo, "main"), main_sha);
+        assert!(!repo.join("leak.txt").exists());
+        let listed = std::process::Command::new("git")
+            .current_dir(&repo)
+            .args(["worktree", "list"])
+            .output()
+            .expect("worktree list");
+        assert!(!String::from_utf8_lossy(&listed.stdout).contains("plan-scratch"));
+    }
+
+    #[tokio::test]
+    async fn plan_scratch_detaches_at_main_when_the_ticket_branch_is_missing() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let repo = tmp.path().join("repo");
+        std::fs::create_dir(&repo).expect("repo");
+        init_repo(&repo);
+        let main_sha = git_sha(&repo, "main");
+        let worktrees = tmp.path().join("worktrees");
+        let scratch = PlanScratch::create(
+            &worktrees,
+            Uuid::from_u128(8),
+            Some(PlanScratchSource {
+                git_dir: repo.clone(),
+                ticket_branch: "agent/TICKET-missing".into(),
+                fallback_branch: "main".into(),
+            }),
+        )
+        .await
+        .expect("scratch");
+        assert_eq!(git_sha(scratch.path(), "HEAD"), main_sha);
+        let path = scratch.path().to_path_buf();
+        assert!(!scratch.discard().await);
+        assert!(!path.exists());
+        assert_eq!(git_sha(&repo, "main"), main_sha);
+    }
+
+    #[test]
+    fn porcelain_ignores_only_the_injected_agent_context() {
+        assert!(porcelain_line_is_agent_context("?? .agent/context.md"));
+        assert!(!porcelain_line_is_agent_context("?? leak.txt"));
+        assert!(!porcelain_line_is_agent_context(" M README.md"));
     }
 }

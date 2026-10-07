@@ -2,11 +2,14 @@ mod common;
 
 use axum::http::StatusCode;
 use coppice_server::copy::plan::{
-    NO_PLANNER, PLAN_ALREADY_RUNNING, PLAN_APPROVED_NOTE, PLAN_REQUIRED, PLAN_STALE,
-    WORK_NOT_STARTED,
+    NO_PLANNER, PLAN_ALREADY_RUNNING, PLAN_APPROVED_NOTE, PLAN_CHANGES_DISCARDED, PLAN_REQUIRED,
+    PLAN_STALE, WORK_NOT_STARTED,
 };
 use coppice_server::services::planning_service::PlanningService;
-use std::time::Duration;
+use coppice_server::services::worktree_service::compute_paths;
+use std::path::{Path, PathBuf};
+use std::process::Command;
+use std::time::{Duration, Instant};
 use tower::ServiceExt;
 use uuid::Uuid;
 
@@ -465,4 +468,308 @@ async fn a_planning_run_posts_the_plan_and_moves_to_plan_review() {
         plan_runs(&runs(&app, &ticket_id, &cookie, &csrf).await).len(),
         1
     );
+    assert!(thread
+        .iter()
+        .all(|note| note["body"] != PLAN_CHANGES_DISCARDED));
+}
+
+fn git_stdout(dir: &Path, args: &[&str]) -> String {
+    let output = Command::new("git")
+        .args(args)
+        .current_dir(dir)
+        .output()
+        .expect("git");
+    assert!(
+        output.status.success(),
+        "git {args:?} failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8_lossy(&output.stdout).trim().to_string()
+}
+
+struct TicketGit {
+    _repo_dir: tempfile::TempDir,
+    repo: PathBuf,
+    worktree: PathBuf,
+    main_sha: String,
+    branch_sha: String,
+}
+
+fn snapshot_ticket_git(git: &TicketGit) {
+    assert_eq!(git_stdout(&git.repo, &["rev-parse", "main"]), git.main_sha);
+    let branch = git_stdout(&git.worktree, &["rev-parse", "--abbrev-ref", "HEAD"]);
+    assert_eq!(
+        git_stdout(&git.repo, &["rev-parse", &branch]),
+        git.branch_sha
+    );
+    assert_eq!(
+        git_stdout(&git.worktree, &["rev-parse", "HEAD"]),
+        git.branch_sha
+    );
+    assert!(git.worktree.join("feature.txt").is_file());
+    assert!(!git.worktree.join("plan-leak.txt").exists());
+    assert!(!git.repo.join("plan-leak.txt").exists());
+    assert!(git_stdout(&git.worktree, &["status", "--porcelain"]).is_empty());
+    assert!(git_stdout(&git.repo, &["status", "--porcelain"]).is_empty());
+    let listed = git_stdout(&git.repo, &["worktree", "list"]);
+    assert!(!listed.contains("plan-scratch"));
+}
+
+async fn open_planned_repo(
+    app: &axum::Router,
+    state: &coppice_server::AppState,
+    preset_source: &str,
+    cookie: &str,
+    csrf: &str,
+) -> (String, TicketGit) {
+    let board_id = common::create_test_board(app, cookie, csrf).await;
+    let (repo_dir, local_path) = common::create_temp_git_checkout();
+    let repo_id =
+        common::register_test_repo(app, &local_path.display().to_string(), cookie, csrf).await;
+    let agent_id =
+        common::create_agent_with_preset_key(app, "backend_engineer", "Planner", cookie, csrf)
+            .await;
+    let pool = state.db.as_ref().expect("db");
+    sqlx::query("UPDATE agents SET preset_source = $2 WHERE id = $1")
+        .bind(Uuid::parse_str(&agent_id).expect("agent uuid"))
+        .bind(preset_source)
+        .execute(pool)
+        .await
+        .expect("point planner at the plan fixture");
+    let ticket_id = common::create_unplanned_ticket(app, &board_id, cookie, csrf).await;
+    common::set_ticket_repo(app, &ticket_id, &repo_id, cookie, csrf).await;
+    common::assign_agent_to_ticket(app, &ticket_id, &agent_id, cookie, csrf).await;
+    let worktrees = PathBuf::from(&state.config.agent.worktrees_path);
+    let worktree =
+        common::setup_worktree_with_commit(&local_path, &worktrees, "test-repo", &ticket_id);
+    let paths = compute_paths(
+        &worktrees,
+        "test-repo",
+        Uuid::parse_str(&ticket_id).expect("ticket uuid"),
+    );
+    let git = TicketGit {
+        main_sha: git_stdout(&local_path, &["rev-parse", "main"]),
+        branch_sha: git_stdout(&local_path, &["rev-parse", &paths.branch_name]),
+        worktree,
+        repo: local_path,
+        _repo_dir: repo_dir,
+    };
+    assert_ne!(git.main_sha, git.branch_sha);
+    (ticket_id, git)
+}
+
+async fn scratch_for(
+    app: &axum::Router,
+    worktrees: &Path,
+    ticket_id: &str,
+    cookie: &str,
+    csrf: &str,
+) -> PathBuf {
+    let listed = common::poll_runs_until_count(
+        app,
+        ticket_id,
+        cookie,
+        csrf,
+        "plan run id",
+        Duration::from_secs(15),
+        |runs| plan_runs(runs).len() == 1,
+    )
+    .await;
+    let run_id = plan_runs(&listed)[0]["id"].as_str().expect("run id");
+    worktrees.join("plan-scratch").join(run_id)
+}
+
+async fn wait_for_path(label: &str, timeout: Duration, present: bool, path: &Path) {
+    let deadline = Instant::now() + timeout;
+    loop {
+        if path.exists() == present {
+            return;
+        }
+        if Instant::now() >= deadline {
+            panic!("timed out waiting for {label}; exists={}", path.exists());
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+}
+
+async fn assert_discard_note(app: &axum::Router, ticket_id: &str, cookie: &str, csrf: &str) {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        let notes = comments(app, ticket_id, cookie, csrf).await;
+        if notes
+            .iter()
+            .any(|note| note["body"] == PLAN_CHANGES_DISCARDED)
+        {
+            return;
+        }
+        if Instant::now() >= deadline {
+            panic!("timed out waiting for the discarded-changes note");
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+}
+
+#[tokio::test]
+async fn plan_run_discards_scratch_writes_and_leaves_the_ticket_untouched() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let (state, app, cookie, csrf, _env) =
+        common::bootstrap_and_login_with_auto_start_workers().await;
+    let (ticket_id, git) = open_planned_repo(&app, &state, "plan_writer", &cookie, &csrf).await;
+    let ready = app
+        .clone()
+        .oneshot(common::json_request(
+            "PATCH",
+            &format!("/api/tickets/{ticket_id}/status"),
+            r#"{"status":"ready"}"#,
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(ready.status(), StatusCode::OK);
+
+    let ticket = common::poll_ticket_until(
+        &app,
+        &ticket_id,
+        &cookie,
+        &csrf,
+        "plan review after a writing plan run",
+        Duration::from_secs(20),
+        |ticket| ticket["status"] == "plan_review",
+    )
+    .await;
+    assert_eq!(ticket["status"], "plan_review");
+    let worktrees = PathBuf::from(&state.config.agent.worktrees_path);
+    let scratch = scratch_for(&app, &worktrees, &ticket_id, &cookie, &csrf).await;
+    assert!(!scratch.starts_with(&git.worktree));
+    wait_for_path("scratch removal", Duration::from_secs(15), false, &scratch).await;
+    assert_discard_note(&app, &ticket_id, &cookie, &csrf).await;
+    let listed = runs(&app, &ticket_id, &cookie, &csrf).await;
+    let plan = plan_runs(&listed);
+    assert_eq!(plan.len(), 1);
+    assert!(plan[0]["worktreePath"].is_null());
+    snapshot_ticket_git(&git);
+}
+
+#[tokio::test]
+async fn plan_run_removes_scratch_when_the_run_fails() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let (state, app, cookie, csrf, _env) =
+        common::bootstrap_and_login_with_auto_start_workers().await;
+    let (ticket_id, git) =
+        open_planned_repo(&app, &state, "plan_writer_fail", &cookie, &csrf).await;
+    let ready = app
+        .clone()
+        .oneshot(common::json_request(
+            "PATCH",
+            &format!("/api/tickets/{ticket_id}/status"),
+            r#"{"status":"ready"}"#,
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(ready.status(), StatusCode::OK);
+
+    let listed = common::poll_runs_until_count(
+        &app,
+        &ticket_id,
+        &cookie,
+        &csrf,
+        "failed plan run",
+        Duration::from_secs(20),
+        |runs| {
+            plan_runs(runs)
+                .iter()
+                .any(|run| run["status"].as_str() == Some("failed"))
+        },
+    )
+    .await;
+    let run_id = plan_runs(&listed)[0]["id"].as_str().expect("run id");
+    let scratch = PathBuf::from(&state.config.agent.worktrees_path)
+        .join("plan-scratch")
+        .join(run_id);
+    wait_for_path(
+        "failed scratch removal",
+        Duration::from_secs(15),
+        false,
+        &scratch,
+    )
+    .await;
+    let ticket = common::get_ticket(&app, &ticket_id, &cookie, &csrf).await;
+    assert_eq!(ticket["status"], "ready");
+    assert_discard_note(&app, &ticket_id, &cookie, &csrf).await;
+    snapshot_ticket_git(&git);
+}
+
+#[tokio::test]
+async fn plan_run_removes_scratch_when_the_run_is_cancelled() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let (state, app, cookie, csrf, _env) =
+        common::bootstrap_and_login_with_auto_start_workers().await;
+    let (ticket_id, git) =
+        open_planned_repo(&app, &state, "plan_writer_slow", &cookie, &csrf).await;
+    let ready = app
+        .clone()
+        .oneshot(common::json_request(
+            "PATCH",
+            &format!("/api/tickets/{ticket_id}/status"),
+            r#"{"status":"ready"}"#,
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(ready.status(), StatusCode::OK);
+
+    let worktrees = PathBuf::from(&state.config.agent.worktrees_path);
+    let scratch = scratch_for(&app, &worktrees, &ticket_id, &cookie, &csrf).await;
+    let leak = scratch.join("plan-leak.txt");
+    wait_for_path("scratch write", Duration::from_secs(15), true, &leak).await;
+    let run_id = scratch.file_name().unwrap().to_string_lossy().to_string();
+    let stop = app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            &format!("/api/agent-runs/{run_id}/stop"),
+            "",
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(stop.status(), StatusCode::OK);
+    wait_for_path(
+        "cancelled scratch removal",
+        Duration::from_secs(15),
+        false,
+        &scratch,
+    )
+    .await;
+    let listed = common::poll_runs_until_count(
+        &app,
+        &ticket_id,
+        &cookie,
+        &csrf,
+        "cancelled plan run",
+        Duration::from_secs(15),
+        |runs| {
+            plan_runs(runs)
+                .iter()
+                .any(|run| run["status"].as_str() == Some("cancelled"))
+        },
+    )
+    .await;
+    assert_eq!(plan_runs(&listed)[0]["status"], "cancelled");
+    assert_discard_note(&app, &ticket_id, &cookie, &csrf).await;
+    snapshot_ticket_git(&git);
 }

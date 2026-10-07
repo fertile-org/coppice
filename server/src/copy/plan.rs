@@ -31,6 +31,10 @@ pub const IMPLEMENTATION_NOT_STARTED: &str =
 /// Posted when Skip planning cannot start work.
 pub const WORK_NOT_STARTED: &str = "Assign an agent with a ready repository to start the work.";
 
+/// Posted when a plan run leaves files in its scratch worktree.
+pub const PLAN_CHANGES_DISCARDED: &str =
+    "The plan run changed files. Those changes were discarded.";
+
 pub const PLAN_HEADING: &str = "## Plan";
 pub const APPROACH_HEADING: &str = "### Approach";
 pub const STEPS_HEADING: &str = "### Steps";
