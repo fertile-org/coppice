@@ -172,7 +172,7 @@ async fn direct_status_change_cannot_reach_done() {
     }
     let (app, cookie, csrf) = common::bootstrap_and_login().await;
     let board_id = common::create_test_board(&app, &cookie, &csrf).await;
-    let ticket_id = common::create_test_ticket(&app, &board_id, &cookie, &csrf).await;
+    let ticket_id = common::create_unplanned_ticket(&app, &board_id, &cookie, &csrf).await;
 
     let sources = [
         "backlog",
@@ -184,6 +184,9 @@ async fn direct_status_change_cannot_reach_done() {
         "blocked",
     ];
     for status in sources {
+        if status == "in_progress" {
+            common::skip_planning(&app, &ticket_id, &cookie, &csrf).await;
+        }
         if status != "backlog" {
             let move_to = app
                 .clone()
@@ -301,7 +304,7 @@ async fn assign_on_ready_moves_ticket_to_in_progress() {
     )
     .await;
 
-    let ticket_id = common::create_test_ticket(&app, &board_id, &cookie, &csrf).await;
+    let ticket_id = common::create_unplanned_ticket(&app, &board_id, &cookie, &csrf).await;
     common::set_ticket_repo(&app, &ticket_id, &repo_id, &cookie, &csrf).await;
 
     let patch = app
@@ -316,6 +319,7 @@ async fn assign_on_ready_moves_ticket_to_in_progress() {
         .await
         .unwrap();
     assert_eq!(patch.status(), StatusCode::OK);
+    common::skip_planning(&app, &ticket_id, &cookie, &csrf).await;
 
     let assign_res = app
         .clone()
@@ -355,7 +359,7 @@ async fn ready_tech_lead_human_agent_run_keeps_agent_mode_contract_and_git_behav
         &csrf,
     )
     .await;
-    let ticket_id = common::create_test_ticket(&app, &board_id, &cookie, &csrf).await;
+    let ticket_id = common::create_unplanned_ticket(&app, &board_id, &cookie, &csrf).await;
     common::set_ticket_repo(&app, &ticket_id, &repo_id, &cookie, &csrf).await;
     let ready = app
         .clone()
@@ -623,7 +627,7 @@ async fn ready_tech_lead_auto_handoff_queues_exactly_one_implementer_run() {
     )
     .await;
 
-    let ticket_id = common::create_test_ticket(&app, &board_id, &cookie, &csrf).await;
+    let ticket_id = common::create_unplanned_ticket(&app, &board_id, &cookie, &csrf).await;
     common::set_ticket_repo(&app, &ticket_id, &repo_id, &cookie, &csrf).await;
     let ready = app
         .clone()
@@ -637,6 +641,7 @@ async fn ready_tech_lead_auto_handoff_queues_exactly_one_implementer_run() {
         .await
         .unwrap();
     assert_eq!(ready.status(), StatusCode::OK);
+    common::skip_planning(&app, &ticket_id, &cookie, &csrf).await;
 
     common::assign_agent_to_ticket(&app, &ticket_id, &tech_lead_id, &cookie, &csrf).await;
 
@@ -738,7 +743,7 @@ async fn ready_tech_lead_manual_handoff_persists_recommendation_and_starts_nobod
     )
     .await;
 
-    let ticket_id = common::create_test_ticket(&app, &board_id, &cookie, &csrf).await;
+    let ticket_id = common::create_unplanned_ticket(&app, &board_id, &cookie, &csrf).await;
     common::set_ticket_repo(&app, &ticket_id, &repo_id, &cookie, &csrf).await;
     let ready = app
         .clone()
@@ -841,7 +846,7 @@ async fn ready_tech_lead_invalid_handoffs_stay_ready_and_start_nobody() {
             .await
             .expect("configure implementer availability");
 
-        let ticket_id = common::create_test_ticket(&app, &board_id, &cookie, &csrf).await;
+        let ticket_id = common::create_unplanned_ticket(&app, &board_id, &cookie, &csrf).await;
         common::set_ticket_repo(&app, &ticket_id, &repo_id, &cookie, &csrf).await;
         let ready = app
             .clone()
@@ -949,7 +954,7 @@ async fn ready_tech_lead_clarification_resumes_same_refinement_contract() {
         .await
         .expect("select Tech Lead clarification fixtures");
 
-    let ticket_id = common::create_test_ticket(&app, &board_id, &cookie, &csrf).await;
+    let ticket_id = common::create_unplanned_ticket(&app, &board_id, &cookie, &csrf).await;
     common::set_ticket_repo(&app, &ticket_id, &repo_id, &cookie, &csrf).await;
     let ready = app
         .clone()
@@ -963,6 +968,7 @@ async fn ready_tech_lead_clarification_resumes_same_refinement_contract() {
         .await
         .unwrap();
     assert_eq!(ready.status(), StatusCode::OK);
+    common::skip_planning(&app, &ticket_id, &cookie, &csrf).await;
     common::assign_agent_to_ticket(&app, &ticket_id, &tech_lead_id, &cookie, &csrf).await;
 
     let runs = common::poll_runs_until_count(
