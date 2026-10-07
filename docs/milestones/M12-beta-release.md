@@ -6,7 +6,7 @@ Ship a public **Beta**: a marketing and user-docs site plus an installable deskt
 
 > Agents plan, you approve. Agents build, you review. On your machine, with the agent CLIs you already pay for.
 
-Human gates are **Plan Review** and **Wait for Final Review**. The beta is that manager workflow on a local board. It is not a set-and-forget autopilot.
+Human gates are **Plan Review** and **Wait for Human Review**. The beta is that manager workflow on a local board. It is not a set-and-forget autopilot.
 
 Ship this before the capability sandbox ([M13 — Security & sandbox](./M13-security-and-sandbox.md)) and before role-owner agents ([M14 — Role-owner agents](./M14-role-owner-agents.md)). Do not sell role-owners as the beta hero. If the site mentions them, they are a later milestone.
 
@@ -43,7 +43,7 @@ These are checkable with the repo, GitHub Releases, and GitHub Pages. They do no
 
 - [ ] `website/` is an Astro site with a landing page and user docs (install, concepts, and providers at minimum). `npm run build` in `website/` succeeds.
 - [ ] Landing and docs pages say **Beta**.
-- [ ] Landing and docs use the positioning one-liner above and name **Plan Review** and **Wait for Final Review**. Role-owner agents are not the hero; any mention points at M14.
+- [ ] Landing and docs use the positioning one-liner above and name **Plan Review** and **Wait for Human Review**. Role-owner agents are not the hero; any mention points at M14.
 - [ ] The only download targets named for the beta are macOS Apple Silicon `.dmg` and Linux x64 `.deb`.
 - [ ] Before a beta git tag's GitHub Release contains those assets, download CTAs do not link to a missing file. After that release exists, each CTA returns the matching asset (HTTP 200, expected filename).
 - [ ] [https://getcoppice.vercel.app/](https://getcoppice.vercel.app/) serves the built site at the domain root. A custom domain is not required. The website workflow can still deploy GitHub Pages at `/coppice` when that dispatch is run.

@@ -103,7 +103,7 @@ impl WorkflowService {
             return Ok(action);
         }
 
-        // Scope B smoke: after PM clarification, implementer completion skips QA → final review.
+        // Scope B smoke: after PM clarification, implementer completion skips QA → human review.
         if ctx.current_status == TicketStatus::InProgress
             && is_implementer(&ctx.agent_role)
             && ctx.clarification_round > 0

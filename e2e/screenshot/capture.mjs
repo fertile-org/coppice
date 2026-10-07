@@ -7,7 +7,7 @@
  * config. The script seeds a board, a final-review diff, a finished live
  * console, chat transcripts, and plugins, then captures five 1440×900 frames:
  *
- *   1. Final Review — code review diff for the Wait for Final Review ticket
+ *   1. Human Review — code review diff for the Wait for Human Review ticket
  *   2. Board — same crop as the static hero
  *   3. Agent console — Live Console tab
  *   4. Chat
@@ -159,7 +159,7 @@ const COLUMN_LABELS = [
   'In Progress',
   'In Review',
   'In QA',
-  'Wait for Final Review',
+  'Wait for Human Review',
   'Done',
   'Blocked',
 ];

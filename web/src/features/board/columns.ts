@@ -32,7 +32,7 @@ export const BOARD_COLUMNS: BoardColumnDef[] = [
   { status: 'in_qa', label: 'In QA', colorKey: 'in-qa' },
   {
     status: 'wait_for_final_review',
-    label: 'Wait for Final Review',
+    label: 'Wait for Human Review',
     colorKey: 'wait-final',
   },
   { status: 'done', label: 'Done', colorKey: 'done' },

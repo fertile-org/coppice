@@ -13,5 +13,15 @@ describe('BOARD_COLUMNS', () => {
       'done',
       'blocked',
     ]);
+    expect(BOARD_COLUMNS.map((c) => c.label)).toEqual([
+      'Backlog',
+      'Ready',
+      'In Progress',
+      'In Review',
+      'In QA',
+      'Wait for Human Review',
+      'Done',
+      'Blocked',
+    ]);
   });
 });

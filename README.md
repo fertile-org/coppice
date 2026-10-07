@@ -13,7 +13,7 @@
 Work stops for you in two places:
 
 1. **Plan Review** (coming soon). A PM agent writes the plan. You approve it, or ask for changes in the ticket comments, before implementation starts.
-2. **Wait for Final Review.** You review the diff. The ticket stays in this column until you accept it.
+2. **Wait for Human Review.** You review the diff. The ticket stays in this column until you accept it.
 
 You start the work — create a ticket, or approve one an agent proposed. Agents plan and build between those gates.
 
