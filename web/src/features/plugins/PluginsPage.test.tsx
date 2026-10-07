@@ -66,7 +66,7 @@ const samplePlugin: Plugin = {
 };
 
 const STDIO_WARNING =
-  "This plugin starts local MCP servers that run with the Coppice server's privileges until sandboxing lands (M13). Enable anyway?";
+  "Local MCP servers run on your computer with your computer's privileges. Stronger sandboxing is coming in a later release. Enable anyway?";
 
 const shadowedPlugin: Plugin = {
   ...samplePlugin,
@@ -386,6 +386,23 @@ describe('PluginsPage', () => {
     expect(
       await screen.findByText('Installed https://github.com/org/sample-plugin.git.'),
     ).toBeVisible();
+  });
+
+  it('empty state links GitHub examples and describes a desktop git install', async () => {
+    plugins = [];
+    renderPage();
+
+    const examples = await screen.findByRole('link', { name: 'examples/plugins' });
+    expect(examples).toHaveAttribute(
+      'href',
+      'https://github.com/fertile-org/coppice/tree/main/examples/plugins',
+    );
+    expect(examples).toHaveAttribute('target', '_blank');
+    expect(screen.getByText(/with your computer's git credentials/)).toBeVisible();
+    expect(screen.getByLabelText('Directory path')).toHaveAttribute(
+      'placeholder',
+      '~/coppice-plugins',
+    );
   });
 
   it('default directory cannot be removed', async () => {
