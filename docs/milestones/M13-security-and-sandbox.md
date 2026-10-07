@@ -2,9 +2,9 @@
 
 ## Goal
 
-Fail closed. A new agent can read and write its ticket worktree and a Coppice-managed home folder, and it can reach only its model provider, that repo's git remote, and the package registries listed below. Anything else waits for the user.
+Fail closed. A new agent can read and write its ticket worktree and a Coppice-managed home folder, and it can reach only its model provider, that repo's git host (so it can fetch, push, and open pull requests, as agents do today), and the package registries listed below. Anything else waits for the user.
 
-The user decides on the ticket: **Allow once**, **Always allow**, or **Deny**. Always allow applies to **This agent** (the default) or **All agents**. Every strict rule has a switch in Settings. The screen says what is actually enforced on this machine, for this agent CLI. These limits are not a virtual machine.
+The user decides on the ticket: **Allow once**, **Always allow**, or **Deny**. Always allow applies to **This agent** (the default) or **All agents**. Every strict rule has a switch in Settings. The screen says what is actually enforced on this machine, for this agent CLI. When this machine can't apply the limits, agents keep running and a banner at the top of the app says so. These limits are not a virtual machine.
 
 This is the source of truth for M13. No code lands ahead of it. It replaces the earlier M13 note, which assumed a Compose-era admin console and a process wrapper around every CLI.
 
@@ -52,24 +52,30 @@ M13 reduces that blast radius:
 
 - Files outside the worktree and the managed home are not visible to the agent, except the few sign-in files its CLI needs.
 - Network destinations outside the allowlist do not connect.
-- A secret value is in the process environment only after a grant for that agent, and it is scrubbed from logs and comments.
+- A secret value is in the process environment only after a grant for that agent, and it is scrubbed from logs and comments. The repo's forge token is the one default grant, and a Settings switch turns it off.
 - A plugin process for that agent gets the same file and network limits. A remote plugin server is not on this machine; Coppice can only refuse the tool call.
 - The user sees the request and the grant, and can revoke it.
 
-A granted secret can still be sent to a host that is already allowed. A program that breaks Seatbelt or bubblewrap can still escape. The product says so on the agent.
+A granted secret can still be sent to a host that is already allowed. That includes the default forge token: an agent can push to anything that token can write. A program that breaks Seatbelt or bubblewrap can still escape. The product says so on the agent.
 
 ## Decisions
 
 Hung's product rules are requirements. The rest of this section is the design that implements them on the code that exists.
 
-1. **Strict by default.** New runs use the policy in [Default policy](#default-policy). Registries start on, each with its own switch.
+1. **Strict by default.** New runs use the policy in [Default policy](#default-policy). Registries start on, each with its own switch. Agent push and pull requests start on, with their own switch.
 2. **Ask instead of fail.** The agent calls the Coppice tool `request_permission`. The ticket shows the request. **Allow once**, **Always allow**, or **Deny**. A grant resumes work.
-3. **Always allow** asks where it applies. **This agent** is selected. **All agents** is the other choice. Saved rules live under Settings → Access and can be revoked there. The same list is on the agent page, filtered to that agent.
+3. **Always allow** asks where it applies. **This agent** is selected. **All agents** is the other choice (stored as scope `global`). Saved rules live under Settings → Access and can be revoked there. The same list is on the agent page, filtered to that agent.
 4. **Settings toggles** relax a rule for the whole workspace. The screen states the relaxed rule in a sentence, not only with a switch.
 5. **Honest enforcement.** Three levels: **enforced**, **best-effort**, **not enforced**. The agent page and the run show the level for this connector on this machine. Copy never says the machine is locked down.
 6. **The CLI's sandbox first.** Claude Code and Codex already enforce with macOS Seatbelt and Linux bubblewrap. Coppice translates policy into that CLI's per-run settings. Coppice adds its own wrapper only when the CLI has no sandbox, or the sandbox cannot express the rule. Wrappers are not nested: a second bubblewrap around Claude or Codex fails inside the first.
 7. **One policy engine.** Files, hosts, commands, secrets, and MCP tools are rules. Connector id strings do not appear in the policy engine. A new connector adds one adapter and one descriptor block. The Settings screen and the ticket card do not change.
 8. **Denied hosts are learned from a proxy that sees the name.** Seatbelt and bubblewrap deny by address and return a generic error to `npm`. The strategy is in [Spotting a block](#spotting-a-block).
+
+Hung answered the three open questions on Oct 7, 2026:
+
+9. **Agents push and open pull requests by default, as they do today.** The repo's git host and its forge API host are allowed, and the repo's forge token reaches the agent through a credential helper and `GH_TOKEN`, so `git fetch`, `git push`, and `gh pr create` work. It is a visible default grant. Settings → Access → **Let agents push and open pull requests** turns it off. The token is never on a command line or in a prompt, and it is redacted from logs and comments. Coppice's own Push and Create PR buttons are unchanged. See [Managed home and credentials](#managed-home-and-credentials).
+10. **Scopes are This agent and All agents. There is no repo scope in M13.** Rules store `scope_kind` and `scope_id` so a repo scope, or later a project or board scope, can be added without rewriting rows. See [Scopes and adding one later](#scopes-and-adding-one-later).
+11. **When limits can't be applied, agents still run.** This covers desktop and Compose alike. The run is recorded as **not enforced**, and the app shows a dismissible banner at the top. A dismissed banner stays hidden until the situation or the app version changes. Everything that doesn't need the OS backend still applies. An optional switch, **Pause agents when limits can't be applied**, is off by default. See [When limits can't be applied](#when-limits-cant-be-applied).
 
 ## Architecture
 
@@ -123,13 +129,13 @@ A rule is one allow or one deny.
 | `kind` | `filesystem_read`, `filesystem_write`, `network_host`, `command`, `secret`, `mcp_tool` |
 | `pattern` | Path prefix, host (a leading `*.` matches one label), command prefix, secret name, or MCP tool name (`ticket_get`, `github__create_issue`) |
 | `effect` | `allow` or `deny`. Deny wins |
-| `scope` | `agent` or `workspace` |
-| `agent_id` | Set when `scope` is `agent` |
+| `scope_kind` | `agent` or `global` (UI: This agent, All agents). `repo` is reserved, not used in M13 |
+| `scope_id` | The agent id when `scope_kind` is `agent`. Null for `global`. A future `repo` scope stores the repo id |
 | `source` | `default`, `toggle`, `grant`, `capability` |
 
 A **capability** is a named bundle of rules (a command, a secret, and a host together). Granting it writes those rules at the chosen scope. M13 does not ship the role bundles from product design §18.1. The ticket can allow one resource without inventing a bundle name.
 
-The resolver merges, in order: built-in default, workspace toggles, capability grants, saved rules. Deny wins over allow. A toggle that relaxes a class drops the default denies of that class. It does not drop an explicit deny the user saved.
+The resolver merges, in order: built-in default, workspace toggles, capability grants, saved rules. Saved rules and grants are collected by scope from widest to narrowest: `global`, then (reserved) `repo`, then `agent`. Deny wins over allow at every scope, so scope order decides how a rule is explained ("allowed for all agents"), never whether a deny applies. A toggle that relaxes a class drops the default denies of that class. It does not drop an explicit deny the user saved.
 
 These paths stay denied when every wide toggle is on. No switch opens them:
 
@@ -140,6 +146,22 @@ These paths stay denied when every wide toggle is on. No switch opens them:
 The agent page says, when a wide file toggle is on: "Agents can read and write your files. Coppice's saved secrets stay hidden."
 
 A run stores a snapshot of the resolved rules and the enforcement levels, so a later settings change does not rewrite history.
+
+### Scopes and adding one later
+
+M13 ships two scopes: `agent` (This agent, the default) and `global` (All agents). A rule matches a run when `scope_kind = 'global'`, or when `scope_kind = 'agent'` and `scope_id` is the run's agent id. The resolver gets a `ScopeContext { agent_id, repo_id }` for every run. `repo_id` is filled in now even though no rule uses it yet.
+
+In code, `Scope` is a `#[non_exhaustive]` enum (`Agent(AgentId)`, `Global`). `scope_kind` is `TEXT`, checked in code rather than by a database `CHECK`, so a row written by a newer version still loads.
+
+A rule whose `scope_kind` this version doesn't know is never looser than a known rule. An unknown-scope **allow** is ignored. An unknown-scope **deny** applies as if it were `global`. The server logs a warning once per kind. Settings → Access lists the row as "Saved by a newer version of Coppice." `GET` responses keep the row with its raw `scope_kind`, and the web app shows unknown kinds as that read-only row instead of failing. Writes are strict: `POST /api/permission-requests/:id/decide` with an unknown scope returns 422.
+
+**Adding a repo scope later:**
+
+1. **Migration:** none for `policy_rules`. `scope_kind` is text and `scope_id` is already a nullable UUID. Existing rows need no backfill. Add a partial index on `(scope_kind, scope_id)` where `revoked_at` is null if it isn't there yet.
+2. **Resolver:** add `Scope::Repo(RepoId)`. It matches when `scope_id` is the run's `repo_id`. It goes between `global` and `agent`. Deny still wins, so the new scope can't weaken an existing deny.
+3. **Deletes:** `scope_id` has no foreign key because it can point at different tables. Deleting an agent or a repo revokes its scoped rules in the same transaction, in the service.
+4. **API and UI:** the decide body accepts `{ "kind": "repo" }`. The server fills in the id from the ticket. The Always allow chooser gets a third option, **This repo**, and Settings → Access gets a repo filter.
+5. **Older builds:** they ignore repo allows and treat repo denies as global, as described above. A downgrade is stricter, never looser.
 
 ### Per-agent profile
 
@@ -205,30 +227,45 @@ Adding a connector, on top of [architecture.md § Adding a connector](../archite
 
 The policy engine, the ticket card, and Settings → Access stay as they are.
 
-If the CLI rejects the sandbox flag, or the version is older than the floor pinned in the adapter, the adapter does not fall through to today's bypass flags. The run fails with a clear error and the enforcement level is `not enforced`. Updating the floor is a deliberate change, logged with the version.
+If the CLI rejects the sandbox flag, or the version is older than the floor pinned in the adapter, the adapter does not fall through to today's bypass flags. The run starts without the CLI's sandbox, the enforcement level is `not enforced`, and the agent card says the CLI needs an update ([When limits can't be applied](#when-limits-cant-be-applied)). With Pause on, the run waits instead. Updating the floor is a deliberate change, logged with the version.
 
 ### OS backends
 
-Used only when `needs_os_wrapper` is true, or when a native sandbox failed to start and this run is not allowed to continue without it.
+Used only when `needs_os_wrapper` is true.
 
 | Platform | Backend | Notes |
 | --- | --- | --- |
 | macOS (beta: Apple Silicon) | `sandbox-exec` Seatbelt profile | No extra install. Profile allows the worktree, managed home, read-only sign-in files, and OS libraries. Network is the proxy, loopback, and the adapter's model hosts |
-| Linux x64, including WSL2 | `bwrap` | The `.deb` depends on `bubblewrap` and `socat`. Ubuntu 24.04 and later, including Ubuntu on WSL, often set `kernel.apparmor_restrict_unprivileged_userns=1`. Packaging documents the `bwrap` AppArmor profile from the [Claude sandbox docs](https://code.claude.com/docs/en/sandboxing), or the run fails closed with the message below |
+| Linux x64, including WSL2 | `bwrap` | The `.deb` depends on `bubblewrap` and `socat`. Ubuntu 24.04 and later, including Ubuntu on WSL, often set `kernel.apparmor_restrict_unprivileged_userns=1`. Packaging documents the `bwrap` AppArmor profile from the [Claude sandbox docs](https://code.claude.com/docs/en/sandboxing). Without it, agents run without limits and the banner below links to that setup |
 | Docker Compose | Same Linux backend | User namespaces often do not work in the container. See [Migration](#migration) |
 | Native Windows | None | No installer. A from-source run reports `not enforced` and does not pretend otherwise |
 
-The desktop app **does not start the agent** when the wrapper is required and the backend cannot start, unless the user has turned on "Run agents when limits can't be applied". The ticket is Blocked — error, with:
+### When limits can't be applied
 
-> This machine can't limit agent programs yet. Agents are paused. You can fix the Linux setup, or turn limits off in Settings.
+At startup, and again when a run's sandbox fails to start, Coppice checks this machine. The check covers Seatbelt on macOS, whether `bwrap` can create its namespaces on Linux, and whether the container allows user namespaces on Compose. If the check fails, limits can't be applied. Desktop and Compose behave the same way:
 
-WSL interop is a hole: a sandboxed Linux process can still start a Windows binary under `/mnt/c` unless the Unix socket that launches it is blocked. The Linux profile denies `/mnt/c` and, when the optional seccomp helper is absent, the card says:
+- **Agents still run.** Connectors that need the wrapper start without it. Claude Code and Codex start with their own sandbox off, but they never get today's bypass flags. The run's level is **not enforced**, and the run records why.
+- **What still applies:** `request_permission` and its approval card, the CLI's own approval and permission rules where they work without its sandbox (for example, Claude's per-run `permissions.deny` for file tools), MCP tool checks, secret scoping and redaction, the managed home and environment scrub, and the proxy variables for programs that honor them. Hosts reached through the proxy still raise the card, at the **best-effort** level.
+- **The "What is enforced" card** says **Not limited on this machine.**
+- **A banner at the top of the app** (copy pending Content review):
 
-> Running in WSL. Limits apply to Linux programs. A Windows program the agent starts can get around them.
+> This computer can't limit what agents do yet, so they run without limits. [Fix it] [×]
+
+**Fix it** opens the Linux setup section of the [install doc](../../website/src/pages/docs/install.md). On macOS it opens the same doc's macOS section. The **×** dismisses the banner.
+
+The dismissal stores a fingerprint of three things: the check result, the reason, and the app version. It is stored on the server with the user's settings, not in `config.toml` and not per browser. The banner comes back when the fingerprint changes: limits become available and then fail again, the reason changes, or the app updates. When limits become available, the banner goes away on its own.
+
+WSL interop is a hole. A sandboxed Linux process can still start a Windows binary under `/mnt/c` unless the Unix socket that launches it is blocked. The Linux profile denies `/mnt/c`. When the optional seccomp helper is absent, the same banner shows the WSL variant, with the same dismissal rule, and the card repeats it:
+
+> Running in WSL. Limits apply to Linux programs. A Windows program an agent starts can get around them. [×]
 
 That matches the install doc's warning about CLI paths under `/mnt/c`.
 
-Coppice does not wrap a process whose adapter already owns a Seatbelt or bubblewrap sandbox. Nested `bwrap` fails with "Operation not permitted", and Claude would then skip the sandbox unless `failIfUnavailable` is set. The adapter sets that flag so a failed native sandbox stops the run instead of continuing wide open.
+When limits are missing for one connector instead of the whole machine (a CLI older than the adapter's floor, or Kilo before its live check), the run still starts and is **not enforced**. The agent card and the Connectors line say so. The top banner covers only the whole-machine case.
+
+**Pause agents when limits can't be applied** (`[sandbox] pause_when_unenforced`, off by default) is for strict users. When it is on, runs that would start unenforced wait instead. The ticket shows `Blocked — error` with: "This computer can't limit what agents do yet. Agents wait until it can. Fix it, or turn off Pause agents in Settings."
+
+Coppice does not wrap a process whose adapter already owns a Seatbelt or bubblewrap sandbox. Nested `bwrap` fails with "Operation not permitted", and Claude would then skip the sandbox unless `failIfUnavailable` is set. The adapter sets that flag when the machine check passed, so a native sandbox can't silently fall back to running wide open. If it fails anyway, Coppice runs the check again. If the check now fails, the banner appears and the run restarts through the resume path without limits, or waits if Pause is on.
 
 ### Managed home and credentials
 
@@ -238,9 +275,9 @@ Every connector gets:
 
 - `HOME` = `<artifacts_dir>/agent-homes/<agent_id>/` (stable across runs so a resume still finds the CLI's session state)
 - `TMPDIR` = that home's `tmp/`
-- An environment built from a cleared list: `PATH`, `LANG`, `TMPDIR`, `COPPICE_MCP_URL`, `COPPICE_MCP_TOKEN`, the descriptor's `auth_env` names when they are set, and secrets granted to this run
+- An environment built from a cleared list: `PATH`, `LANG`, `TMPDIR`, `COPPICE_MCP_URL`, `COPPICE_MCP_TOKEN`, the descriptor's `auth_env` names when they are set, the repo's forge token as `GH_TOKEN` while the push switch is on, and secrets granted to this run
 
-Not passed through: `AWS_*`, `SSH_AUTH_SOCK`, `DATABASE_URL`, `SECRETS_MASTER_KEY`, `GH_TOKEN`, and the rest of the server environment.
+Not passed through: `AWS_*`, `SSH_AUTH_SOCK`, `DATABASE_URL`, `SECRETS_MASTER_KEY`, the server's own `GH_TOKEN`, and the rest of the server environment.
 
 Sign-in files are bind-mounted or copied read-only into the managed home at the path the CLI expects. The mount is the credential file, not the whole config directory. In particular, Codex's `~/.codex/config.toml` and Claude's `~/.claude/settings.json` are not mounted: those files can turn the sandbox off. Coppice writes the per-run policy itself.
 
@@ -252,7 +289,9 @@ Sign-in files are bind-mounted or copied read-only into the managed home at the 
 | `opencode` | `~/.local/share/opencode/auth.json` | `~/.opencode` (install tree; the probe already ignores it) |
 | `kilo-code` | The auth file the live CLI actually reads, once [#10](https://github.com/fertile-org/coppice/issues/10) / M10's live check names it. Until then the card says sign-in files are not enforced | A whole `~/.local/share/opencode` or `~/.kilocode` tree |
 
-`GIT_CONFIG_GLOBAL` points at a gitconfig inside the managed home. It sets the proxy when this run uses Coppice's egress proxy, and a credential helper only when a forge-token grant exists for this repo. The helper reads a `0600` file in the managed home. The token is not put on the command line. The user's `~/.ssh` is not mounted. Agent `git push` and `gh` stay off until that grant. Coppice's own push and create-PR actions (M07) stay on the server, behind `git.push_enabled`, and do not run inside the agent.
+`GIT_CONFIG_GLOBAL` points at a gitconfig inside the managed home. It sets the proxy when this run uses Coppice's egress proxy, and a credential helper for this repo's forge token. The helper reads a `0600` file in the managed home. `gh` gets the same token as `GH_TOKEN`. The token is not put on the command line, and it is redacted from logs and comments like any granted secret. The user's `~/.ssh` is not mounted. For an SSH remote, the gitconfig rewrites the URL to HTTPS (`url.<https-url>.insteadOf`) so the push uses the token.
+
+Agents fetch, push, and open pull requests by default, as they do today. That is the default grant of the repo's forge token, listed under Settings → Access. **Let agents push and open pull requests** turns it off for every agent. The git host stays reachable for fetch, and no token is injected. A repo with no forge token can still fetch a public remote, and the agent asks for one (**Add secret**) when it needs to push. Coppice's own push and create-PR actions (M07) stay on the server, behind `git.push_enabled`, and are unchanged.
 
 ### Spotting a block
 
@@ -304,8 +343,8 @@ Decisions the tool returns to the agent:
 | User choice | Tool result | What was saved |
 | --- | --- | --- |
 | Allow once | `allowed for this run` | A rule with source `grant` for this run and, when a follow-up is required, for that one follow-up run. It does not stick after that |
-| Always allow, This agent | `allowed for this run` | An agent-scoped rule |
-| Always allow, All agents | `allowed for this run` | A workspace-scoped rule |
+| Always allow, This agent | `allowed for this run` | A rule with `scope_kind` `agent` and `scope_id` set to this agent |
+| Always allow, All agents | `allowed for this run` | A rule with `scope_kind` `global` |
 | Deny | `denied` | The request row only |
 
 The agent does not learn the scope. It learns whether it may proceed. That return happens only when the grant applies inside the waiting process. When it does not, the process is stopped instead, as [When a grant takes effect](#when-a-grant-takes-effect) describes.
@@ -335,7 +374,7 @@ A detected block cannot un-fail the command that already died. The card still co
 
 The ticket moves to `Blocked` only when the process has exited and the user has not decided yet, or when they choose Deny. An Allow that needs a follow-up run queues that run and the usual start transition puts the ticket back In Progress. Blocked uses the result-contract fields that already exist:
 
-- Substatus from the kind: `blocked_by_permission` (host, path, command, tool), `blocked_by_missing_capability` (a bundle), `blocked_by_missing_secret` (secret name only), `blocked_by_error` (backend missing)
+- Substatus from the kind: `blocked_by_permission` (host, path, command, tool), `blocked_by_missing_capability` (a bundle), `blocked_by_missing_secret` (secret name only), `blocked_by_error` (backend missing, only when Pause agents when limits can't be applied is on)
 - `substatus_metadata` includes `permissionRequestId`, `kind`, and `resource`. The metadata panel already keys capability and secret off this object; extend it rather than adding a status
 
 **Allow once** and **Always allow** queue that follow-up through the existing resume path (`resume_session_id`, connector `caps.run_resume` / `chat_resume`) whenever the grant needs a new process, including when the user decides before the CLI exits. The follow-up context says what the user allowed. Connectors that cannot resume (Kilo; Codex is best-effort and falls back to the transcript) get a fresh session with that sentence. **Deny** does not start a run. It posts the denial on the ticket and leaves the ticket Blocked.
@@ -366,7 +405,7 @@ Redaction reuses the plugin MCP `Redactor`: every CLI stdout and stderr line, an
 
 The Settings list shows name, which agents, which plugins, which repos, and when it was created. After save, the value is not shown again. This is the M07 forge-token screen, extended. It is not a new product area.
 
-A repo's forge token is eligible to be granted to an agent for that repo. It is not injected on its own.
+A repo's forge token is granted by default to every agent working on that repo, so agents can push and open pull requests as they do today. It is not a `secret_grants` row. It is the default behind the **Let agents push and open pull requests** switch, and it shows in this list as "All agents, this repo, default". It reaches the agent only through the managed gitconfig credential helper and `GH_TOKEN`, and it is redacted like any granted value. Other secrets still need a grant.
 
 ### Plugin MCP servers
 
@@ -396,8 +435,8 @@ policy_rules
   kind            TEXT NOT NULL
   pattern         TEXT NOT NULL
   effect          TEXT NOT NULL          -- allow | deny
-  scope           TEXT NOT NULL          -- agent | workspace
-  agent_id        UUID REFERENCES agents(id) ON DELETE CASCADE
+  scope_kind      TEXT NOT NULL          -- agent | global. Reserved: repo (later maybe project, board). Checked in code, not by a CHECK constraint
+  scope_id        UUID                   -- agent id for agent; NULL for global; repo id for a future repo scope. No FK: revoked by the service when the target is deleted
   source          TEXT NOT NULL          -- default rows are not stored; grant | capability | toggle-exception
   capability_id   UUID REFERENCES capabilities(id) ON DELETE SET NULL
   created_at      TIMESTAMPTZ NOT NULL
@@ -423,7 +462,8 @@ permission_requests
   resource        TEXT NOT NULL
   why             TEXT NOT NULL
   status          TEXT NOT NULL          -- pending | allowed_once | allowed_always | denied | expired
-  scope           TEXT                   -- agent | workspace, set when allowed_always
+  scope_kind      TEXT                   -- agent | global, set when allowed_always
+  scope_id        UUID                   -- same meaning as policy_rules.scope_id
   rule_id         UUID REFERENCES policy_rules(id)
   created_at      TIMESTAMPTZ NOT NULL
   decided_at      TIMESTAMPTZ
@@ -458,19 +498,20 @@ audit_log
 
 `backend` is one of `claude-sandbox`, `codex-sandbox`, `coppice-seatbelt`, `coppice-bwrap`, `none`.
 
-Indexes: pending permission requests by ticket, rules by agent where `revoked_at` is null, audit by `created_at` desc.
+Indexes: pending permission requests by ticket, rules by `(scope_kind, scope_id)` where `revoked_at` is null, audit by `created_at` desc.
 
 ### API
 
-Admin session, CSRF on writes, same style as the connectors routes.
+Admin session, CSRF on writes, same style as the connectors routes. Rule and request payloads carry `scope: { kind, id }`. The server fills in `id` from the request's agent, so the client never sends one. Clients keep a rule with an unknown `kind` and show it read-only.
 
 ```text
-GET    /api/settings/access
+GET    /api/settings/access                 switches, plus limits { applied, reason, fingerprint, dismissed }
 PUT    /api/settings/access                 patches [sandbox] in config.toml
 GET    /api/access/rules?agentId=
 DELETE /api/access/rules/:id
 GET    /api/agents/:id/access               resolved rules + enforcement for this machine
-POST   /api/permission-requests/:id/decide  { "decision": "allow_once"|"allow_always"|"deny", "scope": "agent"|"workspace" }
+POST   /api/permission-requests/:id/decide  { "decision": "allow_once"|"allow_always"|"deny", "scope": { "kind": "agent"|"global" } }
+POST   /api/settings/access/banner          { "dismissedFingerprint": "..." }
 GET    /api/secrets                         names and grants only
 POST   /api/secrets                         { name, value } — value write-only
 POST   /api/secrets/:id/grants
@@ -491,9 +532,10 @@ Missing keys mean the defaults below. Existing files keep working. The desktop g
 ```toml
 [sandbox]
 enforce = true
-# Desktop stays false. The Compose example sets true: user namespaces often
-# do not work in that container. The UI still says limits are not enforced.
-allow_unenforced = false
+# When this machine can't apply limits, agents still run and a banner says so.
+# Set true to make them wait instead.
+pause_when_unenforced = false
+allow_agent_push = true
 allow_all_network = false
 allow_all_filesystem = false
 allow_user_home = false
@@ -512,7 +554,7 @@ maven = true
 
 `SECRETS_MASTER_KEY` already overrides `[secrets] master_key`. No new `SANDBOX_ENFORCE` environment variable. Compose does not grow a sandbox env knob.
 
-Root `config.example.toml` and the desktop file use the defaults above. `deploy/config/config.example.toml` sets `allow_unenforced = true` with the comment in the sample. That split is the only Compose-specific sandbox setting.
+Root `config.example.toml`, the desktop file, and `deploy/config/config.example.toml` all use the defaults above. There is no Compose-specific sandbox setting. Compose behaves like desktop when it can't apply limits.
 
 ## UX
 
@@ -543,7 +585,8 @@ A new section on the existing Settings page, not a new top-level product. Four g
    - Allow all network access. Off: "Agents can reach their model, this repo's git host, and the package registries below." On: "Network limits are off. Agents can reach the internet."
    - Allow reads and writes outside the ticket folder. On: "Agents can read and write your files. Coppice's saved secrets stay hidden."
    - Allow the home folder. On: "Agents can read your home folder, including SSH keys, cloud credentials, and browser data."
-   - Run agents when limits can't be applied. On: "Agents still run when this machine can't limit them."
+   - Let agents push and open pull requests. On by default: "Agents can fetch, push, and open pull requests with this repo's token." Off: "Agents can fetch. They can't push or open pull requests."
+   - Pause agents when limits can't be applied. Off by default: "When this computer can't limit agents, they still run and a banner says so." On: "When this computer can't limit agents, they wait until it can."
 2. **Package registries.** One switch each, labeled with the registry name and the hosts. Off: "Agents can't download from npm."
 3. **Saved rules.** One row: what, who (this agent or all agents), when. Revoke is on the row. The agent page shows the same rows for that agent.
 4. **Secrets** and **Recent activity** (the audit log).
@@ -567,7 +610,7 @@ Levels use plain words:
 | best-effort | "Coppice asks for these hosts. This machine cannot block every other connection." |
 | not enforced | "Not limited on this machine." |
 
-A relaxed switch adds the matching "limits are off" sentence at the top of this card.
+A relaxed switch adds the matching "limits are off" sentence at the top of this card. When limits can't be applied, every level on the card reads "Not limited on this machine."
 
 Tools → Connectors adds one line under the readiness label: "Limits on this machine: limited." / "Limits on this machine: not limited." The test provider is already hidden on that page and stays hidden.
 
@@ -588,7 +631,7 @@ Applies when `enforce = true` and the wide switches are off. Registries default 
 Allowed hosts are the union of:
 
 1. The adapter's `model_hosts` (not editable; the card lists them).
-2. The host from this ticket's repo `remote_url`, port 443 for `https` and port 22 for `ssh` / `git@`. No remote URL means no git host. An SSH session still needs a key grant; the host being allowed is not a credential.
+2. The host from this ticket's repo `remote_url`, port 443 for `https` and port 22 for `ssh` / `git@`, plus that forge's API host so `gh` can open pull requests. For `github.com` that adds `api.github.com`. GitLab, Gitea, and GitHub Enterprise serve the API from the same host. No remote URL means no git host. `~/.ssh` is not mounted, so pushes go over HTTPS with the repo's forge token (see [Managed home and credentials](#managed-home-and-credentials)).
 3. Hosts for each registry switch that is on.
 
 Model hosts are pinned in the adapter and logged with the CLI version. Starting set, corrected when a live canary shows a host the CLI actually needs:
@@ -625,11 +668,11 @@ Commands are not denied by name in the default profile. `curl` inside the worktr
 
 MCP tools: the core set for that context profile, plus plugin tools for plugins enabled on that agent. Chat keeps write tools off.
 
-Secrets: none injected. Coppice's server-side forge token for push and create-PR is unchanged and is not an agent secret.
+Secrets: only the repo's forge token, for `git push` and `gh`, while **Let agents push and open pull requests** is on (the default). No other secret is injected without a grant. Coppice's server-side push and create-PR actions are unchanged.
 
 ## Enforcement matrix
 
-"Native" means the CLI's own sandbox is the owner for that column. "Coppice" means the OS backend plus, for network, Coppice's proxy. Levels assume the backend started and the switches are off. If the backend did not start, both columns drop to **not enforced** and the desktop app pauses the run.
+"Native" means the CLI's own sandbox is the owner for that column. "Coppice" means the OS backend plus, for network, Coppice's proxy. Levels assume the backend started and the switches are off. If the backend did not start, both columns drop to **not enforced**, the run still starts, and the top banner shows. If Pause agents when limits can't be applied is on, the run waits instead.
 
 | Connector | Filesystem | Network | Launch change | Denial signal | Wrapper |
 | --- | --- | --- | --- | --- | --- |
@@ -637,7 +680,7 @@ Secrets: none injected. Coppice's server-side forge token for push and create-PR
 | `codex` | **Enforced** for writes (workspace + managed home) when the permission profile loads. Legacy `--sandbox workspace-write` still allows reading the whole disk; the adapter does not use that legacy mode for the default | **Enforced** when this CLI has permission profiles and `features.network_proxy`. An older CLI that can only open or close all network leaves network **off** (fail closed) and the card says package installs need a newer Codex, or the all-network switch | Remove `--dangerously-bypass-approvals-and-sandbox`. Per-run `-c` / config in the managed home only. Do not set `sandbox_mode` in the same launch as `default_permissions`; Codex ignores the profile if both are set | Codex proxy / sandbox events, parsed by the adapter | No, while the native sandbox started |
 | `cursor` | **Enforced** by Coppice's OS backend. Cursor's `--force` stays so the CLI does not sit on a prompt nobody can see. `--mode ask` stays for chat, on top of the file rule | **Enforced** by the Coppice proxy plus the OS network rule. Cursor has no host sandbox | Keep the per-run `HOME` and `cli-config.json`. Stop pointing `XDG_CONFIG_HOME` at the real `~/.config`. Stop forwarding `GH_CONFIG_DIR` | Coppice proxy for hosts. Seatbelt denial log for files. bubblewrap file denials are best-effort to name | Yes |
 | `opencode` | **Enforced** by the OS backend around `opencode serve`. OpenCode's own permission file is extra, not the claim | **Enforced** by the Coppice proxy | Existing per-run `OPENCODE_CONFIG`. The serve process is the wrapped child | Coppice proxy | Yes |
-| `kilo-code` | Same shape as OpenCode. `--auto` stays so Kilo does not prompt. The live CLI is still unverified; until the adapter's flags are checked against it, the card says **not enforced** and desktop pauses Kilo runs when `allow_unenforced` is false | Same | Existing `KILO_CONFIG` | Coppice proxy | Yes, once the live check lands |
+| `kilo-code` | Same shape as OpenCode. `--auto` stays so Kilo does not prompt. The live CLI is still unverified; until the adapter's flags are checked against it, the card says **not enforced**. Kilo runs still start, or wait if Pause is on | Same | Existing `KILO_CONFIG` | Coppice proxy | Yes, once the live check lands |
 | Plugin stdio | **Enforced** by the OS backend, per agent | Same hosts as that agent, via the Coppice proxy | Pool key includes `agent_id`. Managed home. Not inside the CLI sandbox | Coppice proxy | Yes |
 | Plugin HTTP | **Not enforced** for the remote process. The call is refused when the URL host is outside the rules | The connect is **enforced** as a policy check before the request | Existing HTTP transport | Policy error, no sandbox log | No |
 
@@ -647,7 +690,7 @@ Platform claim the card is allowed to make:
 | --- | --- |
 | macOS Apple Silicon | Seatbelt. Enforced when the profile loads |
 | Linux x64 `.deb`, and that `.deb` under WSL2 | bubblewrap. Enforced when `bwrap` starts. WSL adds the Windows-program sentence |
-| Docker Compose | Often **not enforced**. Runs still start because `allow_unenforced` is true in the Compose example. The card says not limited |
+| Docker Compose | Often **not enforced**. Same as desktop: runs still start, the banner shows, and the card says not limited |
 | Native Windows | **Not enforced.** Out of scope |
 
 ## Migration
@@ -657,8 +700,8 @@ Platform claim the card is allowed to make:
 - `permissive.rs` remains for tests and for `sandbox.enforce = false`. It is not a profile the UI offers.
 - Config files with no `[sandbox]` table get the strict defaults from the config types. Nobody has to edit TOML to be safe.
 - Desktop data dirs are patched in place with the `[sandbox]` block. Comments and other keys stay.
-- Existing `secrets` rows gain no grants. Forge tokens keep working for Coppice's push and create-PR. They are not dropped into agent environments.
-- Cursor runs that depended on the real `~/.config/gh` or the user's gitconfig lose that on the next run and ask. That is the point of [#30](https://github.com/fertile-org/coppice/issues/30).
+- A repo's existing forge token becomes the agents' push credential for that repo on their next run, because the push switch defaults on. Other `secrets` rows gain no grants. Coppice's own push and create-PR keep working unchanged.
+- Runs that depended on the real `~/.config/gh`, `~/.ssh`, or the user's gitconfig lose them on the next run. They push with the repo's forge token instead. A repo without one gets the **Add secret** card the first time the agent needs to push. That is the point of [#30](https://github.com/fertile-org/coppice/issues/30).
 - Chat write-denial does not get looser. Kilo chat, which is refused today, stays refused until Kilo's wrapper is verified. Then the file rule enforces it and the refuse can go.
 
 ## Delivery
@@ -667,41 +710,39 @@ Each pull request merges on its own and leaves the app working. Later ones depen
 
 Do not run `make test` on every one of these. Use the targeted command. The last pull request runs the full suite.
 
-1. **Policy resolver and tables.** `sandbox/policy.rs`, migration, config types, example TOML. Launch flags unchanged. Test: default policy allows `registry.npmjs.org` and the worktree, denies `~/.ssh` and an arbitrary host, deny wins, toggles relax only their class, the hard floor holds, `policy.rs` contains no connector id.
+1. **Policy resolver and tables.** `sandbox/policy.rs`, migration, config types, example TOML. Launch flags unchanged. Test: default policy allows `registry.npmjs.org`, the repo's git and forge API hosts, and the worktree; it denies `~/.ssh` and an arbitrary host. Deny wins, toggles relax only their class, the hard floor holds, and `policy.rs` contains no connector id. Agent and global scopes match correctly. An unknown `scope_kind` row is ignored when it allows and applied as global when it denies, with one warning.
 2. **Audit log for actions that exist today.** Secret create/delete, plugin install/enable, push, create PR. `GET /api/audit-log`. Test: an integration test performs each action and reads the row back; the secret value is absent.
 3. **`request_permission` and the ticket card.** Waiting tool, decision API, Allow once / Always allow / Deny, comment on allow, notification. Grants apply in-process for this pull request (no OS sandbox yet). The follow-up-run path from [When a grant takes effect](#when-a-grant-takes-effect) lands with the Claude, Codex, and OS-backend pull requests. Test: server integration with the test provider calling the tool; web test for the three buttons and the This agent / All agents choice.
 4. **MCP policy check.** `ToolRegistry::call` consults the resolver. Chat write tools stay denied. A miss opens a permission request. Test: existing chat registry tests plus a denied plugin tool.
-5. **Secret grants, injection, redaction.** Test: agent outside the grant does not see the variable; a granted value is scrubbed from a fake CLI stdout line and from a comment; API JSON has no value.
+5. **Secret grants, injection, redaction, default forge token.** The repo's forge token goes to the credential helper and `GH_TOKEN` while the push switch is on. Test: an agent outside the grant does not see the variable. A granted value, and the forge token, are scrubbed from a fake CLI stdout line and from a comment. API JSON has no value. With the push switch off, no token is injected.
 6. **Managed home and env scrub.** All five connectors. Credential mounts. Cursor stops forwarding the real config home and `GH_CONFIG_DIR`. Test: adapter tests assert `HOME` is under artifacts, `AWS_SECRET_ACCESS_KEY` is absent, auth file path is present, user `config.toml` for Codex is not.
 7. **Claude Code adapter.** Per-run settings, bypass flag gone, denial parser. Test: golden argv and settings JSON; a fixture stream event becomes a permission request. Enforcement card for Claude only, with the file-tool sentence.
 8. **Codex adapter.** Bypass flag gone, permission profile plus network proxy, older-CLI fail-closed path. Test: golden `-c` args; a fixture denial event; a version-too-old case that does not pass the bypass flag.
-9. **Coppice OS backend, egress proxy, plugin pool per agent.** Cursor and OpenCode use it. Kilo uses the same code path and stays paused on desktop until its flags are verified against the live CLI (the card stays "not limited"). Plugin stdio is per agent. Desktop pauses when `bwrap` cannot start; the Compose example stays `allow_unenforced`. Test: proxy unit test denies `evil.example` and allows `registry.npmjs.org`; bwrap argv unit test; a live `bwrap` test only when the binary exists, otherwise skipped; pool test that two agents do not share one stdio process.
-10. **Settings → Access and the rest of the honest card.** Switches patch TOML and keep comments. Saved rules revoke. Connectors line. Agent card for every connector. Test: web tests for the "limits are off" sentences and for revoke; config patch test.
+9. **Coppice OS backend, egress proxy, plugin pool per agent.** Cursor and OpenCode use it. Kilo uses the same code path. Until its flags are verified against the live CLI, its runs start and the card stays "not limited". Plugin stdio is per agent. The machine check runs, and when `bwrap` cannot start, runs still start unenforced on desktop and Compose (or wait when `pause_when_unenforced` is on). Test: proxy unit test denies `evil.example` and allows `registry.npmjs.org`; bwrap argv unit test; a live `bwrap` test only when the binary exists, otherwise skipped; pool test that two agents do not share one stdio process; a failed check starts the run as not enforced, and Pause makes it wait.
+10. **Settings → Access, the banner, and the rest of the honest card.** Switches patch TOML and keep comments, including Let agents push and open pull requests and Pause agents when limits can't be applied. Saved rules revoke. The top banner and the WSL variant, with fingerprint dismissal. Connectors line. Agent card for every connector. Test: web tests for the "limits are off" sentences, for revoke, and for the banner showing, dismissing, and coming back when the fingerprint changes; config patch test.
 11. **Blocked actions and smoke.** Add secret, Allow command, Grant capability, Enable tool, Ask the agent why, resume on allow. `make e2e-smoke-m13` drives the card through the test provider: blocked ticket, Allow once, follow-up run succeeds. Then `make test`, `cargo clippy --workspace -- -D warnings`, `make web-test`. After a green full Rust run, `make clean`.
 
 Manual, not CI: on a Mac and on Ubuntu x64, with a real Claude Code and a real Codex, `npm install` in the worktree works, a fetch of an unlisted host raises the card, and `~/.ssh` is not readable. Kilo stays at its verified line until that CLI is checked. Record the CLI versions next to the flags, for [#10](https://github.com/fertile-org/coppice/issues/10).
 
 ## Acceptance criteria
 
-- [ ] A new agent, with no grants, cannot read `~/.ssh` or `~/.aws`, cannot see other repos, and cannot open a TCP connection to an arbitrary host. The model host, the repo remote host, and the default registry hosts work.
+- [ ] A new agent, with no grants, cannot read `~/.ssh` or `~/.aws`, cannot see other repos, and cannot open a TCP connection to an arbitrary host. The model host, the repo remote host, and the default registry hosts work. With default settings, `git fetch`, `git push`, and `gh pr create` work in the ticket worktree using the repo's forge token. Turning off Let agents push and open pull requests removes the token.
 - [ ] Each registry switch is in Settings. Turning one off removes exactly the hosts in the table above.
-- [ ] `request_permission` parks the run until Allow once, Always allow, or Deny. Always allow defaults to This agent and can apply to All agents. The rule shows under Settings → Access and on the agent, and revoke works.
+- [ ] `request_permission` parks the run until Allow once, Always allow, or Deny. Always allow defaults to This agent and can apply to All agents. Rules are stored with `scope_kind` and `scope_id`. The rule shows under Settings → Access and on the agent, and revoke works.
 - [ ] A host denied by the proxy or by a Claude/Codex event raises the same card, including when the agent never called the tool.
 - [ ] Allow after the process exited resumes through the existing session-resume path.
 - [ ] Every MCP tool call is checked against the resolved policy. Chat write-denial is that policy for chat profiles.
-- [ ] Secrets are injected only for a matching grant, redacted from logs and comments, and never returned by the API.
+- [ ] Secrets are injected only for a matching grant (the repo's forge token is the one default grant, behind its switch), redacted from logs and comments, and never returned by the API.
 - [ ] Plugin stdio servers run per agent under that agent's file and network limits. Remote plugin calls to a host outside the list are refused.
 - [ ] The agent page states the enforcement level for that CLI on that machine, and says this is not a virtual machine. A relaxed switch is described in a sentence.
 - [ ] Claude Code and Codex launches do not pass `bypassPermissions` or `--dangerously-bypass-approvals-and-sandbox`. Coppice does not wrap those processes in a second OS sandbox while the native one started.
-- [ ] Cursor, OpenCode, and verified Kilo runs use the Coppice backend. Desktop does not start them when the backend cannot. Compose with `allow_unenforced` still runs and says not limited.
+- [ ] Cursor, OpenCode, and verified Kilo runs use the Coppice backend. When limits can't be applied, on desktop or Compose, runs still start, the card says not limited, and a dismissible banner says so. A dismissed banner returns when the check result, the reason, or the app version changes. With Pause agents when limits can't be applied on, runs wait instead.
 - [ ] Audit rows exist for grants, revokes, secret changes, toggles, plugin enable, push, and create PR. Values are absent.
 - [ ] `make e2e-smoke-m13` passes. Full `make test`, clippy, and `make web-test` pass on the last pull request.
 
 ## Open questions
 
-1. **Agent push.** This spec lets an agent fetch its repo remote, and it injects that repo's forge token only after a grant. Push from inside the agent stays off until then. Coppice's own Push and Create PR buttons are unchanged. Is the forge-token grant the right way to let the agent push, or should the agent never push?
-2. **All agents** means the whole workspace on this machine. There is no per-repo rule in M13. Say if a repo-sized scope is needed now.
-3. **Compose** keeps running when the container cannot sandbox, and the card says not limited. The desktop app pauses instead. Confirm that split.
+None. Hung answered the three earlier questions (agent push, a per-repo scope, and what happens when limits can't be applied) on Oct 7, 2026. They are Decisions 9–11.
 
 ## References
 
