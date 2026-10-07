@@ -177,7 +177,7 @@ function PluginDirsSection({ dirs }: { dirs: PluginDir[] }) {
             type="text"
             autoComplete="off"
             spellCheck={false}
-            placeholder="/srv/coppice-plugins"
+            placeholder="~/coppice-plugins"
             value={path}
             onChange={(e) => setPath(e.target.value)}
             className="field-control w-full px-3 py-2 font-mono text-sm"
@@ -278,7 +278,7 @@ function InstallSection({
       <div>
         <SubHeading>Install from git</SubHeading>
         <p className="mt-1 font-body text-sm text-text-secondary">
-          Clones the repository into a plugin directory using the server’s git
+          Clones the repository into a plugin directory with your computer's git
           credentials. Plugins installed this way get an Update button.
         </p>
       </div>
@@ -437,8 +437,16 @@ export function PluginsPage() {
             {plugins.length === 0 ? (
               <p className="rounded-xl border border-border bg-surface-raised px-4 py-8 text-center font-body text-sm text-text-muted shadow-card">
                 No plugins yet. Install one from git or add a plugin directory below. To try
-                one out, add the <code className="font-mono">examples/plugins</code> folder
-                from the Coppice repository.
+                one out, add the{' '}
+                <a
+                  href="https://github.com/fertile-org/coppice/tree/main/examples/plugins"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="font-medium text-moss-700 underline-offset-2 hover:underline"
+                >
+                  <code className="font-mono">examples/plugins</code>
+                </a>{' '}
+                folder from GitHub.
               </p>
             ) : (
               <div className="space-y-3">

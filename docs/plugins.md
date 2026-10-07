@@ -36,12 +36,12 @@ Skills are found up to 3 folders deep inside each skills folder (`skills/<catego
 
 On **Plugins → Add plugins**, either:
 
-- **Install from git:** paste a repository URL (and optionally a branch or tag) and pick a target directory. The server clones it with its own git credentials into `<directory>/<repo name>`. Any supported layout works; a marketplace or skills repo can produce several plugins, and the success message lists them (`Installed <repo>: 3 plugins (a, b, c)`). A repository with no plugin, skills, or marketplace is removed again and the install fails. Git-installed plugins get an **Update** button.
-- **Add a plugin directory:** a folder on the server's machine. If the folder itself is a plugin, skills repo, or marketplace, it is read as that. Otherwise each direct subfolder that is one becomes a plugin. For the directory itself, `<name>/SKILL.md` subfolders do not count (only a root `SKILL.md` or skills in `skills/`, `.agents/skills/`, … do), so a directory holding several single-skill clones lists each clone as its own plugin. Deeper folders are ignored. Press **Rescan** after changing files. In the desktop app, **Browse…** opens a folder picker.
+- **Install from git:** paste a repository URL (and optionally a branch or tag) and pick a target directory. Coppice clones it with your computer's git credentials into `<directory>/<repo name>`. Any supported layout works; a marketplace or skills repo can produce several plugins, and the success message lists them (`Installed <repo>: 3 plugins (a, b, c)`). A repository with no plugin, skills, or marketplace is removed again and the install fails. Git-installed plugins get an **Update** button.
+- **Add a plugin directory:** a folder on your computer, such as `~/coppice-plugins`. If the folder itself is a plugin, skills repo, or marketplace, it is read as that. Otherwise each direct subfolder that is one becomes a plugin. For the directory itself, `<name>/SKILL.md` subfolders do not count (only a root `SKILL.md` or skills in `skills/`, `.agents/skills/`, … do), so a directory holding several single-skill clones lists each clone as its own plugin. Deeper folders are ignored. Press **Rescan** after changing files. In the desktop app, **Browse…** opens a folder picker.
 
 Directories are scanned in order. If two plugins have the same name, the one in the earlier directory is used and the other is marked `shadowed`. Use the arrows to reorder.
 
-To try the flow, add the [`examples/plugins`](../examples/plugins) folder from this repository. It contains `hello-coppice`, which has one skill and one tool. It needs `node` on the server's PATH.
+To try the flow, add the [`examples/plugins`](https://github.com/fertile-org/coppice/tree/main/examples/plugins) folder from GitHub. It contains `hello-coppice`, which has one skill and one tool. It needs `node` on your computer's PATH.
 
 ### 2. Enable it and fill in settings
 
@@ -53,7 +53,7 @@ Plugins start **disabled**. On the plugin card:
 
 **Switching skills off.** Each skill on the card has its own switch; the header reads `Skills (12 of 30 on)` when some are off. A switched-off skill is hidden from every agent that has the plugin, at once (including running runs): it is left out of the skill list, and `skill_load` reports it as not found. The setting is workspace-wide, kept by skill name across rescans and updates. The built-in `coppice` skills cannot be switched off.
 
-A plugin with **stdio** servers runs a program on the server's machine with the server's privileges (sandboxing comes in M13). Enabling or testing such a plugin asks for confirmation, and also names any settings whose value would come from the server's environment. Only install plugins you trust.
+A plugin with **stdio** servers runs a program on your computer with your computer's privileges (stronger sandboxing is coming in a later release). Enabling or testing such a plugin asks for confirmation, and also names any settings whose value would come from the server's environment. Only install plugins you trust.
 
 ### 3. Attach it to agents
 
@@ -109,7 +109,7 @@ Open a ticket's **Runs** tab and expand a run. **Tools & Skills** lists every to
 | A skill shows `duplicate skill name` | Another skill in the same plugin has the same folder name; the first by path is used. |
 | A skill shows `path escapes plugin root` | The skill folder or its `SKILL.md` is a symlink pointing outside the plugin. |
 | Test says `missing setting "X"` | Enter setting `X` on the card, or give it a default in `.mcp.json`. |
-| Test fails to start a stdio server | Is the command installed and on the server's PATH (in Docker: inside the server container)? |
+| Test fails to start a stdio server | Is the command installed and on your computer's PATH (in Docker: inside the server container)? |
 | Agent never uses the plugin | Is it enabled **and** selected on that agent? Check the run's **Tools & Skills** tab. |
 
 ## Writing a plugin

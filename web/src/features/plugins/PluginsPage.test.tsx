@@ -388,6 +388,23 @@ describe('PluginsPage', () => {
     ).toBeVisible();
   });
 
+  it('empty state links GitHub examples and describes a desktop git install', async () => {
+    plugins = [];
+    renderPage();
+
+    const examples = await screen.findByRole('link', { name: 'examples/plugins' });
+    expect(examples).toHaveAttribute(
+      'href',
+      'https://github.com/fertile-org/coppice/tree/main/examples/plugins',
+    );
+    expect(examples).toHaveAttribute('target', '_blank');
+    expect(screen.getByText(/with your computer's git credentials/)).toBeVisible();
+    expect(screen.getByLabelText('Directory path')).toHaveAttribute(
+      'placeholder',
+      '~/coppice-plugins',
+    );
+  });
+
   it('default directory cannot be removed', async () => {
     renderPage();
 
