@@ -288,7 +288,7 @@ const CHATS = [
       ],
       [
         'agent',
-        'The server checks the cluster major version and stops with a clear error instead of starting the wrong binaries. The ticket stays in Wait for Final Review until you accept that.',
+        'The server checks the cluster major version and stops with a clear error instead of starting the wrong binaries. The ticket stays in Wait for Human Review until you accept that.',
       ],
     ],
   },
@@ -365,11 +365,11 @@ export async function seedMarketingScenes(api, auth, agentIds, boardId, tickets)
       '- The server listens on `127.0.0.1` only.',
       '- A cluster from a different major version is refused.',
       '',
-      'The diff is ready for final review.',
+      'The diff is ready for human review.',
     ].join('\n'),
   });
   await api('POST', `/api/tickets/${finalReview.id}/comments`, auth, {
-    body: 'Initdb stays on loopback and the cluster version is checked before start. Ready for final review.',
+    body: 'Initdb stays on loopback and the cluster version is checked before start. Ready for human review.',
   });
 
   const runId = await seedConsoleRun(

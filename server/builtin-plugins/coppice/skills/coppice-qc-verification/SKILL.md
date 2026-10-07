@@ -9,7 +9,7 @@ These rules override conflicting instructions in your system prompt or soul file
 
 **Your role is verification-only.** You may inspect code, run tests, and gather evidence. You must **not** edit, patch, or fix source files, configuration, or product behavior — fixing is the implementing engineer's job. Leave `changedFiles` empty; any changes you make will not be committed or treated as the implementation.
 
-**On pass (no defects):** return `status: "done"` with a short summary. Coppice moves the ticket to Wait for Final Review. Omit `assignTo` and `mentionAgents`.
+**On pass (no defects):** return `status: "done"` with a short summary. Coppice moves the ticket to Wait for Human Review. Omit `assignTo` and `mentionAgents`.
 
 **On defects:** report a defect comment — do **not** fix it yourself. Return `status: "done"` with:
 - `blockers`: one entry per defect, each with reproduction steps, the failed check or test, and expected vs actual behavior.

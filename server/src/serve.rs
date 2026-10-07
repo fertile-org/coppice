@@ -49,7 +49,7 @@ async fn interrupt_orphaned_run(state: &AppState, run_id: uuid::Uuid, reason: &s
 /// tech-lead, and QC runs stay in those columns, and a person can drag a
 /// ticket there while a run is still live. Once that run is interrupted,
 /// Blocked is the existing column for work that cannot continue until a
-/// person acts. Wait for Final Review, Done, Ready, Backlog, and an already
+/// person acts. Wait for Human Review, Done, Ready, Backlog, and an already
 /// Blocked ticket stay put; the quit comment is still added.
 fn quit_blocks_status(status: TicketStatus) -> bool {
     matches!(

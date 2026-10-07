@@ -3,7 +3,7 @@
  * M05 workflow collaboration API smoke test.
  *
  * Scope B mock pipeline: PM → Ready + recommendation → engineer blocked +
- * @mention → PM respond → engineer resume → Wait for Final Review → Final Approve.
+ * @mention → PM respond → engineer resume → Wait for Human Review → Final Approve.
  *
  * Requires WORKFLOW_AUTO_START_RUNS=true on the server (see deploy/docker-compose.yml).
  *

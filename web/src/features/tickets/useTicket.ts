@@ -525,7 +525,7 @@ export function statusLabel(status: TicketStatus): string {
     in_progress: 'In Progress',
     in_review: 'In Review',
     in_qa: 'In QA',
-    wait_for_final_review: 'Wait for Final Review',
+    wait_for_final_review: 'Wait for Human Review',
     done: 'Done',
     blocked: 'Blocked',
   };

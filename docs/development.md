@@ -72,7 +72,7 @@ Regenerates the marketing stills and a looping GIF. The board frame is [`static/
 
 Frame order, three seconds each: final-review diff, board, agent console, chat, plugins. The board crop stays 1440×900, the same window as the hero. There is no Plan Review column.
 
-It starts Compose project `coppice-screenshot` (its own volumes, ports 5432/5000/5001) with [`deploy/docker-compose.screenshot.yml`](../deploy/docker-compose.screenshot.yml), which forces `auth.desktop_mode` and turns off workflow auto-start. The seed builds a board, a Wait for Final Review diff, a finished Live Console transcript, two chats, and two plugins. The overlay does not enable the `mock-provider` feature, and the frames must not show it.
+It starts Compose project `coppice-screenshot` (its own volumes, ports 5432/5000/5001) with [`deploy/docker-compose.screenshot.yml`](../deploy/docker-compose.screenshot.yml), which forces `auth.desktop_mode` and turns off workflow auto-start. The seed builds a board, a Wait for Human Review diff, a finished Live Console transcript, two chats, and two plugins. The overlay does not enable the `mock-provider` feature, and the frames must not show it.
 
 The capture matches the installed Electron app: no login screen, and the top bar does not show the bootstrap admin email or Sign out. Seeding does not start agent runs and does not change packaged desktop builds. The target is intentionally outside CI so pull requests are not gated on pixels. Stop a dev stack on those ports first; this project does not share its database.
 

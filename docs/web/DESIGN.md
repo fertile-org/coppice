@@ -73,7 +73,7 @@ Each column has a distinct but harmonious tint — muted, not saturated traffic 
 | In Progress | Sky-slate `#dce8f0` | `#3d6b8b` | Work under open canopy |
 | In Review | Soft violet `#ede5f5` | `#6b4f8b` | Second eyes, twilight |
 | In QA | Harvest wheat `#f5edd6` | `#9a7b2e` | Testing the harvest |
-| Wait for Final Review | Aged parchment `#f0e8dc` | `#8b6914` | Almost ripe |
+| Wait for Human Review | Aged parchment `#f0e8dc` | `#8b6914` | Almost ripe |
 | Done | Full moss `#d4ead9` | `#2d5a3d` | Mature growth |
 | Blocked | Wilted rose `#f5e6e6` | `#9b3d3d` | Dead branch — needs attention |
 

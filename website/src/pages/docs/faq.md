@@ -19,7 +19,7 @@ No. Coppice is a board for driving coding agents, not a full company issue track
 No. Agents run via CLIs on your machine, on your repos. Category contrast: cloud agent services hand off work to someone else’s computer; Coppice keeps the work local and gated by you.
 
 ## Will agents merge without me?
-No. Final Review is a first-class gate. You open the diff and decide.
+No. Human Review is a first-class gate. You open the diff and decide.
 
 ## What about “set and forget” autopilots?
 That is not Coppice’s product. The wedge is the manager workflow: approve the plan, approve the diff.
