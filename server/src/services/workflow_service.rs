@@ -13,7 +13,7 @@ pub const MAX_CLARIFICATION_ROUNDS: i32 = 3;
 pub const MAX_MENTIONS_PER_RUN: u32 = 2;
 
 /// Direct status writes cannot enter Done. Accept is the only route.
-pub const DONE_REQUIRES_ACCEPT: &str = "Accept the ticket to move it to Done.";
+pub const DONE_REQUIRES_ACCEPT: &str = "A ticket moves to Done only when you accept it.";
 
 pub struct WorkflowService;
 

@@ -84,7 +84,7 @@ describe('BoardPage drop on Done', () => {
         throw new ApiError(
           400,
           JSON.stringify({
-            message: 'Accept the ticket to move it to Done.',
+            message: 'A ticket moves to Done only when you accept it.',
           }),
         );
       }
@@ -123,7 +123,7 @@ describe('BoardPage drop on Done', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Drop on Done' }));
 
     expect(
-      await screen.findByText('Accept the ticket to move it to Done.'),
+      await screen.findByText('A ticket moves to Done only when you accept it.'),
     ).toBeVisible();
     await waitFor(() => {
       expect(
