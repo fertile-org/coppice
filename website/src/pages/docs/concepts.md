@@ -16,7 +16,7 @@ You create or approve tickets, decide when work starts, and review the code befo
 1. **Nothing starts without a human action.** Agents may propose tickets; approving one counts. Approved tickets land in Backlog.
 2. **Plan Review (coming soon).** A PM agent will write a plan for each Ready ticket, and you'll approve it or ask for changes in comments before any code is written. Until then, put your plan or acceptance criteria in the ticket itself.
 3. **Agents execute** through In Progress → In Review → In QA.
-4. **Human Review.** You open the in-app diff, leave feedback as ticket comments, and only then mark done. Approval is tied to what you reviewed.
+4. **Human Review.** You open the in-app diff, leave feedback as ticket comments, and then accept it. What you accept is exactly what merges. If an agent adds commits after your review, you review again before you accept.
 
 ## Isolated worktrees
 When an agent works a ticket, Coppice gives it an isolated git worktree. Agents don’t thrash your main checkout; you review a concrete diff.
