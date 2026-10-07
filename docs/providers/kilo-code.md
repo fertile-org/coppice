@@ -85,10 +85,10 @@ Start at **Tools → Connectors** (admin): it shows whether `kilo` is found, whi
 Coppice spawns roughly:
 
 ```text
-kilo run --format json --auto --model <provider>/<model> "<prompt>"
+kilo run --format json --auto --dir <worktree> "<prompt>" --model <provider>/<model>
 ```
 
-with CWD set to the worktree. Stdout JSON events are parsed defensively (OpenCode-derived shapes); assistant text is scanned for Coppice’s JSON result contract.
+with the process cwd set to the worktree. Stdout JSON events are parsed defensively (OpenCode-derived shapes); assistant text is scanned for Coppice’s JSON result contract. A result ends the run even if the process is still alive.
 
 Vendor docs: [CLI](https://kilo.ai/docs/code-with-ai/platforms/cli), [CLI reference](https://kilo.ai/docs/code-with-ai/platforms/cli-reference).
 

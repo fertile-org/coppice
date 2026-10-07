@@ -234,7 +234,6 @@ mod tests {
     fn opencode_stays_off_when_it_is_only_the_default() {
         let mut config = AppConfig::load_defaults().expect("config");
         config.agent.connectors.opencode.enabled = false;
-        config.agent.default_connector = OPENCODE.into();
         let registry = ConnectorRegistry::from_config(&config, runs());
         assert!(!registry.has(OPENCODE));
     }

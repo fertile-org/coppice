@@ -45,7 +45,6 @@ services:
       COPPICE_MCP__BUILTIN_PLUGINS_DIR: /data/builtin-plugins
       # Default plugin dir (cannot be removed in Settings → Plugins).
       COPPICE_PLUGINS__DIR: /data/plugins
-      AGENT_DEFAULT_PROVIDER: mock
       WORKTREES_PATH: /data/worktrees
       AGENT_WORKER_COUNT: "2"
       WORKFLOW_AUTO_START_RUNS: "${WORKFLOW_AUTO_START_RUNS:-true}"

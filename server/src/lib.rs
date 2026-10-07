@@ -90,10 +90,6 @@ impl AppState {
         )
     }
 
-    pub fn default_connector_id(&self) -> &str {
-        &self.config.agent.default_connector
-    }
-
     /// Writes the embedded built-in plugins into `config.mcp.builtin_plugins_dir`
     /// and loads the skill catalog from there. Called once at startup.
     pub fn builtin_skills_from_config(

@@ -81,7 +81,7 @@ Start at **Tools → Connectors** (admin): it shows whether `codex` is found, wh
 
 ## How Coppice runs Codex (reference)
 
-Coppice spawns `codex exec --json --dangerously-bypass-approvals-and-sandbox` with worktree `-C`, optional `-m`, and the prompt on stdin. JSONL events drive the live console; accumulated agent text is parsed for Coppice’s JSON result contract.
+Coppice spawns `codex --no-daemon exec --json --dangerously-bypass-approvals-and-sandbox -C <worktree>` when `codex --version` is at least 0.156. Older or unknown versions omit `--no-daemon`. The prompt is on stdin. Optional `-m`, MCP `-c` overrides, and `resume` follow the pinned flags. The process cwd stays the server cwd. A result ends the run even if the process is still alive.
 
 Models: `openai` = slugs without an `azure/` prefix; `azure` = slugs with `azure/`.
 

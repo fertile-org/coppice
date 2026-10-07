@@ -80,6 +80,6 @@ Start at **Tools → Connectors** (admin): it shows whether `claude` is found, w
 
 ## How Coppice runs Claude Code (reference)
 
-Coppice spawns `claude -p` with `--output-format stream-json`, worktree CWD, and optional `--model` / `--resume`. Stdout NDJSON is mapped to live frames; the final result text is parsed for Coppice’s JSON result contract.
+Coppice spawns `claude -p "<prompt>" --output-format stream-json --verbose --permission-mode bypassPermissions` with the worktree as the process cwd, then optional `--allowedTools`, `--model`, `--resume`, and per-run MCP flags. Those pinned flags live on the connector descriptor. Stdout NDJSON is mapped to live frames; the final result text is parsed for Coppice’s JSON result contract. A result ends the run even if `claude` is still waiting on a background command.
 
 More: [providers README](README.md), [M08](../milestones/M08-connector-operator-cli.md).

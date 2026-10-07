@@ -687,8 +687,15 @@ pub struct StorageConfig {
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct AgentConfig {
-    #[serde(alias = "default_provider")]
-    pub default_connector: String,
+    /// Obsolete. New agents pick a connector in the UI. Old files and the
+    /// `default_provider` alias are accepted and ignored.
+    #[serde(
+        default,
+        rename = "default_connector",
+        alias = "default_provider",
+        skip_serializing
+    )]
+    ignored_default_connector: Option<String>,
     pub worktrees_path: String,
     pub worker_count: u32,
     #[serde(default = "default_health_check_interval")]
@@ -1053,7 +1060,15 @@ impl AppConfig {
     }
 
     fn load_figment(figment: Figment) -> Result<Self, Box<figment::Error>> {
-        let config: Self = figment.extract().map_err(Box::new)?;
+        let mut config: Self = figment.extract().map_err(Box::new)?;
+        if config.agent.ignored_default_connector.take().is_some() {
+            tracing::debug!("ignoring obsolete agent.default_connector / default_provider");
+        }
+        if std::env::var_os("AGENT_DEFAULT_CONNECTOR").is_some()
+            || std::env::var_os("AGENT_DEFAULT_PROVIDER").is_some()
+        {
+            tracing::debug!("ignoring obsolete AGENT_DEFAULT_CONNECTOR / AGENT_DEFAULT_PROVIDER");
+        }
         config
             .knowledge
             .validate()
@@ -1115,11 +1130,6 @@ impl AppConfig {
             )
             .merge(
                 Env::raw()
-                    .only(&["AGENT_DEFAULT_CONNECTOR", "AGENT_DEFAULT_PROVIDER"])
-                    .map(|_| "agent.default_connector".into()),
-            )
-            .merge(
-                Env::raw()
                     .only(&["WORKTREES_PATH"])
                     .map(|_| "agent.worktrees_path".into()),
             )
@@ -1175,7 +1185,7 @@ impl AppConfig {
                 max_upload_bytes: 10 * 1024 * 1024,
             },
             agent: AgentConfig {
-                default_connector: "mock".into(),
+                ignored_default_connector: None,
                 worktrees_path: "./data/worktrees".into(),
                 worker_count: 2,
                 health_check_interval_secs: default_health_check_interval(),
@@ -1236,7 +1246,6 @@ mod tests {
 
         assert_eq!(cfg.server.port, 4321);
         assert_eq!(cfg.web.port, 5001);
-        assert_eq!(cfg.agent.default_connector, "mock");
     }
 
     #[test]
@@ -1306,7 +1315,7 @@ mod tests {
         }
         let wrapper: Wrapper = toml::from_str(toml).expect("parse");
         let cfg = wrapper.agent;
-        assert_eq!(cfg.default_connector, "opencode");
+        assert!(cfg.ignored_default_connector.is_some());
         assert!(cfg.connectors.opencode.enabled);
         assert_eq!(cfg.connectors.opencode.model_providers, vec!["anthropic"]);
     }
@@ -1479,7 +1488,7 @@ mod tests {
     }
 
     #[test]
-    fn agent_default_provider_env_maps_to_connector() {
+    fn agent_default_provider_env_is_ignored() {
         let _guard = ENV_LOCK.lock().expect("env lock");
 
         const KEY: &str = "AGENT_DEFAULT_PROVIDER";
@@ -1493,7 +1502,8 @@ mod tests {
             None => std::env::remove_var(KEY),
         }
 
-        assert_eq!(cfg.agent.default_connector, "opencode");
+        assert!(!cfg.agent.connectors.opencode.enabled);
+        assert!(cfg.agent.ignored_default_connector.is_none());
     }
 
     #[test]

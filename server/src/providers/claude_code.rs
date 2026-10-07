@@ -1,5 +1,8 @@
 use super::claude_console::ClaudeConsolePublisher;
-use super::cli_runner::{run_cli, CliError, CliInvocation, LineHandler, LineStep, RunIo};
+use super::cli_runner::{
+    log_launch, run_cli, run_log_dir, CliError, CliInvocation, LineHandler, LineStep, RunIo,
+};
+use super::cli_version;
 use super::{
     run_dir, worktree_dir_from_context, AgentProvider, AgentRunInput, AgentRunResult,
     ProviderError, CHAT_READ_ONLY_TOOLS,
@@ -66,18 +69,27 @@ impl AgentProvider for ClaudeCodeProvider {
         let worktree = worktree_dir_from_context(&input.context_path)?;
 
         let run_timeout = Duration::from_secs(self.config.run_timeout_secs);
-
-        let mut args = vec![
-            "-p".to_string(),
-            coppice_run_prompt().to_string(),
-            "--output-format".to_string(),
-            "stream-json".to_string(),
-            "--verbose".to_string(),
-            "--allowedTools".to_string(),
-            claude_allowed_tools(input.read_only_tools, input.mcp.is_some()),
-            "--permission-mode".to_string(),
-            "bypassPermissions".to_string(),
-        ];
+        let descriptor = coppice_connectors::get(coppice_connectors::CLAUDE_CODE)
+            .expect("claude-code descriptor");
+        let contract = descriptor.run_contract;
+        let program = descriptor.binary.to_string();
+        let version = cli_version::detect(&program).await;
+        let worktree_arg = worktree.display().to_string();
+        let mut args = contract.with_prompt(
+            contract.argv(&coppice_connectors::LaunchSubst {
+                read_only: input.read_only_tools,
+                worktree: &worktree_arg,
+                hostname: "",
+                port: "",
+                version: cli_version::for_gate(&version),
+            }),
+            coppice_run_prompt(),
+        );
+        args.push("--allowedTools".to_string());
+        args.push(claude_allowed_tools(
+            input.read_only_tools,
+            input.mcp.is_some(),
+        ));
 
         if let Some(model) = &input.model {
             args.push("--model".to_string());
@@ -104,14 +116,26 @@ impl AgentProvider for ClaudeCodeProvider {
             env.extend(access.env().map(|(k, v)| (k.to_string(), v)));
         }
 
+        log_launch(
+            &program,
+            &version,
+            &args,
+            run_log_dir(input.artifacts_dir.as_deref(), input.run_id.as_deref()).as_deref(),
+        );
         let invocation = CliInvocation {
-            program: "claude".to_string(),
+            program,
             args,
             env,
-            cwd: worktree,
+            cwd: if contract.process_cwd_is_worktree {
+                worktree
+            } else {
+                std::env::current_dir().map_err(ProviderError::Io)?
+            },
             timeout: run_timeout,
             run_id: input.run_id.clone(),
             artifacts_dir: input.artifacts_dir.clone(),
+            result_before_exit: contract.result_before_exit,
+            result_exit_grace: None,
         };
         let mut handler = ClaudeLines {
             stream: input.stream.clone(),
@@ -136,7 +160,7 @@ impl AgentProvider for ClaudeCodeProvider {
             }
         };
 
-        if !exit.status.success() {
+        if !exit.status.success() && !exit.had_terminal_result {
             return Err(ProviderError::InvalidFixture(format!(
                 "claude-code exited with status {}",
                 exit.status

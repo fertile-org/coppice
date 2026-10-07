@@ -3,7 +3,13 @@
 use serde::Serialize;
 
 pub mod probe;
+pub mod run_contract;
 pub mod sign_in;
+
+pub use run_contract::{
+    version_at_least, version_token, LaunchSubst, PermissionMode, PinnedFlag, PromptPlace,
+    RunContract,
+};
 
 pub const MOCK: &str = "mock";
 pub const CURSOR: &str = "cursor";
@@ -25,6 +31,8 @@ pub struct ConnectorDescriptor {
     pub mcp_tool_names: ToolNameStyle,
     pub console: ConsoleKind,
     pub caps: Capabilities,
+    /// Pinned flags, permission mode, and the minimum CLI version each flag needs.
+    pub run_contract: RunContract,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -182,6 +190,7 @@ const CONNECTORS: &[ConnectorDescriptor] = &[
             run_resume: false,
             run_server: false,
         },
+        run_contract: run_contract::MOCK,
     },
     ConnectorDescriptor {
         id: CURSOR,
@@ -206,6 +215,7 @@ const CONNECTORS: &[ConnectorDescriptor] = &[
             run_resume: true,
             run_server: false,
         },
+        run_contract: run_contract::CURSOR,
     },
     ConnectorDescriptor {
         id: CLAUDE_CODE,
@@ -230,6 +240,7 @@ const CONNECTORS: &[ConnectorDescriptor] = &[
             run_resume: true,
             run_server: false,
         },
+        run_contract: run_contract::CLAUDE_CODE,
     },
     ConnectorDescriptor {
         id: CODEX,
@@ -254,6 +265,7 @@ const CONNECTORS: &[ConnectorDescriptor] = &[
             run_resume: false,
             run_server: false,
         },
+        run_contract: run_contract::CODEX,
     },
     ConnectorDescriptor {
         id: KILO_CODE,
@@ -279,6 +291,7 @@ const CONNECTORS: &[ConnectorDescriptor] = &[
             run_resume: false,
             run_server: false,
         },
+        run_contract: run_contract::KILO_CODE,
     },
     ConnectorDescriptor {
         id: OPENCODE,
@@ -304,6 +317,7 @@ const CONNECTORS: &[ConnectorDescriptor] = &[
             run_resume: false,
             run_server: true,
         },
+        run_contract: run_contract::OPENCODE,
     },
 ];
 
@@ -621,5 +635,33 @@ mod tests {
         assert!(get("nope").is_none());
         assert!(get("").is_none());
         assert!(get("Cursor").is_none());
+    }
+
+    /// Streaming CLIs reap a leftover process after the result. OpenCode stops
+    /// its serve process itself. Mock does not spawn one. Codex keeps the
+    /// server cwd and passes the worktree with `-C`.
+    #[test]
+    fn run_contract_follows_the_descriptor() {
+        for id in [CLAUDE_CODE, CODEX, CURSOR, KILO_CODE] {
+            let contract = get(id).unwrap().run_contract;
+            assert!(contract.result_before_exit, "{id}");
+        }
+        for id in [CLAUDE_CODE, CURSOR, KILO_CODE] {
+            assert!(
+                get(id).unwrap().run_contract.process_cwd_is_worktree,
+                "{id}"
+            );
+        }
+        assert!(!get(CODEX).unwrap().run_contract.process_cwd_is_worktree);
+        let opencode = get(OPENCODE).unwrap().run_contract;
+        assert!(!opencode.result_before_exit);
+        assert!(!opencode.process_cwd_is_worktree);
+        assert!(opencode.permission_mode.write.is_empty());
+        #[cfg(feature = "mock")]
+        {
+            let mock = get(MOCK).unwrap().run_contract;
+            assert!(!mock.result_before_exit);
+            assert!(mock.leading.is_empty());
+        }
     }
 }

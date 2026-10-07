@@ -212,23 +212,22 @@ mod tests {
             !contents.contains("default_connector"),
             "starter file omits default_connector"
         );
-        assert_eq!(cfg.agent.default_connector, "mock");
-        coppice_config::settings_file::validate_config_text(&contents).expect("settings validation");
+        coppice_config::settings_file::validate_config_text(&contents)
+            .expect("settings validation");
     }
 
     #[test]
     fn config_with_default_connector_still_validates() {
         let dir = tempfile::tempdir().expect("tempdir");
         let layout = layout_in(&dir);
-        let text = generated_config(&layout)
-            .unwrap()
-            .replace("[agent]\n", "[agent]\ndefault_connector = \"claude-code\"\n");
+        let text = generated_config(&layout).unwrap().replace(
+            "[agent]\n",
+            "[agent]\ndefault_connector = \"claude-code\"\n",
+        );
         assert!(text.contains("default_connector = \"claude-code\""));
-        let parsed = coppice_config::settings_file::validate_config_text(&text).expect("validates");
-        assert_eq!(parsed.agent.default_connector, "claude-code");
+        coppice_config::settings_file::validate_config_text(&text).expect("validates");
         std::fs::write(&layout.config_file, &text).unwrap();
-        let cfg = AppConfig::load_file_only(&layout.config_file).expect("loads");
-        assert_eq!(cfg.agent.default_connector, "claude-code");
+        AppConfig::load_file_only(&layout.config_file).expect("loads");
     }
 
     #[test]
