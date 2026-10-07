@@ -38,6 +38,7 @@ use crate::services::plugin_service::PluginService;
 use crate::services::result_contract;
 use crate::services::run_orchestrator::{load_run_continuation_context, RunOrchestrator};
 use crate::services::run_service::RunService;
+use crate::services::ticket_git_service::TicketGitService;
 use crate::services::ticket_service::TicketService;
 use crate::services::ticket_thread;
 use crate::services::workflow_service::WorkflowService;
@@ -695,6 +696,20 @@ async fn execute_job(
         )
         .await
         .context("finish run via orchestrator")?;
+
+    if let Err(err) = TicketGitService::new(
+        pool,
+        PathBuf::from(&state.config.agent.worktrees_path),
+    )
+    .note_branch_head(ticket_id)
+    .await
+    {
+        tracing::warn!(
+            ticket_id = %ticket_id,
+            error = %err,
+            "human review check after run failed"
+        );
+    }
 
     let session_id = run_session_id(pool, run.id).await;
     persist_artifacts(state, &stream, run.id, connector_name, session_id)?;

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { BOARD_COLUMNS, type TicketStatus } from '../board/columns';
-import type { Ticket } from '../board/useTickets';
+import type { HumanReview, Ticket } from '../board/useTickets';
 import { useToast } from '../../components/ToastProvider';
 import { Button } from '../../components/ui/button';
 import { Combobox } from '../../components/ui/combobox';
@@ -41,6 +41,21 @@ function buildCodeReviewUrl(
   const params = new URLSearchParams({ repoId, ticketId: ticket.id });
   if (worktreePath) params.set('worktree', worktreePath);
   return `/code?${params.toString()}`;
+}
+
+function ReviewedCommit({ review }: { review: HumanReview }) {
+  return (
+    <div className="space-y-1">
+      <p className="font-body text-xs text-text-muted">
+        Reviewed at <code className="font-mono">{review.shortSha}</code>
+      </p>
+      {review.stale && (
+        <p className="font-body text-sm text-text-secondary">
+          New commits since your review. Review again before you accept.
+        </p>
+      )}
+    </div>
+  );
 }
 
 function metadataFromTicket(ticket: Ticket): Record<string, unknown> {
@@ -329,6 +344,9 @@ export function TicketMetadataPanel({ ticket }: TicketMetadataPanelProps) {
       <TicketGitActions ticket={ticket} />
 
       <div className="space-y-2">
+        {ticket.humanReview && (
+          <ReviewedCommit review={ticket.humanReview} />
+        )}
         <Label htmlFor="ticket-repo">Repository</Label>
         <Combobox
           id="ticket-repo"

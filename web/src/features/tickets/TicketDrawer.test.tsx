@@ -188,6 +188,54 @@ describe('TicketDrawer', () => {
     expect(dialog.className).toMatch(/w-\[90%\]/);
   });
 
+  it('shows the reviewed short SHA in the review area', () => {
+    ticketState.ticket = {
+      ...ticketState.ticket,
+      status: 'done',
+      humanReview: {
+        headSha: 'abc1234deadbeef',
+        shortSha: 'abc1234',
+        stale: false,
+        commentIds: [],
+        runIds: [],
+      },
+    };
+    renderDrawer();
+
+    const sha = screen.getByText('abc1234');
+    expect(sha.tagName).toBe('CODE');
+    expect(sha.closest('p')).toHaveTextContent('Reviewed at abc1234');
+    expect(
+      screen.queryByText(
+        'New commits since your review. Review again before you accept.',
+      ),
+    ).toBeNull();
+  });
+
+  it('says when new commits arrived after review', () => {
+    ticketState.ticket = {
+      ...ticketState.ticket,
+      status: 'in_review',
+      humanReview: {
+        headSha: 'abc1234deadbeef',
+        shortSha: 'abc1234',
+        stale: true,
+        commentIds: [],
+        runIds: [],
+      },
+    };
+    renderDrawer();
+
+    expect(screen.getByText('abc1234').closest('p')).toHaveTextContent(
+      'Reviewed at abc1234',
+    );
+    expect(
+      screen.getByText(
+        'New commits since your review. Review again before you accept.',
+      ),
+    ).toBeVisible();
+  });
+
   it('shows Accept only when status is wait_for_final_review', () => {
     ticketState.ticket = { ...ticketState.ticket, status: 'backlog' };
     const { unmount } = renderDrawer();

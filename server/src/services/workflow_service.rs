@@ -37,7 +37,17 @@ impl WorkflowService {
                 | (Blocked, InProgress)
                 | (Blocked, Backlog)
                 | (WaitForFinalReview, Done)
+                | (WaitForFinalReview, InReview)
+                | (Done, InReview)
         )
+    }
+
+    /// A new commit after acceptance sends the card back to In Review.
+    pub fn status_after_stale_review(current: TicketStatus) -> TicketStatus {
+        match current {
+            TicketStatus::Done | TicketStatus::WaitForFinalReview => TicketStatus::InReview,
+            other => other,
+        }
     }
 
     pub fn resolve_transition(ctx: TransitionContext) -> Result<TransitionAction, String> {
@@ -1220,6 +1230,30 @@ mod tests {
     #[test]
     fn final_approve_rejects_other_status() {
         assert!(WorkflowService::final_approve(TicketStatus::InReview).is_err());
+    }
+
+    #[test]
+    fn stale_human_review_returns_done_to_in_review() {
+        assert_eq!(
+            WorkflowService::status_after_stale_review(TicketStatus::Done),
+            TicketStatus::InReview
+        );
+        assert_eq!(
+            WorkflowService::status_after_stale_review(TicketStatus::WaitForFinalReview),
+            TicketStatus::InReview
+        );
+        assert!(WorkflowService::is_legal_transition(
+            TicketStatus::Done,
+            TicketStatus::InReview,
+        ));
+        assert!(WorkflowService::is_legal_transition(
+            TicketStatus::WaitForFinalReview,
+            TicketStatus::InReview,
+        ));
+        assert_eq!(
+            WorkflowService::status_after_stale_review(TicketStatus::InReview),
+            TicketStatus::InReview
+        );
     }
 
     #[test]
