@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { apiErrorToastMessage, parseApiErrorMessage } from '../../lib/api';
 import { useToast } from '../../components/ToastProvider';
 import { Button } from '../../components/ui/button';
@@ -17,8 +17,10 @@ import {
   usePushTicketBranch,
   useRebaseTicketBranch,
   useRemoveWorktree,
+  useResolveConflict,
   useTicketGitInfo,
 } from './useTicket';
+import { parseGitConflict, type GitConflict } from './conflictOffer';
 
 interface TicketGitActionsProps {
   ticket: Ticket;
@@ -28,6 +30,33 @@ function isFinalReviewOrDone(status: string): boolean {
   return status === 'wait_for_final_review' || status === 'done';
 }
 
+function ConflictNotice({
+  conflict,
+  showAsk,
+  asking,
+  onAsk,
+}: {
+  conflict: GitConflict;
+  showAsk: boolean;
+  asking: boolean;
+  onAsk: () => void;
+}) {
+  return (
+    <div data-testid="git-conflict" className="space-y-2">
+      <p className="whitespace-pre-wrap font-body text-sm text-danger">{conflict.message}</p>
+      <p className="font-body text-sm text-text-secondary">{conflict.rereviewNote}</p>
+      {conflict.unavailableReason && (
+        <p className="font-body text-sm text-text-secondary">{conflict.unavailableReason}</p>
+      )}
+      {showAsk && conflict.canAskAssignee && conflict.askLabel && (
+        <Button type="button" disabled={asking} onClick={onAsk}>
+          {conflict.askLabel}
+        </Button>
+      )}
+    </div>
+  );
+}
+
 function MergeBranchDialog({
   open,
   onClose,
@@ -35,6 +64,10 @@ function MergeBranchDialog({
   defaultBranch,
   branches,
   ticketBranch,
+  conflict,
+  asking,
+  onConflict,
+  onAsk,
 }: {
   open: boolean;
   onClose: () => void;
@@ -42,6 +75,10 @@ function MergeBranchDialog({
   defaultBranch: string;
   branches: string[];
   ticketBranch: string;
+  conflict: GitConflict | null;
+  asking: boolean;
+  onConflict: (conflict: GitConflict | null) => void;
+  onAsk: () => void;
 }) {
   const toast = useToast();
   const mergeBranch = useMergeTicketBranch(ticketId);
@@ -65,8 +102,17 @@ function MergeBranchDialog({
     try {
       const result = await mergeBranch.mutateAsync(baseBranch);
       toast.success(result.merge.message);
+      onConflict(null);
       onClose();
     } catch (err) {
+      const gitConflict = parseGitConflict(err);
+      if (gitConflict) {
+        onConflict(gitConflict);
+        setError(null);
+        toast.error(apiErrorToastMessage(gitConflict.message));
+        return;
+      }
+      onConflict(null);
       const message = parseApiErrorMessage(
         err,
         'Merge failed. Check that the base branch is clean and the ticket branch exists.',
@@ -100,6 +146,17 @@ function MergeBranchDialog({
             />
           </div>
 
+          {conflict && (
+            <div className="rounded-md border border-danger-muted bg-danger-muted/40 px-3 py-2">
+              <ConflictNotice
+                conflict={conflict}
+                showAsk={false}
+                asking={asking}
+                onAsk={onAsk}
+              />
+            </div>
+          )}
+
           {error && (
             <p className="whitespace-pre-wrap rounded-md border border-danger-muted bg-danger-muted/40 px-3 py-2 font-body text-sm text-danger">
               {error}
@@ -110,6 +167,11 @@ function MergeBranchDialog({
             <Button type="button" variant="secondary" onClick={onClose}>
               Cancel
             </Button>
+            {conflict?.canAskAssignee && conflict.askLabel && (
+              <Button type="button" disabled={asking} onClick={onAsk}>
+                {conflict.askLabel}
+              </Button>
+            )}
             <Button type="submit" loading={mergeBranch.isPending}>
               {mergeBranch.isPending ? 'Merging…' : 'Merge'}
             </Button>
@@ -127,6 +189,10 @@ function RebaseBranchDialog({
   defaultBranch,
   branches,
   ticketBranch,
+  conflict,
+  asking,
+  onConflict,
+  onAsk,
 }: {
   open: boolean;
   onClose: () => void;
@@ -134,6 +200,10 @@ function RebaseBranchDialog({
   defaultBranch: string;
   branches: string[];
   ticketBranch: string;
+  conflict: GitConflict | null;
+  asking: boolean;
+  onConflict: (conflict: GitConflict | null) => void;
+  onAsk: () => void;
 }) {
   const toast = useToast();
   const rebaseBranch = useRebaseTicketBranch(ticketId);
@@ -159,8 +229,17 @@ function RebaseBranchDialog({
       toast.success(
         `${result.rebase.message} — if already pushed, force-with-lease push is not available yet`,
       );
+      onConflict(null);
       onClose();
     } catch (err) {
+      const gitConflict = parseGitConflict(err);
+      if (gitConflict) {
+        onConflict(gitConflict);
+        setError(null);
+        toast.error(apiErrorToastMessage(gitConflict.message));
+        return;
+      }
+      onConflict(null);
       const message = parseApiErrorMessage(
         err,
         'Rebase failed. Worktree must be clean; conflicts are aborted automatically.',
@@ -194,6 +273,17 @@ function RebaseBranchDialog({
             />
           </div>
 
+          {conflict && (
+            <div className="rounded-md border border-danger-muted bg-danger-muted/40 px-3 py-2">
+              <ConflictNotice
+                conflict={conflict}
+                showAsk={false}
+                asking={asking}
+                onAsk={onAsk}
+              />
+            </div>
+          )}
+
           {error && (
             <p
               data-testid="rebase-inline-error"
@@ -207,6 +297,11 @@ function RebaseBranchDialog({
             <Button type="button" variant="secondary" onClick={onClose}>
               Cancel
             </Button>
+            {conflict?.canAskAssignee && conflict.askLabel && (
+              <Button type="button" disabled={asking} onClick={onAsk}>
+                {conflict.askLabel}
+              </Button>
+            )}
             <Button type="submit" loading={rebaseBranch.isPending}>
               {rebaseBranch.isPending ? 'Rebasing…' : 'Rebase'}
             </Button>
@@ -230,6 +325,37 @@ export function TicketGitActions({ ticket }: TicketGitActionsProps) {
   const [mergeOpen, setMergeOpen] = useState(false);
   const [rebaseOpen, setRebaseOpen] = useState(false);
   const [gitError, setGitError] = useState<string | null>(null);
+  const [conflict, setConflict] = useState<GitConflict | null>(null);
+  const [asking, setAsking] = useState(false);
+  const askingRef = useRef(false);
+  const resolveConflict = useResolveConflict(ticket.id);
+
+  useEffect(() => {
+    setConflict(null);
+  }, [ticket.id]);
+
+  async function handleAsk() {
+    if (!conflict || askingRef.current || !conflict.canAskAssignee) {
+      return;
+    }
+    askingRef.current = true;
+    setAsking(true);
+    try {
+      await resolveConflict.mutateAsync({
+        baseBranch: conflict.baseBranch,
+        files: conflict.files,
+      });
+      setConflict(null);
+      setMergeOpen(false);
+      setRebaseOpen(false);
+    } catch (err) {
+      const message = parseApiErrorMessage(err);
+      toast.error(apiErrorToastMessage(message));
+    } finally {
+      askingRef.current = false;
+      setAsking(false);
+    }
+  }
 
   if (!ticket.repoId) {
     return null;
@@ -416,6 +542,17 @@ export function TicketGitActions({ ticket }: TicketGitActionsProps) {
         </p>
       )}
 
+      {conflict && (
+        <div className="rounded-md border border-danger-muted bg-danger-muted/40 px-3 py-2">
+          <ConflictNotice
+            conflict={conflict}
+            showAsk
+            asking={asking}
+            onAsk={() => void handleAsk()}
+          />
+        </div>
+      )}
+
       {gitInfo && (
         <>
           <RebaseBranchDialog
@@ -425,6 +562,10 @@ export function TicketGitActions({ ticket }: TicketGitActionsProps) {
             defaultBranch={gitInfo.defaultBranch}
             branches={gitInfo.branches}
             ticketBranch={gitInfo.ticketBranch}
+            conflict={conflict}
+            asking={asking}
+            onConflict={setConflict}
+            onAsk={() => void handleAsk()}
           />
           {showFinalActions && (
             <MergeBranchDialog
@@ -434,6 +575,10 @@ export function TicketGitActions({ ticket }: TicketGitActionsProps) {
               defaultBranch={gitInfo.defaultBranch}
               branches={gitInfo.branches}
               ticketBranch={gitInfo.ticketBranch}
+              conflict={conflict}
+              asking={asking}
+              onConflict={setConflict}
+              onAsk={() => void handleAsk()}
             />
           )}
         </>

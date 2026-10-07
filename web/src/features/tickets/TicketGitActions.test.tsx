@@ -1,6 +1,6 @@
 import '@testing-library/jest-dom/vitest';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ToastProvider } from '../../components/ToastProvider';
 import { ApiError } from '../../lib/api';
@@ -10,6 +10,7 @@ import type { TicketGitInfo } from './useTicket';
 
 const rebaseMutateAsync = vi.fn();
 const mergeMutateAsync = vi.fn();
+const resolveMutateAsync = vi.fn();
 const gitInfoState: { data: TicketGitInfo | undefined; isLoading: boolean } = {
   data: undefined,
   isLoading: false,
@@ -26,6 +27,10 @@ vi.mock('./useTicket', () => ({
   }),
   useRebaseTicketBranch: () => ({
     mutateAsync: rebaseMutateAsync,
+    isPending: false,
+  }),
+  useResolveConflict: () => ({
+    mutateAsync: resolveMutateAsync,
     isPending: false,
   }),
   useRemoveWorktree: () => ({ mutateAsync: vi.fn(), isPending: false }),
@@ -76,6 +81,8 @@ describe('TicketGitActions', () => {
   beforeEach(() => {
     rebaseMutateAsync.mockReset();
     mergeMutateAsync.mockReset();
+    resolveMutateAsync.mockReset();
+    resolveMutateAsync.mockResolvedValue({ run: { id: 'run-1' } });
     gitInfoState.data = { ...baseGitInfo };
     gitInfoState.isLoading = false;
   });
@@ -180,5 +187,139 @@ describe('TicketGitActions', () => {
     expect(toasts.some((el) => el.textContent?.includes(conflictMessage))).toBe(
       true,
     );
+  });
+
+  const conflictMessage =
+    "Couldn't rebase onto main because these files conflict: README.md. Nothing was changed.";
+  const rereviewNote =
+    "When the conflicts are resolved, the ticket goes back to In Review. You'll need to accept it again before it merges.";
+
+  function conflictBody(
+    overrides: Record<string, unknown> = {},
+    message = conflictMessage,
+  ) {
+    return JSON.stringify({
+      message,
+      conflict: {
+        operation: 'rebase',
+        baseBranch: 'main',
+        files: ['README.md'],
+        canAskAssignee: true,
+        askLabel: 'Ask Ada to resolve',
+        rereviewNote,
+        ...overrides,
+      },
+    });
+  }
+
+  it('offers to ask the assignee from the rebase dialog and the drawer', async () => {
+    rebaseMutateAsync.mockRejectedValue(new ApiError(400, conflictBody()));
+
+    renderActions(makeTicket({ status: 'in_progress' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Rebase…' }));
+    const dialog = await screen.findByRole('dialog', { name: /rebase ticket branch/i });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Rebase' }));
+
+    await waitFor(() => {
+      expect(dialog).toHaveTextContent(conflictMessage);
+    });
+    expect(dialog).toHaveTextContent('README.md');
+    expect(dialog).toHaveTextContent(rereviewNote);
+    expect(resolveMutateAsync).not.toHaveBeenCalled();
+
+    const ask = within(dialog).getByRole('button', { name: 'Ask Ada to resolve' });
+    const cancel = within(dialog).getByRole('button', { name: 'Cancel' });
+    expect(ask.parentElement).toBe(cancel.parentElement);
+    // The dialog hides the drawer from assistive tech, so include that button.
+    expect(screen.getAllByTestId('git-conflict')).toHaveLength(2);
+    expect(
+      screen.getAllByRole('button', { name: 'Ask Ada to resolve', hidden: true }),
+    ).toHaveLength(2);
+
+    fireEvent.click(ask);
+    fireEvent.click(ask);
+    await waitFor(() => {
+      expect(resolveMutateAsync).toHaveBeenCalledTimes(1);
+    });
+    expect(resolveMutateAsync).toHaveBeenCalledWith({
+      baseBranch: 'main',
+      files: ['README.md'],
+    });
+  });
+
+  it('offers to ask the assignee from the merge dialog', async () => {
+    const mergeMessage =
+      "Couldn't merge into main because these files conflict: README.md. Nothing was changed.";
+    mergeMutateAsync.mockRejectedValue(
+      new ApiError(
+        400,
+        conflictBody(
+          {
+            operation: 'merge',
+          },
+          mergeMessage,
+        ),
+      ),
+    );
+
+    renderActions(makeTicket({ status: 'done' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Merge…' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Merge ticket branch' });
+    fireEvent.click(within(dialog).getByRole('button', { name: /^Merge$/ }));
+
+    const ask = await within(dialog).findByRole('button', {
+      name: 'Ask Ada to resolve',
+    });
+    expect(dialog).toHaveTextContent(mergeMessage);
+    expect(ask.parentElement).toBe(
+      within(dialog).getByRole('button', { name: 'Cancel' }).parentElement,
+    );
+    expect(resolveMutateAsync).not.toHaveBeenCalled();
+  });
+
+  it('hides the ask button when there is no assignee', async () => {
+    const reason = 'Assign an agent to this ticket to resolve the conflicts.';
+    rebaseMutateAsync.mockRejectedValue(
+      new ApiError(
+        400,
+        conflictBody({
+          canAskAssignee: false,
+          askLabel: undefined,
+          unavailableReason: reason,
+        }),
+      ),
+    );
+
+    renderActions(makeTicket({ status: 'in_progress' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Rebase…' }));
+    const dialog = await screen.findByRole('dialog', { name: /rebase ticket branch/i });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Rebase' }));
+
+    await waitFor(() => {
+      expect(dialog).toHaveTextContent(reason);
+    });
+    expect(screen.queryByRole('button', { name: /Ask .+ to resolve/ })).not.toBeInTheDocument();
+    expect(resolveMutateAsync).not.toHaveBeenCalled();
+  });
+
+  it("hides the ask button when the assignee's connector is not ready", async () => {
+    const reason = "Ada's connector isn't ready. Check it in Tools → Connectors.";
+    rebaseMutateAsync.mockRejectedValue(
+      new ApiError(
+        400,
+        conflictBody({
+          canAskAssignee: false,
+          askLabel: undefined,
+          unavailableReason: reason,
+        }),
+      ),
+    );
+
+    renderActions(makeTicket({ status: 'in_progress' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Rebase…' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Rebase' }));
+
+    expect(await screen.findAllByText(reason)).not.toHaveLength(0);
+    expect(screen.queryByRole('button', { name: /Ask .+ to resolve/ })).not.toBeInTheDocument();
   });
 });

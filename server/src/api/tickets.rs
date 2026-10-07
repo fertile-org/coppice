@@ -17,7 +17,12 @@ use crate::services::agent_service::{AgentError, AgentService};
 use crate::services::run_service::{RunError, RunService};
 use crate::services::split_service::{SplitError, SplitService};
 use crate::services::human_review_service::{short_commit_sha, HumanReviewService};
-use crate::services::ticket_git_service::{TicketGitError, TicketGitInfo, TicketGitService};
+use crate::services::conflict_resolve::{
+    self, ConflictResolveError, GitConflictHttp,
+};
+use crate::services::ticket_git_service::{
+    GitConflictKind, TicketGitError, TicketGitInfo, TicketGitService,
+};
 use crate::services::ticket_service::{TicketError, TicketFilters, TicketService, TicketWithDisplay};
 use crate::AppState;
 use axum::{
@@ -62,6 +67,10 @@ pub fn routes() -> Router<Arc<AppState>> {
         .route(
             "/api/tickets/{ticket_id}/rebase-branch",
             post(rebase_ticket_branch),
+        )
+        .route(
+            "/api/tickets/{ticket_id}/resolve-conflict",
+            post(resolve_ticket_conflict),
         )
         .route(
             "/api/tickets/{ticket_id}/remove-worktree",
@@ -372,17 +381,15 @@ fn map_ticket_git_error_response(err: TicketGitError) -> TicketGitApiError {
             StatusCode::BAD_REQUEST,
             "Ticket worktree does not exist — rebase requires an existing worktree.".into(),
         ),
-        TicketGitError::RebaseConflict { paths, detail } => {
-            let paths_note = if paths.is_empty() {
-                String::new()
-            } else {
-                format!(" Conflicting paths: {}.", paths.join(", "))
-            };
-            (
-                StatusCode::BAD_REQUEST,
-                format!("Rebase conflict — aborted.{paths_note} {detail}"),
-            )
-        }
+        TicketGitError::Conflict {
+            kind,
+            base_branch,
+            paths,
+            detail: _,
+        } => (
+            StatusCode::BAD_REQUEST,
+            crate::copy::conflict::conflict_message(conflict_action(kind), &base_branch, &paths),
+        ),
         TicketGitError::InvalidBranchName => (
             StatusCode::BAD_REQUEST,
             "Invalid base branch name.".into(),
@@ -440,8 +447,60 @@ fn ticket_error_message(err: &TicketError) -> String {
     }
 }
 
+fn conflict_action(kind: GitConflictKind) -> &'static str {
+    match kind {
+        GitConflictKind::Merge => crate::copy::conflict::MERGE_ACTION,
+        GitConflictKind::Rebase => crate::copy::conflict::REBASE_ACTION,
+    }
+}
+
+fn connector_is_ready(state: &AppState, connector: &str) -> bool {
+    if connector == coppice_connectors::MOCK {
+        return true;
+    }
+    matches!(
+        state
+            .connector_probes
+            .get(connector)
+            .map(|cached| cached.readiness),
+        Some(coppice_connectors::sign_in::Readiness::Ready)
+    )
+}
+
+async fn git_failure_response(
+    state: &AppState,
+    pool: &sqlx::PgPool,
+    ticket_id: Uuid,
+    err: TicketGitError,
+) -> TicketGitApiError {
+    match err {
+        TicketGitError::Conflict {
+            kind,
+            base_branch,
+            paths,
+            detail,
+        } => {
+            tracing::info!(%detail, ?paths, "git conflict aborted");
+            let ready = |connector: &str| connector_is_ready(state, connector);
+            let body = conflict_resolve::build_git_conflict_response(
+                pool,
+                ticket_id,
+                kind,
+                base_branch,
+                paths,
+                &ready,
+            )
+            .await;
+            TicketGitApiError::Conflict(Box::new(body))
+        }
+        other => map_ticket_git_error_response(other),
+    }
+}
+
 enum TicketGitApiError {
     Message(StatusCode, String),
+    // Boxed so the error type stays small enough for `Result`.
+    Conflict(Box<GitConflictHttp>),
 }
 
 impl IntoResponse for TicketGitApiError {
@@ -449,6 +508,9 @@ impl IntoResponse for TicketGitApiError {
         match self {
             TicketGitApiError::Message(code, message) => {
                 (code, Json(ApiMessageResponse { message })).into_response()
+            }
+            TicketGitApiError::Conflict(body) => {
+                (StatusCode::BAD_REQUEST, Json(body)).into_response()
             }
         }
     }
@@ -766,6 +828,9 @@ impl From<TicketGitApiError> for FinalApproveError {
     fn from(err: TicketGitApiError) -> Self {
         match err {
             TicketGitApiError::Message(code, message) => FinalApproveError::Message(code, message),
+            TicketGitApiError::Conflict(body) => {
+                FinalApproveError::Message(StatusCode::BAD_REQUEST, body.message)
+            }
         }
     }
 }
@@ -865,7 +930,10 @@ async fn merge_ticket_branch(
         .merge_ticket_branch(ticket_id, body.base_branch.trim())
         .await;
     publish_ticket_state(&state, pool, ticket_id).await;
-    let merge = merge.map_err(map_ticket_git_error_response)?;
+    let merge = match merge {
+        Ok(merge) => merge,
+        Err(err) => return Err(git_failure_response(&state, pool, ticket_id, err).await),
+    };
 
     let short_sha = merge.head_sha.get(..7).unwrap_or(&merge.head_sha);
     let comment_body = format!(
@@ -910,7 +978,10 @@ async fn rebase_ticket_branch(
         .rebase_ticket_branch(ticket_id, base)
         .await;
     publish_ticket_state(&state, pool, ticket_id).await;
-    let rebase = rebase.map_err(map_ticket_git_error_response)?;
+    let rebase = match rebase {
+        Ok(rebase) => rebase,
+        Err(err) => return Err(git_failure_response(&state, pool, ticket_id, err).await),
+    };
 
     let short_sha = rebase.head_sha.get(..7).unwrap_or(&rebase.head_sha);
     let comment_body = format!(
@@ -924,6 +995,115 @@ async fn rebase_ticket_branch(
         })?;
 
     Ok(Json(RebaseBranchResponse { rebase }))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ResolveConflictBody {
+    base_branch: String,
+    #[serde(default)]
+    files: Vec<String>,
+}
+
+enum ResolveConflictApiError {
+    Status(StatusCode),
+    Message(StatusCode, String),
+}
+
+impl IntoResponse for ResolveConflictApiError {
+    fn into_response(self) -> Response {
+        match self {
+            ResolveConflictApiError::Status(code) => code.into_response(),
+            ResolveConflictApiError::Message(code, message) => {
+                (code, Json(ApiMessageResponse { message })).into_response()
+            }
+        }
+    }
+}
+
+fn map_resolve_error(err: ConflictResolveError) -> ResolveConflictApiError {
+    match err {
+        ConflictResolveError::NoAssignee => ResolveConflictApiError::Message(
+            StatusCode::BAD_REQUEST,
+            crate::copy::conflict::NO_ASSIGNEE.to_string(),
+        ),
+        ConflictResolveError::ConnectorNotReady { assignee } => {
+            ResolveConflictApiError::Message(
+                StatusCode::BAD_REQUEST,
+                crate::copy::conflict::connector_not_ready_reason(&assignee),
+            )
+        }
+        ConflictResolveError::InvalidBranch => ResolveConflictApiError::Message(
+            StatusCode::BAD_REQUEST,
+            "Invalid base branch name.".into(),
+        ),
+        ConflictResolveError::InvalidFiles => ResolveConflictApiError::Message(
+            StatusCode::BAD_REQUEST,
+            conflict_resolve::invalid_file_list_message().to_string(),
+        ),
+        ConflictResolveError::Ticket(err) => match err {
+            TicketError::TicketNotFound => ResolveConflictApiError::Status(StatusCode::NOT_FOUND),
+            TicketError::Archived => ResolveConflictApiError::Message(
+                StatusCode::CONFLICT,
+                "ticket is archived; unarchive before continuing".into(),
+            ),
+            TicketError::Validation(message) => {
+                ResolveConflictApiError::Message(StatusCode::BAD_REQUEST, message)
+            }
+            other => {
+                tracing::error!(error = %other, "resolve conflict failed");
+                ResolveConflictApiError::Status(StatusCode::INTERNAL_SERVER_ERROR)
+            }
+        },
+        ConflictResolveError::Run(err) => match map_run_error_response(err) {
+            RunAgentError::Status(code) => ResolveConflictApiError::Status(code),
+            RunAgentError::Message(code, message) => {
+                ResolveConflictApiError::Message(code, message)
+            }
+        },
+        ConflictResolveError::Comment(err) => {
+            tracing::error!(error = %err, "resolve conflict comment failed");
+            ResolveConflictApiError::Status(StatusCode::INTERNAL_SERVER_ERROR)
+        }
+    }
+}
+
+async fn resolve_ticket_conflict(
+    State(state): State<Arc<AppState>>,
+    AuthUser { .. }: AuthUser,
+    Path(ticket_id): Path<Uuid>,
+    Json(body): Json<ResolveConflictBody>,
+) -> Result<Json<SingleRunResponse>, ResolveConflictApiError> {
+    let pool = pool_from_state(&state).map_err(ResolveConflictApiError::Status)?;
+    let ready = |connector: &str| connector_is_ready(&state, connector);
+    let outcome = conflict_resolve::start_resolve(
+        pool,
+        ticket_id,
+        &body.base_branch,
+        &body.files,
+        &ready,
+    )
+    .await
+    .map_err(map_resolve_error)?;
+
+    if let Some(comment_id) = outcome.new_comment_id {
+        state.event_bus.publish(AppEvent::CommentCreated {
+            comment_id,
+            ticket_id,
+            author_type: "system".into(),
+        });
+    }
+
+    let connector = RunService::new(pool)
+        .agent_connector_for_run(outcome.run.agent_id)
+        .await
+        .map_err(|err| match map_run_error_response(err) {
+            RunAgentError::Status(code) => ResolveConflictApiError::Status(code),
+            RunAgentError::Message(code, message) => {
+                ResolveConflictApiError::Message(code, message)
+            }
+        })?;
+    Ok(Json(single_run_response(outcome.run, connector)))
 }
 
 async fn remove_ticket_worktree(

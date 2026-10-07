@@ -86,6 +86,21 @@ pub struct TicketGitContext {
     pub pr_url: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GitConflictKind {
+    Merge,
+    Rebase,
+}
+
+impl GitConflictKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Merge => "merge",
+            Self::Rebase => "rebase",
+        }
+    }
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum TicketGitError {
     #[error("ticket not found")]
@@ -102,8 +117,10 @@ pub enum TicketGitError {
     WorktreeAlreadyRemoved,
     #[error("ticket worktree does not exist")]
     WorktreeMissing,
-    #[error("rebase conflict: {detail}")]
-    RebaseConflict {
+    #[error("git conflict")]
+    Conflict {
+        kind: GitConflictKind,
+        base_branch: String,
         paths: Vec<String>,
         detail: String,
     },
@@ -535,6 +552,7 @@ impl<'a> TicketGitService<'a> {
             ));
         }
 
+        let previous_branch = checked_out_branch(&ctx.git_dir).await;
         run_git(&ctx.git_dir, &["checkout", base_branch]).await?;
 
         let merge_msg = format!(
@@ -555,9 +573,14 @@ impl<'a> TicketGitService<'a> {
                     format!("Merged `{}` into `{}`", ctx.ticket_branch, base_branch)
                 }
             }
-            Err(msg) => {
-                let _ = run_git(&ctx.git_dir, &["merge", "--abort"]).await;
-                return Err(TicketGitError::Git(msg));
+            Err(detail) => {
+                return Err(abort_merge_conflict(
+                    &ctx.git_dir,
+                    previous_branch.as_deref(),
+                    base_branch,
+                    detail,
+                )
+                .await);
             }
         };
 
@@ -634,22 +657,7 @@ impl<'a> TicketGitService<'a> {
                 })
             }
             Err(detail) => {
-                let paths = unmerged_paths(&ctx.worktree_dir).await;
-                let paths = if paths.is_empty() {
-                    parse_conflict_paths_from_output(&detail)
-                } else {
-                    paths
-                };
-                let _ = run_git(&ctx.worktree_dir, &["rebase", "--abort"]).await;
-                let clean_after = git_status_clean(&ctx.worktree_dir).await.unwrap_or(false);
-                if !paths.is_empty() {
-                    let mut detail = detail;
-                    if !clean_after {
-                        detail.push_str(" (worktree may still be dirty after rebase --abort)");
-                    }
-                    return Err(TicketGitError::RebaseConflict { paths, detail });
-                }
-                Err(TicketGitError::Git(detail))
+                return Err(abort_rebase_conflict(&ctx.worktree_dir, base, detail).await);
             }
         }
     }
@@ -840,6 +848,88 @@ async fn has_git_remote(git_dir: &Path) -> bool {
         return false;
     };
     output.status.success() && !String::from_utf8_lossy(&output.stdout).trim().is_empty()
+}
+
+async fn abort_merge_conflict(
+    git_dir: &Path,
+    previous_branch: Option<&str>,
+    base_branch: &str,
+    detail: String,
+) -> TicketGitError {
+    let mut paths = unmerged_paths(git_dir).await;
+    if paths.is_empty() {
+        paths = parse_conflict_paths_from_output(&detail);
+    }
+    let merging = git_dir.join(".git").join("MERGE_HEAD").exists();
+    let conflicted =
+        merging || !paths.is_empty() || detail.to_ascii_lowercase().contains("conflict");
+    if merging {
+        if let Err(err) = run_git(git_dir, &["merge", "--abort"]).await {
+            return TicketGitError::Git(format!("merge abort failed: {err}; {detail}"));
+        }
+    }
+    restore_checked_out_branch(git_dir, previous_branch, base_branch).await;
+    let clean = git_status_clean(git_dir).await.unwrap_or(false);
+    if conflicted && clean {
+        return TicketGitError::Conflict {
+            kind: GitConflictKind::Merge,
+            base_branch: base_branch.to_string(),
+            paths,
+            detail,
+        };
+    }
+    if conflicted {
+        return TicketGitError::Git(format!(
+            "{detail} (repository may still be dirty after merge --abort)"
+        ));
+    }
+    TicketGitError::Git(detail)
+}
+
+async fn abort_rebase_conflict(worktree: &Path, base_branch: &str, detail: String) -> TicketGitError {
+    let mut paths = unmerged_paths(worktree).await;
+    if paths.is_empty() {
+        paths = parse_conflict_paths_from_output(&detail);
+    }
+    let _ = run_git(worktree, &["rebase", "--abort"]).await;
+    let clean = git_status_clean(worktree).await.unwrap_or(false);
+    let conflicted = !paths.is_empty() || detail.to_ascii_lowercase().contains("conflict");
+    if conflicted && clean {
+        return TicketGitError::Conflict {
+            kind: GitConflictKind::Rebase,
+            base_branch: base_branch.to_string(),
+            paths,
+            detail,
+        };
+    }
+    if conflicted {
+        return TicketGitError::Git(format!(
+            "{detail} (worktree may still be dirty after rebase --abort)"
+        ));
+    }
+    TicketGitError::Git(detail)
+}
+
+async fn checked_out_branch(dir: &Path) -> Option<String> {
+    let output = run_git_capture(dir, &["rev-parse", "--abbrev-ref", "HEAD"]).await.ok()?;
+    let name = output.lines().next()?.trim();
+    if name.is_empty() || name == "HEAD" {
+        None
+    } else {
+        Some(name.to_string())
+    }
+}
+
+async fn restore_checked_out_branch(dir: &Path, previous: Option<&str>, current: &str) {
+    let Some(previous) = previous else {
+        return;
+    };
+    if previous == current {
+        return;
+    }
+    if let Err(err) = run_git(dir, &["checkout", previous]).await {
+        tracing::warn!(error = %err, "failed to restore the previous branch after merge abort");
+    }
 }
 
 async fn unmerged_paths(git_dir: &Path) -> Vec<String> {
