@@ -13,10 +13,10 @@ Astro site for the Beta marketing page and user docs. Contributor docs stay in t
 | `/docs/providers` | `src/pages/docs/providers.md` |
 | `/docs/faq` | `src/pages/docs/faq.md` |
 
-Copy follows `POSITIONING.md` (M12 Beta). Download links are `#` until a beta GitHub Release exists. The only download targets are:
+Copy follows `POSITIONING.md` (M12 Beta). Download links point at the pinned release assets in `DownloadLinks.astro` (bump `version` there each release). The only download targets are:
 
 - macOS Apple Silicon — `Coppice-<version>-mac-arm64.dmg`
-- Linux x64 — `Coppice-<version>-linux-x64.deb`
+- Linux x64 — `Coppice-<version>-linux-amd64.deb`
 
 The release workflow also builds macOS Intel and Linux arm64. Those are not site CTAs, and there is no Windows build.
 
