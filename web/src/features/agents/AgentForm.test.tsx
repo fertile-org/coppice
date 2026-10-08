@@ -180,7 +180,6 @@ describe('AgentForm model choice', () => {
       id: 'a',
       name: 'Builder',
       role: 'Developer',
-      skills: [],
       responsibilities: [],
       systemPrompt: '',
       connector: 'cursor',
