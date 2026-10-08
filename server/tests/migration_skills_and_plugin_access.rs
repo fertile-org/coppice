@@ -1,3 +1,5 @@
+#![cfg(feature = "embedded-test-db")]
+
 mod common;
 
 use std::path::PathBuf;
