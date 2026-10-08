@@ -22,6 +22,19 @@ export function parseReleaseTag(tag) {
   return { version: match[1], prerelease: match[5] !== undefined };
 }
 
+// Debian splits on the last hyphen, so 0.1.0-rc.7 is upstream 0.1.0 with
+// revision rc.7 and sorts AFTER the final 0.1.0. A tilde sorts before the
+// end of the upstream version, so 0.1.0~rc.7 < 0.1.0. The app version, git
+// tag, and installer file name keep the hyphen.
+const APP_VERSION_RE = new RegExp(`^${NUM}\\.${NUM}\\.${NUM}(-rc\\.${NUM})?$`);
+
+export function debianPackageVersion(appVersion) {
+  if (typeof appVersion !== 'string' || !APP_VERSION_RE.test(appVersion)) {
+    throw new Error(`invalid app version ${JSON.stringify(appVersion)}: expected X.Y.Z or X.Y.Z-rc.N`);
+  }
+  return appVersion.replace(/-rc\./, '~rc.');
+}
+
 export async function setPackageVersion(file, version) {
   const pkg = JSON.parse(await readFile(file, 'utf8'));
   pkg.version = version;

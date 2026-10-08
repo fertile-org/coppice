@@ -169,6 +169,9 @@ jobs:
       - name: Package (Linux)
         if: runner.os == 'Linux'
         run: cd desktop && yarn dist
+      - name: Check Debian package version
+        if: runner.os == 'Linux'
+        run: node desktop/scripts/deb-version.mjs --check desktop/dist/*.deb
       - name: Headless smoke
         run: make desktop-smoke
       - name: Upload installer
