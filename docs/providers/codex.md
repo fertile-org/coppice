@@ -49,7 +49,7 @@ coppice connector doctor codex
 
 1. Open **Agents** and create or edit an agent.
 2. Set connector to **codex**.
-3. Pick model provider **openai** or **azure**, then a model from the list (from `codex debug models` after login).
+3. Leave the model on Codex's default, or pick a model from the list (from `codex debug models` after login). The built-in provider is `openai`, so the form does not ask for a provider unless you override the list.
 4. Assign the agent to a ticket and start a run.
 
 Optional config (usually set by `enable`):
@@ -57,7 +57,8 @@ Optional config (usually set by `enable`):
 ```toml
 [agent.connectors.codex]
 enabled = true
-model_providers = ["openai", "azure"]
+# Optional. A non-empty list replaces the built-in provider (openai).
+# model_providers = ["openai", "azure"]
 # run_timeout_secs = 600
 ```
 

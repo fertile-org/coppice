@@ -1,5 +1,6 @@
 pub mod claude_code;
 pub mod claude_console;
+pub mod cli_catalog;
 pub mod cli_runner;
 pub mod cli_version;
 pub mod codex;
@@ -13,6 +14,7 @@ pub mod kilo_console;
 pub mod kilo_models;
 #[cfg(feature = "mock-provider")]
 pub mod mock;
+pub mod model_flag;
 pub mod models;
 pub mod opencode;
 pub mod opencode_models;

@@ -279,7 +279,7 @@ const CONNECTORS: &[ConnectorDescriptor] = &[
             probe_proves_auth: false,
             docs_url: "https://kilo.ai/docs/cli",
         },
-        default_model_providers: &["anthropic"],
+        default_model_providers: &[],
         mcp_wiring: McpWiring::KiloJson,
         // Unverified (no live CLI); follows its OpenCode fork. Only affects console labels.
         mcp_tool_names: ToolNameStyle::Underscore,
@@ -488,7 +488,7 @@ mod tests {
 
         let kilo = get(KILO_CODE).unwrap();
         assert_eq!(kilo.binary, "kilo");
-        assert_eq!(kilo.default_model_providers, ["anthropic"]);
+        assert!(kilo.default_model_providers.is_empty());
         assert_eq!(kilo.install.auth_hint, "kilo auth / TUI /connect");
         assert_eq!(
             kilo.install.auth_paths,

@@ -51,7 +51,7 @@ coppice connector doctor cursor
 
 1. Open **Agents** and create or edit an agent.
 2. Set connector to **cursor**.
-3. Pick model provider **cursor** and a model from the list (loaded from `agent models` after login).
+3. Leave the model on Cursor's default, or pick one from the list (loaded from `agent models` after login). Cursor has one provider, so the form does not ask for it.
 4. Assign the agent to a ticket and start a run. Live output appears in the ticket drawer.
 
 Optional config (usually set by `enable`):
@@ -60,7 +60,8 @@ Optional config (usually set by `enable`):
 [agent.connectors.cursor]
 enabled = true
 command = "agent"
-model_providers = ["cursor"]
+# Optional. A non-empty list replaces the built-in provider (cursor).
+# model_providers = ["cursor"]
 # run_timeout_secs = 600
 ```
 
