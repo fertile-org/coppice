@@ -2499,9 +2499,13 @@ async fn update_removed_entry_becomes_missing() {
     assert_eq!(done["pluginIds"], json!([alpha_id]), "{done}");
     let beta = get(&app, &format!("/api/plugins/{beta_id}"), &cookie, &csrf).await;
     assert_eq!(beta["status"], "missing", "{beta}");
+    // beta-skills is skills-only, so it starts as all agents. A missing plugin
+    // is not usable, and that choice stays on the plugin rather than a row
+    // the agent form would drop on save.
+    assert_eq!(beta["agentAccess"], "all", "{beta}");
     assert_eq!(
         get(&app, &uri, &cookie, &csrf).await,
-        json!({ "pluginIds": [beta_id] })
+        json!({ "pluginIds": [] })
     );
 }
 
@@ -2783,4 +2787,290 @@ async fn disabled_skills_survive_rescan_and_prune_removed() {
     rescan(&app, &cookie, &csrf).await;
     let plugin = get(&app, &uri, &cookie, &csrf).await;
     assert!(skill_enabled(&plugin, "writing-plans"), "{plugin}");
+}
+
+fn id_set(value: &Value) -> std::collections::BTreeSet<String> {
+    value
+        .as_array()
+        .unwrap_or_else(|| panic!("expected ids, got {value}"))
+        .iter()
+        .map(|id| id.as_str().unwrap().to_string())
+        .collect()
+}
+
+async fn plugin_agents(app: &Router, plugin_id: &str, cookie: &str, csrf: &str) -> Value {
+    get(
+        app,
+        &format!("/api/plugins/{plugin_id}/agents"),
+        cookie,
+        csrf,
+    )
+    .await
+}
+
+async fn put_plugin_agents(
+    app: &Router,
+    plugin_id: &str,
+    body: Value,
+    cookie: &str,
+    csrf: &str,
+) -> Value {
+    let (status, response) = send(
+        app,
+        "PUT",
+        &format!("/api/plugins/{plugin_id}/agents"),
+        body,
+        cookie,
+        csrf,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{response}");
+    response
+}
+
+#[tokio::test]
+async fn skills_only_plugin_defaults_to_all_agents_including_later_ones() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    require_db!();
+    let (_state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
+    let (_dir, plugin_id) = fixture_plugin(&app, "skills-only", &cookie, &csrf).await;
+    let plugin = get(&app, &format!("/api/plugins/{plugin_id}"), &cookie, &csrf).await;
+    assert_eq!(plugin["agentAccess"], "all", "{plugin}");
+    assert_eq!(plugin["agentIds"], json!([]));
+
+    let before = common::create_test_agent_from_preset(&app, "Before", &cookie, &csrf).await;
+    assert_eq!(
+        get(
+            &app,
+            &format!("/api/agents/{before}/plugins"),
+            &cookie,
+            &csrf
+        )
+        .await,
+        json!({ "pluginIds": [] }),
+        "a disabled all-agents plugin is not in use yet"
+    );
+
+    set_enabled(&app, &plugin_id, true, &cookie, &csrf).await;
+    assert_eq!(
+        id_set(
+            &get(
+                &app,
+                &format!("/api/agents/{before}/plugins"),
+                &cookie,
+                &csrf,
+            )
+            .await["pluginIds"]
+        ),
+        id_set(&json!([plugin_id]))
+    );
+
+    let later = common::create_test_agent_from_preset(&app, "Later", &cookie, &csrf).await;
+    assert_eq!(
+        id_set(
+            &get(
+                &app,
+                &format!("/api/agents/{later}/plugins"),
+                &cookie,
+                &csrf,
+            )
+            .await["pluginIds"]
+        ),
+        id_set(&json!([plugin_id]))
+    );
+    assert_eq!(
+        plugin_agents(&app, &plugin_id, &cookie, &csrf).await,
+        json!({ "mode": "all", "agentIds": [] })
+    );
+}
+
+#[tokio::test]
+async fn local_mcp_plugin_defaults_to_no_agents() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    require_db!();
+    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
+    let (_dir, plugin_id) = fixture_plugin(&app, "sample-plugin", &cookie, &csrf).await;
+    let plugin = get(&app, &format!("/api/plugins/{plugin_id}"), &cookie, &csrf).await;
+    assert_eq!(plugin["agentAccess"], "explicit", "{plugin}");
+    assert_eq!(plugin["agentIds"], json!([]));
+
+    set_enabled(&app, &plugin_id, true, &cookie, &csrf).await;
+    let agent_id = common::create_test_agent_from_preset(&app, "Worker", &cookie, &csrf).await;
+    assert_eq!(
+        get(
+            &app,
+            &format!("/api/agents/{agent_id}/plugins"),
+            &cookie,
+            &csrf,
+        )
+        .await,
+        json!({ "pluginIds": [] })
+    );
+    assert!(run_plugin_ids(&state, &agent_id).await.is_empty());
+}
+
+#[tokio::test]
+async fn rescan_keeps_the_agent_access_choice() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    require_db!();
+    let (_state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
+    let (_dir, plugin_id) = fixture_plugin(&app, "sample-plugin", &cookie, &csrf).await;
+    set_enabled(&app, &plugin_id, true, &cookie, &csrf).await;
+    let updated = put_plugin_agents(
+        &app,
+        &plugin_id,
+        json!({ "mode": "all", "agentIds": [] }),
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(updated["mode"], "all");
+
+    rescan(&app, &cookie, &csrf).await;
+    assert_eq!(
+        plugin_agents(&app, &plugin_id, &cookie, &csrf).await["mode"],
+        "all"
+    );
+    let later = common::create_test_agent_from_preset(&app, "Later", &cookie, &csrf).await;
+    assert_eq!(
+        id_set(
+            &get(
+                &app,
+                &format!("/api/agents/{later}/plugins"),
+                &cookie,
+                &csrf,
+            )
+            .await["pluginIds"]
+        ),
+        id_set(&json!([plugin_id]))
+    );
+}
+
+#[tokio::test]
+async fn plugin_card_and_agent_form_share_one_assignment() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    require_db!();
+    let (_state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
+    let (_dir, plugin_id) = fixture_plugin(&app, "sample-plugin", &cookie, &csrf).await;
+    set_enabled(&app, &plugin_id, true, &cookie, &csrf).await;
+    let agent_a = common::create_test_agent_from_preset(&app, "Ada", &cookie, &csrf).await;
+    let agent_b = common::create_test_agent_from_preset(&app, "Bea", &cookie, &csrf).await;
+
+    let chosen = put_plugin_agents(
+        &app,
+        &plugin_id,
+        json!({ "mode": "explicit", "agentIds": [agent_a] }),
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(chosen["mode"], "explicit");
+    assert_eq!(id_set(&chosen["agentIds"]), id_set(&json!([agent_a])));
+    assert_eq!(
+        id_set(
+            &get(
+                &app,
+                &format!("/api/agents/{agent_a}/plugins"),
+                &cookie,
+                &csrf,
+            )
+            .await["pluginIds"]
+        ),
+        id_set(&json!([plugin_id]))
+    );
+    assert_eq!(
+        get(
+            &app,
+            &format!("/api/agents/{agent_b}/plugins"),
+            &cookie,
+            &csrf,
+        )
+        .await,
+        json!({ "pluginIds": [] })
+    );
+
+    let (status, body) = send(
+        &app,
+        "PUT",
+        &format!("/api/agents/{agent_b}/plugins"),
+        json!({ "pluginIds": [plugin_id] }),
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(
+        id_set(&plugin_agents(&app, &plugin_id, &cookie, &csrf).await["agentIds"]),
+        id_set(&json!([agent_a, agent_b]))
+    );
+
+    put_plugin_agents(
+        &app,
+        &plugin_id,
+        json!({ "mode": "all", "agentIds": [] }),
+        &cookie,
+        &csrf,
+    )
+    .await;
+    let agent_c = common::create_test_agent_from_preset(&app, "Cy", &cookie, &csrf).await;
+    assert_eq!(
+        id_set(
+            &get(
+                &app,
+                &format!("/api/agents/{agent_c}/plugins"),
+                &cookie,
+                &csrf,
+            )
+            .await["pluginIds"]
+        ),
+        id_set(&json!([plugin_id]))
+    );
+
+    let (status, body) = send(
+        &app,
+        "PUT",
+        &format!("/api/agents/{agent_a}/plugins"),
+        json!({ "pluginIds": [] }),
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let after_uncheck = plugin_agents(&app, &plugin_id, &cookie, &csrf).await;
+    assert_eq!(after_uncheck["mode"], "explicit", "{after_uncheck}");
+    assert_eq!(
+        id_set(&after_uncheck["agentIds"]),
+        id_set(&json!([agent_b, agent_c]))
+    );
+
+    let agent_d = common::create_test_agent_from_preset(&app, "Dee", &cookie, &csrf).await;
+    assert_eq!(
+        get(
+            &app,
+            &format!("/api/agents/{agent_d}/plugins"),
+            &cookie,
+            &csrf,
+        )
+        .await,
+        json!({ "pluginIds": [] })
+    );
+    assert_eq!(
+        get(
+            &app,
+            &format!("/api/agents/{agent_a}/plugins"),
+            &cookie,
+            &csrf,
+        )
+        .await,
+        json!({ "pluginIds": [] })
+    );
+    for kept in [agent_b, agent_c] {
+        assert_eq!(
+            id_set(
+                &get(&app, &format!("/api/agents/{kept}/plugins"), &cookie, &csrf).await
+                    ["pluginIds"]
+            ),
+            id_set(&json!([plugin_id]))
+        );
+    }
 }

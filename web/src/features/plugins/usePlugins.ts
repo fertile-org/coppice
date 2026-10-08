@@ -263,3 +263,38 @@ export function useInstallPlugin() {
 export function useUpdatePlugin() {
   return useMutation({ mutationFn: updatePlugin });
 }
+
+const pluginAgentsSchema = z.object({
+  mode: z.enum(['all', 'explicit']),
+  agentIds: z.array(z.string().uuid()),
+});
+
+export type PluginAgentAssignment = z.infer<typeof pluginAgentsSchema>;
+
+async function setPluginAgents({
+  id,
+  mode,
+  agentIds,
+}: {
+  id: string;
+  mode: 'all' | 'explicit';
+  agentIds: string[];
+}): Promise<PluginAgentAssignment> {
+  const res = await apiFetch(`/api/plugins/${id}/agents`, {
+    method: 'PUT',
+    headers: JSON_HEADERS,
+    body: JSON.stringify({ mode, agentIds }),
+  });
+  return pluginAgentsSchema.parse(await res.json());
+}
+
+export function useSetPluginAgents() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: setPluginAgents,
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: PLUGINS_QUERY_KEY });
+      void queryClient.invalidateQueries({ queryKey: ['agents'] });
+    },
+  });
+}

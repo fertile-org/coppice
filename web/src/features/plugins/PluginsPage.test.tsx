@@ -63,6 +63,8 @@ const samplePlugin: Plugin = {
   marketplace: null,
   external: null,
   gitRoot: null,
+  agentAccess: 'explicit',
+  agentIds: [],
 };
 
 const STDIO_WARNING =
@@ -130,6 +132,9 @@ describe('PluginsPage', () => {
       }
       if (path === '/api/plugins' && method === 'GET') {
         return Promise.resolve(json(plugins));
+      }
+      if (path === '/api/agents' && method === 'GET') {
+        return Promise.resolve(json({ items: [] }));
       }
       if (path.startsWith('/api/plugins/') && method === 'PATCH') {
         const body = JSON.parse(init.body as string) as { enabled: boolean };

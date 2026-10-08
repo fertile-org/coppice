@@ -57,9 +57,9 @@ async fn insert_running_ticket(pool: &sqlx::PgPool, status: &str) -> (Uuid, Uuid
     sqlx::query(
         r#"
         INSERT INTO agents (
-            id, name, role, skills, responsibilities, system_prompt, connector
+            id, name, role, responsibilities, system_prompt, connector
         )
-        VALUES ($1, $2, 'worker', '{}', '{}', 'prompt', 'mock')
+        VALUES ($1, $2, 'worker', '{}', 'prompt', 'mock')
         "#,
     )
     .bind(agent_id)

@@ -1055,9 +1055,9 @@ mod tests {
         sqlx::query(
             r#"
             INSERT INTO agents (
-                id, name, role, skills, responsibilities, system_prompt, connector, preset_source
+                id, name, role, responsibilities, system_prompt, connector, preset_source
             )
-            VALUES ($1, $2, $3, '{}', '{}', $4, $5, $6)
+            VALUES ($1, $2, $3, '{}', $4, $5, $6)
             "#,
         )
         .bind(pm_agent_id)
@@ -1074,9 +1074,9 @@ mod tests {
         sqlx::query(
             r#"
             INSERT INTO agents (
-                id, name, role, skills, responsibilities, system_prompt, connector, preset_source
+                id, name, role, responsibilities, system_prompt, connector, preset_source
             )
-            VALUES ($1, $2, $3, '{}', '{}', $4, $5, $6)
+            VALUES ($1, $2, $3, '{}', $4, $5, $6)
             "#,
         )
         .bind(engineer_agent_id)
@@ -1269,7 +1269,6 @@ mod tests {
             id,
             name: name.into(),
             role: "Reviewer".into(),
-            skills: vec![],
             responsibilities: vec![],
             system_prompt: "Review only".into(),
             connector: "mock".into(),
@@ -2068,9 +2067,9 @@ mod tests {
         sqlx::query(
             r#"
             INSERT INTO agents (
-                id, name, role, skills, responsibilities, system_prompt, connector, preset_source
+                id, name, role, responsibilities, system_prompt, connector, preset_source
             )
-            VALUES ($1, 'Replacement Engineer', 'Engineer', '{}', '{}', 'prompt', 'mock', 'research')
+            VALUES ($1, 'Replacement Engineer', 'Engineer', '{}', 'prompt', 'mock', 'research')
             "#,
         )
         .bind(replacement_agent_id)
@@ -3083,10 +3082,10 @@ mod tests {
         sqlx::query(
             r#"
             INSERT INTO agents (
-                id, name, role, skills, responsibilities, system_prompt,
+                id, name, role, responsibilities, system_prompt,
                 connector, enabled, preset_source
             )
-            VALUES ($1, 'Disabled Agent', 'Reviewer', '{}', '{}', 'prompt', 'mock', false, 'disabled_agent')
+            VALUES ($1, 'Disabled Agent', 'Reviewer', '{}', 'prompt', 'mock', false, 'disabled_agent')
             "#,
         )
         .bind(disabled_agent_id)
@@ -3267,11 +3266,11 @@ mod tests {
         sqlx::query(
             r#"
             INSERT INTO agents (
-                id, name, role, skills, responsibilities, system_prompt,
+                id, name, role, responsibilities, system_prompt,
                 connector, enabled, preset_source
             )
             VALUES (
-                $1, 'Secondary Backend Engineer', 'Backend Engineer', '{}', '{}',
+                $1, 'Secondary Backend Engineer', 'Backend Engineer', '{}',
                 'prompt', 'mock', true, 'backend_engineer'
             )
             "#,
@@ -3285,10 +3284,10 @@ mod tests {
         sqlx::query(
             r#"
             INSERT INTO agents (
-                id, name, role, skills, responsibilities, system_prompt,
+                id, name, role, responsibilities, system_prompt,
                 connector, enabled, preset_source
             )
-            VALUES ($1, 'QC Agent', 'QC', '{}', '{}', 'prompt', 'mock', true, 'qc')
+            VALUES ($1, 'QC Agent', 'QC', '{}', 'prompt', 'mock', true, 'qc')
             "#,
         )
         .bind(qc_agent_id)
@@ -4448,7 +4447,6 @@ mod tests {
             agent_name: "Backend Engineer",
             agent_key: "backend_engineer",
             agent_role: "Backend Engineer",
-            agent_skills: &[],
             agent_responsibilities: &[],
             agent_system_prompt: "prompt",
             repo_name: None,

@@ -115,7 +115,6 @@ mod tests {
             id: Uuid::new_v4(),
             name: "Bot".into(),
             role: "Developer".into(),
-            skills: vec![],
             responsibilities: vec![],
             system_prompt: "x".into(),
             connector: connector.into(),

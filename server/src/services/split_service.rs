@@ -250,9 +250,9 @@ mod tests {
         sqlx::query(
             r#"
             INSERT INTO agents (
-                id, name, role, skills, responsibilities, system_prompt, connector, preset_source
+                id, name, role, responsibilities, system_prompt, connector, preset_source
             )
-            VALUES ($1, $2, $3, '{}', '{}', $4, $5, $6)
+            VALUES ($1, $2, $3, '{}', $4, $5, $6)
             "#,
         )
         .bind(pm_agent_id)
@@ -348,9 +348,9 @@ mod tests {
         sqlx::query(
             r#"
             INSERT INTO agents (
-                id, name, role, skills, responsibilities, system_prompt, connector, preset_source
+                id, name, role, responsibilities, system_prompt, connector, preset_source
             )
-            VALUES ($1, $2, $3, '{}', '{}', $4, $5, $6)
+            VALUES ($1, $2, $3, '{}', $4, $5, $6)
             "#,
         )
         .bind(pm_agent_id)
@@ -444,9 +444,9 @@ mod tests {
         sqlx::query(
             r#"
             INSERT INTO agents (
-                id, name, role, skills, responsibilities, system_prompt, connector, preset_source
+                id, name, role, responsibilities, system_prompt, connector, preset_source
             )
-            VALUES ($1, $2, $3, '{}', '{}', $4, $5, $6)
+            VALUES ($1, $2, $3, '{}', $4, $5, $6)
             "#,
         )
         .bind(pm_agent_id)
@@ -463,9 +463,9 @@ mod tests {
         sqlx::query(
             r#"
             INSERT INTO agents (
-                id, name, role, skills, responsibilities, system_prompt, connector, preset_source
+                id, name, role, responsibilities, system_prompt, connector, preset_source
             )
-            VALUES ($1, $2, $3, '{}', '{}', $4, $5, $6)
+            VALUES ($1, $2, $3, '{}', $4, $5, $6)
             "#,
         )
         .bind(engineer_agent_id)

@@ -98,7 +98,6 @@ function CreateAgentDialog({
     id: '',
     key: '',
     role: '',
-    skills: [],
     responsibilities: [],
     systemPromptTemplate: '',
   }));
@@ -106,10 +105,16 @@ function CreateAgentDialog({
   const [createdAgentId, setCreatedAgentId] = useState<string | null>(null);
   const createAgent = useCreateAgent();
   const setAgentPlugins = useSetAgentPlugins();
+  const pluginsQuery = usePlugins();
+  const accessSeeded = useRef(false);
   const toast = useToast();
 
   useEffect(() => {
-    if (!open) return;
+    if (!open) {
+      accessSeeded.current = false;
+      return;
+    }
+    accessSeeded.current = false;
     setCreatedAgentId(null);
     const first = presets[0];
     setPresetId(first?.id ?? '');
@@ -117,7 +122,6 @@ function CreateAgentDialog({
       id: '',
       key: '',
       role: '',
-      skills: [],
       responsibilities: [],
       systemPromptTemplate: '',
     }));
@@ -125,6 +129,15 @@ function CreateAgentDialog({
     const timer = window.setTimeout(() => presetRef.current?.focus(), 0);
     return () => window.clearTimeout(timer);
   }, [open, presets]);
+
+  useEffect(() => {
+    if (!open || accessSeeded.current || !pluginsQuery.data) return;
+    accessSeeded.current = true;
+    const pluginIds = pluginsQuery.data
+      .filter((plugin) => isAssignable(plugin) && plugin.agentAccess === 'all')
+      .map((plugin) => plugin.id);
+    setValues((prev) => ({ ...prev, pluginIds }));
+  }, [open, pluginsQuery.data, presets]);
 
   function handlePresetChange(nextPresetId: string) {
     setPresetId(nextPresetId);
@@ -138,13 +151,21 @@ function CreateAgentDialog({
   }
 
   async function assignPlugins(agentId: string, pluginIds: string[]) {
-    if (pluginIds.length === 0) return;
-    // Preset defaults were assigned server-side on create; add picks on top.
     const current = await fetchAgentPlugins(agentId);
-    await setAgentPlugins.mutateAsync({
-      agentId,
-      pluginIds: [...new Set([...current, ...pluginIds])],
-    });
+    const allMode = new Set(
+      (pluginsQuery.data ?? [])
+        .filter((plugin) => plugin.agentAccess === 'all')
+        .map((plugin) => plugin.id),
+    );
+    const checked = new Set(pluginIds);
+    const desired = new Set(current);
+    for (const id of allMode) {
+      if (!checked.has(id)) desired.delete(id);
+    }
+    for (const id of checked) desired.add(id);
+    const next = [...desired];
+    if (sameIds(current, next)) return;
+    await setAgentPlugins.mutateAsync({ agentId, pluginIds: next });
   }
 
   async function handleSubmit(formValues: AgentFormValues) {
@@ -297,7 +318,6 @@ function EditAgentDialog({
       const agent = await updateAgent.mutateAsync({
         name: formValues.name.trim(),
         role: formValues.role.trim(),
-        skills: listFromLines(formValues.skills),
         responsibilities: listFromLines(formValues.responsibilities),
         systemPrompt: formValues.systemPrompt,
         connector: formValues.connector,

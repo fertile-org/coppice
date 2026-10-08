@@ -6,6 +6,7 @@ import { Combobox } from '../../components/ui/combobox';
 import { isDesktopShell, pickDirectory } from '../../lib/desktop';
 import type { Plugin, PluginDir, PluginInstall } from '../../lib/schemas/plugin';
 import { useSession } from '../auth/useSession';
+import { PLUGIN_COPY } from './copy';
 import { PluginCard } from './PluginCard';
 import { PluginsGuide } from './PluginsGuide';
 import { parseApiErrorMessage } from '../../lib/api';
@@ -402,10 +403,7 @@ export function PluginsPage() {
     <div className="space-y-8">
       <div>
         <h1 className="font-display text-2xl font-semibold text-bark-900">Plugins</h1>
-        <p className="mt-2 max-w-xl font-body text-text-secondary">
-          Plugins add skills and tools to your agents. Add a plugin, enable it, then
-          attach it to the agents that should use it.
-        </p>
+        <p className="mt-2 max-w-xl font-body text-text-secondary">{PLUGIN_COPY.pageIntro}</p>
       </div>
 
       {!isLoading && !isError && <PluginsGuide hasPlugins={plugins.length > 0} />}

@@ -8,7 +8,7 @@ use crate::mcp::proxy::{McpServerPool, PluginServerNames, PoolError, PoolServerS
 use crate::plugins::capability::McpServerTransport;
 use crate::plugins::discover::{discover, Discovered};
 use crate::plugins::git_install::{repo_dir_name, validate_git_url, validate_ref};
-use crate::plugins::manifest::PluginManifest;
+use crate::plugins::manifest::{PluginLayout, PluginManifest};
 use crate::plugins::skills::{PluginSkillSet, SkillCatalog};
 use crate::services::plugin_settings_service::{PluginSettingsError, PluginSettingsService};
 use crate::services::secret_service::SecretError;
@@ -30,7 +30,7 @@ const NO_PLUGIN_IN_REPO: &str = "no plugin, skills, or marketplace found in this
 const PLUGIN_COLUMNS: &str = r#"
     p.id, p.plugin_dir_id, p.rel_path, p.name, p.version, p.description, p.source,
     p.git_url, p.git_ref, p.git_commit, p.manifest::text AS manifest, p.status, p.error, p.enabled,
-    p.git_root, p.disabled_skills
+    p.git_root, p.disabled_skills, p.agent_access
 "#;
 
 pub struct PluginService<'a> {
@@ -83,6 +83,31 @@ pub struct PluginRow {
     pub enabled: bool,
     pub git_root: Option<String>,
     pub disabled_skills: Vec<String>,
+    /// `all` (every agent, including ones created later) or `explicit`.
+    pub agent_access: String,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct PluginAgentAssignment {
+    pub mode: String,
+    pub agent_ids: Vec<Uuid>,
+}
+
+/// Install default. A local (stdio) MCP server is assigned to nobody until
+/// sandboxing exists. A skills-only plugin with no local server is available
+/// to all agents. Anything else starts as an empty explicit list.
+pub fn default_agent_access(manifest: &PluginManifest) -> &'static str {
+    let runs_locally = manifest
+        .mcp_servers
+        .iter()
+        .any(|server| matches!(server.transport, McpServerTransport::Stdio { .. }));
+    if runs_locally {
+        "explicit"
+    } else if manifest.layout == PluginLayout::SkillsOnly {
+        "all"
+    } else {
+        "explicit"
+    }
 }
 
 const UNDECRYPTABLE_SETTINGS: &str = "plugin settings could not be decrypted";
@@ -917,17 +942,32 @@ impl<'a> PluginService<'a> {
         self.get_install(id).await
     }
 
-    /// Every assigned plugin, whatever its current status.
+    /// Plugins this agent can use. `all` counts only while the plugin is enabled
+    /// and `ok`, so a disabled "all agents" choice is not dropped by saving an
+    /// agent. Explicit rows are returned even when the plugin is unavailable.
     pub async fn agent_plugin_ids(&self, agent_id: Uuid) -> Result<Vec<Uuid>, PluginError> {
         self.ensure_agent(agent_id).await?;
         Ok(sqlx::query_scalar(
-            "SELECT plugin_id FROM agent_plugins WHERE agent_id = $1 ORDER BY plugin_id",
+            r#"
+            SELECT p.id FROM plugins p
+            WHERE (p.agent_access = 'all' AND p.enabled AND p.status = 'ok')
+               OR (
+                    p.agent_access = 'explicit'
+                    AND EXISTS (
+                        SELECT 1 FROM agent_plugins ap
+                        WHERE ap.plugin_id = p.id AND ap.agent_id = $1
+                    )
+               )
+            ORDER BY p.id
+            "#,
         )
         .bind(agent_id)
         .fetch_all(self.pool)
         .await?)
     }
 
+    /// Updates the same per-plugin assignment the plugin card edits.
+    /// Leaving an "all agents" plugin removes this agent and keeps everyone else.
     pub async fn set_agent_plugins(
         &self,
         agent_id: Uuid,
@@ -949,28 +989,144 @@ impl<'a> PluginService<'a> {
             )));
         }
 
+        let current = self.agent_plugin_ids(agent_id).await?;
         let mut tx = self.pool.begin().await?;
-        sqlx::query("DELETE FROM agent_plugins WHERE agent_id = $1")
-            .bind(agent_id)
-            .execute(&mut *tx)
-            .await?;
-        sqlx::query(
-            "INSERT INTO agent_plugins (agent_id, plugin_id) SELECT $1, UNNEST($2::uuid[])",
-        )
-        .bind(agent_id)
-        .bind(&wanted)
-        .execute(&mut *tx)
-        .await?;
+        for plugin_id in current.iter().filter(|id| !wanted.contains(id)) {
+            detach_agent(&mut tx, *plugin_id, agent_id).await?;
+        }
+        for plugin_id in wanted.iter().filter(|id| !current.contains(id)) {
+            attach_agent(&mut tx, *plugin_id, agent_id).await?;
+        }
         tx.commit().await?;
         self.agent_plugin_ids(agent_id).await
     }
 
+    pub async fn plugin_assignment(
+        &self,
+        plugin_id: Uuid,
+    ) -> Result<PluginAgentAssignment, PluginError> {
+        let plugin = self.get_plugin(plugin_id).await?;
+        let agent_ids = if plugin.agent_access == "all" {
+            Vec::new()
+        } else {
+            explicit_agent_ids(self.pool, plugin_id).await?
+        };
+        Ok(PluginAgentAssignment {
+            mode: plugin.agent_access,
+            agent_ids,
+        })
+    }
+
+    pub async fn explicit_members(
+        &self,
+        plugin_ids: &[Uuid],
+    ) -> Result<std::collections::HashMap<Uuid, Vec<Uuid>>, PluginError> {
+        let rows: Vec<(Uuid, Uuid)> = sqlx::query_as(
+            r#"
+            SELECT plugin_id, agent_id FROM agent_plugins
+            WHERE plugin_id = ANY($1)
+            ORDER BY agent_id
+            "#,
+        )
+        .bind(plugin_ids)
+        .fetch_all(self.pool)
+        .await?;
+        let mut members: std::collections::HashMap<Uuid, Vec<Uuid>> =
+            std::collections::HashMap::new();
+        for (plugin_id, agent_id) in rows {
+            members.entry(plugin_id).or_default().push(agent_id);
+        }
+        Ok(members)
+    }
+
+    /// Replaces this plugin's assignment. `all` drops the explicit list.
+    pub async fn set_plugin_agents(
+        &self,
+        plugin_id: Uuid,
+        mode: &str,
+        agent_ids: &[Uuid],
+    ) -> Result<PluginAgentAssignment, PluginError> {
+        self.get_plugin(plugin_id).await?;
+        match mode {
+            "all" => {
+                let mut tx = self.pool.begin().await?;
+                sqlx::query(
+                    "UPDATE plugins SET agent_access = 'all', updated_at = now() WHERE id = $1",
+                )
+                .bind(plugin_id)
+                .execute(&mut *tx)
+                .await?;
+                sqlx::query("DELETE FROM agent_plugins WHERE plugin_id = $1")
+                    .bind(plugin_id)
+                    .execute(&mut *tx)
+                    .await?;
+                tx.commit().await?;
+                Ok(PluginAgentAssignment {
+                    mode: "all".into(),
+                    agent_ids: Vec::new(),
+                })
+            }
+            "explicit" => {
+                let mut ids = agent_ids.to_vec();
+                ids.sort();
+                ids.dedup();
+                let found: Vec<Uuid> =
+                    sqlx::query_scalar("SELECT id FROM agents WHERE id = ANY($1)")
+                        .bind(&ids)
+                        .fetch_all(self.pool)
+                        .await?;
+                if found.len() != ids.len() {
+                    return Err(PluginError::Validation("unknown agent".into()));
+                }
+                let mut tx = self.pool.begin().await?;
+                sqlx::query(
+                    "UPDATE plugins SET agent_access = 'explicit', updated_at = now() WHERE id = $1",
+                )
+                .bind(plugin_id)
+                .execute(&mut *tx)
+                .await?;
+                sqlx::query("DELETE FROM agent_plugins WHERE plugin_id = $1")
+                    .bind(plugin_id)
+                    .execute(&mut *tx)
+                    .await?;
+                if !ids.is_empty() {
+                    sqlx::query(
+                        "INSERT INTO agent_plugins (agent_id, plugin_id) SELECT UNNEST($1::uuid[]), $2",
+                    )
+                    .bind(&ids)
+                    .bind(plugin_id)
+                    .execute(&mut *tx)
+                    .await?;
+                }
+                tx.commit().await?;
+                Ok(PluginAgentAssignment {
+                    mode: "explicit".into(),
+                    agent_ids: ids,
+                })
+            }
+            _ => Err(PluginError::Validation(
+                "mode must be all or explicit".into(),
+            )),
+        }
+    }
+
     /// Assigned plugins that are enabled and `ok` — the per-run token snapshot.
+    /// Read when the run starts, so a later assignment waits until the next run.
     pub async fn run_plugin_ids(&self, agent_id: Uuid) -> Result<Vec<Uuid>, PluginError> {
         Ok(sqlx::query_scalar(
             r#"
-            SELECT p.id FROM agent_plugins ap JOIN plugins p ON p.id = ap.plugin_id
-            WHERE ap.agent_id = $1 AND p.enabled AND p.status = 'ok'
+            SELECT p.id FROM plugins p
+            WHERE p.enabled AND p.status = 'ok'
+              AND (
+                    p.agent_access = 'all'
+                    OR (
+                        p.agent_access = 'explicit'
+                        AND EXISTS (
+                            SELECT 1 FROM agent_plugins ap
+                            WHERE ap.plugin_id = p.id AND ap.agent_id = $1
+                        )
+                    )
+              )
             ORDER BY p.id
             "#,
         )
@@ -979,7 +1135,8 @@ impl<'a> PluginService<'a> {
         .await?)
     }
 
-    /// Assigns preset default plugins by name; names not enabled/`ok` are skipped.
+    /// Assigns preset default plugins by name. `all` plugins already include the
+    /// new agent. Names that are not enabled and `ok` are skipped.
     pub async fn apply_preset_defaults(
         &self,
         agent_id: Uuid,
@@ -991,7 +1148,8 @@ impl<'a> PluginService<'a> {
         sqlx::query(
             r#"
             INSERT INTO agent_plugins (agent_id, plugin_id)
-            SELECT $1, id FROM plugins WHERE name = ANY($2) AND enabled AND status = 'ok'
+            SELECT $1, id FROM plugins
+            WHERE name = ANY($2) AND enabled AND status = 'ok' AND agent_access = 'explicit'
             ON CONFLICT DO NOTHING
             "#,
         )
@@ -1013,6 +1171,79 @@ impl<'a> PluginService<'a> {
             Err(PluginError::AgentNotFound)
         }
     }
+}
+
+async fn explicit_agent_ids(pool: &PgPool, plugin_id: Uuid) -> Result<Vec<Uuid>, PluginError> {
+    Ok(sqlx::query_scalar(
+        "SELECT agent_id FROM agent_plugins WHERE plugin_id = $1 ORDER BY agent_id",
+    )
+    .bind(plugin_id)
+    .fetch_all(pool)
+    .await?)
+}
+
+async fn detach_agent(
+    tx: &mut Transaction<'_, Postgres>,
+    plugin_id: Uuid,
+    agent_id: Uuid,
+) -> Result<(), PluginError> {
+    let mode: Option<String> =
+        sqlx::query_scalar("SELECT agent_access FROM plugins WHERE id = $1 FOR UPDATE")
+            .bind(plugin_id)
+            .fetch_optional(&mut **tx)
+            .await?;
+    let Some(mode) = mode else {
+        return Ok(());
+    };
+    if mode == "all" {
+        sqlx::query(
+            "UPDATE plugins SET agent_access = 'explicit', updated_at = now() WHERE id = $1",
+        )
+        .bind(plugin_id)
+        .execute(&mut **tx)
+        .await?;
+        sqlx::query("DELETE FROM agent_plugins WHERE plugin_id = $1")
+            .bind(plugin_id)
+            .execute(&mut **tx)
+            .await?;
+        sqlx::query(
+            "INSERT INTO agent_plugins (agent_id, plugin_id) SELECT id, $1 FROM agents WHERE id <> $2",
+        )
+        .bind(plugin_id)
+        .bind(agent_id)
+        .execute(&mut **tx)
+        .await?;
+    } else {
+        sqlx::query("DELETE FROM agent_plugins WHERE plugin_id = $1 AND agent_id = $2")
+            .bind(plugin_id)
+            .bind(agent_id)
+            .execute(&mut **tx)
+            .await?;
+    }
+    Ok(())
+}
+
+async fn attach_agent(
+    tx: &mut Transaction<'_, Postgres>,
+    plugin_id: Uuid,
+    agent_id: Uuid,
+) -> Result<(), PluginError> {
+    let mode: String =
+        sqlx::query_scalar("SELECT agent_access FROM plugins WHERE id = $1 FOR UPDATE")
+            .bind(plugin_id)
+            .fetch_one(&mut **tx)
+            .await?;
+    if mode == "all" {
+        return Ok(());
+    }
+    sqlx::query(
+        "INSERT INTO agent_plugins (agent_id, plugin_id) VALUES ($1, $2) ON CONFLICT DO NOTHING",
+    )
+    .bind(agent_id)
+    .bind(plugin_id)
+    .execute(&mut **tx)
+    .await?;
+    Ok(())
 }
 
 async fn test_server(mcp: &McpServerPool, spec: &PoolServerSpec) -> ServerTestResult {
@@ -1118,11 +1349,15 @@ async fn upsert_discovered(
         Ok(manifest) => manifest.skills.iter().map(|s| s.name.as_str()).collect(),
         Err(_) => Vec::new(),
     };
+    let agent_access = match &discovered.result {
+        Ok(manifest) => default_agent_access(manifest),
+        Err(_) => "explicit",
+    };
     sqlx::query(
         r#"
         INSERT INTO plugins
-            (id, plugin_dir_id, rel_path, name, version, description, manifest, status, error)
-        VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9)
+            (id, plugin_dir_id, rel_path, name, version, description, manifest, status, error, agent_access)
+        VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9, $11)
         ON CONFLICT (plugin_dir_id, rel_path) DO UPDATE SET
             name = EXCLUDED.name,
             version = EXCLUDED.version,
@@ -1150,6 +1385,7 @@ async fn upsert_discovered(
     .bind(status)
     .bind(error)
     .bind(skill_names)
+    .bind(agent_access)
     .execute(&mut **tx)
     .await?;
     Ok(())
@@ -1233,5 +1469,83 @@ fn row_to_plugin(row: &PgRow) -> PluginRow {
         enabled: row.get("enabled"),
         git_root: row.get("git_root"),
         disabled_skills: row.get("disabled_skills"),
+        agent_access: row.get("agent_access"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::plugins::capability::McpServerEntry;
+    use std::collections::BTreeMap;
+
+    fn manifest(layout: PluginLayout, mcp_servers: Vec<McpServerEntry>) -> PluginManifest {
+        PluginManifest {
+            name: "plugin".into(),
+            version: "0.0.0".into(),
+            description: String::new(),
+            author: None,
+            layout,
+            skills: Vec::new(),
+            mcp_servers,
+            unsupported: Vec::new(),
+            marketplace: None,
+            external: None,
+        }
+    }
+
+    fn stdio_server() -> McpServerEntry {
+        McpServerEntry {
+            name: "echo".into(),
+            transport: McpServerTransport::Stdio {
+                command: "node".into(),
+                args: Vec::new(),
+                env: BTreeMap::new(),
+            },
+            error: None,
+        }
+    }
+
+    fn http_server() -> McpServerEntry {
+        McpServerEntry {
+            name: "remote".into(),
+            transport: McpServerTransport::Http {
+                url: "http://127.0.0.1:9".into(),
+                headers: BTreeMap::new(),
+            },
+            error: None,
+        }
+    }
+
+    #[test]
+    fn skills_only_plugins_default_to_all_agents() {
+        assert_eq!(
+            default_agent_access(&manifest(PluginLayout::SkillsOnly, Vec::new())),
+            "all"
+        );
+    }
+
+    #[test]
+    fn local_mcp_plugins_default_to_no_agents() {
+        assert_eq!(
+            default_agent_access(&manifest(PluginLayout::Plugin, vec![stdio_server()])),
+            "explicit"
+        );
+        assert_eq!(
+            default_agent_access(&manifest(PluginLayout::SkillsOnly, vec![stdio_server()])),
+            "explicit"
+        );
+    }
+
+    #[test]
+    fn remote_mcp_plugins_default_to_no_agents() {
+        assert_eq!(
+            default_agent_access(&manifest(PluginLayout::Plugin, vec![http_server()])),
+            "explicit"
+        );
+        assert_eq!(
+            default_agent_access(&manifest(PluginLayout::Plugin, Vec::new())),
+            "explicit"
+        );
     }
 }

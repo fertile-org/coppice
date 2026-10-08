@@ -949,7 +949,6 @@ impl<'a> ChatService<'a> {
             agent_name: &agent.name,
             agent_key: &agent_key,
             agent_role: &agent.role,
-            agent_skills: &agent.skills,
             agent_responsibilities: &agent.responsibilities,
             agent_system_prompt: &agent.system_prompt,
             repo_name: None,

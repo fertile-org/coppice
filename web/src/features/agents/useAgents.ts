@@ -12,7 +12,6 @@ export interface AgentPreset {
   id: string;
   key: string;
   role: string;
-  skills: string[];
   responsibilities: string[];
   systemPromptTemplate: string;
 }
@@ -21,7 +20,6 @@ export interface Agent {
   id: string;
   name: string;
   role: string;
-  skills: string[];
   responsibilities: string[];
   systemPrompt: string;
   connector: string;

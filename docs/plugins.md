@@ -59,9 +59,15 @@ A plugin with local (**stdio**) MCP servers runs programs on your computer with 
 
 The same prompt names any settings whose value would come from your computer's environment. Only install plugins you trust.
 
-### 3. Attach it to agents
+### 3. Choose which agents can use it
 
-Enabling does not give the plugin to anyone. Click **Give it to an agent →** on the plugin card: it opens **Agents** with the plugin pre-selected, so you click **Edit** on each agent that should have it and **Save**. (Or open **Agents** yourself, edit an agent, and select the plugin under **Plugins**.) Only enabled plugins with status `ok` can be selected. Agent presets may select some plugins by default.
+On the plugin card, **Which agents can use it?** is **All agents** or **Choose agents**. **All agents** includes agents you create later. **Choose agents** is a checklist; the card reads **All agents**, **1 agent**, **N agents**, or **No agents**.
+
+The agent form has the same choice under **Skills**. Checking or unchecking a plugin there updates the plugin card, and editing the card updates the agent form. One assignment record backs both.
+
+Skills-only plugins start as **All agents**. A plugin that runs a local MCP server starts as **No agents**. A later rescan keeps the choice you made.
+
+Changes apply from each agent's next run. Only enabled plugins with status `ok` are used. Agent presets may still name plugins to add when you create an agent from that preset.
 
 What each kind of run gets from attached plugins:
 
@@ -80,7 +86,7 @@ Open a ticket's **Runs** tab and expand a run. **Tools & Skills** lists every to
 
 | Plugin status | Meaning |
 |---------------|---------|
-| `ok` | Loaded; can be enabled and attached. |
+| `ok` | Loaded; can be enabled and given to agents. |
 | `shadowed` | A plugin with the same name in an earlier directory is used instead. |
 | `missing` | The folder is gone. Agent assignments are kept and return when the folder does. |
 | `invalid` | The plugin could not be read; the card shows the error. |
@@ -114,7 +120,7 @@ Open a ticket's **Runs** tab and expand a run. **Tools & Skills** lists every to
 | A skill shows `path escapes plugin root` | The skill folder or its `SKILL.md` is a symlink pointing outside the plugin. |
 | Test says `missing setting "X"` | Enter setting `X` on the card, or give it a default in `.mcp.json`. |
 | Test fails to start a stdio server | Is the command installed and on your PATH? Coppice reads your PATH from your login shell when it opens, so quit and reopen Coppice after installing something new. |
-| Agent never uses the plugin | Is it enabled **and** selected on that agent? Check the run's **Tools & Skills** tab. |
+| Agent never uses the plugin | Is it enabled, and can that agent use it (**All agents**, or that agent is checked)? Check the run's **Tools & Skills** tab. |
 
 ## Writing a plugin
 
@@ -227,7 +233,7 @@ Use a default for optional values. Leave secrets without one, so each person ent
 
 1. Put your plugin in a folder and add that folder (or its parent) as a plugin directory.
 2. Press **Test** on the card after each change to `.mcp.json` or your MCP server's code; it restarts the plugin's servers. Press **Rescan** after adding or renaming skills or editing `plugin.json`.
-3. Attach the plugin to an agent and run a ticket. Check **Tools & Skills** on the run.
+3. Choose **All agents** or check that agent on the card, then run a ticket. Check **Tools & Skills** on the run.
 
 You can also talk to a stdio server by hand:
 

@@ -45,6 +45,8 @@ function plugin(overrides: Partial<Plugin>): Plugin {
     enabled: true,
     skills: [],
     mcpServers: [],
+    agentAccess: 'explicit',
+    agentIds: [],
     settings: [],
     unsupported: [],
     marketplace: null,
@@ -73,7 +75,6 @@ function baseValues(overrides: Partial<AgentFormValues> = {}): AgentFormValues {
   return {
     name: 'Builder',
     role: 'Developer',
-    skills: '',
     responsibilities: '',
     systemPrompt: '',
     connector: 'mock',
@@ -179,7 +180,6 @@ describe('AgentForm model choice', () => {
       id: 'a',
       name: 'Builder',
       role: 'Developer',
-      skills: [],
       responsibilities: [],
       systemPrompt: '',
       connector: 'cursor',
@@ -244,6 +244,14 @@ describe('AgentForm plugins picker', () => {
       'href',
       '/settings/plugins',
     );
+  });
+
+  it('has no free-text skills field', () => {
+    render(<Harness initial={baseValues()} onSubmit={vi.fn()} />);
+
+    expect(screen.queryByRole('textbox', { name: /^Skills/ })).toBeNull();
+    expect(screen.getByRole('group', { name: /Skills/ })).toBeVisible();
+    expect(screen.getByText("Changes apply from each agent's next run.")).toBeVisible();
   });
 
   it('lists only enabled ok plugins', () => {
