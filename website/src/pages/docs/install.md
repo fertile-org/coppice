@@ -45,7 +45,7 @@ You need Windows 11, because older Windows 10 builds can't show Linux app window
 
    Use `apt`, not `dpkg -i`. `apt` also installs what Coppice needs.
 
-   The package name is `coppice-desktop`. `<version>` in the file name is the git tag without the leading `v` (`0.1.0-rc.7`). The Debian package version is `0.1.0~rc.7` for that release candidate and `0.1.0` for a final release, so the final `.deb` sorts as an upgrade. Installing a newer `.deb` the same way replaces Coppice. `sudo apt remove coppice-desktop` leaves boards and settings in `~/.config/Coppice`.
+   To update Coppice later, download the newer `.deb` and run the same `sudo apt install` command. Your boards and settings stay.
 4. Install the agent CLIs you use (Claude Code, Codex, Cursor, OpenCode, Kilo Code) in Ubuntu. Sign in to them and to git there too.
 5. Start Coppice from the Windows Start menu (under Ubuntu), or run `coppice` in Ubuntu.
 
