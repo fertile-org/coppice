@@ -35,6 +35,8 @@ const plugin: Plugin = {
   marketplace: null,
   external: null,
   gitRoot: null,
+  agentAccess: 'explicit',
+  agentIds: [],
 };
 
 const testResult: PluginTestResult = {
@@ -110,6 +112,9 @@ describe('PluginCard', () => {
       }
       if (path === '/api/plugins' && method === 'GET') {
         return Promise.resolve(json([plugin]));
+      }
+      if (path === '/api/agents' && method === 'GET') {
+        return Promise.resolve(json({ items: [] }));
       }
       return Promise.reject(new Error(`unexpected ${method} ${path}`));
     });
@@ -200,7 +205,10 @@ describe('PluginCard', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Test' }));
 
     expect(confirm).toHaveBeenCalledWith(STDIO_WARNING);
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalledWith(
+      `/api/plugins/${plugin.id}/test`,
+      expect.anything(),
+    );
     confirm.mockRestore();
   });
 
@@ -293,7 +301,10 @@ describe('PluginCard', () => {
     expect(confirm).toHaveBeenCalledWith(
       "Local MCP servers run on your computer with your computer's privileges. Stronger sandboxing is coming in a later release. Settings A, B are not set here, so your computer's environment values for them will be sent to the plugin. Enable anyway?",
     );
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalledWith(
+      `/api/plugins/${plugin.id}`,
+      expect.anything(),
+    );
     confirm.mockRestore();
   });
 
@@ -309,7 +320,10 @@ describe('PluginCard', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Test' }));
 
     expect(confirm).toHaveBeenCalledWith(expect.stringContaining('GITHUB_TOKEN'));
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalledWith(
+      `/api/plugins/${plugin.id}/test`,
+      expect.anything(),
+    );
     confirm.mockRestore();
   });
 
@@ -329,12 +343,13 @@ describe('PluginCard', () => {
   });
 
   it('shows unsupported servers and test conflicts', async () => {
+    renderCard();
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/agents', expect.anything()));
     fetchMock.mockImplementationOnce(() =>
       Promise.resolve(
         json({ servers: [{ name: 'legacy', kind: 'sse', status: 'unsupported', tools: [] }] }),
       ),
     );
-    renderCard();
 
     fireEvent.click(screen.getByRole('button', { name: 'Test' }));
     const results = await screen.findByTestId('plugin-test-results');
@@ -377,20 +392,84 @@ describe('PluginCard', () => {
     );
   });
 
-  it('enabled plugin points to the Agents page', () => {
-    renderCard();
+  it('summarizes who can use the plugin', () => {
+    const { unmount } = renderCard();
+    expect(screen.getByTestId('plugin-agent-access-summary')).toHaveTextContent('No agents');
+    unmount();
 
-    expect(screen.getByRole('link', { name: /Give it to an agent/ })).toHaveAttribute(
-      'href',
-      `/agents?plugin=${plugin.id}`,
-    );
-    expect(screen.getByText(/mcp-fake pre-selected/)).toBeVisible();
+    const all = renderCard({ ...plugin, agentAccess: 'all' });
+    expect(screen.getByTestId('plugin-agent-access-summary')).toHaveTextContent('All agents');
+    all.unmount();
+
+    const one = renderCard({
+      ...plugin,
+      agentIds: ['00000000-0000-4000-8000-0000000000aa'],
+    });
+    expect(screen.getByTestId('plugin-agent-access-summary')).toHaveTextContent('1 agent');
+    one.unmount();
+
+    renderCard({
+      ...plugin,
+      agentIds: [
+        '00000000-0000-4000-8000-0000000000aa',
+        '00000000-0000-4000-8000-0000000000bb',
+      ],
+    });
+    expect(screen.getByTestId('plugin-agent-access-summary')).toHaveTextContent('2 agents');
   });
 
-  it('disabled plugin does not show the attach link', () => {
-    renderCard({ ...plugin, enabled: false });
+  it('all agents and choose agents update the same assignment', async () => {
+    const ada = '00000000-0000-4000-8000-0000000000aa';
+    fetchMock.mockImplementation((path: string, init: RequestInit = {}) => {
+      const method = init.method ?? 'GET';
+      if (path === '/api/agents' && method === 'GET') {
+        return Promise.resolve(
+          json({
+            items: [
+              {
+                id: ada,
+                name: 'Ada',
+                role: 'Engineer',
+                responsibilities: [],
+                systemPrompt: '',
+                connector: 'mock',
+                health: 'healthy',
+                enabled: true,
+                createdAt: '2026-10-01T00:00:00Z',
+                updatedAt: '2026-10-01T00:00:00Z',
+              },
+            ],
+          }),
+        );
+      }
+      if (path === `/api/plugins/${plugin.id}/agents` && method === 'PUT') {
+        return Promise.resolve(json({ mode: 'explicit', agentIds: [ada] }));
+      }
+      return Promise.reject(new Error(`unexpected ${method} ${path}`));
+    });
+    renderCard({ ...plugin, agentAccess: 'all', agentIds: [] });
 
-    expect(screen.queryByRole('link', { name: /Give it to an agent/ })).not.toBeInTheDocument();
+    expect(screen.getByText("Changes apply from each agent's next run.")).toBeVisible();
+    await waitFor(() =>
+      expect(screen.getByRole('radio', { name: 'Choose agents' })).toBeEnabled(),
+    );
+    fireEvent.click(screen.getByRole('radio', { name: 'Choose agents' }));
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        `/api/plugins/${plugin.id}/agents`,
+        expect.anything(),
+      ),
+    );
+    const init = callFor(`/api/plugins/${plugin.id}/agents`);
+    expect(init.method).toBe('PUT');
+    expect(JSON.parse(init.body as string)).toEqual({ mode: 'explicit', agentIds: [ada] });
+  });
+
+  it('external plugins do not ask which agents can use them', () => {
+    renderCard({ ...plugin, status: 'external', enabled: false, mcpServers: [], settings: [] });
+
+    expect(screen.queryByText('Which agents can use it?')).not.toBeInTheDocument();
   });
 
   it('explains how agents see tools and skills', () => {

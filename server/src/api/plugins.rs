@@ -6,8 +6,8 @@ use crate::plugins::git_install;
 use crate::plugins::manifest::{ExternalSource, MarketplaceRef};
 use crate::plugins::placeholders::{placeholder_keys, setting_sources, SettingSource};
 use crate::services::plugin_service::{
-    PluginDir, PluginError, PluginInstall, PluginRow, PluginService, ServerTestOutcome,
-    ServerTestResult,
+    PluginAgentAssignment, PluginDir, PluginError, PluginInstall, PluginRow, PluginService,
+    ServerTestOutcome, ServerTestResult,
 };
 use crate::services::plugin_settings_service::{PluginSettingsError, PluginSettingsService};
 use crate::AppState;
@@ -48,6 +48,10 @@ pub fn routes() -> Router<Arc<AppState>> {
             "/api/plugins/{plugin_id}/skills/{skill}",
             put(set_skill_enabled),
         )
+        .route(
+            "/api/plugins/{plugin_id}/agents",
+            get(get_plugin_agents).put(set_plugin_agents),
+        )
         .route("/api/plugin-installs/{install_id}", get(get_install))
         .route(
             "/api/agents/{agent_id}/plugins",
@@ -87,6 +91,8 @@ struct PluginResponse {
     mcp_servers: Vec<McpServerResponse>,
     unsupported: Vec<String>,
     settings: Vec<PluginSettingResponse>,
+    agent_access: String,
+    agent_ids: Vec<Uuid>,
 }
 
 #[derive(Serialize)]
@@ -191,6 +197,13 @@ struct AgentPluginsBody {
     plugin_ids: Vec<Uuid>,
 }
 
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PluginAgentsBody {
+    mode: String,
+    agent_ids: Vec<Uuid>,
+}
+
 struct ApiError(StatusCode, String);
 
 impl IntoResponse for ApiError {
@@ -292,6 +305,7 @@ fn plugin_response(
     plugin: PluginRow,
     configured: &BTreeSet<String>,
     mcp: &McpServerPool,
+    agent_ids: &[Uuid],
 ) -> PluginResponse {
     let entries = plugin
         .manifest
@@ -355,6 +369,12 @@ fn plugin_response(
         mcp_servers,
         unsupported,
         settings,
+        agent_ids: if plugin.agent_access == "all" {
+            Vec::new()
+        } else {
+            agent_ids.to_vec()
+        },
+        agent_access: plugin.agent_access,
     }
 }
 
@@ -366,10 +386,15 @@ async fn single_response(
     let configured = PluginSettingsService::new(pool, &state.secret_store)
         .configured_keys(plugin.id)
         .await?;
+    let members = PluginService::new(pool)
+        .explicit_members(&[plugin.id])
+        .await?;
+    let agent_ids = members.get(&plugin.id).cloned().unwrap_or_default();
     Ok(Json(plugin_response(
         plugin,
         &configured,
         &state.plugin_mcp,
+        &agent_ids,
     )))
 }
 
@@ -381,13 +406,17 @@ async fn plugins_response(
     let configured = PluginSettingsService::new(pool, &state.secret_store)
         .configured_keys_by_plugin()
         .await?;
+    let ids: Vec<Uuid> = plugins.iter().map(|plugin| plugin.id).collect();
+    let members = PluginService::new(pool).explicit_members(&ids).await?;
     let none = BTreeSet::new();
+    let no_agents = Vec::new();
     Ok(Json(
         plugins
             .into_iter()
             .map(|p| {
                 let keys = configured.get(&p.id).unwrap_or(&none);
-                plugin_response(p, keys, &state.plugin_mcp)
+                let agent_ids = members.get(&p.id).unwrap_or(&no_agents);
+                plugin_response(p, keys, &state.plugin_mcp, agent_ids)
             })
             .collect(),
     ))
@@ -671,6 +700,38 @@ async fn set_skill_enabled(
         tracing::error!(error = %err, "failed to refresh plugin skill catalog");
     }
     single_response(&state, pool, plugin).await
+}
+
+fn assignment_body(assignment: PluginAgentAssignment) -> Json<PluginAgentsBody> {
+    Json(PluginAgentsBody {
+        mode: assignment.mode,
+        agent_ids: assignment.agent_ids,
+    })
+}
+
+async fn get_plugin_agents(
+    State(state): State<Arc<AppState>>,
+    AuthUser { .. }: AuthUser,
+    Path(plugin_id): Path<Uuid>,
+) -> Result<Json<PluginAgentsBody>, ApiError> {
+    let pool = pool_from_state(&state)?;
+    let assignment = PluginService::new(pool)
+        .plugin_assignment(plugin_id)
+        .await?;
+    Ok(assignment_body(assignment))
+}
+
+async fn set_plugin_agents(
+    State(state): State<Arc<AppState>>,
+    AdminUser(_): AdminUser,
+    Path(plugin_id): Path<Uuid>,
+    Json(body): Json<PluginAgentsBody>,
+) -> Result<Json<PluginAgentsBody>, ApiError> {
+    let pool = pool_from_state(&state)?;
+    let assignment = PluginService::new(pool)
+        .set_plugin_agents(plugin_id, &body.mode, &body.agent_ids)
+        .await?;
+    Ok(assignment_body(assignment))
 }
 
 async fn get_agent_plugins(

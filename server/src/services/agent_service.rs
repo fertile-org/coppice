@@ -30,7 +30,7 @@ impl<'a> AgentService<'a> {
     pub async fn list_presets(&self) -> Result<Vec<AgentPreset>, AgentError> {
         let rows = sqlx::query(
             r#"
-            SELECT id, key, role, skills, responsibilities, default_plugins
+            SELECT id, key, role, responsibilities, default_plugins
             FROM agent_presets
             ORDER BY key ASC
             "#,
@@ -45,7 +45,7 @@ impl<'a> AgentService<'a> {
         let rows = sqlx::query(
             r#"
             SELECT
-                id, name, role, skills, responsibilities, system_prompt,
+                id, name, role, responsibilities, system_prompt,
                 connector, model_provider, model, enabled, preset_source, created_at, updated_at
             FROM agents
             ORDER BY created_at ASC
@@ -61,7 +61,7 @@ impl<'a> AgentService<'a> {
         let row = sqlx::query(
             r#"
             SELECT
-                id, name, role, skills, responsibilities, system_prompt,
+                id, name, role, responsibilities, system_prompt,
                 connector, model_provider, model, enabled, preset_source, created_at, updated_at
             FROM agents
             WHERE id = $1
@@ -78,7 +78,7 @@ impl<'a> AgentService<'a> {
     pub async fn get_preset(&self, preset_id: Uuid) -> Result<AgentPreset, AgentError> {
         let row = sqlx::query(
             r#"
-            SELECT id, key, role, skills, responsibilities, default_plugins
+            SELECT id, key, role, responsibilities, default_plugins
             FROM agent_presets
             WHERE id = $1
             "#,
@@ -122,7 +122,6 @@ impl<'a> AgentService<'a> {
             .insert_agent(
                 name,
                 &preset.role,
-                &preset.skills,
                 &preset.responsibilities,
                 system_prompt,
                 connector,
@@ -146,7 +145,6 @@ impl<'a> AgentService<'a> {
         &self,
         name: &str,
         role: &str,
-        skills: &[String],
         responsibilities: &[String],
         system_prompt: &str,
         connector: Option<&str>,
@@ -175,7 +173,6 @@ impl<'a> AgentService<'a> {
         self.insert_agent(
             name,
             role,
-            skills,
             responsibilities,
             system_prompt,
             connector,
@@ -193,7 +190,6 @@ impl<'a> AgentService<'a> {
         agent_id: Uuid,
         name: Option<&str>,
         role: Option<&str>,
-        skills: Option<&[String]>,
         responsibilities: Option<&[String]>,
         system_prompt: Option<&str>,
         connector: Option<&str>,
@@ -212,7 +208,6 @@ impl<'a> AgentService<'a> {
         let current = self.get(agent_id).await?;
         let name = name.unwrap_or(&current.name);
         let role = role.unwrap_or(&current.role);
-        let skills = skills.unwrap_or(&current.skills);
         let responsibilities = responsibilities.unwrap_or(&current.responsibilities);
         let system_prompt = system_prompt.unwrap_or(&current.system_prompt);
         let connector = connector.unwrap_or(&current.connector);
@@ -226,24 +221,22 @@ impl<'a> AgentService<'a> {
             SET
                 name = $2,
                 role = $3,
-                skills = $4,
-                responsibilities = $5,
-                system_prompt = $6,
-                connector = $7,
-                model_provider = $8,
-                model = $9,
-                enabled = $10,
+                responsibilities = $4,
+                system_prompt = $5,
+                connector = $6,
+                model_provider = $7,
+                model = $8,
+                enabled = $9,
                 updated_at = now()
             WHERE id = $1
             RETURNING
-                id, name, role, skills, responsibilities, system_prompt,
+                id, name, role, responsibilities, system_prompt,
                 connector, model_provider, model, enabled, preset_source, created_at, updated_at
             "#,
         )
         .bind(agent_id)
         .bind(name)
         .bind(role)
-        .bind(skills)
         .bind(responsibilities)
         .bind(system_prompt)
         .bind(connector)
@@ -315,7 +308,6 @@ impl<'a> AgentService<'a> {
         &self,
         name: &str,
         role: &str,
-        skills: &[String],
         responsibilities: &[String],
         system_prompt: &str,
         connector: &str,
@@ -328,19 +320,18 @@ impl<'a> AgentService<'a> {
         let row = sqlx::query(
             r#"
             INSERT INTO agents (
-                id, name, role, skills, responsibilities, system_prompt,
+                id, name, role, responsibilities, system_prompt,
                 connector, model_provider, model, enabled, preset_source
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
             RETURNING
-                id, name, role, skills, responsibilities, system_prompt,
+                id, name, role, responsibilities, system_prompt,
                 connector, model_provider, model, enabled, preset_source, created_at, updated_at
             "#,
         )
         .bind(id)
         .bind(name)
         .bind(role)
-        .bind(skills)
         .bind(responsibilities)
         .bind(system_prompt)
         .bind(connector)
@@ -377,7 +368,6 @@ fn row_to_preset(row: &sqlx::postgres::PgRow) -> AgentPreset {
         id: row.get("id"),
         key: row.get("key"),
         role: row.get("role"),
-        skills: row.get("skills"),
         responsibilities: row.get("responsibilities"),
         default_plugins: row.get("default_plugins"),
     }
@@ -388,7 +378,6 @@ fn row_to_agent(row: &sqlx::postgres::PgRow) -> Agent {
         id: row.get("id"),
         name: row.get("name"),
         role: row.get("role"),
-        skills: row.get("skills"),
         responsibilities: row.get("responsibilities"),
         system_prompt: row.get("system_prompt"),
         connector: row.get("connector"),

@@ -466,7 +466,6 @@ mod tests {
             id: Uuid::from_u128(id),
             name: role.into(),
             role: role.into(),
-            skills: vec![],
             responsibilities: vec![],
             system_prompt: String::new(),
             connector: "claude-code".into(),

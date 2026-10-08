@@ -94,7 +94,7 @@ Legacy `knowledge.embedding.*` and `knowledge.extraction.*` keys are ignored.
 
 ## Plugins
 
-The default plugin dir is `[plugins] dir` (`COPPICE_PLUGINS__DIR`). In the default Docker stack it is `/data/plugins`, backed by the `plugin_data` volume, so git-installed plugins survive container rebuilds. Extra dirs are added in Settings → Plugins. Changing `[plugins] dir` repoints the default dir: plugins recorded under the old path are forgotten along with their agent assignments, and plugins in the new dir are scanned as new, disabled plugins.
+The default plugin dir is `[plugins] dir` (`COPPICE_PLUGINS__DIR`). In the default Docker stack it is `/data/plugins`, backed by the `plugin_data` volume, so git-installed plugins survive container rebuilds. Extra dirs are added in Settings → Plugins. Each plugin is available to all agents or to an explicit list of agents; that choice is kept across rescans. Changing `[plugins] dir` repoints the default dir: plugins recorded under the old path are forgotten along with their agent assignments, and plugins in the new dir are scanned as new, disabled plugins.
 
 Two conditions stop the server at startup (`AppState::init_plugins`): the configured `[plugins] dir` cannot be created, or its path is already registered as a non-default plugin dir (remove that dir in Settings → Plugins, or pick another path). Plugin scan and skill-loading failures are only logged.
 

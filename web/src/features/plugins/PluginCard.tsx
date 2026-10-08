@@ -1,6 +1,5 @@
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import { useState } from 'react';
-import { Link } from 'react-router-dom';
 import { Button } from '../../components/ui/button';
 import type {
   Plugin,
@@ -9,10 +8,13 @@ import type {
 } from '../../lib/schemas/plugin';
 import { cn } from '../../lib/utils';
 import { parseApiErrorMessage } from '../../lib/api';
+import { useAgents } from '../agents/useAgents';
+import { PLUGIN_COPY, pluginAgentSummary } from './copy';
 import { PluginSettingsForm } from './PluginSettingsForm';
 import { PluginTestResults } from './PluginTestResults';
 import {
   usePluginInstall,
+  useSetPluginAgents,
   useSetPluginEnabled,
   useSetSkillEnabled,
   useTestPlugin,
@@ -189,6 +191,110 @@ function skillsHeader(skills: Plugin['skills']): string {
   return on === skills.length
     ? `Skills (${skills.length})`
     : `Skills (${on} of ${skills.length} on)`;
+}
+
+function AgentAccessSection({ plugin }: { plugin: Plugin }) {
+  const { data: agents, isLoading, isError } = useAgents();
+  const setAgents = useSetPluginAgents();
+  const [error, setError] = useState<string | null>(null);
+  const choosing = plugin.agentAccess === 'explicit';
+
+  async function save(mode: 'all' | 'explicit', agentIds: string[]) {
+    setError(null);
+    try {
+      await setAgents.mutateAsync({ id: plugin.id, mode, agentIds });
+    } catch (err) {
+      setError(parseApiErrorMessage(err, PLUGIN_COPY.unableToUpdateAgents));
+    }
+  }
+
+  function chooseAll() {
+    if (plugin.agentAccess === 'all') return;
+    void save('all', []);
+  }
+
+  function chooseExplicit() {
+    if (plugin.agentAccess === 'explicit') return;
+    if (!agents) return;
+    void save(
+      'explicit',
+      agents.map((agent) => agent.id),
+    );
+  }
+
+  function toggleAgent(id: string, checked: boolean) {
+    const agentIds = checked
+      ? [...plugin.agentIds, id]
+      : plugin.agentIds.filter((existing) => existing !== id);
+    void save('explicit', agentIds);
+  }
+
+  return (
+    <fieldset className="mt-3 border-t border-border pt-3">
+      <legend className="font-body text-xs font-medium text-text-secondary">
+        {PLUGIN_COPY.whichAgents}
+      </legend>
+      <div className="mt-2 flex flex-wrap gap-4">
+        <label className="flex items-center gap-2 font-body text-sm text-text-primary">
+          <input
+            type="radio"
+            name={`plugin-agents-${plugin.id}`}
+            checked={plugin.agentAccess === 'all'}
+            onChange={chooseAll}
+            className="h-4 w-4 border-border text-moss-600 focus:ring-moss-500"
+          />
+          {PLUGIN_COPY.allAgents}
+        </label>
+        <label className="flex items-center gap-2 font-body text-sm text-text-primary">
+          <input
+            type="radio"
+            name={`plugin-agents-${plugin.id}`}
+            checked={choosing}
+            disabled={!agents && !choosing}
+            onChange={chooseExplicit}
+            className="h-4 w-4 border-border text-moss-600 focus:ring-moss-500"
+          />
+          {PLUGIN_COPY.chooseAgents}
+        </label>
+      </div>
+      {choosing && (
+        <div className="mt-2">
+          {isLoading && (
+            <p className="font-body text-sm text-text-muted">{PLUGIN_COPY.loadingAgents}</p>
+          )}
+          {isError && (
+            <p className="font-body text-sm text-danger">{PLUGIN_COPY.unableToUpdateAgents}</p>
+          )}
+          {agents && agents.length === 0 && (
+            <p className="font-body text-sm text-text-muted">{PLUGIN_COPY.noAgentsYet}</p>
+          )}
+          {agents && agents.length > 0 && (
+            <ul className="space-y-1.5">
+              {agents.map((agent) => (
+                <li key={agent.id}>
+                  <label className="flex items-start gap-2">
+                    <input
+                      type="checkbox"
+                      checked={plugin.agentIds.includes(agent.id)}
+                      onChange={(e) => toggleAgent(agent.id, e.target.checked)}
+                      className="mt-0.5 h-4 w-4 rounded border-border text-moss-600 focus:ring-moss-500"
+                    />
+                    <span className="font-body text-sm text-text-primary">{agent.name}</span>
+                  </label>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+      {error && (
+        <p role="alert" className="mt-2 font-body text-xs text-danger">
+          {error}
+        </p>
+      )}
+      <p className="mt-2 font-body text-xs text-text-muted">{PLUGIN_COPY.nextRun}</p>
+    </fieldset>
+  );
 }
 
 function SkillsSection({ plugin }: { plugin: Plugin }) {
@@ -371,6 +477,10 @@ export function PluginCard({ plugin, onInstallFromGit, siblingCount = 1 }: Plugi
                   {plugin.mcpServers.length}{' '}
                   {plugin.mcpServers.length === 1 ? 'MCP server' : 'MCP servers'}
                 </span>
+                <span>·</span>
+                <span data-testid="plugin-agent-access-summary">
+                  {pluginAgentSummary(plugin.agentAccess, plugin.agentIds.length)}
+                </span>
               </>
             )}
           </p>
@@ -415,19 +525,7 @@ export function PluginCard({ plugin, onInstallFromGit, siblingCount = 1 }: Plugi
         <ExternalSource external={plugin.external} onInstallFromGit={onInstallFromGit} />
       )}
 
-      {plugin.enabled && plugin.status === 'ok' && (
-        <p className="mt-2 font-body text-xs text-text-secondary">
-          <Link
-            to={`/agents?plugin=${plugin.id}`}
-            className="font-medium text-moss-700 underline-offset-2 hover:underline"
-          >
-            Give it to an agent →
-          </Link>{' '}
-          <span className="text-text-muted">
-            {`Opens Agents with ${plugin.name} pre-selected.`}
-          </span>
-        </p>
-      )}
+      {!isExternal && <AgentAccessSection plugin={plugin} />}
 
       {update?.status === 'failed' && (
         <p role="alert" className="mt-2 font-body text-xs text-danger">

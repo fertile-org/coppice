@@ -4,7 +4,6 @@ export const createAgentSchema = z.object({
   name: z.string().min(1, 'Name is required'),
   presetId: z.string().uuid().optional(),
   role: z.string().optional(),
-  skills: z.array(z.string()).optional(),
   responsibilities: z.array(z.string()).optional(),
   systemPrompt: z.string().optional(),
   connector: z.string().optional(),
@@ -18,7 +17,6 @@ export type CreateAgentInput = z.infer<typeof createAgentSchema>;
 export const updateAgentSchema = z.object({
   name: z.string().min(1, 'Name is required').optional(),
   role: z.string().optional(),
-  skills: z.array(z.string()).optional(),
   responsibilities: z.array(z.string()).optional(),
   systemPrompt: z.string().optional(),
   connector: z.string().optional(),

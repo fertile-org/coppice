@@ -1,6 +1,7 @@
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import { useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
+import { PLUGIN_COPY } from './copy';
 
 const GUIDE_OPEN_KEY = 'coppice.plugins.guideOpen';
 
@@ -97,15 +98,15 @@ export function PluginsGuide({ hasPlugins }: { hasPlugins: boolean }) {
               <Step n={2} title="Enable">
                 plugins start disabled. Fill in any settings, then press Test.
               </Step>
-              <Step n={3} title="Attach">
-                select it on an agent in{' '}
+              <Step n={3} title={PLUGIN_COPY.guideChooseTitle}>
+                {PLUGIN_COPY.guideChooseBefore}{' '}
                 <Link
                   to="/agents"
                   className="font-medium text-moss-700 underline-offset-2 hover:underline"
                 >
-                  Agents
+                  {PLUGIN_COPY.guideChooseLink}
                 </Link>
-                . Only attached agents get it.
+                .
               </Step>
             </ol>
           </div>

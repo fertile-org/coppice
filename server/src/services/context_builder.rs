@@ -19,7 +19,6 @@ pub struct ContextInput<'a> {
     pub agent_name: &'a str,
     pub agent_key: &'a str,
     pub agent_role: &'a str,
-    pub agent_skills: &'a [String],
     pub agent_responsibilities: &'a [String],
     pub agent_system_prompt: &'a str,
     pub repo_name: Option<&'a str>,
@@ -49,15 +48,9 @@ pub fn build_tool_first_context(
         "# Agent\n\n**Name:** {}\n**Role:** {}\n\n",
         input.agent_name, input.agent_role
     );
-    for (label, items) in [
-        ("Skills", input.agent_skills),
-        ("Responsibilities", input.agent_responsibilities),
-    ] {
-        if items.is_empty() {
-            continue;
-        }
-        out.push_str(&format!("**{label}:**\n"));
-        for item in items {
+    if !input.agent_responsibilities.is_empty() {
+        out.push_str("**Responsibilities:**\n");
+        for item in input.agent_responsibilities {
             out.push_str(&format!("- {item}\n"));
         }
         out.push('\n');
@@ -362,7 +355,6 @@ mod tests {
             agent_name: "PM Agent",
             agent_key: "pm",
             agent_role: "PM",
-            agent_skills: &[],
             agent_responsibilities: &[],
             agent_system_prompt: "You are the product manager.",
             repo_name: Some("coppice"),
@@ -414,20 +406,19 @@ mod tests {
     }
 
     #[test]
-    fn tool_first_context_lists_agent_skills_and_responsibilities() {
+    fn tool_first_context_lists_responsibilities_without_skill_labels() {
         let mut input = fixture_full_input();
         let md = build_tool_first_context(&input, &test_skills(), None);
-        assert!(!md.contains("**Skills:**"));
-        assert!(!md.contains("**Responsibilities:**"));
+        let agent = &md[..md.find("# Task\n").expect("task")];
+        assert!(!agent.contains("**Skills:**"));
+        assert!(!agent.contains("**Responsibilities:**"));
 
-        let skills = ["Rust".to_string(), "SQL".to_string()];
-        let responsibilities = ["Own the API".to_string()];
-        input.agent_skills = &skills;
+        let responsibilities = ["Own the API".to_string(), "Rust".to_string()];
         input.agent_responsibilities = &responsibilities;
         let md = build_tool_first_context(&input, &test_skills(), None);
         let agent = &md[..md.find("# Task\n").expect("task")];
-        assert!(agent.contains("**Skills:**\n- Rust\n- SQL\n"));
-        assert!(agent.contains("**Responsibilities:**\n- Own the API\n"));
+        assert!(!agent.contains("**Skills:**"));
+        assert!(agent.contains("**Responsibilities:**\n- Own the API\n- Rust\n"));
         assert!(agent.contains("You are the product manager."));
     }
 

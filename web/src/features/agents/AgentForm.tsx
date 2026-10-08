@@ -14,13 +14,14 @@ import type {
   ConnectorOption,
 } from './useAgents';
 import { useModelProviders, useModels } from './useAgents';
+import { AGENT_COPY } from './copy';
 import { isAssignable } from '../plugins/assignable';
+import { PLUGIN_COPY } from '../plugins/copy';
 import { usePlugins } from '../plugins/usePlugins';
 
 export interface AgentFormValues {
   name: string;
   role: string;
-  skills: string;
   responsibilities: string;
   systemPrompt: string;
   connector: string;
@@ -51,7 +52,6 @@ export function agentToFormValues(agent: Agent): AgentFormValues {
   return {
     name: agent.name,
     role: agent.role,
-    skills: linesFromList(agent.skills),
     responsibilities: linesFromList(agent.responsibilities),
     systemPrompt: agent.systemPrompt,
     connector: agent.connector,
@@ -70,7 +70,6 @@ export function presetToFormValues(
   return {
     name,
     role: preset.role,
-    skills: linesFromList(preset.skills),
     responsibilities: linesFromList(preset.responsibilities),
     systemPrompt: preset.systemPromptTemplate,
     connector,
@@ -265,24 +264,6 @@ export function AgentForm({
         />
       </div>
 
-      <div>
-        <label
-          htmlFor="agent-skills"
-          className="mb-1 block font-body text-sm font-medium text-bark-800"
-        >
-          Skills
-          <span className="ml-1 font-normal text-text-muted">(one per line)</span>
-        </label>
-        <textarea
-          id="agent-skills"
-          rows={3}
-          value={values.skills}
-          onChange={(e) => updateField('skills', e.target.value)}
-          readOnly={mode === 'create'}
-          className="field-control w-full resize-y px-3 py-2 font-body text-sm"
-        />
-      </div>
-
       <fieldset
         ref={pluginsRef}
         disabled={pluginAssignment.status !== 'ready'}
@@ -291,10 +272,8 @@ export function AgentForm({
         }
       >
         <legend className="mb-1 block font-body text-sm font-medium text-bark-800">
-          Plugins
-          <span className="ml-1 font-normal text-text-muted">
-            (skills exposed as plugin:skill)
-          </span>
+          {AGENT_COPY.skillsHeading}
+          <span className="ml-1 font-normal text-text-muted">{AGENT_COPY.skillsHint}</span>
         </legend>
         {pluginAssignment.status === 'loading' && (
           <p className="mb-1.5 font-body text-sm text-text-muted">
@@ -365,6 +344,7 @@ export function AgentForm({
             ))}
           </ul>
         )}
+        <p className="mt-2 font-body text-xs text-text-muted">{PLUGIN_COPY.nextRun}</p>
       </fieldset>
 
       <div>

@@ -6,7 +6,6 @@ pub struct AgentPreset {
     pub id: Uuid,
     pub key: String,
     pub role: String,
-    pub skills: Vec<String>,
     pub responsibilities: Vec<String>,
     pub default_plugins: Vec<String>,
 }
@@ -16,7 +15,6 @@ pub struct Agent {
     pub id: Uuid,
     pub name: String,
     pub role: String,
-    pub skills: Vec<String>,
     pub responsibilities: Vec<String>,
     pub system_prompt: String,
     pub connector: String,

@@ -32,7 +32,6 @@ struct PresetResponse {
     id: Uuid,
     key: String,
     role: String,
-    skills: Vec<String>,
     responsibilities: Vec<String>,
     system_prompt_template: String,
 }
@@ -43,7 +42,6 @@ struct AgentResponse {
     id: Uuid,
     name: String,
     role: String,
-    skills: Vec<String>,
     responsibilities: Vec<String>,
     system_prompt: String,
     connector: String,
@@ -84,7 +82,6 @@ struct CreateAgentBody {
     name: String,
     preset_id: Option<Uuid>,
     role: Option<String>,
-    skills: Option<Vec<String>>,
     responsibilities: Option<Vec<String>>,
     system_prompt: Option<String>,
     connector: Option<String>,
@@ -98,7 +95,6 @@ struct CreateAgentBody {
 struct UpdateAgentBody {
     name: Option<String>,
     role: Option<String>,
-    skills: Option<Vec<String>>,
     responsibilities: Option<Vec<String>>,
     system_prompt: Option<String>,
     connector: Option<String>,
@@ -113,7 +109,6 @@ fn preset_to_response(preset: AgentPreset, templates: &HashMap<String, String>) 
         id: preset.id,
         key: preset.key,
         role: preset.role,
-        skills: preset.skills,
         responsibilities: preset.responsibilities,
         system_prompt_template,
     }
@@ -133,7 +128,6 @@ fn agent_to_response_with_turn_on(
         id: agent.id,
         name: agent.name,
         role: agent.role,
-        skills: agent.skills,
         responsibilities: agent.responsibilities,
         system_prompt: agent.system_prompt,
         connector: agent.connector,
@@ -258,7 +252,6 @@ async fn create_agent(
             .create(
                 &body.name,
                 role,
-                body.skills.as_deref().unwrap_or(&[]),
                 body.responsibilities.as_deref().unwrap_or(&[]),
                 system_prompt,
                 body.connector.as_deref(),
@@ -309,7 +302,6 @@ async fn update_agent(
             agent_id,
             body.name.as_deref(),
             body.role.as_deref(),
-            body.skills.as_deref(),
             body.responsibilities.as_deref(),
             body.system_prompt.as_deref(),
             body.connector.as_deref(),

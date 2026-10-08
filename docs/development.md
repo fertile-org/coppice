@@ -99,7 +99,7 @@ Admins manage plugins in **Settings → Plugins**. Claude Code / Cursor format p
 
 - **Plugin dirs.** The default dir comes from `[plugins] dir` (default `./data/plugins`). In Docker it is `/data/plugins` on the `plugin_data` volume (`COPPICE_PLUGINS__DIR`). It is created on start and cannot be removed. Add more dirs by path and order them; a plugin name found in an earlier dir shadows the same name in later dirs. Click **Rescan** after changing folders on disk.
 - **Install from git.** Enter a URL (optional ref) and a target dir; the server shallow-clones it into that dir and rescans. Allowed: `https://` (no userinfo), `ssh://`, and `git@host:path`. `file://` URLs are rejected unless `[plugins] allow_file_git_urls = true` (default `false`; meant for tests and local experiments). Clones time out after `[plugins] git_timeout_secs` (default 300). **Update** re-pulls a git-installed plugin.
-- **Enable and assign.** New plugins start disabled. Enable a plugin, then tick it under **Plugins** in the agent form. Its skills reach runs as `<plugin>:<skill>` through the `skill_list` / `skill_load` MCP tools.
+- **Enable and assign.** New plugins start disabled. Skills-only plugins start as **All agents**; a plugin with a local MCP server starts as **No agents**. On the plugin card, choose **All agents** or **Choose agents**. The agent form's **Skills** checkboxes edit the same assignment. Skills reach runs as `<plugin>:<skill>` through the `skill_list` / `skill_load` MCP tools. A change applies on each agent's next run.
 
 ---
 
