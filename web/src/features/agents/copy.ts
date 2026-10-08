@@ -1,5 +1,5 @@
 /** User-facing agent strings. Content owns this list. */
 export const AGENT_COPY = {
   skillsHeading: 'Skills',
-  skillsHint: '(skills exposed as plugin:skill)',
+  skillsHint: '(plugins this agent can use)',
 } as const;

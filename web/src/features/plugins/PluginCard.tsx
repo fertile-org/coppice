@@ -204,7 +204,7 @@ function AgentAccessSection({ plugin }: { plugin: Plugin }) {
     try {
       await setAgents.mutateAsync({ id: plugin.id, mode, agentIds });
     } catch (err) {
-      setError(parseApiErrorMessage(err, PLUGIN_COPY.unableToUpdateAgents));
+      setError(parseApiErrorMessage(err, PLUGIN_COPY.updateAgentsFailed));
     }
   }
 
@@ -263,7 +263,7 @@ function AgentAccessSection({ plugin }: { plugin: Plugin }) {
             <p className="font-body text-sm text-text-muted">{PLUGIN_COPY.loadingAgents}</p>
           )}
           {isError && (
-            <p className="font-body text-sm text-danger">{PLUGIN_COPY.unableToUpdateAgents}</p>
+            <p className="font-body text-sm text-danger">{PLUGIN_COPY.loadAgentsFailed}</p>
           )}
           {agents && agents.length === 0 && (
             <p className="font-body text-sm text-text-muted">{PLUGIN_COPY.noAgentsYet}</p>

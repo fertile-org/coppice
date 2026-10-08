@@ -9,10 +9,11 @@ export const PLUGIN_COPY = {
   oneAgent: '1 agent',
   loadingAgents: 'Loading agents…',
   noAgentsYet: 'No agents yet.',
-  unableToUpdateAgents: 'Unable to update agents.',
+  loadAgentsFailed: "Couldn't load agents. Try again.",
+  updateAgentsFailed: "Couldn't update which agents can use it. Try again.",
   nextRun: "Changes apply from each agent's next run.",
   guideChooseTitle: 'Choose',
-  guideChooseBefore: 'pick All agents or specific agents on the card, or on',
+  guideChooseBefore: 'pick All agents, or check specific agents here or in',
   guideChooseLink: 'Agents',
 } as const;
 
