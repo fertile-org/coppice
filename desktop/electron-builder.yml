@@ -43,6 +43,11 @@ linux:
       # desktop file is coppice.desktop. StartupWMClass has to be that same id.
       StartupWMClass: coppice
 deb:
+  # package.json version (0.1.0-rc.N) is the app version, the .dmg version, and
+  # the file name Coppice-0.1.0-rc.N-linux-<arch>.deb. electron-builder passes
+  # the control Version with "-" rewritten to "~" (0.1.0~rc.N), which sorts
+  # before the final 0.1.0. scripts/deb-version.mjs checks the built .deb and
+  # rewrites only that control field when it differs.
   # package.json "license" is passed to fpm as --license (Debian control License).
   # rc.1 and rc.2 shipped this package name. Keeping it lets a newer deb replace
   # the installed package instead of sitting beside it.

@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
 
-import { parseReleaseTag, setPackageVersion } from '../scripts/release-version.mjs';
+import { debianPackageVersion, parseReleaseTag, setPackageVersion } from '../scripts/release-version.mjs';
 
 describe('parseReleaseTag', () => {
   it('accepts a stable tag', () => {
@@ -38,6 +38,25 @@ describe('parseReleaseTag', () => {
   it('rejects non-strings', () => {
     assert.throws(() => parseReleaseTag(undefined), /release tag/);
   });
+});
+
+describe('debianPackageVersion', () => {
+  it('keeps a final release as upstream X.Y.Z', () => {
+    assert.equal(debianPackageVersion('0.1.0'), '0.1.0');
+    assert.equal(debianPackageVersion('10.20.30'), '10.20.30');
+  });
+
+  it('uses a tilde so a release candidate sorts before the final version', () => {
+    assert.equal(debianPackageVersion('0.1.0-rc.7'), '0.1.0~rc.7');
+    assert.equal(debianPackageVersion('1.2.3-rc.4'), '1.2.3~rc.4');
+    assert.equal(debianPackageVersion('10.20.30-rc.11'), '10.20.30~rc.11');
+  });
+
+  for (const version of ['v0.1.0-rc.7', '0.1.0-rc', '0.1.0~rc.7', '0.1.0-beta.1', '01.2.3', '']) {
+    it(`rejects ${JSON.stringify(version)}`, () => {
+      assert.throws(() => debianPackageVersion(version), /app version/);
+    });
+  }
 });
 
 describe('setPackageVersion', () => {

@@ -145,7 +145,7 @@ Desktop installers are built by `.github/workflows/release.yml` ([design](superp
 **Cut a release** (maintainers):
 
 1. Make sure `main` is green, then push a tag: `git tag v0.2.0 && git push origin v0.2.0`. Use `vX.Y.Z-rc.N` for a release candidate; any other tag shape fails the `prepare` job.
-2. The workflow sets the app version from the tag, builds the server, web, and installers on `macos-15`, `macos-15-intel`, `ubuntu-22.04`, and `ubuntu-22.04-arm`, runs the headless smoke on each, and uploads `Coppice-<version>-mac-arm64.dmg`, `Coppice-<version>-mac-x64.dmg`, `Coppice-<version>-linux-amd64.deb`, `Coppice-<version>-linux-arm64.deb`, and `SHA256SUMS` to a **draft** release (marked pre-release for `-rc` tags). Notes are generated since the previous tag, plus the install section from `.github/release-notes/install.md`.
+2. The workflow sets the app version from the tag, builds the server, web, and installers on `macos-15`, `macos-15-intel`, `ubuntu-22.04`, and `ubuntu-22.04-arm`, runs the headless smoke on each, and uploads `Coppice-<version>-mac-arm64.dmg`, `Coppice-<version>-mac-x64.dmg`, `Coppice-<version>-linux-amd64.deb`, `Coppice-<version>-linux-arm64.deb`, and `SHA256SUMS` to a **draft** release (marked pre-release for `-rc` tags). Notes are generated since the previous tag, plus the install section from `.github/release-notes/install.md`. `<version>` is the tag without `v` (`0.1.0` or `0.1.0-rc.7`). That string is the app version and the file name. The `.deb` control `Version` is `0.1.0` for a final tag and `0.1.0~rc.7` for `v0.1.0-rc.7`, so apt sorts the final release after every release candidate. The package name is `coppice-desktop`.
 3. Review the draft on GitHub and click **Publish**. Re-running the workflow for the same tag reuses the draft and replaces its files.
 
 Installed apps check `releases/latest` of `fertile-org/coppice` on launch and every 24 h and show a "new version available" banner. Drafts and pre-releases are never offered.
@@ -185,6 +185,8 @@ Alternatively, after the first blocked launch open **System Settings → Privacy
 ```bash
 sudo apt install ./Coppice-<version>-linux-<arch>.deb
 ```
+
+`<version>` in the file name is the git tag without `v` (`0.1.0-rc.7`, or `0.1.0` for a final release). The Debian package name is `coppice-desktop`, and the control `Version` is `0.1.0~rc.7` for that release candidate (`0.1.0` for the final tag). `dpkg` sorts `0.1.0~rc.7` before `0.1.0`, so installing the final `.deb` is an upgrade. Installing a newer `.deb` replaces `coppice-desktop`. `sudo apt remove coppice-desktop` leaves boards and settings in `~/.config/Coppice`.
 
 Then start **Coppice** from the applications menu, or run `coppice`.
 

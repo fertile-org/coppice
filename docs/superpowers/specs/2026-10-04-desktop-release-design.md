@@ -117,7 +117,7 @@ If `COPPICE_WEB_URL` is set, behave as today: load that URL, spawn nothing.
 
 - `extraResources`: `bin/coppice-server`, `postgres/`, `web/`.
 - **macOS:** one `.dmg` per arch, `hardenedRuntime: true`, entitlements allowing the bundled Postgres and server binaries to run as child processes; all bundled executables and dylibs are signed. Signing and notarization run automatically when `CSC_LINK`, `CSC_KEY_PASSWORD`, `APPLE_API_KEY`, `APPLE_API_KEY_ID`, and `APPLE_API_ISSUER` are present; otherwise the build is unsigned.
-- **Linux:** `.deb` with `Depends: git`; post-install sets `chrome-sandbox` to root-owned `4755` and installs an AppArmor profile granting `userns` so the Chromium sandbox works on Ubuntu 24.04+.
+- **Linux:** `.deb` with `Depends: git`; post-install sets `chrome-sandbox` to root-owned `4755` and installs an AppArmor profile granting `userns` so the Chromium sandbox works on Ubuntu 24.04+. The package name is `coppice-desktop`. File names stay `Coppice-<version>-linux-<arch>.deb` where `<version>` is the git tag without `v`. The control `Version` is `<version>` with a final `-rc.N` rewritten to `~rc.N` (`0.1.0~rc.7` before `0.1.0`), so apt treats the final release as an upgrade.
 - Version comes from `desktop/package.json`, set from the tag by CI.
 
 ## Release pipeline (`.github/workflows/release.yml`)

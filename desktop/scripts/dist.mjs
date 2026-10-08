@@ -8,6 +8,7 @@ import { spawn } from 'node:child_process';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
+import { stampDebsInDist } from './deb-version.mjs';
 import { writeMetainfo } from './write-metainfo.mjs';
 
 const desktopDir = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -50,7 +51,17 @@ function main() {
     console.error(`failed to start electron-builder: ${err.message}`);
     process.exit(1);
   });
-  child.on('exit', (code, signal) => process.exit(code ?? (signal ? 1 : 0)));
+  child.on('exit', (code, signal) => {
+    if (code !== 0 || signal) process.exit(code ?? 1);
+    if (values.dir || process.platform !== 'linux') process.exit(0);
+    stampDebsInDist(desktopDir).then(
+      () => process.exit(0),
+      (err) => {
+        console.error(err.message);
+        process.exit(1);
+      },
+    );
+  });
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1]).href) {
