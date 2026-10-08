@@ -62,16 +62,17 @@ impl KiloCodeProvider {
     /// through (allows a fully-qualified `provider/model` string stored in
     /// `model`). When only `model_provider` is set, omit the flag.
     fn model_arg(&self, input: &AgentRunInput) -> Option<String> {
-        match (&input.model_provider, &input.model) {
-            (Some(provider), Some(model)) => {
-                if model.contains('/') {
-                    Some(model.clone())
-                } else {
-                    Some(format!("{provider}/{model}"))
-                }
-            }
-            (None, Some(model)) => Some(model.clone()),
-            _ => None,
+        let model = crate::providers::model_flag::selected_model(input.model.as_deref())?;
+        match crate::providers::model_flag::selected_model(input.model_provider.as_deref()) {
+            Some(provider) if !model.contains('/') => Some(format!("{provider}/{model}")),
+            _ => Some(model.to_string()),
+        }
+    }
+
+    fn push_model_arg(&self, args: &mut Vec<String>, input: &AgentRunInput) {
+        if let Some(model) = self.model_arg(input) {
+            args.push("--model".to_string());
+            args.push(model);
         }
     }
 }
@@ -106,10 +107,7 @@ impl AgentProvider for KiloCodeProvider {
         });
         let mut args = contract.with_prompt(pinned, coppice_run_prompt());
 
-        if let Some(model) = self.model_arg(&input) {
-            args.push("--model".to_string());
-            args.push(model);
-        }
+        self.push_model_arg(&mut args, &input);
 
         // Resume a previous Kilo session if we have its id. `kilo run -s <id>`
         // is documented for resuming a specific session.
@@ -420,6 +418,64 @@ mod tests {
             mcp: None,
         };
         assert!(provider.model_arg(&input).is_none());
+    }
+
+    #[test]
+    fn blank_model_omits_model_flag_from_launched_command() {
+        let provider = KiloCodeProvider::new(KiloCodeProviderConfig::default());
+        let contract = coppice_connectors::get(coppice_connectors::KILO_CODE)
+            .expect("kilo descriptor")
+            .run_contract;
+        let base = contract.with_prompt(
+            contract.argv(&coppice_connectors::LaunchSubst {
+                read_only: false,
+                plan: false,
+                worktree: "/tmp/wt",
+                hostname: "",
+                port: "",
+                version: None,
+            }),
+            "prompt",
+        );
+        for model in [None, Some(String::new()), Some("   ".into())] {
+            let input = AgentRunInput {
+                model_provider: Some("anthropic".into()),
+                model,
+                ..blank_kilo_input()
+            };
+            let mut args = base.clone();
+            provider.push_model_arg(&mut args, &input);
+            assert!(
+                args.iter().all(|arg| arg != "--model" && arg != "-m"),
+                "model {:?} launched {args:?}",
+                input.model
+            );
+        }
+    }
+
+    fn blank_kilo_input() -> AgentRunInput {
+        AgentRunInput {
+            agent_id: "a".into(),
+            agent_key: "a".into(),
+            agent_role: "Backend Engineer".into(),
+            job_type: "work_on_ticket".into(),
+            ticket_id: None,
+            ticket_status: None,
+            context_profile: crate::domain::context_profile::ContextProfile::Full,
+            context_path: "/tmp/.agent/context.md".into(),
+            run_id: None,
+            chat_session_id: None,
+            artifacts_dir: None,
+            stream: None,
+            cancel_rx: None,
+            model_provider: None,
+            model: None,
+            session_created_tx: None,
+            resume_context: None,
+            resume_session_id: None,
+            read_only_tools: false,
+            mcp: None,
+        }
     }
 
     #[test]

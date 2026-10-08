@@ -79,7 +79,11 @@ impl OpenCodeClient {
         })
     }
 
-    fn url_with_directory(&self, path: &str, directory: &Path) -> Result<reqwest::Url, ProviderError> {
+    fn url_with_directory(
+        &self,
+        path: &str,
+        directory: &Path,
+    ) -> Result<reqwest::Url, ProviderError> {
         let mut url = reqwest::Url::parse(&format!("{}{path}", self.base_url))
             .map_err(|err| ProviderError::InvalidInput(format!("opencode url: {err}")))?;
         url.query_pairs_mut()
@@ -165,9 +169,10 @@ impl OpenCodeClient {
         drain_events_task(events_handle, &idle_flag).await;
 
         let messages = self.fetch_messages(&directory, &session_id).await?;
-        let snapshot = ctx.snapshot.lock().map_err(|_| {
-            ProviderError::InvalidFixture("snapshot lock poisoned".into())
-        })?;
+        let snapshot = ctx
+            .snapshot
+            .lock()
+            .map_err(|_| ProviderError::InvalidFixture("snapshot lock poisoned".into()))?;
         extract_result_from_messages(&messages)
             .or_else(|| extract_result_from_snapshot(&snapshot))
             .ok_or_else(|| {
@@ -199,7 +204,6 @@ impl OpenCodeClient {
         self.reattach_stream_loop(&directory, session_id, event_tx, idle_flag)
             .await
     }
-
 }
 
 impl StreamContext {
@@ -242,16 +246,16 @@ impl OpenCodeClient {
         model_provider: Option<&str>,
         model: Option<&str>,
     ) -> Result<String, ProviderError> {
-        let mut body = json!({});
-        if let (Some(provider), Some(model)) = (model_provider, model) {
-            body["model"] = json!({
-                "id": model,
-                "providerID": provider,
-            });
-        }
+        let body = session_create_body(model_provider, model);
 
         let url = self.url_with_directory("/session", directory)?;
-        let resp = self.api.post(url).json(&body).send().await.map_err(map_reqwest)?;
+        let resp = self
+            .api
+            .post(url)
+            .json(&body)
+            .send()
+            .await
+            .map_err(map_reqwest)?;
         let status = resp.status();
         let value: serde_json::Value = resp.json().await.map_err(map_reqwest)?;
         if !status.is_success() {
@@ -270,7 +274,8 @@ impl OpenCodeClient {
         session_id: &str,
         prompt: &str,
     ) -> Result<(), ProviderError> {
-        let url = self.url_with_directory(&format!("/session/{session_id}/prompt_async"), directory)?;
+        let url =
+            self.url_with_directory(&format!("/session/{session_id}/prompt_async"), directory)?;
         let body = json!({
             "parts": [{ "type": "text", "text": prompt }],
         });
@@ -567,9 +572,22 @@ fn map_reqwest(err: reqwest::Error) -> ProviderError {
 }
 
 fn api_error(action: &str, status: reqwest::StatusCode, body: serde_json::Value) -> ProviderError {
-    ProviderError::InvalidFixture(format!(
-        "opencode {action} failed ({status}): {body}"
-    ))
+    ProviderError::InvalidFixture(format!("opencode {action} failed ({status}): {body}"))
+}
+
+/// Session create body. A blank model or provider leaves the model to the CLI.
+pub(crate) fn session_create_body(
+    model_provider: Option<&str>,
+    model: Option<&str>,
+) -> serde_json::Value {
+    let mut body = json!({});
+    if let (Some(provider), Some(model)) = (
+        crate::providers::model_flag::selected_model(model_provider),
+        crate::providers::model_flag::selected_model(model),
+    ) {
+        body["model"] = json!({ "id": model, "providerID": provider });
+    }
+    body
 }
 
 fn mark_idle_when_status(status: Option<&str>, idle_flag: &std::sync::atomic::AtomicBool) -> bool {
@@ -584,6 +602,45 @@ fn mark_idle_when_status(status: Option<&str>, idle_flag: &std::sync::atomic::At
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn blank_model_omits_model_flag_from_launched_command() {
+        let contract = coppice_connectors::get(coppice_connectors::OPENCODE)
+            .expect("opencode descriptor")
+            .run_contract;
+        let args = contract.argv(&coppice_connectors::LaunchSubst {
+            read_only: false,
+            plan: false,
+            worktree: "",
+            hostname: "127.0.0.1",
+            port: "4096",
+            version: None,
+        });
+        assert!(
+            args.iter().all(|arg| arg != "--model" && arg != "-m"),
+            "serve argv {args:?}"
+        );
+        for (provider, model) in [
+            (None, None),
+            (Some("openai"), None),
+            (Some("openai"), Some("")),
+            (Some("openai"), Some("   ")),
+            (None, Some("gpt")),
+            (Some(""), Some("gpt")),
+            (Some("   "), Some("gpt")),
+        ] {
+            let body = session_create_body(provider, model);
+            assert!(
+                body.get("model").is_none(),
+                "{provider:?} {model:?} -> {body}"
+            );
+        }
+        let body = session_create_body(Some("openai"), Some("  gpt-5  "));
+        assert_eq!(
+            body["model"],
+            json!({ "id": "gpt-5", "providerID": "openai" })
+        );
+    }
 
     #[test]
     fn mark_idle_when_status_sets_flag() {

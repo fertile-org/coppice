@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { Link } from 'react-router-dom';
 import { Combobox } from '../../components/ui/combobox';
 import {
+  connectorDefaultModelLabel,
   INSTALL_GUIDE_URL,
   NO_READY_CONNECTOR_HINT,
   notOnPathHint,
@@ -55,8 +56,8 @@ export function agentToFormValues(agent: Agent): AgentFormValues {
     responsibilities: linesFromList(agent.responsibilities),
     systemPrompt: agent.systemPrompt,
     connector: agent.connector,
-    modelProvider: agent.modelProvider ?? '',
-    model: agent.model ?? '',
+    modelProvider: agent.modelProvider?.trim() ?? '',
+    model: agent.model?.trim() ?? '',
     enabled: agent.enabled,
     pluginIds: [],
   };
@@ -161,9 +162,17 @@ export function AgentForm({
   const showModelFields = values.connector !== 'mock';
   const { data: modelProviderOptions = [], isLoading: modelProvidersLoading } =
     useModelProviders(showModelFields ? values.connector : undefined);
+  const showProviderField = modelProviderOptions.length > 1;
+  const soleProviderId =
+    modelProviderOptions.length === 1 ? modelProviderOptions[0].id : undefined;
+  const modelsProviderId = showProviderField ? values.modelProvider : soleProviderId;
   const { data: modelOptions = [], isLoading: modelsLoading } = useModels(
     showModelFields ? values.connector : undefined,
-    showModelFields ? values.modelProvider : undefined,
+    showModelFields ? modelsProviderId || undefined : undefined,
+  );
+  const selectedConnector = connectorOptions.find((option) => option.id === values.connector);
+  const defaultModelLabel = connectorDefaultModelLabel(
+    selectedConnector?.displayName ?? selectedConnector?.id ?? values.connector,
   );
   const { data: plugins, isLoading: pluginsLoading } = usePlugins();
   const assignablePlugins = (plugins ?? []).filter(isAssignable);
@@ -195,6 +204,24 @@ export function AgentForm({
 
   function handleModelProviderChange(modelProvider: string) {
     onChange({ ...values, modelProvider, model: '' });
+  }
+
+  function handleModelChange(model: string) {
+    if (!model) {
+      onChange({
+        ...values,
+        model: '',
+        modelProvider: showProviderField ? values.modelProvider : '',
+      });
+      return;
+    }
+    onChange({
+      ...values,
+      model,
+      modelProvider: showProviderField
+        ? values.modelProvider
+        : (soleProviderId ?? values.modelProvider),
+    });
   }
 
   function togglePlugin(id: string, checked: boolean) {
@@ -403,24 +430,26 @@ export function AgentForm({
 
       {showModelFields && (
         <>
-          <div>
-            <label
-              htmlFor="agent-model-provider"
-              className="mb-1 block font-body text-sm font-medium text-bark-800"
-            >
-              Model provider
-            </label>
-            <Combobox
-              id="agent-model-provider"
-              value={values.modelProvider}
-              onValueChange={handleModelProviderChange}
-              disabled={modelProvidersLoading}
-              placeholder={modelProvidersLoading ? 'Loading…' : 'Select model provider'}
-              searchPlaceholder="Search providers…"
-              clearable
-              options={modelProviderOptions.map((p) => ({ value: p.id, label: p.id }))}
-            />
-          </div>
+          {showProviderField && (
+            <div>
+              <label
+                htmlFor="agent-model-provider"
+                className="mb-1 block font-body text-sm font-medium text-bark-800"
+              >
+                Model provider
+              </label>
+              <Combobox
+                id="agent-model-provider"
+                value={values.modelProvider}
+                onValueChange={handleModelProviderChange}
+                disabled={modelProvidersLoading}
+                placeholder={modelProvidersLoading ? 'Loading…' : 'Select model provider'}
+                searchPlaceholder="Search providers…"
+                clearable
+                options={modelProviderOptions.map((p) => ({ value: p.id, label: p.id }))}
+              />
+            </div>
+          )}
 
           <div>
             <label
@@ -432,12 +461,21 @@ export function AgentForm({
             <Combobox
               id="agent-model"
               value={values.model}
-              onValueChange={(value) => updateField('model', value)}
-              disabled={!values.modelProvider || modelsLoading}
-              placeholder={modelsLoading ? 'Loading…' : 'Select model'}
+              onValueChange={handleModelChange}
+              disabled={Boolean(modelsProviderId) && modelsLoading}
+              placeholder={modelsLoading ? 'Loading…' : defaultModelLabel}
               searchPlaceholder="Search models…"
-              clearable
-              options={modelOptions.map((m) => ({ value: m.id, label: m.name }))}
+              options={[
+                { value: '', label: defaultModelLabel },
+                ...modelOptions
+                  .filter((model) => model.id)
+                  .map((model) => ({ value: model.id, label: model.name })),
+                ...(values.model &&
+                values.model !== '' &&
+                !modelOptions.some((model) => model.id === values.model)
+                  ? [{ value: values.model, label: values.model }]
+                  : []),
+              ]}
             />
           </div>
         </>

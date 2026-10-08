@@ -27,7 +27,7 @@ docker compose -f deploy/docker-compose.yml exec -it -u "$(id -u):$(id -g)" serv
 
 | Step | Notes |
 |------|--------|
-| `enable` | Turns the connector on in `deploy/config/config.toml` — also set `model_providers` to IDs from `opencode auth list` (see below) |
+| `enable` | Turns the connector on in `deploy/config/config.toml`. Providers come from `opencode models` unless you set `model_providers` |
 | recreate server | Needed after `coppice connector enable` or a hand-edit. The in-app Connectors switch and saving an agent apply immediately. OpenCode is registered only when `enabled = true` |
 | `install` | Installs `opencode` into `/home/coppice/.opencode/bin` |
 | `setup` | Runs `opencode auth login` |
@@ -42,7 +42,8 @@ After login, put provider IDs into config (example):
 enabled = true
 command = "opencode"
 serve_hostname = "127.0.0.1"   # per-run servers listen here on a free port
-model_providers = ["zai-coding-plan"]
+# Optional. A non-empty list replaces providers read from `opencode models`.
+# model_providers = ["zai-coding-plan"]
 # run_timeout_secs = 3600   # optional; default 1800 (30 min)
 ```
 
@@ -50,7 +51,7 @@ model_providers = ["zai-coding-plan"]
 
 ```bash
 coppice connector enable opencode
-# edit config.toml model_providers, then restart coppice-server
+# restart coppice-server so it reloads config
 coppice connector install opencode   # or install OpenCode onto PATH yourself
 coppice connector setup opencode
 coppice connector doctor opencode
@@ -60,7 +61,7 @@ coppice connector doctor opencode
 
 1. Open **Agents** and create or edit an agent.
 2. Set connector to **opencode**.
-3. Pick a model provider (must be listed in `model_providers`) and a model.
+3. Leave the model on OpenCode's default, or pick a provider and model. With no `model_providers` override, Coppice reads providers from `opencode models` (a few seconds; if that fails, only the default is offered).
 4. Assign the agent to a ticket and start a run. Watch the **Live Session** in the ticket drawer.
 
 OpenCode has no separate `--provider` flag. Coppice sends `model_provider/model` to OpenCode. Common IDs after `opencode auth list`:
@@ -82,7 +83,7 @@ Start at **Tools → Connectors** (admin): it shows whether `opencode` is found,
 |---------|-------------|
 | Binary missing | Re-run `install`; PATH should include `/home/coppice/.opencode/bin` |
 | Auth missing | Re-run `setup` (`opencode auth login`) |
-| Agent health `missing_config` | If the message says OpenCode is turned off, turn it on in Tools → Connectors or save the agent again. If it names a model provider, add that id to `model_providers` (a hand-edit is read on the next server start) |
+| Agent health `missing_config` | If the message says OpenCode is turned off, turn it on in Tools → Connectors or save the agent again. If it names a model provider, set that id in `model_providers` (a hand-edit is read on the next server start) or leave the list empty so Coppice reads providers from `opencode models` |
 | Live Session empty / run fails | Check the run error (a per-run `opencode serve` that fails to start names the cause) and `doctor` |
 | Run times out on long tests | Raise `run_timeout_secs`, or prefer shorter agent test commands |
 

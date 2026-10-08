@@ -72,7 +72,8 @@ pub async fn evaluate_agent_health(
         );
     };
     if let Some(ref mp) = agent.model_provider {
-        if models.checks_model_provider() && !models.model_providers().contains(mp) {
+        if models.checks_model_provider() && !models.model_providers().await.iter().any(|p| p == mp)
+        {
             return (
                 AgentHealthStatus::MissingConfig,
                 Some(format!(
@@ -155,7 +156,6 @@ mod tests {
         );
 
         config.agent.connectors.cursor.enabled = true;
-        config.agent.connectors.cursor.model_providers = vec!["cursor".into()];
         let reg = registry(&config);
         let (status, detail) = evaluate_agent_health(&agent("cursor", Some("x")), &reg).await;
         assert_eq!(status, AgentHealthStatus::MissingConfig);
@@ -164,6 +164,9 @@ mod tests {
             Some("Model provider 'x' is not configured on this server")
         );
         let (status, detail) = evaluate_agent_health(&agent("cursor", Some("cursor")), &reg).await;
+        assert_eq!(status, AgentHealthStatus::Healthy);
+        assert_eq!(detail, None);
+        let (status, detail) = evaluate_agent_health(&agent("cursor", None), &reg).await;
         assert_eq!(status, AgentHealthStatus::Healthy);
         assert_eq!(detail, None);
     }

@@ -6,12 +6,17 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Plugin } from '../../lib/schemas/plugin';
 import {
   AgentForm,
+  agentToFormValues,
   type AgentFormValues,
   type PluginAssignmentState,
 } from './AgentForm';
+import type { Agent } from './useAgents';
 
 const mocks = vi.hoisted(() => ({
   plugins: [] as Plugin[],
+  modelProviders: [] as { id: string }[],
+  models: [] as { id: string; name: string }[],
+  modelsLoading: false,
 }));
 
 vi.mock('../plugins/usePlugins', () => ({
@@ -19,8 +24,8 @@ vi.mock('../plugins/usePlugins', () => ({
 }));
 
 vi.mock('./useAgents', () => ({
-  useModelProviders: () => ({ data: [], isLoading: false }),
-  useModels: () => ({ data: [], isLoading: false }),
+  useModelProviders: () => ({ data: mocks.modelProviders, isLoading: false }),
+  useModels: () => ({ data: mocks.models, isLoading: mocks.modelsLoading }),
 }));
 
 function plugin(overrides: Partial<Plugin>): Plugin {
@@ -85,37 +90,156 @@ function Harness({
   initial,
   onSubmit,
   pluginAssignment,
+  mode = 'edit',
+  connectorOptions = [{ id: 'mock' }],
 }: {
   initial: AgentFormValues;
   onSubmit: (values: AgentFormValues) => void;
   pluginAssignment?: PluginAssignmentState;
+  mode?: 'create' | 'edit';
+  connectorOptions?: { id: string; displayName?: string }[];
 }) {
   const [values, setValues] = useState(initial);
   return (
-    <AgentForm
-      mode="edit"
-      values={values}
-      onChange={setValues}
-      onSubmit={onSubmit}
-      onCancel={() => {}}
-      connectorOptions={[{ id: 'mock' }]}
-      pluginAssignment={pluginAssignment}
-    />
+    <MemoryRouter>
+      <AgentForm
+        mode={mode}
+        values={values}
+        onChange={setValues}
+        onSubmit={onSubmit}
+        onCancel={() => {}}
+        connectorOptions={connectorOptions}
+        pluginAssignment={pluginAssignment}
+      />
+    </MemoryRouter>
   );
 }
+
+describe('AgentForm model choice', () => {
+  beforeEach(() => {
+    mocks.plugins = [];
+    mocks.modelProviders = [];
+    mocks.models = [];
+    mocks.modelsLoading = false;
+  });
+
+  it('hides an empty provider list and preselects the connector default', () => {
+    mocks.modelProviders = [];
+    render(
+      <Harness
+        mode="create"
+        initial={baseValues({ connector: 'cursor' })}
+        onSubmit={vi.fn()}
+        connectorOptions={[{ id: 'cursor', displayName: 'Cursor' }]}
+      />,
+    );
+
+    expect(screen.queryByLabelText('Model provider')).toBeNull();
+    expect(screen.getByRole('combobox', { name: 'Model' })).toHaveTextContent(
+      "Cursor's default",
+    );
+  });
+
+  it('hides the provider field for one provider and preselects that connector default', () => {
+    mocks.modelProviders = [{ id: 'cursor' }];
+    mocks.models = [{ id: 'composer-2.5', name: 'Composer 2.5' }];
+    render(
+      <Harness
+        mode="create"
+        initial={baseValues({ connector: 'cursor' })}
+        onSubmit={vi.fn()}
+        connectorOptions={[{ id: 'cursor', displayName: 'Cursor' }]}
+      />,
+    );
+
+    expect(screen.queryByLabelText('Model provider')).toBeNull();
+    expect(screen.getByRole('combobox', { name: 'Model' })).toHaveTextContent(
+      "Cursor's default",
+    );
+  });
+
+  it('shows the provider field when several providers are available', () => {
+    mocks.modelProviders = [{ id: 'sonnet' }, { id: 'opus' }, { id: 'haiku' }];
+    render(
+      <Harness
+        mode="create"
+        initial={baseValues({ connector: 'claude-code' })}
+        onSubmit={vi.fn()}
+        connectorOptions={[{ id: 'claude-code', displayName: 'Claude Code' }]}
+      />,
+    );
+
+    expect(screen.getByLabelText('Model provider')).toBeInTheDocument();
+    expect(screen.getByRole('combobox', { name: 'Model' })).toHaveTextContent(
+      "Claude Code's default",
+    );
+  });
+
+  it('treats a blank saved model as the connector default', () => {
+    const agent = {
+      id: 'a',
+      name: 'Builder',
+      role: 'Developer',
+      skills: [],
+      responsibilities: [],
+      systemPrompt: '',
+      connector: 'cursor',
+      modelProvider: '   ',
+      model: '   ',
+      health: 'healthy',
+      enabled: true,
+      createdAt: '',
+      updatedAt: '',
+    } satisfies Agent;
+    expect(agentToFormValues(agent).model).toBe('');
+    expect(agentToFormValues(agent).modelProvider).toBe('');
+  });
+
+  it('shows the connector default for an agent with no saved model', () => {
+    mocks.modelProviders = [{ id: 'cursor' }];
+    render(
+      <Harness
+        initial={baseValues({ connector: 'cursor', model: '', modelProvider: '' })}
+        onSubmit={vi.fn()}
+        connectorOptions={[{ id: 'cursor', displayName: 'Cursor' }]}
+      />,
+    );
+
+    expect(screen.getByRole('combobox', { name: 'Model' })).toHaveTextContent(
+      "Cursor's default",
+    );
+  });
+
+  it('submits a blank model when the default stays selected', async () => {
+    mocks.modelProviders = [{ id: 'cursor' }];
+    const onSubmit = vi.fn();
+    render(
+      <Harness
+        mode="create"
+        initial={baseValues({ connector: 'cursor', systemPrompt: 'Help' })}
+        onSubmit={onSubmit}
+        connectorOptions={[{ id: 'cursor', displayName: 'Cursor' }]}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Create agent' }));
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(onSubmit.mock.calls[0][0].model).toBe('');
+    expect(onSubmit.mock.calls[0][0].modelProvider).toBe('');
+  });
+});
 
 describe('AgentForm plugins picker', () => {
   beforeEach(() => {
     mocks.plugins = [pluginA, pluginB, pluginC];
+    mocks.modelProviders = [];
+    mocks.models = [];
   });
 
   it('empty plugin list links to the Plugins page', () => {
     mocks.plugins = [pluginB];
-    render(
-      <MemoryRouter>
-        <Harness initial={baseValues()} onSubmit={vi.fn()} />
-      </MemoryRouter>,
-    );
+    render(<Harness initial={baseValues()} onSubmit={vi.fn()} />);
 
     expect(screen.getByRole('link', { name: 'Plugins' })).toHaveAttribute(
       'href',

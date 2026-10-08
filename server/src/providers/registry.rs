@@ -84,10 +84,10 @@ fn build_opencode(config: &AppConfig, deps: &FactoryDeps) -> Option<BuiltConnect
             deps.opencode_runs.clone(),
             cfg.clone(),
         )),
-        models: Arc::new(OpenCodeModels {
-            command: cfg.command.clone(),
-            model_providers: cfg.model_providers.clone(),
-        }),
+        models: Arc::new(OpenCodeModels::new(
+            cfg.command.clone(),
+            cfg.model_providers.clone(),
+        )),
     })
 }
 
@@ -124,10 +124,10 @@ fn build_kilo_code(config: &AppConfig, _deps: &FactoryDeps) -> Option<BuiltConne
     }
     Some(BuiltConnector {
         provider: Arc::new(KiloCodeProvider::new(cfg.clone())),
-        models: Arc::new(KiloCodeModels {
-            command: cfg.command.clone(),
-            model_providers: cfg.model_providers.clone(),
-        }),
+        models: Arc::new(KiloCodeModels::new(
+            cfg.command.clone(),
+            cfg.model_providers.clone(),
+        )),
     })
 }
 
@@ -186,13 +186,16 @@ impl ConnectorRegistry {
         ids
     }
 
-    pub fn has_model_provider(&self, connector: &str, model_provider: &str) -> bool {
-        self.connectors.get(connector).is_some_and(|c| {
-            c.models
-                .model_providers()
-                .iter()
-                .any(|p| p == model_provider)
-        })
+    pub async fn has_model_provider(&self, connector: &str, model_provider: &str) -> bool {
+        let Some(built) = self.connectors.get(connector) else {
+            return false;
+        };
+        built
+            .models
+            .model_providers()
+            .await
+            .iter()
+            .any(|provider| provider == model_provider)
     }
 }
 
@@ -204,11 +207,11 @@ mod tests {
         OpenCodeRunServers::new("opencode".into(), "127.0.0.1".into())
     }
 
-    fn providers_of(registry: &ConnectorRegistry, id: &str) -> Vec<String> {
-        registry
-            .models(id)
-            .map(|m| m.model_providers().to_vec())
-            .unwrap_or_default()
+    async fn providers_of(registry: &ConnectorRegistry, id: &str) -> Vec<String> {
+        match registry.models(id) {
+            Some(models) => models.model_providers().await,
+            None => Vec::new(),
+        }
     }
 
     #[test]
@@ -279,19 +282,23 @@ mod tests {
         );
     }
 
-    #[test]
-    fn models_catalog_reports_config_model_providers() {
+    #[tokio::test]
+    async fn models_catalog_reports_config_model_providers() {
         let mut config = AppConfig::load_defaults().expect("config");
         config.agent.connectors.opencode.enabled = true;
         config.agent.connectors.opencode.model_providers = vec!["zai-coding-plan".into()];
         let registry = ConnectorRegistry::from_config(&config, runs());
         let models = registry.models("opencode").expect("opencode catalog");
-        assert_eq!(models.model_providers(), ["zai-coding-plan".to_string()]);
+        assert_eq!(
+            models.model_providers().await,
+            ["zai-coding-plan".to_string()]
+        );
         #[cfg(feature = "mock-provider")]
         assert!(registry
             .models("mock")
             .expect("mock catalog")
             .model_providers()
+            .await
             .is_empty());
         #[cfg(not(feature = "mock-provider"))]
         assert!(registry.models("mock").is_none());
@@ -317,25 +324,58 @@ mod tests {
         assert!(registry.has("opencode"));
     }
 
-    #[test]
-    fn lists_model_providers_from_config() {
+    #[tokio::test]
+    async fn lists_model_providers_from_config() {
         let mut config = AppConfig::load_defaults().expect("config");
         config.agent.connectors.opencode.enabled = true;
         config.agent.connectors.opencode.model_providers = vec!["zai-coding-plan".into()];
         let registry = ConnectorRegistry::from_config(&config, runs());
-        assert_eq!(providers_of(&registry, "opencode"), vec!["zai-coding-plan"]);
-        assert!(providers_of(&registry, "mock").is_empty());
+        assert_eq!(
+            providers_of(&registry, "opencode").await,
+            vec!["zai-coding-plan"]
+        );
+        assert!(providers_of(&registry, "mock").await.is_empty());
     }
 
-    #[test]
-    fn registers_claude_code_when_enabled() {
+    #[tokio::test]
+    async fn empty_config_uses_builtin_model_providers() {
+        let mut config = AppConfig::load_defaults().expect("config");
+        config.agent.connectors.cursor.enabled = true;
+        config.agent.connectors.claude_code.enabled = true;
+        config.agent.connectors.codex.enabled = true;
+        config.agent.connectors.kilo_code.enabled = true;
+        config.agent.connectors.kilo_code.command = "coppice-missing-kilo".into();
+        config.agent.connectors.opencode.enabled = true;
+        config.agent.connectors.opencode.command = "coppice-missing-opencode".into();
+        let registry = ConnectorRegistry::from_config(&config, runs());
+        assert_eq!(providers_of(&registry, "cursor").await, vec!["cursor"]);
+        assert_eq!(
+            providers_of(&registry, "claude-code").await,
+            vec!["sonnet", "opus", "haiku"]
+        );
+        assert_eq!(providers_of(&registry, "codex").await, vec!["openai"]);
+        assert!(providers_of(&registry, "kilo-code").await.is_empty());
+        assert!(providers_of(&registry, "opencode").await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn non_empty_config_replaces_builtin_model_providers() {
+        let mut config = AppConfig::load_defaults().expect("config");
+        config.agent.connectors.cursor.enabled = true;
+        config.agent.connectors.cursor.model_providers = vec!["other".into()];
+        let registry = ConnectorRegistry::from_config(&config, runs());
+        assert_eq!(providers_of(&registry, "cursor").await, vec!["other"]);
+    }
+
+    #[tokio::test]
+    async fn registers_claude_code_when_enabled() {
         let mut config = AppConfig::load_defaults().expect("config");
         config.agent.connectors.claude_code.enabled = true;
         config.agent.connectors.claude_code.model_providers = vec!["sonnet".into(), "opus".into()];
         let registry = ConnectorRegistry::from_config(&config, runs());
         assert!(registry.has("claude-code"));
         assert_eq!(
-            providers_of(&registry, "claude-code"),
+            providers_of(&registry, "claude-code").await,
             vec!["sonnet", "opus"]
         );
     }
@@ -347,14 +387,17 @@ mod tests {
         assert!(!registry.has("claude-code"));
     }
 
-    #[test]
-    fn registers_codex_when_enabled() {
+    #[tokio::test]
+    async fn registers_codex_when_enabled() {
         let mut config = AppConfig::load_defaults().expect("config");
         config.agent.connectors.codex.enabled = true;
         config.agent.connectors.codex.model_providers = vec!["openai".into(), "azure".into()];
         let registry = ConnectorRegistry::from_config(&config, runs());
         assert!(registry.has("codex"));
-        assert_eq!(providers_of(&registry, "codex"), vec!["openai", "azure"]);
+        assert_eq!(
+            providers_of(&registry, "codex").await,
+            vec!["openai", "azure"]
+        );
     }
 
     #[test]
@@ -364,8 +407,8 @@ mod tests {
         assert!(!registry.has("codex"));
     }
 
-    #[test]
-    fn registers_kilo_code_when_enabled() {
+    #[tokio::test]
+    async fn registers_kilo_code_when_enabled() {
         let mut config = AppConfig::load_defaults().expect("config");
         config.agent.connectors.kilo_code.enabled = true;
         config.agent.connectors.kilo_code.model_providers =
@@ -373,7 +416,7 @@ mod tests {
         let registry = ConnectorRegistry::from_config(&config, runs());
         assert!(registry.has("kilo-code"));
         assert_eq!(
-            providers_of(&registry, "kilo-code"),
+            providers_of(&registry, "kilo-code").await,
             vec!["anthropic", "openai"]
         );
     }
@@ -385,14 +428,14 @@ mod tests {
         assert!(!registry.has("kilo-code"));
     }
 
-    #[test]
-    fn registers_cursor_when_enabled() {
+    #[tokio::test]
+    async fn registers_cursor_when_enabled() {
         let mut config = AppConfig::load_defaults().expect("config");
         config.agent.connectors.cursor.enabled = true;
         config.agent.connectors.cursor.model_providers = vec!["cursor".into()];
         let registry = ConnectorRegistry::from_config(&config, runs());
         assert!(registry.has("cursor"));
-        assert_eq!(providers_of(&registry, "cursor"), vec!["cursor"]);
+        assert_eq!(providers_of(&registry, "cursor").await, vec!["cursor"]);
     }
 
     /// End-user binaries are built without `mock-provider`. The connector must

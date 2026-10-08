@@ -11,8 +11,8 @@ pub struct ModelInfo {
 
 #[async_trait]
 pub trait ModelCatalog: Send + Sync {
-    /// Model providers from the connector's config.
-    fn model_providers(&self) -> &[String];
+    /// Model providers: a non-empty config list, otherwise the connector's built-in defaults.
+    async fn model_providers(&self) -> Vec<String>;
 
     async fn list_models(&self, model_provider: &str) -> anyhow::Result<Vec<ModelInfo>>;
 
@@ -30,8 +30,8 @@ pub struct MockModels;
 #[cfg(feature = "mock-provider")]
 #[async_trait]
 impl ModelCatalog for MockModels {
-    fn model_providers(&self) -> &[String] {
-        &[]
+    async fn model_providers(&self) -> Vec<String> {
+        Vec::new()
     }
 
     async fn list_models(&self, _model_provider: &str) -> anyhow::Result<Vec<ModelInfo>> {
@@ -45,19 +45,47 @@ impl ModelCatalog for MockModels {
 
 pub struct OpenCodeModels {
     pub command: String,
+    /// Non-empty config override. Empty means discover providers from the CLI.
     pub model_providers: Vec<String>,
+    cache: crate::providers::cli_catalog::ProviderCache,
+}
+
+impl OpenCodeModels {
+    pub fn new(command: String, model_providers: Vec<String>) -> Self {
+        Self {
+            command,
+            model_providers,
+            cache: crate::providers::cli_catalog::ProviderCache::new(),
+        }
+    }
 }
 
 #[async_trait]
 impl ModelCatalog for OpenCodeModels {
-    fn model_providers(&self) -> &[String] {
-        &self.model_providers
+    async fn model_providers(&self) -> Vec<String> {
+        let configured =
+            crate::providers::cli_catalog::effective_model_providers(&self.model_providers, &[]);
+        if !configured.is_empty() {
+            return configured;
+        }
+        if let Some(cached) = self.cache.get() {
+            return cached;
+        }
+        let discovered = crate::providers::cli_catalog::discover_cli_providers(&self.command).await;
+        self.cache.store(discovered.clone());
+        discovered
     }
 
     async fn list_models(&self, model_provider: &str) -> anyhow::Result<Vec<ModelInfo>> {
-        let models =
-            crate::providers::opencode_models::list_opencode_models(&self.command, model_provider)
-                .await?;
+        let listed = tokio::time::timeout(
+            crate::providers::cli_catalog::CLI_LIST_TIMEOUT,
+            crate::providers::opencode_models::list_opencode_models(&self.command, model_provider),
+        )
+        .await;
+        let models = match listed {
+            Ok(Ok(models)) => models,
+            _ => return Ok(vec![]),
+        };
         Ok(models
             .into_iter()
             .map(|m| ModelInfo {
@@ -74,8 +102,13 @@ pub struct ClaudeCodeModels {
 
 #[async_trait]
 impl ModelCatalog for ClaudeCodeModels {
-    fn model_providers(&self) -> &[String] {
-        &self.model_providers
+    async fn model_providers(&self) -> Vec<String> {
+        crate::providers::cli_catalog::effective_model_providers(
+            &self.model_providers,
+            coppice_connectors::get(coppice_connectors::CLAUDE_CODE)
+                .map(|descriptor| descriptor.default_model_providers)
+                .unwrap_or(&[]),
+        )
     }
 
     async fn list_models(&self, model_provider: &str) -> anyhow::Result<Vec<ModelInfo>> {
@@ -95,8 +128,13 @@ pub struct CodexModels {
 
 #[async_trait]
 impl ModelCatalog for CodexModels {
-    fn model_providers(&self) -> &[String] {
-        &self.model_providers
+    async fn model_providers(&self) -> Vec<String> {
+        crate::providers::cli_catalog::effective_model_providers(
+            &self.model_providers,
+            coppice_connectors::get(coppice_connectors::CODEX)
+                .map(|descriptor| descriptor.default_model_providers)
+                .unwrap_or(&[]),
+        )
     }
 
     async fn list_models(&self, model_provider: &str) -> anyhow::Result<Vec<ModelInfo>> {
@@ -113,18 +151,47 @@ impl ModelCatalog for CodexModels {
 
 pub struct KiloCodeModels {
     pub command: String,
+    /// Non-empty config override. Empty means discover providers from the CLI.
     pub model_providers: Vec<String>,
+    cache: crate::providers::cli_catalog::ProviderCache,
+}
+
+impl KiloCodeModels {
+    pub fn new(command: String, model_providers: Vec<String>) -> Self {
+        Self {
+            command,
+            model_providers,
+            cache: crate::providers::cli_catalog::ProviderCache::new(),
+        }
+    }
 }
 
 #[async_trait]
 impl ModelCatalog for KiloCodeModels {
-    fn model_providers(&self) -> &[String] {
-        &self.model_providers
+    async fn model_providers(&self) -> Vec<String> {
+        let configured =
+            crate::providers::cli_catalog::effective_model_providers(&self.model_providers, &[]);
+        if !configured.is_empty() {
+            return configured;
+        }
+        if let Some(cached) = self.cache.get() {
+            return cached;
+        }
+        let discovered = crate::providers::cli_catalog::discover_cli_providers(&self.command).await;
+        self.cache.store(discovered.clone());
+        discovered
     }
 
     async fn list_models(&self, model_provider: &str) -> anyhow::Result<Vec<ModelInfo>> {
-        let models =
-            crate::providers::kilo_models::list_kilo_models(&self.command, model_provider).await?;
+        let listed = tokio::time::timeout(
+            crate::providers::cli_catalog::CLI_LIST_TIMEOUT,
+            crate::providers::kilo_models::list_kilo_models(&self.command, model_provider),
+        )
+        .await;
+        let models = match listed {
+            Ok(Ok(models)) => models,
+            _ => return Ok(vec![]),
+        };
         Ok(models
             .into_iter()
             .map(|m| ModelInfo {
@@ -142,8 +209,13 @@ pub struct CursorModels {
 
 #[async_trait]
 impl ModelCatalog for CursorModels {
-    fn model_providers(&self) -> &[String] {
-        &self.model_providers
+    async fn model_providers(&self) -> Vec<String> {
+        crate::providers::cli_catalog::effective_model_providers(
+            &self.model_providers,
+            coppice_connectors::get(coppice_connectors::CURSOR)
+                .map(|descriptor| descriptor.default_model_providers)
+                .unwrap_or(&[]),
+        )
     }
 
     /// Cursor has one model namespace; any other provider id lists nothing.
@@ -244,7 +316,7 @@ mod tests {
     #[tokio::test]
     async fn mock_lists_nothing_and_skips_provider_check() {
         assert!(MockModels.list_models("x").await.expect("empty").is_empty());
-        assert!(MockModels.model_providers().is_empty());
+        assert!(MockModels.model_providers().await.is_empty());
         assert!(!MockModels.checks_model_provider());
     }
 }

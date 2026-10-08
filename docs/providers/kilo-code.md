@@ -49,7 +49,7 @@ coppice connector doctor kilo-code
 
 1. Open **Agents** and create or edit an agent.
 2. Set connector to **kilo-code**.
-3. Pick a model provider (e.g. `anthropic`) and a model from the list (from `kilo models <provider>` after login).
+3. Leave the model on Kilo Code's default, or pick a provider and model. With no `model_providers` override, Coppice reads providers from `kilo models` (a few seconds; if that fails, only the default is offered).
 4. Assign the agent to a ticket and start a run.
 
 Optional config (usually set by `enable`):
@@ -58,7 +58,8 @@ Optional config (usually set by `enable`):
 [agent.connectors.kilo-code]
 enabled = true
 command = "kilo"
-model_providers = ["anthropic", "openai"]
+# Optional. A non-empty list replaces the providers read from `kilo models`.
+# model_providers = ["anthropic", "openai"]
 # run_timeout_secs = 600
 ```
 

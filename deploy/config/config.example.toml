@@ -35,31 +35,35 @@ serve_hostname = "127.0.0.1"
 serve_port = 4096
 # Max seconds Coppice waits for OpenCode session idle (default 1800 = 30 min).
 # run_timeout_secs = 3600
-model_providers = []
+# Optional. A non-empty list replaces the built-in providers. Empty or omitted
+# keeps the built-in list (OpenCode reads it from `opencode models`).
 # model_providers = ["zai-coding-plan", "opencode-go", "opencode-zen", "alibaba"]
 
 [agent.connectors.claude-code]
 enabled = true
 # run_timeout_secs = 3600
-model_providers = ["sonnet", "opus", "haiku"]
+# Optional. A non-empty list replaces the built-in providers (sonnet, opus, haiku).
+# model_providers = ["sonnet", "opus", "haiku"]
 
 [agent.connectors.codex]
 enabled = false
 # run_timeout_secs = 3600
-model_providers = ["openai", "azure"]
+# Optional. A non-empty list replaces the built-in provider (openai).
+# model_providers = ["openai", "azure"]
 
 [agent.connectors.kilo-code]
 enabled = false
 command = "kilo"
 # run_timeout_secs = 3600
-model_providers = []
+# Optional. A non-empty list replaces the built-in providers. Empty or omitted
+# keeps the built-in list (Kilo reads it from `kilo models`).
 # model_providers = ["anthropic", "openai"]
 
 [agent.connectors.cursor]
 enabled = false
 command = "agent"
 # run_timeout_secs = 3600
-model_providers = []
+# Optional. A non-empty list replaces the built-in provider (cursor).
 # model_providers = ["cursor"]
 
 

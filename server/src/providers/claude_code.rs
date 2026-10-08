@@ -36,6 +36,10 @@ fn claude_mcp_args(access: &McpAccess, run_dir: &Path) -> std::io::Result<Vec<St
     ])
 }
 
+fn append_model_flag(args: &mut Vec<String>, model: Option<&str>) {
+    crate::providers::model_flag::push_model_flag(args, "--model", model);
+}
+
 fn claude_allowed_tools(read_only_tools: bool, mcp: bool) -> String {
     let base = if read_only_tools {
         CHAT_READ_ONLY_TOOLS
@@ -91,10 +95,7 @@ impl AgentProvider for ClaudeCodeProvider {
         args.push("--allowedTools".to_string());
         args.push(claude_allowed_tools(read_only_tools, input.mcp.is_some()));
 
-        if let Some(model) = &input.model {
-            args.push("--model".to_string());
-            args.push(model.clone());
-        }
+        append_model_flag(&mut args, input.model.as_deref());
 
         // Resume a previous claude-code session if we have its session_id.
         if let Some(sid) = &input.resume_session_id {
@@ -232,6 +233,32 @@ mod tests {
     use super::*;
     use crate::mcp::protocol::SERVER_NAME;
     use std::path::PathBuf;
+
+    #[test]
+    fn blank_model_omits_model_flag_from_launched_command() {
+        let contract = coppice_connectors::get(coppice_connectors::CLAUDE_CODE)
+            .expect("claude-code descriptor")
+            .run_contract;
+        let base = contract.with_prompt(
+            contract.argv(&coppice_connectors::LaunchSubst {
+                read_only: false,
+                plan: false,
+                worktree: "/tmp/wt",
+                hostname: "",
+                port: "",
+                version: None,
+            }),
+            "prompt",
+        );
+        for model in [None, Some(""), Some("   ")] {
+            let mut args = base.clone();
+            append_model_flag(&mut args, model);
+            assert!(
+                args.iter().all(|arg| arg != "--model" && arg != "-m"),
+                "model {model:?} launched {args:?}"
+            );
+        }
+    }
 
     fn fixtures_root() -> PathBuf {
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../fixtures/claude-code")

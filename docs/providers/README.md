@@ -41,7 +41,7 @@ Each connector has a `[agent.connectors.<id>]` section in `config.toml`:
 | --- | --- | --- |
 | `enabled` | all | `false` |
 | `command` | `cursor` (`agent`), `opencode` (`opencode`), `kilo-code` (`kilo`) | Claude Code and Codex always run `claude` / `codex` |
-| `model_providers` | all | Empty. Turning a connector on fills an empty list from the descriptor: `claude-code` → `sonnet, opus, haiku`; `codex` → `openai`; `cursor` → `cursor`; `kilo-code` → `anthropic`; `opencode` → none (list IDs from `opencode auth list` yourself) |
+| `model_providers` | all | Optional. Empty or omitted uses the built-in list: `claude-code` → `sonnet, opus, haiku`; `codex` → `openai`; `cursor` → `cursor`. `opencode` and `kilo-code` read providers from `opencode models` / `kilo models` (a few seconds; a CLI failure leaves the list empty). A non-empty value replaces that built-in list. Turning a connector on still fills an empty file entry from the descriptor when the descriptor has one |
 | `run_timeout_secs` | all | `600`; `opencode` `1800` |
 | `serve_hostname` | `opencode` | `127.0.0.1` (each run's server picks a free port; `serve_port` is ignored) |
 

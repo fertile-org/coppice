@@ -44,6 +44,13 @@ export function turnedOnToast(name: string): string {
   return `${name} turned on.`;
 }
 
+/** First model option. `{connector}` is the connector's display name. */
+export const CONNECTOR_DEFAULT_MODEL_LABEL = "{connector}'s default";
+
+export function connectorDefaultModelLabel(connectorName: string): string {
+  return CONNECTOR_DEFAULT_MODEL_LABEL.replaceAll('{connector}', connectorName);
+}
+
 export function turnOffConfirm(name: string, count: number): string {
   if (count === 1) {
     return `Turn off ${name}? 1 agent uses it and can't run tickets until you turn it back on or switch it to another connector.`;
