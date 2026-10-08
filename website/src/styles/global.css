@@ -263,13 +263,6 @@ a:hover {
   margin-top: 1.35rem;
 }
 
-.download-note {
-  flex-basis: 100%;
-  margin: 0;
-  color: var(--color-bark-700);
-  font-size: 0.98rem;
-}
-
 .btn {
   display: inline-flex;
   align-items: center;
