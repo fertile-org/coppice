@@ -144,13 +144,13 @@ async fn list_model_providers(
     if !registry.has(&connector_id) {
         return Err(StatusCode::NOT_FOUND);
     }
-    let items = registry
-        .models(&connector_id)
-        .map(|models| models.model_providers().to_vec())
-        .unwrap_or_default()
-        .into_iter()
-        .map(|id| ModelProviderResponse { id })
-        .collect();
+    let items = match registry.models(&connector_id) {
+        Some(models) => models.model_providers().await,
+        None => Vec::new(),
+    }
+    .into_iter()
+    .map(|id| ModelProviderResponse { id })
+    .collect();
     Ok(Json(ModelProviderListResponse { items }))
 }
 
@@ -163,7 +163,10 @@ async fn list_models(
     if !registry.has(&connector_id) {
         return Err(ModelsApiError::Status(StatusCode::NOT_FOUND));
     }
-    if !registry.has_model_provider(&connector_id, &model_provider_id) {
+    if !registry
+        .has_model_provider(&connector_id, &model_provider_id)
+        .await
+    {
         return Err(ModelsApiError::Status(StatusCode::NOT_FOUND));
     }
     let catalog = registry

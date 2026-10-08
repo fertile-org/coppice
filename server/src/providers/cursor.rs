@@ -248,12 +248,7 @@ fn cursor_cli_args(
         version,
     });
     let mut args = contract.with_prompt(pinned, coppice_run_prompt());
-    if let Some(model) = model {
-        if !model.is_empty() {
-            args.push("--model".to_string());
-            args.push(model.to_string());
-        }
-    }
+    crate::providers::model_flag::push_model_flag(&mut args, "--model", model);
     if let Some(sid) = resume_session_id {
         if !sid.is_empty() {
             args.push("--resume".to_string());
@@ -429,6 +424,17 @@ mod tests {
         assert!(args.windows(2).any(|w| w == ["--mode", "ask"]));
         assert!(!args.iter().any(|a| a == "--force"));
         assert!(args.windows(2).any(|w| w == ["--model", "auto"]));
+    }
+
+    #[test]
+    fn blank_model_omits_model_flag_from_launched_command() {
+        for model in [None, Some(""), Some("   ")] {
+            let args = cursor_cli_args(Path::new("/tmp/wt"), false, false, model, None, None);
+            assert!(
+                args.iter().all(|arg| arg != "--model" && arg != "-m"),
+                "model {model:?} launched {args:?}"
+            );
+        }
     }
 
     #[test]

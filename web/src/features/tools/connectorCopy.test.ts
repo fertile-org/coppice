@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { chatUnavailableMessage, readinessLabel } from './connectorCopy';
+import {
+  chatUnavailableMessage,
+  CONNECTOR_DEFAULT_MODEL_LABEL,
+  connectorDefaultModelLabel,
+  readinessLabel,
+} from './connectorCopy';
 
 describe('readinessLabel', () => {
   it('names a found CLI whose sign-in was not checked', () => {
@@ -12,6 +17,14 @@ describe('readinessLabel', () => {
     expect(readinessLabel('not_on_path')).toBe('Not on your PATH');
     expect(readinessLabel(null)).toBeNull();
     expect(readinessLabel(undefined)).toBeNull();
+  });
+});
+
+describe('connectorDefaultModelLabel', () => {
+  it('fills the connector display name into the template', () => {
+    expect(CONNECTOR_DEFAULT_MODEL_LABEL).toBe("{connector}'s default");
+    expect(connectorDefaultModelLabel('Cursor')).toBe("Cursor's default");
+    expect(connectorDefaultModelLabel('Claude Code')).toBe("Claude Code's default");
   });
 });
 
