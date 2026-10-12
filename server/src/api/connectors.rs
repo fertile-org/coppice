@@ -1,7 +1,7 @@
 use crate::api::auth::AuthUser;
 use crate::AppState;
 use axum::{
-    extract::{Path, State},
+    extract::{Path, Query, State},
     http::StatusCode,
     response::{IntoResponse, Response},
     routing::get,
@@ -9,7 +9,7 @@ use axum::{
 };
 use coppice_connectors::sign_in::Readiness;
 use coppice_connectors::{ConsoleKind, MOCK};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
 pub fn routes() -> Router<Arc<AppState>> {
@@ -75,27 +75,49 @@ struct ModelListResponse {
 #[derive(Serialize)]
 struct ApiMessageResponse {
     message: String,
+    /// First CLI stderr line, when the list command failed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    detail: Option<String>,
 }
 
 enum ModelsApiError {
     Status(StatusCode),
-    Message(StatusCode, String),
+    Message {
+        status: StatusCode,
+        message: String,
+        detail: Option<String>,
+    },
 }
 
 impl IntoResponse for ModelsApiError {
     fn into_response(self) -> Response {
         match self {
             ModelsApiError::Status(code) => code.into_response(),
-            ModelsApiError::Message(code, message) => {
-                tracing::warn!(%message, status = %code, "connector models listing failed");
-                (code, Json(ApiMessageResponse { message })).into_response()
+            ModelsApiError::Message {
+                status,
+                message,
+                detail,
+            } => {
+                tracing::warn!(%message, ?detail, %status, "connector models listing failed");
+                (status, Json(ApiMessageResponse { message, detail })).into_response()
             }
         }
     }
 }
 
-fn models_gateway_err(context: &str, err: impl std::fmt::Display) -> ModelsApiError {
-    ModelsApiError::Message(StatusCode::BAD_GATEWAY, format!("{context}: {err}"))
+fn models_gateway_err(context: &str, err: &anyhow::Error) -> ModelsApiError {
+    ModelsApiError::Message {
+        status: StatusCode::BAD_GATEWAY,
+        message: format!("{context}: {err}"),
+        detail: crate::providers::cli_catalog::model_list_detail(err),
+    }
+}
+
+#[derive(Debug, Deserialize, Default)]
+struct ModelsQuery {
+    /// When true, skip the server's cached list for this connector and provider.
+    #[serde(default)]
+    refresh: bool,
 }
 
 async fn list_connectors(
@@ -158,6 +180,7 @@ async fn list_models(
     State(state): State<Arc<AppState>>,
     AuthUser { .. }: AuthUser,
     Path((connector_id, model_provider_id)): Path<(String, String)>,
+    Query(query): Query<ModelsQuery>,
 ) -> Result<Json<ModelListResponse>, ModelsApiError> {
     let registry = state.connectors.registry();
     if !registry.has(&connector_id) {
@@ -173,9 +196,9 @@ async fn list_models(
         .models(&connector_id)
         .ok_or(ModelsApiError::Status(StatusCode::NOT_FOUND))?;
     let models = catalog
-        .list_models(&model_provider_id)
+        .list_models(&model_provider_id, query.refresh)
         .await
-        .map_err(|err| models_gateway_err(&format!("{connector_id} models"), err))?;
+        .map_err(|err| models_gateway_err(&format!("{connector_id} models"), &err))?;
     Ok(Json(ModelListResponse {
         items: models
             .into_iter()

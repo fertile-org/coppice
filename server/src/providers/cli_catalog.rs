@@ -3,10 +3,47 @@
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-/// Bound for `opencode models` / `kilo models`. A hung CLI must not stall the form.
+/// Bound for provider discovery (`opencode models` / `kilo models` id scan).
+/// A hung CLI must not stall health checks. Model lists use [`MODEL_LIST_TIMEOUT`].
 pub const CLI_LIST_TIMEOUT: Duration = Duration::from_secs(3);
 
+/// Model lists hit the network. Cursor's `agent models` often takes several
+/// seconds; a shorter bound fails the picker while the Ready check can still
+/// pass.
+pub const MODEL_LIST_TIMEOUT: Duration = Duration::from_secs(30);
+
 const CLI_LIST_CACHE: Duration = Duration::from_secs(30);
+
+/// Failure from a connector CLI model list. `detail` is the first stderr line
+/// (or a short spawn/timeout line) for the agent form.
+#[derive(Debug)]
+pub struct ModelListError {
+    pub message: String,
+    pub detail: Option<String>,
+}
+
+impl std::fmt::Display for ModelListError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.message)
+    }
+}
+
+impl std::error::Error for ModelListError {}
+
+pub fn model_list_err(message: impl Into<String>, detail: Option<String>) -> anyhow::Error {
+    anyhow::Error::new(ModelListError {
+        message: message.into(),
+        detail,
+    })
+}
+
+pub fn model_list_detail(err: &anyhow::Error) -> Option<String> {
+    err.chain().find_map(|cause| {
+        cause
+            .downcast_ref::<ModelListError>()
+            .and_then(|model_err| model_err.detail.clone())
+    })
+}
 
 /// Config override when non-empty; otherwise `builtin`.
 pub fn effective_model_providers(configured: &[String], builtin: &[&str]) -> Vec<String> {

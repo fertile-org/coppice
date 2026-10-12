@@ -42,8 +42,8 @@ serve_port = 4096
 [agent.connectors.claude-code]
 enabled = true
 # run_timeout_secs = 3600
-# Optional. A non-empty list replaces the built-in providers (sonnet, opus, haiku).
-# model_providers = ["sonnet", "opus", "haiku"]
+# Optional. A non-empty list replaces the built-in providers (sonnet, opus, haiku, fable).
+# model_providers = ["sonnet", "opus", "haiku", "fable"]
 
 [agent.connectors.codex]
 enabled = false

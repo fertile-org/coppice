@@ -68,12 +68,20 @@ pub async fn list_codex_models(model_provider: &str) -> anyhow::Result<Vec<Model
         .await?;
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        anyhow::bail!("codex debug models failed: {stderr}");
+        let detail = stderr.lines().map(str::trim).find(|line| !line.is_empty());
+        tracing::warn!(stderr = %stderr, "codex debug models failed");
+        return Err(crate::providers::cli_catalog::model_list_err(
+            format!("codex debug models failed: {stderr}"),
+            detail.map(str::to_string),
+        ));
     }
     let stdout = String::from_utf8_lossy(&output.stdout);
     let models = parse_codex_models_json(&stdout, model_provider);
     if models.is_empty() {
-        anyhow::bail!("no codex models available for provider `{model_provider}`");
+        return Err(crate::providers::cli_catalog::model_list_err(
+            format!("no codex models available for provider `{model_provider}`"),
+            None,
+        ));
     }
     Ok(models)
 }

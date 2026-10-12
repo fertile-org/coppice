@@ -44,7 +44,12 @@ pub async fn list_opencode_models(
         .await?;
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        anyhow::bail!("opencode models failed: {stderr}");
+        let detail = stderr.lines().map(str::trim).find(|line| !line.is_empty());
+        tracing::warn!(stderr = %stderr, "opencode models failed");
+        return Err(crate::providers::cli_catalog::model_list_err(
+            format!("opencode models failed: {stderr}"),
+            detail.map(str::to_string),
+        ));
     }
     let stdout = String::from_utf8_lossy(&output.stdout);
     Ok(parse_opencode_models_stdout(&stdout, model_provider))

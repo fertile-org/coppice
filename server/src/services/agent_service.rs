@@ -193,26 +193,21 @@ impl<'a> AgentService<'a> {
         responsibilities: Option<&[String]>,
         system_prompt: Option<&str>,
         connector: Option<&str>,
-        model_provider: Option<&str>,
-        model: Option<&str>,
+        model_provider: Option<Option<&str>>,
+        model: Option<Option<&str>>,
         enabled: Option<bool>,
     ) -> Result<Agent, AgentError> {
-        if let Some(mp) = model_provider {
-            if mp.trim().is_empty() {
-                return Err(AgentError::Validation(
-                    "modelProvider cannot be empty".into(),
-                ));
-            }
-        }
-
         let current = self.get(agent_id).await?;
         let name = name.unwrap_or(&current.name);
         let role = role.unwrap_or(&current.role);
         let responsibilities = responsibilities.unwrap_or(&current.responsibilities);
         let system_prompt = system_prompt.unwrap_or(&current.system_prompt);
         let connector = connector.unwrap_or(&current.connector);
-        let model_provider = model_provider.or(current.model_provider.as_deref());
-        let model = model.or(current.model.as_deref());
+        // `None` keeps the saved value. `Some(None)` and blank text clear it,
+        // which is how the form selects "{connector}'s default".
+        let model_provider =
+            resolve_cleared_text(model_provider, current.model_provider.as_deref());
+        let model = resolve_cleared_text(model, current.model.as_deref());
         let enabled = enabled.unwrap_or(current.enabled);
 
         let row = sqlx::query(
@@ -348,6 +343,17 @@ impl<'a> AgentService<'a> {
 
 /// Dev/test builds default a missing connector to mock. Release builds refuse
 /// it: the mock provider is not compiled in, so it must not be stored either.
+/// Absent field keeps `current`. A present blank or null clears it.
+fn resolve_cleared_text<'a>(
+    incoming: Option<Option<&'a str>>,
+    current: Option<&'a str>,
+) -> Option<&'a str> {
+    match incoming {
+        None => current,
+        Some(value) => value.map(str::trim).filter(|text| !text.is_empty()),
+    }
+}
+
 fn resolve_new_connector(connector: Option<&str>) -> Result<&str, AgentError> {
     #[cfg(feature = "mock-provider")]
     let connector = connector.unwrap_or(coppice_connectors::MOCK);
@@ -393,6 +399,81 @@ fn row_to_agent(row: &sqlx::postgres::PgRow) -> Agent {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn choosing_the_connector_default_clears_a_saved_model() {
+        assert_eq!(resolve_cleared_text(Some(None), Some("auto")), None);
+        assert_eq!(resolve_cleared_text(Some(Some("")), Some("auto")), None);
+        assert_eq!(resolve_cleared_text(Some(Some("  ")), Some("cursor")), None);
+        assert_eq!(
+            resolve_cleared_text(None, Some("auto")),
+            Some("auto"),
+            "an omitted field keeps the saved model"
+        );
+        assert_eq!(
+            resolve_cleared_text(Some(Some(" composer-2.5 ")), None),
+            Some("composer-2.5")
+        );
+    }
+
+    #[tokio::test]
+    async fn update_clears_saved_model_and_provider() {
+        let pool = match crate::db::shared_test_pool().await {
+            Ok(pool) => pool,
+            Err(_) => return,
+        };
+        crate::db::truncate_test_workspace(&pool).await.ok();
+        let service = AgentService::new(&pool);
+        let created = service
+            .create(
+                "Builder",
+                "Developer",
+                &[],
+                "You build.",
+                Some("cursor"),
+                Some("cursor"),
+                Some("auto"),
+                Some(true),
+            )
+            .await
+            .expect("create");
+        assert_eq!(created.model.as_deref(), Some("auto"));
+        assert_eq!(created.model_provider.as_deref(), Some("cursor"));
+
+        let cleared = service
+            .update(
+                created.id,
+                None,
+                None,
+                None,
+                None,
+                None,
+                Some(None),
+                Some(None),
+                None,
+            )
+            .await
+            .expect("clear");
+        assert!(cleared.model.is_none());
+        assert!(cleared.model_provider.is_none());
+
+        let kept = service
+            .update(
+                created.id,
+                Some("Renamed"),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+            )
+            .await
+            .expect("rename");
+        assert_eq!(kept.name, "Renamed");
+        assert!(kept.model.is_none());
+    }
 
     #[cfg(not(feature = "mock-provider"))]
     #[test]

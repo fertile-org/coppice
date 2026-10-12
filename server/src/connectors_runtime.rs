@@ -295,7 +295,8 @@ mod tests {
             vec![
                 "sonnet".to_string(),
                 "opus".to_string(),
-                "haiku".to_string()
+                "haiku".to_string(),
+                "fable".to_string()
             ]
         );
         let text = std::fs::read_to_string(&path).unwrap();

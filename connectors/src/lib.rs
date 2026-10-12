@@ -229,7 +229,7 @@ const CONNECTORS: &[ConnectorDescriptor] = &[
             probe_proves_auth: false,
             docs_url: "https://docs.anthropic.com/en/docs/claude-code/setup",
         },
-        default_model_providers: &["sonnet", "opus", "haiku"],
+        default_model_providers: &["sonnet", "opus", "haiku", "fable"],
         mcp_wiring: McpWiring::ClaudeJson,
         mcp_tool_names: ToolNameStyle::McpDoubleUnderscore,
         console: ConsoleKind::Structured,
@@ -471,7 +471,10 @@ mod tests {
 
         let claude = get(CLAUDE_CODE).unwrap();
         assert_eq!(claude.binary, "claude");
-        assert_eq!(claude.default_model_providers, ["sonnet", "opus", "haiku"]);
+        assert_eq!(
+            claude.default_model_providers,
+            ["sonnet", "opus", "haiku", "fable"]
+        );
         assert_eq!(
             claude.install.auth_hint,
             "ANTHROPIC_API_KEY or claude setup-token"

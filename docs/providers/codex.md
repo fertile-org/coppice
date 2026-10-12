@@ -49,7 +49,7 @@ coppice connector doctor codex
 
 1. Open **Agents** and create or edit an agent.
 2. Set connector to **codex**.
-3. Leave the model on Codex's default, or pick a model from the list (from `codex debug models` after login). The built-in provider is `openai`, so the form does not ask for a provider unless you override the list.
+3. Leave the model on Codex's default, or pick a model from the list (provider names are headings when there is more than one). Refresh models loads that list again.
 4. Assign the agent to a ticket and start a run.
 
 Optional config (usually set by `enable`):
