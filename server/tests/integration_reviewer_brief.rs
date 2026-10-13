@@ -32,6 +32,34 @@ async fn implementation_brief_is_on_the_ticket_and_does_not_block_accept() {
     );
     assert!(ticket["reviewerBrief"].get("changesFromPlan").is_none());
     assert_eq!(ticket["reviewerBrief"]["lookHereFirst"], "src/parser.rs");
+    let commit_sha = ticket["reviewerBrief"]["commitSha"]
+        .as_str()
+        .expect("brief stores the commit it was written for")
+        .to_string();
+    assert!(!commit_sha.is_empty());
+
+    set_status(&app, &with_brief, "wait_for_final_review", &cookie, &csrf).await;
+    let in_review = get_ticket(&app, &with_brief, &cookie, &csrf).await;
+    assert_eq!(in_review["reviewerBrief"]["commitSha"], commit_sha);
+
+    let other_sha = "0000000000000000000000000000000000000000";
+    sqlx::query("UPDATE ticket_reviewer_briefs SET commit_sha = $2 WHERE ticket_id = $1")
+        .bind(Uuid::parse_str(&with_brief).unwrap())
+        .bind(other_sha)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let hidden = get_ticket(&app, &with_brief, &cookie, &csrf).await;
+    assert!(hidden.get("reviewerBrief").is_none());
+
+    sqlx::query("UPDATE ticket_reviewer_briefs SET commit_sha = $2 WHERE ticket_id = $1")
+        .bind(Uuid::parse_str(&with_brief).unwrap())
+        .bind(&commit_sha)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let shown = get_ticket(&app, &with_brief, &cookie, &csrf).await;
+    assert_eq!(shown["reviewerBrief"]["howItWorks"], "The parser reads the header first.");
 
     std::env::set_var("MOCK_AGENT_RESPONSE", "done");
     let without_brief = common::create_test_ticket(&app, &board_id, &cookie, &csrf).await;
@@ -42,7 +70,6 @@ async fn implementation_brief_is_on_the_ticket_and_does_not_block_accept() {
     let ticket = get_ticket(&app, &without_brief, &cookie, &csrf).await;
     assert!(ticket.get("reviewerBrief").is_none());
 
-    set_status(&app, &with_brief, "wait_for_final_review", &cookie, &csrf).await;
     let approved = app
         .clone()
         .oneshot(common::json_request(

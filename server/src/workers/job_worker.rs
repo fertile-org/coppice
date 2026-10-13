@@ -36,6 +36,7 @@ use crate::services::job_service::JobService;
 use crate::services::mention_service::MentionService;
 use crate::services::plugin_service::PluginService;
 use crate::services::result_contract;
+use crate::services::git_ops::git_head_sha;
 use crate::services::reviewer_brief::ReviewerBriefService;
 use crate::services::run_orchestrator::{load_run_continuation_context, RunOrchestrator};
 use crate::services::run_service::RunService;
@@ -653,6 +654,7 @@ async fn execute_job(
         apply.comment.intent = CommentIntent::ReviewFeedback;
     }
 
+    let mut brief_commit_sha = None;
     if apply.run_status == RunStatus::Succeeded
         && should_finalize_run_git(run, &agent, ticket.ticket.status)
     {
@@ -673,6 +675,7 @@ async fn execute_job(
         .await
         {
             Ok(git_state) => {
+                brief_commit_sha = Some(git_state.head_sha.clone());
                 apply
                     .comment
                     .body
@@ -689,8 +692,11 @@ async fn execute_job(
     }
 
     if should_capture_reviewer_brief(run, &agent, ticket.ticket.status) {
+        if brief_commit_sha.is_none() {
+            brief_commit_sha = git_head_sha(&paths.worktree_dir).await.ok();
+        }
         ReviewerBriefService::new(pool)
-            .record(ticket_id, &result)
+            .record(ticket_id, &result, brief_commit_sha.as_deref().unwrap_or(""))
             .await
             .context("store reviewer brief")?;
     }

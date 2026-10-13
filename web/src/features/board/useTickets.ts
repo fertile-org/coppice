@@ -23,6 +23,7 @@ export interface ReviewerBrief {
   howItWorks?: string | null;
   changesFromPlan?: string | null;
   lookHereFirst?: string | null;
+  commitSha?: string | null;
 }
 
 export interface ApprovedPlan {

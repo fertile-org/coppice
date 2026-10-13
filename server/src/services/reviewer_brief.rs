@@ -21,6 +21,8 @@ pub struct ReviewerBrief {
     pub changes_from_plan: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub look_here_first: Option<String>,
+    /// Commit this brief was written for.
+    pub commit_sha: String,
 }
 
 pub struct ReviewerBriefService<'a> {
@@ -32,12 +34,13 @@ impl<'a> ReviewerBriefService<'a> {
         Self { pool }
     }
 
-    /// Store a done result's brief, or clear it when that result reported none.
-    /// Other outcomes leave the stored brief alone.
+    /// Store a done result's brief for `commit_sha`, or clear it when that
+    /// result reported none. Other outcomes leave the stored brief alone.
     pub async fn record(
         &self,
         ticket_id: Uuid,
         result: &AgentRunResult,
+        commit_sha: &str,
     ) -> Result<(), sqlx::Error> {
         let AgentRunResult::Done {
             how_it_works,
@@ -54,16 +57,20 @@ impl<'a> ReviewerBriefService<'a> {
             look_here_first.as_deref(),
         ) {
             Some(brief) => {
+                let commit_sha =
+                    crate::services::human_review_service::normalize_sha(commit_sha);
                 sqlx::query(
                     r#"
                     INSERT INTO ticket_reviewer_briefs (
-                        ticket_id, how_it_works, changes_from_plan, look_here_first, updated_at
+                        ticket_id, how_it_works, changes_from_plan, look_here_first,
+                        commit_sha, updated_at
                     )
-                    VALUES ($1, $2, $3, $4, now())
+                    VALUES ($1, $2, $3, $4, $5, now())
                     ON CONFLICT (ticket_id) DO UPDATE SET
                         how_it_works = EXCLUDED.how_it_works,
                         changes_from_plan = EXCLUDED.changes_from_plan,
                         look_here_first = EXCLUDED.look_here_first,
+                        commit_sha = EXCLUDED.commit_sha,
                         updated_at = now()
                     "#,
                 )
@@ -71,6 +78,7 @@ impl<'a> ReviewerBriefService<'a> {
                 .bind(&brief.how_it_works)
                 .bind(&brief.changes_from_plan)
                 .bind(&brief.look_here_first)
+                .bind(&commit_sha)
                 .execute(self.pool)
                 .await?;
             }
@@ -87,7 +95,7 @@ impl<'a> ReviewerBriefService<'a> {
     pub async fn get(&self, ticket_id: Uuid) -> Result<Option<ReviewerBrief>, sqlx::Error> {
         let row = sqlx::query(
             r#"
-            SELECT how_it_works, changes_from_plan, look_here_first
+            SELECT how_it_works, changes_from_plan, look_here_first, commit_sha
             FROM ticket_reviewer_briefs
             WHERE ticket_id = $1
             "#,
@@ -99,6 +107,15 @@ impl<'a> ReviewerBriefService<'a> {
     }
 }
 
+/// Human Review shows a brief only when it was written for the commit that
+/// review is bound to. A missing reviewed commit hides the brief.
+pub fn brief_matches_reviewed_commit(brief_sha: &str, reviewed_sha: Option<&str>) -> bool {
+    let Some(reviewed) = reviewed_sha.map(str::trim).filter(|sha| !sha.is_empty()) else {
+        return false;
+    };
+    crate::services::human_review_service::reviewed_sha_matches(brief_sha, reviewed)
+}
+
 pub fn brief_from_parts(
     how_it_works: Option<&str>,
     changes_from_plan: Option<&str>,
@@ -108,6 +125,7 @@ pub fn brief_from_parts(
         how_it_works: clip_field(how_it_works),
         changes_from_plan: clip_field(changes_from_plan),
         look_here_first: clip_field(look_here_first),
+        commit_sha: String::new(),
     };
     if brief.how_it_works.is_none()
         && brief.changes_from_plan.is_none()
@@ -129,11 +147,14 @@ fn clip_field(value: Option<&str>) -> Option<String> {
 }
 
 fn row_to_brief(row: &sqlx::postgres::PgRow) -> Option<ReviewerBrief> {
-    brief_from_parts(
+    let mut brief = brief_from_parts(
         row.get::<Option<String>, _>("how_it_works").as_deref(),
         row.get::<Option<String>, _>("changes_from_plan").as_deref(),
         row.get::<Option<String>, _>("look_here_first").as_deref(),
-    )
+    )?;
+    brief.commit_sha =
+        crate::services::human_review_service::normalize_sha(&row.get::<String, _>("commit_sha"));
+    Some(brief)
 }
 
 /// Paths named in an approved plan. A diff file that matches none is outside the plan.
@@ -172,9 +193,14 @@ pub fn path_in_plan(diff_path: &str, planned: &[String]) -> bool {
     })
 }
 
-/// `true` when `markdown` is an approved plan and `diff_path` is not named in it.
+/// `true` when `markdown` names paths and `diff_path` is not one of them.
+/// A plan that names no files tags nothing.
 pub fn file_outside_plan(diff_path: &str, markdown: &str) -> bool {
-    !path_in_plan(diff_path, &planned_paths(markdown))
+    let planned = planned_paths(markdown);
+    if planned.is_empty() {
+        return false;
+    }
+    !path_in_plan(diff_path, &planned)
 }
 
 fn consider_token(raw: &str, found: &mut Vec<String>) {
@@ -306,8 +332,19 @@ mod tests {
     }
 
     #[test]
-    fn a_plan_that_names_no_files_marks_every_diff_file() {
+    fn a_plan_that_names_no_files_tags_nothing() {
         let markdown = "## Plan\n\n### Steps\n- [ ] Follow the approach above.\n";
-        assert!(file_outside_plan("src/main.rs", markdown));
+        assert!(planned_paths(markdown).is_empty());
+        assert!(!file_outside_plan("src/main.rs", markdown));
+        assert!(!file_outside_plan("web/src/App.tsx", markdown));
+    }
+
+    #[test]
+    fn brief_is_visible_only_for_the_reviewed_commit() {
+        let sha = "abc1234deadbeef";
+        assert!(brief_matches_reviewed_commit(sha, Some("ABC1234deadbeef")));
+        assert!(!brief_matches_reviewed_commit(sha, Some("fff1234deadbeef")));
+        assert!(!brief_matches_reviewed_commit(sha, None));
+        assert!(!brief_matches_reviewed_commit("", Some(sha)));
     }
 }

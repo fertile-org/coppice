@@ -659,7 +659,11 @@ async fn get_ticket(
     let pool = pool_from_state(&state)?;
     let service = TicketService::new(pool);
     let ticket = service.get(ticket_id).await.map_err(map_error)?;
-    Ok(Json(with_approved_plan(pool, ticket).await.map_err(map_error)?))
+    Ok(Json(
+        with_approved_plan(&state, pool, ticket)
+            .await
+            .map_err(map_error)?,
+    ))
 }
 
 async fn archive_ticket(
@@ -800,7 +804,11 @@ async fn approve_plan(
         .get(ticket_id)
         .await
         .map_err(map_update_status_error)?;
-    Ok(Json(with_approved_plan(pool, ticket).await.map_err(map_update_status_error)?))
+    Ok(Json(
+        with_approved_plan(&state, pool, ticket)
+            .await
+            .map_err(map_update_status_error)?,
+    ))
 }
 
 async fn ask_for_plan_changes(
@@ -834,6 +842,7 @@ fn map_plan_error(err: crate::services::planning_service::PlanError) -> UpdateSt
 }
 
 async fn with_approved_plan(
+    state: &AppState,
     pool: &sqlx::PgPool,
     ticket: TicketWithDisplay,
 ) -> Result<TicketResponse, TicketError> {
@@ -847,16 +856,59 @@ async fn with_approved_plan(
             }
         })?;
     let ticket_id = ticket.ticket.id;
+    let status = ticket.ticket.status;
     let mut response = ticket_to_response(ticket);
     response.approved_plan = plan.map(|plan| ApprovedPlanResponse {
         comment_id: plan.comment_id,
         markdown: plan.markdown,
         steps: plan.steps,
     });
-    response.reviewer_brief = crate::services::reviewer_brief::ReviewerBriefService::new(pool)
+    response.reviewer_brief = reviewer_brief_for_ticket(state, pool, ticket_id, status).await?;
+    Ok(response)
+}
+
+/// The stored brief, hidden in Human Review when it was written for a different
+/// commit than the one review is bound to.
+async fn reviewer_brief_for_ticket(
+    state: &AppState,
+    pool: &sqlx::PgPool,
+    ticket_id: Uuid,
+    status: TicketStatus,
+) -> Result<Option<crate::services::reviewer_brief::ReviewerBrief>, TicketError> {
+    let brief = crate::services::reviewer_brief::ReviewerBriefService::new(pool)
         .get(ticket_id)
         .await?;
-    Ok(response)
+    if status != TicketStatus::WaitForFinalReview {
+        return Ok(brief);
+    }
+    let Some(brief) = brief else {
+        return Ok(None);
+    };
+    let reviewed = match ticket_git_service(state, pool)
+        .reviewed_head_sha(ticket_id)
+        .await
+    {
+        Ok(sha) => sha,
+        Err(crate::services::ticket_git_service::TicketGitError::Database(err)) => {
+            return Err(err.into());
+        }
+        Err(crate::services::ticket_git_service::TicketGitError::Ticket(err)) => return Err(err),
+        Err(err) => {
+            tracing::debug!(
+                error = %err,
+                "reviewer brief hidden; reviewed commit unavailable"
+            );
+            None
+        }
+    };
+    if crate::services::reviewer_brief::brief_matches_reviewed_commit(
+        &brief.commit_sha,
+        reviewed.as_deref(),
+    ) {
+        Ok(Some(brief))
+    } else {
+        Ok(None)
+    }
 }
 
 async fn assign_agent(

@@ -8,6 +8,7 @@ import { PlanChecklist } from '../plan/PlanChecklist';
 import { useTicket } from '../tickets/useTicket';
 import { ChangedFilesPanel } from './ChangedFilesPanel';
 import { DiffViewer, type InlineCommentDraft } from './DiffViewer';
+import { briefMatchesReviewedCommit } from './briefCommit';
 import { ReviewerBriefBar } from './ReviewerBriefBar';
 import { SubmitReviewDialog } from './SubmitReviewDialog';
 import {
@@ -298,9 +299,12 @@ export function CodeReviewPage() {
           />
           {repoId && selectedWorktreePath && (
             <div className="flex h-full min-h-0 min-w-0 flex-col">
-              {ticket?.status === 'wait_for_final_review' && ticket.reviewerBrief && (
-                <ReviewerBriefBar brief={ticket.reviewerBrief} />
-              )}
+              {ticket?.status === 'wait_for_final_review' &&
+                ticket.reviewerBrief &&
+                briefMatchesReviewedCommit(
+                  ticket.reviewerBrief.commitSha,
+                  headSha,
+                ) && <ReviewerBriefBar brief={ticket.reviewerBrief} />}
               <DiffViewer
                 repoId={repoId}
                 worktreePath={selectedWorktreePath}

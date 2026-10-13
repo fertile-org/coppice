@@ -486,7 +486,8 @@ async fn get_repo_diff(
 }
 
 /// Tags diff files that the approved plan does not name. Only Human Review, and
-/// only when a current approved plan exists. Anything else leaves the flags off.
+/// only when a current approved plan names at least one path. A plan that names
+/// no files leaves every flag off.
 async fn mark_files_outside_plan(
     pool: &sqlx::PgPool,
     ticket_id: Uuid,
