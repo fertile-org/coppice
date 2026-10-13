@@ -159,8 +159,13 @@ fn parse_command_output(stdout: &str, stderr: &str) -> Vec<ModelOption> {
 
 /// Live-list Cursor models through [`crate::host_env::HostEnv`].
 ///
-/// The child is not a TTY. Cursor is Ready from an auth file, not this command.
-/// `models` is tried first, then `--list-models`. Both go through
+/// The child is not a TTY: stdin is null and stdout is a pipe. Cursor CLI
+/// `2026.10.01-e373342` writes the model list with `process.stdout.write` and
+/// does not require a terminal. A TTY only adds chalk color and a one-time
+/// stderr tip (`You can start the Cursor CLI with agent`). Piped output of
+/// `agent models` is the same `id - name` list, so this does not use a pty.
+/// Cursor is Ready from an auth file, not this command. `models` is tried
+/// first, then `--list-models`. Both go through
 /// [`HostEnv::run_with_timeout`](crate::host_env::HostEnv::run_with_timeout).
 pub async fn list_cursor_models(command: &str) -> anyhow::Result<Vec<ModelOption>> {
     list_cursor_models_with(crate::host_env::current().as_ref(), command).await

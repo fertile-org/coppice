@@ -354,22 +354,32 @@ impl CursorModels {
 #[async_trait]
 impl ModelCatalog for CursorModels {
     async fn model_providers(&self) -> Vec<String> {
-        crate::providers::cli_catalog::effective_model_providers(
+        let mut providers = crate::providers::cli_catalog::effective_model_providers(
             &self.model_providers,
             coppice_connectors::get(coppice_connectors::CURSOR)
                 .map(|descriptor| descriptor.default_model_providers)
                 .unwrap_or(&[]),
-        )
+        );
+        // Old configs can list other ids and omit `cursor`. The CLI still has
+        // one namespace, so the picker must keep being able to ask for it.
+        if !providers.iter().any(|provider| provider == "cursor") {
+            providers.push("cursor".to_string());
+        }
+        providers
     }
 
-    /// Cursor has one model namespace; any other provider id lists nothing.
+    /// Cursor has one model namespace. Any other provider id is an error.
     async fn list_models(
         &self,
         model_provider: &str,
         refresh: bool,
     ) -> anyhow::Result<Vec<ModelInfo>> {
         if model_provider != "cursor" {
-            return Ok(vec![]);
+            tracing::warn!(
+                provider = model_provider,
+                "cursor model list rejected an unknown provider"
+            );
+            return Err(anyhow::anyhow!("unknown model provider `{model_provider}`"));
         }
         if let Some(hit) = self.models_cache.get(model_provider, refresh) {
             return Ok(hit);
@@ -465,16 +475,45 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn cursor_lists_nothing_for_other_providers() {
+    async fn cursor_unknown_provider_is_an_error() {
         let models = CursorModels::new(
             "definitely-not-a-cursor-binary".into(),
             vec!["cursor".into(), "other".into()],
         );
-        assert!(models
+        let err = models
             .list_models("other", false)
             .await
-            .expect("empty")
-            .is_empty());
+            .expect_err("unknown provider");
+        assert!(err.to_string().contains("other"), "{err}");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn config_without_cursor_still_lists_cursor_models() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        let bin = dir.path().join("agent");
+        std::fs::write(
+            &bin,
+            "#!/bin/sh\necho 'auto - Auto (current, default)'\necho 'composer-2.5 - Composer 2.5'\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        let models = CursorModels::new(bin.display().to_string(), vec!["other".into()]);
+        let providers = models.model_providers().await;
+        assert!(
+            providers.iter().any(|provider| provider == "cursor"),
+            "{providers:?}"
+        );
+        let listed = models
+            .list_models("cursor", true)
+            .await
+            .expect("cursor models");
+        assert_eq!(listed[0].id, "auto");
+        assert_eq!(listed[0].name, "Auto");
+        assert!(listed.iter().any(|model| model.id == "composer-2.5"));
     }
 
     #[cfg(feature = "mock-provider")]
