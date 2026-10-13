@@ -16,16 +16,6 @@ fn log_directives(rust_log: Option<&str>) -> String {
     }
 }
 
-/// Desktop launchers often omit common bin dirs; probes and runs share this PATH.
-fn augment_process_path() {
-    let Some(home) = std::env::var_os("HOME") else {
-        return;
-    };
-    let current = std::env::var_os("PATH").unwrap_or_default();
-    let path = coppice_connectors::probe::augment_path(std::path::Path::new(&home), &current);
-    std::env::set_var("PATH", path);
-}
-
 fn init_tracing() {
     let rust_log = std::env::var(EnvFilter::DEFAULT_ENV).ok();
     tracing_subscriber::fmt()
@@ -45,7 +35,6 @@ fn runtime() -> std::io::Result<tokio::runtime::Runtime> {
 /// The environment is set before the tokio runtime exists, so no other thread
 /// can read it concurrently.
 fn main() -> anyhow::Result<()> {
-    augment_process_path();
     let args: Vec<String> = std::env::args().collect();
     match desktop::parse_desktop_args(&args) {
         Ok(Some(args)) => run_desktop(args),

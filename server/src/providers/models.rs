@@ -68,24 +68,22 @@ impl ModelCatalog for OpenCodeModels {
         if !configured.is_empty() {
             return configured;
         }
-        if let Some(cached) = self.cache.get() {
+        if let Some(cached) = self.cache.get().filter(|providers| !providers.is_empty()) {
             return cached;
         }
         let discovered = crate::providers::cli_catalog::discover_cli_providers(&self.command).await;
-        self.cache.store(discovered.clone());
+        if !discovered.is_empty() {
+            self.cache.store(discovered.clone());
+        }
         discovered
     }
 
     async fn list_models(&self, model_provider: &str) -> anyhow::Result<Vec<ModelInfo>> {
-        let listed = tokio::time::timeout(
-            crate::providers::cli_catalog::CLI_LIST_TIMEOUT,
-            crate::providers::opencode_models::list_opencode_models(&self.command, model_provider),
+        let models = crate::providers::opencode_models::list_opencode_models(
+            &self.command,
+            model_provider,
         )
-        .await;
-        let models = match listed {
-            Ok(Ok(models)) => models,
-            _ => return Ok(vec![]),
-        };
+        .await?;
         Ok(models
             .into_iter()
             .map(|m| ModelInfo {
@@ -123,6 +121,7 @@ impl ModelCatalog for ClaudeCodeModels {
 }
 
 pub struct CodexModels {
+    pub command: String,
     pub model_providers: Vec<String>,
 }
 
@@ -138,7 +137,9 @@ impl ModelCatalog for CodexModels {
     }
 
     async fn list_models(&self, model_provider: &str) -> anyhow::Result<Vec<ModelInfo>> {
-        let models = crate::providers::codex_models::list_codex_models(model_provider).await?;
+        let models =
+            crate::providers::codex_models::list_codex_models(&self.command, model_provider)
+                .await?;
         Ok(models
             .into_iter()
             .map(|m| ModelInfo {
@@ -174,24 +175,19 @@ impl ModelCatalog for KiloCodeModels {
         if !configured.is_empty() {
             return configured;
         }
-        if let Some(cached) = self.cache.get() {
+        if let Some(cached) = self.cache.get().filter(|providers| !providers.is_empty()) {
             return cached;
         }
         let discovered = crate::providers::cli_catalog::discover_cli_providers(&self.command).await;
-        self.cache.store(discovered.clone());
+        if !discovered.is_empty() {
+            self.cache.store(discovered.clone());
+        }
         discovered
     }
 
     async fn list_models(&self, model_provider: &str) -> anyhow::Result<Vec<ModelInfo>> {
-        let listed = tokio::time::timeout(
-            crate::providers::cli_catalog::CLI_LIST_TIMEOUT,
-            crate::providers::kilo_models::list_kilo_models(&self.command, model_provider),
-        )
-        .await;
-        let models = match listed {
-            Ok(Ok(models)) => models,
-            _ => return Ok(vec![]),
-        };
+        let models =
+            crate::providers::kilo_models::list_kilo_models(&self.command, model_provider).await?;
         Ok(models
             .into_iter()
             .map(|m| ModelInfo {

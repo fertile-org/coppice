@@ -52,8 +52,10 @@ impl AgentProvider for CodexProvider {
         let descriptor =
             coppice_connectors::get(coppice_connectors::CODEX).expect("codex descriptor");
         let contract = descriptor.run_contract;
-        let program = descriptor.binary.to_string();
-        let version = cli_version::detect(&program).await;
+        let program = self.config.command.clone();
+        let version = cli_version::detect(&program).await.map_err(|err| {
+            ProviderError::InvalidFixture(cli_version::version_unavailable(&program, &err))
+        })?;
         let worktree_arg = worktree.display().to_string();
         // The prompt stays on stdin. Pinned flags, including a version-gated
         // `--no-daemon`, come from the descriptor.
@@ -63,7 +65,7 @@ impl AgentProvider for CodexProvider {
             worktree: &worktree_arg,
             hostname: "",
             port: "",
-            version: cli_version::for_gate(&version),
+            version: Some(version.as_str()),
         });
 
         append_model_flag(&mut args, input.model.as_deref());

@@ -84,21 +84,44 @@ fn strip_ansi(input: &str) -> String {
 }
 
 pub async fn list_cursor_models(command: &str) -> anyhow::Result<Vec<ModelOption>> {
-    let output = tokio::process::Command::new(command)
-        .arg("models")
-        .output()
+    let host = crate::host_env::current();
+    list_cursor_models_in(command, host.path.as_os_str(), host.home.as_path()).await
+}
+
+/// `path` and `home` are the host environment the model picker resolves against.
+pub async fn list_cursor_models_in(
+    command: &str,
+    path: &std::ffi::OsStr,
+    home: &std::path::Path,
+) -> anyhow::Result<Vec<ModelOption>> {
+    let program = crate::host_env::resolve_model_program(command, path);
+    let mut cmd = tokio::process::Command::new(&program);
+    cmd.arg("models")
+        .env("PATH", path)
+        .stdin(std::process::Stdio::null())
+        .kill_on_drop(true);
+    if !home.as_os_str().is_empty() {
+        cmd.env("HOME", home);
+    }
+    let output = tokio::time::timeout(crate::host_env::MODEL_LIST_TIMEOUT, cmd.output())
         .await
-        .map_err(|err| anyhow::anyhow!("failed to spawn `{command} models`: {err}"))?;
+        .map_err(|_| {
+            anyhow::anyhow!(
+                "`{command} models` timed out after {}s",
+                crate::host_env::MODEL_LIST_TIMEOUT.as_secs()
+            )
+        })?
+        .map_err(|err| anyhow::anyhow!("Couldn't start `{command} models`: {err}"))?;
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
     if !output.status.success() {
-        anyhow::bail!(
-            "`{command} models` exited {}: stdout={} stderr={}",
+        anyhow::bail!(crate::providers::cli_catalog::models_failure_message(
+            &format!("`{command} models`"),
             output.status,
-            truncate_for_err(&stdout),
-            truncate_for_err(&stderr)
-        );
+            &stdout,
+            &stderr,
+        ));
     }
 
     // Some CLI builds print the table on stderr when stdout is not a TTY.
@@ -109,23 +132,18 @@ pub async fn list_cursor_models(command: &str) -> anyhow::Result<Vec<ModelOption
     };
     let models = parse_cursor_models_stdout(combined);
     if models.is_empty() {
-        anyhow::bail!(
-            "no cursor models parsed from `{command} models` (stdout={} stderr={})",
-            truncate_for_err(&stdout),
-            truncate_for_err(&stderr)
+        tracing::warn!(
+            command,
+            %stdout,
+            %stderr,
+            "no cursor models parsed"
         );
+        let line = crate::host_env::first_text_line(&stderr)
+            .or_else(|| crate::host_env::first_text_line(&stdout))
+            .unwrap_or_else(|| "no output".to_string());
+        anyhow::bail!("`{command} models` listed no models: {line}. Full output is in the log.");
     }
     Ok(models)
-}
-
-fn truncate_for_err(text: &str) -> String {
-    const MAX: usize = 500;
-    let trimmed = text.trim();
-    if trimmed.len() <= MAX {
-        trimmed.to_string()
-    } else {
-        format!("{}…", &trimmed[..MAX])
-    }
 }
 
 #[cfg(test)]
@@ -162,5 +180,54 @@ gpt-5.5-high - GPT-5.5 1M High
         assert_eq!(models.len(), 1);
         assert_eq!(models[0].id, "auto");
         assert_eq!(models[0].name, "Auto (default)");
+    }
+
+    fn executable(path: &std::path::Path, body: &str) {
+        std::fs::write(path, format!("#!/bin/sh\n{body}\n")).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut perms = std::fs::metadata(path).unwrap().permissions();
+            perms.set_mode(0o755);
+            std::fs::set_permissions(path, perms).unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn empty_model_list_uses_the_first_line_and_points_at_the_log() {
+        let dir = tempfile::tempdir().unwrap();
+        let stderr_only = dir.path().join("from-stderr");
+        executable(&stderr_only, "echo 'not a table' >&2");
+        let err = list_cursor_models_in(
+            &stderr_only.display().to_string(),
+            std::ffi::OsStr::new("/usr/bin:/bin"),
+            dir.path(),
+        )
+        .await
+        .expect_err("stderr-only output");
+        assert_eq!(
+            err.to_string(),
+            format!(
+                "`{} models` listed no models: not a table. Full output is in the log.",
+                stderr_only.display()
+            )
+        );
+
+        let stdout_only = dir.path().join("from-stdout");
+        executable(&stdout_only, "echo 'from stdout'");
+        let err = list_cursor_models_in(
+            &stdout_only.display().to_string(),
+            std::ffi::OsStr::new("/usr/bin:/bin"),
+            dir.path(),
+        )
+        .await
+        .expect_err("stdout-only output");
+        assert_eq!(
+            err.to_string(),
+            format!(
+                "`{} models` listed no models: from stdout. Full output is in the log.",
+                stdout_only.display()
+            )
+        );
     }
 }

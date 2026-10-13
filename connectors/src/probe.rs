@@ -61,15 +61,85 @@ impl ProbeReport {
     }
 }
 
-/// Prepends each existing common bin dir not already on `current`, in listed order.
+/// Highest `~/.nvm/versions/node/<version>/bin` that exists, by numeric version.
+pub fn newest_nvm_bin(home: &Path) -> Option<PathBuf> {
+    let root = home.join(".nvm/versions/node");
+    let mut best: Option<(Vec<u64>, PathBuf)> = None;
+    let entries = std::fs::read_dir(&root).ok()?;
+    for entry in entries.flatten() {
+        let key = version_key(&entry.file_name().to_string_lossy());
+        let Some(key) = key else {
+            continue;
+        };
+        let bin = entry.path().join("bin");
+        if !bin.is_dir() {
+            continue;
+        }
+        let replace = best
+            .as_ref()
+            .map(|(current, _)| cmp_version(&key, current).is_gt())
+            .unwrap_or(true);
+        if replace {
+            best = Some((key, bin));
+        }
+    }
+    best.map(|(_, bin)| bin)
+}
+
+fn version_key(name: &str) -> Option<Vec<u64>> {
+    let name = name.strip_prefix('v').or_else(|| name.strip_prefix('V')).unwrap_or(name);
+    let mut parts = Vec::new();
+    for part in name.split('.') {
+        let digits: String = part.chars().take_while(|c| c.is_ascii_digit()).collect();
+        if digits.is_empty() {
+            break;
+        }
+        parts.push(digits.parse::<u64>().ok()?);
+    }
+    if parts.is_empty() {
+        None
+    } else {
+        Some(parts)
+    }
+}
+
+fn cmp_version(a: &[u64], b: &[u64]) -> std::cmp::Ordering {
+    let n = a.len().max(b.len());
+    for i in 0..n {
+        let av = a.get(i).copied().unwrap_or(0);
+        let bv = b.get(i).copied().unwrap_or(0);
+        match av.cmp(&bv) {
+            std::cmp::Ordering::Equal => {}
+            other => return other,
+        }
+    }
+    std::cmp::Ordering::Equal
+}
+
+/// Version-manager and common bin dirs merged ahead of a short desktop PATH.
+fn fallback_bin_dirs(home: &Path) -> Vec<PathBuf> {
+    let mut dirs = Vec::new();
+    if let Some(nvm) = newest_nvm_bin(home) {
+        dirs.push(nvm);
+    }
+    for rel in [
+        ".local/share/mise/shims",
+        ".asdf/shims",
+        ".volta/bin",
+        ".cargo/bin",
+    ] {
+        dirs.push(home.join(rel));
+    }
+    dirs.extend(COMMON_BIN_DIRS_HOME.iter().map(|rel| home.join(rel)));
+    dirs.extend(COMMON_BIN_DIRS_ABS.iter().map(PathBuf::from));
+    dirs
+}
+
+/// Prepends each existing fallback bin dir not already on `current`, in listed order.
 pub fn augment_path(home: &Path, current: &OsStr) -> OsString {
     let existing: Vec<PathBuf> = std::env::split_paths(current).collect();
     let mut added: Vec<PathBuf> = Vec::new();
-    let candidates = COMMON_BIN_DIRS_HOME
-        .iter()
-        .map(|rel| home.join(rel))
-        .chain(COMMON_BIN_DIRS_ABS.iter().map(PathBuf::from));
-    for dir in candidates {
+    for dir in fallback_bin_dirs(home) {
         if dir.is_dir() && !existing.contains(&dir) && !added.contains(&dir) {
             added.push(dir);
         }
@@ -421,6 +491,33 @@ mod tests {
         assert!(dirs.contains(&PathBuf::from("/usr/bin")));
         let twice = augment_path(home.path(), &once);
         assert_eq!(twice, once);
+    }
+
+    #[test]
+    fn augment_path_prepends_newest_nvm_and_version_manager_shims() {
+        let home = TempDir::new("nvm");
+        fs::create_dir_all(home.path().join(".nvm/versions/node/v18.20.0/bin")).unwrap();
+        fs::create_dir_all(home.path().join(".nvm/versions/node/v22.1.0/bin")).unwrap();
+        fs::create_dir_all(home.path().join(".nvm/versions/node/not-a-version/bin")).unwrap();
+        for rel in [
+            ".local/share/mise/shims",
+            ".asdf/shims",
+            ".volta/bin",
+            ".cargo/bin",
+        ] {
+            fs::create_dir_all(home.path().join(rel)).unwrap();
+        }
+        let path = augment_path(home.path(), OsStr::new("/usr/bin"));
+        let dirs: Vec<PathBuf> = std::env::split_paths(&path).collect();
+        assert_eq!(
+            dirs[0],
+            home.path().join(".nvm/versions/node/v22.1.0/bin")
+        );
+        assert!(!dirs.iter().any(|d| d.ends_with("v18.20.0/bin")));
+        assert!(dirs.iter().any(|d| d.ends_with(".asdf/shims")));
+        assert!(dirs.iter().any(|d| d.ends_with(".volta/bin")));
+        assert!(dirs.iter().any(|d| d.ends_with(".cargo/bin")));
+        assert!(dirs.iter().any(|d| d.ends_with("mise/shims")));
     }
 
     #[test]

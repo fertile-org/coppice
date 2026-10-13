@@ -75,7 +75,7 @@ pub struct CliExit {
 
 #[derive(Debug, thiserror::Error)]
 pub enum CliError {
-    #[error("failed to spawn CLI: {0}")]
+    #[error("Couldn't start the CLI: {0}")]
     Spawn(std::io::Error),
     #[error("CLI run cancelled")]
     Cancelled,
@@ -83,6 +83,20 @@ pub enum CliError {
     TimedOut { stderr_tail: Vec<String> },
     #[error("CLI I/O error: {0}")]
     Io(std::io::Error),
+}
+
+fn resolve_cli_program(host: &crate::host_env::HostEnv, program: &str) -> Result<String, CliError> {
+    if program.contains('/') || program.contains('\\') {
+        return Ok(program.to_string());
+    }
+    host.resolve(program)
+        .map(|path| path.to_string_lossy().into_owned())
+        .map_err(|err| {
+            CliError::Spawn(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                err.to_string(),
+            ))
+        })
 }
 
 pub async fn run_cli(
@@ -101,7 +115,13 @@ pub async fn run_cli_with_stdin(
     handler: &mut dyn LineHandler,
     io: RunIo,
 ) -> Result<CliExit, CliError> {
-    let mut cmd = Command::new(&inv.program);
+    let host = crate::host_env::current();
+    let program = resolve_cli_program(&host, &inv.program)?;
+    let mut cmd = Command::new(&program);
+    cmd.env("PATH", &host.path);
+    if !host.home.as_os_str().is_empty() {
+        cmd.env("HOME", &host.home);
+    }
     cmd.args(&inv.args)
         .envs(inv.env.iter().map(|(k, v)| (k.as_str(), v.as_str())))
         .current_dir(&inv.cwd)

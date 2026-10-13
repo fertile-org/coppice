@@ -26,6 +26,8 @@ jobs:
             ~/.embedded-postgres
           key: pg-embed-${{ runner.os }}-${{ hashFiles('server/Cargo.toml') }}
       - uses: taiki-e/install-action@nextest
+      - name: Install zsh
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends zsh
       - name: Test
         run: cargo nextest run --workspace --features embedded-test-db --profile ci
       - name: Clippy

@@ -347,6 +347,7 @@ impl<'a> RunService<'a> {
     }
 
     pub async fn retry(&self, run_id: Uuid) -> Result<AgentRun, RunError> {
+        crate::host_env::invalidate();
         let run = self.get(run_id).await?;
 
         if !matches!(run.status, RunStatus::Failed | RunStatus::Cancelled) {

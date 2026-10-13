@@ -749,11 +749,28 @@ fn live_members(pgid: u32) -> Vec<u32> {
     }
 }
 
+const PS_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+
+fn ps_output(args: &[&str]) -> Option<std::process::Output> {
+    let host = crate::host_env::current();
+    let cmd = match host.command("ps", args) {
+        Ok(cmd) => cmd,
+        Err(err) => {
+            tracing::warn!(error = %err, "ps was not found");
+            return None;
+        }
+    };
+    match crate::host_env::wait_blocking(cmd, PS_TIMEOUT) {
+        Ok(output) => Some(output),
+        Err(err) => {
+            tracing::warn!(error = %err, "ps failed");
+            None
+        }
+    }
+}
+
 fn ps_identity(pid: u32) -> Option<Identity> {
-    let output = std::process::Command::new("ps")
-        .args(["-p", &pid.to_string(), "-o", "lstart=", "-o", "command="])
-        .output()
-        .ok()?;
+    let output = ps_output(&["-p", &pid.to_string(), "-o", "lstart=", "-o", "command="])?;
     if !output.status.success() {
         return None;
     }
@@ -772,10 +789,7 @@ fn ps_identity(pid: u32) -> Option<Identity> {
 }
 
 fn ps_ppid(pid: u32) -> Option<u32> {
-    let output = std::process::Command::new("ps")
-        .args(["-p", &pid.to_string(), "-o", "ppid="])
-        .output()
-        .ok()?;
+    let output = ps_output(&["-p", &pid.to_string(), "-o", "ppid="])?;
     if !output.status.success() {
         return None;
     }
@@ -783,10 +797,7 @@ fn ps_ppid(pid: u32) -> Option<u32> {
 }
 
 fn ps_group_members(pgid: u32) -> Vec<u32> {
-    let Ok(output) = std::process::Command::new("ps")
-        .args(["-ax", "-o", "pid=,pgid=,state="])
-        .output()
-    else {
+    let Some(output) = ps_output(&["-ax", "-o", "pid=,pgid=,state="]) else {
         return Vec::new();
     };
     if !output.status.success() {
@@ -1215,6 +1226,7 @@ mod tests {
         let leader = tracked.id();
         let _cleanup = KillGroup(tracked.record.pgid);
         wait_for_file(&ready).await;
+        let _ = crate::host_env::current();
         let started = std::time::Instant::now();
 
         let reports = registry.stop_all("cancelled").await;

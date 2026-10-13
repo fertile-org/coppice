@@ -45,13 +45,22 @@ pub async fn list_kilo_models(
     command: &str,
     model_provider: &str,
 ) -> anyhow::Result<Vec<ModelOption>> {
-    let output = tokio::process::Command::new(command)
-        .args(["models", model_provider])
-        .output()
-        .await?;
+    let output = crate::providers::cli_catalog::capture_cli(
+        command,
+        &["models", model_provider],
+        crate::host_env::MODEL_LIST_TIMEOUT,
+    )
+    .await
+    .map_err(|err| anyhow::anyhow!(err))?;
     if !output.status.success() {
+        let stdout = String::from_utf8_lossy(&output.stdout);
         let stderr = String::from_utf8_lossy(&output.stderr);
-        anyhow::bail!("kilo models failed: {stderr}");
+        anyhow::bail!(crate::providers::cli_catalog::models_failure_message(
+            &format!("`{command} models`"),
+            output.status,
+            &stdout,
+            &stderr,
+        ));
     }
     let stdout = String::from_utf8_lossy(&output.stdout);
     let models = parse_kilo_models_stdout(&stdout, model_provider);
