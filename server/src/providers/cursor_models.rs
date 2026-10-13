@@ -111,17 +111,17 @@ pub async fn list_cursor_models_in(
                 crate::host_env::MODEL_LIST_TIMEOUT.as_secs()
             )
         })?
-        .map_err(|err| anyhow::anyhow!("failed to spawn `{command} models`: {err}"))?;
+        .map_err(|err| anyhow::anyhow!("Couldn't start `{command} models`: {err}"))?;
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
     if !output.status.success() {
-        anyhow::bail!(
-            "`{command} models` exited {}: stdout={} stderr={}",
+        anyhow::bail!(crate::providers::cli_catalog::models_failure_message(
+            &format!("`{command} models`"),
             output.status,
-            truncate_for_err(&stdout),
-            truncate_for_err(&stderr)
-        );
+            &stdout,
+            &stderr,
+        ));
     }
 
     // Some CLI builds print the table on stderr when stdout is not a TTY.
@@ -132,23 +132,19 @@ pub async fn list_cursor_models_in(
     };
     let models = parse_cursor_models_stdout(combined);
     if models.is_empty() {
+        tracing::warn!(
+            command,
+            %stdout,
+            %stderr,
+            "no cursor models parsed"
+        );
+        let stdout_line = crate::host_env::first_text_line(&stdout).unwrap_or_default();
+        let stderr_line = crate::host_env::first_text_line(&stderr).unwrap_or_default();
         anyhow::bail!(
-            "no cursor models parsed from `{command} models` (stdout={} stderr={})",
-            truncate_for_err(&stdout),
-            truncate_for_err(&stderr)
+            "no cursor models parsed from `{command} models` (stdout={stdout_line} stderr={stderr_line}). Full output is in the log."
         );
     }
     Ok(models)
-}
-
-fn truncate_for_err(text: &str) -> String {
-    const MAX: usize = 500;
-    let trimmed = text.trim();
-    if trimmed.len() <= MAX {
-        trimmed.to_string()
-    } else {
-        format!("{}…", &trimmed[..MAX])
-    }
 }
 
 #[cfg(test)]

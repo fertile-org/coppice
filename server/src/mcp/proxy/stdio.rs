@@ -88,9 +88,9 @@ impl McpTransport for StdioTransport {
 
         let host = crate::host_env::current();
         let program = host.resolve(command).map_err(|err| {
-            ProxyError::Start(redactor.apply(&format!(
-                "mcp server `{command}` was not found: {err}"
-            )))
+            ProxyError::Start(
+                redactor.apply(&format!("MCP server `{command}` wasn't found: {err}")),
+            )
         })?;
         let mut cmd = tokio::process::Command::new(&program);
         cmd.args(args).env_clear().env("PATH", &host.path);
@@ -112,20 +112,24 @@ impl McpTransport for StdioTransport {
         if let Some(stderr) = stderr {
             let redactor = redactor.clone();
             let stderr_line = std::sync::Arc::clone(&stderr_line);
-            tokio::spawn(drain_stderr(BufReader::new(stderr), redactor, move |line| {
-                tracing::debug!(target: "coppice::plugin_mcp", %line, "mcp server stderr");
-                if let Ok(mut slot) = stderr_line.lock() {
-                    if slot.is_none() && !line.trim().is_empty() {
-                        *slot = Some(line);
+            tokio::spawn(drain_stderr(
+                BufReader::new(stderr),
+                redactor,
+                move |line| {
+                    tracing::debug!(target: "coppice::plugin_mcp", %line, "mcp server stderr");
+                    if let Ok(mut slot) = stderr_line.lock() {
+                        if slot.is_none() && !line.trim().is_empty() {
+                            *slot = Some(line);
+                        }
                     }
-                }
-            }));
+                },
+            ));
         }
         let started = client::connect(process, redactor.clone(), Redactor::for_output(secrets));
         match tokio::time::timeout(HANDSHAKE_TIMEOUT, started).await {
             Ok(result) => result.map_err(|err| annotate_start(err, &stderr_line, &redactor)),
             Err(_) => Err(ProxyError::Start(redactor.apply(&format!(
-                "mcp server timed out after {}s{}",
+                "MCP server timed out after {}s{}",
                 HANDSHAKE_TIMEOUT.as_secs(),
                 stderr_suffix(&stderr_line)
             )))),
@@ -140,6 +144,7 @@ fn stderr_suffix(slot: &std::sync::Mutex<Option<String>>) -> String {
         .ok()
         .and_then(|guard| guard.clone())
         .filter(|line| !line.is_empty())
+        .and_then(|line| crate::host_env::first_text_line(&line))
         .map(|line| format!(": {line}"))
         .unwrap_or_default()
 }

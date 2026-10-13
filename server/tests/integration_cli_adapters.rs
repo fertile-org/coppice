@@ -210,7 +210,7 @@ async fn cursor_spawn_failure_message() {
     assert_eq!(
         invalid_fixture(err),
         format!(
-            "could not read `{missing}` version (`{missing}` was not found); version-specific flags were not applied"
+            "Couldn't read `{missing}`'s version (`{missing}` wasn't found. Looked in: {missing}), so version-specific flags weren't applied."
         )
     );
 }

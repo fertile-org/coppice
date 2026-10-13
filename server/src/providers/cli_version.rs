@@ -23,7 +23,7 @@ static CACHE: Mutex<Option<HashMap<CacheKey, String>>> = Mutex::new(None);
 /// Shown when a version probe fails, so version-gated flags are not dropped quietly.
 pub fn version_unavailable(program: &str, err: &str) -> String {
     format!(
-        "could not read `{program}` version ({err}); version-specific flags were not applied"
+        "Couldn't read `{program}`'s version ({err}), so version-specific flags weren't applied."
     )
 }
 
@@ -36,7 +36,11 @@ pub async fn detect(program: &str) -> Result<String, String> {
         host.resolve(program).map_err(|err| err.to_string())?
     };
     if !resolved.is_file() {
-        return Err(format!("`{program}` was not found"));
+        return Err(crate::host_env::NotFound {
+            name: program.to_string(),
+            dirs: vec![resolved],
+        }
+        .to_string());
     }
     let mtime = std::fs::metadata(&resolved)
         .and_then(|meta| meta.modified())
@@ -79,7 +83,7 @@ async fn probe(program: &Path) -> Result<String, String> {
     }
     let child = cmd
         .spawn()
-        .map_err(|err| format!("failed to spawn `{}`: {err}", program.display()))?;
+        .map_err(|err| format!("Couldn't start `{}`: {err}", program.display()))?;
     let finished = tokio::time::timeout(PROBE_TIMEOUT, child.wait_with_output())
         .await
         .map_err(|_| {

@@ -73,8 +73,14 @@ pub async fn list_codex_models(
     .await
     .map_err(|err| anyhow::anyhow!(err))?;
     if !output.status.success() {
+        let stdout = String::from_utf8_lossy(&output.stdout);
         let stderr = String::from_utf8_lossy(&output.stderr);
-        anyhow::bail!("`{command} debug models` failed: {stderr}");
+        anyhow::bail!(crate::providers::cli_catalog::models_failure_message(
+            &format!("`{command} debug models`"),
+            output.status,
+            &stdout,
+            &stderr,
+        ));
     }
     let stdout = String::from_utf8_lossy(&output.stdout);
     let models = parse_codex_models_json(&stdout, model_provider);

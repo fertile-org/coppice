@@ -48,6 +48,26 @@ pub fn parse_cli_provider_ids(stdout: &str) -> Vec<String> {
     providers
 }
 
+/// User-visible failure for a models listing. Full output is logged, not shown.
+pub fn models_failure_message(
+    invocation: &str,
+    status: impl std::fmt::Display,
+    stdout: &str,
+    stderr: &str,
+) -> String {
+    tracing::warn!(
+        invocation,
+        %status,
+        %stdout,
+        %stderr,
+        "cli models command failed"
+    );
+    let line = crate::host_env::first_text_line(stderr)
+        .or_else(|| crate::host_env::first_text_line(stdout))
+        .unwrap_or_else(|| "no output".to_string());
+    format!("{invocation} failed ({status}): {line}. Full output is in the log.")
+}
+
 /// Run a CLI through the host environment. `Err` is not found, timed out, or a spawn failure.
 pub async fn capture_cli(
     command: &str,
@@ -57,16 +77,24 @@ pub async fn capture_cli(
     let host = crate::host_env::current();
     match host.run_with_timeout(command, args, timeout).await {
         crate::host_env::RunOutput::NotFound(err) => Err(err.to_string()),
-        crate::host_env::RunOutput::TimedOut { stderr_line } => Err(stderr_line.unwrap_or_else(|| {
-            format!("`{command}` timed out after {}s", timeout.as_secs())
-        })),
+        crate::host_env::RunOutput::TimedOut { stderr_line } => {
+            if let Some(line) = &stderr_line {
+                tracing::debug!(command, %line, "cli command timed out");
+            }
+            Err(format!(
+                "`{command}` timed out after {}s",
+                timeout.as_secs()
+            ))
+        }
         crate::host_env::RunOutput::Exit(exit) => {
             let status = match exit.status {
                 Some(status) => status,
                 None => {
-                    return Err(exit
+                    let err = exit
                         .stderr_line
-                        .unwrap_or_else(|| format!("failed to spawn `{command}`")));
+                        .unwrap_or_else(|| "unknown error".to_string());
+                    tracing::warn!(command, %err, "failed to start cli");
+                    return Err(format!("Couldn't start `{command}`: {err}"));
                 }
             };
             Ok(std::process::Output {
@@ -143,6 +171,30 @@ mod tests {
         assert_eq!(
             effective_model_providers(&["azure".into(), "openai".into()], &["openai"]),
             vec!["azure".to_string(), "openai".to_string()]
+        );
+    }
+
+    #[test]
+    fn models_failure_uses_the_first_line_and_points_at_the_log() {
+        let long = "x".repeat(250);
+        let message = models_failure_message(
+            "`agent` models`",
+            "exit status: 1",
+            &format!("ignored stdout\n{long}"),
+            "\nnot signed in\nmore detail\n",
+        );
+        assert_eq!(
+            message,
+            "`agent` models` failed (exit status: 1): not signed in. Full output is in the log."
+        );
+        let from_stdout =
+            models_failure_message("`agent` models`", "exit status: 2", &long, "  \n");
+        let line = crate::host_env::first_text_line(&long).unwrap();
+        assert_eq!(line.chars().count(), 201);
+        assert!(line.ends_with('…'));
+        assert_eq!(
+            from_stdout,
+            format!("`agent` models` failed (exit status: 2): {line}. Full output is in the log.")
         );
     }
 

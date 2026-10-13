@@ -71,7 +71,7 @@ impl std::fmt::Display for NotFound {
                 .collect::<Vec<_>>()
                 .join(", ")
         };
-        write!(f, "`{}` was not found (looked in {dirs})", self.name)
+        write!(f, "`{}` wasn't found. Looked in: {dirs}", self.name)
     }
 }
 
@@ -149,20 +149,24 @@ pub fn resolve_model_program(command: &str, path: &OsStr) -> PathBuf {
     resolve_in(path, command).unwrap_or_else(|_| PathBuf::from(command))
 }
 
-/// First non-empty line of a stderr buffer, capped so a UI row stays short.
-pub fn first_stderr_line(stderr: &[u8]) -> Option<String> {
-    let text = String::from_utf8_lossy(stderr);
+/// First non-empty line of CLI output, trimmed to about 200 characters.
+pub fn first_text_line(text: &str) -> Option<String> {
     let line = text.lines().map(str::trim).find(|line| !line.is_empty())?;
     let line = line.replace('\0', "");
     if line.is_empty() {
         return None;
     }
-    const MAX: usize = 500;
+    const MAX: usize = 200;
     if line.chars().count() <= MAX {
         Some(line)
     } else {
         Some(format!("{}…", line.chars().take(MAX).collect::<String>()))
     }
+}
+
+/// First non-empty line of a stderr buffer, capped so a UI row stays short.
+pub fn first_stderr_line(stderr: &[u8]) -> Option<String> {
+    first_text_line(&String::from_utf8_lossy(stderr))
 }
 
 impl HostEnv {
@@ -700,7 +704,10 @@ mod tests {
         let missing = env.resolve("absent").unwrap_err();
         assert_eq!(missing.name, "absent");
         assert_eq!(missing.dirs, vec![bin.clone()]);
-        assert!(missing.to_string().contains("absent"));
+        assert_eq!(
+            missing.to_string(),
+            format!("`absent` wasn't found. Looked in: {}", bin.display())
+        );
         assert_eq!(
             resolve_model_program("absent", &path),
             PathBuf::from("absent")

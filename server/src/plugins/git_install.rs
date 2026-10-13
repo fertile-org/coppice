@@ -210,10 +210,7 @@ impl Git {
         if remaining.is_zero() {
             return Err(format!("git timed out after {}s", self.timeout.as_secs()));
         }
-        let mut full: Vec<&OsStr> = vec![
-            OsStr::new("-c"),
-            OsStr::new("protocol.ext.allow=never"),
-        ];
+        let mut full: Vec<&OsStr> = vec![OsStr::new("-c"), OsStr::new("protocol.ext.allow=never")];
         if !self.allow_file {
             full.push(OsStr::new("-c"));
             full.push(OsStr::new("protocol.file.allow=never"));
@@ -225,7 +222,7 @@ impl Git {
                 if err.kind() == std::io::ErrorKind::TimedOut {
                     format!("git timed out after {}s", self.timeout.as_secs())
                 } else {
-                    format!("failed to run git: {err}")
+                    err.to_string()
                 }
             })?;
         if output.status.success() {

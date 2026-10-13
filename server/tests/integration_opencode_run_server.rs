@@ -143,9 +143,9 @@ async fn start_with_missing_binary_names_the_command() {
         .expect("missing binary must fail");
     let message = err.to_string();
     assert!(message.contains("does-not-exist-opencode"), "{message}");
-    assert!(message.contains("was not found"), "{message}");
+    assert!(message.contains("wasn't found"), "{message}");
     assert!(
-        message.contains("version-specific flags were not applied"),
+        message.contains("version-specific flags weren't applied"),
         "{message}"
     );
 }
