@@ -136,6 +136,7 @@ async fn run_check(
     let context_path = scratch.join(".agent").join("context.md");
 
     let stream = state.run_streams.register(run.id);
+    crate::services::run_service::spawn_reported_model_writer(pool.clone(), run.id, stream.clone());
     let cancel_rx = stream.cancelled_rx();
     run_svc
         .mark_running(run.id)
@@ -195,6 +196,7 @@ async fn run_check(
         mcp: Some(grant.access.clone()),
     });
     let timed = tokio::time::timeout(Duration::from_secs(timeout_secs), provider_run).await;
+    crate::services::run_service::record_reported_model(pool, run.id, &stream).await;
     grant.revoke().await;
     let Ok(provider_result) = timed else {
         stream.cancel();

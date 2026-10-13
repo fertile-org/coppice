@@ -38,6 +38,7 @@ pub mod split_service;
 pub mod ticket_git_service;
 pub mod ticket_service;
 pub mod ticket_thread;
+pub mod uncovered_model_service;
 pub mod user_service;
 pub mod workflow_service;
 pub mod workspace_settings_service;

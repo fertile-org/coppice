@@ -120,6 +120,12 @@ function stubApi(extra: Handler = () => undefined) {
     if (path === '/api/agents' && method === 'GET') {
       return Promise.resolve(json({ items: agents }));
     }
+    if (method === 'GET' && /^\/api\/connectors\/[^/]+\/model-providers$/.test(path)) {
+      return Promise.resolve(json({ items: [] }));
+    }
+    if (method === 'GET' && /^\/api\/tools\/connectors\/[^/]+\/uncovered-models$/.test(path)) {
+      return Promise.resolve(json({ modelIds: [] }));
+    }
     return Promise.reject(new Error(`unexpected ${method} ${path}`));
   });
 }
@@ -432,6 +438,53 @@ describe('ConnectorsTab', () => {
     expect(JSON.parse(String(callsFor('/api/tools/connectors/codex', 'PATCH')[0][1].body))).toEqual({
       enabled: false,
     });
+  });
+
+  it('checks one model as not covered by the plan', async () => {
+    const cursor = connector({ id: 'cursor', displayName: 'Cursor' });
+    stubApi((path, init) => {
+      const method = init.method ?? 'GET';
+      if (path === '/api/tools/connectors' && method === 'GET') {
+        return json([cursor]);
+      }
+      if (path === '/api/connectors/cursor/model-providers' && method === 'GET') {
+        return json({ items: [{ id: 'cursor' }] });
+      }
+      if (path === '/api/connectors/cursor/model-providers/cursor/models' && method === 'GET') {
+        return json({
+          items: [
+            { id: 'composer-2.5', name: 'Composer 2.5' },
+            { id: 'auto', name: 'Auto' },
+          ],
+        });
+      }
+      if (path === '/api/tools/connectors/cursor/uncovered-models' && method === 'GET') {
+        return json({ modelIds: [] });
+      }
+      if (path === '/api/tools/connectors/cursor/uncovered-models' && method === 'PUT') {
+        return json({ modelIds: ['composer-2.5'] });
+      }
+      return undefined;
+    });
+    renderTab();
+
+    const cursorCard = await card('cursor');
+    expect(cursorCard.getByText('Models not covered by my plan')).toBeVisible();
+    const composer = await cursorCard.findByRole('checkbox', { name: /Composer 2.5/ });
+    expect(composer).not.toBeChecked();
+    expect(cursorCard.getByRole('checkbox', { name: /^Auto/ })).not.toBeChecked();
+
+    fireEvent.click(composer);
+
+    await waitFor(() =>
+      expect(callsFor('/api/tools/connectors/cursor/uncovered-models', 'PUT')).toHaveLength(1),
+    );
+    expect(
+      JSON.parse(
+        String(callsFor('/api/tools/connectors/cursor/uncovered-models', 'PUT')[0][1].body),
+      ),
+    ).toEqual({ modelIds: ['composer-2.5'] });
+    expect(composer).toBeChecked();
   });
 
   it('unknown statuses fall back', () => {

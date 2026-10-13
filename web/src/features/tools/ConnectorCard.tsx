@@ -10,6 +10,7 @@ import type { ConnectorStatus } from '../../lib/schemas/connectorDiagnostics';
 import { useAgents } from '../agents/useAgents';
 import { ConnectorStatusList } from './ConnectorStatusList';
 import { ConnectorTestSection } from './ConnectorTestSection';
+import { UncoveredModels } from './UncoveredModels';
 import { turnOffConfirm } from './connectorCopy';
 import { useRecheckConnector, useSetConnectorEnabled } from './useConnectorDiagnostics';
 
@@ -104,6 +105,8 @@ export function ConnectorCard({ connector }: { connector: ConnectorStatus }) {
       </div>
 
       <ConnectorStatusList connector={connector} />
+
+      <UncoveredModels connector={connector} />
 
       <Dialog open={confirming} onOpenChange={(open) => !open && setConfirming(false)}>
         <DialogContent>

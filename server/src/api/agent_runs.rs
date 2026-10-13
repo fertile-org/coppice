@@ -96,6 +96,9 @@ pub(crate) struct RunResponse {
     ended_at: Option<String>,
     created_at: String,
     connector: Option<String>,
+    /// Exact CLI model, or null when the CLI did not report one.
+    reported_model: Option<String>,
+    billed_outside_plan: bool,
 }
 
 #[derive(Serialize)]
@@ -110,22 +113,53 @@ pub(crate) struct RunsListResponse {
     runs: Vec<RunResponse>,
 }
 
-pub(crate) fn single_run_response(run: AgentRun, connector: Option<String>) -> SingleRunResponse {
+pub(crate) fn single_run_response(
+    run: AgentRun,
+    connector: Option<String>,
+    reported_model: Option<String>,
+    billed_outside_plan: bool,
+) -> SingleRunResponse {
     SingleRunResponse {
-        run: run_to_response(run, connector),
+        run: run_to_response(run, connector, reported_model, billed_outside_plan),
     }
+}
+
+pub(crate) async fn load_single_run_response(
+    service: &RunService<'_>,
+    run: AgentRun,
+    connector: Option<String>,
+) -> Result<SingleRunResponse, RunError> {
+    let (reported_model, billed_outside_plan) = service.model_display(run.id).await?;
+    Ok(single_run_response(
+        run,
+        connector,
+        reported_model,
+        billed_outside_plan,
+    ))
 }
 
 pub(crate) fn runs_list_response(runs: Vec<AgentRunWithConnector>) -> RunsListResponse {
     RunsListResponse {
         runs: runs
             .into_iter()
-            .map(|item| run_to_response(item.run, item.connector))
+            .map(|item| {
+                run_to_response(
+                    item.run,
+                    item.connector,
+                    item.reported_model,
+                    item.billed_outside_plan,
+                )
+            })
             .collect(),
     }
 }
 
-pub(crate) fn run_to_response(run: AgentRun, connector: Option<String>) -> RunResponse {
+pub(crate) fn run_to_response(
+    run: AgentRun,
+    connector: Option<String>,
+    reported_model: Option<String>,
+    billed_outside_plan: bool,
+) -> RunResponse {
     RunResponse {
         id: run.id,
         ticket_id: run.ticket_id,
@@ -143,6 +177,8 @@ pub(crate) fn run_to_response(run: AgentRun, connector: Option<String>) -> RunRe
         ended_at: run.ended_at.map(|t| t.format(&Rfc3339).unwrap_or_default()),
         created_at: run.created_at.format(&Rfc3339).unwrap_or_default(),
         connector,
+        reported_model,
+        billed_outside_plan,
     }
 }
 
@@ -167,7 +203,10 @@ async fn get_run(
         .agent_connector_for_run(run.agent_id)
         .await
         .map_err(map_error)?;
-    Ok(Json(single_run_response(run, connector)))
+    load_single_run_response(&service, run, connector)
+        .await
+        .map(Json)
+        .map_err(map_error)
 }
 
 async fn stop_run(
@@ -201,7 +240,10 @@ async fn stop_run(
         .agent_connector_for_run(run.agent_id)
         .await
         .map_err(map_error)?;
-    Ok(Json(single_run_response(run, connector)))
+    load_single_run_response(&service, run, connector)
+        .await
+        .map(Json)
+        .map_err(map_error)
 }
 
 async fn retry_run(
@@ -216,10 +258,10 @@ async fn retry_run(
         .agent_connector_for_run(run.agent_id)
         .await
         .map_err(map_error)?;
-    Ok((
-        StatusCode::CREATED,
-        Json(single_run_response(run, connector)),
-    ))
+    let response = load_single_run_response(&service, run, connector)
+        .await
+        .map_err(map_error)?;
+    Ok((StatusCode::CREATED, Json(response)))
 }
 
 async fn list_tool_calls(
@@ -270,8 +312,10 @@ mod tests {
             ended_at: None,
             created_at: time::OffsetDateTime::now_utc(),
         };
-        let response = run_to_response(run, Some("mock".into()));
+        let response = run_to_response(run, Some("mock".into()), None, false);
         assert_eq!(response.status, "running");
         assert_eq!(response.connector.as_deref(), Some("mock"));
+        assert_eq!(response.reported_model, None);
+        assert!(!response.billed_outside_plan);
     }
 }

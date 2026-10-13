@@ -26,6 +26,9 @@ export const agentRunSchema = z.object({
   errorMessage: z.string().nullable(),
   sessionId: z.string().nullable().optional(),
   connector: z.string().optional(),
+  /** Exact CLI model. Null or absent means the CLI did not report one. */
+  reportedModel: z.string().nullable().optional(),
+  billedOutsidePlan: z.boolean().optional(),
 });
 
 export type AgentRun = z.infer<typeof agentRunSchema>;
