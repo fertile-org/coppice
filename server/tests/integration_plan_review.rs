@@ -859,6 +859,17 @@ async fn plan_run_leaves_branches_tags_and_remotes_unchanged() {
     assert_eq!(ticket["status"], "plan_review");
     let after = repo_ref_snapshot(&git.repo);
     assert_eq!(before, after, "plan run changed branches, tags, or remotes");
+    let deadline = Instant::now() + Duration::from_secs(15);
+    loop {
+        let listed = git_stdout(&git.repo, &["worktree", "list"]);
+        if !listed.contains("plan-scratch") {
+            break;
+        }
+        if Instant::now() >= deadline {
+            panic!("plan scratch worktree was not removed:\n{listed}");
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
     snapshot_ticket_git(&git);
 
     let listed = runs(&app, &ticket_id, &cookie, &csrf).await;
