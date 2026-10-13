@@ -42,35 +42,20 @@ fi
 
 set -m
 export DEBIAN_FRONTEND=noninteractive
-# Bundled Postgres is built --with-system-tzdata=/usr/share/zoneinfo. Without
-# tzdata, connecting with TimeZone=UTC fails.
 apt-get update
+# Runtime libraries come from the .deb (tzdata, libasound2, libgbm1, GTK).
+# Postgres libs are copied into the package at build time, so they are not
+# installed here. These packages only let the check start a session and call
+# the API: zsh and Xvfb stand in for Hung's shell and display; curl and
+# python3 sign in and read JSON.
 apt-get install -y --no-install-recommends \
   ca-certificates \
   curl \
   python3 \
-  tzdata \
-  xz-utils \
   zsh \
   xvfb \
   xauth \
-  libxml2 \
-  libxslt1.1 \
-  libreadline8 \
-  libxxhash0 \
-  liblz4-1 \
-  libzstd1 \
-  libssl3 \
-  libgssapi-krb5-2 \
-  libgbm1 \
   /opt/coppice-e2e/coppice.deb
-# Electron needs libasound.so.2. The .deb depends on libasound2 (Ubuntu 22.04).
-# 24.04 renamed that library to libasound2t64, so install whichever this image has.
-if apt-cache show libasound2t64 >/dev/null 2>&1; then
-  apt-get install -y --no-install-recommends libasound2t64
-else
-  apt-get install -y --no-install-recommends libasound2
-fi
 
 if [[ ! -x /bin/zsh ]]; then
   ln -s "$(command -v zsh)" /bin/zsh
