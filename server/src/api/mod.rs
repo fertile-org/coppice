@@ -24,7 +24,7 @@ mod users;
 
 use axum::{middleware, Router};
 use std::sync::Arc;
-use crate::middleware::{csrf, host_guard, session};
+use crate::middleware::{csrf, host_guard, request_log, session};
 use crate::AppState;
 
 pub fn router(state: Arc<AppState>) -> Router {
@@ -70,5 +70,6 @@ pub fn router(state: Arc<AppState>) -> Router {
             state.clone(),
             host_guard::desktop_host_guard,
         ))
+        .layer(middleware::from_fn(request_log::log_request))
         .with_state(state)
 }
