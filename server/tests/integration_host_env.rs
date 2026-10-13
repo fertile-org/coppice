@@ -111,9 +111,12 @@ esac"#
 esac"#,
     );
     let fake_mcp = env!("CARGO_BIN_EXE_fake-mcp");
+    // A name that is not a real CLI. Fallback dirs such as /usr/local/bin are
+    // searched before the login-shell PATH, so `npx` can resolve to the
+    // runner's Node shim and never reach this script.
     script(
-        &tools.join("npx"),
-        &format!("touch \"$HOME/npx-stamp\"\nexec '{fake_mcp}' \"$@\""),
+        &tools.join("coppice-host-mcp"),
+        &format!("touch \"$HOME/host-mcp-stamp\"\nexec '{fake_mcp}' \"$@\""),
     );
 
     let _env = EnvGuard::apply("/usr/bin:/bin", home.path());
@@ -121,6 +124,7 @@ esac"#,
     let (_state, app, cookie, csrf) = common::bootstrap_and_login_with_state_config(|config| {
         config.agent.connectors.cursor.enabled = true;
         config.agent.connectors.claude_code.enabled = true;
+        config.agent.connectors.kilo_code.command = "coppice-host-kilo".into();
     })
     .await;
 
@@ -229,7 +233,7 @@ esac"#,
     let conn = StdioTransport
         .connect(
             &ResolvedTransport::Stdio {
-                command: "npx".into(),
+                command: "coppice-host-mcp".into(),
                 args: Vec::new(),
                 env: Default::default(),
                 secrets: Vec::new(),
@@ -238,11 +242,17 @@ esac"#,
         )
         .await
         .expect("mcp spawn");
-    assert!(home.path().join("npx-stamp").is_file(), "npx was not spawned");
+    assert!(
+        home.path().join("host-mcp-stamp").is_file(),
+        "login-shell MCP command was not spawned"
+    );
     conn.close().await;
 
     let extra = home.path().join("extra/bin");
-    script(&extra.join("kilo"), "echo 'kilo 1.0.0'\nexit 0");
+    script(
+        &extra.join("coppice-host-kilo"),
+        "echo 'kilo 1.0.0'\nexit 0",
+    );
     std::fs::write(
         home.path().join(".zshrc"),
         "export PATH=\"$HOME/extra/bin:$HOME/tools/bin:$PATH\"\n",
@@ -264,7 +274,10 @@ esac"#,
     assert_eq!(kilo_json["readiness"], "found", "{kilo_json}");
     assert!(kilo_json["cli"]["found"].as_bool().unwrap_or(false));
     let kilo_path = kilo_json["cli"]["path"].as_str().unwrap_or("");
-    assert!(kilo_path.contains("extra/bin/kilo"), "{kilo_path}");
+    assert!(
+        kilo_path.contains("extra/bin/coppice-host-kilo"),
+        "{kilo_path}"
+    );
 }
 
 #[test]
