@@ -448,20 +448,13 @@ print(f"program: {program}")
 PY
 
 # A missing route is still an info line: method, path, status, no query string.
-# Electron captures server stdout through a pipe, so Rust block-buffers it.
-# One line can sit in that buffer; a burst fills it and the log file catches up.
 missing_body=$(mktemp)
-missing_code=""
-for _ in $(seq 1 60); do
-  missing_code=$(fetch "${missing_body}" "${base_url}/api/this-route-is-missing")
-  if [[ "${missing_code}" != "404" ]]; then
-    echo "missing route status ${missing_code}" >&2
-    exit 1
-  fi
-done
-logged_404=""
-for _ in $(seq 1 20); do
-  if python3 - "${server_log}" <<'PY'
+missing_code=$(fetch "${missing_body}" "${base_url}/api/this-route-is-missing")
+if [[ "${missing_code}" != "404" ]]; then
+  echo "missing route status ${missing_code}" >&2
+  exit 1
+fi
+python3 - "${server_log}" <<'PY'
 import sys
 path = "/api/this-route-is-missing"
 lines = [
@@ -469,7 +462,7 @@ lines = [
     if "http request" in line and path in line
 ]
 if not lines:
-    sys.exit(1)
+    sys.exit("404 was not logged")
 for line in lines:
     if "?" in line or "refresh=" in line:
         sys.exit("404 request log included a query string: " + line)
@@ -477,16 +470,6 @@ for line in lines:
         sys.exit("404 request log missing status: " + line)
 print("logged 404:", path)
 PY
-  then
-    logged_404=1
-    break
-  fi
-  sleep 0.25
-done
-if [[ -z "${logged_404}" ]]; then
-  echo "404 was not logged" >&2
-  exit 1
-fi
 
 launch_known() {
   if [[ "${sandbox_note}" == *--no-sandbox* ]]; then

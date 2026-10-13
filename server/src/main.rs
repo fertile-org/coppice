@@ -1,3 +1,4 @@
+use std::io::{self, IsTerminal, Write};
 use std::net::SocketAddr;
 use std::time::Duration;
 use tracing_subscriber::EnvFilter;
@@ -18,12 +19,45 @@ fn log_directives(rust_log: Option<&str>) -> String {
 
 fn init_tracing() {
     let rust_log = std::env::var(EnvFilter::DEFAULT_ENV).ok();
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            EnvFilter::try_new(log_directives(rust_log.as_deref()))
-                .unwrap_or_else(|_| EnvFilter::new(log_directives(None))),
-        )
-        .init();
+    let filter = EnvFilter::try_new(log_directives(rust_log.as_deref()))
+        .unwrap_or_else(|_| EnvFilter::new(log_directives(None)));
+    let builder = tracing_subscriber::fmt().with_env_filter(filter);
+    // A terminal is already line-buffered. A pipe (Electron's server.log) is
+    // block-buffered, so the last lines sit there until the process exits —
+    // and are gone if it crashes. Flush every write in that case.
+    if io::stdout().is_terminal() {
+        builder.init();
+    } else {
+        builder.with_writer(pipe_log_writer).init();
+    }
+}
+
+fn pipe_log_writer() -> FlushingWriter<io::Stdout> {
+    FlushingWriter {
+        inner: io::stdout(),
+    }
+}
+
+/// Flushes after every write so a block-buffered pipe cannot keep a log line.
+struct FlushingWriter<W> {
+    inner: W,
+}
+
+impl<W: Write> Write for FlushingWriter<W> {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        let n = self.inner.write(buf)?;
+        self.inner.flush()?;
+        Ok(n)
+    }
+
+    fn write_all(&mut self, buf: &[u8]) -> io::Result<()> {
+        self.inner.write_all(buf)?;
+        self.inner.flush()
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.inner.flush()
+    }
 }
 
 fn runtime() -> std::io::Result<tokio::runtime::Runtime> {
@@ -145,5 +179,28 @@ mod tests {
         assert_eq!(log_directives(Some(" ")), "info,rmcp=warn");
         assert_eq!(log_directives(Some("debug")), "debug,rmcp=warn");
         assert_eq!(log_directives(Some("info,rmcp=debug")), "info,rmcp=debug");
+    }
+
+    #[test]
+    fn flushing_writer_pushes_a_line_through_a_block_buffer() {
+        use std::io::{Read, Write};
+        use std::sync::mpsc;
+        use std::time::Duration;
+
+        let (reader, writer) = std::io::pipe().expect("pipe");
+        let buffered = std::io::BufWriter::with_capacity(8 * 1024, writer);
+        let mut out = super::FlushingWriter { inner: buffered };
+        let (tx, rx) = mpsc::channel();
+        std::thread::spawn(move || {
+            let mut reader = reader;
+            let mut buf = [0u8; 32];
+            let n = reader.read(&mut buf).unwrap_or(0);
+            let _ = tx.send(buf[..n].to_vec());
+        });
+        out.write_all(b"hello\n").expect("write");
+        let got = rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("line was not flushed");
+        assert_eq!(got, b"hello\n");
     }
 }
