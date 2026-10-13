@@ -4,7 +4,7 @@ import { render, screen } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router-dom';
 import type { AgentRun } from '../../lib/schemas/agentRun';
-import { BILLED_OUTSIDE_PLAN } from '../runs/reportedModel';
+import { NOT_COVERED_BY_PLAN } from '../runs/reportedModel';
 import { TicketRunsTab } from './TicketRunsTab';
 
 const billedRun: AgentRun = {
@@ -57,6 +57,6 @@ describe('TicketRunsTab model line', () => {
       </MemoryRouter>,
     );
     expect(screen.getByText('composer-2.5')).toBeVisible();
-    expect(screen.getByText(BILLED_OUTSIDE_PLAN)).toBeVisible();
+    expect(screen.getByText(NOT_COVERED_BY_PLAN)).toBeVisible();
   });
 });

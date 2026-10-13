@@ -1,5 +1,5 @@
 import '@testing-library/jest-dom/vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { useState } from 'react';
 import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -11,6 +11,7 @@ import {
   type AgentFormValues,
   type PluginAssignmentState,
 } from './AgentForm';
+import { NOT_COVERED_BY_PLAN } from '../runs/reportedModel';
 import type { Agent, ModelGroup } from './useAgents';
 
 const mocks = vi.hoisted(() => ({
@@ -20,10 +21,19 @@ const mocks = vi.hoisted(() => ({
   modelsError: false,
   modelsDetail: null as string | null,
   refreshModels: vi.fn(),
+  uncoveredIds: [] as string[],
 }));
 
 vi.mock('../plugins/usePlugins', () => ({
   usePlugins: () => ({ data: mocks.plugins, isLoading: false }),
+}));
+
+vi.mock('../tools/useUncoveredModels', () => ({
+  useUncoveredModels: () => ({
+    data: mocks.uncoveredIds,
+    isLoading: false,
+    isError: false,
+  }),
 }));
 
 vi.mock('./useAgents', () => ({
@@ -132,6 +142,7 @@ describe('AgentForm model choice', () => {
     mocks.modelsError = false;
     mocks.modelsDetail = null;
     mocks.refreshModels.mockReset();
+    mocks.uncoveredIds = [];
   });
 
   it('preselects the connector default and offers Refresh models', () => {
@@ -153,6 +164,44 @@ describe('AgentForm model choice', () => {
     );
     fireEvent.click(screen.getByRole('button', { name: 'Refresh models' }));
     expect(mocks.refreshModels).toHaveBeenCalledTimes(1);
+  });
+
+  it('marks a model the user checked as not covered', () => {
+    mocks.groups = [
+      {
+        provider: 'cursor',
+        models: [
+          { id: 'auto', name: 'Auto' },
+          { id: 'composer-2.5', name: 'Composer 2.5' },
+        ],
+      },
+    ];
+    mocks.uncoveredIds = ['composer-2.5'];
+    render(
+      <Harness
+        mode="edit"
+        initial={baseValues({
+          connector: 'cursor',
+          modelProvider: 'cursor',
+          model: 'composer-2.5',
+        })}
+        onSubmit={vi.fn()}
+        connectorOptions={[{ id: 'cursor', displayName: 'Cursor' }]}
+      />,
+    );
+
+    const trigger = screen.getByRole('combobox', { name: 'Model' });
+    expect(trigger).toHaveTextContent('Composer 2.5');
+    expect(trigger).not.toHaveTextContent(NOT_COVERED_BY_PLAN);
+    expect(screen.getByText(NOT_COVERED_BY_PLAN)).toBeVisible();
+
+    const list = openCombobox(trigger);
+    expect(within(list).getByRole('option', { name: /Composer 2.5/ })).toHaveTextContent(
+      NOT_COVERED_BY_PLAN,
+    );
+    expect(within(list).getByRole('option', { name: 'Auto' })).not.toHaveTextContent(
+      NOT_COVERED_BY_PLAN,
+    );
   });
 
   it('lists one provider without a group heading and sets that provider when picked', async () => {

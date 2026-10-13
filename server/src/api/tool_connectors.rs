@@ -1,3 +1,4 @@
+use crate::api::auth::AuthUser;
 use crate::connectors_runtime::ConnectorConfigError;
 use crate::middleware::admin::AdminUser;
 use crate::services::connector_check_service::{
@@ -175,7 +176,7 @@ struct UncoveredModelsBody {
 
 async fn list_uncovered_models(
     State(state): State<Arc<AppState>>,
-    AdminUser(_admin): AdminUser,
+    AuthUser { .. }: AuthUser,
     Path(id): Path<String>,
 ) -> Result<Json<UncoveredModelsResponse>, StatusCode> {
     let pool = state.db.as_ref().ok_or(StatusCode::SERVICE_UNAVAILABLE)?;

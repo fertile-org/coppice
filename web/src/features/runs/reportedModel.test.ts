@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   MODEL_NOT_REPORTED,
   modelsListFailed,
+  NOT_COVERED_BY_PLAN,
   reportedModelLabel,
 } from './reportedModel';
 
@@ -11,6 +12,10 @@ describe('reportedModelLabel', () => {
     expect(reportedModelLabel('  claude-sonnet-4-20250514  ')).toBe(
       'claude-sonnet-4-20250514',
     );
+  });
+
+  it('uses the not-covered placeholder', () => {
+    expect(NOT_COVERED_BY_PLAN).toBe('Not covered by your plan');
   });
 
   it('names the connector when its model list fails', () => {

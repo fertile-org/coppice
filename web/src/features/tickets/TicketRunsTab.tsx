@@ -3,7 +3,7 @@ import { useAgents } from '../agents/useAgents';
 import { KnowledgeUsed } from '../knowledge/KnowledgeUsed';
 import { RunToolsAndSkills } from '../runs/RunToolsAndSkills';
 import type { AgentRun, RunStatus } from '../../lib/schemas/agentRun';
-import { BILLED_OUTSIDE_PLAN, reportedModelLabel } from '../runs/reportedModel';
+import { NOT_COVERED_BY_PLAN, reportedModelLabel } from '../runs/reportedModel';
 import { useOpenTicket } from './useOpenTicket';
 import { useAgentRuns } from './useAgentRuns';
 
@@ -97,7 +97,7 @@ function RunRow({
           </p>
           <p className="font-body text-xs text-text-muted">{reportedModelLabel(run.reportedModel)}</p>
           {run.billedOutsidePlan && (
-            <p className="font-body text-xs text-text-muted">{BILLED_OUTSIDE_PLAN}</p>
+            <p className="font-body text-xs text-text-muted">{NOT_COVERED_BY_PLAN}</p>
           )}
         </div>
         <time

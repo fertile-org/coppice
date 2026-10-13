@@ -2,7 +2,7 @@
 
 export const MODEL_NOT_REPORTED = 'Model not reported';
 
-export const BILLED_OUTSIDE_PLAN = 'Billed outside your plan';
+export const NOT_COVERED_BY_PLAN = 'Not covered by your plan';
 
 export const MODELS_NOT_COVERED_HEADING = 'Models not covered by my plan';
 

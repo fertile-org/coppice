@@ -15,6 +15,8 @@ export type ComboboxOption = {
   value: string;
   label: string;
   description?: string;
+  /** Small text beside the label in the list. The closed trigger stays the label. */
+  hint?: string;
   disabled?: boolean;
   group?: string;
   icon?: React.ReactNode;
@@ -200,7 +202,12 @@ function Combobox({
                       <CommandItem
                         key={itemKey(index)}
                         value={itemKey(index)}
-                        keywords={[option.label, option.value, option.description ?? '']}
+                        keywords={[
+                          option.label,
+                          option.value,
+                          option.description ?? '',
+                          option.hint ?? '',
+                        ]}
                         disabled={option.disabled}
                         aria-checked={isSelected}
                         onSelect={() => {
@@ -213,7 +220,14 @@ function Combobox({
                           {renderLabel ? (
                             <span className="flex min-w-0">{renderLabel(option)}</span>
                           ) : (
-                            <span className="truncate">{option.label}</span>
+                            <span className="flex min-w-0 items-baseline gap-2">
+                              <span className="truncate">{option.label}</span>
+                              {option.hint ? (
+                                <span className="shrink-0 text-xs text-text-muted">
+                                  {option.hint}
+                                </span>
+                              ) : null}
+                            </span>
                           )}
                           {option.description ? (
                             <span className="truncate text-xs text-text-muted">

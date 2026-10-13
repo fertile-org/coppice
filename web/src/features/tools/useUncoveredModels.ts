@@ -14,11 +14,12 @@ function uncoveredModelsPath(connectorId: string): string {
   return `/api/tools/connectors/${encodeURIComponent(connectorId)}/uncovered-models`;
 }
 
-export function useUncoveredModels(connectorId: string) {
+export function useUncoveredModels(connectorId: string | undefined) {
   return useQuery({
-    queryKey: uncoveredModelsQueryKey(connectorId),
+    queryKey: uncoveredModelsQueryKey(connectorId ?? ''),
+    enabled: Boolean(connectorId) && connectorId !== 'mock',
     queryFn: async () => {
-      const res = await apiFetch(uncoveredModelsPath(connectorId));
+      const res = await apiFetch(uncoveredModelsPath(connectorId!));
       return uncoveredModelsSchema.parse(await res.json()).modelIds;
     },
   });
