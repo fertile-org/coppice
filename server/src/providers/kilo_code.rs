@@ -93,7 +93,12 @@ impl AgentProvider for KiloCodeProvider {
         let contract = coppice_connectors::get(coppice_connectors::KILO_CODE)
             .expect("kilo-code descriptor")
             .run_contract;
-        let version = cli_version::detect(&self.config.command).await;
+        let version = cli_version::detect(&self.config.command).await.map_err(|err| {
+            ProviderError::InvalidFixture(cli_version::version_unavailable(
+                &self.config.command,
+                &err,
+            ))
+        })?;
         let worktree_arg = worktree.display().to_string();
         // Pinned flags (including `--dir`) come from the descriptor. The prompt
         // is appended after them; model and session stay dynamic.
@@ -103,7 +108,7 @@ impl AgentProvider for KiloCodeProvider {
             worktree: &worktree_arg,
             hostname: "",
             port: "",
-            version: cli_version::for_gate(&version),
+            version: Some(version.as_str()),
         });
         let mut args = contract.with_prompt(pinned, coppice_run_prompt());
 

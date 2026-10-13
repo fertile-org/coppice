@@ -326,15 +326,15 @@ fn probe_kilo_version(command: Option<&str>) -> ProbeOutcome {
     let Some(descriptor) = coppice_connectors::get(coppice_connectors::KILO_CODE) else {
         return ProbeOutcome::NotRun;
     };
-    let home = std::env::var_os("HOME")
-        .map(PathBuf::from)
-        .unwrap_or_default();
-    let path = std::env::var_os("PATH").unwrap_or_default();
+    let host = crate::host_env::current();
+    let env_lookup = |key: &str| {
+        process_auth_env(key).or_else(|| host.var_string(key))
+    };
     let env = ProbeEnv {
-        home: &home,
-        path: &path,
+        home: &host.home,
+        path: &host.path,
         command_override: command,
-        env_lookup: &process_auth_env,
+        env_lookup: &env_lookup,
     };
     probe(descriptor, &env, VERSION_PROBE_TIMEOUT).probe
 }

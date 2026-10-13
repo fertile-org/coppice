@@ -4,11 +4,19 @@ import {
   CONNECTOR_DEFAULT_MODEL_LABEL,
   connectorDefaultModelLabel,
   readinessLabel,
+  SIGN_IN_UNCHECKED_HINT,
+  signInUncheckedHint,
 } from './connectorCopy';
 
 describe('readinessLabel', () => {
-  it('names a found CLI whose sign-in was not checked', () => {
-    expect(readinessLabel('found')).toBe('Found (sign-in not checked)');
+  it('names a found CLI Installed', () => {
+    expect(readinessLabel('found')).toBe('Installed');
+  });
+
+  it('adds the plan hint only for a connector with no free sign-in check', () => {
+    expect(signInUncheckedHint('kilo-code', 'found')).toBe(SIGN_IN_UNCHECKED_HINT);
+    expect(signInUncheckedHint('codex', 'found')).toBeNull();
+    expect(signInUncheckedHint('kilo-code', 'ready')).toBeNull();
   });
 
   it('keeps the other readiness labels', () => {

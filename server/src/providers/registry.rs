@@ -109,7 +109,10 @@ fn build_codex(config: &AppConfig, _deps: &FactoryDeps) -> Option<BuiltConnector
     }
     Some(BuiltConnector {
         provider: Arc::new(CodexProvider::new(cfg.clone())),
-        models: Arc::new(CodexModels::new(cfg.model_providers.clone())),
+        models: Arc::new(CodexModels::new(
+            cfg.command.clone(),
+            cfg.model_providers.clone(),
+        )),
     })
 }
 

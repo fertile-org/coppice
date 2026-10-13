@@ -77,7 +77,9 @@ impl AgentProvider for ClaudeCodeProvider {
             .expect("claude-code descriptor");
         let contract = descriptor.run_contract;
         let program = descriptor.binary.to_string();
-        let version = cli_version::detect(&program).await;
+        let version = cli_version::detect(&program).await.map_err(|err| {
+            ProviderError::InvalidFixture(cli_version::version_unavailable(&program, &err))
+        })?;
         let worktree_arg = worktree.display().to_string();
         let planning = input.job_type == crate::domain::workflow::JOB_TYPE_PLAN_TICKET;
         let read_only_tools = input.read_only_tools || planning;
@@ -88,7 +90,7 @@ impl AgentProvider for ClaudeCodeProvider {
                 worktree: &worktree_arg,
                 hostname: "",
                 port: "",
-                version: cli_version::for_gate(&version),
+                version: Some(version.as_str()),
             }),
             coppice_run_prompt(),
         );

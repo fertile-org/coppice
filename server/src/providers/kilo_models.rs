@@ -1,6 +1,4 @@
-use std::process::Stdio;
-
-use crate::providers::cli_catalog::{self, MODEL_LIST_TIMEOUT};
+use crate::providers::cli_catalog;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ModelOption {
@@ -96,42 +94,21 @@ pub async fn list_kilo_models(
 }
 
 pub async fn fetch_kilo_models_stdout(command: &str) -> anyhow::Result<String> {
-    let mut cmd = tokio::process::Command::new(command);
-    cmd.arg("models")
-        .kill_on_drop(true)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-    let output = match tokio::time::timeout(MODEL_LIST_TIMEOUT, cmd.output()).await {
-        Ok(Ok(output)) => output,
-        Ok(Err(err)) => {
-            return Err(cli_catalog::model_list_err(
-                format!("failed to spawn `{command} models`: {err}"),
-                Some(err.to_string()),
-            ));
-        }
-        Err(_) => {
-            let message = format!(
-                "`{command} models` timed out after {}s",
-                MODEL_LIST_TIMEOUT.as_secs()
-            );
-            return Err(cli_catalog::model_list_err(message.clone(), Some(message)));
-        }
-    };
+    let output =
+        cli_catalog::capture_cli(command, &["models"], crate::host_env::MODEL_LIST_TIMEOUT)
+            .await
+            .map_err(|err| cli_catalog::model_list_err(err.clone(), Some(err)))?;
     let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
     let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
     let stderr_line = first_line(&stderr);
     if !output.status.success() {
-        tracing::warn!(
-            status = %output.status,
-            stderr = %stderr,
-            command,
-            "kilo models command failed"
+        let message = cli_catalog::models_failure_message(
+            &format!("`{command} models`"),
+            output.status,
+            &stdout,
+            &stderr,
         );
-        return Err(cli_catalog::model_list_err(
-            format!("`{command} models` exited {}: {stderr}", output.status),
-            stderr_line,
-        ));
+        return Err(cli_catalog::model_list_err(message, stderr_line));
     }
     let text = if stdout.trim().is_empty() {
         stderr
@@ -139,9 +116,13 @@ pub async fn fetch_kilo_models_stdout(command: &str) -> anyhow::Result<String> {
         stdout
     };
     if kilo_provider_ids(&text).is_empty() {
+        let line = stderr_line
+            .or_else(|| first_line(&text))
+            .unwrap_or_else(|| "no output".to_string());
+        tracing::warn!(command, %text, "no kilo models parsed");
         return Err(cli_catalog::model_list_err(
-            format!("no kilo models parsed from `{command} models`"),
-            stderr_line,
+            format!("`{command} models` listed no models: {line}. Full output is in the log."),
+            Some(line),
         ));
     }
     Ok(text)
@@ -149,9 +130,8 @@ pub async fn fetch_kilo_models_stdout(command: &str) -> anyhow::Result<String> {
 
 /// Provider ids from `kilo models`. Failure or timeout yields an empty list.
 pub async fn discover_kilo_providers(command: &str) -> Vec<String> {
-    let run = tokio::process::Command::new(command).arg("models").output();
-    match tokio::time::timeout(cli_catalog::CLI_LIST_TIMEOUT, run).await {
-        Ok(Ok(output)) if output.status.success() => {
+    match cli_catalog::capture_cli(command, &["models"], cli_catalog::CLI_LIST_TIMEOUT).await {
+        Ok(output) if output.status.success() => {
             let stdout = String::from_utf8_lossy(&output.stdout);
             let text = if stdout.trim().is_empty() {
                 String::from_utf8_lossy(&output.stderr).into_owned()

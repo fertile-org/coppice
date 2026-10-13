@@ -1,5 +1,4 @@
 use std::path::Path;
-use std::process::Command;
 
 use crate::domain::repo::VerificationStatus;
 
@@ -25,12 +24,11 @@ pub fn verify_local_path(path: &Path) -> VerifyResult {
         };
     }
 
-    match Command::new("git")
-        .args(["-C"])
-        .arg(path)
-        .args(["rev-parse", "--git-dir"])
-        .output()
-    {
+    let path_arg = path.to_string_lossy();
+    match crate::services::git_cmd::output_blocking(
+        None,
+        &["-C", path_arg.as_ref(), "rev-parse", "--git-dir"],
+    ) {
         Ok(output) if output.status.success() => VerifyResult {
             status: VerificationStatus::Ready,
             error: None,
@@ -101,12 +99,10 @@ pub fn inspect_local_path(path: &Path) -> InspectPathResult {
 }
 
 fn git_stdout(path: &Path, args: &[&str]) -> Option<String> {
-    let output = Command::new("git")
-        .args(["-C"])
-        .arg(path)
-        .args(args)
-        .output()
-        .ok()?;
+    let path_arg = path.to_string_lossy();
+    let mut full = vec!["-C", path_arg.as_ref()];
+    full.extend_from_slice(args);
+    let output = crate::services::git_cmd::output_blocking(None, &full).ok()?;
     if !output.status.success() {
         return None;
     }

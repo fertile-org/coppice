@@ -10,7 +10,6 @@ use coppice_connectors::ConnectorDescriptor;
 use serde::Serialize;
 use sqlx::PgPool;
 use std::collections::HashMap;
-use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
 use time::format_description::well_known::Rfc3339;
@@ -29,8 +28,8 @@ pub struct CachedProbe {
     pub probed_at: OffsetDateTime,
 }
 
-/// In-memory probe results keyed by connector id. Probes use the server
-/// process `HOME` and `PATH`, the same environment real runs get.
+/// In-memory probe results keyed by connector id. Probes use the shared host
+/// environment (login-shell PATH and HOME), the same one real runs get.
 pub struct ConnectorProbes {
     cache: RwLock<HashMap<String, CachedProbe>>,
     env_lookup: EnvLookup,
@@ -63,24 +62,40 @@ impl ConnectorProbes {
     }
 
     /// Re-probes one diagnosable connector; `None` for `mock`, unknown ids,
-    /// or a probe task that panicked.
+    /// or a probe task that panicked. Drops the cached host environment first.
     pub async fn refresh(&self, config: &AppConfig, id: &str) -> Option<CachedProbe> {
+        crate::host_env::invalidate();
+        self.probe_one(config, id).await
+    }
+
+    pub async fn refresh_all(&self, config: &AppConfig) {
+        crate::host_env::invalidate();
+        let ids: Vec<&str> = diagnosable_descriptors().map(|d| d.id).collect();
+        futures_util::future::join_all(ids.into_iter().map(|id| self.probe_one(config, id))).await;
+    }
+
+    async fn probe_one(&self, config: &AppConfig, id: &str) -> Option<CachedProbe> {
         let descriptor = diagnosable(id)?;
         let command = config.agent.connectors.command(id).map(str::to_string);
         let lookup = self.env_lookup.clone();
         let probed = tokio::task::spawn_blocking(move || {
-            let home = std::env::var_os("HOME")
-                .map(PathBuf::from)
-                .unwrap_or_default();
-            let path = std::env::var_os("PATH").unwrap_or_default();
+            let host = crate::host_env::current();
+            let home = host.home.clone();
+            let path = host.path.clone();
+            let env_lookup = |key: &str| -> Option<String> {
+                if let Some(value) = lookup(key).filter(|value| !value.is_empty()) {
+                    return Some(value);
+                }
+                host.var_string(key)
+            };
             let env = ProbeEnv {
                 home: &home,
                 path: &path,
                 command_override: command.as_deref(),
-                env_lookup: &*lookup,
+                env_lookup: &env_lookup,
             };
             let report = probe(descriptor, &env, PROBE_TIMEOUT);
-            let readiness = assess(descriptor, &env, report.binary.as_deref(), SIGN_IN_TIMEOUT);
+            let readiness = readiness_after_probe(descriptor, &env, &report);
             (report, readiness)
         })
         .await;
@@ -102,11 +117,41 @@ impl ConnectorProbes {
             .insert(id.to_string(), cached.clone());
         Some(cached)
     }
+}
 
-    pub async fn refresh_all(&self, config: &AppConfig) {
-        let ids: Vec<&str> = diagnosable_descriptors().map(|d| d.id).collect();
-        futures_util::future::join_all(ids.into_iter().map(|id| self.refresh(config, id))).await;
+/// Cursor's probe is already `agent models`. Mapping that outcome avoids a
+/// second models call. Other connectors still run their free sign-in command.
+fn readiness_after_probe(
+    descriptor: &ConnectorDescriptor,
+    env: &ProbeEnv<'_>,
+    report: &ProbeReport,
+) -> Readiness {
+    if descriptor.id == coppice_connectors::CURSOR {
+        return cursor_readiness(report);
     }
+    assess(
+        descriptor,
+        env,
+        report.binary.as_deref(),
+        SIGN_IN_TIMEOUT,
+    )
+}
+
+fn cursor_readiness(report: &ProbeReport) -> Readiness {
+    if report.binary.is_none() {
+        return Readiness::NotOnPath;
+    }
+    match &report.probe {
+        ProbeOutcome::Ok { .. } => Readiness::Ready,
+        ProbeOutcome::Failed { message } if unknown_command(message) => Readiness::Found,
+        ProbeOutcome::Failed { .. } => Readiness::FoundNotSignedIn,
+        ProbeOutcome::TimedOut | ProbeOutcome::NotRun => Readiness::Found,
+    }
+}
+
+fn unknown_command(message: &str) -> bool {
+    let lower = message.to_ascii_lowercase();
+    lower.contains("unknown command") || lower.contains("unrecognized")
 }
 
 /// Any set, non-empty value counts, including non-UTF-8 ones.
@@ -384,6 +429,7 @@ pub async fn check_connector(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
 
     fn report(
         env: &[&'static str],

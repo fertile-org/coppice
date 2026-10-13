@@ -213,6 +213,7 @@ async fn graceful_shutdown_and_crash_reap_block_in_progress_tickets() {
     let _grace_cleanup = KillGroup(grace_leader);
     assert!(process_alive(grace_child));
 
+    let _ = coppice_server::host_env::current();
     let started = tokio::time::Instant::now();
     shutdown_agent_sessions(&state).await;
     assert!(
@@ -243,6 +244,7 @@ async fn graceful_shutdown_and_crash_reap_block_in_progress_tickets() {
     // The process that spawned the agent is gone. The next launch installs the
     // same record file, reaps the orphan, then sweeps runs still marked active.
     process_tree::install(&crash_path);
+    let _ = coppice_server::host_env::current();
     let started = tokio::time::Instant::now();
     process_tree::reap_orphaned_agents().await;
     sweep_orphaned_runs(&state).await;
@@ -278,6 +280,7 @@ async fn graceful_shutdown_blocks_in_review_and_in_qa_tickets() {
         let _cleanup = KillGroup(leader);
         assert!(process_alive(child), "{status} child was not running");
 
+        let _ = coppice_server::host_env::current();
         let started = tokio::time::Instant::now();
         shutdown_agent_sessions(&state).await;
         assert!(

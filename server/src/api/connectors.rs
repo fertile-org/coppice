@@ -182,6 +182,9 @@ async fn list_models(
     Path((connector_id, model_provider_id)): Path<(String, String)>,
     Query(query): Query<ModelsQuery>,
 ) -> Result<Json<ModelListResponse>, ModelsApiError> {
+    if query.refresh {
+        crate::host_env::invalidate();
+    }
     let registry = state.connectors.registry();
     if !registry.has(&connector_id) {
         return Err(ModelsApiError::Status(StatusCode::NOT_FOUND));

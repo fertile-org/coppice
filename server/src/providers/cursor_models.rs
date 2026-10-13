@@ -1,8 +1,4 @@
-use std::ffi::OsStr;
-use std::path::PathBuf;
-use std::process::Stdio;
-
-use crate::providers::cli_catalog::{self, MODEL_LIST_TIMEOUT};
+use crate::providers::cli_catalog;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ModelOption {
@@ -161,35 +157,22 @@ fn parse_command_output(stdout: &str, stderr: &str) -> Vec<ModelOption> {
     parse_cursor_models_stdout(&format!("{stdout}\n{stderr}"))
 }
 
-/// Same lookup the Ready probe uses: an absolute path when `command` is on
-/// `path`, otherwise the name unchanged.
-pub fn resolve_model_program(command: &str, path: &OsStr) -> PathBuf {
-    coppice_connectors::probe::resolve_binary(command, path)
-        .unwrap_or_else(|| PathBuf::from(command))
-}
-
-/// Live-list Cursor models.
+/// Live-list Cursor models through [`crate::host_env::HostEnv`].
 ///
-/// The child is not a TTY (stdout and stderr are pipes, stdin is null), which
-/// is the same shape as the connector probe. The desktop Ready check does not
-/// run this command: Cursor is Ready when an auth file exists. This spawn uses
-/// the probe's resolved absolute path and the same `PATH` and `HOME`, then
-/// waits up to [`MODEL_LIST_TIMEOUT`].
+/// The child is not a TTY. Cursor is Ready from an auth file, not this command.
+/// `models` is tried first, then `--list-models`. Both go through
+/// [`HostEnv::run_with_timeout`](crate::host_env::HostEnv::run_with_timeout).
 pub async fn list_cursor_models(command: &str) -> anyhow::Result<Vec<ModelOption>> {
-    let path = std::env::var_os("PATH").unwrap_or_default();
-    let home = std::env::var_os("HOME").unwrap_or_default();
-    list_cursor_models_in(command, &path, &home).await
+    list_cursor_models_with(crate::host_env::current().as_ref(), command).await
 }
 
-pub async fn list_cursor_models_in(
+pub async fn list_cursor_models_with(
+    host: &crate::host_env::HostEnv,
     command: &str,
-    path: &OsStr,
-    home: &OsStr,
 ) -> anyhow::Result<Vec<ModelOption>> {
-    let program = resolve_model_program(command, path);
     let mut failures: Vec<cli_catalog::ModelListError> = Vec::new();
     for args in MODEL_ARG_SETS {
-        match run_model_args(&program, args, path, home).await {
+        match run_model_args(host, command, args).await {
             Ok(models) => return Ok(models),
             Err(err) => failures.push(err),
         }
@@ -204,82 +187,77 @@ pub async fn list_cursor_models_in(
         })
         .or_else(|| failures.iter().find_map(|err| err.detail.clone()));
     let message = failures
-        .last()
+        .first()
         .map(|err| err.message.clone())
-        .unwrap_or_else(|| format!("no cursor models parsed from `{}`", program.display()));
+        .unwrap_or_else(|| {
+            format!("`{command} models` listed no models: no output. Full output is in the log.")
+        });
     Err(cli_catalog::model_list_err(message, detail))
 }
 
 async fn run_model_args(
-    program: &std::path::Path,
+    host: &crate::host_env::HostEnv,
+    command: &str,
     args: &[&str],
-    path: &OsStr,
-    home: &OsStr,
 ) -> Result<Vec<ModelOption>, cli_catalog::ModelListError> {
-    let shown = format!("`{} {}`", program.display(), args.join(" "));
-    let mut cmd = tokio::process::Command::new(program);
-    cmd.args(args)
-        .env("PATH", path)
-        .env("HOME", home)
-        .kill_on_drop(true)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-    let output = match tokio::time::timeout(MODEL_LIST_TIMEOUT, cmd.output()).await {
-        Ok(Ok(output)) => output,
-        Ok(Err(err)) => {
-            let message = format!("failed to spawn {shown}: {err}");
-            tracing::warn!(%message, "cursor model list failed");
-            return Err(cli_catalog::ModelListError {
-                detail: Some(err.to_string()),
-                message,
-            });
-        }
-        Err(_) => {
-            let message = format!("{shown} timed out after {}s", MODEL_LIST_TIMEOUT.as_secs());
-            tracing::warn!(%message, "cursor model list timed out");
-            return Err(cli_catalog::ModelListError {
+    let invocation = format!("`{command} {}`", args.join(" "));
+    match host
+        .run_with_timeout(command, args, crate::host_env::MODEL_LIST_TIMEOUT)
+        .await
+    {
+        crate::host_env::RunOutput::NotFound(missing) => {
+            let message = missing.to_string();
+            Err(cli_catalog::ModelListError {
                 detail: Some(message.clone()),
                 message,
-            });
+            })
         }
-    };
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    let stderr_line = error_detail(&stderr);
-    if !output.status.success() {
-        tracing::warn!(
-            status = %output.status,
-            stderr = %truncate_for_err(&stderr),
-            stdout = %truncate_for_err(&stdout),
-            command = %shown,
-            "cursor model list command failed"
-        );
+        crate::host_env::RunOutput::TimedOut { stderr_line } => {
+            let message = format!(
+                "`{command}` timed out after {}s",
+                crate::host_env::MODEL_LIST_TIMEOUT.as_secs()
+            );
+            Err(cli_catalog::ModelListError {
+                detail: stderr_line.or_else(|| Some(message.clone())),
+                message,
+            })
+        }
+        crate::host_env::RunOutput::Exit(exit) => {
+            let Some(status) = exit.status else {
+                let err = exit
+                    .stderr_line
+                    .clone()
+                    .unwrap_or_else(|| "unknown error".to_string());
+                let message = format!("Couldn't start `{command}`: {err}");
+                return Err(cli_catalog::ModelListError {
+                    detail: Some(err),
+                    message,
+                });
+            };
+            let stdout = String::from_utf8_lossy(&exit.stdout);
+            let stderr = String::from_utf8_lossy(&exit.stderr);
+            let detail = error_detail(&stderr);
+            let models = parse_command_output(&stdout, &stderr);
+            if !models.is_empty() {
+                return Ok(models);
+            }
+            if !status.success() {
+                let message =
+                    cli_catalog::models_failure_message(&invocation, status, &stdout, &stderr);
+                return Err(cli_catalog::ModelListError { detail, message });
+            }
+            tracing::warn!(command, %stdout, %stderr, "no cursor models parsed");
+            let line = crate::host_env::first_text_line(&stderr)
+                .or_else(|| crate::host_env::first_text_line(&stdout))
+                .unwrap_or_else(|| "no output".to_string());
+            let message =
+                format!("{invocation} listed no models: {line}. Full output is in the log.");
+            Err(cli_catalog::ModelListError {
+                detail: detail.or(Some(line)),
+                message,
+            })
+        }
     }
-    let models = parse_command_output(&stdout, &stderr);
-    if !models.is_empty() {
-        return Ok(models);
-    }
-    let message = if output.status.success() {
-        format!(
-            "no cursor models parsed from {shown} (stdout={} stderr={})",
-            truncate_for_err(&stdout),
-            truncate_for_err(&stderr)
-        )
-    } else {
-        format!(
-            "{shown} exited {} (stdout={} stderr={})",
-            output.status,
-            truncate_for_err(&stdout),
-            truncate_for_err(&stderr)
-        )
-    };
-    tracing::warn!(%message, "cursor model list parsed nothing");
-    Err(cli_catalog::ModelListError {
-        detail: stderr_line,
-        message,
-    })
 }
 
 /// First stderr line, or the line that contains `Authentication required`
@@ -313,7 +291,36 @@ fn truncate_for_err(text: &str) -> String {
 mod tests {
     use super::*;
     use std::ffi::OsStr;
-    use std::path::Path;
+    use std::path::{Path, PathBuf};
+    use std::time::Instant;
+
+    fn test_host(path: &OsStr, home: &Path) -> crate::host_env::HostEnv {
+        crate::host_env::HostEnv {
+            path: path.to_os_string(),
+            home: home.to_path_buf(),
+            vars: Vec::new(),
+            read_at: Instant::now(),
+        }
+    }
+
+    /// Overlay filesystems can return ETXTBSY for a script that was just executed.
+    async fn list_with_retry(
+        host: &crate::host_env::HostEnv,
+        command: &str,
+    ) -> anyhow::Result<Vec<ModelOption>> {
+        let mut last = None;
+        for _ in 0..4 {
+            match list_cursor_models_with(host, command).await {
+                Ok(models) => return Ok(models),
+                Err(err) if err.to_string().contains("Text file busy") => {
+                    last = Some(err);
+                    tokio::time::sleep(std::time::Duration::from_millis(30)).await;
+                }
+                Err(err) => return Err(err),
+            }
+        }
+        Err(last.expect("text file busy"))
+    }
 
     #[cfg(unix)]
     use std::os::unix::fs::PermissionsExt;
@@ -441,10 +448,8 @@ gpt-5.5-high - GPT-5.5 1M High
         script.push_str(USER_LINUX_AGENT_MODELS);
         script.push_str("EOF\n");
         let bin = write_exe(dir.path(), "agent", &script);
-        let models =
-            list_cursor_models_in("agent", dir.path().as_os_str(), home.path().as_os_str())
-                .await
-                .expect("models");
+        let host = test_host(dir.path().as_os_str(), home.path());
+        let models = list_with_retry(&host, "agent").await.expect("models");
         assert_eq!(models[0].id, "auto");
         assert_eq!(models[0].name, "Auto");
         let recorded = std::fs::read_to_string(&record).unwrap();
@@ -460,9 +465,8 @@ gpt-5.5-high - GPT-5.5 1M High
         let dir = tempfile::tempdir().unwrap();
         let script = "#!/bin/sh\nif [ \"$1\" = \"--list-models\" ]; then\n  echo 'not a table' >&2\n  echo 'composer-2.5 - Composer 2.5' >&2\n  exit 0\nfi\nexit 1\n";
         write_exe(dir.path(), "agent", script);
-        let models = list_cursor_models_in("agent", dir.path().as_os_str(), OsStr::new("/tmp"))
-            .await
-            .expect("models");
+        let host = test_host(dir.path().as_os_str(), Path::new("/tmp"));
+        let models = list_with_retry(&host, "agent").await.expect("models");
         assert_eq!(models.len(), 1);
         assert_eq!(models[0].id, "composer-2.5");
         assert_eq!(models[0].name, "Composer 2.5");
@@ -474,12 +478,54 @@ gpt-5.5-high - GPT-5.5 1M High
         let dir = tempfile::tempdir().unwrap();
         let script = "#!/bin/sh\necho 'could not list models' >&2\necho 'Error: Authentication required' >&2\nexit 1\n";
         write_exe(dir.path(), "agent", script);
-        let err = list_cursor_models_in("agent", dir.path().as_os_str(), OsStr::new("/tmp"))
-            .await
-            .expect_err("auth");
+        let host = test_host(dir.path().as_os_str(), Path::new("/tmp"));
+        let err = list_with_retry(&host, "agent").await.expect_err("auth");
         assert_eq!(
             cli_catalog::model_list_detail(&err).as_deref(),
             Some("Error: Authentication required")
+        );
+    }
+
+    fn executable(path: &std::path::Path, body: &str) {
+        std::fs::write(path, format!("#!/bin/sh\n{body}\n")).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut perms = std::fs::metadata(path).unwrap().permissions();
+            perms.set_mode(0o755);
+            std::fs::set_permissions(path, perms).unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn empty_model_list_uses_the_first_line_and_points_at_the_log() {
+        let dir = tempfile::tempdir().unwrap();
+        let stderr_only = dir.path().join("from-stderr");
+        executable(&stderr_only, "echo 'not a table' >&2");
+        let host = test_host(OsStr::new("/usr/bin:/bin"), dir.path());
+        let err = list_with_retry(&host, &stderr_only.display().to_string())
+            .await
+            .expect_err("stderr-only output");
+        assert_eq!(
+            err.to_string(),
+            format!(
+                "`{} models` listed no models: not a table. Full output is in the log.",
+                stderr_only.display()
+            )
+        );
+
+        let stdout_only = dir.path().join("from-stdout");
+        executable(&stdout_only, "echo 'from stdout'");
+        let host = test_host(OsStr::new("/usr/bin:/bin"), dir.path());
+        let err = list_with_retry(&host, &stdout_only.display().to_string())
+            .await
+            .expect_err("stdout-only output");
+        assert_eq!(
+            err.to_string(),
+            format!(
+                "`{} models` listed no models: from stdout. Full output is in the log.",
+                stdout_only.display()
+            )
         );
     }
 }

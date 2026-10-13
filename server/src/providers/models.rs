@@ -6,8 +6,6 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-use crate::providers::cli_catalog::{self, MODEL_LIST_TIMEOUT};
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ModelInfo {
     pub id: String,
@@ -123,11 +121,13 @@ impl ModelCatalog for OpenCodeModels {
         if !configured.is_empty() {
             return configured;
         }
-        if let Some(cached) = self.cache.get() {
+        if let Some(cached) = self.cache.get().filter(|providers| !providers.is_empty()) {
             return cached;
         }
         let discovered = crate::providers::cli_catalog::discover_cli_providers(&self.command).await;
-        self.cache.store(discovered.clone());
+        if !discovered.is_empty() {
+            self.cache.store(discovered.clone());
+        }
         discovered
     }
 
@@ -139,23 +139,9 @@ impl ModelCatalog for OpenCodeModels {
         if let Some(hit) = self.models_cache.get(model_provider, refresh) {
             return Ok(hit);
         }
-        let listed = tokio::time::timeout(
-            MODEL_LIST_TIMEOUT,
-            crate::providers::opencode_models::list_opencode_models(&self.command, model_provider),
-        )
-        .await;
-        let models = match listed {
-            Ok(result) => result?,
-            Err(_) => {
-                return Err(cli_catalog::model_list_err(
-                    format!(
-                        "opencode models timed out after {}s",
-                        MODEL_LIST_TIMEOUT.as_secs()
-                    ),
-                    Some(format!("timed out after {}s", MODEL_LIST_TIMEOUT.as_secs())),
-                ));
-            }
-        };
+        let models =
+            crate::providers::opencode_models::list_opencode_models(&self.command, model_provider)
+                .await?;
         let info: Vec<ModelInfo> = models
             .into_iter()
             .map(|m| ModelInfo {
@@ -214,13 +200,15 @@ impl ModelCatalog for ClaudeCodeModels {
 }
 
 pub struct CodexModels {
+    pub command: String,
     pub model_providers: Vec<String>,
     models_cache: ModelListCache,
 }
 
 impl CodexModels {
-    pub fn new(model_providers: Vec<String>) -> Self {
+    pub fn new(command: String, model_providers: Vec<String>) -> Self {
         Self {
+            command,
             model_providers,
             models_cache: ModelListCache::new(),
         }
@@ -246,23 +234,9 @@ impl ModelCatalog for CodexModels {
         if let Some(hit) = self.models_cache.get(model_provider, refresh) {
             return Ok(hit);
         }
-        let listed = tokio::time::timeout(
-            MODEL_LIST_TIMEOUT,
-            crate::providers::codex_models::list_codex_models(model_provider),
-        )
-        .await;
-        let models = match listed {
-            Ok(result) => result?,
-            Err(_) => {
-                return Err(cli_catalog::model_list_err(
-                    format!(
-                        "codex debug models timed out after {}s",
-                        MODEL_LIST_TIMEOUT.as_secs()
-                    ),
-                    Some(format!("timed out after {}s", MODEL_LIST_TIMEOUT.as_secs())),
-                ));
-            }
-        };
+        let models =
+            crate::providers::codex_models::list_codex_models(&self.command, model_provider)
+                .await?;
         let info: Vec<ModelInfo> = models
             .into_iter()
             .map(|m| ModelInfo {
@@ -332,12 +306,14 @@ impl ModelCatalog for KiloCodeModels {
         if !configured.is_empty() {
             return configured;
         }
-        if let Some(cached) = self.cache.get() {
+        if let Some(cached) = self.cache.get().filter(|providers| !providers.is_empty()) {
             return cached;
         }
         let discovered =
             crate::providers::kilo_models::discover_kilo_providers(&self.command).await;
-        self.cache.store(discovered.clone());
+        if !discovered.is_empty() {
+            self.cache.store(discovered.clone());
+        }
         discovered
     }
 
