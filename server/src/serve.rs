@@ -159,8 +159,11 @@ pub async fn sweep_orphaned_runs(state: &AppState) {
 /// Startup after a crash. One comment, ticket to Blocked, worktree untouched.
 /// Does not call `handle_terminal_run`, so deferred work is not replayed.
 async fn interrupt_restarted_run(state: &AppState, run: crate::domain::run::AgentRun) {
-    let worktree = run.worktree_path.as_deref().map(std::path::Path::new);
-    let changed = restart_service::count_changed_files(worktree).await;
+    let changed = if let Some(pool) = state.db.as_ref() {
+        restart_service::changed_file_count(pool, &run).await
+    } else {
+        0
+    };
     let comment = restart_service::restart_comment(changed);
     let run_id = run.id;
     match mark_run_interrupted(state, run_id, "server restarted during run").await {

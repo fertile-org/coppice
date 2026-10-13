@@ -877,6 +877,31 @@ impl<'a> RunService<'a> {
         Ok(row_to_run(&row))
     }
 
+    /// The worktree and the commit HEAD pointed at when this run began.
+    /// Written before the connector starts so a crash can still see them.
+    pub async fn record_worktree_start(
+        &self,
+        run_id: Uuid,
+        worktree_path: &str,
+        branch_name: &str,
+        start_sha: &str,
+    ) -> Result<(), RunError> {
+        sqlx::query(
+            r#"
+            UPDATE agent_runs
+            SET worktree_path = $2, branch_name = $3, start_sha = $4
+            WHERE id = $1
+            "#,
+        )
+        .bind(run_id)
+        .bind(worktree_path)
+        .bind(branch_name)
+        .bind(start_sha)
+        .execute(self.pool)
+        .await?;
+        Ok(())
+    }
+
     pub async fn set_session_id(&self, run_id: Uuid, session_id: &str) -> Result<(), RunError> {
         sqlx::query("UPDATE agent_runs SET session_id = $2 WHERE id = $1")
             .bind(run_id)

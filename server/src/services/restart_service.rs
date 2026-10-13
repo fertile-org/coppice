@@ -155,7 +155,16 @@ impl<'a> RestartService<'a> {
             return Err(RestartError::UseCancel);
         }
         if let Some(path) = self.worktree_path(choice.run_id).await? {
-            discard_changed_files(Path::new(&path)).await?;
+            let start = self
+                .start_sha(choice.run_id)
+                .await?
+                .filter(|sha| is_commit_sha(sha));
+            let Some(start) = start else {
+                return Err(RestartError::Git(
+                    "run has no commit to discard back to".into(),
+                ));
+            };
+            discard_to_start(Path::new(&path), &start).await?;
         }
         self.resolve(choice.run_id).await?;
         Ok(())
@@ -196,62 +205,119 @@ impl<'a> RestartService<'a> {
     async fn worktree_path(&self, run_id: Uuid) -> Result<Option<String>, RestartError> {
         Ok(RunService::new(self.pool).get(run_id).await?.worktree_path)
     }
+
+    async fn start_sha(&self, run_id: Uuid) -> Result<Option<String>, RestartError> {
+        let sha = sqlx::query_scalar::<_, Option<String>>(
+            "SELECT start_sha FROM agent_runs WHERE id = $1",
+        )
+        .bind(run_id)
+        .fetch_optional(self.pool)
+        .await?;
+        Ok(sha.flatten())
+    }
 }
 
-/// Changed paths in the worktree, excluding Coppice's `.agent/` context.
-/// A missing or unreadable worktree counts as zero so the run still waits.
-pub async fn count_changed_files(worktree: Option<&Path>) -> u32 {
-    let Some(worktree) = worktree else {
-        return 0;
-    };
-    if !worktree.exists() {
-        return 0;
-    }
-    let output = match crate::services::git_cmd::output(
-        Some(worktree),
-        &["status", "--porcelain", "-uall", "--", ".", ":!.agent"],
+/// Files the run changed relative to the commit it started from.
+/// A missing start commit or an unreadable worktree counts as zero so the run still waits.
+pub async fn changed_file_count(pool: &PgPool, run: &crate::domain::run::AgentRun) -> u32 {
+    let sha = sqlx::query_scalar::<_, Option<String>>(
+        "SELECT start_sha FROM agent_runs WHERE id = $1",
+    )
+    .bind(run.id)
+    .fetch_optional(pool)
+    .await
+    .ok()
+    .flatten()
+    .flatten();
+    count_changed_files(
+        run.worktree_path.as_deref().map(Path::new),
+        sha.as_deref(),
     )
     .await
-    {
-        Ok(output) if output.status.success() => output,
-        Ok(output) => {
-            tracing::warn!(
-                stderr = %String::from_utf8_lossy(&output.stderr),
-                path = %worktree.display(),
-                "could not count worktree changes after restart"
-            );
-            return 0;
-        }
-        Err(err) => {
-            tracing::warn!(
-                error = %err,
-                path = %worktree.display(),
-                "could not count worktree changes after restart"
-            );
-            return 0;
-        }
+}
+
+/// Tracked edits, deletions, later commits, and untracked files that are not
+/// ignored and not under `.agent/`. Compared with the commit the run started from.
+pub async fn count_changed_files(worktree: Option<&Path>, start_sha: Option<&str>) -> u32 {
+    let (Some(worktree), Some(start_sha)) = (worktree, start_sha) else {
+        return 0;
     };
-    String::from_utf8_lossy(&output.stdout)
-        .lines()
-        .filter(|line| !line.trim().is_empty())
-        .count() as u32
+    if !worktree.exists() || !is_commit_sha(start_sha) {
+        return 0;
+    }
+    let Some(tracked) = git_name_list(
+        worktree,
+        &["diff", "--name-only", start_sha, "--", ".", ":!.agent"],
+    )
+    .await
+    else {
+        return 0;
+    };
+    let Some(untracked) = git_name_list(
+        worktree,
+        &[
+            "ls-files",
+            "--others",
+            "--exclude-standard",
+            "--",
+            ".",
+            ":!.agent",
+        ],
+    )
+    .await
+    else {
+        return 0;
+    };
+    let mut names = std::collections::HashSet::new();
+    for line in tracked.lines().chain(untracked.lines()) {
+        let line = line.trim();
+        if !line.is_empty() {
+            names.insert(line.to_string());
+        }
+    }
+    u32::try_from(names.len()).unwrap_or(u32::MAX)
+}
+
+fn is_commit_sha(sha: &str) -> bool {
+    (7..=64).contains(&sha.len()) && sha.bytes().all(|byte| byte.is_ascii_hexdigit())
 }
 
 pub fn restart_comment(changed_files: u32) -> String {
     comment_for(changed_files)
 }
 
-async fn discard_changed_files(worktree: &Path) -> Result<(), RestartError> {
+async fn discard_to_start(worktree: &Path, start_sha: &str) -> Result<(), RestartError> {
     if !worktree.exists() {
         return Ok(());
     }
-    git_ok(
-        worktree,
-        &["restore", "--worktree", "--staged", "--", ".", ":!.agent"],
-    )
-    .await?;
+    git_ok(worktree, &["reset", "--hard", start_sha]).await?;
+    // Untracked files only. `-fd` leaves ignored files. `.agent/` stays.
     git_ok(worktree, &["clean", "-fd", "--", ".", ":!.agent"]).await?;
     Ok(())
+}
+
+async fn git_name_list(worktree: &Path, args: &[&str]) -> Option<String> {
+    match crate::services::git_cmd::output(Some(worktree), args).await {
+        Ok(output) if output.status.success() => {
+            Some(String::from_utf8_lossy(&output.stdout).into_owned())
+        }
+        Ok(output) => {
+            tracing::warn!(
+                stderr = %String::from_utf8_lossy(&output.stderr),
+                path = %worktree.display(),
+                "could not list worktree changes after restart"
+            );
+            None
+        }
+        Err(err) => {
+            tracing::warn!(
+                error = %err,
+                path = %worktree.display(),
+                "could not list worktree changes after restart"
+            );
+            None
+        }
+    }
 }
 
 async fn remove_linked_worktree(worktree: &Path) -> Result<(), RestartError> {
@@ -329,6 +395,19 @@ mod tests {
         assert!(status.success(), "git {args:?} failed in {}", dir.display());
     }
 
+    fn head(dir: &Path) -> String {
+        let output = std::process::Command::new("git")
+            .args(["rev-parse", "HEAD"])
+            .current_dir(dir)
+            .output()
+            .expect("rev-parse");
+        assert!(output.status.success(), "rev-parse failed");
+        String::from_utf8(output.stdout)
+            .expect("utf-8")
+            .trim()
+            .to_string()
+    }
+
     fn worktree_with_changes(dirty: bool) -> (tempfile::TempDir, std::path::PathBuf) {
         let root = tempfile::tempdir().expect("temp");
         let main = root.path().join("main");
@@ -336,7 +415,8 @@ mod tests {
         std::fs::create_dir_all(&main).unwrap();
         git(&main, &["init", "-b", "main"]);
         std::fs::write(main.join("README.md"), "hello\n").unwrap();
-        git(&main, &["add", "README.md"]);
+        std::fs::write(main.join("tracked.txt"), "keep\n").unwrap();
+        git(&main, &["add", "README.md", "tracked.txt"]);
         git(&main, &["commit", "-m", "init"]);
         git(
             &main,
@@ -353,6 +433,7 @@ mod tests {
         if dirty {
             std::fs::write(wt.join("README.md"), "changed\n").unwrap();
             std::fs::write(wt.join("notes.txt"), "new\n").unwrap();
+            std::fs::remove_file(wt.join("tracked.txt")).unwrap();
         }
         (root, wt)
     }
@@ -360,27 +441,70 @@ mod tests {
     #[tokio::test]
     async fn count_ignores_agent_context_and_keeps_real_files() {
         let (_root, wt) = worktree_with_changes(true);
-        assert_eq!(count_changed_files(Some(&wt)).await, 2);
+        let start = head(&wt);
+        assert_eq!(count_changed_files(Some(&wt), Some(&start)).await, 3);
     }
 
     #[tokio::test]
     async fn count_is_zero_when_only_agent_context_changed() {
         let (_root, wt) = worktree_with_changes(false);
-        assert_eq!(count_changed_files(Some(&wt)).await, 0);
-        assert_eq!(count_changed_files(None).await, 0);
+        let start = head(&wt);
+        assert_eq!(count_changed_files(Some(&wt), Some(&start)).await, 0);
+        assert_eq!(count_changed_files(None, Some(&start)).await, 0);
+        assert_eq!(count_changed_files(Some(&wt), None).await, 0);
     }
 
     #[tokio::test]
     async fn discard_removes_counted_files_and_keeps_agent_context() {
         let (_root, wt) = worktree_with_changes(true);
-        discard_changed_files(&wt).await.expect("discard");
+        let start = head(&wt);
+        discard_to_start(&wt, &start).await.expect("discard");
         assert_eq!(
             std::fs::read_to_string(wt.join("README.md")).unwrap(),
             "hello\n"
         );
         assert!(!wt.join("notes.txt").exists());
+        assert_eq!(
+            std::fs::read_to_string(wt.join("tracked.txt")).unwrap(),
+            "keep\n"
+        );
         assert!(wt.join(".agent").join("context.md").exists());
-        assert_eq!(count_changed_files(Some(&wt)).await, 0);
+        assert_eq!(count_changed_files(Some(&wt), Some(&start)).await, 0);
+    }
+
+    #[tokio::test]
+    async fn untracked_file_is_counted_and_discard_removes_it() {
+        let (_root, wt) = worktree_with_changes(false);
+        std::fs::write(wt.join(".gitignore"), "*.log\n").unwrap();
+        git(&wt, &["add", ".gitignore"]);
+        git(&wt, &["commit", "-m", "ignore logs"]);
+        let start = head(&wt);
+        std::fs::write(wt.join("notes.txt"), "new\n").unwrap();
+        std::fs::write(wt.join("secret.log"), "hidden\n").unwrap();
+        assert_eq!(count_changed_files(Some(&wt), Some(&start)).await, 1);
+        discard_to_start(&wt, &start).await.expect("discard");
+        assert!(!wt.join("notes.txt").exists());
+        assert!(wt.join("secret.log").exists());
+        assert!(wt.join(".agent").join("context.md").exists());
+        assert_eq!(head(&wt), start);
+    }
+
+    #[tokio::test]
+    async fn committed_change_is_counted_and_discard_returns_to_start() {
+        let (_root, wt) = worktree_with_changes(false);
+        let start = head(&wt);
+        std::fs::write(wt.join("README.md"), "during the run\n").unwrap();
+        git(&wt, &["add", "README.md"]);
+        git(&wt, &["commit", "-m", "before the crash"]);
+        assert_ne!(head(&wt), start);
+        assert_eq!(count_changed_files(Some(&wt), Some(&start)).await, 1);
+        discard_to_start(&wt, &start).await.expect("discard");
+        assert_eq!(head(&wt), start);
+        assert_eq!(
+            std::fs::read_to_string(wt.join("README.md")).unwrap(),
+            "hello\n"
+        );
+        assert!(wt.join(".agent").join("context.md").exists());
     }
 
     #[tokio::test]
