@@ -3,8 +3,10 @@
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-/// Bound for `opencode models` / `kilo models`. A hung CLI must not stall the form.
+/// Bound for `opencode models` / `kilo models` provider discovery. A hung CLI must not stall the form.
 pub const CLI_LIST_TIMEOUT: Duration = Duration::from_secs(3);
+
+pub use crate::host_env::MODEL_LIST_TIMEOUT;
 
 const CLI_LIST_CACHE: Duration = Duration::from_secs(30);
 
@@ -46,14 +48,53 @@ pub fn parse_cli_provider_ids(stdout: &str) -> Vec<String> {
     providers
 }
 
+/// Run a CLI through the host environment. `Err` is not found, timed out, or a spawn failure.
+pub async fn capture_cli(
+    command: &str,
+    args: &[&str],
+    timeout: Duration,
+) -> Result<std::process::Output, String> {
+    let host = crate::host_env::current();
+    match host.run_with_timeout(command, args, timeout).await {
+        crate::host_env::RunOutput::NotFound(err) => Err(err.to_string()),
+        crate::host_env::RunOutput::TimedOut { stderr_line } => Err(stderr_line.unwrap_or_else(|| {
+            format!("`{command}` timed out after {}s", timeout.as_secs())
+        })),
+        crate::host_env::RunOutput::Exit(exit) => {
+            let status = match exit.status {
+                Some(status) => status,
+                None => {
+                    return Err(exit
+                        .stderr_line
+                        .unwrap_or_else(|| format!("failed to spawn `{command}`")));
+                }
+            };
+            Ok(std::process::Output {
+                status,
+                stdout: exit.stdout,
+                stderr: exit.stderr,
+            })
+        }
+    }
+}
+
 /// Run `{command} models`. Failure, timeout, or no parseable lines yield an empty list.
+/// The empty result is not a successful discovery; callers must not cache it.
 pub async fn discover_cli_providers(command: &str) -> Vec<String> {
-    let run = tokio::process::Command::new(command).arg("models").output();
-    match tokio::time::timeout(CLI_LIST_TIMEOUT, run).await {
-        Ok(Ok(output)) if output.status.success() => {
+    match capture_cli(command, &["models"], CLI_LIST_TIMEOUT).await {
+        Ok(output) if output.status.success() => {
             parse_cli_provider_ids(&String::from_utf8_lossy(&output.stdout))
         }
-        _ => Vec::new(),
+        Ok(output) => {
+            let detail = crate::host_env::first_stderr_line(&output.stderr)
+                .unwrap_or_else(|| format!("exit {}", output.status));
+            tracing::warn!(command, %detail, "model provider discovery failed");
+            Vec::new()
+        }
+        Err(err) => {
+            tracing::warn!(command, error = %err, "model provider discovery failed");
+            Vec::new()
+        }
     }
 }
 

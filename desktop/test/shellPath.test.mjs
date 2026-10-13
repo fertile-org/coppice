@@ -43,6 +43,29 @@ test('default runner returns the real login shell PATH', async () => {
   assert.ok(!result.includes('__COPPICE_PATH__'));
 });
 
+test('does not run a shell when SHELL is empty', async () => {
+  let called = false;
+  const result = await resolveLoginShellPath({
+    shell: '',
+    run: async () => {
+      called = true;
+      return '';
+    },
+  });
+  assert.equal(called, false);
+  assert.ok(result.split(path.delimiter).includes('/usr/local/bin'));
+});
+
+test('reads the shell again on every call', async () => {
+  let n = 0;
+  const run = async () => {
+    n += 1;
+    return `__COPPICE_PATH__/call-${n}__COPPICE_PATH__`;
+  };
+  assert.equal(await resolveLoginShellPath({ shell: '/bin/zsh', run }), '/call-1');
+  assert.equal(await resolveLoginShellPath({ shell: '/bin/zsh', run }), '/call-2');
+});
+
 test('falls back when the shell hangs past the timeout', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'coppice-shell-test-'));
   const shell = path.join(dir, 'slow-shell');

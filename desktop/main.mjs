@@ -122,7 +122,6 @@ function openMainWindow(url) {
   void win.loadURL(url);
 }
 
-let shellPathPromise = null;
 let launching = null;
 
 function showSplash() {
@@ -154,8 +153,7 @@ async function launchServer() {
   let current = null;
   let url;
   try {
-    shellPathPromise ??= resolveLoginShellPath();
-    const PATH = await shellPathPromise;
+    const PATH = await resolveLoginShellPath();
     if (quitting) return;
 
     const resources = resourcesDir();

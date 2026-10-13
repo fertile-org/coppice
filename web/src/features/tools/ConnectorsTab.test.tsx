@@ -163,7 +163,12 @@ describe('ConnectorsTab', () => {
     renderTab();
 
     const kiloCard = await card('kilo-code');
-    expect(kiloCard.getByText('Found (sign-in not checked)')).toBeVisible();
+    expect(kiloCard.getByText('Installed')).toBeVisible();
+    expect(
+      kiloCard.getByText(
+        "Coppice can't check this sign-in without using your plan. A run will show an error if you're signed out.",
+      ),
+    ).toBeVisible();
     expect(kiloCard.getByText('/home/coppice/.local/bin/kilo')).toBeVisible();
     expect(kiloCard.getByText('kilo 9.9.9')).toBeVisible();
     expect(kiloCard.getByText(/KILO_API_KEY/)).toBeVisible();

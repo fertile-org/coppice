@@ -744,6 +744,7 @@ impl AgentConnectorsConfig {
             "opencode" => Some(&self.opencode.command),
             "kilo-code" => Some(&self.kilo_code.command),
             "cursor" => Some(&self.cursor.command),
+            "codex" => Some(&self.codex.command),
             _ => None,
         }
     }
@@ -893,6 +894,8 @@ pub type ClaudeCodeProviderConfig = ClaudeCodeConnectorConfig;
 pub struct CodexConnectorConfig {
     #[serde(default = "default_false")]
     pub enabled: bool,
+    #[serde(default = "default_codex_command")]
+    pub command: String,
     #[serde(default = "default_codex_run_timeout_secs")]
     pub run_timeout_secs: u64,
     #[serde(default)]
@@ -900,6 +903,10 @@ pub struct CodexConnectorConfig {
 }
 
 pub type CodexProviderConfig = CodexConnectorConfig;
+
+fn default_codex_command() -> String {
+    "codex".into()
+}
 
 fn default_codex_run_timeout_secs() -> u64 {
     600
@@ -909,6 +916,7 @@ impl Default for CodexConnectorConfig {
     fn default() -> Self {
         Self {
             enabled: default_false(),
+            command: default_codex_command(),
             run_timeout_secs: default_codex_run_timeout_secs(),
             model_providers: Vec::new(),
         }
@@ -1470,7 +1478,7 @@ mod tests {
         assert_eq!(cfg.command("cursor"), Some("agent"));
         assert_eq!(cfg.command("opencode"), Some("opencode"));
         assert_eq!(cfg.command("claude-code"), None);
-        assert_eq!(cfg.command("codex"), None);
+        assert_eq!(cfg.command("codex"), Some("codex"));
         assert_eq!(cfg.command("mock"), None);
         assert_eq!(cfg.command("nope"), None);
         cfg.cursor.command = "cursor-agent".into();

@@ -562,11 +562,8 @@ fn default_branch_pull_gate(
 }
 
 async fn head_points_at_ref(git_dir: &std::path::Path, local_ref: &str) -> Result<bool, RepoGitError> {
-    let output = tokio::process::Command::new("git")
-        .current_dir(git_dir)
-        .args(["symbolic-ref", "-q", "HEAD"])
-        .output()
-        .await?;
+    let output =
+        crate::services::git_cmd::output(Some(git_dir), &["symbolic-ref", "-q", "HEAD"]).await?;
     if !output.status.success() {
         return Ok(false);
     }

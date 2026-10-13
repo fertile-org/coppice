@@ -1,7 +1,7 @@
 use crate::api::auth::AuthUser;
 use crate::AppState;
 use axum::{
-    extract::{Path, State},
+    extract::{Path, Query, State},
     http::StatusCode,
     response::{IntoResponse, Response},
     routing::get,
@@ -9,7 +9,7 @@ use axum::{
 };
 use coppice_connectors::sign_in::Readiness;
 use coppice_connectors::{ConsoleKind, MOCK};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
 pub fn routes() -> Router<Arc<AppState>> {
@@ -154,11 +154,21 @@ async fn list_model_providers(
     Ok(Json(ModelProviderListResponse { items }))
 }
 
+#[derive(Debug, Deserialize)]
+struct ModelsQuery {
+    #[serde(default)]
+    refresh: bool,
+}
+
 async fn list_models(
     State(state): State<Arc<AppState>>,
     AuthUser { .. }: AuthUser,
     Path((connector_id, model_provider_id)): Path<(String, String)>,
+    Query(query): Query<ModelsQuery>,
 ) -> Result<Json<ModelListResponse>, ModelsApiError> {
+    if query.refresh {
+        crate::host_env::invalidate();
+    }
     let registry = state.connectors.registry();
     if !registry.has(&connector_id) {
         return Err(ModelsApiError::Status(StatusCode::NOT_FOUND));

@@ -84,10 +84,33 @@ fn strip_ansi(input: &str) -> String {
 }
 
 pub async fn list_cursor_models(command: &str) -> anyhow::Result<Vec<ModelOption>> {
-    let output = tokio::process::Command::new(command)
-        .arg("models")
-        .output()
+    let host = crate::host_env::current();
+    list_cursor_models_in(command, host.path.as_os_str(), host.home.as_path()).await
+}
+
+/// `path` and `home` are the host environment the model picker resolves against.
+pub async fn list_cursor_models_in(
+    command: &str,
+    path: &std::ffi::OsStr,
+    home: &std::path::Path,
+) -> anyhow::Result<Vec<ModelOption>> {
+    let program = crate::host_env::resolve_model_program(command, path);
+    let mut cmd = tokio::process::Command::new(&program);
+    cmd.arg("models")
+        .env("PATH", path)
+        .stdin(std::process::Stdio::null())
+        .kill_on_drop(true);
+    if !home.as_os_str().is_empty() {
+        cmd.env("HOME", home);
+    }
+    let output = tokio::time::timeout(crate::host_env::MODEL_LIST_TIMEOUT, cmd.output())
         .await
+        .map_err(|_| {
+            anyhow::anyhow!(
+                "`{command} models` timed out after {}s",
+                crate::host_env::MODEL_LIST_TIMEOUT.as_secs()
+            )
+        })?
         .map_err(|err| anyhow::anyhow!("failed to spawn `{command} models`: {err}"))?;
 
     let stdout = String::from_utf8_lossy(&output.stdout);

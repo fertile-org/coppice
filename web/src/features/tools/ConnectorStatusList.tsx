@@ -2,7 +2,7 @@ import { useState, type ReactNode } from 'react';
 import type { ConnectorStatus, LastRun } from '../../lib/schemas/connectorDiagnostics';
 import { useOpenTicket } from '../tickets/useOpenTicket';
 import { CHECK_STATUS_LABELS, checkStatusClass, formatRelativeTime } from './connectorFormat';
-import { readinessLabel } from './connectorCopy';
+import { readinessLabel, signInUncheckedHint } from './connectorCopy';
 
 const CHECKING = <span className="text-text-muted">Checking…</span>;
 
@@ -18,6 +18,7 @@ function Row({ label, children }: { label: string; children: ReactNode }) {
 function CliValue({ connector }: { connector: ConnectorStatus }) {
   if (!connector.probedAt) return CHECKING;
   const label = readinessLabel(connector.readiness);
+  const hint = signInUncheckedHint(connector.id, connector.readiness);
   return (
     <>
       {label && (
@@ -25,6 +26,7 @@ function CliValue({ connector }: { connector: ConnectorStatus }) {
           {label}
         </span>
       )}
+      {hint && <p className="text-text-muted">{hint}</p>}
       {connector.cli.path && (
         <p className="truncate font-mono text-xs" title={connector.cli.path}>
           {connector.cli.path}

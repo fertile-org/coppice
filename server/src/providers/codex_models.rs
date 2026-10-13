@@ -61,14 +61,20 @@ fn model_matches_provider(slug: &str, provider_id: &str) -> bool {
     }
 }
 
-pub async fn list_codex_models(model_provider: &str) -> anyhow::Result<Vec<ModelOption>> {
-    let output = tokio::process::Command::new("codex")
-        .args(["debug", "models"])
-        .output()
-        .await?;
+pub async fn list_codex_models(
+    command: &str,
+    model_provider: &str,
+) -> anyhow::Result<Vec<ModelOption>> {
+    let output = crate::providers::cli_catalog::capture_cli(
+        command,
+        &["debug", "models"],
+        crate::host_env::MODEL_LIST_TIMEOUT,
+    )
+    .await
+    .map_err(|err| anyhow::anyhow!(err))?;
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        anyhow::bail!("codex debug models failed: {stderr}");
+        anyhow::bail!("`{command} debug models` failed: {stderr}");
     }
     let stdout = String::from_utf8_lossy(&output.stdout);
     let models = parse_codex_models_json(&stdout, model_provider);

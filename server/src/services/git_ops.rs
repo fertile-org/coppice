@@ -89,11 +89,7 @@ pub fn push_argv<'a>(remote: &'a str, refspec: &'a str) -> [&'a str; 3] {
 }
 
 pub async fn run_git(cwd: &Path, args: &[&str]) -> Result<(), GitOpsError> {
-    let output = tokio::process::Command::new("git")
-        .current_dir(cwd)
-        .args(args)
-        .output()
-        .await?;
+    let output = crate::services::git_cmd::output(Some(cwd), args).await?;
     if output.status.success() {
         Ok(())
     } else {
@@ -106,10 +102,7 @@ pub async fn run_git(cwd: &Path, args: &[&str]) -> Result<(), GitOpsError> {
 }
 
 pub async fn run_git_capture(cwd: &Path, args: &[&str]) -> Result<String, String> {
-    let output = tokio::process::Command::new("git")
-        .current_dir(cwd)
-        .args(args)
-        .output()
+    let output = crate::services::git_cmd::output(Some(cwd), args)
         .await
         .map_err(|err| err.to_string())?;
     if output.status.success() {
@@ -120,11 +113,7 @@ pub async fn run_git_capture(cwd: &Path, args: &[&str]) -> Result<String, String
 }
 
 pub async fn git_status_clean(cwd: &Path) -> Result<bool, GitOpsError> {
-    let output = tokio::process::Command::new("git")
-        .current_dir(cwd)
-        .args(["status", "--porcelain"])
-        .output()
-        .await?;
+    let output = crate::services::git_cmd::output(Some(cwd), &["status", "--porcelain"]).await?;
     if !output.status.success() {
         return Err(GitOpsError::Git(git_stderr(&output)));
     }
@@ -132,11 +121,8 @@ pub async fn git_status_clean(cwd: &Path) -> Result<bool, GitOpsError> {
 }
 
 pub async fn git_rev_parse(cwd: &Path, rev: &str) -> Result<Option<String>, GitOpsError> {
-    let output = tokio::process::Command::new("git")
-        .current_dir(cwd)
-        .args(["rev-parse", "--verify", rev])
-        .output()
-        .await?;
+    let output =
+        crate::services::git_cmd::output(Some(cwd), &["rev-parse", "--verify", rev]).await?;
     if !output.status.success() {
         return Ok(None);
     }
@@ -162,11 +148,11 @@ pub async fn ahead_behind(
     remote_ref: &str,
 ) -> Result<(u64, u64), GitOpsError> {
     let range = format!("{local_ref}...{remote_ref}");
-    let output = tokio::process::Command::new("git")
-        .current_dir(cwd)
-        .args(["rev-list", "--left-right", "--count", &range])
-        .output()
-        .await?;
+    let output = crate::services::git_cmd::output(
+        Some(cwd),
+        &["rev-list", "--left-right", "--count", &range],
+    )
+    .await?;
     if !output.status.success() {
         return Err(GitOpsError::Git(git_stderr(&output)));
     }
@@ -184,11 +170,11 @@ pub async fn ahead_behind(
 }
 
 pub async fn list_local_branches(git_dir: &Path) -> Result<Vec<String>, GitOpsError> {
-    let output = tokio::process::Command::new("git")
-        .current_dir(git_dir)
-        .args(["branch", "--format=%(refname:short)"])
-        .output()
-        .await?;
+    let output = crate::services::git_cmd::output(
+        Some(git_dir),
+        &["branch", "--format=%(refname:short)"],
+    )
+    .await?;
 
     if !output.status.success() {
         return Err(GitOpsError::Git(git_stderr(&output)));

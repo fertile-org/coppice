@@ -20,31 +20,37 @@ struct CacheKey {
 
 static CACHE: Mutex<Option<HashMap<CacheKey, String>>> = Mutex::new(None);
 
-/// Version token, or `"unknown"` when the binary is missing or the output has none.
-pub async fn detect(program: &str) -> String {
-    let resolved = resolve_program(program);
+/// Shown when a version probe fails, so version-gated flags are not dropped quietly.
+pub fn version_unavailable(program: &str, err: &str) -> String {
+    format!(
+        "could not read `{program}` version ({err}); version-specific flags were not applied"
+    )
+}
+
+/// Version token. Failures are not cached.
+pub async fn detect(program: &str) -> Result<String, String> {
+    let host = crate::host_env::current();
+    let resolved = if program.contains('/') || program.contains('\\') {
+        PathBuf::from(program)
+    } else {
+        host.resolve(program).map_err(|err| err.to_string())?
+    };
+    if !resolved.is_file() {
+        return Err(format!("`{program}` was not found"));
+    }
     let mtime = std::fs::metadata(&resolved)
         .and_then(|meta| meta.modified())
         .ok();
     let key = CacheKey {
-        path: resolved,
+        path: resolved.clone(),
         mtime,
     };
     if let Some(hit) = cache_get(&key) {
-        return hit;
+        return Ok(hit);
     }
-    let version = probe(program).await;
+    let version = probe(&resolved).await?;
     cache_put(key, version.clone());
-    version
-}
-
-/// `None` when the probe did not find a version, so gated flags are omitted.
-pub fn for_gate(detected: &str) -> Option<&str> {
-    if detected == "unknown" {
-        None
-    } else {
-        Some(detected)
-    }
+    Ok(version)
 }
 
 fn cache_get(key: &CacheKey) -> Option<String> {
@@ -57,46 +63,44 @@ fn cache_put(key: CacheKey, version: String) {
     }
 }
 
-fn resolve_program(program: &str) -> PathBuf {
-    let path = Path::new(program);
-    if program.contains('/') || program.contains('\\') {
-        return path.to_path_buf();
-    }
-    let Some(path_var) = std::env::var_os("PATH") else {
-        return PathBuf::from(program);
-    };
-    for dir in std::env::split_paths(&path_var) {
-        let candidate = dir.join(program);
-        if candidate.is_file() {
-            return candidate;
-        }
-    }
-    PathBuf::from(program)
-}
-
-async fn probe(program: &str) -> String {
-    let Ok(dir) = tempfile::tempdir() else {
-        return "unknown".into();
-    };
+async fn probe(program: &Path) -> Result<String, String> {
+    let dir = tempfile::tempdir().map_err(|err| err.to_string())?;
+    let host = crate::host_env::current();
     let mut cmd = tokio::process::Command::new(program);
     cmd.arg("--version")
         .current_dir(dir.path())
+        .env("PATH", &host.path)
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .kill_on_drop(true);
-    let Ok(child) = cmd.spawn() else {
-        return "unknown".into();
-    };
-    let Ok(finished) = tokio::time::timeout(PROBE_TIMEOUT, child.wait_with_output()).await else {
-        return "unknown".into();
-    };
-    let Ok(output) = finished else {
-        return "unknown".into();
-    };
-    let mut text = String::from_utf8_lossy(&output.stdout).into_owned();
-    if text.trim().is_empty() {
-        text = String::from_utf8_lossy(&output.stderr).into_owned();
+    if !host.home.as_os_str().is_empty() {
+        cmd.env("HOME", &host.home);
     }
-    version_token(&text).unwrap_or("unknown").to_string()
+    let child = cmd
+        .spawn()
+        .map_err(|err| format!("failed to spawn `{}`: {err}", program.display()))?;
+    let finished = tokio::time::timeout(PROBE_TIMEOUT, child.wait_with_output())
+        .await
+        .map_err(|_| {
+            format!(
+                "`{} --version` timed out after {}s",
+                program.display(),
+                PROBE_TIMEOUT.as_secs()
+            )
+        })?
+        .map_err(|err| err.to_string())?;
+    if !finished.status.success() {
+        let line = crate::host_env::first_stderr_line(&finished.stderr)
+            .or_else(|| crate::host_env::first_stderr_line(&finished.stdout))
+            .unwrap_or_else(|| format!("exit {}", finished.status));
+        return Err(line);
+    }
+    let mut text = String::from_utf8_lossy(&finished.stdout).into_owned();
+    if text.trim().is_empty() {
+        text = String::from_utf8_lossy(&finished.stderr).into_owned();
+    }
+    version_token(&text)
+        .map(str::to_string)
+        .ok_or_else(|| "no version token in --version output".to_string())
 }

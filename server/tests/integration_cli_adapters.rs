@@ -95,6 +95,7 @@ async fn cursor_returns_done_while_process_keeps_running() {
     let wt = worktree(&[("FAKE_CLI_LINES", &lines), ("FAKE_CLI_SLEEP_MS", "30000")]);
     let mut input = run_input(wt.path());
     input.artifacts_dir = Some(artifacts.path().display().to_string());
+    let _ = coppice_server::host_env::current();
     let started = Instant::now();
     let result = cursor(60).run(input).await.expect("cursor run");
     assert!(
@@ -107,7 +108,7 @@ async fn cursor_returns_done_while_process_keeps_running() {
     }
     let log = std::fs::read_to_string(artifacts.path().join("runs").join("run-1").join("run.log"))
         .expect("run.log");
-    assert!(log.contains("unknown · flags:"), "{log}");
+    assert!(log.contains("0.0.0 · flags:"), "{log}");
     assert!(log.contains("--force"), "{log}");
     assert!(log.contains("--output-format"), "{log}");
     assert!(log.contains("--workspace"), "{log}");
@@ -195,7 +196,6 @@ async fn cursor_missing_result_message() {
 #[tokio::test]
 async fn cursor_spawn_failure_message() {
     let wt = worktree(&[]);
-    let cwd = wt.path().canonicalize().unwrap();
     let missing = wt.path().join("no-such-cli").display().to_string();
     let provider = CursorProvider::new(CursorProviderConfig {
         command: missing.clone(),
@@ -205,18 +205,14 @@ async fn cursor_spawn_failure_message() {
     let err = provider
         .run(run_input(wt.path()))
         .await
-        .expect_err("spawn failure");
+        .expect_err("missing cli");
 
-    match err {
-        ProviderError::Io(e) => assert!(
-            e.to_string().starts_with(&format!(
-                "failed to spawn `{missing}` (cwd {}): ",
-                cwd.display()
-            )),
-            "{e}"
-        ),
-        other => panic!("expected Io, got {other:?}"),
-    }
+    assert_eq!(
+        invalid_fixture(err),
+        format!(
+            "could not read `{missing}` version (`{missing}` was not found); version-specific flags were not applied"
+        )
+    );
 }
 
 #[tokio::test]
@@ -248,6 +244,7 @@ async fn cursor_cancel_returns_cancelled() {
         let _ = cancel_tx.send(true);
     });
 
+    let _ = coppice_server::host_env::current();
     let started = Instant::now();
     let err = cursor(30).run(input).await.expect_err("cancelled");
 
@@ -259,6 +256,7 @@ async fn cursor_cancel_returns_cancelled() {
 async fn kilo_returns_done_while_process_keeps_running() {
     let lines = fixture("kilo-code/done.jsonl");
     let wt = worktree(&[("FAKE_CLI_LINES", &lines), ("FAKE_CLI_SLEEP_MS", "30000")]);
+    let _ = coppice_server::host_env::current();
     let started = Instant::now();
     let result = kilo(60).run(run_input(wt.path())).await.expect("kilo run");
     assert!(started.elapsed() < Duration::from_secs(10));
@@ -368,6 +366,7 @@ async fn kilo_cancel_returns_cancelled() {
         let _ = cancel_tx.send(true);
     });
 
+    let _ = coppice_server::host_env::current();
     let started = Instant::now();
     let err = kilo(30).run(input).await.expect_err("cancelled");
 

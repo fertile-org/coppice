@@ -839,15 +839,21 @@ async fn resolve_rebase_onto(
 }
 
 async fn has_git_remote(git_dir: &Path) -> bool {
-    let Ok(output) = tokio::process::Command::new("git")
-        .current_dir(git_dir)
-        .args(["remote"])
-        .output()
-        .await
-    else {
-        return false;
+    let output = match crate::services::git_cmd::output(Some(git_dir), &["remote"]).await {
+        Ok(output) => output,
+        Err(err) => {
+            tracing::warn!(error = %err, "could not list git remotes");
+            return false;
+        }
     };
-    output.status.success() && !String::from_utf8_lossy(&output.stdout).trim().is_empty()
+    if !output.status.success() {
+        tracing::warn!(
+            stderr = %String::from_utf8_lossy(&output.stderr).trim(),
+            "could not list git remotes"
+        );
+        return false;
+    }
+    !String::from_utf8_lossy(&output.stdout).trim().is_empty()
 }
 
 async fn abort_merge_conflict(
@@ -933,15 +939,23 @@ async fn restore_checked_out_branch(dir: &Path, previous: Option<&str>, current:
 }
 
 async fn unmerged_paths(git_dir: &Path) -> Vec<String> {
-    let Ok(output) = tokio::process::Command::new("git")
-        .current_dir(git_dir)
-        .args(["diff", "--name-only", "--diff-filter=U"])
-        .output()
-        .await
-    else {
-        return Vec::new();
+    let output = match crate::services::git_cmd::output(
+        Some(git_dir),
+        &["diff", "--name-only", "--diff-filter=U"],
+    )
+    .await
+    {
+        Ok(output) => output,
+        Err(err) => {
+            tracing::warn!(error = %err, "could not list unmerged paths");
+            return Vec::new();
+        }
     };
     if !output.status.success() {
+        tracing::warn!(
+            stderr = %String::from_utf8_lossy(&output.stderr).trim(),
+            "could not list unmerged paths"
+        );
         return Vec::new();
     }
     let mut paths: Vec<String> = String::from_utf8_lossy(&output.stdout)

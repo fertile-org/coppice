@@ -119,12 +119,12 @@ pub fn format_git_comment_footer(state: &WorktreeGitState) -> String {
 }
 
 async fn worktree_dirty_excluding_agent(worktree: &Path) -> Result<bool, WorktreeError> {
-    let output = tokio::process::Command::new("git")
-        .current_dir(worktree)
-        .args(["status", "--porcelain", "--", ".", ":!.agent"])
-        .output()
-        .await
-        .map_err(WorktreeError::from)?;
+    let output = crate::services::git_cmd::output(
+        Some(worktree),
+        &["status", "--porcelain", "--", ".", ":!.agent"],
+    )
+    .await
+    .map_err(WorktreeError::from)?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
@@ -138,10 +138,7 @@ async fn worktree_dirty_excluding_agent(worktree: &Path) -> Result<bool, Worktre
 }
 
 async fn git_ref_sha(git_dir: &Path, ref_name: &str) -> Result<String, WorktreeError> {
-    let output = tokio::process::Command::new("git")
-        .current_dir(git_dir)
-        .args(["rev-parse", ref_name])
-        .output()
+    let output = crate::services::git_cmd::output(Some(git_dir), &["rev-parse", ref_name])
         .await
         .map_err(WorktreeError::from)?;
 
@@ -157,10 +154,7 @@ async fn git_ref_sha(git_dir: &Path, ref_name: &str) -> Result<String, WorktreeE
 }
 
 async fn git_head_sha(worktree: &Path) -> Result<String, WorktreeError> {
-    let output = tokio::process::Command::new("git")
-        .current_dir(worktree)
-        .args(["rev-parse", "HEAD"])
-        .output()
+    let output = crate::services::git_cmd::output(Some(worktree), &["rev-parse", "HEAD"])
         .await
         .map_err(WorktreeError::from)?;
 
@@ -400,12 +394,10 @@ async fn plan_base_rev(
 
 async fn local_branch_exists(git_dir: &Path, branch: &str) -> Result<bool, WorktreeError> {
     let spec = format!("refs/heads/{branch}");
-    let output = tokio::process::Command::new("git")
-        .current_dir(git_dir)
-        .args(["show-ref", "--verify", "--quiet", &spec])
-        .output()
-        .await
-        .map_err(WorktreeError::from)?;
+    let output =
+        crate::services::git_cmd::output(Some(git_dir), &["show-ref", "--verify", "--quiet", &spec])
+            .await
+            .map_err(WorktreeError::from)?;
     Ok(output.status.success())
 }
 
@@ -452,14 +444,20 @@ async fn init_detached_scratch(path: &Path) -> Result<(), WorktreeError> {
 }
 
 async fn scratch_has_changes(worktree: &Path) -> bool {
-    let output = match tokio::process::Command::new("git")
-        .current_dir(worktree)
-        .args(["status", "--porcelain"])
-        .output()
-        .await
+    let output = match crate::services::git_cmd::output(Some(worktree), &["status", "--porcelain"]).await
     {
         Ok(output) if output.status.success() => output,
-        _ => return false,
+        Ok(output) => {
+            tracing::warn!(
+                stderr = %String::from_utf8_lossy(&output.stderr).trim(),
+                "plan scratch status failed"
+            );
+            return false;
+        }
+        Err(err) => {
+            tracing::warn!(error = %err, "plan scratch status failed");
+            return false;
+        }
     };
     String::from_utf8_lossy(&output.stdout)
         .lines()
@@ -482,10 +480,7 @@ fn path_to_string(path: &Path) -> Result<String, WorktreeError> {
 }
 
 async fn git_output(git_dir: &Path, args: &[&str]) -> Result<String, WorktreeError> {
-    let output = tokio::process::Command::new("git")
-        .current_dir(git_dir)
-        .args(args)
-        .output()
+    let output = crate::services::git_cmd::output(Some(git_dir), args)
         .await
         .map_err(|err| {
             WorktreeError::Io(std::io::Error::new(
@@ -505,10 +500,7 @@ async fn git_output(git_dir: &Path, args: &[&str]) -> Result<String, WorktreeErr
 }
 
 async fn run_git_in(git_dir: &Path, args: &[&str]) -> Result<(), WorktreeError> {
-    let output = tokio::process::Command::new("git")
-        .current_dir(git_dir)
-        .args(args)
-        .output()
+    let output = crate::services::git_cmd::output(Some(git_dir), args)
         .await
         .map_err(|err| {
             WorktreeError::Io(std::io::Error::new(

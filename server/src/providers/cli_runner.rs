@@ -85,6 +85,20 @@ pub enum CliError {
     Io(std::io::Error),
 }
 
+fn resolve_cli_program(host: &crate::host_env::HostEnv, program: &str) -> Result<String, CliError> {
+    if program.contains('/') || program.contains('\\') {
+        return Ok(program.to_string());
+    }
+    host.resolve(program)
+        .map(|path| path.to_string_lossy().into_owned())
+        .map_err(|err| {
+            CliError::Spawn(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                err.to_string(),
+            ))
+        })
+}
+
 pub async fn run_cli(
     inv: CliInvocation,
     handler: &mut dyn LineHandler,
@@ -101,7 +115,13 @@ pub async fn run_cli_with_stdin(
     handler: &mut dyn LineHandler,
     io: RunIo,
 ) -> Result<CliExit, CliError> {
-    let mut cmd = Command::new(&inv.program);
+    let host = crate::host_env::current();
+    let program = resolve_cli_program(&host, &inv.program)?;
+    let mut cmd = Command::new(&program);
+    cmd.env("PATH", &host.path);
+    if !host.home.as_os_str().is_empty() {
+        cmd.env("HOME", &host.home);
+    }
     cmd.args(&inv.args)
         .envs(inv.env.iter().map(|(k, v)| (k.as_str(), v.as_str())))
         .current_dir(&inv.cwd)

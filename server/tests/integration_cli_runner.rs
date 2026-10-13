@@ -242,6 +242,7 @@ async fn run_cli_reaps_lingering_process_after_result() {
     invocation.result_exit_grace = Some(Duration::from_millis(200));
     let seen = Arc::new(Mutex::new(Vec::new()));
     let mut handler = Recorder { seen: seen.clone() };
+    let _ = coppice_server::host_env::current();
     let started = std::time::Instant::now();
     let exit = run_cli(invocation, &mut handler, io())
         .await
@@ -269,6 +270,7 @@ async fn run_cli_cancel_during_result_grace() {
     invocation.result_before_exit = true;
     invocation.result_exit_grace = Some(Duration::from_secs(10));
     let mut handler = Recorder::default();
+    let _ = coppice_server::host_env::current();
     let task = tokio::spawn(async move {
         run_cli(
             invocation,
@@ -294,6 +296,7 @@ async fn run_cli_cancel_during_result_grace() {
 #[tokio::test]
 async fn run_cli_timeout_kills_child_and_returns_tail() {
     let mut handler = Recorder::default();
+    let _ = coppice_server::host_env::current();
     let started = std::time::Instant::now();
     let result = run_cli(
         fake_cli(
@@ -315,6 +318,7 @@ async fn run_cli_timeout_kills_child_and_returns_tail() {
 #[tokio::test]
 async fn run_cli_timeout_returns_even_if_grandchild_holds_stderr() {
     let mut handler = Recorder::default();
+    let _ = coppice_server::host_env::current();
     let started = std::time::Instant::now();
     let result = run_cli(
         fake_cli(

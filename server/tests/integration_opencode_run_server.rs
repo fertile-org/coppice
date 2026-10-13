@@ -94,7 +94,10 @@ async fn lease_drop_kills_process_and_forgets_base_url() {
     let config = config_file(dir.path());
     let servers = servers();
 
-    let lease = servers.start("run-1", &config, vec![]).await.expect("start");
+    let lease = servers
+        .start("run-1", &config, vec![])
+        .await
+        .expect("start");
     let base_url = lease.base_url().to_string();
     assert!(doc_ok(&base_url).await);
 
@@ -110,8 +113,14 @@ async fn shutdown_all_kills_every_server() {
     let config = config_file(dir.path());
     let servers = servers();
 
-    let a = servers.start("run-a", &config, vec![]).await.expect("start a");
-    let b = servers.start("run-b", &config, vec![]).await.expect("start b");
+    let a = servers
+        .start("run-a", &config, vec![])
+        .await
+        .expect("start a");
+    let b = servers
+        .start("run-b", &config, vec![])
+        .await
+        .expect("start b");
     let (url_a, url_b) = (a.base_url().to_string(), b.base_url().to_string());
 
     servers.shutdown_all().await;
@@ -134,5 +143,9 @@ async fn start_with_missing_binary_names_the_command() {
         .expect("missing binary must fail");
     let message = err.to_string();
     assert!(message.contains("does-not-exist-opencode"), "{message}");
-    assert!(message.contains("not found on PATH"), "{message}");
+    assert!(message.contains("was not found"), "{message}");
+    assert!(
+        message.contains("version-specific flags were not applied"),
+        "{message}"
+    );
 }
