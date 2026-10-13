@@ -372,12 +372,16 @@ python3 - "${server_log}" "${token}" <<'PY'
 import sys
 log = open(sys.argv[1], encoding="utf-8", errors="replace").read()
 token = sys.argv[2]
+models_path = "/api/connectors/cursor/model-providers/cursor/models"
 refresh = [
     line for line in log.splitlines()
-    if "http request" in line and "models?refresh=true" in line
+    if "http request" in line and models_path in line
 ]
 if len(refresh) < 2:
-    sys.exit(f"expected two models?refresh=true request logs, found {len(refresh)}")
+    sys.exit(f"expected two models request logs, found {len(refresh)}")
+query_lines = [line for line in refresh if "?" in line or "refresh=" in line]
+if query_lines:
+    sys.exit("request log included a query string: " + repr(query_lines))
 if token and token in log:
     sys.exit("server log contains the session token")
 for secret in ("cookie", "authorization", "coppice_session"):

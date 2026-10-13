@@ -1,5 +1,5 @@
-//! One info line per API request: method, path (with query), status, duration.
-//! Bodies, cookies, and auth headers are not read.
+//! One info line per API request: method, path, status, duration.
+//! The query string is omitted. Bodies, cookies, and auth headers are not read.
 
 use std::time::Instant;
 
@@ -10,11 +10,7 @@ use axum::response::Response;
 
 pub async fn log_request(request: Request<Body>, next: Next) -> Response {
     let method = request.method().clone();
-    let path = request
-        .uri()
-        .path_and_query()
-        .map(|value| value.as_str().to_owned())
-        .unwrap_or_else(|| request.uri().path().to_owned());
+    let path = request.uri().path().to_owned();
     let started = Instant::now();
     let response = next.run(request).await;
     tracing::info!(
@@ -49,7 +45,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "current_thread")]
-    async fn logs_method_path_query_status_and_duration_only() {
+    async fn logs_method_path_status_and_duration_without_the_query() {
         let buf = Arc::new(Mutex::new(Vec::<u8>::new()));
         let writer = Arc::clone(&buf);
         let subscriber = tracing_subscriber::fmt()
@@ -69,7 +65,7 @@ mod tests {
             .oneshot(
                 Request::builder()
                     .method("GET")
-                    .uri("/api/connectors/cursor/model-providers/cursor/models?refresh=true")
+                    .uri("/api/connectors/cursor/model-providers/cursor/models?refresh=query-secret-value")
                     .header("cookie", "coppice_session=secret-cookie")
                     .header("authorization", "Bearer secret-token")
                     .body(Body::from("secret-body"))
@@ -82,9 +78,11 @@ mod tests {
         let text = String::from_utf8(buf.lock().unwrap().clone()).unwrap();
         assert!(text.contains("GET"), "{text}");
         assert!(
-            text.contains("/api/connectors/cursor/model-providers/cursor/models?refresh=true"),
+            text.contains("/api/connectors/cursor/model-providers/cursor/models"),
             "{text}"
         );
+        assert!(!text.contains('?'), "{text}");
+        assert!(!text.contains("query-secret-value"), "{text}");
         assert!(
             text.contains("status=200") || text.contains("status: 200"),
             "{text}"
