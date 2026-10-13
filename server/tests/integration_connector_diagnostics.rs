@@ -847,6 +847,8 @@ async fn test_route_validation() {
     }
     let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state_config(|config| {
         config.agent.connectors.kilo_code.enabled = Some(true);
+        // A missing key is automatic, not off. Only an explicit false is disabled.
+        config.agent.connectors.codex.enabled = Some(false);
     })
     .await;
     let pool = state.db.clone().unwrap();

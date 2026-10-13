@@ -51,12 +51,14 @@ fi
 set -m
 export DEBIAN_FRONTEND=noninteractive
 apt-get update
+# Bundled Postgres uses the system zoneinfo. TimeZone=UTC fails without tzdata.
 apt-get install -y --no-install-recommends \
   ca-certificates \
   curl \
   git \
   python3 \
   python3-cryptography \
+  tzdata \
   xz-utils \
   zsh \
   xvfb \
