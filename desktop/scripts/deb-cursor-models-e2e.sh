@@ -42,11 +42,14 @@ fi
 
 set -m
 export DEBIAN_FRONTEND=noninteractive
+# Bundled Postgres is built --with-system-tzdata=/usr/share/zoneinfo. Without
+# tzdata, connecting with TimeZone=UTC fails.
 apt-get update
 apt-get install -y --no-install-recommends \
   ca-certificates \
   curl \
   python3 \
+  tzdata \
   xz-utils \
   zsh \
   xvfb \
