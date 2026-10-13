@@ -59,7 +59,8 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            libxml2 libxslt1.1 libreadline8 libxxhash0 liblz4-1 libzstd1 libssl3 libgssapi-krb5-2
+            libxml2 libxslt1.1 libreadline8 libxxhash0 liblz4-1 libzstd1 libssl3 libgssapi-krb5-2 \
+            zsh
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - uses: actions/setup-node@v4
@@ -88,10 +89,23 @@ jobs:
         run: cd desktop && node scripts/fetch-postgres.mjs --target x86_64-unknown-linux-gnu --out .cache/postgres-host
       - name: Assemble resources
         run: cd desktop && yarn assemble --server-bin ../target/release/coppice-server --web-dist ../web/dist --postgres .cache/postgres-host
-      - name: Package (unpacked)
-        run: cd desktop && yarn dist:dir
+      - name: Package deb
+        run: cd desktop && yarn dist
       - name: Headless smoke
         run: cd desktop && yarn smoke:headless --resources dist/linux-unpacked/resources
+      - name: Install the deb
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          debs=(desktop/dist/Coppice-*-linux-*.deb)
+          if [ "${#debs[@]}" -ne 1 ]; then
+            echo "expected one .deb, found: ${debs[*]-}" >&2
+            ls -la desktop/dist >&2
+            exit 1
+          fi
+          sudo apt-get install -y "${debs[0]}"
+      - name: Installed deb connector e2e
+        run: desktop/scripts/deb-installed-e2e.sh --expected-commit "$(git rev-parse HEAD)"
       - name: Desktop tests
         run: make desktop-test
 

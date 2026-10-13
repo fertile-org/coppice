@@ -12,10 +12,8 @@ pub struct ModelInfo {
     pub name: String,
 }
 
-/// Successful model lists, per provider id. Refresh within a couple of seconds
-/// reuses a list another provider request just loaded.
+/// Successful model lists, per provider id. `refresh=true` always loads again.
 const MODEL_LIST_CACHE_TTL: Duration = Duration::from_secs(10 * 60);
-const MODEL_LIST_REFRESH_COALESCE: Duration = Duration::from_secs(2);
 
 pub struct ModelListCache {
     inner: Mutex<HashMap<String, (Instant, Vec<ModelInfo>)>>,
@@ -47,7 +45,7 @@ impl ModelListCache {
 }
 
 fn cache_hit(age: Duration, refresh: bool) -> bool {
-    age < MODEL_LIST_CACHE_TTL && (!refresh || age < MODEL_LIST_REFRESH_COALESCE)
+    !refresh && age < MODEL_LIST_CACHE_TTL
 }
 
 #[async_trait]
@@ -55,8 +53,7 @@ pub trait ModelCatalog: Send + Sync {
     /// Model providers: a non-empty config list, otherwise the connector's built-in defaults.
     async fn model_providers(&self) -> Vec<String>;
 
-    /// `refresh` skips a cached list. A refresh that lands while another
-    /// request is filling the cache still shares that result.
+    /// `refresh` always loads again. A list already in flight is not shared.
     async fn list_models(
         &self,
         model_provider: &str,
@@ -362,14 +359,14 @@ impl ModelCatalog for CursorModels {
         )
     }
 
-    /// Cursor has one model namespace; any other provider id lists nothing.
+    /// Cursor has one model namespace. Any other provider id is an error.
     async fn list_models(
         &self,
         model_provider: &str,
         refresh: bool,
     ) -> anyhow::Result<Vec<ModelInfo>> {
         if model_provider != "cursor" {
-            return Ok(vec![]);
+            anyhow::bail!("unknown model provider {model_provider}");
         }
         if let Some(hit) = self.models_cache.get(model_provider, refresh) {
             return Ok(hit);
@@ -465,16 +462,30 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn cursor_lists_nothing_for_other_providers() {
+    async fn cursor_rejects_unknown_model_providers() {
         let models = CursorModels::new(
             "definitely-not-a-cursor-binary".into(),
             vec!["cursor".into(), "other".into()],
         );
-        assert!(models
+        let err = models
             .list_models("other", false)
             .await
-            .expect("empty")
-            .is_empty());
+            .expect_err("unknown provider");
+        assert!(err.to_string().contains("unknown model provider"), "{err}");
+    }
+
+    #[test]
+    fn refresh_does_not_reuse_a_fresh_cache_entry() {
+        let cache = ModelListCache::new();
+        cache.store(
+            "cursor",
+            vec![ModelInfo {
+                id: "auto".into(),
+                name: "Auto".into(),
+            }],
+        );
+        assert!(cache.get("cursor", false).is_some());
+        assert!(cache.get("cursor", true).is_none());
     }
 
     #[cfg(feature = "mock-provider")]

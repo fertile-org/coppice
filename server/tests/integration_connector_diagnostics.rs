@@ -67,7 +67,7 @@ impl FakeKilo {
 fn configure_kilo(script: &Path) -> impl FnOnce(&mut coppice_server::AppConfig) {
     let script = script.display().to_string();
     move |config| {
-        config.agent.connectors.kilo_code.enabled = true;
+        config.agent.connectors.kilo_code.enabled = Some(true);
         config.agent.connectors.kilo_code.command = script;
     }
 }
@@ -846,7 +846,7 @@ async fn test_route_validation() {
         return;
     }
     let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state_config(|config| {
-        config.agent.connectors.kilo_code.enabled = true;
+        config.agent.connectors.kilo_code.enabled = Some(true);
     })
     .await;
     let pool = state.db.clone().unwrap();

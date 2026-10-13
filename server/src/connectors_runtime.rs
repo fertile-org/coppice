@@ -1,8 +1,9 @@
 //! Live connector config and registry. Enabling or disabling rebuilds the
 //! registry in this process and, when a config path is set, patches that file.
 
+use std::collections::HashSet;
 use std::path::PathBuf;
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Mutex, RwLock};
 
 use coppice_config::connector_file::{write_toml_atomic, ConnectorFilePatch};
 use coppice_config::settings_file::{self, ConfigDocument, ConfigTextError, SaveError};
@@ -73,11 +74,14 @@ struct Inner {
     config: AppConfig,
     registry: Arc<ConnectorRegistry>,
     path: Option<PathBuf>,
+    /// Connector ids whose free sign-in check passed.
+    ready: HashSet<String>,
 }
 
 pub struct ConnectorsRuntime {
     opencode_runs: Arc<OpenCodeRunServers>,
     inner: RwLock<Inner>,
+    import_notice: Mutex<Option<String>>,
 }
 
 impl ConnectorsRuntime {
@@ -96,8 +100,46 @@ impl ConnectorsRuntime {
                 config,
                 registry,
                 path,
+                ready: HashSet::new(),
             }),
+            import_notice: Mutex::new(None),
         }
+    }
+
+    pub fn set_import_notice(&self, notice: impl Into<String>) {
+        *self
+            .import_notice
+            .lock()
+            .unwrap_or_else(|err| err.into_inner()) = Some(notice.into());
+    }
+
+    pub fn import_notice(&self) -> Option<String> {
+        self.import_notice
+            .lock()
+            .unwrap_or_else(|err| err.into_inner())
+            .clone()
+    }
+
+    /// Rebuild from the latest free sign-in results. Explicit `enabled = false`
+    /// stays off. A missing key is on when `ready` contains that id.
+    pub fn sync_readiness(&self, ready_ids: impl IntoIterator<Item = impl Into<String>>) {
+        let mut guard = self.inner.write().unwrap_or_else(|err| err.into_inner());
+        guard.ready = ready_ids.into_iter().map(Into::into).collect();
+        rebuild(&mut guard, &self.opencode_runs);
+    }
+
+    /// Shared on/off used by the picker, Ready, and the registry.
+    /// `None` is an unknown connector id.
+    pub fn is_enabled(&self, id: &str) -> Option<bool> {
+        coppice_connectors::get(id)?;
+        Some(self.registry().has(id))
+    }
+
+    pub fn explicitly_off(&self, id: &str) -> bool {
+        matches!(
+            self.config().agent.connectors.switch(id),
+            coppice_config::ConnectorSwitch::Off
+        )
     }
 
     pub fn registry(&self) -> Arc<ConnectorRegistry> {
@@ -162,10 +204,7 @@ impl ConnectorsRuntime {
                 }
             })?;
         guard.config.agent.connectors = outcome.parsed.agent.connectors;
-        guard.registry = Arc::new(ConnectorRegistry::from_config(
-            &guard.config,
-            self.opencode_runs.clone(),
-        ));
+        rebuild(&mut guard, &self.opencode_runs);
         Ok(SavedConfigFile {
             revision: outcome.revision,
             restart_required: outcome.restart_required,
@@ -185,12 +224,7 @@ impl ConnectorsRuntime {
             return Err(ConnectorConfigError::Mock);
         }
         let mut guard = self.inner.write().unwrap_or_else(|e| e.into_inner());
-        let currently = guard
-            .config
-            .agent
-            .connectors
-            .enabled(descriptor.id)
-            .unwrap_or(false);
+        let currently = guard.registry.has(descriptor.id);
         let change = ConnectorChange {
             id: descriptor.id,
             display_name: descriptor.display_name,
@@ -209,12 +243,23 @@ impl ConnectorsRuntime {
             .connectors
             .set_enabled_flag(descriptor.id, enabled, descriptor.default_model_providers)
             .map_err(|_| ConnectorConfigError::Unknown)?;
-        guard.registry = Arc::new(ConnectorRegistry::from_config(
-            &guard.config,
-            self.opencode_runs.clone(),
-        ));
+        rebuild(&mut guard, &self.opencode_runs);
         Ok(change)
     }
+}
+
+fn rebuild(guard: &mut Inner, runs: &Arc<OpenCodeRunServers>) {
+    let ready = guard.ready.clone();
+    guard.registry = Arc::new(ConnectorRegistry::with_readiness(
+        &guard.config,
+        runs.clone(),
+        &|id| ready.contains(id),
+    ));
+}
+
+/// Logged when a known connector is turned off and something asks for its models.
+pub fn models_turned_off_log(display_name: &str) -> String {
+    format!("Can't list {display_name}'s models because it's turned off in Connectors.")
 }
 
 /// Shown when a known connector is installed in config terms but turned off.
@@ -289,7 +334,7 @@ mod tests {
         assert!(on.changed);
         assert_eq!(on.display_name, "Claude Code");
         assert!(rt.registry().has(coppice_connectors::CLAUDE_CODE));
-        assert!(rt.config().agent.connectors.claude_code.enabled);
+        assert_eq!(rt.config().agent.connectors.claude_code.enabled, Some(true));
         assert_eq!(
             rt.config().agent.connectors.claude_code.model_providers,
             vec![
@@ -333,7 +378,7 @@ mod tests {
         )
         .unwrap();
         let mut config = AppConfig::load_defaults().expect("defaults");
-        config.agent.connectors.cursor.enabled = true;
+        config.agent.connectors.cursor.enabled = Some(true);
         config.agent.connectors.cursor.command = "my-agent".into();
         config.agent.connectors.cursor.model_providers = vec!["cursor".into()];
         let runs = OpenCodeRunServers::new("opencode".into(), "127.0.0.1".into());
@@ -380,6 +425,6 @@ mod tests {
             original
         );
         assert!(rt.registry().has(coppice_connectors::CLAUDE_CODE));
-        assert!(rt.config().agent.connectors.claude_code.enabled);
+        assert_eq!(rt.config().agent.connectors.claude_code.enabled, Some(true));
     }
 }

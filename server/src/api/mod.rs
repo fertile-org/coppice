@@ -1,31 +1,31 @@
-pub mod auth;
 mod agent_runs;
-mod ws;
 mod agents;
-mod chat;
-mod connectors;
 mod attachments;
+pub mod auth;
+mod boards;
+mod chat;
 mod code_reviews;
 mod comments;
-mod mentions;
+mod connectors;
 mod health;
 mod jobs;
 mod knowledge;
 mod knowledge_compaction;
+mod mentions;
 mod notifications;
 mod plugins;
-mod boards;
 mod repos;
 mod settings;
 mod tickets;
 mod tool_connectors;
 mod tools;
 mod users;
+mod ws;
 
-use axum::{middleware, Router};
-use std::sync::Arc;
 use crate::middleware::{csrf, host_guard, session};
 use crate::AppState;
+use axum::{middleware, Router};
+use std::sync::Arc;
 
 pub fn router(state: Arc<AppState>) -> Router {
     let public = Router::new()
@@ -55,7 +55,10 @@ pub fn router(state: Arc<AppState>) -> Router {
         .merge(tool_connectors::routes())
         .merge(plugins::routes())
         .layer(middleware::from_fn(csrf::csrf_middleware))
-        .layer(middleware::from_fn_with_state(state.clone(), session::session_middleware));
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            session::session_middleware,
+        ));
 
     let ws = ws::routes().layer(middleware::from_fn_with_state(
         state.clone(),
@@ -69,6 +72,9 @@ pub fn router(state: Arc<AppState>) -> Router {
         .layer(middleware::from_fn_with_state(
             state.clone(),
             host_guard::desktop_host_guard,
+        ))
+        .layer(middleware::from_fn(
+            crate::middleware::request_log::log_request,
         ))
         .with_state(state)
 }

@@ -34,8 +34,20 @@ fn runtime() -> std::io::Result<tokio::runtime::Runtime> {
 
 /// The environment is set before the tokio runtime exists, so no other thread
 /// can read it concurrently.
+fn version_text() -> String {
+    format!(
+        "coppice-server {}\ncommit {}\n",
+        env!("CARGO_PKG_VERSION"),
+        env!("COPPICE_BUILD_COMMIT")
+    )
+}
+
 fn main() -> anyhow::Result<()> {
     let args: Vec<String> = std::env::args().collect();
+    if args.iter().any(|arg| arg == "--version") {
+        print!("{}", version_text());
+        return Ok(());
+    }
     match desktop::parse_desktop_args(&args) {
         Ok(Some(args)) => run_desktop(args),
         Ok(None) => runtime()?.block_on(run()),
@@ -113,6 +125,19 @@ async fn server_shutdown_signal() {
 #[cfg(test)]
 mod tests {
     use super::log_directives;
+
+    #[test]
+    fn version_text_names_the_package_and_commit() {
+        let text = super::version_text();
+        assert!(text.starts_with("coppice-server "));
+        assert!(text.contains(env!("CARGO_PKG_VERSION")));
+        let commit = text
+            .lines()
+            .find_map(|line| line.strip_prefix("commit "))
+            .expect("commit line");
+        assert!(!commit.is_empty());
+        assert!(!commit.contains(' '));
+    }
 
     #[test]
     fn rmcp_defaults_to_warn_unless_named() {

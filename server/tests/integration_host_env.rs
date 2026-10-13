@@ -20,8 +20,7 @@ use coppice_server::providers::cursor::CursorProvider;
 use coppice_server::providers::{AgentProvider, AgentRunInput, AgentRunResult};
 use tower::ServiceExt;
 
-static ENV_LOCK: LazyLock<tokio::sync::Mutex<()>> =
-    LazyLock::new(|| tokio::sync::Mutex::new(()));
+static ENV_LOCK: LazyLock<tokio::sync::Mutex<()>> = LazyLock::new(|| tokio::sync::Mutex::new(()));
 
 fn script(path: &Path, body: &str) {
     if let Some(parent) = path.parent() {
@@ -122,8 +121,8 @@ esac"#,
     let _env = EnvGuard::apply("/usr/bin:/bin", home.path());
 
     let (_state, app, cookie, csrf) = common::bootstrap_and_login_with_state_config(|config| {
-        config.agent.connectors.cursor.enabled = true;
-        config.agent.connectors.claude_code.enabled = true;
+        config.agent.connectors.cursor.enabled = Some(true);
+        config.agent.connectors.claude_code.enabled = Some(true);
         config.agent.connectors.kilo_code.command = "coppice-host-kilo".into();
     })
     .await;
@@ -143,10 +142,7 @@ esac"#,
     let cursor_json = common::json_body(cursor).await;
     assert_eq!(cursor_json["readiness"], "ready", "{cursor_json}");
     let cursor_path = cursor_json["cli"]["path"].as_str().unwrap_or("");
-    assert!(
-        cursor_path.contains("tools/bin/agent"),
-        "{cursor_path}"
-    );
+    assert!(cursor_path.contains("tools/bin/agent"), "{cursor_path}");
 
     let claude = app
         .clone()
@@ -202,11 +198,7 @@ esac"#,
             ticket_id: None,
             ticket_status: None,
             context_profile: ContextProfile::Full,
-            context_path: work
-                .path()
-                .join(".agent/context.md")
-                .display()
-                .to_string(),
+            context_path: work.path().join(".agent/context.md").display().to_string(),
             run_id: Some("run-host-env".into()),
             chat_session_id: None,
             artifacts_dir: None,

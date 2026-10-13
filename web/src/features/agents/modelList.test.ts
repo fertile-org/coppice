@@ -6,6 +6,7 @@ import {
   encodeModelValue,
   modelsFailureExtra,
   modelsUnavailableMessage,
+  turnedOffConnectorName,
 } from './modelList';
 
 describe('model list copy', () => {
@@ -28,6 +29,15 @@ describe('model list copy', () => {
       "Cursor's CLI isn't signed in for Coppice. Run `agent login` in a terminal, then click Refresh models.",
     );
     expect(modelsFailureExtra('cursor', '  ')).toBeNull();
+  });
+
+  it('names the connector from the turned-off log line', () => {
+    expect(
+      turnedOffConnectorName(
+        "Can't list Cursor's models because it's turned off in Connectors.",
+      ),
+    ).toBe('Cursor');
+    expect(turnedOffConnectorName("Couldn't get Cursor's models.")).toBeNull();
   });
 
   it('requests models for the cursor provider and can bypass the cache', () => {

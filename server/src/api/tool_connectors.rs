@@ -4,7 +4,8 @@ use crate::services::connector_check_service::{
     CheckDetail, CheckError as ConnectorCheckError, ConnectorCheckService,
 };
 use crate::services::connector_probe_service::{
-    check_connector, diagnosable, list_statuses, CheckError, ConnectorStatusResponse,
+    check_connector, diagnosable, list_statuses, ready_connector_ids, CheckError,
+    ConnectorStatusResponse,
 };
 use crate::AppState;
 use axum::{
@@ -26,15 +27,23 @@ pub fn routes() -> Router<Arc<AppState>> {
         .route("/api/tools/connector-checks/{id}", get(check_detail))
 }
 
+fn sync_enabled(state: &AppState, id: &str) -> bool {
+    state
+        .connectors
+        .sync_readiness(ready_connector_ids(&state.connector_probes));
+    state.connectors.is_enabled(id).unwrap_or(false)
+}
+
 async fn list_connectors(
     State(state): State<Arc<AppState>>,
     AdminUser(_admin): AdminUser,
 ) -> Result<Json<Vec<ConnectorStatusResponse>>, StatusCode> {
-    list_statuses(
-        &state.connector_probes,
-        &state.connectors.config(),
-        state.db.as_ref(),
-    )
+    state
+        .connectors
+        .sync_readiness(ready_connector_ids(&state.connector_probes));
+    list_statuses(&state.connector_probes, state.db.as_ref(), &|id| {
+        state.connectors.is_enabled(id).unwrap_or(false)
+    })
     .await
     .map(Json)
     .map_err(|err| {
@@ -53,6 +62,7 @@ async fn check(
         &state.connectors.config(),
         state.db.as_ref(),
         &id,
+        &|connector_id| sync_enabled(&state, connector_id),
     )
     .await
     .map(Json)
@@ -140,10 +150,13 @@ async fn set_enabled(
                 StatusCode::INTERNAL_SERVER_ERROR
             }
         })?;
+    state
+        .connectors
+        .sync_readiness(ready_connector_ids(&state.connector_probes));
     list_statuses(
         &state.connector_probes,
-        &state.connectors.config(),
         state.db.as_ref(),
+        &|connector_id| state.connectors.is_enabled(connector_id).unwrap_or(false),
     )
     .await
     .map_err(|err| {
