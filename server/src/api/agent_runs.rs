@@ -20,6 +20,7 @@ use uuid::Uuid;
 
 pub fn routes() -> Router<Arc<AppState>> {
     Router::new()
+        .route("/api/agent-runs/active", get(active_runs))
         .route("/api/agent-runs/{run_id}", get(get_run))
         .route("/api/agent-runs/{run_id}/stop", post(stop_run))
         .route("/api/agent-runs/{run_id}/retry", post(retry_run))
@@ -153,6 +154,18 @@ fn map_error(err: RunError) -> StatusCode {
         RunError::Validation(_) => StatusCode::BAD_REQUEST,
         RunError::Database(_) => StatusCode::INTERNAL_SERVER_ERROR,
     }
+}
+
+async fn active_runs(
+    State(state): State<Arc<AppState>>,
+    AuthUser { .. }: AuthUser,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    let pool = pool_from_state(&state)?;
+    let runs = RunService::new(pool)
+        .list_active_runs()
+        .await
+        .map_err(map_error)?;
+    Ok(Json(json!({ "active": !runs.is_empty() })))
 }
 
 async fn get_run(

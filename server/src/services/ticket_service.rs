@@ -23,6 +23,9 @@ pub struct TicketService<'a> {
 enum StatusWrite {
     Direct,
     Accept,
+    /// Continue a column a crash moved to Blocked. Skips the plan gate:
+    /// the ticket was already in that column.
+    RestartResume,
 }
 
 #[derive(Debug, Default)]
@@ -448,6 +451,22 @@ impl<'a> TicketService<'a> {
         .await
     }
 
+    /// Put a ticket back in the column it occupied when Coppice restarted.
+    pub async fn restore_interrupted_column(
+        &self,
+        ticket_id: Uuid,
+        status: TicketStatus,
+    ) -> Result<TicketWithDisplay, TicketError> {
+        self.write_status(
+            ticket_id,
+            status,
+            Some(None),
+            Some(None),
+            StatusWrite::RestartResume,
+        )
+        .await
+    }
+
     /// Accept is the only status write that may enter Done.
     pub async fn accept_to_done(
         &self,
@@ -489,6 +508,18 @@ impl<'a> TicketService<'a> {
                     WorkflowService::direct_status_change_error(current.ticket.status, status, plan)
                 {
                     return Err(TicketError::Validation(msg.to_string()));
+                }
+            }
+            StatusWrite::RestartResume => {
+                if current.ticket.status != TicketStatus::Blocked {
+                    return Err(TicketError::Validation(
+                        "ticket is not waiting after a restart".into(),
+                    ));
+                }
+                if status == TicketStatus::Done {
+                    return Err(TicketError::Validation(
+                        "accepted work is not resumed".into(),
+                    ));
                 }
             }
         }

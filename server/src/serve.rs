@@ -7,6 +7,7 @@ use crate::domain::comment::{AuthorType, CommentIntent};
 use crate::domain::substatus::{Substatus, TicketStatus};
 use crate::events::{mark_run_interrupted, publish_ticket_updated};
 use crate::services::comment_service::CommentService;
+use crate::services::restart_service::{self, RestartService};
 use crate::services::run_orchestrator::RunOrchestrator;
 use crate::services::run_service::RunService;
 use crate::services::ticket_service::TicketService;
@@ -145,12 +146,133 @@ pub async fn sweep_orphaned_runs(state: &AppState) {
     };
 
     // No per-run `opencode serve` survives a restart, so OpenCode runs are
-    // orphaned just like every other connector's.
+    // orphaned just like every other connector's. The worktree stays, and
+    // nothing starts again until a person chooses.
     for run in runs {
         if state.run_streams.get(run.id).is_some() {
             continue;
         }
-        interrupt_orphaned_run(state, run.id, "server restarted during run").await;
+        interrupt_restarted_run(state, run).await;
+    }
+}
+
+/// Startup after a crash. One comment, ticket to Blocked, worktree untouched.
+/// Does not call `handle_terminal_run`, so deferred work is not replayed.
+async fn interrupt_restarted_run(state: &AppState, run: crate::domain::run::AgentRun) {
+    let worktree = run.worktree_path.as_deref().map(std::path::Path::new);
+    let changed = restart_service::count_changed_files(worktree).await;
+    let comment = restart_service::restart_comment(changed);
+    let run_id = run.id;
+    match mark_run_interrupted(state, run_id, "server restarted during run").await {
+        Ok(interrupted) => {
+            note_restart(state, &interrupted, &comment, changed).await;
+        }
+        Err(err) => {
+            tracing::warn!(error = %err, %run_id, "failed to mark restarted run interrupted");
+        }
+    }
+}
+
+async fn note_restart(
+    state: &AppState,
+    run: &crate::domain::run::AgentRun,
+    comment: &str,
+    changed_files: u32,
+) {
+    let Some(pool) = state.db.as_ref() else {
+        return;
+    };
+    let Some(ticket_id) = run.ticket_id else {
+        return;
+    };
+    let ticket_svc = TicketService::new(pool);
+    let ticket = match ticket_svc.get(ticket_id).await {
+        Ok(ticket) => ticket,
+        Err(err) => {
+            tracing::warn!(
+                error = %err,
+                %ticket_id,
+                run_id = %run.id,
+                "failed to load ticket for restarted run"
+            );
+            return;
+        }
+    };
+    let previous = ticket.ticket.status;
+    if ticket.ticket.archived_at.is_some() {
+        leave_restart_comment(pool, ticket_id, run.id, comment).await;
+        return;
+    }
+
+    let waiting = if previous == TicketStatus::Done {
+        false
+    } else if previous == TicketStatus::Blocked {
+        true
+    } else {
+        match ticket_svc
+            .update_status(
+                ticket_id,
+                TicketStatus::Blocked,
+                Some(Some(Substatus::BlockedByError)),
+                Some(None),
+            )
+            .await
+        {
+            Ok(updated) => {
+                publish_ticket_updated(&state.event_bus, &updated);
+                true
+            }
+            Err(err) => {
+                tracing::warn!(
+                    error = %err,
+                    %ticket_id,
+                    run_id = %run.id,
+                    "failed to move restarted run's ticket to Blocked"
+                );
+                false
+            }
+        }
+    };
+    leave_restart_comment(pool, ticket_id, run.id, comment).await;
+    if waiting {
+        if let Err(err) = RestartService::new(pool)
+            .record(run.id, ticket_id, changed_files, previous)
+            .await
+        {
+            tracing::warn!(
+                error = %err,
+                %ticket_id,
+                run_id = %run.id,
+                "failed to record restart choice"
+            );
+        }
+    }
+}
+
+async fn leave_restart_comment(
+    pool: &sqlx::PgPool,
+    ticket_id: uuid::Uuid,
+    run_id: uuid::Uuid,
+    comment: &str,
+) {
+    if let Err(err) = CommentService::new(pool)
+        .create(
+            ticket_id,
+            AuthorType::System,
+            None,
+            comment,
+            CommentIntent::SystemEvent,
+            &[],
+            &[],
+        )
+        .await
+    {
+        tracing::warn!(
+            error = %err,
+            %ticket_id,
+            %run_id,
+            "failed to comment that Coppice restarted during the run"
+        );
     }
 }
 
