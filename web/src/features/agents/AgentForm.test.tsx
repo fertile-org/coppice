@@ -242,11 +242,15 @@ describe('AgentForm model choice', () => {
         connectorOptions={[{ id: 'cursor', displayName: 'Cursor' }]}
       />,
     );
-    expect(
-      screen.getByText(
-        "Cursor's CLI isn't signed in for Coppice. Run `agent login` in a terminal, then click Refresh models.",
-      ),
-    ).toBeInTheDocument();
+    const signIn = screen.getByText((_content, element) => {
+      return (
+        element?.tagName === 'P' &&
+        element.textContent ===
+          "Cursor's CLI isn't signed in for Coppice. Run agent login in a terminal, then click Refresh models."
+      );
+    });
+    expect(signIn.querySelector('code')?.textContent).toBe('agent login');
+    expect(signIn.textContent).not.toContain('`');
     expect(screen.queryByText('Error: Authentication required')).toBeNull();
   });
 

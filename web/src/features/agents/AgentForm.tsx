@@ -18,6 +18,7 @@ import { useConnectorModels, type ModelGroup } from './useAgents';
 import {
   decodeModelValue,
   encodeModelValue,
+  CURSOR_MODELS_SIGN_IN,
   modelsFailureExtra,
   modelsUnavailableMessage,
 } from './modelList';
@@ -85,6 +86,14 @@ export function presetToFormValues(
     enabled: true,
     pluginIds: [],
   };
+}
+
+/** `agent login` in the Cursor sign-in line is inline code, not backtick characters. */
+function cursorSignInLine(line: string) {
+  const parts = line.split('`');
+  return parts.map((part, index) =>
+    index % 2 === 1 ? <code key={index}>{part}</code> : part,
+  );
 }
 
 function modelPickerOptions({
@@ -507,7 +516,11 @@ export function AgentForm({
                 {modelsUnavailableMessage(connectorName)}
               </p>
               {modelsFailureLine && (
-                <p className="mt-1 font-body text-xs text-text-muted">{modelsFailureLine}</p>
+                <p className="mt-1 font-body text-xs text-text-muted">
+                  {modelsFailureLine === CURSOR_MODELS_SIGN_IN
+                    ? cursorSignInLine(modelsFailureLine)
+                    : modelsFailureLine}
+                </p>
               )}
             </div>
           )}
