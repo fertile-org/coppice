@@ -175,6 +175,15 @@ pub enum AgentRunResult {
         split_tickets: Vec<SplitTicketSpec>,
         #[serde(default, rename = "knowledgeCandidates")]
         knowledge_candidates: Vec<KnowledgeCandidateSpec>,
+        /// Short Human Review note. Absent when the connector did not report a brief.
+        #[serde(default, rename = "howItWorks", skip_serializing_if = "Option::is_none")]
+        how_it_works: Option<String>,
+        /// What changed from the approved plan. Empty means nothing changed.
+        #[serde(default, rename = "changesFromPlan", skip_serializing_if = "Option::is_none")]
+        changes_from_plan: Option<String>,
+        /// Where a reviewer should look first.
+        #[serde(default, rename = "lookHereFirst", skip_serializing_if = "Option::is_none")]
+        look_here_first: Option<String>,
     },
     Blocked {
         #[serde(rename = "blockerType")]

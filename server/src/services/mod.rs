@@ -30,6 +30,7 @@ pub mod repo_git_service;
 pub mod repo_service;
 pub mod repo_verifier;
 pub mod result_contract;
+pub mod reviewer_brief;
 pub mod run_orchestrator;
 pub mod run_service;
 pub mod run_tool_call_service;

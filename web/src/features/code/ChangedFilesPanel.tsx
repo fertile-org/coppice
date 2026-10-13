@@ -1,6 +1,7 @@
 import { Badge } from '../../components/ui/badge';
 import type { DiffFileSummary } from '../../lib/schemas/codeReview';
 import { cn } from '../../lib/utils';
+import { REVIEWER_BRIEF_COPY } from './reviewerBriefCopy';
 
 function statusLabel(status: string): string {
   switch (status.toLowerCase()) {
@@ -106,7 +107,14 @@ export function ChangedFilesPanel({
                   {statusLabel(file.status)}
                 </Badge>
                 <span className="min-w-0 flex-1">
-                  <span className="block truncate font-mono text-xs">{file.path}</span>
+                  <span className="flex min-w-0 items-center gap-1">
+                    <span className="truncate font-mono text-xs">{file.path}</span>
+                    {file.notInPlan && (
+                      <span className="shrink-0 rounded border border-border px-1 py-px font-body text-[10px] leading-4 text-text-muted">
+                        {REVIEWER_BRIEF_COPY.notInPlan}
+                      </span>
+                    )}
+                  </span>
                   <span className="mt-0.5 block font-body text-xs text-text-muted">
                     <span className="text-success">+{file.additions}</span>
                     {' · '}

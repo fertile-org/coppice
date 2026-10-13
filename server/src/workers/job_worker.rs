@@ -36,6 +36,7 @@ use crate::services::job_service::JobService;
 use crate::services::mention_service::MentionService;
 use crate::services::plugin_service::PluginService;
 use crate::services::result_contract;
+use crate::services::reviewer_brief::ReviewerBriefService;
 use crate::services::run_orchestrator::{load_run_continuation_context, RunOrchestrator};
 use crate::services::run_service::RunService;
 use crate::services::ticket_git_service::TicketGitService;
@@ -687,6 +688,13 @@ async fn execute_job(
         }
     }
 
+    if should_capture_reviewer_brief(run, &agent, ticket.ticket.status) {
+        ReviewerBriefService::new(pool)
+            .record(ticket_id, &result)
+            .await
+            .context("store reviewer brief")?;
+    }
+
     let worktree_path = paths.worktree_dir.to_string_lossy().into_owned();
     let orchestrator =
         RunOrchestrator::new(pool, &state.config.workflow).with_event_bus(&state.event_bus);
@@ -1319,6 +1327,38 @@ fn should_finalize_worktree_git(
     true
 }
 
+/// Implementation done-results carry the reviewer brief. Review, QC verification,
+/// and Ready tech-lead refinement do not replace it.
+fn should_capture_reviewer_brief(
+    run: &crate::domain::run::AgentRun,
+    agent: &crate::domain::agent::Agent,
+    ticket_status: TicketStatus,
+) -> bool {
+    if run.job_type != "work_on_ticket" {
+        return false;
+    }
+    let agent_key = agent
+        .preset_source
+        .clone()
+        .unwrap_or_else(|| slugify(&agent.name));
+    if is_ready_tech_lead_refinement(
+        run.context_profile,
+        &run.job_type,
+        status_to_str(ticket_status),
+        &agent_key,
+        &agent.role,
+    ) {
+        return false;
+    }
+    if is_qc_agent(agent) && ticket_status == TicketStatus::InQa {
+        return false;
+    }
+    if is_review_agent(agent) && ticket_status == TicketStatus::InReview {
+        return false;
+    }
+    true
+}
+
 fn should_finalize_run_git(
     run: &crate::domain::run::AgentRun,
     agent: &crate::domain::agent::Agent,
@@ -1543,6 +1583,40 @@ mod tests {
             TicketStatus::InProgress
         ));
         assert!(should_finalize_worktree_git(&engineer, TicketStatus::InQa));
+    }
+
+    #[test]
+    fn reviewer_brief_is_captured_from_implementation_only() {
+        let engineer = test_agent("Backend Engineer", Some("backend_engineer"));
+        assert!(should_capture_reviewer_brief(
+            &test_run("work_on_ticket"),
+            &engineer,
+            TicketStatus::InProgress
+        ));
+        assert!(!should_capture_reviewer_brief(
+            &test_run("respond_to_mention"),
+            &engineer,
+            TicketStatus::InProgress
+        ));
+        assert!(!should_capture_reviewer_brief(
+            &test_run("plan_ticket"),
+            &engineer,
+            TicketStatus::PlanReview
+        ));
+
+        let qc = test_agent("QC", Some("qc"));
+        assert!(!should_capture_reviewer_brief(
+            &test_run("work_on_ticket"),
+            &qc,
+            TicketStatus::InQa
+        ));
+
+        let reviewer = test_agent("Reviewer", Some("reviewer"));
+        assert!(!should_capture_reviewer_brief(
+            &test_run("work_on_ticket"),
+            &reviewer,
+            TicketStatus::InReview
+        ));
     }
 
     #[test]

@@ -27,8 +27,9 @@ export function repoDiffQueryKey(
   repoId: string,
   worktreePath: string,
   baseBranch: string,
+  ticketId?: string,
 ) {
-  return ['repo-diff', repoId, worktreePath, baseBranch] as const;
+  return ['repo-diff', repoId, worktreePath, baseBranch, ticketId ?? ''] as const;
 }
 
 export function filePatchQueryKey(
@@ -55,8 +56,10 @@ async function fetchRepoDiff(
   repoId: string,
   worktreePath: string,
   baseBranch: string,
+  ticketId?: string,
 ): Promise<DiffSummary> {
   const params = new URLSearchParams({ worktreePath, baseBranch });
+  if (ticketId) params.set('ticketId', ticketId);
   const res = await apiFetch(`/api/repos/${repoId}/diff?${params}`);
   return diffSummarySchema.parse(await res.json());
 }
@@ -103,10 +106,16 @@ export function useRepoDiff(
   repoId: string | undefined,
   worktreePath: string | undefined,
   baseBranch: string | undefined,
+  ticketId?: string,
 ) {
   return useQuery({
-    queryKey: repoDiffQueryKey(repoId ?? '', worktreePath ?? '', baseBranch ?? ''),
-    queryFn: () => fetchRepoDiff(repoId!, worktreePath!, baseBranch!),
+    queryKey: repoDiffQueryKey(
+      repoId ?? '',
+      worktreePath ?? '',
+      baseBranch ?? '',
+      ticketId,
+    ),
+    queryFn: () => fetchRepoDiff(repoId!, worktreePath!, baseBranch!, ticketId),
     enabled: Boolean(repoId && worktreePath && baseBranch),
   });
 }

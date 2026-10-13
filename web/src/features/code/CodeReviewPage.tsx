@@ -8,6 +8,7 @@ import { PlanChecklist } from '../plan/PlanChecklist';
 import { useTicket } from '../tickets/useTicket';
 import { ChangedFilesPanel } from './ChangedFilesPanel';
 import { DiffViewer, type InlineCommentDraft } from './DiffViewer';
+import { ReviewerBriefBar } from './ReviewerBriefBar';
 import { SubmitReviewDialog } from './SubmitReviewDialog';
 import {
   useRepoBranches,
@@ -57,10 +58,13 @@ export function CodeReviewPage() {
 
   const baseBranch = baseBranchFromUrl ?? defaultBranch;
 
+  const reviewTicketId =
+    ticket?.status === 'wait_for_final_review' ? ticketId : undefined;
   const { data: diffSummary, isLoading: diffLoading } = useRepoDiff(
     repoId,
     selectedWorktreePath,
     baseBranch,
+    reviewTicketId,
   );
 
   const syncParams = useCallback(
@@ -293,15 +297,20 @@ export function CodeReviewPage() {
             isLoading={diffLoading}
           />
           {repoId && selectedWorktreePath && (
-            <DiffViewer
-              repoId={repoId}
-              worktreePath={selectedWorktreePath}
-              baseBranch={baseBranch}
-              filePath={selectedFile}
-              viewType={viewType}
-              inlineComments={inlineComments}
-              onInlineCommentsChange={setInlineComments}
-            />
+            <div className="flex h-full min-h-0 min-w-0 flex-col">
+              {ticket?.status === 'wait_for_final_review' && ticket.reviewerBrief && (
+                <ReviewerBriefBar brief={ticket.reviewerBrief} />
+              )}
+              <DiffViewer
+                repoId={repoId}
+                worktreePath={selectedWorktreePath}
+                baseBranch={baseBranch}
+                filePath={selectedFile}
+                viewType={viewType}
+                inlineComments={inlineComments}
+                onInlineCommentsChange={setInlineComments}
+              />
+            </div>
           )}
         </div>
       )}

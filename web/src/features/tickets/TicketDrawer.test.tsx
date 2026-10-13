@@ -246,11 +246,13 @@ describe('TicketDrawer', () => {
     ticketState.ticket = {
       ...ticketState.ticket,
       status: 'wait_for_final_review',
+      reviewerBrief: {
+        howItWorks: 'Reads the header.',
+        lookHereFirst: 'src/parser.rs',
+      },
     };
     renderDrawer();
-    expect(
-      screen.getByRole('button', { name: 'Accept' }),
-    ).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Accept' })).toBeEnabled();
   });
 
   it('archives an active ticket from the drawer header', async () => {

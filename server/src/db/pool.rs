@@ -83,6 +83,7 @@ pub async fn truncate_test_workspace(pool: &PgPool) -> anyhow::Result<()> {
             ticket_mentions,
             attachments,
             ticket_comments,
+            ticket_reviewer_briefs,
             agent_jobs,
             agent_runs,
             connector_checks,

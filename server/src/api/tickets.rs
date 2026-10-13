@@ -145,6 +145,9 @@ pub(crate) struct TicketResponse {
     archived_at: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     human_review: Option<HumanReviewResponse>,
+    /// Present only when an implementation run reported a reviewer brief.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reviewer_brief: Option<crate::services::reviewer_brief::ReviewerBrief>,
 }
 
 #[derive(Serialize)]
@@ -259,6 +262,7 @@ pub(crate) fn ticket_to_response(item: TicketWithDisplay) -> TicketResponse {
                 run_ids: review.run_ids,
             }
         }),
+        reviewer_brief: None,
     }
 }
 
@@ -842,12 +846,16 @@ async fn with_approved_plan(
                 TicketError::Validation(message)
             }
         })?;
+    let ticket_id = ticket.ticket.id;
     let mut response = ticket_to_response(ticket);
     response.approved_plan = plan.map(|plan| ApprovedPlanResponse {
         comment_id: plan.comment_id,
         markdown: plan.markdown,
         steps: plan.steps,
     });
+    response.reviewer_brief = crate::services::reviewer_brief::ReviewerBriefService::new(pool)
+        .get(ticket_id)
+        .await?;
     Ok(response)
 }
 
