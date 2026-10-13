@@ -21,11 +21,16 @@ fn init_tracing() {
     let rust_log = std::env::var(EnvFilter::DEFAULT_ENV).ok();
     let filter = EnvFilter::try_new(log_directives(rust_log.as_deref()))
         .unwrap_or_else(|_| EnvFilter::new(log_directives(None)));
-    let builder = tracing_subscriber::fmt().with_env_filter(filter);
-    // A terminal is already line-buffered. A pipe (Electron's server.log) is
-    // block-buffered, so the last lines sit there until the process exits —
-    // and are gone if it crashes. Flush every write in that case.
-    if io::stdout().is_terminal() {
+    // A terminal is already line-buffered and can show color. A pipe
+    // (Electron's server.log) is block-buffered and is read as text: flush
+    // every write, and leave ANSI codes out. Otherwise the last lines sit in
+    // the buffer until exit — gone if the process crashes — and `status=404`
+    // is split by escape sequences, so it cannot be grepped.
+    let terminal = io::stdout().is_terminal();
+    let builder = tracing_subscriber::fmt()
+        .with_env_filter(filter)
+        .with_ansi(terminal);
+    if terminal {
         builder.init();
     } else {
         builder.with_writer(pipe_log_writer).init();
@@ -202,5 +207,39 @@ mod tests {
             .recv_timeout(Duration::from_secs(2))
             .expect("line was not flushed");
         assert_eq!(got, b"hello\n");
+    }
+
+    #[test]
+    fn pipe_tracing_format_keeps_status_404_contiguous() {
+        use std::sync::{Arc, Mutex};
+
+        struct Mem(Arc<Mutex<Vec<u8>>>);
+
+        impl std::io::Write for Mem {
+            fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+                self.0.lock().unwrap().extend_from_slice(buf);
+                Ok(buf.len())
+            }
+
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+
+        let buf = Arc::new(Mutex::new(Vec::<u8>::new()));
+        let writer = Arc::clone(&buf);
+        // Same settings as `init_tracing` when stdout is not a terminal.
+        let subscriber = tracing_subscriber::fmt()
+            .with_ansi(false)
+            .with_max_level(tracing::Level::INFO)
+            .without_time()
+            .with_writer(move || Mem(Arc::clone(&writer)))
+            .finish();
+        tracing::subscriber::with_default(subscriber, || {
+            tracing::info!(status = 404_u16, "http request");
+        });
+        let text = String::from_utf8(buf.lock().unwrap().clone()).unwrap();
+        assert!(text.contains("status=404"), "{text}");
+        assert!(!text.contains('\u{1b}'), "{text}");
     }
 }
