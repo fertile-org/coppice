@@ -185,7 +185,7 @@ esac"#,
     std::fs::write(work.path().join(".agent/context.md"), "context").unwrap();
     let provider = CursorProvider::new(CursorProviderConfig {
         command: "agent".into(),
-        enabled: true,
+        enabled: Some(true),
         run_timeout_secs: 30,
         ..CursorProviderConfig::default()
     });

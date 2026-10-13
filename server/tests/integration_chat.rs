@@ -293,7 +293,7 @@ async fn conversation_profile_refuses_write_capable_connectors() {
     use coppice_config::KiloCodeProviderConfig;
 
     let provider = KiloCodeProvider::new(KiloCodeProviderConfig {
-        enabled: true,
+        enabled: Some(true),
         command: "kilo".into(),
         model_providers: vec![],
         run_timeout_secs: 30,
