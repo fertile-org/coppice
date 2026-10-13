@@ -14,6 +14,7 @@ import type {
   AgentPreset,
   ConnectorOption,
 } from './useAgents';
+import { RefreshModelsButton } from './RefreshModelsButton';
 import { useConnectorModels, type ModelGroup } from './useAgents';
 import {
   decodeModelValue,
@@ -482,14 +483,10 @@ export function AgentForm({
             >
               Model
             </label>
-            <button
-              type="button"
+            <RefreshModelsButton
               onClick={() => refreshModels()}
               disabled={modelsLoading || modelsFetching}
-              className="font-body text-xs font-medium text-moss-700 underline-offset-2 hover:underline disabled:opacity-60"
-            >
-              Refresh models
-            </button>
+            />
           </div>
           <Combobox
             id="agent-model"

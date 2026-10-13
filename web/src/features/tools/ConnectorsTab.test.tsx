@@ -469,7 +469,11 @@ describe('ConnectorsTab', () => {
     renderTab();
 
     const cursorCard = await card('cursor');
-    expect(cursorCard.getByText('Models not covered by my plan')).toBeVisible();
+    const disclosure = cursorCard.getByRole('button', { name: 'Models not covered by my plan' });
+    expect(disclosure).toHaveAttribute('aria-expanded', 'false');
+    expect(cursorCard.queryByRole('checkbox')).not.toBeInTheDocument();
+
+    fireEvent.click(disclosure);
     const composer = await cursorCard.findByRole('checkbox', { name: /Composer 2.5/ });
     expect(composer).not.toBeChecked();
     expect(cursorCard.getByRole('checkbox', { name: /^Auto/ })).not.toBeChecked();
@@ -485,6 +489,86 @@ describe('ConnectorsTab', () => {
       ),
     ).toEqual({ modelIds: ['composer-2.5'] });
     expect(composer).toBeChecked();
+  });
+
+  it('shows only checked models until the list is expanded', async () => {
+    const cursor = connector({ id: 'cursor', displayName: 'Cursor' });
+    stubApi((path, init) => {
+      const method = init.method ?? 'GET';
+      if (path === '/api/tools/connectors' && method === 'GET') {
+        return json([cursor]);
+      }
+      if (path === '/api/connectors/cursor/model-providers' && method === 'GET') {
+        return json({ items: [{ id: 'cursor' }] });
+      }
+      if (path === '/api/connectors/cursor/model-providers/cursor/models' && method === 'GET') {
+        return json({
+          items: [
+            { id: 'composer-2.5', name: 'Composer 2.5' },
+            { id: 'auto', name: 'Auto' },
+          ],
+        });
+      }
+      if (path === '/api/tools/connectors/cursor/uncovered-models' && method === 'GET') {
+        return json({ modelIds: ['composer-2.5'] });
+      }
+      return undefined;
+    });
+    renderTab();
+
+    const cursorCard = await card('cursor');
+    const disclosure = cursorCard.getByRole('button', { name: 'Models not covered by my plan' });
+    expect(disclosure).toHaveAttribute('aria-expanded', 'false');
+    const composer = await cursorCard.findByRole('checkbox', { name: /Composer 2.5/ });
+    expect(composer).toBeChecked();
+    expect(cursorCard.queryByRole('checkbox', { name: /^Auto/ })).not.toBeInTheDocument();
+
+    fireEvent.click(disclosure);
+    expect(disclosure).toHaveAttribute('aria-expanded', 'true');
+    expect(cursorCard.getByRole('checkbox', { name: /^Auto/ })).not.toBeChecked();
+
+    fireEvent.click(disclosure);
+    expect(disclosure).toHaveAttribute('aria-expanded', 'false');
+    expect(cursorCard.getByRole('checkbox', { name: /Composer 2.5/ })).toBeChecked();
+    expect(cursorCard.queryByRole('checkbox', { name: /^Auto/ })).not.toBeInTheDocument();
+  });
+
+  it('offers Refresh models when the live list fails', async () => {
+    const cursor = connector({ id: 'cursor', displayName: 'Cursor' });
+    stubApi((path, init) => {
+      const method = init.method ?? 'GET';
+      if (path === '/api/tools/connectors' && method === 'GET') {
+        return json([cursor]);
+      }
+      if (path === '/api/connectors/cursor/model-providers' && method === 'GET') {
+        return json({ items: [{ id: 'cursor' }] });
+      }
+      if (path === '/api/connectors/cursor/model-providers/cursor/models?refresh=true' && method === 'GET') {
+        return json({
+          items: [{ id: 'composer-2.5', name: 'Composer 2.5' }],
+        });
+      }
+      if (path === '/api/connectors/cursor/model-providers/cursor/models' && method === 'GET') {
+        return json({ message: 'unavailable' }, 500);
+      }
+      if (path === '/api/tools/connectors/cursor/uncovered-models' && method === 'GET') {
+        return json({ modelIds: [] });
+      }
+      return undefined;
+    });
+    renderTab();
+
+    const cursorCard = await card('cursor');
+    expect(await cursorCard.findByText("Couldn't get Cursor's models.")).toBeVisible();
+    fireEvent.click(cursorCard.getByRole('button', { name: 'Refresh models' }));
+
+    await waitFor(() =>
+      expect(
+        fetchMock.mock.calls.some(
+          ([path]) => path === '/api/connectors/cursor/model-providers/cursor/models?refresh=true',
+        ),
+      ).toBe(true),
+    );
   });
 
   it('unknown statuses fall back', () => {
