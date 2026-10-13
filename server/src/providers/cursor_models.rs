@@ -228,7 +228,7 @@ async fn run_model_args(
                     .stderr_line
                     .clone()
                     .unwrap_or_else(|| "unknown error".to_string());
-                let message = format!("Couldn't start `{command}`: {err}");
+                let message = format!("Couldn't start {invocation}: {err}");
                 return Err(cli_catalog::ModelListError {
                     detail: Some(err),
                     message,
@@ -470,6 +470,24 @@ gpt-5.5-high - GPT-5.5 1M High
         assert_eq!(models.len(), 1);
         assert_eq!(models[0].id, "composer-2.5");
         assert_eq!(models[0].name, "Composer 2.5");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn spawn_failure_names_the_models_invocation() {
+        let dir = tempfile::tempdir().unwrap();
+        let bin = dir.path().join("agent");
+        std::fs::write(&bin, []).unwrap();
+        std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let host = test_host(dir.path().as_os_str(), dir.path());
+        let err = list_cursor_models_with(&host, "agent")
+            .await
+            .expect_err("empty executable");
+        let text = err.to_string();
+        assert!(
+            text.starts_with("Couldn't start `agent models`: "),
+            "{text}"
+        );
     }
 
     #[cfg(unix)]

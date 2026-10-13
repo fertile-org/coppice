@@ -125,7 +125,8 @@ pub async fn capture_cli(
                         .stderr_line
                         .unwrap_or_else(|| "unknown error".to_string());
                     tracing::warn!(command, %err, "failed to start cli");
-                    return Err(format!("Couldn't start `{command}`: {err}"));
+                    let invocation = format!("`{command} {}`", args.join(" "));
+                    return Err(format!("Couldn't start {invocation}: {err}"));
                 }
             };
             Ok(std::process::Output {
@@ -235,6 +236,30 @@ mod tests {
             parse_cli_provider_ids(stdout),
             vec!["anthropic".to_string(), "openai".to_string()]
         );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn spawn_failure_names_the_models_invocation() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let cases = [
+            ("kilo", &["models"][..], "models"),
+            ("opencode", &["models", "anthropic"][..], "models anthropic"),
+            ("codex", &["debug", "models"][..], "debug models"),
+        ];
+        for (name, args, shown) in cases {
+            let bin = dir.path().join(name);
+            std::fs::write(&bin, []).unwrap();
+            let mut perms = std::fs::metadata(&bin).unwrap().permissions();
+            perms.set_mode(0o755);
+            std::fs::set_permissions(&bin, perms).unwrap();
+            let err = capture_cli(bin.to_str().unwrap(), args, Duration::from_secs(2))
+                .await
+                .expect_err(name);
+            let prefix = format!("Couldn't start `{} {shown}`: ", bin.display());
+            assert!(err.starts_with(&prefix), "{name}: {err}");
+        }
     }
 
     #[tokio::test]
