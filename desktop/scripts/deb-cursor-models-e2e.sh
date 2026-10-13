@@ -59,6 +59,7 @@ apt-get update
 apt-get install -y --no-install-recommends \
   ca-certificates \
   curl \
+  procps \
   python3 \
   python3-cryptography \
   zsh \
@@ -154,11 +155,69 @@ stdio_file="${hung_home}/.agent-models-stdio"
 sandbox_note="desktop argv (no --no-sandbox)"
 app_pid=""
 
+# The Electron binary, not a `--type=` helper and not coppice-server.
+hung_electron_pid() {
+  local pid args
+  for pid in $(ps -u hung -o pid= 2>/dev/null || true); do
+    args=$(tr '\0' ' ' <"/proc/${pid}/cmdline" 2>/dev/null || true)
+    case "${args}" in
+      /opt/Coppice/coppice\ --type=*) continue ;;
+      /opt/Coppice/coppice | /opt/Coppice/coppice\ *)
+        printf '%s\n' "${pid}"
+        return 0
+        ;;
+    esac
+  done
+  return 1
+}
+
+hung_running() {
+  pgrep -u hung -x coppice >/dev/null 2>&1 \
+    || pgrep -u hung -x coppice-server >/dev/null 2>&1 \
+    || pgrep -u hung -x postgres >/dev/null 2>&1
+}
+
 stop_app() {
-  if [[ -n "${app_pid}" ]]; then
-    kill -TERM "-${app_pid}" 2>/dev/null || kill -TERM "${app_pid}" 2>/dev/null || true
-    wait "${app_pid}" 2>/dev/null || true
-    app_pid=""
+  local i electron_pid
+  if [[ -z "${app_pid}" ]]; then
+    return 0
+  fi
+  # Signal Electron itself and leave Xvfb up. A group SIGTERM kills the
+  # display at the same time; Ozone then aborts with "Failed to shutdown"
+  # before before-quit can stop the detached coppice-server. That server
+  # keeps the profile, and the next launch cannot create SingletonLock.
+  electron_pid=$(hung_electron_pid || true)
+  if [[ -n "${electron_pid}" ]]; then
+    kill -TERM "${electron_pid}" 2>/dev/null || true
+  else
+    kill -TERM "${app_pid}" 2>/dev/null || true
+  fi
+  for i in $(seq 1 25); do
+    if ! kill -0 "${app_pid}" 2>/dev/null && ! hung_running; then
+      break
+    fi
+    sleep 1
+  done
+  kill -TERM "-${app_pid}" 2>/dev/null || true
+  pkill -TERM -u hung -x coppice-server 2>/dev/null || true
+  pkill -TERM -u hung -x postgres 2>/dev/null || true
+  for i in $(seq 1 10); do
+    if ! kill -0 "${app_pid}" 2>/dev/null && ! hung_running; then
+      break
+    fi
+    sleep 1
+  done
+  kill -KILL "-${app_pid}" 2>/dev/null || true
+  pkill -KILL -u hung -x coppice 2>/dev/null || true
+  pkill -KILL -u hung -x coppice-server 2>/dev/null || true
+  pkill -KILL -u hung -x postgres 2>/dev/null || true
+  wait "${app_pid}" 2>/dev/null || true
+  app_pid=""
+  if [[ -d "${hung_home}/.config/Coppice" ]]; then
+    chown -R hung:hung "${hung_home}/.config/Coppice" || true
+    rm -f "${hung_home}/.config/Coppice/SingletonLock" \
+      "${hung_home}/.config/Coppice/SingletonCookie" \
+      "${hung_home}/.config/Coppice/SingletonSocket"
   fi
 }
 trap stop_app EXIT
@@ -198,6 +257,10 @@ dump_failure() {
   tail -n 80 "${app_log}" >&2 || true
   echo "----- server log -----" >&2
   tail -n 120 "${server_log}" >&2 || true
+  echo "----- processes -----" >&2
+  ps -u hung -o pid,user,args >&2 || true
+  echo "----- profile -----" >&2
+  ls -ld "${hung_home}/.config" "${hung_home}/.config/Coppice" >&2 || true
 }
 
 assert_installed_version() {
@@ -561,6 +624,9 @@ PY
 echo "fresh profile"
 stop_app
 rm -rf "${hung_home}/.config/Coppice" "${hung_home}/.config/coppice"
+# The first launch had this directory. Electron cannot create SingletonLock
+# when the profile dir is missing or not writable by hung.
+install -d -o hung -g hung "${hung_home}/.config/Coppice"
 relaunch
 
 expected_config=$(mktemp)
