@@ -260,7 +260,13 @@ fn capture_from_process() -> HostEnv {
     let process_home = std::env::var_os("HOME")
         .map(PathBuf::from)
         .unwrap_or_default();
-    let captured = shell_program().and_then(|shell| capture_shell(&shell, SHELL_TIMEOUT));
+    let captured = match shell_program() {
+        Some(shell) => capture_shell(&shell, SHELL_TIMEOUT),
+        None => {
+            warn_shell_fallback("no SHELL");
+            None
+        }
+    };
     assemble(captured, &process_home, &process_path)
 }
 
@@ -327,8 +333,26 @@ fn upsert_var(vars: &mut Vec<(OsString, OsString)>, key: &str, value: &OsStr) {
 }
 
 /// `$SHELL -ilc` prints a marker, then `env -0`, then the marker.
-/// Timeout or a missing shell returns `None` so the caller uses the fallback.
+/// Timeout, a missing shell, or unusable output returns `None` so the caller
+/// uses the process environment. Each fallback logs its reason.
 fn capture_shell(shell: &Path, timeout: Duration) -> Option<Vec<(OsString, OsString)>> {
+    match capture_shell_result(shell, timeout) {
+        Ok(vars) => Some(vars),
+        Err(reason) => {
+            warn_shell_fallback(&reason);
+            None
+        }
+    }
+}
+
+fn warn_shell_fallback(reason: &str) {
+    tracing::warn!(reason, "login shell capture fell back");
+}
+
+fn capture_shell_result(
+    shell: &Path,
+    timeout: Duration,
+) -> Result<Vec<(OsString, OsString)>, String> {
     let script = format!("printf '%s' '{MARKER}'; env -0; printf '%s' '{MARKER}'");
     let mut cmd = std::process::Command::new(shell);
     cmd.arg("-ilc").arg(script);
@@ -338,7 +362,7 @@ fn capture_shell(shell: &Path, timeout: Duration) -> Option<Vec<(OsString, OsStr
     // A new session, not only a process group. Interactive zsh puts `sleep` in
     // its own group, and that child keeps the stdout pipe open after the shell dies.
     detach_session(&mut cmd);
-    let mut child = cmd.spawn().ok()?;
+    let mut child = cmd.spawn().map_err(|err| format!("spawn: {err}"))?;
     // Read while the shell runs. A full pipe otherwise blocks `env -0` until
     // the timeout, which looks like a hung login shell.
     let stdout = child.stdout.take();
@@ -359,23 +383,27 @@ fn capture_shell(shell: &Path, timeout: Duration) -> Option<Vec<(OsString, OsStr
                 let _ = child.kill();
                 let _ = wait_briefly(&mut child, Duration::from_millis(500));
                 let _ = join_briefly(reader, Duration::from_millis(500));
-                return None;
+                return Err("timeout".to_string());
             }
             Ok(None) => std::thread::sleep(Duration::from_millis(50)),
-            Err(_) => {
+            Err(err) => {
                 kill_session(child.id());
                 let _ = child.kill();
                 let _ = wait_briefly(&mut child, Duration::from_millis(500));
                 let _ = join_briefly(reader, Duration::from_millis(500));
-                return None;
+                return Err(format!("wait: {err}"));
             }
         }
     };
     let bytes = reader.join().unwrap_or_default();
-    if !status.is_some_and(|status| status.success()) {
-        return None;
+    if !status.as_ref().is_some_and(|status| status.success()) {
+        let code = status.as_ref().and_then(|status| status.code());
+        return Err(match code {
+            Some(code) => format!("exit code {code}"),
+            None => "exit code".to_string(),
+        });
     }
-    parse_env_blob(&bytes)
+    parse_env_blob(&bytes).map_err(str::to_string)
 }
 
 fn detach_session(cmd: &mut std::process::Command) {
@@ -477,11 +505,16 @@ fn wait_briefly(child: &mut std::process::Child, grace: Duration) -> Result<Exit
     }
 }
 
-fn parse_env_blob(bytes: &[u8]) -> Option<Vec<(OsString, OsString)>> {
+fn parse_env_blob(bytes: &[u8]) -> Result<Vec<(OsString, OsString)>, &'static str> {
     let marker = MARKER.as_bytes();
-    let start = find_bytes(bytes, marker)?;
+    let Some(start) = find_bytes(bytes, marker) else {
+        return Err("missing marker");
+    };
     let from = start + marker.len();
-    let end = find_bytes(&bytes[from..], marker)? + from;
+    let Some(rel_end) = find_bytes(&bytes[from..], marker) else {
+        return Err("missing marker");
+    };
+    let end = rel_end + from;
     let body = &bytes[from..end];
     let mut vars = Vec::new();
     for entry in body.split(|byte| *byte == 0) {
@@ -499,9 +532,9 @@ fn parse_env_blob(bytes: &[u8]) -> Option<Vec<(OsString, OsString)>> {
         vars.push((key, value));
     }
     if vars.is_empty() {
-        None
+        Err("empty env")
     } else {
-        Some(vars)
+        Ok(vars)
     }
 }
 
@@ -667,7 +700,7 @@ mod tests {
     #[test]
     fn parses_env_between_markers_and_ignores_a_banner() {
         let raw = b"welcome\n__COPPICE_ENV__PATH=/bin\0HOME=/tmp\0FOO=a=b\0__COPPICE_ENV__trailing";
-        let vars = parse_env_blob(raw).unwrap();
+        let vars = parse_env_blob(raw).expect("env");
         assert_eq!(var_of(&vars, "PATH").unwrap(), "/bin");
         assert_eq!(var_of(&vars, "HOME").unwrap(), "/tmp");
         assert_eq!(var_of(&vars, "FOO").unwrap(), "a=b");
@@ -675,7 +708,14 @@ mod tests {
 
     #[test]
     fn missing_markers_are_not_an_environment() {
-        assert!(parse_env_blob(b"no markers here").is_none());
+        assert_eq!(
+            parse_env_blob(b"no markers here").expect_err("missing"),
+            "missing marker"
+        );
+        assert_eq!(
+            parse_env_blob(b"__COPPICE_ENV____COPPICE_ENV__").expect_err("empty"),
+            "empty env"
+        );
     }
 
     #[test]
@@ -754,9 +794,65 @@ fi"#
         let home = tempfile::tempdir().unwrap();
         let shell = home.path().join("slow");
         script(&shell, "sleep 30\n");
-        let started = Instant::now();
-        let captured = capture_shell(&shell, Duration::from_millis(200));
+        let (captured, log) = warnings_during(|| {
+            let started = Instant::now();
+            let captured = capture_shell(&shell, Duration::from_millis(200));
+            assert!(started.elapsed() < Duration::from_secs(5));
+            captured
+        });
         assert!(captured.is_none());
-        assert!(started.elapsed() < Duration::from_secs(5));
+        assert!(log.contains("timeout"), "{log}");
+    }
+
+    fn warnings_during<T>(f: impl FnOnce() -> T) -> (T, String) {
+        let buf = std::sync::Arc::new(std::sync::Mutex::new(Vec::<u8>::new()));
+        let writer = std::sync::Arc::clone(&buf);
+        let subscriber = tracing_subscriber::fmt()
+            .with_max_level(tracing::Level::WARN)
+            .with_ansi(false)
+            .without_time()
+            .with_writer(move || LogWriter(std::sync::Arc::clone(&writer)))
+            .finish();
+        let value = tracing::subscriber::with_default(subscriber, f);
+        let text = String::from_utf8(buf.lock().unwrap().clone()).unwrap();
+        (value, text)
+    }
+
+    struct LogWriter(std::sync::Arc<std::sync::Mutex<Vec<u8>>>);
+
+    impl std::io::Write for LogWriter {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(buf);
+            Ok(buf.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn shell_fallbacks_warn_with_the_reason() {
+        let home = tempfile::tempdir().unwrap();
+        let exit = home.path().join("exit");
+        script(&exit, "exit 3");
+        let (_, exit_log) = warnings_during(|| capture_shell(&exit, Duration::from_secs(2)));
+        assert!(exit_log.contains("exit code"), "{exit_log}");
+
+        let banner = home.path().join("banner");
+        script(&banner, "echo hello");
+        let (captured, marker_log) =
+            warnings_during(|| capture_shell(&banner, Duration::from_secs(2)));
+        assert!(captured.is_none());
+        assert!(marker_log.contains("missing marker"), "{marker_log}");
+
+        let empty = home.path().join("empty");
+        script(&empty, "printf '%s' '__COPPICE_ENV____COPPICE_ENV__'");
+        let (_, empty_log) = warnings_during(|| capture_shell(&empty, Duration::from_secs(2)));
+        assert!(empty_log.contains("empty env"), "{empty_log}");
+
+        let missing = home.path().join("not-a-shell");
+        let (_, spawn_log) = warnings_during(|| capture_shell(&missing, Duration::from_secs(2)));
+        assert!(spawn_log.contains("spawn"), "{spawn_log}");
     }
 }

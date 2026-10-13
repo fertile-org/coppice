@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiFetch } from '../../lib/api';
 import {
@@ -132,17 +133,17 @@ function invalidateIfConnectorTurnedOn(
   void queryClient.invalidateQueries({ queryKey: TOOL_CONNECTORS_QUERY_KEY });
 }
 
+async function fetchModelProviders(connectorId: string): Promise<ModelProviderOption[]> {
+  const res = await apiFetch(`/api/connectors/${connectorId}/model-providers`);
+  const data = (await res.json()) as { items: ModelProviderOption[] };
+  return data.items;
+}
+
 export function useModelProviders(connectorId: string | undefined) {
   return useQuery({
     queryKey: ['model-providers', connectorId],
     enabled: !!connectorId && connectorId !== 'mock',
-    queryFn: async () => {
-      const res = await apiFetch(
-        `/api/connectors/${connectorId}/model-providers`,
-      );
-      const data = (await res.json()) as { items: ModelProviderOption[] };
-      return data.items;
-    },
+    queryFn: () => fetchModelProviders(connectorId!),
   });
 }
 
@@ -170,7 +171,10 @@ async function fetchProviderModels(
 ): Promise<ModelOption[]> {
   try {
     const res = await apiFetch(connectorModelsPath(connectorId, providerId, refresh));
-    const data = (await res.json()) as { items: ModelOption[] };
+    const data = (await res.json()) as { items?: ModelOption[] };
+    if (!Array.isArray(data.items) || data.items.length === 0) {
+      throw new ModelsRequestError('empty model list', null);
+    }
     return data.items;
   } catch (err) {
     throw modelsRequestError(err);
@@ -203,25 +207,48 @@ export function useConnectorModels(connectorId: string | undefined) {
     provider,
     models: queries[index]?.data ?? [],
   }));
+  const [refreshing, setRefreshing] = useState(false);
 
-  const refresh = () => {
+  const refresh = async () => {
     if (!connectorId || connectorId === 'mock') return;
-    void Promise.all(
-      providerIds.map((providerId) =>
-        queryClient.fetchQuery({
-          queryKey: modelsQueryKey(connectorId, providerId),
-          queryFn: () => fetchProviderModels(connectorId, providerId, true),
+    setRefreshing(true);
+    try {
+      let ids = providerIds;
+      if (ids.length === 0) {
+        const next = await queryClient.fetchQuery({
+          queryKey: ['model-providers', connectorId],
+          queryFn: () => fetchModelProviders(connectorId),
           staleTime: MODELS_REFRESH_STALE_TIME,
-        }),
-      ),
-    );
+        });
+        ids = next.map((provider) => provider.id);
+      }
+      await Promise.all(
+        ids.map((providerId) =>
+          queryClient.fetchQuery({
+            queryKey: modelsQueryKey(connectorId, providerId),
+            queryFn: () => fetchProviderModels(connectorId, providerId, true),
+            staleTime: MODELS_REFRESH_STALE_TIME,
+          }),
+        ),
+      );
+    } catch {
+      // The query cache keeps the failure so the form can show it.
+    } finally {
+      setRefreshing(false);
+    }
   };
 
+  const providersEmpty =
+    !!connectorId &&
+    connectorId !== 'mock' &&
+    providers.isSuccess &&
+    providerIds.length === 0;
   const isLoading =
     (!!connectorId && connectorId !== 'mock' && providers.isLoading) ||
     queries.some((query) => query.isLoading);
-  const isFetching = queries.some((query) => query.isFetching);
-  const isError = providers.isError || queries.some((query) => query.isError);
+  const isFetching = refreshing || queries.some((query) => query.isFetching);
+  const isError =
+    providersEmpty || providers.isError || queries.some((query) => query.isError);
   const detail =
     queries
       .map((query) => query.error)

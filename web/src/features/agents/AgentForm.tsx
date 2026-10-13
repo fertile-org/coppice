@@ -487,8 +487,11 @@ export function AgentForm({
             </label>
             <button
               type="button"
-              onClick={() => refreshModels()}
+              onClick={() => {
+                void refreshModels();
+              }}
               disabled={modelsLoading || modelsFetching}
+              aria-busy={modelsLoading || modelsFetching || undefined}
               className="font-body text-xs font-medium text-moss-700 underline-offset-2 hover:underline disabled:opacity-60"
             >
               Refresh models

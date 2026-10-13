@@ -362,12 +362,15 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn non_empty_config_replaces_builtin_model_providers() {
+    async fn cursor_config_without_cursor_still_offers_cursor() {
         let mut config = AppConfig::load_defaults().expect("config");
         config.agent.connectors.cursor.enabled = Some(true);
         config.agent.connectors.cursor.model_providers = vec!["other".into()];
         let registry = ConnectorRegistry::from_config(&config, runs());
-        assert_eq!(providers_of(&registry, "cursor").await, vec!["other"]);
+        assert_eq!(
+            providers_of(&registry, "cursor").await,
+            vec!["other".to_string(), "cursor".to_string()]
+        );
     }
 
     #[tokio::test]

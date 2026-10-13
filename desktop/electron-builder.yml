@@ -66,6 +66,7 @@ deb:
     - libatspi2.0-0
     - libuuid1
     - libsecret-1-0
+    - libasound2
     - git
   afterInstall: build/linux/after-install.sh
   afterRemove: build/linux/after-remove.sh
