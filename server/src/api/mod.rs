@@ -24,6 +24,7 @@ mod ws;
 
 use crate::middleware::{csrf, host_guard, request_log, session};
 use crate::AppState;
+use axum::http::StatusCode;
 use axum::{middleware, Router};
 use std::sync::Arc;
 
@@ -69,6 +70,10 @@ pub fn router(state: Arc<AppState>) -> Router {
         .merge(public)
         .merge(protected)
         .merge(ws)
+        // Before the layers. Axum only wraps routes that already exist, and
+        // the desktop shell forwards unknown /api paths back into this
+        // fallback so the request log still sees the 404.
+        .fallback(StatusCode::NOT_FOUND)
         .layer(middleware::from_fn_with_state(
             state.clone(),
             host_guard::desktop_host_guard,
