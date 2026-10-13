@@ -367,6 +367,46 @@ mod tests {
     }
 
     #[test]
+    fn kilo_catalog_id_is_the_model_flag() {
+        let provider = KiloCodeProvider::new(KiloCodeProviderConfig::default());
+        let input = AgentRunInput {
+            agent_id: "a".into(),
+            agent_key: "a".into(),
+            agent_role: "Backend Engineer".into(),
+            job_type: "work_on_ticket".into(),
+            ticket_id: None,
+            ticket_status: None,
+            context_profile: crate::domain::context_profile::ContextProfile::Full,
+            context_path: "/tmp/.agent/context.md".into(),
+            run_id: None,
+            chat_session_id: None,
+            artifacts_dir: None,
+            stream: None,
+            cancel_rx: None,
+            model_provider: Some("anthropic".into()),
+            model: Some("anthropic/claude-sonnet-4-20250514".into()),
+            session_created_tx: None,
+            resume_context: None,
+            resume_session_id: None,
+            read_only_tools: false,
+            mcp: None,
+        };
+        assert_eq!(
+            provider.model_arg(&input).as_deref(),
+            Some("anthropic/claude-sonnet-4-20250514")
+        );
+        let tilde = AgentRunInput {
+            model_provider: Some("~openai".into()),
+            model: Some("~openai/gpt-4o".into()),
+            ..input
+        };
+        assert_eq!(
+            provider.model_arg(&tilde).as_deref(),
+            Some("~openai/gpt-4o")
+        );
+    }
+
+    #[test]
     fn model_arg_passes_through_qualified_model() {
         let provider = KiloCodeProvider::new(KiloCodeProviderConfig::default());
         let input = AgentRunInput {

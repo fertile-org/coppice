@@ -1,5 +1,10 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiFetch } from '../../lib/api';
+import {
+  connectorModelsPath,
+  ModelsRequestError,
+  modelsRequestError,
+} from './modelList';
 import type { CreateAgentInput, UpdateAgentInput } from '../../lib/schemas/agent';
 import { connectorListSchema, type Connector } from '../../lib/schemas/connector';
 import { TOOL_CONNECTORS_QUERY_KEY } from '../tools/useConnectorDiagnostics';
@@ -146,14 +151,80 @@ export function useModels(
     queryKey: ['models', connectorId, modelProviderId],
     enabled:
       !!connectorId && !!modelProviderId && connectorId !== 'mock',
-    queryFn: async () => {
-      const res = await apiFetch(
-        `/api/connectors/${connectorId}/model-providers/${modelProviderId}/models`,
-      );
-      const data = (await res.json()) as { items: ModelOption[] };
-      return data.items;
-    },
+    queryFn: () => fetchProviderModels(connectorId!, modelProviderId!, false),
   });
+}
+
+export interface ModelGroup {
+  provider: string;
+  models: ModelOption[];
+}
+
+async function fetchProviderModels(
+  connectorId: string,
+  providerId: string,
+  refresh: boolean,
+): Promise<ModelOption[]> {
+  try {
+    const res = await apiFetch(connectorModelsPath(connectorId, providerId, refresh));
+    const data = (await res.json()) as { items: ModelOption[] };
+    return data.items;
+  } catch (err) {
+    throw modelsRequestError(err);
+  }
+}
+
+function modelsQueryKey(connectorId: string, providerId: string) {
+  return ['models', connectorId, providerId] as const;
+}
+
+/**
+ * Models for every provider of the connector, in provider order.
+ * Cursor's provider id is `cursor`, so the request is
+ * `/api/connectors/cursor/model-providers/cursor/models`.
+ */
+export function useConnectorModels(connectorId: string | undefined) {
+  const queryClient = useQueryClient();
+  const providers = useModelProviders(connectorId);
+  const providerIds = (providers.data ?? []).map((provider) => provider.id);
+  const enabled = !!connectorId && connectorId !== 'mock' && providers.isSuccess;
+  const queries = useQueries({
+    queries: providerIds.map((providerId) => ({
+      queryKey: modelsQueryKey(connectorId ?? '', providerId),
+      enabled,
+      queryFn: () => fetchProviderModels(connectorId!, providerId, false),
+    })),
+  });
+
+  const groups: ModelGroup[] = providerIds.map((provider, index) => ({
+    provider,
+    models: queries[index]?.data ?? [],
+  }));
+
+  const refresh = () => {
+    if (!connectorId || connectorId === 'mock') return;
+    void Promise.all(
+      providerIds.map((providerId) =>
+        queryClient.fetchQuery({
+          queryKey: modelsQueryKey(connectorId, providerId),
+          queryFn: () => fetchProviderModels(connectorId, providerId, true),
+        }),
+      ),
+    );
+  };
+
+  const isLoading =
+    (!!connectorId && connectorId !== 'mock' && providers.isLoading) ||
+    queries.some((query) => query.isLoading);
+  const isFetching = queries.some((query) => query.isFetching);
+  const isError = providers.isError || queries.some((query) => query.isError);
+  const detail =
+    queries
+      .map((query) => query.error)
+      .find((error): error is ModelsRequestError => error instanceof ModelsRequestError)?.detail ??
+    null;
+
+  return { groups, isLoading, isFetching, isError, detail, refresh };
 }
 
 export function useCreateAgent() {

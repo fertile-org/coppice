@@ -10,6 +10,37 @@ pub use crate::host_env::MODEL_LIST_TIMEOUT;
 
 const CLI_LIST_CACHE: Duration = Duration::from_secs(30);
 
+/// Failure from a connector CLI model list. `detail` is the first stderr line
+/// (or a short spawn/timeout line) for the agent form.
+#[derive(Debug)]
+pub struct ModelListError {
+    pub message: String,
+    pub detail: Option<String>,
+}
+
+impl std::fmt::Display for ModelListError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.message)
+    }
+}
+
+impl std::error::Error for ModelListError {}
+
+pub fn model_list_err(message: impl Into<String>, detail: Option<String>) -> anyhow::Error {
+    anyhow::Error::new(ModelListError {
+        message: message.into(),
+        detail,
+    })
+}
+
+pub fn model_list_detail(err: &anyhow::Error) -> Option<String> {
+    err.chain().find_map(|cause| {
+        cause
+            .downcast_ref::<ModelListError>()
+            .and_then(|model_err| model_err.detail.clone())
+    })
+}
+
 /// Config override when non-empty; otherwise `builtin`.
 pub fn effective_model_providers(configured: &[String], builtin: &[&str]) -> Vec<String> {
     let configured: Vec<String> = configured
@@ -94,7 +125,8 @@ pub async fn capture_cli(
                         .stderr_line
                         .unwrap_or_else(|| "unknown error".to_string());
                     tracing::warn!(command, %err, "failed to start cli");
-                    return Err(format!("Couldn't start `{command}`: {err}"));
+                    let invocation = format!("`{command} {}`", args.join(" "));
+                    return Err(format!("Couldn't start {invocation}: {err}"));
                 }
             };
             Ok(std::process::Output {
@@ -204,6 +236,30 @@ mod tests {
             parse_cli_provider_ids(stdout),
             vec!["anthropic".to_string(), "openai".to_string()]
         );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn spawn_failure_names_the_models_invocation() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let cases = [
+            ("kilo", &["models"][..], "models"),
+            ("opencode", &["models", "anthropic"][..], "models anthropic"),
+            ("codex", &["debug", "models"][..], "debug models"),
+        ];
+        for (name, args, shown) in cases {
+            let bin = dir.path().join(name);
+            std::fs::write(&bin, []).unwrap();
+            let mut perms = std::fs::metadata(&bin).unwrap().permissions();
+            perms.set_mode(0o755);
+            std::fs::set_permissions(&bin, perms).unwrap();
+            let err = capture_cli(bin.to_str().unwrap(), args, Duration::from_secs(2))
+                .await
+                .expect_err(name);
+            let prefix = format!("Couldn't start `{} {shown}`: ", bin.display());
+            assert!(err.starts_with(&prefix), "{name}: {err}");
+        }
     }
 
     #[tokio::test]

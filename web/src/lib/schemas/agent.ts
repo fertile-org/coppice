@@ -20,8 +20,8 @@ export const updateAgentSchema = z.object({
   responsibilities: z.array(z.string()).optional(),
   systemPrompt: z.string().optional(),
   connector: z.string().optional(),
-  modelProvider: z.string().optional(),
-  model: z.string().optional(),
+  modelProvider: z.string().nullable().optional(),
+  model: z.string().nullable().optional(),
   enabled: z.boolean().optional(),
 });
 

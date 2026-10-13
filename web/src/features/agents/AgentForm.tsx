@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { Link } from 'react-router-dom';
-import { Combobox } from '../../components/ui/combobox';
+import { Combobox, type ComboboxOption } from '../../components/ui/combobox';
 import {
   connectorDefaultModelLabel,
   INSTALL_GUIDE_URL,
@@ -14,7 +14,14 @@ import type {
   AgentPreset,
   ConnectorOption,
 } from './useAgents';
-import { useModelProviders, useModels } from './useAgents';
+import { useConnectorModels, type ModelGroup } from './useAgents';
+import {
+  decodeModelValue,
+  encodeModelValue,
+  CURSOR_MODELS_SIGN_IN,
+  modelsFailureExtra,
+  modelsUnavailableMessage,
+} from './modelList';
 import { AGENT_COPY } from './copy';
 import { isAssignable } from '../plugins/assignable';
 import { PLUGIN_COPY } from '../plugins/copy';
@@ -79,6 +86,49 @@ export function presetToFormValues(
     enabled: true,
     pluginIds: [],
   };
+}
+
+/** `agent login` in the Cursor sign-in line is inline code, not backtick characters. */
+function cursorSignInLine(line: string) {
+  const parts = line.split('`');
+  return parts.map((part, index) =>
+    index % 2 === 1 ? <code key={index}>{part}</code> : part,
+  );
+}
+
+function modelPickerOptions({
+  defaultLabel,
+  groups,
+  showGroups,
+  modelProvider,
+  model,
+}: {
+  defaultLabel: string;
+  groups: ModelGroup[];
+  showGroups: boolean;
+  modelProvider: string;
+  model: string;
+}): ComboboxOption[] {
+  const options: ComboboxOption[] = [{ value: '', label: defaultLabel }];
+  for (const group of groups) {
+    for (const entry of group.models) {
+      if (!entry.id) continue;
+      options.push({
+        value: encodeModelValue(group.provider, entry.id),
+        label: entry.name || entry.id,
+        group: showGroups ? group.provider : undefined,
+      });
+    }
+  }
+  const saved = model ? encodeModelValue(modelProvider, model) : '';
+  if (saved && !options.some((option) => option.value === saved)) {
+    options.push({
+      value: saved,
+      label: model,
+      group: showGroups && modelProvider ? modelProvider : undefined,
+    });
+  }
+  return options;
 }
 
 function connectorOptionLabel(option: ConnectorOption): string {
@@ -160,20 +210,23 @@ export function AgentForm({
   const [localError, setLocalError] = useState<string | null>(null);
   const pluginsRef = useRef<HTMLFieldSetElement>(null);
   const showModelFields = values.connector !== 'mock';
-  const { data: modelProviderOptions = [], isLoading: modelProvidersLoading } =
-    useModelProviders(showModelFields ? values.connector : undefined);
-  const showProviderField = modelProviderOptions.length > 1;
-  const soleProviderId =
-    modelProviderOptions.length === 1 ? modelProviderOptions[0].id : undefined;
-  const modelsProviderId = showProviderField ? values.modelProvider : soleProviderId;
-  const { data: modelOptions = [], isLoading: modelsLoading } = useModels(
-    showModelFields ? values.connector : undefined,
-    showModelFields ? modelsProviderId || undefined : undefined,
+  const {
+    groups: modelGroups,
+    isLoading: modelsLoading,
+    isFetching: modelsFetching,
+    isError: modelsError,
+    detail: modelsErrorDetail,
+    refresh: refreshModels,
+  } = useConnectorModels(showModelFields ? values.connector : undefined);
+  const groupsWithModels = modelGroups.filter((group) =>
+    group.models.some((model) => model.id),
   );
+  const showModelGroups = groupsWithModels.length > 1;
   const selectedConnector = connectorOptions.find((option) => option.id === values.connector);
-  const defaultModelLabel = connectorDefaultModelLabel(
-    selectedConnector?.displayName ?? selectedConnector?.id ?? values.connector,
-  );
+  const connectorName =
+    selectedConnector?.displayName ?? selectedConnector?.id ?? values.connector;
+  const defaultModelLabel = connectorDefaultModelLabel(connectorName);
+  const modelsFailureLine = modelsFailureExtra(values.connector, modelsErrorDetail);
   const { data: plugins, isLoading: pluginsLoading } = usePlugins();
   const assignablePlugins = (plugins ?? []).filter(isAssignable);
   const assignableIds = new Set(assignablePlugins.map((p) => p.id));
@@ -202,25 +255,17 @@ export function AgentForm({
     onChange({ ...values, connector, modelProvider: '', model: '' });
   }
 
-  function handleModelProviderChange(modelProvider: string) {
-    onChange({ ...values, modelProvider, model: '' });
-  }
-
-  function handleModelChange(model: string) {
-    if (!model) {
-      onChange({
-        ...values,
-        model: '',
-        modelProvider: showProviderField ? values.modelProvider : '',
-      });
+  function handleModelChange(encoded: string) {
+    if (!encoded) {
+      onChange({ ...values, model: '', modelProvider: '' });
       return;
     }
+    const picked = decodeModelValue(encoded);
+    if (!picked) return;
     onChange({
       ...values,
-      model,
-      modelProvider: showProviderField
-        ? values.modelProvider
-        : (soleProviderId ?? values.modelProvider),
+      model: picked.model,
+      modelProvider: picked.provider,
     });
   }
 
@@ -429,56 +474,57 @@ export function AgentForm({
       </div>
 
       {showModelFields && (
-        <>
-          {showProviderField && (
-            <div>
-              <label
-                htmlFor="agent-model-provider"
-                className="mb-1 block font-body text-sm font-medium text-bark-800"
-              >
-                Model provider
-              </label>
-              <Combobox
-                id="agent-model-provider"
-                value={values.modelProvider}
-                onValueChange={handleModelProviderChange}
-                disabled={modelProvidersLoading}
-                placeholder={modelProvidersLoading ? 'Loading…' : 'Select model provider'}
-                searchPlaceholder="Search providers…"
-                clearable
-                options={modelProviderOptions.map((p) => ({ value: p.id, label: p.id }))}
-              />
-            </div>
-          )}
-
-          <div>
+        <div>
+          <div className="mb-1 flex items-baseline justify-between gap-3">
             <label
               htmlFor="agent-model"
-              className="mb-1 block font-body text-sm font-medium text-bark-800"
+              className="font-body text-sm font-medium text-bark-800"
             >
               Model
             </label>
-            <Combobox
-              id="agent-model"
-              value={values.model}
-              onValueChange={handleModelChange}
-              disabled={Boolean(modelsProviderId) && modelsLoading}
-              placeholder={modelsLoading ? 'Loading…' : defaultModelLabel}
-              searchPlaceholder="Search models…"
-              options={[
-                { value: '', label: defaultModelLabel },
-                ...modelOptions
-                  .filter((model) => model.id)
-                  .map((model) => ({ value: model.id, label: model.name })),
-                ...(values.model &&
-                values.model !== '' &&
-                !modelOptions.some((model) => model.id === values.model)
-                  ? [{ value: values.model, label: values.model }]
-                  : []),
-              ]}
-            />
+            <button
+              type="button"
+              onClick={() => refreshModels()}
+              disabled={modelsLoading || modelsFetching}
+              className="font-body text-xs font-medium text-moss-700 underline-offset-2 hover:underline disabled:opacity-60"
+            >
+              Refresh models
+            </button>
           </div>
-        </>
+          <Combobox
+            id="agent-model"
+            value={
+              values.model
+                ? encodeModelValue(values.modelProvider, values.model)
+                : ''
+            }
+            onValueChange={handleModelChange}
+            disabled={modelsLoading}
+            placeholder={modelsLoading ? 'Loading…' : defaultModelLabel}
+            searchPlaceholder="Search models…"
+            options={modelPickerOptions({
+              defaultLabel: defaultModelLabel,
+              groups: groupsWithModels,
+              showGroups: showModelGroups,
+              modelProvider: values.modelProvider,
+              model: values.model,
+            })}
+          />
+          {modelsError && !modelsLoading && groupsWithModels.length === 0 && (
+            <div className="mt-2">
+              <p className="font-body text-xs text-text-secondary">
+                {modelsUnavailableMessage(connectorName)}
+              </p>
+              {modelsFailureLine && (
+                <p className="mt-1 font-body text-xs text-text-muted">
+                  {modelsFailureLine === CURSOR_MODELS_SIGN_IN
+                    ? cursorSignInLine(modelsFailureLine)
+                    : modelsFailureLine}
+                </p>
+              )}
+            </div>
+          )}
+        </div>
       )}
 
       {mode === 'edit' && (

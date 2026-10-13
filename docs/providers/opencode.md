@@ -61,7 +61,7 @@ coppice connector doctor opencode
 
 1. Open **Agents** and create or edit an agent.
 2. Set connector to **opencode**.
-3. Leave the model on OpenCode's default, or pick a provider and model. With no `model_providers` override, Coppice reads providers from `opencode models` (a few seconds; if that fails, only the default is offered).
+3. Leave the model on OpenCode's default, or pick a model from the list (providers are headings). Refresh models loads that list again.
 4. Assign the agent to a ticket and start a run. Watch the **Live Session** in the ticket drawer.
 
 OpenCode has no separate `--provider` flag. Coppice sends `model_provider/model` to OpenCode. Common IDs after `opencode auth list`:

@@ -6,8 +6,7 @@
 //! connector checks, and run retry call [`invalidate`] so a newly installed
 //! CLI is visible without restarting.
 //!
-//! Model lists use [`MODEL_LIST_TIMEOUT`] and [`resolve_model_program`], the
-//! same names the agent model picker resolves a CLI with.
+//! Model lists use [`MODEL_LIST_TIMEOUT`] and [`HostEnv::run_with_timeout`].
 
 use std::ffi::{OsStr, OsString};
 use std::io::Read;
@@ -139,14 +138,6 @@ pub fn invalidate() {
     let mut slot = lock();
     slot.generation = slot.generation.wrapping_add(1);
     slot.env = None;
-}
-
-/// Absolute path when `command` is on `path`, otherwise the name unchanged.
-///
-/// The agent model picker calls this the same way `resolve_model_program` did:
-/// pass the connector's configured command and the host PATH.
-pub fn resolve_model_program(command: &str, path: &OsStr) -> PathBuf {
-    resolve_in(path, command).unwrap_or_else(|_| PathBuf::from(command))
 }
 
 /// First non-empty line of CLI output, trimmed to about 200 characters.
@@ -693,9 +684,8 @@ mod tests {
         let bin = dir.path().join("bin");
         std::fs::create_dir(&bin).unwrap();
         script(&bin.join("tool"), "exit 0");
-        let path = OsString::from(bin.as_os_str());
         let env = HostEnv {
-            path: path.clone(),
+            path: OsString::from(bin.as_os_str()),
             home: dir.path().to_path_buf(),
             vars: Vec::new(),
             read_at: Instant::now(),
@@ -708,11 +698,6 @@ mod tests {
             missing.to_string(),
             format!("`absent` wasn't found. Looked in: {}", bin.display())
         );
-        assert_eq!(
-            resolve_model_program("absent", &path),
-            PathBuf::from("absent")
-        );
-        assert_eq!(resolve_model_program("tool", &path), bin.join("tool"));
     }
 
     #[test]

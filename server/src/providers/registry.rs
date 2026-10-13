@@ -98,9 +98,7 @@ fn build_claude_code(config: &AppConfig, _deps: &FactoryDeps) -> Option<BuiltCon
     }
     Some(BuiltConnector {
         provider: Arc::new(ClaudeCodeProvider::new(cfg.clone())),
-        models: Arc::new(ClaudeCodeModels {
-            model_providers: cfg.model_providers.clone(),
-        }),
+        models: Arc::new(ClaudeCodeModels::new(cfg.model_providers.clone())),
     })
 }
 
@@ -111,10 +109,10 @@ fn build_codex(config: &AppConfig, _deps: &FactoryDeps) -> Option<BuiltConnector
     }
     Some(BuiltConnector {
         provider: Arc::new(CodexProvider::new(cfg.clone())),
-        models: Arc::new(CodexModels {
-            command: cfg.command.clone(),
-            model_providers: cfg.model_providers.clone(),
-        }),
+        models: Arc::new(CodexModels::new(
+            cfg.command.clone(),
+            cfg.model_providers.clone(),
+        )),
     })
 }
 
@@ -139,10 +137,10 @@ fn build_cursor(config: &AppConfig, _deps: &FactoryDeps) -> Option<BuiltConnecto
     }
     Some(BuiltConnector {
         provider: Arc::new(CursorProvider::new(cfg.clone())),
-        models: Arc::new(CursorModels {
-            command: cfg.command.clone(),
-            model_providers: cfg.model_providers.clone(),
-        }),
+        models: Arc::new(CursorModels::new(
+            cfg.command.clone(),
+            cfg.model_providers.clone(),
+        )),
     })
 }
 
@@ -352,7 +350,7 @@ mod tests {
         assert_eq!(providers_of(&registry, "cursor").await, vec!["cursor"]);
         assert_eq!(
             providers_of(&registry, "claude-code").await,
-            vec!["sonnet", "opus", "haiku"]
+            vec!["sonnet", "opus", "haiku", "fable"]
         );
         assert_eq!(providers_of(&registry, "codex").await, vec!["openai"]);
         assert!(providers_of(&registry, "kilo-code").await.is_empty());

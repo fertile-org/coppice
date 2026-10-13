@@ -321,8 +321,8 @@ function EditAgentDialog({
         responsibilities: listFromLines(formValues.responsibilities),
         systemPrompt: formValues.systemPrompt,
         connector: formValues.connector,
-        modelProvider: formValues.modelProvider || undefined,
-        model: formValues.model || undefined,
+        modelProvider: formValues.modelProvider.trim() ? formValues.modelProvider.trim() : null,
+        model: formValues.model.trim() ? formValues.model.trim() : null,
         enabled: formValues.enabled,
       });
       if (agent.connectorTurnedOn?.displayName) {

@@ -48,11 +48,15 @@ pub async fn list_opencode_models(
     if !output.status.success() {
         let stdout = String::from_utf8_lossy(&output.stdout);
         let stderr = String::from_utf8_lossy(&output.stderr);
-        anyhow::bail!(crate::providers::cli_catalog::models_failure_message(
+        let message = crate::providers::cli_catalog::models_failure_message(
             &format!("`{command} models`"),
             output.status,
             &stdout,
             &stderr,
+        );
+        return Err(crate::providers::cli_catalog::model_list_err(
+            message,
+            crate::host_env::first_text_line(&stderr),
         ));
     }
     let stdout = String::from_utf8_lossy(&output.stdout);
