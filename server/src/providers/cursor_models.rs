@@ -138,11 +138,10 @@ pub async fn list_cursor_models_in(
             %stderr,
             "no cursor models parsed"
         );
-        let stdout_line = crate::host_env::first_text_line(&stdout).unwrap_or_default();
-        let stderr_line = crate::host_env::first_text_line(&stderr).unwrap_or_default();
-        anyhow::bail!(
-            "no cursor models parsed from `{command} models` (stdout={stdout_line} stderr={stderr_line}). Full output is in the log."
-        );
+        let line = crate::host_env::first_text_line(&stderr)
+            .or_else(|| crate::host_env::first_text_line(&stdout))
+            .unwrap_or_else(|| "no output".to_string());
+        anyhow::bail!("`{command} models` listed no models: {line}. Full output is in the log.");
     }
     Ok(models)
 }
@@ -181,5 +180,54 @@ gpt-5.5-high - GPT-5.5 1M High
         assert_eq!(models.len(), 1);
         assert_eq!(models[0].id, "auto");
         assert_eq!(models[0].name, "Auto (default)");
+    }
+
+    fn executable(path: &std::path::Path, body: &str) {
+        std::fs::write(path, format!("#!/bin/sh\n{body}\n")).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut perms = std::fs::metadata(path).unwrap().permissions();
+            perms.set_mode(0o755);
+            std::fs::set_permissions(path, perms).unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn empty_model_list_uses_the_first_line_and_points_at_the_log() {
+        let dir = tempfile::tempdir().unwrap();
+        let stderr_only = dir.path().join("from-stderr");
+        executable(&stderr_only, "echo 'not a table' >&2");
+        let err = list_cursor_models_in(
+            &stderr_only.display().to_string(),
+            std::ffi::OsStr::new("/usr/bin:/bin"),
+            dir.path(),
+        )
+        .await
+        .expect_err("stderr-only output");
+        assert_eq!(
+            err.to_string(),
+            format!(
+                "`{} models` listed no models: not a table. Full output is in the log.",
+                stderr_only.display()
+            )
+        );
+
+        let stdout_only = dir.path().join("from-stdout");
+        executable(&stdout_only, "echo 'from stdout'");
+        let err = list_cursor_models_in(
+            &stdout_only.display().to_string(),
+            std::ffi::OsStr::new("/usr/bin:/bin"),
+            dir.path(),
+        )
+        .await
+        .expect_err("stdout-only output");
+        assert_eq!(
+            err.to_string(),
+            format!(
+                "`{} models` listed no models: from stdout. Full output is in the log.",
+                stdout_only.display()
+            )
+        );
     }
 }

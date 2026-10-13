@@ -75,7 +75,7 @@ pub struct CliExit {
 
 #[derive(Debug, thiserror::Error)]
 pub enum CliError {
-    #[error("failed to spawn CLI: {0}")]
+    #[error("Couldn't start the CLI: {0}")]
     Spawn(std::io::Error),
     #[error("CLI run cancelled")]
     Cancelled,

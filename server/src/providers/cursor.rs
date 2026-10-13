@@ -116,7 +116,7 @@ impl AgentProvider for CursorProvider {
                 return Err(ProviderError::Io(std::io::Error::new(
                     err.kind(),
                     format!(
-                        "failed to spawn `{command}` (cwd {}): {err}",
+                        "Couldn't start `{command}` in {}: {err}",
                         worktree.display()
                     ),
                 )));

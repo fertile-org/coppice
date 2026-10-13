@@ -167,7 +167,7 @@ impl OpenCodeRunServers {
                         self.command
                     )
                 } else {
-                    anyhow::anyhow!("failed to spawn `{} serve`: {err}", self.command)
+                    anyhow::anyhow!("Couldn't start `{} serve`: {err}", self.command)
                 }
             })
     }

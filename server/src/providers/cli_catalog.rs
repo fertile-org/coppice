@@ -178,23 +178,22 @@ mod tests {
     fn models_failure_uses_the_first_line_and_points_at_the_log() {
         let long = "x".repeat(250);
         let message = models_failure_message(
-            "`agent` models`",
+            "`agent models`",
             "exit status: 1",
             &format!("ignored stdout\n{long}"),
             "\nnot signed in\nmore detail\n",
         );
         assert_eq!(
             message,
-            "`agent` models` failed (exit status: 1): not signed in. Full output is in the log."
+            "`agent models` failed (exit status: 1): not signed in. Full output is in the log."
         );
-        let from_stdout =
-            models_failure_message("`agent` models`", "exit status: 2", &long, "  \n");
+        let from_stdout = models_failure_message("`agent models`", "exit status: 2", &long, "  \n");
         let line = crate::host_env::first_text_line(&long).unwrap();
         assert_eq!(line.chars().count(), 201);
         assert!(line.ends_with('…'));
         assert_eq!(
             from_stdout,
-            format!("`agent` models` failed (exit status: 2): {line}. Full output is in the log.")
+            format!("`agent models` failed (exit status: 2): {line}. Full output is in the log.")
         );
     }
 

@@ -385,7 +385,13 @@ async fn run_cli_spawn_failure() {
     inv.program = "/nonexistent/coppice-fake-cli-missing".to_string();
     let mut handler = Recorder::default();
     let result = run_cli(inv, &mut handler, io()).await;
-    assert!(matches!(result, Err(CliError::Spawn(_))), "{result:?}");
+    match result {
+        Err(err @ CliError::Spawn(_)) => {
+            let text = err.to_string();
+            assert!(text.starts_with("Couldn't start the CLI: "), "{text}");
+        }
+        other => panic!("expected spawn failure, got {other:?}"),
+    }
 }
 
 #[tokio::test]
