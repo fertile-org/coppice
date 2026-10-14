@@ -4,7 +4,11 @@ import { parseApiErrorMessage } from '../../lib/api';
 import type { ConnectorStatus } from '../../lib/schemas/connectorDiagnostics';
 import { RefreshModelsButton } from '../agents/RefreshModelsButton';
 import { useConnectorModels, type ModelOption } from '../agents/useAgents';
-import { MODELS_NOT_COVERED_HEADING, modelsListFailed } from '../runs/reportedModel';
+import {
+  MODELS_NOT_COVERED_HEADING,
+  MODELS_NOT_COVERED_HINT,
+  modelsListFailed,
+} from '../runs/reportedModel';
 import {
   useReplaceUncoveredModels,
   useUncoveredModels,
@@ -68,6 +72,7 @@ export function UncoveredModels({ connector }: { connector: ConnectorStatus }) {
         )}
         {MODELS_NOT_COVERED_HEADING}
       </button>
+      <p className="mt-1 font-body text-xs text-text-muted">{MODELS_NOT_COVERED_HINT}</p>
       {catalog.isError && connector.cli.found && (
         <p className="mt-1 flex flex-wrap items-baseline gap-x-2 font-body text-xs text-text-muted">
           <span>{modelsListFailed(connector.displayName)}</span>

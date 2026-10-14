@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   MODEL_NOT_REPORTED,
+  MODELS_NOT_COVERED_HEADING,
+  MODELS_NOT_COVERED_HINT,
   modelsListFailed,
   NOT_COVERED_BY_PLAN,
   reportedModelLabel,
@@ -14,12 +16,25 @@ describe('reportedModelLabel', () => {
     );
   });
 
-  it('uses the not-covered placeholder', () => {
-    expect(NOT_COVERED_BY_PLAN).toBe('Not covered by your plan');
+  it('keeps the not-reported line', () => {
+    expect(MODEL_NOT_REPORTED).toBe('Model not reported');
+  });
+
+  it('uses the outside-plan line on a run', () => {
+    expect(NOT_COVERED_BY_PLAN).toBe('Billed outside your plan');
+  });
+
+  it('keeps the uncovered-models heading and explains the run line', () => {
+    expect(MODELS_NOT_COVERED_HEADING).toBe('Models not covered by my plan');
+    expect(MODELS_NOT_COVERED_HINT).toBe(
+      'Runs on these models show Billed outside your plan.',
+    );
   });
 
   it('names the connector when its model list fails', () => {
-    expect(modelsListFailed('Cursor')).toBe("Couldn't get Cursor's models.");
+    expect(modelsListFailed('Cursor')).toBe(
+      "Couldn't get Cursor's models. Click Refresh models to try again.",
+    );
   });
 
   it('does not invent a model when the CLI reported none', () => {

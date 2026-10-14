@@ -471,6 +471,9 @@ describe('ConnectorsTab', () => {
     const cursorCard = await card('cursor');
     const disclosure = cursorCard.getByRole('button', { name: 'Models not covered by my plan' });
     expect(disclosure).toHaveAttribute('aria-expanded', 'false');
+    expect(
+      cursorCard.getByText('Runs on these models show Billed outside your plan.'),
+    ).toBeVisible();
     expect(cursorCard.queryByRole('checkbox')).not.toBeInTheDocument();
 
     fireEvent.click(disclosure);
@@ -559,7 +562,11 @@ describe('ConnectorsTab', () => {
     renderTab();
 
     const cursorCard = await card('cursor');
-    expect(await cursorCard.findByText("Couldn't get Cursor's models.")).toBeVisible();
+    expect(
+      await cursorCard.findByText(
+        "Couldn't get Cursor's models. Click Refresh models to try again.",
+      ),
+    ).toBeVisible();
     fireEvent.click(cursorCard.getByRole('button', { name: 'Refresh models' }));
 
     await waitFor(() =>
