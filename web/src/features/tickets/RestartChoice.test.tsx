@@ -30,9 +30,9 @@ describe('RestartChoice', () => {
         return new Response(
           JSON.stringify({
             pending: true,
-            resumeLabel: '{{restart.resume}}',
-            otherLabel: '{{restart.discard}}',
-            confirm: '{{restart.discard_confirm:4}}',
+            resumeLabel: 'Keep the changes',
+            otherLabel: 'Start over',
+            confirm: "Delete the changes to 4 files and start over? You can't undo this.",
           }),
           { status: 200 },
         );
@@ -42,15 +42,19 @@ describe('RestartChoice', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     renderChoice();
-    expect(await screen.findByRole('button', { name: '{{restart.resume}}' })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: '{{restart.discard}}' }));
+    expect(await screen.findByRole('button', { name: 'Keep the changes' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Start over' }));
     const dialog = await screen.findByRole('dialog');
-    expect(within(dialog).getByText('{{restart.discard_confirm:4}}')).toBeInTheDocument();
+    expect(
+      within(dialog).getByText(
+        "Delete the changes to 4 files and start over? You can't undo this.",
+      ),
+    ).toBeInTheDocument();
     expect(fetchMock).not.toHaveBeenCalledWith(
       expect.stringContaining('/restart/discard'),
       expect.anything(),
     );
-    fireEvent.click(within(dialog).getByRole('button', { name: '{{restart.discard}}' }));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Start over' }));
     await vi.waitFor(() =>
       expect(fetchMock).toHaveBeenCalledWith(
         `/api/tickets/${ticketId}/restart/discard`,
@@ -69,8 +73,8 @@ describe('RestartChoice', () => {
       return new Response(
         JSON.stringify({
           pending: true,
-          resumeLabel: '{{restart.resume}}',
-          otherLabel: '{{restart.cancel}}',
+          resumeLabel: 'Keep the changes',
+          otherLabel: 'Cancel',
           confirm: null,
         }),
         { status: 200 },
@@ -79,14 +83,14 @@ describe('RestartChoice', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     renderChoice();
-    fireEvent.click(await screen.findByRole('button', { name: '{{restart.resume}}' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Keep the changes' }));
     await vi.waitFor(() =>
       expect(fetchMock).toHaveBeenCalledWith(
         `/api/tickets/${ticketId}/restart/resume`,
         expect.objectContaining({ method: 'POST' }),
       ),
     );
-    fireEvent.click(screen.getByRole('button', { name: '{{restart.cancel}}' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
     await vi.waitFor(() =>
       expect(fetchMock).toHaveBeenCalledWith(
         `/api/tickets/${ticketId}/restart/cancel`,

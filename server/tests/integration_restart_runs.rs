@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 
 use axum::http::StatusCode;
 use coppice_server::copy::restart::{
-    comment_for, ACTION_CANCEL, ACTION_DISCARD, ACTION_RESUME, COMMENT_NONE,
+    comment_for, confirm_discard, ACTION_CANCEL, ACTION_DISCARD, ACTION_RESUME, COMMENT_NONE,
 };
 use coppice_server::serve::sweep_orphaned_runs;
 use coppice_server::services::comment_service::CommentService;
@@ -275,7 +275,7 @@ async fn sweep_keeps_the_worktree_and_waits_for_a_choice() {
     assert_eq!(restart["changedFiles"], 2);
     assert_eq!(restart["resumeLabel"], ACTION_RESUME);
     assert_eq!(restart["otherLabel"], ACTION_DISCARD);
-    assert_eq!(restart["confirm"], "{{restart.discard_confirm:2}}");
+    assert_eq!(restart["confirm"], confirm_discard(2));
 
     let active = common::json_body(
         app.clone()

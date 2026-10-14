@@ -11,7 +11,7 @@ use crate::domain::comment::{AuthorType, CommentIntent};
 use crate::events::bus::AppEvent;
 use crate::services::comment_service::CommentService;
 use crate::copy::plan::PLAN_REQUIRED;
-use crate::copy::restart::{ERROR_GIT, ERROR_NONE, ERROR_USE_CANCEL, ERROR_USE_DISCARD};
+use crate::copy::restart::{git_error, ERROR_NONE, ERROR_USE_CANCEL, ERROR_USE_DISCARD};
 use crate::services::planning_service::PlanningService;
 use crate::services::workflow_service::{WorkflowService, DONE_REQUIRES_ACCEPT};
 use crate::domain::agent_health::AgentHealthStatus;
@@ -1017,7 +1017,7 @@ fn map_restart_error(err: RestartError) -> RestartApiError {
         }
         RestartError::Git(detail) => {
             tracing::warn!(error = %detail, "restart worktree action failed");
-            RestartApiError::Message(StatusCode::INTERNAL_SERVER_ERROR, ERROR_GIT.to_string())
+            RestartApiError::Message(StatusCode::INTERNAL_SERVER_ERROR, git_error(&detail))
         }
         RestartError::Run(RunError::ActiveRunExists)
         | RestartError::Ticket(TicketError::ActiveRunExists)
