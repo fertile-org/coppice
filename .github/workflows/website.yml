@@ -54,6 +54,9 @@ jobs:
       - name: Check internal links
         working-directory: website
         run: npm run check:links
+      - name: Check download page
+        working-directory: website
+        run: npm run check:download && npm run check:download-page
       - name: Directory indexes for GitHub Pages
         if: github.event_name == 'workflow_dispatch' && github.event.inputs.deploy == 'true'
         working-directory: website

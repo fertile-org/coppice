@@ -183,6 +183,18 @@ fn result_submit_properties() -> Value {
         "requiredCapabilities": strings("Capabilities needed (blocked)."),
         "requiredSecrets": strings("Secret keys needed (blocked)."),
         "progressNote": { "type": "string", "description": "What remains to do (continued)." },
+        "howItWorks": {
+            "type": "string",
+            "description": "Optional. Short note for Human Review: how the change works. Omit to report no brief.",
+        },
+        "changesFromPlan": {
+            "type": "string",
+            "description": "Optional. Short note for Human Review: what changed from the approved plan. Omit or leave empty when nothing changed.",
+        },
+        "lookHereFirst": {
+            "type": "string",
+            "description": "Optional. Short note for Human Review: where to look first. Omit to report no brief.",
+        },
     })
 }
 
@@ -296,6 +308,16 @@ mod tests {
         }
         assert!(!CoreTool::CommentPost.definition().read_only);
         assert!(CoreTool::TicketGet.definition().read_only);
+    }
+
+    #[test]
+    fn result_submit_brief_fields_are_optional() {
+        let schema = CoreTool::ResultSubmit.definition().input_schema;
+        let required = schema["required"].as_array().expect("required");
+        for name in ["howItWorks", "changesFromPlan", "lookHereFirst"] {
+            assert!(schema["properties"][name].is_object(), "{name}");
+            assert!(!required.iter().any(|item| item == name), "{name}");
+        }
     }
 
     #[test]

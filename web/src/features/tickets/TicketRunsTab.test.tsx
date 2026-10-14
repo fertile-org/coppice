@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router-dom';
 import { TicketRunsTab } from './TicketRunsTab';
 import type { AgentRun } from '../../lib/schemas/agentRun';
+import { MODEL_NOT_REPORTED, NOT_COVERED_BY_PLAN } from '../runs/reportedModel';
 
 const failedRun: AgentRun = {
   id: '00000000-0000-0000-0000-000000000001',
@@ -59,6 +60,8 @@ describe('TicketRunsTab', () => {
     renderRuns();
     expect(screen.getByText(/path missing/)).toBeTruthy();
     expect(screen.queryByRole('button', { name: /show error/i })).toBeNull();
+    expect(screen.getByText(MODEL_NOT_REPORTED)).toBeVisible();
+    expect(screen.queryByText(NOT_COVERED_BY_PLAN)).toBeNull();
   });
 
   it('details have tabs', () => {

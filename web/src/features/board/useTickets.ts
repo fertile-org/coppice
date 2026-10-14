@@ -19,6 +19,13 @@ export interface HumanReview {
   runIds: string[];
 }
 
+export interface ReviewerBrief {
+  howItWorks?: string | null;
+  changesFromPlan?: string | null;
+  lookHereFirst?: string | null;
+  commitSha?: string | null;
+}
+
 export interface ApprovedPlan {
   commentId: string;
   markdown: string;
@@ -53,6 +60,7 @@ export interface Ticket {
   approvedPlan?: ApprovedPlan | null;
   archivedAt?: string | null;
   humanReview?: HumanReview | null;
+  reviewerBrief?: ReviewerBrief | null;
 }
 
 /** Prefix for all ticket-list queries for a board (any includeArchived variant). */

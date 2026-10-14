@@ -290,6 +290,7 @@ async fn drive_plan_run(
     let context_path = cwd.join(".agent").join("context.md");
 
     let stream = state.run_streams.register(run.id);
+    crate::services::run_service::spawn_reported_model_writer(pool.clone(), run.id, stream.clone());
     let cancel_rx = stream.cancelled_rx();
     run_svc
         .mark_running(run.id)
@@ -340,6 +341,7 @@ async fn drive_plan_run(
             mcp: Some(grant.access.clone()),
         })
         .await;
+    crate::services::run_service::record_reported_model(pool, run.id, &stream).await;
     grant.revoke().await;
     let provider_result = prefer_submitted_result(pool, run.id, provider_result).await;
 

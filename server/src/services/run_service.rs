@@ -46,6 +46,10 @@ impl Default for StartRunOptions {
 pub struct AgentRunWithConnector {
     pub run: AgentRun,
     pub connector: Option<String>,
+    /// Exact model string from the CLI, when it reported one.
+    pub reported_model: Option<String>,
+    /// True when `reported_model` is on this connector's uncovered list.
+    pub billed_outside_plan: bool,
 }
 
 pub struct RunService<'a> {
@@ -291,6 +295,14 @@ impl<'a> RunService<'a> {
                 ar.worktree_path, ar.branch_name, ar.error_message, ar.session_id,
                 ar.context_profile, ar.trigger_comment_id,
                 ar.started_at, ar.ended_at, ar.created_at,
+                ar.reported_model,
+                EXISTS (
+                    SELECT 1
+                    FROM connector_uncovered_models u
+                    WHERE u.connector_id = a.connector
+                      AND ar.reported_model IS NOT NULL
+                      AND u.model_id = ar.reported_model
+                ) AS billed_outside_plan,
                 a.connector
             FROM agent_runs ar
             JOIN agents a ON a.id = ar.agent_id
@@ -307,6 +319,8 @@ impl<'a> RunService<'a> {
             .map(|row| AgentRunWithConnector {
                 run: row_to_run(row),
                 connector: row.get("connector"),
+                reported_model: row.get("reported_model"),
+                billed_outside_plan: row.get("billed_outside_plan"),
             })
             .collect())
     }
@@ -902,6 +916,54 @@ impl<'a> RunService<'a> {
         Ok(())
     }
 
+    /// Store the first model the CLI reported. A later or blank value does not
+    /// replace it, and this never copies the agent's saved model.
+    pub async fn set_reported_model(&self, run_id: Uuid, model: &str) -> Result<(), RunError> {
+        let model = model.trim();
+        if model.is_empty() {
+            return Ok(());
+        }
+        sqlx::query(
+            r#"
+            UPDATE agent_runs
+            SET reported_model = $2
+            WHERE id = $1
+              AND reported_model IS NULL
+            "#,
+        )
+        .bind(run_id)
+        .bind(model)
+        .execute(self.pool)
+        .await?;
+        Ok(())
+    }
+
+    /// Reported model and whether it is on the connector's uncovered list.
+    pub async fn model_display(&self, run_id: Uuid) -> Result<(Option<String>, bool), RunError> {
+        let row = sqlx::query(
+            r#"
+            SELECT ar.reported_model,
+                   EXISTS (
+                       SELECT 1
+                       FROM connector_uncovered_models u
+                       JOIN agents a ON a.id = ar.agent_id
+                       WHERE u.connector_id = a.connector
+                         AND ar.reported_model IS NOT NULL
+                         AND u.model_id = ar.reported_model
+                   ) AS billed_outside_plan
+            FROM agent_runs ar
+            WHERE ar.id = $1
+            "#,
+        )
+        .bind(run_id)
+        .fetch_optional(self.pool)
+        .await?;
+        let Some(row) = row else {
+            return Ok((None, false));
+        };
+        Ok((row.get("reported_model"), row.get("billed_outside_plan")))
+    }
+
     pub async fn set_session_id(&self, run_id: Uuid, session_id: &str) -> Result<(), RunError> {
         sqlx::query("UPDATE agent_runs SET session_id = $2 WHERE id = $1")
             .bind(run_id)
@@ -976,6 +1038,43 @@ impl<'a> RunService<'a> {
             Some(s) => Ok(run_status_from_str(&s) == Some(RunStatus::Cancelled)),
             None => Err(RunError::NotFound),
         }
+    }
+}
+
+/// Write the model as soon as the CLI reports it, so a running row can show it
+/// before the process exits. The first non-empty value wins.
+pub fn spawn_reported_model_writer(
+    pool: PgPool,
+    run_id: Uuid,
+    stream: std::sync::Arc<crate::sessions::run_registry::RunStreamHandle>,
+) {
+    tokio::spawn(async move {
+        let mut rx = stream.subscribe_reported_model();
+        loop {
+            let model = rx.borrow().clone();
+            if !model.is_empty() {
+                let _ = RunService::new(&pool)
+                    .set_reported_model(run_id, &model)
+                    .await;
+                break;
+            }
+            if rx.changed().await.is_err() {
+                break;
+            }
+        }
+    });
+}
+
+/// Persist whatever the stream has already captured. Safe to call more than once.
+pub async fn record_reported_model(
+    pool: &PgPool,
+    run_id: Uuid,
+    stream: &crate::sessions::run_registry::RunStreamHandle,
+) {
+    if let Some(model) = stream.reported_model() {
+        let _ = RunService::new(pool)
+            .set_reported_model(run_id, &model)
+            .await;
     }
 }
 
@@ -1301,6 +1400,57 @@ mod tests {
             .await
             .expect("ticket status");
         assert_eq!(status, "in_progress");
+    }
+
+    #[tokio::test]
+    async fn reported_model_is_kept_and_flagged_only_for_a_marked_model() {
+        let Some(pool) = test_pool().await else {
+            return;
+        };
+        let run_id = insert_run(&pool, RunStatus::Succeeded).await;
+        let ticket_id: Uuid = sqlx::query_scalar("SELECT ticket_id FROM agent_runs WHERE id = $1")
+            .bind(run_id)
+            .fetch_one(&pool)
+            .await
+            .expect("ticket");
+        sqlx::query("UPDATE agents SET connector = 'cursor' WHERE id = (SELECT agent_id FROM agent_runs WHERE id = $1)")
+            .bind(run_id)
+            .execute(&pool)
+            .await
+            .expect("point agent at cursor");
+
+        let svc = RunService::new(&pool);
+        svc.set_reported_model(run_id, "  ").await.expect("blank");
+        svc.set_reported_model(run_id, "composer-2.5")
+            .await
+            .expect("set");
+        svc.set_reported_model(run_id, "gpt-5")
+            .await
+            .expect("second does not replace");
+
+        let runs = svc.list_for_ticket(ticket_id).await.expect("list");
+        assert_eq!(runs.len(), 1);
+        assert_eq!(runs[0].reported_model.as_deref(), Some("composer-2.5"));
+        assert!(!runs[0].billed_outside_plan);
+        let (model, billed) = svc.model_display(run_id).await.expect("display");
+        assert_eq!(model.as_deref(), Some("composer-2.5"));
+        assert!(!billed);
+
+        crate::services::uncovered_model_service::UncoveredModelService::new(&pool)
+            .replace("cursor", &["composer-2.5".into(), "auto".into()])
+            .await
+            .expect("mark");
+        let runs = svc.list_for_ticket(ticket_id).await.expect("list");
+        assert!(runs[0].billed_outside_plan);
+        let (_, billed) = svc.model_display(run_id).await.expect("display");
+        assert!(billed);
+
+        crate::services::uncovered_model_service::UncoveredModelService::new(&pool)
+            .replace("cursor", &["auto".into()])
+            .await
+            .expect("unmark composer");
+        let runs = svc.list_for_ticket(ticket_id).await.expect("list");
+        assert!(!runs[0].billed_outside_plan);
     }
 }
 

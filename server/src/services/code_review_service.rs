@@ -139,6 +139,9 @@ pub struct DiffFileSummary {
     pub status: String,
     pub additions: u32,
     pub deletions: u32,
+    /// Set when Human Review has an approved plan and this path is not named in it.
+    #[serde(default)]
+    pub not_in_plan: bool,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -559,6 +562,7 @@ fn parse_diff_files(name_status: &str, numstat: &str) -> Vec<DiffFileSummary> {
             status: status.to_string(),
             additions,
             deletions,
+            not_in_plan: false,
         });
     }
     files

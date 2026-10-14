@@ -17,10 +17,12 @@ Coppice Beta ships as a desktop app. No Docker, no server, no Coppice account.
 There's no Windows app in this beta. On Windows 11, see [Windows 11 (through WSL)](#windows-11-through-wsl).
 
 ## Download
-- [macOS arm64 `.dmg`](#) — Coming with the beta release.
-- [Linux x64 `.deb`](#) — Coming with the beta release.
+- [macOS (Apple Silicon) `.dmg`](https://github.com/fertile-org/coppice/releases/latest/download/Coppice-mac-arm64.dmg)
+- [macOS (Intel) `.dmg`](https://github.com/fertile-org/coppice/releases/latest/download/Coppice-mac-x64.dmg)
+- [Linux (x64) `.deb`](https://github.com/fertile-org/coppice/releases/latest/download/Coppice-linux-amd64.deb)
+- [Linux (ARM64) `.deb`](https://github.com/fertile-org/coppice/releases/latest/download/Coppice-linux-arm64.deb)
 
-After the beta tag, assets will also appear on [GitHub Releases](https://github.com/fertile-org/coppice/releases).
+You can also get every build from [GitHub Releases](https://github.com/fertile-org/coppice/releases).
 
 ## Windows 11 (through WSL)
 The Linux x64 build should run on Windows 11 through WSL. We haven't tested this yet. If you try it, please [tell us how it went](https://github.com/fertile-org/coppice/issues).

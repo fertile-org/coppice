@@ -1,5 +1,5 @@
 use crate::api::agent_runs::{
-    runs_list_response, single_run_response, RunsListResponse, SingleRunResponse,
+    load_single_run_response, runs_list_response, RunsListResponse, SingleRunResponse,
 };
 use crate::api::auth::{pool_from_state, AuthUser};
 use crate::domain::substatus::{Substatus, SubstatusDisplay, TicketStatus};
@@ -160,6 +160,9 @@ pub(crate) struct TicketResponse {
     archived_at: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     human_review: Option<HumanReviewResponse>,
+    /// Present only when an implementation run reported a reviewer brief.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reviewer_brief: Option<crate::services::reviewer_brief::ReviewerBrief>,
 }
 
 #[derive(Serialize)]
@@ -274,6 +277,7 @@ pub(crate) fn ticket_to_response(item: TicketWithDisplay) -> TicketResponse {
                 run_ids: review.run_ids,
             }
         }),
+        reviewer_brief: None,
     }
 }
 
@@ -670,7 +674,11 @@ async fn get_ticket(
     let pool = pool_from_state(&state)?;
     let service = TicketService::new(pool);
     let ticket = service.get(ticket_id).await.map_err(map_error)?;
-    Ok(Json(with_approved_plan(pool, ticket).await.map_err(map_error)?))
+    Ok(Json(
+        with_approved_plan(&state, pool, ticket)
+            .await
+            .map_err(map_error)?,
+    ))
 }
 
 async fn archive_ticket(
@@ -811,7 +819,11 @@ async fn approve_plan(
         .get(ticket_id)
         .await
         .map_err(map_update_status_error)?;
-    Ok(Json(with_approved_plan(pool, ticket).await.map_err(map_update_status_error)?))
+    Ok(Json(
+        with_approved_plan(&state, pool, ticket)
+            .await
+            .map_err(map_update_status_error)?,
+    ))
 }
 
 async fn ask_for_plan_changes(
@@ -845,6 +857,7 @@ fn map_plan_error(err: crate::services::planning_service::PlanError) -> UpdateSt
 }
 
 async fn with_approved_plan(
+    state: &AppState,
     pool: &sqlx::PgPool,
     ticket: TicketWithDisplay,
 ) -> Result<TicketResponse, TicketError> {
@@ -857,13 +870,60 @@ async fn with_approved_plan(
                 TicketError::Validation(message)
             }
         })?;
+    let ticket_id = ticket.ticket.id;
+    let status = ticket.ticket.status;
     let mut response = ticket_to_response(ticket);
     response.approved_plan = plan.map(|plan| ApprovedPlanResponse {
         comment_id: plan.comment_id,
         markdown: plan.markdown,
         steps: plan.steps,
     });
+    response.reviewer_brief = reviewer_brief_for_ticket(state, pool, ticket_id, status).await?;
     Ok(response)
+}
+
+/// The stored brief, hidden in Human Review when it was written for a different
+/// commit than the one review is bound to.
+async fn reviewer_brief_for_ticket(
+    state: &AppState,
+    pool: &sqlx::PgPool,
+    ticket_id: Uuid,
+    status: TicketStatus,
+) -> Result<Option<crate::services::reviewer_brief::ReviewerBrief>, TicketError> {
+    let brief = crate::services::reviewer_brief::ReviewerBriefService::new(pool)
+        .get(ticket_id)
+        .await?;
+    if status != TicketStatus::WaitForFinalReview {
+        return Ok(brief);
+    }
+    let Some(brief) = brief else {
+        return Ok(None);
+    };
+    let reviewed = match ticket_git_service(state, pool)
+        .reviewed_head_sha(ticket_id)
+        .await
+    {
+        Ok(sha) => sha,
+        Err(crate::services::ticket_git_service::TicketGitError::Database(err)) => {
+            return Err(err.into());
+        }
+        Err(crate::services::ticket_git_service::TicketGitError::Ticket(err)) => return Err(err),
+        Err(err) => {
+            tracing::debug!(
+                error = %err,
+                "reviewer brief hidden; reviewed commit unavailable"
+            );
+            None
+        }
+    };
+    if crate::services::reviewer_brief::brief_matches_reviewed_commit(
+        &brief.commit_sha,
+        reviewed.as_deref(),
+    ) {
+        Ok(Some(brief))
+    } else {
+        Ok(None)
+    }
 }
 
 async fn assign_agent(
@@ -946,7 +1006,10 @@ async fn run_agent(
         .agent_connector_for_run(run.agent_id)
         .await
         .map_err(map_run_error_response)?;
-    Ok((StatusCode::CREATED, Json(single_run_response(run, connector))))
+    let response = load_single_run_response(&service, run, connector)
+        .await
+        .map_err(map_run_error_response)?;
+    Ok((StatusCode::CREATED, Json(response)))
 }
 
 #[derive(Serialize)]
@@ -1409,7 +1472,8 @@ async fn resolve_ticket_conflict(
         });
     }
 
-    let connector = RunService::new(pool)
+    let service = RunService::new(pool);
+    let connector = service
         .agent_connector_for_run(outcome.run.agent_id)
         .await
         .map_err(|err| match map_run_error_response(err) {
@@ -1418,7 +1482,15 @@ async fn resolve_ticket_conflict(
                 ResolveConflictApiError::Message(code, message)
             }
         })?;
-    Ok(Json(single_run_response(outcome.run, connector)))
+    let response = load_single_run_response(&service, outcome.run, connector)
+        .await
+        .map_err(|err| match map_run_error_response(err) {
+            RunAgentError::Status(code) => ResolveConflictApiError::Status(code),
+            RunAgentError::Message(code, message) => {
+                ResolveConflictApiError::Message(code, message)
+            }
+        })?;
+    Ok(Json(response))
 }
 
 async fn remove_ticket_worktree(
