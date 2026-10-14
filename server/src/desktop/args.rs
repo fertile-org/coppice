@@ -1,10 +1,11 @@
 use std::path::PathBuf;
 
-/// `coppice-server desktop --data-dir <D> --resources <R>`.
+/// `coppice-server desktop --data-dir <D> --resources <R> [--logs-dir <L>]`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DesktopArgs {
     pub data_dir: PathBuf,
     pub resources: PathBuf,
+    pub logs_dir: Option<PathBuf>,
 }
 
 /// `None` unless `args[1] == "desktop"`; both flags are required.
@@ -14,22 +15,24 @@ pub fn parse_desktop_args(args: &[String]) -> Result<Option<DesktopArgs>, String
     }
     let mut data_dir = None;
     let mut resources = None;
+    let mut logs_dir = None;
     let mut rest = args[2..].iter();
     while let Some(flag) = rest.next() {
-        let slot = match flag.as_str() {
-            "--data-dir" => &mut data_dir,
-            "--resources" => &mut resources,
-            other => return Err(format!("unknown desktop argument {other:?}")),
-        };
         let value = rest
             .next()
             .ok_or_else(|| format!("{flag} requires a path"))?;
-        *slot = Some(PathBuf::from(value));
+        match flag.as_str() {
+            "--data-dir" => data_dir = Some(PathBuf::from(value)),
+            "--resources" => resources = Some(PathBuf::from(value)),
+            "--logs-dir" => logs_dir = Some(PathBuf::from(value)),
+            other => return Err(format!("unknown desktop argument {other:?}")),
+        }
     }
     match (data_dir, resources) {
         (Some(data_dir), Some(resources)) => Ok(Some(DesktopArgs {
             data_dir,
             resources,
+            logs_dir,
         })),
         (None, _) => Err("desktop requires --data-dir <path>".into()),
         (_, None) => Err("desktop requires --resources <path>".into()),
@@ -61,8 +64,26 @@ mod tests {
             Ok(Some(DesktopArgs {
                 data_dir: PathBuf::from("/d"),
                 resources: PathBuf::from("/r"),
+                logs_dir: None,
             }))
         );
+    }
+
+    #[test]
+    fn logs_dir_is_optional_and_kept() {
+        let args = strings(&[
+            "x",
+            "desktop",
+            "--logs-dir",
+            "/var/log/Coppice",
+            "--resources",
+            "/r",
+            "--data-dir",
+            "/d",
+        ]);
+        let parsed = parse_desktop_args(&args).expect("parse").expect("desktop");
+        assert_eq!(parsed.logs_dir, Some(PathBuf::from("/var/log/Coppice")));
+        assert_eq!(parsed.data_dir, PathBuf::from("/d"));
     }
 
     #[test]

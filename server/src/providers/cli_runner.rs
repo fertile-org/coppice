@@ -1,5 +1,5 @@
 //! The subprocess loop shared by the streaming-JSON CLI connectors: spawn,
-//! mirror stderr to tracing, race cancel and deadline against stdout lines,
+//! record stdout and stderr, race cancel and deadline against stdout lines,
 //! forward the first session id, and report the exit status.
 
 use serde_json::Value;
@@ -26,6 +26,8 @@ pub struct CliInvocation {
     pub run_id: Option<String>,
     /// `<artifacts_dir>/runs/<run_id>/process-stops.log` receives stop lines.
     pub artifacts_dir: Option<String>,
+    /// Set by the worker that already knows the ticket.
+    pub ticket_id: Option<String>,
     /// When true, a terminal stdout event ends the run without waiting out a
     /// process that stays alive after the result. The flag comes from the
     /// connector's `run_contract`.
@@ -42,7 +44,7 @@ pub struct CliInvocation {
 pub const RESULT_EXIT_GRACE: Duration = Duration::from_secs(2);
 
 pub trait LineHandler: Send {
-    /// One parsed JSON stdout line (non-JSON lines are skipped by the runner).
+    /// One parsed JSON stdout line. Non-JSON lines are logged and skipped.
     /// The handler forwards console events, accumulates text, and says whether
     /// the stream reached its terminal event.
     fn on_json(&mut self, value: &Value) -> LineStep;
@@ -57,8 +59,6 @@ pub struct LineStep {
 pub struct RunIo {
     pub cancel_rx: Option<watch::Receiver<bool>>,
     pub session_created_tx: Option<watch::Sender<String>>,
-    /// Tracing target for mirrored stderr lines, e.g. `"cursor.stderr"`.
-    pub stderr_target: &'static str,
 }
 
 #[derive(Debug)]
@@ -117,6 +117,8 @@ pub async fn run_cli_with_stdin(
 ) -> Result<CliExit, CliError> {
     let host = crate::host_env::current();
     let program = resolve_cli_program(&host, &inv.program)?;
+    let secrets =
+        crate::logs::guard_for_child_env(inv.env.iter().map(|(k, v)| (k.as_str(), v.as_str())));
     let mut cmd = Command::new(&program);
     cmd.env("PATH", &host.path);
     if !host.home.as_os_str().is_empty() {
@@ -156,7 +158,15 @@ pub async fn run_cli_with_stdin(
     let stdout = tracked.take_stdout().expect("piped stdout");
     let stderr = tracked.take_stderr().expect("piped stderr");
     let stderr_tail = Arc::new(Mutex::new(Vec::new()));
-    let mut stderr_task = tokio::spawn(pump_stderr(stderr, io.stderr_target, stderr_tail.clone()));
+    let mut stderr_task = tokio::spawn(pump_stderr(
+        stderr,
+        secrets.clone(),
+        inv.run_id.clone(),
+        inv.ticket_id.clone(),
+        stderr_tail.clone(),
+    ));
+    // `secrets` stays alive for stdout lines read on this task. The stderr task
+    // holds a clone until that pipe is drained.
 
     let mut reader = BufReader::new(stdout).lines();
     let deadline = tokio::time::Instant::now() + inv.timeout;
@@ -196,6 +206,12 @@ pub async fn run_cli_with_stdin(
             line = reader.next_line() => {
                 match line {
                     Ok(Some(raw)) => {
+                        crate::logs::log_cli_line(
+                            inv.run_id.as_deref(),
+                            inv.ticket_id.as_deref(),
+                            "stdout",
+                            &raw,
+                        );
                         let Ok(value) = serde_json::from_str::<Value>(&raw) else {
                             continue;
                         };
@@ -358,22 +374,17 @@ pub fn log_launch(
     }
 }
 
-/// Mirrors stderr to tracing and keeps the first lines for error messages.
-/// Tracing targets must be compile-time constants, hence the dispatch.
+/// Records stderr and keeps the first lines for error messages.
 async fn pump_stderr(
     stderr: impl AsyncRead + Unpin,
-    target: &'static str,
+    _secrets: crate::logs::SecretGuard,
+    run_id: Option<String>,
+    ticket_id: Option<String>,
     tail: Arc<Mutex<Vec<String>>>,
 ) {
     let mut reader = BufReader::new(stderr).lines();
     while let Ok(Some(line)) = reader.next_line().await {
-        match target {
-            "claude_code.stderr" => tracing::debug!(target: "claude_code.stderr", "{line}"),
-            "codex.stderr" => tracing::debug!(target: "codex.stderr", "{line}"),
-            "cursor.stderr" => tracing::debug!(target: "cursor.stderr", "{line}"),
-            "kilo_code.stderr" => tracing::debug!(target: "kilo_code.stderr", "{line}"),
-            _ => tracing::debug!(target: "cli_runner.stderr", source = target, "{line}"),
-        }
+        crate::logs::log_cli_line(run_id.as_deref(), ticket_id.as_deref(), "stderr", &line);
         let mut lines = tail.lock().unwrap();
         if lines.len() < STDERR_TAIL_LINES {
             lines.push(line);
@@ -425,5 +436,106 @@ mod tests {
         let text = std::fs::read_to_string(log_dir.join("run.log")).expect("run.log");
         assert_eq!(text, "claude 2.1.292 · flags: -p --verbose\n");
         assert!(!text.contains("ANTHROPIC"));
+    }
+
+    #[test]
+    fn stdout_and_stderr_lines_are_stored_with_the_run_id() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        crate::logs::with_cli_logs(dir.path(), || {
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .expect("runtime");
+            runtime.block_on(async {
+                let mut handler = NopHandler;
+                let invocation = CliInvocation {
+                    program: "sh".into(),
+                    args: vec![
+                        "-c".into(),
+                        "printf '%s\\n' 'plain-line'; printf '%s\\n' '{\"ok\":true}'; printf '%s\\n' 'err-line' >&2"
+                            .into(),
+                    ],
+                    env: Vec::new(),
+                    cwd: std::env::temp_dir(),
+                    timeout: Duration::from_secs(10),
+                    run_id: Some("run-42".into()),
+                    artifacts_dir: None,
+                    ticket_id: Some("ticket-9".into()),
+                    result_before_exit: false,
+                    result_exit_grace: None,
+                };
+                run_cli(
+                    invocation,
+                    &mut handler,
+                    RunIo {
+                        cancel_rx: None,
+                        session_created_tx: None,
+                    },
+                )
+                .await
+                .expect("sh");
+            });
+        })
+        .expect("subscriber");
+
+        let lines = jsonl_values(dir.path());
+        let plain = find_line(&lines, "plain-line");
+        assert_eq!(plain["fields"]["source"], "cli");
+        assert_eq!(plain["fields"]["stream"], "stdout");
+        assert_eq!(plain["fields"]["run_id"], "run-42");
+        assert_eq!(plain["fields"]["ticket_id"], "ticket-9");
+        assert_eq!(plain["level"], "INFO");
+        let timestamp = plain["timestamp"].as_str().expect("timestamp");
+        assert!(
+            timestamp.contains('T') && timestamp.ends_with('Z'),
+            "{timestamp}"
+        );
+
+        let json_line = find_line(&lines, "{\"ok\":true}");
+        assert_eq!(json_line["fields"]["stream"], "stdout");
+        assert_eq!(json_line["fields"]["run_id"], "run-42");
+
+        let err = find_line(&lines, "err-line");
+        assert_eq!(err["fields"]["stream"], "stderr");
+        assert_eq!(err["fields"]["run_id"], "run-42");
+        assert_eq!(err["fields"]["ticket_id"], "ticket-9");
+        assert_eq!(
+            lines
+                .iter()
+                .filter(|line| line["fields"]["message"] == "err-line")
+                .count(),
+            1
+        );
+    }
+
+    struct NopHandler;
+
+    impl LineHandler for NopHandler {
+        fn on_json(&mut self, _value: &Value) -> LineStep {
+            LineStep::default()
+        }
+    }
+
+    fn jsonl_values(dir: &std::path::Path) -> Vec<Value> {
+        let mut lines = Vec::new();
+        for entry in std::fs::read_dir(dir).expect("read_dir") {
+            let path = entry.expect("entry").path();
+            let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+            if !(name.starts_with("coppice.") && name.ends_with(".jsonl")) {
+                continue;
+            }
+            let text = std::fs::read_to_string(&path).expect("jsonl");
+            for line in text.lines() {
+                lines.push(serde_json::from_str(line).expect("json"));
+            }
+        }
+        lines
+    }
+
+    fn find_line<'a>(lines: &'a [Value], message: &str) -> &'a Value {
+        lines
+            .iter()
+            .find(|line| line["fields"]["message"] == message)
+            .unwrap_or_else(|| panic!("missing {message} in {lines:?}"))
     }
 }

@@ -89,6 +89,7 @@ impl AgentProvider for CursorProvider {
             timeout: run_timeout,
             run_id: input.run_id.clone(),
             artifacts_dir: input.artifacts_dir.clone(),
+            ticket_id: input.ticket_id.clone(),
             result_before_exit: contract.result_before_exit,
             result_exit_grace: None,
         };
@@ -102,7 +103,6 @@ impl AgentProvider for CursorProvider {
         let io = RunIo {
             cancel_rx: input.cancel_rx,
             session_created_tx: input.session_created_tx,
-            stderr_target: "cursor.stderr",
         };
 
         let CliExit {

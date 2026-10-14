@@ -150,10 +150,12 @@ impl McpTransport for HttpTransport {
         spec: &ResolvedTransport,
         _cwd: &Path,
     ) -> Result<Box<dyn McpConnection>, ProxyError> {
+        let secrets_guard = crate::logs::SecretGuard::register(spec.secret_pairs());
         let ResolvedTransport::Http {
             url,
             headers,
             secrets,
+            ..
         } = spec
         else {
             return Err(ProxyError::Start(format!(
@@ -181,7 +183,13 @@ impl McpTransport for HttpTransport {
         let config =
             StreamableHttpClientTransportConfig::with_uri(url.as_str()).custom_headers(custom);
         let transport = StreamableHttpClientTransport::with_client(UrlFreeClient::new()?, config);
-        client::connect(transport, redactor, Redactor::for_output(secrets)).await
+        match client::connect(transport, redactor, Redactor::for_output(secrets)).await {
+            Ok(conn) => Ok(Box::new(super::hold::MaskedConnection {
+                inner: conn,
+                _secrets: secrets_guard,
+            })),
+            Err(err) => Err(err),
+        }
     }
 }
 
@@ -302,6 +310,7 @@ mod tests {
             url,
             headers,
             secrets,
+            ..
         } = resolve(&transport, &ctx).unwrap()
         else {
             panic!("expected http");

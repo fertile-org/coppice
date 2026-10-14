@@ -74,6 +74,7 @@ impl McpTransport for StdioTransport {
             args,
             env,
             secrets,
+            ..
         } = spec
         else {
             return Err(ProxyError::Start(format!(
@@ -81,6 +82,7 @@ impl McpTransport for StdioTransport {
                 spec.kind()
             )));
         };
+        let secrets_guard = crate::logs::SecretGuard::register(spec.secret_pairs());
         let redactor = std::iter::once(command)
             .chain(args)
             .chain(env.values())
@@ -112,10 +114,12 @@ impl McpTransport for StdioTransport {
         if let Some(stderr) = stderr {
             let redactor = redactor.clone();
             let stderr_line = std::sync::Arc::clone(&stderr_line);
+            let task_secrets = secrets_guard.clone();
             tokio::spawn(drain_stderr(
                 BufReader::new(stderr),
                 redactor,
                 move |line| {
+                    let _secrets = &task_secrets;
                     tracing::debug!(target: "coppice::plugin_mcp", %line, "mcp server stderr");
                     if let Ok(mut slot) = stderr_line.lock() {
                         if slot.is_none() && !line.trim().is_empty() {
@@ -127,7 +131,11 @@ impl McpTransport for StdioTransport {
         }
         let started = client::connect(process, redactor.clone(), Redactor::for_output(secrets));
         match tokio::time::timeout(HANDSHAKE_TIMEOUT, started).await {
-            Ok(result) => result.map_err(|err| annotate_start(err, &stderr_line, &redactor)),
+            Ok(Ok(conn)) => Ok(Box::new(super::hold::MaskedConnection {
+                inner: conn,
+                _secrets: secrets_guard,
+            })),
+            Ok(Err(err)) => Err(annotate_start(err, &stderr_line, &redactor)),
             Err(_) => Err(ProxyError::Start(redactor.apply(&format!(
                 "MCP server timed out after {}s{}",
                 HANDSHAKE_TIMEOUT.as_secs(),

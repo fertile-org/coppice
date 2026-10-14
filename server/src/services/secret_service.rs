@@ -83,17 +83,20 @@ impl<'a> SecretService<'a> {
     }
 
     pub async fn decrypt_by_id(&self, id: Uuid) -> Result<String, SecretError> {
-        let row = sqlx::query(
-            "SELECT ciphertext, nonce FROM secrets WHERE id = $1",
-        )
-        .bind(id)
-        .fetch_optional(self.pool)
-        .await?
-        .ok_or(SecretError::NotFound)?;
+        self.decrypt_named(id).await.map(|(_, value)| value)
+    }
 
+    pub async fn decrypt_named(&self, id: Uuid) -> Result<(String, String), SecretError> {
+        let row = sqlx::query("SELECT name, ciphertext, nonce FROM secrets WHERE id = $1")
+            .bind(id)
+            .fetch_optional(self.pool)
+            .await?
+            .ok_or(SecretError::NotFound)?;
+
+        let name: String = row.get("name");
         let ciphertext: Vec<u8> = row.get("ciphertext");
         let nonce: Vec<u8> = row.get("nonce");
-        Ok(self.store.decrypt(&ciphertext, &nonce)?)
+        Ok((name, self.store.decrypt(&ciphertext, &nonce)?))
     }
 
     pub async fn delete_by_id(&self, id: Uuid) -> Result<(), SecretError> {

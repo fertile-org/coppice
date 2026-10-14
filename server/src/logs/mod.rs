@@ -1,0 +1,383 @@
+//! Daily JSONL for agent CLI lines, and the write-time secret mask.
+
+mod mask;
+
+use std::io::{self, IsTerminal, Write};
+use std::path::Path;
+
+use tracing_subscriber::filter::FilterExt;
+use tracing_subscriber::fmt::time::UtcTime;
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
+use tracing_subscriber::Layer;
+
+pub use mask::SecretGuard;
+
+/// Tracing target for agent CLI lines. The file layer records this target only.
+const CLI_LOG_TARGET: &str = "coppice_server::cli";
+
+/// One info event for a CLI stdout or stderr line.
+/// `stream` is `stdout` or `stderr`. `run_id` and `ticket_id` are omitted when absent.
+pub fn log_cli_line(
+    run_id: Option<&str>,
+    ticket_id: Option<&str>,
+    stream: &'static str,
+    line: &str,
+) {
+    let run_id = run_id.filter(|id| !id.is_empty());
+    let ticket_id = ticket_id.filter(|id| !id.is_empty());
+    match (run_id, ticket_id) {
+        (Some(run_id), Some(ticket_id)) => {
+            tracing::info!(target: CLI_LOG_TARGET, source = "cli", stream, run_id, ticket_id, "{line}");
+        }
+        (Some(run_id), None) => {
+            tracing::info!(target: CLI_LOG_TARGET, source = "cli", stream, run_id, "{line}");
+        }
+        (None, Some(ticket_id)) => {
+            tracing::info!(target: CLI_LOG_TARGET, source = "cli", stream, ticket_id, "{line}");
+        }
+        (None, None) => {
+            tracing::info!(target: CLI_LOG_TARGET, source = "cli", stream, "{line}");
+        }
+    }
+}
+
+/// Read a piped CLI stream until EOF and record each line.
+pub async fn pump_lines(
+    reader: impl tokio::io::AsyncRead + Unpin,
+    run_id: Option<String>,
+    ticket_id: Option<String>,
+    stream: &'static str,
+) {
+    use tokio::io::{AsyncBufReadExt, BufReader};
+    let mut lines = BufReader::new(reader).lines();
+    while let Ok(Some(line)) = lines.next_line().await {
+        log_cli_line(run_id.as_deref(), ticket_id.as_deref(), stream, &line);
+    }
+}
+
+/// Secrets placed on a child that inherits the server environment:
+/// `COPPICE_MCP_TOKEN`, connector `install.auth_env` values passed in `env`,
+/// and those auth values when the child inherits them from this process.
+pub fn guard_for_child_env<I, K, V>(env: I) -> SecretGuard
+where
+    I: IntoIterator<Item = (K, V)>,
+    K: AsRef<str>,
+    V: AsRef<str>,
+{
+    let mut pairs = Vec::new();
+    for (key, value) in env {
+        let key = key.as_ref();
+        if is_forwarded_secret(key) {
+            pairs.push((key.to_string(), value.as_ref().to_string()));
+        }
+    }
+    for key in auth_env_keys() {
+        if pairs.iter().any(|(name, _)| name == key) {
+            continue;
+        }
+        if let Ok(value) = std::env::var(key) {
+            pairs.push((key.to_string(), value));
+        }
+    }
+    SecretGuard::register(pairs)
+}
+
+fn is_forwarded_secret(key: &str) -> bool {
+    key == "COPPICE_MCP_TOKEN" || auth_env_keys().contains(&key)
+}
+
+fn auth_env_keys() -> Vec<&'static str> {
+    let mut keys = Vec::new();
+    for connector in coppice_connectors::all() {
+        for key in connector.install.auth_env {
+            if !keys.contains(key) {
+                keys.push(*key);
+            }
+        }
+    }
+    keys
+}
+
+/// rmcp logs plugin-controlled content below warn, so it stays at warn unless
+/// the operator's `RUST_LOG` names it.
+fn log_directives(rust_log: Option<&str>) -> String {
+    let base = rust_log.filter(|s| !s.trim().is_empty()).unwrap_or("info");
+    if base.contains("rmcp") {
+        base.to_string()
+    } else {
+        format!("{base},rmcp=warn")
+    }
+}
+
+fn env_filter() -> tracing_subscriber::EnvFilter {
+    let rust_log = std::env::var(tracing_subscriber::EnvFilter::DEFAULT_ENV).ok();
+    let directives = log_directives(rust_log.as_deref());
+    tracing_subscriber::EnvFilter::try_new(&directives)
+        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new(log_directives(None)))
+}
+
+fn rolling(logs_dir: &Path) -> io::Result<tracing_appender::rolling::RollingFileAppender> {
+    std::fs::create_dir_all(logs_dir)?;
+    tracing_appender::rolling::RollingFileAppender::builder()
+        .rotation(tracing_appender::rolling::Rotation::DAILY)
+        .filename_prefix("coppice")
+        .filename_suffix("jsonl")
+        .latest_symlink("current.jsonl")
+        .build(logs_dir)
+        .map_err(io::Error::other)
+}
+
+struct MaskingAppender {
+    inner: tracing_appender::rolling::RollingFileAppender,
+}
+
+impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for MaskingAppender {
+    type Writer = mask::MaskingWriter<FlushingWriter<tracing_appender::rolling::RollingWriter<'a>>>;
+
+    fn make_writer(&'a self) -> Self::Writer {
+        mask::MaskingWriter::new(FlushingWriter {
+            inner: self.inner.make_writer(),
+        })
+    }
+}
+
+fn cli_json_layer<S>(
+    logs_dir: &Path,
+    respect_env: bool,
+) -> io::Result<Box<dyn Layer<S> + Send + Sync>>
+where
+    S: tracing::Subscriber + for<'a> tracing_subscriber::registry::LookupSpan<'a>,
+{
+    let appender = MaskingAppender {
+        inner: rolling(logs_dir)?,
+    };
+    let cli = tracing_subscriber::filter::filter_fn(|meta| meta.target() == CLI_LOG_TARGET);
+    if respect_env {
+        let layer = tracing_subscriber::fmt::layer()
+            .json()
+            .with_ansi(false)
+            .with_timer(UtcTime::rfc_3339())
+            .with_writer(appender)
+            .with_filter(env_filter().and(cli));
+        Ok(Box::new(layer))
+    } else {
+        let layer = tracing_subscriber::fmt::layer()
+            .json()
+            .with_ansi(false)
+            .with_timer(UtcTime::rfc_3339())
+            .with_writer(appender)
+            .with_filter(cli);
+        Ok(Box::new(layer))
+    }
+}
+
+/// Human stdout subscriber plus the CLI JSONL file. The env filter is `RUST_LOG`,
+/// or `info` plus `rmcp=warn`.
+pub fn init(logs_dir: &Path) -> io::Result<()> {
+    let terminal = io::stdout().is_terminal();
+    let stdout = tracing_subscriber::fmt::layer()
+        .with_ansi(terminal)
+        .with_writer(move || {
+            mask::MaskingWriter::new(if terminal {
+                StdoutWriter::Term(io::stdout())
+            } else {
+                StdoutWriter::Pipe(FlushingWriter {
+                    inner: io::stdout(),
+                })
+            })
+        })
+        .with_filter(env_filter());
+    tracing_subscriber::registry()
+        .with(stdout)
+        .with(cli_json_layer(logs_dir, true)?)
+        .init();
+    Ok(())
+}
+
+/// Run `f` with a CLI JSONL subscriber pointed at `logs_dir`.
+/// The test subscriber records info CLI lines even when `RUST_LOG` is narrower.
+pub fn with_cli_logs<R>(logs_dir: &Path, f: impl FnOnce() -> R) -> io::Result<R> {
+    let layer = cli_json_layer(logs_dir, false)?;
+    Ok(tracing::subscriber::with_default(
+        tracing_subscriber::registry().with(layer),
+        f,
+    ))
+}
+
+/// Flushes after every write so a block-buffered pipe cannot keep a log line.
+pub struct FlushingWriter<W> {
+    inner: W,
+}
+
+impl<W: Write> Write for FlushingWriter<W> {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        let n = self.inner.write(buf)?;
+        self.inner.flush()?;
+        Ok(n)
+    }
+
+    fn write_all(&mut self, buf: &[u8]) -> io::Result<()> {
+        self.inner.write_all(buf)?;
+        self.inner.flush()
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.inner.flush()
+    }
+}
+
+enum StdoutWriter {
+    Term(io::Stdout),
+    Pipe(FlushingWriter<io::Stdout>),
+}
+
+impl Write for StdoutWriter {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        match self {
+            Self::Term(writer) => writer.write(buf),
+            Self::Pipe(writer) => writer.write(buf),
+        }
+    }
+
+    fn write_all(&mut self, buf: &[u8]) -> io::Result<()> {
+        match self {
+            Self::Term(writer) => writer.write_all(buf),
+            Self::Pipe(writer) => writer.write_all(buf),
+        }
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        match self {
+            Self::Term(writer) => writer.flush(),
+            Self::Pipe(writer) => writer.flush(),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rmcp_defaults_to_warn_unless_named() {
+        assert_eq!(log_directives(None), "info,rmcp=warn");
+        assert_eq!(log_directives(Some(" ")), "info,rmcp=warn");
+        assert_eq!(log_directives(Some("debug")), "debug,rmcp=warn");
+        assert_eq!(log_directives(Some("info,rmcp=debug")), "info,rmcp=debug");
+    }
+
+    #[test]
+    fn flushing_writer_pushes_a_line_through_a_block_buffer() {
+        use std::sync::mpsc;
+        use std::time::Duration;
+
+        let (reader, writer) = std::io::pipe().expect("pipe");
+        let buffered = std::io::BufWriter::with_capacity(8 * 1024, writer);
+        let mut out = FlushingWriter { inner: buffered };
+        let (tx, rx) = mpsc::channel();
+        std::thread::spawn(move || {
+            let mut reader = reader;
+            let mut buf = [0u8; 32];
+            let n = std::io::Read::read(&mut reader, &mut buf).unwrap_or(0);
+            let _ = tx.send(buf[..n].to_vec());
+        });
+        out.write_all(b"hello\n").expect("write");
+        let got = rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("line was not flushed");
+        assert_eq!(got, b"hello\n");
+    }
+
+    #[test]
+    fn printed_secret_is_stored_only_as_its_name() {
+        let token = "coppice-mask-7kQ9mP2x";
+        let short = "abcde";
+        let dir = tempfile::tempdir().expect("tempdir");
+        let _guard = SecretGuard::register([("COPPICE_MCP_TOKEN", token), ("TINY", short)]);
+        with_cli_logs(dir.path(), || {
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .expect("runtime");
+            runtime.block_on(async {
+                let mut handler = Nop;
+                let invocation = crate::providers::cli_runner::CliInvocation {
+                    program: "sh".into(),
+                    args: vec![
+                        "-c".into(),
+                        "printf '%s\\n' \"$COPPICE_MCP_TOKEN $TINY\"".into(),
+                    ],
+                    env: vec![
+                        ("COPPICE_MCP_TOKEN".into(), token.into()),
+                        ("TINY".into(), short.into()),
+                    ],
+                    cwd: std::env::temp_dir(),
+                    timeout: std::time::Duration::from_secs(10),
+                    run_id: Some("run-mask".into()),
+                    artifacts_dir: None,
+                    result_before_exit: false,
+                    result_exit_grace: None,
+                    ticket_id: None,
+                };
+                crate::providers::cli_runner::run_cli(
+                    invocation,
+                    &mut handler,
+                    crate::providers::cli_runner::RunIo {
+                        cancel_rx: None,
+                        session_created_tx: None,
+                    },
+                )
+                .await
+                .expect("print secret");
+            });
+        })
+        .expect("subscriber");
+
+        let stored = directory_bytes(dir.path());
+        assert!(
+            !stored
+                .windows(token.len())
+                .any(|window| window == token.as_bytes()),
+            "token bytes reached the logs directory"
+        );
+        let text = String::from_utf8_lossy(&stored);
+        assert!(text.contains("\u{2039}COPPICE_MCP_TOKEN\u{203A}"), "{text}");
+        assert!(text.contains(short), "{text}");
+    }
+}
+
+#[cfg(test)]
+struct Nop;
+
+#[cfg(test)]
+impl crate::providers::cli_runner::LineHandler for Nop {
+    fn on_json(&mut self, _value: &serde_json::Value) -> crate::providers::cli_runner::LineStep {
+        crate::providers::cli_runner::LineStep::default()
+    }
+}
+
+#[cfg(test)]
+fn directory_bytes(dir: &Path) -> Vec<u8> {
+    let mut out = Vec::new();
+    let mut stack = vec![dir.to_path_buf()];
+    while let Some(path) = stack.pop() {
+        let meta = std::fs::symlink_metadata(&path).expect("metadata");
+        out.extend_from_slice(path.to_string_lossy().as_bytes());
+        if meta.file_type().is_dir() {
+            for entry in std::fs::read_dir(&path).expect("read_dir") {
+                stack.push(entry.expect("entry").path());
+            }
+            continue;
+        }
+        if meta.file_type().is_symlink() {
+            if let Ok(target) = std::fs::read_link(&path) {
+                out.extend_from_slice(target.to_string_lossy().as_bytes());
+            }
+        }
+        if let Ok(bytes) = std::fs::read(&path) {
+            out.extend_from_slice(&bytes);
+        }
+    }
+    out
+}
