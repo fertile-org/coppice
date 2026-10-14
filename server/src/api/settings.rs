@@ -31,6 +31,14 @@ pub fn routes() -> Router<Arc<AppState>> {
             get(get_config_file).put(put_config_file),
         )
         .route("/api/settings/config/backup", get(get_config_backup))
+        .route("/api/import-notice", get(import_notice))
+}
+
+async fn import_notice(
+    State(state): State<Arc<AppState>>,
+    AuthUser { .. }: AuthUser,
+) -> Json<serde_json::Value> {
+    Json(json!({ "message": state.connectors.import_notice() }))
 }
 
 struct SettingsApiError {

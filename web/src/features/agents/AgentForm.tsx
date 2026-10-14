@@ -24,6 +24,7 @@ import {
   CURSOR_MODELS_SIGN_IN,
   modelsFailureExtra,
   modelsUnavailableMessage,
+  turnedOffConnectorName,
 } from './modelList';
 import { AGENT_COPY } from './copy';
 import { isAssignable } from '../plugins/assignable';
@@ -225,6 +226,7 @@ export function AgentForm({
     isFetching: modelsFetching,
     isError: modelsError,
     detail: modelsErrorDetail,
+    errorMessage: modelsErrorMessage,
     refresh: refreshModels,
   } = useConnectorModels(showModelFields ? values.connector : undefined);
   const uncovered = useUncoveredModels(showModelFields ? values.connector : undefined);
@@ -240,6 +242,7 @@ export function AgentForm({
     selectedConnector?.displayName ?? selectedConnector?.id ?? values.connector;
   const defaultModelLabel = connectorDefaultModelLabel(connectorName);
   const modelsFailureLine = modelsFailureExtra(values.connector, modelsErrorDetail);
+  const turnedOffName = turnedOffConnectorName(modelsErrorMessage);
   const { data: plugins, isLoading: pluginsLoading } = usePlugins();
   const assignablePlugins = (plugins ?? []).filter(isAssignable);
   const assignableIds = new Set(assignablePlugins.map((p) => p.id));
@@ -496,7 +499,9 @@ export function AgentForm({
               Model
             </label>
             <RefreshModelsButton
-              onClick={() => refreshModels()}
+              onClick={() => {
+                void refreshModels();
+              }}
               disabled={modelsLoading || modelsFetching}
             />
           </div>
@@ -523,7 +528,16 @@ export function AgentForm({
           {selectedUncovered && (
             <p className="mt-1 font-body text-xs text-text-muted">{NOT_COVERED_BY_PLAN}</p>
           )}
-          {modelsError && !modelsLoading && groupsWithModels.length === 0 && (
+          {turnedOffName && !modelsLoading && (
+            <p className="mt-2 font-body text-xs text-text-secondary">
+              {turnedOffName} is turned off. Turn it on in{' '}
+              <Link to="/tools?tab=connectors" className="font-medium text-moss-700 underline-offset-2 hover:underline">
+                Connectors
+              </Link>
+              .
+            </p>
+          )}
+          {!turnedOffName && modelsError && !modelsLoading && groupsWithModels.length === 0 && (
             <div className="mt-2">
               <p className="font-body text-xs text-text-secondary">
                 {modelsUnavailableMessage(connectorName)}

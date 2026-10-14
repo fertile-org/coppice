@@ -66,6 +66,12 @@ deb:
     - libatspi2.0-0
     - libuuid1
     - libsecret-1-0
+    - libasound2
+    # Electron links libgbm.so.1 directly. libgtk-3-0 does not always pull it.
+    - libgbm1
+    # Bundled Postgres is built --with-system-tzdata=/usr/share/zoneinfo.
+    # TimeZone=UTC is rejected when that directory is missing.
+    - tzdata
     - git
   afterInstall: build/linux/after-install.sh
   afterRemove: build/linux/after-remove.sh

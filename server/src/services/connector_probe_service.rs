@@ -129,12 +129,7 @@ fn readiness_after_probe(
     if descriptor.id == coppice_connectors::CURSOR {
         return cursor_readiness(report);
     }
-    assess(
-        descriptor,
-        env,
-        report.binary.as_deref(),
-        SIGN_IN_TIMEOUT,
-    )
+    assess(descriptor, env, report.binary.as_deref(), SIGN_IN_TIMEOUT)
 }
 
 fn cursor_readiness(report: &ProbeReport) -> Readiness {
@@ -294,9 +289,22 @@ impl From<&LastRun> for LastRunResponse {
 
 /// A connector not yet probed (startup probe still running) reports
 /// `probedAt: null`, `cli.found: false`, and probe status `not_run`.
+/// Ids whose free sign-in check passed. The live registry uses the same set.
+pub fn ready_connector_ids(probes: &ConnectorProbes) -> Vec<String> {
+    coppice_connectors::all()
+        .iter()
+        .filter(|descriptor| {
+            probes
+                .get(descriptor.id)
+                .is_some_and(|cached| cached.readiness == Readiness::Ready)
+        })
+        .map(|descriptor| descriptor.id.to_string())
+        .collect()
+}
+
 pub fn connector_status(
     descriptor: &'static ConnectorDescriptor,
-    config: &AppConfig,
+    enabled: bool,
     cached: Option<&CachedProbe>,
     last_run: Option<&LastRun>,
     last_check: Option<&CheckSummary>,
@@ -305,11 +313,7 @@ pub fn connector_status(
     ConnectorStatusResponse {
         id: descriptor.id,
         display_name: descriptor.display_name,
-        enabled: config
-            .agent
-            .connectors
-            .enabled(descriptor.id)
-            .unwrap_or(false),
+        enabled,
         cli: CliStatus {
             found: report.is_some_and(|r| r.binary.is_some()),
             path: report
@@ -363,15 +367,15 @@ fn auth_status(report: Option<&ProbeReport>) -> AuthStatus {
 /// Status for every diagnosable connector from the cache (no probing).
 pub async fn list_statuses(
     probes: &ConnectorProbes,
-    config: &AppConfig,
     pool: Option<&PgPool>,
+    is_enabled: &(dyn Fn(&str) -> bool + Sync),
 ) -> Result<Vec<ConnectorStatusResponse>, sqlx::Error> {
     let (runs, checks) = run_history(pool).await?;
     Ok(diagnosable_descriptors()
         .map(|d| {
             connector_status(
                 d,
-                config,
+                is_enabled(d.id),
                 probes.get(d.id).as_ref(),
                 runs.get(d.id),
                 checks.get(d.id),
@@ -410,6 +414,7 @@ pub async fn check_connector(
     config: &AppConfig,
     pool: Option<&PgPool>,
     id: &str,
+    is_enabled: &(dyn Fn(&str) -> bool + Sync),
 ) -> Result<ConnectorStatusResponse, CheckError> {
     let descriptor = diagnosable(id).ok_or(CheckError::NotFound)?;
     let cached = probes
@@ -419,7 +424,7 @@ pub async fn check_connector(
     let (runs, checks) = run_history(pool).await.map_err(CheckError::Db)?;
     Ok(connector_status(
         descriptor,
-        config,
+        is_enabled(id),
         Some(&cached),
         runs.get(id),
         checks.get(id),
