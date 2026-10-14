@@ -14,11 +14,15 @@ pub enum ResolvedTransport {
         args: Vec<String>,
         env: BTreeMap<String, String>,
         secrets: Vec<String>,
+        /// Parallel to `secrets`: the setting or env name for each value.
+        secret_names: Vec<String>,
     },
     Http {
         url: String,
         headers: BTreeMap<String, String>,
         secrets: Vec<String>,
+        /// Parallel to `secrets`: the setting or env name for each value.
+        secret_names: Vec<String>,
     },
 }
 
@@ -36,6 +40,28 @@ impl ResolvedTransport {
                 secrets
             }
         }
+    }
+
+    /// `(name, value)` for each resolved secret, skipping empty values.
+    pub fn secret_pairs(&self) -> Vec<(String, String)> {
+        let (names, values) = match self {
+            Self::Stdio {
+                secret_names,
+                secrets,
+                ..
+            }
+            | Self::Http {
+                secret_names,
+                secrets,
+                ..
+            } => (secret_names, secrets),
+        };
+        names
+            .iter()
+            .zip(values.iter())
+            .filter(|(_, value)| !value.is_empty())
+            .map(|(name, value)| (name.clone(), value.clone()))
+            .collect()
     }
 }
 
@@ -140,7 +166,7 @@ pub fn resolve(
     transport: &McpServerTransport,
     ctx: &ResolveCtx,
 ) -> Result<ResolvedTransport, String> {
-    let mut secrets = Vec::new();
+    let mut named = Vec::new();
     let mut lookup = |name: &str, default: Option<&str>| {
         if name == PLUGIN_ROOT {
             return Ok(ctx.plugin_root.to_string_lossy().into_owned());
@@ -157,7 +183,7 @@ pub fn resolve(
                     .filter(|v| !v.is_empty())
             });
         if let Some(value) = value {
-            secrets.push(value.clone());
+            named.push((name.to_string(), value.clone()));
             return Ok(value);
         }
         default
@@ -173,21 +199,36 @@ pub fn resolve(
                 .collect::<Result<_, _>>()?,
             env: expand_values(env, &mut lookup)?,
             secrets: Vec::new(),
+            secret_names: Vec::new(),
         },
         McpServerTransport::Http { url, headers } => ResolvedTransport::Http {
             url: expand(url, &mut lookup)?,
             headers: expand_values(headers, &mut lookup)?,
             secrets: Vec::new(),
+            secret_names: Vec::new(),
         },
         McpServerTransport::Unsupported { kind } => {
             return Err(format!("unsupported transport \"{kind}\""))
         }
     };
-    secrets.sort();
-    secrets.dedup();
+    named.sort_by(|a, b| a.1.cmp(&b.1).then(a.0.cmp(&b.0)));
+    named.dedup_by(|a, b| a.1 == b.1);
+    let secrets: Vec<String> = named.iter().map(|(_, value)| value.clone()).collect();
+    let secret_names: Vec<String> = named.iter().map(|(name, _)| name.clone()).collect();
     match &mut resolved {
-        ResolvedTransport::Stdio { secrets: s, .. }
-        | ResolvedTransport::Http { secrets: s, .. } => *s = secrets,
+        ResolvedTransport::Stdio {
+            secrets: s,
+            secret_names: n,
+            ..
+        }
+        | ResolvedTransport::Http {
+            secrets: s,
+            secret_names: n,
+            ..
+        } => {
+            *s = secrets;
+            *n = secret_names;
+        }
     }
     Ok(resolved)
 }
@@ -317,6 +358,7 @@ mod tests {
                 args: vec!["--home".into(), "/home/x".into()],
                 env: settings(&[("TOKEN", "tok")]),
                 secrets: vec!["/home/x".into(), "tok".into()],
+                secret_names: vec!["HOME_DIR".into(), "API_TOKEN".into()],
             }
         );
 
@@ -332,6 +374,7 @@ mod tests {
                 url: "https://h//home/x".into(),
                 headers: settings(&[("Authorization", "Bearer from-env")]),
                 secrets: vec!["/home/x".into(), "from-env".into()],
+                secret_names: vec!["HOME_DIR".into(), "API_TOKEN".into()],
             }
         );
     }
@@ -488,6 +531,7 @@ mod tests {
             args: vec!["--token=arg-secret".into()],
             env: settings(&[("API_TOKEN", "env-secret")]),
             secrets: vec!["arg-secret".into(), "env-secret".into()],
+            secret_names: Vec::new(),
         };
         let shown = format!("{stdio:?}");
         assert!(
@@ -502,6 +546,7 @@ mod tests {
             url: "https://u:url-pass@h/mcp?k=url-query".into(),
             headers: settings(&[("Authorization", "Bearer hdr-secret")]),
             secrets: vec!["hdr-secret".into()],
+            secret_names: Vec::new(),
         };
         let shown = format!("{http:?}");
         assert!(

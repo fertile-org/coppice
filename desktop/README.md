@@ -11,8 +11,10 @@ make desktop
 - **Dev** — `COPPICE_WEB_URL` set (what `make desktop` does): loads that URL and spawns nothing.
 - **Bundled** — `COPPICE_WEB_URL` unset: shows a splash, starts `resources/bin/coppice-server desktop` (from
   `process.resourcesPath` when packaged), loads the URL it prints on `COPPICE_READY`, and stops it on quit.
-  Startup failures show an error window with the last log lines. Logs live in `<userData>/logs/`
-  (`server.log`, rotated at 10 MB × 3, plus the server's `postgres.log`).
+  Startup failures show an error window with the last log lines. Logs live in
+  `$XDG_STATE_HOME/Coppice/logs` (or `~/.local/state/Coppice/logs`) on Linux and
+  `~/Library/Logs/Coppice` on macOS (`server.log`, rotated at 10 MB × 3, plus
+  `postgres.log` and the daily `coppice.*.jsonl` files).
 
 To run the bundled mode from a checkout, populate `desktop/resources/` (gitignored):
 

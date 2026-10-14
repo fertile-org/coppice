@@ -21,6 +21,7 @@ fn fake_cli(env: &[(&str, &str)], timeout: Duration) -> CliInvocation {
         timeout,
         run_id: None,
         artifacts_dir: None,
+        ticket_id: None,
         result_before_exit: false,
         result_exit_grace: None,
     }
@@ -30,7 +31,6 @@ fn io() -> RunIo {
     RunIo {
         cancel_rx: None,
         session_created_tx: None,
-        stderr_target: "fake_cli.stderr",
     }
 }
 

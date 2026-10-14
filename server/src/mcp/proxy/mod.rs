@@ -3,6 +3,7 @@
 //! server pool, and the gateway tool source over it.
 
 mod client;
+mod hold;
 mod http;
 pub mod naming;
 mod pool;

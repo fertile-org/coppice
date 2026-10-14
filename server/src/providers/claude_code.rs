@@ -137,6 +137,7 @@ impl AgentProvider for ClaudeCodeProvider {
             timeout: run_timeout,
             run_id: input.run_id.clone(),
             artifacts_dir: input.artifacts_dir.clone(),
+            ticket_id: input.ticket_id.clone(),
             result_before_exit: contract.result_before_exit,
             result_exit_grace: None,
         };
@@ -148,7 +149,6 @@ impl AgentProvider for ClaudeCodeProvider {
         let io = RunIo {
             cancel_rx: input.cancel_rx,
             session_created_tx: input.session_created_tx,
-            stderr_target: "claude_code.stderr",
         };
 
         let exit = match run_cli(invocation, &mut handler, io).await {

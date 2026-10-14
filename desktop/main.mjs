@@ -2,6 +2,7 @@ import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { desktopServerArgs, resolveAppLogsDir } from './src/logsDir.mjs';
 import { startServer } from './src/serverProcess.mjs';
 import { resolveLoginShellPath } from './src/shellPath.mjs';
 import { checkForUpdate } from './src/updateCheck.mjs';
@@ -21,6 +22,13 @@ const devUserData = devUserDataPath({
 });
 if (devUserData) app.setPath('userData', devUserData);
 
+const appLogsDir = resolveAppLogsDir({
+  platform: process.platform,
+  env: process.env,
+  home: app.getPath('home'),
+});
+app.setAppLogsPath(appLogsDir);
+
 let mainWindow = null;
 let splashWindow = null;
 let errorWindow = null;
@@ -37,7 +45,7 @@ function resourcesDir() {
 }
 
 function logsDir() {
-  return path.join(app.getPath('userData'), 'logs');
+  return app.getPath('logs');
 }
 
 ipcMain.handle('coppice:show-item-in-folder', (_event, filePath) => {
@@ -160,7 +168,11 @@ async function launchServer() {
     if (server) void server.stop();
     current = startServer({
       command: path.join(resources, 'bin', 'coppice-server'),
-      args: ['desktop', '--data-dir', app.getPath('userData'), '--resources', resources],
+      args: desktopServerArgs({
+        userData: app.getPath('userData'),
+        resources,
+        logsDir: appLogsDir,
+      }),
       env: { ...process.env, PATH },
       logFile: path.join(logsDir(), 'server.log'),
     });

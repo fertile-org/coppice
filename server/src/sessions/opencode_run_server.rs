@@ -53,6 +53,7 @@ impl OpenCodeRunServers {
         key: &str,
         config_path: &Path,
         env: Vec<(&'static str, String)>,
+        ticket_id: Option<&str>,
     ) -> anyhow::Result<OpenCodeRunLease> {
         let mut attempt = 1;
         loop {
@@ -66,7 +67,8 @@ impl OpenCodeRunServers {
                         &err
                     ))
                 })?;
-            let (mut child, group_pid) = self.spawn(key, port, config_path, &env, &version)?;
+            let (mut child, group_pid) =
+                self.spawn(key, port, config_path, &env, &version, ticket_id)?;
 
             match wait_for_healthy(&base_url, &mut child).await {
                 Ok(()) => return self.register(key, base_url, child, Some(group_pid)).await,
@@ -112,6 +114,7 @@ impl OpenCodeRunServers {
         config_path: &Path,
         env: &[(&'static str, String)],
         version: &str,
+        ticket_id: Option<&str>,
     ) -> anyhow::Result<(Child, u32)> {
         let contract = coppice_connectors::get(coppice_connectors::OPENCODE)
             .expect("opencode descriptor")
@@ -146,8 +149,11 @@ impl OpenCodeRunServers {
         }
         cmd.args(&args)
             .env("OPENCODE_CONFIG", config_path)
-            .envs(env.iter().map(|(k, v)| (*k, v.as_str())));
-        crate::process_tree::active()
+            .envs(env.iter().map(|(k, v)| (*k, v.as_str())))
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped());
+        let secrets = crate::logs::guard_for_child_env(env.iter().map(|(k, v)| (*k, v.as_str())));
+        let mut tracked = crate::process_tree::active()
             .spawn(
                 &mut cmd,
                 crate::process_tree::SpawnMeta {
@@ -157,7 +163,6 @@ impl OpenCodeRunServers {
                     task_log_dir: config_path.parent().map(std::path::Path::to_path_buf),
                 },
             )
-            .map(|tracked| tracked.detach())
             .map_err(|err| {
                 if err.kind() == std::io::ErrorKind::NotFound {
                     anyhow::anyhow!(
@@ -169,7 +174,26 @@ impl OpenCodeRunServers {
                 } else {
                     anyhow::anyhow!("Couldn't start `{} serve`: {err}", self.command)
                 }
-            })
+            })?;
+        let run_id = key.to_string();
+        let ticket_id = ticket_id.map(str::to_string);
+        if let Some(stdout) = tracked.take_stdout() {
+            let secrets = secrets.clone();
+            let run_id = run_id.clone();
+            let ticket_id = ticket_id.clone();
+            tokio::spawn(async move {
+                let _secrets = secrets;
+                crate::logs::pump_lines(stdout, Some(run_id), ticket_id, "stdout").await;
+            });
+        }
+        if let Some(stderr) = tracked.take_stderr() {
+            let secrets = secrets.clone();
+            tokio::spawn(async move {
+                let _secrets = secrets;
+                crate::logs::pump_lines(stderr, Some(run_id), ticket_id, "stderr").await;
+            });
+        }
+        Ok(tracked.detach())
     }
 
     async fn register(

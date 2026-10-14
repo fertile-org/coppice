@@ -31,6 +31,27 @@ pub struct AppConfig {
     pub mcp: McpConfig,
     #[serde(default)]
     pub plugins: PluginsConfig,
+    #[serde(default)]
+    pub logs: LogsConfig,
+}
+
+/// Non-desktop log directory. Ignored when the desktop app passes `--logs-dir`.
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+pub struct LogsConfig {
+    #[serde(default = "default_logs_dir")]
+    pub dir: String,
+}
+
+fn default_logs_dir() -> String {
+    "./data/logs".into()
+}
+
+impl Default for LogsConfig {
+    fn default() -> Self {
+        Self {
+            dir: default_logs_dir(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
@@ -1253,6 +1274,7 @@ impl AppConfig {
             git: GitConfig::default(),
             mcp: McpConfig::default(),
             plugins: PluginsConfig::default(),
+            logs: LogsConfig::default(),
         }
     }
 }
@@ -1297,6 +1319,7 @@ mod tests {
     fn loads_defaults_without_files() {
         let cfg = AppConfig::load_defaults().expect("defaults");
         assert_eq!(cfg.server.port, 5000);
+        assert_eq!(cfg.logs.dir, "./data/logs");
     }
 
     #[test]

@@ -17,17 +17,23 @@ pub struct DataLayout {
 
 impl DataLayout {
     pub fn new(root: &Path) -> Self {
+        Self::with_logs_dir(root, root.join("logs"))
+    }
+
+    /// `logs` is the directory for `postgres.log`. When the desktop app passes
+    /// `--logs-dir`, that directory is used and `<data-dir>/logs` is not created.
+    pub fn with_logs_dir(root: &Path, logs: PathBuf) -> Self {
         Self {
             root: root.to_path_buf(),
             config_file: root.join("config.toml"),
             secrets_dir: root.join("secrets"),
             pg_data: root.join("pg").join("data"),
-            pg_log: root.join("logs").join("postgres.log"),
+            pg_log: logs.join("postgres.log"),
             artifacts: root.join("artifacts"),
             worktrees: root.join("worktrees"),
             plugins: root.join("plugins"),
             builtin_plugins: root.join("builtin-plugins"),
-            logs: root.join("logs"),
+            logs,
         }
     }
 
@@ -100,6 +106,17 @@ mod tests {
         assert_eq!(layout.pg_data, Path::new("/d/pg/data"));
         assert_eq!(layout.pg_log, Path::new("/d/logs/postgres.log"));
         assert_eq!(layout.builtin_plugins, Path::new("/d/builtin-plugins"));
+    }
+
+    #[test]
+    fn logs_dir_flag_is_postgres_log_and_not_a_second_directory() {
+        let data = tempfile::tempdir().expect("tempdir");
+        let logs = tempfile::tempdir().expect("tempdir");
+        let layout = DataLayout::with_logs_dir(data.path(), logs.path().to_path_buf());
+        layout.ensure_dirs().expect("ensure dirs");
+        assert_eq!(layout.pg_log, logs.path().join("postgres.log"));
+        assert_eq!(layout.logs, logs.path());
+        assert!(!data.path().join("logs").exists());
     }
 
     #[test]
