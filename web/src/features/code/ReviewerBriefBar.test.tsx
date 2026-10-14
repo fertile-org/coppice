@@ -19,7 +19,7 @@ describe('ReviewerBriefBar', () => {
     expect(section).toHaveAccessibleName('Reviewer brief');
     expect(
       screen.getByText(
-        'Coppice compares this diff with the plan you approved and shows where to look first.',
+        "The agent wrote these notes when it finished. Coppice tags any file that wasn't in the plan you approved.",
       ),
     ).toBeVisible();
     expect(screen.getByText('Reads the header.')).toBeVisible();
