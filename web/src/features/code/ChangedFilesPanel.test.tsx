@@ -1,7 +1,6 @@
 import '@testing-library/jest-dom/vitest';
 import { render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
-import { REVIEWER_BRIEF_COPY } from './reviewerBriefCopy';
 import { ChangedFilesPanel } from './ChangedFilesPanel';
 
 describe('ChangedFilesPanel', () => {
@@ -23,7 +22,7 @@ describe('ChangedFilesPanel', () => {
       />,
     );
 
-    expect(screen.getAllByText(REVIEWER_BRIEF_COPY.notInPlan)).toHaveLength(1);
+    expect(screen.getAllByText('Not in the plan')).toHaveLength(1);
     expect(screen.getByText('src/planned.rs')).toBeVisible();
     expect(screen.getByText('src/extra.rs')).toBeVisible();
   });
