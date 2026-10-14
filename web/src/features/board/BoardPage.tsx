@@ -35,6 +35,7 @@ import { buildTicketHierarchyIndex } from './ticketHierarchy';
 import {
   ticketsQueryKey,
   useCreateTicket,
+  useStartPlanRun,
   useTickets,
   useUpdateTicketStatus,
   type Ticket,
@@ -72,6 +73,7 @@ export function BoardPage() {
   const toast = useToast();
   const createTicket = useCreateTicket(boardId ?? '');
   const updateStatus = useUpdateTicketStatus(boardId ?? '', includeArchived);
+  const startPlan = useStartPlanRun(boardId ?? '');
 
   const [activeTicket, setActiveTicket] = useState<Ticket | null>(null);
 
@@ -196,6 +198,12 @@ export function BoardPage() {
     await createTicket.mutateAsync(title);
   }
 
+  function handleRunPlan(ticketId: string) {
+    void startPlan.mutateAsync(ticketId).catch((err: unknown) => {
+      toast.error(apiErrorToastMessage(parseApiErrorMessage(err)));
+    });
+  }
+
   if (!boardId) {
     return (
       <p className="font-body text-sm text-danger">Missing board id.</p>
@@ -257,6 +265,10 @@ export function BoardPage() {
                   onQuickAdd={handleQuickAdd}
                   isAdding={createTicket.isPending}
                   onOpenTicket={openTicket}
+                  onRunPlan={handleRunPlan}
+                  planRunTicketId={
+                    startPlan.isPending ? (startPlan.variables ?? null) : null
+                  }
                 />
               ))}
             </div>

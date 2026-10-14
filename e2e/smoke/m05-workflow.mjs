@@ -259,6 +259,17 @@ async function assignAgent(ticketId, agentId, auth) {
   return res.json();
 }
 
+async function setTicketStatus(ticketId, status, auth) {
+  const res = await api('PATCH', `/api/tickets/${ticketId}/status`, {
+    ...auth,
+    body: { status },
+  });
+  if (!res.ok) {
+    fail(`set status ${status} failed: ${res.status} ${await res.text()}`);
+  }
+  return res.json();
+}
+
 async function skipPlanning(ticketId, auth) {
   const res = await api('PATCH', `/api/tickets/${ticketId}`, {
     ...auth,
@@ -409,26 +420,14 @@ async function main() {
 
   await setTicketRepo(ticket.id, repo.id, auth);
   await skipPlanning(ticket.id, auth);
-  await assignAgent(ticket.id, pm.id, auth);
-
-  const pmReady = await pollTicketUntil(
-    ticket.id,
-    auth,
-    'PM run → ready + recommendation',
-    RUN_POLL_TIMEOUT_MS,
-    (t) =>
-      t.status === 'ready' &&
-      t.pendingAssignRecommendation?.recommendedAgentKey === 'tech_lead',
-  );
-  console.log(
-    `smoke: PM run complete; status=${pmReady.status}, recommendation=${pmReady.pendingAssignRecommendation.recommendedAgentKey}`,
-  );
-
-  const afterTechLeadAssign = await assignAgent(ticket.id, techLead.id, auth);
-  if (afterTechLeadAssign.pendingAssignRecommendation != null) {
-    fail('expected pending recommendation cleared after Tech Lead assign');
+  const ready = await setTicketStatus(ticket.id, 'ready', auth);
+  if (ready.status !== 'ready') {
+    fail(`expected Ready after Skip planning, got ${ready.status}`);
   }
-  console.log('smoke: assigned Tech Lead for Ready refinement');
+  if (ready.assigneeAgentId !== techLead.id) {
+    fail('expected the Tech Lead to start when the ticket entered Ready');
+  }
+  console.log('smoke: Skip planning entered Ready and started the Tech Lead');
 
   await pollRunsUntil(
     ticket.id,

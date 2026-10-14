@@ -228,6 +228,20 @@ async function assignAgent(ticketId, agentId, auth) {
   }
 }
 
+async function skipPlanning(ticketId, auth) {
+  const res = await api('PATCH', `/api/tickets/${ticketId}`, {
+    ...auth,
+    body: { skipPlanning: true },
+  });
+  if (!res.ok) {
+    fail(`skip planning failed: ${res.status} ${await res.text()}`);
+  }
+  const ticket = await res.json();
+  if (ticket.skipPlanning !== true) {
+    fail('skip planning did not stick');
+  }
+}
+
 async function getTicket(ticketId, auth) {
   const res = await api('GET', `/api/tickets/${ticketId}`, auth);
   if (!res.ok) {
@@ -288,6 +302,8 @@ async function main() {
   const ticket = await createTicket(board.id, auth);
 
   await setTicketRepo(ticket.id, repo.id, auth);
+  // This smoke exercises a PM work run (split), not plan writing.
+  await skipPlanning(ticket.id, auth);
   await assignAgent(ticket.id, pm.id, auth);
 
   const runRes = await api('POST', `/api/tickets/${ticket.id}/run-agent`, auth);

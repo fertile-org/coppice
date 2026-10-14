@@ -292,7 +292,7 @@ async function seedBoard(auth, agentIds) {
       description: ticket.description,
       priority: ticket.priority,
     });
-    if (ticket.status === 'in_progress') {
+    if (ticket.status === 'in_progress' || ticket.status === 'ready') {
       const skipped = await api('PATCH', `/api/tickets/${created.id}`, auth, {
         skipPlanning: true,
       });

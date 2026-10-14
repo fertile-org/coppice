@@ -2,6 +2,7 @@ import '@testing-library/jest-dom/vitest';
 import { DndContext } from '@dnd-kit/core';
 import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
+import { PLAN_COPY } from '../plan/copy';
 import type { TicketHierarchy } from './ticketHierarchy';
 import { resolveAssigneeName, TicketCard } from './TicketCard';
 import type { Ticket } from './useTickets';
@@ -192,6 +193,53 @@ describe('TicketCard assignee and priority', () => {
     expect(resolveAssigneeName(undefined, agents)).toBeUndefined();
     expect(resolveAssigneeName('agent-1', agents)).toBe('FE');
     expect(resolveAssigneeName('missing', agents)).toBe('Unknown agent');
+  });
+});
+
+describe('TicketCard plan labels', () => {
+  it('shows the locked labels and starts a plan without opening the card', () => {
+    const onOpen = vi.fn();
+    const onRunPlan = vi.fn();
+    const { rerender } = render(
+      <DndContext>
+        <TicketCard
+          ticket={{ ...ticket, status: 'backlog' }}
+          onOpen={onOpen}
+          onRunPlan={onRunPlan}
+        />
+      </DndContext>,
+    );
+
+    expect(screen.getByText(PLAN_COPY.planNeedsRun)).toBeVisible();
+    fireEvent.click(
+      screen.getByRole('button', { name: PLAN_COPY.runAgent, exact: true }),
+    );
+    expect(onRunPlan).toHaveBeenCalledWith(ticket.id);
+    expect(onOpen).not.toHaveBeenCalled();
+
+    rerender(
+      <DndContext>
+        <TicketCard
+          ticket={{
+            ...ticket,
+            status: 'plan_review',
+            latestPlanRunStatus: 'running',
+          }}
+          onOpen={onOpen}
+        />
+      </DndContext>,
+    );
+    expect(screen.getByText(PLAN_COPY.writingPlan)).toBeVisible();
+
+    rerender(
+      <DndContext>
+        <TicketCard
+          ticket={{ ...ticket, status: 'plan_review' }}
+          onOpen={onOpen}
+        />
+      </DndContext>,
+    );
+    expect(screen.getByText(PLAN_COPY.waitingForApproval)).toBeVisible();
   });
 });
 

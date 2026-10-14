@@ -7,6 +7,25 @@
 pub const PLAN_REQUIRED: &str =
     "Approve the plan, or turn on Skip planning, before moving this ticket to In Progress.";
 
+/// PLACEHOLDER — Content has not locked this string.
+/// Refused move into Ready without an approved plan or Skip planning.
+pub const READY_REQUIRES_PLAN: &str =
+    "[placeholder] This ticket enters Ready after its plan is approved, or from Backlog when Skip planning is on.";
+
+/// PLACEHOLDER — Content has not locked this string.
+/// Posted when no enabled PM can write the plan.
+pub const NO_PM: &str = "[placeholder] No PM is available to write the plan.";
+
+/// PLACEHOLDER — Content has not locked this string.
+/// Posted when Ready has no Tech Lead to start. The ticket is not blocked.
+pub const NO_TECH_LEAD: &str =
+    "[placeholder] No Tech Lead is available. The ticket stays in Ready without a new assignee so someone can pick it up.";
+
+/// PLACEHOLDER — Content has not locked this string.
+/// Starting a plan from a column that is not Backlog or Ready.
+pub const PLAN_START_WRONG_COLUMN: &str =
+    "[placeholder] A plan is written from Backlog, or from Ready when this ticket still needs one.";
+
 /// Posted when Ready has nobody to write the plan.
 pub const NO_PLANNER: &str = "Assign an agent to this ticket to write the plan.";
 

@@ -156,12 +156,10 @@ async fn final_approve_requires_wait_for_final_review() {
         .as_array()
         .and_then(|list| list.last())
         .expect("final approve comment");
-    assert!(
-        final_comment["body"]
-            .as_str()
-            .unwrap_or("")
-            .contains("Accepted: ticket moved to **Done**.")
-    );
+    assert!(final_comment["body"]
+        .as_str()
+        .unwrap_or("")
+        .contains("Accepted: ticket moved to **Done**."));
 }
 
 #[tokio::test]
@@ -184,7 +182,7 @@ async fn direct_status_change_cannot_reach_done() {
         "blocked",
     ];
     for status in sources {
-        if status == "in_progress" {
+        if status == "ready" || status == "in_progress" {
             common::skip_planning(&app, &ticket_id, &cookie, &csrf).await;
         }
         if status != "backlog" {
@@ -306,6 +304,7 @@ async fn assign_on_ready_moves_ticket_to_in_progress() {
 
     let ticket_id = common::create_unplanned_ticket(&app, &board_id, &cookie, &csrf).await;
     common::set_ticket_repo(&app, &ticket_id, &repo_id, &cookie, &csrf).await;
+    common::skip_planning(&app, &ticket_id, &cookie, &csrf).await;
 
     let patch = app
         .clone()
@@ -319,7 +318,6 @@ async fn assign_on_ready_moves_ticket_to_in_progress() {
         .await
         .unwrap();
     assert_eq!(patch.status(), StatusCode::OK);
-    common::skip_planning(&app, &ticket_id, &cookie, &csrf).await;
 
     let assign_res = app
         .clone()
@@ -351,16 +349,9 @@ async fn ready_tech_lead_human_agent_run_keeps_agent_mode_contract_and_git_behav
     let (_git_dir, local_path) = common::create_temp_git_checkout();
     let repo_id =
         common::register_test_repo(&app, &local_path.display().to_string(), &cookie, &csrf).await;
-    let tech_lead_id = common::create_agent_with_preset_key(
-        &app,
-        "tech_lead",
-        "Human Ready Tech Lead",
-        &cookie,
-        &csrf,
-    )
-    .await;
     let ticket_id = common::create_unplanned_ticket(&app, &board_id, &cookie, &csrf).await;
     common::set_ticket_repo(&app, &ticket_id, &repo_id, &cookie, &csrf).await;
+    common::skip_planning(&app, &ticket_id, &cookie, &csrf).await;
     let ready = app
         .clone()
         .oneshot(common::json_request(
@@ -373,6 +364,15 @@ async fn ready_tech_lead_human_agent_run_keeps_agent_mode_contract_and_git_behav
         .await
         .unwrap();
     assert_eq!(ready.status(), StatusCode::OK);
+
+    let tech_lead_id = common::create_agent_with_preset_key(
+        &app,
+        "tech_lead",
+        "Human Ready Tech Lead",
+        &cookie,
+        &csrf,
+    )
+    .await;
 
     let comment = app
         .clone()
@@ -468,31 +468,21 @@ async fn scope_b_mock_pipeline_reaches_final_review() {
 
     let ticket_id = common::create_test_ticket(&app, &board_id, &cookie, &csrf).await;
     common::set_ticket_repo(&app, &ticket_id, &repo_id, &cookie, &csrf).await;
-    common::assign_agent_to_ticket(&app, &ticket_id, &pm_id, &cookie, &csrf).await;
-
-    let pm_ready = common::poll_ticket_until(
-        &app,
-        &ticket_id,
-        &cookie,
-        &csrf,
-        "PM run → ready + recommendation",
-        Duration::from_secs(30),
-        |ticket| {
-            ticket["status"].as_str() == Some("ready")
-                && ticket["pendingAssignRecommendation"]
-                    .as_object()
-                    .and_then(|rec| rec.get("recommendedAgentKey"))
-                    .and_then(|key| key.as_str())
-                    == Some("tech_lead")
-        },
-    )
-    .await;
-    assert!(pm_ready["pendingAssignRecommendation"].is_object());
-
-    common::assign_agent_to_ticket(&app, &ticket_id, &tech_lead_id, &cookie, &csrf).await;
-
-    let after_assign = common::get_ticket(&app, &ticket_id, &cookie, &csrf).await;
-    assert!(after_assign["pendingAssignRecommendation"].is_null());
+    let ready = app
+        .clone()
+        .oneshot(common::json_request(
+            "PATCH",
+            &format!("/api/tickets/{ticket_id}/status"),
+            r#"{"status":"ready"}"#,
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(ready.status(), StatusCode::OK);
+    let started = common::get_ticket(&app, &ticket_id, &cookie, &csrf).await;
+    assert_eq!(started["status"], "ready");
+    assert_eq!(started["assigneeAgentId"], tech_lead_id);
 
     common::poll_runs_until_count(
         &app,
@@ -629,6 +619,7 @@ async fn ready_tech_lead_auto_handoff_queues_exactly_one_implementer_run() {
 
     let ticket_id = common::create_unplanned_ticket(&app, &board_id, &cookie, &csrf).await;
     common::set_ticket_repo(&app, &ticket_id, &repo_id, &cookie, &csrf).await;
+    common::skip_planning(&app, &ticket_id, &cookie, &csrf).await;
     let ready = app
         .clone()
         .oneshot(common::json_request(
@@ -641,9 +632,6 @@ async fn ready_tech_lead_auto_handoff_queues_exactly_one_implementer_run() {
         .await
         .unwrap();
     assert_eq!(ready.status(), StatusCode::OK);
-    common::skip_planning(&app, &ticket_id, &cookie, &csrf).await;
-
-    common::assign_agent_to_ticket(&app, &ticket_id, &tech_lead_id, &cookie, &csrf).await;
 
     let runs = common::poll_runs_until_count(
         &app,
@@ -745,6 +733,7 @@ async fn ready_tech_lead_manual_handoff_persists_recommendation_and_starts_nobod
 
     let ticket_id = common::create_unplanned_ticket(&app, &board_id, &cookie, &csrf).await;
     common::set_ticket_repo(&app, &ticket_id, &repo_id, &cookie, &csrf).await;
+    common::skip_planning(&app, &ticket_id, &cookie, &csrf).await;
     let ready = app
         .clone()
         .oneshot(common::json_request(
@@ -757,7 +746,6 @@ async fn ready_tech_lead_manual_handoff_persists_recommendation_and_starts_nobod
         .await
         .unwrap();
     assert_eq!(ready.status(), StatusCode::OK);
-    common::assign_agent_to_ticket(&app, &ticket_id, &tech_lead_id, &cookie, &csrf).await;
 
     common::poll_runs_until_count(
         &app,
@@ -848,6 +836,7 @@ async fn ready_tech_lead_invalid_handoffs_stay_ready_and_start_nobody() {
 
         let ticket_id = common::create_unplanned_ticket(&app, &board_id, &cookie, &csrf).await;
         common::set_ticket_repo(&app, &ticket_id, &repo_id, &cookie, &csrf).await;
+        common::skip_planning(&app, &ticket_id, &cookie, &csrf).await;
         let ready = app
             .clone()
             .oneshot(common::json_request(
@@ -860,7 +849,6 @@ async fn ready_tech_lead_invalid_handoffs_stay_ready_and_start_nobody() {
             .await
             .unwrap();
         assert_eq!(ready.status(), StatusCode::OK);
-        common::assign_agent_to_ticket(&app, &ticket_id, &tech_lead_id, &cookie, &csrf).await;
 
         common::poll_runs_until_count(
             &app,
@@ -956,6 +944,7 @@ async fn ready_tech_lead_clarification_resumes_same_refinement_contract() {
 
     let ticket_id = common::create_unplanned_ticket(&app, &board_id, &cookie, &csrf).await;
     common::set_ticket_repo(&app, &ticket_id, &repo_id, &cookie, &csrf).await;
+    common::skip_planning(&app, &ticket_id, &cookie, &csrf).await;
     let ready = app
         .clone()
         .oneshot(common::json_request(
@@ -968,8 +957,6 @@ async fn ready_tech_lead_clarification_resumes_same_refinement_contract() {
         .await
         .unwrap();
     assert_eq!(ready.status(), StatusCode::OK);
-    common::skip_planning(&app, &ticket_id, &cookie, &csrf).await;
-    common::assign_agent_to_ticket(&app, &ticket_id, &tech_lead_id, &cookie, &csrf).await;
 
     let runs = common::poll_runs_until_count(
         &app,
@@ -1137,12 +1124,10 @@ async fn scope_continued_run_keeps_in_progress() {
         .iter()
         .find(|c| c["authorType"] == "agent" && c["intent"] == "progress_update")
         .expect("agent progress_update comment");
-    assert!(
-        progress_comment["body"]
-            .as_str()
-            .unwrap()
-            .contains("TmuxStream")
-    );
+    assert!(progress_comment["body"]
+        .as_str()
+        .unwrap()
+        .contains("TmuxStream"));
 }
 
 #[tokio::test]
@@ -1159,8 +1144,7 @@ async fn scope_pm_split_pending() {
     let (_git_dir, local_path) = common::create_temp_git_checkout();
     let repo_id =
         common::register_test_repo(&app, &local_path.display().to_string(), &cookie, &csrf).await;
-    let pm_id =
-        common::create_agent_with_preset_key(&app, "pm", "PM Agent", &cookie, &csrf).await;
+    let pm_id = common::create_agent_with_preset_key(&app, "pm", "PM Agent", &cookie, &csrf).await;
 
     let ticket_id = common::create_test_ticket(&app, &board_id, &cookie, &csrf).await;
     common::set_ticket_repo(&app, &ticket_id, &repo_id, &cookie, &csrf).await;
@@ -1236,8 +1220,7 @@ async fn qc_defect_handoff_returns_to_engineer_without_committing() {
         &csrf,
     )
     .await;
-    let qc_id =
-        common::create_agent_with_preset_key(&app, "qc", "QC Agent", &cookie, &csrf).await;
+    let qc_id = common::create_agent_with_preset_key(&app, "qc", "QC Agent", &cookie, &csrf).await;
 
     let ticket_id = common::create_test_ticket(&app, &board_id, &cookie, &csrf).await;
     common::set_ticket_repo(&app, &ticket_id, &repo_id, &cookie, &csrf).await;
@@ -1343,7 +1326,10 @@ async fn qc_defect_handoff_returns_to_engineer_without_committing() {
         .find(|c| c["authorId"].as_str() == Some(qc_id.as_str()))
         .expect("QC-authored comment");
     let body = qc_comment["body"].as_str().expect("qc comment body");
-    assert!(body.contains("Defects found"), "QC defect verdict present: {body}");
+    assert!(
+        body.contains("Defects found"),
+        "QC defect verdict present: {body}"
+    );
     assert!(
         !body.contains("**Git:**"),
         "QC comment must not carry a git footer: {body}"
