@@ -1,0 +1,21 @@
+{
+  "status": "done",
+  "summary": "stdout ignored",
+  "changedFiles": [],
+  "testsRun": [],
+  "mentionAgents": [],
+  "blockers": [],
+  "toolCalls": [
+    {
+      "tool": "result_submit",
+      "args": {
+        "status": "done",
+        "summary": "Shipped the parser.",
+        "mentionAgents": [],
+        "howItWorks": "The parser reads the header first.",
+        "changesFromPlan": "",
+        "lookHereFirst": "src/parser.rs"
+      }
+    }
+  ]
+}

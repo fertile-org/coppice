@@ -26,6 +26,7 @@ export const diffFileSummarySchema = z.object({
   status: z.string(),
   additions: z.number(),
   deletions: z.number(),
+  notInPlan: z.boolean().optional(),
 });
 
 export type DiffFileSummary = z.infer<typeof diffFileSummarySchema>;
