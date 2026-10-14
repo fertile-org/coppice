@@ -11,11 +11,13 @@ use crate::domain::comment::{AuthorType, CommentIntent};
 use crate::events::bus::AppEvent;
 use crate::services::comment_service::CommentService;
 use crate::copy::plan::PLAN_REQUIRED;
+use crate::copy::restart::{git_error, ERROR_NONE, ERROR_USE_CANCEL, ERROR_USE_DISCARD};
 use crate::services::planning_service::PlanningService;
 use crate::services::workflow_service::{WorkflowService, DONE_REQUIRES_ACCEPT};
 use crate::domain::agent_health::AgentHealthStatus;
 use crate::services::agent_health::missing_connector_detail;
 use crate::services::agent_service::{AgentError, AgentService};
+use crate::services::restart_service::{RestartError, RestartService};
 use crate::services::run_service::{RunError, RunService};
 use crate::services::split_service::{SplitError, SplitService};
 use crate::services::human_review_service::{short_commit_sha, HumanReviewService};
@@ -58,6 +60,19 @@ pub fn routes() -> Router<Arc<AppState>> {
         )
         .route("/api/tickets/{ticket_id}/assign", post(assign_agent))
         .route("/api/tickets/{ticket_id}/run-agent", post(run_agent))
+        .route("/api/tickets/{ticket_id}/restart", get(get_restart))
+        .route(
+            "/api/tickets/{ticket_id}/restart/resume",
+            post(resume_restart),
+        )
+        .route(
+            "/api/tickets/{ticket_id}/restart/discard",
+            post(discard_restart),
+        )
+        .route(
+            "/api/tickets/{ticket_id}/restart/cancel",
+            post(cancel_restart),
+        )
         .route("/api/tickets/{ticket_id}/runs", get(list_runs))
         .route(
             "/api/tickets/{ticket_id}/final-approve",
@@ -995,6 +1010,166 @@ async fn run_agent(
         .await
         .map_err(map_run_error_response)?;
     Ok((StatusCode::CREATED, Json(response)))
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RestartResponse {
+    pending: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    run_id: Option<Uuid>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    changed_files: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    resume_label: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    other_label: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    confirm: Option<String>,
+}
+
+fn restart_response(
+    choice: Option<crate::services::restart_service::RestartChoice>,
+) -> RestartResponse {
+    match choice {
+        None => RestartResponse {
+            pending: false,
+            run_id: None,
+            changed_files: None,
+            resume_label: None,
+            other_label: None,
+            confirm: None,
+        },
+        Some(choice) => RestartResponse {
+            pending: true,
+            run_id: Some(choice.run_id),
+            changed_files: Some(choice.changed_files),
+            resume_label: Some(choice.resume_label.to_string()),
+            other_label: Some(choice.other_label.to_string()),
+            confirm: choice.confirm,
+        },
+    }
+}
+
+enum RestartApiError {
+    Status(StatusCode),
+    Message(StatusCode, String),
+}
+
+impl IntoResponse for RestartApiError {
+    fn into_response(self) -> Response {
+        match self {
+            RestartApiError::Status(code) => code.into_response(),
+            RestartApiError::Message(code, message) => {
+                (code, Json(ApiMessageResponse { message })).into_response()
+            }
+        }
+    }
+}
+
+fn map_restart_error(err: RestartError) -> RestartApiError {
+    match err {
+        RestartError::NothingPending => {
+            RestartApiError::Message(StatusCode::NOT_FOUND, ERROR_NONE.to_string())
+        }
+        RestartError::UseDiscard => {
+            RestartApiError::Message(StatusCode::BAD_REQUEST, ERROR_USE_DISCARD.to_string())
+        }
+        RestartError::UseCancel => {
+            RestartApiError::Message(StatusCode::BAD_REQUEST, ERROR_USE_CANCEL.to_string())
+        }
+        RestartError::Git(detail) => {
+            tracing::warn!(error = %detail, "restart worktree action failed");
+            RestartApiError::Message(StatusCode::INTERNAL_SERVER_ERROR, git_error(&detail))
+        }
+        RestartError::Run(RunError::ActiveRunExists)
+        | RestartError::Ticket(TicketError::ActiveRunExists)
+        | RestartError::Ticket(TicketError::Archived) => {
+            RestartApiError::Status(StatusCode::CONFLICT)
+        }
+        RestartError::Run(RunError::NotFound)
+        | RestartError::Ticket(TicketError::TicketNotFound)
+        | RestartError::Ticket(TicketError::BoardNotFound) => {
+            RestartApiError::Message(StatusCode::NOT_FOUND, ERROR_NONE.to_string())
+        }
+        RestartError::Run(RunError::Validation(message))
+        | RestartError::Ticket(TicketError::Validation(message)) => {
+            // Status-write backstops. The sentences stay off the client.
+            if message == "ticket is not waiting after a restart"
+                || message == "accepted work is not resumed"
+            {
+                RestartApiError::Message(StatusCode::NOT_FOUND, ERROR_NONE.to_string())
+            } else {
+                RestartApiError::Message(StatusCode::BAD_REQUEST, message)
+            }
+        }
+        RestartError::Ticket(
+            TicketError::InvalidStatus
+            | TicketError::InvalidSubstatus
+            | TicketError::InvalidPriority,
+        ) => RestartApiError::Status(StatusCode::BAD_REQUEST),
+        RestartError::Ticket(TicketError::Database(err))
+        | RestartError::Run(RunError::Database(err))
+        | RestartError::Database(err) => {
+            tracing::warn!(error = %err, "restart action failed");
+            RestartApiError::Status(StatusCode::INTERNAL_SERVER_ERROR)
+        }
+    }
+}
+
+async fn get_restart(
+    State(state): State<Arc<AppState>>,
+    AuthUser { .. }: AuthUser,
+    Path(ticket_id): Path<Uuid>,
+) -> Result<Json<RestartResponse>, RestartApiError> {
+    let pool = pool_from_state(&state).map_err(RestartApiError::Status)?;
+    let choice = RestartService::new(pool)
+        .open(ticket_id)
+        .await
+        .map_err(map_restart_error)?;
+    Ok(Json(restart_response(choice)))
+}
+
+async fn resume_restart(
+    State(state): State<Arc<AppState>>,
+    AuthUser { .. }: AuthUser,
+    Path(ticket_id): Path<Uuid>,
+) -> Result<Json<RestartResponse>, RestartApiError> {
+    let pool = pool_from_state(&state).map_err(RestartApiError::Status)?;
+    RestartService::new(pool)
+        .resume(ticket_id)
+        .await
+        .map_err(map_restart_error)?;
+    publish_ticket_state(&state, pool, ticket_id).await;
+    Ok(Json(restart_response(None)))
+}
+
+async fn discard_restart(
+    State(state): State<Arc<AppState>>,
+    AuthUser { .. }: AuthUser,
+    Path(ticket_id): Path<Uuid>,
+) -> Result<Json<RestartResponse>, RestartApiError> {
+    let pool = pool_from_state(&state).map_err(RestartApiError::Status)?;
+    RestartService::new(pool)
+        .discard(ticket_id)
+        .await
+        .map_err(map_restart_error)?;
+    publish_ticket_state(&state, pool, ticket_id).await;
+    Ok(Json(restart_response(None)))
+}
+
+async fn cancel_restart(
+    State(state): State<Arc<AppState>>,
+    AuthUser { .. }: AuthUser,
+    Path(ticket_id): Path<Uuid>,
+) -> Result<Json<RestartResponse>, RestartApiError> {
+    let pool = pool_from_state(&state).map_err(RestartApiError::Status)?;
+    RestartService::new(pool)
+        .cancel(ticket_id)
+        .await
+        .map_err(map_restart_error)?;
+    publish_ticket_state(&state, pool, ticket_id).await;
+    Ok(Json(restart_response(None)))
 }
 
 async fn list_runs(

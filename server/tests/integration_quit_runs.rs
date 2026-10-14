@@ -6,6 +6,7 @@ mod common;
 use std::path::Path;
 use std::time::Duration;
 
+use coppice_server::copy::restart::COMMENT_NONE;
 use coppice_server::domain::substatus::{Substatus, TicketStatus};
 use coppice_server::domain::ticket::status_to_str;
 use coppice_server::process_tree::{self, process_alive, SpawnMeta};
@@ -161,11 +162,12 @@ async fn wait_dead(pid: u32) -> bool {
     }
 }
 
-async fn assert_blocked_with_quit_comment(
+async fn assert_blocked_with_comment(
     pool: &sqlx::PgPool,
     ticket_id: Uuid,
     run_id: Uuid,
     reason: &str,
+    body: &str,
 ) {
     let ticket = TicketService::new(pool)
         .get(ticket_id)
@@ -187,9 +189,7 @@ async fn assert_blocked_with_quit_comment(
         .await
         .expect("comments");
     assert!(
-        comments
-            .iter()
-            .any(|comment| comment.body == RUN_STOPPED_BECAUSE_QUIT),
+        comments.iter().any(|comment| comment.body == body),
         "{comments:?}"
     );
 
@@ -230,7 +230,14 @@ async fn graceful_shutdown_and_crash_reap_block_in_progress_tickets() {
         wait_dead(grace_child).await,
         "background {grace_child} survived shutdown"
     );
-    assert_blocked_with_quit_comment(pool, grace_ticket, grace_run, GRACEFUL_QUIT_REASON).await;
+    assert_blocked_with_comment(
+        pool,
+        grace_ticket,
+        grace_run,
+        GRACEFUL_QUIT_REASON,
+        RUN_STOPPED_BECAUSE_QUIT,
+    )
+    .await;
 
     let (crash_ticket, crash_run) = insert_running_ticket(pool, "in_progress").await;
     let crash_dir = tempfile::tempdir().expect("crash dir");
@@ -262,8 +269,24 @@ async fn graceful_shutdown_and_crash_reap_block_in_progress_tickets() {
         wait_dead(crash_child).await,
         "background {crash_child} survived restart reap"
     );
-    assert_blocked_with_quit_comment(pool, crash_ticket, crash_run, "server restarted during run")
-        .await;
+    assert_blocked_with_comment(
+        pool,
+        crash_ticket,
+        crash_run,
+        "server restarted during run",
+        COMMENT_NONE,
+    )
+    .await;
+    let comments = CommentService::new(pool)
+        .list_by_ticket(crash_ticket)
+        .await
+        .expect("comments");
+    assert!(
+        !comments
+            .iter()
+            .any(|comment| comment.body == RUN_STOPPED_BECAUSE_QUIT),
+        "restart must not reuse the quit comment: {comments:?}"
+    );
 }
 
 #[tokio::test]
@@ -293,6 +316,13 @@ async fn graceful_shutdown_blocks_in_review_and_in_qa_tickets() {
             wait_dead(child).await,
             "{status} background {child} survived quit"
         );
-        assert_blocked_with_quit_comment(pool, ticket_id, run_id, GRACEFUL_QUIT_REASON).await;
+        assert_blocked_with_comment(
+            pool,
+            ticket_id,
+            run_id,
+            GRACEFUL_QUIT_REASON,
+            RUN_STOPPED_BECAUSE_QUIT,
+        )
+        .await;
     }
 }

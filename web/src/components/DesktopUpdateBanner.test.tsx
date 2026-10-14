@@ -60,4 +60,17 @@ describe('DesktopUpdateBanner', () => {
     render(<DesktopUpdateBanner />);
     expect(await screen.findByText('Coppice 9.0.0 is available')).toBeInTheDocument();
   });
+
+  it('hides the download while a run is active', async () => {
+    stubBridge({ version: '9.0.0', url: 'https://x' });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(JSON.stringify({ active: true }), { status: 200 })),
+    );
+    const { container } = render(<DesktopUpdateBanner />);
+    await vi.waitFor(() => expect(window.coppiceDesktop?.getUpdateInfo).toHaveBeenCalled());
+    await vi.waitFor(() => expect(fetch).toHaveBeenCalled());
+    expect(container).toBeEmptyDOMElement();
+    vi.unstubAllGlobals();
+  });
 });

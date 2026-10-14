@@ -153,7 +153,7 @@ async fn git_ref_sha(git_dir: &Path, ref_name: &str) -> Result<String, WorktreeE
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
 
-async fn git_head_sha(worktree: &Path) -> Result<String, WorktreeError> {
+pub(crate) async fn git_head_sha(worktree: &Path) -> Result<String, WorktreeError> {
     let output = crate::services::git_cmd::output(Some(worktree), &["rev-parse", "HEAD"])
         .await
         .map_err(WorktreeError::from)?;
