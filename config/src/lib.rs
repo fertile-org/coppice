@@ -722,18 +722,56 @@ pub struct AgentConnectorsConfig {
     pub cursor: CursorConnectorConfig,
 }
 
+/// Whether the user set a connector's switch.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConnectorSwitch {
+    /// Not a connector id this config knows.
+    Unknown,
+    /// The key is absent. A CLI that is found and passes the free sign-in
+    /// check is on until the user turns it off in Connectors.
+    Automatic,
+    On,
+    Off,
+}
+
+impl ConnectorSwitch {
+    /// Shared on/off. `ready` is the free sign-in check (CLI found and signed in).
+    pub fn is_on(self, ready: bool) -> bool {
+        match self {
+            Self::On => true,
+            Self::Automatic => ready,
+            Self::Off | Self::Unknown => false,
+        }
+    }
+}
+
 impl AgentConnectorsConfig {
-    /// `enabled` flag for a connector id; `mock` is always enabled.
-    /// `None` means the id has no config section here.
+    /// How the user left the switch. Missing keys are [`ConnectorSwitch::Automatic`].
+    pub fn switch(&self, id: &str) -> ConnectorSwitch {
+        let flag = match id {
+            "mock" => return ConnectorSwitch::On,
+            "opencode" => self.opencode.enabled,
+            "claude-code" => self.claude_code.enabled,
+            "codex" => self.codex.enabled,
+            "kilo-code" => self.kilo_code.enabled,
+            "cursor" => self.cursor.enabled,
+            _ => return ConnectorSwitch::Unknown,
+        };
+        match flag {
+            Some(true) => ConnectorSwitch::On,
+            Some(false) => ConnectorSwitch::Off,
+            None => ConnectorSwitch::Automatic,
+        }
+    }
+
+    /// Explicit on/off for callers that do not run the sign-in check.
+    /// A missing key is `Some(false)`. `None` means the id is unknown.
+    /// `mock` is always `Some(true)`.
     pub fn enabled(&self, id: &str) -> Option<bool> {
-        match id {
-            "mock" => Some(true),
-            "opencode" => Some(self.opencode.enabled),
-            "claude-code" => Some(self.claude_code.enabled),
-            "codex" => Some(self.codex.enabled),
-            "kilo-code" => Some(self.kilo_code.enabled),
-            "cursor" => Some(self.cursor.enabled),
-            _ => None,
+        match self.switch(id) {
+            ConnectorSwitch::Unknown => None,
+            ConnectorSwitch::On => Some(true),
+            ConnectorSwitch::Off | ConnectorSwitch::Automatic => Some(false),
         }
     }
 
@@ -744,6 +782,7 @@ impl AgentConnectorsConfig {
             "opencode" => Some(&self.opencode.command),
             "kilo-code" => Some(&self.kilo_code.command),
             "cursor" => Some(&self.cursor.command),
+            "codex" => Some(&self.codex.command),
             _ => None,
         }
     }
@@ -758,13 +797,13 @@ impl AgentConnectorsConfig {
         default_model_providers: &[&str],
     ) -> Result<bool, &'static str> {
         fn apply(
-            flag: &mut bool,
+            flag: &mut Option<bool>,
             providers: &mut Vec<String>,
             enabled: bool,
             defaults: &[&str],
         ) -> bool {
-            let changed = *flag != enabled;
-            *flag = enabled;
+            let changed = *flag != Some(enabled);
+            *flag = Some(enabled);
             if enabled && providers.is_empty() {
                 *providers = defaults
                     .iter()
@@ -824,8 +863,9 @@ impl AgentConnectorsConfig {
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct OpenCodeConnectorConfig {
-    #[serde(default = "default_false")]
-    pub enabled: bool,
+    /// Absent until the user sets the switch in Connectors.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub enabled: Option<bool>,
     #[serde(default = "default_opencode_command")]
     pub command: String,
     #[serde(default = "default_opencode_host")]
@@ -867,7 +907,7 @@ fn default_opencode_run_timeout_secs() -> u64 {
 impl Default for OpenCodeConnectorConfig {
     fn default() -> Self {
         Self {
-            enabled: default_false(),
+            enabled: None,
             command: default_opencode_command(),
             serve_hostname: default_opencode_host(),
             serve_port: default_opencode_port(),
@@ -879,8 +919,9 @@ impl Default for OpenCodeConnectorConfig {
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct ClaudeCodeConnectorConfig {
-    #[serde(default = "default_false")]
-    pub enabled: bool,
+    /// Absent until the user sets the switch in Connectors.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub enabled: Option<bool>,
     #[serde(default = "default_claude_code_run_timeout_secs")]
     pub run_timeout_secs: u64,
     #[serde(default)]
@@ -891,8 +932,11 @@ pub type ClaudeCodeProviderConfig = ClaudeCodeConnectorConfig;
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct CodexConnectorConfig {
-    #[serde(default = "default_false")]
-    pub enabled: bool,
+    /// Absent until the user sets the switch in Connectors.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub enabled: Option<bool>,
+    #[serde(default = "default_codex_command")]
+    pub command: String,
     #[serde(default = "default_codex_run_timeout_secs")]
     pub run_timeout_secs: u64,
     #[serde(default)]
@@ -901,6 +945,10 @@ pub struct CodexConnectorConfig {
 
 pub type CodexProviderConfig = CodexConnectorConfig;
 
+fn default_codex_command() -> String {
+    "codex".into()
+}
+
 fn default_codex_run_timeout_secs() -> u64 {
     600
 }
@@ -908,7 +956,8 @@ fn default_codex_run_timeout_secs() -> u64 {
 impl Default for CodexConnectorConfig {
     fn default() -> Self {
         Self {
-            enabled: default_false(),
+            enabled: None,
+            command: default_codex_command(),
             run_timeout_secs: default_codex_run_timeout_secs(),
             model_providers: Vec::new(),
         }
@@ -922,7 +971,7 @@ fn default_claude_code_run_timeout_secs() -> u64 {
 impl Default for ClaudeCodeConnectorConfig {
     fn default() -> Self {
         Self {
-            enabled: default_false(),
+            enabled: None,
             run_timeout_secs: default_claude_code_run_timeout_secs(),
             model_providers: Vec::new(),
         }
@@ -931,8 +980,9 @@ impl Default for ClaudeCodeConnectorConfig {
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct KiloCodeConnectorConfig {
-    #[serde(default = "default_false")]
-    pub enabled: bool,
+    /// Absent until the user sets the switch in Connectors.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub enabled: Option<bool>,
     #[serde(default = "default_kilo_code_command")]
     pub command: String,
     #[serde(default = "default_kilo_code_run_timeout_secs")]
@@ -954,7 +1004,7 @@ fn default_kilo_code_run_timeout_secs() -> u64 {
 impl Default for KiloCodeConnectorConfig {
     fn default() -> Self {
         Self {
-            enabled: default_false(),
+            enabled: None,
             command: default_kilo_code_command(),
             run_timeout_secs: default_kilo_code_run_timeout_secs(),
             model_providers: Vec::new(),
@@ -964,8 +1014,9 @@ impl Default for KiloCodeConnectorConfig {
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct CursorConnectorConfig {
-    #[serde(default = "default_false")]
-    pub enabled: bool,
+    /// Absent until the user sets the switch in Connectors.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub enabled: Option<bool>,
     #[serde(default = "default_cursor_command")]
     pub command: String,
     #[serde(default = "default_cursor_run_timeout_secs")]
@@ -987,7 +1038,7 @@ fn default_cursor_run_timeout_secs() -> u64 {
 impl Default for CursorConnectorConfig {
     fn default() -> Self {
         Self {
-            enabled: default_false(),
+            enabled: None,
             command: default_cursor_command(),
             run_timeout_secs: default_cursor_run_timeout_secs(),
             model_providers: Vec::new(),
@@ -1226,8 +1277,20 @@ mod tests {
         assert_eq!(connectors.enabled("nope"), None);
         assert_eq!(connectors.enabled(coppice_connectors::MOCK), Some(true));
         assert_eq!(connectors.enabled(coppice_connectors::CODEX), Some(false));
-        connectors.codex.enabled = true;
+        connectors.codex.enabled = Some(true);
         assert_eq!(connectors.enabled(coppice_connectors::CODEX), Some(true));
+        assert_eq!(
+            connectors.switch(coppice_connectors::CURSOR),
+            ConnectorSwitch::Automatic
+        );
+        assert!(connectors.switch(coppice_connectors::CURSOR).is_on(true));
+        assert!(!connectors.switch(coppice_connectors::CURSOR).is_on(false));
+        connectors.cursor.enabled = Some(false);
+        assert_eq!(
+            connectors.switch(coppice_connectors::CURSOR),
+            ConnectorSwitch::Off
+        );
+        assert!(!connectors.switch(coppice_connectors::CURSOR).is_on(true));
     }
 
     #[test]
@@ -1316,7 +1379,7 @@ mod tests {
         let wrapper: Wrapper = toml::from_str(toml).expect("parse");
         let cfg = wrapper.agent;
         assert!(cfg.ignored_default_connector.is_some());
-        assert!(cfg.connectors.opencode.enabled);
+        assert_eq!(cfg.connectors.opencode.enabled, Some(true));
         assert_eq!(cfg.connectors.opencode.model_providers, vec!["anthropic"]);
     }
 
@@ -1339,7 +1402,7 @@ mod tests {
         }
         let wrapper: Wrapper = toml::from_str(toml).expect("parse");
         let cfg = wrapper.agent;
-        assert!(cfg.connectors.claude_code.enabled);
+        assert_eq!(cfg.connectors.claude_code.enabled, Some(true));
         assert_eq!(cfg.connectors.claude_code.run_timeout_secs, 900);
         assert_eq!(
             cfg.connectors.claude_code.model_providers,
@@ -1350,7 +1413,7 @@ mod tests {
     #[test]
     fn claude_code_connector_defaults() {
         let cfg = ClaudeCodeConnectorConfig::default();
-        assert!(!cfg.enabled);
+        assert_eq!(cfg.enabled, None);
         assert_eq!(cfg.run_timeout_secs, 600);
         assert!(cfg.model_providers.is_empty());
     }
@@ -1374,7 +1437,7 @@ mod tests {
         }
         let wrapper: Wrapper = toml::from_str(toml).expect("parse");
         let cfg = wrapper.agent;
-        assert!(cfg.connectors.codex.enabled);
+        assert_eq!(cfg.connectors.codex.enabled, Some(true));
         assert_eq!(cfg.connectors.codex.run_timeout_secs, 900);
         assert_eq!(
             cfg.connectors.codex.model_providers,
@@ -1385,7 +1448,7 @@ mod tests {
     #[test]
     fn codex_connector_defaults() {
         let cfg = CodexConnectorConfig::default();
-        assert!(!cfg.enabled);
+        assert_eq!(cfg.enabled, None);
         assert_eq!(cfg.run_timeout_secs, 600);
         assert!(cfg.model_providers.is_empty());
     }
@@ -1410,7 +1473,7 @@ mod tests {
         }
         let wrapper: Wrapper = toml::from_str(toml).expect("parse");
         let cfg = wrapper.agent;
-        assert!(cfg.connectors.kilo_code.enabled);
+        assert_eq!(cfg.connectors.kilo_code.enabled, Some(true));
         assert_eq!(cfg.connectors.kilo_code.command, "kilo");
         assert_eq!(cfg.connectors.kilo_code.run_timeout_secs, 900);
         assert_eq!(
@@ -1422,7 +1485,7 @@ mod tests {
     #[test]
     fn kilo_code_connector_defaults() {
         let cfg = KiloCodeConnectorConfig::default();
-        assert!(!cfg.enabled);
+        assert_eq!(cfg.enabled, None);
         assert_eq!(cfg.command, "kilo");
         assert_eq!(cfg.run_timeout_secs, 600);
         assert!(cfg.model_providers.is_empty());
@@ -1448,7 +1511,7 @@ mod tests {
         }
         let wrapper: Wrapper = toml::from_str(toml).expect("parse");
         let cfg = wrapper.agent;
-        assert!(cfg.connectors.cursor.enabled);
+        assert_eq!(cfg.connectors.cursor.enabled, Some(true));
         assert_eq!(cfg.connectors.cursor.command, "cursor-agent");
         assert_eq!(cfg.connectors.cursor.run_timeout_secs, 900);
         assert_eq!(cfg.connectors.cursor.model_providers, vec!["cursor"]);
@@ -1457,7 +1520,7 @@ mod tests {
     #[test]
     fn cursor_connector_defaults() {
         let cfg = CursorConnectorConfig::default();
-        assert!(!cfg.enabled);
+        assert_eq!(cfg.enabled, None);
         assert_eq!(cfg.command, "agent");
         assert_eq!(cfg.run_timeout_secs, 600);
         assert!(cfg.model_providers.is_empty());
@@ -1470,7 +1533,7 @@ mod tests {
         assert_eq!(cfg.command("cursor"), Some("agent"));
         assert_eq!(cfg.command("opencode"), Some("opencode"));
         assert_eq!(cfg.command("claude-code"), None);
-        assert_eq!(cfg.command("codex"), None);
+        assert_eq!(cfg.command("codex"), Some("codex"));
         assert_eq!(cfg.command("mock"), None);
         assert_eq!(cfg.command("nope"), None);
         cfg.cursor.command = "cursor-agent".into();
@@ -1502,7 +1565,7 @@ mod tests {
             None => std::env::remove_var(KEY),
         }
 
-        assert!(!cfg.agent.connectors.opencode.enabled);
+        assert_eq!(cfg.agent.connectors.opencode.enabled, None);
         assert!(cfg.agent.ignored_default_connector.is_none());
     }
 

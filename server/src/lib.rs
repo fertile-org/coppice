@@ -9,6 +9,7 @@ pub mod db;
 pub mod desktop;
 pub mod domain;
 pub mod events;
+pub mod host_env;
 pub mod knowledge;
 pub mod mcp;
 pub mod middleware;

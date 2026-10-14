@@ -10,7 +10,7 @@ use axum::{
     routing::get,
     Json, Router,
 };
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 use time::format_description::well_known::Rfc3339;
@@ -90,6 +90,14 @@ struct CreateAgentBody {
     enabled: Option<bool>,
 }
 
+fn deserialize_present_nullable<'de, D, T>(deserializer: D) -> Result<Option<Option<T>>, D::Error>
+where
+    D: Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    Ok(Some(Option::<T>::deserialize(deserializer)?))
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct UpdateAgentBody {
@@ -98,8 +106,12 @@ struct UpdateAgentBody {
     responsibilities: Option<Vec<String>>,
     system_prompt: Option<String>,
     connector: Option<String>,
-    model_provider: Option<String>,
-    model: Option<String>,
+    /// Missing keeps the saved provider. JSON `null` or `""` clears it.
+    #[serde(default, deserialize_with = "deserialize_present_nullable")]
+    model_provider: Option<Option<String>>,
+    /// Missing keeps the saved model. JSON `null` or `""` clears it.
+    #[serde(default, deserialize_with = "deserialize_present_nullable")]
+    model: Option<Option<String>>,
     enabled: Option<bool>,
 }
 
@@ -305,8 +317,8 @@ async fn update_agent(
             body.responsibilities.as_deref(),
             body.system_prompt.as_deref(),
             body.connector.as_deref(),
-            body.model_provider.as_deref(),
-            body.model.as_deref(),
+            body.model_provider.as_ref().map(|value| value.as_deref()),
+            body.model.as_ref().map(|value| value.as_deref()),
             body.enabled,
         )
         .await
@@ -327,4 +339,33 @@ async fn delete_agent(
     let service = AgentService::new(pool);
     service.delete(agent_id).await.map_err(map_error)?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::UpdateAgentBody;
+
+    #[test]
+    fn null_model_fields_are_present_and_clear() {
+        let body: UpdateAgentBody =
+            serde_json::from_str(r#"{"model":null,"modelProvider":null}"#).unwrap();
+        assert_eq!(body.model, Some(None));
+        assert_eq!(body.model_provider, Some(None));
+    }
+
+    #[test]
+    fn omitted_model_fields_stay_absent() {
+        let body: UpdateAgentBody = serde_json::from_str(r#"{"name":"Ada"}"#).unwrap();
+        assert_eq!(body.model, None);
+        assert_eq!(body.model_provider, None);
+        assert_eq!(body.name.as_deref(), Some("Ada"));
+    }
+
+    #[test]
+    fn blank_model_fields_are_present() {
+        let body: UpdateAgentBody =
+            serde_json::from_str(r#"{"model":"","modelProvider":"  "}"#).unwrap();
+        assert_eq!(body.model, Some(Some(String::new())));
+        assert_eq!(body.model_provider, Some(Some("  ".to_string())));
+    }
 }

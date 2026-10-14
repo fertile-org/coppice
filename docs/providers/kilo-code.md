@@ -49,7 +49,7 @@ coppice connector doctor kilo-code
 
 1. Open **Agents** and create or edit an agent.
 2. Set connector to **kilo-code**.
-3. Leave the model on Kilo Code's default, or pick a provider and model. With no `model_providers` override, Coppice reads providers from `kilo models` (a few seconds; if that fails, only the default is offered).
+3. Leave the model on Kilo Code's default, or pick a model from the list (providers from `kilo models` are headings). Refresh models loads that list again.
 4. Assign the agent to a ticket and start a run.
 
 Optional config (usually set by `enable`):
@@ -71,12 +71,12 @@ Start at **Tools → Connectors** (admin): it shows whether `kilo` is found, whi
 |---------|-------------|
 | Binary missing | Install `@kilocode/cli` so `kilo` is on PATH under `/home/coppice` |
 | Auth missing | Re-run `setup` or authenticate in the Kilo TUI (`/connect`) |
-| No models in UI | Confirm `kilo models <provider>` works inside the server container |
+| No models in UI | Confirm `kilo models` works inside the server container, then use Refresh models |
 | Config ignored | `coppice connector enable` and hand-edits apply on the next server start. The in-app switch does not need a restart |
 
 ## Behavior notes
 
-- **Sign-in:** Kilo has no cheap non-interactive auth check (`kilo auth` opens a TUI). A found binary is labeled **Found (sign-in not checked)**, not Ready or "Found, not signed in".
+- **Sign-in:** Kilo has no free non-interactive auth check (`kilo auth` opens a TUI). A found binary is labeled **Installed**, not Ready. Tools → Connectors adds: "Coppice can't check this sign-in without using your plan. A run will show an error if you're signed out."
 - **Live console:** Streams assistant output while the run is active. After a server restart mid-run, Coppice replays the saved log.
 - **Continued tickets:** Prefer checkpoint-style `continued` runs. Worker-wired session resume for Kilo is not fully connected yet.
 - **Daemon / serve:** Coppice uses the **subprocess** path (`kilo run`), not `kilo serve` / daemon HTTP APIs (compatibility not confirmed).

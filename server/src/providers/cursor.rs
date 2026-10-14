@@ -42,7 +42,9 @@ impl AgentProvider for CursorProvider {
         let contract = coppice_connectors::get(coppice_connectors::CURSOR)
             .expect("cursor descriptor")
             .run_contract;
-        let version = cli_version::detect(command).await;
+        let version = cli_version::detect(command).await.map_err(|err| {
+            ProviderError::InvalidFixture(cli_version::version_unavailable(command, &err))
+        })?;
 
         let args = cursor_cli_args(
             &worktree,
@@ -50,7 +52,7 @@ impl AgentProvider for CursorProvider {
             input.job_type == crate::domain::workflow::JOB_TYPE_PLAN_TICKET,
             input.model.as_deref(),
             input.resume_session_id.as_deref(),
-            cli_version::for_gate(&version),
+            Some(version.as_str()),
         );
 
         // Auth is host-managed: the operator runs `agent login` wherever the
@@ -63,7 +65,7 @@ impl AgentProvider for CursorProvider {
             env.extend(cursor_mcp_setup(
                 access,
                 &state_dir,
-                &HostEnv::from_process(),
+                &CursorLaunchEnv::from_process(),
             )?);
             env.extend(access.env().map(|(k, v)| (k.to_string(), v)));
         }
@@ -114,7 +116,7 @@ impl AgentProvider for CursorProvider {
                 return Err(ProviderError::Io(std::io::Error::new(
                     err.kind(),
                     format!(
-                        "failed to spawn `{command}` (cwd {}): {err}",
+                        "Couldn't start `{command}` in {}: {err}",
                         worktree.display()
                     ),
                 )));
@@ -260,14 +262,14 @@ fn cursor_cli_args(
 
 /// The host values the per-run environment is derived from, captured before
 /// `HOME` is overridden.
-struct HostEnv {
+struct CursorLaunchEnv {
     home: Option<PathBuf>,
     xdg_config_home: Option<PathBuf>,
     git_config_global: Option<String>,
     gh_config_dir: Option<String>,
 }
 
-impl HostEnv {
+impl CursorLaunchEnv {
     fn from_process() -> Self {
         Self {
             home: std::env::var_os("HOME").map(PathBuf::from),
@@ -319,7 +321,7 @@ fn cursor_state_dir(input: &AgentRunInput) -> Result<PathBuf, ProviderError> {
 fn cursor_mcp_setup(
     access: &McpAccess,
     state_dir: &Path,
-    host: &HostEnv,
+    host: &CursorLaunchEnv,
 ) -> std::io::Result<Vec<(String, String)>> {
     let home = state_dir.join("cursor-home");
     let config_dir = state_dir.join("cursor-config");
@@ -608,7 +610,7 @@ mod tests {
         std::fs::write(real_home.join(".gitconfig"), "[user]\n").expect("gitconfig");
         let run_dir = tmp.path().join("runs").join("run-1");
 
-        let host = HostEnv {
+        let host = CursorLaunchEnv {
             home: Some(real_home.clone()),
             xdg_config_home: None,
             git_config_global: None,
@@ -657,7 +659,7 @@ mod tests {
         std::fs::create_dir_all(&real_home).expect("home");
         let run_dir = tmp.path().join("runs").join("run-2");
 
-        let host = HostEnv {
+        let host = CursorLaunchEnv {
             home: Some(real_home),
             xdg_config_home: Some(real_xdg.clone()),
             git_config_global: Some("/etc/gitconfig".into()),

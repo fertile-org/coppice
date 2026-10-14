@@ -38,13 +38,26 @@ pub async fn list_opencode_models(
     command: &str,
     model_provider: &str,
 ) -> anyhow::Result<Vec<ModelOption>> {
-    let output = tokio::process::Command::new(command)
-        .args(["models", model_provider])
-        .output()
-        .await?;
+    let output = crate::providers::cli_catalog::capture_cli(
+        command,
+        &["models", model_provider],
+        crate::host_env::MODEL_LIST_TIMEOUT,
+    )
+    .await
+    .map_err(|err| anyhow::anyhow!(err))?;
     if !output.status.success() {
+        let stdout = String::from_utf8_lossy(&output.stdout);
         let stderr = String::from_utf8_lossy(&output.stderr);
-        anyhow::bail!("opencode models failed: {stderr}");
+        let message = crate::providers::cli_catalog::models_failure_message(
+            &format!("`{command} models`"),
+            output.status,
+            &stdout,
+            &stderr,
+        );
+        return Err(crate::providers::cli_catalog::model_list_err(
+            message,
+            crate::host_env::first_text_line(&stderr),
+        ));
     }
     let stdout = String::from_utf8_lossy(&output.stdout);
     Ok(parse_opencode_models_stdout(&stdout, model_provider))

@@ -1,5 +1,11 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useState } from 'react';
+import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiFetch } from '../../lib/api';
+import {
+  connectorModelsPath,
+  ModelsRequestError,
+  modelsRequestError,
+} from './modelList';
 import type { CreateAgentInput, UpdateAgentInput } from '../../lib/schemas/agent';
 import { connectorListSchema, type Connector } from '../../lib/schemas/connector';
 import { TOOL_CONNECTORS_QUERY_KEY } from '../tools/useConnectorDiagnostics';
@@ -7,6 +13,9 @@ import { TOOL_CONNECTORS_QUERY_KEY } from '../tools/useConnectorDiagnostics';
 export const AGENTS_QUERY_KEY = ['agents'] as const;
 export const AGENT_PRESETS_QUERY_KEY = ['agent-presets'] as const;
 export const CONNECTORS_QUERY_KEY = ['connectors'] as const;
+
+/** Refresh models must ignore the shared 30s staleTime and hit the server. */
+export const MODELS_REFRESH_STALE_TIME = 0;
 
 export interface AgentPreset {
   id: string;
@@ -124,17 +133,17 @@ function invalidateIfConnectorTurnedOn(
   void queryClient.invalidateQueries({ queryKey: TOOL_CONNECTORS_QUERY_KEY });
 }
 
+async function fetchModelProviders(connectorId: string): Promise<ModelProviderOption[]> {
+  const res = await apiFetch(`/api/connectors/${connectorId}/model-providers`);
+  const data = (await res.json()) as { items: ModelProviderOption[] };
+  return data.items;
+}
+
 export function useModelProviders(connectorId: string | undefined) {
   return useQuery({
     queryKey: ['model-providers', connectorId],
     enabled: !!connectorId && connectorId !== 'mock',
-    queryFn: async () => {
-      const res = await apiFetch(
-        `/api/connectors/${connectorId}/model-providers`,
-      );
-      const data = (await res.json()) as { items: ModelProviderOption[] };
-      return data.items;
-    },
+    queryFn: () => fetchModelProviders(connectorId!),
   });
 }
 
@@ -146,14 +155,110 @@ export function useModels(
     queryKey: ['models', connectorId, modelProviderId],
     enabled:
       !!connectorId && !!modelProviderId && connectorId !== 'mock',
-    queryFn: async () => {
-      const res = await apiFetch(
-        `/api/connectors/${connectorId}/model-providers/${modelProviderId}/models`,
-      );
-      const data = (await res.json()) as { items: ModelOption[] };
-      return data.items;
-    },
+    queryFn: () => fetchProviderModels(connectorId!, modelProviderId!, false),
   });
+}
+
+export interface ModelGroup {
+  provider: string;
+  models: ModelOption[];
+}
+
+async function fetchProviderModels(
+  connectorId: string,
+  providerId: string,
+  refresh: boolean,
+): Promise<ModelOption[]> {
+  try {
+    const res = await apiFetch(connectorModelsPath(connectorId, providerId, refresh));
+    const data = (await res.json()) as { items?: ModelOption[] };
+    if (!Array.isArray(data.items) || data.items.length === 0) {
+      throw new ModelsRequestError('empty model list', null);
+    }
+    return data.items;
+  } catch (err) {
+    throw modelsRequestError(err);
+  }
+}
+
+function modelsQueryKey(connectorId: string, providerId: string) {
+  return ['models', connectorId, providerId] as const;
+}
+
+/**
+ * Models for every provider of the connector, in provider order.
+ * Cursor's provider id is `cursor`, so the request is
+ * `/api/connectors/cursor/model-providers/cursor/models`.
+ */
+export function useConnectorModels(connectorId: string | undefined) {
+  const queryClient = useQueryClient();
+  const providers = useModelProviders(connectorId);
+  const providerIds = (providers.data ?? []).map((provider) => provider.id);
+  const enabled = !!connectorId && connectorId !== 'mock' && providers.isSuccess;
+  const queries = useQueries({
+    queries: providerIds.map((providerId) => ({
+      queryKey: modelsQueryKey(connectorId ?? '', providerId),
+      enabled,
+      queryFn: () => fetchProviderModels(connectorId!, providerId, false),
+    })),
+  });
+
+  const groups: ModelGroup[] = providerIds.map((provider, index) => ({
+    provider,
+    models: queries[index]?.data ?? [],
+  }));
+  const [refreshing, setRefreshing] = useState(false);
+
+  const refresh = async () => {
+    if (!connectorId || connectorId === 'mock') return;
+    setRefreshing(true);
+    try {
+      let ids = providerIds;
+      if (ids.length === 0) {
+        const next = await queryClient.fetchQuery({
+          queryKey: ['model-providers', connectorId],
+          queryFn: () => fetchModelProviders(connectorId),
+          staleTime: MODELS_REFRESH_STALE_TIME,
+        });
+        ids = next.map((provider) => provider.id);
+      }
+      await Promise.all(
+        ids.map((providerId) =>
+          queryClient.fetchQuery({
+            queryKey: modelsQueryKey(connectorId, providerId),
+            queryFn: () => fetchProviderModels(connectorId, providerId, true),
+            staleTime: MODELS_REFRESH_STALE_TIME,
+          }),
+        ),
+      );
+    } catch {
+      // The query cache keeps the failure so the form can show it.
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
+  const providersEmpty =
+    !!connectorId &&
+    connectorId !== 'mock' &&
+    providers.isSuccess &&
+    providerIds.length === 0;
+  const isLoading =
+    (!!connectorId && connectorId !== 'mock' && providers.isLoading) ||
+    queries.some((query) => query.isLoading);
+  const isFetching = refreshing || queries.some((query) => query.isFetching);
+  const isError =
+    providersEmpty || providers.isError || queries.some((query) => query.isError);
+  const detail =
+    queries
+      .map((query) => query.error)
+      .find((error): error is ModelsRequestError => error instanceof ModelsRequestError)?.detail ??
+    null;
+  const errorMessage = [providers.error, ...queries.map((query) => query.error)]
+    .map((error) => (error ? modelsRequestError(error).message.trim() : ''))
+    .find((message) => message.length > 0) ?? null;
+
+  return { groups, isLoading, isFetching, isError, detail, errorMessage, refresh };
 }
 
 export function useCreateAgent() {

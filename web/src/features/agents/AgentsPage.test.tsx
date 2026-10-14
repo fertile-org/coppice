@@ -1,5 +1,6 @@
 import '@testing-library/jest-dom/vitest';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { selectComboboxOption } from '../../test/combobox';
 import { MemoryRouter, useLocation } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ToastProvider } from '../../components/ToastProvider';
@@ -12,6 +13,11 @@ const mocks = vi.hoisted(() => ({
   assigned: [] as string[],
   setPlugins: vi.fn(),
   updateAgent: vi.fn(),
+  groups: [] as { provider: string; models: { id: string; name: string }[] }[],
+  connectors: [{ id: 'mock', displayName: 'Mock' }] as {
+    id: string;
+    displayName?: string;
+  }[],
 }));
 
 vi.mock('../plugins/usePlugins', () => ({
@@ -42,14 +48,20 @@ const agent: Agent = {
 vi.mock('./useAgents', () => ({
   useAgents: () => ({ data: [agent], isLoading: false, isError: false, refetch: vi.fn() }),
   useAgentPresets: () => ({ data: [], isLoading: false }),
-  useConnectors: () => ({ data: [{ id: 'mock' }] }),
+  useConnectors: () => ({ data: mocks.connectors }),
   useUpdateAgentMutation: () => ({ mutateAsync: vi.fn() }),
   useCreateAgent: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useUpdateAgent: () => ({ mutateAsync: mocks.updateAgent, isPending: false }),
   useAgentPlugins: () => ({ data: mocks.assigned, error: null, isSuccess: true }),
   useSetAgentPlugins: () => ({ mutateAsync: mocks.setPlugins, isPending: false }),
-  useModelProviders: () => ({ data: [], isLoading: false }),
-  useModels: () => ({ data: [], isLoading: false }),
+  useConnectorModels: () => ({
+    groups: mocks.groups,
+    isLoading: false,
+    isFetching: false,
+    isError: false,
+    detail: null,
+    refresh: vi.fn(),
+  }),
   fetchAgentPlugins: vi.fn(),
 }));
 
@@ -105,6 +117,11 @@ describe('AgentsPage rows', () => {
     vi.clearAllMocks();
     mocks.plugins = [];
     mocks.assigned = [];
+    mocks.groups = [];
+    mocks.connectors = [{ id: 'mock', displayName: 'Mock' }];
+    agent.connector = 'mock';
+    agent.model = undefined;
+    agent.modelProvider = undefined;
   });
 
   it('clicking a row opens the edit dialog', async () => {
@@ -129,6 +146,32 @@ describe('AgentsPage rows', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Disable' }));
 
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+});
+
+describe('AgentsPage model clear', () => {
+  beforeEach(() => {
+    mocks.updateAgent.mockResolvedValue({});
+    mocks.setPlugins.mockResolvedValue([]);
+    mocks.connectors = [{ id: 'cursor', displayName: 'Cursor' }];
+    mocks.groups = [{ provider: 'cursor', models: [{ id: 'auto', name: 'Auto' }] }];
+    agent.connector = 'cursor';
+    agent.model = 'auto';
+    agent.modelProvider = 'cursor';
+  });
+
+  it('choosing the connector default clears the saved model', async () => {
+    renderPage('/agents');
+    fireEvent.click(screen.getByText('Developer'));
+    const dialog = await screen.findByRole('dialog');
+    const trigger = within(dialog).getByRole('combobox', { name: 'Model' });
+    expect(trigger).toHaveTextContent('Auto');
+    selectComboboxOption(trigger, "Cursor's default");
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save changes' }));
+
+    await waitFor(() => expect(mocks.updateAgent).toHaveBeenCalled());
+    expect(mocks.updateAgent.mock.calls[0][0].model).toBeNull();
+    expect(mocks.updateAgent.mock.calls[0][0].modelProvider).toBeNull();
   });
 });
 

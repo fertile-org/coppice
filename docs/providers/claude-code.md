@@ -49,7 +49,7 @@ coppice connector doctor claude-code
 
 1. Open **Agents** and create or edit an agent.
 2. Set connector to **claude-code**.
-3. Leave the model on Claude Code's default, or pick a model provider (`sonnet`, `opus`, or `haiku`) and a model.
+3. Leave the model on Claude Code's default, or pick a model from the list (sonnet, opus, haiku, and fable are headings). Refresh models loads that list again.
 4. Assign the agent to a ticket and start a run.
 
 Optional config (usually set by `enable`):
@@ -57,8 +57,8 @@ Optional config (usually set by `enable`):
 ```toml
 [agent.connectors.claude-code]
 enabled = true
-# Optional. A non-empty list replaces the built-in providers (sonnet, opus, haiku).
-# model_providers = ["sonnet", "opus", "haiku"]
+# Optional. A non-empty list replaces the built-in providers (sonnet, opus, haiku, fable).
+# model_providers = ["sonnet", "opus", "haiku", "fable"]
 # run_timeout_secs = 600
 ```
 

@@ -6,6 +6,10 @@ use axum::{routing::get, Router};
 #[tokio::main]
 async fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    if args.first().map(String::as_str) == Some("--version") {
+        println!("opencode 0.0.0");
+        return;
+    }
     if args.first().map(String::as_str) != Some("serve") {
         eprintln!("fake-opencode: expected `serve`, got {args:?}");
         std::process::exit(2);

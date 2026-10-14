@@ -4,6 +4,7 @@
 pub mod args;
 pub mod bootstrap;
 pub mod layout;
+pub mod legacy_config;
 pub mod postgres;
 pub mod shutdown;
 
@@ -86,6 +87,13 @@ pub async fn run(args: DesktopArgs) -> anyhow::Result<()> {
         .with_context(|| format!("load secrets from {}", layout.secrets_dir.display()))?;
     bootstrap::ensure_config_file(&layout)
         .with_context(|| format!("write {}", layout.config_file.display()))?;
+    let import_notice = match legacy_config::import_legacy_config(&layout.config_file) {
+        Ok(notice) => notice,
+        Err(err) => {
+            tracing::warn!(error = %err, "legacy config import failed");
+            None
+        }
+    };
 
     let pg = DesktopPostgres::new(&resources, &layout);
     let bundled = pg.bundled_major().await?;
@@ -101,7 +109,7 @@ pub async fn run(args: DesktopArgs) -> anyhow::Result<()> {
     let pg_port = start_postgres(&pg).await?;
 
     let served = tokio::select! {
-        served = serve_with_postgres(&pg, pg_port, &layout, &resources, &secrets, requested.clone()) => served,
+        served = serve_with_postgres(&pg, pg_port, &layout, &resources, &secrets, import_notice, requested.clone()) => served,
         () = async {
             shutdown_requested(requested.clone()).await;
             tokio::time::sleep(DRAIN_TIMEOUT).await;
@@ -151,6 +159,7 @@ async fn serve_with_postgres(
     layout: &DataLayout,
     resources: &ResourceLayout,
     secrets: &DesktopSecrets,
+    import_notice: Option<String>,
     requested: watch::Receiver<bool>,
 ) -> anyhow::Result<()> {
     let pg_url = pg
@@ -164,6 +173,7 @@ async fn serve_with_postgres(
     let options = ServeOptions {
         static_web_dir: Some(resources.web.clone()),
         config_path: Some(layout.config_file.clone()),
+        import_notice,
         on_ready: Some(Box::new({
             let requested = requested.clone();
             move |addr| {

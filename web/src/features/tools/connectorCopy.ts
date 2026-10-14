@@ -17,10 +17,26 @@ export function readinessLabel(readiness: ConnectorReadiness | null | undefined)
     case 'not_on_path':
       return 'Not on your PATH';
     case 'found':
-      return 'Found (sign-in not checked)';
+      return 'Installed';
     default:
       return null;
   }
+}
+
+/** Connectors whose sign-in cannot be checked without a plan-using request. */
+export const NO_FREE_SIGN_IN_CHECK = ['kilo-code'] as const;
+
+export const SIGN_IN_UNCHECKED_HINT =
+  "Coppice can't check this sign-in without using your plan. A run will show an error if you're signed out.";
+
+export function signInUncheckedHint(
+  connectorId: string | null | undefined,
+  readiness: ConnectorReadiness | null | undefined,
+): string | null {
+  if (readiness !== 'found' || !connectorId) return null;
+  return (NO_FREE_SIGN_IN_CHECK as readonly string[]).includes(connectorId)
+    ? SIGN_IN_UNCHECKED_HINT
+    : null;
 }
 
 /** Chat turns are read-only. Kilo Code refuses that, and it has no safe write-blocked mode. */

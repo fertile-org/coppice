@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { fetchConnectors } from './useAgents';
+import { fetchConnectors, MODELS_REFRESH_STALE_TIME } from './useAgents';
 
 const apiFetch = vi.hoisted(() => vi.fn());
 
@@ -7,6 +7,12 @@ vi.mock('../../lib/api', () => ({ apiFetch }));
 
 afterEach(() => {
   apiFetch.mockReset();
+});
+
+describe('model refresh', () => {
+  it('bypasses the shared staleTime cache', () => {
+    expect(MODELS_REFRESH_STALE_TIME).toBe(0);
+  });
 });
 
 describe('fetchConnectors', () => {

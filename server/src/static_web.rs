@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use axum::extract::Request;
-use axum::http::{header, HeaderValue, StatusCode};
+use axum::http::{header, HeaderValue};
 use axum::response::IntoResponse;
 use axum::Router;
 use tower::ServiceExt;
@@ -21,6 +21,10 @@ fn is_server_path(path: &str) -> bool {
 
 /// Serves the built SPA from `web_dir` for every route `router` does not
 /// match; unknown client routes get `index.html` so deep links work.
+///
+/// Server prefixes are forwarded into `router` rather than answered here.
+/// `Router::fallback` replaces the fallback the request log already wraps,
+/// so a 404 written in this function would never be logged.
 pub fn with_static_web(router: Router, web_dir: &Path) -> Router {
     let index = SetResponseHeader::overriding(
         ServeFile::new(web_dir.join("index.html")),
@@ -30,10 +34,13 @@ pub fn with_static_web(router: Router, web_dir: &Path) -> Router {
     let files = ServeDir::new(web_dir)
         .append_index_html_on_directories(false)
         .fallback(index.clone());
-    router.fallback(move |req: Request| async move {
-        let path = req.uri().path();
-        if is_server_path(path) {
-            return StatusCode::NOT_FOUND.into_response();
+    Router::new().fallback(move |req: Request| async move {
+        let path = req.uri().path().to_owned();
+        if is_server_path(&path) {
+            return match router.oneshot(req).await {
+                Ok(response) => response.into_response(),
+                Err(never) => match never {},
+            };
         }
         let res = if path == "/" || path == "/index.html" {
             index.oneshot(req).await

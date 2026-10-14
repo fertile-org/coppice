@@ -61,19 +61,38 @@ fn model_matches_provider(slug: &str, provider_id: &str) -> bool {
     }
 }
 
-pub async fn list_codex_models(model_provider: &str) -> anyhow::Result<Vec<ModelOption>> {
-    let output = tokio::process::Command::new("codex")
-        .args(["debug", "models"])
-        .output()
-        .await?;
+pub async fn list_codex_models(
+    command: &str,
+    model_provider: &str,
+) -> anyhow::Result<Vec<ModelOption>> {
+    let output = crate::providers::cli_catalog::capture_cli(
+        command,
+        &["debug", "models"],
+        crate::host_env::MODEL_LIST_TIMEOUT,
+    )
+    .await
+    .map_err(|err| anyhow::anyhow!(err))?;
     if !output.status.success() {
+        let stdout = String::from_utf8_lossy(&output.stdout);
         let stderr = String::from_utf8_lossy(&output.stderr);
-        anyhow::bail!("codex debug models failed: {stderr}");
+        let message = crate::providers::cli_catalog::models_failure_message(
+            &format!("`{command} debug models`"),
+            output.status,
+            &stdout,
+            &stderr,
+        );
+        return Err(crate::providers::cli_catalog::model_list_err(
+            message,
+            crate::host_env::first_text_line(&stderr),
+        ));
     }
     let stdout = String::from_utf8_lossy(&output.stdout);
     let models = parse_codex_models_json(&stdout, model_provider);
     if models.is_empty() {
-        anyhow::bail!("no codex models available for provider `{model_provider}`");
+        return Err(crate::providers::cli_catalog::model_list_err(
+            format!("no codex models available for provider `{model_provider}`"),
+            None,
+        ));
     }
     Ok(models)
 }

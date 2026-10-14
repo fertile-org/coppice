@@ -565,11 +565,7 @@ fn parse_diff_files(name_status: &str, numstat: &str) -> Vec<DiffFileSummary> {
 }
 
 async fn git_in(worktree: &Path, args: &[&str]) -> Result<String, CodeReviewError> {
-    let output = tokio::process::Command::new("git")
-        .current_dir(worktree)
-        .args(args)
-        .output()
-        .await?;
+    let output = crate::services::git_cmd::output(Some(worktree), args).await?;
     if !output.status.success() {
         return Err(CodeReviewError::Git(
             String::from_utf8_lossy(&output.stderr).trim().to_string(),

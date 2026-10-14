@@ -1,8 +1,6 @@
 use std::ffi::OsStr;
 use std::path::Path;
-use std::process::Stdio;
 use std::time::Duration;
-use tokio::process::Command;
 use tokio::time::Instant;
 
 const NETWORK_SCHEMES: [&str; 2] = ["https://", "ssh://"];
@@ -208,21 +206,25 @@ impl Git {
     }
 
     async fn run(&self, args: &[&OsStr]) -> Result<String, String> {
-        let mut cmd = Command::new("git");
-        cmd.args(["-c", "protocol.ext.allow=never"]);
-        if !self.allow_file {
-            cmd.args(["-c", "protocol.file.allow=never"]);
+        let remaining = self.deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            return Err(format!("git timed out after {}s", self.timeout.as_secs()));
         }
-        cmd.args(args)
-            .env("GIT_TERMINAL_PROMPT", "0")
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .kill_on_drop(true);
-        let output = tokio::time::timeout_at(self.deadline, cmd.output())
+        let mut full: Vec<&OsStr> = vec![OsStr::new("-c"), OsStr::new("protocol.ext.allow=never")];
+        if !self.allow_file {
+            full.push(OsStr::new("-c"));
+            full.push(OsStr::new("protocol.file.allow=never"));
+        }
+        full.extend_from_slice(args);
+        let output = crate::services::git_cmd::output_within(None, &full, remaining)
             .await
-            .map_err(|_| format!("git timed out after {}s", self.timeout.as_secs()))?
-            .map_err(|err| format!("failed to run git: {err}"))?;
+            .map_err(|err| {
+                if err.kind() == std::io::ErrorKind::TimedOut {
+                    format!("git timed out after {}s", self.timeout.as_secs())
+                } else {
+                    err.to_string()
+                }
+            })?;
         if output.status.success() {
             Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
         } else {

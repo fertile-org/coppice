@@ -159,10 +159,19 @@ fn resolve_pg_tool(name: &str, env: impl Fn(&str) -> Option<OsString>) -> PgTool
 
 /// Bundled Linux libraries carry no RUNPATH, so the bundled tools need
 /// `LD_LIBRARY_PATH`; set on this command only so other children are unaffected.
+/// A bare name is resolved through the host environment so a short desktop PATH
+/// still finds the user's `pg_dump` / `psql`.
 fn pg_command(name: &str) -> std::process::Command {
     let tool = resolve_pg_tool(name, |key| std::env::var_os(key));
+    let bundled = tool.lib_dir.is_some() || tool.program.components().count() > 1;
     #[cfg_attr(not(target_os = "linux"), allow(unused_mut))]
-    let mut cmd = std::process::Command::new(&tool.program);
+    let mut cmd = if bundled {
+        std::process::Command::new(&tool.program)
+    } else {
+        crate::host_env::current()
+            .command(name, &[] as &[&str])
+            .unwrap_or_else(|_| std::process::Command::new(name))
+    };
     #[cfg(target_os = "linux")]
     if let Some(lib) = &tool.lib_dir {
         cmd.env("LD_LIBRARY_PATH", lib);

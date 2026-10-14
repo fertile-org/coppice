@@ -58,7 +58,14 @@ impl OpenCodeRunServers {
         loop {
             let port = free_port(&self.hostname)?;
             let base_url = format!("http://{}:{port}", self.hostname);
-            let version = crate::providers::cli_version::detect(&self.command).await;
+            let version = crate::providers::cli_version::detect(&self.command)
+                .await
+                .map_err(|err| {
+                    anyhow::anyhow!(crate::providers::cli_version::version_unavailable(
+                        &self.command,
+                        &err
+                    ))
+                })?;
             let (mut child, group_pid) = self.spawn(key, port, config_path, &env, &version)?;
 
             match wait_for_healthy(&base_url, &mut child).await {
@@ -116,7 +123,7 @@ impl OpenCodeRunServers {
             worktree: "",
             hostname: &self.hostname,
             port: &port_arg,
-            version: crate::providers::cli_version::for_gate(version),
+            version: Some(version),
         });
         crate::providers::cli_runner::log_launch(
             &self.command,
@@ -124,7 +131,19 @@ impl OpenCodeRunServers {
             &args,
             config_path.parent(),
         );
-        let mut cmd = tokio::process::Command::new(&self.command);
+        let host = crate::host_env::current();
+        let program = if self.command.contains('/') || self.command.contains('\\') {
+            self.command.clone()
+        } else {
+            host.resolve(&self.command)
+                .map(|path| path.to_string_lossy().into_owned())
+                .map_err(|err| anyhow::anyhow!(err.to_string()))?
+        };
+        let mut cmd = tokio::process::Command::new(&program);
+        cmd.env("PATH", &host.path);
+        if !host.home.as_os_str().is_empty() {
+            cmd.env("HOME", &host.home);
+        }
         cmd.args(&args)
             .env("OPENCODE_CONFIG", config_path)
             .envs(env.iter().map(|(k, v)| (*k, v.as_str())));
@@ -148,7 +167,7 @@ impl OpenCodeRunServers {
                         self.command
                     )
                 } else {
-                    anyhow::anyhow!("failed to spawn `{} serve`: {err}", self.command)
+                    anyhow::anyhow!("Couldn't start `{} serve`: {err}", self.command)
                 }
             })
     }

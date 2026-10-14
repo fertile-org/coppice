@@ -13,6 +13,10 @@
 use std::io::{Read, Write};
 
 fn main() {
+    if std::env::args().nth(1).as_deref() == Some("--version") {
+        println!("fake-cli 0.0.0");
+        return;
+    }
     if let Ok(raw) = std::fs::read_to_string(".fake-cli-env.json") {
         let vars: std::collections::HashMap<String, String> =
             serde_json::from_str(&raw).expect("parse .fake-cli-env.json");

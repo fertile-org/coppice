@@ -4,19 +4,23 @@ import { useState } from 'react';
 import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Plugin } from '../../lib/schemas/plugin';
+import { openCombobox, selectComboboxOption } from '../../test/combobox';
 import {
   AgentForm,
   agentToFormValues,
   type AgentFormValues,
   type PluginAssignmentState,
 } from './AgentForm';
-import type { Agent } from './useAgents';
+import type { Agent, ModelGroup } from './useAgents';
 
 const mocks = vi.hoisted(() => ({
   plugins: [] as Plugin[],
-  modelProviders: [] as { id: string }[],
-  models: [] as { id: string; name: string }[],
+  groups: [] as ModelGroup[],
   modelsLoading: false,
+  modelsError: false,
+  modelsDetail: null as string | null,
+  modelsErrorMessage: null as string | null,
+  refreshModels: vi.fn(),
 }));
 
 vi.mock('../plugins/usePlugins', () => ({
@@ -24,8 +28,15 @@ vi.mock('../plugins/usePlugins', () => ({
 }));
 
 vi.mock('./useAgents', () => ({
-  useModelProviders: () => ({ data: mocks.modelProviders, isLoading: false }),
-  useModels: () => ({ data: mocks.models, isLoading: mocks.modelsLoading }),
+  useConnectorModels: () => ({
+    groups: mocks.groups,
+    isLoading: mocks.modelsLoading,
+    isFetching: false,
+    isError: mocks.modelsError,
+    detail: mocks.modelsDetail,
+    errorMessage: mocks.modelsErrorMessage,
+    refresh: mocks.refreshModels,
+  }),
 }));
 
 function plugin(overrides: Partial<Plugin>): Plugin {
@@ -118,13 +129,18 @@ function Harness({
 describe('AgentForm model choice', () => {
   beforeEach(() => {
     mocks.plugins = [];
-    mocks.modelProviders = [];
-    mocks.models = [];
+    mocks.groups = [];
     mocks.modelsLoading = false;
+    mocks.modelsError = false;
+    mocks.modelsDetail = null;
+    mocks.modelsErrorMessage = null;
+    mocks.refreshModels.mockReset();
   });
 
-  it('hides an empty provider list and preselects the connector default', () => {
-    mocks.modelProviders = [];
+  it('preselects the connector default and offers Refresh models', () => {
+    mocks.groups = [
+      { provider: 'cursor', models: [{ id: 'auto', name: 'Auto' }, { id: 'composer-2.5', name: 'Composer 2.5' }] },
+    ];
     render(
       <Harness
         mode="create"
@@ -138,41 +154,130 @@ describe('AgentForm model choice', () => {
     expect(screen.getByRole('combobox', { name: 'Model' })).toHaveTextContent(
       "Cursor's default",
     );
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh models' }));
+    expect(mocks.refreshModels).toHaveBeenCalledTimes(1);
   });
 
-  it('hides the provider field for one provider and preselects that connector default', () => {
-    mocks.modelProviders = [{ id: 'cursor' }];
-    mocks.models = [{ id: 'composer-2.5', name: 'Composer 2.5' }];
+  it('lists one provider without a group heading and sets that provider when picked', async () => {
+    mocks.groups = [
+      {
+        provider: 'cursor',
+        models: [
+          { id: 'auto', name: 'Auto' },
+          { id: 'composer-2.5', name: 'Composer 2.5' },
+        ],
+      },
+    ];
+    const onSubmit = vi.fn();
     render(
       <Harness
         mode="create"
-        initial={baseValues({ connector: 'cursor' })}
-        onSubmit={vi.fn()}
+        initial={baseValues({ connector: 'cursor', systemPrompt: 'Help' })}
+        onSubmit={onSubmit}
         connectorOptions={[{ id: 'cursor', displayName: 'Cursor' }]}
       />,
     );
 
-    expect(screen.queryByLabelText('Model provider')).toBeNull();
-    expect(screen.getByRole('combobox', { name: 'Model' })).toHaveTextContent(
-      "Cursor's default",
-    );
+    const trigger = screen.getByRole('combobox', { name: 'Model' });
+    const list = openCombobox(trigger);
+    expect(list.textContent).not.toContain('cursor');
+    selectComboboxOption(trigger, 'Auto');
+    expect(trigger).toHaveTextContent('Auto');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Create agent' }));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(onSubmit.mock.calls[0][0].model).toBe('auto');
+    expect(onSubmit.mock.calls[0][0].modelProvider).toBe('cursor');
   });
 
-  it('shows the provider field when several providers are available', () => {
-    mocks.modelProviders = [{ id: 'sonnet' }, { id: 'opus' }, { id: 'haiku' }];
+  it('uses provider names only as group headings', async () => {
+    mocks.groups = [
+      { provider: 'sonnet', models: [{ id: 'claude-sonnet-4-6', name: 'Claude Sonnet 4.6' }] },
+      { provider: 'fable', models: [{ id: 'fable', name: 'fable' }] },
+    ];
+    const onSubmit = vi.fn();
     render(
       <Harness
-        mode="create"
-        initial={baseValues({ connector: 'claude-code' })}
-        onSubmit={vi.fn()}
+        mode="edit"
+        initial={baseValues({ connector: 'claude-code', systemPrompt: 'Help' })}
+        onSubmit={onSubmit}
         connectorOptions={[{ id: 'claude-code', displayName: 'Claude Code' }]}
       />,
     );
 
-    expect(screen.getByLabelText('Model provider')).toBeInTheDocument();
-    expect(screen.getByRole('combobox', { name: 'Model' })).toHaveTextContent(
-      "Claude Code's default",
+    expect(screen.queryByLabelText('Model provider')).toBeNull();
+    const trigger = screen.getByRole('combobox', { name: 'Model' });
+    expect(trigger).toHaveTextContent("Claude Code's default");
+    openCombobox(trigger);
+    expect(screen.getByText('sonnet')).toBeInTheDocument();
+    expect(screen.getAllByText('fable').length).toBeGreaterThan(0);
+    selectComboboxOption(trigger, 'Claude Sonnet 4.6');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(onSubmit.mock.calls[0][0].model).toBe('claude-sonnet-4-6');
+    expect(onSubmit.mock.calls[0][0].modelProvider).toBe('sonnet');
+  });
+
+  it('shows the failure copy, the stderr line, and the Cursor sign-in line', () => {
+    mocks.modelsError = true;
+    mocks.modelsDetail = 'boom from cli';
+    const { rerender } = render(
+      <Harness
+        mode="create"
+        initial={baseValues({ connector: 'cursor' })}
+        onSubmit={vi.fn()}
+        connectorOptions={[{ id: 'cursor', displayName: 'Cursor' }]}
+      />,
     );
+    expect(
+      screen.getByText("Couldn't get Cursor's models. Using Cursor's default for now."),
+    ).toBeInTheDocument();
+    expect(screen.getByText('boom from cli')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Refresh models' })).toBeInTheDocument();
+
+    mocks.modelsDetail = 'Error: Authentication required';
+    rerender(
+      <Harness
+        mode="create"
+        initial={baseValues({ connector: 'cursor' })}
+        onSubmit={vi.fn()}
+        connectorOptions={[{ id: 'cursor', displayName: 'Cursor' }]}
+      />,
+    );
+    const signIn = screen.getByText((_content, element) => {
+      return (
+        element?.tagName === 'P' &&
+        element.textContent ===
+          "Cursor's CLI isn't signed in for Coppice. Run agent login in a terminal, then click Refresh models."
+      );
+    });
+    expect(signIn.querySelector('code')?.textContent).toBe('agent login');
+    expect(signIn.textContent).not.toContain('`');
+    expect(screen.queryByText('Error: Authentication required')).toBeNull();
+  });
+
+  it('links a turned-off connector to Tools → Connectors', () => {
+    mocks.modelsError = true;
+    mocks.modelsErrorMessage =
+      "Can't list Cursor's models because it's turned off in Connectors.";
+    render(
+      <Harness
+        mode="edit"
+        initial={baseValues({ connector: 'cursor' })}
+        onSubmit={vi.fn()}
+        connectorOptions={[]}
+      />,
+    );
+
+    expect(screen.getByText(/Cursor is turned off\. Turn it on in/)).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Connectors' })).toHaveAttribute(
+      'href',
+      '/tools?tab=connectors',
+    );
+    expect(
+      screen.queryByText("Couldn't get Cursor's models. Using Cursor's default for now."),
+    ).toBeNull();
   });
 
   it('treats a blank saved model as the connector default', () => {
@@ -195,7 +300,7 @@ describe('AgentForm model choice', () => {
   });
 
   it('shows the connector default for an agent with no saved model', () => {
-    mocks.modelProviders = [{ id: 'cursor' }];
+    mocks.groups = [{ provider: 'cursor', models: [{ id: 'auto', name: 'Auto' }] }];
     render(
       <Harness
         initial={baseValues({ connector: 'cursor', model: '', modelProvider: '' })}
@@ -210,7 +315,7 @@ describe('AgentForm model choice', () => {
   });
 
   it('submits a blank model when the default stays selected', async () => {
-    mocks.modelProviders = [{ id: 'cursor' }];
+    mocks.groups = [{ provider: 'cursor', models: [{ id: 'auto', name: 'Auto' }] }];
     const onSubmit = vi.fn();
     render(
       <Harness
@@ -232,8 +337,8 @@ describe('AgentForm model choice', () => {
 describe('AgentForm plugins picker', () => {
   beforeEach(() => {
     mocks.plugins = [pluginA, pluginB, pluginC];
-    mocks.modelProviders = [];
-    mocks.models = [];
+    mocks.groups = [];
+    mocks.modelsError = false;
   });
 
   it('empty plugin list links to the Plugins page', () => {

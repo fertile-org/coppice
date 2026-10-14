@@ -2395,6 +2395,7 @@ async fn plugin_source_hung_server_does_not_block_list() {
     )
     .await;
 
+    let _ = coppice_server::host_env::current();
     let started = std::time::Instant::now();
     let names = tool_names(&url, &token).await;
     assert!(
@@ -2486,6 +2487,7 @@ async fn slow_plugin_server_does_not_hide_healthy_plugin_tools() {
     )
     .await;
 
+    let _ = coppice_server::host_env::current();
     let started = std::time::Instant::now();
     let names = tool_names(&url, &token).await;
     assert!(

@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 
 use serde::Serialize;
 
-use crate::probe::{auth_path_present, ProbeEnv};
+use crate::probe::ProbeEnv;
 use crate::{ConnectorDescriptor, CLAUDE_CODE, CODEX, CURSOR, KILO_CODE, OPENCODE};
 
 const OUTPUT_CAP: u64 = 8 * 1024;
@@ -26,8 +26,9 @@ pub enum Readiness {
     Ready,
     /// Binary found, and a reliable check says there is no sign-in.
     FoundNotSignedIn,
-    /// Binary found, but sign-in could not be verified. The UI says
-    /// "Found (sign-in not checked)" and does not claim the user is signed out.
+    /// Binary found, but a free check did not confirm sign-in. The picker says
+    /// "Installed". Connectors with no free check add a plan hint on the
+    /// Connectors page.
     Found,
 }
 
@@ -52,22 +53,13 @@ pub struct CommandObservation<'a> {
     pub stderr: &'a str,
 }
 
-/// Map a connector id and local observations to evidence, without running anything.
-pub fn evidence_from(
-    id: &str,
-    env_hit: bool,
-    file_hit: bool,
-    command: Option<CommandObservation<'_>>,
-) -> Option<bool> {
+/// Map a connector id and a free command's output to evidence, without running anything.
+///
+/// An API key or a credentials file is not evidence. Only a free command that
+/// the CLI documents as a sign-in check can return `Some`.
+pub fn evidence_from(id: &str, command: Option<CommandObservation<'_>>) -> Option<bool> {
     if id == KILO_CODE || id == crate::MOCK {
         return None;
-    }
-    if env_hit || file_hit {
-        return Some(true);
-    }
-    if id == CURSOR {
-        // Auth lives in those json files. Missing both means not signed in.
-        return Some(false);
     }
     let command = command?;
     if command.timed_out || command.spawn_failed {
@@ -78,6 +70,9 @@ pub fn evidence_from(
     }
     if id == CODEX {
         return interpret_codex(command);
+    }
+    if id == CURSOR {
+        return interpret_cursor(command);
     }
     if id == OPENCODE {
         return interpret_opencode(command);
@@ -108,6 +103,14 @@ fn interpret_claude(command: CommandObservation<'_>) -> Option<bool> {
 }
 
 fn interpret_codex(command: CommandObservation<'_>) -> Option<bool> {
+    let text = format!("{}\n{}", command.stdout, command.stderr).to_ascii_lowercase();
+    if text.contains("unknown command") || text.contains("unrecognized") {
+        return None;
+    }
+    Some(command.exit_ok)
+}
+
+fn interpret_cursor(command: CommandObservation<'_>) -> Option<bool> {
     let text = format!("{}\n{}", command.stdout, command.stderr).to_ascii_lowercase();
     if text.contains("unknown command") || text.contains("unrecognized") {
         return None;
@@ -174,42 +177,30 @@ fn auth_list_has_provider(stdout: &str) -> bool {
 }
 
 struct Spec {
-    env: &'static [&'static str],
-    files: &'static [&'static str],
+    /// A free local command. `None` means this CLI has no sign-in check that
+    /// avoids a prompt and a plan-using request, so nothing is spawned.
     command: Option<&'static [&'static str]>,
 }
 
 fn spec_for(id: &str) -> Spec {
     if id == CURSOR {
         Spec {
-            env: &[],
-            files: &[".config/cursor/auth.json", ".cursor/auth.json"],
-            command: None,
+            command: Some(&["models"]),
         }
     } else if id == CLAUDE_CODE {
         Spec {
-            env: &["ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN"],
-            files: &[".claude/.credentials.json"],
             command: Some(&["auth", "status"]),
         }
     } else if id == CODEX {
         Spec {
-            env: &["OPENAI_API_KEY"],
-            files: &[".codex/auth.json"],
             command: Some(&["login", "status"]),
         }
     } else if id == OPENCODE {
         Spec {
-            env: &[],
-            files: &[".local/share/opencode/auth.json"],
             command: Some(&["auth", "list"]),
         }
     } else {
-        Spec {
-            env: &[],
-            files: &[],
-            command: None,
-        }
+        Spec { command: None }
     }
 }
 
@@ -225,21 +216,6 @@ pub fn assess(
         return Readiness::NotOnPath;
     };
     let spec = spec_for(descriptor.id);
-    let env_hit = spec
-        .env
-        .iter()
-        .any(|key| (env.env_lookup)(key).is_some_and(|value| !value.is_empty()));
-    let file_hit = spec
-        .files
-        .iter()
-        .any(|rel| auth_path_present(&env.home.join(rel)));
-    if evidence_from(descriptor.id, env_hit, file_hit, None) == Some(true) {
-        return Readiness::Ready;
-    }
-    // Cursor has no command: missing files is the negative result.
-    if spec.command.is_none() {
-        return readiness_from(true, evidence_from(descriptor.id, env_hit, file_hit, None));
-    }
     let Some(args) = spec.command else {
         return Readiness::Found;
     };
@@ -248,8 +224,6 @@ pub fn assess(
         true,
         evidence_from(
             descriptor.id,
-            env_hit,
-            file_hit,
             Some(CommandObservation {
                 timed_out: observed.timed_out,
                 spawn_failed: observed.spawn_failed,
@@ -384,46 +358,24 @@ mod tests {
     #[test]
     fn claude_json_and_phrases() {
         assert_eq!(
-            evidence_from(
-                CLAUDE_CODE,
-                false,
-                false,
-                Some(obs(true, r#"{"loggedIn": true}"#, ""))
-            ),
+            evidence_from(CLAUDE_CODE, Some(obs(true, r#"{"loggedIn": true}"#, ""))),
             Some(true)
         );
         assert_eq!(
-            evidence_from(
-                CLAUDE_CODE,
-                false,
-                false,
-                Some(obs(true, r#"{"loggedIn":false}"#, ""))
-            ),
+            evidence_from(CLAUDE_CODE, Some(obs(true, r#"{"loggedIn":false}"#, ""))),
             Some(false)
         );
         assert_eq!(
-            evidence_from(
-                CLAUDE_CODE,
-                false,
-                false,
-                Some(obs(true, "", "Not logged in"))
-            ),
+            evidence_from(CLAUDE_CODE, Some(obs(true, "", "Not logged in"))),
             Some(false)
         );
         assert_eq!(
-            evidence_from(
-                CLAUDE_CODE,
-                false,
-                false,
-                Some(obs(false, "unknown command", ""))
-            ),
+            evidence_from(CLAUDE_CODE, Some(obs(false, "unknown command", ""))),
             None
         );
         assert_eq!(
             evidence_from(
                 CLAUDE_CODE,
-                false,
-                false,
                 Some(CommandObservation {
                     timed_out: true,
                     spawn_failed: false,
@@ -434,63 +386,62 @@ mod tests {
             ),
             None
         );
-        assert_eq!(evidence_from(CLAUDE_CODE, true, false, None), Some(true));
+        assert_eq!(evidence_from(CLAUDE_CODE, None), None);
     }
 
     #[test]
     fn codex_exit_status_and_unknown_subcommand() {
         assert_eq!(
-            evidence_from(CODEX, false, false, Some(obs(true, "Logged in", ""))),
+            evidence_from(CODEX, Some(obs(true, "Logged in", ""))),
             Some(true)
         );
         assert_eq!(
-            evidence_from(CODEX, false, false, Some(obs(false, "", "Not logged in"))),
+            evidence_from(CODEX, Some(obs(false, "", "Not logged in"))),
             Some(false)
         );
         assert_eq!(
-            evidence_from(
-                CODEX,
-                false,
-                false,
-                Some(obs(false, "", "unknown command: login"))
-            ),
+            evidence_from(CODEX, Some(obs(false, "", "unknown command: login"))),
             None
         );
-        assert_eq!(evidence_from(CODEX, false, true, None), Some(true));
+        assert_eq!(evidence_from(CODEX, None), None);
     }
 
     #[test]
-    fn cursor_files_are_the_whole_check() {
-        assert_eq!(evidence_from(CURSOR, false, true, None), Some(true));
-        assert_eq!(evidence_from(CURSOR, false, false, None), Some(false));
+    fn cursor_models_exit_is_the_check_and_files_are_not() {
+        assert_eq!(
+            evidence_from(CURSOR, Some(obs(true, "composer-2.5 - Composer 2.5", ""))),
+            Some(true)
+        );
+        assert_eq!(
+            evidence_from(CURSOR, Some(obs(false, "", "not signed in"))),
+            Some(false)
+        );
+        assert_eq!(
+            evidence_from(CURSOR, Some(obs(false, "", "unknown command"))),
+            None
+        );
+        assert_eq!(evidence_from(CURSOR, None), None);
     }
 
     #[test]
     fn opencode_empty_list_is_signed_out_and_a_provider_is_ready() {
         assert_eq!(
-            evidence_from(OPENCODE, false, false, Some(obs(true, "", ""))),
+            evidence_from(OPENCODE, Some(obs(true, "", ""))),
             Some(false)
         );
         assert_eq!(
             evidence_from(
                 OPENCODE,
-                false,
-                false,
                 Some(obs(true, "┌──────────┐\n│ anthropic │\n└──────────┘\n", ""))
             ),
             Some(true)
         );
         assert_eq!(
-            evidence_from(OPENCODE, false, false, Some(obs(true, "Provider\n", ""))),
+            evidence_from(OPENCODE, Some(obs(true, "Provider\n", ""))),
             Some(false)
         );
         assert_eq!(
-            evidence_from(
-                OPENCODE,
-                false,
-                false,
-                Some(obs(false, "unknown command", ""))
-            ),
+            evidence_from(OPENCODE, Some(obs(false, "unknown command", ""))),
             None
         );
     }
@@ -498,10 +449,10 @@ mod tests {
     #[test]
     fn kilo_never_claims_signed_out() {
         assert_eq!(
-            evidence_from(KILO_CODE, true, true, Some(obs(false, "", ""))),
+            evidence_from(KILO_CODE, Some(obs(false, "", ""))),
             None
         );
-        assert_eq!(evidence_from(KILO_CODE, false, false, None), None);
+        assert_eq!(evidence_from(KILO_CODE, None), None);
     }
 
     fn env<'a>(home: &'a Path, lookup: &'a dyn Fn(&str) -> Option<String>) -> ProbeEnv<'a> {
@@ -525,14 +476,13 @@ mod tests {
     }
 
     #[test]
-    fn cursor_missing_file_is_not_signed_in_and_does_not_run_a_command() {
+    fn cursor_models_success_is_ready_and_a_credentials_file_is_not() {
         let home = tempfile::tempdir().unwrap();
+        let auth = home.path().join(".config/cursor/auth.json");
+        std::fs::create_dir_all(auth.parent().unwrap()).unwrap();
+        std::fs::write(&auth, "{ \"accessToken\": \"x\" }\n").unwrap();
         let bin_dir = tempfile::tempdir().unwrap();
-        let marker = bin_dir.path().join("ran");
-        let bin = script(
-            bin_dir.path(),
-            &format!("touch '{}'\nexit 0", marker.display()),
-        );
+        let bin = script(bin_dir.path(), "echo 'not signed in' >&2\nexit 1");
         let none = |_: &str| None;
         let readiness = assess(
             crate::get(CURSOR).unwrap(),
@@ -541,33 +491,28 @@ mod tests {
             Duration::from_secs(2),
         );
         assert_eq!(readiness, Readiness::FoundNotSignedIn);
-        assert!(!marker.exists(), "cursor sign-in must not spawn the CLI");
-    }
 
-    #[test]
-    fn cursor_auth_json_is_ready() {
-        let home = tempfile::tempdir().unwrap();
-        let auth = home.path().join(".config/cursor/auth.json");
-        std::fs::create_dir_all(auth.parent().unwrap()).unwrap();
-        std::fs::write(&auth, "{ \"accessToken\": \"x\" }\n").unwrap();
-        let none = |_: &str| None;
+        let ready = script(bin_dir.path(), "echo 'composer-2.5 - Composer 2.5'\nexit 0");
         let readiness = assess(
             crate::get(CURSOR).unwrap(),
             &env(home.path(), &none),
-            Some(Path::new("/usr/bin/true")),
-            Duration::from_millis(200),
+            Some(&ready),
+            Duration::from_secs(2),
         );
         assert_eq!(readiness, Readiness::Ready);
     }
 
     #[test]
-    fn claude_api_key_is_ready_without_running_the_cli() {
+    fn claude_api_key_does_not_skip_the_free_check() {
         let home = tempfile::tempdir().unwrap();
         let bin_dir = tempfile::tempdir().unwrap();
         let marker = bin_dir.path().join("ran");
         let bin = script(
             bin_dir.path(),
-            &format!("touch '{}'\nexit 1", marker.display()),
+            &format!(
+                "echo ran > '{}'\necho '{{\"loggedIn\":false}}'\nexit 0",
+                marker.display()
+            ),
         );
         let lookup = |key: &str| (key == "ANTHROPIC_API_KEY").then(|| "secret".to_string());
         let readiness = assess(
@@ -576,8 +521,8 @@ mod tests {
             Some(&bin),
             Duration::from_secs(2),
         );
-        assert_eq!(readiness, Readiness::Ready);
-        assert!(!marker.exists());
+        assert_eq!(readiness, Readiness::FoundNotSignedIn);
+        assert!(marker.exists(), "the free auth status check must run");
     }
 
     #[test]
@@ -617,7 +562,7 @@ mod tests {
         let marker = bin_dir.path().join("ran");
         let bin = script(
             bin_dir.path(),
-            &format!("touch '{}'\nexit 1", marker.display()),
+            &format!("echo ran > '{}'\nexit 1", marker.display()),
         );
         let none = |_: &str| None;
         let readiness = assess(

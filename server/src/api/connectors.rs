@@ -1,7 +1,7 @@
 use crate::api::auth::AuthUser;
 use crate::AppState;
 use axum::{
-    extract::{Path, State},
+    extract::{Path, Query, State},
     http::StatusCode,
     response::{IntoResponse, Response},
     routing::get,
@@ -9,7 +9,7 @@ use axum::{
 };
 use coppice_connectors::sign_in::Readiness;
 use coppice_connectors::{ConsoleKind, MOCK};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
 pub fn routes() -> Router<Arc<AppState>> {
@@ -75,36 +75,72 @@ struct ModelListResponse {
 #[derive(Serialize)]
 struct ApiMessageResponse {
     message: String,
+    /// First CLI stderr line, when the list command failed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    detail: Option<String>,
 }
 
 enum ModelsApiError {
     Status(StatusCode),
-    Message(StatusCode, String),
+    Message {
+        status: StatusCode,
+        message: String,
+        detail: Option<String>,
+    },
+    /// `message` was already logged at warn, exactly.
+    Logged {
+        status: StatusCode,
+        message: String,
+    },
 }
 
 impl IntoResponse for ModelsApiError {
     fn into_response(self) -> Response {
         match self {
             ModelsApiError::Status(code) => code.into_response(),
-            ModelsApiError::Message(code, message) => {
-                tracing::warn!(%message, status = %code, "connector models listing failed");
-                (code, Json(ApiMessageResponse { message })).into_response()
+            ModelsApiError::Message {
+                status,
+                message,
+                detail,
+            } => {
+                tracing::warn!(%message, ?detail, %status, "connector models listing failed");
+                (status, Json(ApiMessageResponse { message, detail })).into_response()
             }
+            ModelsApiError::Logged { status, message } => (
+                status,
+                Json(ApiMessageResponse {
+                    message,
+                    detail: None,
+                }),
+            )
+                .into_response(),
         }
     }
 }
 
-fn models_gateway_err(context: &str, err: impl std::fmt::Display) -> ModelsApiError {
-    ModelsApiError::Message(StatusCode::BAD_GATEWAY, format!("{context}: {err}"))
+fn models_gateway_err(context: &str, err: &anyhow::Error) -> ModelsApiError {
+    ModelsApiError::Message {
+        status: StatusCode::BAD_GATEWAY,
+        message: format!("{context}: {err}"),
+        detail: crate::providers::cli_catalog::model_list_detail(err),
+    }
+}
+
+#[derive(Debug, Deserialize, Default)]
+struct ModelsQuery {
+    /// When true, skip the server's cached list for this connector and provider.
+    #[serde(default)]
+    refresh: bool,
 }
 
 async fn list_connectors(
     State(state): State<Arc<AppState>>,
     AuthUser { .. }: AuthUser,
 ) -> Json<ConnectorListResponse> {
-    let config = state.connectors.config();
+    let registry = state.connectors.registry();
     let items = coppice_connectors::all()
         .iter()
+        .filter(|descriptor| registry.has(descriptor.id))
         .map(|descriptor| {
             let readiness = if descriptor.id == MOCK {
                 Some(Readiness::Ready)
@@ -122,11 +158,7 @@ async fn list_connectors(
                     read_only_tools: descriptor.caps.read_only_tools,
                     chat_resume: descriptor.caps.chat_resume,
                 },
-                enabled: config
-                    .agent
-                    .connectors
-                    .enabled(descriptor.id)
-                    .unwrap_or(false),
+                enabled: true,
                 readiness,
                 docs_url: descriptor.install.docs_url,
             }
@@ -135,14 +167,54 @@ async fn list_connectors(
     Json(ConnectorListResponse { items })
 }
 
+fn turned_off_error(state: &AppState, connector_id: &str) -> Option<ModelsApiError> {
+    let descriptor = coppice_connectors::get(connector_id)?;
+    if descriptor.id == MOCK || !state.connectors.explicitly_off(connector_id) {
+        return None;
+    }
+    let message = crate::connectors_runtime::models_turned_off_log(descriptor.display_name);
+    tracing::warn!("{message}");
+    Some(ModelsApiError::Logged {
+        status: StatusCode::CONFLICT,
+        message,
+    })
+}
+
+fn model_list_program(state: &AppState, connector_id: &str) -> String {
+    let config = state.connectors.config();
+    let command = config
+        .agent
+        .connectors
+        .command(connector_id)
+        .map(str::to_string)
+        .or_else(|| {
+            coppice_connectors::get(connector_id).map(|descriptor| descriptor.binary.to_string())
+        });
+    let Some(command) = command else {
+        return String::new();
+    };
+    match crate::host_env::current().resolve(&command) {
+        Ok(path) => path.display().to_string(),
+        Err(missing) => missing.to_string(),
+    }
+}
+
 async fn list_model_providers(
     State(state): State<Arc<AppState>>,
     AuthUser { .. }: AuthUser,
     Path(connector_id): Path<String>,
-) -> Result<Json<ModelProviderListResponse>, StatusCode> {
+) -> Result<Json<ModelProviderListResponse>, ModelsApiError> {
     let registry = state.connectors.registry();
     if !registry.has(&connector_id) {
-        return Err(StatusCode::NOT_FOUND);
+        if let Some(err) = turned_off_error(&state, &connector_id) {
+            return Err(err);
+        }
+        tracing::warn!(
+            connector = %connector_id,
+            status = 404_u16,
+            "model providers not found"
+        );
+        return Err(ModelsApiError::Status(StatusCode::NOT_FOUND));
     }
     let items = match registry.models(&connector_id) {
         Some(models) => models.model_providers().await,
@@ -158,24 +230,79 @@ async fn list_models(
     State(state): State<Arc<AppState>>,
     AuthUser { .. }: AuthUser,
     Path((connector_id, model_provider_id)): Path<(String, String)>,
+    Query(query): Query<ModelsQuery>,
 ) -> Result<Json<ModelListResponse>, ModelsApiError> {
+    if query.refresh {
+        crate::host_env::invalidate();
+    }
     let registry = state.connectors.registry();
     if !registry.has(&connector_id) {
+        if let Some(err) = turned_off_error(&state, &connector_id) {
+            return Err(err);
+        }
+        tracing::warn!(
+            connector = %connector_id,
+            provider = %model_provider_id,
+            status = 404_u16,
+            "models not found"
+        );
         return Err(ModelsApiError::Status(StatusCode::NOT_FOUND));
     }
     if !registry
         .has_model_provider(&connector_id, &model_provider_id)
         .await
     {
+        tracing::warn!(
+            connector = %connector_id,
+            provider = %model_provider_id,
+            status = 404_u16,
+            "models not found"
+        );
         return Err(ModelsApiError::Status(StatusCode::NOT_FOUND));
     }
-    let catalog = registry
-        .models(&connector_id)
-        .ok_or(ModelsApiError::Status(StatusCode::NOT_FOUND))?;
-    let models = catalog
-        .list_models(&model_provider_id)
-        .await
-        .map_err(|err| models_gateway_err(&format!("{connector_id} models"), err))?;
+    let Some(catalog) = registry.models(&connector_id) else {
+        tracing::warn!(
+            connector = %connector_id,
+            provider = %model_provider_id,
+            status = 404_u16,
+            "models not found"
+        );
+        return Err(ModelsApiError::Status(StatusCode::NOT_FOUND));
+    };
+    let program = model_list_program(&state, &connector_id);
+    let models = match catalog.list_models(&model_provider_id, query.refresh).await {
+        Ok(models) if models.is_empty() => {
+            let name = coppice_connectors::get(&connector_id)
+                .map(|descriptor| descriptor.display_name)
+                .unwrap_or(connector_id.as_str());
+            let message = format!("{name} returned no models.");
+            tracing::warn!("{message}");
+            return Err(ModelsApiError::Logged {
+                status: StatusCode::BAD_GATEWAY,
+                message,
+            });
+        }
+        Ok(models) => {
+            tracing::info!(
+                connector = %connector_id,
+                provider = %model_provider_id,
+                %program,
+                count = models.len(),
+                "listed models"
+            );
+            models
+        }
+        Err(err) => {
+            tracing::info!(
+                connector = %connector_id,
+                provider = %model_provider_id,
+                %program,
+                error = %err,
+                "listed models"
+            );
+            return Err(models_gateway_err(&format!("{connector_id} models"), &err));
+        }
+    };
     Ok(Json(ModelListResponse {
         items: models
             .into_iter()
