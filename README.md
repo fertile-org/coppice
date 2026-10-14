@@ -19,7 +19,7 @@ You start the work — create a ticket, or approve one an agent proposed. Agents
 
 ## This beta
 
-Installers for the beta are **macOS Apple Silicon** (`.dmg`) and **Linux x64** (`.deb`).
+Installers for the beta are a `.dmg` for macOS (Apple silicon or Intel) and a `.deb` for Linux (`amd64` or `arm64`). Get them from the [releases page](https://github.com/fertile-org/coppice/releases).
 
 Stronger sandboxing for agents is coming in a later release. Role-owner agents that watch a domain and raise signals come after this beta. This beta is the gated board above.
 
@@ -29,7 +29,7 @@ Bring the CLIs you already use — Claude Code, Codex, Cursor, OpenCode and Kilo
 
 Product docs are the site in [`website/`](website/): the landing page and the user guides. The public site is [https://getcoppice.vercel.app/](https://getcoppice.vercel.app/).
 
-Download buttons go live when a beta git tag publishes GitHub Release assets for the `.dmg` and the `.deb`. Until that release exists, the site documents the install and leaves the download buttons inactive.
+Download Coppice from the [site](https://getcoppice.vercel.app/) or the [releases page](https://github.com/fertile-org/coppice/releases).
 
 ## Contributors
 

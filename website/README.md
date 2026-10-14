@@ -7,18 +7,21 @@ Astro site for the Beta marketing page and user docs. Contributor docs stay in t
 | Route | Source |
 | --- | --- |
 | `/` | `src/pages/index.astro` |
+| `/download` | `src/pages/download.astro` |
 | `/docs` | `src/pages/docs/index.md` |
 | `/docs/install` | `src/pages/docs/install.md` |
 | `/docs/concepts` | `src/pages/docs/concepts.md` |
 | `/docs/providers` | `src/pages/docs/providers.md` |
 | `/docs/faq` | `src/pages/docs/faq.md` |
 
-Copy follows `POSITIONING.md` (M12 Beta). Download links are `#` until a beta GitHub Release exists. The only download targets are:
+Copy follows `POSITIONING.md` (M12 Beta). Download buttons link to `/download`. The labels and asset URLs for that page live in `src/content/downloads.ts`.
 
-- macOS Apple Silicon — `Coppice-<version>-mac-arm64.dmg`
-- Linux x64 — `Coppice-<version>-linux-x64.deb`
+- macOS (Apple Silicon) — `Coppice-mac-arm64.dmg`
+- macOS (Intel) — `Coppice-mac-x64.dmg`
+- Linux (x64) — `Coppice-linux-amd64.deb`
+- Linux (ARM64) — `Coppice-linux-arm64.deb`
 
-The release workflow also builds macOS Intel and Linux arm64. Those are not site CTAs, and there is no Windows build.
+Windows 11 links to the WSL section of the install doc. There is no Windows build.
 
 ## Local preview
 
