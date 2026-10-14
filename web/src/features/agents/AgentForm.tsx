@@ -14,6 +14,9 @@ import type {
   AgentPreset,
   ConnectorOption,
 } from './useAgents';
+import { NOT_COVERED_BY_PLAN } from '../runs/reportedModel';
+import { useUncoveredModels } from '../tools/useUncoveredModels';
+import { RefreshModelsButton } from './RefreshModelsButton';
 import { useConnectorModels, type ModelGroup } from './useAgents';
 import {
   decodeModelValue,
@@ -103,13 +106,17 @@ function modelPickerOptions({
   showGroups,
   modelProvider,
   model,
+  uncoveredIds,
 }: {
   defaultLabel: string;
   groups: ModelGroup[];
   showGroups: boolean;
   modelProvider: string;
   model: string;
+  uncoveredIds: ReadonlySet<string>;
 }): ComboboxOption[] {
+  const hintFor = (modelId: string) =>
+    uncoveredIds.has(modelId) ? NOT_COVERED_BY_PLAN : undefined;
   const options: ComboboxOption[] = [{ value: '', label: defaultLabel }];
   for (const group of groups) {
     for (const entry of group.models) {
@@ -118,6 +125,7 @@ function modelPickerOptions({
         value: encodeModelValue(group.provider, entry.id),
         label: entry.name || entry.id,
         group: showGroups ? group.provider : undefined,
+        hint: hintFor(entry.id),
       });
     }
   }
@@ -127,6 +135,7 @@ function modelPickerOptions({
       value: saved,
       label: model,
       group: showGroups && modelProvider ? modelProvider : undefined,
+      hint: hintFor(model),
     });
   }
   return options;
@@ -220,6 +229,10 @@ export function AgentForm({
     errorMessage: modelsErrorMessage,
     refresh: refreshModels,
   } = useConnectorModels(showModelFields ? values.connector : undefined);
+  const uncovered = useUncoveredModels(showModelFields ? values.connector : undefined);
+  const uncoveredIds = new Set(uncovered.data ?? []);
+  const selectedUncovered =
+    values.model.trim().length > 0 && uncoveredIds.has(values.model.trim());
   const groupsWithModels = modelGroups.filter((group) =>
     group.models.some((model) => model.id),
   );
@@ -485,17 +498,12 @@ export function AgentForm({
             >
               Model
             </label>
-            <button
-              type="button"
+            <RefreshModelsButton
               onClick={() => {
                 void refreshModels();
               }}
               disabled={modelsLoading || modelsFetching}
-              aria-busy={modelsLoading || modelsFetching || undefined}
-              className="font-body text-xs font-medium text-moss-700 underline-offset-2 hover:underline disabled:opacity-60"
-            >
-              Refresh models
-            </button>
+            />
           </div>
           <Combobox
             id="agent-model"
@@ -514,8 +522,12 @@ export function AgentForm({
               showGroups: showModelGroups,
               modelProvider: values.modelProvider,
               model: values.model,
+              uncoveredIds,
             })}
           />
+          {selectedUncovered && (
+            <p className="mt-1 font-body text-xs text-text-muted">{NOT_COVERED_BY_PLAN}</p>
+          )}
           {turnedOffName && !modelsLoading && (
             <p className="mt-2 font-body text-xs text-text-secondary">
               {turnedOffName} is turned off. Turn it on in{' '}

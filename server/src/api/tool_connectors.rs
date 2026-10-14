@@ -1,3 +1,4 @@
+use crate::api::auth::AuthUser;
 use crate::connectors_runtime::ConnectorConfigError;
 use crate::middleware::admin::AdminUser;
 use crate::services::connector_check_service::{
@@ -7,6 +8,7 @@ use crate::services::connector_probe_service::{
     check_connector, diagnosable, list_statuses, ready_connector_ids, CheckError,
     ConnectorStatusResponse,
 };
+use crate::services::uncovered_model_service::{UncoveredModelError, UncoveredModelService};
 use crate::AppState;
 use axum::{
     extract::{Path, State},
@@ -22,6 +24,10 @@ pub fn routes() -> Router<Arc<AppState>> {
     Router::new()
         .route("/api/tools/connectors", get(list_connectors))
         .route("/api/tools/connectors/{id}", patch(set_enabled))
+        .route(
+            "/api/tools/connectors/{id}/uncovered-models",
+            get(list_uncovered_models).put(replace_uncovered_models),
+        )
         .route("/api/tools/connectors/{id}/check", post(check))
         .route("/api/tools/connectors/{id}/test", post(test_connection))
         .route("/api/tools/connector-checks/{id}", get(check_detail))
@@ -167,6 +173,56 @@ async fn set_enabled(
     .find(|status| status.id == id)
     .map(Json)
     .ok_or(StatusCode::NOT_FOUND)
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct UncoveredModelsResponse {
+    model_ids: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct UncoveredModelsBody {
+    model_ids: Vec<String>,
+}
+
+async fn list_uncovered_models(
+    State(state): State<Arc<AppState>>,
+    AuthUser { .. }: AuthUser,
+    Path(id): Path<String>,
+) -> Result<Json<UncoveredModelsResponse>, StatusCode> {
+    let pool = state.db.as_ref().ok_or(StatusCode::SERVICE_UNAVAILABLE)?;
+    let model_ids = UncoveredModelService::new(pool)
+        .list(&id)
+        .await
+        .map_err(uncovered_error_status)?;
+    Ok(Json(UncoveredModelsResponse { model_ids }))
+}
+
+async fn replace_uncovered_models(
+    State(state): State<Arc<AppState>>,
+    AdminUser(_admin): AdminUser,
+    Path(id): Path<String>,
+    Json(body): Json<UncoveredModelsBody>,
+) -> Result<Json<UncoveredModelsResponse>, StatusCode> {
+    let pool = state.db.as_ref().ok_or(StatusCode::SERVICE_UNAVAILABLE)?;
+    let model_ids = UncoveredModelService::new(pool)
+        .replace(&id, &body.model_ids)
+        .await
+        .map_err(uncovered_error_status)?;
+    Ok(Json(UncoveredModelsResponse { model_ids }))
+}
+
+fn uncovered_error_status(err: UncoveredModelError) -> StatusCode {
+    match err {
+        UncoveredModelError::UnknownConnector => StatusCode::NOT_FOUND,
+        UncoveredModelError::InvalidModelId => StatusCode::BAD_REQUEST,
+        UncoveredModelError::Database(err) => {
+            tracing::warn!(error = %err, "uncovered model update failed");
+            StatusCode::INTERNAL_SERVER_ERROR
+        }
+    }
 }
 
 async fn check_detail(

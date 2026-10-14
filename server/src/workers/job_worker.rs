@@ -267,6 +267,7 @@ async fn execute_job(
     // left a window where wait_for_run_stream polled an empty registry; short
     // runs finished and unregistered before a client could attach.
     let stream = state.run_streams.register(run.id);
+    crate::services::run_service::spawn_reported_model_writer(pool.clone(), run.id, stream.clone());
     let cancel_rx = stream.cancelled_rx();
 
     run_svc
@@ -585,6 +586,7 @@ async fn execute_job(
             mcp: Some(grant.access.clone()),
         })
         .await;
+    crate::services::run_service::record_reported_model(pool, run.id, &stream).await;
     grant.revoke().await;
     let provider_result = prefer_submitted_result(pool, run.id, provider_result).await;
 
@@ -859,7 +861,7 @@ async fn invoke_chat_provider(
         ))
     })?;
     let session_created_tx = spawn_chat_session_created_tx(pool.clone(), run.id, connector_name);
-    connector
+    let result = connector
         .run(AgentRunInput {
             agent_id: run.agent_id.to_string(),
             agent_key: agent_key.to_string(),
@@ -874,7 +876,7 @@ async fn invoke_chat_provider(
             artifacts_dir: Some(state.config.storage.artifacts_dir.clone()),
             model_provider: agent.model_provider.clone(),
             model: agent.model.clone(),
-            stream: Some(stream),
+            stream: Some(stream.clone()),
             cancel_rx: Some(cancel_rx),
             session_created_tx,
             resume_context: None,
@@ -882,7 +884,9 @@ async fn invoke_chat_provider(
             read_only_tools: true,
             mcp: Some(mcp),
         })
-        .await
+        .await;
+    crate::services::run_service::record_reported_model(pool, run.id, &stream).await;
+    result
 }
 
 async fn execute_chat_turn(
@@ -928,6 +932,7 @@ async fn execute_chat_turn(
     let cwd_str = cwd.to_string_lossy().into_owned();
 
     let stream = state.run_streams.register(run.id);
+    crate::services::run_service::spawn_reported_model_writer(pool.clone(), run.id, stream.clone());
     let cancel_rx = stream.cancelled_rx();
 
     run_svc

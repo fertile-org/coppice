@@ -20,6 +20,10 @@ const mocks = vi.hoisted(() => ({
   }[],
 }));
 
+vi.mock('../tools/useUncoveredModels', () => ({
+  useUncoveredModels: () => ({ data: [], isLoading: false, isError: false }),
+}));
+
 vi.mock('../plugins/usePlugins', () => ({
   usePlugins: () => ({ data: mocks.plugins, isLoading: false }),
 }));

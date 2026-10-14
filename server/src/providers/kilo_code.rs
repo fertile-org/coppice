@@ -204,6 +204,10 @@ struct KiloLines {
 impl LineHandler for KiloLines {
     fn on_json(&mut self, value: &Value) -> LineStep {
         if let Some(stream) = &self.stream {
+            if let Some(model) = crate::providers::reported_model::reported_model("kilo-code", value)
+            {
+                stream.note_reported_model(&model);
+            }
             self.console.handle_json(stream, value);
         }
 

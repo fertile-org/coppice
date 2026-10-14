@@ -1,5 +1,5 @@
 use crate::api::agent_runs::{
-    runs_list_response, single_run_response, RunsListResponse, SingleRunResponse,
+    load_single_run_response, runs_list_response, RunsListResponse, SingleRunResponse,
 };
 use crate::api::auth::{pool_from_state, AuthUser};
 use crate::domain::substatus::{Substatus, SubstatusDisplay, TicketStatus};
@@ -931,7 +931,10 @@ async fn run_agent(
         .agent_connector_for_run(run.agent_id)
         .await
         .map_err(map_run_error_response)?;
-    Ok((StatusCode::CREATED, Json(single_run_response(run, connector))))
+    let response = load_single_run_response(&service, run, connector)
+        .await
+        .map_err(map_run_error_response)?;
+    Ok((StatusCode::CREATED, Json(response)))
 }
 
 async fn list_runs(
@@ -1234,7 +1237,8 @@ async fn resolve_ticket_conflict(
         });
     }
 
-    let connector = RunService::new(pool)
+    let service = RunService::new(pool);
+    let connector = service
         .agent_connector_for_run(outcome.run.agent_id)
         .await
         .map_err(|err| match map_run_error_response(err) {
@@ -1243,7 +1247,15 @@ async fn resolve_ticket_conflict(
                 ResolveConflictApiError::Message(code, message)
             }
         })?;
-    Ok(Json(single_run_response(outcome.run, connector)))
+    let response = load_single_run_response(&service, outcome.run, connector)
+        .await
+        .map_err(|err| match map_run_error_response(err) {
+            RunAgentError::Status(code) => ResolveConflictApiError::Status(code),
+            RunAgentError::Message(code, message) => {
+                ResolveConflictApiError::Message(code, message)
+            }
+        })?;
+    Ok(Json(response))
 }
 
 async fn remove_ticket_worktree(

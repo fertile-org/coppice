@@ -184,6 +184,9 @@ impl LineHandler for CursorLines {
             .map(str::to_string);
 
         if let Some(stream) = &self.stream {
+            if let Some(model) = crate::providers::reported_model::reported_model("cursor", value) {
+                stream.note_reported_model(&model);
+            }
             self.console.handle_stream_json(stream, value);
         }
 
