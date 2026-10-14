@@ -253,7 +253,15 @@ async fn merge_succeeds_when_head_matches_approval() {
     let fx = setup().await;
     set_wait_for_human_review(&fx).await;
     let head = git_rev_parse(&fx.worktree_path, "HEAD");
-    final_approve(&fx).await;
+    let main_before = git_rev_parse(&fx.local_path, "main");
+    let approved = final_approve(&fx).await;
+    assert_eq!(approved["status"], "done");
+    assert_eq!(approved["humanReview"]["merged"], false);
+    assert_eq!(
+        git_rev_parse(&fx.local_path, "main"),
+        main_before,
+        "accept moves the ticket to Done and does not merge"
+    );
 
     let res = fx
         .app
@@ -280,7 +288,19 @@ async fn merge_succeeds_when_head_matches_approval() {
         .status()
         .expect("merge-base");
     assert!(ancestor.success(), "approved commit was not merged");
-    assert_eq!(git_rev_parse(&fx.local_path, "HEAD"), head);
+    let merge_head = git_rev_parse(&fx.local_path, "HEAD");
+    assert_ne!(merge_head, head, "merge creates a merge commit");
+    assert_eq!(git_rev_parse(&fx.local_path, "HEAD^1"), main_before);
+    assert_eq!(git_rev_parse(&fx.local_path, "HEAD^2"), head);
+    assert_eq!(
+        git_rev_parse(&fx.worktree_path, "HEAD"),
+        head,
+        "ticket branch is left as the accepted commit"
+    );
+    let ticket = get_ticket(&fx).await;
+    assert_eq!(ticket["status"], "done");
+    assert_eq!(ticket["humanReview"]["merged"], true);
+    assert_eq!(ticket["humanReview"]["stale"], false);
 }
 
 #[tokio::test]

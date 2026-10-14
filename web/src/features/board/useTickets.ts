@@ -15,6 +15,8 @@ export interface HumanReview {
   headSha: string;
   shortSha: string;
   stale: boolean;
+  /** True after the accepted commit has been merged. */
+  merged?: boolean;
   commentIds: string[];
   runIds: string[];
 }

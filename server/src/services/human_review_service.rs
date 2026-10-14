@@ -22,6 +22,7 @@ pub struct HumanReview {
     pub stale: bool,
     pub accepted_by: Option<Uuid>,
     pub accepted_at: time::OffsetDateTime,
+    pub merged_at: Option<time::OffsetDateTime>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -42,7 +43,7 @@ impl<'a> HumanReviewService<'a> {
     pub async fn get(&self, ticket_id: Uuid) -> Result<Option<HumanReview>, sqlx::Error> {
         let row = sqlx::query(
             r#"
-            SELECT ticket_id, head_sha, comment_ids, run_ids, stale, accepted_by, accepted_at
+            SELECT ticket_id, head_sha, comment_ids, run_ids, stale, accepted_by, accepted_at, merged_at
             FROM ticket_human_reviews
             WHERE ticket_id = $1
             "#,
@@ -80,7 +81,7 @@ impl<'a> HumanReviewService<'a> {
                 invalidated_at = NULL,
                 merged_sha = NULL,
                 merged_at = NULL
-            RETURNING ticket_id, head_sha, comment_ids, run_ids, stale, accepted_by, accepted_at
+            RETURNING ticket_id, head_sha, comment_ids, run_ids, stale, accepted_by, accepted_at, merged_at
             "#,
         )
         .bind(ticket_id)
@@ -279,6 +280,7 @@ fn row_to_review(row: &sqlx::postgres::PgRow) -> HumanReview {
         stale: row.get("stale"),
         accepted_by: row.get("accepted_by"),
         accepted_at: row.get("accepted_at"),
+        merged_at: row.get("merged_at"),
     }
 }
 

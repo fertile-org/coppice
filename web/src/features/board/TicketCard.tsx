@@ -2,6 +2,8 @@ import { useDraggable } from '@dnd-kit/core';
 import { CSS } from '@dnd-kit/utilities';
 import { Bot, GitBranch, Network } from 'lucide-react';
 import type { CSSProperties } from 'react';
+import { AcceptedNotMerged } from './AcceptedNotMerged';
+import { showsAcceptedNotMerged } from './showsAcceptedNotMerged';
 import type { TicketHierarchy } from './ticketHierarchy';
 import type { Ticket } from './useTickets';
 
@@ -44,30 +46,35 @@ export function TicketCard({
     ? { transform: CSS.Translate.toString(transform) }
     : undefined;
 
+  const showMerge = showsAcceptedNotMerged(ticket);
+
   return (
     <div
       ref={setNodeRef}
       style={style}
-      {...listeners}
-      {...attributes}
-      role="button"
-      tabIndex={0}
-      onClick={() => {
-        if (!isDragging) onOpen(ticket.id);
-      }}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter' || e.key === ' ') {
-          e.preventDefault();
-          onOpen(ticket.id);
-        }
-      }}
       className={[
         'rounded-md border border-border bg-surface-raised p-3 shadow-card transition-shadow duration-fast',
-        'hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
+        'hover:shadow-md',
         isArchived ? 'cursor-pointer opacity-60' : 'cursor-grab',
         isDragging ? 'z-10 opacity-60 shadow-lg' : '',
       ].join(' ')}
     >
+      <div
+        {...listeners}
+        {...attributes}
+        role="button"
+        tabIndex={0}
+        onClick={() => {
+          if (!isDragging) onOpen(ticket.id);
+        }}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            onOpen(ticket.id);
+          }
+        }}
+        className="rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+      >
       {(hierarchy?.parent || hierarchy?.parentUnavailable) && (
         <div className="mb-2 flex min-w-0 items-center gap-1.5 font-body text-xs leading-tight text-text-secondary">
           <GitBranch
@@ -154,6 +161,8 @@ export function TicketCard({
           </span>
         </div>
       )}
+      </div>
+      {showMerge && <AcceptedNotMerged ticket={ticket} />}
     </div>
   );
 }

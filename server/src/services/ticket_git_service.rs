@@ -559,11 +559,10 @@ impl<'a> TicketGitService<'a> {
             "Merge {} into {} (Coppice ticket {})",
             ctx.ticket_branch, base_branch, ticket_id
         );
-        let output = run_git_capture(
-            &ctx.git_dir,
-            &["merge", &ctx.ticket_branch, "-m", &merge_msg],
-        )
-        .await;
+        let merge_args =
+            merge_commit_args(self.git_author.as_ref(), &ctx.ticket_branch, &merge_msg);
+        let merge_arg_refs: Vec<&str> = merge_args.iter().map(String::as_str).collect();
+        let output = run_git_capture(&ctx.git_dir, &merge_arg_refs).await;
 
         let message = match output {
             Ok(stdout) => {
@@ -856,6 +855,27 @@ async fn has_git_remote(git_dir: &Path) -> bool {
     !String::from_utf8_lossy(&output.stdout).trim().is_empty()
 }
 
+/// Merge with a merge commit. Never rebases and never force-pushes.
+fn merge_commit_args(
+    author: Option<&GitAuthor>,
+    ticket_branch: &str,
+    message: &str,
+) -> Vec<String> {
+    let mut args = Vec::new();
+    if let Some(author) = author {
+        args.push("-c".to_string());
+        args.push(format!("user.name={}", author.name));
+        args.push("-c".to_string());
+        args.push(format!("user.email={}", author.email));
+    }
+    args.push("merge".to_string());
+    args.push("--no-ff".to_string());
+    args.push(ticket_branch.to_string());
+    args.push("-m".to_string());
+    args.push(message.to_string());
+    args
+}
+
 async fn abort_merge_conflict(
     git_dir: &Path,
     previous_branch: Option<&str>,
@@ -999,6 +1019,28 @@ fn parse_conflict_paths_from_output(output: &str) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn merge_commit_args_create_a_merge_commit_without_rewriting_history() {
+        let author = GitAuthor {
+            name: "Coppice".into(),
+            email: "coppice@localhost".into(),
+        };
+        let args = merge_commit_args(
+            Some(&author),
+            "agent/TICKET-abc",
+            "Merge agent/TICKET-abc into main",
+        );
+        let merge_at = args.iter().position(|arg| arg == "merge").expect("merge");
+        assert!(merge_at > 1, "author config precedes the merge subcommand");
+        assert_eq!(args[merge_at - 2], "-c");
+        assert_eq!(args[merge_at - 1], "user.email=coppice@localhost");
+        assert_eq!(args[merge_at + 1], "--no-ff");
+        assert_eq!(args[merge_at + 2], "agent/TICKET-abc");
+        assert_eq!(args[merge_at + 3], "-m");
+        assert!(!args.iter().any(|arg| arg == "rebase"));
+        assert!(!args.iter().any(|arg| arg.contains("force")));
+    }
 
     #[test]
     fn validate_branch_name_accepts_common_names() {
