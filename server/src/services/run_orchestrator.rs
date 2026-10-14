@@ -1150,6 +1150,9 @@ mod tests {
             blockers: vec![],
             split_tickets: vec![],
             knowledge_candidates: Vec::new(),
+            how_it_works: None,
+            changes_from_plan: None,
+            look_here_first: None,
         }
     }
 
@@ -1181,6 +1184,9 @@ mod tests {
             blockers: vec![],
             split_tickets: vec![],
             knowledge_candidates: Vec::new(),
+            how_it_works: None,
+            changes_from_plan: None,
+            look_here_first: None,
         }
     }
 
@@ -1205,6 +1211,9 @@ mod tests {
             blockers: vec![],
             split_tickets: vec![],
             knowledge_candidates: Vec::new(),
+            how_it_works: None,
+            changes_from_plan: None,
+            look_here_first: None,
         }
     }
 
@@ -1329,6 +1338,9 @@ mod tests {
             blockers: vec![],
             split_tickets: vec![],
             knowledge_candidates: Vec::new(),
+            how_it_works: None,
+            changes_from_plan: None,
+            look_here_first: None,
         };
 
         let targets = select_collaboration_targets(&contract, &agents, source_id);
@@ -1809,6 +1821,9 @@ mod tests {
                 },
             ],
             knowledge_candidates: Vec::new(),
+            how_it_works: None,
+            changes_from_plan: None,
+            look_here_first: None,
         };
         let apply = ApplyResult {
             run_status: RunStatus::Succeeded,
@@ -3321,6 +3336,9 @@ mod tests {
             blockers: vec!["Regression remains".into()],
             split_tickets: vec![],
             knowledge_candidates: Vec::new(),
+            how_it_works: None,
+            changes_from_plan: None,
+            look_here_first: None,
         };
         let workflow = WorkflowConfig {
             auto_start_runs: true,
@@ -3558,6 +3576,9 @@ mod tests {
                 assign_to: None,
             }],
             knowledge_candidates: Vec::new(),
+            how_it_works: None,
+            changes_from_plan: None,
+            look_here_first: None,
         };
         let mut malicious_apply =
             crate::services::result_contract::apply_agent_result(&response_contract)
@@ -4191,6 +4212,9 @@ mod tests {
                     blockers: vec![],
                     split_tickets: vec![],
                     knowledge_candidates: Vec::new(),
+                    how_it_works: None,
+                    changes_from_plan: None,
+                    look_here_first: None,
                 },
                 ApplyResult {
                     run_status: RunStatus::Succeeded,

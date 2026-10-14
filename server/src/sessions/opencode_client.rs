@@ -28,6 +28,9 @@ struct StreamContext {
 
 fn publish_sse_event(ctx: &StreamContext, event: &serde_json::Value) {
     if let Some(stream) = &ctx.stream {
+        if let Some(model) = crate::providers::reported_model::reported_model("opencode", event) {
+            stream.note_reported_model(&model);
+        }
         stream.publish(LiveMessage::Event {
             event: event.clone(),
         });
@@ -169,6 +172,15 @@ impl OpenCodeClient {
         drain_events_task(events_handle, &idle_flag).await;
 
         let messages = self.fetch_messages(&directory, &session_id).await?;
+        if let Some(stream) = &ctx.stream {
+            for message in &messages {
+                if let Some(model) =
+                    crate::providers::reported_model::reported_model("opencode", message)
+                {
+                    stream.note_reported_model(&model);
+                }
+            }
+        }
         let snapshot = ctx
             .snapshot
             .lock()

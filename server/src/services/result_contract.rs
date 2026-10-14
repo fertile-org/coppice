@@ -663,6 +663,9 @@ mod tests {
             blockers: vec!["Docs mismatch".into()],
             split_tickets: vec![],
             knowledge_candidates: Vec::new(),
+            how_it_works: None,
+            changes_from_plan: None,
+            look_here_first: None,
         };
         let applied = apply_agent_result(&result).expect("apply");
         assert!(applied.comment.body.contains("@backend_engineer"));
@@ -689,6 +692,9 @@ mod tests {
             blockers: vec![],
             split_tickets: vec![],
             knowledge_candidates: Vec::new(),
+            how_it_works: None,
+            changes_from_plan: None,
+            look_here_first: None,
         };
 
         let applied = apply_agent_result(&result).expect("apply");
@@ -722,6 +728,9 @@ mod tests {
             blockers: vec![],
             split_tickets: vec![],
             knowledge_candidates: Vec::new(),
+            how_it_works: None,
+            changes_from_plan: None,
+            look_here_first: None,
         };
 
         let applied = apply_agent_result(&result).expect("apply attention result");
@@ -752,6 +761,9 @@ mod tests {
                 assign_to: None,
             }],
             knowledge_candidates: Vec::new(),
+            how_it_works: None,
+            changes_from_plan: None,
+            look_here_first: None,
         };
 
         let applied = apply_consultation_result(&result).expect("apply consultation");
@@ -822,6 +834,9 @@ mod tests {
             blockers: vec![],
             split_tickets: vec![],
             knowledge_candidates: Vec::new(),
+            how_it_works: None,
+            changes_from_plan: None,
+            look_here_first: None,
         };
         let applied = apply_agent_result(&result).expect("apply");
         assert!(applied
@@ -845,6 +860,9 @@ mod tests {
             blockers: vec![],
             split_tickets: vec![],
             knowledge_candidates: Vec::new(),
+            how_it_works: None,
+            changes_from_plan: None,
+            look_here_first: None,
         };
         let applied = apply_agent_result(&result).expect("apply");
         assert!(applied.comment.body.contains("Refined scope."));
@@ -868,6 +886,9 @@ mod tests {
             blockers: vec![],
             split_tickets: vec![],
             knowledge_candidates: Vec::new(),
+            how_it_works: None,
+            changes_from_plan: None,
+            look_here_first: None,
         };
         let applied = apply_agent_result(&result).expect("apply");
         assert!(applied
@@ -902,6 +923,9 @@ mod tests {
             blockers: vec![],
             split_tickets: vec![],
             knowledge_candidates: Vec::new(),
+            how_it_works: None,
+            changes_from_plan: None,
+            look_here_first: None,
         };
         let applied = apply_agent_result(&result).expect("apply");
         assert_eq!(
@@ -944,6 +968,9 @@ mod tests {
             blockers: vec![],
             split_tickets: vec![],
             knowledge_candidates: Vec::new(),
+            how_it_works: None,
+            changes_from_plan: None,
+            look_here_first: None,
         }
     }
 

@@ -550,6 +550,9 @@ mod tests {
                 blockers: vec![],
                 split_tickets: vec![],
                 knowledge_candidates: Vec::new(),
+                how_it_works: None,
+                changes_from_plan: None,
+                look_here_first: None,
             },
             board_agent_keys: vec!["pm".into()],
             board_agent_ids: HashMap::from([("pm".into(), pm_agent_id())]),
@@ -574,6 +577,9 @@ mod tests {
             blockers: vec![],
             split_tickets: vec![],
             knowledge_candidates: Vec::new(),
+            how_it_works: None,
+            changes_from_plan: None,
+            look_here_first: None,
         }
     }
 
@@ -713,6 +719,9 @@ mod tests {
                     blockers: vec![],
                     split_tickets: vec![],
                     knowledge_candidates: Vec::new(),
+                    how_it_works: None,
+                    changes_from_plan: None,
+                    look_here_first: None,
                 };
                 if let Ok(action) = WorkflowService::resolve_transition(ctx) {
                     assert_ne!(action.new_status, Some(Done), "{current_status:?} / {role}");
@@ -1009,6 +1018,9 @@ mod tests {
                 blockers: vec![],
                 split_tickets: vec![],
                 knowledge_candidates: Vec::new(),
+                how_it_works: None,
+                changes_from_plan: None,
+                look_here_first: None,
             },
             ..minimal_ctx()
         })
@@ -1062,6 +1074,9 @@ mod tests {
                 blockers: vec![],
                 split_tickets: vec![],
                 knowledge_candidates: Vec::new(),
+                how_it_works: None,
+                changes_from_plan: None,
+                look_here_first: None,
             },
             ..minimal_ctx()
         })
@@ -1111,6 +1126,9 @@ mod tests {
                 blockers: vec![],
                 split_tickets: vec![],
                 knowledge_candidates: Vec::new(),
+                how_it_works: None,
+                changes_from_plan: None,
+                look_here_first: None,
             },
             ..minimal_ctx()
         })
@@ -1138,6 +1156,9 @@ mod tests {
                 blockers: vec![],
                 split_tickets: vec![],
                 knowledge_candidates: Vec::new(),
+                how_it_works: None,
+                changes_from_plan: None,
+                look_here_first: None,
             },
             ..minimal_ctx()
         })
@@ -1167,6 +1188,9 @@ mod tests {
                 blockers: vec![],
                 split_tickets: vec![],
                 knowledge_candidates: Vec::new(),
+                how_it_works: None,
+                changes_from_plan: None,
+                look_here_first: None,
             },
             ..minimal_ctx()
         })
@@ -1196,6 +1220,9 @@ mod tests {
                 blockers: vec!["Missing tests".into()],
                 split_tickets: vec![],
                 knowledge_candidates: Vec::new(),
+                how_it_works: None,
+                changes_from_plan: None,
+                look_here_first: None,
             },
             board_agent_keys: vec!["qc".into(), "backend_engineer".into()],
             board_agent_ids: agent_map(&[
@@ -1234,6 +1261,9 @@ mod tests {
                 blockers: vec![],
                 split_tickets: vec![],
                 knowledge_candidates: Vec::new(),
+                how_it_works: None,
+                changes_from_plan: None,
+                look_here_first: None,
             },
             board_agent_keys: vec!["qc".into(), "backend_engineer".into()],
             board_agent_ids: agent_map(&[

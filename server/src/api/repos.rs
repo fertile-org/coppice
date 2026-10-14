@@ -2,9 +2,13 @@ use crate::api::auth::{pool_from_state, AuthUser};
 use crate::api::code_reviews::map_code_review_error;
 use crate::domain::repo::{verification_status_to_str, Repo};
 use crate::middleware::admin::AdminUser;
+use crate::domain::substatus::TicketStatus;
 use crate::services::code_review_service::{
     BranchesResponse, CodeReviewService, DiffSummary, FilePatch,
 };
+use crate::services::planning_service::PlanningService;
+use crate::services::reviewer_brief::file_outside_plan;
+use crate::services::ticket_service::{TicketError, TicketService};
 use crate::services::repo_git_service::{
     DefaultBranchSyncStatus, PullDefaultBranchResult, PushDefaultBranchResult, RepoGitError,
     RepoGitService,
@@ -62,6 +66,7 @@ pub fn routes() -> Router<Arc<AppState>> {
 struct DiffQuery {
     worktree_path: String,
     base_branch: String,
+    ticket_id: Option<Uuid>,
 }
 
 #[derive(Deserialize)]
@@ -470,11 +475,50 @@ async fn get_repo_diff(
         pool,
         state.config.agent.worktrees_path.clone().into(),
     );
-    let diff = service
+    let mut diff = service
         .diff_summary(repo_id, &query.worktree_path, &query.base_branch)
         .await
         .map_err(map_code_review_error)?;
+    if let Some(ticket_id) = query.ticket_id {
+        mark_files_outside_plan(pool, ticket_id, &mut diff).await?;
+    }
     Ok(Json(diff))
+}
+
+/// Tags diff files that the approved plan does not name. Only Human Review, and
+/// only when a current approved plan names at least one path. A plan that names
+/// no files leaves every flag off.
+async fn mark_files_outside_plan(
+    pool: &sqlx::PgPool,
+    ticket_id: Uuid,
+    diff: &mut DiffSummary,
+) -> Result<(), StatusCode> {
+    let ticket = match TicketService::new(pool).get(ticket_id).await {
+        Ok(ticket) => ticket,
+        Err(TicketError::TicketNotFound) => return Ok(()),
+        Err(TicketError::Database(err)) => {
+            tracing::warn!(error = %err, "reviewer brief plan lookup failed");
+            return Err(StatusCode::INTERNAL_SERVER_ERROR);
+        }
+        Err(_) => return Ok(()),
+    };
+    if ticket.ticket.status != TicketStatus::WaitForFinalReview {
+        return Ok(());
+    }
+    let plan = PlanningService::new(pool)
+        .approved_plan(ticket_id)
+        .await
+        .map_err(|err| {
+            tracing::warn!(error = %err, "approved plan lookup failed");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+    let Some(plan) = plan else {
+        return Ok(());
+    };
+    for file in &mut diff.files {
+        file.not_in_plan = file_outside_plan(&file.path, &plan.markdown);
+    }
+    Ok(())
 }
 
 async fn get_repo_diff_file(

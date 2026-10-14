@@ -1,5 +1,5 @@
 use crate::api::agent_runs::{
-    runs_list_response, single_run_response, RunsListResponse, SingleRunResponse,
+    load_single_run_response, runs_list_response, RunsListResponse, SingleRunResponse,
 };
 use crate::api::auth::{pool_from_state, AuthUser};
 use crate::domain::substatus::{Substatus, SubstatusDisplay, TicketStatus};
@@ -11,11 +11,13 @@ use crate::domain::comment::{AuthorType, CommentIntent};
 use crate::events::bus::AppEvent;
 use crate::services::comment_service::CommentService;
 use crate::copy::plan::PLAN_REQUIRED;
+use crate::copy::restart::{git_error, ERROR_NONE, ERROR_USE_CANCEL, ERROR_USE_DISCARD};
 use crate::services::planning_service::PlanningService;
 use crate::services::workflow_service::{WorkflowService, DONE_REQUIRES_ACCEPT};
 use crate::domain::agent_health::AgentHealthStatus;
 use crate::services::agent_health::missing_connector_detail;
 use crate::services::agent_service::{AgentError, AgentService};
+use crate::services::restart_service::{RestartError, RestartService};
 use crate::services::run_service::{RunError, RunService};
 use crate::services::split_service::{SplitError, SplitService};
 use crate::services::human_review_service::{short_commit_sha, HumanReviewService};
@@ -58,6 +60,19 @@ pub fn routes() -> Router<Arc<AppState>> {
         )
         .route("/api/tickets/{ticket_id}/assign", post(assign_agent))
         .route("/api/tickets/{ticket_id}/run-agent", post(run_agent))
+        .route("/api/tickets/{ticket_id}/restart", get(get_restart))
+        .route(
+            "/api/tickets/{ticket_id}/restart/resume",
+            post(resume_restart),
+        )
+        .route(
+            "/api/tickets/{ticket_id}/restart/discard",
+            post(discard_restart),
+        )
+        .route(
+            "/api/tickets/{ticket_id}/restart/cancel",
+            post(cancel_restart),
+        )
         .route("/api/tickets/{ticket_id}/runs", get(list_runs))
         .route(
             "/api/tickets/{ticket_id}/final-approve",
@@ -145,6 +160,9 @@ pub(crate) struct TicketResponse {
     archived_at: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     human_review: Option<HumanReviewResponse>,
+    /// Present only when an implementation run reported a reviewer brief.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reviewer_brief: Option<crate::services::reviewer_brief::ReviewerBrief>,
 }
 
 #[derive(Serialize)]
@@ -259,6 +277,7 @@ pub(crate) fn ticket_to_response(item: TicketWithDisplay) -> TicketResponse {
                 run_ids: review.run_ids,
             }
         }),
+        reviewer_brief: None,
     }
 }
 
@@ -655,7 +674,11 @@ async fn get_ticket(
     let pool = pool_from_state(&state)?;
     let service = TicketService::new(pool);
     let ticket = service.get(ticket_id).await.map_err(map_error)?;
-    Ok(Json(with_approved_plan(pool, ticket).await.map_err(map_error)?))
+    Ok(Json(
+        with_approved_plan(&state, pool, ticket)
+            .await
+            .map_err(map_error)?,
+    ))
 }
 
 async fn archive_ticket(
@@ -796,7 +819,11 @@ async fn approve_plan(
         .get(ticket_id)
         .await
         .map_err(map_update_status_error)?;
-    Ok(Json(with_approved_plan(pool, ticket).await.map_err(map_update_status_error)?))
+    Ok(Json(
+        with_approved_plan(&state, pool, ticket)
+            .await
+            .map_err(map_update_status_error)?,
+    ))
 }
 
 async fn ask_for_plan_changes(
@@ -830,6 +857,7 @@ fn map_plan_error(err: crate::services::planning_service::PlanError) -> UpdateSt
 }
 
 async fn with_approved_plan(
+    state: &AppState,
     pool: &sqlx::PgPool,
     ticket: TicketWithDisplay,
 ) -> Result<TicketResponse, TicketError> {
@@ -842,13 +870,60 @@ async fn with_approved_plan(
                 TicketError::Validation(message)
             }
         })?;
+    let ticket_id = ticket.ticket.id;
+    let status = ticket.ticket.status;
     let mut response = ticket_to_response(ticket);
     response.approved_plan = plan.map(|plan| ApprovedPlanResponse {
         comment_id: plan.comment_id,
         markdown: plan.markdown,
         steps: plan.steps,
     });
+    response.reviewer_brief = reviewer_brief_for_ticket(state, pool, ticket_id, status).await?;
     Ok(response)
+}
+
+/// The stored brief, hidden in Human Review when it was written for a different
+/// commit than the one review is bound to.
+async fn reviewer_brief_for_ticket(
+    state: &AppState,
+    pool: &sqlx::PgPool,
+    ticket_id: Uuid,
+    status: TicketStatus,
+) -> Result<Option<crate::services::reviewer_brief::ReviewerBrief>, TicketError> {
+    let brief = crate::services::reviewer_brief::ReviewerBriefService::new(pool)
+        .get(ticket_id)
+        .await?;
+    if status != TicketStatus::WaitForFinalReview {
+        return Ok(brief);
+    }
+    let Some(brief) = brief else {
+        return Ok(None);
+    };
+    let reviewed = match ticket_git_service(state, pool)
+        .reviewed_head_sha(ticket_id)
+        .await
+    {
+        Ok(sha) => sha,
+        Err(crate::services::ticket_git_service::TicketGitError::Database(err)) => {
+            return Err(err.into());
+        }
+        Err(crate::services::ticket_git_service::TicketGitError::Ticket(err)) => return Err(err),
+        Err(err) => {
+            tracing::debug!(
+                error = %err,
+                "reviewer brief hidden; reviewed commit unavailable"
+            );
+            None
+        }
+    };
+    if crate::services::reviewer_brief::brief_matches_reviewed_commit(
+        &brief.commit_sha,
+        reviewed.as_deref(),
+    ) {
+        Ok(Some(brief))
+    } else {
+        Ok(None)
+    }
 }
 
 async fn assign_agent(
@@ -931,7 +1006,170 @@ async fn run_agent(
         .agent_connector_for_run(run.agent_id)
         .await
         .map_err(map_run_error_response)?;
-    Ok((StatusCode::CREATED, Json(single_run_response(run, connector))))
+    let response = load_single_run_response(&service, run, connector)
+        .await
+        .map_err(map_run_error_response)?;
+    Ok((StatusCode::CREATED, Json(response)))
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RestartResponse {
+    pending: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    run_id: Option<Uuid>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    changed_files: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    resume_label: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    other_label: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    confirm: Option<String>,
+}
+
+fn restart_response(
+    choice: Option<crate::services::restart_service::RestartChoice>,
+) -> RestartResponse {
+    match choice {
+        None => RestartResponse {
+            pending: false,
+            run_id: None,
+            changed_files: None,
+            resume_label: None,
+            other_label: None,
+            confirm: None,
+        },
+        Some(choice) => RestartResponse {
+            pending: true,
+            run_id: Some(choice.run_id),
+            changed_files: Some(choice.changed_files),
+            resume_label: Some(choice.resume_label.to_string()),
+            other_label: Some(choice.other_label.to_string()),
+            confirm: choice.confirm,
+        },
+    }
+}
+
+enum RestartApiError {
+    Status(StatusCode),
+    Message(StatusCode, String),
+}
+
+impl IntoResponse for RestartApiError {
+    fn into_response(self) -> Response {
+        match self {
+            RestartApiError::Status(code) => code.into_response(),
+            RestartApiError::Message(code, message) => {
+                (code, Json(ApiMessageResponse { message })).into_response()
+            }
+        }
+    }
+}
+
+fn map_restart_error(err: RestartError) -> RestartApiError {
+    match err {
+        RestartError::NothingPending => {
+            RestartApiError::Message(StatusCode::NOT_FOUND, ERROR_NONE.to_string())
+        }
+        RestartError::UseDiscard => {
+            RestartApiError::Message(StatusCode::BAD_REQUEST, ERROR_USE_DISCARD.to_string())
+        }
+        RestartError::UseCancel => {
+            RestartApiError::Message(StatusCode::BAD_REQUEST, ERROR_USE_CANCEL.to_string())
+        }
+        RestartError::Git(detail) => {
+            tracing::warn!(error = %detail, "restart worktree action failed");
+            RestartApiError::Message(StatusCode::INTERNAL_SERVER_ERROR, git_error(&detail))
+        }
+        RestartError::Run(RunError::ActiveRunExists)
+        | RestartError::Ticket(TicketError::ActiveRunExists)
+        | RestartError::Ticket(TicketError::Archived) => {
+            RestartApiError::Status(StatusCode::CONFLICT)
+        }
+        RestartError::Run(RunError::NotFound)
+        | RestartError::Ticket(TicketError::TicketNotFound)
+        | RestartError::Ticket(TicketError::BoardNotFound) => {
+            RestartApiError::Message(StatusCode::NOT_FOUND, ERROR_NONE.to_string())
+        }
+        RestartError::Run(RunError::Validation(message))
+        | RestartError::Ticket(TicketError::Validation(message)) => {
+            // Status-write backstops. The sentences stay off the client.
+            if message == "ticket is not waiting after a restart"
+                || message == "accepted work is not resumed"
+            {
+                RestartApiError::Message(StatusCode::NOT_FOUND, ERROR_NONE.to_string())
+            } else {
+                RestartApiError::Message(StatusCode::BAD_REQUEST, message)
+            }
+        }
+        RestartError::Ticket(
+            TicketError::InvalidStatus
+            | TicketError::InvalidSubstatus
+            | TicketError::InvalidPriority,
+        ) => RestartApiError::Status(StatusCode::BAD_REQUEST),
+        RestartError::Ticket(TicketError::Database(err))
+        | RestartError::Run(RunError::Database(err))
+        | RestartError::Database(err) => {
+            tracing::warn!(error = %err, "restart action failed");
+            RestartApiError::Status(StatusCode::INTERNAL_SERVER_ERROR)
+        }
+    }
+}
+
+async fn get_restart(
+    State(state): State<Arc<AppState>>,
+    AuthUser { .. }: AuthUser,
+    Path(ticket_id): Path<Uuid>,
+) -> Result<Json<RestartResponse>, RestartApiError> {
+    let pool = pool_from_state(&state).map_err(RestartApiError::Status)?;
+    let choice = RestartService::new(pool)
+        .open(ticket_id)
+        .await
+        .map_err(map_restart_error)?;
+    Ok(Json(restart_response(choice)))
+}
+
+async fn resume_restart(
+    State(state): State<Arc<AppState>>,
+    AuthUser { .. }: AuthUser,
+    Path(ticket_id): Path<Uuid>,
+) -> Result<Json<RestartResponse>, RestartApiError> {
+    let pool = pool_from_state(&state).map_err(RestartApiError::Status)?;
+    RestartService::new(pool)
+        .resume(ticket_id)
+        .await
+        .map_err(map_restart_error)?;
+    publish_ticket_state(&state, pool, ticket_id).await;
+    Ok(Json(restart_response(None)))
+}
+
+async fn discard_restart(
+    State(state): State<Arc<AppState>>,
+    AuthUser { .. }: AuthUser,
+    Path(ticket_id): Path<Uuid>,
+) -> Result<Json<RestartResponse>, RestartApiError> {
+    let pool = pool_from_state(&state).map_err(RestartApiError::Status)?;
+    RestartService::new(pool)
+        .discard(ticket_id)
+        .await
+        .map_err(map_restart_error)?;
+    publish_ticket_state(&state, pool, ticket_id).await;
+    Ok(Json(restart_response(None)))
+}
+
+async fn cancel_restart(
+    State(state): State<Arc<AppState>>,
+    AuthUser { .. }: AuthUser,
+    Path(ticket_id): Path<Uuid>,
+) -> Result<Json<RestartResponse>, RestartApiError> {
+    let pool = pool_from_state(&state).map_err(RestartApiError::Status)?;
+    RestartService::new(pool)
+        .cancel(ticket_id)
+        .await
+        .map_err(map_restart_error)?;
+    publish_ticket_state(&state, pool, ticket_id).await;
+    Ok(Json(restart_response(None)))
 }
 
 async fn list_runs(
@@ -1234,7 +1472,8 @@ async fn resolve_ticket_conflict(
         });
     }
 
-    let connector = RunService::new(pool)
+    let service = RunService::new(pool);
+    let connector = service
         .agent_connector_for_run(outcome.run.agent_id)
         .await
         .map_err(|err| match map_run_error_response(err) {
@@ -1243,7 +1482,15 @@ async fn resolve_ticket_conflict(
                 ResolveConflictApiError::Message(code, message)
             }
         })?;
-    Ok(Json(single_run_response(outcome.run, connector)))
+    let response = load_single_run_response(&service, outcome.run, connector)
+        .await
+        .map_err(|err| match map_run_error_response(err) {
+            RunAgentError::Status(code) => ResolveConflictApiError::Status(code),
+            RunAgentError::Message(code, message) => {
+                ResolveConflictApiError::Message(code, message)
+            }
+        })?;
+    Ok(Json(response))
 }
 
 async fn remove_ticket_worktree(
