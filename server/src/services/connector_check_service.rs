@@ -105,10 +105,12 @@ impl<'a> ConnectorCheckService<'a> {
         if agent.connector != connector {
             return Err(CheckError::WrongConnector);
         }
-        match config.agent.connectors.enabled(connector) {
-            None => return Err(CheckError::UnknownConnector),
-            Some(false) => return Err(CheckError::Disabled),
-            Some(true) => {}
+        match config.agent.connectors.switch(connector) {
+            coppice_config::ConnectorSwitch::Unknown => {
+                return Err(CheckError::UnknownConnector);
+            }
+            coppice_config::ConnectorSwitch::Off => return Err(CheckError::Disabled),
+            coppice_config::ConnectorSwitch::On | coppice_config::ConnectorSwitch::Automatic => {}
         }
 
         let check_id = Uuid::new_v4();

@@ -76,9 +76,6 @@ fn build_mock(_config: &AppConfig, _deps: &FactoryDeps) -> Option<BuiltConnector
 
 fn build_opencode(config: &AppConfig, deps: &FactoryDeps) -> Option<BuiltConnector> {
     let cfg = &config.agent.connectors.opencode;
-    if !cfg.enabled {
-        return None;
-    }
     Some(BuiltConnector {
         provider: Arc::new(OpenCodeProvider::new(
             deps.opencode_runs.clone(),
@@ -93,9 +90,6 @@ fn build_opencode(config: &AppConfig, deps: &FactoryDeps) -> Option<BuiltConnect
 
 fn build_claude_code(config: &AppConfig, _deps: &FactoryDeps) -> Option<BuiltConnector> {
     let cfg = &config.agent.connectors.claude_code;
-    if !cfg.enabled {
-        return None;
-    }
     Some(BuiltConnector {
         provider: Arc::new(ClaudeCodeProvider::new(cfg.clone())),
         models: Arc::new(ClaudeCodeModels::new(cfg.model_providers.clone())),
@@ -104,9 +98,6 @@ fn build_claude_code(config: &AppConfig, _deps: &FactoryDeps) -> Option<BuiltCon
 
 fn build_codex(config: &AppConfig, _deps: &FactoryDeps) -> Option<BuiltConnector> {
     let cfg = &config.agent.connectors.codex;
-    if !cfg.enabled {
-        return None;
-    }
     Some(BuiltConnector {
         provider: Arc::new(CodexProvider::new(cfg.clone())),
         models: Arc::new(CodexModels::new(
@@ -118,9 +109,6 @@ fn build_codex(config: &AppConfig, _deps: &FactoryDeps) -> Option<BuiltConnector
 
 fn build_kilo_code(config: &AppConfig, _deps: &FactoryDeps) -> Option<BuiltConnector> {
     let cfg = &config.agent.connectors.kilo_code;
-    if !cfg.enabled {
-        return None;
-    }
     Some(BuiltConnector {
         provider: Arc::new(KiloCodeProvider::new(cfg.clone())),
         models: Arc::new(KiloCodeModels::new(
@@ -132,9 +120,6 @@ fn build_kilo_code(config: &AppConfig, _deps: &FactoryDeps) -> Option<BuiltConne
 
 fn build_cursor(config: &AppConfig, _deps: &FactoryDeps) -> Option<BuiltConnector> {
     let cfg = &config.agent.connectors.cursor;
-    if !cfg.enabled {
-        return None;
-    }
     Some(BuiltConnector {
         provider: Arc::new(CursorProvider::new(cfg.clone())),
         models: Arc::new(CursorModels::new(
@@ -150,6 +135,17 @@ pub struct ConnectorRegistry {
 
 impl ConnectorRegistry {
     pub fn from_config(config: &AppConfig, opencode_runs: Arc<OpenCodeRunServers>) -> Self {
+        Self::with_readiness(config, opencode_runs, &|_| false)
+    }
+
+    /// `ready` is true when that connector's CLI was found and passed the free
+    /// sign-in check. A missing `enabled` key is on only in that case. An
+    /// explicit `enabled = false` stays off.
+    pub fn with_readiness(
+        config: &AppConfig,
+        opencode_runs: Arc<OpenCodeRunServers>,
+        ready: &dyn Fn(&str) -> bool,
+    ) -> Self {
         assert!(
             FACTORIES.len() == coppice_connectors::all().len()
                 && FACTORIES
@@ -161,6 +157,14 @@ impl ConnectorRegistry {
         let connectors = FACTORIES
             .iter()
             .filter_map(|factory| {
+                if !config
+                    .agent
+                    .connectors
+                    .switch(factory.id)
+                    .is_on(ready(factory.id))
+                {
+                    return None;
+                }
                 (factory.build)(config, &deps).map(|built| (factory.id.to_string(), built))
             })
             .collect();
@@ -235,7 +239,7 @@ mod tests {
     #[test]
     fn opencode_stays_off_when_it_is_only_the_default() {
         let mut config = AppConfig::load_defaults().expect("config");
-        config.agent.connectors.opencode.enabled = false;
+        config.agent.connectors.opencode.enabled = Some(false);
         let registry = ConnectorRegistry::from_config(&config, runs());
         assert!(!registry.has(OPENCODE));
     }
@@ -284,7 +288,7 @@ mod tests {
     #[tokio::test]
     async fn models_catalog_reports_config_model_providers() {
         let mut config = AppConfig::load_defaults().expect("config");
-        config.agent.connectors.opencode.enabled = true;
+        config.agent.connectors.opencode.enabled = Some(true);
         config.agent.connectors.opencode.model_providers = vec!["zai-coding-plan".into()];
         let registry = ConnectorRegistry::from_config(&config, runs());
         let models = registry.models("opencode").expect("opencode catalog");
@@ -318,7 +322,7 @@ mod tests {
     #[test]
     fn registers_opencode_when_enabled() {
         let mut config = AppConfig::load_defaults().expect("config");
-        config.agent.connectors.opencode.enabled = true;
+        config.agent.connectors.opencode.enabled = Some(true);
         let registry = ConnectorRegistry::from_config(&config, runs());
         assert!(registry.has("opencode"));
     }
@@ -326,7 +330,7 @@ mod tests {
     #[tokio::test]
     async fn lists_model_providers_from_config() {
         let mut config = AppConfig::load_defaults().expect("config");
-        config.agent.connectors.opencode.enabled = true;
+        config.agent.connectors.opencode.enabled = Some(true);
         config.agent.connectors.opencode.model_providers = vec!["zai-coding-plan".into()];
         let registry = ConnectorRegistry::from_config(&config, runs());
         assert_eq!(
@@ -339,12 +343,12 @@ mod tests {
     #[tokio::test]
     async fn empty_config_uses_builtin_model_providers() {
         let mut config = AppConfig::load_defaults().expect("config");
-        config.agent.connectors.cursor.enabled = true;
-        config.agent.connectors.claude_code.enabled = true;
-        config.agent.connectors.codex.enabled = true;
-        config.agent.connectors.kilo_code.enabled = true;
+        config.agent.connectors.cursor.enabled = Some(true);
+        config.agent.connectors.claude_code.enabled = Some(true);
+        config.agent.connectors.codex.enabled = Some(true);
+        config.agent.connectors.kilo_code.enabled = Some(true);
         config.agent.connectors.kilo_code.command = "coppice-missing-kilo".into();
-        config.agent.connectors.opencode.enabled = true;
+        config.agent.connectors.opencode.enabled = Some(true);
         config.agent.connectors.opencode.command = "coppice-missing-opencode".into();
         let registry = ConnectorRegistry::from_config(&config, runs());
         assert_eq!(providers_of(&registry, "cursor").await, vec!["cursor"]);
@@ -358,18 +362,21 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn non_empty_config_replaces_builtin_model_providers() {
+    async fn cursor_config_without_cursor_still_offers_cursor() {
         let mut config = AppConfig::load_defaults().expect("config");
-        config.agent.connectors.cursor.enabled = true;
+        config.agent.connectors.cursor.enabled = Some(true);
         config.agent.connectors.cursor.model_providers = vec!["other".into()];
         let registry = ConnectorRegistry::from_config(&config, runs());
-        assert_eq!(providers_of(&registry, "cursor").await, vec!["other"]);
+        assert_eq!(
+            providers_of(&registry, "cursor").await,
+            vec!["other".to_string(), "cursor".to_string()]
+        );
     }
 
     #[tokio::test]
     async fn registers_claude_code_when_enabled() {
         let mut config = AppConfig::load_defaults().expect("config");
-        config.agent.connectors.claude_code.enabled = true;
+        config.agent.connectors.claude_code.enabled = Some(true);
         config.agent.connectors.claude_code.model_providers = vec!["sonnet".into(), "opus".into()];
         let registry = ConnectorRegistry::from_config(&config, runs());
         assert!(registry.has("claude-code"));
@@ -389,7 +396,7 @@ mod tests {
     #[tokio::test]
     async fn registers_codex_when_enabled() {
         let mut config = AppConfig::load_defaults().expect("config");
-        config.agent.connectors.codex.enabled = true;
+        config.agent.connectors.codex.enabled = Some(true);
         config.agent.connectors.codex.model_providers = vec!["openai".into(), "azure".into()];
         let registry = ConnectorRegistry::from_config(&config, runs());
         assert!(registry.has("codex"));
@@ -409,7 +416,7 @@ mod tests {
     #[tokio::test]
     async fn registers_kilo_code_when_enabled() {
         let mut config = AppConfig::load_defaults().expect("config");
-        config.agent.connectors.kilo_code.enabled = true;
+        config.agent.connectors.kilo_code.enabled = Some(true);
         config.agent.connectors.kilo_code.model_providers =
             vec!["anthropic".into(), "openai".into()];
         let registry = ConnectorRegistry::from_config(&config, runs());
@@ -430,7 +437,7 @@ mod tests {
     #[tokio::test]
     async fn registers_cursor_when_enabled() {
         let mut config = AppConfig::load_defaults().expect("config");
-        config.agent.connectors.cursor.enabled = true;
+        config.agent.connectors.cursor.enabled = Some(true);
         config.agent.connectors.cursor.model_providers = vec!["cursor".into()];
         let registry = ConnectorRegistry::from_config(&config, runs());
         assert!(registry.has("cursor"));
@@ -457,5 +464,21 @@ mod tests {
         let config = AppConfig::load_defaults().expect("config");
         let registry = ConnectorRegistry::from_config(&config, runs());
         assert!(!registry.has("cursor"));
+    }
+
+    #[test]
+    fn ready_cli_is_on_unless_the_user_turned_it_off() {
+        let config = AppConfig::load_defaults().expect("config");
+        let ready = ConnectorRegistry::with_readiness(&config, runs(), &|id| id == "cursor");
+        assert!(ready.has("cursor"));
+        assert!(!ready.has("claude-code"));
+
+        let mut off = config;
+        off.agent.connectors.cursor.enabled = Some(false);
+        let registry = ConnectorRegistry::with_readiness(&off, runs(), &|id| id == "cursor");
+        assert!(
+            !registry.has("cursor"),
+            "explicit off stays out of the registry"
+        );
     }
 }

@@ -94,6 +94,10 @@ jobs:
         run: cd desktop && yarn smoke:headless --resources dist/linux-unpacked/resources
       - name: Desktop tests
         run: make desktop-test
+      - name: Package .deb
+        run: cd desktop && yarn dist
+      - name: Installed .deb Cursor models
+        run: bash desktop/scripts/deb-cursor-models-e2e.sh desktop/dist/Coppice-*.deb
 
   # Guard against lockfile/toolchain drift: extract the rust version pinned in
   # deploy/Dockerfile.server and confirm the committed Cargo.lock compiles with

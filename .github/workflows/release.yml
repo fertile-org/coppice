@@ -4,6 +4,12 @@ name: Release
 # GitHub Release; a maintainer reviews it and clicks Publish. Re-running for the
 # same tag reuses the draft and replaces its files.
 #
+# Each installer is uploaded twice: the versioned name electron-builder wrote
+# (Coppice-<version>-mac-arm64.dmg and the other three) and a copy without the
+# version (Coppice-mac-arm64.dmg, Coppice-mac-x64.dmg, Coppice-linux-amd64.deb,
+# Coppice-linux-arm64.deb). SHA256SUMS lists both. The unversioned names keep
+# releases/latest/download/<file> stable across tags.
+#
 # macOS signing and notarization switch on when these repository secrets exist
 # (no code change needed):
 #   CSC_LINK          base64 of the Developer ID Application .p12
@@ -177,6 +183,7 @@ jobs:
       - name: Upload installer
         env:
           GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.prepare.outputs.version }}
         run: |
           shopt -s nullglob
           files=(desktop/dist/*.dmg desktop/dist/*.deb)
@@ -184,26 +191,48 @@ jobs:
             echo "expected exactly one installer, found: ${files[*]}" >&2
             exit 1
           fi
-          gh release upload "$TAG" "${files[0]}" --clobber
+          stable="$(node desktop/scripts/stable-installer-name.mjs "$VERSION" "${files[0]}")"
+          cp "${files[0]}" "desktop/dist/$stable"
+          gh release upload "$TAG" "${files[0]}" "desktop/dist/$stable" --clobber
 
   finalize:
-    needs: build
+    needs: [prepare, build]
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - name: Upload SHA256SUMS
         env:
           GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.prepare.outputs.version }}
         run: |
           mkdir installers && cd installers
           gh release download "$TAG" --pattern '*.dmg' --pattern '*.deb'
           shopt -s nullglob
-          files=(*.dmg *.deb)
-          if [ "${#files[@]}" -ne 4 ]; then
-            echo "expected exactly 4 installers on the release, found ${#files[@]}: ${files[*]}" >&2
+          mapfile -t files < <(printf '%s\n' *.dmg *.deb | sort)
+          if [ "${#files[@]}" -ne 8 ]; then
+            echo "expected 8 installers (versioned and stable), found ${#files[@]}: ${files[*]}" >&2
             exit 1
           fi
+          while IFS= read -r stable; do
+            versioned="Coppice-${VERSION}-${stable#Coppice-}"
+            if [ ! -f "$stable" ] || [ ! -f "$versioned" ]; then
+              echo "missing pair $versioned and $stable" >&2
+              printf '%s\n' "${files[@]}" >&2
+              exit 1
+            fi
+            if ! cmp -s "$stable" "$versioned"; then
+              echo "$stable and $versioned differ" >&2
+              exit 1
+            fi
+          done < <(node ../desktop/scripts/stable-installer-name.mjs --list)
           sha256sum "${files[@]}" > SHA256SUMS
+          while IFS= read -r stable; do
+            grep -F "  ${stable}" SHA256SUMS >/dev/null
+            grep -F "  Coppice-${VERSION}-${stable#Coppice-}" SHA256SUMS >/dev/null
+          done < <(node ../desktop/scripts/stable-installer-name.mjs --list)
           cat SHA256SUMS
           gh release upload "$TAG" SHA256SUMS --clobber

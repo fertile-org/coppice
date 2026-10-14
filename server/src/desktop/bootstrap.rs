@@ -62,6 +62,23 @@ fn read_secret(path: &Path) -> io::Result<String> {
     Ok(value)
 }
 
+/// Replace `path` with `contents`, keeping a crash from leaving a partial file.
+pub fn write_config_preserving(path: &Path, contents: &str) -> io::Result<()> {
+    if let Some(parent) = path.parent() {
+        if !parent.as_os_str().is_empty() {
+            std::fs::create_dir_all(parent)?;
+        }
+    }
+    let tmp = path.with_extension("toml.writing");
+    {
+        let mut file = std::fs::File::create(&tmp)?;
+        file.write_all(contents.as_bytes())?;
+        file.sync_all()?;
+    }
+    std::fs::rename(&tmp, path)?;
+    Ok(())
+}
+
 /// Writes the desktop `config.toml` if missing; returns true when created.
 /// An existing file is never touched so user edits survive upgrades.
 pub fn ensure_config_file(layout: &DataLayout) -> io::Result<bool> {
@@ -94,16 +111,22 @@ fn write_new_file(path: &Path, contents: &str, mode: u32) -> io::Result<bool> {
     }
 }
 
+/// Opening lines of a newly written desktop `config.toml`. Word for word.
+pub const DESKTOP_CONFIG_HEADER: &str = "\
+# Coppice desktop configuration. Edits here survive upgrades.\n\
+# Secrets (session secret, encryption key, passwords) live in secrets/, not here.\n\
+# The server port, database URL and auth mode are set by the desktop app at startup.\n\
+# Turn connectors on or off in Connectors in the app.\n";
+
 fn generated_config(layout: &DataLayout) -> io::Result<String> {
     // Written by hand so each section keeps its comment; toml::to_string drops
     // comments. toml::Value quotes and escapes paths (spaces, backslashes).
+    // No `[agent.connectors.*]` tables and no `default_connector`: a signed-in
+    // CLI is on until someone turns it off in Connectors.
     let quoted = |s: &str| toml::Value::String(s.to_owned()).to_string();
     let path = |p: &Path| quoted(&p.to_string_lossy());
     Ok(format!(
-        "# Coppice settings. Your edits are kept when Coppice updates.\n\
-         # Passwords and keys live in secrets/, not in this file.\n\
-         # The app picks its own port and database, so they aren't set here.\n\
-         # After each save, Settings tells you if Coppice needs a restart.\n\
+        "{DESKTOP_CONFIG_HEADER}\
          \n\
          # How agents run.\n\
          [agent]\n\
@@ -191,7 +214,19 @@ mod tests {
         ensure_config_file(&layout).expect("create");
 
         let contents = std::fs::read_to_string(&layout.config_file).unwrap();
-        assert!(contents.starts_with('#'), "missing header comment");
+        assert!(
+            contents.starts_with(DESKTOP_CONFIG_HEADER),
+            "starter file header:\n{contents}"
+        );
+        let after_header = contents.strip_prefix(DESKTOP_CONFIG_HEADER).unwrap();
+        assert!(
+            after_header.starts_with("\n# How agents run.\n"),
+            "header is followed by the agent section:\n{after_header}"
+        );
+        assert!(
+            !contents.contains("[agent.connectors"),
+            "starter file has no connector tables:\n{contents}"
+        );
         assert!(contents.contains("secrets/"));
 
         let cfg = AppConfig::load_file_only(&layout.config_file).expect("valid toml");
@@ -211,6 +246,15 @@ mod tests {
         assert!(
             !contents.contains("default_connector"),
             "starter file omits default_connector"
+        );
+        assert_eq!(
+            toml::Value::String("/tmp/coppice".into()).to_string(),
+            "\"/tmp/coppice\"",
+            "plain paths are quoted so the deb e2e can match the template"
+        );
+        assert!(
+            !contents.to_ascii_lowercase().contains("mock"),
+            "starter file does not mention mock: {contents}"
         );
         coppice_config::settings_file::validate_config_text(&contents)
             .expect("settings validation");
