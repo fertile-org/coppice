@@ -27,10 +27,11 @@ pub const ERROR_NONE: &str = "There's no earlier work on this ticket to keep or 
 pub const ERROR_USE_DISCARD: &str =
     "The earlier work can't be continued. Choose Start over to begin again.";
 pub const ERROR_USE_CANCEL: &str =
-    "An agent is still working on this ticket. Cancel, then try again when it stops.";
+    "There's nothing to throw away. Choose Cancel to clear this ticket's earlier run.";
 
 /// `{err}` is the git error.
-pub const ERROR_GIT: &str = "Couldn't restart: {err}. Nothing was changed.";
+pub const ERROR_GIT: &str =
+    "Couldn't finish restarting: {err}. Check the ticket's files before you try again.";
 
 pub fn comment_for(changed_files: u32) -> String {
     if changed_files == 0 {
@@ -82,8 +83,12 @@ mod tests {
     #[test]
     fn git_error_includes_the_detail() {
         assert_eq!(
+            ERROR_USE_CANCEL,
+            "There's nothing to throw away. Choose Cancel to clear this ticket's earlier run."
+        );
+        assert_eq!(
             git_error("fatal: not a git repository"),
-            "Couldn't restart: fatal: not a git repository. Nothing was changed."
+            "Couldn't finish restarting: fatal: not a git repository. Check the ticket's files before you try again."
         );
     }
 }
