@@ -4,7 +4,27 @@ Design for [issue #77](https://github.com/fertile-org/coppice/issues/77). This i
 
 Hung's asks: one place in the UI for server logs (including the request log) and agent CLI logs; an export he can attach to a GitHub issue; a setting for how long logs are kept; a small open-source library if one fits; keep it simple.
 
-The store is daily JSON-lines files written by `tracing` and `tracing-appender`. A small sweep compresses past days with `zstd` and deletes by age and by size. The page reads those files. Logs are not inserted into Postgres, and there is no index.
+The store is daily JSON-lines files written by `tracing` and `tracing-appender`. A small sweep compresses past days with `zstd` and deletes by age and by a fixed size backstop. The page reads those files, plus `postgres.log`. Logs are not inserted into Postgres, and there is no index.
+
+## Build order
+
+Each step is one build PR. Later steps stay out of earlier PRs.
+
+1. **Capture CLI output.** This is the first build PR. It writes agent CLI stderr and non-JSON stdout from `server/src/providers/cli_runner.rs`, and OpenCode stdout and stderr from `spawn` in `server/src/sessions/opencode_run_server.rs`, into the daily JSONL files. Every one of those lines carries that run's id (`fields.run_id`) and `fields.stream` (`stdout` or `stderr`). The same pump also writes JSON stdout lines, so the runner has one path. This PR adds the file writer those lines need and the write-time mask, so a secret printed by the CLI does not reach disk. It does not add the page, export, or the retention setting.
+2. **Server lines.** The request log and other server events go into the same files, with `source` `http` or `server`.
+3. **Read API, live tail, and the Logs page.** Admin-only. Filters include the `postgres` source. A run links to its lines.
+4. **Export and the report link.** Zip of the current view, then the placeholder link that opens a prefilled GitHub issue.
+5. **Retention.** The "Keep logs for" setting, the `zstd` sweep, the 256 MiB backstop, and deletion of `server.log*` once past retention. Electron stops appending to `server.log` in this PR.
+
+## PM defaults
+
+Pending Hung's confirmation. Until he says otherwise, the build uses these:
+
+1. The size cap is a 256 MiB backstop inside the sweep. It is not a config key and not a control on Settings. The only retention control is the placeholder "Keep logs for".
+2. The Logs page is admin-only, the same gate as Settings.
+3. `postgres.log` is its own source, `postgres`, beside `server`, `http`, and `cli`.
+4. Old `server.log` files are not imported. The sweep deletes `server.log` and `server.log.1` … `.3` once they are past retention.
+5. Secret values shorter than 6 bytes are not masked. The reason is in Write-time mask.
 
 ## Line schema
 
@@ -20,12 +40,14 @@ One JSON object per line, produced by `tracing_subscriber::fmt().json()` with a 
 | `level` | Tracing level (`TRACE`, `DEBUG`, `INFO`, `WARN`, `ERROR`). |
 | `target` | Tracing target, kept for support. |
 | `fields.message` | The event message. |
-| `fields.source` | `server`, `http`, or `cli`. |
+| `fields.source` | `server`, `http`, `cli`, or `postgres`. |
 | `fields.run_id` | Run id when the event belongs to a run. Omitted otherwise. |
 | `fields.ticket_id` | Ticket id when the caller knows it. Omitted otherwise. |
 | `fields.stream` | `stdout` or `stderr`, on `cli` lines only. |
 
-The request log already records `method`, `path`, `status`, and `duration_ms`. It keeps doing that, and it sets `source` to `http`. Other server events set `source` to `server`. A line that is not valid JSON is skipped by the reader.
+The request log already records `method`, `path`, `status`, and `duration_ms`. It keeps doing that, and it sets `source` to `http`. Other server events set `source` to `server`. A line in a `coppice.*.jsonl` file that is not valid JSON is skipped by the reader.
+
+`postgres` lines are not written by this subscriber. They are lines read from `postgres.log`. See Where the files live.
 
 ## Where the files live
 
@@ -46,7 +68,9 @@ A non-desktop process (Compose, or `coppice-server` without `desktop`) writes th
 | `current.jsonl` | Symlink to the file the appender has open, created with `latest_symlink("current.jsonl")`. |
 | `coppice.YYYY-MM-DD.jsonl.zst` | A past day after the sweep compresses it. |
 
-`postgres.log` stays the Postgres `-l` file. This page does not read it. `server.log` and `server.log.1` … `.3` stay on disk until someone deletes them. The page does not read them, and the sweep does not delete them.
+`postgres.log` stays the Postgres `-l` file at `DataLayout.pg_log` (`<data-dir>/logs/postgres.log` on desktop). The page reads it as source `postgres`. Pending Hung's confirmation. Each line is returned with `source` `postgres` and `message` set to the line. A leading timestamp, when the line has one, becomes `timestamp`. The line is not copied into the JSONL files, not compressed, and not deleted by the sweep: Postgres has the file open. Compose does not own that file, so the source is empty there.
+
+`server.log` and `server.log.1` … `.3` are not imported and are not shown on the page. The sweep deletes them once they are past retention. Pending Hung's confirmation. See Migration from `server.log`.
 
 ## Writer
 
@@ -99,7 +123,9 @@ Keep a process list of `(name, value)` for every secret Coppice places on a chil
 - plugin setting secrets it puts on a plugin MCP process
 - forge tokens it puts on a git or forge command
 
-Before a formatted line is written, to the file or to stdout, replace each value with `‹NAME›` (U+2039, the name, U+203A). Longest value first. Skip empty values. Skip values shorter than 6 bytes, the same floor as `MIN_OUTPUT_SECRET_LEN` on the MCP output redactor, so a short value does not cut holes in ordinary text. The value stays on the list until that child's pipes have been drained.
+Before a formatted line is written, to the file or to stdout, replace each value with `‹NAME›` (U+2039, the name, U+203A). Longest value first. Skip empty values. The value stays on the list until that child's pipes have been drained.
+
+Skip a value shorter than 6 bytes. Pending Hung's confirmation. This is the same floor as `MIN_OUTPUT_SECRET_LEN` in `server/src/mcp/proxy/client.rs`. A secret that short is also a substring of ordinary log text: small numbers, short words, path segments. Replacing every occurrence would cut holes in lines that are not that secret. Six bytes is long enough that a match is the injected value. The disk test registers a value of at least 6 bytes and asserts those bytes never appear under the logs directory. A value of 5 bytes is left unchanged, so the floor is visible in the test.
 
 `‹NAME›` and `‹redacted›` are log encoding, not UI copy.
 
@@ -116,13 +142,13 @@ Test: register a token longer than the floor, emit a line that contains it, and 
 
 ## Read API
 
-Admin only, the same gate as Settings. The session cookie is required. `POST` export also requires `X-CSRF-Token`.
+Admin only, the same gate as Settings. Pending Hung's confirmation. The session cookie is required. `POST` export also requires `X-CSRF-Token`.
 
 `GET /api/logs`
 
 | Query | Meaning |
 | --- | --- |
-| `source` | `server`, `http`, or `cli`. Omit for all three. |
+| `source` | `server`, `http`, `cli`, or `postgres`. Omit for all four. |
 | `level` | Minimum level. Default `info`. |
 | `from`, `to` | UTC RFC3339 bounds. Omit for no bound. |
 | `run` | Run id. |
@@ -149,11 +175,11 @@ Admin only, the same gate as Settings. The session cookie is required. `POST` ex
 }
 ```
 
-No index. Choose the `coppice.YYYY-MM-DD.jsonl` and `coppice.YYYY-MM-DD.jsonl.zst` files whose UTC dates overlap the range, or every retained file when there is no range. Walk dates from newest to oldest. Read a plain file as text. Inflate a compressed day with `zstd::stream::read::Decoder` for that request only, and do not write the plain text back to disk.
+No index. For `server`, `http`, and `cli`, choose the `coppice.YYYY-MM-DD.jsonl` and `coppice.YYYY-MM-DD.jsonl.zst` files whose UTC dates overlap the range, or every retained file when there is no range. Walk dates from newest to oldest. Read a plain file as text. Inflate a compressed day with `zstd::stream::read::Decoder` for that request only, and do not write the plain text back to disk. For `postgres`, scan `postgres.log` the same way (newest page, then older). A query with no `source` merges that file with the JSONL days by timestamp, and lines with no parsed timestamp sort as a group after the dated lines from that file.
 
 The first page is the newest `limit` matching lines. `nextCursor` names the oldest line on that page (file date + line index). The next request returns the next older page. A compressed day is scanned from the start of its stream. The boundary line is not returned twice.
 
-`GET /api/logs/meta` returns `retentionDays`, `maxBytes`, the server package version, the build commit, `os`, `arch`, and `osVersion`. The page and the report link use it.
+`GET /api/logs/meta` returns `retentionDays`, the server package version, the build commit, `os`, `arch`, and `osVersion`. The page and the report link use it. The 256 MiB backstop is a server constant, not a field the client can change.
 
 `osVersion` is `PRETTY_NAME` from `/etc/os-release` when that file exists, and `sw_vers -productVersion` on macOS. It is empty when that read fails. No extra crate.
 
@@ -167,12 +193,13 @@ Use a WebSocket because the SPA already authenticates `/ws/events` and `/ws/agen
 
 ## Page
 
-New route `/logs`, admin only, with a nav entry beside Settings.
+New route `/logs`, admin only, with a nav entry beside Settings. Pending Hung's confirmation.
 
 Every quoted string in this section and in Export is a placeholder for Content. None of them is final copy.
 
 | Slot | Placeholder |
 | --- | --- |
+| The only retention control | "Keep logs for" |
 | Nav and page title | "Logs" |
 | Source filter | "Source" |
 | Level filter | "Level" |
@@ -209,25 +236,24 @@ The prefilled title and body are placeholders for Content. The body includes the
 [logs]
 # How many days of logs to keep, including today. Default 14.
 retention_days = 14
-# Disk cap in bytes for the JSONL files. Default 256 MiB.
-max_bytes = 268435456
 # Non-desktop only. Desktop always uses <data-dir>/logs.
 # dir = "./data/logs"
 ```
 
-`retention_days` is `1..=365`. `max_bytes` is at least 1 MiB. Desktop ignores `dir` and uses `DataLayout.logs`.
+`retention_days` is `1..=365`. There is no `max_bytes` key. Desktop ignores `dir` and uses `DataLayout.logs`.
 
-The Settings page gains two numeric controls. Their label placeholders are "Keep logs for (days)" and "Log disk cap (bytes)". Saving goes through the existing config-file save. Each sweep reads these keys from the on-disk config, so a save applies on the next pass without a restart.
+The Settings page gains one numeric control. Its label placeholder is "Keep logs for". Pending Hung's confirmation. That is the only retention setting. Saving goes through the existing config-file save. Each sweep reads `retention_days` from the on-disk config, so a save applies on the next pass without a restart.
 
 ### Sweep
 
 On process start, and every hour after that.
 
-Candidates are regular files matching `coppice.YYYY-MM-DD.jsonl` or `coppice.YYYY-MM-DD.jsonl.zst`. Use `symlink_metadata` and skip symlinks, so `current.jsonl` is never a candidate. Also skip `server.log*`, `postgres.log`, and any other name.
+JSONL candidates are regular files matching `coppice.YYYY-MM-DD.jsonl` or `coppice.YYYY-MM-DD.jsonl.zst`. Use `symlink_metadata` and skip symlinks, so `current.jsonl` is never a candidate. `postgres.log` is not a candidate. `server.log`, `server.log.1`, `server.log.2`, and `server.log.3` are candidates for deletion only.
 
 1. Compress a plain file whose UTC date is before today. Stream it with `zstd` at the crate's default level to `coppice.YYYY-MM-DD.jsonl.zst.tmp` in the same directory, sync, rename to `coppice.YYYY-MM-DD.jsonl.zst`, then delete the plain file. If a non-empty `.zst` for that day is already there, delete the plain file and do not compress again. Never compress today's file. The appender has it open.
 2. Age. A file's age is today's UTC date minus the date in its name, in calendar days. Delete plain and compressed files whose age is greater than or equal to `retention_days`. With the default 14, ages 0 through 13 stay (fourteen dates, including today). A compressed file at age 14 is deleted.
-3. Size. Sum the sizes of the files that remain. While the sum is over `max_bytes`, delete the oldest date's file and subtract its size. Never delete today's file. If today's file alone is over the cap, leave it and write a warning.
+3. Old `server.log` files. Pending Hung's confirmation. Do not import them. Delete `server.log` and `server.log.1` … `.3` when the file's mtime is at least `retention_days` old. While Electron is still appending, `server.log` stays fresh and is kept.
+4. Size backstop. Pending Hung's confirmation. The cap is 256 MiB (`268435456` bytes), a constant in the sweep, not a setting. Sum the JSONL candidates that remain, plus any `server.log*` files that remain. While the sum is over 256 MiB, delete the oldest JSONL date's file and subtract its size. Never delete today's JSONL file. If today's file alone is over the cap, leave it and write a warning. Do not delete `postgres.log` to get under the cap.
 
 The appender does not delete files. The sweep is the only thing that does.
 
@@ -255,20 +281,22 @@ After the server writes JSONL:
 
 - Electron keeps the pipe, the ready-line parse, and the ring.
 - Electron stops appending the pipe to `server.log`.
-- `server.log`, `server.log.1`, `server.log.2`, and `server.log.3` are left in place. They are text, not JSON, and they are not imported.
+- `server.log`, `server.log.1`, `server.log.2`, and `server.log.3` are not imported. Pending Hung's confirmation. The sweep deletes each of them once its mtime is at least `retention_days` old.
 - Lines printed before tracing starts (`eprintln!` in `server/src/main.rs`) stay in the ring only.
-- `postgres.log` is unchanged.
+- `postgres.log` is unchanged on disk. The page reads it as source `postgres`.
 
 ## Test plan
 
 - **Mask.** A line that contains an injected token is stored only as `‹NAME›`. A directory read of the logs folder does not contain the token bytes.
 - **Compressed files expire.** A `coppice.YYYY-MM-DD.jsonl.zst` whose age is `>= retention_days` is deleted. A newer `.jsonl.zst` remains. Today's plain file is not compressed and is not deleted.
-- **Size cap.** Over the cap, the oldest date is deleted first. Today's file remains even when the directory is still over the cap.
+- **Size backstop.** The cap is the constant 256 MiB, with no Settings control and no config key. Over the cap, the oldest JSONL date is deleted first. Today's file remains even when the directory is still over the cap. `postgres.log` is not deleted to get under the cap.
+- **Old `server.log`.** A file older than retention is deleted. Its bytes are not copied into a JSONL file. A `server.log` whose mtime is inside the window remains.
 - **Appender limit unset.** Opening the appender does not delete an older `.jsonl.zst`.
 - **Query.** A filter (source, level, run, text) returns a line from a compressed day. The cursor's next page does not repeat the boundary line.
 - **Export.** The zip contains `logs.jsonl` and `versions.txt`. A buffer that still contains a registered secret does not contain it after the export pass.
 - **Request log.** The existing middleware test still requires method, path, status, duration, and no query string.
-- **CLI.** A non-JSON stdout line and a stderr line are stored with that run's id.
+- **CLI.** A non-JSON stdout line and a stderr line are stored with that run's id. OpenCode stdout and stderr are stored the same way, each with that run's id.
+- **Postgres source.** A line from `postgres.log` is returned when `source` is `postgres`, and not returned when `source` is `cli`.
 - **Page.** Filters, the tail socket, the export download, and the report link's query string. Any assertion on a label uses the placeholder in this spec and is marked temporary until Content replaces it.
 
-Out of scope: showing `postgres.log`, importing `server.log`, replacing the live run console or the per-run artifact files, an index, a Postgres log table, OpenTelemetry, Loki, and Vector.
+Out of scope: importing `server.log` into the JSONL files, replacing the live run console or the per-run artifact files, an index, a Postgres log table, OpenTelemetry, Loki, and Vector.
