@@ -1,3 +1,4 @@
+use std::io::{self, IsTerminal, Write};
 use std::net::SocketAddr;
 use std::time::Duration;
 use tracing_subscriber::EnvFilter;
@@ -18,12 +19,50 @@ fn log_directives(rust_log: Option<&str>) -> String {
 
 fn init_tracing() {
     let rust_log = std::env::var(EnvFilter::DEFAULT_ENV).ok();
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            EnvFilter::try_new(log_directives(rust_log.as_deref()))
-                .unwrap_or_else(|_| EnvFilter::new(log_directives(None))),
-        )
-        .init();
+    let filter = EnvFilter::try_new(log_directives(rust_log.as_deref()))
+        .unwrap_or_else(|_| EnvFilter::new(log_directives(None)));
+    // A terminal is already line-buffered and can show color. A pipe
+    // (Electron's server.log) is block-buffered and is read as text: flush
+    // every write, and leave ANSI codes out. Otherwise the last lines sit in
+    // the buffer until exit — gone if the process crashes — and `status=404`
+    // is split by escape sequences, so it cannot be grepped.
+    let terminal = io::stdout().is_terminal();
+    let builder = tracing_subscriber::fmt()
+        .with_env_filter(filter)
+        .with_ansi(terminal);
+    if terminal {
+        builder.init();
+    } else {
+        builder.with_writer(pipe_log_writer).init();
+    }
+}
+
+fn pipe_log_writer() -> FlushingWriter<io::Stdout> {
+    FlushingWriter {
+        inner: io::stdout(),
+    }
+}
+
+/// Flushes after every write so a block-buffered pipe cannot keep a log line.
+struct FlushingWriter<W> {
+    inner: W,
+}
+
+impl<W: Write> Write for FlushingWriter<W> {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        let n = self.inner.write(buf)?;
+        self.inner.flush()?;
+        Ok(n)
+    }
+
+    fn write_all(&mut self, buf: &[u8]) -> io::Result<()> {
+        self.inner.write_all(buf)?;
+        self.inner.flush()
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.inner.flush()
+    }
 }
 
 fn runtime() -> std::io::Result<tokio::runtime::Runtime> {
@@ -34,8 +73,20 @@ fn runtime() -> std::io::Result<tokio::runtime::Runtime> {
 
 /// The environment is set before the tokio runtime exists, so no other thread
 /// can read it concurrently.
+fn version_text() -> String {
+    format!(
+        "coppice-server {}\ncommit {}\n",
+        env!("CARGO_PKG_VERSION"),
+        env!("COPPICE_BUILD_COMMIT")
+    )
+}
+
 fn main() -> anyhow::Result<()> {
     let args: Vec<String> = std::env::args().collect();
+    if args.iter().any(|arg| arg == "--version") {
+        print!("{}", version_text());
+        return Ok(());
+    }
     match desktop::parse_desktop_args(&args) {
         Ok(Some(args)) => run_desktop(args),
         Ok(None) => runtime()?.block_on(run()),
@@ -115,10 +166,80 @@ mod tests {
     use super::log_directives;
 
     #[test]
+    fn version_text_names_the_package_and_commit() {
+        let text = super::version_text();
+        assert!(text.starts_with("coppice-server "));
+        assert!(text.contains(env!("CARGO_PKG_VERSION")));
+        let commit = text
+            .lines()
+            .find_map(|line| line.strip_prefix("commit "))
+            .expect("commit line");
+        assert!(!commit.is_empty());
+        assert!(!commit.contains(' '));
+    }
+
+    #[test]
     fn rmcp_defaults_to_warn_unless_named() {
         assert_eq!(log_directives(None), "info,rmcp=warn");
         assert_eq!(log_directives(Some(" ")), "info,rmcp=warn");
         assert_eq!(log_directives(Some("debug")), "debug,rmcp=warn");
         assert_eq!(log_directives(Some("info,rmcp=debug")), "info,rmcp=debug");
+    }
+
+    #[test]
+    fn flushing_writer_pushes_a_line_through_a_block_buffer() {
+        use std::io::{Read, Write};
+        use std::sync::mpsc;
+        use std::time::Duration;
+
+        let (reader, writer) = std::io::pipe().expect("pipe");
+        let buffered = std::io::BufWriter::with_capacity(8 * 1024, writer);
+        let mut out = super::FlushingWriter { inner: buffered };
+        let (tx, rx) = mpsc::channel();
+        std::thread::spawn(move || {
+            let mut reader = reader;
+            let mut buf = [0u8; 32];
+            let n = reader.read(&mut buf).unwrap_or(0);
+            let _ = tx.send(buf[..n].to_vec());
+        });
+        out.write_all(b"hello\n").expect("write");
+        let got = rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("line was not flushed");
+        assert_eq!(got, b"hello\n");
+    }
+
+    #[test]
+    fn pipe_tracing_format_keeps_status_404_contiguous() {
+        use std::sync::{Arc, Mutex};
+
+        struct Mem(Arc<Mutex<Vec<u8>>>);
+
+        impl std::io::Write for Mem {
+            fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+                self.0.lock().unwrap().extend_from_slice(buf);
+                Ok(buf.len())
+            }
+
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+
+        let buf = Arc::new(Mutex::new(Vec::<u8>::new()));
+        let writer = Arc::clone(&buf);
+        // Same settings as `init_tracing` when stdout is not a terminal.
+        let subscriber = tracing_subscriber::fmt()
+            .with_ansi(false)
+            .with_max_level(tracing::Level::INFO)
+            .without_time()
+            .with_writer(move || Mem(Arc::clone(&writer)))
+            .finish();
+        tracing::subscriber::with_default(subscriber, || {
+            tracing::info!(status = 404_u16, "http request");
+        });
+        let text = String::from_utf8(buf.lock().unwrap().clone()).unwrap();
+        assert!(text.contains("status=404"), "{text}");
+        assert!(!text.contains('\u{1b}'), "{text}");
     }
 }

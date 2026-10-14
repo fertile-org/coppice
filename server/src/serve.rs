@@ -28,6 +28,8 @@ pub struct ServeOptions {
     pub on_ready: Option<Box<dyn FnOnce(SocketAddr) + Send>>,
     /// Config file the Connectors toggle and agent save patch in place.
     pub config_path: Option<PathBuf>,
+    /// Shown once after a legacy `~/.config/coppice/config.toml` import.
+    pub import_notice: Option<String>,
 }
 
 async fn interrupt_orphaned_run(state: &AppState, run_id: uuid::Uuid, reason: &str) {
@@ -320,6 +322,10 @@ pub async fn serve(
     );
     let connectors = AppState::connectors_runtime(&config, opencode_runs.clone());
     connectors.set_config_path(options.config_path.clone());
+    if let Some(notice) = options.import_notice {
+        tracing::info!("{notice}");
+        connectors.set_import_notice(notice);
+    }
     let state = Arc::new(AppState {
         attachments: AppState::attachment_store_from_config(&config),
         connectors,
@@ -345,6 +351,11 @@ pub async fn serve(
                 .connector_probes
                 .refresh_all(&state.connectors.config())
                 .await;
+            state.connectors.sync_readiness(
+                crate::services::connector_probe_service::ready_connector_ids(
+                    &state.connector_probes,
+                ),
+            );
         });
     }
     plugin_mcp.spawn_reaper();

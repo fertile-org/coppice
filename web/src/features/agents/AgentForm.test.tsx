@@ -19,6 +19,7 @@ const mocks = vi.hoisted(() => ({
   modelsLoading: false,
   modelsError: false,
   modelsDetail: null as string | null,
+  modelsErrorMessage: null as string | null,
   refreshModels: vi.fn(),
 }));
 
@@ -33,6 +34,7 @@ vi.mock('./useAgents', () => ({
     isFetching: false,
     isError: mocks.modelsError,
     detail: mocks.modelsDetail,
+    errorMessage: mocks.modelsErrorMessage,
     refresh: mocks.refreshModels,
   }),
 }));
@@ -131,6 +133,7 @@ describe('AgentForm model choice', () => {
     mocks.modelsLoading = false;
     mocks.modelsError = false;
     mocks.modelsDetail = null;
+    mocks.modelsErrorMessage = null;
     mocks.refreshModels.mockReset();
   });
 
@@ -252,6 +255,29 @@ describe('AgentForm model choice', () => {
     expect(signIn.querySelector('code')?.textContent).toBe('agent login');
     expect(signIn.textContent).not.toContain('`');
     expect(screen.queryByText('Error: Authentication required')).toBeNull();
+  });
+
+  it('links a turned-off connector to Tools → Connectors', () => {
+    mocks.modelsError = true;
+    mocks.modelsErrorMessage =
+      "Can't list Cursor's models because it's turned off in Connectors.";
+    render(
+      <Harness
+        mode="edit"
+        initial={baseValues({ connector: 'cursor' })}
+        onSubmit={vi.fn()}
+        connectorOptions={[]}
+      />,
+    );
+
+    expect(screen.getByText(/Cursor is turned off\. Turn it on in/)).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Connectors' })).toHaveAttribute(
+      'href',
+      '/tools?tab=connectors',
+    );
+    expect(
+      screen.queryByText("Couldn't get Cursor's models. Using Cursor's default for now."),
+    ).toBeNull();
   });
 
   it('treats a blank saved model as the connector default', () => {
