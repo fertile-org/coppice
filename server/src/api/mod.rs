@@ -1,31 +1,32 @@
-pub mod auth;
 mod agent_runs;
-mod ws;
 mod agents;
-mod chat;
-mod connectors;
 mod attachments;
+pub mod auth;
+mod boards;
+mod chat;
 mod code_reviews;
 mod comments;
-mod mentions;
+mod connectors;
 mod health;
 mod jobs;
 mod knowledge;
 mod knowledge_compaction;
+mod mentions;
 mod notifications;
 mod plugins;
-mod boards;
 mod repos;
 mod settings;
 mod tickets;
 mod tool_connectors;
 mod tools;
 mod users;
+mod ws;
 
-use axum::{middleware, Router};
-use std::sync::Arc;
 use crate::middleware::{csrf, host_guard, request_log, session};
 use crate::AppState;
+use axum::http::StatusCode;
+use axum::{middleware, Router};
+use std::sync::Arc;
 
 pub fn router(state: Arc<AppState>) -> Router {
     let public = Router::new()
@@ -55,7 +56,10 @@ pub fn router(state: Arc<AppState>) -> Router {
         .merge(tool_connectors::routes())
         .merge(plugins::routes())
         .layer(middleware::from_fn(csrf::csrf_middleware))
-        .layer(middleware::from_fn_with_state(state.clone(), session::session_middleware));
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            session::session_middleware,
+        ));
 
     let ws = ws::routes().layer(middleware::from_fn_with_state(
         state.clone(),
@@ -66,6 +70,10 @@ pub fn router(state: Arc<AppState>) -> Router {
         .merge(public)
         .merge(protected)
         .merge(ws)
+        // Before the layers. Axum only wraps routes that already exist, and
+        // the desktop shell forwards unknown /api paths back into this
+        // fallback so the request log still sees the 404.
+        .fallback(StatusCode::NOT_FOUND)
         .layer(middleware::from_fn_with_state(
             state.clone(),
             host_guard::desktop_host_guard,

@@ -155,7 +155,7 @@ mod tests {
             Some("Connector 'not-a-connector' is not configured on this server")
         );
 
-        config.agent.connectors.cursor.enabled = true;
+        config.agent.connectors.cursor.enabled = Some(true);
         let reg = registry(&config);
         let (status, detail) = evaluate_agent_health(&agent("cursor", Some("x")), &reg).await;
         assert_eq!(status, AgentHealthStatus::MissingConfig);
@@ -171,6 +171,7 @@ mod tests {
         assert_eq!(detail, None);
     }
 
+    #[cfg(feature = "mock-provider")]
     #[tokio::test]
     async fn health_mock_ignores_model_provider() {
         let config = crate::config::AppConfig::load_defaults().expect("config");

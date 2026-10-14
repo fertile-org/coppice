@@ -14,6 +14,9 @@ export const AGENTS_QUERY_KEY = ['agents'] as const;
 export const AGENT_PRESETS_QUERY_KEY = ['agent-presets'] as const;
 export const CONNECTORS_QUERY_KEY = ['connectors'] as const;
 
+/** Refresh models must ignore the shared 30s staleTime and hit the server. */
+export const MODELS_REFRESH_STALE_TIME = 0;
+
 export interface AgentPreset {
   id: string;
   key: string;
@@ -215,7 +218,7 @@ export function useConnectorModels(connectorId: string | undefined) {
         const next = await queryClient.fetchQuery({
           queryKey: ['model-providers', connectorId],
           queryFn: () => fetchModelProviders(connectorId),
-          staleTime: 0,
+          staleTime: MODELS_REFRESH_STALE_TIME,
         });
         ids = next.map((provider) => provider.id);
       }
@@ -224,7 +227,7 @@ export function useConnectorModels(connectorId: string | undefined) {
           queryClient.fetchQuery({
             queryKey: modelsQueryKey(connectorId, providerId),
             queryFn: () => fetchProviderModels(connectorId, providerId, true),
-            staleTime: 0,
+            staleTime: MODELS_REFRESH_STALE_TIME,
           }),
         ),
       );
@@ -251,8 +254,11 @@ export function useConnectorModels(connectorId: string | undefined) {
       .map((query) => query.error)
       .find((error): error is ModelsRequestError => error instanceof ModelsRequestError)?.detail ??
     null;
+  const errorMessage = [providers.error, ...queries.map((query) => query.error)]
+    .map((error) => (error ? modelsRequestError(error).message.trim() : ''))
+    .find((message) => message.length > 0) ?? null;
 
-  return { groups, isLoading, isFetching, isError, detail, refresh };
+  return { groups, isLoading, isFetching, isError, detail, errorMessage, refresh };
 }
 
 export function useCreateAgent() {

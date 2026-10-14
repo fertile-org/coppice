@@ -1,10 +1,21 @@
-import { ApiError } from '../../lib/api';
+import { ApiError, parseApiErrorMessage } from '../../lib/api';
 
 const MODEL_VALUE_SEP = '\u001f';
 
 /** `{Connector}'s models` failure. `{connector}` is the display name. */
 export function modelsUnavailableMessage(connectorName: string): string {
   return `Couldn't get ${connectorName}'s models. Using ${connectorName}'s default for now.`;
+}
+
+const TURNED_OFF_LOG =
+  /^Can't list (.+)'s models because it's turned off in Connectors\.$/;
+
+/** Display name from the server's turned-off log line, or null. */
+export function turnedOffConnectorName(
+  message: string | null | undefined,
+): string | null {
+  const match = message?.match(TURNED_OFF_LOG);
+  return match?.[1] ?? null;
 }
 
 export const CURSOR_MODELS_SIGN_IN =
@@ -66,7 +77,7 @@ export function modelsRequestError(err: unknown): ModelsRequestError {
     } catch {
       detail = null;
     }
-    return new ModelsRequestError(err.message, detail);
+    return new ModelsRequestError(parseApiErrorMessage(err, err.message), detail);
   }
   return new ModelsRequestError(err instanceof Error ? err.message : 'Request failed', null);
 }
