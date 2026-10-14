@@ -212,7 +212,7 @@ describe('TicketCard plan labels', () => {
 
     expect(screen.getByText(PLAN_COPY.planNeedsRun)).toBeVisible();
     fireEvent.click(
-      screen.getByRole('button', { name: PLAN_COPY.runAgent, exact: true }),
+      screen.getByRole('button', { name: PLAN_COPY.runAgent }),
     );
     expect(onRunPlan).toHaveBeenCalledWith(ticket.id);
     expect(onOpen).not.toHaveBeenCalled();
