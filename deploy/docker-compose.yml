@@ -46,6 +46,9 @@ services:
       # Default plugin dir (cannot be removed in Settings → Plugins).
       COPPICE_PLUGINS__DIR: /data/plugins
       WORKTREES_PATH: /data/worktrees
+      # Default [logs] dir is ./data/logs. The process cwd is / and the dropped
+      # user cannot create directories there, so Compose uses this absolute path.
+      COPPICE_LOGS_DIR: /data/logs
       AGENT_WORKER_COUNT: "2"
       WORKFLOW_AUTO_START_RUNS: "${WORKFLOW_AUTO_START_RUNS:-true}"
       MOCK_AGENT_RESPONSE: ${MOCK_AGENT_RESPONSE:-}

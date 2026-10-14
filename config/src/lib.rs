@@ -1323,6 +1323,24 @@ mod tests {
     }
 
     #[test]
+    fn logs_dir_from_env() {
+        let _guard = ENV_LOCK.lock().expect("env lock");
+
+        const KEY: &str = "COPPICE_LOGS_DIR";
+        let previous = std::env::var(KEY).ok();
+        std::env::set_var(KEY, "/data/logs");
+
+        let cfg = AppConfig::load_defaults().expect("config should load");
+
+        match previous {
+            Some(value) => std::env::set_var(KEY, value),
+            None => std::env::remove_var(KEY),
+        }
+
+        assert_eq!(cfg.logs.dir, "/data/logs");
+    }
+
+    #[test]
     fn load_file_only_reads_file_over_defaults() {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("config.toml");
