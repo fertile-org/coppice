@@ -412,8 +412,11 @@ a:hover {
   max-width: none;
 }
 
-.steps li p + p {
+.steps li p.coming-soon {
   margin-top: 0.4rem;
+  color: var(--color-bark-700);
+  font-size: 0.98rem;
+  font-style: italic;
 }
 
 .feature-grid {
