@@ -12,6 +12,19 @@ function readDismissedVersion(): string | null {
   }
 }
 
+async function runIsActive(): Promise<boolean> {
+  try {
+    const res = await fetch('/api/agent-runs/active', { credentials: 'include' });
+    if (!res.ok) {
+      return false;
+    }
+    const body = (await res.json()) as { active?: boolean };
+    return body.active === true;
+  } catch {
+    return false;
+  }
+}
+
 export function DesktopUpdateBanner() {
   const [update, setUpdate] = useState<DesktopUpdateInfo | null>(null);
 
@@ -21,9 +34,9 @@ export function DesktopUpdateBanner() {
       return;
     }
     let cancelled = false;
-    getUpdateInfo()
-      .then((info) => {
-        if (!cancelled && info && info.version !== readDismissedVersion()) {
+    Promise.all([getUpdateInfo(), runIsActive()])
+      .then(([info, active]) => {
+        if (!cancelled && info && !active && info.version !== readDismissedVersion()) {
           setUpdate(info);
         }
       })
@@ -62,6 +75,17 @@ export function DesktopUpdateBanner() {
         target="_blank"
         rel="noreferrer"
         className="inline-flex items-center gap-1.5 font-body text-sm font-medium text-accent hover:underline"
+        onClick={(event) => {
+          event.preventDefault();
+          const url = update.url;
+          void runIsActive().then((active) => {
+            if (active) {
+              setUpdate(null);
+              return;
+            }
+            window.open(url, '_blank', 'noopener,noreferrer');
+          });
+        }}
       >
         <Download className="h-4 w-4 shrink-0" aria-hidden />
         Download

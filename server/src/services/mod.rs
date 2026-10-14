@@ -29,6 +29,7 @@ pub mod board_service;
 pub mod repo_git_service;
 pub mod repo_service;
 pub mod repo_verifier;
+pub mod restart_service;
 pub mod result_contract;
 pub mod reviewer_brief;
 pub mod run_orchestrator;

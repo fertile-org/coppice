@@ -11,6 +11,7 @@ import { Input } from '../../components/ui/input';
 import { PlanChecklist } from '../plan/PlanChecklist';
 import { PlanReviewActions } from '../plan/PlanReviewActions';
 import { TicketStatusBadge } from './TicketStatusBadge';
+import { RestartChoice } from './RestartChoice';
 import { TicketCommentsTab } from './TicketCommentsTab';
 import { useTicketChildren, useUpdateTicket } from './useTicket';
 
@@ -150,6 +151,10 @@ export function TicketDetailPanel({
           </div>
         )}
       </div>
+
+      {ticket.status === 'blocked' && !isArchived && (
+        <RestartChoice ticketId={ticket.id} boardId={ticket.boardId} />
+      )}
 
       {ticket.status === 'plan_review' && !isArchived && (
         <PlanReviewActions ticketId={ticket.id} boardId={ticket.boardId} />

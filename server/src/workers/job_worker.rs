@@ -36,7 +36,6 @@ use crate::services::job_service::JobService;
 use crate::services::mention_service::MentionService;
 use crate::services::plugin_service::PluginService;
 use crate::services::result_contract;
-use crate::services::git_ops::git_head_sha;
 use crate::services::reviewer_brief::ReviewerBriefService;
 use crate::services::run_orchestrator::{load_run_continuation_context, RunOrchestrator};
 use crate::services::run_service::RunService;
@@ -45,8 +44,8 @@ use crate::services::ticket_service::TicketService;
 use crate::services::ticket_thread;
 use crate::services::workflow_service::WorkflowService;
 use crate::services::worktree_service::{
-    compute_paths, finalize_worktree_git, format_git_comment_footer, sync_worktree_to_branch_tip,
-    GitAuthor, WorktreeService,
+    compute_paths, finalize_worktree_git, format_git_comment_footer, git_head_sha,
+    sync_worktree_to_branch_tip, GitAuthor, WorktreeService,
 };
 use crate::util::error_format::format_job_error;
 use crate::util::truncate::truncate_with_ellipsis;
@@ -458,6 +457,19 @@ async fn execute_job(
         .await
         .context("sync worktree to branch tip")?;
 
+    let start_sha = git_head_sha(&paths.worktree_dir)
+        .await
+        .context("read the commit the run starts from")?;
+    run_svc
+        .record_worktree_start(
+            run.id,
+            &paths.worktree_dir.to_string_lossy(),
+            &paths.branch_name,
+            &start_sha,
+        )
+        .await
+        .context("store the commit the run started from")?;
+
     let project_rules_owned = if run.context_profile == ContextProfile::Full {
         let project_rules_path = paths.worktree_dir.join("AGENTS.md");
         match std::fs::read_to_string(&project_rules_path) {
@@ -695,7 +707,9 @@ async fn execute_job(
 
     if should_capture_reviewer_brief(run, &agent, ticket.ticket.status) {
         if brief_commit_sha.is_none() {
-            brief_commit_sha = git_head_sha(&paths.worktree_dir).await.ok();
+            brief_commit_sha = crate::services::git_ops::git_head_sha(&paths.worktree_dir)
+                .await
+                .ok();
         }
         ReviewerBriefService::new(pool)
             .record(ticket_id, &result, brief_commit_sha.as_deref().unwrap_or(""))
