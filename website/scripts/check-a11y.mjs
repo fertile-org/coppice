@@ -4,7 +4,7 @@ import AxeBuilder from '@axe-core/playwright';
 import { startStaticServer } from './static-server.mjs';
 
 const dist = path.resolve('dist');
-const pages = ['/', '/docs', '/docs/install', '/docs/concepts', '/docs/providers', '/docs/faq'];
+const pages = ['/', '/download', '/docs', '/docs/install', '/docs/concepts', '/docs/providers', '/docs/faq'];
 const server = await startStaticServer(dist, { style: 'clean' });
 const browser = await chromium.launch();
 const context = await browser.newContext();

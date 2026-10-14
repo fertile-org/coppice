@@ -6,6 +6,8 @@ const docsPath = withBase('/docs').replace(/\/$/, '') || '/docs';
 const docsActive = pathname === docsPath || pathname.startsWith(`${docsPath}/`);
 const homePath = withBase('/').replace(/\/$/, '') || '/';
 const homeActive = pathname === homePath;
+const downloadPath = withBase('/download').replace(/\/$/, '') || '/download';
+const downloadActive = pathname === downloadPath;
 ---
 
 <header class="site-header">
@@ -17,7 +19,7 @@ const homeActive = pathname === homePath;
     <nav class="primary-nav" aria-label="Primary">
       <a href={withBase('/docs')} aria-current={docsActive ? 'page' : undefined}>Docs</a>
       <a href="https://github.com/fertile-org/coppice">GitHub</a>
-      <a class="btn btn-small" href={withBase('/#download')}>Download</a>
+      <a class="btn btn-small" href={withBase('/download')} aria-current={downloadActive ? 'page' : undefined}>Download</a>
     </nav>
   </div>
 </header>
