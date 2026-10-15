@@ -17,9 +17,9 @@ One action registry drives the palette, the shortcuts, tooltips, the help overla
 | Vim modes | Out of v1. |
 | Storage | Overrides live in a `[keybindings]` table in `config.toml`. The Settings editor from #42 saves that file and keeps comments. Defaults stay in the registry. |
 | Search | `Mod+K` is search. There is no separate `/` shortcut. |
-| Column moves | `M` then `L` / `M` then `H`. A two-key sequence stays off Safari's `⌘⇧[` / `⌘⇧]`, Chrome's `⌘⌥` arrows, and the `Ctrl+Shift+Arrow` chords some WSLg builds drop. |
-| Approve plan, Merge… | `P` then `A`, and `M` then `M`. Modifier chords on those letters collide with Firefox and Chrome devtools (`Ctrl+Shift+M` is Firefox responsive mode; `⌘.` is Cancel on macOS). Merge… opens the existing dialog, which is the confirm. |
-| Accept | `Mod+Shift+Enter` opens a confirm dialog. Cancel is focused. The chord does not accept by itself (#12). |
+| Column moves | `M` is only the move prefix: `M` then `L` / `M` then `H`. A two-key sequence stays off Safari's `⌘⇧[` / `⌘⇧]`, Chrome's `⌘⌥` arrows, and the `Ctrl+Shift+Arrow` chords some WSLg builds drop. |
+| Merge… | `R` then `M`. `Mod+Shift+M` is not used. Chrome takes that chord for the profile menu on macOS, Linux, and Windows, and Firefox takes `Ctrl+Shift+M` for Responsive Design Mode on Linux and Windows. See conflicts. The sequence does not start with `M` or `G`. |
+| Accept… | `Mod+Shift+Enter` opens a confirm dialog. Cancel is focused. The chord does not accept by itself (#12). |
 | Drag sensor | Leave dnd-kit on `PointerSensor`. Column moves call the same status update as a drop. |
 | `Mod` | `⌘` on macOS (`metaKey`). `Ctrl` on Linux and on WSL, including a Windows browser pointed at a WSL server (`ctrlKey`). |
 
@@ -50,22 +50,22 @@ Single-key shortcuts and sequences fire only in Global, Board, and Ticket. Text 
 
 ## Default keymap
 
-`Mod` is drawn as `⌘` on macOS and `Ctrl` on Linux and WSL. Sequences are shown as `G then B`.
+`Mod` is drawn as `⌘` on macOS and `Ctrl` on Linux and WSL. Sequences are shown as `G then B`. Palette rows and the help overlay use the action names in this table, each in one group: **Navigate**, **Tickets**, or **Review**.
 
-### General
+### Navigate
+
+Focus on the board uses a roving tabindex: one card, or the column heading when that column has no cards, is tabbable. Arrows move it. Keys do not wrap at the ends.
 
 | Action | Keys |
 |---|---|
-| Command palette | `Mod+K` |
-| Keyboard shortcuts | `?` |
+| Open command palette | `Mod+K` |
+| Show keyboard shortcuts | `?` |
 | Close | `Esc` |
-
-### Go to
-
-Second key after `G`. Admin rows are omitted for members, same as the sidebar.
-
-| Action | Keys |
-|---|---|
+| Next card | `J` or `Down` |
+| Previous card | `K` or `Up` |
+| Next column | `L` or `Right` |
+| Previous column | `H` or `Left` |
+| Go to column {n} | `G then 1`–`9` |
 | Go to Boards | `G then B` |
 | Go to Agents | `G then A` |
 | Go to Chat | `G then C` |
@@ -75,53 +75,42 @@ Second key after `G`. Admin rows are omitted for members, same as the sidebar.
 | Go to Users | `G then U` |
 | Go to Tools | `G then T` |
 | Go to Settings | `G then S` |
+| Next section | `]` |
+| Previous section | `[` |
 
-### Board
+`{n}` is the column's place in the order above: 1 Backlog, 2 Plan Review, 3 Ready, 4 In Progress, 5 In Review, 6 In QA, 7 Wait for Human Review, 8 Done, 9 Blocked. The palette and the help overlay list nine rows, **Go to column 1** through **Go to column 9**. Admin **Go to** rows are omitted for members, same as the sidebar. Page jumps are the second key after `G`.
 
-Focus uses a roving tabindex: one card, or the column heading when that column has no cards, is tabbable. Arrows move it. Keys do not wrap at the ends.
+Left and Right land on the card at the same index in the neighboring column, or the last card, or the column heading when the column is empty. **Go to column {n}** focuses the first card of that column, or its heading. **Next section** and **Previous section** move the open drawer across Detail, Live Console, and Agent Runs.
 
-| Action | Keys |
-|---|---|
-| Next card | `J` or `Down` |
-| Previous card | `K` or `Up` |
-| Next column | `L` or `Right` |
-| Previous column | `H` or `Left` |
-| Go to Backlog | `G then 1` |
-| Go to Plan Review | `G then 2` |
-| Go to Ready | `G then 3` |
-| Go to In Progress | `G then 4` |
-| Go to In Review | `G then 5` |
-| Go to In QA | `G then 6` |
-| Go to Wait for Human Review | `G then 7` |
-| Go to Done | `G then 8` |
-| Go to Blocked | `G then 9` |
-| Open ticket | `Enter` |
-| Create ticket | `C` |
-
-`C` focuses the **Add ticket…** field in the focused column. Enter submits that form. Left and Right land on the card at the same index in the next column, or the last card, or the column heading when the column is empty. `G then 1`–`9` focus the first card of that column, or its heading.
-
-### Ticket
+### Tickets
 
 These run on the focused card, or on the open ticket. Disabled actions are omitted from the palette and do nothing from the keyboard.
 
 | Action | Keys | When |
 |---|---|---|
+| Open ticket | `Enter` | A card is focused |
+| Create ticket | `C` | Board, no drawer |
+| Assign ticket | `A` | A card is focused or the drawer is open |
 | Move to next column | `M then L` | A card is focused or the drawer is open |
 | Move to previous column | `M then H` | A card is focused or the drawer is open |
-| Assign | `A` | A card is focused or the drawer is open |
-| Approve plan | `P then A` | The ticket is in Plan Review and **Approve plan** is enabled |
-| Accept | `Mod+Shift+Enter` | The ticket is in Wait for Human Review and is not archived |
-| Merge… | `M then M` | **Merge…** is already shown |
-| Review code | `D` | **Review code** is enabled |
 | Post comment | `Mod+Enter` | The comment editor is focused and has text |
-| Next section | `]` | Drawer open |
-| Previous section | `[` | Drawer open |
+
+`M` starts only a column move. The second key is `L` or `H`. **Create ticket** focuses the **Add ticket…** field in the focused column. Enter submits that form. **Assign ticket** opens the assignee combobox.
 
 Next and previous column follow the order above, through Blocked. The move uses the existing status update. A rejected move shows the same error as a failed drop, and the card stays put. Focus stays on the card.
 
-**Approve plan** runs the same action as the button. **Accept** opens a dialog; **Cancel** is focused, and **Accept** in the dialog completes it. **Merge…** opens the existing **Merge ticket branch** dialog. **Assign** opens the assignee combobox. **Review code** opens the same destination as the button. Drawer sections are Detail, Live Console, and Agent Runs.
+### Review
 
-Archive, Run Agent, Stop, and Ask for changes stay on screen in the tab order. They have no default shortcut. Archive is also in the palette. Choosing it opens **Archive this ticket?** with the body **This archives the ticket. You can unarchive it later.** **Cancel** is focused. **Archive** confirms.
+| Action | Keys | When |
+|---|---|---|
+| Approve plan | `P then A` | The ticket is in Plan Review and **Approve plan** is enabled |
+| Accept… | `Mod+Shift+Enter` | The ticket is in Wait for Human Review and is not archived |
+| Merge… | `R then M` | **Merge…** is already shown |
+| Review code | `D` | **Review code** is enabled |
+
+**Approve plan** runs the same action as the button. **Accept…** opens a dialog; **Cancel** is focused, and **Accept** in the dialog completes it. **Merge…** opens the existing **Merge ticket branch** dialog. **Review code** opens the same destination as the button. `R` is a leader only for **Merge…**. It is not the `M` or `G` leader.
+
+Archive, Run Agent, Stop, and Ask for changes stay on screen in the tab order. They have no default shortcut, so they are not help-overlay rows. Archive is in the palette under **Tickets**. Choosing it opens **Archive this ticket?** with the body **This archives the ticket. You can unarchive it later.** **Cancel** is focused. **Archive** confirms.
 
 ## Command palette
 
@@ -135,7 +124,7 @@ Archive, Run Agent, Stop, and Ask for changes stay on screen in the tab order. T
 
 ## Shortcut help
 
-`?` toggles a dialog titled **Keyboard shortcuts**. Esc closes it. Rows are grouped General, Go to, Board, Ticket, and show the keys in effect after any override. The footer is **Change shortcuts in Settings.** Focus is trapped and restored on close.
+`?` toggles a dialog titled **Keyboard shortcuts**. The action in the palette and in this overlay is **Show keyboard shortcuts**. Esc closes it. Rows use the action names from the keymap, in three groups only: **Navigate**, **Tickets**, **Review**. Each action is in one group, as listed above. Rows show the keys in effect after any override. The footer is **Change shortcuts in Settings.** Focus is trapped and restored on close.
 
 ## Browser, OS, and WSL
 
@@ -153,10 +142,13 @@ The default keymap leaves these keys alone. Recording one of them in Settings sh
 | `Alt+Left` / `Alt+Right` | Back / forward | Same | Same |
 | `Mod+H`, `Mod+M`, `Mod+Tab`, `Mod+Space` | Hide, minimize, switch app, Spotlight | — | The Windows host still takes Alt+Tab, the Windows key, and Alt+F4 while a WSLg window is focused |
 | `Mod+C` `V` `X` `A` `Z` | Clipboard and undo | Same | Same |
+| `Mod+Shift+M` | Chrome profile menu (`⌘⇧M`) | Chrome profile menu and Firefox Responsive Design Mode (`Ctrl+Shift+M`) | Same as Linux in Windows Chrome and Firefox. The Windows host uses `Win+Shift+M` for a different action, so the clash is the browser |
 | `Ctrl+Alt+…` | — | TTY switching | Windows attention sequence as well |
 | `Ctrl+K` while xterm is focused | — | Kill to end of line | Same, so the palette does not take it |
 
 `Mod+K` is the one browser chord the defaults reclaim. Chrome and Safari use it for the address bar, and the palette keeps it with `preventDefault`.
+
+`Mod+Shift+M` stays with the browser. Chrome binds it on macOS (`⌘⇧M`), Linux, and Windows (`Ctrl+Shift+M`) to the profile menu, and uses the same chord for device mode while DevTools is focused. Firefox binds `Ctrl+Shift+M` to Responsive Design Mode on Linux and Windows, which covers a Linux browser and a Windows browser pointed at WSL. macOS Firefox uses `⌘⌥M` for that mode, and Chrome still takes `⌘⇧M` there. **Merge…** is **R then M**, in **Review** with **Accept…**, so the binding does not start with `M` or `G` and does not take `Mod+Shift+M`.
 
 ## Focus and accessibility
 
@@ -190,19 +182,20 @@ The Electron application menu is built from the same registry, so its labels and
 
 ## Strings for Content
 
-New copy. Existing button labels (**Approve plan**, **Accept**, **Merge…**, **Review code**, **Post comment**, **Add ticket…**, **Cancel**) stay as they are. `{column}` is one of Backlog, Plan Review, Ready, In Progress, In Review, In QA, Wait for Human Review, Done, Blocked. `{action}` is the other action's label.
+New copy. Existing button labels (**Approve plan**, **Accept**, **Merge…**, **Review code**, **Post comment**, **Add ticket…**, **Cancel**) stay as they are. `{column}` is one of Backlog, Plan Review, Ready, In Progress, In Review, In QA, Wait for Human Review, Done, Blocked. `{n}` in **Go to column {n}** is 1–9 in that same order. `{action}` is the other action's label.
 
 - Skip to board
 - Command palette
+- Open command palette
 - Search actions, tickets, and agents…
 - Recent
 - No matches
 - Keyboard shortcuts
+- Show keyboard shortcuts
 - Close
-- General
-- Go to
-- Board
-- Ticket
+- Navigate
+- Tickets
+- Review
 - Change shortcuts in Settings.
 - Go to Boards
 - Go to Agents
@@ -217,23 +210,16 @@ New copy. Existing button labels (**Approve plan**, **Accept**, **Merge…**, **
 - Previous card
 - Next column
 - Previous column
-- Go to Backlog
-- Go to Plan Review
-- Go to Ready
-- Go to In Progress
-- Go to In Review
-- Go to In QA
-- Go to Wait for Human Review
-- Go to Done
-- Go to Blocked
+- Go to column {n}
 - Open ticket
 - Create ticket
 - Move to next column
 - Move to previous column
-- Assign
+- Assign ticket
 - Next section
 - Previous section
 - Moved to {column}
+- Accept…
 - Accept this ticket?
 - This accepts the work currently in Wait for Human Review.
 - Record shortcut
@@ -252,5 +238,5 @@ Ship the rest as four pull requests, in order:
 
 1. **Registry and board focus.** The action registry, scopes, roving tabindex, `H`/`J`/`K`/`L` and arrows, Enter to open, Esc back to the card, drawer `[` / `]`, the skip link, the focus ring, and the move announcement.
 2. **Command palette.** `Mod+K`, fuzzy search, recent rows, context-aware ticket actions, key hints on rows.
-3. **Default shortcuts and help.** The remaining default keys, the `?` overlay, and a user docs page at `website/src/pages/docs/shortcuts.md`. Includes the keyboard-only walkthrough: create, assign, open, comment, review code, Accept, back to the board.
+3. **Default shortcuts and help.** The remaining default keys, the `?` overlay, and a user docs page at `website/src/pages/docs/shortcuts.md`. Includes the keyboard-only walkthrough: create, assign, open, comment, review code, Accept…, back to the board.
 4. **Custom bindings.** The Settings section, conflict warnings, reset, the `[keybindings]` table, and Electron menu accelerators from the registry.
