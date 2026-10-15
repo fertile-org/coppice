@@ -18,9 +18,9 @@ On the install you're moving to, open **Tools**, then **Backup**, and choose **I
 
 Importing replaces all data on that install with the backup's. Its settings come across too, except passwords, keys, and folder paths, and you may be signed out.
 
-Saved tokens aren't in the backup, so paste each one again afterward. Coppice marks each token it needs with "Paste this token again." Paste it, then choose **Save token**.
+Saved tokens aren't in the backup, so paste each one again afterward. Coppice marks each token it needs with "Paste this token again." Paste it, then save.
 
-The desktop app has everything it needs to import. A server install needs PostgreSQL's `pg_dump` and `psql`.
+The desktop app has everything it needs. A server install needs PostgreSQL's `pg_dump` to download a backup and `psql` to import one.
 
 ## Copy the folders by hand
 
