@@ -45,7 +45,7 @@ Kilo Code stays off until you turn it on. Coppice can't check its sign-in for fr
 | `worker_count` | integer | `2` | How many agent jobs run at once. Below 1 runs as 1. |
 | `health_check_interval_secs` | integer | `60` | Seconds between agent health checks. Below 10 runs as 10. |
 
-<!-- QUESTION: "<data-dir>" is the folder that holds config.toml. Should we write the full per-OS path instead? -->
+`<data-dir>` is the folder that holds `config.toml`: `~/.config/Coppice/config.toml` on Linux and WSL, and `~/Library/Application Support/Coppice/config.toml` on macOS.
 
 ## `[agent.connectors.<id>]`
 
