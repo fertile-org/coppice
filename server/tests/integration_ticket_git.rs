@@ -151,10 +151,7 @@ async fn rebase_branch_happy_path_advances_tip_and_comments() {
     assert!(!rebase["ticketBranch"].as_str().unwrap().is_empty());
     let head_sha = rebase["headSha"].as_str().unwrap();
     assert_ne!(head_sha, tip_before);
-    assert!(rebase["message"]
-        .as_str()
-        .unwrap()
-        .contains("Rebased"));
+    assert!(rebase["message"].as_str().unwrap().contains("Rebased"));
 
     let tip_after = git_rev_parse(&worktree_path, "HEAD");
     assert_eq!(tip_after, head_sha);
@@ -184,12 +181,9 @@ async fn rebase_branch_happy_path_advances_tip_and_comments() {
     let comments: serde_json::Value = common::json_body(comments_res).await;
     let comments = comments.as_array().unwrap();
     assert!(
-        comments.iter().any(|c| {
-            c["body"]
-                .as_str()
-                .unwrap_or("")
-                .contains("**Rebase:**")
-        }),
+        comments
+            .iter()
+            .any(|c| { c["body"].as_str().unwrap_or("").contains("**Rebase:**") }),
         "expected rebase system comment, got {comments:?}"
     );
 }
@@ -431,9 +425,32 @@ async fn merge_branch_conflict_aborts_and_leaves_branch_unchanged() {
         .await
         .unwrap();
     let ticket: serde_json::Value = common::json_body(ticket).await;
-    assert_eq!(ticket["status"], "done");
-    assert_eq!(ticket["humanReview"]["stale"], false);
+    assert_eq!(ticket["status"], "in_progress");
+    assert!(ticket["assigneeAgentId"].is_null());
+    assert_eq!(ticket["humanReview"]["stale"], true);
     assert_eq!(ticket["humanReview"]["merged"], false);
+
+    let comments = app
+        .clone()
+        .oneshot(common::json_request(
+            "GET",
+            &format!("/api/tickets/{ticket_id}/comments"),
+            "",
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    let comments: serde_json::Value = common::json_body(comments).await;
+    let expected = coppice_server::copy::conflict::merge_conflict_reopen_comment(
+        "main",
+        &["README.md".into()],
+    );
+    assert!(comments
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|comment| { comment["body"] == expected && comment["authorType"] == "system" }));
 }
 
 #[tokio::test]
@@ -462,7 +479,11 @@ async fn rebase_branch_missing_worktree_returns_bad_request() {
         .current_dir(&local_path)
         .output()
         .expect("git branch");
-    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
 
     let res = app
         .clone()

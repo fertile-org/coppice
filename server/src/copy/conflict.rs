@@ -14,6 +14,32 @@ pub const REREVIEW_NOTE: &str =
 
 pub const INVALID_FILE_LIST: &str = "The conflict file list is invalid.";
 
+/// [placeholder] Shown when a person tries to move a Done ticket to another column.
+pub const DONE_COLUMN_HOLDS: &str =
+    "[placeholder] Done tickets stay in Done. Dragging one to another column does not move it.";
+
+/// [placeholder] Shown when a merge conflict was cleared but the ticket could not leave Done.
+pub const MERGE_CONFLICT_REOPEN_FAILED: &str =
+    "[placeholder] The merge conflict was cleared, but the ticket could not return to In Progress.";
+
+/// [placeholder] Comment posted when a Done ticket's merge hits a conflict.
+/// Also copied into the assignee's run context.
+pub fn merge_conflict_reopen_comment(branch: &str, files: &[String]) -> String {
+    let listed = if files.is_empty() {
+        "- (none listed)".to_string()
+    } else {
+        files
+            .iter()
+            .map(|file| format!("- {file}"))
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    format!(
+        "[placeholder] Couldn't merge into {branch} because these files conflict:\n{listed}\n\n\
+         The ticket is back in In Progress with the same assignee. It has to go through Human Review and be accepted again before it can be Done."
+    )
+}
+
 pub fn connector_not_ready_reason(assignee: &str) -> String {
     format!("{assignee}'s connector isn't ready. Check it in Tools → Connectors.")
 }
@@ -99,5 +125,18 @@ mod tests {
         assert!(prompt.contains("- README.md"));
         assert!(prompt.contains("Keep this ticket's intent and get the tests passing."));
         assert!(prompt.contains(REREVIEW_NOTE));
+    }
+
+    #[test]
+    fn merge_conflict_reopen_copy_is_placeholder() {
+        assert!(DONE_COLUMN_HOLDS.starts_with("[placeholder]"));
+        assert!(MERGE_CONFLICT_REOPEN_FAILED.starts_with("[placeholder]"));
+        let comment =
+            merge_conflict_reopen_comment("main", &["README.md".into(), "src/lib.rs".into()]);
+        assert!(comment.starts_with("[placeholder]"));
+        assert!(comment.contains("- README.md"));
+        assert!(comment.contains("- src/lib.rs"));
+        assert!(comment.contains("In Progress"));
+        assert!(comment.contains("Human Review"));
     }
 }

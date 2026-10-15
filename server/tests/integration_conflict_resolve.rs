@@ -428,6 +428,256 @@ async fn successful_resolve_run_stales_acceptance_and_returns_to_in_review() {
     );
 }
 
+async fn accept_to_done(fx: &TicketGit) -> serde_json::Value {
+    let status = fx
+        .app
+        .clone()
+        .oneshot(common::json_request(
+            "PATCH",
+            &format!("/api/tickets/{}/status", fx.ticket_id),
+            r#"{"status":"wait_for_final_review"}"#,
+            &fx.cookie,
+            &fx.csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(status.status(), StatusCode::OK);
+    let approve = fx
+        .app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            &format!("/api/tickets/{}/final-approve", fx.ticket_id),
+            "{}",
+            &fx.cookie,
+            &fx.csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(approve.status(), StatusCode::OK, "final approve");
+    common::json_body(approve).await
+}
+
+async fn comments(fx: &TicketGit) -> Vec<serde_json::Value> {
+    let res = fx
+        .app
+        .clone()
+        .oneshot(common::json_request(
+            "GET",
+            &format!("/api/tickets/{}/comments", fx.ticket_id),
+            "",
+            &fx.cookie,
+            &fx.csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let body: serde_json::Value = common::json_body(res).await;
+    body.as_array().cloned().unwrap_or_default()
+}
+
+async fn merge_main(fx: &TicketGit) -> axum::response::Response {
+    fx.app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            &format!("/api/tickets/{}/merge-branch", fx.ticket_id),
+            r#"{"baseBranch":"main"}"#,
+            &fx.cookie,
+            &fx.csrf,
+        ))
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+async fn merge_conflict_on_done_reopens_in_progress_and_starts_the_assignee() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+
+    let fx = setup_ticket().await;
+    let agent_id = assign_ada(&fx).await;
+    diverge_readme(&fx.local_path, &fx.worktree_path);
+    let approved = accept_to_done(&fx).await;
+    let approved_sha = git_rev_parse(&fx.worktree_path, "HEAD");
+    assert_eq!(approved["status"], "done");
+    assert_eq!(approved["assigneeAgentId"], agent_id);
+    assert_eq!(approved["humanReview"]["headSha"], approved_sha);
+    assert_eq!(approved["humanReview"]["stale"], false);
+    let pool = fx.state.db.clone().expect("pool");
+    let ticket_uuid = uuid::Uuid::parse_str(&fx.ticket_id).unwrap();
+    let accepted_at_before: time::OffsetDateTime =
+        sqlx::query_scalar("SELECT accepted_at FROM ticket_human_reviews WHERE ticket_id = $1")
+            .bind(ticket_uuid)
+            .fetch_one(&pool)
+            .await
+            .expect("acceptance row");
+    let main_before = git_rev_parse(&fx.local_path, "HEAD");
+
+    let res = merge_main(&fx).await;
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+    let body: serde_json::Value = common::json_body(res).await;
+    assert_eq!(body["conflict"]["files"], serde_json::json!(["README.md"]));
+    assert_eq!(body["conflict"]["operation"], "merge");
+    assert_eq!(git_rev_parse(&fx.local_path, "HEAD"), main_before);
+
+    let ticket = ticket_json(&fx).await;
+    assert_eq!(ticket["status"], "in_progress");
+    assert_eq!(ticket["assigneeAgentId"], agent_id);
+    assert_eq!(ticket["humanReview"]["headSha"], approved_sha);
+    assert_eq!(ticket["humanReview"]["stale"], true);
+    assert_eq!(ticket["humanReview"]["merged"], false);
+    let accepted_at_after: time::OffsetDateTime =
+        sqlx::query_scalar("SELECT accepted_at FROM ticket_human_reviews WHERE ticket_id = $1")
+            .bind(ticket_uuid)
+            .fetch_one(&pool)
+            .await
+            .expect("acceptance row kept");
+    assert_eq!(accepted_at_after, accepted_at_before);
+
+    let thread = comments(&fx).await;
+    assert!(
+        thread.iter().any(|comment| comment["body"]
+            .as_str()
+            .unwrap_or("")
+            .contains("Accepted: ticket moved to **Done**.")),
+        "the earlier accept stays in the thread: {thread:?}"
+    );
+    let expected = coppice_server::copy::conflict::merge_conflict_reopen_comment(
+        "main",
+        &["README.md".into()],
+    );
+    let reopen = thread
+        .iter()
+        .find(|comment| comment["body"] == expected && comment["authorType"] == "system")
+        .expect("conflict comment listing the files");
+    let comment_id = reopen["id"].as_str().unwrap().to_string();
+
+    let runs = list_runs(&fx).await;
+    assert_eq!(runs.len(), 1);
+    assert_eq!(runs[0]["agentId"], agent_id);
+    assert_eq!(runs[0]["jobType"], "work_on_ticket");
+    let run_id = uuid::Uuid::parse_str(runs[0]["id"].as_str().unwrap()).unwrap();
+    let row: (String, Option<uuid::Uuid>) =
+        sqlx::query_as("SELECT context_profile, trigger_comment_id FROM agent_runs WHERE id = $1")
+            .bind(run_id)
+            .fetch_one(&pool)
+            .await
+            .expect("run row");
+    assert_eq!(row.0, "full");
+    assert_eq!(row.1.unwrap().to_string(), comment_id);
+
+    let again = merge_main(&fx).await;
+    assert_eq!(again.status(), StatusCode::CONFLICT);
+    assert_eq!(git_rev_parse(&fx.local_path, "HEAD"), main_before);
+    assert_eq!(ticket_json(&fx).await["status"], "in_progress");
+
+    let direct_done = fx
+        .app
+        .clone()
+        .oneshot(common::json_request(
+            "PATCH",
+            &format!("/api/tickets/{}/status", fx.ticket_id),
+            r#"{"status":"done"}"#,
+            &fx.cookie,
+            &fx.csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(direct_done.status(), StatusCode::BAD_REQUEST);
+    let early_accept = fx
+        .app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            &format!("/api/tickets/{}/final-approve", fx.ticket_id),
+            "{}",
+            &fx.cookie,
+            &fx.csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(early_accept.status(), StatusCode::BAD_REQUEST);
+
+    let review = fx
+        .app
+        .clone()
+        .oneshot(common::json_request(
+            "PATCH",
+            &format!("/api/tickets/{}/status", fx.ticket_id),
+            r#"{"status":"wait_for_final_review"}"#,
+            &fx.cookie,
+            &fx.csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(review.status(), StatusCode::OK);
+    let fresh = accept_to_done(&fx).await;
+    assert_eq!(fresh["status"], "done");
+    assert_eq!(fresh["humanReview"]["stale"], false);
+    assert_eq!(fresh["humanReview"]["headSha"], approved_sha);
+    let thread = comments(&fx).await;
+    let accepts = thread
+        .iter()
+        .filter(|comment| {
+            comment["body"]
+                .as_str()
+                .unwrap_or("")
+                .contains("Accepted: ticket moved to **Done**.")
+        })
+        .count();
+    assert_eq!(accepts, 2, "the earlier accept remains after the fresh one");
+}
+
+#[tokio::test]
+async fn merge_conflict_run_context_lists_the_conflicting_files() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+
+    let fx = setup_with_workers().await;
+    assign_ada(&fx).await;
+    diverge_readme(&fx.local_path, &fx.worktree_path);
+    accept_to_done(&fx).await;
+
+    let res = merge_main(&fx).await;
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+
+    let comment = coppice_server::copy::conflict::merge_conflict_reopen_comment(
+        "main",
+        &["README.md".into()],
+    );
+    let deadline = Instant::now() + Duration::from_secs(30);
+    let context_path = fx.worktree_path.join(".agent").join("context.md");
+    loop {
+        if let Ok(context) = std::fs::read_to_string(&context_path) {
+            assert!(
+                context.contains(&comment),
+                "context.md should carry the conflict comment:\n{context}"
+            );
+            break;
+        }
+        let runs = list_runs(&fx).await;
+        let status = runs
+            .first()
+            .and_then(|run| run["status"].as_str())
+            .unwrap_or("");
+        if matches!(status, "failed" | "blocked" | "cancelled") {
+            panic!(
+                "conflict run ended as {status}: {}",
+                runs[0]["errorMessage"]
+            );
+        }
+        if Instant::now() >= deadline {
+            panic!("timed out waiting for context.md; runs={runs:?}");
+        }
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
+}
+
 async fn wait_until_back_in_review(fx: &TicketGit) -> (serde_json::Value, serde_json::Value) {
     let deadline = Instant::now() + Duration::from_secs(30);
     let mut last_run;

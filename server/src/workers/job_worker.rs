@@ -409,6 +409,17 @@ async fn execute_job(
             posted_at,
             mode_label,
         }),
+        // A merge conflict starts an ordinary work run and passes the conflict
+        // comment in, the same way a trigger comment reaches a human-requested run.
+        (Some(body), posted_at, None)
+            if run.job_type == "work_on_ticket" && run.context_profile == ContextProfile::Full =>
+        {
+            Some(HumanRequest {
+                body,
+                posted_at: posted_at.unwrap_or(""),
+                mode_label: "Work on ticket",
+            })
+        }
         _ => None,
     };
 

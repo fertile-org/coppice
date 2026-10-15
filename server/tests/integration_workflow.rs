@@ -156,12 +156,10 @@ async fn final_approve_requires_wait_for_final_review() {
         .as_array()
         .and_then(|list| list.last())
         .expect("final approve comment");
-    assert!(
-        final_comment["body"]
-            .as_str()
-            .unwrap_or("")
-            .contains("Accepted: ticket moved to **Done**.")
-    );
+    assert!(final_comment["body"]
+        .as_str()
+        .unwrap_or("")
+        .contains("Accepted: ticket moved to **Done**."));
 }
 
 #[tokio::test]
@@ -278,6 +276,77 @@ async fn direct_status_change_cannot_reach_done() {
     assert_eq!(stay.status(), StatusCode::OK);
     let stayed: serde_json::Value = common::json_body(stay).await;
     assert_eq!(stayed["status"], "done");
+}
+
+#[tokio::test]
+async fn done_ticket_cannot_be_dragged_to_another_column() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let (app, cookie, csrf) = common::bootstrap_and_login().await;
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
+    let ticket_id = common::create_test_ticket(&app, &board_id, &cookie, &csrf).await;
+
+    let review = app
+        .clone()
+        .oneshot(common::json_request(
+            "PATCH",
+            &format!("/api/tickets/{ticket_id}/status"),
+            r#"{"status":"wait_for_final_review"}"#,
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(review.status(), StatusCode::OK);
+    let approve = app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            &format!("/api/tickets/{ticket_id}/final-approve"),
+            "{}",
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(approve.status(), StatusCode::OK);
+
+    for status in ["in_progress", "in_review", "backlog", "ready", "blocked"] {
+        let denied = app
+            .clone()
+            .oneshot(common::json_request(
+                "PATCH",
+                &format!("/api/tickets/{ticket_id}/status"),
+                &format!(r#"{{"status":"{status}"}}"#),
+                &cookie,
+                &csrf,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(denied.status(), StatusCode::BAD_REQUEST, "{status}");
+        let body: serde_json::Value = common::json_body(denied).await;
+        assert_eq!(
+            body["message"],
+            coppice_server::copy::conflict::DONE_COLUMN_HOLDS,
+            "{status}"
+        );
+
+        let current = app
+            .clone()
+            .oneshot(common::json_request(
+                "GET",
+                &format!("/api/tickets/{ticket_id}"),
+                "",
+                &cookie,
+                &csrf,
+            ))
+            .await
+            .unwrap();
+        let current: serde_json::Value = common::json_body(current).await;
+        assert_eq!(current["status"], "done", "{status}");
+    }
 }
 
 #[tokio::test]
@@ -1137,12 +1206,10 @@ async fn scope_continued_run_keeps_in_progress() {
         .iter()
         .find(|c| c["authorType"] == "agent" && c["intent"] == "progress_update")
         .expect("agent progress_update comment");
-    assert!(
-        progress_comment["body"]
-            .as_str()
-            .unwrap()
-            .contains("TmuxStream")
-    );
+    assert!(progress_comment["body"]
+        .as_str()
+        .unwrap()
+        .contains("TmuxStream"));
 }
 
 #[tokio::test]
@@ -1159,8 +1226,7 @@ async fn scope_pm_split_pending() {
     let (_git_dir, local_path) = common::create_temp_git_checkout();
     let repo_id =
         common::register_test_repo(&app, &local_path.display().to_string(), &cookie, &csrf).await;
-    let pm_id =
-        common::create_agent_with_preset_key(&app, "pm", "PM Agent", &cookie, &csrf).await;
+    let pm_id = common::create_agent_with_preset_key(&app, "pm", "PM Agent", &cookie, &csrf).await;
 
     let ticket_id = common::create_test_ticket(&app, &board_id, &cookie, &csrf).await;
     common::set_ticket_repo(&app, &ticket_id, &repo_id, &cookie, &csrf).await;
@@ -1236,8 +1302,7 @@ async fn qc_defect_handoff_returns_to_engineer_without_committing() {
         &csrf,
     )
     .await;
-    let qc_id =
-        common::create_agent_with_preset_key(&app, "qc", "QC Agent", &cookie, &csrf).await;
+    let qc_id = common::create_agent_with_preset_key(&app, "qc", "QC Agent", &cookie, &csrf).await;
 
     let ticket_id = common::create_test_ticket(&app, &board_id, &cookie, &csrf).await;
     common::set_ticket_repo(&app, &ticket_id, &repo_id, &cookie, &csrf).await;
@@ -1343,7 +1408,10 @@ async fn qc_defect_handoff_returns_to_engineer_without_committing() {
         .find(|c| c["authorId"].as_str() == Some(qc_id.as_str()))
         .expect("QC-authored comment");
     let body = qc_comment["body"].as_str().expect("qc comment body");
-    assert!(body.contains("Defects found"), "QC defect verdict present: {body}");
+    assert!(
+        body.contains("Defects found"),
+        "QC defect verdict present: {body}"
+    );
     assert!(
         !body.contains("**Git:**"),
         "QC comment must not carry a git footer: {body}"

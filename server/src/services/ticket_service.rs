@@ -26,6 +26,9 @@ enum StatusWrite {
     /// Continue a column a crash moved to Blocked. Skips the plan gate:
     /// the ticket was already in that column.
     RestartResume,
+    /// Merge of a Done ticket hit a conflict. The only status write that may
+    /// leave Done, and only into In Progress. Dragging still cannot.
+    MergeConflictReopen,
 }
 
 #[derive(Debug, Default)]
@@ -482,6 +485,22 @@ impl<'a> TicketService<'a> {
         .await
     }
 
+    /// Move a Done ticket to In Progress after its merge conflicted.
+    /// Does not change the assignee. Direct status writes cannot do this.
+    pub async fn reopen_after_merge_conflict(
+        &self,
+        ticket_id: Uuid,
+    ) -> Result<TicketWithDisplay, TicketError> {
+        self.write_status(
+            ticket_id,
+            TicketStatus::InProgress,
+            Some(None),
+            Some(None),
+            StatusWrite::MergeConflictReopen,
+        )
+        .await
+    }
+
     async fn write_status(
         &self,
         ticket_id: Uuid,
@@ -519,6 +538,15 @@ impl<'a> TicketService<'a> {
                 if status == TicketStatus::Done {
                     return Err(TicketError::Validation(
                         "accepted work is not resumed".into(),
+                    ));
+                }
+            }
+            StatusWrite::MergeConflictReopen => {
+                if current.ticket.status != TicketStatus::Done
+                    || status != TicketStatus::InProgress
+                {
+                    return Err(TicketError::Validation(
+                        "a merge conflict reopens a Done ticket into In Progress".into(),
                     ));
                 }
             }

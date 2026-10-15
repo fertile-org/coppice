@@ -406,6 +406,7 @@ export function useMergeTicketBranch(ticketId: string) {
       void queryClient.invalidateQueries({ queryKey: ticketQueryKey(ticketId) });
       void queryClient.invalidateQueries({ queryKey: gitInfoQueryKey(ticketId) });
       void queryClient.invalidateQueries({ queryKey: commentsQueryKey(ticketId) });
+      void queryClient.invalidateQueries({ queryKey: agentRunsQueryKey(ticketId) });
       void queryClient.invalidateQueries({ queryKey: ['tickets'] });
     },
   });
