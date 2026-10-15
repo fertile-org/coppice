@@ -212,6 +212,15 @@ a:hover {
   margin: 1.75rem 0 0;
 }
 
+.hero-frame {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid var(--color-bark-200);
+  border-radius: 14px;
+  background: var(--color-paper-100);
+  box-shadow: var(--shadow-shot);
+}
+
 .hero-shot .hero-still {
   display: none;
 }
@@ -222,10 +231,32 @@ a:hover {
   width: 100%;
   height: auto;
   aspect-ratio: 1440 / 900;
-  border: 1px solid var(--color-bark-200);
-  border-radius: 14px;
-  background: var(--color-paper-100);
-  box-shadow: var(--shadow-shot);
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.hero-progress {
+  position: absolute;
+  z-index: 1;
+  top: 0;
+  right: 0;
+  left: 0;
+  display: none;
+  height: 3px;
+  pointer-events: none;
+}
+
+.hero-shot.is-playing .hero-progress {
+  display: block;
+}
+
+.hero-progress-fill {
+  display: block;
+  width: 0%;
+  height: 100%;
+  background: var(--color-moss-600);
 }
 
 .hero-captions {
@@ -758,6 +789,11 @@ a:hover {
 
   .hero-shot .hero-still {
     display: block;
+  }
+
+  .hero-progress,
+  .hero-shot.is-playing .hero-progress {
+    display: none;
   }
 
   html {
