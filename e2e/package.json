@@ -5,7 +5,8 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "screenshot": "node screenshot/capture.mjs"
+    "screenshot": "node screenshot/capture.mjs",
+    "screenshot:docs": "node screenshot/capture-docs.mjs"
   },
   "devDependencies": {
     "playwright": "1.55.1"

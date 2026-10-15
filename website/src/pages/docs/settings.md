@@ -70,7 +70,7 @@ Changing OpenCode's `command` also needs a restart.
 
 | Field | Type | Default | What it does |
 | --- | --- | --- | --- |
-| `auto_start_runs` | bool | `false` | When true, assigning an agent to a ticket with a repository starts a run. When false, you click **Run Agent**. |
+| `auto_start_runs` | bool | `false` | When true, assigning an agent to a ticket with a repository starts a run. When false, you click **Run agent**. |
 | `auto_assign.default` | bool | `true` | Turns auto-assign on for every status without its own setting. |
 | `auto_assign.<status>` | bool | `backlog`: `false`. Others: uses `default` | Turns auto-assign on or off for one status. |
 | `auto_split.default` | bool | `false` | Turns auto-split on for every status without its own setting. |

@@ -56,7 +56,7 @@ New plugins start like this:
 - Has an MCP server: **Choose agents**, with nobody checked.
 
 ## Use it on a ticket
-Enable the plugin and give the ticket's assignee access. Then click **Run Agent**.
+Enable the plugin and give the ticket's assignee access. Then click **Run agent**.
 
 The agent sees each skill's name and description, and loads a skill when it needs it. Tools are named `<plugin>__<tool>`.
 
