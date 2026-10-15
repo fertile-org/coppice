@@ -31,7 +31,7 @@ Kilo Code shows **Installed**. Coppice can't check that sign-in without using yo
 
 Saving turns that connector on. You'll see "{name} turned on."
 
-Add a **PM** agent, a **Technical Lead** agent, and at least one implementer (**Frontend Engineer**, **Backend Engineer**, or **Research**) so that planning and handoff work.
+Add a **PM** agent, a **Technical Lead** agent, and at least one agent to do the work (**Frontend Engineer**, **Backend Engineer**, or **Research**). Planning and handoffs need all three.
 
 [screenshot: step 2]
 
