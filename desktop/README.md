@@ -13,8 +13,11 @@ make desktop
   `process.resourcesPath` when packaged), loads the URL it prints on `COPPICE_READY`, and stops it on quit.
   Startup failures show an error window with the last log lines. Logs live in
   `$XDG_STATE_HOME/Coppice/logs` (or `~/.local/state/Coppice/logs`) on Linux and
-  `~/Library/Logs/Coppice` on macOS (`postgres.log` and daily `coppice.*.jsonl`
-  files; past days are stored as `coppice.*.jsonl.zst`).
+  `~/Library/Logs/Coppice` on macOS (daily `coppice.*.jsonl` files, past days as
+  `coppice.*.jsonl.zst`, and rotated Postgres logs `postgresql-*.log` plus
+  `postgres.log`). Postgres rotates those logs by size and age. Coppice counts
+  them toward the 256 MiB cap, deletes them after `retention_days`, and never
+  deletes the file Postgres is writing.
 
 To run the bundled mode from a checkout, populate `desktop/resources/` (gitignored):
 

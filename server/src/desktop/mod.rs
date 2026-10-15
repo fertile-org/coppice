@@ -108,8 +108,16 @@ pub async fn run(args: DesktopArgs) -> anyhow::Result<()> {
         }
     }
     pg.init_if_needed(&secrets.pg_password).await?;
-    pg.clear_stale_pid()?;
-    let pg_port = start_postgres(&pg).await?;
+    if pg.stop_leftover().await.context("stop leftover postgres")? {
+        tracing::info!("stopped a database left running from an earlier session");
+    }
+    if *requested.borrow() {
+        return Ok(());
+    }
+    let pg_port = match start_postgres(&pg, requested.clone()).await? {
+        Startup::Shutdown => return Ok(()),
+        Startup::Ready(port) => port,
+    };
 
     let served = tokio::select! {
         served = serve_with_postgres(&pg, pg_port, &layout, &resources, &secrets, import_notice, requested.clone()) => served,
@@ -131,25 +139,45 @@ pub async fn run(args: DesktopArgs) -> anyhow::Result<()> {
     }
 }
 
-/// Retries once on a fresh port in case another process took the first one.
-async fn start_postgres(pg: &DesktopPostgres) -> anyhow::Result<u16> {
-    let port = free_loopback_port().context("pick postgres port")?;
-    let Err(first) = pg.start(port).await else {
-        return Ok(port);
-    };
-    tracing::warn!(error = %format!("{first:#}"), port, "postgres failed to start; retrying on another port");
-    stop_after_failed_start(pg).await;
-    let port = free_loopback_port().context("pick postgres port")?;
-    if let Err(err) = pg.start(port).await {
-        stop_after_failed_start(pg).await;
-        return Err(err);
-    }
-    Ok(port)
+enum Startup {
+    Ready(u16),
+    Shutdown,
 }
 
-/// `pg_ctl start -w` can time out with the server still coming up. Before the
-/// retry this also stops a Postgres left running on this data dir by a
-/// previous SIGKILLed session (its live pid makes `start` fail), so keep it.
+/// Retries once on a fresh port in case another process took the first one.
+/// A shutdown during the wait stops Postgres and returns [`Startup::Shutdown`]
+/// instead of waiting out the 60 s start timeout.
+async fn start_postgres(
+    pg: &DesktopPostgres,
+    cancel: watch::Receiver<bool>,
+) -> anyhow::Result<Startup> {
+    if *cancel.borrow() {
+        return Ok(Startup::Shutdown);
+    }
+    let port = free_loopback_port().context("pick postgres port")?;
+    match pg.start(port, cancel.clone()).await {
+        Ok(postgres::StartStatus::Started) => Ok(Startup::Ready(port)),
+        Ok(postgres::StartStatus::Cancelled) => Ok(Startup::Shutdown),
+        Err(first) => {
+            tracing::warn!(error = %format!("{first:#}"), port, "postgres failed to start; retrying on another port");
+            stop_after_failed_start(pg).await;
+            if *cancel.borrow() {
+                return Ok(Startup::Shutdown);
+            }
+            let port = free_loopback_port().context("pick postgres port")?;
+            match pg.start(port, cancel).await {
+                Ok(postgres::StartStatus::Started) => Ok(Startup::Ready(port)),
+                Ok(postgres::StartStatus::Cancelled) => Ok(Startup::Shutdown),
+                Err(err) => {
+                    stop_after_failed_start(pg).await;
+                    Err(err)
+                }
+            }
+        }
+    }
+}
+
+/// `pg_ctl start -w` can time out with the server still coming up.
 async fn stop_after_failed_start(pg: &DesktopPostgres) {
     if let Err(err) = pg.stop().await {
         tracing::warn!(error = %format!("{err:#}"), "stop after failed postgres start");
@@ -226,6 +254,14 @@ mod tests {
         let runtime_wind_down = 1;
         let electron_grace = 15;
         assert!(DRAIN_TIMEOUT.as_secs() + pg_stop + runtime_wind_down < electron_grace);
+        let startup_cancel = postgres::START_INTERRUPT_WAIT.as_secs()
+            + postgres::START_PID_POLL.as_secs()
+            + pg_stop
+            + runtime_wind_down;
+        assert!(
+            startup_cancel < electron_grace,
+            "quit during pg_ctl start must stop postgres before Electron SIGKILL ({startup_cancel}s)"
+        );
     }
 
     #[test]

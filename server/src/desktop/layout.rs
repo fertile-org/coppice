@@ -20,7 +20,8 @@ impl DataLayout {
         Self::with_logs_dir(root, root.join("logs"))
     }
 
-    /// `logs` is the directory for `postgres.log`. When the desktop app passes
+    /// `logs` is the directory for Postgres logs (`postgres.log` and rotated
+    /// `postgresql-*.log` files). When the desktop app passes
     /// `--logs-dir`, that directory is used and `<data-dir>/logs` is not created.
     pub fn with_logs_dir(root: &Path, logs: PathBuf) -> Self {
         Self {
