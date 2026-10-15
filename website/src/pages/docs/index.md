@@ -19,7 +19,7 @@ Coppice lets you run several coding agents at once without babysitting them: que
 
 ## Advanced
 
-- [Settings](/docs/settings) — Advanced: every field in config.toml
-- [Keyboard shortcuts](/docs/shortcuts) — Default keys for the board, tickets, and review
+- [Settings](/docs/settings): Every field in config.toml
+- [Keyboard shortcuts](/docs/shortcuts): Default keys for the board, tickets, and review
 
 Contributing or hacking on the code? See the [repo docs](https://github.com/fertile-org/coppice/tree/main/docs) on GitHub.
