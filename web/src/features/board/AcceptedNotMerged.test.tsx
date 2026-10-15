@@ -1,7 +1,7 @@
 import '@testing-library/jest-dom/vitest';
 import { DndContext } from '@dnd-kit/core';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ToastProvider } from '../../components/ToastProvider';
 import { ApiError } from '../../lib/api';
@@ -80,6 +80,7 @@ describe('Done card accepted branch', () => {
           worktreeExists: true,
           defaultBranch: 'main',
           branches: ['main', 'agent/accepted'],
+          canCreatePr: true,
         });
       }
       return jsonResponse({});
@@ -92,12 +93,16 @@ describe('Done card accepted branch', () => {
     expect(
       await screen.findByText('[placeholder] Accepted, not merged'),
     ).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Merge…' })).toBeVisible();
     expect(
-      screen.getByRole('button', { name: '[placeholder] Merge' }),
+      await screen.findByRole('button', { name: 'Create PR via API' }),
     ).toBeVisible();
+    expect(
+      screen.queryByRole('button', { name: '[placeholder] Merge' }),
+    ).toBeNull();
   });
 
-  it('hides the label when the accepted branch is already merged', () => {
+  it('hides the label when the accepted branch is already merged', async () => {
     renderCard(
       makeTicket({
         humanReview: { ...acceptedReview, merged: true },
@@ -107,9 +112,10 @@ describe('Done card accepted branch', () => {
     expect(
       screen.queryByText('[placeholder] Accepted, not merged'),
     ).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Merge…' })).toBeNull();
     expect(
-      screen.queryByRole('button', { name: '[placeholder] Merge' }),
-    ).toBeNull();
+      await screen.findByRole('button', { name: 'Create PR via API' }),
+    ).toBeVisible();
   });
 
   it('hides the label when the Done card was not accepted', () => {
@@ -175,6 +181,7 @@ describe('Done card accepted branch', () => {
             worktreeExists: true,
             defaultBranch: 'main',
             branches: ['main'],
+            canCreatePr: true,
           });
         }
         if (
@@ -191,18 +198,18 @@ describe('Done card accepted branch', () => {
     });
 
     const onOpen = renderCard(makeTicket());
-    const mergeButton = await screen.findByRole('button', {
-      name: '[placeholder] Merge',
-    });
+    const mergeButton = await screen.findByRole('button', { name: 'Merge…' });
     await waitFor(() => expect(mergeButton).toBeEnabled());
 
     fireEvent.click(mergeButton);
     expect(onOpen).not.toHaveBeenCalled();
+    const dialog = await screen.findByRole('dialog', { name: 'Merge ticket branch' });
+    fireEvent.click(within(dialog).getByRole('button', { name: /^Merge$/ }));
 
     await mergeStarted;
-    expect(
-      screen.getByRole('button', { name: '[placeholder] Merging' }),
-    ).toBeDisabled();
+    await waitFor(() => {
+      expect(within(dialog).getByRole('button', { name: 'Merging…' })).toBeDisabled();
+    });
     expect(apiFetch).toHaveBeenCalledWith(
       `/api/tickets/${ticketId}/merge-branch`,
       expect.objectContaining({
@@ -227,10 +234,8 @@ describe('Done card accepted branch', () => {
         screen.queryByText('[placeholder] Accepted, not merged'),
       ).toBeNull();
     });
-    expect(await screen.findByText('[placeholder] Merged')).toBeVisible();
-    expect(
-      screen.queryByText('Merged `agent/accepted` into `main`'),
-    ).toBeNull();
+    expect(await screen.findByText('Merged `agent/accepted` into `main`')).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Create PR via API' })).toBeVisible();
     expect(
       apiFetch.mock.calls.some((call) => String(call[0]).endsWith('/status')),
     ).toBe(false);
@@ -271,20 +276,16 @@ describe('Done card accepted branch', () => {
     });
 
     renderCard(makeTicket());
-    const mergeButton = await screen.findByRole('button', {
-      name: '[placeholder] Merge',
-    });
+    const mergeButton = await screen.findByRole('button', { name: 'Merge…' });
     await waitFor(() => expect(mergeButton).toBeEnabled());
     fireEvent.click(mergeButton);
+    const dialog = await screen.findByRole('dialog', { name: 'Merge ticket branch' });
+    fireEvent.click(within(dialog).getByRole('button', { name: /^Merge$/ }));
 
     expect(
-      await screen.findByText('[placeholder] Merge conflict'),
+      await within(dialog).findByText(/README\.md/),
     ).toBeVisible();
-    expect(screen.getByText('README.md')).toBeVisible();
-    expect(screen.getByText('src/app.ts')).toBeVisible();
-    expect(
-      screen.queryByText(/Nothing was changed/),
-    ).toBeNull();
+    expect(within(dialog).getByText(/src\/app\.ts/)).toBeVisible();
     expect(
       screen.getByText('[placeholder] Accepted, not merged'),
     ).toBeVisible();
@@ -292,5 +293,43 @@ describe('Done card accepted branch', () => {
     expect(
       apiFetch.mock.calls.some((call) => String(call[0]).endsWith('/status')),
     ).toBe(false);
+  });
+
+  it('creates a pull request from a Done card with the existing button', async () => {
+    const open = vi.spyOn(window, 'open').mockImplementation(() => null);
+    apiFetch.mockImplementation(async (path: string, init?: RequestInit) => {
+      if (String(path).endsWith('/git-info')) {
+        return jsonResponse({
+          ticketBranch: 'agent/accepted',
+          worktreePath: '/tmp/wt',
+          worktreeExists: true,
+          defaultBranch: 'main',
+          branches: ['main'],
+          canCreatePr: true,
+        });
+      }
+      if (
+        String(path) === `/api/tickets/${ticketId}/create-pr` &&
+        init?.method === 'POST'
+      ) {
+        return jsonResponse({
+          pullRequest: { prUrl: 'https://github.com/org/repo/pull/7', number: 7, title: 'Ship' },
+        });
+      }
+      return jsonResponse({});
+    });
+
+    renderCard(makeTicket({ humanReview: { ...acceptedReview, merged: true } }));
+    const createPr = await screen.findByRole('button', { name: 'Create PR via API' });
+    fireEvent.click(createPr);
+
+    await waitFor(() => {
+      expect(apiFetch).toHaveBeenCalledWith(
+        `/api/tickets/${ticketId}/create-pr`,
+        expect.objectContaining({ method: 'POST' }),
+      );
+    });
+    expect(await screen.findByText('PR #7 created')).toBeVisible();
+    open.mockRestore();
   });
 });

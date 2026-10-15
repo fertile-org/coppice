@@ -2,6 +2,8 @@ import { useDraggable } from '@dnd-kit/core';
 import { CSS } from '@dnd-kit/utilities';
 import { Bot, GitBranch, Network } from 'lucide-react';
 import type { CSSProperties } from 'react';
+import { CreatePrButton } from '../tickets/TicketGitActions';
+import { useTicketGitInfo } from '../tickets/useTicket';
 import { AcceptedNotMerged } from './AcceptedNotMerged';
 import { showsAcceptedNotMerged } from './showsAcceptedNotMerged';
 import type { TicketHierarchy } from './ticketHierarchy';
@@ -16,6 +18,23 @@ function priorityBadgeStyle(priority: string): CSSProperties | undefined {
     color: `var(--badge-priority-${priority}-text)`,
     borderColor: `var(--badge-priority-${priority}-border)`,
   };
+}
+
+function DoneCardPullRequest({ ticketId }: { ticketId: string }) {
+  const gitInfo = useTicketGitInfo(ticketId, true);
+  if (!gitInfo.data?.canCreatePr) {
+    return null;
+  }
+
+  return (
+    <div
+      className="mt-2"
+      onPointerDown={(event) => event.stopPropagation()}
+      onClick={(event) => event.stopPropagation()}
+    >
+      <CreatePrButton ticketId={ticketId} size="sm" />
+    </div>
+  );
 }
 
 interface TicketCardProps {
@@ -163,6 +182,9 @@ export function TicketCard({
       )}
       </div>
       {showMerge && <AcceptedNotMerged ticket={ticket} />}
+      {ticket.status === 'done' && ticket.repoId && !isArchived && (
+        <DoneCardPullRequest ticketId={ticket.id} />
+      )}
     </div>
   );
 }

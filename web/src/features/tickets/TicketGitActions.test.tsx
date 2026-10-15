@@ -120,6 +120,14 @@ describe('TicketGitActions', () => {
     expect(screen.getByRole('button', { name: 'Remove worktree' })).toBeInTheDocument();
   });
 
+  it('shows Merge and Create PR for a Done ticket', () => {
+    gitInfoState.data = { ...baseGitInfo, canCreatePr: true };
+    renderActions(makeTicket({ status: 'done' }));
+
+    expect(screen.getByRole('button', { name: 'Merge…' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Create PR via API' })).toBeInTheDocument();
+  });
+
   it('shows API Create PR only when canCreatePr is true', () => {
     gitInfoState.data = {
       ...baseGitInfo,

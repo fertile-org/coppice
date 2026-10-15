@@ -1,9 +1,13 @@
 import { useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
-import { Button } from '../../components/ui/button';
+import { apiErrorToastMessage, parseApiErrorMessage } from '../../lib/api';
 import { useToast } from '../../components/ToastProvider';
-import { parseGitConflict } from '../tickets/conflictOffer';
-import { useMergeTicketBranch, useTicketGitInfo } from '../tickets/useTicket';
+import { parseGitConflict, type GitConflict } from '../tickets/conflictOffer';
+import {
+  MergeBranchDialog,
+  MergeBranchTrigger,
+} from '../tickets/TicketGitActions';
+import { useResolveConflict, useTicketGitInfo } from '../tickets/useTicket';
 import { acceptedNotMergedCopy } from './acceptedNotMergedCopy';
 import { ticketsQueryKey, type Ticket } from './useTickets';
 
@@ -11,41 +15,50 @@ export function AcceptedNotMerged({ ticket }: { ticket: Ticket }) {
   const toast = useToast();
   const queryClient = useQueryClient();
   const gitInfo = useTicketGitInfo(ticket.id, true);
-  const mergeBranch = useMergeTicketBranch(ticket.id);
-  const [conflictFiles, setConflictFiles] = useState<string[] | null>(null);
-  const [merged, setMerged] = useState(false);
-  const baseBranch = gitInfo.data?.defaultBranch ?? '';
+  const resolveConflict = useResolveConflict(ticket.id);
+  const [open, setOpen] = useState(false);
+  const [hidden, setHidden] = useState(false);
+  const [conflict, setConflict] = useState<GitConflict | null>(null);
+  const [asking, setAsking] = useState(false);
+  const info = gitInfo.data;
 
-  if (merged) {
+  if (hidden) {
     return null;
   }
 
-  async function handleMerge() {
-    if (!baseBranch || mergeBranch.isPending) {
+  function handleMerged() {
+    queryClient.setQueriesData<Ticket[]>(
+      { queryKey: ticketsQueryKey(ticket.boardId) },
+      (current) =>
+        current?.map((item) =>
+          item.id === ticket.id && item.humanReview
+            ? {
+                ...item,
+                humanReview: { ...item.humanReview, merged: true },
+              }
+            : item,
+        ),
+    );
+    setHidden(true);
+  }
+
+  async function handleAsk() {
+    if (!conflict?.canAskAssignee || asking) {
       return;
     }
-    setConflictFiles(null);
+    setAsking(true);
     try {
-      await mergeBranch.mutateAsync(baseBranch);
-      queryClient.setQueriesData<Ticket[]>(
-        { queryKey: ticketsQueryKey(ticket.boardId) },
-        (current) =>
-          current?.map((item) =>
-            item.id === ticket.id && item.humanReview
-              ? {
-                  ...item,
-                  humanReview: { ...item.humanReview, merged: true },
-                }
-              : item,
-          ),
-      );
-      toast.success(acceptedNotMergedCopy.success);
-      setMerged(true);
+      await resolveConflict.mutateAsync({
+        baseBranch: conflict.baseBranch,
+        files: conflict.files,
+      });
+      setConflict(null);
+      setOpen(false);
     } catch (err) {
-      const conflict = parseGitConflict(err);
-      if (conflict?.operation === 'merge') {
-        setConflictFiles(conflict.files);
-      }
+      const message = parseApiErrorMessage(err);
+      toast.error(apiErrorToastMessage(message));
+    } finally {
+      setAsking(false);
     }
   }
 
@@ -58,33 +71,25 @@ export function AcceptedNotMerged({ ticket }: { ticket: Ticket }) {
       <p className="font-body text-xs text-text-secondary">
         {acceptedNotMergedCopy.statusLabel}
       </p>
-      <Button
-        type="button"
+      <MergeBranchTrigger
         size="sm"
-        variant="secondary"
-        disabled={!baseBranch || mergeBranch.isPending}
-        onClick={() => void handleMerge()}
-      >
-        {mergeBranch.isPending
-          ? acceptedNotMergedCopy.merging
-          : acceptedNotMergedCopy.mergeButton}
-      </Button>
-      {conflictFiles && (
-        <div className="space-y-1">
-          <p className="font-body text-xs text-danger">
-            {acceptedNotMergedCopy.conflictError}
-          </p>
-          <ul className="space-y-0.5">
-            {conflictFiles.map((file) => (
-              <li
-                key={file}
-                className="truncate font-mono text-xs text-text-secondary"
-              >
-                {file}
-              </li>
-            ))}
-          </ul>
-        </div>
+        disabled={!info}
+        onClick={() => setOpen(true)}
+      />
+      {info && (
+        <MergeBranchDialog
+          open={open}
+          onClose={() => setOpen(false)}
+          ticketId={ticket.id}
+          defaultBranch={info.defaultBranch}
+          branches={info.branches}
+          ticketBranch={info.ticketBranch}
+          conflict={conflict}
+          asking={asking}
+          onConflict={setConflict}
+          onAsk={() => void handleAsk()}
+          onMerged={handleMerged}
+        />
       )}
     </div>
   );

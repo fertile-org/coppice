@@ -57,7 +57,82 @@ function ConflictNotice({
   );
 }
 
-function MergeBranchDialog({
+export function MergeBranchTrigger({
+  disabled,
+  className,
+  size,
+  onClick,
+}: {
+  disabled?: boolean;
+  className?: string;
+  size?: 'default' | 'sm';
+  onClick: () => void;
+}) {
+  return (
+    <Button
+      type="button"
+      variant="secondary"
+      size={size}
+      disabled={disabled}
+      onClick={onClick}
+      className={className}
+    >
+      Merge…
+    </Button>
+  );
+}
+
+export function CreatePrButton({
+  ticketId,
+  disabled,
+  className,
+  size,
+  onPendingChange,
+  onError,
+}: {
+  ticketId: string;
+  disabled?: boolean;
+  className?: string;
+  size?: 'default' | 'sm';
+  onPendingChange?: (pending: boolean) => void;
+  onError?: (message: string | null) => void;
+}) {
+  const toast = useToast();
+  const createPr = useCreateTicketPr(ticketId);
+
+  useEffect(() => {
+    onPendingChange?.(createPr.isPending);
+  }, [createPr.isPending, onPendingChange]);
+
+  async function handleCreatePr() {
+    onError?.(null);
+    try {
+      const result = await createPr.mutateAsync({});
+      toast.success(`PR #${result.pullRequest.number} created`);
+      window.open(result.pullRequest.prUrl, '_blank', 'noopener,noreferrer');
+    } catch (err) {
+      const message = parseApiErrorMessage(err, 'Create PR failed.');
+      onError?.(message);
+      toast.error(apiErrorToastMessage(message));
+    }
+  }
+
+  return (
+    <Button
+      type="button"
+      variant="secondary"
+      size={size}
+      disabled={disabled || createPr.isPending}
+      title="Push the ticket branch (if needed) and create a GitHub pull request via API"
+      onClick={() => void handleCreatePr()}
+      className={className}
+    >
+      {createPr.isPending ? 'Creating…' : 'Create PR via API'}
+    </Button>
+  );
+}
+
+export function MergeBranchDialog({
   open,
   onClose,
   ticketId,
@@ -68,6 +143,7 @@ function MergeBranchDialog({
   asking,
   onConflict,
   onAsk,
+  onMerged,
 }: {
   open: boolean;
   onClose: () => void;
@@ -79,6 +155,7 @@ function MergeBranchDialog({
   asking: boolean;
   onConflict: (conflict: GitConflict | null) => void;
   onAsk: () => void;
+  onMerged?: () => void;
 }) {
   const toast = useToast();
   const mergeBranch = useMergeTicketBranch(ticketId);
@@ -103,6 +180,7 @@ function MergeBranchDialog({
       const result = await mergeBranch.mutateAsync(baseBranch);
       toast.success(result.merge.message);
       onConflict(null);
+      onMerged?.();
       onClose();
     } catch (err) {
       const gitConflict = parseGitConflict(err);
@@ -135,9 +213,9 @@ function MergeBranchDialog({
 
         <form onSubmit={(e) => void handleSubmit(e)} className="mt-5 space-y-4">
           <div className="space-y-2">
-            <Label htmlFor="merge-base-branch">Base branch</Label>
+            <Label htmlFor={`merge-base-branch-${ticketId}`}>Base branch</Label>
             <Combobox
-              id="merge-base-branch"
+              id={`merge-base-branch-${ticketId}`}
               value={baseBranch}
               onValueChange={setBaseBranch}
               placeholder="Select branch…"
@@ -321,7 +399,7 @@ export function TicketGitActions({ ticket }: TicketGitActionsProps) {
   );
   const removeWorktree = useRemoveWorktree(ticket.id);
   const pushBranch = usePushTicketBranch(ticket.id);
-  const createPr = useCreateTicketPr(ticket.id);
+  const [createPrPending, setCreatePrPending] = useState(false);
   const [mergeOpen, setMergeOpen] = useState(false);
   const [rebaseOpen, setRebaseOpen] = useState(false);
   const [gitError, setGitError] = useState<string | null>(null);
@@ -391,21 +469,8 @@ export function TicketGitActions({ ticket }: TicketGitActionsProps) {
     }
   }
 
-  async function handleCreatePr() {
-    setGitError(null);
-    try {
-      const result = await createPr.mutateAsync({});
-      toast.success(`PR #${result.pullRequest.number} created`);
-      window.open(result.pullRequest.prUrl, '_blank', 'noopener,noreferrer');
-    } catch (err) {
-      const message = parseApiErrorMessage(err, 'Create PR failed.');
-      setGitError(message);
-      toast.error(apiErrorToastMessage(message));
-    }
-  }
-
   const busy =
-    removeWorktree.isPending || pushBranch.isPending || createPr.isPending;
+    removeWorktree.isPending || pushBranch.isPending || createPrPending;
   const isArchived = Boolean(ticket.archivedAt);
 
   return (
@@ -503,26 +568,19 @@ export function TicketGitActions({ ticket }: TicketGitActionsProps) {
               </Button>
             )}
             {gitInfo?.canCreatePr && (
-              <Button
-                type="button"
-                variant="secondary"
+              <CreatePrButton
+                ticketId={ticket.id}
                 disabled={busy || isLoading || isArchived}
-                title="Push the ticket branch (if needed) and create a GitHub pull request via API"
-                onClick={() => void handleCreatePr()}
                 className="w-full"
-              >
-                {createPr.isPending ? 'Creating…' : 'Create PR via API'}
-              </Button>
+                onPendingChange={setCreatePrPending}
+                onError={setGitError}
+              />
             )}
-            <Button
-              type="button"
-              variant="secondary"
+            <MergeBranchTrigger
               disabled={busy || isLoading || isArchived || !gitInfo}
               onClick={() => setMergeOpen(true)}
               className="w-full"
-            >
-              Merge…
-            </Button>
+            />
             <Button
               type="button"
               variant="secondary"
