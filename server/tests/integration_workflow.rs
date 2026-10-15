@@ -279,6 +279,77 @@ async fn direct_status_change_cannot_reach_done() {
 }
 
 #[tokio::test]
+async fn done_ticket_cannot_be_dragged_to_another_column() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let (app, cookie, csrf) = common::bootstrap_and_login().await;
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
+    let ticket_id = common::create_test_ticket(&app, &board_id, &cookie, &csrf).await;
+
+    let review = app
+        .clone()
+        .oneshot(common::json_request(
+            "PATCH",
+            &format!("/api/tickets/{ticket_id}/status"),
+            r#"{"status":"wait_for_final_review"}"#,
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(review.status(), StatusCode::OK);
+    let approve = app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            &format!("/api/tickets/{ticket_id}/final-approve"),
+            "{}",
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(approve.status(), StatusCode::OK);
+
+    for status in ["in_progress", "in_review", "backlog", "ready", "blocked"] {
+        let denied = app
+            .clone()
+            .oneshot(common::json_request(
+                "PATCH",
+                &format!("/api/tickets/{ticket_id}/status"),
+                &format!(r#"{{"status":"{status}"}}"#),
+                &cookie,
+                &csrf,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(denied.status(), StatusCode::BAD_REQUEST, "{status}");
+        let body: serde_json::Value = common::json_body(denied).await;
+        assert_eq!(
+            body["message"],
+            coppice_server::copy::conflict::DONE_COLUMN_HOLDS,
+            "{status}"
+        );
+
+        let current = app
+            .clone()
+            .oneshot(common::json_request(
+                "GET",
+                &format!("/api/tickets/{ticket_id}"),
+                "",
+                &cookie,
+                &csrf,
+            ))
+            .await
+            .unwrap();
+        let current: serde_json::Value = common::json_body(current).await;
+        assert_eq!(current["status"], "done", "{status}");
+    }
+}
+
+#[tokio::test]
 async fn assign_on_ready_moves_ticket_to_in_progress() {
     let _guard = common::DB_TEST_LOCK.lock().await;
     if !common::db_available().await {

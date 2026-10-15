@@ -118,6 +118,23 @@ impl<'a> HumanReviewService<'a> {
         Ok(())
     }
 
+    /// Keep the acceptance row and mark it stale. Does not change ticket status,
+    /// the accepted commit, or who accepted it.
+    pub async fn retain_stale_acceptance(&self, ticket_id: Uuid) -> Result<(), HumanReviewError> {
+        sqlx::query(
+            r#"
+            UPDATE ticket_human_reviews
+            SET stale = true,
+                invalidated_at = COALESCE(invalidated_at, now())
+            WHERE ticket_id = $1
+            "#,
+        )
+        .bind(ticket_id)
+        .execute(self.pool)
+        .await?;
+        Ok(())
+    }
+
     /// Move a ticket that has no acceptance row back to Wait for Human Review
     /// so Accept can record one. Does not insert a review row. A ticket already
     /// in that column is left unchanged.

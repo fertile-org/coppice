@@ -8,14 +8,17 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::copy::conflict::{
-    ask_to_resolve_label, conflict_message, connector_not_ready_reason, resolve_prompt,
-    INVALID_FILE_LIST, MERGE_ACTION, NO_ASSIGNEE, REBASE_ACTION, REREVIEW_NOTE,
+    ask_to_resolve_label, conflict_message, connector_not_ready_reason,
+    merge_conflict_reopen_comment, resolve_prompt, INVALID_FILE_LIST, MERGE_ACTION, NO_ASSIGNEE,
+    REBASE_ACTION, REREVIEW_NOTE,
 };
 use crate::domain::comment::{AuthorType, CommentIntent};
 use crate::domain::context_profile::ContextProfile;
 use crate::domain::run::AgentRun;
+use crate::domain::substatus::TicketStatus;
 use crate::services::agent_service::AgentService;
 use crate::services::comment_service::{CommentError, CommentService};
+use crate::services::human_review_service::HumanReviewService;
 use crate::services::run_service::{RunError, RunService, StartRunOptions};
 use crate::services::ticket_git_service::{validate_branch_name, GitConflictKind};
 use crate::services::ticket_service::{TicketError, TicketService};
@@ -46,6 +49,11 @@ pub struct GitConflictHttp {
 pub struct ResolveConflictOutcome {
     pub run: AgentRun,
     pub new_comment_id: Option<Uuid>,
+}
+
+pub struct MergeConflictReopen {
+    pub comment_id: Uuid,
+    pub run_id: Option<Uuid>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -201,6 +209,88 @@ pub async fn start_resolve(
             })
         }
         Err(err) => Err(err.into()),
+    }
+}
+
+/// When a Done ticket's merge conflicts, move it to In Progress, keep the
+/// assignee and the earlier acceptance, and start that agent's normal work run
+/// with the conflict comment as its trigger.
+///
+/// Returns `None` when the ticket is not Done. Rebase conflicts do not call this.
+pub async fn reopen_done_after_merge_conflict(
+    pool: &PgPool,
+    ticket_id: Uuid,
+    base_branch: &str,
+    files: &[String],
+) -> Result<Option<MergeConflictReopen>, ConflictResolveError> {
+    let tickets = TicketService::new(pool);
+    let ticket = tickets.get(ticket_id).await?;
+    if ticket.ticket.status != TicketStatus::Done {
+        return Ok(None);
+    }
+    TicketService::ensure_not_archived(&ticket.ticket)?;
+    let assignee = ticket.ticket.assignee_agent_id;
+
+    tickets.reopen_after_merge_conflict(ticket_id).await?;
+    HumanReviewService::new(pool)
+        .retain_stale_acceptance(ticket_id)
+        .await
+        .map_err(|err| {
+            let crate::services::human_review_service::HumanReviewError::Database(err) = err;
+            ConflictResolveError::Ticket(TicketError::Database(err))
+        })?;
+
+    let comment = CommentService::new(pool)
+        .create(
+            ticket_id,
+            AuthorType::System,
+            None,
+            &merge_conflict_reopen_comment(base_branch, files),
+            CommentIntent::SystemEvent,
+            &[],
+            &[],
+        )
+        .await?;
+
+    let run_id = match assignee {
+        Some(agent_id) => start_assignee_work(pool, ticket_id, agent_id, comment.id).await?,
+        None => None,
+    };
+
+    Ok(Some(MergeConflictReopen {
+        comment_id: comment.id,
+        run_id,
+    }))
+}
+
+async fn start_assignee_work(
+    pool: &PgPool,
+    ticket_id: Uuid,
+    agent_id: Uuid,
+    comment_id: Uuid,
+) -> Result<Option<Uuid>, ConflictResolveError> {
+    let run_svc = RunService::new(pool);
+    match run_svc
+        .start_run_for_agent(
+            ticket_id,
+            agent_id,
+            JOB_TYPE_WORK_ON_TICKET,
+            StartRunOptions {
+                context_profile: ContextProfile::Full,
+                trigger_comment_id: Some(comment_id),
+            },
+        )
+        .await
+    {
+        Ok(run) => Ok(Some(run.id)),
+        Err(RunError::ActiveRunExists) => Ok(run_svc
+            .active_for_ticket_agent(ticket_id, agent_id)
+            .await?
+            .map(|run| run.id)),
+        Err(err) => {
+            tracing::warn!(error = %err, "merge conflict did not start a run");
+            Ok(None)
+        }
     }
 }
 

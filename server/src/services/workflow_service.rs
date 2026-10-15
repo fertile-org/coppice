@@ -78,8 +78,9 @@ impl WorkflowService {
         )
     }
 
-    /// Refusal for a direct status write that would enter Done.
-    /// Staying on Done, and every other column move, is unchanged.
+    /// Refusal for a direct status write.
+    /// Entering Done requires Accept. Leaving Done is refused.
+    /// Staying on Done is allowed.
     pub fn direct_status_change_error(
         from: TicketStatus,
         to: TicketStatus,
@@ -87,6 +88,11 @@ impl WorkflowService {
     ) -> Option<&'static str> {
         if from == to {
             return None;
+        }
+        // Done is not a column a person can drag out of. A merge conflict uses
+        // `TicketService::reopen_after_merge_conflict`, which does not call this.
+        if from == TicketStatus::Done {
+            return Some(crate::copy::conflict::DONE_COLUMN_HOLDS);
         }
         if to == TicketStatus::Done {
             return Some(DONE_REQUIRES_ACCEPT);
@@ -675,6 +681,40 @@ mod tests {
             None
         );
         assert_eq!(WorkflowService::final_approve(WaitForFinalReview), Ok(Done));
+    }
+
+    #[test]
+    fn direct_status_change_cannot_leave_done() {
+        use TicketStatus::*;
+        let destinations = [
+            Backlog,
+            Ready,
+            PlanReview,
+            InProgress,
+            InReview,
+            InQa,
+            WaitForFinalReview,
+            Blocked,
+        ];
+        for to in destinations {
+            assert_eq!(
+                WorkflowService::direct_status_change_error(Done, to, PlanEntry::open()),
+                Some(crate::copy::conflict::DONE_COLUMN_HOLDS),
+                "Done -> {to:?}"
+            );
+        }
+        let blocked = PlanEntry {
+            skip_planning: false,
+            approved_for_current_version: false,
+        };
+        assert_eq!(
+            WorkflowService::direct_status_change_error(Done, InProgress, blocked),
+            Some(crate::copy::conflict::DONE_COLUMN_HOLDS)
+        );
+        assert_eq!(
+            WorkflowService::direct_status_change_error(Done, Done, PlanEntry::open()),
+            None
+        );
     }
 
     #[test]

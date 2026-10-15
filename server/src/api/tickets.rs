@@ -10,6 +10,7 @@ use crate::domain::workflow::{PendingRecommendation, PendingSplitRecommendation}
 use crate::domain::comment::{AuthorType, CommentIntent};
 use crate::events::bus::AppEvent;
 use crate::services::comment_service::CommentService;
+use crate::copy::conflict::DONE_COLUMN_HOLDS;
 use crate::copy::plan::{NO_PM, PLAN_REQUIRED, READY_REQUIRES_PLAN};
 use crate::copy::restart::{git_error, ERROR_NONE, ERROR_USE_CANCEL, ERROR_USE_DISCARD};
 use crate::services::planning_service::{PlanningService, StartOutcome};
@@ -529,6 +530,41 @@ async fn git_failure_response(
             detail,
         } => {
             tracing::info!(%detail, ?paths, "git conflict aborted");
+            if matches!(&kind, GitConflictKind::Merge) {
+                match conflict_resolve::reopen_done_after_merge_conflict(
+                    pool,
+                    ticket_id,
+                    &base_branch,
+                    &paths,
+                )
+                .await
+                {
+                    Ok(Some(reopen)) => {
+                        tracing::info!(
+                            comment_id = %reopen.comment_id,
+                            run_id = ?reopen.run_id,
+                            "done ticket returned to in progress after a merge conflict"
+                        );
+                        state.event_bus.publish(AppEvent::CommentCreated {
+                            comment_id: reopen.comment_id,
+                            ticket_id,
+                            author_type: "system".into(),
+                        });
+                        publish_ticket_state(state, pool, ticket_id).await;
+                    }
+                    Ok(None) => {}
+                    Err(err) => {
+                        tracing::error!(
+                            error = %err,
+                            "merge conflict did not return the ticket to In Progress"
+                        );
+                        return TicketGitApiError::Message(
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            crate::copy::conflict::MERGE_CONFLICT_REOPEN_FAILED.to_string(),
+                        );
+                    }
+                }
+            }
             let ready = |connector: &str| connector_is_ready(state, connector);
             let body = conflict_resolve::build_git_conflict_response(
                 pool,
@@ -765,6 +801,7 @@ fn map_update_status_error(err: TicketError) -> UpdateStatusError {
         TicketError::Validation(message)
             if message == DONE_REQUIRES_ACCEPT
                 || message == PLAN_REQUIRED
+                || message == DONE_COLUMN_HOLDS
                 || message == READY_REQUIRES_PLAN =>
         {
             UpdateStatusError::Message(StatusCode::BAD_REQUEST, message)
