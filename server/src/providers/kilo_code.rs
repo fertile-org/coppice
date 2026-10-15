@@ -93,12 +93,14 @@ impl AgentProvider for KiloCodeProvider {
         let contract = coppice_connectors::get(coppice_connectors::KILO_CODE)
             .expect("kilo-code descriptor")
             .run_contract;
-        let version = cli_version::detect(&self.config.command).await.map_err(|err| {
-            ProviderError::InvalidFixture(cli_version::version_unavailable(
-                &self.config.command,
-                &err,
-            ))
-        })?;
+        let version = cli_version::detect(&self.config.command)
+            .await
+            .map_err(|err| {
+                ProviderError::InvalidFixture(cli_version::version_unavailable(
+                    &self.config.command,
+                    &err,
+                ))
+            })?;
         let worktree_arg = worktree.display().to_string();
         // Pinned flags (including `--dir`) come from the descriptor. The prompt
         // is appended after them; model and session stay dynamic.
@@ -153,6 +155,7 @@ impl AgentProvider for KiloCodeProvider {
             timeout: run_timeout,
             run_id: input.run_id.clone(),
             artifacts_dir: input.artifacts_dir.clone(),
+            ticket_id: input.ticket_id.clone(),
             result_before_exit: contract.result_before_exit,
             result_exit_grace: None,
         };
@@ -164,7 +167,6 @@ impl AgentProvider for KiloCodeProvider {
         let io = RunIo {
             cancel_rx: input.cancel_rx,
             session_created_tx: input.session_created_tx,
-            stderr_target: "kilo_code.stderr",
         };
 
         let exit = match run_cli(invocation, &mut handler, io).await {

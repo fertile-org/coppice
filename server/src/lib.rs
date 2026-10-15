@@ -11,6 +11,7 @@ pub mod domain;
 pub mod events;
 pub mod host_env;
 pub mod knowledge;
+pub mod logs;
 pub mod mcp;
 pub mod middleware;
 pub mod plugins;

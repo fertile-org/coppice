@@ -302,7 +302,7 @@ impl<'a> TicketGitService<'a> {
         let ctx = self.resolve_context(ticket_id).await?;
         let remote_url = ctx.remote_url.as_deref().ok_or(TicketGitError::NoRemoteUrl)?;
         let https = https_remote_url(remote_url).ok_or(TicketGitError::NoRemoteUrl)?;
-        let token = self.decrypt_forge_token(&ctx).await;
+        let (token, _secret_mask) = self.decrypt_forge_token(&ctx).await;
 
         if !git_ref_exists(&ctx.git_dir, &ctx.ticket_branch).await? {
             return Err(TicketGitError::TicketBranchMissing(ctx.ticket_branch));
@@ -665,7 +665,7 @@ impl<'a> TicketGitService<'a> {
     /// fail the rebase itself.
     async fn soft_fetch_for_rebase(&self, ctx: &TicketGitContext, base: &str) -> bool {
         if let Some(remote_url) = ctx.remote_url.as_deref() {
-            let token = self.decrypt_forge_token(ctx).await;
+            let (token, _secret_mask) = self.decrypt_forge_token(ctx).await;
             if let Ok(fetch_remote) = network_remote(remote_url, token.as_deref()) {
                 let refspec = fetch_default_refspec(base);
                 match run_git(&ctx.worktree_dir, &["fetch", &fetch_remote, &refspec]).await {
@@ -697,13 +697,26 @@ impl<'a> TicketGitService<'a> {
         }
     }
 
-    async fn decrypt_forge_token(&self, ctx: &TicketGitContext) -> Option<String> {
-        let store = self.secret_store?;
-        let secret_id = ctx.forge_token_secret_id?;
-        SecretService::new(self.pool, store)
-            .decrypt_by_id(secret_id)
+    async fn decrypt_forge_token(
+        &self,
+        ctx: &TicketGitContext,
+    ) -> (Option<String>, crate::logs::SecretGuard) {
+        let Some(store) = self.secret_store else {
+            return (None, crate::logs::SecretGuard::empty());
+        };
+        let Some(secret_id) = ctx.forge_token_secret_id else {
+            return (None, crate::logs::SecretGuard::empty());
+        };
+        match SecretService::new(self.pool, store)
+            .decrypt_named(secret_id)
             .await
-            .ok()
+        {
+            Ok((name, value)) => {
+                let guard = crate::logs::SecretGuard::register([(name, value.clone())]);
+                (Some(value), guard)
+            }
+            Err(_) => (None, crate::logs::SecretGuard::empty()),
+        }
     }
 
     pub async fn remove_worktree(&self, ticket_id: Uuid) -> Result<(), TicketGitError> {

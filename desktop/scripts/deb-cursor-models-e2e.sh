@@ -79,6 +79,9 @@ fi
 id hung >/dev/null 2>&1 || useradd --create-home --shell /bin/zsh hung
 hung_home=$(getent passwd hung | cut -d: -f6)
 install -d -o hung -g hung "${hung_home}/.local/bin" "${hung_home}/.config/Coppice"
+# install -d leaves a newly created parent owned by root. ~/.local must be
+# writable so the app can create ~/.local/state/Coppice/logs.
+chown hung:hung "${hung_home}/.local"
 
 # Hung's shell adds the user bin dir. Login+interactive zsh (-ilc) reads this.
 cat >"${hung_home}/.zshrc" <<'EOF'
@@ -148,7 +151,7 @@ builtin_plugins_dir = "${hung_home}/.config/Coppice/builtin-plugins"
 EOF
 chown hung:hung "${hung_home}/.config/Coppice/config.toml"
 
-server_log="${hung_home}/.config/Coppice/logs/server.log"
+server_log="${hung_home}/.local/state/Coppice/logs/server.log"
 app_log=/tmp/coppice-app.log
 count_file="${hung_home}/.agent-models-count"
 stdio_file="${hung_home}/.agent-models-stdio"
@@ -260,7 +263,8 @@ dump_failure() {
   echo "----- processes -----" >&2
   ps -u hung -o pid,user,args >&2 || true
   echo "----- profile -----" >&2
-  ls -ld "${hung_home}/.config" "${hung_home}/.config/Coppice" >&2 || true
+  ls -ld "${hung_home}/.config" "${hung_home}/.config/Coppice" \
+    "${hung_home}/.local" "${hung_home}/.local/state/Coppice/logs" >&2 || true
 }
 
 assert_installed_version() {

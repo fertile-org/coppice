@@ -17,6 +17,14 @@ async fn main() {
     let hostname = flag(&args, "--hostname").unwrap_or_else(|| "127.0.0.1".into());
     let port = flag(&args, "--port").expect("--port is required");
 
+    if let Ok(line) = std::env::var("FAKE_OPENCODE_STDOUT") {
+        println!("{line}");
+        let _ = std::io::Write::flush(&mut std::io::stdout());
+    }
+    if let Ok(line) = std::env::var("FAKE_OPENCODE_STDERR") {
+        eprintln!("{line}");
+    }
+
     if let Ok(record) = std::env::var("FAKE_OPENCODE_RECORD") {
         let body = serde_json::json!({
             "opencodeConfig": std::env::var("OPENCODE_CONFIG").ok(),

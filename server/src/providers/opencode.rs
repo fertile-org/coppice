@@ -56,7 +56,7 @@ impl AgentProvider for OpenCodeProvider {
             .unwrap_or_default();
         let lease = self
             .servers
-            .start(&key, &config_path, env)
+            .start(&key, &config_path, env, input.ticket_id.as_deref())
             .await
             .map_err(|err| ProviderError::Io(std::io::Error::other(format!("{err:#}"))))?;
 
