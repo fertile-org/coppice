@@ -156,6 +156,16 @@ async fn stop_after_failed_start(pg: &DesktopPostgres) {
     }
 }
 
+/// Directory the Logs page reads. `--logs-dir` (anything other than
+/// `<data-dir>/logs`) replaces `[logs] dir`, matching where the writer landed.
+pub(crate) fn page_logs_dir(config_dir: &str, layout: &DataLayout) -> String {
+    if layout.logs != layout.root.join("logs") {
+        layout.logs.to_string_lossy().into_owned()
+    } else {
+        config_dir.to_string()
+    }
+}
+
 async fn serve_with_postgres(
     pg: &DesktopPostgres,
     pg_port: u16,
@@ -172,7 +182,8 @@ async fn serve_with_postgres(
         .await
         .context("bind 127.0.0.1")?;
     let port = listener.local_addr()?.port();
-    let config = bootstrap::desktop_config(layout, secrets, &pg_url, port)?;
+    let mut config = bootstrap::desktop_config(layout, secrets, &pg_url, port)?;
+    config.logs.dir = page_logs_dir(&config.logs.dir, layout);
     let options = ServeOptions {
         static_web_dir: Some(resources.web.clone()),
         config_path: Some(layout.config_file.clone()),
@@ -231,5 +242,18 @@ mod tests {
     fn ready_line_names_loopback_url() {
         let addr: SocketAddr = "127.0.0.1:5123".parse().unwrap();
         assert_eq!(ready_line(addr), "COPPICE_READY url=http://127.0.0.1:5123");
+    }
+
+    #[test]
+    fn logs_dir_flag_replaces_the_config_dir() {
+        let root = std::path::Path::new("/data");
+        let flagged =
+            super::DataLayout::with_logs_dir(root, std::path::PathBuf::from("/var/log/Coppice"));
+        assert_eq!(
+            super::page_logs_dir("./data/logs", &flagged),
+            "/var/log/Coppice"
+        );
+        let plain = super::DataLayout::new(root);
+        assert_eq!(super::page_logs_dir("./data/logs", &plain), "./data/logs");
     }
 }

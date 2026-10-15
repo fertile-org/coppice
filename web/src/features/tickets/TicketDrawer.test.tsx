@@ -66,6 +66,15 @@ const connectorsState: { connectors: Connector[] | undefined } = {
   connectors: ALL_CONNECTORS,
 };
 
+vi.mock('../auth/useSession', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../auth/useSession')>()),
+  useSession: () => ({
+    user: { id: 'user-1', email: 'ada@example.com', role: 'member' },
+    loading: false,
+    desktopMode: false,
+  }),
+}));
+
 vi.mock('../agents/useAgents', () => ({
   useConnectors: () => ({ data: connectorsState.connectors }),
   useAgents: () => ({ data: [] }),

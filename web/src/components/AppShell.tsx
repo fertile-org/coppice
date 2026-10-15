@@ -9,6 +9,7 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   Puzzle,
+  ScrollText,
   Settings,
   Users,
   Wrench,
@@ -20,6 +21,7 @@ import { NotificationBell } from '../features/notifications/NotificationBell';
 import { ThemeToggle } from '../features/theme/ThemeToggle';
 import { useOpenTicket } from '../features/tickets/useOpenTicket';
 import { cn } from '../lib/utils';
+import { LOGS_COPY } from '../features/logs/copy';
 import { SkipToBoard } from '../features/keyboard/SkipToBoard';
 import { BrandLogo } from './BrandLogo';
 import { DesktopUpdateBanner } from './DesktopUpdateBanner';
@@ -44,6 +46,7 @@ const NAV_ITEMS: NavItem[] = [
   { to: '/settings/plugins', label: 'Plugins', icon: Puzzle, adminOnly: true },
   { to: '/settings/users', label: 'Users', icon: Users, adminOnly: true },
   { to: '/tools', label: 'Tools', icon: Wrench, adminOnly: true },
+  { to: '/logs', label: LOGS_COPY.nav, icon: ScrollText, adminOnly: true },
   { to: '/settings', label: 'Settings', icon: Settings, adminOnly: true, end: true },
 ];
 

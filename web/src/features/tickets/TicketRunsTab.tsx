@@ -1,5 +1,8 @@
 import { useId, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useAgents } from '../agents/useAgents';
+import { useSession } from '../auth/useSession';
+import { LOGS_COPY } from '../logs/copy';
 import { KnowledgeUsed } from '../knowledge/KnowledgeUsed';
 import { RunToolsAndSkills } from '../runs/RunToolsAndSkills';
 import type { AgentRun, RunStatus } from '../../lib/schemas/agentRun';
@@ -78,6 +81,7 @@ function RunRow({
   const [errorExpanded, setErrorExpanded] = useState(false);
   const [detailsExpanded, setDetailsExpanded] = useState(false);
   const openTicket = useOpenTicket();
+  const { user } = useSession();
 
   return (
     <article className="rounded-md border border-border bg-surface px-4 py-3">
@@ -149,14 +153,24 @@ function RunRow({
         </div>
       )}
 
-      <button
-        type="button"
-        onClick={() => setDetailsExpanded((value) => !value)}
-        aria-expanded={detailsExpanded}
-        className="mt-3 font-body text-xs font-medium text-moss-700 underline-offset-2 hover:underline"
-      >
-        {detailsExpanded ? 'Hide run details' : 'Show run details'}
-      </button>
+      <div className="mt-3 flex flex-wrap gap-3">
+        {user?.role === 'admin' && (
+          <Link
+            to={`/logs?run=${encodeURIComponent(run.id)}`}
+            className="font-body text-xs font-medium text-moss-700 underline-offset-2 hover:underline"
+          >
+            {LOGS_COPY.viewLogs}
+          </Link>
+        )}
+        <button
+          type="button"
+          onClick={() => setDetailsExpanded((value) => !value)}
+          aria-expanded={detailsExpanded}
+          className="font-body text-xs font-medium text-moss-700 underline-offset-2 hover:underline"
+        >
+          {detailsExpanded ? 'Hide run details' : 'Show run details'}
+        </button>
+      </div>
       {detailsExpanded && (
         <RunDetailsTabs runId={run.id} onOpenTicket={openTicket} />
       )}

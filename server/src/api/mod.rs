@@ -11,6 +11,7 @@ mod health;
 mod jobs;
 mod knowledge;
 mod knowledge_compaction;
+mod logs;
 mod mentions;
 mod notifications;
 mod plugins;
@@ -50,6 +51,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .merge(knowledge::routes())
         .merge(knowledge_compaction::routes())
         .merge(settings::routes())
+        .merge(logs::routes())
         .merge(users::routes())
         .merge(notifications::routes())
         .merge(tools::routes())

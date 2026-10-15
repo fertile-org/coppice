@@ -1,6 +1,9 @@
 # Logs
 logs
 *.log
+# The Logs page lives under src/features/logs.
+!src/features/logs/
+!src/features/logs/**
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
