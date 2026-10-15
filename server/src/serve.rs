@@ -370,6 +370,7 @@ pub async fn serve(
             Err(err) => tracing::warn!(error = %err, "failed to mark stale connector checks"),
         }
     }
+    crate::logs::retain::spawn_sweep(state.clone());
     crate::workers::job_worker::spawn_workers(state.clone());
     crate::workers::health_worker::spawn_health_worker(state.clone());
     crate::workers::knowledge_compaction_scheduler::spawn_knowledge_compaction_scheduler(

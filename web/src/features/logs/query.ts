@@ -1,3 +1,5 @@
+import { LOGS_COPY, reportProblemBody } from './copy';
+
 export interface LogFilters {
   source: string;
   level: string;
@@ -51,6 +53,43 @@ export function logsPath(filters: LogFilters, cursor: string | null): string {
     params.set('cursor', cursor);
   }
   return `/api/logs?${params.toString()}`;
+}
+
+export function exportPayload(filters: LogFilters, shellVersion: string): Record<string, string> {
+  const body: Record<string, string> = {
+    level: filters.level || 'info',
+  };
+  if (filters.source) {
+    body.source = filters.source;
+  }
+  if (filters.from) {
+    body.from = filters.from;
+  }
+  if (filters.to) {
+    body.to = filters.to;
+  }
+  if (filters.run) {
+    body.run = filters.run;
+  }
+  if (filters.q) {
+    body.q = filters.q;
+  }
+  const shell = shellVersion.trim();
+  if (shell) {
+    body.shellVersion = shell;
+  }
+  return body;
+}
+
+export function filenameFromDisposition(header: string | null): string {
+  const match = /filename="([^"]+)"/.exec(header ?? '');
+  return match?.[1] || LOGS_COPY.exportFile;
+}
+
+export function reportProblemUrl(version: string, osVersion: string): string {
+  const url = new URL('https://github.com/fertile-org/coppice/issues/new');
+  url.searchParams.set('body', reportProblemBody(version, osVersion));
+  return url.toString();
 }
 
 export function filtersFromParams(params: URLSearchParams): LogFilters {

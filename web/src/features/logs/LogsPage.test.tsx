@@ -4,7 +4,9 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiError } from '../../lib/api';
+import { savedExport } from './copy';
 import { LogsPage } from './LogsPage';
+import { reportProblemUrl } from './query';
 
 const session = vi.hoisted(() => ({ role: 'admin' }));
 
@@ -33,6 +35,15 @@ const httpLine = {
   fields: { method: 'GET', path: '/api/health', status: 200, duration_ms: 4 },
 };
 
+const metaBody = {
+  retentionDays: 14,
+  version: '0.1.0',
+  commit: 'abc',
+  os: 'linux',
+  arch: 'x64',
+  osVersion: 'Debian GNU/Linux 12',
+};
+
 function jsonResponse(body: unknown) {
   return {
     ok: true,
@@ -40,6 +51,13 @@ function jsonResponse(body: unknown) {
     json: async () => body,
     text: async () => JSON.stringify(body),
   };
+}
+
+function apiResult(path: string, body: unknown) {
+  if (String(path).startsWith('/api/logs/meta')) {
+    return jsonResponse(metaBody);
+  }
+  return jsonResponse(body);
 }
 
 class SocketStub {
@@ -85,9 +103,10 @@ describe('LogsPage', () => {
     session.role = 'admin';
     SocketStub.latest = null;
     vi.stubGlobal('WebSocket', SocketStub);
+    delete window.coppiceDesktop;
     mocks.apiFetch.mockReset();
-    mocks.apiFetch.mockImplementation(() =>
-      jsonResponse({ lines: [], nextCursor: null }),
+    mocks.apiFetch.mockImplementation((path: string) =>
+      apiResult(path, { lines: [], nextCursor: null }),
     );
   });
 
@@ -101,8 +120,8 @@ describe('LogsPage', () => {
   });
 
   it('shows a request line and keeps the run from the address', async () => {
-    mocks.apiFetch.mockImplementation(() =>
-      jsonResponse({ lines: [httpLine], nextCursor: null }),
+    mocks.apiFetch.mockImplementation((path: string) =>
+      apiResult(path, { lines: [httpLine], nextCursor: null }),
     );
     renderPage('/logs?run=run-9');
     expect(await screen.findByText('http request')).toBeInTheDocument();
@@ -178,6 +197,61 @@ describe('LogsPage', () => {
     });
     renderPage();
     expect(await screen.findByText("Couldn't load logs. Try again.")).toBeInTheDocument();
+  });
+
+  it('exports the current filters and says the file was saved', async () => {
+    window.coppiceDesktop = {
+      pickDirectory: async () => null,
+      appInfo: async () => ({ version: '1.4.2', platform: 'darwin', arch: 'arm64' }),
+    };
+    URL.createObjectURL = () => 'blob:logs';
+    URL.revokeObjectURL = () => {};
+    HTMLAnchorElement.prototype.click = () => {};
+    mocks.apiFetch.mockImplementation((path: string, init?: RequestInit) => {
+      if (String(path).startsWith('/api/logs/export')) {
+        expect(init?.method).toBe('POST');
+        expect(String(init?.body)).toContain('"source":"cli"');
+        expect(String(init?.body)).toContain('"shellVersion":"1.4.2"');
+        return {
+          ok: true,
+          status: 200,
+          headers: {
+            get: (name: string) =>
+              name === 'Content-Disposition' ? 'attachment; filename="coppice-logs.zip"' : null,
+          },
+          blob: async () => new Blob(['zip']),
+          json: async () => ({}),
+          text: async () => '',
+        };
+      }
+      return apiResult(path, { lines: [], nextCursor: null });
+    });
+    renderPage('/logs?source=cli');
+    await screen.findByText('No logs match these filters.');
+    fireEvent.click(screen.getByRole('button', { name: 'Export logs' }));
+    expect(await screen.findByText(savedExport('coppice-logs.zip'))).toBeInTheDocument();
+  });
+
+  it('opens a GitHub issue for the report link', async () => {
+    renderPage();
+    const link = await screen.findByRole('link', { name: 'Report a problem' });
+    await waitFor(() => {
+      expect(link).toHaveAttribute('href', reportProblemUrl('0.1.0', 'Debian GNU/Linux 12'));
+    });
+    expect(link).toHaveAttribute('target', '_blank');
+  });
+
+  it('shows the export sentence when the download fails', async () => {
+    mocks.apiFetch.mockImplementation((path: string) => {
+      if (String(path).startsWith('/api/logs/export')) {
+        throw new Error('network');
+      }
+      return apiResult(path, { lines: [], nextCursor: null });
+    });
+    renderPage();
+    await screen.findByText('No logs match these filters.');
+    fireEvent.click(screen.getByRole('button', { name: 'Export logs' }));
+    expect(await screen.findByText("Couldn't export logs. Try again.")).toBeInTheDocument();
   });
 
   it('sends a member back to the boards', async () => {

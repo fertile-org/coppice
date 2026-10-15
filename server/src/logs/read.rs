@@ -68,11 +68,17 @@ pub struct LogFilter {
 
 #[derive(Debug, Clone, Deserialize, Default)]
 pub struct FilterParams {
+    #[serde(default)]
     pub source: Option<String>,
+    #[serde(default)]
     pub level: Option<String>,
+    #[serde(default)]
     pub from: Option<String>,
+    #[serde(default)]
     pub to: Option<String>,
+    #[serde(default)]
     pub run: Option<String>,
+    #[serde(default)]
     pub q: Option<String>,
 }
 
@@ -126,20 +132,7 @@ pub fn filter_from_params(params: &FilterParams) -> Result<LogFilter, QueryError
 }
 
 pub fn query(dir: &Path, query: &LogQuery) -> Result<LogPage, QueryError> {
-    if log_store_missing(dir) {
-        return Err(QueryError::StoreMissing);
-    }
-    let mut dated = Vec::new();
-    let mut undated = Vec::new();
-    if query.filter.source != Some(Source::Postgres) {
-        dated.extend(read_jsonl_days(dir, &query.filter)?);
-    }
-    if query.filter.source.is_none() || query.filter.source == Some(Source::Postgres) {
-        let (postgres_dated, postgres_undated) = read_postgres(dir, &query.filter)?;
-        dated.extend(postgres_dated);
-        undated.extend(postgres_undated);
-    }
-    let ordered = merge(dated, undated);
+    let ordered = collect(dir, &query.filter)?;
 
     let start = match &query.cursor {
         None => 0,
@@ -170,6 +163,31 @@ pub fn query(dir: &Path, query: &LogQuery) -> Result<LogPage, QueryError> {
     })
 }
 
+/// Every matching line, newest first, as stored. Not one page.
+pub fn export_lines(dir: &Path, filter: &LogFilter) -> Result<Vec<String>, QueryError> {
+    Ok(collect(dir, filter)?
+        .into_iter()
+        .map(|item| item.raw)
+        .collect())
+}
+
+fn collect(dir: &Path, filter: &LogFilter) -> Result<Vec<Located>, QueryError> {
+    if log_store_missing(dir) {
+        return Err(QueryError::StoreMissing);
+    }
+    let mut dated = Vec::new();
+    let mut undated = Vec::new();
+    if filter.source != Some(Source::Postgres) {
+        dated.extend(read_jsonl_days(dir, filter)?);
+    }
+    if filter.source.is_none() || filter.source == Some(Source::Postgres) {
+        let (postgres_dated, postgres_undated) = read_postgres(dir, filter)?;
+        dated.extend(postgres_dated);
+        undated.extend(postgres_undated);
+    }
+    Ok(merge(dated, undated))
+}
+
 /// One JSONL line, when it matches. Used by the live tail.
 pub fn matching_jsonl_line(filter: &LogFilter, raw: &str) -> Option<LogLine> {
     if filter.source == Some(Source::Postgres) {
@@ -188,6 +206,7 @@ struct Located {
     file_key: String,
     line_index: u64,
     line: LogLine,
+    raw: String,
 }
 
 fn merge(mut dated: Vec<Located>, mut undated: Vec<Located>) -> Vec<Located> {
@@ -247,6 +266,7 @@ fn read_jsonl_days(dir: &Path, filter: &LogFilter) -> Result<Vec<Located>, Query
                 file_key: file_key.clone(),
                 line_index: u64::try_from(index).unwrap_or(u64::MAX),
                 line,
+                raw: raw.to_string(),
             });
         }
     }
@@ -362,6 +382,7 @@ fn read_postgres(
             file_key: "postgres".to_string(),
             line_index: u64::try_from(index).unwrap_or(u64::MAX),
             line,
+            raw: raw.to_string(),
         };
         if timestamp.is_some() {
             dated.push(located);

@@ -44,16 +44,38 @@ pub struct AppConfig {
 pub struct LogsConfig {
     #[serde(default = "default_logs_dir")]
     pub dir: String,
+    /// How many days of logs to keep, including today. One of 3, 7, 14, 30.
+    #[serde(default = "default_retention_days")]
+    pub retention_days: u32,
 }
+
+/// Allowed `[logs] retention_days` values. Anything else is 14 at runtime.
+pub const LOG_RETENTION_DAYS: [u32; 4] = [3, 7, 14, 30];
 
 fn default_logs_dir() -> String {
     "./data/logs".into()
+}
+
+fn default_retention_days() -> u32 {
+    14
+}
+
+impl LogsConfig {
+    /// `retention_days` when it is 3, 7, 14, or 30. Otherwise 14.
+    pub fn effective_retention_days(&self) -> u32 {
+        if LOG_RETENTION_DAYS.contains(&self.retention_days) {
+            self.retention_days
+        } else {
+            default_retention_days()
+        }
+    }
 }
 
 impl Default for LogsConfig {
     fn default() -> Self {
         Self {
             dir: default_logs_dir(),
+            retention_days: default_retention_days(),
         }
     }
 }
@@ -1327,6 +1349,22 @@ mod tests {
         let cfg = AppConfig::load_defaults().expect("defaults");
         assert_eq!(cfg.server.port, 5000);
         assert_eq!(cfg.logs.dir, "./data/logs");
+        assert_eq!(cfg.logs.retention_days, 14);
+        assert_eq!(cfg.logs.effective_retention_days(), 14);
+    }
+
+    #[test]
+    fn retention_outside_the_list_reads_as_fourteen_days() {
+        let outside = LogsConfig {
+            retention_days: 99,
+            ..LogsConfig::default()
+        };
+        assert_eq!(outside.effective_retention_days(), 14);
+        let allowed = LogsConfig {
+            retention_days: 3,
+            ..LogsConfig::default()
+        };
+        assert_eq!(allowed.effective_retention_days(), 3);
     }
 
     #[test]

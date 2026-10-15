@@ -12,6 +12,15 @@ export const logLineSchema = z.object({
   fields: z.record(z.unknown()),
 });
 
+export const logMetaSchema = z.object({
+  retentionDays: z.number(),
+  version: z.string(),
+  commit: z.string(),
+  os: z.string(),
+  arch: z.string(),
+  osVersion: z.string(),
+});
+
 export const logPageSchema = z.object({
   lines: z.array(logLineSchema),
   nextCursor: z.string().nullable(),

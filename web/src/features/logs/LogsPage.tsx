@@ -6,13 +6,27 @@ import { Input } from '../../components/ui/input';
 import { Label } from '../../components/ui/label';
 import { apiFetch, parseApiErrorMessage } from '../../lib/api';
 import { useSession } from '../auth/useSession';
-import { LEVEL_OPTIONS, LOGS_COPY, SOURCE_OPTIONS, sourceLabel } from './copy';
-import { filtersFromParams, fromUtcRfc3339, logsPath, toUtcRfc3339, type LogFilters } from './query';
-import { logLineSchema, logPageSchema, type LogLine, type LogPage } from './schema';
+import { LEVEL_OPTIONS, LOGS_COPY, SOURCE_OPTIONS, savedExport, sourceLabel } from './copy';
+import {
+  exportPayload,
+  filenameFromDisposition,
+  filtersFromParams,
+  fromUtcRfc3339,
+  logsPath,
+  reportProblemUrl,
+  toUtcRfc3339,
+  type LogFilters,
+} from './query';
+import { logLineSchema, logMetaSchema, logPageSchema, type LogLine, type LogPage } from './schema';
 
 async function fetchLogs(filters: LogFilters, cursor: string | null): Promise<LogPage> {
   const response = await apiFetch(logsPath(filters, cursor));
   return logPageSchema.parse(await response.json());
+}
+
+async function fetchMeta() {
+  const response = await apiFetch('/api/logs/meta');
+  return logMetaSchema.parse(await response.json());
 }
 
 function lineKey(line: LogLine): string {
@@ -61,10 +75,18 @@ export function LogsPage() {
     cursor: null,
   });
   const [loadingOlder, setLoadingOlder] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const [exportNote, setExportNote] = useState<string | null>(null);
+  const [exportError, setExportError] = useState<string | null>(null);
 
   const logsQuery = useQuery({
     queryKey: ['logs', filterKey],
     queryFn: () => fetchLogs(filters, null),
+    enabled: user?.role === 'admin',
+  });
+  const metaQuery = useQuery({
+    queryKey: ['logs-meta'],
+    queryFn: fetchMeta,
     enabled: user?.role === 'admin',
   });
 
@@ -158,9 +180,58 @@ export function LogsPage() {
     }
   }
 
+  const reportHref = reportProblemUrl(
+    metaQuery.data?.version ?? '',
+    metaQuery.data?.osVersion ?? '',
+  );
+
+  async function onExport() {
+    setExporting(true);
+    setExportError(null);
+    setExportNote(null);
+    try {
+      const info = await window.coppiceDesktop?.appInfo?.();
+      const response = await apiFetch('/api/logs/export', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(exportPayload(filters, info?.version ?? '')),
+      });
+      const blob = await response.blob();
+      const filename = filenameFromDisposition(response.headers.get('Content-Disposition'));
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = filename;
+      anchor.click();
+      URL.revokeObjectURL(url);
+      setExportNote(savedExport(filename));
+    } catch (error) {
+      setExportError(parseApiErrorMessage(error, LOGS_COPY.exportError));
+    } finally {
+      setExporting(false);
+    }
+  }
+
   return (
     <div className="space-y-6">
-      <h1 className="font-display text-2xl font-semibold text-text-primary">{LOGS_COPY.title}</h1>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h1 className="font-display text-2xl font-semibold text-text-primary">{LOGS_COPY.title}</h1>
+        <div className="flex flex-wrap items-center gap-4">
+          <Button type="button" variant="secondary" onClick={() => void onExport()} disabled={exporting}>
+            {LOGS_COPY.export}
+          </Button>
+          <a
+            href={reportHref}
+            target="_blank"
+            rel="noreferrer"
+            className="font-body text-sm font-medium text-moss-700 underline-offset-2 hover:underline"
+          >
+            {LOGS_COPY.report}
+          </a>
+        </div>
+      </div>
+      {exportNote && <p className="font-body text-sm text-text-secondary">{exportNote}</p>}
+      {exportError && <p className="font-body text-sm text-danger">{exportError}</p>}
       <div className="flex flex-wrap items-end gap-4">
         <div className="space-y-1">
           <Label htmlFor="logs-source">{LOGS_COPY.source}</Label>

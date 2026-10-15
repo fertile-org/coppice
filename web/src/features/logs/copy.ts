@@ -25,7 +25,24 @@ export const LOGS_COPY = {
   loadOlder: 'Load older',
   loadError: "Couldn't load logs. Try again.",
   loading: 'Loading…',
+  export: 'Export logs',
+  report: 'Report a problem',
+  exportFile: 'coppice-logs.zip',
+  exportError: "Couldn't export logs. Try again.",
 } as const;
+
+export function savedExport(file: string): string {
+  return `Saved ${file}. Coppice removed the tokens and keys it knows about. Check the file before you share it.`;
+}
+
+export function reportProblemBody(version: string, osVersion: string): string {
+  return [
+    `Coppice ${version} on ${osVersion}`,
+    'What happened:',
+    'What you expected:',
+    'Attach the file from Logs → Export logs.',
+  ].join('\n');
+}
 
 export const SOURCE_OPTIONS = [
   { value: '', label: LOGS_COPY.sourceAll },

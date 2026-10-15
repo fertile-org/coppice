@@ -1,7 +1,4 @@
-//! Host facts the Logs page and the later report link read.
-
-/// Default until the retention setting exists. One of 3, 7, 14, 30.
-pub const RETENTION_DAYS: u32 = 14;
+//! Host facts the Logs page and the report link read.
 
 pub fn version() -> &'static str {
     env!("CARGO_PKG_VERSION")
