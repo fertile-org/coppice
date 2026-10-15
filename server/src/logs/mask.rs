@@ -131,10 +131,39 @@ fn replace_all(haystack: &[u8], needle: &[u8], replacement: &[u8]) -> Vec<u8> {
     out
 }
 
+/// Adds `source: server` to a tracing JSON line that did not set one.
+/// Lines that already have `fields.source` (http, cli) are left unchanged.
+pub(crate) fn tag_server_source(line: &[u8]) -> Vec<u8> {
+    let Ok(text) = std::str::from_utf8(line) else {
+        return line.to_vec();
+    };
+    let Ok(mut value) = serde_json::from_str::<serde_json::Value>(text) else {
+        return line.to_vec();
+    };
+    if value.get("level").is_none() {
+        return line.to_vec();
+    }
+    let Some(fields) = value
+        .get_mut("fields")
+        .and_then(|field| field.as_object_mut())
+    else {
+        return line.to_vec();
+    };
+    if fields.contains_key("source") {
+        return line.to_vec();
+    }
+    fields.insert(
+        "source".to_string(),
+        serde_json::Value::String("server".to_string()),
+    );
+    serde_json::to_vec(&value).unwrap_or_else(|_| line.to_vec())
+}
+
 /// Masks each complete line, then flushes it.
 pub struct MaskingWriter<W: Write> {
     inner: W,
     buf: Vec<u8>,
+    tag_server_source: bool,
 }
 
 impl<W: Write> MaskingWriter<W> {
@@ -142,6 +171,25 @@ impl<W: Write> MaskingWriter<W> {
         Self {
             inner,
             buf: Vec::new(),
+            tag_server_source: false,
+        }
+    }
+
+    /// File writer: mask, then mark untagged tracing lines as `server`.
+    pub fn file(inner: W) -> Self {
+        Self {
+            inner,
+            buf: Vec::new(),
+            tag_server_source: true,
+        }
+    }
+
+    fn prepare(&self, bytes: &[u8]) -> Vec<u8> {
+        let masked = mask_bytes(bytes);
+        if self.tag_server_source {
+            tag_server_source(&masked)
+        } else {
+            masked
         }
     }
 
@@ -155,7 +203,7 @@ impl<W: Write> MaskingWriter<W> {
             };
             let line: Vec<u8> = self.buf.drain(..=pos).collect();
             let (body, newline) = line.split_at(line.len() - 1);
-            self.inner.write_all(&mask_bytes(body))?;
+            self.inner.write_all(&self.prepare(body))?;
             self.inner.write_all(newline)?;
             self.inner.flush()?;
         }
@@ -166,9 +214,9 @@ impl<W: Write> MaskingWriter<W> {
         W: Write,
     {
         if !self.buf.is_empty() {
-            let masked = mask_bytes(&self.buf);
+            let prepared = self.prepare(&self.buf);
             self.buf.clear();
-            self.inner.write_all(&masked)?;
+            self.inner.write_all(&prepared)?;
         }
         self.inner.flush()
     }
@@ -207,5 +255,22 @@ mod tests {
     fn five_byte_value_is_left_unchanged() {
         let _guard = SecretGuard::register([("TINY", "abcde")]);
         assert_eq!(mask_bytes(b"abcde"), b"abcde");
+    }
+
+    #[test]
+    fn untagged_tracing_line_is_marked_server() {
+        let line = br#"{"timestamp":"2026-10-15T00:00:00Z","level":"INFO","fields":{"message":"scheduler tick"},"target":"coppice_server"}"#;
+        let value: serde_json::Value = serde_json::from_slice(&tag_server_source(line)).unwrap();
+        assert_eq!(value["fields"]["source"], "server");
+        assert_eq!(value["fields"]["message"], "scheduler tick");
+    }
+
+    #[test]
+    fn existing_source_and_non_json_are_left_unchanged() {
+        let http = br#"{"level":"INFO","fields":{"source":"http","message":"http request"}}"#;
+        assert_eq!(tag_server_source(http), http);
+        let cli = br#"{"level":"INFO","fields":{"source":"cli","message":"line"}}"#;
+        assert_eq!(tag_server_source(cli), cli);
+        assert_eq!(tag_server_source(b"not json"), b"not json");
     }
 }
