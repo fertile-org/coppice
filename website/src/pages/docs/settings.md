@@ -1,0 +1,137 @@
+---
+layout: ../../layouts/Docs.astro
+title: Settings reference
+description: "Every field you can change in config.toml, with its type and default."
+---
+
+# Settings reference
+
+Coppice keeps its settings in one file, `config.toml`:
+
+| OS | Path |
+| --- | --- |
+| Linux | `~/.config/Coppice/config.toml` |
+| macOS | `~/Library/Application Support/Coppice/config.toml` |
+
+On Linux, if `XDG_CONFIG_HOME` is set, the file is at `$XDG_CONFIG_HOME/Coppice/config.toml`.
+
+## Edit it in the app
+Open **Settings** in the sidebar. The page shows the file as text, and your comments are kept.
+
+- **Save** checks the file before writing it. A bad value isn't saved.
+- **Restore last good version** undoes a bad change.
+
+Some changes apply right away. Others show "Saved. Restart Coppice to apply."
+
+You can also edit the file in any text editor. Your edits survive upgrades.
+
+## Connectors
+Signed-in CLIs are on by default. You only need a line to turn one off:
+
+```toml
+[agent.connectors.claude-code]
+enabled = false
+```
+
+The switch in **Tools → Connectors** writes the same line.
+
+Kilo Code stays off until you turn it on. Coppice can't check its sign-in for free.
+
+## `[agent]`
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `worktrees_path` | string | `<data-dir>/worktrees` | Folder where each ticket gets its own git worktree. |
+| `worker_count` | integer | `2` | How many agent jobs run at once. Below 1 runs as 1. |
+| `health_check_interval_secs` | integer | `60` | Seconds between agent health checks. Below 10 runs as 10. |
+
+<!-- QUESTION: "<data-dir>" is the folder that holds config.toml. Should we write the full per-OS path instead? -->
+
+## `[agent.connectors.<id>]`
+
+Ids: `claude-code`, `codex`, `cursor`, `opencode`, `kilo-code`. Each table is optional.
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `enabled` | bool | not set: on if the CLI is signed in | Turns the connector on or off. |
+| `model_providers` | list of strings | `[]` | Model providers for this connector. Filled in when you turn it on. |
+| `run_timeout_secs` | integer | `1800` for OpenCode, `600` for others | Seconds before a run on this connector fails. |
+| `command` | string | `agent` (Cursor), `codex`, `opencode`, `kilo` | The CLI binary to run. Claude Code always runs `claude` and has no `command`. |
+
+OpenCode only:
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `serve_hostname` | string | `127.0.0.1` | Hostname for OpenCode's helper during a run. Needs a restart. |
+
+Changing OpenCode's `command` also needs a restart.
+
+## `[workflow]`
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `auto_start_runs` | bool | `false` | When true, assigning an agent to a ticket with a repository starts a run. When false, you click **Run Agent**. |
+| `auto_assign.default` | bool | `true` | Turns auto-assign on for every status without its own setting. |
+| `auto_assign.<status>` | bool | `backlog`: `false`. Others: uses `default` | Turns auto-assign on or off for one status. |
+| `auto_split.default` | bool | `false` | Turns auto-split on for every status without its own setting. |
+| `auto_split.<status>` | bool | uses `default` | Turns auto-split on or off for one status. |
+
+Status keys: `backlog`, `ready`, `in_progress`, `in_review`, `in_qa`, `wait_for_final_review` (Wait for Human Review), `blocked`, `done`.
+
+<!-- QUESTION: The inventory doesn't say what auto-assign and auto-split actually do. Need one line each. Also: is there a `plan_review` key after the reorder PR? -->
+
+## `[knowledge]`
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `enabled` | bool | `true` | Turns knowledge compaction on or off. |
+| `poll_interval_ms` | integer | `500` | How often the compaction scheduler wakes. Below 100 runs as 100. |
+| `compaction.interval_secs` | integer | `1800` | Seconds between compaction cycles. |
+| `compaction.batch_max_tickets` | integer | `10` | Most tickets in one batch. |
+| `compaction.batch_max_source_bytes` | integer | `200000` | Most source bytes in one batch. |
+| `compaction.max_candidates_per_batch` | integer | `20` | Most candidates one batch can propose. |
+| `compaction.max_attempts` | integer | `3` | Most tries for one batch. |
+| `auto_save.enabled` | bool | `false` | Saves low-risk candidates without asking you. |
+| `auto_save.allowed_types` | list of strings | `[]` | Types auto-save may save: `bug_pattern`, `coding_convention`, `dependency_note`, `performance_note`, `review_feedback`, `test_command`. |
+| `auto_save.minimum_confidence` | string | `high` | Must stay `high`. |
+| `retrieval.top_k` | integer | `8` | How many entries one lookup returns. 1 to 20. |
+| `retrieval.allowed_types` | list of strings | `[]` (all types) | Only return these types. |
+| `retrieval.minimum_confidence` | string | `medium` | `low`, `medium` or `high`. |
+| `retrieval.default_page_size` | integer | `25` | Default page size. |
+| `retrieval.max_page_size` | integer | `100` | Largest page size. 100 at most. |
+| `retrieval.max_active_per_board` | integer | `10000` | Most active entries per board. |
+| `retrieval.max_active_workspace` | integer | `1000` | Most active entries in the workspace. |
+
+Every count and interval above must be greater than 0.
+
+<!-- QUESTION: Known types for retrieval.allowed_types: coding_convention, architecture_rule, bug_pattern, test_command, review_feedback, dependency_note, api_contract, workflow_rule, human_preference, operational_runbook, security_rule, performance_note. List them on the page or link a knowledge doc? -->
+<!-- QUESTION: max_active_per_board (10000) is larger than max_active_workspace (1000). Confirm these defaults are correct. -->
+
+## `[git]`
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `author_name` | string | `Coppice` | Author name on commits Coppice makes. |
+| `author_email` | string | `coppice@localhost` | Author email on those commits. |
+| `push_enabled` | bool | `false` | Lets Coppice push branches and open pull requests. |
+
+## `[plugins]`
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `dir` | string | `<data-dir>/plugins` | Your default plugin folder. Add more folders on the Plugins page. |
+| `allow_file_git_urls` | bool | `false` | Lets plugin installs use `file:` git URLs. |
+| `git_timeout_secs` | integer | `300` | Seconds before a plugin clone or update fails. |
+| `mcp_start_timeout_secs` | integer | `20` | Seconds to wait for a plugin's MCP server to start. |
+| `mcp_list_timeout_secs` | integer | `10` | Seconds to wait for a plugin to list its tools. |
+| `mcp_idle_shutdown_secs` | integer | `600` | Seconds an idle plugin MCP server stays up. |
+
+## `[mcp]`
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `builtin_plugins_dir` | string | `<data-dir>/builtin-plugins` | Where Coppice writes its built-in skills on every start. Edits there are lost. |
+| `call_timeout_secs` | integer | `60` | Seconds before one tool call fails. |
+| `max_output_bytes` | integer | `32768` | Largest tool result, in bytes. |
+| `comment_post_limit` | integer | `5` | Most comments one run can post. |
+| `token_ttl_secs` | integer | `14400` | How long a run's tool token lasts, in seconds. |
