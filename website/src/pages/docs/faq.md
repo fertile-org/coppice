@@ -22,7 +22,7 @@ No. Agents run via CLIs on your machine, on your repos. Category contrast: cloud
 No. Human Review is a first-class gate. You open the diff and decide.
 
 ## What happens if a ticket's changes conflict with main?
-Coppice stops before merging and changes nothing. It lists the files that conflict and offers to ask the ticket's assignee to resolve them. Once they're resolved, you review and accept the ticket again before it merges.
+Coppice stops before merging and leaves main untouched. It lists the files that conflict and sends the ticket back to In Progress, where the same agent starts resolving them. Then you accept it again in Human Review before it merges.
 
 ## What about “set and forget” autopilots?
 That is not Coppice’s product. Coppice is built for managing agents: you start the work, and you accept every change.
