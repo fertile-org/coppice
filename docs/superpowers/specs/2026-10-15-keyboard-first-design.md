@@ -19,6 +19,7 @@ One action registry drives the palette, the shortcuts, tooltips, the help overla
 | Search | `Mod+K` is search. There is no separate `/` shortcut. |
 | Column moves | `M` is only the move prefix: `M` then `L` / `M` then `H`. A two-key sequence stays off Safari's `⌘⇧[` / `⌘⇧]`, Chrome's `⌘⌥` arrows, and the `Ctrl+Shift+Arrow` chords some WSLg builds drop. |
 | Merge… | `R` then `M`. `Mod+Shift+M` is not used. Chrome takes that chord for the profile menu on macOS, Linux, and Windows, and Firefox takes `Ctrl+Shift+M` for Responsive Design Mode on Linux and Windows. See conflicts. The sequence does not start with `M` or `G`. |
+| Approve plan | `R` then `P`, in Review with **Merge…** and **Accept…**. `R` is that shared prefix. `P` is not a prefix. |
 | Accept… | `Mod+Shift+Enter` opens a confirm dialog. Cancel is focused. The chord does not accept by itself (#12). |
 | Drag sensor | Leave dnd-kit on `PointerSensor`. Column moves call the same status update as a drop. |
 | `Mod` | `⌘` on macOS (`metaKey`). `Ctrl` on Linux and on WSL, including a Windows browser pointed at a WSL server (`ctrlKey`). |
@@ -103,12 +104,12 @@ Next and previous column follow the order above, through Blocked. The move uses 
 
 | Action | Keys | When |
 |---|---|---|
-| Approve plan | `P then A` | The ticket is in Plan Review and **Approve plan** is enabled |
+| Approve plan | `R then P` | The ticket is in Plan Review and **Approve plan** is enabled |
 | Accept… | `Mod+Shift+Enter` | The ticket is in Wait for Human Review and is not archived |
 | Merge… | `R then M` | **Merge…** is already shown |
 | Review code | `D` | **Review code** is enabled |
 
-**Approve plan** runs the same action as the button. **Accept…** opens a dialog; **Cancel** is focused, and **Accept** in the dialog completes it. **Merge…** opens the existing **Merge ticket branch** dialog. **Review code** opens the same destination as the button. `R` is a leader only for **Merge…**. It is not the `M` or `G` leader.
+**Approve plan**, **Merge…**, and **Accept…** are the Review actions. **Approve plan** runs the same action as the button. **Accept…** is `Mod+Shift+Enter` and opens a dialog; **Cancel** is focused, and **Accept** in the dialog completes it. **Merge…** opens the existing **Merge ticket branch** dialog. **Review code** opens the same destination as the button. `R` is the prefix for **Approve plan** (`R then P`) and **Merge…** (`R then M`). `P` is not a prefix. `R` is not the `M` or `G` leader.
 
 Archive, Run Agent, Stop, and Ask for changes stay on screen in the tab order. They have no default shortcut, so they are not help-overlay rows. Archive is in the palette under **Tickets**. Choosing it opens **Archive this ticket?** with the body **This archives the ticket. You can unarchive it later.** **Cancel** is focused. **Archive** confirms.
 
@@ -148,7 +149,7 @@ The default keymap leaves these keys alone. Recording one of them in Settings sh
 
 `Mod+K` is the one browser chord the defaults reclaim. Chrome and Safari use it for the address bar, and the palette keeps it with `preventDefault`.
 
-`Mod+Shift+M` stays with the browser. Chrome binds it on macOS (`⌘⇧M`), Linux, and Windows (`Ctrl+Shift+M`) to the profile menu, and uses the same chord for device mode while DevTools is focused. Firefox binds `Ctrl+Shift+M` to Responsive Design Mode on Linux and Windows, which covers a Linux browser and a Windows browser pointed at WSL. macOS Firefox uses `⌘⌥M` for that mode, and Chrome still takes `⌘⇧M` there. **Merge…** is **R then M**, in **Review** with **Accept…**, so the binding does not start with `M` or `G` and does not take `Mod+Shift+M`.
+`Mod+Shift+M` stays with the browser. Chrome binds it on macOS (`⌘⇧M`), Linux, and Windows (`Ctrl+Shift+M`) to the profile menu, and uses the same chord for device mode while DevTools is focused. Firefox binds `Ctrl+Shift+M` to Responsive Design Mode on Linux and Windows, which covers a Linux browser and a Windows browser pointed at WSL. macOS Firefox uses `⌘⌥M` for that mode, and Chrome still takes `⌘⇧M` there. **Merge…** is **R then M**, in **Review** with **Approve plan** (**R then P**) and **Accept…**. `P` is not a prefix. The binding does not start with `M` or `G` and does not take `Mod+Shift+M`.
 
 ## Focus and accessibility
 
