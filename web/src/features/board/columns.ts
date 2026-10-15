@@ -30,8 +30,8 @@ export interface BoardColumnDef {
 
 export const BOARD_COLUMNS: BoardColumnDef[] = [
   { status: 'backlog', label: 'Backlog', colorKey: 'backlog' },
-  { status: 'ready', label: 'Ready', colorKey: 'ready' },
   { status: 'plan_review', label: PLAN_COPY.column, colorKey: 'plan-review' },
+  { status: 'ready', label: 'Ready', colorKey: 'ready' },
   { status: 'in_progress', label: 'In Progress', colorKey: 'in-progress' },
   { status: 'in_review', label: 'In Review', colorKey: 'in-review' },
   { status: 'in_qa', label: 'In QA', colorKey: 'in-qa' },

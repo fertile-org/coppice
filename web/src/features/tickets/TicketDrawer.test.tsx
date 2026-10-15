@@ -4,6 +4,7 @@ import { fireEvent, render, screen } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter, useLocation } from 'react-router-dom';
 import { ToastProvider } from '../../components/ToastProvider';
+import { ApiError } from '../../lib/api';
 import { TicketDrawer } from './TicketDrawer';
 import type { Ticket } from '../board/useTickets';
 import type { TicketParentSummary } from '../board/ticketHierarchy';
@@ -72,6 +73,10 @@ const archiveMocks = vi.hoisted(() => ({
   unarchive: vi.fn(),
 }));
 
+const runMocks = vi.hoisted(() => ({
+  runAgent: vi.fn(),
+}));
+
 vi.mock('./useTicket', () => ({
   useTicket: () => ({
     data: ticketState.ticket,
@@ -107,7 +112,7 @@ vi.mock('./useTicket', () => ({
 
 vi.mock('./useAgentRuns', () => ({
   useAgentRuns: () => ({ data: runsState.runs, isLoading: false, isError: false }),
-  useRunAgent: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useRunAgent: () => ({ mutateAsync: runMocks.runAgent, isPending: false }),
   useStopRun: () => ({ mutateAsync: vi.fn(), isPending: false }),
   isActiveRunStatus: (status: string) => status === 'running' || status === 'queued',
   shouldPollRunForReconciliation: (run: AgentRun) =>
@@ -166,6 +171,8 @@ describe('TicketDrawer', () => {
     archiveMocks.unarchive.mockReset();
     archiveMocks.archive.mockResolvedValue(undefined);
     archiveMocks.unarchive.mockResolvedValue(undefined);
+    runMocks.runAgent.mockReset();
+    runMocks.runAgent.mockResolvedValue(undefined);
     ticketState.ticket = {
       ...ticketState.ticket,
       status: 'backlog',
@@ -455,5 +462,25 @@ describe('TicketDrawer', () => {
     expect(screen.getByTestId('location-search')).toHaveTextContent(
       `?ticket=${child.id}`,
     );
+  });
+
+  it('shows the server plan-required message when a run cannot start', async () => {
+    const message =
+      'Approve the plan, or turn on Skip planning, before moving this ticket to In Progress.';
+    ticketState.ticket = {
+      ...ticketState.ticket,
+      status: 'ready',
+      assigneeAgentId: '00000000-0000-0000-0000-000000000010',
+      repoId: '00000000-0000-0000-0000-000000000011',
+    };
+    runMocks.runAgent.mockRejectedValue(
+      new ApiError(400, JSON.stringify({ message })),
+    );
+
+    renderDrawer();
+    fireEvent.click(screen.getByRole('button', { name: 'Run Agent' }));
+
+    expect(await screen.findByText(message)).toBeVisible();
+    expect(screen.queryByText('Unable to start agent run.')).toBeNull();
   });
 });

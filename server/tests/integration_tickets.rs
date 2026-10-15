@@ -28,6 +28,7 @@ async fn create_ticket_and_update_status() {
     let ticket: serde_json::Value = common::json_body(res).await;
     let ticket_id = ticket["id"].as_str().unwrap();
     assert_eq!(ticket["status"], "backlog");
+    common::skip_planning(&app, ticket_id, &cookie, &csrf).await;
 
     let patch = app
         .oneshot(common::json_request(

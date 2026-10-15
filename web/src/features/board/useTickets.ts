@@ -59,6 +59,8 @@ export interface Ticket {
   clarificationRound?: number;
   hasActiveRun?: boolean;
   skipPlanning?: boolean;
+  planApproved?: boolean;
+  latestPlanRunStatus?: string | null;
   approvedPlan?: ApprovedPlan | null;
   archivedAt?: string | null;
   humanReview?: HumanReview | null;
@@ -130,6 +132,24 @@ export function useCreateTicket(boardId: string) {
 
   return useMutation({
     mutationFn: (title: string) => createTicket(boardId, title),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: ticketsQueryKey(boardId),
+      });
+    },
+  });
+}
+
+export function useStartPlanRun(boardId: string) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (ticketId: string) => {
+      const res = await apiFetch(`/api/tickets/${ticketId}/plan-runs`, {
+        method: 'POST',
+      });
+      return res.json() as Promise<Ticket>;
+    },
     onSuccess: () => {
       void queryClient.invalidateQueries({
         queryKey: ticketsQueryKey(boardId),

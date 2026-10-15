@@ -75,6 +75,10 @@ pub struct TicketWithDisplay {
     pub last_activity_at: OffsetDateTime,
     pub has_active_run: bool,
     pub human_review: Option<HumanReview>,
+    /// True when the current content version has an approved plan.
+    pub plan_approved: bool,
+    /// Status of the newest `plan_ticket` run, when one exists.
+    pub latest_plan_run_status: Option<String>,
 }
 
 impl<'a> TicketService<'a> {
@@ -959,6 +963,8 @@ impl<'a> TicketService<'a> {
         );
         let last_activity_at = self.compute_last_activity_at(ticket.id).await?;
         let human_review = HumanReviewService::new(self.pool).get(ticket.id).await?;
+        let plan_approved = self.approved_plan_is_current(&ticket).await?;
+        let latest_plan_run_status = self.latest_plan_run_status(ticket.id).await?;
 
         Ok(TicketWithDisplay {
             ticket,
@@ -966,7 +972,26 @@ impl<'a> TicketService<'a> {
             last_activity_at,
             has_active_run,
             human_review,
+            plan_approved,
+            latest_plan_run_status,
         })
+    }
+
+    async fn latest_plan_run_status(&self, ticket_id: Uuid) -> Result<Option<String>, TicketError> {
+        sqlx::query_scalar(
+            r#"
+            SELECT status
+            FROM agent_runs
+            WHERE ticket_id = $1 AND job_type = $2
+            ORDER BY created_at DESC
+            LIMIT 1
+            "#,
+        )
+        .bind(ticket_id)
+        .bind(crate::domain::workflow::JOB_TYPE_PLAN_TICKET)
+        .fetch_optional(self.pool)
+        .await
+        .map_err(TicketError::from)
     }
 }
 

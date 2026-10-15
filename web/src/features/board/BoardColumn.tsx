@@ -19,6 +19,8 @@ interface BoardColumnProps {
   onQuickAdd?: (title: string) => Promise<void>;
   isAdding?: boolean;
   onOpenTicket: (ticketId: string) => void;
+  onRunPlan?: (ticketId: string) => void;
+  planRunTicketId?: string | null;
 }
 
 export function BoardColumn({
@@ -30,6 +32,8 @@ export function BoardColumn({
   onQuickAdd,
   isAdding = false,
   onOpenTicket,
+  onRunPlan,
+  planRunTicketId = null,
 }: BoardColumnProps) {
   const [title, setTitle] = useState('');
   const { setNodeRef, isOver } = useDroppable({
@@ -109,6 +113,8 @@ export function BoardColumn({
               ticket.assigneeAgentId,
               agentsById,
             )}
+            onRunPlan={onRunPlan}
+            planRunPending={planRunTicketId === ticket.id}
           />
         ))}
       </div>

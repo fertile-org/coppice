@@ -2,6 +2,8 @@ import { useDraggable } from '@dnd-kit/core';
 import { CSS } from '@dnd-kit/utilities';
 import { Bot, GitBranch, Network } from 'lucide-react';
 import type { CSSProperties } from 'react';
+import { PLAN_COPY } from '../plan/copy';
+import { planCardState } from '../plan/planCardState';
 import { CreatePrButton } from '../tickets/TicketGitActions';
 import { useTicketGitInfo } from '../tickets/useTicket';
 import { AcceptedNotMerged } from './AcceptedNotMerged';
@@ -44,6 +46,9 @@ interface TicketCardProps {
   isLive?: boolean;
   /** Resolved agent display name; omit when ticket has no assignee. */
   assigneeName?: string;
+  /** Starts the PM planning run. Omit on the drag overlay. */
+  onRunPlan?: (ticketId: string) => void;
+  planRunPending?: boolean;
 }
 
 export function TicketCard({
@@ -52,6 +57,8 @@ export function TicketCard({
   onOpen,
   isLive = false,
   assigneeName,
+  onRunPlan,
+  planRunPending = false,
 }: TicketCardProps) {
   const isArchived = Boolean(ticket.archivedAt);
   const { attributes, listeners, setNodeRef, transform, isDragging } =
@@ -64,6 +71,15 @@ export function TicketCard({
   const style = transform
     ? { transform: CSS.Translate.toString(transform) }
     : undefined;
+  const planState = planCardState(ticket);
+  const planLabel =
+    planState === 'writing'
+      ? PLAN_COPY.writingPlan
+      : planState === 'waiting'
+        ? PLAN_COPY.waitingForApproval
+        : planState === 'needs-run'
+          ? PLAN_COPY.planNeedsRun
+          : null;
 
   const showMerge = showsAcceptedNotMerged(ticket);
 
@@ -167,6 +183,28 @@ export function TicketCard({
             >
               {ticket.priority}
             </span>
+          )}
+        </div>
+      )}
+
+      {planLabel && (
+        <div className="mt-2">
+          <p className="font-body text-xs leading-tight text-text-secondary">
+            {planLabel}
+          </p>
+          {planState === 'needs-run' && onRunPlan && (
+            <button
+              type="button"
+              disabled={planRunPending}
+              onPointerDown={(event) => event.stopPropagation()}
+              onClick={(event) => {
+                event.stopPropagation();
+                onRunPlan(ticket.id);
+              }}
+              className="mt-1.5 rounded-md border border-border bg-surface px-2 py-1 font-body text-xs font-medium text-text-primary hover:bg-paper-200 disabled:opacity-50"
+            >
+              {PLAN_COPY.runAgent}
+            </button>
           )}
         </div>
       )}
