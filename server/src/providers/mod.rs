@@ -129,9 +129,11 @@ pub fn mcp_unavailable(reason: &str) -> ProviderError {
 }
 
 /// Connectors whose descriptor has `caps.read_only_tools`, in the order shown
-/// to users (settings API, compaction error). Chat refuses every other
-/// connector before launch. Cursor is omitted: `--mode ask` was not shown to
-/// block shell writes. OpenCode is included: its per-run deny was.
+/// to users (settings API, compaction error). Compaction and plan use this
+/// list. Chat is separate: only a connector that passed a live write test
+/// runs in the user's checkout. Cursor is omitted here because `--mode ask`
+/// was not shown to block shell writes. OpenCode is included: its per-run
+/// deny was.
 pub const READ_ONLY_CAPABLE_CONNECTORS: &[&str] = &[
     #[cfg(feature = "mock-provider")]
     coppice_connectors::MOCK,
@@ -143,24 +145,32 @@ pub fn connector_enforces_read_only(connector: &str) -> bool {
     descriptor(connector).is_some_and(|d| d.caps.read_only_tools)
 }
 
-/// User-facing reason Chat cannot start. `None` when this connector enforces
-/// read-only tools.
-pub fn chat_unavailable_message(connector: &str) -> Option<String> {
-    if connector_enforces_read_only(connector) {
+/// OpenCode passed a live write test (OpenCode 1.19.0, `opencode/big-pickle`):
+/// `edit` and `bash` denied, with `OPENCODE_DISABLE_PROJECT_CONFIG=1`, blocked
+/// a file write and a shell write. Mock does not write. Every other connector
+/// failed that test or could not be run, so chat for those uses a temporary
+/// clone and a warning banner.
+pub fn chat_read_only_verified(connector: &str) -> bool {
+    connector == coppice_connectors::OPENCODE || connector == coppice_connectors::MOCK
+}
+
+/// Chat for this connector runs in a local clone with remotes removed, not in
+/// the registered checkout.
+pub fn chat_needs_isolation(connector: &str) -> bool {
+    !chat_read_only_verified(connector)
+}
+
+/// Warning shown on chats whose CLI was not shown to stay read-only.
+/// `None` for OpenCode and Mock.
+pub fn chat_isolation_banner(connector: &str) -> Option<String> {
+    if !chat_needs_isolation(connector) {
         return None;
     }
     let name = descriptor(connector)
         .map(|d| d.display_name)
         .unwrap_or(connector);
     Some(format!(
-        "Chat isn't available for {name} yet, because Chat runs read-only and {name} can't."
-    ))
-}
-
-/// Fail closed when a connector cannot enforce read-only tools for chat turns.
-pub fn refuse_unsupported_read_only(connector_id: &str) -> ProviderError {
-    ProviderError::InvalidInput(format!(
-        "connector `{connector_id}` cannot enforce read-only tools for conversation chat turns"
+        "{name} can't be kept read-only. Chat runs in a temporary copy of your repo, but the agent can still run commands on your computer."
     ))
 }
 
@@ -416,38 +426,33 @@ mod tests {
     }
 
     #[test]
-    fn chat_gating_matches_read_only_capability_for_each_connector() {
-        let blocked = [
-            (
-                coppice_connectors::CURSOR,
-                "Chat isn't available for Cursor yet, because Chat runs read-only and Cursor can't.",
-            ),
-            (
-                coppice_connectors::CODEX,
-                "Chat isn't available for Codex yet, because Chat runs read-only and Codex can't.",
-            ),
-            (
-                coppice_connectors::KILO_CODE,
-                "Chat isn't available for Kilo Code yet, because Chat runs read-only and Kilo Code can't.",
-            ),
+    fn chat_isolation_banner_is_only_for_unverified_connectors() {
+        let isolated = [
+            (coppice_connectors::CLAUDE_CODE, "Claude Code"),
+            (coppice_connectors::CURSOR, "Cursor"),
+            (coppice_connectors::CODEX, "Codex"),
+            (coppice_connectors::KILO_CODE, "Kilo Code"),
         ];
-        for (id, message) in blocked {
-            assert!(
-                !connector_enforces_read_only(id),
-                "{id} must not claim read-only chat"
+        for (id, name) in isolated {
+            assert!(chat_needs_isolation(id), "{id}");
+            let expected = format!(
+                "{name} can't be kept read-only. Chat runs in a temporary copy of your repo, but the agent can still run commands on your computer."
             );
-            assert_eq!(chat_unavailable_message(id).as_deref(), Some(message));
+            assert_eq!(chat_isolation_banner(id).as_deref(), Some(expected.as_str()));
         }
+        assert!(chat_read_only_verified(coppice_connectors::OPENCODE));
+        assert!(!chat_needs_isolation(coppice_connectors::OPENCODE));
+        assert!(chat_isolation_banner(coppice_connectors::OPENCODE).is_none());
+        assert!(chat_read_only_verified(coppice_connectors::MOCK));
+        assert!(chat_isolation_banner(coppice_connectors::MOCK).is_none());
         assert!(connector_enforces_read_only(
             coppice_connectors::CLAUDE_CODE
         ));
-        assert!(chat_unavailable_message(coppice_connectors::CLAUDE_CODE).is_none());
-        assert!(chat_unavailable_message(coppice_connectors::OPENCODE).is_none());
-        #[cfg(feature = "mock-provider")]
-        {
-            assert!(connector_enforces_read_only(coppice_connectors::MOCK));
-            assert!(chat_unavailable_message(coppice_connectors::MOCK).is_none());
-        }
+        assert!(!connector_enforces_read_only(coppice_connectors::CURSOR));
+        assert!(!connector_enforces_read_only(coppice_connectors::CODEX));
+        assert!(!connector_enforces_read_only(
+            coppice_connectors::KILO_CODE
+        ));
     }
 
     #[test]

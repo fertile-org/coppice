@@ -113,8 +113,8 @@ async fn run_check(
             "agent connector changed (expected {expected_connector}, got {connector_name})"
         );
     }
-    // Kilo refuses the read-only tool turn every other connector uses here.
-    // A version command can succeed or fail on its own; it does not touch tools.
+    // Kilo has no read-only tool turn. A version command can succeed or fail
+    // on its own; it does not touch tools.
     if connector_name == coppice_connectors::KILO_CODE {
         return run_kilo_version_check(state, run_svc, run, checks, check_id).await;
     }

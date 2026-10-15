@@ -21,7 +21,7 @@ import {
 } from '../../lib/attachments';
 import { filterChatSessions } from '../../lib/chatSessionSearch';
 import type { ChatSession, ChatSessionStatus } from '../../lib/schemas/chat';
-import { chatUnavailableMessage } from '../tools/connectorCopy';
+import { chatIsolationBanner } from '../tools/connectorCopy';
 import { cn } from '../../lib/utils';
 import { useAgents } from '../agents/useAgents';
 import { useBoards } from '../boards/useBoards';
@@ -150,7 +150,7 @@ function NewChatForm({
   const [boardId, setBoardId] = useState('');
   const [error, setError] = useState<string | null>(null);
   const selected = enabledAgents.find((agent) => agent.id === agentId);
-  const chatBlock = chatUnavailableMessage(selected?.connector);
+  const chatBanner = chatIsolationBanner(selected?.connector);
 
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
@@ -159,7 +159,6 @@ function NewChatForm({
       setError('Select an agent.');
       return;
     }
-    if (chatUnavailableMessage(selected?.connector)) return;
     try {
       const session = await createSession.mutateAsync({
         agentId,
@@ -216,9 +215,13 @@ function NewChatForm({
         />
       </div>
 
-      {chatBlock && (
-        <p className="font-body text-sm text-text-secondary" role="status">
-          {chatBlock}
+      {chatBanner && (
+        <p
+          className="rounded-md border border-warning-muted bg-warning-muted/40 px-3 py-2 font-body text-sm text-text-primary"
+          role="status"
+          data-testid="chat-isolation-banner"
+        >
+          {chatBanner}
         </p>
       )}
 
@@ -228,7 +231,7 @@ function NewChatForm({
         </p>
       )}
 
-      <Button type="submit" disabled={createSession.isPending || Boolean(chatBlock)}>
+      <Button type="submit" disabled={createSession.isPending}>
         {createSession.isPending ? 'Starting…' : 'Start chat'}
       </Button>
     </form>
@@ -463,7 +466,7 @@ function ChatSessionPane({ sessionId }: { sessionId: string }) {
 
   const agent = agents.find((item) => item.id === session?.agentId);
   const agentName = agent?.name ?? 'Agent';
-  const chatBlock = chatUnavailableMessage(agent?.connector);
+  const chatBanner = chatIsolationBanner(agent?.connector);
 
   const onLiveFinished = useCallback(() => {
     setActiveRunId(null);
@@ -514,6 +517,15 @@ function ChatSessionPane({ sessionId }: { sessionId: string }) {
         />
       </div>
 
+      {chatBanner ? (
+        <p
+          className="shrink-0 border-t border-warning-muted bg-warning-muted/40 px-4 py-3 font-body text-sm text-text-primary"
+          role="status"
+          data-testid="chat-isolation-banner"
+        >
+          {chatBanner}
+        </p>
+      ) : null}
       {cutoff ? (
         <p className="shrink-0 border-t border-border bg-paper-50/90 px-4 py-3 font-body text-sm text-text-secondary">
           {session?.status === 'cutoff'
@@ -522,13 +534,6 @@ function ChatSessionPane({ sessionId }: { sessionId: string }) {
           <Link to="/chat" className="text-accent hover:underline">
             Start a new chat
           </Link>
-        </p>
-      ) : chatBlock ? (
-        <p
-          className="shrink-0 border-t border-border bg-paper-50/90 px-4 py-3 font-body text-sm text-text-secondary"
-          role="status"
-        >
-          {chatBlock}
         </p>
       ) : (
         <ChatComposer

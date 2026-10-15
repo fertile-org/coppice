@@ -59,15 +59,17 @@ The Tools → Connectors switch and saving an agent both turn a connector on imm
 
 ## Chat and session resume
 
-Agent Chat turns run with read-only tools. Coppice stores the full transcript itself. When a connector supports resume, later turns reuse the CLI session with a slim context; if resume fails, one retry sends the full transcript.
+Agent Chat is on for every CLI. Coppice stores the full transcript itself. When a connector supports resume, later turns reuse the CLI session with a slim context; if resume fails, one retry sends the full transcript.
 
-| Connector | Chat session resume | Read-only tools in chat |
+With most CLIs, chat is read-only. Where a CLI can't be kept read-only, chat runs in a temporary copy of your repo, and a banner warns you that the agent can still run commands on your computer. That copy is `git clone --local` of the registered checkout at the current HEAD, with every remote removed. It is deleted when the chat ends and again when the app starts. OpenCode passed a live write test, so its chat runs in the checkout and shows no banner.
+
+| Connector | Chat session resume | Where chat runs |
 | --- | --- | --- |
-| `claude-code` | `--resume` | On. `--permission-mode dontAsk` plus `--disallowedTools Write,Edit,MultiEdit,NotebookEdit,Bash,TodoWrite,Task` and a read-only `--allowedTools` list. Not live-verified here: the `claude` binary was not installed and no API key was set |
-| `cursor` | Skipped | Off. `--mode ask` without `--force` was not shown to block writes. CLI `2026.10.14-941492e` was installed and not signed in; the prompt exited with `Authentication required` before any tool call. Cursor staff say ask mode does not hard-block shell unless `--sandbox enabled`, which also blocks network and MCP |
-| `codex` | Skipped | Off. `codex exec --sandbox read-only` exists (`codex-cli 0.162.1`). A write prompt with that flag exited `401 Unauthorized` before a tool call, so it was not shown to block a write. Ticket runs still use `--dangerously-bypass-approvals-and-sandbox` |
-| `opencode` | Prior session id | On. Per-run config sets `permission.edit` and `permission.bash` to `deny`, and the process sets `OPENCODE_DISABLE_PROJECT_CONFIG=1`. Verified with OpenCode 1.19.0 and `opencode/big-pickle`: that pair blocked a file write and a shell write even when the project `opencode.json` allowed both. The same deny without the env var lost to the project file |
-| `kilo-code` | Skipped | Off. No read-only flag. The `kilo` binary was not on this machine |
+| `claude-code` | `--resume` | Temporary clone and banner. Flags are `--permission-mode dontAsk` plus `--disallowedTools Write,Edit,MultiEdit,NotebookEdit,Bash,TodoWrite,Task` and a read-only `--allowedTools` list. Not live-verified: the `claude` binary was not installed and no API key was set |
+| `cursor` | Skipped | Temporary clone and banner. Chat passes `--mode ask` and omits `--force`. CLI `2026.10.14-941492e` was installed and not signed in; the prompt exited with `Authentication required` before any tool call. Cursor staff say ask mode does not hard-block shell unless `--sandbox enabled`, which also blocks network and MCP |
+| `codex` | Skipped | Temporary clone and banner. Chat passes `--sandbox read-only` and never `--dangerously-bypass-approvals-and-sandbox`. A write prompt with that flag on `codex-cli 0.162.1` exited `401 Unauthorized` before a tool call, so it was not shown to block a write. Ticket runs still use the bypass flag |
+| `opencode` | Prior session id | The registered checkout, no banner. Per-run config sets `permission.edit`, `permission.write`, and `permission.bash` to `deny`, and the process sets `OPENCODE_DISABLE_PROJECT_CONFIG=1`. Verified with OpenCode 1.19.0 and `opencode/big-pickle`: denying edit and bash blocked a file write and a shell write even when the project `opencode.json` allowed both. The same deny without the env var lost to the project file |
+| `kilo-code` | Skipped | Temporary clone and banner. No read-only flag; chat uses the same `kilo run --auto` flags as a ticket, inside the clone. The `kilo` binary was not on this machine |
 
 Ticket runs can resume a prior session on `claude-code` and `cursor`. The other connectors start a fresh session and continue from the ticket checkpoint.
 
@@ -89,7 +91,7 @@ Plugin MCP tools are proxied through the same gateway as `<plugin>__<tool>`, so 
 
 Tools → Connectors shows each connector's switch, CLI readiness, detected auth (env var names and file paths only, never values), probe output, last real run, and last test.
 
-**Test connection** runs a real agent run through the production path against a synthetic ticket in a scratch directory. It passes when the agent calls `ticket_get` and `result_submit` and submits `done`. That check uses read-only tools. `kilo-code` refuses those, so its Test connection runs `kilo --version` instead and passes or fails with that command's own result.
+**Test connection** runs a real agent run through the production path against a synthetic ticket in a scratch directory. It passes when the agent calls `ticket_get` and `result_submit` and submits `done`. That check uses read-only tools. `kilo-code` has no read-only tool turn, so its Test connection runs `kilo --version` instead and passes or fails with that command's own result.
 
 `coppice connector doctor <id>` runs the same local checks from a terminal.
 

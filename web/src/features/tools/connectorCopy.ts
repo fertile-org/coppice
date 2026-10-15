@@ -39,25 +39,22 @@ export function signInUncheckedHint(
     : null;
 }
 
-/** Chat turns are read-only. These connectors cannot enforce that, so Chat stays off. */
-export const KILO_CHAT_UNAVAILABLE =
-  "Chat isn't available for Kilo Code yet, because Chat runs read-only and Kilo Code can't.";
-
-export const CODEX_CHAT_UNAVAILABLE =
-  "Chat isn't available for Codex yet, because Chat runs read-only and Codex can't.";
-
-export const CURSOR_CHAT_UNAVAILABLE =
-  "Chat isn't available for Cursor yet, because Chat runs read-only and Cursor can't.";
-
-const CHAT_UNAVAILABLE_BY_CONNECTOR: Record<string, string> = {
-  'kilo-code': KILO_CHAT_UNAVAILABLE,
-  codex: CODEX_CHAT_UNAVAILABLE,
-  cursor: CURSOR_CHAT_UNAVAILABLE,
+/**
+ * CLIs whose live write test failed or could not be run. Chat stays on.
+ * The banner uses the CLI display name.
+ */
+const CHAT_ISOLATION_NAMES: Record<string, string> = {
+  'claude-code': 'Claude Code',
+  cursor: 'Cursor',
+  codex: 'Codex',
+  'kilo-code': 'Kilo Code',
 };
 
-export function chatUnavailableMessage(connectorId: string | null | undefined): string | null {
+export function chatIsolationBanner(connectorId: string | null | undefined): string | null {
   if (!connectorId) return null;
-  return CHAT_UNAVAILABLE_BY_CONNECTOR[connectorId] ?? null;
+  const name = CHAT_ISOLATION_NAMES[connectorId];
+  if (!name) return null;
+  return `${name} can't be kept read-only. Chat runs in a temporary copy of your repo, but the agent can still run commands on your computer.`;
 }
 
 export function notOnPathHint(name: string): string {

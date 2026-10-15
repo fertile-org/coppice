@@ -29,7 +29,8 @@ pub fn opencode_run_config(access: Option<&McpAccess>, read_only: bool) -> Strin
         // OPENCODE_DISABLE_PROJECT_CONFIG.
         cfg["permission"] = serde_json::json!({
             "edit": "deny",
-            "bash": "deny"
+            "bash": "deny",
+            "write": "deny"
         });
     }
     cfg.to_string()
@@ -403,6 +404,7 @@ mod tests {
             serde_json::from_str(&opencode_run_config(None, true)).expect("parse config");
         assert_eq!(cfg["permission"]["edit"], "deny");
         assert_eq!(cfg["permission"]["bash"], "deny");
+        assert_eq!(cfg["permission"]["write"], "deny");
         assert!(cfg.get("mcp").is_none());
 
         let access = McpAccess {

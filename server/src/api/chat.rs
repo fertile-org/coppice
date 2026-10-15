@@ -13,7 +13,6 @@ use crate::AppState;
 use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
-    response::{IntoResponse, Response},
     routing::{get, post},
     Json, Router,
 };
@@ -194,42 +193,24 @@ struct CutoffResponse {
 fn map_error(err: ChatError) -> StatusCode {
     match err {
         ChatError::NotFound => StatusCode::NOT_FOUND,
-        ChatError::Validation(_) | ChatError::ChatUnavailable(_) => StatusCode::BAD_REQUEST,
+        ChatError::Validation(_) => StatusCode::BAD_REQUEST,
         ChatError::ActiveRunExists => StatusCode::CONFLICT,
         ChatError::Database(_) | ChatError::Io(_) => StatusCode::INTERNAL_SERVER_ERROR,
     }
 }
 
-/// Create and post return a JSON message only when Chat is refused. Other
-/// errors stay status-only so the client does not surface an empty object.
-enum ChatApiError {
-    Status(StatusCode),
-    Unavailable(String),
-}
-
-impl From<StatusCode> for ChatApiError {
-    fn from(code: StatusCode) -> Self {
-        ChatApiError::Status(code)
+fn discard_chat_clone_if_ended(state: &AppState, session_id: Uuid, status: ChatSessionStatus) {
+    if !matches!(
+        status,
+        ChatSessionStatus::Archived | ChatSessionStatus::Cutoff
+    ) {
+        return;
     }
-}
-
-impl IntoResponse for ChatApiError {
-    fn into_response(self) -> Response {
-        match self {
-            ChatApiError::Status(code) => code.into_response(),
-            ChatApiError::Unavailable(message) => (
-                StatusCode::BAD_REQUEST,
-                Json(serde_json::json!({ "message": message })),
-            )
-                .into_response(),
-        }
-    }
-}
-
-fn map_api_error(err: ChatError) -> ChatApiError {
-    match err {
-        ChatError::ChatUnavailable(message) => ChatApiError::Unavailable(message),
-        other => ChatApiError::Status(map_error(other)),
+    if let Err(err) = crate::services::chat_cwd::remove_chat_clone(
+        std::path::Path::new(&state.config.agent.worktrees_path),
+        session_id,
+    ) {
+        tracing::warn!(%session_id, error = %err, "failed to remove temporary chat clone");
     }
 }
 
@@ -309,12 +290,12 @@ async fn create_session(
     State(state): State<Arc<AppState>>,
     AuthUser { user, .. }: AuthUser,
     Json(body): Json<CreateSessionBody>,
-) -> Result<(StatusCode, Json<SessionResponse>), ChatApiError> {
+) -> Result<(StatusCode, Json<SessionResponse>), StatusCode> {
     let pool = pool_from_state(&state)?;
     let session = ChatService::new(pool)
         .create_session(user.id, body.agent_id, body.board_id, body.repo_id)
         .await
-        .map_err(map_api_error)?;
+        .map_err(map_error)?;
     Ok((StatusCode::CREATED, Json(session_response(session))))
 }
 
@@ -358,6 +339,7 @@ async fn patch_session(
         .patch_session(session_id, user.id, status)
         .await
         .map_err(map_error)?;
+    discard_chat_clone_if_ended(&state, session_id, status);
     Ok(Json(session_response(session)))
 }
 
@@ -385,13 +367,13 @@ async fn post_message(
     AuthUser { user, .. }: AuthUser,
     Path(session_id): Path<Uuid>,
     Json(body): Json<PostMessageBody>,
-) -> Result<(StatusCode, Json<PostMessageResponse>), ChatApiError> {
+) -> Result<(StatusCode, Json<PostMessageResponse>), StatusCode> {
     let pool = pool_from_state(&state)?;
     let attachment_ids = body.attachment_ids.unwrap_or_default();
     let result = ChatService::new(pool)
         .post_message(session_id, user.id, &body.body, &attachment_ids)
         .await
-        .map_err(map_api_error)?;
+        .map_err(map_error)?;
     let attachments_by_id =
         attachments_for_messages(pool, std::slice::from_ref(&result.message)).await?;
     Ok((
@@ -506,6 +488,7 @@ async fn cutoff_session(
         .cutoff_session(session_id, user.id)
         .await
         .map_err(map_error)?;
+    discard_chat_clone_if_ended(&state, session_id, ChatSessionStatus::Cutoff);
     let attachments_by_id =
         attachments_for_messages(pool, std::slice::from_ref(&result.seed_message)).await?;
     Ok(Json(CutoffResponse {

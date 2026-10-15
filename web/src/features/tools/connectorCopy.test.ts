@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  chatUnavailableMessage,
+  chatIsolationBanner,
   CONNECTOR_DEFAULT_MODEL_LABEL,
   connectorDefaultModelLabel,
   readinessLabel,
@@ -36,25 +36,25 @@ describe('connectorDefaultModelLabel', () => {
   });
 });
 
-describe('chatUnavailableMessage', () => {
-  it('explains that Kilo Code chat is unavailable', () => {
-    expect(chatUnavailableMessage('kilo-code')).toBe(
-      "Chat isn't available for Kilo Code yet, because Chat runs read-only and Kilo Code can't.",
+describe('chatIsolationBanner', () => {
+  it('warns for each CLI that was not shown to stay read-only', () => {
+    expect(chatIsolationBanner('claude-code')).toBe(
+      "Claude Code can't be kept read-only. Chat runs in a temporary copy of your repo, but the agent can still run commands on your computer.",
+    );
+    expect(chatIsolationBanner('cursor')).toBe(
+      "Cursor can't be kept read-only. Chat runs in a temporary copy of your repo, but the agent can still run commands on your computer.",
+    );
+    expect(chatIsolationBanner('codex')).toBe(
+      "Codex can't be kept read-only. Chat runs in a temporary copy of your repo, but the agent can still run commands on your computer.",
+    );
+    expect(chatIsolationBanner('kilo-code')).toBe(
+      "Kilo Code can't be kept read-only. Chat runs in a temporary copy of your repo, but the agent can still run commands on your computer.",
     );
   });
 
-  it('explains chat is unavailable for each connector that cannot stay read-only', () => {
-    expect(chatUnavailableMessage('codex')).toBe(
-      "Chat isn't available for Codex yet, because Chat runs read-only and Codex can't.",
-    );
-    expect(chatUnavailableMessage('cursor')).toBe(
-      "Chat isn't available for Cursor yet, because Chat runs read-only and Cursor can't.",
-    );
-  });
-
-  it('leaves Claude Code and OpenCode available', () => {
-    expect(chatUnavailableMessage('claude-code')).toBeNull();
-    expect(chatUnavailableMessage('opencode')).toBeNull();
-    expect(chatUnavailableMessage(null)).toBeNull();
+  it('is absent for OpenCode, which passed the write test', () => {
+    expect(chatIsolationBanner('opencode')).toBeNull();
+    expect(chatIsolationBanner('mock')).toBeNull();
+    expect(chatIsolationBanner(null)).toBeNull();
   });
 });

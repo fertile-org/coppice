@@ -285,16 +285,14 @@ async fn list_sessions_has_active_run_while_turn_queued() {
 }
 
 #[tokio::test]
-async fn conversation_profile_refuses_write_capable_connectors() {
+async fn conversation_profile_does_not_refuse_kilo_chat() {
     use coppice_server::domain::context_profile::ContextProfile;
-    use coppice_server::providers::{
-        kilo_code::KiloCodeProvider, AgentProvider, AgentRunInput, ProviderError,
-    };
+    use coppice_server::providers::{kilo_code::KiloCodeProvider, AgentProvider, AgentRunInput};
     use coppice_config::KiloCodeProviderConfig;
 
     let provider = KiloCodeProvider::new(KiloCodeProviderConfig {
         enabled: Some(true),
-        command: "kilo".into(),
+        command: "kilo-not-installed".into(),
         model_providers: vec![],
         run_timeout_secs: 30,
     });
@@ -322,9 +320,12 @@ async fn conversation_profile_refuses_write_capable_connectors() {
             mcp: None,
         })
         .await
-        .expect_err("kilo-code must fail closed for read-only chat");
-    assert!(matches!(err, ProviderError::InvalidInput(_)));
-    assert!(err.to_string().contains("read-only"));
+        .expect_err("missing kilo binary");
+    let message = err.to_string();
+    assert!(
+        !message.contains("cannot enforce read-only"),
+        "{message}"
+    );
 }
 
 #[tokio::test]
@@ -1662,40 +1663,18 @@ async fn chat_turn_stages_attachments_into_cwd_and_transcript() {
 }
 
 #[tokio::test]
-async fn chat_refuses_connectors_that_cannot_enforce_read_only_before_launch() {
-    use std::os::unix::fs::PermissionsExt;
-
+async fn chat_accepts_every_connector() {
     let _guard = common::DB_TEST_LOCK.lock().await;
     if !common::db_available().await {
         return;
     }
 
-    let dir = tempfile::tempdir().expect("tempdir");
-    let marker = dir.path().join("invoked");
-    let script = dir.path().join("cli");
-    std::fs::write(
-        &script,
-        format!(
-            "#!/bin/sh\necho invoked >> '{}'\nexit 0\n",
-            marker.display()
-        ),
-    )
-    .unwrap();
-    let mut perms = std::fs::metadata(&script).unwrap().permissions();
-    perms.set_mode(0o755);
-    std::fs::set_permissions(&script, perms).unwrap();
-    let command = script.display().to_string();
-
     let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state_config(|config| {
-        let command = command.clone();
         config.agent.connectors.codex.enabled = Some(true);
-        config.agent.connectors.codex.command = command.clone();
         config.agent.connectors.opencode.enabled = Some(true);
-        config.agent.connectors.opencode.command = command.clone();
         config.agent.connectors.cursor.enabled = Some(true);
-        config.agent.connectors.cursor.command = command.clone();
         config.agent.connectors.kilo_code.enabled = Some(true);
-        config.agent.connectors.kilo_code.command = command;
+        config.agent.connectors.claude_code.enabled = Some(true);
     })
     .await;
     let pool = state.db.as_ref().expect("test db");
@@ -1709,28 +1688,9 @@ async fn chat_refuses_connectors_that_cannot_enforce_read_only_before_launch() {
     .await;
     let agent_uuid = uuid::Uuid::parse_str(&agent_id).unwrap();
 
-    let created = app
-        .clone()
-        .oneshot(common::json_request(
-            "POST",
-            "/api/chat/sessions",
-            &format!(r#"{{"agentId":"{agent_id}"}}"#),
-            &cookie,
-            &csrf,
-        ))
-        .await
-        .unwrap();
-    assert_eq!(created.status(), StatusCode::CREATED);
-    let session: serde_json::Value = common::json_body(created).await;
-    let session_id = session["id"].as_str().unwrap().to_string();
-    let session_uuid = uuid::Uuid::parse_str(&session_id).unwrap();
-
-    for connector in ["codex", "cursor", "kilo-code"] {
+    for connector in ["codex", "cursor", "kilo-code", "claude-code", "opencode"] {
         set_agent_connector(pool, agent_uuid, connector).await;
-        let expected = coppice_server::providers::chat_unavailable_message(connector)
-            .unwrap_or_else(|| panic!("{connector} should be blocked"));
-
-        let denied = app
+        let created = app
             .clone()
             .oneshot(common::json_request(
                 "POST",
@@ -1741,9 +1701,10 @@ async fn chat_refuses_connectors_that_cannot_enforce_read_only_before_launch() {
             ))
             .await
             .unwrap();
-        assert_eq!(denied.status(), StatusCode::BAD_REQUEST, "{connector}");
-        let denied_body: serde_json::Value = common::json_body(denied).await;
-        assert_eq!(denied_body["message"], expected, "{connector}");
+        assert_eq!(created.status(), StatusCode::CREATED, "{connector}");
+        let session: serde_json::Value = common::json_body(created).await;
+        assert!(session.get("message").is_none(), "{connector}");
+        let session_id = session["id"].as_str().unwrap();
 
         let posted = app
             .clone()
@@ -1756,55 +1717,13 @@ async fn chat_refuses_connectors_that_cannot_enforce_read_only_before_launch() {
             ))
             .await
             .unwrap();
-        assert_eq!(posted.status(), StatusCode::BAD_REQUEST, "{connector}");
+        assert_eq!(posted.status(), StatusCode::CREATED, "{connector}");
         let posted_body: serde_json::Value = common::json_body(posted).await;
-        assert_eq!(posted_body["message"], expected, "{connector}");
-
-        let runs: i64 =
-            sqlx::query_scalar("SELECT COUNT(*) FROM agent_runs WHERE chat_session_id = $1")
-                .bind(session_uuid)
-                .fetch_one(pool)
-                .await
-                .unwrap();
-        assert_eq!(runs, 0, "{connector} queued a chat run");
-
-        let draft = app
-            .clone()
-            .oneshot(common::json_request(
-                "POST",
-                &format!("/api/chat/sessions/{session_id}/draft-ticket"),
-                "",
-                &cookie,
-                &csrf,
-            ))
-            .await
-            .unwrap();
-        assert_eq!(draft.status(), StatusCode::OK, "{connector}");
-        let draft_body: serde_json::Value = common::json_body(draft).await;
-        assert_eq!(draft_body["source"], "fallback", "{connector}");
+        assert!(posted_body["runId"].is_string(), "{connector}");
+        let body_text = posted_body.to_string();
         assert!(
-            !marker.is_file(),
-            "{connector} launched a CLI before the read-only refusal"
-        );
-    }
-
-    for connector in ["claude-code", "opencode"] {
-        set_agent_connector(pool, agent_uuid, connector).await;
-        let allowed = app
-            .clone()
-            .oneshot(common::json_request(
-                "POST",
-                "/api/chat/sessions",
-                &format!(r#"{{"agentId":"{agent_id}"}}"#),
-                &cookie,
-                &csrf,
-            ))
-            .await
-            .unwrap();
-        assert_eq!(allowed.status(), StatusCode::CREATED, "{connector}");
-        assert!(
-            coppice_server::providers::chat_unavailable_message(connector).is_none(),
-            "{connector}"
+            !body_text.contains("Chat isn't available"),
+            "{connector} {body_text}"
         );
     }
 }
