@@ -147,10 +147,10 @@ fn generated_config(layout: &DataLayout) -> io::Result<String> {
          # Coppice rewrites coppice/skills here on every start. Edits there are lost.\n\
          builtin_plugins_dir = {builtin_plugins}\n\
          \n\
-         # How many days of logs to keep, including today. One of 3, 7, 14, 30. Default 14.\n\
+         # How many days of logs to keep, including today: 3, 7, 14, or 30. Default 14.\n\
          [logs]\n\
          retention_days = 14\n\
-         # Non-desktop only. Ignored when the desktop app passes --logs-dir.\n\
+         # Folder for logs. The desktop app uses its own folder and ignores this.\n\
          # dir = \"./data/logs\"\n\
          \n\
          # Keyboard shortcuts. Your keys replace the defaults, and an empty value turns one off.\n\

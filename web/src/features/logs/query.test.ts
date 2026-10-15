@@ -70,7 +70,7 @@ describe('log query', () => {
         'Coppice 0.1.0 on Debian GNU/Linux 12',
         'What happened:',
         'What you expected:',
-        'Attach the file from Logs → Export logs.',
+        'Attach the zip from **Export logs** on the Logs page.',
       ].join('\n'),
     );
   });

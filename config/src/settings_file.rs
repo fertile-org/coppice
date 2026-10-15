@@ -110,7 +110,7 @@ pub fn validate_config_text(text: &str) -> Result<AppConfig, ConfigTextError> {
 }
 
 /// Shown when Save rejects `[logs] retention_days`.
-pub const RETENTION_DAYS_MESSAGE: &str = "logs.retention_days must be 3, 7, 14, or 30";
+pub const RETENTION_DAYS_MESSAGE: &str = "Set logs.retention_days to 3, 7, 14, or 30.";
 
 /// An explicit `retention_days` must be 3, 7, 14, or 30. A missing key stays the default.
 fn check_logs_retention(text: &str) -> Result<(), ConfigTextError> {

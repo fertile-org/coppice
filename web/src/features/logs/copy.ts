@@ -32,7 +32,7 @@ export const LOGS_COPY = {
 } as const;
 
 export function savedExport(file: string): string {
-  return `Saved ${file}. Coppice removed the tokens and keys it knows about. Check the file before you share it.`;
+  return `Saved ${file}. Coppice removed the tokens and keys it knows about, but check the file before you share it.`;
 }
 
 export function reportProblemBody(version: string, osVersion: string): string {
@@ -40,7 +40,7 @@ export function reportProblemBody(version: string, osVersion: string): string {
     `Coppice ${version} on ${osVersion}`,
     'What happened:',
     'What you expected:',
-    'Attach the file from Logs → Export logs.',
+    'Attach the zip from **Export logs** on the Logs page.',
   ].join('\n');
 }
 
