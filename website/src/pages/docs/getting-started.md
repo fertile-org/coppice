@@ -56,15 +56,15 @@ Coppice opens your new board.
 2. Open the card.
 3. Click **Edit** to add a description, then **Save**.
 4. On **Detail**, set **Assignee** to your agent and **Repository** to your repository. Click **Save metadata**.
-5. Click **Run Agent**.
+5. Click **Run agent**.
 
 The ticket switches to **Live Console** so you can watch the agent work. Click **Stop** to end the run.
 
-**Run Agent** stays off until the ticket has an assignee and a repository that shows **Ready**. Assigning an agent doesn't start a run by itself.
+**Run agent** stays off until the ticket has an assignee and a repository that shows **Ready**. Assigning an agent doesn't start a run by itself.
 
 <figure>
-<img src="/assets/docs/backlog-ticket.webp" width="1440" height="900" alt="A board with a new ticket in Backlog and the Run Agent button showing.">
-<figcaption>Press Run Agent, and the PM writes the plan.</figcaption>
+<img src="/assets/docs/backlog-ticket.webp" width="1440" height="900" alt="A board with a new ticket in Backlog and the Run agent button showing.">
+<figcaption>Press Run agent, and the PM writes the plan.</figcaption>
 </figure>
 
 ## What happens next
