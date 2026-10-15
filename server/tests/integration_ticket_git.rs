@@ -433,6 +433,7 @@ async fn merge_branch_conflict_aborts_and_leaves_branch_unchanged() {
     let ticket: serde_json::Value = common::json_body(ticket).await;
     assert_eq!(ticket["status"], "done");
     assert_eq!(ticket["humanReview"]["stale"], false);
+    assert_eq!(ticket["humanReview"]["merged"], false);
 }
 
 #[tokio::test]

@@ -183,6 +183,7 @@ pub(crate) struct HumanReviewResponse {
     head_sha: String,
     short_sha: String,
     stale: bool,
+    merged: bool,
     comment_ids: Vec<Uuid>,
     run_ids: Vec<Uuid>,
 }
@@ -279,6 +280,7 @@ pub(crate) fn ticket_to_response(item: TicketWithDisplay) -> TicketResponse {
                 head_sha: review.head_sha,
                 short_sha,
                 stale: review.stale,
+                merged: review.merged_at.is_some(),
                 comment_ids: review.comment_ids,
                 run_ids: review.run_ids,
             }

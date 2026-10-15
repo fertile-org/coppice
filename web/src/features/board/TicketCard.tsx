@@ -4,6 +4,10 @@ import { Bot, GitBranch, Network } from 'lucide-react';
 import type { CSSProperties } from 'react';
 import { PLAN_COPY } from '../plan/copy';
 import { planCardState } from '../plan/planCardState';
+import { CreatePrButton } from '../tickets/TicketGitActions';
+import { useTicketGitInfo } from '../tickets/useTicket';
+import { AcceptedNotMerged } from './AcceptedNotMerged';
+import { showsAcceptedNotMerged } from './showsAcceptedNotMerged';
 import type { TicketHierarchy } from './ticketHierarchy';
 import type { Ticket } from './useTickets';
 
@@ -16,6 +20,23 @@ function priorityBadgeStyle(priority: string): CSSProperties | undefined {
     color: `var(--badge-priority-${priority}-text)`,
     borderColor: `var(--badge-priority-${priority}-border)`,
   };
+}
+
+function DoneCardPullRequest({ ticketId }: { ticketId: string }) {
+  const gitInfo = useTicketGitInfo(ticketId, true);
+  if (!gitInfo.data?.canCreatePr) {
+    return null;
+  }
+
+  return (
+    <div
+      className="mt-2"
+      onPointerDown={(event) => event.stopPropagation()}
+      onClick={(event) => event.stopPropagation()}
+    >
+      <CreatePrButton ticketId={ticketId} size="sm" />
+    </div>
+  );
 }
 
 interface TicketCardProps {
@@ -60,30 +81,35 @@ export function TicketCard({
           ? PLAN_COPY.planNeedsRun
           : null;
 
+  const showMerge = showsAcceptedNotMerged(ticket);
+
   return (
     <div
       ref={setNodeRef}
       style={style}
-      {...listeners}
-      {...attributes}
-      role="button"
-      tabIndex={0}
-      onClick={() => {
-        if (!isDragging) onOpen(ticket.id);
-      }}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter' || e.key === ' ') {
-          e.preventDefault();
-          onOpen(ticket.id);
-        }
-      }}
       className={[
         'rounded-md border border-border bg-surface-raised p-3 shadow-card transition-shadow duration-fast',
-        'hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
+        'hover:shadow-md',
         isArchived ? 'cursor-pointer opacity-60' : 'cursor-grab',
         isDragging ? 'z-10 opacity-60 shadow-lg' : '',
       ].join(' ')}
     >
+      <div
+        {...listeners}
+        {...attributes}
+        role="button"
+        tabIndex={0}
+        onClick={() => {
+          if (!isDragging) onOpen(ticket.id);
+        }}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            onOpen(ticket.id);
+          }
+        }}
+        className="rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+      >
       {(hierarchy?.parent || hierarchy?.parentUnavailable) && (
         <div className="mb-2 flex min-w-0 items-center gap-1.5 font-body text-xs leading-tight text-text-secondary">
           <GitBranch
@@ -191,6 +217,11 @@ export function TicketCard({
             {hierarchy.doneChildCount}/{hierarchy.directChildCount} done
           </span>
         </div>
+      )}
+      </div>
+      {showMerge && <AcceptedNotMerged ticket={ticket} />}
+      {ticket.status === 'done' && ticket.repoId && !isArchived && (
+        <DoneCardPullRequest ticketId={ticket.id} />
       )}
     </div>
   );

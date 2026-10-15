@@ -131,6 +131,7 @@ export const ticketSchema = z.object({
       headSha: z.string(),
       shortSha: z.string(),
       stale: z.boolean(),
+      merged: z.boolean().optional(),
       commentIds: z.array(z.string().uuid()),
       runIds: z.array(z.string().uuid()),
     })

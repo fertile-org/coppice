@@ -248,6 +248,6 @@ describe('TicketCard archived affordance', () => {
     renderCard(undefined, { archivedAt: '2026-09-20T00:00:00.000Z' });
 
     expect(screen.getByText('Archived')).toBeVisible();
-    expect(screen.getByRole('button')).toHaveClass('opacity-60');
+    expect(screen.getByRole('button').parentElement).toHaveClass('opacity-60');
   });
 });
