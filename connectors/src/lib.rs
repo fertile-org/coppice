@@ -209,7 +209,9 @@ const CONNECTORS: &[ConnectorDescriptor] = &[
         mcp_tool_names: ToolNameStyle::Dash,
         console: ConsoleKind::Structured,
         caps: Capabilities {
-            read_only_tools: true,
+            // `--mode ask` blocks edit/apply, not shell writes, so Chat cannot
+            // treat Cursor as read-only. Plan runs still pass `--mode ask`.
+            read_only_tools: false,
             chat_resume: true,
             session_events: true,
             run_resume: true,
@@ -416,7 +418,7 @@ mod tests {
             false,
         );
         assert_row(
-            CURSOR, CursorHome, Dash, Structured, true, true, true, true, false,
+            CURSOR, CursorHome, Dash, Structured, false, true, true, true, false,
         );
         assert_row(
             CODEX,

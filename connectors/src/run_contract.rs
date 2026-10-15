@@ -172,11 +172,13 @@ pub const MOCK: RunContract = RunContract {
 pub const CLAUDE_CODE: RunContract = RunContract {
     permission_mode: PermissionMode {
         write: &["--permission-mode", "bypassPermissions"],
-        // Chat still narrows tools with a dynamic `--allowedTools` list.
-        read_only: None,
+        // `dontAsk` denies anything that would prompt. `--allowedTools` does
+        // not constrain `bypassPermissions` (a Read allowlist still approves
+        // Write, Edit, and Bash). The launcher also passes `--disallowedTools`.
+        read_only: Some(&["--permission-mode", "dontAsk"]),
         min_version: None,
         gate: false,
-        reason: "Claude Code 2.1.284 (interactive) and 2.1.285 (`claude -p`) start in auto mode when no permission mode is set. Coppice already passed bypassPermissions; pinning it keeps that mode.",
+        reason: "Write runs pin bypassPermissions so ticket work stays non-interactive. Read-only chat uses dontAsk because an allowlist does not block the other tools while bypassPermissions is set. Claude Code 2.1.284 (interactive) and 2.1.285 (`claude -p`) start in auto mode when no permission mode is set.",
     },
     leading: &[
         flag(&["-p"], "Headless print mode."),
@@ -439,6 +441,15 @@ mod tests {
         assert!(version_at_least("2.1.292", "2.1.81"));
         assert!(!version_at_least("2.1.80", "2.1.81"));
         assert!(version_at_least("1", "0.156"));
+    }
+
+    #[test]
+    fn claude_read_only_uses_dont_ask_not_bypass() {
+        let argv = CLAUDE_CODE.argv(&subst(Some("2.1.292"), true));
+        assert!(argv
+            .windows(2)
+            .any(|w| w == ["--permission-mode", "dontAsk"]));
+        assert!(!argv.iter().any(|arg| arg == "bypassPermissions"));
     }
 
     #[test]

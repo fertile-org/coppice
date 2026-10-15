@@ -81,6 +81,24 @@ vi.mock('../agents/useAgents', () => ({
         enabled: true,
         connector: 'kilo-code',
       },
+      {
+        id: '00000000-0000-4000-8000-000000000013',
+        name: 'Codex Agent',
+        enabled: true,
+        connector: 'codex',
+      },
+      {
+        id: '00000000-0000-4000-8000-000000000014',
+        name: 'OpenCode Agent',
+        enabled: true,
+        connector: 'opencode',
+      },
+      {
+        id: '00000000-0000-4000-8000-000000000015',
+        name: 'Cursor Agent',
+        enabled: true,
+        connector: 'cursor',
+      },
     ],
   }),
 }));
@@ -254,35 +272,61 @@ describe('ChatPage', () => {
     expect(within(options).queryByRole('option', { name: 'Disabled Agent' })).toBeNull();
   });
 
-  it('disables chat for a Kilo Code agent', () => {
+  it.each([
+    [
+      'Kilo Agent',
+      "Chat isn't available for Kilo Code yet, because Chat runs read-only and Kilo Code can't.",
+    ],
+    [
+      'Codex Agent',
+      "Chat isn't available for Codex yet, because Chat runs read-only and Codex can't.",
+    ],
+    [
+      'OpenCode Agent',
+      "Chat isn't available for OpenCode yet, because Chat runs read-only and OpenCode can't.",
+    ],
+    [
+      'Cursor Agent',
+      "Chat isn't available for Cursor yet, because Chat runs read-only and Cursor can't.",
+    ],
+  ])('disables chat for %s', (agentName, message) => {
     renderChat('/chat');
 
-    selectComboboxOption(screen.getByLabelText('Agent'), 'Kilo Agent');
+    selectComboboxOption(screen.getByLabelText('Agent'), agentName);
 
-    expect(
-      screen.getByText(
-        "Chat isn't available for Kilo Code yet, because Chat runs read-only and Kilo Code can't.",
-      ),
-    ).toBeVisible();
+    expect(screen.getByText(message)).toBeVisible();
     expect(screen.getByRole('button', { name: 'Start chat' })).toBeDisabled();
     fireEvent.click(screen.getByRole('button', { name: 'Start chat' }));
     expect(mocks.createSession).not.toHaveBeenCalled();
   });
 
-  it('hides the composer for an existing Kilo Code chat', () => {
+  it.each([
+    [
+      '00000000-0000-4000-8000-000000000012',
+      "Chat isn't available for Kilo Code yet, because Chat runs read-only and Kilo Code can't.",
+    ],
+    [
+      '00000000-0000-4000-8000-000000000013',
+      "Chat isn't available for Codex yet, because Chat runs read-only and Codex can't.",
+    ],
+    [
+      '00000000-0000-4000-8000-000000000014',
+      "Chat isn't available for OpenCode yet, because Chat runs read-only and OpenCode can't.",
+    ],
+    [
+      '00000000-0000-4000-8000-000000000015',
+      "Chat isn't available for Cursor yet, because Chat runs read-only and Cursor can't.",
+    ],
+  ])('hides the composer when the session agent is %s', (agentId, message) => {
     mocks.sessions = [
       {
         ...ACTIVE_SESSION,
-        agentId: '00000000-0000-4000-8000-000000000012',
+        agentId,
       },
     ];
     renderChat(`/chat/${ACTIVE_SESSION.id}`);
 
-    expect(
-      screen.getByText(
-        "Chat isn't available for Kilo Code yet, because Chat runs read-only and Kilo Code can't.",
-      ),
-    ).toBeVisible();
+    expect(screen.getByText(message)).toBeVisible();
     expect(screen.queryByTestId('chat-composer')).not.toBeInTheDocument();
   });
 
@@ -619,6 +663,27 @@ describe('ChatPage', () => {
     ).not.toBeDisabled();
   });
 
+  it('explains a basic draft when the agent could not draft the ticket', async () => {
+    mocks.sessions = [ACTIVE_SESSION];
+    mocks.draftTicketData = {
+      title: 'From the chat',
+      description: 'Notes from the conversation.',
+      source: 'fallback',
+    };
+
+    renderChat(`/chat/${ACTIVE_SESSION.id}`);
+    fireEvent.click(screen.getByRole('button', { name: 'Create ticket' }));
+
+    expect(await screen.findByDisplayValue('From the chat')).toBeInTheDocument();
+    expect(screen.getByTestId('draft-ticket-status')).toHaveTextContent(
+      "The agent couldn't draft this, so here's a basic draft from the chat. Edit it before you confirm.",
+    );
+    expect(screen.getByLabelText('Title')).not.toBeDisabled();
+    expect(
+      screen.getByRole('button', { name: 'Confirm create ticket' }),
+    ).not.toBeDisabled();
+  });
+
   it('creates a ticket from chat after confirming board and title', async () => {
     mocks.sessions = [ACTIVE_SESSION];
     mocks.createTicket.mockResolvedValue({
@@ -764,7 +829,7 @@ describe('ChatPage', () => {
 
     renderChat(`/chat/${ACTIVE_SESSION.id}`);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Cutoff' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Continue in new chat' }));
 
     await waitFor(() => {
       expect(mocks.cutoffSession).toHaveBeenCalled();

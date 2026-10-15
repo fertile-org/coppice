@@ -20,6 +20,12 @@ use std::time::Duration;
 const ALLOWED_TOOLS: &str =
     "Read,Write,Edit,MultiEdit,Bash,NotebookEdit,WebFetch,WebSearch,Glob,Grep,TodoWrite,Task";
 
+/// Removed from the model on read-only runs. A bare deny drops the tool before
+/// permission mode is considered, including `dontAsk` (which still allows
+/// read-only Bash) and `bypassPermissions` (which approves every tool an
+/// allowlist does not name).
+const CHAT_DISALLOWED_TOOLS: &str = "Write,Edit,MultiEdit,NotebookEdit,Bash,TodoWrite,Task";
+
 /// Per-run MCP config file (never the worktree or the user's `~/.claude.json`)
 /// plus the flags that make `claude` load it and nothing else.
 ///
@@ -50,6 +56,15 @@ fn claude_allowed_tools(read_only_tools: bool, mcp: bool) -> String {
         format!("{base},{}", claude_tool_pattern())
     } else {
         base.to_string()
+    }
+}
+
+fn push_tool_permission_args(args: &mut Vec<String>, read_only_tools: bool, mcp: bool) {
+    args.push("--allowedTools".to_string());
+    args.push(claude_allowed_tools(read_only_tools, mcp));
+    if read_only_tools {
+        args.push("--disallowedTools".to_string());
+        args.push(CHAT_DISALLOWED_TOOLS.to_string());
     }
 }
 
@@ -94,8 +109,7 @@ impl AgentProvider for ClaudeCodeProvider {
             }),
             coppice_run_prompt(),
         );
-        args.push("--allowedTools".to_string());
-        args.push(claude_allowed_tools(read_only_tools, input.mcp.is_some()));
+        push_tool_permission_args(&mut args, read_only_tools, input.mcp.is_some());
 
         append_model_flag(&mut args, input.model.as_deref());
 
@@ -364,6 +378,89 @@ mod tests {
             "Bearer ${COPPICE_MCP_TOKEN}"
         );
         assert!(!raw.contains("super-secret-run-token"));
+    }
+
+    fn chat_argv(read_only: bool, plan: bool, mcp: bool) -> Vec<String> {
+        let contract = coppice_connectors::get(coppice_connectors::CLAUDE_CODE)
+            .expect("claude-code descriptor")
+            .run_contract;
+        let mut args = contract.with_prompt(
+            contract.argv(&coppice_connectors::LaunchSubst {
+                read_only,
+                plan,
+                worktree: "/tmp/chat",
+                hostname: "",
+                port: "",
+                version: Some("2.1.292"),
+            }),
+            "prompt",
+        );
+        push_tool_permission_args(&mut args, read_only || plan, mcp);
+        args
+    }
+
+    fn flag_value<'a>(args: &'a [String], flag: &str) -> &'a str {
+        args.windows(2)
+            .find(|pair| pair[0] == flag)
+            .unwrap_or_else(|| panic!("missing {flag} in {args:?}"))[1]
+            .as_str()
+    }
+
+    #[test]
+    fn read_only_chat_blocks_write_edit_and_bash() {
+        let args = chat_argv(true, false, false);
+        assert!(
+            args.windows(2)
+                .any(|pair| pair == ["--permission-mode", "dontAsk"]),
+            "{args:?}"
+        );
+        assert!(
+            !args.iter().any(|arg| arg == "bypassPermissions"),
+            "bypassPermissions approves tools outside --allowedTools: {args:?}"
+        );
+        assert_eq!(flag_value(&args, "--allowedTools"), CHAT_READ_ONLY_TOOLS);
+        let disallowed: Vec<_> = flag_value(&args, "--disallowedTools").split(',').collect();
+        for tool in [
+            "Write",
+            "Edit",
+            "MultiEdit",
+            "NotebookEdit",
+            "Bash",
+            "TodoWrite",
+            "Task",
+        ] {
+            assert!(
+                disallowed.contains(&tool),
+                "{tool} must be disallowed, got {disallowed:?}"
+            );
+            assert!(
+                !CHAT_READ_ONLY_TOOLS.split(',').any(|name| name == tool),
+                "{tool} must not be allowed"
+            );
+        }
+    }
+
+    #[test]
+    fn write_runs_keep_bypass_and_do_not_disallow_edit_tools() {
+        let args = chat_argv(false, false, false);
+        assert!(args
+            .windows(2)
+            .any(|pair| pair == ["--permission-mode", "bypassPermissions"]));
+        assert!(!args.iter().any(|arg| arg == "--disallowedTools"));
+        assert_eq!(flag_value(&args, "--allowedTools"), ALLOWED_TOOLS);
+    }
+
+    #[test]
+    fn plan_runs_disallow_write_tools_without_bypass() {
+        let args = chat_argv(false, true, true);
+        assert!(args
+            .windows(2)
+            .any(|pair| pair == ["--permission-mode", "plan"]));
+        assert!(!args.iter().any(|arg| arg == "bypassPermissions"));
+        assert!(flag_value(&args, "--disallowedTools")
+            .split(',')
+            .any(|tool| tool == "Bash"));
+        assert!(flag_value(&args, "--allowedTools").ends_with(",mcp__coppice__*"));
     }
 
     #[test]

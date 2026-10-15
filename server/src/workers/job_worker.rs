@@ -952,6 +952,9 @@ async fn execute_chat_turn(
         .preset_source
         .clone()
         .unwrap_or_else(|| slugify(&agent.name));
+    if let Some(message) = crate::providers::chat_unavailable_message(&agent.connector) {
+        anyhow::bail!(message);
+    }
 
     let repo_local_path = if let Some(repo_id) = session.repo_id {
         sqlx::query_scalar::<_, String>("SELECT local_path FROM repos WHERE id = $1")

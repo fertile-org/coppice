@@ -79,7 +79,7 @@ Start at **Tools → Connectors** (admin): it shows whether `agent` is found, wh
 ## Behavior notes
 
 - **Live console:** Streams Cursor’s progress while the run is active. After a server restart mid-run, live reattach is not possible; Coppice replays the saved log and marks an interrupted run.
-- **Agent Chat:** Later turns use `--resume` with `--mode ask` (read-only); Coppice stores the session id on the chat session row.
+- **Agent Chat:** Not available. `--mode ask` blocks edit and apply, but shell commands can still write when the OS sandbox is off, so Coppice refuses Cursor chat before launch.
 - **Continued tickets:** Follow-up runs can resume the same Cursor chat session when Coppice has a prior `session_id`.
 - **Worktrees:** Coppice owns git worktrees. It does not pass Cursor’s `-w` / `--worktree` flag.
 - **MCP:** Not injected by Coppice in this version.
@@ -92,12 +92,6 @@ Start at **Tools → Connectors** (admin): it shows whether `agent` is found, wh
 agent -p "<prompt>" --trust --force --output-format stream-json --workspace <worktree>
 ```
 
-**Agent Chat turns** use Cursor’s read-only Q&A mode (no `--force`):
-
-```text
-agent -p "<prompt>" --trust --mode ask --output-format stream-json --workspace <worktree>
-```
-
-Both paths accept optional `--model` and `--resume <session_id>`. Stdout is NDJSON (`stream-json`); the final `result` event is parsed for Coppice’s JSON result contract. Live events are published as `cursor.console.*` on the run WebSocket.
+Plan runs use `--mode ask` and omit `--force`. That mode is not a Chat boundary: it does not block shell writes. Stdout is NDJSON (`stream-json`); the final `result` event is parsed for Coppice’s JSON result contract. Live events are published as `cursor.console.*` on the run WebSocket. Ticket runs accept optional `--model` and `--resume <session_id>`.
 
 More on connectors in general: [providers README](README.md). Milestone notes: [M08](../milestones/M08-connector-operator-cli.md).

@@ -75,12 +75,12 @@ Start at **Tools → Connectors** (admin): it shows whether `claude` is found, w
 ## Behavior notes
 
 - **Live console:** Streams Claude Code output while the run is active. After a server restart mid-run, Coppice replays the saved log.
-- **Agent Chat:** Later turns pass `--resume` with a narrow read-only `--allowedTools` set; Coppice stores the session id on the chat session row.
+- **Agent Chat:** Later turns pass `--resume` with `--permission-mode dontAsk`, a read-only `--allowedTools` list, and `--disallowedTools` for Write, Edit, and Bash. Coppice stores the session id on the chat session row. `bypassPermissions` is for ticket runs only: it still approves tools that are not on the allowlist.
 - **Continued tickets:** Follow-up runs can resume the same Claude session when Coppice has a prior `session_id`.
 - **Long context:** Within a single run, Claude Code may compact history near the model limit. Across runs, prefer checkpoint-style `continued` results (see [context design](../superpowers/specs/2026-06-10-context-long-running-tasks-design.md)).
 
 ## How Coppice runs Claude Code (reference)
 
-Coppice spawns `claude -p "<prompt>" --output-format stream-json --verbose --permission-mode bypassPermissions` with the worktree as the process cwd, then optional `--allowedTools`, `--model`, `--resume`, and per-run MCP flags. Those pinned flags live on the connector descriptor. Stdout NDJSON is mapped to live frames; the final result text is parsed for Coppice’s JSON result contract. A result ends the run even if `claude` is still waiting on a background command.
+Ticket runs spawn `claude -p "<prompt>" --output-format stream-json --verbose --permission-mode bypassPermissions` with the worktree as the process cwd, then optional `--allowedTools`, `--model`, `--resume`, and per-run MCP flags. Chat and plan runs replace `bypassPermissions` (`dontAsk` for chat, `plan` for planning) and pass `--disallowedTools Write,Edit,MultiEdit,NotebookEdit,Bash,TodoWrite,Task`. Those pinned flags live on the connector descriptor. Stdout NDJSON is mapped to live frames; the final result text is parsed for Coppice’s JSON result contract. A result ends the run even if `claude` is still waiting on a background command.
 
 More: [providers README](README.md), [M08](../milestones/M08-connector-operator-cli.md).

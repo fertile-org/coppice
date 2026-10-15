@@ -91,7 +91,7 @@ Start at **Tools → Connectors** (admin): it shows whether `opencode` is found,
 
 - **Live Session:** Structured UI (messages, tools, reasoning), not the mock/xterm console.
 - **Restart mid-run:** The per-run `opencode serve` does not survive a Coppice restart, so active OpenCode runs are marked interrupted; the Live Session replays the stored snapshot and ends non-recoverable. Chat and resume still continue the stored session id — OpenCode keeps sessions in its shared data dir.
-- **Agent Chat:** Supported; later turns reuse the same OpenCode HTTP session (`prompt_async` on the stored session id) with a slim Coppice context file. No hard read-only tool allowlist — rely on chat rules and operator trust.
+- **Agent Chat:** Not available. `opencode serve` has no verified read-only permission flag, so Coppice refuses the chat before launch.
 - **Long context:** OpenCode can compact history within a single run. Across runs, prefer `continued` checkpoints ([context design](../superpowers/specs/2026-06-10-context-long-running-tasks-design.md)).
 - **CI / default Compose:** Stay on `mock` unless you deliberately enable OpenCode.
 

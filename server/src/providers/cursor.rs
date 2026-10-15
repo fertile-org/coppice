@@ -230,8 +230,9 @@ fn format_stderr_suffix(lines: &[String]) -> String {
 
 /// Build `agent` CLI argv (excluding the binary name).
 ///
-/// Ticket runs use `--force` (write-capable). Chat turns and plan runs use
-/// `--mode ask` (Cursor's read-only mode) and omit `--force`.
+/// Ticket runs use `--force` (write-capable). Plan runs use `--mode ask` and
+/// omit `--force`. Ask mode blocks edit/apply but not shell writes, so Chat
+/// does not launch Cursor: the server refuses that connector first.
 fn cursor_cli_args(
     worktree: &Path,
     read_only_tools: bool,

@@ -39,13 +39,29 @@ export function signInUncheckedHint(
     : null;
 }
 
-/** Chat turns are read-only. Kilo Code refuses that, and it has no safe write-blocked mode. */
+/** Chat turns are read-only. These connectors cannot enforce that, so Chat stays off. */
 export const KILO_CHAT_UNAVAILABLE =
   "Chat isn't available for Kilo Code yet, because Chat runs read-only and Kilo Code can't.";
 
+export const CODEX_CHAT_UNAVAILABLE =
+  "Chat isn't available for Codex yet, because Chat runs read-only and Codex can't.";
+
+export const OPENCODE_CHAT_UNAVAILABLE =
+  "Chat isn't available for OpenCode yet, because Chat runs read-only and OpenCode can't.";
+
+export const CURSOR_CHAT_UNAVAILABLE =
+  "Chat isn't available for Cursor yet, because Chat runs read-only and Cursor can't.";
+
+const CHAT_UNAVAILABLE_BY_CONNECTOR: Record<string, string> = {
+  'kilo-code': KILO_CHAT_UNAVAILABLE,
+  codex: CODEX_CHAT_UNAVAILABLE,
+  opencode: OPENCODE_CHAT_UNAVAILABLE,
+  cursor: CURSOR_CHAT_UNAVAILABLE,
+};
+
 export function chatUnavailableMessage(connectorId: string | null | undefined): string | null {
-  if (connectorId === 'kilo-code') return KILO_CHAT_UNAVAILABLE;
-  return null;
+  if (!connectorId) return null;
+  return CHAT_UNAVAILABLE_BY_CONNECTOR[connectorId] ?? null;
 }
 
 export function notOnPathHint(name: string): string {

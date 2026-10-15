@@ -76,7 +76,7 @@ Start at **Tools → Connectors** (admin): it shows whether `codex` is found, wh
 ## Behavior notes
 
 - **Live console:** Streams Codex output while the run is active. After a server restart mid-run, Coppice replays the saved log.
-- **Agent Chat:** Supported with prompt-level write denial; Coppice passes `codex exec resume <id>` on later chat turns when a session id is stored. Resume is **best-effort** — Coppice falls back to a full transcript once if resume fails.
+- **Agent Chat:** Not available. Codex chat would launch with `--dangerously-bypass-approvals-and-sandbox`, and there is no verified read-only mode wired here, so Coppice refuses the chat before launch.
 - **Continued tickets:** Prefer checkpoint-style `continued` runs (progress note → next run). Ticket runs may also use resume when a prior `thread_id` exists.
 - **Long context:** Within a single run, Codex may compact history near the model limit. Across runs, use checkpoints ([context design](../superpowers/specs/2026-06-10-context-long-running-tasks-design.md)).
 

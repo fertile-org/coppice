@@ -43,9 +43,20 @@ describe('chatUnavailableMessage', () => {
     );
   });
 
-  it('leaves other connectors available', () => {
+  it('explains chat is unavailable for each connector that cannot stay read-only', () => {
+    expect(chatUnavailableMessage('codex')).toBe(
+      "Chat isn't available for Codex yet, because Chat runs read-only and Codex can't.",
+    );
+    expect(chatUnavailableMessage('opencode')).toBe(
+      "Chat isn't available for OpenCode yet, because Chat runs read-only and OpenCode can't.",
+    );
+    expect(chatUnavailableMessage('cursor')).toBe(
+      "Chat isn't available for Cursor yet, because Chat runs read-only and Cursor can't.",
+    );
+  });
+
+  it('leaves Claude Code available', () => {
     expect(chatUnavailableMessage('claude-code')).toBeNull();
-    expect(chatUnavailableMessage('cursor')).toBeNull();
     expect(chatUnavailableMessage(null)).toBeNull();
   });
 });

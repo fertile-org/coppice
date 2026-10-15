@@ -63,11 +63,11 @@ Agent Chat turns run with read-only tools. Coppice stores the full transcript it
 
 | Connector | Chat session resume | Read-only tools in chat |
 | --- | --- | --- |
-| `claude-code` | `--resume` | Enforced with an `--allowedTools` read-only list |
-| `cursor` | `--resume` | Enforced with `--mode ask` |
-| `codex` | `codex exec resume` (best effort) | Not enforced by the CLI; prompt and rules only |
-| `opencode` | Reuses the OpenCode session | Not enforced by the CLI; prompt and rules only |
-| `kilo-code` | Skipped | Can't be enforced, so the run is refused: ``connector `kilo-code` cannot enforce read-only tools for conversation chat turns`` |
+| `claude-code` | `--resume` | `--permission-mode dontAsk` plus `--disallowedTools Write,Edit,MultiEdit,NotebookEdit,Bash,TodoWrite,Task` and a read-only `--allowedTools` list. `bypassPermissions` does not treat that allowlist as a deny list, so chat does not use it |
+| `cursor` | Skipped | Refused. `--mode ask` blocks edits, not shell writes |
+| `codex` | Skipped | Refused. No verified read-only mode |
+| `opencode` | Skipped | Refused. No verified read-only mode |
+| `kilo-code` | Skipped | Refused. Chat isn't available for Kilo Code yet, because Chat runs read-only and Kilo Code can't. |
 
 Ticket runs can resume a prior session on `claude-code` and `cursor`. The other connectors start a fresh session and continue from the ticket checkpoint.
 
