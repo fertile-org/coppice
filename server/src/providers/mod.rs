@@ -130,12 +130,13 @@ pub fn mcp_unavailable(reason: &str) -> ProviderError {
 
 /// Connectors whose descriptor has `caps.read_only_tools`, in the order shown
 /// to users (settings API, compaction error). Chat refuses every other
-/// connector before launch. Cursor is omitted: `--mode ask` does not block
-/// shell writes.
+/// connector before launch. Cursor is omitted: `--mode ask` was not shown to
+/// block shell writes. OpenCode is included: its per-run deny was.
 pub const READ_ONLY_CAPABLE_CONNECTORS: &[&str] = &[
     #[cfg(feature = "mock-provider")]
     coppice_connectors::MOCK,
     coppice_connectors::CLAUDE_CODE,
+    coppice_connectors::OPENCODE,
 ];
 
 pub fn connector_enforces_read_only(connector: &str) -> bool {
@@ -410,7 +411,7 @@ mod tests {
         }
         assert!(!connector_enforces_read_only("codex"));
         assert!(!connector_enforces_read_only("cursor"));
-        assert!(!connector_enforces_read_only("opencode"));
+        assert!(connector_enforces_read_only("opencode"));
         assert!(!connector_enforces_read_only("kilo-code"));
     }
 
@@ -429,10 +430,6 @@ mod tests {
                 coppice_connectors::KILO_CODE,
                 "Chat isn't available for Kilo Code yet, because Chat runs read-only and Kilo Code can't.",
             ),
-            (
-                coppice_connectors::OPENCODE,
-                "Chat isn't available for OpenCode yet, because Chat runs read-only and OpenCode can't.",
-            ),
         ];
         for (id, message) in blocked {
             assert!(
@@ -445,6 +442,7 @@ mod tests {
             coppice_connectors::CLAUDE_CODE
         ));
         assert!(chat_unavailable_message(coppice_connectors::CLAUDE_CODE).is_none());
+        assert!(chat_unavailable_message(coppice_connectors::OPENCODE).is_none());
         #[cfg(feature = "mock-provider")]
         {
             assert!(connector_enforces_read_only(coppice_connectors::MOCK));

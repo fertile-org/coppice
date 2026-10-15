@@ -313,7 +313,12 @@ const CONNECTORS: &[ConnectorDescriptor] = &[
         mcp_tool_names: ToolNameStyle::Underscore,
         console: ConsoleKind::OpenCodeSession,
         caps: Capabilities {
-            read_only_tools: false,
+            // Chat denies `edit` and `bash` in the per-run config and sets
+            // OPENCODE_DISABLE_PROJECT_CONFIG. Verified with OpenCode 1.19.0:
+            // a project file that allows both tools could not create a file or
+            // run a writing shell command. Without that env var, the project
+            // file overrode the deny and both writes succeeded.
+            read_only_tools: true,
             chat_resume: true,
             session_events: true,
             run_resume: false,
@@ -439,7 +444,7 @@ mod tests {
             OpenCodeJson,
             Underscore,
             OpenCodeSession,
-            false,
+            true,
             true,
             true,
             false,

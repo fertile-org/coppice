@@ -63,11 +63,11 @@ Agent Chat turns run with read-only tools. Coppice stores the full transcript it
 
 | Connector | Chat session resume | Read-only tools in chat |
 | --- | --- | --- |
-| `claude-code` | `--resume` | `--permission-mode dontAsk` plus `--disallowedTools Write,Edit,MultiEdit,NotebookEdit,Bash,TodoWrite,Task` and a read-only `--allowedTools` list. `bypassPermissions` does not treat that allowlist as a deny list, so chat does not use it |
-| `cursor` | Skipped | Refused. `--mode ask` blocks edits, not shell writes |
-| `codex` | Skipped | Refused. No verified read-only mode |
-| `opencode` | Skipped | Refused. No verified read-only mode |
-| `kilo-code` | Skipped | Refused. Chat isn't available for Kilo Code yet, because Chat runs read-only and Kilo Code can't. |
+| `claude-code` | `--resume` | On. `--permission-mode dontAsk` plus `--disallowedTools Write,Edit,MultiEdit,NotebookEdit,Bash,TodoWrite,Task` and a read-only `--allowedTools` list. Not live-verified here: the `claude` binary was not installed and no API key was set |
+| `cursor` | Skipped | Off. `--mode ask` without `--force` was not shown to block writes. CLI `2026.10.14-941492e` was installed and not signed in; the prompt exited with `Authentication required` before any tool call. Cursor staff say ask mode does not hard-block shell unless `--sandbox enabled`, which also blocks network and MCP |
+| `codex` | Skipped | Off. `codex exec --sandbox read-only` exists (`codex-cli 0.162.1`). A write prompt with that flag exited `401 Unauthorized` before a tool call, so it was not shown to block a write. Ticket runs still use `--dangerously-bypass-approvals-and-sandbox` |
+| `opencode` | Prior session id | On. Per-run config sets `permission.edit` and `permission.bash` to `deny`, and the process sets `OPENCODE_DISABLE_PROJECT_CONFIG=1`. Verified with OpenCode 1.19.0 and `opencode/big-pickle`: that pair blocked a file write and a shell write even when the project `opencode.json` allowed both. The same deny without the env var lost to the project file |
+| `kilo-code` | Skipped | Off. No read-only flag. The `kilo` binary was not on this machine |
 
 Ticket runs can resume a prior session on `claude-code` and `cursor`. The other connectors start a fresh session and continue from the ticket checkpoint.
 

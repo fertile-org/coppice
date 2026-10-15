@@ -282,10 +282,6 @@ describe('ChatPage', () => {
       "Chat isn't available for Codex yet, because Chat runs read-only and Codex can't.",
     ],
     [
-      'OpenCode Agent',
-      "Chat isn't available for OpenCode yet, because Chat runs read-only and OpenCode can't.",
-    ],
-    [
       'Cursor Agent',
       "Chat isn't available for Cursor yet, because Chat runs read-only and Cursor can't.",
     ],
@@ -308,10 +304,6 @@ describe('ChatPage', () => {
     [
       '00000000-0000-4000-8000-000000000013',
       "Chat isn't available for Codex yet, because Chat runs read-only and Codex can't.",
-    ],
-    [
-      '00000000-0000-4000-8000-000000000014',
-      "Chat isn't available for OpenCode yet, because Chat runs read-only and OpenCode can't.",
     ],
     [
       '00000000-0000-4000-8000-000000000015',
@@ -834,7 +826,9 @@ describe('ChatPage', () => {
     await waitFor(() => {
       expect(mocks.cutoffSession).toHaveBeenCalled();
     });
-    expect(window.confirm).toHaveBeenCalled();
+    expect(window.confirm).toHaveBeenCalledWith(
+      'Continue in a new chat? A shorter chat will open with a summary of this one. This chat stays readable.',
+    );
     await waitFor(() => {
       expect(
         screen.getByRole('heading', { name: 'Backend Engineer' }),
@@ -844,6 +838,17 @@ describe('ChatPage', () => {
       );
       expect(screen.getByTestId('chat-composer')).toBeInTheDocument();
     });
+  });
+
+  it('labels a continued session and hides the composer', () => {
+    mocks.sessions = [{ ...ACTIVE_SESSION, status: 'cutoff' }];
+    renderChat(`/chat/${ACTIVE_SESSION.id}`);
+
+    expect(screen.getByTestId('chat-session-status')).toHaveTextContent('Continued');
+    expect(
+      screen.getByText(/This chat was continued in a new one/),
+    ).toBeInTheDocument();
+    expect(screen.queryByTestId('chat-composer')).not.toBeInTheDocument();
   });
 
   it('submits on Enter with a non-empty body', async () => {

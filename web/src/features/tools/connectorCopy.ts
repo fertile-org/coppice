@@ -46,16 +46,12 @@ export const KILO_CHAT_UNAVAILABLE =
 export const CODEX_CHAT_UNAVAILABLE =
   "Chat isn't available for Codex yet, because Chat runs read-only and Codex can't.";
 
-export const OPENCODE_CHAT_UNAVAILABLE =
-  "Chat isn't available for OpenCode yet, because Chat runs read-only and OpenCode can't.";
-
 export const CURSOR_CHAT_UNAVAILABLE =
   "Chat isn't available for Cursor yet, because Chat runs read-only and Cursor can't.";
 
 const CHAT_UNAVAILABLE_BY_CONNECTOR: Record<string, string> = {
   'kilo-code': KILO_CHAT_UNAVAILABLE,
   codex: CODEX_CHAT_UNAVAILABLE,
-  opencode: OPENCODE_CHAT_UNAVAILABLE,
   cursor: CURSOR_CHAT_UNAVAILABLE,
 };
 

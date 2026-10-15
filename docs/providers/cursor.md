@@ -79,7 +79,7 @@ Start at **Tools → Connectors** (admin): it shows whether `agent` is found, wh
 ## Behavior notes
 
 - **Live console:** Streams Cursor’s progress while the run is active. After a server restart mid-run, live reattach is not possible; Coppice replays the saved log and marks an interrupted run.
-- **Agent Chat:** Not available. `--mode ask` blocks edit and apply, but shell commands can still write when the OS sandbox is off, so Coppice refuses Cursor chat before launch.
+- **Agent Chat:** Not available. `--mode ask` (no `--force`) was not shown to block writes: Cursor CLI `2026.10.14-941492e` was installed here and not signed in, and the prompt exited with `Authentication required` before any tool call. Cursor staff say ask mode does not hard-block shell writes unless `--sandbox enabled`, and that sandbox also blocks network and MCP, so chat stays off.
 - **Continued tickets:** Follow-up runs can resume the same Cursor chat session when Coppice has a prior `session_id`.
 - **Worktrees:** Coppice owns git worktrees. It does not pass Cursor’s `-w` / `--worktree` flag.
 - **MCP:** Not injected by Coppice in this version.

@@ -76,7 +76,7 @@ Start at **Tools → Connectors** (admin): it shows whether `codex` is found, wh
 ## Behavior notes
 
 - **Live console:** Streams Codex output while the run is active. After a server restart mid-run, Coppice replays the saved log.
-- **Agent Chat:** Not available. Codex chat would launch with `--dangerously-bypass-approvals-and-sandbox`, and there is no verified read-only mode wired here, so Coppice refuses the chat before launch.
+- **Agent Chat:** Not available. `codex exec --sandbox read-only` is a real flag (`codex-cli 0.162.1` lists it, and `exec` defaults to a read-only sandbox). A write prompt with `--sandbox read-only` on this machine exited `401 Unauthorized` before any tool call, so it was not shown to block a write. Ticket runs still pass `--dangerously-bypass-approvals-and-sandbox`. Chat stays off until a signed-in write attempt is blocked.
 - **Continued tickets:** Prefer checkpoint-style `continued` runs (progress note → next run). Ticket runs may also use resume when a prior `thread_id` exists.
 - **Long context:** Within a single run, Codex may compact history near the model limit. Across runs, use checkpoints ([context design](../superpowers/specs/2026-06-10-context-long-running-tasks-design.md)).
 

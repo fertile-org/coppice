@@ -1143,7 +1143,9 @@ impl<'a> ChatService<'a> {
     ) -> Result<CutoffResult, ChatError> {
         let parent = self.get_session(session_id, owner_user_id).await?;
         if parent.status == ChatSessionStatus::Cutoff {
-            return Err(ChatError::Validation("session is already cutoff".into()));
+            return Err(ChatError::Validation(
+                "This chat was already continued.".into(),
+            ));
         }
 
         let transcript = self.format_transcript(session_id).await?;
@@ -1174,14 +1176,14 @@ impl<'a> ChatService<'a> {
             .append_message(
                 session_id,
                 ChatMessageRole::System,
-                &format!("Session cutoff. Continued in child session {}.", child.id),
+                "Continued in a new chat.",
                 None,
                 Some(serde_json::to_value(&meta).unwrap_or_default()),
             )
             .await?;
 
         let seed_body = format!(
-            "Continued from cutoff session {session_id}.\n\n## Prior conversation summary\n\n{summary}"
+            "Continued from an earlier chat.\n\n## Prior conversation summary\n\n{summary}"
         );
         let seed_message = self
             .append_message(

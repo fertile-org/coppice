@@ -1725,7 +1725,7 @@ async fn chat_refuses_connectors_that_cannot_enforce_read_only_before_launch() {
     let session_id = session["id"].as_str().unwrap().to_string();
     let session_uuid = uuid::Uuid::parse_str(&session_id).unwrap();
 
-    for connector in ["codex", "opencode", "cursor", "kilo-code"] {
+    for connector in ["codex", "cursor", "kilo-code"] {
         set_agent_connector(pool, agent_uuid, connector).await;
         let expected = coppice_server::providers::chat_unavailable_message(connector)
             .unwrap_or_else(|| panic!("{connector} should be blocked"));
@@ -1788,20 +1788,25 @@ async fn chat_refuses_connectors_that_cannot_enforce_read_only_before_launch() {
         );
     }
 
-    set_agent_connector(pool, agent_uuid, "claude-code").await;
-    let allowed = app
-        .clone()
-        .oneshot(common::json_request(
-            "POST",
-            "/api/chat/sessions",
-            &format!(r#"{{"agentId":"{agent_id}"}}"#),
-            &cookie,
-            &csrf,
-        ))
-        .await
-        .unwrap();
-    assert_eq!(allowed.status(), StatusCode::CREATED);
-    assert!(coppice_server::providers::chat_unavailable_message("claude-code").is_none());
+    for connector in ["claude-code", "opencode"] {
+        set_agent_connector(pool, agent_uuid, connector).await;
+        let allowed = app
+            .clone()
+            .oneshot(common::json_request(
+                "POST",
+                "/api/chat/sessions",
+                &format!(r#"{{"agentId":"{agent_id}"}}"#),
+                &cookie,
+                &csrf,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(allowed.status(), StatusCode::CREATED, "{connector}");
+        assert!(
+            coppice_server::providers::chat_unavailable_message(connector).is_none(),
+            "{connector}"
+        );
+    }
 }
 
 async fn set_agent_connector(pool: &sqlx::PgPool, agent_id: uuid::Uuid, connector: &str) {

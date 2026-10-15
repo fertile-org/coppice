@@ -75,7 +75,7 @@ Start at **Tools → Connectors** (admin): it shows whether `claude` is found, w
 ## Behavior notes
 
 - **Live console:** Streams Claude Code output while the run is active. After a server restart mid-run, Coppice replays the saved log.
-- **Agent Chat:** Later turns pass `--resume` with `--permission-mode dontAsk`, a read-only `--allowedTools` list, and `--disallowedTools` for Write, Edit, and Bash. Coppice stores the session id on the chat session row. `bypassPermissions` is for ticket runs only: it still approves tools that are not on the allowlist.
+- **Agent Chat:** Later turns pass `--resume` with `--permission-mode dontAsk`, a read-only `--allowedTools` list, and `--disallowedTools` for Write, Edit, and Bash. Coppice stores the session id on the chat session row. `bypassPermissions` is for ticket runs only: it still approves tools that are not on the allowlist. This flag set follows Anthropic's permission order (a bare deny drops the tool before the permission mode). It was not live-verified here: `claude` was not installed and no API key was set.
 - **Continued tickets:** Follow-up runs can resume the same Claude session when Coppice has a prior `session_id`.
 - **Long context:** Within a single run, Claude Code may compact history near the model limit. Across runs, prefer checkpoint-style `continued` results (see [context design](../superpowers/specs/2026-06-10-context-long-running-tasks-design.md)).
 

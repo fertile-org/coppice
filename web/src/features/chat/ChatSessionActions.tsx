@@ -374,7 +374,7 @@ export function ChatSessionActions({
 
   async function handleCutoff() {
     const confirmed = window.confirm(
-      'Cutoff this session? A shorter child chat will open with a summary seed. This session stays readable.',
+      'Continue in a new chat? A shorter chat will open with a summary of this one. This chat stays readable.',
     );
     if (!confirmed) return;
     setError(null);
@@ -421,7 +421,7 @@ export function ChatSessionActions({
           disabled={disabled || cutoff.isPending}
           onClick={() => void handleCutoff()}
         >
-          {cutoff.isPending ? 'Cutting off…' : 'Continue in new chat'}
+          {cutoff.isPending ? 'Starting a new chat…' : 'Continue in new chat'}
         </Button>
       </div>
       {error && (

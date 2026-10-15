@@ -43,17 +43,25 @@ impl AgentProvider for OpenCodeProvider {
         if let Some(parent) = config_path.parent() {
             std::fs::create_dir_all(parent)?;
         }
-        std::fs::write(&config_path, opencode_run_config(input.mcp.as_ref()))?;
+        std::fs::write(
+            &config_path,
+            opencode_run_config(input.mcp.as_ref(), input.read_only_tools),
+        )?;
 
         let key = input
             .run_id
             .clone()
             .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
-        let env = input
+        let mut env = input
             .mcp
             .as_ref()
             .map(|access| access.env().to_vec())
             .unwrap_or_default();
+        if input.read_only_tools {
+            // Without this, a checkout's opencode.json that allows edit and
+            // bash overrides the per-run deny. Verified on OpenCode 1.19.0.
+            env.push(("OPENCODE_DISABLE_PROJECT_CONFIG", "1".into()));
+        }
         let lease = self
             .servers
             .start(&key, &config_path, env, input.ticket_id.as_deref())

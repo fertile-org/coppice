@@ -287,7 +287,7 @@ pub const OPENCODE: RunContract = RunContract {
         read_only: None,
         min_version: None,
         gate: false,
-        reason: "opencode serve has no documented permission-mode flag. The HTTP session carries the worktree.",
+        reason: "opencode serve has no permission-mode argv. Read-only chat denies edit and bash in OPENCODE_CONFIG and sets OPENCODE_DISABLE_PROJECT_CONFIG so a project config cannot allow those tools.",
     },
     leading: &[
         flag(

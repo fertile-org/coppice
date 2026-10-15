@@ -74,7 +74,7 @@ function sessionStatusLabel(status: ChatSessionStatus): string {
     case 'active':
       return 'Active';
     case 'cutoff':
-      return 'Cutoff';
+      return 'Continued';
     case 'archived':
       return 'Archived';
   }
@@ -516,10 +516,9 @@ function ChatSessionPane({ sessionId }: { sessionId: string }) {
 
       {cutoff ? (
         <p className="shrink-0 border-t border-border bg-paper-50/90 px-4 py-3 font-body text-sm text-text-secondary">
-          This session is {session?.status}. History stays readable
           {session?.status === 'cutoff'
-            ? ' — open the continued child session from the transcript chip if one exists.'
-            : '.'}{' '}
+            ? 'This chat was continued in a new one. History stays readable — open the continued chat from the transcript if one exists.'
+            : 'This session is archived. History stays readable.'}{' '}
           <Link to="/chat" className="text-accent hover:underline">
             Start a new chat
           </Link>
