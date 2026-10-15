@@ -1,10 +1,5 @@
 import { useContext, useEffect, useMemo, useRef, useState } from 'react';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogTitle,
-} from '../../components/ui/dialog';
+import { Dialog, DialogContent, DialogTitle } from '../../components/ui/dialog';
 import { SessionContext } from '../auth/useSession';
 import { HELP_COPY, helpSections } from './help';
 import { detectPlatform } from './platform';
@@ -52,6 +47,7 @@ export function ShortcutHelp() {
       <DialogContent
         className="z-[70] flex max-h-[min(40rem,85vh)] max-w-lg flex-col overflow-hidden p-0"
         overlayClassName="z-[70]"
+        aria-describedby={undefined}
         onCloseAutoFocus={(event) => {
           const node = restoreFocus.current;
           restoreFocus.current = null;
@@ -82,7 +78,6 @@ export function ShortcutHelp() {
               </ul>
             </section>
           ))}
-          <DialogDescription className="mt-5">{HELP_COPY.footer}</DialogDescription>
         </div>
       </DialogContent>
     </Dialog>

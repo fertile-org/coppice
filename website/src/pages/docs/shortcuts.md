@@ -6,7 +6,7 @@ description: "Move around Coppice from the keyboard: the board, tickets, and rev
 
 # Keyboard shortcuts
 
-Press `?` anywhere to see every shortcut. Shortcuts are grouped as **Navigate**, **Tickets**, and **Review**, and you can change them in Settings.
+Press `?` anywhere to see every shortcut. Shortcuts are grouped as **Navigate**, **Tickets**, and **Review**.
 
 `Mod` is `⌘` on macOS and `Ctrl` on Linux and on WSL. Sequences are shown as `G then B`.
 

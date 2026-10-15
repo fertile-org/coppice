@@ -61,7 +61,7 @@ describe('shortcut help overlay', () => {
     expect(screen.getByText('Create ticket')).toBeVisible();
     expect(screen.getByText('Accept…')).toBeVisible();
     expect(screen.getByText('Ctrl+Shift+Enter')).toBeVisible();
-    expect(screen.getByText('Change shortcuts in Settings.')).toBeVisible();
+    expect(screen.queryByText('Change shortcuts in Settings.')).toBeNull();
     expect(screen.queryByText('Go to Plugins')).toBeNull();
     expect(screen.queryByText('Go to Users')).toBeNull();
 
