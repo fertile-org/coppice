@@ -284,9 +284,10 @@ fn row_to_user(row: &sqlx::postgres::PgRow) -> User {
     }
 }
 
-/// Shortest password the app accepts. The web form uses this same number.
-/// Today that rule is the non-empty check on create-user (`min(1)`).
-pub const MIN_PASSWORD_CHARS: usize = 1;
+/// Shortest new admin password Replace keys accepts.
+/// Login and creating a user do not use this number: an existing password
+/// still signs in, and a new user is only required to be non-empty.
+pub const MIN_PASSWORD_CHARS: usize = 8;
 
 pub fn hash_password(password: &str) -> Result<String, argon2::password_hash::Error> {
     let salt = SaltString::generate(&mut OsRng);

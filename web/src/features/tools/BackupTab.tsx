@@ -130,7 +130,8 @@ export function BackupTab() {
     <div className="space-y-8">
       <p className="max-w-2xl font-body text-sm text-text-secondary">
         Download a backup of your boards, tickets, settings, files, and agent
-        worktrees. Passwords and keys are left out. Keep the file private.
+        worktrees. Passwords, keys, and saved tokens are left out. Keep the file
+        private.
       </p>
 
       {message && (
@@ -171,7 +172,7 @@ export function BackupTab() {
         <p className="mt-2 font-body text-sm text-text-secondary">
           Importing replaces all data on this install with the backup's. Its
           settings are restored too, except passwords, keys, and folder paths.
-          You may be signed out.
+          You'll paste saved tokens again, and you may be signed out.
         </p>
         <p className="mt-2 font-body text-sm text-text-secondary">
           The desktop app has everything it needs to import. A server install
@@ -210,6 +211,12 @@ export function BackupTab() {
           </Button>
         </form>
       </section>
+
+      {!desktopMode && (
+        <p className="max-w-2xl font-body text-sm text-text-secondary">
+          On a server, stop Coppice and run `coppice-server replace-keys`.
+        </p>
+      )}
 
       {desktopMode && (
         <section className="rounded-xl border border-border bg-surface-raised p-6 shadow-card">

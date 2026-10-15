@@ -36,12 +36,13 @@ const ADMIN_PENDING: &str = "admin_password.pending";
 pub const PG_PENDING: &str = "pg_password.pending";
 
 pub const REPLACE_UI_ERROR: &str = "Couldn't replace keys. Nothing was changed.";
-pub const REPLACE_DESKTOP_ONLY: &str = "Replacing keys works only in the desktop app.";
+pub const REPLACE_ON_SERVER: &str =
+    "On a server, stop Coppice and run `coppice-server replace-keys`.";
 pub const PASSWORD_EMPTY: &str = "Enter a new admin password.";
 
 #[derive(Debug, thiserror::Error)]
 pub enum ReplaceError {
-    #[error("{REPLACE_DESKTOP_ONLY}")]
+    #[error("{REPLACE_ON_SERVER}")]
     NotDesktop,
     #[error("{PASSWORD_EMPTY}")]
     PasswordEmpty,
@@ -661,7 +662,9 @@ async fn pending_key_state(
     current: &str,
     pending: &str,
 ) -> Result<PendingKey, ReplaceError> {
-    let row = sqlx::query("SELECT ciphertext, nonce FROM secrets LIMIT 1")
+    let row = sqlx::query(
+        "SELECT ciphertext, nonce FROM secrets WHERE NOT needs_reentry LIMIT 1",
+    )
         .fetch_optional(pool)
         .await?;
     let Some(row) = row else {
@@ -691,10 +694,15 @@ async fn reencrypt_admin_and_sign_out(
     password_hash: &str,
 ) -> Result<(), ReplaceError> {
     let mut tx = conn.begin().await?;
-    let rows = sqlx::query("SELECT id, ciphertext, nonce FROM secrets FOR UPDATE")
-        .fetch_all(&mut *tx)
-        .await?;
+    let rows = sqlx::query(
+        "SELECT id, ciphertext, nonce, needs_reentry FROM secrets FOR UPDATE",
+    )
+    .fetch_all(&mut *tx)
+    .await?;
     for row in rows {
+        if row.get::<bool, _>("needs_reentry") {
+            continue;
+        }
         let id: Uuid = row.get("id");
         let ciphertext: Vec<u8> = row.get("ciphertext");
         let nonce: Vec<u8> = row.get("nonce");
@@ -1062,10 +1070,7 @@ pub async fn replace_offline(
             &email,
         )
         .await?;
-        return Ok(format!(
-            "Keys replaced. New values were written to {}.",
-            dir.display()
-        ));
+        return Ok(replaced_keys_message(&dir));
     }
     let _url = replace_server_keys(
         &pool,
@@ -1078,10 +1083,14 @@ pub async fn replace_offline(
         &email,
     )
     .await?;
-    Ok(format!(
-        "Keys replaced. New values were written to {}.",
-        config_path.display()
-    ))
+    Ok(replaced_keys_message(config_path))
+}
+
+pub fn replaced_keys_message(path: &Path) -> String {
+    format!(
+        "Keys replaced. The new values are in {}. Keep that file private.",
+        path.display()
+    )
 }
 
 #[cfg(all(test, feature = "embedded-test-db"))]
@@ -1172,10 +1181,19 @@ mod tests {
             ReplaceError::PasswordShort.to_string(),
             format!("Use at least {MIN_PASSWORD_CHARS} characters.")
         );
+        assert_eq!(MIN_PASSWORD_CHARS, 8);
+        assert_eq!(
+            check_admin_password("1234567").unwrap_err().to_string(),
+            "Use at least 8 characters."
+        );
         assert!(check_admin_password("").is_err());
         assert!(check_admin_password("   ").is_err());
         let ok = "a".repeat(MIN_PASSWORD_CHARS);
         assert!(check_admin_password(&ok).is_ok());
+        assert_eq!(
+            replaced_keys_message(Path::new("/tmp/config.toml")),
+            "Keys replaced. The new values are in /tmp/config.toml. Keep that file private."
+        );
     }
 
     #[tokio::test]
@@ -1241,6 +1259,47 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(sessions, 0);
+    }
+
+    #[tokio::test]
+    async fn fresh_key_flags_the_token_and_replace_skips_it() {
+        let pool = pool().await;
+        insert_admin(&pool, "admin@localhost", "old-admin-pass").await;
+        let old_store = SecretStore::from_master_key("old-master-key");
+        let fresh = SecretStore::from_master_key("fresh-install-key");
+        insert_secret(&pool, &old_store, "ghp_BROWSERTOKEN_9f3c1a").await;
+
+        let flagged = crate::services::secret_service::SecretService::new(&pool, &fresh)
+            .flag_undecryptable()
+            .await
+            .unwrap();
+        assert_eq!(flagged, 1);
+        let row = sqlx::query("SELECT ciphertext, needs_reentry FROM secrets")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        let ciphertext: Vec<u8> = row.get("ciphertext");
+        assert!(ciphertext.is_empty());
+        assert!(row.get::<bool, _>("needs_reentry"));
+
+        let mut conn = pool.acquire().await.unwrap();
+        reencrypt_admin_and_sign_out(
+            &mut *conn,
+            &fresh,
+            &SecretStore::from_master_key("replaced-key"),
+            "admin@localhost",
+            "hash",
+        )
+        .await
+        .expect("replace skips the flagged token");
+        drop(conn);
+
+        let still: i64 =
+            sqlx::query_scalar("SELECT count(*) FROM secrets WHERE needs_reentry")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(still, 1);
     }
 
     #[tokio::test]

@@ -55,6 +55,7 @@ impl BackupService {
         pool: &PgPool,
         bytes: &[u8],
         config_path: Option<&Path>,
+        secret_store: &crate::crypto::SecretStore,
     ) -> Result<String, BackupError> {
         let temp_dir = tempfile::tempdir().map_err(BackupError::Io)?;
         let extract_root = temp_dir.path().join("import");
@@ -74,6 +75,15 @@ impl BackupService {
 
         terminate_other_sessions(pool).await?;
         run_psql_file(&config.database.url, &db_sql)?;
+        crate::services::secret_service::SecretService::new(pool, secret_store)
+            .flag_undecryptable()
+            .await
+            .map_err(|err| match err {
+                crate::services::secret_service::SecretError::Database(err) => {
+                    BackupError::Database(err)
+                }
+                other => BackupError::Config(other.to_string()),
+            })?;
 
         restore_tree(
             &extract_root.join("data/artifacts"),

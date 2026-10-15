@@ -67,6 +67,16 @@ describe('ToolsPage', () => {
     expect(
       screen.getByRole('button', { name: 'Import backup' }),
     ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        'Download a backup of your boards, tickets, settings, files, and agent worktrees. Passwords, keys, and saved tokens are left out. Keep the file private.',
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "Importing replaces all data on this install with the backup's. Its settings are restored too, except passwords, keys, and folder paths. You'll paste saved tokens again, and you may be signed out.",
+      ),
+    ).toBeInTheDocument();
   });
 
   it('tools page has backup and connectors tabs', async () => {
@@ -95,7 +105,7 @@ describe('ToolsPage', () => {
     sessionState.desktopMode = true;
     renderPage();
 
-    expect(MIN_PASSWORD_CHARS).toBe(1);
+    expect(MIN_PASSWORD_CHARS).toBe(8);
     expect(screen.getByRole('heading', { name: 'Replace keys' })).toBeInTheDocument();
     expect(screen.getByLabelText('New admin password')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Replace keys' }));
@@ -108,11 +118,22 @@ describe('ToolsPage', () => {
     );
     fireEvent.click(screen.getByRole('button', { name: 'Replace keys' }));
     expect(screen.getByText('Enter a new admin password.')).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText('New admin password'), {
+      target: { value: '1234567' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Replace keys' }));
+    expect(screen.getByText('Use at least 8 characters.')).toBeInTheDocument();
   });
 
   it('hides replace keys outside the desktop app', () => {
     renderPage();
     expect(screen.queryByRole('heading', { name: 'Replace keys' })).not.toBeInTheDocument();
+    expect(
+      screen.getByText(
+        'On a server, stop Coppice and run `coppice-server replace-keys`.',
+      ),
+    ).toBeInTheDocument();
   });
 
   it('opens the connectors tab from the url', () => {

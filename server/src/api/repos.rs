@@ -89,6 +89,7 @@ struct RepoResponse {
     verification_error: Option<String>,
     last_verified_at: Option<String>,
     forge_token_configured: bool,
+    forge_token_needs_reentry: bool,
     created_at: String,
     updated_at: String,
 }
@@ -164,6 +165,7 @@ fn repo_to_response(repo: Repo) -> RepoResponse {
             .last_verified_at
             .map(|t| t.format(&Rfc3339).unwrap_or_default()),
         forge_token_configured,
+        forge_token_needs_reentry: repo.forge_token_needs_reentry,
         created_at: repo.created_at.format(&Rfc3339).unwrap_or_default(),
         updated_at: repo.updated_at.format(&Rfc3339).unwrap_or_default(),
     }

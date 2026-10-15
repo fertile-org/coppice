@@ -16,6 +16,7 @@ import {
   useDeleteRepo,
   useInspectRepoPath,
   useRepos,
+  useSetForgeToken,
   useUpdateRepo,
   useVerifyRepo,
 } from './useRepos';
@@ -144,8 +145,11 @@ function EditRepoForm({ repo }: EditRepoFormProps) {
   const [localPath, setLocalPath] = useState(repo.localPath);
   const [remoteUrl, setRemoteUrl] = useState(repo.remoteUrl ?? '');
   const [defaultBranch, setDefaultBranch] = useState(repo.defaultBranch);
+  const [token, setToken] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [tokenError, setTokenError] = useState<string | null>(null);
   const updateRepo = useUpdateRepo();
+  const setForgeToken = useSetForgeToken();
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -174,7 +178,24 @@ function EditRepoForm({ repo }: EditRepoFormProps) {
     }
   }
 
+  async function handleSaveToken(e: FormEvent) {
+    e.preventDefault();
+    if (token.trim() === '') return;
+    setTokenError(null);
+    try {
+      await setForgeToken.mutateAsync({ id: repo.id, token });
+      setToken('');
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 403) {
+        setTokenError('You do not have permission to update repositories.');
+      } else {
+        setTokenError('Unable to save token. Please try again.');
+      }
+    }
+  }
+
   return (
+    <div className="space-y-6">
     <form onSubmit={(e) => void handleSubmit(e)} className="space-y-4">
       <h3 className="font-display text-sm font-semibold text-bark-800">
         Metadata
@@ -207,6 +228,42 @@ function EditRepoForm({ repo }: EditRepoFormProps) {
         {updateRepo.isPending ? 'Saving…' : 'Save changes'}
       </button>
     </form>
+    {repo.forgeTokenNeedsReentry && (
+      <form onSubmit={(e) => void handleSaveToken(e)} className="space-y-3">
+        <label
+          htmlFor="repo-forge-token"
+          className="block font-body text-sm font-medium text-bark-800"
+        >
+          Token
+        </label>
+        <input
+          id="repo-forge-token"
+          type="password"
+          autoComplete="off"
+          spellCheck={false}
+          value={token}
+          placeholder="Paste this token again. Backups don't include saved tokens."
+          onChange={(e) => setToken(e.target.value)}
+          className="field-control w-full px-3 py-2 font-mono text-sm"
+        />
+        {tokenError && (
+          <p
+            role="alert"
+            className="rounded-md bg-danger-muted px-3 py-2 font-body text-sm text-danger"
+          >
+            {tokenError}
+          </p>
+        )}
+        <button
+          type="submit"
+          disabled={setForgeToken.isPending || token.trim() === ''}
+          className="rounded-md bg-moss-600 px-4 py-2 font-body text-sm font-medium text-paper-50 transition-colors duration-fast hover:bg-moss-700 disabled:opacity-60"
+        >
+          {setForgeToken.isPending ? 'Saving…' : 'Save token'}
+        </button>
+      </form>
+    )}
+    </div>
   );
 }
 

@@ -52,7 +52,7 @@ impl<'a> SecretService<'a> {
             sqlx::query(
                 r#"
                 UPDATE secrets
-                SET ciphertext = $2, nonce = $3, updated_at = $4
+                SET ciphertext = $2, nonce = $3, needs_reentry = false, updated_at = $4
                 WHERE id = $1
                 "#,
             )
@@ -89,16 +89,54 @@ impl<'a> SecretService<'a> {
 
     pub async fn decrypt_named(&self, id: Uuid) -> Result<(String, String), SecretError> {
         let _guard = crate::crypto::operations_lock().lock().await;
-        let row = sqlx::query("SELECT name, ciphertext, nonce FROM secrets WHERE id = $1")
-            .bind(id)
-            .fetch_optional(self.pool)
-            .await?
-            .ok_or(SecretError::NotFound)?;
+        let row = sqlx::query(
+            "SELECT name, ciphertext, nonce, needs_reentry FROM secrets WHERE id = $1",
+        )
+        .bind(id)
+        .fetch_optional(self.pool)
+        .await?
+        .ok_or(SecretError::NotFound)?;
 
         let name: String = row.get("name");
+        if row.get::<bool, _>("needs_reentry") {
+            return Err(SecretError::Crypto(SecretStoreError::Decrypt));
+        }
         let ciphertext: Vec<u8> = row.get("ciphertext");
         let nonce: Vec<u8> = row.get("nonce");
         Ok((name, self.store.decrypt(&ciphertext, &nonce)?))
+    }
+
+    /// Keep rows this install cannot decrypt, clear their ciphertext, and flag
+    /// them so the token can be pasted again. Rows that decrypt are left alone.
+    pub async fn flag_undecryptable(&self) -> Result<usize, SecretError> {
+        let _guard = crate::crypto::operations_lock().lock().await;
+        let rows = sqlx::query("SELECT id, ciphertext, nonce, needs_reentry FROM secrets")
+            .fetch_all(self.pool)
+            .await?;
+        let mut flagged = 0usize;
+        for row in rows {
+            if row.get::<bool, _>("needs_reentry") {
+                continue;
+            }
+            let ciphertext: Vec<u8> = row.get("ciphertext");
+            let nonce: Vec<u8> = row.get("nonce");
+            if self.store.decrypt(&ciphertext, &nonce).is_ok() {
+                continue;
+            }
+            let id: Uuid = row.get("id");
+            sqlx::query(
+                r#"
+                UPDATE secrets
+                SET ciphertext = ''::bytea, nonce = ''::bytea, needs_reentry = true, updated_at = now()
+                WHERE id = $1
+                "#,
+            )
+            .bind(id)
+            .execute(self.pool)
+            .await?;
+            flagged += 1;
+        }
+        Ok(flagged)
     }
 
     pub async fn delete_by_id(&self, id: Uuid) -> Result<(), SecretError> {

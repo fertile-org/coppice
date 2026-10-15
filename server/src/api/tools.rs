@@ -1,7 +1,7 @@
 use crate::api::auth::pool_from_state;
 use crate::middleware::admin::AdminUser;
 use crate::services::backup_service::{BackupError, BackupService};
-use crate::services::secret_rotation::{self, REPLACE_DESKTOP_ONLY, REPLACE_UI_ERROR};
+use crate::services::secret_rotation::{self, REPLACE_ON_SERVER, REPLACE_UI_ERROR};
 use crate::AppState;
 use axum::{
     body::Body,
@@ -139,6 +139,7 @@ async fn import_backup(
         pool,
         &bytes,
         config_path.as_deref(),
+        &state.secret_store,
     )
         .await
     {
@@ -175,7 +176,7 @@ async fn replace_keys(
         state.config.auth.desktop_mode,
         state.connectors.config_path().as_deref(),
     ) else {
-        return Err((StatusCode::BAD_REQUEST, REPLACE_DESKTOP_ONLY.into()));
+        return Err((StatusCode::BAD_REQUEST, REPLACE_ON_SERVER.into()));
     };
     let email = state
         .config
