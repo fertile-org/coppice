@@ -3,6 +3,7 @@
 pub(crate) mod export;
 mod mask;
 pub(crate) mod meta;
+pub(crate) mod postgres_files;
 pub(crate) mod read;
 pub(crate) mod retain;
 pub(crate) mod tail;

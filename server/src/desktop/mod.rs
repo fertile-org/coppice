@@ -108,8 +108,14 @@ pub async fn run(args: DesktopArgs) -> anyhow::Result<()> {
         }
     }
     pg.init_if_needed(&secrets.pg_password).await?;
-    pg.clear_stale_pid()?;
-    let pg_port = start_postgres(&pg).await?;
+    reject_leftover(pg.stop_leftover().await.context("stop leftover postgres")?)?;
+    if *requested.borrow() {
+        return Ok(());
+    }
+    let pg_port = match start_postgres(&pg, requested.clone()).await? {
+        Startup::Shutdown => return Ok(()),
+        Startup::Ready(port) => port,
+    };
 
     let served = tokio::select! {
         served = serve_with_postgres(&pg, pg_port, &layout, &resources, &secrets, import_notice, requested.clone()) => served,
@@ -131,25 +137,69 @@ pub async fn run(args: DesktopArgs) -> anyhow::Result<()> {
     }
 }
 
-/// Retries once on a fresh port in case another process took the first one.
-async fn start_postgres(pg: &DesktopPostgres) -> anyhow::Result<u16> {
-    let port = free_loopback_port().context("pick postgres port")?;
-    let Err(first) = pg.start(port).await else {
-        return Ok(port);
-    };
-    tracing::warn!(error = %format!("{first:#}"), port, "postgres failed to start; retrying on another port");
-    stop_after_failed_start(pg).await;
-    let port = free_loopback_port().context("pick postgres port")?;
-    if let Err(err) = pg.start(port).await {
-        stop_after_failed_start(pg).await;
-        return Err(err);
-    }
-    Ok(port)
+enum Startup {
+    Ready(u16),
+    Shutdown,
 }
 
-/// `pg_ctl start -w` can time out with the server still coming up. Before the
-/// retry this also stops a Postgres left running on this data dir by a
-/// previous SIGKILLed session (its live pid makes `start` fail), so keep it.
+/// Retries once on a fresh port in case another process took the first one.
+/// A shutdown during the wait stops Postgres and returns [`Startup::Shutdown`]
+/// instead of waiting out the 60 s start timeout.
+async fn start_postgres(
+    pg: &DesktopPostgres,
+    cancel: watch::Receiver<bool>,
+) -> anyhow::Result<Startup> {
+    if *cancel.borrow() {
+        return Ok(Startup::Shutdown);
+    }
+    let port = free_loopback_port().context("pick postgres port")?;
+    match pg.start(port, cancel.clone()).await {
+        Ok(postgres::StartStatus::Started) => Ok(Startup::Ready(port)),
+        Ok(postgres::StartStatus::Cancelled) => Ok(Startup::Shutdown),
+        Err(first) => {
+            if postgres::data_directory_in_use(&first) {
+                stop_after_failed_start(pg).await;
+                return Err(blocked_database_error(first));
+            }
+            tracing::warn!(error = %format!("{first:#}"), port, "postgres failed to start; retrying on another port");
+            stop_after_failed_start(pg).await;
+            if *cancel.borrow() {
+                return Ok(Startup::Shutdown);
+            }
+            let port = free_loopback_port().context("pick postgres port")?;
+            match pg.start(port, cancel).await {
+                Ok(postgres::StartStatus::Started) => Ok(Startup::Ready(port)),
+                Ok(postgres::StartStatus::Cancelled) => Ok(Startup::Shutdown),
+                Err(err) => {
+                    stop_after_failed_start(pg).await;
+                    Err(blocked_database_error(err))
+                }
+            }
+        }
+    }
+}
+
+fn reject_leftover(status: postgres::LeftoverStop) -> anyhow::Result<()> {
+    match status {
+        postgres::LeftoverStop::Stopped => {
+            tracing::info!("stopped a database left running from an earlier session");
+            Ok(())
+        }
+        postgres::LeftoverStop::NotRunning => Ok(()),
+        postgres::LeftoverStop::LeftRunning => bail!(postgres::DATABASE_STILL_RUNNING),
+    }
+}
+
+fn blocked_database_error(err: anyhow::Error) -> anyhow::Error {
+    if postgres::data_directory_in_use(&err) {
+        tracing::warn!(error = %format!("{err:#}"), "postgres data directory is still in use");
+        anyhow::anyhow!(postgres::DATABASE_STILL_RUNNING)
+    } else {
+        err
+    }
+}
+
+/// `pg_ctl start -w` can time out with the server still coming up.
 async fn stop_after_failed_start(pg: &DesktopPostgres) {
     if let Err(err) = pg.stop().await {
         tracing::warn!(error = %format!("{err:#}"), "stop after failed postgres start");
@@ -208,6 +258,46 @@ mod tests {
     use super::*;
 
     #[test]
+    fn a_leftover_left_running_is_the_startup_error() {
+        let err = reject_leftover(postgres::LeftoverStop::LeftRunning).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "Coppice couldn't start because an earlier Coppice database may still be running. Quit any other Coppice window, or restart your computer, then open Coppice again."
+        );
+        assert!(reject_leftover(postgres::LeftoverStop::NotRunning).is_ok());
+        assert!(reject_leftover(postgres::LeftoverStop::Stopped).is_ok());
+    }
+
+    #[test]
+    fn a_data_directory_still_in_use_is_the_same_startup_error() {
+        let raw = anyhow::anyhow!(
+            "pg_ctl exited with exit status: 1\nFATAL: lock file \"postmaster.pid\" already exists\nHINT: Is another postmaster (PID 9) running in data directory \"/d\"?"
+        );
+        assert_eq!(
+            blocked_database_error(raw).to_string(),
+            postgres::DATABASE_STILL_RUNNING
+        );
+        let shared = anyhow::anyhow!(
+            "FATAL: pre-existing shared memory block is still in use\nHINT: Check if there are any old server processes still running"
+        );
+        assert_eq!(
+            blocked_database_error(shared).to_string(),
+            postgres::DATABASE_STILL_RUNNING
+        );
+        let trying = anyhow::anyhow!(
+            "pg_ctl: another server might be running; trying to start server anyway"
+        );
+        assert_eq!(
+            blocked_database_error(trying).to_string(),
+            postgres::DATABASE_STILL_RUNNING
+        );
+        let other = anyhow::anyhow!(
+            "pg_ctl exited with exit status: 1\ninitdb: error: could not create directory"
+        );
+        assert!(blocked_database_error(other).to_string().contains("initdb"));
+    }
+
+    #[test]
     fn free_loopback_port_is_bindable() {
         let port = free_loopback_port().expect("port");
         assert_ne!(port, 0);
@@ -226,6 +316,14 @@ mod tests {
         let runtime_wind_down = 1;
         let electron_grace = 15;
         assert!(DRAIN_TIMEOUT.as_secs() + pg_stop + runtime_wind_down < electron_grace);
+        let startup_cancel = postgres::START_INTERRUPT_WAIT.as_secs()
+            + postgres::START_PID_POLL.as_secs()
+            + pg_stop
+            + runtime_wind_down;
+        assert!(
+            startup_cancel < electron_grace,
+            "quit during pg_ctl start must stop postgres before Electron SIGKILL ({startup_cancel}s)"
+        );
     }
 
     #[test]

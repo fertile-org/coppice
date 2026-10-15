@@ -67,10 +67,10 @@ fn coerce(days: u32) -> u32 {
 /// 256 MiB. Not a config key and not a Settings control.
 pub const LOG_DIR_MAX_BYTES: u64 = 268_435_456;
 
-/// Shown in the log when today's file, alone or with a fresh `server.log`,
-/// is still over [`LOG_DIR_MAX_BYTES`] after older days are gone.
-pub const OVER_CAP_WARNING: &str =
-    "Logs are over 256 MiB even after cleanup. Coppice keeps today's log.";
+/// Shown in the log when today's file, a fresh `server.log`, or the database
+/// log Postgres is writing is still over [`LOG_DIR_MAX_BYTES`] after older
+/// files are gone.
+pub const OVER_CAP_WARNING: &str = "Logs are over 256 MiB even after cleanup. Coppice keeps today's log and the database log it is writing.";
 
 /// Compress past days, delete by age and by the 256 MiB cap, and remove old
 /// `server.log` files. `now` and `legacy_logs` let tests pin the clock and the
@@ -94,6 +94,7 @@ pub fn sweep_logs(
     if !is_symlink(dir) {
         compress_past_days(dir, today)?;
         delete_expired(dir, retention_days, today)?;
+        delete_expired_postgres(dir, retention_days, today, now)?;
         delete_old_server_logs(dir, retention_days, now)?;
     }
     if let Some(legacy) = legacy_logs {
@@ -102,14 +103,15 @@ pub fn sweep_logs(
         }
     }
     if !is_symlink(dir) {
-        enforce_size_cap(dir, today)?;
+        enforce_size_cap(dir, today, now)?;
     }
     Ok(())
 }
 
 /// Delete `coppice.YYYY-MM-DD.jsonl` and `.jsonl.zst` whose calendar age is
 /// at least `retention_days`. Today's file stays. Symlinks, including
-/// `current.jsonl`, are left in place. `postgres.log` is not a candidate.
+/// `current.jsonl`, are left in place. Postgres logs are handled by
+/// [`delete_expired_postgres`], not here.
 pub fn delete_expired(dir: &Path, retention_days: u32, today: Date) -> io::Result<()> {
     if is_symlink(dir) || !dir.is_dir() {
         return Ok(());
@@ -138,6 +140,34 @@ pub fn delete_expired(dir: &Path, retention_days: u32, today: Date) -> io::Resul
             if let Err(error) = fs::remove_file(&path) {
                 tracing::warn!(error = %error, path = %path.display(), "failed to delete an expired log");
             }
+        }
+    }
+    Ok(())
+}
+
+/// Deletes rotated Postgres logs past `retention_days`, and `postgres.log`
+/// once its mtime is that old. The file Postgres is writing stays.
+fn delete_expired_postgres(
+    dir: &Path,
+    retention_days: u32,
+    today: Date,
+    now: OffsetDateTime,
+) -> io::Result<()> {
+    let files = crate::logs::postgres_files::list(dir)?;
+    let open = crate::logs::postgres_files::open_names(&files, now);
+    let retention_days_i = i64::from(coerce(retention_days));
+    for file in files {
+        if open.contains(&file.name) {
+            continue;
+        }
+        let expired = if let Some(opened) = file.opened {
+            let age = i64::from(today.to_julian_day()) - i64::from(opened.date().to_julian_day());
+            age >= retention_days_i
+        } else {
+            file_is_old_at(file.modified, now, retention_days)
+        };
+        if expired {
+            remove_log(&file.path);
         }
     }
     Ok(())
@@ -198,7 +228,10 @@ fn file_is_old(meta: &fs::Metadata, now: OffsetDateTime, days: u32) -> bool {
     let Ok(modified) = meta.modified() else {
         return false;
     };
-    let modified = OffsetDateTime::from(modified);
+    file_is_old_at(OffsetDateTime::from(modified), now, days)
+}
+
+fn file_is_old_at(modified: OffsetDateTime, now: OffsetDateTime, days: u32) -> bool {
     if modified > now {
         return false;
     }
@@ -301,12 +334,12 @@ fn delete_old_server_logs(dir: &Path, retention_days: u32, now: OffsetDateTime) 
     Ok(())
 }
 
-fn enforce_size_cap(dir: &Path, today: Date) -> io::Result<()> {
+fn enforce_size_cap(dir: &Path, today: Date, now: OffsetDateTime) -> io::Result<()> {
     let Some(entries) = read_entries(dir)? else {
         return Ok(());
     };
     struct Piece {
-        date: Date,
+        key: OffsetDateTime,
         path: PathBuf,
         len: u64,
     }
@@ -323,25 +356,44 @@ fn enforce_size_cap(dir: &Path, today: Date) -> io::Result<()> {
             continue;
         };
         if let Some(date) = day_from_name(&name) {
-            days.push(Piece {
-                date,
-                path,
-                len: meta.len(),
-            });
+            days.push((date, path, meta.len()));
         } else if is_server_log_name(&name) {
             extra = extra.saturating_add(meta.len());
         }
     }
-    days.sort_by_key(|piece| piece.date);
+    let pg_files = crate::logs::postgres_files::list(dir)?;
+    let open = crate::logs::postgres_files::open_names(&pg_files, now);
+    let mut deletable = Vec::new();
     let mut total = days
         .iter()
-        .fold(extra, |sum, piece| sum.saturating_add(piece.len));
+        .fold(extra, |sum, (_, _, len)| sum.saturating_add(*len));
+    for (date, path, len) in days {
+        if date != today {
+            deletable.push(Piece {
+                key: date.midnight().assume_utc(),
+                path,
+                len,
+            });
+        }
+    }
+    for file in pg_files {
+        total = total.saturating_add(file.len);
+        if open.contains(&file.name) {
+            continue;
+        }
+        deletable.push(Piece {
+            key: file.opened.unwrap_or(file.modified),
+            path: file.path,
+            len: file.len,
+        });
+    }
+    deletable.sort_by_key(|piece| piece.key);
     while total > LOG_DIR_MAX_BYTES {
-        let Some(index) = days.iter().position(|piece| piece.date != today) else {
+        if deletable.is_empty() {
             tracing::warn!("{OVER_CAP_WARNING}");
             break;
-        };
-        let piece = days.remove(index);
+        }
+        let piece = deletable.remove(0);
         if remove_log(&piece.path) {
             total = total.saturating_sub(piece.len);
         } else {
@@ -561,7 +613,7 @@ mod tests {
         assert_eq!(LOG_DIR_MAX_BYTES, 268_435_456);
         assert_eq!(
             OVER_CAP_WARNING,
-            "Logs are over 256 MiB even after cleanup. Coppice keeps today's log."
+            "Logs are over 256 MiB even after cleanup. Coppice keeps today's log and the database log it is writing."
         );
     }
 
@@ -667,7 +719,9 @@ mod tests {
         set_len(&dir.path().join("coppice.2026-10-15.jsonl"), 200 * mib);
         set_len(&dir.path().join("coppice.2026-10-14.jsonl.zst"), 100 * mib);
         set_len(&dir.path().join("coppice.2026-10-13.jsonl.zst"), 100 * mib);
-        set_len(&dir.path().join("postgres.log"), 400 * mib);
+        let pg = dir.path().join("postgres.log");
+        set_len(&pg, 400 * mib);
+        set_mtime(&pg, fixed_now());
         let blob = dir.path().join("blob");
         set_len(&blob, 400 * mib);
         std::os::unix::fs::symlink(&blob, dir.path().join("coppice.2020-01-01.jsonl"))
@@ -734,8 +788,9 @@ mod tests {
         fs::write(&extra, marker).expect("write");
         set_mtime(&extra, old);
         fs::write(dir.path().join("coppice.2026-10-14.jsonl"), b"daily\n").expect("daily");
-        fs::write(dir.path().join("postgres.log"), marker).expect("postgres");
-        set_mtime(&dir.path().join("postgres.log"), old);
+        let pg = dir.path().join("postgres.log");
+        fs::write(&pg, marker).expect("postgres");
+        set_mtime(&pg, old);
         std::os::unix::fs::symlink("postgres.log", dir.path().join("server.log.linked"))
             .expect("symlink");
 
@@ -746,9 +801,9 @@ mod tests {
         assert!(!dir.path().join("server.log.3").exists());
         assert_eq!(fs::read(&kept).expect("fresh"), b"still-fresh");
         assert_eq!(fs::read(&extra).expect("extra"), marker);
-        assert_eq!(
-            fs::read(dir.path().join("postgres.log")).expect("pg"),
-            marker
+        assert!(
+            !dir.path().join("postgres.log").exists(),
+            "an old postgres.log is past retention when nothing is writing it"
         );
         assert!(dir
             .path()
@@ -829,7 +884,75 @@ mod tests {
         sweep_logs(dir.path(), 14, today(), fixed_now(), Some(dir.path())).expect("sweep");
 
         assert_eq!(fs::read(&notes).expect("notes"), b"stay");
-        assert_eq!(fs::read(&pg).expect("pg"), b"pg");
+        assert!(
+            !pg.exists(),
+            "an old database log in the live directory is past retention"
+        );
+    }
+
+    #[test]
+    fn rotated_postgres_logs_expire_and_the_open_file_stays() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let expired = dir.path().join("postgresql-2026-10-01_000000.log");
+        fs::write(&expired, b"old-rotated").expect("write");
+        set_mtime(&expired, fixed_now() - time::Duration::days(20));
+        let kept = dir.path().join("postgresql-2026-10-02_000000.log");
+        fs::write(&kept, b"kept-rotated").expect("write");
+        set_mtime(&kept, fixed_now() - time::Duration::days(13));
+        // Filename date is past retention, but Postgres is still writing it.
+        let open = dir.path().join("postgresql-2026-10-01_000001.log");
+        fs::write(&open, b"still-writing").expect("write");
+        set_mtime(&open, fixed_now());
+        let legacy = dir.path().join("postgres.log");
+        fs::write(&legacy, b"startup").expect("write");
+        set_mtime(&legacy, fixed_now() - time::Duration::days(20));
+        std::os::unix::fs::symlink(&kept, dir.path().join("postgresql-2020-01-01_000000.log"))
+            .expect("symlink");
+
+        sweep_logs(dir.path(), 14, today(), fixed_now(), None).expect("sweep");
+
+        assert!(!expired.exists());
+        assert!(!legacy.exists());
+        assert_eq!(fs::read(&kept).expect("kept"), b"kept-rotated");
+        assert_eq!(fs::read(&open).expect("open"), b"still-writing");
+        assert!(dir
+            .path()
+            .join("postgresql-2020-01-01_000000.log")
+            .symlink_metadata()
+            .expect("link")
+            .file_type()
+            .is_symlink());
+    }
+
+    #[test]
+    fn postgres_logs_count_toward_the_cap_and_the_open_file_is_kept() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let mib = 1024 * 1024;
+        set_len(&dir.path().join("coppice.2026-10-15.jsonl"), 200 * mib);
+        set_len(&dir.path().join("coppice.2026-10-13.jsonl.zst"), 50 * mib);
+        let legacy = dir.path().join("postgres.log");
+        set_len(&legacy, 100 * mib);
+        set_mtime(&legacy, fixed_now() - time::Duration::hours(1));
+        let open = dir.path().join("postgresql-2026-10-15_120000.log");
+        set_len(&open, 100 * mib);
+        set_mtime(&open, fixed_now());
+        let old = dir.path().join("postgresql-2026-10-10_000000.log");
+        set_len(&old, 50 * mib);
+        set_mtime(&old, fixed_now() - time::Duration::days(5));
+
+        let warnings = warnings_during(|| {
+            sweep_logs(dir.path(), 14, today(), fixed_now(), None).expect("sweep");
+        });
+
+        assert!(dir.path().join("coppice.2026-10-15.jsonl").is_file());
+        assert!(!dir.path().join("coppice.2026-10-13.jsonl.zst").exists());
+        assert!(!legacy.exists(), "a closed database log counts and can go");
+        assert!(!old.exists());
+        assert_eq!(fs::metadata(&open).expect("open").len(), 100 * mib);
+        assert!(
+            warnings.iter().any(|line| line.contains(OVER_CAP_WARNING)),
+            "{warnings:?}"
+        );
     }
 
     #[test]

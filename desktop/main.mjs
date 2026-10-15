@@ -4,6 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { desktopServerArgs, resolveAppLogsDir } from './src/logsDir.mjs';
 import { startServer } from './src/serverProcess.mjs';
+import { startupFailureMessage } from './src/startupError.mjs';
 import { resolveLoginShellPath } from './src/shellPath.mjs';
 import { checkForUpdate } from './src/updateCheck.mjs';
 import { devUserDataPath } from './src/userDataPath.mjs';
@@ -180,7 +181,8 @@ async function launchServer() {
   } catch (err) {
     if (current) await current.stop();
     if (current && current !== server) return;
-    if (!quitting) showError(err.message, current?.lastLines(50) ?? []);
+    const lines = current?.lastLines(50) ?? [];
+    if (!quitting) showError(startupFailureMessage(lines, err.message), lines);
     return;
   }
   if (current !== server) {

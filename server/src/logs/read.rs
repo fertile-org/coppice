@@ -1,4 +1,4 @@
-//! Read daily JSONL logs and `postgres.log` for the Logs page.
+//! Read daily JSONL logs and Postgres logs for the Logs page.
 //! No index. Newest matching lines come first.
 
 use std::fs::{self, File};
@@ -209,7 +209,7 @@ struct Located {
     raw: String,
 }
 
-fn merge(mut dated: Vec<Located>, mut undated: Vec<Located>) -> Vec<Located> {
+fn merge(mut dated: Vec<Located>, undated: Vec<Located>) -> Vec<Located> {
     dated.sort_by(|left, right| {
         right
             .timestamp
@@ -220,14 +220,37 @@ fn merge(mut dated: Vec<Located>, mut undated: Vec<Located>) -> Vec<Located> {
     if undated.is_empty() {
         return dated;
     }
-    // Lines with no timestamp stay together after the dated lines from postgres.log.
-    undated.sort_by_key(|left| left.line_index);
-    let insert_at = dated
-        .iter()
-        .rposition(|item| item.postgres)
-        .map(|index| index + 1)
-        .unwrap_or(dated.len());
-    dated.splice(insert_at..insert_at, undated);
+    // Lines with no timestamp stay together after the dated lines from that file.
+    let mut groups: std::collections::BTreeMap<String, Vec<Located>> =
+        std::collections::BTreeMap::new();
+    for item in undated {
+        groups.entry(item.file_key.clone()).or_default().push(item);
+    }
+    let mut inserts = Vec::new();
+    for (file_key, mut lines) in groups {
+        lines.sort_by_key(|item| item.line_index);
+        let at = dated
+            .iter()
+            .rposition(|item| item.postgres && item.file_key == file_key)
+            .map(|index| index + 1)
+            .or_else(|| {
+                dated
+                    .iter()
+                    .rposition(|item| item.postgres)
+                    .map(|index| index + 1)
+            })
+            .unwrap_or(dated.len());
+        inserts.push((at, lines));
+    }
+    inserts.sort_by(|left, right| {
+        right
+            .0
+            .cmp(&left.0)
+            .then(left.1[0].file_key.cmp(&right.1[0].file_key))
+    });
+    for (at, lines) in inserts {
+        dated.splice(at..at, lines);
+    }
     dated
 }
 
@@ -360,34 +383,37 @@ fn read_postgres(
     dir: &Path,
     filter: &LogFilter,
 ) -> Result<(Vec<Located>, Vec<Located>), QueryError> {
-    let path = dir.join("postgres.log");
-    if !path.exists() {
-        return Ok((Vec::new(), Vec::new()));
-    }
-    let text = read_lossy(&path, false)?;
+    let files = match crate::logs::postgres_files::list(dir) {
+        Ok(files) => files,
+        Err(error) if store_disappeared(&error) => return Err(QueryError::StoreMissing),
+        Err(error) => return Err(error.into()),
+    };
     let mut dated = Vec::new();
     let mut undated = Vec::new();
-    for (index, raw) in text.lines().enumerate() {
-        if raw.trim().is_empty() {
-            continue;
-        }
-        let timestamp = leading_timestamp(raw);
-        let line = postgres_line(raw, timestamp);
-        if !accepts(filter, &line, timestamp, raw) {
-            continue;
-        }
-        let located = Located {
-            timestamp,
-            postgres: true,
-            file_key: "postgres".to_string(),
-            line_index: u64::try_from(index).unwrap_or(u64::MAX),
-            line,
-            raw: raw.to_string(),
-        };
-        if timestamp.is_some() {
-            dated.push(located);
-        } else {
-            undated.push(located);
+    for file in files {
+        let text = read_lossy(&file.path, false)?;
+        for (index, raw) in text.lines().enumerate() {
+            if raw.trim().is_empty() {
+                continue;
+            }
+            let timestamp = leading_timestamp(raw);
+            let line = postgres_line(raw, timestamp);
+            if !accepts(filter, &line, timestamp, raw) {
+                continue;
+            }
+            let located = Located {
+                timestamp,
+                postgres: true,
+                file_key: file.name.clone(),
+                line_index: u64::try_from(index).unwrap_or(u64::MAX),
+                line,
+                raw: raw.to_string(),
+            };
+            if timestamp.is_some() {
+                dated.push(located);
+            } else {
+                undated.push(located);
+            }
         }
     }
     Ok((dated, undated))
@@ -801,6 +827,59 @@ mod tests {
         assert!(newer < dated, "{messages:?}");
         assert!(dated < undated, "{messages:?}");
         assert!(undated < older, "{messages:?}");
+    }
+
+    #[test]
+    fn rotated_postgres_files_are_read_and_exported_with_their_own_undated_lines() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        fs::write(
+            dir.path().join("postgresql-2026-10-14_030000.log"),
+            "2026-10-14 03:00:00 UTC [1] LOG:  older-db\nplain-older\n",
+        )
+        .expect("older");
+        fs::write(
+            dir.path().join("postgresql-2026-10-15_050000.log"),
+            "2026-10-15 05:00:00 UTC [1] LOG:  newer-db\nplain-newer\n",
+        )
+        .expect("newer");
+        fs::write(
+            dir.path().join("postgres.log"),
+            "2026-10-14 04:00:00 UTC [1] LOG:  startup\n",
+        )
+        .expect("startup");
+        let target = dir.path().join("secret.txt");
+        fs::write(&target, "2026-10-15 06:00:00 UTC [1] LOG:  hidden\n").expect("secret");
+        std::os::unix::fs::symlink(&target, dir.path().join("postgresql-2026-10-15_060000.log"))
+            .expect("symlink");
+
+        let page = query(dir.path(), &params(Some("postgres"), None, None, None)).expect("db");
+        let messages: Vec<_> = page
+            .lines
+            .iter()
+            .map(|line| line.message.as_str())
+            .collect();
+        let newer = messages
+            .iter()
+            .position(|m| m.contains("newer-db"))
+            .unwrap();
+        let plain_newer = messages.iter().position(|m| *m == "plain-newer").unwrap();
+        let startup = messages.iter().position(|m| m.contains("startup")).unwrap();
+        let older = messages
+            .iter()
+            .position(|m| m.contains("older-db"))
+            .unwrap();
+        let plain_older = messages.iter().position(|m| *m == "plain-older").unwrap();
+        assert!(newer < plain_newer, "{messages:?}");
+        assert!(plain_newer < startup, "{messages:?}");
+        assert!(startup < older, "{messages:?}");
+        assert!(older < plain_older, "{messages:?}");
+        assert!(messages.iter().all(|message| !message.contains("hidden")));
+
+        let filter = filter_from_params(&FilterParams::default()).expect("filter");
+        let exported = export_lines(dir.path(), &filter).expect("export");
+        assert!(exported.iter().any(|line| line.contains("newer-db")));
+        assert!(exported.iter().any(|line| line.contains("older-db")));
+        assert!(exported.iter().all(|line| !line.contains("hidden")));
     }
 
     #[test]
