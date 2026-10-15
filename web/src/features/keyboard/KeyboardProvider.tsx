@@ -16,6 +16,7 @@ import {
 } from './match';
 import { detectPlatform } from './platform';
 import { omittedActionIds } from './registry';
+import { CommandPalette } from './CommandPalette';
 import { classifyTarget, isForeignDialog } from './targets';
 import type { KeyEventLike } from './types';
 
@@ -91,6 +92,18 @@ export function KeyboardProvider({ children }: { children: ReactNode }) {
       setEnvironment(environment) {
         envRef.current = environment;
       },
+      readShortcutState() {
+        const enabledIds = ['close'];
+        for (const [id, registration] of handlersRef.current) {
+          if (registration.enabled()) enabledIds.push(id);
+        }
+        return { enabledIds, drawerOpen: envRef.current.drawerOpen };
+      },
+      runShortcut(id) {
+        const registration = handlersRef.current.get(id);
+        if (!registration || !registration.enabled()) return false;
+        return registration.run() !== false;
+      },
     }),
     [],
   );
@@ -161,6 +174,9 @@ export function KeyboardProvider({ children }: { children: ReactNode }) {
   }, [platform]);
 
   return (
-    <KeyboardContext.Provider value={api}>{children}</KeyboardContext.Provider>
+    <KeyboardContext.Provider value={api}>
+      {children}
+      <CommandPalette />
+    </KeyboardContext.Provider>
   );
 }

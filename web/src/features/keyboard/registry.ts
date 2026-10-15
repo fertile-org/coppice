@@ -2,9 +2,10 @@ import type { Binding, Chord, ShortcutAction } from './types';
 
 /**
  * One registry for the palette, shortcuts, help, and later the app menu.
- * Labels and groups are the Content-locked names. Palette, help, ticket,
- * and review handlers are wired in later PRs; their bindings still participate
- * in sequence matching so a disabled second key is not reused.
+ * Labels and groups are the Content-locked names. Help, ticket, and review
+ * handlers are wired in later PRs; their bindings still participate in
+ * sequence matching so a disabled second key is not reused. Column jumps keep
+ * the label "Go to column {n}" here; the palette shows "Go to {column} column".
  */
 function chord(key: string, extras?: Omit<Chord, 'key'>): Binding {
   return { kind: 'chord', chord: { key, ...extras } };
