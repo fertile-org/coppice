@@ -79,7 +79,10 @@ pub async fn run(args: DesktopArgs) -> anyhow::Result<()> {
 
     let resources = ResourceLayout::new(&args.resources);
     resources.validate().map_err(anyhow::Error::msg)?;
-    let layout = DataLayout::new(&args.data_dir);
+    let layout = match &args.logs_dir {
+        Some(logs_dir) => DataLayout::with_logs_dir(&args.data_dir, logs_dir.clone()),
+        None => DataLayout::new(&args.data_dir),
+    };
     layout
         .ensure_dirs()
         .with_context(|| format!("create data dir {}", layout.root.display()))?;

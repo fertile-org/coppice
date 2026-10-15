@@ -59,3 +59,28 @@ pub async fn fix_rewritten_migration_checksums(pool: &PgPool) -> anyhow::Result<
     }
     Ok(updated)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn migration_versions_are_unique() {
+        let mut versions = std::collections::BTreeMap::<i64, Vec<String>>::new();
+        for migration in MIGRATOR.iter() {
+            versions.entry(migration.version).or_default().push(format!(
+                "{:?} {}",
+                migration.migration_type, migration.description
+            ));
+        }
+        let dupes: Vec<_> = versions
+            .iter()
+            .filter(|(_, names)| names.len() > 1)
+            .collect();
+        assert!(dupes.is_empty(), "duplicate migration versions: {dupes:?}");
+        assert!(
+            versions.len() >= 38,
+            "expected migrations, got {versions:?}"
+        );
+    }
+}

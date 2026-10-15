@@ -1,69 +1,10 @@
-use std::io::{self, IsTerminal, Write};
 use std::net::SocketAddr;
+use std::path::PathBuf;
 use std::time::Duration;
-use tracing_subscriber::EnvFilter;
 
 use coppice_server::desktop;
+use coppice_server::logs;
 use coppice_server::serve::{serve, ServeOptions};
-
-/// rmcp logs plugin-controlled content (notifications, peer info) below warn, so it
-/// stays at warn unless the operator's `RUST_LOG` names it.
-fn log_directives(rust_log: Option<&str>) -> String {
-    let base = rust_log.filter(|s| !s.trim().is_empty()).unwrap_or("info");
-    if base.contains("rmcp") {
-        base.to_string()
-    } else {
-        format!("{base},rmcp=warn")
-    }
-}
-
-fn init_tracing() {
-    let rust_log = std::env::var(EnvFilter::DEFAULT_ENV).ok();
-    let filter = EnvFilter::try_new(log_directives(rust_log.as_deref()))
-        .unwrap_or_else(|_| EnvFilter::new(log_directives(None)));
-    // A terminal is already line-buffered and can show color. A pipe
-    // (Electron's server.log) is block-buffered and is read as text: flush
-    // every write, and leave ANSI codes out. Otherwise the last lines sit in
-    // the buffer until exit — gone if the process crashes — and `status=404`
-    // is split by escape sequences, so it cannot be grepped.
-    let terminal = io::stdout().is_terminal();
-    let builder = tracing_subscriber::fmt()
-        .with_env_filter(filter)
-        .with_ansi(terminal);
-    if terminal {
-        builder.init();
-    } else {
-        builder.with_writer(pipe_log_writer).init();
-    }
-}
-
-fn pipe_log_writer() -> FlushingWriter<io::Stdout> {
-    FlushingWriter {
-        inner: io::stdout(),
-    }
-}
-
-/// Flushes after every write so a block-buffered pipe cannot keep a log line.
-struct FlushingWriter<W> {
-    inner: W,
-}
-
-impl<W: Write> Write for FlushingWriter<W> {
-    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        let n = self.inner.write(buf)?;
-        self.inner.flush()?;
-        Ok(n)
-    }
-
-    fn write_all(&mut self, buf: &[u8]) -> io::Result<()> {
-        self.inner.write_all(buf)?;
-        self.inner.flush()
-    }
-
-    fn flush(&mut self) -> io::Result<()> {
-        self.inner.flush()
-    }
-}
 
 fn runtime() -> std::io::Result<tokio::runtime::Runtime> {
     tokio::runtime::Builder::new_multi_thread()
@@ -88,8 +29,20 @@ fn main() -> anyhow::Result<()> {
         return Ok(());
     }
     match desktop::parse_desktop_args(&args) {
-        Ok(Some(args)) => run_desktop(args),
-        Ok(None) => runtime()?.block_on(run()),
+        Ok(Some(args)) => {
+            let logs_dir = args
+                .logs_dir
+                .clone()
+                .unwrap_or_else(|| PathBuf::from("./data/logs"));
+            logs::init(&logs_dir)?;
+            run_desktop(args)
+        }
+        Ok(None) => {
+            let config = coppice_server::AppConfig::load()
+                .map_err(|e| anyhow::anyhow!("failed to load config: {e}"))?;
+            logs::init(std::path::Path::new(&config.logs.dir))?;
+            runtime()?.block_on(run(config))
+        }
         Err(err) => {
             eprintln!("coppice-server: {err}");
             std::process::exit(2);
@@ -101,10 +54,7 @@ fn main() -> anyhow::Result<()> {
 fn run_desktop(args: desktop::DesktopArgs) -> anyhow::Result<()> {
     desktop::set_process_env(&args);
     let result = runtime().map_err(anyhow::Error::from).and_then(|runtime| {
-        let result = runtime.block_on(async {
-            init_tracing();
-            desktop::run(args).await
-        });
+        let result = runtime.block_on(async { desktop::run(args).await });
         runtime.shutdown_timeout(Duration::from_secs(1));
         result
     });
@@ -115,12 +65,7 @@ fn run_desktop(args: desktop::DesktopArgs) -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn run() -> anyhow::Result<()> {
-    init_tracing();
-
-    let config = coppice_server::AppConfig::load()
-        .map_err(|e| anyhow::anyhow!("failed to load config: {e}"))?;
-
+async fn run(config: coppice_server::AppConfig) -> anyhow::Result<()> {
     let addr: SocketAddr = format!("0.0.0.0:{}", config.server.port).parse()?;
     let listener = tokio::net::TcpListener::bind(addr).await?;
     serve(
@@ -163,8 +108,6 @@ async fn server_shutdown_signal() {
 
 #[cfg(test)]
 mod tests {
-    use super::log_directives;
-
     #[test]
     fn version_text_names_the_package_and_commit() {
         let text = super::version_text();
@@ -176,37 +119,6 @@ mod tests {
             .expect("commit line");
         assert!(!commit.is_empty());
         assert!(!commit.contains(' '));
-    }
-
-    #[test]
-    fn rmcp_defaults_to_warn_unless_named() {
-        assert_eq!(log_directives(None), "info,rmcp=warn");
-        assert_eq!(log_directives(Some(" ")), "info,rmcp=warn");
-        assert_eq!(log_directives(Some("debug")), "debug,rmcp=warn");
-        assert_eq!(log_directives(Some("info,rmcp=debug")), "info,rmcp=debug");
-    }
-
-    #[test]
-    fn flushing_writer_pushes_a_line_through_a_block_buffer() {
-        use std::io::{Read, Write};
-        use std::sync::mpsc;
-        use std::time::Duration;
-
-        let (reader, writer) = std::io::pipe().expect("pipe");
-        let buffered = std::io::BufWriter::with_capacity(8 * 1024, writer);
-        let mut out = super::FlushingWriter { inner: buffered };
-        let (tx, rx) = mpsc::channel();
-        std::thread::spawn(move || {
-            let mut reader = reader;
-            let mut buf = [0u8; 32];
-            let n = reader.read(&mut buf).unwrap_or(0);
-            let _ = tx.send(buf[..n].to_vec());
-        });
-        out.write_all(b"hello\n").expect("write");
-        let got = rx
-            .recv_timeout(Duration::from_secs(2))
-            .expect("line was not flushed");
-        assert_eq!(got, b"hello\n");
     }
 
     #[test]

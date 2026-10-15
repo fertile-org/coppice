@@ -229,6 +229,7 @@ esac"#,
                 args: Vec::new(),
                 env: Default::default(),
                 secrets: Vec::new(),
+                secret_names: Vec::new(),
             },
             cwd.path(),
         )

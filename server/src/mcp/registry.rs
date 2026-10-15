@@ -86,8 +86,9 @@ impl ToolRegistry {
         match tokio::time::timeout(self.list_timeout, source.list(scope)).await {
             Ok(tools) => tools,
             Err(_) => {
+                // `source` on a log line is server, http, or cli. The catalog kind is separate.
                 tracing::warn!(
-                    source = source.kind().as_str(),
+                    tool_source = source.kind().as_str(),
                     "tool source list timed out"
                 );
                 Vec::new()
@@ -160,7 +161,7 @@ impl ToolRegistry {
         if warned.insert(tool.def.name.clone()) {
             tracing::warn!(
                 tool = %tool.def.name,
-                source = tool.source.as_str(),
+                tool_source = tool.source.as_str(),
                 "duplicate mcp tool name; keeping the first source's tool"
             );
         }

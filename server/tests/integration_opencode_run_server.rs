@@ -55,6 +55,7 @@ async fn run_server_spawns_with_per_run_config_and_token_env() {
                 ("FAKE_OPENCODE_RECORD", record.display().to_string()),
                 ("COPPICE_MCP_TOKEN", "secret".into()),
             ],
+            None,
         )
         .await
         .expect("start");
@@ -75,8 +76,8 @@ async fn two_leases_get_distinct_ports() {
     let servers = servers();
 
     let (a, b) = tokio::join!(
-        servers.start("run-a", &config, vec![]),
-        servers.start("run-b", &config, vec![]),
+        servers.start("run-a", &config, vec![], None),
+        servers.start("run-b", &config, vec![], None),
     );
     let (a, b) = (a.expect("start a"), b.expect("start b"));
 
@@ -95,7 +96,7 @@ async fn lease_drop_kills_process_and_forgets_base_url() {
     let servers = servers();
 
     let lease = servers
-        .start("run-1", &config, vec![])
+        .start("run-1", &config, vec![], None)
         .await
         .expect("start");
     let base_url = lease.base_url().to_string();
@@ -114,11 +115,11 @@ async fn shutdown_all_kills_every_server() {
     let servers = servers();
 
     let a = servers
-        .start("run-a", &config, vec![])
+        .start("run-a", &config, vec![], None)
         .await
         .expect("start a");
     let b = servers
-        .start("run-b", &config, vec![])
+        .start("run-b", &config, vec![], None)
         .await
         .expect("start b");
     let (url_a, url_b) = (a.base_url().to_string(), b.base_url().to_string());
@@ -137,7 +138,7 @@ async fn start_with_missing_binary_names_the_command() {
     let servers = OpenCodeRunServers::new("does-not-exist-opencode".into(), "127.0.0.1".into());
 
     let err = servers
-        .start("run-1", &config, vec![])
+        .start("run-1", &config, vec![], None)
         .await
         .err()
         .expect("missing binary must fail");
@@ -148,4 +149,92 @@ async fn start_with_missing_binary_names_the_command() {
         message.contains("version-specific flags weren't applied"),
         "{message}"
     );
+}
+
+#[test]
+fn opencode_stdout_and_stderr_are_stored_with_the_run_id() {
+    let dir = tempfile::tempdir().unwrap();
+    let config = config_file(dir.path());
+    let logs = tempfile::tempdir().unwrap();
+    let servers = servers();
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    coppice_server::logs::with_cli_logs(logs.path(), || {
+        runtime.block_on(async {
+            let lease = servers
+                .start(
+                    "run-oc",
+                    &config,
+                    vec![
+                        ("FAKE_OPENCODE_STDOUT", "oc-stdout-line".into()),
+                        ("FAKE_OPENCODE_STDERR", "oc-stderr-line".into()),
+                    ],
+                    Some("ticket-oc"),
+                )
+                .await
+                .expect("start");
+            let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+            loop {
+                let lines = jsonl_lines(logs.path());
+                if lines
+                    .iter()
+                    .any(|line| line["fields"]["message"] == "oc-stdout-line")
+                    && lines
+                        .iter()
+                        .any(|line| line["fields"]["message"] == "oc-stderr-line")
+                {
+                    break;
+                }
+                assert!(
+                    tokio::time::Instant::now() < deadline,
+                    "missing cli lines: {lines:?}"
+                );
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+            lease.stop().await;
+        });
+    })
+    .expect("logs");
+
+    let lines = jsonl_lines(logs.path());
+    for message in ["oc-stdout-line", "oc-stderr-line"] {
+        let line = lines
+            .iter()
+            .find(|line| line["fields"]["message"] == message)
+            .unwrap_or_else(|| panic!("missing {message} in {lines:?}"));
+        let stream = if message.contains("stdout") {
+            "stdout"
+        } else {
+            "stderr"
+        };
+        assert_eq!(line["fields"]["source"], "cli");
+        assert_eq!(line["fields"]["stream"], stream);
+        assert_eq!(line["fields"]["run_id"], "run-oc");
+        assert_eq!(line["fields"]["ticket_id"], "ticket-oc");
+    }
+}
+
+fn jsonl_lines(dir: &Path) -> Vec<serde_json::Value> {
+    let mut lines = Vec::new();
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return lines;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+        if !(name.starts_with("coppice.") && name.ends_with(".jsonl")) {
+            continue;
+        }
+        let Ok(text) = std::fs::read_to_string(&path) else {
+            continue;
+        };
+        for line in text.lines() {
+            if let Ok(value) = serde_json::from_str(line) {
+                lines.push(value);
+            }
+        }
+    }
+    lines
 }

@@ -213,7 +213,7 @@ impl<'a> RepoGitService<'a> {
             .as_deref()
             .filter(|s| !s.trim().is_empty())
             .ok_or(RepoGitError::NoRemoteUrl)?;
-        let token = self.decrypt_forge_token_optional(&ctx).await;
+        let (token, _secret_mask) = self.decrypt_forge_token_optional(&ctx).await;
         let fetch_remote = network_remote(remote_url, token.as_deref())?;
         let refspec = fetch_default_refspec(&ctx.default_branch);
         match run_git(&ctx.git_dir, &["fetch", &fetch_remote, &refspec]).await {
@@ -245,7 +245,7 @@ impl<'a> RepoGitService<'a> {
             .filter(|s| !s.trim().is_empty())
             .ok_or(RepoGitError::NoRemoteUrl)?;
         let https = https_remote_url(remote_url).ok_or(RepoGitError::NoRemoteUrl)?;
-        let token = self.decrypt_forge_token_optional(&ctx).await;
+        let (token, _secret_mask) = self.decrypt_forge_token_optional(&ctx).await;
 
         self.enforce_push_gates(&ctx).await?;
 
@@ -336,7 +336,7 @@ impl<'a> RepoGitService<'a> {
             .as_deref()
             .filter(|s| !s.trim().is_empty())
             .ok_or(RepoGitError::NoRemoteUrl)?;
-        let token = self.decrypt_forge_token_optional(&ctx).await;
+        let (token, _secret_mask) = self.decrypt_forge_token_optional(&ctx).await;
         let fetch_remote = network_remote(remote_url, token.as_deref())?;
         self.fetch_then_ff_pull(&ctx, &fetch_remote, token.as_deref())
             .await
@@ -421,12 +421,23 @@ impl<'a> RepoGitService<'a> {
         Ok(())
     }
 
-    async fn decrypt_forge_token_optional(&self, ctx: &RepoGitContext) -> Option<String> {
-        let secret_id = ctx.forge_token_secret_id?;
-        SecretService::new(self.pool, self.secret_store)
-            .decrypt_by_id(secret_id)
+    async fn decrypt_forge_token_optional(
+        &self,
+        ctx: &RepoGitContext,
+    ) -> (Option<String>, crate::logs::SecretGuard) {
+        let Some(secret_id) = ctx.forge_token_secret_id else {
+            return (None, crate::logs::SecretGuard::empty());
+        };
+        match SecretService::new(self.pool, self.secret_store)
+            .decrypt_named(secret_id)
             .await
-            .ok()
+        {
+            Ok((name, value)) => {
+                let guard = crate::logs::SecretGuard::register([(name, value.clone())]);
+                (Some(value), guard)
+            }
+            Err(_) => (None, crate::logs::SecretGuard::empty()),
+        }
     }
 
     async fn enforce_pull_gates(&self, ctx: &RepoGitContext) -> Result<(), RepoGitError> {

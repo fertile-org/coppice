@@ -190,7 +190,7 @@ sudo apt install ./Coppice-<version>-linux-<arch>.deb
 
 Then start **Coppice** from the applications menu, or run `coppice`.
 
-**Data and logs:** `~/Library/Application Support/Coppice` on macOS, `~/.config/Coppice` on Linux (`config.toml`, `secrets/`, the Postgres cluster in `pg/data`, `logs/server.log`). Uninstalling leaves them in place. The `secrets/` files encrypt forge and plugin settings; losing them loses those secrets. Verify downloads with `SHA256SUMS` from the release (`sha256sum --check --ignore-missing SHA256SUMS`, or `shasum -a 256 …` on macOS).
+**Data:** `~/Library/Application Support/Coppice` on macOS, `~/.config/Coppice` on Linux (`config.toml`, `secrets/`, the Postgres cluster in `pg/data`). **Logs:** `~/Library/Logs/Coppice` on macOS; `$XDG_STATE_HOME/Coppice/logs` or `~/.local/state/Coppice/logs` on Linux. Uninstalling leaves them in place. The `secrets/` files encrypt forge and plugin settings; losing them loses those secrets. Verify downloads with `SHA256SUMS` from the release (`sha256sum --check --ignore-missing SHA256SUMS`, or `shasum -a 256 …` on macOS).
 
 ### Self-host tarball
 
