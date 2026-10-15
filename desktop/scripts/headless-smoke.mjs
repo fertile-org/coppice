@@ -36,11 +36,10 @@ function withTimeout(promise, ms, what) {
   ]).finally(() => clearTimeout(timer));
 }
 
-async function runOnce(resources, dataDir, logFile, round) {
+async function runOnce(resources, dataDir, round) {
   const server = startServer({
     command: join(resources, 'bin', 'coppice-server'),
     args: ['desktop', '--data-dir', dataDir, '--resources', resources],
-    logFile,
     timeoutMs: READY_TIMEOUT_MS,
   });
   try {
@@ -79,7 +78,7 @@ async function main() {
   const dataDir = join(root, 'data');
   try {
     for (const round of [1, 2]) {
-      await runOnce(resources, dataDir, join(root, `server-${round}.log`), round);
+      await runOnce(resources, dataDir, round);
     }
     console.log('headless smoke PASS');
   } finally {

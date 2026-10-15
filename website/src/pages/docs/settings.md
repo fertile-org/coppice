@@ -36,7 +36,12 @@ Admins can open **Logs** beside Settings to filter and live-tail server, request
 
 | Field | Type | Default | What it does |
 | --- | --- | --- | --- |
-| `retention_days` | integer | `14` | How many days of logs to keep, including today: 3, 7, 14, or 30. The default is 14. Coppice deletes older logs every hour, and changes apply without a restart. |
+| `retention_days` | integer | `14` | How many days of logs to keep, including today: 3, 7, 14, or 30. The default is 14. Coppice deletes older logs every hour, and changes apply without a restart. If logs pass 256 MiB, Coppice deletes the oldest first, even before `retention_days` is up. |
+
+Coppice never deletes today's log, even past the limit. `postgres.log` doesn't count toward the 256 MiB limit and keeps growing. To clear it, quit Coppice first.
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
 | `dir` | string | `./data/logs` | Folder for logs. The desktop app uses its own folder and ignores this. Changing it needs a restart. |
 
 ## Connectors

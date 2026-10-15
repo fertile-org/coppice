@@ -148,6 +148,7 @@ fn generated_config(layout: &DataLayout) -> io::Result<String> {
          builtin_plugins_dir = {builtin_plugins}\n\
          \n\
          # How many days of logs to keep, including today: 3, 7, 14, or 30. Default 14.\n\
+         # If logs pass 256 MiB, Coppice deletes the oldest first, even before retention_days is up.\n\
          [logs]\n\
          retention_days = 14\n\
          # Folder for logs. The desktop app uses its own folder and ignores this.\n\
@@ -255,6 +256,12 @@ mod tests {
             layout.builtin_plugins.as_path()
         );
         assert_eq!(cfg.logs.retention_days, 14);
+        assert!(
+            contents.contains(
+                "# If logs pass 256 MiB, Coppice deletes the oldest first, even before retention_days is up."
+            ),
+            "starter file explains the size cap:\n{contents}"
+        );
         assert!(
             !contents.contains("default_connector"),
             "starter file omits default_connector"

@@ -149,6 +149,7 @@ builtin_plugins_dir = "./data/builtin-plugins"
 # mcp_idle_shutdown_secs = 600
 
 # How many days of logs to keep, including today: 3, 7, 14, or 30. Default 14.
+# If logs pass 256 MiB, Coppice deletes the oldest first, even before retention_days is up.
 [logs]
 retention_days = 14
 # Folder for logs. The desktop app uses its own folder and ignores this.

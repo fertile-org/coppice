@@ -13,8 +13,8 @@ make desktop
   `process.resourcesPath` when packaged), loads the URL it prints on `COPPICE_READY`, and stops it on quit.
   Startup failures show an error window with the last log lines. Logs live in
   `$XDG_STATE_HOME/Coppice/logs` (or `~/.local/state/Coppice/logs`) on Linux and
-  `~/Library/Logs/Coppice` on macOS (`server.log`, rotated at 10 MB × 3, plus
-  `postgres.log` and the daily `coppice.*.jsonl` files).
+  `~/Library/Logs/Coppice` on macOS (`postgres.log` and daily `coppice.*.jsonl`
+  files; past days are stored as `coppice.*.jsonl.zst`).
 
 To run the bundled mode from a checkout, populate `desktop/resources/` (gitignored):
 

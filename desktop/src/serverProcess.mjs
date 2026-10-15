@@ -1,6 +1,5 @@
 import { spawn } from 'node:child_process';
 import { parseReadyLine } from './readyLine.mjs';
-import { createRotatingLog } from './rotatingLog.mjs';
 
 const RING_SIZE = 500;
 const KILL_WAIT_MS = 2000;
@@ -32,12 +31,10 @@ export function startServer({
   command,
   args = [],
   env = process.env,
-  logFile,
   timeoutMs = 60000,
   graceMs = SERVER_STOP_GRACE_MS,
   drainMs = 2000,
 }) {
-  const log = createRotatingLog(logFile);
   const ring = [];
   const child = spawn(command, args, {
     env,
@@ -73,7 +70,6 @@ export function startServer({
     const splitter = createLineSplitter(onLine);
     stream.setEncoding('utf8');
     stream.on('data', (text) => {
-      log.write(text);
       splitter.push(text);
     });
     return splitter;
@@ -103,7 +99,6 @@ export function startServer({
       for (const splitter of splitters) splitter.flush();
       const how = code === null ? `signal ${signal}` : `code ${code}`;
       settle(rejectReady, new Error(`coppice-server exited with ${how} before it was ready`));
-      log.close();
       resolve(code);
     }
     child.on('error', (err) => {
