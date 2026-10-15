@@ -91,15 +91,12 @@ describe('Done card accepted branch', () => {
     renderCard(makeTicket());
 
     expect(
-      await screen.findByText('[placeholder] Accepted, not merged'),
+      await screen.findByText('Accepted, not merged'),
     ).toBeVisible();
     expect(screen.getByRole('button', { name: 'Merge…' })).toBeVisible();
     expect(
       await screen.findByRole('button', { name: 'Create PR via API' }),
     ).toBeVisible();
-    expect(
-      screen.queryByRole('button', { name: '[placeholder] Merge' }),
-    ).toBeNull();
   });
 
   it('hides the label when the accepted branch is already merged', async () => {
@@ -110,7 +107,7 @@ describe('Done card accepted branch', () => {
     );
 
     expect(
-      screen.queryByText('[placeholder] Accepted, not merged'),
+      screen.queryByText('Accepted, not merged'),
     ).toBeNull();
     expect(screen.queryByRole('button', { name: 'Merge…' })).toBeNull();
     expect(
@@ -122,7 +119,7 @@ describe('Done card accepted branch', () => {
     renderCard(makeTicket({ humanReview: null }));
 
     expect(
-      screen.queryByText('[placeholder] Accepted, not merged'),
+      screen.queryByText('Accepted, not merged'),
     ).toBeNull();
   });
 
@@ -136,7 +133,7 @@ describe('Done card accepted branch', () => {
       </DndContext>,
     );
     expect(
-      screen.queryByText('[placeholder] Accepted, not merged'),
+      screen.queryByText('Accepted, not merged'),
     ).toBeNull();
     unmount();
 
@@ -146,7 +143,7 @@ describe('Done card accepted branch', () => {
       }),
     );
     expect(
-      screen.queryByText('[placeholder] Accepted, not merged'),
+      screen.queryByText('Accepted, not merged'),
     ).toBeNull();
   });
 
@@ -160,13 +157,13 @@ describe('Done card accepted branch', () => {
       </DndContext>,
     );
     expect(
-      screen.queryByText('[placeholder] Accepted, not merged'),
+      screen.queryByText('Accepted, not merged'),
     ).toBeNull();
     unmount();
 
     renderCard(makeTicket({ repoId: undefined }));
     expect(
-      screen.queryByText('[placeholder] Accepted, not merged'),
+      screen.queryByText('Accepted, not merged'),
     ).toBeNull();
   });
 
@@ -231,7 +228,7 @@ describe('Done card accepted branch', () => {
 
     await waitFor(() => {
       expect(
-        screen.queryByText('[placeholder] Accepted, not merged'),
+        screen.queryByText('Accepted, not merged'),
       ).toBeNull();
     });
     expect(await screen.findByText('Merged `agent/accepted` into `main`')).toBeVisible();
@@ -287,7 +284,7 @@ describe('Done card accepted branch', () => {
     ).toBeVisible();
     expect(within(dialog).getByText(/src\/app\.ts/)).toBeVisible();
     expect(
-      screen.getByText('[placeholder] Accepted, not merged'),
+      screen.getByText('Accepted, not merged'),
     ).toBeVisible();
     expect(screen.getByText('Ship the accepted branch')).toBeVisible();
     expect(
