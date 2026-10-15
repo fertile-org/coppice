@@ -108,9 +108,7 @@ pub async fn run(args: DesktopArgs) -> anyhow::Result<()> {
         }
     }
     pg.init_if_needed(&secrets.pg_password).await?;
-    if pg.stop_leftover().await.context("stop leftover postgres")? {
-        tracing::info!("stopped a database left running from an earlier session");
-    }
+    reject_leftover(pg.stop_leftover().await.context("stop leftover postgres")?)?;
     if *requested.borrow() {
         return Ok(());
     }
@@ -159,6 +157,10 @@ async fn start_postgres(
         Ok(postgres::StartStatus::Started) => Ok(Startup::Ready(port)),
         Ok(postgres::StartStatus::Cancelled) => Ok(Startup::Shutdown),
         Err(first) => {
+            if postgres::data_directory_in_use(&first) {
+                stop_after_failed_start(pg).await;
+                return Err(blocked_database_error(first));
+            }
             tracing::warn!(error = %format!("{first:#}"), port, "postgres failed to start; retrying on another port");
             stop_after_failed_start(pg).await;
             if *cancel.borrow() {
@@ -170,10 +172,30 @@ async fn start_postgres(
                 Ok(postgres::StartStatus::Cancelled) => Ok(Startup::Shutdown),
                 Err(err) => {
                     stop_after_failed_start(pg).await;
-                    Err(err)
+                    Err(blocked_database_error(err))
                 }
             }
         }
+    }
+}
+
+fn reject_leftover(status: postgres::LeftoverStop) -> anyhow::Result<()> {
+    match status {
+        postgres::LeftoverStop::Stopped => {
+            tracing::info!("stopped a database left running from an earlier session");
+            Ok(())
+        }
+        postgres::LeftoverStop::NotRunning => Ok(()),
+        postgres::LeftoverStop::LeftRunning => bail!(postgres::DATABASE_STILL_RUNNING),
+    }
+}
+
+fn blocked_database_error(err: anyhow::Error) -> anyhow::Error {
+    if postgres::data_directory_in_use(&err) {
+        tracing::warn!(error = %format!("{err:#}"), "postgres data directory is still in use");
+        anyhow::anyhow!(postgres::DATABASE_STILL_RUNNING)
+    } else {
+        err
     }
 }
 
@@ -234,6 +256,46 @@ async fn serve_with_postgres(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_leftover_left_running_is_the_startup_error() {
+        let err = reject_leftover(postgres::LeftoverStop::LeftRunning).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "Coppice couldn't start because an earlier Coppice database may still be running. Quit any other Coppice window, or restart your computer, then open Coppice again."
+        );
+        assert!(reject_leftover(postgres::LeftoverStop::NotRunning).is_ok());
+        assert!(reject_leftover(postgres::LeftoverStop::Stopped).is_ok());
+    }
+
+    #[test]
+    fn a_data_directory_still_in_use_is_the_same_startup_error() {
+        let raw = anyhow::anyhow!(
+            "pg_ctl exited with exit status: 1\nFATAL: lock file \"postmaster.pid\" already exists\nHINT: Is another postmaster (PID 9) running in data directory \"/d\"?"
+        );
+        assert_eq!(
+            blocked_database_error(raw).to_string(),
+            postgres::DATABASE_STILL_RUNNING
+        );
+        let shared = anyhow::anyhow!(
+            "FATAL: pre-existing shared memory block is still in use\nHINT: Check if there are any old server processes still running"
+        );
+        assert_eq!(
+            blocked_database_error(shared).to_string(),
+            postgres::DATABASE_STILL_RUNNING
+        );
+        let trying = anyhow::anyhow!(
+            "pg_ctl: another server might be running; trying to start server anyway"
+        );
+        assert_eq!(
+            blocked_database_error(trying).to_string(),
+            postgres::DATABASE_STILL_RUNNING
+        );
+        let other = anyhow::anyhow!(
+            "pg_ctl exited with exit status: 1\ninitdb: error: could not create directory"
+        );
+        assert!(blocked_database_error(other).to_string().contains("initdb"));
+    }
 
     #[test]
     fn free_loopback_port_is_bindable() {

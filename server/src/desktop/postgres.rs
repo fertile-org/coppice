@@ -38,6 +38,19 @@ pub enum StartStatus {
     Cancelled,
 }
 
+/// Shown when a leftover postmaster is left running, or Postgres reports that
+/// this data directory is already in use.
+pub(super) const DATABASE_STILL_RUNNING: &str = "Coppice couldn't start because an earlier Coppice database may still be running. Quit any other Coppice window, or restart your computer, then open Coppice again.";
+
+/// Result of trying to stop a postmaster left from an earlier session.
+#[derive(Debug)]
+pub(super) enum LeftoverStop {
+    Stopped,
+    NotRunning,
+    /// The pid is alive and its command line could not be read, so it was not signalled.
+    LeftRunning,
+}
+
 /// The bundled Postgres cluster in `D/pg/data`, run from `R/postgres`.
 #[derive(Debug, Clone)]
 pub struct DesktopPostgres {
@@ -175,11 +188,11 @@ impl DesktopPostgres {
     /// read and names this data directory. A reused pid is not signalled.
     /// An unreadable command line is left running: the pid may belong to an
     /// unrelated process. Processes are not matched by name.
-    pub(super) async fn stop_leftover(&self) -> anyhow::Result<bool> {
+    pub(super) async fn stop_leftover(&self) -> anyhow::Result<LeftoverStop> {
         match self.classify_postmaster()? {
             PostmasterPid::Ours => {
                 self.stop_running().await?;
-                Ok(true)
+                Ok(LeftoverStop::Stopped)
             }
             PostmasterPid::Unreadable { pid, error } => {
                 tracing::warn!(
@@ -187,13 +200,13 @@ impl DesktopPostgres {
                     pid,
                     "could not read the postmaster command line; leaving it running"
                 );
-                Ok(false)
+                Ok(LeftoverStop::LeftRunning)
             }
             PostmasterPid::Stale => {
                 self.clear_stale_pid()?;
-                Ok(false)
+                Ok(LeftoverStop::NotRunning)
             }
-            PostmasterPid::Missing => Ok(false),
+            PostmasterPid::Missing => Ok(LeftoverStop::NotRunning),
         }
     }
 
@@ -530,6 +543,16 @@ async fn interrupt_pg_ctl(child: &mut tokio::process::Child) {
         let _ = child.start_kill();
         let _ = child.wait().await;
     }
+}
+
+/// Postgres refused to start because a postmaster already has this data directory.
+pub(super) fn data_directory_in_use(err: &anyhow::Error) -> bool {
+    let text = format!("{err:#}").to_ascii_lowercase();
+    text.contains("another postmaster")
+        || text.contains("another server might be running")
+        || text.contains("pre-existing shared memory block is still in use")
+        || text.contains("postmaster.pid\" already exists")
+        || text.contains("postmaster.pid already exists")
 }
 
 fn failure_message(bin: &str, status: &str, stderr: &str, stdout: &str) -> String {

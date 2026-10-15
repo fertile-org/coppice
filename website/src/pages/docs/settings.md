@@ -38,7 +38,7 @@ Admins can open **Logs** beside Settings to filter and live-tail server, request
 | --- | --- | --- | --- |
 | `retention_days` | integer | `14` | How many days of logs to keep, including today: 3, 7, 14, or 30. The default is 14. Coppice deletes older logs every hour, and changes apply without a restart. If logs pass 256 MiB, Coppice deletes the oldest first, even before `retention_days` is up. |
 
-Coppice never deletes today's log, even past the limit, and it never deletes the database log file it is writing. Database logs count toward the 256 MiB limit. Coppice rotates them by size and age and deletes older ones once they pass `retention_days`.
+Coppice never deletes today's log or the database log it's writing, even past the limit. Database logs count toward the 256 MiB limit, and Coppice deletes them once they pass `retention_days`.
 
 | Field | Type | Default | What it does |
 | --- | --- | --- | --- |
