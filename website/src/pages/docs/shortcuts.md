@@ -6,11 +6,11 @@ description: "Move around Coppice from the keyboard: the board, tickets, and rev
 
 # Keyboard shortcuts
 
-The board, the ticket drawer, and review actions have default keys. Press `?` to open **Keyboard shortcuts**. The action is **Show keyboard shortcuts**. Rows are grouped as **Navigate**, **Tickets**, and **Review**. The footer is **Change shortcuts in Settings.**
+Press `?` anywhere to see every shortcut. Shortcuts are grouped as **Navigate**, **Tickets**, and **Review**, and you can change them in Settings.
 
 `Mod` is `⌘` on macOS and `Ctrl` on Linux and on WSL. Sequences are shown as `G then B`.
 
-Shortcuts stay quiet while you are typing in a field. The terminal keeps its own keys, including `?` and `C`. `Esc` closes the top layer, then leaves a field.
+Shortcuts don't fire while you're typing in a field, and the terminal keeps its own keys. Press `Esc` to close whatever is open.
 
 ## Navigate
 
@@ -44,7 +44,7 @@ Shortcuts stay quiet while you are typing in a field. The terminal keeps its own
 | Next section | `]` |
 | Previous section | `[` |
 
-**Go to column 1** through **Go to column 9** follow the board from left to right: 1 Backlog, 2 Plan Review, 3 Ready, 4 In Progress, 5 In Review, 6 In QA, 7 Wait for Human Review, 8 Done, 9 Blocked. The help overlay keeps each row labelled **Go to column {n}**.
+**Go to column 1** through **Go to column 9** follow the board from left to right: 1 Backlog, 2 Plan Review, 3 Ready, 4 In Progress, 5 In Review, 6 In QA, 7 Wait for Human Review, 8 Done, 9 Blocked.
 
 **Go to Plugins**, **Go to Users**, **Go to Tools**, and **Go to Settings** are omitted for members, same as the sidebar. The desktop app also omits **Go to Users**.
 
@@ -65,7 +65,7 @@ Shortcuts stay quiet while you are typing in a field. The terminal keeps its own
 
 **Assign ticket** opens the assignee combobox. If the drawer is closed, the ticket opens and then the combobox opens.
 
-**Move to next column** and **Move to previous column** follow the column order above, through Blocked. A successful move is announced as **Moved to {column}**.
+**Move to next column** and **Move to previous column** follow the column order above.
 
 ## Review
 
@@ -76,20 +76,16 @@ Shortcuts stay quiet while you are typing in a field. The terminal keeps its own
 | Merge… | `R then M` | **Merge…** is already shown |
 | Open code review | `D` | **Open code review** is enabled |
 
-**Approve plan** runs the same action as the button.
-
-**Accept…** opens a dialog. The title is **Accept this ticket?** The body is **This accepts the work currently in Wait for Human Review.** **Cancel** is focused. **Accept** in the dialog completes it. The chord does not accept by itself.
+**Accept…** opens the **Accept this ticket?** dialog with **Cancel** focused. Choose **Accept** to finish.
 
 **Merge…** opens the **Merge ticket branch** dialog.
 
-**Open code review** opens the same destination as **Review code**.
-
 ## A pass with only the keyboard
 
-1. On the board, press `C`. That is **Create ticket**. It focuses **Add ticket…**. Type a title and press Enter.
-2. Move to that card with `J` or `K`, then press `A`. That is **Assign ticket**. The assignee combobox opens.
-3. Press Enter. That is **Open ticket**.
-4. Focus the comment editor, type, and press `Mod+Enter`. That is **Post comment**.
-5. Press `D`. That is **Open code review**.
-6. When the ticket is in Wait for Human Review, press `Mod+Shift+Enter`. That is **Accept…**. **Cancel** is focused. Choose **Accept** to finish.
+1. On the board, press `C`. It focuses **Add ticket…**. Type a title and press Enter.
+2. Move to that card with `J` or `K`, then press `A`. The assignee combobox opens.
+3. Press Enter.
+4. Focus the comment editor, type, and press `Mod+Enter`.
+5. Press `D`.
+6. When the ticket is in Wait for Human Review, press `Mod+Shift+Enter`. **Cancel** is focused. Choose **Accept** to finish.
 7. Press `Esc`. Focus returns to the card on the board.
