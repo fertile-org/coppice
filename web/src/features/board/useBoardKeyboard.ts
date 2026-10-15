@@ -57,13 +57,17 @@ export function useBoardKeyboard({
       bind('board.previousColumn', () => {
         onMoveRef.current(moveColumn(columnsRef.current, focusRef.current, -1));
       }),
-      bind('ticket.open', () => {
-        const focus = focusRef.current;
-        if (focus.type !== 'card') return false;
-        const active = document.activeElement;
-        if (!(active instanceof HTMLElement)) return false;
-        if (active.dataset.boardFocusId !== boardFocusDomId(focus)) return false;
-        onOpenRef.current(focus.ticketId);
+      keyboard.register('ticket.open', {
+        run: () => {
+          const focus = focusRef.current;
+          if (focus.type !== 'card') return false;
+          const active = document.activeElement;
+          if (!(active instanceof HTMLElement)) return false;
+          if (active.dataset.boardFocusId !== boardFocusDomId(focus)) return false;
+          onOpenRef.current(focus.ticketId);
+        },
+        // A heading has no ticket to open, so the command stays out of the palette.
+        enabled: () => enabledRef.current && focusRef.current.type === 'card',
       }),
       ...[1, 2, 3, 4, 5, 6, 7, 8, 9].map((n) =>
         bind(`board.column.${n}`, () => {
