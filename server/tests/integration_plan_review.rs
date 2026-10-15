@@ -2,8 +2,8 @@ mod common;
 
 use axum::http::StatusCode;
 use coppice_server::copy::plan::{
-    NO_PLANNER, PLAN_ALREADY_RUNNING, PLAN_APPROVED_NOTE, PLAN_CHANGES_DISCARDED, PLAN_REQUIRED,
-    PLAN_STALE, WORK_NOT_STARTED,
+    NO_PM, NO_TECH_LEAD, PLAN_ALREADY_RUNNING, PLAN_APPROVED_NOTE, PLAN_CHANGES_DISCARDED,
+    PLAN_REQUIRED, PLAN_STALE, READY_REQUIRES_PLAN,
 };
 use coppice_server::services::planning_service::PlanningService;
 use coppice_server::services::worktree_service::compute_paths;
@@ -97,7 +97,7 @@ async fn drag_and_api_refuse_in_progress_without_an_approved_plan() {
 }
 
 #[tokio::test]
-async fn skip_planning_goes_straight_from_ready_to_in_progress() {
+async fn skip_planning_enters_ready_and_stays_there_without_a_tech_lead() {
     let _guard = common::DB_TEST_LOCK.lock().await;
     if !common::db_available().await {
         return;
@@ -122,6 +122,20 @@ async fn skip_planning_goes_straight_from_ready_to_in_progress() {
     assert_eq!(direct.status(), StatusCode::OK);
 
     let other = common::create_unplanned_ticket(&app, &board_id, &cookie, &csrf).await;
+    let blocked = app
+        .clone()
+        .oneshot(common::json_request(
+            "PATCH",
+            &format!("/api/tickets/{other}/status"),
+            r#"{"status":"ready"}"#,
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(blocked.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(message(blocked).await, READY_REQUIRES_PLAN);
+
     common::skip_planning(&app, &other, &cookie, &csrf).await;
     let ready = app
         .clone()
@@ -136,14 +150,15 @@ async fn skip_planning_goes_straight_from_ready_to_in_progress() {
         .unwrap();
     assert_eq!(ready.status(), StatusCode::OK);
     let ticket = common::get_ticket(&app, &other, &cookie, &csrf).await;
-    assert_eq!(ticket["status"], "in_progress");
+    assert_eq!(ticket["status"], "ready");
+    assert!(ticket["assigneeAgentId"].is_null());
     assert!(plan_runs(&runs(&app, &other, &cookie, &csrf).await).is_empty());
     let notes = comments(&app, &other, &cookie, &csrf).await;
-    assert!(notes.iter().any(|note| note["body"] == WORK_NOT_STARTED));
+    assert!(notes.iter().any(|note| note["body"] == NO_TECH_LEAD));
 }
 
 #[tokio::test]
-async fn ready_starts_one_plan_run_for_the_assignee() {
+async fn backlog_plan_run_uses_the_pm_not_the_assignee() {
     let _guard = common::DB_TEST_LOCK.lock().await;
     if !common::db_available().await {
         return;
@@ -157,25 +172,25 @@ async fn ready_starts_one_plan_run_for_the_assignee() {
     let ticket_id = common::create_unplanned_ticket(&app, &board_id, &cookie, &csrf).await;
     common::assign_agent_to_ticket(&app, &ticket_id, &engineer_id, &cookie, &csrf).await;
 
-    let ready = app
+    let started = app
         .clone()
         .oneshot(common::json_request(
-            "PATCH",
-            &format!("/api/tickets/{ticket_id}/status"),
-            r#"{"status":"ready"}"#,
+            "POST",
+            &format!("/api/tickets/{ticket_id}/plan-runs"),
+            "",
             &cookie,
             &csrf,
         ))
         .await
         .unwrap();
-    assert_eq!(ready.status(), StatusCode::OK);
+    assert_eq!(started.status(), StatusCode::OK);
 
     let again = app
         .clone()
         .oneshot(common::json_request(
-            "PATCH",
-            &format!("/api/tickets/{ticket_id}/status"),
-            r#"{"status":"ready"}"#,
+            "POST",
+            &format!("/api/tickets/{ticket_id}/plan-runs"),
+            "",
             &cookie,
             &csrf,
         ))
@@ -186,12 +201,15 @@ async fn ready_starts_one_plan_run_for_the_assignee() {
     let listed = runs(&app, &ticket_id, &cookie, &csrf).await;
     let plans = plan_runs(&listed);
     assert_eq!(plans.len(), 1);
-    assert_eq!(plans[0]["agentId"], engineer_id);
-    assert_ne!(plans[0]["agentId"], pm_id);
+    assert_eq!(plans[0]["agentId"], pm_id);
+    assert_ne!(plans[0]["agentId"], engineer_id);
+    let ticket = common::get_ticket(&app, &ticket_id, &cookie, &csrf).await;
+    assert_eq!(ticket["status"], "backlog");
+    assert_eq!(ticket["latestPlanRunStatus"], "queued");
 }
 
 #[tokio::test]
-async fn ready_without_a_planner_stays_ready_and_says_why() {
+async fn planning_without_a_pm_stays_in_backlog_and_says_why() {
     let _guard = common::DB_TEST_LOCK.lock().await;
     if !common::db_available().await {
         return;
@@ -200,27 +218,28 @@ async fn ready_without_a_planner_stays_ready_and_says_why() {
     let board_id = common::create_test_board(&app, &cookie, &csrf).await;
     let ticket_id = common::create_unplanned_ticket(&app, &board_id, &cookie, &csrf).await;
 
-    let ready = app
+    let started = app
         .clone()
         .oneshot(common::json_request(
-            "PATCH",
-            &format!("/api/tickets/{ticket_id}/status"),
-            r#"{"status":"ready"}"#,
+            "POST",
+            &format!("/api/tickets/{ticket_id}/plan-runs"),
+            "",
             &cookie,
             &csrf,
         ))
         .await
         .unwrap();
-    assert_eq!(ready.status(), StatusCode::OK);
+    assert_eq!(started.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(message(started).await, NO_PM);
     let ticket = common::get_ticket(&app, &ticket_id, &cookie, &csrf).await;
-    assert_eq!(ticket["status"], "ready");
+    assert_eq!(ticket["status"], "backlog");
     let notes = comments(&app, &ticket_id, &cookie, &csrf).await;
-    assert!(notes.iter().any(|note| note["body"] == NO_PLANNER));
+    assert!(notes.iter().any(|note| note["body"] == NO_PM));
     assert!(plan_runs(&runs(&app, &ticket_id, &cookie, &csrf).await).is_empty());
 }
 
 #[tokio::test]
-async fn ready_uses_the_assignee_when_there_is_no_pm() {
+async fn an_engineer_assignee_does_not_become_the_planner() {
     let _guard = common::DB_TEST_LOCK.lock().await;
     if !common::db_available().await {
         return;
@@ -233,22 +252,23 @@ async fn ready_uses_the_assignee_when_there_is_no_pm() {
     let ticket_id = common::create_unplanned_ticket(&app, &board_id, &cookie, &csrf).await;
     common::assign_agent_to_ticket(&app, &ticket_id, &engineer_id, &cookie, &csrf).await;
 
-    let ready = app
+    let started = app
         .clone()
         .oneshot(common::json_request(
-            "PATCH",
-            &format!("/api/tickets/{ticket_id}/status"),
-            r#"{"status":"ready"}"#,
+            "POST",
+            &format!("/api/tickets/{ticket_id}/plan-runs"),
+            "",
             &cookie,
             &csrf,
         ))
         .await
         .unwrap();
-    assert_eq!(ready.status(), StatusCode::OK);
-    let listed = runs(&app, &ticket_id, &cookie, &csrf).await;
-    let plans = plan_runs(&listed);
-    assert_eq!(plans.len(), 1);
-    assert_eq!(plans[0]["agentId"], engineer_id);
+    assert_eq!(started.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(message(started).await, NO_PM);
+    assert!(plan_runs(&runs(&app, &ticket_id, &cookie, &csrf).await).is_empty());
+    let ticket = common::get_ticket(&app, &ticket_id, &cookie, &csrf).await;
+    assert_eq!(ticket["assigneeAgentId"], engineer_id);
+    assert_eq!(ticket["status"], "backlog");
 }
 
 const CANONICAL_PLAN: &str = "## Plan\n\n### Approach\nShip the parser first.\n\n### Steps\n- [ ] Add the column\n- [ ] Gate In Progress\n\n### Risks\nNone.\n\n### Out of scope\nNone.\n";
@@ -396,9 +416,11 @@ async fn approve_posts_the_note_and_the_review_checklist() {
         .unwrap();
     assert_eq!(approve.status(), StatusCode::OK);
     let approved = common::get_ticket(&app, &ticket_id, &cookie, &csrf).await;
-    assert_eq!(approved["status"], "in_progress");
+    assert_eq!(approved["status"], "ready");
+    assert!(approved["assigneeAgentId"].is_null());
     let notes = comments(&app, &ticket_id, &cookie, &csrf).await;
     assert!(notes.iter().any(|note| note["body"] == PLAN_APPROVED_NOTE));
+    assert!(notes.iter().any(|note| note["body"] == NO_TECH_LEAD));
 
     let review = app
         .clone()
@@ -432,18 +454,18 @@ async fn a_planning_run_posts_the_plan_and_moves_to_plan_review() {
     let ticket_id = common::create_unplanned_ticket(&app, &board_id, &cookie, &csrf).await;
     common::assign_agent_to_ticket(&app, &ticket_id, &pm_id, &cookie, &csrf).await;
 
-    let ready = app
+    let started = app
         .clone()
         .oneshot(common::json_request(
-            "PATCH",
-            &format!("/api/tickets/{ticket_id}/status"),
-            r#"{"status":"ready"}"#,
+            "POST",
+            &format!("/api/tickets/{ticket_id}/plan-runs"),
+            "",
             &cookie,
             &csrf,
         ))
         .await
         .unwrap();
-    assert_eq!(ready.status(), StatusCode::OK);
+    assert_eq!(started.status(), StatusCode::OK);
 
     let ticket = common::poll_ticket_until(
         &app,
@@ -530,7 +552,7 @@ async fn open_planned_repo(
         common::create_agent_with_preset_key(app, "backend_engineer", "Planner", cookie, csrf)
             .await;
     let pool = state.db.as_ref().expect("db");
-    sqlx::query("UPDATE agents SET preset_source = $2 WHERE id = $1")
+    sqlx::query("UPDATE agents SET preset_source = $2, role = 'PM' WHERE id = $1")
         .bind(Uuid::parse_str(&agent_id).expect("agent uuid"))
         .bind(preset_source)
         .execute(pool)
@@ -618,18 +640,6 @@ async fn plan_run_discards_scratch_writes_and_leaves_the_ticket_untouched() {
     let (state, app, cookie, csrf, _env) =
         common::bootstrap_and_login_with_auto_start_workers().await;
     let (ticket_id, git) = open_planned_repo(&app, &state, "plan_writer", &cookie, &csrf).await;
-    let ready = app
-        .clone()
-        .oneshot(common::json_request(
-            "PATCH",
-            &format!("/api/tickets/{ticket_id}/status"),
-            r#"{"status":"ready"}"#,
-            &cookie,
-            &csrf,
-        ))
-        .await
-        .unwrap();
-    assert_eq!(ready.status(), StatusCode::OK);
 
     let ticket = common::poll_ticket_until(
         &app,
@@ -664,18 +674,6 @@ async fn plan_run_removes_scratch_when_the_run_fails() {
         common::bootstrap_and_login_with_auto_start_workers().await;
     let (ticket_id, git) =
         open_planned_repo(&app, &state, "plan_writer_fail", &cookie, &csrf).await;
-    let ready = app
-        .clone()
-        .oneshot(common::json_request(
-            "PATCH",
-            &format!("/api/tickets/{ticket_id}/status"),
-            r#"{"status":"ready"}"#,
-            &cookie,
-            &csrf,
-        ))
-        .await
-        .unwrap();
-    assert_eq!(ready.status(), StatusCode::OK);
 
     let listed = common::poll_runs_until_count(
         &app,
@@ -703,7 +701,7 @@ async fn plan_run_removes_scratch_when_the_run_fails() {
     )
     .await;
     let ticket = common::get_ticket(&app, &ticket_id, &cookie, &csrf).await;
-    assert_eq!(ticket["status"], "ready");
+    assert_eq!(ticket["status"], "backlog");
     assert_discard_note(&app, &ticket_id, &cookie, &csrf).await;
     snapshot_ticket_git(&git);
 }
@@ -718,18 +716,6 @@ async fn plan_run_removes_scratch_when_the_run_is_cancelled() {
         common::bootstrap_and_login_with_auto_start_workers().await;
     let (ticket_id, git) =
         open_planned_repo(&app, &state, "plan_writer_slow", &cookie, &csrf).await;
-    let ready = app
-        .clone()
-        .oneshot(common::json_request(
-            "PATCH",
-            &format!("/api/tickets/{ticket_id}/status"),
-            r#"{"status":"ready"}"#,
-            &cookie,
-            &csrf,
-        ))
-        .await
-        .unwrap();
-    assert_eq!(ready.status(), StatusCode::OK);
 
     let worktrees = PathBuf::from(&state.config.agent.worktrees_path);
     let scratch = scratch_for(&app, &worktrees, &ticket_id, &cookie, &csrf).await;
@@ -834,18 +820,6 @@ async fn plan_run_leaves_branches_tags_and_remotes_unchanged() {
     assert!(before.1.contains("(fetch)"));
     assert!(before.1.contains("(push)"));
 
-    let ready = app
-        .clone()
-        .oneshot(common::json_request(
-            "PATCH",
-            &format!("/api/tickets/{ticket_id}/status"),
-            r#"{"status":"ready"}"#,
-            &cookie,
-            &csrf,
-        ))
-        .await
-        .unwrap();
-    assert_eq!(ready.status(), StatusCode::OK);
     let ticket = common::poll_ticket_until(
         &app,
         &ticket_id,

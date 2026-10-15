@@ -150,6 +150,10 @@ impl<'a> RunOrchestrator<'a> {
             auto_assign_enabled,
             clarification_round: ticket.ticket.clarification_round,
             context_profile: run.context_profile,
+            plan_allows_ready: ticket_svc
+                .plan_entry(&ticket.ticket)
+                .await?
+                .allows_ready(),
         };
 
         let skip_workflow = ctx.context_profile == ContextProfile::HumanAgent
@@ -1620,6 +1624,7 @@ mod tests {
             auto_assign_enabled: true,
             clarification_round: 0,
             context_profile: ContextProfile::HumanAgent,
+            plan_allows_ready: false,
         };
 
         let skip_workflow = ctx.context_profile == ContextProfile::HumanAgent
@@ -1631,7 +1636,7 @@ mod tests {
             ..ctx.clone()
         })
         .expect("full profile resolves");
-        assert_eq!(full_action.new_status, Some(TicketStatus::Ready));
+        assert!(full_action.new_status.is_none());
 
         let action = if skip_workflow {
             TransitionAction::default()
@@ -1702,7 +1707,7 @@ mod tests {
             .get(fx.ticket_id)
             .await
             .expect("load ticket");
-        assert_eq!(ticket.ticket.status, TicketStatus::Ready);
+        assert_eq!(ticket.ticket.status, TicketStatus::Backlog);
         assert!(ticket.ticket.pending_assign_recommendation.is_some());
     }
 

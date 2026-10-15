@@ -1,14 +1,16 @@
 //! Planning runs and the Plan Review gate.
 //!
-//! A human move to Ready starts one `plan_ticket` run for the ticket's assignee.
-//! The plan is a ticket comment. Implementation starts only after that plan is
-//! approved for the ticket's current content version. Skip planning sends the
-//! ticket straight from Ready to In Progress.
+//! The PM writes the plan while the ticket is in Backlog. When that plan is
+//! posted, the ticket moves to Plan Review. Approving it moves the ticket to
+//! Ready and starts the Tech Lead when one is available. Skip planning sends
+//! the ticket straight from Backlog to Ready. A missing Tech Lead does not
+//! block the ticket: Ready stays put and a comment explains why.
 
 use crate::copy::plan::{
     self, format_plan, APPROVE_ONLY_FROM_PLAN_REVIEW, ASK_COMMENT_REQUIRED,
-    ASK_ONLY_FROM_PLAN_REVIEW, IMPLEMENTATION_NOT_STARTED, NO_PLANNER, NO_PLAN_YET,
-    PLAN_ALREADY_RUNNING, PLAN_APPROVED_NOTE, PLAN_STALE, WORK_NOT_STARTED,
+    ASK_ONLY_FROM_PLAN_REVIEW, IMPLEMENTATION_NOT_STARTED, NO_PLAN_YET, NO_PM, NO_TECH_LEAD,
+    PLAN_ALREADY_RUNNING, PLAN_APPROVED_NOTE, PLAN_STALE, PLAN_START_WRONG_COLUMN,
+    WORK_NOT_STARTED,
 };
 use crate::domain::agent::Agent;
 use crate::domain::comment::{AuthorType, Comment, CommentIntent};
@@ -16,7 +18,7 @@ use crate::domain::context_profile::ContextProfile;
 use crate::domain::job::{job_status_to_str, JobStatus};
 use crate::domain::run::{run_status_to_str, RunStatus};
 use crate::domain::substatus::TicketStatus;
-use crate::domain::workflow::JOB_TYPE_PLAN_TICKET;
+use crate::domain::workflow::{is_pm_identity, is_tech_lead_identity, JOB_TYPE_PLAN_TICKET};
 use crate::sandbox::permissive::PROFILE_ID;
 use crate::services::agent_service::AgentService;
 use crate::services::comment_service::CommentService;
@@ -83,26 +85,88 @@ impl<'a> PlanningService<'a> {
         Self { pool }
     }
 
-    /// Start planning after a human moves the ticket to Ready.
-    /// Skip planning moves that ticket to In Progress and starts the work.
-    /// A second call while a planning run is queued or running is a no-op.
-    pub async fn start_for_ready(&self, ticket_id: Uuid) -> Result<StartOutcome, PlanError> {
+    /// Start the PM's planning run. Used from Backlog, and from Ready when a
+    /// ticket is sitting there with no plan (older rows).
+    pub async fn start_planning(&self, ticket_id: Uuid) -> Result<StartOutcome, PlanError> {
         let ticket = TicketService::new(self.pool).get(ticket_id).await?;
-        if ticket.ticket.skip_planning {
-            self.advance_skipped(ticket_id).await?;
-            return Ok(StartOutcome::Skipped);
+        if !matches!(
+            ticket.ticket.status,
+            TicketStatus::Backlog | TicketStatus::Ready
+        ) {
+            return Err(PlanError::Validation(PLAN_START_WRONG_COLUMN.to_string()));
         }
         self.start(ticket_id, None).await
     }
 
-    async fn advance_skipped(&self, ticket_id: Uuid) -> Result<(), PlanError> {
+    /// Ready was just entered with an approved plan or Skip planning.
+    /// Start the Tech Lead when one exists. A missing Tech Lead leaves the
+    /// ticket in Ready and posts an explanation.
+    pub async fn on_entered_ready(&self, ticket_id: Uuid) -> Result<(), PlanError> {
         let ticket = TicketService::new(self.pool).get(ticket_id).await?;
-        if ticket.ticket.status != TicketStatus::InProgress {
-            TicketService::new(self.pool)
-                .update_status(ticket_id, TicketStatus::InProgress, None, None)
-                .await?;
+        if ticket.ticket.status != TicketStatus::Ready {
+            return Ok(());
         }
-        self.start_implementation(ticket_id, WORK_NOT_STARTED).await
+        let plan = TicketService::new(self.pool)
+            .plan_entry(&ticket.ticket)
+            .await?;
+        if !plan.allows_ready() {
+            return Ok(());
+        }
+        self.start_tech_lead(ticket_id).await
+    }
+
+    async fn start_tech_lead(&self, ticket_id: Uuid) -> Result<(), PlanError> {
+        let agents = AgentService::new(self.pool)
+            .list_agents()
+            .await
+            .map_err(|err| PlanError::Validation(err.to_string()))?;
+        let Some(lead) = tech_lead_for_ready(&agents) else {
+            self.note(ticket_id, NO_TECH_LEAD).await?;
+            return Ok(());
+        };
+        TicketService::new(self.pool)
+            .assign_agent(ticket_id, Some(lead.id))
+            .await?;
+        let missing = if TicketService::new(self.pool)
+            .get(ticket_id)
+            .await?
+            .ticket
+            .approved_plan_comment_id
+            .is_some()
+        {
+            IMPLEMENTATION_NOT_STARTED
+        } else {
+            WORK_NOT_STARTED
+        };
+        match RunService::new(self.pool)
+            .start_run_for_agent(
+                ticket_id,
+                lead.id,
+                "work_on_ticket",
+                crate::services::run_service::StartRunOptions::default(),
+            )
+            .await
+        {
+            Ok(_) | Err(RunError::ActiveRunExists) => Ok(()),
+            Err(RunError::Validation(_)) => self.note(ticket_id, missing).await,
+            Err(RunError::Database(err)) => Err(PlanError::Database(err)),
+            Err(RunError::NotFound) => Ok(()),
+        }
+    }
+
+    async fn note(&self, ticket_id: Uuid, body: &str) -> Result<(), PlanError> {
+        CommentService::new(self.pool)
+            .create(
+                ticket_id,
+                AuthorType::System,
+                None,
+                body,
+                CommentIntent::SystemEvent,
+                &[],
+                &[],
+            )
+            .await?;
+        Ok(())
     }
 
     async fn start(
@@ -122,18 +186,8 @@ impl<'a> PlanningService<'a> {
             .list_agents()
             .await
             .map_err(|err| PlanError::Validation(err.to_string()))?;
-        let Some(planner) = planner_for_ticket(&agents, ticket.ticket.assignee_agent_id) else {
-            CommentService::new(self.pool)
-                .create(
-                    ticket_id,
-                    AuthorType::System,
-                    None,
-                    NO_PLANNER,
-                    CommentIntent::SystemEvent,
-                    &[],
-                    &[],
-                )
-                .await?;
+        let Some(planner) = planner_for_ticket(&agents) else {
+            self.note(ticket_id, NO_PM).await?;
             return Ok(StartOutcome::NoPlanner);
         };
 
@@ -240,13 +294,9 @@ impl<'a> PlanningService<'a> {
         .execute(self.pool)
         .await?;
 
-        if matches!(
-            ticket.ticket.status,
-            TicketStatus::Ready | TicketStatus::PlanReview
-        ) && ticket.ticket.status != TicketStatus::PlanReview
-        {
+        if let Some(next) = status_after_planning_run(ticket.ticket.status) {
             TicketService::new(self.pool)
-                .update_status(ticket_id, TicketStatus::PlanReview, None, None)
+                .update_status(ticket_id, next, None, None)
                 .await?;
         }
         Ok(())
@@ -280,7 +330,7 @@ impl<'a> PlanningService<'a> {
         .await?;
 
         TicketService::new(self.pool)
-            .update_status(ticket_id, TicketStatus::InProgress, None, None)
+            .update_status(ticket_id, TicketStatus::Ready, None, None)
             .await?;
 
         CommentService::new(self.pool)
@@ -295,8 +345,7 @@ impl<'a> PlanningService<'a> {
             )
             .await?;
 
-        self.start_implementation(ticket_id, IMPLEMENTATION_NOT_STARTED)
-            .await?;
+        self.start_tech_lead(ticket_id).await?;
         Ok(())
     }
 
@@ -363,47 +412,6 @@ impl<'a> PlanningService<'a> {
         }))
     }
 
-    async fn start_implementation(
-        &self,
-        ticket_id: Uuid,
-        missing_note: &str,
-    ) -> Result<(), PlanError> {
-        let ticket = TicketService::new(self.pool).get(ticket_id).await?;
-        if ticket.ticket.assignee_agent_id.is_none() || ticket.ticket.repo_id.is_none() {
-            CommentService::new(self.pool)
-                .create(
-                    ticket_id,
-                    AuthorType::System,
-                    None,
-                    missing_note,
-                    CommentIntent::SystemEvent,
-                    &[],
-                    &[],
-                )
-                .await?;
-            return Ok(());
-        }
-        match RunService::new(self.pool).start_run(ticket_id).await {
-            Ok(_) | Err(RunError::ActiveRunExists) => Ok(()),
-            Err(RunError::Validation(_)) => {
-                CommentService::new(self.pool)
-                    .create(
-                        ticket_id,
-                        AuthorType::System,
-                        None,
-                        missing_note,
-                        CommentIntent::SystemEvent,
-                        &[],
-                        &[],
-                    )
-                    .await?;
-                Ok(())
-            }
-            Err(RunError::Database(err)) => Err(PlanError::Database(err)),
-            Err(RunError::NotFound) => Ok(()),
-        }
-    }
-
     async fn active_plan_run(&self, ticket_id: Uuid) -> Result<Option<Uuid>, PlanError> {
         let id = sqlx::query_scalar(
             r#"
@@ -447,13 +455,38 @@ impl<'a> PlanningService<'a> {
     }
 }
 
-/// The agent who writes the plan. Today that is the ticket's assignee.
-/// M14 can replace this with a dedicated planner.
-pub fn planner_for_ticket(agents: &[Agent], assignee_id: Option<Uuid>) -> Option<&Agent> {
-    let assignee_id = assignee_id?;
+/// Where a finished planning run moves the ticket. The agent's next status
+/// is not an input: Backlog and a stranded Ready ticket go to Plan Review.
+pub fn status_after_planning_run(current: TicketStatus) -> Option<TicketStatus> {
+    match current {
+        TicketStatus::Backlog | TicketStatus::Ready => Some(TicketStatus::PlanReview),
+        _ => None,
+    }
+}
+
+/// The enabled PM who writes the plan. The earliest PM wins when several exist.
+pub fn planner_for_ticket(agents: &[Agent]) -> Option<&Agent> {
     agents
         .iter()
-        .find(|agent| agent.enabled && agent.id == assignee_id)
+        .filter(|agent| agent.enabled && is_pm_agent(agent))
+        .min_by_key(|agent| agent.created_at)
+}
+
+fn is_pm_agent(agent: &Agent) -> bool {
+    let key = agent.preset_source.as_deref().unwrap_or("");
+    is_pm_identity(key, &agent.role)
+}
+
+fn tech_lead_for_ready(agents: &[Agent]) -> Option<&Agent> {
+    agents
+        .iter()
+        .filter(|agent| agent.enabled && is_tech_lead_agent(agent))
+        .min_by_key(|agent| agent.created_at)
+}
+
+fn is_tech_lead_agent(agent: &Agent) -> bool {
+    let key = agent.preset_source.as_deref().unwrap_or("");
+    is_tech_lead_identity(key, &agent.role)
 }
 
 #[cfg(test)]
@@ -479,33 +512,56 @@ mod tests {
     }
 
     #[test]
-    fn planner_is_the_enabled_assignee() {
-        let engineer = agent(2, "Backend Engineer", "backend_engineer", true, 10);
-        let agents = [engineer.clone()];
-        let chosen = planner_for_ticket(&agents, Some(engineer.id));
-        assert_eq!(chosen.map(|agent| agent.id), Some(engineer.id));
-    }
-
-    #[test]
-    fn planner_is_none_without_an_assignee() {
-        let engineer = agent(2, "Backend Engineer", "backend_engineer", true, 10);
-        assert!(planner_for_ticket(&[engineer], None).is_none());
-    }
-
-    #[test]
-    fn planner_is_none_when_the_assignee_is_disabled() {
-        let disabled = agent(2, "Backend Engineer", "backend_engineer", false, 10);
-        let id = disabled.id;
-        assert!(planner_for_ticket(&[disabled], Some(id)).is_none());
-    }
-
-    #[test]
-    fn planner_ignores_a_pm_who_is_not_the_assignee() {
+    fn planner_is_the_enabled_pm() {
         let pm = agent(1, "PM", "pm", true, 1);
         let engineer = agent(2, "Backend Engineer", "backend_engineer", true, 10);
-        let agents = [pm, engineer.clone()];
-        let chosen = planner_for_ticket(&agents, Some(engineer.id));
-        assert_eq!(chosen.map(|agent| agent.id), Some(engineer.id));
-        assert!(planner_for_ticket(&agents, None).is_none());
+        let agents = [engineer, pm.clone()];
+        let chosen = planner_for_ticket(&agents);
+        assert_eq!(chosen.map(|agent| agent.id), Some(pm.id));
+    }
+
+    #[test]
+    fn planner_is_none_without_a_pm() {
+        let engineer = agent(2, "Backend Engineer", "backend_engineer", true, 10);
+        assert!(planner_for_ticket(&[engineer]).is_none());
+    }
+
+    #[test]
+    fn planner_is_none_when_the_pm_is_disabled() {
+        let disabled = agent(1, "PM", "pm", false, 1);
+        assert!(planner_for_ticket(&[disabled]).is_none());
+    }
+
+    #[test]
+    fn planner_picks_the_earliest_enabled_pm() {
+        let later = agent(2, "PM", "pm", true, 10);
+        let earlier = agent(1, "Product Manager", "product", true, 1);
+        let agents = [later, earlier.clone()];
+        let chosen = planner_for_ticket(&agents);
+        assert_eq!(chosen.map(|agent| agent.id), Some(earlier.id));
+    }
+
+    #[test]
+    fn planning_run_moves_backlog_to_plan_review_with_no_next_status() {
+        assert_eq!(
+            status_after_planning_run(TicketStatus::Backlog),
+            Some(TicketStatus::PlanReview)
+        );
+        assert_eq!(
+            status_after_planning_run(TicketStatus::Ready),
+            Some(TicketStatus::PlanReview)
+        );
+        assert_eq!(status_after_planning_run(TicketStatus::PlanReview), None);
+        assert_eq!(status_after_planning_run(TicketStatus::InProgress), None);
+    }
+
+    #[test]
+    fn approving_a_plan_targets_ready_not_in_progress() {
+        // Approval does not read an agent next status. The status write is Ready.
+        assert_eq!(
+            status_after_planning_run(TicketStatus::PlanReview),
+            None,
+            "approval is a separate move from the planning run"
+        );
     }
 }

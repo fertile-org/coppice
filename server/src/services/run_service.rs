@@ -1,3 +1,4 @@
+use crate::copy::plan::NO_PM;
 use crate::domain::comment::AuthorType;
 use crate::domain::connector_check::JOB_TYPE_CONNECTOR_CHECK;
 use crate::domain::context_profile::ContextProfile;
@@ -8,6 +9,7 @@ use crate::domain::run::{run_status_from_str, run_status_to_str, AgentRun, RunSt
 use crate::domain::slug::slugify;
 use crate::domain::substatus::{validate_status_substatus_combo, TicketStatus};
 use crate::domain::ticket::{status_from_str, status_to_str, substatus_from_str};
+use crate::domain::workflow::is_pm_identity;
 use crate::mcp::token::TokenService;
 use crate::sandbox::permissive::PROFILE_ID;
 use crate::services::agent_service::AgentError;
@@ -16,6 +18,7 @@ use crate::services::comment_service::{CommentError, CommentService};
 use crate::services::job_service::{JobError, JobService};
 use crate::services::mention_service::MentionError;
 use crate::services::notification_service::NotificationService;
+use crate::services::planning_service::{PlanError, PlanningService, StartOutcome};
 use crate::services::repo_service::RepoService;
 use crate::services::result_contract::ApplyResult;
 use crate::services::ticket_service::{TicketError, TicketService};
@@ -148,6 +151,14 @@ impl<'a> RunService<'a> {
             .assignee_agent_id
             .ok_or_else(|| RunError::Validation("ticket has no assignee agent".into()))?;
 
+        let (agent_key, agent_role) = self.agent_key_and_role(agent_id).await?;
+        if ticket.ticket.status == TicketStatus::Backlog
+            && !ticket.ticket.skip_planning
+            && is_pm_identity(&agent_key, &agent_role)
+        {
+            return self.start_assigned_planning(ticket_id).await;
+        }
+
         let repo_id = ticket
             .ticket
             .repo_id
@@ -171,8 +182,6 @@ impl<'a> RunService<'a> {
                 "repository path is not ready: {detail}"
             )));
         }
-
-        let (agent_key, agent_role) = self.agent_key_and_role(agent_id).await?;
 
         let mut tx = self.pool.begin().await?;
         let run_id = Uuid::new_v4();
@@ -235,6 +244,23 @@ impl<'a> RunService<'a> {
         tx.commit().await?;
 
         Ok(row_to_run(&row))
+    }
+
+    /// A PM on Backlog without Skip planning writes the plan. No repository
+    /// is required. The planner is the enabled PM, not necessarily this assignee.
+    async fn start_assigned_planning(&self, ticket_id: Uuid) -> Result<AgentRun, RunError> {
+        match PlanningService::new(self.pool)
+            .start_planning(ticket_id)
+            .await
+        {
+            Ok(StartOutcome::Started(id)) => self.get(id).await,
+            Ok(StartOutcome::AlreadyRunning(_)) => Err(RunError::ActiveRunExists),
+            Ok(StartOutcome::NoPlanner | StartOutcome::Skipped) => {
+                Err(RunError::Validation(NO_PM.to_string()))
+            }
+            Err(PlanError::Validation(message)) => Err(RunError::Validation(message)),
+            Err(PlanError::Database(err)) => Err(RunError::Database(err)),
+        }
     }
 
     pub async fn get(&self, run_id: Uuid) -> Result<AgentRun, RunError> {

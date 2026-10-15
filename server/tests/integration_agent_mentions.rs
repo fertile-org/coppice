@@ -499,7 +499,7 @@ async fn pending_pm_assignment_wins_over_same_target_consultation_request() {
         "PM recommendation awaits human Tech Lead assignment",
         Duration::from_secs(30),
         |ticket| {
-            ticket["status"].as_str() == Some("ready")
+            ticket["status"].as_str() == Some("backlog")
                 && ticket["pendingAssignRecommendation"]["recommendedAgentKey"].as_str()
                     == Some("tech_lead")
         },

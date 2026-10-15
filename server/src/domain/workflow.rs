@@ -30,6 +30,9 @@ pub struct TransitionContext {
     pub auto_assign_enabled: bool,
     pub clarification_round: i32,
     pub context_profile: ContextProfile,
+    /// When false, workflow must not enter Ready. Planning or Skip planning
+    /// is what makes Ready legal.
+    pub plan_allows_ready: bool,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]

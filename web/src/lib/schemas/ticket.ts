@@ -121,6 +121,9 @@ export const ticketSchema = z.object({
     .nullable()
     .optional(),
   clarificationRound: z.number().optional(),
+  skipPlanning: z.boolean().optional(),
+  planApproved: z.boolean().optional(),
+  latestPlanRunStatus: z.string().nullable().optional(),
   hasActiveRun: z.boolean().optional(),
   archivedAt: z.string().nullable().optional(),
   humanReview: z
