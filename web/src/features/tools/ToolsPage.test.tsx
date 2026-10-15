@@ -3,11 +3,16 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { fireEvent, render, screen } from '@testing-library/react';
 import { MemoryRouter, useLocation } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { MIN_PASSWORD_CHARS } from '../../lib/passwords';
 import { ToolsPage } from './ToolsPage';
+
+const sessionState = vi.hoisted(() => ({ desktopMode: false }));
 
 vi.mock('../auth/useSession', () => ({
   useSession: () => ({
     user: { id: '1', email: 'admin@localhost', role: 'admin' },
+    desktopMode: sessionState.desktopMode,
+    establishSession: () => {},
   }),
 }));
 
@@ -34,6 +39,7 @@ const fetchMock = vi.fn();
 
 describe('ToolsPage', () => {
   beforeEach(() => {
+    sessionState.desktopMode = false;
     fetchMock.mockReset();
     fetchMock.mockImplementation((path: string) => {
       const body = path === '/api/agents' ? { items: [] } : [];
@@ -61,6 +67,16 @@ describe('ToolsPage', () => {
     expect(
       screen.getByRole('button', { name: 'Import backup' }),
     ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        'Download a backup of your boards, tickets, settings, files, and agent worktrees. Passwords, keys, and saved tokens are left out. Keep the file private.',
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "Importing replaces all data on this install with the backup's. Its settings are restored too, except passwords, keys, and folder paths. You'll paste saved tokens again, and you may be signed out.",
+      ),
+    ).toBeInTheDocument();
   });
 
   it('tools page has backup and connectors tabs', async () => {
@@ -83,6 +99,41 @@ describe('ToolsPage', () => {
       screen.queryByRole('button', { name: 'Download backup' }),
     ).not.toBeInTheDocument();
     expect(await screen.findByText(/No connectors/)).toBeVisible();
+  });
+
+  it('asks for a new admin password before replacing keys', () => {
+    sessionState.desktopMode = true;
+    renderPage();
+
+    expect(MIN_PASSWORD_CHARS).toBe(8);
+    expect(screen.getByRole('heading', { name: 'Replace keys' })).toBeInTheDocument();
+    expect(screen.getByLabelText('New admin password')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Replace keys' }));
+    expect(screen.getByText('Check the box to continue.')).toBeInTheDocument();
+
+    fireEvent.click(
+      screen.getByRole('checkbox', {
+        name: "I understand everyone will be signed out, and I'll sign in with the new password.",
+      }),
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Replace keys' }));
+    expect(screen.getByText('Enter a new admin password.')).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText('New admin password'), {
+      target: { value: '1234567' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Replace keys' }));
+    expect(screen.getByText('Use at least 8 characters.')).toBeInTheDocument();
+  });
+
+  it('hides replace keys outside the desktop app', () => {
+    renderPage();
+    expect(screen.queryByRole('heading', { name: 'Replace keys' })).not.toBeInTheDocument();
+    const command = screen.getByText('coppice-server replace-keys');
+    expect(command.tagName).toBe('CODE');
+    expect(command.parentElement).toHaveTextContent(
+      'On a server, stop Coppice and run coppice-server replace-keys.',
+    );
   });
 
   it('opens the connectors tab from the url', () => {

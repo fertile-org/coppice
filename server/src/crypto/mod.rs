@@ -1,3 +1,3 @@
 pub mod secret_store;
 
-pub use secret_store::{SecretStore, SecretStoreError};
+pub use secret_store::{operations_lock, SecretStore, SecretStoreError};

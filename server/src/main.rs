@@ -28,6 +28,24 @@ fn main() -> anyhow::Result<()> {
         print!("{}", version_text());
         return Ok(());
     }
+    match coppice_server::services::secret_rotation::parse_replace_keys_command(&args) {
+        Ok(Some(())) => {
+            let password = match coppice_server::services::secret_rotation::prompt_admin_password()
+            {
+                Ok(password) => password,
+                Err(err) => {
+                    eprintln!("coppice-server: {err}");
+                    std::process::exit(2);
+                }
+            };
+            return run_replace_keys(&password);
+        }
+        Ok(None) => {}
+        Err(err) => {
+            eprintln!("coppice-server: {err}");
+            std::process::exit(2);
+        }
+    }
     match desktop::parse_desktop_args(&args) {
         Ok(Some(args)) => {
             let logs_dir = args
@@ -63,6 +81,42 @@ fn run_desktop(args: desktop::DesktopArgs) -> anyhow::Result<()> {
         std::process::exit(1);
     }
     Ok(())
+}
+
+fn run_replace_keys(password: &str) -> anyhow::Result<()> {
+    let config = coppice_server::AppConfig::load()
+        .map_err(|e| anyhow::anyhow!("failed to load config: {e}"))?;
+    logs::init(std::path::Path::new(&config.logs.dir))?;
+    let config_path = coppice_server::AppConfig::writable_config_path();
+    let result = runtime()?.block_on(coppice_server::services::secret_rotation::replace_offline(
+        &config,
+        &config_path,
+        password,
+    ));
+    match result {
+        Ok(message) => {
+            println!("{message}");
+            Ok(())
+        }
+        Err(err) => {
+            match &err {
+                coppice_server::services::secret_rotation::ReplaceError::PasswordEmpty
+                | coppice_server::services::secret_rotation::ReplaceError::PasswordShort
+                | coppice_server::services::secret_rotation::ReplaceError::NotDesktop => {
+                    eprintln!("{err}");
+                }
+                coppice_server::services::secret_rotation::ReplaceError::Failed(detail) => {
+                    tracing::error!(error = %detail, "couldn't replace keys");
+                    eprintln!("{detail}");
+                    eprintln!(
+                        "{}",
+                        coppice_server::services::secret_rotation::REPLACE_UI_ERROR
+                    );
+                }
+            }
+            std::process::exit(1);
+        }
+    }
 }
 
 async fn run(config: coppice_server::AppConfig) -> anyhow::Result<()> {

@@ -52,6 +52,7 @@ vi.mock('./useRepos', () => ({
   useDeleteRepo: () => mutation(mocks.remove),
   useVerifyRepo: () => mutation(mocks.verify),
   useInspectRepoPath: () => mutation(vi.fn()),
+  useSetForgeToken: () => mutation(mocks.setToken),
   useDefaultBranchSync: () => ({ data: undefined, isLoading: false }),
   useFetchDefaultBranch: () => mutation(vi.fn()),
   usePushDefaultBranch: () => mutation(vi.fn()),
@@ -139,6 +140,23 @@ describe('RepositoriesPage', () => {
     expect(within(dialog).getByRole('button', { name: 'Remove' })).toBeVisible();
     expect(within(dialog).getByTestId('default-branch-sync')).toBeVisible();
     expect(within(dialog).queryByRole('combobox')).not.toBeInTheDocument();
+  });
+
+  it('asks for a forge token again only after import marks it', () => {
+    mocks.repos = [{ ...sampleRepo, forgeTokenNeedsReentry: true }];
+    render(<RepositoriesPage />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
+
+    const dialog = screen.getByRole('dialog', { name: 'Edit repository' });
+    const field = within(dialog).getByLabelText('Token');
+    expect(field).toHaveAttribute(
+      'placeholder',
+      "Paste this token again. Backups don't include saved tokens.",
+    );
+    expect(
+      within(dialog).getByRole('button', { name: 'Save token' }),
+    ).toBeVisible();
   });
 
   it('hides admin controls for non-admins but keeps View code', () => {

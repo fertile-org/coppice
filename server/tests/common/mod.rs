@@ -224,6 +224,7 @@ where
         tools: gateway.tools,
         plugin_mcp: gateway.plugin_mcp,
         connector_probes: Arc::new(ConnectorProbes::new()),
+        database_url: AppState::share_database_url(&config.database.url),
         config,
         db: Some(pool),
     })
@@ -273,6 +274,7 @@ where
         tools: gateway.tools,
         plugin_mcp: gateway.plugin_mcp,
         connector_probes: Arc::new(ConnectorProbes::new()),
+        database_url: AppState::share_database_url(&config.database.url),
         config,
         db: Some(pool),
     });
@@ -322,6 +324,7 @@ where
         tools: gateway.tools,
         plugin_mcp: gateway.plugin_mcp,
         connector_probes: Arc::new(ConnectorProbes::new()),
+        database_url: AppState::share_database_url(&config.database.url),
         config,
         db: Some(pool),
     });

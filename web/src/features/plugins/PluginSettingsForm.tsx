@@ -67,8 +67,9 @@ export function PluginSettingsForm({ pluginId, settings }: PluginSettingsFormPro
     <form onSubmit={(e) => void handleSave(e)} className="mt-3 border-t border-border pt-3">
       <p className="font-body text-xs font-medium text-text-secondary">Settings</p>
       <ul className="mt-2 space-y-2">
-        {settings.map(({ key, configured, source }) => {
+        {settings.map(({ key, configured, source, needsReentry }) => {
           const inputId = `plugin-${pluginId}-setting-${key}`;
+          const again = needsReentry === true;
           return (
             <li
               key={key}
@@ -83,12 +84,18 @@ export function PluginSettingsForm({ pluginId, settings }: PluginSettingsFormPro
                 type="password"
                 autoComplete="off"
                 spellCheck={false}
-                placeholder={configured ? '••••••••' : ''}
+                placeholder={
+                  again
+                    ? "Paste this token again. Backups don't include saved tokens."
+                    : configured
+                      ? '••••••••'
+                      : ''
+                }
                 value={values[key] ?? ''}
                 onChange={(e) => setValues((prev) => ({ ...prev, [key]: e.target.value }))}
                 className="field-control min-w-[12rem] flex-1 px-3 py-1.5 font-mono text-xs"
               />
-              {configured && (
+              {configured && !again && (
                 <>
                   <span className={`${BADGE} border-success-muted bg-success-muted text-success`}>
                     Configured
@@ -112,7 +119,7 @@ export function PluginSettingsForm({ pluginId, settings }: PluginSettingsFormPro
                   </Button>
                 </>
               )}
-              {!configured && <SourceBadge source={source} />}
+              {!configured && !again && <SourceBadge source={source} />}
             </li>
           );
         })}

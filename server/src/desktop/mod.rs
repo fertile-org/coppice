@@ -225,6 +225,17 @@ async fn serve_with_postgres(
     import_notice: Option<String>,
     requested: watch::Receiver<bool>,
 ) -> anyhow::Result<()> {
+    let pg_password = crate::services::secret_rotation::finish_file_password(
+        &layout.secrets_dir,
+        "127.0.0.1",
+        pg_port,
+        postgres::SUPERUSER,
+        "postgres",
+    )
+    .await
+    .map_err(|err| anyhow::anyhow!("could not finish replacing keys: {err}"))?;
+    let mut secrets = secrets.clone();
+    secrets.pg_password = pg_password;
     let pg_url = pg
         .ensure_database(pg_port, &secrets.pg_password, DATABASE_NAME)
         .await?;
@@ -232,7 +243,7 @@ async fn serve_with_postgres(
         .await
         .context("bind 127.0.0.1")?;
     let port = listener.local_addr()?.port();
-    let mut config = bootstrap::desktop_config(layout, secrets, &pg_url, port)?;
+    let mut config = bootstrap::desktop_config(layout, &secrets, &pg_url, port)?;
     config.logs.dir = page_logs_dir(&config.logs.dir, layout);
     let options = ServeOptions {
         static_web_dir: Some(resources.web.clone()),

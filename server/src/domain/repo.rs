@@ -20,6 +20,7 @@ pub struct Repo {
     pub verification_error: Option<String>,
     pub last_verified_at: Option<OffsetDateTime>,
     pub forge_token_secret_id: Option<Uuid>,
+    pub forge_token_needs_reentry: bool,
     pub created_at: OffsetDateTime,
     pub updated_at: OffsetDateTime,
 }

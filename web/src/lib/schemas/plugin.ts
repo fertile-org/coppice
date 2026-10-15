@@ -57,6 +57,7 @@ export const pluginSettingSchema = z.object({
   key: z.string(),
   configured: z.boolean(),
   source: pluginSettingSourceSchema,
+  needsReentry: z.boolean().optional(),
 });
 
 export type PluginSetting = z.infer<typeof pluginSettingSchema>;

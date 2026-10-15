@@ -146,6 +146,7 @@ struct PluginSettingResponse {
     key: String,
     configured: bool,
     source: &'static str,
+    needs_reentry: bool,
 }
 
 #[derive(Deserialize)]
@@ -304,6 +305,7 @@ fn server_health(mcp: &McpServerPool, plugin_id: Uuid, entry: &McpServerEntry) -
 fn plugin_response(
     plugin: PluginRow,
     configured: &BTreeSet<String>,
+    reentry: &BTreeSet<String>,
     mcp: &McpServerPool,
     agent_ids: &[Uuid],
 ) -> PluginResponse {
@@ -315,6 +317,7 @@ fn plugin_response(
     let settings = setting_sources(entries, configured, &|name| std::env::var(name).ok())
         .into_iter()
         .map(|(key, source)| PluginSettingResponse {
+            needs_reentry: reentry.contains(&key),
             key,
             configured: source == SettingSource::Setting,
             source: source.as_str(),
@@ -383,9 +386,9 @@ async fn single_response(
     pool: &PgPool,
     plugin: PluginRow,
 ) -> Result<Json<PluginResponse>, ApiError> {
-    let configured = PluginSettingsService::new(pool, &state.secret_store)
-        .configured_keys(plugin.id)
-        .await?;
+    let settings = PluginSettingsService::new(pool, &state.secret_store);
+    let configured = settings.configured_keys(plugin.id).await?;
+    let reentry = settings.reentry_keys(plugin.id).await?;
     let members = PluginService::new(pool)
         .explicit_members(&[plugin.id])
         .await?;
@@ -393,6 +396,7 @@ async fn single_response(
     Ok(Json(plugin_response(
         plugin,
         &configured,
+        &reentry,
         &state.plugin_mcp,
         &agent_ids,
     )))
@@ -403,9 +407,9 @@ async fn plugins_response(
     pool: &PgPool,
     plugins: Vec<PluginRow>,
 ) -> Result<Json<Vec<PluginResponse>>, ApiError> {
-    let configured = PluginSettingsService::new(pool, &state.secret_store)
-        .configured_keys_by_plugin()
-        .await?;
+    let settings = PluginSettingsService::new(pool, &state.secret_store);
+    let configured = settings.configured_keys_by_plugin().await?;
+    let reentry = settings.reentry_keys_by_plugin().await?;
     let ids: Vec<Uuid> = plugins.iter().map(|plugin| plugin.id).collect();
     let members = PluginService::new(pool).explicit_members(&ids).await?;
     let none = BTreeSet::new();
@@ -415,8 +419,9 @@ async fn plugins_response(
             .into_iter()
             .map(|p| {
                 let keys = configured.get(&p.id).unwrap_or(&none);
+                let again = reentry.get(&p.id).unwrap_or(&none);
                 let agent_ids = members.get(&p.id).unwrap_or(&no_agents);
-                plugin_response(p, keys, &state.plugin_mcp, agent_ids)
+                plugin_response(p, keys, again, &state.plugin_mcp, agent_ids)
             })
             .collect(),
     ))
