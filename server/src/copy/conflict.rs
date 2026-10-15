@@ -14,15 +14,15 @@ pub const REREVIEW_NOTE: &str =
 
 pub const INVALID_FILE_LIST: &str = "The conflict file list is invalid.";
 
-/// [placeholder] Shown when a person tries to move a Done ticket to another column.
+/// Shown when a person tries to move a Done ticket to another column.
 pub const DONE_COLUMN_HOLDS: &str =
-    "[placeholder] Done tickets stay in Done. Dragging one to another column does not move it.";
+    "Done tickets can't be moved. Create a new ticket for follow-up work.";
 
-/// [placeholder] Shown when a merge conflict was cleared but the ticket could not leave Done.
+/// Shown when a merge conflict was cleared but the ticket could not leave Done.
 pub const MERGE_CONFLICT_REOPEN_FAILED: &str =
-    "[placeholder] The merge conflict was cleared, but the ticket could not return to In Progress.";
+    "The conflict was cleared, but Coppice couldn't move this ticket back to In Progress. Move it there yourself.";
 
-/// [placeholder] Comment posted when a Done ticket's merge hits a conflict.
+/// Comment posted when a Done ticket's merge hits a conflict.
 /// Also copied into the assignee's run context.
 pub fn merge_conflict_reopen_comment(branch: &str, files: &[String]) -> String {
     let listed = if files.is_empty() {
@@ -35,8 +35,8 @@ pub fn merge_conflict_reopen_comment(branch: &str, files: &[String]) -> String {
             .join("\n")
     };
     format!(
-        "[placeholder] Couldn't merge into {branch} because these files conflict:\n{listed}\n\n\
-         The ticket is back in In Progress with the same assignee. It has to go through Human Review and be accepted again before it can be Done."
+        "Couldn't merge into {branch} because these files conflict:\n{listed}\n\n\
+         The ticket is back in In Progress with the same assignee. You'll need to accept it again in Human Review before it merges."
     )
 }
 
@@ -128,15 +128,18 @@ mod tests {
     }
 
     #[test]
-    fn merge_conflict_reopen_copy_is_placeholder() {
-        assert!(DONE_COLUMN_HOLDS.starts_with("[placeholder]"));
-        assert!(MERGE_CONFLICT_REOPEN_FAILED.starts_with("[placeholder]"));
-        let comment =
-            merge_conflict_reopen_comment("main", &["README.md".into(), "src/lib.rs".into()]);
-        assert!(comment.starts_with("[placeholder]"));
-        assert!(comment.contains("- README.md"));
-        assert!(comment.contains("- src/lib.rs"));
-        assert!(comment.contains("In Progress"));
-        assert!(comment.contains("Human Review"));
+    fn merge_conflict_reopen_copy_matches_content() {
+        assert_eq!(
+            DONE_COLUMN_HOLDS,
+            "Done tickets can't be moved. Create a new ticket for follow-up work."
+        );
+        assert_eq!(
+            MERGE_CONFLICT_REOPEN_FAILED,
+            "The conflict was cleared, but Coppice couldn't move this ticket back to In Progress. Move it there yourself."
+        );
+        assert_eq!(
+            merge_conflict_reopen_comment("main", &["README.md".into(), "src/lib.rs".into()]),
+            "Couldn't merge into main because these files conflict:\n- README.md\n- src/lib.rs\n\nThe ticket is back in In Progress with the same assignee. You'll need to accept it again in Human Review before it merges."
+        );
     }
 }
