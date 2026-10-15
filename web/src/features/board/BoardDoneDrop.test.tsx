@@ -6,6 +6,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ToastProvider } from '../../components/ToastProvider';
 import { ApiError } from '../../lib/api';
 import { BoardPage } from './BoardPage';
+
+vi.mock('./ReviewCapacityBar', () => ({
+  ReviewCapacityBar: () => null,
+}));
 import type { Ticket } from './useTickets';
 
 const apiFetch = vi.hoisted(() => vi.fn());

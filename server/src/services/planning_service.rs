@@ -12,6 +12,7 @@ use crate::copy::plan::{
     PLAN_ALREADY_RUNNING, PLAN_APPROVED_NOTE, PLAN_STALE, PLAN_START_WRONG_COLUMN,
     WORK_NOT_STARTED,
 };
+use crate::copy::review::is_ready_hold;
 use crate::domain::agent::Agent;
 use crate::domain::comment::{AuthorType, Comment, CommentIntent};
 use crate::domain::context_profile::ContextProfile;
@@ -22,6 +23,7 @@ use crate::domain::workflow::{is_pm_identity, is_tech_lead_identity, JOB_TYPE_PL
 use crate::sandbox::permissive::PROFILE_ID;
 use crate::services::agent_service::AgentService;
 use crate::services::comment_service::CommentService;
+use crate::services::review_capacity::{ReviewCapacityError, ReviewCapacityService};
 use crate::services::run_service::{RunError, RunService};
 use crate::services::ticket_service::{TicketError, TicketService};
 use sqlx::PgPool;
@@ -116,6 +118,20 @@ impl<'a> PlanningService<'a> {
     }
 
     async fn start_tech_lead(&self, ticket_id: Uuid) -> Result<(), PlanError> {
+        ReviewCapacityService::new(self.pool)
+            .agree_diff_budget_if_unset(ticket_id)
+            .await
+            .map_err(map_capacity_error)?;
+        if let Some(hold) = ReviewCapacityService::new(self.pool)
+            .block_ready_start(ticket_id)
+            .await
+            .map_err(map_capacity_error)?
+        {
+            if hold.post {
+                self.note(ticket_id, &hold.message).await?;
+            }
+            return Ok(());
+        }
         let agents = AgentService::new(self.pool)
             .list_agents()
             .await
@@ -148,6 +164,7 @@ impl<'a> PlanningService<'a> {
             .await
         {
             Ok(_) | Err(RunError::ActiveRunExists) => Ok(()),
+            Err(RunError::Validation(message)) if is_ready_hold(&message) => Ok(()),
             Err(RunError::Validation(_)) => self.note(ticket_id, missing).await,
             Err(RunError::Database(err)) => Err(PlanError::Database(err)),
             Err(RunError::NotFound) => Ok(()),
@@ -329,6 +346,12 @@ impl<'a> PlanningService<'a> {
         .execute(self.pool)
         .await?;
 
+        // The budget agreed with this plan. The plan text is not read.
+        ReviewCapacityService::new(self.pool)
+            .agree_diff_budget(ticket_id)
+            .await
+            .map_err(map_capacity_error)?;
+
         TicketService::new(self.pool)
             .update_status(ticket_id, TicketStatus::Ready, None, None)
             .await?;
@@ -452,6 +475,13 @@ impl<'a> PlanningService<'a> {
             .await
             .map(Some)
             .map_err(Into::into)
+    }
+}
+
+fn map_capacity_error(err: ReviewCapacityError) -> PlanError {
+    match err {
+        ReviewCapacityError::Database(err) => PlanError::Database(err),
+        ReviewCapacityError::Message(message) => PlanError::Validation(message),
     }
 }
 

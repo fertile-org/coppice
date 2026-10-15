@@ -4,6 +4,7 @@ use crate::domain::substatus::{
 };
 use crate::domain::workflow::{PendingRecommendation, PendingSplitRecommendation};
 use crate::services::human_review_service::{HumanReview, HumanReviewService};
+use crate::services::review_capacity::ReviewCapacityService;
 use crate::services::workflow_service::{PlanEntry, WorkflowService};
 use crate::domain::ticket::{
     priority_from_str, priority_to_str, status_from_str, status_to_str, substatus_from_str,
@@ -495,14 +496,20 @@ impl<'a> TicketService<'a> {
         &self,
         ticket_id: Uuid,
     ) -> Result<TicketWithDisplay, TicketError> {
-        self.write_status(
-            ticket_id,
-            TicketStatus::InProgress,
-            Some(None),
-            Some(None),
-            StatusWrite::MergeConflictReopen,
-        )
-        .await
+        let ticket = self
+            .write_status(
+                ticket_id,
+                TicketStatus::InProgress,
+                Some(None),
+                Some(None),
+                StatusWrite::MergeConflictReopen,
+            )
+            .await?;
+        // Previously accepted in Human Review. The cap lets this ticket back in.
+        ReviewCapacityService::new(self.pool)
+            .mark_merge_conflict_exempt(ticket_id)
+            .await?;
+        Ok(ticket)
     }
 
     async fn write_status(
@@ -531,6 +538,12 @@ impl<'a> TicketService<'a> {
                     WorkflowService::direct_status_change_error(current.ticket.status, status, plan)
                 {
                     return Err(TicketError::Validation(msg.to_string()));
+                }
+                if let Some(message) = ReviewCapacityService::new(self.pool)
+                    .direct_status_block(ticket_id, current.ticket.status, status)
+                    .await?
+                {
+                    return Err(TicketError::Validation(message));
                 }
             }
             StatusWrite::RestartResume => {
@@ -599,6 +612,15 @@ impl<'a> TicketService<'a> {
         .fetch_optional(self.pool)
         .await?
         .ok_or(TicketError::TicketNotFound)?;
+
+        ReviewCapacityService::new(self.pool)
+            .after_status_write(
+                current.ticket.board_id,
+                ticket_id,
+                current.ticket.status,
+                status,
+            )
+            .await?;
 
         self.enrich_row(&row).await
     }
@@ -688,6 +710,15 @@ impl<'a> TicketService<'a> {
         .fetch_optional(self.pool)
         .await?
         .ok_or(TicketError::TicketNotFound)?;
+
+        ReviewCapacityService::new(self.pool)
+            .after_status_write(
+                current.ticket.board_id,
+                ticket_id,
+                current.ticket.status,
+                status,
+            )
+            .await?;
 
         self.enrich_row(&row).await
     }

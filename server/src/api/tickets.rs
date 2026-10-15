@@ -802,7 +802,9 @@ fn map_update_status_error(err: TicketError) -> UpdateStatusError {
             if message == DONE_REQUIRES_ACCEPT
                 || message == PLAN_REQUIRED
                 || message == DONE_COLUMN_HOLDS
-                || message == READY_REQUIRES_PLAN =>
+                || message == READY_REQUIRES_PLAN
+                || crate::copy::review::is_ready_hold(&message)
+                || crate::copy::review::is_entry_hold(&message) =>
         {
             UpdateStatusError::Message(StatusCode::BAD_REQUEST, message)
         }

@@ -143,6 +143,39 @@ impl<'a> RunService<'a> {
         Self { pool }
     }
 
+    /// A Ready work run stays queued while review capacity is full.
+    /// The check counts tickets. It does not read the plan or send a prompt.
+    async fn hold_if_ready_queue_is_full(
+        &self,
+        ticket_id: Uuid,
+        status: TicketStatus,
+        job_type: &str,
+    ) -> Result<(), RunError> {
+        if status != TicketStatus::Ready || job_type != JOB_TYPE_WORK_ON_TICKET {
+            return Ok(());
+        }
+        let Some(hold) = crate::services::review_capacity::ReviewCapacityService::new(self.pool)
+            .block_ready_start(ticket_id)
+            .await?
+        else {
+            return Ok(());
+        };
+        if hold.post {
+            CommentService::new(self.pool)
+                .create(
+                    ticket_id,
+                    AuthorType::System,
+                    None,
+                    &hold.message,
+                    crate::domain::comment::CommentIntent::SystemEvent,
+                    &[],
+                    &[],
+                )
+                .await?;
+        }
+        Err(RunError::Validation(hold.message))
+    }
+
     pub async fn start_run(&self, ticket_id: Uuid) -> Result<AgentRun, RunError> {
         let ticket = TicketService::new(self.pool).get(ticket_id).await?;
 
@@ -158,6 +191,9 @@ impl<'a> RunService<'a> {
         {
             return self.start_assigned_planning(ticket_id).await;
         }
+
+        self.hold_if_ready_queue_is_full(ticket_id, ticket.ticket.status, JOB_TYPE_WORK_ON_TICKET)
+            .await?;
 
         let repo_id = ticket
             .ticket
@@ -499,6 +535,8 @@ impl<'a> RunService<'a> {
         options: StartRunOptions,
     ) -> Result<AgentRun, RunError> {
         let ticket = TicketService::new(self.pool).get(ticket_id).await?;
+        self.hold_if_ready_queue_is_full(ticket_id, ticket.ticket.status, job_type)
+            .await?;
 
         let repo_id = ticket
             .ticket

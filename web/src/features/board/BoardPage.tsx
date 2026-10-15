@@ -29,6 +29,7 @@ import {
   type BoardFilters,
 } from './boardFilters';
 import { BoardColumn } from './BoardColumn';
+import { ReviewCapacityBar } from './ReviewCapacityBar';
 import { BOARD_COLUMNS, isTicketStatus, type TicketStatus } from './columns';
 import { resolveAssigneeName, TicketCard } from './TicketCard';
 import { buildTicketHierarchyIndex } from './ticketHierarchy';
@@ -220,6 +221,7 @@ export function BoardPage() {
           <p className="mt-1 font-body text-sm text-text-secondary">
             Drag tickets between columns to update status.
           </p>
+          <ReviewCapacityBar boardId={boardId} />
         </div>
         <BoardFilterButton
           activeCount={activeFilterCount}
