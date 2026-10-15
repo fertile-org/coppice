@@ -93,9 +93,7 @@ Put it at `.claude-plugin/plugin.json`.
 | `version` | No | Defaults to `0.0.0`. |
 | `description` | No | Defaults to empty. |
 | `author` | No | A string, or `{ "name": "..." }`. |
-| `skills` | No | A string or a list of strings. |
-
-<!-- QUESTION: What does the `skills` field in plugin.json point to (paths to skill folders)? The inventory only gives its type. -->
+| `skills` | No | A path to a skill directory, or a list of directory paths, relative to the plugin root. |
 
 Without `plugin.json`, a folder is still a plugin if it has a `SKILL.md` at the top, or skills in `skills/`, `.agents/skills/`, `.claude/skills/`, or `<name>/SKILL.md`. It takes the folder's name and version `0.0.0`.
 
@@ -129,10 +127,8 @@ Add `.mcp.json` with an `mcpServers` map. Each server is local or remote.
 }
 ```
 
-`${NAME}` becomes a setting on the plugin's card. `${NAME:-default}` gives it a default. SSE servers aren't supported.
+`${NAME}` becomes a setting on the plugin's card. `${NAME:-default}` gives it a default. Coppice fills in `${CLAUDE_PLUGIN_ROOT}` with the plugin's install folder. It is not a card setting. SSE servers aren't supported.
 
 This example exposes the tool `hello-coppice__greet` and the skill `hello-coppice:greeting-style`. See the full example in [`examples/plugins`](https://github.com/fertile-org/coppice/tree/main/examples/plugins).
-
-<!-- QUESTION: Is ${CLAUDE_PLUGIN_ROOT} a variable Coppice fills in, or would it become a card setting? The inventory doesn't say. -->
 
 `commands/`, `agents/` and `hooks/` folders aren't supported yet. They show "Not supported yet" and don't run.

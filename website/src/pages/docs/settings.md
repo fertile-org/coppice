@@ -78,7 +78,9 @@ Changing OpenCode's `command` also needs a restart.
 
 Status keys: `backlog`, `ready`, `in_progress`, `in_review`, `in_qa`, `wait_for_final_review` (Wait for Human Review), `blocked`, `done`.
 
-<!-- QUESTION: The inventory doesn't say what auto-assign and auto-split actually do. Need one line each. Also: is there a `plan_review` key after the reorder PR? -->
+When auto-assign is on for that status, Coppice assigns the agent named by the run. When it's off, the ticket shows **Recommends:** instead.
+
+When auto-split is on for that status, Coppice creates the child tickets the run proposes. When it's off, it saves a **Pending split recommendation** until you click **Approve splits**.
 
 ## `[knowledge]`
 
@@ -95,17 +97,12 @@ Status keys: `backlog`, `ready`, `in_progress`, `in_review`, `in_qa`, `wait_for_
 | `auto_save.allowed_types` | list of strings | `[]` | Types auto-save may save: `bug_pattern`, `coding_convention`, `dependency_note`, `performance_note`, `review_feedback`, `test_command`. |
 | `auto_save.minimum_confidence` | string | `high` | Must stay `high`. |
 | `retrieval.top_k` | integer | `8` | How many entries one lookup returns. 1 to 20. |
-| `retrieval.allowed_types` | list of strings | `[]` (all types) | Only return these types. |
+| `retrieval.allowed_types` | list of strings | `[]` (all types) | Only return these types: `coding_convention`, `architecture_rule`, `bug_pattern`, `test_command`, `review_feedback`, `dependency_note`, `api_contract`, `workflow_rule`, `human_preference`, `operational_runbook`, `security_rule`, `performance_note`. |
 | `retrieval.minimum_confidence` | string | `medium` | `low`, `medium` or `high`. |
 | `retrieval.default_page_size` | integer | `25` | Default page size. |
 | `retrieval.max_page_size` | integer | `100` | Largest page size. 100 at most. |
-| `retrieval.max_active_per_board` | integer | `10000` | Most active entries per board. |
-| `retrieval.max_active_workspace` | integer | `1000` | Most active entries in the workspace. |
 
 Every count and interval above must be greater than 0.
-
-<!-- QUESTION: Known types for retrieval.allowed_types: coding_convention, architecture_rule, bug_pattern, test_command, review_feedback, dependency_note, api_contract, workflow_rule, human_preference, operational_runbook, security_rule, performance_note. List them on the page or link a knowledge doc? -->
-<!-- QUESTION: max_active_per_board (10000) is larger than max_active_workspace (1000). Confirm these defaults are correct. -->
 
 ## `[git]`
 

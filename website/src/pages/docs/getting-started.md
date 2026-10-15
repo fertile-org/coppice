@@ -31,7 +31,7 @@ Kilo Code shows **Installed**. Coppice can't check that sign-in without using yo
 
 Saving turns that connector on. You'll see "{name} turned on."
 
-<!-- QUESTION: Should Getting started tell users to create several agents (a PM, a Tech Lead, an implementer) so the "what happens next" flow works? The inventory doesn't say which presets exist. -->
+Add a **PM** agent, a **Technical Lead** agent, and at least one implementer (**Frontend Engineer**, **Backend Engineer**, or **Research**) so that planning and handoff work.
 
 [screenshot: step 2]
 
