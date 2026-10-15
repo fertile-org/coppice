@@ -68,13 +68,10 @@ The ticket switches to **Live Console** so you can watch the agent work. Click *
 [screenshot: step 5]
 
 ## What happens next
-1. **Plan Review.** The PM agent writes a plan, and the ticket moves to Plan Review. It waits there for you to approve the plan.
+1. **Plan Review.** The PM agent writes a plan, and the ticket moves to Plan Review. It waits there for you to approve the plan. Click **Approve plan**.
 2. **Ready.** When you approve, the ticket moves to Ready. Agents decide who works it next. If nobody fits, they leave it unassigned and add a comment that says why.
 3. **In Progress.** The assigned agent does the work in its own git worktree.
 4. **Wait for Human Review.** You read the diff. Click **Accept** in Human Review.
-5. **Done.** A Done card may show "Accepted, not merged".
+5. **Done.** A Done card may show "Accepted, not merged". Open the ticket and choose **Merge…**, or **Create PR via API** if you'd rather review it as a pull request.
 
 To skip the plan, check **Skip planning** on the ticket. It goes from Backlog straight to Ready.
-
-<!-- QUESTION: What is the UI label for approving a plan in Plan Review? Not in the inventory. -->
-<!-- QUESTION: When does an accepted ticket merge, and what should users do when a card shows "Accepted, not merged"? -->
