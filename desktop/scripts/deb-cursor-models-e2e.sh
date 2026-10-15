@@ -659,9 +659,8 @@ dir = "${hung_home}/.config/Coppice/plugins"
 # Coppice rewrites coppice/skills here on every start. Edits there are lost.
 builtin_plugins_dir = "${hung_home}/.config/Coppice/builtin-plugins"
 
-# Keyboard shortcuts. Keys here override the defaults.
+# Keyboard shortcuts. Your keys replace the defaults, and an empty value turns one off.
 # Mod is Cmd on macOS and Ctrl on Linux and WSL.
-# An empty value removes the shortcut. Quote the command id.
 # [keybindings]
 # "palette.open" = "Mod+K"
 EOF

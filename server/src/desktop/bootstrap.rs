@@ -147,9 +147,8 @@ fn generated_config(layout: &DataLayout) -> io::Result<String> {
          # Coppice rewrites coppice/skills here on every start. Edits there are lost.\n\
          builtin_plugins_dir = {builtin_plugins}\n\
          \n\
-         # Keyboard shortcuts. Keys here override the defaults.\n\
+         # Keyboard shortcuts. Your keys replace the defaults, and an empty value turns one off.\n\
          # Mod is Cmd on macOS and Ctrl on Linux and WSL.\n\
-         # An empty value removes the shortcut. Quote the command id.\n\
          # [keybindings]\n\
          # \"palette.open\" = \"Mod+K\"\n",
         worktrees = path(&layout.worktrees),
@@ -256,6 +255,16 @@ mod tests {
         assert!(
             contents.contains("# [keybindings]"),
             "starter file shows the shortcuts section:\n{contents}"
+        );
+        assert!(
+            contents.contains(
+                "# Keyboard shortcuts. Your keys replace the defaults, and an empty value turns one off."
+            ),
+            "starter file comment:\n{contents}"
+        );
+        assert!(
+            contents.contains("# Mod is Cmd on macOS and Ctrl on Linux and WSL."),
+            "starter file keeps the Mod line:\n{contents}"
         );
         assert!(contents.contains("\"palette.open\" = \"Mod+K\""));
         assert_eq!(

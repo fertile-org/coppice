@@ -135,7 +135,7 @@ Every count and interval above must be greater than 0.
 
 ## `[keybindings]`
 
-Each key is a command id. The value replaces that command's shortcut. An empty string removes it. Quote the command id. This section is part of the file you edit in Settings.
+Each key is a command id from [Keyboard shortcuts](/docs/shortcuts). Your keys replace that command's defaults, and an empty value turns the shortcut off.
 
 | Field | Type | Default | What it does |
 | --- | --- | --- | --- |

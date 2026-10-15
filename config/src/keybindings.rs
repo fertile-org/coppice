@@ -86,23 +86,25 @@ impl Keybindings {
 }
 
 pub fn unknown_command(id: &str) -> String {
-    format!("Unknown command id \"{id}\".")
+    format!("Unknown command id \"{id}\". See Keyboard shortcuts for the list.")
 }
 
 pub fn malformed_shortcut(text: &str) -> String {
-    format!("Malformed shortcut \"{text}\".")
+    format!("Couldn't read the shortcut \"{text}\". Write it like \"Mod+K\" or \"G then B\".")
 }
 
 pub fn shortcut_conflict(binding: &str, other_id: &str) -> String {
-    format!("Shortcut \"{binding}\" is already used by {other_id}.")
+    format!(
+        "\"{binding}\" is already used by {other_id}. Pick another key, or turn that one off with \"\"."
+    )
 }
 
 pub fn quoted_command_id() -> String {
-    "Command ids must be quoted, for example \"palette.open\".".to_string()
+    "Put each command id in quotes, like \"palette.open\".".to_string()
 }
 
 pub fn section_must_be_table() -> String {
-    "The [keybindings] section must be a table.".to_string()
+    "[keybindings] must be a list of command ids and keys.".to_string()
 }
 
 /// Settings save checks the file text so the error names a line.
@@ -537,7 +539,10 @@ mod tests {
 ";
         let error = check_document(text).expect_err("unknown");
         assert_eq!(error.line, 2, "{}", error.message);
-        assert_eq!(error.message, "Unknown command id \"nope\".");
+        assert_eq!(
+            error.message,
+            "Unknown command id \"nope\". See Keyboard shortcuts for the list."
+        );
     }
 
     #[test]
@@ -548,7 +553,10 @@ mod tests {
 ";
         let error = check_document(text).expect_err("malformed");
         assert_eq!(error.line, 2, "{}", error.message);
-        assert_eq!(error.message, "Malformed shortcut \"Ctrl+K\".");
+        assert_eq!(
+            error.message,
+            "Couldn't read the shortcut \"Ctrl+K\". Write it like \"Mod+K\" or \"G then B\"."
+        );
     }
 
     #[test]
@@ -559,7 +567,10 @@ mod tests {
 ";
         let error = check_document(text).expect_err("integer");
         assert_eq!(error.line, 2, "{}", error.message);
-        assert_eq!(error.message, "Malformed shortcut \"1\".");
+        assert_eq!(
+            error.message,
+            "Couldn't read the shortcut \"1\". Write it like \"Mod+K\" or \"G then B\"."
+        );
     }
 
     #[test]
@@ -572,7 +583,7 @@ mod tests {
         assert_eq!(error.line, 2, "{}", error.message);
         assert_eq!(
             error.message,
-            "Shortcut \"Mod+K\" is already used by palette.open."
+            "\"Mod+K\" is already used by palette.open. Pick another key, or turn that one off with \"\"."
         );
     }
 
@@ -586,9 +597,19 @@ mod tests {
         let error = check_document(text).expect_err("conflict");
         assert_eq!(
             error.message,
-            "Shortcut \"X\" is already used by ticket.create."
+            "\"X\" is already used by ticket.create. Pick another key, or turn that one off with \"\"."
         );
         assert_eq!(error.line, 3, "{}", error.message);
+    }
+
+    #[test]
+    fn keybindings_section_must_list_command_ids() {
+        let text = "keybindings = \"nope\"\n";
+        let error = check_document(text).expect_err("not a table");
+        assert_eq!(
+            error.message,
+            "[keybindings] must be a list of command ids and keys."
+        );
     }
 
     #[test]
@@ -600,7 +621,7 @@ palette.open = \"Mod+P\"
         let error = check_document(text).expect_err("dotted");
         assert_eq!(
             error.message,
-            "Command ids must be quoted, for example \"palette.open\"."
+            "Put each command id in quotes, like \"palette.open\"."
         );
     }
 
@@ -611,10 +632,9 @@ palette.open = \"Mod+P\"
 \"ticket.create\" = \"G\"
 ";
         let error = check_document(text).expect_err("leader");
-        assert!(
-            error.message.contains("already used by"),
-            "{}",
-            error.message
+        assert_eq!(
+            error.message,
+            "\"G\" is already used by board.column.1. Pick another key, or turn that one off with \"\"."
         );
         assert_eq!(error.line, 2);
     }
