@@ -17,6 +17,8 @@ import {
 import { detectPlatform } from './platform';
 import { omittedActionIds } from './registry';
 import { CommandPalette } from './CommandPalette';
+import { PageShortcuts } from './PageShortcuts';
+import { ShortcutHelp } from './ShortcutHelp';
 import { classifyTarget, isForeignDialog } from './targets';
 import type { KeyEventLike } from './types';
 
@@ -50,7 +52,7 @@ export function KeyboardProvider({ children }: { children: ReactNode }) {
       desktopMode: session?.desktopMode ?? false,
     };
   }, [location, session]);
-  const handlersRef = useRef(new Map<string, ShortcutRegistration>());
+  const handlersRef = useRef(new Map<string, ShortcutRegistration[]>());
   const layersRef = useRef<LayerHandlers>({});
   const envRef = useRef<KeyboardEnvironment>({
     drawerOpen: false,
@@ -61,11 +63,14 @@ export function KeyboardProvider({ children }: { children: ReactNode }) {
   const api = useMemo<KeyboardContextValue>(
     () => ({
       register(id, registration) {
-        handlersRef.current.set(id, registration);
+        const list = handlersRef.current.get(id) ?? [];
+        handlersRef.current.set(id, [...list, registration]);
         return () => {
-          if (handlersRef.current.get(id) === registration) {
-            handlersRef.current.delete(id);
-          }
+          const current = handlersRef.current.get(id);
+          if (!current) return;
+          const next = current.filter((item) => item !== registration);
+          if (next.length === 0) handlersRef.current.delete(id);
+          else handlersRef.current.set(id, next);
         };
       },
       registerLayer(layer) {
@@ -94,14 +99,16 @@ export function KeyboardProvider({ children }: { children: ReactNode }) {
       },
       readShortcutState() {
         const enabledIds = ['close'];
-        for (const [id, registration] of handlersRef.current) {
-          if (registration.enabled()) enabledIds.push(id);
+        for (const [id, list] of handlersRef.current) {
+          if (list.some((registration) => registration.enabled())) enabledIds.push(id);
         }
         return { enabledIds, drawerOpen: envRef.current.drawerOpen };
       },
       runShortcut(id) {
-        const registration = handlersRef.current.get(id);
-        if (!registration || !registration.enabled()) return false;
+        const registration = handlersRef.current
+          .get(id)
+          ?.find((item) => item.enabled());
+        if (!registration) return false;
         return registration.run() !== false;
       },
     }),
@@ -137,8 +144,8 @@ export function KeyboardProvider({ children }: { children: ReactNode }) {
         foreignDialog,
       });
       const enabled = new Set<string>(['close']);
-      for (const [id, registration] of handlersRef.current) {
-        if (registration.enabled()) enabled.add(id);
+      for (const [id, list] of handlersRef.current) {
+        if (list.some((registration) => registration.enabled())) enabled.add(id);
       }
       const reduced = reduceShortcut(
         sequenceRef.current,
@@ -160,10 +167,13 @@ export function KeyboardProvider({ children }: { children: ReactNode }) {
         return;
       }
 
+      const registration = handlersRef.current
+        .get(reduced.effect.actionId)
+        ?.find((item) => item.enabled());
       const handled =
         reduced.effect.actionId === 'close'
           ? performClose(event.target)
-          : handlersRef.current.get(reduced.effect.actionId)?.run() !== false;
+          : registration != null && registration.run() !== false;
       if (!handled) return;
       event.preventDefault();
       event.stopPropagation();
@@ -176,6 +186,8 @@ export function KeyboardProvider({ children }: { children: ReactNode }) {
   return (
     <KeyboardContext.Provider value={api}>
       {children}
+      <PageShortcuts />
+      <ShortcutHelp />
       <CommandPalette />
     </KeyboardContext.Provider>
   );

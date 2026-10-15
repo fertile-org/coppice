@@ -1,6 +1,6 @@
 import '@testing-library/jest-dom/vitest';
 import { beforeEach, describe, it, expect, vi } from 'vitest';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter, useLocation } from 'react-router-dom';
 import { ToastProvider } from '../../components/ToastProvider';
@@ -76,6 +76,24 @@ const archiveMocks = vi.hoisted(() => ({
   unarchive: vi.fn(),
 }));
 
+const finalApprove = vi.hoisted(() => vi.fn());
+const mergeBranch = vi.hoisted(() => vi.fn());
+const approveTicketPlan = vi.hoisted(() => vi.fn());
+const gitInfoState = vi.hoisted(() => ({
+  current: undefined as
+    | {
+        ticketBranch: string;
+        worktreePath: string;
+        worktreeExists: boolean;
+        defaultBranch: string;
+        branches: string[];
+      }
+    | undefined,
+}));
+const reposState = vi.hoisted(() => ({
+  data: [] as { id: string; name: string; verificationStatus: string }[],
+}));
+
 const runMocks = vi.hoisted(() => ({
   runAgent: vi.fn(),
 }));
@@ -92,7 +110,7 @@ vi.mock('./useTicket', () => ({
   useAssignAgent: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useAgents: () => ({ data: [] }),
   useUpdateTicketStatus: () => ({ mutateAsync: vi.fn(), isPending: false }),
-  useFinalApprove: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useFinalApprove: () => ({ mutateAsync: finalApprove, isPending: false }),
   useArchiveTicket: () => ({
     mutateAsync: archiveMocks.archive,
     isPending: false,
@@ -104,8 +122,11 @@ vi.mock('./useTicket', () => ({
   useTicketChildren: () => ({ data: childrenState.children }),
   useApproveSplits: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useDismissSplits: () => ({ mutateAsync: vi.fn(), isPending: false }),
-  useTicketGitInfo: () => ({ data: undefined, isLoading: false }),
-  useMergeTicketBranch: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useTicketGitInfo: () => ({
+    data: gitInfoState.current,
+    isLoading: false,
+  }),
+  useMergeTicketBranch: () => ({ mutateAsync: mergeBranch, isPending: false }),
   useRebaseTicketBranch: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useResolveConflict: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useRemoveWorktree: () => ({ mutateAsync: vi.fn(), isPending: false }),
@@ -123,7 +144,11 @@ vi.mock('./useAgentRuns', () => ({
 }));
 
 vi.mock('../repos/useRepos', () => ({
-  useRepos: () => ({ data: [] }),
+  useRepos: () => ({ data: reposState.data }),
+}));
+
+vi.mock('../plan/approvePlan', () => ({
+  approveTicketPlan: (...args: unknown[]) => approveTicketPlan(...args),
 }));
 
 vi.mock('../runs/LiveConsole', () => ({
@@ -165,8 +190,20 @@ function renderDrawer(parentTicket: TicketParentSummary | null = null) {
   );
 }
 
+function resetShortcutMocks() {
+  finalApprove.mockReset();
+  finalApprove.mockResolvedValue(undefined);
+  mergeBranch.mockReset();
+  mergeBranch.mockResolvedValue(undefined);
+  approveTicketPlan.mockReset();
+  approveTicketPlan.mockResolvedValue(undefined);
+  gitInfoState.current = undefined;
+  reposState.data = [];
+}
+
 describe('TicketDrawer', () => {
   beforeEach(() => {
+    resetShortcutMocks();
     runsState.runs = [];
     childrenState.children = [];
     connectorsState.connectors = ALL_CONNECTORS;
@@ -495,6 +532,7 @@ function DrawerKeyboardEnvironment() {
 
 describe('TicketDrawer keyboard sections', () => {
   beforeEach(() => {
+    resetShortcutMocks();
     runsState.runs = [];
     childrenState.children = [];
     connectorsState.connectors = ALL_CONNECTORS;
@@ -550,6 +588,120 @@ describe('TicketDrawer keyboard sections', () => {
 
     fireEvent.keyDown(document, { key: '[' });
     expect(live).toHaveAttribute('aria-selected', 'true');
+  });
+
+  it('opens the assignee combobox with A', () => {
+    renderKeyboardDrawer();
+    const assignee = screen.getByRole('combobox', { name: 'Assignee' });
+    expect(assignee).toHaveAttribute('aria-expanded', 'false');
+
+    fireEvent.keyDown(document, { key: 'a' });
+    expect(assignee).toHaveAttribute('aria-expanded', 'true');
+  });
+
+  it('does not open the assignee combobox for an archived ticket', () => {
+    ticketState.ticket = {
+      ...ticketState.ticket,
+      archivedAt: '2026-06-08T00:00:00.000Z',
+    };
+    renderKeyboardDrawer();
+    fireEvent.keyDown(document, { key: 'a' });
+    expect(screen.getByRole('combobox', { name: 'Assignee' })).toHaveAttribute(
+      'aria-expanded',
+      'false',
+    );
+  });
+
+  it('approves the plan with R then P and does not approve on R alone', async () => {
+    ticketState.ticket = { ...ticketState.ticket, status: 'plan_review' };
+    renderKeyboardDrawer();
+
+    fireEvent.keyDown(document, { key: 'r' });
+    expect(approveTicketPlan).not.toHaveBeenCalled();
+    fireEvent.keyDown(document, { key: 'p' });
+    await waitFor(() => {
+      expect(approveTicketPlan).toHaveBeenCalledWith(ticketState.ticket.id);
+    });
+  });
+
+  it('opens Merge ticket branch with R then M and does not merge', () => {
+    ticketState.ticket = {
+      ...ticketState.ticket,
+      status: 'wait_for_final_review',
+      repoId: 'repo-1',
+    };
+    gitInfoState.current = {
+      ticketBranch: 'ticket/alpha',
+      worktreePath: '/tmp/alpha',
+      worktreeExists: true,
+      defaultBranch: 'main',
+      branches: ['main'],
+    };
+    renderKeyboardDrawer();
+
+    fireEvent.keyDown(document, { key: 'r' });
+    fireEvent.keyDown(document, { key: 'm' });
+    expect(screen.getByRole('dialog', { name: 'Merge ticket branch' })).toBeVisible();
+    expect(mergeBranch).not.toHaveBeenCalled();
+  });
+
+  it('opens code review with D when the repository can be reviewed', () => {
+    const open = vi.spyOn(window, 'open').mockImplementation(() => null);
+    ticketState.ticket = {
+      ...ticketState.ticket,
+      status: 'in_progress',
+      repoId: 'repo-1',
+    };
+    renderKeyboardDrawer();
+
+    fireEvent.keyDown(document, { key: 'd' });
+    expect(open).toHaveBeenCalledWith(
+      '/code?repoId=repo-1&ticketId=00000000-0000-0000-0000-000000000001',
+      '_blank',
+      'noopener,noreferrer',
+    );
+    open.mockRestore();
+  });
+
+  it('does not open code review when repository verification is not ready', () => {
+    const open = vi.spyOn(window, 'open').mockImplementation(() => null);
+    ticketState.ticket = {
+      ...ticketState.ticket,
+      status: 'in_progress',
+      repoId: 'repo-1',
+    };
+    reposState.data = [
+      { id: 'repo-1', name: 'Coppice', verificationStatus: 'path_missing' },
+    ];
+    renderKeyboardDrawer();
+
+    fireEvent.keyDown(document, { key: 'd' });
+    expect(open).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: 'Review code' })).toBeDisabled();
+    open.mockRestore();
+  });
+
+  it('opens Accept… with Ctrl+Shift+Enter and accepts only from the dialog', async () => {
+    ticketState.ticket = {
+      ...ticketState.ticket,
+      status: 'wait_for_final_review',
+    };
+    renderKeyboardDrawer();
+
+    fireEvent.keyDown(document, { key: 'Enter', ctrlKey: true, shiftKey: true });
+    const dialog = screen.getByRole('dialog', { name: 'Accept this ticket?' });
+    expect(
+      screen.getByText('This accepts the work currently in Wait for Human Review.'),
+    ).toBeVisible();
+    expect(finalApprove).not.toHaveBeenCalled();
+    await waitFor(() => {
+      expect(within(dialog).getByRole('button', { name: 'Cancel' })).toHaveFocus();
+    });
+
+    await act(async () => {
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Accept' }));
+    });
+    expect(finalApprove).toHaveBeenCalledTimes(1);
   });
 
   it('ignores section keys while typing', () => {

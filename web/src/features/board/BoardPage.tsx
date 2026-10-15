@@ -13,8 +13,13 @@ import { useParams, useSearchParams } from 'react-router-dom';
 import { useToast } from '../../components/ToastProvider';
 import { apiErrorToastMessage, parseApiErrorMessage } from '../../lib/api';
 import { useAgents } from '../agents/useAgents';
+import { codeReviewHref } from '../code/codeReviewHref';
 import { useKeyboardEnvironment, useKeyboardLayer } from '../keyboard/useKeyboard';
+import { approveTicketPlan } from '../plan/approvePlan';
+import { useRepos } from '../repos/useRepos';
+import { AcceptTicketDialog } from '../tickets/AcceptTicketDialog';
 import { TicketDrawer } from '../tickets/TicketDrawer';
+import { commentsQueryKey, ticketQueryKey } from '../tickets/useTicket';
 import { setLastBoardId } from '../boards/useBoards';
 import {
   BoardFilterButton,
@@ -38,6 +43,7 @@ import {
 } from './boardFocus';
 import { BoardColumn } from './BoardColumn';
 import { useBoardKeyboard } from './useBoardKeyboard';
+import { useTicketShortcuts } from './useTicketShortcuts';
 import { ReviewCapacityBar } from './ReviewCapacityBar';
 import { BOARD_COLUMNS, isTicketStatus, type TicketStatus } from './columns';
 import { resolveAssigneeName, TicketCard } from './TicketCard';
@@ -80,6 +86,7 @@ export function BoardPage() {
     includeArchived,
   );
   const { data: agents } = useAgents();
+  const { data: repos } = useRepos();
   const toast = useToast();
   const createTicket = useCreateTicket(boardId ?? '');
   const updateStatus = useUpdateTicketStatus(boardId ?? '', includeArchived);
@@ -89,6 +96,7 @@ export function BoardPage() {
   const [focusState, setFocusState] = useState<BoardFocus | null>(null);
   const [focusGeneration, setFocusGeneration] = useState(0);
   const [moveAnnouncement, setMoveAnnouncement] = useState('');
+  const [acceptTicket, setAcceptTicket] = useState<Ticket | null>(null);
   const returnTicketId = useRef<string | null>(null);
 
   const agentsById = useMemo(() => {
@@ -186,6 +194,57 @@ export function BoardPage() {
     onOpenTicket: openTicket,
   });
 
+  function commitStatus(ticketId: string, targetStatus: TicketStatus) {
+    const columnLabel = BOARD_COLUMNS.find((column) => column.status === targetStatus)
+      ?.label;
+    void updateStatus
+      .mutateAsync({ ticketId, status: targetStatus })
+      .then((updated) => {
+        if (updated) {
+          queryClient.setQueryData(ticketQueryKey(ticketId), updated);
+        }
+        if (columnLabel) setMoveAnnouncement(movedToColumnAnnouncement(columnLabel));
+      })
+      .catch((err: unknown) => {
+        toast.error(apiErrorToastMessage(parseApiErrorMessage(err)));
+      });
+  }
+
+  function approveFocusedPlan(ticketId: string) {
+    void approveTicketPlan(ticketId)
+      .then(() => {
+        void queryClient.invalidateQueries({ queryKey: ticketQueryKey(ticketId) });
+        void queryClient.invalidateQueries({ queryKey: commentsQueryKey(ticketId) });
+        if (boardId) {
+          void queryClient.invalidateQueries({ queryKey: ticketsQueryKey(boardId) });
+        }
+      })
+      .catch((err: unknown) => {
+        toast.error(apiErrorToastMessage(parseApiErrorMessage(err)));
+      });
+  }
+
+  useTicketShortcuts({
+    drawerOpen,
+    selectedTicketId,
+    ticketsById,
+    columnsRef,
+    focusRef,
+    repos,
+    onOpenTicket: openTicket,
+    onMoveStatus: commitStatus,
+    onApprove: approveFocusedPlan,
+    onAccept: setAcceptTicket,
+    onOpenCode: (ticket) => {
+      if (!ticket.repoId) return;
+      window.open(
+        codeReviewHref(ticket.id, ticket.repoId, null),
+        '_blank',
+        'noopener,noreferrer',
+      );
+    },
+  });
+
   useEffect(() => {
     if (focusGeneration === 0) return;
     const node = document.querySelector(
@@ -262,17 +321,7 @@ export function BoardPage() {
 
     const targetStatus = resolveDropStatus(over.id, ticketsById);
     if (!targetStatus || targetStatus === ticket.status) return;
-
-    const columnLabel = BOARD_COLUMNS.find((column) => column.status === targetStatus)
-      ?.label;
-    void updateStatus
-      .mutateAsync({ ticketId, status: targetStatus })
-      .then(() => {
-        if (columnLabel) setMoveAnnouncement(movedToColumnAnnouncement(columnLabel));
-      })
-      .catch((err: unknown) => {
-        toast.error(apiErrorToastMessage(parseApiErrorMessage(err)));
-      });
+    commitStatus(ticketId, targetStatus);
   }
 
   async function handleQuickAdd(title: string) {
@@ -412,6 +461,14 @@ export function BoardPage() {
         onClose={() => setFilterOpen(false)}
         onClear={clearFilters}
       />
+
+      {acceptTicket && (
+        <AcceptTicketDialog
+          ticketId={acceptTicket.id}
+          open
+          onClose={() => setAcceptTicket(null)}
+        />
+      )}
     </div>
   );
 }

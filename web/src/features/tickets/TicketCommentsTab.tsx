@@ -8,6 +8,7 @@ import { TicketMarkdown } from '../../components/TicketMarkdown';
 import { useToast } from '../../components/ToastProvider';
 import { formatFileSize, isImageContentType } from '../../lib/attachments';
 import type { MentionMode } from '../../lib/schemas/ticket';
+import { useRegisterShortcut } from '../keyboard/useKeyboard';
 import { Button } from '../../components/ui/button';
 import { Combobox } from '../../components/ui/combobox';
 import { CommentAttachments } from './CommentAttachments';
@@ -238,6 +239,19 @@ export function TicketCommentsTab({ ticketId }: TicketCommentsTabProps) {
   }
 
   const isBusy = createComment.isPending || uploadAttachment.isPending;
+
+  useRegisterShortcut(
+    'ticket.comment',
+    () => {
+      formRef.current?.requestSubmit();
+    },
+    () => {
+      const active = document.activeElement;
+      if (!(active instanceof Element) || !formRef.current?.contains(active)) return false;
+      const inEditor = Boolean(active.closest('textarea, .ProseMirror'));
+      return inEditor && body.trim().length > 0;
+    },
+  );
 
   return (
     <div className="flex h-full flex-col gap-4">

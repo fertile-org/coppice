@@ -20,7 +20,7 @@ export const PALETTE_COPY = {
   empty: 'No matches',
 } as const;
 
-/** Page jumps the palette can run. Their G-then keys stay unwired until the shortcut PR. */
+/** Page jumps the palette and the G-then shortcuts share. */
 export const PAGE_ACTION_ROUTES: Readonly<Record<string, string>> = {
   'nav.boards': '/boards',
   'nav.agents': '/agents',
