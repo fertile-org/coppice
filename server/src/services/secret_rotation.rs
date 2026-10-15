@@ -252,6 +252,7 @@ pub async fn replace_desktop_keys(
 
 /// Server Replace keys, with Coppice stopped and PostgreSQL still running.
 /// Writes the new values into `config_path` and returns the new database URL.
+#[allow(clippy::too_many_arguments)]
 pub async fn replace_server_keys(
     pool: &sqlx::PgPool,
     store: &SecretStore,
@@ -339,7 +340,7 @@ async fn apply_pg_then_keys(
 ) -> Result<(), ReplaceError> {
     let target = db_target(database_url)?;
     let mut conn = pool.acquire().await?;
-    if let Err(err) = alter_role_password(&mut *conn, &target.user, new_pg).await {
+    if let Err(err) = alter_role_password(&mut conn, &target.user, new_pg).await {
         let _ = std::fs::remove_file(dir.join(PG_PENDING));
         return Err(err);
     }
@@ -352,7 +353,7 @@ async fn apply_pg_then_keys(
     )
     .await
     {
-        let _ = alter_role_password(&mut *conn, &target.user, &target.password).await;
+        let _ = alter_role_password(&mut conn, &target.user, &target.password).await;
         let _ = std::fs::remove_file(dir.join(PG_PENDING));
         return Err(ReplaceError::Failed(
             "postgres did not accept the new password, so the role password was restored".into(),
@@ -367,7 +368,7 @@ async fn apply_pg_then_keys(
     let old_store = SecretStore::from_master_key(old_master);
     let new_store = SecretStore::from_master_key(new_master);
     let rotated = reencrypt_admin_and_sign_out(
-        &mut *conn,
+        &mut conn,
         &old_store,
         &new_store,
         admin_email,
@@ -378,7 +379,7 @@ async fn apply_pg_then_keys(
         let _ = std::fs::remove_file(dir.join(MASTER_PENDING));
         let _ = std::fs::remove_file(dir.join(SESSION_PENDING));
         let _ = std::fs::remove_file(dir.join(ADMIN_PENDING));
-        if let Err(revert) = alter_role_password(&mut *conn, &target.user, &target.password).await {
+        if let Err(revert) = alter_role_password(&mut conn, &target.user, &target.password).await {
             tracing::error!(
                 error = %revert,
                 "new postgres password could not be restored; the pending file was kept"
