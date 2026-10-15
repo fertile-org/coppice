@@ -23,6 +23,7 @@ import { ChatPage } from './features/chat/ChatPage';
 import { KnowledgePage } from './features/knowledge/KnowledgePage';
 import { SettingsPage } from './features/settings/SettingsPage';
 import { ToolsPage } from './features/tools/ToolsPage';
+import { KeyboardProvider } from './features/keyboard/KeyboardProvider';
 import { useOpenTicket } from './features/tickets/useOpenTicket';
 import {
   useEventSocket,
@@ -66,8 +67,9 @@ function App() {
       <ToastProvider>
       <BrowserRouter>
         <AuthProvider>
-          <EventSocketBridge />
-          <Routes>
+          <KeyboardProvider>
+            <EventSocketBridge />
+            <Routes>
             <Route path="/login" element={<LoginPage />} />
             <Route element={<ProtectedRoute />}>
               <Route element={<AppShell />}>
@@ -92,7 +94,8 @@ function App() {
               <Route path="/code" element={<CodeReviewPage />} />
             </Route>
             <Route path="*" element={<Navigate to="/boards" replace />} />
-          </Routes>
+            </Routes>
+          </KeyboardProvider>
         </AuthProvider>
       </BrowserRouter>
       </ToastProvider>

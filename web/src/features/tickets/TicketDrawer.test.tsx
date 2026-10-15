@@ -4,6 +4,8 @@ import { fireEvent, render, screen } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter, useLocation } from 'react-router-dom';
 import { ToastProvider } from '../../components/ToastProvider';
+import { KeyboardProvider } from '../keyboard/KeyboardProvider';
+import { useKeyboardEnvironment } from '../keyboard/useKeyboard';
 import { ApiError } from '../../lib/api';
 import { TicketDrawer } from './TicketDrawer';
 import type { Ticket } from '../board/useTickets';
@@ -66,6 +68,7 @@ const connectorsState: { connectors: Connector[] | undefined } = {
 
 vi.mock('../agents/useAgents', () => ({
   useConnectors: () => ({ data: connectorsState.connectors }),
+  useAgents: () => ({ data: [] }),
 }));
 
 const archiveMocks = vi.hoisted(() => ({
@@ -482,5 +485,83 @@ describe('TicketDrawer', () => {
 
     expect(await screen.findByText(message)).toBeVisible();
     expect(screen.queryByText('Unable to start agent run.')).toBeNull();
+  });
+});
+
+function DrawerKeyboardEnvironment() {
+  useKeyboardEnvironment({ drawerOpen: true, modalOpen: false });
+  return null;
+}
+
+describe('TicketDrawer keyboard sections', () => {
+  beforeEach(() => {
+    runsState.runs = [];
+    childrenState.children = [];
+    connectorsState.connectors = ALL_CONNECTORS;
+    ticketState.ticket = {
+      ...ticketState.ticket,
+      status: 'backlog',
+      parentTicketId: undefined,
+      archivedAt: undefined,
+      assigneeAgentId: undefined,
+      repoId: undefined,
+      hasActiveRun: false,
+    };
+  });
+
+  function renderKeyboardDrawer() {
+    const client = new QueryClient();
+    return render(
+      <MemoryRouter initialEntries={['/boards/board-1']}>
+        <KeyboardProvider>
+          <QueryClientProvider client={client}>
+            <ToastProvider>
+              <DrawerKeyboardEnvironment />
+              <TicketDrawer
+                ticketId="00000000-0000-0000-0000-000000000001"
+                onClose={() => {}}
+              />
+            </ToastProvider>
+          </QueryClientProvider>
+        </KeyboardProvider>
+      </MemoryRouter>,
+    );
+  }
+
+  it('moves across Detail, Live Console, and Agent Runs with ] and [', () => {
+    renderKeyboardDrawer();
+
+    const detail = screen.getByRole('tab', { name: 'Detail' });
+    const live = screen.getByRole('tab', { name: 'Live Console' });
+    const runs = screen.getByRole('tab', { name: 'Agent Runs' });
+    expect(detail).toHaveAttribute('aria-selected', 'true');
+
+    fireEvent.keyDown(document, { key: '[' });
+    expect(detail).toHaveAttribute('aria-selected', 'true');
+
+    fireEvent.keyDown(document, { key: ']' });
+    expect(live).toHaveAttribute('aria-selected', 'true');
+    expect(document.activeElement).toBe(live);
+
+    fireEvent.keyDown(document, { key: ']' });
+    expect(runs).toHaveAttribute('aria-selected', 'true');
+    fireEvent.keyDown(document, { key: ']' });
+    expect(runs).toHaveAttribute('aria-selected', 'true');
+
+    fireEvent.keyDown(document, { key: '[' });
+    expect(live).toHaveAttribute('aria-selected', 'true');
+  });
+
+  it('ignores section keys while typing', () => {
+    renderKeyboardDrawer();
+    const input = document.createElement('input');
+    document.body.appendChild(input);
+    input.focus();
+    fireEvent.keyDown(input, { key: ']' });
+    expect(screen.getByRole('tab', { name: 'Detail' })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
+    input.remove();
   });
 });

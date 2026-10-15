@@ -85,6 +85,23 @@ describe('AppShell', () => {
     );
   });
 
+  it('puts Skip to board first on a board route', () => {
+    renderShell(['/boards/board-1']);
+
+    const skip = screen.getByRole('link', { name: 'Skip to board' });
+    const sidebar = screen.getByTestId('app-shell-sidebar');
+    expect(
+      skip.compareDocumentPosition(sidebar) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(skip).toHaveClass('keyboard-focus');
+    expect(skip).toHaveAttribute('href', '#board');
+  });
+
+  it('does not show Skip to board away from a board', () => {
+    renderShell(['/boards']);
+    expect(screen.queryByRole('link', { name: 'Skip to board' })).not.toBeInTheDocument();
+  });
+
   it('uses full-width main on non-chat routes', () => {
     renderShell(['/boards']);
 
