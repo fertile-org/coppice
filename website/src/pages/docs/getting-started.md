@@ -31,6 +31,11 @@ Saving turns that connector on. You'll see "{name} turned on."
 
 Add a **PM** agent, a **Technical Lead** agent, and at least one agent to do the work (**Frontend Engineer**, **Backend Engineer**, or **Research**). Planning and handoffs need all three.
 
+<figure>
+<img src="/assets/docs/new-agent.webp" width="1440" height="900" alt="The new agent form with a name, a role and a CLI chosen.">
+<figcaption>Each agent runs on one of your CLIs.</figcaption>
+</figure>
+
 ## 3. Add a repository
 1. Open **Repositories** in the sidebar and click **Add repository**.
 2. Next to **Local path**, click **Browse…** and pick a local git checkout.
@@ -51,11 +56,16 @@ Coppice opens your new board.
 2. Open the card.
 3. Click **Edit** to add a description, then **Save**.
 4. On **Detail**, set **Assignee** to your agent and **Repository** to your repository. Click **Save metadata**.
-5. Click **Run Agent**.
+5. Click **Run agent**.
 
 The ticket switches to **Live Console** so you can watch the agent work. Click **Stop** to end the run.
 
-**Run Agent** stays off until the ticket has an assignee and a repository that shows **Ready**. Assigning an agent doesn't start a run by itself.
+**Run agent** stays off until the ticket has an assignee and a repository that shows **Ready**. Assigning an agent doesn't start a run by itself.
+
+<figure>
+<img src="/assets/docs/backlog-ticket.webp" width="1440" height="900" alt="A board with a new ticket in Backlog and the Run agent button showing.">
+<figcaption>Press Run agent, and the PM writes the plan.</figcaption>
+</figure>
 
 ## What happens next
 1. **Plan Review.** The PM agent writes a plan, and the ticket moves to Plan Review. It waits there for you to approve the plan. Click **Approve plan**.
