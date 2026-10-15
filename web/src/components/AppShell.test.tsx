@@ -227,6 +227,7 @@ describe('AppShell', () => {
       screen.getByRole('button', { name: 'Notifications' }),
     ).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Tools' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Logs' })).toHaveAttribute('href', '/logs');
     expect(screen.getByRole('link', { name: 'Settings' })).toHaveAttribute(
       'href',
       '/settings',
@@ -250,6 +251,7 @@ describe('AppShell', () => {
     renderShell(['/boards']);
 
     expect(screen.queryByRole('link', { name: 'Settings' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Logs' })).not.toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Boards' })).toBeInTheDocument();
   });
 });

@@ -7,6 +7,10 @@ import type { AgentRun } from '../../lib/schemas/agentRun';
 import { NOT_COVERED_BY_PLAN } from '../runs/reportedModel';
 import { TicketRunsTab } from './TicketRunsTab';
 
+vi.mock('../auth/useSession', () => ({
+  useSession: () => ({ user: { role: 'member' }, loading: false }),
+}));
+
 const billedRun: AgentRun = {
   id: '00000000-0000-0000-0000-000000000001',
   ticketId: '00000000-0000-0000-0000-000000000002',

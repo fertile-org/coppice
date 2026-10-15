@@ -1,11 +1,17 @@
 import '@testing-library/jest-dom/vitest';
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router-dom';
-import { TicketRunsTab } from './TicketRunsTab';
 import type { AgentRun } from '../../lib/schemas/agentRun';
 import { MODEL_NOT_REPORTED, NOT_COVERED_BY_PLAN } from '../runs/reportedModel';
+import { TicketRunsTab } from './TicketRunsTab';
+
+const session = vi.hoisted(() => ({ role: 'admin' }));
+
+vi.mock('../auth/useSession', () => ({
+  useSession: () => ({ user: { role: session.role }, loading: false }),
+}));
 
 const failedRun: AgentRun = {
   id: '00000000-0000-0000-0000-000000000001',
@@ -56,6 +62,24 @@ function renderRuns() {
 }
 
 describe('TicketRunsTab', () => {
+  beforeEach(() => {
+    session.role = 'admin';
+  });
+
+  it('links an admin to that run’s logs', () => {
+    renderRuns();
+    expect(screen.getByRole('link', { name: 'View logs' })).toHaveAttribute(
+      'href',
+      '/logs?run=00000000-0000-0000-0000-000000000001',
+    );
+  });
+
+  it('hides the logs link from a member', () => {
+    session.role = 'member';
+    renderRuns();
+    expect(screen.queryByRole('link', { name: 'View logs' })).not.toBeInTheDocument();
+  });
+
   it('shows failed run error without extra click', () => {
     renderRuns();
     expect(screen.getByText(/path missing/)).toBeTruthy();
