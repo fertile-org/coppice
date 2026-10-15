@@ -34,6 +34,10 @@ use serde_json::Value;
 use sqlx::PgPool;
 use uuid::Uuid;
 
+fn is_review_capacity_hold(err: &RunError) -> bool {
+    matches!(err, RunError::Validation(message) if crate::copy::review::is_ready_hold(message))
+}
+
 pub struct RunOrchestrator<'a> {
     pool: &'a PgPool,
     workflow: &'a WorkflowConfig,
@@ -165,6 +169,9 @@ impl<'a> RunOrchestrator<'a> {
         } else {
             WorkflowService::resolve_transition(ctx).map_err(RunError::Validation)?
         };
+        crate::services::review_capacity::ReviewCapacityService::new(self.pool)
+            .constrain_finished_run(ticket_id, current_status, &mut action)
+            .await?;
 
         let (substatus, substatus_metadata) = if consultation_run {
             (None, None)
@@ -356,6 +363,13 @@ impl<'a> RunOrchestrator<'a> {
                             "could not auto-start mentioned agent; mention remains pending"
                         );
                     }
+                    Err(error) if is_review_capacity_hold(&error) => {
+                        tracing::info!(
+                            source_run_id = %run.id,
+                            error = %error,
+                            "review capacity kept the next run in Ready"
+                        );
+                    }
                     Err(error) => return Err(error),
                 }
             }
@@ -382,6 +396,13 @@ impl<'a> RunOrchestrator<'a> {
                                     source_run_id = %run.id,
                                     target_agent_id = %new_assignee,
                                     "handoff target is already active; assigned Ready work will start after the active run finishes"
+                                );
+                            }
+                            Err(error) if is_review_capacity_hold(&error) => {
+                                tracing::info!(
+                                    source_run_id = %run.id,
+                                    error = %error,
+                                    "review capacity kept the next run in Ready"
                                 );
                             }
                             Err(error) => return Err(error),

@@ -5,6 +5,10 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ToastProvider } from '../../components/ToastProvider';
 import { BoardPage } from './BoardPage';
+
+vi.mock('./ReviewCapacityBar', () => ({
+  ReviewCapacityBar: () => null,
+}));
 import type { Ticket } from './useTickets';
 
 const ticketsState = vi.hoisted(() => ({

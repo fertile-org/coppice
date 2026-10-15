@@ -7,6 +7,10 @@ import { ToastProvider } from '../../components/ToastProvider';
 import { ApiError } from '../../lib/api';
 import { PLAN_COPY } from '../plan/copy';
 import { BoardPage } from './BoardPage';
+
+vi.mock('./ReviewCapacityBar', () => ({
+  ReviewCapacityBar: () => null,
+}));
 import type { Ticket } from './useTickets';
 
 const apiFetch = vi.hoisted(() => vi.fn());
