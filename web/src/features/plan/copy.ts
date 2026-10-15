@@ -10,4 +10,8 @@ export const PLAN_COPY = {
   skipFailed: "Couldn't change Skip planning. Try again.",
   approvedPlan: 'Approved plan',
   noSteps: 'This plan has no steps.',
+  writingPlan: 'Writing plan',
+  waitingForApproval: 'Waiting for you to approve the plan',
+  planNeedsRun: 'Plan needs a run',
+  runAgent: 'Run agent',
 } as const;

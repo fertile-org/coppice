@@ -5,8 +5,8 @@ describe('BOARD_COLUMNS', () => {
   it('has nine columns in spec order', () => {
     expect(BOARD_COLUMNS.map((c) => c.status)).toEqual([
       'backlog',
-      'ready',
       'plan_review',
+      'ready',
       'in_progress',
       'in_review',
       'in_qa',
@@ -16,8 +16,8 @@ describe('BOARD_COLUMNS', () => {
     ]);
     expect(BOARD_COLUMNS.map((c) => c.label)).toEqual([
       'Backlog',
-      'Ready',
       'Plan Review',
+      'Ready',
       'In Progress',
       'In Review',
       'In QA',

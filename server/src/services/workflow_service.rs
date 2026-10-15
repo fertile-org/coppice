@@ -33,6 +33,11 @@ impl PlanEntry {
     pub const fn allows_in_progress(self) -> bool {
         self.skip_planning || self.approved_for_current_version
     }
+
+    /// Ready uses the same bar as In Progress: an approved plan, or Skip planning.
+    pub const fn allows_ready(self) -> bool {
+        self.allows_in_progress()
+    }
 }
 
 pub struct WorkflowService;
@@ -94,6 +99,9 @@ impl WorkflowService {
         }
         if to == TicketStatus::InProgress && !plan.allows_in_progress() {
             return Some(crate::copy::plan::PLAN_REQUIRED);
+        }
+        if to == TicketStatus::Ready && !plan.allows_ready() {
+            return Some(crate::copy::plan::READY_REQUIRES_PLAN);
         }
         None
     }
@@ -215,6 +223,12 @@ impl WorkflowService {
             if next == TicketStatus::WaitForFinalReview {
                 action.new_assignee_id = Some(None);
             }
+        }
+
+        // Agents cannot skip Plan Review. Ready is only legal with an approved
+        // plan or Skip planning, and no succeeded-gate arm enters Ready.
+        if action.new_status == Some(TicketStatus::Ready) && !ctx.plan_allows_ready {
+            action.new_status = None;
         }
 
         Ok(action)
@@ -451,7 +465,8 @@ fn unknown_assign_to_notice(assign_key: &str, known_keys: &[String], blocked: bo
 fn resolve_succeeded_gate(current: TicketStatus, role: &str) -> Option<TicketStatus> {
     use TicketStatus::*;
     match (current, role) {
-        (Backlog, role) if is_pm(role) => Some(Ready),
+        // A PM work run on Backlog must not skip Plan Review. The plan run
+        // moves the ticket when the plan is posted.
         (Backlog, role) if is_implementer(role) => Some(InReview),
         (Ready, role) if is_implementer(role) => Some(InReview),
         (InProgress, role) if is_implementer(role) => Some(InReview),
@@ -566,6 +581,7 @@ mod tests {
             auto_assign_enabled: true,
             clarification_round: 0,
             context_profile: ContextProfile::Full,
+            plan_allows_ready: false,
         }
     }
 
@@ -643,6 +659,25 @@ mod tests {
         }
         assert_eq!(
             WorkflowService::direct_status_change_error(Backlog, Ready, PlanEntry::open()),
+            None
+        );
+        let unplanned = PlanEntry {
+            skip_planning: false,
+            approved_for_current_version: false,
+        };
+        assert_eq!(
+            WorkflowService::direct_status_change_error(Backlog, Ready, unplanned),
+            Some(crate::copy::plan::READY_REQUIRES_PLAN)
+        );
+        assert_eq!(
+            WorkflowService::direct_status_change_error(
+                Backlog,
+                Ready,
+                PlanEntry {
+                    skip_planning: false,
+                    approved_for_current_version: true,
+                }
+            ),
             None
         );
         assert_eq!(WorkflowService::final_approve(WaitForFinalReview), Ok(Done));
@@ -781,7 +816,7 @@ mod tests {
     }
 
     #[test]
-    fn case1_pm_backlog_to_ready_with_pending_recommendation() {
+    fn pm_backlog_work_does_not_skip_plan_review_even_with_a_recommendation() {
         let action = WorkflowService::resolve_transition(TransitionContext {
             current_status: TicketStatus::Backlog,
             agent_role: "PM".into(),
@@ -798,13 +833,36 @@ mod tests {
             ..minimal_ctx()
         })
         .expect("resolve");
-        assert_eq!(action.new_status, Some(TicketStatus::Ready));
+        assert_ne!(action.new_status, Some(TicketStatus::Ready));
+        assert!(action.new_status.is_none());
         assert!(action.pending_recommendation.unwrap().is_some());
         assert!(action.new_assignee_id.is_none());
     }
 
     #[test]
-    fn auto_assign_true_applies_assign_to_when_agent_exists() {
+    fn pm_backlog_work_stays_put_when_the_agent_omits_next_status() {
+        let mut ctx = minimal_ctx();
+        ctx.plan_allows_ready = true;
+        let action = WorkflowService::resolve_transition(ctx).expect("resolve");
+        assert!(action.new_status.is_none());
+    }
+
+    #[test]
+    fn accepting_the_diff_is_the_only_move_to_done_without_an_agent_next_status() {
+        let mut ctx = minimal_ctx();
+        ctx.current_status = TicketStatus::WaitForFinalReview;
+        ctx.agent_role = "Backend Engineer".into();
+        ctx.agent_key = "backend_engineer".into();
+        let action = WorkflowService::resolve_transition(ctx).expect("resolve");
+        assert_ne!(action.new_status, Some(TicketStatus::Done));
+        assert_eq!(
+            WorkflowService::final_approve(TicketStatus::WaitForFinalReview),
+            Ok(TicketStatus::Done)
+        );
+    }
+
+    #[test]
+    fn auto_assign_true_applies_assign_to_without_entering_ready() {
         let action = WorkflowService::resolve_transition(TransitionContext {
             current_status: TicketStatus::Backlog,
             agent_role: "PM".into(),
@@ -818,7 +876,8 @@ mod tests {
             ..minimal_ctx()
         })
         .expect("resolve");
-        assert_eq!(action.new_status, Some(TicketStatus::Ready));
+        assert_ne!(action.new_status, Some(TicketStatus::Ready));
+        assert!(action.new_status.is_none());
         assert_eq!(action.new_assignee_id, Some(Some(engineer_agent_id())));
         assert!(matches!(action.pending_recommendation, Some(None)));
     }

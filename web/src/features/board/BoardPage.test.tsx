@@ -70,6 +70,11 @@ vi.mock('./useTickets', () => ({
     };
   },
   useCreateTicket: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useStartPlanRun: () => ({
+    mutateAsync: vi.fn(),
+    isPending: false,
+    variables: undefined,
+  }),
   useUpdateTicketStatus: () => ({ mutateAsync: vi.fn() }),
 }));
 

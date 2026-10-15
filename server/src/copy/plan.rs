@@ -7,6 +7,22 @@
 pub const PLAN_REQUIRED: &str =
     "Approve the plan, or turn on Skip planning, before moving this ticket to In Progress.";
 
+/// Refused move into Ready without an approved plan or Skip planning.
+pub const READY_REQUIRES_PLAN: &str =
+    "Approve the plan before moving this ticket to Ready, or turn on Skip planning.";
+
+/// Posted when no enabled PM can write the plan.
+pub const NO_PM: &str =
+    "No PM agent is available to write the plan. Add one in Agents, or turn on Skip planning.";
+
+/// Posted when Ready has no Tech Lead to start. The ticket is not blocked.
+pub const NO_TECH_LEAD: &str =
+    "No Tech Lead agent is available, so this ticket stays in Ready without an assignee. Assign an agent to start work.";
+
+/// Starting a plan from a column that is not Backlog or Ready.
+pub const PLAN_START_WRONG_COLUMN: &str =
+    "You can start a plan only from Backlog, or from Ready if the ticket has no plan yet.";
+
 /// Posted when Ready has nobody to write the plan.
 pub const NO_PLANNER: &str = "Assign an agent to this ticket to write the plan.";
 

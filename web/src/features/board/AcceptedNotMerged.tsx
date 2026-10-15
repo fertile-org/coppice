@@ -2,7 +2,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { apiErrorToastMessage, parseApiErrorMessage } from '../../lib/api';
 import { useToast } from '../../components/ToastProvider';
-import { parseGitConflict, type GitConflict } from '../tickets/conflictOffer';
+import type { GitConflict } from '../tickets/conflictOffer';
 import {
   MergeBranchDialog,
   MergeBranchTrigger,

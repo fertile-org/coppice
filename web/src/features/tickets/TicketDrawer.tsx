@@ -15,6 +15,7 @@ import {
 } from './useAgentRuns';
 import { TicketStatusBadge } from './TicketStatusBadge';
 import { Sheet, SheetContent, SheetTitle } from '../../components/ui/sheet';
+import { parseApiErrorMessage } from '../../lib/api';
 import {
   useArchiveTicket,
   useFinalApprove,
@@ -114,8 +115,8 @@ function TicketDrawerPanel({
     try {
       await runAgent.mutateAsync();
       setTab('live');
-    } catch {
-      setActionError('Unable to start agent run.');
+    } catch (err) {
+      setActionError(parseApiErrorMessage(err, 'Unable to start agent run.'));
     }
   }
 
