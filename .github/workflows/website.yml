@@ -48,6 +48,9 @@ jobs:
           node-version: '22'
           cache: npm
           cache-dependency-path: website/package-lock.json
+      - name: Check docs placeholders
+        working-directory: website
+        run: node scripts/check-doc-placeholders.mjs
       - name: Install and build
         working-directory: website
         run: npm ci && npm run build

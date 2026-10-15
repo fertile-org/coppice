@@ -19,8 +19,6 @@ If it shows **Found, not signed in**, sign in to the CLI in your terminal. If it
 
 Kilo Code shows **Installed**. Coppice can't check that sign-in without using your plan, so a run shows an error if you're signed out.
 
-[screenshot: step 1]
-
 ## 2. Set up an agent
 1. Open **Agents** in the sidebar and click **New agent**.
 2. Pick a **Preset**. It fills in the role and prompt.
@@ -33,8 +31,6 @@ Saving turns that connector on. You'll see "{name} turned on."
 
 Add a **PM** agent, a **Technical Lead** agent, and at least one agent to do the work (**Frontend Engineer**, **Backend Engineer**, or **Research**). Planning and handoffs need all three.
 
-[screenshot: step 2]
-
 ## 3. Add a repository
 1. Open **Repositories** in the sidebar and click **Add repository**.
 2. Next to **Local path**, click **Browse…** and pick a local git checkout.
@@ -43,16 +39,12 @@ Add a **PM** agent, a **Technical Lead** agent, and at least one agent to do the
 
 The new row should show **Ready**. If it shows **Path missing** or **Not a git repo**, pick the folder again.
 
-[screenshot: step 3]
-
 ## 4. Set up a board
 1. Open **Boards** in the sidebar.
 2. Click **New board**. On a fresh install, click **Create board**.
 3. Type a **Name** and click **Create board**.
 
 Coppice opens your new board.
-
-[screenshot: step 4]
 
 ## 5. Create a ticket and run it
 1. In the **Backlog** column, type a title in **Add ticket…** and press Enter.
@@ -64,8 +56,6 @@ Coppice opens your new board.
 The ticket switches to **Live Console** so you can watch the agent work. Click **Stop** to end the run.
 
 **Run Agent** stays off until the ticket has an assignee and a repository that shows **Ready**. Assigning an agent doesn't start a run by itself.
-
-[screenshot: step 5]
 
 ## What happens next
 1. **Plan Review.** The PM agent writes a plan, and the ticket moves to Plan Review. It waits there for you to approve the plan. Click **Approve plan**.
