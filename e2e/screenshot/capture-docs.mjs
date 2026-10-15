@@ -48,7 +48,7 @@ const SHOTS = [
   },
   {
     name: 'backlog-ticket',
-    alt: 'A board with a new ticket in Backlog and the Run Agent button showing.',
+    alt: 'A board with a new ticket in Backlog and the Run agent button showing.',
   },
 ];
 
