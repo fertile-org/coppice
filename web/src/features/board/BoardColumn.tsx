@@ -117,6 +117,8 @@ export function BoardColumn({
               onChange={(e) => setTitle(e.target.value)}
               placeholder="Add ticket…"
               disabled={isAdding}
+              data-add-ticket=""
+              data-column-index={columnIndex}
               className="field-control w-full px-2 py-1.5 font-body text-sm placeholder:text-text-muted"
             />
           </form>

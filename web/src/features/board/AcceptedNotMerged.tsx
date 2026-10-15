@@ -1,5 +1,6 @@
 import { useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
+import { useRegisterShortcut } from '../keyboard/useKeyboard';
 import { apiErrorToastMessage, parseApiErrorMessage } from '../../lib/api';
 import { useToast } from '../../components/ToastProvider';
 import type { GitConflict } from '../tickets/conflictOffer';
@@ -11,7 +12,14 @@ import { useResolveConflict, useTicketGitInfo } from '../tickets/useTicket';
 import { acceptedNotMergedCopy } from './acceptedNotMergedCopy';
 import { ticketsQueryKey, type Ticket } from './useTickets';
 
-export function AcceptedNotMerged({ ticket }: { ticket: Ticket }) {
+export function AcceptedNotMerged({
+  ticket,
+  shortcutActive = false,
+}: {
+  ticket: Ticket;
+  /** True when this card is the board tab stop, so Merge… follows the focused card. */
+  shortcutActive?: boolean;
+}) {
   const toast = useToast();
   const queryClient = useQueryClient();
   const gitInfo = useTicketGitInfo(ticket.id, true);
@@ -21,6 +29,16 @@ export function AcceptedNotMerged({ ticket }: { ticket: Ticket }) {
   const [conflict, setConflict] = useState<GitConflict | null>(null);
   const [asking, setAsking] = useState(false);
   const info = gitInfo.data;
+
+  useRegisterShortcut(
+    'review.merge',
+    () => setOpen(true),
+    () =>
+      shortcutActive &&
+      Boolean(info) &&
+      !hidden &&
+      document.querySelector('[data-shortcut-layer="ticket"]') == null,
+  );
 
   if (hidden) {
     return null;

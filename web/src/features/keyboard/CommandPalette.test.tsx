@@ -152,7 +152,7 @@ describe('command palette', () => {
 
     dispatchKey(document, { key: 'g' });
     dispatchKey(document, { key: 'b' });
-    expect(screen.getByTestId('location')).toHaveTextContent('/boards/board-1');
+    expect(screen.getByTestId('location').textContent).toBe('/boards');
     expect(screen.queryByRole('dialog')).toBeNull();
   });
 
@@ -248,10 +248,10 @@ describe('command palette', () => {
     expect(screen.getByRole('option', { name: /Go to Boards/ })).toBeInTheDocument();
 
     const input = screen.getByPlaceholderText('Search actions, tickets, and agents…');
-    fireEvent.change(input, { target: { value: 'boards' } });
+    fireEvent.change(input, { target: { value: 'go to boards' } });
     fireEvent.keyDown(input, { key: 'Enter' });
     await waitFor(() => {
-      expect(screen.getByTestId('location')).toHaveTextContent('/boards');
+      expect(screen.getByTestId('location').textContent).toBe('/boards');
     });
     expect(screen.queryByRole('dialog')).toBeNull();
 

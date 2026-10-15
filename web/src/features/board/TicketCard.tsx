@@ -231,7 +231,9 @@ export function TicketCard({
         </div>
       )}
       </div>
-      {showMerge && <AcceptedNotMerged ticket={ticket} />}
+      {showMerge && (
+        <AcceptedNotMerged ticket={ticket} shortcutActive={boardTabStop} />
+      )}
       {ticket.status === 'done' && ticket.repoId && !isArchived && (
         <DoneCardPullRequest ticketId={ticket.id} />
       )}

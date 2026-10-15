@@ -16,8 +16,11 @@ import {
   type Substatus,
 } from '../../lib/schemas/substatus';
 import { ticketPrioritySchema } from '../../lib/schemas/ticket';
+import { codeReviewHref } from '../code/codeReviewHref';
+import { useRegisterShortcut } from '../keyboard/useKeyboard';
 import { PLAN_COPY } from '../plan/copy';
 import { useRepos } from '../repos/useRepos';
+import { openAssigneeCombobox, subscribeAssigneeOpen } from './assigneeShortcut';
 import { useAgentRuns } from './useAgentRuns';
 import { TicketStatusBadge } from './TicketStatusBadge';
 import { TicketGitActions } from './TicketGitActions';
@@ -33,16 +36,6 @@ import {
 
 interface TicketMetadataPanelProps {
   ticket: Ticket;
-}
-
-function buildCodeReviewUrl(
-  ticket: Ticket,
-  repoId: string,
-  worktreePath: string | null,
-) {
-  const params = new URLSearchParams({ repoId, ticketId: ticket.id });
-  if (worktreePath) params.set('worktree', worktreePath);
-  return `/code?${params.toString()}`;
 }
 
 function ReviewedCommit({ review }: { review: HumanReview }) {
@@ -217,6 +210,20 @@ export function TicketMetadataPanel({ ticket }: TicketMetadataPanelProps) {
   const isArchived = Boolean(ticket.archivedAt);
   const formDisabled = isBusy || isArchived;
   const activeSubstatus = substatus || null;
+  const codeReviewReady = Boolean(ticket.repoId) && !repoNotReady;
+
+  function openCodeReview() {
+    if (!ticket.repoId || repoNotReady) return;
+    window.open(
+      codeReviewHref(ticket.id, ticket.repoId, worktreePath),
+      '_blank',
+      'noopener,noreferrer',
+    );
+  }
+
+  useEffect(() => subscribeAssigneeOpen(ticket.id, openAssigneeCombobox), [ticket.id]);
+  useRegisterShortcut('ticket.assign', openAssigneeCombobox, !formDisabled);
+  useRegisterShortcut('review.openCode', openCodeReview, codeReviewReady);
   const assignedAgent = agents?.find((agent) => agent.id === assigneeId);
 
   return (
@@ -371,15 +378,8 @@ export function TicketMetadataPanel({ ticket }: TicketMetadataPanelProps) {
         <Button
           type="button"
           variant="secondary"
-          disabled={!ticket.repoId || repoNotReady}
-          onClick={() => {
-            const url = buildCodeReviewUrl(
-              ticket,
-              ticket.repoId!,
-              worktreePath,
-            );
-            window.open(url, '_blank', 'noopener,noreferrer');
-          }}
+          disabled={!codeReviewReady}
+          onClick={openCodeReview}
           className="w-full"
         >
           Review code

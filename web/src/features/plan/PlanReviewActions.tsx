@@ -3,6 +3,8 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiFetch, parseApiErrorMessage } from '../../lib/api';
 import { ticketsQueryKey } from '../board/useTickets';
 import { commentsQueryKey, ticketQueryKey } from '../tickets/useTicket';
+import { useRegisterShortcut } from '../keyboard/useKeyboard';
+import { approveTicketPlan } from './approvePlan';
 import { PLAN_COPY } from './copy';
 
 async function postPlan(ticketId: string, path: string, body?: string) {
@@ -32,7 +34,7 @@ export function PlanReviewActions({
   }
 
   const approve = useMutation({
-    mutationFn: () => postPlan(ticketId, 'approve-plan'),
+    mutationFn: () => approveTicketPlan(ticketId),
     onSuccess: () => {
       setError(null);
       refresh();
@@ -51,6 +53,14 @@ export function PlanReviewActions({
   });
 
   const busy = approve.isPending || ask.isPending;
+
+  useRegisterShortcut(
+    'review.approvePlan',
+    () => {
+      approve.mutate();
+    },
+    !busy,
+  );
 
   return (
     <section className="space-y-3 border-t border-border pt-6">

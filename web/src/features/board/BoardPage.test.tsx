@@ -92,6 +92,10 @@ vi.mock('../agents/useAgents', () => ({
   }),
 }));
 
+vi.mock('../repos/useRepos', () => ({
+  useRepos: () => ({ data: [] }),
+}));
+
 vi.mock('../tickets/TicketDrawer', () => ({
   TicketDrawer: ({
     parentTicket,

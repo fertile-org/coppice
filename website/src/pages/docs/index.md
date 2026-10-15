@@ -12,6 +12,7 @@ Coppice lets you run several coding agents at once without babysitting them: que
 | --- | --- |
 | [Install](/docs/install) | Download the Beta for macOS or Linux and run your first ticket |
 | [Getting started](/docs/getting-started) | Five steps from install to your first agent run |
+| [Keyboard shortcuts](/docs/shortcuts) | Default keys for the board, tickets, and review |
 | [Concepts](/docs/concepts) | Board, gates, worktrees, and how agents work tickets |
 | [Providers](/docs/providers) | Which agent CLIs Coppice talks to |
 | [Plugins](/docs/plugins) | Give agents skills and MCP tools |

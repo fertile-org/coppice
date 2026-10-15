@@ -15,6 +15,7 @@ import {
 } from './useAgentRuns';
 import { TicketStatusBadge } from './TicketStatusBadge';
 import { Sheet, SheetContent, SheetTitle } from '../../components/ui/sheet';
+import { acceptShortcutEnabled } from '../board/ticketShortcutRules';
 import {
   DRAWER_SECTION_LABELS,
   stepDrawerSection,
@@ -25,6 +26,7 @@ import {
   useRegisterShortcut,
 } from '../keyboard/useKeyboard';
 import { parseApiErrorMessage } from '../../lib/api';
+import { AcceptTicketDialog } from './AcceptTicketDialog';
 import {
   useArchiveTicket,
   useFinalApprove,
@@ -89,6 +91,7 @@ function TicketDrawerPanel({
   const [tabTicketId, setTabTicketId] = useState(ticketId);
   const [sectionFocusTick, setSectionFocusTick] = useState(0);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [acceptOpen, setAcceptOpen] = useState(false);
   if (ticketId !== tabTicketId) {
     setTabTicketId(ticketId);
     setTab('detail');
@@ -143,6 +146,11 @@ function TicketDrawerPanel({
 
   useRegisterShortcut('drawer.nextSection', () => moveSection(1));
   useRegisterShortcut('drawer.previousSection', () => moveSection(-1));
+  useRegisterShortcut(
+    'review.accept',
+    () => setAcceptOpen(true),
+    acceptShortcutEnabled(ticket),
+  );
   useKeyboardLayer({
     focusDrawerTabs: () => {
       const button = tabRefs.current[tab];
@@ -409,6 +417,13 @@ function TicketDrawerPanel({
           </div>
         )}
       </div>
+      {acceptOpen && ticket && (
+        <AcceptTicketDialog
+          ticketId={ticket.id}
+          open
+          onClose={() => setAcceptOpen(false)}
+        />
+      )}
     </>
   );
 }

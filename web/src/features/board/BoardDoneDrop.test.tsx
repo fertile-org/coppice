@@ -10,6 +10,10 @@ import { BoardPage } from './BoardPage';
 vi.mock('./ReviewCapacityBar', () => ({
   ReviewCapacityBar: () => null,
 }));
+
+vi.mock('../repos/useRepos', () => ({
+  useRepos: () => ({ data: [] }),
+}));
 import type { Ticket } from './useTickets';
 
 const apiFetch = vi.hoisted(() => vi.fn());

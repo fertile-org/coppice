@@ -1,9 +1,13 @@
 import '@testing-library/jest-dom/vitest';
-import { describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { MemoryRouter } from 'react-router-dom';
 import { ToastProvider } from '../../components/ToastProvider';
+import { KeyboardProvider } from '../keyboard/KeyboardProvider';
 import { TicketCommentsTab } from './TicketCommentsTab';
+
+const createComment = vi.hoisted(() => vi.fn());
 
 vi.mock('../agents/useAgents', () => ({
   useAgents: () => ({
@@ -28,7 +32,7 @@ vi.mock('../agents/useAgents', () => ({
 
 vi.mock('./useTicket', () => ({
   useComments: () => ({ data: [], isLoading: false, isError: false }),
-  useCreateComment: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useCreateComment: () => ({ mutateAsync: createComment, isPending: false }),
   useUploadAttachment: () => ({ mutateAsync: vi.fn(), isPending: false }),
 }));
 
@@ -36,14 +40,23 @@ function renderComments() {
   const client = new QueryClient();
   return render(
     <QueryClientProvider client={client}>
-      <ToastProvider>
-        <TicketCommentsTab ticketId="00000000-0000-0000-0000-000000000003" />
-      </ToastProvider>
+      <MemoryRouter>
+        <KeyboardProvider>
+          <ToastProvider>
+            <TicketCommentsTab ticketId="00000000-0000-0000-0000-000000000003" />
+          </ToastProvider>
+        </KeyboardProvider>
+      </MemoryRouter>
     </QueryClientProvider>,
   );
 }
 
 describe('TicketCommentsTab', () => {
+  beforeEach(() => {
+    createComment.mockReset();
+    createComment.mockResolvedValue({ startedRuns: [] });
+  });
+
   it('suggests distinct mentions by full agent name when presets match', () => {
     renderComments();
 
@@ -84,5 +97,32 @@ describe('TicketCommentsTab', () => {
       'true',
     );
     expect(screen.getByRole('button', { name: 'Post comment' })).toBeDisabled();
+  });
+
+  it('posts once with Mod+Enter from the comment editor and stays quiet otherwise', async () => {
+    renderComments();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Markdown source' }));
+    const textarea = screen.getByPlaceholderText('Write a comment in markdown…');
+    textarea.focus();
+    fireEvent.keyDown(textarea, { key: 'Enter', ctrlKey: true });
+    expect(createComment).not.toHaveBeenCalled();
+
+    fireEvent.change(textarea, { target: { value: 'Ship the gate' } });
+    const elsewhere = document.createElement('input');
+    document.body.appendChild(elsewhere);
+    elsewhere.focus();
+    fireEvent.keyDown(elsewhere, { key: 'Enter', ctrlKey: true });
+    expect(createComment).not.toHaveBeenCalled();
+    elsewhere.remove();
+
+    textarea.focus();
+    fireEvent.keyDown(textarea, { key: 'Enter', ctrlKey: true });
+    await waitFor(() => {
+      expect(createComment).toHaveBeenCalledTimes(1);
+    });
+    expect(createComment).toHaveBeenCalledWith(
+      expect.objectContaining({ body: 'Ship the gate' }),
+    );
   });
 });

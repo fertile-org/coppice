@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { useRegisterShortcut } from '../keyboard/useKeyboard';
 import { apiErrorToastMessage, parseApiErrorMessage } from '../../lib/api';
 import { useToast } from '../../components/ToastProvider';
 import { Button } from '../../components/ui/button';
@@ -435,10 +436,6 @@ export function TicketGitActions({ ticket }: TicketGitActionsProps) {
     }
   }
 
-  if (!ticket.repoId) {
-    return null;
-  }
-
   async function handleRemoveWorktree() {
     if (!gitInfo?.worktreeExists) return;
     const confirmed = window.confirm(
@@ -472,6 +469,19 @@ export function TicketGitActions({ ticket }: TicketGitActionsProps) {
   const busy =
     removeWorktree.isPending || pushBranch.isPending || createPrPending;
   const isArchived = Boolean(ticket.archivedAt);
+  const mergeEnabled =
+    Boolean(ticket.repoId) &&
+    showFinalActions &&
+    Boolean(gitInfo) &&
+    !isLoading &&
+    !isArchived &&
+    !busy;
+
+  useRegisterShortcut('review.merge', () => setMergeOpen(true), mergeEnabled);
+
+  if (!ticket.repoId) {
+    return null;
+  }
 
   return (
     <div className="space-y-3 rounded-md border border-border bg-surface px-3 py-3">
