@@ -659,6 +659,12 @@ dir = "${hung_home}/.config/Coppice/plugins"
 # Coppice rewrites coppice/skills here on every start. Edits there are lost.
 builtin_plugins_dir = "${hung_home}/.config/Coppice/builtin-plugins"
 
+# How many days of logs to keep, including today: 3, 7, 14, or 30. Default 14.
+[logs]
+retention_days = 14
+# Folder for logs. The desktop app uses its own folder and ignores this.
+# dir = "./data/logs"
+
 # Keyboard shortcuts. Your keys replace the defaults, and an empty value turns one off.
 # Mod is Cmd on macOS and Ctrl on Linux and WSL.
 # [keybindings]

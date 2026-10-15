@@ -91,7 +91,7 @@ pub fn read_backup_text(path: &Path) -> io::Result<Option<String>> {
     Ok(Some(std::fs::read_to_string(backup)?))
 }
 
-/// Same parser and checks as startup: defaults, then this TOML, then knowledge rules.
+/// Same parser and checks as startup, and Save rejects a `retention_days` outside 3, 7, 14, and 30.
 pub fn validate_config_text(text: &str) -> Result<AppConfig, ConfigTextError> {
     if let Err(fault) = crate::keybindings::check_document(text) {
         return Err(ConfigTextError {
@@ -101,10 +101,37 @@ pub fn validate_config_text(text: &str) -> Result<AppConfig, ConfigTextError> {
         });
     }
     let figment = AppConfig::defaults_figment().merge(Toml::string(text));
-    match AppConfig::load_figment(figment) {
-        Ok(config) => Ok(config),
-        Err(error) => Err(error_from_figment(text, &error)),
+    let config = match AppConfig::load_figment(figment) {
+        Ok(config) => config,
+        Err(error) => return Err(error_from_figment(text, &error)),
+    };
+    check_logs_retention(text)?;
+    Ok(config)
+}
+
+/// Shown when Save rejects `[logs] retention_days`.
+pub const RETENTION_DAYS_MESSAGE: &str = "Set logs.retention_days to 3, 7, 14, or 30.";
+
+/// An explicit `retention_days` must be 3, 7, 14, or 30. A missing key stays the default.
+fn check_logs_retention(text: &str) -> Result<(), ConfigTextError> {
+    let Ok(doc) = toml_edit::ImDocument::<&str>::parse(text) else {
+        return Ok(());
+    };
+    let Some(item) = doc.get("logs").and_then(|logs| logs.get("retention_days")) else {
+        return Ok(());
+    };
+    if item.as_integer().is_some_and(|value| {
+        u32::try_from(value).is_ok_and(|days| crate::LOG_RETENTION_DAYS.contains(&days))
+    }) {
+        return Ok(());
     }
+    let start = item.span().map(|span| span.start).unwrap_or(0);
+    let (line, column) = offset_line_col(text, start);
+    Err(ConfigTextError {
+        line,
+        column,
+        message: RETENTION_DAYS_MESSAGE.to_string(),
+    })
 }
 
 /// True when applying `after` needs a process restart.
@@ -125,6 +152,9 @@ pub fn changes_need_restart(before: &AppConfig, after: &AppConfig) -> bool {
     // Shortcut overrides apply in the open app, the same way connector flags do.
     before.keybindings = crate::keybindings::Keybindings::default();
     after.keybindings = crate::keybindings::Keybindings::default();
+    // The sweep reads retention_days from disk on its next pass.
+    before.logs.retention_days = 0;
+    after.logs.retention_days = 0;
     before != after
 }
 
@@ -472,6 +502,52 @@ port = 5000
         assert_eq!(detail.message, "invalid array expected `]`");
         assert_eq!(std::fs::read_to_string(&path).unwrap(), original);
         assert_eq!(std::fs::read_to_string(backup_path(&path)).unwrap(), backup);
+    }
+
+    #[test]
+    fn retention_days_change_does_not_need_a_restart() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        let original = "[logs]\nretention_days = 14\n";
+        write(&path, original);
+        let next = "[logs]\nretention_days = 30\n";
+
+        let outcome = save_config_verbatim(&path, next, &content_revision(original.as_bytes()))
+            .expect("save");
+
+        assert!(!outcome.restart_required);
+        assert_eq!(outcome.parsed.logs.retention_days, 30);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), next);
+    }
+
+    #[test]
+    fn logs_dir_change_still_needs_a_restart() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        let original = "[logs]\ndir = \"./data/logs\"\n";
+        write(&path, original);
+        let next = "[logs]\ndir = \"/tmp/coppice-logs\"\n";
+
+        let outcome = save_config_verbatim(&path, next, &content_revision(original.as_bytes()))
+            .expect("save");
+
+        assert!(outcome.restart_required);
+        assert_eq!(outcome.parsed.logs.dir, "/tmp/coppice-logs");
+    }
+
+    #[test]
+    fn retention_days_rejects_a_value_outside_the_list() {
+        let text = "# head\n[logs]\nretention_days = 10\n";
+        let error = validate_config_text(text).expect_err("days");
+        assert_eq!(error.line, 3, "{}", error.message);
+        assert_eq!(error.message, RETENTION_DAYS_MESSAGE);
+    }
+
+    #[test]
+    fn missing_retention_days_stays_fourteen() {
+        let config = validate_config_text("[logs]\ndir = \"./data/logs\"\n").expect("loads");
+        assert_eq!(config.logs.retention_days, 14);
+        assert_eq!(config.logs.effective_retention_days(), 14);
     }
 
     #[test]

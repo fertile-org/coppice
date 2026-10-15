@@ -1,13 +1,16 @@
 //! Admin read API for daily JSONL logs and `postgres.log`.
 
+use crate::logs::export::{self, VersionFile};
 use crate::logs::meta;
 use crate::logs::read::{self, FilterParams, LogQuery, QueryError};
+use crate::logs::retain;
 use crate::middleware::admin::AdminUser;
 use crate::AppState;
+use axum::body::Body;
 use axum::extract::{Query, State};
-use axum::http::StatusCode;
+use axum::http::{header, StatusCode};
 use axum::response::{IntoResponse, Response};
-use axum::routing::get;
+use axum::routing::{get, post};
 use axum::{Json, Router};
 use serde::Deserialize;
 use serde_json::json;
@@ -21,6 +24,7 @@ pub fn routes() -> Router<Arc<AppState>> {
     Router::new()
         .route("/api/logs", get(list_logs))
         .route("/api/logs/meta", get(logs_meta))
+        .route("/api/logs/export", post(export_logs))
 }
 
 #[derive(Deserialize)]
@@ -58,15 +62,68 @@ async fn list_logs(
     Json(page).into_response()
 }
 
-async fn logs_meta(AdminUser(_admin): AdminUser) -> Json<serde_json::Value> {
+async fn logs_meta(
+    State(state): State<Arc<AppState>>,
+    AdminUser(_admin): AdminUser,
+) -> Json<serde_json::Value> {
     Json(json!({
-        "retentionDays": meta::RETENTION_DAYS,
+        "retentionDays": retention_days(&state),
         "version": meta::version(),
         "commit": meta::commit(),
         "os": meta::os_name(),
         "arch": meta::arch(),
         "osVersion": meta::os_version(),
     }))
+}
+
+#[derive(Deserialize)]
+struct ExportBody {
+    #[serde(flatten)]
+    filter: FilterParams,
+    #[serde(default, rename = "shellVersion")]
+    shell_version: Option<String>,
+}
+
+async fn export_logs(
+    State(state): State<Arc<AppState>>,
+    AdminUser(_admin): AdminUser,
+    Json(body): Json<ExportBody>,
+) -> Response {
+    let filter = match read::filter_from_params(&body.filter) {
+        Ok(filter) => filter,
+        Err(error) => return query_error(error),
+    };
+    let versions = VersionFile {
+        app_version: meta::version().to_string(),
+        commit: meta::commit().to_string(),
+        os: meta::os_name().to_string(),
+        arch: meta::arch().to_string(),
+        os_version: meta::os_version(),
+        shell_version: body.shell_version,
+    };
+    match export::build_zip(
+        std::path::Path::new(&state.config.logs.dir),
+        &filter,
+        &versions,
+    ) {
+        Ok(bytes) => Response::builder()
+            .status(StatusCode::OK)
+            .header(header::CONTENT_TYPE, "application/zip")
+            .header(
+                header::CONTENT_DISPOSITION,
+                format!("attachment; filename=\"{}\"", export::ARCHIVE_NAME),
+            )
+            .body(Body::from(bytes))
+            .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response()),
+        Err(error) => query_error(error),
+    }
+}
+
+fn retention_days(state: &AppState) -> u32 {
+    retain::configured_retention_days(
+        state.config.logs.effective_retention_days(),
+        state.connectors.config_path().as_deref(),
+    )
 }
 
 fn parse_limit(limit: Option<&str>) -> Result<usize, QueryError> {

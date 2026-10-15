@@ -1,5 +1,7 @@
 mod common;
 
+use std::io::Read;
+
 use axum::http::{header, StatusCode};
 use futures_util::{SinkExt, StreamExt};
 use std::time::{Duration, Instant};
@@ -64,6 +66,7 @@ async fn admin_reads_logs_and_a_member_cannot() {
 
     let (_state, app, cookie, csrf) = common::bootstrap_and_login_with_state_config(|config| {
         config.logs.dir = logs_dir.to_string_lossy().into_owned();
+        config.logs.retention_days = 7;
     })
     .await;
 
@@ -145,7 +148,7 @@ async fn admin_reads_logs_and_a_member_cannot() {
         .unwrap();
     assert_eq!(meta.status(), StatusCode::OK);
     let meta = common::json_body(meta).await;
-    assert_eq!(meta["retentionDays"], 14);
+    assert_eq!(meta["retentionDays"], 7);
     assert!(meta["version"]
         .as_str()
         .is_some_and(|value| !value.is_empty()));
@@ -155,6 +158,110 @@ async fn admin_reads_logs_and_a_member_cannot() {
     assert!(meta["os"].as_str().is_some_and(|value| !value.is_empty()));
     assert!(meta["arch"].as_str().is_some_and(|value| !value.is_empty()));
     assert!(meta["osVersion"].is_string());
+
+    let token = "coppice-export-7kQ9mP2x";
+    let _guard = coppice_server::logs::SecretGuard::register([("COPPICE_MCP_TOKEN", token)]);
+    std::fs::write(
+        logs_dir.join("coppice.2026-10-14.jsonl"),
+        format!(
+            concat!(
+                r#"{{"timestamp":"2026-10-14T03:35:01Z","level":"INFO","target":"coppice_server::middleware::request_log","fields":{{"message":"http request","source":"http","method":"GET","path":"/api/health","status":200,"duration_ms":4}}}}"#,
+                "\n",
+                r#"{{"timestamp":"2026-10-14T03:35:02Z","level":"DEBUG","target":"t","fields":{{"message":"hidden debug","source":"server"}}}}"#,
+                "\n",
+                r#"{{"timestamp":"2026-10-14T03:36:00Z","level":"INFO","target":"t","fields":{{"message":"connector returned {token} Authorization: Bearer export-bearer-token","source":"http"}}}}"#,
+                "\n",
+                r#"{{"timestamp":"2026-10-14T03:36:01Z","level":"INFO","target":"t","fields":{{"message":"cli-only-marker","source":"cli"}}}}"#,
+                "\n",
+            ),
+            token = token,
+        ),
+    )
+    .expect("rewrite logs");
+
+    let exported = app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            "/api/logs/export",
+            r#"{"source":"http","shellVersion":"1.4.2"}"#,
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(exported.status(), StatusCode::OK);
+    assert_eq!(
+        exported
+            .headers()
+            .get(header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok()),
+        Some("application/zip")
+    );
+    let disposition = exported
+        .headers()
+        .get(header::CONTENT_DISPOSITION)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or("");
+    assert!(
+        disposition.contains("filename=\"coppice-logs.zip\""),
+        "{disposition}"
+    );
+    let bytes = http_body_util::BodyExt::collect(exported.into_body())
+        .await
+        .unwrap()
+        .to_bytes();
+    let mut archive = zip::ZipArchive::new(std::io::Cursor::new(bytes.to_vec())).expect("zip");
+    let mut logs_text = String::new();
+    archive
+        .by_name("logs.jsonl")
+        .expect("logs.jsonl")
+        .read_to_string(&mut logs_text)
+        .expect("logs");
+    assert!(logs_text.contains("http request"), "{logs_text}");
+    assert!(!logs_text.contains("cli-only-marker"), "{logs_text}");
+    assert!(!logs_text.contains(token), "{logs_text}");
+    assert!(!logs_text.contains("export-bearer-token"), "{logs_text}");
+    assert!(
+        logs_text.contains("\u{2039}COPPICE_MCP_TOKEN\u{203A}"),
+        "{logs_text}"
+    );
+    let mut versions = String::new();
+    archive
+        .by_name("versions.txt")
+        .expect("versions.txt")
+        .read_to_string(&mut versions)
+        .expect("versions");
+    assert!(versions.contains("shell_version=1.4.2\n"), "{versions}");
+    assert!(versions.contains("app_version="), "{versions}");
+
+    let forbidden_export = app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            "/api/logs/export",
+            "{}",
+            &member_cookie,
+            &member_csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(forbidden_export.status(), StatusCode::FORBIDDEN);
+
+    let no_csrf = app
+        .clone()
+        .oneshot(
+            axum::http::Request::builder()
+                .method("POST")
+                .uri("/api/logs/export")
+                .header("content-type", "application/json")
+                .header(header::COOKIE, &cookie)
+                .body(axum::body::Body::from("{}"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(no_csrf.status(), StatusCode::FORBIDDEN);
 }
 
 #[tokio::test]

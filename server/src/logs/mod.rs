@@ -1,8 +1,10 @@
 //! Daily JSONL for server, HTTP, and agent CLI lines, and the write-time secret mask.
 
+pub(crate) mod export;
 mod mask;
 pub(crate) mod meta;
 pub(crate) mod read;
+pub(crate) mod retain;
 pub(crate) mod tail;
 
 use std::io::{self, IsTerminal, Write};

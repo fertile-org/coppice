@@ -28,6 +28,17 @@ You can also edit the file in any text editor. Your edits survive upgrades.
 ## Logs
 Admins can open **Logs** beside Settings to filter and live-tail server, request, agent run and database logs. Each run has a **View logs** link.
 
+**Export logs** saves the lines that match your current filters as `coppice-logs.zip`. Coppice removes the tokens and keys it knows about, but check the file before you share it.
+
+**Report a problem** opens a new GitHub issue with your Coppice version filled in. Say what happened and what you expected, then attach the zip from **Export logs**.
+
+## `[logs]`
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `retention_days` | integer | `14` | How many days of logs to keep, including today: 3, 7, 14, or 30. The default is 14. Coppice deletes older logs every hour, and changes apply without a restart. |
+| `dir` | string | `./data/logs` | Folder for logs. The desktop app uses its own folder and ignores this. Changing it needs a restart. |
+
 ## Connectors
 Signed-in CLIs are on by default. You only need a line to turn one off:
 
