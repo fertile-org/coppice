@@ -28,8 +28,18 @@ fn main() -> anyhow::Result<()> {
         print!("{}", version_text());
         return Ok(());
     }
-    match coppice_server::services::secret_rotation::parse_replace_keys_password(&args) {
-        Ok(Some(password)) => return run_replace_keys(&password),
+    match coppice_server::services::secret_rotation::parse_replace_keys_command(&args) {
+        Ok(Some(())) => {
+            let password = match coppice_server::services::secret_rotation::prompt_admin_password()
+            {
+                Ok(password) => password,
+                Err(err) => {
+                    eprintln!("coppice-server: {err}");
+                    std::process::exit(2);
+                }
+            };
+            return run_replace_keys(&password);
+        }
         Ok(None) => {}
         Err(err) => {
             eprintln!("coppice-server: {err}");

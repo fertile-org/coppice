@@ -12,7 +12,7 @@
 //! file is promoted. A crash in either gap is finished on the next launch by
 //! trying the current password and then the pending one.
 
-use std::io::{self, Write};
+use std::io::{self, IsTerminal, Write};
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::time::Duration;
@@ -1009,27 +1009,120 @@ async fn password_connects(
     }
 }
 
-/// `coppice-server replace-keys --admin-password <value>`.
+pub const PROMPT_NEW_ADMIN_PASSWORD: &str = "New admin password: ";
+pub const PROMPT_TYPE_IT_AGAIN: &str = "Type it again: ";
+pub const PASSWORDS_DO_NOT_MATCH: &str = "The passwords don't match. Try again.";
+pub const PASSWORD_ON_STDIN: &str =
+    "Enter a new admin password on stdin, or run this in a terminal.";
+
+/// `coppice-server replace-keys`. The password is never taken from argv.
 /// `Ok(None)` when `args` is a different command.
-pub fn parse_replace_keys_password(args: &[String]) -> Result<Option<String>, String> {
+pub fn parse_replace_keys_command(args: &[String]) -> Result<Option<()>, String> {
     if args.get(1).map(String::as_str) != Some("replace-keys") {
         return Ok(None);
     }
-    let mut password = None;
-    let mut rest = args[2..].iter();
-    while let Some(flag) = rest.next() {
-        if flag == "--admin-password" {
-            let value = rest
-                .next()
-                .ok_or_else(|| "--admin-password requires a value".to_string())?;
-            password = Some(value.clone());
-        } else {
-            return Err(format!("unknown argument {flag}"));
+    if args.len() > 2 {
+        return Err(
+            "replace-keys does not take arguments. It asks for the new admin password.".into(),
+        );
+    }
+    Ok(Some(()))
+}
+
+/// A terminal asks twice, without echo, and the two entries must match.
+/// Anything else reads one line. An empty line is [`PASSWORD_ON_STDIN`].
+pub fn read_replacement_password(
+    terminal: bool,
+    mut read_line: impl FnMut() -> std::io::Result<String>,
+    mut prompt_hidden: impl FnMut(&str) -> std::io::Result<String>,
+    mut write_err: impl FnMut(&str),
+) -> Result<String, String> {
+    if !terminal {
+        let mut line = read_line().map_err(|err| err.to_string())?;
+        if line.ends_with('\n') {
+            line.pop();
+            if line.ends_with('\r') {
+                line.pop();
+            }
+        }
+        if line.is_empty() {
+            return Err(PASSWORD_ON_STDIN.into());
+        }
+        check_admin_password(&line).map_err(|err| err.to_string())?;
+        return Ok(line);
+    }
+    loop {
+        let first = prompt_hidden(PROMPT_NEW_ADMIN_PASSWORD).map_err(|err| err.to_string())?;
+        if let Err(err) = check_admin_password(&first) {
+            write_err(&err.to_string());
+            continue;
+        }
+        let again = prompt_hidden(PROMPT_TYPE_IT_AGAIN).map_err(|err| err.to_string())?;
+        if first != again {
+            write_err(PASSWORDS_DO_NOT_MATCH);
+            continue;
+        }
+        return Ok(first);
+    }
+}
+
+/// Asks on a terminal, or reads one line when stdin is not a terminal.
+pub fn prompt_admin_password() -> Result<String, String> {
+    read_replacement_password(
+        std::io::stdin().is_terminal(),
+        || {
+            let mut line = String::new();
+            std::io::stdin().read_line(&mut line)?;
+            Ok(line)
+        },
+        read_hidden_line,
+        |message| eprintln!("{message}"),
+    )
+}
+
+fn read_hidden_line(prompt: &str) -> std::io::Result<String> {
+    eprint!("{prompt}");
+    std::io::stderr().flush()?;
+    let _guard = EchoGuard::disable()?;
+    let mut line = String::new();
+    std::io::stdin().read_line(&mut line)?;
+    eprintln!();
+    if line.ends_with('\n') {
+        line.pop();
+        if line.ends_with('\r') {
+            line.pop();
         }
     }
-    password
-        .ok_or_else(|| "--admin-password is required".to_string())
-        .map(Some)
+    Ok(line)
+}
+
+struct EchoGuard {
+    fd: i32,
+    original: libc::termios,
+}
+
+impl EchoGuard {
+    fn disable() -> std::io::Result<Self> {
+        let fd = libc::STDIN_FILENO;
+        let mut original = unsafe { std::mem::zeroed() };
+        if unsafe { libc::tcgetattr(fd, &mut original) } != 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        let mut hidden = original;
+        hidden.c_lflag &= !libc::ECHO;
+        if unsafe { libc::tcsetattr(fd, libc::TCSAFLUSH, &hidden) } != 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        Ok(Self { fd, original })
+    }
+}
+
+impl Drop for EchoGuard {
+    fn drop(&mut self) {
+        unsafe {
+            libc::tcsetattr(self.fd, libc::TCSAFLUSH, &self.original);
+        }
+    }
 }
 
 /// Stop Coppice first and leave PostgreSQL running. Desktop installs keep the
@@ -1195,6 +1288,99 @@ mod tests {
             replaced_keys_message(Path::new("/tmp/config.toml")),
             "Keys replaced. The new values are in /tmp/config.toml. Keep that file private."
         );
+        assert_eq!(PROMPT_NEW_ADMIN_PASSWORD, "New admin password: ");
+        assert_eq!(PROMPT_TYPE_IT_AGAIN, "Type it again: ");
+        assert_eq!(PASSWORDS_DO_NOT_MATCH, "The passwords don't match. Try again.");
+        assert_eq!(
+            PASSWORD_ON_STDIN,
+            "Enter a new admin password on stdin, or run this in a terminal."
+        );
+        assert!(parse_replace_keys_command(&["coppice-server".into(), "serve".into()])
+            .unwrap()
+            .is_none());
+        assert!(parse_replace_keys_command(&[
+            "coppice-server".into(),
+            "replace-keys".into()
+        ])
+        .unwrap()
+        .is_some());
+        let rejected = parse_replace_keys_command(&[
+            "coppice-server".into(),
+            "replace-keys".into(),
+            "--admin-password".into(),
+            "secret-value".into(),
+        ])
+        .unwrap_err();
+        assert!(!rejected.contains("secret-value"), "{rejected}");
+    }
+
+    #[test]
+    fn replacement_password_prompts_match_and_reject_a_short_one() {
+        let mut notes = Vec::new();
+        let mut prompts = Vec::new();
+        let mut answers = vec![
+            "1234567".to_string(),
+            "12345678".to_string(),
+            "otherpass".to_string(),
+            "long-enough".to_string(),
+            "long-enough".to_string(),
+        ];
+        let password = read_replacement_password(
+            true,
+            || unreachable!("a terminal does not read a piped line"),
+            |prompt| {
+                prompts.push(prompt.to_string());
+                Ok(answers.remove(0))
+            },
+            |message| notes.push(message.to_string()),
+        )
+        .unwrap();
+        assert_eq!(password, "long-enough");
+        assert_eq!(
+            prompts,
+            vec![
+                "New admin password: ",
+                "New admin password: ",
+                "Type it again: ",
+                "New admin password: ",
+                "Type it again: ",
+            ]
+        );
+        assert_eq!(
+            notes,
+            vec![
+                "Use at least 8 characters.",
+                "The passwords don't match. Try again.",
+            ]
+        );
+
+        let piped = read_replacement_password(
+            false,
+            || Ok("from-stdin-ok\n".into()),
+            |_| unreachable!("a pipe does not prompt"),
+            |_| unreachable!("a valid piped password has no note"),
+        )
+        .unwrap();
+        assert_eq!(piped, "from-stdin-ok");
+        let empty = read_replacement_password(
+            false,
+            || Ok(String::new()),
+            |_| unreachable!("a pipe does not prompt"),
+            |_| {},
+        )
+        .unwrap_err();
+        assert_eq!(
+            empty,
+            "Enter a new admin password on stdin, or run this in a terminal."
+        );
+        let short = read_replacement_password(
+            false,
+            || Ok("1234567\n".into()),
+            |_| unreachable!("a pipe does not prompt"),
+            |_| {},
+        )
+        .unwrap_err();
+        assert_eq!(short, "Use at least 8 characters.");
     }
 
     #[tokio::test]

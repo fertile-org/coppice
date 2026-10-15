@@ -34,10 +34,10 @@ In the desktop app, open **Tools → Backup → Replace keys**, enter the new ad
 On a server install, stop Coppice and leave PostgreSQL running, then run:
 
 ```bash
-coppice-server replace-keys --admin-password 'a new password'
+coppice-server replace-keys
 ```
 
-The command writes the new database URL, encryption key, session secret, and admin password into `config.toml`. It then prints where that file is, and it does not print the new values. Tokens this install cannot read stay marked so you can paste them again. Changing `master_key` by hand makes saved tokens unreadable, so you would have to enter them again.
+The command asks for the new admin password and does not take that password as an argument. It writes the new database URL, encryption key, session secret, and admin password into `config.toml`. It then prints where that file is, and it does not print the new values. Tokens this install cannot read stay marked so you can paste them again. Changing `master_key` by hand makes saved tokens unreadable, so you would have to enter them again.
 
 ## Logs
 Admins can open **Logs** beside Settings to filter and live-tail server, request, agent run and database logs. Each run has a **View logs** link.

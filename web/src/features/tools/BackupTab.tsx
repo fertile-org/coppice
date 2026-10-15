@@ -4,6 +4,14 @@ import { MIN_PASSWORD_CHARS } from '../../lib/passwords';
 import { Button } from '../../components/ui/button';
 import { useSession, type User } from '../auth/useSession';
 
+/** Backtick-wrapped words are inline code, not backtick characters. */
+function inlineCode(line: string) {
+  const parts = line.split('`');
+  return parts.map((part, index) =>
+    index % 2 === 1 ? <code key={index}>{part}</code> : part,
+  );
+}
+
 export function BackupTab() {
   const { desktopMode, establishSession } = useSession();
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -147,7 +155,7 @@ export function BackupTab() {
           className="rounded-lg border border-danger/30 bg-danger-muted px-4 py-3 font-body text-sm text-danger"
           role="alert"
         >
-          {error}
+          {inlineCode(error)}
         </p>
       )}
 
@@ -214,7 +222,7 @@ export function BackupTab() {
 
       {!desktopMode && (
         <p className="max-w-2xl font-body text-sm text-text-secondary">
-          On a server, stop Coppice and run `coppice-server replace-keys`.
+          On a server, stop Coppice and run <code>coppice-server replace-keys</code>.
         </p>
       )}
 
