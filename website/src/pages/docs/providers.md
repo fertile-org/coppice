@@ -18,8 +18,6 @@ Tired of keeping a terminal open for every agent? Coppice runs the coding agent 
 | OpenCode | `opencode` | [Install guide](https://opencode.ai/docs/) |
 | Kilo Code | `kilo` | [Install guide](https://kilo.ai/docs/cli) |
 
-[screenshot: model picker]
-
 Pick a model for this agent, or leave it on the default. Installed a new model? Click Refresh models.
 
 ## Connect your agent CLI
