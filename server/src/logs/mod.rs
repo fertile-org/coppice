@@ -261,6 +261,15 @@ mod tests {
     use super::*;
 
     #[test]
+    fn opening_the_appender_does_not_delete_a_compressed_day() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let zst = dir.path().join("coppice.2020-01-01.jsonl.zst");
+        std::fs::write(&zst, b"kept-compressed").expect("write");
+        rolling(dir.path()).expect("appender");
+        assert_eq!(std::fs::read(&zst).expect("zst"), b"kept-compressed");
+    }
+
+    #[test]
     fn rmcp_defaults_to_warn_unless_named() {
         assert_eq!(log_directives(None), "info,rmcp=warn");
         assert_eq!(log_directives(Some(" ")), "info,rmcp=warn");

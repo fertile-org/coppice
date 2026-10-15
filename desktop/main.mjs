@@ -174,7 +174,6 @@ async function launchServer() {
         logsDir: appLogsDir,
       }),
       env: { ...process.env, PATH },
-      logFile: path.join(logsDir(), 'server.log'),
     });
     server = current;
     url = await current.ready;

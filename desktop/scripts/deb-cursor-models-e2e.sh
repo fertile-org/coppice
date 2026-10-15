@@ -151,7 +151,8 @@ builtin_plugins_dir = "${hung_home}/.config/Coppice/builtin-plugins"
 EOF
 chown hung:hung "${hung_home}/.config/Coppice/config.toml"
 
-server_log="${hung_home}/.local/state/Coppice/logs/server.log"
+logs_dir="${hung_home}/.local/state/Coppice/logs"
+ready_mark=0
 app_log=/tmp/coppice-app.log
 count_file="${hung_home}/.agent-models-count"
 stdio_file="${hung_home}/.agent-models-stdio"
@@ -238,14 +239,60 @@ launch_app() {
   app_pid=$!
 }
 
+listening_count() {
+  local count=0 file matches
+  shopt -s nullglob
+  for file in "${logs_dir}"/coppice.*.jsonl; do
+    matches=$(grep -c '"message":"listening"' "${file}" || true)
+    count=$((count + matches))
+  done
+  shopt -u nullglob
+  printf '%s\n' "${count}"
+}
+
+collect_logs() {
+  local out="$1" file
+  : >"${out}"
+  shopt -s nullglob
+  for file in "${logs_dir}"/coppice.*.jsonl; do
+    cat "${file}" >>"${out}"
+  done
+  shopt -u nullglob
+}
+
+read_ready() {
+  local combined
+  combined=$(mktemp)
+  collect_logs "${combined}"
+  base_url=$(python3 - "${combined}" <<'PY'
+import json, sys
+url = ""
+for line in open(sys.argv[1], encoding="utf-8", errors="replace"):
+    try:
+        obj = json.loads(line)
+    except json.JSONDecodeError:
+        continue
+    fields = obj.get("fields") or {}
+    if fields.get("message") != "listening":
+        continue
+    addr = str(fields.get("addr") or "")
+    if addr.startswith("127.0.0.1:"):
+        url = "http://" + addr
+if not url:
+    sys.exit("listening line has no loopback address")
+print(url)
+PY
+)
+  rm -f "${combined}"
+  echo "deb-cursor-models-e2e: ready ${base_url}"
+}
+
 wait_ready() {
-  local i
+  local i count
   for i in $(seq 1 90); do
-    if [[ -f "${server_log}" ]] && grep -q 'COPPICE_READY url=http://127.0.0.1:' "${server_log}"; then
+    count=$(listening_count)
+    if [[ "${count}" -gt "${ready_mark}" ]]; then
       return 0
-    fi
-    if [[ -f "${server_log}" ]] && grep -q 'coppice-server desktop: failed' "${server_log}"; then
-      return 1
     fi
     if ! kill -0 "${app_pid}" 2>/dev/null; then
       return 1
@@ -259,7 +306,13 @@ dump_failure() {
   echo "----- app log -----" >&2
   tail -n 80 "${app_log}" >&2 || true
   echo "----- server log -----" >&2
-  tail -n 120 "${server_log}" >&2 || true
+  local file
+  shopt -s nullglob
+  for file in "${logs_dir}"/coppice.*.jsonl; do
+    echo "--- ${file} ---" >&2
+    tail -n 40 "${file}" >&2 || true
+  done
+  shopt -u nullglob
   echo "----- processes -----" >&2
   ps -u hung -o pid,user,args >&2 || true
   echo "----- profile -----" >&2
@@ -345,9 +398,7 @@ if ! wait_ready; then
   fi
 fi
 
-ready_line=$(grep -o 'COPPICE_READY url=http://127.0.0.1:[0-9]*' "${server_log}" | tail -n 1)
-base_url=${ready_line#COPPICE_READY url=}
-echo "deb-cursor-models-e2e: ready ${base_url}"
+read_ready
 
 # Startup probes `agent models` once. Wait until that count stops moving.
 count_now() {
@@ -481,7 +532,9 @@ if not lines or any(line.strip() != "pipe" for line in lines):
 print(f"stdio: pipe ({len(lines)} invocations)")
 PY
 
-python3 - "${server_log}" "${token}" <<'PY'
+log_text=$(mktemp)
+collect_logs "${log_text}"
+python3 - "${log_text}" "${token}" <<'PY'
 import sys
 log = open(sys.argv[1], encoding="utf-8", errors="replace").read()
 token = sys.argv[2]
@@ -521,7 +574,8 @@ if [[ "${missing_code}" != "404" ]]; then
   echo "missing route status ${missing_code}" >&2
   exit 1
 fi
-python3 - "${server_log}" <<'PY'
+collect_logs "${log_text}"
+python3 - "${log_text}" <<'PY'
 import sys
 path = "/api/this-route-is-missing"
 lines = [
@@ -533,7 +587,7 @@ if not lines:
 for line in lines:
     if "?" in line or "refresh=" in line:
         sys.exit("404 request log included a query string: " + line)
-    if "status=404" not in line and "status: 404" not in line:
+    if '"status":404' not in line and "status=404" not in line and "status: 404" not in line:
         sys.exit("404 request log missing status: " + line)
 print("logged 404:", path)
 PY
@@ -546,15 +600,9 @@ launch_known() {
   fi
 }
 
-read_ready() {
-  ready_line=$(grep -o 'COPPICE_READY url=http://127.0.0.1:[0-9]*' "${server_log}" | tail -n 1)
-  base_url=${ready_line#COPPICE_READY url=}
-  echo "deb-cursor-models-e2e: ready ${base_url}"
-}
-
 relaunch() {
   stop_app
-  rm -f "${server_log}"
+  ready_mark=$(listening_count)
   launch_known
   if ! wait_ready; then
     dump_failure
@@ -660,6 +708,7 @@ dir = "${hung_home}/.config/Coppice/plugins"
 builtin_plugins_dir = "${hung_home}/.config/Coppice/builtin-plugins"
 
 # How many days of logs to keep, including today: 3, 7, 14, or 30. Default 14.
+# If logs pass 256 MiB, Coppice deletes the oldest first, even before retention_days is up.
 [logs]
 retention_days = 14
 # Folder for logs. The desktop app uses its own folder and ignores this.

@@ -1,7 +1,5 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { SERVER_STOP_GRACE_MS, startServer } from '../src/serverProcess.mjs';
@@ -9,17 +7,11 @@ import { SERVER_STOP_GRACE_MS, startServer } from '../src/serverProcess.mjs';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const FAKE = path.join(__dirname, 'fixtures', 'fake-server.mjs');
 
-function tmpLog() {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'coppice-server-test-'));
-  return path.join(dir, 'logs', 'server.log');
-}
-
 function start(mode, opts = {}) {
   return startServer({
     command: process.execPath,
     args: [FAKE, mode],
     env: process.env,
-    logFile: tmpLog(),
     ...opts,
   });
 }
@@ -38,9 +30,8 @@ test('stop grace leaves the server time to stop agent process groups', () => {
   assert.equal(SERVER_STOP_GRACE_MS, 15000);
 });
 
-test('ready resolves to the URL; stop exits 0 and logs are teed', async () => {
-  const logFile = tmpLog();
-  const server = start('ready', { logFile });
+test('ready resolves to the URL and output stays in the ring', async () => {
+  const server = start('ready');
   assert.equal(await server.ready, 'http://127.0.0.1:5123');
   await server.stop();
   assert.equal(await server.exited, 0);
@@ -48,7 +39,6 @@ test('ready resolves to the URL; stop exits 0 and logs are teed', async () => {
   assert.ok(lines.includes('INFO starting fake server'));
   assert.ok(lines.includes('WARN fake stderr line'));
   assert.ok(lines.includes('COPPICE_READY url=http://127.0.0.1:5123'));
-  assert.match(fs.readFileSync(logFile, 'utf8'), /INFO starting fake server/);
 });
 
 test('ready rejects with the exit code on early exit', async () => {
@@ -83,7 +73,6 @@ test('stop escalates to SIGKILL when SIGTERM is ignored', async () => {
 test('ready rejects when the command cannot be spawned', async () => {
   const server = startServer({
     command: path.join(__dirname, 'fixtures', 'does-not-exist'),
-    logFile: tmpLog(),
   });
   await assert.rejects(server.ready, /failed to start/);
   assert.equal(await server.exited, null);
@@ -125,16 +114,6 @@ test('exited resolves when the child exits but a grandchild keeps the pipes open
   const sleeper = grandchildPid(server);
   await server.stop();
   assert.equal(await waitGone(sleeper), true);
-});
-
-test('an unwritable log location does not break the server', async (t) => {
-  t.mock.method(console, 'error', () => {});
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'coppice-server-test-'));
-  fs.writeFileSync(path.join(dir, 'file'), '');
-  const server = start('ready', { logFile: path.join(dir, 'file', 'logs', 'server.log') });
-  assert.equal(await server.ready, 'http://127.0.0.1:5123');
-  assert.ok(server.lastLines().includes('INFO starting fake server'));
-  await server.stop();
 });
 
 test('lastLines returns the most recent n lines', async () => {
