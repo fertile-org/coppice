@@ -37,7 +37,7 @@ pub const PG_PENDING: &str = "pg_password.pending";
 
 pub const REPLACE_UI_ERROR: &str = "Couldn't replace keys. Nothing was changed.";
 pub const REPLACE_ON_SERVER: &str =
-    "On a server, stop Coppice and run `coppice-server replace-keys`.";
+    "On a server, stop Coppice and run coppice-server replace-keys.";
 pub const PASSWORD_EMPTY: &str = "Enter a new admin password.";
 
 #[derive(Debug, thiserror::Error)]
