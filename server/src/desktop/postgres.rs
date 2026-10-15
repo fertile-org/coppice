@@ -152,36 +152,49 @@ impl DesktopPostgres {
         .with_context(|| format!("append {}", path.display()))
     }
 
-    /// Removes `postmaster.pid` left by a crashed server; returns true when removed.
+    /// Removes `postmaster.pid` when it does not name a live process whose
+    /// command line names this data directory. Returns true when removed.
+    /// An unreadable command line is left in place.
     pub fn clear_stale_pid(&self) -> anyhow::Result<bool> {
-        let path = self.pg_data.join("postmaster.pid");
-        let contents = match std::fs::read_to_string(&path) {
-            Ok(contents) => contents,
-            Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(false),
-            Err(err) => return Err(err).with_context(|| format!("read {}", path.display())),
-        };
-        let pid = contents
-            .lines()
-            .next()
-            .and_then(|line| line.trim().parse::<u32>().ok());
-        if let Some(pid) = pid {
-            if self.is_our_postmaster(pid)? {
-                return Ok(false);
-            }
-        }
-        std::fs::remove_file(&path).with_context(|| format!("remove {}", path.display()))?;
-        Ok(true)
-    }
-
-    /// Stops a Postgres still running on this data directory.
-    /// Returns whether a live postmaster for this data directory was stopped.
-    /// A reused pid is not signalled.
-    pub(super) async fn stop_leftover(&self) -> anyhow::Result<bool> {
-        if !self.is_running()? {
+        if !matches!(self.classify_postmaster()?, PostmasterPid::Stale) {
             return Ok(false);
         }
-        self.stop_running().await?;
-        Ok(true)
+        let path = self.pg_data.join("postmaster.pid");
+        match std::fs::remove_file(&path) {
+            Ok(()) => Ok(true),
+            Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(false),
+            Err(err) => Err(err).with_context(|| format!("remove {}", path.display())),
+        }
+    }
+
+    /// Stops a postmaster still running on this data directory.
+    /// Returns whether that postmaster was stopped.
+    ///
+    /// The pid comes from `postmaster.pid` in this data directory. It is
+    /// stopped only when that process is alive and its command line can be
+    /// read and names this data directory. A reused pid is not signalled.
+    /// An unreadable command line is left running: the pid may belong to an
+    /// unrelated process. Processes are not matched by name.
+    pub(super) async fn stop_leftover(&self) -> anyhow::Result<bool> {
+        match self.classify_postmaster()? {
+            PostmasterPid::Ours => {
+                self.stop_running().await?;
+                Ok(true)
+            }
+            PostmasterPid::Unreadable { pid, error } => {
+                tracing::warn!(
+                    error = %error,
+                    pid,
+                    "could not read the postmaster command line; leaving it running"
+                );
+                Ok(false)
+            }
+            PostmasterPid::Stale => {
+                self.clear_stale_pid()?;
+                Ok(false)
+            }
+            PostmasterPid::Missing => Ok(false),
+        }
     }
 
     pub async fn start(
@@ -334,23 +347,35 @@ impl DesktopPostgres {
         std::fs::canonicalize(dir).unwrap_or_else(|_| dir.to_path_buf())
     }
 
-    /// A live process named `postgres` whose command line names this data dir.
-    /// When the command line cannot be read, the process is treated as ours
-    /// so a pid file is not thrown away in front of a server we cannot see.
-    fn is_our_postmaster(&self, pid: u32) -> anyhow::Result<bool> {
-        if !is_live_postgres(pid)? {
-            return Ok(false);
+    /// What `postmaster.pid` in this data directory refers to.
+    /// Identity is the command line, never the process name.
+    fn classify_postmaster(&self) -> anyhow::Result<PostmasterPid> {
+        let path = self.pg_data.join("postmaster.pid");
+        let contents = match std::fs::read_to_string(&path) {
+            Ok(contents) => contents,
+            Err(err) if err.kind() == io::ErrorKind::NotFound => {
+                return Ok(PostmasterPid::Missing);
+            }
+            Err(err) => {
+                return Err(err).with_context(|| format!("read {}", path.display()));
+            }
+        };
+        let Some(pid) = contents
+            .lines()
+            .next()
+            .and_then(|line| line.trim().parse::<u32>().ok())
+        else {
+            return Ok(PostmasterPid::Stale);
+        };
+        match pid_is_alive(pid) {
+            Ok(true) => {}
+            Ok(false) => return Ok(PostmasterPid::Stale),
+            Err(error) => return Ok(PostmasterPid::Unreadable { pid, error }),
         }
         match process_args(pid) {
-            Ok(args) => Ok(args_contain_data_dir(&args, &self.pg_data)),
-            Err(err) => {
-                tracing::warn!(
-                    error = %err,
-                    pid,
-                    "could not read the postmaster command line; treating it as this data directory"
-                );
-                Ok(true)
-            }
+            Ok(args) if args_contain_data_dir(&args, &self.pg_data) => Ok(PostmasterPid::Ours),
+            Ok(_) => Ok(PostmasterPid::Stale),
+            Err(error) => Ok(PostmasterPid::Unreadable { pid, error }),
         }
     }
 
@@ -521,7 +546,7 @@ fn failure_message(bin: &str, status: &str, stderr: &str, stdout: &str) -> Strin
 }
 
 fn process_args(pid: u32) -> anyhow::Result<String> {
-    let output = std::process::Command::new("ps")
+    let output = ps_command()
         .args(["-ww", "-p", &pid.to_string(), "-o", "args="])
         .stdin(Stdio::null())
         .output()
@@ -621,13 +646,41 @@ fn set_private_dir(path: &Path) -> io::Result<()> {
     std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700))
 }
 
-fn is_live_postgres(pid: u32) -> anyhow::Result<bool> {
-    let output = std::process::Command::new("ps")
-        .args(["-p", &pid.to_string(), "-o", "comm="])
+enum PostmasterPid {
+    Missing,
+    /// No live process, or a live one whose command line does not name this data dir.
+    Stale,
+    /// Alive, but `ps` could not show the command line. Do not signal it.
+    Unreadable {
+        pid: u32,
+        error: anyhow::Error,
+    },
+    /// Alive and the command line names this data dir.
+    Ours,
+}
+
+fn pid_is_alive(pid: u32) -> anyhow::Result<bool> {
+    let output = ps_command()
+        .args(["-p", &pid.to_string()])
         .stdin(Stdio::null())
         .output()
         .context("run ps")?;
-    Ok(output.status.success() && String::from_utf8_lossy(&output.stdout).contains("postgres"))
+    Ok(output.status.success())
+}
+
+fn ps_command() -> std::process::Command {
+    #[cfg(test)]
+    {
+        if let Some(path) = PS_BIN.with(|cell| cell.borrow().clone()) {
+            return std::process::Command::new(path);
+        }
+    }
+    std::process::Command::new("ps")
+}
+
+#[cfg(test)]
+std::thread_local! {
+    static PS_BIN: std::cell::RefCell<Option<PathBuf>> = const { std::cell::RefCell::new(None) };
 }
 
 fn is_valid_db_name(name: &str) -> bool {
@@ -653,6 +706,41 @@ mod tests {
     use super::*;
     use std::os::unix::fs::PermissionsExt;
     use std::os::unix::process::CommandExt;
+    use tracing_subscriber::layer::SubscriberExt;
+
+    struct WarnCapture(std::sync::Arc<std::sync::Mutex<Vec<String>>>);
+    struct WarnVisit(String);
+
+    impl tracing::field::Visit for WarnVisit {
+        fn record_str(&mut self, field: &tracing::field::Field, value: &str) {
+            if field.name() == "message" {
+                self.0 = value.to_string();
+            }
+        }
+
+        fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
+            if field.name() == "message" && self.0.is_empty() {
+                self.0 = format!("{value:?}");
+            }
+        }
+    }
+
+    impl<S: tracing::Subscriber> tracing_subscriber::Layer<S> for WarnCapture {
+        fn on_event(
+            &self,
+            event: &tracing::Event<'_>,
+            _ctx: tracing_subscriber::layer::Context<'_, S>,
+        ) {
+            if *event.metadata().level() > tracing::Level::WARN {
+                return;
+            }
+            let mut visit = WarnVisit(String::new());
+            event.record(&mut visit);
+            if !visit.0.is_empty() {
+                self.0.lock().expect("warnings").push(visit.0);
+            }
+        }
+    }
 
     fn postgres_in(dir: &tempfile::TempDir) -> DesktopPostgres {
         let layout = DataLayout::new(&dir.path().join("Application Support").join("Coppice"));
@@ -771,9 +859,10 @@ mod tests {
         assert!(!pid_file.exists());
     }
 
-    /// A live process named `postgres` recorded in `postmaster.pid`, plus a fake
+    /// A live process whose command line names this data directory, plus a fake
     /// `pg_ctl` that logs its arguments, fails `fast` stops when `fail_fast`,
-    /// and otherwise removes the pid file like a real stop.
+    /// and otherwise removes the pid file like a real stop. The process is not
+    /// named `postgres`.
     struct FakeRunningPostgres {
         pg: DesktopPostgres,
         log: PathBuf,
@@ -784,20 +873,19 @@ mod tests {
         fn new(dir: &tempfile::TempDir, fail_fast: bool) -> Self {
             let pg = postgres_in(dir);
             std::fs::create_dir_all(&pg.pg_bin).unwrap();
-            // A script (not a renamed binary) so `ps -o comm=` reports `postgres`;
-            // no `exec`, which would rename the process to `sleep`.
-            let fake_postgres = dir.path().join("postgres");
-            std::fs::write(&fake_postgres, "#!/bin/sh\nwhile :; do sleep 1; done\n").unwrap();
-            std::fs::set_permissions(&fake_postgres, std::fs::Permissions::from_mode(0o755))
-                .unwrap();
-            let process = std::process::Command::new(&fake_postgres)
+            // Not named `postgres`: identity is the `-D <data dir>` argument.
+            // No `exec`, which would drop that argument from the command line.
+            let sleeper = dir.path().join("sleeper");
+            std::fs::write(&sleeper, "#!/bin/sh\nwhile :; do sleep 1; done\n").unwrap();
+            std::fs::set_permissions(&sleeper, std::fs::Permissions::from_mode(0o755)).unwrap();
+            let process = std::process::Command::new(&sleeper)
                 .arg("-D")
                 .arg(&pg.pg_data)
                 .process_group(0)
                 .spawn()
                 .unwrap();
             for _ in 0..50 {
-                if is_live_postgres(process.id()).unwrap() {
+                if pid_is_alive(process.id()).unwrap() {
                     break;
                 }
                 std::thread::sleep(std::time::Duration::from_millis(20));
@@ -824,8 +912,8 @@ mod tests {
                 "fake postgres exited"
             );
             assert!(
-                is_live_postgres(self.process.id()).unwrap(),
-                "fake postgres not seen as postgres"
+                pid_is_alive(self.process.id()).unwrap(),
+                "sleeper is not running"
             );
         }
 
@@ -887,7 +975,7 @@ mod tests {
             .spawn()
             .unwrap();
         for _ in 0..50 {
-            if is_live_postgres(process.id()).unwrap() {
+            if pid_is_alive(process.id()).unwrap() {
                 break;
             }
             std::thread::sleep(std::time::Duration::from_millis(20));
@@ -908,6 +996,74 @@ mod tests {
         );
         assert!(!pid_file.exists(), "stale pid file should be removed");
         assert_eq!(std::fs::read_to_string(&log).unwrap_or_default(), "");
+        let _ = std::process::Command::new("kill")
+            .args(["-KILL", "--", &format!("-{}", process.id())])
+            .status();
+        let _ = process.wait();
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn stop_leaves_an_unreadable_command_line_running() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let pg = postgres_in(&dir);
+        std::fs::create_dir_all(&pg.pg_bin).unwrap();
+        let mut process = std::process::Command::new("sleep")
+            .arg("300")
+            .process_group(0)
+            .spawn()
+            .unwrap();
+        let pid_file = pg.pg_data.join("postmaster.pid");
+        std::fs::write(&pid_file, format!("{}\n", process.id())).unwrap();
+        let log = dir.path().join("pg_ctl.log");
+        let script = format!(
+            "#!/bin/sh\necho \"$*\" >> '{}'\nkill -KILL {} 2>/dev/null || true\nexit 1\n",
+            log.display(),
+            process.id(),
+        );
+        let pg_ctl = pg.pg_bin.join("pg_ctl");
+        std::fs::write(&pg_ctl, script).unwrap();
+        std::fs::set_permissions(&pg_ctl, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let ps = dir.path().join("ps");
+        std::fs::write(
+            &ps,
+            "#!/bin/sh\nfor arg in \"$@\"; do\n  if [ \"$arg\" = \"args=\" ]; then\n    echo denied >&2\n    exit 1\n  fi\ndone\nexit 0\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&ps, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        PS_BIN.with(|cell| *cell.borrow_mut() = Some(ps));
+        struct ClearPs;
+        impl Drop for ClearPs {
+            fn drop(&mut self) {
+                PS_BIN.with(|cell| *cell.borrow_mut() = None);
+            }
+        }
+        let _clear_ps = ClearPs;
+
+        let warnings = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+        let subscriber = tracing_subscriber::registry().with(WarnCapture(warnings.clone()));
+        let _tracing = tracing::subscriber::set_default(subscriber);
+
+        pg.stop()
+            .await
+            .expect("unreadable command line is left running");
+
+        assert!(
+            process.try_wait().unwrap().is_none(),
+            "unreadable pid was signalled"
+        );
+        assert!(
+            pid_file.exists(),
+            "pid file should stay when the command line cannot be read"
+        );
+        assert_eq!(std::fs::read_to_string(&log).unwrap_or_default(), "");
+        let recorded = warnings.lock().expect("warnings").clone();
+        assert!(
+            recorded.iter().any(|line| {
+                line == "could not read the postmaster command line; leaving it running"
+            }),
+            "{recorded:?}"
+        );
         let _ = std::process::Command::new("kill")
             .args(["-KILL", "--", &format!("-{}", process.id())])
             .status();
@@ -949,7 +1105,11 @@ mod tests {
                         .next()
                         .and_then(|line| line.trim().parse::<u32>().ok())
                     {
-                        if is_live_postgres(pid).unwrap_or(false) {
+                        if pid_is_alive(pid).unwrap_or(false)
+                            && process_args(pid)
+                                .ok()
+                                .is_some_and(|args| args_contain_data_dir(&args, &pg.pg_data))
+                        {
                             return pid;
                         }
                     }
@@ -968,7 +1128,7 @@ mod tests {
         assert_eq!(status, StartStatus::Cancelled);
         assert!(!pid_file.exists(), "postmaster.pid still present");
         assert!(
-            !is_live_postgres(sleeper).unwrap(),
+            !pid_is_alive(sleeper).unwrap(),
             "postgres kept running after shutdown during start"
         );
         let calls = std::fs::read_to_string(&log).unwrap_or_default();
