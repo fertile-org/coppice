@@ -107,9 +107,9 @@ Next and previous column follow the order above, through Blocked. The move uses 
 | Approve plan | `R then P` | The ticket is in Plan Review and **Approve plan** is enabled |
 | Accept… | `Mod+Shift+Enter` | The ticket is in Wait for Human Review and is not archived |
 | Merge… | `R then M` | **Merge…** is already shown |
-| Review code | `D` | **Review code** is enabled |
+| Open code review | `D` | **Open code review** is enabled |
 
-**Approve plan**, **Merge…**, and **Accept…** are the Review actions. **Approve plan** runs the same action as the button. **Accept…** is `Mod+Shift+Enter` and opens a dialog; **Cancel** is focused, and **Accept** in the dialog completes it. **Merge…** opens the existing **Merge ticket branch** dialog. **Review code** opens the same destination as the button. `R` is the prefix for **Approve plan** (`R then P`) and **Merge…** (`R then M`). `P` is not a prefix. `R` is not the `M` or `G` leader.
+**Approve plan**, **Merge…**, and **Accept…** are the Review actions. **Approve plan** runs the same action as the button. **Accept…** is `Mod+Shift+Enter` and opens a dialog; **Cancel** is focused, and **Accept** in the dialog completes it. **Merge…** opens the existing **Merge ticket branch** dialog. **Open code review** opens the same destination as the button. `R` is the prefix for **Approve plan** (`R then P`) and **Merge…** (`R then M`). `P` is not a prefix. `R` is not the `M` or `G` leader.
 
 Archive, Run Agent, Stop, and Ask for changes stay on screen in the tab order. They have no default shortcut, so they are not help-overlay rows. Archive is in the palette under **Tickets**. Choosing it opens **Archive this ticket?** with the body **This archives the ticket. You can unarchive it later.** **Cancel** is focused. **Archive** confirms.
 
@@ -197,6 +197,7 @@ New copy. Existing button labels (**Approve plan**, **Accept**, **Merge…**, **
 - Navigate
 - Tickets
 - Review
+- Open code review
 - Change shortcuts in Settings.
 - Go to Boards
 - Go to Agents
@@ -239,5 +240,5 @@ Ship the rest as four pull requests, in order:
 
 1. **Registry and board focus.** The action registry, scopes, roving tabindex, `H`/`J`/`K`/`L` and arrows, Enter to open, Esc back to the card, drawer `[` / `]`, the skip link, the focus ring, and the move announcement.
 2. **Command palette.** `Mod+K`, fuzzy search, recent rows, context-aware ticket actions, key hints on rows.
-3. **Default shortcuts and help.** The remaining default keys, the `?` overlay, and a user docs page at `website/src/pages/docs/shortcuts.md`. Includes the keyboard-only walkthrough: create, assign, open, comment, review code, Accept…, back to the board.
+3. **Default shortcuts and help.** The remaining default keys, the `?` overlay, and a user docs page at `website/src/pages/docs/shortcuts.md`. Includes the keyboard-only walkthrough: create, assign, open, comment, Open code review, Accept…, back to the board.
 4. **Custom bindings.** The Settings section, conflict warnings, reset, the `[keybindings]` table, and Electron menu accelerators from the registry.
