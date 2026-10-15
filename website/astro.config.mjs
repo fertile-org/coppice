@@ -22,6 +22,13 @@ function siteBase() {
  * Markdown links in the drafts are root-relative (`/docs/...`).
  * Prefix them when the site is hosted below a base path (GitHub project Pages).
  */
+function prefixAbsolute(root, value) {
+  if (typeof value === 'string' && value.startsWith('/') && !value.startsWith('//')) {
+    return `${root}${value}`;
+  }
+  return value;
+}
+
 function prefixRootLinks() {
   const prefix = siteBase();
   const root = prefix === '/' ? '' : prefix;
@@ -31,11 +38,16 @@ function prefixRootLinks() {
       if (!node || typeof node !== 'object') return;
       if (node.type === 'element' && node.properties) {
         for (const attr of ['href', 'src']) {
-          const value = node.properties[attr];
-          if (typeof value === 'string' && value.startsWith('/') && !value.startsWith('//')) {
-            node.properties[attr] = `${root}${value}`;
-          }
+          node.properties[attr] = prefixAbsolute(root, node.properties[attr]);
         }
+      }
+      // Markdown HTML blocks stay raw, so figure <img src="/assets/..."> would
+      // otherwise miss the GitHub Pages base.
+      if (node.type === 'raw' && typeof node.value === 'string') {
+        node.value = node.value.replace(
+          /(\s(?:href|src)\s*=\s*)(["'])(\/(?!\/)[^"']*)\2/gi,
+          (_match, attr, quote, url) => `${attr}${quote}${root}${url}${quote}`,
+        );
       }
       if (Array.isArray(node.children)) node.children.forEach(walk);
     };

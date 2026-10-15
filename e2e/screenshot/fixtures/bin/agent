@@ -1,0 +1,20 @@
+#!/bin/sh
+# Stable Cursor CLI output for the docs screenshot harness.
+# Same `id - name` list shape as a signed-in `agent models` session.
+case "${1:-}" in
+  models|--list-models)
+    cat <<'EOF'
+Available models
+
+auto - Auto (current, default)
+gpt-5.3-codex-low - Codex 5.3 Low
+composer-2.5 - Composer 2.5
+claude-opus-5-thinking-high - Claude Opus 5 1M Thinking
+grok-4.7-low - Grok 4.7 Low
+cursor-grok-4.6-low-fast - Grok 4.6 Low Fast
+EOF
+    ;;
+  *)
+    printf '%s\n' 'agent 1.0.0'
+    ;;
+esac
