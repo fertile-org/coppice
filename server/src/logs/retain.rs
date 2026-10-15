@@ -69,7 +69,8 @@ pub const LOG_DIR_MAX_BYTES: u64 = 268_435_456;
 
 /// Shown in the log when today's file, alone or with a fresh `server.log`,
 /// is still over [`LOG_DIR_MAX_BYTES`] after older days are gone.
-pub const OVER_CAP_WARNING: &str = "Logs are over 256 MiB. Coppice left today's log in place.";
+pub const OVER_CAP_WARNING: &str =
+    "Logs are over 256 MiB even after cleanup. Coppice keeps today's log.";
 
 /// Compress past days, delete by age and by the 256 MiB cap, and remove old
 /// `server.log` files. `now` and `legacy_logs` let tests pin the clock and the
@@ -558,6 +559,10 @@ mod tests {
     #[test]
     fn the_size_cap_is_256_mib_and_not_a_setting() {
         assert_eq!(LOG_DIR_MAX_BYTES, 268_435_456);
+        assert_eq!(
+            OVER_CAP_WARNING,
+            "Logs are over 256 MiB even after cleanup. Coppice keeps today's log."
+        );
     }
 
     #[test]
