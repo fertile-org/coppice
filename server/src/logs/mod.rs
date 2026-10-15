@@ -1,11 +1,10 @@
-//! Daily JSONL for agent CLI lines, and the write-time secret mask.
+//! Daily JSONL for server, HTTP, and agent CLI lines, and the write-time secret mask.
 
 mod mask;
 
 use std::io::{self, IsTerminal, Write};
 use std::path::Path;
 
-use tracing_subscriber::filter::FilterExt;
 use tracing_subscriber::fmt::time::UtcTime;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
@@ -13,7 +12,7 @@ use tracing_subscriber::Layer;
 
 pub use mask::SecretGuard;
 
-/// Tracing target for agent CLI lines. The file layer records this target only.
+/// Tracing target for agent CLI lines.
 const CLI_LOG_TARGET: &str = "coppice_server::cli";
 
 /// One info event for a CLI stdout or stderr line.
@@ -136,13 +135,13 @@ impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for MaskingAppender {
     type Writer = mask::MaskingWriter<FlushingWriter<tracing_appender::rolling::RollingWriter<'a>>>;
 
     fn make_writer(&'a self) -> Self::Writer {
-        mask::MaskingWriter::new(FlushingWriter {
+        mask::MaskingWriter::file(FlushingWriter {
             inner: self.inner.make_writer(),
         })
     }
 }
 
-fn cli_json_layer<S>(
+fn json_file_layer<S>(
     logs_dir: &Path,
     respect_env: bool,
 ) -> io::Result<Box<dyn Layer<S> + Send + Sync>>
@@ -152,28 +151,24 @@ where
     let appender = MaskingAppender {
         inner: rolling(logs_dir)?,
     };
-    let cli = tracing_subscriber::filter::filter_fn(|meta| meta.target() == CLI_LOG_TARGET);
+    let layer = tracing_subscriber::fmt::layer()
+        .json()
+        .with_ansi(false)
+        .with_timer(UtcTime::rfc_3339())
+        .with_writer(appender);
+    // The JSON formatter only emits fields the event recorded. CLI and HTTP
+    // events set `source` themselves. A line with no `source` is a server event.
     if respect_env {
-        let layer = tracing_subscriber::fmt::layer()
-            .json()
-            .with_ansi(false)
-            .with_timer(UtcTime::rfc_3339())
-            .with_writer(appender)
-            .with_filter(env_filter().and(cli));
-        Ok(Box::new(layer))
+        Ok(Box::new(layer.with_filter(env_filter())))
     } else {
-        let layer = tracing_subscriber::fmt::layer()
-            .json()
-            .with_ansi(false)
-            .with_timer(UtcTime::rfc_3339())
-            .with_writer(appender)
-            .with_filter(cli);
-        Ok(Box::new(layer))
+        Ok(Box::new(layer.with_filter(
+            tracing_subscriber::filter::LevelFilter::INFO,
+        )))
     }
 }
 
-/// Human stdout subscriber plus the CLI JSONL file. The env filter is `RUST_LOG`,
-/// or `info` plus `rmcp=warn`.
+/// Human stdout subscriber plus the JSONL file. The env filter is `RUST_LOG`,
+/// or `info` plus `rmcp=warn`. The file records every event that passes it.
 pub fn init(logs_dir: &Path) -> io::Result<()> {
     let terminal = io::stdout().is_terminal();
     let stdout = tracing_subscriber::fmt::layer()
@@ -190,15 +185,16 @@ pub fn init(logs_dir: &Path) -> io::Result<()> {
         .with_filter(env_filter());
     tracing_subscriber::registry()
         .with(stdout)
-        .with(cli_json_layer(logs_dir, true)?)
+        .with(json_file_layer(logs_dir, true)?)
         .init();
     Ok(())
 }
 
-/// Run `f` with a CLI JSONL subscriber pointed at `logs_dir`.
-/// The test subscriber records info CLI lines even when `RUST_LOG` is narrower.
+/// Run `f` with the JSONL subscriber pointed at `logs_dir`.
+/// The test subscriber records info and above for every target, even when
+/// `RUST_LOG` is narrower.
 pub fn with_cli_logs<R>(logs_dir: &Path, f: impl FnOnce() -> R) -> io::Result<R> {
-    let layer = cli_json_layer(logs_dir, false)?;
+    let layer = json_file_layer(logs_dir, false)?;
     Ok(tracing::subscriber::with_default(
         tracing_subscriber::registry().with(layer),
         f,
@@ -344,6 +340,53 @@ mod tests {
         let text = String::from_utf8_lossy(&stored);
         assert!(text.contains("\u{2039}COPPICE_MCP_TOKEN\u{203A}"), "{text}");
         assert!(text.contains(short), "{text}");
+    }
+
+    #[test]
+    fn server_event_secret_is_stored_only_as_its_name() {
+        let token = "coppice-mask-7kQ9mP2x";
+        let dir = tempfile::tempdir().expect("tempdir");
+        let _guard = SecretGuard::register([("COPPICE_MCP_TOKEN", token)]);
+        with_cli_logs(dir.path(), || {
+            tracing::warn!("connector returned {token}");
+        })
+        .expect("subscriber");
+
+        let stored = directory_bytes(dir.path());
+        assert!(
+            !stored
+                .windows(token.len())
+                .any(|window| window == token.as_bytes()),
+            "token bytes reached the logs directory"
+        );
+        let text = String::from_utf8_lossy(&stored);
+        assert!(text.contains("\u{2039}COPPICE_MCP_TOKEN\u{203A}"), "{text}");
+        let jsonl = std::fs::read_dir(dir.path())
+            .expect("read_dir")
+            .map(|entry| entry.expect("entry").path())
+            .find(|path| {
+                let name = path
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .unwrap_or("");
+                name.starts_with("coppice.") && name.ends_with(".jsonl")
+            })
+            .expect("daily file");
+        let file = std::fs::read_to_string(&jsonl).expect("jsonl");
+        let value: serde_json::Value = serde_json::from_str(
+            file.lines()
+                .find(|line| line.contains("connector returned"))
+                .expect("server line"),
+        )
+        .expect("json");
+        assert_eq!(value["fields"]["source"], "server");
+        assert!(
+            value["fields"]["message"]
+                .as_str()
+                .unwrap_or("")
+                .contains("\u{2039}COPPICE_MCP_TOKEN\u{203A}"),
+            "{value}"
+        );
     }
 }
 
