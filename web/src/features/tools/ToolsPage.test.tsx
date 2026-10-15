@@ -3,6 +3,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { fireEvent, render, screen } from '@testing-library/react';
 import { MemoryRouter, useLocation } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { MIN_PASSWORD_CHARS } from '../../lib/passwords';
 import { ToolsPage } from './ToolsPage';
 
 const sessionState = vi.hoisted(() => ({ desktopMode: false }));
@@ -90,20 +91,28 @@ describe('ToolsPage', () => {
     expect(await screen.findByText(/No connectors/)).toBeVisible();
   });
 
-  it('shows secret rotation on the desktop app', () => {
+  it('asks for a new admin password before replacing keys', () => {
     sessionState.desktopMode = true;
     renderPage();
 
-    expect(screen.getByRole('heading', { name: 'Rotate secrets' })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Rotate secrets' }));
-    expect(
-      screen.getByText('Confirm that you want to rotate secrets before continuing.'),
-    ).toBeInTheDocument();
+    expect(MIN_PASSWORD_CHARS).toBe(1);
+    expect(screen.getByRole('heading', { name: 'Replace keys' })).toBeInTheDocument();
+    expect(screen.getByLabelText('New admin password')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Replace keys' }));
+    expect(screen.getByText('Check the box to continue.')).toBeInTheDocument();
+
+    fireEvent.click(
+      screen.getByRole('checkbox', {
+        name: "I understand everyone will be signed out, and I'll sign in with the new password.",
+      }),
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Replace keys' }));
+    expect(screen.getByText('Enter a new admin password.')).toBeInTheDocument();
   });
 
-  it('hides secret rotation outside the desktop app', () => {
+  it('hides replace keys outside the desktop app', () => {
     renderPage();
-    expect(screen.queryByRole('heading', { name: 'Rotate secrets' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Replace keys' })).not.toBeInTheDocument();
   });
 
   it('opens the connectors tab from the url', () => {

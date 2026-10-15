@@ -29,7 +29,7 @@ pub mod workers;
 use axum::Router;
 use sqlx::PgPool;
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 use storage::AttachmentStore;
 
 pub use config::AppConfig;
@@ -37,6 +37,9 @@ pub use config::AppConfig;
 #[derive(Clone)]
 pub struct AppState {
     pub config: AppConfig,
+    /// Connection string for new backup commands and the next Postgres password change.
+    /// Updated when Replace keys changes the database password. Clones share it.
+    pub database_url: Arc<RwLock<String>>,
     pub db: Option<PgPool>,
     pub attachments: AttachmentStore,
     /// Connector enablement and the provider registry. Rebuilt when a connector
@@ -55,6 +58,23 @@ pub struct AppState {
 }
 
 impl AppState {
+    pub fn share_database_url(url: &str) -> Arc<RwLock<String>> {
+        Arc::new(RwLock::new(url.to_string()))
+    }
+
+    pub fn database_url(&self) -> String {
+        self.database_url
+            .read()
+            .unwrap_or_else(|err| err.into_inner())
+            .clone()
+    }
+
+    pub fn set_database_url(&self, url: String) {
+        *self.database_url
+            .write()
+            .unwrap_or_else(|err| err.into_inner()) = url;
+    }
+
     pub fn attachment_store_from_config(config: &AppConfig) -> AttachmentStore {
         AttachmentStore::new(
             &config.storage.artifacts_dir,
@@ -219,7 +239,8 @@ pub async fn test_state() -> Arc<AppState> {
         connector_probes: Arc::new(
             crate::services::connector_probe_service::ConnectorProbes::new(),
         ),
-        config,
+        config: config.clone(),
+        database_url: AppState::share_database_url(&config.database.url),
         db: None,
     })
 }

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { MIN_PASSWORD_CHARS } from '../passwords';
 
 export const createAgentSchema = z.object({
   name: z.string().min(1, 'Name is required'),
@@ -29,7 +30,7 @@ export type UpdateAgentInput = z.infer<typeof updateAgentSchema>;
 
 export const createUserSchema = z.object({
   email: z.string().email('Valid email is required'),
-  password: z.string().min(1, 'Password is required'),
+  password: z.string().min(MIN_PASSWORD_CHARS, 'Password is required'),
 });
 
 export type CreateUserInput = z.infer<typeof createUserSchema>;

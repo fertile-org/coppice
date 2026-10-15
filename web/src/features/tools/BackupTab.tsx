@@ -1,5 +1,6 @@
 import { useRef, useState, type FormEvent } from 'react';
 import { ApiError, apiFetch, parseApiErrorMessage } from '../../lib/api';
+import { MIN_PASSWORD_CHARS } from '../../lib/passwords';
 import { Button } from '../../components/ui/button';
 import { useSession, type User } from '../auth/useSession';
 
@@ -8,9 +9,10 @@ export function BackupTab() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [exporting, setExporting] = useState(false);
   const [importing, setImporting] = useState(false);
-  const [rotating, setRotating] = useState(false);
+  const [replacing, setReplacing] = useState(false);
   const [confirmImport, setConfirmImport] = useState(false);
-  const [confirmRotate, setConfirmRotate] = useState(false);
+  const [confirmReplace, setConfirmReplace] = useState(false);
+  const [adminPassword, setAdminPassword] = useState('');
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -31,7 +33,7 @@ export function BackupTab() {
       anchor.click();
       URL.revokeObjectURL(url);
       setMessage(
-        'Export downloaded. Store the archive securely — it contains all workspace data. Passwords and encryption keys are left out.',
+        'Backup downloaded. It holds all your workspace data, so keep it private.',
       );
     } catch (err) {
       setError(parseApiErrorMessage(err, 'Export failed.'));
@@ -64,7 +66,7 @@ export function BackupTab() {
         body: form,
       });
       const data = (await res.json()) as { message?: string };
-      setMessage(data.message ?? 'Import completed.');
+      setMessage(data.message ?? 'Import finished.');
       if (fileInputRef.current) {
         fileInputRef.current.value = '';
       }
@@ -72,7 +74,7 @@ export function BackupTab() {
     } catch (err) {
       if (err instanceof ApiError && err.status === 503) {
         setError(
-          'Import needs pg_dump and psql on the machine running Coppice. The desktop app includes them.',
+          "The desktop app has everything it needs to import. A server install needs PostgreSQL's `pg_dump` and `psql`.",
         );
       } else {
         setError(parseApiErrorMessage(err, 'Import failed.'));
@@ -82,44 +84,53 @@ export function BackupTab() {
     }
   }
 
-  async function handleRotate() {
-    if (!confirmRotate) {
-      setError('Confirm that you want to rotate secrets before continuing.');
+  async function handleReplace() {
+    if (!confirmReplace) {
+      setError('Check the box to continue.');
       setMessage(null);
       return;
     }
-    setRotating(true);
+    if (adminPassword.trim() === '') {
+      setError('Enter a new admin password.');
+      setMessage(null);
+      return;
+    }
+    if ([...adminPassword].length < MIN_PASSWORD_CHARS) {
+      setError(`Use at least ${MIN_PASSWORD_CHARS} characters.`);
+      setMessage(null);
+      return;
+    }
+    setReplacing(true);
     setError(null);
     setMessage(null);
     try {
-      await apiFetch('/api/tools/secrets/rotate', { method: 'POST' });
+      await apiFetch('/api/tools/keys/replace', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ adminPassword }),
+      });
+      setAdminPassword('');
+      setConfirmReplace(false);
       try {
         const renew = await apiFetch('/api/auth/desktop-session', { method: 'POST' });
         const session = (await renew.json()) as { user: User; csrfToken: string };
         establishSession(session.user, session.csrfToken);
-        setMessage(
-          'Secrets rotated. Saved tokens were re-encrypted, and this sign-in was renewed.',
-        );
+        setMessage('Keys replaced. Saved tokens still work.');
       } catch {
-        setMessage(
-          'Secrets rotated. Reload the page to sign in again. Saved tokens were re-encrypted.',
-        );
+        setMessage('Keys replaced. Reload the page to sign in again.');
       }
-      setConfirmRotate(false);
     } catch (err) {
-      setError(parseApiErrorMessage(err, 'Could not rotate secrets.'));
+      setError(parseApiErrorMessage(err, "Couldn't replace keys. Nothing was changed."));
     } finally {
-      setRotating(false);
+      setReplacing(false);
     }
   }
 
   return (
     <div className="space-y-8">
       <p className="max-w-2xl font-body text-sm text-text-secondary">
-        Export or import a full Coppice archive: PostgreSQL dump, settings other
-        than passwords and encryption keys, uploaded artifacts, and agent
-        worktrees. Intended for migration and desktop backups — not for sharing
-        publicly.
+        Download a backup of your boards, tickets, settings, files, and agent
+        worktrees. Passwords and keys are left out. Keep the file private.
       </p>
 
       {message && (
@@ -143,10 +154,6 @@ export function BackupTab() {
         <h2 className="font-display text-lg font-semibold text-text-primary">
           Export backup
         </h2>
-        <p className="mt-2 font-body text-sm text-text-secondary">
-          Downloads a zip file. Requires{' '}
-          <code className="font-mono text-xs">pg_dump</code> on the server machine.
-        </p>
         <Button
           type="button"
           className="mt-4"
@@ -162,9 +169,13 @@ export function BackupTab() {
           Import backup
         </h2>
         <p className="mt-2 font-body text-sm text-text-secondary">
-          Replaces the current database and on-disk data directories with the
-          archive. Settings from the backup are restored, except secrets and data
-          paths on this install. Active sessions may be invalidated.
+          Importing replaces all data on this install with the backup's. Its
+          settings are restored too, except passwords, keys, and folder paths.
+          You may be signed out.
+        </p>
+        <p className="mt-2 font-body text-sm text-text-secondary">
+          The desktop app has everything it needs to import. A server install
+          needs PostgreSQL's `pg_dump` and `psql`.
         </p>
         <form className="mt-4 space-y-4" onSubmit={(e) => void handleImport(e)}>
           <div>
@@ -203,28 +214,47 @@ export function BackupTab() {
       {desktopMode && (
         <section className="rounded-xl border border-border bg-surface-raised p-6 shadow-card">
           <h2 className="font-display text-lg font-semibold text-text-primary">
-            Rotate secrets
+            Replace keys
           </h2>
           <p className="mt-2 font-body text-sm text-text-secondary">
-            Generates a new session secret and encryption key. You will be signed
-            out, and saved tokens are re-encrypted.
+            If you shared a backup, make new keys and a new admin password. Saved
+            tokens keep working, and everyone is signed out.
           </p>
           <div className="mt-4 space-y-4">
+            <div>
+              <label
+                htmlFor="new-admin-password"
+                className="mb-1 block font-body text-sm font-medium text-bark-800"
+              >
+                New admin password
+              </label>
+              <input
+                id="new-admin-password"
+                type="password"
+                autoComplete="new-password"
+                value={adminPassword}
+                onChange={(e) => setAdminPassword(e.target.value)}
+                className="field-control w-full max-w-md px-3 py-2 font-body text-sm"
+              />
+            </div>
             <label className="flex items-start gap-2 font-body text-sm text-text-secondary">
               <input
                 type="checkbox"
-                checked={confirmRotate}
-                onChange={(e) => setConfirmRotate(e.target.checked)}
+                checked={confirmReplace}
+                onChange={(e) => setConfirmReplace(e.target.checked)}
                 className="mt-1"
               />
-              <span>I understand this signs me out and re-encrypts saved tokens.</span>
+              <span>
+                I understand everyone will be signed out, and I'll sign in with the
+                new password.
+              </span>
             </label>
             <Button
               type="button"
-              disabled={rotating}
-              onClick={() => void handleRotate()}
+              disabled={replacing}
+              onClick={() => void handleReplace()}
             >
-              {rotating ? 'Rotating…' : 'Rotate secrets'}
+              {replacing ? 'Replacing keys…' : 'Replace keys'}
             </Button>
           </div>
         </section>

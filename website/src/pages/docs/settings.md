@@ -25,6 +25,20 @@ Some changes apply right away. Others show "Saved. Restart Coppice to apply."
 
 You can also edit the file in any text editor. Your edits survive upgrades.
 
+## Replace keys
+
+If you shared a backup, make new keys and a new admin password. Saved tokens keep working, and everyone is signed out.
+
+In the desktop app, open **Tools → Backup → Replace keys**, enter the new admin password, and confirm.
+
+On a server install, stop Coppice and leave PostgreSQL running, then run:
+
+```bash
+coppice-server replace-keys --admin-password 'a new password'
+```
+
+The command writes the new database URL, encryption key, session secret, and admin password into `config.toml`. It does not print those values. Changing `master_key` by hand makes saved tokens unreadable, so you would have to enter them again.
+
 ## Logs
 Admins can open **Logs** beside Settings to filter and live-tail server, request, agent run and database logs. Each run has a **View logs** link.
 

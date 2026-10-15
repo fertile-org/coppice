@@ -298,6 +298,19 @@ pub async fn serve(
     );
 
     let mut config = config;
+    if let Some(path) = options.config_path.as_deref() {
+        match crate::services::secret_rotation::finish_server_pg_password(
+            path,
+            &config.database.url,
+        )
+        .await
+        {
+            Ok(url) => config.database.url = url,
+            Err(err) => {
+                return Err(anyhow::anyhow!("could not finish replacing keys: {err}"));
+            }
+        }
+    }
     let db = crate::db::connect_and_migrate(&config.database.url).await?;
     if let Some(secrets_dir) = crate::services::secret_rotation::desktop_secrets_dir(
         config.auth.desktop_mode,
@@ -307,13 +320,33 @@ pub async fn serve(
             Ok(Some(master_key)) => config.secrets.master_key = master_key,
             Ok(None) => {}
             Err(err) => {
-                return Err(anyhow::anyhow!("could not finish secret rotation: {err}"));
+                return Err(anyhow::anyhow!("could not finish replacing keys: {err}"));
             }
         }
         if let Some(session_secret) =
             crate::services::secret_rotation::read_session_secret(&secrets_dir)
         {
             config.auth.session_secret = session_secret;
+        }
+    } else if let Some(path) = options.config_path.as_deref() {
+        match crate::services::secret_rotation::finish_server_keys(
+            &db,
+            path,
+            &config.secrets.master_key,
+            &config.auth.session_secret,
+        )
+        .await
+        {
+            Ok(recovered) => {
+                config.secrets.master_key = recovered.master_key;
+                config.auth.session_secret = recovered.session_secret;
+                if let Some(password) = recovered.admin_password {
+                    config.auth.bootstrap_admin_password = Some(password);
+                }
+            }
+            Err(err) => {
+                return Err(anyhow::anyhow!("could not finish replacing keys: {err}"));
+            }
         }
     }
     crate::services::auth_service::AuthService::new(&db, &config.auth)
@@ -359,6 +392,7 @@ pub async fn serve(
         connector_probes: Arc::new(
             crate::services::connector_probe_service::ConnectorProbes::new(),
         ),
+        database_url: AppState::share_database_url(&config.database.url),
         config,
         db: Some(db),
     });

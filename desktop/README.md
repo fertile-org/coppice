@@ -49,9 +49,11 @@ Packaged apps keep their data in `Coppice` (`~/.config/Coppice`, `~/Library/Appl
 Tagged releases are built by `.github/workflows/release.yml` — see
 [docs/development.md](../docs/development.md#desktop-release-tag-and-publish).
 
-## Rotate secrets
+## Replace keys
 
-In the desktop app, **Tools → Backup → Rotate secrets** writes new `session_secret` and `master_key` files, signs everyone out, and re-encrypts saved tokens. It is not available on a server install. If Coppice stops between re-encrypting and replacing those files, the next launch finishes the swap.
+In the desktop app, **Tools → Backup → Replace keys** writes new `session_secret` and `master_key` files, a new admin password, and a new Postgres password. Everyone is signed out and saved tokens are re-encrypted. A server install uses `coppice-server replace-keys --admin-password …` with Coppice stopped and PostgreSQL still running.
+
+The new Postgres password is written to a pending file, then applied with `ALTER ROLE`, then that file becomes the current password. If Coppice stops in either gap, the next launch tries the current password and then the pending one and finishes the swap. The same pending-file recovery applies to the encryption key, session secret, and admin password.
 
 ## Tests
 

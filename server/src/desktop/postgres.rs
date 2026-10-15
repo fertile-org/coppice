@@ -10,7 +10,7 @@ use tokio::process::Command;
 
 use super::layout::{DataLayout, ResourceLayout};
 
-const SUPERUSER: &str = "coppice";
+pub(crate) const SUPERUSER: &str = "coppice";
 const START_TIMEOUT_SECS: &str = "60";
 pub(super) const FAST_STOP_TIMEOUT_SECS: &str = "5";
 pub(super) const IMMEDIATE_STOP_TIMEOUT_SECS: &str = "3";

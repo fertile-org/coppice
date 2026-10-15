@@ -43,8 +43,6 @@ pub struct BackupManifest {
     pub app_version: String,
 }
 
-pub const IMPORT_TAIL: &str = "Sign in again if your session was reset; restart the server if anything looks inconsistent.";
-
 pub struct BackupService;
 
 impl BackupService {
@@ -88,18 +86,22 @@ impl BackupService {
 
         if let Some(text) = restore.replacement {
             let Some(path) = config_path else {
+                tracing::error!("backup settings could not be saved: no config path");
                 return Err(BackupError::Config(
-                    "The database and files were imported, but settings could not be saved. Current settings were kept.".into(),
+                    "Your data was imported, but the settings couldn't be saved. Your current settings were kept.".into(),
                 ));
             };
-            coppice_config::connector_file::write_toml_atomic(path, &text).map_err(|err| {
-                BackupError::Config(format!(
-                    "The database and files were imported, but settings could not be saved. Current settings were kept. {err}"
-                ))
-            })?;
+            if let Err(err) =
+                coppice_config::connector_file::write_toml_atomic(path, &text)
+            {
+                tracing::error!(error = %err, "backup settings could not be saved");
+                return Err(BackupError::Config(
+                    "Your data was imported, but the settings couldn't be saved. Your current settings were kept.".into(),
+                ));
+            }
         }
 
-        Ok(import_completed_message(&restore.note))
+        Ok(restore.note)
     }
 }
 
@@ -139,10 +141,6 @@ fn export_to_path_with(
 
     write_zip(staging, zip_path)?;
     Ok(())
-}
-
-fn import_completed_message(note: &str) -> String {
-    format!("Import completed. {note} {IMPORT_TAIL}")
 }
 
 /// `config.toml` for a backup. Secret fields are removed and credentials are
@@ -260,8 +258,7 @@ struct ConfigRestore {
 fn plan_config_restore(config_path: Option<&Path>, extract_root: &Path) -> ConfigRestore {
     let Some(config_path) = config_path else {
         return ConfigRestore {
-            note: "This install has no config file to update, so the current settings were kept."
-                .into(),
+            note: "Import finished. Your current settings were kept.".into(),
             replacement: None,
         };
     };
@@ -270,7 +267,8 @@ fn plan_config_restore(config_path: Option<&Path>, extract_root: &Path) -> Confi
         Ok(text) => text,
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
             return ConfigRestore {
-                note: "The backup has no config.toml, so the current settings were kept.".into(),
+                note: "Import finished. The backup had no settings, so your current settings were kept."
+                    .into(),
                 replacement: None,
             };
         }
@@ -291,11 +289,9 @@ fn plan_config_restore(config_path: Option<&Path>, extract_root: &Path) -> Confi
         match std::fs::read_to_string(config_path) {
             Ok(text) => text,
             Err(err) => {
+                tracing::error!(error = %err, "current settings could not be read");
                 return ConfigRestore {
-                    note: format!(
-                        "The current config file could not be read, so settings were not changed. {}",
-                        sentence(&err.to_string())
-                    ),
+                    note: "Couldn't read your current settings, so nothing was changed.".into(),
                     replacement: None,
                 };
             }
@@ -305,8 +301,7 @@ fn plan_config_restore(config_path: Option<&Path>, extract_root: &Path) -> Confi
     };
     if !local.trim().is_empty() && local.parse::<toml_edit::DocumentMut>().is_err() {
         return ConfigRestore {
-            note: "The current config file could not be read, so settings were not changed."
-                .into(),
+            note: "Couldn't read your current settings, so nothing was changed.".into(),
             replacement: None,
         };
     }
@@ -315,7 +310,7 @@ fn plan_config_restore(config_path: Option<&Path>, extract_root: &Path) -> Confi
         Err(err) => {
             return ConfigRestore {
                 note: format!(
-                    "The backup's settings could not be applied, so the current settings were kept. {}",
+                    "Couldn't apply the backup's settings, so your current settings were kept. {}",
                     sentence(&err)
                 ),
                 replacement: None,
@@ -325,21 +320,21 @@ fn plan_config_restore(config_path: Option<&Path>, extract_root: &Path) -> Confi
     if let Err(err) = coppice_config::settings_file::validate_config_text(&merged) {
         return ConfigRestore {
             note: format!(
-                "The backup's settings could not be applied, so the current settings were kept. {}",
+                "Couldn't apply the backup's settings, so your current settings were kept. {}",
                 sentence(&err.message)
             ),
             replacement: None,
         };
     }
     ConfigRestore {
-        note: "Settings from the backup were applied. Secrets and data paths on this install were kept.".into(),
+        note: "Import finished. The backup's settings were applied, and this install kept its passwords, keys, and folder paths. If something looks wrong, restart Coppice.".into(),
         replacement: Some(merged),
     }
 }
 
 fn invalid_config_note(reason: &str) -> String {
     format!(
-        "The backup's config.toml is invalid, so the current settings were kept. {}",
+        "Import finished, but the backup's settings couldn't be read, so your current settings were kept. {}",
         sentence(reason)
     )
 }
@@ -832,7 +827,7 @@ top_k = 4
         let planned = plan_config_restore(Some(&config_path), &extract);
         let merged = planned.replacement.expect("settings applied");
         assert!(
-            planned.note.contains("Secrets and data paths on this install were kept"),
+            planned.note.contains("passwords, keys, and folder paths"),
             "{}",
             planned.note
         );
@@ -876,7 +871,7 @@ top_k = 4
         let invalid = plan_config_restore(Some(&config_path), &extract);
         assert!(invalid.replacement.is_none());
         assert!(
-            invalid.note.contains("config.toml is invalid")
+            invalid.note.contains("backup's settings couldn't be read")
                 && invalid.note.contains("current settings were kept"),
             "{}",
             invalid.note
@@ -885,7 +880,7 @@ top_k = 4
 
         std::fs::remove_file(extract.join(CONFIG_NAME)).unwrap();
         let missing = plan_config_restore(Some(&config_path), &extract);
-        assert!(missing.note.contains("no config.toml"), "{}", missing.note);
+        assert!(missing.note.contains("had no settings"), "{}", missing.note);
         assert_eq!(std::fs::read_to_string(&config_path).unwrap(), local);
     }
 }
