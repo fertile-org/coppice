@@ -25,6 +25,9 @@ Some changes apply right away. Others show "Saved. Restart Coppice to apply."
 
 You can also edit the file in any text editor. Your edits survive upgrades.
 
+## Logs
+Admins can open **Logs** beside Settings to filter and live-tail server, request, agent run and database logs. Each run has a **View logs** link.
+
 ## Connectors
 Signed-in CLIs are on by default. You only need a line to turn one off:
 

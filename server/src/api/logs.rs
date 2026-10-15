@@ -13,8 +13,9 @@ use serde::Deserialize;
 use serde_json::json;
 use std::sync::Arc;
 
-const INVALID_QUERY: &str = "The log query is not valid.";
-const UNAVAILABLE: &str = "Logs are unavailable.";
+const INVALID_QUERY: &str = "Couldn't read that search. Check it and try again.";
+const UNAVAILABLE: &str = "Logs aren't available on this server.";
+const LOAD_FAILED: &str = "Couldn't load logs. Try again.";
 
 pub fn routes() -> Router<Arc<AppState>> {
     Router::new()
@@ -87,11 +88,16 @@ fn query_error(error: QueryError) -> Response {
             Json(json!({ "message": INVALID_QUERY })),
         )
             .into_response(),
+        QueryError::StoreMissing => (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(json!({ "message": UNAVAILABLE })),
+        )
+            .into_response(),
         QueryError::Io(error) => {
             tracing::error!(error = %error, "reading logs failed");
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({ "message": UNAVAILABLE })),
+                Json(json!({ "message": LOAD_FAILED })),
             )
                 .into_response()
         }

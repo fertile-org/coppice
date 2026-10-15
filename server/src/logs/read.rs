@@ -16,6 +16,8 @@ pub enum QueryError {
     Io(io::Error),
     BadCursor,
     BadFilter,
+    /// The configured log directory is empty, missing, or not a directory.
+    StoreMissing,
 }
 
 impl From<io::Error> for QueryError {
@@ -124,11 +126,8 @@ pub fn filter_from_params(params: &FilterParams) -> Result<LogFilter, QueryError
 }
 
 pub fn query(dir: &Path, query: &LogQuery) -> Result<LogPage, QueryError> {
-    if !dir.exists() {
-        return Ok(LogPage {
-            lines: Vec::new(),
-            next_cursor: None,
-        });
+    if log_store_missing(dir) {
+        return Err(QueryError::StoreMissing);
     }
     let mut dated = Vec::new();
     let mut undated = Vec::new();
@@ -213,8 +212,17 @@ fn merge(mut dated: Vec<Located>, mut undated: Vec<Located>) -> Vec<Located> {
     dated
 }
 
+/// Empty path, a path that is not there, or a path that is not a directory.
+fn log_store_missing(dir: &Path) -> bool {
+    dir.as_os_str().is_empty() || !dir.is_dir()
+}
+
 fn read_jsonl_days(dir: &Path, filter: &LogFilter) -> Result<Vec<Located>, QueryError> {
-    let mut days = day_files(dir)?;
+    let mut days = match fs::read_dir(dir) {
+        Ok(entries) => day_files_from(entries)?,
+        Err(error) if store_disappeared(&error) => return Err(QueryError::StoreMissing),
+        Err(error) => return Err(error.into()),
+    };
     days.sort_by_key(|left| std::cmp::Reverse(left.date));
     let mut located = Vec::new();
     for day in days {
@@ -251,9 +259,16 @@ struct DayFile {
     compressed: bool,
 }
 
-fn day_files(dir: &Path) -> Result<Vec<DayFile>, QueryError> {
+fn store_disappeared(error: &io::Error) -> bool {
+    matches!(
+        error.kind(),
+        io::ErrorKind::NotFound | io::ErrorKind::NotADirectory
+    )
+}
+
+fn day_files_from(entries: fs::ReadDir) -> Result<Vec<DayFile>, QueryError> {
     let mut by_date: Vec<DayFile> = Vec::new();
-    for entry in fs::read_dir(dir)? {
+    for entry in entries {
         let entry = entry?;
         let meta = fs::symlink_metadata(entry.path())?;
         if meta.file_type().is_symlink() || !meta.is_file() {
@@ -818,5 +833,20 @@ mod tests {
         bounded.filter.to = Some(OffsetDateTime::parse("2026-10-14T03:00:00Z", &Rfc3339).unwrap());
         let page = query(dir.path(), &bounded).expect("bounded");
         assert_eq!(page.lines.len(), 1);
+    }
+
+    #[test]
+    fn a_missing_log_directory_is_unavailable_and_an_empty_one_is_not() {
+        let parent = tempfile::tempdir().expect("parent");
+        let missing = query(&parent.path().join("gone"), &params(None, None, None, None));
+        assert!(matches!(missing, Err(QueryError::StoreMissing)));
+
+        let file = tempfile::NamedTempFile::new().expect("file");
+        let as_file = query(file.path(), &params(None, None, None, None));
+        assert!(matches!(as_file, Err(QueryError::StoreMissing)));
+
+        let empty = tempfile::tempdir().expect("dir");
+        let page = query(empty.path(), &params(None, None, None, None)).expect("empty");
+        assert!(page.lines.is_empty());
     }
 }

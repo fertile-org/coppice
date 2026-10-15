@@ -4,7 +4,7 @@ import { Navigate, useSearchParams } from 'react-router-dom';
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
 import { Label } from '../../components/ui/label';
-import { apiFetch } from '../../lib/api';
+import { apiFetch, parseApiErrorMessage } from '../../lib/api';
 import { useSession } from '../auth/useSession';
 import { LEVEL_OPTIONS, LOGS_COPY, SOURCE_OPTIONS, sourceLabel } from './copy';
 import { filtersFromParams, fromUtcRfc3339, logsPath, toUtcRfc3339, type LogFilters } from './query';
@@ -243,7 +243,9 @@ export function LogsPage() {
       </div>
 
       {logsQuery.isError && (
-        <p className="font-body text-sm text-danger">{LOGS_COPY.loadError}</p>
+        <p className="font-body text-sm text-danger">
+          {parseApiErrorMessage(logsQuery.error, LOGS_COPY.loadError)}
+        </p>
       )}
       {logsQuery.isLoading && (
         <p className="font-body text-sm text-text-muted">{LOGS_COPY.loading}</p>

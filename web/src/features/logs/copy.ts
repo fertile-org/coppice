@@ -12,7 +12,7 @@ export const LOGS_COPY = {
   levelTrace: 'Trace',
   levelDebug: 'Debug',
   levelInfo: 'Info',
-  levelWarn: 'Warn',
+  levelWarn: 'Warning',
   levelError: 'Error',
   time: 'Time',
   from: 'From',
@@ -23,7 +23,7 @@ export const LOGS_COPY = {
   empty: 'No logs match these filters.',
   viewLogs: 'View logs',
   loadOlder: 'Load older',
-  loadError: 'Unable to load logs.',
+  loadError: "Couldn't load logs. Try again.",
   loading: 'Loading…',
 } as const;
 

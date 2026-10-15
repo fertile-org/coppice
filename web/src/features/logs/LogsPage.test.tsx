@@ -3,6 +3,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { ApiError } from '../../lib/api';
 import { LogsPage } from './LogsPage';
 
 const session = vi.hoisted(() => ({ role: 'admin' }));
@@ -138,6 +139,45 @@ describe('LogsPage', () => {
       });
     });
     expect(await screen.findByText('arrived later')).toBeInTheDocument();
+  });
+
+  it('labels the warn level Warning', async () => {
+    renderPage();
+    await screen.findByText('No logs match these filters.');
+    expect(screen.getByRole('option', { name: 'Warning' })).toHaveValue('warn');
+  });
+
+  it('shows the server sentence when the log store is missing', async () => {
+    mocks.apiFetch.mockImplementation(() => {
+      throw new ApiError(
+        503,
+        JSON.stringify({ message: "Logs aren't available on this server." }),
+      );
+    });
+    renderPage();
+    expect(await screen.findByText("Logs aren't available on this server.")).toBeInTheDocument();
+    expect(screen.queryByText("Couldn't load logs. Try again.")).not.toBeInTheDocument();
+  });
+
+  it('shows the search sentence for a bad query', async () => {
+    mocks.apiFetch.mockImplementation(() => {
+      throw new ApiError(
+        400,
+        JSON.stringify({ message: "Couldn't read that search. Check it and try again." }),
+      );
+    });
+    renderPage();
+    expect(
+      await screen.findByText("Couldn't read that search. Check it and try again."),
+    ).toBeInTheDocument();
+  });
+
+  it('shows the retry sentence when the request fails without a server sentence', async () => {
+    mocks.apiFetch.mockImplementation(() => {
+      throw new Error('network');
+    });
+    renderPage();
+    expect(await screen.findByText("Couldn't load logs. Try again.")).toBeInTheDocument();
   });
 
   it('sends a member back to the boards', async () => {
