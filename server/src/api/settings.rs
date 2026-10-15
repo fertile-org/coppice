@@ -30,6 +30,7 @@ pub fn routes() -> Router<Arc<AppState>> {
             "/api/settings/config",
             get(get_config_file).put(put_config_file),
         )
+        .route("/api/keybindings", get(get_keybindings))
         .route("/api/settings/config/backup", get(get_config_backup))
         .route("/api/import-notice", get(import_notice))
 }
@@ -228,6 +229,13 @@ fn config_response(
         revision,
         backup_available,
     }
+}
+
+async fn get_keybindings(
+    State(state): State<Arc<AppState>>,
+    AuthUser { .. }: AuthUser,
+) -> Json<coppice_config::keybindings::KeybindingsApi> {
+    Json(state.connectors.config().keybindings.api())
 }
 
 async fn get_config_file(

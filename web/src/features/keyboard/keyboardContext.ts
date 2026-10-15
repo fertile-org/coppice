@@ -1,4 +1,5 @@
 import { createContext } from 'react';
+import type { ShortcutAction } from './types';
 
 export type ShortcutRegistration = {
   run: () => void | boolean;
@@ -16,6 +17,8 @@ export type KeyboardEnvironment = {
 };
 
 export type KeyboardContextValue = {
+  /** Registry actions with `[keybindings]` overrides applied. */
+  actions: readonly ShortcutAction[];
   register: (id: string, registration: ShortcutRegistration) => () => void;
   registerLayer: (layer: LayerHandlers) => () => void;
   setEnvironment: (environment: KeyboardEnvironment) => void;

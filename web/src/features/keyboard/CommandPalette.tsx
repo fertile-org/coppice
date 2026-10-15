@@ -14,9 +14,10 @@ import {
 } from '../../components/ui/command';
 import { Dialog, DialogContent, DialogTitle } from '../../components/ui/dialog';
 import { KeyboardContext } from './keyboardContext';
+import { eventMatchesBinding } from './match';
 import { useRegisterShortcut } from './useKeyboard';
-import { modPressed, detectPlatform, type Platform } from './platform';
-import { omittedActionIds } from './registry';
+import { detectPlatform } from './platform';
+import { omittedActionIds, SHORTCUT_ACTIONS } from './registry';
 import {
   boardIdFromPath,
   layoutPalette,
@@ -31,22 +32,6 @@ import {
   type PaletteEntry,
   type PaletteTicket,
 } from './palette';
-
-function isPaletteChord(
-  event: {
-    key: string;
-    metaKey: boolean;
-    ctrlKey: boolean;
-    altKey: boolean;
-    shiftKey: boolean;
-    repeat?: boolean;
-  },
-  platform: Platform,
-): boolean {
-  if (event.repeat || event.altKey || event.shiftKey) return false;
-  if (event.key.toLowerCase() !== 'k') return false;
-  return modPressed(event, platform);
-}
 
 function PaletteSources({
   boardId,
@@ -103,6 +88,8 @@ export function CommandPalette() {
   const navigate = useNavigate();
   const queryClient = useContext(QueryClientContext);
   const platform = useMemo(() => detectPlatform(), []);
+  const actionsForKeys = keyboard?.actions ?? SHORTCUT_ACTIONS;
+  const paletteAction = actionsForKeys.find((action) => action.id === 'palette.open');
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [selected, setSelected] = useState('');
@@ -126,7 +113,10 @@ export function CommandPalette() {
   useEffect(() => {
     if (!open) return;
     function onKeyDown(event: KeyboardEvent) {
-      if (!isPaletteChord(event, platform)) return;
+      const matches = paletteAction?.bindings.some((binding) =>
+        eventMatchesBinding(binding, event, platform),
+      );
+      if (!matches || event.repeat) return;
       event.preventDefault();
       event.stopPropagation();
       setOpen(false);
@@ -134,7 +124,7 @@ export function CommandPalette() {
     }
     document.addEventListener('keydown', onKeyDown, true);
     return () => document.removeEventListener('keydown', onKeyDown, true);
-  }, [open, platform]);
+  }, [open, paletteAction, platform]);
 
   const shortcutState = keyboard?.readShortcutState() ?? {
     enabledIds: [] as string[],
@@ -151,6 +141,7 @@ export function CommandPalette() {
     }),
     enabled: new Set(shortcutState.enabledIds),
     platform,
+    actions: actionsForKeys,
   });
   const layout = layoutPalette({
     actions,

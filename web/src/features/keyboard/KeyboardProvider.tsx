@@ -1,4 +1,4 @@
-import { useContext, useEffect, useMemo, useRef, type ReactNode } from 'react';
+import { useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useLocation } from 'react-router-dom';
 import { SessionContext } from '../auth/useSession';
 import {
@@ -14,6 +14,13 @@ import {
   reduceShortcut,
   type SequenceSession,
 } from './match';
+import {
+  currentKeybindings,
+  effectiveShortcutActions,
+  publishKeybindings,
+  readKeybindings,
+  subscribeKeybindings,
+} from './keybindings';
 import { detectPlatform } from './platform';
 import { omittedActionIds } from './registry';
 import { CommandPalette } from './CommandPalette';
@@ -39,6 +46,9 @@ export function KeyboardProvider({ children }: { children: ReactNode }) {
   const location = useLocation();
   const session = useContext(SessionContext);
   const platform = useMemo(() => detectPlatform(), []);
+  const [overrides, setOverrides] = useState(currentKeybindings);
+  const actions = useMemo(() => effectiveShortcutActions(overrides), [overrides]);
+  const actionsRef = useRef(actions);
   const locationRef = useRef(location);
   const accessRef = useRef({
     isAdmin: session?.user?.role === 'admin',
@@ -46,12 +56,31 @@ export function KeyboardProvider({ children }: { children: ReactNode }) {
   });
 
   useEffect(() => {
+    actionsRef.current = actions;
     locationRef.current = location;
     accessRef.current = {
       isAdmin: session?.user?.role === 'admin',
       desktopMode: session?.desktopMode ?? false,
     };
-  }, [location, session]);
+  }, [actions, location, session]);
+
+  useEffect(() => subscribeKeybindings(setOverrides), []);
+
+  useEffect(() => {
+    // Tests publish overrides directly. A relative fetch here has no server.
+    if (!session?.user || import.meta.env.VITEST) return;
+    let cancelled = false;
+    readKeybindings()
+      .then((next) => {
+        if (!cancelled) publishKeybindings(next);
+      })
+      .catch(() => {
+        /* Keep the shortcuts already in effect. */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [session?.user]);
   const handlersRef = useRef(new Map<string, ShortcutRegistration[]>());
   const layersRef = useRef<LayerHandlers>({});
   const envRef = useRef<KeyboardEnvironment>({
@@ -62,6 +91,7 @@ export function KeyboardProvider({ children }: { children: ReactNode }) {
 
   const api = useMemo<KeyboardContextValue>(
     () => ({
+      actions,
       register(id, registration) {
         const list = handlersRef.current.get(id) ?? [];
         handlersRef.current.set(id, [...list, registration]);
@@ -112,7 +142,7 @@ export function KeyboardProvider({ children }: { children: ReactNode }) {
         return registration.run() !== false;
       },
     }),
-    [],
+    [actions],
   );
 
   useEffect(() => {
@@ -155,6 +185,7 @@ export function KeyboardProvider({ children }: { children: ReactNode }) {
           scopes,
           enabled,
           omitted: omittedActionIds(accessRef.current),
+          actions: actionsRef.current,
         },
         Date.now(),
       );

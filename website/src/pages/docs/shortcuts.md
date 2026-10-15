@@ -6,7 +6,7 @@ description: "Move around Coppice from the keyboard: the board, tickets, and rev
 
 # Keyboard shortcuts
 
-Press `?` anywhere to see every shortcut. Shortcuts are grouped as **Navigate**, **Tickets**, and **Review**.
+Press `?` anywhere to see every shortcut. Shortcuts are grouped as **Navigate**, **Tickets**, and **Review**. Change shortcuts in Settings.
 
 `Mod` is `⌘` on macOS and `Ctrl` on Linux and on WSL. Sequences are shown as `G then B`.
 
@@ -89,3 +89,15 @@ Shortcuts don't fire while you're typing in a field, and the terminal keeps its 
 5. Press `D`.
 6. When the ticket is in Wait for Human Review, press `Mod+Shift+Enter`. **Cancel** is focused. Choose **Accept** to finish.
 7. Press `Esc`. Focus returns to the card on the board.
+
+## Custom shortcuts
+
+Change a shortcut in `config.toml`, under `[keybindings]`. The command id replaces that command's keys. An empty value removes the shortcut. Quote the command id.
+
+```toml
+[keybindings]
+"palette.open" = "Mod+P"
+"ticket.create" = ""
+```
+
+`Mod` is `⌘` on macOS and `Ctrl` on Linux and on WSL. A sequence is `G then B`. Open **Settings**, edit the file, and choose **Save**. The new keys show in the shortcut help and the command palette without a restart.

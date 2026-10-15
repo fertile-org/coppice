@@ -93,6 +93,13 @@ pub fn read_backup_text(path: &Path) -> io::Result<Option<String>> {
 
 /// Same parser and checks as startup: defaults, then this TOML, then knowledge rules.
 pub fn validate_config_text(text: &str) -> Result<AppConfig, ConfigTextError> {
+    if let Err(fault) = crate::keybindings::check_document(text) {
+        return Err(ConfigTextError {
+            line: fault.line,
+            column: fault.column,
+            message: fault.message,
+        });
+    }
     let figment = AppConfig::defaults_figment().merge(Toml::string(text));
     match AppConfig::load_figment(figment) {
         Ok(config) => Ok(config),
@@ -115,6 +122,9 @@ pub fn changes_need_restart(before: &AppConfig, after: &AppConfig) -> bool {
     let mut after = after.clone();
     before.agent.connectors = crate::AgentConnectorsConfig::default();
     after.agent.connectors = crate::AgentConnectorsConfig::default();
+    // Shortcut overrides apply in the open app, the same way connector flags do.
+    before.keybindings = crate::keybindings::Keybindings::default();
+    after.keybindings = crate::keybindings::Keybindings::default();
     before != after
 }
 
@@ -382,6 +392,50 @@ mod tests {
             Some(true)
         );
         assert_eq!(std::fs::read_to_string(&path).unwrap(), next);
+    }
+
+    #[test]
+    fn keybinding_edit_does_not_need_a_restart_and_keeps_the_section() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        let original = "# keep\n[server]\nport = 5000\n";
+        write(&path, original);
+        let next = "\
+# keep
+[server]
+port = 5000
+
+[keybindings]
+\"palette.open\" = \"Mod+P\"
+\"ticket.create\" = \"\"
+";
+
+        let outcome = save_config_verbatim(&path, next, &content_revision(original.as_bytes()))
+            .expect("save");
+
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), next);
+        assert!(
+            !outcome.restart_required,
+            "shortcut overrides apply without a restart"
+        );
+        assert_eq!(
+            outcome
+                .parsed
+                .keybindings
+                .overrides
+                .get("palette.open")
+                .map(|value| match value {
+                    crate::keybindings::KeybindingValue::One(text) => text.as_str(),
+                    crate::keybindings::KeybindingValue::Many(_) => "",
+                }),
+            Some("Mod+P")
+        );
+        let shown = read_config_document(&path).expect("read");
+        assert!(
+            shown.text.contains("[keybindings]"),
+            "the settings document keeps the section:\n{}",
+            shown.text
+        );
     }
 
     #[test]

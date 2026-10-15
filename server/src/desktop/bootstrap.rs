@@ -145,7 +145,13 @@ fn generated_config(layout: &DataLayout) -> io::Result<String> {
          # Skills that ship with Coppice.\n\
          [mcp]\n\
          # Coppice rewrites coppice/skills here on every start. Edits there are lost.\n\
-         builtin_plugins_dir = {builtin_plugins}\n",
+         builtin_plugins_dir = {builtin_plugins}\n\
+         \n\
+         # Keyboard shortcuts. Keys here override the defaults.\n\
+         # Mod is Cmd on macOS and Ctrl on Linux and WSL.\n\
+         # An empty value removes the shortcut. Quote the command id.\n\
+         # [keybindings]\n\
+         # \"palette.open\" = \"Mod+K\"\n",
         worktrees = path(&layout.worktrees),
         artifacts = path(&layout.artifacts),
         plugins = path(&layout.plugins),
@@ -247,6 +253,11 @@ mod tests {
             !contents.contains("default_connector"),
             "starter file omits default_connector"
         );
+        assert!(
+            contents.contains("# [keybindings]"),
+            "starter file shows the shortcuts section:\n{contents}"
+        );
+        assert!(contents.contains("\"palette.open\" = \"Mod+K\""));
         assert_eq!(
             toml::Value::String("/tmp/coppice".into()).to_string(),
             "\"/tmp/coppice\"",

@@ -2,21 +2,26 @@ import { useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { Dialog, DialogContent, DialogTitle } from '../../components/ui/dialog';
 import { SessionContext } from '../auth/useSession';
 import { HELP_COPY, helpSections } from './help';
+import { KeyboardContext } from './keyboardContext';
+import { eventMatchesBinding } from './match';
 import { detectPlatform } from './platform';
-import { omittedActionIds } from './registry';
+import { omittedActionIds, SHORTCUT_ACTIONS } from './registry';
 import { useRegisterShortcut } from './useKeyboard';
 
 export function ShortcutHelp() {
   const session = useContext(SessionContext);
+  const keyboard = useContext(KeyboardContext);
   const platform = useMemo(() => detectPlatform(), []);
   const [open, setOpen] = useState(false);
   const restoreFocus = useRef<HTMLElement | null>(null);
+  const actions = keyboard?.actions ?? SHORTCUT_ACTIONS;
   const sections = helpSections({
     omitted: omittedActionIds({
       isAdmin: session?.user?.role === 'admin',
       desktopMode: session?.desktopMode ?? false,
     }),
     platform,
+    actions,
   });
 
   useRegisterShortcut('help.show', () => {
@@ -30,17 +35,19 @@ export function ShortcutHelp() {
 
   useEffect(() => {
     if (!open) return;
+    const help = actions.find((action) => action.id === 'help.show');
     function onKeyDown(event: KeyboardEvent) {
-      if (event.key !== '?' || event.metaKey || event.ctrlKey || event.altKey || event.repeat) {
-        return;
-      }
+      const matches = help?.bindings.some((binding) =>
+        eventMatchesBinding(binding, event, platform),
+      );
+      if (!matches || event.repeat) return;
       event.preventDefault();
       event.stopPropagation();
       setOpen(false);
     }
     document.addEventListener('keydown', onKeyDown, true);
     return () => document.removeEventListener('keydown', onKeyDown, true);
-  }, [open]);
+  }, [actions, open, platform]);
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -79,6 +86,9 @@ export function ShortcutHelp() {
             </section>
           ))}
         </div>
+        <p className="border-t border-border px-6 py-3 font-body text-sm text-text-muted">
+          {HELP_COPY.footer}
+        </p>
       </DialogContent>
     </Dialog>
   );

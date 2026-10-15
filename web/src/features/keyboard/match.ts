@@ -2,6 +2,7 @@ import { modPressed, type Platform } from './platform';
 import { SHORTCUT_ACTIONS } from './registry';
 import {
   normalizeEventKey,
+  type Binding,
   type KeyEventLike,
   type ShortcutAction,
   type ShortcutScope,
@@ -21,6 +22,8 @@ export type MatchContext = {
   scopes: readonly ShortcutScope[];
   enabled: ReadonlySet<string>;
   omitted: ReadonlySet<string>;
+  /** Effective actions, after `[keybindings]` overrides. Defaults to the registry. */
+  actions?: readonly ShortcutAction[];
 };
 
 export type ShortcutEffect =
@@ -54,9 +57,19 @@ function inScope(action: ShortcutAction, scopes: readonly ShortcutScope[]): bool
 }
 
 function candidates(ctx: MatchContext): ShortcutAction[] {
-  return SHORTCUT_ACTIONS.filter(
+  const actions = ctx.actions ?? SHORTCUT_ACTIONS;
+  return actions.filter(
     (action) => !ctx.omitted.has(action.id) && inScope(action, ctx.scopes),
   );
+}
+
+export function eventMatchesBinding(
+  binding: Binding,
+  event: KeyEventLike,
+  platform: Platform,
+): boolean {
+  if (binding.kind !== 'chord') return false;
+  return chordMatches(event, binding.chord, platform);
 }
 
 function chordMatches(
