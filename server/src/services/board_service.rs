@@ -25,7 +25,7 @@ impl<'a> BoardService<'a> {
     pub async fn list_boards(&self) -> Result<Vec<Board>, BoardError> {
         let rows = sqlx::query(
             r#"
-            SELECT id, name, slug, created_at, review_cap, review_cap_counts_in_review, diff_budget
+            SELECT id, name, slug, created_at, review_cap, review_cap_counts_in_review
             FROM boards
             ORDER BY created_at ASC
             "#,
@@ -43,7 +43,7 @@ impl<'a> BoardService<'a> {
             r#"
             INSERT INTO boards (id, name, slug)
             VALUES ($1, $2, $3)
-            RETURNING id, name, slug, created_at, review_cap, review_cap_counts_in_review, diff_budget
+            RETURNING id, name, slug, created_at, review_cap, review_cap_counts_in_review
             "#,
         )
         .bind(id)
@@ -58,7 +58,7 @@ impl<'a> BoardService<'a> {
     pub async fn get_board(&self, board_id: Uuid) -> Result<Board, BoardError> {
         let row = sqlx::query(
             r#"
-            SELECT id, name, slug, created_at, review_cap, review_cap_counts_in_review, diff_budget
+            SELECT id, name, slug, created_at, review_cap, review_cap_counts_in_review
             FROM boards
             WHERE id = $1
             "#,
@@ -85,7 +85,7 @@ impl<'a> BoardService<'a> {
             UPDATE boards
             SET name = $2, slug = $3
             WHERE id = $1
-            RETURNING id, name, slug, created_at, review_cap, review_cap_counts_in_review, diff_budget
+            RETURNING id, name, slug, created_at, review_cap, review_cap_counts_in_review
             "#,
         )
         .bind(board_id)
@@ -107,7 +107,6 @@ fn row_to_board(row: &sqlx::postgres::PgRow) -> Board {
         created_at: row.get("created_at"),
         review_cap: row.get("review_cap"),
         count_in_review: row.get("review_cap_counts_in_review"),
-        diff_budget: row.get("diff_budget"),
     }
 }
 

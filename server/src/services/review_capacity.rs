@@ -1,15 +1,13 @@
-//! Review-capacity cap and the diff budget agreed when a plan is approved.
+//! Review-capacity cap.
 //!
 //! The Ready check counts tickets in the review columns. It does not read the
 //! plan, the ticket description, or any comment, and it does not send a prompt.
-
-use std::path::Path;
 
 use sqlx::PgPool;
 use sqlx::Row;
 use uuid::Uuid;
 
-use crate::copy::review::{diff_over_budget, ready_held, review_entry_held, waiting_on_review};
+use crate::copy::review::{ready_held, review_entry_held, waiting_on_review};
 use crate::domain::comment::{AuthorType, CommentIntent};
 use crate::domain::substatus::TicketStatus;
 use crate::domain::ticket::status_to_str;
@@ -26,13 +24,6 @@ FROM tickets
 WHERE board_id = $1
   AND archived_at IS NULL
   AND status = ANY($2)
-"#;
-
-/// The number stored when the plan was approved. Not the plan text.
-pub const AGREED_BUDGET_SQL: &str = r#"
-SELECT agreed_diff_budget, diff_budget_agreed
-FROM tickets
-WHERE id = $1
 "#;
 
 const WORK_ON_TICKET: &str = "work_on_ticket";
@@ -77,7 +68,6 @@ impl From<ReviewCapacityError> for RunError {
 pub struct ReviewPolicy {
     pub cap: Option<i32>,
     pub count_in_review: bool,
-    pub diff_budget: Option<i32>,
 }
 
 /// Returned when a Ready `work_on_ticket` run must not start.
@@ -99,7 +89,7 @@ impl<'a> ReviewCapacityService<'a> {
     pub async fn policy(&self, board_id: Uuid) -> Result<ReviewPolicy, ReviewCapacityError> {
         let row = sqlx::query(
             r#"
-            SELECT review_cap, review_cap_counts_in_review, diff_budget
+            SELECT review_cap, review_cap_counts_in_review
             FROM boards
             WHERE id = $1
             "#,
@@ -111,7 +101,6 @@ impl<'a> ReviewCapacityService<'a> {
         Ok(ReviewPolicy {
             cap: row.get("review_cap"),
             count_in_review: row.get("review_cap_counts_in_review"),
-            diff_budget: row.get("diff_budget"),
         })
     }
 
@@ -124,15 +113,13 @@ impl<'a> ReviewCapacityService<'a> {
             r#"
             UPDATE boards
             SET review_cap = $2,
-                review_cap_counts_in_review = $3,
-                diff_budget = $4
+                review_cap_counts_in_review = $3
             WHERE id = $1
             "#,
         )
         .bind(board_id)
         .bind(policy.cap)
         .bind(policy.count_in_review)
-        .bind(policy.diff_budget)
         .execute(self.pool)
         .await?;
         if updated.rows_affected() == 0 {
@@ -168,48 +155,6 @@ impl<'a> ReviewCapacityService<'a> {
         } else {
             Ok(Some(waiting_on_review(count)))
         }
-    }
-
-    /// Copy the board's diff budget onto the ticket. This is the number agreed
-    /// at plan approval. The plan text is not an input.
-    pub async fn agree_diff_budget(&self, ticket_id: Uuid) -> Result<(), ReviewCapacityError> {
-        sqlx::query(
-            r#"
-            UPDATE tickets AS ticket
-            SET agreed_diff_budget = board.diff_budget,
-                diff_budget_agreed = true
-            FROM boards AS board
-            WHERE ticket.id = $1
-              AND ticket.board_id = board.id
-            "#,
-        )
-        .bind(ticket_id)
-        .execute(self.pool)
-        .await?;
-        Ok(())
-    }
-
-    /// Freeze the board budget the first time a ticket is allowed to start
-    /// without a fresh plan approval (Skip planning).
-    pub async fn agree_diff_budget_if_unset(
-        &self,
-        ticket_id: Uuid,
-    ) -> Result<(), ReviewCapacityError> {
-        sqlx::query(
-            r#"
-            UPDATE tickets AS ticket
-            SET agreed_diff_budget = board.diff_budget,
-                diff_budget_agreed = true
-            FROM boards AS board
-            WHERE ticket.id = $1
-              AND ticket.board_id = board.id
-              AND ticket.diff_budget_agreed = false
-            "#,
-        )
-        .bind(ticket_id)
-        .execute(self.pool)
-        .await?;
-        Ok(())
     }
 
     /// `None` when the Ready ticket may start. Does not read the plan.
@@ -312,30 +257,13 @@ impl<'a> ReviewCapacityService<'a> {
         }
     }
 
-    /// Stop a finished work run that outgrew the budget agreed at plan time.
-    /// Adjusts `action` and records an entry hold when review is full.
+    /// Hold a finished run that would enter Wait for Human Review while the cap is full.
     pub async fn constrain_finished_run(
         &self,
         ticket_id: Uuid,
         current: TicketStatus,
-        job_type: &str,
-        run_id: Uuid,
-        worktree: Option<&str>,
         action: &mut TransitionAction,
     ) -> Result<(), ReviewCapacityError> {
-        if job_type == WORK_ON_TICKET {
-            if let Some(message) = self
-                .diff_budget_message(ticket_id, run_id, worktree)
-                .await?
-            {
-                action.new_status = None;
-                action.new_assignee_id = None;
-                action.enqueue_jobs.clear();
-                action.system_comments.push(message);
-                return Ok(());
-            }
-        }
-
         if action.new_status == Some(TicketStatus::WaitForFinalReview) {
             if let Some(message) = self.entry_denial(ticket_id, current).await? {
                 action.new_status = None;
@@ -349,34 +277,6 @@ impl<'a> ReviewCapacityService<'a> {
             }
         }
         Ok(())
-    }
-
-    /// Comment when the run's diff exceeds the agreed budget. `None` when
-    /// there is no budget or the diff fits. Does not read the plan text.
-    pub async fn diff_budget_message(
-        &self,
-        ticket_id: Uuid,
-        run_id: Uuid,
-        worktree: Option<&str>,
-    ) -> Result<Option<String>, ReviewCapacityError> {
-        let row = sqlx::query(AGREED_BUDGET_SQL)
-            .bind(ticket_id)
-            .fetch_optional(self.pool)
-            .await?
-            .ok_or_else(|| ReviewCapacityError::Message("ticket not found".into()))?;
-        let agreed: bool = row.get("diff_budget_agreed");
-        let budget: Option<i32> = row.get("agreed_diff_budget");
-        let Some(budget) = budget.filter(|_| agreed).filter(|budget| *budget >= 0) else {
-            return Ok(None);
-        };
-        let start_sha = self.run_start_sha(run_id).await?;
-        let actual = changed_lines(worktree.map(Path::new), start_sha.as_deref()).await;
-        let budget = u64::try_from(budget).unwrap_or(0);
-        if actual > budget {
-            Ok(Some(diff_over_budget(actual, budget)))
-        } else {
-            Ok(None)
-        }
     }
 
     /// A merge-conflict reopen may enter Wait for Human Review while the cap is full.
@@ -564,16 +464,6 @@ impl<'a> ReviewCapacityService<'a> {
             .map_err(ReviewCapacityError::from)
     }
 
-    async fn run_start_sha(&self, run_id: Uuid) -> Result<Option<String>, ReviewCapacityError> {
-        let sha = sqlx::query_scalar::<_, Option<String>>(
-            "SELECT start_sha FROM agent_runs WHERE id = $1",
-        )
-        .bind(run_id)
-        .fetch_optional(self.pool)
-        .await?;
-        Ok(sha.flatten())
-    }
-
     async fn mark_ready_hold(&self, ticket_id: Uuid) -> Result<(), ReviewCapacityError> {
         sqlx::query("UPDATE tickets SET review_hold = true WHERE id = $1")
             .bind(ticket_id)
@@ -671,59 +561,10 @@ fn frees_review_slot(from: TicketStatus, to: TicketStatus) -> bool {
     watched && !still_watched
 }
 
-pub fn parse_numstat(text: &str) -> u64 {
-    let mut total = 0u64;
-    for line in text.lines() {
-        let mut parts = line.split('\t');
-        let added = parts.next().unwrap_or("-");
-        let removed = parts.next().unwrap_or("-");
-        if let Ok(count) = added.parse::<u64>() {
-            total = total.saturating_add(count);
-        }
-        if let Ok(count) = removed.parse::<u64>() {
-            total = total.saturating_add(count);
-        }
-    }
-    total
-}
-
-pub async fn changed_lines(worktree: Option<&Path>, start_sha: Option<&str>) -> u64 {
-    let (Some(worktree), Some(start_sha)) = (worktree, start_sha) else {
-        return 0;
-    };
-    if !worktree.exists() || !is_commit_sha(start_sha) {
-        return 0;
-    }
-    let output = match crate::services::git_cmd::output(
-        Some(worktree),
-        &["diff", "--numstat", start_sha, "--", ".", ":!.agent"],
-    )
-    .await
-    {
-        Ok(output) => output,
-        Err(err) => {
-            tracing::warn!(error = %err, "could not measure the run diff");
-            return 0;
-        }
-    };
-    if !output.status.success() {
-        tracing::warn!(
-            stderr = %String::from_utf8_lossy(&output.stderr).trim(),
-            "could not measure the run diff"
-        );
-        return 0;
-    }
-    parse_numstat(&String::from_utf8_lossy(&output.stdout))
-}
-
-fn is_commit_sha(sha: &str) -> bool {
-    let len = sha.len();
-    (7..=64).contains(&len) && sha.bytes().all(|byte| byte.is_ascii_hexdigit())
-}
-
-pub fn non_negative_limit(value: Option<i32>, invalid: &str) -> Result<Option<i32>, String> {
+/// Empty is no cap. A set cap is a whole number of 1 or more.
+pub fn review_cap_limit(value: Option<i32>, invalid: &str) -> Result<Option<i32>, String> {
     if let Some(value) = value {
-        if value < 0 {
+        if value < 1 {
             return Err(invalid.to_string());
         }
     }
@@ -747,17 +588,6 @@ mod tests {
         ] {
             assert!(!occupancy.contains(word), "occupancy query contains {word}");
         }
-        let budget = AGREED_BUDGET_SQL.to_ascii_lowercase();
-        for word in [
-            "plan",
-            "prompt",
-            "description",
-            "comment",
-            "summary",
-            "body",
-        ] {
-            assert!(!budget.contains(word), "budget query contains {word}");
-        }
     }
 
     #[test]
@@ -766,7 +596,6 @@ mod tests {
         assert!(ready_may_start(4, None));
         assert!(ready_may_start(0, Some(1)));
         assert!(!ready_may_start(1, Some(1)));
-        assert!(!ready_may_start(0, Some(0)));
 
         assert!(!entry_allowed(1, Some(1), false, false));
         assert!(entry_allowed(1, Some(1), true, false));
@@ -776,57 +605,20 @@ mod tests {
     }
 
     #[test]
+    fn review_cap_rejects_zero_and_keeps_empty() {
+        let invalid = "invalid";
+        assert_eq!(review_cap_limit(None, invalid), Ok(None));
+        assert_eq!(review_cap_limit(Some(1), invalid), Ok(Some(1)));
+        assert_eq!(review_cap_limit(Some(0), invalid), Err(invalid.to_string()));
+        assert_eq!(review_cap_limit(Some(-1), invalid), Err(invalid.to_string()));
+    }
+
+    #[test]
     fn in_review_counts_only_when_the_board_asks() {
         assert!(counts_toward_cap(TicketStatus::WaitForFinalReview, false));
         assert!(!counts_toward_cap(TicketStatus::InReview, false));
         assert!(counts_toward_cap(TicketStatus::InReview, true));
         assert!(!counts_toward_cap(TicketStatus::Ready, true));
         assert!(!counts_toward_cap(TicketStatus::InProgress, true));
-    }
-
-    #[test]
-    fn numstat_sums_added_and_removed_lines_and_skips_binaries() {
-        let text = "3\t1\tsrc/lib.rs\n-\t-\timage.png\n0\t4\told.rs\n";
-        assert_eq!(parse_numstat(text), 8);
-    }
-
-    #[tokio::test]
-    async fn changed_lines_counts_edits_after_the_start_commit() {
-        let dir = tempfile::tempdir().unwrap();
-        let repo = dir.path();
-        git(repo, &["init"]);
-        git(repo, &["config", "user.email", "test@localhost"]);
-        git(repo, &["config", "user.name", "test"]);
-        std::fs::write(repo.join("notes.txt"), "one\n").unwrap();
-        git(repo, &["add", "notes.txt"]);
-        git(repo, &["commit", "-m", "start"]);
-        let sha = git_stdout(repo, &["rev-parse", "HEAD"]);
-        std::fs::write(repo.join("notes.txt"), "one\ntwo\nthree\n").unwrap();
-        let lines = changed_lines(Some(repo), Some(sha.trim())).await;
-        assert_eq!(lines, 2);
-        assert_eq!(changed_lines(Some(repo), None).await, 0);
-    }
-
-    fn git(dir: &Path, args: &[&str]) {
-        let output = std::process::Command::new("git")
-            .args(args)
-            .current_dir(dir)
-            .output()
-            .unwrap();
-        assert!(
-            output.status.success(),
-            "{}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-    }
-
-    fn git_stdout(dir: &Path, args: &[&str]) -> String {
-        let output = std::process::Command::new("git")
-            .args(args)
-            .current_dir(dir)
-            .output()
-            .unwrap();
-        assert!(output.status.success());
-        String::from_utf8(output.stdout).unwrap()
     }
 }

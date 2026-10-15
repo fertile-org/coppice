@@ -170,14 +170,7 @@ impl<'a> RunOrchestrator<'a> {
             WorkflowService::resolve_transition(ctx).map_err(RunError::Validation)?
         };
         crate::services::review_capacity::ReviewCapacityService::new(self.pool)
-            .constrain_finished_run(
-                ticket_id,
-                current_status,
-                &run.job_type,
-                run.id,
-                worktree_path.as_deref(),
-                &mut action,
-            )
+            .constrain_finished_run(ticket_id, current_status, &mut action)
             .await?;
 
         let (substatus, substatus_metadata) = if consultation_run {

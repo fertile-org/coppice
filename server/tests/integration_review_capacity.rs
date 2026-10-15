@@ -2,11 +2,10 @@ mod common;
 
 use axum::http::StatusCode;
 use coppice_server::copy::review::{
-    self, ready_held, review_entry_held, waiting_on_review, DIFF_BUDGET_INVALID, REVIEW_CAP_INVALID,
+    ready_held, review_entry_held, waiting_on_review, REVIEW_CAP_HINT, REVIEW_CAP_INVALID,
+    REVIEW_CAP_LABEL,
 };
-use coppice_server::services::review_capacity::ReviewCapacityService;
 use coppice_server::services::ticket_service::TicketService;
-use sqlx::Row;
 use tower::ServiceExt;
 
 async fn message(response: axum::response::Response) -> String {
@@ -36,11 +35,10 @@ async fn comments(
     body.as_array().cloned().unwrap_or_default()
 }
 
-fn put_capacity(cap: Option<i32>, count_in_review: bool, budget: Option<i32>) -> String {
+fn put_capacity(cap: Option<i32>, count_in_review: bool) -> String {
     serde_json::json!({
         "reviewCap": cap,
         "countInReview": count_in_review,
-        "diffBudget": budget,
     })
     .to_string()
 }
@@ -60,7 +58,7 @@ async fn full_cap_keeps_ready_tickets_queued_until_review_clears() {
         .oneshot(common::json_request(
             "PUT",
             &format!("/api/boards/{board_id}/review-capacity"),
-            &put_capacity(Some(1), false, None),
+            &put_capacity(Some(1), false),
             &cookie,
             &csrf,
         ))
@@ -96,7 +94,7 @@ async fn full_cap_keeps_ready_tickets_queued_until_review_clears() {
     assert_eq!(board.status(), StatusCode::OK);
     let board_body: serde_json::Value = common::json_body(board).await;
     assert_eq!(board_body["waitingOnReview"], waiting_on_review(1));
-    assert_eq!(board_body["reviewCapLabel"], review::REVIEW_CAP_LABEL);
+    assert_eq!(board_body["reviewCapLabel"], REVIEW_CAP_LABEL);
     assert_eq!(board_body["reviewCap"], 1);
 
     let queued = common::create_unplanned_ticket(&app, &board_id, &cookie, &csrf).await;
@@ -176,7 +174,7 @@ async fn in_review_counts_when_the_board_asks() {
         .oneshot(common::json_request(
             "PUT",
             &format!("/api/boards/{board_id}/review-capacity"),
-            &put_capacity(Some(1), true, None),
+            &put_capacity(Some(1), true),
             &cookie,
             &csrf,
         ))
@@ -282,7 +280,7 @@ async fn merge_conflict_reopen_bypasses_a_full_review_cap() {
         .oneshot(common::json_request(
             "PUT",
             &format!("/api/boards/{board_id}/review-capacity"),
-            &put_capacity(Some(1), false, None),
+            &put_capacity(Some(1), false),
             &cookie,
             &csrf,
         ))
@@ -346,174 +344,116 @@ async fn merge_conflict_reopen_bypasses_a_full_review_cap() {
 }
 
 #[tokio::test]
-async fn plan_approval_stores_the_diff_budget_without_reading_the_plan() {
+async fn review_cap_defaults_to_empty_on_new_and_existing_boards() {
     let _guard = common::DB_TEST_LOCK.lock().await;
     if !common::db_available().await {
         return;
     }
     let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
     let pool = state.db.as_ref().expect("db pool");
-    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
-    let saved = app
-        .clone()
-        .oneshot(common::json_request(
-            "PUT",
-            &format!("/api/boards/{board_id}/review-capacity"),
-            &put_capacity(None, false, Some(1)),
-            &cookie,
-            &csrf,
-        ))
-        .await
-        .unwrap();
-    assert_eq!(saved.status(), StatusCode::OK);
 
-    let ticket_id = common::create_unplanned_ticket(&app, &board_id, &cookie, &csrf).await;
-    let ticket_uuid = uuid::Uuid::parse_str(&ticket_id).unwrap();
-    sqlx::query(
+    let column_default: Option<String> = sqlx::query_scalar(
         r#"
-        UPDATE tickets SET status = 'plan_review' WHERE id = $1
+        SELECT column_default
+        FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = 'boards'
+          AND column_name = 'review_cap'
         "#,
     )
-    .bind(ticket_uuid)
-    .execute(pool)
+    .fetch_one(pool)
     .await
     .unwrap();
-    sqlx::query(
-        r#"
-        INSERT INTO ticket_comments (
-            id, ticket_id, author_type, body, intent, plan_content_version
-        )
-        VALUES ($1, $2, 'system', $3, 'plan', 1)
-        "#,
-    )
-    .bind(uuid::Uuid::new_v4())
-    .bind(ticket_uuid)
-    .bind("## Plan\n\nSend a prompt. Budget in this plan text is 999 lines.")
-    .execute(pool)
-    .await
-    .unwrap();
+    assert!(
+        column_default.is_none(),
+        "the migration must not default review_cap to a number"
+    );
 
-    let approved = app
-        .clone()
-        .oneshot(common::json_request(
-            "POST",
-            &format!("/api/tickets/{ticket_id}/approve-plan"),
-            "{}",
-            &cookie,
-            &csrf,
-        ))
+    let existing_id = uuid::Uuid::new_v4();
+    sqlx::query("INSERT INTO boards (id, name, slug) VALUES ($1, $2, $3)")
+        .bind(existing_id)
+        .bind("Already here")
+        .bind(format!("already-here-{existing_id}"))
+        .execute(pool)
         .await
         .unwrap();
-    assert_eq!(approved.status(), StatusCode::OK);
-
-    let row =
-        sqlx::query("SELECT agreed_diff_budget, diff_budget_agreed FROM tickets WHERE id = $1")
-            .bind(ticket_uuid)
+    let existing_cap: Option<i32> =
+        sqlx::query_scalar("SELECT review_cap FROM boards WHERE id = $1")
+            .bind(existing_id)
             .fetch_one(pool)
             .await
             .unwrap();
-    let agreed: Option<i32> = row.get("agreed_diff_budget");
-    let frozen: bool = row.get("diff_budget_agreed");
-    assert_eq!(agreed, Some(1));
-    assert!(frozen);
+    assert!(existing_cap.is_none(), "an existing board has no cap");
 
-    let dir = tempfile::tempdir().unwrap();
-    let repo = dir.path();
-    git(repo, &["init"]);
-    git(repo, &["config", "user.email", "test@localhost"]);
-    git(repo, &["config", "user.name", "test"]);
-    std::fs::write(repo.join("notes.txt"), "one\n").unwrap();
-    git(repo, &["add", "notes.txt"]);
-    git(repo, &["commit", "-m", "start"]);
-    let sha = git_stdout(repo, &["rev-parse", "HEAD"]);
-    std::fs::write(repo.join("notes.txt"), "one\ntwo\nthree\nfour\n").unwrap();
-
-    let agent_id = uuid::Uuid::parse_str(
-        &common::create_agent_with_preset_key(&app, "backend_engineer", "Backend", &cookie, &csrf)
-            .await,
-    )
-    .unwrap();
-    let run_id = uuid::Uuid::new_v4();
-    sqlx::query(
-        r#"
-        INSERT INTO agent_runs (id, ticket_id, agent_id, job_type, status, sandbox_profile_id, start_sha)
-        VALUES ($1, $2, $3, 'work_on_ticket', 'succeeded', 'permissive', $4)
-        "#,
-    )
-    .bind(run_id)
-    .bind(ticket_uuid)
-    .bind(agent_id)
-    .bind(sha.trim())
-    .execute(pool)
-    .await
-    .unwrap();
-
-    let over = ReviewCapacityService::new(pool)
-        .diff_budget_message(ticket_uuid, run_id, Some(repo.to_str().unwrap()))
+    let created = app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            "/api/boards",
+            r#"{"name":"Fresh board"}"#,
+            &cookie,
+            &csrf,
+        ))
         .await
         .unwrap();
-    assert_eq!(
-        over.as_deref(),
-        Some(review::diff_over_budget(3, 1).as_str())
-    );
+    assert_eq!(created.status(), StatusCode::CREATED);
+    let created_body: serde_json::Value = common::json_body(created).await;
+    assert!(created_body["reviewCap"].is_null());
+    assert_eq!(created_body["reviewCapHint"], REVIEW_CAP_HINT);
+    assert_eq!(created_body["countInReview"], false);
+
+    let existing = app
+        .clone()
+        .oneshot(common::json_request(
+            "GET",
+            &format!("/api/boards/{existing_id}"),
+            "",
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(existing.status(), StatusCode::OK);
+    let existing_body: serde_json::Value = common::json_body(existing).await;
+    assert!(existing_body["reviewCap"].is_null());
 }
 
 #[tokio::test]
-async fn negative_limits_are_rejected_with_the_copy() {
+async fn zero_and_negative_caps_are_rejected_with_the_copy() {
     let _guard = common::DB_TEST_LOCK.lock().await;
     if !common::db_available().await {
         return;
     }
     let (app, cookie, csrf) = common::bootstrap_and_login().await;
     let board_id = common::create_test_board(&app, &cookie, &csrf).await;
-    let cap = app
+    for cap in [0, -1] {
+        let response = app
+            .clone()
+            .oneshot(common::json_request(
+                "PUT",
+                &format!("/api/boards/{board_id}/review-capacity"),
+                &put_capacity(Some(cap), false),
+                &cookie,
+                &csrf,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(message(response).await, REVIEW_CAP_INVALID);
+    }
+
+    let cleared = app
         .clone()
         .oneshot(common::json_request(
             "PUT",
             &format!("/api/boards/{board_id}/review-capacity"),
-            &put_capacity(Some(-1), false, None),
+            &put_capacity(None, false),
             &cookie,
             &csrf,
         ))
         .await
         .unwrap();
-    assert_eq!(cap.status(), StatusCode::BAD_REQUEST);
-    assert_eq!(message(cap).await, REVIEW_CAP_INVALID);
-
-    let budget = app
-        .clone()
-        .oneshot(common::json_request(
-            "PUT",
-            &format!("/api/boards/{board_id}/review-capacity"),
-            &put_capacity(None, false, Some(-2)),
-            &cookie,
-            &csrf,
-        ))
-        .await
-        .unwrap();
-    assert_eq!(budget.status(), StatusCode::BAD_REQUEST);
-    assert_eq!(message(budget).await, DIFF_BUDGET_INVALID);
-}
-
-fn git(dir: &std::path::Path, args: &[&str]) {
-    let output = std::process::Command::new("git")
-        .args(args)
-        .current_dir(dir)
-        .output()
-        .unwrap();
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-}
-
-fn git_stdout(dir: &std::path::Path, args: &[&str]) -> String {
-    let output = std::process::Command::new("git")
-        .args(args)
-        .current_dir(dir)
-        .output()
-        .unwrap();
-    assert!(output.status.success());
-    String::from_utf8(output.stdout).unwrap()
+    assert_eq!(cleared.status(), StatusCode::OK);
+    let body: serde_json::Value = common::json_body(cleared).await;
+    assert!(body["reviewCap"].is_null());
 }

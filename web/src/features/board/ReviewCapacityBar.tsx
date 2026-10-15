@@ -6,12 +6,11 @@ import { apiFetch, parseApiErrorMessage } from '../../lib/api';
 const reviewCapacitySchema = z.object({
   reviewCap: z.number().int().nullable(),
   countInReview: z.boolean(),
-  diffBudget: z.number().int().nullable(),
   waitingOnReview: z.string().nullable(),
   reviewCapLabel: z.string(),
+  reviewCapHint: z.string(),
   countInReviewLabel: z.string(),
-  diffBudgetLabel: z.string(),
-  diffBudgetHint: z.string(),
+  reviewCapInvalid: z.string(),
 });
 
 type ReviewCapacity = z.infer<typeof reviewCapacitySchema>;
@@ -30,7 +29,6 @@ async function saveReviewCapacity(
   body: {
     reviewCap: number | null;
     countInReview: boolean;
-    diffBudget: number | null;
   },
 ): Promise<ReviewCapacity> {
   const response = await apiFetch(`/api/boards/${boardId}/review-capacity`, {
@@ -48,8 +46,9 @@ function limitText(value: number | null): string {
 function parseLimit(text: string): number | null | undefined {
   const trimmed = text.trim();
   if (!trimmed) return null;
+  if (!/^\d+$/.test(trimmed)) return undefined;
   const value = Number(trimmed);
-  if (!Number.isInteger(value)) return undefined;
+  if (!Number.isInteger(value) || value < 1) return undefined;
   return value;
 }
 
@@ -61,7 +60,6 @@ export function ReviewCapacityBar({ boardId }: { boardId: string }) {
   });
   const [draft, setDraft] = useState<{
     cap: string;
-    budget: string;
     countInReview: boolean;
   } | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -70,22 +68,17 @@ export function ReviewCapacityBar({ boardId }: { boardId: string }) {
   if (saved && draft === null) {
     setDraft({
       cap: limitText(saved.reviewCap),
-      budget: limitText(saved.diffBudget),
       countInReview: saved.countInReview,
     });
   }
 
   const save = useMutation({
-    mutationFn: (body: {
-      reviewCap: number | null;
-      countInReview: boolean;
-      diffBudget: number | null;
-    }) => saveReviewCapacity(boardId, body),
+    mutationFn: (body: { reviewCap: number | null; countInReview: boolean }) =>
+      saveReviewCapacity(boardId, body),
     onSuccess: (next) => {
       queryClient.setQueryData(queryKey(boardId), next);
       setDraft({
         cap: limitText(next.reviewCap),
-        budget: limitText(next.diffBudget),
         countInReview: next.countInReview,
       });
       setError(null);
@@ -99,33 +92,28 @@ export function ReviewCapacityBar({ boardId }: { boardId: string }) {
     return null;
   }
 
-  function commit(next: {
-    cap: string;
-    budget: string;
-    countInReview: boolean;
-  }) {
+  function commit(next: { cap: string; countInReview: boolean }) {
     if (!saved) return;
     const reviewCap = parseLimit(next.cap);
-    const diffBudget = parseLimit(next.budget);
-    if (reviewCap === undefined || diffBudget === undefined) {
+    if (reviewCap === undefined) {
+      setError(saved.reviewCapInvalid);
       return;
     }
     if (
       reviewCap === saved.reviewCap &&
-      diffBudget === saved.diffBudget &&
       next.countInReview === saved.countInReview
     ) {
+      setError(null);
       return;
     }
+    setError(null);
     save.mutate({
       reviewCap,
       countInReview: next.countInReview,
-      diffBudget,
     });
   }
 
   const capId = `${boardId}-review-cap`;
-  const budgetId = `${boardId}-diff-budget`;
 
   return (
     <div className="mt-3 flex flex-wrap items-end gap-x-4 gap-y-2">
@@ -144,16 +132,21 @@ export function ReviewCapacityBar({ boardId }: { boardId: string }) {
         <input
           id={capId}
           type="number"
-          min={0}
+          min={1}
           step={1}
           value={draft.cap}
           disabled={save.isPending}
-          onChange={(event) =>
-            setDraft({ ...draft, cap: event.target.value })
-          }
+          onChange={(event) => setDraft({ ...draft, cap: event.target.value })}
           onBlur={() => commit(draft)}
+          aria-describedby={`${capId}-hint`}
           className="field-control w-24 px-2 py-1 font-body text-sm"
         />
+        <p
+          id={`${capId}-hint`}
+          className="mt-1 font-body text-xs text-text-muted"
+        >
+          {saved.reviewCapHint}
+        </p>
       </div>
       <label className="flex items-center gap-2 pb-1 font-body text-sm text-text-secondary">
         <input
@@ -168,34 +161,6 @@ export function ReviewCapacityBar({ boardId }: { boardId: string }) {
         />
         {saved.countInReviewLabel}
       </label>
-      <div>
-        <label
-          htmlFor={budgetId}
-          className="mb-1 block font-body text-sm text-text-secondary"
-        >
-          {saved.diffBudgetLabel}
-        </label>
-        <input
-          id={budgetId}
-          type="number"
-          min={0}
-          step={1}
-          value={draft.budget}
-          disabled={save.isPending}
-          onChange={(event) =>
-            setDraft({ ...draft, budget: event.target.value })
-          }
-          onBlur={() => commit(draft)}
-          aria-describedby={`${budgetId}-hint`}
-          className="field-control w-24 px-2 py-1 font-body text-sm"
-        />
-        <p
-          id={`${budgetId}-hint`}
-          className="mt-1 font-body text-xs text-text-muted"
-        >
-          {saved.diffBudgetHint}
-        </p>
-      </div>
       {error && (
         <p className="w-full font-body text-sm text-danger" role="alert">
           {error}

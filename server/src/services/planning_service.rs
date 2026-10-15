@@ -118,10 +118,6 @@ impl<'a> PlanningService<'a> {
     }
 
     async fn start_tech_lead(&self, ticket_id: Uuid) -> Result<(), PlanError> {
-        ReviewCapacityService::new(self.pool)
-            .agree_diff_budget_if_unset(ticket_id)
-            .await
-            .map_err(map_capacity_error)?;
         if let Some(hold) = ReviewCapacityService::new(self.pool)
             .block_ready_start(ticket_id)
             .await
@@ -345,12 +341,6 @@ impl<'a> PlanningService<'a> {
         .bind(ticket.ticket.content_version)
         .execute(self.pool)
         .await?;
-
-        // The budget agreed with this plan. The plan text is not read.
-        ReviewCapacityService::new(self.pool)
-            .agree_diff_budget(ticket_id)
-            .await
-            .map_err(map_capacity_error)?;
 
         TicketService::new(self.pool)
             .update_status(ticket_id, TicketStatus::Ready, None, None)

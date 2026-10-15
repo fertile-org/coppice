@@ -1,12 +1,11 @@
 use crate::api::auth::{pool_from_state, AuthUser};
 use crate::copy::review::{
-    COUNT_IN_REVIEW_LABEL, DIFF_BUDGET_HINT, DIFF_BUDGET_INVALID, DIFF_BUDGET_LABEL,
-    REVIEW_CAP_INVALID, REVIEW_CAP_LABEL,
+    COUNT_IN_REVIEW_LABEL, REVIEW_CAP_HINT, REVIEW_CAP_INVALID, REVIEW_CAP_LABEL,
 };
 use crate::domain::board::Board;
 use crate::services::board_service::{BoardError, BoardService};
 use crate::services::review_capacity::{
-    non_negative_limit, ReviewCapacityError, ReviewCapacityService, ReviewPolicy,
+    review_cap_limit, ReviewCapacityError, ReviewCapacityService, ReviewPolicy,
 };
 use crate::AppState;
 use axum::{
@@ -40,12 +39,11 @@ struct BoardResponse {
     created_at: String,
     review_cap: Option<i32>,
     count_in_review: bool,
-    diff_budget: Option<i32>,
     waiting_on_review: Option<String>,
     review_cap_label: &'static str,
+    review_cap_hint: &'static str,
     count_in_review_label: &'static str,
-    diff_budget_label: &'static str,
-    diff_budget_hint: &'static str,
+    review_cap_invalid: &'static str,
 }
 
 #[derive(Deserialize)]
@@ -53,7 +51,6 @@ struct BoardResponse {
 struct ReviewCapacityBody {
     review_cap: Option<i32>,
     count_in_review: bool,
-    diff_budget: Option<i32>,
 }
 
 #[derive(Serialize)]
@@ -97,12 +94,11 @@ fn board_to_response(board: Board, waiting_on_review: Option<String>) -> BoardRe
         created_at: board.created_at.format(&Rfc3339).unwrap_or_default(),
         review_cap: board.review_cap,
         count_in_review: board.count_in_review,
-        diff_budget: board.diff_budget,
         waiting_on_review,
         review_cap_label: REVIEW_CAP_LABEL,
+        review_cap_hint: REVIEW_CAP_HINT,
         count_in_review_label: COUNT_IN_REVIEW_LABEL,
-        diff_budget_label: DIFF_BUDGET_LABEL,
-        diff_budget_hint: DIFF_BUDGET_HINT,
+        review_cap_invalid: REVIEW_CAP_INVALID,
     }
 }
 
@@ -182,9 +178,7 @@ async fn put_review_capacity(
     Path(board_id): Path<Uuid>,
     Json(body): Json<ReviewCapacityBody>,
 ) -> Result<Json<BoardResponse>, BoardApiError> {
-    let review_cap = non_negative_limit(body.review_cap, REVIEW_CAP_INVALID)
-        .map_err(|message| BoardApiError::Message(StatusCode::BAD_REQUEST, message))?;
-    let diff_budget = non_negative_limit(body.diff_budget, DIFF_BUDGET_INVALID)
+    let review_cap = review_cap_limit(body.review_cap, REVIEW_CAP_INVALID)
         .map_err(|message| BoardApiError::Message(StatusCode::BAD_REQUEST, message))?;
     let pool = pool_from_state(&state).map_err(BoardApiError::Status)?;
     let capacity = ReviewCapacityService::new(pool);
@@ -194,7 +188,6 @@ async fn put_review_capacity(
             ReviewPolicy {
                 cap: review_cap,
                 count_in_review: body.count_in_review,
-                diff_budget,
             },
         )
         .await
@@ -212,8 +205,7 @@ fn map_board_error(err: BoardError) -> BoardApiError {
 
 fn map_capacity_error(err: ReviewCapacityError) -> BoardApiError {
     match err {
-        ReviewCapacityError::Message(message)
-            if message == REVIEW_CAP_INVALID || message == DIFF_BUDGET_INVALID =>
+        ReviewCapacityError::Message(message) if message == REVIEW_CAP_INVALID =>
         {
             BoardApiError::Message(StatusCode::BAD_REQUEST, message)
         }
