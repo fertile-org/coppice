@@ -96,7 +96,7 @@ Change any shortcut in Settings, under `[keybindings]`. Use the command's id fro
 
 ```toml
 [keybindings]
-"palette.open" = "Mod+P"
+"palette.open" = "P"
 "ticket.create" = ""
 ```
 

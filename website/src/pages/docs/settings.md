@@ -143,7 +143,7 @@ Each key is a command id from [Keyboard shortcuts](/docs/shortcuts). Your keys r
 
 ```toml
 [keybindings]
-"palette.open" = "Mod+P"
+"palette.open" = "P"
 "ticket.create" = ""
 "board.nextCard" = ["J", "Down"]
 ```
