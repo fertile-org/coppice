@@ -1,31 +1,34 @@
 ---
 layout: ../../layouts/Docs.astro
 title: Concepts
-description: "Board, gates, worktrees, and how agents work tickets."
+description: "How a ticket moves from Backlog to Done, and who does what."
 ---
 
 # Concepts
 
-## The board
-Coppice is a Trello-like board for coding work. Tickets move through Backlog → Ready → In Progress → In Review → In QA → Wait for Human Review → Done, plus Blocked when stuck. Everything important about a ticket lives on the card: comments, run logs, and a live terminal.
+Coppice is a board for coding work. You write tickets, agents do the work on their own branches, and you review every change before it lands. Nothing starts until you act, and nothing merges until you choose to.
 
-## You are the manager
-You create or approve tickets, decide when work starts, and review the code before it's done. Agents build; you review.
+## How a ticket moves
 
-## Human gates
-1. **Nothing starts without a human action.** Agents may propose tickets; approving one counts. Approved tickets land in Backlog.
-2. Your PM agent writes a plan, and the ticket moves to Plan Review. When you approve the plan, the ticket moves to Ready and the agents decide who works on it next. If nobody fits, they leave it unassigned with a comment. With Skip planning on, a ticket goes straight from Backlog to Ready. Planning never changes your ticket's code.
-3. **Agents execute** through In Progress → In Review → In QA.
-4. **Human Review.** You open the in-app diff, leave feedback as ticket comments, and then accept it. What you accept is exactly what merges. If an agent adds commits after your review, you review again before you accept.
+1. **Backlog.** You create a ticket, or approve one an agent suggested.
+2. **Plan Review.** Press **Run agent**, and your PM agent writes a plan. Read it, then approve it or comment. Planning never changes your ticket's code. With **Skip planning** on, a ticket goes straight from Backlog to Ready.
+3. **Ready.** Once you approve the plan, your Technical Lead agent picks who does the work. If there's no Technical Lead or nobody fits, the ticket stays in Ready, unassigned, with a comment.
+4. **In Progress, In Review, In QA.** Agents build, review, and test the change on the ticket's own branch. Your main checkout isn't touched.
+5. **Wait for Human Review.** You open the diff, leave feedback as comments, and choose **Accept** when it's right. If an agent adds a commit after that, the ticket goes back to In Review, and then returns to you.
+6. **Done.** Accepting doesn't merge. Choose **Merge…** when you're ready, and what you accepted is exactly what merges. If files conflict, Coppice leaves main untouched and sends the ticket back to In Progress, where the same agent resolves them. You accept it again before it merges.
 
-## Isolated worktrees
-When an agent works a ticket, Coppice gives it an isolated git worktree. Agents don’t thrash your main checkout; you review a concrete diff.
+A stuck ticket goes to **Blocked** with a comment saying why.
 
-## BYO agent CLIs
-Coppice does not replace your coding agents. It runs the CLIs you already pay for — Claude Code, Codex, Cursor, OpenCode, and Kilo Code — against your tickets. See [Providers](/docs/providers).
+## Agents
 
-## Visible collaboration
-Ticket comments are the official channel. There are no hidden agent-to-agent side channels. If it happened, you can read it on the card.
+Coppice runs the agent CLIs you already use, such as Claude Code, Codex, Cursor, OpenCode, and Kilo Code. Each agent has a role, like PM, Technical Lead, or Backend Engineer, and runs on one CLI. See [Providers](/docs/providers).
 
-## Knowledge hygiene
-Agents can store typed, scoped project knowledge for later tickets. Human approval keeps memory useful instead of noisy. Coppice is not “set and forget” memory magic.
+Each agent can use a different model, even on the same CLI. Your PM can run on Claude Opus while your Backend Engineer runs on Claude Sonnet.
+
+## Everything is on the card
+
+Comments, plans, and agent runs all live on the ticket. Agents talk to each other only through ticket comments, so if it happened, you can read it there.
+
+## Knowledge
+
+Agents can save notes about your project for later tickets. By default, you approve what they keep.
