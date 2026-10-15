@@ -20,6 +20,7 @@ import { NotificationBell } from '../features/notifications/NotificationBell';
 import { ThemeToggle } from '../features/theme/ThemeToggle';
 import { useOpenTicket } from '../features/tickets/useOpenTicket';
 import { cn } from '../lib/utils';
+import { SkipToBoard } from '../features/keyboard/SkipToBoard';
 import { BrandLogo } from './BrandLogo';
 import { DesktopUpdateBanner } from './DesktopUpdateBanner';
 import { ImportNoticeBanner } from './ImportNoticeBanner';
@@ -118,6 +119,7 @@ export function AppShell() {
         chatLayout ? 'h-svh overflow-hidden' : 'min-h-screen',
       )}
     >
+      {boardLayout && <SkipToBoard />}
       <aside
         data-testid="app-shell-sidebar"
         data-collapsed={sidebarCollapsed ? 'true' : 'false'}

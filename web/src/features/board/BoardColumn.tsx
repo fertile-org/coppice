@@ -6,6 +6,7 @@ import {
   columnBorderClass,
   type BoardColumnDef,
 } from './columns';
+import { boardFocusDomId, type BoardFocus } from './boardFocus';
 import { resolveAssigneeName, TicketCard } from './TicketCard';
 import type { TicketHierarchyIndex } from './ticketHierarchy';
 import type { Ticket } from './useTickets';
@@ -21,6 +22,10 @@ interface BoardColumnProps {
   onOpenTicket: (ticketId: string) => void;
   onRunPlan?: (ticketId: string) => void;
   planRunTicketId?: string | null;
+  columnIndex?: number;
+  boardFocus?: BoardFocus;
+  onCardFocus?: (ticketId: string) => void;
+  onHeadingFocus?: (columnIndex: number) => void;
 }
 
 export function BoardColumn({
@@ -34,6 +39,10 @@ export function BoardColumn({
   onOpenTicket,
   onRunPlan,
   planRunTicketId = null,
+  columnIndex = 0,
+  boardFocus,
+  onCardFocus,
+  onHeadingFocus,
 }: BoardColumnProps) {
   const [title, setTitle] = useState('');
   const { setNodeRef, isOver } = useDroppable({
@@ -48,6 +57,13 @@ export function BoardColumn({
     await onQuickAdd(trimmed);
     setTitle('');
   }
+
+  const headingFocusable = tickets.length === 0;
+  const headingSelected =
+    headingFocusable &&
+    boardFocus?.type === 'heading' &&
+    boardFocus.column === columnIndex;
+  const headingFocusId = `heading:${columnIndex}`;
 
   return (
     <section
@@ -67,8 +83,12 @@ export function BoardColumn({
         ].join(' ')}
       >
         <h2
+          tabIndex={headingFocusable ? (headingSelected ? 0 : -1) : undefined}
+          data-board-focus-id={headingFocusable ? headingFocusId : undefined}
+          data-board-tabstop={headingSelected ? 'true' : undefined}
+          onFocus={() => onHeadingFocus?.(columnIndex)}
           className={[
-            'font-display text-sm font-semibold',
+            'keyboard-focus rounded-sm font-display text-sm font-semibold',
             columnAccentClass(column.colorKey),
           ].join(' ')}
         >
@@ -102,21 +122,30 @@ export function BoardColumn({
           </form>
         )}
 
-        {tickets.map((ticket) => (
-          <TicketCard
-            key={ticket.id}
-            ticket={ticket}
-            hierarchy={hierarchyIndex.get(ticket.id)}
-            onOpen={onOpenTicket}
-            isLive={ticket.hasActiveRun ?? false}
-            assigneeName={resolveAssigneeName(
-              ticket.assigneeAgentId,
-              agentsById,
-            )}
-            onRunPlan={onRunPlan}
-            planRunPending={planRunTicketId === ticket.id}
-          />
-        ))}
+        {tickets.map((ticket) => {
+          const selected =
+            boardFocus?.type === 'card' && boardFocus.ticketId === ticket.id;
+          const focusId = boardFocusDomId({ type: 'card', ticketId: ticket.id });
+          return (
+            <TicketCard
+              key={ticket.id}
+              ticket={ticket}
+              hierarchy={hierarchyIndex.get(ticket.id)}
+              onOpen={onOpenTicket}
+              isLive={ticket.hasActiveRun ?? false}
+              assigneeName={resolveAssigneeName(
+                ticket.assigneeAgentId,
+                agentsById,
+              )}
+              onRunPlan={onRunPlan}
+              planRunPending={planRunTicketId === ticket.id}
+              tabIndex={boardFocus ? (selected ? 0 : -1) : 0}
+              boardFocusId={boardFocus ? focusId : undefined}
+              boardTabStop={Boolean(selected)}
+              onFocusCard={() => onCardFocus?.(ticket.id)}
+            />
+          );
+        })}
       </div>
     </section>
   );

@@ -62,6 +62,12 @@
       0 0 0 2px var(--color-accent-muted);
   }
 
+  /* Same 2px accent ring as .field-control:focus-visible. */
+  .keyboard-focus:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 2px var(--color-accent-muted);
+  }
+
   /* :read-only must not target select — selects are never read-write in CSS */
   .field-control:disabled,
   input.field-control:read-only,

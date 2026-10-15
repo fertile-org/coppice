@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { TicketParentSummary } from '../board/ticketHierarchy';
 import { useConnectors } from '../agents/useAgents';
 import { LiveRunView } from '../runs/LiveRunView';
@@ -15,6 +15,15 @@ import {
 } from './useAgentRuns';
 import { TicketStatusBadge } from './TicketStatusBadge';
 import { Sheet, SheetContent, SheetTitle } from '../../components/ui/sheet';
+import {
+  DRAWER_SECTION_LABELS,
+  stepDrawerSection,
+  type DrawerSection,
+} from '../keyboard/drawerSections';
+import {
+  useKeyboardLayer,
+  useRegisterShortcut,
+} from '../keyboard/useKeyboard';
 import { parseApiErrorMessage } from '../../lib/api';
 import {
   useArchiveTicket,
@@ -23,7 +32,7 @@ import {
   useUnarchiveTicket,
 } from './useTicket';
 
-type DrawerTab = 'detail' | 'live' | 'runs';
+type DrawerTab = DrawerSection;
 
 interface TicketDrawerProps {
   /** Keep the drawer mounted and toggle this so the exit animation plays. */
@@ -31,17 +40,17 @@ interface TicketDrawerProps {
   ticketId: string;
   parentTicket?: TicketParentSummary | null;
   onClose: () => void;
+  /** Focus the card that opened the drawer. */
+  onRestoreFocus?: () => void;
 }
-
-const TAB_LABELS: Record<DrawerTab, string> = {
-  detail: 'Detail',
-  live: 'Live Console',
-  runs: 'Agent Runs',
-};
 
 const TAB_ORDER: DrawerTab[] = ['detail', 'live', 'runs'];
 
-export function TicketDrawer({ open = true, ...panelProps }: TicketDrawerProps) {
+export function TicketDrawer({
+  open = true,
+  onRestoreFocus,
+  ...panelProps
+}: TicketDrawerProps) {
   return (
     <Sheet open={open} onOpenChange={(next) => !next && panelProps.onClose()}>
       <SheetContent
@@ -49,6 +58,12 @@ export function TicketDrawer({ open = true, ...panelProps }: TicketDrawerProps) 
         aria-labelledby={undefined}
         aria-describedby={undefined}
         className="w-[90%] max-w-[90vw]"
+        data-shortcut-layer="ticket"
+        onCloseAutoFocus={(event) => {
+          if (!onRestoreFocus) return;
+          event.preventDefault();
+          onRestoreFocus();
+        }}
       >
         <TicketDrawerPanel {...panelProps} />
       </SheetContent>
@@ -71,7 +86,19 @@ function TicketDrawerPanel({
   const archiveTicket = useArchiveTicket(ticketId);
   const unarchiveTicket = useUnarchiveTicket(ticketId);
   const [tab, setTab] = useState<DrawerTab>('detail');
+  const [tabTicketId, setTabTicketId] = useState(ticketId);
+  const [sectionFocusTick, setSectionFocusTick] = useState(0);
   const [actionError, setActionError] = useState<string | null>(null);
+  if (ticketId !== tabTicketId) {
+    setTabTicketId(ticketId);
+    setTab('detail');
+    setActionError(null);
+  }
+  const tabRefs = useRef<Record<DrawerTab, HTMLButtonElement | null>>({
+    detail: null,
+    live: null,
+    runs: null,
+  });
 
   const selectedRepo = repos?.find((repo) => repo.id === ticket?.repoId);
   const repoNotReady = Boolean(
@@ -104,10 +131,25 @@ function TicketDrawerPanel({
           ? 'Repository path is not ready. Ask an admin to verify in Settings → Repositories.'
           : null;
 
+  function moveSection(direction: 1 | -1) {
+    setTab((current) => stepDrawerSection(current, direction));
+    setSectionFocusTick((tick) => tick + 1);
+  }
+
   useEffect(() => {
-    setTab('detail');
-    setActionError(null);
-  }, [ticketId]);
+    if (sectionFocusTick === 0) return;
+    tabRefs.current[tab]?.focus();
+  }, [sectionFocusTick, tab]);
+
+  useRegisterShortcut('drawer.nextSection', () => moveSection(1));
+  useRegisterShortcut('drawer.previousSection', () => moveSection(-1));
+  useKeyboardLayer({
+    focusDrawerTabs: () => {
+      const button = tabRefs.current[tab];
+      button?.focus();
+      return Boolean(button);
+    },
+  });
 
   async function handleRunAgent() {
     if (!canRunAgent) return;
@@ -291,18 +333,22 @@ function TicketDrawerPanel({
         {TAB_ORDER.map((key) => (
           <button
             key={key}
+            ref={(node) => {
+              tabRefs.current[key] = node;
+            }}
+            id={`ticket-section-${key}`}
             type="button"
             role="tab"
             aria-selected={tab === key}
             onClick={() => setTab(key)}
             className={[
-              'border-b-2 px-4 py-3 font-body text-sm transition-colors duration-fast',
+              'keyboard-focus border-b-2 px-4 py-3 font-body text-sm transition-colors duration-fast',
               tab === key
                 ? 'border-accent text-accent'
                 : 'border-transparent text-text-secondary hover:text-text-primary',
             ].join(' ')}
           >
-            {TAB_LABELS[key]}
+            {DRAWER_SECTION_LABELS[key]}
           </button>
         ))}
       </nav>

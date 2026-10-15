@@ -8,11 +8,12 @@ import {
   type DragStartEvent,
 } from '@dnd-kit/core';
 import { useQueryClient } from '@tanstack/react-query';
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
 import { useToast } from '../../components/ToastProvider';
 import { apiErrorToastMessage, parseApiErrorMessage } from '../../lib/api';
 import { useAgents } from '../agents/useAgents';
+import { useKeyboardEnvironment, useKeyboardLayer } from '../keyboard/useKeyboard';
 import { TicketDrawer } from '../tickets/TicketDrawer';
 import { setLastBoardId } from '../boards/useBoards';
 import {
@@ -28,7 +29,15 @@ import {
   writeBoardFilters,
   type BoardFilters,
 } from './boardFilters';
+import {
+  boardFocusDomId,
+  movedToColumnAnnouncement,
+  reconcileBoardFocus,
+  type BoardColumnSnapshot,
+  type BoardFocus,
+} from './boardFocus';
 import { BoardColumn } from './BoardColumn';
+import { useBoardKeyboard } from './useBoardKeyboard';
 import { ReviewCapacityBar } from './ReviewCapacityBar';
 import { BOARD_COLUMNS, isTicketStatus, type TicketStatus } from './columns';
 import { resolveAssigneeName, TicketCard } from './TicketCard';
@@ -77,6 +86,10 @@ export function BoardPage() {
   const startPlan = useStartPlanRun(boardId ?? '');
 
   const [activeTicket, setActiveTicket] = useState<Ticket | null>(null);
+  const [focusState, setFocusState] = useState<BoardFocus | null>(null);
+  const [focusGeneration, setFocusGeneration] = useState(0);
+  const [moveAnnouncement, setMoveAnnouncement] = useState('');
+  const returnTicketId = useRef<string | null>(null);
 
   const agentsById = useMemo(() => {
     const map = new Map<string, string>();
@@ -122,6 +135,67 @@ export function BoardPage() {
     return grouped;
   }, [filteredTickets]);
 
+  const columnSnapshots = useMemo<BoardColumnSnapshot[]>(
+    () =>
+      BOARD_COLUMNS.map((column) => ({
+        ticketIds: (ticketsByStatus.get(column.status) ?? []).map((ticket) => ticket.id),
+      })),
+    [ticketsByStatus],
+  );
+  const boardFocus = reconcileBoardFocus(columnSnapshots, focusState);
+  const closeDrawer = useCallback(() => {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.delete('ticket');
+      return next;
+    });
+    if (boardId) {
+      void queryClient.invalidateQueries({ queryKey: ticketsQueryKey(boardId) });
+    }
+    const ticketId = returnTicketId.current;
+    if (!ticketId) return;
+    setFocusState({ type: 'card', ticketId });
+    setFocusGeneration((generation) => generation + 1);
+  }, [boardId, queryClient, setSearchParams]);
+
+  const columnsRef = useRef(columnSnapshots);
+  const focusRef = useRef(boardFocus);
+  const focusDomIdRef = useRef(boardFocusDomId(boardFocus));
+  const closeDrawerRef = useRef(closeDrawer);
+
+  useEffect(() => {
+    columnsRef.current = columnSnapshots;
+    focusRef.current = boardFocus;
+    focusDomIdRef.current = boardFocusDomId(boardFocus);
+    closeDrawerRef.current = closeDrawer;
+  }, [columnSnapshots, boardFocus, closeDrawer]);
+
+  const drawerOpen = Boolean(selectedTicketId) && !filterOpen;
+  useKeyboardEnvironment({ drawerOpen, modalOpen: filterOpen });
+
+  function moveBoardFocus(next: BoardFocus) {
+    setFocusState(next);
+    setFocusGeneration((generation) => generation + 1);
+  }
+
+  useBoardKeyboard({
+    enabled: !drawerOpen && !filterOpen,
+    columnsRef,
+    focusRef,
+    onMove: moveBoardFocus,
+    onOpenTicket: openTicket,
+  });
+
+  useEffect(() => {
+    if (focusGeneration === 0) return;
+    const node = document.querySelector(
+      `[data-board-focus-id="${CSS.escape(focusDomIdRef.current)}"]`,
+    );
+    if (!(node instanceof HTMLElement)) return;
+    node.focus();
+    node.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  }, [focusGeneration]);
+
   const [shownTicketId, setShownTicketId] = useState(selectedTicketId);
   if (selectedTicketId && selectedTicketId !== shownTicketId) {
     setShownTicketId(selectedTicketId);
@@ -141,6 +215,8 @@ export function BoardPage() {
   }
 
   function openTicket(ticketId: string) {
+    returnTicketId.current = ticketId;
+    setFocusState({ type: 'card', ticketId });
     setFilterOpen(false);
     setSearchParams((prev) => {
       const next = new URLSearchParams(prev);
@@ -149,16 +225,15 @@ export function BoardPage() {
     });
   }
 
-  function closeDrawer() {
-    setSearchParams((prev) => {
-      const next = new URLSearchParams(prev);
-      next.delete('ticket');
-      return next;
-    });
-    if (boardId) {
-      void queryClient.invalidateQueries({ queryKey: ticketsQueryKey(boardId) });
-    }
+  function restoreBoardFocus() {
+    const ticketId = returnTicketId.current;
+    if (!ticketId) return;
+    moveBoardFocus({ type: 'card', ticketId });
   }
+
+  useKeyboardLayer({
+    closeDrawer: () => closeDrawerRef.current(),
+  });
 
   function openFilters() {
     if (selectedTicketId) {
@@ -188,8 +263,13 @@ export function BoardPage() {
     const targetStatus = resolveDropStatus(over.id, ticketsById);
     if (!targetStatus || targetStatus === ticket.status) return;
 
+    const columnLabel = BOARD_COLUMNS.find((column) => column.status === targetStatus)
+      ?.label;
     void updateStatus
       .mutateAsync({ ticketId, status: targetStatus })
+      .then(() => {
+        if (columnLabel) setMoveAnnouncement(movedToColumnAnnouncement(columnLabel));
+      })
       .catch((err: unknown) => {
         toast.error(apiErrorToastMessage(parseApiErrorMessage(err)));
       });
@@ -254,12 +334,16 @@ export function BoardPage() {
           onDragStart={handleDragStart}
           onDragEnd={handleDragEnd}
         >
-          <div className="-mx-8 overflow-x-auto px-8 pb-4">
+          <div className="sr-only" aria-live="polite" aria-atomic="true">
+            {moveAnnouncement}
+          </div>
+          <div id="board" className="-mx-8 overflow-x-auto px-8 pb-4">
             <div className="flex min-w-max gap-4">
-              {BOARD_COLUMNS.map((column) => (
+              {BOARD_COLUMNS.map((column, columnIndex) => (
                 <BoardColumn
                   key={column.status}
                   column={column}
+                  columnIndex={columnIndex}
                   tickets={ticketsByStatus.get(column.status) ?? []}
                   hierarchyIndex={hierarchyIndex}
                   agentsById={agentsById}
@@ -270,6 +354,21 @@ export function BoardPage() {
                   onRunPlan={handleRunPlan}
                   planRunTicketId={
                     startPlan.isPending ? (startPlan.variables ?? null) : null
+                  }
+                  boardFocus={boardFocus}
+                  onCardFocus={(ticketId) =>
+                    setFocusState((current) =>
+                      current?.type === 'card' && current.ticketId === ticketId
+                        ? current
+                        : { type: 'card', ticketId },
+                    )
+                  }
+                  onHeadingFocus={(index) =>
+                    setFocusState((current) =>
+                      current?.type === 'heading' && current.column === index
+                        ? current
+                        : { type: 'heading', column: index },
+                    )
                   }
                 />
               ))}
@@ -288,6 +387,7 @@ export function BoardPage() {
                     activeTicket.assigneeAgentId,
                     agentsById,
                   )}
+                  tabIndex={-1}
                 />
               </div>
             ) : null}
@@ -301,6 +401,7 @@ export function BoardPage() {
           ticketId={shownTicketId}
           parentTicket={shownParentTicket}
           onClose={closeDrawer}
+          onRestoreFocus={restoreBoardFocus}
         />
       )}
 

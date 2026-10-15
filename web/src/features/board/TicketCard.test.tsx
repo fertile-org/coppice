@@ -129,7 +129,7 @@ describe('TicketCard hierarchy cues', () => {
     renderCard(undefined, {}, onOpen);
     const card = screen.getByRole('button');
 
-    expect(card).toHaveClass('focus-visible:ring-accent');
+    expect(card).toHaveClass('keyboard-focus');
     fireEvent.keyDown(card, { key: 'Enter' });
     fireEvent.keyDown(card, { key: ' ' });
 

@@ -49,6 +49,11 @@ interface TicketCardProps {
   /** Starts the PM planning run. Omit on the drag overlay. */
   onRunPlan?: (ticketId: string) => void;
   planRunPending?: boolean;
+  /** Roving tabindex. Defaults to 0 so a card stays keyboard-activatable alone. */
+  tabIndex?: number;
+  boardFocusId?: string;
+  boardTabStop?: boolean;
+  onFocusCard?: () => void;
 }
 
 export function TicketCard({
@@ -59,6 +64,10 @@ export function TicketCard({
   assigneeName,
   onRunPlan,
   planRunPending = false,
+  tabIndex = 0,
+  boardFocusId,
+  boardTabStop = false,
+  onFocusCard,
 }: TicketCardProps) {
   const isArchived = Boolean(ticket.archivedAt);
   const { attributes, listeners, setNodeRef, transform, isDragging } =
@@ -98,17 +107,20 @@ export function TicketCard({
         {...listeners}
         {...attributes}
         role="button"
-        tabIndex={0}
+        tabIndex={tabIndex}
+        data-board-focus-id={boardFocusId}
+        data-board-tabstop={boardTabStop ? 'true' : undefined}
         onClick={() => {
           if (!isDragging) onOpen(ticket.id);
         }}
+        onFocus={() => onFocusCard?.()}
         onKeyDown={(e) => {
           if (e.key === 'Enter' || e.key === ' ') {
             e.preventDefault();
             onOpen(ticket.id);
           }
         }}
-        className="rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+        className="keyboard-focus rounded-sm"
       >
       {(hierarchy?.parent || hierarchy?.parentUnavailable) && (
         <div className="mb-2 flex min-w-0 items-center gap-1.5 font-body text-xs leading-tight text-text-secondary">
