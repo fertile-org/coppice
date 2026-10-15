@@ -2,9 +2,10 @@ import '@testing-library/jest-dom/vitest';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, useLocation } from 'react-router-dom';
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SessionContext, type SessionContextValue } from '../auth/useSession';
 import { KeyboardProvider } from './KeyboardProvider';
+import { publishKeybindings } from './keybindings';
 
 const memberSession: SessionContextValue = {
   user: { id: 'user-1', email: 'ada@example.com', role: 'member' },
@@ -43,6 +44,15 @@ function renderHelp(session: SessionContextValue | null = memberSession) {
 }
 
 describe('shortcut help overlay', () => {
+  beforeEach(() => {
+    publishKeybindings({});
+    vi.stubGlobal('fetch', vi.fn(() => Promise.reject(new Error('offline'))));
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
   it('opens with ?, lists Go to column {n}, and restores focus on Esc', async () => {
     renderHelp();
     const before = screen.getByRole('button', { name: 'Before' });
@@ -61,7 +71,7 @@ describe('shortcut help overlay', () => {
     expect(screen.getByText('Create ticket')).toBeVisible();
     expect(screen.getByText('Accept…')).toBeVisible();
     expect(screen.getByText('Ctrl+Shift+Enter')).toBeVisible();
-    expect(screen.queryByText('Change shortcuts in Settings.')).toBeNull();
+    expect(screen.getByText('Change shortcuts in Settings.')).toBeVisible();
     expect(screen.queryByText('Go to Plugins')).toBeNull();
     expect(screen.queryByText('Go to Users')).toBeNull();
 
@@ -133,6 +143,30 @@ describe('shortcut help overlay', () => {
     fireEvent.keyDown(document, { key: 'g' });
     fireEvent.keyDown(document, { key: 'u' });
     expect(screen.getByTestId('location').textContent).toBe('/settings/users');
+  });
+
+  it('uses a saved keybinding in the help overlay and the palette', async () => {
+    publishKeybindings({
+      'palette.open': [{ kind: 'chord', chord: { key: 'p', mod: true } }],
+      'ticket.create': [],
+    });
+    renderHelp();
+
+    fireEvent.keyDown(document, { key: 'k', ctrlKey: true });
+    expect(screen.queryByPlaceholderText('Search actions, tickets, and agents…')).toBeNull();
+    fireEvent.keyDown(document, { key: 'p', ctrlKey: true });
+    expect(screen.getByPlaceholderText('Search actions, tickets, and agents…')).toBeVisible();
+    expect(screen.getByText('Ctrl+P')).toBeVisible();
+
+    fireEvent.keyDown(document, { key: 'Escape' });
+    await waitFor(() => {
+      expect(screen.queryByPlaceholderText('Search actions, tickets, and agents…')).toBeNull();
+    });
+    fireEvent.keyDown(document, { key: '?' });
+    expect(screen.getByRole('dialog', { name: 'Keyboard shortcuts' })).toBeVisible();
+    expect(screen.getByText('Ctrl+P')).toBeVisible();
+    expect(screen.getByText('Create ticket').closest('li')).toHaveTextContent(/^Create ticket$/);
+    expect(screen.getByText('Change shortcuts in Settings.')).toBeVisible();
   });
 
   it('omits Users on the desktop app and keeps Settings', () => {

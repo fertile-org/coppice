@@ -147,3 +147,8 @@ builtin_plugins_dir = "./data/builtin-plugins"
 # mcp_start_timeout_secs = 20
 # mcp_list_timeout_secs = 10
 # mcp_idle_shutdown_secs = 600
+
+# Keyboard shortcuts. Your keys replace the defaults, and an empty value turns one off.
+# Mod is Cmd on macOS and Ctrl on Linux and WSL.
+# [keybindings]
+# "palette.open" = "Mod+K"

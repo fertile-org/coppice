@@ -1,4 +1,5 @@
 pub mod connector_file;
+pub mod keybindings;
 pub mod settings_file;
 
 use figment::{
@@ -33,6 +34,9 @@ pub struct AppConfig {
     pub plugins: PluginsConfig,
     #[serde(default)]
     pub logs: LogsConfig,
+    /// Shortcut overrides. Empty keeps the built-in keys.
+    #[serde(default)]
+    pub keybindings: keybindings::Keybindings,
 }
 
 /// Non-desktop log directory. Ignored when the desktop app passes `--logs-dir`.
@@ -1145,6 +1149,8 @@ impl AppConfig {
             .knowledge
             .validate()
             .map_err(|message| Box::new(figment::Error::from(message)))?;
+        keybindings::validate(&config.keybindings)
+            .map_err(|message| Box::new(figment::Error::from(message)))?;
         Ok(config)
     }
 
@@ -1275,6 +1281,7 @@ impl AppConfig {
             mcp: McpConfig::default(),
             plugins: PluginsConfig::default(),
             logs: LogsConfig::default(),
+            keybindings: keybindings::Keybindings::default(),
         }
     }
 }

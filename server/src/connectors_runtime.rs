@@ -204,6 +204,7 @@ impl ConnectorsRuntime {
                 }
             })?;
         guard.config.agent.connectors = outcome.parsed.agent.connectors;
+        guard.config.keybindings = outcome.parsed.keybindings;
         rebuild(&mut guard, &self.opencode_runs);
         Ok(SavedConfigFile {
             revision: outcome.revision,
@@ -426,5 +427,30 @@ mod tests {
         );
         assert!(rt.registry().has(coppice_connectors::CLAUDE_CODE));
         assert_eq!(rt.config().agent.connectors.claude_code.enabled, Some(true));
+    }
+
+    #[test]
+    fn settings_save_applies_keybindings_without_a_restart() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        let original = "# keep\n[server]\nport = 5000\n";
+        std::fs::write(&path, original).unwrap();
+        let rt = runtime(Some(path.clone()));
+        let revision = coppice_config::settings_file::content_revision(original.as_bytes());
+        let next = "# keep\n[server]\nport = 5000\n\n[keybindings]\n\"palette.open\" = \"Mod+P\"\n";
+
+        let saved = rt.save_config_text(next, &revision).unwrap();
+
+        assert!(!saved.restart_required);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), next);
+        let api = rt.config().keybindings.api();
+        let binding = &api.overrides["palette.open"][0];
+        match binding {
+            coppice_config::keybindings::ParsedBinding::Chord { chord } => {
+                assert_eq!(chord.key, "p");
+                assert!(chord.mod_key);
+            }
+            other => panic!("expected a chord, got {other:?}"),
+        }
     }
 }

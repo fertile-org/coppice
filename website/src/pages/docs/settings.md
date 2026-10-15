@@ -132,3 +132,20 @@ Every count and interval above must be greater than 0.
 | `max_output_bytes` | integer | `32768` | Largest tool result, in bytes. |
 | `comment_post_limit` | integer | `5` | Most comments one run can post. |
 | `token_ttl_secs` | integer | `14400` | How long a run's tool token lasts, in seconds. |
+
+## `[keybindings]`
+
+Each key is a command id from [Keyboard shortcuts](/docs/shortcuts). Your keys replace that command's defaults, and an empty value turns the shortcut off.
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `"<command id>"` | string or list of strings | the built-in shortcut | Replaces that command's keys. `""` removes them. |
+
+```toml
+[keybindings]
+"palette.open" = "P"
+"ticket.create" = ""
+"board.nextCard" = ["J", "Down"]
+```
+
+`Mod` is Cmd on macOS and Ctrl on Linux and WSL. A sequence is written `G then B`. Several keys for one command are separated with ` or `, or written as a list. Save applies the change without a restart. Unknown command ids, malformed keys, and two commands bound to the same key are rejected.

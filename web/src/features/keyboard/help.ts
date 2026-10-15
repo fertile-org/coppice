@@ -5,6 +5,7 @@ import type { Platform } from './platform';
 
 export const HELP_COPY = {
   title: 'Keyboard shortcuts',
+  footer: 'Change shortcuts in Settings.',
 } as const;
 
 export type HelpRow = {

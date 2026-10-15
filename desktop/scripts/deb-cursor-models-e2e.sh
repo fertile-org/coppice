@@ -658,6 +658,11 @@ dir = "${hung_home}/.config/Coppice/plugins"
 [mcp]
 # Coppice rewrites coppice/skills here on every start. Edits there are lost.
 builtin_plugins_dir = "${hung_home}/.config/Coppice/builtin-plugins"
+
+# Keyboard shortcuts. Your keys replace the defaults, and an empty value turns one off.
+# Mod is Cmd on macOS and Ctrl on Linux and WSL.
+# [keybindings]
+# "palette.open" = "Mod+K"
 EOF
 if ! diff -u "${expected_config}" "${hung_home}/.config/Coppice/config.toml"; then
   echo "fresh config.toml is not the desktop template" >&2

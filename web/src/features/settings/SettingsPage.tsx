@@ -6,6 +6,7 @@ import { Button } from '../../components/ui/button';
 import { ApiError, apiFetch, parseApiErrorMessage } from '../../lib/api';
 import { isDesktopShell, revealFileInFolder, revealFileLabel } from '../../lib/desktop';
 import { useSession } from '../auth/useSession';
+import { publishKeybindings, readKeybindings } from '../keyboard/keybindings';
 import { TomlEditor } from './TomlEditor';
 
 const SAVED = 'Saved.';
@@ -159,6 +160,9 @@ export function SettingsPage() {
       );
       setStatus(saved.restartRequired ? SAVED_RESTART : SAVED);
       setErrorLine(null);
+      void readKeybindings().then(publishKeybindings).catch(() => {
+        /* The file is saved. The open app keeps the previous shortcuts. */
+      });
       queryClient.setQueryData<ConfigFile>(CONFIG_QUERY_KEY, (current) =>
         current
           ? {

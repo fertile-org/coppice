@@ -82,6 +82,22 @@ describe('SettingsPage', () => {
     });
   });
 
+  it('shows a [keybindings] section in the config editor', async () => {
+    const text = '# keep\n[keybindings]\n"palette.open" = "Mod+P"\n';
+    mocks.apiFetch.mockImplementation((path: string) => {
+      if (path === '/api/settings/config') {
+        return jsonResponse({ ...disk, text });
+      }
+      throw new Error(`unexpected ${path}`);
+    });
+    renderPage();
+
+    const editor = await screen.findByRole('textbox', { name: 'config.toml' });
+    expect(editor).toHaveValue(text);
+    expect((editor as HTMLTextAreaElement).value).toContain('[keybindings]');
+    expect((editor as HTMLTextAreaElement).value).toContain('"palette.open" = "Mod+P"');
+  });
+
   it('shows the config file behind the Settings title', async () => {
     renderPage();
 
