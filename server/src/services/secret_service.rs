@@ -29,6 +29,7 @@ impl<'a> SecretService<'a> {
 
     /// Create or replace a named secret; returns the secret id.
     pub async fn upsert_named(&self, name: &str, value: &str) -> Result<Uuid, SecretError> {
+        let _guard = crate::crypto::operations_lock().lock().await;
         let name = name.trim();
         let value = value.trim();
         if name.is_empty() {
@@ -87,6 +88,7 @@ impl<'a> SecretService<'a> {
     }
 
     pub async fn decrypt_named(&self, id: Uuid) -> Result<(String, String), SecretError> {
+        let _guard = crate::crypto::operations_lock().lock().await;
         let row = sqlx::query("SELECT name, ciphertext, nonce FROM secrets WHERE id = $1")
             .bind(id)
             .fetch_optional(self.pool)
@@ -100,6 +102,7 @@ impl<'a> SecretService<'a> {
     }
 
     pub async fn delete_by_id(&self, id: Uuid) -> Result<(), SecretError> {
+        let _guard = crate::crypto::operations_lock().lock().await;
         let result = sqlx::query("DELETE FROM secrets WHERE id = $1")
             .bind(id)
             .execute(self.pool)

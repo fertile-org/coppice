@@ -1,6 +1,7 @@
 use crate::api::auth::pool_from_state;
 use crate::middleware::admin::AdminUser;
 use crate::services::backup_service::{BackupError, BackupService};
+use crate::services::secret_rotation::{self, ROTATE_DESKTOP_ONLY, ROTATED_MESSAGE};
 use crate::AppState;
 use axum::{
     body::Body,
@@ -21,6 +22,7 @@ pub fn routes() -> Router<Arc<AppState>> {
     Router::new()
         .route("/api/tools/backup/export", get(export_backup))
         .route("/api/tools/backup/import", post(import_backup))
+        .route("/api/tools/secrets/rotate", post(rotate_secrets))
 }
 
 #[derive(Serialize)]
@@ -131,16 +133,48 @@ async fn import_backup(
         "missing file field".into(),
     ))?;
 
-    match BackupService::import_from_bytes(&state.config, pool, &bytes).await {
-        Ok(()) => Ok(Json(ImportBackupResponse {
+    let config_path = state.connectors.config_path();
+    match BackupService::import_from_bytes(&state.config, pool, &bytes, config_path.as_deref())
+        .await
+    {
+        Ok(message) => Ok(Json(ImportBackupResponse {
             ok: true,
-            message:
-                "Import completed. Sign in again if your session was reset; restart the server if anything looks inconsistent."
-                    .into(),
+            message,
         })),
         Err(err) => {
             let (status, message) = map_error(err);
             Err((status, message))
         }
     }
+}
+
+async fn rotate_secrets(
+    State(state): State<Arc<AppState>>,
+    AdminUser(_admin): AdminUser,
+) -> Result<Json<ImportBackupResponse>, (StatusCode, String)> {
+    let pool = pool_from_state(&state).map_err(|status| (status, "database unavailable".into()))?;
+    let Some(dir) = secret_rotation::desktop_secrets_dir(
+        state.config.auth.desktop_mode,
+        state.connectors.config_path().as_deref(),
+    ) else {
+        return Err((StatusCode::BAD_REQUEST, ROTATE_DESKTOP_ONLY.into()));
+    };
+    secret_rotation::rotate_desktop_secrets(pool, &dir, &state.secret_store)
+        .await
+        .map_err(|err| {
+            let status = match err {
+                secret_rotation::RotateError::NotDesktop => StatusCode::BAD_REQUEST,
+                secret_rotation::RotateError::Decrypt
+                | secret_rotation::RotateError::Corrupt
+                | secret_rotation::RotateError::Unreadable => StatusCode::CONFLICT,
+                secret_rotation::RotateError::Io(_) | secret_rotation::RotateError::Database(_) => {
+                    StatusCode::INTERNAL_SERVER_ERROR
+                }
+            };
+            (status, err.to_string())
+        })?;
+    Ok(Json(ImportBackupResponse {
+        ok: true,
+        message: ROTATED_MESSAGE.into(),
+    }))
 }

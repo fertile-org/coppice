@@ -36,6 +36,7 @@ pub mod reviewer_brief;
 pub mod run_orchestrator;
 pub mod run_service;
 pub mod run_tool_call_service;
+pub mod secret_rotation;
 pub mod secret_service;
 pub mod split_service;
 pub mod ticket_git_service;

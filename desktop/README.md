@@ -49,6 +49,10 @@ Packaged apps keep their data in `Coppice` (`~/.config/Coppice`, `~/Library/Appl
 Tagged releases are built by `.github/workflows/release.yml` — see
 [docs/development.md](../docs/development.md#desktop-release-tag-and-publish).
 
+## Rotate secrets
+
+In the desktop app, **Tools → Backup → Rotate secrets** writes new `session_secret` and `master_key` files, signs everyone out, and re-encrypts saved tokens. It is not available on a server install. If Coppice stops between re-encrypting and replacing those files, the next launch finishes the swap.
+
 ## Tests
 
 ```bash

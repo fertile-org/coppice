@@ -5,9 +5,13 @@ import { MemoryRouter, useLocation } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ToolsPage } from './ToolsPage';
 
+const sessionState = vi.hoisted(() => ({ desktopMode: false }));
+
 vi.mock('../auth/useSession', () => ({
   useSession: () => ({
     user: { id: '1', email: 'admin@localhost', role: 'admin' },
+    desktopMode: sessionState.desktopMode,
+    establishSession: () => {},
   }),
 }));
 
@@ -34,6 +38,7 @@ const fetchMock = vi.fn();
 
 describe('ToolsPage', () => {
   beforeEach(() => {
+    sessionState.desktopMode = false;
     fetchMock.mockReset();
     fetchMock.mockImplementation((path: string) => {
       const body = path === '/api/agents' ? { items: [] } : [];
@@ -83,6 +88,22 @@ describe('ToolsPage', () => {
       screen.queryByRole('button', { name: 'Download backup' }),
     ).not.toBeInTheDocument();
     expect(await screen.findByText(/No connectors/)).toBeVisible();
+  });
+
+  it('shows secret rotation on the desktop app', () => {
+    sessionState.desktopMode = true;
+    renderPage();
+
+    expect(screen.getByRole('heading', { name: 'Rotate secrets' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Rotate secrets' }));
+    expect(
+      screen.getByText('Confirm that you want to rotate secrets before continuing.'),
+    ).toBeInTheDocument();
+  });
+
+  it('hides secret rotation outside the desktop app', () => {
+    renderPage();
+    expect(screen.queryByRole('heading', { name: 'Rotate secrets' })).not.toBeInTheDocument();
   });
 
   it('opens the connectors tab from the url', () => {

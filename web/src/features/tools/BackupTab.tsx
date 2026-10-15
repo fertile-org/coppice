@@ -1,12 +1,16 @@
 import { useRef, useState, type FormEvent } from 'react';
 import { ApiError, apiFetch, parseApiErrorMessage } from '../../lib/api';
 import { Button } from '../../components/ui/button';
+import { useSession, type User } from '../auth/useSession';
 
 export function BackupTab() {
+  const { desktopMode, establishSession } = useSession();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [exporting, setExporting] = useState(false);
   const [importing, setImporting] = useState(false);
+  const [rotating, setRotating] = useState(false);
   const [confirmImport, setConfirmImport] = useState(false);
+  const [confirmRotate, setConfirmRotate] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -26,7 +30,9 @@ export function BackupTab() {
       anchor.download = filename;
       anchor.click();
       URL.revokeObjectURL(url);
-      setMessage('Export downloaded. Store the archive securely — it contains secrets and all workspace data.');
+      setMessage(
+        'Export downloaded. Store the archive securely — it contains all workspace data. Passwords and encryption keys are left out.',
+      );
     } catch (err) {
       setError(parseApiErrorMessage(err, 'Export failed.'));
     } finally {
@@ -66,7 +72,7 @@ export function BackupTab() {
     } catch (err) {
       if (err instanceof ApiError && err.status === 503) {
         setError(
-          'Import needs pg_dump/psql on the server host (bundled with Postgres in the future desktop app).',
+          'Import needs pg_dump and psql on the machine running Coppice. The desktop app includes them.',
         );
       } else {
         setError(parseApiErrorMessage(err, 'Import failed.'));
@@ -76,12 +82,44 @@ export function BackupTab() {
     }
   }
 
+  async function handleRotate() {
+    if (!confirmRotate) {
+      setError('Confirm that you want to rotate secrets before continuing.');
+      setMessage(null);
+      return;
+    }
+    setRotating(true);
+    setError(null);
+    setMessage(null);
+    try {
+      await apiFetch('/api/tools/secrets/rotate', { method: 'POST' });
+      try {
+        const renew = await apiFetch('/api/auth/desktop-session', { method: 'POST' });
+        const session = (await renew.json()) as { user: User; csrfToken: string };
+        establishSession(session.user, session.csrfToken);
+        setMessage(
+          'Secrets rotated. Saved tokens were re-encrypted, and this sign-in was renewed.',
+        );
+      } catch {
+        setMessage(
+          'Secrets rotated. Reload the page to sign in again. Saved tokens were re-encrypted.',
+        );
+      }
+      setConfirmRotate(false);
+    } catch (err) {
+      setError(parseApiErrorMessage(err, 'Could not rotate secrets.'));
+    } finally {
+      setRotating(false);
+    }
+  }
+
   return (
     <div className="space-y-8">
       <p className="max-w-2xl font-body text-sm text-text-secondary">
-        Export or import a full Coppice archive: PostgreSQL dump, runtime
-        config snapshot, uploaded artifacts, and agent worktrees. Intended for
-        migration and desktop backups — not for sharing publicly.
+        Export or import a full Coppice archive: PostgreSQL dump, settings other
+        than passwords and encryption keys, uploaded artifacts, and agent
+        worktrees. Intended for migration and desktop backups — not for sharing
+        publicly.
       </p>
 
       {message && (
@@ -124,8 +162,9 @@ export function BackupTab() {
           Import backup
         </h2>
         <p className="mt-2 font-body text-sm text-text-secondary">
-          Replaces the current database and on-disk Coppice data directories with
-          the archive contents. Active sessions may be invalidated.
+          Replaces the current database and on-disk data directories with the
+          archive. Settings from the backup are restored, except secrets and data
+          paths on this install. Active sessions may be invalidated.
         </p>
         <form className="mt-4 space-y-4" onSubmit={(e) => void handleImport(e)}>
           <div>
@@ -160,6 +199,36 @@ export function BackupTab() {
           </Button>
         </form>
       </section>
+
+      {desktopMode && (
+        <section className="rounded-xl border border-border bg-surface-raised p-6 shadow-card">
+          <h2 className="font-display text-lg font-semibold text-text-primary">
+            Rotate secrets
+          </h2>
+          <p className="mt-2 font-body text-sm text-text-secondary">
+            Generates a new session secret and encryption key. You will be signed
+            out, and saved tokens are re-encrypted.
+          </p>
+          <div className="mt-4 space-y-4">
+            <label className="flex items-start gap-2 font-body text-sm text-text-secondary">
+              <input
+                type="checkbox"
+                checked={confirmRotate}
+                onChange={(e) => setConfirmRotate(e.target.checked)}
+                className="mt-1"
+              />
+              <span>I understand this signs me out and re-encrypts saved tokens.</span>
+            </label>
+            <Button
+              type="button"
+              disabled={rotating}
+              onClick={() => void handleRotate()}
+            >
+              {rotating ? 'Rotating…' : 'Rotate secrets'}
+            </Button>
+          </div>
+        </section>
+      )}
     </div>
   );
 }

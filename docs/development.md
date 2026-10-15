@@ -229,4 +229,4 @@ Open http://localhost:5001. Change default passwords and secrets before exposing
 
 ### Backup and migration
 
-Admins: **Tools** in the app (`/tools`) or `GET /api/tools/backup/export` / `POST /api/tools/backup/import`. Archives are full-system backups (database, config snapshot, artifacts, worktrees) and are **sensitive**. Requires `pg_dump` / `psql` on the server host (the desktop app uses its bundled copies).
+Admins: **Tools** in the app (`/tools`) or `GET /api/tools/backup/export` / `POST /api/tools/backup/import`. Archives are full-system backups (database, settings, artifacts, worktrees). The settings file leaves out passwords and encryption keys. Backups exported before that change can contain those secrets in `config.toml`; treat those files as secrets. The database dump still includes workspace data, so archives stay sensitive. Requires `pg_dump` / `psql` on the server host (the desktop app includes them). On the desktop app, **Tools → Backup → Rotate secrets** generates a new session secret (everyone is signed out) and a new encryption key (saved tokens are re-encrypted).
