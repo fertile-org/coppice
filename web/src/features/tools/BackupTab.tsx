@@ -1,5 +1,5 @@
 import { useRef, useState, type FormEvent } from 'react';
-import { ApiError, apiFetch, parseApiErrorMessage } from '../../lib/api';
+import { apiFetch, parseApiErrorMessage } from '../../lib/api';
 import { MIN_PASSWORD_CHARS } from '../../lib/passwords';
 import { Button } from '../../components/ui/button';
 import { useSession, type User } from '../auth/useSession';
@@ -80,13 +80,7 @@ export function BackupTab() {
       }
       setConfirmImport(false);
     } catch (err) {
-      if (err instanceof ApiError && err.status === 503) {
-        setError(
-          'The desktop app has everything it needs to import.',
-        );
-      } else {
-        setError(parseApiErrorMessage(err, 'Import failed.'));
-      }
+      setError(parseApiErrorMessage(err, 'Import failed.'));
     } finally {
       setImporting(false);
     }
@@ -182,9 +176,6 @@ export function BackupTab() {
           Passwords, keys, folder paths, agent commands, and plugin and MCP
           settings aren't imported, so set those up again. You'll paste saved
           tokens again, and you may be signed out.
-        </p>
-        <p className="mt-2 font-body text-sm text-text-secondary">
-          The desktop app has everything it needs to import.
         </p>
         <form className="mt-4 space-y-4" onSubmit={(e) => void handleImport(e)}>
           <div>
