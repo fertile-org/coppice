@@ -8,9 +8,14 @@
 //! new admin password hash.
 //!
 //! The Postgres password cannot share that transaction. The new password is
-//! written to `pg_password.pending` first, then `ALTER ROLE`, then the pending
-//! file is promoted. A crash in either gap is finished on the next launch by
-//! trying the current password and then the pending one.
+//! written to a pending file first, then `ALTER ROLE`, then the pending file
+//! is promoted. A crash in either gap is finished on the next launch by trying
+//! the current password and then the pending one.
+//!
+//! Desktop installs keep two passwords. `pg_password` is the bootstrap
+//! superuser and is not replaced here. The runtime role password is
+//! `pg_app_password`. Server installs still record the `database.url` password
+//! in `pg_password.pending` beside the config file.
 
 use std::io::{self, IsTerminal, Write};
 use std::path::{Path, PathBuf};
@@ -30,10 +35,12 @@ const MASTER_FILE: &str = "master_key";
 const SESSION_FILE: &str = "session_secret";
 const ADMIN_FILE: &str = "admin_password";
 const PG_FILE: &str = "pg_password";
+const PG_APP_FILE: &str = "pg_app_password";
 const MASTER_PENDING: &str = "master_key.pending";
 const SESSION_PENDING: &str = "session_secret.pending";
 const ADMIN_PENDING: &str = "admin_password.pending";
 pub const PG_PENDING: &str = "pg_password.pending";
+const PG_APP_PENDING: &str = "pg_app_password.pending";
 
 pub const REPLACE_UI_ERROR: &str = "Couldn't replace keys. Nothing was changed.";
 pub const REPLACE_ON_SERVER: &str =
@@ -108,8 +115,32 @@ pub async fn finish_file_password(
     user: &str,
     database: &str,
 ) -> Result<String, ReplaceError> {
-    let current = read_secret(&dir.join(PG_FILE))?;
-    let pending_path = dir.join(PG_PENDING);
+    finish_role_file(dir, host, port, user, database, PG_FILE, PG_PENDING).await
+}
+
+/// Desktop runtime role. Same crash recovery as [`finish_file_password`], using
+/// `pg_app_password` so a replacement cannot overwrite the superuser password.
+pub async fn finish_app_password(
+    dir: &Path,
+    host: &str,
+    port: u16,
+    user: &str,
+    database: &str,
+) -> Result<String, ReplaceError> {
+    finish_role_file(dir, host, port, user, database, PG_APP_FILE, PG_APP_PENDING).await
+}
+
+async fn finish_role_file(
+    dir: &Path,
+    host: &str,
+    port: u16,
+    user: &str,
+    database: &str,
+    current_name: &str,
+    pending_name: &str,
+) -> Result<String, ReplaceError> {
+    let current = read_secret(&dir.join(current_name))?;
+    let pending_path = dir.join(pending_name);
     if !pending_path.is_file() {
         return Ok(current);
     }
@@ -119,7 +150,7 @@ pub async fn finish_file_password(
     }
     let pending = read_secret(&pending_path)?;
     if password_connects(host, port, user, &pending, database).await {
-        std::fs::rename(&pending_path, dir.join(PG_FILE))?;
+        std::fs::rename(&pending_path, dir.join(current_name))?;
         return Ok(pending);
     }
     Err(ReplaceError::Failed(
@@ -224,7 +255,7 @@ pub async fn replace_desktop_keys(
     let password_hash = hash_password(admin_password)
         .map_err(|err| ReplaceError::Failed(format!("could not hash the admin password: {err}")))?;
 
-    write_secret_atomic(&dir.join(PG_PENDING), &new_pg)?;
+    write_secret_atomic(&dir.join(PG_APP_PENDING), &new_pg)?;
     let old_options = (*pool.connect_options()).clone();
     let outcome = apply_pg_then_keys(
         pool,
@@ -334,9 +365,14 @@ async fn apply_pg_then_keys(
     secret_files: bool,
 ) -> Result<(), ReplaceError> {
     let target = db_target(database_url)?;
+    let pg_pending = if secret_files {
+        PG_APP_PENDING
+    } else {
+        PG_PENDING
+    };
     let mut conn = pool.acquire().await?;
     if let Err(err) = alter_role_password(&mut conn, &target.user, new_pg).await {
-        let _ = std::fs::remove_file(dir.join(PG_PENDING));
+        let _ = std::fs::remove_file(dir.join(pg_pending));
         return Err(err);
     }
     if !password_connects(
@@ -355,7 +391,7 @@ async fn apply_pg_then_keys(
             );
         } else {
             pool.set_connect_options(old_options.clone());
-            let _ = std::fs::remove_file(dir.join(PG_PENDING));
+            let _ = std::fs::remove_file(dir.join(pg_pending));
         }
         return Err(ReplaceError::Failed(
             "postgres did not accept the new password, so the role password was restored".into(),
@@ -390,7 +426,7 @@ async fn apply_pg_then_keys(
             );
         } else {
             pool.set_connect_options(old_options.clone());
-            let _ = std::fs::remove_file(dir.join(PG_PENDING));
+            let _ = std::fs::remove_file(dir.join(pg_pending));
         }
         return Err(err);
     }
@@ -433,11 +469,11 @@ async fn settle_desktop_pg(
     dir: &Path,
     database_url: &str,
 ) -> Result<String, ReplaceError> {
-    if !dir.join(PG_PENDING).is_file() {
+    if !dir.join(PG_APP_PENDING).is_file() {
         return Ok(database_url.to_string());
     }
     let target = db_target(database_url)?;
-    let pg = finish_file_password(
+    let pg = finish_app_password(
         dir,
         &target.host,
         target.port,
@@ -486,14 +522,20 @@ fn alter_role_sql(role: &str, password: &str) -> Result<String, ReplaceError> {
             "unsupported database role {role}"
         )));
     }
+    Ok(format!(
+        "ALTER ROLE {role} PASSWORD {}",
+        role_password_literal(password)?
+    ))
+}
+
+/// Quoted SCRAM-SHA-256 verifier for `CREATE ROLE` / `ALTER ROLE`. The
+/// plaintext password is not sent to PostgreSQL.
+pub(crate) fn role_password_literal(password: &str) -> Result<String, ReplaceError> {
     if password.contains('\0') {
         return Err(ReplaceError::Failed("password contains a null byte".into()));
     }
     let verifier = scram_sha256_verifier(password)?;
-    Ok(format!(
-        "ALTER ROLE {role} PASSWORD '{}'",
-        verifier.replace('\'', "''")
-    ))
+    Ok(format!("'{}'", verifier.replace('\'', "''")))
 }
 
 /// PostgreSQL stores a client-built SCRAM-SHA-256 verifier as-is, so the
@@ -870,6 +912,7 @@ fn promote_pending(dir: &Path) -> Result<(), ReplaceError> {
             (SESSION_PENDING, SESSION_FILE),
             (ADMIN_PENDING, ADMIN_FILE),
             (PG_PENDING, PG_FILE),
+            (PG_APP_PENDING, PG_APP_FILE),
         ],
     )
 }
@@ -883,6 +926,7 @@ fn promote_pending_except_admin(dir: &Path) -> Result<(), ReplaceError> {
             (MASTER_PENDING, MASTER_FILE),
             (SESSION_PENDING, SESSION_FILE),
             (PG_PENDING, PG_FILE),
+            (PG_APP_PENDING, PG_APP_FILE),
         ],
     )
 }
@@ -1870,5 +1914,23 @@ mod tests {
             .await
         );
         role.drop_role().await;
+    }
+
+    #[test]
+    fn promote_pending_moves_the_app_password_and_leaves_the_superuser_password() {
+        let root = secrets_dir();
+        let dir = root.path().join("secrets");
+        let superuser = generate_secret();
+        let old_app = generate_secret();
+        let new_app = generate_secret();
+        write_secret_atomic(&dir.join(PG_FILE), &superuser).unwrap();
+        write_secret_atomic(&dir.join(PG_APP_FILE), &old_app).unwrap();
+        write_secret_atomic(&dir.join(PG_APP_PENDING), &new_app).unwrap();
+
+        promote_pending(&dir).unwrap();
+
+        assert_eq!(read_secret(&dir.join(PG_FILE)).unwrap(), superuser);
+        assert_eq!(read_secret(&dir.join(PG_APP_FILE)).unwrap(), new_app);
+        assert!(!dir.join(PG_APP_PENDING).exists());
     }
 }

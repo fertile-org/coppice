@@ -1,6 +1,7 @@
 //! `coppice-server desktop`: data dir layout, bundled resources, secrets and
 //! generated config for the single-user desktop app.
 
+mod app_role;
 pub mod args;
 pub mod bootstrap;
 pub mod layout;
@@ -236,9 +237,29 @@ async fn serve_with_postgres(
     .map_err(|err| anyhow::anyhow!("could not finish replacing keys: {err}"))?;
     let mut secrets = secrets.clone();
     secrets.pg_password = pg_password;
-    let pg_url = pg
-        .ensure_database(pg_port, &secrets.pg_password, DATABASE_NAME)
+    // Provision before settling a pending app password: creating the role
+    // must not overwrite a password that already landed in PostgreSQL.
+    let mut pg_url = pg
+        .ensure_database(
+            pg_port,
+            &secrets.pg_password,
+            &secrets.pg_app_password,
+            DATABASE_NAME,
+        )
         .await?;
+    let app_password = crate::services::secret_rotation::finish_app_password(
+        &layout.secrets_dir,
+        "127.0.0.1",
+        pg_port,
+        app_role::APP_ROLE,
+        DATABASE_NAME,
+    )
+    .await
+    .map_err(|err| anyhow::anyhow!("could not finish replacing keys: {err}"))?;
+    if app_password != secrets.pg_app_password {
+        pg_url = app_role::app_database_url(pg_port, &app_password, DATABASE_NAME)?;
+        secrets.pg_app_password = app_password;
+    }
     let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
         .await
         .context("bind 127.0.0.1")?;
