@@ -5,8 +5,6 @@ use std::process::{Output, Stdio};
 use std::time::Duration;
 
 use anyhow::{bail, Context};
-use sqlx::postgres::PgConnectOptions;
-use sqlx::{ConnectOptions, Connection};
 use tokio::process::Command;
 
 use super::layout::{DataLayout, ResourceLayout};
@@ -261,42 +259,28 @@ impl DesktopPostgres {
         Ok(StartStatus::Started)
     }
 
-    /// Creates database `name` if missing and returns its connection URL.
+    /// Creates database `name` if missing, owned by `coppice_app`, and returns
+    /// that role's connection URL. The superuser password is used only to
+    /// create the role and adopt an existing cluster. `ready_flag` skips
+    /// opening the database as the superuser once that adoption has succeeded.
     pub async fn ensure_database(
         &self,
         port: u16,
-        password: &str,
+        superuser_password: &str,
+        app_password: &str,
         name: &str,
+        ready_flag: &Path,
     ) -> anyhow::Result<String> {
-        if !is_valid_db_name(name) {
-            bail!("invalid database name {name:?}");
-        }
-        let mut conn = PgConnectOptions::new()
-            .host("127.0.0.1")
-            .port(port)
-            .username(SUPERUSER)
-            .password(password)
-            .database("postgres")
-            .connect()
-            .await
-            .context("connect to bundled postgres")?;
-        let exists: bool =
-            sqlx::query_scalar("SELECT EXISTS (SELECT 1 FROM pg_database WHERE datname = $1)")
-                .bind(name)
-                .fetch_one(&mut conn)
-                .await
-                .context("check database exists")?;
-        if !exists {
-            sqlx::query(&format!("CREATE DATABASE \"{name}\""))
-                .execute(&mut conn)
-                .await
-                .with_context(|| format!("create database {name}"))?;
-        }
-        conn.close().await.ok();
-        Ok(format!(
-            "postgres://{SUPERUSER}:{}@127.0.0.1:{port}/{name}",
-            percent_encode(password)
-        ))
+        super::app_role::provision_app_role(
+            "127.0.0.1",
+            port,
+            superuser_password,
+            app_password,
+            name,
+            ready_flag,
+        )
+        .await?;
+        super::app_role::app_database_url(port, app_password, name)
     }
 
     /// Fast shutdown, falling back to immediate; Ok when the server is not running.
@@ -706,13 +690,13 @@ std::thread_local! {
     static PS_BIN: std::cell::RefCell<Option<PathBuf>> = const { std::cell::RefCell::new(None) };
 }
 
-fn is_valid_db_name(name: &str) -> bool {
+pub(crate) fn is_valid_db_name(name: &str) -> bool {
     let mut chars = name.chars();
     matches!(chars.next(), Some(c) if c.is_ascii_lowercase() || c == '_')
         && chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
 }
 
-fn percent_encode(value: &str) -> String {
+pub(crate) fn percent_encode(value: &str) -> String {
     value
         .bytes()
         .map(|b| match b {

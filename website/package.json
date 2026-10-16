@@ -7,7 +7,8 @@
   },
   "scripts": {
     "dev": "astro dev",
-    "build": "astro build",
+    "build": "astro build && node scripts/check-search-index.mjs",
+    "check:search": "node --experimental-strip-types --test src/lib/docs-search.test.ts",
     "preview": "astro preview --host 127.0.0.1",
     "check:links": "node scripts/check-links.mjs",
     "check:download": "node --experimental-strip-types --test src/content/downloads.test.ts",
@@ -20,7 +21,8 @@
     "@astrojs/markdown-remark": "^7.3.1",
     "@fontsource-variable/fraunces": "^5.3.0",
     "@fontsource-variable/source-sans-3": "^5.3.0",
-    "astro": "^7.3.5"
+    "astro": "^7.3.5",
+    "astro-pagefind": "^2.0.1"
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.13.0",

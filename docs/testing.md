@@ -16,7 +16,7 @@ cargo nextest run --workspace --features embedded-test-db --profile ci
 cargo clippy --workspace -- -D warnings
 ```
 
-Locally, use `make test` (same flags; install [cargo-nextest](https://nexte.st) with `make tools` or it falls back to the slow serial runner). First run may download Postgres binaries (network once); later runs use cache.
+Locally, use `make test` (same flags; install [cargo-nextest](https://nexte.st) with `make tools` or it falls back to the slow serial runner). First run may download Postgres binaries (network once); later runs use cache. The desktop app-role import test runs `psql` from `PATH` (`postgresql-client`); CI installs that package.
 
 For host `make migrate` / dev server, ensure `config.toml` (or `DATABASE_URL`) matches the Postgres you started: `compose-up` → `:5432`, `compose-local-up` → `:5433`.
 

@@ -15,6 +15,9 @@ pub struct DesktopSecrets {
     pub session_secret: String,
     pub master_key: String,
     pub pg_password: String,
+    /// Password for the non-superuser runtime role. Separate from `pg_password`,
+    /// which stays the bootstrap superuser.
+    pub pg_app_password: String,
     pub admin_password: String,
 }
 
@@ -26,6 +29,7 @@ pub fn load_or_create_secrets(dir: &Path) -> io::Result<DesktopSecrets> {
         session_secret: load_or_create_secret(&dir.join("session_secret"))?,
         master_key: load_or_create_secret(&dir.join("master_key"))?,
         pg_password: load_or_create_secret(&dir.join("pg_password"))?,
+        pg_app_password: load_or_create_secret(&dir.join("pg_app_password"))?,
         admin_password: load_or_create_admin_password(&dir.join("admin_password"))?,
     })
 }
@@ -343,12 +347,15 @@ mod tests {
         assert_eq!(first.session_secret, second.session_secret);
         assert_eq!(first.master_key, second.master_key);
         assert_eq!(first.pg_password, second.pg_password);
+        assert_eq!(first.pg_app_password, second.pg_app_password);
+        assert_ne!(first.pg_password, first.pg_app_password);
         assert_eq!(first.admin_password, second.admin_password);
         assert_ne!(first.session_secret, first.master_key);
         for value in [
             &first.session_secret,
             &first.master_key,
             &first.pg_password,
+            &first.pg_app_password,
             &first.admin_password,
         ] {
             assert_eq!(value.len(), 64);
@@ -358,6 +365,7 @@ mod tests {
             "session_secret",
             "master_key",
             "pg_password",
+            "pg_app_password",
             "admin_password",
         ] {
             let mode = std::fs::metadata(secrets_dir.join(name))
@@ -429,6 +437,7 @@ mod tests {
             [
                 "admin_password",
                 "master_key",
+                "pg_app_password",
                 "pg_password",
                 "session_secret"
             ]
