@@ -172,7 +172,7 @@ fn chat_banner_for(name: &str, status: coppice_connectors::ChatReadOnlyStatus) -
     match status {
         ChatReadOnlyStatus::Passed | ChatReadOnlyStatus::Unavailable => None,
         ChatReadOnlyStatus::Untested => Some(format!(
-            "Coppice hasn't confirmed that {name} stays read-only, so chat runs in a temporary copy of your repo. The agent can still run commands on your computer."
+            "Coppice hasn't confirmed that {name} stays read-only. The agent can still run commands on your computer."
         )),
         ChatReadOnlyStatus::Failed => Some(format!(
             "{name} can't be kept read-only. Chat runs in a temporary copy of your repo, but the agent can still run commands on your computer."
@@ -471,7 +471,7 @@ mod tests {
             assert!(chat_needs_isolation(id), "{id}");
             assert!(chat_unavailable_message(id).is_none(), "{id}");
             let expected = format!(
-                "Coppice hasn't confirmed that {name} stays read-only, so chat runs in a temporary copy of your repo. The agent can still run commands on your computer."
+                "Coppice hasn't confirmed that {name} stays read-only. The agent can still run commands on your computer."
             );
             assert_eq!(chat_isolation_banner(id).as_deref(), Some(expected.as_str()));
         }
