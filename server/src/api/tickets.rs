@@ -1320,6 +1320,8 @@ async fn final_approve(
         Err(err) => return Err(map_ticket_git_error_response(err).into()),
     }
 
+    // Staged attachment copies stay until a successful merge or ticket delete.
+    // A failed merge sends this ticket back to In Progress.
     let updated = ticket_svc
         .accept_to_done(ticket_id)
         .await
@@ -1390,6 +1392,20 @@ async fn merge_ticket_branch(
         Ok(merge) => merge,
         Err(err) => return Err(git_failure_response(&state, pool, ticket_id, err).await),
     };
+
+    // Accept does not remove these copies. A failed merge (the Err arm above)
+    // returns the ticket to In Progress and leaves them in place.
+    if let Err(err) = crate::services::ticket_attachments::clear_if_ended(
+        &state.config.storage.artifacts_dir,
+        ticket_id,
+        crate::services::ticket_attachments::AttachmentFolderEnd::MergeSucceeded,
+    ) {
+        tracing::warn!(
+            error = %err,
+            %ticket_id,
+            "could not remove staged ticket attachments after merge"
+        );
+    }
 
     let short_sha = merge.head_sha.get(..7).unwrap_or(&merge.head_sha);
     let comment_body = format!(

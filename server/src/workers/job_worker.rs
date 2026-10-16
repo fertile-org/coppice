@@ -544,11 +544,17 @@ async fn execute_job(
         &agent_key,
         &agent.role,
     );
-    write_context_document(
+    let mut markdown = build_tool_first_context(&context_input, &skills, required);
+    let attachments = crate::services::ticket_attachments::stage_ticket_attachments(
+        pool,
+        &state.config.storage.artifacts_dir,
         &paths.worktree_dir,
-        &build_tool_first_context(&context_input, &skills, required),
+        ticket_id,
     )
-    .context("write context file")?;
+    .await
+    .context("stage ticket attachments")?;
+    crate::services::ticket_attachments::append_section(&mut markdown, &attachments);
+    write_context_document(&paths.worktree_dir, &markdown).context("write context file")?;
 
     if run_svc.is_cancelled(run.id).await? {
         return Err(JobCancelled.into());

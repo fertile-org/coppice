@@ -9,6 +9,7 @@ use super::{
 };
 use crate::mcp::grant::McpAccess;
 use crate::mcp::wiring::McpServerSpec;
+use crate::services::ticket_attachments;
 use crate::sessions::opencode_events::{coppice_run_prompt, extract_result_from_text};
 use crate::sessions::run_registry::RunStreamHandle;
 use async_trait::async_trait;
@@ -112,7 +113,14 @@ impl AgentProvider for KiloCodeProvider {
             port: "",
             version: Some(version.as_str()),
         });
-        let mut args = contract.with_prompt(pinned, coppice_run_prompt());
+        let staged = ticket_attachments::load_for_run(
+            input.artifacts_dir.as_deref(),
+            input.ticket_id.as_deref(),
+        );
+        let mut args = contract.with_prompt(
+            pinned,
+            &ticket_attachments::launch_prompt(coppice_run_prompt(), &staged),
+        );
 
         self.push_model_arg(&mut args, &input);
 
@@ -135,6 +143,15 @@ impl AgentProvider for KiloCodeProvider {
             let run_dir = run_dir(&input, "kilo-code")?;
             env.extend(kilo_mcp_setup(access, &run_dir)?);
             env.extend(access.env().map(|(k, v)| (k.to_string(), v)));
+        }
+        if let Some(dir) = ticket_attachments::external_read_dir(&staged) {
+            ticket_attachments::apply_external_read_env(
+                &mut env,
+                "KILO_CONFIG",
+                &dir,
+                input.artifacts_dir.as_deref(),
+                input.run_id.as_deref(),
+            )?;
         }
 
         log_launch(

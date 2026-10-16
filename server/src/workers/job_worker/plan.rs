@@ -286,6 +286,15 @@ async fn drive_plan_run(
     let mut markdown = build_tool_first_context(&context_input, &skills, None);
     markdown.push_str("\n# Plan\n\n");
     markdown.push_str(&plan::plan_instructions(changes.as_deref()));
+    let attachments = crate::services::ticket_attachments::stage_ticket_attachments(
+        pool,
+        &state.config.storage.artifacts_dir,
+        cwd,
+        ticket_id,
+    )
+    .await
+    .context("stage ticket attachments")?;
+    crate::services::ticket_attachments::append_section(&mut markdown, &attachments);
     write_context_document(cwd, &markdown).context("write plan context")?;
     let context_path = cwd.join(".agent").join("context.md");
 
