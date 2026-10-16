@@ -6,6 +6,7 @@ use crate::domain::substatus::TicketStatus;
 use crate::domain::ticket::{status_from_str, status_to_str, substatus_to_str};
 use crate::mcp::tools::{ToolCtx, ToolError};
 use crate::services::agent_service::AgentService;
+use crate::services::board_service::BoardService;
 use crate::services::comment_service::CommentService;
 use crate::services::repo_service::{RepoError, RepoService};
 use crate::services::result_contract::ACCEPTANCE_CRITERIA_HEADER;
@@ -104,9 +105,10 @@ async fn resolve_ticket(ctx: &ToolCtx<'_>, args: &Value) -> Result<TicketWithDis
             "ticket is not part of this compaction batch".into(),
         ));
     }
-    // A board-less scope (e.g. a chat session without a board) may only read
-    // its own ticket; compaction is bounded by its batch above.
+    // A board-less scope may only read its own ticket. A workspace chat (no
+    // board) may read any ticket. Compaction is bounded by its batch above.
     if ctx.scope.board_id.is_none()
+        && !ctx.scope.workspace_chat()
         && ctx.scope.profile != ContextProfile::KnowledgeCompaction
         && ctx.scope.ticket_id != Some(ticket_id)
     {
@@ -190,7 +192,7 @@ pub async fn call_ticket_get(ctx: &ToolCtx<'_>, args: Value) -> Result<Value, To
         },
     };
 
-    Ok(json!({
+    let mut body = json!({
         "id": ticket.ticket.id,
         "title": ticket.ticket.title,
         "description": description,
@@ -200,7 +202,12 @@ pub async fn call_ticket_get(ctx: &ToolCtx<'_>, args: Value) -> Result<Value, To
         "assignee": assignee_key(&agents, ticket.ticket.assignee_agent_id),
         "repo": repo,
         "branch": ticket.ticket.branch_name,
-    }))
+    });
+    if ctx.scope.workspace_chat() {
+        let names = board_names(ctx).await?;
+        body["boardName"] = json!(names.get(&ticket.ticket.board_id));
+    }
+    Ok(body)
 }
 
 pub async fn call_ticket_comments(ctx: &ToolCtx<'_>, args: Value) -> Result<Value, ToolError> {
@@ -264,25 +271,46 @@ pub async fn call_ticket_search(ctx: &ToolCtx<'_>, args: Value) -> Result<Value,
                 ToolError::InvalidArgs("status is not a valid ticket status".into())
             })?),
         };
-    let Some(board_id) = ctx.scope.board_id else {
+    let workspace = ctx.scope.workspace_chat();
+    if ctx.scope.board_id.is_none() && !workspace {
         return Ok(json!({ "tickets": [] }));
-    };
+    }
 
     let tickets = TicketService::new(ctx.pool)
-        .search(Some(board_id), query, status, limit as i64)
+        .search(ctx.scope.board_id, query, status, limit as i64)
         .await
         .map_err(|e| ToolError::Internal(e.into()))?;
     let agents = list_agents(ctx).await?;
+    let names = if workspace {
+        board_names(ctx).await?
+    } else {
+        HashMap::new()
+    };
     let items: Vec<Value> = tickets
         .iter()
         .map(|t| {
-            json!({
+            let mut item = json!({
                 "id": t.id,
                 "title": t.title,
                 "status": status_to_str(t.status),
                 "assignee": assignee_key(&agents, t.assignee_agent_id),
-            })
+            });
+            if workspace {
+                item["boardName"] = json!(names.get(&t.board_id));
+            }
+            item
         })
         .collect();
     Ok(json!({ "tickets": items }))
+}
+
+async fn board_names(ctx: &ToolCtx<'_>) -> Result<HashMap<Uuid, String>, ToolError> {
+    let boards = BoardService::new(ctx.pool)
+        .list_boards()
+        .await
+        .map_err(|e| ToolError::Internal(e.into()))?;
+    Ok(boards
+        .into_iter()
+        .map(|board| (board.id, board.name))
+        .collect())
 }

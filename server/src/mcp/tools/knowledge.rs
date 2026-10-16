@@ -1,4 +1,4 @@
-use crate::knowledge::retrieval::retrieve;
+use crate::knowledge::retrieval::{retrieve, retrieve_across_boards};
 use crate::mcp::tools::{ToolCtx, ToolError};
 use crate::services::context_budget::{
     record_usage, render_knowledge, ByteTokenCounter, RenderedKnowledge, KNOWLEDGE_DATA_NOTE,
@@ -22,8 +22,10 @@ fn parse_limit(args: &Value) -> Result<usize, ToolError> {
     }
 }
 
-/// Searches approved knowledge visible to the run's agent on its board.
-/// Retrieval already restricts to approved, live, in-scope entries.
+/// Searches approved knowledge visible to the run's agent.
+/// A workspace chat (no board) searches every board. Other runs stay on their
+/// board, or return nothing when they have none. Retrieval already restricts
+/// to approved, live, in-scope entries.
 pub async fn call_knowledge_search(ctx: &ToolCtx<'_>, args: Value) -> Result<Value, ToolError> {
     let query = args
         .get("query")
@@ -33,23 +35,34 @@ pub async fn call_knowledge_search(ctx: &ToolCtx<'_>, args: Value) -> Result<Val
         .ok_or_else(|| ToolError::InvalidArgs("query is required".into()))?;
     let limit = parse_limit(&args)?;
 
-    let Some(board_id) = ctx.scope.board_id else {
-        return Ok(response(Vec::new()));
-    };
     if !ctx.state.config.knowledge.enabled {
         return Ok(response(Vec::new()));
     }
 
     let query: String = query.chars().take(MAX_QUERY_CHARS).collect();
-    let mut found = retrieve(
-        ctx.pool,
-        board_id,
-        ctx.scope.agent_id,
-        &query,
-        "",
-        &ctx.state.config.knowledge.retrieval,
-    )
-    .await?;
+    let workspace = ctx.scope.workspace_chat();
+    let mut found = if workspace {
+        retrieve_across_boards(
+            ctx.pool,
+            ctx.scope.agent_id,
+            &query,
+            "",
+            &ctx.state.config.knowledge.retrieval,
+        )
+        .await?
+    } else if let Some(board_id) = ctx.scope.board_id {
+        retrieve(
+            ctx.pool,
+            board_id,
+            ctx.scope.agent_id,
+            &query,
+            "",
+            &ctx.state.config.knowledge.retrieval,
+        )
+        .await?
+    } else {
+        return Ok(response(Vec::new()));
+    };
     // Retrieval returns the whole eligible set; non-matches carry score 0.
     found.retain(|k| k.score > 0.0);
     found.truncate(limit);
@@ -62,13 +75,17 @@ pub async fn call_knowledge_search(ctx: &ToolCtx<'_>, args: Value) -> Result<Val
         .iter()
         .zip(&section.entries)
         .map(|(k, entry)| {
-            json!({
+            let mut item = json!({
                 "id": k.item_id,
                 "revisionId": k.revision_id,
                 "title": k.title,
                 "type": k.knowledge_type,
                 "content": entry.rendered_content,
-            })
+            });
+            if workspace {
+                item["boardName"] = json!(k.board_name.as_deref());
+            }
+            item
         })
         .collect();
     Ok(response(items))

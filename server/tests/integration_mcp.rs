@@ -1059,39 +1059,158 @@ async fn chat_ticket_tool_without_ticket_id_errors() {
     assert_eq!(out["title"], "Test ticket");
 }
 
+fn boardless_chat_scope(fx: &RunFixture) -> NewRunToolScope {
+    NewRunToolScope {
+        ticket_id: None,
+        board_id: None,
+        profile: ContextProfile::Conversation,
+        job_type: "chat_turn".into(),
+        ..fx.scope.clone()
+    }
+}
+
 #[tokio::test]
-async fn boardless_chat_token_reads_only_its_own_ticket() {
+async fn boardless_chat_searches_tickets_across_boards_and_opens_them() {
     let _guard = common::DB_TEST_LOCK.lock().await;
     if !common::db_available().await {
         return;
     }
     let fx = run_fixture().await;
     let url = serve(&fx).await;
-    let own_ticket = fx.scope.ticket_id.unwrap().to_string();
-    let board_id = fx.scope.board_id.unwrap().to_string();
-    let other_ticket = common::create_test_ticket(&fx.app, &board_id, &fx.cookie, &fx.csrf).await;
-    let token = mint_scope(
+    let home = fx.scope.ticket_id.unwrap().to_string();
+    set_ticket_title(&fx.pool, &home, "Lantern invoice alpha").await;
+    let other_board = create_other_board(&fx).await;
+    let elsewhere = common::create_test_ticket(&fx.app, &other_board, &fx.cookie, &fx.csrf).await;
+    set_ticket_title(&fx.pool, &elsewhere, "Lantern invoice beta").await;
+    let token = mint_scope(&fx, boardless_chat_scope(&fx)).await;
+
+    let out = call_tool_json(&url, &token, "ticket_search", json!({"query": "Lantern"})).await;
+    let tickets = out["tickets"].as_array().unwrap();
+    assert_eq!(tickets.len(), 2, "{out}");
+    let board_of = |id: &str| {
+        tickets
+            .iter()
+            .find(|t| t["id"] == id)
+            .unwrap_or_else(|| panic!("missing {id} in {out}"))["boardName"]
+            .as_str()
+            .unwrap()
+            .to_string()
+    };
+    assert_eq!(board_of(&home), "Test Board");
+    assert_eq!(board_of(&elsewhere), "Other Board");
+
+    let opened =
+        call_tool_json(&url, &token, "ticket_get", json!({"ticketId": elsewhere})).await;
+    assert_eq!(opened["id"], elsewhere);
+    assert_eq!(opened["title"], "Lantern invoice beta");
+    assert_eq!(opened["boardName"], "Other Board");
+    let comments =
+        call_tool_json(&url, &token, "ticket_comments", json!({"ticketId": elsewhere})).await;
+    assert!(comments["comments"].is_array());
+    let runs = call_tool_json(&url, &token, "ticket_runs", json!({"ticketId": elsewhere})).await;
+    assert!(runs["runs"].is_array());
+
+    // A chat attached to one board stays on that board.
+    let scoped = mint_scope(
         &fx,
         NewRunToolScope {
-            board_id: None,
+            ticket_id: None,
             profile: ContextProfile::Conversation,
             job_type: "chat_turn".into(),
             ..fx.scope.clone()
         },
     )
     .await;
+    let scoped_search =
+        call_tool_json(&url, &scoped, "ticket_search", json!({"query": "Lantern"})).await;
+    let scoped_tickets = scoped_search["tickets"].as_array().unwrap();
+    assert_eq!(scoped_tickets.len(), 1, "{scoped_search}");
+    assert_eq!(scoped_tickets[0]["id"], home);
+    assert!(scoped_tickets[0].get("boardName").is_none(), "{scoped_search}");
+    let (is_error, text) =
+        call_tool(&url, &scoped, "ticket_get", json!({"ticketId": elsewhere})).await;
+    assert!(is_error);
+    assert_eq!(text, "ticket not on this board");
 
-    for tool in ["ticket_get", "ticket_comments", "ticket_runs"] {
-        let (is_error, text) =
-            call_tool(&url, &token, tool, json!({"ticketId": other_ticket})).await;
-        assert!(is_error, "{tool} should fail");
-        assert_eq!(text, "ticket not on this board");
+    // Board-less tokens that are not a workspace chat stay closed.
+    let human = mint_scope(
+        &fx,
+        NewRunToolScope {
+            board_id: None,
+            profile: ContextProfile::HumanChat,
+            job_type: "respond_to_mention".into(),
+            ..fx.scope.clone()
+        },
+    )
+    .await;
+    let (is_error, text) =
+        call_tool(&url, &human, "ticket_get", json!({"ticketId": elsewhere})).await;
+    assert!(is_error);
+    assert_eq!(text, "ticket not on this board");
+    let human_search =
+        call_tool_json(&url, &human, "ticket_search", json!({"query": "Lantern"})).await;
+    assert!(human_search["tickets"].as_array().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn boardless_chat_exposes_no_write_tools() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
     }
-    let own = call_tool_json(&url, &token, "ticket_get", json!({"ticketId": own_ticket})).await;
-    assert_eq!(own["id"], own_ticket);
+    let fx = run_fixture().await;
+    let url = serve(&fx).await;
+    let _other = create_other_board(&fx).await;
+    let token = mint_scope(&fx, boardless_chat_scope(&fx)).await;
 
-    let search = call_tool_json(&url, &token, "ticket_search", json!({"query": "Test"})).await;
-    assert!(search["tickets"].as_array().unwrap().is_empty(), "{search}");
+    let res = rpc(&url, &token, "tools/list", json!({})).await;
+    let tools = res["result"]["tools"].as_array().expect("tools");
+    let names: Vec<&str> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
+    assert!(names.contains(&"board_list"), "{names:?}");
+    assert!(names.contains(&"ticket_get"));
+    assert!(names.contains(&"ticket_search"));
+    assert!(names.contains(&"knowledge_search"));
+    assert!(!names.contains(&"comment_post"), "{names:?}");
+    for tool in tools {
+        let name = tool["name"].as_str().unwrap();
+        let read_only = tool["annotations"]["readOnlyHint"].as_bool().unwrap();
+        if name == "result_submit" {
+            assert!(!read_only);
+        } else {
+            assert!(read_only, "{name} must be read-only");
+        }
+    }
+
+    let (is_error, text) = call_tool(&url, &token, "comment_post", json!({"body": "nope"})).await;
+    assert!(is_error);
+    assert!(text.contains("not available"), "{text}");
+
+    let listed = call_tool_json(&url, &token, "board_list", json!({})).await;
+    let board_names: Vec<&str> = listed["boards"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|b| b["name"].as_str().unwrap())
+        .collect();
+    assert!(board_names.contains(&"Test Board"), "{listed}");
+    assert!(board_names.contains(&"Other Board"), "{listed}");
+    assert!(listed["boards"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|b| b["id"].is_string()));
+
+    let scoped = mint_scope(
+        &fx,
+        NewRunToolScope {
+            profile: ContextProfile::Conversation,
+            job_type: "chat_turn".into(),
+            ..fx.scope.clone()
+        },
+    )
+    .await;
+    let scoped_names = tool_names(&url, &scoped).await;
+    assert!(!scoped_names.iter().any(|n| n == "board_list"), "{scoped_names:?}");
 }
 
 #[tokio::test]
@@ -1242,6 +1361,212 @@ async fn seed_knowledge_with_content(
     .await
     .unwrap();
     revision_id
+}
+
+async fn seed_scoped_knowledge(
+    pool: &PgPool,
+    scope: &str,
+    board_id: Option<Uuid>,
+    agent_id: Option<Uuid>,
+    title: &str,
+    content: &str,
+    status: &str,
+) -> Uuid {
+    let item_id = Uuid::new_v4();
+    let revision_id = Uuid::new_v4();
+    let approved = status == "approved";
+    sqlx::query("INSERT INTO knowledge_items (id, status, version) VALUES ($1, $2, 1)")
+        .bind(item_id)
+        .bind(status)
+        .execute(pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        r#"
+        INSERT INTO knowledge_revisions (
+            id, item_id, revision_number, scope, board_id, agent_id,
+            knowledge_type, title, content, source_type, confidence
+        ) VALUES ($1, $2, 1, $3, $4, $5, 'test_command', $6, $7, 'human_note', 'high')
+        "#,
+    )
+    .bind(revision_id)
+    .bind(item_id)
+    .bind(scope)
+    .bind(board_id)
+    .bind(agent_id)
+    .bind(title)
+    .bind(content)
+    .execute(pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "UPDATE knowledge_items SET current_revision_id = $2, \
+         active_revision_id = CASE WHEN $3 THEN $2 ELSE NULL END WHERE id = $1",
+    )
+    .bind(item_id)
+    .bind(revision_id)
+    .bind(approved)
+    .execute(pool)
+    .await
+    .unwrap();
+    revision_id
+}
+
+#[tokio::test]
+async fn boardless_chat_searches_knowledge_across_boards() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let fx = run_fixture().await;
+    let url = serve(&fx).await;
+    let home = fx.scope.board_id.unwrap();
+    let other_board: Uuid = create_other_board(&fx).await.parse().unwrap();
+    let other_agent: Uuid = common::create_test_agent_from_preset(
+        &fx.app,
+        "Other Agent",
+        &fx.cookie,
+        &fx.csrf,
+    )
+    .await
+    .parse()
+    .unwrap();
+
+    seed_scoped_knowledge(
+        &fx.pool,
+        "board",
+        Some(home),
+        None,
+        "Axolotl on the home board",
+        "axolotl habitat on the home board",
+        "approved",
+    )
+    .await;
+    seed_scoped_knowledge(
+        &fx.pool,
+        "board",
+        Some(other_board),
+        None,
+        "Axolotl on the other board",
+        "axolotl habitat on the other board",
+        "approved",
+    )
+    .await;
+    seed_scoped_knowledge(
+        &fx.pool,
+        "workspace",
+        None,
+        None,
+        "Axolotl workspace note",
+        "axolotl habitat for the whole workspace",
+        "approved",
+    )
+    .await;
+    seed_scoped_knowledge(
+        &fx.pool,
+        "agent",
+        Some(other_board),
+        Some(fx.scope.agent_id),
+        "Axolotl for this agent",
+        "axolotl habitat this agent keeps",
+        "approved",
+    )
+    .await;
+    seed_scoped_knowledge(
+        &fx.pool,
+        "agent",
+        Some(other_board),
+        Some(other_agent),
+        "Axolotl for another agent",
+        "axolotl habitat another agent keeps",
+        "approved",
+    )
+    .await;
+    seed_scoped_knowledge(
+        &fx.pool,
+        "board",
+        Some(other_board),
+        None,
+        "Axolotl still pending",
+        "axolotl habitat waiting in the inbox",
+        "pending",
+    )
+    .await;
+
+    let token = mint_scope(&fx, boardless_chat_scope(&fx)).await;
+    let out = call_tool_json(&url, &token, "knowledge_search", json!({"query": "axolotl"})).await;
+    let items = out["items"].as_array().unwrap();
+    let titles: Vec<&str> = items.iter().map(|i| i["title"].as_str().unwrap()).collect();
+    assert!(titles.contains(&"Axolotl on the home board"), "{out}");
+    assert!(titles.contains(&"Axolotl on the other board"), "{out}");
+    assert!(titles.contains(&"Axolotl workspace note"), "{out}");
+    assert!(titles.contains(&"Axolotl for this agent"), "{out}");
+    assert!(!titles.contains(&"Axolotl for another agent"), "{out}");
+    assert!(!titles.contains(&"Axolotl still pending"), "{out}");
+
+    let board_of = |title: &str| {
+        items
+            .iter()
+            .find(|i| i["title"] == title)
+            .unwrap()
+            .get("boardName")
+            .cloned()
+            .unwrap_or(Value::Null)
+    };
+    assert_eq!(board_of("Axolotl on the home board"), json!("Test Board"));
+    assert_eq!(board_of("Axolotl on the other board"), json!("Other Board"));
+    assert_eq!(board_of("Axolotl for this agent"), json!("Other Board"));
+    assert!(board_of("Axolotl workspace note").is_null());
+
+    let scoped = mint_scope(
+        &fx,
+        NewRunToolScope {
+            profile: ContextProfile::Conversation,
+            job_type: "chat_turn".into(),
+            ..fx.scope.clone()
+        },
+    )
+    .await;
+    let scoped_out =
+        call_tool_json(&url, &scoped, "knowledge_search", json!({"query": "axolotl"})).await;
+    let mut scoped_titles: Vec<&str> = scoped_out["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|i| i["title"].as_str().unwrap())
+        .collect();
+    scoped_titles.sort();
+    // Workspace notes stay visible on a board; other boards do not.
+    assert_eq!(
+        scoped_titles,
+        vec!["Axolotl on the home board", "Axolotl workspace note"],
+        "{scoped_out}"
+    );
+    assert!(scoped_out["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|item| item.get("boardName").is_none()));
+
+    let compaction = mint_scope(
+        &fx,
+        NewRunToolScope {
+            ticket_id: None,
+            board_id: None,
+            profile: ContextProfile::KnowledgeCompaction,
+            job_type: "compact_knowledge".into(),
+            ..fx.scope.clone()
+        },
+    )
+    .await;
+    let compaction_out = call_tool_json(
+        &url,
+        &compaction,
+        "knowledge_search",
+        json!({"query": "axolotl"}),
+    )
+    .await;
+    assert!(compaction_out["items"].as_array().unwrap().is_empty(), "{compaction_out}");
 }
 
 #[tokio::test]

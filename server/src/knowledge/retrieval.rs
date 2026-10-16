@@ -39,6 +39,8 @@ pub struct RetrievedKnowledge {
     /// Full-text rank; `0.0` when the entry did not match the query.
     pub score: f64,
     pub revision_created_at: OffsetDateTime,
+    /// Set by [`retrieve_across_boards`]. Board-scoped retrieval leaves this empty.
+    pub board_name: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -101,6 +103,59 @@ ORDER BY score DESC, revision_created_at DESC, item_id ASC
 LIMIT $6
 "#
 );
+
+/// Approved knowledge on every board, plus workspace notes and this agent's
+/// agent-scoped notes. `$1` is the agent id (no board bind).
+pub const WORKSPACE_RETRIEVAL_QUERY_SQL: &str = r#"
+WITH eligible AS MATERIALIZED (
+    SELECT
+        i.id AS item_id,
+        r.id AS revision_id,
+        r.scope,
+        r.knowledge_type,
+        r.title,
+        r.content,
+        r.source_type,
+        r.source_id,
+        r.confidence,
+        r.created_at AS revision_created_at,
+        r.search_vector,
+        b.name AS board_name
+    FROM knowledge_items i
+    JOIN knowledge_revisions r ON r.id = i.active_revision_id
+    LEFT JOIN boards b ON b.id = r.board_id
+    WHERE i.status = 'approved'
+      AND i.superseded_by IS NULL
+      AND (i.expires_at IS NULL OR i.expires_at > now())
+      AND CASE $2
+            WHEN 'high' THEN r.confidence = 'high'
+            WHEN 'medium' THEN r.confidence IN ('medium', 'high')
+            ELSE r.confidence IN ('low', 'medium', 'high')
+          END
+      AND (cardinality($4::text[]) = 0 OR r.knowledge_type = ANY($4::text[]))
+      AND (
+            r.scope = 'workspace'
+            OR r.scope = 'board'
+            OR (r.scope = 'agent' AND r.agent_id = $1)
+          )
+), query AS (
+    SELECT CASE
+        WHEN $3::text IS NULL THEN NULL
+        ELSE to_tsquery('simple'::regconfig, coppice_unaccent($3::text))
+    END AS q
+)
+SELECT
+    item_id, revision_id, scope, knowledge_type, title, content,
+    source_type, source_id, confidence, revision_created_at, board_name,
+    CASE
+        WHEN query.q IS NOT NULL AND eligible.search_vector @@ query.q
+            THEN ts_rank_cd(eligible.search_vector, query.q)::float8
+        ELSE 0.0::float8
+    END AS score
+FROM eligible CROSS JOIN query
+ORDER BY score DESC, revision_created_at DESC, item_id ASC
+LIMIT $5
+"#;
 
 const INBOX_SIMILAR_QUERY_SQL: &str = concat!(
     r#"
@@ -173,6 +228,44 @@ pub async fn retrieve(
                 confidence: row.try_get("confidence")?,
                 score: row.try_get("score")?,
                 revision_created_at: row.try_get("revision_created_at")?,
+                board_name: None,
+            })
+        })
+        .collect()
+}
+
+/// Same eligibility as [`retrieve`], without a single-board filter.
+pub async fn retrieve_across_boards(
+    pool: &PgPool,
+    agent_id: Uuid,
+    query_title: &str,
+    query_body: &str,
+    config: &KnowledgeRetrievalConfig,
+) -> Result<Vec<RetrievedKnowledge>, sqlx::Error> {
+    let tsquery = build_tsquery(query_title, query_body);
+    let rows = sqlx::query(WORKSPACE_RETRIEVAL_QUERY_SQL)
+        .bind(agent_id)
+        .bind(&config.minimum_confidence)
+        .bind(tsquery)
+        .bind(&config.allowed_types)
+        .bind(MAX_ELIGIBLE_CANDIDATES)
+        .fetch_all(pool)
+        .await?;
+    rows.into_iter()
+        .map(|row| {
+            Ok(RetrievedKnowledge {
+                item_id: row.try_get("item_id")?,
+                revision_id: row.try_get("revision_id")?,
+                scope: row.try_get("scope")?,
+                knowledge_type: row.try_get("knowledge_type")?,
+                title: row.try_get("title")?,
+                content: row.try_get("content")?,
+                source_type: row.try_get("source_type")?,
+                source_id: row.try_get("source_id")?,
+                confidence: row.try_get("confidence")?,
+                score: row.try_get("score")?,
+                revision_created_at: row.try_get("revision_created_at")?,
+                board_name: row.try_get("board_name")?,
             })
         })
         .collect()
@@ -231,5 +324,11 @@ mod tests {
         assert!(RETRIEVAL_QUERY_SQL.contains("ts_rank_cd"));
         assert!(!RETRIEVAL_QUERY_SQL.contains("<=>"));
         assert_eq!(ELIGIBLE_KNOWLEDGE_FROM, eligible_knowledge_from!());
+        assert!(WORKSPACE_RETRIEVAL_QUERY_SQL.contains("r.scope = 'workspace'"));
+        assert!(WORKSPACE_RETRIEVAL_QUERY_SQL.contains("r.scope = 'board'"));
+        assert!(WORKSPACE_RETRIEVAL_QUERY_SQL.contains("r.agent_id = $1"));
+        assert!(WORKSPACE_RETRIEVAL_QUERY_SQL.contains("LEFT JOIN boards"));
+        assert!(!WORKSPACE_RETRIEVAL_QUERY_SQL.contains("r.board_id = $1"));
+        assert!(WORKSPACE_RETRIEVAL_QUERY_SQL.contains("i.status = 'approved'"));
     }
 }

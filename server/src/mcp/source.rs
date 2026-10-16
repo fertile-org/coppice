@@ -86,10 +86,17 @@ impl ToolSource for CoreToolSource {
     }
 
     async fn list(&self, scope: &RunToolScope) -> Vec<SourcedTool> {
-        core_tools_for(scope.profile)
+        let mut tools: Vec<SourcedTool> = core_tools_for(scope.profile)
             .into_iter()
-            .map(|t| sourced(t.definition(), SourceKind::Core))
-            .collect()
+            .map(|t| sourced(t.definition_for(scope), SourceKind::Core))
+            .collect();
+        if scope.workspace_chat() {
+            tools.insert(
+                0,
+                sourced(CoreTool::BoardList.definition(), SourceKind::Core),
+            );
+        }
+        tools
     }
 
     async fn call(
