@@ -47,6 +47,7 @@ impl From<sqlx::Error> for ToolError {
 
 pub async fn dispatch(tool: CoreTool, ctx: &ToolCtx<'_>, args: Value) -> Result<Value, ToolError> {
     match tool {
+        CoreTool::BoardList => agents::call_board_list(ctx, args).await,
         CoreTool::BoardAgents => agents::call_board_agents(ctx, args).await,
         CoreTool::TicketGet => tickets::call_ticket_get(ctx, args).await,
         CoreTool::TicketComments => tickets::call_ticket_comments(ctx, args).await,

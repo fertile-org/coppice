@@ -162,6 +162,7 @@ mod tests {
             confidence: "high".into(),
             score,
             revision_created_at: time::OffsetDateTime::now_utc(),
+            board_name: None,
         }
     }
 

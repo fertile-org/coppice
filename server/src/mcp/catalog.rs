@@ -4,6 +4,7 @@ use serde_json::{json, Value};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CoreTool {
+    BoardList,
     BoardAgents,
     TicketGet,
     TicketComments,
@@ -16,7 +17,8 @@ pub enum CoreTool {
 }
 
 impl CoreTool {
-    const ALL: [Self; 9] = [
+    const ALL: [Self; 10] = [
+        Self::BoardList,
         Self::BoardAgents,
         Self::TicketGet,
         Self::TicketComments,
@@ -30,6 +32,7 @@ impl CoreTool {
 
     pub fn name(self) -> &'static str {
         match self {
+            Self::BoardList => "board_list",
             Self::BoardAgents => "board_agents",
             Self::TicketGet => "ticket_get",
             Self::TicketComments => "ticket_comments",
@@ -48,6 +51,11 @@ impl CoreTool {
 
     pub fn definition(self) -> ToolDefinition {
         let (description, input_schema, read_only) = match self {
+            Self::BoardList => (
+                "List every board by id and name.",
+                object(json!({}), &[]),
+                true,
+            ),
             Self::BoardAgents => (
                 "List enabled agents (key, name, role). Use a key to hand work to an agent.",
                 object(json!({}), &[]),
@@ -134,6 +142,27 @@ impl CoreTool {
             input_schema,
             read_only,
         }
+    }
+
+    /// Descriptions for a workspace chat say the search covers every board.
+    /// Board-attached sessions keep the profile definition.
+    pub fn definition_for(self, scope: &crate::mcp::token::RunToolScope) -> ToolDefinition {
+        let mut def = self.definition();
+        if scope.workspace_chat() {
+            match self {
+                Self::TicketSearch => {
+                    def.description = "Search tickets on every board by text and optional status. Each result includes the board name.".into();
+                }
+                Self::KnowledgeSearch => {
+                    def.description = format!(
+                        "Search approved knowledge on every board. Each result includes the board name. {}",
+                        crate::services::context_budget::KNOWLEDGE_DATA_NOTE
+                    );
+                }
+                _ => {}
+            }
+        }
+        def
     }
 }
 

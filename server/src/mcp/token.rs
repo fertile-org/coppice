@@ -33,6 +33,13 @@ pub struct RunToolScope {
     pub plugin_ids: Vec<Uuid>,
 }
 
+impl RunToolScope {
+    /// A workspace chat: the conversation profile with no board attached.
+    pub fn workspace_chat(&self) -> bool {
+        self.board_id.is_none() && self.profile == ContextProfile::Conversation
+    }
+}
+
 pub struct TokenService<'a> {
     pool: &'a PgPool,
 }
