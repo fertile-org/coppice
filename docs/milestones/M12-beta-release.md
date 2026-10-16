@@ -18,7 +18,7 @@ Ship this before the capability sandbox ([M13 — Security & sandbox](./M13-secu
 - **Beta labeling** on the site (including docs pages) and in the root README.
 - **Download CTAs** resolve to GitHub Release assets only after a beta git tag has published those two installers. Until that release exists, the buttons do not pretend a file is there.
 - **No mock agent in end-user builds.** `MockProvider` stays for automated tests and for Compose/dev when the `mock-provider` feature is on. Desktop installers and `make release-tar` are built without that feature ([mock](../providers/mock.md)).
-- **Screenshot** in the root README stays `static/screenshot.png` (the board). Surrounding copy does not describe Sign out or an `admin@localhost` login.
+- **Screenshot** in the root README is `static/marketing.gif` (the hero storyboard). Surrounding copy does not describe Sign out or an `admin@localhost` login.
 
 ## Out of scope
 
@@ -48,7 +48,7 @@ These are checkable with the repo, GitHub Releases, and GitHub Pages. They do no
 - [ ] Before a beta git tag's GitHub Release contains those assets, download CTAs do not link to a missing file. After that release exists, each CTA returns the matching asset (HTTP 200, expected filename).
 - [ ] [https://getcoppice.vercel.app/](https://getcoppice.vercel.app/) serves the built site at the domain root. A custom domain is not required. The website workflow can still deploy GitHub Pages at `/coppice` when that dispatch is run.
 - [ ] Root [README.md](../../README.md) leads with the Electron desktop app, points at `website/` and `https://getcoppice.vercel.app/` as the product docs, and points contributors at [AGENTS.md](../../AGENTS.md) and [docs/development.md](../development.md). Docker Compose is the contributor/dev path.
-- [ ] The README image is `static/screenshot.png`. The README text does not tell the reader to sign in as `admin@localhost` or to look for a Sign out control on that shot.
+- [ ] The README image is `static/marketing.gif`. The README text does not tell the reader to sign in as `admin@localhost` or to look for a Sign out control on that shot.
 - [ ] A desktop installer and a `make release-tar` build do not list or run the `mock` connector. Automated tests, and Compose/dev with `--features mock-provider`, still can ([mock](../providers/mock.md)).
 - [ ] The M11 live tag check has passed, and manual install acceptance on both the arm64 `.dmg` and the x64 `.deb` used a real connector through to Done.
 
