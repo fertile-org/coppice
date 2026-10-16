@@ -103,39 +103,6 @@ Admins manage plugins in **Settings → Plugins**. Claude Code / Cursor format p
 
 ## Release (build and publish)
 
-### Self-host tarball (server + web + CLI)
-
-**Build** (from repo root):
-
-```bash
-make test
-make clippy
-make web-test
-make release-tar
-```
-
-**Artifact:** `dist/coppice-<os>-<arch>.tar.gz` containing `coppice-server`, `coppice-cli`, `web/dist/`, `config.example.toml`, `systemd/`.
-
-**Publish** (maintainers):
-
-1. Tag a version in git (e.g. `v0.2.0`).
-2. Run the build on each target OS/arch you support (or cross-compile where applicable).
-3. Upload each `dist/coppice-*.tar.gz` to a **GitHub Release** (or your artifact store) with release notes.
-4. Point users to [Install — Self-host tarball](#self-host-tarball).
-
-The tarball does **not** include PostgreSQL; operators bring their own Postgres 16.
-
-### Docker images (optional)
-
-For teams that deploy with Compose instead of the tarball:
-
-```bash
-docker compose -f deploy/docker-compose.yml build
-# Tag and push to your registry; document image tags in the release notes.
-```
-
-Smoke/CI uses the same compose file via `make compose-up` — not the tarball.
-
 ### Desktop release (tag and publish)
 
 Desktop installers are built by `.github/workflows/release.yml` ([design](superpowers/specs/2026-10-04-desktop-release-design.md)). Four targets: macOS arm64 and x64 `.dmg`, Linux amd64 and arm64 `.deb`. No Windows, no auto-update.
@@ -184,47 +151,12 @@ Alternatively, after the first blocked launch open **System Settings → Privacy
 sudo apt install ./Coppice-<version>-linux-<arch>.deb
 ```
 
-`<version>` in the file name is the git tag without `v` (`0.1.0-rc.7`, or `0.1.0` for a final release). The Debian package name is `coppice-desktop`, and the control `Version` is `0.1.0~rc.7` for that release candidate (`0.1.0` for the final tag). `dpkg` sorts `0.1.0~rc.7` before `0.1.0`, so installing the final `.deb` is an upgrade. Installing a newer `.deb` replaces `coppice-desktop`. `sudo apt remove coppice-desktop` leaves boards and settings in `~/.config/Coppice`.
+`<version>` in the file name is the git tag without `v` (for example `0.1.0`). The Debian package name is `coppice-desktop`, and the control `Version` is `0.1.0~rc.7` for that release candidate (`0.1.0` for the final tag). `dpkg` sorts `0.1.0~rc.7` before `0.1.0`, so installing the final `.deb` is an upgrade. Installing a newer `.deb` replaces `coppice-desktop`. `sudo apt remove coppice-desktop` leaves boards and settings in `~/.config/Coppice`.
 
 Then start **Coppice** from the applications menu, or run `coppice`.
 
 **Data:** `~/Library/Application Support/Coppice` on macOS, `~/.config/Coppice` on Linux (`config.toml`, `secrets/`, the Postgres cluster in `pg/data`). **Logs:** `~/Library/Logs/Coppice` on macOS; `$XDG_STATE_HOME/Coppice/logs` or `~/.local/state/Coppice/logs` on Linux. Uninstalling leaves them in place. The `secrets/` files encrypt forge and plugin settings; losing them loses those secrets. Verify downloads with `SHA256SUMS` from the release (`sha256sum --check --ignore-missing SHA256SUMS`, or `shasum -a 256 …` on macOS).
 
-### Self-host tarball
+### Backup
 
-**You need:** PostgreSQL 16 and a machine to run two processes (API + web proxy).
-
-```bash
-tar -xzf coppice-<os>-<arch>.tar.gz -C /opt/coppice
-cd /opt/coppice
-
-cp config.example.toml config.toml
-# Edit: database.url, auth.session_secret, storage paths
-
-./coppice-cli migrate
-./coppice-cli bootstrap admin --email you@example.com --password '<strong-password>'
-
-./coppice-cli server start    # :5000
-./coppice-cli web start       # :5001 — open in browser
-```
-
-Optional: `mv coppice-cli coppice`. Config may also live in `~/.config/coppice/config.toml`.
-
-**Production:** example systemd units in `systemd/` inside the tarball — set `WorkingDirectory` and `ExecStart`, then `systemctl enable --now coppice-server coppice-web`.
-
-### Docker Compose
-
-For operators comfortable with containers:
-
-```bash
-# On a server with Docker; use published images or build from this repo
-cp deploy/config/config.example.toml deploy/config/config.toml
-# Edit deploy/config/config.toml and compose env as needed
-docker compose -f deploy/docker-compose.yml up -d
-```
-
-Open http://localhost:5001. Change default passwords and secrets before exposing to a network.
-
-### Backup and migration
-
-Admins: **Tools** in the app (`/tools`) or `GET /api/tools/backup/export` / `POST /api/tools/backup/import`. Archives are full-system backups (database, settings, artifacts, worktrees). The settings file leaves out passwords, encryption keys, and saved tokens. Backups exported before that change can contain those secrets in `config.toml`; treat those files as secrets. The database dump still includes workspace data, so archives stay sensitive. Requires `pg_dump` / `psql` on the server host (the desktop app includes them). The desktop app runs that `psql` as the non-superuser role `coppice_app`, so a dump cannot run `COPY ... TO PROGRAM`. After the desktop app has adopted the database, later launches do not open it as the superuser either. Server installs keep the previous behaviour: import uses the role in `database.url`. In the Compose dev stack that role is the Postgres superuser (`POSTGRES_USER`). A server install that should refuse `COPY ... TO PROGRAM` sets `database.url` to a non-superuser that owns the database; Coppice does not create `coppice_app` there. After import, a token this install cannot decrypt is kept, its ciphertext is cleared, and the app asks for it again. **Tools → Backup → Replace keys** (desktop) or `coppice-server replace-keys` (server, Coppice stopped, PostgreSQL still running) makes a new session secret, encryption key, admin password, and Postgres password. Tokens this install can still read are re-encrypted. Tokens already marked for re-entry are skipped. Everyone is signed out. The server command prints where the new values were written. Changing `master_key` by hand makes saved tokens unreadable until they are entered again.
+Admins: **Tools** in the app (`/tools`), or `GET /api/tools/backup/export` / `POST /api/tools/backup/import`. A backup holds the database, settings, artifacts and worktrees. Settings leave out passwords, keys and saved tokens. The database dump still has workspace data, so keep backups private. The desktop app runs import as the non-superuser role `coppice_app`. After import, any token Coppice can't read is cleared and the app asks for it again. **Tools → Backup → Replace keys** makes a new session secret, encryption key, admin password and Postgres password, and signs everyone out. Changing `master_key` by hand makes saved tokens unreadable.

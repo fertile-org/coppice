@@ -43,13 +43,11 @@ pub const PG_PENDING: &str = "pg_password.pending";
 const PG_APP_PENDING: &str = "pg_app_password.pending";
 
 pub const REPLACE_UI_ERROR: &str = "Couldn't replace keys. Nothing was changed.";
-pub const REPLACE_ON_SERVER: &str =
-    "On a server, stop Coppice and run coppice-server replace-keys.";
 pub const PASSWORD_EMPTY: &str = "Enter a new admin password.";
 
 #[derive(Debug, thiserror::Error)]
 pub enum ReplaceError {
-    #[error("{REPLACE_ON_SERVER}")]
+    #[error("{REPLACE_UI_ERROR}")]
     NotDesktop,
     #[error("{PASSWORD_EMPTY}")]
     PasswordEmpty,
@@ -1299,7 +1297,7 @@ pub async fn replace_offline(
         && db_target(&config.database.url).is_err()
     {
         return Err(ReplaceError::Failed(
-            "this data directory belongs to the desktop app. Use Tools → Backup → Replace keys while Coppice is open. coppice-server replace-keys is for a server install with PostgreSQL still running"
+            "This folder belongs to the desktop app. Use Tools → Backup → Replace keys while Coppice is open."
                 .into(),
         ));
     }

@@ -2,7 +2,7 @@
 
 > *Grow an agent team from shared roots.*
 
-Coppice is a self-hosted agent workspace with a Trello-like board. The visual language draws from **coppice forestry** — managed woodland where new growth springs from shared stumps. The UI should feel **organic, warm, and alive**, not like generic purple SaaS.
+Coppice is a desktop agent workspace with a Trello-like board. The visual language draws from **coppice forestry** — managed woodland where new growth springs from shared stumps. The UI should feel **organic, warm, and alive**, not like generic purple SaaS.
 
 ## Aesthetic direction
 

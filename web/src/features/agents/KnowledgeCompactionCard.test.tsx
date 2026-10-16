@@ -127,6 +127,16 @@ describe('KnowledgeCompactionCard', () => {
     expect(option).toHaveTextContent('Cannot run compaction (no read-only mode)');
   });
 
+  it('names only the connector shown to block writes', () => {
+    mocks.settings = settings(coder);
+    renderCard([coder]);
+    expect(
+      screen.getByText(
+        "This agent's CLI can't run compaction safely. Pick an agent that uses OpenCode.",
+      ),
+    ).toBeVisible();
+  });
+
   it('shows a paused hint for a disabled compaction agent', () => {
     const disabled = agent({ enabled: false });
     mocks.settings = settings(disabled);

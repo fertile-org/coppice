@@ -1,6 +1,6 @@
 # Coppice Desktop
 
-Electron shell around the bundled Coppice server. **Setup, release, and install**: [docs/development.md](../docs/development.md).
+Electron shell around the bundled Coppice server. **Setup and release**: [docs/development.md](../docs/development.md).
 
 ```bash
 make desktop

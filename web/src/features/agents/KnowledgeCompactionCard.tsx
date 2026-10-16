@@ -188,8 +188,7 @@ export function KnowledgeCompactionCard({
       )}
       {selectedInvalid && (
         <p className="mt-3 rounded-md bg-amber-100 px-3 py-2 font-body text-sm text-amber-900">
-          {NO_READ_ONLY_REASON}. Compaction needs a connector that enforces
-          read-only tools: {readOnlyConnectors.join(', ')}.
+          This agent's CLI can't run compaction safely. Pick an agent that uses OpenCode.
         </p>
       )}
       {error && (
