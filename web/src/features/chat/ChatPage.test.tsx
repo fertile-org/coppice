@@ -930,7 +930,9 @@ describe('ChatPage', () => {
 
     expect(screen.getByTestId('chat-session-status')).toHaveTextContent('Continued');
     expect(
-      screen.getByText(/This chat was continued in a new one/),
+      screen.getByText('This chat continued in a new one. You can still read it here.', {
+        exact: false,
+      }),
     ).toBeInTheDocument();
     expect(screen.queryByTestId('chat-composer')).not.toBeInTheDocument();
   });

@@ -544,7 +544,7 @@ function ChatSessionPane({ sessionId }: { sessionId: string }) {
       {cutoff ? (
         <p className="shrink-0 border-t border-border bg-paper-50/90 px-4 py-3 font-body text-sm text-text-secondary">
           {session?.status === 'cutoff'
-            ? 'This chat was continued in a new one. History stays readable — open the continued chat from the transcript if one exists.'
+            ? 'This chat continued in a new one. You can still read it here.'
             : 'This session is archived. History stays readable.'}{' '}
           <Link to="/chat" className="text-accent hover:underline">
             Start a new chat
