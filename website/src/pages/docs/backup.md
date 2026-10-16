@@ -16,7 +16,7 @@ Passwords, keys, and saved tokens are left out. The backup still holds all your 
 
 On the install you're moving to, open **Tools**, then **Backup**, and choose **Import backup**.
 
-Importing replaces all data on that install with the backup's. Its settings come across too, except passwords, keys, and folder paths, and you may be signed out.
+Importing replaces all data on that install with the backup's. Your board and workspace settings come across. Passwords, keys, folder paths, agent commands, and plugin and MCP settings don't, so set those up again. You may be signed out.
 
 Saved tokens aren't in the backup, so paste each one again afterward. Coppice marks each token it needs with "Paste this token again." Paste it, then save.
 

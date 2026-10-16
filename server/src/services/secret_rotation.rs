@@ -123,8 +123,7 @@ pub async fn finish_file_password(
         return Ok(pending);
     }
     Err(ReplaceError::Failed(
-        "the current postgres password and the pending replacement both failed to connect"
-            .into(),
+        "the current postgres password and the pending replacement both failed to connect".into(),
     ))
 }
 
@@ -174,11 +173,13 @@ pub async fn finish_server_pg_password(
     ))
 }
 
-/// Master key, session secret, and admin password after a server crash.
+/// Master key and session secret after a server crash.
+///
+/// The admin password is not recovered into config. The hash on the user row
+/// is the record of it.
 pub struct RecoveredServerKeys {
     pub master_key: String,
     pub session_secret: String,
-    pub admin_password: Option<String>,
 }
 
 /// Finish key files left beside a server `config.toml`. The Postgres password
@@ -266,9 +267,9 @@ pub async fn replace_server_keys(
     let _guard = crate::crypto::operations_lock().lock().await;
     check_admin_password(admin_password)?;
     ensure_admin(pool, admin_email).await?;
-    let dir = config_path.parent().ok_or_else(|| {
-        ReplaceError::Failed(format!("{} has no parent", config_path.display()))
-    })?;
+    let dir = config_path
+        .parent()
+        .ok_or_else(|| ReplaceError::Failed(format!("{} has no parent", config_path.display())))?;
     let database_url = finish_server_pg_password(config_path, database_url).await?;
     adopt_url_password(pool, &database_url);
     let recovered =
@@ -303,17 +304,11 @@ pub async fn replace_server_keys(
         false,
     )
     .await?;
-    set_config_values(
+    write_server_key_config(
         config_path,
-        &[
-            (&["database", "url"], new_url.as_str()),
-            (&["secrets", "master_key"], new_master.as_str()),
-            (&["auth", "session_secret"], new_session.as_str()),
-            (
-                &["auth", "bootstrap_admin_password"],
-                admin_password,
-            ),
-        ],
+        Some(new_master.as_str()),
+        Some(new_session.as_str()),
+        Some(new_url.as_str()),
     )?;
     for name in [PG_PENDING, MASTER_PENDING, SESSION_PENDING, ADMIN_PENDING] {
         let _ = std::fs::remove_file(dir.join(name));
@@ -353,8 +348,15 @@ async fn apply_pg_then_keys(
     )
     .await
     {
-        let _ = alter_role_password(&mut conn, &target.user, &target.password).await;
-        let _ = std::fs::remove_file(dir.join(PG_PENDING));
+        if let Err(revert) = alter_role_password(&mut conn, &target.user, &target.password).await {
+            tracing::error!(
+                error = %revert,
+                "new postgres password could not be restored; the pending file was kept"
+            );
+        } else {
+            pool.set_connect_options(old_options.clone());
+            let _ = std::fs::remove_file(dir.join(PG_PENDING));
+        }
         return Err(ReplaceError::Failed(
             "postgres did not accept the new password, so the role password was restored".into(),
         ));
@@ -363,7 +365,9 @@ async fn apply_pg_then_keys(
 
     write_secret_atomic(&dir.join(MASTER_PENDING), new_master)?;
     write_secret_atomic(&dir.join(SESSION_PENDING), new_session)?;
-    write_password_atomic(&dir.join(ADMIN_PENDING), admin_password)?;
+    if secret_files {
+        write_password_atomic(&dir.join(ADMIN_PENDING), admin_password)?;
+    }
 
     let old_store = SecretStore::from_master_key(old_master);
     let new_store = SecretStore::from_master_key(new_master);
@@ -392,8 +396,14 @@ async fn apply_pg_then_keys(
     }
     drop(conn);
 
-    if let Err(err) = promote_after_commit(dir, secret_files, new_url, new_master, new_session, admin_password)
-    {
+    if let Err(err) = promote_after_commit(
+        dir,
+        secret_files,
+        new_url,
+        new_master,
+        new_session,
+        admin_password,
+    ) {
         tracing::error!(
             error = %err,
             "keys were replaced in the database but the files were not moved; the next launch finishes that"
@@ -427,8 +437,14 @@ async fn settle_desktop_pg(
         return Ok(database_url.to_string());
     }
     let target = db_target(database_url)?;
-    let pg = finish_file_password(dir, &target.host, target.port, &target.user, &target.database)
-        .await?;
+    let pg = finish_file_password(
+        dir,
+        &target.host,
+        target.port,
+        &target.user,
+        &target.database,
+    )
+    .await?;
     if pg != target.password {
         adopt_url_password(pool, &replace_url_password(database_url, &pg)?);
         return replace_url_password(database_url, &pg);
@@ -443,16 +459,13 @@ fn adopt_url_password(pool: &sqlx::PgPool, url: &str) {
 }
 
 async fn ensure_admin(pool: &sqlx::PgPool, email: &str) -> Result<(), ReplaceError> {
-    let found: Option<Uuid> = sqlx::query_scalar(
-        "SELECT id FROM users WHERE email = $1 AND role = 'admin' LIMIT 1",
-    )
-    .bind(email)
-    .fetch_optional(pool)
-    .await?;
+    let found: Option<Uuid> =
+        sqlx::query_scalar("SELECT id FROM users WHERE email = $1 AND role = 'admin' LIMIT 1")
+            .bind(email)
+            .fetch_optional(pool)
+            .await?;
     if found.is_none() {
-        return Err(ReplaceError::Failed(format!(
-            "no admin user named {email}"
-        )));
+        return Err(ReplaceError::Failed(format!("no admin user named {email}")));
     }
     Ok(())
 }
@@ -468,24 +481,60 @@ async fn alter_role_password(
 }
 
 fn alter_role_sql(role: &str, password: &str) -> Result<String, ReplaceError> {
-    if role.is_empty()
-        || !role
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || c == '_')
-    {
+    if role.is_empty() || !role.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
         return Err(ReplaceError::Failed(format!(
             "unsupported database role {role}"
         )));
     }
     if password.contains('\0') {
-        return Err(ReplaceError::Failed(
-            "password contains a null byte".into(),
-        ));
+        return Err(ReplaceError::Failed("password contains a null byte".into()));
     }
+    let verifier = scram_sha256_verifier(password)?;
     Ok(format!(
         "ALTER ROLE {role} PASSWORD '{}'",
-        password.replace('\'', "''")
+        verifier.replace('\'', "''")
     ))
+}
+
+/// PostgreSQL stores a client-built SCRAM-SHA-256 verifier as-is, so the
+/// plaintext password is not sent in `ALTER ROLE` and cannot land in the
+/// server log. The iteration count is the PostgreSQL 16 default.
+fn scram_sha256_verifier(password: &str) -> Result<String, ReplaceError> {
+    use base64::Engine;
+    use hmac::Hmac;
+    use sha2::{Digest, Sha256};
+
+    let normalized = stringprep::saslprep(password)
+        .map(|value| value.into_owned())
+        .unwrap_or_else(|_| password.to_string());
+    let mut salt = [0u8; 16];
+    rand::rngs::OsRng.fill_bytes(&mut salt);
+    const ITERATIONS: u32 = 4096;
+    let mut salted = [0u8; 32];
+    pbkdf2::pbkdf2::<Hmac<Sha256>>(normalized.as_bytes(), &salt, ITERATIONS, &mut salted).map_err(
+        |_| ReplaceError::Failed("could not build the database password verifier".into()),
+    )?;
+    let client_key = hmac_sha256(&salted, b"Client Key");
+    let stored_key = Sha256::digest(client_key);
+    let server_key = hmac_sha256(&salted, b"Server Key");
+    let salt_b64 = base64::engine::general_purpose::STANDARD.encode(salt);
+    let stored_b64 = base64::engine::general_purpose::STANDARD.encode(stored_key);
+    let server_b64 = base64::engine::general_purpose::STANDARD.encode(server_key);
+    Ok(format!(
+        "SCRAM-SHA-256${ITERATIONS}:{salt_b64}${stored_b64}:{server_b64}"
+    ))
+}
+
+fn hmac_sha256(key: &[u8], data: &[u8]) -> [u8; 32] {
+    use hmac::{Hmac, Mac};
+    use sha2::Sha256;
+
+    let mut mac = Hmac::<Sha256>::new_from_slice(key).expect("hmac-sha256 accepts a 32-byte key");
+    mac.update(data);
+    let bytes = mac.finalize().into_bytes();
+    let mut out = [0u8; 32];
+    out.copy_from_slice(&bytes);
+    out
 }
 
 async fn recover_pending_locked(
@@ -506,11 +555,12 @@ async fn recover_pending_locked(
             PendingKey::Unused => {
                 let _ = std::fs::remove_file(&master_pending);
                 let _ = std::fs::remove_file(&session_pending);
-                let _ = std::fs::remove_file(dir.join(ADMIN_PENDING));
+                settle_admin_file(pool, dir).await?;
                 return Ok(None);
             }
             PendingKey::Committed => {
-                promote_pending(dir)?;
+                promote_pending_except_admin(dir)?;
+                settle_admin_file(pool, dir).await?;
                 return Ok(Some(pending));
             }
         }
@@ -546,7 +596,23 @@ fn promote_server_config(
     dir: &Path,
     master: Option<&str>,
     session: Option<&str>,
-    admin: Option<&str>,
+    url: Option<&str>,
+) -> Result<(), ReplaceError> {
+    if master.is_some() || session.is_some() || url.is_some() {
+        write_server_key_config(config_path, master, session, url)?;
+    }
+    for name in [MASTER_PENDING, SESSION_PENDING, ADMIN_PENDING] {
+        let _ = std::fs::remove_file(dir.join(name));
+    }
+    Ok(())
+}
+
+/// Write rotated server secrets into `config.toml` and drop any admin password
+/// stored there. The password hash on the user row is the only copy.
+fn write_server_key_config(
+    path: &Path,
+    master: Option<&str>,
+    session: Option<&str>,
     url: Option<&str>,
 ) -> Result<(), ReplaceError> {
     let mut pairs: Vec<(&[&str], &str)> = Vec::new();
@@ -556,18 +622,29 @@ fn promote_server_config(
     if let Some(session) = session {
         pairs.push((&["auth", "session_secret"], session));
     }
-    if let Some(admin) = admin {
-        pairs.push((&["auth", "bootstrap_admin_password"], admin));
-    }
     if let Some(url) = url {
         pairs.push((&["database", "url"], url));
     }
-    if !pairs.is_empty() {
-        set_config_values(config_path, &pairs)?;
+    if pairs.is_empty() {
+        return Ok(());
     }
-    for name in [MASTER_PENDING, SESSION_PENDING, ADMIN_PENDING] {
-        let _ = std::fs::remove_file(dir.join(name));
+    let raw = if path.is_file() {
+        std::fs::read_to_string(path)?
+    } else {
+        String::new()
+    };
+    let mut doc = if raw.trim().is_empty() {
+        toml_edit::DocumentMut::new()
+    } else {
+        raw.parse::<toml_edit::DocumentMut>()
+            .map_err(|err| ReplaceError::Failed(err.to_string()))?
+    };
+    for (keys, value) in pairs {
+        set_nested(doc.as_table_mut(), keys, value)?;
     }
+    remove_nested(doc.as_table_mut(), &["auth", "bootstrap_admin_password"]);
+    coppice_config::connector_file::write_toml_atomic(path, &doc.to_string())
+        .map_err(|err| ReplaceError::Failed(err.to_string()))?;
     Ok(())
 }
 
@@ -580,7 +657,6 @@ async fn finish_server_keys_locked(
     let unchanged = RecoveredServerKeys {
         master_key: master_key.to_string(),
         session_secret: session_secret.to_string(),
-        admin_password: None,
     };
     let Some(dir) = config_path.parent() else {
         return Ok(unchanged);
@@ -594,7 +670,6 @@ async fn finish_server_keys_locked(
 
     let mut master = master_key.to_string();
     let mut session = session_secret.to_string();
-    let mut admin_password = None;
     let mut write_master = false;
     let mut write_session = false;
 
@@ -623,7 +698,7 @@ async fn finish_server_keys_locked(
         let pending = read_password_file(&dir.join(ADMIN_PENDING))?;
         match admin_hash(pool).await? {
             Some(hash) if password_matches(&pending, &hash) => {
-                admin_password = Some(pending);
+                let _ = std::fs::remove_file(dir.join(ADMIN_PENDING));
             }
             Some(_) if write_master => {
                 return Err(ReplaceError::Failed(
@@ -636,20 +711,18 @@ async fn finish_server_keys_locked(
         }
     }
 
-    if write_master || write_session || admin_password.is_some() {
+    if write_master || write_session {
         promote_server_config(
             config_path,
             dir,
             write_master.then_some(master.as_str()),
             write_session.then_some(session.as_str()),
-            admin_password.as_deref(),
             None,
         )?;
     }
     Ok(RecoveredServerKeys {
         master_key: master,
         session_secret: session,
-        admin_password,
     })
 }
 
@@ -663,12 +736,13 @@ async fn pending_key_state(
     current: &str,
     pending: &str,
 ) -> Result<PendingKey, ReplaceError> {
-    let row = sqlx::query(
-        "SELECT ciphertext, nonce FROM secrets WHERE NOT needs_reentry LIMIT 1",
-    )
+    let row = sqlx::query("SELECT ciphertext, nonce FROM secrets WHERE NOT needs_reentry LIMIT 1")
         .fetch_optional(pool)
         .await?;
     let Some(row) = row else {
+        // No token to decrypt, so the key files cannot show whether the
+        // transaction committed. The admin password is settled against the
+        // saved hash instead of being promoted with the key.
         return Ok(PendingKey::Committed);
     };
     let ciphertext: Vec<u8> = row.get("ciphertext");
@@ -695,11 +769,9 @@ async fn reencrypt_admin_and_sign_out(
     password_hash: &str,
 ) -> Result<(), ReplaceError> {
     let mut tx = conn.begin().await?;
-    let rows = sqlx::query(
-        "SELECT id, ciphertext, nonce, needs_reentry FROM secrets FOR UPDATE",
-    )
-    .fetch_all(&mut *tx)
-    .await?;
+    let rows = sqlx::query("SELECT id, ciphertext, nonce, needs_reentry FROM secrets FOR UPDATE")
+        .fetch_all(&mut *tx)
+        .await?;
     for row in rows {
         if row.get::<bool, _>("needs_reentry") {
             continue;
@@ -718,13 +790,12 @@ async fn reencrypt_admin_and_sign_out(
         .execute(&mut *tx)
         .await?;
     }
-    let updated = sqlx::query(
-        "UPDATE users SET password_hash = $1 WHERE email = $2 AND role = 'admin'",
-    )
-    .bind(password_hash)
-    .bind(admin_email)
-    .execute(&mut *tx)
-    .await?;
+    let updated =
+        sqlx::query("UPDATE users SET password_hash = $1 WHERE email = $2 AND role = 'admin'")
+            .bind(password_hash)
+            .bind(admin_email)
+            .execute(&mut *tx)
+            .await?;
     if updated.rows_affected() == 0 {
         return Err(ReplaceError::Failed(format!(
             "no admin user named {admin_email}"
@@ -792,12 +863,32 @@ async fn admin_hash(pool: &sqlx::PgPool) -> Result<Option<String>, ReplaceError>
 }
 
 fn promote_pending(dir: &Path) -> Result<(), ReplaceError> {
-    for (pending, current) in [
-        (MASTER_PENDING, MASTER_FILE),
-        (SESSION_PENDING, SESSION_FILE),
-        (ADMIN_PENDING, ADMIN_FILE),
-        (PG_PENDING, PG_FILE),
-    ] {
+    promote_named(
+        dir,
+        &[
+            (MASTER_PENDING, MASTER_FILE),
+            (SESSION_PENDING, SESSION_FILE),
+            (ADMIN_PENDING, ADMIN_FILE),
+            (PG_PENDING, PG_FILE),
+        ],
+    )
+}
+
+/// Key and database files only. The admin password goes through
+/// [`settle_admin_file`], which checks the saved hash first.
+fn promote_pending_except_admin(dir: &Path) -> Result<(), ReplaceError> {
+    promote_named(
+        dir,
+        &[
+            (MASTER_PENDING, MASTER_FILE),
+            (SESSION_PENDING, SESSION_FILE),
+            (PG_PENDING, PG_FILE),
+        ],
+    )
+}
+
+fn promote_named(dir: &Path, pairs: &[(&str, &str)]) -> Result<(), ReplaceError> {
+    for (pending, current) in pairs {
         let pending_path = dir.join(pending);
         if pending_path.is_file() {
             std::fs::rename(&pending_path, dir.join(current))?;
@@ -873,18 +964,15 @@ struct DbTarget {
 fn db_target(url: &str) -> Result<DbTarget, ReplaceError> {
     let opts = PgConnectOptions::from_str(url)
         .map_err(|err| ReplaceError::Failed(format!("could not parse the database url: {err}")))?;
-    let password = password_from_url(url).filter(|value| !value.is_empty()).ok_or_else(|| {
-        ReplaceError::Failed("database url has no password".into())
-    })?;
+    let password = password_from_url(url)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| ReplaceError::Failed("database url has no password".into()))?;
     Ok(DbTarget {
         host: opts.get_host().to_string(),
         port: opts.get_port(),
         user: opts.get_username().to_string(),
         password,
-        database: opts
-            .get_database()
-            .unwrap_or("postgres")
-            .to_string(),
+        database: opts.get_database().unwrap_or("postgres").to_string(),
     })
 }
 
@@ -897,16 +985,19 @@ fn password_from_url(url: &str) -> Option<String> {
 }
 
 fn replace_url_password(url: &str, password: &str) -> Result<String, ReplaceError> {
-    let (scheme, rest) = url.split_once("://").ok_or_else(|| {
-        ReplaceError::Failed("database url has no scheme".into())
-    })?;
+    let (scheme, rest) = url
+        .split_once("://")
+        .ok_or_else(|| ReplaceError::Failed("database url has no scheme".into()))?;
     let auth_end = rest.find(['/', '?', '#']).unwrap_or(rest.len());
     let authority = &rest[..auth_end];
     let tail = &rest[auth_end..];
-    let (userinfo, host) = authority.rsplit_once('@').ok_or_else(|| {
-        ReplaceError::Failed("database url has no user".into())
-    })?;
-    let user = userinfo.split_once(':').map(|(user, _)| user).unwrap_or(userinfo);
+    let (userinfo, host) = authority
+        .rsplit_once('@')
+        .ok_or_else(|| ReplaceError::Failed("database url has no user".into()))?;
+    let user = userinfo
+        .split_once(':')
+        .map(|(user, _)| user)
+        .unwrap_or(userinfo);
     Ok(format!(
         "{scheme}://{user}:{}@{host}{tail}",
         percent_encode(password)
@@ -966,7 +1057,31 @@ fn set_config_values(path: &Path, values: &[(&[&str], &str)]) -> Result<(), Repl
     Ok(())
 }
 
-fn set_nested(table: &mut toml_edit::Table, keys: &[&str], value: &str) -> Result<(), ReplaceError> {
+fn remove_nested(table: &mut toml_edit::Table, keys: &[&str]) {
+    let Some((first, rest)) = keys.split_first() else {
+        return;
+    };
+    if rest.is_empty() {
+        table.remove(first);
+        return;
+    }
+    let remove_parent = {
+        let Some(child) = table.get_mut(first).and_then(|item| item.as_table_mut()) else {
+            return;
+        };
+        remove_nested(child, rest);
+        child.is_empty()
+    };
+    if remove_parent {
+        table.remove(first);
+    }
+}
+
+fn set_nested(
+    table: &mut toml_edit::Table,
+    keys: &[&str],
+    value: &str,
+) -> Result<(), ReplaceError> {
     let (first, rest) = keys
         .split_first()
         .ok_or_else(|| ReplaceError::Failed("empty config path".into()))?;
@@ -1187,6 +1302,55 @@ pub fn replaced_keys_message(path: &Path) -> String {
     )
 }
 
+#[cfg(test)]
+mod plain_tests {
+    use super::*;
+    use std::os::unix::fs::PermissionsExt;
+
+    #[test]
+    fn server_key_config_omits_admin_password_and_is_private() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(
+            &path,
+            "[auth]\nbootstrap_admin_password = \"admin-plain-password\"\nsession_secret = \"old\"\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+
+        write_server_key_config(
+            &path,
+            Some("master-secret-value"),
+            Some("session-secret-value"),
+            Some("postgres://coppice:pg-secret-value@127.0.0.1:5432/coppice"),
+        )
+        .unwrap();
+
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(text.contains("master-secret-value"), "{text}");
+        assert!(text.contains("session-secret-value"), "{text}");
+        assert!(text.contains("pg-secret-value"), "{text}");
+        assert!(!text.contains("admin-plain-password"), "{text}");
+        assert!(!text.contains("bootstrap_admin_password"), "{text}");
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600);
+    }
+
+    #[test]
+    fn alter_role_sql_sends_a_scram_verifier_not_the_password() {
+        let password = "s3cret-pass'word";
+        let sql = alter_role_sql("coppice", password).unwrap();
+        assert!(!sql.contains(password), "{sql}");
+        assert!(!sql.contains("s3cret-pass"), "{sql}");
+        assert!(
+            sql.starts_with("ALTER ROLE coppice PASSWORD 'SCRAM-SHA-256$"),
+            "{sql}"
+        );
+        assert!(sql.ends_with('\''), "{sql}");
+        assert!(!sql.contains("PASSWORD 's"), "{sql}");
+    }
+}
+
 #[cfg(all(test, feature = "embedded-test-db"))]
 mod tests {
     use super::*;
@@ -1227,16 +1391,14 @@ mod tests {
 
     async fn insert_secret(pool: &sqlx::PgPool, store: &SecretStore, plain: &str) {
         let (ciphertext, nonce) = store.encrypt(plain).unwrap();
-        sqlx::query(
-            "INSERT INTO secrets (id, name, ciphertext, nonce) VALUES ($1, $2, $3, $4)",
-        )
-        .bind(Uuid::new_v4())
-        .bind("forge")
-        .bind(&ciphertext)
-        .bind(&nonce)
-        .execute(pool)
-        .await
-        .unwrap();
+        sqlx::query("INSERT INTO secrets (id, name, ciphertext, nonce) VALUES ($1, $2, $3, $4)")
+            .bind(Uuid::new_v4())
+            .bind("forge")
+            .bind(&ciphertext)
+            .bind(&nonce)
+            .execute(pool)
+            .await
+            .unwrap();
     }
 
     async fn insert_admin(pool: &sqlx::PgPool, email: &str, password: &str) {
@@ -1290,20 +1452,24 @@ mod tests {
         );
         assert_eq!(PROMPT_NEW_ADMIN_PASSWORD, "New admin password: ");
         assert_eq!(PROMPT_TYPE_IT_AGAIN, "Type it again: ");
-        assert_eq!(PASSWORDS_DO_NOT_MATCH, "The passwords don't match. Try again.");
+        assert_eq!(
+            PASSWORDS_DO_NOT_MATCH,
+            "The passwords don't match. Try again."
+        );
         assert_eq!(
             PASSWORD_ON_STDIN,
             "Enter a new admin password on stdin, or run this in a terminal."
         );
-        assert!(parse_replace_keys_command(&["coppice-server".into(), "serve".into()])
-            .unwrap()
-            .is_none());
-        assert!(parse_replace_keys_command(&[
-            "coppice-server".into(),
-            "replace-keys".into()
-        ])
-        .unwrap()
-        .is_some());
+        assert!(
+            parse_replace_keys_command(&["coppice-server".into(), "serve".into()])
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            parse_replace_keys_command(&["coppice-server".into(), "replace-keys".into()])
+                .unwrap()
+                .is_some()
+        );
         let rejected = parse_replace_keys_command(&[
             "coppice-server".into(),
             "replace-keys".into(),
@@ -1481,11 +1647,10 @@ mod tests {
         .expect("replace skips the flagged token");
         drop(conn);
 
-        let still: i64 =
-            sqlx::query_scalar("SELECT count(*) FROM secrets WHERE needs_reentry")
-                .fetch_one(&pool)
-                .await
-                .unwrap();
+        let still: i64 = sqlx::query_scalar("SELECT count(*) FROM secrets WHERE needs_reentry")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
         assert_eq!(still, 1);
     }
 
@@ -1589,9 +1754,10 @@ mod tests {
         write_secret_atomic(&dir.join(PG_FILE), &old_pg).unwrap();
         write_secret_atomic(&dir.join(PG_PENDING), &new_pg).unwrap();
 
-        let resolved = finish_file_password(&dir, &role.host, role.port, &role.name, &role.database)
-            .await
-            .expect("finish");
+        let resolved =
+            finish_file_password(&dir, &role.host, role.port, &role.name, &role.database)
+                .await
+                .expect("finish");
         assert_eq!(resolved, old_pg);
         assert!(!dir.join(PG_PENDING).exists());
         assert!(
@@ -1619,9 +1785,10 @@ mod tests {
             .unwrap();
         drop(conn);
 
-        let resolved = finish_file_password(&dir, &role.host, role.port, &role.name, &role.database)
-            .await
-            .expect("finish");
+        let resolved =
+            finish_file_password(&dir, &role.host, role.port, &role.name, &role.database)
+                .await
+                .expect("finish");
         assert_eq!(resolved, new_pg);
         assert_eq!(read_secret(&dir.join(PG_FILE)).unwrap(), new_pg);
         assert!(!dir.join(PG_PENDING).exists());
@@ -1630,6 +1797,77 @@ mod tests {
         );
         assert!(
             !password_connects(&role.host, role.port, &role.name, &old_pg, &role.database).await
+        );
+        role.drop_role().await;
+    }
+
+    #[tokio::test]
+    async fn crash_before_commit_with_no_tokens_keeps_the_current_admin_password() {
+        let pool = pool().await;
+        let root = secrets_dir();
+        let dir = root.path().join("secrets");
+        let old_master = generate_secret();
+        write_pair(&dir, &old_master, &generate_secret());
+        write_password_atomic(&dir.join(ADMIN_FILE), "old-admin-pass").unwrap();
+        insert_admin(&pool, "admin@localhost", "old-admin-pass").await;
+        write_secret_atomic(&dir.join(MASTER_PENDING), &generate_secret()).unwrap();
+        write_secret_atomic(&dir.join(SESSION_PENDING), &generate_secret()).unwrap();
+        write_password_atomic(&dir.join(ADMIN_PENDING), "new-admin-pass").unwrap();
+
+        let promoted = recover_pending(&pool, &dir).await.expect("recover");
+        assert!(promoted.is_some());
+        assert_eq!(
+            read_password_file(&dir.join(ADMIN_FILE)).unwrap(),
+            "old-admin-pass"
+        );
+        assert!(!dir.join(ADMIN_PENDING).exists());
+    }
+
+    #[tokio::test]
+    async fn committed_admin_password_is_kept_when_there_are_no_tokens() {
+        let pool = pool().await;
+        let root = secrets_dir();
+        let dir = root.path().join("secrets");
+        let new_master = generate_secret();
+        write_pair(&dir, &generate_secret(), &generate_secret());
+        write_password_atomic(&dir.join(ADMIN_FILE), "old-admin-pass").unwrap();
+        insert_admin(&pool, "admin@localhost", "new-admin-pass").await;
+        write_secret_atomic(&dir.join(MASTER_PENDING), &new_master).unwrap();
+        write_password_atomic(&dir.join(ADMIN_PENDING), "new-admin-pass").unwrap();
+
+        let promoted = recover_pending(&pool, &dir).await.expect("recover");
+        assert_eq!(promoted.as_deref(), Some(new_master.as_str()));
+        assert_eq!(
+            read_password_file(&dir.join(ADMIN_FILE)).unwrap(),
+            "new-admin-pass"
+        );
+        assert!(!dir.join(ADMIN_PENDING).exists());
+    }
+
+    #[tokio::test]
+    async fn alter_role_uses_scram_verifier_and_plaintext_still_connects() {
+        let pool = pool().await;
+        let password = "quote'pass-99";
+        let role = RoleGuard::create(&pool, "temp-init-pass").await;
+        let sql = alter_role_sql(&role.name, password).unwrap();
+        assert!(!sql.contains(password), "{sql}");
+        assert!(sql.contains("SCRAM-SHA-256$"), "{sql}");
+        let mut conn = pool.acquire().await.unwrap();
+        sqlx::query(&sql).execute(&mut *conn).await.unwrap();
+        drop(conn);
+
+        assert!(
+            password_connects(&role.host, role.port, &role.name, password, &role.database).await
+        );
+        assert!(
+            !password_connects(
+                &role.host,
+                role.port,
+                &role.name,
+                "temp-init-pass",
+                &role.database
+            )
+            .await
         );
         role.drop_role().await;
     }
