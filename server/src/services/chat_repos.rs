@@ -533,7 +533,6 @@ pub fn sweep_aged_chat_folders(
     max_age: Duration,
     now: SystemTime,
 ) -> std::io::Result<u32> {
-    remove_legacy_chat_clones(worktrees_root)?;
     let root = worktrees_root.join("chat");
     if !root.exists() {
         return Ok(0);
@@ -859,37 +858,6 @@ fn remove_tree_inside(root: &Path, target: &Path) -> std::io::Result<()> {
             std::io::ErrorKind::InvalidInput,
             "refusing to delete a path outside the chat folder",
         ));
-    }
-    fs::remove_dir_all(canonical)
-}
-
-/// `chat-clones/` is a fixed sibling of `chat/`, not a slug. A symlink there is
-/// left in place so cleanup cannot follow it out of the worktrees directory.
-fn remove_legacy_chat_clones(worktrees_root: &Path) -> std::io::Result<()> {
-    let legacy = worktrees_root.join("chat-clones");
-    let meta = match fs::symlink_metadata(&legacy) {
-        Ok(meta) => meta,
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-        Err(err) => return Err(err),
-    };
-    if meta.file_type().is_symlink() {
-        tracing::warn!(
-            path = %legacy.display(),
-            "skipping chat-clones because it is a symlink"
-        );
-        return Ok(());
-    }
-    if !meta.is_dir() {
-        return fs::remove_file(&legacy);
-    }
-    let root = worktrees_root.canonicalize()?;
-    let canonical = legacy.canonicalize()?;
-    if canonical.parent() != Some(root.as_path()) {
-        tracing::warn!(
-            path = %canonical.display(),
-            "skipping chat-clones because it is outside the worktrees directory"
-        );
-        return Ok(());
     }
     fs::remove_dir_all(canonical)
 }
@@ -1551,18 +1519,11 @@ mod tests {
             ..ChatRepoState::default()
         };
         write_state(&dir, &state).unwrap();
-        fs::create_dir_all(root.path().join("chat-clones").join("old")).unwrap();
         let removed =
             sweep_aged_chat_folders(root.path(), Duration::from_secs(1), SystemTime::now())
                 .unwrap();
         assert_eq!(removed, 1);
         assert!(!dir.exists());
-        assert!(!root.path().join("chat-clones").exists());
-
-        fs::remove_dir_all(root.path().join("chat")).unwrap();
-        fs::create_dir_all(root.path().join("chat-clones").join("old")).unwrap();
-        sweep_aged_chat_folders(root.path(), Duration::from_secs(1), SystemTime::now()).unwrap();
-        assert!(!root.path().join("chat-clones").exists());
     }
 
     #[test]

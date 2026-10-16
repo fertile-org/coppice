@@ -12,7 +12,7 @@ import {
 import type { Agent } from './useAgents';
 
 export const KNOWLEDGE_COMPACTION_ANCHOR = 'knowledge-compaction';
-const NO_READ_ONLY_REASON = 'Cannot run compaction (no read-only mode)';
+const NO_READ_ONLY_REASON = "Can't run compaction safely";
 
 function errorMessage(error: unknown): string {
   if (error instanceof ApiError) {
@@ -188,8 +188,7 @@ export function KnowledgeCompactionCard({
       )}
       {selectedInvalid && (
         <p className="mt-3 rounded-md bg-amber-100 px-3 py-2 font-body text-sm text-amber-900">
-          {NO_READ_ONLY_REASON}. Compaction needs a connector that enforces
-          read-only tools: {readOnlyConnectors.join(', ')}.
+          This agent's CLI can't run compaction safely. Pick an agent that uses OpenCode.
         </p>
       )}
       {error && (

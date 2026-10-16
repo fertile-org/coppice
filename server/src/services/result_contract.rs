@@ -34,9 +34,7 @@ pub fn ticket_status_from_next_status(label: &str) -> Option<TicketStatus> {
         "In Progress" | "in_progress" => Some(TicketStatus::InProgress),
         "In Review" | "in_review" => Some(TicketStatus::InReview),
         "In QA" | "in_qa" => Some(TicketStatus::InQa),
-        "Wait for Human Review" | "Wait for Final Review" | "wait_for_final_review" => {
-            Some(TicketStatus::WaitForFinalReview)
-        }
+        "Wait for Human Review" => Some(TicketStatus::WaitForFinalReview),
         "Done" | "done" => Some(TicketStatus::Done),
         "Blocked" | "blocked" => Some(TicketStatus::Blocked),
         _ => None,
@@ -576,11 +574,11 @@ mod tests {
         );
         assert_eq!(
             ticket_status_from_next_status("  wait_for_final_review  "),
-            Some(TicketStatus::WaitForFinalReview)
+            None
         );
         assert_eq!(
             ticket_status_from_next_status("Wait for Final Review"),
-            Some(TicketStatus::WaitForFinalReview)
+            None
         );
     }
 

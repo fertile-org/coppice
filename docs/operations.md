@@ -43,7 +43,7 @@ The installed desktop app (`coppice-server desktop`) forces `auth.desktop_mode =
 ### Repositories (desktop)
 
 - Electron shell exposes **Browse…** for local checkouts (`window.coppiceDesktop.pickDirectory`).
-- Pull / push / fetch use the checkout’s configured `origin` (SSH agent or credential helper). A stored forge token is optional and only used when present (legacy / API Create PR).
+- Pull / push / fetch use the checkout’s configured `origin` (SSH agent or credential helper). A stored forge token is optional and only used when present (API Create PR).
 - Ticket **Open compare URL** is the primary PR path; API Create PR stays available only when a forge token is configured.
 
 ## Default Docker stack (agents / smoke)
@@ -86,11 +86,9 @@ Settings live under `[knowledge]` and `[knowledge.compaction]` in TOML. There is
 | `knowledge.compaction.max_candidates_per_batch` | `20` | Candidates kept from one run; extras are dropped |
 | `knowledge.compaction.max_attempts` | `3` | Failed attempts before a ticket waits for a manual Retry |
 
-**Compaction agent.** An admin picks an existing agent on the Agents page (**Knowledge compaction** card, `PUT /api/settings/knowledge`). With no agent configured, Done tickets still queue but nothing is compacted. The agent runs read-only in a scratch directory under `WORKTREES_PATH/knowledge-compaction/`, so its connector must enforce read-only tools: `mock`, `claude-code`, or `cursor`. Other connectors are rejected when saving and fail closed if the connector changes later.
+**Compaction agent.** An admin picks an existing agent on the Agents page (**Knowledge compaction** card, `PUT /api/settings/knowledge`). With no agent configured, Done tickets still queue but nothing is compacted. The agent runs in a scratch directory under `WORKTREES_PATH/knowledge-compaction/`. A live write test has confirmed OpenCode blocks writes. Claude Code's read-only flags are untested. Cursor, Codex, and Kilo Code do not enforce read-only tools. The server still accepts a connector when `caps.read_only_tools` is set, and rejects the others when saving. It fails closed if the connector changes later.
 
 **Lifecycle.** Moving a ticket to Done queues it. Every `interval_secs`, or on **Compact now** from the Knowledge page, a drain cycle runs batches until the queue is empty or a batch fails. Candidates land in the Pending inbox under the fail-closed approval policy. Success sends no notification. A failure fans out a `knowledge_compaction_failed` notification to every user, returns the tickets to the queue with one more attempt, and shows a Retry banner. Cancel releases the tickets without counting an attempt.
-
-Legacy `knowledge.embedding.*` and `knowledge.extraction.*` keys are ignored.
 
 ## Plugins
 

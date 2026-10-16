@@ -1,4 +1,4 @@
-//! Replace desktop and server keys: `session_secret`, `secrets.master_key`,
+//! Replace desktop keys: `session_secret`, `secrets.master_key`,
 //! the admin password, and the Postgres role password.
 //!
 //! `session_secret` is not what session cookies are checked against (those are
@@ -14,10 +14,10 @@
 //!
 //! Desktop installs keep two passwords. `pg_password` is the bootstrap
 //! superuser and is not replaced here. The runtime role password is
-//! `pg_app_password`. Server installs still record the `database.url` password
-//! in `pg_password.pending` beside the config file.
+//! `pg_app_password`. A non-desktop start still finishes a pending database
+//! password, master key, or session secret left beside `config.toml`.
 
-use std::io::{self, IsTerminal, Write};
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::time::Duration;
@@ -43,13 +43,11 @@ pub const PG_PENDING: &str = "pg_password.pending";
 const PG_APP_PENDING: &str = "pg_app_password.pending";
 
 pub const REPLACE_UI_ERROR: &str = "Couldn't replace keys. Nothing was changed.";
-pub const REPLACE_ON_SERVER: &str =
-    "On a server, stop Coppice and run coppice-server replace-keys.";
 pub const PASSWORD_EMPTY: &str = "Enter a new admin password.";
 
 #[derive(Debug, thiserror::Error)]
 pub enum ReplaceError {
-    #[error("{REPLACE_ON_SERVER}")]
+    #[error("{REPLACE_UI_ERROR}")]
     NotDesktop,
     #[error("{PASSWORD_EMPTY}")]
     PasswordEmpty,
@@ -270,7 +268,6 @@ pub async fn replace_desktop_keys(
         admin_password,
         admin_email,
         &password_hash,
-        true,
     )
     .await;
     match outcome {
@@ -282,72 +279,6 @@ pub async fn replace_desktop_keys(
     }
 }
 
-/// Server Replace keys, with Coppice stopped and PostgreSQL still running.
-/// Writes the new values into `config_path` and returns the new database URL.
-#[allow(clippy::too_many_arguments)]
-pub async fn replace_server_keys(
-    pool: &sqlx::PgPool,
-    store: &SecretStore,
-    config_path: &Path,
-    database_url: &str,
-    master_key: &str,
-    _session_secret: &str,
-    admin_password: &str,
-    admin_email: &str,
-) -> Result<String, ReplaceError> {
-    let _guard = crate::crypto::operations_lock().lock().await;
-    check_admin_password(admin_password)?;
-    ensure_admin(pool, admin_email).await?;
-    let dir = config_path
-        .parent()
-        .ok_or_else(|| ReplaceError::Failed(format!("{} has no parent", config_path.display())))?;
-    let database_url = finish_server_pg_password(config_path, database_url).await?;
-    adopt_url_password(pool, &database_url);
-    let recovered =
-        finish_server_keys_locked(pool, config_path, master_key, _session_secret).await?;
-    if recovered.master_key != master_key {
-        store.replace_master_key(&recovered.master_key);
-    }
-    let master_key = recovered.master_key;
-
-    let new_master = generate_secret();
-    let new_session = generate_secret();
-    let new_pg = generate_secret();
-    let new_url = replace_url_password(&database_url, &new_pg)?;
-    let password_hash = hash_password(admin_password)
-        .map_err(|err| ReplaceError::Failed(format!("could not hash the admin password: {err}")))?;
-
-    write_secret_atomic(&dir.join(PG_PENDING), &new_pg)?;
-    let old_options = (*pool.connect_options()).clone();
-    apply_pg_then_keys(
-        pool,
-        dir,
-        &old_options,
-        &database_url,
-        &new_pg,
-        &new_url,
-        &master_key,
-        &new_master,
-        &new_session,
-        admin_password,
-        admin_email,
-        &password_hash,
-        false,
-    )
-    .await?;
-    write_server_key_config(
-        config_path,
-        Some(new_master.as_str()),
-        Some(new_session.as_str()),
-        Some(new_url.as_str()),
-    )?;
-    for name in [PG_PENDING, MASTER_PENDING, SESSION_PENDING, ADMIN_PENDING] {
-        let _ = std::fs::remove_file(dir.join(name));
-    }
-    store.replace_master_key(&new_master);
-    Ok(new_url)
-}
-
 #[allow(clippy::too_many_arguments)]
 async fn apply_pg_then_keys(
     pool: &sqlx::PgPool,
@@ -355,21 +286,16 @@ async fn apply_pg_then_keys(
     old_options: &PgConnectOptions,
     database_url: &str,
     new_pg: &str,
-    new_url: &str,
+    _new_url: &str,
     old_master: &str,
     new_master: &str,
     new_session: &str,
     admin_password: &str,
     admin_email: &str,
     password_hash: &str,
-    secret_files: bool,
 ) -> Result<(), ReplaceError> {
     let target = db_target(database_url)?;
-    let pg_pending = if secret_files {
-        PG_APP_PENDING
-    } else {
-        PG_PENDING
-    };
+    let pg_pending = PG_APP_PENDING;
     let mut conn = pool.acquire().await?;
     if let Err(err) = alter_role_password(&mut conn, &target.user, new_pg).await {
         let _ = std::fs::remove_file(dir.join(pg_pending));
@@ -401,9 +327,7 @@ async fn apply_pg_then_keys(
 
     write_secret_atomic(&dir.join(MASTER_PENDING), new_master)?;
     write_secret_atomic(&dir.join(SESSION_PENDING), new_session)?;
-    if secret_files {
-        write_password_atomic(&dir.join(ADMIN_PENDING), admin_password)?;
-    }
+    write_password_atomic(&dir.join(ADMIN_PENDING), admin_password)?;
 
     let old_store = SecretStore::from_master_key(old_master);
     let new_store = SecretStore::from_master_key(new_master);
@@ -432,34 +356,12 @@ async fn apply_pg_then_keys(
     }
     drop(conn);
 
-    if let Err(err) = promote_after_commit(
-        dir,
-        secret_files,
-        new_url,
-        new_master,
-        new_session,
-        admin_password,
-    ) {
+    if let Err(err) = promote_pending(dir) {
         tracing::error!(
             error = %err,
             "keys were replaced in the database but the files were not moved; the next launch finishes that"
         );
         return Err(err);
-    }
-    let _ = new_url;
-    Ok(())
-}
-
-fn promote_after_commit(
-    dir: &Path,
-    secret_files: bool,
-    _new_url: &str,
-    _new_master: &str,
-    _new_session: &str,
-    _admin_password: &str,
-) -> Result<(), ReplaceError> {
-    if secret_files {
-        promote_pending(dir)?;
     }
     Ok(())
 }
@@ -1169,184 +1071,6 @@ async fn password_connects(
     }
 }
 
-pub const PROMPT_NEW_ADMIN_PASSWORD: &str = "New admin password: ";
-pub const PROMPT_TYPE_IT_AGAIN: &str = "Type it again: ";
-pub const PASSWORDS_DO_NOT_MATCH: &str = "The passwords don't match. Try again.";
-pub const PASSWORD_ON_STDIN: &str =
-    "Enter a new admin password on stdin, or run this in a terminal.";
-
-/// `coppice-server replace-keys`. The password is never taken from argv.
-/// `Ok(None)` when `args` is a different command.
-pub fn parse_replace_keys_command(args: &[String]) -> Result<Option<()>, String> {
-    if args.get(1).map(String::as_str) != Some("replace-keys") {
-        return Ok(None);
-    }
-    if args.len() > 2 {
-        return Err(
-            "replace-keys does not take arguments. It asks for the new admin password.".into(),
-        );
-    }
-    Ok(Some(()))
-}
-
-/// A terminal asks twice, without echo, and the two entries must match.
-/// Anything else reads one line. An empty line is [`PASSWORD_ON_STDIN`].
-pub fn read_replacement_password(
-    terminal: bool,
-    mut read_line: impl FnMut() -> std::io::Result<String>,
-    mut prompt_hidden: impl FnMut(&str) -> std::io::Result<String>,
-    mut write_err: impl FnMut(&str),
-) -> Result<String, String> {
-    if !terminal {
-        let mut line = read_line().map_err(|err| err.to_string())?;
-        if line.ends_with('\n') {
-            line.pop();
-            if line.ends_with('\r') {
-                line.pop();
-            }
-        }
-        if line.is_empty() {
-            return Err(PASSWORD_ON_STDIN.into());
-        }
-        check_admin_password(&line).map_err(|err| err.to_string())?;
-        return Ok(line);
-    }
-    loop {
-        let first = prompt_hidden(PROMPT_NEW_ADMIN_PASSWORD).map_err(|err| err.to_string())?;
-        if let Err(err) = check_admin_password(&first) {
-            write_err(&err.to_string());
-            continue;
-        }
-        let again = prompt_hidden(PROMPT_TYPE_IT_AGAIN).map_err(|err| err.to_string())?;
-        if first != again {
-            write_err(PASSWORDS_DO_NOT_MATCH);
-            continue;
-        }
-        return Ok(first);
-    }
-}
-
-/// Asks on a terminal, or reads one line when stdin is not a terminal.
-pub fn prompt_admin_password() -> Result<String, String> {
-    read_replacement_password(
-        std::io::stdin().is_terminal(),
-        || {
-            let mut line = String::new();
-            std::io::stdin().read_line(&mut line)?;
-            Ok(line)
-        },
-        read_hidden_line,
-        |message| eprintln!("{message}"),
-    )
-}
-
-fn read_hidden_line(prompt: &str) -> std::io::Result<String> {
-    eprint!("{prompt}");
-    std::io::stderr().flush()?;
-    let _guard = EchoGuard::disable()?;
-    let mut line = String::new();
-    std::io::stdin().read_line(&mut line)?;
-    eprintln!();
-    if line.ends_with('\n') {
-        line.pop();
-        if line.ends_with('\r') {
-            line.pop();
-        }
-    }
-    Ok(line)
-}
-
-struct EchoGuard {
-    fd: i32,
-    original: libc::termios,
-}
-
-impl EchoGuard {
-    fn disable() -> std::io::Result<Self> {
-        let fd = libc::STDIN_FILENO;
-        let mut original = unsafe { std::mem::zeroed() };
-        if unsafe { libc::tcgetattr(fd, &mut original) } != 0 {
-            return Err(std::io::Error::last_os_error());
-        }
-        let mut hidden = original;
-        hidden.c_lflag &= !libc::ECHO;
-        if unsafe { libc::tcsetattr(fd, libc::TCSAFLUSH, &hidden) } != 0 {
-            return Err(std::io::Error::last_os_error());
-        }
-        Ok(Self { fd, original })
-    }
-}
-
-impl Drop for EchoGuard {
-    fn drop(&mut self) {
-        unsafe {
-            libc::tcsetattr(self.fd, libc::TCSAFLUSH, &self.original);
-        }
-    }
-}
-
-/// Stop Coppice first and leave PostgreSQL running. Desktop installs keep the
-/// database password in `secrets/` and change it from Tools → Backup.
-pub async fn replace_offline(
-    config: &crate::AppConfig,
-    config_path: &Path,
-    admin_password: &str,
-) -> Result<String, ReplaceError> {
-    let secrets = config_path.parent().map(|parent| parent.join("secrets"));
-    if secrets
-        .as_ref()
-        .is_some_and(|dir| dir.join(MASTER_FILE).is_file() && dir.join(SESSION_FILE).is_file())
-        && db_target(&config.database.url).is_err()
-    {
-        return Err(ReplaceError::Failed(
-            "this data directory belongs to the desktop app. Use Tools → Backup → Replace keys while Coppice is open. coppice-server replace-keys is for a server install with PostgreSQL still running"
-                .into(),
-        ));
-    }
-    let pool = sqlx::postgres::PgPoolOptions::new()
-        .max_connections(2)
-        .acquire_timeout(Duration::from_secs(8))
-        .connect(&config.database.url)
-        .await?;
-    let store = SecretStore::from_master_key(&config.secrets.master_key);
-    let email = config
-        .auth
-        .bootstrap_admin_email
-        .clone()
-        .unwrap_or_else(|| "admin@localhost".into());
-    if let Some(dir) = secrets.filter(|dir| dir.join(MASTER_FILE).is_file()) {
-        let _url = replace_desktop_keys(
-            &pool,
-            &store,
-            &dir,
-            &config.database.url,
-            admin_password,
-            &email,
-        )
-        .await?;
-        return Ok(replaced_keys_message(&dir));
-    }
-    let _url = replace_server_keys(
-        &pool,
-        &store,
-        config_path,
-        &config.database.url,
-        &config.secrets.master_key,
-        &config.auth.session_secret,
-        admin_password,
-        &email,
-    )
-    .await?;
-    Ok(replaced_keys_message(config_path))
-}
-
-pub fn replaced_keys_message(path: &Path) -> String {
-    format!(
-        "Keys replaced. The new values are in {}. Keep that file private.",
-        path.display()
-    )
-}
-
 #[cfg(test)]
 mod plain_tests {
     use super::*;
@@ -1491,107 +1215,6 @@ mod tests {
         assert!(check_admin_password("   ").is_err());
         let ok = "a".repeat(MIN_PASSWORD_CHARS);
         assert!(check_admin_password(&ok).is_ok());
-        assert_eq!(
-            replaced_keys_message(Path::new("/tmp/config.toml")),
-            "Keys replaced. The new values are in /tmp/config.toml. Keep that file private."
-        );
-        assert_eq!(PROMPT_NEW_ADMIN_PASSWORD, "New admin password: ");
-        assert_eq!(PROMPT_TYPE_IT_AGAIN, "Type it again: ");
-        assert_eq!(
-            PASSWORDS_DO_NOT_MATCH,
-            "The passwords don't match. Try again."
-        );
-        assert_eq!(
-            PASSWORD_ON_STDIN,
-            "Enter a new admin password on stdin, or run this in a terminal."
-        );
-        assert!(
-            parse_replace_keys_command(&["coppice-server".into(), "serve".into()])
-                .unwrap()
-                .is_none()
-        );
-        assert!(
-            parse_replace_keys_command(&["coppice-server".into(), "replace-keys".into()])
-                .unwrap()
-                .is_some()
-        );
-        let rejected = parse_replace_keys_command(&[
-            "coppice-server".into(),
-            "replace-keys".into(),
-            "--admin-password".into(),
-            "secret-value".into(),
-        ])
-        .unwrap_err();
-        assert!(!rejected.contains("secret-value"), "{rejected}");
-    }
-
-    #[test]
-    fn replacement_password_prompts_match_and_reject_a_short_one() {
-        let mut notes = Vec::new();
-        let mut prompts = Vec::new();
-        let mut answers = vec![
-            "1234567".to_string(),
-            "12345678".to_string(),
-            "otherpass".to_string(),
-            "long-enough".to_string(),
-            "long-enough".to_string(),
-        ];
-        let password = read_replacement_password(
-            true,
-            || unreachable!("a terminal does not read a piped line"),
-            |prompt| {
-                prompts.push(prompt.to_string());
-                Ok(answers.remove(0))
-            },
-            |message| notes.push(message.to_string()),
-        )
-        .unwrap();
-        assert_eq!(password, "long-enough");
-        assert_eq!(
-            prompts,
-            vec![
-                "New admin password: ",
-                "New admin password: ",
-                "Type it again: ",
-                "New admin password: ",
-                "Type it again: ",
-            ]
-        );
-        assert_eq!(
-            notes,
-            vec![
-                "Use at least 8 characters.",
-                "The passwords don't match. Try again.",
-            ]
-        );
-
-        let piped = read_replacement_password(
-            false,
-            || Ok("from-stdin-ok\n".into()),
-            |_| unreachable!("a pipe does not prompt"),
-            |_| unreachable!("a valid piped password has no note"),
-        )
-        .unwrap();
-        assert_eq!(piped, "from-stdin-ok");
-        let empty = read_replacement_password(
-            false,
-            || Ok(String::new()),
-            |_| unreachable!("a pipe does not prompt"),
-            |_| {},
-        )
-        .unwrap_err();
-        assert_eq!(
-            empty,
-            "Enter a new admin password on stdin, or run this in a terminal."
-        );
-        let short = read_replacement_password(
-            false,
-            || Ok("1234567\n".into()),
-            |_| unreachable!("a pipe does not prompt"),
-            |_| {},
-        )
-        .unwrap_err();
-        assert_eq!(short, "Use at least 8 characters.");
     }
 
     #[tokio::test]

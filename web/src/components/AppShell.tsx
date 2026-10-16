@@ -25,7 +25,6 @@ import { LOGS_COPY } from '../features/logs/copy';
 import { SkipToBoard } from '../features/keyboard/SkipToBoard';
 import { BrandLogo } from './BrandLogo';
 import { DesktopUpdateBanner } from './DesktopUpdateBanner';
-import { ImportNoticeBanner } from './ImportNoticeBanner';
 
 const SIDEBAR_COLLAPSED_KEY = 'coppice.sidebar.collapsed';
 
@@ -200,7 +199,6 @@ export function AppShell() {
         )}
       >
         <DesktopUpdateBanner />
-        <ImportNoticeBanner />
         <header
           data-testid="app-shell-topbar"
           className="flex h-14 shrink-0 items-center justify-end gap-2 border-b border-border bg-surface px-4 sm:gap-4 sm:px-6"

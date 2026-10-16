@@ -288,8 +288,7 @@ pub fn required_skill(
         return Some("coppice-git");
     }
     let status = ticket_status.map(status_to_str).unwrap_or_default();
-    // Mirrors the precedence of the legacy contract guidance: the stable Tech
-    // Lead identity on a Ready ticket wins over a PM-like editable role.
+    // The stable Tech Lead identity on a Ready ticket wins over a PM-like editable role.
     let ready_tech_lead =
         is_ready_tech_lead_refinement(profile, job_type, status, agent_key, agent_role);
     if is_pm_identity(agent_key, agent_role) && !ready_tech_lead {

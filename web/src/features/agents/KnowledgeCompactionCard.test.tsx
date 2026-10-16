@@ -124,7 +124,17 @@ describe('KnowledgeCompactionCard', () => {
     const list = openCombobox(screen.getByLabelText('Compaction agent'));
     const option = within(list).getByRole('option', { name: /Coder \(codex\)/ });
     expect(option).toHaveAttribute('aria-disabled', 'true');
-    expect(option).toHaveTextContent('Cannot run compaction (no read-only mode)');
+    expect(option).toHaveTextContent("Can't run compaction safely");
+  });
+
+  it('names only the connector shown to block writes', () => {
+    mocks.settings = settings(coder);
+    renderCard([coder]);
+    expect(
+      screen.getByText(
+        "This agent's CLI can't run compaction safely. Pick an agent that uses OpenCode.",
+      ),
+    ).toBeVisible();
   });
 
   it('shows a paused hint for a disabled compaction agent', () => {

@@ -46,4 +46,4 @@ When an agent picks up a ticket, Coppice starts its CLI in that ticket's own git
 
 ---
 
-Building from source or running Coppice in Docker? Per-connector setup and internals are in [providers/](providers/README.md).
+Building from source? Per-connector setup and internals are in [providers/](providers/README.md).
