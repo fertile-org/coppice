@@ -24,7 +24,6 @@ pub enum ChatAction {
         #[serde(default, rename = "boardId")]
         board_id: Option<Uuid>,
     },
-    Cutoff,
 }
 
 fn default_knowledge_type() -> String {
@@ -43,8 +42,6 @@ pub struct ChatActionResultMeta {
     pub ticket_id: Option<Uuid>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub knowledge_item_id: Option<Uuid>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub child_session_id: Option<Uuid>,
 }
 
 /// Parse `actions` array from a chat-turn result object.
@@ -80,7 +77,7 @@ pub fn parse_chat_actions(value: &serde_json::Value) -> Result<Vec<ChatAction>, 
     Ok(out)
 }
 
-/// Deterministic compact of a chat transcript for knowledge / cutoff seed.
+/// Deterministic compact of a chat transcript for knowledge drafts.
 pub fn compact_transcript(transcript: &str, max_chars: usize) -> String {
     let trimmed = transcript.trim();
     if trimmed.is_empty() {
@@ -173,7 +170,7 @@ mod tests {
     }
 
     #[test]
-    fn parse_create_ticket_knowledge_cutoff() {
+    fn parse_create_ticket_and_knowledge() {
         let value = json!({
             "actions": [
                 {
@@ -188,12 +185,11 @@ mod tests {
                     "content": "Always resolve chat cwd",
                     "knowledgeType": "coding_convention",
                     "scope": "board"
-                },
-                { "type": "cutoff" }
+                }
             ]
         });
         let actions = parse_chat_actions(&value).expect("parse");
-        assert_eq!(actions.len(), 3);
+        assert_eq!(actions.len(), 2);
         match &actions[0] {
             ChatAction::CreateTicket { title, board_id, .. } => {
                 assert_eq!(title, "Fix cwd");
@@ -202,7 +198,6 @@ mod tests {
             other => panic!("expected create_ticket, got {other:?}"),
         }
         assert!(matches!(actions[1], ChatAction::CreateKnowledge { .. }));
-        assert!(matches!(actions[2], ChatAction::Cutoff));
     }
 
     #[test]

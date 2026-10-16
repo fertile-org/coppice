@@ -7,6 +7,7 @@ pub mod backup_service;
 pub mod chat_cwd;
 pub mod chat_repos;
 pub mod chat_service;
+pub mod chat_transcript;
 pub mod chat_workspace;
 pub mod code_review_service;
 pub mod comment_service;

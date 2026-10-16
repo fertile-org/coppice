@@ -3,7 +3,7 @@
  * M09 agent chat API smoke test.
  *
  * Validates session create (agent required, board optional), one mock
- * conversation turn, and cutoff → child session with summary seed.
+ * conversation turn.
  *
  * Env:
  *   COPPICE_API_URL            default http://localhost:5000
@@ -230,55 +230,6 @@ async function pollUntilAgentReply(sessionId, auth) {
   );
 }
 
-async function cutoffSession(sessionId, auth) {
-  const res = await api('POST', `/api/chat/sessions/${sessionId}/cutoff`, auth);
-
-  if (!res.ok) {
-    fail(`cutoff failed: ${res.status} ${await res.text()}`);
-  }
-
-  const body = await res.json();
-  if (body.parent?.status !== 'cutoff') {
-    fail(`expected parent cutoff, got ${body.parent?.status}`);
-  }
-  if (body.parent?.id !== sessionId) {
-    fail('cutoff parent id mismatch');
-  }
-  if (!body.child?.id) {
-    fail('cutoff response missing child session');
-  }
-  if (body.child.status !== 'active') {
-    fail(`expected active child session, got ${body.child.status}`);
-  }
-  if (body.child.parentSessionId !== sessionId) {
-    fail('child parentSessionId mismatch');
-  }
-  if (body.seedMessage?.role !== 'system') {
-    fail(`expected system seed message, got ${body.seedMessage?.role}`);
-  }
-  if (!body.seedMessage?.body?.includes('Prior conversation summary')) {
-    fail('seed message missing prior conversation summary');
-  }
-
-  console.log(
-    `smoke: cutoff parent ${sessionId} → child ${body.child.id} with seed`,
-  );
-  return body;
-}
-
-async function assertParentRejectsMessages(sessionId, auth) {
-  const res = await api('POST', `/api/chat/sessions/${sessionId}/messages`, {
-    ...auth,
-    body: { body: 'should fail after cutoff' },
-  });
-
-  if (res.status === 201) {
-    fail('cutoff parent still accepted a new message');
-  }
-
-  console.log('smoke: cutoff parent rejects further messages');
-}
-
 async function main() {
   console.log(`smoke: waiting for ${API}/health`);
   await waitForHealth();
@@ -291,8 +242,6 @@ async function main() {
   await pollUntilAgentReply(session.id, auth);
   await postHumanMessage(session.id, auth, 'Second turn for provider session reuse.');
   await pollUntilAgentReply(session.id, auth);
-  await cutoffSession(session.id, auth);
-  await assertParentRejectsMessages(session.id, auth);
 
   console.log('smoke: M09 agent chat API flow passed');
 }

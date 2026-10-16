@@ -65,7 +65,7 @@ export function chatIsolationBanner(connectorId: string | null | undefined): str
   return `Coppice hasn't confirmed that ${entry.name} stays read-only. The agent can still run commands on your computer.`;
 }
 
-/** Why Start chat is off. One sentence per CLI. */
+/** Why chat is off for this connector. One sentence per CLI. */
 export function chatUnavailableMessage(connectorId: string | null | undefined): string | null {
   const entry = chatConnector(connectorId);
   if (!entry || entry.status !== 'unavailable') return null;

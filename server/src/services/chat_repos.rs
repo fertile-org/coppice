@@ -421,17 +421,6 @@ pub fn open_repo(
     })
 }
 
-pub fn opened_slugs_for_continue(chat_dir: &Path) -> Vec<String> {
-    let state = read_state(chat_dir);
-    let mut slugs: Vec<String> = state.opened.into_iter().map(|opened| opened.slug).collect();
-    for slug in state.carried {
-        if !slugs.contains(&slug) {
-            slugs.push(slug);
-        }
-    }
-    slugs
-}
-
 pub fn copies_were_swept(chat_dir: &Path) -> bool {
     read_state(chat_dir).copies_swept
 }
@@ -771,9 +760,6 @@ fn write_index(
         }
         if checked_out {
             marks.push("checked out");
-        } else if state.carried.iter().any(|slug| slug == &repo.slug) {
-            marks.push("call `open_repo`");
-            marks.push("opened in the previous chat");
         } else {
             marks.push("call `open_repo`");
         }
@@ -1394,49 +1380,6 @@ mod tests {
         }
         assert!(dir.join("alpha").join(".git").is_dir());
         assert!(dir.join("beta").join(".git").is_dir());
-    }
-
-    #[test]
-    fn continue_carries_opened_slugs_without_copying() {
-        let root = tempfile::tempdir().unwrap();
-        let parent = Uuid::new_v4();
-        let child = Uuid::new_v4();
-        let repos = vec![
-            linked("alpha", init_repo(root.path(), "alpha"), true),
-            linked("beta", init_repo(root.path(), "beta"), false),
-        ];
-        let parent_dir = chat_dir(root.path(), parent);
-        open_notes(
-            &parent_dir,
-            parent,
-            &repos,
-            "beta",
-            &ChatRepoLimits::default(),
-        )
-        .0
-        .unwrap();
-        let carried = opened_slugs_for_continue(&parent_dir);
-        assert_eq!(carried, vec!["beta".to_string()]);
-        let started = begin_chat_workspace(
-            root.path(),
-            child,
-            &repos,
-            &carried,
-            &ChatRepoLimits::default(),
-            |_| {},
-        )
-        .unwrap();
-        if let Some(handle) = started.eager {
-            let _ = handle.join();
-        }
-        assert!(!chat_dir(root.path(), child).join("beta").exists());
-        let child_carried = opened_slugs_for_continue(&chat_dir(root.path(), child));
-        assert!(child_carried.contains(&"beta".to_string()));
-        let index = fs::read_to_string(chat_dir(root.path(), child).join(INDEX_FILE)).unwrap();
-        assert!(index.contains("beta"));
-        assert!(index.contains("opened in the previous chat"));
-        assert!(index.contains("Focus:"));
-        assert!(index.contains("alpha"));
     }
 
     #[test]

@@ -11,7 +11,7 @@ use uuid::Uuid;
 
 use crate::services::chat_repos::{
     self, assign_slug, begin_chat_workspace, chat_dir, choose_focus_repo, clear_swept_flag,
-    copies_were_swept, one_line_description, open_repo, opened_slugs_for_continue, refresh_index,
+    copies_were_swept, one_line_description, open_repo, refresh_index,
     slugs_to_restore, touch_activity, ChatRepoLimits, LinkedRepo, INDEX_FILE, REPOS_READY_LINE,
 };
 use crate::services::chat_service::ChatService;
@@ -189,10 +189,6 @@ pub async fn on_chat_turn(
             tracing::warn!(%session_id, error = %err, "failed to rebuild chat folder");
         }
     }
-}
-
-pub fn continue_slugs(worktrees: &Path, session_id: Uuid) -> Vec<String> {
-    opened_slugs_for_continue(&chat_dir(worktrees, session_id))
 }
 
 pub fn spawn_sweep(state: Arc<AppState>) {
