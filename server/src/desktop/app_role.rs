@@ -4,7 +4,11 @@
 //! `database.sql` to `psql` as the runtime role, and a superuser can run
 //! `COPY ... TO PROGRAM`. The server and that import connect as `coppice_app`
 //! instead. The superuser password is only used here, to create the role and
-//! to adopt a database left by an older install.
+//! to adopt a database left by an older install. Adoption opens that database
+//! once; `pg_app_role_ready` in the data directory records it, and later
+//! launches do not open the database as the superuser.
+
+use std::path::Path;
 
 use anyhow::{bail, Context};
 use sqlx::postgres::PgConnectOptions;
@@ -13,6 +17,9 @@ use sqlx::{ConnectOptions, Connection, PgConnection};
 use super::postgres::{percent_encode, SUPERUSER};
 
 pub(crate) const APP_ROLE: &str = "coppice_app";
+
+/// Written in the desktop data directory after ownership has moved.
+pub(crate) const READY_FLAG_FILE: &str = "pg_app_role_ready";
 
 const ROLE_ATTRIBUTES: &str = "LOGIN NOSUPERUSER NOCREATEROLE NOCREATEDB NOREPLICATION NOBYPASSRLS";
 
@@ -35,23 +42,31 @@ pub(crate) fn app_database_url(port: u16, password: &str, name: &str) -> anyhow:
 /// Creates `coppice_app` when missing, makes it own `database`, and moves
 /// existing schema objects off the bootstrap superuser. An existing role keeps
 /// its password so a crashed replacement can still be detected from the files.
+///
+/// Role and database checks run on the `postgres` database. Object ownership
+/// is moved only when `ready_flag` is absent (or the database was just
+/// created). That flag is written after the move succeeds.
 pub(crate) async fn provision_app_role(
     host: &str,
     port: u16,
     superuser_password: &str,
     app_password: &str,
     database: &str,
+    ready_flag: &Path,
 ) -> anyhow::Result<()> {
     if !super::postgres::is_valid_db_name(database) {
         bail!("invalid database name {database:?}");
     }
     let mut maintenance = connect(host, port, superuser_password, "postgres").await?;
-    let role_existed: bool =
-        sqlx::query_scalar("SELECT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = $1)")
-            .bind(APP_ROLE)
-            .fetch_one(&mut maintenance)
-            .await
-            .context("check application role")?;
+    let role_existed = {
+        let mut tx = catalog_tx(&mut maintenance).await?;
+        let role_existed = role_exists(&mut tx).await?;
+        if role_existed {
+            lock_down_role(&mut tx).await?;
+        }
+        tx.commit().await.context("commit")?;
+        role_existed
+    };
     if !role_existed {
         if app_password.is_empty() {
             bail!("application role password is empty");
@@ -59,34 +74,28 @@ pub(crate) async fn provision_app_role(
         let password_literal =
             crate::services::secret_rotation::role_password_literal(app_password)
                 .map_err(|err| anyhow::anyhow!("{err}"))?;
-        let sql = format!(
-            "CREATE ROLE {} WITH {ROLE_ATTRIBUTES} PASSWORD {password_literal}",
-            quote_ident(APP_ROLE)
-        );
-        sqlx::query(&sql)
-            .execute(&mut maintenance)
-            .await
-            .context("create application role")?;
+        exec(
+            &mut maintenance,
+            &format!(
+                "CREATE ROLE {} WITH {ROLE_ATTRIBUTES} PASSWORD {password_literal}",
+                quote_ident(APP_ROLE)
+            ),
+        )
+        .await
+        .context("create application role")?;
+        let mut tx = catalog_tx(&mut maintenance).await?;
+        lock_down_role(&mut tx).await?;
+        tx.commit().await.context("commit")?;
     }
-    exec(
-        &mut maintenance,
-        &format!(
-            "ALTER ROLE {} WITH {ROLE_ATTRIBUTES}",
-            quote_ident(APP_ROLE)
-        ),
-    )
-    .await
-    .context("restrict application role")?;
-    revoke_server_file_roles(&mut maintenance).await?;
 
-    let database_exists: bool =
-        sqlx::query_scalar("SELECT EXISTS (SELECT 1 FROM pg_database WHERE datname = $1)")
-            .bind(database)
-            .fetch_one(&mut maintenance)
-            .await
-            .context("check application database")?;
+    let database_existed = {
+        let mut tx = catalog_tx(&mut maintenance).await?;
+        let database_existed = database_exists(&mut tx, database).await?;
+        tx.commit().await.context("commit")?;
+        database_existed
+    };
     let database_ident = quote_ident(database);
-    if database_exists {
+    if database_existed {
         exec(
             &mut maintenance,
             &format!(
@@ -109,9 +118,57 @@ pub(crate) async fn provision_app_role(
     }
     maintenance.close().await.ok();
 
+    // A database GUC cannot redirect a connection we never open.
+    if ready_flag.is_file() && database_existed {
+        return Ok(());
+    }
+
     let mut conn = connect(host, port, superuser_password, database).await?;
-    transfer_ownership(&mut conn).await?;
+    let mut tx = catalog_tx(&mut conn).await?;
+    transfer_ownership(&mut tx).await?;
+    tx.commit().await.context("commit")?;
     conn.close().await.ok();
+    write_ready_flag(ready_flag)?;
+    Ok(())
+}
+
+async fn role_exists(conn: &mut PgConnection) -> anyhow::Result<bool> {
+    sqlx::query_scalar(
+        "SELECT EXISTS (
+            SELECT 1 FROM pg_catalog.pg_roles
+            WHERE rolname::pg_catalog.text OPERATOR(pg_catalog.=) $1
+        )",
+    )
+    .bind(APP_ROLE)
+    .fetch_one(&mut *conn)
+    .await
+    .context("check application role")
+}
+
+async fn database_exists(conn: &mut PgConnection, database: &str) -> anyhow::Result<bool> {
+    sqlx::query_scalar(
+        "SELECT EXISTS (
+            SELECT 1 FROM pg_catalog.pg_database
+            WHERE datname::pg_catalog.text OPERATOR(pg_catalog.=) $1
+        )",
+    )
+    .bind(database)
+    .fetch_one(&mut *conn)
+    .await
+    .context("check application database")
+}
+
+async fn lock_down_role(conn: &mut PgConnection) -> anyhow::Result<()> {
+    exec(
+        conn,
+        &format!(
+            "ALTER ROLE {} WITH {ROLE_ATTRIBUTES}",
+            quote_ident(APP_ROLE)
+        ),
+    )
+    .await
+    .context("restrict application role")?;
+    revoke_server_file_roles(conn).await?;
     Ok(())
 }
 
@@ -119,10 +176,13 @@ async fn revoke_server_file_roles(conn: &mut PgConnection) -> anyhow::Result<()>
     for granted in SERVER_PROGRAM_ROLES {
         let member: bool = sqlx::query_scalar(
             "SELECT EXISTS (
-                SELECT 1 FROM pg_auth_members m
-                JOIN pg_roles g ON g.oid = m.roleid
-                JOIN pg_roles u ON u.oid = m.member
-                WHERE u.rolname = $1 AND g.rolname = $2
+                SELECT 1 FROM pg_catalog.pg_auth_members m
+                JOIN pg_catalog.pg_roles g
+                  ON g.oid OPERATOR(pg_catalog.=) m.roleid
+                JOIN pg_catalog.pg_roles u
+                  ON u.oid OPERATOR(pg_catalog.=) m.member
+                WHERE u.rolname::pg_catalog.text OPERATOR(pg_catalog.=) $1
+                  AND g.rolname::pg_catalog.text OPERATOR(pg_catalog.=) $2
             )",
         )
         .bind(APP_ROLE)
@@ -149,13 +209,14 @@ async fn revoke_server_file_roles(conn: &mut PgConnection) -> anyhow::Result<()>
 async fn transfer_ownership(conn: &mut PgConnection) -> anyhow::Result<()> {
     let schemas: Vec<String> = sqlx::query_scalar(
         "SELECT n.nspname
-         FROM pg_namespace n
-         JOIN pg_roles r ON r.oid = n.nspowner
-         WHERE n.nspname <> 'pg_catalog'
-           AND n.nspname <> 'information_schema'
-           AND n.nspname NOT LIKE 'pg_toast%'
-           AND n.nspname NOT LIKE 'pg_temp%'
-           AND r.rolname <> $1",
+         FROM pg_catalog.pg_namespace n
+         JOIN pg_catalog.pg_roles r
+           ON r.oid OPERATOR(pg_catalog.=) n.nspowner
+         WHERE n.nspname::pg_catalog.text OPERATOR(pg_catalog.<>) 'pg_catalog'
+           AND n.nspname::pg_catalog.text OPERATOR(pg_catalog.<>) 'information_schema'
+           AND n.nspname::pg_catalog.text OPERATOR(pg_catalog.!~~) 'pg_toast%'
+           AND n.nspname::pg_catalog.text OPERATOR(pg_catalog.!~~) 'pg_temp%'
+           AND r.rolname::pg_catalog.text OPERATOR(pg_catalog.<>) $1",
     )
     .bind(APP_ROLE)
     .fetch_all(&mut *conn)
@@ -175,21 +236,26 @@ async fn transfer_ownership(conn: &mut PgConnection) -> anyhow::Result<()> {
     }
 
     let relations: Vec<(String, String, String)> = sqlx::query_as(
-        "SELECT n.nspname, c.relname, c.relkind::text
-         FROM pg_class c
-         JOIN pg_namespace n ON n.oid = c.relnamespace
-         JOIN pg_roles r ON r.oid = c.relowner
-         WHERE n.nspname <> 'pg_catalog'
-           AND n.nspname <> 'information_schema'
-           AND n.nspname NOT LIKE 'pg_toast%'
-           AND n.nspname NOT LIKE 'pg_temp%'
-           AND c.relkind IN ('r', 'p', 'S', 'v', 'm', 'i', 'I')
-           AND r.rolname <> $1
+        "SELECT n.nspname, c.relname, c.relkind::pg_catalog.text
+         FROM pg_catalog.pg_class c
+         JOIN pg_catalog.pg_namespace n
+           ON n.oid OPERATOR(pg_catalog.=) c.relnamespace
+         JOIN pg_catalog.pg_roles r
+           ON r.oid OPERATOR(pg_catalog.=) c.relowner
+         WHERE n.nspname::pg_catalog.text OPERATOR(pg_catalog.<>) 'pg_catalog'
+           AND n.nspname::pg_catalog.text OPERATOR(pg_catalog.<>) 'information_schema'
+           AND n.nspname::pg_catalog.text OPERATOR(pg_catalog.!~~) 'pg_toast%'
+           AND n.nspname::pg_catalog.text OPERATOR(pg_catalog.!~~) 'pg_temp%'
+           AND c.relkind::pg_catalog.text OPERATOR(pg_catalog.=) ANY (
+               ARRAY['r', 'p', 'S', 'v', 'm', 'i', 'I']::pg_catalog.text[]
+           )
+           AND r.rolname::pg_catalog.text OPERATOR(pg_catalog.<>) $1
            AND NOT EXISTS (
-               SELECT 1 FROM pg_depend d
-               WHERE d.classid = 'pg_class'::regclass
-                 AND d.objid = c.oid
-                 AND d.deptype = 'e'
+               SELECT 1 FROM pg_catalog.pg_depend d
+               WHERE d.classid OPERATOR(pg_catalog.=)
+                     'pg_catalog.pg_class'::pg_catalog.regclass::pg_catalog.oid
+                 AND d.objid OPERATOR(pg_catalog.=) c.oid
+                 AND d.deptype::pg_catalog.text OPERATOR(pg_catalog.=) 'e'
            )",
     )
     .bind(APP_ROLE)
@@ -218,20 +284,26 @@ async fn transfer_ownership(conn: &mut PgConnection) -> anyhow::Result<()> {
     }
 
     let functions: Vec<(String, String, String, String)> = sqlx::query_as(
-        "SELECT n.nspname, p.proname, p.prokind::text, pg_get_function_identity_arguments(p.oid)
-         FROM pg_proc p
-         JOIN pg_namespace n ON n.oid = p.pronamespace
-         JOIN pg_roles r ON r.oid = p.proowner
-         WHERE n.nspname <> 'pg_catalog'
-           AND n.nspname <> 'information_schema'
-           AND n.nspname NOT LIKE 'pg_toast%'
-           AND n.nspname NOT LIKE 'pg_temp%'
-           AND r.rolname <> $1
+        "SELECT n.nspname,
+                p.proname,
+                p.prokind::pg_catalog.text,
+                pg_catalog.pg_get_function_identity_arguments(p.oid)
+         FROM pg_catalog.pg_proc p
+         JOIN pg_catalog.pg_namespace n
+           ON n.oid OPERATOR(pg_catalog.=) p.pronamespace
+         JOIN pg_catalog.pg_roles r
+           ON r.oid OPERATOR(pg_catalog.=) p.proowner
+         WHERE n.nspname::pg_catalog.text OPERATOR(pg_catalog.<>) 'pg_catalog'
+           AND n.nspname::pg_catalog.text OPERATOR(pg_catalog.<>) 'information_schema'
+           AND n.nspname::pg_catalog.text OPERATOR(pg_catalog.!~~) 'pg_toast%'
+           AND n.nspname::pg_catalog.text OPERATOR(pg_catalog.!~~) 'pg_temp%'
+           AND r.rolname::pg_catalog.text OPERATOR(pg_catalog.<>) $1
            AND NOT EXISTS (
-               SELECT 1 FROM pg_depend d
-               WHERE d.classid = 'pg_proc'::regclass
-                 AND d.objid = p.oid
-                 AND d.deptype = 'e'
+               SELECT 1 FROM pg_catalog.pg_depend d
+               WHERE d.classid OPERATOR(pg_catalog.=)
+                     'pg_catalog.pg_proc'::pg_catalog.regclass::pg_catalog.oid
+                 AND d.objid OPERATOR(pg_catalog.=) p.oid
+                 AND d.deptype::pg_catalog.text OPERATOR(pg_catalog.=) 'e'
            )",
     )
     .bind(APP_ROLE)
@@ -259,9 +331,11 @@ async fn transfer_ownership(conn: &mut PgConnection) -> anyhow::Result<()> {
 
     let extensions: Vec<String> = sqlx::query_scalar(
         "SELECT e.extname
-         FROM pg_extension e
-         JOIN pg_roles r ON r.oid = e.extowner
-         WHERE e.extname <> 'plpgsql' AND r.rolname <> $1",
+         FROM pg_catalog.pg_extension e
+         JOIN pg_catalog.pg_roles r
+           ON r.oid OPERATOR(pg_catalog.=) e.extowner
+         WHERE e.extname::pg_catalog.text OPERATOR(pg_catalog.<>) 'plpgsql'
+           AND r.rolname::pg_catalog.text OPERATOR(pg_catalog.<>) $1",
     )
     .bind(APP_ROLE)
     .fetch_all(&mut *conn)
@@ -288,15 +362,52 @@ async fn connect(
     superuser_password: &str,
     database: &str,
 ) -> anyhow::Result<PgConnection> {
-    PgConnectOptions::new()
+    let mut conn = PgConnectOptions::new()
         .host(host)
         .port(port)
         .username(SUPERUSER)
         .password(superuser_password)
         .database(database)
+        .options([("search_path", "pg_catalog")])
         .connect()
         .await
-        .with_context(|| format!("connect to {database} as {SUPERUSER}"))
+        .with_context(|| format!("connect to {database} as {SUPERUSER}"))?;
+    // Client startup options are applied before a database GUC on PostgreSQL
+    // 16. `SET` still wins if a build applies `ALTER DATABASE SET` later.
+    sqlx::query("SET search_path TO pg_catalog")
+        .execute(&mut conn)
+        .await
+        .context("pin search_path")?;
+    Ok(conn)
+}
+
+async fn catalog_tx(
+    conn: &mut PgConnection,
+) -> anyhow::Result<sqlx::Transaction<'_, sqlx::Postgres>> {
+    let mut tx = conn.begin().await.context("begin")?;
+    sqlx::query("SET LOCAL search_path TO pg_catalog")
+        .execute(&mut *tx)
+        .await
+        .context("pin search_path")?;
+    Ok(tx)
+}
+
+fn write_ready_flag(path: &Path) -> anyhow::Result<()> {
+    if let Some(parent) = path.parent() {
+        if !parent.as_os_str().is_empty() {
+            std::fs::create_dir_all(parent).context("record application role")?;
+        }
+    }
+    let tmp = path.with_extension("writing");
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let file = std::fs::File::create(&tmp).context("record application role")?;
+        file.set_permissions(std::fs::Permissions::from_mode(0o600))
+            .context("record application role")?;
+        file.sync_all().context("record application role")?;
+    }
+    std::fs::rename(&tmp, path).context("record application role")?;
+    Ok(())
 }
 
 async fn exec(conn: &mut PgConnection, sql: &str) -> anyhow::Result<()> {
@@ -331,6 +442,7 @@ mod tests {
 #[cfg(all(test, feature = "embedded-test-db"))]
 mod embedded_tests {
     use std::io::Write;
+    use std::os::unix::fs::PermissionsExt;
     use std::str::FromStr;
 
     use sqlx::postgres::PgPoolOptions;
@@ -344,6 +456,7 @@ mod embedded_tests {
     const UPGRADE_DB: &str = "app_role_upgrade";
     const FRESH_DB: &str = "app_role_fresh";
     const IMPORT_DB: &str = "app_role_import";
+    const HIJACK_DB: &str = "app_role_hijack";
 
     /// Held for the whole test. Nextest runs each test in its own process, so
     /// an in-process mutex would not stop two processes creating `coppice_app`.
@@ -377,7 +490,7 @@ mod embedded_tests {
 
     async fn reset_role(port: u16) {
         let mut conn = maintenance(port).await;
-        for name in [UPGRADE_DB, FRESH_DB, IMPORT_DB] {
+        for name in [UPGRADE_DB, FRESH_DB, IMPORT_DB, HIJACK_DB] {
             let _ = sqlx::query(&format!(
                 "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '{name}'"
             ))
@@ -434,26 +547,42 @@ mod embedded_tests {
         let mut db = connect("127.0.0.1", port, SUPER_PASSWORD, UPGRADE_DB)
             .await
             .expect("upgrade database");
-        sqlx::query("CREATE TABLE kept_rows (id int)")
+        sqlx::query("CREATE TABLE public.kept_rows (id int)")
             .execute(&mut db)
             .await
             .unwrap();
-        sqlx::query("CREATE SEQUENCE kept_seq")
+        sqlx::query("CREATE SEQUENCE public.kept_seq")
             .execute(&mut db)
             .await
             .unwrap();
-        sqlx::query("CREATE FUNCTION kept_fn() RETURNS int LANGUAGE sql AS $$ SELECT 1 $$")
+        sqlx::query("CREATE FUNCTION public.kept_fn() RETURNS int LANGUAGE sql AS $$ SELECT 1 $$")
             .execute(&mut db)
             .await
             .unwrap();
         db.close().await.ok();
 
-        provision_app_role("127.0.0.1", port, SUPER_PASSWORD, APP_PASSWORD, UPGRADE_DB)
-            .await
-            .expect("provision");
-        provision_app_role("127.0.0.1", port, SUPER_PASSWORD, APP_PASSWORD, UPGRADE_DB)
-            .await
-            .expect("provision again");
+        let flag_dir = tempfile::tempdir().expect("tempdir");
+        let flag = flag_dir.path().join(READY_FLAG_FILE);
+        provision_app_role(
+            "127.0.0.1",
+            port,
+            SUPER_PASSWORD,
+            APP_PASSWORD,
+            UPGRADE_DB,
+            &flag,
+        )
+        .await
+        .expect("provision");
+        provision_app_role(
+            "127.0.0.1",
+            port,
+            SUPER_PASSWORD,
+            APP_PASSWORD,
+            UPGRADE_DB,
+            &flag,
+        )
+        .await
+        .expect("provision again");
 
         let mut admin = maintenance(port).await;
         let (superuser, create_role, create_db, login, replication, bypass): (
@@ -564,9 +693,17 @@ mod embedded_tests {
         let port = embedded_port().await;
         let _lock = hold_role_lock(port).await;
         reset_role(port).await;
-        provision_app_role("127.0.0.1", port, SUPER_PASSWORD, APP_PASSWORD, FRESH_DB)
-            .await
-            .expect("provision fresh database");
+        let flag_dir = tempfile::tempdir().expect("tempdir");
+        provision_app_role(
+            "127.0.0.1",
+            port,
+            SUPER_PASSWORD,
+            APP_PASSWORD,
+            FRESH_DB,
+            &flag_dir.path().join(READY_FLAG_FILE),
+        )
+        .await
+        .expect("provision fresh database");
         let url = app_database_url(port, APP_PASSWORD, FRESH_DB).unwrap();
         assert!(url.contains("postgres://coppice_app:"));
         crate::db::connect_and_migrate(&url)
@@ -596,9 +733,17 @@ mod embedded_tests {
         let port = embedded_port().await;
         let _lock = hold_role_lock(port).await;
         reset_role(port).await;
-        provision_app_role("127.0.0.1", port, SUPER_PASSWORD, APP_PASSWORD, IMPORT_DB)
-            .await
-            .expect("provision import database");
+        let flag_dir = tempfile::tempdir().expect("tempdir");
+        provision_app_role(
+            "127.0.0.1",
+            port,
+            SUPER_PASSWORD,
+            APP_PASSWORD,
+            IMPORT_DB,
+            &flag_dir.path().join(READY_FLAG_FILE),
+        )
+        .await
+        .expect("provision import database");
 
         let dir = tempfile::tempdir().expect("tempdir");
         let marker = dir.path().join("copy-program-marker");
@@ -637,5 +782,143 @@ mod embedded_tests {
             marker.exists(),
             "the same COPY TO PROGRAM did not run as the superuser, so the denial was not proven"
         );
+    }
+
+    fn trojan_dump(database: &str, marker: &std::path::Path) -> String {
+        let marker = marker.display().to_string().replace('\'', "''");
+        format!(
+            "ALTER DATABASE {database} SET search_path TO public, pg_catalog;\n\
+             CREATE FUNCTION public.pg_get_function_identity_arguments(oid)\n\
+             RETURNS text LANGUAGE plpgsql AS $fn$\n\
+             BEGIN\n\
+               EXECUTE 'COPY (SELECT 1) TO PROGRAM ''touch {marker}''';\n\
+               RETURN '';\n\
+             END;\n\
+             $fn$;\n"
+        )
+    }
+
+    async fn legacy_owner(conn: &mut PgConnection) -> String {
+        sqlx::query_scalar(
+            "SELECT pg_catalog.pg_get_userbyid(p.proowner)
+             FROM pg_catalog.pg_proc p
+             JOIN pg_catalog.pg_namespace n
+               ON n.oid OPERATOR(pg_catalog.=) p.pronamespace
+             WHERE n.nspname::pg_catalog.text OPERATOR(pg_catalog.=) 'public'
+               AND p.proname::pg_catalog.text OPERATOR(pg_catalog.=) 'legacy_fn'",
+        )
+        .fetch_one(conn)
+        .await
+        .expect("legacy_fn owner")
+    }
+
+    /// A dump can set this database's `search_path` and plant a function the
+    /// adoption query calls. Restarting must not run that function as the
+    /// superuser, so the marker file stays absent. Removing the ready flag
+    /// adopts again, and that connection must not run the trojan either.
+    #[tokio::test]
+    async fn restart_after_a_search_path_trojan_does_not_run_copy_to_program() {
+        let port = embedded_port().await;
+        let _lock = hold_role_lock(port).await;
+        reset_role(port).await;
+        let dir = tempfile::tempdir().expect("tempdir");
+        let flag = dir.path().join(READY_FLAG_FILE);
+        let marker = dir.path().join("search-path-marker");
+        provision_app_role(
+            "127.0.0.1",
+            port,
+            SUPER_PASSWORD,
+            APP_PASSWORD,
+            HIJACK_DB,
+            &flag,
+        )
+        .await
+        .expect("provision");
+        let mode = std::fs::metadata(&flag)
+            .expect("ready flag")
+            .permissions()
+            .mode();
+        assert_eq!(mode & 0o777, 0o600);
+
+        let mut admin = connect("127.0.0.1", port, SUPER_PASSWORD, HIJACK_DB)
+            .await
+            .expect("hijacked database");
+        sqlx::query(
+            "CREATE FUNCTION public.legacy_fn() RETURNS int LANGUAGE sql AS $$ SELECT 1 $$",
+        )
+        .execute(&mut admin)
+        .await
+        .expect("superuser-owned function");
+        admin.close().await.ok();
+
+        let bytes = zip_with_sql(&trojan_dump(HIJACK_DB, &marker));
+        let mut config = crate::AppConfig::load_defaults().expect("config");
+        config.database.url = app_database_url(port, APP_PASSWORD, HIJACK_DB).unwrap();
+        config.storage.artifacts_dir = dir.path().join("artifacts").display().to_string();
+        config.agent.worktrees_path = dir.path().join("worktrees").display().to_string();
+        let pool = PgPoolOptions::new()
+            .max_connections(1)
+            .connect(&config.database.url)
+            .await
+            .expect("app pool");
+        let store = crate::crypto::SecretStore::from_master_key("desktop-app-role");
+        let _imported =
+            BackupService::import_from_bytes(&config, &pool, &bytes, None, &store).await;
+        assert!(
+            !marker.exists(),
+            "the dump ran COPY TO PROGRAM before restart"
+        );
+
+        let mut pinned = connect("127.0.0.1", port, SUPER_PASSWORD, HIJACK_DB)
+            .await
+            .expect("pinned superuser connection");
+        let search_path: String = sqlx::query_scalar("SHOW search_path")
+            .fetch_one(&mut pinned)
+            .await
+            .expect("show search_path");
+        assert_eq!(search_path, "pg_catalog");
+        pinned.close().await.ok();
+
+        provision_app_role(
+            "127.0.0.1",
+            port,
+            SUPER_PASSWORD,
+            APP_PASSWORD,
+            HIJACK_DB,
+            &flag,
+        )
+        .await
+        .expect("restart");
+        assert!(
+            !marker.exists(),
+            "superuser startup ran the search_path trojan"
+        );
+        let mut admin = connect("127.0.0.1", port, SUPER_PASSWORD, HIJACK_DB)
+            .await
+            .unwrap();
+        assert_eq!(legacy_owner(&mut admin).await, SUPERUSER);
+        admin.close().await.ok();
+
+        std::fs::remove_file(&flag).expect("remove ready flag");
+        provision_app_role(
+            "127.0.0.1",
+            port,
+            SUPER_PASSWORD,
+            APP_PASSWORD,
+            HIJACK_DB,
+            &flag,
+        )
+        .await
+        .expect("adopt again");
+        assert!(
+            !marker.exists(),
+            "adopting the hijacked database ran COPY TO PROGRAM"
+        );
+        assert!(flag.is_file(), "adoption did not record the ready flag");
+        let mut admin = connect("127.0.0.1", port, SUPER_PASSWORD, HIJACK_DB)
+            .await
+            .unwrap();
+        assert_eq!(legacy_owner(&mut admin).await, APP_ROLE);
+        admin.close().await.ok();
     }
 }

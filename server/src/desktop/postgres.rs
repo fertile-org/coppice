@@ -261,13 +261,15 @@ impl DesktopPostgres {
 
     /// Creates database `name` if missing, owned by `coppice_app`, and returns
     /// that role's connection URL. The superuser password is used only to
-    /// create the role and adopt an existing cluster.
+    /// create the role and adopt an existing cluster. `ready_flag` skips
+    /// opening the database as the superuser once that adoption has succeeded.
     pub async fn ensure_database(
         &self,
         port: u16,
         superuser_password: &str,
         app_password: &str,
         name: &str,
+        ready_flag: &Path,
     ) -> anyhow::Result<String> {
         super::app_role::provision_app_role(
             "127.0.0.1",
@@ -275,6 +277,7 @@ impl DesktopPostgres {
             superuser_password,
             app_password,
             name,
+            ready_flag,
         )
         .await?;
         super::app_role::app_database_url(port, app_password, name)

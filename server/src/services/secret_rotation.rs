@@ -1158,7 +1158,8 @@ async fn password_connects(
         .port(port)
         .username(user)
         .password(password)
-        .database(database);
+        .database(database)
+        .options([("search_path", "pg_catalog")]);
     match tokio::time::timeout(Duration::from_secs(4), opts.connect()).await {
         Ok(Ok(conn)) => {
             let _ = conn.close().await;

@@ -245,6 +245,7 @@ async fn serve_with_postgres(
             &secrets.pg_password,
             &secrets.pg_app_password,
             DATABASE_NAME,
+            &layout.root.join(app_role::READY_FLAG_FILE),
         )
         .await?;
     let app_password = crate::services::secret_rotation::finish_app_password(
