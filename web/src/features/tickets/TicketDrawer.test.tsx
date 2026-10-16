@@ -116,6 +116,7 @@ vi.mock('./useTicket', () => ({
   }),
   statusLabel: (status: string) => status,
   useUpdateTicket: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useUploadAttachment: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useAssignAgent: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useAgents: () => ({ data: [] }),
   useUpdateTicketStatus: () => ({ mutateAsync: vi.fn(), isPending: false }),
@@ -229,6 +230,18 @@ describe('TicketDrawer', () => {
       archivedAt: null,
       hasActiveRun: false,
     };
+  });
+
+  it('offers Attach files and highlights the ticket drop zone', () => {
+    renderDrawer();
+    expect(screen.getByRole('button', { name: 'Attach files' })).toHaveAttribute(
+      'title',
+      'Attach files',
+    );
+    fireEvent.dragOver(screen.getByText('Ticket description'), {
+      dataTransfer: { types: ['Files'], files: [] },
+    });
+    expect(screen.getByText('Drop to attach')).toBeInTheDocument();
   });
 
   it('renders Detail, Live Console, and Agent Runs tabs', () => {

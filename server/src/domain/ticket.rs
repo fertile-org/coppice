@@ -20,6 +20,7 @@ pub struct Ticket {
     pub repo_id: Option<Uuid>,
     pub title: String,
     pub description: String,
+    pub attachment_ids: Vec<Uuid>,
     pub status: TicketStatus,
     pub substatus: Option<Substatus>,
     pub substatus_metadata: Option<Value>,

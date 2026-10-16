@@ -197,7 +197,7 @@ impl<'a> CommentService<'a> {
     /// Whether `user_id` may download the attachment.
     ///
     /// Allowed when the caller uploaded it, owns a chat session that links it,
-    /// or it is linked to any ticket comment (existing ticket access for authenticated users).
+    /// or it is linked from a ticket comment or the ticket description.
     pub async fn user_can_access_attachment(
         &self,
         attachment_id: Uuid,
@@ -239,7 +239,23 @@ impl<'a> CommentService<'a> {
         .bind(attachment_id)
         .fetch_one(self.pool)
         .await?;
-        Ok(linked_to_comment)
+        if linked_to_comment {
+            return Ok(true);
+        }
+
+        let linked_to_ticket: bool = sqlx::query_scalar(
+            r#"
+            SELECT EXISTS(
+                SELECT 1
+                FROM tickets
+                WHERE $1 = ANY(attachment_ids)
+            )
+            "#,
+        )
+        .bind(attachment_id)
+        .fetch_one(self.pool)
+        .await?;
+        Ok(linked_to_ticket)
     }
 
     async fn ensure_ticket_exists(&self, ticket_id: Uuid) -> Result<(), CommentError> {
