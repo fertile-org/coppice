@@ -1,4 +1,4 @@
-//! Admin read API for daily JSONL logs and `postgres.log`.
+//! Admin read API for daily JSONL logs and Postgres logs.
 
 use crate::logs::export::{self, VersionFile};
 use crate::logs::meta;

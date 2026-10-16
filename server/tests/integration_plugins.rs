@@ -611,8 +611,8 @@ async fn settings_put_marks_configured() {
     assert_eq!(
         body["settings"],
         json!([
-            { "key": "API_TOKEN", "configured": true, "source": "setting" },
-            { "key": "ROOT", "configured": false, "source": "missing" },
+            { "key": "API_TOKEN", "configured": true, "needsReentry": false, "source": "setting" },
+            { "key": "ROOT", "configured": false, "needsReentry": false, "source": "missing" },
         ])
     );
     let plugin_uuid: uuid::Uuid = id.parse().unwrap();
@@ -647,8 +647,8 @@ async fn settings_empty_value_clears() {
     assert_eq!(
         body["settings"],
         json!([
-            { "key": "API_TOKEN", "configured": false, "source": "missing" },
-            { "key": "ROOT", "configured": false, "source": "missing" },
+            { "key": "API_TOKEN", "configured": false, "needsReentry": false, "source": "missing" },
+            { "key": "ROOT", "configured": false, "needsReentry": false, "source": "missing" },
         ])
     );
     let name = format!("plugin-setting-{id}-API_TOKEN");
@@ -697,10 +697,10 @@ async fn settings_report_their_source_without_values() {
     assert_eq!(
         body["settings"],
         json!([
-            { "key": "API_TOKEN", "configured": true, "source": "setting" },
-            { "key": "DATABASE_URL", "configured": false, "source": "missing" },
-            { "key": "HOME", "configured": false, "source": "env" },
-            { "key": "PORT_NUM", "configured": false, "source": "default" },
+            { "key": "API_TOKEN", "configured": true, "needsReentry": false, "source": "setting" },
+            { "key": "DATABASE_URL", "configured": false, "needsReentry": false, "source": "missing" },
+            { "key": "HOME", "configured": false, "needsReentry": false, "source": "env" },
+            { "key": "PORT_NUM", "configured": false, "needsReentry": false, "source": "default" },
         ])
     );
     let list = get(&app, "/api/plugins", &cookie, &csrf).await;
@@ -2047,7 +2047,7 @@ async fn example_hello_coppice_plugin_loads_and_tests() {
     assert_eq!(plugin["mcpServers"][0]["kind"], "stdio");
     assert_eq!(
         plugin["settings"],
-        json!([{ "key": "HELLO_GREETING", "configured": false, "source": "default" }])
+        json!([{ "key": "HELLO_GREETING", "configured": false, "needsReentry": false, "source": "default" }])
     );
 
     if std::process::Command::new("node").arg("--version").output().is_err() {

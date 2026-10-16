@@ -13,8 +13,11 @@ make desktop
   `process.resourcesPath` when packaged), loads the URL it prints on `COPPICE_READY`, and stops it on quit.
   Startup failures show an error window with the last log lines. Logs live in
   `$XDG_STATE_HOME/Coppice/logs` (or `~/.local/state/Coppice/logs`) on Linux and
-  `~/Library/Logs/Coppice` on macOS (`postgres.log` and daily `coppice.*.jsonl`
-  files; past days are stored as `coppice.*.jsonl.zst`).
+  `~/Library/Logs/Coppice` on macOS (daily `coppice.*.jsonl` files, past days as
+  `coppice.*.jsonl.zst`, and rotated Postgres logs `postgresql-*.log` plus
+  `postgres.log`). Postgres rotates those logs by size and age. Coppice counts
+  them toward the 256 MiB cap, deletes them after `retention_days`, and never
+  deletes the file Postgres is writing.
 
 To run the bundled mode from a checkout, populate `desktop/resources/` (gitignored):
 
@@ -48,6 +51,12 @@ make desktop-smoke       # headless smoke against the packaged resources (two ru
 Packaged apps keep their data in `Coppice` (`~/.config/Coppice`, `~/Library/Application Support/Coppice`).
 Tagged releases are built by `.github/workflows/release.yml` — see
 [docs/development.md](../docs/development.md#desktop-release-tag-and-publish).
+
+## Replace keys
+
+In the desktop app, **Tools → Backup → Replace keys** writes new `session_secret` and `master_key` files, a new admin password, and a new Postgres password. Everyone is signed out. Tokens this install can still read are re-encrypted. Tokens already marked for re-entry stay that way until they are pasted again. A server install uses `coppice-server replace-keys` with Coppice stopped and PostgreSQL still running. The command prints where the new values were written.
+
+The new Postgres password is written to a pending file, then applied with `ALTER ROLE`, then that file becomes the current password. If Coppice stops in either gap, the next launch tries the current password and then the pending one and finishes the swap. The same pending-file recovery applies to the encryption key, session secret, and admin password.
 
 ## Tests
 

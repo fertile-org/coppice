@@ -10,26 +10,38 @@ interface Props {
 }
 
 const { frontmatter } = Astro.props;
-const pathname = Astro.url.pathname.replace(/\/$/, '') || '/';
-const links = [
-  { href: '/docs', label: 'Docs' },
+// `build.format: 'file'` renders `/docs/shortcuts.html`. Compare the clean URL.
+const pathname = (Astro.url.pathname.replace(/\/$/, '') || '/').replace(/\.html$/, '') || '/';
+
+const topLevel = [
   { href: '/docs/install', label: 'Install' },
   { href: '/docs/getting-started', label: 'Getting started' },
-  { href: '/docs/shortcuts', label: 'Keyboard shortcuts' },
   { href: '/docs/concepts', label: 'Concepts' },
   { href: '/docs/providers', label: 'Providers' },
   { href: '/docs/plugins', label: 'Plugins' },
-  { href: '/docs/settings', label: 'Advanced: Settings' },
   { href: '/docs/faq', label: 'FAQ' },
 ];
+
+// One object per page. Chat with agents is not published yet.
+const advanced = [
+  { href: '/docs/settings', label: 'Settings' },
+  { href: '/docs/shortcuts', label: 'Keyboard shortcuts' },
+  { href: '/docs/backup', label: 'Backup data' },
+];
+
+function linkHref(href: string) {
+  return withBase(href).replace(/\/$/, '');
+}
+
+const advancedOpen = advanced.some((link) => pathname === linkHref(link.href));
 ---
 
 <Base title={frontmatter.title} description={frontmatter.description}>
   <div class="shell docs-shell">
     <nav class="docs-nav" aria-label="Documentation">
       {
-        links.map((link) => {
-          const href = withBase(link.href).replace(/\/$/, '');
+        topLevel.map((link) => {
+          const href = linkHref(link.href);
           const current = pathname === href;
           return (
             <a href={href} aria-current={current ? 'page' : undefined}>
@@ -38,9 +50,44 @@ const links = [
           );
         })
       }
+      <div class="docs-nav-group">
+        <button
+          type="button"
+          class="docs-nav-toggle"
+          aria-expanded={advancedOpen ? 'true' : 'false'}
+          aria-controls="docs-nav-advanced"
+        >
+          Advanced
+        </button>
+        <div id="docs-nav-advanced" class="docs-nav-sub" hidden={!advancedOpen}>
+          {
+            advanced.map((link) => {
+              const href = linkHref(link.href);
+              const current = pathname === href;
+              return (
+                <a href={href} aria-current={current ? 'page' : undefined}>
+                  {link.label}
+                </a>
+              );
+            })
+          }
+        </div>
+      </div>
     </nav>
     <article class="prose">
       <slot />
     </article>
   </div>
 </Base>
+
+<script>
+  const toggle = document.querySelector('.docs-nav-toggle');
+  const panel = document.getElementById('docs-nav-advanced');
+  if (toggle instanceof HTMLButtonElement && panel) {
+    toggle.addEventListener('click', () => {
+      const open = toggle.getAttribute('aria-expanded') !== 'true';
+      toggle.setAttribute('aria-expanded', String(open));
+      panel.hidden = !open;
+    });
+  }
+</script>

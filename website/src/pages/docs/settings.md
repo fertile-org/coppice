@@ -25,6 +25,20 @@ Some changes apply right away. Others show "Saved. Restart Coppice to apply."
 
 You can also edit the file in any text editor. Your edits survive upgrades.
 
+## Replace keys
+
+If you shared a backup, make new keys and a new admin password. Saved tokens keep working, and everyone is signed out.
+
+In the desktop app, open **Tools → Backup → Replace keys**, enter the new admin password, and confirm.
+
+On a server install, stop Coppice and leave PostgreSQL running, then run:
+
+```bash
+coppice-server replace-keys
+```
+
+The command asks for the new admin password and does not take that password as an argument. It writes the new database URL, encryption key, session secret, and admin password into `config.toml`. It then prints where that file is, and it does not print the new values. Tokens this install cannot read stay marked so you can paste them again. Changing `master_key` by hand makes saved tokens unreadable, so you would have to enter them again.
+
 ## Logs
 Admins can open **Logs** beside Settings to filter and live-tail server, request, agent run and database logs. Each run has a **View logs** link.
 
@@ -38,7 +52,7 @@ Admins can open **Logs** beside Settings to filter and live-tail server, request
 | --- | --- | --- | --- |
 | `retention_days` | integer | `14` | How many days of logs to keep, including today: 3, 7, 14, or 30. The default is 14. Coppice deletes older logs every hour, and changes apply without a restart. If logs pass 256 MiB, Coppice deletes the oldest first, even before `retention_days` is up. |
 
-Coppice never deletes today's log, even past the limit. `postgres.log` doesn't count toward the 256 MiB limit and keeps growing. To clear it, quit Coppice first.
+Coppice never deletes today's log or the database log it's writing, even past the limit. Database logs count toward the 256 MiB limit, and Coppice deletes them once they pass `retention_days`.
 
 | Field | Type | Default | What it does |
 | --- | --- | --- | --- |

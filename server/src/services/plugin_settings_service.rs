@@ -33,20 +33,70 @@ impl<'a> PluginSettingsService<'a> {
         &self,
         plugin_id: Uuid,
     ) -> Result<BTreeSet<String>, PluginSettingsError> {
-        let keys: Vec<String> =
-            sqlx::query_scalar("SELECT key FROM plugin_settings WHERE plugin_id = $1")
-                .bind(plugin_id)
-                .fetch_all(self.pool)
-                .await?;
+        let keys: Vec<String> = sqlx::query_scalar(
+            r#"
+            SELECT ps.key FROM plugin_settings ps
+            JOIN secrets s ON s.id = ps.secret_id
+            WHERE ps.plugin_id = $1 AND NOT s.needs_reentry
+            "#,
+        )
+        .bind(plugin_id)
+        .fetch_all(self.pool)
+        .await?;
         Ok(keys.into_iter().collect())
     }
 
     pub async fn configured_keys_by_plugin(
         &self,
     ) -> Result<BTreeMap<Uuid, BTreeSet<String>>, PluginSettingsError> {
-        let rows = sqlx::query("SELECT plugin_id, key FROM plugin_settings")
+        let rows = sqlx::query(
+            r#"
+            SELECT ps.plugin_id, ps.key FROM plugin_settings ps
+            JOIN secrets s ON s.id = ps.secret_id
+            WHERE NOT s.needs_reentry
+            "#,
+        )
             .fetch_all(self.pool)
             .await?;
+        let mut by_plugin: BTreeMap<Uuid, BTreeSet<String>> = BTreeMap::new();
+        for row in rows {
+            by_plugin
+                .entry(row.get("plugin_id"))
+                .or_default()
+                .insert(row.get("key"));
+        }
+        Ok(by_plugin)
+    }
+
+    pub async fn reentry_keys(
+        &self,
+        plugin_id: Uuid,
+    ) -> Result<BTreeSet<String>, PluginSettingsError> {
+        let keys: Vec<String> = sqlx::query_scalar(
+            r#"
+            SELECT ps.key FROM plugin_settings ps
+            JOIN secrets s ON s.id = ps.secret_id
+            WHERE ps.plugin_id = $1 AND s.needs_reentry
+            "#,
+        )
+        .bind(plugin_id)
+        .fetch_all(self.pool)
+        .await?;
+        Ok(keys.into_iter().collect())
+    }
+
+    pub async fn reentry_keys_by_plugin(
+        &self,
+    ) -> Result<BTreeMap<Uuid, BTreeSet<String>>, PluginSettingsError> {
+        let rows = sqlx::query(
+            r#"
+            SELECT ps.plugin_id, ps.key FROM plugin_settings ps
+            JOIN secrets s ON s.id = ps.secret_id
+            WHERE s.needs_reentry
+            "#,
+        )
+        .fetch_all(self.pool)
+        .await?;
         let mut by_plugin: BTreeMap<Uuid, BTreeSet<String>> = BTreeMap::new();
         for row in rows {
             by_plugin
@@ -114,7 +164,13 @@ impl<'a> PluginSettingsService<'a> {
         &self,
         plugin_id: Uuid,
     ) -> Result<BTreeMap<String, String>, PluginSettingsError> {
-        let rows = sqlx::query("SELECT key, secret_id FROM plugin_settings WHERE plugin_id = $1")
+        let rows = sqlx::query(
+            r#"
+            SELECT ps.key, ps.secret_id FROM plugin_settings ps
+            JOIN secrets s ON s.id = ps.secret_id
+            WHERE ps.plugin_id = $1 AND NOT s.needs_reentry
+            "#,
+        )
             .bind(plugin_id)
             .fetch_all(self.pool)
             .await?;

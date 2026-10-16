@@ -26,7 +26,7 @@ pub fn load_or_create_secrets(dir: &Path) -> io::Result<DesktopSecrets> {
         session_secret: load_or_create_secret(&dir.join("session_secret"))?,
         master_key: load_or_create_secret(&dir.join("master_key"))?,
         pg_password: load_or_create_secret(&dir.join("pg_password"))?,
-        admin_password: load_or_create_secret(&dir.join("admin_password"))?,
+        admin_password: load_or_create_admin_password(&dir.join("admin_password"))?,
     })
 }
 
@@ -44,6 +44,29 @@ fn load_or_create_secret(path: &Path) -> io::Result<String> {
     } else {
         read_secret(path)
     }
+}
+
+/// First run generates a hex password. Replace keys may later store the
+/// password the admin chose, which is not hex.
+fn load_or_create_admin_password(path: &Path) -> io::Result<String> {
+    if std::fs::metadata(path).is_ok_and(|meta| meta.len() == 0) {
+        std::fs::remove_file(path)?;
+    }
+    if path.is_file() {
+        return read_admin_password(path);
+    }
+    load_or_create_secret(path)
+}
+
+fn read_admin_password(path: &Path) -> io::Result<String> {
+    let value = std::fs::read_to_string(path)?.trim().to_string();
+    if value.is_empty() || value.chars().any(|c| c.is_control()) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("secret file {} is corrupt", path.display()),
+        ));
+    }
+    Ok(value)
 }
 
 /// An unreadable secret is fatal: regenerating `master_key` would orphan encrypted data.

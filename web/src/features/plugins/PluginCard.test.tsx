@@ -124,6 +124,29 @@ describe('PluginCard', () => {
     vi.unstubAllGlobals();
   });
 
+  it('asks for a plugin token again when the backup left it out', () => {
+    renderCard({
+      ...plugin,
+      settings: [
+        {
+          key: 'API_TOKEN',
+          configured: false,
+          source: 'missing',
+          needsReentry: true,
+        },
+      ],
+    });
+
+    const field = screen.getByLabelText('API_TOKEN');
+    expect(field).toHaveAttribute(
+      'placeholder',
+      "Paste this token again. Backups don't include saved tokens.",
+    );
+    const row = screen.getByTestId('plugin-setting-API_TOKEN');
+    expect(within(row).queryByText('Configured')).not.toBeInTheDocument();
+    expect(within(row).queryByText('Missing')).not.toBeInTheDocument();
+  });
+
   it('renders settings with configured badges', () => {
     renderCard();
 

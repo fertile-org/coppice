@@ -12,7 +12,11 @@ use uuid::Uuid;
 const REPO_COLUMNS: &str = r#"
     id, name, local_path, remote_url, default_branch,
     verification_status, verification_error, last_verified_at,
-    forge_token_secret_id, created_at, updated_at
+    forge_token_secret_id, created_at, updated_at,
+    COALESCE((
+        SELECT needs_reentry FROM secrets
+        WHERE secrets.id = forge_token_secret_id
+    ), false) AS forge_token_needs_reentry
 "#;
 
 pub struct RepoService<'a> {
@@ -280,6 +284,7 @@ fn row_to_repo(row: &sqlx::postgres::PgRow) -> Repo {
         verification_error: row.get("verification_error"),
         last_verified_at: row.get("last_verified_at"),
         forge_token_secret_id: row.get("forge_token_secret_id"),
+        forge_token_needs_reentry: row.get("forge_token_needs_reentry"),
         created_at: row.get("created_at"),
         updated_at: row.get("updated_at"),
     }

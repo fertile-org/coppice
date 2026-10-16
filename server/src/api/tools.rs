@@ -1,6 +1,7 @@
 use crate::api::auth::pool_from_state;
 use crate::middleware::admin::AdminUser;
 use crate::services::backup_service::{BackupError, BackupService};
+use crate::services::secret_rotation::{self, REPLACE_ON_SERVER, REPLACE_UI_ERROR};
 use crate::AppState;
 use axum::{
     body::Body,
@@ -21,6 +22,7 @@ pub fn routes() -> Router<Arc<AppState>> {
     Router::new()
         .route("/api/tools/backup/export", get(export_backup))
         .route("/api/tools/backup/import", post(import_backup))
+        .route("/api/tools/keys/replace", post(replace_keys))
 }
 
 #[derive(Serialize)]
@@ -51,7 +53,7 @@ async fn export_backup(
         .replace(':', "-");
     let zip_path = temp_dir.path().join(format!("coppice-backup-{stamp}.zip"));
 
-    match BackupService::export_to_path(&state.config, &zip_path).await {
+    match BackupService::export_to_path(&config_with_live_database(&state), &zip_path).await {
         Ok(()) => {}
         Err(err) => {
             let (status, message) = map_error(err);
@@ -131,15 +133,88 @@ async fn import_backup(
         "missing file field".into(),
     ))?;
 
-    match BackupService::import_from_bytes(&state.config, pool, &bytes).await {
-        Ok(()) => Ok(Json(ImportBackupResponse {
+    let config_path = state.connectors.config_path();
+    match BackupService::import_from_bytes(
+        &config_with_live_database(&state),
+        pool,
+        &bytes,
+        config_path.as_deref(),
+        &state.secret_store,
+    )
+        .await
+    {
+        Ok(message) => Ok(Json(ImportBackupResponse {
             ok: true,
-            message:
-                "Import completed. Sign in again if your session was reset; restart the server if anything looks inconsistent."
-                    .into(),
+            message,
         })),
         Err(err) => {
             let (status, message) = map_error(err);
+            Err((status, message))
+        }
+    }
+}
+
+#[derive(serde::Deserialize)]
+struct ReplaceKeysBody {
+    #[serde(default, rename = "adminPassword")]
+    admin_password: String,
+}
+
+fn config_with_live_database(state: &AppState) -> crate::AppConfig {
+    let mut config = state.config.clone();
+    config.database.url = state.database_url();
+    config
+}
+
+async fn replace_keys(
+    State(state): State<Arc<AppState>>,
+    AdminUser(_admin): AdminUser,
+    Json(body): Json<ReplaceKeysBody>,
+) -> Result<Json<ImportBackupResponse>, (StatusCode, String)> {
+    let pool = pool_from_state(&state).map_err(|status| (status, "database unavailable".into()))?;
+    let Some(dir) = secret_rotation::desktop_secrets_dir(
+        state.config.auth.desktop_mode,
+        state.connectors.config_path().as_deref(),
+    ) else {
+        return Err((StatusCode::BAD_REQUEST, REPLACE_ON_SERVER.into()));
+    };
+    let email = state
+        .config
+        .auth
+        .bootstrap_admin_email
+        .clone()
+        .unwrap_or_else(|| "admin@localhost".into());
+    match secret_rotation::replace_desktop_keys(
+        pool,
+        &state.secret_store,
+        &dir,
+        &state.database_url(),
+        &body.admin_password,
+        &email,
+    )
+    .await
+    {
+        Ok(url) => {
+            state.set_database_url(url);
+            Ok(Json(ImportBackupResponse {
+                ok: true,
+                message: "Keys replaced. Saved tokens still work.".into(),
+            }))
+        }
+        Err(err) => {
+            let status = match &err {
+                secret_rotation::ReplaceError::NotDesktop
+                | secret_rotation::ReplaceError::PasswordEmpty
+                | secret_rotation::ReplaceError::PasswordShort => StatusCode::BAD_REQUEST,
+                secret_rotation::ReplaceError::Failed(_) => StatusCode::CONFLICT,
+            };
+            let message = match &err {
+                secret_rotation::ReplaceError::Failed(_) => {
+                    tracing::error!(error = %err, "couldn't replace keys");
+                    REPLACE_UI_ERROR.to_string()
+                }
+                other => other.to_string(),
+            };
             Err((status, message))
         }
     }

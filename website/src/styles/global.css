@@ -212,6 +212,15 @@ a:hover {
   margin: 1.75rem 0 0;
 }
 
+.hero-frame {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid var(--color-bark-200);
+  border-radius: 14px;
+  background: var(--color-paper-100);
+  box-shadow: var(--shadow-shot);
+}
+
 .hero-shot .hero-still {
   display: none;
 }
@@ -222,10 +231,32 @@ a:hover {
   width: 100%;
   height: auto;
   aspect-ratio: 1440 / 900;
-  border: 1px solid var(--color-bark-200);
-  border-radius: 14px;
-  background: var(--color-paper-100);
-  box-shadow: var(--shadow-shot);
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.hero-progress {
+  position: absolute;
+  z-index: 1;
+  top: 0;
+  right: 0;
+  left: 0;
+  display: none;
+  height: 3px;
+  pointer-events: none;
+}
+
+.hero-shot.is-playing .hero-progress {
+  display: block;
+}
+
+.hero-progress-fill {
+  display: block;
+  width: 0%;
+  height: 100%;
+  background: var(--color-moss-600);
 }
 
 .hero-captions {
@@ -495,6 +526,54 @@ a:hover {
   text-underline-offset: 0.28em;
 }
 
+.docs-nav-group,
+.docs-nav-sub {
+  display: flex;
+  gap: 0.4rem 1rem;
+  align-items: baseline;
+}
+
+.docs-nav-sub {
+  padding-left: 0.75rem;
+}
+
+.docs-nav-sub[hidden] {
+  display: none;
+}
+
+.docs-nav-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--color-bark-700);
+  font: inherit;
+  font-weight: 600;
+  line-height: inherit;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.docs-nav-toggle:hover {
+  color: var(--color-bark-900);
+}
+
+.docs-nav-toggle::before {
+  content: '';
+  width: 0.38em;
+  height: 0.38em;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  transform: translateY(-0.12em) rotate(-45deg);
+}
+
+.docs-nav-toggle[aria-expanded='true']::before {
+  transform: translateY(0.05em) rotate(45deg);
+}
+
 .prose :first-child {
   margin-top: 0;
 }
@@ -667,6 +746,12 @@ a:hover {
     gap: 0.45rem;
     overflow: visible;
   }
+
+  .docs-nav-group,
+  .docs-nav-sub {
+    display: grid;
+    gap: 0.45rem;
+  }
 }
 
 @media (max-width: 640px) {
@@ -704,6 +789,11 @@ a:hover {
 
   .hero-shot .hero-still {
     display: block;
+  }
+
+  .hero-progress,
+  .hero-shot.is-playing .hero-progress {
+    display: none;
   }
 
   html {
