@@ -71,6 +71,9 @@ pub const PLAN_TASK: &str =
 
 pub const PLAN_FORMAT_INSTRUCTION: &str = "Put the plan in `summary` when you call `result_submit` with status `done`. Use exactly this markdown:";
 
+/// Diagrams support the written plan. They are not a substitute for it.
+pub const PLAN_DIAGRAM_INSTRUCTION: &str = "When the ticket needs a flow, architecture, or data model, add one or two small diagrams as fenced mermaid code blocks. Skip diagrams otherwise. The written plan always stays.";
+
 pub const CHANGES_REQUESTED_HEADING: &str = "## Changes requested";
 
 pub const PLAN_CHANGED_FILES_REJECTED: &str = "changedFiles is not allowed on a planning run.";
@@ -131,7 +134,7 @@ pub fn plan_template() -> String {
 /// Instructions appended to a planning run. `changes` is the human comment.
 pub fn plan_instructions(changes: Option<&str>) -> String {
     let mut out = format!(
-        "{PLAN_TASK}\n\n{PLAN_FORMAT_INSTRUCTION}\n\n{}\n",
+        "{PLAN_TASK}\n\n{PLAN_FORMAT_INSTRUCTION}\n\n{}\n{PLAN_DIAGRAM_INSTRUCTION}\n",
         plan_template()
     );
     if let Some(changes) = changes.map(str::trim).filter(|text| !text.is_empty()) {
@@ -168,6 +171,18 @@ mod tests {
             checklist_steps(markdown),
             vec!["Write the gate", "Cover the drag", "Cover the API"]
         );
+    }
+
+    #[test]
+    fn instructions_add_diagrams_only_when_a_plan_needs_one() {
+        let text = plan_instructions(None);
+        assert!(text.contains(
+            "When the ticket needs a flow, architecture, or data model, add one or two small diagrams"
+        ));
+        assert!(text.contains("Skip diagrams otherwise."));
+        assert!(text.contains("The written plan always stays."));
+        assert!(text.contains(PLAN_HEADING));
+        assert!(text.contains(STEPS_HEADING));
     }
 
     #[test]

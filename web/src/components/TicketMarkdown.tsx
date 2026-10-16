@@ -1,6 +1,34 @@
+import { Children, isValidElement, type ReactNode } from 'react';
 import type { Components } from 'react-markdown';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { MermaidDiagram } from './MermaidDiagram';
+
+function fenceLanguage(className: string | undefined): string | undefined {
+  return /language-([\w-]+)/.exec(className ?? '')?.[1]?.toLowerCase();
+}
+
+function codeText(children: ReactNode): string {
+  if (Array.isArray(children)) {
+    return children
+      .map((part) =>
+        typeof part === 'string' || typeof part === 'number' ? String(part) : '',
+      )
+      .join('')
+      .replace(/\n$/, '');
+  }
+  return String(children ?? '').replace(/\n$/, '');
+}
+
+function mermaidFenceSource(children: ReactNode): string | null {
+  for (const node of Children.toArray(children)) {
+    if (!isValidElement(node)) continue;
+    const props = node.props as { className?: string; children?: ReactNode };
+    if (fenceLanguage(props.className) !== 'mermaid') continue;
+    return codeText(props.children).trim();
+  }
+  return null;
+}
 
 const components: Components = {
   h1: ({ children }) => (
@@ -47,11 +75,15 @@ const components: Components = {
       {children}
     </code>
   ),
-  pre: ({ children }) => (
-    <pre className="mb-3 overflow-x-auto rounded-md border border-border bg-paper-200 p-3 font-mono text-xs leading-relaxed">
-      {children}
-    </pre>
-  ),
+  pre: ({ children }) => {
+    const diagram = mermaidFenceSource(children);
+    if (diagram !== null) return <MermaidDiagram source={diagram} />;
+    return (
+      <pre className="mb-3 overflow-x-auto rounded-md border border-border bg-paper-200 p-3 font-mono text-xs leading-relaxed">
+        {children}
+      </pre>
+    );
+  },
   blockquote: ({ children }) => (
     <blockquote className="mb-3 border-l-2 border-border pl-3 text-text-secondary">
       {children}
