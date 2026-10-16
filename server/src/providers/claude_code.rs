@@ -548,6 +548,34 @@ mod tests {
     }
 
     #[test]
+    fn chat_argv_strict_mcp_config_is_coppice_only() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let run_dir = tmp.path().join("runs").join("chat-1");
+        // Same append `run()` makes when a chat turn has gateway access.
+        let mut args = chat_argv(true, false, true);
+        args.extend(claude_mcp_args(&access(), &run_dir).expect("mcp args"));
+
+        assert!(args
+            .windows(2)
+            .any(|pair| pair == ["--permission-mode", "plan"]));
+        assert_eq!(
+            args.iter()
+                .filter(|arg| arg.as_str() == "--strict-mcp-config")
+                .count(),
+            1,
+            "{args:?}"
+        );
+        let raw = std::fs::read_to_string(flag_value(&args, "--mcp-config")).expect("mcp.json");
+        let doc: serde_json::Value = serde_json::from_str(&raw).expect("parse mcp.json");
+        let servers = doc["mcpServers"]
+            .as_object()
+            .expect("mcpServers object");
+        assert_eq!(servers.keys().cloned().collect::<Vec<_>>(), vec!["coppice"]);
+        assert_eq!(servers["coppice"]["url"], "http://127.0.0.1:5000/mcp");
+        assert!(!raw.contains("super-secret-run-token"));
+    }
+
+    #[test]
     fn plan_runs_disallow_write_tools_without_bypass() {
         let args = chat_argv(false, true, true);
         assert!(args
