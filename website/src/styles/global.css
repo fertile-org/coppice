@@ -459,13 +459,6 @@ a:hover {
   max-width: none;
 }
 
-.steps li p.coming-soon {
-  margin-top: 0.4rem;
-  color: var(--color-bark-700);
-  font-size: 0.98rem;
-  font-style: italic;
-}
-
 .feature-grid {
   display: grid;
   grid-template-columns: 1fr;
@@ -494,13 +487,6 @@ a:hover {
   margin: 0;
   max-width: none;
   color: var(--color-bark-700);
-}
-
-.closer {
-  margin: 1.1rem 0 0;
-  font-family: var(--font-display);
-  font-size: 1.35rem;
-  letter-spacing: -0.02em;
 }
 
 .closer-links {

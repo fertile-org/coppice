@@ -2,12 +2,15 @@
 import Base from '../layouts/Base.astro';
 import DownloadLinks from '../components/DownloadLinks.astro';
 import HeroMedia from '../components/HeroMedia.astro';
-import { withBase } from '../lib/url';
 
 const description =
   'Run several coding agents at once without babysitting them. Review every diff before it counts. Local, open source, with the agent CLIs you already pay for.';
 
 const reasons = [
+  [
+    'The right model for each role.',
+    'Every agent picks its own CLI and model. Plan and review with your strongest model, and code with a faster one, all on one board.',
+  ],
   [
     'Stop tab-hopping between terminals.',
     "Every agent's work is a card on one board. Blocked tickets and work waiting for your review stand out, so you know where you're needed.",
@@ -19,14 +22,6 @@ const reasons = [
   [
     'No second subscription.',
     'Coppice drives the CLIs you already pay for: Claude Code, Codex, Cursor, OpenCode and Kilo Code.',
-  ],
-  [
-    'No Coppice cloud.',
-    'Your repos, tickets and history stay on your machine. Only your CLIs talk to their own model providers.',
-  ],
-  [
-    'The right model for each role.',
-    'Every agent picks its own CLI and model. Plan and review with your strongest model, and code with a faster one, all on one board.',
   ],
 ];
 ---
@@ -53,15 +48,10 @@ const reasons = [
       <h2 id="how-it-works">How it works</h2>
       <ol class="steps">
         <li>
-          <div>
-            <p>
-              <strong>Hand off the work.</strong> Write a ticket, or approve one an agent suggests, and move it to Ready.
-            </p>
-            <p class="coming-soon">
-              (Plan Review coming soon: a PM agent will draft the plan first, and you'll approve it before anyone writes
-              code.)
-            </p>
-          </div>
+          <p>
+            <strong>Hand off the work.</strong> Write a ticket, or approve one an agent suggests. Assign it to
+            your PM agent, which drafts a plan you approve before anyone writes code.
+          </p>
         </li>
         <li>
           <p>
@@ -100,21 +90,6 @@ const reasons = [
         <li>Not a Jira replacement</li>
         <li>Not “tell the agent and get the finished product”</li>
       </ul>
-    </section>
-
-    <section class="block" aria-labelledby="get-started">
-      <h2 id="get-started">Get started</h2>
-      <p>
-        For engineers and small teams who already run coding agents and want to hand off more work without losing
-        control of what ships.
-      </p>
-      <DownloadLinks />
-      <p class="closer">Put your agents on a board. Keep the gates.</p>
-      <p class="closer-links">
-        <a href={withBase('/docs')}>Docs</a>
-        <span aria-hidden="true">·</span>
-        <a href="https://github.com/fertile-org/coppice">GitHub</a>
-      </p>
     </section>
   </div>
 </Base>
