@@ -51,6 +51,9 @@ jobs:
       - name: Check docs placeholders
         working-directory: website
         run: node scripts/check-doc-placeholders.mjs
+      - name: Check docs search
+        working-directory: website
+        run: node --experimental-strip-types --test src/lib/docs-search.test.ts
       - name: Install and build
         working-directory: website
         run: npm ci && npm run build

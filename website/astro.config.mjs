@@ -1,4 +1,5 @@
 import { unified } from '@astrojs/markdown-remark';
+import pagefind from 'astro-pagefind';
 import { defineConfig } from 'astro/config';
 
 /** `/` or a path prefix such as `/coppice`, with no trailing slash. */
@@ -57,10 +58,35 @@ function prefixRootLinks() {
 
 const site = process.env.SITE_URL?.trim() || undefined;
 
+/** Pagefind logs indexing failures and returns. Fail the build instead. */
+function pagefindOrFail() {
+  const integration = pagefind();
+  const done = integration.hooks['astro:build:done'];
+  integration.hooks['astro:build:done'] = async (options) => {
+    const errors = [];
+    const logger = new Proxy(options.logger, {
+      get(target, prop, receiver) {
+        if (prop === 'error') {
+          return (message) => {
+            errors.push(String(message));
+            return target.error(message);
+          };
+        }
+        const value = Reflect.get(target, prop, receiver);
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    });
+    await done({ ...options, logger });
+    if (errors.length) throw new Error(errors.join('\n'));
+  };
+  return integration;
+}
+
 export default defineConfig({
   site,
   base: siteBase(),
   trailingSlash: 'never',
+  integrations: [pagefindOrFail()],
   // `file` writes docs.html. Vercel serves that at /docs via website/vercel.json
   // (`cleanUrls` + `trailingSlash: false`). GitHub Pages has no clean URLs, so the
   // Pages deploy rewrites those files to docs/index.html after the build.

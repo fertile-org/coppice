@@ -1,4 +1,5 @@
 ---
+import DocsSearch from '../components/DocsSearch.astro';
 import Base from './Base.astro';
 import { withBase } from '../lib/url';
 
@@ -38,7 +39,10 @@ const advancedOpen = advanced.some((link) => pathname === linkHref(link.href));
 
 <Base title={frontmatter.title} description={frontmatter.description}>
   <div class="shell docs-shell">
-    <nav class="docs-nav" aria-label="Documentation">
+    <header class="docs-header" data-pagefind-ignore>
+      <DocsSearch />
+    </header>
+    <nav class="docs-nav" data-pagefind-ignore aria-label="Documentation">
       {
         topLevel.map((link) => {
           const href = linkHref(link.href);
@@ -74,7 +78,7 @@ const advancedOpen = advanced.some((link) => pathname === linkHref(link.href));
         </div>
       </div>
     </nav>
-    <article class="prose">
+    <article class="prose" data-pagefind-body>
       <slot />
     </article>
   </div>

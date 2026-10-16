@@ -10,13 +10,13 @@ const downloadPath = withBase('/download').replace(/\/$/, '') || '/download';
 const downloadActive = pathname === downloadPath;
 ---
 
-<header class="site-header">
+<header class="site-header" data-pagefind-ignore>
   <div class="shell header-inner">
     <a class:list={['brand', { active: homeActive }]} href={withBase('/')}>
       <img class="mark" src={withBase('/logo.svg')} width="34" height="36" alt="" />
       <span>Coppice</span>
     </a>
-    <nav class="primary-nav" aria-label="Primary">
+    <nav class="primary-nav" data-pagefind-ignore aria-label="Primary">
       <a href={withBase('/docs')} aria-current={docsActive ? 'page' : undefined}>Docs</a>
       <a href="https://github.com/fertile-org/coppice">GitHub</a>
       <a class="btn btn-small" href={withBase('/download')} aria-current={downloadActive ? 'page' : undefined}>Download</a>
