@@ -167,7 +167,7 @@ pub async fn on_chat_turn(
         let _ = ChatService::new(pool)
             .append_system_note(session_id, REPOS_READY_LINE)
             .await;
-        let slugs = slugs_to_restore(&dir);
+        let slugs = slugs_to_restore(&dir, &repos);
         let _ = clear_swept_flag(&dir);
         let _ = refresh_index(&dir, &repos);
         spawn_restore(pool.clone(), dir, session_id, repos, slugs, limits);
@@ -197,19 +197,30 @@ pub fn continue_slugs(worktrees: &Path, session_id: Uuid) -> Vec<String> {
 
 pub fn spawn_sweep(state: Arc<AppState>) {
     tokio::spawn(async move {
-        sweep(&state);
+        sweep(&state).await;
         loop {
             tokio::time::sleep(Duration::from_secs(60 * 60)).await;
-            sweep(&state);
+            sweep(&state).await;
         }
     });
 }
 
-fn sweep(state: &AppState) {
+async fn sweep(state: &AppState) {
     let root = Path::new(&state.config.agent.worktrees_path);
     let limits = limits_from_config(&state.config.agent);
     let now = SystemTime::now();
-    if let Err(err) = chat_repos::sweep_idle_copies(root, limits.copy_idle, now) {
+    // No linked-repo list means no slug is allowed to name a directory to delete.
+    let repos = match state.db.as_ref() {
+        Some(pool) => match load_linked_repos(pool, None).await {
+            Ok(repos) => repos,
+            Err(err) => {
+                tracing::warn!(error = %err, "failed to list repositories for chat cleanup");
+                Vec::new()
+            }
+        },
+        None => Vec::new(),
+    };
+    if let Err(err) = chat_repos::sweep_idle_copies(root, limits.copy_idle, now, &repos) {
         tracing::warn!(error = %err, "failed to sweep idle chat copies");
     }
     if let Err(err) = chat_repos::sweep_aged_chat_folders(root, limits.chat_folder_max_age, now) {

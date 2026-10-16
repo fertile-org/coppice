@@ -232,6 +232,9 @@ where
     let _lock = dir_lock(&dir)?;
     let mut state = read_state(&dir);
     for slug in carried {
+        if slug_error(slug).is_some() || !repos.iter().any(|repo| repo.slug == *slug) {
+            continue;
+        }
         if !state.carried.iter().any(|existing| existing == slug)
             && !state.opened.iter().any(|opened| &opened.slug == slug)
         {
@@ -326,6 +329,9 @@ pub fn open_repo(
     let dest = chat_dir.join(&repo.slug);
     let started = Instant::now();
     let mut state = read_state(chat_dir);
+    if drop_unlinked_slugs(&mut state, repos) {
+        let _ = write_state(chat_dir, &state);
+    }
     touch_state(&mut state);
 
     if copy_is_ready(&dest) {
@@ -356,7 +362,14 @@ pub fn open_repo(
             let victim_slug = victim.slug.clone();
             let victim_name = victim.name.clone();
             notes(&closed_for_room_line(&victim_name));
-            let _ = fs::remove_dir_all(chat_dir.join(&victim_slug));
+            if let Err(err) = remove_tree_inside(chat_root(chat_dir), &chat_dir.join(&victim_slug))
+            {
+                tracing::warn!(
+                    slug = %victim_slug,
+                    error = %err,
+                    "refusing to close a chat copy outside the chat folder"
+                );
+            }
             state.opened.retain(|opened| opened.slug != victim_slug);
             closed_name = Some(victim_name);
         }
@@ -364,14 +377,20 @@ pub fn open_repo(
 
     notes(&opening_line(&repo.name));
     let deadline = Instant::now() + limits.copy_timeout;
-    if let Err(err) = materialize(repo, &dest, deadline) {
+    if let Err(err) = materialize(chat_root(chat_dir), repo, &dest, deadline) {
         tracing::warn!(
             %session_id,
             slug = %repo.slug,
             error = %err,
             "chat repository copy failed"
         );
-        let _ = fs::remove_dir_all(&dest);
+        if let Err(err) = remove_tree_inside(chat_root(chat_dir), &dest) {
+            tracing::warn!(
+                slug = %repo.slug,
+                error = %err,
+                "refusing to remove a failed chat copy outside the chat folder"
+            );
+        }
         state.opened.retain(|opened| opened.slug != repo.slug);
         let _ = write_state(chat_dir, &state);
         let _ = write_index(chat_dir, repos, &state);
@@ -437,8 +456,11 @@ pub fn refresh_index(chat_dir: &Path, repos: &[LinkedRepo]) -> std::io::Result<(
     write_index(chat_dir, repos, &state)
 }
 
-pub fn slugs_to_restore(chat_dir: &Path) -> Vec<String> {
-    let state = read_state(chat_dir);
+pub fn slugs_to_restore(chat_dir: &Path, repos: &[LinkedRepo]) -> Vec<String> {
+    let mut state = read_state(chat_dir);
+    if drop_unlinked_slugs(&mut state, repos) {
+        let _ = write_state(chat_dir, &state);
+    }
     state
         .opened
         .into_iter()
@@ -448,11 +470,9 @@ pub fn slugs_to_restore(chat_dir: &Path) -> Vec<String> {
 }
 
 pub fn remove_chat_workspace(worktrees_root: &Path, session_id: Uuid) -> std::io::Result<()> {
+    let root = worktrees_root.join("chat");
     let path = chat_dir(worktrees_root, session_id);
-    if path.exists() {
-        fs::remove_dir_all(path)?;
-    }
-    Ok(())
+    remove_tree_inside(&root, &path)
 }
 
 /// Delete materialized copies whose chat has been quiet for `idle`. The index
@@ -461,6 +481,7 @@ pub fn sweep_idle_copies(
     worktrees_root: &Path,
     idle: Duration,
     now: SystemTime,
+    repos: &[LinkedRepo],
 ) -> std::io::Result<u32> {
     let root = worktrees_root.join("chat");
     if !root.exists() {
@@ -470,7 +491,7 @@ pub fn sweep_idle_copies(
     for entry in fs::read_dir(&root)? {
         let entry = entry?;
         let dir = entry.path();
-        if !dir.is_dir() {
+        if !is_real_dir(&dir) {
             continue;
         }
         if entry.file_name().to_string_lossy().parse::<Uuid>().is_err() {
@@ -478,21 +499,40 @@ pub fn sweep_idle_copies(
         }
         let _guard = dir_lock(&dir)?;
         let mut state = read_state(&dir);
+        let dropped = drop_unlinked_slugs(&mut state, repos);
         if !activity_older_than(&state, idle, now) {
+            if dropped {
+                write_state(&dir, &state)?;
+            }
             continue;
         }
         let mut changed = false;
         for opened in &state.opened {
             let path = dir.join(&opened.slug);
-            if path.exists() {
-                fs::remove_dir_all(&path)?;
-                changed = true;
+            let existed = fs::symlink_metadata(&path).is_ok();
+            match remove_tree_inside(&root, &path) {
+                Ok(()) => {
+                    if existed {
+                        changed = true;
+                    }
+                }
+                Err(err) if err.kind() == std::io::ErrorKind::InvalidInput => {
+                    tracing::warn!(
+                        path = %path.display(),
+                        error = %err,
+                        "skipping a chat copy that is outside its chat folder"
+                    );
+                }
+                Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+                Err(err) => return Err(err),
             }
         }
         if changed {
             state.copies_swept = true;
-            write_state(&dir, &state)?;
             removed += 1;
+        }
+        if changed || dropped {
+            write_state(&dir, &state)?;
         }
     }
     Ok(removed)
@@ -504,10 +544,7 @@ pub fn sweep_aged_chat_folders(
     max_age: Duration,
     now: SystemTime,
 ) -> std::io::Result<u32> {
-    let legacy = worktrees_root.join("chat-clones");
-    if legacy.exists() {
-        fs::remove_dir_all(&legacy)?;
-    }
+    remove_legacy_chat_clones(worktrees_root)?;
     let root = worktrees_root.join("chat");
     if !root.exists() {
         return Ok(0);
@@ -516,7 +553,7 @@ pub fn sweep_aged_chat_folders(
     for entry in fs::read_dir(&root)? {
         let entry = entry?;
         let dir = entry.path();
-        if !dir.is_dir() {
+        if !is_real_dir(&dir) {
             continue;
         }
         let state = read_state(&dir);
@@ -525,9 +562,19 @@ pub fn sweep_aged_chat_folders(
         } else {
             activity_older_than(&state, max_age, now)
         };
-        if old {
-            fs::remove_dir_all(&dir)?;
-            removed += 1;
+        if !old {
+            continue;
+        }
+        match remove_tree_inside(&root, &dir) {
+            Ok(()) => removed += 1,
+            Err(err) if err.kind() == std::io::ErrorKind::InvalidInput => {
+                tracing::warn!(
+                    path = %dir.display(),
+                    error = %err,
+                    "skipping a chat folder that is outside the chat directory"
+                );
+            }
+            Err(err) => return Err(err),
         }
     }
     Ok(removed)
@@ -573,10 +620,13 @@ pub fn assign_slug(name: &str, id: Uuid, used: &mut std::collections::HashSet<St
     full
 }
 
-fn materialize(repo: &LinkedRepo, dest: &Path, deadline: Instant) -> std::io::Result<()> {
-    if dest.exists() {
-        fs::remove_dir_all(dest)?;
-    }
+fn materialize(
+    chat_root: &Path,
+    repo: &LinkedRepo,
+    dest: &Path,
+    deadline: Instant,
+) -> std::io::Result<()> {
+    remove_tree_inside(chat_root, dest)?;
     if let Some(parent) = dest.parent() {
         fs::create_dir_all(parent)?;
     }
@@ -641,7 +691,26 @@ fn copy_is_ready(dest: &Path) -> bool {
     if alternates.trim().is_empty() {
         return false;
     }
-    matches!(git_stdout(dest, &["remote"], Duration::from_secs(5)), Ok(remotes) if remotes.is_empty())
+    if !matches!(
+        git_stdout(dest, &["remote"], Duration::from_secs(5)),
+        Ok(remotes) if remotes.is_empty()
+    ) {
+        return false;
+    }
+    // Source `git gc` can delete objects this copy still names. Reusing that
+    // checkout would hide the missing history, so the caller clones again.
+    git(
+        Some(dest),
+        &["cat-file", "-e", "HEAD"],
+        Duration::from_secs(5),
+    )
+    .is_ok()
+        && git(
+            Some(dest),
+            &["cat-file", "-e", "HEAD^{tree}"],
+            Duration::from_secs(5),
+        )
+        .is_ok()
 }
 
 fn ready_opened(chat_dir: &Path, state: &ChatRepoState) -> Vec<OpenedRepo> {
@@ -738,7 +807,105 @@ fn read_state(chat_dir: &Path) -> ChatRepoState {
     let Ok(text) = fs::read_to_string(path) else {
         return ChatRepoState::default();
     };
-    serde_json::from_str(&text).unwrap_or_default()
+    let mut state: ChatRepoState = serde_json::from_str(&text).unwrap_or_default();
+    if drop_unsafe_slugs(&mut state) {
+        let _ = write_state(chat_dir, &state);
+    }
+    state
+}
+
+fn slug_is_safe(slug: &str) -> bool {
+    slug_error(slug).is_none()
+}
+
+fn drop_unsafe_slugs(state: &mut ChatRepoState) -> bool {
+    let opened_before = state.opened.len();
+    let carried_before = state.carried.len();
+    state.opened.retain(|opened| slug_is_safe(&opened.slug));
+    state.carried.retain(|slug| slug_is_safe(slug));
+    state.opened.len() != opened_before || state.carried.len() != carried_before
+}
+
+fn drop_unlinked_slugs(state: &mut ChatRepoState, repos: &[LinkedRepo]) -> bool {
+    let linked = |slug: &str| repos.iter().any(|repo| repo.slug == slug);
+    let opened_before = state.opened.len();
+    let carried_before = state.carried.len();
+    state.opened.retain(|opened| linked(&opened.slug));
+    state.carried.retain(|slug| linked(slug));
+    state.opened.len() != opened_before || state.carried.len() != carried_before
+}
+
+fn chat_root(chat_dir: &Path) -> &Path {
+    chat_dir.parent().unwrap_or(chat_dir)
+}
+
+fn is_real_dir(path: &Path) -> bool {
+    fs::symlink_metadata(path)
+        .map(|meta| meta.is_dir() && !meta.file_type().is_symlink())
+        .unwrap_or(false)
+}
+
+/// Delete `target` only when it is a real directory strictly inside `root`.
+/// Absolute slugs, `..`, and symlinks that leave the chat folder are refused.
+fn remove_tree_inside(root: &Path, target: &Path) -> std::io::Result<()> {
+    let root_meta = fs::symlink_metadata(root)?;
+    if root_meta.file_type().is_symlink() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "refusing to delete inside a symlinked chat folder",
+        ));
+    }
+    let meta = match fs::symlink_metadata(target) {
+        Ok(meta) => meta,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(err) => return Err(err),
+    };
+    if meta.file_type().is_symlink() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "refusing to delete a symlink in a chat folder",
+        ));
+    }
+    let root = root.canonicalize()?;
+    let canonical = target.canonicalize()?;
+    if canonical == root || !canonical.starts_with(&root) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "refusing to delete a path outside the chat folder",
+        ));
+    }
+    fs::remove_dir_all(canonical)
+}
+
+/// `chat-clones/` is a fixed sibling of `chat/`, not a slug. A symlink there is
+/// left in place so cleanup cannot follow it out of the worktrees directory.
+fn remove_legacy_chat_clones(worktrees_root: &Path) -> std::io::Result<()> {
+    let legacy = worktrees_root.join("chat-clones");
+    let meta = match fs::symlink_metadata(&legacy) {
+        Ok(meta) => meta,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(err) => return Err(err),
+    };
+    if meta.file_type().is_symlink() {
+        tracing::warn!(
+            path = %legacy.display(),
+            "skipping chat-clones because it is a symlink"
+        );
+        return Ok(());
+    }
+    if !meta.is_dir() {
+        return fs::remove_file(&legacy);
+    }
+    let root = worktrees_root.canonicalize()?;
+    let canonical = legacy.canonicalize()?;
+    if canonical.parent() != Some(root.as_path()) {
+        tracing::warn!(
+            path = %canonical.display(),
+            "skipping chat-clones because it is outside the worktrees directory"
+        );
+        return Ok(());
+    }
+    fs::remove_dir_all(canonical)
 }
 
 fn write_state(chat_dir: &Path, state: &ChatRepoState) -> std::io::Result<()> {
@@ -771,6 +938,10 @@ fn looks_like_path(slug: &str) -> bool {
 }
 
 fn first_line_limited(path: &Path) -> Option<String> {
+    let meta = fs::symlink_metadata(path).ok()?;
+    if meta.file_type().is_symlink() {
+        return None;
+    }
     let mut file = File::open(path).ok()?;
     let mut buf = [0u8; 512];
     let n = file.read(&mut buf).ok()?;
@@ -1281,16 +1452,149 @@ mod tests {
         let mut state = read_state(&dir);
         state.last_activity_unix_ms = 1;
         write_state(&dir, &state).unwrap();
-        let removed =
-            sweep_idle_copies(root.path(), Duration::from_secs(1), SystemTime::now()).unwrap();
+        let removed = sweep_idle_copies(
+            root.path(),
+            Duration::from_secs(1),
+            SystemTime::now(),
+            &repos,
+        )
+        .unwrap();
         assert_eq!(removed, 1);
         assert!(!dir.join("demo").exists());
         assert!(dir.join(INDEX_FILE).exists());
         assert!(copies_were_swept(&dir));
-        assert_eq!(slugs_to_restore(&dir), vec!["demo".to_string()]);
+        assert_eq!(slugs_to_restore(&dir, &repos), vec!["demo".to_string()]);
 
         remove_chat_workspace(root.path(), session).unwrap();
         assert!(!dir.exists());
+    }
+
+    #[test]
+    fn hostile_state_slugs_do_not_delete_outside_the_chat_dir() {
+        let root = tempfile::tempdir().unwrap();
+        let session = Uuid::new_v4();
+        let dir = chat_dir(root.path(), session);
+        fs::create_dir_all(&dir).unwrap();
+        let outside_abs = root.path().join("outside-abs");
+        let outside_rel = root.path().join("outside-rel");
+        fs::create_dir_all(&outside_abs).unwrap();
+        fs::create_dir_all(&outside_rel).unwrap();
+        fs::write(outside_abs.join("keep.txt"), "keep-abs").unwrap();
+        fs::write(outside_rel.join("keep.txt"), "keep-rel").unwrap();
+
+        let abs_slug = outside_abs.to_string_lossy().to_string();
+        let rel_slug = "../../outside-rel";
+        let planted = serde_json::json!({
+            "opened": [
+                {"slug": abs_slug, "name": "Absolute", "last_used_unix_ms": 1},
+                {"slug": rel_slug, "name": "Relative", "last_used_unix_ms": 1}
+            ],
+            "carried": [abs_slug, rel_slug],
+            "copies_swept": false,
+            "last_activity_unix_ms": 1
+        });
+        let write_hostile = |dir: &Path| {
+            fs::write(
+                dir.join(STATE_FILE),
+                serde_json::to_vec_pretty(&planted).unwrap(),
+            )
+            .unwrap();
+        };
+        write_hostile(&dir);
+
+        let repos = vec![linked("demo", init_repo(root.path(), "demo"), false)];
+        sweep_idle_copies(
+            root.path(),
+            Duration::from_secs(1),
+            SystemTime::now(),
+            &repos,
+        )
+        .unwrap();
+        assert_eq!(
+            fs::read_to_string(outside_abs.join("keep.txt")).unwrap(),
+            "keep-abs"
+        );
+        assert_eq!(
+            fs::read_to_string(outside_rel.join("keep.txt")).unwrap(),
+            "keep-rel"
+        );
+        let loaded = read_state(&dir);
+        assert!(loaded.opened.is_empty());
+        assert!(loaded.carried.is_empty());
+
+        write_hostile(&dir);
+        let restore = slugs_to_restore(&dir, &repos);
+        assert!(
+            restore.iter().all(|slug| slug_error(slug).is_none()),
+            "{restore:?}"
+        );
+        assert!(!restore
+            .iter()
+            .any(|slug| slug == &abs_slug || slug == rel_slug));
+
+        write_hostile(&dir);
+        open_notes(&dir, session, &repos, "demo", &limits_cap(1))
+            .0
+            .unwrap();
+        assert_eq!(
+            fs::read_to_string(outside_abs.join("keep.txt")).unwrap(),
+            "keep-abs"
+        );
+        assert_eq!(
+            fs::read_to_string(outside_rel.join("keep.txt")).unwrap(),
+            "keep-rel"
+        );
+        assert!(dir.join("demo").join("README.md").is_file());
+
+        let chat_root = root.path().join("chat");
+        let abs_err = remove_tree_inside(&chat_root, &outside_abs).unwrap_err();
+        let rel_err = remove_tree_inside(&chat_root, &dir.join(rel_slug)).unwrap_err();
+        assert_eq!(abs_err.kind(), std::io::ErrorKind::InvalidInput);
+        assert_eq!(rel_err.kind(), std::io::ErrorKind::InvalidInput);
+        assert!(outside_abs.join("keep.txt").is_file());
+        assert!(outside_rel.join("keep.txt").is_file());
+    }
+
+    #[test]
+    fn symlink_readme_is_not_followed() {
+        let root = tempfile::tempdir().unwrap();
+        let repo = root.path().join("demo");
+        fs::create_dir_all(&repo).unwrap();
+        let secret = root.path().join("secret.txt");
+        fs::write(&secret, "TOP SECRET checkout notes\n").unwrap();
+        std::os::unix::fs::symlink(&secret, repo.join("README.md")).unwrap();
+        let description = one_line_description(&repo, "main");
+        assert_eq!(description, "Default branch main.");
+        assert!(!description.contains("SECRET"));
+    }
+
+    #[test]
+    fn broken_copy_is_rebuilt() {
+        let root = tempfile::tempdir().unwrap();
+        let session = Uuid::new_v4();
+        let repo = init_repo(root.path(), "demo");
+        let repos = vec![linked("demo", repo, false)];
+        let dir = chat_dir(root.path(), session);
+        let limits = ChatRepoLimits::default();
+        let first = open_notes(&dir, session, &repos, "demo", &limits)
+            .0
+            .unwrap();
+        assert!(!first.reused);
+        fs::write(
+            first.path.join(".git/HEAD"),
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n",
+        )
+        .unwrap();
+        assert!(!copy_is_ready(&first.path));
+        let (second, notes) = open_notes(&dir, session, &repos, "demo", &limits);
+        let second = second.unwrap();
+        assert!(!second.reused);
+        assert!(notes.contains(&opening_line("demo")));
+        assert!(notes.contains(&opened_line("demo")));
+        assert_eq!(
+            fs::read_to_string(dir.join("demo").join("README.md")).unwrap(),
+            "demo does one thing.\n"
+        );
     }
 
     #[test]
