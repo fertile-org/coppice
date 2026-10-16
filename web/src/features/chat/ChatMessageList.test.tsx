@@ -201,7 +201,7 @@ describe('ChatMessageList', () => {
     );
   });
 
-  it('surfaces action result chips for ticket, knowledge, and cutoff', () => {
+  it('surfaces action result chips for ticket and knowledge', () => {
     const actionMessages: ChatMessage[] = [
       {
         id: '00000000-0000-4000-8000-000000000001',
@@ -233,21 +233,6 @@ describe('ChatMessageList', () => {
         attachments: [],
         createdAt: '2026-09-08T00:00:01Z',
       },
-      {
-        id: '00000000-0000-4000-8000-000000000003',
-        sessionId: '00000000-0000-4000-8000-000000000099',
-        seq: 3,
-        role: 'system',
-        body: 'Session cutoff',
-        agentRunId: null,
-        actionMetadata: {
-          action: 'cutoff',
-          childSessionId: '00000000-0000-4000-8000-000000000070',
-        },
-        attachmentIds: [],
-        attachments: [],
-        createdAt: '2026-09-08T00:00:02Z',
-      },
     ];
 
     renderList(<ChatMessageList messages={actionMessages} />);
@@ -256,10 +241,6 @@ describe('ChatMessageList', () => {
     expect(screen.getByTestId('chat-action-chip-knowledge')).toHaveAttribute(
       'href',
       '/knowledge',
-    );
-    expect(screen.getByTestId('chat-action-chip-cutoff')).toHaveAttribute(
-      'href',
-      '/chat/00000000-0000-4000-8000-000000000070',
     );
   });
 

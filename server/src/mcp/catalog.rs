@@ -12,10 +12,11 @@ pub enum CoreTool {
     KnowledgeSearch,
     CommentPost,
     ResultSubmit,
+    OpenRepo,
 }
 
 impl CoreTool {
-    const ALL: [Self; 8] = [
+    const ALL: [Self; 9] = [
         Self::BoardAgents,
         Self::TicketGet,
         Self::TicketComments,
@@ -24,6 +25,7 @@ impl CoreTool {
         Self::KnowledgeSearch,
         Self::CommentPost,
         Self::ResultSubmit,
+        Self::OpenRepo,
     ];
 
     pub fn name(self) -> &'static str {
@@ -36,6 +38,7 @@ impl CoreTool {
             Self::KnowledgeSearch => "knowledge_search",
             Self::CommentPost => "comment_post",
             Self::ResultSubmit => "result_submit",
+            Self::OpenRepo => "open_repo",
         }
     }
 
@@ -113,6 +116,16 @@ impl CoreTool {
                 "Submit the final result for this run. Returns validation errors and warnings; fix and resubmit if it reports errors.",
                 object(result_submit_properties(), &["status", "summary"]),
                 false,
+            ),
+            Self::OpenRepo => (
+                "Check out a linked repository into this chat folder. Pass the slug from REPOS.md, not a path. Reuses a copy that is already here.",
+                object(
+                    json!({
+                        "slug": { "type": "string", "description": "Repository slug from REPOS.md." }
+                    }),
+                    &["slug"],
+                ),
+                true,
             ),
         };
         ToolDefinition {
@@ -224,13 +237,23 @@ pub fn core_tools_for(profile: ContextProfile) -> Vec<CoreTool> {
             CommentPost,
             ResultSubmit,
         ],
-        ContextProfile::HumanChat | ContextProfile::Conversation => vec![
+        ContextProfile::HumanChat => vec![
             BoardAgents,
             TicketGet,
             TicketComments,
             TicketRuns,
             TicketSearch,
             KnowledgeSearch,
+            ResultSubmit,
+        ],
+        ContextProfile::Conversation => vec![
+            BoardAgents,
+            TicketGet,
+            TicketComments,
+            TicketRuns,
+            TicketSearch,
+            KnowledgeSearch,
+            OpenRepo,
             ResultSubmit,
         ],
         ContextProfile::KnowledgeCompaction => vec![
@@ -276,7 +299,10 @@ mod tests {
             .filter(|n| *n != "comment_post")
             .collect();
         assert_eq!(names(ContextProfile::HumanChat), no_comment);
-        assert_eq!(names(ContextProfile::Conversation), no_comment);
+        let mut conversation = no_comment.clone();
+        conversation.insert(conversation.len() - 1, "open_repo");
+        assert_eq!(names(ContextProfile::Conversation), conversation);
+        assert!(CoreTool::OpenRepo.definition().read_only);
 
         assert_eq!(
             names(ContextProfile::KnowledgeCompaction),

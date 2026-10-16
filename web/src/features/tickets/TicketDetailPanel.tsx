@@ -6,14 +6,23 @@ import type { Ticket } from '../board/useTickets';
 import { MarkdownEditor } from '../../components/MarkdownEditor';
 import { TicketMarkdown } from '../../components/TicketMarkdown';
 import { useToast } from '../../components/ToastProvider';
+import {
+  attachmentFailedMessage,
+  imageFilesFromClipboard,
+  isFileDrag,
+  partitionAttachmentFiles,
+} from '../../lib/attachmentFiles';
+import type { AttachmentMeta } from '../../lib/attachments';
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
 import { PlanChecklist } from '../plan/PlanChecklist';
 import { PlanReviewActions } from '../plan/PlanReviewActions';
+import { AttachFilesButton } from './AttachFilesButton';
+import { CommentAttachments } from './CommentAttachments';
 import { TicketStatusBadge } from './TicketStatusBadge';
 import { RestartChoice } from './RestartChoice';
 import { TicketCommentsTab } from './TicketCommentsTab';
-import { useTicketChildren, useUpdateTicket } from './useTicket';
+import { useTicketChildren, useUpdateTicket, useUploadAttachment } from './useTicket';
 
 interface TicketDetailPanelProps {
   ticket: Ticket;
@@ -27,8 +36,10 @@ export function TicketDetailPanel({
   const toast = useToast();
   const [, setSearchParams] = useSearchParams();
   const updateTicket = useUpdateTicket(ticket.id);
+  const uploadAttachment = useUploadAttachment();
   const { data: children } = useTicketChildren(ticket.id);
   const [editing, setEditing] = useState(false);
+  const [dropActive, setDropActive] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [title, setTitle] = useState(ticket.title);
   const [description, setDescription] = useState(ticket.description);
@@ -59,6 +70,32 @@ export function TicketDetailPanel({
 
   const saving = isSaving || updateTicket.isPending;
   const isArchived = Boolean(ticket.archivedAt);
+  const descriptionFiles = descriptionAttachments(ticket);
+
+  async function attachToTicket(incoming: File[]) {
+    if (isArchived) return;
+    const { accepted, errors } = partitionAttachmentFiles(incoming);
+    for (const message of errors) toast.error(message);
+    const uploaded: string[] = [];
+    const linked: File[] = [];
+    for (const file of accepted) {
+      try {
+        const result = await uploadAttachment.mutateAsync(file);
+        uploaded.push(result.id);
+        linked.push(file);
+      } catch {
+        toast.error(attachmentFailedMessage(file));
+      }
+    }
+    if (uploaded.length === 0) return;
+    try {
+      await updateTicket.mutateAsync({
+        attachmentIds: [...(ticket.attachmentIds ?? []), ...uploaded],
+      });
+    } catch {
+      for (const file of linked) toast.error(attachmentFailedMessage(file));
+    }
+  }
 
   function handleCancel() {
     setTitle(ticket.title);
@@ -68,7 +105,42 @@ export function TicketDetailPanel({
   }
 
   return (
-    <div className="flex min-h-0 flex-col gap-8">
+    <div
+      className="relative flex min-h-0 flex-col gap-8"
+      onDragEnter={(event) => {
+        if (!isFileDrag(event.dataTransfer)) return;
+        event.preventDefault();
+      }}
+      onDragOver={(event) => {
+        if (!isFileDrag(event.dataTransfer)) return;
+        event.preventDefault();
+        const overComment = (event.target as HTMLElement).closest?.(
+          '[data-attachment-zone="comment"]',
+        );
+        setDropActive(!overComment);
+      }}
+      onDragLeave={(event) => {
+        if (event.currentTarget.contains(event.relatedTarget as Node)) return;
+        setDropActive(false);
+      }}
+      onDrop={(event) => {
+        if (!isFileDrag(event.dataTransfer)) return;
+        const overComment = (event.target as HTMLElement).closest?.(
+          '[data-attachment-zone="comment"]',
+        );
+        setDropActive(false);
+        if (overComment) return;
+        event.preventDefault();
+        void attachToTicket(Array.from(event.dataTransfer.files));
+      }}
+    >
+      {dropActive && (
+        <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center rounded-md border-2 border-dashed border-accent bg-paper-50/90">
+          <p className="font-body text-sm font-medium text-text-primary">
+            Drop to attach
+          </p>
+        </div>
+      )}
       <div className="flex flex-col gap-4">
         <div className="flex items-start justify-between gap-4">
           {editing ? (
@@ -127,29 +199,45 @@ export function TicketDetailPanel({
           </p>
         )}
 
-        {editing ? (
-          <MarkdownEditor
-            value={description}
-            onChange={setDescription}
-            placeholder="Describe the ticket in markdown…"
-            aria-label="Ticket description"
-            minHeight={200}
-            disabled={saving}
-            onSubmit={() => {
-              if (!saving && title.trim().length > 0) void handleSave();
-            }}
-          />
-        ) : (
-          <div className="min-h-[200px] overflow-y-auto rounded-md border border-border bg-surface px-4 py-3">
-            {description.trim() ? (
-              <TicketMarkdown>{description}</TicketMarkdown>
-            ) : (
-              <p className="font-body text-sm italic text-text-muted">
-                No description yet.
-              </p>
-            )}
+        <div
+          onPaste={(event) => {
+            const images = imageFilesFromClipboard(event.clipboardData);
+            if (images.length === 0) return;
+            event.preventDefault();
+            void attachToTicket(images);
+          }}
+        >
+          {editing ? (
+            <MarkdownEditor
+              value={description}
+              onChange={setDescription}
+              placeholder="Describe the ticket in markdown…"
+              aria-label="Ticket description"
+              minHeight={200}
+              disabled={saving}
+              onSubmit={() => {
+                if (!saving && title.trim().length > 0) void handleSave();
+              }}
+            />
+          ) : (
+            <div className="min-h-[200px] overflow-y-auto rounded-md border border-border bg-surface px-4 py-3">
+              {description.trim() ? (
+                <TicketMarkdown>{description}</TicketMarkdown>
+              ) : (
+                <p className="font-body text-sm italic text-text-muted">
+                  No description yet.
+                </p>
+              )}
+            </div>
+          )}
+          <div className="mt-2">
+            <AttachFilesButton
+              disabled={isArchived || saving || uploadAttachment.isPending}
+              onFiles={(files) => void attachToTicket(files)}
+            />
           </div>
-        )}
+          <CommentAttachments attachments={descriptionFiles} />
+        </div>
       </div>
 
       {ticket.status === 'blocked' && !isArchived && (
@@ -221,4 +309,16 @@ export function TicketDetailPanel({
       </section>
     </div>
   );
+}
+
+function descriptionAttachments(ticket: Ticket): AttachmentMeta[] {
+  if (ticket.attachments && ticket.attachments.length > 0) {
+    return ticket.attachments;
+  }
+  return (ticket.attachmentIds ?? []).map((id) => ({
+    id,
+    filename: 'Attachment',
+    contentType: 'application/octet-stream',
+    sizeBytes: 0,
+  }));
 }

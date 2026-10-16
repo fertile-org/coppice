@@ -544,11 +544,17 @@ async fn execute_job(
         &agent_key,
         &agent.role,
     );
-    write_context_document(
+    let mut markdown = build_tool_first_context(&context_input, &skills, required);
+    let attachments = crate::services::ticket_attachments::stage_ticket_attachments(
+        pool,
+        &state.config.storage.artifacts_dir,
         &paths.worktree_dir,
-        &build_tool_first_context(&context_input, &skills, required),
+        ticket_id,
     )
-    .context("write context file")?;
+    .await
+    .context("stage ticket attachments")?;
+    crate::services::ticket_attachments::append_section(&mut markdown, &attachments);
+    write_context_document(&paths.worktree_dir, &markdown).context("write context file")?;
 
     if run_svc.is_cancelled(run.id).await? {
         return Err(JobCancelled.into());
@@ -955,22 +961,12 @@ async fn execute_chat_turn(
         .preset_source
         .clone()
         .unwrap_or_else(|| slugify(&agent.name));
-    let repo_local_path = if let Some(repo_id) = session.repo_id {
-        sqlx::query_scalar::<_, String>("SELECT local_path FROM repos WHERE id = $1")
-            .bind(repo_id)
-            .fetch_optional(pool)
-            .await?
-    } else {
-        None
-    };
-
     let cwd = resolve_chat_cwd(
         std::path::Path::new(&state.config.agent.worktrees_path),
         session_id,
-        repo_local_path.as_deref(),
-        crate::providers::chat_needs_isolation(&agent.connector),
     )
     .context("resolve chat cwd")?;
+    crate::services::chat_workspace::on_chat_turn(state, pool, session_id, session.board_id).await;
     let cwd_str = cwd.to_string_lossy().into_owned();
 
     let stream = state.run_streams.register(run.id);
@@ -1071,7 +1067,10 @@ async fn execute_chat_turn(
                     "chat resume invalid, using full transcript fallback"
                 );
                 let transcript = ChatService::new(pool)
-                    .format_transcript(session_id)
+                    .format_model_transcript(
+                        session_id,
+                        state.config.knowledge.context_budget.latest_comments,
+                    )
                     .await
                     .context("format chat transcript for fallback")?;
                 write_chat_context(
@@ -1103,7 +1102,10 @@ async fn execute_chat_turn(
         }
     } else {
         let transcript = ChatService::new(pool)
-            .format_transcript(session_id)
+            .format_model_transcript(
+                session_id,
+                state.config.knowledge.context_budget.latest_comments,
+            )
             .await
             .context("format chat transcript")?;
         write_chat_context(

@@ -4,7 +4,6 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiError } from '../../lib/api';
-import { openCombobox, selectComboboxOption } from '../../test/combobox';
 import { ChatPage } from './ChatPage';
 
 const mocks = vi.hoisted(() => ({
@@ -25,7 +24,6 @@ const mocks = vi.hoisted(() => ({
   draftTicketLoading: false,
   draftTicketError: false,
   createKnowledge: vi.fn(),
-  cutoffSession: vi.fn(),
   openTicket: vi.fn(),
   sessions: [] as Array<{
     id: string;
@@ -38,6 +36,7 @@ const mocks = vi.hoisted(() => ({
     lastMessageRole?: 'human' | 'agent' | 'system';
     hasActiveRun?: boolean;
     activeRunId?: string | null;
+    title?: string | null;
     createdAt: string;
     updatedAt: string;
   }>,
@@ -66,36 +65,42 @@ vi.mock('../agents/useAgents', () => ({
       {
         id: '00000000-0000-4000-8000-000000000010',
         name: 'Backend Engineer',
+        role: 'Engineer',
         enabled: true,
         connector: 'claude-code',
       },
       {
         id: '00000000-0000-4000-8000-000000000011',
         name: 'Disabled Agent',
+        role: 'Engineer',
         enabled: false,
         connector: 'claude-code',
       },
       {
         id: '00000000-0000-4000-8000-000000000012',
         name: 'Kilo Agent',
+        role: 'Assistant',
         enabled: true,
         connector: 'kilo-code',
       },
       {
         id: '00000000-0000-4000-8000-000000000013',
         name: 'Codex Agent',
+        role: 'Engineer',
         enabled: true,
         connector: 'codex',
       },
       {
         id: '00000000-0000-4000-8000-000000000014',
         name: 'OpenCode Agent',
+        role: 'Engineer',
         enabled: true,
         connector: 'opencode',
       },
       {
         id: '00000000-0000-4000-8000-000000000015',
         name: 'Cursor Agent',
+        role: 'Assistant',
         enabled: true,
         connector: 'cursor',
       },
@@ -161,10 +166,6 @@ vi.mock('./useChat', () => ({
     mutateAsync: mocks.createKnowledge,
     isPending: false,
   }),
-  useCutoffChatSession: () => ({
-    mutateAsync: mocks.cutoffSession,
-    isPending: false,
-  }),
 }));
 
 vi.mock('./useChatRunLiveStream', () => ({
@@ -189,6 +190,7 @@ function renderChat(path = '/chat') {
       <MemoryRouter initialEntries={[path]}>
         <Routes>
           <Route path="/chat" element={<ChatPage />} />
+          <Route path="/chat/new/:agentId" element={<ChatPage />} />
           <Route path="/chat/:sessionId" element={<ChatPage />} />
           <Route path="/knowledge" element={<div>Knowledge inbox</div>} />
         </Routes>
@@ -225,11 +227,9 @@ describe('ChatPage', () => {
     mocks.draftTicketLoading = false;
     mocks.draftTicketError = false;
     mocks.createKnowledge.mockReset();
-    mocks.cutoffSession.mockReset();
     mocks.openTicket.mockReset();
     mocks.sessions = [];
     mocks.messages = [];
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
     vi.stubGlobal(
       'URL',
       class extends URL {
@@ -239,100 +239,127 @@ describe('ChatPage', () => {
     );
   });
 
-  it('filters sessions with sidebar search', () => {
-    mocks.sessions = [
-      ACTIVE_SESSION,
-      {
-        ...ACTIVE_SESSION,
-        id: '00000000-0000-4000-8000-000000000099',
-        agentId: '00000000-0000-4000-8000-000000000011',
-        lastMessagePreview: 'other topic',
-      },
-    ];
+  it('lists every enabled agent with name and role', () => {
     renderChat('/chat');
 
     const list = screen.getByTestId('chat-session-list');
-    expect(within(list).getAllByRole('link').length).toBe(2);
-    fireEvent.change(screen.getByTestId('chat-session-search'), {
-      target: { value: 'backend' },
-    });
     expect(within(list).getByText('Backend Engineer')).toBeInTheDocument();
-    expect(within(list).queryByText('other topic')).not.toBeInTheDocument();
+    expect(within(list).getAllByText('Engineer').length).toBeGreaterThan(0);
+    expect(within(list).getAllByText('No messages yet').length).toBeGreaterThan(0);
+    expect(within(list).queryByText('Disabled Agent')).toBeNull();
+    expect(screen.queryByTestId('new-chat-form')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Start chat' })).not.toBeInTheDocument();
   });
 
-  it('shows new-chat controls for agent and optional board', () => {
+  it('greys out Cursor and Kilo Code and keeps chat off', () => {
     renderChat('/chat');
 
-    expect(screen.getByTestId('new-chat-form')).toBeInTheDocument();
-    const agent = screen.getByLabelText('Agent');
-    expect(agent).toBeInTheDocument();
-    expect(screen.getByLabelText('Board (optional)')).toBeInTheDocument();
-    const options = openCombobox(agent);
-    expect(within(options).getByRole('option', { name: 'Backend Engineer' })).toBeInTheDocument();
-    expect(within(options).queryByRole('option', { name: 'Disabled Agent' })).toBeNull();
+    expect(
+      screen.getByText(
+        "Chat isn't available for Kilo Code yet, because Coppice can't keep it read-only.",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "Chat isn't available for Cursor yet, because Coppice can't keep it read-only.",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: 'New chat with Kilo Agent' }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: 'New chat with Cursor Agent' }),
+    ).not.toBeInTheDocument();
+    expect(mocks.createSession).not.toHaveBeenCalled();
   });
 
-  it.each([
-    [
-      'Backend Engineer',
-      "Coppice hasn't confirmed that Claude Code stays read-only. The agent can still run commands on your computer.",
-    ],
-    [
-      'Codex Agent',
-      "Coppice hasn't confirmed that Codex stays read-only. The agent can still run commands on your computer.",
-    ],
-  ])('warns and still starts chat for %s', async (agentName, message) => {
+  it('opens an empty chat and creates the session on the first message', async () => {
     mocks.createSession.mockResolvedValue({
       id: '00000000-0000-4000-8000-000000000001',
       boardId: null,
       ownerUserId: '00000000-0000-4000-8000-000000000002',
-      agentId: '00000000-0000-4000-8000-000000000010',
+      agentId: '00000000-0000-4000-8000-000000000014',
       repoId: null,
       status: 'active',
       createdAt: '2026-09-08T00:00:00Z',
       updatedAt: '2026-09-08T00:00:00Z',
     });
+    mocks.postMessage.mockResolvedValue({
+      message: {
+        id: '00000000-0000-4000-8000-000000000031',
+        sessionId: '00000000-0000-4000-8000-000000000001',
+        seq: 1,
+        role: 'human',
+        body: 'Hello',
+        agentRunId: '00000000-0000-4000-8000-000000000040',
+        actionMetadata: null,
+        attachmentIds: [],
+        attachments: [],
+        createdAt: '2026-09-08T00:02:00Z',
+      },
+      runId: '00000000-0000-4000-8000-000000000040',
+    });
+
     renderChat('/chat');
+    fireEvent.click(screen.getByRole('link', { name: /OpenCode Agent/ }));
 
-    selectComboboxOption(screen.getByLabelText('Agent'), agentName);
+    expect(
+      await screen.findByText(
+        'Say hi to OpenCode Agent. They can see all your projects.',
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByTestId('chat-isolation-banner')).not.toBeInTheDocument();
+    expect(mocks.createSession).not.toHaveBeenCalled();
 
-    expect(screen.getByTestId('chat-isolation-banner')).toHaveTextContent(message);
-    expect(screen.queryByTestId('chat-unavailable')).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Start chat' })).toBeEnabled();
-    fireEvent.click(screen.getByRole('button', { name: 'Start chat' }));
+    fireEvent.change(screen.getByLabelText('Message'), {
+      target: { value: 'Hello' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+
     await waitFor(() => {
-      expect(mocks.createSession).toHaveBeenCalled();
+      expect(mocks.createSession).toHaveBeenCalledWith({
+        agentId: '00000000-0000-4000-8000-000000000014',
+      });
+      expect(mocks.postMessage).toHaveBeenCalledWith({
+        body: 'Hello',
+        sessionId: '00000000-0000-4000-8000-000000000001',
+      });
     });
   });
 
-  it.each([
-    [
-      'Kilo Agent',
-      "Chat isn't available for Kilo Code yet, because Coppice can't keep it read-only.",
-    ],
-    [
-      'Cursor Agent',
-      "Chat isn't available for Cursor yet, because Coppice can't keep it read-only.",
-    ],
-  ])('refuses to start chat for %s', (agentName, message) => {
+  it('shows a new-chat button whose tooltip names the agent', () => {
     renderChat('/chat');
-
-    selectComboboxOption(screen.getByLabelText('Agent'), agentName);
-
-    expect(screen.getByTestId('chat-unavailable')).toHaveTextContent(message);
-    expect(screen.queryByTestId('chat-isolation-banner')).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Start chat' })).toBeDisabled();
-    fireEvent.click(screen.getByRole('button', { name: 'Start chat' }));
-    expect(mocks.createSession).not.toHaveBeenCalled();
+    const button = screen.getByRole('button', {
+      name: 'New chat with Backend Engineer',
+    });
+    expect(button).toHaveAttribute('title', 'New chat with Backend Engineer');
+    expect(button).toHaveTextContent('New chat');
   });
 
-  it('starts OpenCode chat with no isolation banner', () => {
+  it('expands an agent that has several chats and titles them from the first message', () => {
+    mocks.sessions = [
+      {
+        ...ACTIVE_SESSION,
+        title: 'Fix the login form',
+        updatedAt: '2026-09-08T00:02:00Z',
+      },
+      {
+        ...ACTIVE_SESSION,
+        id: '00000000-0000-4000-8000-000000000099',
+        title: null,
+        updatedAt: '2026-09-08T00:01:00Z',
+      },
+    ];
     renderChat('/chat');
 
-    selectComboboxOption(screen.getByLabelText('Agent'), 'OpenCode Agent');
-
-    expect(screen.queryByTestId('chat-isolation-banner')).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Start chat' })).toBeEnabled();
+    const list = screen.getByTestId('chat-session-list');
+    const backend = within(list)
+      .getAllByTestId('chat-agent-row')
+      .find((row) => within(row).queryByText('Backend Engineer'));
+    expect(backend).toBeTruthy();
+    expect(within(backend!).getByRole('link', { name: 'Fix the login form' })).toBeInTheDocument();
+    expect(within(backend!).getByRole('link', { name: 'New chat' })).toBeInTheDocument();
+    expect(within(backend!).queryByText('No messages yet')).not.toBeInTheDocument();
   });
 
   it.each([
@@ -355,7 +382,6 @@ describe('ChatPage', () => {
 
     expect(screen.getByTestId('chat-isolation-banner')).toHaveTextContent(message);
     expect(screen.getByTestId('chat-composer')).toBeInTheDocument();
-    expect(screen.queryByTestId('chat-unavailable')).not.toBeInTheDocument();
   });
 
   it.each([
@@ -376,7 +402,7 @@ describe('ChatPage', () => {
     ];
     renderChat(`/chat/${ACTIVE_SESSION.id}`);
 
-    expect(screen.getByTestId('chat-unavailable')).toHaveTextContent(message);
+    expect(screen.getAllByText(message).length).toBeGreaterThan(0);
     expect(screen.queryByTestId('chat-isolation-banner')).not.toBeInTheDocument();
     expect(screen.queryByTestId('chat-composer')).not.toBeInTheDocument();
   });
@@ -392,32 +418,6 @@ describe('ChatPage', () => {
 
     expect(screen.queryByTestId('chat-isolation-banner')).not.toBeInTheDocument();
     expect(screen.getByTestId('chat-composer')).toBeInTheDocument();
-  });
-
-  it('creates a session then opens the transcript composer', async () => {
-    mocks.createSession.mockResolvedValue({
-      id: '00000000-0000-4000-8000-000000000001',
-      boardId: '00000000-0000-4000-8000-000000000003',
-      ownerUserId: '00000000-0000-4000-8000-000000000002',
-      agentId: '00000000-0000-4000-8000-000000000010',
-      repoId: null,
-      status: 'active',
-      createdAt: '2026-09-08T00:00:00Z',
-      updatedAt: '2026-09-08T00:00:00Z',
-    });
-
-    renderChat('/chat');
-
-    selectComboboxOption(screen.getByLabelText('Agent'), 'Backend Engineer');
-    selectComboboxOption(screen.getByLabelText('Board (optional)'), 'Coppice');
-    fireEvent.click(screen.getByRole('button', { name: 'Start chat' }));
-
-    await waitFor(() => {
-      expect(mocks.createSession).toHaveBeenCalledWith({
-        agentId: '00000000-0000-4000-8000-000000000010',
-        boardId: '00000000-0000-4000-8000-000000000003',
-      });
-    });
   });
 
   it('lists sessions and sends a message that starts a live turn', async () => {
@@ -470,9 +470,7 @@ describe('ChatPage', () => {
     const transcript = await screen.findByTestId('chat-message-list');
     expect(within(transcript).getByText('Prior message')).toBeInTheDocument();
     expect(screen.getByTestId('chat-session-pane')).toBeInTheDocument();
-    expect(screen.getByTestId('chat-session-status')).toHaveTextContent(
-      'Active',
-    );
+    expect(screen.getByRole('heading', { name: 'Backend Engineer' })).toBeInTheDocument();
     expect(screen.getByTestId('chat-session-actions')).toBeInTheDocument();
     expect(screen.getByTestId('chat-composer')).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText('Message'), {
@@ -838,104 +836,6 @@ describe('ChatPage', () => {
     expect(await screen.findByText('Knowledge inbox')).toBeInTheDocument();
   });
 
-  it('cutoffs the session and opens the seeded child chat', async () => {
-    mocks.sessions = [ACTIVE_SESSION];
-    mocks.cutoffSession.mockResolvedValue({
-      parent: { ...ACTIVE_SESSION, status: 'cutoff' },
-      child: {
-        ...ACTIVE_SESSION,
-        id: '00000000-0000-4000-8000-000000000070',
-        parentSessionId: ACTIVE_SESSION.id,
-        status: 'active',
-      },
-      seedMessage: {
-        id: '00000000-0000-4000-8000-000000000071',
-        sessionId: '00000000-0000-4000-8000-000000000070',
-        seq: 1,
-        role: 'system',
-        body: 'Prior conversation summary',
-        agentRunId: null,
-        actionMetadata: {
-          action: 'cutoff_seed',
-          parentSessionId: ACTIVE_SESSION.id,
-        },
-        createdAt: '2026-09-08T00:04:00Z',
-      },
-    });
-
-    // After navigate, child must resolve from sessions list.
-    mocks.cutoffSession.mockImplementation(async () => {
-      const child = {
-        ...ACTIVE_SESSION,
-        id: '00000000-0000-4000-8000-000000000070',
-        parentSessionId: ACTIVE_SESSION.id,
-        status: 'active' as const,
-      };
-      mocks.sessions = [{ ...ACTIVE_SESSION, status: 'cutoff' }, child];
-      return {
-        parent: { ...ACTIVE_SESSION, status: 'cutoff' as const },
-        child,
-        seedMessage: {
-          id: '00000000-0000-4000-8000-000000000071',
-          sessionId: child.id,
-          seq: 1,
-          role: 'system' as const,
-          body: 'Prior conversation summary',
-          agentRunId: null,
-          actionMetadata: {
-            action: 'cutoff_seed',
-            parentSessionId: ACTIVE_SESSION.id,
-          },
-          createdAt: '2026-09-08T00:04:00Z',
-        },
-      };
-    });
-
-    renderChat(`/chat/${ACTIVE_SESSION.id}`);
-
-    fireEvent.click(screen.getByRole('button', { name: 'Continue in new chat' }));
-
-    await waitFor(() => {
-      expect(mocks.cutoffSession).toHaveBeenCalled();
-    });
-    expect(window.confirm).toHaveBeenCalledWith(
-      'Continue in a new chat? A shorter chat will open with a summary of this one. This chat stays readable.',
-    );
-    await waitFor(() => {
-      expect(
-        screen.getByRole('heading', { name: 'Backend Engineer' }),
-      ).toBeInTheDocument();
-      expect(screen.getByTestId('chat-session-status')).toHaveTextContent(
-        'Active',
-      );
-      expect(screen.getByTestId('chat-composer')).toBeInTheDocument();
-    });
-  });
-
-  it('shows the continue error when a new chat cannot start', async () => {
-    mocks.sessions = [ACTIVE_SESSION];
-    mocks.cutoffSession.mockRejectedValue(new Error('network'));
-    renderChat(`/chat/${ACTIVE_SESSION.id}`);
-
-    fireEvent.click(screen.getByRole('button', { name: 'Continue in new chat' }));
-
-    expect(await screen.findByRole('alert')).toHaveTextContent(
-      "Couldn't start a new chat. Try again.",
-    );
-  });
-
-  it('labels a continued session and hides the composer', () => {
-    mocks.sessions = [{ ...ACTIVE_SESSION, status: 'cutoff' }];
-    renderChat(`/chat/${ACTIVE_SESSION.id}`);
-
-    expect(screen.getByTestId('chat-session-status')).toHaveTextContent('Continued');
-    expect(
-      screen.getByText('This chat continued in a new one. You can still read it here.', {
-        exact: false,
-      }),
-    ).toBeInTheDocument();
-    expect(screen.queryByTestId('chat-composer')).not.toBeInTheDocument();
-  });
 
   it('submits on Enter with a non-empty body', async () => {
     mocks.sessions = [ACTIVE_SESSION];

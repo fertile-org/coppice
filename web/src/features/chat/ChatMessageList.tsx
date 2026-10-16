@@ -79,30 +79,6 @@ function ActionMetadataChip({ message }: { message: ChatMessage }) {
     );
   }
 
-  if (meta.action === 'cutoff' && meta.childSessionId) {
-    return (
-      <Link
-        to={`/chat/${meta.childSessionId}`}
-        className="mt-1.5 inline-flex rounded-md border border-border bg-surface-raised px-2 py-0.5 font-body text-xs text-text-secondary hover:text-text-primary"
-        data-testid="chat-action-chip-cutoff"
-      >
-        Open continued session
-      </Link>
-    );
-  }
-
-  if (meta.action === 'cutoff_seed' && meta.parentSessionId) {
-    return (
-      <Link
-        to={`/chat/${meta.parentSessionId}`}
-        className="mt-1.5 inline-flex rounded-md border border-border bg-surface-raised px-2 py-0.5 font-body text-xs text-text-secondary hover:text-text-primary"
-        data-testid="chat-action-chip-cutoff-seed"
-      >
-        View parent session
-      </Link>
-    );
-  }
-
   return null;
 }
 

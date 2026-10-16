@@ -9,7 +9,7 @@ use crate::domain::ticket::{
 use crate::domain::workflow::{PendingRecommendation, PendingSplitRecommendation};
 use crate::domain::comment::{AuthorType, CommentIntent};
 use crate::events::bus::AppEvent;
-use crate::services::comment_service::CommentService;
+use crate::services::comment_service::{CommentError, CommentService};
 use crate::copy::conflict::DONE_COLUMN_HOLDS;
 use crate::copy::plan::{NO_PM, PLAN_REQUIRED, READY_REQUIRES_PLAN};
 use crate::copy::restart::{git_error, ERROR_NONE, ERROR_USE_CANCEL, ERROR_USE_DISCARD};
@@ -39,6 +39,7 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::collections::HashMap;
 use std::sync::Arc;
 use time::format_description::well_known::Rfc3339;
 use uuid::Uuid;
@@ -168,6 +169,17 @@ pub(crate) struct TicketResponse {
     /// Present only when an implementation run reported a reviewer brief.
     #[serde(skip_serializing_if = "Option::is_none")]
     reviewer_brief: Option<crate::services::reviewer_brief::ReviewerBrief>,
+    attachment_ids: Vec<Uuid>,
+    attachments: Vec<AttachmentSummary>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AttachmentSummary {
+    id: Uuid,
+    filename: String,
+    content_type: String,
+    size_bytes: i64,
 }
 
 #[derive(Serialize)]
@@ -197,6 +209,8 @@ struct CreateTicketBody {
     description: String,
     repo_id: Option<Uuid>,
     priority: Option<String>,
+    #[serde(default)]
+    attachment_ids: Vec<Uuid>,
 }
 
 #[derive(Deserialize)]
@@ -209,6 +223,7 @@ struct UpdateTicketBody {
     branch_name: Option<String>,
     owner_user_id: Option<Uuid>,
     skip_planning: Option<bool>,
+    attachment_ids: Option<Vec<Uuid>>,
 }
 
 #[derive(Deserialize)]
@@ -287,7 +302,61 @@ pub(crate) fn ticket_to_response(item: TicketWithDisplay) -> TicketResponse {
             }
         }),
         reviewer_brief: None,
+        attachment_ids: ticket.attachment_ids,
+        attachments: Vec::new(),
     }
+}
+
+async fn load_attachment_summaries(
+    pool: &sqlx::PgPool,
+    ids: &[Uuid],
+) -> Result<Vec<AttachmentSummary>, CommentError> {
+    if ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    let rows = CommentService::new(pool)
+        .list_attachments_by_ids(ids)
+        .await?;
+    let by_id: HashMap<Uuid, _> = rows.into_iter().map(|row| (row.id, row)).collect();
+    Ok(ids
+        .iter()
+        .filter_map(|id| by_id.get(id))
+        .map(|row| AttachmentSummary {
+            id: row.id,
+            filename: row.filename.clone(),
+            content_type: row.content_type.clone(),
+            size_bytes: row.size_bytes,
+        })
+        .collect())
+}
+
+async fn store_attachment_ids(
+    pool: &sqlx::PgPool,
+    ticket: TicketWithDisplay,
+    attachment_ids: Option<Vec<Uuid>>,
+) -> Result<TicketWithDisplay, StatusCode> {
+    let Some(attachment_ids) = attachment_ids else {
+        return Ok(ticket);
+    };
+    let mut unique = Vec::new();
+    for id in attachment_ids {
+        if !unique.contains(&id) {
+            unique.push(id);
+        }
+    }
+    if !unique.is_empty() {
+        let found = CommentService::new(pool)
+            .list_attachments_by_ids(&unique)
+            .await
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        if found.len() != unique.len() {
+            return Err(StatusCode::BAD_REQUEST);
+        }
+    }
+    TicketService::new(pool)
+        .set_attachment_ids(ticket.ticket.id, &unique)
+        .await
+        .map_err(map_error)
 }
 
 trait StatusSerde {
@@ -707,7 +776,12 @@ async fn create_ticket(
         )
         .await
         .map_err(map_error)?;
-    Ok((StatusCode::CREATED, Json(ticket_to_response(ticket))))
+    let ticket = store_attachment_ids(pool, ticket, Some(body.attachment_ids)).await?;
+    let mut response = ticket_to_response(ticket);
+    response.attachments = load_attachment_summaries(pool, &response.attachment_ids)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    Ok((StatusCode::CREATED, Json(response)))
 }
 
 async fn get_ticket(
@@ -763,21 +837,38 @@ async fn update_ticket(
         Some(p) => Some(Some(parse_priority(p).map_err(map_error)?)),
         None => None,
     };
-    let ticket = service
-        .update_fields(
-            ticket_id,
-            body.title.as_deref(),
-            body.description.as_deref(),
-            body.repo_id.map(Some),
-            priority,
-            body.branch_name.as_deref().map(Some),
-            body.owner_user_id.map(Some),
-            body.skip_planning,
-            true,
-        )
+    let has_field_update = body.title.is_some()
+        || body.description.is_some()
+        || body.repo_id.is_some()
+        || body.priority.is_some()
+        || body.branch_name.is_some()
+        || body.owner_user_id.is_some()
+        || body.skip_planning.is_some();
+    let ticket = if has_field_update {
+        service
+            .update_fields(
+                ticket_id,
+                body.title.as_deref(),
+                body.description.as_deref(),
+                body.repo_id.map(Some),
+                priority,
+                body.branch_name.as_deref().map(Some),
+                body.owner_user_id.map(Some),
+                body.skip_planning,
+                true,
+            )
+            .await
+            .map_err(map_error)?
+    } else {
+        service.get(ticket_id).await.map_err(map_error)?
+    };
+    let ticket = store_attachment_ids(pool, ticket, body.attachment_ids).await?;
+    crate::events::publish_ticket_updated(&state.event_bus, &ticket);
+    let mut response = ticket_to_response(ticket);
+    response.attachments = load_attachment_summaries(pool, &response.attachment_ids)
         .await
-        .map_err(map_error)?;
-    Ok(Json(ticket_to_response(ticket)))
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    Ok(Json(response))
 }
 
 enum UpdateStatusError {
@@ -957,6 +1048,12 @@ async fn with_approved_plan(
         steps: plan.steps,
     });
     response.reviewer_brief = reviewer_brief_for_ticket(state, pool, ticket_id, status).await?;
+    response.attachments = load_attachment_summaries(pool, &response.attachment_ids)
+        .await
+        .map_err(|err| match err {
+            CommentError::Database(err) => TicketError::Database(err),
+            other => TicketError::Validation(other.to_string()),
+        })?;
     Ok(response)
 }
 
@@ -1320,6 +1417,8 @@ async fn final_approve(
         Err(err) => return Err(map_ticket_git_error_response(err).into()),
     }
 
+    // Staged attachment copies stay until a successful merge or ticket delete.
+    // A failed merge sends this ticket back to In Progress.
     let updated = ticket_svc
         .accept_to_done(ticket_id)
         .await
@@ -1390,6 +1489,20 @@ async fn merge_ticket_branch(
         Ok(merge) => merge,
         Err(err) => return Err(git_failure_response(&state, pool, ticket_id, err).await),
     };
+
+    // Accept does not remove these copies. A failed merge (the Err arm above)
+    // returns the ticket to In Progress and leaves them in place.
+    if let Err(err) = crate::services::ticket_attachments::clear_if_ended(
+        &state.config.storage.artifacts_dir,
+        ticket_id,
+        crate::services::ticket_attachments::AttachmentFolderEnd::MergeSucceeded,
+    ) {
+        tracing::warn!(
+            error = %err,
+            %ticket_id,
+            "could not remove staged ticket attachments after merge"
+        );
+    }
 
     let short_sha = merge.head_sha.get(..7).unwrap_or(&merge.head_sha);
     let comment_body = format!(

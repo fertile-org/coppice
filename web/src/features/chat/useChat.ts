@@ -6,7 +6,6 @@ import {
   chatSessionSchema,
   createKnowledgeFromChatResponseSchema,
   createTicketFromChatResponseSchema,
-  cutoffSessionResponseSchema,
   draftTicketFromChatResponseSchema,
   postChatMessageResponseSchema,
   type ChatMessage,
@@ -14,7 +13,6 @@ import {
   type ChatSessionStatus,
   type CreateKnowledgeFromChatResponse,
   type CreateTicketFromChatResponse,
-  type CutoffSessionResponse,
   type DraftTicketFromChatResponse,
   type PostChatMessageInput,
 } from '../../lib/schemas/chat';
@@ -166,15 +164,6 @@ async function createKnowledgeFromChat(
   return createKnowledgeFromChatResponseSchema.parse(await res.json());
 }
 
-async function cutoffSession(sessionId: string): Promise<CutoffSessionResponse> {
-  const res = await apiFetch(`/api/chat/sessions/${sessionId}/cutoff`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: '{}',
-  });
-  return cutoffSessionResponseSchema.parse(await res.json());
-}
-
 export function useChatSessions(boardId?: string | null) {
   return useQuery({
     queryKey: [...CHAT_SESSIONS_QUERY_KEY, boardId ?? null],
@@ -219,10 +208,13 @@ export function useCreateChatSession() {
 export function usePostChatMessage(sessionId: string) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (input: PostChatMessageInput) => postMessage(sessionId, input),
-    onSuccess: () => {
+    mutationFn: (input: PostChatMessageInput & { sessionId?: string }) => {
+      const { sessionId: override, ...message } = input;
+      return postMessage(override ?? sessionId, message);
+    },
+    onSuccess: (_result, input) => {
       void queryClient.invalidateQueries({
-        queryKey: chatMessagesQueryKey(sessionId),
+        queryKey: chatMessagesQueryKey(input.sessionId ?? sessionId),
       });
       void queryClient.invalidateQueries({ queryKey: CHAT_SESSIONS_QUERY_KEY });
     },
@@ -284,18 +276,3 @@ export function useCreateKnowledgeFromChat(sessionId: string) {
   });
 }
 
-export function useCutoffChatSession(sessionId: string) {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: () => cutoffSession(sessionId),
-    onSuccess: (result) => {
-      void queryClient.invalidateQueries({
-        queryKey: chatMessagesQueryKey(sessionId),
-      });
-      void queryClient.invalidateQueries({
-        queryKey: chatMessagesQueryKey(result.child.id),
-      });
-      void queryClient.invalidateQueries({ queryKey: CHAT_SESSIONS_QUERY_KEY });
-    },
-  });
-}

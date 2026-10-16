@@ -9,6 +9,7 @@ use super::{
 };
 use crate::mcp::grant::McpAccess;
 use crate::mcp::wiring::{claude_tool_pattern, McpServerSpec};
+use crate::services::ticket_attachments;
 use crate::sessions::opencode_events::{coppice_run_prompt, extract_result_from_text};
 use crate::sessions::run_registry::RunStreamHandle;
 use async_trait::async_trait;
@@ -120,6 +121,10 @@ impl AgentProvider for ClaudeCodeProvider {
         let worktree_arg = worktree.display().to_string();
         let planning = input.job_type == crate::domain::workflow::JOB_TYPE_PLAN_TICKET;
         let read_only_tools = input.read_only_tools || planning;
+        let staged = ticket_attachments::load_for_run(
+            input.artifacts_dir.as_deref(),
+            input.ticket_id.as_deref(),
+        );
         let mut args = contract.with_prompt(
             contract.argv(&coppice_connectors::LaunchSubst {
                 read_only: read_only_tools,
@@ -129,8 +134,9 @@ impl AgentProvider for ClaudeCodeProvider {
                 port: "",
                 version: Some(version.as_str()),
             }),
-            coppice_run_prompt(),
+            &ticket_attachments::launch_prompt(coppice_run_prompt(), &staged),
         );
+        args.extend(ticket_attachments::add_dir_args(&staged));
         push_tool_permission_args(&mut args, read_only_tools, input.mcp.is_some());
         if input.context_profile == crate::domain::context_profile::ContextProfile::Conversation {
             push_chat_hook_lock(&mut args);
@@ -573,6 +579,8 @@ mod tests {
         assert_eq!(servers.keys().cloned().collect::<Vec<_>>(), vec!["coppice"]);
         assert_eq!(servers["coppice"]["url"], "http://127.0.0.1:5000/mcp");
         assert!(!raw.contains("super-secret-run-token"));
+        assert!(flag_value(&args, "--allowedTools").ends_with(",mcp__coppice__*"));
+        assert!(!args.iter().any(|arg| arg == "open_repo"));
     }
 
     #[test]

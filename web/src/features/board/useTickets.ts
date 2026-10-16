@@ -63,6 +63,13 @@ export interface Ticket {
   latestPlanRunStatus?: string | null;
   approvedPlan?: ApprovedPlan | null;
   archivedAt?: string | null;
+  attachmentIds?: string[];
+  attachments?: {
+    id: string;
+    filename: string;
+    contentType: string;
+    sizeBytes: number;
+  }[];
   humanReview?: HumanReview | null;
   reviewerBrief?: ReviewerBrief | null;
 }

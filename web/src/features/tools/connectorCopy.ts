@@ -39,7 +39,7 @@ export function signInUncheckedHint(
     : null;
 }
 
-type ChatReadOnlyStatus = 'passed' | 'untested' | 'failed' | 'unavailable';
+type ChatReadOnlyStatus = 'passed' | 'untested' | 'unavailable';
 
 /** Per-CLI chat status. Unknown ids fail closed as unavailable. */
 const CHAT_READ_ONLY: Record<string, { name: string; status: ChatReadOnlyStatus }> = {
@@ -58,20 +58,14 @@ function chatConnector(
   return CHAT_READ_ONLY[connectorId] ?? { name: connectorId, status: 'unavailable' };
 }
 
-/** Warning when chat is on but the CLI is untested or marked failed. */
+/** Warning when chat is on but the CLI has not been shown to stay read-only. */
 export function chatIsolationBanner(connectorId: string | null | undefined): string | null {
   const entry = chatConnector(connectorId);
-  if (!entry) return null;
-  if (entry.status === 'untested') {
-    return `Coppice hasn't confirmed that ${entry.name} stays read-only. The agent can still run commands on your computer.`;
-  }
-  if (entry.status === 'failed') {
-    return `${entry.name} can't be kept read-only. Chat runs in a temporary copy of your repo, but the agent can still run commands on your computer.`;
-  }
-  return null;
+  if (!entry || entry.status !== 'untested') return null;
+  return `Coppice hasn't confirmed that ${entry.name} stays read-only. The agent can still run commands on your computer.`;
 }
 
-/** Why Start chat is off. One sentence per CLI. */
+/** Why chat is off for this connector. One sentence per CLI. */
 export function chatUnavailableMessage(connectorId: string | null | undefined): string | null {
   const entry = chatConnector(connectorId);
   if (!entry || entry.status !== 'unavailable') return null;

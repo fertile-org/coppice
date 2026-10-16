@@ -18,21 +18,15 @@ export const chatSessionSchema = z.object({
   lastMessageRole: chatMessageRoleSchema.nullable().optional(),
   hasActiveRun: z.boolean().default(false),
   activeRunId: z.string().uuid().nullable().optional(),
+  title: z.string().nullable().optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
 });
 
 export const chatActionMetadataSchema = z.object({
-  action: z.enum([
-    'create_ticket',
-    'create_knowledge',
-    'cutoff',
-    'cutoff_seed',
-  ]),
+  action: z.enum(['create_ticket', 'create_knowledge']),
   ticketId: z.string().uuid().optional(),
   knowledgeItemId: z.string().uuid().optional(),
-  childSessionId: z.string().uuid().optional(),
-  parentSessionId: z.string().uuid().optional(),
 });
 
 export const chatAttachmentSchema = z.object({
@@ -94,12 +88,6 @@ export const createKnowledgeFromChatResponseSchema = z.object({
   message: chatMessageSchema,
 });
 
-export const cutoffSessionResponseSchema = z.object({
-  parent: chatSessionSchema,
-  child: chatSessionSchema,
-  seedMessage: chatMessageSchema,
-});
-
 export type ChatSession = z.infer<typeof chatSessionSchema>;
 export type ChatMessage = z.infer<typeof chatMessageSchema>;
 export type ChatAttachment = z.infer<typeof chatAttachmentSchema>;
@@ -115,7 +103,6 @@ export type DraftTicketFromChatResponse = z.infer<
 export type CreateKnowledgeFromChatResponse = z.infer<
   typeof createKnowledgeFromChatResponseSchema
 >;
-export type CutoffSessionResponse = z.infer<typeof cutoffSessionResponseSchema>;
 
 export interface PostChatMessageInput {
   body: string;

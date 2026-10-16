@@ -57,6 +57,56 @@ describe('TicketCommentsTab', () => {
     createComment.mockResolvedValue({ startedRuns: [] });
   });
 
+  it('adds a pending chip when a file is dropped on the comment box', () => {
+    vi.stubGlobal('URL', {
+      ...URL,
+      createObjectURL: () => 'blob:shot',
+      revokeObjectURL: () => {},
+    });
+    renderComments();
+    const form = screen.getByLabelText('Comment').closest('form');
+    expect(form).not.toBeNull();
+    const shot = new File(['png'], 'shot.png', { type: 'image/png' });
+    fireEvent.dragOver(form!, { dataTransfer: { types: ['Files'], files: [shot] } });
+    expect(screen.getByText('Drop to add to your comment')).toBeInTheDocument();
+    fireEvent.drop(form!, { dataTransfer: { types: ['Files'], files: [shot] } });
+    expect(screen.getByAltText('shot.png')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Attach files' })).toBeInTheDocument();
+  });
+
+  it('adds a pending chip when an image is pasted into the comment box', () => {
+    vi.stubGlobal('URL', {
+      ...URL,
+      createObjectURL: () => 'blob:pasted',
+      revokeObjectURL: () => {},
+    });
+    renderComments();
+    const form = screen.getByLabelText('Comment').closest('form');
+    const shot = new File(['png'], 'pasted.png', { type: 'image/png' });
+    fireEvent.paste(form!, {
+      clipboardData: {
+        items: [{ kind: 'file', type: 'image/png', getAsFile: () => shot }],
+      },
+    });
+    expect(screen.getByAltText('pasted.png')).toBeInTheDocument();
+  });
+
+  it('toasts the locked type and size sentences and skips the chip', () => {
+    renderComments();
+    const form = screen.getByLabelText('Comment').closest('form');
+    const html = new File(['<p>'], 'page.html', { type: 'text/html' });
+    const huge = new File([new Uint8Array(10 * 1024 * 1024 + 1)], 'diagram.png', {
+      type: 'image/png',
+    });
+    fireEvent.drop(form!, { dataTransfer: { types: ['Files'], files: [html, huge] } });
+    expect(screen.getByText("Coppice can't attach html files.")).toBeInTheDocument();
+    expect(
+      screen.getByText('diagram.png is too large. The limit is 10.0 MB.'),
+    ).toBeInTheDocument();
+    expect(screen.queryByAltText('diagram.png')).not.toBeInTheDocument();
+    expect(screen.queryByText('page.html')).not.toBeInTheDocument();
+  });
+
   it('suggests distinct mentions by full agent name when presets match', () => {
     renderComments();
 

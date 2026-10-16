@@ -70,7 +70,8 @@ const TICKET_COLUMNS_ALIASED: &str = r#"
                 t.pending_split_recommendation, t.clarification_round,
                 t.skip_planning, t.content_version,
                 t.approved_plan_comment_id, t.approved_plan_content_version,
-                t.created_by, t.created_by_id, t.created_at, t.updated_at, t.archived_at
+                t.created_by, t.created_by_id, t.created_at, t.updated_at, t.archived_at,
+                t.attachment_ids
 "#;
 
 pub struct TicketWithDisplay {
@@ -236,7 +237,7 @@ impl<'a> TicketService<'a> {
                 pending_split_recommendation, clarification_round,
                 skip_planning, content_version,
                 approved_plan_comment_id, approved_plan_content_version,
-                created_by, created_by_id, created_at, updated_at, archived_at
+                created_by, created_by_id, created_at, updated_at, archived_at, attachment_ids
             "#,
         )
         .bind(id)
@@ -282,7 +283,7 @@ impl<'a> TicketService<'a> {
                 pending_split_recommendation, clarification_round,
                 skip_planning, content_version,
                 approved_plan_comment_id, approved_plan_content_version,
-                created_by, created_by_id, created_at, updated_at, archived_at
+                created_by, created_by_id, created_at, updated_at, archived_at, attachment_ids
             "#,
         )
         .bind(id)
@@ -322,7 +323,7 @@ impl<'a> TicketService<'a> {
                 pending_split_recommendation, clarification_round,
                 skip_planning, content_version,
                 approved_plan_comment_id, approved_plan_content_version,
-                created_by, created_by_id, created_at, updated_at, archived_at
+                created_by, created_by_id, created_at, updated_at, archived_at, attachment_ids
             "#,
         )
         .bind(ticket_id)
@@ -347,7 +348,7 @@ impl<'a> TicketService<'a> {
                 pending_split_recommendation, clarification_round,
                 skip_planning, content_version,
                 approved_plan_comment_id, approved_plan_content_version,
-                created_by, created_by_id, created_at, updated_at, archived_at
+                created_by, created_by_id, created_at, updated_at, archived_at, attachment_ids
             FROM tickets
             WHERE id = $1
             "#,
@@ -423,7 +424,7 @@ impl<'a> TicketService<'a> {
                 pending_split_recommendation, clarification_round,
                 skip_planning, content_version,
                 approved_plan_comment_id, approved_plan_content_version,
-                created_by, created_by_id, created_at, updated_at, archived_at
+                created_by, created_by_id, created_at, updated_at, archived_at, attachment_ids
             "#,
         )
         .bind(ticket_id)
@@ -439,6 +440,37 @@ impl<'a> TicketService<'a> {
         .await?
         .ok_or(TicketError::TicketNotFound)?;
 
+        self.enrich_row(&row).await
+    }
+
+    pub async fn set_attachment_ids(
+        &self,
+        ticket_id: Uuid,
+        attachment_ids: &[Uuid],
+    ) -> Result<TicketWithDisplay, TicketError> {
+        let current = self.get(ticket_id).await?;
+        Self::ensure_not_archived(&current.ticket)?;
+        let row = sqlx::query(
+            r#"
+            UPDATE tickets
+            SET attachment_ids = $2, updated_at = now()
+            WHERE id = $1
+            RETURNING
+                id, board_id, repo_id, title, description,
+                status, substatus, substatus_metadata, priority,
+                assignee_agent_id, owner_user_id, branch_name,
+                pending_assign_recommendation, parent_ticket_id,
+                pending_split_recommendation, clarification_round,
+                skip_planning, content_version,
+                approved_plan_comment_id, approved_plan_content_version,
+                created_by, created_by_id, created_at, updated_at, archived_at, attachment_ids
+            "#,
+        )
+        .bind(ticket_id)
+        .bind(attachment_ids)
+        .fetch_optional(self.pool)
+        .await?
+        .ok_or(TicketError::TicketNotFound)?;
         self.enrich_row(&row).await
     }
 
@@ -602,7 +634,7 @@ impl<'a> TicketService<'a> {
                 pending_split_recommendation, clarification_round,
                 skip_planning, content_version,
                 approved_plan_comment_id, approved_plan_content_version,
-                created_by, created_by_id, created_at, updated_at, archived_at
+                created_by, created_by_id, created_at, updated_at, archived_at, attachment_ids
             "#,
         )
         .bind(ticket_id)
@@ -697,7 +729,7 @@ impl<'a> TicketService<'a> {
                 pending_split_recommendation, clarification_round,
                 skip_planning, content_version,
                 approved_plan_comment_id, approved_plan_content_version,
-                created_by, created_by_id, created_at, updated_at, archived_at
+                created_by, created_by_id, created_at, updated_at, archived_at, attachment_ids
             "#,
         )
         .bind(ticket_id)
@@ -740,7 +772,7 @@ impl<'a> TicketService<'a> {
                 pending_split_recommendation, clarification_round,
                 skip_planning, content_version,
                 approved_plan_comment_id, approved_plan_content_version,
-                created_by, created_by_id, created_at, updated_at, archived_at
+                created_by, created_by_id, created_at, updated_at, archived_at, attachment_ids
             "#,
         )
         .bind(ticket_id)
@@ -768,7 +800,7 @@ impl<'a> TicketService<'a> {
                 pending_split_recommendation, clarification_round,
                 skip_planning, content_version,
                 approved_plan_comment_id, approved_plan_content_version,
-                created_by, created_by_id, created_at, updated_at, archived_at
+                created_by, created_by_id, created_at, updated_at, archived_at, attachment_ids
             "#,
         )
         .bind(ticket_id)
@@ -795,7 +827,7 @@ impl<'a> TicketService<'a> {
                 pending_split_recommendation, clarification_round,
                 skip_planning, content_version,
                 approved_plan_comment_id, approved_plan_content_version,
-                created_by, created_by_id, created_at, updated_at, archived_at
+                created_by, created_by_id, created_at, updated_at, archived_at, attachment_ids
             FROM tickets
             WHERE parent_ticket_id = $1
             ORDER BY created_at ASC
@@ -833,7 +865,7 @@ impl<'a> TicketService<'a> {
                 pending_split_recommendation, clarification_round,
                 skip_planning, content_version,
                 approved_plan_comment_id, approved_plan_content_version,
-                created_by, created_by_id, created_at, updated_at, archived_at
+                created_by, created_by_id, created_at, updated_at, archived_at, attachment_ids
             "#,
         )
         .bind(ticket_id)
@@ -867,7 +899,7 @@ impl<'a> TicketService<'a> {
                 pending_split_recommendation, clarification_round,
                 skip_planning, content_version,
                 approved_plan_comment_id, approved_plan_content_version,
-                created_by, created_by_id, created_at, updated_at, archived_at
+                created_by, created_by_id, created_at, updated_at, archived_at, attachment_ids
             "#,
         )
         .bind(ticket_id)
@@ -897,7 +929,7 @@ impl<'a> TicketService<'a> {
                 pending_split_recommendation, clarification_round,
                 skip_planning, content_version,
                 approved_plan_comment_id, approved_plan_content_version,
-                created_by, created_by_id, created_at, updated_at, archived_at
+                created_by, created_by_id, created_at, updated_at, archived_at, attachment_ids
             "#,
         )
         .bind(ticket_id)
@@ -1137,5 +1169,87 @@ fn row_to_ticket(row: &sqlx::postgres::PgRow) -> Ticket {
         created_at: row.get("created_at"),
         updated_at: row.get("updated_at"),
         archived_at: row.get("archived_at"),
+        attachment_ids: row.get("attachment_ids"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::services::comment_service::CommentService;
+
+    #[tokio::test]
+    async fn description_attachment_ids_round_trip_and_are_readable() {
+        let pool = crate::db::shared_test_pool().await.expect("pool");
+        let user_id = Uuid::new_v4();
+        sqlx::query(
+            "INSERT INTO users (id, email, password_hash, role) VALUES ($1, $2, 'x', 'member')",
+        )
+        .bind(user_id)
+        .bind(format!("attach-{user_id}@example.com"))
+        .execute(&pool)
+        .await
+        .expect("user");
+
+        let board_id = Uuid::new_v4();
+        sqlx::query("INSERT INTO boards (id, name, slug) VALUES ($1, $2, $3)")
+            .bind(board_id)
+            .bind("attach board")
+            .bind(format!("attach-{board_id}"))
+            .execute(&pool)
+            .await
+            .expect("board");
+
+        let tickets = TicketService::new(&pool);
+        let created = tickets
+            .create(
+                board_id,
+                "Shot",
+                "see file",
+                None,
+                None,
+                "ada",
+                user_id,
+            )
+            .await
+            .expect("ticket");
+        assert!(created.ticket.attachment_ids.is_empty());
+
+        let attachment_id = Uuid::new_v4();
+        CommentService::new(&pool)
+            .create_attachment(
+                attachment_id,
+                "shot.png",
+                "image/png",
+                4,
+                "unused",
+                user_id,
+            )
+            .await
+            .expect("attachment");
+
+        let other = Uuid::new_v4();
+        sqlx::query(
+            "INSERT INTO users (id, email, password_hash, role) VALUES ($1, $2, 'x', 'member')",
+        )
+        .bind(other)
+        .bind(format!("other-{other}@example.com"))
+        .execute(&pool)
+        .await
+        .expect("other user");
+
+        let updated = tickets
+            .set_attachment_ids(created.ticket.id, &[attachment_id])
+            .await
+            .expect("set");
+        assert_eq!(updated.ticket.attachment_ids, vec![attachment_id]);
+
+        let loaded = tickets.get(created.ticket.id).await.expect("get");
+        assert_eq!(loaded.ticket.attachment_ids, vec![attachment_id]);
+
+        assert!(CommentService::new(&pool)
+            .user_can_access_attachment(attachment_id, other)
+            .await
+            .expect("access"));
     }
 }

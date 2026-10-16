@@ -7,7 +7,6 @@ import {
   chatSessionSchema,
   createKnowledgeFromChatResponseSchema,
   createTicketFromChatResponseSchema,
-  cutoffSessionResponseSchema,
   draftTicketFromChatResponseSchema,
   parseChatActionMetadata,
   postChatMessageResponseSchema,
@@ -186,26 +185,5 @@ describe('chat schemas', () => {
         },
       }).knowledge.sourceType,
     ).toBe('chat_session');
-
-    const cutoff = cutoffSessionResponseSchema.parse({
-      parent: { ...session, status: 'cutoff' },
-      child: {
-        ...session,
-        id: '00000000-0000-4000-8000-000000000070',
-        parentSessionId: session.id,
-      },
-      seedMessage: {
-        ...message,
-        sessionId: '00000000-0000-4000-8000-000000000070',
-        role: 'system',
-        body: 'Summary',
-        actionMetadata: {
-          action: 'cutoff_seed',
-          parentSessionId: session.id,
-        },
-      },
-    });
-    expect(cutoff.parent.status).toBe('cutoff');
-    expect(cutoff.child.parentSessionId).toBe(session.id);
   });
 });

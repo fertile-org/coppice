@@ -52,7 +52,7 @@ npm run check:links
 
 Vercel should use `website/` as the project root. `website/vercel.json` turns on clean URLs so `/docs` serves `docs.html`.
 
-Docs search is a box in the docs header. The `astro-pagefind` integration builds the Pagefind index from the static output at the end of `npm run build` (the same command Vercel runs). Only the docs article is indexed: `data-pagefind-body` is on that article, and pages without it — the homepage, download page, and 404 — stay out of the index. The site header, nav, and footer are marked `data-pagefind-ignore`.
+Docs search is a button in the docs header. It opens a dialog that searches the Pagefind index. The `astro-pagefind` integration builds that index from the static output at the end of `npm run build` (the same command Vercel runs). Only the docs article is indexed: `data-pagefind-body` is on that article, and pages without it — the homepage, download page, and 404 — stay out of the index. The site header, nav, and footer are marked `data-pagefind-ignore`.
 
 GitHub Pages is an optional manual deploy, still at `/coppice`:
 

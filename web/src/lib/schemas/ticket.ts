@@ -22,6 +22,7 @@ export type TicketPriorityValue = z.infer<typeof ticketPrioritySchema>;
 export const updateTicketSchema = z.object({
   title: z.string().min(1, 'Title is required').optional(),
   description: z.string().optional(),
+  attachmentIds: z.array(z.string().uuid()).optional(),
   repoId: z.string().uuid().optional().nullable(),
   priority: ticketPrioritySchema.optional().nullable(),
   branchName: z.string().optional().nullable(),
@@ -126,6 +127,17 @@ export const ticketSchema = z.object({
   latestPlanRunStatus: z.string().nullable().optional(),
   hasActiveRun: z.boolean().optional(),
   archivedAt: z.string().nullable().optional(),
+  attachmentIds: z.array(z.string().uuid()).optional(),
+  attachments: z
+    .array(
+      z.object({
+        id: z.string().uuid(),
+        filename: z.string(),
+        contentType: z.string(),
+        sizeBytes: z.number(),
+      }),
+    )
+    .optional(),
   humanReview: z
     .object({
       headSha: z.string(),

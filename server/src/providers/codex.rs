@@ -9,6 +9,7 @@ use super::{
 };
 use crate::mcp::grant::McpAccess;
 use crate::mcp::wiring::McpServerSpec;
+use crate::services::ticket_attachments;
 use crate::sessions::opencode_events::{coppice_run_prompt, extract_result_from_text};
 use crate::sessions::run_registry::RunStreamHandle;
 use async_trait::async_trait;
@@ -108,7 +109,11 @@ impl AgentProvider for CodexProvider {
         // MCP allowlist are applied before `resume` so they bind to `exec`.
         let chat =
             input.context_profile == crate::domain::context_profile::ContextProfile::Conversation;
-        let args = codex_launch_args(
+        let staged = ticket_attachments::load_for_run(
+            input.artifacts_dir.as_deref(),
+            input.ticket_id.as_deref(),
+        );
+        let mut args = codex_launch_args(
             contract,
             CodexLaunch {
                 version: &version,
@@ -121,6 +126,8 @@ impl AgentProvider for CodexProvider {
                 resume: input.resume_session_id.as_deref(),
             },
         );
+        args.extend(ticket_attachments::add_dir_args(&staged));
+        args.extend(ticket_attachments::image_input_args(&staged));
         let mut env = Vec::new();
         if let Some(access) = &input.mcp {
             env.extend(access.env().map(|(k, v)| (k.to_string(), v)));
@@ -165,7 +172,10 @@ impl AgentProvider for CodexProvider {
 
         let exit = match run_cli_with_stdin(
             invocation,
-            Some(coppice_run_prompt().to_string()),
+            Some(ticket_attachments::launch_prompt(
+                coppice_run_prompt(),
+                &staged,
+            )),
             &mut handler,
             io,
         )
@@ -496,6 +506,7 @@ mod tests {
             effective_mcp_servers(&user, &project, &args),
             vec!["coppice".to_string()]
         );
+        assert!(!args.iter().any(|arg| arg.contains("open_repo")));
     }
 
     #[test]
