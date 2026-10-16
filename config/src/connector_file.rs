@@ -67,9 +67,11 @@ pub fn set_connector_enabled(
 
 /// Replace `path` with `contents`. A crash leaves the previous file intact.
 ///
-/// A document that holds a secret (a key such as `master_key` or `session_secret`,
-/// or a URL with userinfo) is written `0600`. Anything else keeps the mode the
-/// file already has, or `0644` when the file is new.
+/// The temporary file is created mode `0600` before any bytes are written, so a
+/// secret is never stored in a world-readable file. After the write, a document
+/// that holds a secret (a key such as `master_key` or `session_secret`, or a URL
+/// with userinfo) stays `0600`. Anything else is restored to the mode the
+/// destination already has, or `0644` when the file is new.
 pub fn write_toml_atomic(path: &Path, contents: &str) -> io::Result<()> {
     if let Some(parent) = path.parent() {
         if !parent.as_os_str().is_empty() {
@@ -78,7 +80,7 @@ pub fn write_toml_atomic(path: &Path, contents: &str) -> io::Result<()> {
     }
     let tmp = path.with_extension("toml.writing");
     {
-        let mut file = std::fs::File::create(&tmp)?;
+        let mut file = create_toml_temp(&tmp)?;
         file.write_all(contents.as_bytes())?;
         file.sync_all()?;
         #[cfg(unix)]
@@ -91,6 +93,26 @@ pub fn write_toml_atomic(path: &Path, contents: &str) -> io::Result<()> {
     }
     std::fs::rename(&tmp, path)?;
     Ok(())
+}
+
+/// Create `path` so the first byte is written into a file that is already private.
+/// `mode` applies only when the file is created; a leftover temp is tightened
+/// with `fchmod` before this returns.
+fn create_toml_temp(path: &Path) -> io::Result<std::fs::File> {
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let file = options.open(path)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        file.set_permissions(std::fs::Permissions::from_mode(0o600))?;
+    }
+    Ok(file)
 }
 
 #[cfg(unix)]
@@ -316,5 +338,33 @@ model_providers = ["cursor"]
         std::fs::set_permissions(&session, std::fs::Permissions::from_mode(0o644)).unwrap();
         write_toml_atomic(&session, "[auth]\nsession_secret = \"s\"\n").unwrap();
         assert_eq!(mode(&session), 0o600);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn temp_file_is_private_before_any_bytes_are_written() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        let tmp = dir.path().join("config.toml.writing");
+        let mut file = create_toml_temp(&tmp).unwrap();
+        let mode_before_write = std::fs::metadata(&tmp).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode_before_write, 0o600);
+        file.write_all(b"master_key = \"sekrit\"\n").unwrap();
+        let mode_after_write = std::fs::metadata(&tmp).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode_after_write, 0o600);
+        drop(file);
+
+        let leftover = dir.path().join("config.toml.writing");
+        std::fs::write(&leftover, b"stale").unwrap();
+        std::fs::set_permissions(&leftover, std::fs::Permissions::from_mode(0o644)).unwrap();
+        let mut reused = create_toml_temp(&leftover).unwrap();
+        let tightened = std::fs::metadata(&leftover).unwrap().permissions().mode() & 0o777;
+        assert_eq!(tightened, 0o600);
+        reused.write_all(b"session_secret = \"s\"\n").unwrap();
+        assert_eq!(
+            std::fs::metadata(&leftover).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
     }
 }
