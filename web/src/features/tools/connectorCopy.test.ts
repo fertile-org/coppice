@@ -40,10 +40,10 @@ describe('connectorDefaultModelLabel', () => {
 describe('chatIsolationBanner', () => {
   it('warns for each CLI that has not been shown to stay read-only', () => {
     expect(chatIsolationBanner('claude-code')).toBe(
-      "Coppice hasn't confirmed that Claude Code stays read-only, so chat runs in a temporary copy of your repo. The agent can still run commands on your computer.",
+      "Coppice hasn't confirmed that Claude Code stays read-only. The agent can still run commands on your computer.",
     );
     expect(chatIsolationBanner('codex')).toBe(
-      "Coppice hasn't confirmed that Codex stays read-only, so chat runs in a temporary copy of your repo. The agent can still run commands on your computer.",
+      "Coppice hasn't confirmed that Codex stays read-only. The agent can still run commands on your computer.",
     );
   });
 

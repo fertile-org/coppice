@@ -63,7 +63,7 @@ export function chatIsolationBanner(connectorId: string | null | undefined): str
   const entry = chatConnector(connectorId);
   if (!entry) return null;
   if (entry.status === 'untested') {
-    return `Coppice hasn't confirmed that ${entry.name} stays read-only, so chat runs in a temporary copy of your repo. The agent can still run commands on your computer.`;
+    return `Coppice hasn't confirmed that ${entry.name} stays read-only. The agent can still run commands on your computer.`;
   }
   if (entry.status === 'failed') {
     return `${entry.name} can't be kept read-only. Chat runs in a temporary copy of your repo, but the agent can still run commands on your computer.`;

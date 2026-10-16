@@ -275,11 +275,11 @@ describe('ChatPage', () => {
   it.each([
     [
       'Backend Engineer',
-      "Coppice hasn't confirmed that Claude Code stays read-only, so chat runs in a temporary copy of your repo. The agent can still run commands on your computer.",
+      "Coppice hasn't confirmed that Claude Code stays read-only. The agent can still run commands on your computer.",
     ],
     [
       'Codex Agent',
-      "Coppice hasn't confirmed that Codex stays read-only, so chat runs in a temporary copy of your repo. The agent can still run commands on your computer.",
+      "Coppice hasn't confirmed that Codex stays read-only. The agent can still run commands on your computer.",
     ],
   ])('warns and still starts chat for %s', async (agentName, message) => {
     mocks.createSession.mockResolvedValue({
@@ -338,11 +338,11 @@ describe('ChatPage', () => {
   it.each([
     [
       '00000000-0000-4000-8000-000000000010',
-      "Coppice hasn't confirmed that Claude Code stays read-only, so chat runs in a temporary copy of your repo. The agent can still run commands on your computer.",
+      "Coppice hasn't confirmed that Claude Code stays read-only. The agent can still run commands on your computer.",
     ],
     [
       '00000000-0000-4000-8000-000000000013',
-      "Coppice hasn't confirmed that Codex stays read-only, so chat runs in a temporary copy of your repo. The agent can still run commands on your computer.",
+      "Coppice hasn't confirmed that Codex stays read-only. The agent can still run commands on your computer.",
     ],
   ])('shows the isolation banner and the composer for %s', (agentId, message) => {
     mocks.sessions = [
