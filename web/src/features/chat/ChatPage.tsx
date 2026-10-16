@@ -587,7 +587,7 @@ export function ChatPage() {
         >
           <div className="min-h-0 flex-1 space-y-1 overflow-y-auto">
             {isLoading ? (
-              <p className="font-body text-sm text-text-muted">Loading sessions…</p>
+              <p className="font-body text-sm text-text-muted">Loading chats…</p>
             ) : null}
             {enabledAgents.map((agent) => (
               <AgentRow
