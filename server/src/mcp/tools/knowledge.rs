@@ -23,9 +23,9 @@ fn parse_limit(args: &Value) -> Result<usize, ToolError> {
 }
 
 /// Searches approved knowledge visible to the run's agent.
-/// A workspace chat (no board) searches every board. Other runs stay on their
-/// board, or return nothing when they have none. Retrieval already restricts
-/// to approved, live, in-scope entries.
+/// Conversation chat searches every board. Other runs stay on their board, or
+/// return nothing when they have none. Retrieval already restricts to approved,
+/// live, in-scope entries, including agent-scoped notes for this agent only.
 pub async fn call_knowledge_search(ctx: &ToolCtx<'_>, args: Value) -> Result<Value, ToolError> {
     let query = args
         .get("query")

@@ -105,8 +105,8 @@ async fn resolve_ticket(ctx: &ToolCtx<'_>, args: &Value) -> Result<TicketWithDis
             "ticket is not part of this compaction batch".into(),
         ));
     }
-    // A board-less scope may only read its own ticket. A workspace chat (no
-    // board) may read any ticket. Compaction is bounded by its batch above.
+    // A board-less scope may only read its own ticket. Conversation chat may
+    // read any ticket. Compaction is bounded by its batch above.
     if ctx.scope.board_id.is_none()
         && !ctx.scope.workspace_chat()
         && ctx.scope.profile != ContextProfile::KnowledgeCompaction
@@ -122,10 +122,11 @@ async fn resolve_ticket(ctx: &ToolCtx<'_>, args: &Value) -> Result<TicketWithDis
             TicketError::TicketNotFound => ToolError::NotFound("ticket not found".into()),
             other => ToolError::Internal(other.into()),
         })?;
-    if ctx
-        .scope
-        .board_id
-        .is_some_and(|board_id| board_id != ticket.ticket.board_id)
+    if !ctx.scope.workspace_chat()
+        && ctx
+            .scope
+            .board_id
+            .is_some_and(|board_id| board_id != ticket.ticket.board_id)
     {
         return Err(ToolError::NotFound("ticket not on this board".into()));
     }
@@ -276,8 +277,14 @@ pub async fn call_ticket_search(ctx: &ToolCtx<'_>, args: Value) -> Result<Value,
         return Ok(json!({ "tickets": [] }));
     }
 
+    // The session board picks the focus repo. Conversation search ignores it.
+    let search_board = if workspace {
+        None
+    } else {
+        ctx.scope.board_id
+    };
     let tickets = TicketService::new(ctx.pool)
-        .search(ctx.scope.board_id, query, status, limit as i64)
+        .search(search_board, query, status, limit as i64)
         .await
         .map_err(|e| ToolError::Internal(e.into()))?;
     let agents = list_agents(ctx).await?;

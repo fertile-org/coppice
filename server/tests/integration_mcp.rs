@@ -1110,7 +1110,8 @@ async fn boardless_chat_searches_tickets_across_boards_and_opens_them() {
     let runs = call_tool_json(&url, &token, "ticket_runs", json!({"ticketId": elsewhere})).await;
     assert!(runs["runs"].is_array());
 
-    // A chat attached to one board stays on that board.
+    // A conversation token that still carries the session board searches every board.
+    // The board only chooses the focus repository.
     let scoped = mint_scope(
         &fx,
         NewRunToolScope {
@@ -1124,13 +1125,21 @@ async fn boardless_chat_searches_tickets_across_boards_and_opens_them() {
     let scoped_search =
         call_tool_json(&url, &scoped, "ticket_search", json!({"query": "Lantern"})).await;
     let scoped_tickets = scoped_search["tickets"].as_array().unwrap();
-    assert_eq!(scoped_tickets.len(), 1, "{scoped_search}");
-    assert_eq!(scoped_tickets[0]["id"], home);
-    assert!(scoped_tickets[0].get("boardName").is_none(), "{scoped_search}");
-    let (is_error, text) =
-        call_tool(&url, &scoped, "ticket_get", json!({"ticketId": elsewhere})).await;
-    assert!(is_error);
-    assert_eq!(text, "ticket not on this board");
+    assert_eq!(scoped_tickets.len(), 2, "{scoped_search}");
+    let scoped_board = |id: &str| {
+        scoped_tickets
+            .iter()
+            .find(|t| t["id"] == id)
+            .unwrap_or_else(|| panic!("missing {id} in {scoped_search}"))["boardName"]
+            .as_str()
+            .unwrap()
+            .to_string()
+    };
+    assert_eq!(scoped_board(&home), "Test Board");
+    assert_eq!(scoped_board(&elsewhere), "Other Board");
+    let opened_scoped =
+        call_tool_json(&url, &scoped, "ticket_get", json!({"ticketId": elsewhere})).await;
+    assert_eq!(opened_scoped["boardName"], "Other Board");
 
     // Board-less tokens that are not a workspace chat stay closed.
     let human = mint_scope(
@@ -1210,7 +1219,8 @@ async fn boardless_chat_exposes_no_write_tools() {
     )
     .await;
     let scoped_names = tool_names(&url, &scoped).await;
-    assert!(!scoped_names.iter().any(|n| n == "board_list"), "{scoped_names:?}");
+    assert!(scoped_names.iter().any(|n| n == "board_list"), "{scoped_names:?}");
+    assert!(!scoped_names.iter().any(|n| n == "comment_post"), "{scoped_names:?}");
 }
 
 #[tokio::test]
@@ -1518,6 +1528,7 @@ async fn boardless_chat_searches_knowledge_across_boards() {
     assert_eq!(board_of("Axolotl for this agent"), json!("Other Board"));
     assert!(board_of("Axolotl workspace note").is_null());
 
+    // The same search when the conversation token still has the session board.
     let scoped = mint_scope(
         &fx,
         NewRunToolScope {
@@ -1529,24 +1540,34 @@ async fn boardless_chat_searches_knowledge_across_boards() {
     .await;
     let scoped_out =
         call_tool_json(&url, &scoped, "knowledge_search", json!({"query": "axolotl"})).await;
-    let mut scoped_titles: Vec<&str> = scoped_out["items"]
-        .as_array()
-        .unwrap()
+    let scoped_items = scoped_out["items"].as_array().unwrap();
+    let mut scoped_titles: Vec<&str> = scoped_items
         .iter()
         .map(|i| i["title"].as_str().unwrap())
         .collect();
     scoped_titles.sort();
-    // Workspace notes stay visible on a board; other boards do not.
     assert_eq!(
         scoped_titles,
-        vec!["Axolotl on the home board", "Axolotl workspace note"],
+        {
+            let mut expected = titles.clone();
+            expected.sort();
+            expected
+        },
         "{scoped_out}"
     );
-    assert!(scoped_out["items"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .all(|item| item.get("boardName").is_none()));
+    assert!(!scoped_titles.contains(&"Axolotl for another agent"));
+    assert!(!scoped_titles.contains(&"Axolotl still pending"));
+    let scoped_board = |title: &str| {
+        scoped_items
+            .iter()
+            .find(|i| i["title"] == title)
+            .unwrap()
+            .get("boardName")
+            .cloned()
+            .unwrap_or(Value::Null)
+    };
+    assert_eq!(scoped_board("Axolotl on the other board"), json!("Other Board"));
+    assert!(scoped_board("Axolotl workspace note").is_null());
 
     let compaction = mint_scope(
         &fx,

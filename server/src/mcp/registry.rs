@@ -508,7 +508,7 @@ mod tests {
             .collect();
         let mut conversation = chat.clone();
         conversation.insert(conversation.len() - 1, "open_repo");
-        // A chat with no board also lists boards. The fixture scope has no board.
+        // Every conversation lists boards. The fixture scope has no board.
         conversation.push("board_list");
         let compaction = vec![
             "ticket_get",
@@ -567,15 +567,33 @@ mod tests {
             .all(|t| t.def.read_only || t.def.name == "result_submit"));
         assert!(!tools.iter().any(|t| t.def.name == "comment_post"));
 
+        // A board on the conversation token only marks the focus repo.
         let mut attached = scope(ContextProfile::Conversation);
         attached.board_id = Some(Uuid::new_v4());
         let attached_tools = registry.tools_for(&attached).await;
-        assert!(!attached_tools.iter().any(|t| t.def.name == "board_list"));
+        assert!(attached_tools.iter().any(|t| t.def.name == "board_list"));
         let attached_search = attached_tools
             .iter()
             .find(|t| t.def.name == "ticket_search")
             .unwrap();
-        assert!(attached_search.def.description.contains("current board"));
+        assert!(
+            attached_search.def.description.contains("every board"),
+            "{}",
+            attached_search.def.description
+        );
+        assert!(attached_tools
+            .iter()
+            .all(|t| t.def.read_only || t.def.name == "result_submit"));
+
+        let mut human = scope(ContextProfile::HumanChat);
+        human.board_id = None;
+        let human_tools = registry.tools_for(&human).await;
+        assert!(!human_tools.iter().any(|t| t.def.name == "board_list"));
+        let human_search = human_tools
+            .iter()
+            .find(|t| t.def.name == "ticket_search")
+            .unwrap();
+        assert!(human_search.def.description.contains("current board"));
     }
 
     #[tokio::test]
