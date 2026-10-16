@@ -27,10 +27,6 @@ vi.mock('../features/tickets/useOpenTicket', () => ({
   useOpenTicket: () => vi.fn(),
 }));
 
-vi.mock('./ImportNoticeBanner', () => ({
-  ImportNoticeBanner: () => null,
-}));
-
 function renderShell(initialEntries: string[] = ['/']) {
   return render(
     <ThemeProvider>

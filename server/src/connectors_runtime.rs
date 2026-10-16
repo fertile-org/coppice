@@ -3,7 +3,7 @@
 
 use std::collections::HashSet;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Arc, RwLock};
 
 use coppice_config::connector_file::{write_toml_atomic, ConnectorFilePatch};
 use coppice_config::settings_file::{self, ConfigDocument, ConfigTextError, SaveError};
@@ -81,7 +81,6 @@ struct Inner {
 pub struct ConnectorsRuntime {
     opencode_runs: Arc<OpenCodeRunServers>,
     inner: RwLock<Inner>,
-    import_notice: Mutex<Option<String>>,
 }
 
 impl ConnectorsRuntime {
@@ -102,22 +101,7 @@ impl ConnectorsRuntime {
                 path,
                 ready: HashSet::new(),
             }),
-            import_notice: Mutex::new(None),
         }
-    }
-
-    pub fn set_import_notice(&self, notice: impl Into<String>) {
-        *self
-            .import_notice
-            .lock()
-            .unwrap_or_else(|err| err.into_inner()) = Some(notice.into());
-    }
-
-    pub fn import_notice(&self) -> Option<String> {
-        self.import_notice
-            .lock()
-            .unwrap_or_else(|err| err.into_inner())
-            .clone()
     }
 
     /// Rebuild from the latest free sign-in results. Explicit `enabled = false`

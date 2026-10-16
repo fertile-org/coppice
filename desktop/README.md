@@ -54,7 +54,7 @@ Tagged releases are built by `.github/workflows/release.yml` — see
 
 ## Replace keys
 
-In the desktop app, **Tools → Backup → Replace keys** writes new `session_secret` and `master_key` files, a new admin password, and a new Postgres password. Everyone is signed out. Tokens this install can still read are re-encrypted. Tokens already marked for re-entry stay that way until they are pasted again. A server install uses `coppice-server replace-keys` with Coppice stopped and PostgreSQL still running. The command prints where the new values were written.
+In the desktop app, **Tools → Backup → Replace keys** writes new `session_secret` and `master_key` files, a new admin password, and a new Postgres password. Everyone is signed out. Tokens this install can still read are re-encrypted. Tokens already marked for re-entry stay that way until they are pasted again.
 
 The new Postgres password is written to a pending file, then applied with `ALTER ROLE`, then that file becomes the current password. If Coppice stops in either gap, the next launch tries the current password and then the pending one and finishes the swap. The same pending-file recovery applies to the encryption key, session secret, and admin password.
 

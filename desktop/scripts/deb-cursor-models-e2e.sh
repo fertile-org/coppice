@@ -755,10 +755,9 @@ if [[ "${token_code}" != "200" ]]; then
 fi
 plain="$(decrypt_forge_token)"
 if [[ "${plain}" != "coppice-token-still-decrypts" ]]; then
-  echo "forge token did not decrypt before import" >&2
+  echo "forge token did not decrypt" >&2
   exit 1
 fi
-master_before="$(cat "${hung_home}/.config/Coppice/secrets/master_key")"
 
 sleep 3
 touch "${hung_home}/.coppice-agent-empty"
@@ -771,92 +770,6 @@ if [[ "${empty_code}" != "502" ]]; then
 fi
 if ! grep -E 'returned no models|listed no models' "${empty_body}" >/dev/null; then
   echo "empty model list was not reported as a failure: $(cat "${empty_body}")" >&2
-  exit 1
-fi
-
-echo "legacy import"
-mkdir -p "${hung_home}/.config/coppice"
-cat >"${hung_home}/.config/coppice/config.toml" <<'EOF'
-[database]
-url = "postgres://evil/db"
-
-[auth]
-session_secret = "stolen-session"
-
-[secrets]
-master_key = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-
-[server]
-port = 1
-
-[storage]
-artifacts_dir = "/tmp/evil-artifacts"
-
-[web]
-port = 9
-
-[git]
-author_name = "Imported Ada"
-author_email = "ada@import.example"
-push_enabled = true
-
-[agent]
-worker_count = 7
-default_connector = "mock"
-worktrees_path = "/evil/worktrees"
-
-[agent.connectors.cursor]
-enabled = false
-command = "agent"
-run_timeout_secs = 42
-
-[knowledge.retrieval]
-top_k = 4
-EOF
-chown -R hung:hung "${hung_home}/.config/coppice"
-relaunch
-
-notice_body=$(mktemp)
-notice_code=$(fetch "${notice_body}" "${base_url}/api/import-notice")
-python3 - "${notice_body}" "${notice_code}" <<'PY'
-import json, sys
-body, code = sys.argv[1], sys.argv[2]
-if code != "200":
-    sys.exit(f"import-notice HTTP {code}: {open(body).read()}")
-want = "Imported your git author, worker, knowledge and connector settings from `~/.config/coppice/config.toml`. Connectors stay as set in Connectors. The old file is now `config.toml.imported`."
-got = json.load(open(body)).get("message")
-if got != want:
-    sys.exit("import notice:\n" + repr(got))
-print("import notice ok")
-PY
-if [[ -e "${hung_home}/.config/coppice/config.toml" ]]; then
-  echo "legacy config.toml was not renamed" >&2
-  exit 1
-fi
-if [[ ! -f "${hung_home}/.config/coppice/config.toml.imported" ]]; then
-  echo "missing config.toml.imported" >&2
-  exit 1
-fi
-imported="${hung_home}/.config/Coppice/config.toml"
-grep -F 'author_name = "Imported Ada"' "${imported}" >/dev/null
-grep -F 'author_email = "ada@import.example"' "${imported}" >/dev/null
-grep -F 'worker_count = 7' "${imported}" >/dev/null
-grep -F 'top_k = 4' "${imported}" >/dev/null
-grep -F 'command = "agent"' "${imported}" >/dev/null
-grep -F 'run_timeout_secs = 42' "${imported}" >/dev/null
-grep -F "worktrees_path = \"${hung_home}/.config/Coppice/worktrees\"" "${imported}" >/dev/null
-if grep -E 'master_key|stolen-session|postgres://evil|enabled|default_connector|push_enabled|/tmp/evil-artifacts|^\[database\]|^\[auth\]|^\[secrets\]|^\[server\]|^\[web\]' "${imported}"; then
-  echo "import copied a denied setting" >&2
-  exit 1
-fi
-if [[ "$(cat "${hung_home}/.config/Coppice/secrets/master_key")" != "${master_before}" ]]; then
-  echo "desktop master_key changed during import" >&2
-  exit 1
-fi
-poll_auto
-plain="$(decrypt_forge_token)"
-if [[ "${plain}" != "coppice-token-still-decrypts" ]]; then
-  echo "forge token did not decrypt after import" >&2
   exit 1
 fi
 

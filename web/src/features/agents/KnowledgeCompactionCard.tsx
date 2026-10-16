@@ -12,7 +12,7 @@ import {
 import type { Agent } from './useAgents';
 
 export const KNOWLEDGE_COMPACTION_ANCHOR = 'knowledge-compaction';
-const NO_READ_ONLY_REASON = 'Cannot run compaction (no read-only mode)';
+const NO_READ_ONLY_REASON = "Can't run compaction safely";
 
 function errorMessage(error: unknown): string {
   if (error instanceof ApiError) {
