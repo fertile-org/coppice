@@ -392,6 +392,10 @@ a:hover {
   line-height: 1.2;
 }
 
+.prose h2 {
+  margin-top: 2.5rem;
+}
+
 .block p,
 .prose p,
 .prose li {
@@ -579,7 +583,7 @@ a:hover {
 }
 
 .prose h3 {
-  margin: 1.6rem 0 0.4rem;
+  margin: 2rem 0 0.4rem;
   font-size: 1.15rem;
 }
 
