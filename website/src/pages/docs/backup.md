@@ -20,8 +20,6 @@ Importing replaces all data on that install with the backup's. Your board and wo
 
 Saved tokens aren't in the backup, so paste each one again afterward. Coppice marks each token it needs with "Paste this token again." Paste it, then save.
 
-The desktop app has everything it needs. A server install needs PostgreSQL's `pg_dump` to download a backup and `psql` to import one.
-
 ## Copy the folders by hand
 
 You can also quit Coppice and copy its data folder:
