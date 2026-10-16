@@ -138,7 +138,7 @@ function CreateTicketForm({
   const draftHint = draftError
     ? 'Could not load an agent draft; edit the fields below or confirm to use server defaults.'
     : draft?.source === 'fallback'
-      ? 'Using a deterministic fallback draft. Edit before confirming.'
+      ? "The agent couldn't draft this, so here's a basic draft from the chat. Edit it before you confirm."
       : 'Review the agent draft, edit if needed, then confirm.';
 
   return (
@@ -374,7 +374,7 @@ export function ChatSessionActions({
 
   async function handleCutoff() {
     const confirmed = window.confirm(
-      'Cutoff this session? A shorter child chat will open with a summary seed. This session stays readable.',
+      'Continue in a new chat? A shorter chat will open with a summary of this one. This chat stays readable.',
     );
     if (!confirmed) return;
     setError(null);
@@ -382,7 +382,7 @@ export function ChatSessionActions({
       const result = await cutoff.mutateAsync();
       navigate(`/chat/${result.child.id}`);
     } catch (err) {
-      setError(parseApiErrorMessage(err, 'Could not cutoff session.'));
+      setError(parseApiErrorMessage(err, "Couldn't start a new chat. Try again."));
     }
   }
 
@@ -421,7 +421,7 @@ export function ChatSessionActions({
           disabled={disabled || cutoff.isPending}
           onClick={() => void handleCutoff()}
         >
-          {cutoff.isPending ? 'Cutting off…' : 'Cutoff'}
+          {cutoff.isPending ? 'Starting a new chat…' : 'Continue in new chat'}
         </Button>
       </div>
       {error && (

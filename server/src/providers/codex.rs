@@ -29,6 +29,52 @@ fn codex_mcp_args(access: &McpAccess) -> Vec<String> {
     McpServerSpec::from_access(access).codex_args()
 }
 
+/// Chat skips `$CODEX_HOME/config.toml`. Auth still uses `CODEX_HOME`
+/// (`codex exec --help` on 0.162.1). Project `.codex/config.toml` loads only
+/// when that user config trusts the project, so it is skipped as well.
+/// `-c mcp_servers={}` does not clear the table on 0.162.1; Coppice is added
+/// afterwards with its own `-c` keys, which is the allowlist.
+fn push_chat_mcp_isolation(args: &mut Vec<String>) {
+    args.push("--ignore-user-config".to_string());
+}
+
+struct CodexLaunch<'a> {
+    version: &'a str,
+    worktree: &'a str,
+    read_only: bool,
+    plan: bool,
+    model: Option<&'a str>,
+    chat: bool,
+    mcp: Option<&'a McpAccess>,
+    resume: Option<&'a str>,
+}
+
+fn codex_launch_args(
+    contract: coppice_connectors::RunContract,
+    launch: CodexLaunch<'_>,
+) -> Vec<String> {
+    let mut args = contract.argv(&coppice_connectors::LaunchSubst {
+        read_only: launch.read_only,
+        plan: launch.plan,
+        worktree: launch.worktree,
+        hostname: "",
+        port: "",
+        version: Some(launch.version),
+    });
+    append_model_flag(&mut args, launch.model);
+    if launch.chat {
+        push_chat_mcp_isolation(&mut args);
+    }
+    if let Some(access) = launch.mcp {
+        args.extend(codex_mcp_args(access));
+    }
+    if let Some(sid) = launch.resume.filter(|sid| !sid.is_empty()) {
+        args.push("resume".to_string());
+        args.push(sid.to_string());
+    }
+    args
+}
+
 pub struct CodexProvider {
     config: CodexProviderConfig,
 }
@@ -58,41 +104,26 @@ impl AgentProvider for CodexProvider {
         })?;
         let worktree_arg = worktree.display().to_string();
         // The prompt stays on stdin. Pinned flags, including a version-gated
-        // `--no-daemon`, come from the descriptor.
-        let mut args = contract.argv(&coppice_connectors::LaunchSubst {
-            read_only: input.read_only_tools,
-            plan: input.job_type == crate::domain::workflow::JOB_TYPE_PLAN_TICKET,
-            worktree: &worktree_arg,
-            hostname: "",
-            port: "",
-            version: Some(version.as_str()),
-        });
-
-        append_model_flag(&mut args, input.model.as_deref());
-
-        // Resume: if we have a session_id, use the resume subcommand.
-        // Note: Codex session resume is documented as unreliable. This may not work
-        // reliably until the Codex CLI stabilizes this feature.
-        let resume = if let Some(sid) = &input.resume_session_id {
-            if !sid.is_empty() {
-                Some(sid.clone())
-            } else {
-                None
-            }
-        } else {
-            None
-        };
-
+        // `--no-daemon`, come from the descriptor. Isolation and the Coppice
+        // MCP allowlist are applied before `resume` so they bind to `exec`.
+        let chat =
+            input.context_profile == crate::domain::context_profile::ContextProfile::Conversation;
+        let args = codex_launch_args(
+            contract,
+            CodexLaunch {
+                version: &version,
+                worktree: &worktree_arg,
+                read_only: input.read_only_tools,
+                plan: input.job_type == crate::domain::workflow::JOB_TYPE_PLAN_TICKET,
+                model: input.model.as_deref(),
+                chat,
+                mcp: input.mcp.as_ref(),
+                resume: input.resume_session_id.as_deref(),
+            },
+        );
         let mut env = Vec::new();
-        // Before `resume`, so the overrides bind to `exec` and not to the subcommand.
         if let Some(access) = &input.mcp {
-            args.extend(codex_mcp_args(access));
             env.extend(access.env().map(|(k, v)| (k.to_string(), v)));
-        }
-
-        if let Some(sid) = &resume {
-            args.push("resume".to_string());
-            args.push(sid.clone());
         }
 
         // Auth is host-managed: the operator runs `codex login` wherever the server runs.
@@ -369,6 +400,102 @@ mod tests {
         let args = codex_mcp_args(&access);
         assert_eq!(args, McpServerSpec::from_access(&access).codex_args());
         assert!(!args.join(" ").contains("super-secret-run-token"));
+    }
+
+    fn access() -> crate::mcp::grant::McpAccess {
+        crate::mcp::grant::McpAccess {
+            url: "http://127.0.0.1:5000/mcp".into(),
+            token: "super-secret-run-token".into(),
+        }
+    }
+
+    fn launch(chat: bool, read_only: bool, mcp: bool) -> Vec<String> {
+        let contract = coppice_connectors::get(coppice_connectors::CODEX)
+            .expect("codex descriptor")
+            .run_contract;
+        let access = access();
+        codex_launch_args(
+            contract,
+            CodexLaunch {
+                version: "0.162.1",
+                worktree: "/tmp/chat",
+                read_only,
+                plan: false,
+                model: None,
+                chat,
+                mcp: if mcp { Some(&access) } else { None },
+                resume: None,
+            },
+        )
+    }
+
+    fn server_names(doc: &toml::Value) -> std::collections::BTreeSet<String> {
+        doc.get("mcp_servers")
+            .and_then(|value| value.as_table())
+            .map(|table| table.keys().cloned().collect())
+            .unwrap_or_default()
+    }
+
+    /// 0.162.1 merges `-c` into the loaded tables. `--ignore-user-config` loads
+    /// neither the user file nor a project file whose trust entry lived there.
+    /// An empty `mcp_servers={}` override does not remove servers.
+    fn effective_mcp_servers(user_toml: &str, project_toml: &str, args: &[String]) -> Vec<String> {
+        let mut names = std::collections::BTreeSet::new();
+        if !args.iter().any(|arg| arg == "--ignore-user-config") {
+            let user: toml::Value = toml::from_str(user_toml).expect("user config");
+            let project: toml::Value = toml::from_str(project_toml).expect("project config");
+            names.extend(server_names(&user));
+            names.extend(server_names(&project));
+        }
+        for pair in args.windows(2) {
+            if pair[0] != "-c" {
+                continue;
+            }
+            let Some(rest) = pair[1].strip_prefix("mcp_servers.") else {
+                continue;
+            };
+            let Some(name) = rest.split(['.', '=']).next() else {
+                continue;
+            };
+            if !name.is_empty() && !name.starts_with('{') {
+                names.insert(name.to_string());
+            }
+        }
+        names.into_iter().collect()
+    }
+
+    #[test]
+    fn chat_allowlists_coppice_and_drops_other_mcp_servers() {
+        let user = std::fs::read_to_string(fixtures_root().join("user-config-with-mcp.toml"))
+            .expect("user mcp fixture");
+        let project = std::fs::read_to_string(fixtures_root().join("project-config-with-mcp.toml"))
+            .expect("project mcp fixture");
+        let user_doc: toml::Value = toml::from_str(&user).expect("user toml");
+        let project_doc: toml::Value = toml::from_str(&project).expect("project toml");
+        assert!(server_names(&user_doc).contains("user_evil"));
+        assert!(server_names(&project_doc).contains("project_evil"));
+
+        let ticket = launch(false, false, true);
+        assert!(ticket.iter().any(|arg| arg == "--dangerously-bypass-approvals-and-sandbox"));
+        assert!(!ticket.iter().any(|arg| arg == "--ignore-user-config"));
+        assert_eq!(
+            effective_mcp_servers(&user, &project, &ticket),
+            vec!["coppice".to_string(), "project_evil".to_string(), "user_evil".to_string()]
+        );
+
+        let args = launch(true, true, true);
+        assert!(args.windows(2).any(|pair| pair == ["--sandbox", "read-only"]));
+        assert!(!args.iter().any(|arg| arg == "--dangerously-bypass-approvals-and-sandbox"));
+        assert!(args.iter().any(|arg| arg == "--ignore-user-config"));
+        assert!(args.iter().any(|arg| arg.contains("mcp_servers.coppice.url=")));
+        assert!(args.iter().any(|arg| {
+            arg.contains("mcp_servers.coppice.bearer_token_env_var=")
+        }));
+        assert!(!args.iter().any(|arg| arg.contains("user_evil") || arg.contains("project_evil")));
+        assert_eq!(
+            effective_mcp_servers(&user, &project, &args),
+            vec!["coppice".to_string()]
+        );
     }
 
     #[test]

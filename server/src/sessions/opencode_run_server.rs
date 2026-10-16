@@ -17,11 +17,23 @@ const HEALTH_DEADLINE: Duration = Duration::from_secs(30);
 
 /// The per-run `OPENCODE_CONFIG`. The token stays in the process environment;
 /// OpenCode interpolates `{env:COPPICE_MCP_TOKEN}` into the header.
-pub fn opencode_run_config(access: Option<&McpAccess>) -> String {
-    match access {
+pub fn opencode_run_config(access: Option<&McpAccess>, read_only: bool) -> String {
+    let mut cfg: serde_json::Value = serde_json::from_str(&match access {
         Some(access) => McpServerSpec::from_access(access).opencode_json(),
         None => opencode_base_json(),
+    })
+    .expect("opencode config is json");
+    if read_only {
+        // `edit` covers the write and patch tools. A project opencode.json can
+        // override this file unless the process also sets
+        // OPENCODE_DISABLE_PROJECT_CONFIG.
+        cfg["permission"] = serde_json::json!({
+            "edit": "deny",
+            "bash": "deny",
+            "write": "deny"
+        });
     }
+    cfg.to_string()
 }
 
 struct RunServer {
@@ -368,7 +380,7 @@ mod tests {
             url: "http://127.0.0.1:5000/mcp".into(),
             token: "secret-run-token".into(),
         };
-        let raw = opencode_run_config(Some(&access));
+        let raw = opencode_run_config(Some(&access), false);
         let cfg: serde_json::Value = serde_json::from_str(&raw).expect("parse config");
         assert_eq!(cfg["mcp"][SERVER_NAME]["url"], "http://127.0.0.1:5000/mcp");
         assert_eq!(
@@ -381,8 +393,29 @@ mod tests {
     #[test]
     fn run_config_without_access_has_no_mcp() {
         let cfg: serde_json::Value =
-            serde_json::from_str(&opencode_run_config(None)).expect("parse config");
+            serde_json::from_str(&opencode_run_config(None, false)).expect("parse config");
         assert!(cfg.get("mcp").is_none());
+        assert!(cfg.get("permission").is_none());
+    }
+
+    #[test]
+    fn read_only_config_denies_edit_and_bash() {
+        let cfg: serde_json::Value =
+            serde_json::from_str(&opencode_run_config(None, true)).expect("parse config");
+        assert_eq!(cfg["permission"]["edit"], "deny");
+        assert_eq!(cfg["permission"]["bash"], "deny");
+        assert_eq!(cfg["permission"]["write"], "deny");
+        assert!(cfg.get("mcp").is_none());
+
+        let access = McpAccess {
+            url: "http://127.0.0.1:5000/mcp".into(),
+            token: "secret-run-token".into(),
+        };
+        let with_mcp: serde_json::Value =
+            serde_json::from_str(&opencode_run_config(Some(&access), true)).expect("parse config");
+        assert_eq!(with_mcp["permission"]["bash"], "deny");
+        assert_eq!(with_mcp["mcp"][SERVER_NAME]["url"], "http://127.0.0.1:5000/mcp");
+        assert!(!with_mcp.to_string().contains("secret-run-token"));
     }
 
     fn sleeper(secs: &str) -> Child {

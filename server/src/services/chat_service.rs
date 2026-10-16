@@ -77,6 +77,9 @@ pub enum ChatError {
     NotFound,
     #[error("validation error: {0}")]
     Validation(String),
+    /// Chat is off for this connector. The string is the user-facing refusal.
+    #[error("{0}")]
+    ChatUnavailable(String),
     #[error("active run already exists")]
     ActiveRunExists,
     #[error(transparent)]
@@ -205,6 +208,13 @@ pub struct CreateKnowledgeFromChatInput<'a> {
     pub board_id: Option<Uuid>,
 }
 
+fn ensure_chat_available(connector: &str) -> Result<(), ChatError> {
+    if let Some(message) = crate::providers::chat_unavailable_message(connector) {
+        return Err(ChatError::ChatUnavailable(message));
+    }
+    Ok(())
+}
+
 impl<'a> ChatService<'a> {
     pub fn new(pool: &'a PgPool) -> Self {
         Self { pool }
@@ -233,6 +243,7 @@ impl<'a> ChatService<'a> {
         if !agent.enabled {
             return Err(ChatError::Validation("agent is disabled".into()));
         }
+        ensure_chat_available(&agent.connector)?;
         if let Some(board_id) = board_id {
             BoardService::new(self.pool).get_board(board_id).await?;
         }
@@ -487,7 +498,8 @@ impl<'a> ChatService<'a> {
                 "session is not active; reopen before posting".into(),
             ));
         }
-
+        let agent = AgentService::new(self.pool).get(session.agent_id).await?;
+        ensure_chat_available(&agent.connector)?;
         self.validate_chat_attachments(owner_user_id, attachment_ids)
             .await?;
 
@@ -907,6 +919,9 @@ impl<'a> ChatService<'a> {
                 return Ok(draft_result(fallback, DraftTicketSource::Fallback));
             }
         };
+        if crate::providers::chat_unavailable_message(&agent.connector).is_some() {
+            return Ok(draft_result(fallback, DraftTicketSource::Fallback));
+        }
         let Some(connector) = deps.connector_registry.get(&agent.connector) else {
             return Ok(draft_result(fallback, DraftTicketSource::Fallback));
         };
@@ -924,8 +939,12 @@ impl<'a> ChatService<'a> {
             None
         };
 
-        let cwd = match resolve_chat_cwd(deps.worktrees_path, session_id, repo_local_path.as_deref())
-        {
+        let cwd = match resolve_chat_cwd(
+            deps.worktrees_path,
+            session_id,
+            repo_local_path.as_deref(),
+            crate::providers::chat_needs_isolation(&agent.connector),
+        ) {
             Ok(path) => path,
             Err(_) => {
                 return Ok(draft_result(fallback, DraftTicketSource::Fallback));
@@ -1127,7 +1146,9 @@ impl<'a> ChatService<'a> {
     ) -> Result<CutoffResult, ChatError> {
         let parent = self.get_session(session_id, owner_user_id).await?;
         if parent.status == ChatSessionStatus::Cutoff {
-            return Err(ChatError::Validation("session is already cutoff".into()));
+            return Err(ChatError::Validation(
+                "This chat was already continued.".into(),
+            ));
         }
 
         let transcript = self.format_transcript(session_id).await?;
@@ -1158,14 +1179,14 @@ impl<'a> ChatService<'a> {
             .append_message(
                 session_id,
                 ChatMessageRole::System,
-                &format!("Session cutoff. Continued in child session {}.", child.id),
+                "Continued in a new chat.",
                 None,
                 Some(serde_json::to_value(&meta).unwrap_or_default()),
             )
             .await?;
 
         let seed_body = format!(
-            "Continued from cutoff session {session_id}.\n\n## Prior conversation summary\n\n{summary}"
+            "Continued from an earlier chat.\n\n## Prior conversation summary\n\n{summary}"
         );
         let seed_message = self
             .append_message(

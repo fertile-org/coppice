@@ -172,11 +172,12 @@ pub const MOCK: RunContract = RunContract {
 pub const CLAUDE_CODE: RunContract = RunContract {
     permission_mode: PermissionMode {
         write: &["--permission-mode", "bypassPermissions"],
-        // Chat still narrows tools with a dynamic `--allowedTools` list.
-        read_only: None,
+        // Plan mode is Claude Code's read-only mode. The launcher also passes
+        // `--disallowedTools` so Write, Edit, and Bash are denied outright.
+        read_only: Some(&["--permission-mode", "plan"]),
         min_version: None,
         gate: false,
-        reason: "Claude Code 2.1.284 (interactive) and 2.1.285 (`claude -p`) start in auto mode when no permission mode is set. Coppice already passed bypassPermissions; pinning it keeps that mode.",
+        reason: "Write runs pin bypassPermissions so ticket work stays non-interactive. Chat uses plan mode, which does not include Bash, Write, or Edit. The launcher also denies those tools.",
     },
     leading: &[
         flag(&["-p"], "Headless print mode."),
@@ -200,10 +201,10 @@ pub const CLAUDE_CODE: RunContract = RunContract {
 pub const CODEX: RunContract = RunContract {
     permission_mode: PermissionMode {
         write: &["--dangerously-bypass-approvals-and-sandbox"],
-        read_only: None,
+        read_only: Some(&["--sandbox", "read-only"]),
         min_version: None,
         gate: false,
-        reason: "Today's approval bypass (it also disables the Codex sandbox). A later milestone swaps this field for a sandboxed flag.",
+        reason: "Ticket runs bypass approvals and the sandbox. Chat passes --sandbox read-only and never the bypass flag. A signed-in write with that flag was not shown to be blocked (codex-cli 0.162.1 exited 401), so chat still runs in a temporary clone.",
     },
     leading: &[
         gated(
@@ -263,7 +264,7 @@ pub const KILO_CODE: RunContract = RunContract {
         read_only: None,
         min_version: None,
         gate: false,
-        reason: "Auto-approves permissions for non-interactive kilo run. Read-only chat is refused before launch.",
+        reason: "Auto-approves permissions for non-interactive kilo run. Kilo has no read-only flag, so chat is refused instead of launching.",
     },
     leading: &[
         flag(&["run"], "Non-interactive run."),
@@ -285,7 +286,7 @@ pub const OPENCODE: RunContract = RunContract {
         read_only: None,
         min_version: None,
         gate: false,
-        reason: "opencode serve has no documented permission-mode flag. The HTTP session carries the worktree.",
+        reason: "opencode serve has no permission-mode argv. Read-only chat denies edit and bash in OPENCODE_CONFIG and sets OPENCODE_DISABLE_PROJECT_CONFIG so a project config cannot allow those tools.",
     },
     leading: &[
         flag(
@@ -442,6 +443,16 @@ mod tests {
     }
 
     #[test]
+    fn claude_read_only_uses_plan_not_bypass() {
+        let argv = CLAUDE_CODE.argv(&subst(Some("2.1.292"), true));
+        assert!(argv
+            .windows(2)
+            .any(|w| w == ["--permission-mode", "plan"]));
+        assert!(!argv.iter().any(|arg| arg == "bypassPermissions"));
+        assert!(!argv.iter().any(|arg| arg == "dontAsk"));
+    }
+
+    #[test]
     fn claude_pins_permission_after_output_flags() {
         let argv =
             CLAUDE_CODE.with_prompt(CLAUDE_CODE.argv(&subst(Some("2.1.292"), false)), "PROMPT");
@@ -487,6 +498,13 @@ mod tests {
                 .map(String::as_str),
             Some("/wt")
         );
+    }
+
+    #[test]
+    fn codex_read_only_uses_sandbox_not_bypass() {
+        let argv = CODEX.argv(&subst(Some("0.162.0"), true));
+        assert!(argv.windows(2).any(|w| w == ["--sandbox", "read-only"]));
+        assert!(!argv.iter().any(|arg| arg.contains("dangerously-bypass")));
     }
 
     #[test]

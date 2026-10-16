@@ -59,15 +59,17 @@ The Tools → Connectors switch and saving an agent both turn a connector on imm
 
 ## Chat and session resume
 
-Agent Chat turns run with read-only tools. Coppice stores the full transcript itself. When a connector supports resume, later turns reuse the CLI session with a slim context; if resume fails, one retry sends the full transcript.
+Coppice stores the full transcript itself. When a connector supports resume, later turns reuse the CLI session with a slim context; if resume fails, one retry sends the full transcript.
 
-| Connector | Chat session resume | Read-only tools in chat |
+Chat is on for Claude Code, Codex, and OpenCode. Claude Code and Codex have not been shown to stay read-only, so chat runs in a temporary copy of your repo and shows "Coppice hasn't confirmed that {cli} stays read-only, so chat runs in a temporary copy of your repo. The agent can still run commands on your computer." That copy is `git clone --local --no-hardlinks` of the registered checkout at the current HEAD, with every remote removed, and it is deleted when the chat ends and again when the app starts. OpenCode passed a live write test, so its chat runs in the checkout and shows no banner. MCP tools or a checkout's `.opencode/` plugins may still bypass those denials. Chat is off for Cursor and for Kilo Code. Each one shows its own sentence: "Chat isn't available for Cursor yet, because Coppice can't keep it read-only." and "Chat isn't available for Kilo Code yet, because Coppice can't keep it read-only."
+
+| Connector | Chat session resume | Where chat runs |
 | --- | --- | --- |
-| `claude-code` | `--resume` | Enforced with an `--allowedTools` read-only list |
-| `cursor` | `--resume` | Enforced with `--mode ask` |
-| `codex` | `codex exec resume` (best effort) | Not enforced by the CLI; prompt and rules only |
-| `opencode` | Reuses the OpenCode session | Not enforced by the CLI; prompt and rules only |
-| `kilo-code` | Skipped | Can't be enforced, so the run is refused: ``connector `kilo-code` cannot enforce read-only tools for conversation chat turns`` |
+| `claude-code` | `--resume` | On, in a temporary clone, with the untested banner. Flags are `--permission-mode plan`, `--settings {"disableAllHooks":true}`, `--setting-sources user`, plus `--disallowedTools Write,Edit,MultiEdit,NotebookEdit,Bash,TodoWrite,Task` and a read-only `--allowedTools` list. `--settings` is above user, project, and local files, so `disableAllHooks` turns those hooks off. Managed hooks still run. Not live-verified: the `claude` binary was not installed and no API key was set |
+| `cursor` | Skipped | Off. "Chat isn't available for Cursor yet, because Coppice can't keep it read-only." `--mode ask` without `--force` was not shown to block shell. CLI `2026.10.14-941492e` was installed and not signed in; the prompt exited with `Authentication required`. Cursor staff say ask mode does not hard-block shell unless `--sandbox enabled`, which also blocks network and MCP. Chat does not launch |
+| `codex` | Skipped | On, in a temporary clone, with the untested banner. Chat passes `--sandbox read-only`, `--ignore-user-config`, and `-c` keys for the Coppice MCP server only. On `codex-cli 0.162.1`, `--ignore-user-config` skips user and project MCP servers (project trust lives in the user config) and auth still uses `CODEX_HOME`. A write prompt with `--sandbox read-only` exited `401 Unauthorized` before a tool call, so it was not shown to block a write. Ticket runs still use the bypass flag and still load user config |
+| `opencode` | Prior session id | On, in the registered checkout, no banner. Per-run config sets `permission.edit`, `permission.write`, and `permission.bash` to `deny`, and the process sets `OPENCODE_DISABLE_PROJECT_CONFIG=1`. Verified with OpenCode 1.19.0 and `opencode/big-pickle`: denying edit and bash blocked a file write and a shell write even when the project `opencode.json` allowed both. The same deny without the env var lost to the project file. MCP tools or `.opencode/` plugins may bypass those denials |
+| `kilo-code` | Skipped | Off. "Chat isn't available for Kilo Code yet, because Coppice can't keep it read-only." No read-only flag, and the `kilo` binary was not on this machine. A read-only run is refused before launch. Test connection still runs `kilo --version` |
 
 Ticket runs can resume a prior session on `claude-code` and `cursor`. The other connectors start a fresh session and continue from the ticket checkpoint.
 
@@ -89,7 +91,7 @@ Plugin MCP tools are proxied through the same gateway as `<plugin>__<tool>`, so 
 
 Tools → Connectors shows each connector's switch, CLI readiness, detected auth (env var names and file paths only, never values), probe output, last real run, and last test.
 
-**Test connection** runs a real agent run through the production path against a synthetic ticket in a scratch directory. It passes when the agent calls `ticket_get` and `result_submit` and submits `done`. That check uses read-only tools. `kilo-code` refuses those, so its Test connection runs `kilo --version` instead and passes or fails with that command's own result.
+**Test connection** runs a real agent run through the production path against a synthetic ticket in a scratch directory. It passes when the agent calls `ticket_get` and `result_submit` and submits `done`. That check uses read-only tools. `kilo-code` has no read-only tool turn, so its Test connection runs `kilo --version` instead and passes or fails with that command's own result.
 
 `coppice connector doctor <id>` runs the same local checks from a terminal.
 

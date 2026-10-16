@@ -13,6 +13,7 @@ use crate::AppState;
 use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
+    response::{IntoResponse, Response},
     routing::{get, post},
     Json, Router,
 };
@@ -193,9 +194,52 @@ struct CutoffResponse {
 fn map_error(err: ChatError) -> StatusCode {
     match err {
         ChatError::NotFound => StatusCode::NOT_FOUND,
-        ChatError::Validation(_) => StatusCode::BAD_REQUEST,
+        ChatError::Validation(_) | ChatError::ChatUnavailable(_) => StatusCode::BAD_REQUEST,
         ChatError::ActiveRunExists => StatusCode::CONFLICT,
         ChatError::Database(_) | ChatError::Io(_) => StatusCode::INTERNAL_SERVER_ERROR,
+    }
+}
+
+#[derive(Serialize)]
+struct ChatMessageBody {
+    message: String,
+}
+
+enum ChatApiError {
+    Status(StatusCode),
+    Unavailable(String),
+}
+
+impl IntoResponse for ChatApiError {
+    fn into_response(self) -> Response {
+        match self {
+            ChatApiError::Status(code) => code.into_response(),
+            ChatApiError::Unavailable(message) => {
+                (StatusCode::BAD_REQUEST, Json(ChatMessageBody { message })).into_response()
+            }
+        }
+    }
+}
+
+fn map_chat_start_error(err: ChatError) -> ChatApiError {
+    match err {
+        ChatError::ChatUnavailable(message) => ChatApiError::Unavailable(message),
+        other => ChatApiError::Status(map_error(other)),
+    }
+}
+
+fn discard_chat_clone_if_ended(state: &AppState, session_id: Uuid, status: ChatSessionStatus) {
+    if !matches!(
+        status,
+        ChatSessionStatus::Archived | ChatSessionStatus::Cutoff
+    ) {
+        return;
+    }
+    if let Err(err) = crate::services::chat_cwd::remove_chat_clone(
+        std::path::Path::new(&state.config.agent.worktrees_path),
+        session_id,
+    ) {
+        tracing::warn!(%session_id, error = %err, "failed to remove temporary chat clone");
     }
 }
 
@@ -275,12 +319,12 @@ async fn create_session(
     State(state): State<Arc<AppState>>,
     AuthUser { user, .. }: AuthUser,
     Json(body): Json<CreateSessionBody>,
-) -> Result<(StatusCode, Json<SessionResponse>), StatusCode> {
-    let pool = pool_from_state(&state)?;
+) -> Result<(StatusCode, Json<SessionResponse>), ChatApiError> {
+    let pool = pool_from_state(&state).map_err(ChatApiError::Status)?;
     let session = ChatService::new(pool)
         .create_session(user.id, body.agent_id, body.board_id, body.repo_id)
         .await
-        .map_err(map_error)?;
+        .map_err(map_chat_start_error)?;
     Ok((StatusCode::CREATED, Json(session_response(session))))
 }
 
@@ -324,6 +368,7 @@ async fn patch_session(
         .patch_session(session_id, user.id, status)
         .await
         .map_err(map_error)?;
+    discard_chat_clone_if_ended(&state, session_id, status);
     Ok(Json(session_response(session)))
 }
 
@@ -351,14 +396,16 @@ async fn post_message(
     AuthUser { user, .. }: AuthUser,
     Path(session_id): Path<Uuid>,
     Json(body): Json<PostMessageBody>,
-) -> Result<(StatusCode, Json<PostMessageResponse>), StatusCode> {
-    let pool = pool_from_state(&state)?;
+) -> Result<(StatusCode, Json<PostMessageResponse>), ChatApiError> {
+    let pool = pool_from_state(&state).map_err(ChatApiError::Status)?;
     let attachment_ids = body.attachment_ids.unwrap_or_default();
     let result = ChatService::new(pool)
         .post_message(session_id, user.id, &body.body, &attachment_ids)
         .await
-        .map_err(map_error)?;
-    let attachments_by_id = attachments_for_messages(pool, std::slice::from_ref(&result.message)).await?;
+        .map_err(map_chat_start_error)?;
+    let attachments_by_id = attachments_for_messages(pool, std::slice::from_ref(&result.message))
+        .await
+        .map_err(ChatApiError::Status)?;
     Ok((
         StatusCode::CREATED,
         Json(PostMessageResponse {
@@ -471,6 +518,7 @@ async fn cutoff_session(
         .cutoff_session(session_id, user.id)
         .await
         .map_err(map_error)?;
+    discard_chat_clone_if_ended(&state, session_id, ChatSessionStatus::Cutoff);
     let attachments_by_id =
         attachments_for_messages(pool, std::slice::from_ref(&result.seed_message)).await?;
     Ok(Json(CutoffResponse {

@@ -408,6 +408,11 @@ pub async fn serve(
         });
     }
     plugin_mcp.spawn_reaper();
+    if let Err(err) = crate::services::chat_cwd::sweep_chat_clones(std::path::Path::new(
+        &state.config.agent.worktrees_path,
+    )) {
+        tracing::warn!(error = %err, "failed to remove temporary chat clones");
+    }
     sweep_orphaned_runs(&state).await;
     if let Some(pool) = state.db.as_ref() {
         match crate::services::connector_check_service::ConnectorCheckService::new(pool)

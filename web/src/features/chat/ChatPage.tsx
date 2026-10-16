@@ -21,7 +21,7 @@ import {
 } from '../../lib/attachments';
 import { filterChatSessions } from '../../lib/chatSessionSearch';
 import type { ChatSession, ChatSessionStatus } from '../../lib/schemas/chat';
-import { chatUnavailableMessage } from '../tools/connectorCopy';
+import { chatIsolationBanner, chatUnavailableMessage } from '../tools/connectorCopy';
 import { cn } from '../../lib/utils';
 import { useAgents } from '../agents/useAgents';
 import { useBoards } from '../boards/useBoards';
@@ -74,7 +74,7 @@ function sessionStatusLabel(status: ChatSessionStatus): string {
     case 'active':
       return 'Active';
     case 'cutoff':
-      return 'Cutoff';
+      return 'Continued';
     case 'archived':
       return 'Archived';
   }
@@ -150,7 +150,8 @@ function NewChatForm({
   const [boardId, setBoardId] = useState('');
   const [error, setError] = useState<string | null>(null);
   const selected = enabledAgents.find((agent) => agent.id === agentId);
-  const chatBlock = chatUnavailableMessage(selected?.connector);
+  const chatBanner = chatIsolationBanner(selected?.connector);
+  const chatUnavailable = chatUnavailableMessage(selected?.connector);
 
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
@@ -159,7 +160,9 @@ function NewChatForm({
       setError('Select an agent.');
       return;
     }
-    if (chatUnavailableMessage(selected?.connector)) return;
+    if (chatUnavailable) {
+      return;
+    }
     try {
       const session = await createSession.mutateAsync({
         agentId,
@@ -216,11 +219,25 @@ function NewChatForm({
         />
       </div>
 
-      {chatBlock && (
-        <p className="font-body text-sm text-text-secondary" role="status">
-          {chatBlock}
+      {chatUnavailable ? (
+        <p
+          className="rounded-md border border-warning-muted bg-warning-muted/40 px-3 py-2 font-body text-sm text-text-primary"
+          role="status"
+          data-testid="chat-unavailable"
+        >
+          {chatUnavailable}
         </p>
-      )}
+      ) : null}
+
+      {chatBanner ? (
+        <p
+          className="rounded-md border border-warning-muted bg-warning-muted/40 px-3 py-2 font-body text-sm text-text-primary"
+          role="status"
+          data-testid="chat-isolation-banner"
+        >
+          {chatBanner}
+        </p>
+      ) : null}
 
       {error && (
         <p className="font-body text-sm text-danger" role="alert">
@@ -228,7 +245,7 @@ function NewChatForm({
         </p>
       )}
 
-      <Button type="submit" disabled={createSession.isPending || Boolean(chatBlock)}>
+      <Button type="submit" disabled={createSession.isPending || Boolean(chatUnavailable)}>
         {createSession.isPending ? 'Starting…' : 'Start chat'}
       </Button>
     </form>
@@ -463,7 +480,8 @@ function ChatSessionPane({ sessionId }: { sessionId: string }) {
 
   const agent = agents.find((item) => item.id === session?.agentId);
   const agentName = agent?.name ?? 'Agent';
-  const chatBlock = chatUnavailableMessage(agent?.connector);
+  const chatBanner = chatIsolationBanner(agent?.connector);
+  const chatUnavailable = chatUnavailableMessage(agent?.connector);
 
   const onLiveFinished = useCallback(() => {
     setActiveRunId(null);
@@ -514,22 +532,31 @@ function ChatSessionPane({ sessionId }: { sessionId: string }) {
         />
       </div>
 
+      {chatBanner ? (
+        <p
+          className="shrink-0 border-t border-warning-muted bg-warning-muted/40 px-4 py-3 font-body text-sm text-text-primary"
+          role="status"
+          data-testid="chat-isolation-banner"
+        >
+          {chatBanner}
+        </p>
+      ) : null}
       {cutoff ? (
         <p className="shrink-0 border-t border-border bg-paper-50/90 px-4 py-3 font-body text-sm text-text-secondary">
-          This session is {session?.status}. History stays readable
           {session?.status === 'cutoff'
-            ? ' — open the continued child session from the transcript chip if one exists.'
-            : '.'}{' '}
+            ? 'This chat continued in a new one. You can still read it here.'
+            : 'This session is archived. History stays readable.'}{' '}
           <Link to="/chat" className="text-accent hover:underline">
             Start a new chat
           </Link>
         </p>
-      ) : chatBlock ? (
+      ) : chatUnavailable ? (
         <p
-          className="shrink-0 border-t border-border bg-paper-50/90 px-4 py-3 font-body text-sm text-text-secondary"
+          className="shrink-0 border-t border-warning-muted bg-warning-muted/40 px-4 py-3 font-body text-sm text-text-primary"
           role="status"
+          data-testid="chat-unavailable"
         >
-          {chatBlock}
+          {chatUnavailable}
         </p>
       ) : (
         <ChatComposer

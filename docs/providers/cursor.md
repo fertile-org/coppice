@@ -79,7 +79,7 @@ Start at **Tools → Connectors** (admin): it shows whether `agent` is found, wh
 ## Behavior notes
 
 - **Live console:** Streams Cursor’s progress while the run is active. After a server restart mid-run, live reattach is not possible; Coppice replays the saved log and marks an interrupted run.
-- **Agent Chat:** Later turns use `--resume` with `--mode ask` (read-only); Coppice stores the session id on the chat session row.
+- **Agent Chat:** Off. A temporary clone only changes the working directory: absolute paths and `git push` can still reach the real checkout, and `--mode ask` without `--force` was not shown to block shell. Cursor CLI `2026.10.14-941492e` was installed here and not signed in, and the prompt exited with `Authentication required` before any tool call. Cursor staff say ask mode does not hard-block shell writes unless `--sandbox enabled`, and that sandbox also blocks network and MCP. Creating a chat or posting a message returns: "Chat isn't available for Cursor yet, because Coppice can't keep it read-only." Chat does not launch the CLI. Ticket runs still pass `--force`. Plan runs still use `--mode ask`.
 - **Continued tickets:** Follow-up runs can resume the same Cursor chat session when Coppice has a prior `session_id`.
 - **Worktrees:** Coppice owns git worktrees. It does not pass Cursor’s `-w` / `--worktree` flag.
 - **MCP:** Not injected by Coppice in this version.
@@ -92,12 +92,6 @@ Start at **Tools → Connectors** (admin): it shows whether `agent` is found, wh
 agent -p "<prompt>" --trust --force --output-format stream-json --workspace <worktree>
 ```
 
-**Agent Chat turns** use Cursor’s read-only Q&A mode (no `--force`):
-
-```text
-agent -p "<prompt>" --trust --mode ask --output-format stream-json --workspace <worktree>
-```
-
-Both paths accept optional `--model` and `--resume <session_id>`. Stdout is NDJSON (`stream-json`); the final `result` event is parsed for Coppice’s JSON result contract. Live events are published as `cursor.console.*` on the run WebSocket.
+Plan runs use `--mode ask` and omit `--force`. That mode is not a Chat boundary: it does not block shell writes. Stdout is NDJSON (`stream-json`); the final `result` event is parsed for Coppice’s JSON result contract. Live events are published as `cursor.console.*` on the run WebSocket. Ticket runs accept optional `--model` and `--resume <session_id>`.
 
 More on connectors in general: [providers README](README.md). Milestone notes: [M08](../milestones/M08-connector-operator-cli.md).

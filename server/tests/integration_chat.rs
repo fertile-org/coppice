@@ -285,16 +285,14 @@ async fn list_sessions_has_active_run_while_turn_queued() {
 }
 
 #[tokio::test]
-async fn conversation_profile_refuses_write_capable_connectors() {
+async fn conversation_profile_refuses_kilo_read_only_chat() {
     use coppice_server::domain::context_profile::ContextProfile;
-    use coppice_server::providers::{
-        kilo_code::KiloCodeProvider, AgentProvider, AgentRunInput, ProviderError,
-    };
+    use coppice_server::providers::{kilo_code::KiloCodeProvider, AgentProvider, AgentRunInput};
     use coppice_config::KiloCodeProviderConfig;
 
     let provider = KiloCodeProvider::new(KiloCodeProviderConfig {
         enabled: Some(true),
-        command: "kilo".into(),
+        command: "kilo-not-installed".into(),
         model_providers: vec![],
         run_timeout_secs: 30,
     });
@@ -322,9 +320,12 @@ async fn conversation_profile_refuses_write_capable_connectors() {
             mcp: None,
         })
         .await
-        .expect_err("kilo-code must fail closed for read-only chat");
-    assert!(matches!(err, ProviderError::InvalidInput(_)));
-    assert!(err.to_string().contains("read-only"));
+        .expect_err("missing kilo binary");
+    let message = err.to_string();
+    assert!(
+        message.contains("cannot enforce read-only"),
+        "{message}"
+    );
 }
 
 #[tokio::test]
@@ -1659,4 +1660,140 @@ async fn chat_turn_stages_attachments_into_cwd_and_transcript() {
             || true,
         "session cwd under worktrees"
     );
+}
+
+#[tokio::test]
+async fn chat_refuses_cursor_and_kilo_and_accepts_the_rest() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+
+    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state_config(|config| {
+        config.agent.connectors.codex.enabled = Some(true);
+        config.agent.connectors.opencode.enabled = Some(true);
+        config.agent.connectors.cursor.enabled = Some(true);
+        config.agent.connectors.kilo_code.enabled = Some(true);
+        config.agent.connectors.claude_code.enabled = Some(true);
+    })
+    .await;
+    let pool = state.db.as_ref().expect("test db");
+    let agent_id = common::create_agent_with_preset_key(
+        &app,
+        "backend_engineer",
+        "Backend Engineer",
+        &cookie,
+        &csrf,
+    )
+    .await;
+    let agent_uuid = uuid::Uuid::parse_str(&agent_id).unwrap();
+
+    for (connector, name) in [("cursor", "Cursor"), ("kilo-code", "Kilo Code")] {
+        let expected = format!(
+            "Chat isn't available for {name} yet, because Coppice can't keep it read-only."
+        );
+        set_agent_connector(pool, agent_uuid, connector).await;
+        let refused = app
+            .clone()
+            .oneshot(common::json_request(
+                "POST",
+                "/api/chat/sessions",
+                &format!(r#"{{"agentId":"{agent_id}"}}"#),
+                &cookie,
+                &csrf,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(refused.status(), StatusCode::BAD_REQUEST, "{connector}");
+        let refused_body: serde_json::Value = common::json_body(refused).await;
+        assert_eq!(refused_body["message"], expected, "{connector}");
+
+        set_agent_connector(pool, agent_uuid, "opencode").await;
+        let created = app
+            .clone()
+            .oneshot(common::json_request(
+                "POST",
+                "/api/chat/sessions",
+                &format!(r#"{{"agentId":"{agent_id}"}}"#),
+                &cookie,
+                &csrf,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(created.status(), StatusCode::CREATED, "{connector}");
+        let session: serde_json::Value = common::json_body(created).await;
+        let session_id = session["id"].as_str().unwrap();
+        set_agent_connector(pool, agent_uuid, connector).await;
+
+        let posted = app
+            .clone()
+            .oneshot(common::json_request(
+                "POST",
+                &format!("/api/chat/sessions/{session_id}/messages"),
+                r#"{"body":"write README.md"}"#,
+                &cookie,
+                &csrf,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(posted.status(), StatusCode::BAD_REQUEST, "{connector}");
+        let posted_body: serde_json::Value = common::json_body(posted).await;
+        assert_eq!(posted_body["message"], expected, "{connector}");
+        let runs: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM agent_runs WHERE chat_session_id = $1",
+        )
+        .bind(uuid::Uuid::parse_str(session_id).unwrap())
+        .fetch_one(pool)
+        .await
+        .unwrap();
+        assert_eq!(runs, 0, "{connector}");
+    }
+
+    for connector in ["codex", "claude-code", "opencode"] {
+        set_agent_connector(pool, agent_uuid, connector).await;
+        let created = app
+            .clone()
+            .oneshot(common::json_request(
+                "POST",
+                "/api/chat/sessions",
+                &format!(r#"{{"agentId":"{agent_id}"}}"#),
+                &cookie,
+                &csrf,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(created.status(), StatusCode::CREATED, "{connector}");
+        let session: serde_json::Value = common::json_body(created).await;
+        assert!(session.get("message").is_none(), "{connector}");
+        let session_id = session["id"].as_str().unwrap();
+
+        let posted = app
+            .clone()
+            .oneshot(common::json_request(
+                "POST",
+                &format!("/api/chat/sessions/{session_id}/messages"),
+                r#"{"body":"write README.md"}"#,
+                &cookie,
+                &csrf,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(posted.status(), StatusCode::CREATED, "{connector}");
+        let posted_body: serde_json::Value = common::json_body(posted).await;
+        assert!(posted_body["runId"].is_string(), "{connector}");
+        let body_text = posted_body.to_string();
+        assert!(
+            !body_text.contains("Chat isn't available"),
+            "{connector} {body_text}"
+        );
+    }
+}
+
+async fn set_agent_connector(pool: &sqlx::PgPool, agent_id: uuid::Uuid, connector: &str) {
+    sqlx::query("UPDATE agents SET connector = $2 WHERE id = $1")
+        .bind(agent_id)
+        .bind(connector)
+        .execute(pool)
+        .await
+        .unwrap();
 }

@@ -18,6 +18,29 @@ pub const CODEX: &str = "codex";
 pub const KILO_CODE: &str = "kilo-code";
 pub const OPENCODE: &str = "opencode";
 
+/// How chat treats one connector. Change an arm to flip a CLI later.
+/// `Failed` is reserved until a write test shows that CLI can still write.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChatReadOnlyStatus {
+    /// A live write test blocked writes. Chat uses the registered checkout.
+    Passed,
+    /// Not shown to block writes. Chat stays on, in a temporary clone.
+    Untested,
+    /// Shown to write through its read-only mode. Chat stays on, in a clone.
+    Failed,
+    /// Chat does not start.
+    Unavailable,
+}
+
+pub fn chat_read_only_status(connector: &str) -> ChatReadOnlyStatus {
+    match connector {
+        OPENCODE | MOCK => ChatReadOnlyStatus::Passed,
+        CLAUDE_CODE | CODEX => ChatReadOnlyStatus::Untested,
+        CURSOR | KILO_CODE => ChatReadOnlyStatus::Unavailable,
+        _ => ChatReadOnlyStatus::Unavailable,
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ConnectorDescriptor {
     /// Matches `[agent.connectors.<id>]` in config and `agents.connector`.
@@ -209,7 +232,9 @@ const CONNECTORS: &[ConnectorDescriptor] = &[
         mcp_tool_names: ToolNameStyle::Dash,
         console: ConsoleKind::Structured,
         caps: Capabilities {
-            read_only_tools: true,
+            // `--mode ask` blocks edit/apply, not shell writes, so Chat cannot
+            // treat Cursor as read-only. Plan runs still pass `--mode ask`.
+            read_only_tools: false,
             chat_resume: true,
             session_events: true,
             run_resume: true,
@@ -311,7 +336,12 @@ const CONNECTORS: &[ConnectorDescriptor] = &[
         mcp_tool_names: ToolNameStyle::Underscore,
         console: ConsoleKind::OpenCodeSession,
         caps: Capabilities {
-            read_only_tools: false,
+            // Chat denies `edit`, `write`, and `bash` in the per-run config
+            // and sets OPENCODE_DISABLE_PROJECT_CONFIG. Verified with OpenCode
+            // 1.19.0: a project file that allows edit and bash could not create
+            // a file or run a writing shell command. Without that env var, the
+            // project file overrode the deny and both writes succeeded.
+            read_only_tools: true,
             chat_resume: true,
             session_events: true,
             run_resume: false,
@@ -416,7 +446,7 @@ mod tests {
             false,
         );
         assert_row(
-            CURSOR, CursorHome, Dash, Structured, true, true, true, true, false,
+            CURSOR, CursorHome, Dash, Structured, false, true, true, true, false,
         );
         assert_row(
             CODEX,
@@ -437,7 +467,7 @@ mod tests {
             OpenCodeJson,
             Underscore,
             OpenCodeSession,
-            false,
+            true,
             true,
             true,
             false,
