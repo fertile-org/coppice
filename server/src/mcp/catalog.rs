@@ -144,8 +144,8 @@ impl CoreTool {
         }
     }
 
-    /// Descriptions for a workspace chat say the search covers every board.
-    /// Board-attached sessions keep the profile definition.
+    /// Conversation chat searches every board. Other profiles keep the
+    /// board-scoped description.
     pub fn definition_for(self, scope: &crate::mcp::token::RunToolScope) -> ToolDefinition {
         let mut def = self.definition();
         if scope.workspace_chat() {

@@ -34,9 +34,10 @@ pub struct RunToolScope {
 }
 
 impl RunToolScope {
-    /// A workspace chat: the conversation profile with no board attached.
+    /// Conversation chat. A session board only chooses the focus repository
+    /// (`REPOS.md` / `open_repo`). Ticket and knowledge tools still cover every board.
     pub fn workspace_chat(&self) -> bool {
-        self.board_id.is_none() && self.profile == ContextProfile::Conversation
+        self.profile == ContextProfile::Conversation
     }
 }
 

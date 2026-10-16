@@ -987,6 +987,8 @@ async fn execute_chat_turn(
             agent_id: run.agent_id,
             ticket_id: None,
             chat_session_id: Some(session_id),
+            // Kept so open_repo and REPOS.md can mark the board's focus repo.
+            // Conversation tools do not use it to narrow ticket or knowledge reads.
             board_id: session.board_id,
             profile: ContextProfile::Conversation,
             job_type: run.job_type.clone(),
