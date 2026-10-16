@@ -496,13 +496,6 @@ a:hover {
   color: var(--color-bark-700);
 }
 
-.closer {
-  margin: 1.1rem 0 0;
-  font-family: var(--font-display);
-  font-size: 1.35rem;
-  letter-spacing: -0.02em;
-}
-
 .closer-links {
   display: flex;
   flex-wrap: wrap;

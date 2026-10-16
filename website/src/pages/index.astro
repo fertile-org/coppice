@@ -2,7 +2,6 @@
 import Base from '../layouts/Base.astro';
 import DownloadLinks from '../components/DownloadLinks.astro';
 import HeroMedia from '../components/HeroMedia.astro';
-import { withBase } from '../lib/url';
 
 const description =
   'Run several coding agents at once without babysitting them. Review every diff before it counts. Local, open source, with the agent CLIs you already pay for.';
@@ -96,21 +95,6 @@ const reasons = [
         <li>Not a Jira replacement</li>
         <li>Not “tell the agent and get the finished product”</li>
       </ul>
-    </section>
-
-    <section class="block" aria-labelledby="get-started">
-      <h2 id="get-started">Get started</h2>
-      <p>
-        For engineers and small teams who already run coding agents and want to hand off more work without losing
-        control of what ships.
-      </p>
-      <DownloadLinks />
-      <p class="closer">Put your agents on a board. Keep the gates.</p>
-      <p class="closer-links">
-        <a href={withBase('/docs')}>Docs</a>
-        <span aria-hidden="true">·</span>
-        <a href="https://github.com/fertile-org/coppice">GitHub</a>
-      </p>
     </section>
   </div>
 </Base>
