@@ -747,12 +747,73 @@ pub struct AgentConfig {
     pub worker_count: u32,
     #[serde(default = "default_health_check_interval")]
     pub health_check_interval_secs: u32,
+    /// Materialized repository copies kept in one chat. Opening another closes
+    /// the least recently used copy. See `chat_repos` for the measurement notes.
+    #[serde(default = "default_chat_open_repo_cap")]
+    pub chat_open_repo_cap: u32,
+    /// Seconds the board repository copy may run at chat start before it is
+    /// left for `open_repo`.
+    #[serde(default = "default_chat_eager_copy_timeout_secs")]
+    pub chat_eager_copy_timeout_secs: u64,
+    /// Seconds an on-demand `open_repo` copy may run.
+    #[serde(default = "default_chat_copy_timeout_secs")]
+    pub chat_copy_timeout_secs: u64,
+    /// Seconds without a chat turn before that chat's copies are deleted.
+    #[serde(default = "default_chat_copy_idle_secs")]
+    pub chat_copy_idle_secs: u64,
+    /// Seconds without a chat turn before the whole chat folder is deleted.
+    #[serde(default = "default_chat_folder_max_age_secs")]
+    pub chat_folder_max_age_secs: u64,
+    /// Skip the eager board-repo copy when the checkout is larger than this.
+    #[serde(default = "default_chat_eager_copy_max_bytes")]
+    pub chat_eager_copy_max_bytes: u64,
     #[serde(default, alias = "providers")]
     pub connectors: AgentConnectorsConfig,
 }
 
 fn default_health_check_interval() -> u32 {
     60
+}
+
+/// How many repository copies one chat keeps. Opening another closes the
+/// least recently used copy.
+pub fn default_chat_open_repo_cap() -> u32 {
+    5
+}
+
+/// Eager board-repo copy deadline.
+///
+/// Measured with git 2.43 on this machine: `git clone --local --shared
+/// --no-checkout` plus `checkout` was 15 ms for a one-file repository, 67 ms
+/// for a 32 MiB incompressible blob, and 62 ms for an 80 MiB run of zeros.
+/// Three seconds stays above those and still bounds a slow disk.
+pub fn default_chat_eager_copy_timeout_secs() -> u64 {
+    3
+}
+
+/// On-demand copy deadline. Longer than the eager start budget so a requested
+/// large repository can finish, and shorter than the 60s MCP call timeout.
+pub fn default_chat_copy_timeout_secs() -> u64 {
+    45
+}
+
+/// Delete a chat's copies after 12 hours without a turn. The session and the
+/// opened-repo list stay so the next visit can rebuild them.
+pub fn default_chat_copy_idle_secs() -> u64 {
+    12 * 60 * 60
+}
+
+/// Delete a chat folder after 30 days without a turn. The session row stays.
+/// The next visit rebuilds the index and opens the board repository again.
+pub fn default_chat_folder_max_age_secs() -> u64 {
+    30 * 24 * 60 * 60
+}
+
+/// Do not copy the board repository at chat start when its files (excluding
+/// `.git`) exceed 64 MiB. A stat of a 32 MiB file was under 1 ms. Larger
+/// checkouts stay listed for `open_repo`.
+pub fn default_chat_eager_copy_max_bytes() -> u64 {
+    64 * 1024 * 1024
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize, Default)]
@@ -1289,6 +1350,12 @@ impl AppConfig {
                 worktrees_path: "./data/worktrees".into(),
                 worker_count: 2,
                 health_check_interval_secs: default_health_check_interval(),
+                chat_open_repo_cap: default_chat_open_repo_cap(),
+                chat_eager_copy_timeout_secs: default_chat_eager_copy_timeout_secs(),
+                chat_copy_timeout_secs: default_chat_copy_timeout_secs(),
+                chat_copy_idle_secs: default_chat_copy_idle_secs(),
+                chat_folder_max_age_secs: default_chat_folder_max_age_secs(),
+                chat_eager_copy_max_bytes: default_chat_eager_copy_max_bytes(),
                 connectors: AgentConnectorsConfig::default(),
             },
             web: WebConfig {

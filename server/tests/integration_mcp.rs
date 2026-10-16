@@ -1,6 +1,7 @@
 mod common;
 
 use axum::Router;
+use http_body_util::BodyExt;
 use coppice_server::domain::context_profile::ContextProfile;
 use coppice_server::mcp::token::{NewRunToolScope, TokenService};
 use coppice_server::services::knowledge_compaction_service::KnowledgeCompactionService;
@@ -1904,8 +1905,13 @@ async fn api(app: &Router, method: &str, uri: &str, body: Value, cookie: &str, c
         .await
         .unwrap();
     let status = res.status();
-    let body = common::json_body(res).await;
-    assert!(status.is_success(), "{method} {uri}: {status} {body}");
+    let bytes = res.into_body().collect().await.unwrap().to_bytes();
+    let body: Value = serde_json::from_slice(&bytes).unwrap_or(Value::Null);
+    assert!(
+        status.is_success(),
+        "{method} {uri}: {status} {}",
+        String::from_utf8_lossy(&bytes)
+    );
     body
 }
 

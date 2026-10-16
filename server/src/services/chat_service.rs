@@ -504,6 +504,7 @@ impl<'a> ChatService<'a> {
             .await?;
 
         let mut tx = self.pool.begin().await?;
+        lock_chat_session(&mut tx, session_id).await?;
         let next_seq: i64 = sqlx::query_scalar(
             r#"
             SELECT COALESCE(MAX(seq), 0) + 1 FROM chat_messages WHERE session_id = $1
@@ -584,6 +585,15 @@ impl<'a> ChatService<'a> {
         .await
     }
 
+    pub async fn append_system_note(
+        &self,
+        session_id: Uuid,
+        body: &str,
+    ) -> Result<ChatMessage, ChatError> {
+        self.append_message(session_id, ChatMessageRole::System, body, None, None)
+            .await
+    }
+
     async fn append_message(
         &self,
         session_id: Uuid,
@@ -593,6 +603,7 @@ impl<'a> ChatService<'a> {
         action_metadata: Option<serde_json::Value>,
     ) -> Result<ChatMessage, ChatError> {
         let mut tx = self.pool.begin().await?;
+        lock_chat_session(&mut tx, session_id).await?;
         let next_seq: i64 = sqlx::query_scalar(
             r#"
             SELECT COALESCE(MAX(seq), 0) + 1 FROM chat_messages WHERE session_id = $1
@@ -930,21 +941,7 @@ impl<'a> ChatService<'a> {
             .clone()
             .unwrap_or_else(|| slugify(&agent.name));
 
-        let repo_local_path = if let Some(repo_id) = session.repo_id {
-            sqlx::query_scalar::<_, String>("SELECT local_path FROM repos WHERE id = $1")
-                .bind(repo_id)
-                .fetch_optional(self.pool)
-                .await?
-        } else {
-            None
-        };
-
-        let cwd = match resolve_chat_cwd(
-            deps.worktrees_path,
-            session_id,
-            repo_local_path.as_deref(),
-            crate::providers::chat_needs_isolation(&agent.connector),
-        ) {
+        let cwd = match resolve_chat_cwd(deps.worktrees_path, session_id) {
             Ok(path) => path,
             Err(_) => {
                 return Ok(draft_result(fallback, DraftTicketSource::Fallback));
@@ -1207,6 +1204,19 @@ impl<'a> ChatService<'a> {
             seed_message,
         })
     }
+}
+
+/// Serialize message inserts for one session. `seq` is unique per session, and
+/// a repository-copy note can land while the person is posting.
+async fn lock_chat_session(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    session_id: Uuid,
+) -> Result<(), sqlx::Error> {
+    sqlx::query("SELECT id FROM chat_sessions WHERE id = $1 FOR UPDATE")
+        .bind(session_id)
+        .execute(&mut **tx)
+        .await?;
+    Ok(())
 }
 
 fn verify_image_magic_bytes(att: &Attachment) -> Result<(), String> {

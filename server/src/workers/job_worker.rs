@@ -955,22 +955,12 @@ async fn execute_chat_turn(
         .preset_source
         .clone()
         .unwrap_or_else(|| slugify(&agent.name));
-    let repo_local_path = if let Some(repo_id) = session.repo_id {
-        sqlx::query_scalar::<_, String>("SELECT local_path FROM repos WHERE id = $1")
-            .bind(repo_id)
-            .fetch_optional(pool)
-            .await?
-    } else {
-        None
-    };
-
     let cwd = resolve_chat_cwd(
         std::path::Path::new(&state.config.agent.worktrees_path),
         session_id,
-        repo_local_path.as_deref(),
-        crate::providers::chat_needs_isolation(&agent.connector),
     )
     .context("resolve chat cwd")?;
+    crate::services::chat_workspace::on_chat_turn(state, pool, session_id, session.board_id).await;
     let cwd_str = cwd.to_string_lossy().into_owned();
 
     let stream = state.run_streams.register(run.id);

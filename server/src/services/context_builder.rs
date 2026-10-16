@@ -104,7 +104,13 @@ fn write_tool_first_task(out: &mut String, input: &ContextInput<'_>) {
         out.push_str(
             "## Agent Chat\n\nYou are replying in a human-owned exploratory chat session. \
              Do not change files, tickets, workflow state, or knowledge. \
-             Answer the latest human message directly and concisely.\n\n",
+             Answer the latest human message directly and concisely.\n\n\
+             Linked repositories are listed in `REPOS.md` in the working directory \
+             (name, folder, one-line description, and boards). \
+             The focus repository is the one the current board uses most, and it is checked out \
+             at the start of the chat when it fits. \
+             Call `open_repo` with a slug from `REPOS.md` when you need a repository that is not checked out. \
+             Pass a slug, not a path.\n\n",
         );
         match (&input.human_request, input.latest_comments) {
             (Some(human), _) => out.push_str(&format!(
@@ -573,6 +579,7 @@ mod tests {
         assert!(full.contains("### Conversation transcript"));
         assert!(full.contains("First question"));
         assert!(full.contains("Do not change files, tickets, workflow state, or knowledge."));
+        assert!(full.contains("Call `open_repo` with a slug from `REPOS.md`"));
         assert!(full.contains("/data/worktrees/coppice/ticket-1"));
 
         input.human_request = Some(HumanRequest {

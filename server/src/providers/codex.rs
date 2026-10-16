@@ -496,6 +496,7 @@ mod tests {
             effective_mcp_servers(&user, &project, &args),
             vec!["coppice".to_string()]
         );
+        assert!(!args.iter().any(|arg| arg.contains("open_repo")));
     }
 
     #[test]
