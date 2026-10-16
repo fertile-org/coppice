@@ -506,6 +506,8 @@ mod tests {
             .copied()
             .filter(|n| *n != "comment_post")
             .collect();
+        let mut conversation = chat.clone();
+        conversation.insert(conversation.len() - 1, "open_repo");
         let compaction = vec![
             "ticket_get",
             "ticket_comments",
@@ -520,7 +522,7 @@ mod tests {
             (ContextProfile::Full, &full),
             (ContextProfile::HumanAgent, &full),
             (ContextProfile::HumanChat, &chat),
-            (ContextProfile::Conversation, &chat),
+            (ContextProfile::Conversation, &conversation),
             (ContextProfile::KnowledgeCompaction, &compaction),
             (ContextProfile::ConnectorCheck, &check),
         ] {

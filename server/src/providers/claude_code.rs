@@ -573,6 +573,8 @@ mod tests {
         assert_eq!(servers.keys().cloned().collect::<Vec<_>>(), vec!["coppice"]);
         assert_eq!(servers["coppice"]["url"], "http://127.0.0.1:5000/mcp");
         assert!(!raw.contains("super-secret-run-token"));
+        assert!(flag_value(&args, "--allowedTools").ends_with(",mcp__coppice__*"));
+        assert!(!args.iter().any(|arg| arg == "open_repo"));
     }
 
     #[test]

@@ -149,14 +149,15 @@ pub fn chat_read_only_status(connector: &str) -> coppice_connectors::ChatReadOnl
     coppice_connectors::chat_read_only_status(connector)
 }
 
-/// OpenCode passed a live write test. Mock does not write. Both use the checkout.
+/// OpenCode passed a live write test. Mock does not write. This is not a working-directory selector.
 pub fn chat_read_only_verified(connector: &str) -> bool {
     chat_read_only_status(connector) == coppice_connectors::ChatReadOnlyStatus::Passed
 }
 
-/// Chat runs in a local clone with remotes removed, not in the registered checkout.
-/// Passed connectors stay in the checkout. Unavailable connectors are refused
-/// before launch; a clone is still the fallback if a turn is queued anyway.
+/// Whether this connector's read-only mode has not been shown to hold.
+/// Chat working directories are the per-session folder for every connector,
+/// including ones whose read-only mode was verified. This flag is not a
+/// working-directory selector.
 pub fn chat_needs_isolation(connector: &str) -> bool {
     !chat_read_only_verified(connector)
 }

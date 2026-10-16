@@ -228,18 +228,18 @@ fn map_chat_start_error(err: ChatError) -> ChatApiError {
     }
 }
 
-fn discard_chat_clone_if_ended(state: &AppState, session_id: Uuid, status: ChatSessionStatus) {
+fn discard_chat_workspace_if_ended(state: &AppState, session_id: Uuid, status: ChatSessionStatus) {
     if !matches!(
         status,
         ChatSessionStatus::Archived | ChatSessionStatus::Cutoff
     ) {
         return;
     }
-    if let Err(err) = crate::services::chat_cwd::remove_chat_clone(
+    if let Err(err) = crate::services::chat_repos::remove_chat_workspace(
         std::path::Path::new(&state.config.agent.worktrees_path),
         session_id,
     ) {
-        tracing::warn!(%session_id, error = %err, "failed to remove temporary chat clone");
+        tracing::warn!(%session_id, error = %err, "failed to remove chat folder");
     }
 }
 
@@ -325,6 +325,13 @@ async fn create_session(
         .create_session(user.id, body.agent_id, body.board_id, body.repo_id)
         .await
         .map_err(map_chat_start_error)?;
+    crate::services::chat_workspace::start_session(
+        &state,
+        pool.clone(),
+        session.id,
+        session.board_id,
+        &[],
+    );
     Ok((StatusCode::CREATED, Json(session_response(session))))
 }
 
@@ -368,7 +375,7 @@ async fn patch_session(
         .patch_session(session_id, user.id, status)
         .await
         .map_err(map_error)?;
-    discard_chat_clone_if_ended(&state, session_id, status);
+    discard_chat_workspace_if_ended(&state, session_id, status);
     Ok(Json(session_response(session)))
 }
 
@@ -518,7 +525,16 @@ async fn cutoff_session(
         .cutoff_session(session_id, user.id)
         .await
         .map_err(map_error)?;
-    discard_chat_clone_if_ended(&state, session_id, ChatSessionStatus::Cutoff);
+    let worktrees = std::path::Path::new(&state.config.agent.worktrees_path);
+    let carried = crate::services::chat_workspace::continue_slugs(worktrees, session_id);
+    crate::services::chat_workspace::start_session(
+        &state,
+        pool.clone(),
+        result.child.id,
+        result.child.board_id,
+        &carried,
+    );
+    discard_chat_workspace_if_ended(&state, session_id, ChatSessionStatus::Cutoff);
     let attachments_by_id =
         attachments_for_messages(pool, std::slice::from_ref(&result.seed_message)).await?;
     Ok(Json(CutoffResponse {

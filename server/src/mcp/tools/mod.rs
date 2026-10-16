@@ -1,6 +1,7 @@
 pub mod agents;
 pub mod comments;
 pub mod knowledge;
+pub mod open_repo;
 pub mod result;
 pub mod skills;
 pub mod tickets;
@@ -54,5 +55,6 @@ pub async fn dispatch(tool: CoreTool, ctx: &ToolCtx<'_>, args: Value) -> Result<
         CoreTool::KnowledgeSearch => knowledge::call_knowledge_search(ctx, args).await,
         CoreTool::CommentPost => comments::call_comment_post(ctx, args).await,
         CoreTool::ResultSubmit => result::call_result_submit(ctx, args).await,
+        CoreTool::OpenRepo => open_repo::call_open_repo(ctx, args).await,
     }
 }

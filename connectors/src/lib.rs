@@ -22,11 +22,11 @@ pub const OPENCODE: &str = "opencode";
 /// `Failed` is reserved until a write test shows that CLI can still write.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ChatReadOnlyStatus {
-    /// A live write test blocked writes. Chat uses the registered checkout.
+    /// A live write test blocked writes. Chat still uses a per-chat copy.
     Passed,
-    /// Not shown to block writes. Chat stays on, in a temporary clone.
+    /// Not shown to block writes. Chat stays on, in a per-chat copy.
     Untested,
-    /// Shown to write through its read-only mode. Chat stays on, in a clone.
+    /// Shown to write through its read-only mode. Chat stays on, in a per-chat copy.
     Failed,
     /// Chat does not start.
     Unavailable,
