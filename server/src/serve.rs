@@ -340,9 +340,6 @@ pub async fn serve(
             Ok(recovered) => {
                 config.secrets.master_key = recovered.master_key;
                 config.auth.session_secret = recovered.session_secret;
-                if let Some(password) = recovered.admin_password {
-                    config.auth.bootstrap_admin_password = Some(password);
-                }
             }
             Err(err) => {
                 return Err(anyhow::anyhow!("could not finish replacing keys: {err}"));

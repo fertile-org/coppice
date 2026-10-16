@@ -74,7 +74,7 @@ describe('ToolsPage', () => {
     ).toBeInTheDocument();
     expect(
       screen.getByText(
-        "Importing replaces all data on this install with the backup's. Its settings are restored too, except passwords, keys, and folder paths. You'll paste saved tokens again, and you may be signed out.",
+        "Importing replaces all data on this install with the backup's. Passwords, keys, folder paths, agent commands, and plugin and MCP settings aren't imported, so set those up again. You'll paste saved tokens again, and you may be signed out.",
       ),
     ).toBeInTheDocument();
   });

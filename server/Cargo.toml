@@ -50,6 +50,9 @@ time = { version = "0.3", features = ["serde", "parsing"] }
 argon2 = "0.5"
 rand = "0.8"
 sha2 = "0.10"
+hmac = "0.12.1"
+pbkdf2 = "0.12.2"
+stringprep = "0.1.5"
 hex = "0.4"
 libc = "0.2"
 # 0.1.92 stops emitting an empty #[must_use] that clippy 1.99 rejects.

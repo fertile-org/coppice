@@ -178,9 +178,10 @@ export function BackupTab() {
           Import backup
         </h2>
         <p className="mt-2 font-body text-sm text-text-secondary">
-          Importing replaces all data on this install with the backup's. Its
-          settings are restored too, except passwords, keys, and folder paths.
-          You'll paste saved tokens again, and you may be signed out.
+          Importing replaces all data on this install with the backup's.
+          Passwords, keys, folder paths, agent commands, and plugin and MCP
+          settings aren't imported, so set those up again. You'll paste saved
+          tokens again, and you may be signed out.
         </p>
         <p className="mt-2 font-body text-sm text-text-secondary">
           The desktop app has everything it needs to import. A server install
