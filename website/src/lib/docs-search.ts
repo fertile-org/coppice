@@ -2,6 +2,8 @@
 export const SEARCH_PLACEHOLDER = 'Search docs';
 export const SEARCH_LABEL = 'Search docs';
 export const SEARCH_HINT = '/';
+export const SEARCH_FOOTER = '↑↓ to move, Enter to open, Esc to close';
+export const SEARCH_CLOSE = 'Close';
 
 export function noResultsMessage(query: string): string {
   return `No results for "${query}".`;
@@ -26,6 +28,50 @@ export function slashShouldFocus(event: {
   if (target.isContentEditable) return false;
   const tag = target.tagName?.toUpperCase();
   return tag !== 'INPUT' && tag !== 'TEXTAREA' && tag !== 'SELECT';
+}
+
+export type IndexedSection = {
+  url?: string;
+  title?: string;
+  excerpt?: string;
+};
+
+export type IndexedHit = {
+  url: string;
+  excerpt?: string;
+  meta?: { title?: string };
+  sub_results?: IndexedSection[];
+};
+
+export type SearchRow = {
+  url: string;
+  pageTitle: string;
+  section: string;
+  excerpt: string;
+};
+
+/** Flatten Pagefind page hits into rows with a page title, optional section, and snippet. */
+export function searchRows(hits: IndexedHit[], limit: number): SearchRow[] {
+  const rows: SearchRow[] = [];
+  for (const hit of hits) {
+    if (rows.length >= limit) break;
+    const sections = hit.sub_results?.length
+      ? hit.sub_results
+      : [{ url: hit.url, title: '', excerpt: hit.excerpt }];
+    for (const sectionHit of sections) {
+      if (rows.length >= limit) break;
+      const sectionTitle = sectionHit.title?.trim() || '';
+      const url = (sectionHit.url || hit.url || '').trim();
+      const pageTitle = hit.meta?.title?.trim() || sectionTitle || url;
+      rows.push({
+        url,
+        pageTitle,
+        section: sectionTitle && sectionTitle !== pageTitle ? sectionTitle : '',
+        excerpt: sectionHit.excerpt ?? hit.excerpt ?? '',
+      });
+    }
+  }
+  return rows;
 }
 
 export function moveResultIndex(current: number, count: number, direction: 1 | -1): number {

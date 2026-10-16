@@ -70,6 +70,12 @@ for (const file of docsFiles) {
   if (!html.includes('<kbd class="docs-search-hint" aria-hidden="true">/</kbd>')) {
     failures.push(`${name} missing shortcut hint`);
   }
+  if (!html.includes('class="docs-search-open"')) failures.push(`${name} missing search button`);
+  if (!html.includes('role="dialog"')) failures.push(`${name} missing search dialog`);
+  if (!html.includes('aria-modal="true"')) failures.push(`${name} search dialog missing aria-modal`);
+  if (!html.includes('>Search docs</span>')) failures.push(`${name} missing search button text`);
+  if (!html.includes('↑↓ to move, Enter to open, Esc to close')) failures.push(`${name} missing search footer hint`);
+  if (!html.includes('>Close</button>')) failures.push(`${name} missing search close button`);
 }
 
 const entryPath = path.join(dist, 'pagefind', 'pagefind-entry.json');
