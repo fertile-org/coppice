@@ -3,7 +3,7 @@
 **Beta.** Run a team of coding agents without babysitting them.
 
 <p align="center">
-  <img src="static/screenshot.png" alt="Coppice board with tickets across the workflow columns" width="900" />
+  <img src="static/marketing.gif" alt="Write a ticket, approve the plan, and review the diff. Nothing is done until you accept it." width="960" />
 </p>
 
 **Stop babysitting agent terminals.** Queue work as tickets and let Claude Code, Codex and the rest build in parallel, each on its own branch. The board shows what's moving, what's stuck and what's waiting on you, and nothing counts as done until you've reviewed the diff. It runs on your machine with the agent CLIs you already pay for: no new subscription, no Coppice cloud, no Coppice account.

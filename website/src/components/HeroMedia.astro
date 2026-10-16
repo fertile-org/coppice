@@ -2,15 +2,16 @@
 import { withBase } from '../lib/url';
 
 const videoAlt =
-  'Coppice in five frames: a code diff waiting for human review, the ticket board, a Claude Code run in the live console, a chat with an agent, and the plugins page.';
-const stillAlt = 'Coppice board with tickets from Backlog through In Review';
+  'Coppice: write a ticket, approve the plan a PM agent drafts, let agents build and test, then comment on the diff. Nothing is done until you accept it.';
+const stillAlt = 'Coppice board with tickets for the acme-web repository';
 
 const captions = [
-  'Human Review: Agents build, you review. Read the diff, comment on any line, and nothing is done until you accept it.',
-  'Board: Your agent team works from one board on your machine, with no Coppice account and no Docker.',
-  'Agent console: Agents run on the CLIs you already pay for. Follow every thought, tool call and test, live or afterwards.',
-  'Chat: Ask an agent anything, then turn the answer into a ticket.',
-  'Plugins: Plugins give agents skills and MCP tools. Add one, enable it, and choose which agents can use it.',
+  'Write a ticket.',
+  'Your PM agent drafts a plan.',
+  'You approve it.',
+  'Agents build, review, and test.',
+  'Review the diff. Comment on any line.',
+  'Nothing is done until you accept it.',
 ];
 ---
 
@@ -36,7 +37,7 @@ const captions = [
     >
       <source src={withBase('/assets/marketing.webm')} type="video/webm" />
       <source src={withBase('/assets/marketing.mp4')} type="video/mp4" />
-      <img src={withBase('/assets/marketing.gif')} width="1440" height="900" alt={videoAlt} />
+      <img src={withBase('/assets/marketing.gif')} width="960" height="600" alt={videoAlt} />
     </video>
     <div class="hero-progress" aria-hidden="true">
       <span class="hero-progress-fill"></span>
@@ -47,6 +48,7 @@ const captions = [
       {
         captions.map((caption) => {
           const splitAt = caption.indexOf(': ');
+          if (splitAt === -1) return <li>{caption}</li>;
           const label = caption.slice(0, splitAt + 1);
           const rest = caption.slice(splitAt + 1);
           return (

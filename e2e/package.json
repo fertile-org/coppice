@@ -5,7 +5,7 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "screenshot": "node screenshot/capture.mjs",
+    "screenshot": "node screenshot/capture-hero.mjs",
     "screenshot:docs": "node screenshot/capture-docs.mjs"
   },
   "devDependencies": {

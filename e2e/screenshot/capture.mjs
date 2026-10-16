@@ -1,5 +1,8 @@
 #!/usr/bin/env node
 /**
+ * Older five-frame gallery. The homepage and README hero is capture-hero.mjs
+ * (`make screenshot` runs that, then capture-docs.mjs).
+ *
  * Marketing screenshots and GIF.
  *
  * Assumes the screenshot Compose project is already up (`make screenshot`).

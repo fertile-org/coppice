@@ -194,7 +194,7 @@ screenshot:
 	$(SCREENSHOT_COMPOSE) up -d --force-recreate --no-deps server
 	cd e2e && yarn install --frozen-lockfile
 	cd e2e && yarn playwright install chromium
-	node e2e/screenshot/capture.mjs
+	node e2e/screenshot/capture-hero.mjs
 	node e2e/screenshot/capture-docs.mjs
 
 # Docs stills only. The screenshot stack must already be up.
