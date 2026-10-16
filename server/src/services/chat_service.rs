@@ -504,6 +504,7 @@ impl<'a> ChatService<'a> {
             .await?;
 
         let mut tx = self.pool.begin().await?;
+        lock_chat_session(&mut tx, session_id).await?;
         let next_seq: i64 = sqlx::query_scalar(
             r#"
             SELECT COALESCE(MAX(seq), 0) + 1 FROM chat_messages WHERE session_id = $1
@@ -602,6 +603,7 @@ impl<'a> ChatService<'a> {
         action_metadata: Option<serde_json::Value>,
     ) -> Result<ChatMessage, ChatError> {
         let mut tx = self.pool.begin().await?;
+        lock_chat_session(&mut tx, session_id).await?;
         let next_seq: i64 = sqlx::query_scalar(
             r#"
             SELECT COALESCE(MAX(seq), 0) + 1 FROM chat_messages WHERE session_id = $1
@@ -1202,6 +1204,19 @@ impl<'a> ChatService<'a> {
             seed_message,
         })
     }
+}
+
+/// Serialize message inserts for one session. `seq` is unique per session, and
+/// a repository-copy note can land while the person is posting.
+async fn lock_chat_session(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    session_id: Uuid,
+) -> Result<(), sqlx::Error> {
+    sqlx::query("SELECT id FROM chat_sessions WHERE id = $1 FOR UPDATE")
+        .bind(session_id)
+        .execute(&mut **tx)
+        .await?;
+    Ok(())
 }
 
 fn verify_image_magic_bytes(att: &Attachment) -> Result<(), String> {
