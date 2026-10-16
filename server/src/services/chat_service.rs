@@ -77,6 +77,9 @@ pub enum ChatError {
     NotFound,
     #[error("validation error: {0}")]
     Validation(String),
+    /// Chat is off for this connector. The string is the user-facing refusal.
+    #[error("{0}")]
+    ChatUnavailable(String),
     #[error("active run already exists")]
     ActiveRunExists,
     #[error(transparent)]
@@ -205,6 +208,13 @@ pub struct CreateKnowledgeFromChatInput<'a> {
     pub board_id: Option<Uuid>,
 }
 
+fn ensure_chat_available(connector: &str) -> Result<(), ChatError> {
+    if let Some(message) = crate::providers::chat_unavailable_message(connector) {
+        return Err(ChatError::ChatUnavailable(message));
+    }
+    Ok(())
+}
+
 impl<'a> ChatService<'a> {
     pub fn new(pool: &'a PgPool) -> Self {
         Self { pool }
@@ -233,6 +243,7 @@ impl<'a> ChatService<'a> {
         if !agent.enabled {
             return Err(ChatError::Validation("agent is disabled".into()));
         }
+        ensure_chat_available(&agent.connector)?;
         if let Some(board_id) = board_id {
             BoardService::new(self.pool).get_board(board_id).await?;
         }
@@ -487,6 +498,8 @@ impl<'a> ChatService<'a> {
                 "session is not active; reopen before posting".into(),
             ));
         }
+        let agent = AgentService::new(self.pool).get(session.agent_id).await?;
+        ensure_chat_available(&agent.connector)?;
         self.validate_chat_attachments(owner_user_id, attachment_ids)
             .await?;
 
@@ -906,6 +919,9 @@ impl<'a> ChatService<'a> {
                 return Ok(draft_result(fallback, DraftTicketSource::Fallback));
             }
         };
+        if crate::providers::chat_unavailable_message(&agent.connector).is_some() {
+            return Ok(draft_result(fallback, DraftTicketSource::Fallback));
+        }
         let Some(connector) = deps.connector_registry.get(&agent.connector) else {
             return Ok(draft_result(fallback, DraftTicketSource::Fallback));
         };

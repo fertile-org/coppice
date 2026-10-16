@@ -77,7 +77,7 @@ Start at **Tools → Connectors** (admin): it shows whether `kilo` is found, whi
 ## Behavior notes
 
 - **Sign-in:** Kilo has no free non-interactive auth check (`kilo auth` opens a TUI). A found binary is labeled **Installed**, not Ready. Tools → Connectors adds: "Coppice can't check this sign-in without using your plan. A run will show an error if you're signed out."
-- **Agent Chat:** On. Kilo has no read-only flag, and the `kilo` binary was not on the machine where this was checked, so chat uses the same `kilo run --auto` flags as a ticket inside a temporary local clone of the repo with every remote removed. The chat shows: "Kilo Code can't be kept read-only. Chat runs in a temporary copy of your repo, but the agent can still run commands on your computer."
+- **Agent Chat:** Off. Kilo has no read-only flag, and the `kilo` binary was not on the machine where this was checked. A read-only run is refused before launch. Creating a chat or posting a message returns: "Chat isn't available for Kilo Code yet, because Coppice can't keep it read-only." Test connection still runs `kilo --version`. Ticket runs still use `kilo run --auto`.
 - **Live console:** Streams assistant output while the run is active. After a server restart mid-run, Coppice replays the saved log.
 - **Continued tickets:** Prefer checkpoint-style `continued` runs. Worker-wired session resume for Kilo is not fully connected yet.
 - **Daemon / serve:** Coppice uses the **subprocess** path (`kilo run`), not `kilo serve` / daemon HTTP APIs (compatibility not confirmed).

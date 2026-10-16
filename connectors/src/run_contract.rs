@@ -172,13 +172,12 @@ pub const MOCK: RunContract = RunContract {
 pub const CLAUDE_CODE: RunContract = RunContract {
     permission_mode: PermissionMode {
         write: &["--permission-mode", "bypassPermissions"],
-        // `dontAsk` denies anything that would prompt. `--allowedTools` does
-        // not constrain `bypassPermissions` (a Read allowlist still approves
-        // Write, Edit, and Bash). The launcher also passes `--disallowedTools`.
-        read_only: Some(&["--permission-mode", "dontAsk"]),
+        // Plan mode is Claude Code's read-only mode. The launcher also passes
+        // `--disallowedTools` so Write, Edit, and Bash are denied outright.
+        read_only: Some(&["--permission-mode", "plan"]),
         min_version: None,
         gate: false,
-        reason: "Write runs pin bypassPermissions so ticket work stays non-interactive. Read-only chat uses dontAsk because an allowlist does not block the other tools while bypassPermissions is set. Claude Code 2.1.284 (interactive) and 2.1.285 (`claude -p`) start in auto mode when no permission mode is set.",
+        reason: "Write runs pin bypassPermissions so ticket work stays non-interactive. Chat uses plan mode, which does not include Bash, Write, or Edit. The launcher also denies those tools.",
     },
     leading: &[
         flag(&["-p"], "Headless print mode."),
@@ -265,7 +264,7 @@ pub const KILO_CODE: RunContract = RunContract {
         read_only: None,
         min_version: None,
         gate: false,
-        reason: "Auto-approves permissions for non-interactive kilo run. Kilo has no read-only flag, so chat uses these same flags inside a temporary clone.",
+        reason: "Auto-approves permissions for non-interactive kilo run. Kilo has no read-only flag, so chat is refused instead of launching.",
     },
     leading: &[
         flag(&["run"], "Non-interactive run."),
@@ -444,12 +443,13 @@ mod tests {
     }
 
     #[test]
-    fn claude_read_only_uses_dont_ask_not_bypass() {
+    fn claude_read_only_uses_plan_not_bypass() {
         let argv = CLAUDE_CODE.argv(&subst(Some("2.1.292"), true));
         assert!(argv
             .windows(2)
-            .any(|w| w == ["--permission-mode", "dontAsk"]));
+            .any(|w| w == ["--permission-mode", "plan"]));
         assert!(!argv.iter().any(|arg| arg == "bypassPermissions"));
+        assert!(!argv.iter().any(|arg| arg == "dontAsk"));
     }
 
     #[test]

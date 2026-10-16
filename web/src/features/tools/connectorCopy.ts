@@ -39,22 +39,43 @@ export function signInUncheckedHint(
     : null;
 }
 
-/**
- * CLIs whose live write test failed or could not be run. Chat stays on.
- * The banner uses the CLI display name.
- */
-const CHAT_ISOLATION_NAMES: Record<string, string> = {
-  'claude-code': 'Claude Code',
-  cursor: 'Cursor',
-  codex: 'Codex',
-  'kilo-code': 'Kilo Code',
+type ChatReadOnlyStatus = 'passed' | 'untested' | 'failed' | 'unavailable';
+
+/** Per-CLI chat status. Unknown ids fail closed as unavailable. */
+const CHAT_READ_ONLY: Record<string, { name: string; status: ChatReadOnlyStatus }> = {
+  'claude-code': { name: 'Claude Code', status: 'untested' },
+  cursor: { name: 'Cursor', status: 'unavailable' },
+  codex: { name: 'Codex', status: 'untested' },
+  'kilo-code': { name: 'Kilo Code', status: 'unavailable' },
+  opencode: { name: 'OpenCode', status: 'passed' },
+  mock: { name: 'Mock', status: 'passed' },
 };
 
-export function chatIsolationBanner(connectorId: string | null | undefined): string | null {
+function chatConnector(
+  connectorId: string | null | undefined,
+): { name: string; status: ChatReadOnlyStatus } | null {
   if (!connectorId) return null;
-  const name = CHAT_ISOLATION_NAMES[connectorId];
-  if (!name) return null;
-  return `${name} can't be kept read-only. Chat runs in a temporary copy of your repo, but the agent can still run commands on your computer.`;
+  return CHAT_READ_ONLY[connectorId] ?? { name: connectorId, status: 'unavailable' };
+}
+
+/** Warning when chat is on but the CLI is untested or marked failed. */
+export function chatIsolationBanner(connectorId: string | null | undefined): string | null {
+  const entry = chatConnector(connectorId);
+  if (!entry) return null;
+  if (entry.status === 'untested') {
+    return `Coppice hasn't confirmed that ${entry.name} stays read-only, so chat runs in a temporary copy of your repo. The agent can still run commands on your computer.`;
+  }
+  if (entry.status === 'failed') {
+    return `${entry.name} can't be kept read-only. Chat runs in a temporary copy of your repo, but the agent can still run commands on your computer.`;
+  }
+  return null;
+}
+
+/** Why Start chat is off. One sentence per CLI. */
+export function chatUnavailableMessage(connectorId: string | null | undefined): string | null {
+  const entry = chatConnector(connectorId);
+  if (!entry || entry.status !== 'unavailable') return null;
+  return `Chat isn't available for ${entry.name} yet, because Coppice can't keep it read-only.`;
 }
 
 export function notOnPathHint(name: string): string {

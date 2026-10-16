@@ -5,8 +5,8 @@ use uuid::Uuid;
 /// Resolve the working directory for a chat turn.
 ///
 /// - Verified read-only connector with a bound repo → registered `local_path`
-/// - Any other connector with a bound repo → a local clone of that repo at
-///   the current HEAD, with every remote removed
+/// - Any other connector with a bound repo → `git clone --local --no-hardlinks`
+///   of that repo at the current HEAD, with every remote removed
 /// - Unbound → `$WORKTREES_PATH/chat/{session_id}/` (created if missing)
 ///
 /// Never returns `/` and never attaches to `TICKET-*` worktrees. An isolated
@@ -77,7 +77,10 @@ fn prepare_isolated_clone(
     let source_head = git_stdout(Some(repo), &["rev-parse", "HEAD"])?;
     let src = repo.display().to_string();
     let dst = dest.display().to_string();
-    git_stdout(None, &["clone", "--local", &src, &dst])?;
+    git_stdout(
+        None,
+        &["clone", "--local", "--no-hardlinks", &src, &dst],
+    )?;
     let cloned_head = git_stdout(Some(&dest), &["rev-parse", "HEAD"])?;
     if cloned_head != source_head {
         git_stdout(Some(&dest), &["checkout", "--detach", &source_head])?;
@@ -156,6 +159,7 @@ fn validate_cwd(path: &Path) -> std::io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::os::unix::fs::MetadataExt;
     use std::process::Command;
     use tempfile::tempdir;
 
@@ -171,6 +175,13 @@ mod tests {
             .status()
             .expect("git");
         assert!(status.success(), "git {} failed", args.join(" "));
+    }
+
+    fn loose_object(repo: &Path, sha: &str) -> PathBuf {
+        repo.join(".git")
+            .join("objects")
+            .join(&sha[..2])
+            .join(&sha[2..])
     }
 
     fn init_repo_at_detached_head(root: &Path) -> (PathBuf, String) {
@@ -255,6 +266,16 @@ mod tests {
         assert_eq!(
             std::fs::read_to_string(cwd.join("README.md")).unwrap(),
             "one\n"
+        );
+        let blob = git_stdout(Some(&repo), &["rev-parse", "HEAD:README.md"]).unwrap();
+        let src_object = loose_object(&repo, &blob);
+        let dst_object = loose_object(&cwd, &blob);
+        let src_meta = std::fs::metadata(&src_object).unwrap();
+        let dst_meta = std::fs::metadata(&dst_object).unwrap();
+        assert_ne!(
+            src_meta.ino(),
+            dst_meta.ino(),
+            "clone objects must not be hardlinked to the checkout"
         );
 
         let again =

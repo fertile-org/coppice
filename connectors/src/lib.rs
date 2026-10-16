@@ -18,6 +18,29 @@ pub const CODEX: &str = "codex";
 pub const KILO_CODE: &str = "kilo-code";
 pub const OPENCODE: &str = "opencode";
 
+/// How chat treats one connector. Change an arm to flip a CLI later.
+/// `Failed` is reserved until a write test shows that CLI can still write.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChatReadOnlyStatus {
+    /// A live write test blocked writes. Chat uses the registered checkout.
+    Passed,
+    /// Not shown to block writes. Chat stays on, in a temporary clone.
+    Untested,
+    /// Shown to write through its read-only mode. Chat stays on, in a clone.
+    Failed,
+    /// Chat does not start.
+    Unavailable,
+}
+
+pub fn chat_read_only_status(connector: &str) -> ChatReadOnlyStatus {
+    match connector {
+        OPENCODE | MOCK => ChatReadOnlyStatus::Passed,
+        CLAUDE_CODE | CODEX => ChatReadOnlyStatus::Untested,
+        CURSOR | KILO_CODE => ChatReadOnlyStatus::Unavailable,
+        _ => ChatReadOnlyStatus::Unavailable,
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ConnectorDescriptor {
     /// Matches `[agent.connectors.<id>]` in config and `agents.connector`.

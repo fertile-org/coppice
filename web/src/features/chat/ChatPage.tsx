@@ -21,7 +21,7 @@ import {
 } from '../../lib/attachments';
 import { filterChatSessions } from '../../lib/chatSessionSearch';
 import type { ChatSession, ChatSessionStatus } from '../../lib/schemas/chat';
-import { chatIsolationBanner } from '../tools/connectorCopy';
+import { chatIsolationBanner, chatUnavailableMessage } from '../tools/connectorCopy';
 import { cn } from '../../lib/utils';
 import { useAgents } from '../agents/useAgents';
 import { useBoards } from '../boards/useBoards';
@@ -151,12 +151,16 @@ function NewChatForm({
   const [error, setError] = useState<string | null>(null);
   const selected = enabledAgents.find((agent) => agent.id === agentId);
   const chatBanner = chatIsolationBanner(selected?.connector);
+  const chatUnavailable = chatUnavailableMessage(selected?.connector);
 
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
     setError(null);
     if (!agentId) {
       setError('Select an agent.');
+      return;
+    }
+    if (chatUnavailable) {
       return;
     }
     try {
@@ -215,7 +219,17 @@ function NewChatForm({
         />
       </div>
 
-      {chatBanner && (
+      {chatUnavailable ? (
+        <p
+          className="rounded-md border border-warning-muted bg-warning-muted/40 px-3 py-2 font-body text-sm text-text-primary"
+          role="status"
+          data-testid="chat-unavailable"
+        >
+          {chatUnavailable}
+        </p>
+      ) : null}
+
+      {chatBanner ? (
         <p
           className="rounded-md border border-warning-muted bg-warning-muted/40 px-3 py-2 font-body text-sm text-text-primary"
           role="status"
@@ -223,7 +237,7 @@ function NewChatForm({
         >
           {chatBanner}
         </p>
-      )}
+      ) : null}
 
       {error && (
         <p className="font-body text-sm text-danger" role="alert">
@@ -231,7 +245,7 @@ function NewChatForm({
         </p>
       )}
 
-      <Button type="submit" disabled={createSession.isPending}>
+      <Button type="submit" disabled={createSession.isPending || Boolean(chatUnavailable)}>
         {createSession.isPending ? 'Starting…' : 'Start chat'}
       </Button>
     </form>
@@ -467,6 +481,7 @@ function ChatSessionPane({ sessionId }: { sessionId: string }) {
   const agent = agents.find((item) => item.id === session?.agentId);
   const agentName = agent?.name ?? 'Agent';
   const chatBanner = chatIsolationBanner(agent?.connector);
+  const chatUnavailable = chatUnavailableMessage(agent?.connector);
 
   const onLiveFinished = useCallback(() => {
     setActiveRunId(null);
@@ -534,6 +549,14 @@ function ChatSessionPane({ sessionId }: { sessionId: string }) {
           <Link to="/chat" className="text-accent hover:underline">
             Start a new chat
           </Link>
+        </p>
+      ) : chatUnavailable ? (
+        <p
+          className="shrink-0 border-t border-warning-muted bg-warning-muted/40 px-4 py-3 font-body text-sm text-text-primary"
+          role="status"
+          data-testid="chat-unavailable"
+        >
+          {chatUnavailable}
         </p>
       ) : (
         <ChatComposer

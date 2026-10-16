@@ -948,6 +948,9 @@ async fn execute_chat_turn(
         .get(run.agent_id)
         .await
         .context("load agent")?;
+    if let Some(message) = crate::providers::chat_unavailable_message(&agent.connector) {
+        anyhow::bail!(message);
+    }
     let agent_key = agent
         .preset_source
         .clone()

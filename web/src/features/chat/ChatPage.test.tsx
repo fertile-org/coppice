@@ -275,19 +275,11 @@ describe('ChatPage', () => {
   it.each([
     [
       'Backend Engineer',
-      "Claude Code can't be kept read-only. Chat runs in a temporary copy of your repo, but the agent can still run commands on your computer.",
-    ],
-    [
-      'Kilo Agent',
-      "Kilo Code can't be kept read-only. Chat runs in a temporary copy of your repo, but the agent can still run commands on your computer.",
+      "Coppice hasn't confirmed that Claude Code stays read-only, so chat runs in a temporary copy of your repo. The agent can still run commands on your computer.",
     ],
     [
       'Codex Agent',
-      "Codex can't be kept read-only. Chat runs in a temporary copy of your repo, but the agent can still run commands on your computer.",
-    ],
-    [
-      'Cursor Agent',
-      "Cursor can't be kept read-only. Chat runs in a temporary copy of your repo, but the agent can still run commands on your computer.",
+      "Coppice hasn't confirmed that Codex stays read-only, so chat runs in a temporary copy of your repo. The agent can still run commands on your computer.",
     ],
   ])('warns and still starts chat for %s', async (agentName, message) => {
     mocks.createSession.mockResolvedValue({
@@ -305,11 +297,33 @@ describe('ChatPage', () => {
     selectComboboxOption(screen.getByLabelText('Agent'), agentName);
 
     expect(screen.getByTestId('chat-isolation-banner')).toHaveTextContent(message);
+    expect(screen.queryByTestId('chat-unavailable')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Start chat' })).toBeEnabled();
     fireEvent.click(screen.getByRole('button', { name: 'Start chat' }));
     await waitFor(() => {
       expect(mocks.createSession).toHaveBeenCalled();
     });
+  });
+
+  it.each([
+    [
+      'Kilo Agent',
+      "Chat isn't available for Kilo Code yet, because Coppice can't keep it read-only.",
+    ],
+    [
+      'Cursor Agent',
+      "Chat isn't available for Cursor yet, because Coppice can't keep it read-only.",
+    ],
+  ])('refuses to start chat for %s', (agentName, message) => {
+    renderChat('/chat');
+
+    selectComboboxOption(screen.getByLabelText('Agent'), agentName);
+
+    expect(screen.getByTestId('chat-unavailable')).toHaveTextContent(message);
+    expect(screen.queryByTestId('chat-isolation-banner')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Start chat' })).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Start chat' }));
+    expect(mocks.createSession).not.toHaveBeenCalled();
   });
 
   it('starts OpenCode chat with no isolation banner', () => {
@@ -324,19 +338,11 @@ describe('ChatPage', () => {
   it.each([
     [
       '00000000-0000-4000-8000-000000000010',
-      "Claude Code can't be kept read-only. Chat runs in a temporary copy of your repo, but the agent can still run commands on your computer.",
-    ],
-    [
-      '00000000-0000-4000-8000-000000000012',
-      "Kilo Code can't be kept read-only. Chat runs in a temporary copy of your repo, but the agent can still run commands on your computer.",
+      "Coppice hasn't confirmed that Claude Code stays read-only, so chat runs in a temporary copy of your repo. The agent can still run commands on your computer.",
     ],
     [
       '00000000-0000-4000-8000-000000000013',
-      "Codex can't be kept read-only. Chat runs in a temporary copy of your repo, but the agent can still run commands on your computer.",
-    ],
-    [
-      '00000000-0000-4000-8000-000000000015',
-      "Cursor can't be kept read-only. Chat runs in a temporary copy of your repo, but the agent can still run commands on your computer.",
+      "Coppice hasn't confirmed that Codex stays read-only, so chat runs in a temporary copy of your repo. The agent can still run commands on your computer.",
     ],
   ])('shows the isolation banner and the composer for %s', (agentId, message) => {
     mocks.sessions = [
@@ -349,6 +355,30 @@ describe('ChatPage', () => {
 
     expect(screen.getByTestId('chat-isolation-banner')).toHaveTextContent(message);
     expect(screen.getByTestId('chat-composer')).toBeInTheDocument();
+    expect(screen.queryByTestId('chat-unavailable')).not.toBeInTheDocument();
+  });
+
+  it.each([
+    [
+      '00000000-0000-4000-8000-000000000012',
+      "Chat isn't available for Kilo Code yet, because Coppice can't keep it read-only.",
+    ],
+    [
+      '00000000-0000-4000-8000-000000000015',
+      "Chat isn't available for Cursor yet, because Coppice can't keep it read-only.",
+    ],
+  ])('hides the composer and shows the refusal for %s', (agentId, message) => {
+    mocks.sessions = [
+      {
+        ...ACTIVE_SESSION,
+        agentId,
+      },
+    ];
+    renderChat(`/chat/${ACTIVE_SESSION.id}`);
+
+    expect(screen.getByTestId('chat-unavailable')).toHaveTextContent(message);
+    expect(screen.queryByTestId('chat-isolation-banner')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('chat-composer')).not.toBeInTheDocument();
   });
 
   it('hides the isolation banner for an OpenCode session', () => {
@@ -880,6 +910,18 @@ describe('ChatPage', () => {
       );
       expect(screen.getByTestId('chat-composer')).toBeInTheDocument();
     });
+  });
+
+  it('shows the continue error when a new chat cannot start', async () => {
+    mocks.sessions = [ACTIVE_SESSION];
+    mocks.cutoffSession.mockRejectedValue(new Error('network'));
+    renderChat(`/chat/${ACTIVE_SESSION.id}`);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Continue in new chat' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      "Couldn't start a new chat. Try again.",
+    );
   });
 
   it('labels a continued session and hides the composer', () => {

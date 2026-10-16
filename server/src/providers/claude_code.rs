@@ -21,9 +21,10 @@ const ALLOWED_TOOLS: &str =
     "Read,Write,Edit,MultiEdit,Bash,NotebookEdit,WebFetch,WebSearch,Glob,Grep,TodoWrite,Task";
 
 /// Removed from the model on read-only runs. A bare deny drops the tool before
-/// permission mode is considered, including `dontAsk` (which still allows
-/// read-only Bash) and `bypassPermissions` (which approves every tool an
-/// allowlist does not name).
+/// permission mode is considered. Chat uses `--permission-mode plan`, which
+/// does not include Bash, Write, or Edit. `bypassPermissions` still approves
+/// every tool an allowlist does not name, so ticket runs are the only path
+/// that uses it.
 const CHAT_DISALLOWED_TOOLS: &str = "Write,Edit,MultiEdit,NotebookEdit,Bash,TodoWrite,Task";
 
 /// Per-run MCP config file (never the worktree or the user's `~/.claude.json`)
@@ -411,7 +412,7 @@ mod tests {
         let args = chat_argv(true, false, false);
         assert!(
             args.windows(2)
-                .any(|pair| pair == ["--permission-mode", "dontAsk"]),
+                .any(|pair| pair == ["--permission-mode", "plan"]),
             "{args:?}"
         );
         assert!(
