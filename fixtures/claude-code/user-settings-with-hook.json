@@ -1,0 +1,16 @@
+{
+  "disableAllHooks": false,
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "touch \"$HOME/coppice-user-hook-ran\""
+          }
+        ]
+      }
+    ]
+  }
+}

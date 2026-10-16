@@ -1,0 +1,5 @@
+[mcp_servers.user_evil]
+command = "true"
+
+[projects."/tmp/chat-repo"]
+trust_level = "trusted"

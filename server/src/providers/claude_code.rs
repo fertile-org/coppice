@@ -27,6 +27,27 @@ const ALLOWED_TOOLS: &str =
 /// that uses it.
 const CHAT_DISALLOWED_TOOLS: &str = "Write,Edit,MultiEdit,NotebookEdit,Bash,TodoWrite,Task";
 
+/// Inline settings for a chat process. Claude Code applies `--settings` above
+/// user, project, and local files and below managed settings
+/// (https://code.claude.com/docs/en/settings). `disableAllHooks: true` from
+/// that layer turns off hooks in `~/.claude/settings.json`,
+/// `.claude/settings.json`, and `.claude/settings.local.json`, plus plugin
+/// hooks. Managed hooks still run; only managed settings can disable those
+/// (https://code.claude.com/docs/en/settings-reference). `CLAUDE_CONFIG_DIR`
+/// is left alone so login files under `~/.claude` stay in place.
+const CHAT_SETTINGS_JSON: &str = r#"{"disableAllHooks":true}"#;
+
+/// Drop project and local settings files (including their hooks). User
+/// settings still load, and [`CHAT_SETTINGS_JSON`] disables the hooks in them.
+const CHAT_SETTING_SOURCES: &str = "user";
+
+fn push_chat_hook_lock(args: &mut Vec<String>) {
+    args.push("--settings".to_string());
+    args.push(CHAT_SETTINGS_JSON.to_string());
+    args.push("--setting-sources".to_string());
+    args.push(CHAT_SETTING_SOURCES.to_string());
+}
+
 /// Per-run MCP config file (never the worktree or the user's `~/.claude.json`)
 /// plus the flags that make `claude` load it and nothing else.
 ///
@@ -111,6 +132,9 @@ impl AgentProvider for ClaudeCodeProvider {
             coppice_run_prompt(),
         );
         push_tool_permission_args(&mut args, read_only_tools, input.mcp.is_some());
+        if input.context_profile == crate::domain::context_profile::ContextProfile::Conversation {
+            push_chat_hook_lock(&mut args);
+        }
 
         append_model_flag(&mut args, input.model.as_deref());
 
@@ -397,7 +421,52 @@ mod tests {
             "prompt",
         );
         push_tool_permission_args(&mut args, read_only || plan, mcp);
+        // Chat is read-only and not a plan run. Plan and ticket runs leave hooks alone.
+        if read_only && !plan {
+            push_chat_hook_lock(&mut args);
+        }
         args
+    }
+
+    fn hook_commands(settings: &serde_json::Value) -> Vec<String> {
+        let mut commands = Vec::new();
+        let Some(events) = settings.get("hooks").and_then(|v| v.as_object()) else {
+            return commands;
+        };
+        for groups in events.values().filter_map(|v| v.as_array()) {
+            for group in groups {
+                let Some(hooks) = group.get("hooks").and_then(|v| v.as_array()) else {
+                    continue;
+                };
+                for hook in hooks {
+                    if let Some(command) = hook.get("command").and_then(|v| v.as_str()) {
+                        commands.push(command.to_string());
+                    }
+                }
+            }
+        }
+        commands
+    }
+
+    /// `--settings` wins over the same key in user settings. A true value
+    /// disables the hook commands that file still contains.
+    fn enabled_hook_commands(
+        user_settings: &serde_json::Value,
+        cli_settings: &serde_json::Value,
+    ) -> Vec<String> {
+        let disabled = if let Some(value) = cli_settings.get("disableAllHooks") {
+            value.as_bool() == Some(true)
+        } else {
+            user_settings
+                .get("disableAllHooks")
+                .and_then(|v| v.as_bool())
+                == Some(true)
+        };
+        if disabled {
+            Vec::new()
+        } else {
+            hook_commands(user_settings)
+        }
     }
 
     fn flag_value<'a>(args: &'a [String], flag: &str) -> &'a str {
@@ -420,6 +489,8 @@ mod tests {
             "bypassPermissions approves tools outside --allowedTools: {args:?}"
         );
         assert_eq!(flag_value(&args, "--allowedTools"), CHAT_READ_ONLY_TOOLS);
+        assert_eq!(flag_value(&args, "--settings"), CHAT_SETTINGS_JSON);
+        assert_eq!(flag_value(&args, "--setting-sources"), CHAT_SETTING_SOURCES);
         let disallowed: Vec<_> = flag_value(&args, "--disallowedTools").split(',').collect();
         for tool in [
             "Write",
@@ -448,7 +519,32 @@ mod tests {
             .windows(2)
             .any(|pair| pair == ["--permission-mode", "bypassPermissions"]));
         assert!(!args.iter().any(|arg| arg == "--disallowedTools"));
+        assert!(!args.iter().any(|arg| arg == "--settings"));
+        assert!(!args.iter().any(|arg| arg == "--setting-sources"));
         assert_eq!(flag_value(&args, "--allowedTools"), ALLOWED_TOOLS);
+    }
+
+    #[test]
+    fn chat_settings_disable_a_user_level_hook() {
+        let raw = std::fs::read_to_string(fixtures_root().join("user-settings-with-hook.json"))
+            .expect("user hook fixture");
+        let user: serde_json::Value = serde_json::from_str(&raw).expect("parse user settings");
+        let stored = hook_commands(&user);
+        assert_eq!(stored, vec!["touch \"$HOME/coppice-user-hook-ran\"".to_string()]);
+        assert_eq!(
+            enabled_hook_commands(&user, &serde_json::json!({})),
+            stored,
+            "the fixture hook runs when chat does not pass --settings"
+        );
+
+        let args = chat_argv(true, false, false);
+        let cli: serde_json::Value =
+            serde_json::from_str(flag_value(&args, "--settings")).expect("chat --settings json");
+        assert_eq!(cli["disableAllHooks"], true);
+        assert!(
+            enabled_hook_commands(&user, &cli).is_empty(),
+            "user hook must be disabled: {stored:?}"
+        );
     }
 
     #[test]
@@ -461,6 +557,10 @@ mod tests {
         assert!(flag_value(&args, "--disallowedTools")
             .split(',')
             .any(|tool| tool == "Bash"));
+        assert!(
+            !args.iter().any(|arg| arg == "--settings"),
+            "plan runs are not chat: {args:?}"
+        );
         assert!(flag_value(&args, "--allowedTools").ends_with(",mcp__coppice__*"));
     }
 
