@@ -6,11 +6,18 @@ import {
 } from '../../components/MarkdownEditor';
 import { TicketMarkdown } from '../../components/TicketMarkdown';
 import { useToast } from '../../components/ToastProvider';
+import {
+  attachmentFailedMessage,
+  imageFilesFromClipboard,
+  isFileDrag,
+  partitionAttachmentFiles,
+} from '../../lib/attachmentFiles';
 import { formatFileSize, isImageContentType } from '../../lib/attachments';
 import type { MentionMode } from '../../lib/schemas/ticket';
 import { useRegisterShortcut } from '../keyboard/useKeyboard';
 import { Button } from '../../components/ui/button';
 import { Combobox } from '../../components/ui/combobox';
+import { AttachFilesButton } from './AttachFilesButton';
 import { CommentAttachments } from './CommentAttachments';
 import { useAgents, type Agent } from '../agents/useAgents';
 import {
@@ -138,7 +145,6 @@ export function TicketCommentsTab({ ticketId }: TicketCommentsTabProps) {
   );
   const createComment = useCreateComment(ticketId);
   const uploadAttachment = useUploadAttachment();
-  const fileInputRef = useRef<HTMLInputElement>(null);
   const formRef = useRef<HTMLFormElement>(null);
   const editorRef = useRef<MarkdownEditorHandle>(null);
 
@@ -147,6 +153,7 @@ export function TicketCommentsTab({ ticketId }: TicketCommentsTabProps) {
   const [mentionMatch, setMentionMatch] = useState<MentionMatch | null>(null);
   const [pendingFiles, setPendingFiles] = useState<PendingFile[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [dropActive, setDropActive] = useState(false);
 
   const pendingFilesRef = useRef(pendingFiles);
   pendingFilesRef.current = pendingFiles;
@@ -162,9 +169,13 @@ export function TicketCommentsTab({ ticketId }: TicketCommentsTabProps) {
   }, []);
 
   function addPendingFiles(files: FileList | File[]) {
-    const next = Array.from(files).map(pendingFileFromFile);
-    if (next.length === 0) return;
-    setPendingFiles((current) => [...current, ...next]);
+    const { accepted, errors } = partitionAttachmentFiles(Array.from(files));
+    for (const message of errors) toast.error(message);
+    if (accepted.length === 0) return;
+    setPendingFiles((current) => [
+      ...current,
+      ...accepted.map(pendingFileFromFile),
+    ]);
   }
 
   function insertMention(key: string) {
@@ -206,8 +217,13 @@ export function TicketCommentsTab({ ticketId }: TicketCommentsTabProps) {
     try {
       const attachmentIds: string[] = [];
       for (const pending of pendingFiles) {
-        const uploaded = await uploadAttachment.mutateAsync(pending.file);
-        attachmentIds.push(uploaded.id);
+        try {
+          const uploaded = await uploadAttachment.mutateAsync(pending.file);
+          attachmentIds.push(uploaded.id);
+        } catch {
+          toast.error(attachmentFailedMessage(pending.file));
+          return;
+        }
       }
 
       const result = await createComment.mutateAsync({
@@ -232,7 +248,6 @@ export function TicketCommentsTab({ ticketId }: TicketCommentsTabProps) {
         }
         return [];
       });
-      if (fileInputRef.current) fileInputRef.current.value = '';
     } catch {
       setError('Unable to post comment.');
     }
@@ -257,9 +272,45 @@ export function TicketCommentsTab({ ticketId }: TicketCommentsTabProps) {
     <div className="flex h-full flex-col gap-4">
       <form
         ref={formRef}
+        data-attachment-zone="comment"
         onSubmit={(e) => void handleSubmit(e)}
-        className="shrink-0 space-y-3 border-b border-border pb-4"
+        onDragEnter={(event) => {
+          if (!isFileDrag(event.dataTransfer)) return;
+          event.preventDefault();
+          setDropActive(true);
+        }}
+        onDragOver={(event) => {
+          if (!isFileDrag(event.dataTransfer)) return;
+          event.preventDefault();
+          setDropActive(true);
+        }}
+        onDragLeave={(event) => {
+          if (event.currentTarget.contains(event.relatedTarget as Node)) return;
+          setDropActive(false);
+        }}
+        onDrop={(event) => {
+          if (!isFileDrag(event.dataTransfer)) return;
+          event.preventDefault();
+          event.stopPropagation();
+          setDropActive(false);
+          addPendingFiles(event.dataTransfer.files);
+        }}
+        onPaste={(event) => {
+          const images = imageFilesFromClipboard(event.clipboardData);
+          if (images.length === 0) return;
+          event.preventDefault();
+          event.stopPropagation();
+          addPendingFiles(images);
+        }}
+        className="relative shrink-0 space-y-3 border-b border-border pb-4"
       >
+        {dropActive && (
+          <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center rounded-md border-2 border-dashed border-accent bg-paper-50/90">
+            <p className="font-body text-sm font-medium text-text-primary">
+              Drop to add to your comment
+            </p>
+          </div>
+        )}
         {error && (
           <p className="rounded-md border border-danger-muted bg-danger-muted/40 px-3 py-2 font-body text-sm text-danger">
             {error}
@@ -368,18 +419,7 @@ export function TicketCommentsTab({ ticketId }: TicketCommentsTabProps) {
 
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-2">
-            <input
-              ref={fileInputRef}
-              type="file"
-              multiple
-              onChange={(e) => {
-                if (e.target.files) {
-                  addPendingFiles(e.target.files);
-                }
-                e.target.value = '';
-              }}
-              className="max-w-xs font-body text-xs text-text-secondary file:mr-2 file:rounded-md file:border file:border-border file:bg-surface-raised file:px-2 file:py-1 file:font-body file:text-xs file:text-text-secondary"
-            />
+            <AttachFilesButton disabled={isBusy} onFiles={addPendingFiles} />
             {pendingFiles.length > 0 && (
               <span className="font-body text-xs text-text-muted">
                 {pendingFiles.length} file{pendingFiles.length === 1 ? '' : 's'}{' '}
