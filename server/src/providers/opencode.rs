@@ -2,6 +2,7 @@ use super::{
     mcp_unavailable, run_dir, worktree_dir_from_context, AgentProvider, AgentRunInput,
     AgentRunResult, ProviderError,
 };
+use crate::services::ticket_attachments;
 use crate::sessions::opencode_client::OpenCodeClient;
 use crate::sessions::opencode_events::coppice_run_prompt;
 use crate::sessions::opencode_run_server::{opencode_run_config, OpenCodeRunServers};
@@ -43,9 +44,16 @@ impl AgentProvider for OpenCodeProvider {
         if let Some(parent) = config_path.parent() {
             std::fs::create_dir_all(parent)?;
         }
+        let staged = ticket_attachments::load_for_run(
+            input.artifacts_dir.as_deref(),
+            input.ticket_id.as_deref(),
+        );
         std::fs::write(
             &config_path,
-            opencode_run_config(input.mcp.as_ref(), input.read_only_tools),
+            ticket_attachments::with_attachment_read(
+                &opencode_run_config(input.mcp.as_ref(), input.read_only_tools),
+                ticket_attachments::external_read_dir(&staged).as_deref(),
+            ),
         )?;
 
         let key = input
@@ -76,7 +84,7 @@ impl AgentProvider for OpenCodeProvider {
                 input.model_provider.as_deref(),
                 input.model.as_deref(),
                 input.resume_session_id.as_deref(),
-                coppice_run_prompt(),
+                &ticket_attachments::launch_prompt(coppice_run_prompt(), &staged),
                 input.stream,
                 input.cancel_rx,
                 input.session_created_tx,

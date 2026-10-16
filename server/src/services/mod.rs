@@ -41,6 +41,7 @@ pub mod run_tool_call_service;
 pub mod secret_rotation;
 pub mod secret_service;
 pub mod split_service;
+pub mod ticket_attachments;
 pub mod ticket_git_service;
 pub mod ticket_service;
 pub mod ticket_thread;

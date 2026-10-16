@@ -10,6 +10,7 @@ use super::{
 };
 use crate::mcp::grant::McpAccess;
 use crate::mcp::wiring::McpServerSpec;
+use crate::services::ticket_attachments;
 use crate::sessions::opencode_events::{coppice_run_prompt, extract_result_from_text};
 use crate::sessions::run_registry::RunStreamHandle;
 use async_trait::async_trait;
@@ -46,14 +47,20 @@ impl AgentProvider for CursorProvider {
             ProviderError::InvalidFixture(cli_version::version_unavailable(command, &err))
         })?;
 
-        let args = cursor_cli_args(
+        let staged = ticket_attachments::load_for_run(
+            input.artifacts_dir.as_deref(),
+            input.ticket_id.as_deref(),
+        );
+        let mut args = cursor_cli_args(
             &worktree,
             input.read_only_tools,
             input.job_type == crate::domain::workflow::JOB_TYPE_PLAN_TICKET,
             input.model.as_deref(),
             input.resume_session_id.as_deref(),
             Some(version.as_str()),
+            &ticket_attachments::launch_prompt(coppice_run_prompt(), &staged),
         );
+        args.extend(ticket_attachments::add_dir_args(&staged));
 
         // Auth is host-managed: the operator runs `agent login` wherever the
         // server runs. The child process inherits that environment directly.
@@ -240,6 +247,7 @@ fn cursor_cli_args(
     model: Option<&str>,
     resume_session_id: Option<&str>,
     version: Option<&str>,
+    prompt: &str,
 ) -> Vec<String> {
     let contract = coppice_connectors::get(coppice_connectors::CURSOR)
         .expect("cursor descriptor")
@@ -253,7 +261,7 @@ fn cursor_cli_args(
         port: "",
         version,
     });
-    let mut args = contract.with_prompt(pinned, coppice_run_prompt());
+    let mut args = contract.with_prompt(pinned, prompt);
     crate::providers::model_flag::push_model_flag(&mut args, "--model", model);
     if let Some(sid) = resume_session_id {
         if !sid.is_empty() {
@@ -426,6 +434,7 @@ mod tests {
             Some("auto"),
             None,
             None,
+            coppice_run_prompt(),
         );
         assert!(args.windows(2).any(|w| w == ["--mode", "ask"]));
         assert!(!args.iter().any(|a| a == "--force"));
@@ -435,7 +444,15 @@ mod tests {
     #[test]
     fn blank_model_omits_model_flag_from_launched_command() {
         for model in [None, Some(""), Some("   ")] {
-            let args = cursor_cli_args(Path::new("/tmp/wt"), false, false, model, None, None);
+            let args = cursor_cli_args(
+                Path::new("/tmp/wt"),
+                false,
+                false,
+                model,
+                None,
+                None,
+                coppice_run_prompt(),
+            );
             assert!(
                 args.iter().all(|arg| arg != "--model" && arg != "-m"),
                 "model {model:?} launched {args:?}"
@@ -452,6 +469,7 @@ mod tests {
             None,
             Some("sess-1"),
             None,
+            coppice_run_prompt(),
         );
         assert!(args.iter().any(|a| a == "--force"));
         assert!(!args.windows(2).any(|w| w == ["--mode", "ask"]));
@@ -460,7 +478,15 @@ mod tests {
 
     #[test]
     fn plan_runs_use_ask_mode_without_force() {
-        let args = cursor_cli_args(Path::new("/tmp/plan"), false, true, None, None, None);
+        let args = cursor_cli_args(
+            Path::new("/tmp/plan"),
+            false,
+            true,
+            None,
+            None,
+            None,
+            coppice_run_prompt(),
+        );
         assert!(args.windows(2).any(|w| w == ["--mode", "ask"]));
         assert!(!args.iter().any(|a| a == "--force"));
     }
