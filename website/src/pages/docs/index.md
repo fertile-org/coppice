@@ -22,5 +22,6 @@ Coppice lets you run several coding agents at once without babysitting them: que
 - [Settings](/docs/settings): Every field in config.toml
 - [Keyboard shortcuts](/docs/shortcuts): Default keys for the board, tickets, and review
 - [Backup data](/docs/backup): Back up, move, and replace keys
+- [Chat with agents](/docs/chat): Ask an agent about your code, and turn the answer into a ticket.
 
 Contributing or hacking on the code? See the [repo docs](https://github.com/fertile-org/coppice/tree/main/docs) on GitHub.
