@@ -221,12 +221,6 @@ export function BackupTab() {
         </form>
       </section>
 
-      {!desktopMode && (
-        <p className="max-w-2xl font-body text-sm text-text-secondary">
-          On a server, stop Coppice and run <code>coppice-server replace-keys</code>.
-        </p>
-      )}
-
       {desktopMode && (
         <section className="rounded-xl border border-border bg-surface-raised p-6 shadow-card">
           <h2 className="font-display text-lg font-semibold text-text-primary">

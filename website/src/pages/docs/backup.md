@@ -36,7 +36,3 @@ This copy includes the `secrets` folder, so treat it like a password. Your CLI s
 If you shared a backup, or think someone else has a copy, make new keys.
 
 Open **Tools**, then **Backup**, and choose **Replace keys**. Enter a new admin password and check the box. Coppice makes new keys and a new database password. Your saved tokens keep working, and everyone is signed out.
-
-## Backups from rc.7 or earlier
-
-Those backups contain your Coppice keys and passwords in plain text. Delete them, or keep them somewhere private. If you shared one, replace your keys.

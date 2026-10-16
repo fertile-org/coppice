@@ -129,11 +129,7 @@ describe('ToolsPage', () => {
   it('hides replace keys outside the desktop app', () => {
     renderPage();
     expect(screen.queryByRole('heading', { name: 'Replace keys' })).not.toBeInTheDocument();
-    const command = screen.getByText('coppice-server replace-keys');
-    expect(command.tagName).toBe('CODE');
-    expect(command.parentElement).toHaveTextContent(
-      'On a server, stop Coppice and run coppice-server replace-keys.',
-    );
+    expect(screen.queryByText('coppice-server replace-keys')).not.toBeInTheDocument();
   });
 
   it('opens the connectors tab from the url', () => {
