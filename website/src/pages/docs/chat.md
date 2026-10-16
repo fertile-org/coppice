@@ -8,13 +8,13 @@ description: "Talk to any agent like a teammate who knows all your projects."
 
 Open **Chat** and click an agent. There's nothing to set up. Your first message starts the chat.
 
-Each agent can see every repository you've linked, plus your boards, tickets, and Knowledge. Ask about your code, talk an idea through, or ask it to draft a ticket or a Knowledge note. Nothing is created until you confirm.
+Each agent can see every repository you've linked, plus your boards, tickets, and Knowledge. Ask about your code, talk an idea through, or have it draft a ticket. Nothing is created until you confirm. It can also suggest a Knowledge note, which goes to your inbox for approval.
 
-Clicking an agent opens its latest chat. Choose **New chat** to start a separate one. An agent with more than one chat shows them all in the sidebar. When a chat gets long, Coppice summarizes the older part for the agent, and you can still scroll back through everything.
+Clicking an agent opens its latest chat. Choose **New chat** to start a separate one. An agent with more than one chat shows them all in the sidebar. You can always scroll back through a whole chat.
 
 ## How chat reads your code
 
-Each chat has its own folder with a copy of your repositories, so it never works in your checkout. Very large workspaces start with the board's repository, and the agent opens others when it needs them.
+Each chat has its own folder. When the agent needs a repository, it opens a copy there, so it never works in your checkout.
 
 ## Which CLIs can chat
 

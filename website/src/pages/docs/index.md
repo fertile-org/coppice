@@ -17,6 +17,8 @@ Coppice lets you run several coding agents at once without babysitting them: que
 | [Plugins](/docs/plugins) | Give agents skills and MCP tools |
 | [FAQ](/docs/faq) | Beta scope, what’s next, and what Coppice is not |
 
+- [Chat with agents](/docs/chat): Talk to any agent about all your projects
+
 ## Advanced
 
 - [Settings](/docs/settings): Every field in config.toml
