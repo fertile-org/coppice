@@ -25,7 +25,6 @@ import { ThinkingIndicator } from './ChatMessageList';
 import {
   useCreateKnowledgeFromChat,
   useCreateTicketFromChat,
-  useCutoffChatSession,
   useDraftTicketFromChat,
 } from './useChat';
 
@@ -365,28 +364,8 @@ export function ChatSessionActions({
   session: ChatSession;
   disabled?: boolean;
 }) {
-  const navigate = useNavigate();
-  const cutoff = useCutoffChatSession(session.id);
   const [dialog, setDialog] = useState<DialogKind>(null);
-  const [error, setError] = useState<string | null>(null);
-  const inactive =
-    session.status === 'cutoff' || session.status === 'archived';
-
-  async function handleCutoff() {
-    const confirmed = window.confirm(
-      'Continue in a new chat? A shorter chat will open with a summary of this one. This chat stays readable.',
-    );
-    if (!confirmed) return;
-    setError(null);
-    try {
-      const result = await cutoff.mutateAsync();
-      navigate(`/chat/${result.child.id}`);
-    } catch (err) {
-      setError(parseApiErrorMessage(err, "Couldn't start a new chat. Try again."));
-    }
-  }
-
-  if (inactive) return null;
+  if (session.status === 'archived' || session.status === 'cutoff') return null;
 
   return (
     <div className="flex flex-col items-end gap-1">
@@ -400,7 +379,7 @@ export function ChatSessionActions({
           type="button"
           variant="secondary"
           size="sm"
-          disabled={disabled || cutoff.isPending}
+          disabled={disabled}
           onClick={() => setDialog('ticket')}
         >
           Create ticket
@@ -409,26 +388,12 @@ export function ChatSessionActions({
           type="button"
           variant="secondary"
           size="sm"
-          disabled={disabled || cutoff.isPending}
+          disabled={disabled}
           onClick={() => setDialog('knowledge')}
         >
           Propose knowledge
         </Button>
-        <Button
-          type="button"
-          variant="secondary"
-          size="sm"
-          disabled={disabled || cutoff.isPending}
-          onClick={() => void handleCutoff()}
-        >
-          {cutoff.isPending ? 'Starting a new chat…' : 'Continue in new chat'}
-        </Button>
       </div>
-      {error && (
-        <p className="font-body text-xs text-danger" role="alert">
-          {error}
-        </p>
-      )}
       <ActionDialogShell
         open={dialog === 'ticket'}
         title="Create ticket"

@@ -44,6 +44,7 @@ async fn create_session_requires_agent_board_optional() {
     assert_eq!(body["agentId"], agent_id);
     assert!(body["boardId"].is_null());
     assert_eq!(body["status"], "active");
+    assert!(body["title"].is_null());
 }
 
 #[tokio::test]
@@ -220,6 +221,7 @@ async fn list_sessions_includes_message_preview() {
             .unwrap_or("");
         if preview.contains("Mock chat reply") || preview.contains("cwd") {
             assert!(!preview.is_empty());
+            assert_eq!(body["sessions"][0]["title"], "What is the cwd policy?");
             return;
         }
         tokio::time::sleep(Duration::from_millis(100)).await;
@@ -1041,115 +1043,7 @@ async fn create_knowledge_from_chat_is_pending_not_admin_route() {
     assert_eq!(body["message"]["actionMetadata"]["action"], "create_knowledge");
 }
 
-#[tokio::test]
-async fn cutoff_opens_child_session_with_summary_seed() {
-    let _guard = common::DB_TEST_LOCK.lock().await;
-    if !common::db_available().await {
-        return;
-    }
 
-    let (app, cookie, csrf) = common::bootstrap_and_login().await;
-    let agent_id =
-        common::create_agent_with_preset_key(&app, "backend_engineer", "BE", &cookie, &csrf).await;
-
-    let created = app
-        .clone()
-        .oneshot(common::json_request(
-            "POST",
-            "/api/chat/sessions",
-            &format!(r#"{{"agentId":"{agent_id}"}}"#),
-            &cookie,
-            &csrf,
-        ))
-        .await
-        .unwrap();
-    let session: serde_json::Value = common::json_body(created).await;
-    let parent_id = session["id"].as_str().unwrap().to_string();
-
-    let _ = app
-        .clone()
-        .oneshot(common::json_request(
-            "POST",
-            &format!("/api/chat/sessions/{parent_id}/messages"),
-            r#"{"body":"Long exploration about cwd policy"}"#,
-            &cookie,
-            &csrf,
-        ))
-        .await
-        .unwrap();
-
-    let cutoff = app
-        .clone()
-        .oneshot(common::json_request(
-            "POST",
-            &format!("/api/chat/sessions/{parent_id}/cutoff"),
-            "{}",
-            &cookie,
-            &csrf,
-        ))
-        .await
-        .unwrap();
-    assert_eq!(cutoff.status(), StatusCode::OK);
-    let body: serde_json::Value = common::json_body(cutoff).await;
-    assert_eq!(body["parent"]["status"], "cutoff");
-    assert_eq!(body["parent"]["id"], parent_id);
-    let child_id = body["child"]["id"].as_str().expect("child id");
-    assert_eq!(body["child"]["status"], "active");
-    assert_eq!(body["child"]["parentSessionId"], parent_id);
-    assert_eq!(body["seedMessage"]["role"], "system");
-    assert!(body["seedMessage"]["body"]
-        .as_str()
-        .unwrap()
-        .contains("Prior conversation summary"));
-
-    let parent_messages = app
-        .clone()
-        .oneshot(common::json_request(
-            "GET",
-            &format!("/api/chat/sessions/{parent_id}/messages"),
-            "",
-            &cookie,
-            &csrf,
-        ))
-        .await
-        .unwrap();
-    assert_eq!(parent_messages.status(), StatusCode::OK);
-    let parent_body: serde_json::Value = common::json_body(parent_messages).await;
-    assert!(
-        parent_body["messages"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|m| m["role"] == "human"),
-        "parent transcript retained"
-    );
-
-    let reject_post = app
-        .clone()
-        .oneshot(common::json_request(
-            "POST",
-            &format!("/api/chat/sessions/{parent_id}/messages"),
-            r#"{"body":"should fail"}"#,
-            &cookie,
-            &csrf,
-        ))
-        .await
-        .unwrap();
-    assert_eq!(reject_post.status(), StatusCode::BAD_REQUEST);
-
-    let child_post = app
-        .clone()
-        .oneshot(common::json_request(
-            "POST",
-            &format!("/api/chat/sessions/{child_id}/messages"),
-            r#"{"body":"continue from summary"}"#,
-            &cookie,
-            &csrf,
-        ))
-        .await
-        .unwrap();
-    assert_eq!(child_post.status(), StatusCode::CREATED);
-}
 
 async fn login_as(app: &axum::Router, email: &str, password: &str) -> (String, String) {
     use coppice_server::middleware::session::parse_session_cookie;

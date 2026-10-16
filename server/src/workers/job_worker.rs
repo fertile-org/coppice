@@ -1061,7 +1061,10 @@ async fn execute_chat_turn(
                     "chat resume invalid, using full transcript fallback"
                 );
                 let transcript = ChatService::new(pool)
-                    .format_transcript(session_id)
+                    .format_model_transcript(
+                        session_id,
+                        state.config.knowledge.context_budget.latest_comments,
+                    )
                     .await
                     .context("format chat transcript for fallback")?;
                 write_chat_context(
@@ -1093,7 +1096,10 @@ async fn execute_chat_turn(
         }
     } else {
         let transcript = ChatService::new(pool)
-            .format_transcript(session_id)
+            .format_model_transcript(
+                session_id,
+                state.config.knowledge.context_budget.latest_comments,
+            )
             .await
             .context("format chat transcript")?;
         write_chat_context(

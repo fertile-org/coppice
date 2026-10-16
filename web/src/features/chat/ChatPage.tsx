@@ -1,5 +1,5 @@
 import { useQueryClient } from '@tanstack/react-query';
-import { MessageSquarePlus, Paperclip, X } from 'lucide-react';
+import { Paperclip, X } from 'lucide-react';
 import {
   useCallback,
   useEffect,
@@ -9,9 +9,8 @@ import {
   type FormEvent,
   type KeyboardEvent,
 } from 'react';
-import { Link, useNavigate, useParams } from 'react-router-dom';
+import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { Button } from '../../components/ui/button';
-import { Combobox } from '../../components/ui/combobox';
 import { Label } from '../../components/ui/label';
 import { Textarea } from '../../components/ui/textarea';
 import { parseApiErrorMessage } from '../../lib/api';
@@ -19,12 +18,10 @@ import {
   formatFileSize,
   isImageContentType,
 } from '../../lib/attachments';
-import { filterChatSessions } from '../../lib/chatSessionSearch';
-import type { ChatSession, ChatSessionStatus } from '../../lib/schemas/chat';
+import type { ChatSession } from '../../lib/schemas/chat';
 import { chatIsolationBanner, chatUnavailableMessage } from '../tools/connectorCopy';
 import { cn } from '../../lib/utils';
-import { useAgents } from '../agents/useAgents';
-import { useBoards } from '../boards/useBoards';
+import { useAgents, type Agent } from '../agents/useAgents';
 import { useUploadAttachment } from '../tickets/useTicket';
 import { ChatMessageList } from './ChatMessageList';
 import { ChatSessionActions } from './ChatSessionActions';
@@ -58,217 +55,40 @@ function pendingFileFromFile(file: File): PendingFile {
   };
 }
 
-function formatSessionTime(iso: string): string {
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) return '';
-  return date.toLocaleString(undefined, {
-    month: 'short',
-    day: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit',
-  });
+function chatLabel(session: ChatSession): string {
+  const title = session.title?.trim();
+  return title ? title : 'New chat';
 }
 
-function sessionStatusLabel(status: ChatSessionStatus): string {
-  switch (status) {
-    case 'active':
-      return 'Active';
-    case 'cutoff':
-      return 'Continued';
-    case 'archived':
-      return 'Archived';
-  }
-}
-
-function SessionStatusPill({ status }: { status: ChatSessionStatus }) {
-  return (
-    <span
-      className={cn(
-        'inline-flex items-center rounded-full px-2 py-0.5 font-body text-[11px] font-medium',
-        status === 'active' && 'bg-moss-100 text-moss-800',
-        status === 'cutoff' && 'bg-warning-muted text-bark-700',
-        status === 'archived' && 'bg-bark-100 text-bark-600',
-      )}
-      data-testid="chat-session-status"
-    >
-      {sessionStatusLabel(status)}
-    </span>
-  );
-}
-
-function SessionListItem({
-  session,
-  agentName,
-  active,
-}: {
-  session: ChatSession;
-  agentName: string;
-  active: boolean;
-}) {
-  return (
-    <Link
-      to={`/chat/${session.id}`}
-      className={[
-        'block rounded-md border px-3 py-2 transition-colors duration-fast',
-        active
-          ? 'border-accent bg-accent-muted text-accent'
-          : 'border-transparent hover:border-border hover:bg-paper-100',
-      ].join(' ')}
-    >
-      <div className="font-body text-sm font-medium text-text-primary">
-        {agentName}
-      </div>
-      <div className="mt-0.5 flex flex-wrap items-center gap-x-1.5 font-body text-xs text-text-secondary">
-        {session.hasActiveRun ? (
-          <span className="text-moss-700" data-testid="chat-session-active">
-            Replying…
-          </span>
-        ) : null}
-        <span>{formatSessionTime(session.updatedAt)}</span>
-      </div>
-      <p className="truncate font-body text-xs text-text-muted">
-        {session.lastMessageRole === 'human' ? 'You: ' : ''}
-        {session.lastMessagePreview || 'No messages yet'}
-      </p>
-    </Link>
-  );
-}
-
-function NewChatForm({
-  onCreated,
-}: {
-  onCreated: (sessionId: string) => void;
-}) {
-  const { data: agents = [] } = useAgents();
-  const { data: boards = [] } = useBoards();
-  const createSession = useCreateChatSession();
-  const enabledAgents = useMemo(
-    () => agents.filter((agent) => agent.enabled),
-    [agents],
-  );
-  const [agentId, setAgentId] = useState('');
-  const [boardId, setBoardId] = useState('');
-  const [error, setError] = useState<string | null>(null);
-  const selected = enabledAgents.find((agent) => agent.id === agentId);
-  const chatBanner = chatIsolationBanner(selected?.connector);
-  const chatUnavailable = chatUnavailableMessage(selected?.connector);
-
-  async function handleSubmit(event: FormEvent) {
-    event.preventDefault();
-    setError(null);
-    if (!agentId) {
-      setError('Select an agent.');
-      return;
-    }
-    if (chatUnavailable) {
-      return;
-    }
-    try {
-      const session = await createSession.mutateAsync({
-        agentId,
-        boardId: boardId || null,
-      });
-      onCreated(session.id);
-    } catch (err) {
-      setError(parseApiErrorMessage(err, 'Could not create chat.'));
-    }
-  }
-
-  return (
-    <form
-      onSubmit={(event) => void handleSubmit(event)}
-      className="space-y-4 rounded-lg border border-border bg-surface-raised p-4"
-      data-testid="new-chat-form"
-    >
-      <div>
-        <h2 className="font-display text-lg font-semibold text-text-primary">
-          New chat
-        </h2>
-        <p className="mt-1 font-body text-sm text-text-secondary">
-          Talk to an agent outside a ticket thread.
-        </p>
-      </div>
-
-      <div className="space-y-2">
-        <Label htmlFor="chat-agent">Agent</Label>
-        <Combobox
-          id="chat-agent"
-          aria-label="Agent"
-          value={agentId}
-          onValueChange={setAgentId}
-          placeholder="Select agent"
-          searchPlaceholder="Search agents…"
-          options={enabledAgents.map((agent) => ({
-            value: agent.id,
-            label: agent.name,
-          }))}
-        />
-      </div>
-
-      <div className="space-y-2">
-        <Label htmlFor="chat-board">Board (optional)</Label>
-        <Combobox
-          id="chat-board"
-          aria-label="Board (optional)"
-          value={boardId}
-          onValueChange={setBoardId}
-          placeholder="No board"
-          searchPlaceholder="Search boards…"
-          clearable
-          options={boards.map((board) => ({ value: board.id, label: board.name }))}
-        />
-      </div>
-
-      {chatUnavailable ? (
-        <p
-          className="rounded-md border border-warning-muted bg-warning-muted/40 px-3 py-2 font-body text-sm text-text-primary"
-          role="status"
-          data-testid="chat-unavailable"
-        >
-          {chatUnavailable}
-        </p>
-      ) : null}
-
-      {chatBanner ? (
-        <p
-          className="rounded-md border border-warning-muted bg-warning-muted/40 px-3 py-2 font-body text-sm text-text-primary"
-          role="status"
-          data-testid="chat-isolation-banner"
-        >
-          {chatBanner}
-        </p>
-      ) : null}
-
-      {error && (
-        <p className="font-body text-sm text-danger" role="alert">
-          {error}
-        </p>
-      )}
-
-      <Button type="submit" disabled={createSession.isPending || Boolean(chatUnavailable)}>
-        {createSession.isPending ? 'Starting…' : 'Start chat'}
-      </Button>
-    </form>
-  );
+function sessionsForAgent(sessions: ChatSession[], agentId: string): ChatSession[] {
+  return sessions
+    .filter((session) => session.agentId === agentId)
+    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
 }
 
 function ChatComposer({
   sessionId,
+  agentId,
   disabled,
   onPosted,
 }: {
-  sessionId: string;
+  sessionId: string | null;
+  agentId: string;
   disabled?: boolean;
-  onPosted: (runId: string) => void;
+  onPosted: (runId: string, sessionId: string) => void;
 }) {
-  const postMessage = usePostChatMessage(sessionId);
+  const postMessage = usePostChatMessage(sessionId ?? '');
+  const createSession = useCreateChatSession();
   const uploadAttachment = useUploadAttachment();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [body, setBody] = useState('');
   const [pendingFiles, setPendingFiles] = useState<PendingFile[]>([]);
   const [error, setError] = useState<string | null>(null);
   const composerLocked = Boolean(
-    disabled || postMessage.isPending || uploadAttachment.isPending,
+    disabled ||
+      postMessage.isPending ||
+      uploadAttachment.isPending ||
+      createSession.isPending,
   );
   const canSend = body.trim().length > 0 || pendingFiles.length > 0;
 
@@ -327,13 +147,20 @@ function ChatComposer({
         const uploaded = await uploadAttachment.mutateAsync(pending.file);
         attachmentIds.push(uploaded.id);
       }
+      let targetId = sessionId;
+      const createdNow = !targetId;
+      if (!targetId) {
+        const created = await createSession.mutateAsync({ agentId });
+        targetId = created.id;
+      }
       const result = await postMessage.mutateAsync({
         body: trimmed,
         attachmentIds: attachmentIds.length > 0 ? attachmentIds : undefined,
+        ...(createdNow ? { sessionId: targetId } : {}),
       });
       setBody('');
       clearPendingFiles();
-      onPosted(result.runId);
+      onPosted(result.runId, targetId);
     } catch (err) {
       setError(parseApiErrorMessage(err, 'Could not send message.'));
     }
@@ -439,7 +266,9 @@ function ChatComposer({
           disabled={composerLocked || !canSend}
           className="shrink-0"
         >
-          {postMessage.isPending || uploadAttachment.isPending
+          {postMessage.isPending ||
+          uploadAttachment.isPending ||
+          createSession.isPending
             ? 'Sending…'
             : 'Send'}
         </Button>
@@ -460,14 +289,27 @@ function ChatComposer({
   );
 }
 
-function ChatSessionPane({ sessionId }: { sessionId: string }) {
-  const queryClient = useQueryClient();
-  const { data: agents = [] } = useAgents();
+function ChatTranscript({
+  sessionId,
+  agent,
+  initialRunId,
+  onPosted,
+}: {
+  sessionId: string | null;
+  agent: Agent;
+  initialRunId?: string | null;
+  onPosted: (runId: string, sessionId: string) => void;
+}) {
   const { data: session } = useChatSession(sessionId);
-  const [activeRunId, setActiveRunId] = useState<string | null>(null);
+  const [activeRunId, setActiveRunId] = useState<string | null>(initialRunId ?? null);
   const awaiting = Boolean(activeRunId) || Boolean(session?.hasActiveRun);
 
-  const { data: messages = [], refetch } = useChatMessages(sessionId, {
+  const {
+    data: messages = [],
+    refetch,
+    isLoading: messagesLoading,
+    isFetched,
+  } = useChatMessages(sessionId, {
     refetchInterval: awaiting ? 1500 : false,
   });
 
@@ -478,10 +320,9 @@ function ChatSessionPane({ sessionId }: { sessionId: string }) {
     }
   }, [activeRunId, session?.hasActiveRun, session?.activeRunId]);
 
-  const agent = agents.find((item) => item.id === session?.agentId);
-  const agentName = agent?.name ?? 'Agent';
-  const chatBanner = chatIsolationBanner(agent?.connector);
-  const chatUnavailable = chatUnavailableMessage(agent?.connector);
+  const chatBanner = chatIsolationBanner(agent.connector);
+  const chatUnavailable = chatUnavailableMessage(agent.connector);
+  const queryClient = useQueryClient();
 
   const onLiveFinished = useCallback(() => {
     setActiveRunId(null);
@@ -490,12 +331,17 @@ function ChatSessionPane({ sessionId }: { sessionId: string }) {
   }, [queryClient, refetch]);
 
   const live = useChatRunLiveStream(activeRunId, { onFinished: onLiveFinished });
-
   const streamingAgent = activeRunId
     ? { runId: activeRunId, text: live.text, error: live.error }
     : undefined;
 
-  const cutoff = session?.status === 'cutoff' || session?.status === 'archived';
+  const readOnly = session?.status === 'archived' || session?.status === 'cutoff';
+  const showEmpty =
+    !chatUnavailable &&
+    !readOnly &&
+    !awaiting &&
+    messages.length === 0 &&
+    (!sessionId || (isFetched && !messagesLoading));
 
   return (
     <div
@@ -507,29 +353,33 @@ function ChatSessionPane({ sessionId }: { sessionId: string }) {
         data-testid="chat-session-header"
       >
         <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-2">
-            <h2 className="font-display text-base font-semibold text-text-primary">
-              {agentName}
-            </h2>
-            {session ? <SessionStatusPill status={session.status} /> : null}
-          </div>
-          <p className="mt-0.5 font-body text-xs text-text-secondary">
-            {session
-              ? `Updated ${formatSessionTime(session.updatedAt)}`
-              : 'Loading conversation…'}
-          </p>
+          <h2 className="font-display text-base font-semibold text-text-primary">
+            {agent.name}
+          </h2>
+          {agent.role ? (
+            <p className="mt-0.5 font-body text-xs text-text-secondary">{agent.role}</p>
+          ) : null}
         </div>
-        {session && (
+        {session && session.status === 'active' ? (
           <ChatSessionActions session={session} disabled={awaiting} />
-        )}
+        ) : null}
       </header>
 
       <div className="flex min-h-0 flex-1 flex-col gap-2 bg-paper-100/40 px-3 py-2">
-        <ChatMessageList
-          messages={messages}
-          thinking={awaiting && !activeRunId}
-          streamingAgent={streamingAgent}
-        />
+        {showEmpty ? (
+          <p
+            className="m-auto max-w-sm px-4 text-center font-body text-sm text-text-secondary"
+            data-testid="chat-empty-state"
+          >
+            Say hi to {agent.name}. They can see all your projects.
+          </p>
+        ) : (
+          <ChatMessageList
+            messages={messages}
+            thinking={awaiting && !activeRunId}
+            streamingAgent={streamingAgent}
+          />
+        )}
       </div>
 
       {chatBanner ? (
@@ -541,136 +391,230 @@ function ChatSessionPane({ sessionId }: { sessionId: string }) {
           {chatBanner}
         </p>
       ) : null}
-      {cutoff ? (
+      {session?.status === 'archived' ? (
         <p className="shrink-0 border-t border-border bg-paper-50/90 px-4 py-3 font-body text-sm text-text-secondary">
-          {session?.status === 'cutoff'
-            ? 'This chat continued in a new one. You can still read it here.'
-            : 'This session is archived. History stays readable.'}{' '}
-          <Link to="/chat" className="text-accent hover:underline">
-            Start a new chat
-          </Link>
+          This session is archived. History stays readable.
         </p>
       ) : chatUnavailable ? (
         <p
           className="shrink-0 border-t border-warning-muted bg-warning-muted/40 px-4 py-3 font-body text-sm text-text-primary"
           role="status"
-          data-testid="chat-unavailable"
         >
           {chatUnavailable}
         </p>
       ) : (
         <ChatComposer
           sessionId={sessionId}
+          agentId={agent.id}
           disabled={awaiting}
-          onPosted={(runId) => setActiveRunId(runId)}
+          onPosted={(runId, nextSessionId) => {
+            if (sessionId && nextSessionId === sessionId) {
+              setActiveRunId(runId);
+            }
+            onPosted(runId, nextSessionId);
+          }}
         />
       )}
     </div>
   );
 }
 
-export function ChatPage() {
-  const { sessionId } = useParams<{ sessionId?: string }>();
+function AgentRow({
+  agent,
+  sessions,
+  drafting,
+  openSessionId,
+}: {
+  agent: Agent;
+  sessions: ChatSession[];
+  drafting: boolean;
+  openSessionId?: string;
+}) {
   const navigate = useNavigate();
-  const { data: agents = [] } = useAgents();
-  const { data: sessions = [], isLoading } = useChatSessions();
-  const [showNew, setShowNew] = useState(!sessionId);
-  const [search, setSearch] = useState('');
+  const unavailable = chatUnavailableMessage(agent.connector);
+  const latest = sessions[0];
+  const expanded = sessions.length > 1 || (drafting && sessions.length > 0);
+  const active =
+    drafting ||
+    sessions.some((session) => session.id === openSessionId);
+  const href = latest ? `/chat/${latest.id}` : `/chat/new/${agent.id}`;
+  const replying = sessions.some((session) => session.hasActiveRun);
 
-  const agentNameById = useMemo(() => {
-    const map = new Map<string, string>();
-    for (const agent of agents) map.set(agent.id, agent.name);
-    return map;
-  }, [agents]);
-
-  const visibleSessions = useMemo(
-    () => filterChatSessions(sessions, agentNameById, search),
-    [sessions, agentNameById, search],
-  );
+  if (unavailable) {
+    return (
+      <div
+        className="rounded-md px-3 py-2 opacity-60"
+        data-testid="chat-agent-unavailable"
+        aria-disabled="true"
+      >
+        <div className="font-body text-sm font-medium text-text-muted">{agent.name}</div>
+        {agent.role ? (
+          <div className="mt-0.5 font-body text-xs text-text-muted">{agent.role}</div>
+        ) : null}
+        <p
+          className="mt-1 font-body text-xs text-text-muted"
+          data-testid="chat-unavailable"
+        >
+          {unavailable}
+        </p>
+      </div>
+    );
+  }
 
   return (
-    <div
-      className="flex min-h-0 flex-1 flex-col gap-4"
-      data-testid="chat-page"
-    >
-      <div className="flex shrink-0 flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="font-display text-2xl font-semibold text-text-primary">
-            Chat
-          </h1>
-          <p className="mt-1 font-body text-sm text-text-secondary">
-            Human-owned exploratory conversations with a chosen agent.
-          </p>
-        </div>
+    <div data-testid="chat-agent-row">
+      <div className="flex items-start gap-1">
+        <Link
+          to={href}
+          className={cn(
+            'min-w-0 flex-1 rounded-md px-3 py-2 transition-colors duration-fast',
+            active
+              ? 'bg-accent-muted text-accent'
+              : 'hover:bg-paper-100',
+          )}
+          aria-current={active ? 'page' : undefined}
+        >
+          <div className="flex items-center gap-1.5">
+            <span className="truncate font-body text-sm font-medium text-text-primary">
+              {agent.name}
+            </span>
+            {replying ? (
+              <span className="shrink-0 font-body text-xs text-moss-700" data-testid="chat-session-active">
+                Replying…
+              </span>
+            ) : null}
+          </div>
+          {agent.role ? (
+            <div className="mt-0.5 truncate font-body text-xs text-text-secondary">
+              {agent.role}
+            </div>
+          ) : null}
+          {!expanded ? (
+            <p className="mt-0.5 truncate font-body text-xs text-text-muted">
+              {sessions.length === 0
+                ? drafting
+                  ? 'New chat'
+                  : 'No messages yet'
+                : chatLabel(sessions[0])}
+            </p>
+          ) : null}
+        </Link>
         <Button
           type="button"
-          variant="secondary"
-          onClick={() => {
-            setShowNew(true);
-            navigate('/chat');
-          }}
+          variant="ghost"
+          size="sm"
+          className="mt-1 shrink-0"
+          title={`New chat with ${agent.name}`}
+          aria-label={`New chat with ${agent.name}`}
+          onClick={() => navigate(`/chat/new/${agent.id}`)}
         >
-          <MessageSquarePlus className="size-4" />
           New chat
         </Button>
       </div>
+      {expanded ? (
+        <ul className="mb-1 ml-3 space-y-0.5 border-l border-border pl-2">
+          {drafting ? (
+            <li>
+              <Link
+                to={`/chat/new/${agent.id}`}
+                className="block truncate rounded-md bg-accent-muted px-2 py-1 font-body text-xs text-accent"
+                aria-current="page"
+              >
+                New chat
+              </Link>
+            </li>
+          ) : null}
+          {sessions.map((session) => (
+            <li key={session.id}>
+              <Link
+                to={`/chat/${session.id}`}
+                className={cn(
+                  'block truncate rounded-md px-2 py-1 font-body text-xs',
+                  session.id === openSessionId
+                    ? 'bg-accent-muted text-accent'
+                    : 'text-text-secondary hover:bg-paper-100 hover:text-text-primary',
+                )}
+                aria-current={session.id === openSessionId ? 'page' : undefined}
+              >
+                {chatLabel(session)}
+              </Link>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </div>
+  );
+}
+
+export function ChatPage() {
+  const { sessionId, agentId: draftAgentId } = useParams<{
+    sessionId?: string;
+    agentId?: string;
+  }>();
+  const navigate = useNavigate();
+  const location = useLocation();
+  const { data: agents = [] } = useAgents();
+  const { data: sessions = [], isLoading } = useChatSessions();
+  const seededRunId =
+    (location.state as { runId?: string } | null)?.runId ?? null;
+
+  const enabledAgents = useMemo(
+    () =>
+      agents
+        .filter((agent) => agent.enabled)
+        .sort((a, b) => a.name.localeCompare(b.name)),
+    [agents],
+  );
+
+  const openSession = sessions.find((session) => session.id === sessionId);
+  const selectedAgentId = draftAgentId ?? openSession?.agentId;
+  const selectedAgent = agents.find((agent) => agent.id === selectedAgentId);
+
+  return (
+    <div className="flex min-h-0 flex-1 flex-col gap-4" data-testid="chat-page">
+      <h1 className="shrink-0 font-display text-2xl font-semibold text-text-primary">
+        Chat
+      </h1>
 
       <div
-        className="grid min-h-0 flex-1 gap-4 overflow-hidden lg:grid-cols-[240px_minmax(0,1fr)]"
+        className="grid min-h-0 flex-1 gap-4 overflow-hidden lg:grid-cols-[280px_minmax(0,1fr)]"
         data-testid="chat-layout-grid"
       >
         <aside
           className="flex min-h-0 flex-col gap-2 overflow-hidden lg:h-full lg:max-h-full lg:self-stretch"
-          aria-label="Chat sessions"
+          aria-label="Agents"
           data-testid="chat-session-list"
         >
-          <input
-            type="search"
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            placeholder="Search chats…"
-            aria-label="Search chat sessions"
-            className="shrink-0 rounded-md border border-border bg-surface-raised px-2.5 py-1.5 font-body text-sm text-text-primary placeholder:text-text-muted"
-            data-testid="chat-session-search"
-          />
-          <div className="min-h-0 flex-1 space-y-2 overflow-y-auto">
-          {isLoading && (
-            <p className="font-body text-sm text-text-muted">Loading sessions…</p>
-          )}
-          {!isLoading && sessions.length === 0 && (
-            <p className="font-body text-sm text-text-muted">No chats yet.</p>
-          )}
-          {!isLoading && sessions.length > 0 && visibleSessions.length === 0 && (
-            <p className="font-body text-sm text-text-muted">No matching chats.</p>
-          )}
-          {visibleSessions.map((session) => (
-            <SessionListItem
-              key={session.id}
-              session={session}
-              agentName={agentNameById.get(session.agentId) ?? 'Agent'}
-              active={session.id === sessionId}
-            />
-          ))}
+          <div className="min-h-0 flex-1 space-y-1 overflow-y-auto">
+            {isLoading ? (
+              <p className="font-body text-sm text-text-muted">Loading sessions…</p>
+            ) : null}
+            {enabledAgents.map((agent) => (
+              <AgentRow
+                key={agent.id}
+                agent={agent}
+                sessions={sessionsForAgent(sessions, agent.id)}
+                drafting={draftAgentId === agent.id}
+                openSessionId={sessionId}
+              />
+            ))}
           </div>
         </aside>
 
         <section className="flex min-h-0 min-w-0 flex-col overflow-hidden lg:h-full">
-          {showNew && !sessionId ? (
-            <div className="min-h-0 flex-1 overflow-y-auto">
-              <NewChatForm
-                onCreated={(id) => {
-                  setShowNew(false);
-                  navigate(`/chat/${id}`);
-                }}
-              />
-            </div>
-          ) : sessionId ? (
-            <ChatSessionPane key={sessionId} sessionId={sessionId} />
-          ) : (
-            <p className="font-body text-sm text-text-secondary">
-              Select a session or start a new chat.
-            </p>
-          )}
+          {selectedAgent ? (
+            <ChatTranscript
+              key={sessionId ?? `new-${selectedAgent.id}`}
+              sessionId={sessionId ?? null}
+              agent={selectedAgent}
+              initialRunId={seededRunId}
+              onPosted={(runId, nextSessionId) => {
+                if (!sessionId || nextSessionId !== sessionId) {
+                  navigate(`/chat/${nextSessionId}`, { state: { runId } });
+                }
+              }}
+            />
+          ) : null}
         </section>
       </div>
     </div>

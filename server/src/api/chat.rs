@@ -50,7 +50,6 @@ pub fn routes() -> Router<Arc<AppState>> {
             "/api/chat/sessions/{session_id}/create-knowledge",
             post(create_knowledge),
         )
-        .route("/api/chat/sessions/{session_id}/cutoff", post(cutoff_session))
 }
 
 #[derive(Deserialize)]
@@ -114,6 +113,7 @@ struct SessionResponse {
     last_message_role: Option<String>,
     has_active_run: bool,
     active_run_id: Option<Uuid>,
+    title: Option<String>,
     created_at: String,
     updated_at: String,
 }
@@ -183,14 +183,6 @@ struct CreateKnowledgeResponse {
     message: MessageResponse,
 }
 
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct CutoffResponse {
-    parent: SessionResponse,
-    child: SessionResponse,
-    seed_message: MessageResponse,
-}
-
 fn map_error(err: ChatError) -> StatusCode {
     match err {
         ChatError::NotFound => StatusCode::NOT_FOUND,
@@ -231,7 +223,7 @@ fn map_chat_start_error(err: ChatError) -> ChatApiError {
 fn discard_chat_workspace_if_ended(state: &AppState, session_id: Uuid, status: ChatSessionStatus) {
     if !matches!(
         status,
-        ChatSessionStatus::Archived | ChatSessionStatus::Cutoff
+        ChatSessionStatus::Archived
     ) {
         return;
     }
@@ -259,6 +251,7 @@ fn session_response(session: ChatSession) -> SessionResponse {
         last_message_role: session.last_message_role,
         has_active_run: session.has_active_run,
         active_run_id: session.active_run_id,
+        title: session.title,
         created_at: session.created_at.format(&Rfc3339).unwrap_or_default(),
         updated_at: session.updated_at.format(&Rfc3339).unwrap_or_default(),
     }
@@ -513,33 +506,4 @@ async fn create_knowledge(
             message: message_response(result.system_message, &attachments_by_id),
         }),
     ))
-}
-
-async fn cutoff_session(
-    State(state): State<Arc<AppState>>,
-    AuthUser { user, .. }: AuthUser,
-    Path(session_id): Path<Uuid>,
-) -> Result<Json<CutoffResponse>, StatusCode> {
-    let pool = pool_from_state(&state)?;
-    let result = ChatService::new(pool)
-        .cutoff_session(session_id, user.id)
-        .await
-        .map_err(map_error)?;
-    let worktrees = std::path::Path::new(&state.config.agent.worktrees_path);
-    let carried = crate::services::chat_workspace::continue_slugs(worktrees, session_id);
-    crate::services::chat_workspace::start_session(
-        &state,
-        pool.clone(),
-        result.child.id,
-        result.child.board_id,
-        &carried,
-    );
-    discard_chat_workspace_if_ended(&state, session_id, ChatSessionStatus::Cutoff);
-    let attachments_by_id =
-        attachments_for_messages(pool, std::slice::from_ref(&result.seed_message)).await?;
-    Ok(Json(CutoffResponse {
-        parent: session_response(result.parent),
-        child: session_response(result.child),
-        seed_message: message_response(result.seed_message, &attachments_by_id),
-    }))
 }

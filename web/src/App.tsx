@@ -81,6 +81,7 @@ function App() {
                 />
                 <Route path="/agents" element={<AgentsPage />} />
                 <Route path="/chat" element={<ChatPage />} />
+                <Route path="/chat/new/:agentId" element={<ChatPage />} />
                 <Route path="/chat/:sessionId" element={<ChatPage />} />
                 <Route path="/knowledge" element={<KnowledgePage />} />
                 <Route

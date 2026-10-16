@@ -4,7 +4,8 @@ use crate::domain::chat_action::{
     fallback_draft_ticket, ChatActionResultMeta, DraftTicketFields, DraftTicketSource,
 };
 use crate::domain::chat_message::{ChatMessage, ChatMessageRole};
-use crate::domain::chat_session::{ChatSession, ChatSessionStatus};
+use crate::domain::chat_session::{title_from_first_message, ChatSession, ChatSessionStatus};
+use crate::services::chat_transcript::bound_rendered_transcript;
 use crate::domain::context_profile::ContextProfile;
 use crate::domain::knowledge::{
     scope_from_str, type_from_str, KnowledgeConfidence, KnowledgeItemView, KnowledgeRevisionInput,
@@ -171,13 +172,6 @@ pub struct CreateKnowledgeFromChatResult {
     pub system_message: ChatMessage,
 }
 
-#[derive(Debug, Clone)]
-pub struct CutoffResult {
-    pub parent: ChatSession,
-    pub child: ChatSession,
-    pub seed_message: ChatMessage,
-}
-
 pub struct CreateTicketFromChatInput<'a> {
     pub board_id: Uuid,
     pub title: Option<&'a str>,
@@ -294,6 +288,15 @@ impl<'a> ChatService<'a> {
                     ORDER BY seq DESC
                     LIMIT 1
                 ) lm ON true
+                LEFT JOIN LATERAL (
+                    SELECT body AS first_human_body
+                    FROM chat_messages
+                    WHERE session_id = cs.id
+                      AND role = 'human'
+                      AND btrim(body) <> ''
+                    ORDER BY seq ASC
+                    LIMIT 1
+                ) fm ON true
                 WHERE cs.owner_user_id = $1 AND cs.board_id = $2
                 ORDER BY cs.updated_at DESC
                 "#,
@@ -314,6 +317,15 @@ impl<'a> ChatService<'a> {
                     ORDER BY seq DESC
                     LIMIT 1
                 ) lm ON true
+                LEFT JOIN LATERAL (
+                    SELECT body AS first_human_body
+                    FROM chat_messages
+                    WHERE session_id = cs.id
+                      AND role = 'human'
+                      AND btrim(body) <> ''
+                    ORDER BY seq ASC
+                    LIMIT 1
+                ) fm ON true
                 WHERE cs.owner_user_id = $1
                 ORDER BY cs.updated_at DESC
                 "#,
@@ -342,6 +354,15 @@ impl<'a> ChatService<'a> {
                 ORDER BY seq DESC
                 LIMIT 1
             ) lm ON true
+            LEFT JOIN LATERAL (
+                SELECT body AS first_human_body
+                FROM chat_messages
+                WHERE session_id = cs.id
+                  AND role = 'human'
+                  AND btrim(body) <> ''
+                ORDER BY seq ASC
+                LIMIT 1
+            ) fm ON true
             WHERE cs.id = $1 AND cs.owner_user_id = $2
             "#,
         ))
@@ -365,6 +386,15 @@ impl<'a> ChatService<'a> {
                 ORDER BY seq DESC
                 LIMIT 1
             ) lm ON true
+            LEFT JOIN LATERAL (
+                SELECT body AS first_human_body
+                FROM chat_messages
+                WHERE session_id = cs.id
+                  AND role = 'human'
+                  AND btrim(body) <> ''
+                ORDER BY seq ASC
+                LIMIT 1
+            ) fm ON true
             WHERE cs.id = $1
             "#,
         ))
@@ -433,7 +463,7 @@ impl<'a> ChatService<'a> {
         let _ = self.get_session(session_id, owner_user_id).await?;
         if !matches!(
             status,
-            ChatSessionStatus::Active | ChatSessionStatus::Archived | ChatSessionStatus::Cutoff
+            ChatSessionStatus::Active | ChatSessionStatus::Archived
         ) {
             return Err(ChatError::Validation("invalid session status".into()));
         }
@@ -649,6 +679,25 @@ impl<'a> ChatService<'a> {
     }
 
     pub async fn format_transcript(&self, session_id: Uuid) -> Result<String, ChatError> {
+        let blocks = self.transcript_blocks(session_id).await?;
+        if blocks.is_empty() {
+            return Ok("(No previous messages)".into());
+        }
+        Ok(blocks.concat())
+    }
+
+    /// Transcript sent to the model. Older turns are summarized once the
+    /// rendered text would pass `max_tokens`.
+    pub async fn format_model_transcript(
+        &self,
+        session_id: Uuid,
+        max_tokens: usize,
+    ) -> Result<String, ChatError> {
+        let blocks = self.transcript_blocks(session_id).await?;
+        Ok(bound_rendered_transcript(&blocks, max_tokens))
+    }
+
+    async fn transcript_blocks(&self, session_id: Uuid) -> Result<Vec<String>, ChatError> {
         let rows = sqlx::query(
             r#"
             SELECT role, body, attachment_ids FROM chat_messages
@@ -661,7 +710,7 @@ impl<'a> ChatService<'a> {
         .await?;
 
         if rows.is_empty() {
-            return Ok("(No previous messages)".into());
+            return Ok(Vec::new());
         }
 
         let mut all_ids: Vec<Uuid> = rows
@@ -688,7 +737,7 @@ impl<'a> ChatService<'a> {
             .map(|a| (a.id, a))
             .collect();
 
-        let mut out = String::new();
+        let mut blocks = Vec::with_capacity(rows.len());
         for row in rows {
             let role: String = row.get("role");
             let body: String = row.get("body");
@@ -699,28 +748,29 @@ impl<'a> ChatService<'a> {
                 "system" => "System",
                 other => other,
             };
-            out.push_str(&format!("### {label}\n\n"));
+            let mut block = format!("### {label}\n\n");
             if !body.is_empty() {
-                out.push_str(&body);
-                out.push_str("\n\n");
+                block.push_str(&body);
+                block.push_str("\n\n");
             }
             if !attachment_ids.is_empty() {
-                out.push_str("Attachments:\n");
+                block.push_str("Attachments:\n");
                 for id in &attachment_ids {
                     if let Some(att) = by_id.get(id) {
                         let safe_name = sanitize_filename(&att.filename);
-                        out.push_str(&format!(
+                        block.push_str(&format!(
                             "- file: attachments/{}/{safe_name} ({}, {} bytes)\n",
                             att.id, att.content_type, att.size_bytes
                         ));
                     } else {
-                        out.push_str(&format!("- file: attachments/{id}/(missing)\n"));
+                        block.push_str(&format!("- file: attachments/{id}/(missing)\n"));
                     }
                 }
-                out.push('\n');
+                block.push('\n');
             }
+            blocks.push(block);
         }
-        Ok(out)
+        Ok(blocks)
     }
 
     /// Copy session attachment bytes into `{chat_cwd}/attachments/{id}/{filename}` for agent Read.
@@ -880,7 +930,6 @@ impl<'a> ChatService<'a> {
             action: "create_ticket".into(),
             ticket_id: Some(ticket.ticket.id),
             knowledge_item_id: None,
-            child_session_id: None,
         };
         let system_message = self
             .append_message(
@@ -1117,7 +1166,6 @@ impl<'a> ChatService<'a> {
             action: "create_knowledge".into(),
             ticket_id: None,
             knowledge_item_id: Some(item.id),
-            child_session_id: None,
         };
         let system_message = self
             .append_message(
@@ -1132,76 +1180,6 @@ impl<'a> ChatService<'a> {
         Ok(CreateKnowledgeFromChatResult {
             item,
             system_message,
-        })
-    }
-
-    /// Cut off the session and open a shorter child session seeded with a summary.
-    pub async fn cutoff_session(
-        &self,
-        session_id: Uuid,
-        owner_user_id: Uuid,
-    ) -> Result<CutoffResult, ChatError> {
-        let parent = self.get_session(session_id, owner_user_id).await?;
-        if parent.status == ChatSessionStatus::Cutoff {
-            return Err(ChatError::Validation(
-                "This chat was already continued.".into(),
-            ));
-        }
-
-        let transcript = self.format_transcript(session_id).await?;
-        let summary = compact_transcript(&transcript, TRANSCRIPT_COMPACT_CHARS);
-
-        let parent = self
-            .patch_session(session_id, owner_user_id, ChatSessionStatus::Cutoff)
-            .await?;
-        self.clear_provider_session(session_id).await?;
-
-        let child = self
-            .create_session_inner(
-                owner_user_id,
-                parent.agent_id,
-                parent.board_id,
-                parent.repo_id,
-                Some(session_id),
-            )
-            .await?;
-
-        let meta = ChatActionResultMeta {
-            action: "cutoff".into(),
-            ticket_id: None,
-            knowledge_item_id: None,
-            child_session_id: Some(child.id),
-        };
-        let _parent_note = self
-            .append_message(
-                session_id,
-                ChatMessageRole::System,
-                "Continued in a new chat.",
-                None,
-                Some(serde_json::to_value(&meta).unwrap_or_default()),
-            )
-            .await?;
-
-        let seed_body = format!(
-            "Continued from an earlier chat.\n\n## Prior conversation summary\n\n{summary}"
-        );
-        let seed_message = self
-            .append_message(
-                child.id,
-                ChatMessageRole::System,
-                &seed_body,
-                None,
-                Some(serde_json::json!({
-                    "action": "cutoff_seed",
-                    "parentSessionId": session_id
-                })),
-            )
-            .await?;
-
-        Ok(CutoffResult {
-            parent,
-            child,
-            seed_message,
         })
     }
 }
@@ -1266,6 +1244,7 @@ const CHAT_SESSION_LIST_SELECT: &str = r"
     cs.id, cs.board_id, cs.owner_user_id, cs.agent_id, cs.repo_id, cs.parent_session_id, cs.status,
     cs.provider_session_id, cs.provider_session_connector,
     cs.created_at, cs.updated_at,
+    fm.first_human_body,
     COALESCE(lm.body, '') AS last_message_body,
     lm.role AS last_message_role,
     lm.created_at AS last_message_at,
@@ -1300,6 +1279,7 @@ fn session_from_insert_row(row: &sqlx::postgres::PgRow) -> ChatSession {
         last_message_role: None,
         has_active_run: false,
         active_run_id: None,
+        title: None,
         created_at: row.get("created_at"),
         updated_at: row.get("updated_at"),
     }
@@ -1325,6 +1305,12 @@ fn row_to_session(row: &sqlx::postgres::PgRow) -> ChatSession {
         last_message_role: row.try_get("last_message_role").ok().flatten(),
         has_active_run: row.try_get("has_active_run").unwrap_or(false),
         active_run_id: row.try_get("active_run_id").ok().flatten(),
+        title: row
+            .try_get::<Option<String>, _>("first_human_body")
+            .ok()
+            .flatten()
+            .as_deref()
+            .and_then(title_from_first_message),
         created_at: row.get("created_at"),
         updated_at: row.get("updated_at"),
     }
