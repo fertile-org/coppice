@@ -1,3 +1,5 @@
+[English](README.md) · [简体中文](README.zh-CN.md)
+
 # Coppice
 
 **Beta.** Hire specialists. Keep the final say.

@@ -2,10 +2,11 @@ import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import zlib from 'node:zlib';
+import { LOCALES, LOCALE_PATHS } from '../src/i18n/locales.mjs';
 
 const root = process.cwd();
 const dist = path.resolve('dist');
-const locales = ['zh-cn', 'zh-tw', 'zh-hk', 'ja', 'fr'];
+const locales = LOCALE_PATHS;
 const failures = [];
 
 function fail(message) {
@@ -88,7 +89,32 @@ function indexedUrls(outDir) {
   return urls;
 }
 
-function checkHead(html, { lang, canonicalPath, hreflangs, absent = [], site }) {
+const LOCALE_CODES = Object.fromEntries(LOCALES.map((locale) => [locale.path, locale.code]));
+
+/** Translations that ship in the repo (not the fixture): `[hreflang, localized path]` for one English path. */
+function shippedTranslations(englishPath) {
+  const out = [];
+  for (const locale of locales) {
+    let found = false;
+    if (englishPath === '/' || englishPath === '/download') {
+      found = fs.existsSync(path.join(root, 'src/i18n/pages', `${locale}.ts`));
+    } else if (englishPath === '/docs' || englishPath.startsWith('/docs/')) {
+      const slug = englishPath === '/docs' ? 'index' : englishPath.slice('/docs/'.length);
+      found = ['.md', '.mdx'].some(
+        (ext) =>
+          fs.existsSync(path.join(root, 'src/content/docs', locale, `${slug}${ext}`)) ||
+          fs.existsSync(path.join(root, 'src/pages', locale, 'docs', `${slug}${ext}`)),
+      );
+    }
+    if (found) out.push([LOCALE_CODES[locale], englishPath === '/' ? `/${locale}` : `/${locale}${englishPath}`]);
+  }
+  return out;
+}
+
+function checkHead(html, { lang, canonicalPath, hreflangs, absent = [], site, englishPath }) {
+  const shipped = englishPath ? shippedTranslations(englishPath) : [];
+  hreflangs = [...hreflangs, ...shipped.filter(([code]) => !hreflangs.some(([have]) => have === code))];
+  absent = absent.filter((code) => !shipped.some(([have]) => have.toLowerCase() === code.toLowerCase()));
   if (htmlLang(html) !== lang) fail(`expected html lang ${lang}, got ${htmlLang(html)}`);
   const canonical = attr(html, 'canonical');
   if (canonical.length !== 1 || pathnameOf(canonical[0].href) !== canonicalPath) {
@@ -144,10 +170,35 @@ function checkBuild(outDir, { translated, site }) {
     }
   }
 
+  for (const englishPath of baseline) {
+    for (const [code, localized] of shippedTranslations(englishPath)) {
+      if (localized.startsWith('/ja/') && translated) continue;
+      const html = readHtml(outDir, localized);
+      if (!html) {
+        fail(`missing shipped translation ${localized}`);
+        continue;
+      }
+      checkHead(html, {
+        englishPath,
+        lang: code,
+        canonicalPath: localized,
+        site,
+        hreflangs: [
+          ['en', englishPath],
+          ['x-default', englishPath],
+        ],
+      });
+      if (englishPath.startsWith('/docs') && !html.includes('data-pagefind-body')) {
+        fail(`shipped translation ${localized} is not searchable`);
+      }
+    }
+  }
+
   const fallback = readHtml(outDir, '/ja/docs/install');
   if (!fallback) fail('missing /ja/docs/install');
   else {
     checkHead(fallback, {
+      englishPath: '/docs/install',
       lang: 'ja',
       canonicalPath: '/docs/install',
       site,
@@ -173,6 +224,7 @@ function checkBuild(outDir, { translated, site }) {
   if (!englishConcepts) fail('missing /docs/concepts');
   else if (translated) {
     checkHead(englishConcepts, {
+      englishPath: '/docs/concepts',
       lang: 'en',
       canonicalPath: '/docs/concepts',
       site,
@@ -185,6 +237,7 @@ function checkBuild(outDir, { translated, site }) {
     });
   } else {
     checkHead(englishConcepts, {
+      englishPath: '/docs/concepts',
       lang: 'en',
       canonicalPath: '/docs/concepts',
       site,
@@ -223,6 +276,7 @@ function checkBuild(outDir, { translated, site }) {
     if (!page) fail('missing translated /ja/docs/concepts');
     else {
       checkHead(page, {
+        englishPath: '/docs/concepts',
         lang: 'ja',
         canonicalPath: '/ja/docs/concepts',
         site,
