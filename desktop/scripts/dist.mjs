@@ -5,12 +5,11 @@
 //   node scripts/dist.mjs [--dir]
 
 import { spawn } from 'node:child_process';
-import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
 import { aptSourceLine, updateBase } from '../src/updateEndpoints.mjs';
-import { installAptPublicKey } from './apt-repo.mjs';
 import { stampDebsInDist } from './deb-version.mjs';
 import { writeMetainfo } from './write-metainfo.mjs';
 
@@ -41,23 +40,15 @@ export function updaterModeJson(env) {
   })}\n`;
 }
 
-// Writes the public keyring and the apt source line into resources/apt.
-// The private signing key is never read here.
-export function stageAptResources(env, resourcesDir) {
+// Public half only. The private key is used by apt-repo.yml and is not read here.
+export const APT_KEYRING_FILE = 'build/linux/coppice-archive-keyring.gpg';
+
+// Copies the committed keyring and writes the apt source line into resources/apt.
+export function stageAptResources(env, resourcesDir, keyringPath) {
   const aptDir = join(resourcesDir, 'apt');
-  const keyPath = join(aptDir, 'coppice-archive-keyring.gpg');
-  const listPath = join(aptDir, 'coppice.list');
-  const installed = installAptPublicKey({
-    publicKeyArmored: env.COPPICE_APT_PUBLIC_KEY ?? '',
-    outPath: keyPath,
-  });
-  if (!installed) {
-    rmSync(listPath, { force: true });
-    return false;
-  }
   mkdirSync(aptDir, { recursive: true });
-  writeFileSync(listPath, `${aptSourceLine(env.COPPICE_UPDATE_BASE)}\n`);
-  return true;
+  copyFileSync(keyringPath, join(aptDir, 'coppice-archive-keyring.gpg'));
+  writeFileSync(join(aptDir, 'coppice.list'), `${aptSourceLine(env.COPPICE_UPDATE_BASE)}\n`);
 }
 
 export function builderArgs(env, { dir, platform }) {
@@ -84,9 +75,8 @@ function main() {
   writeFileSync(join(desktopDir, 'updater-mode.json'), updaterModeJson(env));
   const resourcesDir = join(desktopDir, 'resources');
   if (process.platform === 'linux' && existsSync(resourcesDir)) {
-    stageAptResources(env, resourcesDir);
+    stageAptResources(env, resourcesDir, join(desktopDir, APT_KEYRING_FILE));
   }
-  delete env.COPPICE_APT_PUBLIC_KEY;
   for (const key of Object.keys(env)) {
     if (key.startsWith('COPPICE_APT_SIGNING_')) delete env[key];
   }

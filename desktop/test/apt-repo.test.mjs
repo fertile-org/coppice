@@ -11,15 +11,16 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 
 import {
   APT_SOURCE_LINE,
   buildAptRepo,
-  installAptPublicKey,
   poolFilename,
   renderPackageEntry,
 } from '../scripts/apt-repo.mjs';
+import { APT_KEYRING_FILE, stageAptResources } from '../scripts/dist.mjs';
 import { APT_KEYRING_PATH, aptSourceLine, macUpdateFeed } from '../src/updateEndpoints.mjs';
 
 test('package entries keep the Debian version and a pool path', () => {
@@ -48,44 +49,23 @@ test('package entries keep the Debian version and a pool path', () => {
   assert.match(entry, /Description: Local board\n Second line\n/);
 });
 
-test('an empty public key does not leave a keyring behind', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'coppice-apt-key-'));
-  const out = join(dir, 'coppice-archive-keyring.gpg');
-  writeFileSync(out, 'stale');
-  assert.equal(installAptPublicKey({ publicKeyArmored: '  ', outPath: out }), false);
-  assert.equal(readOrNull(out), null);
-});
-
-test('packaging installs a throwaway public key and refuses a private key', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'coppice-apt-pub-'));
-  const gpgHome = join(dir, 'gnupg');
-  mkdirSync(gpgHome, { mode: 0o700 });
-  const gen = spawnSync('gpg', ['--batch', '--homedir', gpgHome, '--gen-key'], {
-    input: [
-      '%no-protection',
-      'Key-Type: RSA',
-      'Key-Length: 2048',
-      'Name-Real: Coppice Apt Public Test',
-      'Expire-Date: 0',
-      '%commit',
-      '',
-    ].join('\n'),
-    encoding: 'utf8',
-  });
-  assert.equal(gen.status, 0, gen.stderr);
-  const pub = spawnSync('gpg', ['--homedir', gpgHome, '--batch', '--armor', '--export'], { encoding: 'utf8' });
-  assert.equal(pub.status, 0, pub.stderr);
-  const secret = spawnSync('gpg', ['--homedir', gpgHome, '--batch', '--armor', '--export-secret-keys'], {
-    encoding: 'utf8',
-  });
-  assert.equal(secret.status, 0, secret.stderr);
-  const out = join(dir, 'nested', 'coppice-archive-keyring.gpg');
-  assert.equal(installAptPublicKey({ publicKeyArmored: pub.stdout, outPath: out }), true);
-  const shown = spawnSync('gpg', ['--batch', '--show-keys', out], { encoding: 'utf8' });
+test('packaging copies the committed public keyring', () => {
+  const keyring = fileURLToPath(new URL(`../${APT_KEYRING_FILE}`, import.meta.url));
+  const shown = spawnSync('gpg', ['--batch', '--show-keys', keyring], { encoding: 'utf8' });
   assert.equal(shown.status, 0, shown.stderr);
-  assert.match(shown.stdout, /Coppice Apt Public Test/);
-  assert.throws(() => installAptPublicKey({ publicKeyArmored: secret.stdout, outPath: out }), /public key/);
-  chmodSync(gpgHome, 0o700);
+  assert.match(shown.stdout, /Coppice Apt/);
+  const packets = spawnSync('gpg', ['--batch', '--list-packets', keyring], { encoding: 'utf8' });
+  assert.equal(packets.status, 0, packets.stderr);
+  assert.match(packets.stdout, /public key packet/);
+  assert.doesNotMatch(`${packets.stdout}\n${packets.stderr}`, /secret key/i);
+
+  const dir = mkdtempSync(join(tmpdir(), 'coppice-apt-stage-'));
+  stageAptResources({ COPPICE_UPDATE_BASE: 'https://apt.example.com/' }, dir, keyring);
+  assert.deepEqual(readFileSync(join(dir, 'apt/coppice-archive-keyring.gpg')), readFileSync(keyring));
+  assert.equal(
+    readFileSync(join(dir, 'apt/coppice.list'), 'utf8'),
+    `${aptSourceLine('https://apt.example.com/')}\n`,
+  );
   rmSync(dir, { recursive: true, force: true });
 });
 
@@ -178,14 +158,6 @@ test('the installed apt source uses signed-by and the base URL lives in one plac
   assert.equal(remove.includes(APT_KEYRING_PATH), true);
   assert.match(remove, /sources\.list\.d\/coppice\.list/);
 });
-
-function readOrNull(file) {
-  try {
-    return readFileSync(file);
-  } catch {
-    return null;
-  }
-}
 
 function makeDeb(dir, arch) {
   const root = join(dir, `pkg-${arch}`);

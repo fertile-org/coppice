@@ -246,38 +246,6 @@ export function exportPublicKeyring({ keyArmored, passphrase = '', outPath }) {
   });
 }
 
-// Linux packaging calls this with the public key only. An empty value leaves
-// the deb without an apt source; the postinst skips a missing key. A stale
-// key from an earlier local build is removed so it cannot be shipped.
-export function installAptPublicKey({ publicKeyArmored, outPath }) {
-  if (typeof publicKeyArmored !== 'string' || publicKeyArmored.trim() === '') {
-    rmSync(outPath, { force: true });
-    return false;
-  }
-  const armored = publicKeyArmored.replace(/\r\n/g, '\n').trim();
-  if (armored.includes('PRIVATE KEY BLOCK')) {
-    throw new Error('COPPICE_APT_PUBLIC_KEY must be a public key, not a private key');
-  }
-  if (!armored.includes('BEGIN PGP PUBLIC KEY BLOCK')) {
-    throw new Error('COPPICE_APT_PUBLIC_KEY must be an ASCII-armored PGP public key');
-  }
-  mkdirSync(dirname(outPath), { recursive: true });
-  const dir = mkdtempSync(join(tmpdir(), 'coppice-apt-pub-'));
-  try {
-    const asc = join(dir, 'key.asc');
-    writeFileSync(asc, `${armored}\n`);
-    const result = spawnSync('gpg', ['--batch', '--yes', '--dearmor', '--output', outPath, asc], {
-      encoding: 'utf8',
-    });
-    if (result.status !== 0) {
-      throw new Error((result.stderr || 'gpg --dearmor failed').trim());
-    }
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-  return true;
-}
-
 function readPassphrase(file) {
   if (!file) return '';
   return readFileSync(file, 'utf8');

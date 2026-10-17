@@ -28,9 +28,9 @@ if hash update-desktop-database 2>/dev/null; then
 fi
 
 # First install registers the apt source, the way VS Code does. Later updates
-# arrive through apt upgrade or Software Updater. The key and the source list
-# are packaged only when the release build has COPPICE_APT_PUBLIC_KEY.
-# Local builds omit both, and this script does not embed the repository URL.
+# arrive through apt upgrade or Software Updater. The keyring is the committed
+# public file packaged by scripts/dist.mjs, and the source list is written
+# beside it. This script does not embed the repository URL.
 KEY_SRC="$APP_DIR/resources/apt/coppice-archive-keyring.gpg"
 LIST_SRC="$APP_DIR/resources/apt/coppice.list"
 KEY_DST=/usr/share/keyrings/coppice-archive-keyring.gpg

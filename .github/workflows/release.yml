@@ -178,7 +178,6 @@ jobs:
       - name: Package (Linux)
         if: runner.os == 'Linux'
         env:
-          COPPICE_APT_PUBLIC_KEY: ${{ vars.COPPICE_APT_PUBLIC_KEY }}
           COPPICE_UPDATE_BASE: ${{ vars.COPPICE_UPDATE_BASE }}
         run: cd desktop && yarn dist
       - name: Check Debian package version
