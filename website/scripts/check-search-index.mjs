@@ -141,7 +141,6 @@ else {
 const fragmentDir = path.join(dist, 'pagefind', 'fragment');
 const urls = [];
 const banned = [
-  'Put your agents on a board',
   'Hire specialists. Keep the final say.',
   'Search docs',
   'Page not found',

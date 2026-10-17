@@ -18,7 +18,7 @@ export const ui = {
     download: 'Download',
   },
   footer: {
-    tagline: 'Put your agents on a board. Keep the gates.',
+    tagline: 'Hire specialists. Keep the final say.',
     licenseBefore: 'Coppice is open source under the ',
     licenseLabel: 'Apache 2.0 license',
     licenseAfter: '.',
