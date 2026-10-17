@@ -320,6 +320,15 @@ impl<'a> PlanningService<'a> {
         if ticket.ticket.status != TicketStatus::PlanReview {
             return Err(PlanError::Validation(APPROVE_ONLY_FROM_PLAN_REVIEW.into()));
         }
+        if self
+            .questions(ticket_id)
+            .await?
+            .is_some_and(|state| state.waiting)
+        {
+            return Err(PlanError::Validation(
+                plan::APPROVE_WAITING_FOR_ANSWERS.into(),
+            ));
+        }
         let Some(plan) = self.latest_plan_comment(ticket_id).await? else {
             return Err(PlanError::Validation(NO_PLAN_YET.into()));
         };
@@ -362,10 +371,145 @@ impl<'a> PlanningService<'a> {
         Ok(())
     }
 
+    /// The ticket's question round, if the planner asked one.
+    pub async fn questions(&self, ticket_id: Uuid) -> Result<Option<PlanQuestionsState>, PlanError> {
+        let row: Option<(serde_json::Value, Option<serde_json::Value>, bool)> = sqlx::query_as(
+            r#"
+            SELECT questions, answers, answered_at IS NULL
+            FROM ticket_plan_questions
+            WHERE ticket_id = $1
+            "#,
+        )
+        .bind(ticket_id)
+        .fetch_optional(self.pool)
+        .await?;
+        Ok(row.map(|(questions, answers, waiting)| PlanQuestionsState {
+            questions: serde_json::from_value(questions).unwrap_or_default(),
+            answers: answers
+                .and_then(|answers| serde_json::from_value(answers).ok())
+                .unwrap_or_default(),
+            waiting,
+        }))
+    }
+
+    /// Questions are allowed once, and only before the ticket's first plan.
+    pub async fn can_ask_questions(&self, ticket_id: Uuid) -> Result<bool, PlanError> {
+        let blocked: bool = sqlx::query_scalar(
+            r#"
+            SELECT EXISTS(SELECT 1 FROM ticket_plan_questions WHERE ticket_id = $1)
+                OR EXISTS(
+                    SELECT 1 FROM ticket_comments WHERE ticket_id = $1 AND intent = 'plan'
+                )
+            "#,
+        )
+        .bind(ticket_id)
+        .fetch_one(self.pool)
+        .await?;
+        Ok(!blocked)
+    }
+
+    /// Store the planner's questions and move the ticket to Plan Review,
+    /// where it waits for answers. `comment_id` is the posted questions comment.
+    pub async fn record_questions(
+        &self,
+        ticket_id: Uuid,
+        run_id: Option<Uuid>,
+        comment_id: Option<Uuid>,
+        questions: &[crate::providers::PlanQuestion],
+    ) -> Result<(), PlanError> {
+        if questions.len() > plan::MAX_PLAN_QUESTIONS {
+            return Err(PlanError::Validation(plan::PLAN_QUESTIONS_TOO_MANY.into()));
+        }
+        let inserted = sqlx::query(
+            r#"
+            INSERT INTO ticket_plan_questions (ticket_id, run_id, comment_id, questions)
+            VALUES ($1, $2, $3, $4)
+            ON CONFLICT (ticket_id) DO NOTHING
+            "#,
+        )
+        .bind(ticket_id)
+        .bind(run_id)
+        .bind(comment_id)
+        .bind(serde_json::to_value(questions).unwrap_or_default())
+        .execute(self.pool)
+        .await?
+        .rows_affected();
+        if inserted == 0 {
+            return Err(PlanError::Validation(plan::PLAN_QUESTIONS_ALREADY_ASKED.into()));
+        }
+        let ticket = TicketService::new(self.pool).get(ticket_id).await?;
+        if let Some(next) = status_after_planning_run(ticket.ticket.status) {
+            TicketService::new(self.pool)
+                .update_status(ticket_id, next, None, None)
+                .await?;
+        }
+        Ok(())
+    }
+
+    /// Post the human's answers and start planning again with them. The
+    /// ticket stays in Plan Review while the plan is written.
+    pub async fn send_answers(&self, ticket_id: Uuid, answers: &[String]) -> Result<(), PlanError> {
+        let ticket = TicketService::new(self.pool).get(ticket_id).await?;
+        TicketService::ensure_not_archived(&ticket.ticket)?;
+        let Some(state) = self.questions(ticket_id).await?.filter(|state| state.waiting) else {
+            return Err(PlanError::Validation(plan::NO_QUESTIONS_WAITING.into()));
+        };
+        let answers: Vec<String> = state
+            .questions
+            .iter()
+            .enumerate()
+            .map(|(index, _)| {
+                answers
+                    .get(index)
+                    .map(|answer| answer.trim().to_string())
+                    .unwrap_or_default()
+            })
+            .collect();
+        if answers.iter().all(String::is_empty) {
+            return Err(PlanError::Validation(plan::SEND_ANSWERS_REQUIRED.into()));
+        }
+        if self.active_plan_run(ticket_id).await?.is_some() {
+            return Err(PlanError::Validation(PLAN_ALREADY_RUNNING.into()));
+        }
+        let body = format!(
+            "{}\n\n{}",
+            plan::ANSWERS_COMMENT_TITLE,
+            plan::answered_questions(&state.questions, &answers)
+        );
+        let comment = CommentService::new(self.pool)
+            .create(
+                ticket_id,
+                AuthorType::Human,
+                None,
+                body.trim_end(),
+                CommentIntent::ClarificationAnswer,
+                &[],
+                &[],
+            )
+            .await?;
+        sqlx::query(
+            r#"
+            UPDATE ticket_plan_questions
+            SET answers = $2, answers_comment_id = $3, answered_at = now()
+            WHERE ticket_id = $1
+            "#,
+        )
+        .bind(ticket_id)
+        .bind(serde_json::to_value(&answers).unwrap_or_default())
+        .bind(comment.id)
+        .execute(self.pool)
+        .await?;
+        self.start(ticket_id, Some(comment.id)).await?;
+        Ok(())
+    }
+
     pub async fn ask_for_changes(&self, ticket_id: Uuid, body: &str) -> Result<(), PlanError> {
         let ticket = TicketService::new(self.pool).get(ticket_id).await?;
         if ticket.ticket.status != TicketStatus::PlanReview {
             return Err(PlanError::Validation(ASK_ONLY_FROM_PLAN_REVIEW.into()));
+        }
+        if self.latest_plan_comment(ticket_id).await?.is_none() {
+            return Err(PlanError::Validation(NO_PLAN_YET.into()));
         }
         if body.trim().is_empty() {
             return Err(PlanError::Validation(ASK_COMMENT_REQUIRED.into()));
@@ -520,6 +664,15 @@ impl<'a> PlanningService<'a> {
             .map(Some)
             .map_err(Into::into)
     }
+}
+
+/// A ticket's question round. `waiting` until the human sends answers.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PlanQuestionsState {
+    pub questions: Vec<crate::providers::PlanQuestion>,
+    pub answers: Vec<String>,
+    pub waiting: bool,
 }
 
 /// What a revision run is told: the plan it replaces and every request.

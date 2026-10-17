@@ -955,3 +955,192 @@ async fn revision_runs_get_the_previous_plan_and_every_change_request() {
     assert!(round_three.previous_plan.starts_with("### Changes requested"));
     assert!(round_three.previous_plan.contains("- [ ] Add the table"));
 }
+
+async fn post_json(
+    app: &axum::Router,
+    path: &str,
+    body: serde_json::Value,
+    cookie: &str,
+    csrf: &str,
+) -> axum::response::Response {
+    app.clone()
+        .oneshot(common::json_request("POST", path, &body.to_string(), cookie, csrf))
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+async fn questions_wait_in_plan_review_and_answers_start_the_plan() {
+    use coppice_server::copy::plan::{
+        APPROVE_WAITING_FOR_ANSWERS, NO_PLAN_YET, QUESTIONS_COMMENT_TITLE, SEND_ANSWERS_REQUIRED,
+    };
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let (state, app, cookie, csrf, _env) =
+        common::bootstrap_and_login_with_auto_start_workers().await;
+    let (ticket_id, git) =
+        open_planned_repo(&app, &state, "plan_questioner", &cookie, &csrf).await;
+    let board_id = common::get_ticket(&app, &ticket_id, &cookie, &csrf).await["boardId"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let ticket = common::poll_ticket_until(
+        &app,
+        &ticket_id,
+        &cookie,
+        &csrf,
+        "waiting for answers",
+        Duration::from_secs(20),
+        |ticket| ticket["planQuestions"]["waiting"] == true,
+    )
+    .await;
+    assert_eq!(ticket["status"], "plan_review");
+    assert_eq!(ticket["hasPlan"], false);
+    assert_eq!(ticket["planQuestions"]["questions"].as_array().unwrap().len(), 2);
+    let thread = comments(&app, &ticket_id, &cookie, &csrf).await;
+    let asked = thread
+        .iter()
+        .find(|note| note["intent"] == "clarification_request")
+        .expect("questions comment");
+    assert!(asked["body"].as_str().unwrap().starts_with(QUESTIONS_COMMENT_TITLE));
+    assert!(thread.iter().all(|note| note["intent"] != "plan"));
+    snapshot_ticket_git(&git);
+
+    // A waiting ticket is outside the review cap.
+    let pool = state.db.as_ref().expect("db");
+    let occupancy = coppice_server::services::review_capacity::ReviewCapacityService::new(pool)
+        .occupancy(Uuid::parse_str(&board_id).unwrap(), true)
+        .await
+        .unwrap();
+    assert_eq!(occupancy, 0);
+
+    let approve = post_json(&app, &format!("/api/tickets/{ticket_id}/approve-plan"), serde_json::json!({}), &cookie, &csrf).await;
+    assert_eq!(approve.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(message(approve).await, APPROVE_WAITING_FOR_ANSWERS);
+    let ask = post_json(
+        &app,
+        &format!("/api/tickets/{ticket_id}/plan-changes"),
+        serde_json::json!({ "comment": "Change it." }),
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(ask.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(message(ask).await, NO_PLAN_YET);
+    let empty = post_json(
+        &app,
+        &format!("/api/tickets/{ticket_id}/plan-answers"),
+        serde_json::json!({ "answers": ["  ", ""] }),
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(empty.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(message(empty).await, SEND_ANSWERS_REQUIRED);
+
+    // The next run writes a plan.
+    let planner: Uuid = sqlx::query_scalar("SELECT assignee_agent_id FROM tickets WHERE id = $1")
+        .bind(Uuid::parse_str(&ticket_id).unwrap())
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE agents SET preset_source = 'plan_writer' WHERE id = $1")
+        .bind(planner)
+        .execute(pool)
+        .await
+        .unwrap();
+    let sent = post_json(
+        &app,
+        &format!("/api/tickets/{ticket_id}/plan-answers"),
+        serde_json::json!({ "answers": ["Postgres"] }),
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(sent.status(), StatusCode::OK);
+    let sent = common::json_body(sent).await;
+    assert_eq!(sent["status"], "plan_review");
+    assert_eq!(sent["planQuestions"]["waiting"], false);
+
+    let ticket = common::poll_ticket_until(
+        &app,
+        &ticket_id,
+        &cookie,
+        &csrf,
+        "plan after answers",
+        Duration::from_secs(20),
+        |ticket| ticket["hasPlan"] == true,
+    )
+    .await;
+    assert_eq!(ticket["status"], "plan_review");
+    let thread = comments(&app, &ticket_id, &cookie, &csrf).await;
+    let answers = thread
+        .iter()
+        .find(|note| note["intent"] == "clarification_answer")
+        .expect("answers comment");
+    let body = answers["body"].as_str().unwrap();
+    assert!(body.contains("Which database should the store use?"));
+    assert!(body.contains("Postgres"));
+    assert!(body.contains("No answer."));
+    let listed = runs(&app, &ticket_id, &cookie, &csrf).await;
+    let plan = plan_runs(&listed);
+    assert_eq!(plan.len(), 2);
+    assert!(plan.iter().all(|run| run["status"] == "succeeded"), "{plan:?}");
+    snapshot_ticket_git(&git);
+}
+
+#[tokio::test]
+async fn a_second_question_round_and_more_than_three_questions_are_refused() {
+    use coppice_server::copy::plan::{PLAN_QUESTIONS_ALREADY_ASKED, PLAN_QUESTIONS_TOO_MANY};
+    use coppice_server::providers::PlanQuestion;
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
+    let ticket_id = common::create_unplanned_ticket(&app, &board_id, &cookie, &csrf).await;
+    let ticket = Uuid::parse_str(&ticket_id).unwrap();
+    let pool = state.db.as_ref().expect("db");
+    let planning = PlanningService::new(pool);
+    let question = |text: &str| PlanQuestion {
+        question: text.into(),
+        choices: Vec::new(),
+    };
+
+    let four: Vec<PlanQuestion> = ["a", "b", "c", "d"].iter().map(|q| question(q)).collect();
+    let err = planning.record_questions(ticket, None, None, &four).await.unwrap_err();
+    assert_eq!(err.to_string(), PLAN_QUESTIONS_TOO_MANY);
+
+    assert!(planning.can_ask_questions(ticket).await.unwrap());
+    planning
+        .record_questions(ticket, None, None, &[question("Which?")])
+        .await
+        .unwrap();
+    assert!(!planning.can_ask_questions(ticket).await.unwrap());
+    let err = planning
+        .record_questions(ticket, None, None, &[question("Again?")])
+        .await
+        .unwrap_err();
+    assert_eq!(err.to_string(), PLAN_QUESTIONS_ALREADY_ASKED);
+    let state = planning.questions(ticket).await.unwrap().unwrap();
+    assert!(state.waiting);
+    assert_eq!(state.questions[0].question, "Which?");
+
+    // Validation refuses four questions at submit time too.
+    let four_json = serde_json::json!({
+        "status": "done",
+        "summary": "",
+        "planQuestions": ["a", "b", "c", "d"]
+    });
+    let result: coppice_server::providers::AgentRunResult = serde_json::from_value(four_json).unwrap();
+    let refused = coppice_server::services::result_contract::validate_for_profile(
+        &result,
+        coppice_server::domain::context_profile::ContextProfile::Full,
+        "plan_ticket",
+    );
+    assert_eq!(refused.unwrap_err(), PLAN_QUESTIONS_TOO_MANY);
+}

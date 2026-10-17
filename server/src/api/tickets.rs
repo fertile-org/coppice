@@ -60,6 +60,7 @@ pub fn routes() -> Router<Arc<AppState>> {
             "/api/tickets/{ticket_id}/plan-changes",
             post(ask_for_plan_changes),
         )
+        .route("/api/tickets/{ticket_id}/plan-answers", post(send_plan_answers))
         .route("/api/tickets/{ticket_id}/plan-runs", post(start_plan_run))
         .route("/api/tickets/{ticket_id}/assign", post(assign_agent))
         .route("/api/tickets/{ticket_id}/run-agent", post(run_agent))
@@ -162,6 +163,12 @@ pub(crate) struct TicketResponse {
     latest_plan_run_status: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     approved_plan: Option<ApprovedPlanResponse>,
+    /// The planner's questions. `waiting` is the stored "waiting for your
+    /// answers" state.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    plan_questions: Option<crate::services::planning_service::PlanQuestionsState>,
+    /// In Plan Review: there is a plan to approve.
+    has_plan: bool,
     has_active_run: bool,
     archived_at: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -289,6 +296,8 @@ pub(crate) fn ticket_to_response(item: TicketWithDisplay) -> TicketResponse {
         plan_approved: item.plan_approved,
         latest_plan_run_status: item.latest_plan_run_status,
         approved_plan: None,
+        plan_questions: item.plan_questions,
+        has_plan: item.has_plan,
         has_active_run: item.has_active_run,
         archived_at: ticket
             .archived_at
@@ -1039,6 +1048,30 @@ async fn ask_for_plan_changes(
         .get(ticket_id)
         .await
         .map_err(map_update_status_error)?;
+    Ok(Json(ticket_to_response(ticket)))
+}
+
+#[derive(Deserialize)]
+struct PlanAnswersBody {
+    answers: Vec<String>,
+}
+
+async fn send_plan_answers(
+    State(state): State<Arc<AppState>>,
+    AuthUser { .. }: AuthUser,
+    Path(ticket_id): Path<Uuid>,
+    Json(body): Json<PlanAnswersBody>,
+) -> Result<Json<TicketResponse>, UpdateStatusError> {
+    let pool = pool_from_state(&state).map_err(UpdateStatusError::Status)?;
+    PlanningService::new(pool)
+        .send_answers(ticket_id, &body.answers)
+        .await
+        .map_err(map_plan_error)?;
+    let ticket = TicketService::new(pool)
+        .get(ticket_id)
+        .await
+        .map_err(map_update_status_error)?;
+    crate::events::publish_ticket_updated(&state.event_bus, &ticket);
     Ok(Json(ticket_to_response(ticket)))
 }
 

@@ -44,6 +44,18 @@ export interface ApprovedPlan {
   criteria?: PlanCriterion[];
 }
 
+export interface PlanQuestion {
+  question: string;
+  choices?: string[];
+}
+
+export interface PlanQuestions {
+  questions: PlanQuestion[];
+  answers: string[];
+  /** True until the answers are sent. */
+  waiting: boolean;
+}
+
 export interface Ticket {
   id: string;
   boardId: string;
@@ -72,6 +84,9 @@ export interface Ticket {
   planApproved?: boolean;
   latestPlanRunStatus?: string | null;
   approvedPlan?: ApprovedPlan | null;
+  planQuestions?: PlanQuestions | null;
+  /** In Plan Review: a plan exists to approve. */
+  hasPlan?: boolean;
   archivedAt?: string | null;
   attachmentIds?: string[];
   attachments?: {

@@ -287,6 +287,29 @@ async fn drive_plan_run(
             requests: context.requests.iter().map(String::as_str).collect(),
         });
     markdown.push_str(&plan::plan_instructions(revision.as_ref()));
+    let planning = PlanningService::new(pool);
+    match planning
+        .questions(ticket_id)
+        .await
+        .context("load plan questions")?
+    {
+        Some(state) if !state.waiting => {
+            markdown.push_str(&format!(
+                "\n{}\n\n{}\n{}\n",
+                plan::ANSWERS_HEADING,
+                plan::answered_questions(&state.questions, &state.answers),
+                plan::ANSWERS_INSTRUCTION
+            ));
+        }
+        None if planning
+            .can_ask_questions(ticket_id)
+            .await
+            .context("check plan questions")? =>
+        {
+            markdown.push_str(&format!("\n{}\n", plan::PLAN_QUESTIONS_INSTRUCTION));
+        }
+        _ => {}
+    }
     let attachments = crate::services::ticket_attachments::stage_ticket_attachments(
         pool,
         &state.config.storage.artifacts_dir,
@@ -389,12 +412,29 @@ async fn drive_plan_run(
         return Err(JobCancelled.into());
     }
 
-    let summary = match &result {
-        AgentRunResult::Done { summary, .. } => summary.clone(),
+    let (summary, questions) = match &result {
+        AgentRunResult::Done {
+            summary,
+            plan_questions,
+            ..
+        } => (summary.clone(), plan_questions.clone()),
         _ => anyhow::bail!(PLAN_MUST_FINISH),
     };
     result_contract::validate_for_profile(&result, run.context_profile, &run.job_type)
         .map_err(|err| anyhow::anyhow!(err))?;
+    if !questions.is_empty()
+        && !PlanningService::new(pool)
+            .can_ask_questions(ticket_id)
+            .await
+            .context("check plan questions")?
+    {
+        anyhow::bail!(plan::PLAN_QUESTIONS_ALREADY_ASKED);
+    }
+    let (comment_body, comment_intent) = if questions.is_empty() {
+        (plan::format_plan(&summary), CommentIntent::Plan)
+    } else {
+        (plan::questions_comment(&questions), CommentIntent::ClarificationRequest)
+    };
 
     let apply = ApplyResult {
         run_status: RunStatus::Succeeded,
@@ -406,8 +446,8 @@ async fn drive_plan_run(
             acceptance_criteria: None,
         },
         comment: ApplyComment {
-            body: plan::format_plan(&summary),
-            intent: CommentIntent::Plan,
+            body: comment_body,
+            intent: comment_intent,
             mentions: Vec::new(),
         },
     };
@@ -419,10 +459,29 @@ async fn drive_plan_run(
         .await
         .context("finish planning run")?;
 
-    PlanningService::new(pool)
-        .bind_latest_plan(ticket_id)
+    if questions.is_empty() {
+        PlanningService::new(pool)
+            .bind_latest_plan(ticket_id)
+            .await
+            .context("bind plan comment")?;
+    } else {
+        let comment_id: Option<uuid::Uuid> = sqlx::query_scalar(
+            r#"
+            SELECT id FROM ticket_comments
+            WHERE ticket_id = $1 AND intent = 'clarification_request'
+            ORDER BY created_at DESC, id DESC
+            LIMIT 1
+            "#,
+        )
+        .bind(ticket_id)
+        .fetch_optional(pool)
         .await
-        .context("bind plan comment")?;
+        .context("find questions comment")?;
+        PlanningService::new(pool)
+            .record_questions(ticket_id, Some(run.id), comment_id, &questions)
+            .await
+            .context("record plan questions")?;
+    }
 
     let updated = TicketService::new(pool)
         .get(ticket_id)

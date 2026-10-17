@@ -245,7 +245,12 @@ export function TicketDetailPanel({
       )}
 
       {ticket.status === 'plan_review' && !isArchived && (
-        <PlanReviewActions ticketId={ticket.id} boardId={ticket.boardId} />
+        <PlanReviewActions
+          ticketId={ticket.id}
+          boardId={ticket.boardId}
+          hasPlan={ticket.hasPlan ?? true}
+          planQuestions={ticket.planQuestions}
+        />
       )}
 
       {ticket.status === 'wait_for_final_review' && ticket.approvedPlan && (

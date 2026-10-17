@@ -84,6 +84,10 @@ pub struct TicketWithDisplay {
     pub plan_approved: bool,
     /// Status of the newest `plan_ticket` run, when one exists.
     pub latest_plan_run_status: Option<String>,
+    /// The planner's question round, when it asked one.
+    pub plan_questions: Option<crate::services::planning_service::PlanQuestionsState>,
+    /// In Plan Review: a plan comment exists to approve. False elsewhere.
+    pub has_plan: bool,
 }
 
 impl<'a> TicketService<'a> {
@@ -1056,6 +1060,26 @@ impl<'a> TicketService<'a> {
         let human_review = HumanReviewService::new(self.pool).get(ticket.id).await?;
         let plan_approved = self.approved_plan_is_current(&ticket).await?;
         let latest_plan_run_status = self.latest_plan_run_status(ticket.id).await?;
+        let plan_questions = crate::services::planning_service::PlanningService::new(self.pool)
+            .questions(ticket.id)
+            .await
+            .map_err(|err| match err {
+                crate::services::planning_service::PlanError::Database(err) => TicketError::Database(err),
+                crate::services::planning_service::PlanError::Validation(message) => {
+                    TicketError::Validation(message)
+                }
+            })?;
+
+        let has_plan = if ticket.status == TicketStatus::PlanReview {
+            sqlx::query_scalar(
+                "SELECT EXISTS(SELECT 1 FROM ticket_comments WHERE ticket_id = $1 AND intent = 'plan')",
+            )
+            .bind(ticket.id)
+            .fetch_one(self.pool)
+            .await?
+        } else {
+            false
+        };
 
         Ok(TicketWithDisplay {
             ticket,
@@ -1065,6 +1089,8 @@ impl<'a> TicketService<'a> {
             human_review,
             plan_approved,
             latest_plan_run_status,
+            plan_questions,
+            has_plan,
         })
     }
 

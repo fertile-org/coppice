@@ -18,6 +18,11 @@ pub async fn call_result_submit(ctx: &ToolCtx<'_>, args: Value) -> Result<Value,
         .map_err(|e| ToolError::InvalidArgs(format!("invalid result: {e}")))?;
     validate_for_profile(&result, ctx.scope.profile, &ctx.scope.job_type)
         .map_err(ToolError::InvalidArgs)?;
+    if let AgentRunResult::Done { plan_questions, .. } = &result {
+        if !plan_questions.is_empty() {
+            questions_allowed(ctx).await?;
+        }
+    }
 
     let stored = serde_json::to_value(&result).map_err(|e| ToolError::Internal(e.into()))?;
     // A connection check is decided by its first submitted outcome.
@@ -49,6 +54,38 @@ pub async fn call_result_submit(ctx: &ToolCtx<'_>, args: Value) -> Result<Value,
     let warnings = target_warnings(&result, &keys, ctx.scope.agent_id);
 
     Ok(json!({ "accepted": true, "warnings": warnings }))
+}
+
+/// Questions belong to a planning run on a ticket with no plan and no
+/// earlier question round. Refusing here lets the agent plan instead.
+async fn questions_allowed(ctx: &ToolCtx<'_>) -> Result<(), ToolError> {
+    if ctx.scope.job_type != crate::domain::workflow::JOB_TYPE_PLAN_TICKET {
+        return Err(ToolError::InvalidArgs(
+            "planQuestions is only for planning runs.".into(),
+        ));
+    }
+    let ticket_id: Option<Uuid> =
+        sqlx::query_scalar("SELECT ticket_id FROM agent_runs WHERE id = $1")
+            .bind(ctx.scope.run_id)
+            .fetch_optional(ctx.pool)
+            .await?
+            .flatten();
+    let Some(ticket_id) = ticket_id else {
+        return Err(ToolError::InvalidArgs(
+            "planQuestions needs a ticket.".into(),
+        ));
+    };
+    let allowed = crate::services::planning_service::PlanningService::new(ctx.pool)
+        .can_ask_questions(ticket_id)
+        .await
+        .map_err(|e| ToolError::Internal(anyhow::anyhow!("{e}")))?;
+    if allowed {
+        Ok(())
+    } else {
+        Err(ToolError::InvalidArgs(
+            crate::copy::plan::PLAN_QUESTIONS_ALREADY_ASKED.into(),
+        ))
+    }
 }
 
 async fn run_is_running(pool: &PgPool, run_id: Uuid) -> Result<bool, sqlx::Error> {

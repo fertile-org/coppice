@@ -35,9 +35,22 @@ export function moveTargetStatus(
 }
 
 export function approveShortcutEnabled(
-  ticket: { status: string; archivedAt?: string | null } | null | undefined,
+  ticket:
+    | {
+        status: string;
+        archivedAt?: string | null;
+        hasPlan?: boolean;
+        planQuestions?: { waiting: boolean } | null;
+      }
+    | null
+    | undefined,
 ): boolean {
-  return ticket?.status === 'plan_review' && !ticket.archivedAt;
+  return (
+    ticket?.status === 'plan_review' &&
+    !ticket.archivedAt &&
+    ticket.hasPlan !== false &&
+    !ticket.planQuestions?.waiting
+  );
 }
 
 export function acceptShortcutEnabled(

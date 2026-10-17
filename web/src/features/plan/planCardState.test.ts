@@ -59,4 +59,20 @@ describe('planCardState', () => {
     ).toBe('none');
     expect(planCardState({ ...base, status: 'in_progress' })).toBe('none');
   });
+
+  it('says the ticket is waiting for answers while questions are open', () => {
+    const planQuestions = {
+      questions: [{ question: 'Which database?' }],
+      answers: [],
+      waiting: true,
+    };
+    expect(planCardState({ ...base, status: 'plan_review', planQuestions })).toBe('answers');
+    expect(
+      planCardState({
+        ...base,
+        status: 'plan_review',
+        planQuestions: { ...planQuestions, waiting: false },
+      }),
+    ).toBe('waiting');
+  });
 });

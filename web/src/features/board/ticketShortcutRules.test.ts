@@ -41,6 +41,15 @@ describe('ticket shortcut rules', () => {
       ),
     ).toBeNull();
     expect(approveShortcutEnabled(ticket({ status: 'plan_review' }))).toBe(true);
+    expect(approveShortcutEnabled(ticket({ status: 'plan_review', hasPlan: false }))).toBe(false);
+    expect(
+      approveShortcutEnabled(
+        ticket({
+          status: 'plan_review',
+          planQuestions: { questions: [{ question: 'Q?' }], answers: [], waiting: true },
+        }),
+      ),
+    ).toBe(false);
     expect(approveShortcutEnabled(ticket({ status: 'ready' }))).toBe(false);
     expect(acceptShortcutEnabled(ticket({ status: 'wait_for_final_review' }))).toBe(true);
     expect(

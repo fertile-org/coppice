@@ -87,6 +87,71 @@ pub const PLAN_SPLIT_REJECTED: &str = "splitTickets is not allowed on a planning
 pub const PLAN_MUST_FINISH: &str =
     "A planning run finishes with status `done` and the plan in `summary`.";
 
+/// Most questions a planning run may ask.
+pub const MAX_PLAN_QUESTIONS: usize = 3;
+
+pub const PLAN_QUESTIONS_INSTRUCTION: &str = "If something in the ticket is unclear and the answer would change the plan, you may ask instead of planning: call `result_submit` with status `done`, an empty `summary`, and 1 to 3 short `planQuestions`, each with optional `choices`. You get one round of questions. If nothing is unclear, write the plan.";
+
+pub const PLAN_QUESTIONS_TOO_MANY: &str =
+    "Ask at most 3 questions. If more is unclear, write the plan and list it under Risks.";
+
+pub const PLAN_QUESTIONS_ALREADY_ASKED: &str = "You already asked your questions for this ticket. Write the plan now and list anything still unclear under Risks.";
+
+pub const ANSWERS_HEADING: &str = "## Your questions and the answers";
+
+pub const ANSWERS_INSTRUCTION: &str =
+    "Write the plan now. Don't ask more questions; list anything still unclear under Risks.";
+
+/// Ticket comment that holds the questions.
+pub const QUESTIONS_COMMENT_TITLE: &str = "**Questions before the plan**";
+
+/// Ticket comment that holds the human's answers.
+pub const ANSWERS_COMMENT_TITLE: &str = "**Answers**";
+
+/// Shown when an answer is not given.
+pub const NO_ANSWER: &str = "No answer.";
+
+pub const SEND_ANSWERS_REQUIRED: &str = "Answer at least one question.";
+
+pub const NO_QUESTIONS_WAITING: &str = "There are no questions waiting for answers.";
+
+pub const APPROVE_WAITING_FOR_ANSWERS: &str =
+    "Answer the questions first. There's no plan to approve yet.";
+
+/// Markdown for the questions comment.
+pub fn questions_comment(questions: &[crate::providers::PlanQuestion]) -> String {
+    let mut out = format!("{QUESTIONS_COMMENT_TITLE}\n");
+    for (index, question) in questions.iter().enumerate() {
+        out.push_str(&format!("\n{}. {}", index + 1, question.question.trim()));
+        for choice in &question.choices {
+            out.push_str(&format!("\n   - {}", choice.trim()));
+        }
+    }
+    out
+}
+
+/// Markdown for the answers comment and the next planning prompt.
+pub fn answered_questions(
+    questions: &[crate::providers::PlanQuestion],
+    answers: &[String],
+) -> String {
+    let mut out = String::new();
+    for (index, question) in questions.iter().enumerate() {
+        let answer = answers
+            .get(index)
+            .map(|answer| answer.trim())
+            .filter(|answer| !answer.is_empty())
+            .unwrap_or(NO_ANSWER);
+        out.push_str(&format!(
+            "{}. {}\n   {}\n",
+            index + 1,
+            question.question.trim(),
+            answer.lines().collect::<Vec<_>>().join("\n   ")
+        ));
+    }
+    out
+}
+
 fn checkbox_text(line: &str) -> Option<String> {
     let trimmed = line.trim();
     let rest = trimmed
@@ -258,6 +323,30 @@ mod tests {
         assert!(text.contains(ACCEPTANCE_CRITERIA_HEADING));
         assert!(text.contains(PLAN_CRITERIA_INSTRUCTION));
         assert_eq!(checklist_steps(&plan_template()), vec!["..."]);
+    }
+
+    #[test]
+    fn questions_and_answers_read_in_order() {
+        use crate::providers::PlanQuestion;
+        let questions = vec![
+            PlanQuestion {
+                question: "Which database?".into(),
+                choices: vec!["Postgres".into(), "SQLite".into()],
+            },
+            PlanQuestion {
+                question: "Keep the endpoint?".into(),
+                choices: Vec::new(),
+            },
+        ];
+        let asked = questions_comment(&questions);
+        assert!(asked.starts_with(QUESTIONS_COMMENT_TITLE));
+        assert!(asked.contains("1. Which database?\n   - Postgres\n   - SQLite"));
+        assert!(asked.contains("2. Keep the endpoint?"));
+        let answered = answered_questions(&questions, &["Postgres".into()]);
+        assert_eq!(
+            answered,
+            "1. Which database?\n   Postgres\n2. Keep the endpoint?\n   No answer.\n"
+        );
     }
 
     #[test]

@@ -17,6 +17,10 @@ export const PLAN_COPY = {
   criterionNotChecked: 'Not checked',
   writingPlan: 'Writing plan',
   waitingForApproval: 'Waiting for you to approve the plan',
+  waitingForAnswers: 'Waiting for your answers',
+  sendAnswers: 'Send answers',
+  answerPlaceholder: 'Your answer',
+  questionsTitle: 'Questions before the plan',
   planNeedsRun: 'Plan needs a run',
   runAgent: 'Run agent',
 } as const;

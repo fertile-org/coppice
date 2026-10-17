@@ -270,10 +270,14 @@ fn validate_plan_result(result: &AgentRunResult) -> Result<(), String> {
             updated_description,
             assign_to,
             split_tickets,
+            plan_questions,
             ..
         } => {
             if !changed_files.is_empty() {
                 return Err(PLAN_CHANGED_FILES_REJECTED.into());
+            }
+            if plan_questions.len() > crate::copy::plan::MAX_PLAN_QUESTIONS {
+                return Err(crate::copy::plan::PLAN_QUESTIONS_TOO_MANY.into());
             }
             if updated_description
                 .as_deref()
@@ -287,7 +291,8 @@ fn validate_plan_result(result: &AgentRunResult) -> Result<(), String> {
             if !split_tickets.is_empty() {
                 return Err(PLAN_SPLIT_REJECTED.into());
             }
-            if summary.trim().is_empty() {
+            // Questions stand in for the plan; any summary is ignored then.
+            if summary.trim().is_empty() && plan_questions.is_empty() {
                 return Err(PLAN_MUST_FINISH.into());
             }
             Ok(())
