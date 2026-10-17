@@ -44,9 +44,9 @@ type ChatReadOnlyStatus = 'passed' | 'untested' | 'unavailable';
 /** Per-CLI chat status. Unknown ids fail closed as unavailable. */
 const CHAT_READ_ONLY: Record<string, { name: string; status: ChatReadOnlyStatus }> = {
   'claude-code': { name: 'Claude Code', status: 'untested' },
-  cursor: { name: 'Cursor', status: 'unavailable' },
+  cursor: { name: 'Cursor', status: 'untested' },
   codex: { name: 'Codex', status: 'untested' },
-  'kilo-code': { name: 'Kilo Code', status: 'unavailable' },
+  'kilo-code': { name: 'Kilo Code', status: 'untested' },
   opencode: { name: 'OpenCode', status: 'passed' },
   mock: { name: 'Mock', status: 'passed' },
 };

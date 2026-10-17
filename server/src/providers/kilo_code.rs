@@ -4,7 +4,7 @@ use super::cli_runner::{
 use super::cli_version;
 use super::kilo_console::KiloConsolePublisher;
 use super::{
-    refuse_unsupported_read_only, run_dir, worktree_dir_from_context, AgentProvider, AgentRunInput,
+    run_dir, worktree_dir_from_context, AgentProvider, AgentRunInput,
     AgentRunResult, ProviderError,
 };
 use crate::mcp::grant::McpAccess;
@@ -85,9 +85,6 @@ impl AgentProvider for KiloCodeProvider {
     }
 
     async fn run(&self, input: AgentRunInput) -> Result<AgentRunResult, ProviderError> {
-        if input.read_only_tools {
-            return Err(refuse_unsupported_read_only(self.id()));
-        }
         let worktree = worktree_dir_from_context(&input.context_path)?;
 
         let run_timeout = Duration::from_secs(self.config.run_timeout_secs);
