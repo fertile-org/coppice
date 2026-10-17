@@ -11,6 +11,8 @@ pub struct RunStreamHandle {
     cancel_tx: watch::Sender<bool>,
     buffer: Arc<Mutex<Vec<LiveMessage>>>,
     snapshot: Arc<Mutex<Option<Value>>>,
+    /// A live session snapshot, read only when someone asks for it.
+    snapshot_source: Mutex<Option<Arc<Mutex<crate::sessions::session_snapshot::SessionSnapshot>>>>,
     /// First non-empty model the CLI reported for this run.
     reported: Mutex<Option<String>>,
     reported_tx: watch::Sender<String>,
@@ -76,10 +78,32 @@ impl RunStreamHandle {
     }
 
     pub fn snapshot(&self) -> Option<Value> {
+        let source = self
+            .snapshot_source
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone();
+        if let Some(source) = source {
+            return Some(source.lock().unwrap_or_else(|e| e.into_inner()).to_value());
+        }
         self.snapshot
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .clone()
+    }
+
+    /// Serve snapshots from a live session that the caller keeps updating.
+    /// Nothing is serialized until a reader asks.
+    pub fn set_snapshot_source(
+        &self,
+        source: Arc<Mutex<crate::sessions::session_snapshot::SessionSnapshot>>,
+    ) {
+        *self.snapshot_source.lock().unwrap_or_else(|e| e.into_inner()) = Some(source);
+    }
+
+    /// The live session changed; idle checkpoints wait for this to settle.
+    pub fn touch_snapshot(&self) {
+        self.snapshot_version.send_modify(|version| *version += 1);
     }
 
     pub fn publish_frame(&self, seq: u64, data: Vec<u8>) {
@@ -167,6 +191,7 @@ impl RunStreamRegistry {
             cancel_tx,
             buffer: Arc::new(Mutex::new(Vec::new())),
             snapshot: Arc::new(Mutex::new(None)),
+            snapshot_source: Mutex::new(None),
             reported: Mutex::new(None),
             reported_tx,
             artifact_log,
