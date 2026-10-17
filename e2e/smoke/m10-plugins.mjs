@@ -214,8 +214,8 @@ async function saveSetting(pluginId, auth) {
   if (setting?.configured !== true || setting?.source !== 'setting') {
     fail('setting GREETING not reported as configured');
   }
-  if (Object.keys(setting).sort().join(',') !== 'configured,key,source') {
-    fail('plugin settings response exposes more than key, configured, and source');
+  if (Object.keys(setting).sort().join(',') !== 'configured,key,needsReentry,source') {
+    fail('plugin settings response exposes more than key, configured, needsReentry, and source');
   }
   console.log('smoke: saved setting GREETING');
 }
