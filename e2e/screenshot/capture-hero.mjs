@@ -6,9 +6,9 @@
  * desktop mode, 1440×900. Seeds the acme-web repo and a small board, then
  * records the core-flow storyboard. Card moves stay instant. Shots hold
  * still. A later column is a straight cut to a whole-column scroll, never a
- * pan or zoom. Crossfades join only shots that share framing and scale.
- * Captions fade in place at the bottom center, one at a time. The pulse
- * wraps the card border.
+ * pan or zoom. A crossfade joins only shots that share framing and scale,
+ * and the edit pulses the card that moved. Any other join is a straight cut.
+ * A caption is gone before the next shot, and the next caption starts there.
  * Writes:
  *
  *   website/public/assets/marketing.mp4   1440×900
@@ -502,7 +502,9 @@ const PULSE_GAP = 4;
 const PULSE_STROKE = 3;
 const MARKERS = [
   { name: 'start', css: 'rgb(255, 0, 96)', rgb: [255, 0, 96] },
+  { name: 'draft', css: 'rgb(120, 0, 255)', rgb: [120, 0, 255] },
   { name: 'plan', css: 'rgb(0, 255, 170)', rgb: [0, 255, 170] },
+  { name: 'preapprove', css: 'rgb(0, 90, 255)', rgb: [0, 90, 255] },
   { name: 'ready', css: 'rgb(255, 128, 0)', rgb: [255, 128, 0] },
   { name: 'build', css: 'rgb(255, 220, 0)', rgb: [255, 220, 0] },
   { name: 'diff', css: 'rgb(80, 0, 255)', rgb: [80, 0, 255] },
@@ -510,10 +512,23 @@ const MARKERS = [
   { name: 'done', css: 'rgb(255, 80, 180)', rgb: [255, 80, 180] },
   { name: 'loop', css: 'rgb(255, 0, 180)', rgb: [255, 0, 180] },
 ];
-const SEGMENT_NAMES = ['write', 'plan', 'approve', 'build', 'diff', 'accept', 'done', 'loop'];
+const SEGMENT_NAMES = [
+  'write',
+  'draft',
+  'plan',
+  'preapprove',
+  'approve',
+  'build',
+  'diff',
+  'accept',
+  'done',
+  'loop',
+];
 const SEGMENT_FRAMES = {
   write: 'board-left',
+  draft: 'board-left',
   plan: 'plan',
+  preapprove: 'board-left',
   approve: 'board-left',
   build: 'board-waiting',
   diff: 'diff',
@@ -1092,7 +1107,7 @@ for offset in (0, 0.8, 1.6, 2.5):
         text=True,
         stderr=subprocess.DEVNULL,
     ).lower()
-    folded = " ".join(text.replace(",", " ").split())
+    folded = " ".join(text.replace(",", " ").split()).replace("accented", "accepted")
     if "nothing is done" not in folded or "accepted not merged" not in folded:
         raise SystemExit(f"accept +{offset:.1f}s missing caption or accepted state:\\n{text}")
     print(f"accept +{offset:.1f}s caption overlaps Accepted, not merged")
@@ -1301,16 +1316,20 @@ async function assemble(raw, pulses, stills) {
     const prev = segments[index];
     const out = index === segments.length - 2 ? 'vout' : `j${index}`;
     const at = outputTime(segments, index, prev.end - prev.start);
+    const left = `n${index}a`;
+    const right = `n${index}b`;
+    filters.push(`[${label}]settb=AVTB[${left}]`);
+    filters.push(`[${index + 1}:v]settb=AVTB[${right}]`);
     if (sameFraming(prev, segment)) {
       const offset = elapsed - CROSSFADE_SECONDS;
       if (offset <= 0.05) fail(`crossfade does not fit after ${prev.name}`);
       filters.push(
-        `[${label}][${index + 1}:v]xfade=transition=fade:duration=${CROSSFADE_SECONDS}:offset=${offset.toFixed(3)}[${out}]`,
+        `[${left}][${right}]xfade=transition=fade:duration=${CROSSFADE_SECONDS}:offset=${offset.toFixed(3)}[${out}]`,
       );
       elapsed = elapsed + (segment.end - segment.start) - CROSSFADE_SECONDS;
       console.log(`hero: join ${prev.name}->${segment.name} crossfade at ${at.toFixed(2)}s`);
     } else {
-      filters.push(`[${label}][${index + 1}:v]concat=n=2:v=1:a=0[${out}]`);
+      filters.push(`[${left}][${right}]concat=n=2:v=1:a=0[${out}]`);
       elapsed += segment.end - segment.start;
       console.log(`hero: join ${prev.name}->${segment.name} cut at ${at.toFixed(2)}s`);
     }
@@ -1585,6 +1604,14 @@ async function record(scene) {
       // finishes so the next cut cannot land while the caption is still appearing.
       if (text) await sleep(520);
     };
+    const hideCaption = async () => {
+      await page.evaluate(() => {
+        sessionStorage.setItem('coppice.hero.caption.visible', '0');
+        document.getElementById('coppice-hero-caption')?.classList.remove('is-on');
+      });
+      await sleep(500);
+      captionAt = 0;
+    };
     const cutScene = async (marker, settle) => {
       await page.evaluate((css) => {
         sessionStorage.setItem('coppice.hero.marker', css);
@@ -1676,40 +1703,62 @@ async function record(scene) {
     const tickets = Array.isArray(created) ? created : (created.items ?? []);
     const ticket = tickets.find((item) => item.title === TICKET_TITLE);
     if (!ticket) fail('typed ticket was not saved');
-    await api('PATCH', `/api/tickets/${ticket.id}`, scene.auth, {
-      description:
-        'Settings should offer a dark mode toggle and follow the same theme preference as the rest of the app.',
-      priority: 'high',
-      repoId: scene.repoId,
+    const worktreePromise = heroGit('worktree', ticket.id.split('-')[0]);
+    // The crossfade overlaps the last half-second. That tail has no caption,
+    // so two pills cannot blend.
+    await fadeCaption(null);
+    await hold(page, 800);
+
+    await cutScene(MARKERS[1], async () => {
+      await api('PATCH', `/api/tickets/${ticket.id}`, scene.auth, {
+        description:
+          'Settings should offer a dark mode toggle and follow the same theme preference as the rest of the app.',
+        priority: 'high',
+        repoId: scene.repoId,
+      });
+      await api('POST', `/api/tickets/${ticket.id}/assign`, scene.auth, {
+        agentId: scene.agentIds.PM,
+      });
+      await api('PATCH', `/api/tickets/${ticket.id}/status`, scene.auth, { status: 'plan_review' });
+      await attachPlan(ticket.id, scene.agentIds.PM);
+      const landed = storyCard('Plan Review');
+      await landed.waitFor({ timeout: 15_000 });
+      await pinBoardLeft(page);
+      await preparePage(page);
     });
-    await api('POST', `/api/tickets/${ticket.id}/assign`, scene.auth, {
-      agentId: scene.agentIds.PM,
-    });
-    await api('PATCH', `/api/tickets/${ticket.id}/status`, scene.auth, { status: 'plan_review' });
-    await attachPlan(ticket.id, scene.agentIds.PM);
-    const planCard = storyCard('Plan Review');
-    await planCard.waitFor({ timeout: 15_000 });
-    await pinBoardLeft(page);
-    await pulseCue(planCard);
+    await sleep(700);
+    await pulseCue(storyCard('Plan Review'));
     await fadeCaption(CAPTIONS[1]);
     await hold(page, 3000);
 
-    await cutScene(MARKERS[1], async () => {
+    const planCard = storyCard('Plan Review');
+    await cutScene(MARKERS[2], async () => {
       await planCard.click();
       await page.getByRole('button', { name: 'Approve plan' }).waitFor({ timeout: 15_000 });
-      await page.getByText('acme-web').first().waitFor();
+      await page.getByText('acme-web', { exact: true }).first().waitFor();
       await page.getByRole('heading', { name: 'Plan', level: 2 }).scrollIntoViewIfNeeded();
       await page.getByText('Add the Settings toggle').waitFor();
       await preparePage(page);
     });
-    await assertClean(page, 'scene 2');
+    await assertClean(page, 'scene plan');
     await hold(page, 200);
     await markStill('plan');
     await hold(page, 600);
 
     const detail = page.locator('[aria-label="Ticket detail"]');
-    const worktreePromise = heroGit('worktree', ticket.id.split('-')[0]);
-    await cutScene(MARKERS[2], async () => {
+    await cutScene(MARKERS[3], async () => {
+      await hideCaption();
+      await page.getByRole('button', { name: 'Close', exact: true }).click();
+      await planCard.waitFor({ timeout: 15_000 });
+      await pinBoardLeft(page);
+      await preparePage(page);
+    });
+    await assertClean(page, 'scene preapprove');
+    await hold(page, 1600);
+
+    await cutScene(MARKERS[4], async () => {
+      await planCard.click();
+      await page.getByRole('button', { name: 'Approve plan' }).waitFor({ timeout: 15_000 });
       await page.getByRole('button', { name: 'Approve plan' }).click();
       await detail.locator('header').getByText('Ready', { exact: true }).waitFor({ timeout: 15_000 });
       await page.getByRole('button', { name: 'Close', exact: true }).click();
@@ -1717,13 +1766,16 @@ async function record(scene) {
       await pinBoardLeft(page);
       await preparePage(page);
     });
-    await fadeCaption(CAPTIONS[2]);
+    await sleep(700);
     await pulseCue(storyCard('Ready'));
-    await assertClean(page, 'scene 3');
+    await fadeCaption(CAPTIONS[2]);
+    await assertClean(page, 'scene approve');
     await hold(page, 3800);
+    await fadeCaption(null);
+    await hold(page, 250);
 
     const short = ticket.id.split('-')[0];
-    await cutScene(MARKERS[3], async () => {
+    await cutScene(MARKERS[5], async () => {
       await api('PATCH', `/api/tickets/${ticket.id}/status`, scene.auth, {
         status: 'wait_for_final_review',
       });
@@ -1741,12 +1793,14 @@ async function record(scene) {
     await sleep(200);
     await fadeCaption(CAPTIONS[3]);
     await pulseCue(storyCard('Wait for Human Review'));
-    await assertClean(page, 'scene 4');
+    await assertClean(page, 'scene build');
     await hold(page, 3800);
+    await fadeCaption(null);
+    await hold(page, 250);
 
     const worktree = await worktreePromise;
     if (!worktree?.startsWith('/data/worktrees/')) fail(`worktree path missing: ${worktree}`);
-    await cutScene(MARKERS[4], async () => {
+    await cutScene(MARKERS[6], async () => {
       const review = new URL('/code', WEB);
       review.searchParams.set('repoId', scene.repoId);
       review.searchParams.set('ticketId', ticket.id);
@@ -1754,14 +1808,14 @@ async function record(scene) {
       review.searchParams.set('baseBranch', 'main');
       await page.goto(review.href, { waitUntil: 'domcontentloaded' });
       await page.getByText('Code review', { exact: true }).waitFor({ timeout: 30_000 });
-      await page.getByText('acme-web').first().waitFor();
+      await page.getByText('acme-web', { exact: true }).first().waitFor();
       await page.getByText('src/settings/ThemeToggle.tsx').waitFor();
       await page.getByRole('button', { name: 'Unified' }).click();
       await page.getByText("useState('light')").first().waitFor({ timeout: 20_000 });
       await preparePage(page);
     });
     await fadeCaption(CAPTIONS[4]);
-    await assertClean(page, 'scene 5 diff');
+    await assertClean(page, 'scene diff');
     await hold(page, 1800);
     const line = page.locator('tr').filter({ hasText: "useState('light')" }).first();
     await line.locator('td.diff-gutter').last().click();
@@ -1770,12 +1824,14 @@ async function record(scene) {
     await commentBox.pressSequentially(LINE_COMMENT, { delay: 38 });
     await page.getByRole('button', { name: 'Add comment', exact: true }).click();
     await page.getByText(LINE_COMMENT).waitFor();
-    await assertClean(page, 'scene 5 comment');
+    await assertClean(page, 'scene diff comment');
     await hold(page, 1400);
     await markStill('diff');
     await hold(page, 4400);
+    await fadeCaption(null);
+    await hold(page, 250);
 
-    await cutScene(MARKERS[5], async () => {
+    await cutScene(MARKERS[7], async () => {
       await page.goto(`${WEB}/boards/${scene.boardId}?ticket=${ticket.id}`, {
         waitUntil: 'domcontentloaded',
       });
@@ -1788,10 +1844,12 @@ async function record(scene) {
       await page.getByRole('dialog', { name: 'Accept this ticket?' }).waitFor({ timeout: 10_000 });
     });
     await fadeCaption(CAPTIONS[5]);
-    await assertClean(page, 'scene 6');
+    await assertClean(page, 'scene accept');
     await hold(page, 2800);
+    await fadeCaption(null);
+    await hold(page, 250);
     const acceptDialog = page.getByRole('dialog', { name: 'Accept this ticket?' });
-    await cutScene(MARKERS[6], async () => {
+    await cutScene(MARKERS[8], async () => {
       await acceptDialog.getByRole('button', { name: 'Accept', exact: true }).click();
       await acceptDialog.waitFor({ state: 'hidden', timeout: 15_000 });
       await detail.locator('header').getByText('Done', { exact: true }).waitFor({ timeout: 15_000 });
@@ -1812,18 +1870,19 @@ async function record(scene) {
     });
     await pinBoardScroll(page, columnScroll);
     await sleep(300);
+    await fadeCaption(CAPTIONS[5]);
     await pulseCue(storyCard('Done'));
     await markStill('accept');
     await hold(page, 4700);
 
-    await cutScene(MARKERS[7], async () => {
+    await cutScene(MARKERS[9], async () => {
+      await hideCaption();
       await pinBoardLeft(page);
-      await fadeCaption(null);
       await page.getByText('Remember the last open settings tab').waitFor();
       await preparePage(page);
     });
-    await assertClean(page, 'scene 7');
-    await hold(page, 4000);
+    await assertClean(page, 'scene loop');
+    await hold(page, 5500);
 
     const video = page.video();
     await page.close();
