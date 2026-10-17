@@ -19,6 +19,8 @@ vi.mock('./useTicket', () => ({
   useTicketChildren: () => ({ data: [] }),
   useUpdateTicket: () => ({ mutateAsync: updateTicket, isPending: false }),
   useUploadAttachment: () => ({ mutateAsync: upload, isPending: false }),
+  COMMENTS_PAGE_SIZE: 200,
+  fetchOlderComments: vi.fn(),
   useComments: () => ({ data: [], isLoading: false, isError: false }),
   useCreateComment: () => ({ mutateAsync: vi.fn(), isPending: false }),
 }));

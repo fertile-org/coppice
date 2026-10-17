@@ -40,6 +40,8 @@ const mocks = vi.hoisted(() => ({
     createdAt: string;
     updatedAt: string;
   }>,
+  olderBeforeSeq: null as number | null,
+  fetchOlderMessages: vi.fn(),
   messages: [] as Array<{
     id: string;
     sessionId: string;
@@ -142,9 +144,10 @@ vi.mock('./useChat', () => ({
     data: mocks.sessions.find((session) => session.id === sessionId),
   }),
   useChatMessages: () => ({
-    data: mocks.messages,
+    data: { messages: mocks.messages, olderBeforeSeq: mocks.olderBeforeSeq ?? undefined },
     refetch: vi.fn(),
   }),
+  fetchOlderMessages: (...args: unknown[]) => mocks.fetchOlderMessages(...args),
   useCreateChatSession: () => ({
     mutateAsync: mocks.createSession,
     isPending: false,
@@ -214,6 +217,8 @@ const ACTIVE_SESSION = {
 
 describe('ChatPage', () => {
   beforeEach(() => {
+    mocks.olderBeforeSeq = null;
+    mocks.fetchOlderMessages.mockReset();
     mocks.createSession.mockReset();
     mocks.postMessage.mockReset();
     mocks.postMessagePending = false;
@@ -399,6 +404,43 @@ describe('ChatPage', () => {
 
     expect(screen.queryByTestId('chat-isolation-banner')).not.toBeInTheDocument();
     expect(screen.getByTestId('chat-composer')).toBeInTheDocument();
+  });
+
+  it('loads earlier messages above the newest page', async () => {
+    Object.defineProperty(HTMLElement.prototype, 'offsetHeight', {
+      configurable: true,
+      get() {
+        return 480;
+      },
+    });
+    Object.defineProperty(HTMLElement.prototype, 'offsetWidth', {
+      configurable: true,
+      get() {
+        return 640;
+      },
+    });
+    const message = (seq: number, body: string) => ({
+      id: `00000000-0000-4000-8000-${String(100 + seq).padStart(12, '0')}`,
+      sessionId: '00000000-0000-4000-8000-000000000001',
+      seq,
+      role: 'human' as const,
+      body,
+      agentRunId: null,
+      actionMetadata: null,
+      attachmentIds: [],
+      attachments: [],
+      createdAt: '2026-09-08T00:01:00Z',
+    });
+    mocks.sessions = [ACTIVE_SESSION];
+    mocks.messages = [message(100, 'Newest page message')];
+    mocks.olderBeforeSeq = 100;
+    mocks.fetchOlderMessages.mockResolvedValue({ messages: [message(99, 'An earlier message')] });
+    renderChat('/chat/00000000-0000-4000-8000-000000000001');
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Load earlier messages' }));
+    expect(await screen.findByText('An earlier message')).toBeInTheDocument();
+    expect(mocks.fetchOlderMessages).toHaveBeenCalledWith('00000000-0000-4000-8000-000000000001', 100);
+    expect(screen.queryByRole('button', { name: 'Load earlier messages' })).not.toBeInTheDocument();
   });
 
   it('lists sessions and sends a message that starts a live turn', async () => {

@@ -21,6 +21,8 @@ import { AttachFilesButton } from './AttachFilesButton';
 import { CommentAttachments } from './CommentAttachments';
 import { useAgents, type Agent } from '../agents/useAgents';
 import {
+  COMMENTS_PAGE_SIZE,
+  fetchOlderComments,
   useComments,
   useCreateComment,
   useUploadAttachment,
@@ -125,7 +127,41 @@ const MENTION_MODE_TOOLTIP = (
 );
 
 export function TicketCommentsTab({ ticketId }: TicketCommentsTabProps) {
-  const { data: comments, isLoading, isError } = useComments(ticketId);
+  const { data: newest, isLoading, isError } = useComments(ticketId);
+  const [older, setOlder] = useState<{
+    ticketId: string;
+    comments: Comment[];
+    nextBefore: string | null;
+  } | null>(null);
+  const [loadingOlder, setLoadingOlder] = useState(false);
+  const olderForTicket = older?.ticketId === ticketId ? older : null;
+  const comments = useMemo(() => {
+    const first = newest ?? [];
+    if (!olderForTicket) return first;
+    const ids = new Set(first.map((comment) => comment.id));
+    return [...first, ...olderForTicket.comments.filter((comment) => !ids.has(comment.id))];
+  }, [newest, olderForTicket]);
+  // A full first page means older comments may exist; after that, the server says.
+  const nextBefore = olderForTicket
+    ? olderForTicket.nextBefore
+    : (newest?.length ?? 0) >= COMMENTS_PAGE_SIZE
+      ? (newest?.[newest.length - 1]?.id ?? null)
+      : null;
+
+  async function loadOlderComments() {
+    if (!nextBefore) return;
+    setLoadingOlder(true);
+    try {
+      const page = await fetchOlderComments(ticketId, nextBefore);
+      setOlder({
+        ticketId,
+        comments: [...(olderForTicket?.comments ?? []), ...page.comments],
+        nextBefore: page.nextBefore,
+      });
+    } finally {
+      setLoadingOlder(false);
+    }
+  }
   const { data: agents } = useAgents();
   const toast = useToast();
   const agentNamesById = useMemo(
@@ -478,6 +514,17 @@ export function TicketCommentsTab({ ticketId }: TicketCommentsTabProps) {
             />
           </article>
         ))}
+
+        {nextBefore && (
+          <Button
+            type="button"
+            variant="secondary"
+            onClick={() => void loadOlderComments()}
+            disabled={loadingOlder}
+          >
+            {loadingOlder ? 'Loading…' : 'Load older comments'}
+          </Button>
+        )}
       </div>
     </div>
   );

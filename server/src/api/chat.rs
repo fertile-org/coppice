@@ -152,6 +152,22 @@ struct SessionListResponse {
 #[serde(rename_all = "camelCase")]
 struct MessageListResponse {
     messages: Vec<MessageResponse>,
+    /// Pass as `beforeSeq` to load older messages. Absent at the start of the chat.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    older_before_seq: Option<i64>,
+}
+
+/// Newest messages returned when the client does not ask for a page size.
+const MESSAGES_PAGE_DEFAULT: i64 = 100;
+const MESSAGES_PAGE_MAX: i64 = 500;
+
+#[derive(Debug, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+struct ListMessagesQuery {
+    #[serde(default)]
+    limit: Option<i64>,
+    #[serde(default)]
+    before_seq: Option<i64>,
 }
 
 #[derive(Serialize)]
@@ -376,10 +392,15 @@ async fn list_messages(
     State(state): State<Arc<AppState>>,
     AuthUser { user, .. }: AuthUser,
     Path(session_id): Path<Uuid>,
+    axum::extract::Query(query): axum::extract::Query<ListMessagesQuery>,
 ) -> Result<Json<MessageListResponse>, StatusCode> {
     let pool = pool_from_state(&state)?;
-    let messages = ChatService::new(pool)
-        .list_messages(session_id, user.id)
+    let limit = query
+        .limit
+        .unwrap_or(MESSAGES_PAGE_DEFAULT)
+        .clamp(1, MESSAGES_PAGE_MAX);
+    let (messages, older_before_seq) = ChatService::new(pool)
+        .list_messages_page(session_id, user.id, query.before_seq, limit)
         .await
         .map_err(map_error)?;
     let attachments_by_id = attachments_for_messages(pool, &messages).await?;
@@ -388,6 +409,7 @@ async fn list_messages(
             .into_iter()
             .map(|m| message_response(m, &attachments_by_id))
             .collect(),
+        older_before_seq,
     }))
 }
 

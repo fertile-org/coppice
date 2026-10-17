@@ -365,6 +365,15 @@ impl<'a> RunService<'a> {
         &self,
         ticket_id: Uuid,
     ) -> Result<Vec<AgentRunWithConnector>, RunError> {
+        self.list_recent_for_ticket(ticket_id, i64::MAX).await
+    }
+
+    /// The newest `limit` runs for a ticket, newest first.
+    pub async fn list_recent_for_ticket(
+        &self,
+        ticket_id: Uuid,
+        limit: i64,
+    ) -> Result<Vec<AgentRunWithConnector>, RunError> {
         let rows = sqlx::query(
             r#"
             SELECT
@@ -385,9 +394,11 @@ impl<'a> RunService<'a> {
             JOIN agents a ON a.id = ar.agent_id
             WHERE ar.ticket_id = $1
             ORDER BY ar.created_at DESC
+            LIMIT $2
             "#,
         )
         .bind(ticket_id)
+        .bind(limit.max(1))
         .fetch_all(self.pool)
         .await?;
 

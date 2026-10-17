@@ -194,25 +194,57 @@ fn parse_intent(intent: &str) -> Result<CommentIntent, CommentError> {
     intent_from_str(intent).ok_or(CommentError::InvalidIntent)
 }
 
+/// Newest comments returned when the client does not ask for a page size.
+const COMMENTS_PAGE_DEFAULT: i64 = 200;
+const COMMENTS_PAGE_MAX: i64 = 500;
+/// Response header with the id to pass as `before` for the next older page.
+pub const NEXT_BEFORE_HEADER: &str = "x-next-before";
+
+#[derive(Debug, Deserialize, Default)]
+struct ListCommentsQuery {
+    #[serde(default)]
+    limit: Option<i64>,
+    #[serde(default)]
+    before: Option<Uuid>,
+}
+
+/// Newest first, one page at a time.
 async fn list_comments(
     State(state): State<Arc<AppState>>,
     AuthUser { .. }: AuthUser,
     Path(ticket_id): Path<Uuid>,
-) -> Result<Json<Vec<CommentResponse>>, StatusCode> {
+    axum::extract::Query(query): axum::extract::Query<ListCommentsQuery>,
+) -> Result<impl axum::response::IntoResponse, StatusCode> {
     let pool = pool_from_state(&state)?;
     let service = CommentService::new(pool);
-    let comments = service
-        .list_by_ticket(ticket_id)
+    let limit = query
+        .limit
+        .unwrap_or(COMMENTS_PAGE_DEFAULT)
+        .clamp(1, COMMENTS_PAGE_MAX);
+    let (comments, has_more) = service
+        .list_page(ticket_id, query.before, limit)
         .await
         .map_err(map_error)?;
+    let next_before = has_more
+        .then(|| comments.last().map(|comment| comment.id))
+        .flatten();
     let attachments_by_id = attachments_for_comments(&service, &comments)
         .await
         .map_err(map_error)?;
-    Ok(Json(
-        comments
-            .into_iter()
-            .map(|comment| comment_to_response(comment, &attachments_by_id))
-            .collect(),
+    let mut headers = axum::http::HeaderMap::new();
+    if let Some(id) = next_before {
+        if let Ok(value) = axum::http::HeaderValue::from_str(&id.to_string()) {
+            headers.insert(NEXT_BEFORE_HEADER, value);
+        }
+    }
+    Ok((
+        headers,
+        Json(
+            comments
+                .into_iter()
+                .map(|comment| comment_to_response(comment, &attachments_by_id))
+                .collect::<Vec<_>>(),
+        ),
     ))
 }
 

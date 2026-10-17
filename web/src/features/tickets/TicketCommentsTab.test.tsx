@@ -8,6 +8,10 @@ import { KeyboardProvider } from '../keyboard/KeyboardProvider';
 import { TicketCommentsTab } from './TicketCommentsTab';
 
 const createComment = vi.hoisted(() => vi.fn());
+const commentPages = vi.hoisted(() => ({
+  newest: [] as unknown[],
+  fetchOlder: vi.fn(),
+}));
 
 vi.mock('../agents/useAgents', () => ({
   useAgents: () => ({
@@ -31,7 +35,9 @@ vi.mock('../agents/useAgents', () => ({
 }));
 
 vi.mock('./useTicket', () => ({
-  useComments: () => ({ data: [], isLoading: false, isError: false }),
+  COMMENTS_PAGE_SIZE: 200,
+  fetchOlderComments: (...args: unknown[]) => commentPages.fetchOlder(...args),
+  useComments: () => ({ data: commentPages.newest, isLoading: false, isError: false }),
   useCreateComment: () => ({ mutateAsync: createComment, isPending: false }),
   useUploadAttachment: () => ({ mutateAsync: vi.fn(), isPending: false }),
 }));
@@ -53,6 +59,8 @@ function renderComments() {
 
 describe('TicketCommentsTab', () => {
   beforeEach(() => {
+    commentPages.newest = [];
+    commentPages.fetchOlder.mockReset();
     createComment.mockReset();
     createComment.mockResolvedValue({ startedRuns: [] });
   });
@@ -174,5 +182,36 @@ describe('TicketCommentsTab', () => {
     expect(createComment).toHaveBeenCalledWith(
       expect.objectContaining({ body: 'Ship the gate' }),
     );
+  });
+
+  it('loads older comments after a full first page', async () => {
+    const comment = (n: number) => ({
+      id: `00000000-0000-0000-0001-${String(n).padStart(12, '0')}`,
+      ticketId: '00000000-0000-0000-0000-000000000003',
+      authorType: 'human',
+      body: `Comment ${n}`,
+      intent: 'progress_update',
+      mentions: [],
+      attachmentIds: [],
+      attachments: [],
+      createdAt: '2026-10-18T00:00:00Z',
+    });
+    commentPages.newest = Array.from({ length: 200 }, (_, i) => comment(400 - i));
+    commentPages.fetchOlder.mockResolvedValue({ comments: [comment(200), comment(199)], nextBefore: null });
+    renderComments();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Load older comments' }));
+    expect(await screen.findByText('Comment 199')).toBeInTheDocument();
+    expect(commentPages.fetchOlder).toHaveBeenCalledWith(
+      '00000000-0000-0000-0000-000000000003',
+      '00000000-0000-0000-0001-000000000201',
+    );
+    expect(screen.queryByRole('button', { name: 'Load older comments' })).not.toBeInTheDocument();
+  });
+
+  it('has no Load older button when the first page is short', () => {
+    commentPages.newest = [];
+    renderComments();
+    expect(screen.queryByRole('button', { name: 'Load older comments' })).not.toBeInTheDocument();
   });
 });

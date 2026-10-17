@@ -68,6 +68,12 @@ pub const CHAT_ATTACHMENT_MIME_ALLOWLIST: &[&str] = &[
     "application/pdf",
 ];
 
+const TRANSCRIPT_ROWS_ASC: &str = r#"
+    SELECT seq, role, body, attachment_ids FROM chat_messages
+    WHERE session_id = $1
+    ORDER BY seq ASC
+"#;
+
 pub struct ChatService<'a> {
     pool: &'a PgPool,
 }
@@ -508,6 +514,41 @@ impl<'a> ChatService<'a> {
         Ok(rows.iter().map(row_to_message).collect())
     }
 
+    /// The newest `limit` messages before `before_seq` (or overall), oldest
+    /// first, and the seq to pass for the next older page when any remain.
+    pub async fn list_messages_page(
+        &self,
+        session_id: Uuid,
+        owner_user_id: Uuid,
+        before_seq: Option<i64>,
+        limit: i64,
+    ) -> Result<(Vec<ChatMessage>, Option<i64>), ChatError> {
+        let _ = self.get_session(session_id, owner_user_id).await?;
+        let limit = limit.max(1);
+        let rows = sqlx::query(
+            r#"
+            SELECT
+                id, session_id, seq, role, body, agent_run_id, action_metadata,
+                attachment_ids, created_at
+            FROM chat_messages
+            WHERE session_id = $1 AND ($2::BIGINT IS NULL OR seq < $2)
+            ORDER BY seq DESC
+            LIMIT $3
+            "#,
+        )
+        .bind(session_id)
+        .bind(before_seq)
+        .bind(limit + 1)
+        .fetch_all(self.pool)
+        .await?;
+        let has_more = rows.len() as i64 > limit;
+        let mut messages: Vec<ChatMessage> =
+            rows.iter().take(limit as usize).map(row_to_message).collect();
+        messages.reverse();
+        let older = has_more.then(|| messages.first().map(|m| m.seq)).flatten();
+        Ok((messages, older))
+    }
+
     pub async fn post_message(
         &self,
         session_id: Uuid,
@@ -693,22 +734,78 @@ impl<'a> ChatService<'a> {
         session_id: Uuid,
         max_tokens: usize,
     ) -> Result<String, ChatError> {
-        let blocks = self.transcript_blocks(session_id).await?;
+        let rows = self.recent_transcript_rows(session_id, max_tokens).await?;
+        let blocks = self.render_blocks(rows).await?;
         Ok(bound_rendered_transcript(&blocks, max_tokens))
     }
 
-    async fn transcript_blocks(&self, session_id: Uuid) -> Result<Vec<String>, ChatError> {
-        let rows = sqlx::query(
-            r#"
-            SELECT role, body, attachment_ids FROM chat_messages
-            WHERE session_id = $1
-            ORDER BY seq ASC
-            "#,
-        )
-        .bind(session_id)
-        .fetch_all(self.pool)
-        .await?;
+    /// The newest messages the bounded transcript can use, oldest first. Rows
+    /// are read newest first in pages until the recent part is past the
+    /// budget and enough older rows are there for every summary line that
+    /// could fit, so a long chat is not loaded whole.
+    async fn recent_transcript_rows(
+        &self,
+        session_id: Uuid,
+        max_tokens: usize,
+    ) -> Result<Vec<sqlx::postgres::PgRow>, ChatError> {
+        const PAGE: i64 = 200;
+        // A summary line is at least ~12 bytes ("- Human: x").
+        const MIN_SUMMARY_LINE_BYTES: usize = 12;
+        if max_tokens == 0 {
+            return Ok(sqlx::query(TRANSCRIPT_ROWS_ASC)
+                .bind(session_id)
+                .fetch_all(self.pool)
+                .await?);
+        }
+        let byte_budget = max_tokens.saturating_mul(4);
+        let summary_rows_needed = byte_budget / MIN_SUMMARY_LINE_BYTES + 1;
+        let mut newest_first = Vec::new();
+        let mut bytes = 0usize;
+        let mut rows_past_budget = 0usize;
+        let mut before: Option<i64> = None;
+        loop {
+            let page = sqlx::query(
+                r#"
+                SELECT seq, role, body, attachment_ids FROM chat_messages
+                WHERE session_id = $1 AND ($2::BIGINT IS NULL OR seq < $2)
+                ORDER BY seq DESC
+                LIMIT $3
+                "#,
+            )
+            .bind(session_id)
+            .bind(before)
+            .bind(PAGE)
+            .fetch_all(self.pool)
+            .await?;
+            let short = (page.len() as i64) < PAGE;
+            for row in page {
+                before = Some(row.get::<i64, _>("seq"));
+                if bytes >= byte_budget {
+                    rows_past_budget += 1;
+                }
+                bytes = bytes.saturating_add(row.get::<String, _>("body").len() + 32);
+                newest_first.push(row);
+            }
+            if short || rows_past_budget >= summary_rows_needed {
+                break;
+            }
+        }
+        newest_first.reverse();
+        Ok(newest_first)
+    }
 
+    async fn transcript_blocks(&self, session_id: Uuid) -> Result<Vec<String>, ChatError> {
+        let rows = sqlx::query(TRANSCRIPT_ROWS_ASC)
+            .bind(session_id)
+            .fetch_all(self.pool)
+            .await?;
+        self.render_blocks(rows).await
+    }
+
+    async fn render_blocks(
+        &self,
+        rows: Vec<sqlx::postgres::PgRow>,
+    ) -> Result<Vec<String>, ChatError> {
         if rows.is_empty() {
             return Ok(Vec::new());
         }

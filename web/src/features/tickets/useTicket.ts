@@ -128,9 +128,26 @@ async function patchTicketStatus(
   return res.json() as Promise<Ticket>;
 }
 
+/** Comments per page; the server returns the newest page first. */
+export const COMMENTS_PAGE_SIZE = 200;
+
 async function fetchComments(ticketId: string): Promise<Comment[]> {
-  const res = await apiFetch(`/api/tickets/${ticketId}/comments`);
+  const res = await apiFetch(`/api/tickets/${ticketId}/comments?limit=${COMMENTS_PAGE_SIZE}`);
   return res.json() as Promise<Comment[]>;
+}
+
+/** Comments older than `before`, newest first, and the cursor for the page after. */
+export async function fetchOlderComments(
+  ticketId: string,
+  before: string,
+): Promise<{ comments: Comment[]; nextBefore: string | null }> {
+  const res = await apiFetch(
+    `/api/tickets/${ticketId}/comments?limit=${COMMENTS_PAGE_SIZE}&before=${before}`,
+  );
+  return {
+    comments: (await res.json()) as Comment[],
+    nextBefore: res.headers?.get?.('x-next-before') ?? null,
+  };
 }
 
 async function postComment(

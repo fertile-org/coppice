@@ -9,6 +9,7 @@ import {
   draftTicketFromChatResponseSchema,
   postChatMessageResponseSchema,
   type ChatMessage,
+  type ChatMessagePage,
   type ChatSession,
   type ChatSessionStatus,
   type CreateKnowledgeFromChatResponse,
@@ -80,9 +81,19 @@ async function createSession(input: CreateChatSessionInput): Promise<ChatSession
   return chatSessionSchema.parse(await res.json());
 }
 
-async function fetchMessages(sessionId: string): Promise<ChatMessage[]> {
+/** The newest page of a chat, oldest first, with the cursor for older ones. */
+async function fetchMessages(sessionId: string): Promise<ChatMessagePage> {
   const res = await apiFetch(`/api/chat/sessions/${sessionId}/messages`);
-  return chatMessageListSchema.parse(await res.json()).messages;
+  return chatMessageListSchema.parse(await res.json());
+}
+
+/** Messages before `beforeSeq`, oldest first. */
+export async function fetchOlderMessages(
+  sessionId: string,
+  beforeSeq: number,
+): Promise<ChatMessagePage> {
+  const res = await apiFetch(`/api/chat/sessions/${sessionId}/messages?beforeSeq=${beforeSeq}`);
+  return chatMessageListSchema.parse(await res.json());
 }
 
 async function postMessage(
@@ -183,7 +194,7 @@ export function useChatSession(sessionId: string | null) {
 
 export function useChatMessages(
   sessionId: string | null,
-  opts?: { refetchInterval?: number | false },
+  opts?: { refetchInterval?: number | false | (() => number | false) },
 ) {
   return useQuery({
     queryKey: sessionId

@@ -18,7 +18,7 @@ import {
   formatFileSize,
   isImageContentType,
 } from '../../lib/attachments';
-import type { ChatSession } from '../../lib/schemas/chat';
+import type { ChatMessage, ChatSession } from '../../lib/schemas/chat';
 import { chatIsolationBanner, chatUnavailableMessage } from '../tools/connectorCopy';
 import { cn } from '../../lib/utils';
 import { useAgents, type Agent } from '../agents/useAgents';
@@ -27,6 +27,7 @@ import { ChatMessageList } from './ChatMessageList';
 import { ChatSessionActions } from './ChatSessionActions';
 import {
   CHAT_SESSIONS_QUERY_KEY,
+  fetchOlderMessages,
   useChatMessages,
   useChatSession,
   useChatSessions,
@@ -304,14 +305,51 @@ function ChatTranscript({
   const [activeRunId, setActiveRunId] = useState<string | null>(initialRunId ?? null);
   const awaiting = Boolean(activeRunId) || Boolean(session?.hasActiveRun);
 
+  // Poll the transcript only while a reply is pending and its live stream is
+  // not connected; an open stream already shows the reply as it arrives.
+  const pollRef = useRef({ awaiting, liveOpen: false });
+  pollRef.current.awaiting = awaiting;
   const {
-    data: messages = [],
+    data: page,
     refetch,
     isLoading: messagesLoading,
     isFetched,
   } = useChatMessages(sessionId, {
-    refetchInterval: awaiting ? 1500 : false,
+    refetchInterval: () =>
+      pollRef.current.awaiting && !pollRef.current.liveOpen ? 1500 : false,
   });
+  const [older, setOlder] = useState<{
+    sessionId: string | null;
+    messages: ChatMessage[];
+    beforeSeq: number | null;
+  }>({ sessionId: null, messages: [], beforeSeq: null });
+  const [loadingOlder, setLoadingOlder] = useState(false);
+  const olderForSession = older.sessionId === sessionId ? older : null;
+  const messages = useMemo(() => {
+    const newest = page?.messages ?? [];
+    const earlier = olderForSession?.messages ?? [];
+    if (earlier.length === 0) return newest;
+    const ids = new Set(newest.map((message) => message.id));
+    return [...earlier.filter((message) => !ids.has(message.id)), ...newest];
+  }, [page?.messages, olderForSession?.messages]);
+  const nextOlderSeq = olderForSession
+    ? olderForSession.beforeSeq
+    : (page?.olderBeforeSeq ?? null);
+
+  async function loadOlder() {
+    if (!sessionId || nextOlderSeq === null) return;
+    setLoadingOlder(true);
+    try {
+      const earlier = await fetchOlderMessages(sessionId, nextOlderSeq);
+      setOlder({
+        sessionId,
+        messages: [...earlier.messages, ...(olderForSession?.messages ?? [])],
+        beforeSeq: earlier.olderBeforeSeq ?? null,
+      });
+    } finally {
+      setLoadingOlder(false);
+    }
+  }
 
   useEffect(() => {
     if (activeRunId) return;
@@ -331,6 +369,7 @@ function ChatTranscript({
   }, [queryClient, refetch]);
 
   const live = useChatRunLiveStream(activeRunId, { onFinished: onLiveFinished });
+  pollRef.current.liveOpen = live.connection === 'open';
   const streamingAgent = activeRunId
     ? { runId: activeRunId, text: live.text, error: live.error }
     : undefined;
@@ -374,11 +413,24 @@ function ChatTranscript({
             Say hi to {agent.name}. They can see all your projects.
           </p>
         ) : (
+          <>
+          {nextOlderSeq !== null && (
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => void loadOlder()}
+              disabled={loadingOlder}
+              className="self-center"
+            >
+              {loadingOlder ? 'Loading…' : 'Load earlier messages'}
+            </Button>
+          )}
           <ChatMessageList
             messages={messages}
             thinking={awaiting && !activeRunId}
             streamingAgent={streamingAgent}
           />
+          </>
         )}
       </div>
 
