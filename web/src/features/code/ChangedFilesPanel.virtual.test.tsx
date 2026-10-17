@@ -27,12 +27,12 @@ describe('ChangedFilesPanel', () => {
   afterEach(() => vi.restoreAllMocks());
 
   it('lists every file when the diff is small', () => {
-    render(<ChangedFilesPanel files={files(VIRTUALIZE_FILES_AFTER)} selectedPath={null} onSelect={() => {}} isLoading={false} />);
+    render(<ChangedFilesPanel files={files(VIRTUALIZE_FILES_AFTER)} selectedPath={undefined} onSelect={() => {}} isLoading={false} />);
     expect(screen.getAllByRole('button')).toHaveLength(VIRTUALIZE_FILES_AFTER);
   });
 
   it('mounts only the rows in view for 3,000 changed files', () => {
-    render(<ChangedFilesPanel files={files(3000)} selectedPath={null} onSelect={() => {}} isLoading={false} />);
+    render(<ChangedFilesPanel files={files(3000)} selectedPath={undefined} onSelect={() => {}} isLoading={false} />);
     const rows = screen.getAllByRole('button').length;
     expect(rows).toBeGreaterThan(0);
     expect(rows).toBeLessThan(60);
