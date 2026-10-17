@@ -100,11 +100,13 @@ export function useAgentPresets() {
   });
 }
 
-export function useAgents() {
+export function useAgents(options?: { enabled?: boolean }) {
+  const enabled = options?.enabled ?? true;
   return useQuery({
     queryKey: AGENTS_QUERY_KEY,
     queryFn: fetchAgents,
-    refetchInterval: 30_000,
+    enabled,
+    refetchInterval: enabled ? 30_000 : false,
   });
 }
 
@@ -113,14 +115,18 @@ export async function fetchConnectors(): Promise<Connector[]> {
   return connectorListSchema.parse(await res.json()).items;
 }
 
-export function useConnectors() {
+export function useConnectors(options?: { enabled?: boolean }) {
+  const enabled = options?.enabled ?? true;
   return useQuery({
     queryKey: CONNECTORS_QUERY_KEY,
     queryFn: fetchConnectors,
-    refetchInterval: (query) =>
-      query.state.data?.some((item) => item.id !== 'mock' && item.readiness == null)
-        ? 2_000
-        : false,
+    enabled,
+    refetchInterval: enabled
+      ? (query) =>
+          query.state.data?.some((item) => item.id !== 'mock' && item.readiness == null)
+            ? 2_000
+            : false
+      : false,
   });
 }
 

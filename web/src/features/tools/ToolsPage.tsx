@@ -1,6 +1,12 @@
-import { useId } from 'react';
-import { Navigate, useSearchParams } from 'react-router-dom';
+import { useId, useState } from 'react';
+import { Navigate, useNavigate, useSearchParams } from 'react-router-dom';
+import { useToast } from '../../components/ToastProvider';
 import { useSession } from '../auth/useSession';
+import { setLastBoardId } from '../boards/useBoards';
+import { InitWizard, type InitCreated } from '../init/InitWizard';
+import { INIT_COPY } from '../init/copy';
+import { setInitWizardFlag } from '../init/storage';
+import { turnedOnToast } from './connectorCopy';
 import { BackupTab } from './BackupTab';
 import { ConnectorsTab } from './ConnectorsTab';
 
@@ -12,7 +18,10 @@ const TOOLS_TABS: { key: ToolsTab; label: string }[] = [
 ];
 
 export function ToolsPage() {
-  const { user } = useSession();
+  const { user, desktopMode } = useSession();
+  const navigate = useNavigate();
+  const toast = useToast();
+  const [initOpen, setInitOpen] = useState(false);
   const [searchParams, setSearchParams] = useSearchParams();
   const idPrefix = useId();
   const tab: ToolsTab = searchParams.get('tab') === 'connectors' ? 'connectors' : 'backup';
@@ -27,16 +36,37 @@ export function ToolsPage() {
     setSearchParams(key === 'backup' ? {} : { tab: key }, { replace: true });
   }
 
+  function finishInit(created: InitCreated) {
+    setInitWizardFlag('done');
+    setLastBoardId(created.boardId);
+    if (created.connectorTurnedOn) {
+      toast.success(turnedOnToast(created.connectorDisplayName));
+    }
+    setInitOpen(false);
+    navigate(`/boards/${created.boardId}`);
+  }
+
   return (
     <div className="space-y-6">
-      <header className="border-b border-border pb-6">
-        <h1 className="font-display text-2xl font-semibold text-text-primary">
-          Tools
-        </h1>
-        <p className="mt-2 max-w-2xl font-body text-sm text-text-secondary">
-          Back up this Coppice instance and check that agent connectors are
-          installed, logged in, and reach the Coppice gateway.
-        </p>
+      <header className="flex flex-wrap items-start justify-between gap-4 border-b border-border pb-6">
+        <div>
+          <h1 className="font-display text-2xl font-semibold text-text-primary">
+            Tools
+          </h1>
+          <p className="mt-2 max-w-2xl font-body text-sm text-text-secondary">
+            Back up this Coppice instance and check that agent connectors are
+            installed, logged in, and reach the Coppice gateway.
+          </p>
+        </div>
+        {desktopMode && (
+          <button
+            type="button"
+            onClick={() => setInitOpen(true)}
+            className="rounded-md border border-border px-3 py-1.5 font-body text-sm text-text-secondary transition-colors duration-fast hover:text-text-primary"
+          >
+            {INIT_COPY.toolsButton}
+          </button>
+        )}
       </header>
 
       <div role="tablist" aria-label="Tools" className="flex gap-1 border-b border-border">
@@ -72,6 +102,17 @@ export function ToolsPage() {
           {tab === key && (key === 'backup' ? <BackupTab /> : <ConnectorsTab />)}
         </div>
       ))}
+
+      {desktopMode && (
+        <InitWizard
+          open={initOpen}
+          onSkip={() => {
+            setInitWizardFlag('skipped');
+            setInitOpen(false);
+          }}
+          onCreated={finishInit}
+        />
+      )}
     </div>
   );
 }

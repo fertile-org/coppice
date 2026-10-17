@@ -7,6 +7,7 @@ import {
   DialogTitle,
 } from '../../components/ui/dialog';
 import { ApiError } from '../../lib/api';
+import { InitWizardOffer } from '../init/InitWizardOffer';
 import {
   getLastBoardId,
   setLastBoardId,
@@ -263,6 +264,7 @@ export function BoardPickerPage() {
         open={dialogOpen}
         onClose={() => setDialogOpen(false)}
       />
+      <InitWizardOffer boardsEmpty={!isLoading && !isError && boards?.length === 0} />
     </div>
   );
 }
