@@ -73,3 +73,7 @@ macOS in-place install is one flag. `scripts/dist.mjs` sets `updater-mode.json` 
 ```bash
 yarn test               # or `make desktop-test` from the repo root
 ```
+
+### Moving the apt pool to a CDN (#167)
+
+The apt repository and macOS feed live behind `COPPICE_UPDATE_BASE` (`https://apt.getcoppice.app`), a CNAME to GitHub Pages today. Pages has a soft 100 GB/month limit, roughly 850 Linux upgrades of a ~115 MB `.deb`. When that gets close, publish the same `site/` tree (dists, pool, `updates/`) to an object store or CDN and point the `apt.getcoppice.app` DNS record at it. No app update is needed: installs keep the same origin, and the old host only has to serve one more upgrade.

@@ -3,6 +3,8 @@
 
 APP_DIR=/opt/Coppice
 EXECUTABLE=coppice
+# Empty when installed. Tests point it at a scratch root.
+ROOT=
 
 if type update-alternatives >/dev/null 2>&1; then
     # Remove a previous link that does not use update-alternatives.
@@ -31,15 +33,34 @@ fi
 # arrive through apt upgrade or Software Updater. The keyring is the committed
 # public file packaged by scripts/dist.mjs, and the source list is written
 # beside it. This script does not embed the repository URL.
+# BEGIN apt source
 KEY_SRC="$APP_DIR/resources/apt/coppice-archive-keyring.gpg"
 LIST_SRC="$APP_DIR/resources/apt/coppice.list"
-KEY_DST=/usr/share/keyrings/coppice-archive-keyring.gpg
-LIST=/etc/apt/sources.list.d/coppice.list
+KEY_DST="$ROOT/usr/share/keyrings/coppice-archive-keyring.gpg"
+LIST="$ROOT/etc/apt/sources.list.d/coppice.list"
+# The copy Coppice last wrote. A source the user disabled or edited no longer
+# matches it, so upgrades leave that file alone.
+WRITTEN="$ROOT/var/lib/coppice-desktop/coppice.list.written"
+coppice_owns_list() {
+    [ ! -e "$LIST" ] && return 0
+    if [ -f "$WRITTEN" ]; then
+        cmp -s "$LIST" "$WRITTEN"
+        return
+    fi
+    # Installed before the record existed: one active deb line on our keyring.
+    [ "$(grep -cv '^[[:space:]]*$' "$LIST")" = 1 ] \
+        && grep -q '^deb .*signed-by=/usr/share/keyrings/coppice-archive-keyring.gpg' "$LIST"
+}
 if [ -f "$KEY_SRC" ] && [ -f "$LIST_SRC" ]; then
-    install -d -m 0755 /usr/share/keyrings
+    install -d -m 0755 "$ROOT/usr/share/keyrings"
     install -m 0644 "$KEY_SRC" "$KEY_DST"
-    install -m 0644 "$LIST_SRC" "$LIST"
+    if coppice_owns_list; then
+        install -d -m 0755 "$ROOT/etc/apt/sources.list.d" "$ROOT/var/lib/coppice-desktop"
+        install -m 0644 "$LIST_SRC" "$LIST"
+        install -m 0644 "$LIST_SRC" "$WRITTEN"
+    fi
 fi
+# END apt source
 
 # Ubuntu 24.04+ restricts unprivileged user namespaces; the profile grants them to
 # Coppice. AppArmor 3 (Ubuntu 22.04) cannot parse abi/4.0 and needs no profile.

@@ -32,15 +32,15 @@ function fail(message) {
   process.exit(1);
 }
 
+// A published event can be an older release published again. Pages always
+// mirrors the newest published release, so the event's tag only joins the list.
+export function selectForEvent(eventTag, listed) {
+  return selectPublishedRelease([...(listed ?? []), { tag_name: eventTag, draft: false }]);
+}
+
 async function main() {
-  if (process.env.EVENT_NAME === 'release') {
-    if (process.env.EVENT_DRAFT === 'true') {
-      fail('Refusing to publish update metadata for a draft release.');
-    }
-    const chosen = selectPublishedRelease([{ tag_name: process.env.EVENT_TAG, draft: false }]);
-    if (!chosen) fail(`unsupported release tag ${JSON.stringify(process.env.EVENT_TAG)}`);
-    writeOutput(chosen);
-    return;
+  if (process.env.EVENT_NAME === 'release' && process.env.EVENT_DRAFT === 'true') {
+    fail('Refusing to publish update metadata for a draft release.');
   }
 
   const listed = spawnSync(
@@ -49,7 +49,11 @@ async function main() {
     { encoding: 'utf8' },
   );
   if (listed.status !== 0) fail(listed.stderr || 'gh release list failed');
-  const chosen = selectPublishedRelease(JSON.parse(listed.stdout));
+  const releases = JSON.parse(listed.stdout);
+  const chosen =
+    process.env.EVENT_NAME === 'release'
+      ? selectForEvent(process.env.EVENT_TAG, releases)
+      : selectPublishedRelease(releases);
   if (!chosen) fail('No published release to mirror.');
   writeOutput(chosen);
 }
