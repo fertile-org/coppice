@@ -45,11 +45,15 @@ describe('chatIsolationBanner', () => {
     expect(chatIsolationBanner('codex')).toBe(
       "Coppice hasn't confirmed that Codex stays read-only. The agent can still run commands on your computer.",
     );
+    expect(chatIsolationBanner('cursor')).toBe(
+      "Coppice hasn't confirmed that Cursor stays read-only. The agent can still run commands on your computer.",
+    );
+    expect(chatIsolationBanner('kilo-code')).toBe(
+      "Coppice hasn't confirmed that Kilo Code stays read-only. The agent can still run commands on your computer.",
+    );
   });
 
-  it('is absent when chat is off or the write test passed', () => {
-    expect(chatIsolationBanner('cursor')).toBeNull();
-    expect(chatIsolationBanner('kilo-code')).toBeNull();
+  it('is absent when the write test passed', () => {
     expect(chatIsolationBanner('opencode')).toBeNull();
     expect(chatIsolationBanner('mock')).toBeNull();
     expect(chatIsolationBanner(null)).toBeNull();
@@ -57,16 +61,18 @@ describe('chatIsolationBanner', () => {
 });
 
 describe('chatUnavailableMessage', () => {
-  it('uses one locked sentence per CLI', () => {
-    expect(chatUnavailableMessage('cursor')).toBe(
-      "Chat isn't available for Cursor yet, because Coppice can't keep it read-only.",
-    );
-    expect(chatUnavailableMessage('kilo-code')).toBe(
-      "Chat isn't available for Kilo Code yet, because Coppice can't keep it read-only.",
-    );
+  it('is absent for every chat CLI', () => {
+    expect(chatUnavailableMessage('cursor')).toBeNull();
+    expect(chatUnavailableMessage('kilo-code')).toBeNull();
     expect(chatUnavailableMessage('claude-code')).toBeNull();
     expect(chatUnavailableMessage('codex')).toBeNull();
     expect(chatUnavailableMessage('opencode')).toBeNull();
     expect(chatUnavailableMessage(null)).toBeNull();
+  });
+
+  it('still refuses an unknown connector', () => {
+    expect(chatUnavailableMessage('not-a-connector')).toBe(
+      "Chat isn't available for not-a-connector yet, because Coppice can't keep it read-only.",
+    );
   });
 });

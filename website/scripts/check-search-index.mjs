@@ -24,11 +24,16 @@ if (!fs.existsSync(dist)) {
   process.exit(1);
 }
 
+function isRedirect(html) {
+  return /http-equiv=["']refresh["']/i.test(html) && !html.includes('data-pagefind-body');
+}
+
 const htmlFiles = walk(dist);
 const marketing = new Set(['index.html', 'download.html', '404.html']);
 const docsFiles = htmlFiles.filter((file) => {
   const name = rel(file);
-  return name === 'docs.html' || name.startsWith('docs/');
+  if (!(name === 'docs.html' || name.startsWith('docs/'))) return false;
+  return !isRedirect(fs.readFileSync(file, 'utf8'));
 });
 
 if (docsFiles.length === 0) failures.push('no docs html in dist');

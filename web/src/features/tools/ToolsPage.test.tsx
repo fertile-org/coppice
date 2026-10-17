@@ -3,6 +3,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { fireEvent, render, screen } from '@testing-library/react';
 import { MemoryRouter, useLocation } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { ToastProvider } from '../../components/ToastProvider';
 import { MIN_PASSWORD_CHARS } from '../../lib/passwords';
 import { ToolsPage } from './ToolsPage';
 
@@ -27,10 +28,12 @@ function renderPage(initialEntry = '/tools') {
   });
   return render(
     <QueryClientProvider client={client}>
-      <MemoryRouter initialEntries={[initialEntry]}>
-        <ToolsPage />
-        <LocationProbe />
-      </MemoryRouter>
+      <ToastProvider>
+        <MemoryRouter initialEntries={[initialEntry]}>
+          <ToolsPage />
+          <LocationProbe />
+        </MemoryRouter>
+      </ToastProvider>
     </QueryClientProvider>,
   );
 }
@@ -135,6 +138,49 @@ describe('ToolsPage', () => {
     renderPage();
     expect(screen.queryByRole('heading', { name: 'Replace keys' })).not.toBeInTheDocument();
     expect(screen.queryByText('coppice-server replace-keys')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Set up workspace' })).not.toBeInTheDocument();
+  });
+
+  it('opens setup from the tools page in the desktop app', async () => {
+    sessionState.desktopMode = true;
+    fetchMock.mockImplementation((path: string, init?: RequestInit) => {
+      if (path === '/api/init' && init?.method === 'POST') {
+        return Promise.resolve(new Response('{}', { status: 500 }));
+      }
+      if (path === '/api/init') {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              presetId: 'starter',
+              status: 'ready',
+              connectors: [{ id: 'claude-code', displayName: 'Claude Code' }],
+              members: [
+                { presetKey: 'pm', name: 'PM', role: 'PM' },
+                { presetKey: 'tech_lead', name: 'Technical Lead', role: 'Technical Lead' },
+                {
+                  presetKey: 'backend_engineer',
+                  name: 'Backend Engineer',
+                  role: 'Backend Engineer',
+                },
+              ],
+            }),
+            { status: 200, headers: { 'Content-Type': 'application/json' } },
+          ),
+        );
+      }
+      const body = path === '/api/agents' ? { items: [] } : path === '/api/connectors' ? { items: [] } : [];
+      return Promise.resolve(
+        new Response(JSON.stringify(body), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      );
+    });
+    renderPage();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Set up workspace' }));
+    expect(await screen.findByRole('heading', { name: 'Set up Coppice' })).toBeInTheDocument();
+    expect(screen.queryByText(/mock|fake/i)).not.toBeInTheDocument();
   });
 
   it('opens the connectors tab from the url', () => {

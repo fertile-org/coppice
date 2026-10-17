@@ -1,6 +1,7 @@
 use crate::api::auth::{pool_from_state, AuthUser};
 use crate::copy::review::{
-    COUNT_IN_REVIEW_LABEL, REVIEW_CAP_HINT, REVIEW_CAP_INVALID, REVIEW_CAP_LABEL,
+    BOARD_SETTINGS_LABEL, COUNT_IN_REVIEW_LABEL, REVIEW_CAP_HINT, REVIEW_CAP_INVALID,
+    REVIEW_CAP_LABEL,
 };
 use crate::domain::board::Board;
 use crate::services::board_service::{BoardError, BoardService};
@@ -40,6 +41,7 @@ struct BoardResponse {
     review_cap: Option<i32>,
     count_in_review: bool,
     waiting_on_review: Option<String>,
+    board_settings_label: &'static str,
     review_cap_label: &'static str,
     review_cap_hint: &'static str,
     count_in_review_label: &'static str,
@@ -95,6 +97,7 @@ fn board_to_response(board: Board, waiting_on_review: Option<String>) -> BoardRe
         review_cap: board.review_cap,
         count_in_review: board.count_in_review,
         waiting_on_review,
+        board_settings_label: BOARD_SETTINGS_LABEL,
         review_cap_label: REVIEW_CAP_LABEL,
         review_cap_hint: REVIEW_CAP_HINT,
         count_in_review_label: COUNT_IN_REVIEW_LABEL,
@@ -205,8 +208,7 @@ fn map_board_error(err: BoardError) -> BoardApiError {
 
 fn map_capacity_error(err: ReviewCapacityError) -> BoardApiError {
     match err {
-        ReviewCapacityError::Message(message) if message == REVIEW_CAP_INVALID =>
-        {
+        ReviewCapacityError::Message(message) if message == REVIEW_CAP_INVALID => {
             BoardApiError::Message(StatusCode::BAD_REQUEST, message)
         }
         ReviewCapacityError::Message(message) if message == "board not found" => {

@@ -61,6 +61,31 @@ impl ConnectorProbes {
             .cloned()
     }
 
+    /// Cached free sign-in result. `None` means that connector has not been checked.
+    pub fn readiness(&self, id: &str) -> Option<Readiness> {
+        self.get(id).map(|cached| cached.readiness)
+    }
+
+    /// Record a readiness value without spawning a CLI. The init wizard reads
+    /// this cache and does not probe on its own.
+    pub fn store_readiness(&self, id: &str, readiness: Readiness) {
+        let cached = CachedProbe {
+            report: ProbeReport {
+                binary: None,
+                auth_env_set: Vec::new(),
+                auth_paths_found: Vec::new(),
+                probe: ProbeOutcome::NotRun,
+                probe_proves_auth: false,
+            },
+            readiness,
+            probed_at: OffsetDateTime::UNIX_EPOCH,
+        };
+        self.cache
+            .write()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(id.to_string(), cached);
+    }
+
     /// Re-probes one diagnosable connector; `None` for `mock`, unknown ids,
     /// or a probe task that panicked. Drops the cached host environment first.
     pub async fn refresh(&self, config: &AppConfig, id: &str) -> Option<CachedProbe> {

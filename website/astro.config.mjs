@@ -91,6 +91,11 @@ export default defineConfig({
   // (`cleanUrls` + `trailingSlash: false`). GitHub Pages has no clean URLs, so the
   // Pages deploy rewrites those files to docs/index.html after the build.
   build: { format: 'file' },
+  redirects: {
+    // Destination is used as written. Prefix the base so GitHub Pages
+    // (`/coppice`) does not send /docs/chat at the domain root.
+    '/docs/chat': `${siteBase() === '/' ? '' : siteBase()}/docs/concepts#chat`,
+  },
   markdown: {
     processor: unified({
       gfm: true,

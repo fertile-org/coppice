@@ -8,6 +8,8 @@ description: "Go from a fresh install to your first agent run in five steps."
 
 Five steps take you from a fresh install to your first agent run. You need a local git checkout and one agent CLI. No Coppice account.
 
+On a fresh install, Coppice opens a short setup that adds your first repository, board, and starter team. You can reopen it from Tools.
+
 ## 1. Install a provider and sign in
 A provider is the agent CLI Coppice runs for you: Claude Code, Codex, Cursor, OpenCode or Kilo Code. Coppice doesn't install it. It finds the CLIs already on your computer.
 

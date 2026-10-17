@@ -38,6 +38,13 @@ fn is_review_capacity_hold(err: &RunError) -> bool {
     matches!(err, RunError::Validation(message) if crate::copy::review::is_ready_hold(message))
 }
 
+fn is_review_round_stop(err: &RunError) -> bool {
+    matches!(
+        err,
+        RunError::Validation(message) if crate::services::review_rounds::is_round_cap_signal(message)
+    )
+}
+
 pub struct RunOrchestrator<'a> {
     pool: &'a PgPool,
     workflow: &'a WorkflowConfig,
@@ -144,7 +151,7 @@ impl<'a> RunOrchestrator<'a> {
             current_status: ticket.ticket.status,
             assignee_agent_id: ticket.ticket.assignee_agent_id,
             agent_role: agent.role.clone(),
-            agent_key,
+            agent_key: agent_key.clone(),
             job_type: run.job_type.clone(),
             run_outcome,
             contract: contract.clone(),
@@ -168,6 +175,38 @@ impl<'a> RunOrchestrator<'a> {
             TransitionAction::default()
         } else {
             WorkflowService::resolve_transition(ctx).map_err(RunError::Validation)?
+        };
+        let review_capped = if skip_workflow || consultation_run {
+            false
+        } else {
+            crate::services::review_rounds::ReviewRoundService::new(self.pool)
+                .constrain_finished_review(
+                    &crate::services::review_rounds::FinishedReview {
+                        ticket_id,
+                        status: current_status,
+                        agent_key: &agent_key,
+                        agent_role: &agent.role,
+                        result: contract,
+                        worktree: worktree_path.as_deref(),
+                    },
+                    &mut action,
+                    &mut apply.comment.body,
+                )
+                .await?
+        };
+        if review_capped {
+            apply.comment.intent = CommentIntent::ReviewFeedback;
+        }
+        let silenced_contract;
+        let contract = if review_capped {
+            silenced_contract = {
+                let mut cloned = contract.clone();
+                crate::services::review_rounds::silence_collaboration(&mut cloned);
+                cloned
+            };
+            &silenced_contract
+        } else {
+            contract
         };
         crate::services::review_capacity::ReviewCapacityService::new(self.pool)
             .constrain_finished_run(ticket_id, current_status, &mut action)
@@ -228,12 +267,14 @@ impl<'a> RunOrchestrator<'a> {
         }
 
         let collaboration_targets = select_collaboration_targets(contract, &agents, run.agent_id);
-        if let AgentRunResult::Done { agent_requests, .. } = contract {
-            replace_agent_requests_in_comment(
-                &mut apply.comment.body,
-                agent_requests,
-                &collaboration_targets.agent_requests,
-            );
+        if !review_capped {
+            if let AgentRunResult::Done { agent_requests, .. } = contract {
+                replace_agent_requests_in_comment(
+                    &mut apply.comment.body,
+                    agent_requests,
+                    &collaboration_targets.agent_requests,
+                );
+            }
         }
 
         let comment = CommentService::new(self.pool)
@@ -363,7 +404,7 @@ impl<'a> RunOrchestrator<'a> {
                             "could not auto-start mentioned agent; mention remains pending"
                         );
                     }
-                    Err(error) if is_review_capacity_hold(&error) => {
+                    Err(error) if is_review_capacity_hold(&error) || is_review_round_stop(&error) => {
                         tracing::info!(
                             source_run_id = %run.id,
                             error = %error,
@@ -398,7 +439,7 @@ impl<'a> RunOrchestrator<'a> {
                                     "handoff target is already active; assigned Ready work will start after the active run finishes"
                                 );
                             }
-                            Err(error) if is_review_capacity_hold(&error) => {
+                            Err(error) if is_review_capacity_hold(&error) || is_review_round_stop(&error) => {
                                 tracing::info!(
                                     source_run_id = %run.id,
                                     error = %error,
