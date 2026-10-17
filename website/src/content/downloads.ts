@@ -1,8 +1,9 @@
+import { pages as englishPages, type Pages } from '../i18n/pages/en.ts';
 import { type OsId } from './download-order.ts';
 
 export { detectOs, noJsOsOrder, orderOs, type OsId } from './download-order.ts';
 
-/** Visitor-facing download copy. Edit this file to change the download page. */
+/** Download URLs. The words live in `src/i18n/pages`. */
 
 const latest = 'https://github.com/fertile-org/coppice/releases/latest/download';
 
@@ -44,80 +45,63 @@ export interface DownloadPageCopy {
   };
 }
 
-export const downloadPage: DownloadPageCopy = {
-  title: 'Download Coppice',
-  intro: 'Free, runs on your own machine, with no Coppice account.',
-  groups: [
-    {
-      os: 'mac',
-      note: 'Not sure which Mac you have? Open Apple menu → About This Mac. If it lists a Chip, choose Apple Silicon. If it lists a Processor, choose Intel.',
-      rows: [
-        {
-          name: 'macOS (Apple Silicon)',
-          action: {
-            label: 'Download .dmg',
-            href: `${latest}/Coppice-mac-arm64.dmg`,
-            kind: 'button',
-          },
-        },
-        {
-          name: 'macOS (Intel)',
-          action: {
-            label: 'Download .dmg',
-            href: `${latest}/Coppice-mac-x64.dmg`,
-            kind: 'button',
-          },
-        },
-      ],
-    },
-    {
-      os: 'linux',
-      rows: [
-        {
-          name: 'Linux (x64)',
-          action: {
-            label: 'Download .deb',
-            href: `${latest}/Coppice-linux-amd64.deb`,
-            kind: 'button',
-          },
-        },
-        {
-          name: 'Linux (ARM64)',
-          action: {
-            label: 'Download .deb',
-            href: `${latest}/Coppice-linux-arm64.deb`,
-            kind: 'button',
-          },
-        },
-      ],
-    },
-    {
-      os: 'windows',
-      rows: [
-        {
-          name: 'Windows 11',
-          action: {
-            label: 'Install through WSL',
-            href: '/docs/install#windows-11-through-wsl',
-            kind: 'link',
-          },
-        },
-      ],
-    },
-  ],
-  checksum: {
-    before: 'Check your download against ',
-    sumsLabel: 'SHA256SUMS',
-    sumsHref: `${latest}/SHA256SUMS`,
-    between: '. See ',
-    installLabel: 'Install',
-    installHref: '/docs/install',
-    after: ' for how.',
+const linkSkeleton = [
+  {
+    os: 'mac' as const,
+    rows: [
+      { href: `${latest}/Coppice-mac-arm64.dmg`, kind: 'button' as const },
+      { href: `${latest}/Coppice-mac-x64.dmg`, kind: 'button' as const },
+    ],
   },
-  next: {
-    before: 'Next, follow the ',
-    label: 'install steps',
-    href: '/docs/install',
-    after: '.',
+  {
+    os: 'linux' as const,
+    rows: [
+      { href: `${latest}/Coppice-linux-amd64.deb`, kind: 'button' as const },
+      { href: `${latest}/Coppice-linux-arm64.deb`, kind: 'button' as const },
+    ],
   },
-};
+  {
+    os: 'windows' as const,
+    rows: [{ href: '/docs/install#windows-11-through-wsl', kind: 'link' as const }],
+  },
+];
+
+/** Words from a locale, links from the shared skeleton. */
+export function downloadPageFor(wording: Pages['download']): DownloadPageCopy {
+  return {
+    title: wording.title,
+    intro: wording.intro,
+    groups: linkSkeleton.map((group, index) => {
+      const text = wording.groups[index];
+      return {
+        os: group.os,
+        note: text?.note,
+        rows: group.rows.map((row, rowIndex) => ({
+          name: text?.rows[rowIndex]?.name ?? '',
+          action: {
+            label: text?.rows[rowIndex]?.label ?? '',
+            href: row.href,
+            kind: row.kind,
+          },
+        })),
+      };
+    }),
+    checksum: {
+      before: wording.checksum.before,
+      sumsLabel: wording.checksum.sumsLabel,
+      sumsHref: `${latest}/SHA256SUMS`,
+      between: wording.checksum.between,
+      installLabel: wording.checksum.installLabel,
+      installHref: '/docs/install',
+      after: wording.checksum.after,
+    },
+    next: {
+      before: wording.next.before,
+      label: wording.next.label,
+      href: '/docs/install',
+      after: wording.next.after,
+    },
+  };
+}
+
+export const downloadPage: DownloadPageCopy = downloadPageFor(englishPages.download);

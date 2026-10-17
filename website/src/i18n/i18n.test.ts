@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { buildCatalog, englishRoutesFromPages, matchTranslation } from './catalog.ts';
+import { buildCatalog, englishRoutesFromPages, matchTranslation, pageStringLocale } from './catalog.ts';
+import { fillMissing } from './fill-missing.ts';
 import { prefixHref, rewriteLocaleHtml } from './locale-html.mjs';
 import { LOCALES } from './locales.mjs';
 import {
@@ -14,6 +15,25 @@ import {
   translatedLocales,
   urlInLocale,
 } from './paths.ts';
+
+describe('page string fallback', () => {
+  it('keeps English for keys a locale does not set', () => {
+    const base = {
+      h1: 'English',
+      reasons: [
+        { title: 'One', body: 'First' },
+        { title: 'Two', body: 'Second' },
+      ],
+    };
+    assert.deepEqual(fillMissing(base, { h1: 'Français', reasons: [{ title: 'Un' }] }), {
+      h1: 'Français',
+      reasons: [
+        { title: 'Un', body: 'First' },
+        { title: 'Two', body: 'Second' },
+      ],
+    });
+  });
+});
 
 describe('locale registry', () => {
   it('uses lowercase URL prefixes and the requested language codes', () => {
@@ -105,15 +125,17 @@ describe('translation sources', () => {
       englishPath: '/docs/concepts',
     });
     assert.deepEqual(matchTranslation('src/content/docs/fr/index.md'), { locale: 'fr', englishPath: '/docs' });
-    assert.deepEqual(matchTranslation('src/content/pages/ja/index.astro'), { locale: 'ja', englishPath: '/' });
+    assert.equal(matchTranslation('src/content/pages/ja/index.astro'), null);
     assert.deepEqual(matchTranslation('src/pages/zh-tw/docs/install.md'), {
       locale: 'zh-tw',
       englishPath: '/docs/install',
     });
-    assert.deepEqual(matchTranslation('src/pages/zh-hk/download.astro'), {
-      locale: 'zh-hk',
-      englishPath: '/download',
-    });
+    assert.equal(matchTranslation('src/pages/zh-hk/download.astro'), null);
+    assert.equal(pageStringLocale('src/i18n/pages/ja.ts'), 'ja');
+    assert.equal(pageStringLocale('src/i18n/pages/en.ts'), null);
+    const pages = buildCatalog(['src/i18n/pages/ja.ts']);
+    assert.equal(pages.get('/')?.has('ja'), true);
+    assert.equal(pages.get('/download')?.has('ja'), true);
     assert.equal(matchTranslation('src/pages/ja/index.astro'), null);
     assert.equal(matchTranslation('src/pages/docs/concepts.md'), null);
   });

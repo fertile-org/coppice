@@ -1,7 +1,11 @@
 ---
-import { downloadPage } from '../content/downloads';
+import { downloadPageFor } from '../content/downloads';
+import { pagesFor } from '../i18n/pages';
+import { useI18n } from '../i18n/runtime';
 import Base from '../layouts/Base.astro';
 import { withBase } from '../lib/url';
+
+const downloadPage = downloadPageFor(pagesFor(useI18n(Astro).locale).download);
 ---
 
 <Base title={downloadPage.title} description={downloadPage.intro}>

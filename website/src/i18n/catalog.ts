@@ -30,14 +30,6 @@ export function matchTranslation(file: string): { locale: LocalePath; englishPat
     const englishPath = docsEnglishPath(match[2]);
     return englishPath ? { locale: match[1], englishPath } : null;
   }
-  match = path.match(/^src\/content\/pages\/([^/]+)\/(index|download)\.(astro|md|mdx)$/);
-  if (match && LOCALE_SET.has(match[1]) && isLocalePath(match[1])) {
-    return { locale: match[1], englishPath: match[2] === 'index' ? '/' : '/download' };
-  }
-  match = path.match(/^src\/pages\/([^/]+)\/download\.(astro|md|mdx)$/);
-  if (match && LOCALE_SET.has(match[1]) && isLocalePath(match[1])) {
-    return { locale: match[1], englishPath: '/download' };
-  }
   match = path.match(/^src\/pages\/([^/]+)\/docs\/(.+)$/);
   if (match && LOCALE_SET.has(match[1]) && isLocalePath(match[1])) {
     const englishPath = docsEnglishPath(match[2]);
@@ -46,14 +38,31 @@ export function matchTranslation(file: string): { locale: LocalePath; englishPat
   return null;
 }
 
+/** `src/i18n/pages/<locale>.ts` supplies homepage and download wording. */
+export function pageStringLocale(file: string): LocalePath | null {
+  const path = normalizeSourcePath(file);
+  const match = path.match(/(?:^|\/)i18n\/pages\/([^/]+)\.ts$/) ?? path.match(/^pages\/([^/]+)\.ts$/);
+  if (!match || !LOCALE_SET.has(match[1]) || !isLocalePath(match[1])) return null;
+  return match[1];
+}
+
 export function buildCatalog(files: readonly string[]): Map<string, Set<LocalePath>> {
   const catalog = new Map<string, Set<LocalePath>>();
+  const add = (englishPath: string, locale: LocalePath) => {
+    const locales = catalog.get(englishPath) ?? new Set<LocalePath>();
+    locales.add(locale);
+    catalog.set(englishPath, locales);
+  };
   for (const file of files) {
+    const pageLocale = pageStringLocale(file);
+    if (pageLocale) {
+      add('/', pageLocale);
+      add('/download', pageLocale);
+      continue;
+    }
     const hit = matchTranslation(file);
     if (!hit) continue;
-    const locales = catalog.get(hit.englishPath) ?? new Set<LocalePath>();
-    locales.add(hit.locale);
-    catalog.set(hit.englishPath, locales);
+    add(hit.englishPath, hit.locale);
   }
   return catalog;
 }

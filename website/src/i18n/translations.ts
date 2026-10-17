@@ -6,39 +6,17 @@ type DocModule = {
   frontmatter?: { title?: string; description?: string };
 };
 
-type PageModule = {
-  default?: (props: Record<string, unknown>) => unknown;
-  Content?: (props: Record<string, unknown>) => unknown;
-};
-
 const docModules = import.meta.glob('../content/docs/*/**/*.{md,mdx}', { eager: true }) as Record<string, DocModule>;
-const pageModules = import.meta.glob('../content/pages/*/**/*.{astro,md,mdx}', { eager: true }) as Record<
-  string,
-  PageModule
->;
 const localePageKeys = Object.keys(import.meta.glob('../pages/*/**/*.{astro,md,mdx}', { eager: false }));
+const pageStringKeys = Object.keys(import.meta.glob('./pages/*.ts', { eager: false })).map(
+  (file) => `src/i18n/pages/${file.split('/').pop()}`,
+);
 
-export const catalog = buildCatalog([
-  ...Object.keys(docModules),
-  ...Object.keys(pageModules),
-  ...localePageKeys,
-]);
+export const catalog = buildCatalog([...Object.keys(docModules), ...localePageKeys, ...pageStringKeys]);
 
 function findModule<T>(modules: Record<string, T>, suffix: string): T | null {
   const key = Object.keys(modules).find((item) => item.replace(/\\/g, '/').endsWith(suffix));
   return key ? modules[key] : null;
-}
-
-/** Whole-page component for `/` or `/download`, when a locale added one under `src/content/pages`. */
-export function pageOverride(locale: string, englishPath: '/' | '/download') {
-  if (locale === 'en') return null;
-  const name = englishPath === '/' ? 'index' : 'download';
-  for (const ext of ['.astro', '.md', '.mdx']) {
-    const mod = findModule(pageModules, `/content/pages/${locale}/${name}${ext}`);
-    const component = mod?.default ?? mod?.Content;
-    if (component) return component;
-  }
-  return null;
 }
 
 /** Docs markdown that replaces the English article on a fallback URL. */

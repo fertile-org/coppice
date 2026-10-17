@@ -14,7 +14,7 @@ Astro site for the Beta marketing page and user docs. Contributor docs stay in t
 | `/docs/providers` | `src/pages/docs/providers.md` |
 | `/docs/faq` | `src/pages/docs/faq.md` |
 
-Copy follows `POSITIONING.md` (M12 Beta). Download buttons link to `/download`. The labels and asset URLs for that page live in `src/content/downloads.ts`.
+Copy follows `POSITIONING.md` (M12 Beta). Download buttons link to `/download`. Asset URLs live in `src/content/downloads.ts`. Homepage and download wording live in `src/i18n/pages/en.ts`.
 
 English keeps those URLs. `zh-CN`, `zh-TW`, `zh-HK`, `ja`, and `fr` use a lowercase prefix (`/ja/docs/concepts`). Untranslated locale URLs render the English page. See [I18N.md](I18N.md).
 
@@ -43,7 +43,7 @@ Or `make website-dev` / `make website-build`.
 
 Public site: [https://getcoppice.vercel.app/](https://getcoppice.vercel.app/), served from the domain root. No repository secrets are required for the build.
 
-`BASE_PATH` (or the older `SITE_BASE`) sets Astro `base`. Leave it unset to build for `/`. Canonical, `hreflang`, and sitemap URLs use the `site` value in `astro.config.mjs`.
+Canonical, `hreflang`, and sitemap URLs use the `site` value in `astro.config.mjs`. The site is built at the domain root.
 
 ```bash
 cd website
@@ -56,9 +56,4 @@ Vercel should use `website/` as the project root. `website/vercel.json` turns on
 
 Docs search is a button in the docs header. It opens a dialog that searches the Pagefind index. The `astro-pagefind` integration builds that index from the static output at the end of `npm run build` (the same command Vercel runs). Only the docs article is indexed: `data-pagefind-body` is on that article, and pages without it — the homepage, download page, 404, and any locale URL that is still showing English — stay out of the index. Each locale has its own Pagefind index. The site header, nav, and footer are marked `data-pagefind-ignore`.
 
-GitHub Pages is an optional manual deploy, still at `/coppice`:
-
-1. In the repo settings, set **Pages → Build and deployment → Source** to **GitHub Actions**.
-2. Run the **Website** workflow manually (**Actions → Website → Run workflow**) with **Deploy to GitHub Pages at /coppice** checked.
-
-That dispatch rebuilds with `BASE_PATH=/coppice`, rewrites `docs.html` into `docs/index.html` (Pages does not apply Vercel clean URLs), then deploys `website/dist` with the built-in `GITHUB_TOKEN` (`pages: write` and `id-token: write`). Canonical, `hreflang`, and sitemap URLs still come from `site` in `astro.config.mjs`. Pull requests only build and upload the `website` artifact, with `base` `/`.
+The website workflow builds and checks the site, then uploads the `website` artifact. It does not deploy.
