@@ -4,8 +4,11 @@
  *
  * Same stack as `make screenshot`: Compose project coppice-screenshot,
  * desktop mode, 1440×900. Seeds the acme-web repo and a small board, then
- * records the core-flow storyboard. Card moves stay instant. Crossfades,
- * caption fades, and the highlight pulse are applied in the edit. Writes:
+ * records the core-flow storyboard. Card moves stay instant. The board
+ * stays on the left edge while recording; a later column slides in with an
+ * edit pan that lands on whole columns. Crossfades, caption fades, and the
+ * highlight pulse are applied in the edit. The pulse wraps the card border.
+ * Writes:
  *
  *   website/public/assets/marketing.mp4   1440×900
  *   website/public/assets/marketing.webm  1440×900
@@ -397,9 +400,14 @@ async function preparePage(page) {
     .catch(() => {});
   await page.evaluate(() => document.fonts.ready);
   await page.addStyleTag({
-    content:
-      'html,body{overflow:hidden!important}*{scrollbar-width:none!important}*{caret-color:transparent!important}::-webkit-scrollbar{display:none!important}',
+    content: `html,body{overflow:hidden!important}*{scrollbar-width:none!important}*{caret-color:transparent!important}::-webkit-scrollbar{display:none!important}${COLUMN_RULE}`,
   });
+  await page.evaluate(
+    () =>
+      new Promise((resolve) => {
+        requestAnimationFrame(() => requestAnimationFrame(resolve));
+      }),
+  );
 }
 
 async function assertClean(page, label) {
@@ -444,7 +452,7 @@ async function setCaption(page, text) {
       bar.textContent = caption ?? '';
       bar.classList.toggle('is-on', Boolean(caption));
     },
-    { caption: text ?? '', styleText: CAPTION_STYLE },
+    { caption: text ?? '', styleText: CAPTION_CSS },
   );
   if (text) {
     const shown = await page.locator('#coppice-hero-caption').innerText();
@@ -480,8 +488,14 @@ const CAPTION_STYLE = `
   #coppice-hero-caption.is-on { opacity: 1; }
 `;
 
+const COLUMN_RULE =
+  '#board > div > section{width:284px!important;min-width:284px!important;max-width:284px!important}';
+const CAPTION_CSS = `${CAPTION_STYLE}\n${COLUMN_RULE}`;
 const CROSSFADE_SECONDS = 0.5;
 const CAPTION_MIN_MS = 2500;
+const PAN_SECONDS = 0.9;
+const PULSE_GAP = 4;
+const PULSE_STROKE = 3;
 const MARKERS = [
   { name: 'start', css: 'rgb(255, 0, 96)', rgb: [255, 0, 96] },
   { name: 'plan', css: 'rgb(0, 255, 170)', rgb: [0, 255, 170] },
@@ -507,18 +521,115 @@ async function shoot(page, name) {
   return file;
 }
 
-async function scrollBoardTo(page, label) {
-  await page.locator('#board').evaluate((el, name) => {
-    const col = document.querySelector(`[aria-label="${name}"]`);
-    if (!col) return;
-    const board = el.getBoundingClientRect();
-    const colBox = col.getBoundingClientRect();
-    el.scrollTo({
-      left: el.scrollLeft + colBox.left - board.left - 4,
-      behavior: 'smooth',
+async function pinBoardLeft(page) {
+  const board = page.locator('#board');
+  if ((await board.count()) === 0) return;
+  await board.evaluate((el) => {
+    el.scrollLeft = 0;
+  });
+  await page.evaluate(
+    () =>
+      new Promise((resolve) => {
+        requestAnimationFrame(() => requestAnimationFrame(resolve));
+      }),
+  );
+}
+
+async function boardGeometry(page) {
+  return page.locator('#board').evaluate((board) => {
+    const rect = board.getBoundingClientRect();
+    const style = getComputedStyle(board);
+    const cols = [...board.querySelectorAll(':scope > div > section')].map((el) => {
+      const box = el.getBoundingClientRect();
+      return { label: el.getAttribute('aria-label'), x: box.x, w: box.width };
     });
-  }, label);
-  await sleep(900);
+    return {
+      board: { x: rect.x, y: rect.y, w: rect.width, h: rect.height },
+      padLeft: parseFloat(style.paddingLeft) || 0,
+      scrollLeft: board.scrollLeft,
+      cols,
+    };
+  });
+}
+
+function snapScroll(geo, label) {
+  const boardW = geo.board.w;
+  const cols = geo.cols.map((col) => {
+    const left = col.x - geo.board.x + geo.scrollLeft;
+    return { label: col.label, left, right: left + col.w };
+  });
+  const target = cols.find((col) => col.label === label);
+  if (!target) fail(`column ${label} is missing`);
+  const candidates = [0, ...cols.map((col) => col.right)];
+  const fits = candidates.filter((scroll) => {
+    const viewRight = scroll + boardW;
+    if (target.left < scroll - 0.6 || target.right > viewRight + 0.6) return false;
+    return cols.every((col) => {
+      const fullyIn = col.left >= scroll - 0.6 && col.right <= viewRight + 0.6;
+      return fullyIn || col.right <= scroll + 0.6 || col.left >= viewRight - 0.6;
+    });
+  });
+  if (!fits.length) fail(`no whole-column view includes ${label}`);
+  fits.sort((a, b) => a - b);
+  return fits[0];
+}
+
+async function assertTrackPainted(file) {
+  const painted = await run(
+    [
+      'python3',
+      '-c',
+      `from PIL import Image
+import sys
+image = Image.open(sys.argv[1]).convert('RGB')
+px = image.load()
+width, height = image.size
+hits = 0
+for x in range(min(width - 1, 2300), min(width, 2500), 6):
+    for y in range(20, min(height, 80), 4):
+        r, g, b = px[x, y]
+        if abs(r - 248) + abs(g - 244) + abs(b - 238) > 40:
+            hits += 1
+print(hits)
+if hits < 8:
+    raise SystemExit(f'track screenshot is not fully painted ({hits} hits, {width}x{height})')
+`,
+      file,
+    ],
+    { cwd: REPO_ROOT },
+  );
+  console.log(`hero: track painted ${painted.trim()} hits`);
+}
+
+async function measureCard(page, locator) {
+  const read = () =>
+    locator.evaluate((el) => {
+      const card = el.parentElement;
+      const rect = card.getBoundingClientRect();
+      const radius = parseFloat(getComputedStyle(card).borderRadius) || 8;
+      return { x: rect.x, y: rect.y, width: rect.width, height: rect.height, radius };
+    });
+  let box = await read();
+  await page.evaluate(
+    () =>
+      new Promise((resolve) => {
+        requestAnimationFrame(() => requestAnimationFrame(resolve));
+      }),
+  );
+  const again = await read();
+  const drift =
+    Math.abs(again.x - box.x) +
+    Math.abs(again.y - box.y) +
+    Math.abs(again.width - box.width) +
+    Math.abs(again.height - box.height);
+  if (drift > 1) {
+    await sleep(250);
+    box = await read();
+  } else {
+    box = again;
+  }
+  if (!box || box.width < 40 || box.height < 36) fail(`card box missing: ${JSON.stringify(box)}`);
+  return box;
 }
 
 async function hold(page, ms) {
@@ -604,25 +715,33 @@ function markerRuns(sample) {
   return merged;
 }
 
-function pipTimes(sample) {
+function pipCues(sample) {
   const { frames, w, h, fps } = sample;
-  const times = [];
-  let open = false;
+  const cues = [];
+  let open = null;
   frames.forEach((frame, index) => {
-    let mag = 0;
+    let magenta = 0;
+    let green = 0;
     for (let i = 0; i < frame.length; i += 3) {
-      if (frame[i] > 220 && frame[i + 2] > 220 && frame[i + 1] < 80) mag += 1;
+      const r = frame[i];
+      const g = frame[i + 1];
+      const b = frame[i + 2];
+      if (r > 220 && b > 220 && g < 80) magenta += 1;
+      if (g > 220 && r < 80 && b < 80) green += 1;
     }
-    const hit = mag > w * h * 0.25;
-    if (hit && !open) times.push(index / fps);
-    open = hit;
+    const need = w * h * 0.25;
+    const kind = magenta > need ? 'pulse' : green > need ? 'still' : null;
+    if (kind && kind !== open) cues.push({ kind, time: index / fps });
+    open = kind;
   });
-  return times;
+  return cues;
 }
 
-async function writePulse(file, width, height) {
-  const w = Math.max(48, Math.round(width));
-  const h = Math.max(36, Math.round(height));
+async function writePulse(file, width, height, radius) {
+  const margin = PULSE_GAP + PULSE_STROKE;
+  const w = Math.max(48, Math.round(width + margin * 2));
+  const h = Math.max(36, Math.round(height + margin * 2));
+  const rad = Math.max(4, Number(radius) + PULSE_GAP + PULSE_STROKE / 2);
   await new Promise((resolve, reject) => {
     const child = spawn(
       'python3',
@@ -630,14 +749,17 @@ async function writePulse(file, width, height) {
         '-c',
         `from PIL import Image, ImageDraw
 import sys
-w, h, path = int(sys.argv[1]), int(sys.argv[2]), sys.argv[3]
+w, h, radius, stroke, path = int(sys.argv[1]), int(sys.argv[2]), float(sys.argv[3]), int(sys.argv[4]), sys.argv[5]
 image = Image.new('RGBA', (w, h), (0, 0, 0, 0))
 draw = ImageDraw.Draw(image)
-draw.rounded_rectangle((2, 2, w - 3, h - 3), radius=12, outline=(231, 177, 90, 220), width=4)
+inset = stroke / 2
+draw.rounded_rectangle((inset, inset, w - 1 - inset, h - 1 - inset), radius=radius, outline=(231, 177, 90, 230), width=stroke)
 image.save(path)
 `,
         String(w),
         String(h),
+        String(rad),
+        String(PULSE_STROKE),
         file,
       ],
       { stdio: ['ignore', 'ignore', 'pipe'] },
@@ -652,7 +774,7 @@ image.save(path)
       else resolve();
     });
   });
-  return { w, h };
+  return { w, h, margin };
 }
 
 function ffmpeg(args) {
@@ -711,7 +833,182 @@ function ffprobe(file) {
   });
 }
 
-async function assemble(raw, pulses) {
+function outputTime(segments, segmentIndex, at) {
+  let start = 0;
+  for (let index = 0; index < segmentIndex; index += 1) {
+    start += segments[index].end - segments[index].start - CROSSFADE_SECONDS;
+  }
+  return start + at;
+}
+
+async function renderSegment(clean, segment, dest) {
+  const length = Math.max(0.2, segment.end - segment.start);
+  let vf = 'fps=25,setpts=PTS-STARTPTS,format=yuv420p';
+  if (segment.zoom) {
+    vf += `,scale=1500:938,crop=1440:900:x=(in_w-out_w)*(0.25+0.5*t/${length.toFixed(3)}):y=(in_h-out_h)*(0.4+0.15*t/${length.toFixed(3)})`;
+  }
+  await ffmpeg([
+    '-y',
+    '-ss',
+    segment.start.toFixed(3),
+    '-to',
+    segment.end.toFixed(3),
+    '-i',
+    clean,
+    '-an',
+    '-vf',
+    vf,
+    '-c:v',
+    'libx264',
+    '-pix_fmt',
+    'yuv420p',
+    '-crf',
+    '16',
+    '-preset',
+    'veryfast',
+    dest,
+  ]);
+}
+
+async function applyPan(source, pulse, dest) {
+  const pan = pulse.pan;
+  const start = Math.max(0, pulse.at - pan.duration);
+  const caption = pan.caption ? pan.caption.join(',') : '';
+  const board = `${pan.board.x},${pan.board.y},${pan.board.w},${pan.board.h}`;
+  await run(
+    [
+      'python3',
+      path.join(HERE, 'hero-board-pan.py'),
+      '--video',
+      source,
+      '--track',
+      pan.track,
+      '--out',
+      dest,
+      '--start',
+      start.toFixed(3),
+      '--duration',
+      pan.duration.toFixed(3),
+      '--scroll',
+      String(pan.scrollTo),
+      '--board',
+      board,
+      '--pad',
+      String(pan.pad),
+      '--caption',
+      caption,
+    ],
+    { cwd: REPO_ROOT },
+  );
+}
+
+async function overlayPulses(source, pulses, scratch, dest) {
+  if (!pulses.length) {
+    await copyFile(source, dest);
+    return;
+  }
+  const args = ['-y', '-i', source];
+  const filters = [];
+  let label = '0:v';
+  for (const [index, pulse] of pulses.entries()) {
+    const png = path.join(scratch, `pulse-${index}-${pulse.at.toFixed(2)}.png`);
+    const size = await writePulse(png, pulse.width, pulse.height, pulse.radius);
+    pulse.margin = size.margin;
+    args.push('-loop', '1', '-t', '0.75', '-i', png);
+    const faded = `f${index}`;
+    const next = `q${index}`;
+    const x = Math.round(pulse.x - size.margin);
+    const y = Math.round(pulse.y - size.margin);
+    filters.push(
+      `[${index + 1}:v]fps=25,format=rgba,fade=t=in:st=0:d=0.12:alpha=1,fade=t=out:st=0.4:d=0.22:alpha=1,setpts=PTS-STARTPTS+${pulse.at.toFixed(3)}/TB[${faded}]`,
+    );
+    filters.push(
+      `[${label}][${faded}]overlay=${x}:${y}:eof_action=pass:format=auto[${next}]`,
+    );
+    label = next;
+  }
+  await ffmpeg([
+    ...args,
+    '-filter_complex',
+    filters.join(';'),
+    '-map',
+    `[${label}]`,
+    '-an',
+    '-c:v',
+    'libx264',
+    '-pix_fmt',
+    'yuv420p',
+    '-crf',
+    '16',
+    '-preset',
+    'veryfast',
+    dest,
+  ]);
+}
+
+async function assertPulseFrames(frames) {
+  const script = `
+import json, sys
+from PIL import Image
+frames = json.loads(sys.argv[1])
+def gold(r, g, b):
+    return r > 175 and 120 < g < 215 and b < 160 and r > g > b and (r - b) > 70
+for item in frames:
+    image = Image.open(item["file"]).convert("RGB")
+    px = image.load()
+    w, h = image.size
+    pulse = item["pulse"]
+    margin = pulse["margin"]
+    left = pulse["x"] - margin
+    top = pulse["y"] - margin
+    right = pulse["x"] + pulse["width"] + margin
+    bottom = pulse["y"] + pulse["height"] + margin
+    xs, ys = [], []
+    for y in range(max(0, int(top) - 6), min(h, int(bottom) + 8)):
+        for x in range(max(0, int(left) - 6), min(w, int(right) + 8), 2):
+            near = min(abs(x - left), abs(x - right), abs(y - top), abs(y - bottom)) <= 12
+            if near and gold(*px[x, y]):
+                xs.append(x); ys.append(y)
+    if len(xs) < 80:
+        raise SystemExit(f'{item["scene"]} pulse has too little highlight ({len(xs)})')
+    box = (min(xs), min(ys), max(xs), max(ys))
+    if abs(box[0] - left) > 10 or abs(box[1] - top) > 10 or abs(box[2] - right) > 10 or abs(box[3] - bottom) > 10:
+        raise SystemExit(f'{item["scene"]} pulse box {box} != card outline {(round(left), round(top), round(right), round(bottom))}')
+    title = 0
+    x0, y0 = int(pulse["x"] + 18), int(pulse["y"] + 8)
+    x1, y1 = int(pulse["x"] + pulse["width"] - 18), int(pulse["y"] + 32)
+    for y in range(max(0, y0), min(h, y1)):
+        for x in range(max(0, x0), min(w, x1), 2):
+            if gold(*px[x, y]):
+                title += 1
+    if title > 8:
+        raise SystemExit(f'{item["scene"]} pulse crosses the title ({title} pixels)')
+    print(f'pulse {item["scene"]} {box} ok')
+`;
+  return run(
+    [
+      'python3',
+      '-c',
+      script,
+      JSON.stringify(
+        frames.map((item) => ({
+          file: item.file,
+          scene: item.scene,
+          pulse: {
+            x: item.pulse.x,
+            y: item.pulse.y,
+            width: item.pulse.width,
+            height: item.pulse.height,
+            margin: item.pulse.margin,
+          },
+        })),
+      ),
+    ],
+    { cwd: REPO_ROOT },
+  );
+}
+
+async function assemble(raw, pulses, stills) {
   const probed = await ffprobe(raw);
   const duration = Number(probed.duration);
   if (!Number.isFinite(duration)) fail('raw video has no duration');
@@ -727,10 +1024,20 @@ async function assemble(raw, pulses) {
   }
 
   const corner = await samplePixels(raw, 12, '22:22:0:0');
-  const cues = pipTimes(corner);
-  console.log(`hero: pulse cues ${cues.map((time) => time.toFixed(2)).join(' ') || 'none'}`);
-  if (cues.length !== pulses.length) {
-    fail(`found ${cues.length} pulse cues, expected ${pulses.length}`);
+  const cues = pipCues(corner);
+  const pulseCues = cues.filter((cue) => cue.kind === 'pulse');
+  const stillCues = cues.filter((cue) => cue.kind === 'still');
+  console.log(
+    `hero: pulse cues ${pulseCues.map((cue) => cue.time.toFixed(2)).join(' ') || 'none'}`,
+  );
+  console.log(
+    `hero: still cues ${stillCues.map((cue) => cue.time.toFixed(2)).join(' ') || 'none'}`,
+  );
+  if (pulseCues.length !== pulses.length) {
+    fail(`found ${pulseCues.length} pulse cues, expected ${pulses.length}`);
+  }
+  if (stillCues.length !== stills.length) {
+    fail(`found ${stillCues.length} still cues, expected ${stills.length}`);
   }
 
   const segments = SEGMENT_NAMES.map((name, index) => {
@@ -745,10 +1052,19 @@ async function assemble(raw, pulses) {
       pulses: [],
     };
   });
-  cues.forEach((time, index) => {
-    const segment = segments.find((item) => time >= item.start - 0.05 && time <= item.end + 0.05);
-    if (!segment) fail(`pulse at ${time.toFixed(2)}s sits outside a scene`);
-    segment.pulses.push({ ...pulses[index], at: Math.max(0, time - segment.start) });
+  const placeCue = (time, label) => {
+    const index = segments.findIndex((item) => time >= item.start - 0.05 && time <= item.end + 0.05);
+    const segment = segments[index];
+    if (!segment) fail(`${label} at ${time.toFixed(2)}s sits outside a scene`);
+    return { segment, index, at: Math.max(0, time - segment.start) };
+  };
+  pulseCues.forEach((cue, index) => {
+    const placed = placeCue(cue.time, 'pulse');
+    placed.segment.pulses.push({ ...pulses[index], at: placed.at });
+  });
+  const stillFrames = stillCues.map((cue, index) => {
+    const placed = placeCue(cue.time, 'still');
+    return { name: stills[index], time: outputTime(segments, placed.index, placed.at) };
   });
   for (const segment of segments) {
     const length = segment.end - segment.start;
@@ -778,61 +1094,41 @@ async function assemble(raw, pulses) {
     clean,
   ]);
 
-  const args = ['-y'];
-  for (const segment of segments) {
-    args.push('-ss', segment.start.toFixed(3), '-to', segment.end.toFixed(3), '-i', clean);
-  }
-  let pulseInput = segments.length;
-  for (const segment of segments) {
-    for (const pulse of segment.pulses) {
-      const file = path.join(scratch, `pulse-${pulseInput}.png`);
-      const size = await writePulse(file, pulse.width, pulse.height);
-      pulse.input = pulseInput;
-      pulse.w = size.w;
-      pulse.h = size.h;
-      pulseInput += 1;
-      args.push('-loop', '1', '-t', '0.75', '-i', file);
+  for (const [index, segment] of segments.entries()) {
+    const cut = path.join(scratch, `seg-${index}.mp4`);
+    await renderSegment(clean, segment, cut);
+    let current = cut;
+    const pan = segment.pulses.find((pulse) => pulse.pan);
+    if (pan) {
+      const panned = path.join(scratch, `pan-${index}.mp4`);
+      console.log(
+        `hero: pan ${segment.name} to ${pan.pan.scrollTo.toFixed(0)}px at ${pan.at.toFixed(2)}s`,
+      );
+      await applyPan(current, pan, panned);
+      current = panned;
     }
+    const pulsed = path.join(scratch, `pulsed-${index}.mp4`);
+    await overlayPulses(current, segment.pulses, scratch, pulsed);
+    segment.file = pulsed;
   }
 
   const filters = [];
-  for (const [index, segment] of segments.entries()) {
-    const length = Math.max(0.2, segment.end - segment.start).toFixed(3);
-    let chain = `[${index}:v]fps=25,setpts=PTS-STARTPTS,format=yuv420p`;
-    if (segment.zoom) {
-      chain += `,scale=1500:938,crop=1440:900:x=(in_w-out_w)*(0.25+0.5*t/${length}):y=(in_h-out_h)*(0.4+0.15*t/${length})`;
-    }
-    let label = `s${index}`;
-    filters.push(`${chain}[${label}]`);
-    segment.pulses.forEach((pulse, pulseIndex) => {
-      const faded = `f${index}${pulseIndex}`;
-      const next = `q${index}${pulseIndex}`;
-      filters.push(
-        `[${pulse.input}:v]fps=25,format=rgba,fade=t=in:st=0:d=0.12:alpha=1,fade=t=out:st=0.4:d=0.22:alpha=1,setpts=PTS-STARTPTS+${pulse.at.toFixed(3)}/TB[${faded}]`,
-      );
-      filters.push(
-        `[${label}][${faded}]overlay=${Math.round(pulse.x)}:${Math.round(pulse.y)}:eof_action=pass:format=auto[${next}]`,
-      );
-      label = next;
-    });
-    segment.label = label;
-  }
-
-  let current = segments[0].label;
+  let current = '0:v';
   segments.slice(1).forEach((segment, index) => {
     const offset =
       segments.slice(0, index + 1).reduce((sum, item) => sum + (item.end - item.start), 0) -
       CROSSFADE_SECONDS * (index + 1);
     const out = index === segments.length - 2 ? 'vout' : `x${index}`;
     filters.push(
-      `[${current}][${segment.label}]xfade=transition=fade:duration=${CROSSFADE_SECONDS}:offset=${offset.toFixed(3)}[${out}]`,
+      `[${current}][${index + 1}:v]xfade=transition=fade:duration=${CROSSFADE_SECONDS}:offset=${offset.toFixed(3)}[${out}]`,
     );
     current = out;
   });
 
   await mkdir(ASSETS, { recursive: true });
   await ffmpeg([
-    ...args,
+    '-y',
+    ...segments.flatMap((segment) => ['-i', segment.file]),
     '-filter_complex',
     filters.join(';'),
     '-map',
@@ -883,6 +1179,55 @@ async function assemble(raw, pulses) {
     GIF_SITE,
   ]);
   await copyFile(GIF_SITE, GIF_README);
+
+  const grab = async (time, dest) => {
+    await ffmpeg([
+      '-y',
+      '-ss',
+      time.toFixed(3),
+      '-i',
+      MP4_OUT,
+      '-frames:v',
+      '1',
+      dest,
+    ]);
+  };
+  const stillNames = {
+    write: '01-write-ticket.png',
+    plan: '02-plan.png',
+    diff: '05-diff.png',
+    accept: '06-accept.png',
+  };
+  await mkdir(STILLS_DIR, { recursive: true });
+  for (const still of stillFrames) {
+    const file = path.join(STILLS_DIR, stillNames[still.name] ?? `${still.name}.png`);
+    await grab(still.time, file);
+    console.log(`hero: still ${still.name} at ${still.time.toFixed(2)}s -> ${file}`);
+  }
+  const pulseFrames = [];
+  for (const [index, segment] of segments.entries()) {
+    for (const pulse of segment.pulses) {
+      const time = outputTime(segments, index, pulse.at + 0.22);
+      const file = path.join(scratch, `check-pulse-${index}-${pulse.at.toFixed(2)}.png`);
+      await grab(time, file);
+      pulseFrames.push({ file, pulse, time, scene: segment.name });
+    }
+  }
+  const ready = segments.findIndex((segment) => segment.name === 'board');
+  const boardPulses = segments[ready]?.pulses ?? [];
+  if (boardPulses[0]) {
+    await grab(outputTime(segments, ready, boardPulses[0].at + 0.22), path.join(STILLS_DIR, '03-approve.png'));
+  }
+  if (boardPulses[1]) {
+    await grab(outputTime(segments, ready, boardPulses[1].at + 0.22), path.join(STILLS_DIR, '04-build.png'));
+  }
+  const loopIndex = segments.findIndex((segment) => segment.name === 'loop');
+  const loop = segments[loopIndex];
+  const posterTime = outputTime(segments, loopIndex, (loop.end - loop.start) * 0.45);
+  const posterFile = path.join(STILLS_DIR, '07-board.png');
+  await grab(posterTime, posterFile);
+  await copyFile(posterFile, POSTER);
+  console.log((await assertPulseFrames(pulseFrames)).trim());
   await rm(scratch, { recursive: true, force: true });
 
   const mp4 = await ffprobe(MP4_OUT);
@@ -908,6 +1253,7 @@ async function record(scene) {
   const browser = await launchBrowser();
   const videoDir = await mkdtemp(path.join(tmpdir(), 'coppice-hero-video-'));
   const pulses = [];
+  const stills = [];
   let raw = null;
   try {
     const context = await browser.newContext({
@@ -982,7 +1328,7 @@ async function record(scene) {
       };
       if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
       else boot();
-    }, CAPTION_STYLE);
+    }, CAPTION_CSS);
 
     const page = await context.newPage();
     page.on('pageerror', (error) => {
@@ -1054,31 +1400,90 @@ async function record(scene) {
       });
       await sleep(120);
     };
-    const pulseCue = async (locator) => {
-      const box = await locator.boundingBox();
-      if (!box || box.width < 40) fail(`card box missing: ${JSON.stringify(box)}`);
-      pulses.push({
-        x: Math.round(box.x),
-        y: Math.round(box.y),
-        width: Math.round(box.width),
-        height: Math.round(box.height),
-      });
-      await page.evaluate(() => {
+    const flashPip = async (css) => {
+      await page.evaluate((background) => {
         let pip = document.getElementById('coppice-hero-pip');
         if (!pip) {
           pip = document.createElement('div');
           pip.id = 'coppice-hero-pip';
           pip.style.cssText =
-            'position:fixed;left:0;top:0;width:22px;height:22px;z-index:2147483647;background:#ff00ff;pointer-events:none;';
+            'position:fixed;left:0;top:0;width:22px;height:22px;z-index:2147483647;pointer-events:none;';
           document.body.appendChild(pip);
         }
+        pip.style.background = background;
         pip.style.display = 'block';
-      });
+      }, css);
       await sleep(280);
       await page.evaluate(() => {
         const pip = document.getElementById('coppice-hero-pip');
         if (pip) pip.style.display = 'none';
       });
+    };
+    const markStill = async (name) => {
+      stills.push(name);
+      await flashPip('rgb(0, 255, 0)');
+    };
+    const pulseCue = async (locator, { column } = {}) => {
+      await pinBoardLeft(page);
+      const box = await measureCard(page, locator);
+      const pulse = {
+        x: box.x,
+        y: box.y,
+        width: box.width,
+        height: box.height,
+        radius: box.radius,
+      };
+      if (column) {
+        const geo = await boardGeometry(page);
+        const scrollTo = snapScroll(geo, column);
+        const track = path.join(videoDir, `track-${pulses.length}.png`);
+        await page.evaluate(() => {
+          const board = document.querySelector('#board');
+          const saved = [];
+          let node = board;
+          while (node) {
+            saved.push({ node, overflow: node.style.overflow, priority: node.style.getPropertyPriority('overflow') });
+            node.style.setProperty('overflow', 'visible', 'important');
+            node = node.parentElement;
+          }
+          window.__heroOverflow = saved;
+        });
+        await page.locator('#board > div').screenshot({ path: track, animations: 'disabled' });
+        await page.evaluate(() => {
+          for (const item of window.__heroOverflow ?? []) {
+            item.node.style.removeProperty('overflow');
+            if (item.overflow) {
+              item.node.style.setProperty('overflow', item.overflow, item.priority || '');
+            }
+          }
+          window.__heroOverflow = undefined;
+        });
+        await assertTrackPainted(track);
+        const captionOn = await page.evaluate(
+          () => document.getElementById('coppice-hero-caption')?.classList.contains('is-on') ?? false,
+        );
+        let caption = null;
+        if (captionOn) {
+          const captionBox = await page.locator('#coppice-hero-caption').boundingBox();
+          if (captionBox) caption = [captionBox.x, captionBox.y, captionBox.width, captionBox.height];
+        }
+        pulse.x = box.x - scrollTo;
+        pulse.pan = {
+          scrollTo,
+          duration: PAN_SECONDS,
+          track,
+          board: geo.board,
+          pad: geo.padLeft,
+          caption,
+        };
+        console.log(
+          `hero: card ${column} pan ${scrollTo.toFixed(0)}px box ${pulse.x.toFixed(0)},${pulse.y.toFixed(0)} ${pulse.width.toFixed(0)}x${pulse.height.toFixed(0)} r${pulse.radius}`,
+        );
+      } else if (pulse.x < -1 || pulse.x + pulse.width > VIEWPORT.width + 1) {
+        fail(`card is outside the left-edge frame: ${JSON.stringify(pulse)}`);
+      }
+      pulses.push(pulse);
+      await flashPip('#ff00ff');
     };
 
     await page.goto(`${WEB}/boards/${scene.boardId}`, { waitUntil: 'domcontentloaded' });
@@ -1099,10 +1504,11 @@ async function record(scene) {
     await sleep(350);
     await input.press('Enter');
     await storyCard('Backlog').waitFor({ timeout: 15_000 });
+    await pinBoardLeft(page);
     await assertClean(page, 'scene 1');
-    await hold(page, 2200);
-    await shoot(page, '01-write-ticket');
-    await hold(page, 1500);
+    await hold(page, 1600);
+    await markStill('write');
+    await hold(page, 2800);
 
     const created = await api('GET', `/api/boards/${scene.boardId}/tickets`, scene.auth);
     const tickets = Array.isArray(created) ? created : (created.items ?? []);
@@ -1121,7 +1527,7 @@ async function record(scene) {
     await attachPlan(ticket.id, scene.agentIds.PM);
     const planCard = storyCard('Plan Review');
     await planCard.waitFor({ timeout: 15_000 });
-    await scrollBoardTo(page, 'Plan Review');
+    await pinBoardLeft(page);
     await pulseCue(planCard);
     await hold(page, 1800);
 
@@ -1135,9 +1541,9 @@ async function record(scene) {
     });
     await fadeCaption(CAPTIONS[1]);
     await assertClean(page, 'scene 2');
-    await hold(page, 6500);
-    await shoot(page, '02-plan');
-    await hold(page, 1800);
+    await hold(page, 3800);
+    await markStill('plan');
+    await hold(page, 3800);
 
     await page.getByRole('button', { name: 'Approve plan' }).click();
     const detail = page.locator('[aria-label="Ticket detail"]');
@@ -1146,15 +1552,13 @@ async function record(scene) {
     await cutScene(MARKERS[2], async () => {
       await page.getByRole('button', { name: 'Close', exact: true }).click();
       await page.getByRole('region', { name: 'Ready' }).getByText(TICKET_TITLE).waitFor({ timeout: 15_000 });
-      await scrollBoardTo(page, 'Ready');
+      await pinBoardLeft(page);
       await preparePage(page);
     });
     await fadeCaption(CAPTIONS[2]);
     await pulseCue(storyCard('Ready'));
     await assertClean(page, 'scene 3');
     await hold(page, 2800);
-    await shoot(page, '03-approve');
-    await hold(page, 1500);
 
     const short = ticket.id.split('-')[0];
     await api('PATCH', `/api/tickets/${ticket.id}/status`, scene.auth, {
@@ -1167,12 +1571,11 @@ async function record(scene) {
     `);
     const waiting = storyCard('Wait for Human Review');
     await waiting.waitFor({ timeout: 15_000 });
-    await scrollBoardTo(page, 'Wait for Human Review');
+    await pinBoardLeft(page);
     await fadeCaption(CAPTIONS[3]);
-    await pulseCue(waiting);
+    await pulseCue(waiting, { column: 'Wait for Human Review' });
     await assertClean(page, 'scene 4');
     await hold(page, 2800);
-    await shoot(page, '04-build');
 
     const worktree = await worktreePromise;
     if (!worktree?.startsWith('/data/worktrees/')) fail(`worktree path missing: ${worktree}`);
@@ -1201,8 +1604,9 @@ async function record(scene) {
     await page.getByRole('button', { name: 'Add comment', exact: true }).click();
     await page.getByText(LINE_COMMENT).waitFor();
     await assertClean(page, 'scene 5 comment');
-    await hold(page, 4200);
-    await shoot(page, '05-diff');
+    await hold(page, 1400);
+    await markStill('diff');
+    await hold(page, 3200);
 
     await cutScene(MARKERS[4], async () => {
       await page.goto(`${WEB}/boards/${scene.boardId}?ticket=${ticket.id}`, {
@@ -1218,27 +1622,37 @@ async function record(scene) {
     });
     await fadeCaption(CAPTIONS[5]);
     await assertClean(page, 'scene 6');
-    await hold(page, 4200);
-    await shoot(page, '06-accept');
+    await hold(page, 2800);
+    const acceptDialog = page.getByRole('dialog', { name: 'Accept this ticket?' });
+    await acceptDialog.getByRole('button', { name: 'Accept', exact: true }).click();
+    await acceptDialog.waitFor({ state: 'hidden', timeout: 15_000 });
+    await detail.locator('header').getByText('Done', { exact: true }).waitFor({ timeout: 15_000 });
+    const drawerText = await detail.innerText();
+    await fadeCaption(null);
+    await page.getByRole('button', { name: 'Close', exact: true }).click();
+    await pinBoardLeft(page);
+    const doneCard = storyCard('Done');
+    await doneCard.waitFor({ timeout: 15_000 });
+    await page
+      .getByText('Accepted, not merged', { exact: true })
+      .waitFor({ timeout: 6_000 })
+      .catch(() => {});
+    const cardText = await doneCard.evaluate((el) => el.parentElement.innerText);
+    const acceptReport = `drawer:\n${drawerText}\n\ncard:\n${cardText}\n`;
+    await writeFile('/tmp/hero-accept-state.txt', acceptReport);
+    console.log(`hero: post-accept\n${acceptReport}`);
+    await pulseCue(doneCard, { column: 'Done' });
+    await markStill('accept');
+    await hold(page, 3800);
 
     await cutScene(MARKERS[5], async () => {
-      await page
-        .getByRole('dialog', { name: 'Accept this ticket?' })
-        .getByRole('button', { name: 'Cancel' })
-        .click();
-      await page.getByRole('button', { name: 'Close', exact: true }).click();
-      await page.getByRole('dialog', { name: 'Accept this ticket?' }).waitFor({ state: 'hidden' });
-      await scrollBoardTo(page, 'Backlog');
+      await pinBoardLeft(page);
       await fadeCaption(null);
       await page.getByText('Remember the last open settings tab').waitFor();
       await preparePage(page);
     });
     await assertClean(page, 'scene 7');
-    await hold(page, 3200);
-    const stillBoard = await shoot(page, '07-board');
-    await copyFile(stillBoard, POSTER);
-    console.log(`hero: wrote ${POSTER}`);
-    await hold(page, 700);
+    await hold(page, 4700);
 
     const video = page.video();
     await page.close();
@@ -1249,7 +1663,7 @@ async function record(scene) {
     await browser.close();
   }
   if (!raw) fail('recording did not finish');
-  await assemble(raw, pulses);
+  await assemble(raw, pulses, stills);
   await rm(videoDir, { recursive: true, force: true });
 }
 
