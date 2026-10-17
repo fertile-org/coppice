@@ -4,7 +4,8 @@
  *
  * Same stack as `make screenshot`: Compose project coppice-screenshot,
  * desktop mode, 1440×900. Seeds the acme-web repo and a small board, then
- * records the seven-scene storyboard. Writes:
+ * records the core-flow storyboard. Card moves stay instant. Crossfades,
+ * caption fades, and the highlight pulse are applied in the edit. Writes:
  *
  *   website/public/assets/marketing.mp4   1440×900
  *   website/public/assets/marketing.webm  1440×900
@@ -413,6 +414,13 @@ async function assertClean(page, label) {
   if (bodyText.includes('/data/') || /Technical Lead|couldn't start/.test(bodyText)) {
     fail(`${label}: internal note is visible: ${JSON.stringify(bodyText.slice(0, 700))}`);
   }
+  if (/board settings|review cap|waiting for review/i.test(bodyText)) {
+    fail(`${label}: review cap chrome is visible`);
+  }
+  const chip = page.locator('[data-testid="review-waiting-chip"]');
+  if ((await chip.count()) > 0 && (await chip.first().isVisible())) {
+    fail(`${label}: review waiting chip is visible`);
+  }
 }
 
 async function setCaption(page, text) {
@@ -434,7 +442,7 @@ async function setCaption(page, text) {
         document.body.appendChild(bar);
       }
       bar.textContent = caption ?? '';
-      bar.style.display = caption ? 'block' : 'none';
+      bar.classList.toggle('is-on', Boolean(caption));
     },
     { caption: text ?? '', styleText: CAPTION_STYLE },
   );
@@ -466,8 +474,23 @@ const CAPTION_STYLE = `
     box-shadow: 0 10px 28px rgba(28, 25, 23, 0.28);
     pointer-events: none;
     white-space: nowrap;
+    opacity: 0;
+    transition: opacity 0.45s ease;
   }
+  #coppice-hero-caption.is-on { opacity: 1; }
 `;
+
+const CROSSFADE_SECONDS = 0.5;
+const CAPTION_MIN_MS = 2500;
+const MARKERS = [
+  { name: 'start', css: 'rgb(255, 0, 96)', rgb: [255, 0, 96] },
+  { name: 'plan', css: 'rgb(0, 255, 170)', rgb: [0, 255, 170] },
+  { name: 'ready', css: 'rgb(255, 128, 0)', rgb: [255, 128, 0] },
+  { name: 'diff', css: 'rgb(80, 0, 255)', rgb: [80, 0, 255] },
+  { name: 'accept', css: 'rgb(0, 180, 255)', rgb: [0, 180, 255] },
+  { name: 'loop', css: 'rgb(255, 0, 180)', rgb: [255, 0, 180] },
+];
+const SEGMENT_NAMES = ['write', 'plan', 'board', 'diff', 'accept', 'loop'];
 
 async function installCaption(page) {
   const current = await page.evaluate(
@@ -496,6 +519,140 @@ async function scrollBoardTo(page, label) {
     });
   }, label);
   await sleep(900);
+}
+
+async function hold(page, ms) {
+  const start = Date.now();
+  let step = 0;
+  while (Date.now() - start < ms) {
+    await page.mouse.move(16 + (step % 4), 12).catch(() => {});
+    step += 1;
+    const left = ms - (Date.now() - start);
+    if (left <= 0) break;
+    await sleep(Math.min(350, left));
+  }
+}
+
+function ffmpegBuffer(args) {
+  return new Promise((resolve, reject) => {
+    const child = spawn('ffmpeg', args, { stdio: ['ignore', 'pipe', 'pipe'] });
+    const chunks = [];
+    let stderr = '';
+    child.stdout.on('data', (chunk) => chunks.push(chunk));
+    child.stderr.on('data', (chunk) => {
+      stderr += chunk;
+    });
+    child.on('error', reject);
+    child.on('close', (code) => {
+      if (code !== 0) reject(new Error(`ffmpeg failed (${code}): ${stderr}`));
+      else resolve(Buffer.concat(chunks));
+    });
+  });
+}
+
+function nearColor(r, g, b, rgb, tol) {
+  return Math.abs(r - rgb[0]) <= tol && Math.abs(g - rgb[1]) <= tol && Math.abs(b - rgb[2]) <= tol;
+}
+
+async function samplePixels(file, fps, crop) {
+  const buffer = await ffmpegBuffer([
+    '-v',
+    'error',
+    '-i',
+    file,
+    '-vf',
+    `fps=${fps},crop=${crop},format=rgb24`,
+    '-f',
+    'rawvideo',
+    'pipe:1',
+  ]);
+  const [w, h] = crop.split(':').slice(0, 2).map(Number);
+  const frameBytes = w * h * 3;
+  const frames = [];
+  for (let offset = 0; offset + frameBytes <= buffer.length; offset += frameBytes) {
+    frames.push(buffer.subarray(offset, offset + frameBytes));
+  }
+  return { frames, w, h, fps };
+}
+
+function markerRuns(sample) {
+  const { frames, w, h, fps } = sample;
+  const runs = [];
+  let current = null;
+  frames.forEach((frame, index) => {
+    const mid = (Math.floor(h / 2) * w + Math.floor(w / 2)) * 3;
+    const hit = MARKERS.find((marker) =>
+      nearColor(frame[mid], frame[mid + 1], frame[mid + 2], marker.rgb, 36),
+    );
+    if (hit && current?.name === hit.name) {
+      current.end = (index + 1) / fps;
+      return;
+    }
+    if (current) runs.push(current);
+    current = hit ? { name: hit.name, start: index / fps, end: (index + 1) / fps } : null;
+  });
+  if (current) runs.push(current);
+  const merged = [];
+  for (const run of runs) {
+    const prev = merged.at(-1);
+    if (prev && prev.name === run.name && run.start - prev.end < 0.5) {
+      prev.end = Math.max(prev.end, run.end);
+      continue;
+    }
+    merged.push({ ...run });
+  }
+  return merged;
+}
+
+function pipTimes(sample) {
+  const { frames, w, h, fps } = sample;
+  const times = [];
+  let open = false;
+  frames.forEach((frame, index) => {
+    let mag = 0;
+    for (let i = 0; i < frame.length; i += 3) {
+      if (frame[i] > 220 && frame[i + 2] > 220 && frame[i + 1] < 80) mag += 1;
+    }
+    const hit = mag > w * h * 0.25;
+    if (hit && !open) times.push(index / fps);
+    open = hit;
+  });
+  return times;
+}
+
+async function writePulse(file, width, height) {
+  const w = Math.max(48, Math.round(width));
+  const h = Math.max(36, Math.round(height));
+  await new Promise((resolve, reject) => {
+    const child = spawn(
+      'python3',
+      [
+        '-c',
+        `from PIL import Image, ImageDraw
+import sys
+w, h, path = int(sys.argv[1]), int(sys.argv[2]), sys.argv[3]
+image = Image.new('RGBA', (w, h), (0, 0, 0, 0))
+draw = ImageDraw.Draw(image)
+draw.rounded_rectangle((2, 2, w - 3, h - 3), radius=12, outline=(231, 177, 90, 220), width=4)
+image.save(path)
+`,
+        String(w),
+        String(h),
+        file,
+      ],
+      { stdio: ['ignore', 'ignore', 'pipe'] },
+    );
+    let stderr = '';
+    child.stderr.on('data', (chunk) => {
+      stderr += chunk;
+    });
+    child.on('error', reject);
+    child.on('close', (code) => {
+      if (code !== 0) reject(new Error(`pulse image failed (${code}): ${stderr}`));
+      else resolve();
+    });
+  });
+  return { w, h };
 }
 
 function ffmpeg(args) {
@@ -554,20 +711,132 @@ function ffprobe(file) {
   });
 }
 
-async function encode(raw, startSec, endSec) {
-  const duration = Math.max(0.1, endSec - startSec);
-  console.log(`hero: trimming ${startSec.toFixed(2)}s → ${endSec.toFixed(2)}s (${duration.toFixed(2)}s)`);
-  const ss = startSec.toFixed(3);
-  const to = endSec.toFixed(3);
-  await mkdir(ASSETS, { recursive: true });
+async function assemble(raw, pulses) {
+  const probed = await ffprobe(raw);
+  const duration = Number(probed.duration);
+  if (!Number.isFinite(duration)) fail('raw video has no duration');
+  console.log(`hero: raw ${duration.toFixed(2)}s`);
+
+  const center = await samplePixels(raw, 8, '8:8:716:446');
+  const runs = markerRuns(center);
+  console.log(
+    `hero: markers ${runs.map((run) => `${run.name}@${run.start.toFixed(2)}-${run.end.toFixed(2)}`).join(' ')}`,
+  );
+  if (runs.length !== MARKERS.length || runs.some((run, index) => run.name !== MARKERS[index].name)) {
+    fail(`marker sequence was ${runs.map((run) => run.name).join(',') || 'empty'}`);
+  }
+
+  const corner = await samplePixels(raw, 12, '22:22:0:0');
+  const cues = pipTimes(corner);
+  console.log(`hero: pulse cues ${cues.map((time) => time.toFixed(2)).join(' ') || 'none'}`);
+  if (cues.length !== pulses.length) {
+    fail(`found ${cues.length} pulse cues, expected ${pulses.length}`);
+  }
+
+  const segments = SEGMENT_NAMES.map((name, index) => {
+    const start = runs[index].end;
+    const end =
+      index === SEGMENT_NAMES.length - 1 ? Math.max(start + 0.4, duration - 0.12) : runs[index + 1].start;
+    return {
+      name,
+      start,
+      end,
+      zoom: name === 'plan' || name === 'diff',
+      pulses: [],
+    };
+  });
+  cues.forEach((time, index) => {
+    const segment = segments.find((item) => time >= item.start - 0.05 && time <= item.end + 0.05);
+    if (!segment) fail(`pulse at ${time.toFixed(2)}s sits outside a scene`);
+    segment.pulses.push({ ...pulses[index], at: Math.max(0, time - segment.start) });
+  });
+  for (const segment of segments) {
+    const length = segment.end - segment.start;
+    console.log(
+      `hero: scene ${segment.name} ${length.toFixed(2)}s pulses ${segment.pulses.length}`,
+    );
+    if (length < 2) fail(`scene ${segment.name} is only ${length.toFixed(2)}s`);
+  }
+
+  const scratch = await mkdtemp(path.join(tmpdir(), 'coppice-hero-edit-'));
+  const clean = path.join(scratch, 'clean.mp4');
   await ffmpeg([
     '-y',
-    '-ss',
-    ss,
-    '-to',
-    to,
     '-i',
     raw,
+    '-an',
+    '-vf',
+    'split[base][patch];[patch]crop=22:22:28:0[cover];[base][cover]overlay=0:0',
+    '-c:v',
+    'libx264',
+    '-pix_fmt',
+    'yuv420p',
+    '-crf',
+    '16',
+    '-preset',
+    'veryfast',
+    clean,
+  ]);
+
+  const args = ['-y'];
+  for (const segment of segments) {
+    args.push('-ss', segment.start.toFixed(3), '-to', segment.end.toFixed(3), '-i', clean);
+  }
+  let pulseInput = segments.length;
+  for (const segment of segments) {
+    for (const pulse of segment.pulses) {
+      const file = path.join(scratch, `pulse-${pulseInput}.png`);
+      const size = await writePulse(file, pulse.width, pulse.height);
+      pulse.input = pulseInput;
+      pulse.w = size.w;
+      pulse.h = size.h;
+      pulseInput += 1;
+      args.push('-loop', '1', '-t', '0.75', '-i', file);
+    }
+  }
+
+  const filters = [];
+  for (const [index, segment] of segments.entries()) {
+    const length = Math.max(0.2, segment.end - segment.start).toFixed(3);
+    let chain = `[${index}:v]fps=25,setpts=PTS-STARTPTS,format=yuv420p`;
+    if (segment.zoom) {
+      chain += `,scale=1500:938,crop=1440:900:x=(in_w-out_w)*(0.25+0.5*t/${length}):y=(in_h-out_h)*(0.4+0.15*t/${length})`;
+    }
+    let label = `s${index}`;
+    filters.push(`${chain}[${label}]`);
+    segment.pulses.forEach((pulse, pulseIndex) => {
+      const faded = `f${index}${pulseIndex}`;
+      const next = `q${index}${pulseIndex}`;
+      filters.push(
+        `[${pulse.input}:v]fps=25,format=rgba,fade=t=in:st=0:d=0.12:alpha=1,fade=t=out:st=0.4:d=0.22:alpha=1,setpts=PTS-STARTPTS+${pulse.at.toFixed(3)}/TB[${faded}]`,
+      );
+      filters.push(
+        `[${label}][${faded}]overlay=${Math.round(pulse.x)}:${Math.round(pulse.y)}:eof_action=pass:format=auto[${next}]`,
+      );
+      label = next;
+    });
+    segment.label = label;
+  }
+
+  let current = segments[0].label;
+  segments.slice(1).forEach((segment, index) => {
+    const offset =
+      segments.slice(0, index + 1).reduce((sum, item) => sum + (item.end - item.start), 0) -
+      CROSSFADE_SECONDS * (index + 1);
+    const out = index === segments.length - 2 ? 'vout' : `x${index}`;
+    filters.push(
+      `[${current}][${segment.label}]xfade=transition=fade:duration=${CROSSFADE_SECONDS}:offset=${offset.toFixed(3)}[${out}]`,
+    );
+    current = out;
+  });
+
+  await mkdir(ASSETS, { recursive: true });
+  await ffmpeg([
+    ...args,
+    '-filter_complex',
+    filters.join(';'),
+    '-map',
+    '[vout]',
     '-an',
     '-c:v',
     'libx264',
@@ -583,12 +852,8 @@ async function encode(raw, startSec, endSec) {
   ]);
   await ffmpeg([
     '-y',
-    '-ss',
-    ss,
-    '-to',
-    to,
     '-i',
-    raw,
+    MP4_OUT,
     '-an',
     '-c:v',
     'libvpx-vp9',
@@ -602,34 +867,17 @@ async function encode(raw, startSec, endSec) {
     '1',
     WEBM_OUT,
   ]);
-
-  const scratch = await mkdtemp(path.join(tmpdir(), 'coppice-hero-gif-'));
   const palette = path.join(scratch, 'palette.png');
-  const filters = `fps=6,scale=${GIF_WIDTH}:-1:flags=lanczos`;
+  const gifFilters = `fps=5,scale=${GIF_WIDTH}:-1:flags=lanczos`;
+  await ffmpeg(['-y', '-i', MP4_OUT, '-vf', `${gifFilters},palettegen=max_colors=48:stats_mode=diff`, palette]);
   await ffmpeg([
     '-y',
-    '-ss',
-    ss,
-    '-to',
-    to,
     '-i',
-    raw,
-    '-vf',
-    `${filters},palettegen=max_colors=96:stats_mode=diff`,
-    palette,
-  ]);
-  await ffmpeg([
-    '-y',
-    '-ss',
-    ss,
-    '-to',
-    to,
-    '-i',
-    raw,
+    MP4_OUT,
     '-i',
     palette,
     '-lavfi',
-    `${filters}[x];[x][1:v]paletteuse=dither=bayer:bayer_scale=4`,
+    `${gifFilters}[x];[x][1:v]paletteuse=dither=bayer:bayer_scale=5`,
     '-loop',
     '0',
     GIF_SITE,
@@ -644,21 +892,23 @@ async function encode(raw, startSec, endSec) {
   }
   if (gif.width !== GIF_WIDTH) fail(`gif width is ${gif.width}, expected ${GIF_WIDTH}`);
   const seconds = Number(mp4.duration);
-  if (seconds < 50 || seconds > 62) {
-    fail(`hero duration ${seconds.toFixed(2)}s is outside 50–62s`);
-  }
+  if (seconds < 54 || seconds > 70) fail(`hero duration ${seconds.toFixed(2)}s is outside 54–70s`);
   const gifBytes = (await stat(GIF_SITE)).size;
-  console.log(`hero: mp4 ${mp4.width}x${mp4.height} ${seconds.toFixed(2)}s`);
-  console.log(
-    `hero: gif ${gif.width}x${gif.height} ${(gifBytes / (1024 * 1024)).toFixed(1)}MB`,
-  );
+  if (gifBytes > 10 * 1024 * 1024) {
+    fail(`gif is ${(gifBytes / (1024 * 1024)).toFixed(1)}MB, over 10MB`);
+  }
+  const webmBytes = (await stat(WEBM_OUT)).size;
+  const mp4Bytes = (await stat(MP4_OUT)).size;
+  console.log(`hero: mp4 ${mp4.width}x${mp4.height} ${seconds.toFixed(2)}s ${mp4Bytes} bytes`);
+  console.log(`hero: webm ${webmBytes} bytes`);
+  console.log(`hero: gif ${gif.width}x${gif.height} ${gifBytes} bytes`);
 }
 
 async function record(scene) {
   const browser = await launchBrowser();
   const videoDir = await mkdtemp(path.join(tmpdir(), 'coppice-hero-video-'));
+  const pulses = [];
   let raw = null;
-  let trim = null;
   try {
     const context = await browser.newContext({
       viewport: VIEWPORT,
@@ -672,11 +922,33 @@ async function record(scene) {
       localStorage.setItem('coppice.theme', 'light');
       localStorage.setItem('coppice.sidebar.collapsed', '0');
       localStorage.setItem('coppice.plugins.guideOpen', '0');
-      const hideInfra = () => {
+      const hideChrome = () => {
         for (const el of document.querySelectorAll('dd')) {
           if ((el.textContent || '').includes('/data/')) {
             if (el.parentElement) el.parentElement.style.display = 'none';
           }
+        }
+        for (const el of document.querySelectorAll('button')) {
+          if ((el.textContent || '').trim() === 'Board settings') el.style.display = 'none';
+        }
+        for (const el of document.querySelectorAll('[data-testid="review-waiting-chip"]')) {
+          el.style.display = 'none';
+        }
+        const marker = sessionStorage.getItem('coppice.hero.marker') || '';
+        let veil = document.getElementById('coppice-hero-marker');
+        if (marker) {
+          if (!veil && document.body) {
+            veil = document.createElement('div');
+            veil.id = 'coppice-hero-marker';
+            veil.style.cssText = 'position:fixed;inset:0;z-index:2147483647;pointer-events:none;';
+            document.body.appendChild(veil);
+          }
+          if (veil) {
+            veil.style.background = marker;
+            veil.style.display = 'block';
+          }
+        } else if (veil) {
+          veil.style.display = 'none';
         }
       };
       const install = () => {
@@ -696,28 +968,22 @@ async function record(scene) {
         }
         const caption = sessionStorage.getItem('coppice.hero.caption') ?? '';
         bar.textContent = caption;
-        bar.style.display = caption ? 'block' : 'none';
-        hideInfra();
+        const visible = sessionStorage.getItem('coppice.hero.caption.visible') === '1' && caption;
+        bar.classList.toggle('is-on', visible);
+        hideChrome();
       };
       const boot = () => {
         install();
         if (!document.body) return;
         new MutationObserver(() => {
-          hideInfra();
+          hideChrome();
           if (!document.getElementById('coppice-hero-caption')) install();
         }).observe(document.body, { childList: true, subtree: true });
       };
-      if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', boot);
-      } else {
-        boot();
-      }
-    }, `${CAPTION_STYLE}
-      html,body{overflow:hidden!important}
-      *{scrollbar-width:none!important;caret-color:transparent!important}
-      ::-webkit-scrollbar{display:none!important}
-    `);
-    const openedAt = Date.now();
+      if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
+      else boot();
+    }, CAPTION_STYLE);
+
     const page = await context.newPage();
     page.on('pageerror', (error) => {
       console.log(`hero: pageerror ${error.message}`);
@@ -742,32 +1008,101 @@ async function record(scene) {
       await route.fulfill({ status: response.status(), json: filtered });
     });
 
+    let captionAt = 0;
+    const storyCard = (column) => {
+      const root = column ? page.getByRole('region', { name: column }) : page;
+      return root.getByRole('button', { name: new RegExp(TICKET_TITLE) }).first();
+    };
+    const ensureCaption = async () => {
+      if (!captionAt) return;
+      const left = CAPTION_MIN_MS - (Date.now() - captionAt);
+      if (left > 0) await hold(page, left);
+    };
+    const fadeCaption = async (text) => {
+      await ensureCaption();
+      await page.evaluate(() => {
+        sessionStorage.setItem('coppice.hero.caption.visible', '0');
+        document.getElementById('coppice-hero-caption')?.classList.remove('is-on');
+      });
+      await sleep(480);
+      await setCaption(page, text);
+      await page.evaluate((on) => {
+        sessionStorage.setItem('coppice.hero.caption.visible', on ? '1' : '0');
+      }, Boolean(text));
+      captionAt = text ? Date.now() : 0;
+    };
+    const cutScene = async (marker, settle) => {
+      await page.evaluate((css) => {
+        sessionStorage.setItem('coppice.hero.marker', css);
+        let veil = document.getElementById('coppice-hero-marker');
+        if (!veil) {
+          veil = document.createElement('div');
+          veil.id = 'coppice-hero-marker';
+          veil.style.cssText = 'position:fixed;inset:0;z-index:2147483647;pointer-events:none;';
+          document.body.appendChild(veil);
+        }
+        veil.style.background = css;
+        veil.style.display = 'block';
+      }, marker.css);
+      await sleep(180);
+      await settle();
+      await sleep(220);
+      await page.evaluate(() => {
+        sessionStorage.removeItem('coppice.hero.marker');
+        const veil = document.getElementById('coppice-hero-marker');
+        if (veil) veil.style.display = 'none';
+      });
+      await sleep(120);
+    };
+    const pulseCue = async (locator) => {
+      const box = await locator.boundingBox();
+      if (!box || box.width < 40) fail(`card box missing: ${JSON.stringify(box)}`);
+      pulses.push({
+        x: Math.round(box.x),
+        y: Math.round(box.y),
+        width: Math.round(box.width),
+        height: Math.round(box.height),
+      });
+      await page.evaluate(() => {
+        let pip = document.getElementById('coppice-hero-pip');
+        if (!pip) {
+          pip = document.createElement('div');
+          pip.id = 'coppice-hero-pip';
+          pip.style.cssText =
+            'position:fixed;left:0;top:0;width:22px;height:22px;z-index:2147483647;background:#ff00ff;pointer-events:none;';
+          document.body.appendChild(pip);
+        }
+        pip.style.display = 'block';
+      });
+      await sleep(280);
+      await page.evaluate(() => {
+        const pip = document.getElementById('coppice-hero-pip');
+        if (pip) pip.style.display = 'none';
+      });
+    };
+
     await page.goto(`${WEB}/boards/${scene.boardId}`, { waitUntil: 'domcontentloaded' });
     await page.getByRole('heading', { name: 'Board', level: 1 }).waitFor({ timeout: 30_000 });
     await page.getByText('Remember the last open settings tab').waitFor();
     await page.getByText('Tighten spacing on the settings form').waitFor();
     await preparePage(page);
-    await installCaption(page);
     await assertClean(page, 'board');
 
-    await setCaption(page, CAPTIONS[0]);
-    const storyStart = Date.now();
-    const until = async (ms) => {
-      const wait = storyStart + ms - Date.now();
-      if (wait > 0) await sleep(wait);
-    };
-    await until(700);
+    await cutScene(MARKERS[0], async () => {
+      await fadeCaption(CAPTIONS[0]);
+      await sleep(250);
+    });
     const input = page.locator('[data-add-ticket]');
     await input.click();
-    await until(1100);
-    await input.pressSequentially(TICKET_TITLE, { delay: 68 });
-    await until(4200);
+    await sleep(250);
+    await input.pressSequentially(TICKET_TITLE, { delay: 62 });
+    await sleep(350);
     await input.press('Enter');
-    const card = page.getByRole('button', { name: new RegExp(TICKET_TITLE) });
-    await card.waitFor({ timeout: 15_000 });
+    await storyCard('Backlog').waitFor({ timeout: 15_000 });
     await assertClean(page, 'scene 1');
-    await until(6800);
-    const stillWrite = await shoot(page, '01-write-ticket');
+    await hold(page, 2200);
+    await shoot(page, '01-write-ticket');
+    await hold(page, 1500);
 
     const created = await api('GET', `/api/boards/${scene.boardId}/tickets`, scene.auth);
     const tickets = Array.isArray(created) ? created : (created.items ?? []);
@@ -782,53 +1117,46 @@ async function record(scene) {
     await api('POST', `/api/tickets/${ticket.id}/assign`, scene.auth, {
       agentId: scene.agentIds.PM,
     });
-    await api('PATCH', `/api/tickets/${ticket.id}/status`, scene.auth, {
-      status: 'plan_review',
-    });
+    await api('PATCH', `/api/tickets/${ticket.id}/status`, scene.auth, { status: 'plan_review' });
     await attachPlan(ticket.id, scene.agentIds.PM);
+    const planCard = storyCard('Plan Review');
+    await planCard.waitFor({ timeout: 15_000 });
+    await scrollBoardTo(page, 'Plan Review');
+    await pulseCue(planCard);
+    await hold(page, 1800);
 
-    await until(7600);
-    await setCaption(page, CAPTIONS[1]);
-    await card.click();
-    await page.getByRole('button', { name: 'Approve plan' }).waitFor({ timeout: 15_000 });
-    await page.getByText('acme-web').first().waitFor();
-    await page.getByRole('heading', { name: 'Plan', level: 2 }).scrollIntoViewIfNeeded();
-    await page.getByText('Add the Settings toggle').waitFor();
+    await cutScene(MARKERS[1], async () => {
+      await planCard.click();
+      await page.getByRole('button', { name: 'Approve plan' }).waitFor({ timeout: 15_000 });
+      await page.getByText('acme-web').first().waitFor();
+      await page.getByRole('heading', { name: 'Plan', level: 2 }).scrollIntoViewIfNeeded();
+      await page.getByText('Add the Settings toggle').waitFor();
+      await preparePage(page);
+    });
+    await fadeCaption(CAPTIONS[1]);
     await assertClean(page, 'scene 2');
-    await until(13200);
+    await hold(page, 6500);
     await shoot(page, '02-plan');
+    await hold(page, 1800);
 
-    await setCaption(page, CAPTIONS[2]);
-    await page.getByRole('button', { name: 'Approve plan' }).scrollIntoViewIfNeeded();
-    await until(14800);
     await page.getByRole('button', { name: 'Approve plan' }).click();
     const detail = page.locator('[aria-label="Ticket detail"]');
-    await detail.locator('header').getByText('Ready', { exact: true }).waitFor({
-      timeout: 15_000,
-    });
-    await page.getByRole('button', { name: 'Close', exact: true }).click();
-    const readyColumn = page.getByRole('region', { name: 'Ready' });
-    await readyColumn.getByText(TICKET_TITLE).waitFor({ timeout: 15_000 });
-    await scrollBoardTo(page, 'Ready');
-    await setCaption(page, CAPTIONS[2]);
-    await assertClean(page, 'scene 3');
-    await until(21200);
-    await shoot(page, '03-approve');
-
-    await setCaption(page, CAPTIONS[3]);
+    await detail.locator('header').getByText('Ready', { exact: true }).waitFor({ timeout: 15_000 });
     const worktreePromise = heroGit('worktree', ticket.id.split('-')[0]);
-    await scrollBoardTo(page, 'In Progress');
-    await page.getByText('Cover theme switching with a smoke test').waitFor();
-    await page.getByText('Review the settings page at a narrow width').waitFor();
-    await assertClean(page, 'scene 4');
-    await until(23000);
-    await shoot(page, '04-build');
+    await cutScene(MARKERS[2], async () => {
+      await page.getByRole('button', { name: 'Close', exact: true }).click();
+      await page.getByRole('region', { name: 'Ready' }).getByText(TICKET_TITLE).waitFor({ timeout: 15_000 });
+      await scrollBoardTo(page, 'Ready');
+      await preparePage(page);
+    });
+    await fadeCaption(CAPTIONS[2]);
+    await pulseCue(storyCard('Ready'));
+    await assertClean(page, 'scene 3');
+    await hold(page, 2800);
+    await shoot(page, '03-approve');
+    await hold(page, 1500);
 
     const short = ticket.id.split('-')[0];
-    const worktree = await worktreePromise;
-    if (!worktree?.startsWith('/data/worktrees/')) {
-      fail(`worktree path missing: ${worktree}`);
-    }
     await api('PATCH', `/api/tickets/${ticket.id}/status`, scene.auth, {
       status: 'wait_for_final_review',
     });
@@ -837,95 +1165,91 @@ async function record(scene) {
       SET branch_name = ${sqlQuote(`agent/TICKET-${short}`)}
       WHERE id = ${sqlQuote(ticket.id)}::uuid;
     `);
+    const waiting = storyCard('Wait for Human Review');
+    await waiting.waitFor({ timeout: 15_000 });
+    await scrollBoardTo(page, 'Wait for Human Review');
+    await fadeCaption(CAPTIONS[3]);
+    await pulseCue(waiting);
+    await assertClean(page, 'scene 4');
+    await hold(page, 2800);
+    await shoot(page, '04-build');
 
-    await until(28500);
-    await setCaption(page, CAPTIONS[4]);
-    const review = new URL('/code', WEB);
-    review.searchParams.set('repoId', scene.repoId);
-    review.searchParams.set('ticketId', ticket.id);
-    review.searchParams.set('worktree', worktree);
-    review.searchParams.set('baseBranch', 'main');
-    await page.goto(review.href, { waitUntil: 'domcontentloaded' });
-    await page.getByText('Code review', { exact: true }).waitFor({ timeout: 30_000 });
-    await page.getByText('acme-web').first().waitFor();
-    await page.getByText('src/settings/ThemeToggle.tsx').waitFor();
-    await page.getByRole('button', { name: 'Unified' }).click();
-    await page.getByText("useState('light')").first().waitFor({ timeout: 20_000 });
-    await preparePage(page);
-    await installCaption(page);
-    await setCaption(page, CAPTIONS[4]);
+    const worktree = await worktreePromise;
+    if (!worktree?.startsWith('/data/worktrees/')) fail(`worktree path missing: ${worktree}`);
+    await cutScene(MARKERS[3], async () => {
+      const review = new URL('/code', WEB);
+      review.searchParams.set('repoId', scene.repoId);
+      review.searchParams.set('ticketId', ticket.id);
+      review.searchParams.set('worktree', worktree);
+      review.searchParams.set('baseBranch', 'main');
+      await page.goto(review.href, { waitUntil: 'domcontentloaded' });
+      await page.getByText('Code review', { exact: true }).waitFor({ timeout: 30_000 });
+      await page.getByText('acme-web').first().waitFor();
+      await page.getByText('src/settings/ThemeToggle.tsx').waitFor();
+      await page.getByRole('button', { name: 'Unified' }).click();
+      await page.getByText("useState('light')").first().waitFor({ timeout: 20_000 });
+      await preparePage(page);
+    });
+    await fadeCaption(CAPTIONS[4]);
     await assertClean(page, 'scene 5 diff');
-    await until(33500);
+    await hold(page, 1800);
     const line = page.locator('tr').filter({ hasText: "useState('light')" }).first();
     await line.locator('td.diff-gutter').last().click();
     const commentBox = page.getByPlaceholder('Leave a comment…');
     await commentBox.waitFor({ timeout: 10_000 });
-    await commentBox.pressSequentially(LINE_COMMENT, { delay: 42 });
+    await commentBox.pressSequentially(LINE_COMMENT, { delay: 38 });
     await page.getByRole('button', { name: 'Add comment', exact: true }).click();
     await page.getByText(LINE_COMMENT).waitFor();
     await assertClean(page, 'scene 5 comment');
-    await until(42000);
+    await hold(page, 4200);
     await shoot(page, '05-diff');
 
-    await setCaption(page, CAPTIONS[5]);
-    await page.goto(`${WEB}/boards/${scene.boardId}?ticket=${ticket.id}`, {
-      waitUntil: 'domcontentloaded',
+    await cutScene(MARKERS[4], async () => {
+      await page.goto(`${WEB}/boards/${scene.boardId}?ticket=${ticket.id}`, {
+        waitUntil: 'domcontentloaded',
+      });
+      const ticketHeading = page.getByRole('heading', { name: TICKET_TITLE }).first();
+      await ticketHeading.waitFor({ timeout: 30_000 });
+      await page.getByRole('button', { name: 'Accept', exact: true }).waitFor();
+      await preparePage(page);
+      await ticketHeading.click();
+      await page.keyboard.press('Control+Shift+Enter');
+      await page.getByRole('dialog', { name: 'Accept this ticket?' }).waitFor({ timeout: 10_000 });
     });
-    const ticketHeading = page.getByRole('heading', { name: TICKET_TITLE }).first();
-    await ticketHeading.waitFor({ timeout: 30_000 });
-    await page.getByRole('button', { name: 'Accept', exact: true }).waitFor();
-    await preparePage(page);
-    await installCaption(page);
-    await setCaption(page, CAPTIONS[5]);
-    await ticketHeading.click();
-    await page.keyboard.press('Control+Shift+Enter');
-    await page.getByRole('dialog', { name: 'Accept this ticket?' }).waitFor({ timeout: 10_000 });
+    await fadeCaption(CAPTIONS[5]);
     await assertClean(page, 'scene 6');
-    await until(47500);
+    await hold(page, 4200);
     await shoot(page, '06-accept');
 
-    await page.getByRole('dialog', { name: 'Accept this ticket?' }).getByRole('button', { name: 'Cancel' }).click();
-    await page.getByRole('button', { name: 'Close', exact: true }).click();
-    await page.getByRole('dialog', { name: 'Accept this ticket?' }).waitFor({ state: 'hidden' });
-    await scrollBoardTo(page, 'Backlog');
-    await setCaption(page, null);
-    await page.getByText('Remember the last open settings tab').waitFor();
+    await cutScene(MARKERS[5], async () => {
+      await page
+        .getByRole('dialog', { name: 'Accept this ticket?' })
+        .getByRole('button', { name: 'Cancel' })
+        .click();
+      await page.getByRole('button', { name: 'Close', exact: true }).click();
+      await page.getByRole('dialog', { name: 'Accept this ticket?' }).waitFor({ state: 'hidden' });
+      await scrollBoardTo(page, 'Backlog');
+      await fadeCaption(null);
+      await page.getByText('Remember the last open settings tab').waitFor();
+      await preparePage(page);
+    });
     await assertClean(page, 'scene 7');
-    // Hold the clean board long enough that the loop reads as a cut back to scene 1.
-    // Nudge the pointer so the recorder keeps emitting frames after the dialog closes.
-    for (let i = 0; i < 8; i += 1) {
-      await page.mouse.move(8 + i * 3, 8);
-      await sleep(450);
-    }
+    await hold(page, 3200);
     const stillBoard = await shoot(page, '07-board');
-    await page.mouse.move(20, 12);
-    await sleep(800);
     await copyFile(stillBoard, POSTER);
     console.log(`hero: wrote ${POSTER}`);
+    await hold(page, 700);
 
-    const storyEnd = Date.now();
     const video = page.video();
     await page.close();
     await context.close();
     raw = await video.path();
-    const rawDuration = Number((await ffprobe(raw)).duration);
-    const lead = (storyStart - openedAt) / 1000;
-    const storyLength = (storyEnd - storyStart) / 1000;
-    trim = {
-      // The caption paints just after storyStart. Skip the beat before it.
-      start: Math.max(0, lead + 0.55),
-      // Recorder timestamps lag wall clock, so the board hold sits in the tail.
-      end: Math.min(rawDuration - 0.25, lead + storyLength + 6),
-    };
-    console.log(
-      `hero: raw video ${raw} duration ${rawDuration.toFixed(2)}s wallEnd ${wallEnd.toFixed(2)}s`,
-    );
-    console.log(`hero: still ${stillWrite}`);
+    console.log(`hero: raw video ${raw}`);
   } finally {
     await browser.close();
   }
-  if (!raw || !trim) fail('recording did not finish');
-  await encode(raw, trim.start, trim.end);
+  if (!raw) fail('recording did not finish');
+  await assemble(raw, pulses);
   await rm(videoDir, { recursive: true, force: true });
 }
 
