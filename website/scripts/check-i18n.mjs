@@ -145,6 +145,32 @@ function checkHead(html, { lang, canonicalPath, hreflangs, absent = [], site, en
   }
 }
 
+function checkFallback(outDir, locale, englishPath, site) {
+  const localized = `/${locale}${englishPath}`;
+  const html = readHtml(outDir, localized);
+  if (!html) {
+    fail(`missing ${localized}`);
+    return;
+  }
+  // Redirect stubs (like /docs/chat) have no head to check.
+  if (/http-equiv=["']refresh["']/i.test(html)) return;
+  checkHead(html, {
+    englishPath,
+    lang: LOCALE_CODES[locale],
+    canonicalPath: englishPath,
+    site,
+    hreflangs: [
+      ['en', englishPath],
+      ['x-default', englishPath],
+    ],
+    absent: [LOCALE_CODES[locale]],
+  });
+  if (html.includes('data-pagefind-body')) fail(`fallback ${localized} is in the search index`);
+  if (indexedUrls(outDir).some((url) => pathnameOf(url).replace(/\.html$/, '') === localized)) {
+    fail(`fallback ${localized} was indexed`);
+  }
+}
+
 function checkBuild(outDir, { translated, site }) {
   const routes = walk(outDir)
     .filter((file) => file.endsWith('.html'))
@@ -172,7 +198,6 @@ function checkBuild(outDir, { translated, site }) {
 
   for (const englishPath of baseline) {
     for (const [code, localized] of shippedTranslations(englishPath)) {
-      if (localized.startsWith('/ja/') && translated) continue;
       const html = readHtml(outDir, localized);
       if (!html) {
         fail(`missing shipped translation ${localized}`);
@@ -194,29 +219,26 @@ function checkBuild(outDir, { translated, site }) {
     }
   }
 
-  const fallback = readHtml(outDir, '/ja/docs/install');
-  if (!fallback) fail('missing /ja/docs/install');
+  // Every locale page without a shipped translation falls back to English.
+  // When every page is translated there are none here; the fixture build below
+  // always removes one so the fallback path is still checked.
+  const fallbacks = [];
+  for (const locale of locales) {
+    for (const englishPath of baseline.filter((route) => route === '/docs' || route.startsWith('/docs/'))) {
+      const localized = `/${locale}${englishPath}`;
+      if (shippedTranslations(englishPath).some(([, have]) => have === localized)) continue;
+      fallbacks.push(localized);
+      checkFallback(outDir, locale, englishPath, site);
+    }
+  }
+  if (translated && !fallbacks.includes('/ja/docs/install')) fail('fixture build has no fallback /ja/docs/install');
+
+  const switcher = readHtml(outDir, '/ja/docs/install');
+  if (!switcher) fail('missing /ja/docs/install');
   else {
-    checkHead(fallback, {
-      englishPath: '/docs/install',
-      lang: 'ja',
-      canonicalPath: '/docs/install',
-      site,
-      hreflangs: translated
-        ? [
-            ['en', '/docs/install'],
-            ['x-default', '/docs/install'],
-          ]
-        : [
-            ['en', '/docs/install'],
-            ['x-default', '/docs/install'],
-          ],
-      absent: ['ja', 'zh-CN', 'fr'],
-    });
-    if (fallback.includes('data-pagefind-body')) fail('fallback /ja/docs/install is in the search index');
-    if (!fallback.includes('>English<') || !fallback.includes('>日本語<')) fail('language switcher missing native names');
-    if (!fallback.includes('href="/ja/docs/concepts"') && !fallback.includes('href="/ja/docs/concepts#')) {
-      fail('fallback docs nav did not stay on /ja');
+    if (!switcher.includes('>English<') || !switcher.includes('>日本語<')) fail('language switcher missing native names');
+    if (!switcher.includes('href="/ja/docs/concepts"') && !switcher.includes('href="/ja/docs/concepts#')) {
+      fail('docs nav did not stay on /ja');
     }
   }
 
@@ -264,10 +286,14 @@ function checkBuild(outDir, { translated, site }) {
       }
     }
     if (!locs.includes('/docs/concepts')) fail('sitemap missing /docs/concepts');
-    if (translated) {
-      if (!locs.includes('/ja/docs/concepts')) fail('sitemap missing translated /ja/docs/concepts');
-    } else if (locs.includes('/ja/docs/concepts')) fail('sitemap includes fallback /ja/docs/concepts');
-    if (locs.includes('/ja/docs/install')) fail('sitemap includes fallback /ja/docs/install');
+    for (const localized of fallbacks) {
+      if (locs.includes(localized)) fail(`sitemap includes fallback ${localized}`);
+    }
+    for (const englishPath of baseline.filter((route) => route.startsWith('/docs'))) {
+      for (const [, localized] of shippedTranslations(englishPath)) {
+        if (!locs.includes(localized)) fail(`sitemap missing translated ${localized}`);
+      }
+    }
     if (!xml.includes('hreflang="x-default"')) fail('sitemap missing x-default');
   }
 
@@ -294,7 +320,7 @@ function checkBuild(outDir, { translated, site }) {
     }
     const urls = indexedUrls(outDir);
     if (!urls.some((url) => url.includes('/ja/docs/concepts'))) fail('ja search index missing the fixture');
-    if (urls.some((url) => url.includes('/ja/docs/install'))) fail('ja fallback page was indexed');
+
     const entry = JSON.parse(fs.readFileSync(path.join(outDir, 'pagefind', 'pagefind-entry.json'), 'utf8'));
     if (!entry.languages?.ja) fail('pagefind has no ja language index');
     if (entry.languages?.en?.page_count && urls.filter((url) => url.includes('/ja/')).some((url) => url.startsWith('/docs'))) {
@@ -313,12 +339,21 @@ checkBuild(dist, { translated: false, site });
 const plain = readHtml(dist, '/ja/docs/concepts');
 if (plain?.includes('Concepts fixture')) fail('production build contains the i18n fixture');
 
-const fixtureDest = path.join(root, 'src/content/docs/ja/concepts.md');
+// The fixture build swaps in a known Japanese concepts page and takes the
+// Japanese install page away, so both a translation and a fallback are checked
+// even when every page ships translated. Real files are moved aside and put
+// back afterwards; nothing in src/content is deleted.
+const jaDocs = path.join(root, 'src/content/docs/ja');
+const fixtureDest = path.join(jaDocs, 'concepts.md');
 const fixtureSrc = path.join(root, 'scripts/fixtures/i18n/ja-concepts.md');
 const fixtureOut = path.join(root, '.i18n-fixture-dist');
-fs.mkdirSync(path.dirname(fixtureDest), { recursive: true });
-fs.copyFileSync(fixtureSrc, fixtureDest);
+const stash = fs.mkdtempSync(path.join(root, '.i18n-stash-'));
+const jaDocsExisted = fs.existsSync(jaDocs);
+const swapped = ['concepts.md', 'install.md', 'install.mdx'].filter((name) => fs.existsSync(path.join(jaDocs, name)));
 try {
+  for (const name of swapped) fs.renameSync(path.join(jaDocs, name), path.join(stash, name));
+  fs.mkdirSync(jaDocs, { recursive: true });
+  fs.copyFileSync(fixtureSrc, fixtureDest);
   const build = spawnSync('npx', ['astro', 'build', '--outDir', fixtureOut], {
     cwd: root,
     env: process.env,
@@ -328,11 +363,16 @@ try {
   else checkBuild(fixtureOut, { translated: true, site });
 } finally {
   fs.rmSync(fixtureDest, { force: true });
-  fs.rmSync(path.dirname(fixtureDest), { recursive: true, force: true });
+  for (const name of swapped) fs.renameSync(path.join(stash, name), path.join(jaDocs, name));
+  if (!jaDocsExisted && fs.readdirSync(jaDocs).length === 0) fs.rmdirSync(jaDocs);
+  fs.rmSync(stash, { recursive: true, force: true });
   fs.rmSync(fixtureOut, { recursive: true, force: true });
 }
 
-if (fs.existsSync(fixtureDest)) fail('fixture file was left in src/content');
+if (!swapped.includes('concepts.md') && fs.existsSync(fixtureDest)) fail('fixture file was left in src/content');
+for (const name of swapped) {
+  if (!fs.existsSync(path.join(jaDocs, name))) fail(`translation ${name} was not restored`);
+}
 
 if (failures.length) {
   console.error(`i18n check failed (${failures.length}):`);
