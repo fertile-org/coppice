@@ -74,6 +74,9 @@ jobs:
           umask 077
           printf '%s\n' "$COPPICE_APT_SIGNING_KEY" > "$RUNNER_TEMP/apt-key.asc"
           printf '%s' "$COPPICE_APT_SIGNING_PASSPHRASE" > "$RUNNER_TEMP/apt-pass"
+          node desktop/scripts/apt-repo.mjs check-keyring \
+            --keyring desktop/build/linux/coppice-archive-keyring.gpg \
+            --fingerprint "$COPPICE_APT_KEY_FINGERPRINT"
           node desktop/scripts/apt-repo.mjs check-signing-key \
             --key "$RUNNER_TEMP/apt-key.asc" \
             --passphrase-file "$RUNNER_TEMP/apt-pass" \
@@ -112,6 +115,8 @@ jobs:
           import { pagesCname } from './desktop/src/updateEndpoints.mjs';
           writeFileSync('site/CNAME', `${pagesCname(process.env.COPPICE_UPDATE_BASE)}\n`);
           EOF
+      - name: No old update domain in the Pages site
+        run: node desktop/scripts/check-old-domain.mjs site/CNAME site/updates
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:

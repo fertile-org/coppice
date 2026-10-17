@@ -2,7 +2,7 @@
 // COPPICE_UPDATE_BASE repository variable (passed through at package time).
 // The value must be an https origin: a host, no credentials, no path, no
 // query. Packaging calls this and the build fails when the value is rejected.
-export const DEFAULT_UPDATE_BASE = 'https://apt.getcoppice.dev';
+export const DEFAULT_UPDATE_BASE = 'https://apt.getcoppice.app';
 
 function rejectUpdateBase(detail) {
   throw new Error(`COPPICE_UPDATE_BASE must be an https origin with no path: ${detail}`);
@@ -24,6 +24,9 @@ function rawPath(candidate) {
 export function updateBase(value) {
   const raw = typeof value === 'string' ? value.trim() : '';
   const candidate = raw || DEFAULT_UPDATE_BASE;
+  // The URL parser reads `\` as `/`, so `https://evil.com\@x.com` would parse
+  // as host evil.com. Refuse it outright, like any other path separator.
+  if (candidate.includes('\\')) rejectUpdateBase('it must not include a backslash');
   let url;
   try {
     url = new URL(candidate);

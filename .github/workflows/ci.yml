@@ -90,6 +90,8 @@ jobs:
         run: cd desktop && yarn assemble --server-bin ../target/release/coppice-server --web-dist ../web/dist --postgres .cache/postgres-host
       - name: Package (unpacked)
         run: cd desktop && yarn dist:dir
+      - name: No old update domain in the packaged app
+        run: node desktop/scripts/check-old-domain.mjs desktop/dist/linux-unpacked desktop/updater-mode.json
       - name: Headless smoke
         run: cd desktop && yarn smoke:headless --resources dist/linux-unpacked/resources
       - name: Desktop tests
@@ -120,6 +122,17 @@ jobs:
           # --workspace => cover every workspace member the lockfile resolves.
           docker run --rm -v "$PWD":/app -w /app "rust:${TOOLCHAIN}-bookworm" \
             sh -c 'cargo check --locked --workspace --all-targets --target-dir /tmp/check-target'
+
+  # The old update domain was never bought. Any tracked reference fails.
+  guard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: No old update domain in the repository
+        run: node desktop/scripts/check-old-domain.mjs --source
 
   # Signs apt metadata with a throwaway key. No repository secrets.
   apt-repo:

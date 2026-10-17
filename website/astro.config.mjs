@@ -71,7 +71,7 @@ function chatRedirects() {
 }
 
 export default defineConfig({
-  site: 'https://getcoppice.dev',
+  site: 'https://getcoppice.app',
   trailingSlash: 'never',
   i18n: {
     defaultLocale: DEFAULT_LOCALE,

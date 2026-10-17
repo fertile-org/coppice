@@ -5,6 +5,8 @@ import { DEFAULT_UPDATE_BASE, aptSourceLine, macUpdateFeed, pagesCname, updateBa
 
 test('updateBase accepts an https origin and strips trailing slashes', () => {
   assert.equal(updateBase(undefined), DEFAULT_UPDATE_BASE);
+  assert.equal(DEFAULT_UPDATE_BASE, 'https://apt.getcoppice.app');
+  assert.equal(updateBase('https://apt.getcoppice.app'), 'https://apt.getcoppice.app');
   assert.equal(updateBase(''), DEFAULT_UPDATE_BASE);
   assert.equal(updateBase('   '), DEFAULT_UPDATE_BASE);
   assert.equal(updateBase('https://apt.example.com'), 'https://apt.example.com');
@@ -29,7 +31,21 @@ test('updateBase rejects a bad COPPICE_UPDATE_BASE', () => {
     'https://apt.example.com#frag',
     'not a url',
     'apt.example.com',
+    'https://evil.com\\@x.com',
+    'https://a\\b',
+    'https://apt.example.com\\',
+    'https://apt.example.com\\updates',
   ]) {
     assert.throws(() => updateBase(value), /COPPICE_UPDATE_BASE/, value);
+  }
+});
+
+test('updateBase output is always a bare https origin', () => {
+  for (const value of ['https://apt.example.com', 'https://apt.example.com:8443/', 'https://xn--bcher-kva.example/']) {
+    const base = updateBase(value);
+    const url = new URL(base);
+    assert.equal(base, `https://${url.host}`, value);
+    assert.equal(url.pathname, '/');
+    assert.equal(url.search + url.hash + url.username + url.password, '');
   }
 });

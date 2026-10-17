@@ -21,12 +21,48 @@ import {
   buildAptRepo,
   fingerprintsFromColonListing,
   normalizeFingerprint,
+  primaryFingerprints,
   poolFilename,
   publicKeyringFingerprints,
   renderPackageEntry,
 } from '../scripts/apt-repo.mjs';
 import { APT_KEYRING_FILE, stageAptResources } from '../scripts/dist.mjs';
 import { APT_KEYRING_PATH, MAC_UPDATE_FEED, aptSourceLine, macUpdateFeed, pagesCname } from '../src/updateEndpoints.mjs';
+
+const RELEASE_KEY_FINGERPRINT = '9DF5EB073C5DE73BB265BE5D3B3195AE54B119EF';
+
+function generateKey(gpgHome, name) {
+  mkdirSync(gpgHome, { recursive: true, mode: 0o700 });
+  const gen = spawnSync('gpg', ['--batch', '--homedir', gpgHome, '--gen-key'], {
+    input: [
+      '%no-protection',
+      'Key-Type: RSA',
+      'Key-Length: 2048',
+      `Name-Real: ${name}`,
+      'Name-Email: apt-test@example.com',
+      'Expire-Date: 0',
+      '%commit',
+      '',
+    ].join('\n'),
+    encoding: 'utf8',
+  });
+  assert.equal(gen.status, 0, gen.stderr);
+  const listed = spawnSync('gpg', ['--homedir', gpgHome, '--batch', '--with-colons', '--list-secret-keys'], {
+    encoding: 'utf8',
+  });
+  assert.equal(listed.status, 0, listed.stderr);
+  const [fingerprint] = primaryFingerprints(listed.stdout, 'sec');
+  const publicKeyring = join(gpgHome, 'public.gpg');
+  const exported = spawnSync('gpg', ['--homedir', gpgHome, '--batch', '--export', '--output', publicKeyring], {
+    encoding: 'utf8',
+  });
+  assert.equal(exported.status, 0, exported.stderr);
+  const secret = spawnSync('gpg', ['--homedir', gpgHome, '--batch', '--armor', '--export-secret-keys'], {
+    encoding: 'utf8',
+  });
+  assert.equal(secret.status, 0, secret.stderr);
+  return { fingerprint, publicKeyring, secretArmored: secret.stdout };
+}
 
 test('package entries keep the Debian version and a pool path', () => {
   assert.equal(
@@ -58,7 +94,7 @@ test('packaging copies the committed public keyring', () => {
   const keyring = fileURLToPath(new URL(`../${APT_KEYRING_FILE}`, import.meta.url));
   const shown = spawnSync('gpg', ['--batch', '--show-keys', keyring], { encoding: 'utf8' });
   assert.equal(shown.status, 0, shown.stderr);
-  assert.match(shown.stdout, /Coppice Apt/);
+  assert.match(shown.stdout, /Coppice Archive <releases@getcoppice\.app>/);
   const packets = spawnSync('gpg', ['--batch', '--list-packets', keyring], { encoding: 'utf8' });
   assert.equal(packets.status, 0, packets.stderr);
   assert.match(packets.stdout, /public key packet/);
@@ -155,10 +191,10 @@ test('the installed apt source uses signed-by and the base URL lives in one plac
   assert.equal(script.includes('github.io'), false);
   assert.equal(
     APT_SOURCE_LINE,
-    `deb [arch=amd64,arm64 signed-by=${APT_KEYRING_PATH}] https://apt.getcoppice.dev stable main`,
+    `deb [arch=amd64,arm64 signed-by=${APT_KEYRING_PATH}] https://apt.getcoppice.app stable main`,
   );
-  assert.equal(MAC_UPDATE_FEED, 'https://apt.getcoppice.dev/updates/');
-  assert.equal(pagesCname(), 'apt.getcoppice.dev');
+  assert.equal(MAC_UPDATE_FEED, 'https://apt.getcoppice.app/updates/');
+  assert.equal(pagesCname(), 'apt.getcoppice.app');
   assert.equal(pagesCname('https://apt.example.com/'), 'apt.example.com');
   assert.equal(APT_SOURCE_LINE, aptSourceLine());
   assert.equal(
@@ -179,10 +215,93 @@ test('colon fingerprint fields are the tenth column', () => {
   );
 });
 
-test('the committed keyring exposes a fingerprint without pinning the test key', () => {
+test('primary fingerprints skip subkeys', () => {
+  const listing = [
+    'pub:u:4096:1:AAAA:1::::::scESC:',
+    'fpr:::::::::PRIMARYONE:',
+    'sub:u:4096:1:BBBB:1:::::e:',
+    'fpr:::::::::SUBKEY:',
+    'pub:u:4096:1:CCCC:1::::::scESC:',
+    'fpr:::::::::PRIMARYTWO:',
+    '',
+  ].join('\n');
+  assert.deepEqual(primaryFingerprints(listing), ['PRIMARYONE', 'PRIMARYTWO']);
+  assert.deepEqual(primaryFingerprints(listing.replaceAll('pub:', 'sec:'), 'sec'), [
+    'PRIMARYONE',
+    'PRIMARYTWO',
+  ]);
+  assert.deepEqual(primaryFingerprints(''), []);
+});
+
+test('the committed keyring holds exactly the release key', () => {
   const keyring = fileURLToPath(new URL(`../${APT_KEYRING_FILE}`, import.meta.url));
-  const [first] = publicKeyringFingerprints(keyring);
-  assert.match(first, /^[0-9A-F]{40}$/);
+  assert.deepEqual(publicKeyringFingerprints(keyring), [RELEASE_KEY_FINGERPRINT]);
+  assertKeyringHasFingerprint(keyring, RELEASE_KEY_FINGERPRINT);
+});
+
+test('keyring checks fail closed on empty, missing and multi-key keyrings', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'coppice-apt-closed-'));
+  try {
+    const committed = fileURLToPath(new URL(`../${APT_KEYRING_FILE}`, import.meta.url));
+    const empty = join(dir, 'empty.gpg');
+    writeFileSync(empty, '');
+    assert.throws(() => assertKeyringHasFingerprint(empty, RELEASE_KEY_FINGERPRINT));
+    assert.throws(() => assertKeyringHasFingerprint(join(dir, 'missing.gpg'), RELEASE_KEY_FINGERPRINT));
+    const garbage = join(dir, 'garbage.gpg');
+    writeFileSync(garbage, 'not a keyring');
+    assert.throws(() => assertKeyringHasFingerprint(garbage, RELEASE_KEY_FINGERPRINT));
+
+    // A subkey fingerprint is never accepted in place of the primary.
+    const listed = spawnSync(
+      'gpg',
+      ['--batch', '--homedir', dir, '--with-colons', '--show-keys', committed],
+      { encoding: 'utf8' },
+    );
+    const subkeys = fingerprintsFromColonListing(listed.stdout).filter(
+      (fpr) => fpr !== RELEASE_KEY_FINGERPRINT,
+    );
+    for (const subkey of subkeys) {
+      assert.throws(
+        () => assertKeyringHasFingerprint(committed, subkey),
+        /does not contain COPPICE_APT_KEY_FINGERPRINT/,
+      );
+    }
+
+    // The release key plus a second key is two trusted signers.
+    const extra = generateKey(join(dir, 'extra'), 'Coppice Extra Signer');
+    const doubled = join(dir, 'doubled.gpg');
+    writeFileSync(doubled, Buffer.concat([readFileSync(committed), readFileSync(extra.publicKeyring)]));
+    assert.throws(
+      () => assertKeyringHasFingerprint(doubled, RELEASE_KEY_FINGERPRINT),
+      /exactly one primary key, found 2/,
+    );
+    const script = fileURLToPath(new URL('../scripts/apt-repo.mjs', import.meta.url));
+    for (const keyring of [doubled, empty, join(dir, 'missing.gpg')]) {
+      const run = spawnSync(
+        process.execPath,
+        [script, 'check-keyring', '--keyring', keyring, '--fingerprint', RELEASE_KEY_FINGERPRINT],
+        { encoding: 'utf8' },
+      );
+      assert.equal(run.status, 1, `${keyring}: ${run.stdout}${run.stderr}`);
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a signing key file with two primary keys is refused', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'coppice-apt-twosec-'));
+  try {
+    const one = generateKey(join(dir, 'one'), 'Coppice Signer One');
+    const two = generateKey(join(dir, 'two'), 'Coppice Signer Two');
+    assert.throws(
+      () => assertSigningKeyMatchesFingerprint(`${one.secretArmored}\n${two.secretArmored}`, '', one.fingerprint),
+      /exactly one primary key, found 2/,
+    );
+    assertSigningKeyMatchesFingerprint(one.secretArmored, '', one.fingerprint);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test('keyring and signing-key checks follow COPPICE_APT_KEY_FINGERPRINT', () => {

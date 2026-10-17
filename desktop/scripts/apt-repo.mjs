@@ -154,12 +154,11 @@ function withKeyring(keyArmored, passphrase, fn) {
     }
     gpg(gpgHome, args, { input: Buffer.from(keyArmored) });
     const listed = gpg(gpgHome, ['--with-colons', '--list-secret-keys']).toString();
-    const fingerprint = listed
-      .split('\n')
-      .find((line) => line.startsWith('fpr:'))
-      ?.split(':')[9];
-    if (!fingerprint) throw new Error('signing key has no fingerprint');
-    return fn({ gpgHome, fingerprint });
+    const primaries = primaryFingerprints(listed, 'sec');
+    if (primaries.length !== 1) {
+      throw new Error(`signing key must hold exactly one primary key, found ${primaries.length}`);
+    }
+    return fn({ gpgHome, fingerprint: primaries[0] });
   } finally {
     rmSync(gpgHome, { recursive: true, force: true });
   }
@@ -177,6 +176,23 @@ export function fingerprintsFromColonListing(text) {
     .filter((line) => line.startsWith('fpr:'))
     .map((line) => line.split(':')[9] ?? '')
     .filter(Boolean);
+}
+
+// Fingerprints of primary keys only: the `fpr` record right after each `pub`
+// (or `sec`) record. Subkey `fpr` lines follow `sub`/`ssb` and are skipped.
+export function primaryFingerprints(text, kind = 'pub') {
+  const found = [];
+  let primary = false;
+  for (const line of String(text).split('\n')) {
+    const type = line.split(':')[0];
+    if (type === 'fpr') {
+      if (primary) found.push(normalizeFingerprint(line.split(':')[9] ?? ''));
+      primary = false;
+    } else if (type) {
+      primary = type === kind;
+    }
+  }
+  return found;
 }
 
 function requireFingerprint(value) {
@@ -200,8 +216,10 @@ export function publicKeyringFingerprints(keyringPath) {
     if (result.status !== 0) {
       throw new Error((result.stderr || `could not read ${keyringPath}`).trim());
     }
-    const found = fingerprintsFromColonListing(result.stdout).map(normalizeFingerprint);
-    if (!found.length) throw new Error(`${keyringPath} has no fingerprint`);
+    const found = primaryFingerprints(result.stdout, 'pub');
+    if (!found.length || found.some((fpr) => !FINGERPRINT_HEX.test(fpr))) {
+      throw new Error(`${keyringPath} has no readable primary key`);
+    }
     return found;
   } finally {
     rmSync(gpgHome, { recursive: true, force: true });
@@ -213,7 +231,14 @@ export function publicKeyringFingerprints(keyringPath) {
 export function assertKeyringHasFingerprint(keyringPath, expected) {
   const want = requireFingerprint(expected);
   const found = publicKeyringFingerprints(keyringPath);
-  if (!found.includes(want)) {
+  // Every key in this file becomes a trusted apt signer through signed-by=,
+  // so an extra key is an extra signer.
+  if (found.length !== 1) {
+    throw new Error(
+      `committed keyring must hold exactly one primary key, found ${found.length} (keyring: ${found.join(', ')})`,
+    );
+  }
+  if (found[0] !== want) {
     throw new Error(
       `committed keyring does not contain COPPICE_APT_KEY_FINGERPRINT (keyring: ${found.join(', ')})`,
     );
