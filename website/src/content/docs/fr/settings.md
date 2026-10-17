@@ -56,7 +56,7 @@ Les administrateurs peuvent ouvrir **Logs** à côté de Settings pour filtrer e
 | --- | --- | --- | --- |
 | `retention_days` | integer | `14` | Combien de jours de journaux garder, aujourd’hui compris : 3, 7, 14 ou 30. La valeur par défaut est 14. Coppice supprime les journaux plus anciens toutes les heures, et les changements s’appliquent sans redémarrage. Si les journaux dépassent 256 Mio, Coppice supprime d’abord les plus anciens, même avant la fin de `retention_days`. |
 
-Coppice ne supprime jamais le journal du jour ni le journal de base de données en cours d’écriture, même au-delà de la limite. Les journaux de base de données comptent dans la limite de 256 Mio, et Coppice les supprime une fois `retention_days` dépassé.
+Le journal de chaque jour est découpé en fichiers de 32 Mio au plus, et chaque fichier compte dans la limite de 256 Mio, ceux du jour compris. Coppice ne supprime jamais le fichier de journal ni le journal de base de données en cours d’écriture. Les journaux de base de données comptent dans la limite, et Coppice les supprime une fois `retention_days` dépassé.
 
 | Champ | Type | Défaut | Rôle |
 | --- | --- | --- | --- |

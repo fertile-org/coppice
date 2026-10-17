@@ -206,13 +206,19 @@ pub async fn run_cli_with_stdin(
             line = reader.next_line() => {
                 match line {
                     Ok(Some(raw)) => {
-                        crate::logs::log_cli_line(
-                            inv.run_id.as_deref(),
-                            inv.ticket_id.as_deref(),
-                            "stdout",
-                            &raw,
-                        );
-                        let Ok(value) = serde_json::from_str::<Value>(&raw) else {
+                        let parsed = serde_json::from_str::<Value>(&raw);
+                        // A run's JSON lines become its console, which is kept
+                        // in the run folder. Only other stdout goes to the
+                        // server log.
+                        if parsed.is_err() || inv.run_id.is_none() {
+                            crate::logs::log_cli_line(
+                                inv.run_id.as_deref(),
+                                inv.ticket_id.as_deref(),
+                                "stdout",
+                                &raw,
+                            );
+                        }
+                        let Ok(value) = parsed else {
                             continue;
                         };
                         let step = handler.on_json(&value);
@@ -491,9 +497,13 @@ mod tests {
             "{timestamp}"
         );
 
-        let json_line = find_line(&lines, "{\"ok\":true}");
-        assert_eq!(json_line["fields"]["stream"], "stdout");
-        assert_eq!(json_line["fields"]["run_id"], "run-42");
+        // A run's JSON lines are its console, kept in the run folder.
+        assert!(
+            !lines
+                .iter()
+                .any(|line| line["fields"]["message"] == "{\"ok\":true}"),
+            "JSON stdout of a run was mirrored: {lines:?}"
+        );
 
         let err = find_line(&lines, "err-line");
         assert_eq!(err["fields"]["stream"], "stderr");

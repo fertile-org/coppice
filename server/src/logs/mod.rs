@@ -1,4 +1,4 @@
-//! Daily JSONL for server, HTTP, and agent CLI lines, and the write-time secret mask.
+//! Size-capped daily JSONL for server, HTTP, and agent CLI lines, and the write-time secret mask.
 
 pub(crate) mod export;
 mod mask;
@@ -6,6 +6,7 @@ pub(crate) mod meta;
 pub(crate) mod postgres_files;
 pub(crate) mod read;
 pub(crate) mod retain;
+pub(crate) mod segments;
 pub(crate) mod tail;
 
 use std::io::{self, IsTerminal, Write};
@@ -21,14 +22,37 @@ pub use mask::SecretGuard;
 /// Tracing target for agent CLI lines.
 const CLI_LOG_TARGET: &str = "coppice_server::cli";
 
-/// One info event for a CLI stdout or stderr line.
-/// `stream` is `stdout` or `stderr`. `run_id` and `ticket_id` are omitted when absent.
+/// Longest CLI line copied into the server log, in bytes.
+pub const CLI_LINE_MAX_BYTES: usize = 4 * 1024;
+
+/// `line` cut to [`CLI_LINE_MAX_BYTES`] on a character boundary, with a note
+/// saying how much was left out.
+fn capped_cli_line(line: &str) -> std::borrow::Cow<'_, str> {
+    if line.len() <= CLI_LINE_MAX_BYTES {
+        return std::borrow::Cow::Borrowed(line);
+    }
+    let mut end = CLI_LINE_MAX_BYTES;
+    while !line.is_char_boundary(end) {
+        end -= 1;
+    }
+    std::borrow::Cow::Owned(format!(
+        "{}…[truncated {} bytes]",
+        &line[..end],
+        line.len() - end
+    ))
+}
+
+/// One info event for a CLI stdout or stderr line, cut to
+/// [`CLI_LINE_MAX_BYTES`]. `stream` is `stdout` or `stderr`. `run_id` and
+/// `ticket_id` are omitted when absent.
 pub fn log_cli_line(
     run_id: Option<&str>,
     ticket_id: Option<&str>,
     stream: &'static str,
     line: &str,
 ) {
+    let line = capped_cli_line(line);
+    let line = line.as_ref();
     let run_id = run_id.filter(|id| !id.is_empty());
     let ticket_id = ticket_id.filter(|id| !id.is_empty());
     match (run_id, ticket_id) {
@@ -122,28 +146,21 @@ fn env_filter() -> tracing_subscriber::EnvFilter {
         .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new(log_directives(None)))
 }
 
-fn rolling(logs_dir: &Path) -> io::Result<tracing_appender::rolling::RollingFileAppender> {
-    std::fs::create_dir_all(logs_dir)?;
-    tracing_appender::rolling::RollingFileAppender::builder()
-        .rotation(tracing_appender::rolling::Rotation::DAILY)
-        .filename_prefix("coppice")
-        .filename_suffix("jsonl")
-        .latest_symlink("current.jsonl")
-        .build(logs_dir)
-        .map_err(io::Error::other)
+fn rolling(logs_dir: &Path) -> io::Result<segments::SegmentedAppender> {
+    segments::SegmentedAppender::new(logs_dir)
 }
 
 struct MaskingAppender {
-    inner: tracing_appender::rolling::RollingFileAppender,
+    inner: segments::SegmentedAppender,
 }
 
 impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for MaskingAppender {
-    type Writer = mask::MaskingWriter<FlushingWriter<tracing_appender::rolling::RollingWriter<'a>>>;
+    type Writer = mask::MaskingWriter<segments::SegmentWriter<'a>>;
 
     fn make_writer(&'a self) -> Self::Writer {
-        mask::MaskingWriter::file(FlushingWriter {
-            inner: self.inner.make_writer(),
-        })
+        // The masking writer hands whole lines to the segment writer, so a
+        // segment never ends in the middle of a line.
+        mask::MaskingWriter::file(self.inner.writer())
     }
 }
 
@@ -175,7 +192,21 @@ where
 
 /// Human stdout subscriber plus the JSONL file. The env filter is `RUST_LOG`,
 /// or `info` plus `rmcp=warn`. The file records every event that passes it.
+/// Set once the desktop app has printed its ready line.
+static STDOUT_QUIET: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// From now on stdout carries only warnings and errors. The JSONL files keep
+/// everything.
+pub fn quiet_stdout() {
+    STDOUT_QUIET.store(true, std::sync::atomic::Ordering::Relaxed);
+}
+
+fn stdout_allows(level: &tracing::Level) -> bool {
+    !STDOUT_QUIET.load(std::sync::atomic::Ordering::Relaxed) || *level <= tracing::Level::WARN
+}
+
 pub fn init(logs_dir: &Path) -> io::Result<()> {
+    use tracing_subscriber::filter::FilterExt;
     let terminal = io::stdout().is_terminal();
     let stdout = tracing_subscriber::fmt::layer()
         .with_ansi(terminal)
@@ -188,7 +219,9 @@ pub fn init(logs_dir: &Path) -> io::Result<()> {
                 })
             })
         })
-        .with_filter(env_filter());
+        .with_filter(env_filter().and(tracing_subscriber::filter::filter_fn(|meta| {
+            stdout_allows(meta.level())
+        })));
     tracing_subscriber::registry()
         .with(stdout)
         .with(json_file_layer(logs_dir, true)?)
@@ -268,6 +301,27 @@ mod tests {
         std::fs::write(&zst, b"kept-compressed").expect("write");
         rolling(dir.path()).expect("appender");
         assert_eq!(std::fs::read(&zst).expect("zst"), b"kept-compressed");
+    }
+
+    #[test]
+    fn quiet_stdout_keeps_only_warnings_and_errors() {
+        assert!(stdout_allows(&tracing::Level::INFO));
+        quiet_stdout();
+        assert!(!stdout_allows(&tracing::Level::INFO));
+        assert!(!stdout_allows(&tracing::Level::DEBUG));
+        assert!(stdout_allows(&tracing::Level::WARN));
+        assert!(stdout_allows(&tracing::Level::ERROR));
+        STDOUT_QUIET.store(false, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    #[test]
+    fn long_cli_lines_are_cut_on_a_character_boundary() {
+        let short = "fine";
+        assert_eq!(capped_cli_line(short), short);
+        let long = format!("{}é{}", "a".repeat(CLI_LINE_MAX_BYTES - 1), "b".repeat(100));
+        let capped = capped_cli_line(&long);
+        assert!(capped.starts_with(&"a".repeat(CLI_LINE_MAX_BYTES - 1)));
+        assert!(capped.ends_with("…[truncated 102 bytes]"), "{capped}");
     }
 
     #[test]

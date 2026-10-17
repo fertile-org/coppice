@@ -5,7 +5,7 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiError } from '../../lib/api';
 import { savedExport } from './copy';
-import { LogsPage } from './LogsPage';
+import { LogsPage, MAX_LIVE_LINES, MAX_OLDER_LINES } from './LogsPage';
 import { reportProblemUrl } from './query';
 
 const session = vi.hoisted(() => ({ role: 'admin' }));
@@ -158,6 +158,52 @@ describe('LogsPage', () => {
       });
     });
     expect(await screen.findByText('arrived later')).toBeInTheDocument();
+  });
+
+  it('keeps only the newest live lines and drops repeats', async () => {
+    renderPage();
+    await screen.findByText('No logs match these filters.');
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Live' }));
+    await waitFor(() => expect(SocketStub.latest).not.toBeNull());
+    await act(async () => {
+      for (let i = 0; i < MAX_LIVE_LINES + 50; i += 1) {
+        const line = {
+          ...httpLine,
+          timestamp: `2026-10-14T04:${String(Math.floor(i / 60)).padStart(2, '0')}:${String(i % 60).padStart(2, '0')}Z`,
+          message: `live ${i}`,
+        };
+        SocketStub.latest?.onmessage?.({ data: JSON.stringify(line) });
+        SocketStub.latest?.onmessage?.({ data: JSON.stringify(line) });
+      }
+    });
+    expect(await screen.findByText(`live ${MAX_LIVE_LINES + 49}`)).toBeInTheDocument();
+    expect(screen.queryByText('live 0')).not.toBeInTheDocument();
+    expect(screen.getAllByText(/^live \d+$/)).toHaveLength(MAX_LIVE_LINES);
+  });
+
+  it('stops loading older lines at the cap', async () => {
+    const page = (start: number, count: number) =>
+      Array.from({ length: count }, (_, i) => ({ ...httpLine, message: `old ${start + i}` }));
+    let calls = 0;
+    mocks.apiFetch.mockImplementation((path: string) => {
+      if (String(path).startsWith('/api/logs/meta')) {
+        return jsonResponse(metaBody);
+      }
+      calls += 1;
+      return jsonResponse({ lines: page(calls * 1000, 1000), nextCursor: `c${calls}` });
+    });
+    renderPage();
+    await screen.findByText('old 1000');
+    fireEvent.click(screen.getByRole('button', { name: 'Load older' }));
+    await screen.findByText('old 2000');
+    fireEvent.click(screen.getByRole('button', { name: 'Load older' }));
+    expect(
+      await screen.findByText(
+        'Showing the newest lines only. Narrow the filters or use Export logs to see older ones.',
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Load older' })).not.toBeInTheDocument();
+    expect(screen.getAllByText(/^old \d+$/).length).toBeLessThanOrEqual(1000 + MAX_OLDER_LINES);
   });
 
   it('labels the warn level Warning', async () => {

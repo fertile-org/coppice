@@ -23,6 +23,7 @@ export const LOGS_COPY = {
   empty: 'No logs match these filters.',
   viewLogs: 'View logs',
   loadOlder: 'Load older',
+  olderLimit: 'Showing the newest lines only. Narrow the filters or use Export logs to see older ones.',
   loadError: "Couldn't load logs. Try again.",
   loading: 'Loading…',
   export: 'Export logs',

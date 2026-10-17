@@ -294,6 +294,10 @@ async fn serve_with_postgres(
                 let mut stdout = std::io::stdout().lock();
                 let _ = writeln!(stdout, "{line}");
                 let _ = stdout.flush();
+                drop(stdout);
+                // Electron only needs warnings from here on; the full log is
+                // in the JSONL files.
+                crate::logs::quiet_stdout();
             }
         })),
     };
