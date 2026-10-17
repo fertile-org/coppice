@@ -8,7 +8,8 @@
  * still. A later column is a straight cut to a whole-column scroll, never a
  * pan or zoom. A crossfade joins only shots that share framing and scale,
  * and the edit pulses the card that moved. Any other join is a straight cut.
- * A caption is gone before the next shot, and the next caption starts there.
+ * Each caption stays through its step and switches at the cut. The finished
+ * edit plays at 1.25×. The take ends on the Done hold.
  * Writes:
  *
  *   website/public/assets/marketing.mp4   1440×900
@@ -492,12 +493,15 @@ const CAPTION_STYLE = `
 const COLUMN_RULE =
   '#board{scroll-behavior:auto!important}#board > div > section{width:284px!important;min-width:284px!important;max-width:284px!important}';
 const CAPTION_CSS = `${CAPTION_STYLE}\n${COLUMN_RULE}`;
-const CROSSFADE_SECONDS = 0.5;
-const CAPTION_MIN_MS = 2500;
+const SPEED = 1.25;
+// 0.5s on screen after the speed-up.
+const CROSSFADE_SECONDS = 0.5 * SPEED;
+const CAPTION_MIN_MS = 3200;
+const play = (time) => time / SPEED;
 // Marker edges are measured on discrete frames. Keep this much of the real
 // shot on either side of a veil so a color frame never survives into the cut.
 const MARKER_GUARD = 0.08;
-const PLAN_SHOT_SECONDS = 1.55;
+const PLAN_SHOT_SECONDS = 2.5;
 const PULSE_GAP = 4;
 const PULSE_STROKE = 3;
 const MARKERS = [
@@ -1094,7 +1098,7 @@ if not accept_times or accept_times[-1] - accept_times[0] < 2.5:
     span = 0 if not accept_times else accept_times[-1] - accept_times[0]
     raise SystemExit(f"accept caption lasted {span:.2f}s, need at least 2.5s")
 
-for offset in (0, 0.8, 1.6, 2.5):
+for offset in (0, 0.8, 1.6, 2.2):
     shot = f"/tmp/hero-caption-check-{offset:.1f}.png"
     subprocess.check_call(
         ["ffmpeg", "-y", "-v", "error", "-ss", f"{accept_time + offset:.3f}", "-i", mp4, "-frames:v", "1", shot]
@@ -1103,7 +1107,17 @@ for offset in (0, 0.8, 1.6, 2.5):
         ["tesseract", shot, "stdout", "--psm", "6"],
         text=True,
         stderr=subprocess.DEVNULL,
-    ).lower()
+    )
+    card = f"/tmp/hero-caption-check-card-{offset:.1f}.png"
+    subprocess.check_call(
+        ["ffmpeg", "-y", "-v", "error", "-ss", f"{accept_time + offset:.3f}", "-i", mp4, "-vf", "crop=420:300:1020:260", "-frames:v", "1", card]
+    )
+    text += "\\n" + subprocess.check_output(
+        ["tesseract", card, "stdout", "--psm", "6"],
+        text=True,
+        stderr=subprocess.DEVNULL,
+    )
+    text = text.lower()
     folded = " ".join(text.replace(",", " ").split())
     folded = folded.replace("accented", "accepted").replace("accepted", "accept")
     if "nothing is done" not in folded or "accept not merged" not in folded:
@@ -1312,7 +1326,7 @@ async function assemble(raw, pulses, stills) {
   let elapsed = segments[0].end - segments[0].start;
   segments.slice(1).forEach((segment, index) => {
     const prev = segments[index];
-    const out = index === segments.length - 2 ? 'vout' : `j${index}`;
+    const out = index === segments.length - 2 ? 'joined' : `j${index}`;
     const at = outputTime(segments, index, prev.end - prev.start);
     const left = `n${index}a`;
     const right = `n${index}b`;
@@ -1325,14 +1339,15 @@ async function assemble(raw, pulses, stills) {
         `[${left}][${right}]xfade=transition=fade:duration=${CROSSFADE_SECONDS}:offset=${offset.toFixed(3)}[${out}]`,
       );
       elapsed = elapsed + (segment.end - segment.start) - CROSSFADE_SECONDS;
-      console.log(`hero: join ${prev.name}->${segment.name} crossfade at ${at.toFixed(2)}s`);
+      console.log(`hero: join ${prev.name}->${segment.name} crossfade at ${play(at).toFixed(2)}s`);
     } else {
       filters.push(`[${left}][${right}]concat=n=2:v=1:a=0[${out}]`);
       elapsed += segment.end - segment.start;
-      console.log(`hero: join ${prev.name}->${segment.name} cut at ${at.toFixed(2)}s`);
+      console.log(`hero: join ${prev.name}->${segment.name} cut at ${play(at).toFixed(2)}s`);
     }
     label = out;
   });
+  filters.push(`[joined]setpts=${(1 / SPEED).toFixed(4)}*PTS,fps=25[vout]`);
 
   await mkdir(ASSETS, { recursive: true });
   await ffmpeg([
@@ -1410,13 +1425,13 @@ async function assemble(raw, pulses, stills) {
   await mkdir(STILLS_DIR, { recursive: true });
   for (const still of stillFrames) {
     const file = path.join(STILLS_DIR, stillNames[still.name] ?? `${still.name}.png`);
-    await grab(still.time, file);
-    console.log(`hero: still ${still.name} at ${still.time.toFixed(2)}s -> ${file}`);
+    await grab(play(still.time), file);
+    console.log(`hero: still ${still.name} at ${play(still.time).toFixed(2)}s -> ${file}`);
   }
   const pulseFrames = [];
   for (const [index, segment] of segments.entries()) {
     for (const pulse of segment.pulses) {
-      const time = outputTime(segments, index, pulse.at + 0.22);
+      const time = play(outputTime(segments, index, pulse.at + 0.22));
       const file = path.join(scratch, `check-pulse-${index}-${pulse.at.toFixed(2)}.png`);
       await grab(time, file);
       pulseFrames.push({ file, pulse, time, scene: segment.name });
@@ -1426,15 +1441,13 @@ async function assemble(raw, pulses, stills) {
     const index = segments.findIndex((segment) => segment.name === name);
     const pulse = segments[index]?.pulses[0];
     if (!pulse) fail(`missing pulse still for ${name}`);
-    await grab(outputTime(segments, index, pulse.at + 0.22), path.join(STILLS_DIR, file));
+    await grab(play(outputTime(segments, index, pulse.at + 0.22)), path.join(STILLS_DIR, file));
   };
   await pulseStill('approve', '03-approve.png');
   await pulseStill('build', '04-build.png');
-  const writeIndex = segments.findIndex((segment) => segment.name === 'write');
-  const write = segments[writeIndex];
-  // Caption has cleared, and the crossfade into the next shot has not started.
-  const posterAt = Math.max(0.4, write.end - write.start - CROSSFADE_SECONDS - 0.35);
-  const posterTime = outputTime(segments, writeIndex, posterAt);
+  const writeStill = stillFrames.find((still) => still.name === 'write');
+  if (!writeStill) fail('write still is missing');
+  const posterTime = play(writeStill.time);
   const posterFile = path.join(STILLS_DIR, '07-board.png');
   await grab(posterTime, posterFile);
   await copyFile(posterFile, POSTER);
@@ -1442,14 +1455,16 @@ async function assemble(raw, pulses, stills) {
   const acceptStill = stillFrames.find((still) => still.name === 'accept');
   if (!acceptStill) fail('accept still is missing');
   console.log((await assertNoMarkerFlash(MP4_OUT)).trim());
-  console.log((await assertCaptionFrames(MP4_OUT, acceptStill.time)).trim());
-  const stillHoldStart = acceptStill.time + 1;
-  const stillHoldEnd = acceptStill.time + 4;
+  console.log((await assertCaptionFrames(MP4_OUT, play(acceptStill.time))).trim());
+  const stillHoldStart = play(acceptStill.time) + 0.25;
+  const stillHoldEnd = play(acceptStill.time) + 2.45;
   console.log((await assertHoldStill(MP4_OUT, stillHoldStart, stillHoldEnd)).trim());
   for (const [index, segment] of segments.entries()) {
     const start = outputTime(segments, index, 0);
     const end = outputTime(segments, index, segment.end - segment.start);
-    console.log(`hero: beat ${segment.name} ${start.toFixed(2)}-${end.toFixed(2)} ${segment.startFrame}`);
+    console.log(
+      `hero: beat ${segment.name} ${play(start).toFixed(2)}-${play(end).toFixed(2)} ${segment.startFrame}`,
+    );
   }
   await rm(scratch, { recursive: true, force: true });
 
@@ -1460,7 +1475,7 @@ async function assemble(raw, pulses, stills) {
   }
   if (gif.width !== GIF_WIDTH) fail(`gif width is ${gif.width}, expected ${GIF_WIDTH}`);
   const seconds = Number(mp4.duration);
-  if (seconds < 54 || seconds > 70) fail(`hero duration ${seconds.toFixed(2)}s is outside 54–70s`);
+  if (seconds < 24 || seconds >= 30) fail(`hero duration ${seconds.toFixed(2)}s is outside 24–30s`);
   const gifBytes = (await stat(GIF_SITE)).size;
   if (gifBytes > 10 * 1024 * 1024) {
     fail(`gif is ${(gifBytes / (1024 * 1024)).toFixed(1)}MB, over 10MB`);
@@ -1604,12 +1619,14 @@ async function record(scene) {
       // finishes so the next cut cannot land while the caption is still appearing.
       if (text) await sleep(520);
     };
-    const hideCaption = async () => {
+    const hideCaptionNow = async () => {
       await page.evaluate(() => {
         sessionStorage.setItem('coppice.hero.caption.visible', '0');
-        document.getElementById('coppice-hero-caption')?.classList.remove('is-on');
+        const bar = document.getElementById('coppice-hero-caption');
+        if (!bar) return;
+        bar.style.transition = 'none';
+        bar.classList.remove('is-on');
       });
-      await sleep(500);
       captionAt = 0;
     };
     const cutScene = async (marker, settle) => {
@@ -1695,19 +1712,19 @@ async function record(scene) {
     await storyCard('Backlog').waitFor({ timeout: 15_000 });
     await pinBoardLeft(page);
     await assertClean(page, 'scene 1');
-    await hold(page, 1600);
     await markStill('write');
-    await hold(page, 3800);
+    // Idle after the ticket lands, before the card moves. Was ~7s.
+    await hold(page, 1500);
 
     const created = await api('GET', `/api/boards/${scene.boardId}/tickets`, scene.auth);
     const tickets = Array.isArray(created) ? created : (created.items ?? []);
     const ticket = tickets.find((item) => item.title === TICKET_TITLE);
     if (!ticket) fail('typed ticket was not saved');
     const worktreePromise = heroGit('worktree', ticket.id.split('-')[0]);
-    // The crossfade overlaps the last half-second. That tail has no caption,
-    // so two pills cannot blend.
-    await fadeCaption(null);
-    await hold(page, 800);
+    // The crossfade overlaps this tail. Drop the outgoing caption so the
+    // next line can come up on the incoming shot without the two blending.
+    await hideCaptionNow();
+    await sleep(Math.round((CROSSFADE_SECONDS + MARKER_GUARD + 0.05) * 1000));
 
     await cutScene(MARKERS[1], async () => {
       await api('PATCH', `/api/tickets/${ticket.id}`, scene.auth, {
@@ -1725,11 +1742,12 @@ async function record(scene) {
       await landed.waitFor({ timeout: 15_000 });
       await pinBoardLeft(page);
       await preparePage(page);
+      await fadeCaption(CAPTIONS[1]);
     });
-    await sleep(700);
+    await sleep(Math.round((CROSSFADE_SECONDS + 0.28) * 1000));
     await pulseCue(storyCard('Plan Review'));
-    await fadeCaption(CAPTIONS[1]);
-    await hold(page, 3000);
+    // Board wait before the plan opens. Was 3s.
+    await hold(page, 1500);
 
     const planCard = storyCard('Plan Review');
     await cutScene(MARKERS[2], async () => {
@@ -1743,11 +1761,11 @@ async function record(scene) {
     await assertClean(page, 'scene plan');
     await hold(page, 200);
     await markStill('plan');
-    await hold(page, 600);
+    await hold(page, 1700);
 
     const detail = page.locator('[aria-label="Ticket detail"]');
     await cutScene(MARKERS[3], async () => {
-      await hideCaption();
+      await fadeCaption(CAPTIONS[2]);
       await page.getByRole('button', { name: 'Close', exact: true }).click();
       await planCard.waitFor({ timeout: 15_000 });
       await pinBoardLeft(page);
@@ -1766,16 +1784,14 @@ async function record(scene) {
       await pinBoardLeft(page);
       await preparePage(page);
     });
-    await sleep(700);
+    await sleep(Math.round((CROSSFADE_SECONDS + 0.28) * 1000));
     await pulseCue(storyCard('Ready'));
-    await fadeCaption(CAPTIONS[2]);
     await assertClean(page, 'scene approve');
     await hold(page, 3800);
-    await fadeCaption(null);
-    await hold(page, 250);
 
     const short = ticket.id.split('-')[0];
     await cutScene(MARKERS[5], async () => {
+      await fadeCaption(CAPTIONS[3]);
       await api('PATCH', `/api/tickets/${ticket.id}/status`, scene.auth, {
         status: 'wait_for_final_review',
       });
@@ -1791,16 +1807,14 @@ async function record(scene) {
     });
     await pinBoardScroll(page, columnScroll);
     await sleep(200);
-    await fadeCaption(CAPTIONS[3]);
     await pulseCue(storyCard('Wait for Human Review'));
     await assertClean(page, 'scene build');
     await hold(page, 3800);
-    await fadeCaption(null);
-    await hold(page, 250);
 
     const worktree = await worktreePromise;
     if (!worktree?.startsWith('/data/worktrees/')) fail(`worktree path missing: ${worktree}`);
     await cutScene(MARKERS[6], async () => {
+      await fadeCaption(CAPTIONS[4]);
       const review = new URL('/code', WEB);
       review.searchParams.set('repoId', scene.repoId);
       review.searchParams.set('ticketId', ticket.id);
@@ -1814,9 +1828,9 @@ async function record(scene) {
       await page.getByText("useState('light')").first().waitFor({ timeout: 20_000 });
       await preparePage(page);
     });
-    await fadeCaption(CAPTIONS[4]);
     await assertClean(page, 'scene diff');
-    await hold(page, 1800);
+    // Still diff before the comment is typed. Was ~3s; keep about 1.5s.
+    await hold(page, 900);
     const line = page.locator('tr').filter({ hasText: "useState('light')" }).first();
     await line.locator('td.diff-gutter').last().click();
     const commentBox = page.getByPlaceholder('Leave a comment…');
@@ -1825,13 +1839,12 @@ async function record(scene) {
     await page.getByRole('button', { name: 'Add comment', exact: true }).click();
     await page.getByText(LINE_COMMENT).waitFor();
     await assertClean(page, 'scene diff comment');
-    await hold(page, 1400);
     await markStill('diff');
-    await hold(page, 4400);
-    await fadeCaption(null);
-    await hold(page, 250);
+    // Still diff after the comment posts, long enough to read the line.
+    await hold(page, 3100);
 
     await cutScene(MARKERS[7], async () => {
+      await fadeCaption(CAPTIONS[5]);
       await page.goto(`${WEB}/boards/${scene.boardId}?ticket=${ticket.id}`, {
         waitUntil: 'domcontentloaded',
       });
@@ -1843,11 +1856,9 @@ async function record(scene) {
       await page.keyboard.press('Control+Shift+Enter');
       await page.getByRole('dialog', { name: 'Accept this ticket?' }).waitFor({ timeout: 10_000 });
     });
-    await fadeCaption(CAPTIONS[5]);
     await assertClean(page, 'scene accept');
-    await hold(page, 2800);
-    await fadeCaption(null);
-    await hold(page, 250);
+    // Accept dialog. Was ~5.7s. The same caption continues onto the Done board.
+    await hold(page, 1500);
     const acceptDialog = page.getByRole('dialog', { name: 'Accept this ticket?' });
     await cutScene(MARKERS[8], async () => {
       await acceptDialog.getByRole('button', { name: 'Accept', exact: true }).click();
@@ -1870,10 +1881,10 @@ async function record(scene) {
     });
     await pinBoardScroll(page, columnScroll);
     await sleep(300);
-    await fadeCaption(CAPTIONS[5]);
     await pulseCue(storyCard('Done'));
     await markStill('accept');
-    await hold(page, 4700);
+    // Resting Done hold. 3.6s here is about 2.9s after the 1.25× speed-up.
+    await hold(page, 3600);
 
     const video = page.video();
     await page.close();
