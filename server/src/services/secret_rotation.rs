@@ -2010,15 +2010,81 @@ mod tests {
         }
     }
 
+    /// `GRANT CONNECT ON DATABASE postgres` rewrites that database's single
+    /// catalog row. Nextest runs these tests in separate processes on one
+    /// cluster, so two grants overlap and PostgreSQL returns SQLSTATE XX000
+    /// "tuple concurrently updated" without applying the loser. The statement
+    /// is safe to run again.
     async fn grant_postgres_connect(pool: &sqlx::PgPool, role: &str) {
-        sqlx::query(&format!("GRANT CONNECT ON DATABASE postgres TO {role}"))
-            .execute(pool)
-            .await
-            .unwrap();
+        execute_shared_catalog(
+            pool,
+            &format!("GRANT CONNECT ON DATABASE postgres TO {role}"),
+        )
+        .await;
         sqlx::query(&format!("ALTER ROLE {role} SUPERUSER"))
             .execute(pool)
             .await
             .unwrap();
+    }
+
+    async fn execute_shared_catalog(pool: &sqlx::PgPool, sql: &str) {
+        const ATTEMPTS: u32 = 8;
+        let mut pause = Duration::from_millis(5);
+        let mut attempt = 1u32;
+        loop {
+            match sqlx::query(sql).execute(pool).await {
+                Ok(_) => return,
+                Err(err) if catalog_tuple_conflict(&err) && attempt < ATTEMPTS => {
+                    tokio::time::sleep(pause).await;
+                    pause = (pause * 2).min(Duration::from_millis(40));
+                    attempt += 1;
+                }
+                Err(err) => panic!("catalog update failed: {err:?}"),
+            }
+        }
+    }
+
+    fn catalog_tuple_conflict(err: &sqlx::Error) -> bool {
+        match err {
+            sqlx::Error::Database(db) => {
+                db.code().as_deref() == Some("XX000")
+                    && db.message().contains("tuple concurrently updated")
+            }
+            _ => false,
+        }
+    }
+
+    /// Overlapping grants on the shared `postgres` database must all land.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn parallel_connect_grants_on_the_shared_postgres_database_succeed() {
+        let pool = pool().await;
+        let mut roles = Vec::new();
+        for _ in 0..12 {
+            roles.push(RoleGuard::create(&pool, &generate_secret()).await);
+        }
+        for _ in 0..6 {
+            let mut tasks = tokio::task::JoinSet::new();
+            for role in &roles {
+                let pool = pool.clone();
+                let name = role.name.clone();
+                tasks.spawn(async move {
+                    grant_postgres_connect(&pool, &name).await;
+                });
+            }
+            while let Some(joined) = tasks.join_next().await {
+                joined.expect("grant task");
+            }
+        }
+        for role in &roles {
+            let superuser: bool =
+                sqlx::query_scalar("SELECT rolsuper FROM pg_catalog.pg_roles WHERE rolname = $1")
+                    .bind(&role.name)
+                    .fetch_one(&pool)
+                    .await
+                    .unwrap();
+            assert!(superuser, "{}", role.name);
+            role.drop_role().await;
+        }
     }
 
     fn mode_of(path: &Path) -> u32 {
