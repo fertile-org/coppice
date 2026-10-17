@@ -231,7 +231,7 @@ pub const CURSOR: RunContract = RunContract {
         read_only: Some(&["--mode", "ask"]),
         min_version: None,
         gate: false,
-        reason: "Write runs use --force, which Coppice already passed. Read-only chat uses --mode ask and omits --force. --sandbox exists and is left for a later milestone.",
+        reason: "Write runs use --force, which Coppice already passed. Read-only chat uses --mode ask and omits --force. Plan runs use --mode plan. --sandbox exists and is left for a later milestone.",
     },
     leading: &[
         flag(&["-p"], "Headless print mode."),
@@ -253,18 +253,19 @@ pub const CURSOR: RunContract = RunContract {
     process_cwd_is_worktree: true,
     result_before_exit: true,
     prompt: PromptPlace::AfterDashP,
-    // Read-only plan invocation. Same `--mode ask` as read-only chat, pinned
-    // here so a planning run uses it instead of `--force`.
-    plan_mode: Some(&["--mode", "ask"]),
+    // Cursor's plan mode. Chat stays on `--mode ask` via read_only.
+    plan_mode: Some(&["--mode", "plan"]),
 };
 
 pub const KILO_CODE: RunContract = RunContract {
     permission_mode: PermissionMode {
         write: &["--auto"],
-        read_only: None,
+        // Ask denies writes. `--auto` stays so a headless run can approve MCP
+        // calls, which ask mode marks as approval rather than deny.
+        read_only: Some(&["--auto", "--agent", "ask"]),
         min_version: None,
         gate: false,
-        reason: "Auto-approves permissions for non-interactive kilo run. Kilo has no read-only flag, so chat is refused instead of launching.",
+        reason: "Ticket runs pass --auto so a headless run is not stuck on a prompt. Chat keeps --auto and selects the ask agent. Plan runs select the plan agent. A live write was not shown to be blocked.",
     },
     leading: &[
         flag(&["run"], "Non-interactive run."),
@@ -277,7 +278,7 @@ pub const KILO_CODE: RunContract = RunContract {
     process_cwd_is_worktree: true,
     result_before_exit: true,
     prompt: PromptPlace::Append,
-    plan_mode: None,
+    plan_mode: Some(&["--auto", "--agent", "plan"]),
 };
 
 pub const OPENCODE: RunContract = RunContract {
@@ -553,9 +554,12 @@ mod tests {
             CLAUDE_CODE.plan_mode,
             Some(&["--permission-mode", "plan"][..])
         );
-        assert_eq!(CURSOR.plan_mode, Some(&["--mode", "ask"][..]));
+        assert_eq!(CURSOR.plan_mode, Some(&["--mode", "plan"][..]));
         assert!(CODEX.plan_mode.is_none());
-        assert!(KILO_CODE.plan_mode.is_none());
+        assert_eq!(
+            KILO_CODE.plan_mode,
+            Some(&["--auto", "--agent", "plan"][..])
+        );
         assert!(OPENCODE.plan_mode.is_none());
         assert!(MOCK.plan_mode.is_none());
 
@@ -568,7 +572,8 @@ mod tests {
         assert!(!claude.iter().any(|arg| arg == "bypassPermissions"));
 
         let cursor = CURSOR.argv(&planned);
-        assert!(cursor.windows(2).any(|w| w == ["--mode", "ask"]));
+        assert!(cursor.windows(2).any(|w| w == ["--mode", "plan"]));
+        assert!(!cursor.windows(2).any(|w| w == ["--mode", "ask"]));
         assert!(!cursor.iter().any(|arg| arg == "--force"));
 
         let write = CLAUDE_CODE.argv(&subst(None, false));
@@ -582,6 +587,13 @@ mod tests {
             .iter()
             .any(|arg| arg == "--dangerously-bypass-approvals-and-sandbox"));
         let kilo = KILO_CODE.argv(&planned);
+        assert!(kilo.windows(2).any(|w| w == ["--agent", "plan"]));
         assert!(kilo.iter().any(|arg| arg == "--auto"));
+        assert!(!kilo.windows(2).any(|w| w == ["--agent", "ask"]));
+
+        let kilo_chat = KILO_CODE.argv(&subst(None, true));
+        assert!(kilo_chat.windows(2).any(|w| w == ["--agent", "ask"]));
+        assert!(kilo_chat.iter().any(|arg| arg == "--auto"));
+        assert!(!kilo_chat.windows(2).any(|w| w == ["--agent", "plan"]));
     }
 }

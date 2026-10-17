@@ -32,8 +32,7 @@ pub enum ChatReadOnlyStatus {
 pub fn chat_read_only_status(connector: &str) -> ChatReadOnlyStatus {
     match connector {
         OPENCODE | MOCK => ChatReadOnlyStatus::Passed,
-        CLAUDE_CODE | CODEX => ChatReadOnlyStatus::Untested,
-        CURSOR | KILO_CODE => ChatReadOnlyStatus::Unavailable,
+        CLAUDE_CODE | CODEX | CURSOR | KILO_CODE => ChatReadOnlyStatus::Untested,
         _ => ChatReadOnlyStatus::Unavailable,
     }
 }
@@ -229,8 +228,9 @@ const CONNECTORS: &[ConnectorDescriptor] = &[
         mcp_tool_names: ToolNameStyle::Dash,
         console: ConsoleKind::Structured,
         caps: Capabilities {
-            // `--mode ask` blocks edit/apply, not shell writes, so Chat cannot
-            // treat Cursor as read-only. Plan runs still pass `--mode ask`.
+            // `--mode ask` blocks edit/apply, not shell writes, so compaction
+            // cannot treat Cursor as read-only. Chat still launches in ask
+            // mode and shows the untested banner. Plan runs pass `--mode plan`.
             read_only_tools: false,
             chat_resume: true,
             session_events: true,

@@ -68,7 +68,7 @@ const samplePlugin: Plugin = {
 };
 
 const STDIO_WARNING =
-  "Local MCP servers run on your computer with your computer's privileges. Stronger sandboxing is coming in a later release. Enable anyway?";
+  "Local MCP servers run on your computer with your computer's privileges. Enable anyway?";
 
 const shadowedPlugin: Plugin = {
   ...samplePlugin,

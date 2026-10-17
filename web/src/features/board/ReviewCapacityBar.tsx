@@ -7,6 +7,7 @@ const reviewCapacitySchema = z.object({
   reviewCap: z.number().int().nullable(),
   countInReview: z.boolean(),
   waitingOnReview: z.string().nullable(),
+  boardSettingsLabel: z.string(),
   reviewCapLabel: z.string(),
   reviewCapHint: z.string(),
   countInReviewLabel: z.string(),
@@ -62,6 +63,7 @@ export function ReviewCapacityBar({ boardId }: { boardId: string }) {
     cap: string;
     countInReview: boolean;
   } | null>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const saved = query.data;
@@ -116,55 +118,72 @@ export function ReviewCapacityBar({ boardId }: { boardId: string }) {
   const capId = `${boardId}-review-cap`;
 
   return (
-    <div className="mt-3 flex flex-wrap items-end gap-x-4 gap-y-2">
+    <div className="mt-3">
       {saved.waitingOnReview && (
-        <p className="w-full font-body text-sm text-text-secondary">
-          {saved.waitingOnReview}
+        <p className="mb-2">
+          <span
+            data-testid="review-waiting-chip"
+            className="inline-flex rounded-full border border-border bg-paper-200 px-2.5 py-0.5 font-body text-xs text-text-secondary"
+          >
+            {saved.waitingOnReview}
+          </span>
         </p>
       )}
-      <div>
-        <label
-          htmlFor={capId}
-          className="mb-1 block font-body text-sm text-text-secondary"
-        >
-          {saved.reviewCapLabel}
-        </label>
-        <input
-          id={capId}
-          type="number"
-          min={1}
-          step={1}
-          value={draft.cap}
-          disabled={save.isPending}
-          onChange={(event) => setDraft({ ...draft, cap: event.target.value })}
-          onBlur={() => commit(draft)}
-          aria-describedby={`${capId}-hint`}
-          className="field-control w-24 px-2 py-1 font-body text-sm"
-        />
-        <p
-          id={`${capId}-hint`}
-          className="mt-1 font-body text-xs text-text-muted"
-        >
-          {saved.reviewCapHint}
-        </p>
-      </div>
-      <label className="flex items-center gap-2 pb-1 font-body text-sm text-text-secondary">
-        <input
-          type="checkbox"
-          checked={draft.countInReview}
-          disabled={save.isPending}
-          onChange={(event) => {
-            const next = { ...draft, countInReview: event.target.checked };
-            setDraft(next);
-            commit(next);
-          }}
-        />
-        {saved.countInReviewLabel}
-      </label>
-      {error && (
-        <p className="w-full font-body text-sm text-danger" role="alert">
-          {error}
-        </p>
+      <button
+        type="button"
+        aria-expanded={settingsOpen}
+        onClick={() => setSettingsOpen((open) => !open)}
+        className="font-body text-sm text-text-secondary underline-offset-2 hover:underline"
+      >
+        {saved.boardSettingsLabel}
+      </button>
+      {settingsOpen && (
+        <div className="mt-3 flex flex-wrap items-end gap-x-4 gap-y-2">
+          <div>
+            <label
+              htmlFor={capId}
+              className="mb-1 block font-body text-sm text-text-secondary"
+            >
+              {saved.reviewCapLabel}
+            </label>
+            <input
+              id={capId}
+              type="number"
+              min={1}
+              step={1}
+              value={draft.cap}
+              disabled={save.isPending}
+              onChange={(event) => setDraft({ ...draft, cap: event.target.value })}
+              onBlur={() => commit(draft)}
+              aria-describedby={`${capId}-hint`}
+              className="field-control w-24 px-2 py-1 font-body text-sm"
+            />
+            <p
+              id={`${capId}-hint`}
+              className="mt-1 font-body text-xs text-text-muted"
+            >
+              {saved.reviewCapHint}
+            </p>
+          </div>
+          <label className="flex items-center gap-2 pb-1 font-body text-sm text-text-secondary">
+            <input
+              type="checkbox"
+              checked={draft.countInReview}
+              disabled={save.isPending}
+              onChange={(event) => {
+                const next = { ...draft, countInReview: event.target.checked };
+                setDraft(next);
+                commit(next);
+              }}
+            />
+            {saved.countInReviewLabel}
+          </label>
+          {error && (
+            <p className="w-full font-body text-sm text-danger" role="alert">
+              {error}
+            </p>
+          )}
+        </div>
       )}
     </div>
   );

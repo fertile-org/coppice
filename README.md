@@ -6,22 +6,20 @@
   <img src="static/marketing.gif" alt="Write a ticket, approve the plan, and review the diff. Nothing is done until you accept it." width="960" />
 </p>
 
-**Stop babysitting agent terminals.** Queue work as tickets and let Claude Code, Codex and the rest build in parallel, each on its own branch. The board shows what's moving, what's stuck and what's waiting on you, and nothing counts as done until you've reviewed the diff. It runs on your machine with the agent CLIs you already pay for: no new subscription, no Coppice cloud, no Coppice account.
+**Stop babysitting agent terminals.** Queue work as tickets and let Claude Code, Codex and the rest build in parallel, each on its own branch. The board shows what's moving, what's stuck and what's waiting on you, and nothing counts as done until you've reviewed the diff. It runs on your machine with the agent CLIs you already pay for: no new subscription, no Coppice account.
 
 ## The gates
 
 Work stops for you in two places:
 
-1. **Plan Review.** The ticket's assignee writes a plan, and you approve it or ask for changes before work starts. Planning never changes your ticket's code. Turn on Skip planning to send a ticket straight to In Progress.
+1. **Plan Review.** Your PM agent drafts a plan, and you approve it or ask for changes before work starts. Planning never changes your ticket's code. Turn on Skip planning to send a ticket straight to Ready.
 2. **Wait for Human Review.** You review the diff. The ticket stays in this column until you accept it.
 
-You start the work — create a ticket, or approve one an agent proposed. Agents plan and build between those gates.
+You start the work. Create a ticket, or approve one an agent proposed. Agents plan and build between those gates.
 
 ## This beta
 
 Installers for the beta are a `.dmg` for macOS (Apple silicon or Intel) and a `.deb` for Linux (`amd64` or `arm64`). Get them from the [releases page](https://github.com/fertile-org/coppice/releases).
-
-Stronger sandboxing for agents is coming in a later release. Role-owner agents that watch a domain and raise signals come after this beta. This beta is the gated board above.
 
 Bring the CLIs you already use — Claude Code, Codex, Cursor, OpenCode and Kilo Code. Install and sign in to them the usual way. Coppice finds them on your login shell `PATH`.
 

@@ -130,10 +130,10 @@ pub fn mcp_unavailable(reason: &str) -> ProviderError {
 
 /// Connectors whose descriptor has `caps.read_only_tools`, in the order shown
 /// to users (settings API, compaction error). Compaction and plan use this
-/// list. Chat is separate: only a connector that passed a live write test
-/// runs in the user's checkout. Cursor is omitted here because `--mode ask`
-/// was not shown to block shell writes. OpenCode is included: its per-run
-/// deny was.
+/// list. Chat does not: Claude Code, Codex, Cursor, and Kilo Code stay on
+/// with the untested banner. Cursor is omitted here because `--mode ask` was
+/// not shown to block shell writes. Kilo Code's ask agent is the same.
+/// OpenCode is included: its per-run deny was.
 pub const READ_ONLY_CAPABLE_CONNECTORS: &[&str] = &[
     #[cfg(feature = "mock-provider")]
     coppice_connectors::MOCK,
@@ -188,6 +188,7 @@ pub fn chat_isolation_banner(connector: &str) -> Option<String> {
 }
 
 /// User-facing reason Chat cannot start. `None` when this connector may chat.
+/// Unknown connectors stay unavailable. Cursor and Kilo Code may chat.
 pub fn chat_unavailable_message(connector: &str) -> Option<String> {
     if chat_read_only_status(connector) != coppice_connectors::ChatReadOnlyStatus::Unavailable {
         return None;
@@ -195,13 +196,6 @@ pub fn chat_unavailable_message(connector: &str) -> Option<String> {
     let name = connector_display_name(connector);
     Some(format!(
         "Chat isn't available for {name} yet, because Coppice can't keep it read-only."
-    ))
-}
-
-/// Fail closed when a connector cannot enforce read-only tools.
-pub fn refuse_unsupported_read_only(connector_id: &str) -> ProviderError {
-    ProviderError::InvalidInput(format!(
-        "connector `{connector_id}` cannot enforce read-only tools for conversation chat turns"
     ))
 }
 
@@ -463,6 +457,8 @@ mod tests {
         let untested = [
             (coppice_connectors::CLAUDE_CODE, "Claude Code"),
             (coppice_connectors::CODEX, "Codex"),
+            (coppice_connectors::CURSOR, "Cursor"),
+            (coppice_connectors::KILO_CODE, "Kilo Code"),
         ];
         for (id, name) in untested {
             assert_eq!(chat_read_only_status(id), ChatReadOnlyStatus::Untested);
@@ -474,21 +470,17 @@ mod tests {
             assert_eq!(chat_isolation_banner(id).as_deref(), Some(expected.as_str()));
         }
 
-        let unavailable = [
-            (coppice_connectors::CURSOR, "Cursor"),
-            (coppice_connectors::KILO_CODE, "Kilo Code"),
-        ];
-        for (id, name) in unavailable {
-            assert_eq!(chat_read_only_status(id), ChatReadOnlyStatus::Unavailable);
-            assert!(chat_isolation_banner(id).is_none(), "{id}");
-            let expected = format!(
-                "Chat isn't available for {name} yet, because Coppice can't keep it read-only."
-            );
-            assert_eq!(
-                chat_unavailable_message(id).as_deref(),
-                Some(expected.as_str())
-            );
-        }
+        assert_eq!(
+            chat_read_only_status("not-a-connector"),
+            ChatReadOnlyStatus::Unavailable
+        );
+        assert!(chat_isolation_banner("not-a-connector").is_none());
+        assert_eq!(
+            chat_unavailable_message("not-a-connector").as_deref(),
+            Some(
+                "Chat isn't available for not-a-connector yet, because Coppice can't keep it read-only."
+            )
+        );
 
         assert_eq!(
             chat_read_only_status(coppice_connectors::OPENCODE),
