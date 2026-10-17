@@ -5,11 +5,12 @@
 //   node scripts/dist.mjs [--dir]
 
 import { spawn } from 'node:child_process';
-import { existsSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
-import { exportAptPublicKeyIfConfigured } from './apt-repo.mjs';
+import { aptSourceLine, updateBase } from '../src/updateEndpoints.mjs';
+import { installAptPublicKey } from './apt-repo.mjs';
 import { stampDebsInDist } from './deb-version.mjs';
 import { writeMetainfo } from './write-metainfo.mjs';
 
@@ -34,7 +35,29 @@ export function macInPlaceUpdatesEnabled(env) {
 }
 
 export function updaterModeJson(env) {
-  return `${JSON.stringify({ macInPlaceUpdates: macInPlaceUpdatesEnabled(env) })}\n`;
+  return `${JSON.stringify({
+    macInPlaceUpdates: macInPlaceUpdatesEnabled(env),
+    updateBase: updateBase(env.COPPICE_UPDATE_BASE),
+  })}\n`;
+}
+
+// Writes the public keyring and the apt source line into resources/apt.
+// The private signing key is never read here.
+export function stageAptResources(env, resourcesDir) {
+  const aptDir = join(resourcesDir, 'apt');
+  const keyPath = join(aptDir, 'coppice-archive-keyring.gpg');
+  const listPath = join(aptDir, 'coppice.list');
+  const installed = installAptPublicKey({
+    publicKeyArmored: env.COPPICE_APT_PUBLIC_KEY ?? '',
+    outPath: keyPath,
+  });
+  if (!installed) {
+    rmSync(listPath, { force: true });
+    return false;
+  }
+  mkdirSync(aptDir, { recursive: true });
+  writeFileSync(listPath, `${aptSourceLine(env.COPPICE_UPDATE_BASE)}\n`);
+  return true;
 }
 
 export function builderArgs(env, { dir, platform }) {
@@ -61,14 +84,12 @@ function main() {
   writeFileSync(join(desktopDir, 'updater-mode.json'), updaterModeJson(env));
   const resourcesDir = join(desktopDir, 'resources');
   if (process.platform === 'linux' && existsSync(resourcesDir)) {
-    exportAptPublicKeyIfConfigured({
-      keyArmored: env.COPPICE_APT_SIGNING_KEY ?? '',
-      passphrase: env.COPPICE_APT_SIGNING_PASSPHRASE ?? '',
-      outPath: join(resourcesDir, 'apt', 'coppice-archive-keyring.gpg'),
-    });
+    stageAptResources(env, resourcesDir);
   }
-  delete env.COPPICE_APT_SIGNING_KEY;
-  delete env.COPPICE_APT_SIGNING_PASSPHRASE;
+  delete env.COPPICE_APT_PUBLIC_KEY;
+  for (const key of Object.keys(env)) {
+    if (key.startsWith('COPPICE_APT_SIGNING_')) delete env[key];
+  }
   const bin = join(desktopDir, 'node_modules', '.bin', 'electron-builder');
   console.log(`electron-builder ${args.join(' ')}`);
   const child = spawn(bin, args, { cwd: desktopDir, env, stdio: 'inherit' });

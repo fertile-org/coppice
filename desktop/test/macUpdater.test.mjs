@@ -4,7 +4,7 @@ import test from 'node:test';
 
 import { MAC_UPDATE_FEED } from '../src/updateEndpoints.mjs';
 import { attachMacUpdater, configureMacFeed } from '../src/macUpdater.mjs';
-import { readUpdaterMode } from '../src/readUpdaterMode.mjs';
+import { readUpdateBase, readUpdaterMode } from '../src/readUpdaterMode.mjs';
 
 test('in-place updates use the Pages feed and still accept prereleases', () => {
   const updater = {
@@ -55,4 +55,11 @@ test('updater mode is on only when the package was signed', () => {
   assert.equal(readUpdaterMode('{"macInPlaceUpdates":false}\n'), false);
   assert.equal(readUpdaterMode(''), false);
   assert.equal(readUpdaterMode('{'), false);
+});
+
+test('a packaged update base overrides the default feed host', () => {
+  assert.equal(readUpdateBase('{"updateBase":"https://apt.example.com"}'), 'https://apt.example.com');
+  assert.equal(readUpdateBase('{"updateBase":"  "}'), null);
+  assert.equal(readUpdateBase(''), null);
+  assert.equal(readUpdateBase('{'), null);
 });

@@ -7,7 +7,8 @@ import { startServer } from './src/serverProcess.mjs';
 import { startupFailureMessage } from './src/startupError.mjs';
 import { resolveLoginShellPath } from './src/shellPath.mjs';
 import { attachMacUpdater, configureMacFeed } from './src/macUpdater.mjs';
-import { readUpdaterMode } from './src/readUpdaterMode.mjs';
+import { macUpdateFeed } from './src/updateEndpoints.mjs';
+import { readUpdateBase, readUpdaterMode } from './src/readUpdaterMode.mjs';
 import { checkForUpdate } from './src/updateCheck.mjs';
 import { bannerForUpdate, startUpdateLoop, UPDATE_INTERVAL_MS } from './src/updatePlan.mjs';
 import { readUpdateSettings, UPDATE_SETTINGS_NAME, writeUpdateSettings } from './src/updateSettings.mjs';
@@ -19,13 +20,21 @@ const DEV_URL = process.env.COPPICE_WEB_URL;
 const RELEASE_REPO = JSON.parse(fs.readFileSync(path.join(__dirname, 'package.json'), 'utf8'))
   .coppice.releaseRepo;
 
+function readPackagedUpdaterMode() {
+  try {
+    return fs.readFileSync(path.join(__dirname, 'updater-mode.json'), 'utf8');
+  } catch {
+    return '';
+  }
+}
+
 function packagedMacInPlaceUpdates() {
   if (process.platform !== 'darwin' || !app.isPackaged) return false;
-  try {
-    return readUpdaterMode(fs.readFileSync(path.join(__dirname, 'updater-mode.json'), 'utf8'));
-  } catch {
-    return false;
-  }
+  return readUpdaterMode(readPackagedUpdaterMode());
+}
+
+function packagedMacFeed() {
+  return macUpdateFeed(readUpdateBase(readPackagedUpdaterMode()));
 }
 
 const devUserData = devUserDataPath({
@@ -124,7 +133,7 @@ async function ensureMacUpdater() {
     macUpdaterLoading = (async () => {
       try {
         const { autoUpdater } = await import('electron-updater');
-        configureMacFeed(autoUpdater);
+        configureMacFeed(autoUpdater, packagedMacFeed());
         autoUpdater.autoInstallOnAppQuit = automaticUpdatesEnabled();
         macUpdater = attachMacUpdater(autoUpdater, {
           onDownloaded(info) {

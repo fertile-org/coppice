@@ -28,18 +28,17 @@ if hash update-desktop-database 2>/dev/null; then
 fi
 
 # First install registers the apt source, the way VS Code does. Later updates
-# arrive through apt upgrade or Software Updater. The key is packaged only
-# when the release build has COPPICE_APT_SIGNING_KEY; local builds omit it.
+# arrive through apt upgrade or Software Updater. The key and the source list
+# are packaged only when the release build has COPPICE_APT_PUBLIC_KEY.
+# Local builds omit both, and this script does not embed the repository URL.
 KEY_SRC="$APP_DIR/resources/apt/coppice-archive-keyring.gpg"
+LIST_SRC="$APP_DIR/resources/apt/coppice.list"
 KEY_DST=/usr/share/keyrings/coppice-archive-keyring.gpg
 LIST=/etc/apt/sources.list.d/coppice.list
-if [ -f "$KEY_SRC" ]; then
+if [ -f "$KEY_SRC" ] && [ -f "$LIST_SRC" ]; then
     install -d -m 0755 /usr/share/keyrings
     install -m 0644 "$KEY_SRC" "$KEY_DST"
-    cat > "$LIST" << 'EOF'
-deb [arch=amd64,arm64 signed-by=/usr/share/keyrings/coppice-archive-keyring.gpg] https://fertile-org.github.io/coppice stable main
-EOF
-    chmod 644 "$LIST"
+    install -m 0644 "$LIST_SRC" "$LIST"
 fi
 
 # Ubuntu 24.04+ restricts unprivileged user namespaces; the profile grants them to

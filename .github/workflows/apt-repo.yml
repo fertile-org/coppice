@@ -22,6 +22,9 @@ concurrency:
 jobs:
   publish:
     runs-on: ubuntu-latest
+    # COPPICE_APT_SIGNING_KEY and COPPICE_APT_SIGNING_PASSPHRASE are secrets on
+    # this environment. They are not repository secrets and are not used by
+    # the packaging workflow.
     environment:
       name: github-pages
       url: ${{ steps.deploy.outputs.page_url }}

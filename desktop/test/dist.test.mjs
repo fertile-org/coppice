@@ -39,8 +39,18 @@ describe('builderArgs', () => {
     assert.equal(macInPlaceUpdatesEnabled({ CSC_LINK: '' }), false);
     assert.equal(macInPlaceUpdatesEnabled({ CSC_LINK: '   ' }), false);
     assert.equal(macInPlaceUpdatesEnabled({ CSC_LINK: 'cert' }), true);
-    assert.equal(updaterModeJson({ CSC_LINK: 'cert' }), '{"macInPlaceUpdates":true}\n');
-    assert.equal(updaterModeJson({}), '{"macInPlaceUpdates":false}\n');
+    assert.equal(
+      updaterModeJson({ CSC_LINK: 'cert' }),
+      '{"macInPlaceUpdates":true,"updateBase":"https://fertile-org.github.io/coppice"}\n',
+    );
+    assert.equal(
+      updaterModeJson({}),
+      '{"macInPlaceUpdates":false,"updateBase":"https://fertile-org.github.io/coppice"}\n',
+    );
+    assert.equal(
+      updaterModeJson({ COPPICE_UPDATE_BASE: 'https://apt.example.com/' }),
+      '{"macInPlaceUpdates":false,"updateBase":"https://apt.example.com"}\n',
+    );
   });
 
   it('never publishes from electron-builder', () => {

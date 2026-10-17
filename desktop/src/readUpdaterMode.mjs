@@ -9,3 +9,15 @@ export function readUpdaterMode(jsonText) {
     return false;
   }
 }
+
+// Null means the package did not record a base, so the app uses the default.
+export function readUpdateBase(jsonText) {
+  try {
+    const value = JSON.parse(jsonText)?.updateBase;
+    if (typeof value !== 'string') return null;
+    const trimmed = value.trim();
+    return trimmed === '' ? null : trimmed;
+  } catch {
+    return null;
+  }
+}

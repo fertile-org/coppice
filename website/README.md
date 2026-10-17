@@ -54,9 +54,4 @@ Vercel should use `website/` as the project root. `website/vercel.json` turns on
 
 Docs search is a button in the docs header. It opens a dialog that searches the Pagefind index. The `astro-pagefind` integration builds that index from the static output at the end of `npm run build` (the same command Vercel runs). Only the docs article is indexed: `data-pagefind-body` is on that article, and pages without it — the homepage, download page, and 404 — stay out of the index. The site header, nav, and footer are marked `data-pagefind-ignore`.
 
-GitHub Pages is an optional manual deploy, still at `/coppice`:
-
-1. In the repo settings, set **Pages → Build and deployment → Source** to **GitHub Actions**.
-2. Run the **Website** workflow manually (**Actions → Website → Run workflow**) with **Deploy to GitHub Pages at /coppice** checked.
-
-That dispatch rebuilds with `BASE_PATH=/coppice` and `SITE_URL=https://fertile-org.github.io`, rewrites `docs.html` into `docs/index.html` (Pages does not apply Vercel clean URLs), then deploys `website/dist` with the built-in `GITHUB_TOKEN` (`pages: write` and `id-token: write`). Pull requests only build and upload the `website` artifact, with `base` `/`.
+The marketing site is not published to GitHub Pages. Pages is the apt repository and the macOS update feed (`.github/workflows/apt-repo.yml`). Deploying this site there would replace those files. `BASE_PATH` still exists so a build can be prefixed, and the default build is the domain root Vercel serves. Pull requests build and upload the `website` artifact.

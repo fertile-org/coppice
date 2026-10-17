@@ -115,21 +115,23 @@ Desktop installers are built by `.github/workflows/release.yml` ([design](superp
 
 Installed apps check the GitHub releases list for `fertile-org/coppice` (drafts skipped, prereleases included) on launch and every 4 hours. The check does not block startup. Network errors are ignored. **Settings → Updates** stores `automaticUpdates` in `update-settings.json` under the app data directory (default `true`).
 
-Linux updates are an apt repository on GitHub Pages (`https://fertile-org.github.io/coppice`, suite `stable`, amd64 and arm64). `.github/workflows/apt-repo.yml` builds it when a release is **published**, or from a manual run. It does not run when a draft is created, and it does not create or edit releases. The `.deb` postinst writes `/etc/apt/sources.list.d/coppice.list` and installs the public key at `/usr/share/keyrings/coppice-archive-keyring.gpg` when the package was built with `COPPICE_APT_SIGNING_KEY`.
+Linux updates are an apt repository on GitHub Pages (suite `stable`, amd64 and arm64). The default host is `DEFAULT_UPDATE_BASE` in `desktop/src/updateEndpoints.mjs` (`https://fertile-org.github.io/coppice`). Set the repository variable `COPPICE_UPDATE_BASE` to move the apt source and the macOS feed to another origin, such as `https://apt.example.com`, with no trailing slash. Packaging reads that variable; an empty value keeps the default. `.github/workflows/apt-repo.yml` builds the repository when a release is **published**, or from a manual run. It does not run when a draft is created, and it does not create or edit releases. The `.deb` postinst copies `/usr/share/keyrings/coppice-archive-keyring.gpg` and `/etc/apt/sources.list.d/coppice.list` from files the package build wrote. Those files are written only when the repository variable `COPPICE_APT_PUBLIC_KEY` is set to the ASCII-armored **public** key. The private key is not available to packaging.
 
-macOS in-place install uses `electron-updater` against `latest-mac.yml` on that same Pages site. It is on only when the build was signed: `desktop/scripts/dist.mjs` writes `updater-mode.json` with `macInPlaceUpdates: true` when `CSC_LINK` is set. Unsigned builds keep a download link. Turning in-place install on is that secret (plus the notarization secrets below); no application change is required. The Pages workflow writes `updates/latest-mac.yml` when the release has macOS zip assets.
+macOS in-place install uses `electron-updater` against `latest-mac.yml` on that same host (`<base>/updates/`). It is on only when the build was signed: `desktop/scripts/dist.mjs` writes `updater-mode.json` with `macInPlaceUpdates: true` when `CSC_LINK` is set, and records `updateBase` in that same file. Unsigned builds keep a download link. Turning in-place install on is that secret (plus the notarization secrets below); no application change is required. The Pages workflow writes `updates/latest-mac.yml` when the release has macOS zip assets. The marketing site is Vercel. `website.yml` does not deploy to Pages, because that deploy would replace the apt repository.
 
-**Enable macOS signing and notarization:** add these repository secrets. Without `CSC_LINK`, mac builds are unsigned and the release notes include the `xattr` workaround.
+**Signing secrets live on GitHub environments**, not as repository secrets. `release.yml`'s build job uses the `release` environment (`CSC_*`, `APPLE_*`). `apt-repo.yml` uses the `github-pages` environment (`COPPICE_APT_SIGNING_KEY`, `COPPICE_APT_SIGNING_PASSPHRASE`). Without `CSC_LINK`, mac builds are unsigned and the release notes include the `xattr` workaround.
 
-| Secret | Value |
-|--------|-------|
-| `CSC_LINK` | Base64 of the Developer ID Application `.p12` |
-| `CSC_KEY_PASSWORD` | Password of that `.p12` |
-| `APPLE_API_KEY` | Contents of the App Store Connect API key (`AuthKey_XXXX.p8`) |
-| `APPLE_API_KEY_ID` | Key ID of that API key |
-| `APPLE_API_ISSUER` | Issuer ID (UUID) of that API key |
-| `COPPICE_APT_SIGNING_KEY` | ASCII-armored private GPG key that signs the apt `Release` file |
-| `COPPICE_APT_SIGNING_PASSPHRASE` | Passphrase for that key. Empty if the key has none |
+| Name | Where | Value |
+|------|-------|-------|
+| `CSC_LINK` | `release` environment secret | Base64 of the Developer ID Application `.p12` |
+| `CSC_KEY_PASSWORD` | `release` environment secret | Password of that `.p12` |
+| `APPLE_API_KEY` | `release` environment secret | Contents of the App Store Connect API key (`AuthKey_XXXX.p8`) |
+| `APPLE_API_KEY_ID` | `release` environment secret | Key ID of that API key |
+| `APPLE_API_ISSUER` | `release` environment secret | Issuer ID (UUID) of that API key |
+| `COPPICE_APT_SIGNING_KEY` | `github-pages` environment secret | ASCII-armored private GPG key that signs the apt `Release` file |
+| `COPPICE_APT_SIGNING_PASSPHRASE` | `github-pages` environment secret | Passphrase for that key. Empty if the key has none |
+| `COPPICE_APT_PUBLIC_KEY` | repository variable | ASCII-armored public half of that key. Packaging refuses a private key |
+| `COPPICE_UPDATE_BASE` | repository variable | Optional apt and macOS feed origin. Empty uses the default in `updateEndpoints.mjs` |
 
 **Build locally:** `make desktop-dist-dir` (unpacked, host platform; `POSTGRES_DIR=<dir with bin/lib/share>` skips the pinned Postgres download), then `make desktop-smoke`. After that, `cd desktop && yarn dist` builds the installer for the host platform from the same assembled resources.
 

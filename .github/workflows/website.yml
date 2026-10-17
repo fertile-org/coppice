@@ -1,9 +1,10 @@
 name: Website
 
-# Builds the Astro marketing site when it changes. The static `website/dist`
-# artifact is the deployable output. Deploy to GitHub Pages is opt-in
-# (workflow_dispatch) so a normal PR or push does not need Pages enabled
-# and does not need repository secrets.
+# Builds the Astro marketing site when it changes. The public site is
+# https://getcoppice.vercel.app/, served by Vercel. This workflow does not
+# deploy anywhere. GitHub Pages is only the apt repository and the macOS
+# update feed, published by apt-repo.yml. A website deploy to that same
+# Pages site would replace those files.
 
 on:
   pull_request:
@@ -16,11 +17,6 @@ on:
       - 'website/**'
       - '.github/workflows/website.yml'
   workflow_dispatch:
-    inputs:
-      deploy:
-        description: Deploy to GitHub Pages at /coppice
-        type: boolean
-        default: false
 
 permissions:
   contents: read
@@ -35,12 +31,6 @@ jobs:
     env:
       ASTRO_TELEMETRY_DISABLED: '1'
       PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
-      # The public site is https://getcoppice.vercel.app/ at the domain root.
-      # Project Pages (manual dispatch only) still lives at /coppice.
-      # PR artifacts stay at base `/` so they open from the root of any static host.
-      BASE_PATH: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.deploy == 'true' && '/coppice' || '/' }}
-      SITE_BASE: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.deploy == 'true' && '/coppice' || '/' }}
-      SITE_URL: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.deploy == 'true' && 'https://fertile-org.github.io' || '' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -66,43 +56,9 @@ jobs:
       - name: Check download page
         working-directory: website
         run: npm run check:download && npm run check:download-page
-      - name: Directory indexes for GitHub Pages
-        if: github.event_name == 'workflow_dispatch' && github.event.inputs.deploy == 'true'
-        working-directory: website
-        run: node scripts/to-directory-indexes.mjs dist && npm run check:links -- --host-style=directory
       - uses: actions/upload-artifact@v4
         with:
           name: website
           path: website/dist
           if-no-files-found: error
           retention-days: 14
-      - name: Check GitHub Pages base
-        if: github.event_name != 'workflow_dispatch' || github.event.inputs.deploy != 'true'
-        working-directory: website
-        env:
-          BASE_PATH: /coppice
-          SITE_BASE: /coppice
-          SITE_URL: https://fertile-org.github.io
-        run: npm run build && npm run check:links && node scripts/to-directory-indexes.mjs dist && npm run check:links -- --host-style=directory
-
-  deploy:
-    if: github.event_name == 'workflow_dispatch' && github.event.inputs.deploy == 'true'
-    needs: build
-    runs-on: ubuntu-latest
-    permissions:
-      pages: write
-      id-token: write
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          name: website
-          path: website-dist
-      - uses: actions/upload-pages-artifact@v3
-        with:
-          path: website-dist
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v4
