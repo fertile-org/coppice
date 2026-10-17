@@ -6,8 +6,9 @@
  * desktop mode, 1440×900. Seeds the acme-web repo and a small board, then
  * records the core-flow storyboard. Card moves stay instant. The board
  * stays on the left edge while recording; a later column slides in with an
- * edit pan that lands on whole columns. Crossfades, caption fades, and the
- * highlight pulse are applied in the edit. The pulse wraps the card border.
+ * edit pan that lands on whole columns. Crossfades and the highlight pulse
+ * are applied in the edit. Captions fade in place at the bottom center, one
+ * at a time. The pulse wraps the card border.
  * Writes:
  *
  *   website/public/assets/marketing.mp4   1440×900
@@ -1008,6 +1009,114 @@ for item in frames:
   );
 }
 
+async function assertCaptionFrames(mp4, acceptTime) {
+  const script = `
+import subprocess, sys
+from PIL import Image
+
+mp4 = sys.argv[1]
+accept_time = float(sys.argv[2])
+width, height = 1440, 900
+frame_bytes = width * height * 3
+
+def pills(image):
+    pixels = image.load()
+    frame_w, frame_h = image.size
+    cols = []
+    for x in range(frame_w):
+        ys = []
+        for y in range(780, frame_h):
+            red, green, blue = pixels[x, y]
+            neutral = abs(red - green) < 18 and abs(green - blue) < 18 and abs(red - blue) < 18
+            if red < 70 and green < 66 and blue < 62 and neutral:
+                ys.append(y)
+        if len(ys) >= 24:
+            cols.append((x, min(ys), max(ys), len(ys)))
+    runs = []
+    for x, y0, y1, count in cols:
+        if not runs or x - runs[-1]["x1"] > 20:
+            runs.append({"x0": x, "x1": x, "y0": y0, "y1": y1, "n": count})
+        else:
+            run = runs[-1]
+            run["x1"] = x
+            run["y0"] = min(run["y0"], y0)
+            run["y1"] = max(run["y1"], y1)
+            run["n"] += count
+    found = []
+    for run in runs:
+        box_w = run["x1"] - run["x0"] + 1
+        box_h = run["y1"] - run["y0"] + 1
+        if box_w < 24 or box_h < 36 or box_h > 90:
+            continue
+        if run["n"] / (box_w * box_h) < 0.45:
+            continue
+        found.append((run["x0"], run["x1"]))
+    return found
+
+proc = subprocess.Popen(
+    [
+        "ffmpeg", "-v", "error", "-i", mp4,
+        "-vf", "fps=5",
+        "-f", "rawvideo", "-pix_fmt", "rgb24", "pipe:1",
+    ],
+    stdout=subprocess.PIPE,
+)
+index = 0
+previous = None
+accept_times = []
+try:
+    while True:
+        blob = proc.stdout.read(frame_bytes)
+        if len(blob) < frame_bytes:
+            break
+        time = index / 5
+        found = pills(Image.frombytes("RGB", (width, height), blob))
+        if len(found) > 1:
+            raise SystemExit(f"caption frame {time:.2f}s has {len(found)} pills {found}")
+        if found:
+            center = (found[0][0] + found[0][1]) / 2
+            if abs(center - 720) > 100:
+                raise SystemExit(f"caption frame {time:.2f}s is off center at {center:.0f} {found}")
+            if previous is not None and abs(center - previous) > 50:
+                raise SystemExit(
+                    f"caption frame {time:.2f}s slid from {previous:.0f} to {center:.0f}"
+                )
+            previous = center
+        else:
+            previous = None
+        if accept_time - 0.05 <= time <= accept_time + 2.7:
+            if len(found) != 1:
+                raise SystemExit(f"accept caption missing at {time:.2f}s")
+            accept_times.append(time)
+        index += 1
+finally:
+    proc.stdout.close()
+    proc.wait()
+if index == 0:
+    raise SystemExit("caption check decoded no frames")
+if not accept_times or accept_times[-1] - accept_times[0] < 2.5:
+    span = 0 if not accept_times else accept_times[-1] - accept_times[0]
+    raise SystemExit(f"accept caption lasted {span:.2f}s, need at least 2.5s")
+
+for offset in (0, 0.8, 1.6, 2.5):
+    shot = f"/tmp/hero-caption-check-{offset:.1f}.png"
+    subprocess.check_call(
+        ["ffmpeg", "-y", "-v", "error", "-ss", f"{accept_time + offset:.3f}", "-i", mp4, "-frames:v", "1", shot]
+    )
+    text = subprocess.check_output(
+        ["tesseract", shot, "stdout", "--psm", "6"],
+        text=True,
+        stderr=subprocess.DEVNULL,
+    ).lower()
+    if "nothing is done" not in text or "accepted, not merged" not in text:
+        raise SystemExit(f"accept +{offset:.1f}s missing caption or accepted state:\\n{text}")
+    print(f"accept +{offset:.1f}s caption overlaps Accepted, not merged")
+span = accept_times[-1] - accept_times[0]
+print(f"captions stay centered ({index} frames, accept hold {span:.2f}s)")
+`;
+  return run(['python3', '-c', script, mp4, acceptTime.toFixed(3)], { cwd: REPO_ROOT });
+}
+
 async function assemble(raw, pulses, stills) {
   const probed = await ffprobe(raw);
   const duration = Number(probed.duration);
@@ -1228,6 +1337,9 @@ async function assemble(raw, pulses, stills) {
   await grab(posterTime, posterFile);
   await copyFile(posterFile, POSTER);
   console.log((await assertPulseFrames(pulseFrames)).trim());
+  const acceptStill = stillFrames.find((still) => still.name === 'accept');
+  if (!acceptStill) fail('accept still is missing');
+  console.log((await assertCaptionFrames(MP4_OUT, acceptStill.time)).trim());
   await rm(scratch, { recursive: true, force: true });
 
   const mp4 = await ffprobe(MP4_OUT);
@@ -1376,6 +1488,9 @@ async function record(scene) {
         sessionStorage.setItem('coppice.hero.caption.visible', on ? '1' : '0');
       }, Boolean(text));
       captionAt = text ? Date.now() : 0;
+      // The pill only transitions opacity, in place. Wait until that fade-in
+      // finishes so a later pan cannot start while the caption is still appearing.
+      if (text) await sleep(520);
     };
     const cutScene = async (marker, settle) => {
       await page.evaluate((css) => {
@@ -1425,6 +1540,9 @@ async function record(scene) {
     };
     const pulseCue = async (locator, { column } = {}) => {
       await pinBoardLeft(page);
+      // The edit pan looks back PAN_SECONDS before this cue. Hold the settled
+      // board first so that window is a stable frame, caption already in place.
+      if (column) await sleep(PAN_SECONDS * 1000);
       const box = await measureCard(page, locator);
       const pulse = {
         x: box.x,
@@ -1438,23 +1556,32 @@ async function record(scene) {
         const scrollTo = snapScroll(geo, column);
         const track = path.join(videoDir, `track-${pulses.length}.png`);
         await page.evaluate(() => {
-          const board = document.querySelector('#board');
           const saved = [];
-          let node = board;
+          const set = (node, prop, value) => {
+            saved.push({
+              node,
+              prop,
+              value: node.style.getPropertyValue(prop),
+              priority: node.style.getPropertyPriority(prop),
+            });
+            node.style.setProperty(prop, value, 'important');
+          };
+          let node = document.querySelector('#board');
           while (node) {
-            saved.push({ node, overflow: node.style.overflow, priority: node.style.getPropertyPriority('overflow') });
-            node.style.setProperty('overflow', 'visible', 'important');
+            set(node, 'overflow', 'visible');
             node = node.parentElement;
           }
+          // The fixed caption is painted into this wide shot. Hide it so the
+          // pan cannot slide a second pill across the frame.
+          const caption = document.getElementById('coppice-hero-caption');
+          if (caption) set(caption, 'visibility', 'hidden');
           window.__heroOverflow = saved;
         });
         await page.locator('#board > div').screenshot({ path: track, animations: 'disabled' });
         await page.evaluate(() => {
           for (const item of window.__heroOverflow ?? []) {
-            item.node.style.removeProperty('overflow');
-            if (item.overflow) {
-              item.node.style.setProperty('overflow', item.overflow, item.priority || '');
-            }
+            item.node.style.removeProperty(item.prop);
+            if (item.value) item.node.style.setProperty(item.prop, item.value, item.priority || '');
           }
           window.__heroOverflow = undefined;
         });
@@ -1628,7 +1755,6 @@ async function record(scene) {
     await acceptDialog.waitFor({ state: 'hidden', timeout: 15_000 });
     await detail.locator('header').getByText('Done', { exact: true }).waitFor({ timeout: 15_000 });
     const drawerText = await detail.innerText();
-    await fadeCaption(null);
     await page.getByRole('button', { name: 'Close', exact: true }).click();
     await pinBoardLeft(page);
     const doneCard = storyCard('Done');
@@ -1652,7 +1778,7 @@ async function record(scene) {
       await preparePage(page);
     });
     await assertClean(page, 'scene 7');
-    await hold(page, 4700);
+    await hold(page, 2000);
 
     const video = page.video();
     await page.close();

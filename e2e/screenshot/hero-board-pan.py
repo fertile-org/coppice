@@ -4,7 +4,9 @@
 The page stays scrolled to the left edge. This replaces the board rectangle
 with a crop of the full column track so a later column can slide into view
 without a column resting half off the frame. The caption pill is copied back
-from the original frame when it is visible.
+from the original frame and stays put. A frame whose pill was hidden for the
+track shot reuses the last frame that still had it, so the caption does not
+blink or travel with the pan.
 """
 
 import argparse
@@ -50,7 +52,23 @@ def paste_track(frame, original, track, board, pad, scroll):
     frame.paste(crop, (dest_x, dest_y))
 
 
-def restore_caption(frame, original, caption):
+def pill_present(piece):
+    """The crop holds the dark caption pill, not the light board behind it."""
+    width, height = piece.size
+    x0, y0 = int(width * 0.28), int(height * 0.28)
+    x1, y1 = int(width * 0.72), int(height * 0.72)
+    if x1 <= x0 or y1 <= y0:
+        return False
+    dark = 0
+    total = 0
+    for red, green, blue in piece.crop((x0, y0, x1, y1)).getdata():
+        total += 1
+        if red < 110 and green < 105 and blue < 100:
+            dark += 1
+    return total > 0 and dark >= max(8, total // 25)
+
+
+def restore_caption(frame, original, caption, held):
     if caption is None:
         return
     x, y, w, h = caption
@@ -64,6 +82,12 @@ def restore_caption(frame, original, caption):
     if w < 8 or h < 8:
         return
     piece = original.crop((x, y, x + w, y + h))
+    if pill_present(piece):
+        held["piece"] = piece
+    elif held.get("piece") is not None and held["piece"].size == piece.size:
+        piece = held["piece"]
+    else:
+        return
     frame.paste(piece, (x, y), stadium_mask(w, h))
 
 
@@ -133,6 +157,7 @@ def main():
     )
     frame_bytes = 1440 * 900 * 3
     index = 0
+    held = {}
     try:
         while True:
             blob = decode.stdout.read(frame_bytes)
@@ -147,7 +172,7 @@ def main():
                 scroll = args.scroll * ease(progress)
                 frame = original.copy()
                 paste_track(frame, original, track, board, args.pad, scroll)
-                restore_caption(frame, original, caption)
+                restore_caption(frame, original, caption, held)
             encode.stdin.write(frame.tobytes())
             index += 1
     finally:
