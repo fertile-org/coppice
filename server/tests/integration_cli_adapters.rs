@@ -321,6 +321,59 @@ async fn kilo_accepts_result_despite_nonzero_exit() {
 }
 
 #[tokio::test]
+async fn kilo_resume_nonzero_exit_is_a_missing_session() {
+    let wt = worktree(&[
+        ("FAKE_CLI_STDERR", "Session not found"),
+        ("FAKE_CLI_EXIT", "1"),
+    ]);
+    let mut input = run_input(wt.path());
+    input.resume_session_id = Some("kilo_sess_gone".into());
+
+    let err = kilo(30)
+        .run(input)
+        .await
+        .expect_err("missing session");
+
+    match err {
+        ProviderError::ResumeSessionInvalid(msg) => {
+            assert!(msg.contains("Session not found"), "{msg}");
+        }
+        other => panic!("expected ResumeSessionInvalid, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn kilo_resume_error_event_is_a_missing_session() {
+    let wt = worktree(&[(
+        "FAKE_CLI_LINES",
+        r#"{"type":"error","sessionID":"kilo_sess_gone","error":{"message":"Session not found"}}"#,
+    )]);
+    let mut input = run_input(wt.path());
+    input.resume_session_id = Some("kilo_sess_gone".into());
+
+    let err = kilo(30).run(input).await.expect_err("error event");
+
+    assert!(
+        matches!(err, ProviderError::ResumeSessionInvalid(_)),
+        "{err:?}"
+    );
+}
+
+#[tokio::test]
+async fn kilo_resume_without_output_is_a_missing_session() {
+    let wt = worktree(&[]);
+    let mut input = run_input(wt.path());
+    input.resume_session_id = Some("kilo_sess_gone".into());
+
+    let err = kilo(30).run(input).await.expect_err("no output");
+
+    assert!(
+        matches!(err, ProviderError::ResumeSessionInvalid(_)),
+        "{err:?}"
+    );
+}
+
+#[tokio::test]
 async fn kilo_nonzero_exit_without_result_message() {
     let wt = worktree(&[
         ("FAKE_CLI_LINES", r#"{"type":"session.updated"}"#),

@@ -177,6 +177,7 @@ impl AgentProvider for KiloCodeProvider {
             stream: input.stream.clone(),
             console: KiloConsolePublisher::new(),
             assistant_text: String::new(),
+            saw_error: false,
         };
         let io = RunIo {
             cancel_rx: input.cancel_rx,
@@ -195,16 +196,41 @@ impl AgentProvider for KiloCodeProvider {
             }
         };
 
+        let resuming = input
+            .resume_session_id
+            .as_ref()
+            .is_some_and(|sid| !sid.is_empty());
+        // A resumed Kilo session that is gone shows up as a non-zero exit
+        // (`Session not found` on stderr), a JSON `error` event, or no result.
+        // The chat worker retries that once without `--session`.
         if !exit.status.success() && !exit.had_terminal_result {
-            return Err(ProviderError::InvalidFixture(format!(
-                "kilo-code exited with status {}",
-                exit.status
-            )));
+            let detail = format!("kilo-code exited with status {}", exit.status);
+            if resuming {
+                return Err(ProviderError::ResumeSessionInvalid(with_stderr(
+                    detail,
+                    &exit.stderr_tail,
+                )));
+            }
+            return Err(ProviderError::InvalidFixture(detail));
         }
 
-        extract_result_from_text(&handler.assistant_text).ok_or_else(|| {
-            ProviderError::MissingResult("no result contract found in kilo-code output".into())
-        })
+        if let Some(result) = extract_result_from_text(&handler.assistant_text) {
+            if !(resuming && handler.saw_error) {
+                return Ok(result);
+            }
+        } else if !resuming {
+            return Err(ProviderError::MissingResult(
+                "no result contract found in kilo-code output".into(),
+            ));
+        }
+
+        let mut detail = if handler.saw_error {
+            "kilo-code resume error event".to_string()
+        } else {
+            "no result contract found in kilo-code output".to_string()
+        };
+        detail = with_stderr(detail, &exit.stderr_tail);
+        Err(ProviderError::ResumeSessionInvalid(detail))
     }
 }
 
@@ -215,6 +241,7 @@ struct KiloLines {
     stream: Option<Arc<RunStreamHandle>>,
     console: KiloConsolePublisher,
     assistant_text: String,
+    saw_error: bool,
 }
 
 impl LineHandler for KiloLines {
@@ -227,6 +254,9 @@ impl LineHandler for KiloLines {
             self.console.handle_json(stream, value);
         }
 
+        if is_error_event(value) {
+            self.saw_error = true;
+        }
         if let Some(text) = extract_assistant_text(value) {
             self.assistant_text.push_str(&text);
         }
@@ -236,6 +266,27 @@ impl LineHandler for KiloLines {
             stop: is_terminal_event(value),
         }
     }
+}
+
+fn with_stderr(detail: String, stderr_tail: &[String]) -> String {
+    let joined = stderr_tail
+        .iter()
+        .map(|line| line.trim())
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>()
+        .join(" | ");
+    if joined.is_empty() {
+        detail
+    } else {
+        format!("{detail}; stderr: {joined}")
+    }
+}
+
+fn is_error_event(value: &Value) -> bool {
+    matches!(
+        value.get("type").and_then(|v| v.as_str()),
+        Some("error") | Some("session.error")
+    )
 }
 
 fn is_terminal_event(value: &Value) -> bool {

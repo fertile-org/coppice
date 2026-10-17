@@ -1762,6 +1762,159 @@ async fn wait_provider_session(pool: &sqlx::PgPool, session_id: uuid::Uuid) -> O
     None
 }
 
+/// A Kilo `--session` launch that exits non-zero is a missing session. The
+/// turn clears that id, retries once without `--session`, and the retry
+/// prompt includes the earlier turns through the same bounded transcript
+/// non-resume chats use.
+#[cfg(feature = "embedded-test-db")]
+#[tokio::test]
+async fn kilo_chat_resume_failure_retries_once_with_earlier_context() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+
+    let fake = env!("CARGO_BIN_EXE_fake-cli");
+    let (state, app, cookie, csrf, env) = common::bootstrap_and_login_with_state_and_workers(
+        "backend_engineer/chat_turn",
+        |config| {
+            config.agent.connectors.kilo_code.enabled = Some(true);
+            config.agent.connectors.kilo_code.command = fake.to_string();
+            config.knowledge.context_budget.latest_comments = 180;
+        },
+    )
+    .await;
+    let pool = state.db.as_ref().expect("test db");
+    let agent_id = common::create_agent_with_preset_key(
+        &app,
+        "backend_engineer",
+        "Backend Engineer",
+        &cookie,
+        &csrf,
+    )
+    .await;
+    let agent_uuid = uuid::Uuid::parse_str(&agent_id).unwrap();
+    set_agent_connector(pool, agent_uuid, "kilo-code").await;
+
+    let created = app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            "/api/chat/sessions",
+            &format!(r#"{{"agentId":"{agent_id}"}}"#),
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(created.status(), StatusCode::CREATED);
+    let session: serde_json::Value = common::json_body(created).await;
+    let session_id = session["id"].as_str().unwrap().to_string();
+    let session_uuid = uuid::Uuid::parse_str(&session_id).unwrap();
+
+    let fixture = std::fs::read_to_string(
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../fixtures/kilo-code/done.jsonl"),
+    )
+    .expect("kilo fixture");
+    let chat_dir = env.worktrees.path().join("chat").join(&session_id);
+    std::fs::create_dir_all(&chat_dir).expect("chat dir");
+    std::fs::write(
+        chat_dir.join(".fake-cli-env.json"),
+        serde_json::json!({
+            "FAKE_CLI_LINES": fixture,
+            "FAKE_CLI_REJECT_SESSION": "1",
+        })
+        .to_string(),
+    )
+    .expect("fake cli env");
+
+    let earlier = format!(
+        "FIRSTUNIQUE older kilo turn\n{}",
+        "PADTOKEN ".repeat(400)
+    );
+    let first = post_chat_message(&app, &cookie, &csrf, &session_id, &earlier).await;
+    let first_run = wait_run(&app, &cookie, &csrf, &first).await;
+    assert_eq!(
+        first_run["run"]["status"], "succeeded",
+        "first kilo turn failed: {first_run}"
+    );
+    assert_eq!(
+        wait_provider_session(pool, session_uuid).await.as_deref(),
+        Some("kilo_sess_abc123")
+    );
+    sqlx::query(
+        "UPDATE chat_sessions SET provider_session_id = 'kilo_sess_gone', provider_session_connector = 'kilo-code' WHERE id = $1",
+    )
+    .bind(session_uuid)
+    .execute(pool)
+    .await
+    .expect("seed gone session");
+
+    let second = post_chat_message(
+        &app,
+        &cookie,
+        &csrf,
+        &session_id,
+        "Follow-up after the missing session",
+    )
+    .await;
+    let second_run = wait_run(&app, &cookie, &csrf, &second).await;
+    assert_eq!(
+        second_run["run"]["status"], "succeeded",
+        "resume fallback did not succeed: {second_run}"
+    );
+
+    let log_path = std::path::Path::new(&state.config.storage.artifacts_dir)
+        .join("runs")
+        .join(&second)
+        .join("run.log");
+    let log = std::fs::read_to_string(&log_path)
+        .unwrap_or_else(|err| panic!("read {}: {err}", log_path.display()));
+    let launches: Vec<&str> = log.lines().filter(|line| line.contains("flags:")).collect();
+    assert_eq!(
+        launches.len(),
+        2,
+        "resume must be tried once and retried once: {log}"
+    );
+    assert!(
+        launches[0].contains("--session kilo_sess_gone"),
+        "first launch did not resume: {log}"
+    );
+    assert!(
+        !launches[1].contains("--session"),
+        "retry passed --session again: {log}"
+    );
+
+    let context = std::fs::read_to_string(chat_dir.join(".agent").join("context.md"))
+        .expect("fallback context");
+    assert!(
+        context.contains("### Earlier messages"),
+        "fallback did not use the bounded transcript: {context}"
+    );
+    assert!(
+        context.contains("FIRSTUNIQUE"),
+        "fallback dropped the earlier turn: {context}"
+    );
+    assert!(
+        context.contains("Follow-up after the missing session"),
+        "{context}"
+    );
+    assert!(
+        !context.contains("PADTOKEN"),
+        "fallback pasted the full earlier turn instead of the summary: {context}"
+    );
+
+    let stored: Option<String> = sqlx::query_scalar(
+        "SELECT provider_session_id FROM chat_sessions WHERE id = $1",
+    )
+    .bind(session_uuid)
+    .fetch_one(pool)
+    .await
+    .expect("session after fallback");
+    assert_eq!(stored.as_deref(), Some("kilo_sess_abc123"));
+}
+
 #[tokio::test]
 async fn chat_session_starts_on_cursor_and_kilo() {
     let _guard = common::DB_TEST_LOCK.lock().await;

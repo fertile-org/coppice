@@ -1068,6 +1068,15 @@ impl<'a> RunService<'a> {
         Ok(())
     }
 
+    /// Drop a session id captured from a resume attempt that did not continue.
+    pub async fn clear_session_id(&self, run_id: Uuid) -> Result<(), RunError> {
+        sqlx::query("UPDATE agent_runs SET session_id = NULL WHERE id = $1")
+            .bind(run_id)
+            .execute(self.pool)
+            .await?;
+        Ok(())
+    }
+
     pub async fn mark_interrupted(&self, run_id: Uuid, reason: &str) -> Result<AgentRun, RunError> {
         let message = format!("interrupted: {reason}");
         let run = self.finish_failed(run_id, &message).await?;
