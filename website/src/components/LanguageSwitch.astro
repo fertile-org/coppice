@@ -1,0 +1,47 @@
+---
+import { LOCALES } from '../i18n/locales.mjs';
+import { hrefFor, useI18n } from '../i18n/runtime';
+
+const ctx = useI18n(Astro);
+const options = LOCALES.map((locale) => ({
+  ...locale,
+  href: hrefFor(locale.path, ctx.englishPath),
+}));
+---
+
+<div class="lang-switch">
+  <label>
+    <span class="visually-hidden">{ctx.ui.languageLabel}</span>
+    <select data-language-switch>
+      {
+        options.map((locale) => (
+          <option value={locale.href} lang={locale.code} selected={locale.path === ctx.locale}>
+            {locale.name}
+          </option>
+        ))
+      }
+    </select>
+  </label>
+  <noscript>
+    <span class="lang-switch-links">
+      {
+        options.map((locale) => (
+          <a href={locale.href} hrefLang={locale.code} lang={locale.code} aria-current={locale.path === ctx.locale ? 'true' : undefined}>
+            {locale.name}
+          </a>
+        ))
+      }
+    </span>
+  </noscript>
+</div>
+
+<script>
+  const select = document.querySelector('[data-language-switch]');
+  if (select instanceof HTMLSelectElement) {
+    select.addEventListener('change', () => {
+      const next = new URL(select.value, window.location.href);
+      next.hash = window.location.hash;
+      window.location.assign(next.href);
+    });
+  }
+</script>

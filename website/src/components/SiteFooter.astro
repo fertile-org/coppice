@@ -1,30 +1,31 @@
 ---
-import { withBase } from '../lib/url';
+import { hrefFor, useI18n } from '../i18n/runtime';
 
+const ctx = useI18n(Astro);
 const links = [
-  { href: '/docs', label: 'Docs' },
-  { href: '/docs/install', label: 'Install' },
-  { href: '/docs/concepts', label: 'Concepts' },
-  { href: '/docs/providers', label: 'Providers' },
-  { href: '/docs/faq', label: 'FAQ' },
+  { href: '/docs', label: ctx.ui.footer.docs },
+  { href: '/docs/install', label: ctx.ui.footer.install },
+  { href: '/docs/concepts', label: ctx.ui.footer.concepts },
+  { href: '/docs/providers', label: ctx.ui.footer.providers },
+  { href: '/docs/faq', label: ctx.ui.footer.faq },
 ];
 ---
 
 <footer class="site-footer" data-pagefind-ignore>
   <div class="shell footer-inner">
     <div class="footer-copy">
-      <p>Put your agents on a board. Keep the gates.</p>
+      <p>{ctx.ui.footer.tagline}</p>
       <p class="footer-license">
-        Coppice is open source under the <a href="https://github.com/fertile-org/coppice/blob/main/LICENSE">Apache 2.0 license</a>.
+        {ctx.ui.footer.licenseBefore}<a href="https://github.com/fertile-org/coppice/blob/main/LICENSE">{ctx.ui.footer.licenseLabel}</a>{ctx.ui.footer.licenseAfter}
       </p>
     </div>
     <nav data-pagefind-ignore aria-label="Footer">
       {
         links.map((link) => (
-          <a href={withBase(link.href)}>{link.label}</a>
+          <a href={hrefFor(ctx.locale, link.href)}>{link.label}</a>
         ))
       }
-      <a href="https://github.com/fertile-org/coppice">GitHub</a>
+      <a href="https://github.com/fertile-org/coppice">{ctx.ui.footer.github}</a>
     </nav>
   </div>
 </footer>

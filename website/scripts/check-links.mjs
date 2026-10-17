@@ -42,7 +42,7 @@ function htmlFiles(dir, out = []) {
 
 function fileToPath(file) {
   let rel = path.relative(dist, file).split(path.sep).join('/');
-  if (rel === '404.html') return null;
+  if (rel === '404.html' || rel.endsWith('/404.html') || rel.endsWith('/404/index.html')) return null;
   if (rel.endsWith('/index.html')) rel = rel.slice(0, -'/index.html'.length);
   else if (rel.endsWith('.html')) rel = rel.slice(0, -'.html'.length);
   if (rel === 'index' || rel === '') return mount || '/';

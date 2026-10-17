@@ -1,12 +1,14 @@
 # Coppice
 
-**Beta.** Run a team of coding agents without babysitting them.
+[English](README.md) <!-- Uncomment a link when that README file exists: · [简体中文](README.zh-CN.md) · [繁體中文（台灣）](README.zh-TW.md) · [繁體中文（香港）](README.zh-HK.md) · [日本語](README.ja.md) · [Français](README.fr.md) -->
+
+**Beta.** Hire specialists. Keep the final say.
 
 <p align="center">
   <img src="static/marketing.gif" alt="Write a ticket, approve the plan, and review the diff. Nothing is done until you accept it." width="960" />
 </p>
 
-**Stop babysitting agent terminals.** Queue work as tickets and let Claude Code, Codex and the rest build in parallel, each on its own branch. The board shows what's moving, what's stuck and what's waiting on you, and nothing counts as done until you've reviewed the diff. It runs on your machine with the agent CLIs you already pay for: no new subscription, no Coppice account.
+**Stop tab-hopping between agent terminals.** Write a ticket and your PM agent drafts a plan for you to approve. Then Claude Code, Codex and the rest build, review and test in parallel, each on its own branch. The board shows what's moving, what's stuck and what's waiting on you, and nothing counts as done until you've reviewed the diff. It runs on your machine with the agent CLIs you already pay for: no new subscription, no Coppice account.
 
 ## The gates
 

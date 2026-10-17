@@ -137,28 +137,32 @@ describe('docs search markup', () => {
     assert.match(footer, /<footer\b[^>]*\bdata-pagefind-ignore\b/);
     assert.match(footer, /<nav\b[^>]*\bdata-pagefind-ignore\b/);
     assert.doesNotMatch(home, /data-pagefind-body/);
+    assert.doesNotMatch(read('components/HomePage.astro'), /data-pagefind-body/);
     assert.doesNotMatch(read('pages/download.astro'), /data-pagefind-body/);
+    assert.doesNotMatch(read('components/DownloadPage.astro'), /data-pagefind-body/);
     assert.doesNotMatch(read('pages/404.astro'), /data-pagefind-body/);
   });
 
   it('puts the locked search strings in the docs header', () => {
     const search = read('components/DocsSearch.astro');
     const css = read('styles/global.css');
-    assert.match(search, /placeholder=\{SEARCH_PLACEHOLDER\}/);
-    assert.match(search, /aria-label=\{SEARCH_LABEL\}/);
-    assert.match(search, />\{SEARCH_LABEL\}</);
-    assert.match(search, /noResultsMessage\(/);
-    assert.match(search, /<kbd class="docs-search-hint"[^>]*>\{SEARCH_HINT\}<\/kbd>/);
+    assert.match(search, /placeholder=\{placeholder\}/);
+    assert.match(search, /aria-label=\{label\}/);
+    assert.match(search, />\{label\}</);
+    assert.match(search, /noResultsFor\(/);
+    assert.match(search, /pagefindHasLanguage\(/);
+    assert.match(search, /urlInLocale\(/);
+    assert.match(search, /<kbd class="docs-search-hint"[^>]*>\{hint\}<\/kbd>/);
     assert.match(search, /class="docs-search-open"/);
-    assert.match(search, /class="docs-search-open-label">\{SEARCH_LABEL\}<\/span>/);
-    assert.match(search, /aria-label=\{SEARCH_LABEL\}/);
+    assert.match(search, /class="docs-search-open-label">\{label\}<\/span>/);
+    assert.match(read('i18n/ui/en.ts'), /label: SEARCH_LABEL/);
     assert.match(
       search,
-      /id="docs-search-dialog"[\s\S]*?role="dialog"[\s\S]*?aria-modal="true"[\s\S]*?aria-label=\{SEARCH_LABEL\}/,
+      /id="docs-search-dialog"[\s\S]*?role="dialog"[\s\S]*?aria-modal="true"[\s\S]*?aria-label=\{label\}/,
     );
     assert.match(search, /class="docs-search-backdrop"/);
-    assert.match(search, /class="docs-search-close"[^>]*>\{SEARCH_CLOSE\}<\/button>/);
-    assert.match(search, /class="docs-search-keys">\{SEARCH_FOOTER\}<\/p>/);
+    assert.match(search, /class="docs-search-close"[^>]*>\{close\}<\/button>/);
+    assert.match(search, /class="docs-search-keys">\{footer\}<\/p>/);
     assert.match(search, /searchRows\(/);
     assert.doesNotMatch(search, /<h[1-6]\b/);
     const script = search.slice(search.indexOf('<script>'));
@@ -168,7 +172,11 @@ describe('docs search markup', () => {
     assert.match(script, /Escape[\s\S]*closeDialog\(/);
     assert.match(script, /docs-search-backdrop[\s\S]*closeDialog\(/);
     assert.match(script, /docs-search-close[\s\S]*closeDialog\(/);
-    assert.match(read('layouts/Docs.astro'), /<DocsSearch\b/);
+    const docs = read('layouts/Docs.astro');
+    assert.match(docs, /<DocsSearch\b/);
+    assert.match(docs, /placeholder=\{ctx\.ui\.search\.placeholder\}/);
+    assert.match(docs, /label=\{ctx\.ui\.search\.label\}/);
+    assert.match(read('i18n/ui/en.ts'), /placeholder: SEARCH_PLACEHOLDER/);
     assert.match(css, /\.docs-search-hint \{\n  display: none;\n\}/);
     assert.match(css, /@media \(min-width: 880px\) \{[\s\S]*?\.docs-search-hint \{\n    display: inline-flex;/);
     assert.match(css, /\.docs-search-dialog \{\n  position: fixed;\n  inset: 0;/);

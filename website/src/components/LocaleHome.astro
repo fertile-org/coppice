@@ -1,0 +1,10 @@
+---
+import { pageOverride } from '../i18n/translations';
+import { useI18n } from '../i18n/runtime';
+import HomePage from './HomePage.astro';
+
+const ctx = useI18n(Astro);
+const Override = pageOverride(ctx.locale, '/');
+---
+
+{Override ? <Override /> : <HomePage />}

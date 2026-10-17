@@ -16,6 +16,8 @@ Astro site for the Beta marketing page and user docs. Contributor docs stay in t
 
 Copy follows `POSITIONING.md` (M12 Beta). Download buttons link to `/download`. The labels and asset URLs for that page live in `src/content/downloads.ts`.
 
+English keeps those URLs. `zh-CN`, `zh-TW`, `zh-HK`, `ja`, and `fr` use a lowercase prefix (`/ja/docs/concepts`). Untranslated locale URLs render the English page. See [I18N.md](I18N.md).
+
 - macOS (Apple Silicon) — `Coppice-mac-arm64.dmg`
 - macOS (Intel) — `Coppice-mac-x64.dmg`
 - Linux (x64) — `Coppice-linux-amd64.deb`
@@ -52,7 +54,7 @@ npm run check:links
 
 Vercel should use `website/` as the project root. `website/vercel.json` turns on clean URLs so `/docs` serves `docs.html`.
 
-Docs search is a button in the docs header. It opens a dialog that searches the Pagefind index. The `astro-pagefind` integration builds that index from the static output at the end of `npm run build` (the same command Vercel runs). Only the docs article is indexed: `data-pagefind-body` is on that article, and pages without it — the homepage, download page, and 404 — stay out of the index. The site header, nav, and footer are marked `data-pagefind-ignore`.
+Docs search is a button in the docs header. It opens a dialog that searches the Pagefind index. The `astro-pagefind` integration builds that index from the static output at the end of `npm run build` (the same command Vercel runs). Only the docs article is indexed: `data-pagefind-body` is on that article, and pages without it — the homepage, download page, 404, and any locale URL that is still showing English — stay out of the index. Each locale has its own Pagefind index. The site header, nav, and footer are marked `data-pagefind-ignore`.
 
 GitHub Pages is an optional manual deploy, still at `/coppice`:
 

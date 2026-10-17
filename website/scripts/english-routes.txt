@@ -1,0 +1,14 @@
+/
+/404
+/docs
+/docs/backup
+/docs/chat
+/docs/concepts
+/docs/faq
+/docs/getting-started
+/docs/install
+/docs/plugins
+/docs/providers
+/docs/settings
+/docs/shortcuts
+/download

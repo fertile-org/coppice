@@ -1,6 +1,11 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { unified } from '@astrojs/markdown-remark';
 import pagefind from 'astro-pagefind';
 import { defineConfig } from 'astro/config';
+import { localeFromDistFile, rewriteLocaleHtml } from './src/i18n/locale-html.mjs';
+import { astroLocales, DEFAULT_LOCALE, fallbackMap, LOCALE_PATHS } from './src/i18n/locales.mjs';
 
 /** `/` or a path prefix such as `/coppice`, with no trailing slash. */
 function normalizeBase(value) {
@@ -82,20 +87,67 @@ function pagefindOrFail() {
   return integration;
 }
 
+/** Prefix in-page links on locale HTML before Pagefind reads the output. */
+function localeLinkRewrite() {
+  return {
+    name: 'locale-link-rewrite',
+    hooks: {
+      'astro:build:done': ({ dir }) => {
+        const root = fileURLToPath(dir);
+        const base = siteBase();
+        const walk = (directory) => {
+          for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+            const full = path.join(directory, entry.name);
+            if (entry.isDirectory()) {
+              if (entry.name === 'pagefind' || entry.name === '_astro') continue;
+              walk(full);
+              continue;
+            }
+            if (!entry.name.endsWith('.html')) continue;
+            const locale = localeFromDistFile(path.relative(root, full));
+            if (!locale) continue;
+            const html = fs.readFileSync(full, 'utf8');
+            const next = rewriteLocaleHtml(html, locale, base);
+            if (next !== html) fs.writeFileSync(full, next);
+          }
+        };
+        walk(root);
+      },
+    },
+  };
+}
+
+function chatRedirects() {
+  const root = siteBase() === '/' ? '' : siteBase();
+  const redirects = {
+    '/docs/chat': `${root}/docs/concepts#chat`,
+  };
+  for (const locale of LOCALE_PATHS) {
+    redirects[`/${locale}/docs/chat`] = `${root}/${locale}/docs/concepts#chat`;
+  }
+  return redirects;
+}
+
 export default defineConfig({
   site,
   base: siteBase(),
   trailingSlash: 'never',
-  integrations: [pagefindOrFail()],
+  i18n: {
+    defaultLocale: DEFAULT_LOCALE,
+    locales: astroLocales(),
+    fallback: fallbackMap(),
+    routing: {
+      prefixDefaultLocale: false,
+      redirectToDefaultLocale: false,
+      fallbackType: 'rewrite',
+    },
+  },
+  integrations: [localeLinkRewrite(), pagefindOrFail()],
   // `file` writes docs.html. Vercel serves that at /docs via website/vercel.json
   // (`cleanUrls` + `trailingSlash: false`). GitHub Pages has no clean URLs, so the
   // Pages deploy rewrites those files to docs/index.html after the build.
   build: { format: 'file' },
-  redirects: {
-    // Destination is used as written. Prefix the base so GitHub Pages
-    // (`/coppice`) does not send /docs/chat at the domain root.
-    '/docs/chat': `${siteBase() === '/' ? '' : siteBase()}/docs/concepts#chat`,
-  },
+  redirects: chatRedirects(),
   markdown: {
     processor: unified({
       gfm: true,

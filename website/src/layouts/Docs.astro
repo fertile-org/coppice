@@ -1,7 +1,8 @@
 ---
 import DocsSearch from '../components/DocsSearch.astro';
+import { docOverride } from '../i18n/translations';
+import { hrefFor, useI18n } from '../i18n/runtime';
 import Base from './Base.astro';
-import { withBase } from '../lib/url';
 
 interface Props {
   frontmatter: {
@@ -11,42 +12,47 @@ interface Props {
 }
 
 const { frontmatter } = Astro.props;
-// `build.format: 'file'` renders `/docs/shortcuts.html`. Compare the clean URL.
-const pathname = (Astro.url.pathname.replace(/\/$/, '') || '/').replace(/\.html$/, '') || '/';
+const ctx = useI18n(Astro);
+const translation = ctx.rewritten ? docOverride(ctx.locale, ctx.englishPath) : null;
+const Translation = translation?.Content;
+const title = translation?.title || frontmatter.title;
+const description = translation?.description || frontmatter.description;
+const indexed = ctx.translated;
 
 const topLevel = [
-  { href: '/docs/install', label: 'Install' },
-  { href: '/docs/getting-started', label: 'Getting started' },
-  { href: '/docs/concepts', label: 'Concepts' },
-  { href: '/docs/providers', label: 'Providers' },
-  { href: '/docs/plugins', label: 'Plugins' },
-  { href: '/docs/faq', label: 'FAQ' },
+  { href: '/docs/install', label: ctx.ui.docs.install },
+  { href: '/docs/getting-started', label: ctx.ui.docs.gettingStarted },
+  { href: '/docs/concepts', label: ctx.ui.docs.concepts },
+  { href: '/docs/providers', label: ctx.ui.docs.providers },
+  { href: '/docs/plugins', label: ctx.ui.docs.plugins },
+  { href: '/docs/faq', label: ctx.ui.docs.faq },
 ];
 
-// One object per page.
 const advanced = [
-  { href: '/docs/settings', label: 'Settings' },
-  { href: '/docs/shortcuts', label: 'Keyboard shortcuts' },
-  { href: '/docs/backup', label: 'Backup data' },
+  { href: '/docs/settings', label: ctx.ui.docs.settings },
+  { href: '/docs/shortcuts', label: ctx.ui.docs.shortcuts },
+  { href: '/docs/backup', label: ctx.ui.docs.backup },
 ];
 
-function linkHref(href: string) {
-  return withBase(href).replace(/\/$/, '');
-}
-
-const advancedOpen = advanced.some((link) => pathname === linkHref(link.href));
+const advancedOpen = advanced.some((link) => ctx.englishPath === link.href);
 ---
 
-<Base title={frontmatter.title} description={frontmatter.description}>
+<Base title={title} description={description}>
   <div class="shell docs-shell">
     <header class="docs-header" data-pagefind-ignore>
-      <DocsSearch />
+      <DocsSearch
+        placeholder={ctx.ui.search.placeholder}
+        label={ctx.ui.search.label}
+        hint={ctx.ui.search.hint}
+        footer={ctx.ui.search.footer}
+        close={ctx.ui.search.close}
+      />
     </header>
-    <nav class="docs-nav" data-pagefind-ignore aria-label="Documentation">
+    <nav class="docs-nav" data-pagefind-ignore aria-label={ctx.ui.docs.navLabel}>
       {
         topLevel.map((link) => {
-          const href = linkHref(link.href);
-          const current = pathname === href;
+          const href = hrefFor(ctx.locale, link.href);
+          const current = ctx.englishPath === link.href;
           return (
             <a href={href} aria-current={current ? 'page' : undefined}>
               {link.label}
@@ -61,13 +67,13 @@ const advancedOpen = advanced.some((link) => pathname === linkHref(link.href));
           aria-expanded={advancedOpen ? 'true' : 'false'}
           aria-controls="docs-nav-advanced"
         >
-          Advanced
+          {ctx.ui.docs.advanced}
         </button>
         <div id="docs-nav-advanced" class="docs-nav-sub" hidden={!advancedOpen}>
           {
             advanced.map((link) => {
-              const href = linkHref(link.href);
-              const current = pathname === href;
+              const href = hrefFor(ctx.locale, link.href);
+              const current = ctx.englishPath === link.href;
               return (
                 <a href={href} aria-current={current ? 'page' : undefined}>
                   {link.label}
@@ -78,9 +84,17 @@ const advancedOpen = advanced.some((link) => pathname === linkHref(link.href));
         </div>
       </div>
     </nav>
-    <article class="prose" data-pagefind-body>
-      <slot />
-    </article>
+    {
+      indexed ? (
+        <article class="prose" data-pagefind-body>
+          {Translation ? <Translation /> : <slot />}
+        </article>
+      ) : (
+        <article class="prose" lang="en">
+          <slot />
+        </article>
+      )
+    }
   </div>
 </Base>
 
