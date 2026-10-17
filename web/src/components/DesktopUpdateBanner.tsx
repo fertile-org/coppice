@@ -1,4 +1,3 @@
-import { Download, X } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import type { DesktopUpdateInfo } from '../lib/desktop';
 
@@ -29,22 +28,37 @@ export function DesktopUpdateBanner() {
   const [update, setUpdate] = useState<DesktopUpdateInfo | null>(null);
 
   useEffect(() => {
-    const getUpdateInfo = window.coppiceDesktop?.getUpdateInfo;
+    const desktop = window.coppiceDesktop;
+    const getUpdateInfo = desktop?.getUpdateInfo;
     if (!getUpdateInfo) {
       return;
     }
     let cancelled = false;
-    Promise.all([getUpdateInfo(), runIsActive()])
-      .then(([info, active]) => {
-        if (!cancelled && info && !active && info.version !== readDismissedVersion()) {
-          setUpdate(info);
+    const apply = (info: DesktopUpdateInfo | null) => {
+      void (async () => {
+        if (cancelled) return;
+        if (!info) {
+          setUpdate(null);
+          return;
         }
-      })
+        const active = await runIsActive();
+        if (cancelled) return;
+        if (active || info.version === readDismissedVersion()) {
+          setUpdate(null);
+          return;
+        }
+        setUpdate(info);
+      })();
+    };
+    getUpdateInfo()
+      .then(apply)
       .catch(() => {
         /* update checks are best-effort */
       });
+    const unsubscribe = desktop?.onUpdateInfo?.(apply);
     return () => {
       cancelled = true;
+      unsubscribe?.();
     };
   }, []);
 
@@ -61,42 +75,70 @@ export function DesktopUpdateBanner() {
     setUpdate(null);
   };
 
+  const openRelease = () => {
+    if (update.kind !== 'download') return;
+    const url = update.url;
+    void runIsActive().then((active) => {
+      if (active) {
+        setUpdate(null);
+        return;
+      }
+      window.open(url, '_blank', 'noopener,noreferrer');
+    });
+  };
+
+  const restart = () => {
+    void runIsActive().then((active) => {
+      if (active) {
+        setUpdate(null);
+        return;
+      }
+      void window.coppiceDesktop?.restartToUpdate?.();
+    });
+  };
+
   return (
     <div
       role="status"
       data-testid="desktop-update-banner"
-      className="flex shrink-0 items-center gap-3 border-b border-moss-500/30 bg-moss-500/10 px-4 py-2 sm:px-6"
+      className="flex shrink-0 flex-wrap items-center gap-3 border-b border-moss-500/30 bg-moss-500/10 px-4 py-2 sm:px-6"
     >
       <span className="font-body text-sm text-text-primary">
-        Coppice {update.version} is available
+        {update.kind === 'ready' ? (
+          <>Coppice {update.version} is ready.</>
+        ) : update.kind === 'linux' ? (
+          <>
+            Coppice {update.version} is available. Install it from Software Updater, or run{' '}
+            <code className="font-mono text-[0.95em]">sudo apt update && sudo apt upgrade</code>.
+          </>
+        ) : (
+          <>Coppice {update.version} is available.</>
+        )}
       </span>
-      <a
-        href={update.url}
-        target="_blank"
-        rel="noreferrer"
-        className="inline-flex items-center gap-1.5 font-body text-sm font-medium text-accent hover:underline"
-        onClick={(event) => {
-          event.preventDefault();
-          const url = update.url;
-          void runIsActive().then((active) => {
-            if (active) {
-              setUpdate(null);
-              return;
-            }
-            window.open(url, '_blank', 'noopener,noreferrer');
-          });
-        }}
-      >
-        <Download className="h-4 w-4 shrink-0" aria-hidden />
-        Download
-      </a>
+      {update.kind === 'ready' ? (
+        <button
+          type="button"
+          onClick={restart}
+          className="font-body text-sm font-medium text-accent hover:underline"
+        >
+          Restart to update
+        </button>
+      ) : null}
+      {update.kind === 'download' ? (
+        <button
+          type="button"
+          onClick={openRelease}
+          className="font-body text-sm font-medium text-accent hover:underline"
+        >
+          Download update
+        </button>
+      ) : null}
       <button
         type="button"
         onClick={dismiss}
-        aria-label="Dismiss update notice"
-        className="ml-auto rounded-md p-1 text-text-secondary transition-colors duration-fast hover:bg-paper-200 hover:text-text-primary"
+        className="ml-auto font-body text-sm text-text-secondary hover:text-text-primary"
       >
-        <X className="h-4 w-4" aria-hidden />
+        {update.kind === 'linux' ? 'Dismiss' : 'Later'}
       </button>
     </div>
   );

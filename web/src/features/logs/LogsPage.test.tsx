@@ -202,7 +202,7 @@ describe('LogsPage', () => {
   it('exports the current filters and says the file was saved', async () => {
     window.coppiceDesktop = {
       pickDirectory: async () => null,
-      appInfo: async () => ({ version: '1.4.2', platform: 'darwin', arch: 'arm64' }),
+      appInfo: async () => ({ version: '1.4.2', platform: 'darwin', arch: 'arm64', macInPlaceUpdates: false }),
     };
     URL.createObjectURL = () => 'blob:logs';
     URL.revokeObjectURL = () => {};

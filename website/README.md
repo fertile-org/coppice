@@ -56,4 +56,4 @@ Vercel should use `website/` as the project root. `website/vercel.json` turns on
 
 Docs search is a button in the docs header. It opens a dialog that searches the Pagefind index. The `astro-pagefind` integration builds that index from the static output at the end of `npm run build` (the same command Vercel runs). Only the docs article is indexed: `data-pagefind-body` is on that article, and pages without it — the homepage, download page, 404, and any locale URL that is still showing English — stay out of the index. Each locale has its own Pagefind index. The site header, nav, and footer are marked `data-pagefind-ignore`.
 
-The website workflow builds and checks the site, then uploads the `website` artifact. It does not deploy.
+The marketing site is not published to GitHub Pages. Pages is the apt repository and the macOS update feed (`.github/workflows/apt-repo.yml`). Deploying this site there would replace those files. The website workflow builds and checks the site, then uploads the `website` artifact. It does not deploy.

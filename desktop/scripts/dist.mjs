@@ -5,9 +5,11 @@
 //   node scripts/dist.mjs [--dir]
 
 import { spawn } from 'node:child_process';
+import { copyFileSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
+import { aptSourceLine, updateBase } from '../src/updateEndpoints.mjs';
 import { stampDebsInDist } from './deb-version.mjs';
 import { writeMetainfo } from './write-metainfo.mjs';
 
@@ -22,6 +24,32 @@ const SECRET_KEYS = new Set([
   'APPLE_API_KEY_ID',
   'APPLE_API_ISSUER',
 ]);
+
+// In-place macOS install is this one condition. A non-blank CSC_LINK means the
+// build is Developer ID signed, so updater-mode.json tells the app to use
+// electron-updater. Unsigned builds keep the download link. No other code
+// change is required to turn in-place updates on.
+export function macInPlaceUpdatesEnabled(env) {
+  return typeof env.CSC_LINK === 'string' && env.CSC_LINK.trim() !== '';
+}
+
+export function updaterModeJson(env) {
+  return `${JSON.stringify({
+    macInPlaceUpdates: macInPlaceUpdatesEnabled(env),
+    updateBase: updateBase(env.COPPICE_UPDATE_BASE),
+  })}\n`;
+}
+
+// Public half only. The private key is used by apt-repo.yml and is not read here.
+export const APT_KEYRING_FILE = 'build/linux/coppice-archive-keyring.gpg';
+
+// Copies the committed keyring and writes the apt source line into resources/apt.
+export function stageAptResources(env, resourcesDir, keyringPath) {
+  const aptDir = join(resourcesDir, 'apt');
+  mkdirSync(aptDir, { recursive: true });
+  copyFileSync(keyringPath, join(aptDir, 'coppice-archive-keyring.gpg'));
+  writeFileSync(join(aptDir, 'coppice.list'), `${aptSourceLine(env.COPPICE_UPDATE_BASE)}\n`);
+}
 
 export function builderArgs(env, { dir, platform }) {
   const outEnv = {};
@@ -44,6 +72,14 @@ function main() {
   writeMetainfo(desktopDir);
   const { values } = parseArgs({ options: { dir: { type: 'boolean', default: false } } });
   const { args, env } = builderArgs(process.env, { dir: values.dir, platform: process.platform });
+  writeFileSync(join(desktopDir, 'updater-mode.json'), updaterModeJson(env));
+  const resourcesDir = join(desktopDir, 'resources');
+  if (process.platform === 'linux' && existsSync(resourcesDir)) {
+    stageAptResources(env, resourcesDir, join(desktopDir, APT_KEYRING_FILE));
+  }
+  for (const key of Object.keys(env)) {
+    if (key.startsWith('COPPICE_APT_SIGNING_')) delete env[key];
+  }
   const bin = join(desktopDir, 'node_modules', '.bin', 'electron-builder');
   console.log(`electron-builder ${args.join(' ')}`);
   const child = spawn(bin, args, { cwd: desktopDir, env, stdio: 'inherit' });

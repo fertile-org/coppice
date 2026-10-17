@@ -17,3 +17,4 @@ dist
 /desktop/resources/
 /desktop/.cache/
 /desktop/dist/
+/desktop/updater-mode.json

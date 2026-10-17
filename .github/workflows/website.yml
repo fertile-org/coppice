@@ -1,7 +1,10 @@
 name: Website
 
-# Builds the Astro marketing site when it changes. The site is served from
-# the domain root. This workflow does not deploy.
+# Builds the Astro marketing site when it changes. The public site is
+# https://getcoppice.vercel.app/, served by Vercel. This workflow does not
+# deploy anywhere. GitHub Pages is only the apt repository and the macOS
+# update feed, published by apt-repo.yml. A website deploy to that same
+# Pages site would replace those files.
 
 on:
   pull_request:

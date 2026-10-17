@@ -10,8 +10,12 @@ name: Release
 # Coppice-linux-arm64.deb). SHA256SUMS lists both. The unversioned names keep
 # releases/latest/download/<file> stable across tags.
 #
-# macOS signing and notarization switch on when these repository secrets exist
-# (no code change needed):
+# macOS signing and notarization switch on when these secrets exist on the
+# `release` environment (no code change needed). The install notes' unsigned
+# block is chosen later, in the macOS arm64 build leg, because that job already
+# runs in this environment and can see CSC_LINK. prepare cannot: a secret
+# comparison there is always empty, so the note would always say unsigned.
+# Adding `environment: release` to prepare would be another approval.
 #   CSC_LINK          base64 of the Developer ID Application .p12
 #   CSC_KEY_PASSWORD  password of that .p12
 #   APPLE_API_KEY     contents of the App Store Connect API key (AuthKey_XXXX.p8);
@@ -50,14 +54,6 @@ jobs:
       - name: Validate tag
         id: version
         run: node desktop/scripts/release-version.mjs "$TAG" >> "$GITHUB_OUTPUT"
-      - name: Render install notes
-        env:
-          MAC_UNSIGNED: ${{ secrets.CSC_LINK == '' }}
-        run: >-
-          node desktop/scripts/render-notes.mjs
-          --template .github/release-notes/install.md
-          --out "$RUNNER_TEMP/install.md"
-          --mac-unsigned "$MAC_UNSIGNED"
       - name: Create draft release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -67,7 +63,7 @@ jobs:
             echo "Release $TAG already exists; reusing it"
             exit 0
           fi
-          args=(--draft --verify-tag --generate-notes --notes-file "$RUNNER_TEMP/install.md")
+          args=(--draft --verify-tag --generate-notes)
           if [ "$PRERELEASE" = true ]; then args+=(--prerelease); fi
           gh release create "$TAG" "${args[@]}"
 
@@ -108,6 +104,8 @@ jobs:
           - runner: ubuntu-22.04-arm
             target: aarch64-unknown-linux-gnu
     runs-on: ${{ matrix.runner }}
+    # CSC_* and APPLE_* are secrets on the release environment, not the repository.
+    environment: release
     permissions:
       contents: write
     steps:
@@ -129,6 +127,29 @@ jobs:
           node-version: '22'
           cache: yarn
           cache-dependency-path: desktop/yarn.lock
+      # One matrix leg, already under environment: release, so this sees the
+      # real CSC_LINK and does not add an approval. It runs on every attempt,
+      # including a rerun after the secret is added, and replaces the ## Install
+      # section instead of appending a second copy. prepare leaves the generated
+      # changelog in place and does not read CSC_LINK.
+      - name: Set the macOS install note
+        if: matrix.target == 'aarch64-apple-darwin'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MAC_UNSIGNED: ${{ secrets.CSC_LINK == '' }}
+        run: |
+          set -euo pipefail
+          gh release view "$TAG" --json body --template '{{.body}}' > "$RUNNER_TEMP/release-body.md"
+          node desktop/scripts/render-notes.mjs \
+            --template .github/release-notes/install.md \
+            --mac-unsigned "$MAC_UNSIGNED" \
+            --splice-into "$RUNNER_TEMP/release-body.md" \
+            --out "$RUNNER_TEMP/release-notes.md"
+          if grep -q '{{MAC_UNSIGNED}}' "$RUNNER_TEMP/release-notes.md"; then
+            echo "install notes still contain the unsigned marker" >&2
+            exit 1
+          fi
+          gh release edit "$TAG" --notes-file "$RUNNER_TEMP/release-notes.md"
       - run: corepack enable && corepack prepare yarn@1.22.22 --activate
       - name: Cache Postgres bundle and Electron downloads
         uses: actions/cache@v4
@@ -171,9 +192,20 @@ jobs:
           CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
           APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          COPPICE_UPDATE_BASE: ${{ vars.COPPICE_UPDATE_BASE }}
         run: cd desktop && yarn dist
+      - name: Check the apt keyring fingerprint
+        if: runner.os == 'Linux'
+        env:
+          COPPICE_APT_KEY_FINGERPRINT: ${{ vars.COPPICE_APT_KEY_FINGERPRINT }}
+        run: |
+          node desktop/scripts/apt-repo.mjs check-keyring \
+            --keyring desktop/build/linux/coppice-archive-keyring.gpg \
+            --fingerprint "$COPPICE_APT_KEY_FINGERPRINT"
       - name: Package (Linux)
         if: runner.os == 'Linux'
+        env:
+          COPPICE_UPDATE_BASE: ${{ vars.COPPICE_UPDATE_BASE }}
         run: cd desktop && yarn dist
       - name: Check Debian package version
         if: runner.os == 'Linux'
@@ -187,13 +219,16 @@ jobs:
         run: |
           shopt -s nullglob
           files=(desktop/dist/*.dmg desktop/dist/*.deb)
+          zips=(desktop/dist/*.zip)
           if [ "${#files[@]}" -ne 1 ]; then
             echo "expected exactly one installer, found: ${files[*]}" >&2
             exit 1
           fi
           stable="$(node desktop/scripts/stable-installer-name.mjs "$VERSION" "${files[0]}")"
           cp "${files[0]}" "desktop/dist/$stable"
-          gh release upload "$TAG" "${files[0]}" "desktop/dist/$stable" --clobber
+          # Zips are the macOS in-place update payload. They are not the
+          # download-page installer, so they stay out of SHA256SUMS.
+          gh release upload "$TAG" "${files[0]}" "desktop/dist/$stable" "${zips[@]}" --clobber
 
   finalize:
     needs: [prepare, build]

@@ -7,6 +7,7 @@ import { ApiError, apiFetch, parseApiErrorMessage } from '../../lib/api';
 import { isDesktopShell, revealFileInFolder, revealFileLabel } from '../../lib/desktop';
 import { useSession } from '../auth/useSession';
 import { publishKeybindings, readKeybindings } from '../keyboard/keybindings';
+import { DesktopUpdatesSection } from './DesktopUpdatesSection';
 import { TomlEditor } from './TomlEditor';
 
 const SAVED = 'Saved.';
@@ -260,6 +261,8 @@ export function SettingsPage() {
           kept.
         </p>
       </header>
+
+      {desktop ? <DesktopUpdatesSection /> : null}
 
       {text == null && configQuery.isLoading ? (
         <p className="font-body text-sm text-text-muted">Loading…</p>
