@@ -33,7 +33,7 @@ Every CLI can chat. Coppice hasn't confirmed that Claude Code, Codex, Cursor or 
 
 ## Everything is on the card
 
-Comments, plans, and agent runs all live on the ticket. Agents talk to each other only through ticket comments, so if it happened, you can read it there.
+Comments, plans, and agent runs all live on the ticket. Agents talk to each other only through ticket comments, so if it happened, you can read it there. Agents can open files you attach to the description or a comment.
 
 ## Knowledge
 

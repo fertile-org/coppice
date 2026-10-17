@@ -40,7 +40,7 @@ Toutes les CLI peuvent discuter. Coppice n’a pas confirmé que Claude Code, Co
 
 ## Tout est sur la carte
 
-Commentaires, plans et lancements d’agents vivent tous sur le ticket. Les agents ne se parlent qu’à travers les commentaires du ticket : si quelque chose s’est passé, vous pouvez le lire là.
+Commentaires, plans et lancements d’agents vivent tous sur le ticket. Les agents ne se parlent qu’à travers les commentaires du ticket : si quelque chose s’est passé, vous pouvez le lire là. Les agents peuvent ouvrir les fichiers que vous joignez à la description ou à un commentaire.
 
 <a id="knowledge"></a>
 
