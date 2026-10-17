@@ -308,7 +308,11 @@ const CONNECTORS: &[ConnectorDescriptor] = &[
         console: ConsoleKind::Structured,
         caps: Capabilities {
             read_only_tools: false,
-            chat_resume: false,
+            // `kilo run --session <id>` continues that session and still takes
+            // a message. `--format json` events include `sessionID`. Ticket
+            // runs stay fresh (`run_resume` is off). Not checked against a
+            // live `kilo` binary.
+            chat_resume: true,
             session_events: true,
             run_resume: false,
             run_server: false,
@@ -457,7 +461,7 @@ mod tests {
             false,
         );
         assert_row(
-            KILO_CODE, KiloJson, Underscore, Structured, false, false, true, false, false,
+            KILO_CODE, KiloJson, Underscore, Structured, false, true, true, false, false,
         );
         assert_row(
             OPENCODE,

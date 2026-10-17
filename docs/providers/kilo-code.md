@@ -77,9 +77,9 @@ Start at **Tools → Connectors** (admin): it shows whether `kilo` is found, whi
 ## Behavior notes
 
 - **Sign-in:** Kilo has no free non-interactive auth check (`kilo auth` opens a TUI). A found binary is labeled **Installed**, not Ready. Tools → Connectors adds: "Coppice can't check this sign-in without using your plan. A run will show an error if you're signed out."
-- **Agent Chat:** On, in the per-chat folder, with the untested banner: "Coppice hasn't confirmed that Kilo Code stays read-only. The agent can still run commands on your computer." Chat passes `--auto --agent ask`. Plan runs pass `--auto --agent plan`. Ask mode denies writes; `--auto` still approves permissions that are not denied, including MCP. A live write was not shown to be blocked, and the `kilo` binary was not on the machine where this was checked. Test connection still runs `kilo --version`. Ticket runs still use `kilo run --auto`.
+- **Agent Chat:** On, in the per-chat folder, with the untested banner: "Coppice hasn't confirmed that Kilo Code stays read-only. The agent can still run commands on your computer." Chat passes `--auto --agent ask`. Plan runs pass `--auto --agent plan`. Later chat turns append `--session <id>` taken from the previous turn's JSON `sessionID`, and the prompt for that turn is only the latest human message. Ask mode denies writes; `--auto` still approves permissions that are not denied, including MCP. A live write was not shown to be blocked. Not tried against a real `kilo` binary. Test connection still runs `kilo --version`. Ticket runs still use `kilo run --auto`.
 - **Live console:** Streams assistant output while the run is active. After a server restart mid-run, Coppice replays the saved log.
-- **Continued tickets:** Prefer checkpoint-style `continued` runs. Worker-wired session resume for Kilo is not fully connected yet.
+- **Continued tickets:** Prefer checkpoint-style `continued` runs. Ticket runs do not resume a Kilo session (`run_resume` stays off). Chat follow-ups do, via `--session`.
 - **Daemon / serve:** Coppice uses the **subprocess** path (`kilo run`), not `kilo serve` / daemon HTTP APIs (compatibility not confirmed).
 
 ## How Coppice runs Kilo (reference)
@@ -88,10 +88,12 @@ Coppice spawns roughly:
 
 ```text
 kilo run --format json --auto --dir <worktree> "<prompt>" --model <provider>/<model>
+# later chat turn
+kilo run --format json --auto --agent ask --dir <worktree> "<prompt>" --session <id>
 ```
 
 with the process cwd set to the worktree. Stdout JSON events are parsed defensively (OpenCode-derived shapes); assistant text is scanned for Coppice’s JSON result contract. A result ends the run even if the process is still alive.
 
-Vendor docs: [CLI](https://kilo.ai/docs/code-with-ai/platforms/cli), [CLI reference](https://kilo.ai/docs/code-with-ai/platforms/cli-reference).
+Vendor docs: [CLI](https://kilo.ai/docs/code-with-ai/platforms/cli), [CLI reference](https://kilo.ai/docs/code-with-ai/platforms/cli-reference) (`kilo run --session`), [session history](https://kilo.ai/docs/code-with-ai/agents/session-history).
 
 More: [providers README](README.md), [M08](../milestones/M08-connector-operator-cli.md).
