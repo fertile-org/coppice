@@ -192,7 +192,7 @@ async fn record_plan_ref_changes(
 fn append_plan_ref_diff(artifacts_dir: &str, run_id: uuid::Uuid, diff: &str) {
     let paths = RunArtifactPaths::new(artifacts_dir, &run_id.to_string());
     let ends_with_newline = ArtifactService::read_terminal_log_tail(&paths, 1)
-        .map_or(true, |last| last.ends_with(b"\n"));
+        .is_none_or(|last| last.ends_with(b"\n"));
     let mut bytes = Vec::new();
     if !ends_with_newline {
         bytes.push(b'\n');

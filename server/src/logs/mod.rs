@@ -190,21 +190,25 @@ where
     }
 }
 
-/// Human stdout subscriber plus the JSONL file. The env filter is `RUST_LOG`,
-/// or `info` plus `rmcp=warn`. The file records every event that passes it.
 /// Set once the desktop app has printed its ready line.
 static STDOUT_QUIET: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
-/// From now on stdout carries only warnings and errors. The JSONL files keep
-/// everything.
+/// From now on stdout carries only warnings, errors and the shutdown reason,
+/// which Electron keeps for crash reports. The JSONL files keep everything.
 pub fn quiet_stdout() {
     STDOUT_QUIET.store(true, std::sync::atomic::Ordering::Relaxed);
 }
 
-fn stdout_allows(level: &tracing::Level) -> bool {
-    !STDOUT_QUIET.load(std::sync::atomic::Ordering::Relaxed) || *level <= tracing::Level::WARN
+const SHUTDOWN_TARGET: &str = "coppice_server::desktop::shutdown";
+
+fn stdout_allows(level: &tracing::Level, target: &str) -> bool {
+    !STDOUT_QUIET.load(std::sync::atomic::Ordering::Relaxed)
+        || *level <= tracing::Level::WARN
+        || target == SHUTDOWN_TARGET
 }
 
+/// Human stdout subscriber plus the JSONL file. The env filter is `RUST_LOG`,
+/// or `info` plus `rmcp=warn`. The file records every event that passes it.
 pub fn init(logs_dir: &Path) -> io::Result<()> {
     use tracing_subscriber::filter::FilterExt;
     let terminal = io::stdout().is_terminal();
@@ -219,9 +223,10 @@ pub fn init(logs_dir: &Path) -> io::Result<()> {
                 })
             })
         })
-        .with_filter(env_filter().and(tracing_subscriber::filter::filter_fn(|meta| {
-            stdout_allows(meta.level())
-        })));
+        // Dynamic, so the answer is not cached per callsite before ready.
+        .with_filter(env_filter().and(tracing_subscriber::filter::dynamic_filter_fn(
+            |meta, _| stdout_allows(meta.level(), meta.target()),
+        )));
     tracing_subscriber::registry()
         .with(stdout)
         .with(json_file_layer(logs_dir, true)?)
@@ -304,13 +309,15 @@ mod tests {
     }
 
     #[test]
-    fn quiet_stdout_keeps_only_warnings_and_errors() {
-        assert!(stdout_allows(&tracing::Level::INFO));
+    fn quiet_stdout_keeps_warnings_errors_and_the_shutdown_reason() {
+        let other = "coppice_server::services::run_service";
+        assert!(stdout_allows(&tracing::Level::INFO, other));
         quiet_stdout();
-        assert!(!stdout_allows(&tracing::Level::INFO));
-        assert!(!stdout_allows(&tracing::Level::DEBUG));
-        assert!(stdout_allows(&tracing::Level::WARN));
-        assert!(stdout_allows(&tracing::Level::ERROR));
+        assert!(!stdout_allows(&tracing::Level::INFO, other));
+        assert!(!stdout_allows(&tracing::Level::DEBUG, other));
+        assert!(stdout_allows(&tracing::Level::WARN, other));
+        assert!(stdout_allows(&tracing::Level::ERROR, other));
+        assert!(stdout_allows(&tracing::Level::INFO, SHUTDOWN_TARGET));
         STDOUT_QUIET.store(false, std::sync::atomic::Ordering::Relaxed);
     }
 
