@@ -526,11 +526,12 @@ fn default_knowledge_list_limit() -> usize {
 fn default_knowledge_list_max() -> usize {
     100
 }
+// Board and agent items share the per-board cap; workspace items are counted separately, so that cap is higher.
 fn default_knowledge_board_capacity() -> i64 {
-    10_000
+    1_000
 }
 fn default_knowledge_workspace_capacity() -> i64 {
-    1_000
+    10_000
 }
 fn default_knowledge_poll_interval_ms() -> u64 {
     500
@@ -1878,6 +1879,8 @@ mod tests {
         assert_eq!(cfg.retrieval.top_k, 8);
         assert!(cfg.retrieval.allowed_types.is_empty());
         assert_eq!(cfg.retrieval.max_page_size, 100);
+        assert_eq!(cfg.retrieval.max_active_per_board, 1_000);
+        assert_eq!(cfg.retrieval.max_active_workspace, 10_000);
         assert_eq!(cfg.context_budget.max_tokens, 24_000);
         assert!(cfg.validate().is_ok());
     }

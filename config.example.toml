@@ -106,8 +106,8 @@ allowed_types = []
 minimum_confidence = "medium"
 default_page_size = 25
 max_page_size = 100
-max_active_per_board = 10000
-max_active_workspace = 1000
+max_active_per_board = 1000
+max_active_workspace = 10000
 
 [knowledge.context_budget]
 max_tokens = 24000
