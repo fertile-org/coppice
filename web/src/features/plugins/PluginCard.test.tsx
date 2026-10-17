@@ -59,7 +59,7 @@ const testResult: PluginTestResult = {
 };
 
 const STDIO_WARNING =
-  "Local MCP servers run on your computer with your computer's privileges. Stronger sandboxing is coming in a later release. Enable anyway?";
+  "Local MCP servers run on your computer with your computer's privileges. Enable anyway?";
 
 const fetchMock = vi.fn();
 
@@ -322,7 +322,7 @@ describe('PluginCard', () => {
 
     expect(confirm).toHaveBeenCalledTimes(1);
     expect(confirm).toHaveBeenCalledWith(
-      "Local MCP servers run on your computer with your computer's privileges. Stronger sandboxing is coming in a later release. Settings A, B are not set here, so your computer's environment values for them will be sent to the plugin. Enable anyway?",
+      "Local MCP servers run on your computer with your computer's privileges. Settings A, B are not set here, so your computer's environment values for them will be sent to the plugin. Enable anyway?",
     );
     expect(fetchMock).not.toHaveBeenCalledWith(
       `/api/plugins/${plugin.id}`,

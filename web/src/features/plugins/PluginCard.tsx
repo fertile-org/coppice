@@ -22,7 +22,7 @@ import {
 } from './usePlugins';
 
 const STDIO_RISK =
-  "Local MCP servers run on your computer with your computer's privileges. Stronger sandboxing is coming in a later release.";
+  "Local MCP servers run on your computer with your computer's privileges.";
 
 /** Names keys only; the values never reach the browser. */
 function envRisk(keys: string[]): string {
