@@ -18,18 +18,27 @@ pub struct DesktopSecrets {
     /// Password for the non-superuser runtime role. Separate from `pg_password`,
     /// which stays the bootstrap superuser.
     pub pg_app_password: String,
+    /// `pg_app_password` was missing or unreadable. Startup must set this
+    /// password on the role before connecting. The file is not written here.
+    pub reset_pg_app_password: bool,
     pub admin_password: String,
 }
 
 /// One file per secret in `dir` (made `0700`); generated on first run (mode
 /// `0600`) and reused after.
+///
+/// `pg_app_password` is not written when it is missing or unreadable. Startup
+/// sets that password on the role, then writes the file. Regenerating it here
+/// would look like a normal password and leave the role unreachable.
 pub fn load_or_create_secrets(dir: &Path) -> io::Result<DesktopSecrets> {
     std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700))?;
+    let (pg_app_password, reset_pg_app_password) = load_app_password(&dir.join("pg_app_password"));
     Ok(DesktopSecrets {
         session_secret: load_or_create_secret(&dir.join("session_secret"))?,
         master_key: load_or_create_secret(&dir.join("master_key"))?,
         pg_password: load_or_create_secret(&dir.join("pg_password"))?,
-        pg_app_password: load_or_create_secret(&dir.join("pg_app_password"))?,
+        pg_app_password,
+        reset_pg_app_password,
         admin_password: load_or_create_admin_password(&dir.join("admin_password"))?,
     })
 }
@@ -40,14 +49,37 @@ fn load_or_create_secret(path: &Path) -> io::Result<String> {
     if std::fs::metadata(path).is_ok_and(|meta| meta.len() == 0) {
         std::fs::remove_file(path)?;
     }
-    let mut bytes = [0u8; SECRET_BYTES];
-    rand::rngs::OsRng.fill_bytes(&mut bytes);
-    let value = hex::encode(bytes);
+    let value = generate_secret_value();
     if write_new_file(path, &value, 0o600)? {
         Ok(value)
     } else {
         read_secret(path)
     }
+}
+
+/// A readable file is reused. Anything else (missing, empty, corrupt, or
+/// unreadable) stays on disk and is replaced after the role password is set.
+fn load_app_password(path: &Path) -> (String, bool) {
+    if let Some(value) = read_valid_secret(path) {
+        (value, false)
+    } else {
+        (generate_secret_value(), true)
+    }
+}
+
+fn read_valid_secret(path: &Path) -> Option<String> {
+    let value = std::fs::read_to_string(path).ok()?.trim().to_string();
+    if value.len() == SECRET_BYTES * 2 && value.chars().all(|c| c.is_ascii_hexdigit()) {
+        Some(value)
+    } else {
+        None
+    }
+}
+
+fn generate_secret_value() -> String {
+    let mut bytes = [0u8; SECRET_BYTES];
+    rand::rngs::OsRng.fill_bytes(&mut bytes);
+    hex::encode(bytes)
 }
 
 /// First run generates a hex password. Replace keys may later store the
@@ -340,9 +372,15 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         let secrets_dir = dir.path().join("secrets");
         std::fs::create_dir_all(&secrets_dir).unwrap();
+        let app_password = "12".repeat(32);
+        let app_path = secrets_dir.join("pg_app_password");
+        std::fs::write(&app_path, &app_password).unwrap();
+        std::fs::set_permissions(&app_path, std::fs::Permissions::from_mode(0o600)).unwrap();
 
         let first = load_or_create_secrets(&secrets_dir).expect("create");
         let second = load_or_create_secrets(&secrets_dir).expect("reuse");
+        assert!(!first.reset_pg_app_password);
+        assert_eq!(first.pg_app_password, app_password);
 
         assert_eq!(first.session_secret, second.session_secret);
         assert_eq!(first.master_key, second.master_key);
@@ -374,6 +412,83 @@ mod tests {
                 .mode();
             assert_eq!(mode & 0o777, 0o600, "{name}");
         }
+    }
+
+    #[test]
+    fn missing_app_password_file_is_left_for_startup_to_reset() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let secrets = load_or_create_secrets(dir.path()).expect("load");
+
+        assert!(secrets.reset_pg_app_password);
+        assert_eq!(secrets.pg_app_password.len(), 64);
+        assert!(secrets
+            .pg_app_password
+            .chars()
+            .all(|c| c.is_ascii_hexdigit()));
+        assert!(
+            !dir.path().join("pg_app_password").exists(),
+            "the file is written only after the role password is set"
+        );
+        assert!(dir.path().join("pg_password").is_file());
+    }
+
+    #[test]
+    fn corrupt_app_password_file_stays_on_disk_until_startup_resets_it() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("pg_app_password");
+        std::fs::write(&path, "not-hex\n").unwrap();
+
+        let secrets = load_or_create_secrets(dir.path()).expect("load");
+
+        assert!(secrets.reset_pg_app_password);
+        assert_ne!(secrets.pg_app_password, "not-hex");
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "not-hex\n");
+    }
+
+    #[test]
+    fn empty_app_password_file_stays_on_disk_until_startup_resets_it() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("pg_app_password");
+        std::fs::write(&path, "").unwrap();
+
+        let secrets = load_or_create_secrets(dir.path()).expect("load");
+
+        assert!(secrets.reset_pg_app_password);
+        assert!(path.is_file());
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "");
+    }
+
+    #[test]
+    fn unreadable_app_password_file_stays_on_disk_until_startup_resets_it() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("pg_app_password");
+        std::fs::write(&path, "ee".repeat(32)).unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o000)).unwrap();
+
+        let secrets = load_or_create_secrets(dir.path()).expect("load");
+
+        assert!(secrets.reset_pg_app_password);
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o000);
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+    }
+
+    #[test]
+    fn readable_app_password_is_reused_and_not_reset() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("pg_app_password");
+        let value = "ab".repeat(32);
+        std::fs::write(&path, format!("{value}\n")).unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+
+        let first = load_or_create_secrets(dir.path()).expect("load");
+        let second = load_or_create_secrets(dir.path()).expect("reload");
+
+        assert!(!first.reset_pg_app_password);
+        assert!(!second.reset_pg_app_password);
+        assert_eq!(first.pg_app_password, value);
+        assert_eq!(second.pg_app_password, value);
+        assert_eq!(std::fs::read_to_string(&path).unwrap().trim(), value);
     }
 
     #[test]
@@ -437,7 +552,6 @@ mod tests {
             [
                 "admin_password",
                 "master_key",
-                "pg_app_password",
                 "pg_password",
                 "session_secret"
             ]

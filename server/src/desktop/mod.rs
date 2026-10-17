@@ -24,6 +24,11 @@ use bootstrap::DesktopSecrets;
 use layout::{DataLayout, ResourceLayout};
 use postgres::DesktopPostgres;
 
+#[cfg(test)]
+pub(crate) fn load_desktop_secrets(dir: &std::path::Path) -> std::io::Result<DesktopSecrets> {
+    bootstrap::load_or_create_secrets(dir)
+}
+
 const DATABASE_NAME: &str = "coppice";
 /// How long in-flight requests, agent-tree shutdown, and plugin/OpenCode
 /// shutdown get after a signal. Agent groups get 3 s of that for SIGTERM
@@ -228,6 +233,25 @@ async fn serve_with_postgres(
     .map_err(|err| anyhow::anyhow!("could not finish replacing keys: {err}"))?;
     let mut secrets = secrets.clone();
     secrets.pg_password = pg_password;
+    // A missing or unreadable application password is set on the role, when
+    // the role already exists, before provisioning. Provisioning does not
+    // change an existing role's password.
+    if secrets.reset_pg_app_password {
+        crate::services::secret_rotation::heal_app_password(
+            &layout.secrets_dir,
+            crate::services::secret_rotation::AppPasswordHeal {
+                host: "127.0.0.1",
+                port: pg_port,
+                superuser: postgres::SUPERUSER,
+                superuser_password: &secrets.pg_password,
+                role: app_role::APP_ROLE,
+                database: DATABASE_NAME,
+                password: &secrets.pg_app_password,
+            },
+        )
+        .await
+        .map_err(|err| anyhow::anyhow!("{err}"))?;
+    }
     // Provision before settling a pending app password: creating the role
     // must not overwrite a password that already landed in PostgreSQL.
     let mut pg_url = pg
@@ -357,6 +381,14 @@ mod tests {
             Some("COPPICE_READY url=http://127.0.0.1:5123")
         );
         assert_eq!(ready_announcement(addr, true), None);
+    }
+
+    #[test]
+    fn superuser_name_matches_key_rotation() {
+        assert_eq!(
+            postgres::SUPERUSER,
+            crate::services::secret_rotation::DESKTOP_SUPERUSER
+        );
     }
 
     #[test]

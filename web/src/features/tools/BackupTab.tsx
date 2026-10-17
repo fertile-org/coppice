@@ -217,8 +217,8 @@ export function BackupTab() {
             Replace keys
           </h2>
           <p className="mt-2 font-body text-sm text-text-secondary">
-            If you shared a backup, make new keys and a new admin password. Saved
-            tokens keep working, and everyone is signed out.
+            Coppice will make new keys and database passwords. Saved tokens keep
+            working, and everyone is signed out.
           </p>
           <div className="mt-4 space-y-4">
             <div>

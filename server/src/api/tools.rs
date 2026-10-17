@@ -191,6 +191,7 @@ async fn replace_keys(
         &state.database_url(),
         &body.admin_password,
         &email,
+        secret_rotation::DESKTOP_SUPERUSER,
     )
     .await
     {
