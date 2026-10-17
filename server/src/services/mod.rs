@@ -25,6 +25,7 @@ pub mod planning_service;
 pub mod git_cmd;
 pub mod git_ops;
 pub mod human_review_service;
+pub mod init_wizard;
 pub mod plugin_service;
 pub mod plugin_settings_service;
 pub mod pr_create_url;

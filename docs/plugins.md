@@ -53,9 +53,9 @@ Plugins start **disabled**. On the plugin card:
 
 **Switching skills off.** Each skill on the card has its own switch; the header reads `Skills (12 of 30 on)` when some are off. A switched-off skill is hidden from every agent that has the plugin, at once (including running runs): it is left out of the skill list, and `skill_load` reports it as not found. The setting is workspace-wide, kept by skill name across rescans and updates. The built-in `coppice` skills cannot be switched off.
 
-A plugin with local (**stdio**) MCP servers runs programs on your computer with your computer's privileges (stronger sandboxing is coming in a later release). Before you turn one on, or test it while it's off, Coppice asks you to confirm:
+A plugin with local (**stdio**) MCP servers runs programs on your computer with your computer's privileges. Before you turn one on, or test it while it's off, Coppice asks you to confirm:
 
-> Local MCP servers run on your computer with your computer's privileges. Stronger sandboxing is coming in a later release.
+> Local MCP servers run on your computer with your computer's privileges.
 
 The same prompt names any settings whose value would come from your computer's environment. Only install plugins you trust.
 

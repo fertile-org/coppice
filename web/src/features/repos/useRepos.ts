@@ -150,10 +150,11 @@ export function useInspectRepoPath() {
   });
 }
 
-export function useRepos() {
+export function useRepos(options?: { enabled?: boolean }) {
   return useQuery({
     queryKey: REPOS_QUERY_KEY,
     queryFn: fetchRepos,
+    enabled: options?.enabled ?? true,
   });
 }
 
