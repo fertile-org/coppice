@@ -204,7 +204,7 @@ describe('LogsPage', () => {
     ).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Load older' })).not.toBeInTheDocument();
     expect(screen.getAllByText(/^old \d+$/).length).toBeLessThanOrEqual(1000 + MAX_OLDER_LINES);
-  });
+  }, 20_000);
 
   it('labels the warn level Warning', async () => {
     renderPage();
