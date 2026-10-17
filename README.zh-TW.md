@@ -27,7 +27,7 @@ Beta 版的安裝包包括 macOS 的 `.dmg`（Apple 晶片或 Intel）和 Linux 
 
 ## 開始使用
 
-產品文件就是 [`website/`](website/) 中的網站：落地頁和使用者指南。公開網站地址是 [https://getcoppice.vercel.app/](https://getcoppice.vercel.app/)。
+產品文件就是 [`website/`](website/) 中的網站：落地頁和使用者指南。公開網站地址是 [https://getcoppice.app/](https://getcoppice.app/)。
 
 ## 貢獻者
 

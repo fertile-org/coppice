@@ -27,7 +27,7 @@ Beta のインストーラーは、macOS 用の `.dmg`（Apple Silicon または
 
 ## はじめに
 
-製品のドキュメントは [`website/`](website/) にあるサイトです：ランディングページとユーザーガイド。公開サイトは [https://getcoppice.vercel.app/](https://getcoppice.vercel.app/) です。
+製品のドキュメントは [`website/`](website/) にあるサイトです：ランディングページとユーザーガイド。公開サイトは [https://getcoppice.app/](https://getcoppice.app/) です。
 
 ## コントリビューター向け
 

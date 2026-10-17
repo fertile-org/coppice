@@ -27,7 +27,7 @@ Apportez les CLI que vous utilisez déjà : Claude Code, Codex, Cursor, OpenCode
 
 ## Pour commencer
 
-La documentation produit est le site dans [`website/`](website/) : la page d’accueil et les guides d’utilisation. Le site public est [https://getcoppice.vercel.app/](https://getcoppice.vercel.app/).
+La documentation produit est le site dans [`website/`](website/) : la page d’accueil et les guides d’utilisation. Le site public est [https://getcoppice.app/](https://getcoppice.app/).
 
 ## Contributeurs
 

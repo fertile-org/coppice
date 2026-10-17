@@ -17,7 +17,7 @@ function run(args, cwd) {
 test('the old host matches with any case and the new host does not', () => {
   assert.deepEqual(findInBuffer(Buffer.from(`a\nhttps://apt.${OLD_DOMAIN}/x\n`), 'f'), ['f:2']);
   assert.deepEqual(findInBuffer(Buffer.from(OLD_DOMAIN.toUpperCase()), 'f'), ['f:1']);
-  assert.deepEqual(findInBuffer(Buffer.from('https://apt.getcoppice.app getcoppice.vercel.app'), 'f'), []);
+  assert.deepEqual(findInBuffer(Buffer.from('https://apt.getcoppice.app https://getcoppice.app'), 'f'), []);
 });
 
 test('packaged files, updater-mode.json and the CNAME fail on the old host', () => {

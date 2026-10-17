@@ -81,6 +81,6 @@ describe('AppStream metainfo', () => {
     const existing = '<release version="1.2.3" date="2020-01-02"/>';
     assert.equal(releaseDateFor('1.2.3', existing, '2026-10-06'), '2020-01-02');
     assert.equal(releaseDateFor('1.2.4', existing, '2026-10-06'), '2026-10-06');
-    assert.equal(SCREENSHOT, 'https://getcoppice.vercel.app/assets/hero-screenshot.png');
+    assert.equal(SCREENSHOT, 'https://getcoppice.app/assets/hero-screenshot.png');
   });
 });

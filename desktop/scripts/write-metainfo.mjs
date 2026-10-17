@@ -14,8 +14,8 @@ export const METAINFO_PATH = join(desktopDir, 'build/linux/dev.coppice.app.metai
 export const SUMMARY = 'Local board for your AI agent team';
 export const LONG_DESCRIPTION =
   'Hire specialists. Keep the final say. Coppice runs on your computer with the agent CLIs you already pay for, like Claude Code and Codex. No Coppice account, no Docker.';
-export const HOMEPAGE = 'https://getcoppice.vercel.app/';
-export const SCREENSHOT = 'https://getcoppice.vercel.app/assets/hero-screenshot.png';
+export const HOMEPAGE = 'https://getcoppice.app/';
+export const SCREENSHOT = 'https://getcoppice.app/assets/hero-screenshot.png';
 export const SCREENSHOT_CAPTION = 'The Coppice board';
 
 function escapeXml(value) {
