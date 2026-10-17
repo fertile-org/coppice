@@ -612,3 +612,110 @@ async fn human_review_row_count(fx: &Fixture) -> i64 {
     .await
     .expect("review row count")
 }
+
+async fn seed_approved_plan(fx: &Fixture, markdown: &str) {
+    let pool = fx.state.db.clone().expect("pool");
+    let ticket_id = Uuid::parse_str(&fx.ticket_id).unwrap();
+    let version: i32 = sqlx::query_scalar("SELECT content_version FROM tickets WHERE id = $1")
+        .bind(ticket_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    let comment_id = Uuid::new_v4();
+    sqlx::query(
+        r#"
+        INSERT INTO ticket_comments (id, ticket_id, author_type, body, intent, plan_content_version)
+        VALUES ($1, $2, 'agent', $3, 'plan', $4)
+        "#,
+    )
+    .bind(comment_id)
+    .bind(ticket_id)
+    .bind(markdown)
+    .bind(version)
+    .execute(&pool)
+    .await
+    .expect("plan comment");
+    sqlx::query(
+        "UPDATE tickets SET approved_plan_comment_id = $2, approved_plan_content_version = $3 WHERE id = $1",
+    )
+    .bind(ticket_id)
+    .bind(comment_id)
+    .bind(version)
+    .execute(&pool)
+    .await
+    .expect("approve");
+}
+
+async fn seed_criteria_results(fx: &Fixture, sha: &str, results: serde_json::Value) {
+    let pool = fx.state.db.clone().expect("pool");
+    sqlx::query(
+        r#"
+        INSERT INTO ticket_criteria_results (ticket_id, commit_sha, results)
+        VALUES ($1, $2, $3)
+        ON CONFLICT (ticket_id) DO UPDATE SET commit_sha = EXCLUDED.commit_sha, results = EXCLUDED.results
+        "#,
+    )
+    .bind(Uuid::parse_str(&fx.ticket_id).unwrap())
+    .bind(sha)
+    .bind(results)
+    .execute(&pool)
+    .await
+    .expect("criteria results");
+}
+
+#[tokio::test]
+async fn human_review_ticks_criteria_from_the_result_for_the_reviewed_commit() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    let fx = setup().await;
+    seed_approved_plan(
+        &fx,
+        "## Plan\n\n### Steps\n- [ ] Write the gate\n\n### Acceptance criteria\n- [ ] Drag is refused (verified by test)\n- [ ] API returns 409 (verified by curl)\n- [ ] Docs mention it (verified by reading)\n\n### Risks\nNone.\n",
+    )
+    .await;
+    let head = git_rev_parse(&fx.worktree_path, "HEAD");
+    seed_criteria_results(
+        &fx,
+        &head,
+        serde_json::json!([
+            {"criterion": "Drag is refused", "status": "met", "evidence": "test plan_gate_refuses_drag"},
+            {"criterion": "API returns 409", "status": "not_met", "evidence": "returns 400"}
+        ]),
+    )
+    .await;
+
+    let ticket = get_ticket(&fx).await;
+    let plan = &ticket["approvedPlan"];
+    assert_eq!(plan["steps"], serde_json::json!(["Write the gate"]));
+    let criteria = plan["criteria"].as_array().expect("criteria");
+    assert_eq!(criteria.len(), 3);
+    assert_eq!(criteria[0]["status"], "met");
+    assert_eq!(criteria[0]["evidence"], "test plan_gate_refuses_drag");
+    assert_eq!(criteria[1]["status"], "not_met");
+    assert_eq!(criteria[2]["status"], "not_checked");
+
+    // A result written for another commit is stale.
+    seed_criteria_results(
+        &fx,
+        "0000000000000000000000000000000000000000",
+        serde_json::json!([{"criterion": "Drag is refused", "status": "met"}]),
+    )
+    .await;
+    let ticket = get_ticket(&fx).await;
+    let criteria = ticket["approvedPlan"]["criteria"].as_array().unwrap();
+    assert!(criteria.iter().all(|c| c["status"] == "not_checked"), "{criteria:?}");
+
+    // Accept is not affected by criteria.
+    set_wait_for_human_review(&fx).await;
+    let approved = final_approve(&fx).await;
+    assert_eq!(approved["status"], "done");
+}
+
+#[tokio::test]
+async fn a_plan_without_criteria_has_none() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    let fx = setup().await;
+    seed_approved_plan(&fx, "## Plan\n\n### Steps\n- [ ] Only step\n").await;
+    let ticket = get_ticket(&fx).await;
+    assert_eq!(ticket["approvedPlan"]["steps"], serde_json::json!(["Only step"]));
+    assert_eq!(ticket["approvedPlan"]["criteria"], serde_json::json!([]));
+}

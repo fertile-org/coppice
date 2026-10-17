@@ -731,6 +731,10 @@ async fn execute_job(
             .record(ticket_id, &result, brief_commit_sha.as_deref().unwrap_or(""))
             .await
             .context("store reviewer brief")?;
+        crate::services::criteria_results::CriteriaResultsService::new(pool)
+            .record(ticket_id, &result, brief_commit_sha.as_deref().unwrap_or(""))
+            .await
+            .context("store acceptance criteria results")?;
     }
 
     let worktree_path = paths.worktree_dir.to_string_lossy().into_owned();

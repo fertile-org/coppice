@@ -60,6 +60,7 @@ pub const PLAN_CHANGES_DISCARDED: &str =
 pub const PLAN_HEADING: &str = "## Plan";
 pub const APPROACH_HEADING: &str = "### Approach";
 pub const STEPS_HEADING: &str = "### Steps";
+pub const ACCEPTANCE_CRITERIA_HEADING: &str = "### Acceptance criteria";
 pub const RISKS_HEADING: &str = "### Risks";
 pub const OUT_OF_SCOPE_HEADING: &str = "### Out of scope";
 pub const NONE: &str = "None.";
@@ -70,6 +71,9 @@ pub const PLAN_TASK: &str =
     "Write a plan for this ticket. Do not edit files, commit, push, or create or change a branch.";
 
 pub const PLAN_FORMAT_INSTRUCTION: &str = "Put the plan in `summary` when you call `result_submit` with status `done`. Use exactly this markdown:";
+
+/// Criteria are the contract Human Review checks the finished change against.
+pub const PLAN_CRITERIA_INSTRUCTION: &str = "Under Acceptance criteria, write each line as behavior a person can check, then how it's verified: a test, a command, or a manual check. If the ticket description has `## Acceptance criteria`, start from those.";
 
 /// Diagrams support the written plan. They are not a substitute for it.
 pub const PLAN_DIAGRAM_INSTRUCTION: &str = "When the ticket needs a flow, architecture, or data model, add one or two small diagrams as fenced mermaid code blocks. Skip diagrams otherwise. The written plan always stays.";
@@ -83,23 +87,42 @@ pub const PLAN_SPLIT_REJECTED: &str = "splitTickets is not allowed on a planning
 pub const PLAN_MUST_FINISH: &str =
     "A planning run finishes with status `done` and the plan in `summary`.";
 
-/// Checkbox lines under the plan, in order, without the marker.
+fn checkbox_text(line: &str) -> Option<String> {
+    let trimmed = line.trim();
+    let rest = trimmed
+        .strip_prefix("- [ ]")
+        .or_else(|| trimmed.strip_prefix("- [x]"))
+        .or_else(|| trimmed.strip_prefix("- [X]"))?;
+    let text = rest.trim();
+    (!text.is_empty()).then(|| text.to_string())
+}
+
+/// The lines under `heading`, up to the next markdown heading.
+fn section<'a>(markdown: &'a str, heading: &str) -> Option<Vec<&'a str>> {
+    let mut lines = markdown.lines();
+    lines.by_ref().find(|line| line.trim() == heading)?;
+    Some(
+        lines
+            .take_while(|line| !line.trim_start().starts_with('#'))
+            .collect(),
+    )
+}
+
+/// Checkbox lines under Steps, in order, without the marker. A plan with no
+/// Steps heading uses every checkbox line.
 pub fn checklist_steps(markdown: &str) -> Vec<String> {
-    markdown
-        .lines()
-        .filter_map(|line| {
-            let trimmed = line.trim();
-            let rest = trimmed
-                .strip_prefix("- [ ]")
-                .or_else(|| trimmed.strip_prefix("- [x]"))
-                .or_else(|| trimmed.strip_prefix("- [X]"))?;
-            let text = rest.trim();
-            if text.is_empty() {
-                None
-            } else {
-                Some(text.to_string())
-            }
-        })
+    match section(markdown, STEPS_HEADING) {
+        Some(lines) => lines.into_iter().filter_map(checkbox_text).collect(),
+        None => markdown.lines().filter_map(checkbox_text).collect(),
+    }
+}
+
+/// Checkbox lines under Acceptance criteria. Empty for plans without them.
+pub fn plan_criteria(markdown: &str) -> Vec<String> {
+    section(markdown, ACCEPTANCE_CRITERIA_HEADING)
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(checkbox_text)
         .collect()
 }
 
@@ -127,14 +150,14 @@ pub fn format_plan(summary: &str) -> String {
 
 pub fn plan_template() -> String {
     format!(
-        "{PLAN_HEADING}\n\n{APPROACH_HEADING}\n...\n\n{STEPS_HEADING}\n- [ ] ...\n\n{RISKS_HEADING}\n{NONE}\n\n{OUT_OF_SCOPE_HEADING}\n{NONE}\n"
+        "{PLAN_HEADING}\n\n{APPROACH_HEADING}\n...\n\n{STEPS_HEADING}\n- [ ] ...\n\n{ACCEPTANCE_CRITERIA_HEADING}\n- [ ] ... (verified by ...)\n\n{RISKS_HEADING}\n{NONE}\n\n{OUT_OF_SCOPE_HEADING}\n{NONE}\n"
     )
 }
 
 /// Instructions appended to a planning run. `changes` is the human comment.
 pub fn plan_instructions(changes: Option<&str>) -> String {
     let mut out = format!(
-        "{PLAN_TASK}\n\n{PLAN_FORMAT_INSTRUCTION}\n\n{}\n{PLAN_DIAGRAM_INSTRUCTION}\n",
+        "{PLAN_TASK}\n\n{PLAN_FORMAT_INSTRUCTION}\n\n{}\n{PLAN_CRITERIA_INSTRUCTION}\n{PLAN_DIAGRAM_INSTRUCTION}\n",
         plan_template()
     );
     if let Some(changes) = changes.map(str::trim).filter(|text| !text.is_empty()) {
@@ -171,6 +194,36 @@ mod tests {
             checklist_steps(markdown),
             vec!["Write the gate", "Cover the drag", "Cover the API"]
         );
+    }
+
+    #[test]
+    fn criteria_are_their_own_section_and_not_steps() {
+        let markdown = "## Plan\n\n### Approach\nDo it.\n\n### Steps\n- [ ] Write the gate\n- [ ] Cover the API\n\n### Acceptance criteria\n- [ ] Dragging to In Progress without a plan is refused (verified by integration test)\n- [ ] The API returns 409 (verified by curl)\n\n### Risks\nNone.\n";
+        assert_eq!(checklist_steps(markdown), vec!["Write the gate", "Cover the API"]);
+        assert_eq!(
+            plan_criteria(markdown),
+            vec![
+                "Dragging to In Progress without a plan is refused (verified by integration test)",
+                "The API returns 409 (verified by curl)"
+            ]
+        );
+        assert_eq!(format_plan(markdown), markdown.trim());
+    }
+
+    #[test]
+    fn a_plan_without_criteria_still_reads_its_steps() {
+        let markdown = "## Plan\n\n### Steps\n- [ ] Only step\n\n### Risks\nNone.\n";
+        assert_eq!(checklist_steps(markdown), vec!["Only step"]);
+        assert!(plan_criteria(markdown).is_empty());
+        assert!(plan_criteria(&format_plan("plain text")).is_empty());
+    }
+
+    #[test]
+    fn the_template_asks_for_checkable_criteria() {
+        let text = plan_instructions(None);
+        assert!(text.contains(ACCEPTANCE_CRITERIA_HEADING));
+        assert!(text.contains(PLAN_CRITERIA_INSTRUCTION));
+        assert_eq!(checklist_steps(&plan_template()), vec!["..."]);
     }
 
     #[test]

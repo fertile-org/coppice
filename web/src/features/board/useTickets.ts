@@ -28,10 +28,20 @@ export interface ReviewerBrief {
   commitSha?: string | null;
 }
 
+export type CriterionStatus = 'met' | 'not_met' | 'not_checked';
+
+export interface PlanCriterion {
+  text: string;
+  status: CriterionStatus;
+  evidence?: string | null;
+}
+
 export interface ApprovedPlan {
   commentId: string;
   markdown: string;
   steps: string[];
+  /** Acceptance criteria with the result for the reviewed commit. */
+  criteria?: PlanCriterion[];
 }
 
 export interface Ticket {

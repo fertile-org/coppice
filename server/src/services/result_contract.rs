@@ -664,6 +664,8 @@ mod tests {
             how_it_works: None,
             changes_from_plan: None,
             look_here_first: None,
+            criteria_results: Vec::new(),
+            plan_questions: Vec::new(),
         };
         let applied = apply_agent_result(&result).expect("apply");
         assert!(applied.comment.body.contains("@backend_engineer"));
@@ -693,6 +695,8 @@ mod tests {
             how_it_works: None,
             changes_from_plan: None,
             look_here_first: None,
+            criteria_results: Vec::new(),
+            plan_questions: Vec::new(),
         };
 
         let applied = apply_agent_result(&result).expect("apply");
@@ -729,6 +733,8 @@ mod tests {
             how_it_works: None,
             changes_from_plan: None,
             look_here_first: None,
+            criteria_results: Vec::new(),
+            plan_questions: Vec::new(),
         };
 
         let applied = apply_agent_result(&result).expect("apply attention result");
@@ -762,6 +768,8 @@ mod tests {
             how_it_works: None,
             changes_from_plan: None,
             look_here_first: None,
+            criteria_results: Vec::new(),
+            plan_questions: Vec::new(),
         };
 
         let applied = apply_consultation_result(&result).expect("apply consultation");
@@ -835,6 +843,8 @@ mod tests {
             how_it_works: None,
             changes_from_plan: None,
             look_here_first: None,
+            criteria_results: Vec::new(),
+            plan_questions: Vec::new(),
         };
         let applied = apply_agent_result(&result).expect("apply");
         assert!(applied
@@ -861,6 +871,8 @@ mod tests {
             how_it_works: None,
             changes_from_plan: None,
             look_here_first: None,
+            criteria_results: Vec::new(),
+            plan_questions: Vec::new(),
         };
         let applied = apply_agent_result(&result).expect("apply");
         assert!(applied.comment.body.contains("Refined scope."));
@@ -887,6 +899,8 @@ mod tests {
             how_it_works: None,
             changes_from_plan: None,
             look_here_first: None,
+            criteria_results: Vec::new(),
+            plan_questions: Vec::new(),
         };
         let applied = apply_agent_result(&result).expect("apply");
         assert!(applied
@@ -924,6 +938,8 @@ mod tests {
             how_it_works: None,
             changes_from_plan: None,
             look_here_first: None,
+            criteria_results: Vec::new(),
+            plan_questions: Vec::new(),
         };
         let applied = apply_agent_result(&result).expect("apply");
         assert_eq!(
@@ -969,6 +985,8 @@ mod tests {
             how_it_works: None,
             changes_from_plan: None,
             look_here_first: None,
+            criteria_results: Vec::new(),
+            plan_questions: Vec::new(),
         }
     }
 

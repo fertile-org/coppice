@@ -1219,6 +1219,8 @@ mod tests {
             how_it_works: None,
             changes_from_plan: None,
             look_here_first: None,
+            criteria_results: Vec::new(),
+            plan_questions: Vec::new(),
         }
     }
 
@@ -1253,6 +1255,8 @@ mod tests {
             how_it_works: None,
             changes_from_plan: None,
             look_here_first: None,
+            criteria_results: Vec::new(),
+            plan_questions: Vec::new(),
         }
     }
 
@@ -1280,6 +1284,8 @@ mod tests {
             how_it_works: None,
             changes_from_plan: None,
             look_here_first: None,
+            criteria_results: Vec::new(),
+            plan_questions: Vec::new(),
         }
     }
 
@@ -1407,6 +1413,8 @@ mod tests {
             how_it_works: None,
             changes_from_plan: None,
             look_here_first: None,
+            criteria_results: Vec::new(),
+            plan_questions: Vec::new(),
         };
 
         let targets = select_collaboration_targets(&contract, &agents, source_id);
@@ -1891,6 +1899,8 @@ mod tests {
             how_it_works: None,
             changes_from_plan: None,
             look_here_first: None,
+            criteria_results: Vec::new(),
+            plan_questions: Vec::new(),
         };
         let apply = ApplyResult {
             run_status: RunStatus::Succeeded,
@@ -3406,6 +3416,8 @@ mod tests {
             how_it_works: None,
             changes_from_plan: None,
             look_here_first: None,
+            criteria_results: Vec::new(),
+            plan_questions: Vec::new(),
         };
         let workflow = WorkflowConfig {
             auto_start_runs: true,
@@ -3646,6 +3658,8 @@ mod tests {
             how_it_works: None,
             changes_from_plan: None,
             look_here_first: None,
+            criteria_results: Vec::new(),
+            plan_questions: Vec::new(),
         };
         let mut malicious_apply =
             crate::services::result_contract::apply_agent_result(&response_contract)
@@ -4282,6 +4296,8 @@ mod tests {
                     how_it_works: None,
                     changes_from_plan: None,
                     look_here_first: None,
+                    criteria_results: Vec::new(),
+                    plan_questions: Vec::new(),
                 },
                 ApplyResult {
                     run_status: RunStatus::Succeeded,

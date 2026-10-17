@@ -188,6 +188,9 @@ struct ApprovedPlanResponse {
     comment_id: Uuid,
     markdown: String,
     steps: Vec<String>,
+    /// The plan's acceptance criteria, each with the latest result for the
+    /// reviewed commit (or not checked).
+    criteria: Vec<crate::services::criteria_results::CriterionView>,
 }
 
 #[derive(Serialize)]
@@ -1068,10 +1071,34 @@ async fn with_approved_plan(
     let ticket_id = ticket.ticket.id;
     let status = ticket.ticket.status;
     let mut response = ticket_to_response(ticket);
+    let criteria = match &plan {
+        Some(plan) => {
+            let texts = crate::copy::plan::plan_criteria(&plan.markdown);
+            if texts.is_empty() {
+                Vec::new()
+            } else {
+                let stored = crate::services::criteria_results::CriteriaResultsService::new(pool)
+                    .get(ticket_id)
+                    .await?;
+                let reviewed = if stored.is_some() {
+                    reviewed_commit(state, pool, ticket_id).await?
+                } else {
+                    None
+                };
+                crate::services::criteria_results::criteria_view(
+                    &texts,
+                    stored.as_ref(),
+                    reviewed.as_deref(),
+                )
+            }
+        }
+        None => Vec::new(),
+    };
     response.approved_plan = plan.map(|plan| ApprovedPlanResponse {
         comment_id: plan.comment_id,
         markdown: plan.markdown,
         steps: plan.steps,
+        criteria,
     });
     response.reviewer_brief = reviewer_brief_for_ticket(state, pool, ticket_id, status).await?;
     response.attachments = load_attachment_summaries(pool, &response.attachment_ids)
@@ -1085,6 +1112,26 @@ async fn with_approved_plan(
 
 /// The stored brief, hidden in Human Review when it was written for a different
 /// commit than the one review is bound to.
+/// The commit Human Review is bound to, or `None` when it can't be read.
+async fn reviewed_commit(
+    state: &AppState,
+    pool: &sqlx::PgPool,
+    ticket_id: Uuid,
+) -> Result<Option<String>, TicketError> {
+    match ticket_git_service(state, pool)
+        .reviewed_head_sha(ticket_id)
+        .await
+    {
+        Ok(sha) => Ok(sha),
+        Err(crate::services::ticket_git_service::TicketGitError::Database(err)) => Err(err.into()),
+        Err(crate::services::ticket_git_service::TicketGitError::Ticket(err)) => Err(err),
+        Err(err) => {
+            tracing::debug!(error = %err, "reviewed commit unavailable");
+            Ok(None)
+        }
+    }
+}
+
 async fn reviewer_brief_for_ticket(
     state: &AppState,
     pool: &sqlx::PgPool,
@@ -1100,23 +1147,7 @@ async fn reviewer_brief_for_ticket(
     let Some(brief) = brief else {
         return Ok(None);
     };
-    let reviewed = match ticket_git_service(state, pool)
-        .reviewed_head_sha(ticket_id)
-        .await
-    {
-        Ok(sha) => sha,
-        Err(crate::services::ticket_git_service::TicketGitError::Database(err)) => {
-            return Err(err.into());
-        }
-        Err(crate::services::ticket_git_service::TicketGitError::Ticket(err)) => return Err(err),
-        Err(err) => {
-            tracing::debug!(
-                error = %err,
-                "reviewer brief hidden; reviewed commit unavailable"
-            );
-            None
-        }
-    };
+    let reviewed = reviewed_commit(state, pool, ticket_id).await?;
     if crate::services::reviewer_brief::brief_matches_reviewed_commit(
         &brief.commit_sha,
         reviewed.as_deref(),
