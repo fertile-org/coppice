@@ -716,6 +716,7 @@ retention_days = 14
 
 # Keyboard shortcuts. Your keys replace the defaults, and an empty value turns one off.
 # Mod is Cmd on macOS and Ctrl on Linux and WSL.
+# A shortcut Coppice can't use is skipped, and that command keeps its default.
 # [keybindings]
 # "palette.open" = "Mod+K"
 EOF
