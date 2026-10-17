@@ -35,6 +35,7 @@ pub mod repo_verifier;
 pub mod restart_service;
 pub mod result_contract;
 pub mod review_capacity;
+pub mod review_rounds;
 pub mod reviewer_brief;
 pub mod run_orchestrator;
 pub mod run_service;

@@ -545,6 +545,21 @@ async fn execute_job(
         &agent.role,
     );
     let mut markdown = build_tool_first_context(&context_input, &skills, required);
+    if let Some(section) = crate::services::review_rounds::ReviewRoundService::new(pool)
+        .context_section(
+            ticket_id,
+            ticket.ticket.status,
+            &run.job_type,
+            &agent_key,
+            &agent.role,
+            &paths.worktree_dir,
+        )
+        .await
+        .context("review round context")?
+    {
+        markdown.push('\n');
+        markdown.push_str(&section);
+    }
     let attachments = crate::services::ticket_attachments::stage_ticket_attachments(
         pool,
         &state.config.storage.artifacts_dir,
