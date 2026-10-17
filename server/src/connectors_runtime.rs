@@ -436,5 +436,40 @@ mod tests {
             }
             other => panic!("expected a chord, got {other:?}"),
         }
+        assert!(api.warnings.is_empty());
+    }
+
+    #[test]
+    fn settings_save_keeps_a_skipped_shortcut_and_applies_the_rest() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        let original = "# keep\n[server]\nport = 5000\n";
+        std::fs::write(&path, original).unwrap();
+        let rt = runtime(Some(path.clone()));
+        let revision = coppice_config::settings_file::content_revision(original.as_bytes());
+        let next = "\
+# keep
+[server]
+port = 5000
+
+[keybindings]
+\"ticket.create\" = \"Mod+W\"
+\"palette.open\" = \"Mod+P\"
+";
+
+        let saved = rt.save_config_text(next, &revision).unwrap();
+
+        assert!(!saved.restart_required);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), next);
+        let api = rt.config().keybindings.api();
+        assert!(api.overrides.contains_key("palette.open"));
+        assert!(!api.overrides.contains_key("ticket.create"));
+        assert_eq!(
+            api.warnings,
+            vec![
+                "\"Mod+W\" belongs to the browser or the system. Create ticket keeps its default."
+                    .to_string()
+            ]
+        );
     }
 }

@@ -167,6 +167,30 @@ describe('shortcut help overlay', () => {
     expect(screen.getByText('Ctrl+P')).toBeVisible();
     expect(screen.getByText('Create ticket').closest('li')).toHaveTextContent(/^Create ticket$/);
     expect(screen.getByText('Change shortcuts in Settings.')).toBeVisible();
+    expect(
+      screen.queryByText(
+        "Some shortcuts in Settings couldn't be used. Those rows show the defaults.",
+      ),
+    ).toBeNull();
+  });
+
+  it('adds the skipped-shortcut footer when a binding was skipped', () => {
+    publishKeybindings(
+      {
+        'palette.open': [{ kind: 'chord', chord: { key: 'p', mod: true } }],
+      },
+      ['No command called "nope". No shortcut was changed.'],
+    );
+    renderHelp();
+
+    fireEvent.keyDown(document, { key: '?' });
+    expect(screen.getByText('Change shortcuts in Settings.')).toBeVisible();
+    expect(
+      screen.getByText(
+        "Some shortcuts in Settings couldn't be used. Those rows show the defaults.",
+      ),
+    ).toBeVisible();
+    expect(screen.getByText('Ctrl+P')).toBeVisible();
   });
 
   it('omits Users on the desktop app and keeps Settings', () => {

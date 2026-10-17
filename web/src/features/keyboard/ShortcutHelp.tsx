@@ -15,6 +15,7 @@ export function ShortcutHelp() {
   const [open, setOpen] = useState(false);
   const restoreFocus = useRef<HTMLElement | null>(null);
   const actions = keyboard?.actions ?? SHORTCUT_ACTIONS;
+  const keybindingWarnings = keyboard?.keybindingWarnings ?? [];
   const sections = helpSections({
     omitted: omittedActionIds({
       isAdmin: session?.user?.role === 'admin',
@@ -86,9 +87,12 @@ export function ShortcutHelp() {
             </section>
           ))}
         </div>
-        <p className="border-t border-border px-6 py-3 font-body text-sm text-text-muted">
-          {HELP_COPY.footer}
-        </p>
+        <div className="border-t border-border px-6 py-3">
+          <p className="font-body text-sm text-text-muted">{HELP_COPY.footer}</p>
+          {keybindingWarnings.length > 0 ? (
+            <p className="mt-1 font-body text-sm text-text-muted">{HELP_COPY.skipped}</p>
+          ) : null}
+        </div>
       </DialogContent>
     </Dialog>
   );

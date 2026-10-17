@@ -94,6 +94,8 @@ Shortcuts don't fire while you're typing in a field, and the terminal keeps its 
 
 Change any shortcut in Settings, under `[keybindings]`. Use the command's id from the tables above. Your keys replace the defaults, and an empty value turns the shortcut off.
 
+If a shortcut can't be read, names an unknown command, uses a key another command already has, or belongs to the browser or the system, that command keeps its default. Settings explains why. The shortcut help and the command palette show the keys that are in effect.
+
 ```toml
 [keybindings]
 "palette.open" = "P"

@@ -19,6 +19,8 @@ export type KeyboardEnvironment = {
 export type KeyboardContextValue = {
   /** Registry actions with `[keybindings]` overrides applied. */
   actions: readonly ShortcutAction[];
+  /** Skip warnings from the last applied `[keybindings]` table. */
+  keybindingWarnings: readonly string[];
   register: (id: string, registration: ShortcutRegistration) => () => void;
   registerLayer: (layer: LayerHandlers) => () => void;
   setEnvironment: (environment: KeyboardEnvironment) => void;

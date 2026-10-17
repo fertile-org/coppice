@@ -78,6 +78,9 @@ describe('SettingsPage', () => {
       if (path === '/api/settings/config') {
         return jsonResponse(disk);
       }
+      if (path === '/api/keybindings') {
+        return jsonResponse({ overrides: {}, warnings: [] });
+      }
       throw new Error(`unexpected ${path}`);
     });
   });
@@ -96,6 +99,108 @@ describe('SettingsPage', () => {
     expect(editor).toHaveValue(text);
     expect((editor as HTMLTextAreaElement).value).toContain('[keybindings]');
     expect((editor as HTMLTextAreaElement).value).toContain('"palette.open" = "Mod+P"');
+  });
+
+  it('lists skipped shortcuts from the file already on disk', async () => {
+    const warning = 'No command called "nope". No shortcut was changed.';
+    mocks.apiFetch.mockImplementation((path: string) => {
+      if (path === '/api/settings/config') {
+        return jsonResponse({
+          ...disk,
+          text: '# keep\n[keybindings]\n"nope" = "J"\n"palette.open" = "Mod+P"\n',
+        });
+      }
+      if (path === '/api/keybindings') {
+        return jsonResponse({
+          overrides: {
+            'palette.open': [{ kind: 'chord', chord: { key: 'p', mod: true } }],
+          },
+          warnings: [warning],
+        });
+      }
+      throw new Error(`unexpected ${path}`);
+    });
+    renderPage();
+
+    expect(await screen.findByText(warning)).toBeVisible();
+    expect(screen.getByRole('textbox', { name: 'config.toml' })).toHaveValue(
+      '# keep\n[keybindings]\n"nope" = "J"\n"palette.open" = "Mod+P"\n',
+    );
+    expect(screen.queryByText(/Saved/)).toBeNull();
+  });
+
+  it('says some shortcuts were skipped, then clears that line while typing', async () => {
+    const warning =
+      '"Mod+W" belongs to the browser or the system. Create ticket keeps its default.';
+    mocks.apiFetch.mockImplementation((path: string, init?: RequestInit) => {
+      if (path === '/api/settings/config' && init?.method === 'PUT') {
+        return jsonResponse({
+          revision: 'rev-2',
+          restartRequired: false,
+          backupAvailable: true,
+        });
+      }
+      if (path === '/api/keybindings') {
+        return jsonResponse({
+          overrides: {
+            'palette.open': [{ kind: 'chord', chord: { key: 'p', mod: true } }],
+          },
+          warnings: [warning],
+        });
+      }
+      if (path === '/api/settings/config') {
+        return jsonResponse(disk);
+      }
+      throw new Error(`unexpected ${path}`);
+    });
+    renderPage();
+    const editor = await screen.findByRole('textbox', { name: 'config.toml' });
+    expect(await screen.findByText(warning)).toBeVisible();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    expect(
+      await screen.findByRole('status'),
+    ).toHaveTextContent(
+      "Saved. Some shortcuts couldn't be used, so they kept their defaults.",
+    );
+    expect(screen.getByText(warning)).toBeVisible();
+
+    fireEvent.change(editor, { target: { value: `${disk.text}\n` } });
+    expect(
+      screen.queryByText(
+        "Saved. Some shortcuts couldn't be used, so they kept their defaults.",
+      ),
+    ).toBeNull();
+    expect(screen.getByText(warning)).toBeVisible();
+  });
+
+  it('keeps the restart line when a save also skipped a shortcut', async () => {
+    const warning =
+      '"Mod+W" belongs to the browser or the system. Create ticket keeps its default.';
+    mocks.apiFetch.mockImplementation((path: string, init?: RequestInit) => {
+      if (path === '/api/settings/config' && init?.method === 'PUT') {
+        return jsonResponse({
+          revision: 'rev-2',
+          restartRequired: true,
+          backupAvailable: true,
+        });
+      }
+      if (path === '/api/keybindings') {
+        return jsonResponse({ overrides: {}, warnings: [warning] });
+      }
+      if (path === '/api/settings/config') {
+        return jsonResponse(disk);
+      }
+      throw new Error(`unexpected ${path}`);
+    });
+    renderPage();
+    await screen.findByRole('textbox', { name: 'config.toml' });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    expect(await screen.findByRole('status')).toHaveTextContent(
+      'Saved. Restart Coppice to apply.',
+    );
+    expect(screen.getByText(warning)).toBeVisible();
   });
 
   it('shows the config file behind the Settings title', async () => {

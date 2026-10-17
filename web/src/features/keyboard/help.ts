@@ -6,6 +6,8 @@ import type { Platform } from './platform';
 export const HELP_COPY = {
   title: 'Keyboard shortcuts',
   footer: 'Change shortcuts in Settings.',
+  skipped:
+    "Some shortcuts in Settings couldn't be used. Those rows show the defaults.",
 } as const;
 
 export type HelpRow = {
