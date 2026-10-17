@@ -2,6 +2,8 @@ export type DesktopAppInfo = {
   version: string;
   platform: string;
   arch: string;
+  /** True only for a signed macOS build that installs updates in place. */
+  macInPlaceUpdates: boolean;
 };
 
 export type DesktopUpdateInfo =

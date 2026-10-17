@@ -1,6 +1,16 @@
 import { useEffect, useState } from 'react';
-import type { DesktopUpdateCheck } from '../../lib/desktop';
+import type { DesktopAppInfo, DesktopUpdateCheck } from '../../lib/desktop';
 import { Button } from '../../components/ui/button';
+
+export function updateHelperText(info: Pick<DesktopAppInfo, 'platform' | 'macInPlaceUpdates'>): string {
+  if (info.platform === 'darwin' && info.macInPlaceUpdates) {
+    return 'Download new versions in the background. They install when you restart Coppice.';
+  }
+  if (info.platform === 'linux') {
+    return 'Tell me when a new version is out. Updates install through apt.';
+  }
+  return 'Tell me when a new version is out.';
+}
 
 type CheckState =
   | { kind: 'idle' }
@@ -28,6 +38,7 @@ export function DesktopUpdatesSection() {
   const desktop = typeof window !== 'undefined' ? window.coppiceDesktop : undefined;
   const supported = Boolean(desktop?.appInfo && desktop.getUpdateSettings && desktop.checkForUpdates);
   const [version, setVersion] = useState<string | null>(null);
+  const [helper, setHelper] = useState<string | null>(null);
   const [automatic, setAutomatic] = useState(true);
   const [ready, setReady] = useState(false);
   const [check, setCheck] = useState<CheckState>({ kind: 'idle' });
@@ -39,6 +50,7 @@ export function DesktopUpdatesSection() {
       .then(([info, settings]) => {
         if (cancelled) return;
         setVersion(info.version);
+        setHelper(updateHelperText(info));
         setAutomatic(settings.automaticUpdates);
         setReady(true);
       })
@@ -50,12 +62,7 @@ export function DesktopUpdatesSection() {
     };
   }, [desktop, supported]);
 
-  if (!supported || !ready || version == null) return null;
-
-  const helper =
-    desktop?.platform === 'darwin'
-      ? 'Download new versions in the background. They install when you restart Coppice.'
-      : 'Tell me when a new version is out. Updates install through apt.';
+  if (!supported || !ready || version == null || helper == null) return null;
 
   async function toggle() {
     const next = !automatic;

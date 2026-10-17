@@ -7,7 +7,7 @@ import { DesktopUpdateBanner } from './DesktopUpdateBanner';
 function stubBridge(info: DesktopUpdateInfo | null) {
   window.coppiceDesktop = {
     pickDirectory: vi.fn(async () => null),
-    appInfo: vi.fn(async () => ({ version: '1.0.0', platform: 'linux', arch: 'x64' })),
+    appInfo: vi.fn(async () => ({ version: '1.0.0', platform: 'linux', arch: 'x64', macInPlaceUpdates: false })),
     getUpdateInfo: vi.fn(async () => info),
     restartToUpdate: vi.fn(async () => undefined),
   };

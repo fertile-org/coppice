@@ -88,6 +88,7 @@ ipcMain.handle('coppice:app-info', () => ({
   version: app.getVersion(),
   platform: process.platform,
   arch: process.arch,
+  macInPlaceUpdates: macInPlaceReady,
 }));
 
 function settingsPath() {

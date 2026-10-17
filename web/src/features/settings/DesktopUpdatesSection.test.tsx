@@ -4,9 +4,44 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { DesktopUpdateCheck } from '../../lib/desktop';
 import { DesktopUpdatesSection } from './DesktopUpdatesSection';
 
+function shell(info: { platform: string; macInPlaceUpdates: boolean }) {
+  window.coppiceDesktop = {
+    pickDirectory: vi.fn(async () => null),
+    platform: info.platform,
+    appInfo: vi.fn(async () => ({ version: '1.0.0', arch: 'arm64', ...info })),
+    getUpdateSettings: vi.fn(async () => ({ automaticUpdates: true })),
+    setUpdateSettings: vi.fn(async (next: { automaticUpdates: boolean }) => next),
+    checkForUpdates: vi.fn(async () => ({ status: 'up-to-date' as const })),
+  };
+}
+
 describe('DesktopUpdatesSection', () => {
   afterEach(() => {
     delete window.coppiceDesktop;
+  });
+
+  it('describes a signed macOS build as a background download', async () => {
+    shell({ platform: 'darwin', macInPlaceUpdates: true });
+    render(<DesktopUpdatesSection />);
+    expect(
+      await screen.findByText('Download new versions in the background. They install when you restart Coppice.'),
+    ).toBeInTheDocument();
+  });
+
+  it('describes an unsigned macOS build as a notice only', async () => {
+    shell({ platform: 'darwin', macInPlaceUpdates: false });
+    render(<DesktopUpdatesSection />);
+    expect(await screen.findByText('Tell me when a new version is out.', { exact: true })).toBeInTheDocument();
+    expect(screen.queryByText(/Updates install through apt/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/They install when you restart Coppice/)).not.toBeInTheDocument();
+  });
+
+  it('describes Linux updates as apt', async () => {
+    shell({ platform: 'linux', macInPlaceUpdates: false });
+    render(<DesktopUpdatesSection />);
+    expect(
+      await screen.findByText('Tell me when a new version is out. Updates install through apt.'),
+    ).toBeInTheDocument();
   });
 
   it('stays hidden outside the desktop shell', () => {
@@ -19,7 +54,12 @@ describe('DesktopUpdatesSection', () => {
     window.coppiceDesktop = {
       pickDirectory: vi.fn(async () => null),
       platform: 'linux',
-      appInfo: vi.fn(async () => ({ version: '0.1.0-rc.7', platform: 'linux', arch: 'x64' })),
+      appInfo: vi.fn(async () => ({
+        version: '0.1.0-rc.7',
+        platform: 'linux',
+        arch: 'x64',
+        macInPlaceUpdates: false,
+      })),
       getUpdateSettings: vi.fn(async () => ({ ...store })),
       setUpdateSettings: vi.fn(async (next: { automaticUpdates: boolean }) => {
         store.automaticUpdates = next.automaticUpdates;
@@ -55,7 +95,12 @@ describe('DesktopUpdatesSection', () => {
     window.coppiceDesktop = {
       pickDirectory: vi.fn(async () => null),
       platform: 'darwin',
-      appInfo: vi.fn(async () => ({ version: '1.0.0', platform: 'darwin', arch: 'arm64' })),
+      appInfo: vi.fn(async () => ({
+        version: '1.0.0',
+        platform: 'darwin',
+        arch: 'arm64',
+        macInPlaceUpdates: true,
+      })),
       getUpdateSettings: vi.fn(async () => ({ automaticUpdates: true })),
       setUpdateSettings: vi.fn(async (next: { automaticUpdates: boolean }) => next),
       checkForUpdates: vi.fn(
