@@ -377,7 +377,7 @@ The ticket moves to `Blocked` only when the process has exited and the user has 
 - Substatus from the kind: `blocked_by_permission` (host, path, command, tool), `blocked_by_missing_capability` (a bundle), `blocked_by_missing_secret` (secret name only), `blocked_by_error` (backend missing, only when Pause agents when limits can't be applied is on)
 - `substatus_metadata` includes `permissionRequestId`, `kind`, and `resource`. The metadata panel already keys capability and secret off this object; extend it rather than adding a status
 
-**Allow once** and **Always allow** queue that follow-up through the existing resume path (`resume_session_id`, connector `caps.run_resume` / `chat_resume`) whenever the grant needs a new process, including when the user decides before the CLI exits. The follow-up context says what the user allowed. Connectors that cannot resume (Kilo; Codex is best-effort and falls back to the transcript) get a fresh session with that sentence. **Deny** does not start a run. It posts the denial on the ticket and leaves the ticket Blocked.
+**Allow once** and **Always allow** queue that follow-up through the existing resume path (`resume_session_id`, connector `caps.run_resume` / `chat_resume`) whenever the grant needs a new process, including when the user decides before the CLI exits. The follow-up context says what the user allowed. Connectors that cannot resume a ticket run (Kilo leaves `run_resume` off; Codex is best-effort and falls back to the transcript) get a fresh session with that sentence. **Deny** does not start a run. It posts the denial on the ticket and leaves the ticket Blocked.
 
 **Ask the agent why** posts a comment and queues that follow-up with the question. It is the same resume path, without granting.
 

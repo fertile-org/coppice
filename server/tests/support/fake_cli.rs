@@ -7,6 +7,10 @@
 //! `FAKE_CLI_LINES`
 //! (newline-separated stdout lines), `FAKE_CLI_STDERR` (newline-separated
 //! stderr lines), `FAKE_CLI_SLEEP_MS` (sleep after printing), `FAKE_CLI_EXIT`.
+//! `FAKE_CLI_REJECT_SESSION` exits 1 with `Session not found` on stderr when
+//! argv contains `--session` or `-s`. It first prints a JSON `error` event
+//! carrying that session id, the way a missing Kilo session can, then exits
+//! before any other stdout.
 //! Any of these may also come from a JSON object in `./.fake-cli-env.json`,
 //! for callers (connector adapters) that spawn the bin without custom env.
 
@@ -23,6 +27,31 @@ fn main() {
         for (key, value) in vars {
             std::env::set_var(key, value);
         }
+    }
+    if std::env::var_os("FAKE_CLI_REJECT_SESSION").is_some()
+        && std::env::args().any(|arg| arg == "--session" || arg == "-s")
+    {
+        let rejected = std::env::args()
+            .skip_while(|arg| arg != "--session" && arg != "-s")
+            .nth(1);
+        let mut stdout = std::io::stdout();
+        if let Some(sid) = rejected {
+            writeln!(
+                stdout,
+                "{}",
+                serde_json::json!({
+                    "type": "error",
+                    "sessionID": sid,
+                    "error": { "message": "Session not found" }
+                })
+            )
+            .expect("write stdout");
+            stdout.flush().expect("flush stdout");
+        }
+        let mut stderr = std::io::stderr();
+        writeln!(stderr, "Session not found").expect("write stderr");
+        stderr.flush().expect("flush stderr");
+        std::process::exit(1);
     }
     let mut stdout = std::io::stdout();
     if std::env::var_os("FAKE_CLI_PRINT_PID").is_some() {

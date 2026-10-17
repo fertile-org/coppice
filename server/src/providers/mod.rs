@@ -423,10 +423,9 @@ mod tests {
         assert!(connector_supports_chat_resume("mock"));
         #[cfg(not(feature = "mock-provider"))]
         assert!(!connector_supports_chat_resume("mock"));
-        for id in ["opencode", "claude-code", "cursor", "codex"] {
+        for id in ["opencode", "claude-code", "cursor", "codex", "kilo-code"] {
             assert!(connector_supports_chat_resume(id));
         }
-        assert!(!connector_supports_chat_resume("kilo-code"));
         assert!(!connector_supports_chat_resume("unknown"));
     }
 

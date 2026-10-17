@@ -6,7 +6,7 @@ use std::time::Duration;
 use anyhow::Context;
 use sqlx::PgPool;
 use sqlx::Row;
-use tokio::sync::watch;
+use tokio::sync::{oneshot, watch};
 
 use crate::domain::comment::{author_type_to_str, CommentIntent};
 use crate::domain::context_profile::ContextProfile;
@@ -817,11 +817,12 @@ fn spawn_chat_session_created_tx(
     pool: PgPool,
     run_id: uuid::Uuid,
     connector_name: &str,
-) -> Option<watch::Sender<String>> {
+) -> Option<(watch::Sender<String>, oneshot::Receiver<()>)> {
     if !connector_supports_chat_resume(connector_name) {
         return None;
     }
     let (tx, mut rx) = watch::channel(String::new());
+    let (done_tx, done_rx) = oneshot::channel();
     tokio::spawn(async move {
         if rx.changed().await.is_ok() {
             let sid = rx.borrow().clone();
@@ -829,8 +830,9 @@ fn spawn_chat_session_created_tx(
                 let _ = RunService::new(&pool).set_session_id(run_id, &sid).await;
             }
         }
+        let _ = done_tx.send(());
     });
-    Some(tx)
+    Some((tx, done_rx))
 }
 
 /// A failed lookup runs without plugin skills rather than failing the run.
@@ -920,7 +922,11 @@ async fn invoke_chat_provider(
             connector_name,
         ))
     })?;
-    let session_created_tx = spawn_chat_session_created_tx(pool.clone(), run.id, connector_name);
+    let (session_created_tx, session_persisted) =
+        match spawn_chat_session_created_tx(pool.clone(), run.id, connector_name) {
+            Some((tx, persisted)) => (Some(tx), Some(persisted)),
+            None => (None, None),
+        };
     let result = connector
         .run(AgentRunInput {
             agent_id: run.agent_id.to_string(),
@@ -945,6 +951,12 @@ async fn invoke_chat_provider(
             mcp: Some(mcp),
         })
         .await;
+    // The publisher task writes `agent_runs.session_id` after the CLI emits it.
+    // Wait so a failed `--session` attempt cannot record its id after the
+    // caller has cleared that row for the one retry.
+    if let Some(persisted) = session_persisted {
+        let _ = persisted.await;
+    }
     crate::services::run_service::record_reported_model(pool, run.id, &stream).await;
     result
 }
@@ -1083,6 +1095,15 @@ async fn execute_chat_turn(
                     chat_resume_fallback = true,
                     "chat resume invalid, using full transcript fallback"
                 );
+                // One retry, without the stale id. A second failure is not resumed.
+                ChatService::new(pool)
+                    .clear_provider_session(session_id)
+                    .await
+                    .context("clear stale chat provider session")?;
+                run_svc
+                    .clear_session_id(run.id)
+                    .await
+                    .context("clear stale run session id")?;
                 let transcript = ChatService::new(pool)
                     .format_model_transcript(
                         session_id,

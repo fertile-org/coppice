@@ -100,7 +100,7 @@ Baseline values (must equal today's behavior):
 | `claude-code` | ClaudeJson | McpDoubleUnderscore (`mcp__coppice__<tool>`) | Structured | ✓ | ✓ | ✓ | ✓ | — |
 | `cursor` | CursorHome | Dash (`coppice-<tool>`) | Structured | ✓ | ✓ | ✓ | ✓ | — |
 | `codex` | CodexFlags | ServerToolFields (`server`, `tool`) | Structured | — | ✓ | ✓ | — | — |
-| `kilo-code` | KiloJson | Underscore | Structured | — | — | ✓ | — | — |
+| `kilo-code` | KiloJson | Underscore | Structured | — | ✓ | ✓ | — | — |
 | `opencode` | OpenCodeJson | Underscore (`coppice_<tool>`) | OpenCodeSession | — | ✓ | ✓ | — | ✓ |
 
 The kilo-code tool-name style is unverified (no live CLI); `Underscore` follows its OpenCode fork. The value only affects console labels.
