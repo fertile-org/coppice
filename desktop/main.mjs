@@ -6,15 +6,27 @@ import { desktopServerArgs, resolveAppLogsDir } from './src/logsDir.mjs';
 import { startServer } from './src/serverProcess.mjs';
 import { startupFailureMessage } from './src/startupError.mjs';
 import { resolveLoginShellPath } from './src/shellPath.mjs';
+import { attachMacUpdater, configureMacFeed } from './src/macUpdater.mjs';
+import { readUpdaterMode } from './src/readUpdaterMode.mjs';
 import { checkForUpdate } from './src/updateCheck.mjs';
+import { bannerForUpdate, startUpdateLoop, UPDATE_INTERVAL_MS } from './src/updatePlan.mjs';
+import { readUpdateSettings, UPDATE_SETTINGS_NAME, writeUpdateSettings } from './src/updateSettings.mjs';
 import { devUserDataPath } from './src/userDataPath.mjs';
 import { createErrorWindow, createMainWindow, createSplashWindow } from './src/windows.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DEV_URL = process.env.COPPICE_WEB_URL;
-const UPDATE_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const RELEASE_REPO = JSON.parse(fs.readFileSync(path.join(__dirname, 'package.json'), 'utf8'))
   .coppice.releaseRepo;
+
+function packagedMacInPlaceUpdates() {
+  if (process.platform !== 'darwin' || !app.isPackaged) return false;
+  try {
+    return readUpdaterMode(fs.readFileSync(path.join(__dirname, 'updater-mode.json'), 'utf8'));
+  } catch {
+    return false;
+  }
+}
 
 const devUserData = devUserDataPath({
   isPackaged: app.isPackaged,
@@ -38,8 +50,15 @@ let server = null;
 let serverUrl = null;
 let quitting = false;
 let readyToQuit = false;
-let updatePromise = Promise.resolve(null);
-let updateTimer = null;
+let updateLoop = null;
+let updateState = null;
+let updateAvailability = null;
+let downloadState = null;
+let macUpdater = null;
+let macUpdaterLoading = null;
+let macInPlaceReady = packagedMacInPlaceUpdates();
+let installingUpdate = false;
+let checkGeneration = 0;
 
 function resourcesDir() {
   return app.isPackaged ? process.resourcesPath : path.join(__dirname, 'resources');
@@ -71,7 +90,130 @@ ipcMain.handle('coppice:app-info', () => ({
   arch: process.arch,
 }));
 
-ipcMain.handle('coppice:update-info', () => updatePromise);
+function settingsPath() {
+  return path.join(app.getPath('userData'), UPDATE_SETTINGS_NAME);
+}
+
+function automaticUpdatesEnabled() {
+  return readUpdateSettings(settingsPath()).automaticUpdates;
+}
+
+function broadcastUpdate(state) {
+  updateState = state;
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('coppice:update-info', updateState);
+  }
+}
+
+function publishBanner() {
+  broadcastUpdate(
+    bannerForUpdate({
+      platform: process.platform,
+      macInPlaceUpdates: macInPlaceReady,
+      availability: updateAvailability,
+      download: downloadState,
+    }),
+  );
+}
+
+async function ensureMacUpdater() {
+  if (!macInPlaceReady) return;
+  if (macUpdater) return;
+  if (!macUpdaterLoading) {
+    macUpdaterLoading = (async () => {
+      try {
+        const { autoUpdater } = await import('electron-updater');
+        configureMacFeed(autoUpdater);
+        autoUpdater.autoInstallOnAppQuit = automaticUpdatesEnabled();
+        macUpdater = attachMacUpdater(autoUpdater, {
+          onDownloaded(info) {
+            downloadState = { phase: 'downloaded', version: info.version };
+            publishBanner();
+          },
+          onError() {
+            if (downloadState?.phase === 'downloading') downloadState = null;
+          },
+        });
+      } catch {
+        macInPlaceReady = false;
+        macUpdater = null;
+      }
+    })();
+  }
+  await macUpdaterLoading;
+}
+
+async function runUpdateCheck({ manual = false } = {}) {
+  const generation = checkGeneration;
+  await ensureMacUpdater();
+  const result = await checkForUpdate({ repo: RELEASE_REPO, currentVersion: app.getVersion() });
+  if (!manual && generation !== checkGeneration) return result;
+  if (result.status === 'available') {
+    updateAvailability = { version: result.version, url: result.url };
+    if (macInPlaceReady && macUpdater) {
+      const already = downloadState?.phase === 'downloaded' && downloadState.version === result.version;
+      if (!already) {
+        downloadState = { phase: 'downloading', version: result.version };
+        void macUpdater.check().catch(() => {});
+      }
+    }
+    publishBanner();
+  } else if (result.status === 'up-to-date' && downloadState?.phase !== 'downloaded') {
+    updateAvailability = null;
+    downloadState = null;
+    publishBanner();
+  }
+  return result;
+}
+
+function startUpdateChecks() {
+  if (updateLoop || !automaticUpdatesEnabled()) return;
+  updateLoop = startUpdateLoop({ enabled: true, check: () => runUpdateCheck(), intervalMs: UPDATE_INTERVAL_MS });
+}
+
+function stopUpdateChecks() {
+  updateLoop?.stop();
+  updateLoop = null;
+  checkGeneration += 1;
+}
+
+ipcMain.handle('coppice:update-info', () => updateState);
+
+ipcMain.handle('coppice:update-settings-get', () => readUpdateSettings(settingsPath()));
+
+ipcMain.handle('coppice:update-settings-set', (_event, value) => {
+  const saved = writeUpdateSettings(settingsPath(), {
+    automaticUpdates: value?.automaticUpdates === true,
+  });
+  macUpdater?.setAutoInstallOnQuit(saved.automaticUpdates);
+  if (saved.automaticUpdates) startUpdateChecks();
+  else {
+    stopUpdateChecks();
+    broadcastUpdate(null);
+  }
+  return saved;
+});
+
+ipcMain.handle('coppice:check-for-updates', async () => {
+  const result = await runUpdateCheck({ manual: true });
+  if (result.status === 'available') return { status: 'available', version: result.version };
+  if (result.status === 'up-to-date') return { status: 'up-to-date' };
+  return { status: 'error' };
+});
+
+ipcMain.handle('coppice:restart-to-update', async () => {
+  if (!macUpdater || downloadState?.phase !== 'downloaded') return;
+  quitting = true;
+  stopUpdateChecks();
+  if (server) {
+    const current = server;
+    server = null;
+    await current.stop();
+  }
+  readyToQuit = true;
+  installingUpdate = true;
+  macUpdater.install();
+});
 
 ipcMain.handle('coppice:error-details', (event) => {
   if (event.sender !== errorWindow?.webContents) return null;
@@ -89,20 +231,6 @@ ipcMain.handle('coppice:error-action', (event, action) => {
   }
 });
 
-function startUpdateChecks() {
-  if (updateTimer) return;
-  const check = () => {
-    updatePromise = checkForUpdate({ repo: RELEASE_REPO, currentVersion: app.getVersion() });
-  };
-  check();
-  updateTimer = setInterval(check, UPDATE_INTERVAL_MS);
-  updateTimer.unref?.();
-}
-
-function stopUpdateChecks() {
-  if (updateTimer) clearInterval(updateTimer);
-  updateTimer = null;
-}
 
 function closeWindow(win) {
   if (win && !win.isDestroyed()) win.close();
@@ -228,12 +356,34 @@ app.on('window-all-closed', () => {
   }
 });
 
+function installDownloadedUpdate() {
+  if (!macUpdater || downloadState?.phase !== 'downloaded' || installingUpdate) return;
+  installingUpdate = true;
+  readyToQuit = true;
+  macUpdater.install();
+}
+
 app.on('before-quit', (event) => {
   quitting = true;
-  if (readyToQuit || !server) return;
+  if (installingUpdate || readyToQuit) return;
+  const installOnQuit = downloadState?.phase === 'downloaded' && automaticUpdatesEnabled();
+  if (!server) {
+    if (installOnQuit) {
+      event.preventDefault();
+      stopUpdateChecks();
+      installDownloadedUpdate();
+    }
+    return;
+  }
   event.preventDefault();
   stopUpdateChecks();
-  void server.stop().finally(() => {
+  const current = server;
+  server = null;
+  void current.stop().finally(() => {
+    if (installOnQuit) {
+      installDownloadedUpdate();
+      return;
+    }
     readyToQuit = true;
     app.quit();
   });

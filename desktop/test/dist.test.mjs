@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { builderArgs } from '../scripts/dist.mjs';
+import { builderArgs, macInPlaceUpdatesEnabled, updaterModeJson } from '../scripts/dist.mjs';
 
 describe('builderArgs', () => {
   it('passes --dir through and builds unsigned without CSC_LINK', () => {
@@ -32,6 +32,15 @@ describe('builderArgs', () => {
         '-c.mac.notarize=true',
       ),
     );
+  });
+
+  it('turns on in-place macOS updates only when CSC_LINK is set', () => {
+    assert.equal(macInPlaceUpdatesEnabled({}), false);
+    assert.equal(macInPlaceUpdatesEnabled({ CSC_LINK: '' }), false);
+    assert.equal(macInPlaceUpdatesEnabled({ CSC_LINK: '   ' }), false);
+    assert.equal(macInPlaceUpdatesEnabled({ CSC_LINK: 'cert' }), true);
+    assert.equal(updaterModeJson({ CSC_LINK: 'cert' }), '{"macInPlaceUpdates":true}\n');
+    assert.equal(updaterModeJson({}), '{"macInPlaceUpdates":false}\n');
   });
 
   it('never publishes from electron-builder', () => {

@@ -27,6 +27,21 @@ if hash update-desktop-database 2>/dev/null; then
     update-desktop-database /usr/share/applications || true
 fi
 
+# First install registers the apt source, the way VS Code does. Later updates
+# arrive through apt upgrade or Software Updater. The key is packaged only
+# when the release build has COPPICE_APT_SIGNING_KEY; local builds omit it.
+KEY_SRC="$APP_DIR/resources/apt/coppice-archive-keyring.gpg"
+KEY_DST=/usr/share/keyrings/coppice-archive-keyring.gpg
+LIST=/etc/apt/sources.list.d/coppice.list
+if [ -f "$KEY_SRC" ]; then
+    install -d -m 0755 /usr/share/keyrings
+    install -m 0644 "$KEY_SRC" "$KEY_DST"
+    cat > "$LIST" << 'EOF'
+deb [arch=amd64,arm64 signed-by=/usr/share/keyrings/coppice-archive-keyring.gpg] https://fertile-org.github.io/coppice stable main
+EOF
+    chmod 644 "$LIST"
+fi
+
 # Ubuntu 24.04+ restricts unprivileged user namespaces; the profile grants them to
 # Coppice. AppArmor 3 (Ubuntu 22.04) cannot parse abi/4.0 and needs no profile.
 APPARMOR_SOURCE="$APP_DIR/resources/apparmor-profile"

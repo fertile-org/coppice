@@ -105,17 +105,21 @@ Admins manage plugins in **Settings → Plugins**. Claude Code / Cursor format p
 
 ### Desktop release (tag and publish)
 
-Desktop installers are built by `.github/workflows/release.yml` ([design](superpowers/specs/2026-10-04-desktop-release-design.md)). Four targets: macOS arm64 and x64 `.dmg`, Linux amd64 and arm64 `.deb`. No Windows, no auto-update.
+Desktop installers are built by `.github/workflows/release.yml` ([design](superpowers/specs/2026-10-04-desktop-release-design.md)). Four targets: macOS arm64 and x64 `.dmg` (plus a `.zip` for in-place updates), Linux amd64 and arm64 `.deb`. No Windows.
 
 **Cut a release** (maintainers):
 
 1. Make sure `main` is green, then push a tag: `git tag v0.2.0 && git push origin v0.2.0`. Use `vX.Y.Z-rc.N` for a release candidate; any other tag shape fails the `prepare` job.
-2. The workflow sets the app version from the tag, builds the server, web, and installers on `macos-15`, `macos-15-intel`, `ubuntu-22.04`, and `ubuntu-22.04-arm`, runs the headless smoke on each, and uploads `Coppice-<version>-mac-arm64.dmg`, `Coppice-<version>-mac-x64.dmg`, `Coppice-<version>-linux-amd64.deb`, `Coppice-<version>-linux-arm64.deb`, and `SHA256SUMS` to a **draft** release (marked pre-release for `-rc` tags). It also uploads unversioned copies `Coppice-mac-arm64.dmg`, `Coppice-mac-x64.dmg`, `Coppice-linux-amd64.deb`, and `Coppice-linux-arm64.deb`. `SHA256SUMS` lists both sets, so `releases/latest/download/<file>` stays the same from one release to the next. Notes are generated since the previous tag, plus the install section from `.github/release-notes/install.md`. `<version>` is the tag without `v` (`0.1.0` or `0.1.0-rc.7`). That string is the app version and the file name. The `.deb` control `Version` is `0.1.0` for a final tag and `0.1.0~rc.7` for `v0.1.0-rc.7`, so apt sorts the final release after every release candidate. The package name is `coppice-desktop`.
-3. Review the draft on GitHub and click **Publish**. Re-running the workflow for the same tag reuses the draft and replaces its files.
+2. The workflow sets the app version from the tag, builds the server, web, and installers on `macos-15`, `macos-15-intel`, `ubuntu-22.04`, and `ubuntu-22.04-arm`, runs the headless smoke on each, and uploads `Coppice-<version>-mac-arm64.dmg`, `Coppice-<version>-mac-x64.dmg`, `Coppice-<version>-linux-amd64.deb`, `Coppice-<version>-linux-arm64.deb`, the macOS `.zip` files, and `SHA256SUMS` to a **draft** release (marked pre-release for `-rc` tags). It also uploads unversioned copies `Coppice-mac-arm64.dmg`, `Coppice-mac-x64.dmg`, `Coppice-linux-amd64.deb`, and `Coppice-linux-arm64.deb`. `SHA256SUMS` lists the installers (not the zips), so `releases/latest/download/<file>` stays the same from one release to the next. Notes are generated since the previous tag, plus the install section from `.github/release-notes/install.md`. `<version>` is the tag without `v` (`0.1.0` or `0.1.0-rc.7`). That string is the app version and the file name. The `.deb` control `Version` is `0.1.0` for a final tag and `0.1.0~rc.7` for `v0.1.0-rc.7`, so apt sorts the final release after every release candidate. The package name is `coppice-desktop`.
+3. Review the draft on GitHub and click **Publish**. Re-running the workflow for the same tag reuses the draft and replaces its files. Publishing starts `.github/workflows/apt-repo.yml`. That workflow does not run for the draft itself.
 
-Installed apps check `releases/latest` of `fertile-org/coppice` on launch and every 24 h and show a "new version available" banner. Drafts and pre-releases are never offered.
+Installed apps check the GitHub releases list for `fertile-org/coppice` (drafts skipped, prereleases included) on launch and every 4 hours. The check does not block startup. Network errors are ignored. **Settings → Updates** stores `automaticUpdates` in `update-settings.json` under the app data directory (default `true`).
 
-**Enable macOS signing and notarization:** add these repository secrets; no code change is needed. Without `CSC_LINK`, mac builds are unsigned and the release notes include the `xattr` workaround.
+Linux updates are an apt repository on GitHub Pages (`https://fertile-org.github.io/coppice`, suite `stable`, amd64 and arm64). `.github/workflows/apt-repo.yml` builds it when a release is **published**, or from a manual run. It does not run when a draft is created, and it does not create or edit releases. The `.deb` postinst writes `/etc/apt/sources.list.d/coppice.list` and installs the public key at `/usr/share/keyrings/coppice-archive-keyring.gpg` when the package was built with `COPPICE_APT_SIGNING_KEY`.
+
+macOS in-place install uses `electron-updater` against `latest-mac.yml` on that same Pages site. It is on only when the build was signed: `desktop/scripts/dist.mjs` writes `updater-mode.json` with `macInPlaceUpdates: true` when `CSC_LINK` is set. Unsigned builds keep a download link. Turning in-place install on is that secret (plus the notarization secrets below); no application change is required. The Pages workflow writes `updates/latest-mac.yml` when the release has macOS zip assets.
+
+**Enable macOS signing and notarization:** add these repository secrets. Without `CSC_LINK`, mac builds are unsigned and the release notes include the `xattr` workaround.
 
 | Secret | Value |
 |--------|-------|
@@ -124,6 +128,8 @@ Installed apps check `releases/latest` of `fertile-org/coppice` on launch and ev
 | `APPLE_API_KEY` | Contents of the App Store Connect API key (`AuthKey_XXXX.p8`) |
 | `APPLE_API_KEY_ID` | Key ID of that API key |
 | `APPLE_API_ISSUER` | Issuer ID (UUID) of that API key |
+| `COPPICE_APT_SIGNING_KEY` | ASCII-armored private GPG key that signs the apt `Release` file |
+| `COPPICE_APT_SIGNING_PASSPHRASE` | Passphrase for that key. Empty if the key has none |
 
 **Build locally:** `make desktop-dist-dir` (unpacked, host platform; `POSTGRES_DIR=<dir with bin/lib/share>` skips the pinned Postgres download), then `make desktop-smoke`. After that, `cd desktop && yarn dist` builds the installer for the host platform from the same assembled resources.
 

@@ -1,0 +1,103 @@
+name: Apt repository
+
+# Publishes the signed apt repository and the macOS update manifest to GitHub
+# Pages. This runs when a release is published, or when someone starts it by
+# hand. Creating a draft does not run it, and this workflow does not create
+# or edit a release.
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Choose the published release
+        id: rel
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_TAG: ${{ github.event.release.tag_name }}
+          EVENT_DRAFT: ${{ github.event.release.draft }}
+        run: node desktop/scripts/select-published-release.mjs
+      - name: Download release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.rel.outputs.tag }}
+          VERSION: ${{ steps.rel.outputs.version }}
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts
+          gh release download "$TAG" --dir artifacts \
+            --pattern "Coppice-${VERSION}-linux-amd64.deb" \
+            --pattern "Coppice-${VERSION}-linux-arm64.deb"
+          test -f "artifacts/Coppice-${VERSION}-linux-amd64.deb"
+          test -f "artifacts/Coppice-${VERSION}-linux-arm64.deb"
+          # Unsigned releases from before zip packaging have no macOS update payload.
+          gh release download "$TAG" --dir artifacts \
+            --pattern "Coppice-${VERSION}-mac-*.zip" || true
+      - name: Build the apt repository
+        env:
+          COPPICE_APT_SIGNING_KEY: ${{ secrets.COPPICE_APT_SIGNING_KEY }}
+          COPPICE_APT_SIGNING_PASSPHRASE: ${{ secrets.COPPICE_APT_SIGNING_PASSPHRASE }}
+          VERSION: ${{ steps.rel.outputs.version }}
+        run: |
+          set -euo pipefail
+          if [ -z "$COPPICE_APT_SIGNING_KEY" ]; then
+            echo "COPPICE_APT_SIGNING_KEY is not set" >&2
+            exit 1
+          fi
+          umask 077
+          printf '%s\n' "$COPPICE_APT_SIGNING_KEY" > "$RUNNER_TEMP/apt-key.asc"
+          printf '%s' "$COPPICE_APT_SIGNING_PASSPHRASE" > "$RUNNER_TEMP/apt-pass"
+          node desktop/scripts/apt-repo.mjs \
+            --deb "artifacts/Coppice-${VERSION}-linux-amd64.deb" \
+            --deb "artifacts/Coppice-${VERSION}-linux-arm64.deb" \
+            --out site \
+            --key "$RUNNER_TEMP/apt-key.asc" \
+            --passphrase-file "$RUNNER_TEMP/apt-pass"
+          rm -f "$RUNNER_TEMP/apt-key.asc" "$RUNNER_TEMP/apt-pass"
+      - name: Write the macOS update manifest
+        env:
+          TAG: ${{ steps.rel.outputs.tag }}
+          VERSION: ${{ steps.rel.outputs.version }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          zips=(artifacts/Coppice-${VERSION}-mac-*.zip)
+          if [ "${#zips[@]}" -eq 0 ]; then
+            echo "No macOS zip assets on ${TAG}; latest-mac.yml skipped"
+            exit 0
+          fi
+          mkdir -p site/updates
+          node desktop/scripts/latest-mac-yml.mjs \
+            --version "$VERSION" \
+            --asset-base "https://github.com/fertile-org/coppice/releases/download/${TAG}" \
+            --out site/updates/latest-mac.yml \
+            "${zips[@]}"
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+      - id: deploy
+        uses: actions/deploy-pages@v4

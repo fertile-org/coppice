@@ -24,6 +24,13 @@ There's no Windows app in this beta. On Windows 11, see [Windows 11 (through WSL
 
 You can also get every build from [GitHub Releases](https://github.com/fertile-org/coppice/releases).
 
+## Updates
+
+Coppice checks for new versions in the background. To turn this off, open **Settings → Updates** and turn off **Automatic updates**. Your boards and settings stay when you update.
+
+- **macOS:** choose **Download update** in the banner, then drag the new Coppice into Applications.
+- **Linux:** installing the `.deb` adds Coppice's package source, so new versions arrive with your other updates in Software Updater, or run `sudo apt update && sudo apt upgrade`.
+
 ## Windows 11 (through WSL)
 The Linux x64 build should run on Windows 11 through WSL. We haven't tested this yet. If you try it, please [tell us how it went](https://github.com/fertile-org/coppice/issues).
 
@@ -47,7 +54,7 @@ You need Windows 11, because older Windows 10 builds can't show Linux app window
 
    Use `apt`, not `dpkg -i`. `apt` also installs what Coppice needs.
 
-   To update Coppice later, download the newer `.deb` and run the same `sudo apt install` command. Your boards and settings stay.
+   To update Coppice later, run `sudo apt update && sudo apt upgrade`. Your boards and settings stay.
 4. Install the agent CLIs you use (Claude Code, Codex, Cursor, OpenCode, Kilo Code) in Ubuntu. Sign in to them and to git there too.
 5. Start Coppice from the Windows Start menu (under Ubuntu), or run `coppice` in Ubuntu.
 
