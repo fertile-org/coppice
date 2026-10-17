@@ -206,7 +206,7 @@ impl<'a> RunService<'a> {
             .await?
         {
             return Err(RunError::Validation(
-                crate::copy::review::RECONSIDER_APPROACH.into(),
+                crate::services::review_rounds::round_cap_signal(),
             ));
         }
 
@@ -565,7 +565,7 @@ impl<'a> RunService<'a> {
             .await?
         {
             return Err(RunError::Validation(
-                crate::copy::review::RECONSIDER_APPROACH.into(),
+                crate::services::review_rounds::round_cap_signal(),
             ));
         }
 

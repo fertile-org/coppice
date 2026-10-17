@@ -11,8 +11,8 @@ use sqlx::Row;
 use uuid::Uuid;
 
 use crate::copy::review::{
-    RECONSIDER_APPROACH, REVIEW_ROUND_EARLIER_FINDINGS, REVIEW_ROUND_INTRO, REVIEW_ROUND_NEW_DIFF,
-    REVIEW_ROUND_NO_DIFF, REVIEW_ROUND_NO_FINDINGS,
+    review_didnt_pass, round_cap_comment, REVIEW_ROUND_EARLIER_FINDINGS, REVIEW_ROUND_INTRO,
+    REVIEW_ROUND_NEW_DIFF, REVIEW_ROUND_NO_DIFF, REVIEW_ROUND_NO_FINDINGS,
 };
 use crate::domain::comment::{AuthorType, CommentIntent};
 use crate::domain::substatus::TicketStatus;
@@ -103,8 +103,42 @@ pub fn is_review_change_request(action: &TransitionAction) -> bool {
             .any(|job| job.job_type == WORK_ON_TICKET)
 }
 
+/// Validation signal for a start that the round cap already stopped.
+pub fn round_cap_signal() -> String {
+    review_didnt_pass(DEFAULT_REVIEW_ROUND_CAP)
+}
+
+pub fn is_round_cap_signal(message: &str) -> bool {
+    message == round_cap_signal()
+}
+
+/// Open findings recorded on the latest `Round N:` block.
+pub fn last_round_open_findings(stored: &str) -> Vec<String> {
+    let mut last_block = "";
+    for block in stored.split("\n\n") {
+        let block = block.trim();
+        if block.starts_with("Round ") {
+            last_block = block;
+        }
+    }
+    last_block
+        .lines()
+        .filter_map(|line| {
+            line.trim()
+                .strip_prefix("- ")
+                .map(str::trim)
+                .filter(|finding| !finding.is_empty())
+                .map(str::to_string)
+        })
+        .collect()
+}
+
 /// Replace a send-back with Wait for Human Review and the one comment.
-pub fn apply_round_cap(action: &mut TransitionAction, comment_body: &mut String) {
+pub fn apply_round_cap(
+    action: &mut TransitionAction,
+    comment_body: &mut String,
+    findings: &[String],
+) {
     action.new_status = Some(TicketStatus::WaitForFinalReview);
     action.new_assignee_id = Some(None);
     action.pending_recommendation = Some(None);
@@ -112,7 +146,7 @@ pub fn apply_round_cap(action: &mut TransitionAction, comment_body: &mut String)
     action.substatus_metadata = Some(None);
     action.enqueue_jobs.clear();
     action.system_comments.clear();
-    *comment_body = RECONSIDER_APPROACH.to_string();
+    *comment_body = round_cap_comment(DEFAULT_REVIEW_ROUND_CAP, findings);
 }
 
 /// Prompt section for round 2 and later. Round 1 returns `None`.
@@ -290,7 +324,8 @@ impl<'a> ReviewRoundService<'a> {
             ReviewCapacityService::new(self.pool)
                 .mark_merge_conflict_exempt(review.ticket_id)
                 .await?;
-            apply_round_cap(action, comment_body);
+            let (_, blockers) = findings_parts(review.result);
+            apply_round_cap(action, comment_body, &blockers);
             return Ok(true);
         }
         let (summary, blockers) = findings_parts(review.result);
@@ -331,7 +366,8 @@ impl<'a> ReviewRoundService<'a> {
             return Ok(false);
         }
         if !state.escalated {
-            self.post_reconsider(ticket_id, agent_id).await?;
+            let findings = last_round_open_findings(&state.findings);
+            self.post_reconsider(ticket_id, agent_id, &findings).await?;
             self.save(
                 ticket_id,
                 ReviewRoundState {
@@ -413,13 +449,15 @@ impl<'a> ReviewRoundService<'a> {
         &self,
         ticket_id: Uuid,
         agent_id: Uuid,
+        findings: &[String],
     ) -> Result<(), ReviewRoundError> {
+        let body = round_cap_comment(DEFAULT_REVIEW_ROUND_CAP, findings);
         CommentService::new(self.pool)
             .create(
                 ticket_id,
                 AuthorType::Agent,
                 Some(agent_id),
-                RECONSIDER_APPROACH,
+                &body,
                 CommentIntent::ReviewFeedback,
                 &[],
                 &[],
@@ -510,12 +548,42 @@ mod tests {
 
         let mut action = action_with_fix();
         let mut body = "Please rename this helper and add a test.".into();
-        apply_round_cap(&mut action, &mut body);
+        let findings = vec!["Missing a test".into(), "Header is still wrong".into()];
+        apply_round_cap(&mut action, &mut body, &findings);
         assert_eq!(action.new_status, Some(TicketStatus::WaitForFinalReview));
         assert_eq!(action.new_assignee_id, Some(None));
         assert!(action.enqueue_jobs.is_empty());
         assert!(action.system_comments.is_empty());
-        assert_eq!(body, RECONSIDER_APPROACH);
+        assert_eq!(
+            body,
+            format!(
+                "Review didn't pass after {DEFAULT_REVIEW_ROUND_CAP} rounds. This may need a different approach. Open findings:\n- Missing a test\n- Header is still wrong"
+            )
+        );
+    }
+
+    #[test]
+    fn round_cap_comment_without_findings_has_no_open_findings_line() {
+        let mut action = action_with_fix();
+        let mut body = "Please rename this helper.".into();
+        apply_round_cap(&mut action, &mut body, &[]);
+        assert_eq!(
+            body,
+            format!(
+                "Review didn't pass after {DEFAULT_REVIEW_ROUND_CAP} rounds. This may need a different approach."
+            )
+        );
+        assert!(!body.contains("Open findings"));
+        assert_eq!(action.new_status, Some(TicketStatus::WaitForFinalReview));
+
+        let stored = "Round 1: Check the parser.\n- Add a test\n\nRound 2: Header is still wrong.";
+        assert!(last_round_open_findings(stored).is_empty());
+        assert_eq!(
+            last_round_open_findings(
+                "Round 1: Check the parser.\n- Add a test\n\nRound 2: Header is still wrong.\n- Rename the helper\n- Cover the blank line"
+            ),
+            vec!["Rename the helper".to_string(), "Cover the blank line".to_string()]
+        );
     }
 
     #[test]

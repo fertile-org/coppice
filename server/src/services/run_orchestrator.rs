@@ -41,7 +41,7 @@ fn is_review_capacity_hold(err: &RunError) -> bool {
 fn is_review_round_stop(err: &RunError) -> bool {
     matches!(
         err,
-        RunError::Validation(message) if message == crate::copy::review::RECONSIDER_APPROACH
+        RunError::Validation(message) if crate::services::review_rounds::is_round_cap_signal(message)
     )
 }
 
