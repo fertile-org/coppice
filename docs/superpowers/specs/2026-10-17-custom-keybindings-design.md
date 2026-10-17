@@ -148,7 +148,7 @@ These chords are skipped. `Mod+K` stays available. Sequences and single keys are
 
 ## When the section itself cannot be read
 
-If `[keybindings]` is present and is not a table, every command keeps its defaults and Coppice warns once.
+If `[keybindings]` is present and is not a table, every command keeps its defaults and Coppice warns once: **Couldn't read [keybindings]. Each line needs a command id and a key. All shortcuts use their defaults.**
 
 If a key is a nested table, that entry was an unquoted dotted id such as `palette.open`. That entry is skipped with the quotes warning. Quoted siblings in the same table still apply.
 
@@ -156,7 +156,7 @@ If a key is a nested table, that entry was an unquoted dotted id such as `palett
 
 Both surfaces use the keys in effect after the rules above.
 
-The help overlay keeps the title **Keyboard shortcuts**, the groups **Navigate**, **Tickets**, and **Review**, and the action names in the tables above. **Go to column 1** through **Go to column 9** stay numbered there. Each row's keys are the effective bindings: `⌘+P` or `Ctrl+P`, `G then B`, and `J or Down` when a command has several. A command turned off has a blank key column. The footer stays **Change shortcuts in Settings.** When any entry was skipped, a second footer line is **Some shortcuts in Settings could not be used. Those rows show the defaults.**
+The help overlay keeps the title **Keyboard shortcuts**, the groups **Navigate**, **Tickets**, and **Review**, and the action names in the tables above. **Go to column 1** through **Go to column 9** stay numbered there. Each row's keys are the effective bindings: `⌘+P` or `Ctrl+P`, `G then B`, and `J or Down` when a command has several. A command turned off has a blank key column. The footer stays **Change shortcuts in Settings.** When any entry was skipped, a second footer line is **Some shortcuts in Settings couldn't be used. Those rows show the defaults.**
 
 The palette row shows the same effective keys, with **Go to {column} column** for the nine column jumps. A command with no keys has no key hint on its row. The palette has no extra warning line.
 
@@ -164,7 +164,7 @@ Member and desktop omissions are unchanged. A skipped binding on an omitted comm
 
 ## Settings
 
-Save writes the editor text, including a skipped line, so the user's wording and comments stay put. The status line is **Saved.** when every binding applied. When one or more were skipped, the status line is **Saved. Some shortcuts could not be used and kept their defaults.** Under the editor, one status list item per skipped entry, in file order. Opening Settings shows that list when the file on disk already has skipped entries.
+Save writes the editor text, including a skipped line, so the user's wording and comments stay put. The status line is **Saved.** when every binding applied. When one or more were skipped, the status line is **Saved. Some shortcuts couldn't be used, so they kept their defaults.** Under the editor, one status list item per skipped entry, in file order. Opening Settings shows that list when the file on disk already has skipped entries.
 
 The list is the last applied file. Typing clears the **Saved.** line the way the editor already does, and the list refreshes on the next successful save.
 
@@ -192,23 +192,23 @@ The example files gain the comment line in **Format**.
 
 Settings, after a save that skipped at least one entry:
 
-- Saved. Some shortcuts could not be used and kept their defaults.
+- Saved. Some shortcuts couldn't be used, so they kept their defaults.
 
 One list item per skipped entry:
 
-- Unknown command id "{id}". No shortcut was changed.
-- Couldn't read the shortcut "{text}". Write it like "Mod+K" or "G then B". {action} keeps its default shortcut.
-- "{binding}" is already used by {other}. {action} keeps its default shortcut.
-- "{binding}" belongs to the browser or the system. {action} keeps its default shortcut.
+- No command called "{id}". No shortcut was changed.
+- Couldn't read "{text}". Write it like "Mod+K" or "G then B". {action} keeps its default.
+- "{binding}" is already used by {other}. {action} keeps its default.
+- "{binding}" belongs to the browser or the system. {action} keeps its default.
 - Put each command id in quotes, like "palette.open".
 
 When the section is not a table, the only list item is:
 
-- [keybindings] must be a list of command ids and keys. Shortcuts stay on their defaults.
+- Couldn't read [keybindings]. Each line needs a command id and a key. All shortcuts use their defaults.
 
 Help overlay, second footer line while any entry is skipped:
 
-- Some shortcuts in Settings could not be used. Those rows show the defaults.
+- Some shortcuts in Settings couldn't be used. Those rows show the defaults.
 
 Example config comment:
 
@@ -224,11 +224,11 @@ Docs, Settings:
 
 Examples a reviewer can read out loud:
 
-- Unknown command id "nope". No shortcut was changed.
-- Couldn't read the shortcut "Ctrl+K". Write it like "Mod+K" or "G then B". Create ticket keeps its default shortcut.
-- "Mod+K" is already used by Open command palette. Create ticket keeps its default shortcut.
-- "G" is already used by Go to column 1. Create ticket keeps its default shortcut.
-- "Mod+W" belongs to the browser or the system. Open command palette keeps its default shortcut.
+- No command called "nope". No shortcut was changed.
+- Couldn't read "Ctrl+K". Write it like "Mod+K" or "G then B". Create ticket keeps its default.
+- "Mod+K" is already used by Open command palette. Create ticket keeps its default.
+- "G" is already used by Go to column 1. Create ticket keeps its default.
+- "Mod+W" belongs to the browser or the system. Open command palette keeps its default.
 
 **Saved.**, **Change shortcuts in Settings.**, **Keyboard shortcuts**, and the action names in the tables above stay as they are.
 
