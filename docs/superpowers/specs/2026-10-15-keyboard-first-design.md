@@ -15,7 +15,7 @@ One action registry drives the palette, the shortcuts, tooltips, the help overla
 | Registry | Each action registers once: `id`, label, default keys, scopes, an enabled-when check, and a handler. Components do not add their own `keydown` listeners. |
 | Sequences | v1 includes two-key sequences. A leader waits 1 second, then cancels. An unmatched second key cancels. A match whose action is disabled cancels too, and the second key does not run as its own shortcut. |
 | Vim modes | Out of v1. |
-| Storage | Overrides live in a `[keybindings]` table in `config.toml`. The Settings editor from #42 saves that file and keeps comments. Defaults stay in the registry. |
+| Storage | Overrides live in a `[keybindings]` table in `config.toml`, as [Custom key bindings](2026-10-17-custom-keybindings-design.md) specifies. The Settings editor from #42 saves that file and keeps comments. Defaults stay in the registry. A binding Coppice cannot use leaves that command on its default. |
 | Search | `Mod+K` is search. There is no separate `/` shortcut. |
 | Column moves | `M` is only the move prefix: `M` then `L` / `M` then `H`. A two-key sequence stays off Safari's `⌘⇧[` / `⌘⇧]`, Chrome's `⌘⌥` arrows, and the `Ctrl+Shift+Arrow` chords some WSLg builds drop. |
 | Merge… | `R` then `M`. `Mod+Shift+M` is not used. Chrome takes that chord for the profile menu on macOS, Linux, and Windows, and Firefox takes `Ctrl+Shift+M` for Responsive Design Mode on Linux and Windows. See conflicts. The sequence does not start with `M` or `G`. |
@@ -129,7 +129,7 @@ Archive, Run Agent, Stop, and Ask for changes stay on screen in the tab order. T
 
 ## Browser, OS, and WSL
 
-The default keymap leaves these keys alone. Recording one of them in Settings shows **That key belongs to the browser or the system.** and does not save.
+The default keymap leaves these keys alone. Binding one of them in `[keybindings]` is skipped, and that command keeps its default. The warning copy is in [Custom key bindings](2026-10-17-custom-keybindings-design.md).
 
 | Keys | macOS | Linux | WSL |
 |---|---|---|---|
@@ -166,24 +166,13 @@ Target WCAG 2.1 AA 2.1.1, 2.1.2, 2.4.3, and 2.4.7.
 
 ## Settings
 
-The Settings page gains a **Keyboard shortcuts** section above the `config.toml` editor. Each action shows its label, its current keys, **Record shortcut**, and **Reset**. **Reset all shortcuts** clears every override.
+Custom bindings are specified in [Custom key bindings](2026-10-17-custom-keybindings-design.md): a `[keybindings]` table in `config.toml`, edited in the existing Settings file editor. A binding Coppice cannot use leaves that command on its default keys and shows a warning. The help overlay and the palette show the keys in effect.
 
-Recording shows **Press the new shortcut** and listens for the next chord. Esc cancels and shows **Recording cancelled**. A reserved chord shows **That key belongs to the browser or the system.** A chord already used by another action shows **Already used by {action}.** Neither is saved.
-
-Overrides are written only under `[keybindings]`, through the same save that already keeps comments. When the table is absent, the first save adds this commented sample and leaves the rest of the file alone:
-
-```toml
-# Keyboard shortcuts. Keys here override the defaults.
-# Mod is Cmd on macOS and Ctrl on Linux and WSL.
-# [keybindings]
-# palette.open = "Mod+K"
-```
-
-The Electron application menu is built from the same registry, so its labels and accelerators match the palette and the help overlay. The menu bar stays hidden. On macOS the system menu bar shows the menu. Standard edit and quit items keep the OS accelerators and are not Coppice actions.
+The Electron application menu is a later slice. Its accelerators use those same effective keys. The menu bar stays hidden. On macOS the system menu bar shows the menu. Standard edit and quit items keep the OS accelerators and are not Coppice actions.
 
 ## Strings for Content
 
-New copy. Existing button labels (**Approve plan**, **Accept**, **Merge…**, **Review code**, **Post comment**, **Add ticket…**, **Cancel**) stay as they are. `{column}` is one of Backlog, Plan Review, Ready, In Progress, In Review, In QA, Wait for Human Review, Done, Blocked. `{n}` in **Go to column {n}** is 1–9 in that same order. `{action}` is the other action's label.
+New copy. Existing button labels (**Approve plan**, **Accept**, **Merge…**, **Review code**, **Post comment**, **Add ticket…**, **Cancel**) stay as they are. `{column}` is one of Backlog, Plan Review, Ready, In Progress, In Review, In QA, Wait for Human Review, Done, Blocked. `{n}` in **Go to column {n}** is 1–9 in that same order. Warning copy for a custom binding lives in [Custom key bindings](2026-10-17-custom-keybindings-design.md).
 
 - Skip to board
 - Command palette
@@ -224,13 +213,6 @@ New copy. Existing button labels (**Approve plan**, **Accept**, **Merge…**, **
 - Accept…
 - Accept this ticket?
 - This accepts the work currently in Wait for Human Review.
-- Record shortcut
-- Press the new shortcut
-- Reset
-- Reset all shortcuts
-- Recording cancelled
-- That key belongs to the browser or the system.
-- Already used by {action}.
 - Archive this ticket?
 - This archives the ticket. You can unarchive it later.
 
@@ -241,4 +223,4 @@ Ship the rest as four pull requests, in order:
 1. **Registry and board focus.** The action registry, scopes, roving tabindex, `H`/`J`/`K`/`L` and arrows, Enter to open, Esc back to the card, drawer `[` / `]`, the skip link, the focus ring, and the move announcement.
 2. **Command palette.** `Mod+K`, fuzzy search, recent rows, context-aware ticket actions, key hints on rows.
 3. **Default shortcuts and help.** The remaining default keys, the `?` overlay, and a user docs page at `website/src/pages/docs/shortcuts.md`. Includes the keyboard-only walkthrough: create, assign, open, comment, Open code review, Accept…, back to the board.
-4. **Custom bindings.** The Settings section, conflict warnings, reset, the `[keybindings]` table, and Electron menu accelerators from the registry.
+4. **Custom bindings.** Specified in [Custom key bindings](2026-10-17-custom-keybindings-design.md): the `[keybindings]` table, fallback to the default with a warning, and the effective keys in the help overlay and the palette.
