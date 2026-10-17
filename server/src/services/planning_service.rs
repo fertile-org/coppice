@@ -443,6 +443,60 @@ impl<'a> PlanningService<'a> {
         Ok(id)
     }
 
+    /// For a run started by Ask for changes: the latest plan and every change
+    /// request that started a plan run on this ticket, oldest first. `None`
+    /// for a first plan, or a run started by something else.
+    pub async fn revision_context(
+        &self,
+        ticket_id: Uuid,
+        trigger_comment_id: Option<Uuid>,
+    ) -> Result<Option<PlanRevisionContext>, PlanError> {
+        let Some(trigger_comment_id) = trigger_comment_id else {
+            return Ok(None);
+        };
+        let trigger_intent: Option<String> =
+            sqlx::query_scalar("SELECT intent FROM ticket_comments WHERE id = $1")
+                .bind(trigger_comment_id)
+                .fetch_optional(self.pool)
+                .await?;
+        if trigger_intent.as_deref() != Some("review_feedback") {
+            return Ok(None);
+        }
+        let requests: Vec<String> = sqlx::query_scalar(
+            r#"
+            SELECT comment.body
+            FROM ticket_comments comment
+            WHERE comment.ticket_id = $1
+              AND comment.intent = 'review_feedback'
+              AND (
+                  comment.id = $2
+                  OR comment.id IN (
+                      SELECT run.trigger_comment_id
+                      FROM agent_runs run
+                      WHERE run.ticket_id = $1
+                        AND run.job_type = $3
+                        AND run.trigger_comment_id IS NOT NULL
+                  )
+              )
+            ORDER BY comment.created_at, comment.id
+            "#,
+        )
+        .bind(ticket_id)
+        .bind(trigger_comment_id)
+        .bind(JOB_TYPE_PLAN_TICKET)
+        .fetch_all(self.pool)
+        .await?;
+        let previous_plan = self
+            .latest_plan_comment(ticket_id)
+            .await?
+            .map(|comment| comment.body)
+            .unwrap_or_default();
+        Ok(Some(PlanRevisionContext {
+            previous_plan,
+            requests,
+        }))
+    }
+
     pub async fn latest_plan_comment(&self, ticket_id: Uuid) -> Result<Option<Comment>, PlanError> {
         let row = sqlx::query(
             r#"
@@ -466,6 +520,13 @@ impl<'a> PlanningService<'a> {
             .map(Some)
             .map_err(Into::into)
     }
+}
+
+/// What a revision run is told: the plan it replaces and every request.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PlanRevisionContext {
+    pub previous_plan: String,
+    pub requests: Vec<String>,
 }
 
 fn map_capacity_error(err: ReviewCapacityError) -> PlanError {

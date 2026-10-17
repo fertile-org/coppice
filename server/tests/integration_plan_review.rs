@@ -858,3 +858,100 @@ async fn plan_run_leaves_branches_tags_and_remotes_unchanged() {
         "unchanged refs were written to the run log:\n{log}"
     );
 }
+
+async fn ask_for_changes(app: &axum::Router, ticket_id: &str, comment: &str, cookie: &str, csrf: &str) {
+    let ask = app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            &format!("/api/tickets/{ticket_id}/plan-changes"),
+            &serde_json::json!({ "comment": comment }).to_string(),
+            cookie,
+            csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(ask.status(), StatusCode::OK);
+}
+
+/// The queued plan run's trigger comment, after marking that run finished.
+async fn finish_latest_plan_run(pool: &sqlx::PgPool, ticket_id: Uuid) -> Uuid {
+    let (run_id, trigger): (Uuid, Uuid) = sqlx::query_as(
+        r#"
+        SELECT id, trigger_comment_id FROM agent_runs
+        WHERE ticket_id = $1 AND job_type = 'plan_ticket' AND status IN ('queued', 'running')
+        ORDER BY created_at DESC LIMIT 1
+        "#,
+    )
+    .bind(ticket_id)
+    .fetch_one(pool)
+    .await
+    .expect("plan run");
+    sqlx::query("UPDATE agent_runs SET status = 'succeeded', ended_at = now() WHERE id = $1")
+        .bind(run_id)
+        .execute(pool)
+        .await
+        .unwrap();
+    trigger
+}
+
+#[tokio::test]
+async fn revision_runs_get_the_previous_plan_and_every_change_request() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
+    let pm_id = common::create_agent_with_preset_key(&app, "pm", "PM", &cookie, &csrf).await;
+    let pm = Uuid::parse_str(&pm_id).unwrap();
+    let ticket_id = common::create_unplanned_ticket(&app, &board_id, &cookie, &csrf).await;
+    let ticket = Uuid::parse_str(&ticket_id).unwrap();
+    common::assign_agent_to_ticket(&app, &ticket_id, &pm_id, &cookie, &csrf).await;
+    let pool = state.db.as_ref().expect("db");
+    let planning = PlanningService::new(pool);
+
+    // First plan: no revision context.
+    post_plan(&app, &ticket_id, pm, pool, &cookie, &csrf).await;
+    assert_eq!(planning.revision_context(ticket, None).await.unwrap(), None);
+
+    // Round 2.
+    ask_for_changes(&app, &ticket_id, "Use Postgres.", &cookie, &csrf).await;
+    let first = finish_latest_plan_run(pool, ticket).await;
+    let round_two = planning
+        .revision_context(ticket, Some(first))
+        .await
+        .unwrap()
+        .expect("revision");
+    assert_eq!(round_two.previous_plan, CANONICAL_PLAN.trim());
+    assert_eq!(round_two.requests, vec!["Use Postgres."]);
+
+    let second_plan = "### Changes requested\n- Use Postgres: switched the store.\n\n## Plan\n\n### Approach\nPostgres.\n\n### Steps\n- [ ] Add the table\n";
+    planning.record_plan(ticket, pm, second_plan).await.unwrap();
+
+    // A review comment that did not start a plan run is not a change request.
+    let review = app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            &format!("/api/tickets/{ticket_id}/comments"),
+            r#"{"body":"Unrelated review note.","intent":"review_feedback"}"#,
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(review.status(), StatusCode::CREATED);
+
+    // Round 3: both requests, oldest first, and the plan it replaces.
+    ask_for_changes(&app, &ticket_id, "Split the API change.", &cookie, &csrf).await;
+    let second = finish_latest_plan_run(pool, ticket).await;
+    let round_three = planning
+        .revision_context(ticket, Some(second))
+        .await
+        .unwrap()
+        .expect("revision");
+    assert_eq!(round_three.requests, vec!["Use Postgres.", "Split the API change."]);
+    assert!(round_three.previous_plan.starts_with("### Changes requested"));
+    assert!(round_three.previous_plan.contains("- [ ] Add the table"));
+}

@@ -154,15 +154,49 @@ pub fn plan_template() -> String {
     )
 }
 
-/// Instructions appended to a planning run. `changes` is the human comment.
-pub fn plan_instructions(changes: Option<&str>) -> String {
+pub const PREVIOUS_PLAN_HEADING: &str = "## Previous plan";
+
+/// Heading a revised plan opens with, one line per change request.
+pub const REVISED_CHANGES_HEADING: &str = "### Changes requested";
+
+pub const REVISION_INSTRUCTION: &str = "Revise the previous plan. Start the revised plan with `### Changes requested`: one line per request above, in the same order, saying how you addressed it or why you didn't. Then write the full plan in the format above.";
+
+/// A revision run: the plan it replaces and every change request on this
+/// ticket's plans, oldest first. The last one is the newest.
+pub struct PlanRevision<'a> {
+    pub previous_plan: &'a str,
+    pub requests: Vec<&'a str>,
+}
+
+/// Instructions appended to a planning run.
+pub fn plan_instructions(revision: Option<&PlanRevision<'_>>) -> String {
     let mut out = format!(
         "{PLAN_TASK}\n\n{PLAN_FORMAT_INSTRUCTION}\n\n{}\n{PLAN_CRITERIA_INSTRUCTION}\n{PLAN_DIAGRAM_INSTRUCTION}\n",
         plan_template()
     );
-    if let Some(changes) = changes.map(str::trim).filter(|text| !text.is_empty()) {
-        out.push_str(&format!("\n{CHANGES_REQUESTED_HEADING}\n\n{changes}\n"));
+    let Some(revision) = revision else {
+        return out;
+    };
+    let requests: Vec<&str> = revision
+        .requests
+        .iter()
+        .map(|text| text.trim())
+        .filter(|text| !text.is_empty())
+        .collect();
+    if requests.is_empty() {
+        return out;
     }
+    let previous = revision.previous_plan.trim();
+    if !previous.is_empty() {
+        out.push_str(&format!("\n{PREVIOUS_PLAN_HEADING}\n\n{previous}\n"));
+    }
+    out.push_str(&format!("\n{CHANGES_REQUESTED_HEADING}\n\n"));
+    for (index, request) in requests.iter().enumerate() {
+        // Keep multi-line requests inside their numbered item.
+        let body = request.lines().collect::<Vec<_>>().join("\n   ");
+        out.push_str(&format!("{}. {body}\n", index + 1));
+    }
+    out.push_str(&format!("\n{REVISION_INSTRUCTION}\n"));
     out
 }
 
@@ -240,11 +274,45 @@ mod tests {
 
     #[test]
     fn instructions_forbid_writes_and_include_changes() {
-        let text = plan_instructions(Some("Drop the migration."));
+        let revision = PlanRevision {
+            previous_plan: "## Plan\n\n### Steps\n- [ ] Add a migration\n",
+            requests: vec!["Drop the migration."],
+        };
+        let text = plan_instructions(Some(&revision));
         assert!(text.contains(PLAN_TASK));
         assert!(text.contains("Do not edit files, commit, push, or create or change a branch."));
         assert!(text.contains(CHANGES_REQUESTED_HEADING));
-        assert!(text.contains("Drop the migration."));
+        assert!(text.contains("1. Drop the migration."));
         assert!(text.contains(PLAN_FORMAT_INSTRUCTION));
+    }
+
+    #[test]
+    fn a_first_plan_has_no_revision_section() {
+        let text = plan_instructions(None);
+        assert!(!text.contains(PREVIOUS_PLAN_HEADING));
+        assert!(!text.contains(CHANGES_REQUESTED_HEADING));
+        assert!(!text.contains(REVISION_INSTRUCTION));
+    }
+
+    #[test]
+    fn a_third_round_lists_every_request_in_order_with_the_previous_plan() {
+        let revision = PlanRevision {
+            previous_plan: "## Plan\n\n### Steps\n- [ ] Second version\n",
+            requests: vec!["Use Postgres.", "Split the API change\ninto two steps."],
+        };
+        let text = plan_instructions(Some(&revision));
+        let previous = text.find(PREVIOUS_PLAN_HEADING).unwrap();
+        let first = text.find("1. Use Postgres.").unwrap();
+        let second = text.find("2. Split the API change\n   into two steps.").unwrap();
+        assert!(previous < first && first < second, "{text}");
+        assert!(text.contains("- [ ] Second version"));
+        assert!(text.contains(REVISION_INSTRUCTION));
+    }
+
+    #[test]
+    fn a_revised_plan_keeps_its_changes_section_out_of_the_steps() {
+        let revised = "### Changes requested\n- Use Postgres: switched the store to Postgres.\n- [ ] Split the API change: now two steps.\n\n## Plan\n\n### Approach\nPostgres.\n\n### Steps\n- [ ] Add the table\n- [ ] Change the API\n";
+        assert_eq!(format_plan(revised), revised.trim());
+        assert_eq!(checklist_steps(revised), vec!["Add the table", "Change the API"]);
     }
 }

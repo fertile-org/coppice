@@ -247,17 +247,10 @@ async fn drive_plan_run(
             })
     });
 
-    let changes = if let Some(comment_id) = run.trigger_comment_id {
-        Some(
-            CommentService::new(pool)
-                .get(comment_id)
-                .await
-                .context("load plan change request")?
-                .body,
-        )
-    } else {
-        None
-    };
+    let revision_input = crate::services::planning_service::PlanningService::new(pool)
+        .revision_context(ticket_id, run.trigger_comment_id)
+        .await
+        .context("load plan change requests")?;
 
     let context_input = ContextInput {
         ticket_title: &ticket.ticket.title,
@@ -287,7 +280,13 @@ async fn drive_plan_run(
     let skills = state.skills.skills_for(&plugin_ids);
     let mut markdown = build_tool_first_context(&context_input, &skills, None);
     markdown.push_str("\n# Plan\n\n");
-    markdown.push_str(&plan::plan_instructions(changes.as_deref()));
+    let revision = revision_input
+        .as_ref()
+        .map(|context| plan::PlanRevision {
+            previous_plan: &context.previous_plan,
+            requests: context.requests.iter().map(String::as_str).collect(),
+        });
+    markdown.push_str(&plan::plan_instructions(revision.as_ref()));
     let attachments = crate::services::ticket_attachments::stage_ticket_attachments(
         pool,
         &state.config.storage.artifacts_dir,
