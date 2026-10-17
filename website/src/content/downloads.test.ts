@@ -183,7 +183,7 @@ describe('site download buttons', () => {
     const root = new URL('..', import.meta.url);
     const header = fs.readFileSync(new URL('components/SiteHeader.astro', root), 'utf8');
     const links = fs.readFileSync(new URL('components/DownloadLinks.astro', root), 'utf8');
-    assert.equal(header.includes("withBase('/download')"), true);
+    assert.equal(header.includes("hrefFor(ctx.locale, '/download')"), true);
     assert.equal(header.includes('#download'), false);
     assert.equal(links.includes("withBase('/download')"), true);
     assert.equal(links.includes('href="#"'), false);

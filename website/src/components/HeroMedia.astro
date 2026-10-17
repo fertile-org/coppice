@@ -2,18 +2,13 @@
 import { heroScreenshot, marketingGif, marketingMp4, marketingWebm } from '../lib/hero-assets';
 import { withBase } from '../lib/url';
 
-const videoAlt =
-  'Coppice: write a ticket, approve the plan a PM agent drafts, let agents build and test, then comment on the diff. Nothing is done until you accept it.';
-const stillAlt = 'Coppice board with tickets for the acme-web repository';
+interface Props {
+  stillAlt: string;
+  videoAlt: string;
+  captions: readonly string[];
+}
 
-const captions = [
-  'Write a ticket.',
-  'Your PM agent drafts a plan.',
-  'You approve it.',
-  'Agents build, review, and test.',
-  'Review the diff. Comment on any line.',
-  'Nothing is done until you accept it.',
-];
+const { stillAlt, videoAlt, captions } = Astro.props;
 ---
 
 <figure class="hero-shot">

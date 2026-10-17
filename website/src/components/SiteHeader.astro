@@ -1,25 +1,25 @@
 ---
+import LanguageSwitch from './LanguageSwitch.astro';
+import { hrefFor, useI18n } from '../i18n/runtime';
 import { withBase } from '../lib/url';
 
-const pathname = Astro.url.pathname.replace(/\/$/, '') || '/';
-const docsPath = withBase('/docs').replace(/\/$/, '') || '/docs';
-const docsActive = pathname === docsPath || pathname.startsWith(`${docsPath}/`);
-const homePath = withBase('/').replace(/\/$/, '') || '/';
-const homeActive = pathname === homePath;
-const downloadPath = withBase('/download').replace(/\/$/, '') || '/download';
-const downloadActive = pathname === downloadPath;
+const ctx = useI18n(Astro);
+const docsActive = ctx.englishPath === '/docs' || ctx.englishPath.startsWith('/docs/');
+const homeActive = ctx.englishPath === '/';
+const downloadActive = ctx.englishPath === '/download';
 ---
 
 <header class="site-header" data-pagefind-ignore>
   <div class="shell header-inner">
-    <a class:list={['brand', { active: homeActive }]} href={withBase('/')}>
+    <a class:list={['brand', { active: homeActive }]} href={hrefFor(ctx.locale, '/')}>
       <img class="mark" src={withBase('/logo.svg')} width="34" height="36" alt="" />
       <span>Coppice</span>
     </a>
     <nav class="primary-nav" data-pagefind-ignore aria-label="Primary">
-      <a href={withBase('/docs')} aria-current={docsActive ? 'page' : undefined}>Docs</a>
-      <a href="https://github.com/fertile-org/coppice">GitHub</a>
-      <a class="btn btn-small" href={withBase('/download')} aria-current={downloadActive ? 'page' : undefined}>Download</a>
+      <a href={hrefFor(ctx.locale, '/docs')} aria-current={docsActive ? 'page' : undefined}>{ctx.ui.nav.docs}</a>
+      <a href="https://github.com/fertile-org/coppice">{ctx.ui.nav.github}</a>
+      <a class="btn btn-small" href={hrefFor(ctx.locale, '/download')} aria-current={downloadActive ? 'page' : undefined}>{ctx.ui.nav.download}</a>
+      <LanguageSwitch />
     </nav>
   </div>
 </header>

@@ -1,0 +1,61 @@
+---
+import { downloadPageFor } from '../content/downloads';
+import { pagesFor } from '../i18n/pages';
+import { useI18n } from '../i18n/runtime';
+import Base from '../layouts/Base.astro';
+import { withBase } from '../lib/url';
+
+const downloadPage = downloadPageFor(pagesFor(useI18n(Astro).locale).download);
+---
+
+<Base title={downloadPage.title} description={downloadPage.intro}>
+  <div class="shell landing">
+    <header class="promise">
+      <h1>{downloadPage.title}</h1>
+      <p class="lede">{downloadPage.intro}</p>
+    </header>
+
+    <div class="download-platforms" id="download-platforms">
+      {
+        downloadPage.groups.map((group) => (
+          <div class="download-group" data-os={group.os}>
+            {group.rows.map((row) => (
+              <div class="download-platform">
+                <p>{row.name}</p>
+                <a
+                  class={row.action.kind === 'button' ? 'btn' : 'text-link'}
+                  href={withBase(row.action.href)}
+                >
+                  {row.action.label}
+                </a>
+              </div>
+            ))}
+            {group.note && <p class="download-mac-help">{group.note}</p>}
+          </div>
+        ))
+      }
+    </div>
+
+    <p class="download-follow">
+      {downloadPage.checksum.before}<a href={downloadPage.checksum.sumsHref}>{downloadPage.checksum.sumsLabel}</a
+      >{downloadPage.checksum.between}<a href={withBase(downloadPage.checksum.installHref)}>{downloadPage.checksum.installLabel}</a
+      >{downloadPage.checksum.after}
+    </p>
+    <p class="download-follow">
+      {downloadPage.next.before}<a href={withBase(downloadPage.next.href)}>{downloadPage.next.label}</a
+      >{downloadPage.next.after}
+    </p>
+  </div>
+</Base>
+
+<script>
+  import { detectOs, orderOs } from '../content/download-order.ts';
+
+  const root = document.getElementById('download-platforms');
+  if (root) {
+    for (const os of orderOs(detectOs(navigator.userAgent))) {
+      const group = root.querySelector(`[data-os="${os}"]`);
+      if (group) root.append(group);
+    }
+  }
+</script>

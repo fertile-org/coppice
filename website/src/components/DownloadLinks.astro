@@ -3,14 +3,17 @@ import { withBase } from '../lib/url';
 
 interface Props {
   showDocs?: boolean;
+  mac: string;
+  linux: string;
+  docs: string;
 }
 
-const { showDocs = false } = Astro.props;
+const { showDocs = false, mac, linux, docs } = Astro.props;
 const downloadHref = withBase('/download');
 ---
 
 <div class="download-row">
-  <a class="btn" href={downloadHref}>Download for macOS (Apple Silicon)</a>
-  <a class="btn btn-secondary" href={downloadHref}>Download for Linux (.deb)</a>
-  {showDocs && <a class="text-link" href={withBase('/docs')}>Read the docs</a>}
+  <a class="btn" href={downloadHref}>{mac}</a>
+  <a class="btn btn-secondary" href={downloadHref}>{linux}</a>
+  {showDocs && <a class="text-link" href={withBase('/docs')}>{docs}</a>}
 </div>

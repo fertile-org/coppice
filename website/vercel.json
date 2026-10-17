@@ -6,6 +6,31 @@
       "source": "/docs/chat",
       "destination": "/docs/concepts#chat",
       "permanent": true
+    },
+    {
+      "source": "/zh-cn/docs/chat",
+      "destination": "/zh-cn/docs/concepts#chat",
+      "permanent": true
+    },
+    {
+      "source": "/zh-tw/docs/chat",
+      "destination": "/zh-tw/docs/concepts#chat",
+      "permanent": true
+    },
+    {
+      "source": "/zh-hk/docs/chat",
+      "destination": "/zh-hk/docs/concepts#chat",
+      "permanent": true
+    },
+    {
+      "source": "/ja/docs/chat",
+      "destination": "/ja/docs/concepts#chat",
+      "permanent": true
+    },
+    {
+      "source": "/fr/docs/chat",
+      "destination": "/fr/docs/concepts#chat",
+      "permanent": true
     }
   ]
 }

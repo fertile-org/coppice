@@ -1,0 +1,63 @@
+---
+import { pagesFor } from '../i18n/pages';
+import { useI18n } from '../i18n/runtime';
+import Base from '../layouts/Base.astro';
+import DownloadLinks from './DownloadLinks.astro';
+import HeroMedia from './HeroMedia.astro';
+
+const copy = pagesFor(useI18n(Astro).locale).home;
+---
+
+<Base title="Coppice" description={copy.description}>
+  <div class="shell landing">
+    <header class="promise">
+      <h1>{copy.h1}</h1>
+      <p class="lede">{copy.lede}</p>
+    </header>
+
+    <HeroMedia stillAlt={copy.hero.stillAlt} videoAlt={copy.hero.videoAlt} captions={copy.hero.captions} />
+
+    <p class="hero-support">{copy.support}</p>
+
+    <div id="download">
+      <DownloadLinks showDocs mac={copy.downloads.mac} linux={copy.downloads.linux} docs={copy.downloads.docs} />
+    </div>
+
+    <section class="block" aria-labelledby="how-it-works">
+      <h2 id="how-it-works">{copy.howTitle}</h2>
+      <ol class="steps">
+        {
+          copy.steps.map((step) => (
+            <li>
+              <p>
+                <strong>{step.title}</strong> {step.body}
+              </p>
+            </li>
+          ))
+        }
+      </ol>
+      <p>{copy.howClose}</p>
+    </section>
+
+    <section class="block" aria-labelledby="why">
+      <h2 id="why">{copy.whyTitle}</h2>
+      <div class="feature-grid">
+        {
+          copy.reasons.map((reason) => (
+            <article>
+              <h3>{reason.title}</h3>
+              <p>{reason.body}</p>
+            </article>
+          ))
+        }
+      </div>
+    </section>
+
+    <section class="block pair-follow" aria-labelledby="what-it-is-not">
+      <h2 id="what-it-is-not">{copy.notTitle}</h2>
+      <ul class="plain-list">
+        {copy.notItems.map((item) => <li>{item}</li>)}
+      </ul>
+    </section>
+  </div>
+</Base>

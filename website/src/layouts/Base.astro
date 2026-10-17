@@ -3,6 +3,7 @@ import '../styles/global.css';
 import BetaBanner from '../components/BetaBanner.astro';
 import SiteFooter from '../components/SiteFooter.astro';
 import SiteHeader from '../components/SiteHeader.astro';
+import { useI18n } from '../i18n/runtime';
 import { heroScreenshot } from '../lib/hero-assets';
 import { withBase } from '../lib/url';
 
@@ -12,17 +13,14 @@ interface Props {
 }
 
 const { title, description } = Astro.props;
+const ctx = useI18n(Astro);
 const fullTitle = title === 'Coppice' ? 'Coppice' : `${title} · Coppice`;
-const canonicalPath = Astro.url.pathname
-  .replace(/\/index\.html$/, '/')
-  .replace(/\.html$/, '');
-const canonical = Astro.site ? new URL(canonicalPath || '/', Astro.site).href : undefined;
 const image = Astro.site ? new URL(withBase(heroScreenshot), Astro.site).href : undefined;
 const imageAlt = 'Coppice board with tickets from Backlog through In Review';
 ---
 
 <!doctype html>
-<html lang="en">
+<html lang={ctx.code}>
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -33,7 +31,13 @@ const imageAlt = 'Coppice board with tickets from Backlog through In Review';
     <link rel="icon" href={withBase('/favicon.svg')} type="image/svg+xml" />
     <link rel="icon" href={withBase('/favicon-32x32.png')} type="image/png" sizes="32x32" />
     <link rel="apple-touch-icon" href={withBase('/apple-touch-icon.png')} />
-    {canonical && <link rel="canonical" href={canonical} />}
+    <link rel="canonical" href={ctx.canonical} />
+    {
+      ctx.alternates.map((link) => (
+        <link rel="alternate" hreflang={link.hreflang} href={link.href} />
+      ))
+    }
+    <link rel="sitemap" type="application/xml" href={new URL(withBase('/sitemap.xml'), Astro.site).href} />
     <meta property="og:title" content={fullTitle} />
     <meta property="og:description" content={description} />
     <meta property="og:type" content="website" />
@@ -41,10 +45,10 @@ const imageAlt = 'Coppice board with tickets from Backlog through In Review';
     {image && <meta property="og:image:alt" content={imageAlt} />}
   </head>
   <body>
-    <a class="skip" href="#content">Skip to content</a>
+    <a class="skip" href="#content">{ctx.ui.skip}</a>
     <SiteHeader />
     <BetaBanner />
-    <main id="content">
+    <main id="content" lang={ctx.translated ? undefined : 'en'}>
       <slot />
     </main>
     <SiteFooter />
