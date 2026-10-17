@@ -2,6 +2,7 @@ pub mod agent_health;
 pub mod agent_request;
 pub mod agent_service;
 pub mod artifact_retention;
+pub mod attachment_cleanup;
 pub mod artifact_service;
 pub mod auth_service;
 pub mod backup_service;

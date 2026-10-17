@@ -351,6 +351,7 @@ async fn load_attachment_summaries(
 
 async fn store_attachment_ids(
     pool: &sqlx::PgPool,
+    store: &crate::storage::attachment_store::AttachmentStore,
     ticket: TicketWithDisplay,
     attachment_ids: Option<Vec<Uuid>>,
 ) -> Result<TicketWithDisplay, StatusCode> {
@@ -372,10 +373,23 @@ async fn store_attachment_ids(
             return Err(StatusCode::BAD_REQUEST);
         }
     }
-    TicketService::new(pool)
+    let dropped: Vec<Uuid> = ticket
+        .ticket
+        .attachment_ids
+        .iter()
+        .filter(|id| !unique.contains(id))
+        .copied()
+        .collect();
+    let updated = TicketService::new(pool)
         .set_attachment_ids(ticket.ticket.id, &unique)
         .await
-        .map_err(map_error)
+        .map_err(map_error)?;
+    if let Err(err) =
+        crate::services::attachment_cleanup::delete_if_unreferenced(pool, store, &dropped).await
+    {
+        tracing::warn!(error = %err, "could not remove dropped attachments");
+    }
+    Ok(updated)
 }
 
 trait StatusSerde {
@@ -799,7 +813,7 @@ async fn create_ticket(
         )
         .await
         .map_err(map_error)?;
-    let ticket = store_attachment_ids(pool, ticket, Some(body.attachment_ids)).await?;
+    let ticket = store_attachment_ids(pool, &state.attachments, ticket, Some(body.attachment_ids)).await?;
     let mut response = ticket_to_response(ticket);
     response.attachments = load_attachment_summaries(pool, &response.attachment_ids)
         .await
@@ -907,7 +921,7 @@ async fn update_ticket(
     } else {
         service.get(ticket_id).await.map_err(map_error)?
     };
-    let ticket = store_attachment_ids(pool, ticket, body.attachment_ids).await?;
+    let ticket = store_attachment_ids(pool, &state.attachments, ticket, body.attachment_ids).await?;
     crate::events::publish_ticket_updated(&state.event_bus, &ticket);
     let mut response = ticket_to_response(ticket);
     response.attachments = load_attachment_summaries(pool, &response.attachment_ids)
