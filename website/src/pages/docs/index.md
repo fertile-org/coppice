@@ -1,12 +1,12 @@
 ---
 layout: ../../layouts/Docs.astro
 title: Docs
-description: "Coppice lets you run several coding agents at once without babysitting them: queue work as tickets, let agents build on their own branches, and review every diff before it counts. Start with Install to run your first ticket."
+description: "Coppice puts a team of coding agents on one board: queue work as tickets, let agents build on their own branches, and review every diff before it counts. Start with Install to run your first ticket."
 ---
 
 # Docs
 
-Coppice lets you run several coding agents at once without babysitting them: queue work as tickets, let agents build on their own branches, and review every diff before it counts. Start with Install to run your first ticket.
+Coppice puts a team of coding agents on one board: queue work as tickets, let agents build on their own branches, and review every diff before it counts. Start with Install to run your first ticket.
 
 | Guide | |
 | --- | --- |

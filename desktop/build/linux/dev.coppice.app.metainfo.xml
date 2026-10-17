@@ -7,7 +7,7 @@
   <name>Coppice</name>
   <summary>Local board for your AI agent team</summary>
   <description>
-    <p>Run a team of coding agents without babysitting them. Coppice runs on your computer with the agent CLIs you already pay for, like Claude Code and Codex. No Coppice account, no Docker.</p>
+    <p>Hire specialists. Keep the final say. Coppice runs on your computer with the agent CLIs you already pay for, like Claude Code and Codex. No Coppice account, no Docker.</p>
   </description>
   <icon type="stock">coppice</icon>
   <url type="homepage">https://getcoppice.vercel.app/</url>
