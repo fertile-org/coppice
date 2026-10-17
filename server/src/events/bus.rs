@@ -51,7 +51,9 @@ pub struct EventBus {
 
 impl EventBus {
     pub fn new() -> Self {
-        let (tx, _) = tokio::sync::broadcast::channel(256);
+        // Backstop only: a lagging socket gets a `resync`, and the web app
+        // refetches just the event-driven queries.
+        let (tx, _) = tokio::sync::broadcast::channel(1024);
         Self { tx }
     }
 

@@ -52,11 +52,18 @@ describe('useEventSocket dispatch', () => {
     });
   });
 
-  it('invalidates all queries on resync (receiver lag reconciliation)', async () => {
+  it('refetches only the event-driven families on resync', async () => {
     const { dispatchMessageForTest } = await import('./useEventSocket');
     dispatchMessageForTest(JSON.stringify({ type: 'resync' }));
 
-    expect(invalidateSpy).toHaveBeenCalledWith();
+    expect(invalidateSpy).not.toHaveBeenCalledWith();
+    const keys = invalidateSpy.mock.calls.map(([arg]) => (arg as { queryKey: unknown[] }).queryKey);
+    expect(keys).toEqual(
+      expect.arrayContaining([['tickets'], ['ticket'], ['agent-runs'], ['comments'], ['notifications']]),
+    );
+    for (const unrelated of [['agents'], ['knowledge'], ['plugins'], ['logs'], ['chat-messages']]) {
+      expect(keys).not.toContainEqual(unrelated);
+    }
   });
 
   it('invalidates notification queries on notification.changed', async () => {

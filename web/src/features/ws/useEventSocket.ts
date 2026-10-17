@@ -101,10 +101,27 @@ function dispatchMessage(raw: string) {
     });
   }
 
-  // Server signalled that this socket's view may be stale (e.g. its broadcast
-  // receiver lagged). Invalidate everything so the next render refetches truth.
+  // The server dropped events for this socket (its broadcast receiver lagged).
+  // Only the families those events drive can be stale, so refetch those
+  // instead of the whole cache.
   if (msg.type === 'resync') {
-    void queryClient.invalidateQueries();
+    invalidateEventFamilies();
+  }
+}
+
+/** Every query an app event can change: tickets, runs, comments, notifications. */
+export const EVENT_QUERY_FAMILIES = [
+  ['tickets'],
+  ['ticket'],
+  ['agent-runs'],
+  ['comments'],
+  NOTIFICATIONS_QUERY_KEY,
+  COMPACTION_STATUS_QUERY_KEY,
+] as const;
+
+function invalidateEventFamilies() {
+  for (const queryKey of EVENT_QUERY_FAMILIES) {
+    void queryClient.invalidateQueries({ queryKey: [...queryKey] });
   }
 }
 
