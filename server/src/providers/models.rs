@@ -51,7 +51,8 @@ fn cache_hit(age: Duration, refresh: bool) -> bool {
 #[async_trait]
 pub trait ModelCatalog: Send + Sync {
     /// Model providers: a non-empty config list, otherwise the connector's built-in defaults.
-    async fn model_providers(&self) -> Vec<String>;
+    /// `refresh` skips a cached CLI discovery. Connectors without discovery ignore it.
+    async fn model_providers(&self, refresh: bool) -> Vec<String>;
 
     /// `refresh` always loads again. A list already in flight is not shared.
     async fn list_models(
@@ -74,7 +75,7 @@ pub struct MockModels;
 #[cfg(feature = "mock-provider")]
 #[async_trait]
 impl ModelCatalog for MockModels {
-    async fn model_providers(&self) -> Vec<String> {
+    async fn model_providers(&self, _refresh: bool) -> Vec<String> {
         Vec::new()
     }
 
@@ -112,20 +113,18 @@ impl OpenCodeModels {
 
 #[async_trait]
 impl ModelCatalog for OpenCodeModels {
-    async fn model_providers(&self) -> Vec<String> {
+    async fn model_providers(&self, refresh: bool) -> Vec<String> {
         let configured =
             crate::providers::cli_catalog::effective_model_providers(&self.model_providers, &[]);
         if !configured.is_empty() {
             return configured;
         }
-        if let Some(cached) = self.cache.get().filter(|providers| !providers.is_empty()) {
-            return cached;
-        }
-        let discovered = crate::providers::cli_catalog::discover_cli_providers(&self.command).await;
-        if !discovered.is_empty() {
-            self.cache.store(discovered.clone());
-        }
-        discovered
+        let command = self.command.clone();
+        self.cache
+            .discover(refresh, || {
+                crate::providers::cli_catalog::discover_cli_providers(&command)
+            })
+            .await
     }
 
     async fn list_models(
@@ -167,7 +166,7 @@ impl ClaudeCodeModels {
 
 #[async_trait]
 impl ModelCatalog for ClaudeCodeModels {
-    async fn model_providers(&self) -> Vec<String> {
+    async fn model_providers(&self, _refresh: bool) -> Vec<String> {
         crate::providers::cli_catalog::effective_model_providers(
             &self.model_providers,
             coppice_connectors::get(coppice_connectors::CLAUDE_CODE)
@@ -214,7 +213,7 @@ impl CodexModels {
 
 #[async_trait]
 impl ModelCatalog for CodexModels {
-    async fn model_providers(&self) -> Vec<String> {
+    async fn model_providers(&self, _refresh: bool) -> Vec<String> {
         crate::providers::cli_catalog::effective_model_providers(
             &self.model_providers,
             coppice_connectors::get(coppice_connectors::CODEX)
@@ -297,21 +296,18 @@ impl KiloCodeModels {
 
 #[async_trait]
 impl ModelCatalog for KiloCodeModels {
-    async fn model_providers(&self) -> Vec<String> {
+    async fn model_providers(&self, refresh: bool) -> Vec<String> {
         let configured =
             crate::providers::cli_catalog::effective_model_providers(&self.model_providers, &[]);
         if !configured.is_empty() {
             return configured;
         }
-        if let Some(cached) = self.cache.get().filter(|providers| !providers.is_empty()) {
-            return cached;
-        }
-        let discovered =
-            crate::providers::kilo_models::discover_kilo_providers(&self.command).await;
-        if !discovered.is_empty() {
-            self.cache.store(discovered.clone());
-        }
-        discovered
+        let command = self.command.clone();
+        self.cache
+            .discover(refresh, || {
+                crate::providers::kilo_models::discover_kilo_providers(&command)
+            })
+            .await
     }
 
     async fn list_models(
@@ -350,7 +346,7 @@ impl CursorModels {
 
 #[async_trait]
 impl ModelCatalog for CursorModels {
-    async fn model_providers(&self) -> Vec<String> {
+    async fn model_providers(&self, _refresh: bool) -> Vec<String> {
         let mut providers = crate::providers::cli_catalog::effective_model_providers(
             &self.model_providers,
             coppice_connectors::get(coppice_connectors::CURSOR)
@@ -513,7 +509,7 @@ mod tests {
         std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap();
 
         let models = CursorModels::new(bin.display().to_string(), vec!["other".into()]);
-        let providers = models.model_providers().await;
+        let providers = models.model_providers(false).await;
         assert!(
             providers.iter().any(|provider| provider == "cursor"),
             "{providers:?}"
@@ -527,6 +523,39 @@ mod tests {
         assert!(listed.iter().any(|model| model.id == "composer-2.5"));
     }
 
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn concurrent_refresh_shares_one_provider_discovery() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        let bin = dir.path().join("opencode");
+        std::fs::write(
+            &bin,
+            "#!/bin/sh\n\
+             dir=$(CDPATH= cd -- \"$(dirname \"$0\")\" && pwd)\n\
+             printf 'x\\n' >> \"$dir/calls\"\n\
+             sleep 0.4\n\
+             echo anthropic/claude-sonnet\n",
+        )
+        .unwrap();
+        let mut perms = std::fs::metadata(&bin).unwrap().permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(&bin, perms).unwrap();
+
+        let models = OpenCodeModels::new(bin.display().to_string(), Vec::new());
+        let (left, right) =
+            tokio::join!(models.model_providers(true), models.model_providers(true));
+        assert_eq!(left, vec!["anthropic".to_string()]);
+        assert_eq!(right, left);
+        let calls = std::fs::read_to_string(dir.path().join("calls"))
+            .unwrap_or_default()
+            .lines()
+            .filter(|line| !line.is_empty())
+            .count();
+        assert_eq!(calls, 1, "overlapping refreshes must share one CLI run");
+    }
+
     #[cfg(feature = "mock-provider")]
     #[tokio::test]
     async fn mock_lists_nothing_and_skips_provider_check() {
@@ -535,7 +564,7 @@ mod tests {
             .await
             .expect("empty")
             .is_empty());
-        assert!(MockModels.model_providers().await.is_empty());
+        assert!(MockModels.model_providers(false).await.is_empty());
         assert!(!MockModels.checks_model_provider());
     }
 }

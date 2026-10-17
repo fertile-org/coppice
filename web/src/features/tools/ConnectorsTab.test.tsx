@@ -543,7 +543,11 @@ describe('ConnectorsTab', () => {
       if (path === '/api/tools/connectors' && method === 'GET') {
         return json([cursor]);
       }
-      if (path === '/api/connectors/cursor/model-providers' && method === 'GET') {
+      if (
+        (path === '/api/connectors/cursor/model-providers' ||
+          path === '/api/connectors/cursor/model-providers?refresh=true') &&
+        method === 'GET'
+      ) {
         return json({ items: [{ id: 'cursor' }] });
       }
       if (path === '/api/connectors/cursor/model-providers/cursor/models?refresh=true' && method === 'GET') {

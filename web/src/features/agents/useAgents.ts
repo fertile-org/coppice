@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiFetch } from '../../lib/api';
 import {
@@ -139,8 +139,12 @@ function invalidateIfConnectorTurnedOn(
   void queryClient.invalidateQueries({ queryKey: TOOL_CONNECTORS_QUERY_KEY });
 }
 
-async function fetchModelProviders(connectorId: string): Promise<ModelProviderOption[]> {
-  const res = await apiFetch(`/api/connectors/${connectorId}/model-providers`);
+async function fetchModelProviders(
+  connectorId: string,
+  refresh = false,
+): Promise<ModelProviderOption[]> {
+  const path = `/api/connectors/${encodeURIComponent(connectorId)}/model-providers`;
+  const res = await apiFetch(refresh ? `${path}?refresh=true` : path);
   const data = (await res.json()) as { items: ModelProviderOption[] };
   return data.items;
 }
@@ -214,32 +218,30 @@ export function useConnectorModels(connectorId: string | undefined) {
     models: queries[index]?.data ?? [],
   }));
   const [refreshing, setRefreshing] = useState(false);
+  const refreshInFlight = useRef(false);
 
   const refresh = async () => {
-    if (!connectorId || connectorId === 'mock') return;
+    if (!connectorId || connectorId === 'mock' || refreshInFlight.current) return;
+    refreshInFlight.current = true;
     setRefreshing(true);
     try {
-      let ids = providerIds;
-      if (ids.length === 0) {
-        const next = await queryClient.fetchQuery({
-          queryKey: ['model-providers', connectorId],
-          queryFn: () => fetchModelProviders(connectorId),
-          staleTime: MODELS_REFRESH_STALE_TIME,
-        });
-        ids = next.map((provider) => provider.id);
-      }
+      const next = await fetchModelProviders(connectorId, true);
       await Promise.all(
-        ids.map((providerId) =>
-          queryClient.fetchQuery({
-            queryKey: modelsQueryKey(connectorId, providerId),
-            queryFn: () => fetchProviderModels(connectorId, providerId, true),
-            staleTime: MODELS_REFRESH_STALE_TIME,
-          }),
+        next.map((provider) =>
+          queryClient
+            .fetchQuery({
+              queryKey: modelsQueryKey(connectorId, provider.id),
+              queryFn: () => fetchProviderModels(connectorId, provider.id, true),
+              staleTime: MODELS_REFRESH_STALE_TIME,
+            })
+            .catch(() => undefined),
         ),
       );
+      queryClient.setQueryData(['model-providers', connectorId], next);
     } catch {
-      // The query cache keeps the failure so the form can show it.
+      // A failed provider list leaves the list already on screen.
     } finally {
+      refreshInFlight.current = false;
       setRefreshing(false);
     }
   };

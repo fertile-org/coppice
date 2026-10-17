@@ -107,7 +107,7 @@ describe('useConnectorModels refresh', () => {
     });
 
     const paths = apiFetch.mock.calls.map((call) => String(call[0]));
-    expect(paths.filter((path) => path.endsWith('/model-providers')).length).toBeGreaterThan(1);
+    expect(paths).toContain('/api/connectors/cursor/model-providers?refresh=true');
     expect(paths).toContain(
       '/api/connectors/cursor/model-providers/cursor/models?refresh=true',
     );
@@ -115,6 +115,65 @@ describe('useConnectorModels refresh', () => {
       'auto',
       'composer-2.5',
     ]));
+  });
+
+  it('sends a provider refresh and ignores a second click', async () => {
+    let releaseProviders: (response: Response) => void = () => {};
+    const gated = new Promise<Response>((resolve) => {
+      releaseProviders = resolve;
+    });
+    apiFetch.mockImplementation((path: string) => {
+      const url = String(path);
+      if (url.includes('/model-providers?refresh=true')) return gated;
+      if (url.includes('/models')) {
+        return Promise.resolve(jsonResponse({ items: [{ id: 'auto', name: 'Auto' }] }));
+      }
+      return Promise.resolve(jsonResponse({ items: [{ id: 'cursor' }] }));
+    });
+    const queryClient = client();
+
+    function Harness() {
+      const [values, setValues] = useState(baseValues());
+      return (
+        <MemoryRouter>
+          <QueryClientProvider client={queryClient}>
+            <AgentForm
+              mode="edit"
+              values={values}
+              onChange={setValues}
+              onSubmit={() => {}}
+              onCancel={() => {}}
+              connectorOptions={[{ id: 'cursor', displayName: 'Cursor' }]}
+            />
+          </QueryClientProvider>
+        </MemoryRouter>
+      );
+    }
+
+    render(<Harness />);
+    const button = await screen.findByRole('button', { name: 'Refresh models' });
+    await waitFor(() => expect(button).not.toBeDisabled());
+
+    fireEvent.click(button);
+    fireEvent.click(button);
+
+    await act(async () => {
+      releaseProviders(
+        jsonResponse({ items: [{ id: 'cursor' }, { id: 'anthropic' }] }),
+      );
+      await gated;
+    });
+
+    const paths = apiFetch.mock.calls.map((call) => String(call[0]));
+    expect(paths.filter((path) => path.includes('/model-providers?refresh=true'))).toEqual([
+      '/api/connectors/cursor/model-providers?refresh=true',
+    ]);
+    expect(paths).toContain(
+      '/api/connectors/cursor/model-providers/cursor/models?refresh=true',
+    );
+    expect(paths).toContain(
+      '/api/connectors/cursor/model-providers/anthropic/models?refresh=true',
+    );
   });
 
   it('shows a loading state on Refresh models while the refetch is in flight', async () => {

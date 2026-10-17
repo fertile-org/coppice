@@ -127,8 +127,9 @@ fn models_gateway_err(context: &str, err: &anyhow::Error) -> ModelsApiError {
 }
 
 #[derive(Debug, Deserialize, Default)]
-struct ModelsQuery {
-    /// When true, skip the server's cached list for this connector and provider.
+struct RefreshQuery {
+    /// When true, skip the cached CLI listing.
+    /// Provider discovery honors this only for Refresh models.
     #[serde(default)]
     refresh: bool,
 }
@@ -203,6 +204,7 @@ async fn list_model_providers(
     State(state): State<Arc<AppState>>,
     AuthUser { .. }: AuthUser,
     Path(connector_id): Path<String>,
+    Query(query): Query<RefreshQuery>,
 ) -> Result<Json<ModelProviderListResponse>, ModelsApiError> {
     let registry = state.connectors.registry();
     if !registry.has(&connector_id) {
@@ -217,7 +219,7 @@ async fn list_model_providers(
         return Err(ModelsApiError::Status(StatusCode::NOT_FOUND));
     }
     let items = match registry.models(&connector_id) {
-        Some(models) => models.model_providers().await,
+        Some(models) => models.model_providers(query.refresh).await,
         None => Vec::new(),
     }
     .into_iter()
@@ -230,7 +232,7 @@ async fn list_models(
     State(state): State<Arc<AppState>>,
     AuthUser { .. }: AuthUser,
     Path((connector_id, model_provider_id)): Path<(String, String)>,
-    Query(query): Query<ModelsQuery>,
+    Query(query): Query<RefreshQuery>,
 ) -> Result<Json<ModelListResponse>, ModelsApiError> {
     if query.refresh {
         crate::host_env::invalidate();

@@ -72,7 +72,8 @@ pub async fn evaluate_agent_health(
         );
     };
     if let Some(ref mp) = agent.model_provider {
-        if models.checks_model_provider() && !models.model_providers().await.iter().any(|p| p == mp)
+        if models.checks_model_provider()
+            && !models.model_providers(false).await.iter().any(|p| p == mp)
         {
             return (
                 AgentHealthStatus::MissingConfig,
