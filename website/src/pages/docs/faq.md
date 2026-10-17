@@ -7,7 +7,7 @@ description: "Beta scope, what’s next, and what Coppice is not."
 # FAQ
 
 ## Is Coppice production-ready?
-No, not yet. Coppice is in beta, for early users who want a local agent board with real human gates. Agents run with your local permissions for now, and stronger sandboxing is coming in a later release.
+No, not yet. Coppice is in beta, for early users who want a local agent board with real human gates. Agents run with your local permissions.
 
 ## Do I need Docker or an account?
 No. Download the desktop app, open it, and work. No Docker, no server setup, no Coppice account.
@@ -29,10 +29,6 @@ That is not Coppice’s product. Coppice is built for managing agents: you start
 
 ## Windows?
 Windows 11 should be able to run the Linux x64 build through WSL, but we haven't tested it yet. See [Windows 11 (through WSL)](/docs/install#windows-11-through-wsl). If you try it, please [tell us how it went on GitHub](https://github.com/fertile-org/coppice/issues). A native Windows app isn't planned for this beta.
-
-## What’s next on the roadmap?
-- Next: security and sandboxing for agents
-- Role-owner agents (propose and signal; humans still approve) and scheduling  
 
 ## Where do contributors look?
 Architecture, development, and testing docs stay in the [GitHub repo](https://github.com/fertile-org/coppice/tree/main/docs). This site is for using Coppice.
