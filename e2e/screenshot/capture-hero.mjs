@@ -4,11 +4,11 @@
  *
  * Same stack as `make screenshot`: Compose project coppice-screenshot,
  * desktop mode, 1440×900. Seeds the acme-web repo and a small board, then
- * records the core-flow storyboard. Card moves stay instant. The board
- * stays on the left edge while recording; a later column slides in with an
- * edit pan that lands on whole columns. Crossfades and the highlight pulse
- * are applied in the edit. Captions fade in place at the bottom center, one
- * at a time. The pulse wraps the card border.
+ * records the core-flow storyboard. Card moves stay instant. Shots hold
+ * still. A later column is a straight cut to a whole-column scroll, never a
+ * pan or zoom. A crossfade joins only shots that share framing and scale,
+ * and the edit pulses the card that moved. Any other join is a straight cut.
+ * A caption is gone before the next shot, and the next caption starts there.
  * Writes:
  *
  *   website/public/assets/marketing.mp4   1440×900
@@ -490,22 +490,49 @@ const CAPTION_STYLE = `
 `;
 
 const COLUMN_RULE =
-  '#board > div > section{width:284px!important;min-width:284px!important;max-width:284px!important}';
+  '#board{scroll-behavior:auto!important}#board > div > section{width:284px!important;min-width:284px!important;max-width:284px!important}';
 const CAPTION_CSS = `${CAPTION_STYLE}\n${COLUMN_RULE}`;
 const CROSSFADE_SECONDS = 0.5;
 const CAPTION_MIN_MS = 2500;
-const PAN_SECONDS = 0.9;
+// Marker edges are measured on discrete frames. Keep this much of the real
+// shot on either side of a veil so a color frame never survives into the cut.
+const MARKER_GUARD = 0.08;
+const PLAN_SHOT_SECONDS = 1.55;
 const PULSE_GAP = 4;
 const PULSE_STROKE = 3;
 const MARKERS = [
   { name: 'start', css: 'rgb(255, 0, 96)', rgb: [255, 0, 96] },
+  { name: 'draft', css: 'rgb(120, 0, 255)', rgb: [120, 0, 255] },
   { name: 'plan', css: 'rgb(0, 255, 170)', rgb: [0, 255, 170] },
+  { name: 'preapprove', css: 'rgb(0, 90, 255)', rgb: [0, 90, 255] },
   { name: 'ready', css: 'rgb(255, 128, 0)', rgb: [255, 128, 0] },
+  { name: 'build', css: 'rgb(255, 220, 0)', rgb: [255, 220, 0] },
   { name: 'diff', css: 'rgb(80, 0, 255)', rgb: [80, 0, 255] },
   { name: 'accept', css: 'rgb(0, 180, 255)', rgb: [0, 180, 255] },
-  { name: 'loop', css: 'rgb(255, 0, 180)', rgb: [255, 0, 180] },
+  { name: 'done', css: 'rgb(255, 80, 180)', rgb: [255, 80, 180] },
 ];
-const SEGMENT_NAMES = ['write', 'plan', 'board', 'diff', 'accept', 'loop'];
+const SEGMENT_NAMES = [
+  'write',
+  'draft',
+  'plan',
+  'preapprove',
+  'approve',
+  'build',
+  'diff',
+  'accept',
+  'done',
+];
+const SEGMENT_FRAMES = {
+  write: 'board-left',
+  draft: 'board-left',
+  plan: 'plan',
+  preapprove: 'board-left',
+  approve: 'board-left',
+  build: 'board-waiting',
+  diff: 'diff',
+  accept: 'dialog',
+  done: 'board-done',
+};
 
 async function installCaption(page) {
   const current = await page.evaluate(
@@ -523,17 +550,45 @@ async function shoot(page, name) {
 }
 
 async function pinBoardLeft(page) {
+  await pinBoardScroll(page, 0);
+}
+
+async function pinBoardScroll(page, scrollLeft) {
   const board = page.locator('#board');
   if ((await board.count()) === 0) return;
-  await board.evaluate((el) => {
-    el.scrollLeft = 0;
-  });
+  await board.evaluate((el, left) => {
+    el.style.scrollBehavior = 'auto';
+    el.scrollLeft = left;
+  }, scrollLeft);
   await page.evaluate(
     () =>
       new Promise((resolve) => {
         requestAnimationFrame(() => requestAnimationFrame(resolve));
       }),
   );
+}
+
+async function showColumn(page, label) {
+  await pinBoardLeft(page);
+  const geo = await boardGeometry(page);
+  const scroll = snapScroll(geo, label);
+  await pinBoardScroll(page, scroll);
+  const after = await boardGeometry(page);
+  const boardLeft = after.board.x;
+  const boardRight = after.board.x + after.board.w;
+  const visible = [];
+  for (const col of after.cols) {
+    const right = col.x + col.w;
+    const overlaps = right > boardLeft + 1 && col.x < boardRight - 1;
+    const fully = col.x >= boardLeft - 1 && right <= boardRight + 1;
+    if (overlaps && !fully) fail(`column ${col.label} is cut in half`);
+    if (fully) visible.push(col.label);
+  }
+  if (!visible.includes(label)) fail(`column ${label} is not fully in frame`);
+  console.log(
+    `hero: show ${label} scroll ${after.scrollLeft.toFixed(0)} columns ${visible.join(', ')}`,
+  );
+  return after.scrollLeft;
 }
 
 async function boardGeometry(page) {
@@ -573,33 +628,6 @@ function snapScroll(geo, label) {
   if (!fits.length) fail(`no whole-column view includes ${label}`);
   fits.sort((a, b) => a - b);
   return fits[0];
-}
-
-async function assertTrackPainted(file) {
-  const painted = await run(
-    [
-      'python3',
-      '-c',
-      `from PIL import Image
-import sys
-image = Image.open(sys.argv[1]).convert('RGB')
-px = image.load()
-width, height = image.size
-hits = 0
-for x in range(min(width - 1, 2300), min(width, 2500), 6):
-    for y in range(20, min(height, 80), 4):
-        r, g, b = px[x, y]
-        if abs(r - 248) + abs(g - 244) + abs(b - 238) > 40:
-            hits += 1
-print(hits)
-if hits < 8:
-    raise SystemExit(f'track screenshot is not fully painted ({hits} hits, {width}x{height})')
-`,
-      file,
-    ],
-    { cwd: REPO_ROOT },
-  );
-  console.log(`hero: track painted ${painted.trim()} hits`);
 }
 
 async function measureCard(page, locator) {
@@ -834,26 +862,25 @@ function ffprobe(file) {
   });
 }
 
+function sameFraming(left, right) {
+  return left.endFrame === right.startFrame;
+}
+
 function outputTime(segments, segmentIndex, at) {
   let start = 0;
   for (let index = 0; index < segmentIndex; index += 1) {
-    start += segments[index].end - segments[index].start - CROSSFADE_SECONDS;
+    start += segments[index].end - segments[index].start;
+    if (sameFraming(segments[index], segments[index + 1])) start -= CROSSFADE_SECONDS;
   }
   return start + at;
 }
 
 async function renderSegment(clean, segment, dest) {
-  const length = Math.max(0.2, segment.end - segment.start);
-  let vf = 'fps=25,setpts=PTS-STARTPTS,format=yuv420p';
-  if (segment.zoom) {
-    vf += `,scale=1500:938,crop=1440:900:x=(in_w-out_w)*(0.25+0.5*t/${length.toFixed(3)}):y=(in_h-out_h)*(0.4+0.15*t/${length.toFixed(3)})`;
-  }
+  const start = segment.start.toFixed(3);
+  const end = segment.end.toFixed(3);
+  const vf = `trim=start=${start}:end=${end},setpts=PTS-STARTPTS,fps=25,format=yuv420p`;
   await ffmpeg([
     '-y',
-    '-ss',
-    segment.start.toFixed(3),
-    '-to',
-    segment.end.toFixed(3),
     '-i',
     clean,
     '-an',
@@ -869,38 +896,6 @@ async function renderSegment(clean, segment, dest) {
     'veryfast',
     dest,
   ]);
-}
-
-async function applyPan(source, pulse, dest) {
-  const pan = pulse.pan;
-  const start = Math.max(0, pulse.at - pan.duration);
-  const caption = pan.caption ? pan.caption.join(',') : '';
-  const board = `${pan.board.x},${pan.board.y},${pan.board.w},${pan.board.h}`;
-  await run(
-    [
-      'python3',
-      path.join(HERE, 'hero-board-pan.py'),
-      '--video',
-      source,
-      '--track',
-      pan.track,
-      '--out',
-      dest,
-      '--start',
-      start.toFixed(3),
-      '--duration',
-      pan.duration.toFixed(3),
-      '--scroll',
-      String(pan.scrollTo),
-      '--board',
-      board,
-      '--pad',
-      String(pan.pad),
-      '--caption',
-      caption,
-    ],
-    { cwd: REPO_ROOT },
-  );
 }
 
 async function overlayPulses(source, pulses, scratch, dest) {
@@ -1046,7 +1041,8 @@ def pills(image):
     for run in runs:
         box_w = run["x1"] - run["x0"] + 1
         box_h = run["y1"] - run["y0"] + 1
-        if box_w < 24 or box_h < 36 or box_h > 90:
+        # A fading pill can leave a narrow dark fragment. Real captions are wider.
+        if box_w < 140 or box_h < 36 or box_h > 90:
             continue
         if run["n"] / (box_w * box_h) < 0.45:
             continue
@@ -1108,7 +1104,9 @@ for offset in (0, 0.8, 1.6, 2.5):
         text=True,
         stderr=subprocess.DEVNULL,
     ).lower()
-    if "nothing is done" not in text or "accepted, not merged" not in text:
+    folded = " ".join(text.replace(",", " ").split())
+    folded = folded.replace("accented", "accepted").replace("accepted", "accept")
+    if "nothing is done" not in folded or "accept not merged" not in folded:
         raise SystemExit(f"accept +{offset:.1f}s missing caption or accepted state:\\n{text}")
     print(f"accept +{offset:.1f}s caption overlaps Accepted, not merged")
 span = accept_times[-1] - accept_times[0]
@@ -1117,13 +1115,106 @@ print(f"captions stay centered ({index} frames, accept hold {span:.2f}s)")
   return run(['python3', '-c', script, mp4, acceptTime.toFixed(3)], { cwd: REPO_ROOT });
 }
 
+async function assertHoldStill(mp4, start, end) {
+  const script = `
+import subprocess, sys
+from PIL import Image
+
+mp4, start, end = sys.argv[1], float(sys.argv[2]), float(sys.argv[3])
+proc = subprocess.Popen(
+    [
+        "ffmpeg", "-v", "error", "-ss", f"{start:.3f}", "-to", f"{end:.3f}", "-i", mp4,
+        "-vf", "fps=5", "-f", "rawvideo", "-pix_fmt", "rgb24", "pipe:1",
+    ],
+    stdout=subprocess.PIPE,
+)
+width, height = 1440, 900
+frame_bytes = width * height * 3
+frames = []
+while True:
+    blob = proc.stdout.read(frame_bytes)
+    if len(blob) < frame_bytes:
+        break
+    frames.append(blob)
+proc.wait()
+if len(frames) < 8:
+    raise SystemExit(f"static hold decoded {len(frames)} frames, need at least 3s")
+
+def mad(a, b, dx):
+    total = 0
+    count = 0
+    row = width * 3
+    for y in range(0, height, 2):
+        for x in range(40, width - 40, 4):
+            src = y * row + x * 3
+            dst_x = x + dx
+            if dst_x < 0 or dst_x >= width:
+                continue
+            dst = y * row + dst_x * 3
+            total += abs(a[src] - b[dst]) + abs(a[src + 1] - b[dst + 1]) + abs(a[src + 2] - b[dst + 2])
+            count += 3
+    return total / count
+
+worst = 0
+for index in range(1, len(frames)):
+    scores = {dx: mad(frames[index - 1], frames[index], dx) for dx in range(-4, 5)}
+    best = min(scores, key=scores.get)
+    if best != 0:
+        raise SystemExit(
+            f"static hold frame {index} aligns at {best}px (mad {scores[best]:.2f}, center {scores[0]:.2f})"
+        )
+    if scores[0] > 3:
+        raise SystemExit(f"static hold frame {index} changed by mad {scores[0]:.2f}")
+    worst = max(worst, scores[0])
+print(f"static hold {start:.2f}-{end:.2f}s still ({len(frames)} frames, mad {worst:.2f})")
+`;
+  return run(['python3', '-c', script, mp4, start.toFixed(3), end.toFixed(3)], { cwd: REPO_ROOT });
+}
+
+async function assertNoMarkerFlash(mp4) {
+  const colors = MARKERS.map((marker) => `${marker.name}:${marker.rgb.join(',')}`).join(' ');
+  const script = `
+import subprocess, sys
+mp4 = sys.argv[1]
+markers = []
+for item in sys.argv[2].split():
+    name, rgb = item.split(":")
+    markers.append((name, tuple(int(part) for part in rgb.split(","))))
+proc = subprocess.Popen(
+    ["ffmpeg", "-v", "error", "-i", mp4, "-vf", "fps=25,crop=8:8:716:446,format=rgb24", "-f", "rawvideo", "pipe:1"],
+    stdout=subprocess.PIPE,
+)
+frame_bytes = 8 * 8 * 3
+index = 0
+hits = []
+while True:
+    blob = proc.stdout.read(frame_bytes)
+    if len(blob) < frame_bytes:
+        break
+    mid = (4 * 8 + 4) * 3
+    rgb = (blob[mid], blob[mid + 1], blob[mid + 2])
+    for name, target in markers:
+        if all(abs(channel - target[i]) <= 36 for i, channel in enumerate(rgb)):
+            hits.append(f"{name}@{index / 25:.2f}")
+            break
+    index += 1
+proc.wait()
+if index == 0:
+    raise SystemExit("marker scan decoded no frames")
+if hits:
+    raise SystemExit("marker color leaked into the cut: " + " ".join(hits[:12]))
+print(f"no marker frames in {index} output frames")
+`;
+  return run(['python3', '-c', script, mp4, colors], { cwd: REPO_ROOT });
+}
+
 async function assemble(raw, pulses, stills) {
   const probed = await ffprobe(raw);
   const duration = Number(probed.duration);
   if (!Number.isFinite(duration)) fail('raw video has no duration');
   console.log(`hero: raw ${duration.toFixed(2)}s`);
 
-  const center = await samplePixels(raw, 8, '8:8:716:446');
+  const center = await samplePixels(raw, 25, '8:8:716:446');
   const runs = markerRuns(center);
   console.log(
     `hero: markers ${runs.map((run) => `${run.name}@${run.start.toFixed(2)}-${run.end.toFixed(2)}`).join(' ')}`,
@@ -1150,14 +1241,19 @@ async function assemble(raw, pulses, stills) {
   }
 
   const segments = SEGMENT_NAMES.map((name, index) => {
-    const start = runs[index].end;
-    const end =
-      index === SEGMENT_NAMES.length - 1 ? Math.max(start + 0.4, duration - 0.12) : runs[index + 1].start;
+    const start = runs[index].end + MARKER_GUARD;
+    const next =
+      index === SEGMENT_NAMES.length - 1
+        ? Math.max(start + 0.4, duration - 0.12)
+        : runs[index + 1].start - MARKER_GUARD;
+    const end = name === 'plan' ? Math.min(next, start + PLAN_SHOT_SECONDS) : next;
+    if (!(end > start)) fail(`scene ${name} has no frames after the marker guard`);
     return {
       name,
       start,
       end,
-      zoom: name === 'plan' || name === 'diff',
+      startFrame: SEGMENT_FRAMES[name],
+      endFrame: SEGMENT_FRAMES[name],
       pulses: [],
     };
   });
@@ -1180,7 +1276,7 @@ async function assemble(raw, pulses, stills) {
     console.log(
       `hero: scene ${segment.name} ${length.toFixed(2)}s pulses ${segment.pulses.length}`,
     );
-    if (length < 2) fail(`scene ${segment.name} is only ${length.toFixed(2)}s`);
+    if (length < 1.2) fail(`scene ${segment.name} is only ${length.toFixed(2)}s`);
   }
 
   const scratch = await mkdtemp(path.join(tmpdir(), 'coppice-hero-edit-'));
@@ -1206,32 +1302,36 @@ async function assemble(raw, pulses, stills) {
   for (const [index, segment] of segments.entries()) {
     const cut = path.join(scratch, `seg-${index}.mp4`);
     await renderSegment(clean, segment, cut);
-    let current = cut;
-    const pan = segment.pulses.find((pulse) => pulse.pan);
-    if (pan) {
-      const panned = path.join(scratch, `pan-${index}.mp4`);
-      console.log(
-        `hero: pan ${segment.name} to ${pan.pan.scrollTo.toFixed(0)}px at ${pan.at.toFixed(2)}s`,
-      );
-      await applyPan(current, pan, panned);
-      current = panned;
-    }
     const pulsed = path.join(scratch, `pulsed-${index}.mp4`);
-    await overlayPulses(current, segment.pulses, scratch, pulsed);
+    await overlayPulses(cut, segment.pulses, scratch, pulsed);
     segment.file = pulsed;
   }
 
   const filters = [];
-  let current = '0:v';
+  let label = '0:v';
+  let elapsed = segments[0].end - segments[0].start;
   segments.slice(1).forEach((segment, index) => {
-    const offset =
-      segments.slice(0, index + 1).reduce((sum, item) => sum + (item.end - item.start), 0) -
-      CROSSFADE_SECONDS * (index + 1);
-    const out = index === segments.length - 2 ? 'vout' : `x${index}`;
-    filters.push(
-      `[${current}][${index + 1}:v]xfade=transition=fade:duration=${CROSSFADE_SECONDS}:offset=${offset.toFixed(3)}[${out}]`,
-    );
-    current = out;
+    const prev = segments[index];
+    const out = index === segments.length - 2 ? 'vout' : `j${index}`;
+    const at = outputTime(segments, index, prev.end - prev.start);
+    const left = `n${index}a`;
+    const right = `n${index}b`;
+    filters.push(`[${label}]settb=AVTB[${left}]`);
+    filters.push(`[${index + 1}:v]settb=AVTB[${right}]`);
+    if (sameFraming(prev, segment)) {
+      const offset = elapsed - CROSSFADE_SECONDS;
+      if (offset <= 0.05) fail(`crossfade does not fit after ${prev.name}`);
+      filters.push(
+        `[${left}][${right}]xfade=transition=fade:duration=${CROSSFADE_SECONDS}:offset=${offset.toFixed(3)}[${out}]`,
+      );
+      elapsed = elapsed + (segment.end - segment.start) - CROSSFADE_SECONDS;
+      console.log(`hero: join ${prev.name}->${segment.name} crossfade at ${at.toFixed(2)}s`);
+    } else {
+      filters.push(`[${left}][${right}]concat=n=2:v=1:a=0[${out}]`);
+      elapsed += segment.end - segment.start;
+      console.log(`hero: join ${prev.name}->${segment.name} cut at ${at.toFixed(2)}s`);
+    }
+    label = out;
   });
 
   await mkdir(ASSETS, { recursive: true });
@@ -1322,24 +1422,35 @@ async function assemble(raw, pulses, stills) {
       pulseFrames.push({ file, pulse, time, scene: segment.name });
     }
   }
-  const ready = segments.findIndex((segment) => segment.name === 'board');
-  const boardPulses = segments[ready]?.pulses ?? [];
-  if (boardPulses[0]) {
-    await grab(outputTime(segments, ready, boardPulses[0].at + 0.22), path.join(STILLS_DIR, '03-approve.png'));
-  }
-  if (boardPulses[1]) {
-    await grab(outputTime(segments, ready, boardPulses[1].at + 0.22), path.join(STILLS_DIR, '04-build.png'));
-  }
-  const loopIndex = segments.findIndex((segment) => segment.name === 'loop');
-  const loop = segments[loopIndex];
-  const posterTime = outputTime(segments, loopIndex, (loop.end - loop.start) * 0.45);
+  const pulseStill = async (name, file) => {
+    const index = segments.findIndex((segment) => segment.name === name);
+    const pulse = segments[index]?.pulses[0];
+    if (!pulse) fail(`missing pulse still for ${name}`);
+    await grab(outputTime(segments, index, pulse.at + 0.22), path.join(STILLS_DIR, file));
+  };
+  await pulseStill('approve', '03-approve.png');
+  await pulseStill('build', '04-build.png');
+  const writeIndex = segments.findIndex((segment) => segment.name === 'write');
+  const write = segments[writeIndex];
+  // Caption has cleared, and the crossfade into the next shot has not started.
+  const posterAt = Math.max(0.4, write.end - write.start - CROSSFADE_SECONDS - 0.35);
+  const posterTime = outputTime(segments, writeIndex, posterAt);
   const posterFile = path.join(STILLS_DIR, '07-board.png');
   await grab(posterTime, posterFile);
   await copyFile(posterFile, POSTER);
   console.log((await assertPulseFrames(pulseFrames)).trim());
   const acceptStill = stillFrames.find((still) => still.name === 'accept');
   if (!acceptStill) fail('accept still is missing');
+  console.log((await assertNoMarkerFlash(MP4_OUT)).trim());
   console.log((await assertCaptionFrames(MP4_OUT, acceptStill.time)).trim());
+  const stillHoldStart = acceptStill.time + 1;
+  const stillHoldEnd = acceptStill.time + 4;
+  console.log((await assertHoldStill(MP4_OUT, stillHoldStart, stillHoldEnd)).trim());
+  for (const [index, segment] of segments.entries()) {
+    const start = outputTime(segments, index, 0);
+    const end = outputTime(segments, index, segment.end - segment.start);
+    console.log(`hero: beat ${segment.name} ${start.toFixed(2)}-${end.toFixed(2)} ${segment.startFrame}`);
+  }
   await rm(scratch, { recursive: true, force: true });
 
   const mp4 = await ffprobe(MP4_OUT);
@@ -1366,6 +1477,7 @@ async function record(scene) {
   const videoDir = await mkdtemp(path.join(tmpdir(), 'coppice-hero-video-'));
   const pulses = [];
   const stills = [];
+  let columnScroll = 0;
   let raw = null;
   try {
     const context = await browser.newContext({
@@ -1398,7 +1510,7 @@ async function record(scene) {
           if (!veil && document.body) {
             veil = document.createElement('div');
             veil.id = 'coppice-hero-marker';
-            veil.style.cssText = 'position:fixed;inset:0;z-index:2147483647;pointer-events:none;';
+            veil.style.cssText = 'position:fixed;inset:0;z-index:2147483646;pointer-events:none;';
             document.body.appendChild(veil);
           }
           if (veil) {
@@ -1489,8 +1601,16 @@ async function record(scene) {
       }, Boolean(text));
       captionAt = text ? Date.now() : 0;
       // The pill only transitions opacity, in place. Wait until that fade-in
-      // finishes so a later pan cannot start while the caption is still appearing.
+      // finishes so the next cut cannot land while the caption is still appearing.
       if (text) await sleep(520);
+    };
+    const hideCaption = async () => {
+      await page.evaluate(() => {
+        sessionStorage.setItem('coppice.hero.caption.visible', '0');
+        document.getElementById('coppice-hero-caption')?.classList.remove('is-on');
+      });
+      await sleep(500);
+      captionAt = 0;
     };
     const cutScene = async (marker, settle) => {
       await page.evaluate((css) => {
@@ -1499,9 +1619,10 @@ async function record(scene) {
         if (!veil) {
           veil = document.createElement('div');
           veil.id = 'coppice-hero-marker';
-          veil.style.cssText = 'position:fixed;inset:0;z-index:2147483647;pointer-events:none;';
+          veil.style.cssText = 'position:fixed;inset:0;z-index:2147483646;pointer-events:none;';
           document.body.appendChild(veil);
         }
+        veil.style.zIndex = '2147483646';
         veil.style.background = css;
         veil.style.display = 'block';
       }, marker.css);
@@ -1525,10 +1646,11 @@ async function record(scene) {
             'position:fixed;left:0;top:0;width:22px;height:22px;z-index:2147483647;pointer-events:none;';
           document.body.appendChild(pip);
         }
-        pip.style.background = background;
-        pip.style.display = 'block';
+        document.body.appendChild(pip);
+        pip.style.setProperty('background', background, 'important');
+        pip.style.setProperty('display', 'block', 'important');
       }, css);
-      await sleep(280);
+      await sleep(360);
       await page.evaluate(() => {
         const pip = document.getElementById('coppice-hero-pip');
         if (pip) pip.style.display = 'none';
@@ -1538,78 +1660,18 @@ async function record(scene) {
       stills.push(name);
       await flashPip('rgb(0, 255, 0)');
     };
-    const pulseCue = async (locator, { column } = {}) => {
-      await pinBoardLeft(page);
-      // The edit pan looks back PAN_SECONDS before this cue. Hold the settled
-      // board first so that window is a stable frame, caption already in place.
-      if (column) await sleep(PAN_SECONDS * 1000);
+    const pulseCue = async (locator) => {
       const box = await measureCard(page, locator);
-      const pulse = {
+      if (box.x < -1 || box.x + box.width > VIEWPORT.width + 1) {
+        fail(`card is outside the frame: ${JSON.stringify(box)}`);
+      }
+      pulses.push({
         x: box.x,
         y: box.y,
         width: box.width,
         height: box.height,
         radius: box.radius,
-      };
-      if (column) {
-        const geo = await boardGeometry(page);
-        const scrollTo = snapScroll(geo, column);
-        const track = path.join(videoDir, `track-${pulses.length}.png`);
-        await page.evaluate(() => {
-          const saved = [];
-          const set = (node, prop, value) => {
-            saved.push({
-              node,
-              prop,
-              value: node.style.getPropertyValue(prop),
-              priority: node.style.getPropertyPriority(prop),
-            });
-            node.style.setProperty(prop, value, 'important');
-          };
-          let node = document.querySelector('#board');
-          while (node) {
-            set(node, 'overflow', 'visible');
-            node = node.parentElement;
-          }
-          // The fixed caption is painted into this wide shot. Hide it so the
-          // pan cannot slide a second pill across the frame.
-          const caption = document.getElementById('coppice-hero-caption');
-          if (caption) set(caption, 'visibility', 'hidden');
-          window.__heroOverflow = saved;
-        });
-        await page.locator('#board > div').screenshot({ path: track, animations: 'disabled' });
-        await page.evaluate(() => {
-          for (const item of window.__heroOverflow ?? []) {
-            item.node.style.removeProperty(item.prop);
-            if (item.value) item.node.style.setProperty(item.prop, item.value, item.priority || '');
-          }
-          window.__heroOverflow = undefined;
-        });
-        await assertTrackPainted(track);
-        const captionOn = await page.evaluate(
-          () => document.getElementById('coppice-hero-caption')?.classList.contains('is-on') ?? false,
-        );
-        let caption = null;
-        if (captionOn) {
-          const captionBox = await page.locator('#coppice-hero-caption').boundingBox();
-          if (captionBox) caption = [captionBox.x, captionBox.y, captionBox.width, captionBox.height];
-        }
-        pulse.x = box.x - scrollTo;
-        pulse.pan = {
-          scrollTo,
-          duration: PAN_SECONDS,
-          track,
-          board: geo.board,
-          pad: geo.padLeft,
-          caption,
-        };
-        console.log(
-          `hero: card ${column} pan ${scrollTo.toFixed(0)}px box ${pulse.x.toFixed(0)},${pulse.y.toFixed(0)} ${pulse.width.toFixed(0)}x${pulse.height.toFixed(0)} r${pulse.radius}`,
-        );
-      } else if (pulse.x < -1 || pulse.x + pulse.width > VIEWPORT.width + 1) {
-        fail(`card is outside the left-edge frame: ${JSON.stringify(pulse)}`);
-      }
-      pulses.push(pulse);
+      });
       await flashPip('#ff00ff');
     };
 
@@ -1635,78 +1697,110 @@ async function record(scene) {
     await assertClean(page, 'scene 1');
     await hold(page, 1600);
     await markStill('write');
-    await hold(page, 2800);
+    await hold(page, 3800);
 
     const created = await api('GET', `/api/boards/${scene.boardId}/tickets`, scene.auth);
     const tickets = Array.isArray(created) ? created : (created.items ?? []);
     const ticket = tickets.find((item) => item.title === TICKET_TITLE);
     if (!ticket) fail('typed ticket was not saved');
-    await api('PATCH', `/api/tickets/${ticket.id}`, scene.auth, {
-      description:
-        'Settings should offer a dark mode toggle and follow the same theme preference as the rest of the app.',
-      priority: 'high',
-      repoId: scene.repoId,
-    });
-    await api('POST', `/api/tickets/${ticket.id}/assign`, scene.auth, {
-      agentId: scene.agentIds.PM,
-    });
-    await api('PATCH', `/api/tickets/${ticket.id}/status`, scene.auth, { status: 'plan_review' });
-    await attachPlan(ticket.id, scene.agentIds.PM);
-    const planCard = storyCard('Plan Review');
-    await planCard.waitFor({ timeout: 15_000 });
-    await pinBoardLeft(page);
-    await pulseCue(planCard);
-    await hold(page, 1800);
+    const worktreePromise = heroGit('worktree', ticket.id.split('-')[0]);
+    // The crossfade overlaps the last half-second. That tail has no caption,
+    // so two pills cannot blend.
+    await fadeCaption(null);
+    await hold(page, 800);
 
     await cutScene(MARKERS[1], async () => {
+      await api('PATCH', `/api/tickets/${ticket.id}`, scene.auth, {
+        description:
+          'Settings should offer a dark mode toggle and follow the same theme preference as the rest of the app.',
+        priority: 'high',
+        repoId: scene.repoId,
+      });
+      await api('POST', `/api/tickets/${ticket.id}/assign`, scene.auth, {
+        agentId: scene.agentIds.PM,
+      });
+      await api('PATCH', `/api/tickets/${ticket.id}/status`, scene.auth, { status: 'plan_review' });
+      await attachPlan(ticket.id, scene.agentIds.PM);
+      const landed = storyCard('Plan Review');
+      await landed.waitFor({ timeout: 15_000 });
+      await pinBoardLeft(page);
+      await preparePage(page);
+    });
+    await sleep(700);
+    await pulseCue(storyCard('Plan Review'));
+    await fadeCaption(CAPTIONS[1]);
+    await hold(page, 3000);
+
+    const planCard = storyCard('Plan Review');
+    await cutScene(MARKERS[2], async () => {
       await planCard.click();
       await page.getByRole('button', { name: 'Approve plan' }).waitFor({ timeout: 15_000 });
-      await page.getByText('acme-web').first().waitFor();
+      await page.getByText('acme-web', { exact: true }).first().waitFor();
       await page.getByRole('heading', { name: 'Plan', level: 2 }).scrollIntoViewIfNeeded();
       await page.getByText('Add the Settings toggle').waitFor();
       await preparePage(page);
     });
-    await fadeCaption(CAPTIONS[1]);
-    await assertClean(page, 'scene 2');
-    await hold(page, 3800);
+    await assertClean(page, 'scene plan');
+    await hold(page, 200);
     await markStill('plan');
-    await hold(page, 3800);
+    await hold(page, 600);
 
-    await page.getByRole('button', { name: 'Approve plan' }).click();
     const detail = page.locator('[aria-label="Ticket detail"]');
-    await detail.locator('header').getByText('Ready', { exact: true }).waitFor({ timeout: 15_000 });
-    const worktreePromise = heroGit('worktree', ticket.id.split('-')[0]);
-    await cutScene(MARKERS[2], async () => {
+    await cutScene(MARKERS[3], async () => {
+      await hideCaption();
+      await page.getByRole('button', { name: 'Close', exact: true }).click();
+      await planCard.waitFor({ timeout: 15_000 });
+      await pinBoardLeft(page);
+      await preparePage(page);
+    });
+    await assertClean(page, 'scene preapprove');
+    await hold(page, 1600);
+
+    await cutScene(MARKERS[4], async () => {
+      await planCard.click();
+      await page.getByRole('button', { name: 'Approve plan' }).waitFor({ timeout: 15_000 });
+      await page.getByRole('button', { name: 'Approve plan' }).click();
+      await detail.locator('header').getByText('Ready', { exact: true }).waitFor({ timeout: 15_000 });
       await page.getByRole('button', { name: 'Close', exact: true }).click();
       await page.getByRole('region', { name: 'Ready' }).getByText(TICKET_TITLE).waitFor({ timeout: 15_000 });
       await pinBoardLeft(page);
       await preparePage(page);
     });
-    await fadeCaption(CAPTIONS[2]);
+    await sleep(700);
     await pulseCue(storyCard('Ready'));
-    await assertClean(page, 'scene 3');
-    await hold(page, 2800);
+    await fadeCaption(CAPTIONS[2]);
+    await assertClean(page, 'scene approve');
+    await hold(page, 3800);
+    await fadeCaption(null);
+    await hold(page, 250);
 
     const short = ticket.id.split('-')[0];
-    await api('PATCH', `/api/tickets/${ticket.id}/status`, scene.auth, {
-      status: 'wait_for_final_review',
+    await cutScene(MARKERS[5], async () => {
+      await api('PATCH', `/api/tickets/${ticket.id}/status`, scene.auth, {
+        status: 'wait_for_final_review',
+      });
+      await psql(`
+        UPDATE tickets
+        SET branch_name = ${sqlQuote(`agent/TICKET-${short}`)}
+        WHERE id = ${sqlQuote(ticket.id)}::uuid;
+      `);
+      const waiting = storyCard('Wait for Human Review');
+      await waiting.waitFor({ timeout: 15_000 });
+      columnScroll = await showColumn(page, 'Wait for Human Review');
+      await preparePage(page);
     });
-    await psql(`
-      UPDATE tickets
-      SET branch_name = ${sqlQuote(`agent/TICKET-${short}`)}
-      WHERE id = ${sqlQuote(ticket.id)}::uuid;
-    `);
-    const waiting = storyCard('Wait for Human Review');
-    await waiting.waitFor({ timeout: 15_000 });
-    await pinBoardLeft(page);
+    await pinBoardScroll(page, columnScroll);
+    await sleep(200);
     await fadeCaption(CAPTIONS[3]);
-    await pulseCue(waiting, { column: 'Wait for Human Review' });
-    await assertClean(page, 'scene 4');
-    await hold(page, 2800);
+    await pulseCue(storyCard('Wait for Human Review'));
+    await assertClean(page, 'scene build');
+    await hold(page, 3800);
+    await fadeCaption(null);
+    await hold(page, 250);
 
     const worktree = await worktreePromise;
     if (!worktree?.startsWith('/data/worktrees/')) fail(`worktree path missing: ${worktree}`);
-    await cutScene(MARKERS[3], async () => {
+    await cutScene(MARKERS[6], async () => {
       const review = new URL('/code', WEB);
       review.searchParams.set('repoId', scene.repoId);
       review.searchParams.set('ticketId', ticket.id);
@@ -1714,14 +1808,14 @@ async function record(scene) {
       review.searchParams.set('baseBranch', 'main');
       await page.goto(review.href, { waitUntil: 'domcontentloaded' });
       await page.getByText('Code review', { exact: true }).waitFor({ timeout: 30_000 });
-      await page.getByText('acme-web').first().waitFor();
+      await page.getByText('acme-web', { exact: true }).first().waitFor();
       await page.getByText('src/settings/ThemeToggle.tsx').waitFor();
       await page.getByRole('button', { name: 'Unified' }).click();
       await page.getByText("useState('light')").first().waitFor({ timeout: 20_000 });
       await preparePage(page);
     });
     await fadeCaption(CAPTIONS[4]);
-    await assertClean(page, 'scene 5 diff');
+    await assertClean(page, 'scene diff');
     await hold(page, 1800);
     const line = page.locator('tr').filter({ hasText: "useState('light')" }).first();
     await line.locator('td.diff-gutter').last().click();
@@ -1730,12 +1824,14 @@ async function record(scene) {
     await commentBox.pressSequentially(LINE_COMMENT, { delay: 38 });
     await page.getByRole('button', { name: 'Add comment', exact: true }).click();
     await page.getByText(LINE_COMMENT).waitFor();
-    await assertClean(page, 'scene 5 comment');
+    await assertClean(page, 'scene diff comment');
     await hold(page, 1400);
     await markStill('diff');
-    await hold(page, 3200);
+    await hold(page, 4400);
+    await fadeCaption(null);
+    await hold(page, 250);
 
-    await cutScene(MARKERS[4], async () => {
+    await cutScene(MARKERS[7], async () => {
       await page.goto(`${WEB}/boards/${scene.boardId}?ticket=${ticket.id}`, {
         waitUntil: 'domcontentloaded',
       });
@@ -1748,37 +1844,36 @@ async function record(scene) {
       await page.getByRole('dialog', { name: 'Accept this ticket?' }).waitFor({ timeout: 10_000 });
     });
     await fadeCaption(CAPTIONS[5]);
-    await assertClean(page, 'scene 6');
+    await assertClean(page, 'scene accept');
     await hold(page, 2800);
+    await fadeCaption(null);
+    await hold(page, 250);
     const acceptDialog = page.getByRole('dialog', { name: 'Accept this ticket?' });
-    await acceptDialog.getByRole('button', { name: 'Accept', exact: true }).click();
-    await acceptDialog.waitFor({ state: 'hidden', timeout: 15_000 });
-    await detail.locator('header').getByText('Done', { exact: true }).waitFor({ timeout: 15_000 });
-    const drawerText = await detail.innerText();
-    await page.getByRole('button', { name: 'Close', exact: true }).click();
-    await pinBoardLeft(page);
-    const doneCard = storyCard('Done');
-    await doneCard.waitFor({ timeout: 15_000 });
-    await page
-      .getByText('Accepted, not merged', { exact: true })
-      .waitFor({ timeout: 6_000 })
-      .catch(() => {});
-    const cardText = await doneCard.evaluate((el) => el.parentElement.innerText);
-    const acceptReport = `drawer:\n${drawerText}\n\ncard:\n${cardText}\n`;
-    await writeFile('/tmp/hero-accept-state.txt', acceptReport);
-    console.log(`hero: post-accept\n${acceptReport}`);
-    await pulseCue(doneCard, { column: 'Done' });
-    await markStill('accept');
-    await hold(page, 3800);
-
-    await cutScene(MARKERS[5], async () => {
-      await pinBoardLeft(page);
-      await fadeCaption(null);
-      await page.getByText('Remember the last open settings tab').waitFor();
+    await cutScene(MARKERS[8], async () => {
+      await acceptDialog.getByRole('button', { name: 'Accept', exact: true }).click();
+      await acceptDialog.waitFor({ state: 'hidden', timeout: 15_000 });
+      await detail.locator('header').getByText('Done', { exact: true }).waitFor({ timeout: 15_000 });
+      const drawerText = await detail.innerText();
+      await page.getByRole('button', { name: 'Close', exact: true }).click();
+      const doneCard = storyCard('Done');
+      await doneCard.waitFor({ timeout: 15_000 });
+      columnScroll = await showColumn(page, 'Done');
+      await page
+        .getByText('Accepted, not merged', { exact: true })
+        .waitFor({ timeout: 6_000 })
+        .catch(() => {});
+      const cardText = await doneCard.evaluate((el) => el.parentElement.innerText);
+      const acceptReport = `drawer:\n${drawerText}\n\ncard:\n${cardText}\n`;
+      await writeFile('/tmp/hero-accept-state.txt', acceptReport);
+      console.log(`hero: post-accept\n${acceptReport}`);
       await preparePage(page);
     });
-    await assertClean(page, 'scene 7');
-    await hold(page, 2000);
+    await pinBoardScroll(page, columnScroll);
+    await sleep(300);
+    await fadeCaption(CAPTIONS[5]);
+    await pulseCue(storyCard('Done'));
+    await markStill('accept');
+    await hold(page, 4700);
 
     const video = page.video();
     await page.close();
