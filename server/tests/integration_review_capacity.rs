@@ -93,7 +93,7 @@ async fn full_cap_keeps_ready_tickets_queued_until_review_clears() {
         .unwrap();
     assert_eq!(board.status(), StatusCode::OK);
     let board_body: serde_json::Value = common::json_body(board).await;
-    assert_eq!(board_body["waitingOnReview"], waiting_on_review(1));
+    assert_eq!(board_body["waitingOnReview"], waiting_on_review(1, 1));
     assert_eq!(board_body["reviewCapLabel"], REVIEW_CAP_LABEL);
     assert_eq!(board_body["reviewCap"], 1);
 
@@ -223,7 +223,7 @@ async fn in_review_counts_when_the_board_asks() {
         .await
         .unwrap();
     let board_body: serde_json::Value = common::json_body(board).await;
-    assert_eq!(board_body["waitingOnReview"], waiting_on_review(1));
+    assert_eq!(board_body["waitingOnReview"], waiting_on_review(1, 1));
     assert_eq!(board_body["countInReview"], true);
 }
 
