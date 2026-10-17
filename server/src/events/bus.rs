@@ -49,11 +49,13 @@ pub struct EventBus {
     tx: tokio::sync::broadcast::Sender<AppEvent>,
 }
 
+/// Backstop only: a lagging socket gets a `resync`, and the web app
+/// refetches just the event-driven queries.
+pub const EVENT_BUS_CAPACITY: usize = 1024;
+
 impl EventBus {
     pub fn new() -> Self {
-        // Backstop only: a lagging socket gets a `resync`, and the web app
-        // refetches just the event-driven queries.
-        let (tx, _) = tokio::sync::broadcast::channel(1024);
+        let (tx, _) = tokio::sync::broadcast::channel(EVENT_BUS_CAPACITY);
         Self { tx }
     }
 

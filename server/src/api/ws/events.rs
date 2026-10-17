@@ -236,13 +236,13 @@ mod tests {
 
     #[tokio::test]
     async fn lagged_receiver_emits_resync_signal() {
-        // The global bus uses a 256-slot broadcast channel. Flooding it while a
+        // The global bus is a bounded broadcast channel. Flooding it while a
         // subscriber exists but is not draining forces a Lagged recv, which the
         // handler must surface as a resync rather than silently dropping.
         let bus = EventBus::new();
         let mut rx = bus.subscribe();
 
-        for _ in 0..300 {
+        for _ in 0..crate::events::bus::EVENT_BUS_CAPACITY + 50 {
             bus.publish(AppEvent::TicketUpdated {
                 ticket_id: Uuid::nil(),
                 status: "in_progress".into(),
