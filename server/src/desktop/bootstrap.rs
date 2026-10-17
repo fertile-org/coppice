@@ -183,6 +183,7 @@ fn generated_config(layout: &DataLayout) -> io::Result<String> {
          \n\
          # Keyboard shortcuts. Your keys replace the defaults, and an empty value turns one off.\n\
          # Mod is Cmd on macOS and Ctrl on Linux and WSL.\n\
+         # A shortcut Coppice can't use is skipped, and that command keeps its default.\n\
          # [keybindings]\n\
          # \"palette.open\" = \"Mod+K\"\n",
         worktrees = path(&layout.worktrees),
@@ -306,6 +307,12 @@ mod tests {
         assert!(
             contents.contains("# Mod is Cmd on macOS and Ctrl on Linux and WSL."),
             "starter file keeps the Mod line:\n{contents}"
+        );
+        assert!(
+            contents.contains(
+                "# A shortcut Coppice can't use is skipped, and that command keeps its default."
+            ),
+            "starter file explains a skipped shortcut:\n{contents}"
         );
         assert!(contents.contains("\"palette.open\" = \"Mod+K\""));
         assert_eq!(

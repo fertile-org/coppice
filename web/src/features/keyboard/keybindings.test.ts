@@ -72,12 +72,13 @@ describe('keybinding overrides', () => {
 
     const palette = listPaletteActions({
       omitted: new Set(),
-      scopes: ['global', 'text'],
-      enabled: new Set(['palette.open']),
+      scopes: ['global', 'text', 'board'],
+      enabled: new Set(['palette.open', 'ticket.create']),
       platform: 'macos',
       actions,
     });
     expect(palette.find((entry) => entry.id === 'palette.open')?.shortcut).toBe('⌘+P');
+    expect(palette.find((entry) => entry.id === 'ticket.create')?.shortcut).toBeNull();
   });
 
   it('reads chords and an empty unbind from the keybindings API', async () => {
@@ -90,8 +91,11 @@ describe('keybinding overrides', () => {
       }),
     } as Response);
     await expect(readKeybindings()).resolves.toEqual({
-      'palette.open': [{ kind: 'chord', chord: { key: 'p', mod: true } }],
-      'ticket.create': [],
+      overrides: {
+        'palette.open': [{ kind: 'chord', chord: { key: 'p', mod: true } }],
+        'ticket.create': [],
+      },
+      warnings: [],
     });
   });
 

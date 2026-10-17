@@ -92,20 +92,17 @@ pub fn read_backup_text(path: &Path) -> io::Result<Option<String>> {
 }
 
 /// Same parser and checks as startup, and Save rejects a `retention_days` outside 3, 7, 14, and 30.
+///
+/// A `[keybindings]` line Coppice cannot use does not fail the file. It is
+/// skipped and recorded on the parsed config.
 pub fn validate_config_text(text: &str) -> Result<AppConfig, ConfigTextError> {
-    if let Err(fault) = crate::keybindings::check_document(text) {
-        return Err(ConfigTextError {
-            line: fault.line,
-            column: fault.column,
-            message: fault.message,
-        });
-    }
     let figment = AppConfig::defaults_figment().merge(Toml::string(text));
-    let config = match AppConfig::load_figment(figment) {
+    let mut config = match AppConfig::load_figment(figment) {
         Ok(config) => config,
         Err(error) => return Err(error_from_figment(text, &error)),
     };
     check_logs_retention(text)?;
+    config.keybindings = crate::keybindings::from_document(text);
     Ok(config)
 }
 
@@ -448,23 +445,62 @@ port = 5000
             !outcome.restart_required,
             "shortcut overrides apply without a restart"
         );
-        assert_eq!(
-            outcome
-                .parsed
-                .keybindings
-                .overrides
-                .get("palette.open")
-                .map(|value| match value {
-                    crate::keybindings::KeybindingValue::One(text) => text.as_str(),
-                    crate::keybindings::KeybindingValue::Many(_) => "",
-                }),
-            Some("Mod+P")
+        let shown = outcome.parsed.keybindings.api();
+        assert!(
+            matches!(
+                &shown.overrides["palette.open"][0],
+                crate::keybindings::ParsedBinding::Chord { chord }
+                    if chord.key == "p" && chord.mod_key
+            ),
+            "{:?}",
+            shown.overrides.get("palette.open")
         );
+        assert_eq!(shown.overrides.get("ticket.create").map(Vec::len), Some(0));
+        assert!(shown.warnings.is_empty());
         let shown = read_config_document(&path).expect("read");
         assert!(
             shown.text.contains("[keybindings]"),
             "the settings document keeps the section:\n{}",
             shown.text
+        );
+    }
+
+    #[test]
+    fn skipped_keybinding_is_saved_and_a_sibling_still_applies() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        let original = "# keep\n[server]\nport = 5000\n";
+        write(&path, original);
+        let next = "\
+# keep
+[server]
+port = 5000
+
+[keybindings]
+\"nope\" = \"J\"
+\"palette.open\" = \"Mod+P\"
+\"ticket.create\" = \"Ctrl+K\"
+";
+
+        let outcome = save_config_verbatim(&path, next, &content_revision(original.as_bytes()))
+            .expect("skipped shortcuts still save");
+
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), next);
+        assert!(!outcome.restart_required);
+        let shown = outcome.parsed.keybindings.api();
+        assert!(matches!(
+            &shown.overrides["palette.open"][0],
+            crate::keybindings::ParsedBinding::Chord { chord }
+                if chord.key == "p" && chord.mod_key
+        ));
+        assert!(!shown.overrides.contains_key("ticket.create"));
+        assert!(!shown.overrides.contains_key("nope"));
+        assert_eq!(
+            shown.warnings,
+            vec![
+                "No command called \"nope\". No shortcut was changed.".to_string(),
+                "Couldn't read \"Ctrl+K\". Write it like \"Mod+K\" or \"G then B\". Create ticket keeps its default.".to_string(),
+            ]
         );
     }
 

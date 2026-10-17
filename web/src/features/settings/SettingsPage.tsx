@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Navigate } from 'react-router-dom';
 import { z } from 'zod';
 import { Button } from '../../components/ui/button';
@@ -11,6 +11,8 @@ import { TomlEditor } from './TomlEditor';
 
 const SAVED = 'Saved.';
 const SAVED_RESTART = 'Saved. Restart Coppice to apply.';
+const SAVED_SKIPPED =
+  "Saved. Some shortcuts couldn't be used, so they kept their defaults.";
 
 const ERROR_CLASS =
   'rounded-md bg-danger-muted px-3 py-2 font-body text-sm text-danger';
@@ -81,6 +83,7 @@ export function SettingsPage() {
     staleRevision: string | null;
   } | null>(null);
   const [status, setStatus] = useState<string | null>(null);
+  const [shortcutWarnings, setShortcutWarnings] = useState<string[]>([]);
   const [errorLine, setErrorLine] = useState<number | null>(null);
   const [saving, setSaving] = useState(false);
   const [restoring, setRestoring] = useState(false);
@@ -97,6 +100,23 @@ export function SettingsPage() {
   const text = editor?.text ?? disk?.text ?? null;
   const baseRevision = editor?.baseRevision ?? disk?.revision ?? null;
   const backupAvailable = disk?.backupAvailable ?? false;
+
+  useEffect(() => {
+    if (user?.role !== 'admin') return;
+    let cancelled = false;
+    readKeybindings()
+      .then((next) => {
+        if (cancelled) return;
+        setShortcutWarnings(next.warnings);
+        publishKeybindings(next.overrides, next.warnings);
+      })
+      .catch(() => {
+        /* The editor still shows the file. Shortcuts stay as they were. */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.role]);
 
   if (loading) {
     return <p className="font-body text-sm text-text-muted">Loading…</p>;
@@ -158,11 +178,22 @@ export function SettingsPage() {
             }
           : current,
       );
-      setStatus(saved.restartRequired ? SAVED_RESTART : SAVED);
       setErrorLine(null);
-      void readKeybindings().then(publishKeybindings).catch(() => {
+      try {
+        const next = await readKeybindings();
+        setShortcutWarnings(next.warnings);
+        publishKeybindings(next.overrides, next.warnings);
+        setStatus(
+          saved.restartRequired
+            ? SAVED_RESTART
+            : next.warnings.length > 0
+              ? SAVED_SKIPPED
+              : SAVED,
+        );
+      } catch {
+        setStatus(saved.restartRequired ? SAVED_RESTART : SAVED);
         /* The file is saved. The open app keeps the previous shortcuts. */
-      });
+      }
       queryClient.setQueryData<ConfigFile>(CONFIG_QUERY_KEY, (current) =>
         current
           ? {
@@ -217,6 +248,8 @@ export function SettingsPage() {
   }
 
   const invalid = status?.startsWith('Not saved.') ?? false;
+  const savedStatus =
+    status === SAVED || status === SAVED_RESTART || status === SAVED_SKIPPED;
 
   return (
     <div className="space-y-6">
@@ -288,11 +321,19 @@ export function SettingsPage() {
 
           {status && (
             <p
-              role={status === SAVED || status === SAVED_RESTART ? 'status' : 'alert'}
+              role={savedStatus ? 'status' : 'alert'}
               className={invalid ? ERROR_CLASS : 'font-body text-sm text-text-primary'}
             >
               {status}
             </p>
+          )}
+
+          {shortcutWarnings.length > 0 && (
+            <ul className="list-disc space-y-1 pl-5 font-body text-sm text-text-primary">
+              {shortcutWarnings.map((warning, index) => (
+                <li key={`${index}:${warning}`}>{warning}</li>
+              ))}
+            </ul>
           )}
 
           <div className="flex flex-wrap gap-2">

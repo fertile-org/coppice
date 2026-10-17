@@ -1160,7 +1160,9 @@ impl AppConfig {
     /// Load config: defaults → `~/.config/coppice/config.toml` → `./config.toml` →
     /// `COPPICE_CONFIG` file → environment variables (last wins).
     pub fn load() -> Result<Self, Box<figment::Error>> {
-        Self::load_figment(Self::base_figment())
+        let mut config = Self::load_figment(Self::base_figment())?;
+        config.keybindings = keybindings::from_files(&Self::keybinding_files());
+        Ok(config)
     }
 
     /// Load defaults and environment only (no config files). Useful in unit tests.
@@ -1170,7 +1172,34 @@ impl AppConfig {
 
     /// Load defaults → `path` only; ignores global/local config files and environment.
     pub fn load_file_only(path: &Path) -> Result<Self, Box<figment::Error>> {
-        Self::load_figment(Self::merge_file(Self::defaults_figment(), path))
+        let mut config = Self::load_figment(Self::merge_file(Self::defaults_figment(), path))?;
+        let text = std::fs::read_to_string(path).unwrap_or_default();
+        config.keybindings = keybindings::from_document(&text);
+        Ok(config)
+    }
+
+    /// Config files merged into [`Self::load`], in that same order, without
+    /// reading one path twice.
+    fn keybinding_files() -> Vec<PathBuf> {
+        let mut paths = Vec::new();
+        Self::push_keybinding_file(&mut paths, Self::global_config_path());
+        Self::push_keybinding_file(&mut paths, Self::local_config_path());
+        if let Ok(raw) = std::env::var("COPPICE_CONFIG") {
+            if !raw.is_empty() {
+                Self::push_keybinding_file(&mut paths, PathBuf::from(raw));
+            }
+        }
+        paths
+    }
+
+    fn push_keybinding_file(paths: &mut Vec<PathBuf>, path: PathBuf) {
+        if !path.is_file() {
+            return;
+        }
+        let canon = std::fs::canonicalize(&path).unwrap_or(path);
+        if !paths.contains(&canon) {
+            paths.push(canon);
+        }
     }
 
     pub fn local_config_path() -> PathBuf {
@@ -1233,8 +1262,6 @@ impl AppConfig {
         config
             .knowledge
             .validate()
-            .map_err(|message| Box::new(figment::Error::from(message)))?;
-        keybindings::validate(&config.keybindings)
             .map_err(|message| Box::new(figment::Error::from(message)))?;
         Ok(config)
     }

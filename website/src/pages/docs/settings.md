@@ -175,4 +175,4 @@ Each key is a command id from [Keyboard shortcuts](/docs/shortcuts). Your keys r
 "board.nextCard" = ["J", "Down"]
 ```
 
-`Mod` is Cmd on macOS and Ctrl on Linux and WSL. A sequence is written `G then B`. Several keys for one command are separated with ` or `, or written as a list. Save applies the change without a restart. Unknown command ids, malformed keys, and two commands bound to the same key are rejected.
+`Mod` is Cmd on macOS and Ctrl on Linux and WSL. A sequence is written `G then B`. Several keys for one command are separated with ` or `, or written as a list. Save applies the change without a restart. A shortcut Coppice can't read, an unknown command id, a key another command already has, or a key that belongs to the browser or the system is skipped. That command keeps its default, and Settings explains why.

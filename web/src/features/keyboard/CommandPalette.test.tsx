@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SessionContext, type SessionContextValue } from '../auth/useSession';
 import { KeyboardContext } from './keyboardContext';
 import { KeyboardProvider } from './KeyboardProvider';
+import { publishKeybindings } from './keybindings';
 
 const adminSession: SessionContextValue = {
   user: { id: 'user-1', email: 'ada@example.com', role: 'admin' },
@@ -90,6 +91,7 @@ function openPalette() {
 
 describe('command palette', () => {
   beforeEach(() => {
+    publishKeybindings({});
     localStorage.clear();
     vi.stubGlobal(
       'fetch',
@@ -154,6 +156,19 @@ describe('command palette', () => {
     dispatchKey(document, { key: 'b' });
     expect(screen.getByTestId('location').textContent).toBe('/boards');
     expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
+  it('omits the key hint when a command is turned off', () => {
+    publishKeybindings({ 'board.column.1': [] });
+    renderPalette();
+
+    openPalette();
+    const backlog = screen.getByRole('option', { name: /Go to Backlog column/ });
+    expect(backlog).toHaveTextContent('Go to Backlog column');
+    expect(backlog).not.toHaveTextContent('G then 1');
+    expect(screen.getByRole('option', { name: /Go to Plan Review column/ })).toHaveTextContent(
+      'G then 2',
+    );
   });
 
   it('filters as you type, runs the highlighted row with Enter, and restores focus on Esc', async () => {

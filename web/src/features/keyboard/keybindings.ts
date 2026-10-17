@@ -21,9 +21,15 @@ const bindingSchema = z.discriminatedUnion('kind', [
 
 const responseSchema = z.object({
   overrides: z.record(z.string(), z.array(bindingSchema)),
+  warnings: z.array(z.string()).default([]),
 });
 
 export type KeybindingOverrides = Record<string, Binding[]>;
+
+export type KeybindingsSnapshot = {
+  overrides: KeybindingOverrides;
+  warnings: string[];
+};
 
 /** Config-file form of a binding: `Mod+K`, `G then B`. */
 export function configBinding(binding: Binding): string {
@@ -48,21 +54,29 @@ export function applyKeybindingOverrides(
   });
 }
 
-let current: KeybindingOverrides = {};
-const listeners = new Set<(overrides: KeybindingOverrides) => void>();
+let current: KeybindingsSnapshot = { overrides: {}, warnings: [] };
+const listeners = new Set<(snapshot: KeybindingsSnapshot) => void>();
 
 export function currentKeybindings(): KeybindingOverrides {
-  return current;
+  return current.overrides;
 }
 
-export function publishKeybindings(overrides: KeybindingOverrides): void {
-  if (JSON.stringify(current) === JSON.stringify(overrides)) return;
-  current = overrides;
-  for (const listener of listeners) listener(overrides);
+export function currentKeybindingWarnings(): readonly string[] {
+  return current.warnings;
+}
+
+export function publishKeybindings(
+  overrides: KeybindingOverrides,
+  warnings: readonly string[] = [],
+): void {
+  const next: KeybindingsSnapshot = { overrides, warnings: [...warnings] };
+  if (JSON.stringify(current) === JSON.stringify(next)) return;
+  current = next;
+  for (const listener of listeners) listener(next);
 }
 
 export function subscribeKeybindings(
-  listener: (overrides: KeybindingOverrides) => void,
+  listener: (snapshot: KeybindingsSnapshot) => void,
 ): () => void {
   listeners.add(listener);
   return () => {
@@ -70,13 +84,14 @@ export function subscribeKeybindings(
   };
 }
 
-export async function readKeybindings(): Promise<KeybindingOverrides> {
+export async function readKeybindings(): Promise<KeybindingsSnapshot> {
   const response = await apiFetch('/api/keybindings');
-  return responseSchema.parse(await response.json()).overrides;
+  const parsed = responseSchema.parse(await response.json());
+  return { overrides: parsed.overrides, warnings: parsed.warnings };
 }
 
 export function effectiveShortcutActions(
-  overrides: KeybindingOverrides = current,
+  overrides: KeybindingOverrides = current.overrides,
 ): ShortcutAction[] {
   return applyKeybindingOverrides(SHORTCUT_ACTIONS, overrides);
 }

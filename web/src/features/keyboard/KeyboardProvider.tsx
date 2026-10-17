@@ -15,6 +15,7 @@ import {
   type SequenceSession,
 } from './match';
 import {
+  currentKeybindingWarnings,
   currentKeybindings,
   effectiveShortcutActions,
   publishKeybindings,
@@ -47,6 +48,7 @@ export function KeyboardProvider({ children }: { children: ReactNode }) {
   const session = useContext(SessionContext);
   const platform = useMemo(() => detectPlatform(), []);
   const [overrides, setOverrides] = useState(currentKeybindings);
+  const [warnings, setWarnings] = useState(currentKeybindingWarnings);
   const actions = useMemo(() => effectiveShortcutActions(overrides), [overrides]);
   const actionsRef = useRef(actions);
   const locationRef = useRef(location);
@@ -64,7 +66,14 @@ export function KeyboardProvider({ children }: { children: ReactNode }) {
     };
   }, [actions, location, session]);
 
-  useEffect(() => subscribeKeybindings(setOverrides), []);
+  useEffect(
+    () =>
+      subscribeKeybindings((next) => {
+        setOverrides(next.overrides);
+        setWarnings(next.warnings);
+      }),
+    [],
+  );
 
   useEffect(() => {
     // Tests publish overrides directly. A relative fetch here has no server.
@@ -72,7 +81,7 @@ export function KeyboardProvider({ children }: { children: ReactNode }) {
     let cancelled = false;
     readKeybindings()
       .then((next) => {
-        if (!cancelled) publishKeybindings(next);
+        if (!cancelled) publishKeybindings(next.overrides, next.warnings);
       })
       .catch(() => {
         /* Keep the shortcuts already in effect. */
@@ -92,6 +101,7 @@ export function KeyboardProvider({ children }: { children: ReactNode }) {
   const api = useMemo<KeyboardContextValue>(
     () => ({
       actions,
+      keybindingWarnings: warnings,
       register(id, registration) {
         const list = handlersRef.current.get(id) ?? [];
         handlersRef.current.set(id, [...list, registration]);
@@ -142,7 +152,7 @@ export function KeyboardProvider({ children }: { children: ReactNode }) {
         return registration.run() !== false;
       },
     }),
-    [actions],
+    [actions, warnings],
   );
 
   useEffect(() => {
