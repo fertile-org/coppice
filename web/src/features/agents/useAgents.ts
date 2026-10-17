@@ -226,6 +226,12 @@ export function useConnectorModels(connectorId: string | undefined) {
     setRefreshing(true);
     try {
       const next = await fetchModelProviders(connectorId, true);
+      const shown = queryClient.getQueryData<unknown[]>(['model-providers', connectorId]) ?? [];
+      if (next.length === 0 && shown.length > 0) {
+        // An empty discovery is more likely a hiccup than every provider
+        // being gone; keep the list already on screen.
+        return;
+      }
       await Promise.all(
         next.map((provider) =>
           queryClient
