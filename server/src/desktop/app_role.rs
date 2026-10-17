@@ -3,10 +3,11 @@
 //! `initdb -U coppice` makes `coppice` a superuser. Backup import feeds
 //! `database.sql` to `psql` as the runtime role, and a superuser can run
 //! `COPY ... TO PROGRAM`. The server and that import connect as `coppice_app`
-//! instead. The superuser password is only used here, to create the role and
-//! to adopt a database left by an older install. Adoption opens that database
-//! once; `pg_app_role_ready` in the data directory records it, and later
-//! launches do not open the database as the superuser.
+//! instead. The superuser password is used here to create the role and to
+//! adopt a database left by an older install, and at startup to reset
+//! `coppice_app` when its password file is missing or unreadable. Adoption
+//! opens that database once; `pg_app_role_ready` in the data directory records
+//! it, and later launches do not open the database as the superuser.
 
 use std::path::Path;
 
