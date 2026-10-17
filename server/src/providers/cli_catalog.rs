@@ -159,9 +159,12 @@ pub async fn discover_cli_providers(command: &str) -> Vec<String> {
 }
 
 /// Remembers a CLI provider list so health checks do not respawn the CLI every time.
+/// One discovery runs at a time. A refresh that arrives while that run is in
+/// flight reuses the list it stores.
 #[derive(Default)]
 pub struct ProviderCache {
     inner: Mutex<Option<(Instant, Vec<String>)>>,
+    gate: tokio::sync::Mutex<()>,
 }
 
 impl ProviderCache {
@@ -169,7 +172,13 @@ impl ProviderCache {
         Self::default()
     }
 
-    pub fn get(&self) -> Option<Vec<String>> {
+    /// A fresh list, or `None` when `refresh` is set or the entry has expired.
+    /// `refresh` is only for the Refresh models click. A normal load keeps this
+    /// cache, because each lookup starts the CLI as its own process.
+    pub fn get(&self, refresh: bool) -> Option<Vec<String>> {
+        if refresh {
+            return None;
+        }
         let guard = self.inner.lock().unwrap_or_else(|err| err.into_inner());
         guard
             .as_ref()
@@ -179,6 +188,47 @@ impl ProviderCache {
     pub fn store(&self, providers: Vec<String>) {
         let mut guard = self.inner.lock().unwrap_or_else(|err| err.into_inner());
         *guard = Some((Instant::now(), providers));
+    }
+
+    /// Cached providers when `refresh` is false and the entry is still fresh.
+    /// Otherwise runs `load` once. Concurrent callers share that run when it
+    /// stores a non-empty list.
+    pub async fn discover<F, Fut>(&self, refresh: bool, load: F) -> Vec<String>
+    where
+        F: FnOnce() -> Fut,
+        Fut: std::future::Future<Output = Vec<String>>,
+    {
+        if !refresh {
+            if let Some(hit) = self.get(false).filter(|providers| !providers.is_empty()) {
+                return hit;
+            }
+        }
+        let started = Instant::now();
+        let _guard = self.gate.lock().await;
+        if !refresh {
+            if let Some(hit) = self.get(false).filter(|providers| !providers.is_empty()) {
+                return hit;
+            }
+        } else if let Some(hit) = self.stored_after(started) {
+            return hit;
+        }
+        let discovered = load().await;
+        if !discovered.is_empty() {
+            self.store(discovered.clone());
+        }
+        discovered
+    }
+
+    /// A list stored while the caller waited to discover, including one stored
+    /// at the same instant the wait began.
+    fn stored_after(&self, started: Instant) -> Option<Vec<String>> {
+        let guard = self.inner.lock().unwrap_or_else(|err| err.into_inner());
+        let (at, providers) = guard.as_ref()?;
+        if *at < started || providers.is_empty() {
+            None
+        } else {
+            Some(providers.clone())
+        }
     }
 }
 

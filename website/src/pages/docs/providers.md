@@ -51,7 +51,7 @@ Want to use your own API key, or a model your CLI doesn't offer? Use OpenCode. I
 
 1. Install OpenCode.
 2. Run `opencode` in your terminal, type `/connect`, pick your provider and paste your key. OpenCode keeps the key, and Coppice never asks for it. Not in the list? Follow OpenCode's [custom provider steps](https://opencode.ai/docs/providers/#custom-provider).
-3. In Coppice, create an agent and set **Connector** to **OpenCode**. Your provider's models show up under **Model**. If you added the provider while Coppice was open, quit and reopen Coppice.
+3. In Coppice, create an agent and set **Connector** to **OpenCode**. Your provider's models show up under **Model**. If you added the provider while Coppice was open, click **Refresh models**.
 
 ## On a ticket
 

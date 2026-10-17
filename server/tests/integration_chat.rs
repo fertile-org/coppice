@@ -1905,14 +1905,11 @@ async fn kilo_chat_resume_failure_retries_once_with_earlier_context() {
         "fallback pasted the full earlier turn instead of the summary: {context}"
     );
 
-    let stored: Option<String> = sqlx::query_scalar(
-        "SELECT provider_session_id FROM chat_sessions WHERE id = $1",
-    )
-    .bind(session_uuid)
-    .fetch_one(pool)
-    .await
-    .expect("session after fallback");
-    assert_eq!(stored.as_deref(), Some("kilo_sess_abc123"));
+    // The worker stores the session id after the run is marked succeeded.
+    assert_eq!(
+        wait_provider_session(pool, session_uuid).await.as_deref(),
+        Some("kilo_sess_abc123")
+    );
 }
 
 #[tokio::test]

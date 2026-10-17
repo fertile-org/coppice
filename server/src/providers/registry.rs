@@ -195,7 +195,7 @@ impl ConnectorRegistry {
         };
         built
             .models
-            .model_providers()
+            .model_providers(false)
             .await
             .iter()
             .any(|provider| provider == model_provider)
@@ -212,7 +212,7 @@ mod tests {
 
     async fn providers_of(registry: &ConnectorRegistry, id: &str) -> Vec<String> {
         match registry.models(id) {
-            Some(models) => models.model_providers().await,
+            Some(models) => models.model_providers(false).await,
             None => Vec::new(),
         }
     }
@@ -293,14 +293,14 @@ mod tests {
         let registry = ConnectorRegistry::from_config(&config, runs());
         let models = registry.models("opencode").expect("opencode catalog");
         assert_eq!(
-            models.model_providers().await,
+            models.model_providers(false).await,
             ["zai-coding-plan".to_string()]
         );
         #[cfg(feature = "mock-provider")]
         assert!(registry
             .models("mock")
             .expect("mock catalog")
-            .model_providers()
+            .model_providers(false)
             .await
             .is_empty());
         #[cfg(not(feature = "mock-provider"))]
