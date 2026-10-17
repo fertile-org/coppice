@@ -194,6 +194,21 @@ impl<'a> RunService<'a> {
 
         self.hold_if_ready_queue_is_full(ticket_id, ticket.ticket.status, JOB_TYPE_WORK_ON_TICKET)
             .await?;
+        if crate::services::review_rounds::ReviewRoundService::new(self.pool)
+            .stop_capped_review(
+                ticket_id,
+                ticket.ticket.status,
+                agent_id,
+                &agent_key,
+                &agent_role,
+                JOB_TYPE_WORK_ON_TICKET,
+            )
+            .await?
+        {
+            return Err(RunError::Validation(
+                crate::copy::review::RECONSIDER_APPROACH.into(),
+            ));
+        }
 
         let repo_id = ticket
             .ticket
@@ -537,6 +552,22 @@ impl<'a> RunService<'a> {
         let ticket = TicketService::new(self.pool).get(ticket_id).await?;
         self.hold_if_ready_queue_is_full(ticket_id, ticket.ticket.status, job_type)
             .await?;
+        let (agent_key, agent_role) = self.agent_key_and_role(agent_id).await?;
+        if crate::services::review_rounds::ReviewRoundService::new(self.pool)
+            .stop_capped_review(
+                ticket_id,
+                ticket.ticket.status,
+                agent_id,
+                &agent_key,
+                &agent_role,
+                job_type,
+            )
+            .await?
+        {
+            return Err(RunError::Validation(
+                crate::copy::review::RECONSIDER_APPROACH.into(),
+            ));
+        }
 
         let repo_id = ticket
             .ticket

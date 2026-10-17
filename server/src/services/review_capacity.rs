@@ -149,12 +149,11 @@ impl<'a> ReviewCapacityService<'a> {
         board_id: Uuid,
     ) -> Result<Option<String>, ReviewCapacityError> {
         let policy = self.policy(board_id).await?;
+        let Some(cap) = policy.cap else {
+            return Ok(None);
+        };
         let count = self.occupancy(board_id, policy.count_in_review).await?;
-        if count <= 0 {
-            Ok(None)
-        } else {
-            Ok(Some(waiting_on_review(count)))
-        }
+        Ok(Some(waiting_on_review(count, cap)))
     }
 
     /// `None` when the Ready ticket may start. Does not read the plan.
@@ -325,6 +324,17 @@ impl<'a> ReviewCapacityService<'a> {
         if frees_review_slot(from, to) {
             self.release(board_id).await?;
         }
+        crate::services::review_rounds::ReviewRoundService::new(self.pool)
+            .on_status_change(ticket_id, from, to)
+            .await
+            .map_err(|err| match err {
+                crate::services::review_rounds::ReviewRoundError::Database(err) => {
+                    ReviewCapacityError::Database(err)
+                }
+                crate::services::review_rounds::ReviewRoundError::Message(message) => {
+                    ReviewCapacityError::Message(message)
+                }
+            })?;
         Ok(())
     }
 

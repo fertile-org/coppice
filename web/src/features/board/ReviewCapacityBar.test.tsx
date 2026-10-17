@@ -17,7 +17,8 @@ const invalid =
 const board = {
   reviewCap: 2,
   countInReview: false,
-  waitingOnReview: '2 waiting on your review',
+  waitingOnReview: '2 of 2 waiting for review',
+  boardSettingsLabel: 'Board settings',
   reviewCapLabel: 'Review cap',
   reviewCapHint:
     'How many tickets can wait for your review at once. Leave it empty for no cap.',
@@ -44,9 +45,13 @@ describe('ReviewCapacityBar', () => {
     });
   });
 
-  it('shows the server waiting line, label, and hint', async () => {
+  it('shows the waiting chip and keeps the cap field in board settings', async () => {
     renderBar();
-    expect(await screen.findByText('2 waiting on your review')).toBeInTheDocument();
+    expect(
+      await screen.findByTestId('review-waiting-chip'),
+    ).toHaveTextContent('2 of 2 waiting for review');
+    expect(screen.queryByLabelText('Review cap')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Board settings' }));
     expect(screen.getByLabelText('Review cap')).toHaveValue(2);
     expect(screen.getByLabelText('Also count In Review')).not.toBeChecked();
     expect(
@@ -61,7 +66,8 @@ describe('ReviewCapacityBar', () => {
       json: async () => ({ ...board, reviewCap: 4, waitingOnReview: null }),
     });
     renderBar();
-    const cap = await screen.findByLabelText('Review cap');
+    fireEvent.click(await screen.findByRole('button', { name: 'Board settings' }));
+    const cap = screen.getByLabelText('Review cap');
     fireEvent.change(cap, { target: { value: '4' } });
     fireEvent.blur(cap);
     await waitFor(() => {
@@ -77,13 +83,14 @@ describe('ReviewCapacityBar', () => {
       );
     });
     await waitFor(() => {
-      expect(screen.queryByText('2 waiting on your review')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('review-waiting-chip')).not.toBeInTheDocument();
     });
   });
 
   it('rejects zero in the field and does not save it', async () => {
     renderBar();
-    const cap = await screen.findByLabelText('Review cap');
+    fireEvent.click(await screen.findByRole('button', { name: 'Board settings' }));
+    const cap = screen.getByLabelText('Review cap');
     fireEvent.change(cap, { target: { value: '0' } });
     fireEvent.blur(cap);
     expect(await screen.findByRole('alert')).toHaveTextContent(invalid);

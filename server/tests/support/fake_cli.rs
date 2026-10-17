@@ -37,6 +37,9 @@ fn main() {
             .spawn()
             .expect("spawn grandchild");
         writeln!(stdout, "{{\"grandchild_pid\":{}}}", grandchild.id()).expect("write pid");
+        // Dropping the child would leave a zombie. Forget it so the sleeper
+        // stays in this process group until the test reaps the group.
+        std::mem::forget(grandchild);
     }
     if let Some(secs) = std::env::var("FAKE_CLI_BACKGROUND_SLEEP_SECS")
         .ok()
