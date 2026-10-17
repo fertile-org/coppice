@@ -251,26 +251,22 @@ describe('ChatPage', () => {
     expect(screen.queryByRole('button', { name: 'Start chat' })).not.toBeInTheDocument();
   });
 
-  it('greys out Cursor and Kilo Code and keeps chat off', () => {
+  it('lists Cursor and Kilo Code as chats that can start', () => {
     renderChat('/chat');
 
     expect(
-      screen.getByText(
+      screen.queryByText(
         "Chat isn't available for Kilo Code yet, because Coppice can't keep it read-only.",
       ),
-    ).toBeInTheDocument();
+    ).not.toBeInTheDocument();
     expect(
-      screen.getByText(
+      screen.queryByText(
         "Chat isn't available for Cursor yet, because Coppice can't keep it read-only.",
       ),
-    ).toBeInTheDocument();
-    expect(
-      screen.queryByRole('button', { name: 'New chat with Kilo Agent' }),
     ).not.toBeInTheDocument();
-    expect(
-      screen.queryByRole('button', { name: 'New chat with Cursor Agent' }),
-    ).not.toBeInTheDocument();
-    expect(mocks.createSession).not.toHaveBeenCalled();
+    expect(screen.getByRole('link', { name: /Kilo Agent/ })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /Cursor Agent/ })).toBeInTheDocument();
+    expect(screen.queryByTestId('chat-agent-unavailable')).not.toBeInTheDocument();
   });
 
   it('opens an empty chat and creates the session on the first message', async () => {
@@ -371,6 +367,14 @@ describe('ChatPage', () => {
       '00000000-0000-4000-8000-000000000013',
       "Coppice hasn't confirmed that Codex stays read-only. The agent can still run commands on your computer.",
     ],
+    [
+      '00000000-0000-4000-8000-000000000015',
+      "Coppice hasn't confirmed that Cursor stays read-only. The agent can still run commands on your computer.",
+    ],
+    [
+      '00000000-0000-4000-8000-000000000012',
+      "Coppice hasn't confirmed that Kilo Code stays read-only. The agent can still run commands on your computer.",
+    ],
   ])('shows the isolation banner and the composer for %s', (agentId, message) => {
     mocks.sessions = [
       {
@@ -382,29 +386,6 @@ describe('ChatPage', () => {
 
     expect(screen.getByTestId('chat-isolation-banner')).toHaveTextContent(message);
     expect(screen.getByTestId('chat-composer')).toBeInTheDocument();
-  });
-
-  it.each([
-    [
-      '00000000-0000-4000-8000-000000000012',
-      "Chat isn't available for Kilo Code yet, because Coppice can't keep it read-only.",
-    ],
-    [
-      '00000000-0000-4000-8000-000000000015',
-      "Chat isn't available for Cursor yet, because Coppice can't keep it read-only.",
-    ],
-  ])('hides the composer and shows the refusal for %s', (agentId, message) => {
-    mocks.sessions = [
-      {
-        ...ACTIVE_SESSION,
-        agentId,
-      },
-    ];
-    renderChat(`/chat/${ACTIVE_SESSION.id}`);
-
-    expect(screen.getAllByText(message).length).toBeGreaterThan(0);
-    expect(screen.queryByTestId('chat-isolation-banner')).not.toBeInTheDocument();
-    expect(screen.queryByTestId('chat-composer')).not.toBeInTheDocument();
   });
 
   it('hides the isolation banner for an OpenCode session', () => {

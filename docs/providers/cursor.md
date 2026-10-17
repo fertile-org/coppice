@@ -79,7 +79,7 @@ Start at **Tools → Connectors** (admin): it shows whether `agent` is found, wh
 ## Behavior notes
 
 - **Live console:** Streams Cursor’s progress while the run is active. After a server restart mid-run, live reattach is not possible; Coppice replays the saved log and marks an interrupted run.
-- **Agent Chat:** Off. A per-chat copy only changes the working directory: absolute paths and `git push` can still reach the real checkout, and `--mode ask` without `--force` was not shown to block shell. Cursor CLI `2026.10.14-941492e` was installed here and not signed in, and the prompt exited with `Authentication required` before any tool call. Cursor staff say ask mode does not hard-block shell writes unless `--sandbox enabled`, and that sandbox also blocks network and MCP. Creating a chat or posting a message returns: "Chat isn't available for Cursor yet, because Coppice can't keep it read-only." Chat does not launch the CLI. Ticket runs still pass `--force`. Plan runs still use `--mode ask`.
+- **Agent Chat:** On, in the per-chat folder, with the untested banner: "Coppice hasn't confirmed that Cursor stays read-only. The agent can still run commands on your computer." Chat passes `--mode ask` and omits `--force`. A per-chat copy only changes the working directory: absolute paths and `git push` can still reach the real checkout, and `--mode ask` was not shown to block shell. Cursor CLI `2026.10.14-941492e` was installed here and not signed in, and the prompt exited with `Authentication required` before any tool call. Cursor staff say ask mode does not hard-block shell writes unless `--sandbox enabled`, and that sandbox also blocks network and MCP. Ticket runs still pass `--force`. Plan runs use `--mode plan`.
 - **Continued tickets:** Follow-up runs can resume the same Cursor chat session when Coppice has a prior `session_id`.
 - **Worktrees:** Coppice owns git worktrees. It does not pass Cursor’s `-w` / `--worktree` flag.
 - **MCP:** Not injected by Coppice in this version.
@@ -92,6 +92,6 @@ Start at **Tools → Connectors** (admin): it shows whether `agent` is found, wh
 agent -p "<prompt>" --trust --force --output-format stream-json --workspace <worktree>
 ```
 
-Plan runs use `--mode ask` and omit `--force`. That mode is not a Chat boundary: it does not block shell writes. Stdout is NDJSON (`stream-json`); the final `result` event is parsed for Coppice’s JSON result contract. Live events are published as `cursor.console.*` on the run WebSocket. Ticket runs accept optional `--model` and `--resume <session_id>`.
+Plan runs use `--mode plan` and omit `--force`. Ask mode is the chat flag. Neither mode was shown to block shell writes. Stdout is NDJSON (`stream-json`); the final `result` event is parsed for Coppice’s JSON result contract. Live events are published as `cursor.console.*` on the run WebSocket. Ticket runs accept optional `--model` and `--resume <session_id>`.
 
 More on connectors in general: [providers README](README.md). Milestone notes: [M08](../milestones/M08-connector-operator-cli.md).

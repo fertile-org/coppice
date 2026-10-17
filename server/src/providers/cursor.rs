@@ -237,9 +237,9 @@ fn format_stderr_suffix(lines: &[String]) -> String {
 
 /// Build `agent` CLI argv (excluding the binary name).
 ///
-/// Ticket runs use `--force` (write-capable). Plan runs use `--mode ask` and
-/// omit `--force`. Ask mode blocks edit/apply but not shell writes, so Chat
-/// does not launch Cursor: the server refuses that connector first.
+/// Ticket runs use `--force` (write-capable). Plan runs use `--mode plan` and
+/// omit `--force`. Chat uses `--mode ask` and omits `--force`. Ask mode blocks
+/// edit/apply but was not shown to block shell writes.
 fn cursor_cli_args(
     worktree: &Path,
     read_only_tools: bool,
@@ -477,7 +477,7 @@ mod tests {
     }
 
     #[test]
-    fn plan_runs_use_ask_mode_without_force() {
+    fn plan_runs_use_plan_mode_without_force() {
         let args = cursor_cli_args(
             Path::new("/tmp/plan"),
             false,
@@ -487,7 +487,8 @@ mod tests {
             None,
             coppice_run_prompt(),
         );
-        assert!(args.windows(2).any(|w| w == ["--mode", "ask"]));
+        assert!(args.windows(2).any(|w| w == ["--mode", "plan"]));
+        assert!(!args.windows(2).any(|w| w == ["--mode", "ask"]));
         assert!(!args.iter().any(|a| a == "--force"));
     }
 

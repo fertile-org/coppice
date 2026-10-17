@@ -1,4 +1,5 @@
 ---
+import { heroScreenshot, marketingGif, marketingMp4, marketingWebm } from '../lib/hero-assets';
 import { withBase } from '../lib/url';
 
 const videoAlt =
@@ -19,7 +20,7 @@ const captions = [
   <div class="hero-frame">
     <img
       class="hero-still"
-      src={withBase('/assets/hero-screenshot.png')}
+      src={withBase(heroScreenshot)}
       width="1440"
       height="900"
       alt={stillAlt}
@@ -32,12 +33,12 @@ const captions = [
       loop
       playsinline
       preload="none"
-      poster={withBase('/assets/hero-screenshot.png')}
+      poster={withBase(heroScreenshot)}
       aria-label={videoAlt}
     >
-      <source src={withBase('/assets/marketing.webm')} type="video/webm" />
-      <source src={withBase('/assets/marketing.mp4')} type="video/mp4" />
-      <img src={withBase('/assets/marketing.gif')} width="960" height="600" alt={videoAlt} />
+      <source src={withBase(marketingWebm)} type="video/webm" />
+      <source src={withBase(marketingMp4)} type="video/mp4" />
+      <img src={withBase(marketingGif)} width="960" height="600" alt={videoAlt} />
     </video>
     <div class="hero-progress" aria-hidden="true">
       <span class="hero-progress-fill"></span>
