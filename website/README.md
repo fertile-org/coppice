@@ -43,12 +43,12 @@ Or `make website-dev` / `make website-build`.
 
 Public site: [https://getcoppice.vercel.app/](https://getcoppice.vercel.app/), served from the domain root. No repository secrets are required for the build.
 
-`BASE_PATH` (or the older `SITE_BASE`) sets Astro `base`. Leave it unset to build for `/`. `SITE_URL` sets the canonical origin when you want absolute OG and canonical URLs.
+`BASE_PATH` (or the older `SITE_BASE`) sets Astro `base`. Leave it unset to build for `/`. Canonical, `hreflang`, and sitemap URLs use the `site` value in `astro.config.mjs`.
 
 ```bash
 cd website
 npm ci
-SITE_URL=https://getcoppice.vercel.app npm run build
+npm run build
 npm run check:links
 ```
 
@@ -61,4 +61,4 @@ GitHub Pages is an optional manual deploy, still at `/coppice`:
 1. In the repo settings, set **Pages → Build and deployment → Source** to **GitHub Actions**.
 2. Run the **Website** workflow manually (**Actions → Website → Run workflow**) with **Deploy to GitHub Pages at /coppice** checked.
 
-That dispatch rebuilds with `BASE_PATH=/coppice` and `SITE_URL=https://fertile-org.github.io`, rewrites `docs.html` into `docs/index.html` (Pages does not apply Vercel clean URLs), then deploys `website/dist` with the built-in `GITHUB_TOKEN` (`pages: write` and `id-token: write`). Pull requests only build and upload the `website` artifact, with `base` `/`.
+That dispatch rebuilds with `BASE_PATH=/coppice`, rewrites `docs.html` into `docs/index.html` (Pages does not apply Vercel clean URLs), then deploys `website/dist` with the built-in `GITHUB_TOKEN` (`pages: write` and `id-token: write`). Canonical, `hreflang`, and sitemap URLs still come from `site` in `astro.config.mjs`. Pull requests only build and upload the `website` artifact, with `base` `/`.

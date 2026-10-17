@@ -61,8 +61,6 @@ function prefixRootLinks() {
   };
 }
 
-const site = process.env.SITE_URL?.trim() || undefined;
-
 /** Pagefind logs indexing failures and returns. Fail the build instead. */
 function pagefindOrFail() {
   const integration = pagefind();
@@ -129,7 +127,7 @@ function chatRedirects() {
 }
 
 export default defineConfig({
-  site,
+  site: 'https://getcoppice.dev',
   base: siteBase(),
   trailingSlash: 'never',
   i18n: {

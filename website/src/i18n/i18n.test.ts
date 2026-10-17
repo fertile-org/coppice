@@ -70,15 +70,15 @@ describe('hreflang and canonical', () => {
     const catalog = buildCatalog(['src/content/docs/ja/concepts.md']);
     const locales = translatedLocales(catalog, '/docs/concepts');
     assert.deepEqual(locales, ['en', 'ja']);
-    const links = alternateLinks('/docs/concepts', locales, '/', 'https://getcoppice.vercel.app');
+    const links = alternateLinks('/docs/concepts', locales, '/', 'https://example.com');
     assert.deepEqual(links, [
-      { hreflang: 'en', href: 'https://getcoppice.vercel.app/docs/concepts' },
-      { hreflang: 'ja', href: 'https://getcoppice.vercel.app/ja/docs/concepts' },
-      { hreflang: 'x-default', href: 'https://getcoppice.vercel.app/docs/concepts' },
+      { hreflang: 'en', href: 'https://example.com/docs/concepts' },
+      { hreflang: 'ja', href: 'https://example.com/ja/docs/concepts' },
+      { hreflang: 'x-default', href: 'https://example.com/docs/concepts' },
     ]);
     assert.equal(
-      canonicalHref('ja', '/docs/concepts', true, '/', 'https://getcoppice.vercel.app'),
-      'https://getcoppice.vercel.app/ja/docs/concepts',
+      canonicalHref('ja', '/docs/concepts', true, '/', 'https://example.com'),
+      'https://example.com/ja/docs/concepts',
     );
     assert.equal(canonicalHref('zh-cn', '/docs/install', false, '/coppice', 'https://fertile-org.github.io'), 'https://fertile-org.github.io/coppice/docs/install');
   });
@@ -87,12 +87,12 @@ describe('hreflang and canonical', () => {
     const xml = sitemapXml({
       englishRoutes: ['/docs/concepts', '/docs/install'],
       catalog: buildCatalog(['src/pages/ja/docs/concepts.md']),
-      site: 'https://getcoppice.vercel.app',
+      site: 'https://example.com',
     });
-    assert.match(xml, /<loc>https:\/\/getcoppice\.vercel\.app\/docs\/concepts<\/loc>/);
-    assert.match(xml, /<loc>https:\/\/getcoppice\.vercel\.app\/ja\/docs\/concepts<\/loc>/);
-    assert.match(xml, /hreflang="ja" href="https:\/\/getcoppice\.vercel\.app\/ja\/docs\/concepts"/);
-    assert.match(xml, /hreflang="x-default" href="https:\/\/getcoppice\.vercel\.app\/docs\/concepts"/);
+    assert.match(xml, /<loc>https:\/\/example\.com\/docs\/concepts<\/loc>/);
+    assert.match(xml, /<loc>https:\/\/example\.com\/ja\/docs\/concepts<\/loc>/);
+    assert.match(xml, /hreflang="ja" href="https:\/\/example\.com\/ja\/docs\/concepts"/);
+    assert.match(xml, /hreflang="x-default" href="https:\/\/example\.com\/docs\/concepts"/);
     assert.doesNotMatch(xml, /\/ja\/docs\/install/);
     assert.doesNotMatch(xml, /hreflang="zh-CN"/);
   });

@@ -63,6 +63,14 @@ function pathnameOf(href) {
   return new URL(href).pathname.replace(/\/$/, '') || '/';
 }
 
+/** The origin in `astro.config.mjs` `site`. Canonical, hreflang, and sitemap read that value. */
+function configuredSite() {
+  const source = fs.readFileSync(path.join(root, 'astro.config.mjs'), 'utf8');
+  const site = source.match(/\bsite:\s*['"](https?:\/\/[^'"]+)['"]/)?.[1];
+  if (!site) throw new Error('astro.config.mjs is missing site');
+  return site.replace(/\/$/, '');
+}
+
 function htmlLang(html) {
   return html.match(/<html[^>]*\blang=["']([^"']+)["']/i)?.[1] ?? '';
 }
@@ -80,13 +88,27 @@ function indexedUrls(outDir) {
   return urls;
 }
 
-function checkHead(html, { lang, canonicalPath, hreflangs, absent = [] }) {
+function checkHead(html, { lang, canonicalPath, hreflangs, absent = [], site }) {
   if (htmlLang(html) !== lang) fail(`expected html lang ${lang}, got ${htmlLang(html)}`);
   const canonical = attr(html, 'canonical');
   if (canonical.length !== 1 || pathnameOf(canonical[0].href) !== canonicalPath) {
     fail(`canonical ${canonical.map((link) => link.href).join(', ') || '(missing)'} !== ${canonicalPath}`);
   }
+  if (site && canonical[0] && !canonical[0].href.startsWith(`${site}/`)) {
+    fail(`canonical ${canonical[0].href} is not on ${site}`);
+  }
+  if (site) {
+    const sitemap = attr(html, 'sitemap');
+    if (sitemap.length !== 1 || !sitemap[0].href.startsWith(`${site}/`)) {
+      fail(`sitemap link ${sitemap.map((link) => link.href).join(', ') || '(missing)'} is not on ${site}`);
+    }
+  }
   const alternates = attr(html, 'alternate').filter((link) => link.hreflang);
+  if (site) {
+    for (const link of alternates) {
+      if (!link.href.startsWith(`${site}/`) && link.href !== `${site}/`) fail(`hreflang ${link.hreflang} ${link.href} is not on ${site}`);
+    }
+  }
   const got = alternates.map((link) => `${link.hreflang} ${pathnameOf(link.href)}`).sort();
   const want = hreflangs.map(([code, href]) => `${code} ${href}`).sort();
   if (JSON.stringify(got) !== JSON.stringify(want)) fail(`hreflang ${got.join(' | ')} !== ${want.join(' | ')}`);
@@ -97,7 +119,7 @@ function checkHead(html, { lang, canonicalPath, hreflangs, absent = [] }) {
   }
 }
 
-function checkBuild(outDir, { translated }) {
+function checkBuild(outDir, { translated, site }) {
   const routes = walk(outDir)
     .filter((file) => file.endsWith('.html'))
     .map((file) => routeOf(file, outDir))
@@ -128,6 +150,7 @@ function checkBuild(outDir, { translated }) {
     checkHead(fallback, {
       lang: 'ja',
       canonicalPath: '/docs/install',
+      site,
       hreflangs: translated
         ? [
             ['en', '/docs/install'],
@@ -152,6 +175,7 @@ function checkBuild(outDir, { translated }) {
     checkHead(englishConcepts, {
       lang: 'en',
       canonicalPath: '/docs/concepts',
+      site,
       hreflangs: [
         ['en', '/docs/concepts'],
         ['ja', '/ja/docs/concepts'],
@@ -163,6 +187,7 @@ function checkBuild(outDir, { translated }) {
     checkHead(englishConcepts, {
       lang: 'en',
       canonicalPath: '/docs/concepts',
+      site,
       hreflangs: [
         ['en', '/docs/concepts'],
         ['x-default', '/docs/concepts'],
@@ -176,6 +201,15 @@ function checkBuild(outDir, { translated }) {
   else {
     const xml = fs.readFileSync(sitemapFile, 'utf8');
     const locs = [...xml.matchAll(/<loc>([^<]+)<\/loc>/g)].map((match) => pathnameOf(match[1]));
+    if (site) {
+      const absolute = [
+        ...xml.matchAll(/<loc>([^<]+)<\/loc>/g),
+        ...xml.matchAll(/\bhref="([^"]+)"/g),
+      ].map((match) => match[1]);
+      if (!absolute.length || absolute.some((href) => !href.startsWith(`${site}/`))) {
+        fail(`sitemap links are not all on ${site}`);
+      }
+    }
     if (!locs.includes('/docs/concepts')) fail('sitemap missing /docs/concepts');
     if (translated) {
       if (!locs.includes('/ja/docs/concepts')) fail('sitemap missing translated /ja/docs/concepts');
@@ -191,6 +225,7 @@ function checkBuild(outDir, { translated }) {
       checkHead(page, {
         lang: 'ja',
         canonicalPath: '/ja/docs/concepts',
+        site,
         hreflangs: [
           ['en', '/docs/concepts'],
           ['ja', '/ja/docs/concepts'],
@@ -219,7 +254,8 @@ if (!fs.existsSync(dist)) {
   process.exit(1);
 }
 
-checkBuild(dist, { translated: false });
+const site = configuredSite();
+checkBuild(dist, { translated: false, site });
 const plain = readHtml(dist, '/ja/docs/concepts');
 if (plain?.includes('Concepts fixture')) fail('production build contains the i18n fixture');
 
@@ -231,11 +267,11 @@ fs.copyFileSync(fixtureSrc, fixtureDest);
 try {
   const build = spawnSync('npx', ['astro', 'build', '--outDir', fixtureOut], {
     cwd: root,
-    env: { ...process.env, SITE_URL: 'https://getcoppice.vercel.app' },
+    env: process.env,
     stdio: 'inherit',
   });
   if (build.status !== 0) fail('fixture build failed');
-  else checkBuild(fixtureOut, { translated: true });
+  else checkBuild(fixtureOut, { translated: true, site });
 } finally {
   fs.rmSync(fixtureDest, { force: true });
   fs.rmSync(path.dirname(fixtureDest), { recursive: true, force: true });

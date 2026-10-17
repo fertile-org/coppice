@@ -40,7 +40,6 @@ jobs:
       # PR artifacts stay at base `/` so they open from the root of any static host.
       BASE_PATH: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.deploy == 'true' && '/coppice' || '/' }}
       SITE_BASE: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.deploy == 'true' && '/coppice' || '/' }}
-      SITE_URL: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.deploy == 'true' && 'https://fertile-org.github.io' || '' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -88,7 +87,6 @@ jobs:
         env:
           BASE_PATH: /coppice
           SITE_BASE: /coppice
-          SITE_URL: https://fertile-org.github.io
         run: npm run build && npm run check:links && node scripts/to-directory-indexes.mjs dist && npm run check:links -- --host-style=directory
 
   deploy:
