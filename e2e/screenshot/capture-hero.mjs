@@ -510,7 +510,6 @@ const MARKERS = [
   { name: 'diff', css: 'rgb(80, 0, 255)', rgb: [80, 0, 255] },
   { name: 'accept', css: 'rgb(0, 180, 255)', rgb: [0, 180, 255] },
   { name: 'done', css: 'rgb(255, 80, 180)', rgb: [255, 80, 180] },
-  { name: 'loop', css: 'rgb(255, 0, 180)', rgb: [255, 0, 180] },
 ];
 const SEGMENT_NAMES = [
   'write',
@@ -522,7 +521,6 @@ const SEGMENT_NAMES = [
   'diff',
   'accept',
   'done',
-  'loop',
 ];
 const SEGMENT_FRAMES = {
   write: 'board-left',
@@ -534,7 +532,6 @@ const SEGMENT_FRAMES = {
   diff: 'diff',
   accept: 'dialog',
   done: 'board-done',
-  loop: 'board-left',
 };
 
 async function installCaption(page) {
@@ -1107,8 +1104,9 @@ for offset in (0, 0.8, 1.6, 2.5):
         text=True,
         stderr=subprocess.DEVNULL,
     ).lower()
-    folded = " ".join(text.replace(",", " ").split()).replace("accented", "accepted")
-    if "nothing is done" not in folded or "accepted not merged" not in folded:
+    folded = " ".join(text.replace(",", " ").split())
+    folded = folded.replace("accented", "accepted").replace("accepted", "accept")
+    if "nothing is done" not in folded or "accept not merged" not in folded:
         raise SystemExit(f"accept +{offset:.1f}s missing caption or accepted state:\\n{text}")
     print(f"accept +{offset:.1f}s caption overlaps Accepted, not merged")
 span = accept_times[-1] - accept_times[0]
@@ -1432,9 +1430,11 @@ async function assemble(raw, pulses, stills) {
   };
   await pulseStill('approve', '03-approve.png');
   await pulseStill('build', '04-build.png');
-  const loopIndex = segments.findIndex((segment) => segment.name === 'loop');
-  const loop = segments[loopIndex];
-  const posterTime = outputTime(segments, loopIndex, (loop.end - loop.start) * 0.45);
+  const writeIndex = segments.findIndex((segment) => segment.name === 'write');
+  const write = segments[writeIndex];
+  // Caption has cleared, and the crossfade into the next shot has not started.
+  const posterAt = Math.max(0.4, write.end - write.start - CROSSFADE_SECONDS - 0.35);
+  const posterTime = outputTime(segments, writeIndex, posterAt);
   const posterFile = path.join(STILLS_DIR, '07-board.png');
   await grab(posterTime, posterFile);
   await copyFile(posterFile, POSTER);
@@ -1874,15 +1874,6 @@ async function record(scene) {
     await pulseCue(storyCard('Done'));
     await markStill('accept');
     await hold(page, 4700);
-
-    await cutScene(MARKERS[9], async () => {
-      await hideCaption();
-      await pinBoardLeft(page);
-      await page.getByText('Remember the last open settings tab').waitFor();
-      await preparePage(page);
-    });
-    await assertClean(page, 'scene loop');
-    await hold(page, 5500);
 
     const video = page.video();
     await page.close();
