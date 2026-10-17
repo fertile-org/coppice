@@ -501,7 +501,7 @@ const play = (time) => time / SPEED;
 // Marker edges are measured on discrete frames. Keep this much of the real
 // shot on either side of a veil so a color frame never survives into the cut.
 const MARKER_GUARD = 0.08;
-const PLAN_SHOT_SECONDS = 1.55;
+const PLAN_SHOT_SECONDS = 2.5;
 const PULSE_GAP = 4;
 const PULSE_STROKE = 3;
 const MARKERS = [
@@ -1475,7 +1475,7 @@ async function assemble(raw, pulses, stills) {
   }
   if (gif.width !== GIF_WIDTH) fail(`gif width is ${gif.width}, expected ${GIF_WIDTH}`);
   const seconds = Number(mp4.duration);
-  if (seconds < 24 || seconds > 36) fail(`hero duration ${seconds.toFixed(2)}s is outside 24–36s`);
+  if (seconds < 24 || seconds >= 30) fail(`hero duration ${seconds.toFixed(2)}s is outside 24–30s`);
   const gifBytes = (await stat(GIF_SITE)).size;
   if (gifBytes > 10 * 1024 * 1024) {
     fail(`gif is ${(gifBytes / (1024 * 1024)).toFixed(1)}MB, over 10MB`);
@@ -1761,7 +1761,7 @@ async function record(scene) {
     await assertClean(page, 'scene plan');
     await hold(page, 200);
     await markStill('plan');
-    await hold(page, 900);
+    await hold(page, 1700);
 
     const detail = page.locator('[aria-label="Ticket detail"]');
     await cutScene(MARKERS[3], async () => {
@@ -1840,8 +1840,8 @@ async function record(scene) {
     await page.getByText(LINE_COMMENT).waitFor();
     await assertClean(page, 'scene diff comment');
     await markStill('diff');
-    // Still diff after the comment posts. Was ~6.9s.
-    await hold(page, 1500);
+    // Still diff after the comment posts, long enough to read the line.
+    await hold(page, 3100);
 
     await cutScene(MARKERS[7], async () => {
       await fadeCaption(CAPTIONS[5]);
