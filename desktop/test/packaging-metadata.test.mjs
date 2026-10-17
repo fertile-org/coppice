@@ -64,7 +64,7 @@ describe('AppStream metainfo', () => {
     assert.match(xml, /<summary>Local board for your AI agent team<\/summary>/);
     assert.match(
       xml,
-      /<p>Run a team of coding agents without babysitting them\. Coppice runs on your computer with the agent CLIs you already pay for, like Claude Code and Codex\. No Coppice account, no Docker\.<\/p>/,
+      /<p>Hire specialists\. Keep the final say\. Coppice runs on your computer with the agent CLIs you already pay for, like Claude Code and Codex\. No Coppice account, no Docker\.<\/p>/,
     );
     assert.match(xml, /<url type="homepage">https:\/\/getcoppice\.vercel\.app\/<\/url>/);
     assert.match(xml, /width="1440" height="900">https:\/\/getcoppice\.vercel\.app\/assets\/hero-screenshot\.png/);
