@@ -1,8 +1,9 @@
 //! `[keybindings]` overrides in `config.toml`.
 //!
 //! Lines apply from top to bottom on top of the defaults. A line Coppice
-//! cannot use is skipped: that command keeps the keys it already had, and the
-//! rest of the table still applies. Defaults live in
+//! cannot use is skipped: that command keeps its default keys, even when an
+//! earlier line had set a custom key, and the rest of the table still applies.
+//! Defaults live in
 //! `config/default-keybindings.toml` and stay in the web registry; this module
 //! stores only the commands the table changed, plus the warning sentences.
 
@@ -242,6 +243,7 @@ fn warn_section() -> String {
 }
 
 struct World {
+    defaults: BTreeMap<String, Vec<ParsedBinding>>,
     bindings: BTreeMap<String, Vec<ParsedBinding>>,
     owners: HashMap<String, String>,
     changed: BTreeMap<String, Vec<ParsedBinding>>,
@@ -249,15 +251,16 @@ struct World {
 
 impl World {
     fn defaults() -> Self {
-        let bindings = default_bindings();
+        let defaults = default_bindings();
         let mut owners = HashMap::new();
-        for (id, list) in &bindings {
+        for (id, list) in &defaults {
             for binding in list {
                 owners.insert(canonical(binding), id.clone());
             }
         }
         Self {
-            bindings,
+            bindings: defaults.clone(),
+            defaults,
             owners,
             changed: BTreeMap::new(),
         }
@@ -321,6 +324,54 @@ impl World {
         self.bindings.insert(id.to_string(), list.clone());
         self.changed.insert(id.to_string(), list);
     }
+
+    /// A skipped line puts this command back on the built-in keys. An earlier
+    /// custom key is dropped, and a key another command took from that default
+    /// is given back so two commands do not both keep it.
+    fn revert_to_default(&mut self, id: &str) {
+        self.release_owned(id);
+        let defaults = self.defaults.get(id).cloned().unwrap_or_default();
+        for binding in &defaults {
+            let key = canonical(binding);
+            if let Some(other) = self.owners.get(&key).cloned() {
+                if other != id {
+                    self.remove_binding(&other, &key);
+                }
+            }
+            self.owners.insert(key, id.to_string());
+        }
+        self.bindings.insert(id.to_string(), defaults);
+        self.changed.remove(id);
+    }
+
+    fn release_owned(&mut self, id: &str) {
+        let Some(previous) = self.bindings.get(id).cloned() else {
+            return;
+        };
+        for binding in previous {
+            let key = canonical(&binding);
+            if self.owners.get(&key).map(String::as_str) == Some(id) {
+                self.owners.remove(&key);
+            }
+        }
+    }
+
+    fn remove_binding(&mut self, id: &str, key: &str) {
+        let Some(list) = self.bindings.get_mut(id) else {
+            return;
+        };
+        list.retain(|binding| canonical(binding) != key);
+        let remaining = list.clone();
+        let back_to_default = self
+            .defaults
+            .get(id)
+            .is_some_and(|defaults| defaults == &remaining);
+        if back_to_default {
+            self.changed.remove(id);
+        } else {
+            self.changed.insert(id.to_string(), remaining);
+        }
+    }
 }
 
 fn apply_text(text: &str, world: &mut World, warnings: &mut Vec<String>) {
@@ -376,16 +427,19 @@ fn apply_entry(world: &mut World, key: &str, value: &toml_edit::Item, warnings: 
         Ok(list) => dedupe(list),
         Err(text) => {
             warnings.push(warn_unreadable(&text, action));
+            world.revert_to_default(key);
             return;
         }
     };
     match problem(&parsed, world, key) {
         Some(Skip::Reserved(binding)) => {
             warnings.push(warn_reserved(&display_binding(&binding), action));
+            world.revert_to_default(key);
         }
         Some(Skip::Clash { binding, other }) => {
             let other_label = command_label(&other).unwrap_or(other.as_str());
             warnings.push(warn_clash(&display_binding(&binding), other_label, action));
+            world.revert_to_default(key);
         }
         None => world.claim(key, parsed),
     }
@@ -815,23 +869,64 @@ mod tests {
     }
 
     #[test]
-    fn a_later_skip_leaves_an_earlier_successful_line() {
+    fn a_later_skip_puts_the_command_back_on_its_default() {
         // A repeated key in one TOML table is a syntax error. Two layered
-        // files can still set the same command, and a skipped later line
-        // leaves the earlier keys in place.
+        // files can still set the same command. A skipped later line drops
+        // the earlier custom key, so the command keeps its real default.
         let shown = from_texts(&[
             "[keybindings]\n\"ticket.create\" = \"X\"\n",
-            "[keybindings]\n\"ticket.create\" = \"Mod+K\"\n",
+            "\
+[keybindings]
+\"ticket.create\" = \"Mod+K\"
+\"ticket.assign\" = \"X\"
+\"help.show\" = \"C\"
+",
         ])
         .api();
+        assert!(
+            !shown.overrides.contains_key("ticket.create"),
+            "skipped command is absent so the client keeps the default: {:?}",
+            shown.overrides
+        );
         assert!(matches!(
-            &shown.overrides["ticket.create"][0],
+            &shown.overrides["ticket.assign"][0],
             ParsedBinding::Chord { chord } if chord.key == "x" && !chord.mod_key
         ));
+        assert!(!shown.overrides.contains_key("help.show"));
         assert_eq!(
             shown.warnings,
             vec![
                 "\"Mod+K\" is already used by Open command palette. Create ticket keeps its default."
+                    .to_string(),
+                "\"C\" is already used by Create ticket. Show keyboard shortcuts keeps its default."
+                    .to_string(),
+            ]
+        );
+
+        let unreadable = from_texts(&[
+            "[keybindings]\n\"ticket.create\" = \"X\"\n",
+            "[keybindings]\n\"ticket.create\" = \"Ctrl+K\"\n",
+        ])
+        .api();
+        assert!(!unreadable.overrides.contains_key("ticket.create"));
+        assert_eq!(
+            unreadable.warnings,
+            vec![
+                "Couldn't read \"Ctrl+K\". Write it like \"Mod+K\" or \"G then B\". Create ticket keeps its default."
+                    .to_string()
+            ]
+        );
+
+        let reserved = from_texts(&[
+            "[keybindings]\n\"palette.open\" = \"Mod+P\"\n",
+            "[keybindings]\n\"palette.open\" = \"Mod+W\"\n",
+        ])
+        .api();
+        assert!(!reserved.overrides.contains_key("palette.open"));
+        assert_eq!(
+            reserved.warnings,
+            vec![
+                "\"Mod+W\" belongs to the browser or the system. Open command palette keeps its default."
                     .to_string()
             ]
         );
