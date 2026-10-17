@@ -53,4 +53,5 @@ pub mod uncovered_model_service;
 pub mod user_service;
 pub mod workflow_service;
 pub mod workspace_settings_service;
+pub mod worktree_cleanup;
 pub mod worktree_service;

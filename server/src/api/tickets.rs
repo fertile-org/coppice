@@ -495,6 +495,10 @@ fn map_ticket_git_error_response(err: TicketGitError) -> TicketGitApiError {
             StatusCode::BAD_REQUEST,
             "Worktree has already been removed.".into(),
         ),
+        TicketGitError::ActiveRun => (
+            StatusCode::CONFLICT,
+            "Stop the agent run first. Coppice doesn't remove a worktree an agent is working in.".into(),
+        ),
         TicketGitError::WorktreeMissing => (
             StatusCode::BAD_REQUEST,
             "Ticket worktree does not exist — rebase requires an existing worktree.".into(),
@@ -813,8 +817,10 @@ async fn archive_ticket(
     Ok(Json(ticket_to_response(ticket)))
 }
 
-/// Off the request path: drop the archived ticket's run artifacts.
+/// Off the request path: drop the archived ticket's worktree, branch and run
+/// artifacts.
 fn spawn_archived_ticket_cleanup(state: &Arc<AppState>, ticket_id: Uuid) {
+    crate::services::worktree_cleanup::spawn_cleanup(state, ticket_id);
     let Some(pool) = state.db.clone() else {
         return;
     };
@@ -1532,6 +1538,8 @@ async fn merge_ticket_branch(
     create_git_action_comment(pool, &state, ticket_id, user.id, &comment_body)
         .await
         .map_err(|code| TicketGitApiError::Message(code, "Unable to record merge comment.".into()))?;
+    // The merged work is on the base branch now.
+    crate::services::worktree_cleanup::spawn_cleanup(&state, ticket_id);
 
     Ok(Json(MergeBranchResponse { merge }))
 }

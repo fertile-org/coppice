@@ -115,6 +115,8 @@ pub enum TicketGitError {
     TicketBranchMissing(String),
     #[error("worktree already removed")]
     WorktreeAlreadyRemoved,
+    #[error("an agent run is still active on this ticket")]
+    ActiveRun,
     #[error("ticket worktree does not exist")]
     WorktreeMissing,
     #[error("git conflict")]
@@ -725,6 +727,9 @@ impl<'a> TicketGitService<'a> {
         if !worktree_exists(&ctx.worktree_dir) {
             return Err(TicketGitError::WorktreeAlreadyRemoved);
         }
+        if ticket_has_active_run(self.pool, ticket_id).await? {
+            return Err(TicketGitError::ActiveRun);
+        }
 
         let path = path_to_string(&ctx.worktree_dir)?;
         run_git(&ctx.git_dir, &["worktree", "remove", "--force", &path]).await?;
@@ -736,6 +741,73 @@ impl<'a> TicketGitService<'a> {
 
         Ok(())
     }
+}
+
+/// What [`TicketGitService::cleanup_finished_worktree`] did.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum WorktreeCleanup {
+    /// Worktree and local ticket branch removed (either may already have been gone).
+    Removed,
+    /// Nothing on disk to clean up, or the ticket has no ready repository.
+    NothingToDo,
+    /// An agent run is queued or running on the ticket.
+    SkippedActiveRun,
+    /// The worktree has uncommitted changes, so it was kept.
+    SkippedUncommitted { worktree_path: String },
+}
+
+impl TicketGitService<'_> {
+    /// Remove a finished (archived or merged) ticket's worktree and prune its
+    /// local `agent/TICKET-*` branch. Safe to call again. Keeps a worktree
+    /// with uncommitted changes and never touches one with an active run.
+    pub async fn cleanup_finished_worktree(
+        &self,
+        ticket_id: Uuid,
+    ) -> Result<WorktreeCleanup, TicketGitError> {
+        let ctx = match self.resolve_context(ticket_id).await {
+            Ok(ctx) => ctx,
+            Err(
+                TicketGitError::NoRepo | TicketGitError::RepoNotFound | TicketGitError::RepoNotReady,
+            ) => return Ok(WorktreeCleanup::NothingToDo),
+            Err(err) => return Err(err),
+        };
+        if ticket_has_active_run(self.pool, ticket_id).await? {
+            return Ok(WorktreeCleanup::SkippedActiveRun);
+        }
+        let has_worktree = worktree_exists(&ctx.worktree_dir);
+        if has_worktree {
+            if !git_status_clean(&ctx.worktree_dir).await? {
+                return Ok(WorktreeCleanup::SkippedUncommitted {
+                    worktree_path: ctx.worktree_dir.display().to_string(),
+                });
+            }
+            let path = path_to_string(&ctx.worktree_dir)?;
+            run_git(&ctx.git_dir, &["worktree", "remove", "--force", &path]).await?;
+        }
+        let _ = run_git(&ctx.git_dir, &["worktree", "prune"]).await;
+        if ctx.worktree_dir.exists() {
+            tokio::fs::remove_dir_all(&ctx.worktree_dir).await?;
+        }
+        let has_branch =
+            git_ref_exists(&ctx.git_dir, &format!("refs/heads/{}", ctx.ticket_branch)).await?;
+        if has_branch {
+            run_git(&ctx.git_dir, &["branch", "-D", &ctx.ticket_branch]).await?;
+        }
+        Ok(if has_worktree || has_branch {
+            WorktreeCleanup::Removed
+        } else {
+            WorktreeCleanup::NothingToDo
+        })
+    }
+}
+
+async fn ticket_has_active_run(pool: &PgPool, ticket_id: Uuid) -> Result<bool, sqlx::Error> {
+    sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM agent_runs WHERE ticket_id = $1 AND status IN ('queued', 'running'))",
+    )
+    .bind(ticket_id)
+    .fetch_one(pool)
+    .await
 }
 
 fn create_pr_gate(
