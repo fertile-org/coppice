@@ -107,6 +107,11 @@ describe('ToolsPage', () => {
 
     expect(MIN_PASSWORD_CHARS).toBe(8);
     expect(screen.getByRole('heading', { name: 'Replace keys' })).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        'Coppice will make new keys and database passwords. Saved tokens keep working, and everyone is signed out.',
+      ),
+    ).toBeInTheDocument();
     expect(screen.getByLabelText('New admin password')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Replace keys' }));
     expect(screen.getByText('Check the box to continue.')).toBeInTheDocument();

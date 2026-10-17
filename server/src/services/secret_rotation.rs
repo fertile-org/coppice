@@ -47,7 +47,7 @@ pub const PASSWORD_EMPTY: &str = "Enter a new admin password.";
 /// Shown when startup cannot replace a lost application password. The secret
 /// itself is never included.
 pub const HEAL_APP_PASSWORD_ERROR: &str =
-    "Couldn't set a new database password. The password file was missing or unreadable.";
+    "Coppice couldn't start because it couldn't set a new database password. Quit and open Coppice again.";
 const HEAL_APP_PASSWORD_LOG: &str =
     "application database password file was missing or unreadable; a new password was set";
 const SUPERUSER_RESTORE_LOG: &str =
@@ -55,6 +55,14 @@ const SUPERUSER_RESTORE_LOG: &str =
 const SUPERUSER_DATABASE: &str = "postgres";
 /// Bootstrap role created by `initdb -U coppice`.
 pub const DESKTOP_SUPERUSER: &str = "coppice";
+
+// Test seams for a password change that is stored and then reported as an error.
+#[cfg(test)]
+tokio::task_local! {
+    static ALTER_ERROR_BEFORE_APPLY: String;
+    static ALTER_ERROR_AFTER_APPLY: String;
+    static REJECT_PASSWORD_LOGINS: ();
+}
 
 /// Where to set a lost `pg_app_password`, and the password to set.
 pub struct AppPasswordHeal<'a> {
@@ -201,9 +209,13 @@ pub async fn heal_app_password(dir: &Path, heal: AppPasswordHeal<'_>) -> Result<
     Ok(())
 }
 
-/// Writes `pg_password.pending`, changes the superuser password, and leaves
-/// the pending file in place until [`promote_pending`]. A failed attempt
-/// removes the pending file and leaves the role password as it was.
+/// Writes `pg_password.pending` and changes the superuser password.
+///
+/// A successful change leaves the pending file for [`promote_pending`].
+/// `ALTER ROLE` can report an error after PostgreSQL has stored the new
+/// password. In that case the pending password and the current password are
+/// both tried: the one that logs in is kept, and if neither logs in the
+/// pending file stays for the next launch.
 async fn rotate_superuser_password(
     dir: &Path,
     host: &str,
@@ -228,10 +240,26 @@ async fn rotate_superuser_password(
         .is_err()
     {
         drop(conn);
-        let _ = std::fs::remove_file(&pending_path);
-        return Err(ReplaceError::Failed(
-            "could not change the database superuser password".into(),
-        ));
+        let current_path = dir.join(PG_FILE);
+        return match settle_pending_password(
+            host,
+            port,
+            superuser,
+            SUPERUSER_DATABASE,
+            PendingPasswordFiles {
+                current_password: &current,
+                pending_password: new_password,
+                current_path: &current_path,
+                pending_path: &pending_path,
+            },
+        )
+        .await?
+        {
+            SettledPassword::Promoted => Ok(()),
+            SettledPassword::Current | SettledPassword::Neither => Err(ReplaceError::Failed(
+                "could not change the database superuser password".into(),
+            )),
+        };
     }
     drop(conn);
     if !password_connects(host, port, superuser, new_password, SUPERUSER_DATABASE).await {
@@ -272,7 +300,64 @@ async fn restore_superuser_password(
         tracing::error!("{SUPERUSER_RESTORE_LOG}");
         return;
     }
+    if !write_restored_password(
+        &pending_path.with_file_name(PG_FILE),
+        pending_path,
+        old_password,
+    ) {
+        tracing::error!("{SUPERUSER_RESTORE_LOG}");
+    }
+}
+
+enum SettledPassword {
+    /// The pending password logged in and now replaces the current file.
+    Promoted,
+    /// The current password still logs in. The pending file was removed.
+    Current,
+    /// Neither password logged in. The pending file is still on disk.
+    Neither,
+}
+
+struct PendingPasswordFiles<'a> {
+    current_password: &'a str,
+    pending_password: &'a str,
+    current_path: &'a Path,
+    pending_path: &'a Path,
+}
+
+/// `ALTER ROLE` can fail after the new password is stored. Login with each
+/// password and keep the one that works.
+async fn settle_pending_password(
+    host: &str,
+    port: u16,
+    user: &str,
+    database: &str,
+    files: PendingPasswordFiles<'_>,
+) -> Result<SettledPassword, ReplaceError> {
+    if password_connects(host, port, user, files.pending_password, database).await {
+        std::fs::rename(files.pending_path, files.current_path)?;
+        if let Some(parent) = files.current_path.parent() {
+            if let Ok(dir) = std::fs::File::open(parent) {
+                let _ = dir.sync_all();
+            }
+        }
+        return Ok(SettledPassword::Promoted);
+    }
+    if password_connects(host, port, user, files.current_password, database).await {
+        let _ = std::fs::remove_file(files.pending_path);
+        return Ok(SettledPassword::Current);
+    }
+    Ok(SettledPassword::Neither)
+}
+
+/// Writes `password` back to the current file, then drops the pending file.
+/// A write failure leaves the pending file in place.
+fn write_restored_password(current_path: &Path, pending_path: &Path, password: &str) -> bool {
+    if write_secret_atomic(current_path, password).is_err() {
+        return false;
+    }
     let _ = std::fs::remove_file(pending_path);
+    true
 }
 
 async fn connect_role(
@@ -523,17 +608,50 @@ async fn apply_pg_then_keys(
     }
     let mut conn = pool.acquire().await?;
     if let Err(err) = alter_role_password(&mut conn, &target.user, new_pg).await {
-        let _ = std::fs::remove_file(dir.join(pg_pending));
-        restore_superuser_password(
+        // Same rule as the superuser: an error can arrive after the new
+        // password is already stored. Keep whichever password logs in.
+        let app_file = dir.join(PG_APP_FILE);
+        let app_pending_path = dir.join(pg_pending);
+        match settle_pending_password(
             &target.host,
             target.port,
-            superuser,
-            &old_super,
-            new_super,
-            &dir.join(PG_PENDING),
+            &target.user,
+            &target.database,
+            PendingPasswordFiles {
+                current_password: &target.password,
+                pending_password: new_pg,
+                current_path: &app_file,
+                pending_path: &app_pending_path,
+            },
         )
-        .await;
-        return Err(err);
+        .await
+        {
+            Ok(SettledPassword::Promoted) => {}
+            Ok(SettledPassword::Current) | Ok(SettledPassword::Neither) => {
+                restore_superuser_password(
+                    &target.host,
+                    target.port,
+                    superuser,
+                    &old_super,
+                    new_super,
+                    &dir.join(PG_PENDING),
+                )
+                .await;
+                return Err(err);
+            }
+            Err(settle_err) => {
+                restore_superuser_password(
+                    &target.host,
+                    target.port,
+                    superuser,
+                    &old_super,
+                    new_super,
+                    &dir.join(PG_PENDING),
+                )
+                .await;
+                return Err(settle_err);
+            }
+        }
     }
     if !password_connects(
         &target.host,
@@ -551,7 +669,15 @@ async fn apply_pg_then_keys(
             );
         } else {
             pool.set_connect_options(old_options.clone());
-            let _ = std::fs::remove_file(dir.join(pg_pending));
+            if !write_restored_password(
+                &dir.join(PG_APP_FILE),
+                &dir.join(pg_pending),
+                &target.password,
+            ) {
+                tracing::error!(
+                    "new postgres password could not be restored; the pending file was kept"
+                );
+            }
         }
         restore_superuser_password(
             &target.host,
@@ -593,7 +719,15 @@ async fn apply_pg_then_keys(
             );
         } else {
             pool.set_connect_options(old_options.clone());
-            let _ = std::fs::remove_file(dir.join(pg_pending));
+            if !write_restored_password(
+                &dir.join(PG_APP_FILE),
+                &dir.join(pg_pending),
+                &target.password,
+            ) {
+                tracing::error!(
+                    "new postgres password could not be restored; the pending file was kept"
+                );
+            }
         }
         restore_superuser_password(
             &target.host,
@@ -666,7 +800,25 @@ async fn alter_role_password(
     password: &str,
 ) -> Result<(), ReplaceError> {
     let sql = alter_role_sql(role, password)?;
+    #[cfg(test)]
+    if ALTER_ERROR_BEFORE_APPLY
+        .try_with(|name| name == role)
+        .unwrap_or(false)
+    {
+        return Err(ReplaceError::Failed(
+            "the database rejected the password change".into(),
+        ));
+    }
     sqlx::query(&sql).execute(&mut *conn).await?;
+    #[cfg(test)]
+    if ALTER_ERROR_AFTER_APPLY
+        .try_with(|name| name == role)
+        .unwrap_or(false)
+    {
+        return Err(ReplaceError::Failed(
+            "the database reported an error after storing the password".into(),
+        ));
+    }
     Ok(())
 }
 
@@ -1307,6 +1459,10 @@ async fn password_connects(
     password: &str,
     database: &str,
 ) -> bool {
+    #[cfg(test)]
+    if REJECT_PASSWORD_LOGINS.try_with(|_| ()).is_ok() {
+        return false;
+    }
     let opts = PgConnectOptions::new()
         .host(host)
         .port(port)
@@ -1371,7 +1527,7 @@ mod plain_tests {
         }
         assert_eq!(
             HEAL_APP_PASSWORD_ERROR,
-            "Couldn't set a new database password. The password file was missing or unreadable."
+            "Coppice couldn't start because it couldn't set a new database password. Quit and open Coppice again."
         );
     }
 
@@ -1833,6 +1989,7 @@ mod tests {
         assert!(!dir.join(PG_APP_PENDING).exists());
     }
 
+    #[derive(Clone)]
     struct SuperLogin {
         host: String,
         port: u16,
@@ -1906,6 +2063,7 @@ mod tests {
         }
     }
 
+    /// The guard is thread-local, so tests that capture logs use a current-thread runtime.
     fn capture_logs() -> (LogBag, tracing::subscriber::DefaultGuard) {
         let bag = LogBag::default();
         let subscriber = tracing_subscriber::registry().with(LogLayer(bag.clone()));
@@ -1941,7 +2099,7 @@ mod tests {
         }
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "current_thread")]
     async fn lost_app_password_is_reset_with_the_superuser_connection() {
         let pool = pool().await;
         let login = super_login().await;
@@ -2000,7 +2158,7 @@ mod tests {
         role.drop_role().await;
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "current_thread")]
     async fn unreadable_app_password_file_is_replaced_and_not_logged() {
         let pool = pool().await;
         let login = super_login().await;
@@ -2047,7 +2205,7 @@ mod tests {
         role.drop_role().await;
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "current_thread")]
     async fn missing_app_password_is_written_when_the_role_does_not_exist_yet() {
         let _pool = pool().await;
         let login = super_login().await;
@@ -2068,7 +2226,7 @@ mod tests {
         assert_logs_omit(&logs, &[&new_password]);
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "current_thread")]
     async fn app_password_reset_fails_when_the_superuser_password_is_wrong() {
         let pool = pool().await;
         let login = super_login().await;
@@ -2188,7 +2346,7 @@ mod tests {
         role.drop_role().await;
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "current_thread")]
     async fn replace_keys_rotates_the_superuser_password_and_the_app_password() {
         let pool = pool().await;
         let login = super_login().await;
@@ -2304,9 +2462,280 @@ mod tests {
         let text = err.to_string();
         assert!(!text.contains(&old_super), "{text}");
         assert!(!dir.join(PG_PENDING).exists());
-        assert!(!dir.join(PG_APP_PENDING).exists());
+        // The application role name never logged in, so its pending file stays.
+        // The next launch drops it when the saved password still works.
+        assert!(dir.join(PG_APP_PENDING).is_file());
         assert_eq!(read_secret(&dir.join(PG_FILE)).unwrap(), old_super);
         assert!(password_connects(&su.host, su.port, &su.name, &old_super, "postgres").await);
         su.drop_role().await;
+    }
+
+    #[tokio::test]
+    async fn superuser_password_is_kept_when_alter_reports_an_error_after_it_is_stored() {
+        let pool = pool().await;
+        let old_password = generate_secret();
+        let new_password = generate_secret();
+        let role = RoleGuard::create(&pool, &old_password).await;
+        grant_postgres_connect(&pool, &role.name).await;
+        let root = secrets_dir();
+        let dir = root.path().join("secrets");
+        write_secret_atomic(&dir.join(PG_FILE), &old_password).unwrap();
+
+        ALTER_ERROR_AFTER_APPLY
+            .scope(role.name.clone(), async {
+                rotate_superuser_password(&dir, &role.host, role.port, &role.name, &new_password)
+                    .await
+            })
+            .await
+            .expect("stored password is promoted");
+
+        assert_eq!(read_secret(&dir.join(PG_FILE)).unwrap(), new_password);
+        assert!(!dir.join(PG_PENDING).exists());
+        assert_eq!(mode_of(&dir.join(PG_FILE)), 0o600);
+        assert!(
+            password_connects(&role.host, role.port, &role.name, &new_password, "postgres").await
+        );
+        assert!(
+            !password_connects(&role.host, role.port, &role.name, &old_password, "postgres").await
+        );
+        role.drop_role().await;
+    }
+
+    #[tokio::test]
+    async fn superuser_pending_file_is_removed_when_alter_fails_before_the_change() {
+        let pool = pool().await;
+        let old_password = generate_secret();
+        let new_password = generate_secret();
+        let role = RoleGuard::create(&pool, &old_password).await;
+        grant_postgres_connect(&pool, &role.name).await;
+        let root = secrets_dir();
+        let dir = root.path().join("secrets");
+        write_secret_atomic(&dir.join(PG_FILE), &old_password).unwrap();
+
+        let err = ALTER_ERROR_BEFORE_APPLY
+            .scope(role.name.clone(), async {
+                rotate_superuser_password(&dir, &role.host, role.port, &role.name, &new_password)
+                    .await
+            })
+            .await
+            .expect_err("password unchanged");
+
+        assert!(!err.to_string().contains(&new_password), "{err}");
+        assert!(!dir.join(PG_PENDING).exists());
+        assert_eq!(read_secret(&dir.join(PG_FILE)).unwrap(), old_password);
+        assert!(
+            password_connects(&role.host, role.port, &role.name, &old_password, "postgres").await
+        );
+        assert!(
+            !password_connects(&role.host, role.port, &role.name, &new_password, "postgres").await
+        );
+        role.drop_role().await;
+    }
+
+    #[tokio::test]
+    async fn superuser_pending_file_stays_when_neither_password_logs_in() {
+        let pool = pool().await;
+        let old_password = generate_secret();
+        let new_password = generate_secret();
+        let role = RoleGuard::create(&pool, &old_password).await;
+        grant_postgres_connect(&pool, &role.name).await;
+        let root = secrets_dir();
+        let dir = root.path().join("secrets");
+        write_secret_atomic(&dir.join(PG_FILE), &old_password).unwrap();
+
+        let err = ALTER_ERROR_AFTER_APPLY
+            .scope(role.name.clone(), async {
+                REJECT_PASSWORD_LOGINS
+                    .scope((), async {
+                        rotate_superuser_password(
+                            &dir,
+                            &role.host,
+                            role.port,
+                            &role.name,
+                            &new_password,
+                        )
+                        .await
+                    })
+                    .await
+            })
+            .await
+            .expect_err("neither login");
+
+        assert!(!err.to_string().contains(&new_password), "{err}");
+        assert_eq!(read_secret(&dir.join(PG_FILE)).unwrap(), old_password);
+        assert_eq!(read_secret(&dir.join(PG_PENDING)).unwrap(), new_password);
+        assert_eq!(mode_of(&dir.join(PG_PENDING)), 0o600);
+
+        let resolved = finish_file_password(&dir, &role.host, role.port, &role.name, "postgres")
+            .await
+            .expect("next launch");
+        assert_eq!(resolved, new_password);
+        assert_eq!(read_secret(&dir.join(PG_FILE)).unwrap(), new_password);
+        assert!(!dir.join(PG_PENDING).exists());
+        role.drop_role().await;
+    }
+
+    #[tokio::test]
+    async fn app_password_is_kept_when_alter_reports_an_error_after_it_is_stored() {
+        let pool = pool().await;
+        let login = super_login().await;
+        let old_app = generate_secret();
+        let old_super = generate_secret();
+        let app = RoleGuard::create(&pool, &old_app).await;
+        let su = RoleGuard::create(&pool, &old_super).await;
+        grant_postgres_connect(&pool, &su.name).await;
+        let root = secrets_dir();
+        let dir = root.path().join("secrets");
+        let old_master = generate_secret();
+        write_pair(&dir, &old_master, &generate_secret());
+        write_password_atomic(&dir.join(ADMIN_FILE), "old-admin-pass").unwrap();
+        write_secret_atomic(&dir.join(PG_FILE), &old_super).unwrap();
+        write_secret_atomic(&dir.join(PG_APP_FILE), &old_app).unwrap();
+        insert_admin(&pool, "admin@localhost", "old-admin-pass").await;
+        let store = SecretStore::from_master_key(&old_master);
+        let app_url = format!(
+            "postgres://{}:{}@{}:{}/{}",
+            app.name, old_app, app.host, app.port, app.database
+        );
+
+        ALTER_ERROR_AFTER_APPLY
+            .scope(app.name.clone(), async {
+                replace_desktop_keys(
+                    &pool,
+                    &store,
+                    &dir,
+                    &app_url,
+                    "new-admin-pass",
+                    "admin@localhost",
+                    &su.name,
+                )
+                .await
+            })
+            .await
+            .expect("replace");
+
+        let new_app = read_secret(&dir.join(PG_APP_FILE)).unwrap();
+        let new_super = read_secret(&dir.join(PG_FILE)).unwrap();
+        assert_ne!(new_app, old_app);
+        assert!(!dir.join(PG_APP_PENDING).exists());
+        assert!(!dir.join(PG_PENDING).exists());
+        assert_eq!(mode_of(&dir.join(PG_APP_FILE)), 0o600);
+        assert!(password_connects(&app.host, app.port, &app.name, &new_app, &app.database).await);
+        assert!(!password_connects(&app.host, app.port, &app.name, &old_app, &app.database).await);
+        assert!(password_connects(&su.host, su.port, &su.name, &new_super, "postgres").await);
+        assert!(
+            password_connects(
+                &login.host,
+                login.port,
+                &login.user,
+                &login.password,
+                "postgres"
+            )
+            .await
+        );
+        app.drop_role().await;
+        su.drop_role().await;
+    }
+
+    #[tokio::test]
+    async fn failed_app_password_reset_is_retried_on_the_next_launch() {
+        let pool = pool().await;
+        let login = super_login().await;
+        let old_password = generate_secret();
+        let first_password = generate_secret();
+        let role = RoleGuard::create(&pool, &old_password).await;
+        let root = secrets_dir();
+        let dir = root.path().join("secrets");
+        let path = dir.join(PG_APP_FILE);
+        std::fs::write(&path, "not-a-password\n").unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o000)).unwrap();
+        std::fs::write(dir.join("pg_app_password.writing"), "partial").unwrap();
+        let mut wrong = login.clone();
+        wrong.password = generate_secret();
+
+        let err = heal_app_password(
+            &dir,
+            heal_for(&wrong, &role.name, &role.database, &first_password),
+        )
+        .await
+        .expect_err("first launch");
+
+        assert_eq!(err.to_string(), HEAL_APP_PASSWORD_ERROR);
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "not-a-password\n");
+        assert!(!dir.join(PG_APP_PENDING).exists());
+        assert_eq!(
+            std::fs::read_to_string(dir.join("pg_app_password.writing")).unwrap(),
+            "partial"
+        );
+        assert!(
+            password_connects(
+                &role.host,
+                role.port,
+                &role.name,
+                &old_password,
+                &role.database
+            )
+            .await
+        );
+        assert!(
+            !password_connects(
+                &role.host,
+                role.port,
+                &role.name,
+                &first_password,
+                &role.database
+            )
+            .await
+        );
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o000)).unwrap();
+
+        let first_launch = crate::desktop::load_desktop_secrets(&dir).unwrap();
+        let second_launch = crate::desktop::load_desktop_secrets(&dir).unwrap();
+        assert!(first_launch.reset_pg_app_password);
+        assert!(second_launch.reset_pg_app_password);
+        assert_ne!(first_launch.pg_app_password, second_launch.pg_app_password);
+        assert_ne!(second_launch.pg_app_password, first_password);
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "not-a-password\n");
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o000)).unwrap();
+
+        heal_app_password(
+            &dir,
+            heal_for(
+                &login,
+                &role.name,
+                &role.database,
+                &second_launch.pg_app_password,
+            ),
+        )
+        .await
+        .expect("second launch");
+
+        assert_eq!(read_secret(&path).unwrap(), second_launch.pg_app_password);
+        assert_eq!(mode_of(&path), 0o600);
+        assert!(!dir.join(PG_APP_PENDING).exists());
+        assert!(!dir.join("pg_app_password.writing").exists());
+        assert!(
+            password_connects(
+                &role.host,
+                role.port,
+                &role.name,
+                &second_launch.pg_app_password,
+                &role.database
+            )
+            .await
+        );
+        assert!(
+            !password_connects(
+                &role.host,
+                role.port,
+                &role.name,
+                &old_password,
+                &role.database
+            )
+            .await
+        );
+        role.drop_role().await;
     }
 }

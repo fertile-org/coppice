@@ -24,6 +24,11 @@ use bootstrap::DesktopSecrets;
 use layout::{DataLayout, ResourceLayout};
 use postgres::DesktopPostgres;
 
+#[cfg(test)]
+pub(crate) fn load_desktop_secrets(dir: &std::path::Path) -> std::io::Result<DesktopSecrets> {
+    bootstrap::load_or_create_secrets(dir)
+}
+
 const DATABASE_NAME: &str = "coppice";
 /// How long in-flight requests, agent-tree shutdown, and plugin/OpenCode
 /// shutdown get after a signal. Agent groups get 3 s of that for SIGTERM
