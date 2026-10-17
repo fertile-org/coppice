@@ -8,6 +8,7 @@ mod code_reviews;
 mod comments;
 mod connectors;
 mod health;
+mod init_wizard;
 mod jobs;
 mod knowledge;
 mod knowledge_compaction;
@@ -57,6 +58,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .merge(tools::routes())
         .merge(tool_connectors::routes())
         .merge(plugins::routes())
+        .merge(init_wizard::routes())
         .layer(middleware::from_fn(csrf::csrf_middleware))
         .layer(middleware::from_fn_with_state(
             state.clone(),
