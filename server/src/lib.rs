@@ -228,7 +228,10 @@ pub async fn test_state() -> Arc<AppState> {
         attachments: AppState::attachment_store_from_config(&config),
         connectors: AppState::connectors_runtime(&config, opencode_runs.clone()),
         agent_health: Arc::new(crate::services::agent_health::AgentHealthRegistry::new()),
-        run_streams: Arc::new(crate::sessions::run_registry::RunStreamRegistry::new()),
+        run_streams: Arc::new(crate::sessions::run_registry::RunStreamRegistry::with_artifacts(
+            config.storage.artifacts_dir.clone(),
+            config.storage.effective_run_console_max_bytes(),
+        )),
         event_bus: Arc::new(crate::events::bus::EventBus::new()),
         opencode_runs,
         agent_templates: AppState::load_agent_templates(),

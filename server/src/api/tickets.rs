@@ -809,7 +809,27 @@ async fn archive_ticket(
         .archive(ticket_id)
         .await
         .map_err(map_ticket_error_response)?;
+    spawn_archived_ticket_cleanup(&state, ticket_id);
     Ok(Json(ticket_to_response(ticket)))
+}
+
+/// Off the request path: drop the archived ticket's run artifacts.
+fn spawn_archived_ticket_cleanup(state: &Arc<AppState>, ticket_id: Uuid) {
+    let Some(pool) = state.db.clone() else {
+        return;
+    };
+    let artifacts_dir = state.config.storage.artifacts_dir.clone();
+    tokio::spawn(async move {
+        if let Err(err) = crate::services::artifact_retention::remove_ticket_run_artifacts(
+            &pool,
+            std::path::Path::new(&artifacts_dir),
+            ticket_id,
+        )
+        .await
+        {
+            tracing::warn!(%ticket_id, error = %err, "could not remove archived ticket's run artifacts");
+        }
+    });
 }
 
 async fn unarchive_ticket(

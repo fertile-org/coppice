@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
+use crate::sessions::run_registry::is_console_event_type;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -322,24 +323,7 @@ async fn execute_job(
         }
     }
 
-    let snapshot_handle = stream.clone();
-    let artifacts_dir = state.config.storage.artifacts_dir.clone();
-    let run_id_for_flush = run.id;
-    let mut flush_cancel = stream.cancelled_rx();
-    tokio::spawn(async move {
-        let paths = RunArtifactPaths::new(&artifacts_dir, &run_id_for_flush.to_string());
-        let mut interval = tokio::time::interval(Duration::from_secs(5));
-        loop {
-            tokio::select! {
-                _ = interval.tick() => {
-                    if let Some(snap) = snapshot_handle.snapshot() {
-                        let _ = ArtifactService::write_session_snapshot(&paths, &snap);
-                    }
-                }
-                _ = flush_cancel.changed() => break,
-            }
-        }
-    });
+    spawn_snapshot_checkpoints(&stream, &state.config.storage.artifacts_dir, run.id);
 
     state.event_bus.publish(AppEvent::AgentRunStarted {
         run_id: run.id,
@@ -1267,6 +1251,49 @@ async fn execute_chat_turn(
     Ok(())
 }
 
+/// How long a session snapshot must stay unchanged before it is checkpointed.
+const SNAPSHOT_IDLE: Duration = Duration::from_secs(3);
+
+/// Write the session snapshot once the session goes quiet, instead of on a
+/// fixed timer. The end of the run writes it once more.
+fn spawn_snapshot_checkpoints(
+    stream: &Arc<crate::sessions::run_registry::RunStreamHandle>,
+    artifacts_dir: &str,
+    run_id: uuid::Uuid,
+) {
+    let handle = stream.clone();
+    let paths = RunArtifactPaths::new(artifacts_dir, &run_id.to_string());
+    let mut changes = stream.subscribe_snapshot_changes();
+    let mut cancelled = stream.cancelled_rx();
+    tokio::spawn(async move {
+        loop {
+            tokio::select! {
+                changed = changes.changed() => {
+                    if changed.is_err() {
+                        return;
+                    }
+                }
+                _ = cancelled.changed() => return,
+            }
+            // Wait for the session to go idle.
+            loop {
+                tokio::select! {
+                    _ = tokio::time::sleep(SNAPSHOT_IDLE) => break,
+                    changed = changes.changed() => {
+                        if changed.is_err() {
+                            return;
+                        }
+                    }
+                    _ = cancelled.changed() => return,
+                }
+            }
+            if let Some(snap) = handle.snapshot() {
+                let _ = ArtifactService::write_session_snapshot(&paths, &snap);
+            }
+        }
+    });
+}
+
 fn persist_artifacts(
     state: &AppState,
     stream: &crate::sessions::run_registry::RunStreamHandle,
@@ -1304,15 +1331,6 @@ fn best_effort_persist_artifacts(
     }
 }
 
-/// Structured console events are typed `<connector>.console.<kind>`.
-fn is_console_event_type(ty: &str) -> bool {
-    let mut parts = ty.split('.');
-    matches!(
-        (parts.next(), parts.next(), parts.next(), parts.next()),
-        (Some(prefix), Some("console"), Some(kind), None) if !prefix.is_empty() && !kind.is_empty()
-    )
-}
-
 fn persist_artifacts_to_dir(
     artifacts_dir: &str,
     stream: &crate::sessions::run_registry::RunStreamHandle,
@@ -1323,6 +1341,22 @@ fn persist_artifacts_to_dir(
     let paths = RunArtifactPaths::new(artifacts_dir, &run_id.to_string());
     if let Some(snap) = stream.snapshot() {
         let _ = ArtifactService::write_session_snapshot(&paths, &snap);
+    }
+    if let Some(log) = stream.artifact_log() {
+        // Console events and frames were appended as they arrived.
+        log.flush();
+        return ArtifactService::write_meta(
+            &paths,
+            &RunArtifactMeta {
+                provider: connector_name.into(),
+                session_id,
+                frame_count: log.frame_count(),
+                ended_at: time::OffsetDateTime::now_utc()
+                    .format(&Rfc3339)
+                    .unwrap_or_default(),
+            },
+        )
+        .map_err(Into::into);
     }
     let messages = stream.buffered_tail();
     let mut log_bytes = Vec::new();

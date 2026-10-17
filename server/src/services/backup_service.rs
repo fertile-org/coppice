@@ -193,6 +193,7 @@ pub const IMPORT_SETTINGS_NOTE: &str = "Import finished. Agent commands and plug
 /// and `workflow.auto_assign.*`, is left on this machine.
 const IMPORTABLE_SETTINGS: &[&str] = &[
     "storage.max_upload_bytes",
+    "storage.run_artifacts_retention_days",
     "agent.worker_count",
     "agent.health_check_interval_secs",
     "logs.retention_days",

@@ -732,6 +732,32 @@ pub struct AuthConfig {
 pub struct StorageConfig {
     pub artifacts_dir: String,
     pub max_upload_bytes: u64,
+    /// Days a finished run's folder (console, terminal log, snapshot) is kept.
+    /// A run's folder also goes when its ticket is archived. Below 1 runs as 1.
+    #[serde(default = "default_run_artifacts_retention_days")]
+    pub run_artifacts_retention_days: u32,
+    /// Most bytes one run keeps for its console events, and again for its
+    /// terminal log. Older segments are dropped first.
+    #[serde(default = "default_run_console_max_bytes")]
+    pub run_console_max_bytes: u64,
+}
+
+fn default_run_artifacts_retention_days() -> u32 {
+    30
+}
+
+fn default_run_console_max_bytes() -> u64 {
+    64 * 1024 * 1024
+}
+
+impl StorageConfig {
+    pub fn effective_run_artifacts_retention_days(&self) -> u32 {
+        self.run_artifacts_retention_days.max(1)
+    }
+
+    pub fn effective_run_console_max_bytes(&self) -> u64 {
+        self.run_console_max_bytes.max(64 * 1024)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
@@ -1373,6 +1399,8 @@ impl AppConfig {
             storage: StorageConfig {
                 artifacts_dir: "./data/artifacts".into(),
                 max_upload_bytes: 10 * 1024 * 1024,
+                run_artifacts_retention_days: default_run_artifacts_retention_days(),
+                run_console_max_bytes: default_run_console_max_bytes(),
             },
             agent: AgentConfig {
                 ignored_default_connector: None,

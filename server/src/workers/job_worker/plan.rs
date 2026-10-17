@@ -146,15 +146,17 @@ async fn record_plan_ref_changes(
 
 fn append_plan_ref_diff(artifacts_dir: &str, run_id: uuid::Uuid, diff: &str) {
     let paths = RunArtifactPaths::new(artifacts_dir, &run_id.to_string());
-    let mut bytes = std::fs::read(&paths.terminal_log).unwrap_or_default();
-    if !bytes.is_empty() && !bytes.ends_with(b"\n") {
+    let ends_with_newline = ArtifactService::read_terminal_log_tail(&paths, 1)
+        .map_or(true, |last| last.ends_with(b"\n"));
+    let mut bytes = Vec::new();
+    if !ends_with_newline {
         bytes.push(b'\n');
     }
     bytes.extend_from_slice(diff.as_bytes());
     if !bytes.ends_with(b"\n") {
         bytes.push(b'\n');
     }
-    if let Err(err) = ArtifactService::write_terminal_log(&paths, &bytes) {
+    if let Err(err) = ArtifactService::append_terminal_log(&paths, &bytes) {
         tracing::warn!(error = %err, %run_id, "plan run could not write ref diff to the run log");
     }
 }

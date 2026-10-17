@@ -195,6 +195,8 @@ fn generated_config(layout: &DataLayout) -> io::Result<String> {
          # Logs and other files from agent runs and chats.\n\
          [storage]\n\
          artifacts_dir = {artifacts}\n\
+         # Days a finished run's console and terminal log are kept. Archiving a ticket removes them.\n\
+         run_artifacts_retention_days = 30\n\
          \n\
          # Your default plugin folder. Coppice always looks here for plugins.\n\
          [plugins]\n\

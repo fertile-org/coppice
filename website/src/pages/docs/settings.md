@@ -55,6 +55,13 @@ Coppice never deletes today's log or the database log it's writing, even past th
 | --- | --- | --- | --- |
 | `dir` | string | `./data/logs` | Folder for logs. The desktop app uses its own folder and ignores this. Changing it needs a restart. |
 
+## `[storage]`
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `run_artifacts_retention_days` | integer | `30` | Days a finished run's console and terminal log are kept. Archiving a ticket removes its runs' files right away. Below 1 runs as 1. Changing it needs a restart. |
+| `run_console_max_bytes` | integer | `67108864` | Most bytes one run keeps for its console, and the same again for its terminal log. The oldest part goes first. Changing it needs a restart. |
+
 ## Connectors
 Signed-in CLIs are on by default. You only need a line to turn one off:
 

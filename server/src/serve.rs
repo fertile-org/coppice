@@ -372,7 +372,10 @@ pub async fn serve(
         attachments: AppState::attachment_store_from_config(&config),
         connectors,
         agent_health: Arc::new(crate::services::agent_health::AgentHealthRegistry::new()),
-        run_streams: Arc::new(crate::sessions::run_registry::RunStreamRegistry::new()),
+        run_streams: Arc::new(crate::sessions::run_registry::RunStreamRegistry::with_artifacts(
+            config.storage.artifacts_dir.clone(),
+            config.storage.effective_run_console_max_bytes(),
+        )),
         event_bus: Arc::new(crate::events::bus::EventBus::new()),
         opencode_runs: opencode_runs.clone(),
         agent_templates,
@@ -415,6 +418,7 @@ pub async fn serve(
         }
     }
     crate::logs::retain::spawn_sweep(state.clone());
+    crate::services::artifact_retention::spawn_sweep(state.clone());
     crate::workers::job_worker::spawn_workers(state.clone());
     crate::workers::health_worker::spawn_health_worker(state.clone());
     crate::workers::knowledge_compaction_scheduler::spawn_knowledge_compaction_scheduler(
