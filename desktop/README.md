@@ -64,7 +64,7 @@ If `pg_app_password` is missing or unreadable at startup, Coppice generates a ne
 
 The shell checks GitHub releases in the background (prereleases included) and shows a banner. **Settings → Updates** remembers `automaticUpdates` in `update-settings.json` inside the user-data directory. Default is on.
 
-Linux packages copy the committed public keyring `build/linux/coppice-archive-keyring.gpg` and add its apt source on install. The private key is used only by `.github/workflows/apt-repo.yml`, which publishes the signed repository after a release is published. The apt origin and the macOS feed origin are `COPPICE_UPDATE_BASE`, or the default in `src/updateEndpoints.mjs` when that variable is empty.
+Linux packages copy the committed public keyring `build/linux/coppice-archive-keyring.gpg` and add its apt source on install. The private key is used only by `.github/workflows/apt-repo.yml`, which publishes the signed repository after a release is published. The apt origin and the macOS feed origin are `COPPICE_UPDATE_BASE`, or `https://apt.getcoppice.dev` when that variable is empty. The macOS feed is that origin plus `/updates/`.
 
 macOS in-place install is one flag. `scripts/dist.mjs` sets `updater-mode.json` → `macInPlaceUpdates` to `true` only when `CSC_LINK` is non-blank (Developer ID signing). The same file records `updateBase`. The app then uses `electron-updater` and `<updateBase>/updates/latest-mac.yml`. Unsigned builds leave the flag `false` and the banner opens the release page. To turn in-place install on, add the signing secrets listed in [docs/development.md](../docs/development.md#desktop-release-tag-and-publish). No further code change is required.
 

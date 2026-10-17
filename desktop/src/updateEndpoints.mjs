@@ -1,7 +1,7 @@
 // The only copy of the default update host. Override it with the
 // COPPICE_UPDATE_BASE repository variable (passed through at package time).
 // No trailing slash.
-export const DEFAULT_UPDATE_BASE = 'https://fertile-org.github.io/coppice';
+export const DEFAULT_UPDATE_BASE = 'https://apt.getcoppice.dev';
 
 export function updateBase(value) {
   const raw = typeof value === 'string' ? value.trim() : '';
@@ -11,6 +11,11 @@ export function updateBase(value) {
 // Trailing slash matters: electron-updater joins `latest-mac.yml` onto this URL.
 export function macUpdateFeed(value) {
   return `${updateBase(value)}/updates/`;
+}
+
+// Hostname written to the Pages CNAME so the custom domain survives each deploy.
+export function pagesCname(value) {
+  return new URL(updateBase(value)).host;
 }
 
 export function aptSourceLine(value) {

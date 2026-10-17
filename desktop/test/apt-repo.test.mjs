@@ -21,7 +21,7 @@ import {
   renderPackageEntry,
 } from '../scripts/apt-repo.mjs';
 import { APT_KEYRING_FILE, stageAptResources } from '../scripts/dist.mjs';
-import { APT_KEYRING_PATH, aptSourceLine, macUpdateFeed } from '../src/updateEndpoints.mjs';
+import { APT_KEYRING_PATH, MAC_UPDATE_FEED, aptSourceLine, macUpdateFeed, pagesCname } from '../src/updateEndpoints.mjs';
 
 test('package entries keep the Debian version and a pool path', () => {
   assert.equal(
@@ -148,6 +148,13 @@ test('the installed apt source uses signed-by and the base URL lives in one plac
   assert.match(script, /resources\/apt\/coppice\.list/);
   assert.equal(script.includes(APT_KEYRING_PATH), true);
   assert.equal(script.includes('github.io'), false);
+  assert.equal(
+    APT_SOURCE_LINE,
+    `deb [arch=amd64,arm64 signed-by=${APT_KEYRING_PATH}] https://apt.getcoppice.dev stable main`,
+  );
+  assert.equal(MAC_UPDATE_FEED, 'https://apt.getcoppice.dev/updates/');
+  assert.equal(pagesCname(), 'apt.getcoppice.dev');
+  assert.equal(pagesCname('https://apt.example.com/'), 'apt.example.com');
   assert.equal(APT_SOURCE_LINE, aptSourceLine());
   assert.equal(
     aptSourceLine('https://apt.example.com/'),

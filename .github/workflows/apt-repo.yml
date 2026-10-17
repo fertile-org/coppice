@@ -98,6 +98,15 @@ jobs:
             --asset-base "https://github.com/fertile-org/coppice/releases/download/${TAG}" \
             --out site/updates/latest-mac.yml \
             "${zips[@]}"
+      - name: Write the Pages CNAME
+        env:
+          COPPICE_UPDATE_BASE: ${{ vars.COPPICE_UPDATE_BASE }}
+        run: |
+          node --input-type=module <<'EOF'
+          import { writeFileSync } from 'node:fs';
+          import { pagesCname } from './desktop/src/updateEndpoints.mjs';
+          writeFileSync('site/CNAME', `${pagesCname(process.env.COPPICE_UPDATE_BASE)}\n`);
+          EOF
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
