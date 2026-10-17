@@ -54,6 +54,47 @@ const KNOWLEDGE_PREAMBLE: &str = concat!(
     "\n\n"
 );
 
+/// The fields one `<knowledge>` block is built from. Revisions are immutable,
+/// so the same fields always render the same text.
+pub struct KnowledgeEntryFields<'a> {
+    pub item_id: Uuid,
+    pub revision_id: Uuid,
+    pub knowledge_type: &'a str,
+    pub scope: &'a str,
+    pub confidence: &'a str,
+    pub source_type: &'a str,
+    pub source_id: Option<Uuid>,
+    pub title: &'a str,
+    pub content: &'a str,
+}
+
+pub fn render_entry(fields: &KnowledgeEntryFields<'_>) -> String {
+    let source_id = fields
+        .source_id
+        .map(|id| id.to_string())
+        .unwrap_or_else(|| "none".into());
+    format!(
+        concat!(
+            "<knowledge itemId=\"{item_id}\" revisionId=\"{revision_id}\" ",
+            "type=\"{knowledge_type}\" scope=\"{scope}\" confidence=\"{confidence}\" ",
+            "sourceType=\"{source_type}\" sourceId=\"{source_id}\">\n",
+            "--- BEGIN UNTRUSTED KNOWLEDGE {revision_id} ---\n",
+            "Title: {title}\n\n{content}\n",
+            "--- END UNTRUSTED KNOWLEDGE {revision_id} ---\n",
+            "</knowledge>\n\n"
+        ),
+        item_id = fields.item_id,
+        revision_id = fields.revision_id,
+        knowledge_type = fields.knowledge_type,
+        scope = fields.scope,
+        confidence = fields.confidence,
+        source_type = fields.source_type,
+        source_id = source_id,
+        title = fields.title,
+        content = fields.content,
+    )
+}
+
 pub fn render_knowledge(
     retrieved: &[RetrievedKnowledge],
     max_tokens: usize,
@@ -68,30 +109,17 @@ pub fn render_knowledge(
     let mut markdown = KNOWLEDGE_PREAMBLE.to_string();
     let mut entries = Vec::new();
     for item in retrieved {
-        let source_id = item
-            .source_id
-            .map(|id| id.to_string())
-            .unwrap_or_else(|| "none".into());
-        let rendered = format!(
-            concat!(
-                "<knowledge itemId=\"{item_id}\" revisionId=\"{revision_id}\" ",
-                "type=\"{knowledge_type}\" scope=\"{scope}\" confidence=\"{confidence}\" ",
-                "sourceType=\"{source_type}\" sourceId=\"{source_id}\">\n",
-                "--- BEGIN UNTRUSTED KNOWLEDGE {revision_id} ---\n",
-                "Title: {title}\n\n{content}\n",
-                "--- END UNTRUSTED KNOWLEDGE {revision_id} ---\n",
-                "</knowledge>\n\n"
-            ),
-            item_id = item.item_id,
-            revision_id = item.revision_id,
-            knowledge_type = item.knowledge_type,
-            scope = item.scope,
-            confidence = item.confidence,
-            source_type = item.source_type,
-            source_id = source_id,
-            title = item.title,
-            content = item.content,
-        );
+        let rendered = render_entry(&KnowledgeEntryFields {
+            item_id: item.item_id,
+            revision_id: item.revision_id,
+            knowledge_type: &item.knowledge_type,
+            scope: &item.scope,
+            confidence: &item.confidence,
+            source_type: &item.source_type,
+            source_id: item.source_id,
+            title: &item.title,
+            content: &item.content,
+        });
         let entry_tokens = counter.count(&rendered);
         if counter.count(&markdown).saturating_add(entry_tokens) > max_tokens {
             continue;
@@ -124,9 +152,8 @@ pub async fn record_usage(
         sqlx::query(
             r#"
             INSERT INTO knowledge_usage_logs (
-                id, run_id, item_id, revision_id, rank, score,
-                token_count, rendered_content
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                id, run_id, item_id, revision_id, rank, score, token_count
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7)
             ON CONFLICT (run_id, revision_id) DO NOTHING
             "#,
         )
@@ -137,7 +164,6 @@ pub async fn record_usage(
         .bind(entry.rank)
         .bind(entry.score)
         .bind(entry.token_count)
-        .bind(&entry.rendered_content)
         .execute(&mut *tx)
         .await?;
     }

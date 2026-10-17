@@ -77,6 +77,7 @@ pub async fn truncate_test_workspace(pool: &PgPool) -> anyhow::Result<()> {
             knowledge_compaction_batch_tickets,
             knowledge_compaction_queue,
             knowledge_revisions,
+            knowledge_provenance,
             knowledge_items,
             knowledge_compaction_batches,
             notifications,

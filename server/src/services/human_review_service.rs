@@ -2,9 +2,9 @@
 //!
 //! Review comments live on `ticket_comments` (`review_feedback`). Check
 //! outcomes live there too (`qa_passed`, `qa_failed`). Runs do not keep a
-//! test report after they finish (`submitted_result` is cleared), so the
-//! acceptance records the run ids whose stored outcome it covers, plus any
-//! run that still has `submitted_result`.
+//! test report after they finish (`submitted_result` is cleared when the run
+//! finishes), so the acceptance records the run ids whose stored outcome it
+//! covers, plus any run that still holds a submitted result.
 
 use sqlx::PgPool;
 use sqlx::Row;

@@ -6,6 +6,7 @@ use crate::domain::knowledge::{
 };
 use crate::knowledge::retrieval::SimilarKnowledgeNeighbor;
 use crate::middleware::admin::AdminUser;
+use crate::services::context_budget::{render_entry, KnowledgeEntryFields};
 use crate::services::knowledge_service::{
     KnowledgeError, KnowledgeListFilter, KnowledgePage, KnowledgeRevisionPatch, KnowledgeService,
 };
@@ -591,8 +592,8 @@ async fn knowledge_used(
     let rows = sqlx::query(
         r#"
         SELECT u.item_id, u.revision_id, u.rank, u.score, u.token_count,
-               u.rendered_content, u.included_at, r.title, r.knowledge_type,
-               r.scope, r.source_type, r.source_id
+               u.included_at, r.title, r.content, r.knowledge_type,
+               r.scope, r.source_type, r.source_id, r.confidence
         FROM knowledge_usage_logs u
         JOIN knowledge_revisions r ON r.id = u.revision_id
         WHERE u.run_id = $1
@@ -607,18 +608,39 @@ async fn knowledge_used(
         .into_iter()
         .map(|row| -> Result<KnowledgeUsageResponse, sqlx::Error> {
             let included_at: OffsetDateTime = row.try_get("included_at")?;
+            let item_id: Uuid = row.try_get("item_id")?;
+            let revision_id: Uuid = row.try_get("revision_id")?;
+            let title: String = row.try_get("title")?;
+            let content: String = row.try_get("content")?;
+            let knowledge_type: String = row.try_get("knowledge_type")?;
+            let scope: String = row.try_get("scope")?;
+            let source_type: String = row.try_get("source_type")?;
+            let source_id: Option<Uuid> = row.try_get("source_id")?;
+            let confidence: String = row.try_get("confidence")?;
+            // The revision is immutable, so this is the exact text the run saw.
+            let rendered_content = render_entry(&KnowledgeEntryFields {
+                item_id,
+                revision_id,
+                knowledge_type: &knowledge_type,
+                scope: &scope,
+                confidence: &confidence,
+                source_type: &source_type,
+                source_id,
+                title: &title,
+                content: &content,
+            });
             Ok(KnowledgeUsageResponse {
-                item_id: row.try_get("item_id")?,
-                revision_id: row.try_get("revision_id")?,
+                item_id,
+                revision_id,
                 rank: row.try_get("rank")?,
                 score: row.try_get("score")?,
                 token_count: row.try_get("token_count")?,
-                rendered_content: row.try_get("rendered_content")?,
-                title: row.try_get("title")?,
-                knowledge_type: row.try_get("knowledge_type")?,
-                scope: row.try_get("scope")?,
-                source_type: row.try_get("source_type")?,
-                source_id: row.try_get("source_id")?,
+                rendered_content,
+                title,
+                knowledge_type,
+                scope,
+                source_type,
+                source_id,
                 included_at: included_at.format(&Rfc3339).unwrap_or_default(),
             })
         })

@@ -521,7 +521,8 @@ impl<'a> RunService<'a> {
                 status = $2,
                 worktree_path = $3,
                 branch_name = $4,
-                ended_at = now()
+                ended_at = now(),
+                submitted_result = NULL
             WHERE id = $1 AND status = $5
             RETURNING
                 id, ticket_id, agent_id, job_type, status, sandbox_profile_id,
@@ -934,7 +935,8 @@ impl<'a> RunService<'a> {
                 status = $2,
                 worktree_path = $3,
                 branch_name = $4,
-                ended_at = now()
+                ended_at = now(),
+                submitted_result = NULL
             WHERE id = $1 AND status = $5
             RETURNING
                 id, ticket_id, agent_id, job_type, status, sandbox_profile_id,

@@ -384,7 +384,7 @@ async fn deleting_agent_with_knowledge_provenance_returns_conflict_and_preserves
 }
 
 #[tokio::test]
-async fn deleting_agent_with_run_sourced_knowledge_preserves_comment_and_review_provenance() {
+async fn deleting_agent_with_run_sourced_knowledge_keeps_provenance_without_the_run() {
     let _guard = common::DB_TEST_LOCK.lock().await;
     let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
     let board_id = common::create_test_board(&app, &cookie, &csrf).await;
@@ -469,7 +469,8 @@ async fn deleting_agent_with_run_sourced_knowledge_preserves_comment_and_review_
         ))
         .await
         .unwrap();
-    assert_eq!(deleted.status(), StatusCode::CONFLICT);
+    // Knowledge provenance no longer pins the agent's runs.
+    assert_eq!(deleted.status(), StatusCode::NO_CONTENT);
 
     for item_id in knowledge_ids {
         let knowledge = app
@@ -484,17 +485,30 @@ async fn deleting_agent_with_run_sourced_knowledge_preserves_comment_and_review_
             .await
             .unwrap();
         assert_eq!(knowledge.status(), StatusCode::OK);
+        let knowledge = common::json_body(knowledge).await;
+        assert_eq!(knowledge["sourceId"], comment_id);
+        assert_eq!(knowledge["sourceRunId"], run_id.to_string());
     }
+    let pool = state.db.as_ref().unwrap();
     let run_count: i64 = sqlx::query_scalar("SELECT count(*) FROM agent_runs WHERE id = $1")
         .bind(run_id)
-        .fetch_one(state.db.as_ref().unwrap())
+        .fetch_one(pool)
         .await
         .unwrap();
-    assert_eq!(run_count, 1);
+    assert_eq!(run_count, 0);
+    let (ticket, agent): (Option<Uuid>, Option<Uuid>) = sqlx::query_as(
+        "SELECT ticket_id, agent_id FROM knowledge_provenance WHERE run_id = $1",
+    )
+    .bind(run_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(ticket, Some(Uuid::parse_str(&ticket_id).unwrap()));
+    assert_eq!(agent, Some(Uuid::parse_str(&agent_id).unwrap()));
 }
 
 #[tokio::test]
-async fn deleting_agent_preserves_run_knowledge_usage_audit() {
+async fn deleting_a_run_keeps_slim_knowledge_usage_rows() {
     let _guard = common::DB_TEST_LOCK.lock().await;
     let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
     let board_id = common::create_test_board(&app, &cookie, &csrf).await;
@@ -548,9 +562,8 @@ async fn deleting_agent_preserves_run_knowledge_usage_audit() {
     sqlx::query(
         r#"
         INSERT INTO knowledge_usage_logs (
-            id, run_id, item_id, revision_id, rank, score,
-            token_count, rendered_content
-        ) VALUES ($1, $2, $3, $4, 1, 0.9, 12, 'immutable usage snapshot')
+            id, run_id, item_id, revision_id, rank, score, token_count
+        ) VALUES ($1, $2, $3, $4, 1, 0.9, 12)
         "#,
     )
     .bind(Uuid::new_v4())
@@ -561,19 +574,50 @@ async fn deleting_agent_preserves_run_knowledge_usage_audit() {
     .await
     .unwrap();
 
-    let direct_delete_error = sqlx::query("DELETE FROM agent_runs WHERE id = $1")
+    let has_text_column: bool = sqlx::query_scalar(
+        r#"
+        SELECT EXISTS(
+            SELECT 1 FROM information_schema.columns
+            WHERE table_name = 'knowledge_usage_logs' AND column_name = 'rendered_content'
+        )
+        "#,
+    )
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert!(!has_text_column, "usage logs must not store rendered text");
+
+    sqlx::query("DELETE FROM agent_runs WHERE id = $1")
         .bind(run_id)
         .execute(pool)
         .await
-        .expect_err("the database must preserve runs referenced by knowledge usage logs");
-    let database_error = direct_delete_error
-        .as_database_error()
-        .expect("expected a database constraint error");
-    assert_eq!(database_error.code().as_deref(), Some("23503"));
-    assert_eq!(
-        database_error.constraint(),
-        Some("knowledge_usage_logs_run_id_fkey")
-    );
+        .expect("a run that used knowledge can be deleted");
+
+    let (usage_run, usage_rank): (Option<Uuid>, i32) = sqlx::query_as(
+        "SELECT run_id, rank FROM knowledge_usage_logs WHERE revision_id = $1",
+    )
+    .bind(revision_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(usage_run, None);
+    assert_eq!(usage_rank, 1);
+
+    let listed = app
+        .clone()
+        .oneshot(common::json_request(
+            "GET",
+            &format!("/api/knowledge/{item_id}"),
+            "",
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(listed.status(), StatusCode::OK);
+    let listed = common::json_body(listed).await;
+    assert_eq!(listed["usageCount"], 1);
+    assert!(listed["lastUsedAt"].is_string(), "{listed}");
 
     let deleted = app
         .clone()
@@ -586,19 +630,5 @@ async fn deleting_agent_preserves_run_knowledge_usage_audit() {
         ))
         .await
         .unwrap();
-    assert_eq!(deleted.status(), StatusCode::CONFLICT);
-
-    let run_count: i64 = sqlx::query_scalar("SELECT count(*) FROM agent_runs WHERE id = $1")
-        .bind(run_id)
-        .fetch_one(pool)
-        .await
-        .unwrap();
-    let usage_count: i64 =
-        sqlx::query_scalar("SELECT count(*) FROM knowledge_usage_logs WHERE run_id = $1")
-            .bind(run_id)
-            .fetch_one(pool)
-            .await
-            .unwrap();
-    assert_eq!(run_count, 1);
-    assert_eq!(usage_count, 1);
+    assert_eq!(deleted.status(), StatusCode::NO_CONTENT);
 }

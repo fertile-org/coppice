@@ -2116,6 +2116,14 @@ async fn submitted_result_wins_over_final_json() {
         tool_call_rows(&pool, run_id).await,
         vec![("result_submit".into(), "core".into(), "ok".into())]
     );
+    // The orchestrator has read it, so a finished run keeps no payload.
+    let status: String = sqlx::query_scalar("SELECT status FROM agent_runs WHERE id = $1")
+        .bind(run_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(status, "succeeded");
+    assert!(submitted_result(&pool, run_id).await.is_none());
     std::env::remove_var("MOCK_AGENT_RESPONSE");
 }
 
@@ -2388,9 +2396,14 @@ async fn mock_run_loads_plugin_skill_over_mcp() {
         ]
     );
     assert_eq!(token_plugin_ids(&pool, run_id).await, vec![plugin_id]);
-    assert_eq!(
-        submitted_result(&pool, run_id).await.unwrap()["summary"],
-        "via tool"
+    // The finished run no longer holds the payload; its summary was posted.
+    assert!(submitted_result(&pool, run_id).await.is_none());
+    assert!(
+        agent_comment_bodies(&pool, run_id)
+            .await
+            .iter()
+            .any(|body| body.contains("via tool")),
+        "submitted summary was not posted"
     );
 }
 
@@ -2411,9 +2424,14 @@ async fn plugin_skill_not_assigned_is_not_found() {
         ]
     );
     assert!(token_plugin_ids(&pool, run_id).await.is_empty());
-    assert_eq!(
-        submitted_result(&pool, run_id).await.unwrap()["summary"],
-        "via tool"
+    // The finished run no longer holds the payload; its summary was posted.
+    assert!(submitted_result(&pool, run_id).await.is_none());
+    assert!(
+        agent_comment_bodies(&pool, run_id)
+            .await
+            .iter()
+            .any(|body| body.contains("via tool")),
+        "submitted summary was not posted"
     );
 }
 
@@ -2622,9 +2640,14 @@ async fn plugin_mcp_tool_listed_and_called() {
             ("result_submit".into(), "core".into(), None, "ok".into()),
         ]
     );
-    assert_eq!(
-        submitted_result(&pool, fx.run_id).await.unwrap()["summary"],
-        "via tool"
+    // The finished run no longer holds the payload; its summary was posted.
+    assert!(submitted_result(&pool, fx.run_id).await.is_none());
+    assert!(
+        agent_comment_bodies(&pool, fx.run_id)
+            .await
+            .iter()
+            .any(|body| body.contains("via tool")),
+        "submitted summary was not posted"
     );
 
     let token = common::mint_test_token_with_plugins(
