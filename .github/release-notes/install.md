@@ -23,7 +23,7 @@ Coppice bundles its own database and server, so you don't need Docker or Postgre
 sudo apt install ./Coppice-<version>-linux-<arch>.deb
 ```
 
-To update, quit Coppice and run the same command with the newer `.deb`. Your boards and settings stay. Ubuntu's App Center may keep showing the old version as installed, so use the terminal. To remove Coppice, run `sudo apt remove coppice-desktop`.
+Installing the `.deb` adds Coppice's package source, so new versions arrive with your other updates, or run `sudo apt update && sudo apt upgrade`. Your boards and settings stay. To remove Coppice, run `sudo apt remove coppice-desktop`.
 
 Then start **Coppice** from your applications menu, or run `coppice`.
 
