@@ -11,15 +11,15 @@ const memberSchema = z.object({
   role: z.string(),
 });
 
+const connectorSchema = z.object({
+  id: z.string(),
+  displayName: z.string(),
+});
+
 export const initPreviewSchema = z.object({
   presetId: z.literal('starter'),
   status: z.enum(['ready', 'checking', 'none']),
-  connector: z
-    .object({
-      id: z.string(),
-      displayName: z.string(),
-    })
-    .nullable(),
+  connectors: z.array(connectorSchema),
   members: z.array(memberSchema),
 });
 
@@ -44,6 +44,7 @@ export type InitConfirmResult = z.infer<typeof confirmResultSchema>;
 
 export interface InitConfirmInput {
   boardName: string;
+  connectorId: string;
   repository: {
     name: string;
     localPath: string;
@@ -66,6 +67,7 @@ async function confirmInit(input: InitConfirmInput): Promise<InitConfirmResult> 
     body: JSON.stringify({
       presetId: 'starter',
       boardName: input.boardName,
+      connectorId: input.connectorId,
       repository: input.repository,
     }),
   });

@@ -13,7 +13,7 @@ import { setInitWizardFlag } from './storage';
 const previewReady = {
   presetId: 'starter',
   status: 'ready',
-  connector: { id: 'claude-code', displayName: 'Claude Code' },
+  connectors: [{ id: 'claude-code', displayName: 'Claude Code' }],
   members: [
     { presetKey: 'pm', name: 'PM', role: 'PM' },
     { presetKey: 'tech_lead', name: 'Technical Lead', role: 'Technical Lead' },
@@ -92,6 +92,11 @@ describe('InitWizard', () => {
   it('skips without creating anything', async () => {
     const { onSkip } = renderWizard();
     expect(await screen.findByRole('heading', { name: INIT_COPY.title })).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        'Pick a repository, name a board, and add a starter team. Nothing is created until you click Create.',
+      ),
+    ).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: INIT_COPY.skip }));
     expect(onSkip).toHaveBeenCalledOnce();
     expect(fetchMock.mock.calls.some((call) => call[1]?.method === 'POST' && call[0] === '/api/init')).toBe(
@@ -113,7 +118,8 @@ describe('InitWizard', () => {
 
     fireEvent.click(screen.getByRole('button', { name: INIT_COPY.next }));
     expect(await screen.findByText('PM, Technical Lead, and Backend Engineer.')).toBeInTheDocument();
-    expect(screen.getByText("They use Claude Code's default model.")).toBeInTheDocument();
+    expect(screen.getByLabelText('Agent CLI')).toHaveValue('claude-code');
+    expect(screen.getByText('They run on Claude Code with its default model.')).toBeInTheDocument();
     expect(screen.getByText(INIT_COPY.teamIdle)).toBeInTheDocument();
     expect(postCount()).toBe(0);
     expect(document.body.textContent).not.toMatch(/mock|fake/i);
@@ -125,6 +131,7 @@ describe('InitWizard', () => {
     expect(body).toEqual({
       presetId: 'starter',
       boardName: 'demo',
+      connectorId: 'claude-code',
       repository: {
         name: 'demo',
         localPath: '/tmp/demo',
@@ -146,7 +153,7 @@ describe('InitWizard', () => {
         return jsonResponse({ code: 'none_ready' }, 409);
       }
       if (path === '/api/init') {
-        return jsonResponse({ ...previewReady, status: 'none', connector: null });
+        return jsonResponse({ ...previewReady, status: 'none', connectors: [] });
       }
       if (path === '/api/connectors') {
         return jsonResponse({
@@ -169,8 +176,13 @@ describe('InitWizard', () => {
     await waitFor(() => expect(next).toBeEnabled());
     fireEvent.click(next);
     fireEvent.click(screen.getByRole('button', { name: INIT_COPY.next }));
-    expect(await screen.findByText(INIT_COPY.noReady)).toBeInTheDocument();
-    expect(screen.getByText(INIT_COPY.createWaits)).toBeInTheDocument();
+    expect(
+      await screen.findByText(
+        'No agent CLI is ready yet. Install one and sign in, then check it in Tools → Connectors.',
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByText('Create stays off until a CLI shows Ready.')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Agent CLI')).not.toBeInTheDocument();
     expect(
       await screen.findByText(
         "Coppice can't check this sign-in without using your plan. A run will show an error if you're signed out.",
@@ -200,7 +212,51 @@ describe('InitWizard', () => {
     fireEvent.click(await screen.findByRole('button', { name: INIT_COPY.browse }));
     expect(await screen.findByText(INIT_COPY.notGitRepo)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: INIT_COPY.next })).toBeDisabled();
+    expect(screen.queryByText("Choose a folder that's a git repository.")).not.toBeInTheDocument();
     expect(postCount()).toBe(0);
+  });
+
+  it('sends the Ready CLI picked in the dropdown', async () => {
+    fetchMock.mockImplementation((path: string, init?: RequestInit) => {
+      if (path === '/api/repos/inspect-path') return jsonResponse(inspectedReady);
+      if (path === '/api/init' && init?.method === 'POST') {
+        return jsonResponse({
+          boardId: '00000000-0000-4000-8000-0000000000b1',
+          repositoryId: '00000000-0000-4000-8000-0000000000b2',
+          connectorId: 'claude-code',
+          connectorDisplayName: 'Claude Code',
+          connectorTurnedOn: true,
+          agents: [],
+        });
+      }
+      if (path === '/api/init') {
+        return jsonResponse({
+          ...previewReady,
+          connectors: [
+            { id: 'cursor', displayName: 'Cursor' },
+            { id: 'claude-code', displayName: 'Claude Code' },
+          ],
+        });
+      }
+      if (path === '/api/connectors') return jsonResponse({ items: [] });
+      return jsonResponse([]);
+    });
+    const { onCreated } = renderWizard();
+    fireEvent.click(await screen.findByRole('button', { name: INIT_COPY.browse }));
+    const next = screen.getByRole('button', { name: INIT_COPY.next });
+    await waitFor(() => expect(next).toBeEnabled());
+    fireEvent.click(next);
+    fireEvent.click(screen.getByRole('button', { name: INIT_COPY.next }));
+    const cli = await screen.findByLabelText('Agent CLI');
+    expect(cli).toHaveValue('cursor');
+    expect(screen.getByText('They run on Cursor with its default model.')).toBeInTheDocument();
+    fireEvent.change(cli, { target: { value: 'claude-code' } });
+    expect(screen.getByText('They run on Claude Code with its default model.')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: INIT_COPY.create }));
+    await waitFor(() => expect(onCreated).toHaveBeenCalledOnce());
+    const body = JSON.parse(String(postCall()?.[1]?.body));
+    expect(body.connectorId).toBe('claude-code');
+    expect(screen.queryByText('That folder is already registered.')).not.toBeInTheDocument();
   });
 });
 

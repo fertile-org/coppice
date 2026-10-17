@@ -148,7 +148,7 @@ describe('ToolsPage', () => {
             JSON.stringify({
               presetId: 'starter',
               status: 'ready',
-              connector: { id: 'claude-code', displayName: 'Claude Code' },
+              connectors: [{ id: 'claude-code', displayName: 'Claude Code' }],
               members: [
                 { presetKey: 'pm', name: 'PM', role: 'PM' },
                 { presetKey: 'tech_lead', name: 'Technical Lead', role: 'Technical Lead' },

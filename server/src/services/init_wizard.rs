@@ -14,7 +14,7 @@ use uuid::Uuid;
 use crate::domain::repo::verification_status_to_str;
 use crate::domain::repo::VerificationStatus;
 use crate::services::board_service::slugify;
-use crate::services::repo_verifier::verify_local_path;
+use crate::services::repo_verifier::{verify_local_path, VerifyResult};
 use time::OffsetDateTime;
 
 /// Preset id the wizard sends back on confirm. One team, no picker.
@@ -29,37 +29,41 @@ pub struct DetectedConnector {
     pub display_name: &'static str,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Detection {
-    /// A higher-priority connector has not been checked yet.
+    /// A connector's free check is not in the cache yet.
     Checking,
-    /// Every checked connector is present in the cache, and none is Ready.
+    /// Every connector has been checked, and none is Ready.
     NoneReady,
-    Ready(DetectedConnector),
+    /// Ready connectors, descriptor order. The first is the default.
+    Ready(Vec<DetectedConnector>),
 }
 
-/// First Ready connector in descriptor order.
+/// Ready connectors in descriptor order, after every free check is cached.
 ///
 /// `readiness` returns the cached free check: `None` means that check has not
-/// finished. A missing higher-priority result stops the walk so a later Ready
-/// CLI is not chosen while an earlier one is still unknown. `mock` is skipped.
+/// finished. Any missing result stays on Checking so the wizard does not offer
+/// a partial list. `mock` is skipped. `Found` is not Ready.
 pub fn detect_connector(readiness: impl Fn(&str) -> Option<Readiness>) -> Detection {
+    let mut ready = Vec::new();
     for descriptor in coppice_connectors::all() {
         if descriptor.id == MOCK {
             continue;
         }
         match readiness(descriptor.id) {
             None => return Detection::Checking,
-            Some(Readiness::Ready) => {
-                return Detection::Ready(DetectedConnector {
-                    id: descriptor.id,
-                    display_name: descriptor.display_name,
-                });
-            }
+            Some(Readiness::Ready) => ready.push(DetectedConnector {
+                id: descriptor.id,
+                display_name: descriptor.display_name,
+            }),
             Some(Readiness::NotOnPath | Readiness::FoundNotSignedIn | Readiness::Found) => {}
         }
     }
-    Detection::NoneReady
+    if ready.is_empty() {
+        Detection::NoneReady
+    } else {
+        Detection::Ready(ready)
+    }
 }
 
 #[derive(Debug)]
@@ -123,6 +127,17 @@ struct LoadedMember {
     system_prompt: String,
 }
 
+struct NewWorkspace<'a> {
+    board_name: &'a str,
+    repo_name: &'a str,
+    local_path: &'a str,
+    remote_url: Option<&'a str>,
+    default_branch: &'a str,
+    verified: &'a VerifyResult,
+    members: &'a [LoadedMember],
+    connector_id: &'a str,
+}
+
 pub struct InitWizardService<'a> {
     pool: &'a PgPool,
     templates: &'a HashMap<String, String>,
@@ -145,8 +160,10 @@ impl<'a> InitWizardService<'a> {
             .collect())
     }
 
-    /// Insert the repository, board, and starter agents. Caller has already
-    /// chosen a Ready connector. No run is queued.
+    /// Insert the board and starter agents. A new folder is registered in the
+    /// same transaction. A folder that is already registered is reused, and
+    /// that row is left unchanged. Caller has already chosen a Ready
+    /// connector. No run is queued.
     pub async fn create(
         &self,
         input: InitInput,
@@ -172,33 +189,67 @@ impl<'a> InitWizardService<'a> {
         }
 
         let members = self.load_members().await?;
+        let workspace = NewWorkspace {
+            board_name: &board_name,
+            repo_name: &repo_name,
+            local_path: &local_path,
+            remote_url: remote_url.as_deref(),
+            default_branch: &default_branch,
+            verified: &verified,
+            members: &members,
+            connector_id,
+        };
+        match self.insert_board_and_team(&workspace).await {
+            // A concurrent confirm registered the folder first. Retry once
+            // and reuse the row that won.
+            Err(InitError::DuplicatePath) => self.insert_board_and_team(&workspace).await,
+            other => other,
+        }
+    }
+
+    async fn insert_board_and_team(
+        &self,
+        workspace: &NewWorkspace<'_>,
+    ) -> Result<CreatedInit, InitError> {
         let mut tx = self.pool.begin().await?;
 
-        let repository_id = Uuid::new_v4();
-        let now = OffsetDateTime::now_utc();
-        sqlx::query(
-            r#"
-            INSERT INTO repos (
-                id, name, local_path, remote_url, default_branch,
-                verification_status, verification_error, last_verified_at
-            )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-            "#,
-        )
-        .bind(repository_id)
-        .bind(&repo_name)
-        .bind(&local_path)
-        .bind(&remote_url)
-        .bind(&default_branch)
-        .bind(verification_status_to_str(verified.status))
-        .bind(&verified.error)
-        .bind(now)
-        .execute(&mut *tx)
-        .await
-        .map_err(map_db)?;
+        let repository_id =
+            match sqlx::query_scalar::<_, Uuid>("SELECT id FROM repos WHERE local_path = $1")
+                .bind(workspace.local_path)
+                .fetch_optional(&mut *tx)
+                .await
+                .map_err(map_db)?
+            {
+                Some(id) => id,
+                None => {
+                    let repository_id = Uuid::new_v4();
+                    let now = OffsetDateTime::now_utc();
+                    sqlx::query(
+                        r#"
+                    INSERT INTO repos (
+                        id, name, local_path, remote_url, default_branch,
+                        verification_status, verification_error, last_verified_at
+                    )
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                    "#,
+                    )
+                    .bind(repository_id)
+                    .bind(workspace.repo_name)
+                    .bind(workspace.local_path)
+                    .bind(workspace.remote_url)
+                    .bind(workspace.default_branch)
+                    .bind(verification_status_to_str(workspace.verified.status))
+                    .bind(&workspace.verified.error)
+                    .bind(now)
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(map_db)?;
+                    repository_id
+                }
+            };
 
         let board_id = Uuid::new_v4();
-        let slug = slugify(&board_name);
+        let slug = slugify(workspace.board_name);
         sqlx::query(
             r#"
             INSERT INTO boards (id, name, slug)
@@ -206,14 +257,14 @@ impl<'a> InitWizardService<'a> {
             "#,
         )
         .bind(board_id)
-        .bind(&board_name)
+        .bind(workspace.board_name)
         .bind(&slug)
         .execute(&mut *tx)
         .await
         .map_err(map_db)?;
 
-        let mut agents = Vec::with_capacity(members.len());
-        for member in &members {
+        let mut agents = Vec::with_capacity(workspace.members.len());
+        for member in workspace.members {
             let agent_id = Uuid::new_v4();
             sqlx::query(
                 r#"
@@ -229,7 +280,7 @@ impl<'a> InitWizardService<'a> {
             .bind(&member.role)
             .bind(&member.responsibilities)
             .bind(&member.system_prompt)
-            .bind(connector_id)
+            .bind(workspace.connector_id)
             .bind(None::<String>)
             .bind(None::<String>)
             .bind(true)
@@ -338,54 +389,77 @@ mod tests {
         }
     }
 
+    fn checked<'a>(pairs: &'a [(&'a str, Readiness)]) -> Vec<(&'a str, Readiness)> {
+        let mut all = pairs.to_vec();
+        for id in [CURSOR, CLAUDE_CODE, CODEX, KILO_CODE, OPENCODE] {
+            if !all.iter().any(|(key, _)| *key == id) {
+                all.push((id, Readiness::NotOnPath));
+            }
+        }
+        all
+    }
+
     #[test]
-    fn pending_higher_priority_connector_is_still_checking() {
+    fn a_missing_check_stays_on_checking() {
         let detection = detect_connector(readiness_of(&[(CLAUDE_CODE, Readiness::Ready)]));
         assert_eq!(detection, Detection::Checking);
     }
 
     #[test]
-    fn first_ready_connector_wins_and_mock_is_skipped() {
-        let detection = detect_connector(readiness_of(&[
+    fn ready_connectors_follow_descriptor_order_and_skip_mock() {
+        let pairs = checked(&[
             (MOCK, Readiness::Ready),
             (CURSOR, Readiness::NotOnPath),
             (CLAUDE_CODE, Readiness::Ready),
             (CODEX, Readiness::Ready),
             (KILO_CODE, Readiness::Found),
-        ]));
+        ]);
+        let detection = detect_connector(readiness_of(&pairs));
         assert_eq!(
             detection,
-            Detection::Ready(DetectedConnector {
-                id: CLAUDE_CODE,
-                display_name: "Claude Code",
-            })
+            Detection::Ready(vec![
+                DetectedConnector {
+                    id: CLAUDE_CODE,
+                    display_name: "Claude Code",
+                },
+                DetectedConnector {
+                    id: CODEX,
+                    display_name: "Codex",
+                },
+            ])
         );
     }
 
     #[test]
     fn kilo_found_is_not_a_ready_connector() {
-        let detection = detect_connector(readiness_of(&[
+        let detection = detect_connector(readiness_of(&checked(&[
             (CURSOR, Readiness::NotOnPath),
             (CLAUDE_CODE, Readiness::FoundNotSignedIn),
             (CODEX, Readiness::NotOnPath),
             (KILO_CODE, Readiness::Found),
             (OPENCODE, Readiness::NotOnPath),
-        ]));
+        ])));
         assert_eq!(detection, Detection::NoneReady);
     }
 
     #[test]
-    fn cursor_ready_is_chosen_before_claude() {
-        let detection = detect_connector(readiness_of(&[
+    fn cursor_is_listed_before_claude_when_both_are_ready() {
+        let detection = detect_connector(readiness_of(&checked(&[
             (CURSOR, Readiness::Ready),
             (CLAUDE_CODE, Readiness::Ready),
-        ]));
+        ])));
         assert_eq!(
             detection,
-            Detection::Ready(DetectedConnector {
-                id: CURSOR,
-                display_name: "Cursor",
-            })
+            Detection::Ready(vec![
+                DetectedConnector {
+                    id: CURSOR,
+                    display_name: "Cursor",
+                },
+                DetectedConnector {
+                    id: CLAUDE_CODE,
+                    display_name: "Claude Code",
+                },
+            ])
         );
     }
 }

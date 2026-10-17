@@ -43,6 +43,7 @@ export function InitWizard({
   const [defaultBranch, setDefaultBranch] = useState('main');
   const [verification, setVerification] = useState<string | null>(null);
   const [boardName, setBoardName] = useState('');
+  const [connectorId, setConnectorId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const inspectPath = useInspectRepoPath();
   const confirm = useConfirmInit();
@@ -59,6 +60,7 @@ export function InitWizard({
     setDefaultBranch('main');
     setVerification(null);
     setBoardName('');
+    setConnectorId(null);
     setError(null);
   }, [open]);
 
@@ -118,11 +120,12 @@ export function InitWizard({
   }
 
   async function handleCreate() {
-    if (preview.data?.status !== 'ready' || !preview.data.connector) return;
+    if (!chosen) return;
     setError(null);
     try {
       const result = await confirm.mutateAsync({
         boardName: boardName.trim(),
+        connectorId: chosen.id,
         repository: {
           name: name.trim(),
           localPath: localPath.trim(),
@@ -138,8 +141,7 @@ export function InitWizard({
       });
     } catch (err) {
       const code = initErrorCode(err);
-      if (code === 'duplicate_path') setError(INIT_COPY.duplicatePath);
-      else if (code === 'duplicate_board') setError(INIT_COPY.duplicateBoard);
+      if (code === 'duplicate_board') setError(INIT_COPY.duplicateBoard);
       else if (code === 'not_git') setError(INIT_COPY.notGit);
       else if (code === 'checking') setError(INIT_COPY.checking);
       else if (code === 'none_ready') setError(INIT_COPY.noReady);
@@ -157,6 +159,9 @@ export function InitWizard({
   const stepName = step === 0 ? INIT_COPY.repository : step === 1 ? INIT_COPY.board : INIT_COPY.team;
   const pathStatus = verificationLabel(verification);
   const members = preview.data?.members.map((member) => member.name) ?? [];
+  const readyConnectors = preview.data?.status === 'ready' ? preview.data.connectors : [];
+  const chosen =
+    readyConnectors.find((connector) => connector.id === connectorId) ?? readyConnectors[0] ?? null;
   const kiloUnchecked =
     preview.data?.status === 'none' &&
     connectors.data?.some(
@@ -168,7 +173,7 @@ export function InitWizard({
     Boolean(defaultBranch.trim()) &&
     verification === 'ready' &&
     !inspectPath.isPending;
-  const createReady = preview.data?.status === 'ready' && Boolean(preview.data.connector);
+  const createReady = preview.data?.status === 'ready' && Boolean(chosen);
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
@@ -272,10 +277,28 @@ export function InitWizard({
               {preview.data && members.length > 0 && (
                 <p className="font-body text-sm text-text-secondary">{joinNames(members)}.</p>
               )}
-              {preview.data?.status === 'ready' && preview.data.connector && (
+              {chosen && (
                 <>
+                  <label
+                    htmlFor="init-agent-cli"
+                    className="block font-body text-sm font-medium text-bark-800"
+                  >
+                    {INIT_COPY.agentCli}
+                  </label>
+                  <select
+                    id="init-agent-cli"
+                    value={chosen.id}
+                    onChange={(event) => setConnectorId(event.target.value)}
+                    className="field-control w-full px-3 py-2 font-body text-sm"
+                  >
+                    {readyConnectors.map((connector) => (
+                      <option key={connector.id} value={connector.id}>
+                        {connector.displayName}
+                      </option>
+                    ))}
+                  </select>
                   <p className="font-body text-sm text-text-secondary">
-                    {teamConnectorLine(preview.data.connector.displayName)}
+                    {teamConnectorLine(chosen.displayName)}
                   </p>
                   <p className="font-body text-sm text-text-secondary">{INIT_COPY.teamIdle}</p>
                 </>
@@ -288,9 +311,6 @@ export function InitWizard({
               )}
               {kiloUnchecked && (
                 <p className="font-body text-sm text-text-secondary">{SIGN_IN_UNCHECKED_HINT}</p>
-              )}
-              {preview.data && preview.data.status !== 'ready' && (
-                <p className="font-body text-sm text-text-secondary">{INIT_COPY.createWaits}</p>
               )}
             </div>
           )}

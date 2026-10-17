@@ -28,11 +28,22 @@ fn git_repo() -> tempfile::TempDir {
 }
 
 fn confirm_body(path: &std::path::Path, board_name: &str, preset_id: &str) -> String {
+    confirm_with(path, board_name, preset_id, "claude-code", "Demo")
+}
+
+fn confirm_with(
+    path: &std::path::Path,
+    board_name: &str,
+    preset_id: &str,
+    connector_id: &str,
+    repo_name: &str,
+) -> String {
     serde_json::json!({
         "presetId": preset_id,
         "boardName": board_name,
+        "connectorId": connector_id,
         "repository": {
-            "name": "Demo",
+            "name": repo_name,
             "localPath": path,
             "remoteUrl": "",
             "defaultBranch": "main"
@@ -64,8 +75,17 @@ fn store(state: &AppState, id: &str, readiness: Readiness) {
 }
 
 fn mark_claude_ready(state: &AppState) {
-    store(state, CURSOR, Readiness::NotOnPath);
-    store(state, CLAUDE_CODE, Readiness::Ready);
+    for descriptor in all() {
+        if descriptor.id == MOCK {
+            continue;
+        }
+        let readiness = if descriptor.id == CLAUDE_CODE {
+            Readiness::Ready
+        } else {
+            Readiness::NotOnPath
+        };
+        store(state, descriptor.id, readiness);
+    }
 }
 
 #[tokio::test]
@@ -121,7 +141,7 @@ async fn checking_and_not_ready_create_nothing_and_do_not_probe() {
     assert_eq!(preview.status(), axum::http::StatusCode::OK);
     let preview_json = common::json_body(preview).await;
     assert_eq!(preview_json["status"], "checking");
-    assert!(preview_json["connector"].is_null());
+    assert!(preview_json["connectors"].as_array().unwrap().is_empty());
 
     let confirm = app
         .clone()
@@ -194,8 +214,9 @@ async fn confirm_creates_repo_board_and_starter_team_without_a_run() {
     let preview_json = common::json_body(preview).await;
     assert_eq!(preview_json["presetId"], "starter");
     assert_eq!(preview_json["status"], "ready");
-    assert_eq!(preview_json["connector"]["id"], "claude-code");
-    assert_eq!(preview_json["connector"]["displayName"], "Claude Code");
+    assert_eq!(preview_json["connectors"][0]["id"], "claude-code");
+    assert_eq!(preview_json["connectors"][0]["displayName"], "Claude Code");
+    assert_eq!(preview_json["connectors"].as_array().unwrap().len(), 1);
     let members = preview_json["members"].as_array().expect("members");
     assert_eq!(
         members
@@ -302,15 +323,39 @@ async fn confirm_creates_repo_board_and_starter_team_without_a_run() {
         .oneshot(common::json_request(
             "POST",
             "/api/init",
-            &confirm_body(repo.path(), "Other", "starter"),
+            &confirm_with(repo.path(), "Other", "starter", "claude-code", "Renamed"),
             &cookie,
             &csrf,
         ))
         .await
         .unwrap();
-    assert_eq!(again.status(), axum::http::StatusCode::CONFLICT);
-    assert_eq!(common::json_body(again).await["code"], "duplicate_path");
-    assert_eq!(counts(pool).await, (1, 1, 3, 0, 0));
+    assert_eq!(again.status(), axum::http::StatusCode::CREATED);
+    let again_json = common::json_body(again).await;
+    assert_eq!(again_json["repositoryId"], created_json["repositoryId"]);
+    assert_eq!(counts(pool).await, (1, 2, 6, 0, 0));
+    let stored_name: String = sqlx::query_scalar("SELECT name FROM repos")
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    assert_eq!(stored_name, "Demo");
+
+    let same_path_board = app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            "/api/init",
+            &confirm_body(repo.path(), "Demo", "starter"),
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(same_path_board.status(), axum::http::StatusCode::CONFLICT);
+    assert_eq!(
+        common::json_body(same_path_board).await["code"],
+        "duplicate_board"
+    );
+    assert_eq!(counts(pool).await, (1, 2, 6, 0, 0));
 
     let other = git_repo();
     let duplicate_board = app
@@ -329,5 +374,83 @@ async fn confirm_creates_repo_board_and_starter_team_without_a_run() {
         common::json_body(duplicate_board).await["code"],
         "duplicate_board"
     );
+    assert_eq!(counts(pool).await, (1, 2, 6, 0, 0));
+}
+
+#[tokio::test]
+async fn picking_a_later_ready_cli_creates_the_team_on_it() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state_config(|config| {
+        config.auth.desktop_mode = true;
+    })
+    .await;
+    let pool = state.db.as_ref().expect("pool");
+    for descriptor in all() {
+        if descriptor.id == MOCK {
+            continue;
+        }
+        let readiness = if descriptor.id == CURSOR || descriptor.id == CLAUDE_CODE {
+            Readiness::Ready
+        } else {
+            Readiness::NotOnPath
+        };
+        store(&state, descriptor.id, readiness);
+    }
+    let repo = git_repo();
+
+    let preview = app
+        .clone()
+        .oneshot(common::json_request("GET", "/api/init", "", &cookie, &csrf))
+        .await
+        .unwrap();
+    let preview_json = common::json_body(preview).await;
+    assert_eq!(
+        preview_json["connectors"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|connector| connector["id"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        vec!["cursor", "claude-code"]
+    );
+
+    let rejected = app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            "/api/init",
+            &confirm_with(repo.path(), "Board", "starter", "kilo-code", "Demo"),
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(rejected.status(), axum::http::StatusCode::BAD_REQUEST);
+    assert_eq!(common::json_body(rejected).await["code"], "validation");
+    assert_eq!(counts(pool).await, (0, 0, 0, 0, 0));
+
+    let created = app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            "/api/init",
+            &confirm_with(repo.path(), "Board", "starter", "claude-code", "Demo"),
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(created.status(), axum::http::StatusCode::CREATED);
+    let created_json = common::json_body(created).await;
+    assert_eq!(created_json["connectorId"], "claude-code");
+    assert_eq!(created_json["connectorDisplayName"], "Claude Code");
+    let connectors: Vec<String> = sqlx::query_scalar("SELECT connector FROM agents")
+        .fetch_all(pool)
+        .await
+        .unwrap();
+    assert_eq!(connectors.len(), 3);
+    assert!(connectors
+        .iter()
+        .all(|connector| connector == "claude-code"));
     assert_eq!(counts(pool).await, (1, 1, 3, 0, 0));
 }

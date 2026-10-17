@@ -24,7 +24,7 @@ pub fn routes() -> Router<Arc<AppState>> {
 struct PreviewResponse {
     preset_id: &'static str,
     status: &'static str,
-    connector: Option<ConnectorResponse>,
+    connectors: Vec<ConnectorResponse>,
     members: Vec<MemberResponse>,
 }
 
@@ -48,6 +48,7 @@ struct MemberResponse {
 struct ConfirmBody {
     preset_id: String,
     board_name: String,
+    connector_id: String,
     repository: RepositoryBody,
 }
 
@@ -129,21 +130,24 @@ async fn preview(
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
     let detection = detect_connector(|id| state.connector_probes.readiness(id));
-    let (status, connector) = match detection {
-        Detection::Checking => ("checking", None),
-        Detection::NoneReady => ("none", None),
-        Detection::Ready(connector) => (
+    let (status, connectors) = match detection {
+        Detection::Checking => ("checking", Vec::new()),
+        Detection::NoneReady => ("none", Vec::new()),
+        Detection::Ready(connectors) => (
             "ready",
-            Some(ConnectorResponse {
-                id: connector.id.to_string(),
-                display_name: connector.display_name.to_string(),
-            }),
+            connectors
+                .into_iter()
+                .map(|connector| ConnectorResponse {
+                    id: connector.id.to_string(),
+                    display_name: connector.display_name.to_string(),
+                })
+                .collect(),
         ),
     };
     Ok(Json(PreviewResponse {
         preset_id: STARTER_PRESET_ID,
         status,
-        connector,
+        connectors,
         members: members
             .into_iter()
             .map(|member| MemberResponse {
@@ -167,7 +171,16 @@ async fn confirm(
     let connector = match detection {
         Detection::Checking => return Ok(map_init_error(InitError::Checking)),
         Detection::NoneReady => return Ok(map_init_error(InitError::NoneReady)),
-        Detection::Ready(connector) => connector,
+        Detection::Ready(connectors) => {
+            let chosen = body.connector_id;
+            match connectors
+                .into_iter()
+                .find(|connector| connector.id == chosen)
+            {
+                Some(connector) => connector,
+                None => return Ok(map_init_error(InitError::Validation("connector_id"))),
+            }
+        }
     };
     let service = InitWizardService::new(pool, &state.agent_templates);
     let created = match service
