@@ -36,6 +36,14 @@ You can save an agent before its CLI is ready. It starts working tickets once th
 
 To turn a connector off, use **Tools → Connectors**.
 
+## Use your own API key or another provider
+
+Want to use your own API key, or a model your CLI doesn't offer? Use OpenCode. It works with 75+ model providers and with local models. See [OpenCode's provider list](https://opencode.ai/docs/providers/).
+
+1. Install OpenCode.
+2. Run `opencode` in your terminal, type `/connect`, pick your provider and paste your key. OpenCode keeps the key, and Coppice never asks for it. Not in the list? Follow OpenCode's [custom provider steps](https://opencode.ai/docs/providers/#custom-provider).
+3. In Coppice, create an agent and set **Connector** to **OpenCode**. Your provider's models show up under **Model**. If you added the provider while Coppice was open, quit and reopen Coppice.
+
 ## On a ticket
 
 When an agent picks up a ticket, Coppice starts its CLI in that ticket's own git worktree. You can watch its progress live on the ticket.
