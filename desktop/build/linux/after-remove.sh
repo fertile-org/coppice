@@ -17,6 +17,9 @@ else
     rm -f "/usr/bin/$EXECUTABLE"
 fi
 
+rm -f /etc/apt/sources.list.d/coppice.list
+rm -f /usr/share/keyrings/coppice-archive-keyring.gpg
+
 if [ -f "$APPARMOR_TARGET" ]; then
     if [ -d /sys/kernel/security/apparmor ] && hash apparmor_parser 2>/dev/null \
         && ! { [ -x /usr/bin/ischroot ] && /usr/bin/ischroot; }; then

@@ -121,6 +121,20 @@ jobs:
           docker run --rm -v "$PWD":/app -w /app "rust:${TOOLCHAIN}-bookworm" \
             sh -c 'cargo check --locked --workspace --all-targets --target-dir /tmp/check-target'
 
+  # Signs apt metadata with a throwaway key. No repository secrets.
+  apt-repo:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Build apt repository metadata
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends gnupg
+          node --test desktop/test/apt-repo.test.mjs
+
   e2e:
     runs-on: ubuntu-latest
     steps:

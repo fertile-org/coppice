@@ -1,5 +1,7 @@
 const SEMVER_RE = /^v?(\d+)\.(\d+)\.(\d+)(?:-rc\.(\d+))?$/;
 
+const RELEASES_PER_PAGE = 100;
+
 function parse(version) {
   const match = SEMVER_RE.exec(String(version).trim());
   if (!match) return null;
@@ -23,20 +25,46 @@ export function isNewer(latestTag, current) {
   return a.rc > b.rc;
 }
 
+export function versionFromTag(tag) {
+  return String(tag).replace(/^v/, '');
+}
+
+// Newest published release, prereleases included. Drafts are skipped.
+// `releases/latest` hides prereleases, so the list is required.
+export function selectNewerRelease(releases, currentVersion) {
+  if (!Array.isArray(releases)) return null;
+  let best = null;
+  for (const release of releases) {
+    if (!release || release.draft === true) continue;
+    const tag = release.tag_name;
+    const url = release.html_url;
+    if (typeof tag !== 'string' || typeof url !== 'string') continue;
+    if (!isNewer(tag, currentVersion)) continue;
+    if (!best || isNewer(tag, best.tag)) best = { tag, url };
+  }
+  if (!best) return null;
+  return { version: versionFromTag(best.tag), url: best.url };
+}
+
+export function releasesUrl(repo) {
+  return `https://api.github.com/repos/${repo}/releases?per_page=${RELEASES_PER_PAGE}`;
+}
+
 export async function checkForUpdate({ repo, currentVersion, fetchImpl = fetch }) {
   try {
-    const res = await fetchImpl(`https://api.github.com/repos/${repo}/releases/latest`, {
-      headers: { Accept: 'application/vnd.github+json' },
+    const res = await fetchImpl(releasesUrl(repo), {
+      headers: {
+        Accept: 'application/vnd.github+json',
+        'User-Agent': 'coppice',
+      },
       signal: AbortSignal.timeout(10_000),
     });
-    if (!res.ok) return null;
+    if (!res.ok) return { status: 'error' };
     const body = await res.json();
-    const tag = body?.tag_name;
-    const url = body?.html_url;
-    if (typeof tag !== 'string' || typeof url !== 'string') return null;
-    if (!isNewer(tag, currentVersion)) return null;
-    return { version: tag.replace(/^v/, ''), url };
+    const newer = selectNewerRelease(body, currentVersion);
+    if (!newer) return { status: 'up-to-date' };
+    return { status: 'available', version: newer.version, url: newer.url };
   } catch {
-    return null;
+    return { status: 'error' };
   }
 }

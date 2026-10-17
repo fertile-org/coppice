@@ -10,11 +10,17 @@ files:
   - src/**
   - static/**
   - package.json
+  - updater-mode.json
+  - node_modules/**/*
 extraResources:
   - from: resources
     to: .
 mac:
-  target: dmg
+  # zip is the artifact electron-updater installs. dmg stays the download.
+  # In-place install stays off until CSC_LINK is set; see scripts/dist.mjs.
+  target:
+    - dmg
+    - zip
   category: public.app-category.developer-tools
   hardenedRuntime: true
   entitlements: build/entitlements.mac.plist

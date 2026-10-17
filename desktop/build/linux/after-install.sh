@@ -27,6 +27,20 @@ if hash update-desktop-database 2>/dev/null; then
     update-desktop-database /usr/share/applications || true
 fi
 
+# First install registers the apt source, the way VS Code does. Later updates
+# arrive through apt upgrade or Software Updater. The keyring is the committed
+# public file packaged by scripts/dist.mjs, and the source list is written
+# beside it. This script does not embed the repository URL.
+KEY_SRC="$APP_DIR/resources/apt/coppice-archive-keyring.gpg"
+LIST_SRC="$APP_DIR/resources/apt/coppice.list"
+KEY_DST=/usr/share/keyrings/coppice-archive-keyring.gpg
+LIST=/etc/apt/sources.list.d/coppice.list
+if [ -f "$KEY_SRC" ] && [ -f "$LIST_SRC" ]; then
+    install -d -m 0755 /usr/share/keyrings
+    install -m 0644 "$KEY_SRC" "$KEY_DST"
+    install -m 0644 "$LIST_SRC" "$LIST"
+fi
+
 # Ubuntu 24.04+ restricts unprivileged user namespaces; the profile grants them to
 # Coppice. AppArmor 3 (Ubuntu 22.04) cannot parse abi/4.0 and needs no profile.
 APPARMOR_SOURCE="$APP_DIR/resources/apparmor-profile"

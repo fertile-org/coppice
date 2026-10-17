@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { builderArgs } from '../scripts/dist.mjs';
+import { builderArgs, macInPlaceUpdatesEnabled, updaterModeJson } from '../scripts/dist.mjs';
 
 describe('builderArgs', () => {
   it('passes --dir through and builds unsigned without CSC_LINK', () => {
@@ -31,6 +31,36 @@ describe('builderArgs', () => {
       !builderArgs({ CSC_LINK: 'x' }, { dir: false, platform: 'darwin' }).args.includes(
         '-c.mac.notarize=true',
       ),
+    );
+  });
+
+  it('turns on in-place macOS updates only when CSC_LINK is set', () => {
+    assert.equal(macInPlaceUpdatesEnabled({}), false);
+    assert.equal(macInPlaceUpdatesEnabled({ CSC_LINK: '' }), false);
+    assert.equal(macInPlaceUpdatesEnabled({ CSC_LINK: '   ' }), false);
+    assert.equal(macInPlaceUpdatesEnabled({ CSC_LINK: 'cert' }), true);
+    assert.equal(
+      updaterModeJson({ CSC_LINK: 'cert' }),
+      '{"macInPlaceUpdates":true,"updateBase":"https://apt.getcoppice.dev"}\n',
+    );
+    assert.equal(
+      updaterModeJson({}),
+      '{"macInPlaceUpdates":false,"updateBase":"https://apt.getcoppice.dev"}\n',
+    );
+    assert.equal(
+      updaterModeJson({ COPPICE_UPDATE_BASE: 'https://apt.example.com/' }),
+      '{"macInPlaceUpdates":false,"updateBase":"https://apt.example.com"}\n',
+    );
+  });
+
+  it('stops packaging when COPPICE_UPDATE_BASE is not an https origin', () => {
+    assert.throws(
+      () => updaterModeJson({ COPPICE_UPDATE_BASE: 'http://apt.example.com' }),
+      /COPPICE_UPDATE_BASE/,
+    );
+    assert.throws(
+      () => updaterModeJson({ COPPICE_UPDATE_BASE: 'https://apt.example.com/repo' }),
+      /COPPICE_UPDATE_BASE/,
     );
   });
 
