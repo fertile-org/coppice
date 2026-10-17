@@ -3,6 +3,8 @@
 //
 //   node scripts/apt-repo.mjs --deb a.deb --deb b.deb --out site --key key.asc [--passphrase-file pass]
 //   node scripts/apt-repo.mjs export-pubkey --key key.asc --out keyring.gpg [--passphrase-file pass]
+//   node scripts/apt-repo.mjs check-keyring --keyring keyring.gpg --fingerprint <40 hex>
+//   node scripts/apt-repo.mjs check-signing-key --key key.asc --fingerprint <40 hex> [--passphrase-file pass]
 //
 // The private key never goes into the repository. export-pubkey writes the
 // binary public key apt's signed-by option expects.
@@ -163,6 +165,73 @@ function withKeyring(keyArmored, passphrase, fn) {
   }
 }
 
+const FINGERPRINT_HEX = /^[0-9A-F]{40}$/;
+
+export function normalizeFingerprint(value) {
+  return String(value ?? '').replace(/\s+/g, '').toUpperCase();
+}
+
+export function fingerprintsFromColonListing(text) {
+  return String(text)
+    .split('\n')
+    .filter((line) => line.startsWith('fpr:'))
+    .map((line) => line.split(':')[9] ?? '')
+    .filter(Boolean);
+}
+
+function requireFingerprint(value) {
+  const want = normalizeFingerprint(value);
+  if (!want) throw new Error('COPPICE_APT_KEY_FINGERPRINT is empty');
+  if (!FINGERPRINT_HEX.test(want)) {
+    throw new Error('COPPICE_APT_KEY_FINGERPRINT must be the 40-character fingerprint');
+  }
+  return want;
+}
+
+export function publicKeyringFingerprints(keyringPath) {
+  const gpgHome = mkdtempSync(join(tmpdir(), 'coppice-apt-show-'));
+  chmodSync(gpgHome, 0o700);
+  try {
+    const result = spawnSync(
+      'gpg',
+      ['--batch', '--homedir', gpgHome, '--with-colons', '--show-keys', keyringPath],
+      { encoding: 'utf8' },
+    );
+    if (result.status !== 0) {
+      throw new Error((result.stderr || `could not read ${keyringPath}`).trim());
+    }
+    const found = fingerprintsFromColonListing(result.stdout).map(normalizeFingerprint);
+    if (!found.length) throw new Error(`${keyringPath} has no fingerprint`);
+    return found;
+  } finally {
+    rmSync(gpgHome, { recursive: true, force: true });
+  }
+}
+
+// Release packaging calls this. It is not part of buildAptRepo, so a test
+// key can still sign without COPPICE_APT_KEY_FINGERPRINT.
+export function assertKeyringHasFingerprint(keyringPath, expected) {
+  const want = requireFingerprint(expected);
+  const found = publicKeyringFingerprints(keyringPath);
+  if (!found.includes(want)) {
+    throw new Error(
+      `committed keyring does not contain COPPICE_APT_KEY_FINGERPRINT (keyring: ${found.join(', ')})`,
+    );
+  }
+}
+
+export function signingKeyFingerprint(keyArmored, passphrase = '') {
+  return withKeyring(keyArmored, passphrase, ({ fingerprint }) => normalizeFingerprint(fingerprint));
+}
+
+export function assertSigningKeyMatchesFingerprint(keyArmored, passphrase, expected) {
+  const want = requireFingerprint(expected);
+  const got = signingKeyFingerprint(keyArmored, passphrase);
+  if (got !== want) {
+    throw new Error(`signing key fingerprint ${got} does not match COPPICE_APT_KEY_FINGERPRINT`);
+  }
+}
+
 function signRelease({ gpgHome, fingerprint, passphrase, releasePath, distDir }) {
   const passArgs = [];
   if (passphrase) {
@@ -253,6 +322,43 @@ function readPassphrase(file) {
 
 function main() {
   const argv = process.argv.slice(2);
+  if (argv[0] === 'check-keyring') {
+    const { values } = parseArgs({
+      args: argv.slice(1),
+      options: {
+        keyring: { type: 'string' },
+        fingerprint: { type: 'string' },
+      },
+    });
+    if (!values.keyring || values.fingerprint === undefined) {
+      console.error('usage: apt-repo.mjs check-keyring --keyring keyring.gpg --fingerprint <fingerprint>');
+      process.exit(2);
+    }
+    assertKeyringHasFingerprint(values.keyring, values.fingerprint);
+    return;
+  }
+  if (argv[0] === 'check-signing-key') {
+    const { values } = parseArgs({
+      args: argv.slice(1),
+      options: {
+        key: { type: 'string' },
+        fingerprint: { type: 'string' },
+        'passphrase-file': { type: 'string' },
+      },
+    });
+    if (!values.key || values.fingerprint === undefined) {
+      console.error(
+        'usage: apt-repo.mjs check-signing-key --key key.asc --fingerprint <fingerprint> [--passphrase-file pass]',
+      );
+      process.exit(2);
+    }
+    assertSigningKeyMatchesFingerprint(
+      readFileSync(values.key, 'utf8'),
+      readPassphrase(values['passphrase-file']),
+      values.fingerprint,
+    );
+    return;
+  }
   if (argv[0] === 'export-pubkey') {
     const { values } = parseArgs({
       args: argv.slice(1),

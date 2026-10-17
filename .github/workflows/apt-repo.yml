@@ -63,6 +63,7 @@ jobs:
         env:
           COPPICE_APT_SIGNING_KEY: ${{ secrets.COPPICE_APT_SIGNING_KEY }}
           COPPICE_APT_SIGNING_PASSPHRASE: ${{ secrets.COPPICE_APT_SIGNING_PASSPHRASE }}
+          COPPICE_APT_KEY_FINGERPRINT: ${{ vars.COPPICE_APT_KEY_FINGERPRINT }}
           VERSION: ${{ steps.rel.outputs.version }}
         run: |
           set -euo pipefail
@@ -73,6 +74,10 @@ jobs:
           umask 077
           printf '%s\n' "$COPPICE_APT_SIGNING_KEY" > "$RUNNER_TEMP/apt-key.asc"
           printf '%s' "$COPPICE_APT_SIGNING_PASSPHRASE" > "$RUNNER_TEMP/apt-pass"
+          node desktop/scripts/apt-repo.mjs check-signing-key \
+            --key "$RUNNER_TEMP/apt-key.asc" \
+            --passphrase-file "$RUNNER_TEMP/apt-pass" \
+            --fingerprint "$COPPICE_APT_KEY_FINGERPRINT"
           node desktop/scripts/apt-repo.mjs \
             --deb "artifacts/Coppice-${VERSION}-linux-amd64.deb" \
             --deb "artifacts/Coppice-${VERSION}-linux-arm64.deb" \

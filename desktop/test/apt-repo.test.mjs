@@ -16,8 +16,13 @@ import test from 'node:test';
 
 import {
   APT_SOURCE_LINE,
+  assertKeyringHasFingerprint,
+  assertSigningKeyMatchesFingerprint,
   buildAptRepo,
+  fingerprintsFromColonListing,
+  normalizeFingerprint,
   poolFilename,
+  publicKeyringFingerprints,
   renderPackageEntry,
 } from '../scripts/apt-repo.mjs';
 import { APT_KEYRING_FILE, stageAptResources } from '../scripts/dist.mjs';
@@ -164,6 +169,109 @@ test('the installed apt source uses signed-by and the base URL lives in one plac
   const remove = readFileSync(new URL('../build/linux/after-remove.sh', import.meta.url), 'utf8');
   assert.equal(remove.includes(APT_KEYRING_PATH), true);
   assert.match(remove, /sources\.list\.d\/coppice\.list/);
+});
+
+test('colon fingerprint fields are the tenth column', () => {
+  assert.equal(normalizeFingerprint('ae0e c971'), 'AE0EC971');
+  assert.deepEqual(
+    fingerprintsFromColonListing('fpr:::::::::PRIMARY:\nssb:x\nfpr:::::::::SUBKEY:\n'),
+    ['PRIMARY', 'SUBKEY'],
+  );
+});
+
+test('the committed keyring exposes a fingerprint without pinning the test key', () => {
+  const keyring = fileURLToPath(new URL(`../${APT_KEYRING_FILE}`, import.meta.url));
+  const [first] = publicKeyringFingerprints(keyring);
+  assert.match(first, /^[0-9A-F]{40}$/);
+});
+
+test('keyring and signing-key checks follow COPPICE_APT_KEY_FINGERPRINT', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'coppice-apt-fpr-'));
+  const gpgHome = join(dir, 'gnupg');
+  mkdirSync(gpgHome, { mode: 0o700 });
+  const gen = spawnSync('gpg', ['--batch', '--homedir', gpgHome, '--gen-key'], {
+    input: [
+      '%no-protection',
+      'Key-Type: RSA',
+      'Key-Length: 2048',
+      'Name-Real: Coppice Apt Fingerprint',
+      'Name-Email: apt-fpr@example.com',
+      'Expire-Date: 0',
+      '%commit',
+      '',
+    ].join('\n'),
+    encoding: 'utf8',
+  });
+  assert.equal(gen.status, 0, gen.stderr);
+
+  const listed = spawnSync(
+    'gpg',
+    ['--homedir', gpgHome, '--batch', '--with-colons', '--list-secret-keys'],
+    { encoding: 'utf8' },
+  );
+  assert.equal(listed.status, 0, listed.stderr);
+  const fingerprint = fingerprintsFromColonListing(listed.stdout)[0];
+  assert.match(fingerprint, /^[0-9A-F]{40}$/);
+  const spaced = fingerprint.toLowerCase().replace(/(.{4})/g, '$1 ').trim();
+
+  const pub = join(dir, 'keyring.gpg');
+  const exportedPub = spawnSync(
+    'gpg',
+    ['--homedir', gpgHome, '--batch', '--export', '--output', pub],
+    { encoding: 'utf8' },
+  );
+  assert.equal(exportedPub.status, 0, exportedPub.stderr);
+  const secret = spawnSync(
+    'gpg',
+    ['--homedir', gpgHome, '--batch', '--armor', '--export-secret-keys'],
+    { encoding: 'utf8' },
+  );
+  assert.equal(secret.status, 0, secret.stderr);
+  const secretPath = join(dir, 'key.asc');
+  writeFileSync(secretPath, secret.stdout, { mode: 0o600 });
+  const passPath = join(dir, 'pass');
+  writeFileSync(passPath, '', { mode: 0o600 });
+
+  assertKeyringHasFingerprint(pub, spaced);
+  assertSigningKeyMatchesFingerprint(secret.stdout, '', spaced);
+  assert.throws(() => assertKeyringHasFingerprint(pub, ''), /COPPICE_APT_KEY_FINGERPRINT is empty/);
+  assert.throws(() => assertKeyringHasFingerprint(pub, fingerprint.slice(0, 16)), /40-character/);
+  assert.throws(
+    () => assertKeyringHasFingerprint(pub, 'A'.repeat(40)),
+    /does not contain COPPICE_APT_KEY_FINGERPRINT/,
+  );
+  assert.throws(
+    () => assertSigningKeyMatchesFingerprint(secret.stdout, '', 'B'.repeat(40)),
+    /does not match COPPICE_APT_KEY_FINGERPRINT/,
+  );
+  assert.throws(() => assertSigningKeyMatchesFingerprint('not a key', '', fingerprint), /fingerprint|gpg/i);
+
+  const script = fileURLToPath(new URL('../scripts/apt-repo.mjs', import.meta.url));
+  const match = spawnSync(
+    process.execPath,
+    [script, 'check-keyring', '--keyring', pub, '--fingerprint', spaced],
+    { encoding: 'utf8' },
+  );
+  assert.equal(match.status, 0, match.stderr);
+  const mismatch = spawnSync(
+    process.execPath,
+    [
+      script,
+      'check-signing-key',
+      '--key',
+      secretPath,
+      '--passphrase-file',
+      passPath,
+      '--fingerprint',
+      'C'.repeat(40),
+    ],
+    { encoding: 'utf8' },
+  );
+  assert.notEqual(mismatch.status, 0);
+  assert.match(mismatch.stderr, /does not match COPPICE_APT_KEY_FINGERPRINT/);
+
+  chmodSync(gpgHome, 0o700);
+  rmSync(dir, { recursive: true, force: true });
 });
 
 function makeDeb(dir, arch) {

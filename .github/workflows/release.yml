@@ -11,7 +11,11 @@ name: Release
 # releases/latest/download/<file> stable across tags.
 #
 # macOS signing and notarization switch on when these secrets exist on the
-# `release` environment (no code change needed):
+# `release` environment (no code change needed). The install notes' unsigned
+# block is chosen later, in the macOS arm64 build leg, because that job already
+# runs in this environment and can see CSC_LINK. prepare cannot: a secret
+# comparison there is always empty, so the note would always say unsigned.
+# Adding `environment: release` to prepare would be another approval.
 #   CSC_LINK          base64 of the Developer ID Application .p12
 #   CSC_KEY_PASSWORD  password of that .p12
 #   APPLE_API_KEY     contents of the App Store Connect API key (AuthKey_XXXX.p8);
@@ -50,14 +54,6 @@ jobs:
       - name: Validate tag
         id: version
         run: node desktop/scripts/release-version.mjs "$TAG" >> "$GITHUB_OUTPUT"
-      - name: Render install notes
-        env:
-          MAC_UNSIGNED: ${{ secrets.CSC_LINK == '' }}
-        run: >-
-          node desktop/scripts/render-notes.mjs
-          --template .github/release-notes/install.md
-          --out "$RUNNER_TEMP/install.md"
-          --mac-unsigned "$MAC_UNSIGNED"
       - name: Create draft release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -67,7 +63,7 @@ jobs:
             echo "Release $TAG already exists; reusing it"
             exit 0
           fi
-          args=(--draft --verify-tag --generate-notes --notes-file "$RUNNER_TEMP/install.md")
+          args=(--draft --verify-tag --generate-notes)
           if [ "$PRERELEASE" = true ]; then args+=(--prerelease); fi
           gh release create "$TAG" "${args[@]}"
 
@@ -131,6 +127,29 @@ jobs:
           node-version: '22'
           cache: yarn
           cache-dependency-path: desktop/yarn.lock
+      # One matrix leg, already under environment: release, so this sees the
+      # real CSC_LINK and does not add an approval. It runs on every attempt,
+      # including a rerun after the secret is added, and replaces the ## Install
+      # section instead of appending a second copy. prepare leaves the generated
+      # changelog in place and does not read CSC_LINK.
+      - name: Set the macOS install note
+        if: matrix.target == 'aarch64-apple-darwin'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MAC_UNSIGNED: ${{ secrets.CSC_LINK == '' }}
+        run: |
+          set -euo pipefail
+          gh release view "$TAG" --json body --template '{{.body}}' > "$RUNNER_TEMP/release-body.md"
+          node desktop/scripts/render-notes.mjs \
+            --template .github/release-notes/install.md \
+            --mac-unsigned "$MAC_UNSIGNED" \
+            --splice-into "$RUNNER_TEMP/release-body.md" \
+            --out "$RUNNER_TEMP/release-notes.md"
+          if grep -q '{{MAC_UNSIGNED}}' "$RUNNER_TEMP/release-notes.md"; then
+            echo "install notes still contain the unsigned marker" >&2
+            exit 1
+          fi
+          gh release edit "$TAG" --notes-file "$RUNNER_TEMP/release-notes.md"
       - run: corepack enable && corepack prepare yarn@1.22.22 --activate
       - name: Cache Postgres bundle and Electron downloads
         uses: actions/cache@v4
@@ -175,6 +194,14 @@ jobs:
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
           COPPICE_UPDATE_BASE: ${{ vars.COPPICE_UPDATE_BASE }}
         run: cd desktop && yarn dist
+      - name: Check the apt keyring fingerprint
+        if: runner.os == 'Linux'
+        env:
+          COPPICE_APT_KEY_FINGERPRINT: ${{ vars.COPPICE_APT_KEY_FINGERPRINT }}
+        run: |
+          node desktop/scripts/apt-repo.mjs check-keyring \
+            --keyring desktop/build/linux/coppice-archive-keyring.gpg \
+            --fingerprint "$COPPICE_APT_KEY_FINGERPRINT"
       - name: Package (Linux)
         if: runner.os == 'Linux'
         env:

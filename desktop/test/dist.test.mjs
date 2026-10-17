@@ -53,6 +53,17 @@ describe('builderArgs', () => {
     );
   });
 
+  it('stops packaging when COPPICE_UPDATE_BASE is not an https origin', () => {
+    assert.throws(
+      () => updaterModeJson({ COPPICE_UPDATE_BASE: 'http://apt.example.com' }),
+      /COPPICE_UPDATE_BASE/,
+    );
+    assert.throws(
+      () => updaterModeJson({ COPPICE_UPDATE_BASE: 'https://apt.example.com/repo' }),
+      /COPPICE_UPDATE_BASE/,
+    );
+  });
+
   it('never publishes from electron-builder', () => {
     const { args } = builderArgs({}, { dir: false, platform: 'linux' });
     assert.ok(args.includes('--publish=never'));
