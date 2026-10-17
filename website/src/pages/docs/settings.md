@@ -126,6 +126,8 @@ When auto-split is on for that status, Coppice creates the child tickets the run
 | `retrieval.minimum_confidence` | string | `medium` | `low`, `medium` or `high`. |
 | `retrieval.default_page_size` | integer | `25` | Default page size. |
 | `retrieval.max_page_size` | integer | `100` | Largest page size. 100 at most. |
+| `retrieval.max_active_per_board` | integer | `1000` | The most Knowledge items, pending or approved, that one board can hold. Items for agents on that board count too. |
+| `retrieval.max_active_workspace` | integer | `10000` | The most Knowledge items, pending or approved, that apply to the whole workspace. |
 
 Every count and interval above must be greater than 0.
 
