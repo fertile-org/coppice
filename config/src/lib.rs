@@ -307,8 +307,10 @@ pub struct KnowledgeRetrievalConfig {
     pub default_page_size: usize,
     #[serde(default = "default_knowledge_list_max")]
     pub max_page_size: usize,
+    /// The most Knowledge items, pending or approved, that one board can hold. Items for agents on that board count too.
     #[serde(default = "default_knowledge_board_capacity")]
     pub max_active_per_board: i64,
+    /// The most Knowledge items, pending or approved, that apply to the whole workspace.
     #[serde(default = "default_knowledge_workspace_capacity")]
     pub max_active_workspace: i64,
 }
@@ -527,10 +529,10 @@ fn default_knowledge_list_max() -> usize {
     100
 }
 fn default_knowledge_board_capacity() -> i64 {
-    10_000
+    1_000
 }
 fn default_knowledge_workspace_capacity() -> i64 {
-    1_000
+    10_000
 }
 fn default_knowledge_poll_interval_ms() -> u64 {
     500
@@ -1878,6 +1880,8 @@ mod tests {
         assert_eq!(cfg.retrieval.top_k, 8);
         assert!(cfg.retrieval.allowed_types.is_empty());
         assert_eq!(cfg.retrieval.max_page_size, 100);
+        assert_eq!(cfg.retrieval.max_active_per_board, 1_000);
+        assert_eq!(cfg.retrieval.max_active_workspace, 10_000);
         assert_eq!(cfg.context_budget.max_tokens, 24_000);
         assert!(cfg.validate().is_ok());
     }
