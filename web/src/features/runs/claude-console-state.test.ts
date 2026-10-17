@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
+  appendLegacyFrameText,
   applyClaudeConsoleEvent,
   createClaudeConsoleState,
+  MAX_CONSOLE_ENTRIES,
+  MAX_LEGACY_TEXT,
 } from './claude-console-state';
 
 describe('applyClaudeConsoleEvent', () => {
@@ -133,5 +136,24 @@ describe('applyClaudeConsoleEvent', () => {
       variant: 'action',
       status: 'completed',
     });
+  });
+
+  it('keeps a 20,000-event run to the newest entries', () => {
+    let state = createClaudeConsoleState();
+    for (let i = 0; i < 20_000; i += 1) {
+      state = applyClaudeConsoleEvent(state, { type: 'codex.console.text', markdown: `line ${i}` });
+    }
+    expect(state.entries).toHaveLength(MAX_CONSOLE_ENTRIES);
+    expect(state.entries[MAX_CONSOLE_ENTRIES - 1]).toMatchObject({ markdown: 'line 19999' });
+    expect(state.entries[0]).toMatchObject({ markdown: `line ${20_000 - MAX_CONSOLE_ENTRIES}` });
+  });
+
+  it('keeps only the tail of the legacy terminal text', () => {
+    let state = createClaudeConsoleState();
+    const chunk = 'x'.repeat(100_000);
+    for (let i = 0; i < 15; i += 1) state = appendLegacyFrameText(state, chunk);
+    state = appendLegacyFrameText(state, 'END');
+    expect(state.legacyText.length).toBe(MAX_LEGACY_TEXT);
+    expect(state.legacyText.endsWith('END')).toBe(true);
   });
 });

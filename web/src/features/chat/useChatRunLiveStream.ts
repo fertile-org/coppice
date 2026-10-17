@@ -3,6 +3,7 @@ import {
   applyEvent,
   applySnapshot,
   cloneSessionStore,
+  nextSessionStore,
   createSessionStore,
 } from '../../opencode-session/sync/reduce-event';
 import type {
@@ -63,7 +64,7 @@ function sessionReducer(
     }
     case 'event': {
       if (!state) return state;
-      const next = cloneSessionStore(state);
+      const next = nextSessionStore(state);
       applyEvent(next, action.event);
       return next;
     }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { applyEvent, cloneSessionStore, createSessionStore } from './reduce-event';
+import { applyEvent, cloneSessionStore, createSessionStore, nextSessionStore } from './reduce-event';
 import type { TextPart } from './types';
 
 describe('applyEvent', () => {
@@ -128,5 +128,40 @@ describe('applyEvent', () => {
     const strictModePass = cloneSessionStore(store);
     applyEvent(strictModePass, deltaEvent);
     expect((strictModePass.parts['msg_1'][0] as TextPart).text).toBe(once);
+  });
+});
+
+describe('nextSessionStore', () => {
+  it('applies a delta without touching the previous store', () => {
+    const base = createSessionStore('ses_1');
+    applyEvent(base, {
+      type: 'message.updated',
+      properties: { sessionID: 'ses_1', info: { id: 'msg_1', role: 'assistant' } },
+    });
+    applyEvent(base, {
+      type: 'message.part.updated',
+      properties: {
+        sessionID: 'ses_1',
+        part: { id: 'prt_1', type: 'text', text: 'a', messageID: 'msg_1' },
+      },
+    });
+    const next = nextSessionStore(base);
+    applyEvent(next, {
+      type: 'message.part.delta',
+      properties: { sessionID: 'ses_1', partID: 'prt_1', field: 'text', delta: 'b' },
+    });
+    expect((next.parts.msg_1[0] as TextPart).text).toBe('ab');
+    expect((base.parts.msg_1[0] as TextPart).text).toBe('a');
+    // Untouched messages are shared, not copied.
+    expect(next.messages).toBe(base.messages);
+
+    // A delta that arrives before its part buffers without changing the old store.
+    const later = nextSessionStore(next);
+    applyEvent(later, {
+      type: 'message.part.delta',
+      properties: { sessionID: 'ses_1', partID: 'prt_2', field: 'text', delta: 'early' },
+    });
+    expect(later.pendingDeltas.prt_2).toHaveLength(1);
+    expect(next.pendingDeltas.prt_2).toBeUndefined();
   });
 });

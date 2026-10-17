@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { CollapsibleDetail, excerptPreview } from '../../opencode-session/components/CollapsibleDetail';
 import { MarkdownContent } from '../../opencode-session/components/MarkdownContent';
 import { PlainOutput } from '../../opencode-session/components/PlainOutput';
@@ -167,6 +168,9 @@ function renderEntry(
   }
 }
 
+/** Console entries mounted at once. */
+export const CONSOLE_RENDER_WINDOW = 300;
+
 export function ClaudeConsoleView({
   entries,
   legacyText,
@@ -179,6 +183,10 @@ export function ClaudeConsoleView({
   const hasStructured = entries.length > 0;
   const legacy = legacyText.trim();
   const revealedLegacy = useTypewriter(legacy, { enabled: isLive });
+  // Only the newest entries are mounted; older ones are one click away.
+  const [shown, setShown] = useState(CONSOLE_RENDER_WINDOW);
+  const hidden = Math.max(0, entries.length - shown);
+  const visible = hidden > 0 ? entries.slice(hidden) : entries;
 
   if (!hasStructured && !legacy) {
     return (
@@ -190,8 +198,17 @@ export function ClaudeConsoleView({
 
   return (
     <div className={`flex flex-col ${sessionTheme.sectionGap}`}>
-      {entries.map((entry, index) =>
-        renderEntry(entry, index, entries.length, isLive),
+      {hidden > 0 && (
+        <button
+          type="button"
+          onClick={() => setShown((count) => count + CONSOLE_RENDER_WINDOW)}
+          className={`self-start ${sessionTheme.fontBody} text-xs ${sessionTheme.textMuted} underline`}
+        >
+          Show earlier output ({hidden})
+        </button>
+      )}
+      {visible.map((entry, index) =>
+        renderEntry(entry, hidden + index, entries.length, isLive),
       )}
       {legacy ? (
         <pre
