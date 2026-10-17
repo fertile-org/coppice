@@ -1,0 +1,12 @@
+{
+  "status": "done",
+  "summary": "Checked both criteria against the merged sub-tickets.",
+  "criteriaResults": [
+    { "criterion": "Orders persist across restarts", "status": "met", "evidence": "Order store: test orders_survive_restart" },
+    { "criterion": "The API lists orders", "status": "not_met", "evidence": "Order API: GET /orders returns 404" }
+  ],
+  "changedFiles": [],
+  "testsRun": [],
+  "mentionAgents": [],
+  "blockers": []
+}

@@ -1144,3 +1144,199 @@ async fn a_second_question_round_and_more_than_three_questions_are_refused() {
     );
     assert_eq!(refused.unwrap_err(), PLAN_QUESTIONS_TOO_MANY);
 }
+
+#[tokio::test]
+async fn a_split_at_plan_review_then_verify_parent() {
+    use coppice_server::copy::plan::{UMBRELLA_NO_WORK, VERIFY_NOT_READY};
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let (state, app, cookie, csrf, _env) =
+        common::bootstrap_and_login_with_auto_start_workers().await;
+    let (ticket_id, _git) = open_planned_repo(&app, &state, "plan_splitter", &cookie, &csrf).await;
+    let pool = state.db.as_ref().expect("db");
+    let parent = Uuid::parse_str(&ticket_id).unwrap();
+
+    let ticket = common::poll_ticket_until(
+        &app,
+        &ticket_id,
+        &cookie,
+        &csrf,
+        "plan with a split",
+        Duration::from_secs(20),
+        |ticket| ticket["status"] == "plan_review" && ticket["hasPlan"] == true,
+    )
+    .await;
+    let pending = &ticket["pendingSplitRecommendation"];
+    assert_eq!(pending["fromPlan"], true, "{ticket}");
+    assert_eq!(pending["splits"].as_array().unwrap().len(), 2);
+
+    // The split is approved only with the plan.
+    let early = post_json(&app, &format!("/api/tickets/{ticket_id}/approve-splits"), serde_json::json!({}), &cookie, &csrf).await;
+    assert_ne!(early.status(), StatusCode::OK);
+
+    let approved = post_json(&app, &format!("/api/tickets/{ticket_id}/approve-plan"), serde_json::json!({}), &cookie, &csrf).await;
+    assert_eq!(approved.status(), StatusCode::OK);
+
+    let ticket = common::get_ticket(&app, &ticket_id, &cookie, &csrf).await;
+    assert_eq!(ticket["status"], "ready");
+    assert_eq!(ticket["splitParent"], true);
+    assert_eq!(ticket["verifyAvailable"], false);
+    assert!(ticket["pendingSplitRecommendation"].is_null());
+    let children: Vec<(Uuid, String, String)> = sqlx::query_as(
+        "SELECT id, title, status FROM tickets WHERE parent_ticket_id = $1 ORDER BY title",
+    )
+    .bind(parent)
+    .fetch_all(pool)
+    .await
+    .unwrap();
+    assert_eq!(children.len(), 2);
+    for (child_id, _, status) in &children {
+        assert_eq!(status, "backlog");
+        let child = common::get_ticket(&app, &child_id.to_string(), &cookie, &csrf).await;
+        assert_eq!(child["planApproved"], true, "{child}");
+    }
+    let store = common::get_ticket(&app, &children[1].0.to_string(), &cookie, &csrf).await;
+    assert_eq!(children[1].1, "Order store");
+    assert_eq!(
+        store["approvedPlan"]["steps"],
+        serde_json::json!(["Add the orders table", "Write the repository"])
+    );
+    assert_eq!(
+        store["approvedPlan"]["criteria"][0]["text"],
+        "Orders persist across restarts"
+    );
+    // Only the planning run ran on the parent: no Tech Lead, no work.
+    assert_eq!(runs(&app, &ticket_id, &cookie, &csrf).await.len(), 1);
+    let work = post_json(&app, &format!("/api/tickets/{ticket_id}/run-agent"), serde_json::json!({}), &cookie, &csrf).await;
+    assert_eq!(work.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(message(work).await, UMBRELLA_NO_WORK);
+
+    let not_yet = post_json(&app, &format!("/api/tickets/{ticket_id}/verify-parent"), serde_json::json!({}), &cookie, &csrf).await;
+    assert_eq!(not_yet.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(message(not_yet).await, VERIFY_NOT_READY);
+
+    // Children Done and merged; one more child archived (excluded).
+    for (child_id, _, _) in &children {
+        sqlx::query("UPDATE tickets SET status = 'done' WHERE id = $1")
+            .bind(child_id)
+            .execute(pool)
+            .await
+            .unwrap();
+        sqlx::query(
+            "INSERT INTO ticket_human_reviews (ticket_id, head_sha, merged_sha, merged_at) VALUES ($1, 'abc1234', 'abc1234', now())",
+        )
+        .bind(child_id)
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+    let dropped = Uuid::new_v4();
+    sqlx::query(
+        r#"
+        INSERT INTO tickets (id, board_id, title, description, status, parent_ticket_id, created_by, archived_at)
+        SELECT $1, board_id, 'Order export', '', 'backlog', id, 'user', now() FROM tickets WHERE id = $2
+        "#,
+    )
+    .bind(dropped)
+    .bind(parent)
+    .execute(pool)
+    .await
+    .unwrap();
+    let ticket = common::get_ticket(&app, &ticket_id, &cookie, &csrf).await;
+    assert_eq!(ticket["verifyAvailable"], true);
+
+    // A reopened child hides the button again.
+    sqlx::query("UPDATE tickets SET status = 'in_progress' WHERE id = $1")
+        .bind(children[0].0)
+        .execute(pool)
+        .await
+        .unwrap();
+    let ticket = common::get_ticket(&app, &ticket_id, &cookie, &csrf).await;
+    assert_eq!(ticket["verifyAvailable"], false);
+    sqlx::query("UPDATE tickets SET status = 'done' WHERE id = $1")
+        .bind(children[0].0)
+        .execute(pool)
+        .await
+        .unwrap();
+
+    let verifier = common::create_agent_with_preset_key(&app, "backend_engineer", "Verifier", &cookie, &csrf).await;
+    sqlx::query("UPDATE agents SET preset_source = 'verifier' WHERE id = $1")
+        .bind(Uuid::parse_str(&verifier).unwrap())
+        .execute(pool)
+        .await
+        .unwrap();
+    let started = post_json(
+        &app,
+        &format!("/api/tickets/{ticket_id}/verify-parent"),
+        serde_json::json!({ "agentId": verifier }),
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(started.status(), StatusCode::OK);
+
+    let ticket = common::poll_ticket_until(
+        &app,
+        &ticket_id,
+        &cookie,
+        &csrf,
+        "verified parent in Human Review",
+        Duration::from_secs(20),
+        |ticket| ticket["status"] == "wait_for_final_review",
+    )
+    .await;
+    let criteria = ticket["approvedPlan"]["criteria"].as_array().expect("criteria");
+    assert_eq!(criteria[0]["status"], "met");
+    assert_eq!(criteria[1]["status"], "not_met");
+    let thread = comments(&app, &ticket_id, &cookie, &csrf).await;
+    let verification = thread
+        .iter()
+        .find(|note| note["body"].as_str().is_some_and(|b| b.starts_with("**Verification**")))
+        .expect("verification comment");
+    let body = verification["body"].as_str().unwrap();
+    assert!(body.contains("**Met:** Orders persist across restarts"), "{body}");
+    assert!(body.contains("Excluded (archived): Order export"), "{body}");
+
+    let accepted = post_json(&app, &format!("/api/tickets/{ticket_id}/final-approve"), serde_json::json!({}), &cookie, &csrf).await;
+    assert_eq!(accepted.status(), StatusCode::OK);
+    assert_eq!(common::json_body(accepted).await["status"], "done");
+}
+
+#[tokio::test]
+async fn asking_for_changes_drops_the_split_proposed_with_the_plan() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
+    let pm_id = common::create_agent_with_preset_key(&app, "pm", "PM", &cookie, &csrf).await;
+    let pm = Uuid::parse_str(&pm_id).unwrap();
+    let ticket_id = common::create_unplanned_ticket(&app, &board_id, &cookie, &csrf).await;
+    common::assign_agent_to_ticket(&app, &ticket_id, &pm_id, &cookie, &csrf).await;
+    let pool = state.db.as_ref().expect("db");
+    post_plan(&app, &ticket_id, pm, pool, &cookie, &csrf).await;
+    let ticket = coppice_server::services::ticket_service::TicketService::new(pool)
+        .get(Uuid::parse_str(&ticket_id).unwrap())
+        .await
+        .unwrap();
+    let spec = |title: &str| coppice_server::domain::workflow::SplitTicketSpec {
+        title: title.into(),
+        description: "d".into(),
+        acceptance_criteria: None,
+        assign_to: None,
+        steps: Vec::new(),
+    };
+    coppice_server::services::split_service::SplitService::new(pool, &state.config.workflow)
+        .propose_from_plan(&ticket.ticket, &[spec("A"), spec("B")], pm)
+        .await
+        .unwrap();
+    let before = common::get_ticket(&app, &ticket_id, &cookie, &csrf).await;
+    assert_eq!(before["pendingSplitRecommendation"]["fromPlan"], true);
+
+    ask_for_changes(&app, &ticket_id, "Keep it one ticket.", &cookie, &csrf).await;
+    let after = common::get_ticket(&app, &ticket_id, &cookie, &csrf).await;
+    assert!(after["pendingSplitRecommendation"].is_null(), "{after}");
+}

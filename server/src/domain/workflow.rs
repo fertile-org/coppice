@@ -7,6 +7,14 @@ use uuid::Uuid;
 
 /// Planning run. It does not create a worktree or commit.
 pub const JOB_TYPE_PLAN_TICKET: &str = "plan_ticket";
+/// Read-only run that checks a split parent against its acceptance criteria.
+pub const JOB_TYPE_VERIFY_PARENT: &str = "verify_parent";
+
+/// Runs that only read: planning and verifying a split parent. They get
+/// read-only tools and the CLI's plan mode where it has one.
+pub fn is_read_only_job(job_type: &str) -> bool {
+    job_type == JOB_TYPE_PLAN_TICKET || job_type == JOB_TYPE_VERIFY_PARENT
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RunOutcome {
@@ -44,6 +52,9 @@ pub struct SplitTicketSpec {
     pub acceptance_criteria: Option<String>,
     #[serde(default, rename = "assignTo")]
     pub assign_to: Option<String>,
+    /// Short plan steps for the child, when proposed at Plan Review.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub steps: Vec<String>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -52,6 +63,9 @@ pub struct PendingSplitRecommendation {
     pub recommended_by_agent_id: Uuid,
     pub recommended_at: String,
     pub splits: Vec<SplitTicketSpec>,
+    /// Proposed by a planning run: created only by approving that plan.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub from_plan: bool,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]

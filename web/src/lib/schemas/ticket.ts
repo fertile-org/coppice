@@ -78,6 +78,7 @@ export const splitTicketSpecSchema = z.object({
   description: z.string(),
   acceptanceCriteria: z.string().optional(),
   assignTo: z.string().optional(),
+  steps: z.array(z.string()).optional(),
 });
 
 export type SplitTicketSpec = z.infer<typeof splitTicketSpecSchema>;
@@ -86,6 +87,8 @@ export const pendingSplitRecommendationSchema = z.object({
   recommendedByAgentId: z.string().uuid(),
   recommendedAt: z.string(),
   splits: z.array(splitTicketSpecSchema),
+  /** Proposed with a plan: created only by approving that plan. */
+  fromPlan: z.boolean().optional(),
 });
 
 export type PendingSplitRecommendation = z.infer<

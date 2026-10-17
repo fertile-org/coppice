@@ -61,6 +61,7 @@ pub fn routes() -> Router<Arc<AppState>> {
             post(ask_for_plan_changes),
         )
         .route("/api/tickets/{ticket_id}/plan-answers", post(send_plan_answers))
+        .route("/api/tickets/{ticket_id}/verify-parent", post(verify_parent))
         .route("/api/tickets/{ticket_id}/plan-runs", post(start_plan_run))
         .route("/api/tickets/{ticket_id}/assign", post(assign_agent))
         .route("/api/tickets/{ticket_id}/run-agent", post(run_agent))
@@ -169,6 +170,10 @@ pub(crate) struct TicketResponse {
     plan_questions: Option<crate::services::planning_service::PlanQuestionsState>,
     /// In Plan Review: there is a plan to approve.
     has_plan: bool,
+    /// Split into sub-tickets at Plan Review.
+    split_parent: bool,
+    /// Verify parent ticket can run now.
+    verify_available: bool,
     has_active_run: bool,
     archived_at: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -298,6 +303,8 @@ pub(crate) fn ticket_to_response(item: TicketWithDisplay) -> TicketResponse {
         approved_plan: None,
         plan_questions: item.plan_questions,
         has_plan: item.has_plan,
+        split_parent: item.split_parent,
+        verify_available: item.verify_available,
         has_active_run: item.has_active_run,
         archived_at: ticket
             .archived_at
@@ -1019,7 +1026,7 @@ async fn approve_plan(
 ) -> Result<Json<TicketResponse>, UpdateStatusError> {
     let pool = pool_from_state(&state).map_err(UpdateStatusError::Status)?;
     PlanningService::new(pool)
-        .approve(ticket_id)
+        .approve(ticket_id, &state.config.workflow)
         .await
         .map_err(map_plan_error)?;
     let ticket = TicketService::new(pool)
@@ -1075,6 +1082,33 @@ async fn send_plan_answers(
     Ok(Json(ticket_to_response(ticket)))
 }
 
+#[derive(Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+struct VerifyParentBody {
+    #[serde(default)]
+    agent_id: Option<Uuid>,
+}
+
+async fn verify_parent(
+    State(state): State<Arc<AppState>>,
+    AuthUser { .. }: AuthUser,
+    Path(ticket_id): Path<Uuid>,
+    body: Option<Json<VerifyParentBody>>,
+) -> Result<Json<TicketResponse>, UpdateStatusError> {
+    let pool = pool_from_state(&state).map_err(UpdateStatusError::Status)?;
+    let agent_id = body.and_then(|Json(body)| body.agent_id);
+    PlanningService::new(pool)
+        .start_verification(ticket_id, agent_id)
+        .await
+        .map_err(map_plan_error)?;
+    let ticket = TicketService::new(pool)
+        .get(ticket_id)
+        .await
+        .map_err(map_update_status_error)?;
+    crate::events::publish_ticket_updated(&state.event_bus, &ticket);
+    Ok(Json(ticket_to_response(ticket)))
+}
+
 fn map_plan_error(err: crate::services::planning_service::PlanError) -> UpdateStatusError {
     match err {
         crate::services::planning_service::PlanError::Validation(message) => {
@@ -1113,10 +1147,16 @@ async fn with_approved_plan(
                 let stored = crate::services::criteria_results::CriteriaResultsService::new(pool)
                     .get(ticket_id)
                     .await?;
-                let reviewed = if stored.is_some() {
-                    reviewed_commit(state, pool, ticket_id).await?
-                } else {
+                let reviewed = if stored.is_none() {
                     None
+                } else if PlanningService::new(pool)
+                    .is_split_parent(ticket_id)
+                    .await
+                    .map_err(|err| TicketError::Validation(err.to_string()))?
+                {
+                    Some(crate::workers::job_worker::VERIFIED_RESULTS_SHA.to_string())
+                } else {
+                    reviewed_commit(state, pool, ticket_id).await?
                 };
                 crate::services::criteria_results::criteria_view(
                     &texts,
@@ -1231,6 +1271,12 @@ async fn run_agent(
         .await
         .map_err(map_ticket_error_response)?;
     TicketService::ensure_not_archived(&ticket.ticket).map_err(map_ticket_error_response)?;
+    if ticket.split_parent {
+        return Err(RunAgentError::Message(
+            StatusCode::BAD_REQUEST,
+            crate::copy::plan::UMBRELLA_NO_WORK.into(),
+        ));
+    }
 
     if let Some(agent_id) = ticket.ticket.assignee_agent_id {
         let agent = AgentService::new(pool).get(agent_id).await.map_err(|err| match err {
@@ -1493,10 +1539,16 @@ async fn final_approve(
     WorkflowService::final_approve(ticket.ticket.status)
         .map_err(|_| FinalApproveError::Status(StatusCode::BAD_REQUEST))?;
 
-    match ticket_git_service(&state, pool)
-        .reviewed_head_sha(ticket_id)
-        .await
-    {
+    // A split parent has no branch of its own: its work merged with the
+    // sub-tickets, so there is no commit to bind the acceptance to.
+    let reviewed = if ticket.split_parent {
+        Ok(None)
+    } else {
+        ticket_git_service(&state, pool)
+            .reviewed_head_sha(ticket_id)
+            .await
+    };
+    match reviewed {
         Ok(Some(head_sha)) => {
             HumanReviewService::new(pool)
                 .record_acceptance(ticket_id, user.id, &head_sha)

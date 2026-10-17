@@ -87,6 +87,10 @@ export interface Ticket {
   planQuestions?: PlanQuestions | null;
   /** In Plan Review: a plan exists to approve. */
   hasPlan?: boolean;
+  /** Split into sub-tickets at Plan Review. */
+  splitParent?: boolean;
+  /** Every sub-ticket is Done and merged. */
+  verifyAvailable?: boolean;
   archivedAt?: string | null;
   attachmentIds?: string[];
   attachments?: {

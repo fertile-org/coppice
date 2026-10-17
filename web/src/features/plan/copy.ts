@@ -21,6 +21,11 @@ export const PLAN_COPY = {
   sendAnswers: 'Send answers',
   answerPlaceholder: 'Your answer',
   questionsTitle: 'Questions before the plan',
+  splitWithPlan: 'Approve plan creates these sub-tickets. Ask for changes to drop them.',
+  verifyParent: 'Verify parent ticket',
+  verifying: 'Starting…',
+  verifyAgent: 'Agent',
+  verifyDefaultAgent: 'PM (default)',
   planNeedsRun: 'Plan needs a run',
   runAgent: 'Run agent',
 } as const;

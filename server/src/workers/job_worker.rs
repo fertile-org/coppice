@@ -56,6 +56,7 @@ use time::format_description::well_known::Rfc3339;
 mod compaction;
 mod connector_check;
 mod plan;
+pub use plan::VERIFIED_RESULTS_SHA;
 
 #[derive(Debug)]
 struct JobCancelled;
@@ -227,7 +228,7 @@ async fn execute_job(
         return compaction::execute_compaction(state, pool, run_svc, run).await;
     }
 
-    if run.job_type == crate::domain::workflow::JOB_TYPE_PLAN_TICKET {
+    if crate::domain::workflow::is_read_only_job(&run.job_type) {
         return plan::execute_plan(state, pool, run_svc, run).await;
     }
 

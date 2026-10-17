@@ -61,6 +61,15 @@ pub enum TicketError {
     Database(#[from] sqlx::Error),
 }
 
+fn plan_error(err: crate::services::planning_service::PlanError) -> TicketError {
+    match err {
+        crate::services::planning_service::PlanError::Database(err) => TicketError::Database(err),
+        crate::services::planning_service::PlanError::Validation(message) => {
+            TicketError::Validation(message)
+        }
+    }
+}
+
 /// Columns returned by aliased ticket list queries (keep in sync with `row_to_ticket`).
 const TICKET_COLUMNS_ALIASED: &str = r#"
                 t.id, t.board_id, t.repo_id, t.title, t.description,
@@ -88,6 +97,10 @@ pub struct TicketWithDisplay {
     pub plan_questions: Option<crate::services::planning_service::PlanQuestionsState>,
     /// In Plan Review: a plan comment exists to approve. False elsewhere.
     pub has_plan: bool,
+    /// Split into sub-tickets at Plan Review; gets no implementation run.
+    pub split_parent: bool,
+    /// Every sub-ticket is Done and merged, so Verify parent ticket can run.
+    pub verify_available: bool,
 }
 
 impl<'a> TicketService<'a> {
@@ -1063,12 +1076,7 @@ impl<'a> TicketService<'a> {
         let plan_questions = crate::services::planning_service::PlanningService::new(self.pool)
             .questions(ticket.id)
             .await
-            .map_err(|err| match err {
-                crate::services::planning_service::PlanError::Database(err) => TicketError::Database(err),
-                crate::services::planning_service::PlanError::Validation(message) => {
-                    TicketError::Validation(message)
-                }
-            })?;
+            .map_err(plan_error)?;
 
         let has_plan = if ticket.status == TicketStatus::PlanReview {
             sqlx::query_scalar(
@@ -1081,6 +1089,14 @@ impl<'a> TicketService<'a> {
             false
         };
 
+        let planning = crate::services::planning_service::PlanningService::new(self.pool);
+        let split_parent = planning.is_split_parent(ticket.id).await.map_err(plan_error)?;
+        let verify_available = split_parent
+            && planning
+                .verify_available(ticket.id)
+                .await
+                .map_err(plan_error)?;
+
         Ok(TicketWithDisplay {
             ticket,
             substatus_display,
@@ -1091,6 +1107,8 @@ impl<'a> TicketService<'a> {
             latest_plan_run_status,
             plan_questions,
             has_plan,
+            split_parent,
+            verify_available,
         })
     }
 

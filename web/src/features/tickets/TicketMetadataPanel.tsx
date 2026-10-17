@@ -283,27 +283,31 @@ export function TicketMetadataPanel({ ticket }: TicketMetadataPanelProps) {
               </li>
             ))}
           </ul>
-          <div className="flex flex-wrap gap-2">
-            <Button
-              type="button"
-              onClick={() => void handleApproveSplits()}
-              loading={approveSplits.isPending}
-              disabled={formDisabled}
-              className="flex-1"
-            >
-              {approveSplits.isPending ? 'Approving…' : 'Approve splits'}
-            </Button>
-            <Button
-              type="button"
-              variant="secondary"
-              onClick={() => void handleDismissSplits()}
-              loading={dismissSplits.isPending}
-              disabled={formDisabled}
-              className="flex-1"
-            >
-              {dismissSplits.isPending ? 'Dismissing…' : 'Dismiss'}
-            </Button>
-          </div>
+          {ticket.pendingSplitRecommendation.fromPlan ? (
+            <p className="font-body text-xs text-text-muted">{PLAN_COPY.splitWithPlan}</p>
+          ) : (
+            <div className="flex flex-wrap gap-2">
+              <Button
+                type="button"
+                onClick={() => void handleApproveSplits()}
+                loading={approveSplits.isPending}
+                disabled={formDisabled}
+                className="flex-1"
+              >
+                {approveSplits.isPending ? 'Approving…' : 'Approve splits'}
+              </Button>
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => void handleDismissSplits()}
+                loading={dismissSplits.isPending}
+                disabled={formDisabled}
+                className="flex-1"
+              >
+                {dismissSplits.isPending ? 'Dismissing…' : 'Dismiss'}
+              </Button>
+            </div>
+          )}
         </div>
       )}
 

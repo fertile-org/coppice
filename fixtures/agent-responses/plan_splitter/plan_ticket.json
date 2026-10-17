@@ -1,0 +1,21 @@
+{
+  "status": "done",
+  "summary": "## Plan\n\n### Approach\nSplit the store and the API.\n\n### Steps\n- [ ] Build the store\n- [ ] Build the API\n\n### Acceptance criteria\n- [ ] Orders persist across restarts (verified by integration test)\n- [ ] The API lists orders (verified by curl)\n\n### Risks\nNone.\n\n### Out of scope\nNone.\n",
+  "splitTickets": [
+    {
+      "title": "Order store",
+      "description": "Persist orders in Postgres.",
+      "acceptanceCriteria": "- Orders persist across restarts",
+      "steps": ["Add the orders table", "Write the repository"]
+    },
+    {
+      "title": "Order API",
+      "description": "List orders over HTTP.",
+      "acceptanceCriteria": "- GET /orders lists orders"
+    }
+  ],
+  "changedFiles": [],
+  "testsRun": [],
+  "mentionAgents": [],
+  "blockers": []
+}

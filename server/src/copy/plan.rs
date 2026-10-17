@@ -84,8 +84,141 @@ pub const PLAN_CHANGED_FILES_REJECTED: &str = "changedFiles is not allowed on a 
 pub const PLAN_DESCRIPTION_REJECTED: &str = "updatedDescription is not allowed on a planning run.";
 pub const PLAN_ASSIGN_REJECTED: &str = "assignTo is not allowed on a planning run.";
 pub const PLAN_SPLIT_REJECTED: &str = "splitTickets is not allowed on a planning run.";
+pub const PLAN_SPLIT_TOO_SMALL: &str =
+    "A split needs at least 2 sub-tickets. Plan one ticket without splitTickets instead.";
 pub const PLAN_MUST_FINISH: &str =
     "A planning run finishes with status `done` and the plan in `summary`.";
+
+pub const PLAN_SPLIT_INSTRUCTION: &str = "If the work is too big for one ticket, you may also propose 2 or more sub-tickets in `splitTickets`, each with a title, a description, acceptance criteria, and short `steps`. They are created only when the plan is approved, each with its own approved plan. Then write this plan as the umbrella plan for the whole ticket.";
+
+/// System note when approving a plan creates its sub-tickets.
+pub fn split_approved_note(count: usize) -> String {
+    format!("Plan approved. Coppice created {count} sub-tickets in Backlog, each with its approved plan. Work happens on the sub-tickets.")
+}
+
+/// Approach line of a sub-ticket's plan.
+pub fn child_plan_approach(parent_title: &str, description: &str) -> String {
+    let description = description.trim();
+    if description.is_empty() {
+        format!("Part of \"{}\".", parent_title.trim())
+    } else {
+        format!("Part of \"{}\". {description}", parent_title.trim())
+    }
+}
+
+/// The approved plan attached to a sub-ticket created at Plan Review.
+pub fn child_plan(
+    parent_title: &str,
+    description: &str,
+    steps: &[String],
+    acceptance_criteria: Option<&str>,
+) -> String {
+    let mut out = format!(
+        "{PLAN_HEADING}\n\n{APPROACH_HEADING}\n{}\n\n{STEPS_HEADING}\n",
+        child_plan_approach(parent_title, description)
+    );
+    let steps: Vec<&str> = steps.iter().map(|step| step.trim()).filter(|s| !s.is_empty()).collect();
+    if steps.is_empty() {
+        out.push_str(&format!("- [ ] {FOLLOW_APPROACH_STEP}\n"));
+    }
+    for step in steps {
+        out.push_str(&format!("- [ ] {step}\n"));
+    }
+    let criteria: Vec<String> = acceptance_criteria
+        .unwrap_or("")
+        .lines()
+        .map(|line| {
+            let line = line.trim();
+            let line = line
+                .strip_prefix("- [ ]")
+                .or_else(|| line.strip_prefix("- [x]"))
+                .or_else(|| line.strip_prefix("- "))
+                .or_else(|| line.strip_prefix("* "))
+                .unwrap_or(line);
+            line.trim().to_string()
+        })
+        .filter(|line| !line.is_empty() && !line.starts_with('#'))
+        .collect();
+    if !criteria.is_empty() {
+        out.push_str(&format!("\n{ACCEPTANCE_CRITERIA_HEADING}\n"));
+        for criterion in criteria {
+            out.push_str(&format!("- [ ] {criterion}\n"));
+        }
+    }
+    out.push_str(&format!("\n{RISKS_HEADING}\n{NONE}\n\n{OUT_OF_SCOPE_HEADING}\n{NONE}\n"));
+    out
+}
+
+/// Refused work start on a split parent.
+pub const UMBRELLA_NO_WORK: &str = "This ticket was split into sub-tickets, so work happens on them. Verify this ticket once they're all Done and merged.";
+
+pub const VERIFY_NOT_READY: &str =
+    "You can verify this ticket once every sub-ticket is Done and merged.";
+
+pub const VERIFY_NOT_A_PARENT: &str = "Only a ticket split at Plan Review can be verified.";
+
+pub const VERIFY_ALREADY_RUNNING: &str = "Verification is already running.";
+
+pub const VERIFY_TASK: &str = "Verify this parent ticket. Its work was split into the sub-tickets below, and each one is Done and merged. Check the parent's acceptance criteria against the merged code on the default branch. Do not edit files, commit, push, or create or change a branch.";
+
+pub const VERIFY_FORMAT_INSTRUCTION: &str = "Call `result_submit` with status `done`, a short `summary` of what you checked, and `criteriaResults`: one entry per acceptance criterion with `met`, `not_met`, or `not_checked`, and one line of evidence naming the sub-ticket, commit, test, or file.";
+
+pub const VERIFICATION_COMMENT_TITLE: &str = "**Verification**";
+
+pub const VERIFY_EXCLUDED_HEADING: &str = "Excluded (archived):";
+
+/// Instructions for a verification run on a split parent.
+pub fn verify_instructions(criteria: &[String], merged: &[(String, String)], excluded: &[String]) -> String {
+    let mut out = format!("{VERIFY_TASK}\n\n{ACCEPTANCE_CRITERIA_HEADING}\n");
+    if criteria.is_empty() {
+        out.push_str("The parent has no acceptance criteria. Check its description instead.\n");
+    }
+    for criterion in criteria {
+        out.push_str(&format!("- [ ] {criterion}\n"));
+    }
+    out.push_str("\n### Sub-tickets (merged)\n");
+    for (title, sha) in merged {
+        let short = sha.get(..7).unwrap_or(sha);
+        out.push_str(&format!("- {title} (`{short}`)\n"));
+    }
+    if !excluded.is_empty() {
+        out.push_str(&format!("\n### {VERIFY_EXCLUDED_HEADING}\n"));
+        for title in excluded {
+            out.push_str(&format!("- {title}\n"));
+        }
+    }
+    out.push_str(&format!("\n{VERIFY_FORMAT_INSTRUCTION}\n"));
+    out
+}
+
+/// The comment a verification run posts on the parent.
+pub fn verification_comment(
+    summary: &str,
+    results: &[crate::providers::CriterionResult],
+    excluded: &[String],
+) -> String {
+    use crate::providers::CriterionStatus;
+    let mut out = format!("{VERIFICATION_COMMENT_TITLE}\n\n{}\n", summary.trim());
+    if !results.is_empty() {
+        out.push('\n');
+        for result in results {
+            let mark = match result.status {
+                CriterionStatus::Met => "Met",
+                CriterionStatus::NotMet => "Not met",
+                CriterionStatus::NotChecked => "Not checked",
+            };
+            out.push_str(&format!("- **{mark}:** {}", result.criterion.trim()));
+            if let Some(evidence) = result.evidence.as_deref() {
+                out.push_str(&format!(" ({})", evidence.trim()));
+            }
+            out.push('\n');
+        }
+    }
+    if !excluded.is_empty() {
+        out.push_str(&format!("\n{VERIFY_EXCLUDED_HEADING} {}\n", excluded.join(", ")));
+    }
+    out
+}
 
 /// Most questions a planning run may ask.
 pub const MAX_PLAN_QUESTIONS: usize = 3;

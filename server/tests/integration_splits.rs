@@ -36,12 +36,14 @@ async fn approve_splits_creates_children() {
             description: "First deliverable".into(),
             acceptance_criteria: None,
             assign_to: None,
+            steps: Vec::new(),
         },
         SplitTicketSpec {
             title: "Child B".into(),
             description: "Second deliverable".into(),
             acceptance_criteria: None,
             assign_to: None,
+            steps: Vec::new(),
         },
     ];
 

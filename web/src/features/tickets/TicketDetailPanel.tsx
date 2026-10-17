@@ -16,6 +16,7 @@ import type { AttachmentMeta } from '../../lib/attachments';
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
 import { PlanChecklist } from '../plan/PlanChecklist';
+import { VerifyParentAction } from '../plan/VerifyParentAction';
 import { PlanReviewActions } from '../plan/PlanReviewActions';
 import { AttachFilesButton } from './AttachFilesButton';
 import { CommentAttachments } from './CommentAttachments';
@@ -251,6 +252,10 @@ export function TicketDetailPanel({
           hasPlan={ticket.hasPlan ?? true}
           planQuestions={ticket.planQuestions}
         />
+      )}
+
+      {ticket.verifyAvailable && !isArchived && (
+        <VerifyParentAction ticketId={ticket.id} boardId={ticket.boardId} />
       )}
 
       {ticket.status === 'wait_for_final_review' && ticket.approvedPlan && (

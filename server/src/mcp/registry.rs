@@ -270,7 +270,7 @@ impl ToolRegistry {
 }
 
 fn allowed_for(profile: ContextProfile, job_type: &str, def: &ToolDefinition) -> bool {
-    if job_type == crate::domain::workflow::JOB_TYPE_PLAN_TICKET {
+    if crate::domain::workflow::is_read_only_job(job_type) {
         return def.read_only || def.name == REPLY_TOOL;
     }
     match profile {
