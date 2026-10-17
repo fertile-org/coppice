@@ -98,7 +98,7 @@ const fragmentDir = path.join(dist, 'pagefind', 'fragment');
 const urls = [];
 const banned = [
   'Put your agents on a board',
-  'Run a team of coding agents without babysitting them',
+  'Hire specialists. Keep the final say.',
   'Search docs',
   'Page not found',
 ];
