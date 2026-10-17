@@ -43,12 +43,12 @@ export function TicketDetailPanel({
   const [dropActive, setDropActive] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [title, setTitle] = useState(ticket.title);
-  const [description, setDescription] = useState(ticket.description);
+  const [description, setDescription] = useState(ticket.description ?? '');
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     setTitle(ticket.title);
-    setDescription(ticket.description);
+    setDescription(ticket.description ?? '');
   }, [ticket.title, ticket.description]);
 
   async function handleSave() {
@@ -100,7 +100,7 @@ export function TicketDetailPanel({
 
   function handleCancel() {
     setTitle(ticket.title);
-    setDescription(ticket.description);
+    setDescription(ticket.description ?? '');
     setEditing(false);
     setError(null);
   }

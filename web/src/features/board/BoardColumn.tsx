@@ -1,5 +1,6 @@
 import { useDroppable } from '@dnd-kit/core';
-import { useState, type FormEvent } from 'react';
+import { useVirtualizer } from '@tanstack/react-virtual';
+import { Fragment, useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import {
   columnAccentClass,
   columnBgClass,
@@ -124,31 +125,118 @@ export function BoardColumn({
           </form>
         )}
 
-        {tickets.map((ticket) => {
-          const selected =
-            boardFocus?.type === 'card' && boardFocus.ticketId === ticket.id;
-          const focusId = boardFocusDomId({ type: 'card', ticketId: ticket.id });
+        <ColumnCards
+          tickets={tickets}
+          focusedTicketId={boardFocus?.type === 'card' ? boardFocus.ticketId : null}
+          renderCard={(ticket) => {
+            const selected =
+              boardFocus?.type === 'card' && boardFocus.ticketId === ticket.id;
+            const focusId = boardFocusDomId({ type: 'card', ticketId: ticket.id });
+            return (
+              <TicketCard
+                key={ticket.id}
+                ticket={ticket}
+                hierarchy={hierarchyIndex.get(ticket.id)}
+                onOpen={onOpenTicket}
+                isLive={ticket.hasActiveRun ?? false}
+                assigneeName={resolveAssigneeName(
+                  ticket.assigneeAgentId,
+                  agentsById,
+                )}
+                onRunPlan={onRunPlan}
+                planRunPending={planRunTicketId === ticket.id}
+                tabIndex={boardFocus ? (selected ? 0 : -1) : 0}
+                boardFocusId={boardFocus ? focusId : undefined}
+                boardTabStop={Boolean(selected)}
+                onFocusCard={() => onCardFocus?.(ticket.id)}
+              />
+            );
+          }}
+        />
+      </div>
+    </section>
+  );
+}
+
+/** Columns longer than this render only the cards in view. */
+export const VIRTUALIZE_AFTER = 80;
+const ESTIMATED_CARD_HEIGHT = 112;
+
+/**
+ * A short column renders every card. A long one scrolls on its own and
+ * mounts only the cards near the viewport, keeping the keyboard-focused card
+ * mounted by scrolling to it.
+ */
+function ColumnCards({
+  tickets,
+  focusedTicketId,
+  renderCard,
+}: {
+  tickets: Ticket[];
+  focusedTicketId: string | null;
+  renderCard: (ticket: Ticket) => ReactNode;
+}) {
+  if (tickets.length <= VIRTUALIZE_AFTER) {
+    return <>{tickets.map((ticket) => <Fragment key={ticket.id}>{renderCard(ticket)}</Fragment>)}</>;
+  }
+  return (
+    <VirtualCards tickets={tickets} focusedTicketId={focusedTicketId} renderCard={renderCard} />
+  );
+}
+
+function VirtualCards({
+  tickets,
+  focusedTicketId,
+  renderCard,
+}: {
+  tickets: Ticket[];
+  focusedTicketId: string | null;
+  renderCard: (ticket: Ticket) => ReactNode;
+}) {
+  const parentRef = useRef<HTMLDivElement>(null);
+  const virtualizer = useVirtualizer({
+    count: tickets.length,
+    getScrollElement: () => parentRef.current,
+    estimateSize: () => ESTIMATED_CARD_HEIGHT,
+    measureElement: (element) => {
+      const measured = element.getBoundingClientRect().height;
+      return measured > 0 ? measured : ESTIMATED_CARD_HEIGHT;
+    },
+    overscan: 6,
+    initialRect: { width: 280, height: 800 },
+    getItemKey: (index) => tickets[index]?.id ?? index,
+  });
+
+  const focusedIndex = focusedTicketId
+    ? tickets.findIndex((ticket) => ticket.id === focusedTicketId)
+    : -1;
+  useEffect(() => {
+    if (focusedIndex >= 0) virtualizer.scrollToIndex(focusedIndex, { align: 'auto' });
+  }, [focusedIndex, virtualizer]);
+
+  return (
+    <div
+      ref={parentRef}
+      data-virtual-column=""
+      className="max-h-[calc(100svh-16rem)] overflow-y-auto"
+    >
+      <div className="relative w-full" style={{ height: virtualizer.getTotalSize() }}>
+        {virtualizer.getVirtualItems().map((item) => {
+          const ticket = tickets[item.index];
+          if (!ticket) return null;
           return (
-            <TicketCard
-              key={ticket.id}
-              ticket={ticket}
-              hierarchy={hierarchyIndex.get(ticket.id)}
-              onOpen={onOpenTicket}
-              isLive={ticket.hasActiveRun ?? false}
-              assigneeName={resolveAssigneeName(
-                ticket.assigneeAgentId,
-                agentsById,
-              )}
-              onRunPlan={onRunPlan}
-              planRunPending={planRunTicketId === ticket.id}
-              tabIndex={boardFocus ? (selected ? 0 : -1) : 0}
-              boardFocusId={boardFocus ? focusId : undefined}
-              boardTabStop={Boolean(selected)}
-              onFocusCard={() => onCardFocus?.(ticket.id)}
-            />
+            <div
+              key={item.key}
+              data-index={item.index}
+              ref={virtualizer.measureElement}
+              className="absolute left-0 top-0 w-full pb-2"
+              style={{ transform: `translateY(${item.start}px)` }}
+            >
+              {renderCard(ticket)}
+            </div>
           );
         })}
       </div>
-    </section>
+    </div>
   );
 }

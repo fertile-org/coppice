@@ -6,6 +6,7 @@ import {
 import type { RunStatus } from '../../lib/schemas/agentRun';
 import { NOTIFICATIONS_QUERY_KEY } from '../notifications/useNotifications';
 import { COMPACTION_STATUS_QUERY_KEY } from '../knowledge/useCompaction';
+import { setEventSocketOpen } from './socketState';
 
 export interface AgentRunStartedPayload {
   type: 'agent_run.started';
@@ -163,11 +164,13 @@ function connectSocket() {
   };
 
   socket.onopen = () => {
+    setEventSocketOpen(true);
     reconnectAttempt = 0;
     invalidateRealtimeQueries();
   };
 
   socket.onclose = () => {
+    setEventSocketOpen(false);
     socket = null;
     scheduleReconnect();
   };
@@ -183,6 +186,7 @@ function disconnectSocket() {
     reconnectTimer = null;
   }
   socket?.close();
+  setEventSocketOpen(false);
   socket = null;
 }
 

@@ -61,6 +61,19 @@ pub enum TicketError {
     Database(#[from] sqlx::Error),
 }
 
+/// The approved plan is the newest plan comment, written for the ticket's
+/// current content. Same rule as [`TicketService::approved_plan_is_current`].
+fn plan_is_current(ticket: &Ticket, latest_plan_id: Option<Uuid>, latest_plan_version: Option<i32>) -> bool {
+    match (ticket.approved_plan_comment_id, ticket.approved_plan_content_version) {
+        (Some(approved_id), Some(approved_version)) => {
+            approved_version == ticket.content_version
+                && latest_plan_id == Some(approved_id)
+                && latest_plan_version == Some(ticket.content_version)
+        }
+        _ => false,
+    }
+}
+
 fn plan_error(err: crate::services::planning_service::PlanError) -> TicketError {
     match err {
         crate::services::planning_service::PlanError::Database(err) => TicketError::Database(err),
@@ -147,13 +160,9 @@ impl<'a> TicketService<'a> {
 
         let rows = q.fetch_all(self.pool).await?;
         let active_ticket_ids = self.active_ticket_ids_for_board(board_id).await?;
-        let mut results = Vec::with_capacity(rows.len());
-        for row in &rows {
-            let ticket = row_to_ticket(row);
-            let has_active_run = active_ticket_ids.contains(&ticket.id);
-            results.push(self.enrich_ticket(ticket, has_active_run).await?);
-        }
-        Ok(results)
+        let active: std::collections::HashSet<Uuid> = active_ticket_ids.into_iter().collect();
+        self.enrich_many(rows.iter().map(row_to_ticket).collect(), &active)
+            .await
     }
 
     /// Case-insensitive title/description search over non-archived tickets, newest
@@ -854,11 +863,17 @@ impl<'a> TicketService<'a> {
         .fetch_all(self.pool)
         .await?;
 
-        let mut results = Vec::with_capacity(rows.len());
-        for row in &rows {
-            results.push(self.enrich_row(row).await?);
-        }
-        Ok(results)
+        let tickets: Vec<Ticket> = rows.iter().map(row_to_ticket).collect();
+        let ids: Vec<Uuid> = tickets.iter().map(|ticket| ticket.id).collect();
+        let active: std::collections::HashSet<Uuid> = sqlx::query_scalar(
+            "SELECT DISTINCT ticket_id FROM agent_runs WHERE ticket_id = ANY($1) AND status IN ('queued', 'running')",
+        )
+        .bind(&ids)
+        .fetch_all(self.pool)
+        .await?
+        .into_iter()
+        .collect();
+        self.enrich_many(tickets, &active).await
     }
 
     pub async fn assign_agent(
@@ -1054,79 +1069,120 @@ impl<'a> TicketService<'a> {
         ticket: Ticket,
         has_active_run: bool,
     ) -> Result<TicketWithDisplay, TicketError> {
-        let agent_name = if let Some(agent_id) = ticket.assignee_agent_id {
-            sqlx::query_scalar::<_, Option<String>>("SELECT name FROM agents WHERE id = $1")
-                .bind(agent_id)
-                .fetch_optional(self.pool)
-                .await?
-                .flatten()
+        let active = if has_active_run {
+            std::collections::HashSet::from([ticket.id])
         } else {
-            None
+            std::collections::HashSet::new()
         };
-
-        let substatus_display = build_substatus_display(
-            ticket.substatus,
-            &ticket.substatus_metadata,
-            agent_name.as_deref(),
-        );
-        let last_activity_at = self.compute_last_activity_at(ticket.id).await?;
-        let human_review = HumanReviewService::new(self.pool).get(ticket.id).await?;
-        let plan_approved = self.approved_plan_is_current(&ticket).await?;
-        let latest_plan_run_status = self.latest_plan_run_status(ticket.id).await?;
-        let plan_questions = crate::services::planning_service::PlanningService::new(self.pool)
-            .questions(ticket.id)
-            .await
-            .map_err(plan_error)?;
-
-        let has_plan = if ticket.status == TicketStatus::PlanReview {
-            sqlx::query_scalar(
-                "SELECT EXISTS(SELECT 1 FROM ticket_comments WHERE ticket_id = $1 AND intent = 'plan')",
-            )
-            .bind(ticket.id)
-            .fetch_one(self.pool)
-            .await?
-        } else {
-            false
-        };
-
-        let planning = crate::services::planning_service::PlanningService::new(self.pool);
-        let split_parent = planning.is_split_parent(ticket.id).await.map_err(plan_error)?;
-        let verify_available = split_parent
-            && planning
-                .verify_available(ticket.id)
-                .await
-                .map_err(plan_error)?;
-
-        Ok(TicketWithDisplay {
-            ticket,
-            substatus_display,
-            last_activity_at,
-            has_active_run,
-            human_review,
-            plan_approved,
-            latest_plan_run_status,
-            plan_questions,
-            has_plan,
-            split_parent,
-            verify_available,
-        })
+        let mut enriched = self.enrich_many(vec![ticket], &active).await?;
+        Ok(enriched.remove(0))
     }
 
-    async fn latest_plan_run_status(&self, ticket_id: Uuid) -> Result<Option<String>, TicketError> {
-        sqlx::query_scalar(
+    /// Display fields for many tickets in a fixed number of queries, however
+    /// many tickets there are. Order is kept.
+    async fn enrich_many(
+        &self,
+        tickets: Vec<Ticket>,
+        active: &std::collections::HashSet<Uuid>,
+    ) -> Result<Vec<TicketWithDisplay>, TicketError> {
+        if tickets.is_empty() {
+            return Ok(Vec::new());
+        }
+        let ids: Vec<Uuid> = tickets.iter().map(|ticket| ticket.id).collect();
+        let rows = sqlx::query(
             r#"
-            SELECT status
-            FROM agent_runs
-            WHERE ticket_id = $1 AND job_type = $2
-            ORDER BY created_at DESC
-            LIMIT 1
+            SELECT
+                t.id,
+                agent.name AS agent_name,
+                GREATEST(t.updated_at, COALESCE(last_comment.at, t.updated_at)) AS last_activity_at,
+                latest_plan.id AS latest_plan_id,
+                latest_plan.plan_content_version AS latest_plan_version,
+                plan_run.status AS latest_plan_run_status,
+                questions.questions AS plan_questions,
+                questions.answers AS plan_answers,
+                questions.answered_at IS NULL AS plan_questions_waiting,
+                questions.ticket_id IS NOT NULL AS has_plan_questions,
+                split.parent_ticket_id IS NOT NULL AS split_parent
+            FROM tickets t
+            LEFT JOIN agents agent ON agent.id = t.assignee_agent_id
+            LEFT JOIN LATERAL (
+                SELECT max(c.created_at) AS at FROM ticket_comments c WHERE c.ticket_id = t.id
+            ) last_comment ON true
+            LEFT JOIN LATERAL (
+                SELECT c.id, c.plan_content_version FROM ticket_comments c
+                WHERE c.ticket_id = t.id AND c.intent = 'plan'
+                ORDER BY c.created_at DESC, c.id DESC
+                LIMIT 1
+            ) latest_plan ON true
+            LEFT JOIN LATERAL (
+                SELECT r.status FROM agent_runs r
+                WHERE r.ticket_id = t.id AND r.job_type = $2
+                ORDER BY r.created_at DESC
+                LIMIT 1
+            ) plan_run ON true
+            LEFT JOIN ticket_plan_questions questions ON questions.ticket_id = t.id
+            LEFT JOIN ticket_plan_splits split ON split.parent_ticket_id = t.id
+            WHERE t.id = ANY($1)
             "#,
         )
-        .bind(ticket_id)
+        .bind(&ids)
         .bind(crate::domain::workflow::JOB_TYPE_PLAN_TICKET)
-        .fetch_optional(self.pool)
-        .await
-        .map_err(TicketError::from)
+        .fetch_all(self.pool)
+        .await?;
+        let mut by_id: std::collections::HashMap<Uuid, sqlx::postgres::PgRow> = rows
+            .into_iter()
+            .map(|row| (row.get::<Uuid, _>("id"), row))
+            .collect();
+        let mut reviews = HumanReviewService::new(self.pool).get_many(&ids).await?;
+        let planning = crate::services::planning_service::PlanningService::new(self.pool);
+
+        let mut out = Vec::with_capacity(tickets.len());
+        for ticket in tickets {
+            let row = by_id.remove(&ticket.id).ok_or(TicketError::TicketNotFound)?;
+            let agent_name: Option<String> = row.get("agent_name");
+            let substatus_display = build_substatus_display(
+                ticket.substatus,
+                &ticket.substatus_metadata,
+                agent_name.as_deref(),
+            );
+            let latest_plan_id: Option<Uuid> = row.get("latest_plan_id");
+            let latest_plan_version: Option<i32> = row.get("latest_plan_version");
+            let plan_approved = plan_is_current(&ticket, latest_plan_id, latest_plan_version);
+            let plan_questions = if row.get::<bool, _>("has_plan_questions") {
+                let questions: serde_json::Value = row.get("plan_questions");
+                let answers: Option<serde_json::Value> = row.get("plan_answers");
+                Some(crate::services::planning_service::PlanQuestionsState {
+                    questions: serde_json::from_value(questions).unwrap_or_default(),
+                    answers: answers
+                        .and_then(|answers| serde_json::from_value(answers).ok())
+                        .unwrap_or_default(),
+                    waiting: row.get("plan_questions_waiting"),
+                })
+            } else {
+                None
+            };
+            let split_parent: bool = row.get("split_parent");
+            // Rare: only split parents need the sub-ticket check.
+            let verify_available = split_parent
+                && planning
+                    .verify_available(ticket.id)
+                    .await
+                    .map_err(plan_error)?;
+            out.push(TicketWithDisplay {
+                has_active_run: active.contains(&ticket.id),
+                has_plan: ticket.status == TicketStatus::PlanReview && latest_plan_id.is_some(),
+                human_review: reviews.remove(&ticket.id),
+                last_activity_at: row.get("last_activity_at"),
+                latest_plan_run_status: row.get("latest_plan_run_status"),
+                substatus_display,
+                plan_approved,
+                plan_questions,
+                split_parent,
+                verify_available,
+                ticket,
+            });
+        }
+        Ok(out)
     }
 }
 

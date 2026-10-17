@@ -135,7 +135,9 @@ pub(crate) struct TicketResponse {
     board_id: Uuid,
     repo_id: Option<Uuid>,
     title: String,
-    description: String,
+    /// Left out of board lists; the ticket view loads it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    description: Option<String>,
     status: String,
     substatus: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -279,7 +281,7 @@ pub(crate) fn ticket_to_response(item: TicketWithDisplay) -> TicketResponse {
         board_id: ticket.board_id,
         repo_id: ticket.repo_id,
         title: ticket.title,
-        description: ticket.description,
+        description: Some(ticket.description),
         status: ticket.status.to_string_snake(),
         substatus: ticket.substatus.map(|s| s.to_string_snake()),
         substatus_metadata: ticket.substatus_metadata,
@@ -785,7 +787,13 @@ async fn list_tickets(
         .await
         .map_err(map_error)?;
     Ok(Json(
-        tickets.into_iter().map(ticket_to_response).collect(),
+        tickets
+            .into_iter()
+            .map(|ticket| TicketResponse {
+                description: None,
+                ..ticket_to_response(ticket)
+            })
+            .collect(),
     ))
 }
 

@@ -132,3 +132,81 @@ async fn reject_done_with_waiting_substatus() {
         .unwrap();
     assert_eq!(patch.status(), StatusCode::BAD_REQUEST);
 }
+
+#[tokio::test]
+async fn a_large_board_lists_quickly_without_descriptions() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
+    let pool = state.db.clone().unwrap();
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
+    let board = uuid::Uuid::parse_str(&board_id).unwrap();
+    let agent_id = uuid::Uuid::parse_str(
+        &common::create_agent_with_preset_key(&app, "backend_engineer", "Builder", &cookie, &csrf).await,
+    )
+    .unwrap();
+    sqlx::query(
+        r#"
+        INSERT INTO tickets (id, board_id, title, description, status, created_by, assignee_agent_id)
+        SELECT gen_random_uuid(), $1, 'Ticket ' || n, repeat('d', 2000), 'backlog', 'user', $2
+        FROM generate_series(1, 2000) AS n
+        "#,
+    )
+    .bind(board)
+    .bind(agent_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"
+        INSERT INTO ticket_comments (id, ticket_id, author_type, body, intent)
+        SELECT gen_random_uuid(), t.id, 'human', 'note ' || n, 'progress_update'
+        FROM tickets t, generate_series(1, 10) AS n
+        WHERE t.board_id = $1
+        "#,
+    )
+    .bind(board)
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"
+        INSERT INTO agent_runs (id, ticket_id, agent_id, job_type, status, sandbox_profile_id)
+        SELECT gen_random_uuid(), t.id, $2, 'plan_ticket', 'succeeded', 'permissive'
+        FROM tickets t WHERE t.board_id = $1
+        "#,
+    )
+    .bind(board)
+    .bind(agent_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let started = std::time::Instant::now();
+    let res = app
+        .clone()
+        .oneshot(common::json_request(
+            "GET",
+            &format!("/api/boards/{board_id}/tickets"),
+            "",
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    let elapsed = started.elapsed();
+    assert_eq!(res.status(), StatusCode::OK);
+    let list = common::json_body(res).await;
+    let tickets = list.as_array().unwrap();
+    assert_eq!(tickets.len(), 2000);
+    assert!(tickets.iter().all(|ticket| ticket.get("description").is_none()));
+    assert_eq!(tickets[0]["latestPlanRunStatus"], "succeeded");
+    assert_eq!(tickets[0]["substatusDisplay"], serde_json::Value::Null);
+    assert!(tickets[0]["lastActivityAt"].is_string());
+    // One set-based query instead of five per ticket; was ~0.4 s at this size.
+    assert!(elapsed < std::time::Duration::from_secs(1), "board list took {elapsed:?}");
+    println!("2000-ticket board list: {elapsed:?}");
+
+    // The ticket view still gets the description.
+    let one = common::get_ticket(&app, tickets[0]["id"].as_str().unwrap(), &cookie, &csrf).await;
+    assert_eq!(one["description"].as_str().unwrap().len(), 2000);
+}
