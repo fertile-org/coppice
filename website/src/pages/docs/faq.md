@@ -30,8 +30,5 @@ That is not Coppice’s product. Coppice is built for managing agents: you start
 ## Windows?
 Windows 11 should be able to run the Linux x64 build through WSL, but we haven't tested it yet. See [Windows 11 (through WSL)](/docs/install#windows-11-through-wsl). If you try it, please [tell us how it went on GitHub](https://github.com/fertile-org/coppice/issues). A native Windows app isn't planned for this beta.
 
-## What’s next on the roadmap?
-- Role-owner agents (propose and signal; humans still approve) and scheduling  
-
 ## Where do contributors look?
 Architecture, development, and testing docs stay in the [GitHub repo](https://github.com/fertile-org/coppice/tree/main/docs). This site is for using Coppice.
