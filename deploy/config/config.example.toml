@@ -106,7 +106,9 @@ allowed_types = []
 minimum_confidence = "medium"
 default_page_size = 25
 max_page_size = 100
+# The most Knowledge items, pending or approved, that one board can hold. Items for agents on that board count too.
 max_active_per_board = 1000
+# The most Knowledge items, pending or approved, that apply to the whole workspace.
 max_active_workspace = 10000
 
 [knowledge.context_budget]

@@ -307,8 +307,10 @@ pub struct KnowledgeRetrievalConfig {
     pub default_page_size: usize,
     #[serde(default = "default_knowledge_list_max")]
     pub max_page_size: usize,
+    /// The most Knowledge items, pending or approved, that one board can hold. Items for agents on that board count too.
     #[serde(default = "default_knowledge_board_capacity")]
     pub max_active_per_board: i64,
+    /// The most Knowledge items, pending or approved, that apply to the whole workspace.
     #[serde(default = "default_knowledge_workspace_capacity")]
     pub max_active_workspace: i64,
 }
@@ -526,7 +528,6 @@ fn default_knowledge_list_limit() -> usize {
 fn default_knowledge_list_max() -> usize {
     100
 }
-// Board and agent items share the per-board cap; workspace items are counted separately, so that cap is higher.
 fn default_knowledge_board_capacity() -> i64 {
     1_000
 }
