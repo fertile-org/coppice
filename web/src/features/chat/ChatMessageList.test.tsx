@@ -113,6 +113,15 @@ describe('ChatMessageList', () => {
     expect(screen.getByTestId('chat-streaming-bubble')).toBeInTheDocument();
   });
 
+  it('shows one thinking bubble, not one inside another, before text arrives', () => {
+    renderList(
+      <ChatMessageList messages={[]} streamingAgent={{ runId: 'run-1', text: '' }} />,
+    );
+    const indicator = screen.getByTestId('thinking-indicator');
+    expect(indicator.closest('article')).toBeNull();
+    expect(screen.getAllByRole('status')).toHaveLength(1);
+  });
+
   it('virtualizes a long transcript in a scrollable log', () => {
     renderList(<ChatMessageList messages={messages} thinking />);
 
