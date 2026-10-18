@@ -4,6 +4,15 @@ import { Navigate, useSearchParams } from 'react-router-dom';
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
 import { Label } from '../../components/ui/label';
+import { DateTimePicker } from '../../components/ui/date-time-picker';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '../../components/ui/select';
+import { Switch } from '../../components/ui/switch';
 import { apiFetch, parseApiErrorMessage } from '../../lib/api';
 import { useSession } from '../auth/useSession';
 import { LEVEL_OPTIONS, LOGS_COPY, SOURCE_OPTIONS, savedExport, sourceLabel } from './copy';
@@ -58,6 +67,9 @@ function LogRow({ line }: { line: LogLine }) {
     </li>
   );
 }
+
+/** Radix Select needs a non-empty value; this one means every source. */
+const ALL_SOURCES = 'all';
 
 /** Live lines kept in memory. Older live lines drop off the end. */
 export const MAX_LIVE_LINES = 500;
@@ -249,54 +261,53 @@ export function LogsPage() {
       >
         <div className="flex flex-col gap-1.5">
           <Label htmlFor="logs-source">{LOGS_COPY.source}</Label>
-          <select
-            id="logs-source"
-            className="field-control w-full px-3 py-2 font-body text-sm"
-            value={filters.source}
-            onChange={(event) => setFilter('source', event.target.value)}
+          <Select
+            value={filters.source || ALL_SOURCES}
+            onValueChange={(value) => setFilter('source', value === ALL_SOURCES ? '' : value)}
           >
-            {SOURCE_OPTIONS.map((option) => (
-              <option key={option.label} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
+            <SelectTrigger id="logs-source">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {SOURCE_OPTIONS.map((option) => (
+                <SelectItem key={option.label} value={option.value || ALL_SOURCES}>
+                  {option.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
         <div className="flex flex-col gap-1.5">
           <Label htmlFor="logs-level">{LOGS_COPY.level}</Label>
-          <select
-            id="logs-level"
-            className="field-control w-full px-3 py-2 font-body text-sm"
-            value={filters.level}
-            onChange={(event) => setFilter('level', event.target.value)}
-          >
-            {LEVEL_OPTIONS.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
+          <Select value={filters.level} onValueChange={(value) => setFilter('level', value)}>
+            <SelectTrigger id="logs-level">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {LEVEL_OPTIONS.map((option) => (
+                <SelectItem key={option.value} value={option.value}>
+                  {option.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
         <fieldset className="grid gap-4 sm:col-span-2 sm:grid-cols-2">
           <legend className="sr-only">{LOGS_COPY.time}</legend>
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="logs-from">{LOGS_COPY.from}</Label>
-            <Input
+            <DateTimePicker
               id="logs-from"
-              type="datetime-local"
-              className="w-full"
               value={fromUtcRfc3339(filters.from)}
-              onChange={(event) => setFilter('from', toUtcRfc3339(event.target.value))}
+              onChange={(value) => setFilter('from', toUtcRfc3339(value))}
             />
           </div>
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="logs-to">{LOGS_COPY.to}</Label>
-            <Input
+            <DateTimePicker
               id="logs-to"
-              type="datetime-local"
-              className="w-full"
               value={fromUtcRfc3339(filters.to)}
-              onChange={(event) => setFilter('to', toUtcRfc3339(event.target.value))}
+              onChange={(value) => setFilter('to', toUtcRfc3339(value))}
             />
           </div>
         </fieldset>
@@ -319,14 +330,10 @@ export function LogsPage() {
             onChange={(event) => setFilter('q', event.target.value)}
           />
         </div>
-        <label className="flex items-center gap-2 self-end pb-2 font-body text-sm text-text-secondary">
-          <input
-            type="checkbox"
-            checked={live}
-            onChange={(event) => setLive(event.target.checked)}
-          />
-          {LOGS_COPY.live}
-        </label>
+        <div className="flex items-center gap-2 self-end pb-2.5">
+          <Switch id="logs-live" checked={live} onCheckedChange={setLive} />
+          <Label htmlFor="logs-live">{LOGS_COPY.live}</Label>
+        </div>
       </div>
 
       {logsQuery.isError && (
