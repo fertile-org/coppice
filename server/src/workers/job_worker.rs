@@ -167,6 +167,10 @@ async fn process_one(state: &AppState, worker_id: &str) -> anyhow::Result<()> {
                         RunOrchestrator::new(pool, &state.config.workflow)
                             .handle_terminal_run(&failed_run)
                             .await;
+                        // finish_failed does not return chat_session_id.
+                        if let Some(session_id) = run.chat_session_id {
+                            note_failed_chat_turn(pool, session_id, &message).await;
+                        }
                         publish_run_finished(
                             state,
                             pool,
@@ -197,6 +201,27 @@ async fn process_one(state: &AppState, worker_id: &str) -> anyhow::Result<()> {
     }
 
     Ok(())
+}
+
+const FAILED_CHAT_TURN_DETAIL_CHARS: usize = 500;
+
+/// Without this line the streamed text vanishes when a turn fails and the chat
+/// shows nothing.
+async fn note_failed_chat_turn(pool: &PgPool, session_id: uuid::Uuid, failure: &str) {
+    let body = failed_chat_turn_note(failure);
+    if let Err(err) = crate::services::chat_service::ChatService::new(pool)
+        .append_system_note(session_id, &body)
+        .await
+    {
+        tracing::warn!(%session_id, error = %err, "failed to note a failed chat turn");
+    }
+}
+
+fn failed_chat_turn_note(failure: &str) -> String {
+    format!(
+        "The agent stopped without sending a reply. Send your message again to retry.\n\nDetails: {}",
+        truncate_with_ellipsis(failure.trim(), FAILED_CHAT_TURN_DETAIL_CHARS)
+    )
 }
 
 /// Finish a check left active by an error raised before the check executor ran.
