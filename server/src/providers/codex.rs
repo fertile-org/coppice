@@ -160,6 +160,7 @@ impl AgentProvider for CodexProvider {
             ticket_id: input.ticket_id.clone(),
             result_before_exit: contract.result_before_exit,
             result_exit_grace: None,
+            stall_limits: None,
         };
         let mut handler = CodexLines {
             stream: input.stream.clone(),
@@ -168,6 +169,7 @@ impl AgentProvider for CodexProvider {
             last_message: String::new(),
             turn_failed: None,
             last_error: None,
+            tools: Default::default(),
         };
         let io = RunIo {
             cancel_rx: input.cancel_rx,
@@ -188,6 +190,9 @@ impl AgentProvider for CodexProvider {
             Ok(exit) => exit,
             Err(CliError::Spawn(e) | CliError::Io(e)) => return Err(ProviderError::Io(e)),
             Err(CliError::Cancelled) => return Err(ProviderError::Cancelled),
+            Err(CliError::Stalled { reason, stderr_tail }) => {
+                return Err(super::terminal::stalled("Codex", &reason, &stderr_tail));
+            }
             Err(CliError::TimedOut { stderr_tail }) => {
                 return Err(terminal::timed_out(
                     NAME,
@@ -237,9 +242,14 @@ struct CodexLines {
     /// The latest `error` event. Codex also reports retries this way, so it
     /// only explains a failure; it does not cause one.
     last_error: Option<String>,
+    tools: super::cli_runner::ToolTracker,
 }
 
 impl LineHandler for CodexLines {
+    fn tools_running(&self) -> bool {
+        self.tools.any()
+    }
+
     fn on_json(&mut self, value: &serde_json::Value) -> LineStep {
         let session_id = value
             .get("thread_id")
@@ -258,6 +268,20 @@ impl LineHandler for CodexLines {
             self.last_message = text;
         }
         let ty = value.get("type").and_then(|v| v.as_str());
+        if let (Some(kind), Some(id)) = (
+            value.pointer("/item/type").and_then(|v| v.as_str()),
+            value.pointer("/item/id").and_then(|v| v.as_str()),
+        ) {
+            let is_tool = matches!(
+                kind,
+                "command_execution" | "mcp_tool_call" | "web_search" | "file_change"
+            );
+            match ty {
+                Some("item.started") if is_tool => self.tools.started(id),
+                Some("item.completed") => self.tools.finished(id),
+                _ => {}
+            }
+        }
         match ty {
             Some("turn.failed") => {
                 self.turn_failed = Some(
@@ -326,6 +350,7 @@ mod tests {
                 last_message: String::new(),
                 turn_failed: None,
                 last_error: None,
+                tools: Default::default(),
             };
             let mut stopped = false;
             for line in lines {
@@ -406,6 +431,25 @@ mod tests {
             )
             .expect("contract");
             assert!(matches!(result, AgentRunResult::Done { .. }));
+        }
+
+        #[test]
+        fn commands_count_as_running_until_completed() {
+            let mut handler = CodexLines {
+                stream: None,
+                console: CodexConsolePublisher::new(super::super::super::tool_name_style("codex")),
+                assistant_text: String::new(),
+                last_message: String::new(),
+                turn_failed: None,
+                last_error: None,
+                tools: Default::default(),
+            };
+            handler.on_json(&json!({ "type": "item.started", "item": { "id": "m", "type": "agent_message" } }));
+            assert!(!handler.tools_running());
+            handler.on_json(&json!({ "type": "item.started", "item": { "id": "c1", "type": "command_execution", "command": "make" } }));
+            assert!(handler.tools_running());
+            handler.on_json(&json!({ "type": "item.completed", "item": { "id": "c1", "type": "command_execution" } }));
+            assert!(!handler.tools_running());
         }
 
         #[test]

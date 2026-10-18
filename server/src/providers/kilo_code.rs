@@ -171,6 +171,7 @@ impl AgentProvider for KiloCodeProvider {
             ticket_id: input.ticket_id.clone(),
             result_before_exit: contract.result_before_exit,
             result_exit_grace: None,
+            stall_limits: None,
         };
         let mut handler = KiloLines {
             stream: input.stream.clone(),
@@ -187,6 +188,9 @@ impl AgentProvider for KiloCodeProvider {
             Ok(exit) => exit,
             Err(CliError::Spawn(e) | CliError::Io(e)) => return Err(ProviderError::Io(e)),
             Err(CliError::Cancelled) => return Err(ProviderError::Cancelled),
+            Err(CliError::Stalled { reason, stderr_tail }) => {
+                return Err(super::terminal::stalled("Kilo Code", &reason, &stderr_tail));
+            }
             Err(CliError::TimedOut { stderr_tail }) => {
                 return Err(ProviderError::InvalidFixture(format!(
                     "kilo-code run timed out after {}s{}",

@@ -186,6 +186,7 @@ impl AgentProvider for ClaudeCodeProvider {
             ticket_id: input.ticket_id.clone(),
             result_before_exit: contract.result_before_exit,
             result_exit_grace: None,
+            stall_limits: None,
         };
         let mut handler = ClaudeLines {
             stream: input.stream.clone(),
@@ -193,6 +194,7 @@ impl AgentProvider for ClaudeCodeProvider {
             assistant_text: String::new(),
             expects_gateway: input.mcp.is_some(),
             terminal: ClaudeTerminal::default(),
+            tools: Default::default(),
         };
         let io = RunIo {
             cancel_rx: input.cancel_rx,
@@ -203,6 +205,9 @@ impl AgentProvider for ClaudeCodeProvider {
             Ok(exit) => exit,
             Err(CliError::Spawn(e) | CliError::Io(e)) => return Err(ProviderError::Io(e)),
             Err(CliError::Cancelled) => return Err(ProviderError::Cancelled),
+            Err(CliError::Stalled { reason, stderr_tail }) => {
+                return Err(super::terminal::stalled("Claude Code", &reason, &stderr_tail));
+            }
             Err(CliError::TimedOut { stderr_tail }) => {
                 return Err(terminal::timed_out(
                     NAME,
@@ -311,9 +316,40 @@ struct ClaudeLines {
     assistant_text: String,
     expects_gateway: bool,
     terminal: ClaudeTerminal,
+    tools: super::cli_runner::ToolTracker,
+}
+
+/// Tool calls in flight: `tool_use` starts one, its `tool_result` ends it.
+fn track_tools(tools: &mut super::cli_runner::ToolTracker, value: &serde_json::Value) {
+    let Some(content) = value
+        .get("message")
+        .and_then(|m| m.get("content"))
+        .and_then(|c| c.as_array())
+    else {
+        return;
+    };
+    for part in content {
+        match part.get("type").and_then(|t| t.as_str()) {
+            Some("tool_use") => {
+                if let Some(id) = part.get("id").and_then(|v| v.as_str()) {
+                    tools.started(id);
+                }
+            }
+            Some("tool_result") => {
+                if let Some(id) = part.get("tool_use_id").and_then(|v| v.as_str()) {
+                    tools.finished(id);
+                }
+            }
+            _ => {}
+        }
+    }
 }
 
 impl LineHandler for ClaudeLines {
+    fn tools_running(&self) -> bool {
+        self.tools.any()
+    }
+
     fn on_json(&mut self, value: &serde_json::Value) -> LineStep {
         let session_id = value
             .get("session_id")
@@ -335,6 +371,7 @@ impl LineHandler for ClaudeLines {
 
         let ty = value.get("type").and_then(|v| v.as_str());
         self.terminal.note_submit_attempts(value);
+        track_tools(&mut self.tools, value);
         if ty == Some("system") && value.get("subtype").and_then(|v| v.as_str()) == Some("init") {
             self.terminal.permission_mode = value
                 .get("permissionMode")
@@ -490,6 +527,7 @@ mod tests {
                 assistant_text: String::new(),
                 expects_gateway: gateway,
                 terminal: ClaudeTerminal::default(),
+                tools: Default::default(),
             }
         }
 
@@ -610,6 +648,18 @@ mod tests {
             assert!(decide(&h, &exit(0, &[]), ContextProfile::Conversation).is_ok());
             let msg = decide(&h, &exit(0, &[]), ContextProfile::Full).unwrap_err().to_string();
             assert!(msg.contains("no result contract found in claude-code output"), "{msg}");
+        }
+
+        #[test]
+        fn a_tool_counts_as_running_until_its_result() {
+            let mut h = handler(false);
+            assert!(!h.tools_running());
+            h.on_json(&json!({ "type": "assistant", "message": { "content": [
+                { "type": "tool_use", "id": "b1", "name": "Bash", "input": { "command": "cargo test" } } ] } }));
+            assert!(h.tools_running());
+            h.on_json(&json!({ "type": "user", "message": { "content": [
+                { "type": "tool_result", "tool_use_id": "b1", "content": "ok" } ] } }));
+            assert!(!h.tools_running());
         }
 
         #[test]

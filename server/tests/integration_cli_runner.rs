@@ -24,6 +24,7 @@ fn fake_cli(env: &[(&str, &str)], timeout: Duration) -> CliInvocation {
         ticket_id: None,
         result_before_exit: false,
         result_exit_grace: None,
+        stall_limits: None,
     }
 }
 
@@ -421,4 +422,55 @@ async fn wait_dead(pid: u32) -> bool {
         }
         tokio::time::sleep(Duration::from_millis(30)).await;
     }
+}
+
+/// Reports a tool as running the whole time.
+struct BusyTool;
+
+impl LineHandler for BusyTool {
+    fn on_json(&mut self, _value: &Value) -> LineStep {
+        LineStep::default()
+    }
+    fn tools_running(&self) -> bool {
+        true
+    }
+}
+
+fn stalling(env: &[(&str, &str)]) -> CliInvocation {
+    let mut inv = fake_cli(env, Duration::from_secs(10));
+    inv.stall_limits = Some((Duration::from_millis(600), Duration::from_millis(600)));
+    inv
+}
+
+#[tokio::test]
+async fn a_cli_silent_from_the_start_is_stopped() {
+    let inv = stalling(&[("FAKE_CLI_STDERR", "waiting for login"), ("FAKE_CLI_SLEEP_MS", "8000")]);
+    let started = std::time::Instant::now();
+    let err = run_cli(inv, &mut Recorder::default(), io()).await.expect_err("stalled");
+    assert!(started.elapsed() < Duration::from_secs(5));
+    match err {
+        CliError::Stalled { reason, stderr_tail } => {
+            assert!(reason.contains("printed nothing in its first"), "{reason}");
+            assert_eq!(stderr_tail, ["waiting for login"]);
+        }
+        other => panic!("{other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn a_cli_that_goes_quiet_is_stopped() {
+    let inv = stalling(&[("FAKE_CLI_LINES", "{\"type\":\"a\"}"), ("FAKE_CLI_SLEEP_MS", "8000")]);
+    let err = run_cli(inv, &mut Recorder::default(), io()).await.expect_err("stalled");
+    match err {
+        CliError::Stalled { reason, .. } => assert!(reason.contains("with no tool running"), "{reason}"),
+        other => panic!("{other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn a_running_tool_is_allowed_to_be_quiet() {
+    let mut inv = stalling(&[("FAKE_CLI_LINES", "{\"type\":\"a\"}"), ("FAKE_CLI_SLEEP_MS", "8000")]);
+    inv.timeout = Duration::from_millis(2000);
+    let err = run_cli(inv, &mut BusyTool, io()).await.expect_err("timed out");
+    assert!(matches!(err, CliError::TimedOut { .. }), "{err:?}");
 }

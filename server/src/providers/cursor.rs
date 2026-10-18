@@ -99,6 +99,7 @@ impl AgentProvider for CursorProvider {
             ticket_id: input.ticket_id.clone(),
             result_before_exit: contract.result_before_exit,
             result_exit_grace: None,
+            stall_limits: None,
         };
         let mut handler = CursorLines {
             stream: input.stream.clone(),
@@ -106,6 +107,7 @@ impl AgentProvider for CursorProvider {
             assistant_text: String::new(),
             result_error: None,
             saw_result_event: false,
+            tools: Default::default(),
         };
         let io = RunIo {
             cancel_rx: input.cancel_rx,
@@ -130,6 +132,9 @@ impl AgentProvider for CursorProvider {
             }
             Err(CliError::Io(e)) => return Err(ProviderError::Io(e)),
             Err(CliError::Cancelled) => return Err(ProviderError::Cancelled),
+            Err(CliError::Stalled { reason, stderr_tail }) => {
+                return Err(super::terminal::stalled("Cursor", &reason, &stderr_tail));
+            }
             Err(CliError::TimedOut { stderr_tail }) => {
                 return Err(ProviderError::InvalidFixture(format!(
                     "`{command}` timed out after {}s{}",
@@ -186,10 +191,24 @@ struct CursorLines {
     assistant_text: String,
     result_error: Option<String>,
     saw_result_event: bool,
+    tools: super::cli_runner::ToolTracker,
 }
 
 impl LineHandler for CursorLines {
+    fn tools_running(&self) -> bool {
+        self.tools.any()
+    }
+
     fn on_json(&mut self, value: &serde_json::Value) -> LineStep {
+        if value.get("type").and_then(|v| v.as_str()) == Some("tool_call") {
+            if let Some(id) = value.get("call_id").and_then(|v| v.as_str()) {
+                match value.get("subtype").and_then(|v| v.as_str()) {
+                    Some("started") => self.tools.started(id),
+                    Some("completed") => self.tools.finished(id),
+                    _ => {}
+                }
+            }
+        }
         let session_id = value
             .get("session_id")
             .and_then(|v| v.as_str())

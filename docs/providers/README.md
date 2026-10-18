@@ -97,6 +97,15 @@ System → Connectors shows each connector's switch, CLI readiness, detected aut
 
 `coppice connector doctor <id>` runs the same local checks from a terminal.
 
+## When a run is stopped or fails
+
+- **Timeouts.** Besides each connector's `run_timeout_secs`, a stream-JSON CLI (Claude Code, Codex, Cursor, Kilo Code) is stopped when it prints nothing in its first 3 minutes, or when it prints nothing for 20 minutes while no tool is running. A running tool, such as a long build, may be quiet for longer. OpenCode 2 over ACP has its own limits (see [opencode.md](opencode.md)).
+- **Errors.** Every exit, timeout, stall, and error result carries the CLI's stderr. Claude Code's `is_error` and `terminal_reason` (`prompt_too_long` fails even without the error flag) and Codex's `turn.failed` fail the run with the CLI's own message. A failed or refused `result_submit` is named with Claude Code's permission mode.
+- **Chat replies.** A chat turn that ended cleanly with plain text but no `result_submit` posts that text as the reply. A turn whose `result_submit` failed is a setup problem and fails instead.
+- **Resume.** A failure counts as "session gone" only when it says so (`providers/resume.rs`); then chat retries once in a fresh session. Network, quota, and sign-in failures keep the session.
+- **Version floors.** Claude Code needs 2.0.0 and OpenCode 1.1.54. An older CLI fails at run start with both versions.
+- **Each run** logs one `cli stream summary` line: lines read, JSON lines, whether a terminal event arrived, how it ended, the exit code, and the duration.
+
 ## Tests
 
 No real agent CLI runs in CI or automated tests. [CLI integration review](cli-integration-review.md) lists the gaps this leaves, how to close them, and planned connector changes.

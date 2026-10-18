@@ -45,6 +45,11 @@ pub fn timed_out(name: &str, secs: u64, stderr: &[String]) -> ProviderError {
     ))
 }
 
+/// Stopped for printing nothing (see `cli_runner::FIRST_OUTPUT_TIMEOUT`).
+pub fn stalled(name: &str, reason: &str, stderr: &[String]) -> ProviderError {
+    ProviderError::InvalidFixture(format!("{name}: {reason}{}", stderr_suffix(stderr)))
+}
+
 /// The terminal event said the turn failed.
 pub fn error_result(name: &str, detail: Option<&str>, stderr: &[String]) -> ProviderError {
     let detail = detail.map(str::trim).filter(|d| !d.is_empty());
@@ -159,7 +164,11 @@ mod tests {
         )
         .expect("parsed");
         match result {
-            AgentRunResult::Done { summary, changed_files, .. } => {
+            AgentRunResult::Done {
+                summary,
+                changed_files,
+                ..
+            } => {
                 assert_eq!(summary, "from the contract");
                 assert_eq!(changed_files, ["a.rs"]);
             }
