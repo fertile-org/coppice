@@ -64,7 +64,7 @@ enabled = true
 
 ## If something goes wrong
 
-Start at **Tools → Connectors** (admin): it shows whether `claude` is found, which auth is detected, the probe output, the last real run, and **Test connection** runs a real gateway check with a failure reason ([diagnostics](README.md#diagnostics-tools--connectors)).
+Start at **System → Connectors** (admin): it shows whether `claude` is found, which auth is detected, the probe output, the last real run, and **Test connection** runs a real gateway check with a failure reason ([diagnostics](README.md#diagnostics-tools--connectors)).
 
 | Symptom | What to try |
 |---------|-------------|

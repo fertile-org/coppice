@@ -20,7 +20,7 @@ A connector is how Coppice drives one agent CLI. The board, tickets and worktree
 
 At startup, the server adds common bin dirs to its `PATH` if they exist and aren't already there: `~/.local/bin`, `~/.opencode/bin`, `~/.npm-global/bin`, `~/.bun/bin`, `/opt/homebrew/bin` and `/usr/local/bin`. The desktop app also passes in the `PATH` from your login shell. Probes and runs use this same `PATH`.
 
-For each connector, Coppice resolves the binary (the `command` key if set, otherwise the descriptor binary). It runs the probe (10 s cap), then the sign-in check: env var names, credential files, or the CLI's own status command (3 s cap). The sign-in check never opens a browser, prompts, or calls a model. The result is shown in the agent form and in Tools → Connectors:
+For each connector, Coppice resolves the binary (the `command` key if set, otherwise the descriptor binary). It runs the probe (10 s cap), then the sign-in check: env var names, credential files, or the CLI's own status command (3 s cap). The sign-in check never opens a browser, prompts, or calls a model. The result is shown in the agent form and in System → Connectors:
 
 | Readiness | Label | When |
 | --- | --- | --- |
@@ -55,7 +55,7 @@ Where the config lives:
 | From source | Defaults, then `~/.config/coppice/config.toml`, then `./config.toml`, then `COPPICE_CONFIG`, then environment variables (last wins) |
 | Docker Compose | `deploy/config/config.toml`, mounted at `/etc/coppice/config.toml` |
 
-The Tools → Connectors switch and saving an agent both turn a connector on immediately. They write into `config.toml` and keep comments and other keys. `coppice connector enable` and hand edits apply the next time the server starts.
+The System → Connectors switch and saving an agent both turn a connector on immediately. They write into `config.toml` and keep comments and other keys. `coppice connector enable` and hand edits apply the next time the server starts.
 
 ## Chat and session resume
 
@@ -89,11 +89,11 @@ Every run gets a per-run token for the Coppice MCP gateway at `POST /mcp`, hande
 
 Plugin MCP tools are proxied through the same gateway as `<plugin>__<tool>`, so connectors need no per-plugin wiring. More in [architecture.md](../architecture.md#plugin-mcp-proxy).
 
-## Diagnostics (Tools → Connectors)
+## Diagnostics (System → Connectors)
 
-Tools → Connectors shows each connector's switch, CLI readiness, detected auth (env var names and file paths only, never values), probe output, last real run, and last test.
+System → Connectors shows each connector's switch, CLI readiness, detected auth (env var names and file paths only, never values), probe output, last real run, and last test.
 
-**Test connection** runs a real agent run through the production path against a synthetic ticket in a scratch directory. It passes when the agent calls `ticket_get` and `result_submit` and submits `done`. That check uses read-only tools. `kilo-code` has no read-only tool turn, so its Test connection runs `kilo --version` instead and passes or fails with that command's own result.
+**Test connection** runs a real agent run through the production path against a synthetic ticket in a scratch directory, once for each mode Coppice launches the connector in: **Chat** (read-only chat flags), **Planning** (the planning flags), then **Ticket work** (the write flags). Each phase must call `ticket_get` and `result_submit` and submit `done`. In a phase that must block writes (chat, and planning where the connector enforces read-only), the agent is also asked to create `coppice-write-check.txt`; if that file appears, the check fails with "this mode did not block writes". The check stops at the first failing phase and names it, for example `Chat: result_submit was not called`. Every connector, Kilo Code included, gets this real check. It sends three prompts, so it only runs when you click it.
 
 `coppice connector doctor <id>` runs the same local checks from a terminal.
 

@@ -93,13 +93,13 @@ List models: `opencode models zai-coding-plan` (inside the server container or o
 
 ## If something goes wrong
 
-Start at **Tools → Connectors** (admin): it shows whether `opencode` is found, whether auth is detected or verified by the `opencode auth list` probe, the probe output, the last real run, and **Test connection** runs a real gateway check with a failure reason ([diagnostics](README.md#diagnostics-tools--connectors)).
+Start at **System → Connectors** (admin): it shows whether `opencode` is found, whether auth is detected or verified by the `opencode auth list` probe, the probe output, the last real run, and **Test connection** runs a real gateway check with a failure reason ([diagnostics](README.md#diagnostics-tools--connectors)).
 
 | Symptom | What to try |
 |---------|-------------|
 | Binary missing | Re-run `install`; PATH should include `/home/coppice/.opencode/bin` |
 | Auth missing | Re-run `setup` (`opencode auth login`) |
-| Agent health `missing_config` | If the message says OpenCode is turned off, turn it on in Tools → Connectors or save the agent again. If it names a model provider, set that id in `model_providers` (a hand-edit is read on the next server start) or leave the list empty so Coppice reads providers from `opencode models` |
+| Agent health `missing_config` | If the message says OpenCode is turned off, turn it on in System → Connectors or save the agent again. If it names a model provider, set that id in `model_providers` (a hand-edit is read on the next server start) or leave the list empty so Coppice reads providers from `opencode models` |
 | Live Session empty / run fails | Check the run error (a per-run `opencode serve` that fails to start names the cause) and `doctor` |
 | Run times out on long tests | Raise `run_timeout_secs`, or prefer shorter agent test commands |
 

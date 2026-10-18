@@ -4,6 +4,7 @@ use super::cli_runner::{
 };
 use super::cli_version;
 use super::codex_console::CodexConsolePublisher;
+use super::terminal;
 use super::{
     worktree_dir_from_context, AgentProvider, AgentRunInput, AgentRunResult, ProviderError,
 };
@@ -164,6 +165,9 @@ impl AgentProvider for CodexProvider {
             stream: input.stream.clone(),
             console: CodexConsolePublisher::new(super::tool_name_style(self.id())),
             assistant_text: String::new(),
+            last_message: String::new(),
+            turn_failed: None,
+            last_error: None,
         };
         let io = RunIo {
             cancel_rx: input.cancel_rx,
@@ -184,25 +188,41 @@ impl AgentProvider for CodexProvider {
             Ok(exit) => exit,
             Err(CliError::Spawn(e) | CliError::Io(e)) => return Err(ProviderError::Io(e)),
             Err(CliError::Cancelled) => return Err(ProviderError::Cancelled),
-            Err(CliError::TimedOut { .. }) => {
-                return Err(ProviderError::InvalidFixture(format!(
-                    "codex run timed out after {}s",
-                    run_timeout.as_secs()
-                )));
+            Err(CliError::TimedOut { stderr_tail }) => {
+                return Err(terminal::timed_out(
+                    NAME,
+                    run_timeout.as_secs(),
+                    &stderr_tail,
+                ));
             }
         };
-
-        if !exit.status.success() && !exit.had_terminal_result {
-            return Err(ProviderError::InvalidFixture(format!(
-                "codex exited with status {}",
-                exit.status
-            )));
-        }
-
-        extract_result_from_text(&handler.assistant_text).ok_or_else(|| {
-            ProviderError::MissingResult("no result contract found in codex output".into())
-        })
+        decide(&handler, &exit, input.context_profile)
     }
+}
+
+const NAME: &str = "Codex";
+
+/// The run's outcome once the CLI is done.
+fn decide(
+    handler: &CodexLines,
+    exit: &super::cli_runner::CliExit,
+    profile: crate::domain::context_profile::ContextProfile,
+) -> Result<AgentRunResult, ProviderError> {
+    if let Some(reason) = &handler.turn_failed {
+        let detail = reason.as_deref().or(handler.last_error.as_deref());
+        return Err(terminal::error_result(NAME, detail, &exit.stderr_tail));
+    }
+    if !exit.status.success() && !exit.had_terminal_result {
+        return Err(terminal::exited(NAME, &exit.status, &exit.stderr_tail));
+    }
+    // A contract may span several messages; a plain chat reply is the last one.
+    if let Some(result) = extract_result_from_text(&handler.assistant_text) {
+        return Ok(result);
+    }
+    let stderr = terminal::stderr_suffix(&exit.stderr_tail);
+    terminal::result_from_text(&handler.last_message, profile, NAME, || {
+        format!("no result contract found in codex output{stderr}")
+    })
 }
 
 /// Forwards console events and accumulates agent messages; `turn.completed`
@@ -211,6 +231,12 @@ struct CodexLines {
     stream: Option<Arc<RunStreamHandle>>,
     console: CodexConsolePublisher,
     assistant_text: String,
+    last_message: String,
+    /// `turn.failed`, with its message when it had one.
+    turn_failed: Option<Option<String>>,
+    /// The latest `error` event. Codex also reports retries this way, so it
+    /// only explains a failure; it does not cause one.
+    last_error: Option<String>,
 }
 
 impl LineHandler for CodexLines {
@@ -229,11 +255,30 @@ impl LineHandler for CodexLines {
 
         if let Some(text) = extract_assistant_text(value) {
             self.assistant_text.push_str(&text);
+            self.last_message = text;
+        }
+        let ty = value.get("type").and_then(|v| v.as_str());
+        match ty {
+            Some("turn.failed") => {
+                self.turn_failed = Some(
+                    value
+                        .pointer("/error/message")
+                        .and_then(|v| v.as_str())
+                        .map(str::to_string),
+                );
+            }
+            Some("error") => {
+                self.last_error = value
+                    .get("message")
+                    .and_then(|v| v.as_str())
+                    .map(str::to_string);
+            }
+            _ => {}
         }
 
         LineStep {
             session_id,
-            stop: value.get("type").and_then(|v| v.as_str()) == Some("turn.completed"),
+            stop: matches!(ty, Some("turn.completed") | Some("turn.failed")),
         }
     }
 }
@@ -266,6 +311,110 @@ fn extract_assistant_text(value: &serde_json::Value) -> Option<String> {
 mod tests {
     use super::*;
     use std::path::PathBuf;
+
+    mod outcome {
+        use super::super::*;
+        use crate::domain::context_profile::ContextProfile;
+        use serde_json::json;
+        use std::os::unix::process::ExitStatusExt;
+
+        fn run(lines: &[serde_json::Value], code: i32, stderr: &[&str], profile: ContextProfile) -> Result<AgentRunResult, ProviderError> {
+            let mut handler = CodexLines {
+                stream: None,
+                console: CodexConsolePublisher::new(super::super::super::tool_name_style("codex")),
+                assistant_text: String::new(),
+                last_message: String::new(),
+                turn_failed: None,
+                last_error: None,
+            };
+            let mut stopped = false;
+            for line in lines {
+                stopped = handler.on_json(line).stop;
+            }
+            let exit = super::super::super::cli_runner::CliExit {
+                status: std::process::ExitStatus::from_raw(code << 8),
+                stderr_tail: stderr.iter().map(|s| s.to_string()).collect(),
+                had_terminal_result: stopped,
+                stopped_after_result: false,
+            };
+            decide(&handler, &exit, profile)
+        }
+
+        fn message(id: &str, text: &str) -> serde_json::Value {
+            json!({ "type": "item.completed", "item": { "id": id, "type": "agent_message", "text": text } })
+        }
+
+        #[test]
+        fn a_failed_turn_fails_with_its_message() {
+            let err = run(
+                &[json!({ "type": "turn.failed", "error": { "message": "usage limit reached" } })],
+                1,
+                &["warn: quota"],
+                ContextProfile::Full,
+            )
+            .unwrap_err();
+            assert!(matches!(err, ProviderError::MissingResult(_)));
+            assert!(err.to_string().contains("Codex ended with an error: usage limit reached (stderr: warn: quota)"), "{err}");
+        }
+
+        #[test]
+        fn a_failed_turn_without_a_message_falls_back_to_the_last_error_event() {
+            let err = run(
+                &[json!({ "type": "error", "message": "stream disconnected" }), json!({ "type": "turn.failed" })],
+                0,
+                &[],
+                ContextProfile::Full,
+            )
+            .unwrap_err();
+            assert!(err.to_string().contains("stream disconnected"), "{err}");
+        }
+
+        #[test]
+        fn a_retry_error_event_alone_is_not_a_failure() {
+            let done = r#"{"status":"done","summary":"ok"}"#;
+            let result = run(
+                &[json!({ "type": "error", "message": "Reconnecting... 1/5" }), message("m1", done), json!({ "type": "turn.completed" })],
+                0,
+                &[],
+                ContextProfile::Full,
+            );
+            assert!(result.is_ok(), "{result:?}");
+        }
+
+        #[test]
+        fn chat_replies_with_the_last_message_not_the_progress_notes() {
+            let reply = run(
+                &[message("m1", "Let me look around."), message("m2", "Here is the answer."), json!({ "type": "turn.completed" })],
+                0,
+                &[],
+                ContextProfile::Conversation,
+            )
+            .expect("reply");
+            match reply {
+                AgentRunResult::Done { summary, .. } => assert_eq!(summary, "Here is the answer."),
+                other => panic!("{other:?}"),
+            }
+        }
+
+        #[test]
+        fn a_contract_split_over_messages_still_parses() {
+            let result = run(
+                &[message("m1", r#"{"status":"done","#), message("m2", r#""summary":"joined"}"#), json!({ "type": "turn.completed" })],
+                0,
+                &[],
+                ContextProfile::Full,
+            )
+            .expect("contract");
+            assert!(matches!(result, AgentRunResult::Done { .. }));
+        }
+
+        #[test]
+        fn an_exit_before_finishing_carries_stderr() {
+            let err = run(&[], 2, &["error: unexpected argument '--foo'"], ContextProfile::Full).unwrap_err();
+            assert!(matches!(err, ProviderError::InvalidFixture(_)));
+            assert!(err.to_string().contains("unexpected argument"), "{err}");
+        }
+    }
 
     #[test]
     fn blank_model_omits_model_flag_from_launched_command() {
@@ -486,22 +635,36 @@ mod tests {
         assert!(server_names(&project_doc).contains("project_evil"));
 
         let ticket = launch(false, false, true);
-        assert!(ticket.iter().any(|arg| arg == "--dangerously-bypass-approvals-and-sandbox"));
+        assert!(ticket
+            .iter()
+            .any(|arg| arg == "--dangerously-bypass-approvals-and-sandbox"));
         assert!(!ticket.iter().any(|arg| arg == "--ignore-user-config"));
         assert_eq!(
             effective_mcp_servers(&user, &project, &ticket),
-            vec!["coppice".to_string(), "project_evil".to_string(), "user_evil".to_string()]
+            vec![
+                "coppice".to_string(),
+                "project_evil".to_string(),
+                "user_evil".to_string()
+            ]
         );
 
         let args = launch(true, true, true);
-        assert!(args.windows(2).any(|pair| pair == ["--sandbox", "read-only"]));
-        assert!(!args.iter().any(|arg| arg == "--dangerously-bypass-approvals-and-sandbox"));
+        assert!(args
+            .windows(2)
+            .any(|pair| pair == ["--sandbox", "read-only"]));
+        assert!(!args
+            .iter()
+            .any(|arg| arg == "--dangerously-bypass-approvals-and-sandbox"));
         assert!(args.iter().any(|arg| arg == "--ignore-user-config"));
-        assert!(args.iter().any(|arg| arg.contains("mcp_servers.coppice.url=")));
-        assert!(args.iter().any(|arg| {
-            arg.contains("mcp_servers.coppice.bearer_token_env_var=")
-        }));
-        assert!(!args.iter().any(|arg| arg.contains("user_evil") || arg.contains("project_evil")));
+        assert!(args
+            .iter()
+            .any(|arg| arg.contains("mcp_servers.coppice.url=")));
+        assert!(args
+            .iter()
+            .any(|arg| { arg.contains("mcp_servers.coppice.bearer_token_env_var=") }));
+        assert!(!args
+            .iter()
+            .any(|arg| arg.contains("user_evil") || arg.contains("project_evil")));
         assert_eq!(
             effective_mcp_servers(&user, &project, &args),
             vec!["coppice".to_string()]

@@ -11,7 +11,7 @@ use super::{
 use crate::mcp::grant::McpAccess;
 use crate::mcp::wiring::McpServerSpec;
 use crate::services::ticket_attachments;
-use crate::sessions::opencode_events::{coppice_run_prompt, extract_result_from_text};
+use crate::sessions::opencode_events::coppice_run_prompt;
 use crate::sessions::run_registry::RunStreamHandle;
 use async_trait::async_trait;
 use coppice_config::CursorProviderConfig;
@@ -164,12 +164,17 @@ impl AgentProvider for CursorProvider {
             );
         }
 
-        extract_result_from_text(&handler.assistant_text).ok_or_else(|| {
-            ProviderError::MissingResult(format!(
-                "no result contract found in `{command}` output{}",
-                format_stderr_suffix(&stderr_tail)
-            ))
-        })
+        super::terminal::result_from_text(
+            &handler.assistant_text,
+            input.context_profile,
+            "Cursor",
+            || {
+                format!(
+                    "no result contract found in `{command}` output{}",
+                    format_stderr_suffix(&stderr_tail)
+                )
+            },
+        )
     }
 }
 
@@ -419,6 +424,7 @@ fn result_event_is_error(value: &serde_json::Value) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::sessions::opencode_events::extract_result_from_text;
     use std::path::PathBuf;
 
     fn fixtures_root() -> PathBuf {

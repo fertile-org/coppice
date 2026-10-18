@@ -293,7 +293,7 @@ async fn kilo_stops_on_session_idle() {
 #[tokio::test]
 async fn kilo_timeout_message() {
     let wt = worktree(&[
-        ("FAKE_CLI_STDERR", "ignored"),
+        ("FAKE_CLI_STDERR", "still loading models"),
         ("FAKE_CLI_SLEEP_MS", "10000"),
     ]);
 
@@ -302,7 +302,10 @@ async fn kilo_timeout_message() {
         .await
         .expect_err("timeout");
 
-    assert_eq!(invalid_fixture(err), "kilo-code run timed out after 1s");
+    assert_eq!(
+        invalid_fixture(err),
+        "kilo-code run timed out after 1s (stderr: still loading models)"
+    );
 }
 
 #[tokio::test]

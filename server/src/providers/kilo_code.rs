@@ -4,8 +4,7 @@ use super::cli_runner::{
 use super::cli_version;
 use super::kilo_console::KiloConsolePublisher;
 use super::{
-    run_dir, worktree_dir_from_context, AgentProvider, AgentRunInput,
-    AgentRunResult, ProviderError,
+    run_dir, worktree_dir_from_context, AgentProvider, AgentRunInput, AgentRunResult, ProviderError,
 };
 use crate::mcp::grant::McpAccess;
 use crate::mcp::wiring::McpServerSpec;
@@ -188,10 +187,11 @@ impl AgentProvider for KiloCodeProvider {
             Ok(exit) => exit,
             Err(CliError::Spawn(e) | CliError::Io(e)) => return Err(ProviderError::Io(e)),
             Err(CliError::Cancelled) => return Err(ProviderError::Cancelled),
-            Err(CliError::TimedOut { .. }) => {
+            Err(CliError::TimedOut { stderr_tail }) => {
                 return Err(ProviderError::InvalidFixture(format!(
-                    "kilo-code run timed out after {}s",
-                    run_timeout.as_secs()
+                    "kilo-code run timed out after {}s{}",
+                    run_timeout.as_secs(),
+                    super::terminal::stderr_suffix(&stderr_tail)
                 )));
             }
         };
@@ -211,7 +211,10 @@ impl AgentProvider for KiloCodeProvider {
                     &exit.stderr_tail,
                 )));
             }
-            return Err(ProviderError::InvalidFixture(detail));
+            return Err(ProviderError::InvalidFixture(with_stderr(
+                detail,
+                &exit.stderr_tail,
+            )));
         }
 
         if let Some(result) = extract_result_from_text(&handler.assistant_text) {
@@ -219,9 +222,13 @@ impl AgentProvider for KiloCodeProvider {
                 return Ok(result);
             }
         } else if !resuming {
-            return Err(ProviderError::MissingResult(
-                "no result contract found in kilo-code output".into(),
-            ));
+            let stderr = super::terminal::stderr_suffix(&exit.stderr_tail);
+            return super::terminal::result_from_text(
+                &handler.assistant_text,
+                input.context_profile,
+                "Kilo Code",
+                || format!("no result contract found in kilo-code output{stderr}"),
+            );
         }
 
         let mut detail = if handler.saw_error {
@@ -247,7 +254,8 @@ struct KiloLines {
 impl LineHandler for KiloLines {
     fn on_json(&mut self, value: &Value) -> LineStep {
         if let Some(stream) = &self.stream {
-            if let Some(model) = crate::providers::reported_model::reported_model("kilo-code", value)
+            if let Some(model) =
+                crate::providers::reported_model::reported_model("kilo-code", value)
             {
                 stream.note_reported_model(&model);
             }

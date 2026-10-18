@@ -65,7 +65,7 @@ command = "kilo"
 
 ## If something goes wrong
 
-Start at **Tools → Connectors** (admin): it shows whether `kilo` is found, which auth is detected, the probe output, the last real run, and **Test connection** runs `kilo --version` and reports whether that command succeeded ([diagnostics](README.md#diagnostics-tools--connectors)). A ticket run failing with `mcp_unavailable` suggests the CLI ignores `KILO_CONFIG` (see the [providers README](README.md#coppice-mcp-gateway-tool-first-runs)).
+Start at **System → Connectors** (admin): it shows whether `kilo` is found, which auth is detected, the probe output, the last real run, and **Test connection** runs a real chat, planning, and ticket turn and names the first one that fails ([diagnostics](README.md#diagnostics-tools--connectors)). A ticket run failing with `mcp_unavailable` suggests the CLI ignores `KILO_CONFIG` (see the [providers README](README.md#coppice-mcp-gateway-tool-first-runs)).
 
 | Symptom | What to try |
 |---------|-------------|
@@ -76,7 +76,7 @@ Start at **Tools → Connectors** (admin): it shows whether `kilo` is found, whi
 
 ## Behavior notes
 
-- **Sign-in:** Kilo has no free non-interactive auth check (`kilo auth` opens a TUI). A found binary is labeled **Installed**, not Ready. Tools → Connectors adds: "Coppice can't check this sign-in without using your plan. A run will show an error if you're signed out."
+- **Sign-in:** Kilo has no free non-interactive auth check (`kilo auth` opens a TUI). A found binary is labeled **Installed**, not Ready. System → Connectors adds: "Coppice can't check this sign-in without using your plan. A run will show an error if you're signed out."
 - **Agent Chat:** On, in the per-chat folder, with the untested banner: "Coppice hasn't confirmed that Kilo Code stays read-only. The agent can still run commands on your computer." Chat passes `--auto --agent ask`. Plan runs pass `--auto --agent plan`. Later chat turns append `--session <id>` taken from the previous turn's JSON `sessionID`, and the prompt for that turn is only the latest human message. If that run exits non-zero, emits an error event, or returns no output, Coppice clears the stored id and retries once without `--session`, with the same bounded transcript a chat that does not resume uses. The id saved after that retry is the new run's `sessionID`. Ask mode denies writes; `--auto` still approves permissions that are not denied, including MCP. A live write was not shown to be blocked. Not tried against a real `kilo` binary. Test connection still runs `kilo --version`. Ticket runs still use `kilo run --auto`.
 - **Live console:** Streams assistant output while the run is active. After a server restart mid-run, Coppice replays the saved log.
 - **Continued tickets:** Prefer checkpoint-style `continued` runs. Ticket runs do not resume a Kilo session (`run_resume` stays off). Chat follow-ups do, via `--session`.

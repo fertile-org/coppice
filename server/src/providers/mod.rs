@@ -25,6 +25,7 @@ pub mod opencode_models;
 pub mod registry;
 pub mod reported_model;
 pub mod resume;
+pub mod terminal;
 
 pub use coppice_connectors::{ConnectorDescriptor, ToolNameStyle};
 pub use models::{ModelCatalog, ModelInfo};
