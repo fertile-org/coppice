@@ -1,11 +1,16 @@
 import '@testing-library/jest-dom/vitest';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { fireEvent, render, screen } from '@testing-library/react';
-import { MemoryRouter, useLocation } from 'react-router-dom';
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ToastProvider } from '../../components/ToastProvider';
 import { MIN_PASSWORD_CHARS } from '../../lib/passwords';
-import { ToolsPage } from './ToolsPage';
+import {
+  BackupPage,
+  ConnectorsPage,
+  LegacyLogsRedirect,
+  LegacyToolsRedirect,
+} from './SystemPages';
 
 const sessionState = vi.hoisted(() => ({ desktopMode: false }));
 
@@ -22,7 +27,7 @@ function LocationProbe() {
   return <p data-testid="location">{`${location.pathname}${location.search}`}</p>;
 }
 
-function renderPage(initialEntry = '/tools') {
+function renderPage(initialEntry = '/system/backup') {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
@@ -30,7 +35,13 @@ function renderPage(initialEntry = '/tools') {
     <QueryClientProvider client={client}>
       <ToastProvider>
         <MemoryRouter initialEntries={[initialEntry]}>
-          <ToolsPage />
+          <Routes>
+            <Route path="/system/backup" element={<BackupPage />} />
+            <Route path="/system/connectors" element={<ConnectorsPage />} />
+            <Route path="/system/logs" element={<p>Logs page</p>} />
+            <Route path="/tools" element={<LegacyToolsRedirect />} />
+            <Route path="/logs" element={<LegacyLogsRedirect />} />
+          </Routes>
           <LocationProbe />
         </MemoryRouter>
       </ToastProvider>
@@ -40,7 +51,7 @@ function renderPage(initialEntry = '/tools') {
 
 const fetchMock = vi.fn();
 
-describe('ToolsPage', () => {
+describe('System pages', () => {
   beforeEach(() => {
     sessionState.desktopMode = false;
     fetchMock.mockReset();
@@ -63,7 +74,7 @@ describe('ToolsPage', () => {
   it('shows export and import sections for admins', () => {
     renderPage();
 
-    expect(screen.getByRole('heading', { name: 'Tools' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Backup' })).toBeInTheDocument();
     expect(
       screen.getByRole('button', { name: 'Download backup' }),
     ).toBeInTheDocument();
@@ -82,26 +93,23 @@ describe('ToolsPage', () => {
     ).toBeInTheDocument();
   });
 
-  it('tools page has backup and connectors tabs', async () => {
-    renderPage();
+  it('lists connectors on their own page', async () => {
+    renderPage('/system/connectors');
 
-    const backupTab = screen.getByRole('tab', { name: 'Backup' });
-    const connectorsTab = screen.getByRole('tab', { name: 'Connectors' });
-    expect(backupTab).toHaveAttribute('aria-selected', 'true');
-    expect(connectorsTab).toHaveAttribute('aria-selected', 'false');
-    const backupPanel = screen.getByRole('tabpanel', { name: 'Backup' });
-    expect(backupTab).toHaveAttribute('aria-controls', backupPanel.id);
-
-    fireEvent.click(connectorsTab);
-
-    expect(screen.getByTestId('location')).toHaveTextContent('/tools?tab=connectors');
-    expect(connectorsTab).toHaveAttribute('aria-selected', 'true');
-    const connectorsPanel = screen.getByRole('tabpanel', { name: 'Connectors' });
-    expect(connectorsTab).toHaveAttribute('aria-controls', connectorsPanel.id);
+    expect(screen.getByRole('heading', { name: 'Connectors' })).toBeInTheDocument();
     expect(
       screen.queryByRole('button', { name: 'Download backup' }),
     ).not.toBeInTheDocument();
     expect(await screen.findByText(/No connectors/)).toBeVisible();
+  });
+
+  it.each([
+    ['/tools', '/system/backup'],
+    ['/tools?tab=connectors', '/system/connectors'],
+    ['/logs?level=warn&q=boom', '/system/logs?level=warn&q=boom'],
+  ])('sends the old link %s to %s', (from, to) => {
+    renderPage(from);
+    expect(screen.getByTestId('location')).toHaveTextContent(to);
   });
 
   it('asks for a new admin password before replacing keys', () => {
@@ -138,10 +146,14 @@ describe('ToolsPage', () => {
     renderPage();
     expect(screen.queryByRole('heading', { name: 'Replace keys' })).not.toBeInTheDocument();
     expect(screen.queryByText('coppice-server replace-keys')).not.toBeInTheDocument();
+  });
+
+  it('offers setup only in the desktop app', () => {
+    renderPage('/system/connectors');
     expect(screen.queryByRole('button', { name: 'Set up workspace' })).not.toBeInTheDocument();
   });
 
-  it('opens setup from the tools page in the desktop app', async () => {
+  it('opens setup from the connectors page in the desktop app', async () => {
     sessionState.desktopMode = true;
     fetchMock.mockImplementation((path: string, init?: RequestInit) => {
       if (path === '/api/init' && init?.method === 'POST') {
@@ -176,19 +188,11 @@ describe('ToolsPage', () => {
         }),
       );
     });
-    renderPage();
+    renderPage('/system/connectors');
 
     fireEvent.click(screen.getByRole('button', { name: 'Set up workspace' }));
     expect(await screen.findByRole('heading', { name: 'Set up Coppice' })).toBeInTheDocument();
     expect(screen.queryByText(/mock|fake/i)).not.toBeInTheDocument();
   });
 
-  it('opens the connectors tab from the url', () => {
-    renderPage('/tools?tab=connectors');
-
-    expect(screen.getByRole('tab', { name: 'Connectors' })).toHaveAttribute(
-      'aria-selected',
-      'true',
-    );
-  });
 });

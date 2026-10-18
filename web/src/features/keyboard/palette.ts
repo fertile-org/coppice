@@ -29,7 +29,7 @@ export const PAGE_ACTION_ROUTES: Readonly<Record<string, string>> = {
   'nav.repositories': '/settings/repositories',
   'nav.plugins': '/settings/plugins',
   'nav.users': '/settings/users',
-  'nav.tools': '/tools',
+  'nav.tools': '/system/backup',
   'nav.settings': '/settings',
 };
 

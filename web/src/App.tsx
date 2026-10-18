@@ -23,7 +23,12 @@ import { ChatPage } from './features/chat/ChatPage';
 import { KnowledgePage } from './features/knowledge/KnowledgePage';
 import { LogsPage } from './features/logs/LogsPage';
 import { SettingsPage } from './features/settings/SettingsPage';
-import { ToolsPage } from './features/tools/ToolsPage';
+import {
+  BackupPage,
+  ConnectorsPage,
+  LegacyLogsRedirect,
+  LegacyToolsRedirect,
+} from './features/system/SystemPages';
 import { KeyboardProvider } from './features/keyboard/KeyboardProvider';
 import { useOpenTicket } from './features/tickets/useOpenTicket';
 import {
@@ -90,9 +95,13 @@ function App() {
                 />
                 <Route path="/settings/plugins" element={<PluginsPage />} />
                 <Route path="/settings/users" element={<UsersPage />} />
-                <Route path="/logs" element={<LogsPage />} />
+                <Route path="/system" element={<Navigate to="/system/backup" replace />} />
+                <Route path="/system/backup" element={<BackupPage />} />
+                <Route path="/system/connectors" element={<ConnectorsPage />} />
+                <Route path="/system/logs" element={<LogsPage />} />
+                <Route path="/logs" element={<LegacyLogsRedirect />} />
                 <Route path="/settings" element={<SettingsPage />} />
-                <Route path="/tools" element={<ToolsPage />} />
+                <Route path="/tools" element={<LegacyToolsRedirect />} />
               </Route>
               <Route path="/code" element={<CodeReviewPage />} />
             </Route>

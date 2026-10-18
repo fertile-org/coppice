@@ -531,7 +531,7 @@ export function AgentForm({
           {turnedOffName && !modelsLoading && (
             <p className="mt-2 font-body text-xs text-text-secondary">
               {turnedOffName} is turned off. Turn it on in{' '}
-              <Link to="/tools?tab=connectors" className="font-medium text-moss-700 underline-offset-2 hover:underline">
+              <Link to="/system/connectors" className="font-medium text-moss-700 underline-offset-2 hover:underline">
                 Connectors
               </Link>
               .

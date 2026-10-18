@@ -147,7 +147,7 @@ mod tests {
         assert_eq!(
             detail.as_deref(),
             Some(
-                "Cursor is turned off. Turn it on in Tools → Connectors, or switch this agent to another connector."
+                "Cursor is turned off. Turn it on in System → Connectors, or switch this agent to another connector."
             )
         );
         let (_status, detail) = evaluate_agent_health(&agent("not-a-connector", None), &reg).await;

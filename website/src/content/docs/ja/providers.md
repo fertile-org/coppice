@@ -42,11 +42,11 @@ description: "Coppice が動かすエージェント CLI：Claude Code、Codex�
 | **Not on your PATH** | コマンドが見つかりません。インストールするか、PATH を確認してください。 |
 | **Installed** | コマンドは見つかりました。Kilo Code の場合、プランを使わずにサインインを確認できません。 |
 
-Kilo Code は **Kilo Code — Installed** と表示されます。Tools → Connectors には次の説明が付きます："Coppice can't check this sign-in without using your plan. A run will show an error if you're signed out." どの CLI でもチャットできます。Claude Code、Codex、Cursor、Kilo Code のチャットには "Coppice hasn't confirmed that {cli} stays read-only. The agent can still run commands on your computer." と表示されます。OpenCode のチャットにはバナーはありません。Test connection は `kilo` コマンドが動くかを確認します。
+Kilo Code は **Kilo Code — Installed** と表示されます。System → Connectors には次の説明が付きます："Coppice can't check this sign-in without using your plan. A run will show an error if you're signed out." どの CLI でもチャットできます。Claude Code、Codex、Cursor、Kilo Code のチャットには "Coppice hasn't confirmed that {cli} stays read-only. The agent can still run commands on your computer." と表示されます。OpenCode のチャットにはバナーはありません。Test connection は `kilo` コマンドが動くかを確認します。
 
 CLI の準備ができる前でもエージェントは保存できます。CLI をインストールしてサインインすれば、チケットの作業を始めます。Coppice を開いたあとで CLI をインストールした場合は、新しいコマンドを見つけられるよう Coppice を終了して開き直してください。
 
-コネクタをオフにするには **Tools → Connectors** を使います。
+コネクタをオフにするには **System → Connectors** を使います。
 
 <a id="use-your-own-api-key-or-another-provider"></a>
 

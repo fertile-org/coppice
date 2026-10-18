@@ -7,7 +7,7 @@ description: "從全新安裝到第一次執行代理，只需五步。"
 
 從全新安裝到第一次執行代理，只需五步。你需要一個本地 git 倉庫和一個代理 CLI，不需要 Coppice 帳號。
 
-全新安裝後，Coppice 會開啓一個簡短的設定嚮導，幫你新增第一個倉庫、看板和初始團隊。之後可以在 Tools 中重新開啓它。
+全新安裝後，Coppice 會開啓一個簡短的設定嚮導，幫你新增第一個倉庫、看板和初始團隊。之後可以在 **System → Connectors** 中點選 **Set up workspace** 重新開啓它。
 
 <a id="1-install-a-provider-and-sign-in"></a>
 
@@ -15,7 +15,7 @@ description: "從全新安裝到第一次執行代理，只需五步。"
 提供商就是 Coppice 替你執行的代理 CLI：Claude Code、Codex、Cursor、OpenCode 或 Kilo Code。Coppice 不負責安裝它們，而是查詢你電腦上已有的 CLI。
 
 1. 像平常一樣安裝 CLI，並在終端裏登入。
-2. 在 Coppice 側邊欄中開啓 **Tools**（工具），再開啓 **Connectors**（聯結器）標籤頁。
+2. 在 Coppice 側邊欄中開啓 **System**（系統），再開啓 **Connectors**（聯結器）。
 3. 找到你的 CLI 卡片。Coppice 可以使用它時，卡片會顯示 **Ready**（就緒）。
 
 如果顯示 **Found, not signed in**（已找到，未登入），請在終端裏登入該 CLI。如果顯示 **Not on your PATH**（不在 PATH 中），請安裝它，或按卡片上的 **Install docs**（安裝文件）操作。然後點選 **Run check**（執行檢查）。

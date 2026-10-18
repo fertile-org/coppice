@@ -250,7 +250,7 @@ pub fn models_turned_off_log(display_name: &str) -> String {
 /// Shown when a known connector is installed in config terms but turned off.
 pub fn turned_off_message(display_name: &str) -> String {
     format!(
-        "{display_name} is turned off. Turn it on in Tools → Connectors, or switch this agent to another connector."
+        "{display_name} is turned off. Turn it on in System → Connectors, or switch this agent to another connector."
     )
 }
 

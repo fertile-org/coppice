@@ -40,14 +40,14 @@ description: "用键盘在 Coppice 中操作：看板、工单和审核。"
 | Go to Repositories（转到仓库） | `nav.repositories` | `G then R` |
 | Go to Plugins（转到插件） | `nav.plugins` | `G then P` |
 | Go to Users（转到用户） | `nav.users` | `G then U` |
-| Go to Tools（转到工具） | `nav.tools` | `G then T` |
+| Go to System（转到系统） | `nav.tools` | `G then T` |
 | Go to Settings（转到设置） | `nav.settings` | `G then S` |
 | Next section（下一部分） | `drawer.nextSection` | `]` |
 | Previous section（上一部分） | `drawer.previousSection` | `[` |
 
 **Go to column 1** 到 **Go to column 9** 按看板从左到右的顺序对应：1 Backlog、2 Plan Review、3 Ready、4 In Progress、5 In Review、6 In QA、7 Wait for Human Review、8 Done、9 Blocked。
 
-和侧边栏一样，成员（member）看不到 **Go to Plugins**、**Go to Users**、**Go to Tools** 和 **Go to Settings**。桌面应用中也没有 **Go to Users**。
+和侧边栏一样，成员（member）看不到 **Go to Plugins**、**Go to Users**、**Go to System** 和 **Go to Settings**。桌面应用中也没有 **Go to Users**。
 
 **Next card** 和 **Previous card** 在同一列内移动，到头后不会循环。**Next column** 和 **Previous column** 会落到相同序号的卡片上；如果没有，就落到最后一张卡片；如果该列为空，就落到列标题上。**Next section** 和 **Previous section** 会在已打开的抽屉面板中依次切换 Detail、Live Console 和 Agent Runs。
 

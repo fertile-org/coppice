@@ -39,12 +39,12 @@ Coppice 把設定儲存在一個檔案 `config.toml` 中：
 
 如果你分享過備份，請生成新的金鑰和新的管理員密碼。已儲存的令牌仍然可用，所有人都會被退出登入。
 
-開啓 **Tools → Backup → Replace keys**，輸入新的管理員密碼並確認。
+開啓 **System → Backup → Replace keys**，輸入新的管理員密碼並確認。
 
 <a id="logs"></a>
 
 ## 日誌
-管理員可以開啓 Settings 旁邊的 **Logs**（日誌），篩選並即時檢視伺服器、請求、代理執行和數據庫日誌。每次執行都有一個 **View logs** 連結。
+管理員可以開啓 **System → Logs**（系統 → 日誌），篩選並即時檢視伺服器、請求、代理執行和數據庫日誌。每次執行都有一個 **View logs** 連結。
 
 **Export logs** 會把符合當前篩選條件的日誌行儲存為 `coppice-logs.zip`。Coppice 會移除它已知的令牌和金鑰，但分享之前請自己再檢查一遍。
 
@@ -72,7 +72,7 @@ Coppice 把設定儲存在一個檔案 `config.toml` 中：
 enabled = false
 ```
 
-**Tools → Connectors** 中的開關寫入的也是這一行。
+**System → Connectors** 中的開關寫入的也是這一行。
 
 Kilo Code 預設關閉，需要你手動開啓。Coppice 無法免費檢查它的登入狀態。
 

@@ -179,7 +179,7 @@ describe('InitWizard', () => {
     fireEvent.click(screen.getByRole('button', { name: INIT_COPY.next }));
     expect(
       await screen.findByText(
-        'No agent CLI is ready yet. Install one and sign in, then check it in Tools → Connectors.',
+        'No agent CLI is ready yet. Install one and sign in, then check it in System → Connectors.',
       ),
     ).toBeInTheDocument();
     expect(screen.queryByText('Create stays off until a CLI shows Ready.')).not.toBeInTheDocument();

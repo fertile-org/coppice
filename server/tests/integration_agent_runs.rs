@@ -407,6 +407,6 @@ async fn reject_run_when_agent_provider_missing_config() {
     let body = body.unwrap();
     assert_eq!(
         body["message"].as_str().unwrap(),
-        "OpenCode is turned off. Turn it on in Tools → Connectors, or switch this agent to another connector."
+        "OpenCode is turned off. Turn it on in System → Connectors, or switch this agent to another connector."
     );
 }

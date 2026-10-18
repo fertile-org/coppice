@@ -34,10 +34,10 @@ This switch isn't in `config.toml`. Coppice saves it as `automaticUpdates` in `u
 
 If you shared a backup, make new keys and a new admin password. Saved tokens keep working, and everyone is signed out.
 
-Open **Tools → Backup → Replace keys**, enter the new admin password, and confirm.
+Open **System → Backup → Replace keys**, enter the new admin password, and confirm.
 
 ## Logs
-Admins can open **Logs** beside Settings to filter and live-tail server, request, agent run and database logs. Each run has a **View logs** link.
+Admins can open **System → Logs** to filter and live-tail server, request, agent run and database logs. Each run has a **View logs** link.
 
 **Export logs** saves the lines that match your current filters as `coppice-logs.zip`. Coppice removes the tokens and keys it knows about, but check the file before you share it.
 
@@ -70,7 +70,7 @@ Signed-in CLIs are on by default. You only need a line to turn one off:
 enabled = false
 ```
 
-The switch in **Tools → Connectors** writes the same line.
+The switch in **System → Connectors** writes the same line.
 
 Kilo Code stays off until you turn it on. Coppice can't check its sign-in for free.
 

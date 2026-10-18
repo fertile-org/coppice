@@ -39,12 +39,12 @@ Cet interrupteur n’est pas dans `config.toml`. Coppice l’enregistre sous `au
 
 Si vous avez partagé une sauvegarde, créez de nouvelles clés et un nouveau mot de passe administrateur. Les jetons enregistrés continuent de fonctionner, et tout le monde est déconnecté.
 
-Ouvrez **Tools → Backup → Replace keys**, saisissez le nouveau mot de passe administrateur, et confirmez.
+Ouvrez **System → Backup → Replace keys**, saisissez le nouveau mot de passe administrateur, et confirmez.
 
 <a id="logs"></a>
 
 ## Journaux
-Les administrateurs peuvent ouvrir **Logs** à côté de Settings pour filtrer et suivre en direct les journaux du serveur, des requêtes, des lancements d’agents et de la base de données. Chaque lancement a un lien **View logs**.
+Les administrateurs peuvent ouvrir **System → Logs** pour filtrer et suivre en direct les journaux du serveur, des requêtes, des lancements d’agents et de la base de données. Chaque lancement a un lien **View logs**.
 
 **Export logs** enregistre les lignes qui correspondent à vos filtres actuels dans `coppice-logs.zip`. Coppice retire les jetons et les clés qu’il connaît, mais vérifiez le fichier avant de le partager.
 
@@ -72,7 +72,7 @@ Les CLI connectées sont activées par défaut. Il ne faut une ligne que pour en
 enabled = false
 ```
 
-L’interrupteur dans **Tools → Connectors** écrit la même ligne.
+L’interrupteur dans **System → Connectors** écrit la même ligne.
 
 Kilo Code reste désactivé tant que vous ne l’activez pas. Coppice ne peut pas vérifier sa connexion gratuitement.
 

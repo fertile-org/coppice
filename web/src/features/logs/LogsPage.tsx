@@ -243,12 +243,15 @@ export function LogsPage() {
       </div>
       {exportNote && <p className="font-body text-sm text-text-secondary">{exportNote}</p>}
       {exportError && <p className="font-body text-sm text-danger">{exportError}</p>}
-      <div className="flex flex-wrap items-end gap-4">
-        <div className="space-y-1">
+      <div
+        className="grid gap-4 rounded-xl border border-border bg-surface-raised p-4 shadow-sm sm:grid-cols-2 lg:grid-cols-4"
+        data-testid="logs-filters"
+      >
+        <div className="flex flex-col gap-1.5">
           <Label htmlFor="logs-source">{LOGS_COPY.source}</Label>
           <select
             id="logs-source"
-            className="field-control px-3 py-2 font-body text-sm"
+            className="field-control w-full px-3 py-2 font-body text-sm"
             value={filters.source}
             onChange={(event) => setFilter('source', event.target.value)}
           >
@@ -259,11 +262,11 @@ export function LogsPage() {
             ))}
           </select>
         </div>
-        <div className="space-y-1">
+        <div className="flex flex-col gap-1.5">
           <Label htmlFor="logs-level">{LOGS_COPY.level}</Label>
           <select
             id="logs-level"
-            className="field-control px-3 py-2 font-body text-sm"
+            className="field-control w-full px-3 py-2 font-body text-sm"
             value={filters.level}
             onChange={(event) => setFilter('level', event.target.value)}
           >
@@ -274,47 +277,49 @@ export function LogsPage() {
             ))}
           </select>
         </div>
-        <fieldset className="space-y-1">
-          <legend className="font-body text-sm font-medium text-text-secondary">
-            {LOGS_COPY.time}
-          </legend>
-          <div className="flex flex-wrap gap-2">
-            <Label className="space-y-1">
-              <span>{LOGS_COPY.from}</span>
-              <Input
-                type="datetime-local"
-                value={fromUtcRfc3339(filters.from)}
-                onChange={(event) => setFilter('from', toUtcRfc3339(event.target.value))}
-              />
-            </Label>
-            <Label className="space-y-1">
-              <span>{LOGS_COPY.to}</span>
-              <Input
-                type="datetime-local"
-                value={fromUtcRfc3339(filters.to)}
-                onChange={(event) => setFilter('to', toUtcRfc3339(event.target.value))}
-              />
-            </Label>
+        <fieldset className="grid gap-4 sm:col-span-2 sm:grid-cols-2">
+          <legend className="sr-only">{LOGS_COPY.time}</legend>
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="logs-from">{LOGS_COPY.from}</Label>
+            <Input
+              id="logs-from"
+              type="datetime-local"
+              className="w-full"
+              value={fromUtcRfc3339(filters.from)}
+              onChange={(event) => setFilter('from', toUtcRfc3339(event.target.value))}
+            />
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="logs-to">{LOGS_COPY.to}</Label>
+            <Input
+              id="logs-to"
+              type="datetime-local"
+              className="w-full"
+              value={fromUtcRfc3339(filters.to)}
+              onChange={(event) => setFilter('to', toUtcRfc3339(event.target.value))}
+            />
           </div>
         </fieldset>
-        <div className="space-y-1">
+        <div className="flex flex-col gap-1.5">
           <Label htmlFor="logs-run">{LOGS_COPY.run}</Label>
           <Input
             id="logs-run"
+            className="w-full"
             value={filters.run}
             onChange={(event) => setFilter('run', event.target.value)}
           />
         </div>
-        <div className="min-w-48 flex-1 space-y-1">
+        <div className="flex flex-col gap-1.5 sm:col-span-2">
           <Label htmlFor="logs-search">{LOGS_COPY.search}</Label>
           <Input
             id="logs-search"
+            className="w-full"
             placeholder={LOGS_COPY.search}
             value={filters.q}
             onChange={(event) => setFilter('q', event.target.value)}
           />
         </div>
-        <label className="flex items-center gap-2 pb-2 font-body text-sm text-text-secondary">
+        <label className="flex items-center gap-2 self-end pb-2 font-body text-sm text-text-secondary">
           <input
             type="checkbox"
             checked={live}

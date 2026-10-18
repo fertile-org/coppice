@@ -69,7 +69,7 @@ describe('shortcut help rows', () => {
     expect(labels).toContain('Go to Boards');
     expect(labels).not.toContain('Go to Plugins');
     expect(labels).not.toContain('Go to Users');
-    expect(labels).not.toContain('Go to Tools');
+    expect(labels).not.toContain('Go to System');
     expect(labels).not.toContain('Go to Settings');
 
     const desktop = helpSections({

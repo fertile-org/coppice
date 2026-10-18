@@ -1,4 +1,4 @@
-//! Cached local connector probes and the admin Tools → Connectors status view.
+//! Cached local connector probes and the admin System → Connectors status view.
 
 use crate::services::connector_check_service::{
     CheckError as ConnectorCheckError, CheckSummary, ConnectorCheckService,

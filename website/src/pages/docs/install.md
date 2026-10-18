@@ -60,7 +60,7 @@ You need Windows 11, because older Windows 10 builds can't show Linux app window
 
    If a CLI shows Not on your PATH, start Coppice by running `coppice` in Ubuntu.
 
-WSL adds your Windows PATH to Ubuntu, so Coppice could find a Windows copy of a CLI. Open **Tools → Connectors** and look at each connector's CLI path. If a path starts with `/mnt/c/`, install that CLI in Ubuntu.
+WSL adds your Windows PATH to Ubuntu, so Coppice could find a Windows copy of a CLI. Open **System → Connectors** and look at each connector's CLI path. If a path starts with `/mnt/c/`, install that CLI in Ubuntu.
 
 Keep your repos in your Linux home folder, for example `~/code/my-app`, not under `/mnt/c/`. Git and file access are much slower across that boundary. The folder picker shows Linux paths.
 
@@ -69,9 +69,9 @@ Keep your repos in your Linux home folder, for example `~/code/my-app`, not unde
 2. Point it at a local git checkout you already have on disk.
 3. **Connect your agent CLI.** Pick your agent CLI when you create an agent, and Coppice turns it on. Each one shows whether it's **Ready**, **Found, not signed in**, or **Not on your PATH**. Sign in to the CLI in your terminal first, the same way you normally would.
 
-   Kilo Code shows **Kilo Code — Installed**. Tools → Connectors adds: "Coppice can't check this sign-in without using your plan. A run will show an error if you're signed out."
+   Kilo Code shows **Kilo Code — Installed**. System → Connectors adds: "Coppice can't check this sign-in without using your plan. A run will show an error if you're signed out."
 
-   To turn a connector off later, use the toggle in Tools → Connectors, or set `enabled = false` for it in your Coppice `config.toml`:
+   To turn a connector off later, use the toggle in System → Connectors, or set `enabled = false` for it in your Coppice `config.toml`:
 
    - macOS: `~/Library/Application Support/Coppice/config.toml`
    - Linux: `~/.config/Coppice/config.toml`

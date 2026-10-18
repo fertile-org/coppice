@@ -67,7 +67,7 @@ Linux x64 版本應該可以通過 WSL 在 Windows 11 上執行，但我們還�
 
    如果某個 CLI 顯示 Not on your PATH，請在 Ubuntu 中執行 `coppice` 來啟動 Coppice。
 
-WSL 會把 Windows 的 PATH 加到 Ubuntu 中，所以 Coppice 可能會找到某個 CLI 的 Windows 版本。開啟 **Tools → Connectors**（工具 → 聯結器），檢視每個聯結器的 CLI 路徑。如果路徑以 `/mnt/c/` 開頭，請在 Ubuntu 中安裝該 CLI。
+WSL 會把 Windows 的 PATH 加到 Ubuntu 中，所以 Coppice 可能會找到某個 CLI 的 Windows 版本。開啟 **System → Connectors**（系統 → 聯結器），檢視每個聯結器的 CLI 路徑。如果路徑以 `/mnt/c/` 開頭，請在 Ubuntu 中安裝該 CLI。
 
 把倉庫放在 Linux 主目錄下，例如 `~/code/my-app`，不要放在 `/mnt/c/` 下。跨這道邊界訪問時，Git 和檔案讀寫都會慢很多。資料夾選擇器顯示的是 Linux 路徑。
 
@@ -78,9 +78,9 @@ WSL 會把 Windows 的 PATH 加到 Ubuntu 中，所以 Coppice 可能會找到�
 2. 選擇你磁碟上已有的一個本地 git 倉庫。
 3. **連線你的代理 CLI。** 建立代理時選擇你的代理 CLI，Coppice 就會啟用它。每個 CLI 都會顯示狀態：**Ready**（就緒）、**Found, not signed in**（已找到，未登入）或 **Not on your PATH**（不在 PATH 中）。請先像平常一樣在終端裡登入該 CLI。
 
-   Kilo Code 顯示為 **Kilo Code — Installed**。Tools → Connectors 中還會提示："Coppice can't check this sign-in without using your plan. A run will show an error if you're signed out."（不消耗你的套餐額度，Coppice 就無法檢查登入狀態；如果你已退出登入，執行時會報錯。）
+   Kilo Code 顯示為 **Kilo Code — Installed**。System → Connectors 中還會提示："Coppice can't check this sign-in without using your plan. A run will show an error if you're signed out."（不消耗你的套餐額度，Coppice 就無法檢查登入狀態；如果你已退出登入，執行時會報錯。）
 
-   以後要關閉某個聯結器，可以在 Tools → Connectors 中使用開關，或在 Coppice 的 `config.toml` 中為它設定 `enabled = false`：
+   以後要關閉某個聯結器，可以在 System → Connectors 中使用開關，或在 Coppice 的 `config.toml` 中為它設定 `enabled = false`：
 
    - macOS：`~/Library/Application Support/Coppice/config.toml`
    - Linux：`~/.config/Coppice/config.toml`

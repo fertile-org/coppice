@@ -222,13 +222,36 @@ describe('AppShell', () => {
     expect(
       screen.getByRole('button', { name: 'Notifications' }),
     ).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Tools' })).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Logs' })).toHaveAttribute('href', '/logs');
+    expect(screen.getByRole('button', { name: 'System' })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Settings' })).toHaveAttribute(
       'href',
       '/settings',
     );
     expect(screen.getByTestId('theme-toggle')).toBeInTheDocument();
+  });
+
+  it('groups Backup, Connectors, and Logs under System', () => {
+    renderShell(['/boards']);
+
+    const toggle = screen.getByRole('button', { name: 'System' });
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByRole('link', { name: 'Logs' })).not.toBeInTheDocument();
+
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByRole('link', { name: 'Backup' })).toHaveAttribute('href', '/system/backup');
+    expect(screen.getByRole('link', { name: 'Connectors' })).toHaveAttribute(
+      'href',
+      '/system/connectors',
+    );
+    expect(screen.getByRole('link', { name: 'Logs' })).toHaveAttribute('href', '/system/logs');
+  });
+
+  it('opens the System group on a System page', () => {
+    renderShell(['/system/logs']);
+
+    expect(screen.getByRole('button', { name: 'System' })).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByRole('link', { name: 'Logs' })).toHaveAttribute('aria-current', 'page');
   });
 
   it('highlights Settings only on its own page', () => {

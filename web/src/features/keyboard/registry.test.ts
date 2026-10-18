@@ -31,7 +31,7 @@ const NAVIGATE_LABELS = [
   'Go to Repositories',
   'Go to Plugins',
   'Go to Users',
-  'Go to Tools',
+  'Go to System',
   'Go to Settings',
   'Next section',
   'Previous section',

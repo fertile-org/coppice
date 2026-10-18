@@ -7,7 +7,7 @@ description: "从全新安装到第一次运行智能体，只需五步。"
 
 从全新安装到第一次运行智能体，只需五步。你需要一个本地 git 仓库和一个智能体 CLI，不需要 Coppice 账号。
 
-全新安装后，Coppice 会打开一个简短的设置向导，帮你添加第一个仓库、看板和初始团队。之后可以在 Tools 中重新打开它。
+全新安装后，Coppice 会打开一个简短的设置向导，帮你添加第一个仓库、看板和初始团队。之后可以在 **System → Connectors** 中点击 **Set up workspace** 重新打开它。
 
 <a id="1-install-a-provider-and-sign-in"></a>
 
@@ -15,7 +15,7 @@ description: "从全新安装到第一次运行智能体，只需五步。"
 提供商就是 Coppice 替你运行的智能体 CLI：Claude Code、Codex、Cursor、OpenCode 或 Kilo Code。Coppice 不负责安装它们，而是查找你电脑上已有的 CLI。
 
 1. 像平常一样安装 CLI，并在终端里登录。
-2. 在 Coppice 侧边栏中打开 **Tools**（工具），再打开 **Connectors**（连接器）标签页。
+2. 在 Coppice 侧边栏中打开 **System**（系统），再打开 **Connectors**（连接器）。
 3. 找到你的 CLI 卡片。Coppice 可以使用它时，卡片会显示 **Ready**（就绪）。
 
 如果显示 **Found, not signed in**（已找到，未登录），请在终端里登录该 CLI。如果显示 **Not on your PATH**（不在 PATH 中），请安装它，或按卡片上的 **Install docs**（安装文档）操作。然后点击 **Run check**（运行检查）。

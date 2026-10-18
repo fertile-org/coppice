@@ -40,14 +40,14 @@ Les raccourcis ne se déclenchent pas pendant que vous tapez dans un champ, et l
 | Aller à Repositories | `nav.repositories` | `G then R` |
 | Aller à Plugins | `nav.plugins` | `G then P` |
 | Aller à Users | `nav.users` | `G then U` |
-| Aller à Tools | `nav.tools` | `G then T` |
+| Aller à System | `nav.tools` | `G then T` |
 | Aller à Settings | `nav.settings` | `G then S` |
 | Section suivante | `drawer.nextSection` | `]` |
 | Section précédente | `drawer.previousSection` | `[` |
 
 **Aller à la colonne 1** à **Aller à la colonne 9** suivent le tableau de gauche à droite : 1 Backlog, 2 Plan Review, 3 Ready, 4 In Progress, 5 In Review, 6 In QA, 7 Wait for Human Review, 8 Done, 9 Blocked.
 
-**Aller à Plugins**, **Aller à Users**, **Aller à Tools** et **Aller à Settings** n’existent pas pour les membres, comme dans la barre latérale. L’application de bureau n’a pas non plus **Aller à Users**.
+**Aller à Plugins**, **Aller à Users**, **Aller à System** et **Aller à Settings** n’existent pas pour les membres, comme dans la barre latérale. L’application de bureau n’a pas non plus **Aller à Users**.
 
 **Carte suivante** et **Carte précédente** se déplacent dans une colonne et ne bouclent pas. **Colonne suivante** et **Colonne précédente** arrivent sur la carte au même rang, sur la dernière carte, ou sur le titre de la colonne quand elle est vide. **Section suivante** et **Section précédente** font passer le panneau ouvert entre Detail, Live Console et Agent Runs.
 

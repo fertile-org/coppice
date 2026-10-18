@@ -39,14 +39,14 @@ Shortcuts don't fire while you're typing in a field, and the terminal keeps its 
 | Go to Repositories | `nav.repositories` | `G then R` |
 | Go to Plugins | `nav.plugins` | `G then P` |
 | Go to Users | `nav.users` | `G then U` |
-| Go to Tools | `nav.tools` | `G then T` |
+| Go to System | `nav.tools` | `G then T` |
 | Go to Settings | `nav.settings` | `G then S` |
 | Next section | `drawer.nextSection` | `]` |
 | Previous section | `drawer.previousSection` | `[` |
 
 **Go to column 1** through **Go to column 9** follow the board from left to right: 1 Backlog, 2 Plan Review, 3 Ready, 4 In Progress, 5 In Review, 6 In QA, 7 Wait for Human Review, 8 Done, 9 Blocked.
 
-**Go to Plugins**, **Go to Users**, **Go to Tools**, and **Go to Settings** are omitted for members, same as the sidebar. The desktop app also omits **Go to Users**.
+**Go to Plugins**, **Go to Users**, **Go to System**, and **Go to Settings** are omitted for members, same as the sidebar. The desktop app also omits **Go to Users**.
 
 **Next card** and **Previous card** move within a column and do not wrap. **Next column** and **Previous column** land on the card at the same index, the last card, or the column heading when that column is empty. **Next section** and **Previous section** move the open drawer across Detail, Live Console, and Agent Runs.
 
