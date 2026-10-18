@@ -263,6 +263,8 @@ pub struct ConnectorStatusResponse {
     pub probed_at: Option<String>,
     /// `null` until this connector has been probed.
     pub readiness: Option<Readiness>,
+    /// Oldest CLI version Coppice runs, when the connector has a floor.
+    pub min_version: Option<&'static str>,
 }
 
 #[derive(Debug, Serialize)]
@@ -353,6 +355,7 @@ pub fn connector_status(
         last_check: last_check.cloned(),
         probed_at: cached.map(|c| c.probed_at.format(&Rfc3339).unwrap_or_default()),
         readiness: cached.map(|c| c.readiness),
+        min_version: descriptor.min_version.map(|floor| floor.version),
     }
 }
 

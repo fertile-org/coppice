@@ -8,7 +8,7 @@ use axum::{routing::get, Router};
 async fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args.first().map(String::as_str) == Some("--version") {
-        println!("opencode 0.0.0");
+        println!("opencode 1.19.0");
         return;
     }
     if args.first().map(String::as_str) == Some("acp") {

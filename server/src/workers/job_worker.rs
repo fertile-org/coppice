@@ -124,18 +124,31 @@ async fn process_one(state: &AppState, worker_id: &str) -> anyhow::Result<()> {
 
     // Before the run starts, so a client opening its live console picks the
     // right view from the first event.
-    if let Ok(Some(connector)) = run_svc.agent_connector_for_run(run.agent_id).await {
-        if let Some(kind) = crate::providers::run_console_kind(&connector, &state.config).await {
+    let connector = run_svc
+        .agent_connector_for_run(run.agent_id)
+        .await
+        .ok()
+        .flatten();
+    if let Some(connector) = &connector {
+        if let Some(kind) = crate::providers::run_console_kind(connector, &state.config).await {
             let name = crate::providers::console_kind_name(kind);
             if let Err(err) = run_svc.set_console_kind(run.id, &name).await {
                 tracing::warn!(run_id = %run.id, error = %err, "could not record the run's console kind");
             }
         }
     }
+    let too_old = match &connector {
+        Some(connector) => crate::providers::below_min_version(connector, &state.config).await,
+        None => None,
+    };
 
     // The stop endpoint publishes the cancelled transition when it commits;
     // cancellation branches here only reconcile the durable job state.
-    match execute_job(state, pool, &run_svc, &run).await {
+    let executed = match too_old {
+        Some(message) => Err(anyhow::anyhow!(message)),
+        None => execute_job(state, pool, &run_svc, &run).await,
+    };
+    match executed {
         Ok(()) => job_svc.mark_done(job.id).await?,
         Err(err) if err.downcast_ref::<JobCancelled>().is_some() => {
             state.run_streams.remove(run.id);
