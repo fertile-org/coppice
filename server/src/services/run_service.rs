@@ -321,7 +321,7 @@ impl<'a> RunService<'a> {
                 id, ticket_id, chat_session_id, chat_message_id, agent_id, job_type, status,
                 sandbox_profile_id, worktree_path, branch_name, error_message, session_id,
                 context_profile, trigger_comment_id,
-                started_at, ended_at, created_at
+                started_at, ended_at, created_at, console_kind
             FROM agent_runs
             WHERE id = $1
             "#,
@@ -380,7 +380,7 @@ impl<'a> RunService<'a> {
                 ar.id, ar.ticket_id, ar.agent_id, ar.job_type, ar.status, ar.sandbox_profile_id,
                 ar.worktree_path, ar.branch_name, ar.error_message, ar.session_id,
                 ar.context_profile, ar.trigger_comment_id,
-                ar.started_at, ar.ended_at, ar.created_at,
+                ar.started_at, ar.ended_at, ar.created_at, ar.console_kind,
                 ar.reported_model,
                 EXISTS (
                     SELECT 1
@@ -1026,6 +1026,15 @@ impl<'a> RunService<'a> {
 
     /// Store the first model the CLI reported. A later or blank value does not
     /// replace it, and this never copies the agent's saved model.
+    pub async fn set_console_kind(&self, run_id: Uuid, kind: &str) -> Result<(), RunError> {
+        sqlx::query("UPDATE agent_runs SET console_kind = $2 WHERE id = $1")
+            .bind(run_id)
+            .bind(kind)
+            .execute(self.pool)
+            .await?;
+        Ok(())
+    }
+
     pub async fn set_reported_model(&self, run_id: Uuid, model: &str) -> Result<(), RunError> {
         let model = model.trim();
         if model.is_empty() {
@@ -1640,5 +1649,6 @@ fn row_to_run(row: &sqlx::postgres::PgRow) -> AgentRun {
         started_at: row.get("started_at"),
         ended_at: row.get("ended_at"),
         created_at: row.get("created_at"),
+        console_kind: row.try_get("console_kind").ok().flatten(),
     }
 }

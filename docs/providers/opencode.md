@@ -1,6 +1,22 @@
 # OpenCode
 
-Use [OpenCode](https://opencode.ai) as a Coppice connector. Coppice starts a dedicated `opencode serve` for each run and drives it through OpenCode’s HTTP/SSE API. The ticket drawer shows a **Live Session** (messages and tools), not a raw terminal.
+Use [OpenCode](https://opencode.ai) as a Coppice connector. How Coppice drives it depends on the installed version:
+
+- **OpenCode 2.x:** one `opencode acp` per run, over the Agent Client Protocol (below). The ticket drawer shows the structured live console the other connectors use.
+- **OpenCode 1.x:** a dedicated `opencode serve` per run, driven through OpenCode’s HTTP/SSE API. The ticket drawer shows a **Live Session** (messages and tools).
+
+Each run records which console it used, so runs from before an upgrade still replay.
+
+## OpenCode 2.x (ACP)
+
+OpenCode 2 moved its HTTP API under `/api/` behind a server password and changed its shape, so the 1.x client can't use it. `opencode acp` speaks the Agent Client Protocol on stdin and stdout instead. Checked against OpenCode 2.0.20:
+
+- `initialize` reports HTTP MCP support, so Coppice passes the gateway in `session/new` with its `Authorization: Bearer` header. The token is never written to a file.
+- The model is the `configOptions` entry with category `model`, set with `session/set_config_option` to `provider/model`. A model OpenCode doesn't list fails before the prompt with a message naming it.
+- `OPENCODE_CONFIG` is still honoured. Read-only runs (chat, planning, checks) deny `edit`, `bash`, and `write` there and set `OPENCODE_DISABLE_PROJECT_CONFIG=1`. With those rules a shell command and a file write did not run, and reading files and calling `result_submit` still worked.
+- OpenCode's default `build` mode asks for no permission, so read-only can't rely on permission requests. When OpenCode does ask, Coppice approves tools that read (`read`, `search`, `fetch`, `think`) and refuses the rest in read-only runs. A refusal ends the whole turn (`stopReason: cancelled`), and the run error names the refused tool.
+- Resume uses `session/resume` when offered, otherwise `session/load` (its replayed history is not shown again). Only an answer that says the session is gone starts a fresh session; a gateway or sign-in failure doesn't.
+- A turn with no update for 10 minutes, and no tool still running, is stopped. Startup requests get 60 seconds each. Cancel sends `session/cancel` and stops the process if the turn hasn't ended within 5 seconds.
 
 **Connector id:** `opencode`
 

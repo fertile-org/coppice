@@ -122,6 +122,17 @@ async fn process_one(state: &AppState, worker_id: &str) -> anyhow::Result<()> {
         return Ok(());
     }
 
+    // Before the run starts, so a client opening its live console picks the
+    // right view from the first event.
+    if let Ok(Some(connector)) = run_svc.agent_connector_for_run(run.agent_id).await {
+        if let Some(kind) = crate::providers::run_console_kind(&connector, &state.config).await {
+            let name = crate::providers::console_kind_name(kind);
+            if let Err(err) = run_svc.set_console_kind(run.id, &name).await {
+                tracing::warn!(run_id = %run.id, error = %err, "could not record the run's console kind");
+            }
+        }
+    }
+
     // The stop endpoint publishes the cancelled transition when it commits;
     // cancellation branches here only reconcile the durable job state.
     match execute_job(state, pool, &run_svc, &run).await {
@@ -1668,6 +1679,7 @@ mod tests {
             started_at: None,
             ended_at: None,
             created_at: OffsetDateTime::now_utc(),
+            console_kind: None,
         }
     }
 

@@ -1334,6 +1334,7 @@ mod tests {
             started_at: None,
             ended_at: None,
             created_at: time::OffsetDateTime::now_utc(),
+            console_kind: None,
         }
     }
 
@@ -1767,6 +1768,7 @@ mod tests {
                     started_at: None,
                     ended_at: None,
                     created_at: time::OffsetDateTime::now_utc(),
+                    console_kind: None,
                 },
                 &contract,
                 apply,
@@ -1837,6 +1839,7 @@ mod tests {
                     started_at: None,
                     ended_at: None,
                     created_at: time::OffsetDateTime::now_utc(),
+                    console_kind: None,
                 },
                 &contract,
                 apply,
@@ -1943,6 +1946,7 @@ mod tests {
                     started_at: None,
                     ended_at: None,
                     created_at: time::OffsetDateTime::now_utc(),
+                    console_kind: None,
                 },
                 &contract,
                 apply,
@@ -2051,6 +2055,7 @@ mod tests {
                     started_at: None,
                     ended_at: None,
                     created_at: time::OffsetDateTime::now_utc(),
+                    console_kind: None,
                 },
                 &done_with_mentions(&["backend_engineer"]),
                 succeeded_apply("FYI @backend_engineer", &["backend_engineer"]),
@@ -2111,6 +2116,7 @@ mod tests {
                     started_at: None,
                     ended_at: None,
                     created_at: time::OffsetDateTime::now_utc(),
+                    console_kind: None,
                 },
                 &done_with_requests(&["backend_engineer"]),
                 succeeded_request_apply(&["backend_engineer"]),
@@ -2248,6 +2254,7 @@ mod tests {
                     started_at: None,
                     ended_at: None,
                     created_at: time::OffsetDateTime::now_utc(),
+                    console_kind: None,
                 },
                 &done_with_requests(&["backend_engineer"]),
                 succeeded_request_apply(&["backend_engineer"]),
@@ -2319,6 +2326,7 @@ mod tests {
                     started_at: None,
                     ended_at: None,
                     created_at: time::OffsetDateTime::now_utc(),
+                    console_kind: None,
                 },
                 &done_with_requests(&["backend_engineer"]),
                 succeeded_request_apply(&["backend_engineer"]),
@@ -2399,6 +2407,7 @@ mod tests {
                     started_at: None,
                     ended_at: None,
                     created_at: time::OffsetDateTime::now_utc(),
+                    console_kind: None,
                 },
                 &done_with_requests(&["backend_engineer"]),
                 succeeded_request_apply(&["backend_engineer"]),
@@ -2442,6 +2451,7 @@ mod tests {
                     started_at: None,
                     ended_at: None,
                     created_at: time::OffsetDateTime::now_utc(),
+                    console_kind: None,
                 },
                 &done_with_mentions(&[]),
                 succeeded_apply("Unrelated work finished", &[]),
@@ -2533,6 +2543,7 @@ mod tests {
                     started_at: None,
                     ended_at: None,
                     created_at: time::OffsetDateTime::now_utc(),
+                    console_kind: None,
                 },
                 &done_with_requests(&["backend_engineer"]),
                 succeeded_request_apply(&["backend_engineer"]),
@@ -2621,6 +2632,7 @@ mod tests {
                     started_at: None,
                     ended_at: None,
                     created_at: time::OffsetDateTime::now_utc(),
+                    console_kind: None,
                 },
                 &done_with_requests(&["backend_engineer"]),
                 succeeded_request_apply(&["backend_engineer"]),
@@ -2682,6 +2694,7 @@ mod tests {
                     started_at: None,
                     ended_at: None,
                     created_at: time::OffsetDateTime::now_utc(),
+                    console_kind: None,
                 },
                 &done_with_mentions(&["backend_engineer"]),
                 succeeded_apply("Human-request response", &["backend_engineer"]),
@@ -2759,6 +2772,7 @@ mod tests {
                     started_at: None,
                     ended_at: None,
                     created_at: time::OffsetDateTime::now_utc(),
+                    console_kind: None,
                 },
                 &done_with_requests(&["backend_engineer"]),
                 succeeded_request_apply(&["backend_engineer"]),
@@ -2875,6 +2889,7 @@ mod tests {
                 started_at: None,
                 ended_at: None,
                 created_at: time::OffsetDateTime::now_utc(),
+                console_kind: None,
             })
             .await;
 
@@ -2993,6 +3008,7 @@ mod tests {
                     started_at: None,
                     ended_at: None,
                     created_at: time::OffsetDateTime::now_utc(),
+                    console_kind: None,
                 },
                 &pm_done_with_assign_to("backend_engineer"),
                 succeeded_apply("Technical approach is ready", &[]),
@@ -3117,6 +3133,7 @@ mod tests {
             started_at: None,
             ended_at: None,
             created_at: time::OffsetDateTime::now_utc(),
+            console_kind: None,
         };
 
         orchestrator.handle_terminal_run(&human_chat_run).await;
@@ -3222,6 +3239,7 @@ mod tests {
                     started_at: None,
                     ended_at: None,
                     created_at: time::OffsetDateTime::now_utc(),
+                    console_kind: None,
                 },
                 &done_with_requests(&request_keys),
                 succeeded_request_apply(&request_keys),
@@ -3311,6 +3329,7 @@ mod tests {
                     started_at: None,
                     ended_at: None,
                     created_at: time::OffsetDateTime::now_utc(),
+                    console_kind: None,
                 },
                 &blocked_with_mentions(&["pm"]),
                 ApplyResult {
@@ -3449,6 +3468,7 @@ mod tests {
                     started_at: None,
                     ended_at: None,
                     created_at: time::OffsetDateTime::now_utc(),
+                    console_kind: None,
                 },
                 &contract,
                 succeeded_apply("Returning defect to backend", &["backend_engineer"]),
@@ -3521,6 +3541,7 @@ mod tests {
                     started_at: None,
                     ended_at: None,
                     created_at: time::OffsetDateTime::now_utc(),
+                    console_kind: None,
                 },
                 &done_with_mentions(&[]),
                 succeeded_apply("Defect fixed", &[]),
@@ -3591,6 +3612,7 @@ mod tests {
                     started_at: None,
                     ended_at: None,
                     created_at: time::OffsetDateTime::now_utc(),
+                    console_kind: None,
                 },
                 &done_with_requests(&["pm"]),
                 succeeded_request_apply(&["pm"]),
@@ -3694,6 +3716,7 @@ mod tests {
                     started_at: None,
                     ended_at: None,
                     created_at: time::OffsetDateTime::now_utc(),
+                    console_kind: None,
                 },
                 &response_contract,
                 malicious_apply,
@@ -3837,6 +3860,7 @@ mod tests {
                     started_at: None,
                     ended_at: None,
                     created_at: time::OffsetDateTime::now_utc(),
+                    console_kind: None,
                 },
                 &contract,
                 apply,
@@ -3977,6 +4001,7 @@ mod tests {
                     started_at: None,
                     ended_at: None,
                     created_at: time::OffsetDateTime::now_utc(),
+                    console_kind: None,
                 },
                 &blocked_with_mentions(&["pm"]),
                 ApplyResult {
@@ -4083,6 +4108,7 @@ mod tests {
                     started_at: None,
                     ended_at: None,
                     created_at: time::OffsetDateTime::now_utc(),
+                    console_kind: None,
                 },
                 &contract,
                 apply,
@@ -4206,6 +4232,7 @@ mod tests {
                     started_at: None,
                     ended_at: None,
                     created_at: time::OffsetDateTime::now_utc(),
+                    console_kind: None,
                 },
                 &blocked_with_mentions(&["pm"]),
                 ApplyResult {
@@ -4285,6 +4312,7 @@ mod tests {
                     started_at: None,
                     ended_at: None,
                     created_at: time::OffsetDateTime::now_utc(),
+                    console_kind: None,
                 },
                 &AgentRunResult::Done {
                     summary: "Use option A".into(),
@@ -4436,6 +4464,7 @@ mod tests {
             started_at: None,
             ended_at: None,
             created_at: time::OffsetDateTime::now_utc(),
+            console_kind: None,
         };
 
         let ctx = load_run_continuation_context(&pool, &run)
@@ -4498,6 +4527,7 @@ mod tests {
                     started_at: None,
                     ended_at: None,
                     created_at: time::OffsetDateTime::now_utc(),
+                    console_kind: None,
                 },
                 &contract,
                 apply,
@@ -4544,6 +4574,7 @@ mod tests {
             started_at: None,
             ended_at: None,
             created_at: time::OffsetDateTime::now_utc(),
+            console_kind: None,
         };
 
         let resume_context = load_run_continuation_context(&pool, &second_run)

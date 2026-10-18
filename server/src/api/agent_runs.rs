@@ -100,6 +100,8 @@ pub(crate) struct RunResponse {
     /// Exact CLI model, or null when the CLI did not report one.
     reported_model: Option<String>,
     billed_outside_plan: bool,
+    /// The run's own console format, when it differs by CLI version.
+    console_kind: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -180,6 +182,7 @@ pub(crate) fn run_to_response(
         connector,
         reported_model,
         billed_outside_plan,
+        console_kind: run.console_kind,
     }
 }
 
@@ -324,6 +327,7 @@ mod tests {
             started_at: None,
             ended_at: None,
             created_at: time::OffsetDateTime::now_utc(),
+            console_kind: None,
         };
         let response = run_to_response(run, Some("mock".into()), None, false);
         assert_eq!(response.status, "running");

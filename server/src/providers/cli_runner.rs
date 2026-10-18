@@ -85,7 +85,7 @@ pub enum CliError {
     Io(std::io::Error),
 }
 
-fn resolve_cli_program(host: &crate::host_env::HostEnv, program: &str) -> Result<String, CliError> {
+pub(super) fn resolve_cli_program(host: &crate::host_env::HostEnv, program: &str) -> Result<String, CliError> {
     if program.contains('/') || program.contains('\\') {
         return Ok(program.to_string());
     }
@@ -124,6 +124,7 @@ pub async fn run_cli_with_stdin(
     if !host.home.as_os_str().is_empty() {
         cmd.env("HOME", &host.home);
     }
+    super::env_hygiene::scrub(&mut cmd);
     cmd.args(&inv.args)
         .envs(inv.env.iter().map(|(k, v)| (k.as_str(), v.as_str())))
         .current_dir(&inv.cwd)
@@ -168,7 +169,10 @@ pub async fn run_cli_with_stdin(
     // `secrets` stays alive for stdout lines read on this task. The stderr task
     // holds a clone until that pipe is drained.
 
-    let mut reader = BufReader::new(stdout).lines();
+    let mut reader = super::line_reader::CappedLines::new(
+        BufReader::new(stdout),
+        super::line_reader::MAX_LINE_BYTES,
+    );
     let deadline = tokio::time::Instant::now() + inv.timeout;
     let mut cancel_rx = io.cancel_rx;
     let mut session_sent = false;
@@ -381,7 +385,7 @@ pub fn log_launch(
 }
 
 /// Records stderr and keeps the first lines for error messages.
-async fn pump_stderr(
+pub(super) async fn pump_stderr(
     stderr: impl AsyncRead + Unpin,
     _secrets: crate::logs::SecretGuard,
     run_id: Option<String>,

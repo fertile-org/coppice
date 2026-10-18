@@ -116,10 +116,16 @@ async fn handle_live_socket(state: Arc<AppState>, run_id: Uuid, socket: WebSocke
         .await
         .ok()
         .flatten();
-    let console = connector
+    let console = run
+        .console_kind
         .as_deref()
-        .and_then(crate::providers::descriptor)
-        .map(|d| d.console);
+        .and_then(crate::providers::parse_console_kind)
+        .or_else(|| {
+            connector
+                .as_deref()
+                .and_then(crate::providers::descriptor)
+                .map(|d| d.console)
+        });
     let is_opencode = console == Some(ConsoleKind::OpenCodeSession);
     let is_structured_console = console == Some(ConsoleKind::Structured);
 

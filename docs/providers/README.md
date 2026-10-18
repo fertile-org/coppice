@@ -13,7 +13,7 @@ A connector is how Coppice drives one agent CLI. The board, tickets and worktree
 | Claude Code | `claude-code` | `claude` | Subprocess in the worktree: `claude -p … --output-format stream-json --verbose --permission-mode bypassPermissions` | `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN` set, or `~/.claude/.credentials.json`; otherwise `claude auth status` | [claude-code.md](claude-code.md) |
 | Codex | `codex` | `codex` | Subprocess: `codex exec --json --dangerously-bypass-approvals-and-sandbox -C <worktree>` (`--no-daemon` when the CLI is ≥ 0.156) | `OPENAI_API_KEY` set, or `~/.codex/auth.json`; otherwise `codex login status` | [codex.md](codex.md) |
 | Cursor | `cursor` | `agent` | Subprocess in the worktree: `agent -p … --trust --force --output-format stream-json --workspace <worktree>` | `~/.config/cursor/auth.json` or `~/.cursor/auth.json`. Neither means not signed in | [cursor.md](cursor.md) |
-| OpenCode | `opencode` | `opencode` | A fresh `opencode serve --hostname … --port …` per run, driven over HTTP/SSE. The ticket shows a Live Session | `~/.local/share/opencode/auth.json`; otherwise `opencode auth list` | [opencode.md](opencode.md) |
+| OpenCode | `opencode` | `opencode` | 2.x: `opencode acp` per run over the Agent Client Protocol, with the structured console. 1.x: a fresh `opencode serve --hostname … --port …` per run over HTTP/SSE, with a Live Session | `~/.local/share/opencode/auth.json`; otherwise `opencode auth list` | [opencode.md](opencode.md) |
 | Kilo Code | `kilo-code` | `kilo` | Subprocess in the worktree: `kilo run --format json --auto --dir <worktree>` | None. `kilo auth` is interactive, so Coppice never runs it | [kilo-code.md](kilo-code.md) |
 
 ### Detection and status
@@ -113,6 +113,7 @@ No real agent CLI runs in CI or automated tests. [CLI integration review](cli-in
 | `cargo test -p coppice-connectors` | Descriptors, probe, sign-in checks |
 | `cargo test --features embedded-test-db -p coppice-server --test integration_cli_adapters` | Cursor and Kilo Code adapters against `fake-cli` |
 | `cargo test --features embedded-test-db -p coppice-server --test integration_opencode_run_server` | Per-run `opencode serve` against `fake-opencode` |
+| `cargo test --features embedded-test-db -p coppice-server --test integration_acp` | The ACP client against `fake-opencode acp` scenarios: gateway, model, read-only refusal, resume, idle, cancel, oversized lines, early exit. `COPPICE_REAL_OPENCODE=1 … real_opencode -- --ignored` runs a read-only turn on the installed OpenCode 2 |
 | `cargo test --features embedded-test-db -p coppice-server --test integration_connector_diagnostics` | Connectors API and Test connection |
 
 To try a real CLI, run Coppice from source or in Docker, create an agent on that connector, and use **Test connection**.

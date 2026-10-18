@@ -48,13 +48,41 @@ impl AgentProvider for OpenCodeProvider {
             input.artifacts_dir.as_deref(),
             input.ticket_id.as_deref(),
         );
+        let version = super::cli_version::detect(&self.config.command)
+            .await
+            .map_err(|err| {
+                ProviderError::InvalidFixture(super::cli_version::version_unavailable(
+                    &self.config.command,
+                    &err,
+                ))
+            })?;
+        let acp = super::opencode_acp::uses_acp(&version);
         std::fs::write(
             &config_path,
             ticket_attachments::with_attachment_read(
-                &opencode_run_config(input.mcp.as_ref(), input.read_only_tools),
+                // Over ACP the gateway is passed in session/new, not this file.
+                &opencode_run_config(
+                    if acp { None } else { input.mcp.as_ref() },
+                    input.read_only_tools,
+                ),
                 ticket_attachments::external_read_dir(&staged).as_deref(),
             ),
         )?;
+        let run_timeout = Duration::from_secs(self.config.run_timeout_secs);
+        if acp {
+            let prompt = ticket_attachments::launch_prompt(coppice_run_prompt(), &staged);
+            return super::opencode_acp::run(
+                input,
+                super::opencode_acp::RunSpec {
+                    program: &self.config.command,
+                    config_path: &config_path,
+                    worktree: &worktree,
+                    prompt: &prompt,
+                    run_timeout,
+                },
+            )
+            .await;
+        }
 
         let key = input
             .run_id
@@ -76,7 +104,6 @@ impl AgentProvider for OpenCodeProvider {
             .await
             .map_err(|err| ProviderError::Io(std::io::Error::other(format!("{err:#}"))))?;
 
-        let run_timeout = Duration::from_secs(self.config.run_timeout_secs);
         let client = OpenCodeClient::with_run_timeout(lease.base_url(), run_timeout);
         let result = client
             .run_session(
