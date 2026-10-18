@@ -416,8 +416,9 @@ mod tests {
             .expect("claude-code descriptor")
             .run_contract;
         let mut args = contract.with_prompt(
+            // Same as `run()`: planning is always read-only.
             contract.argv(&coppice_connectors::LaunchSubst {
-                read_only,
+                read_only: read_only || plan,
                 plan,
                 worktree: "/tmp/chat",
                 hostname: "",
@@ -487,7 +488,7 @@ mod tests {
         let args = chat_argv(true, false, false);
         assert!(
             args.windows(2)
-                .any(|pair| pair == ["--permission-mode", "plan"]),
+                .any(|pair| pair == ["--permission-mode", "dontAsk"]),
             "{args:?}"
         );
         assert!(
@@ -563,7 +564,7 @@ mod tests {
 
         assert!(args
             .windows(2)
-            .any(|pair| pair == ["--permission-mode", "plan"]));
+            .any(|pair| pair == ["--permission-mode", "dontAsk"]));
         assert_eq!(
             args.iter()
                 .filter(|arg| arg.as_str() == "--strict-mcp-config")
@@ -588,7 +589,7 @@ mod tests {
         let args = chat_argv(false, true, true);
         assert!(args
             .windows(2)
-            .any(|pair| pair == ["--permission-mode", "plan"]));
+            .any(|pair| pair == ["--permission-mode", "dontAsk"]));
         assert!(!args.iter().any(|arg| arg == "bypassPermissions"));
         assert!(flag_value(&args, "--disallowedTools")
             .split(',')
