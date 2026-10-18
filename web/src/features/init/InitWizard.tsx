@@ -30,10 +30,13 @@ export function InitWizard({
   open,
   onSkip,
   onCreated,
+  variant = 'dialog',
 }: {
   open: boolean;
   onSkip: () => void;
   onCreated: (created: InitCreated) => void;
+  /** `page` draws a card for the first-run welcome page instead of a dialog. */
+  variant?: 'dialog' | 'page';
 }) {
   const created = useRef(false);
   const [step, setStep] = useState<Step>(0);
@@ -175,12 +178,7 @@ export function InitWizard({
     !inspectPath.isPending;
   const createReady = preview.data?.status === 'ready' && Boolean(chosen);
 
-  return (
-    <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent className="max-w-lg">
-        <DialogTitle>{INIT_COPY.title}</DialogTitle>
-        <DialogDescription className="mt-1">{INIT_COPY.intro}</DialogDescription>
-
+  const form = (
         <form onSubmit={handleSubmit} className="mt-5 space-y-4">
           <div>
             <p className="font-body text-xs text-text-muted">{stepLabel(step + 1)}</p>
@@ -363,6 +361,34 @@ export function InitWizard({
             )}
           </div>
         </form>
+  );
+
+  if (variant === 'page') {
+    if (!open) return null;
+    return (
+      <section
+        aria-labelledby="init-wizard-title"
+        className="w-full max-w-lg rounded-xl border border-border bg-surface-raised p-6 text-left shadow-sm"
+        data-testid="init-wizard-card"
+      >
+        <h2
+          id="init-wizard-title"
+          className="font-display text-xl font-semibold text-text-primary"
+        >
+          {INIT_COPY.title}
+        </h2>
+        <p className="mt-1 font-body text-sm text-text-secondary">{INIT_COPY.intro}</p>
+        {form}
+      </section>
+    );
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={handleOpenChange}>
+      <DialogContent className="max-w-lg">
+        <DialogTitle>{INIT_COPY.title}</DialogTitle>
+        <DialogDescription className="mt-1">{INIT_COPY.intro}</DialogDescription>
+        {form}
       </DialogContent>
     </Dialog>
   );

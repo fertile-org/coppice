@@ -1,6 +1,9 @@
 /** User-facing init wizard strings. Content owns this list. */
 
 export const INIT_COPY = {
+  welcomeTitle: 'Welcome to Coppice',
+  welcomeIntro:
+    'This short setup gets you started. Connect a repository, create your first board, and add a starter team of agents. It takes about a minute, and you can skip it.',
   title: 'Set up Coppice',
   intro:
     'Pick a repository, name a board, and add a starter team. Nothing is created until you click Create.',
