@@ -64,7 +64,7 @@ If `pg_app_password` is missing or unreadable at startup, Coppice generates a ne
 
 The shell checks GitHub releases in the background (prereleases included) and shows a banner. **Settings → Updates** remembers `automaticUpdates` in `update-settings.json` inside the user-data directory. Default is on.
 
-Linux packages copy the committed public keyring `build/linux/coppice-archive-keyring.gpg` and add its apt source on install. The private key is used only by `.github/workflows/apt-repo.yml`, which publishes the signed repository after a release is published. The apt origin and the macOS feed origin are `COPPICE_UPDATE_BASE`, or `https://apt.getcoppice.dev` when that variable is empty. That value has to be an https origin with a host and no path, or the package build fails. The macOS feed is that origin plus `/updates/`. A release's Linux package also checks the committed keyring against the repository variable `COPPICE_APT_KEY_FINGERPRINT`.
+Linux packages copy the committed public keyring `build/linux/coppice-archive-keyring.gpg` and add its apt source on install. The private key is used only by `.github/workflows/apt-repo.yml`, which publishes the signed repository after a release is published. The apt origin and the macOS feed origin are `COPPICE_UPDATE_BASE`, or `https://apt.getcoppice.app` when that variable is empty. That value has to be an https origin with a host and no path, or the package build fails. The macOS feed is that origin plus `/updates/`. A release's Linux package also checks that the committed keyring holds exactly one primary key, and that its fingerprint is the repository variable `COPPICE_APT_KEY_FINGERPRINT`.
 
 macOS in-place install is one flag. `scripts/dist.mjs` sets `updater-mode.json` → `macInPlaceUpdates` to `true` only when `CSC_LINK` is non-blank (Developer ID signing). The same file records `updateBase`. The app then uses `electron-updater` and `<updateBase>/updates/latest-mac.yml`. Unsigned builds leave the flag `false` and the banner opens the release page. To turn in-place install on, add the signing secrets listed in [docs/development.md](../docs/development.md#desktop-release-tag-and-publish). No further code change is required.
 
@@ -73,3 +73,7 @@ macOS in-place install is one flag. `scripts/dist.mjs` sets `updater-mode.json` 
 ```bash
 yarn test               # or `make desktop-test` from the repo root
 ```
+
+### Moving the apt pool to a CDN (#167)
+
+The apt repository and macOS feed live behind `COPPICE_UPDATE_BASE` (`https://apt.getcoppice.app`), a CNAME to GitHub Pages today. Pages has a soft 100 GB/month limit, roughly 850 Linux upgrades of a ~115 MB `.deb`. When that gets close, publish the same `site/` tree (dists, pool, `updates/`) to an object store or CDN and point the `apt.getcoppice.app` DNS record at it. No app update is needed: installs keep the same origin, and the old host only has to serve one more upgrade.

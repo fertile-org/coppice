@@ -132,6 +132,9 @@ function PendingCommentBubble({
   );
 }
 
+/** Hunks mounted at once for one file. */
+export const HUNK_WINDOW = 100;
+
 export function DiffViewer({
   repoId,
   worktreePath,
@@ -141,6 +144,11 @@ export function DiffViewer({
   inlineComments,
   onInlineCommentsChange,
 }: DiffViewerProps) {
+  // Hunks mounted for the current file; more on request.
+  const [hunkWindow, setHunkWindow] = useState({ path: filePath, count: HUNK_WINDOW });
+  const shownHunks = hunkWindow.path === filePath ? hunkWindow.count : HUNK_WINDOW;
+  const setShownHunks = (next: (count: number) => number) =>
+    setHunkWindow({ path: filePath, count: next(shownHunks) });
   const [editingChangeKey, setEditingChangeKey] = useState<string | null>(null);
   const [composingChangeKey, setComposingChangeKey] = useState<string | null>(
     null,
@@ -228,14 +236,28 @@ export function DiffViewer({
     [inlineComments, onInlineCommentsChange],
   );
 
+  // Built once per file, so compose and edit state changes don't walk every line.
+  const changesByKey = useMemo(() => {
+    const map = new Map<string, ChangeData>();
+    for (const hunk of parsedFile?.hunks ?? []) {
+      for (const change of hunk.changes) {
+        map.set(getChangeKey(change), change);
+      }
+    }
+    return map;
+  }, [parsedFile]);
+
   const widgets = useMemo(() => {
     if (!parsedFile || !filePath) return {};
 
     const result: Record<string, ReactNode> = {};
-    const allChanges = parsedFile.hunks.flatMap((hunk) => hunk.changes);
+    // Only lines with a comment or an open composer get a widget.
+    const keys = new Set(commentsByChangeKey.keys());
+    if (composingChangeKey) keys.add(composingChangeKey);
 
-    for (const change of allChanges) {
-      const changeKey = getChangeKey(change);
+    for (const changeKey of keys) {
+      const change = changesByKey.get(changeKey);
+      if (!change) continue;
       const existing = commentsByChangeKey.get(changeKey);
 
       if (composingChangeKey === changeKey) {
@@ -294,6 +316,7 @@ export function DiffViewer({
 
     return result;
   }, [
+    changesByKey,
     commentsByChangeKey,
     composingChangeKey,
     composingSide,
@@ -366,10 +389,21 @@ export function DiffViewer({
           className="!text-sm"
         >
           {(hunks) =>
-            hunks.map((hunk) => <Hunk key={hunk.content} hunk={hunk} />)
+            hunks
+              .slice(0, shownHunks)
+              .map((hunk) => <Hunk key={hunk.content} hunk={hunk} />)
           }
         </Diff>
       </div>
+      {parsedFile.hunks.length > shownHunks && (
+        <button
+          type="button"
+          onClick={() => setShownHunks((count) => count + HUNK_WINDOW)}
+          className="mt-3 font-body text-xs text-text-secondary underline"
+        >
+          Show more changes ({parsedFile.hunks.length - shownHunks} hunks)
+        </button>
+      )}
       <p className="mt-3 font-body text-xs text-text-muted">
         Click a line number to add an inline comment.
       </p>

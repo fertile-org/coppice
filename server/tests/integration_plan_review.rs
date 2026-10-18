@@ -858,3 +858,485 @@ async fn plan_run_leaves_branches_tags_and_remotes_unchanged() {
         "unchanged refs were written to the run log:\n{log}"
     );
 }
+
+async fn ask_for_changes(app: &axum::Router, ticket_id: &str, comment: &str, cookie: &str, csrf: &str) {
+    let ask = app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            &format!("/api/tickets/{ticket_id}/plan-changes"),
+            &serde_json::json!({ "comment": comment }).to_string(),
+            cookie,
+            csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(ask.status(), StatusCode::OK);
+}
+
+/// The queued plan run's trigger comment, after marking that run finished.
+async fn finish_latest_plan_run(pool: &sqlx::PgPool, ticket_id: Uuid) -> Uuid {
+    let (run_id, trigger): (Uuid, Uuid) = sqlx::query_as(
+        r#"
+        SELECT id, trigger_comment_id FROM agent_runs
+        WHERE ticket_id = $1 AND job_type = 'plan_ticket' AND status IN ('queued', 'running')
+        ORDER BY created_at DESC LIMIT 1
+        "#,
+    )
+    .bind(ticket_id)
+    .fetch_one(pool)
+    .await
+    .expect("plan run");
+    sqlx::query("UPDATE agent_runs SET status = 'succeeded', ended_at = now() WHERE id = $1")
+        .bind(run_id)
+        .execute(pool)
+        .await
+        .unwrap();
+    trigger
+}
+
+#[tokio::test]
+async fn revision_runs_get_the_previous_plan_and_every_change_request() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
+    let pm_id = common::create_agent_with_preset_key(&app, "pm", "PM", &cookie, &csrf).await;
+    let pm = Uuid::parse_str(&pm_id).unwrap();
+    let ticket_id = common::create_unplanned_ticket(&app, &board_id, &cookie, &csrf).await;
+    let ticket = Uuid::parse_str(&ticket_id).unwrap();
+    common::assign_agent_to_ticket(&app, &ticket_id, &pm_id, &cookie, &csrf).await;
+    let pool = state.db.as_ref().expect("db");
+    let planning = PlanningService::new(pool);
+
+    // First plan: no revision context.
+    post_plan(&app, &ticket_id, pm, pool, &cookie, &csrf).await;
+    assert_eq!(planning.revision_context(ticket, None).await.unwrap(), None);
+
+    // Round 2.
+    ask_for_changes(&app, &ticket_id, "Use Postgres.", &cookie, &csrf).await;
+    let first = finish_latest_plan_run(pool, ticket).await;
+    let round_two = planning
+        .revision_context(ticket, Some(first))
+        .await
+        .unwrap()
+        .expect("revision");
+    assert_eq!(round_two.previous_plan, CANONICAL_PLAN.trim());
+    assert_eq!(round_two.requests, vec!["Use Postgres."]);
+
+    let second_plan = "### Changes requested\n- Use Postgres: switched the store.\n\n## Plan\n\n### Approach\nPostgres.\n\n### Steps\n- [ ] Add the table\n";
+    planning.record_plan(ticket, pm, second_plan).await.unwrap();
+
+    // A review comment that did not start a plan run is not a change request.
+    let review = app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            &format!("/api/tickets/{ticket_id}/comments"),
+            r#"{"body":"Unrelated review note.","intent":"review_feedback"}"#,
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(review.status(), StatusCode::CREATED);
+
+    // Round 3: both requests, oldest first, and the plan it replaces.
+    ask_for_changes(&app, &ticket_id, "Split the API change.", &cookie, &csrf).await;
+    let second = finish_latest_plan_run(pool, ticket).await;
+    let round_three = planning
+        .revision_context(ticket, Some(second))
+        .await
+        .unwrap()
+        .expect("revision");
+    assert_eq!(round_three.requests, vec!["Use Postgres.", "Split the API change."]);
+    assert!(round_three.previous_plan.starts_with("### Changes requested"));
+    assert!(round_three.previous_plan.contains("- [ ] Add the table"));
+}
+
+async fn post_json(
+    app: &axum::Router,
+    path: &str,
+    body: serde_json::Value,
+    cookie: &str,
+    csrf: &str,
+) -> axum::response::Response {
+    app.clone()
+        .oneshot(common::json_request("POST", path, &body.to_string(), cookie, csrf))
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+async fn questions_wait_in_plan_review_and_answers_start_the_plan() {
+    use coppice_server::copy::plan::{
+        APPROVE_WAITING_FOR_ANSWERS, NO_PLAN_YET, QUESTIONS_COMMENT_TITLE, SEND_ANSWERS_REQUIRED,
+    };
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let (state, app, cookie, csrf, _env) =
+        common::bootstrap_and_login_with_auto_start_workers().await;
+    let (ticket_id, git) =
+        open_planned_repo(&app, &state, "plan_questioner", &cookie, &csrf).await;
+    let board_id = common::get_ticket(&app, &ticket_id, &cookie, &csrf).await["boardId"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let ticket = common::poll_ticket_until(
+        &app,
+        &ticket_id,
+        &cookie,
+        &csrf,
+        "waiting for answers",
+        Duration::from_secs(20),
+        |ticket| ticket["planQuestions"]["waiting"] == true,
+    )
+    .await;
+    assert_eq!(ticket["status"], "plan_review");
+    assert_eq!(ticket["hasPlan"], false);
+    assert_eq!(ticket["planQuestions"]["questions"].as_array().unwrap().len(), 2);
+    let thread = comments(&app, &ticket_id, &cookie, &csrf).await;
+    let asked = thread
+        .iter()
+        .find(|note| note["intent"] == "clarification_request")
+        .expect("questions comment");
+    assert!(asked["body"].as_str().unwrap().starts_with(QUESTIONS_COMMENT_TITLE));
+    assert!(thread.iter().all(|note| note["intent"] != "plan"));
+    snapshot_ticket_git(&git);
+
+    // A waiting ticket is outside the review cap.
+    let pool = state.db.as_ref().expect("db");
+    let occupancy = coppice_server::services::review_capacity::ReviewCapacityService::new(pool)
+        .occupancy(Uuid::parse_str(&board_id).unwrap(), true)
+        .await
+        .unwrap();
+    assert_eq!(occupancy, 0);
+
+    let approve = post_json(&app, &format!("/api/tickets/{ticket_id}/approve-plan"), serde_json::json!({}), &cookie, &csrf).await;
+    assert_eq!(approve.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(message(approve).await, APPROVE_WAITING_FOR_ANSWERS);
+    let ask = post_json(
+        &app,
+        &format!("/api/tickets/{ticket_id}/plan-changes"),
+        serde_json::json!({ "comment": "Change it." }),
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(ask.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(message(ask).await, NO_PLAN_YET);
+    let empty = post_json(
+        &app,
+        &format!("/api/tickets/{ticket_id}/plan-answers"),
+        serde_json::json!({ "answers": ["  ", ""] }),
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(empty.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(message(empty).await, SEND_ANSWERS_REQUIRED);
+
+    // The next run writes a plan.
+    let planner: Uuid = sqlx::query_scalar("SELECT assignee_agent_id FROM tickets WHERE id = $1")
+        .bind(Uuid::parse_str(&ticket_id).unwrap())
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE agents SET preset_source = 'plan_writer' WHERE id = $1")
+        .bind(planner)
+        .execute(pool)
+        .await
+        .unwrap();
+    let sent = post_json(
+        &app,
+        &format!("/api/tickets/{ticket_id}/plan-answers"),
+        serde_json::json!({ "answers": ["Postgres"] }),
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(sent.status(), StatusCode::OK);
+    let sent = common::json_body(sent).await;
+    assert_eq!(sent["status"], "plan_review");
+    assert_eq!(sent["planQuestions"]["waiting"], false);
+
+    let ticket = common::poll_ticket_until(
+        &app,
+        &ticket_id,
+        &cookie,
+        &csrf,
+        "plan after answers",
+        Duration::from_secs(20),
+        |ticket| ticket["hasPlan"] == true,
+    )
+    .await;
+    assert_eq!(ticket["status"], "plan_review");
+    let thread = comments(&app, &ticket_id, &cookie, &csrf).await;
+    let answers = thread
+        .iter()
+        .find(|note| note["intent"] == "clarification_answer")
+        .expect("answers comment");
+    let body = answers["body"].as_str().unwrap();
+    assert!(body.contains("Which database should the store use?"));
+    assert!(body.contains("Postgres"));
+    assert!(body.contains("No answer."));
+    let listed = runs(&app, &ticket_id, &cookie, &csrf).await;
+    let plan = plan_runs(&listed);
+    assert_eq!(plan.len(), 2);
+    assert!(plan.iter().all(|run| run["status"] == "succeeded"), "{plan:?}");
+    snapshot_ticket_git(&git);
+}
+
+#[tokio::test]
+async fn a_second_question_round_and_more_than_three_questions_are_refused() {
+    use coppice_server::copy::plan::{PLAN_QUESTIONS_ALREADY_ASKED, PLAN_QUESTIONS_TOO_MANY};
+    use coppice_server::providers::PlanQuestion;
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
+    let ticket_id = common::create_unplanned_ticket(&app, &board_id, &cookie, &csrf).await;
+    let ticket = Uuid::parse_str(&ticket_id).unwrap();
+    let pool = state.db.as_ref().expect("db");
+    let planning = PlanningService::new(pool);
+    let question = |text: &str| PlanQuestion {
+        question: text.into(),
+        choices: Vec::new(),
+    };
+
+    let four: Vec<PlanQuestion> = ["a", "b", "c", "d"].iter().map(|q| question(q)).collect();
+    let err = planning.record_questions(ticket, None, None, &four).await.unwrap_err();
+    assert_eq!(err.to_string(), PLAN_QUESTIONS_TOO_MANY);
+
+    assert!(planning.can_ask_questions(ticket).await.unwrap());
+    planning
+        .record_questions(ticket, None, None, &[question("Which?")])
+        .await
+        .unwrap();
+    assert!(!planning.can_ask_questions(ticket).await.unwrap());
+    let err = planning
+        .record_questions(ticket, None, None, &[question("Again?")])
+        .await
+        .unwrap_err();
+    assert_eq!(err.to_string(), PLAN_QUESTIONS_ALREADY_ASKED);
+    let state = planning.questions(ticket).await.unwrap().unwrap();
+    assert!(state.waiting);
+    assert_eq!(state.questions[0].question, "Which?");
+
+    // Validation refuses four questions at submit time too.
+    let four_json = serde_json::json!({
+        "status": "done",
+        "summary": "",
+        "planQuestions": ["a", "b", "c", "d"]
+    });
+    let result: coppice_server::providers::AgentRunResult = serde_json::from_value(four_json).unwrap();
+    let refused = coppice_server::services::result_contract::validate_for_profile(
+        &result,
+        coppice_server::domain::context_profile::ContextProfile::Full,
+        "plan_ticket",
+    );
+    assert_eq!(refused.unwrap_err(), PLAN_QUESTIONS_TOO_MANY);
+}
+
+#[tokio::test]
+async fn a_split_at_plan_review_then_verify_parent() {
+    use coppice_server::copy::plan::{UMBRELLA_NO_WORK, VERIFY_NOT_READY};
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let (state, app, cookie, csrf, _env) =
+        common::bootstrap_and_login_with_auto_start_workers().await;
+    let (ticket_id, _git) = open_planned_repo(&app, &state, "plan_splitter", &cookie, &csrf).await;
+    let pool = state.db.as_ref().expect("db");
+    let parent = Uuid::parse_str(&ticket_id).unwrap();
+
+    let ticket = common::poll_ticket_until(
+        &app,
+        &ticket_id,
+        &cookie,
+        &csrf,
+        "plan with a split",
+        Duration::from_secs(20),
+        |ticket| ticket["status"] == "plan_review" && ticket["hasPlan"] == true,
+    )
+    .await;
+    let pending = &ticket["pendingSplitRecommendation"];
+    assert_eq!(pending["fromPlan"], true, "{ticket}");
+    assert_eq!(pending["splits"].as_array().unwrap().len(), 2);
+
+    // The split is approved only with the plan.
+    let early = post_json(&app, &format!("/api/tickets/{ticket_id}/approve-splits"), serde_json::json!({}), &cookie, &csrf).await;
+    assert_ne!(early.status(), StatusCode::OK);
+
+    let approved = post_json(&app, &format!("/api/tickets/{ticket_id}/approve-plan"), serde_json::json!({}), &cookie, &csrf).await;
+    assert_eq!(approved.status(), StatusCode::OK);
+
+    let ticket = common::get_ticket(&app, &ticket_id, &cookie, &csrf).await;
+    assert_eq!(ticket["status"], "ready");
+    assert_eq!(ticket["splitParent"], true);
+    assert_eq!(ticket["verifyAvailable"], false);
+    assert!(ticket["pendingSplitRecommendation"].is_null());
+    let children: Vec<(Uuid, String, String)> = sqlx::query_as(
+        "SELECT id, title, status FROM tickets WHERE parent_ticket_id = $1 ORDER BY title",
+    )
+    .bind(parent)
+    .fetch_all(pool)
+    .await
+    .unwrap();
+    assert_eq!(children.len(), 2);
+    for (child_id, _, status) in &children {
+        assert_eq!(status, "backlog");
+        let child = common::get_ticket(&app, &child_id.to_string(), &cookie, &csrf).await;
+        assert_eq!(child["planApproved"], true, "{child}");
+    }
+    let store = common::get_ticket(&app, &children[1].0.to_string(), &cookie, &csrf).await;
+    assert_eq!(children[1].1, "Order store");
+    assert_eq!(
+        store["approvedPlan"]["steps"],
+        serde_json::json!(["Add the orders table", "Write the repository"])
+    );
+    assert_eq!(
+        store["approvedPlan"]["criteria"][0]["text"],
+        "Orders persist across restarts"
+    );
+    // Only the planning run ran on the parent: no Tech Lead, no work.
+    assert_eq!(runs(&app, &ticket_id, &cookie, &csrf).await.len(), 1);
+    let work = post_json(&app, &format!("/api/tickets/{ticket_id}/run-agent"), serde_json::json!({}), &cookie, &csrf).await;
+    assert_eq!(work.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(message(work).await, UMBRELLA_NO_WORK);
+
+    let not_yet = post_json(&app, &format!("/api/tickets/{ticket_id}/verify-parent"), serde_json::json!({}), &cookie, &csrf).await;
+    assert_eq!(not_yet.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(message(not_yet).await, VERIFY_NOT_READY);
+
+    // Children Done and merged; one more child archived (excluded).
+    for (child_id, _, _) in &children {
+        sqlx::query("UPDATE tickets SET status = 'done' WHERE id = $1")
+            .bind(child_id)
+            .execute(pool)
+            .await
+            .unwrap();
+        sqlx::query(
+            "INSERT INTO ticket_human_reviews (ticket_id, head_sha, merged_sha, merged_at) VALUES ($1, 'abc1234', 'abc1234', now())",
+        )
+        .bind(child_id)
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+    let dropped = Uuid::new_v4();
+    sqlx::query(
+        r#"
+        INSERT INTO tickets (id, board_id, title, description, status, parent_ticket_id, created_by, archived_at)
+        SELECT $1, board_id, 'Order export', '', 'backlog', id, 'user', now() FROM tickets WHERE id = $2
+        "#,
+    )
+    .bind(dropped)
+    .bind(parent)
+    .execute(pool)
+    .await
+    .unwrap();
+    let ticket = common::get_ticket(&app, &ticket_id, &cookie, &csrf).await;
+    assert_eq!(ticket["verifyAvailable"], true);
+
+    // A reopened child hides the button again.
+    sqlx::query("UPDATE tickets SET status = 'in_progress' WHERE id = $1")
+        .bind(children[0].0)
+        .execute(pool)
+        .await
+        .unwrap();
+    let ticket = common::get_ticket(&app, &ticket_id, &cookie, &csrf).await;
+    assert_eq!(ticket["verifyAvailable"], false);
+    sqlx::query("UPDATE tickets SET status = 'done' WHERE id = $1")
+        .bind(children[0].0)
+        .execute(pool)
+        .await
+        .unwrap();
+
+    let verifier = common::create_agent_with_preset_key(&app, "backend_engineer", "Verifier", &cookie, &csrf).await;
+    sqlx::query("UPDATE agents SET preset_source = 'verifier' WHERE id = $1")
+        .bind(Uuid::parse_str(&verifier).unwrap())
+        .execute(pool)
+        .await
+        .unwrap();
+    let started = post_json(
+        &app,
+        &format!("/api/tickets/{ticket_id}/verify-parent"),
+        serde_json::json!({ "agentId": verifier }),
+        &cookie,
+        &csrf,
+    )
+    .await;
+    assert_eq!(started.status(), StatusCode::OK);
+
+    let ticket = common::poll_ticket_until(
+        &app,
+        &ticket_id,
+        &cookie,
+        &csrf,
+        "verified parent in Human Review",
+        Duration::from_secs(20),
+        |ticket| ticket["status"] == "wait_for_final_review",
+    )
+    .await;
+    let criteria = ticket["approvedPlan"]["criteria"].as_array().expect("criteria");
+    assert_eq!(criteria[0]["status"], "met");
+    assert_eq!(criteria[1]["status"], "not_met");
+    let thread = comments(&app, &ticket_id, &cookie, &csrf).await;
+    let verification = thread
+        .iter()
+        .find(|note| note["body"].as_str().is_some_and(|b| b.starts_with("**Verification**")))
+        .expect("verification comment");
+    let body = verification["body"].as_str().unwrap();
+    assert!(body.contains("**Met:** Orders persist across restarts"), "{body}");
+    assert!(body.contains("Excluded (archived): Order export"), "{body}");
+
+    let accepted = post_json(&app, &format!("/api/tickets/{ticket_id}/final-approve"), serde_json::json!({}), &cookie, &csrf).await;
+    assert_eq!(accepted.status(), StatusCode::OK);
+    assert_eq!(common::json_body(accepted).await["status"], "done");
+}
+
+#[tokio::test]
+async fn asking_for_changes_drops_the_split_proposed_with_the_plan() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state().await;
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
+    let pm_id = common::create_agent_with_preset_key(&app, "pm", "PM", &cookie, &csrf).await;
+    let pm = Uuid::parse_str(&pm_id).unwrap();
+    let ticket_id = common::create_unplanned_ticket(&app, &board_id, &cookie, &csrf).await;
+    common::assign_agent_to_ticket(&app, &ticket_id, &pm_id, &cookie, &csrf).await;
+    let pool = state.db.as_ref().expect("db");
+    post_plan(&app, &ticket_id, pm, pool, &cookie, &csrf).await;
+    let ticket = coppice_server::services::ticket_service::TicketService::new(pool)
+        .get(Uuid::parse_str(&ticket_id).unwrap())
+        .await
+        .unwrap();
+    let spec = |title: &str| coppice_server::domain::workflow::SplitTicketSpec {
+        title: title.into(),
+        description: "d".into(),
+        acceptance_criteria: None,
+        assign_to: None,
+        steps: Vec::new(),
+    };
+    coppice_server::services::split_service::SplitService::new(pool, &state.config.workflow)
+        .propose_from_plan(&ticket.ticket, &[spec("A"), spec("B")], pm)
+        .await
+        .unwrap();
+    let before = common::get_ticket(&app, &ticket_id, &cookie, &csrf).await;
+    assert_eq!(before["pendingSplitRecommendation"]["fromPlan"], true);
+
+    ask_for_changes(&app, &ticket_id, "Keep it one ticket.", &cookie, &csrf).await;
+    let after = common::get_ticket(&app, &ticket_id, &cookie, &csrf).await;
+    assert!(after["pendingSplitRecommendation"].is_null(), "{after}");
+}

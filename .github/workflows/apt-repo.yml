@@ -74,6 +74,9 @@ jobs:
           umask 077
           printf '%s\n' "$COPPICE_APT_SIGNING_KEY" > "$RUNNER_TEMP/apt-key.asc"
           printf '%s' "$COPPICE_APT_SIGNING_PASSPHRASE" > "$RUNNER_TEMP/apt-pass"
+          node desktop/scripts/apt-repo.mjs check-keyring \
+            --keyring desktop/build/linux/coppice-archive-keyring.gpg \
+            --fingerprint "$COPPICE_APT_KEY_FINGERPRINT"
           node desktop/scripts/apt-repo.mjs check-signing-key \
             --key "$RUNNER_TEMP/apt-key.asc" \
             --passphrase-file "$RUNNER_TEMP/apt-pass" \
@@ -103,6 +106,11 @@ jobs:
             --asset-base "https://github.com/fertile-org/coppice/releases/download/${TAG}" \
             --out site/updates/latest-mac.yml \
             "${zips[@]}"
+      - name: Write the update check manifest
+        env:
+          TAG: ${{ steps.rel.outputs.tag }}
+          REPO: ${{ github.repository }}
+        run: node desktop/scripts/latest-json.mjs --tag "$TAG" --repo "$REPO" --out site/updates/latest.json
       - name: Write the Pages CNAME
         env:
           COPPICE_UPDATE_BASE: ${{ vars.COPPICE_UPDATE_BASE }}
@@ -112,6 +120,8 @@ jobs:
           import { pagesCname } from './desktop/src/updateEndpoints.mjs';
           writeFileSync('site/CNAME', `${pagesCname(process.env.COPPICE_UPDATE_BASE)}\n`);
           EOF
+      - name: No old update domain in the Pages site
+        run: node desktop/scripts/check-old-domain.mjs site/CNAME site/updates
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:

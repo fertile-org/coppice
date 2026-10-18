@@ -31,6 +31,16 @@ function nextEntryId(): string {
   return `claude-entry-${entryCounter}`;
 }
 
+/** Console entries kept in memory; the oldest drop off first. */
+export const MAX_CONSOLE_ENTRIES = 5000;
+/** Characters of legacy terminal text kept; the newest are kept. */
+export const MAX_LEGACY_TEXT = 1_000_000;
+
+function capEntries(state: ClaudeConsoleState): ClaudeConsoleState {
+  if (state.entries.length <= MAX_CONSOLE_ENTRIES) return state;
+  return { ...state, entries: state.entries.slice(-MAX_CONSOLE_ENTRIES) };
+}
+
 export function createClaudeConsoleState(): ClaudeConsoleState {
   return { entries: [], legacyText: '' };
 }
@@ -71,6 +81,13 @@ function consoleEventParts(ty: string): { connector: string; event: string } | n
 }
 
 export function applyClaudeConsoleEvent(
+  state: ClaudeConsoleState,
+  event: Record<string, unknown>,
+): ClaudeConsoleState {
+  return capEntries(applyConsoleEvent(state, event));
+}
+
+function applyConsoleEvent(
   state: ClaudeConsoleState,
   event: Record<string, unknown>,
 ): ClaudeConsoleState {
@@ -221,7 +238,12 @@ export function appendLegacyFrameText(
   text: string,
 ): ClaudeConsoleState {
   if (!text) return state;
-  return { ...state, legacyText: state.legacyText + text };
+  const legacyText = state.legacyText + text;
+  return {
+    ...state,
+    legacyText:
+      legacyText.length > MAX_LEGACY_TEXT ? legacyText.slice(-MAX_LEGACY_TEXT) : legacyText,
+  };
 }
 
 export function resetClaudeConsoleState(): ClaudeConsoleState {

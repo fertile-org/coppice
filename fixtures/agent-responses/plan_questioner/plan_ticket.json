@@ -1,0 +1,12 @@
+{
+  "status": "done",
+  "summary": "",
+  "planQuestions": [
+    { "question": "Which database should the store use?", "choices": ["Postgres", "SQLite"] },
+    { "question": "Should the old endpoint stay?" }
+  ],
+  "changedFiles": [],
+  "testsRun": [],
+  "mentionAgents": [],
+  "blockers": []
+}

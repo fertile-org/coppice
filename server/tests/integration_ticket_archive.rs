@@ -370,3 +370,136 @@ async fn archive_parent_does_not_archive_children() {
     assert!(!ids.contains(&parent["id"].as_str().unwrap()));
     assert!(ids.contains(&child_id.as_str()));
 }
+
+async fn insert_run(
+    pool: &sqlx::PgPool,
+    ticket_id: Uuid,
+    agent_id: Uuid,
+    status: &str,
+    age_days: i32,
+) -> Uuid {
+    let run_id = Uuid::new_v4();
+    sqlx::query(
+        r#"
+        INSERT INTO agent_runs (
+            id, ticket_id, agent_id, job_type, status, sandbox_profile_id,
+            created_at, ended_at
+        )
+        VALUES (
+            $1, $2, $3, 'implementation', $4, 'permissive',
+            now() - make_interval(days => $5),
+            CASE WHEN $4 IN ('queued', 'running') THEN NULL
+                 ELSE now() - make_interval(days => $5) END
+        )
+        "#,
+    )
+    .bind(run_id)
+    .bind(ticket_id)
+    .bind(agent_id)
+    .bind(status)
+    .bind(age_days)
+    .execute(pool)
+    .await
+    .unwrap();
+    run_id
+}
+
+fn write_run_dir(artifacts: &std::path::Path, run_id: Uuid) -> std::path::PathBuf {
+    let dir = artifacts.join("runs").join(run_id.to_string());
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("console.events.jsonl"), "{}\n").unwrap();
+    dir
+}
+
+#[tokio::test]
+async fn archiving_a_ticket_and_the_retention_sweep_remove_run_artifacts() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    assert!(
+        common::db_available().await,
+        "embedded test db unavailable"
+    );
+    let artifacts = tempfile::tempdir().unwrap();
+    let artifacts_path = artifacts.path().to_path_buf();
+    let (state, app, cookie, csrf) = common::bootstrap_and_login_with_state_config(|config| {
+        config.storage.artifacts_dir = artifacts_path.to_string_lossy().into_owned();
+    })
+    .await;
+    let pool = state.db.clone().unwrap();
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
+    let agent_id = Uuid::parse_str(
+        &common::create_agent_with_preset_key(
+            &app,
+            "backend_engineer",
+            "Artifact Agent",
+            &cookie,
+            &csrf,
+        )
+        .await,
+    )
+    .unwrap();
+
+    // 100 finished runs on a ticket that gets archived.
+    let archived = create_ticket(&app, &board_id, &cookie, &csrf).await;
+    let archived_id = Uuid::parse_str(archived["id"].as_str().unwrap()).unwrap();
+    let mut archived_dirs = Vec::new();
+    for _ in 0..100 {
+        let run_id = insert_run(&pool, archived_id, agent_id, "succeeded", 0).await;
+        archived_dirs.push(write_run_dir(artifacts.path(), run_id));
+    }
+
+    // A live ticket: one old finished run, one fresh finished run, and one
+    // old run that is still running.
+    let live = create_ticket(&app, &board_id, &cookie, &csrf).await;
+    let live_id = Uuid::parse_str(live["id"].as_str().unwrap()).unwrap();
+    let old_run = write_run_dir(
+        artifacts.path(),
+        insert_run(&pool, live_id, agent_id, "succeeded", 45).await,
+    );
+    let fresh_run = write_run_dir(
+        artifacts.path(),
+        insert_run(&pool, live_id, agent_id, "succeeded", 1).await,
+    );
+    let running_run = write_run_dir(
+        artifacts.path(),
+        insert_run(&pool, live_id, agent_id, "running", 90).await,
+    );
+    // A folder with no run row, written just now.
+    let fresh_orphan = write_run_dir(artifacts.path(), Uuid::new_v4());
+
+    let archive = app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            &format!("/api/tickets/{archived_id}/archive"),
+            "",
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(archive.status(), StatusCode::OK);
+
+    // Archiving removes the folders in the background.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while archived_dirs.iter().any(|dir| dir.exists()) && std::time::Instant::now() < deadline {
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    assert!(archived_dirs.iter().all(|dir| !dir.exists()));
+
+    let removed =
+        coppice_server::services::artifact_retention::sweep(&pool, artifacts.path(), 30)
+            .await
+            .unwrap();
+    assert_eq!(removed, 1);
+    assert!(!old_run.exists(), "a run past retention is removed");
+    assert!(fresh_run.exists(), "a recent run is kept");
+    assert!(running_run.exists(), "an active run is never touched");
+    assert!(fresh_orphan.exists(), "a new folder without a run row gets a grace period");
+
+    let leftover: Vec<String> = std::fs::read_dir(artifacts.path().join("runs"))
+        .unwrap()
+        .filter_map(Result::ok)
+        .map(|entry| entry.file_name().to_string_lossy().into_owned())
+        .collect();
+    assert_eq!(leftover.len(), 3, "{leftover:?}");
+}

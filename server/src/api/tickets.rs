@@ -60,6 +60,8 @@ pub fn routes() -> Router<Arc<AppState>> {
             "/api/tickets/{ticket_id}/plan-changes",
             post(ask_for_plan_changes),
         )
+        .route("/api/tickets/{ticket_id}/plan-answers", post(send_plan_answers))
+        .route("/api/tickets/{ticket_id}/verify-parent", post(verify_parent))
         .route("/api/tickets/{ticket_id}/plan-runs", post(start_plan_run))
         .route("/api/tickets/{ticket_id}/assign", post(assign_agent))
         .route("/api/tickets/{ticket_id}/run-agent", post(run_agent))
@@ -133,7 +135,9 @@ pub(crate) struct TicketResponse {
     board_id: Uuid,
     repo_id: Option<Uuid>,
     title: String,
-    description: String,
+    /// Left out of board lists; the ticket view loads it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    description: Option<String>,
     status: String,
     substatus: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -162,6 +166,16 @@ pub(crate) struct TicketResponse {
     latest_plan_run_status: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     approved_plan: Option<ApprovedPlanResponse>,
+    /// The planner's questions. `waiting` is the stored "waiting for your
+    /// answers" state.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    plan_questions: Option<crate::services::planning_service::PlanQuestionsState>,
+    /// In Plan Review: there is a plan to approve.
+    has_plan: bool,
+    /// Split into sub-tickets at Plan Review.
+    split_parent: bool,
+    /// Verify parent ticket can run now.
+    verify_available: bool,
     has_active_run: bool,
     archived_at: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -188,6 +202,9 @@ struct ApprovedPlanResponse {
     comment_id: Uuid,
     markdown: String,
     steps: Vec<String>,
+    /// The plan's acceptance criteria, each with the latest result for the
+    /// reviewed commit (or not checked).
+    criteria: Vec<crate::services::criteria_results::CriterionView>,
 }
 
 #[derive(Serialize)]
@@ -264,7 +281,7 @@ pub(crate) fn ticket_to_response(item: TicketWithDisplay) -> TicketResponse {
         board_id: ticket.board_id,
         repo_id: ticket.repo_id,
         title: ticket.title,
-        description: ticket.description,
+        description: Some(ticket.description),
         status: ticket.status.to_string_snake(),
         substatus: ticket.substatus.map(|s| s.to_string_snake()),
         substatus_metadata: ticket.substatus_metadata,
@@ -286,6 +303,10 @@ pub(crate) fn ticket_to_response(item: TicketWithDisplay) -> TicketResponse {
         plan_approved: item.plan_approved,
         latest_plan_run_status: item.latest_plan_run_status,
         approved_plan: None,
+        plan_questions: item.plan_questions,
+        has_plan: item.has_plan,
+        split_parent: item.split_parent,
+        verify_available: item.verify_available,
         has_active_run: item.has_active_run,
         archived_at: ticket
             .archived_at
@@ -332,6 +353,7 @@ async fn load_attachment_summaries(
 
 async fn store_attachment_ids(
     pool: &sqlx::PgPool,
+    store: &crate::storage::attachment_store::AttachmentStore,
     ticket: TicketWithDisplay,
     attachment_ids: Option<Vec<Uuid>>,
 ) -> Result<TicketWithDisplay, StatusCode> {
@@ -353,10 +375,23 @@ async fn store_attachment_ids(
             return Err(StatusCode::BAD_REQUEST);
         }
     }
-    TicketService::new(pool)
+    let dropped: Vec<Uuid> = ticket
+        .ticket
+        .attachment_ids
+        .iter()
+        .filter(|id| !unique.contains(id))
+        .copied()
+        .collect();
+    let updated = TicketService::new(pool)
         .set_attachment_ids(ticket.ticket.id, &unique)
         .await
-        .map_err(map_error)
+        .map_err(map_error)?;
+    if let Err(err) =
+        crate::services::attachment_cleanup::delete_if_unreferenced(pool, store, &dropped).await
+    {
+        tracing::warn!(error = %err, "could not remove dropped attachments");
+    }
+    Ok(updated)
 }
 
 trait StatusSerde {
@@ -494,6 +529,10 @@ fn map_ticket_git_error_response(err: TicketGitError) -> TicketGitApiError {
         TicketGitError::WorktreeAlreadyRemoved => (
             StatusCode::BAD_REQUEST,
             "Worktree has already been removed.".into(),
+        ),
+        TicketGitError::ActiveRun => (
+            StatusCode::CONFLICT,
+            "Stop the agent run first. Coppice doesn't remove a worktree an agent is working in.".into(),
         ),
         TicketGitError::WorktreeMissing => (
             StatusCode::BAD_REQUEST,
@@ -748,7 +787,13 @@ async fn list_tickets(
         .await
         .map_err(map_error)?;
     Ok(Json(
-        tickets.into_iter().map(ticket_to_response).collect(),
+        tickets
+            .into_iter()
+            .map(|ticket| TicketResponse {
+                description: None,
+                ..ticket_to_response(ticket)
+            })
+            .collect(),
     ))
 }
 
@@ -776,7 +821,7 @@ async fn create_ticket(
         )
         .await
         .map_err(map_error)?;
-    let ticket = store_attachment_ids(pool, ticket, Some(body.attachment_ids)).await?;
+    let ticket = store_attachment_ids(pool, &state.attachments, ticket, Some(body.attachment_ids)).await?;
     let mut response = ticket_to_response(ticket);
     response.attachments = load_attachment_summaries(pool, &response.attachment_ids)
         .await
@@ -809,7 +854,29 @@ async fn archive_ticket(
         .archive(ticket_id)
         .await
         .map_err(map_ticket_error_response)?;
+    spawn_archived_ticket_cleanup(&state, ticket_id);
     Ok(Json(ticket_to_response(ticket)))
+}
+
+/// Off the request path: drop the archived ticket's worktree, branch and run
+/// artifacts.
+fn spawn_archived_ticket_cleanup(state: &Arc<AppState>, ticket_id: Uuid) {
+    crate::services::worktree_cleanup::spawn_cleanup(state, ticket_id);
+    let Some(pool) = state.db.clone() else {
+        return;
+    };
+    let artifacts_dir = state.config.storage.artifacts_dir.clone();
+    tokio::spawn(async move {
+        if let Err(err) = crate::services::artifact_retention::remove_ticket_run_artifacts(
+            &pool,
+            std::path::Path::new(&artifacts_dir),
+            ticket_id,
+        )
+        .await
+        {
+            tracing::warn!(%ticket_id, error = %err, "could not remove archived ticket's run artifacts");
+        }
+    });
 }
 
 async fn unarchive_ticket(
@@ -862,7 +929,7 @@ async fn update_ticket(
     } else {
         service.get(ticket_id).await.map_err(map_error)?
     };
-    let ticket = store_attachment_ids(pool, ticket, body.attachment_ids).await?;
+    let ticket = store_attachment_ids(pool, &state.attachments, ticket, body.attachment_ids).await?;
     crate::events::publish_ticket_updated(&state.event_bus, &ticket);
     let mut response = ticket_to_response(ticket);
     response.attachments = load_attachment_summaries(pool, &response.attachment_ids)
@@ -981,7 +1048,7 @@ async fn approve_plan(
 ) -> Result<Json<TicketResponse>, UpdateStatusError> {
     let pool = pool_from_state(&state).map_err(UpdateStatusError::Status)?;
     PlanningService::new(pool)
-        .approve(ticket_id)
+        .approve(ticket_id, &state.config.workflow)
         .await
         .map_err(map_plan_error)?;
     let ticket = TicketService::new(pool)
@@ -1010,6 +1077,57 @@ async fn ask_for_plan_changes(
         .get(ticket_id)
         .await
         .map_err(map_update_status_error)?;
+    Ok(Json(ticket_to_response(ticket)))
+}
+
+#[derive(Deserialize)]
+struct PlanAnswersBody {
+    answers: Vec<String>,
+}
+
+async fn send_plan_answers(
+    State(state): State<Arc<AppState>>,
+    AuthUser { .. }: AuthUser,
+    Path(ticket_id): Path<Uuid>,
+    Json(body): Json<PlanAnswersBody>,
+) -> Result<Json<TicketResponse>, UpdateStatusError> {
+    let pool = pool_from_state(&state).map_err(UpdateStatusError::Status)?;
+    PlanningService::new(pool)
+        .send_answers(ticket_id, &body.answers)
+        .await
+        .map_err(map_plan_error)?;
+    let ticket = TicketService::new(pool)
+        .get(ticket_id)
+        .await
+        .map_err(map_update_status_error)?;
+    crate::events::publish_ticket_updated(&state.event_bus, &ticket);
+    Ok(Json(ticket_to_response(ticket)))
+}
+
+#[derive(Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+struct VerifyParentBody {
+    #[serde(default)]
+    agent_id: Option<Uuid>,
+}
+
+async fn verify_parent(
+    State(state): State<Arc<AppState>>,
+    AuthUser { .. }: AuthUser,
+    Path(ticket_id): Path<Uuid>,
+    body: Option<Json<VerifyParentBody>>,
+) -> Result<Json<TicketResponse>, UpdateStatusError> {
+    let pool = pool_from_state(&state).map_err(UpdateStatusError::Status)?;
+    let agent_id = body.and_then(|Json(body)| body.agent_id);
+    PlanningService::new(pool)
+        .start_verification(ticket_id, agent_id)
+        .await
+        .map_err(map_plan_error)?;
+    let ticket = TicketService::new(pool)
+        .get(ticket_id)
+        .await
+        .map_err(map_update_status_error)?;
+    crate::events::publish_ticket_updated(&state.event_bus, &ticket);
     Ok(Json(ticket_to_response(ticket)))
 }
 
@@ -1042,10 +1160,40 @@ async fn with_approved_plan(
     let ticket_id = ticket.ticket.id;
     let status = ticket.ticket.status;
     let mut response = ticket_to_response(ticket);
+    let criteria = match &plan {
+        Some(plan) => {
+            let texts = crate::copy::plan::plan_criteria(&plan.markdown);
+            if texts.is_empty() {
+                Vec::new()
+            } else {
+                let stored = crate::services::criteria_results::CriteriaResultsService::new(pool)
+                    .get(ticket_id)
+                    .await?;
+                let reviewed = if stored.is_none() {
+                    None
+                } else if PlanningService::new(pool)
+                    .is_split_parent(ticket_id)
+                    .await
+                    .map_err(|err| TicketError::Validation(err.to_string()))?
+                {
+                    Some(crate::workers::job_worker::VERIFIED_RESULTS_SHA.to_string())
+                } else {
+                    reviewed_commit(state, pool, ticket_id).await?
+                };
+                crate::services::criteria_results::criteria_view(
+                    &texts,
+                    stored.as_ref(),
+                    reviewed.as_deref(),
+                )
+            }
+        }
+        None => Vec::new(),
+    };
     response.approved_plan = plan.map(|plan| ApprovedPlanResponse {
         comment_id: plan.comment_id,
         markdown: plan.markdown,
         steps: plan.steps,
+        criteria,
     });
     response.reviewer_brief = reviewer_brief_for_ticket(state, pool, ticket_id, status).await?;
     response.attachments = load_attachment_summaries(pool, &response.attachment_ids)
@@ -1059,6 +1207,26 @@ async fn with_approved_plan(
 
 /// The stored brief, hidden in Human Review when it was written for a different
 /// commit than the one review is bound to.
+/// The commit Human Review is bound to, or `None` when it can't be read.
+async fn reviewed_commit(
+    state: &AppState,
+    pool: &sqlx::PgPool,
+    ticket_id: Uuid,
+) -> Result<Option<String>, TicketError> {
+    match ticket_git_service(state, pool)
+        .reviewed_head_sha(ticket_id)
+        .await
+    {
+        Ok(sha) => Ok(sha),
+        Err(crate::services::ticket_git_service::TicketGitError::Database(err)) => Err(err.into()),
+        Err(crate::services::ticket_git_service::TicketGitError::Ticket(err)) => Err(err),
+        Err(err) => {
+            tracing::debug!(error = %err, "reviewed commit unavailable");
+            Ok(None)
+        }
+    }
+}
+
 async fn reviewer_brief_for_ticket(
     state: &AppState,
     pool: &sqlx::PgPool,
@@ -1074,23 +1242,7 @@ async fn reviewer_brief_for_ticket(
     let Some(brief) = brief else {
         return Ok(None);
     };
-    let reviewed = match ticket_git_service(state, pool)
-        .reviewed_head_sha(ticket_id)
-        .await
-    {
-        Ok(sha) => sha,
-        Err(crate::services::ticket_git_service::TicketGitError::Database(err)) => {
-            return Err(err.into());
-        }
-        Err(crate::services::ticket_git_service::TicketGitError::Ticket(err)) => return Err(err),
-        Err(err) => {
-            tracing::debug!(
-                error = %err,
-                "reviewer brief hidden; reviewed commit unavailable"
-            );
-            None
-        }
-    };
+    let reviewed = reviewed_commit(state, pool, ticket_id).await?;
     if crate::services::reviewer_brief::brief_matches_reviewed_commit(
         &brief.commit_sha,
         reviewed.as_deref(),
@@ -1141,6 +1293,12 @@ async fn run_agent(
         .await
         .map_err(map_ticket_error_response)?;
     TicketService::ensure_not_archived(&ticket.ticket).map_err(map_ticket_error_response)?;
+    if ticket.split_parent {
+        return Err(RunAgentError::Message(
+            StatusCode::BAD_REQUEST,
+            crate::copy::plan::UMBRELLA_NO_WORK.into(),
+        ));
+    }
 
     if let Some(agent_id) = ticket.ticket.assignee_agent_id {
         let agent = AgentService::new(pool).get(agent_id).await.map_err(|err| match err {
@@ -1403,10 +1561,16 @@ async fn final_approve(
     WorkflowService::final_approve(ticket.ticket.status)
         .map_err(|_| FinalApproveError::Status(StatusCode::BAD_REQUEST))?;
 
-    match ticket_git_service(&state, pool)
-        .reviewed_head_sha(ticket_id)
-        .await
-    {
+    // A split parent has no branch of its own: its work merged with the
+    // sub-tickets, so there is no commit to bind the acceptance to.
+    let reviewed = if ticket.split_parent {
+        Ok(None)
+    } else {
+        ticket_git_service(&state, pool)
+            .reviewed_head_sha(ticket_id)
+            .await
+    };
+    match reviewed {
         Ok(Some(head_sha)) => {
             HumanReviewService::new(pool)
                 .record_acceptance(ticket_id, user.id, &head_sha)
@@ -1512,6 +1676,8 @@ async fn merge_ticket_branch(
     create_git_action_comment(pool, &state, ticket_id, user.id, &comment_body)
         .await
         .map_err(|code| TicketGitApiError::Message(code, "Unable to record merge comment.".into()))?;
+    // The merged work is on the base branch now.
+    crate::services::worktree_cleanup::spawn_cleanup(&state, ticket_id);
 
     Ok(Json(MergeBranchResponse { merge }))
 }

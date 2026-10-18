@@ -20,3 +20,12 @@ test('a final release beats an older rc', () => {
   ]);
   assert.deepEqual(chosen, { tag: 'v1.3.0', version: '1.3.0' });
 });
+
+test('a published event for an older release still mirrors the newest one', async () => {
+  const { selectForEvent } = await import('../scripts/select-published-release.mjs');
+  const chosen = selectForEvent('v1.0.0-rc.2', [
+    { tagName: 'v1.0.0-rc.2', isDraft: false },
+    { tagName: 'v1.0.0', isDraft: false },
+  ]);
+  assert.deepEqual(chosen, { tag: 'v1.0.0', version: '1.0.0' });
+});

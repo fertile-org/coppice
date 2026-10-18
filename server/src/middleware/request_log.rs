@@ -225,7 +225,7 @@ mod tests {
         let name = files[0].file_name().unwrap().to_str().unwrap();
         let date = name
             .strip_prefix("coppice.")
-            .and_then(|rest| rest.strip_suffix(".jsonl"))
+            .and_then(|rest| rest.strip_suffix(".0.jsonl"))
             .unwrap_or_else(|| panic!("daily file name: {name}"));
         assert_eq!(date.len(), 10, "{name}");
         assert!(

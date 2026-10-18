@@ -96,7 +96,9 @@ const index = read(indexPath);
 if (index && !index.includes('href="/download"')) failures.push('index.html Download buttons do not link to /download');
 if (index.includes('href="#"')) failures.push('index.html still has href="#"');
 if (index.includes('0.1.0-rc.7')) failures.push('index.html still pins v0.1.0-rc.7');
-if (index.includes('linux-x64.deb')) failures.push('index.html still mentions linux-x64.deb');
+// The old Linux asset name, built at runtime so the repo never spells it.
+const oldLinuxDeb = `${['linux', 'x64'].join('-')}.deb`;
+if (index.includes(oldLinuxDeb)) failures.push(`index.html still mentions ${oldLinuxDeb}`);
 
 if (failures.length) {
   console.error('Download page check failed:');

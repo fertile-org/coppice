@@ -390,7 +390,7 @@ async fn handle_structured_console_recovery(
 ) -> RecoveryOutcome {
     // Replay structured console events from disk (preferred) or legacy terminal log.
     let paths = RunArtifactPaths::new(&state.config.storage.artifacts_dir, &run_id.to_string());
-    let console_events = ArtifactService::read_console_events(&paths);
+    let console_events = ArtifactService::read_console_events_tail(&paths, REPLAY_CONSOLE_BYTES);
     if !console_events.is_empty() {
         for event in console_events {
             let msg = LiveMessage::Event { event };
@@ -434,14 +434,15 @@ fn is_active_run_status(status: RunStatus) -> bool {
     matches!(status, RunStatus::Queued | RunStatus::Running)
 }
 
+/// Most console bytes replayed from disk after a restart. The files on disk
+/// can hold more; a reconnect shows the newest part.
+const REPLAY_CONSOLE_BYTES: u64 = 8 * 1024 * 1024;
+/// Most terminal log bytes replayed from disk.
+const REPLAY_TERMINAL_BYTES: u64 = 4 * 1024 * 1024;
+
 fn read_terminal_log_artifact(state: &AppState, run_id: Uuid) -> Option<Vec<u8>> {
     let paths = RunArtifactPaths::new(&state.config.storage.artifacts_dir, &run_id.to_string());
-    if !paths.terminal_log.is_file() {
-        return None;
-    }
-    std::fs::read(&paths.terminal_log)
-        .ok()
-        .filter(|bytes| !bytes.is_empty())
+    ArtifactService::read_terminal_log_tail(&paths, REPLAY_TERMINAL_BYTES)
 }
 
 async fn send_live_message(

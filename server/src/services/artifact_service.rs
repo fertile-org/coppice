@@ -1,7 +1,9 @@
+use crate::sessions::run_artifact_log::{read_console_tail, read_terminal_tail};
 use serde::Serialize;
 use std::path::PathBuf;
 
 pub struct RunArtifactPaths {
+    pub dir: PathBuf,
     pub terminal_log: PathBuf,
     pub console_events: PathBuf,
     pub meta_json: PathBuf,
@@ -12,6 +14,7 @@ impl RunArtifactPaths {
     pub fn new(artifacts_dir: &str, run_id: &str) -> Self {
         let base = PathBuf::from(artifacts_dir).join("runs").join(run_id);
         Self {
+            dir: base.clone(),
             terminal_log: base.join("terminal.log"),
             console_events: base.join("console.events.jsonl"),
             meta_json: base.join("meta.json"),
@@ -54,13 +57,33 @@ impl ArtifactService {
         std::fs::write(&paths.console_events, lines)
     }
 
+    /// Every stored console event, oldest first, across rotated segments.
     pub fn read_console_events(paths: &RunArtifactPaths) -> Vec<serde_json::Value> {
-        let Ok(raw) = std::fs::read_to_string(&paths.console_events) else {
-            return Vec::new();
-        };
-        raw.lines()
-            .filter_map(|line| serde_json::from_str(line).ok())
-            .collect()
+        read_console_tail(&paths.dir, u64::MAX)
+    }
+
+    /// The newest console events that fit in `max_bytes`, streamed from disk.
+    pub fn read_console_events_tail(
+        paths: &RunArtifactPaths,
+        max_bytes: u64,
+    ) -> Vec<serde_json::Value> {
+        read_console_tail(&paths.dir, max_bytes)
+    }
+
+    /// The last `max_bytes` of the terminal log, without reading the rest.
+    pub fn read_terminal_log_tail(paths: &RunArtifactPaths, max_bytes: u64) -> Option<Vec<u8>> {
+        read_terminal_tail(&paths.dir, max_bytes)
+    }
+
+    /// Append to the terminal log without rewriting it.
+    pub fn append_terminal_log(paths: &RunArtifactPaths, content: &[u8]) -> std::io::Result<()> {
+        use std::io::Write;
+        std::fs::create_dir_all(&paths.dir)?;
+        let mut file = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&paths.terminal_log)?;
+        file.write_all(content)
     }
 
     pub fn write_meta(paths: &RunArtifactPaths, meta: &RunArtifactMeta) -> std::io::Result<()> {

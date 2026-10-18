@@ -504,3 +504,220 @@ async fn rebase_branch_missing_worktree_returns_bad_request() {
         "unexpected message: {message}"
     );
 }
+
+async fn setup_finished_ticket() -> (
+    tempfile::TempDir,
+    common::AgentTestEnv,
+    std::sync::Arc<coppice_server::AppState>,
+    axum::Router,
+    String,
+    String,
+    uuid::Uuid,
+    PathBuf,
+    PathBuf,
+) {
+    let (git_dir, local_path) = common::create_temp_git_checkout();
+    let (state, app, cookie, csrf, env) =
+        common::bootstrap_and_login_with_state_and_workers("", |_| {}).await;
+    let repo_id =
+        common::register_test_repo(&app, &local_path.display().to_string(), &cookie, &csrf).await;
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
+    let ticket_id = common::create_test_ticket(&app, &board_id, &cookie, &csrf).await;
+    common::set_ticket_repo(&app, &ticket_id, &repo_id, &cookie, &csrf).await;
+    let worktree_path = common::setup_worktree_with_commit(
+        &local_path,
+        env.worktrees.path(),
+        "test-repo",
+        &ticket_id,
+    );
+    (
+        git_dir,
+        env,
+        state,
+        app,
+        cookie,
+        csrf,
+        ticket_id.parse().unwrap(),
+        local_path,
+        worktree_path,
+    )
+}
+
+fn branch_exists(repo: &Path, ticket_id: uuid::Uuid) -> bool {
+    let short = ticket_id.to_string();
+    let short = short.split('-').next().unwrap();
+    Command::new("git")
+        .args([
+            "rev-parse",
+            "--verify",
+            "--quiet",
+            &format!("refs/heads/agent/TICKET-{short}"),
+        ])
+        .current_dir(repo)
+        .output()
+        .expect("git rev-parse")
+        .status
+        .success()
+}
+
+async fn wait_until(mut done: impl FnMut() -> bool) -> bool {
+    for _ in 0..200 {
+        if done() {
+            return true;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    done()
+}
+
+async fn archive(app: &axum::Router, ticket_id: uuid::Uuid, cookie: &str, csrf: &str) {
+    let res = app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            &format!("/api/tickets/{ticket_id}/archive"),
+            "",
+            cookie,
+            csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+}
+
+#[tokio::test]
+async fn archiving_removes_the_worktree_and_the_ticket_branch() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    let (_git, _env, _state, app, cookie, csrf, ticket_id, repo, worktree) =
+        setup_finished_ticket().await;
+    assert!(worktree.exists());
+    assert!(branch_exists(&repo, ticket_id));
+
+    archive(&app, ticket_id, &cookie, &csrf).await;
+
+    assert!(wait_until(|| !worktree.exists()).await, "worktree left behind");
+    assert!(wait_until(|| !branch_exists(&repo, ticket_id)).await, "branch left behind");
+}
+
+#[tokio::test]
+async fn cleanup_keeps_a_dirty_worktree_and_says_so() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    let (_git, _env, state, app, cookie, csrf, ticket_id, repo, worktree) =
+        setup_finished_ticket().await;
+    std::fs::write(worktree.join("unsaved.txt"), "work in progress").unwrap();
+
+    archive(&app, ticket_id, &cookie, &csrf).await;
+
+    let pool = state.db.clone().unwrap();
+    let mut posted = false;
+    for _ in 0..200 {
+        let count: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM ticket_comments WHERE ticket_id = $1 AND body = $2",
+        )
+        .bind(ticket_id)
+        .bind(coppice_server::services::worktree_cleanup::KEPT_UNCOMMITTED_WORKTREE)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        if count == 1 {
+            posted = true;
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    assert!(posted, "no note about the kept worktree");
+    assert!(worktree.join("unsaved.txt").exists());
+    assert!(branch_exists(&repo, ticket_id));
+}
+
+#[tokio::test]
+async fn an_active_run_blocks_cleanup_and_manual_remove() {
+    use coppice_server::services::ticket_git_service::WorktreeCleanup;
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    let (_git, env, state, app, cookie, csrf, ticket_id, repo, worktree) =
+        setup_finished_ticket().await;
+    let pool = state.db.clone().unwrap();
+    let agent_id = common::create_agent_with_preset_key(
+        &app,
+        "backend_engineer",
+        "Busy Agent",
+        &cookie,
+        &csrf,
+    )
+    .await;
+    let run_id = uuid::Uuid::new_v4();
+    sqlx::query(
+        r#"
+        INSERT INTO agent_runs (id, ticket_id, agent_id, job_type, status, sandbox_profile_id)
+        VALUES ($1, $2, $3, 'implementation', 'running', 'permissive')
+        "#,
+    )
+    .bind(run_id)
+    .bind(ticket_id)
+    .bind(uuid::Uuid::parse_str(&agent_id).unwrap())
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let removed = app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            &format!("/api/tickets/{ticket_id}/remove-worktree"),
+            "",
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(removed.status(), StatusCode::CONFLICT);
+
+    let outcome = coppice_server::services::worktree_cleanup::cleanup_ticket(
+        &pool,
+        env.worktrees.path().to_path_buf(),
+        ticket_id,
+        false,
+    )
+    .await;
+    assert_eq!(outcome, WorktreeCleanup::SkippedActiveRun);
+    assert!(worktree.exists());
+    assert!(branch_exists(&repo, ticket_id));
+}
+
+#[tokio::test]
+async fn the_sweep_cleans_merged_tickets_and_repeats_safely() {
+    use coppice_server::services::ticket_git_service::WorktreeCleanup;
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    let (_git, env, state, _app, _cookie, _csrf, ticket_id, repo, worktree) =
+        setup_finished_ticket().await;
+    let pool = state.db.clone().unwrap();
+    sqlx::query(
+        r#"
+        INSERT INTO ticket_human_reviews (ticket_id, head_sha, merged_sha, merged_at)
+        VALUES ($1, 'abc', 'abc', now())
+        "#,
+    )
+    .bind(ticket_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let removed = coppice_server::services::worktree_cleanup::sweep(
+        &pool,
+        env.worktrees.path().to_path_buf(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(removed, 1);
+    assert!(!worktree.exists());
+    assert!(!branch_exists(&repo, ticket_id));
+
+    let again = coppice_server::services::worktree_cleanup::cleanup_ticket(
+        &pool,
+        env.worktrees.path().to_path_buf(),
+        ticket_id,
+        true,
+    )
+    .await;
+    assert_eq!(again, WorktreeCleanup::NothingToDo);
+}

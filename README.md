@@ -1,3 +1,5 @@
+[English](README.md) · [简体中文](README.zh-CN.md) · [繁體中文（台灣）](README.zh-TW.md) · [繁體中文（香港）](README.zh-HK.md) · [日本語](README.ja.md) · [Français](README.fr.md)
+
 # Coppice
 
 **Beta.** Hire specialists. Keep the final say.
@@ -25,7 +27,7 @@ Bring the CLIs you already use — Claude Code, Codex, Cursor, OpenCode and Kilo
 
 ## Get started
 
-Product docs are the site in [`website/`](website/): the landing page and the user guides. The public site is [https://getcoppice.vercel.app/](https://getcoppice.vercel.app/).
+Product docs are the site in [`website/`](website/): the landing page and the user guides. The public site is [https://getcoppice.app/](https://getcoppice.app/).
 
 ## Contributors
 

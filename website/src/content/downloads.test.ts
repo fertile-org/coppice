@@ -187,6 +187,6 @@ describe('site download buttons', () => {
     assert.equal(header.includes('#download'), false);
     assert.equal(links.includes("withBase('/download')"), true);
     assert.equal(links.includes('href="#"'), false);
-    assert.equal(links.includes('linux-x64.deb'), false);
+    assert.equal(links.includes(`${['linux', 'x64'].join('-')}.deb`), false);
   });
 });

@@ -119,7 +119,7 @@ impl AgentProvider for CodexProvider {
                 version: &version,
                 worktree: &worktree_arg,
                 read_only: input.read_only_tools,
-                plan: input.job_type == crate::domain::workflow::JOB_TYPE_PLAN_TICKET,
+                plan: crate::domain::workflow::is_read_only_job(&input.job_type),
                 model: input.model.as_deref(),
                 chat,
                 mcp: input.mcp.as_ref(),

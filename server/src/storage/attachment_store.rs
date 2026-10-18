@@ -41,6 +41,16 @@ impl AttachmentStore {
     }
 }
 
+impl AttachmentStore {
+    /// Remove an attachment's folder. A folder that is already gone is fine.
+    pub fn delete(&self, id: Uuid) -> std::io::Result<()> {
+        match std::fs::remove_dir_all(self.root.join(id.to_string())) {
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            other => other,
+        }
+    }
+}
+
 pub fn sanitize_filename(filename: &str) -> String {
     let base = Path::new(filename)
         .file_name()

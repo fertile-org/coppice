@@ -2,6 +2,7 @@ pub mod live_message;
 pub mod opencode_client;
 pub mod opencode_events;
 pub mod opencode_run_server;
+pub mod run_artifact_log;
 pub mod run_registry;
 #[cfg(feature = "mock-provider")]
 pub mod scripted_stream;

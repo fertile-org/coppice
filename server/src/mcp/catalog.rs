@@ -237,6 +237,31 @@ fn result_submit_properties() -> Value {
             "type": "string",
             "description": "Optional. Short note for Human Review: where to look first. Omit to report no brief.",
         },
+        "criteriaResults": {
+            "type": "array",
+            "description": "Optional (done). One entry per acceptance criterion in the approved plan: whether this change meets it and one line of evidence (test name, command output, or file).",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "criterion": { "type": "string", "description": "The criterion text from the plan." },
+                    "status": { "type": "string", "enum": ["met", "not_met", "not_checked"] },
+                    "evidence": { "type": "string" },
+                },
+                "required": ["criterion", "status"],
+            },
+        },
+        "planQuestions": {
+            "type": "array",
+            "description": "Planning runs only. 1 to 3 short questions to ask before writing the plan, when the answers would change it. Leave summary empty when you ask.",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "question": { "type": "string" },
+                    "choices": strings("Optional short answers to pick from."),
+                },
+                "required": ["question"],
+            },
+        },
     })
 }
 

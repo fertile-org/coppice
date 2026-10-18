@@ -19,6 +19,51 @@ const SSE_RECONNECT_DELAY: Duration = Duration::from_millis(750);
 const DEFAULT_RUN_TIMEOUT: Duration = Duration::from_secs(1800);
 const STREAM_DRAIN_TIMEOUT: Duration = Duration::from_secs(5);
 
+/// Longest SSE line kept while waiting for its newline.
+const SSE_LINE_MAX_BYTES: usize = 16 * 1024 * 1024;
+
+/// Reassembles SSE lines from raw chunks. Lines are decoded whole, so a
+/// character split across chunks stays intact.
+pub(crate) struct SseLineBuffer {
+    pending: Vec<u8>,
+    max_bytes: usize,
+}
+
+/// A line passed the cap before its newline arrived.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) struct SseLineTooLong;
+
+impl SseLineBuffer {
+    pub(crate) fn new(max_bytes: usize) -> Self {
+        Self {
+            pending: Vec::new(),
+            max_bytes,
+        }
+    }
+
+    /// Complete lines in this chunk, without their line endings.
+    pub(crate) fn push(&mut self, chunk: &[u8]) -> Result<Vec<String>, SseLineTooLong> {
+        self.pending.extend_from_slice(chunk);
+        let mut lines = Vec::new();
+        let mut start = 0;
+        while let Some(offset) = self.pending[start..].iter().position(|b| *b == b'\n') {
+            let end = start + offset;
+            let mut line = &self.pending[start..end];
+            if line.last() == Some(&b'\r') {
+                line = &line[..line.len() - 1];
+            }
+            lines.push(String::from_utf8_lossy(line).into_owned());
+            start = end + 1;
+        }
+        self.pending.drain(..start);
+        if self.pending.len() > self.max_bytes {
+            self.pending.clear();
+            return Err(SseLineTooLong);
+        }
+        Ok(lines)
+    }
+}
+
 struct StreamContext {
     session_id: String,
     stream: Option<Arc<RunStreamHandle>>,
@@ -36,8 +81,8 @@ fn publish_sse_event(ctx: &StreamContext, event: &serde_json::Value) {
         });
         if let Ok(mut snap) = ctx.snapshot.lock() {
             snap.apply_event(event);
-            stream.set_snapshot(snap.to_value());
         }
+        stream.touch_snapshot();
     }
 }
 
@@ -128,6 +173,9 @@ impl OpenCodeClient {
         let idle_flag = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let snapshot = Arc::new(Mutex::new(SessionSnapshot::empty(&session_id)));
 
+        if let Some(stream) = &stream {
+            stream.set_snapshot_source(snapshot.clone());
+        }
         let ctx = StreamContext {
             session_id: session_id.clone(),
             stream,
@@ -443,7 +491,7 @@ impl OpenCodeClient {
             }
 
             let mut lines = resp.bytes_stream();
-            let mut buffer = String::new();
+            let mut buffer = SseLineBuffer::new(SSE_LINE_MAX_BYTES);
 
             while let Some(chunk) = lines.next().await {
                 if is_cancelled(cancel_rx) {
@@ -460,11 +508,14 @@ impl OpenCodeClient {
                         break;
                     }
                 };
-                buffer.push_str(&String::from_utf8_lossy(&chunk));
-
-                while let Some(pos) = buffer.find('\n') {
-                    let line = buffer[..pos].trim_end_matches('\r').to_string();
-                    buffer = buffer[pos + 1..].to_string();
+                let Ok(lines_in_chunk) = buffer.push(&chunk) else {
+                    tracing::warn!(
+                        max_bytes = SSE_LINE_MAX_BYTES,
+                        "opencode event line too long, dropping the connection"
+                    );
+                    break;
+                };
+                for line in lines_in_chunk {
 
                     let Some(data) = line.strip_prefix("data: ") else {
                         continue;
@@ -519,7 +570,7 @@ impl OpenCodeClient {
             }
 
             let mut lines = resp.bytes_stream();
-            let mut buffer = String::new();
+            let mut buffer = SseLineBuffer::new(SSE_LINE_MAX_BYTES);
 
             while let Some(chunk) = lines.next().await {
                 if idle_flag.load(std::sync::atomic::Ordering::Relaxed) {
@@ -533,11 +584,14 @@ impl OpenCodeClient {
                         break;
                     }
                 };
-                buffer.push_str(&String::from_utf8_lossy(&chunk));
-
-                while let Some(pos) = buffer.find('\n') {
-                    let line = buffer[..pos].trim_end_matches('\r').to_string();
-                    buffer = buffer[pos + 1..].to_string();
+                let Ok(lines_in_chunk) = buffer.push(&chunk) else {
+                    tracing::warn!(
+                        max_bytes = SSE_LINE_MAX_BYTES,
+                        "opencode event line too long, dropping the connection"
+                    );
+                    break;
+                };
+                for line in lines_in_chunk {
 
                     let Some(data) = line.strip_prefix("data: ") else {
                         continue;
@@ -608,6 +662,35 @@ fn mark_idle_when_status(status: Option<&str>, idle_flag: &std::sync::atomic::At
         true
     } else {
         false
+    }
+}
+
+#[cfg(test)]
+mod sse_buffer_tests {
+    use super::{SseLineBuffer, SseLineTooLong};
+
+    #[test]
+    fn a_character_split_across_chunks_decodes_whole() {
+        let mut buffer = SseLineBuffer::new(1024);
+        let line = "data: {\"text\":\"héllo\"}\n".as_bytes();
+        let split = line.iter().position(|b| *b == 0xC3).unwrap() + 1;
+        assert!(buffer.push(&line[..split]).unwrap().is_empty());
+        assert_eq!(buffer.push(&line[split..]).unwrap(), vec!["data: {\"text\":\"héllo\"}"]);
+    }
+
+    #[test]
+    fn lines_split_on_newlines_and_drop_carriage_returns() {
+        let mut buffer = SseLineBuffer::new(1024);
+        assert_eq!(buffer.push(b"a\r\nb\nc").unwrap(), vec!["a", "b"]);
+        assert_eq!(buffer.push(b"\n").unwrap(), vec!["c"]);
+    }
+
+    #[test]
+    fn a_line_past_the_cap_drops_the_connection() {
+        let mut buffer = SseLineBuffer::new(16);
+        assert_eq!(buffer.push(&[b'x'; 17]), Err(SseLineTooLong));
+        // The buffer starts clean on the next connection.
+        assert_eq!(buffer.push(b"ok\n").unwrap(), vec!["ok"]);
     }
 }
 

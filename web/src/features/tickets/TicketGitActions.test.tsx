@@ -120,6 +120,13 @@ describe('TicketGitActions', () => {
     expect(screen.getByRole('button', { name: 'Remove worktree' })).toBeInTheDocument();
   });
 
+  it('keeps Remove worktree off while an agent run is active', () => {
+    gitInfoState.data = { ...baseGitInfo };
+    renderActions(makeTicket({ status: 'wait_for_final_review', hasActiveRun: true }));
+
+    expect(screen.getByRole('button', { name: 'Remove worktree' })).toBeDisabled();
+  });
+
   it('shows Merge and Create PR for a Done ticket', () => {
     gitInfoState.data = { ...baseGitInfo, canCreatePr: true };
     renderActions(makeTicket({ status: 'done' }));

@@ -33,7 +33,11 @@ use crate::services::worktree_service::{
 };
 use crate::AppState;
 
-/// Run a `plan_ticket` job in a detached scratch worktree.
+/// Commit key for a split parent's verification results. The parent has no
+/// branch, so Human Review reads these as current.
+pub const VERIFIED_RESULTS_SHA: &str = "verified";
+
+/// Run a `plan_ticket` or `verify_parent` job in a detached scratch worktree.
 /// Planning never changes your ticket's code.
 pub(super) async fn execute_plan(
     state: &AppState,
@@ -121,6 +125,47 @@ async fn snapshot_plan_refs(
     }
 }
 
+/// The plan task: template, revision context, split option, and the
+/// question round (offered once, or answered).
+async fn append_plan_sections(
+    pool: &PgPool,
+    ticket_id: uuid::Uuid,
+    revision_input: Option<&crate::services::planning_service::PlanRevisionContext>,
+    markdown: &mut String,
+) -> anyhow::Result<()> {
+    markdown.push_str("\n# Plan\n\n");
+    let revision = revision_input.map(|context| plan::PlanRevision {
+        previous_plan: &context.previous_plan,
+        requests: context.requests.iter().map(String::as_str).collect(),
+    });
+    markdown.push_str(&plan::plan_instructions(revision.as_ref()));
+    markdown.push_str(&format!("\n{}\n", plan::PLAN_SPLIT_INSTRUCTION));
+    let planning = PlanningService::new(pool);
+    match planning
+        .questions(ticket_id)
+        .await
+        .context("load plan questions")?
+    {
+        Some(state) if !state.waiting => {
+            markdown.push_str(&format!(
+                "\n{}\n\n{}\n{}\n",
+                plan::ANSWERS_HEADING,
+                plan::answered_questions(&state.questions, &state.answers),
+                plan::ANSWERS_INSTRUCTION
+            ));
+        }
+        None if planning
+            .can_ask_questions(ticket_id)
+            .await
+            .context("check plan questions")? =>
+        {
+            markdown.push_str(&format!("\n{}\n", plan::PLAN_QUESTIONS_INSTRUCTION));
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
 /// When branches, tags, or remotes moved, append the command diff to the run log.
 async fn record_plan_ref_changes(
     artifacts_dir: &str,
@@ -146,15 +191,17 @@ async fn record_plan_ref_changes(
 
 fn append_plan_ref_diff(artifacts_dir: &str, run_id: uuid::Uuid, diff: &str) {
     let paths = RunArtifactPaths::new(artifacts_dir, &run_id.to_string());
-    let mut bytes = std::fs::read(&paths.terminal_log).unwrap_or_default();
-    if !bytes.is_empty() && !bytes.ends_with(b"\n") {
+    let ends_with_newline = ArtifactService::read_terminal_log_tail(&paths, 1)
+        .is_none_or(|last| last.ends_with(b"\n"));
+    let mut bytes = Vec::new();
+    if !ends_with_newline {
         bytes.push(b'\n');
     }
     bytes.extend_from_slice(diff.as_bytes());
     if !bytes.ends_with(b"\n") {
         bytes.push(b'\n');
     }
-    if let Err(err) = ArtifactService::write_terminal_log(&paths, &bytes) {
+    if let Err(err) = ArtifactService::append_terminal_log(&paths, &bytes) {
         tracing::warn!(error = %err, %run_id, "plan run could not write ref diff to the run log");
     }
 }
@@ -245,17 +292,11 @@ async fn drive_plan_run(
             })
     });
 
-    let changes = if let Some(comment_id) = run.trigger_comment_id {
-        Some(
-            CommentService::new(pool)
-                .get(comment_id)
-                .await
-                .context("load plan change request")?
-                .body,
-        )
-    } else {
-        None
-    };
+    let verifying = run.job_type == crate::domain::workflow::JOB_TYPE_VERIFY_PARENT;
+    let revision_input = crate::services::planning_service::PlanningService::new(pool)
+        .revision_context(ticket_id, run.trigger_comment_id)
+        .await
+        .context("load plan change requests")?;
 
     let context_input = ContextInput {
         ticket_title: &ticket.ticket.title,
@@ -284,8 +325,20 @@ async fn drive_plan_run(
     let plugin_ids = super::run_plugin_snapshot(pool, run).await;
     let skills = state.skills.skills_for(&plugin_ids);
     let mut markdown = build_tool_first_context(&context_input, &skills, None);
-    markdown.push_str("\n# Plan\n\n");
-    markdown.push_str(&plan::plan_instructions(changes.as_deref()));
+    if verifying {
+        let brief = PlanningService::new(pool)
+            .verification_brief(ticket_id)
+            .await
+            .context("load verification brief")?;
+        markdown.push_str("\n# Verify\n\n");
+        markdown.push_str(&plan::verify_instructions(
+            &brief.criteria,
+            &brief.merged,
+            &brief.excluded,
+        ));
+    } else {
+        append_plan_sections(pool, ticket_id, revision_input.as_ref(), &mut markdown).await?;
+    }
     let attachments = crate::services::ticket_attachments::stage_ticket_attachments(
         pool,
         &state.config.storage.artifacts_dir,
@@ -388,12 +441,47 @@ async fn drive_plan_run(
         return Err(JobCancelled.into());
     }
 
-    let summary = match &result {
-        AgentRunResult::Done { summary, .. } => summary.clone(),
+    let (summary, questions) = match &result {
+        AgentRunResult::Done {
+            summary,
+            plan_questions,
+            ..
+        } => (summary.clone(), plan_questions.clone()),
         _ => anyhow::bail!(PLAN_MUST_FINISH),
     };
     result_contract::validate_for_profile(&result, run.context_profile, &run.job_type)
         .map_err(|err| anyhow::anyhow!(err))?;
+    if !questions.is_empty()
+        && !PlanningService::new(pool)
+            .can_ask_questions(ticket_id)
+            .await
+            .context("check plan questions")?
+    {
+        anyhow::bail!(plan::PLAN_QUESTIONS_ALREADY_ASKED);
+    }
+    let excluded = if verifying {
+        PlanningService::new(pool)
+            .verification_brief(ticket_id)
+            .await
+            .context("load verification brief")?
+            .excluded
+    } else {
+        Vec::new()
+    };
+    let (comment_body, comment_intent) = if verifying {
+        let criteria_results = match &result {
+            AgentRunResult::Done { criteria_results, .. } => criteria_results.as_slice(),
+            _ => &[],
+        };
+        (
+            plan::verification_comment(&summary, criteria_results, &excluded),
+            CommentIntent::ProgressUpdate,
+        )
+    } else if questions.is_empty() {
+        (plan::format_plan(&summary), CommentIntent::Plan)
+    } else {
+        (plan::questions_comment(&questions), CommentIntent::ClarificationRequest)
+    };
 
     let apply = ApplyResult {
         run_status: RunStatus::Succeeded,
@@ -405,8 +493,8 @@ async fn drive_plan_run(
             acceptance_criteria: None,
         },
         comment: ApplyComment {
-            body: plan::format_plan(&summary),
-            intent: CommentIntent::Plan,
+            body: comment_body,
+            intent: comment_intent,
             mentions: Vec::new(),
         },
     };
@@ -418,10 +506,51 @@ async fn drive_plan_run(
         .await
         .context("finish planning run")?;
 
-    PlanningService::new(pool)
-        .bind_latest_plan(ticket_id)
+    if verifying {
+        crate::services::criteria_results::CriteriaResultsService::new(pool)
+            .record(ticket_id, &result, VERIFIED_RESULTS_SHA)
+            .await
+            .context("store verification results")?;
+        TicketService::new(pool)
+            .update_status(
+                ticket_id,
+                crate::domain::substatus::TicketStatus::WaitForFinalReview,
+                None,
+                None,
+            )
+            .await
+            .context("move the parent to Human Review")?;
+    } else if questions.is_empty() {
+        PlanningService::new(pool)
+            .bind_latest_plan(ticket_id)
+            .await
+            .context("bind plan comment")?;
+        if let AgentRunResult::Done { split_tickets, .. } = &result {
+            if !split_tickets.is_empty() {
+                crate::services::split_service::SplitService::new(pool, &state.config.workflow)
+                    .propose_from_plan(&ticket.ticket, split_tickets, run.agent_id)
+                    .await
+                    .context("store the split proposed with the plan")?;
+            }
+        }
+    } else {
+        let comment_id: Option<uuid::Uuid> = sqlx::query_scalar(
+            r#"
+            SELECT id FROM ticket_comments
+            WHERE ticket_id = $1 AND intent = 'clarification_request'
+            ORDER BY created_at DESC, id DESC
+            LIMIT 1
+            "#,
+        )
+        .bind(ticket_id)
+        .fetch_optional(pool)
         .await
-        .context("bind plan comment")?;
+        .context("find questions comment")?;
+        PlanningService::new(pool)
+            .record_questions(ticket_id, Some(run.id), comment_id, &questions)
+            .await
+            .context("record plan questions")?;
+    }
 
     let updated = TicketService::new(pool)
         .get(ticket_id)

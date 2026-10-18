@@ -55,7 +55,11 @@ export const chatSessionListSchema = z.object({
 
 export const chatMessageListSchema = z.object({
   messages: z.array(chatMessageSchema),
+  /** Pass as beforeSeq to load older messages. Absent at the start of the chat. */
+  olderBeforeSeq: z.number().int().optional(),
 });
+
+export type ChatMessagePage = z.infer<typeof chatMessageListSchema>;
 
 export const postChatMessageResponseSchema = z.object({
   message: chatMessageSchema,

@@ -24,7 +24,7 @@ SELECT
     i.superseded_by, i.stale_at, i.created_at, i.updated_at,
     r.revision_number, r.scope, r.board_id, p.name AS board_name,
     r.agent_id, a.name AS agent_name, r.knowledge_type, r.title, r.content,
-    r.source_type, r.source_id, r.source_run_id, r.confidence,
+    r.source_type, r.source_id, provenance.run_id AS source_run_id, r.confidence,
     i.compaction_batch_id, cb.agent_id AS compaction_agent_id,
     ca.name AS compaction_agent_name,
     ARRAY(
@@ -35,6 +35,7 @@ SELECT
     (SELECT max(u.included_at) FROM knowledge_usage_logs u WHERE u.item_id = i.id) AS last_used_at
 FROM knowledge_items i
 JOIN knowledge_revisions r ON r.id = i.current_revision_id
+LEFT JOIN knowledge_provenance provenance ON provenance.id = r.provenance_id
 LEFT JOIN boards p ON p.id = r.board_id
 LEFT JOIN agents a ON a.id = r.agent_id
 LEFT JOIN knowledge_compaction_batches cb ON cb.id = i.compaction_batch_id
@@ -332,9 +333,12 @@ LIMIT $6"#
         check_version(item, expected_version)?;
         let row = sqlx::query(
             r#"
-            SELECT revision_number, scope, board_id, agent_id, knowledge_type,
-                   title, content, source_type, source_id, source_run_id, confidence
-            FROM knowledge_revisions WHERE id = $1
+            SELECT r.revision_number, r.scope, r.board_id, r.agent_id, r.knowledge_type,
+                   r.title, r.content, r.source_type, r.source_id,
+                   provenance.run_id AS source_run_id, r.confidence
+            FROM knowledge_revisions r
+            LEFT JOIN knowledge_provenance provenance ON provenance.id = r.provenance_id
+            WHERE r.id = $1
             "#,
         )
         .bind(item.current_revision_id)
@@ -832,12 +836,16 @@ async fn insert_revision_with_id(
     user_id: Option<Uuid>,
     input: &KnowledgeRevisionInput,
 ) -> Result<(), sqlx::Error> {
+    let provenance_id = match input.source_run_id {
+        Some(run_id) => Some(provenance_for_run(tx, run_id).await?),
+        None => None,
+    };
     sqlx::query(
         r#"
         INSERT INTO knowledge_revisions (
             id, item_id, revision_number, scope, board_id, agent_id,
             knowledge_type, title, content, source_type, source_id,
-            source_run_id, confidence, created_by
+            provenance_id, confidence, created_by
         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
         "#,
     )
@@ -852,12 +860,34 @@ async fn insert_revision_with_id(
     .bind(&input.content)
     .bind(source_type_to_str(input.source_type))
     .bind(input.source_id)
-    .bind(input.source_run_id)
+    .bind(provenance_id)
     .bind(confidence_to_str(input.confidence))
     .bind(user_id)
     .execute(&mut **tx)
     .await?;
     Ok(())
+}
+
+/// The provenance row for a run, created on first use. It copies the run's
+/// ticket, agent and job type, so it outlives the run itself.
+async fn provenance_for_run(
+    tx: &mut Transaction<'_, Postgres>,
+    run_id: Uuid,
+) -> Result<Uuid, sqlx::Error> {
+    sqlx::query_scalar(
+        r#"
+        INSERT INTO knowledge_provenance (id, run_id, ticket_id, agent_id, job_type, run_created_at)
+        SELECT $1, $2, run.ticket_id, run.agent_id, run.job_type, run.created_at
+        FROM (SELECT 1) AS one
+        LEFT JOIN agent_runs run ON run.id = $2
+        ON CONFLICT (run_id) DO UPDATE SET run_id = EXCLUDED.run_id
+        RETURNING id
+        "#,
+    )
+    .bind(Uuid::new_v4())
+    .bind(run_id)
+    .fetch_one(&mut **tx)
+    .await
 }
 
 fn row_to_view(row: &sqlx::postgres::PgRow) -> Result<KnowledgeItemView, KnowledgeError> {

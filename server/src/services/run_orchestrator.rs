@@ -252,7 +252,10 @@ impl<'a> RunOrchestrator<'a> {
             }
         }
 
-        if !consultation_run {
+        // A plan's split waits for the plan's approval (PlanningService).
+        let planning_run = run.job_type == crate::domain::workflow::JOB_TYPE_PLAN_TICKET
+            || run.job_type == crate::domain::workflow::JOB_TYPE_VERIFY_PARENT;
+        if !consultation_run && !planning_run {
             if let AgentRunResult::Done { split_tickets, .. } = contract {
                 if !split_tickets.is_empty() {
                     let auto_split = self
@@ -1219,6 +1222,8 @@ mod tests {
             how_it_works: None,
             changes_from_plan: None,
             look_here_first: None,
+            criteria_results: Vec::new(),
+            plan_questions: Vec::new(),
         }
     }
 
@@ -1253,6 +1258,8 @@ mod tests {
             how_it_works: None,
             changes_from_plan: None,
             look_here_first: None,
+            criteria_results: Vec::new(),
+            plan_questions: Vec::new(),
         }
     }
 
@@ -1280,6 +1287,8 @@ mod tests {
             how_it_works: None,
             changes_from_plan: None,
             look_here_first: None,
+            criteria_results: Vec::new(),
+            plan_questions: Vec::new(),
         }
     }
 
@@ -1407,6 +1416,8 @@ mod tests {
             how_it_works: None,
             changes_from_plan: None,
             look_here_first: None,
+            criteria_results: Vec::new(),
+            plan_questions: Vec::new(),
         };
 
         let targets = select_collaboration_targets(&contract, &agents, source_id);
@@ -1879,18 +1890,22 @@ mod tests {
                     description: "First deliverable".into(),
                     acceptance_criteria: Some("- A is done".into()),
                     assign_to: Some("backend_engineer".into()),
+                    steps: Vec::new(),
                 },
                 crate::domain::workflow::SplitTicketSpec {
                     title: "Child B".into(),
                     description: "Second deliverable".into(),
                     acceptance_criteria: None,
                     assign_to: None,
+                    steps: Vec::new(),
                 },
             ],
             knowledge_candidates: Vec::new(),
             how_it_works: None,
             changes_from_plan: None,
             look_here_first: None,
+            criteria_results: Vec::new(),
+            plan_questions: Vec::new(),
         };
         let apply = ApplyResult {
             run_status: RunStatus::Succeeded,
@@ -3406,6 +3421,8 @@ mod tests {
             how_it_works: None,
             changes_from_plan: None,
             look_here_first: None,
+            criteria_results: Vec::new(),
+            plan_questions: Vec::new(),
         };
         let workflow = WorkflowConfig {
             auto_start_runs: true,
@@ -3641,11 +3658,14 @@ mod tests {
                 description: "Ignored response output".into(),
                 acceptance_criteria: None,
                 assign_to: None,
+                steps: Vec::new(),
             }],
             knowledge_candidates: Vec::new(),
             how_it_works: None,
             changes_from_plan: None,
             look_here_first: None,
+            criteria_results: Vec::new(),
+            plan_questions: Vec::new(),
         };
         let mut malicious_apply =
             crate::services::result_contract::apply_agent_result(&response_contract)
@@ -4282,6 +4302,8 @@ mod tests {
                     how_it_works: None,
                     changes_from_plan: None,
                     look_here_first: None,
+                    criteria_results: Vec::new(),
+                    plan_questions: Vec::new(),
                 },
                 ApplyResult {
                     run_status: RunStatus::Succeeded,

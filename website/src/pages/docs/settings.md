@@ -49,11 +49,18 @@ Admins can open **Logs** beside Settings to filter and live-tail server, request
 | --- | --- | --- | --- |
 | `retention_days` | integer | `14` | How many days of logs to keep, including today: 3, 7, 14, or 30. The default is 14. Coppice deletes older logs every hour, and changes apply without a restart. If logs pass 256 MiB, Coppice deletes the oldest first, even before `retention_days` is up. |
 
-Coppice never deletes today's log or the database log it's writing, even past the limit. Database logs count toward the 256 MiB limit, and Coppice deletes them once they pass `retention_days`.
+Each day's log is split into files of up to 32 MiB, and every file counts toward the 256 MiB limit, today's too. Coppice never deletes the log file or the database log it's writing. Database logs count toward the limit, and Coppice deletes them once they pass `retention_days`.
 
 | Field | Type | Default | What it does |
 | --- | --- | --- | --- |
 | `dir` | string | `./data/logs` | Folder for logs. The desktop app uses its own folder and ignores this. Changing it needs a restart. |
+
+## `[storage]`
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `run_artifacts_retention_days` | integer | `30` | Days a finished run's console and terminal log are kept. Archiving a ticket removes its runs' files right away. Below 1 runs as 1. Changing it needs a restart. |
+| `run_console_max_bytes` | integer | `67108864` | Most bytes one run keeps for its console, and the same again for its terminal log. The oldest part goes first. Changing it needs a restart. |
 
 ## Connectors
 Signed-in CLIs are on by default. You only need a line to turn one off:

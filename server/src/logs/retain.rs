@@ -67,10 +67,10 @@ fn coerce(days: u32) -> u32 {
 /// 256 MiB. Not a config key and not a Settings control.
 pub const LOG_DIR_MAX_BYTES: u64 = 268_435_456;
 
-/// Shown in the log when today's file, a fresh `server.log`, or the database
-/// log Postgres is writing is still over [`LOG_DIR_MAX_BYTES`] after older
-/// files are gone.
-pub const OVER_CAP_WARNING: &str = "Logs are over 256 MiB even after cleanup. Coppice keeps today's log and the database log it is writing.";
+/// Shown in the log when the active segment, a fresh `server.log`, or the
+/// database log Postgres is writing is still over [`LOG_DIR_MAX_BYTES`] after
+/// older files are gone.
+pub const OVER_CAP_WARNING: &str = "Logs are over 256 MiB even after cleanup. Coppice keeps the log file and the database log it is writing.";
 
 /// Compress past days, delete by age and by the 256 MiB cap, and remove old
 /// `server.log` files. `now` and `legacy_logs` let tests pin the clock and the
@@ -174,27 +174,13 @@ fn delete_expired_postgres(
 }
 
 fn day_from_name(name: &str) -> Option<Date> {
-    let rest = name.strip_prefix("coppice.")?;
-    let date = if let Some(date) = rest.strip_suffix(".jsonl.zst") {
-        date
-    } else {
-        rest.strip_suffix(".jsonl")?
-    };
-    let mut parts = date.split('-');
-    let year: i32 = parts.next()?.parse().ok()?;
-    let month: u8 = parts.next()?.parse().ok()?;
-    let day: u8 = parts.next()?.parse().ok()?;
-    if parts.next().is_some() {
-        return None;
-    }
-    Date::from_calendar_date(year, time::Month::try_from(month).ok()?, day).ok()
+    crate::logs::segments::parse_log_name(name).map(|log| log.date)
 }
 
 fn plain_day(name: &str) -> Option<Date> {
-    if name.ends_with(".jsonl.zst") {
-        return None;
-    }
-    day_from_name(name)
+    crate::logs::segments::parse_log_name(name)
+        .filter(|log| !log.compressed)
+        .map(|log| log.date)
 }
 
 fn entry_name(entry: &fs::DirEntry) -> Option<String> {
@@ -242,6 +228,9 @@ fn compress_past_days(dir: &Path, today: Date) -> io::Result<()> {
     let Some(entries) = read_entries(dir)? else {
         return Ok(());
     };
+    // Before the first line after midnight, the open segment is still dated
+    // yesterday. It stays plain until the appender moves on.
+    let active = crate::logs::segments::current_target_name(dir);
     let mut plains = Vec::new();
     for entry in entries {
         let entry = entry?;
@@ -256,7 +245,7 @@ fn compress_past_days(dir: &Path, today: Date) -> io::Result<()> {
         let Some(date) = plain_day(&name) else {
             continue;
         };
-        if date < today {
+        if date < today && active.as_deref() != Some(name.as_str()) {
             plains.push(path);
         }
     }
@@ -335,6 +324,10 @@ fn delete_old_server_logs(dir: &Path, retention_days: u32, now: OffsetDateTime) 
 }
 
 fn enforce_size_cap(dir: &Path, today: Date, now: OffsetDateTime) -> io::Result<()> {
+    enforce_size_cap_at(dir, today, now, LOG_DIR_MAX_BYTES)
+}
+
+fn enforce_size_cap_at(dir: &Path, today: Date, now: OffsetDateTime, cap: u64) -> io::Result<()> {
     let Some(entries) = read_entries(dir)? else {
         return Ok(());
     };
@@ -355,26 +348,36 @@ fn enforce_size_cap(dir: &Path, today: Date, now: OffsetDateTime) -> io::Result<
         let Some(name) = entry_name(&entry) else {
             continue;
         };
-        if let Some(date) = day_from_name(&name) {
-            days.push((date, path, meta.len()));
+        if let Some(log) = crate::logs::segments::parse_log_name(&name) {
+            days.push((log, name, path, meta.len()));
         } else if is_server_log_name(&name) {
             extra = extra.saturating_add(meta.len());
         }
     }
+    // The segment being written stays. Everything else, including today's
+    // closed segments, counts toward the cap and can go, oldest first.
+    let active = crate::logs::segments::current_target_name(dir).or_else(|| {
+        days.iter()
+            .filter(|(log, ..)| log.date == today && !log.compressed)
+            .max_by_key(|(log, ..)| log.seg)
+            .map(|(_, name, ..)| name.clone())
+    });
     let pg_files = crate::logs::postgres_files::list(dir)?;
     let open = crate::logs::postgres_files::open_names(&pg_files, now);
     let mut deletable = Vec::new();
     let mut total = days
         .iter()
-        .fold(extra, |sum, (_, _, len)| sum.saturating_add(*len));
-    for (date, path, len) in days {
-        if date != today {
-            deletable.push(Piece {
-                key: date.midnight().assume_utc(),
-                path,
-                len,
-            });
+        .fold(extra, |sum, (.., len)| sum.saturating_add(*len));
+    for (log, name, path, len) in days {
+        if active.as_deref() == Some(name.as_str()) {
+            continue;
         }
+        deletable.push(Piece {
+            key: log.date.midnight().assume_utc()
+                + time::Duration::milliseconds(i64::from(log.seg)),
+            path,
+            len,
+        });
     }
     for file in pg_files {
         total = total.saturating_add(file.len);
@@ -388,7 +391,7 @@ fn enforce_size_cap(dir: &Path, today: Date, now: OffsetDateTime) -> io::Result<
         });
     }
     deletable.sort_by_key(|piece| piece.key);
-    while total > LOG_DIR_MAX_BYTES {
+    while total > cap {
         if deletable.is_empty() {
             tracing::warn!("{OVER_CAP_WARNING}");
             break;
@@ -613,7 +616,7 @@ mod tests {
         assert_eq!(LOG_DIR_MAX_BYTES, 268_435_456);
         assert_eq!(
             OVER_CAP_WARNING,
-            "Logs are over 256 MiB even after cleanup. Coppice keeps today's log and the database log it is writing."
+            "Logs are over 256 MiB even after cleanup. Coppice keeps the log file and the database log it is writing."
         );
     }
 
@@ -1035,5 +1038,30 @@ mod tests {
         tracing::subscriber::with_default(subscriber, f);
         let recorded = lines.lock().expect("lock").clone();
         recorded
+    }
+
+    #[test]
+    fn todays_closed_segments_count_toward_the_cap() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let appender =
+            crate::logs::segments::SegmentedAppender::with_max_bytes(dir.path(), 64 * 1024)
+                .expect("appender");
+        let line = format!("{}\n", info_line("x".repeat(40).as_str()));
+        for _ in 0..300_000 {
+            appender.write_record(line.as_bytes()).expect("write");
+        }
+        let cap = 1024 * 1024;
+        let now = OffsetDateTime::now_utc();
+        enforce_size_cap_at(dir.path(), now.date(), now, cap).expect("cap");
+        let total: u64 = fs::read_dir(dir.path())
+            .expect("read_dir")
+            .filter_map(Result::ok)
+            .filter(|entry| entry.file_type().is_ok_and(|t| t.is_file()))
+            .map(|entry| entry.metadata().expect("meta").len())
+            .sum();
+        assert!(total <= cap, "logs are {total} bytes after the sweep");
+        let active = crate::logs::segments::current_target_name(dir.path()).expect("current");
+        assert!(dir.path().join(&active).is_file(), "the active segment stays");
+        appender.write_record(line.as_bytes()).expect("still writable");
     }
 }

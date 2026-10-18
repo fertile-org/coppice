@@ -70,6 +70,57 @@ impl<'a> CommentService<'a> {
         Ok(rows.iter().map(row_to_comment).collect())
     }
 
+    /// One page of a ticket's comments, newest first, older than the comment
+    /// `before` when given. The second value says whether older ones remain.
+    pub async fn list_page(
+        &self,
+        ticket_id: Uuid,
+        before: Option<Uuid>,
+        limit: i64,
+    ) -> Result<(Vec<Comment>, bool), CommentError> {
+        self.ensure_ticket_exists(ticket_id).await?;
+        if let Some(before) = before {
+            let known: bool = sqlx::query_scalar(
+                "SELECT EXISTS(SELECT 1 FROM ticket_comments WHERE id = $1 AND ticket_id = $2)",
+            )
+            .bind(before)
+            .bind(ticket_id)
+            .fetch_one(self.pool)
+            .await?;
+            if !known {
+                return Err(CommentError::Validation(
+                    "before is not a comment on this ticket".into(),
+                ));
+            }
+        }
+        let limit = limit.max(1);
+        let rows = sqlx::query(
+            r#"
+            SELECT
+                id, ticket_id, author_type, author_id, body, intent,
+                mentions, attachment_ids, created_at, plan_content_version
+            FROM ticket_comments
+            WHERE ticket_id = $1
+              AND (
+                  $2::UUID IS NULL
+                  OR (created_at, id) < (SELECT created_at, id FROM ticket_comments WHERE id = $2)
+              )
+            ORDER BY created_at DESC, id DESC
+            LIMIT $3
+            "#,
+        )
+        .bind(ticket_id)
+        .bind(before)
+        .bind(limit + 1)
+        .fetch_all(self.pool)
+        .await?;
+        let has_more = rows.len() as i64 > limit;
+        Ok((
+            rows.iter().take(limit as usize).map(row_to_comment).collect(),
+            has_more,
+        ))
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub async fn create(
         &self,

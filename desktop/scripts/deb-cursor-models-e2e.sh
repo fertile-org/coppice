@@ -696,6 +696,8 @@ worktrees_path = "${hung_home}/.config/Coppice/worktrees"
 # Logs and other files from agent runs and chats.
 [storage]
 artifacts_dir = "${hung_home}/.config/Coppice/artifacts"
+# Days a finished run's console and terminal log are kept. Archiving a ticket removes them.
+run_artifacts_retention_days = 30
 
 # Your default plugin folder. Coppice always looks here for plugins.
 [plugins]

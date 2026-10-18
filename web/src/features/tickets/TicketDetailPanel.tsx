@@ -16,6 +16,7 @@ import type { AttachmentMeta } from '../../lib/attachments';
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
 import { PlanChecklist } from '../plan/PlanChecklist';
+import { VerifyParentAction } from '../plan/VerifyParentAction';
 import { PlanReviewActions } from '../plan/PlanReviewActions';
 import { AttachFilesButton } from './AttachFilesButton';
 import { CommentAttachments } from './CommentAttachments';
@@ -42,12 +43,12 @@ export function TicketDetailPanel({
   const [dropActive, setDropActive] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [title, setTitle] = useState(ticket.title);
-  const [description, setDescription] = useState(ticket.description);
+  const [description, setDescription] = useState(ticket.description ?? '');
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     setTitle(ticket.title);
-    setDescription(ticket.description);
+    setDescription(ticket.description ?? '');
   }, [ticket.title, ticket.description]);
 
   async function handleSave() {
@@ -99,7 +100,7 @@ export function TicketDetailPanel({
 
   function handleCancel() {
     setTitle(ticket.title);
-    setDescription(ticket.description);
+    setDescription(ticket.description ?? '');
     setEditing(false);
     setError(null);
   }
@@ -245,7 +246,16 @@ export function TicketDetailPanel({
       )}
 
       {ticket.status === 'plan_review' && !isArchived && (
-        <PlanReviewActions ticketId={ticket.id} boardId={ticket.boardId} />
+        <PlanReviewActions
+          ticketId={ticket.id}
+          boardId={ticket.boardId}
+          hasPlan={ticket.hasPlan ?? true}
+          planQuestions={ticket.planQuestions}
+        />
+      )}
+
+      {ticket.verifyAvailable && !isArchived && (
+        <VerifyParentAction ticketId={ticket.id} boardId={ticket.boardId} />
       )}
 
       {ticket.status === 'wait_for_final_review' && ticket.approvedPlan && (

@@ -16,15 +16,16 @@ const desktopDir = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const lockPath = join(desktopDir, 'postgres.lock.json');
 const cacheDir = join(desktopDir, '.cache', 'postgres');
 
+// Keyed by Node's process.platform, then process.arch.
 const HOST_TARGETS = {
-  'darwin-arm64': 'aarch64-apple-darwin',
-  'darwin-x64': 'x86_64-apple-darwin',
-  'linux-x64': 'x86_64-unknown-linux-gnu',
-  'linux-arm64': 'aarch64-unknown-linux-gnu',
+  darwin: { arm64: 'aarch64-apple-darwin', x64: 'x86_64-apple-darwin' },
+  linux: { x64: 'x86_64-unknown-linux-gnu', arm64: 'aarch64-unknown-linux-gnu' },
 };
 
 export function targetForHost(platform, arch) {
-  const target = HOST_TARGETS[`${platform}-${arch}`];
+  const target = Object.hasOwn(HOST_TARGETS, platform)
+    ? HOST_TARGETS[platform][arch]
+    : undefined;
   if (!target) {
     throw new Error(`unsupported host for bundled postgres: ${platform}/${arch}`);
   }

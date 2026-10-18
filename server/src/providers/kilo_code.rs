@@ -104,7 +104,7 @@ impl AgentProvider for KiloCodeProvider {
         // is appended after them; model and session stay dynamic.
         let pinned = contract.argv(&coppice_connectors::LaunchSubst {
             read_only: input.read_only_tools,
-            plan: input.job_type == crate::domain::workflow::JOB_TYPE_PLAN_TICKET,
+            plan: crate::domain::workflow::is_read_only_job(&input.job_type),
             worktree: &worktree_arg,
             hostname: "",
             port: "",

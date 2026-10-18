@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { isEventSocketOpen } from '../ws/socketState';
 import { apiFetch } from '../../lib/api';
 import type {
   PendingRecommendation,
@@ -28,10 +29,32 @@ export interface ReviewerBrief {
   commitSha?: string | null;
 }
 
+export type CriterionStatus = 'met' | 'not_met' | 'not_checked';
+
+export interface PlanCriterion {
+  text: string;
+  status: CriterionStatus;
+  evidence?: string | null;
+}
+
 export interface ApprovedPlan {
   commentId: string;
   markdown: string;
   steps: string[];
+  /** Acceptance criteria with the result for the reviewed commit. */
+  criteria?: PlanCriterion[];
+}
+
+export interface PlanQuestion {
+  question: string;
+  choices?: string[];
+}
+
+export interface PlanQuestions {
+  questions: PlanQuestion[];
+  answers: string[];
+  /** True until the answers are sent. */
+  waiting: boolean;
 }
 
 export interface Ticket {
@@ -39,7 +62,8 @@ export interface Ticket {
   boardId: string;
   repoId?: string;
   title: string;
-  description: string;
+  /** Absent in board lists; the ticket view loads it. */
+  description?: string;
   status: TicketStatus;
   substatus?: string;
   substatusMetadata?: Record<string, unknown>;
@@ -62,6 +86,13 @@ export interface Ticket {
   planApproved?: boolean;
   latestPlanRunStatus?: string | null;
   approvedPlan?: ApprovedPlan | null;
+  planQuestions?: PlanQuestions | null;
+  /** In Plan Review: a plan exists to approve. */
+  hasPlan?: boolean;
+  /** Split into sub-tickets at Plan Review. */
+  splitParent?: boolean;
+  /** Every sub-ticket is Done and merged. */
+  verifyAvailable?: boolean;
   archivedAt?: string | null;
   attachmentIds?: string[];
   attachments?: {
@@ -72,6 +103,18 @@ export interface Ticket {
   }[];
   humanReview?: HumanReview | null;
   reviewerBrief?: ReviewerBrief | null;
+}
+
+/**
+ * Run start/finish and ticket updates arrive over the event socket, so the
+ * board polls only while that socket is down and a run is live.
+ */
+export function boardRefetchInterval(
+  tickets: Pick<Ticket, 'hasActiveRun'>[] | undefined,
+  socketOpen: boolean,
+): number | false {
+  if (socketOpen) return false;
+  return tickets?.some((ticket) => ticket.hasActiveRun) ? 3000 : false;
 }
 
 /** Prefix for all ticket-list queries for a board (any includeArchived variant). */
@@ -124,13 +167,7 @@ export function useTickets(
     queryKey: ticketsListQueryKey(boardId ?? '', includeArchived),
     queryFn: () => fetchTickets(boardId!, includeArchived),
     enabled: Boolean(boardId),
-    refetchInterval: (query) => {
-      const tickets = query.state.data;
-      if (tickets?.some((ticket) => ticket.hasActiveRun)) {
-        return 3000;
-      }
-      return false;
-    },
+    refetchInterval: (query) => boardRefetchInterval(query.state.data, isEventSocketOpen()),
   });
 }
 

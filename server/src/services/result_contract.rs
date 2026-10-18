@@ -204,6 +204,9 @@ pub fn validate_for_profile(
     if job_type == crate::domain::workflow::JOB_TYPE_PLAN_TICKET {
         return validate_plan_result(result);
     }
+    if job_type == crate::domain::workflow::JOB_TYPE_VERIFY_PARENT {
+        return validate_verify_result(result);
+    }
     match profile {
         ContextProfile::Full if job_type == "respond_to_mention" => {
             apply_consultation_result(result).map(|_| ())
@@ -261,7 +264,7 @@ pub fn validate_for_profile(
 fn validate_plan_result(result: &AgentRunResult) -> Result<(), String> {
     use crate::copy::plan::{
         PLAN_ASSIGN_REJECTED, PLAN_CHANGED_FILES_REJECTED, PLAN_DESCRIPTION_REJECTED,
-        PLAN_MUST_FINISH, PLAN_SPLIT_REJECTED,
+        PLAN_MUST_FINISH, PLAN_SPLIT_TOO_SMALL,
     };
     match result {
         AgentRunResult::Done {
@@ -270,10 +273,14 @@ fn validate_plan_result(result: &AgentRunResult) -> Result<(), String> {
             updated_description,
             assign_to,
             split_tickets,
+            plan_questions,
             ..
         } => {
             if !changed_files.is_empty() {
                 return Err(PLAN_CHANGED_FILES_REJECTED.into());
+            }
+            if plan_questions.len() > crate::copy::plan::MAX_PLAN_QUESTIONS {
+                return Err(crate::copy::plan::PLAN_QUESTIONS_TOO_MANY.into());
             }
             if updated_description
                 .as_deref()
@@ -284,15 +291,37 @@ fn validate_plan_result(result: &AgentRunResult) -> Result<(), String> {
             if assign_to.as_deref().is_some_and(|value| !value.trim().is_empty()) {
                 return Err(PLAN_ASSIGN_REJECTED.into());
             }
-            if !split_tickets.is_empty() {
-                return Err(PLAN_SPLIT_REJECTED.into());
+            // A split proposed here is created only when the plan is approved.
+            if split_tickets.len() == 1 {
+                return Err(PLAN_SPLIT_TOO_SMALL.into());
             }
-            if summary.trim().is_empty() {
+            // Questions stand in for the plan; any summary is ignored then.
+            if summary.trim().is_empty() && plan_questions.is_empty() {
                 return Err(PLAN_MUST_FINISH.into());
             }
             Ok(())
         }
         _ => Err(PLAN_MUST_FINISH.into()),
+    }
+}
+
+fn validate_verify_result(result: &AgentRunResult) -> Result<(), String> {
+    use crate::copy::plan::VERIFY_FORMAT_INSTRUCTION;
+    match result {
+        AgentRunResult::Done {
+            summary,
+            changed_files,
+            split_tickets,
+            plan_questions,
+            ..
+        } if changed_files.is_empty()
+            && split_tickets.is_empty()
+            && plan_questions.is_empty()
+            && !summary.trim().is_empty() =>
+        {
+            Ok(())
+        }
+        _ => Err(VERIFY_FORMAT_INSTRUCTION.into()),
     }
 }
 
@@ -304,6 +333,31 @@ fn non_empty_opt(value: Option<&str>) -> Option<String> {
 }
 
 /// Merge optional description and acceptance-criteria updates into ticket body text.
+/// Bullet or checkbox lines under the description's `## Acceptance criteria`.
+pub fn criteria_from_description(description: &str) -> Vec<String> {
+    let mut lines = description.lines();
+    if lines
+        .by_ref()
+        .find(|line| line.trim() == ACCEPTANCE_CRITERIA_HEADER)
+        .is_none()
+    {
+        return Vec::new();
+    }
+    lines
+        .take_while(|line| !line.trim_start().starts_with("## "))
+        .filter_map(|line| {
+            let line = line.trim();
+            let text = line
+                .strip_prefix("- [ ]")
+                .or_else(|| line.strip_prefix("- [x]"))
+                .or_else(|| line.strip_prefix("- "))
+                .or_else(|| line.strip_prefix("* "))?;
+            let text = text.trim();
+            (!text.is_empty()).then(|| text.to_string())
+        })
+        .collect()
+}
+
 pub fn merge_ticket_description(
     current: &str,
     updated_description: Option<&str>,
@@ -664,6 +718,8 @@ mod tests {
             how_it_works: None,
             changes_from_plan: None,
             look_here_first: None,
+            criteria_results: Vec::new(),
+            plan_questions: Vec::new(),
         };
         let applied = apply_agent_result(&result).expect("apply");
         assert!(applied.comment.body.contains("@backend_engineer"));
@@ -693,6 +749,8 @@ mod tests {
             how_it_works: None,
             changes_from_plan: None,
             look_here_first: None,
+            criteria_results: Vec::new(),
+            plan_questions: Vec::new(),
         };
 
         let applied = apply_agent_result(&result).expect("apply");
@@ -729,6 +787,8 @@ mod tests {
             how_it_works: None,
             changes_from_plan: None,
             look_here_first: None,
+            criteria_results: Vec::new(),
+            plan_questions: Vec::new(),
         };
 
         let applied = apply_agent_result(&result).expect("apply attention result");
@@ -757,11 +817,14 @@ mod tests {
                 description: "Ignored".into(),
                 acceptance_criteria: None,
                 assign_to: None,
+                steps: Vec::new(),
             }],
             knowledge_candidates: Vec::new(),
             how_it_works: None,
             changes_from_plan: None,
             look_here_first: None,
+            criteria_results: Vec::new(),
+            plan_questions: Vec::new(),
         };
 
         let applied = apply_consultation_result(&result).expect("apply consultation");
@@ -835,6 +898,8 @@ mod tests {
             how_it_works: None,
             changes_from_plan: None,
             look_here_first: None,
+            criteria_results: Vec::new(),
+            plan_questions: Vec::new(),
         };
         let applied = apply_agent_result(&result).expect("apply");
         assert!(applied
@@ -861,6 +926,8 @@ mod tests {
             how_it_works: None,
             changes_from_plan: None,
             look_here_first: None,
+            criteria_results: Vec::new(),
+            plan_questions: Vec::new(),
         };
         let applied = apply_agent_result(&result).expect("apply");
         assert!(applied.comment.body.contains("Refined scope."));
@@ -887,6 +954,8 @@ mod tests {
             how_it_works: None,
             changes_from_plan: None,
             look_here_first: None,
+            criteria_results: Vec::new(),
+            plan_questions: Vec::new(),
         };
         let applied = apply_agent_result(&result).expect("apply");
         assert!(applied
@@ -924,6 +993,8 @@ mod tests {
             how_it_works: None,
             changes_from_plan: None,
             look_here_first: None,
+            criteria_results: Vec::new(),
+            plan_questions: Vec::new(),
         };
         let applied = apply_agent_result(&result).expect("apply");
         assert_eq!(
@@ -969,6 +1040,8 @@ mod tests {
             how_it_works: None,
             changes_from_plan: None,
             look_here_first: None,
+            criteria_results: Vec::new(),
+            plan_questions: Vec::new(),
         }
     }
 
@@ -1019,6 +1092,7 @@ mod tests {
                         description: "d".into(),
                         acceptance_criteria: None,
                         assign_to: None,
+                        steps: Vec::new(),
                     });
                 }
             }),

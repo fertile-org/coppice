@@ -84,11 +84,13 @@ export function TicketCard({
   const planLabel =
     planState === 'writing'
       ? PLAN_COPY.writingPlan
-      : planState === 'waiting'
-        ? PLAN_COPY.waitingForApproval
-        : planState === 'needs-run'
-          ? PLAN_COPY.planNeedsRun
-          : null;
+      : planState === 'answers'
+        ? PLAN_COPY.waitingForAnswers
+        : planState === 'waiting'
+          ? PLAN_COPY.waitingForApproval
+          : planState === 'needs-run'
+            ? PLAN_COPY.planNeedsRun
+            : null;
 
   const showMerge = showsAcceptedNotMerged(ticket);
 

@@ -594,7 +594,13 @@ export function TicketGitActions({ ticket }: TicketGitActionsProps) {
             <Button
               type="button"
               variant="secondary"
-              disabled={busy || isLoading || isArchived || !gitInfo?.worktreeExists}
+              disabled={
+                busy ||
+                isLoading ||
+                isArchived ||
+                Boolean(ticket.hasActiveRun) ||
+                !gitInfo?.worktreeExists
+              }
               onClick={() => void handleRemoveWorktree()}
               className="w-full"
             >

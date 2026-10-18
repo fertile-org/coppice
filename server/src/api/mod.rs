@@ -43,7 +43,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .merge(tickets::routes())
         .merge(comments::routes())
         .merge(mentions::routes())
-        .merge(attachments::routes())
+        .merge(attachments::routes(state.attachments.max_bytes()))
         .merge(agents::routes())
         .merge(connectors::routes())
         .merge(agent_runs::routes())

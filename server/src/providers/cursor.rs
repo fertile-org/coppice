@@ -54,7 +54,7 @@ impl AgentProvider for CursorProvider {
         let mut args = cursor_cli_args(
             &worktree,
             input.read_only_tools,
-            input.job_type == crate::domain::workflow::JOB_TYPE_PLAN_TICKET,
+            crate::domain::workflow::is_read_only_job(&input.job_type),
             input.model.as_deref(),
             input.resume_session_id.as_deref(),
             Some(version.as_str()),

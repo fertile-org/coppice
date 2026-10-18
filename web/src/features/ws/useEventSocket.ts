@@ -6,6 +6,7 @@ import {
 import type { RunStatus } from '../../lib/schemas/agentRun';
 import { NOTIFICATIONS_QUERY_KEY } from '../notifications/useNotifications';
 import { COMPACTION_STATUS_QUERY_KEY } from '../knowledge/useCompaction';
+import { setEventSocketOpen } from './socketState';
 
 export interface AgentRunStartedPayload {
   type: 'agent_run.started';
@@ -101,10 +102,27 @@ function dispatchMessage(raw: string) {
     });
   }
 
-  // Server signalled that this socket's view may be stale (e.g. its broadcast
-  // receiver lagged). Invalidate everything so the next render refetches truth.
+  // The server dropped events for this socket (its broadcast receiver lagged).
+  // Only the families those events drive can be stale, so refetch those
+  // instead of the whole cache.
   if (msg.type === 'resync') {
-    void queryClient.invalidateQueries();
+    invalidateEventFamilies();
+  }
+}
+
+/** Every query an app event can change: tickets, runs, comments, notifications. */
+export const EVENT_QUERY_FAMILIES = [
+  ['tickets'],
+  ['ticket'],
+  ['agent-runs'],
+  ['comments'],
+  NOTIFICATIONS_QUERY_KEY,
+  COMPACTION_STATUS_QUERY_KEY,
+] as const;
+
+function invalidateEventFamilies() {
+  for (const queryKey of EVENT_QUERY_FAMILIES) {
+    void queryClient.invalidateQueries({ queryKey: [...queryKey] });
   }
 }
 
@@ -146,11 +164,13 @@ function connectSocket() {
   };
 
   socket.onopen = () => {
+    setEventSocketOpen(true);
     reconnectAttempt = 0;
     invalidateRealtimeQueries();
   };
 
   socket.onclose = () => {
+    setEventSocketOpen(false);
     socket = null;
     scheduleReconnect();
   };
@@ -166,6 +186,7 @@ function disconnectSocket() {
     reconnectTimer = null;
   }
   socket?.close();
+  setEventSocketOpen(false);
   socket = null;
 }
 

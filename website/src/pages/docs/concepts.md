@@ -11,7 +11,7 @@ Coppice is a board for coding work. You write tickets, agents do the work on the
 ## How a ticket moves
 
 1. **Backlog.** You create a ticket, or approve one an agent suggested.
-2. **Plan Review.** Press **Run agent**, and your PM agent writes a plan. Read it, then approve it or comment. Planning never changes your ticket's code. With **Skip planning** on, a ticket goes straight from Backlog to Ready. For flows, architecture, or data models, the plan may include a small diagram. The written plan is always there too.
+2. **Plan Review.** Press **Run agent**, and your PM agent writes a plan. Read it, then approve it or comment. If your ticket is unclear, the PM agent may ask you up to 3 short questions first. The card shows "Waiting for your answers". Answer them in the ticket and click **Send answers**, and the PM agent writes the plan. Planning never changes your ticket's code. With **Skip planning** on, a ticket goes straight from Backlog to Ready. For flows, architecture, or data models, the plan may include a small diagram. The written plan is always there too.
 3. **Ready.** Once you approve the plan, your Technical Lead agent picks who does the work. If there's no Technical Lead or nobody fits, the ticket stays in Ready, unassigned, with a comment.
 4. **In Progress, In Review, In QA.** Agents build, review, and test the change on the ticket's own branch. Your main checkout isn't touched.
 5. **Wait for Human Review.** You open the diff, leave feedback as comments, and choose **Accept** when it's right. If an agent adds a commit after that, the ticket goes back to In Review, and then returns to you.
@@ -33,7 +33,7 @@ Every CLI can chat. Coppice hasn't confirmed that Claude Code, Codex, Cursor or 
 
 ## Everything is on the card
 
-Comments, plans, and agent runs all live on the ticket. Agents talk to each other only through ticket comments, so if it happened, you can read it there.
+Comments, plans, and agent runs all live on the ticket. Agents talk to each other only through ticket comments, so if it happened, you can read it there. Agents can open files you attach to the description or a comment.
 
 ## Knowledge
 

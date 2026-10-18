@@ -59,15 +59,21 @@ function LogRow({ line }: { line: LogLine }) {
   );
 }
 
+/** Live lines kept in memory. Older live lines drop off the end. */
+export const MAX_LIVE_LINES = 500;
+/** Lines kept from Load older. At the cap, Load older stops. */
+export const MAX_OLDER_LINES = 1800;
+
 export function LogsPage() {
   const { user, loading } = useSession();
   const [params, setParams] = useSearchParams();
   const filters = filtersFromParams(params);
   const filterKey = logsPath(filters, null);
   const [live, setLive] = useState(false);
-  const [liveLines, setLiveLines] = useState<{ key: string; lines: LogLine[] }>({
+  const [liveLines, setLiveLines] = useState<{ key: string; lines: LogLine[]; keys: Set<string> }>({
     key: filterKey,
     lines: [],
+    keys: new Set(),
   });
   const [older, setOlder] = useState<{ key: string; lines: LogLine[]; cursor: string | null }>({
     key: '',
@@ -116,10 +122,13 @@ export function LogsPage() {
       const line = parsed.data;
       setLiveLines((current) => {
         const lines = current.key === filterKey ? current.lines : [];
-        if (lines.some((existing) => lineKey(existing) === lineKey(line))) {
-          return { key: filterKey, lines };
+        const keys = current.key === filterKey ? current.keys : new Set<string>();
+        const key = lineKey(line);
+        if (keys.has(key)) {
+          return current;
         }
-        return { key: filterKey, lines: [line, ...lines] };
+        const next = [line, ...lines].slice(0, MAX_LIVE_LINES);
+        return { key: filterKey, lines: next, keys: new Set(next.map(lineKey)) };
       });
     };
     return () => {
@@ -163,6 +172,8 @@ export function LogsPage() {
       ? older.cursor
       : (logsQuery.data?.nextCursor ?? null);
 
+  const olderFull = appended.length >= MAX_OLDER_LINES;
+
   async function loadOlder() {
     if (!nextCursor) {
       return;
@@ -172,7 +183,7 @@ export function LogsPage() {
       const page = await fetchLogs(filters, nextCursor);
       setOlder({
         key: filterKey,
-        lines: [...appended, ...page.lines],
+        lines: [...appended, ...page.lines].slice(0, MAX_OLDER_LINES),
         cursor: page.nextCursor,
       });
     } finally {
@@ -331,7 +342,10 @@ export function LogsPage() {
           ))}
         </ul>
       )}
-      {nextCursor && (
+      {nextCursor && olderFull && (
+        <p className="font-body text-sm text-text-muted">{LOGS_COPY.olderLimit}</p>
+      )}
+      {nextCursor && !olderFull && (
         <Button type="button" variant="secondary" onClick={() => void loadOlder()} disabled={loadingOlder}>
           {LOGS_COPY.loadOlder}
         </Button>

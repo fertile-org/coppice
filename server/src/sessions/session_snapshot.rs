@@ -7,22 +7,60 @@ struct PendingDelta {
     delta: String,
 }
 
+/// Most bytes a session snapshot keeps. Older messages are dropped first;
+/// the newest message always stays.
+pub const SNAPSHOT_MAX_BYTES: usize = 8 * 1024 * 1024;
+/// How many events go by between size checks.
+const TRIM_EVERY_EVENTS: u32 = 256;
+
 pub struct SessionSnapshot {
     pub session_id: String,
     pub messages: Vec<Value>,
     pub parts: HashMap<String, Vec<Value>>,
     pending_deltas: HashMap<String, Vec<PendingDelta>>,
     part_locations: HashMap<String, (String, usize)>,
+    max_bytes: usize,
+    events_since_trim: u32,
 }
 
 impl SessionSnapshot {
     pub fn empty(session_id: &str) -> Self {
+        Self::with_max_bytes(session_id, SNAPSHOT_MAX_BYTES)
+    }
+
+    pub fn with_max_bytes(session_id: &str, max_bytes: usize) -> Self {
         Self {
             session_id: session_id.to_string(),
             messages: Vec::new(),
             parts: HashMap::new(),
             pending_deltas: HashMap::new(),
             part_locations: HashMap::new(),
+            max_bytes,
+            events_since_trim: 0,
+        }
+    }
+
+    /// Serialized size of what a reader receives.
+    pub fn approx_bytes(&self) -> usize {
+        let messages = serde_json::to_vec(&self.messages).map_or(0, |bytes| bytes.len());
+        let parts = serde_json::to_vec(&self.parts).map_or(0, |bytes| bytes.len());
+        messages + parts
+    }
+
+    /// Drop the oldest messages and their parts until the snapshot fits.
+    pub fn trim_to_budget(&mut self) {
+        let mut size = self.approx_bytes();
+        while size > self.max_bytes && self.messages.len() > 1 {
+            let oldest = self.messages.remove(0);
+            let mut freed = serde_json::to_vec(&oldest).map_or(0, |bytes| bytes.len());
+            if let Some(message_id) = message_id_from_value(&oldest) {
+                if let Some(parts) = self.parts.remove(message_id) {
+                    freed += serde_json::to_vec(&parts).map_or(0, |bytes| bytes.len());
+                }
+                self.part_locations
+                    .retain(|_, (location, _)| location != message_id);
+            }
+            size = size.saturating_sub(freed);
         }
     }
 
@@ -59,6 +97,11 @@ impl SessionSnapshot {
             "message.part.delta" => self.apply_part_delta(event),
             "message.updated" => self.apply_message_updated(event),
             _ => {}
+        }
+        self.events_since_trim += 1;
+        if self.events_since_trim >= TRIM_EVERY_EVENTS {
+            self.events_since_trim = 0;
+            self.trim_to_budget();
         }
     }
 
@@ -417,5 +460,47 @@ mod tests {
             }
             _ => panic!("expected done"),
         }
+    }
+
+    #[test]
+    fn a_long_session_stays_within_its_byte_budget() {
+        let budget = 64 * 1024;
+        let mut snap = SessionSnapshot::with_max_bytes("ses_1", budget);
+        let chunk = "x".repeat(200);
+        for m in 0..200 {
+            let message_id = format!("msg_{m}");
+            snap.apply_event(&json!({
+                "type": "message.updated",
+                "properties": { "sessionID": "ses_1", "info": { "id": message_id, "role": "assistant" } }
+            }));
+            let part_id = format!("prt_{m}");
+            snap.apply_event(&json!({
+                "type": "message.part.updated",
+                "properties": {
+                    "sessionID": "ses_1",
+                    "part": { "id": part_id, "type": "text", "text": "", "messageID": message_id }
+                }
+            }));
+            for d in 0..20 {
+                // Distinct deltas: identical repeats are deduplicated on purpose.
+                let delta = format!("{d:03}{}", &chunk[3..]);
+                snap.apply_event(&json!({
+                    "type": "message.part.delta",
+                    "properties": { "sessionID": "ses_1", "partID": part_id, "field": "text", "delta": delta }
+                }));
+            }
+        }
+        snap.trim_to_budget();
+        assert!(snap.approx_bytes() <= budget, "{} bytes", snap.approx_bytes());
+        // The newest message and its text are kept whole.
+        assert_eq!(message_id_from_value(snap.messages.last().unwrap()), Some("msg_199"));
+        assert_eq!(snap.parts["msg_199"][0]["text"].as_str().unwrap().len(), 20 * 200);
+        assert!(!snap.parts.contains_key("msg_0"));
+        // Deltas for a kept part still land after trimming.
+        snap.apply_event(&json!({
+            "type": "message.part.delta",
+            "properties": { "sessionID": "ses_1", "partID": "prt_199", "field": "text", "delta": "!" }
+        }));
+        assert!(snap.parts["msg_199"][0]["text"].as_str().unwrap().ends_with('!'));
     }
 }

@@ -223,21 +223,20 @@ pub async fn call_ticket_comments(ctx: &ToolCtx<'_>, args: Value) -> Result<Valu
     };
     let ticket = resolve_ticket(ctx, &args).await?;
 
-    // Newest first.
-    let comments = CommentService::new(ctx.pool)
-        .list_by_ticket(ticket.ticket.id)
+    // Newest first, paged in SQL.
+    let (page, has_more): (Vec<Comment>, bool) = CommentService::new(ctx.pool)
+        .list_page(
+            ticket.ticket.id,
+            before,
+            i64::try_from(limit).unwrap_or(i64::MAX),
+        )
         .await
-        .map_err(|e| ToolError::Internal(e.into()))?;
-    let start = match before {
-        None => 0,
-        Some(id) => {
-            comments.iter().position(|c| c.id == id).ok_or_else(|| {
-                ToolError::InvalidArgs("before is not a comment on this ticket".into())
-            })? + 1
-        }
-    };
-    let page: Vec<Comment> = comments.iter().skip(start).take(limit).cloned().collect();
-    let has_more = start + page.len() < comments.len();
+        .map_err(|e| match e {
+            crate::services::comment_service::CommentError::Validation(message) => {
+                ToolError::InvalidArgs(message)
+            }
+            other => ToolError::Internal(other.into()),
+        })?;
     let next_before = if has_more {
         page.last().map(|c| c.id)
     } else {
@@ -255,7 +254,7 @@ pub async fn call_ticket_runs(ctx: &ToolCtx<'_>, args: Value) -> Result<Value, T
     let limit = limit_arg(&args, RUNS_DEFAULT_LIMIT, RUNS_MAX_LIMIT)?;
     let ticket = resolve_ticket(ctx, &args).await?;
     let runs = RunService::new(ctx.pool)
-        .list_for_ticket(ticket.ticket.id)
+        .list_recent_for_ticket(ticket.ticket.id, i64::try_from(limit).unwrap_or(i64::MAX))
         .await
         .map_err(|e| ToolError::Internal(e.into()))?;
     let agents = list_agents(ctx).await?;

@@ -7,7 +7,7 @@ import { startServer } from './src/serverProcess.mjs';
 import { startupFailureMessage } from './src/startupError.mjs';
 import { resolveLoginShellPath } from './src/shellPath.mjs';
 import { attachMacUpdater, configureMacFeed } from './src/macUpdater.mjs';
-import { macUpdateFeed } from './src/updateEndpoints.mjs';
+import { macUpdateFeed, updateBase } from './src/updateEndpoints.mjs';
 import { readUpdateBase, readUpdaterMode } from './src/readUpdaterMode.mjs';
 import { checkForUpdate } from './src/updateCheck.mjs';
 import { bannerForUpdate, startUpdateLoop, UPDATE_INTERVAL_MS } from './src/updatePlan.mjs';
@@ -156,7 +156,11 @@ async function ensureMacUpdater() {
 async function runUpdateCheck({ manual = false } = {}) {
   const generation = checkGeneration;
   await ensureMacUpdater();
-  const result = await checkForUpdate({ repo: RELEASE_REPO, currentVersion: app.getVersion() });
+  const result = await checkForUpdate({
+    repo: RELEASE_REPO,
+    currentVersion: app.getVersion(),
+    updateBase: updateBase(readUpdateBase(readPackagedUpdaterMode())),
+  });
   if (!manual && generation !== checkGeneration) return result;
   if (result.status === 'available') {
     updateAvailability = { version: result.version, url: result.url };

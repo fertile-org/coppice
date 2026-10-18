@@ -119,7 +119,7 @@ impl AgentProvider for ClaudeCodeProvider {
             ProviderError::InvalidFixture(cli_version::version_unavailable(&program, &err))
         })?;
         let worktree_arg = worktree.display().to_string();
-        let planning = input.job_type == crate::domain::workflow::JOB_TYPE_PLAN_TICKET;
+        let planning = crate::domain::workflow::is_read_only_job(&input.job_type);
         let read_only_tools = input.read_only_tools || planning;
         let staged = ticket_attachments::load_for_run(
             input.artifacts_dir.as_deref(),

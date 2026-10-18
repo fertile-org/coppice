@@ -131,61 +131,280 @@ pub fn filter_from_params(params: &FilterParams) -> Result<LogFilter, QueryError
     })
 }
 
+/// One page, newest first. JSONL files are read backwards from the cursor,
+/// so a page never loads a whole day.
 pub fn query(dir: &Path, query: &LogQuery) -> Result<LogPage, QueryError> {
-    let ordered = collect(dir, &query.filter)?;
-
-    let start = match &query.cursor {
-        None => 0,
-        Some(cursor) => {
-            let (file_key, line_index) = decode_cursor(cursor).ok_or(QueryError::BadCursor)?;
-            let position = ordered
-                .iter()
-                .position(|item| item.file_key == file_key && item.line_index == line_index)
-                .ok_or(QueryError::BadCursor)?;
-            position + 1
-        }
+    if log_store_missing(dir) {
+        return Err(QueryError::StoreMissing);
+    }
+    let cursor = match &query.cursor {
+        None => Cursor::default(),
+        Some(raw) => decode_cursor(raw).ok_or(QueryError::BadCursor)?,
     };
-    let end = start.saturating_add(query.limit).min(ordered.len());
-    let page = if start >= ordered.len() {
-        &[]
-    } else {
-        &ordered[start..end]
-    };
-    let next_cursor = if end < ordered.len() {
-        page.last()
-            .map(|item| encode_cursor(&item.file_key, item.line_index))
+    let keep = query.limit.saturating_add(1);
+    let mut merged = Merged::open(dir, &query.filter, &cursor, keep)?;
+    let mut lines = Vec::new();
+    while lines.len() < query.limit {
+        let Some(item) = merged.next()? else {
+            break;
+        };
+        lines.push(item.line);
+    }
+    let next_cursor = if merged.has_more()? {
+        Some(encode_cursor(&merged.position()))
     } else {
         None
     };
-    Ok(LogPage {
-        lines: page.iter().map(|item| item.line.clone()).collect(),
-        next_cursor,
-    })
+    Ok(LogPage { lines, next_cursor })
 }
 
 /// Every matching line, newest first, as stored. Not one page.
 pub fn export_lines(dir: &Path, filter: &LogFilter) -> Result<Vec<String>, QueryError> {
-    Ok(collect(dir, filter)?
-        .into_iter()
-        .map(|item| item.raw)
-        .collect())
-}
-
-fn collect(dir: &Path, filter: &LogFilter) -> Result<Vec<Located>, QueryError> {
     if log_store_missing(dir) {
         return Err(QueryError::StoreMissing);
     }
-    let mut dated = Vec::new();
-    let mut undated = Vec::new();
-    if filter.source != Some(Source::Postgres) {
-        dated.extend(read_jsonl_days(dir, filter)?);
+    let mut merged = Merged::open(dir, filter, &Cursor::default(), usize::MAX)?;
+    let mut out = Vec::new();
+    while let Some(item) = merged.next()? {
+        out.push(item.raw);
     }
-    if filter.source.is_none() || filter.source == Some(Source::Postgres) {
-        let (postgres_dated, postgres_undated) = read_postgres(dir, filter)?;
-        dated.extend(postgres_dated);
-        undated.extend(postgres_undated);
+    Ok(out)
+}
+
+/// Where the previous page stopped: the last JSONL line it returned (file
+/// key and byte offset) and the last Postgres line (file and line index).
+#[derive(Debug, Default, Clone, PartialEq)]
+struct Cursor {
+    jsonl: Option<(String, u64)>,
+    postgres: Option<(String, u64)>,
+}
+
+/// JSONL lines (read lazily) merged with Postgres lines by time, newest first.
+struct Merged {
+    jsonl: Option<JsonlStream>,
+    postgres: Vec<Located>,
+    postgres_next: usize,
+    position: Cursor,
+}
+
+impl Merged {
+    fn open(dir: &Path, filter: &LogFilter, cursor: &Cursor, keep: usize) -> Result<Self, QueryError> {
+        let jsonl = if filter.source == Some(Source::Postgres) {
+            None
+        } else {
+            Some(JsonlStream::open(dir, filter, cursor.jsonl.clone(), keep)?)
+        };
+        let postgres = if filter.source.is_none() || filter.source == Some(Source::Postgres) {
+            let (dated, undated) = read_postgres(dir, filter)?;
+            merge(dated, undated)
+        } else {
+            Vec::new()
+        };
+        let postgres_next = match &cursor.postgres {
+            None => 0,
+            Some((file_key, line_index)) => {
+                postgres
+                    .iter()
+                    .position(|item| &item.file_key == file_key && item.line_index == *line_index)
+                    .ok_or(QueryError::BadCursor)?
+                    + 1
+            }
+        };
+        Ok(Self {
+            jsonl,
+            postgres,
+            postgres_next,
+            position: cursor.clone(),
+        })
     }
-    Ok(merge(dated, undated))
+
+    fn next(&mut self) -> Result<Option<Located>, QueryError> {
+        let from_jsonl = match (
+            self.jsonl.as_mut().map(JsonlStream::peek).transpose()?.flatten(),
+            self.postgres.get(self.postgres_next),
+        ) {
+            (None, None) => return Ok(None),
+            (Some(_), None) => true,
+            (None, Some(_)) => false,
+            (Some(left), Some(right)) => match (left.timestamp, right.timestamp) {
+                // An undated Postgres line already sits after its dated neighbour.
+                (_, None) => false,
+                (None, _) => true,
+                (Some(left), Some(right)) => left >= right,
+            },
+        };
+        if from_jsonl {
+            let item = self
+                .jsonl
+                .as_mut()
+                .and_then(|stream| stream.take())
+                .expect("peeked line");
+            self.position.jsonl = Some((item.file_key.clone(), item.line_index));
+            Ok(Some(item))
+        } else {
+            let item = self.postgres[self.postgres_next].clone_located();
+            self.postgres_next += 1;
+            self.position.postgres = Some((item.file_key.clone(), item.line_index));
+            Ok(Some(item))
+        }
+    }
+
+    fn has_more(&mut self) -> Result<bool, QueryError> {
+        let jsonl_more = match self.jsonl.as_mut() {
+            Some(stream) => stream.peek()?.is_some(),
+            None => false,
+        };
+        Ok(jsonl_more || self.postgres_next < self.postgres.len())
+    }
+
+    fn position(&self) -> Cursor {
+        self.position.clone()
+    }
+}
+
+/// One JSONL segment on disk.
+struct SegmentFile {
+    log: crate::logs::segments::LogName,
+    path: PathBuf,
+}
+
+impl SegmentFile {
+    fn key(&self) -> String {
+        format!("{}.{}", self.log.date, self.log.seg)
+    }
+}
+
+fn parse_file_key(key: &str) -> Option<(Date, u32)> {
+    let (date, seg) = key.rsplit_once('.')?;
+    Some((crate::logs::segments::parse_date(date)?, seg.parse().ok()?))
+}
+
+/// Matching JSONL lines, newest first, across segments.
+struct JsonlStream {
+    filter: LogFilter,
+    keep: usize,
+    /// Segments still to read, newest first.
+    files: std::collections::VecDeque<(SegmentFile, u64)>,
+    current: Option<(String, LineSource)>,
+    peeked: Option<Located>,
+}
+
+enum LineSource {
+    Plain(crate::logs::segments::ReverseLines),
+    Loaded(std::vec::IntoIter<(u64, String)>),
+}
+
+impl JsonlStream {
+    fn open(
+        dir: &Path,
+        filter: &LogFilter,
+        after: Option<(String, u64)>,
+        keep: usize,
+    ) -> Result<Self, QueryError> {
+        let mut segments = match fs::read_dir(dir) {
+            Ok(entries) => segment_files_from(entries)?,
+            Err(error) if store_disappeared(&error) => return Err(QueryError::StoreMissing),
+            Err(error) => return Err(error.into()),
+        };
+        segments.sort_by_key(|file| std::cmp::Reverse((file.log.date, file.log.seg)));
+        let bound = match &after {
+            None => None,
+            Some((key, offset)) => Some((parse_file_key(key).ok_or(QueryError::BadCursor)?, *offset)),
+        };
+        let mut files = std::collections::VecDeque::new();
+        for file in segments {
+            if !day_overlaps(file.log.date, filter) {
+                continue;
+            }
+            let end = match bound {
+                None => u64::MAX,
+                Some((at, offset)) => {
+                    let here = (file.log.date, file.log.seg);
+                    if here > at {
+                        continue;
+                    }
+                    if here == at {
+                        offset
+                    } else {
+                        u64::MAX
+                    }
+                }
+            };
+            files.push_back((file, end));
+        }
+        Ok(Self {
+            filter: filter.clone(),
+            keep,
+            files,
+            current: None,
+            peeked: None,
+        })
+    }
+
+    fn peek(&mut self) -> Result<Option<&Located>, QueryError> {
+        if self.peeked.is_none() {
+            self.peeked = self.advance()?;
+        }
+        Ok(self.peeked.as_ref())
+    }
+
+    fn take(&mut self) -> Option<Located> {
+        self.peeked.take()
+    }
+
+    fn advance(&mut self) -> Result<Option<Located>, QueryError> {
+        loop {
+            if self.current.is_none() {
+                let Some((file, end)) = self.files.pop_front() else {
+                    return Ok(None);
+                };
+                let source = if file.log.compressed {
+                    let filter = self.filter.clone();
+                    let lines = crate::logs::segments::compressed_lines_before(
+                        &file.path,
+                        end,
+                        self.keep,
+                        |raw| matching_raw(&filter, raw).is_some(),
+                    )?;
+                    LineSource::Loaded(lines.into_iter())
+                } else {
+                    match crate::logs::segments::ReverseLines::before(&file.path, end) {
+                        Ok(lines) => LineSource::Plain(lines),
+                        Err(error) if error.kind() == io::ErrorKind::NotFound => continue,
+                        Err(error) => return Err(error.into()),
+                    }
+                };
+                self.current = Some((file.key(), source));
+            }
+            let (key, source) = self.current.as_mut().expect("current file");
+            let next = match source {
+                LineSource::Plain(lines) => lines.next().transpose()?,
+                LineSource::Loaded(lines) => lines.next(),
+            };
+            let Some((offset, raw)) = next else {
+                self.current = None;
+                continue;
+            };
+            if raw.trim().is_empty() {
+                continue;
+            }
+            if let Some((line, timestamp)) = matching_raw(&self.filter, &raw) {
+                return Ok(Some(Located {
+                    timestamp,
+                    postgres: false,
+                    file_key: key.clone(),
+                    line_index: offset,
+                    line,
+                    raw,
+                }));
+            }
+        }
+    }
+}
+
+fn matching_raw(filter: &LogFilter, raw: &str) -> Option<(LogLine, Option<OffsetDateTime>)> {
+    let (line, timestamp) = parse_jsonl(raw)?;
+    accepts(filter, &line, timestamp, raw).then_some((line, timestamp))
 }
 
 /// One JSONL line, when it matches. Used by the live tail.
@@ -200,6 +419,7 @@ pub fn matching_jsonl_line(filter: &LogFilter, raw: &str) -> Option<LogLine> {
     Some(line)
 }
 
+#[derive(Clone)]
 struct Located {
     timestamp: Option<OffsetDateTime>,
     postgres: bool,
@@ -207,6 +427,12 @@ struct Located {
     line_index: u64,
     line: LogLine,
     raw: String,
+}
+
+impl Located {
+    fn clone_located(&self) -> Self {
+        self.clone()
+    }
 }
 
 fn merge(mut dated: Vec<Located>, undated: Vec<Located>) -> Vec<Located> {
@@ -259,49 +485,6 @@ fn log_store_missing(dir: &Path) -> bool {
     dir.as_os_str().is_empty() || !dir.is_dir()
 }
 
-fn read_jsonl_days(dir: &Path, filter: &LogFilter) -> Result<Vec<Located>, QueryError> {
-    let mut days = match fs::read_dir(dir) {
-        Ok(entries) => day_files_from(entries)?,
-        Err(error) if store_disappeared(&error) => return Err(QueryError::StoreMissing),
-        Err(error) => return Err(error.into()),
-    };
-    days.sort_by_key(|left| std::cmp::Reverse(left.date));
-    let mut located = Vec::new();
-    for day in days {
-        if !day_overlaps(day.date, filter) {
-            continue;
-        }
-        let text = read_lossy(&day.path, day.compressed)?;
-        let file_key = day.date.to_string();
-        for (index, raw) in text.lines().enumerate() {
-            if raw.trim().is_empty() {
-                continue;
-            }
-            let Some((line, timestamp)) = parse_jsonl(raw) else {
-                continue;
-            };
-            if !accepts(filter, &line, timestamp, raw) {
-                continue;
-            }
-            located.push(Located {
-                timestamp,
-                postgres: false,
-                file_key: file_key.clone(),
-                line_index: u64::try_from(index).unwrap_or(u64::MAX),
-                line,
-                raw: raw.to_string(),
-            });
-        }
-    }
-    Ok(located)
-}
-
-struct DayFile {
-    date: Date,
-    path: PathBuf,
-    compressed: bool,
-}
-
 fn store_disappeared(error: &io::Error) -> bool {
     matches!(
         error.kind(),
@@ -309,8 +492,10 @@ fn store_disappeared(error: &io::Error) -> bool {
     )
 }
 
-fn day_files_from(entries: fs::ReadDir) -> Result<Vec<DayFile>, QueryError> {
-    let mut by_date: Vec<DayFile> = Vec::new();
+/// One file per segment. A segment that exists both plain and compressed
+/// (compression in progress) is read plain.
+fn segment_files_from(entries: fs::ReadDir) -> Result<Vec<SegmentFile>, QueryError> {
+    let mut found: Vec<SegmentFile> = Vec::new();
     for entry in entries {
         let entry = entry?;
         let meta = fs::symlink_metadata(entry.path())?;
@@ -320,45 +505,25 @@ fn day_files_from(entries: fs::ReadDir) -> Result<Vec<DayFile>, QueryError> {
         let Some(name) = entry.file_name().to_str().map(str::to_string) else {
             continue;
         };
-        let Some((date, compressed)) = day_name(&name) else {
+        let Some(log) = crate::logs::segments::parse_log_name(&name) else {
             continue;
         };
-        if let Some(existing) = by_date.iter_mut().find(|day| day.date == date) {
-            if existing.compressed && !compressed {
+        if let Some(existing) = found
+            .iter_mut()
+            .find(|file| file.log.date == log.date && file.log.seg == log.seg)
+        {
+            if existing.log.compressed && !log.compressed {
                 existing.path = entry.path();
-                existing.compressed = false;
+                existing.log = log;
             }
             continue;
         }
-        by_date.push(DayFile {
-            date,
+        found.push(SegmentFile {
+            log,
             path: entry.path(),
-            compressed,
         });
     }
-    Ok(by_date)
-}
-
-fn day_name(name: &str) -> Option<(Date, bool)> {
-    let rest = name.strip_prefix("coppice.")?;
-    if let Some(date) = rest.strip_suffix(".jsonl.zst") {
-        return Some((parse_date(date)?, true));
-    }
-    if let Some(date) = rest.strip_suffix(".jsonl") {
-        return Some((parse_date(date)?, false));
-    }
-    None
-}
-
-fn parse_date(value: &str) -> Option<Date> {
-    let mut parts = value.split('-');
-    let year: i32 = parts.next()?.parse().ok()?;
-    let month: u8 = parts.next()?.parse().ok()?;
-    let day: u8 = parts.next()?.parse().ok()?;
-    if parts.next().is_some() {
-        return None;
-    }
-    Date::from_calendar_date(year, time::Month::try_from(month).ok()?, day).ok()
+    Ok(found)
 }
 
 fn day_overlaps(date: Date, filter: &LogFilter) -> bool {
@@ -636,20 +801,39 @@ fn read_lossy(path: &Path, compressed: bool) -> io::Result<String> {
     Ok(String::from_utf8_lossy(&bytes).into_owned())
 }
 
-fn encode_cursor(file_key: &str, line_index: u64) -> String {
-    base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(format!("{file_key}:{line_index}"))
+fn encode_cursor(cursor: &Cursor) -> String {
+    let part = |position: &Option<(String, u64)>| match position {
+        Some((key, index)) => format!("{key}:{index}"),
+        None => "-".to_string(),
+    };
+    base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(format!(
+        "j={}|p={}",
+        part(&cursor.jsonl),
+        part(&cursor.postgres)
+    ))
 }
 
-fn decode_cursor(cursor: &str) -> Option<(String, u64)> {
+fn decode_cursor(cursor: &str) -> Option<Cursor> {
     let bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
         .decode(cursor)
         .ok()?;
     let text = String::from_utf8(bytes).ok()?;
-    let (file_key, index) = text.rsplit_once(':')?;
-    if file_key.is_empty() {
-        return None;
-    }
-    Some((file_key.to_string(), index.parse().ok()?))
+    let (jsonl, postgres) = text.split_once('|')?;
+    let part = |value: &str, prefix: &str| -> Option<Option<(String, u64)>> {
+        let value = value.strip_prefix(prefix)?;
+        if value == "-" {
+            return Some(None);
+        }
+        let (key, index) = value.rsplit_once(':')?;
+        if key.is_empty() {
+            return None;
+        }
+        Some(Some((key.to_string(), index.parse().ok()?)))
+    };
+    Some(Cursor {
+        jsonl: part(jsonl, "j=")?,
+        postgres: part(postgres, "p=")?,
+    })
 }
 
 #[cfg(test)]
@@ -764,13 +948,58 @@ mod tests {
     }
 
     #[test]
+    fn pages_walk_back_across_segments_and_a_compressed_day() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let day = |n: usize| format!("2026-10-1{n}");
+        let mut expected = Vec::new();
+        // Yesterday, compressed: lines 0..30. Today: segments 0, 1, 2.
+        let mut yesterday = String::new();
+        for i in 0..30 {
+            let message = format!("m{i:03}");
+            yesterday.push_str(&jsonl(&format!("{}T01:00:{:02}Z", day(3), i), "INFO", "server", &message, ""));
+            yesterday.push('\n');
+            expected.push(message);
+        }
+        write_zst(&dir.path().join(format!("coppice.{}.jsonl.zst", day(3))), &yesterday);
+        let mut i = 30;
+        for seg in 0..3 {
+            let mut text = String::new();
+            for _ in 0..25 {
+                let message = format!("m{i:03}");
+                text.push_str(&jsonl(&format!("{}T02:{:02}:{:02}Z", day(4), i / 60, i % 60), "INFO", "server", &message, ""));
+                text.push('\n');
+                expected.push(message);
+                i += 1;
+            }
+            fs::write(dir.path().join(format!("coppice.{}.{seg}.jsonl", day(4))), text).expect("write");
+        }
+        expected.reverse();
+
+        let mut seen = Vec::new();
+        let mut cursor = None;
+        loop {
+            let mut request = params(Some("server"), None, None, None);
+            request.cursor = cursor.clone();
+            request.limit = 7;
+            let page = super::query(dir.path(), &request).expect("page");
+            assert!(page.lines.len() <= 7);
+            seen.extend(page.lines.into_iter().map(|line| line.message));
+            match page.next_cursor {
+                Some(next) => cursor = Some(next),
+                None => break,
+            }
+        }
+        assert_eq!(seen, expected);
+    }
+
+    #[test]
     fn postgres_lines_are_their_own_source_and_undated_lines_follow_dated_ones() {
         let dir = tempfile::tempdir().expect("tempdir");
         fs::write(
             dir.path().join("coppice.2026-10-14.jsonl"),
+            // Appended in time order, as the server writes them.
             format!(
                 "{}\n{}\n",
-                jsonl("2026-10-14T04:00:00Z", "INFO", "server", "newer", ""),
                 jsonl(
                     "2026-10-14T01:00:00Z",
                     "INFO",
@@ -778,6 +1007,7 @@ mod tests {
                     "older",
                     r#","run_id":"run-1","stream":"stdout""#
                 ),
+                jsonl("2026-10-14T04:00:00Z", "INFO", "server", "newer", ""),
             ),
         )
         .expect("write");

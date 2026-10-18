@@ -2,3 +2,4 @@ node_modules/
 dist/
 .astro/
 .i18n-fixture-dist/
+.i18n-stash-*/

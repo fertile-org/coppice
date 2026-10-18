@@ -60,6 +60,7 @@ pub const PLAN_CHANGES_DISCARDED: &str =
 pub const PLAN_HEADING: &str = "## Plan";
 pub const APPROACH_HEADING: &str = "### Approach";
 pub const STEPS_HEADING: &str = "### Steps";
+pub const ACCEPTANCE_CRITERIA_HEADING: &str = "### Acceptance criteria";
 pub const RISKS_HEADING: &str = "### Risks";
 pub const OUT_OF_SCOPE_HEADING: &str = "### Out of scope";
 pub const NONE: &str = "None.";
@@ -71,6 +72,9 @@ pub const PLAN_TASK: &str =
 
 pub const PLAN_FORMAT_INSTRUCTION: &str = "Put the plan in `summary` when you call `result_submit` with status `done`. Use exactly this markdown:";
 
+/// Criteria are the contract Human Review checks the finished change against.
+pub const PLAN_CRITERIA_INSTRUCTION: &str = "Under Acceptance criteria, write each line as behavior a person can check, then how it's verified: a test, a command, or a manual check. If the ticket description has `## Acceptance criteria`, start from those.";
+
 /// Diagrams support the written plan. They are not a substitute for it.
 pub const PLAN_DIAGRAM_INSTRUCTION: &str = "When the ticket needs a flow, architecture, or data model, add one or two small diagrams as fenced mermaid code blocks. Skip diagrams otherwise. The written plan always stays.";
 
@@ -80,26 +84,243 @@ pub const PLAN_CHANGED_FILES_REJECTED: &str = "changedFiles is not allowed on a 
 pub const PLAN_DESCRIPTION_REJECTED: &str = "updatedDescription is not allowed on a planning run.";
 pub const PLAN_ASSIGN_REJECTED: &str = "assignTo is not allowed on a planning run.";
 pub const PLAN_SPLIT_REJECTED: &str = "splitTickets is not allowed on a planning run.";
+pub const PLAN_SPLIT_TOO_SMALL: &str =
+    "A split needs at least 2 sub-tickets. Plan one ticket without splitTickets instead.";
 pub const PLAN_MUST_FINISH: &str =
     "A planning run finishes with status `done` and the plan in `summary`.";
 
-/// Checkbox lines under the plan, in order, without the marker.
-pub fn checklist_steps(markdown: &str) -> Vec<String> {
-    markdown
+pub const PLAN_SPLIT_INSTRUCTION: &str = "If the work is too big for one ticket, you may also propose 2 or more sub-tickets in `splitTickets`, each with a title, a description, acceptance criteria, and short `steps`. They are created only when the plan is approved, each with its own approved plan. Then write this plan as the umbrella plan for the whole ticket.";
+
+/// System note when approving a plan creates its sub-tickets.
+pub fn split_approved_note(count: usize) -> String {
+    format!("Plan approved. Coppice created {count} sub-tickets in Backlog, each with its approved plan. Work happens on the sub-tickets.")
+}
+
+/// Approach line of a sub-ticket's plan.
+pub fn child_plan_approach(parent_title: &str, description: &str) -> String {
+    let description = description.trim();
+    if description.is_empty() {
+        format!("Part of \"{}\".", parent_title.trim())
+    } else {
+        format!("Part of \"{}\". {description}", parent_title.trim())
+    }
+}
+
+/// The approved plan attached to a sub-ticket created at Plan Review.
+pub fn child_plan(
+    parent_title: &str,
+    description: &str,
+    steps: &[String],
+    acceptance_criteria: Option<&str>,
+) -> String {
+    let mut out = format!(
+        "{PLAN_HEADING}\n\n{APPROACH_HEADING}\n{}\n\n{STEPS_HEADING}\n",
+        child_plan_approach(parent_title, description)
+    );
+    let steps: Vec<&str> = steps.iter().map(|step| step.trim()).filter(|s| !s.is_empty()).collect();
+    if steps.is_empty() {
+        out.push_str(&format!("- [ ] {FOLLOW_APPROACH_STEP}\n"));
+    }
+    for step in steps {
+        out.push_str(&format!("- [ ] {step}\n"));
+    }
+    let criteria: Vec<String> = acceptance_criteria
+        .unwrap_or("")
         .lines()
-        .filter_map(|line| {
-            let trimmed = line.trim();
-            let rest = trimmed
+        .map(|line| {
+            let line = line.trim();
+            let line = line
                 .strip_prefix("- [ ]")
-                .or_else(|| trimmed.strip_prefix("- [x]"))
-                .or_else(|| trimmed.strip_prefix("- [X]"))?;
-            let text = rest.trim();
-            if text.is_empty() {
-                None
-            } else {
-                Some(text.to_string())
-            }
+                .or_else(|| line.strip_prefix("- [x]"))
+                .or_else(|| line.strip_prefix("- "))
+                .or_else(|| line.strip_prefix("* "))
+                .unwrap_or(line);
+            line.trim().to_string()
         })
+        .filter(|line| !line.is_empty() && !line.starts_with('#'))
+        .collect();
+    if !criteria.is_empty() {
+        out.push_str(&format!("\n{ACCEPTANCE_CRITERIA_HEADING}\n"));
+        for criterion in criteria {
+            out.push_str(&format!("- [ ] {criterion}\n"));
+        }
+    }
+    out.push_str(&format!("\n{RISKS_HEADING}\n{NONE}\n\n{OUT_OF_SCOPE_HEADING}\n{NONE}\n"));
+    out
+}
+
+/// Refused work start on a split parent.
+pub const UMBRELLA_NO_WORK: &str = "This ticket was split into sub-tickets, so work happens on them. Verify this ticket once they're all Done and merged.";
+
+pub const VERIFY_NOT_READY: &str =
+    "You can verify this ticket once every sub-ticket is Done and merged.";
+
+pub const VERIFY_NOT_A_PARENT: &str = "Only a ticket split at Plan Review can be verified.";
+
+pub const VERIFY_ALREADY_RUNNING: &str = "Verification is already running.";
+
+pub const VERIFY_TASK: &str = "Verify this parent ticket. Its work was split into the sub-tickets below, and each one is Done and merged. Check the parent's acceptance criteria against the merged code on the default branch. Do not edit files, commit, push, or create or change a branch.";
+
+pub const VERIFY_FORMAT_INSTRUCTION: &str = "Call `result_submit` with status `done`, a short `summary` of what you checked, and `criteriaResults`: one entry per acceptance criterion with `met`, `not_met`, or `not_checked`, and one line of evidence naming the sub-ticket, commit, test, or file.";
+
+pub const VERIFICATION_COMMENT_TITLE: &str = "**Verification**";
+
+pub const VERIFY_EXCLUDED_HEADING: &str = "Excluded (archived):";
+
+/// Instructions for a verification run on a split parent.
+pub fn verify_instructions(criteria: &[String], merged: &[(String, String)], excluded: &[String]) -> String {
+    let mut out = format!("{VERIFY_TASK}\n\n{ACCEPTANCE_CRITERIA_HEADING}\n");
+    if criteria.is_empty() {
+        out.push_str("The parent has no acceptance criteria. Check its description instead.\n");
+    }
+    for criterion in criteria {
+        out.push_str(&format!("- [ ] {criterion}\n"));
+    }
+    out.push_str("\n### Sub-tickets (merged)\n");
+    for (title, sha) in merged {
+        let short = sha.get(..7).unwrap_or(sha);
+        out.push_str(&format!("- {title} (`{short}`)\n"));
+    }
+    if !excluded.is_empty() {
+        out.push_str(&format!("\n### {VERIFY_EXCLUDED_HEADING}\n"));
+        for title in excluded {
+            out.push_str(&format!("- {title}\n"));
+        }
+    }
+    out.push_str(&format!("\n{VERIFY_FORMAT_INSTRUCTION}\n"));
+    out
+}
+
+/// The comment a verification run posts on the parent.
+pub fn verification_comment(
+    summary: &str,
+    results: &[crate::providers::CriterionResult],
+    excluded: &[String],
+) -> String {
+    use crate::providers::CriterionStatus;
+    let mut out = format!("{VERIFICATION_COMMENT_TITLE}\n\n{}\n", summary.trim());
+    if !results.is_empty() {
+        out.push('\n');
+        for result in results {
+            let mark = match result.status {
+                CriterionStatus::Met => "Met",
+                CriterionStatus::NotMet => "Not met",
+                CriterionStatus::NotChecked => "Not checked",
+            };
+            out.push_str(&format!("- **{mark}:** {}", result.criterion.trim()));
+            if let Some(evidence) = result.evidence.as_deref() {
+                out.push_str(&format!(" ({})", evidence.trim()));
+            }
+            out.push('\n');
+        }
+    }
+    if !excluded.is_empty() {
+        out.push_str(&format!("\n{VERIFY_EXCLUDED_HEADING} {}\n", excluded.join(", ")));
+    }
+    out
+}
+
+/// Most questions a planning run may ask.
+pub const MAX_PLAN_QUESTIONS: usize = 3;
+
+pub const PLAN_QUESTIONS_INSTRUCTION: &str = "If something in the ticket is unclear and the answer would change the plan, you may ask instead of planning: call `result_submit` with status `done`, an empty `summary`, and 1 to 3 short `planQuestions`, each with optional `choices`. You get one round of questions. If nothing is unclear, write the plan.";
+
+pub const PLAN_QUESTIONS_TOO_MANY: &str =
+    "Ask at most 3 questions. If more is unclear, write the plan and list it under Risks.";
+
+pub const PLAN_QUESTIONS_ALREADY_ASKED: &str = "You already asked your questions for this ticket. Write the plan now and list anything still unclear under Risks.";
+
+pub const ANSWERS_HEADING: &str = "## Your questions and the answers";
+
+pub const ANSWERS_INSTRUCTION: &str =
+    "Write the plan now. Don't ask more questions; list anything still unclear under Risks.";
+
+/// Ticket comment that holds the questions.
+pub const QUESTIONS_COMMENT_TITLE: &str = "**Questions before the plan**";
+
+/// Ticket comment that holds the human's answers.
+pub const ANSWERS_COMMENT_TITLE: &str = "**Answers**";
+
+/// Shown when an answer is not given.
+pub const NO_ANSWER: &str = "No answer.";
+
+pub const SEND_ANSWERS_REQUIRED: &str = "Answer at least one question.";
+
+pub const NO_QUESTIONS_WAITING: &str = "There are no questions waiting for answers.";
+
+pub const APPROVE_WAITING_FOR_ANSWERS: &str =
+    "Answer the questions first. There's no plan to approve yet.";
+
+/// Markdown for the questions comment.
+pub fn questions_comment(questions: &[crate::providers::PlanQuestion]) -> String {
+    let mut out = format!("{QUESTIONS_COMMENT_TITLE}\n");
+    for (index, question) in questions.iter().enumerate() {
+        out.push_str(&format!("\n{}. {}", index + 1, question.question.trim()));
+        for choice in &question.choices {
+            out.push_str(&format!("\n   - {}", choice.trim()));
+        }
+    }
+    out
+}
+
+/// Markdown for the answers comment and the next planning prompt.
+pub fn answered_questions(
+    questions: &[crate::providers::PlanQuestion],
+    answers: &[String],
+) -> String {
+    let mut out = String::new();
+    for (index, question) in questions.iter().enumerate() {
+        let answer = answers
+            .get(index)
+            .map(|answer| answer.trim())
+            .filter(|answer| !answer.is_empty())
+            .unwrap_or(NO_ANSWER);
+        out.push_str(&format!(
+            "{}. {}\n   {}\n",
+            index + 1,
+            question.question.trim(),
+            answer.lines().collect::<Vec<_>>().join("\n   ")
+        ));
+    }
+    out
+}
+
+fn checkbox_text(line: &str) -> Option<String> {
+    let trimmed = line.trim();
+    let rest = trimmed
+        .strip_prefix("- [ ]")
+        .or_else(|| trimmed.strip_prefix("- [x]"))
+        .or_else(|| trimmed.strip_prefix("- [X]"))?;
+    let text = rest.trim();
+    (!text.is_empty()).then(|| text.to_string())
+}
+
+/// The lines under `heading`, up to the next markdown heading.
+fn section<'a>(markdown: &'a str, heading: &str) -> Option<Vec<&'a str>> {
+    let mut lines = markdown.lines();
+    lines.by_ref().find(|line| line.trim() == heading)?;
+    Some(
+        lines
+            .take_while(|line| !line.trim_start().starts_with('#'))
+            .collect(),
+    )
+}
+
+/// Checkbox lines under Steps, in order, without the marker. A plan with no
+/// Steps heading uses every checkbox line.
+pub fn checklist_steps(markdown: &str) -> Vec<String> {
+    match section(markdown, STEPS_HEADING) {
+        Some(lines) => lines.into_iter().filter_map(checkbox_text).collect(),
+        None => markdown.lines().filter_map(checkbox_text).collect(),
+    }
+}
+
+/// Checkbox lines under Acceptance criteria. Empty for plans without them.
+pub fn plan_criteria(markdown: &str) -> Vec<String> {
+    section(markdown, ACCEPTANCE_CRITERIA_HEADING)
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(checkbox_text)
         .collect()
 }
 
@@ -127,19 +348,53 @@ pub fn format_plan(summary: &str) -> String {
 
 pub fn plan_template() -> String {
     format!(
-        "{PLAN_HEADING}\n\n{APPROACH_HEADING}\n...\n\n{STEPS_HEADING}\n- [ ] ...\n\n{RISKS_HEADING}\n{NONE}\n\n{OUT_OF_SCOPE_HEADING}\n{NONE}\n"
+        "{PLAN_HEADING}\n\n{APPROACH_HEADING}\n...\n\n{STEPS_HEADING}\n- [ ] ...\n\n{ACCEPTANCE_CRITERIA_HEADING}\n- [ ] ... (verified by ...)\n\n{RISKS_HEADING}\n{NONE}\n\n{OUT_OF_SCOPE_HEADING}\n{NONE}\n"
     )
 }
 
-/// Instructions appended to a planning run. `changes` is the human comment.
-pub fn plan_instructions(changes: Option<&str>) -> String {
+pub const PREVIOUS_PLAN_HEADING: &str = "## Previous plan";
+
+/// Heading a revised plan opens with, one line per change request.
+pub const REVISED_CHANGES_HEADING: &str = "### Changes requested";
+
+pub const REVISION_INSTRUCTION: &str = "Revise the previous plan. Start the revised plan with `### Changes requested`: one line per request above, in the same order, saying how you addressed it or why you didn't. Then write the full plan in the format above.";
+
+/// A revision run: the plan it replaces and every change request on this
+/// ticket's plans, oldest first. The last one is the newest.
+pub struct PlanRevision<'a> {
+    pub previous_plan: &'a str,
+    pub requests: Vec<&'a str>,
+}
+
+/// Instructions appended to a planning run.
+pub fn plan_instructions(revision: Option<&PlanRevision<'_>>) -> String {
     let mut out = format!(
-        "{PLAN_TASK}\n\n{PLAN_FORMAT_INSTRUCTION}\n\n{}\n{PLAN_DIAGRAM_INSTRUCTION}\n",
+        "{PLAN_TASK}\n\n{PLAN_FORMAT_INSTRUCTION}\n\n{}\n{PLAN_CRITERIA_INSTRUCTION}\n{PLAN_DIAGRAM_INSTRUCTION}\n",
         plan_template()
     );
-    if let Some(changes) = changes.map(str::trim).filter(|text| !text.is_empty()) {
-        out.push_str(&format!("\n{CHANGES_REQUESTED_HEADING}\n\n{changes}\n"));
+    let Some(revision) = revision else {
+        return out;
+    };
+    let requests: Vec<&str> = revision
+        .requests
+        .iter()
+        .map(|text| text.trim())
+        .filter(|text| !text.is_empty())
+        .collect();
+    if requests.is_empty() {
+        return out;
     }
+    let previous = revision.previous_plan.trim();
+    if !previous.is_empty() {
+        out.push_str(&format!("\n{PREVIOUS_PLAN_HEADING}\n\n{previous}\n"));
+    }
+    out.push_str(&format!("\n{CHANGES_REQUESTED_HEADING}\n\n"));
+    for (index, request) in requests.iter().enumerate() {
+        // Keep multi-line requests inside their numbered item.
+        let body = request.lines().collect::<Vec<_>>().join("\n   ");
+        out.push_str(&format!("{}. {body}\n", index + 1));
+    }
+    out.push_str(&format!("\n{REVISION_INSTRUCTION}\n"));
     out
 }
 
@@ -174,6 +429,60 @@ mod tests {
     }
 
     #[test]
+    fn criteria_are_their_own_section_and_not_steps() {
+        let markdown = "## Plan\n\n### Approach\nDo it.\n\n### Steps\n- [ ] Write the gate\n- [ ] Cover the API\n\n### Acceptance criteria\n- [ ] Dragging to In Progress without a plan is refused (verified by integration test)\n- [ ] The API returns 409 (verified by curl)\n\n### Risks\nNone.\n";
+        assert_eq!(checklist_steps(markdown), vec!["Write the gate", "Cover the API"]);
+        assert_eq!(
+            plan_criteria(markdown),
+            vec![
+                "Dragging to In Progress without a plan is refused (verified by integration test)",
+                "The API returns 409 (verified by curl)"
+            ]
+        );
+        assert_eq!(format_plan(markdown), markdown.trim());
+    }
+
+    #[test]
+    fn a_plan_without_criteria_still_reads_its_steps() {
+        let markdown = "## Plan\n\n### Steps\n- [ ] Only step\n\n### Risks\nNone.\n";
+        assert_eq!(checklist_steps(markdown), vec!["Only step"]);
+        assert!(plan_criteria(markdown).is_empty());
+        assert!(plan_criteria(&format_plan("plain text")).is_empty());
+    }
+
+    #[test]
+    fn the_template_asks_for_checkable_criteria() {
+        let text = plan_instructions(None);
+        assert!(text.contains(ACCEPTANCE_CRITERIA_HEADING));
+        assert!(text.contains(PLAN_CRITERIA_INSTRUCTION));
+        assert_eq!(checklist_steps(&plan_template()), vec!["..."]);
+    }
+
+    #[test]
+    fn questions_and_answers_read_in_order() {
+        use crate::providers::PlanQuestion;
+        let questions = vec![
+            PlanQuestion {
+                question: "Which database?".into(),
+                choices: vec!["Postgres".into(), "SQLite".into()],
+            },
+            PlanQuestion {
+                question: "Keep the endpoint?".into(),
+                choices: Vec::new(),
+            },
+        ];
+        let asked = questions_comment(&questions);
+        assert!(asked.starts_with(QUESTIONS_COMMENT_TITLE));
+        assert!(asked.contains("1. Which database?\n   - Postgres\n   - SQLite"));
+        assert!(asked.contains("2. Keep the endpoint?"));
+        let answered = answered_questions(&questions, &["Postgres".into()]);
+        assert_eq!(
+            answered,
+            "1. Which database?\n   Postgres\n2. Keep the endpoint?\n   No answer.\n"
+        );
+    }
+
+    #[test]
     fn instructions_add_diagrams_only_when_a_plan_needs_one() {
         let text = plan_instructions(None);
         assert!(text.contains(
@@ -187,11 +496,45 @@ mod tests {
 
     #[test]
     fn instructions_forbid_writes_and_include_changes() {
-        let text = plan_instructions(Some("Drop the migration."));
+        let revision = PlanRevision {
+            previous_plan: "## Plan\n\n### Steps\n- [ ] Add a migration\n",
+            requests: vec!["Drop the migration."],
+        };
+        let text = plan_instructions(Some(&revision));
         assert!(text.contains(PLAN_TASK));
         assert!(text.contains("Do not edit files, commit, push, or create or change a branch."));
         assert!(text.contains(CHANGES_REQUESTED_HEADING));
-        assert!(text.contains("Drop the migration."));
+        assert!(text.contains("1. Drop the migration."));
         assert!(text.contains(PLAN_FORMAT_INSTRUCTION));
+    }
+
+    #[test]
+    fn a_first_plan_has_no_revision_section() {
+        let text = plan_instructions(None);
+        assert!(!text.contains(PREVIOUS_PLAN_HEADING));
+        assert!(!text.contains(CHANGES_REQUESTED_HEADING));
+        assert!(!text.contains(REVISION_INSTRUCTION));
+    }
+
+    #[test]
+    fn a_third_round_lists_every_request_in_order_with_the_previous_plan() {
+        let revision = PlanRevision {
+            previous_plan: "## Plan\n\n### Steps\n- [ ] Second version\n",
+            requests: vec!["Use Postgres.", "Split the API change\ninto two steps."],
+        };
+        let text = plan_instructions(Some(&revision));
+        let previous = text.find(PREVIOUS_PLAN_HEADING).unwrap();
+        let first = text.find("1. Use Postgres.").unwrap();
+        let second = text.find("2. Split the API change\n   into two steps.").unwrap();
+        assert!(previous < first && first < second, "{text}");
+        assert!(text.contains("- [ ] Second version"));
+        assert!(text.contains(REVISION_INSTRUCTION));
+    }
+
+    #[test]
+    fn a_revised_plan_keeps_its_changes_section_out_of_the_steps() {
+        let revised = "### Changes requested\n- Use Postgres: switched the store to Postgres.\n- [ ] Split the API change: now two steps.\n\n## Plan\n\n### Approach\nPostgres.\n\n### Steps\n- [ ] Add the table\n- [ ] Change the API\n";
+        assert_eq!(format_plan(revised), revised.trim());
+        assert_eq!(checklist_steps(revised), vec!["Add the table", "Change the API"]);
     }
 }

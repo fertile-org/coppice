@@ -54,6 +54,30 @@ function baseValues(overrides: Partial<AgentFormValues> = {}): AgentFormValues {
 }
 
 describe('useConnectorModels refresh', () => {
+  it('keeps the providers on screen when a refresh finds none', async () => {
+    apiFetch.mockImplementation(async (path: string) => {
+      if (path.includes('/model-providers?refresh=true')) {
+        return jsonResponse({ items: [] });
+      }
+      if (path.includes('/models')) {
+        return jsonResponse({ items: [{ id: 'auto', name: 'Auto' }] });
+      }
+      return jsonResponse({ items: [{ id: 'cursor' }] });
+    });
+    const queryClient = client();
+    const { result } = renderHook(() => useConnectorModels('cursor'), {
+      wrapper: wrapper(queryClient),
+    });
+    await waitFor(() => expect(result.current.groups[0]?.models[0]?.id).toBe('auto'));
+
+    await act(async () => {
+      await result.current.refresh();
+    });
+
+    expect(result.current.groups.map((group) => group.provider)).toEqual(['cursor']);
+    expect(result.current.groups[0]?.models[0]?.id).toBe('auto');
+  });
+
   it('bypasses the 30s cache and requests refresh=true', async () => {
     apiFetch.mockImplementation(async (path: string) => {
       if (path.includes('/models')) {

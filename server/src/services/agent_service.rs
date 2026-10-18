@@ -248,19 +248,9 @@ impl<'a> AgentService<'a> {
     pub async fn delete(&self, agent_id: Uuid) -> Result<(), AgentError> {
         let has_knowledge_provenance: bool = sqlx::query_scalar(
             r#"
-            SELECT
-                EXISTS(
-                    SELECT 1
-                    FROM knowledge_revisions revision
-                    LEFT JOIN agent_runs source_run ON source_run.id = revision.source_run_id
-                    WHERE revision.agent_id = $1 OR source_run.agent_id = $1
-                )
-                OR EXISTS(
-                    SELECT 1
-                    FROM agent_runs usage_run
-                    JOIN knowledge_usage_logs usage ON usage.run_id = usage_run.id
-                    WHERE usage_run.agent_id = $1
-                )
+            SELECT EXISTS(
+                SELECT 1 FROM knowledge_revisions revision WHERE revision.agent_id = $1
+            )
             "#,
         )
         .bind(agent_id)
@@ -279,11 +269,7 @@ impl<'a> AgentService<'a> {
                     error
                         .as_database_error()
                         .and_then(|database_error| database_error.constraint()),
-                    Some(
-                        "knowledge_revisions_agent_id_fkey"
-                            | "knowledge_revisions_source_run_id_fkey"
-                            | "knowledge_usage_logs_run_id_fkey"
-                    )
+                    Some("knowledge_revisions_agent_id_fkey")
                 ) {
                     AgentError::KnowledgeProvenanceConflict
                 } else {

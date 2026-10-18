@@ -1,3 +1,4 @@
+use crate::sessions::run_artifact_log::RunArtifactLog;
 use crate::sessions::LiveMessage;
 use dashmap::DashMap;
 use serde_json::Value;
@@ -10,9 +11,24 @@ pub struct RunStreamHandle {
     cancel_tx: watch::Sender<bool>,
     buffer: Arc<Mutex<Vec<LiveMessage>>>,
     snapshot: Arc<Mutex<Option<Value>>>,
+    /// A live session snapshot, read only when someone asks for it.
+    snapshot_source: Mutex<Option<Arc<Mutex<crate::sessions::session_snapshot::SessionSnapshot>>>>,
     /// First non-empty model the CLI reported for this run.
     reported: Mutex<Option<String>>,
     reported_tx: watch::Sender<String>,
+    /// Appends console events and frames to the run folder as they arrive.
+    artifact_log: Option<RunArtifactLog>,
+    /// Bumped on every snapshot change, so a checkpoint can wait for idle.
+    snapshot_version: watch::Sender<u64>,
+}
+
+/// Structured console events are typed `<connector>.console.<kind>`.
+pub fn is_console_event_type(ty: &str) -> bool {
+    let mut parts = ty.split('.');
+    matches!(
+        (parts.next(), parts.next(), parts.next(), parts.next()),
+        (Some(prefix), Some("console"), Some(kind), None) if !prefix.is_empty() && !kind.is_empty()
+    )
 }
 
 impl RunStreamHandle {
@@ -21,6 +37,20 @@ impl RunStreamHandle {
     }
 
     pub fn publish(&self, msg: LiveMessage) {
+        if let Some(log) = &self.artifact_log {
+            match &msg {
+                LiveMessage::Frame { data, .. } => log.frame(data),
+                LiveMessage::Event { event }
+                    if event
+                        .get("type")
+                        .and_then(|v| v.as_str())
+                        .is_some_and(is_console_event_type) =>
+                {
+                    log.console(event)
+                }
+                _ => {}
+            }
+        }
         let _ = self.tx.send(msg.clone());
         if let Ok(mut buf) = self.buffer.lock() {
             buf.push(msg);
@@ -35,13 +65,45 @@ impl RunStreamHandle {
         if let Ok(mut snap) = self.snapshot.lock() {
             *snap = Some(snapshot);
         }
+        self.snapshot_version.send_modify(|version| *version += 1);
+    }
+
+    pub fn subscribe_snapshot_changes(&self) -> watch::Receiver<u64> {
+        self.snapshot_version.subscribe()
+    }
+
+    /// The on-disk console and terminal writer, when the registry has one.
+    pub fn artifact_log(&self) -> Option<&RunArtifactLog> {
+        self.artifact_log.as_ref()
     }
 
     pub fn snapshot(&self) -> Option<Value> {
+        let source = self
+            .snapshot_source
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone();
+        if let Some(source) = source {
+            return Some(source.lock().unwrap_or_else(|e| e.into_inner()).to_value());
+        }
         self.snapshot
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .clone()
+    }
+
+    /// Serve snapshots from a live session that the caller keeps updating.
+    /// Nothing is serialized until a reader asks.
+    pub fn set_snapshot_source(
+        &self,
+        source: Arc<Mutex<crate::sessions::session_snapshot::SessionSnapshot>>,
+    ) {
+        *self.snapshot_source.lock().unwrap_or_else(|e| e.into_inner()) = Some(source);
+    }
+
+    /// The live session changed; idle checkpoints wait for this to settle.
+    pub fn touch_snapshot(&self) {
+        self.snapshot_version.send_modify(|version| *version += 1);
     }
 
     pub fn publish_frame(&self, seq: u64, data: Vec<u8>) {
@@ -94,6 +156,9 @@ impl RunStreamHandle {
 #[derive(Default)]
 pub struct RunStreamRegistry {
     inner: DashMap<Uuid, Arc<RunStreamHandle>>,
+    /// `artifacts_dir` and the per-run byte cap. Without it, nothing is
+    /// written while a run streams (unit tests).
+    artifacts: Option<(String, u64)>,
 }
 
 impl RunStreamRegistry {
@@ -101,17 +166,36 @@ impl RunStreamRegistry {
         Self::default()
     }
 
+    /// Streams registered here append their console and terminal output under
+    /// `<artifacts_dir>/runs/<run_id>/` as it arrives.
+    pub fn with_artifacts(artifacts_dir: impl Into<String>, max_bytes: u64) -> Self {
+        Self {
+            inner: DashMap::new(),
+            artifacts: Some((artifacts_dir.into(), max_bytes)),
+        }
+    }
+
     pub fn register(&self, run_id: Uuid) -> Arc<RunStreamHandle> {
         let (tx, _) = broadcast::channel(2048);
         let (cancel_tx, _) = watch::channel(false);
         let (reported_tx, _) = watch::channel(String::new());
+        let (snapshot_version, _) = watch::channel(0);
+        let artifact_log = self.artifacts.as_ref().map(|(dir, max_bytes)| {
+            RunArtifactLog::start(
+                std::path::Path::new(dir).join("runs").join(run_id.to_string()),
+                *max_bytes,
+            )
+        });
         let handle = Arc::new(RunStreamHandle {
             tx,
             cancel_tx,
             buffer: Arc::new(Mutex::new(Vec::new())),
             snapshot: Arc::new(Mutex::new(None)),
+            snapshot_source: Mutex::new(None),
             reported: Mutex::new(None),
             reported_tx,
+            artifact_log,
+            snapshot_version,
         });
         self.inner.insert(run_id, handle.clone());
         handle

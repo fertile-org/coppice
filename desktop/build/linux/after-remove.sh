@@ -19,6 +19,7 @@ fi
 
 rm -f /etc/apt/sources.list.d/coppice.list
 rm -f /usr/share/keyrings/coppice-archive-keyring.gpg
+rm -rf /var/lib/coppice-desktop
 
 if [ -f "$APPARMOR_TARGET" ]; then
     if [ -d /sys/kernel/security/apparmor ] && hash apparmor_parser 2>/dev/null \

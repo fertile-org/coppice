@@ -210,6 +210,15 @@ jobs:
       - name: Check Debian package version
         if: runner.os == 'Linux'
         run: node desktop/scripts/deb-version.mjs --check desktop/dist/*.deb
+      - name: No old update domain in the packaged app
+        run: |
+          shopt -s nullglob
+          bundles=(desktop/dist/*-unpacked desktop/dist/mac*/*.app)
+          if [ "${#bundles[@]}" -eq 0 ]; then
+            echo "No packaged app found under desktop/dist" >&2
+            exit 1
+          fi
+          node desktop/scripts/check-old-domain.mjs desktop/updater-mode.json "${bundles[@]}"
       - name: Headless smoke
         run: make desktop-smoke
       - name: Upload installer

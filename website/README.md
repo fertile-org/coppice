@@ -41,7 +41,7 @@ Or `make website-dev` / `make website-build`.
 
 ## Deploy
 
-Public site: [https://getcoppice.vercel.app/](https://getcoppice.vercel.app/), served from the domain root. No repository secrets are required for the build.
+Public site: [https://getcoppice.app/](https://getcoppice.app/), served from the domain root. No repository secrets are required for the build.
 
 Canonical, `hreflang`, and sitemap URLs use the `site` value in `astro.config.mjs`. The site is built at the domain root.
 

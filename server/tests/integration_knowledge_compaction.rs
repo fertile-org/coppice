@@ -504,9 +504,10 @@ async fn compaction_run_creates_pending_candidates_without_notifications() {
 
     let items: Vec<(String, String, Option<Uuid>, Option<Uuid>, String)> = sqlx::query_as(
         r#"
-        SELECT i.status, r.source_type, r.source_id, r.source_run_id, r.title
+        SELECT i.status, r.source_type, r.source_id, provenance.run_id, r.title
         FROM knowledge_items i
         JOIN knowledge_revisions r ON r.id = i.current_revision_id
+        LEFT JOIN knowledge_provenance provenance ON provenance.id = r.provenance_id
         WHERE i.compaction_batch_id = $1
         ORDER BY i.compaction_candidate_index
         "#,

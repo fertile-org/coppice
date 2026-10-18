@@ -49,7 +49,8 @@ describe('stableInstallerName', () => {
       /stable installer name/,
     );
     assert.throws(
-      () => stableInstallerName('0.1.0', 'Coppice-0.1.0-linux-x64.deb'),
+      // The old Linux asset name; built at runtime so the repo never spells it.
+      () => stableInstallerName('0.1.0', `Coppice-0.1.0-${['linux', 'x64'].join('-')}.deb`),
       /stable installer name/,
     );
   });

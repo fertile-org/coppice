@@ -118,6 +118,9 @@ impl<'a> PlanningService<'a> {
     }
 
     async fn start_tech_lead(&self, ticket_id: Uuid) -> Result<(), PlanError> {
+        if self.is_split_parent(ticket_id).await? {
+            return Ok(());
+        }
         if let Some(hold) = ReviewCapacityService::new(self.pool)
             .block_ready_start(ticket_id)
             .await
@@ -315,10 +318,23 @@ impl<'a> PlanningService<'a> {
         Ok(())
     }
 
-    pub async fn approve(&self, ticket_id: Uuid) -> Result<(), PlanError> {
+    pub async fn approve(
+        &self,
+        ticket_id: Uuid,
+        workflow: &crate::config::WorkflowConfig,
+    ) -> Result<(), PlanError> {
         let ticket = TicketService::new(self.pool).get(ticket_id).await?;
         if ticket.ticket.status != TicketStatus::PlanReview {
             return Err(PlanError::Validation(APPROVE_ONLY_FROM_PLAN_REVIEW.into()));
+        }
+        if self
+            .questions(ticket_id)
+            .await?
+            .is_some_and(|state| state.waiting)
+        {
+            return Err(PlanError::Validation(
+                plan::APPROVE_WAITING_FOR_ANSWERS.into(),
+            ));
         }
         let Some(plan) = self.latest_plan_comment(ticket_id).await? else {
             return Err(PlanError::Validation(NO_PLAN_YET.into()));
@@ -346,6 +362,23 @@ impl<'a> PlanningService<'a> {
             .update_status(ticket_id, TicketStatus::Ready, None, None)
             .await?;
 
+        let plan_split = ticket
+            .ticket
+            .pending_split_recommendation
+            .clone()
+            .and_then(|value| {
+                serde_json::from_value::<crate::domain::workflow::PendingSplitRecommendation>(value)
+                    .ok()
+            })
+            .filter(|pending| pending.from_plan && !pending.splits.is_empty());
+        if let Some(pending) = plan_split {
+            let count = self
+                .create_planned_children(&ticket.ticket, &pending, plan.id, workflow)
+                .await?;
+            self.note(ticket_id, &plan::split_approved_note(count)).await?;
+            return Ok(());
+        }
+
         CommentService::new(self.pool)
             .create(
                 ticket_id,
@@ -362,10 +395,366 @@ impl<'a> PlanningService<'a> {
         Ok(())
     }
 
+    /// Create the sub-tickets an approved plan proposed, each in Backlog with
+    /// its own approved plan, and record the parent as split.
+    async fn create_planned_children(
+        &self,
+        parent: &crate::domain::ticket::Ticket,
+        pending: &crate::domain::workflow::PendingSplitRecommendation,
+        plan_comment_id: Uuid,
+        workflow: &crate::config::WorkflowConfig,
+    ) -> Result<usize, PlanError> {
+        let children = crate::services::split_service::SplitService::new(self.pool, workflow)
+            .create_child_tickets(parent, &pending.splits, pending.recommended_by_agent_id)
+            .await
+            .map_err(|err| PlanError::Validation(err.to_string()))?;
+        for spec in &pending.splits {
+            let Some(child) = children.iter().find(|child| child.title == spec.title) else {
+                continue;
+            };
+            let body = plan::child_plan(
+                &parent.title,
+                &spec.description,
+                &spec.steps,
+                spec.acceptance_criteria.as_deref(),
+            );
+            let comment = CommentService::new(self.pool)
+                .create(
+                    child.id,
+                    AuthorType::Agent,
+                    Some(pending.recommended_by_agent_id),
+                    &body,
+                    CommentIntent::Plan,
+                    &[],
+                    &[],
+                )
+                .await?;
+            sqlx::query("UPDATE ticket_comments SET plan_content_version = $2 WHERE id = $1")
+                .bind(comment.id)
+                .bind(child.content_version)
+                .execute(self.pool)
+                .await?;
+            sqlx::query(
+                r#"
+                UPDATE tickets
+                SET approved_plan_comment_id = $2, approved_plan_content_version = $3, updated_at = now()
+                WHERE id = $1
+                "#,
+            )
+            .bind(child.id)
+            .bind(comment.id)
+            .bind(child.content_version)
+            .execute(self.pool)
+            .await?;
+        }
+        TicketService::new(self.pool)
+            .clear_pending_split_recommendation(parent.id)
+            .await?;
+        sqlx::query(
+            r#"
+            INSERT INTO ticket_plan_splits (parent_ticket_id, plan_comment_id)
+            VALUES ($1, $2)
+            ON CONFLICT (parent_ticket_id) DO UPDATE SET plan_comment_id = EXCLUDED.plan_comment_id
+            "#,
+        )
+        .bind(parent.id)
+        .bind(plan_comment_id)
+        .execute(self.pool)
+        .await?;
+        Ok(children.len())
+    }
+
+    /// True when the split parent can be verified: every sub-ticket that is
+    /// not archived is Done and merged, nothing is verifying it yet, and it
+    /// is not already waiting for Human Review or Done.
+    pub async fn verify_available(&self, ticket_id: Uuid) -> Result<bool, PlanError> {
+        let row: (bool, i64, i64, bool) = sqlx::query_as(
+            r#"
+            SELECT
+                EXISTS(SELECT 1 FROM ticket_plan_splits WHERE parent_ticket_id = $1),
+                count(child.id) FILTER (WHERE child.archived_at IS NULL),
+                count(child.id) FILTER (
+                    WHERE child.archived_at IS NULL
+                      AND child.status = 'done'
+                      AND review.merged_at IS NOT NULL
+                ),
+                EXISTS(
+                    SELECT 1 FROM tickets parent
+                    WHERE parent.id = $1
+                      AND parent.archived_at IS NULL
+                      AND parent.status NOT IN ('wait_for_final_review', 'done')
+                )
+                AND NOT EXISTS(
+                    SELECT 1 FROM agent_runs run
+                    WHERE run.ticket_id = $1 AND run.job_type = $2
+                      AND run.status IN ('queued', 'running')
+                )
+            FROM tickets child
+            LEFT JOIN ticket_human_reviews review ON review.ticket_id = child.id
+            WHERE child.parent_ticket_id = $1
+            "#,
+        )
+        .bind(ticket_id)
+        .bind(crate::domain::workflow::JOB_TYPE_VERIFY_PARENT)
+        .fetch_one(self.pool)
+        .await?;
+        let (split, live, merged, open) = row;
+        Ok(split && open && live > 0 && live == merged)
+    }
+
+    /// Start one verification run on a split parent. `agent_id` defaults to
+    /// the PM who plans tickets.
+    pub async fn start_verification(
+        &self,
+        ticket_id: Uuid,
+        agent_id: Option<Uuid>,
+    ) -> Result<Uuid, PlanError> {
+        if !self.is_split_parent(ticket_id).await? {
+            return Err(PlanError::Validation(plan::VERIFY_NOT_A_PARENT.into()));
+        }
+        let active: bool = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM agent_runs WHERE ticket_id = $1 AND job_type = $2 AND status IN ('queued', 'running'))",
+        )
+        .bind(ticket_id)
+        .bind(crate::domain::workflow::JOB_TYPE_VERIFY_PARENT)
+        .fetch_one(self.pool)
+        .await?;
+        if active {
+            return Err(PlanError::Validation(plan::VERIFY_ALREADY_RUNNING.into()));
+        }
+        if !self.verify_available(ticket_id).await? {
+            return Err(PlanError::Validation(plan::VERIFY_NOT_READY.into()));
+        }
+        let agents = AgentService::new(self.pool)
+            .list_agents()
+            .await
+            .map_err(|err| PlanError::Validation(err.to_string()))?;
+        let agent = match agent_id {
+            Some(id) => agents
+                .iter()
+                .find(|agent| agent.id == id && agent.enabled)
+                .ok_or_else(|| PlanError::Validation("Agent not found.".into()))?,
+            None => planner_for_ticket(&agents).ok_or_else(|| PlanError::Validation(NO_PM.into()))?,
+        };
+        let run_id = Uuid::new_v4();
+        let mut tx = self.pool.begin().await?;
+        sqlx::query(
+            r#"
+            INSERT INTO agent_runs (
+                id, ticket_id, agent_id, job_type, status, sandbox_profile_id, context_profile
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
+            "#,
+        )
+        .bind(run_id)
+        .bind(ticket_id)
+        .bind(agent.id)
+        .bind(crate::domain::workflow::JOB_TYPE_VERIFY_PARENT)
+        .bind(run_status_to_str(RunStatus::Queued))
+        .bind(PROFILE_ID)
+        .bind(ContextProfile::Full.as_str())
+        .execute(&mut *tx)
+        .await?;
+        sqlx::query(
+            "INSERT INTO agent_jobs (id, run_id, job_type, status) VALUES ($1, $2, $3, $4)",
+        )
+        .bind(Uuid::new_v4())
+        .bind(run_id)
+        .bind(crate::domain::workflow::JOB_TYPE_VERIFY_PARENT)
+        .bind(job_status_to_str(JobStatus::Pending))
+        .execute(&mut *tx)
+        .await?;
+        tx.commit().await?;
+        Ok(run_id)
+    }
+
+    /// What a verification run reads: the parent's criteria, and its
+    /// sub-tickets as merged or excluded.
+    pub async fn verification_brief(&self, ticket_id: Uuid) -> Result<VerificationBrief, PlanError> {
+        let criteria = match self.approved_plan(ticket_id).await? {
+            Some(plan) => plan::plan_criteria(&plan.markdown),
+            None => {
+                let ticket = TicketService::new(self.pool).get(ticket_id).await?;
+                crate::services::result_contract::criteria_from_description(&ticket.ticket.description)
+            }
+        };
+        let rows: Vec<(String, Option<String>, bool)> = sqlx::query_as(
+            r#"
+            SELECT child.title, review.merged_sha, child.archived_at IS NOT NULL
+            FROM tickets child
+            LEFT JOIN ticket_human_reviews review ON review.ticket_id = child.id
+            WHERE child.parent_ticket_id = $1
+            ORDER BY child.created_at, child.id
+            "#,
+        )
+        .bind(ticket_id)
+        .fetch_all(self.pool)
+        .await?;
+        let mut merged = Vec::new();
+        let mut excluded = Vec::new();
+        for (title, sha, archived) in rows {
+            if archived {
+                excluded.push(title);
+            } else {
+                merged.push((title, sha.unwrap_or_default()));
+            }
+        }
+        Ok(VerificationBrief {
+            criteria,
+            merged,
+            excluded,
+        })
+    }
+
+    /// True for a ticket split at Plan Review. It gets no implementation run.
+    pub async fn is_split_parent(&self, ticket_id: Uuid) -> Result<bool, PlanError> {
+        Ok(sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM ticket_plan_splits WHERE parent_ticket_id = $1)",
+        )
+        .bind(ticket_id)
+        .fetch_one(self.pool)
+        .await?)
+    }
+
+    /// The ticket's question round, if the planner asked one.
+    pub async fn questions(&self, ticket_id: Uuid) -> Result<Option<PlanQuestionsState>, PlanError> {
+        let row: Option<(serde_json::Value, Option<serde_json::Value>, bool)> = sqlx::query_as(
+            r#"
+            SELECT questions, answers, answered_at IS NULL
+            FROM ticket_plan_questions
+            WHERE ticket_id = $1
+            "#,
+        )
+        .bind(ticket_id)
+        .fetch_optional(self.pool)
+        .await?;
+        Ok(row.map(|(questions, answers, waiting)| PlanQuestionsState {
+            questions: serde_json::from_value(questions).unwrap_or_default(),
+            answers: answers
+                .and_then(|answers| serde_json::from_value(answers).ok())
+                .unwrap_or_default(),
+            waiting,
+        }))
+    }
+
+    /// Questions are allowed once, and only before the ticket's first plan.
+    pub async fn can_ask_questions(&self, ticket_id: Uuid) -> Result<bool, PlanError> {
+        let blocked: bool = sqlx::query_scalar(
+            r#"
+            SELECT EXISTS(SELECT 1 FROM ticket_plan_questions WHERE ticket_id = $1)
+                OR EXISTS(
+                    SELECT 1 FROM ticket_comments WHERE ticket_id = $1 AND intent = 'plan'
+                )
+            "#,
+        )
+        .bind(ticket_id)
+        .fetch_one(self.pool)
+        .await?;
+        Ok(!blocked)
+    }
+
+    /// Store the planner's questions and move the ticket to Plan Review,
+    /// where it waits for answers. `comment_id` is the posted questions comment.
+    pub async fn record_questions(
+        &self,
+        ticket_id: Uuid,
+        run_id: Option<Uuid>,
+        comment_id: Option<Uuid>,
+        questions: &[crate::providers::PlanQuestion],
+    ) -> Result<(), PlanError> {
+        if questions.len() > plan::MAX_PLAN_QUESTIONS {
+            return Err(PlanError::Validation(plan::PLAN_QUESTIONS_TOO_MANY.into()));
+        }
+        let inserted = sqlx::query(
+            r#"
+            INSERT INTO ticket_plan_questions (ticket_id, run_id, comment_id, questions)
+            VALUES ($1, $2, $3, $4)
+            ON CONFLICT (ticket_id) DO NOTHING
+            "#,
+        )
+        .bind(ticket_id)
+        .bind(run_id)
+        .bind(comment_id)
+        .bind(serde_json::to_value(questions).unwrap_or_default())
+        .execute(self.pool)
+        .await?
+        .rows_affected();
+        if inserted == 0 {
+            return Err(PlanError::Validation(plan::PLAN_QUESTIONS_ALREADY_ASKED.into()));
+        }
+        let ticket = TicketService::new(self.pool).get(ticket_id).await?;
+        if let Some(next) = status_after_planning_run(ticket.ticket.status) {
+            TicketService::new(self.pool)
+                .update_status(ticket_id, next, None, None)
+                .await?;
+        }
+        Ok(())
+    }
+
+    /// Post the human's answers and start planning again with them. The
+    /// ticket stays in Plan Review while the plan is written.
+    pub async fn send_answers(&self, ticket_id: Uuid, answers: &[String]) -> Result<(), PlanError> {
+        let ticket = TicketService::new(self.pool).get(ticket_id).await?;
+        TicketService::ensure_not_archived(&ticket.ticket)?;
+        let Some(state) = self.questions(ticket_id).await?.filter(|state| state.waiting) else {
+            return Err(PlanError::Validation(plan::NO_QUESTIONS_WAITING.into()));
+        };
+        let answers: Vec<String> = state
+            .questions
+            .iter()
+            .enumerate()
+            .map(|(index, _)| {
+                answers
+                    .get(index)
+                    .map(|answer| answer.trim().to_string())
+                    .unwrap_or_default()
+            })
+            .collect();
+        if answers.iter().all(String::is_empty) {
+            return Err(PlanError::Validation(plan::SEND_ANSWERS_REQUIRED.into()));
+        }
+        if self.active_plan_run(ticket_id).await?.is_some() {
+            return Err(PlanError::Validation(PLAN_ALREADY_RUNNING.into()));
+        }
+        let body = format!(
+            "{}\n\n{}",
+            plan::ANSWERS_COMMENT_TITLE,
+            plan::answered_questions(&state.questions, &answers)
+        );
+        let comment = CommentService::new(self.pool)
+            .create(
+                ticket_id,
+                AuthorType::Human,
+                None,
+                body.trim_end(),
+                CommentIntent::ClarificationAnswer,
+                &[],
+                &[],
+            )
+            .await?;
+        sqlx::query(
+            r#"
+            UPDATE ticket_plan_questions
+            SET answers = $2, answers_comment_id = $3, answered_at = now()
+            WHERE ticket_id = $1
+            "#,
+        )
+        .bind(ticket_id)
+        .bind(serde_json::to_value(&answers).unwrap_or_default())
+        .bind(comment.id)
+        .execute(self.pool)
+        .await?;
+        self.start(ticket_id, Some(comment.id)).await?;
+        Ok(())
+    }
+
     pub async fn ask_for_changes(&self, ticket_id: Uuid, body: &str) -> Result<(), PlanError> {
         let ticket = TicketService::new(self.pool).get(ticket_id).await?;
         if ticket.ticket.status != TicketStatus::PlanReview {
             return Err(PlanError::Validation(ASK_ONLY_FROM_PLAN_REVIEW.into()));
+        }
+        if self.latest_plan_comment(ticket_id).await?.is_none() {
+            return Err(PlanError::Validation(NO_PLAN_YET.into()));
         }
         if body.trim().is_empty() {
             return Err(PlanError::Validation(ASK_COMMENT_REQUIRED.into()));
@@ -385,6 +774,19 @@ impl<'a> PlanningService<'a> {
                 &[],
             )
             .await?;
+        // A split proposed with the plan goes with it; the revision may propose another.
+        if ticket
+            .ticket
+            .pending_split_recommendation
+            .as_ref()
+            .and_then(|pending| pending.get("fromPlan"))
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false)
+        {
+            TicketService::new(self.pool)
+                .clear_pending_split_recommendation(ticket_id)
+                .await?;
+        }
 
         sqlx::query(
             r#"
@@ -443,6 +845,60 @@ impl<'a> PlanningService<'a> {
         Ok(id)
     }
 
+    /// For a run started by Ask for changes: the latest plan and every change
+    /// request that started a plan run on this ticket, oldest first. `None`
+    /// for a first plan, or a run started by something else.
+    pub async fn revision_context(
+        &self,
+        ticket_id: Uuid,
+        trigger_comment_id: Option<Uuid>,
+    ) -> Result<Option<PlanRevisionContext>, PlanError> {
+        let Some(trigger_comment_id) = trigger_comment_id else {
+            return Ok(None);
+        };
+        let trigger_intent: Option<String> =
+            sqlx::query_scalar("SELECT intent FROM ticket_comments WHERE id = $1")
+                .bind(trigger_comment_id)
+                .fetch_optional(self.pool)
+                .await?;
+        if trigger_intent.as_deref() != Some("review_feedback") {
+            return Ok(None);
+        }
+        let requests: Vec<String> = sqlx::query_scalar(
+            r#"
+            SELECT comment.body
+            FROM ticket_comments comment
+            WHERE comment.ticket_id = $1
+              AND comment.intent = 'review_feedback'
+              AND (
+                  comment.id = $2
+                  OR comment.id IN (
+                      SELECT run.trigger_comment_id
+                      FROM agent_runs run
+                      WHERE run.ticket_id = $1
+                        AND run.job_type = $3
+                        AND run.trigger_comment_id IS NOT NULL
+                  )
+              )
+            ORDER BY comment.created_at, comment.id
+            "#,
+        )
+        .bind(ticket_id)
+        .bind(trigger_comment_id)
+        .bind(JOB_TYPE_PLAN_TICKET)
+        .fetch_all(self.pool)
+        .await?;
+        let previous_plan = self
+            .latest_plan_comment(ticket_id)
+            .await?
+            .map(|comment| comment.body)
+            .unwrap_or_default();
+        Ok(Some(PlanRevisionContext {
+            previous_plan,
+            requests,
+        }))
+    }
+
     pub async fn latest_plan_comment(&self, ticket_id: Uuid) -> Result<Option<Comment>, PlanError> {
         let row = sqlx::query(
             r#"
@@ -466,6 +922,32 @@ impl<'a> PlanningService<'a> {
             .map(Some)
             .map_err(Into::into)
     }
+}
+
+/// Input for a verification run.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VerificationBrief {
+    pub criteria: Vec<String>,
+    /// Sub-ticket title and merged commit.
+    pub merged: Vec<(String, String)>,
+    /// Archived sub-tickets, left out of verification.
+    pub excluded: Vec<String>,
+}
+
+/// A ticket's question round. `waiting` until the human sends answers.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PlanQuestionsState {
+    pub questions: Vec<crate::providers::PlanQuestion>,
+    pub answers: Vec<String>,
+    pub waiting: bool,
+}
+
+/// What a revision run is told: the plan it replaces and every request.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PlanRevisionContext {
+    pub previous_plan: String,
+    pub requests: Vec<String>,
 }
 
 fn map_capacity_error(err: ReviewCapacityError) -> PlanError {

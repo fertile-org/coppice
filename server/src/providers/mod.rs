@@ -235,6 +235,23 @@ pub enum AgentRunResult {
         /// Where a reviewer should look first.
         #[serde(default, rename = "lookHereFirst", skip_serializing_if = "Option::is_none")]
         look_here_first: Option<String>,
+        /// One entry per plan acceptance criterion. Malformed entries and
+        /// unknown statuses are read leniently; a missing list is empty.
+        #[serde(
+            default,
+            rename = "criteriaResults",
+            deserialize_with = "lenient_criteria_results",
+            skip_serializing_if = "Vec::is_empty"
+        )]
+        criteria_results: Vec<CriterionResult>,
+        /// Planning runs only: 1–3 questions instead of a plan.
+        #[serde(
+            default,
+            rename = "planQuestions",
+            deserialize_with = "lenient_plan_questions",
+            skip_serializing_if = "Vec::is_empty"
+        )]
+        plan_questions: Vec<PlanQuestion>,
     },
     Blocked {
         #[serde(rename = "blockerType")]
@@ -266,6 +283,114 @@ pub enum AgentRunResult {
         #[serde(default)]
         blockers: Vec<String>,
     },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CriterionStatus {
+    Met,
+    NotMet,
+    NotChecked,
+}
+
+impl CriterionStatus {
+    /// Unknown words read as not checked.
+    pub fn parse(value: &str) -> Self {
+        match value.trim().to_ascii_lowercase().replace(['-', ' '], "_").as_str() {
+            "met" | "pass" | "passed" | "done" => Self::Met,
+            "not_met" | "fail" | "failed" | "unmet" => Self::NotMet,
+            _ => Self::NotChecked,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CriterionResult {
+    pub criterion: String,
+    pub status: CriterionStatus,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub evidence: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PlanQuestion {
+    pub question: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub choices: Vec<String>,
+}
+
+fn lenient_criteria_results<'de, D>(deserializer: D) -> Result<Vec<CriterionResult>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = serde_json::Value::deserialize(deserializer)?;
+    let Some(items) = value.as_array() else {
+        return Ok(Vec::new());
+    };
+    Ok(items
+        .iter()
+        .filter_map(|item| {
+            let criterion = item.get("criterion")?.as_str()?.trim();
+            if criterion.is_empty() {
+                return None;
+            }
+            let status = item
+                .get("status")
+                .and_then(serde_json::Value::as_str)
+                .map(CriterionStatus::parse)
+                .unwrap_or(CriterionStatus::NotChecked);
+            let evidence = item
+                .get("evidence")
+                .and_then(serde_json::Value::as_str)
+                .map(str::trim)
+                .filter(|text| !text.is_empty())
+                .map(str::to_string);
+            Some(CriterionResult {
+                criterion: criterion.to_string(),
+                status,
+                evidence,
+            })
+        })
+        .collect())
+}
+
+fn lenient_plan_questions<'de, D>(deserializer: D) -> Result<Vec<PlanQuestion>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = serde_json::Value::deserialize(deserializer)?;
+    let Some(items) = value.as_array() else {
+        return Ok(Vec::new());
+    };
+    Ok(items
+        .iter()
+        .filter_map(|item| {
+            let (question, choices) = match item {
+                serde_json::Value::String(text) => (text.as_str(), Vec::new()),
+                serde_json::Value::Object(_) => (
+                    item.get("question")?.as_str()?,
+                    item.get("choices")
+                        .and_then(serde_json::Value::as_array)
+                        .map(|choices| {
+                            choices
+                                .iter()
+                                .filter_map(serde_json::Value::as_str)
+                                .map(str::trim)
+                                .filter(|choice| !choice.is_empty())
+                                .map(str::to_string)
+                                .collect()
+                        })
+                        .unwrap_or_default(),
+                ),
+                _ => return None,
+            };
+            let question = question.trim();
+            (!question.is_empty()).then(|| PlanQuestion {
+                question: question.to_string(),
+                choices,
+            })
+        })
+        .collect())
 }
 
 #[derive(Debug, Error)]

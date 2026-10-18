@@ -2,9 +2,9 @@
 //!
 //! Review comments live on `ticket_comments` (`review_feedback`). Check
 //! outcomes live there too (`qa_passed`, `qa_failed`). Runs do not keep a
-//! test report after they finish (`submitted_result` is cleared), so the
-//! acceptance records the run ids whose stored outcome it covers, plus any
-//! run that still has `submitted_result`.
+//! test report after they finish (`submitted_result` is cleared when the run
+//! finishes), so the acceptance records the run ids whose stored outcome it
+//! covers, plus any run that still holds a submitted result.
 
 use sqlx::PgPool;
 use sqlx::Row;
@@ -52,6 +52,28 @@ impl<'a> HumanReviewService<'a> {
         .fetch_optional(self.pool)
         .await?;
         Ok(row.as_ref().map(row_to_review))
+    }
+
+    /// Reviews for many tickets in one query, keyed by ticket.
+    pub async fn get_many(
+        &self,
+        ticket_ids: &[Uuid],
+    ) -> Result<std::collections::HashMap<Uuid, HumanReview>, sqlx::Error> {
+        let rows = sqlx::query(
+            r#"
+            SELECT ticket_id, head_sha, comment_ids, run_ids, stale, accepted_by, accepted_at, merged_at
+            FROM ticket_human_reviews
+            WHERE ticket_id = ANY($1)
+            "#,
+        )
+        .bind(ticket_ids)
+        .fetch_all(self.pool)
+        .await?;
+        Ok(rows
+            .iter()
+            .map(row_to_review)
+            .map(|review| (review.ticket_id, review))
+            .collect())
     }
 
     /// Record acceptance of `head_sha`, replacing any earlier acceptance.

@@ -56,6 +56,22 @@ export function cloneSessionStore(store: SessionStore): SessionStore {
   return next;
 }
 
+/**
+ * The store for the next live event. Message and part arrays are already
+ * replaced (never mutated) by the event helpers, so only the top-level maps
+ * are copied, not every message and part.
+ */
+export function nextSessionStore(store: SessionStore): SessionStore {
+  const next: SessionStore = {
+    sessionId: store.sessionId,
+    messages: store.messages,
+    parts: { ...store.parts },
+    pendingDeltas: { ...store.pendingDeltas },
+  };
+  partLocations.set(next, getPartLocations(store));
+  return next;
+}
+
 export function createSessionStore(sessionId: string): SessionStore {
   const store: SessionStore = {
     sessionId,
@@ -124,9 +140,7 @@ function applyPartDelta(store: SessionStore, event: OpenCodeEvent): void {
     delete locations[partId];
   }
 
-  const pending = store.pendingDeltas[partId] ?? [];
-  pending.push({ field, delta });
-  store.pendingDeltas[partId] = pending;
+  store.pendingDeltas[partId] = [...(store.pendingDeltas[partId] ?? []), { field, delta }];
 }
 
 function applyPartUpdated(store: SessionStore, event: OpenCodeEvent): void {

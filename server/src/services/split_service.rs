@@ -16,6 +16,10 @@ use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 use uuid::Uuid;
 
+/// A split proposed by a plan is created only by approving the plan.
+pub const PLAN_SPLIT_NEEDS_APPROVAL: &str =
+    "Approve the plan to create these sub-tickets, or ask for changes to drop them.";
+
 pub struct SplitService<'a> {
     pool: &'a PgPool,
     workflow: &'a WorkflowConfig,
@@ -67,12 +71,38 @@ impl<'a> SplitService<'a> {
             recommended_by_agent_id: recommended_by,
             recommended_at,
             splits: splits.to_vec(),
+            from_plan: false,
         };
         TicketService::new(self.pool)
             .set_pending_split_recommendation(parent.id, pending)
             .await?;
 
         Ok(ApplySplitOutcome::Pending)
+    }
+
+    /// Store a split a planning run proposed. It is never auto-applied: the
+    /// human approves it together with the plan.
+    pub async fn propose_from_plan(
+        &self,
+        parent: &Ticket,
+        splits: &[SplitTicketSpec],
+        recommended_by: Uuid,
+    ) -> Result<(), SplitError> {
+        let recommended_at = OffsetDateTime::now_utc()
+            .format(&Rfc3339)
+            .unwrap_or_else(|_| String::new());
+        TicketService::new(self.pool)
+            .set_pending_split_recommendation(
+                parent.id,
+                PendingSplitRecommendation {
+                    recommended_by_agent_id: recommended_by,
+                    recommended_at,
+                    splits: splits.to_vec(),
+                    from_plan: true,
+                },
+            )
+            .await?;
+        Ok(())
     }
 
     pub async fn create_child_tickets(
@@ -158,6 +188,9 @@ impl<'a> SplitService<'a> {
         let pending: PendingSplitRecommendation = serde_json::from_value(pending_value).map_err(
             |e| SplitError::Validation(format!("invalid pending split recommendation: {e}")),
         )?;
+        if pending.from_plan {
+            return Err(SplitError::Validation(PLAN_SPLIT_NEEDS_APPROVAL.into()));
+        }
 
         let children = self
             .create_child_tickets(
@@ -179,10 +212,17 @@ impl<'a> SplitService<'a> {
         let parent = ticket_svc.get(ticket_id).await?;
         TicketService::ensure_not_archived(&parent.ticket)?;
 
-        if parent.ticket.pending_split_recommendation.is_none() {
+        let Some(pending) = parent.ticket.pending_split_recommendation.as_ref() else {
             return Err(SplitError::Validation(
                 "no pending split recommendation".into(),
             ));
+        };
+        if pending
+            .get("fromPlan")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false)
+        {
+            return Err(SplitError::Validation(PLAN_SPLIT_NEEDS_APPROVAL.into()));
         }
 
         ticket_svc
@@ -296,12 +336,14 @@ mod tests {
                 description: "First deliverable".into(),
                 acceptance_criteria: Some("- Done when A works".into()),
                 assign_to: None,
+                steps: Vec::new(),
             },
             SplitTicketSpec {
                 title: "Child B".into(),
                 description: "Second deliverable".into(),
                 acceptance_criteria: None,
                 assign_to: Some("pm".into()),
+                steps: Vec::new(),
             },
         ];
 
@@ -394,12 +436,14 @@ mod tests {
                 description: "First deliverable".into(),
                 acceptance_criteria: None,
                 assign_to: None,
+                steps: Vec::new(),
             },
             SplitTicketSpec {
                 title: "Child B".into(),
                 description: "Second deliverable".into(),
                 acceptance_criteria: None,
                 assign_to: None,
+                steps: Vec::new(),
             },
         ];
 
@@ -517,6 +561,7 @@ mod tests {
             description: "Add exponential backoff".into(),
             acceptance_criteria: Some("- Retries up to 3 times".into()),
             assign_to: Some("backend_engineer".into()),
+            steps: Vec::new(),
         }];
 
         let children = SplitService::new(&pool, &workflow)

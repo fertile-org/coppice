@@ -13,9 +13,19 @@ use serde::Serialize;
 use std::sync::Arc;
 use uuid::Uuid;
 
-pub fn routes() -> Router<Arc<AppState>> {
+/// Multipart framing on top of the largest allowed file.
+const MULTIPART_OVERHEAD: usize = 1024 * 1024;
+
+/// `max_upload_bytes` is the file cap; the request body may be a little larger.
+pub fn routes(max_upload_bytes: u64) -> Router<Arc<AppState>> {
+    let body_limit = usize::try_from(max_upload_bytes)
+        .unwrap_or(usize::MAX)
+        .saturating_add(MULTIPART_OVERHEAD);
     Router::new()
-        .route("/api/attachments", post(upload_attachment))
+        .route(
+            "/api/attachments",
+            post(upload_attachment).layer(axum::extract::DefaultBodyLimit::max(body_limit)),
+        )
         .route("/api/attachments/{attachment_id}", get(get_attachment))
 }
 
