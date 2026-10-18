@@ -336,6 +336,38 @@ mod tests {
     }
 
     #[test]
+    fn recorded_2_0_20_turn_renders_thinking_tool_and_result() {
+        let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../fixtures/opencode-acp/opencode-2.0.20-read-only-turn.jsonl");
+        let updates: Vec<Value> = std::fs::read_to_string(path)
+            .expect("fixture")
+            .lines()
+            .map(|line| serde_json::from_str::<Value>(line).expect("json"))
+            .filter(|m| m.get("method").and_then(Value::as_str) == Some("session/update"))
+            .filter_map(|m| m.pointer("/params/update").cloned())
+            .collect();
+        let got = events(&updates);
+        let kinds: Vec<&str> = got.iter().map(|e| e["type"].as_str().unwrap()).collect();
+        assert!(kinds.contains(&"opencode.console.thinking"), "{kinds:?}");
+        let tools: Vec<&Value> = got
+            .iter()
+            .filter(|e| e["type"] == "opencode.console.tool")
+            .collect();
+        assert_eq!(tools.first().unwrap()["title"], "read");
+        let last = tools.last().unwrap();
+        assert_eq!(last["status"], "completed");
+        assert!(last["output"]
+            .as_str()
+            .unwrap()
+            .contains("first line of readme"));
+        let result = got
+            .iter()
+            .find(|e| e["type"] == "opencode.console.result")
+            .expect("result");
+        assert_eq!(result["contract"]["summary"], "first line of readme");
+    }
+
+    #[test]
     fn version_two_and_later_use_acp() {
         assert!(uses_acp("2.0.20"));
         assert!(uses_acp("3.1.0"));

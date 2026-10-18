@@ -108,7 +108,7 @@ System → Connectors shows each connector's switch, CLI readiness, detected aut
 
 ## Tests
 
-No real agent CLI runs in CI or automated tests. [CLI integration review](cli-integration-review.md) lists the gaps this leaves, how to close them, and planned connector changes.
+No real agent CLI runs in CI or automated tests. Output captured from a real CLI is kept as `fixtures/<connector>/<cli>-<version>-<case>.jsonl` (for example `claude-code-2.1.302-plan-submit-refused.jsonl`, `opencode-2.0.20-read-only-turn.jsonl`), with local paths and account details removed, and replayed through the connector's parser in its tests. When a CLI release changes its output, add a file for the new version next to the old one instead of editing it. [CLI integration review](cli-integration-review.md) lists the gaps this leaves, how to close them, and planned connector changes.
 
 - `MockProvider` (`server/src/providers/mock.rs`) is a test-only provider. It replays JSON fixtures from `fixtures/agent-responses/` (pick one with `MOCK_AGENT_RESPONSE`). It's compiled only with the `mock-provider` Cargo feature, which `embedded-test-db`, `make server`, CI and the Docker Compose image turn on. Desktop installers and release builds leave it out, and CI runs the `release_build` tests to check that. It isn't something users pick.
 - Adapters are tested against stand-in binaries: `fake-cli` (Cursor and Kilo Code) and `fake-opencode`.

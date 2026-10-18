@@ -205,8 +205,15 @@ impl AgentProvider for ClaudeCodeProvider {
             Ok(exit) => exit,
             Err(CliError::Spawn(e) | CliError::Io(e)) => return Err(ProviderError::Io(e)),
             Err(CliError::Cancelled) => return Err(ProviderError::Cancelled),
-            Err(CliError::Stalled { reason, stderr_tail }) => {
-                return Err(super::terminal::stalled("Claude Code", &reason, &stderr_tail));
+            Err(CliError::Stalled {
+                reason,
+                stderr_tail,
+            }) => {
+                return Err(super::terminal::stalled(
+                    "Claude Code",
+                    &reason,
+                    &stderr_tail,
+                ));
             }
             Err(CliError::TimedOut { stderr_tail }) => {
                 return Err(terminal::timed_out(
@@ -510,8 +517,8 @@ fn extract_assistant_text(value: &serde_json::Value) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::sessions::opencode_events::extract_result_from_text;
     use crate::mcp::protocol::SERVER_NAME;
+    use crate::sessions::opencode_events::extract_result_from_text;
     use std::path::PathBuf;
 
     mod outcome {
@@ -523,7 +530,9 @@ mod tests {
         fn handler(gateway: bool) -> ClaudeLines {
             ClaudeLines {
                 stream: None,
-                console: ClaudeConsolePublisher::new(super::super::super::tool_name_style("claude-code")),
+                console: ClaudeConsolePublisher::new(super::super::super::tool_name_style(
+                    "claude-code",
+                )),
                 assistant_text: String::new(),
                 expects_gateway: gateway,
                 terminal: ClaudeTerminal::default(),
@@ -560,36 +569,50 @@ mod tests {
         fn a_refused_submit_names_the_tool_error_even_in_chat() {
             // The rc.8 shape: plan mode refused the MCP call; the agent explained.
             let mut h = handler(true);
-            feed(&mut h, &[
-                init("plan", "connected"),
-                json!({ "type": "assistant", "message": { "content": [
+            feed(
+                &mut h,
+                &[
+                    init("plan", "connected"),
+                    json!({ "type": "assistant", "message": { "content": [
                     { "type": "tool_use", "id": "toolu_1", "name": "mcp__coppice__result_submit", "input": {} } ] } }),
-                json!({ "type": "user", "message": { "content": [
+                    json!({ "type": "user", "message": { "content": [
                     { "type": "tool_result", "tool_use_id": "toolu_1", "is_error": true,
                       "content": "Cannot call mcp__coppice__result_submit while in plan mode." } ] } }),
-                result("I couldn't submit the reply because plan mode is on.", false, "completed"),
-            ]);
+                    result(
+                        "I couldn't submit the reply because plan mode is on.",
+                        false,
+                        "completed",
+                    ),
+                ],
+            );
             let err = decide(&h, &exit(0, &[]), ContextProfile::Conversation).unwrap_err();
             let msg = err.to_string();
             assert!(matches!(err, ProviderError::MissingResult(_)), "{msg}");
-            assert!(msg.contains("result_submit call failed: Cannot call"), "{msg}");
+            assert!(
+                msg.contains("result_submit call failed: Cannot call"),
+                "{msg}"
+            );
             assert!(msg.contains("permission mode plan"), "{msg}");
         }
 
         #[test]
         fn a_later_successful_submit_clears_the_error() {
             let mut h = handler(true);
-            feed(&mut h, &[
-                init("dontAsk", "connected"),
-                json!({ "type": "assistant", "message": { "content": [
+            feed(
+                &mut h,
+                &[
+                    init("dontAsk", "connected"),
+                    json!({ "type": "assistant", "message": { "content": [
                     { "type": "tool_use", "id": "a", "name": "mcp__coppice__result_submit" },
                     { "type": "tool_use", "id": "b", "name": "mcp__coppice__result_submit" } ] } }),
-                json!({ "type": "user", "message": { "content": [
+                    json!({ "type": "user", "message": { "content": [
                     { "type": "tool_result", "tool_use_id": "a", "is_error": true, "content": [{ "type": "text", "text": "bad args" }] },
                     { "type": "tool_result", "tool_use_id": "b", "content": "ok" } ] } }),
-                result("Done.", false, "completed"),
-            ]);
-            let reply = decide(&h, &exit(0, &[]), ContextProfile::Conversation).expect("plain reply");
+                    result("Done.", false, "completed"),
+                ],
+            );
+            let reply =
+                decide(&h, &exit(0, &[]), ContextProfile::Conversation).expect("plain reply");
             assert!(matches!(reply, AgentRunResult::Done { .. }));
         }
 
@@ -597,10 +620,16 @@ mod tests {
         fn a_permission_denial_of_submit_is_named() {
             let mut h = handler(true);
             let mut done = result("text", false, "completed");
-            done["permission_denials"] = json!([{ "tool_name": "mcp__coppice__result_submit", "tool_use_id": "x" }]);
+            done["permission_denials"] =
+                json!([{ "tool_name": "mcp__coppice__result_submit", "tool_use_id": "x" }]);
             feed(&mut h, &[init("default", "connected"), done]);
-            let msg = decide(&h, &exit(0, &[]), ContextProfile::Full).unwrap_err().to_string();
-            assert!(msg.contains("refused the result_submit tool (permission mode default)"), "{msg}");
+            let msg = decide(&h, &exit(0, &[]), ContextProfile::Full)
+                .unwrap_err()
+                .to_string();
+            assert!(
+                msg.contains("refused the result_submit tool (permission mode default)"),
+                "{msg}"
+            );
         }
 
         #[test]
@@ -608,9 +637,13 @@ mod tests {
             let mut h = handler(true);
             let step = h.on_json(&init("dontAsk", "failed"));
             assert!(step.stop);
-            let msg = decide(&h, &exit(0, &["mcp: connection refused"]), ContextProfile::Full)
-                .unwrap_err()
-                .to_string();
+            let msg = decide(
+                &h,
+                &exit(0, &["mcp: connection refused"]),
+                ContextProfile::Full,
+            )
+            .unwrap_err()
+            .to_string();
             assert!(msg.contains("mcp_unavailable: Claude Code couldn't connect to the Coppice gateway (MCP status: failed)"), "{msg}");
             assert!(msg.contains("connection refused"), "{msg}");
 
@@ -627,17 +660,26 @@ mod tests {
         #[test]
         fn an_error_result_uses_the_cli_text() {
             let mut h = handler(false);
-            feed(&mut h, &[result("API Error: 529 Overloaded", true, "api_error")]);
+            feed(
+                &mut h,
+                &[result("API Error: 529 Overloaded", true, "api_error")],
+            );
             let err = decide(&h, &exit(0, &[]), ContextProfile::Full).unwrap_err();
             assert!(matches!(err, ProviderError::MissingResult(_)));
-            assert!(err.to_string().contains("Claude Code ended with an error: API Error: 529 Overloaded"), "{err}");
+            assert!(
+                err.to_string()
+                    .contains("Claude Code ended with an error: API Error: 529 Overloaded"),
+                "{err}"
+            );
         }
 
         #[test]
         fn a_full_context_fails_even_without_the_error_flag() {
             let mut h = handler(false);
             feed(&mut h, &[result("", false, "prompt_too_long")]);
-            let msg = decide(&h, &exit(0, &[]), ContextProfile::Full).unwrap_err().to_string();
+            let msg = decide(&h, &exit(0, &[]), ContextProfile::Full)
+                .unwrap_err()
+                .to_string();
             assert!(msg.contains("context window is full"), "{msg}");
         }
 
@@ -646,8 +688,13 @@ mod tests {
             let mut h = handler(false);
             feed(&mut h, &[result("Hi there!", false, "completed")]);
             assert!(decide(&h, &exit(0, &[]), ContextProfile::Conversation).is_ok());
-            let msg = decide(&h, &exit(0, &[]), ContextProfile::Full).unwrap_err().to_string();
-            assert!(msg.contains("no result contract found in claude-code output"), "{msg}");
+            let msg = decide(&h, &exit(0, &[]), ContextProfile::Full)
+                .unwrap_err()
+                .to_string();
+            assert!(
+                msg.contains("no result contract found in claude-code output"),
+                "{msg}"
+            );
         }
 
         #[test]
@@ -662,10 +709,60 @@ mod tests {
             assert!(!h.tools_running());
         }
 
+        fn replay(name: &str) -> ClaudeLines {
+            let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("../fixtures/claude-code")
+                .join(name);
+            let mut h = handler(true);
+            for line in std::fs::read_to_string(path).expect("fixture").lines() {
+                h.on_json(&serde_json::from_str(line).expect("json line"));
+            }
+            h
+        }
+
+        #[test]
+        fn recorded_2_1_302_dont_ask_run_submits_and_ends_cleanly() {
+            let h = replay("claude-code-2.1.302-dontask-submit.jsonl");
+            assert!(h.terminal.gateway_failed.is_none());
+            assert_eq!(h.terminal.permission_mode.as_deref(), Some("dontAsk"));
+            assert!(h.terminal.submit_error.is_none());
+            assert!(!h.tools_running());
+            // Its final words are prose; a chat keeps them, a ticket needs the submission.
+            assert!(decide(&h, &exit(0, &[]), ContextProfile::Conversation).is_ok());
+            assert!(matches!(
+                decide(&h, &exit(0, &[]), ContextProfile::Full),
+                Err(ProviderError::MissingResult(_))
+            ));
+        }
+
+        #[test]
+        fn recorded_2_1_302_plan_mode_refusal_is_named() {
+            let h = replay("claude-code-2.1.302-plan-submit-refused.jsonl");
+            assert_eq!(h.terminal.permission_mode.as_deref(), Some("plan"));
+            assert!(h
+                .terminal
+                .denied_tools
+                .iter()
+                .any(|t| t == "mcp__coppice__result_submit"));
+            let msg = decide(&h, &exit(0, &[]), ContextProfile::Conversation)
+                .unwrap_err()
+                .to_string();
+            assert!(
+                msg.contains("Cannot call mcp__coppice__result_submit while in plan mode"),
+                "{msg}"
+            );
+            assert!(msg.contains("permission mode plan"), "{msg}");
+        }
+
         #[test]
         fn a_crash_before_any_result_carries_stderr() {
             let h = handler(false);
-            let err = decide(&h, &exit(1, &["Error: not logged in"]), ContextProfile::Full).unwrap_err();
+            let err = decide(
+                &h,
+                &exit(1, &["Error: not logged in"]),
+                ContextProfile::Full,
+            )
+            .unwrap_err();
             assert!(matches!(err, ProviderError::InvalidFixture(_)));
             assert!(err.to_string().contains("not logged in"), "{err}");
         }
