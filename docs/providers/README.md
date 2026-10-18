@@ -99,7 +99,7 @@ Tools → Connectors shows each connector's switch, CLI readiness, detected auth
 
 ## Tests
 
-No real agent CLI runs in CI or automated tests.
+No real agent CLI runs in CI or automated tests. [CLI integration review](cli-integration-review.md) lists the gaps this leaves, how to close them, and planned connector changes.
 
 - `MockProvider` (`server/src/providers/mock.rs`) is a test-only provider. It replays JSON fixtures from `fixtures/agent-responses/` (pick one with `MOCK_AGENT_RESPONSE`). It's compiled only with the `mock-provider` Cargo feature, which `embedded-test-db`, `make server`, CI and the Docker Compose image turn on. Desktop installers and release builds leave it out, and CI runs the `release_build` tests to check that. It isn't something users pick.
 - Adapters are tested against stand-in binaries: `fake-cli` (Cursor and Kilo Code) and `fake-opencode`.
