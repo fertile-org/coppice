@@ -60,7 +60,7 @@ export const pages: Pages = {
       },
       {
         title: 'Pas de deuxième abonnement.',
-        body: 'Coppice pilote les CLI que vous payez déjà : Claude Code, Codex, Cursor, OpenCode et Kilo Code.',
+        body: 'Coppice pilote les CLI que vous payez déjà : Claude Code, Codex, Cursor, OpenCode, Kilo Code, GitHub Copilot, Qwen Code et Kimi Code.',
       },
     ],
     notTitle: 'Ce que ce n’est pas',

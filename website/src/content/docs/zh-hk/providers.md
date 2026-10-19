@@ -1,6 +1,6 @@
 ---
 title: 提供商
-description: "Coppice 執行的代理 CLI：Claude Code、Codex、Cursor、OpenCode 和 Kilo Code。"
+description: "Coppice 執行的代理 CLI：Claude Code、Codex、Cursor、OpenCode、Kilo Code、GitHub Copilot、Qwen Code 和 Kimi Code。"
 ---
 
 # 提供商
@@ -18,6 +18,9 @@ description: "Coppice 執行的代理 CLI：Claude Code、Codex、Cursor、OpenC
 | Cursor | `agent` | [安裝指南](https://cursor.com/docs/cli/installation) |
 | OpenCode | `opencode` | [安裝指南](https://opencode.ai/docs/) |
 | Kilo Code | `kilo` | [安裝指南](https://kilo.ai/docs/cli) |
+| GitHub Copilot | `copilot` | [安裝指南](https://docs.github.com/en/copilot/how-tos/copilot-cli) |
+| Qwen Code | `qwen` | [安裝指南](https://github.com/QwenLM/qwen-code) |
+| Kimi Code | `kimi` | [安裝指南](https://moonshotai.github.io/kimi-code/) |
 
 <figure>
 <img src="/assets/docs/model-picker.webp" width="1440" height="900" alt="代理上的模型選擇器，列出該代理 CLI 提供的模型。">
@@ -40,9 +43,9 @@ description: "Coppice 執行的代理 CLI：Claude Code、Codex、Cursor、OpenC
 | **Ready** | 一次免費的登入檢查確認你已登入。 |
 | **Found, not signed in** | Coppice 找到了命令，但你還沒有登入。請在終端裏登入。 |
 | **Not on your PATH** | Coppice 找不到該命令。請安裝它，或檢查你的 PATH。 |
-| **Installed** | Coppice 找到了命令。對於 Kilo Code，不消耗你的套餐額度就無法檢查登入狀態。 |
+| **Installed** | Coppice 找到了命令。對於 Kilo Code、GitHub Copilot、Qwen Code 和 Kimi Code，不消耗你的套餐額度就無法檢查登入狀態。 |
 
-Kilo Code 顯示為 **Kilo Code — Installed**。System → Connectors 中還會提示："Coppice can't check this sign-in without using your plan. A run will show an error if you're signed out."（不消耗你的套餐額度，Coppice 就無法檢查登入狀態；如果你已退出登入，執行時會報錯。）所有 CLI 都能聊天。Claude Code、Codex、Cursor 和 Kilo Code 的聊天會顯示 "Coppice hasn't confirmed that {cli} stays read-only. The agent can still run commands on your computer."（Coppice 尚未確認 {cli} 會保持只讀，代理仍可在你的電腦上執行命令。）OpenCode 的聊天沒有這條橫幅。Test connection（測試連線）會檢查 `kilo` 命令能否執行。
+Kilo Code、GitHub Copilot、Qwen Code 和 Kimi Code 顯示為 **Installed**。System → Connectors 中還會提示："Coppice can't check this sign-in without using your plan. A run will show an error if you're signed out."（不消耗你的套餐額度，Coppice 就無法檢查登入狀態；如果你已退出登入，執行時會報錯。）想確認它能用，就按 **Test connection**（測試連線）：它會跑一次簡短的聊天、規劃和工單。所有 CLI 都能聊天。Claude Code、Codex、Cursor 和 Kilo Code 的聊天會顯示 "Coppice hasn't confirmed that {cli} stays read-only. The agent can still run commands on your computer."（Coppice 尚未確認 {cli} 會保持只讀，代理仍可在你的電腦上執行命令。）OpenCode、GitHub Copilot、Qwen Code 和 Kimi Code 的聊天沒有這條橫幅：在聊天和規劃中，Coppice 會阻止它們寫入檔案和執行 shell 命令。你在這些 CLI 裏自己設定的 MCP 工具仍可能改動內容。
 
 CLI 還沒就緒時，也可以先儲存代理。CLI 安裝並登入後，它就會開始處理工單。如果你是在開啓 Coppice 之後才安裝的 CLI，請退出並重新開啓 Coppice，讓它找到新命令。
 

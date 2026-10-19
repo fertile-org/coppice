@@ -21,7 +21,7 @@ A stuck ticket goes to **Blocked** with a comment saying why.
 
 ## Agents
 
-Coppice runs the agent CLIs you already use, such as Claude Code, Codex, Cursor, OpenCode, and Kilo Code. Each agent has a role, like PM, Technical Lead, or Backend Engineer, and runs on one CLI. See [Providers](/docs/providers).
+Coppice runs the agent CLIs you already use, such as Claude Code, Codex, Cursor, OpenCode, Kilo Code, GitHub Copilot, Qwen Code, and Kimi Code. Each agent has a role, like PM, Technical Lead, or Backend Engineer, and runs on one CLI. See [Providers](/docs/providers).
 
 Each agent can use a different model, even on the same CLI. Your PM can run on Claude Opus while your Backend Engineer runs on Claude Sonnet.
 

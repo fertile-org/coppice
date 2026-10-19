@@ -62,7 +62,7 @@ Linux x64 版本應該可以通過 WSL 在 Windows 11 上執行，但我們還�
    請用 `apt`，不要用 `dpkg -i`。`apt` 會順帶安裝 Coppice 需要的依賴。
 
    以後要更新 Coppice，執行 `sudo apt update && sudo apt upgrade`。你的看板和設定都會保留。
-4. 在 Ubuntu 中安裝你要用的代理 CLI（Claude Code、Codex、Cursor、OpenCode、Kilo Code），並在 Ubuntu 裡登入這些 CLI 和 git。
+4. 在 Ubuntu 中安裝你要用的代理 CLI（Claude Code、Codex、Cursor、OpenCode、Kilo Code、GitHub Copilot、Qwen Code、Kimi Code），並在 Ubuntu 裡登入這些 CLI 和 git。
 5. 從 Windows“開始”選單（Ubuntu 分組下）啟動 Coppice，或在 Ubuntu 中執行 `coppice`。
 
    如果某個 CLI 顯示 Not on your PATH，請在 Ubuntu 中執行 `coppice` 來啟動 Coppice。
@@ -78,7 +78,7 @@ WSL 會把 Windows 的 PATH 加到 Ubuntu 中，所以 Coppice 可能會找到�
 2. 選擇你磁碟上已有的一個本地 git 倉庫。
 3. **連線你的代理 CLI。** 建立代理時選擇你的代理 CLI，Coppice 就會啟用它。每個 CLI 都會顯示狀態：**Ready**（就緒）、**Found, not signed in**（已找到，未登入）或 **Not on your PATH**（不在 PATH 中）。請先像平常一樣在終端裡登入該 CLI。
 
-   Kilo Code 顯示為 **Kilo Code — Installed**。System → Connectors 中還會提示："Coppice can't check this sign-in without using your plan. A run will show an error if you're signed out."（不消耗你的套餐額度，Coppice 就無法檢查登入狀態；如果你已退出登入，執行時會報錯。）
+   Kilo Code、GitHub Copilot、Qwen Code 和 Kimi Code 顯示為 **Installed**（例如 **Kilo Code — Installed**）。System → Connectors 中還會提示："Coppice can't check this sign-in without using your plan. A run will show an error if you're signed out."（不消耗你的套餐額度，Coppice 就無法檢查登入狀態；如果你已退出登入，執行時會報錯。）
 
    以後要關閉某個聯結器，可以在 System → Connectors 中使用開關，或在 Coppice 的 `config.toml` 中為它設定 `enabled = false`：
 

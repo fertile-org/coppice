@@ -120,12 +120,24 @@ mod tests {
                 "release builds must not list mock:\n{text}"
             );
         }
-        for want in [
-            "cursor         no       missing    missing  agent login (copy URL)",
-            "claude-code    no       ok         missing  ANTHROPIC_API_KEY or claude setup-token",
-            "codex          no       missing    ok       codex login --device-auth",
+        assert!(
+            lines.contains(
+                &"claude-code    no       ok         missing  ANTHROPIC_API_KEY or claude setup-token"
+            ),
+            "missing claude-code row in:\n{text}"
+        );
+        // The search path adds standard install dirs, so BINARY depends on the
+        // host for CLIs outside the test's own bin dir.
+        for (start, end) in [
+            ("cursor         no       ", "missing  agent login (copy URL)"),
+            ("codex          no       ", "ok       codex login --device-auth"),
         ] {
-            assert!(lines.contains(&want), "missing row {want:?} in:\n{text}");
+            assert!(
+                lines
+                    .iter()
+                    .any(|line| line.starts_with(start) && line.ends_with(end)),
+                "missing row {start:?}…{end:?} in:\n{text}"
+            );
         }
         let n = lines.len();
         assert_eq!(lines[n - 3], "");

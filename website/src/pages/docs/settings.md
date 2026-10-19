@@ -72,7 +72,7 @@ enabled = false
 
 The switch in **System → Connectors** writes the same line.
 
-Kilo Code stays off until you turn it on. Coppice can't check its sign-in for free.
+Kilo Code, GitHub Copilot, Qwen Code and Kimi Code stay off until you turn them on. Coppice can't check their sign-in for free.
 
 ## `[agent]`
 

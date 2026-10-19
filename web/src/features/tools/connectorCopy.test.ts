@@ -76,3 +76,15 @@ describe('chatUnavailableMessage', () => {
     );
   });
 });
+
+describe('ACP CLI connectors', () => {
+  it.each(['copilot', 'qwen-code', 'kimi'])('%s chats without the read-only banner', (id) => {
+    expect(chatIsolationBanner(id)).toBeNull();
+    expect(chatUnavailableMessage(id)).toBeNull();
+  });
+
+  it.each(['copilot', 'qwen-code', 'kimi'])('%s says its sign-in is unchecked when installed', (id) => {
+    expect(signInUncheckedHint(id, 'found')).toBe(SIGN_IN_UNCHECKED_HINT);
+    expect(signInUncheckedHint(id, 'ready')).toBeNull();
+  });
+});

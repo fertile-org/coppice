@@ -12,7 +12,7 @@ Cinq étapes vous mènent d’une installation neuve à votre premier lancement 
 <a id="1-install-a-provider-and-sign-in"></a>
 
 ## 1. Installer un fournisseur et se connecter
-Un fournisseur est la CLI d’agent que Coppice lance pour vous : Claude Code, Codex, Cursor, OpenCode ou Kilo Code. Coppice ne l’installe pas. Il trouve les CLI déjà présentes sur votre ordinateur.
+Un fournisseur est la CLI d’agent que Coppice lance pour vous : Claude Code, Codex, Cursor, OpenCode, Kilo Code, GitHub Copilot, Qwen Code ou Kimi Code. Coppice ne l’installe pas. Il trouve les CLI déjà présentes sur votre ordinateur.
 
 1. Installez la CLI et connectez-vous dans votre terminal, comme d’habitude.
 2. Dans Coppice, ouvrez **System** dans la barre latérale, puis **Connectors**.
@@ -20,7 +20,7 @@ Un fournisseur est la CLI d’agent que Coppice lance pour vous : Claude Code, C
 
 Si elle affiche **Found, not signed in**, connectez-vous à la CLI dans votre terminal. Si elle affiche **Not on your PATH**, installez-la, ou suivez **Install docs** sur la carte. Cliquez ensuite sur **Run check**.
 
-Kilo Code affiche **Installed**. Coppice ne peut pas vérifier cette connexion sans utiliser votre forfait, donc un lancement affiche une erreur si vous êtes déconnecté.
+Kilo Code, GitHub Copilot, Qwen Code et Kimi Code affichent **Installed**. Coppice ne peut pas vérifier leur connexion sans utiliser votre forfait, donc un lancement affiche une erreur si vous êtes déconnecté.
 
 <a id="2-set-up-an-agent"></a>
 

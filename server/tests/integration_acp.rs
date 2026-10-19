@@ -100,6 +100,7 @@ impl Run {
             resume_session_id: self.resume,
             prompt: "do the thing",
             policy: self.policy,
+            session_mode: None,
         };
         run_turn(launch, turn, self.limits, seen, cancel_rx, None).await
     }
@@ -441,6 +442,7 @@ async fn real_opencode_read_only_turn() {
                  then read README.md. Finally reply with only this JSON and nothing else: \
                  {\"status\":\"done\",\"summary\":\"<the README's first line>\"}",
         policy: ToolPolicy::ReadOnly,
+        session_mode: None,
     };
     let mut seen = Seen::default();
     let outcome = run_turn(

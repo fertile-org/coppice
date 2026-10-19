@@ -3,7 +3,8 @@ use std::process::{Command, Stdio};
 use clap::Args;
 
 use coppice_connectors::{
-    ConnectorDescriptor, CLAUDE_CODE, CODEX, CURSOR, KILO_CODE, MOCK, OPENCODE,
+    ConnectorDescriptor, CLAUDE_CODE, CODEX, COPILOT, CURSOR, KILO_CODE, KIMI, MOCK, OPENCODE,
+    QWEN_CODE,
 };
 
 use super::registry::{binary_on_path, home_dir, parse_id};
@@ -52,6 +53,24 @@ pub fn run(args: InstallArgs) -> anyhow::Result<()> {
             )?;
         }
         OPENCODE => install_opencode(&home)?,
+        COPILOT => {
+            defer_or_hint(
+                m,
+                "Install GitHub Copilot CLI into this HOME: npm install -g @github/copilot (with a prefix under $HOME).",
+            )?;
+        }
+        QWEN_CODE => {
+            defer_or_hint(
+                m,
+                "Install Qwen Code into this HOME: npm install -g @qwen-code/qwen-code (with a prefix under $HOME).",
+            )?;
+        }
+        KIMI => {
+            defer_or_hint(
+                m,
+                "Install Kimi Code into this HOME, following https://moonshotai.github.io/kimi-code/ — `kimi` should end up on PATH.",
+            )?;
+        }
         _ => {}
     }
 

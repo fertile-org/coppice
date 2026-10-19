@@ -8,7 +8,7 @@ import {
 import { Button } from '../../components/ui/button';
 import { pickDirectory } from '../../lib/desktop';
 import { useInspectRepoPath } from '../repos/useRepos';
-import { SIGN_IN_UNCHECKED_HINT } from '../tools/connectorCopy';
+import { NO_FREE_SIGN_IN_CHECK, SIGN_IN_UNCHECKED_HINT } from '../tools/connectorCopy';
 import { useConnectors } from '../agents/useAgents';
 import {
   INIT_COPY,
@@ -168,7 +168,9 @@ export function InitWizard({
   const kiloUnchecked =
     preview.data?.status === 'none' &&
     connectors.data?.some(
-      (connector) => connector.id === 'kilo-code' && connector.readiness === 'found',
+      (connector) =>
+        (NO_FREE_SIGN_IN_CHECK as readonly string[]).includes(connector.id) &&
+        connector.readiness === 'found',
     );
   const repositoryReady =
     Boolean(localPath.trim()) &&

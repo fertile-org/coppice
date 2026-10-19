@@ -74,7 +74,7 @@ enabled = false
 
 **System → Connectors** のスイッチも同じ行を書き込みます。
 
-Kilo Code は、あなたがオンにするまでオフのままです。Coppice は無料でそのサインインを確認できないためです。
+Kilo Code、GitHub Copilot、Qwen Code、Kimi Code は、あなたがオンにするまでオフのままです。Coppice は無料でこれらのサインインを確認できないためです。
 
 ## `[agent]`
 

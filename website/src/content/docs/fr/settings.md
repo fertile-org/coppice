@@ -74,7 +74,7 @@ enabled = false
 
 L’interrupteur dans **System → Connectors** écrit la même ligne.
 
-Kilo Code reste désactivé tant que vous ne l’activez pas. Coppice ne peut pas vérifier sa connexion gratuitement.
+Kilo Code, GitHub Copilot, Qwen Code et Kimi Code restent désactivés tant que vous ne les activez pas. Coppice ne peut pas vérifier leur connexion gratuitement.
 
 ## `[agent]`
 

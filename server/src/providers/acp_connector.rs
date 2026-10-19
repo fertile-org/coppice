@@ -34,6 +34,8 @@ pub struct AcpRun<'a> {
     pub model: Option<String>,
     /// How to sign in, shown when the agent says it isn't.
     pub sign_in_hint: Option<String>,
+    /// A `mode` session option to set, when the connector needs one.
+    pub session_mode: Option<&'static str>,
 }
 
 pub async fn run(input: AgentRunInput, run: AcpRun<'_>) -> Result<AgentRunResult, ProviderError> {
@@ -62,6 +64,7 @@ pub async fn run(input: AgentRunInput, run: AcpRun<'_>) -> Result<AgentRunResult
         } else {
             ToolPolicy::AllowAll
         },
+        session_mode: run.session_mode,
     };
     let mut console = AcpConsole::new(run.console_prefix, input.stream.clone());
     let outcome = acp::run_turn(

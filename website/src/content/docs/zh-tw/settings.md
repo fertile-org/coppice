@@ -74,7 +74,7 @@ enabled = false
 
 **System → Connectors** 中的開關寫入的也是這一行。
 
-Kilo Code 預設關閉，需要你手動開啟。Coppice 無法免費檢查它的登入狀態。
+Kilo Code、GitHub Copilot、Qwen Code 和 Kimi Code 預設關閉，需要你手動開啟。Coppice 無法免費檢查它們的登入狀態。
 
 ## `[agent]`
 

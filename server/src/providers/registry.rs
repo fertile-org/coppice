@@ -3,9 +3,10 @@ use std::sync::Arc;
 
 #[cfg(feature = "mock-provider")]
 use coppice_connectors::MOCK;
-use coppice_connectors::{CLAUDE_CODE, CODEX, CURSOR, KILO_CODE, OPENCODE};
+use coppice_connectors::{CLAUDE_CODE, CODEX, COPILOT, CURSOR, KILO_CODE, KIMI, OPENCODE, QWEN_CODE};
 
 use crate::config::AppConfig;
+use crate::providers::acp_cli::{self, AcpCliModels, AcpCliProvider, AcpCliSpec};
 use crate::providers::claude_code::ClaudeCodeProvider;
 use crate::providers::codex::CodexProvider;
 use crate::providers::cursor::CursorProvider;
@@ -64,7 +65,50 @@ pub static FACTORIES: &[ConnectorFactory] = &[
         id: OPENCODE,
         build: build_opencode,
     },
+    ConnectorFactory {
+        id: COPILOT,
+        build: build_copilot,
+    },
+    ConnectorFactory {
+        id: QWEN_CODE,
+        build: build_qwen_code,
+    },
+    ConnectorFactory {
+        id: KIMI,
+        build: build_kimi,
+    },
 ];
+
+fn build_acp_cli(
+    spec: AcpCliSpec,
+    command: &str,
+    run_timeout_secs: u64,
+    model_providers: &[String],
+) -> Option<BuiltConnector> {
+    Some(BuiltConnector {
+        provider: Arc::new(AcpCliProvider::new(spec, command.to_string(), run_timeout_secs)),
+        models: Arc::new(AcpCliModels::new(
+            spec,
+            command.to_string(),
+            model_providers.to_vec(),
+        )),
+    })
+}
+
+fn build_copilot(config: &AppConfig, _deps: &FactoryDeps) -> Option<BuiltConnector> {
+    let cfg = &config.agent.connectors.copilot;
+    build_acp_cli(acp_cli::COPILOT, &cfg.command, cfg.run_timeout_secs, &cfg.model_providers)
+}
+
+fn build_qwen_code(config: &AppConfig, _deps: &FactoryDeps) -> Option<BuiltConnector> {
+    let cfg = &config.agent.connectors.qwen_code;
+    build_acp_cli(acp_cli::QWEN_CODE, &cfg.command, cfg.run_timeout_secs, &cfg.model_providers)
+}
+
+fn build_kimi(config: &AppConfig, _deps: &FactoryDeps) -> Option<BuiltConnector> {
+    let cfg = &config.agent.connectors.kimi;
+    build_acp_cli(acp_cli::KIMI, &cfg.command, cfg.run_timeout_secs, &cfg.model_providers)
+}
 
 #[cfg(feature = "mock-provider")]
 fn build_mock(_config: &AppConfig, _deps: &FactoryDeps) -> Option<BuiltConnector> {

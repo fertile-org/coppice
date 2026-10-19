@@ -62,6 +62,7 @@ pub async fn run(input: AgentRunInput, spec: RunSpec<'_>) -> Result<AgentRunResu
             run_timeout: spec.run_timeout,
             model,
             sign_in_hint: Some("Run `opencode auth login`, then try again.".into()),
+            session_mode: None,
         },
     )
     .await
