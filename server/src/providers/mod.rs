@@ -1,6 +1,7 @@
 pub mod acp;
 pub mod claude_code;
 pub mod claude_console;
+pub mod claude_hook;
 pub mod cli_catalog;
 pub mod cli_runner;
 pub mod cli_version;

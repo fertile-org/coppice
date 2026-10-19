@@ -1,6 +1,7 @@
 use super::claude_console::ClaudeConsolePublisher;
 use super::cli_runner::{
-    log_launch, run_cli, run_log_dir, CliError, CliInvocation, LineHandler, LineStep, RunIo,
+    log_launch, run_cli, run_cli_interactive, run_log_dir, CliError, CliInvocation, LineHandler,
+    LineStep, RunIo,
 };
 use super::cli_version;
 use super::terminal;
@@ -126,17 +127,24 @@ impl AgentProvider for ClaudeCodeProvider {
             input.artifacts_dir.as_deref(),
             input.ticket_id.as_deref(),
         );
-        let mut args = contract.with_prompt(
-            contract.argv(&coppice_connectors::LaunchSubst {
-                read_only: read_only_tools,
-                plan: planning,
-                worktree: &worktree_arg,
-                hostname: "",
-                port: "",
-                version: Some(version.as_str()),
-            }),
-            &ticket_attachments::launch_prompt(coppice_run_prompt(), &staged),
-        );
+        let prompt = ticket_attachments::launch_prompt(coppice_run_prompt(), &staged);
+        let argv = contract.argv(&coppice_connectors::LaunchSubst {
+            read_only: read_only_tools,
+            plan: planning,
+            worktree: &worktree_arg,
+            hostname: "",
+            port: "",
+            version: Some(version.as_str()),
+        });
+        // Read-only runs take the prompt on stdin, after a handshake that has
+        // Claude Code ask Coppice before every tool (see `read_only_hook`).
+        let mut args = if read_only_tools {
+            let mut argv = argv;
+            argv.extend(["--input-format".to_string(), "stream-json".to_string()]);
+            argv
+        } else {
+            contract.with_prompt(argv, &prompt)
+        };
         args.extend(ticket_attachments::add_dir_args(&staged));
         push_tool_permission_args(&mut args, read_only_tools, input.mcp.is_some());
         if input.context_profile == crate::domain::context_profile::ContextProfile::Conversation {
@@ -195,13 +203,25 @@ impl AgentProvider for ClaudeCodeProvider {
             expects_gateway: input.mcp.is_some(),
             terminal: ClaudeTerminal::default(),
             tools: Default::default(),
+            hook: read_only_tools.then(super::claude_hook::HookGate::default),
         };
         let io = RunIo {
             cancel_rx: input.cancel_rx,
             session_created_tx: input.session_created_tx,
         };
 
-        let exit = match run_cli(invocation, &mut handler, io).await {
+        let ran = if read_only_tools {
+            run_cli_interactive(
+                invocation,
+                super::claude_hook::opening_lines(&prompt),
+                &mut handler,
+                io,
+            )
+            .await
+        } else {
+            run_cli(invocation, &mut handler, io).await
+        };
+        let exit = match ran {
             Ok(exit) => exit,
             Err(CliError::Spawn(e) | CliError::Io(e)) => return Err(ProviderError::Io(e)),
             Err(CliError::Cancelled) => return Err(ProviderError::Cancelled),
@@ -324,6 +344,8 @@ struct ClaudeLines {
     expects_gateway: bool,
     terminal: ClaudeTerminal,
     tools: super::cli_runner::ToolTracker,
+    /// Read-only runs: answers Claude Code's tool hooks.
+    hook: Option<super::claude_hook::HookGate>,
 }
 
 /// Tool calls in flight: `tool_use` starts one, its `tool_result` ends it.
@@ -357,6 +379,13 @@ impl LineHandler for ClaudeLines {
         self.tools.any()
     }
 
+    fn take_replies(&mut self) -> Vec<String> {
+        self.hook
+            .as_mut()
+            .map(super::claude_hook::HookGate::take_replies)
+            .unwrap_or_default()
+    }
+
     fn on_json(&mut self, value: &serde_json::Value) -> LineStep {
         let session_id = value
             .get("session_id")
@@ -377,6 +406,9 @@ impl LineHandler for ClaudeLines {
         }
 
         let ty = value.get("type").and_then(|v| v.as_str());
+        if let Some(hook) = self.hook.as_mut() {
+            hook.on_json(value);
+        }
         self.terminal.note_submit_attempts(value);
         track_tools(&mut self.tools, value);
         if ty == Some("system") && value.get("subtype").and_then(|v| v.as_str()) == Some("init") {
@@ -537,6 +569,7 @@ mod tests {
                 expects_gateway: gateway,
                 terminal: ClaudeTerminal::default(),
                 tools: Default::default(),
+                hook: None,
             }
         }
 
@@ -752,6 +785,23 @@ mod tests {
                 "{msg}"
             );
             assert!(msg.contains("permission mode plan"), "{msg}");
+        }
+
+        #[test]
+        fn a_read_only_run_answers_tool_hooks_through_the_handler() {
+            let mut h = handler(true);
+            h.hook = Some(Default::default());
+            h.on_json(&json!({ "type": "control_request", "request_id": "q1",
+                "request": { "subtype": "hook_callback", "callback_id": "coppice-pre-tool-use",
+                             "input": { "tool_name": "Write" } } }));
+            let replies = h.take_replies();
+            assert_eq!(replies.len(), 1);
+            assert!(replies[0].contains("\"permissionDecision\":\"deny\""), "{}", replies[0]);
+            assert!(h.take_replies().is_empty());
+            // A write run has no gate and writes nothing back.
+            let mut write = handler(false);
+            write.on_json(&json!({ "type": "control_request", "request_id": "q2", "request": {} }));
+            assert!(write.take_replies().is_empty());
         }
 
         #[test]

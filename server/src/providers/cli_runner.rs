@@ -130,6 +130,12 @@ pub trait LineHandler: Send {
     fn tools_running(&self) -> bool {
         false
     }
+
+    /// Lines to write to the CLI's stdin, for runs started with
+    /// [`run_cli_interactive`] (answers to control requests). Ignored otherwise.
+    fn take_replies(&mut self) -> Vec<String> {
+        Vec::new()
+    }
 }
 
 /// Tool calls started and not yet finished, by call id.
@@ -226,6 +232,37 @@ pub async fn run_cli_with_stdin(
     handler: &mut dyn LineHandler,
     io: RunIo,
 ) -> Result<CliExit, CliError> {
+    let mode = match stdin {
+        Some(input) => StdinMode::Once(input),
+        None => StdinMode::Null,
+    };
+    run_cli_inner(inv, mode, handler, io).await
+}
+
+/// Keeps stdin open: writes `initial` lines, then the handler's replies, and
+/// closes stdin once the terminal event is read. Writing happens on its own
+/// task so a CLI that stops reading can't stall reading its output.
+pub async fn run_cli_interactive(
+    inv: CliInvocation,
+    initial: Vec<String>,
+    handler: &mut dyn LineHandler,
+    io: RunIo,
+) -> Result<CliExit, CliError> {
+    run_cli_inner(inv, StdinMode::Interactive(initial), handler, io).await
+}
+
+enum StdinMode {
+    Null,
+    Once(String),
+    Interactive(Vec<String>),
+}
+
+async fn run_cli_inner(
+    inv: CliInvocation,
+    stdin: StdinMode,
+    handler: &mut dyn LineHandler,
+    io: RunIo,
+) -> Result<CliExit, CliError> {
     let host = crate::host_env::current();
     let program = resolve_cli_program(&host, &inv.program)?;
     let secrets =
@@ -239,10 +276,10 @@ pub async fn run_cli_with_stdin(
     cmd.args(&inv.args)
         .envs(inv.env.iter().map(|(k, v)| (k.as_str(), v.as_str())))
         .current_dir(&inv.cwd)
-        .stdin(if stdin.is_some() {
-            Stdio::piped()
-        } else {
+        .stdin(if matches!(stdin, StdinMode::Null) {
             Stdio::null()
+        } else {
+            Stdio::piped()
         })
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
@@ -259,14 +296,39 @@ pub async fn run_cli_with_stdin(
         )
         .map_err(CliError::Spawn)?;
 
-    let stdin_task = stdin.map(|input| {
-        let mut pipe = tracked.take_stdin().expect("piped stdin");
-        tokio::spawn(async move {
-            use tokio::io::AsyncWriteExt;
-            let _ = pipe.write_all(input.as_bytes()).await;
-            let _ = pipe.shutdown().await;
-        })
-    });
+    let mut replies: Option<tokio::sync::mpsc::UnboundedSender<String>> = None;
+    let stdin_task = match stdin {
+        StdinMode::Null => None,
+        StdinMode::Once(input) => {
+            let mut pipe = tracked.take_stdin().expect("piped stdin");
+            Some(tokio::spawn(async move {
+                use tokio::io::AsyncWriteExt;
+                let _ = pipe.write_all(input.as_bytes()).await;
+                let _ = pipe.shutdown().await;
+            }))
+        }
+        StdinMode::Interactive(initial) => {
+            let mut pipe = tracked.take_stdin().expect("piped stdin");
+            let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+            for line in initial {
+                let _ = tx.send(line);
+            }
+            replies = Some(tx);
+            Some(tokio::spawn(async move {
+                use tokio::io::AsyncWriteExt;
+                while let Some(mut line) = rx.recv().await {
+                    if !line.ends_with('\n') {
+                        line.push('\n');
+                    }
+                    if pipe.write_all(line.as_bytes()).await.is_err() || pipe.flush().await.is_err()
+                    {
+                        break;
+                    }
+                }
+                let _ = pipe.shutdown().await;
+            }))
+        }
+    };
     let stdout = tracked.take_stdout().expect("piped stdout");
     let stderr = tracked.take_stderr().expect("piped stderr");
     let stderr_tail = Arc::new(Mutex::new(Vec::new()));
@@ -381,6 +443,11 @@ pub async fn run_cli_with_stdin(
                             continue;
                         };
                         let step = handler.on_json(&value);
+                        if let Some(tx) = &replies {
+                            for reply in handler.take_replies() {
+                                let _ = tx.send(reply);
+                            }
+                        }
                         if !session_sent {
                             if let Some(sid) = step.session_id.filter(|s| !s.is_empty()) {
                                 if let Some(tx) = &io.session_created_tx {
@@ -392,6 +459,8 @@ pub async fn run_cli_with_stdin(
                         if step.stop {
                             stopped_on_result = true;
                             summary.terminal = true;
+                            // Closing stdin tells an interactive CLI the turn is over.
+                            replies = None;
                             break;
                         }
                     }
@@ -406,6 +475,7 @@ pub async fn run_cli_with_stdin(
         }
     }
 
+    drop(replies);
     let finished = if stopped_on_result && inv.result_before_exit {
         summary.ended("result");
         finish_after_result(
