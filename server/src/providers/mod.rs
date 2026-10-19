@@ -1,4 +1,5 @@
 pub mod acp;
+pub mod acp_connector;
 pub mod claude_code;
 pub mod claude_console;
 pub mod claude_hook;
