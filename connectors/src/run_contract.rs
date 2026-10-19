@@ -229,6 +229,10 @@ pub const CODEX: RunContract = RunContract {
         ),
         flag(&["exec"], "Non-interactive exec."),
         flag(&["--json"], "Structured stdout."),
+        flag(
+            &["--skip-git-repo-check"],
+            "Chat folders and connection-check folders are not git repositories, and without this Codex exits with \"Not inside a trusted directory\" before doing anything (checked on codex-cli 0.163.0).",
+        ),
     ],
     trailing: &[flag(
         &["-C", "{worktree}"],
@@ -520,6 +524,7 @@ mod tests {
             [
                 "exec",
                 "--json",
+                "--skip-git-repo-check",
                 "--dangerously-bypass-approvals-and-sandbox",
                 "-C",
                 "/wt",
