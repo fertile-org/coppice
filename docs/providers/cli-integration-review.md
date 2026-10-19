@@ -211,7 +211,9 @@ A connector whose read-only checks pass on the installed version can drop the "C
 | P2 | Conformance script | Not built: Test connection now runs every mode against the real gateway with the installed CLI, which covers it |
 | P2 | Shared resume rejection list | Done: `providers/resume.rs` |
 | P3 | Claude Code read-only by hook policy | Done: `providers/claude_hook.rs`, checked on 2.1.302 |
-| P3 | Codex `app-server` | Open: Codex is not installed here, so the protocol can't be checked |
+| P3 | Codex `app-server` | Not adopted, see below. Checking it found and fixed a real bug instead: Codex chat and Test connection failed on every run without `--skip-git-repo-check` |
+
+**Codex `app-server`, checked on codex-cli 0.163.0.** A real turn through `codex app-server` (`initialize`, `initialized`, `thread/start` with `sandbox: read-only` and `approvalPolicy: never`, `turn/start`, then `item/*` and `turn/completed`) read a file and answered with the contract, and no file was created. It sent no approval request: the read-only sandbox, which the operating system enforces, did the blocking, exactly as `codex exec --sandbox read-only` does. A real `exec` chat turn on the same version blocked a shell write and a file write too. So `app-server` would not make read-only stronger. It would add a protocol interrupt (cancel already stops the process group) and a structured resume fallback, at the cost of a protocol its own help marks experimental, with over 100 methods and server requests a client must answer (`account/chatgptAuthTokens/refresh`, `attestation/generate`, `item/tool/requestUserInput`, approvals). Codex stays on `exec`. Two things it showed are worth keeping in mind: `turn/start` and `codex exec` both take an output schema (`--output-schema`) that constrains the final message, which could back up `result_submit` for ticket runs, and `mcpServer/startupStatus/updated` reports MCP startup, which `exec --json` does not.
 
 The process group handling in section 6 needed no change: `process_tree` already sends SIGTERM to the group, waits until the group is empty, then sends SIGKILL.
 
