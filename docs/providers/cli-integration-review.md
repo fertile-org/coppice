@@ -198,18 +198,21 @@ A connector whose read-only checks pass on the installed version can drop the "C
 
 ## Order of work
 
-| Priority | Change | Why |
-|----------|--------|-----|
-| P0 | OpenCode 2.x adapter | Current OpenCode installs most likely can't run |
-| P0 | Test connection per mode, Kilo Code real check | Catches the next mode change before users do |
-| P1 | Shared terminal contract, stderr tail, line cap | Clear errors instead of "no result contract found" |
-| P1 | `permission_denials` diagnosis, chat text fallback | Saves chat replies and names the cause |
-| P1 | MCP init status fail-fast | Minutes saved on every broken gateway |
-| P1 | Environment hygiene, minimum versions | Small, removes whole classes of confusing failures |
-| P2 | Liveness timeouts | Long healthy runs survive, stuck runs end early |
-| P2 | Recorded transcripts, conformance script | Tests that follow the CLIs |
-| P2 | Shared resume rejection list | One place to update per CLI release |
-| P3 | Claude Code read-only by hook policy | Read-only that no CLI mode change can break |
-| P3 | Codex `app-server` | Read-only by approval, real interrupt, cleaner resume |
+| Priority | Change | Status |
+|----------|--------|--------|
+| P0 | OpenCode 2.x adapter | Done: `opencode acp` for 2.x (`providers/acp.rs`, `opencode_acp.rs`), checked on 2.0.20 |
+| P0 | Test connection per mode, Kilo Code real check | Done: Chat, Planning, Ticket work phases with a write check |
+| P1 | Shared terminal contract, stderr tail, line cap | Done: `providers/terminal.rs`, `line_reader.rs` |
+| P1 | `permission_denials` diagnosis, chat text fallback | Done, plus a failed `result_submit` tool result |
+| P1 | MCP init status fail-fast | Done for Claude Code. OpenCode over ACP fails at `session/new`. Codex: not yet, its MCP startup events are unverified |
+| P1 | Environment hygiene, minimum versions | Done: Claude Code 2.0.0, OpenCode 1.1.54 |
+| P2 | Liveness timeouts | Done: 3 minutes to first output, 20 minutes idle with no tool running |
+| P2 | Recorded transcripts | Done for Claude Code 2.1.302 and OpenCode 2.0.20 |
+| P2 | Conformance script | Not built: Test connection now runs every mode against the real gateway with the installed CLI, which covers it |
+| P2 | Shared resume rejection list | Done: `providers/resume.rs` |
+| P3 | Claude Code read-only by hook policy | Done: `providers/claude_hook.rs`, checked on 2.1.302 |
+| P3 | Codex `app-server` | Open: Codex is not installed here, so the protocol can't be checked |
+
+The process group handling in section 6 needed no change: `process_tree` already sends SIGTERM to the group, waits until the group is empty, then sends SIGKILL.
 
 Adding human messages to a run that is still going (Claude Code hooks and Codex `turn/steer` both allow it) is a new feature and out of scope here.
