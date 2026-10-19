@@ -53,6 +53,8 @@ pub struct AcpLaunch {
     pub run_id: Option<String>,
     pub ticket_id: Option<String>,
     pub task_log_dir: Option<PathBuf>,
+    /// How to sign in, for an agent that answers "Authentication required".
+    pub sign_in_hint: Option<String>,
 }
 
 /// Which tool calls Coppice approves when the agent asks.
@@ -192,6 +194,7 @@ pub async fn run_turn(
 
     let mut conn = Connection {
         name: launch.display_name.clone(),
+        sign_in_hint: launch.sign_in_hint.clone(),
         stdin: Some(stdin),
         lines: CappedLines::new(BufReader::new(stdout), MAX_LINE_BYTES),
         next_id: 0,
@@ -282,6 +285,7 @@ enum Wait {
 
 struct Connection<'o> {
     name: String,
+    sign_in_hint: Option<String>,
     stdin: Option<ChildStdin>,
     lines: CappedLines<BufReader<ChildStdout>>,
     next_id: u64,
@@ -306,14 +310,18 @@ impl Connection<'_> {
         turn: &AcpTurn<'_>,
         session_tx: Option<watch::Sender<String>>,
     ) -> Result<AcpOutcome, ProviderError> {
+        // A read-only run offers to handle file writes and commands, so an
+        // agent that routes them to the client (Kimi Code does) asks Coppice,
+        // which refuses. Reads stay with the agent.
+        let gate = self.policy == ToolPolicy::ReadOnly;
         let init = self
             .call(
                 "initialize",
                 json!({
                     "protocolVersion": PROTOCOL_VERSION,
                     "clientCapabilities": {
-                        "fs": { "readTextFile": false, "writeTextFile": false },
-                        "terminal": false
+                        "fs": { "readTextFile": false, "writeTextFile": gate },
+                        "terminal": gate
                     }
                 }),
                 Wait::Handshake("initialize"),
@@ -517,6 +525,20 @@ impl Connection<'_> {
     }
 
     fn rpc_failure(&self, method: &str, err: RpcError) -> ProviderError {
+        if err.code == AUTH_REQUIRED
+            || err
+                .message
+                .to_lowercase()
+                .contains("authentication required")
+        {
+            return ProviderError::InvalidFixture(format!(
+                "{} isn't signed in. {}",
+                self.name,
+                self.sign_in_hint
+                    .as_deref()
+                    .unwrap_or("Sign in with its CLI, then try again.")
+            ));
+        }
         ProviderError::InvalidFixture(format!(
             "{} rejected {method}: {} (code {})",
             self.name, err.message, err.code
@@ -774,9 +796,20 @@ impl Connection<'_> {
                 tracing::info!(agent = %self.name, tool = %title, "refused a tool request in a read-only run");
             }
             json!({ "jsonrpc": "2.0", "id": id, "result": { "outcome": choose_permission_option(params, allowed) } })
+        } else if self.policy == ToolPolicy::ReadOnly
+            && (method == "fs/write_text_file" || method.starts_with("terminal/"))
+        {
+            let what = gated_request_title(method, params);
+            self.refused.push(what.clone());
+            tracing::info!(agent = %self.name, request = %what, "refused a write or command in a read-only run");
+            json!({
+                "jsonrpc": "2.0",
+                "id": id,
+                "error": { "code": -32603, "message": READ_ONLY_REFUSAL }
+            })
         } else {
-            // Coppice declares no file system or terminal capability, so these
-            // and anything newer get a clear error instead of no answer.
+            // Coppice declares no other client capability, so these and
+            // anything newer get a clear error instead of no answer.
             tracing::warn!(agent = %self.name, method, "unsupported ACP request from the agent");
             json!({
                 "jsonrpc": "2.0",
@@ -785,6 +818,37 @@ impl Connection<'_> {
             })
         };
         self.send(&reply).await
+    }
+}
+
+/// JSON-RPC code ACP agents use for "sign in first".
+const AUTH_REQUIRED: i64 = -32000;
+
+const READ_ONLY_REFUSAL: &str =
+    "Coppice: this run only allows reading. Writing files and running commands are refused.";
+
+/// `write <path>` or `run <command>`, for the refused list.
+fn gated_request_title(method: &str, params: &Value) -> String {
+    if method == "fs/write_text_file" {
+        let path = params
+            .get("path")
+            .and_then(Value::as_str)
+            .unwrap_or("a file");
+        return format!("write {path}");
+    }
+    let command = params
+        .get("command")
+        .and_then(Value::as_str)
+        .unwrap_or("a command");
+    let args: Vec<&str> = params
+        .get("args")
+        .and_then(Value::as_array)
+        .map(|a| a.iter().filter_map(Value::as_str).collect())
+        .unwrap_or_default();
+    if args.is_empty() {
+        format!("run {command}")
+    } else {
+        format!("run {command} {}", args.join(" "))
     }
 }
 

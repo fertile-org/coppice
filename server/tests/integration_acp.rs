@@ -90,6 +90,7 @@ impl Run {
             run_id: None,
             ticket_id: None,
             task_log_dir: None,
+            sign_in_hint: None,
         };
         let cwd: &Path = self.dir.path();
         let turn = AcpTurn {
@@ -220,6 +221,44 @@ async fn an_unsupported_request_gets_an_error_reply_and_the_turn_goes_on() {
     assert_eq!(outcome.stop_reason, "end_turn");
     let reply = &run.record()["permissionReply"];
     assert_eq!(reply["error"]["code"], -32601);
+}
+
+#[tokio::test]
+async fn read_only_refuses_writes_and_commands_routed_to_the_client() {
+    let mut run = Run::new("gated_write");
+    run.policy = ToolPolicy::ReadOnly;
+    let outcome = run.go(&mut Seen::default(), None).await.expect("turn");
+    assert_eq!(outcome.stop_reason, "end_turn");
+    assert_eq!(
+        outcome.refused,
+        ["write /work/wrote.txt", "run touch bash-ran"]
+    );
+    let record = run.record();
+    assert_eq!(record["clientGatesWrites"], true);
+    assert!(record["writeReply"]["error"]["message"]
+        .as_str()
+        .unwrap()
+        .contains("only allows reading"));
+    assert!(record["terminalReply"]["error"].is_object());
+}
+
+#[tokio::test]
+async fn a_write_run_does_not_offer_to_handle_writes() {
+    let run = Run::new("done");
+    run.go(&mut Seen::default(), None).await.expect("turn");
+    assert_eq!(run.record()["clientGatesWrites"], false);
+}
+
+#[tokio::test]
+async fn an_agent_that_wants_a_sign_in_says_how() {
+    let err = Run::new("auth_required")
+        .go(&mut Seen::default(), None)
+        .await
+        .expect_err("auth");
+    assert!(
+        err.to_string().contains("OpenCode isn't signed in."),
+        "{err}"
+    );
 }
 
 #[tokio::test]
@@ -388,6 +427,7 @@ async fn real_opencode_read_only_turn() {
         run_id: None,
         ticket_id: None,
         task_log_dir: None,
+        sign_in_hint: None,
     };
     let model = std::env::var("COPPICE_REAL_OPENCODE_MODEL")
         .unwrap_or_else(|_| "opencode/big-pickle".into());

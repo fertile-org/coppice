@@ -32,6 +32,8 @@ pub struct AcpRun<'a> {
     pub run_timeout: Duration,
     /// The model's `configOptions` value, already in the connector's form.
     pub model: Option<String>,
+    /// How to sign in, shown when the agent says it isn't.
+    pub sign_in_hint: Option<String>,
 }
 
 pub async fn run(input: AgentRunInput, run: AcpRun<'_>) -> Result<AgentRunResult, ProviderError> {
@@ -47,6 +49,7 @@ pub async fn run(input: AgentRunInput, run: AcpRun<'_>) -> Result<AgentRunResult
             input.artifacts_dir.as_deref(),
             input.run_id.as_deref(),
         ),
+        sign_in_hint: run.sign_in_hint,
     };
     let turn = AcpTurn {
         cwd: run.worktree,

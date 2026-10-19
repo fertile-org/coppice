@@ -107,6 +107,8 @@ mod acp {
         let mut session = "ses_fake".to_string();
         let mut pending_permission: Option<(u64, u64)> = None;
         let mut prompt_pending: Option<u64> = None;
+        let mut client_gates_writes = false;
+        let mut gated_replies = 0;
         while let Some(Ok(line)) = lines.next() {
             let msg: Value = serde_json::from_str(&line).expect("json from client");
             let method = msg
@@ -118,6 +120,10 @@ mod acp {
             let params = msg.get("params").cloned().unwrap_or(json!({}));
             match method.as_str() {
                 "initialize" => {
+                    client_gates_writes = params.pointer("/clientCapabilities/fs/writeTextFile")
+                        == Some(&json!(true))
+                        && params.pointer("/clientCapabilities/terminal") == Some(&json!(true));
+                    record("clientGatesWrites", json!(client_gates_writes));
                     let http = scenario != "no_http";
                     let mut caps =
                         json!({ "loadSession": true, "mcpCapabilities": { "http": http } });
@@ -127,6 +133,10 @@ mod acp {
                     send(json!({ "jsonrpc": "2.0", "id": id, "result": {
                         "protocolVersion": if scenario == "wrong_version" { 2 } else { 1 },
                         "agentCapabilities": caps } }));
+                }
+                "session/new" if scenario == "auth_required" => {
+                    send(json!({ "jsonrpc": "2.0", "id": id,
+                        "error": { "code": -32000, "message": "Authentication required" } }));
                 }
                 "session/new" => {
                     record("mcpServers", params["mcpServers"].clone());
@@ -218,6 +228,17 @@ mod acp {
                             );
                             pending_permission = Some((prompt_id, 900));
                         }
+                        "gated_write" if client_gates_writes => {
+                            send(
+                                json!({ "jsonrpc": "2.0", "id": 910, "method": "fs/write_text_file",
+                                "params": { "sessionId": session, "path": "/work/wrote.txt", "content": "hi" } }),
+                            );
+                            send(
+                                json!({ "jsonrpc": "2.0", "id": 911, "method": "terminal/create",
+                                "params": { "sessionId": session, "command": "touch", "args": ["bash-ran"] } }),
+                            );
+                            pending_permission = Some((prompt_id, 910));
+                        }
                         "unknown_request" => {
                             send(
                                 json!({ "jsonrpc": "2.0", "id": 901, "method": "fs/read_text_file",
@@ -261,6 +282,25 @@ mod acp {
                 }
                 "" => {
                     // A response to one of our requests.
+                    if let (Some((prompt_id, 910)), Some(911)) =
+                        (pending_permission, id.as_ref().and_then(Value::as_u64))
+                    {
+                        gated_replies += 1;
+                        record("terminalReply", msg.clone());
+                        let _ = gated_replies;
+                        pending_permission = None;
+                        text(&session, r#"{"status":"done","summary":"only read"}"#);
+                        send(
+                            json!({ "jsonrpc": "2.0", "id": prompt_id, "result": { "stopReason": "end_turn" } }),
+                        );
+                        continue;
+                    }
+                    if let (Some((_, 910)), Some(910)) =
+                        (pending_permission, id.as_ref().and_then(Value::as_u64))
+                    {
+                        record("writeReply", msg.clone());
+                        continue;
+                    }
                     if let Some((prompt_id, request_id)) = pending_permission {
                         if id.as_ref().and_then(Value::as_u64) == Some(request_id) {
                             pending_permission = None;
