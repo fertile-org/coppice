@@ -41,7 +41,7 @@ pub fn merge_conflict_reopen_comment(branch: &str, files: &[String]) -> String {
 }
 
 pub fn connector_not_ready_reason(assignee: &str) -> String {
-    format!("{assignee}'s connector isn't ready. Check it in Tools → Connectors.")
+    format!("{assignee}'s connector isn't ready. Check it in System → Connectors.")
 }
 
 pub fn ask_to_resolve_label(assignee: &str) -> String {
@@ -110,7 +110,7 @@ mod tests {
         );
         assert_eq!(
             connector_not_ready_reason("Ada"),
-            "Ada's connector isn't ready. Check it in Tools → Connectors."
+            "Ada's connector isn't ready. Check it in System → Connectors."
         );
         assert_eq!(
             REREVIEW_NOTE,

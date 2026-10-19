@@ -9,7 +9,7 @@ description: "Sauvegarder Coppice, le déplacer sur un nouvel ordinateur, et rem
 
 ## Télécharger une sauvegarde
 
-Ouvrez **Tools** (outils), puis **Backup** (sauvegarde), et choisissez **Download backup** (télécharger une sauvegarde). Vous obtenez un seul fichier avec vos tableaux, tickets, paramètres, fichiers et worktrees d’agents.
+Ouvrez **System** (système), puis **Backup** (sauvegarde), et choisissez **Download backup** (télécharger une sauvegarde). Vous obtenez un seul fichier avec vos tableaux, tickets, paramètres, fichiers et worktrees d’agents.
 
 Les mots de passe, les clés et les jetons enregistrés n’y sont pas. La sauvegarde contient tout de même toutes les données de votre espace de travail, alors gardez-la pour vous.
 
@@ -17,7 +17,7 @@ Les mots de passe, les clés et les jetons enregistrés n’y sont pas. La sauve
 
 ## Importer une sauvegarde
 
-Sur l’ordinateur vers lequel vous déménagez, ouvrez **Tools**, puis **Backup**, et choisissez **Import backup** (importer une sauvegarde).
+Sur l’ordinateur vers lequel vous déménagez, ouvrez **System**, puis **Backup**, et choisissez **Import backup** (importer une sauvegarde).
 
 L’import remplace toutes les données de cet ordinateur par celles de la sauvegarde. Votre tableau et les paramètres de l’espace de travail suivent. Les mots de passe, les clés, les chemins de dossiers, les commandes des agents et les réglages des plugins et de MCP ne suivent pas : configurez-les de nouveau. Vous serez peut-être déconnecté.
 
@@ -42,4 +42,4 @@ Cette copie contient le dossier `secrets` : traitez-la comme un mot de passe. Vo
 
 Si vous avez partagé une sauvegarde, ou si vous pensez que quelqu’un d’autre en a une copie, créez de nouvelles clés.
 
-Ouvrez **Tools**, puis **Backup**, et choisissez **Replace keys** (remplacer les clés). Saisissez un nouveau mot de passe administrateur et cochez la case. Coppice crée de nouvelles clés et de nouveaux mots de passe de base de données. Les jetons enregistrés continuent de fonctionner, et tout le monde est déconnecté.
+Ouvrez **System**, puis **Backup**, et choisissez **Replace keys** (remplacer les clés). Saisissez un nouveau mot de passe administrateur et cochez la case. Coppice crée de nouvelles clés et de nouveaux mots de passe de base de données. Les jetons enregistrés continuent de fonctionner, et tout le monde est déconnecté.

@@ -40,14 +40,14 @@ description: "ボード、チケット、レビューを、キーボードで操
 | Repositories へ | `nav.repositories` | `G then R` |
 | Plugins へ | `nav.plugins` | `G then P` |
 | Users へ | `nav.users` | `G then U` |
-| Tools へ | `nav.tools` | `G then T` |
+| System へ | `nav.tools` | `G then T` |
 | Settings へ | `nav.settings` | `G then S` |
 | 次のセクション | `drawer.nextSection` | `]` |
 | 前のセクション | `drawer.previousSection` | `[` |
 
 1〜9 列目へのショートカットは、ボードの左から右の順です：1 Backlog、2 Plan Review、3 Ready、4 In Progress、5 In Review、6 In QA、7 Wait for Human Review、8 Done、9 Blocked。
 
-Plugins、Users、Tools、Settings への移動は、サイドバーと同じくメンバーには表示されません。デスクトップアプリには Users への移動もありません。
+Plugins、Users、System、Settings への移動は、サイドバーと同じくメンバーには表示されません。デスクトップアプリには Users への移動もありません。
 
 次のカードと前のカードは列の中で動き、端で折り返しません。次の列と前の列は、同じ位置のカード、最後のカード、または列が空なら列の見出しに移ります。次のセクションと前のセクションは、開いているドロワーの Detail、Live Console、Agent Runs の間を移ります。
 

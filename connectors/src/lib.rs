@@ -52,6 +52,33 @@ pub struct ConnectorDescriptor {
     pub caps: Capabilities,
     /// Pinned flags, permission mode, and the minimum CLI version each flag needs.
     pub run_contract: RunContract,
+    /// Oldest CLI version Coppice runs. Older versions fail at run start.
+    pub min_version: Option<MinVersion>,
+}
+
+/// A version floor and why it exists.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MinVersion {
+    pub version: &'static str,
+    pub reason: &'static str,
+}
+
+/// `Err` with a sentence for a detected version below the floor. An unknown
+/// version is allowed: the run itself will show what goes wrong.
+pub fn check_min_version(
+    descriptor: &ConnectorDescriptor,
+    detected: Option<&str>,
+) -> Result<(), String> {
+    let (Some(floor), Some(found)) = (descriptor.min_version, detected) else {
+        return Ok(());
+    };
+    if version_at_least(found, floor.version) {
+        return Ok(());
+    }
+    Err(format!(
+        "Coppice needs {} {} or later, and this computer has {found}. {} Update it, then try again.",
+        descriptor.display_name, floor.version, floor.reason
+    ))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -210,6 +237,7 @@ const CONNECTORS: &[ConnectorDescriptor] = &[
             run_server: false,
         },
         run_contract: run_contract::MOCK,
+        min_version: None,
     },
     ConnectorDescriptor {
         id: CURSOR,
@@ -238,6 +266,7 @@ const CONNECTORS: &[ConnectorDescriptor] = &[
             run_server: false,
         },
         run_contract: run_contract::CURSOR,
+        min_version: None,
     },
     ConnectorDescriptor {
         id: CLAUDE_CODE,
@@ -263,6 +292,10 @@ const CONNECTORS: &[ConnectorDescriptor] = &[
             run_server: false,
         },
         run_contract: run_contract::CLAUDE_CODE,
+        min_version: Some(MinVersion {
+            version: "2.0.0",
+            reason: "Coppice uses Claude Code 2's settings and MCP flags (--setting-sources, --strict-mcp-config).",
+        }),
     },
     ConnectorDescriptor {
         id: CODEX,
@@ -288,6 +321,7 @@ const CONNECTORS: &[ConnectorDescriptor] = &[
             run_server: false,
         },
         run_contract: run_contract::CODEX,
+        min_version: None,
     },
     ConnectorDescriptor {
         id: KILO_CODE,
@@ -318,6 +352,7 @@ const CONNECTORS: &[ConnectorDescriptor] = &[
             run_server: false,
         },
         run_contract: run_contract::KILO_CODE,
+        min_version: None,
     },
     ConnectorDescriptor {
         id: OPENCODE,
@@ -349,6 +384,10 @@ const CONNECTORS: &[ConnectorDescriptor] = &[
             run_server: true,
         },
         run_contract: run_contract::OPENCODE,
+        min_version: Some(MinVersion {
+            version: "1.1.54",
+            reason: "Earlier versions leave a copy of a native module in the shared temp folder on every start and never remove it.",
+        }),
     },
 ];
 
@@ -364,6 +403,20 @@ pub fn get(id: &str) -> Option<&'static ConnectorDescriptor> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn version_floors_refuse_only_known_older_versions() {
+        let claude = get(CLAUDE_CODE).unwrap();
+        assert!(check_min_version(claude, Some("2.1.302")).is_ok());
+        assert!(check_min_version(claude, Some("2.0.0")).is_ok());
+        assert!(check_min_version(claude, None).is_ok());
+        let err = check_min_version(claude, Some("1.0.88")).unwrap_err();
+        assert!(err.starts_with("Coppice needs Claude Code 2.0.0 or later, and this computer has 1.0.88."), "{err}");
+        let opencode = get(OPENCODE).unwrap();
+        assert!(check_min_version(opencode, Some("1.1.53")).is_err());
+        assert!(check_min_version(opencode, Some("2.0.20")).is_ok());
+        assert!(check_min_version(get(CURSOR).unwrap(), Some("0.0.1")).is_ok());
+    }
     use std::collections::HashSet;
 
     #[test]

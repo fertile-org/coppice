@@ -197,6 +197,19 @@ describe('ConnectorsTab', () => {
     );
   });
 
+  it('shows the oldest CLI version Coppice runs', async () => {
+    stubApi((path, init) =>
+      path === '/api/tools/connectors' && (init.method ?? 'GET') === 'GET'
+        ? json([{ ...kilo, minVersion: '2.0.0' }, claude, codex, opencode])
+        : undefined,
+    );
+    renderTab();
+    const kiloCard = await card('kilo-code');
+    expect(kiloCard.getByText('Needs version 2.0.0 or later')).toBeVisible();
+    const codexCard = await card('codex');
+    expect(codexCard.queryByText(/Needs version/)).not.toBeInTheDocument();
+  });
+
   it('shows checking state before the first probe', async () => {
     fetchMock.mockReset();
     stubApi((path, init) =>

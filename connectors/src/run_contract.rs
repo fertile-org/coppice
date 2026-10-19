@@ -36,6 +36,9 @@ pub struct PermissionMode {
     pub write: &'static [&'static str],
     /// Argv for a read-only run. `None` means use [`Self::write`].
     pub read_only: Option<&'static [&'static str]>,
+    /// When set, [`Self::read_only`] is passed only from this CLI version on.
+    /// Older or unknown versions run read-only work with no permission flag.
+    pub read_only_min_version: Option<&'static str>,
     pub min_version: Option<&'static str>,
     pub gate: bool,
     pub reason: &'static str,
@@ -110,6 +113,11 @@ impl RunContract {
                 return (plan, None, false);
             }
         }
+        if subst.read_only && self.permission_mode.read_only.is_some() {
+            if let Some(min) = self.permission_mode.read_only_min_version {
+                return (self.permission_mode.args(true), Some(min), true);
+            }
+        }
         (
             self.permission_mode.args(subst.read_only),
             self.permission_mode.min_version,
@@ -157,6 +165,7 @@ pub const MOCK: RunContract = RunContract {
     permission_mode: PermissionMode {
         write: &[],
         read_only: None,
+        read_only_min_version: None,
         min_version: None,
         gate: false,
         reason: "Built-in fixture connector; no CLI flags.",
@@ -172,12 +181,17 @@ pub const MOCK: RunContract = RunContract {
 pub const CLAUDE_CODE: RunContract = RunContract {
     permission_mode: PermissionMode {
         write: &["--permission-mode", "bypassPermissions"],
-        // Plan mode is Claude Code's read-only mode. The launcher also passes
-        // `--disallowedTools` so Write, Edit, and Bash are denied outright.
-        read_only: Some(&["--permission-mode", "plan"]),
+        // dontAsk refuses every tool the launcher's --allowedTools does not
+        // list, and --disallowedTools denies Write, Edit, and Bash outright.
+        // Plan mode is not used: from 2.1.290 it refuses MCP tools that are
+        // not read-only, including result_submit, so the reply is lost.
+        read_only: Some(&["--permission-mode", "dontAsk"]),
+        // Present by 2.1.285. Older or unknown versions get no flag: headless
+        // default mode cannot ask, so unlisted tools are refused there too.
+        read_only_min_version: Some("2.1.285"),
         min_version: None,
         gate: false,
-        reason: "Write runs pin bypassPermissions so ticket work stays non-interactive. Chat uses plan mode, which does not include Bash, Write, or Edit. The launcher also denies those tools.",
+        reason: "Write runs pin bypassPermissions so ticket work stays non-interactive. Chat and planning use dontAsk, which refuses every tool not on the allow list. The launcher also denies Bash, Write, and Edit.",
     },
     leading: &[
         flag(&["-p"], "Headless print mode."),
@@ -194,14 +208,15 @@ pub const CLAUDE_CODE: RunContract = RunContract {
     process_cwd_is_worktree: true,
     result_before_exit: true,
     prompt: PromptPlace::AfterDashP,
-    // Plan mode is read-only: it replaces bypassPermissions on a planning run.
-    plan_mode: Some(&["--permission-mode", "plan"]),
+    // Planning is a read-only run and uses the read-only flags above.
+    plan_mode: None,
 };
 
 pub const CODEX: RunContract = RunContract {
     permission_mode: PermissionMode {
         write: &["--dangerously-bypass-approvals-and-sandbox"],
         read_only: Some(&["--sandbox", "read-only"]),
+        read_only_min_version: None,
         min_version: None,
         gate: false,
         reason: "Ticket runs bypass approvals and the sandbox. Chat passes --sandbox read-only and never the bypass flag. A signed-in write with that flag was not shown to be blocked (codex-cli 0.162.1 exited 401), so chat still runs in a temporary clone.",
@@ -214,6 +229,10 @@ pub const CODEX: RunContract = RunContract {
         ),
         flag(&["exec"], "Non-interactive exec."),
         flag(&["--json"], "Structured stdout."),
+        flag(
+            &["--skip-git-repo-check"],
+            "Chat folders and connection-check folders are not git repositories, and without this Codex exits with \"Not inside a trusted directory\" before doing anything (checked on codex-cli 0.163.0).",
+        ),
     ],
     trailing: &[flag(
         &["-C", "{worktree}"],
@@ -229,6 +248,7 @@ pub const CURSOR: RunContract = RunContract {
     permission_mode: PermissionMode {
         write: &["--force"],
         read_only: Some(&["--mode", "ask"]),
+        read_only_min_version: None,
         min_version: None,
         gate: false,
         reason: "Write runs use --force, which Coppice already passed. Read-only chat uses --mode ask and omits --force. Plan runs use --mode plan. --sandbox exists and is left for a later milestone.",
@@ -263,6 +283,7 @@ pub const KILO_CODE: RunContract = RunContract {
         // Ask denies writes. `--auto` stays so a headless run can approve MCP
         // calls, which ask mode marks as approval rather than deny.
         read_only: Some(&["--auto", "--agent", "ask"]),
+        read_only_min_version: None,
         min_version: None,
         gate: false,
         reason: "Ticket runs pass --auto so a headless run is not stuck on a prompt. Chat keeps --auto and selects the ask agent. Plan runs select the plan agent. A live write was not shown to be blocked.",
@@ -285,6 +306,7 @@ pub const OPENCODE: RunContract = RunContract {
     permission_mode: PermissionMode {
         write: &[],
         read_only: None,
+        read_only_min_version: None,
         min_version: None,
         gate: false,
         reason: "opencode serve has no permission-mode argv. Read-only chat denies edit and bash in OPENCODE_CONFIG and sets OPENCODE_DISABLE_PROJECT_CONFIG so a project config cannot allow those tools.",
@@ -444,13 +466,35 @@ mod tests {
     }
 
     #[test]
-    fn claude_read_only_uses_plan_not_bypass() {
+    fn claude_read_only_uses_dont_ask_not_plan_or_bypass() {
         let argv = CLAUDE_CODE.argv(&subst(Some("2.1.292"), true));
         assert!(argv
             .windows(2)
-            .any(|w| w == ["--permission-mode", "plan"]));
+            .any(|w| w == ["--permission-mode", "dontAsk"]));
         assert!(!argv.iter().any(|arg| arg == "bypassPermissions"));
-        assert!(!argv.iter().any(|arg| arg == "dontAsk"));
+        assert!(!argv.iter().any(|arg| arg == "plan"));
+    }
+
+    #[test]
+    fn claude_read_only_omits_the_mode_on_old_or_unknown_versions() {
+        for version in [Some("2.1.284"), None] {
+            let argv = CLAUDE_CODE.argv(&subst(version, true));
+            assert!(!argv.iter().any(|arg| arg == "--permission-mode"), "{version:?}");
+        }
+        // Write runs keep bypassPermissions whatever the version.
+        let argv = CLAUDE_CODE.argv(&subst(None, false));
+        assert!(argv.iter().any(|arg| arg == "bypassPermissions"));
+    }
+
+    #[test]
+    fn claude_planning_uses_the_read_only_mode() {
+        let argv = CLAUDE_CODE.argv(&LaunchSubst {
+            plan: true,
+            ..subst(Some("2.1.302"), true)
+        });
+        assert!(argv
+            .windows(2)
+            .any(|w| w == ["--permission-mode", "dontAsk"]));
     }
 
     #[test]
@@ -480,6 +524,7 @@ mod tests {
             [
                 "exec",
                 "--json",
+                "--skip-git-repo-check",
                 "--dangerously-bypass-approvals-and-sandbox",
                 "-C",
                 "/wt",
@@ -550,10 +595,7 @@ mod tests {
 
     #[test]
     fn read_only_plan_invocation_is_pinned_per_connector() {
-        assert_eq!(
-            CLAUDE_CODE.plan_mode,
-            Some(&["--permission-mode", "plan"][..])
-        );
+        assert!(CLAUDE_CODE.plan_mode.is_none());
         assert_eq!(CURSOR.plan_mode, Some(&["--mode", "plan"][..]));
         assert!(CODEX.plan_mode.is_none());
         assert_eq!(
@@ -565,10 +607,12 @@ mod tests {
 
         let mut planned = subst(None, false);
         planned.plan = true;
-        let claude = CLAUDE_CODE.argv(&planned);
-        assert!(claude
-            .windows(2)
-            .any(|w| w == ["--permission-mode", "plan"]));
+        // The Claude Code launcher always marks planning read-only.
+        let claude = CLAUDE_CODE.argv(&LaunchSubst {
+            read_only: true,
+            ..planned
+        });
+        assert!(!claude.iter().any(|arg| arg == "plan"));
         assert!(!claude.iter().any(|arg| arg == "bypassPermissions"));
 
         let cursor = CURSOR.argv(&planned);

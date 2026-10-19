@@ -122,9 +122,33 @@ async fn process_one(state: &AppState, worker_id: &str) -> anyhow::Result<()> {
         return Ok(());
     }
 
+    // Before the run starts, so a client opening its live console picks the
+    // right view from the first event.
+    let connector = run_svc
+        .agent_connector_for_run(run.agent_id)
+        .await
+        .ok()
+        .flatten();
+    if let Some(connector) = &connector {
+        if let Some(kind) = crate::providers::run_console_kind(connector, &state.config).await {
+            let name = crate::providers::console_kind_name(kind);
+            if let Err(err) = run_svc.set_console_kind(run.id, &name).await {
+                tracing::warn!(run_id = %run.id, error = %err, "could not record the run's console kind");
+            }
+        }
+    }
+    let too_old = match &connector {
+        Some(connector) => crate::providers::below_min_version(connector, &state.config).await,
+        None => None,
+    };
+
     // The stop endpoint publishes the cancelled transition when it commits;
     // cancellation branches here only reconcile the durable job state.
-    match execute_job(state, pool, &run_svc, &run).await {
+    let executed = match too_old {
+        Some(message) => Err(anyhow::anyhow!(message)),
+        None => execute_job(state, pool, &run_svc, &run).await,
+    };
+    match executed {
         Ok(()) => job_svc.mark_done(job.id).await?,
         Err(err) if err.downcast_ref::<JobCancelled>().is_some() => {
             state.run_streams.remove(run.id);
@@ -167,6 +191,10 @@ async fn process_one(state: &AppState, worker_id: &str) -> anyhow::Result<()> {
                         RunOrchestrator::new(pool, &state.config.workflow)
                             .handle_terminal_run(&failed_run)
                             .await;
+                        // finish_failed does not return chat_session_id.
+                        if let Some(session_id) = run.chat_session_id {
+                            note_failed_chat_turn(pool, session_id, &message).await;
+                        }
                         publish_run_finished(
                             state,
                             pool,
@@ -197,6 +225,27 @@ async fn process_one(state: &AppState, worker_id: &str) -> anyhow::Result<()> {
     }
 
     Ok(())
+}
+
+const FAILED_CHAT_TURN_DETAIL_CHARS: usize = 500;
+
+/// Without this line the streamed text vanishes when a turn fails and the chat
+/// shows nothing.
+async fn note_failed_chat_turn(pool: &PgPool, session_id: uuid::Uuid, failure: &str) {
+    let body = failed_chat_turn_note(failure);
+    if let Err(err) = crate::services::chat_service::ChatService::new(pool)
+        .append_system_note(session_id, &body)
+        .await
+    {
+        tracing::warn!(%session_id, error = %err, "failed to note a failed chat turn");
+    }
+}
+
+fn failed_chat_turn_note(failure: &str) -> String {
+    format!(
+        "The agent stopped without sending a reply. Send your message again to retry.\n\nDetails: {}",
+        truncate_with_ellipsis(failure.trim(), FAILED_CHAT_TURN_DETAIL_CHARS)
+    )
 }
 
 /// Finish a check left active by an error raised before the check executor ran.
@@ -1643,6 +1692,7 @@ mod tests {
             started_at: None,
             ended_at: None,
             created_at: OffsetDateTime::now_utc(),
+            console_kind: None,
         }
     }
 

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { connectorConsoleSchema } from './connector';
 
 export const runStatusSchema = z.enum([
   'queued',
@@ -29,6 +30,8 @@ export const agentRunSchema = z.object({
   /** Exact CLI model. Null or absent means the CLI did not report one. */
   reportedModel: z.string().nullable().optional(),
   billedOutsidePlan: z.boolean().optional(),
+  /** The run's own console format; null means the connector's default. */
+  consoleKind: connectorConsoleSchema.nullable().optional().catch(null),
 });
 
 export type AgentRun = z.infer<typeof agentRunSchema>;

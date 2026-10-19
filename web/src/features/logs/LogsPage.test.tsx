@@ -8,6 +8,15 @@ import { savedExport } from './copy';
 import { LogsPage, MAX_LIVE_LINES, MAX_OLDER_LINES } from './LogsPage';
 import { reportProblemUrl } from './query';
 
+// Radix Select uses pointer capture and scrollIntoView, which jsdom lacks.
+Element.prototype.hasPointerCapture ??= () => false;
+Element.prototype.releasePointerCapture ??= () => {};
+Element.prototype.scrollIntoView ??= () => {};
+
+function openSelect(label: string) {
+  fireEvent.keyDown(screen.getByLabelText(label), { key: 'ArrowDown' });
+}
+
 const session = vi.hoisted(() => ({ role: 'admin' }));
 
 const mocks = vi.hoisted(() => ({
@@ -115,8 +124,8 @@ describe('LogsPage', () => {
     expect(await screen.findByText('No logs match these filters.')).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Logs' })).toBeInTheDocument();
     expect(screen.getByLabelText('Source')).toBeInTheDocument();
-    expect(screen.getByLabelText('Level')).toHaveValue('info');
-    expect(screen.getByRole('checkbox', { name: 'Live' })).not.toBeChecked();
+    expect(screen.getByLabelText('Level')).toHaveTextContent('Info');
+    expect(screen.getByRole('switch', { name: 'Live' })).not.toBeChecked();
   });
 
   it('shows a request line and keeps the run from the address', async () => {
@@ -132,7 +141,8 @@ describe('LogsPage', () => {
   it('asks for agent lines when the source changes', async () => {
     renderPage();
     await screen.findByText('No logs match these filters.');
-    fireEvent.change(screen.getByLabelText('Source'), { target: { value: 'cli' } });
+    openSelect('Source');
+    fireEvent.click(await screen.findByRole('option', { name: 'Agent runs' }));
     await waitFor(() => {
       expect(mocks.apiFetch).toHaveBeenCalledWith(expect.stringContaining('source=cli'));
     });
@@ -141,7 +151,7 @@ describe('LogsPage', () => {
   it('sends the live filter when Live is on', async () => {
     renderPage('/logs?run=run-9');
     await screen.findByText('No logs match these filters.');
-    fireEvent.click(screen.getByRole('checkbox', { name: 'Live' }));
+    fireEvent.click(screen.getByRole('switch', { name: 'Live' }));
     await waitFor(() => expect(SocketStub.latest).not.toBeNull());
     SocketStub.latest?.onopen?.();
     expect(SocketStub.latest?.sent[0]).toContain('"run":"run-9"');
@@ -163,7 +173,7 @@ describe('LogsPage', () => {
   it('keeps only the newest live lines and drops repeats', async () => {
     renderPage();
     await screen.findByText('No logs match these filters.');
-    fireEvent.click(screen.getByRole('checkbox', { name: 'Live' }));
+    fireEvent.click(screen.getByRole('switch', { name: 'Live' }));
     await waitFor(() => expect(SocketStub.latest).not.toBeNull());
     await act(async () => {
       for (let i = 0; i < MAX_LIVE_LINES + 50; i += 1) {
@@ -209,7 +219,12 @@ describe('LogsPage', () => {
   it('labels the warn level Warning', async () => {
     renderPage();
     await screen.findByText('No logs match these filters.');
-    expect(screen.getByRole('option', { name: 'Warning' })).toHaveValue('warn');
+    openSelect('Level');
+    fireEvent.click(await screen.findByRole('option', { name: 'Warning' }));
+    await waitFor(() => {
+      expect(mocks.apiFetch).toHaveBeenCalledWith(expect.stringContaining('level=warn'));
+    });
+    expect(screen.getByLabelText('Level')).toHaveTextContent('Warning');
   });
 
   it('shows the server sentence when the log store is missing', async () => {

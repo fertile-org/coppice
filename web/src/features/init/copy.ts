@@ -1,6 +1,9 @@
 /** User-facing init wizard strings. Content owns this list. */
 
 export const INIT_COPY = {
+  welcomeTitle: 'Welcome to Coppice',
+  welcomeIntro:
+    'This short setup gets you started. Connect a repository, create your first board, and add a starter team of agents. It takes about a minute, and you can skip it.',
   title: 'Set up Coppice',
   intro:
     'Pick a repository, name a board, and add a starter team. Nothing is created until you click Create.',
@@ -28,7 +31,7 @@ export const INIT_COPY = {
   teamIdle: 'Nothing runs until you click Run agent on a ticket.',
   checking: 'Checking installed CLIs…',
   noReady:
-    'No agent CLI is ready yet. Install one and sign in, then check it in Tools → Connectors.',
+    'No agent CLI is ready yet. Install one and sign in, then check it in System → Connectors.',
   loadFailed: "Couldn't load setup.",
   loading: 'Loading setup…',
   duplicateBoard: 'A board with that name already exists.',

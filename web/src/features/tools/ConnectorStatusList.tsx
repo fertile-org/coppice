@@ -32,6 +32,9 @@ function CliValue({ connector }: { connector: ConnectorStatus }) {
           {connector.cli.path}
         </p>
       )}
+      {connector.minVersion && (
+        <p className="text-text-muted">Needs version {connector.minVersion} or later</p>
+      )}
     </>
   );
 }

@@ -7,7 +7,7 @@ description: "インストール直後から最初のエージェント実行ま
 
 インストール直後から最初のエージェント実行まで、5 ステップで進みます。必要なのはローカルの git チェックアウトとエージェント CLI 1 つだけです。Coppice アカウントは要りません。
 
-初めてインストールしたときは、最初のリポジトリ、ボード、スターターチームを追加する短いセットアップが開きます。あとから Tools で開き直せます。
+初めてインストールしたときは、最初のリポジトリ、ボード、スターターチームを追加する短いセットアップが開きます。あとから **System → Connectors** の **Set up workspace** で開き直せます。
 
 <a id="1-install-a-provider-and-sign-in"></a>
 
@@ -15,7 +15,7 @@ description: "インストール直後から最初のエージェント実行ま
 プロバイダーとは、Coppice があなたの代わりに動かすエージェント CLI のことです。Claude Code、Codex、Cursor、OpenCode、Kilo Code があります。Coppice は CLI をインストールしません。コンピューターにすでにある CLI を見つけます。
 
 1. いつもどおりの方法で CLI をインストールし、ターミナルでサインインします。
-2. Coppice のサイドバーで **Tools** を開き、**Connectors** タブを開きます。
+2. Coppice のサイドバーで **System** を開き、**Connectors** を開きます。
 3. 使う CLI のカードを探します。Coppice が使える状態なら **Ready** と表示されます。
 
 **Found, not signed in** と表示されたら、ターミナルで CLI にサインインしてください。**Not on your PATH** と表示されたら、CLI をインストールするか、カードの **Install docs** に従ってください。そのあと **Run check** をクリックします。

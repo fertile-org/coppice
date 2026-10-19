@@ -42,11 +42,11 @@ description: "Coppice 运行的智能体 CLI：Claude Code、Codex、Cursor、Op
 | **Not on your PATH** | Coppice 找不到该命令。请安装它，或检查你的 PATH。 |
 | **Installed** | Coppice 找到了命令。对于 Kilo Code，不消耗你的套餐额度就无法检查登录状态。 |
 
-Kilo Code 显示为 **Kilo Code — Installed**。Tools → Connectors 中还会提示："Coppice can't check this sign-in without using your plan. A run will show an error if you're signed out."（不消耗你的套餐额度，Coppice 就无法检查登录状态；如果你已退出登录，运行时会报错。）所有 CLI 都能聊天。Claude Code、Codex、Cursor 和 Kilo Code 的聊天会显示 "Coppice hasn't confirmed that {cli} stays read-only. The agent can still run commands on your computer."（Coppice 尚未确认 {cli} 会保持只读，智能体仍可在你的电脑上执行命令。）OpenCode 的聊天没有这条横幅。Test connection（测试连接）会检查 `kilo` 命令能否运行。
+Kilo Code 显示为 **Kilo Code — Installed**。System → Connectors 中还会提示："Coppice can't check this sign-in without using your plan. A run will show an error if you're signed out."（不消耗你的套餐额度，Coppice 就无法检查登录状态；如果你已退出登录，运行时会报错。）所有 CLI 都能聊天。Claude Code、Codex、Cursor 和 Kilo Code 的聊天会显示 "Coppice hasn't confirmed that {cli} stays read-only. The agent can still run commands on your computer."（Coppice 尚未确认 {cli} 会保持只读，智能体仍可在你的电脑上执行命令。）OpenCode 的聊天没有这条横幅。Test connection（测试连接）会检查 `kilo` 命令能否运行。
 
 CLI 还没就绪时，也可以先保存智能体。CLI 安装并登录后，它就会开始处理工单。如果你是在打开 Coppice 之后才安装的 CLI，请退出并重新打开 Coppice，让它找到新命令。
 
-要关闭某个连接器，请使用 **Tools → Connectors**（工具 → 连接器）。
+要关闭某个连接器，请使用 **System → Connectors**（系统 → 连接器）。
 
 <a id="use-your-own-api-key-or-another-provider"></a>
 

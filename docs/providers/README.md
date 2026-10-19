@@ -13,14 +13,14 @@ A connector is how Coppice drives one agent CLI. The board, tickets and worktree
 | Claude Code | `claude-code` | `claude` | Subprocess in the worktree: `claude -p … --output-format stream-json --verbose --permission-mode bypassPermissions` | `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN` set, or `~/.claude/.credentials.json`; otherwise `claude auth status` | [claude-code.md](claude-code.md) |
 | Codex | `codex` | `codex` | Subprocess: `codex exec --json --dangerously-bypass-approvals-and-sandbox -C <worktree>` (`--no-daemon` when the CLI is ≥ 0.156) | `OPENAI_API_KEY` set, or `~/.codex/auth.json`; otherwise `codex login status` | [codex.md](codex.md) |
 | Cursor | `cursor` | `agent` | Subprocess in the worktree: `agent -p … --trust --force --output-format stream-json --workspace <worktree>` | `~/.config/cursor/auth.json` or `~/.cursor/auth.json`. Neither means not signed in | [cursor.md](cursor.md) |
-| OpenCode | `opencode` | `opencode` | A fresh `opencode serve --hostname … --port …` per run, driven over HTTP/SSE. The ticket shows a Live Session | `~/.local/share/opencode/auth.json`; otherwise `opencode auth list` | [opencode.md](opencode.md) |
+| OpenCode | `opencode` | `opencode` | 2.x: `opencode acp` per run over the Agent Client Protocol, with the structured console. 1.x: a fresh `opencode serve --hostname … --port …` per run over HTTP/SSE, with a Live Session | `~/.local/share/opencode/auth.json`; otherwise `opencode auth list` | [opencode.md](opencode.md) |
 | Kilo Code | `kilo-code` | `kilo` | Subprocess in the worktree: `kilo run --format json --auto --dir <worktree>` | None. `kilo auth` is interactive, so Coppice never runs it | [kilo-code.md](kilo-code.md) |
 
 ### Detection and status
 
 At startup, the server adds common bin dirs to its `PATH` if they exist and aren't already there: `~/.local/bin`, `~/.opencode/bin`, `~/.npm-global/bin`, `~/.bun/bin`, `/opt/homebrew/bin` and `/usr/local/bin`. The desktop app also passes in the `PATH` from your login shell. Probes and runs use this same `PATH`.
 
-For each connector, Coppice resolves the binary (the `command` key if set, otherwise the descriptor binary). It runs the probe (10 s cap), then the sign-in check: env var names, credential files, or the CLI's own status command (3 s cap). The sign-in check never opens a browser, prompts, or calls a model. The result is shown in the agent form and in Tools → Connectors:
+For each connector, Coppice resolves the binary (the `command` key if set, otherwise the descriptor binary). It runs the probe (10 s cap), then the sign-in check: env var names, credential files, or the CLI's own status command (3 s cap). The sign-in check never opens a browser, prompts, or calls a model. The result is shown in the agent form and in System → Connectors:
 
 | Readiness | Label | When |
 | --- | --- | --- |
@@ -55,7 +55,7 @@ Where the config lives:
 | From source | Defaults, then `~/.config/coppice/config.toml`, then `./config.toml`, then `COPPICE_CONFIG`, then environment variables (last wins) |
 | Docker Compose | `deploy/config/config.toml`, mounted at `/etc/coppice/config.toml` |
 
-The Tools → Connectors switch and saving an agent both turn a connector on immediately. They write into `config.toml` and keep comments and other keys. `coppice connector enable` and hand edits apply the next time the server starts.
+The System → Connectors switch and saving an agent both turn a connector on immediately. They write into `config.toml` and keep comments and other keys. `coppice connector enable` and hand edits apply the next time the server starts.
 
 ## Chat and session resume
 
@@ -67,9 +67,9 @@ A copy is `git clone --local --shared --no-checkout` of the registered checkout,
 
 | Connector | Chat session resume | Where chat runs |
 | --- | --- | --- |
-| `claude-code` | `--resume` | On, in the per-chat folder, with the untested banner. Flags are `--permission-mode plan`, `--settings {"disableAllHooks":true}`, `--setting-sources user`, plus `--disallowedTools Write,Edit,MultiEdit,NotebookEdit,Bash,TodoWrite,Task` and a read-only `--allowedTools` list ending in `mcp__coppice__*`. `--strict-mcp-config` loads only the Coppice server. `--settings` is above user, project, and local files, so `disableAllHooks` turns those hooks off. Managed hooks still run. Not live-verified: the `claude` binary was not installed and no API key was set |
+| `claude-code` | `--resume` | On, in the per-chat folder, with the untested banner. Flags are `--permission-mode dontAsk` (Claude Code 2.1.285 and later; older versions get no mode flag), `--settings {"disableAllHooks":true}`, `--setting-sources user`, plus `--disallowedTools Write,Edit,MultiEdit,NotebookEdit,Bash,TodoWrite,Task` and a read-only `--allowedTools` list ending in `mcp__coppice__*`. `--strict-mcp-config` loads only the Coppice server. `--settings` is above user, project, and local files, so `disableAllHooks` turns those hooks off. Managed hooks still run. Not live-verified: the `claude` binary was not installed and no API key was set |
 | `cursor` | `--resume` | On, in the per-chat folder, with the untested banner. Chat passes `--mode ask` and omits `--force`. Plan runs pass `--mode plan`. `--mode ask` was not shown to block shell. CLI `2026.10.14-941492e` was installed and not signed in; a prompt exited with `Authentication required`. Cursor staff say ask mode does not hard-block shell unless `--sandbox enabled`, which also blocks network and MCP. Ticket runs still pass `--force` |
-| `codex` | Skipped | On, in the per-chat folder, with the untested banner. Chat passes `--sandbox read-only`, `--ignore-user-config`, and `-c` keys for `mcp_servers.coppice` only. On `codex-cli 0.162.1`, `--ignore-user-config` skips user and project MCP servers (project trust lives in the user config) and auth still uses `CODEX_HOME`. A write prompt with `--sandbox read-only` exited `401 Unauthorized` before a tool call, so it was not shown to block a write. Ticket runs still use the bypass flag and still load user config |
+| `codex` | Skipped | On, in the per-chat folder, with the untested banner. Chat passes `--sandbox read-only`, `--ignore-user-config`, and `-c` keys for `mcp_servers.coppice` only. On `codex-cli 0.162.1`, `--ignore-user-config` skips user and project MCP servers (project trust lives in the user config) and auth still uses `CODEX_HOME`. On 0.163.0 (Linux, signed in) `--sandbox read-only` blocked a shell write and a file write. Every run passes `--skip-git-repo-check`, because chat folders are not git repositories. Ticket runs still use the bypass flag and still load user config |
 | `opencode` | Prior session id | On, in the per-chat folder, no banner. Per-run config sets `permission.edit`, `permission.write`, and `permission.bash` to `deny`, and the process sets `OPENCODE_DISABLE_PROJECT_CONFIG=1`. Verified with OpenCode 1.19.0 and `opencode/big-pickle`: denying edit and bash blocked a file write and a shell write even when the project `opencode.json` allowed both. The same deny without the env var lost to the project file. MCP tools or `.opencode/` plugins may bypass those denials |
 | `kilo-code` | `--session` | On, in the per-chat folder, with the untested banner. Chat passes `--auto --agent ask`. Plan runs pass `--auto --agent plan`. Later chat turns pass `--session <id>` from the previous turn's JSON `sessionID`. If that run exits non-zero, emits an error event, or returns no output, the stored id is cleared and the turn is retried once without `--session`, with the same bounded transcript. Ask mode denies writes; `--auto` still approves permissions that are not denied, including MCP. A live write was not shown to be blocked. Not tried against a real `kilo` binary. Test connection still runs `kilo --version`. Ticket runs still use `kilo run --auto` and do not resume |
 
@@ -89,17 +89,26 @@ Every run gets a per-run token for the Coppice MCP gateway at `POST /mcp`, hande
 
 Plugin MCP tools are proxied through the same gateway as `<plugin>__<tool>`, so connectors need no per-plugin wiring. More in [architecture.md](../architecture.md#plugin-mcp-proxy).
 
-## Diagnostics (Tools → Connectors)
+## Diagnostics (System → Connectors)
 
-Tools → Connectors shows each connector's switch, CLI readiness, detected auth (env var names and file paths only, never values), probe output, last real run, and last test.
+System → Connectors shows each connector's switch, CLI readiness, detected auth (env var names and file paths only, never values), probe output, last real run, and last test.
 
-**Test connection** runs a real agent run through the production path against a synthetic ticket in a scratch directory. It passes when the agent calls `ticket_get` and `result_submit` and submits `done`. That check uses read-only tools. `kilo-code` has no read-only tool turn, so its Test connection runs `kilo --version` instead and passes or fails with that command's own result.
+**Test connection** runs a real agent run through the production path against a synthetic ticket in a scratch directory, once for each mode Coppice launches the connector in: **Chat** (read-only chat flags), **Planning** (the planning flags), then **Ticket work** (the write flags). Each phase must call `ticket_get` and `result_submit` and submit `done`. In a phase that must block writes (chat, and planning where the connector enforces read-only), the agent is also asked to create `coppice-write-check.txt`; if that file appears, the check fails with "this mode did not block writes". The check stops at the first failing phase and names it, for example `Chat: result_submit was not called`. Every connector, Kilo Code included, gets this real check. It sends three prompts, so it only runs when you click it.
 
 `coppice connector doctor <id>` runs the same local checks from a terminal.
 
+## When a run is stopped or fails
+
+- **Timeouts.** Besides each connector's `run_timeout_secs`, a stream-JSON CLI (Claude Code, Codex, Cursor, Kilo Code) is stopped when it prints nothing in its first 3 minutes, or when it prints nothing for 20 minutes while no tool is running. A running tool, such as a long build, may be quiet for longer. OpenCode 2 over ACP has its own limits (see [opencode.md](opencode.md)).
+- **Errors.** Every exit, timeout, stall, and error result carries the CLI's stderr. Claude Code's `is_error` and `terminal_reason` (`prompt_too_long` fails even without the error flag) and Codex's `turn.failed` fail the run with the CLI's own message. A failed or refused `result_submit` is named with Claude Code's permission mode.
+- **Chat replies.** A chat turn that ended cleanly with plain text but no `result_submit` posts that text as the reply. A turn whose `result_submit` failed is a setup problem and fails instead.
+- **Resume.** A failure counts as "session gone" only when it says so (`providers/resume.rs`); then chat retries once in a fresh session. Network, quota, and sign-in failures keep the session.
+- **Version floors.** Claude Code needs 2.0.0 and OpenCode 1.1.54. An older CLI fails at run start with both versions.
+- **Each run** logs one `cli stream summary` line: lines read, JSON lines, whether a terminal event arrived, how it ended, the exit code, and the duration.
+
 ## Tests
 
-No real agent CLI runs in CI or automated tests.
+No real agent CLI runs in CI or automated tests. Output captured from a real CLI is kept as `fixtures/<connector>/<cli>-<version>-<case>.jsonl` (for example `claude-code-2.1.302-plan-submit-refused.jsonl`, `opencode-2.0.20-read-only-turn.jsonl`), with local paths and account details removed, and replayed through the connector's parser in its tests. When a CLI release changes its output, add a file for the new version next to the old one instead of editing it. [CLI integration review](cli-integration-review.md) lists the gaps this leaves, how to close them, and planned connector changes.
 
 - `MockProvider` (`server/src/providers/mock.rs`) is a test-only provider. It replays JSON fixtures from `fixtures/agent-responses/` (pick one with `MOCK_AGENT_RESPONSE`). It's compiled only with the `mock-provider` Cargo feature, which `embedded-test-db`, `make server`, CI and the Docker Compose image turn on. Desktop installers and release builds leave it out, and CI runs the `release_build` tests to check that. It isn't something users pick.
 - Adapters are tested against stand-in binaries: `fake-cli` (Cursor and Kilo Code) and `fake-opencode`.
@@ -113,6 +122,7 @@ No real agent CLI runs in CI or automated tests.
 | `cargo test -p coppice-connectors` | Descriptors, probe, sign-in checks |
 | `cargo test --features embedded-test-db -p coppice-server --test integration_cli_adapters` | Cursor and Kilo Code adapters against `fake-cli` |
 | `cargo test --features embedded-test-db -p coppice-server --test integration_opencode_run_server` | Per-run `opencode serve` against `fake-opencode` |
+| `cargo test --features embedded-test-db -p coppice-server --test integration_acp` | The ACP client against `fake-opencode acp` scenarios: gateway, model, read-only refusal, resume, idle, cancel, oversized lines, early exit. `COPPICE_REAL_OPENCODE=1 … real_opencode -- --ignored` runs a read-only turn on the installed OpenCode 2 |
 | `cargo test --features embedded-test-db -p coppice-server --test integration_connector_diagnostics` | Connectors API and Test connection |
 
 To try a real CLI, run Coppice from source or in Docker, create an agent on that connector, and use **Test connection**.

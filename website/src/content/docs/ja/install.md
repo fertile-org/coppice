@@ -67,7 +67,7 @@ Windows 11 が必要です。古い Windows 10 のビルドでは Linux アプ�
 
    CLI に Not on your PATH と表示されたら、Ubuntu で `coppice` を実行して Coppice を起動してください。
 
-WSL は Windows の PATH を Ubuntu に追加するので、Coppice が Windows 側の CLI を見つけてしまうことがあります。**Tools → Connectors** を開き、各コネクタの CLI のパスを確認してください。パスが `/mnt/c/` で始まっていたら、その CLI を Ubuntu にインストールしてください。
+WSL は Windows の PATH を Ubuntu に追加するので、Coppice が Windows 側の CLI を見つけてしまうことがあります。**System → Connectors** を開き、各コネクタの CLI のパスを確認してください。パスが `/mnt/c/` で始まっていたら、その CLI を Ubuntu にインストールしてください。
 
 リポジトリは `/mnt/c/` の下ではなく、Linux のホームフォルダー（たとえば `~/code/my-app`）に置いてください。その境界をまたぐと git やファイルへのアクセスがかなり遅くなります。フォルダーの選択画面には Linux のパスが表示されます。
 
@@ -78,9 +78,9 @@ WSL は Windows の PATH を Ubuntu に追加するので、Coppice が Windows 
 2. ディスク上にすでにあるローカルの git チェックアウトを指定します。
 3. **エージェント CLI をつなぐ。** エージェントを作るときにエージェント CLI を選ぶと、Coppice がそれをオンにします。それぞれ **Ready**、**Found, not signed in**、**Not on your PATH** のどれかが表示されます。まずはいつもどおりの方法で、ターミナルで CLI にサインインしてください。
 
-   Kilo Code は **Kilo Code — Installed** と表示されます。Tools → Connectors には次の説明が付きます："Coppice can't check this sign-in without using your plan. A run will show an error if you're signed out."（Coppice はあなたのプランを使わずにこのサインインを確認できません。サインアウトしていると実行時にエラーが表示されます。）
+   Kilo Code は **Kilo Code — Installed** と表示されます。System → Connectors には次の説明が付きます："Coppice can't check this sign-in without using your plan. A run will show an error if you're signed out."（Coppice はあなたのプランを使わずにこのサインインを確認できません。サインアウトしていると実行時にエラーが表示されます。）
 
-   あとでコネクタをオフにするには、Tools → Connectors のトグルを使うか、Coppice の `config.toml` でそのコネクタに `enabled = false` を設定します。
+   あとでコネクタをオフにするには、System → Connectors のトグルを使うか、Coppice の `config.toml` でそのコネクタに `enabled = false` を設定します。
 
    - macOS: `~/Library/Application Support/Coppice/config.toml`
    - Linux: `~/.config/Coppice/config.toml`

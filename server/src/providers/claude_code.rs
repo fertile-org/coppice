@@ -1,8 +1,10 @@
 use super::claude_console::ClaudeConsolePublisher;
 use super::cli_runner::{
-    log_launch, run_cli, run_log_dir, CliError, CliInvocation, LineHandler, LineStep, RunIo,
+    log_launch, run_cli, run_cli_interactive, run_log_dir, CliError, CliInvocation, LineHandler,
+    LineStep, RunIo,
 };
 use super::cli_version;
+use super::terminal;
 use super::{
     run_dir, worktree_dir_from_context, AgentProvider, AgentRunInput, AgentRunResult,
     ProviderError, CHAT_READ_ONLY_TOOLS,
@@ -10,7 +12,7 @@ use super::{
 use crate::mcp::grant::McpAccess;
 use crate::mcp::wiring::{claude_tool_pattern, McpServerSpec};
 use crate::services::ticket_attachments;
-use crate::sessions::opencode_events::{coppice_run_prompt, extract_result_from_text};
+use crate::sessions::opencode_events::coppice_run_prompt;
 use crate::sessions::run_registry::RunStreamHandle;
 use async_trait::async_trait;
 use coppice_config::ClaudeCodeProviderConfig;
@@ -125,17 +127,24 @@ impl AgentProvider for ClaudeCodeProvider {
             input.artifacts_dir.as_deref(),
             input.ticket_id.as_deref(),
         );
-        let mut args = contract.with_prompt(
-            contract.argv(&coppice_connectors::LaunchSubst {
-                read_only: read_only_tools,
-                plan: planning,
-                worktree: &worktree_arg,
-                hostname: "",
-                port: "",
-                version: Some(version.as_str()),
-            }),
-            &ticket_attachments::launch_prompt(coppice_run_prompt(), &staged),
-        );
+        let prompt = ticket_attachments::launch_prompt(coppice_run_prompt(), &staged);
+        let argv = contract.argv(&coppice_connectors::LaunchSubst {
+            read_only: read_only_tools,
+            plan: planning,
+            worktree: &worktree_arg,
+            hostname: "",
+            port: "",
+            version: Some(version.as_str()),
+        });
+        // Read-only runs take the prompt on stdin, after a handshake that has
+        // Claude Code ask Coppice before every tool (see `read_only_hook`).
+        let mut args = if read_only_tools {
+            let mut argv = argv;
+            argv.extend(["--input-format".to_string(), "stream-json".to_string()]);
+            argv
+        } else {
+            contract.with_prompt(argv, &prompt)
+        };
         args.extend(ticket_attachments::add_dir_args(&staged));
         push_tool_permission_args(&mut args, read_only_tools, input.mcp.is_some());
         if input.context_profile == crate::domain::context_profile::ContextProfile::Conversation {
@@ -185,40 +194,145 @@ impl AgentProvider for ClaudeCodeProvider {
             ticket_id: input.ticket_id.clone(),
             result_before_exit: contract.result_before_exit,
             result_exit_grace: None,
+            stall_limits: None,
         };
         let mut handler = ClaudeLines {
             stream: input.stream.clone(),
             console: ClaudeConsolePublisher::new(super::tool_name_style(self.id())),
             assistant_text: String::new(),
+            expects_gateway: input.mcp.is_some(),
+            terminal: ClaudeTerminal::default(),
+            tools: Default::default(),
+            hook: read_only_tools.then(super::claude_hook::HookGate::default),
         };
         let io = RunIo {
             cancel_rx: input.cancel_rx,
             session_created_tx: input.session_created_tx,
         };
 
-        let exit = match run_cli(invocation, &mut handler, io).await {
+        let ran = if read_only_tools {
+            run_cli_interactive(
+                invocation,
+                super::claude_hook::opening_lines(&prompt),
+                &mut handler,
+                io,
+            )
+            .await
+        } else {
+            run_cli(invocation, &mut handler, io).await
+        };
+        let exit = match ran {
             Ok(exit) => exit,
             Err(CliError::Spawn(e) | CliError::Io(e)) => return Err(ProviderError::Io(e)),
             Err(CliError::Cancelled) => return Err(ProviderError::Cancelled),
-            Err(CliError::TimedOut { .. }) => {
-                return Err(ProviderError::InvalidFixture(format!(
-                    "claude-code run timed out after {}s",
-                    run_timeout.as_secs()
-                )));
+            Err(CliError::Stalled {
+                reason,
+                stderr_tail,
+            }) => {
+                return Err(super::terminal::stalled(
+                    "Claude Code",
+                    &reason,
+                    &stderr_tail,
+                ));
+            }
+            Err(CliError::TimedOut { stderr_tail }) => {
+                return Err(terminal::timed_out(
+                    NAME,
+                    run_timeout.as_secs(),
+                    &stderr_tail,
+                ));
             }
         };
-
-        if !exit.status.success() && !exit.had_terminal_result {
-            return Err(ProviderError::InvalidFixture(format!(
-                "claude-code exited with status {}",
-                exit.status
-            )));
-        }
-
-        extract_result_from_text(&handler.assistant_text).ok_or_else(|| {
-            ProviderError::MissingResult("no result contract found in claude-code output".into())
-        })
+        decide(&handler, &exit, input.context_profile)
     }
+}
+
+/// The run's outcome once the CLI is done.
+fn decide(
+    handler: &ClaudeLines,
+    exit: &super::cli_runner::CliExit,
+    profile: crate::domain::context_profile::ContextProfile,
+) -> Result<AgentRunResult, ProviderError> {
+    let t = &handler.terminal;
+
+    if let Some(status) = &t.gateway_failed {
+        return Err(super::mcp_unavailable(&format!(
+            "Claude Code couldn't connect to the Coppice gateway (MCP status: {status}){}",
+            terminal::stderr_suffix(&exit.stderr_tail)
+        )));
+    }
+    if !exit.status.success() && !exit.had_terminal_result {
+        return Err(terminal::exited(NAME, &exit.status, &exit.stderr_tail));
+    }
+    // terminal_reason is checked on its own: prompt_too_long has been seen
+    // arriving with is_error false.
+    if t.terminal_reason.as_deref() == Some("prompt_too_long") {
+        return Err(terminal::error_result(
+            NAME,
+            Some(&format!(
+                "the session's context window is full (terminal_reason prompt_too_long){}",
+                t.error_text
+                    .as_deref()
+                    .map(|text| format!(": {text}"))
+                    .unwrap_or_default()
+            )),
+            &exit.stderr_tail,
+        ));
+    }
+    if t.is_error {
+        return Err(terminal::error_result(
+            NAME,
+            t.error_text.as_deref(),
+            &exit.stderr_tail,
+        ));
+    }
+
+    let stderr = terminal::stderr_suffix(&exit.stderr_tail);
+    let mode = t.permission_mode.as_deref().unwrap_or("unknown");
+    // A refused or failed submission is a broken setup, not a plain reply,
+    // even when the agent explains it in text.
+    let submit_problem = if let Some(error) = &t.submit_error {
+        Some(format!(
+            "Claude Code's result_submit call failed: {} (permission mode {mode}){stderr}",
+            crate::util::truncate::truncate_with_ellipsis(error.trim(), 300)
+        ))
+    } else if t
+        .denied_tools
+        .iter()
+        .any(|tool| tool.ends_with("result_submit"))
+    {
+        Some(format!(
+            "Claude Code refused the result_submit tool (permission mode {mode}), so the result never reached Coppice{stderr}"
+        ))
+    } else {
+        None
+    };
+    if let Some(problem) = submit_problem {
+        return crate::sessions::opencode_events::extract_result_from_text(&handler.assistant_text)
+            .ok_or(ProviderError::MissingResult(problem));
+    }
+    terminal::result_from_text(&handler.assistant_text, profile, NAME, || {
+        format!("no result contract found in claude-code output{stderr}")
+    })
+}
+
+const NAME: &str = "Claude Code";
+
+/// What the stream said about how the turn went.
+#[derive(Default)]
+struct ClaudeTerminal {
+    is_error: bool,
+    terminal_reason: Option<String>,
+    error_text: Option<String>,
+    /// Tools the CLI refused (`permission_denials` on the result event).
+    denied_tools: Vec<String>,
+    /// The error a `result_submit` call came back with, when it failed.
+    submit_error: Option<String>,
+    submit_call_ids: Vec<String>,
+    /// From the init event.
+    permission_mode: Option<String>,
+    /// The Coppice MCP server's status when it was not connected at startup.
+    gateway_failed: Option<String>,
 }
 
 /// Forwards console events and accumulates assistant text; the `result`
@@ -227,9 +341,51 @@ struct ClaudeLines {
     stream: Option<Arc<RunStreamHandle>>,
     console: ClaudeConsolePublisher,
     assistant_text: String,
+    expects_gateway: bool,
+    terminal: ClaudeTerminal,
+    tools: super::cli_runner::ToolTracker,
+    /// Read-only runs: answers Claude Code's tool hooks.
+    hook: Option<super::claude_hook::HookGate>,
+}
+
+/// Tool calls in flight: `tool_use` starts one, its `tool_result` ends it.
+fn track_tools(tools: &mut super::cli_runner::ToolTracker, value: &serde_json::Value) {
+    let Some(content) = value
+        .get("message")
+        .and_then(|m| m.get("content"))
+        .and_then(|c| c.as_array())
+    else {
+        return;
+    };
+    for part in content {
+        match part.get("type").and_then(|t| t.as_str()) {
+            Some("tool_use") => {
+                if let Some(id) = part.get("id").and_then(|v| v.as_str()) {
+                    tools.started(id);
+                }
+            }
+            Some("tool_result") => {
+                if let Some(id) = part.get("tool_use_id").and_then(|v| v.as_str()) {
+                    tools.finished(id);
+                }
+            }
+            _ => {}
+        }
+    }
 }
 
 impl LineHandler for ClaudeLines {
+    fn tools_running(&self) -> bool {
+        self.tools.any()
+    }
+
+    fn take_replies(&mut self) -> Vec<String> {
+        self.hook
+            .as_mut()
+            .map(super::claude_hook::HookGate::take_replies)
+            .unwrap_or_default()
+    }
+
     fn on_json(&mut self, value: &serde_json::Value) -> LineStep {
         let session_id = value
             .get("session_id")
@@ -249,13 +405,123 @@ impl LineHandler for ClaudeLines {
             self.assistant_text.push_str(&text);
         }
 
-        let stop = value.get("type").and_then(|v| v.as_str()) == Some("result");
+        let ty = value.get("type").and_then(|v| v.as_str());
+        if let Some(hook) = self.hook.as_mut() {
+            hook.on_json(value);
+        }
+        self.terminal.note_submit_attempts(value);
+        track_tools(&mut self.tools, value);
+        if ty == Some("system") && value.get("subtype").and_then(|v| v.as_str()) == Some("init") {
+            self.terminal.permission_mode = value
+                .get("permissionMode")
+                .and_then(|v| v.as_str())
+                .map(str::to_string);
+            if self.expects_gateway {
+                self.terminal.gateway_failed = gateway_failure(value);
+                if self.terminal.gateway_failed.is_some() {
+                    return LineStep {
+                        session_id,
+                        stop: true,
+                    };
+                }
+            }
+        }
+        let stop = ty == Some("result");
         if stop {
+            self.terminal.is_error = value.get("is_error").and_then(|v| v.as_bool()) == Some(true);
+            self.terminal.terminal_reason = value
+                .get("terminal_reason")
+                .and_then(|v| v.as_str())
+                .map(str::to_string);
+            self.terminal.denied_tools = value
+                .get("permission_denials")
+                .and_then(|v| v.as_array())
+                .map(|denials| {
+                    denials
+                        .iter()
+                        .filter_map(|d| d.get("tool_name").and_then(|v| v.as_str()))
+                        .map(str::to_string)
+                        .collect()
+                })
+                .unwrap_or_default();
             if let Some(final_text) = value.get("result").and_then(|v| v.as_str()) {
+                if self.terminal.is_error {
+                    self.terminal.error_text = Some(final_text.to_string());
+                }
                 self.assistant_text = final_text.to_string();
             }
         }
         LineStep { session_id, stop }
+    }
+}
+
+impl ClaudeTerminal {
+    /// Remembers `result_submit` tool calls and the error one came back with.
+    fn note_submit_attempts(&mut self, value: &serde_json::Value) {
+        let Some(content) = value
+            .get("message")
+            .and_then(|m| m.get("content"))
+            .and_then(|c| c.as_array())
+        else {
+            return;
+        };
+        for part in content {
+            match part.get("type").and_then(|t| t.as_str()) {
+                Some("tool_use") => {
+                    let is_submit = part
+                        .get("name")
+                        .and_then(|n| n.as_str())
+                        .is_some_and(|name| name.ends_with("result_submit"));
+                    if let (true, Some(id)) = (is_submit, part.get("id").and_then(|v| v.as_str())) {
+                        self.submit_call_ids.push(id.to_string());
+                    }
+                }
+                Some("tool_result") => {
+                    let ours = part
+                        .get("tool_use_id")
+                        .and_then(|v| v.as_str())
+                        .is_some_and(|id| self.submit_call_ids.iter().any(|c| c == id));
+                    let failed = part.get("is_error").and_then(|v| v.as_bool()) == Some(true);
+                    if ours && failed {
+                        self.submit_error = Some(tool_result_text(part));
+                    } else if ours {
+                        self.submit_error = None;
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+}
+
+/// A tool result's text, whether `content` is a string or a list of parts.
+fn tool_result_text(part: &serde_json::Value) -> String {
+    match part.get("content") {
+        Some(serde_json::Value::String(text)) => text.clone(),
+        Some(serde_json::Value::Array(items)) => items
+            .iter()
+            .filter_map(|item| item.get("text").and_then(|t| t.as_str()))
+            .collect::<Vec<_>>()
+            .join("\n"),
+        _ => String::new(),
+    }
+}
+
+/// The Coppice server's status from the init event's `mcp_servers`, when it
+/// failed. `pending` is still connecting and is not a failure; a missing entry
+/// means the config never loaded it.
+fn gateway_failure(init: &serde_json::Value) -> Option<String> {
+    let servers = init.get("mcp_servers")?.as_array()?;
+    let ours = servers.iter().find(|server| {
+        server.get("name").and_then(|v| v.as_str()) == Some(crate::mcp::protocol::SERVER_NAME)
+    });
+    match ours
+        .and_then(|server| server.get("status"))
+        .and_then(|v| v.as_str())
+    {
+        None if ours.is_none() => Some("not loaded".into()),
+        Some("connected") | Some("pending") | None => None,
+        Some(other) => Some(other.to_string()),
     }
 }
 
@@ -284,7 +550,273 @@ fn extract_assistant_text(value: &serde_json::Value) -> Option<String> {
 mod tests {
     use super::*;
     use crate::mcp::protocol::SERVER_NAME;
+    use crate::sessions::opencode_events::extract_result_from_text;
     use std::path::PathBuf;
+
+    mod outcome {
+        use super::super::*;
+        use crate::domain::context_profile::ContextProfile;
+        use serde_json::json;
+        use std::os::unix::process::ExitStatusExt;
+
+        fn handler(gateway: bool) -> ClaudeLines {
+            ClaudeLines {
+                stream: None,
+                console: ClaudeConsolePublisher::new(super::super::super::tool_name_style(
+                    "claude-code",
+                )),
+                assistant_text: String::new(),
+                expects_gateway: gateway,
+                terminal: ClaudeTerminal::default(),
+                tools: Default::default(),
+                hook: None,
+            }
+        }
+
+        fn exit(code: i32, stderr: &[&str]) -> super::super::super::cli_runner::CliExit {
+            super::super::super::cli_runner::CliExit {
+                status: std::process::ExitStatus::from_raw(code << 8),
+                stderr_tail: stderr.iter().map(|s| s.to_string()).collect(),
+                had_terminal_result: false,
+                stopped_after_result: false,
+            }
+        }
+
+        fn init(mode: &str, status: &str) -> serde_json::Value {
+            json!({ "type": "system", "subtype": "init", "permissionMode": mode,
+                    "mcp_servers": [{ "name": "coppice", "status": status }] })
+        }
+
+        fn result(text: &str, is_error: bool, reason: &str) -> serde_json::Value {
+            json!({ "type": "result", "subtype": "success", "is_error": is_error,
+                    "terminal_reason": reason, "result": text, "permission_denials": [] })
+        }
+
+        fn feed(h: &mut ClaudeLines, lines: &[serde_json::Value]) {
+            for line in lines {
+                h.on_json(line);
+            }
+        }
+
+        #[test]
+        fn a_refused_submit_names_the_tool_error_even_in_chat() {
+            // The rc.8 shape: plan mode refused the MCP call; the agent explained.
+            let mut h = handler(true);
+            feed(
+                &mut h,
+                &[
+                    init("plan", "connected"),
+                    json!({ "type": "assistant", "message": { "content": [
+                    { "type": "tool_use", "id": "toolu_1", "name": "mcp__coppice__result_submit", "input": {} } ] } }),
+                    json!({ "type": "user", "message": { "content": [
+                    { "type": "tool_result", "tool_use_id": "toolu_1", "is_error": true,
+                      "content": "Cannot call mcp__coppice__result_submit while in plan mode." } ] } }),
+                    result(
+                        "I couldn't submit the reply because plan mode is on.",
+                        false,
+                        "completed",
+                    ),
+                ],
+            );
+            let err = decide(&h, &exit(0, &[]), ContextProfile::Conversation).unwrap_err();
+            let msg = err.to_string();
+            assert!(matches!(err, ProviderError::MissingResult(_)), "{msg}");
+            assert!(
+                msg.contains("result_submit call failed: Cannot call"),
+                "{msg}"
+            );
+            assert!(msg.contains("permission mode plan"), "{msg}");
+        }
+
+        #[test]
+        fn a_later_successful_submit_clears_the_error() {
+            let mut h = handler(true);
+            feed(
+                &mut h,
+                &[
+                    init("dontAsk", "connected"),
+                    json!({ "type": "assistant", "message": { "content": [
+                    { "type": "tool_use", "id": "a", "name": "mcp__coppice__result_submit" },
+                    { "type": "tool_use", "id": "b", "name": "mcp__coppice__result_submit" } ] } }),
+                    json!({ "type": "user", "message": { "content": [
+                    { "type": "tool_result", "tool_use_id": "a", "is_error": true, "content": [{ "type": "text", "text": "bad args" }] },
+                    { "type": "tool_result", "tool_use_id": "b", "content": "ok" } ] } }),
+                    result("Done.", false, "completed"),
+                ],
+            );
+            let reply =
+                decide(&h, &exit(0, &[]), ContextProfile::Conversation).expect("plain reply");
+            assert!(matches!(reply, AgentRunResult::Done { .. }));
+        }
+
+        #[test]
+        fn a_permission_denial_of_submit_is_named() {
+            let mut h = handler(true);
+            let mut done = result("text", false, "completed");
+            done["permission_denials"] =
+                json!([{ "tool_name": "mcp__coppice__result_submit", "tool_use_id": "x" }]);
+            feed(&mut h, &[init("default", "connected"), done]);
+            let msg = decide(&h, &exit(0, &[]), ContextProfile::Full)
+                .unwrap_err()
+                .to_string();
+            assert!(
+                msg.contains("refused the result_submit tool (permission mode default)"),
+                "{msg}"
+            );
+        }
+
+        #[test]
+        fn a_gateway_that_did_not_connect_stops_the_run_early() {
+            let mut h = handler(true);
+            let step = h.on_json(&init("dontAsk", "failed"));
+            assert!(step.stop);
+            let msg = decide(
+                &h,
+                &exit(0, &["mcp: connection refused"]),
+                ContextProfile::Full,
+            )
+            .unwrap_err()
+            .to_string();
+            assert!(msg.contains("mcp_unavailable: Claude Code couldn't connect to the Coppice gateway (MCP status: failed)"), "{msg}");
+            assert!(msg.contains("connection refused"), "{msg}");
+
+            let mut h = handler(true);
+            assert!(!h.on_json(&init("dontAsk", "pending")).stop);
+            let mut missing = init("dontAsk", "connected");
+            missing["mcp_servers"] = json!([]);
+            assert!(h.on_json(&missing).stop, "a gateway that never loaded");
+            // No gateway was asked for: its absence is fine.
+            let mut h = handler(false);
+            assert!(!h.on_json(&missing).stop);
+        }
+
+        #[test]
+        fn an_error_result_uses_the_cli_text() {
+            let mut h = handler(false);
+            feed(
+                &mut h,
+                &[result("API Error: 529 Overloaded", true, "api_error")],
+            );
+            let err = decide(&h, &exit(0, &[]), ContextProfile::Full).unwrap_err();
+            assert!(matches!(err, ProviderError::MissingResult(_)));
+            assert!(
+                err.to_string()
+                    .contains("Claude Code ended with an error: API Error: 529 Overloaded"),
+                "{err}"
+            );
+        }
+
+        #[test]
+        fn a_full_context_fails_even_without_the_error_flag() {
+            let mut h = handler(false);
+            feed(&mut h, &[result("", false, "prompt_too_long")]);
+            let msg = decide(&h, &exit(0, &[]), ContextProfile::Full)
+                .unwrap_err()
+                .to_string();
+            assert!(msg.contains("context window is full"), "{msg}");
+        }
+
+        #[test]
+        fn plain_text_is_a_chat_reply_but_not_a_ticket_result() {
+            let mut h = handler(false);
+            feed(&mut h, &[result("Hi there!", false, "completed")]);
+            assert!(decide(&h, &exit(0, &[]), ContextProfile::Conversation).is_ok());
+            let msg = decide(&h, &exit(0, &[]), ContextProfile::Full)
+                .unwrap_err()
+                .to_string();
+            assert!(
+                msg.contains("no result contract found in claude-code output"),
+                "{msg}"
+            );
+        }
+
+        #[test]
+        fn a_tool_counts_as_running_until_its_result() {
+            let mut h = handler(false);
+            assert!(!h.tools_running());
+            h.on_json(&json!({ "type": "assistant", "message": { "content": [
+                { "type": "tool_use", "id": "b1", "name": "Bash", "input": { "command": "cargo test" } } ] } }));
+            assert!(h.tools_running());
+            h.on_json(&json!({ "type": "user", "message": { "content": [
+                { "type": "tool_result", "tool_use_id": "b1", "content": "ok" } ] } }));
+            assert!(!h.tools_running());
+        }
+
+        fn replay(name: &str) -> ClaudeLines {
+            let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("../fixtures/claude-code")
+                .join(name);
+            let mut h = handler(true);
+            for line in std::fs::read_to_string(path).expect("fixture").lines() {
+                h.on_json(&serde_json::from_str(line).expect("json line"));
+            }
+            h
+        }
+
+        #[test]
+        fn recorded_2_1_302_dont_ask_run_submits_and_ends_cleanly() {
+            let h = replay("claude-code-2.1.302-dontask-submit.jsonl");
+            assert!(h.terminal.gateway_failed.is_none());
+            assert_eq!(h.terminal.permission_mode.as_deref(), Some("dontAsk"));
+            assert!(h.terminal.submit_error.is_none());
+            assert!(!h.tools_running());
+            // Its final words are prose; a chat keeps them, a ticket needs the submission.
+            assert!(decide(&h, &exit(0, &[]), ContextProfile::Conversation).is_ok());
+            assert!(matches!(
+                decide(&h, &exit(0, &[]), ContextProfile::Full),
+                Err(ProviderError::MissingResult(_))
+            ));
+        }
+
+        #[test]
+        fn recorded_2_1_302_plan_mode_refusal_is_named() {
+            let h = replay("claude-code-2.1.302-plan-submit-refused.jsonl");
+            assert_eq!(h.terminal.permission_mode.as_deref(), Some("plan"));
+            assert!(h
+                .terminal
+                .denied_tools
+                .iter()
+                .any(|t| t == "mcp__coppice__result_submit"));
+            let msg = decide(&h, &exit(0, &[]), ContextProfile::Conversation)
+                .unwrap_err()
+                .to_string();
+            assert!(
+                msg.contains("Cannot call mcp__coppice__result_submit while in plan mode"),
+                "{msg}"
+            );
+            assert!(msg.contains("permission mode plan"), "{msg}");
+        }
+
+        #[test]
+        fn a_read_only_run_answers_tool_hooks_through_the_handler() {
+            let mut h = handler(true);
+            h.hook = Some(Default::default());
+            h.on_json(&json!({ "type": "control_request", "request_id": "q1",
+                "request": { "subtype": "hook_callback", "callback_id": "coppice-pre-tool-use",
+                             "input": { "tool_name": "Write" } } }));
+            let replies = h.take_replies();
+            assert_eq!(replies.len(), 1);
+            assert!(replies[0].contains("\"permissionDecision\":\"deny\""), "{}", replies[0]);
+            assert!(h.take_replies().is_empty());
+            // A write run has no gate and writes nothing back.
+            let mut write = handler(false);
+            write.on_json(&json!({ "type": "control_request", "request_id": "q2", "request": {} }));
+            assert!(write.take_replies().is_empty());
+        }
+
+        #[test]
+        fn a_crash_before_any_result_carries_stderr() {
+            let h = handler(false);
+            let err = decide(
+                &h,
+                &exit(1, &["Error: not logged in"]),
+                ContextProfile::Full,
+            )
+            .unwrap_err();
+            assert!(matches!(err, ProviderError::InvalidFixture(_)));
+            assert!(err.to_string().contains("not logged in"), "{err}");
+        }
+    }
 
     #[test]
     fn blank_model_omits_model_flag_from_launched_command() {
@@ -416,8 +948,9 @@ mod tests {
             .expect("claude-code descriptor")
             .run_contract;
         let mut args = contract.with_prompt(
+            // Same as `run()`: planning is always read-only.
             contract.argv(&coppice_connectors::LaunchSubst {
-                read_only,
+                read_only: read_only || plan,
                 plan,
                 worktree: "/tmp/chat",
                 hostname: "",
@@ -487,7 +1020,7 @@ mod tests {
         let args = chat_argv(true, false, false);
         assert!(
             args.windows(2)
-                .any(|pair| pair == ["--permission-mode", "plan"]),
+                .any(|pair| pair == ["--permission-mode", "dontAsk"]),
             "{args:?}"
         );
         assert!(
@@ -536,7 +1069,10 @@ mod tests {
             .expect("user hook fixture");
         let user: serde_json::Value = serde_json::from_str(&raw).expect("parse user settings");
         let stored = hook_commands(&user);
-        assert_eq!(stored, vec!["touch \"$HOME/coppice-user-hook-ran\"".to_string()]);
+        assert_eq!(
+            stored,
+            vec!["touch \"$HOME/coppice-user-hook-ran\"".to_string()]
+        );
         assert_eq!(
             enabled_hook_commands(&user, &serde_json::json!({})),
             stored,
@@ -563,7 +1099,7 @@ mod tests {
 
         assert!(args
             .windows(2)
-            .any(|pair| pair == ["--permission-mode", "plan"]));
+            .any(|pair| pair == ["--permission-mode", "dontAsk"]));
         assert_eq!(
             args.iter()
                 .filter(|arg| arg.as_str() == "--strict-mcp-config")
@@ -573,9 +1109,7 @@ mod tests {
         );
         let raw = std::fs::read_to_string(flag_value(&args, "--mcp-config")).expect("mcp.json");
         let doc: serde_json::Value = serde_json::from_str(&raw).expect("parse mcp.json");
-        let servers = doc["mcpServers"]
-            .as_object()
-            .expect("mcpServers object");
+        let servers = doc["mcpServers"].as_object().expect("mcpServers object");
         assert_eq!(servers.keys().cloned().collect::<Vec<_>>(), vec!["coppice"]);
         assert_eq!(servers["coppice"]["url"], "http://127.0.0.1:5000/mcp");
         assert!(!raw.contains("super-secret-run-token"));
@@ -588,7 +1122,7 @@ mod tests {
         let args = chat_argv(false, true, true);
         assert!(args
             .windows(2)
-            .any(|pair| pair == ["--permission-mode", "plan"]));
+            .any(|pair| pair == ["--permission-mode", "dontAsk"]));
         assert!(!args.iter().any(|arg| arg == "bypassPermissions"));
         assert!(flag_value(&args, "--disallowedTools")
             .split(',')

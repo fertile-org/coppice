@@ -1,25 +1,32 @@
+pub mod acp;
 pub mod claude_code;
 pub mod claude_console;
+pub mod claude_hook;
 pub mod cli_catalog;
 pub mod cli_runner;
 pub mod cli_version;
 pub mod codex;
 pub mod codex_console;
 pub mod codex_models;
+pub mod env_hygiene;
 pub mod cursor;
 pub mod cursor_console;
 pub mod cursor_models;
 pub mod kilo_code;
 pub mod kilo_console;
 pub mod kilo_models;
+pub mod line_reader;
 #[cfg(feature = "mock-provider")]
 pub mod mock;
 pub mod model_flag;
 pub mod models;
 pub mod opencode;
+pub mod opencode_acp;
 pub mod opencode_models;
 pub mod registry;
 pub mod reported_model;
+pub mod resume;
+pub mod terminal;
 
 pub use coppice_connectors::{ConnectorDescriptor, ToolNameStyle};
 pub use models::{ModelCatalog, ModelInfo};
@@ -124,6 +131,54 @@ pub fn run_dir(input: &AgentRunInput, connector: &str) -> Result<PathBuf, Provid
 
 /// A run that has a gateway token but no way to hand it to the CLI must fail
 /// loudly — there is no fallback to the fat context.
+/// The console a run on `connector` produces when the installed CLI version
+/// decides it, or `None` to use the connector's default.
+pub async fn run_console_kind(
+    connector: &str,
+    config: &coppice_config::AppConfig,
+) -> Option<coppice_connectors::ConsoleKind> {
+    if connector != coppice_connectors::OPENCODE {
+        return None;
+    }
+    let version = cli_version::detect(&config.agent.connectors.opencode.command)
+        .await
+        .ok()?;
+    Some(if opencode_acp::uses_acp(&version) {
+        coppice_connectors::ConsoleKind::Structured
+    } else {
+        coppice_connectors::ConsoleKind::OpenCodeSession
+    })
+}
+
+/// The sentence to fail a run with when the installed CLI is older than the
+/// connector's floor. `None` when it is new enough or its version is unknown.
+pub async fn below_min_version(connector: &str, config: &coppice_config::AppConfig) -> Option<String> {
+    let descriptor = descriptor(connector)?;
+    descriptor.min_version?;
+    let command = config
+        .agent
+        .connectors
+        .command(connector)
+        .unwrap_or(descriptor.binary);
+    let version = cli_version::detect(command).await.ok()?;
+    coppice_connectors::check_min_version(descriptor, Some(&version)).err()
+}
+
+/// `ConsoleKind` as stored on a run and sent to the web app.
+pub fn console_kind_name(kind: coppice_connectors::ConsoleKind) -> String {
+    serde_json::to_value(kind)
+        .ok()
+        .and_then(|value| value.as_str().map(str::to_string))
+        .unwrap_or_default()
+}
+
+pub fn parse_console_kind(name: &str) -> Option<coppice_connectors::ConsoleKind> {
+    use coppice_connectors::ConsoleKind;
+    [ConsoleKind::OpenCodeSession, ConsoleKind::Structured, ConsoleKind::Plain]
+        .into_iter()
+        .find(|kind| console_kind_name(*kind) == name)
+}
+
 pub fn mcp_unavailable(reason: &str) -> ProviderError {
     ProviderError::InvalidInput(format!("mcp_unavailable: {reason}"))
 }
@@ -423,10 +478,9 @@ pub fn is_resume_session_invalid(err: &ProviderError) -> bool {
         ProviderError::InvalidInput(msg)
         | ProviderError::InvalidFixture(msg)
         | ProviderError::MissingResult(msg) => {
-            let m = msg.to_ascii_lowercase();
-            ["session not found", "invalid resume", "unknown session"]
-                .iter()
-                .any(|needle| m.contains(needle))
+            // Claude Code prints "No conversation found" on stderr, which
+            // the failure message now carries.
+            resume::session_is_unusable(msg) || msg.to_ascii_lowercase().contains("invalid resume")
         }
         _ => false,
     }
@@ -540,6 +594,18 @@ mod tests {
             "no final result".into()
         )));
         assert!(!is_resume_session_invalid(&ProviderError::Cancelled));
+        // Claude Code's missing transcript, carried in the failure's stderr.
+        assert!(is_resume_session_invalid(&ProviderError::InvalidFixture(
+            "Claude Code exited with exit status: 1 before finishing (stderr: No conversation found with session ID: 9f0)".into()
+        )));
+        // Not cured by a new session: keep the session for the next turn.
+        for msg in [
+            "Claude Code exited with exit status: 1 before finishing (stderr: connect ECONNREFUSED)",
+            "Codex ended with an error: 429 Too Many Requests",
+            "Your session has expired. Please run claude login.",
+        ] {
+            assert!(!is_resume_session_invalid(&ProviderError::InvalidFixture(msg.into())), "{msg}");
+        }
     }
 
     #[test]

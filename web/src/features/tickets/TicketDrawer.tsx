@@ -121,9 +121,10 @@ function TicketDrawerPanel({
   const shouldReconnectLiveRun = liveRun
     ? shouldPollRunForReconciliation(liveRun)
     : false;
-  const liveConsole = connectors?.find(
-    (c) => c.id === liveRun?.connector,
-  )?.console;
+  // A run's own format wins: OpenCode 1.x and 2.x runs render differently.
+  const liveConsole =
+    liveRun?.consoleKind ??
+    connectors?.find((c) => c.id === liveRun?.connector)?.console;
   const runAgentDisabledReason = isArchived
     ? 'Unarchive this ticket before running an agent.'
     : !ticket?.assigneeAgentId

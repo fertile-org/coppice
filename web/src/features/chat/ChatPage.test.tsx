@@ -328,13 +328,51 @@ describe('ChatPage', () => {
     });
   });
 
-  it('shows a new-chat button whose tooltip names the agent', () => {
+  it('opens the newest chat when the page opens', async () => {
+    mocks.sessions = [
+      { ...ACTIVE_SESSION, title: 'Older', updatedAt: '2026-09-08T00:01:00Z' },
+      {
+        ...ACTIVE_SESSION,
+        id: '00000000-0000-4000-8000-000000000099',
+        title: 'Newest',
+        updatedAt: '2026-09-08T00:05:00Z',
+      },
+    ];
     renderChat('/chat');
-    const button = screen.getByRole('button', {
+
+    expect(await screen.findByTestId('chat-session-pane')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Newest' })).toHaveAttribute('aria-current', 'page');
+  });
+
+  it('opens a new chat with the first agent when there are no chats', async () => {
+    renderChat('/chat');
+
+    expect(
+      await screen.findByText('Say hi to Backend Engineer. They can see all your projects.'),
+    ).toBeInTheDocument();
+  });
+
+  it('puts New chat in the open chat header, not on every agent row', async () => {
+    mocks.sessions = [{ ...ACTIVE_SESSION, title: 'Fix the login form' }];
+    renderChat(`/chat/${ACTIVE_SESSION.id}`);
+
+    const header = await screen.findByTestId('chat-session-header');
+    const button = within(header).getByRole('button', {
       name: 'New chat with Backend Engineer',
     });
     expect(button).toHaveAttribute('title', 'New chat with Backend Engineer');
-    expect(button).toHaveTextContent('New chat');
+    const list = screen.getByTestId('chat-session-list');
+    expect(within(list).queryByRole('button', { name: /New chat/ })).toBeNull();
+
+    fireEvent.click(button);
+    expect(
+      await screen.findByText('Say hi to Backend Engineer. They can see all your projects.'),
+    ).toBeInTheDocument();
+    expect(
+      within(screen.getByTestId('chat-session-header')).queryByRole('button', {
+        name: /New chat/,
+      }),
+    ).toBeNull();
   });
 
   it('expands an agent that has several chats and titles them from the first message', () => {

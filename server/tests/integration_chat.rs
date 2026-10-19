@@ -1986,3 +1986,78 @@ async fn set_agent_connector(pool: &sqlx::PgPool, agent_id: uuid::Uuid, connecto
         .await
         .unwrap();
 }
+
+#[tokio::test]
+async fn failed_chat_turn_leaves_a_system_note_in_the_chat() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+
+    // No such fixture, so the turn fails the way a turn with no result does.
+    let (app, cookie, csrf, _env) =
+        common::bootstrap_and_login_with_workers("missing_agent/chat_turn").await;
+    let agent_id = common::create_agent_with_preset_key(
+        &app,
+        "backend_engineer",
+        "Backend Engineer",
+        &cookie,
+        &csrf,
+    )
+    .await;
+    let created = app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            "/api/chat/sessions",
+            &format!(r#"{{"agentId":"{agent_id}"}}"#),
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    let session: serde_json::Value = common::json_body(created).await;
+    let session_id = session["id"].as_str().unwrap();
+    let posted = app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            &format!("/api/chat/sessions/{session_id}/messages"),
+            r#"{"body":"hi"}"#,
+            &cookie,
+            &csrf,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(posted.status(), StatusCode::CREATED);
+
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
+    let mut note = None;
+    while tokio::time::Instant::now() < deadline {
+        let list = app
+            .clone()
+            .oneshot(common::json_request(
+                "GET",
+                &format!("/api/chat/sessions/{session_id}/messages"),
+                "",
+                &cookie,
+                &csrf,
+            ))
+            .await
+            .unwrap();
+        let body: serde_json::Value = common::json_body(list).await;
+        let messages = body["messages"].as_array().unwrap();
+        if let Some(msg) = messages.iter().find(|m| m["role"] == "system") {
+            assert!(messages.iter().all(|m| m["role"] != "agent"));
+            note = Some(msg["body"].as_str().unwrap().to_string());
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    let note = note.expect("system note after the failed turn");
+    assert!(
+        note.starts_with("The agent stopped without sending a reply."),
+        "{note}"
+    );
+    assert!(note.contains("Details: "), "{note}");
+}

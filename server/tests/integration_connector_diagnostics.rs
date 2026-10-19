@@ -570,7 +570,7 @@ async fn check_run_fails_without_ticket_get() {
         .await
         .unwrap();
     assert_eq!(detail.status, "failed");
-    assert_eq!(detail.failure.as_deref(), Some("ticket_get was not called"));
+    assert_eq!(detail.failure.as_deref(), Some("Chat: ticket_get was not called"));
     std::env::remove_var("MOCK_AGENT_RESPONSE");
 }
 
@@ -1074,7 +1074,7 @@ async fn check_records_non_done_result_and_fails_with_its_name() {
         .await
         .unwrap();
     assert_eq!(detail.status, "failed");
-    assert_eq!(detail.failure.as_deref(), Some("result was blocked"));
+    assert_eq!(detail.failure.as_deref(), Some("Chat: result was blocked"));
     assert!(
         detail
             .tool_calls
@@ -1099,7 +1099,7 @@ async fn check_first_submitted_outcome_wins() {
         .await
         .unwrap();
     assert_eq!(detail.status, "failed");
-    assert_eq!(detail.failure.as_deref(), Some("result was blocked"));
+    assert_eq!(detail.failure.as_deref(), Some("Chat: result was blocked"));
     let submits: Vec<&str> = detail
         .tool_calls
         .iter()
@@ -1154,11 +1154,13 @@ async fn run_kilo_version_check(body: &str) -> (Arc<AppState>, Uuid, tempfile::T
 }
 
 #[tokio::test]
-async fn kilo_test_connection_passes_when_version_exits_zero() {
+async fn kilo_test_connection_runs_a_real_check() {
     let _guard = common::DB_TEST_LOCK.lock().await;
     if !common::db_available().await {
         return;
     }
+    // A Kilo Code that only answers --version: the check must launch a real
+    // `kilo run` turn, not stop at the version.
     let (state, check_id, _dir) = run_kilo_version_check(
         r#"case "$1" in
   --version) echo "kilo 1.2.3"; exit 0 ;;
@@ -1170,40 +1172,9 @@ esac"#,
         .get(check_id)
         .await
         .unwrap();
-    assert_eq!(detail.status, "passed", "{:?}", detail.failure);
-    assert!(detail.failure.is_none(), "{:?}", detail.failure);
-    assert!(
-        detail.tool_calls.is_empty(),
-        "version check must not run tools: {:?}",
-        detail.tool_calls
-    );
-    std::env::remove_var("MOCK_AGENT_RESPONSE");
-}
-
-#[tokio::test]
-async fn kilo_test_connection_fails_when_version_exits_nonzero() {
-    let _guard = common::DB_TEST_LOCK.lock().await;
-    if !common::db_available().await {
-        return;
-    }
-    let (state, check_id, _dir) = run_kilo_version_check(
-        r#"case "$1" in
-  --version) echo "kilo: version check failed" >&2; exit 1 ;;
-  *) echo "unexpected: $*" >&2; exit 2 ;;
-esac"#,
-    )
-    .await;
-    let detail = ConnectorCheckService::new(state.db.as_ref().unwrap())
-        .get(check_id)
-        .await
-        .unwrap();
     assert_eq!(detail.status, "failed");
     let failure = detail.failure.expect("failure reason");
-    assert!(failure.contains("kilo: version check failed"), "{failure}");
-    assert!(
-        !failure.contains("read-only"),
-        "version check must not be the read-only tool turn: {failure}"
-    );
-    assert!(detail.tool_calls.is_empty(), "{:?}", detail.tool_calls);
+    assert!(failure.starts_with("Chat: "), "{failure}");
+    assert!(failure.contains("unexpected: run"), "{failure}");
     std::env::remove_var("MOCK_AGENT_RESPONSE");
 }

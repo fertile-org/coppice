@@ -67,7 +67,7 @@ Il faut Windows 11, car les anciennes versions de Windows 10 ne peuvent pas affi
 
    Si une CLI affiche Not on your PATH, lancez Coppice avec `coppice` dans Ubuntu.
 
-WSL ajoute votre PATH Windows à Ubuntu, donc Coppice pourrait trouver une copie Windows d’une CLI. Ouvrez **Tools → Connectors** et regardez le chemin de la CLI de chaque connecteur. Si un chemin commence par `/mnt/c/`, installez cette CLI dans Ubuntu.
+WSL ajoute votre PATH Windows à Ubuntu, donc Coppice pourrait trouver une copie Windows d’une CLI. Ouvrez **System → Connectors** et regardez le chemin de la CLI de chaque connecteur. Si un chemin commence par `/mnt/c/`, installez cette CLI dans Ubuntu.
 
 Gardez vos dépôts dans votre dossier personnel Linux, par exemple `~/code/my-app`, pas sous `/mnt/c/`. Git et l’accès aux fichiers sont beaucoup plus lents à travers cette frontière. Le sélecteur de dossiers affiche des chemins Linux.
 
@@ -78,9 +78,9 @@ Gardez vos dépôts dans votre dossier personnel Linux, par exemple `~/code/my-a
 2. Indiquez-lui un checkout git local que vous avez déjà sur le disque.
 3. **Connectez votre CLI d’agent.** Choisissez votre CLI d’agent en créant un agent, et Coppice l’active. Chacune indique si elle est **Ready**, **Found, not signed in** ou **Not on your PATH**. Connectez-vous d’abord à la CLI dans votre terminal, comme d’habitude.
 
-   Kilo Code affiche **Kilo Code — Installed**. Tools → Connectors ajoute : « Coppice can't check this sign-in without using your plan. A run will show an error if you're signed out. » (Coppice ne peut pas vérifier cette connexion sans utiliser votre forfait. Un lancement affichera une erreur si vous êtes déconnecté.)
+   Kilo Code affiche **Kilo Code — Installed**. System → Connectors ajoute : « Coppice can't check this sign-in without using your plan. A run will show an error if you're signed out. » (Coppice ne peut pas vérifier cette connexion sans utiliser votre forfait. Un lancement affichera une erreur si vous êtes déconnecté.)
 
-   Pour désactiver un connecteur plus tard, utilisez l’interrupteur dans Tools → Connectors, ou mettez `enabled = false` pour lui dans votre `config.toml` Coppice :
+   Pour désactiver un connecteur plus tard, utilisez l’interrupteur dans System → Connectors, ou mettez `enabled = false` pour lui dans votre `config.toml` Coppice :
 
    - macOS: `~/Library/Application Support/Coppice/config.toml`
    - Linux: `~/.config/Coppice/config.toml`

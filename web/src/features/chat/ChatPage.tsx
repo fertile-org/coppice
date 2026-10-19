@@ -20,6 +20,7 @@ import {
 } from '../../lib/attachments';
 import type { ChatMessage, ChatSession } from '../../lib/schemas/chat';
 import { chatIsolationBanner, chatUnavailableMessage } from '../tools/connectorCopy';
+import { formatRelativeTime } from '../tools/connectorFormat';
 import { cn } from '../../lib/utils';
 import { useAgents, type Agent } from '../agents/useAgents';
 import { useUploadAttachment } from '../tickets/useTicket';
@@ -361,6 +362,7 @@ function ChatTranscript({
   const chatBanner = chatIsolationBanner(agent.connector);
   const chatUnavailable = chatUnavailableMessage(agent.connector);
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
 
   const onLiveFinished = useCallback(() => {
     setActiveRunId(null);
@@ -399,9 +401,23 @@ function ChatTranscript({
             <p className="mt-0.5 font-body text-xs text-text-secondary">{agent.role}</p>
           ) : null}
         </div>
-        {session && session.status === 'active' ? (
-          <ChatSessionActions session={session} disabled={awaiting} />
-        ) : null}
+        <div className="flex flex-wrap items-center gap-2">
+          {session && session.status === 'active' ? (
+            <ChatSessionActions session={session} disabled={awaiting} />
+          ) : null}
+          {sessionId && !chatUnavailable ? (
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              title={`New chat with ${agent.name}`}
+              aria-label={`New chat with ${agent.name}`}
+              onClick={() => navigate(`/chat/new/${agent.id}`)}
+            >
+              New chat
+            </Button>
+          ) : null}
+        </div>
       </header>
 
       <div className="flex min-h-0 flex-1 flex-col gap-2 bg-paper-100/40 px-3 py-2">
@@ -471,6 +487,31 @@ function ChatTranscript({
   );
 }
 
+function agentInitials(name: string): string {
+  const words = name.trim().split(/\s+/).filter(Boolean);
+  const letters = words.length > 1 ? words[0]![0]! + words[1]![0]! : name.slice(0, 2);
+  return letters.toUpperCase();
+}
+
+function AgentAvatar({ name, muted }: { name: string; muted?: boolean }) {
+  return (
+    <span
+      aria-hidden
+      className={cn(
+        'flex size-9 shrink-0 items-center justify-center rounded-full font-body text-xs font-semibold',
+        muted ? 'bg-paper-100 text-text-muted' : 'bg-accent-muted text-accent',
+      )}
+    >
+      {agentInitials(name)}
+    </span>
+  );
+}
+
+function sessionPreview(session: ChatSession): string {
+  const preview = session.lastMessagePreview.trim();
+  return preview || chatLabel(session);
+}
+
 function AgentRow({
   agent,
   sessions,
@@ -482,57 +523,64 @@ function AgentRow({
   drafting: boolean;
   openSessionId?: string;
 }) {
-  const navigate = useNavigate();
   const unavailable = chatUnavailableMessage(agent.connector);
   const latest = sessions[0];
-  const expanded = sessions.length > 1 || (drafting && sessions.length > 0);
   const active =
     drafting ||
     sessions.some((session) => session.id === openSessionId);
+  // Only the open agent lists its chats, and only when there is a choice.
+  const expanded = active && (sessions.length > 1 || (drafting && sessions.length > 0));
   const href = latest ? `/chat/${latest.id}` : `/chat/new/${agent.id}`;
   const replying = sessions.some((session) => session.hasActiveRun);
+  const lastAt = latest?.lastMessageAt ?? null;
 
   if (unavailable) {
     return (
-      <div
-        className="rounded-md px-3 py-2 opacity-60"
+      <li
+        className="flex gap-3 px-3 py-3 opacity-60"
         data-testid="chat-agent-unavailable"
         aria-disabled="true"
       >
-        <div className="font-body text-sm font-medium text-text-muted">{agent.name}</div>
-        {agent.role ? (
-          <div className="mt-0.5 font-body text-xs text-text-muted">{agent.role}</div>
-        ) : null}
-        <p
-          className="mt-1 font-body text-xs text-text-muted"
-          data-testid="chat-unavailable"
-        >
-          {unavailable}
-        </p>
-      </div>
+        <AgentAvatar name={agent.name} muted />
+        <div className="min-w-0">
+          <div className="font-body text-sm font-medium text-text-muted">{agent.name}</div>
+          {agent.role ? (
+            <div className="mt-0.5 font-body text-xs text-text-muted">{agent.role}</div>
+          ) : null}
+          <p
+            className="mt-1 font-body text-xs text-text-muted"
+            data-testid="chat-unavailable"
+          >
+            {unavailable}
+          </p>
+        </div>
+      </li>
     );
   }
 
   return (
-    <div data-testid="chat-agent-row">
-      <div className="flex items-start gap-1">
-        <Link
-          to={href}
-          className={cn(
-            'min-w-0 flex-1 rounded-md px-3 py-2 transition-colors duration-fast',
-            active
-              ? 'bg-accent-muted text-accent'
-              : 'hover:bg-paper-100',
-          )}
-          aria-current={active ? 'page' : undefined}
-        >
-          <div className="flex items-center gap-1.5">
+    <li data-testid="chat-agent-row">
+      <Link
+        to={href}
+        className={cn(
+          'flex gap-3 px-3 py-3 transition-colors duration-fast',
+          active ? 'bg-accent-muted/60' : 'hover:bg-paper-100',
+        )}
+        aria-current={active ? 'page' : undefined}
+      >
+        <AgentAvatar name={agent.name} />
+        <div className="min-w-0 flex-1">
+          <div className="flex items-baseline gap-2">
             <span className="truncate font-body text-sm font-medium text-text-primary">
               {agent.name}
             </span>
             {replying ? (
               <span className="shrink-0 font-body text-xs text-moss-700" data-testid="chat-session-active">
                 Replying…
+              </span>
+            ) : lastAt ? (
+              <span className="ml-auto shrink-0 font-body text-[11px] text-text-muted">
+                {formatRelativeTime(lastAt)}
               </span>
             ) : null}
           </div>
@@ -543,28 +591,13 @@ function AgentRow({
           ) : null}
           {!expanded ? (
             <p className="mt-0.5 truncate font-body text-xs text-text-muted">
-              {sessions.length === 0
-                ? drafting
-                  ? 'New chat'
-                  : 'No messages yet'
-                : chatLabel(sessions[0])}
+              {latest ? sessionPreview(latest) : drafting ? 'New chat' : 'No messages yet'}
             </p>
           ) : null}
-        </Link>
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          className="mt-1 shrink-0"
-          title={`New chat with ${agent.name}`}
-          aria-label={`New chat with ${agent.name}`}
-          onClick={() => navigate(`/chat/new/${agent.id}`)}
-        >
-          New chat
-        </Button>
-      </div>
+        </div>
+      </Link>
       {expanded ? (
-        <ul className="mb-1 ml-3 space-y-0.5 border-l border-border pl-2">
+        <ul className="space-y-0.5 pb-2 pl-14 pr-3" aria-label={`Chats with ${agent.name}`}>
           {drafting ? (
             <li>
               <Link
@@ -594,8 +627,25 @@ function AgentRow({
           ))}
         </ul>
       ) : null}
-    </div>
+    </li>
   );
+}
+
+/** Where /chat lands: the newest chat, or a new one with the first agent. */
+function defaultChatPath(
+  sessions: ChatSession[],
+  agents: Agent[],
+): string | null {
+  const available = agents.filter(
+    (agent) => agent.enabled && !chatUnavailableMessage(agent.connector),
+  );
+  const ids = new Set(available.map((agent) => agent.id));
+  const newest = sessions
+    .filter((session) => ids.has(session.agentId))
+    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0];
+  if (newest) return `/chat/${newest.id}`;
+  const first = [...available].sort((a, b) => a.name.localeCompare(b.name))[0];
+  return first ? `/chat/new/${first.id}` : null;
 }
 
 export function ChatPage() {
@@ -605,7 +655,7 @@ export function ChatPage() {
   }>();
   const navigate = useNavigate();
   const location = useLocation();
-  const { data: agents = [] } = useAgents();
+  const { data: agents = [], isLoading: agentsLoading } = useAgents();
   const { data: sessions = [], isLoading } = useChatSessions();
   const seededRunId =
     (location.state as { runId?: string } | null)?.runId ?? null;
@@ -622,6 +672,15 @@ export function ChatPage() {
   const selectedAgentId = draftAgentId ?? openSession?.agentId;
   const selectedAgent = agents.find((agent) => agent.id === selectedAgentId);
 
+  // A bare /chat opens something instead of an empty pane.
+  const landing =
+    !sessionId && !draftAgentId && !isLoading && !agentsLoading
+      ? defaultChatPath(sessions, agents)
+      : null;
+  useEffect(() => {
+    if (landing) navigate(landing, { replace: true });
+  }, [landing, navigate]);
+
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-4" data-testid="chat-page">
       <h1 className="shrink-0 font-display text-2xl font-semibold text-text-primary">
@@ -629,18 +688,26 @@ export function ChatPage() {
       </h1>
 
       <div
-        className="grid min-h-0 flex-1 gap-4 overflow-hidden lg:grid-cols-[280px_minmax(0,1fr)]"
+        className="grid min-h-0 flex-1 gap-4 overflow-hidden lg:grid-cols-[300px_minmax(0,1fr)]"
         data-testid="chat-layout-grid"
       >
         <aside
-          className="flex min-h-0 flex-col gap-2 overflow-hidden lg:h-full lg:max-h-full lg:self-stretch"
+          className="flex min-h-0 flex-col overflow-hidden rounded-xl border border-border bg-surface-raised shadow-sm lg:h-full lg:max-h-full lg:self-stretch"
           aria-label="Agents"
           data-testid="chat-session-list"
         >
-          <div className="min-h-0 flex-1 space-y-1 overflow-y-auto">
-            {isLoading ? (
-              <p className="font-body text-sm text-text-muted">Loading chats…</p>
-            ) : null}
+          <div className="shrink-0 border-b border-border bg-paper-50/80 px-4 py-3">
+            <h2 className="font-display text-base font-semibold text-text-primary">Agents</h2>
+          </div>
+          {isLoading ? (
+            <p className="px-4 py-3 font-body text-sm text-text-muted">Loading chats…</p>
+          ) : null}
+          {!agentsLoading && enabledAgents.length === 0 ? (
+            <p className="px-4 py-3 font-body text-sm text-text-secondary">
+              No agents yet. <Link to="/agents" className="text-accent underline">Add one</Link> to start chatting.
+            </p>
+          ) : null}
+          <ul className="min-h-0 flex-1 divide-y divide-border overflow-y-auto">
             {enabledAgents.map((agent) => (
               <AgentRow
                 key={agent.id}
@@ -650,7 +717,7 @@ export function ChatPage() {
                 openSessionId={sessionId}
               />
             ))}
-          </div>
+          </ul>
         </aside>
 
         <section className="flex min-h-0 min-w-0 flex-col overflow-hidden lg:h-full">

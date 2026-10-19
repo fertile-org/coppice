@@ -306,7 +306,7 @@ describe('AgentForm model choice', () => {
     expect(screen.queryByText('Error: Authentication required')).toBeNull();
   });
 
-  it('links a turned-off connector to Tools → Connectors', () => {
+  it('links a turned-off connector to System → Connectors', () => {
     mocks.modelsError = true;
     mocks.modelsErrorMessage =
       "Can't list Cursor's models because it's turned off in Connectors.";
@@ -322,7 +322,7 @@ describe('AgentForm model choice', () => {
     expect(screen.getByText(/Cursor is turned off\. Turn it on in/)).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Connectors' })).toHaveAttribute(
       'href',
-      '/tools?tab=connectors',
+      '/system/connectors',
     );
     expect(
       screen.queryByText("Couldn't get Cursor's models. Using Cursor's default for now."),

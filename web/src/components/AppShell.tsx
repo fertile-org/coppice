@@ -2,19 +2,23 @@ import type { LucideIcon } from 'lucide-react';
 import {
   BookOpen,
   Bot,
+  ChevronDown,
+  ChevronRight,
+  DatabaseBackup,
   FolderGit2,
   LayoutGrid,
   LogOut,
   MessageSquare,
   PanelLeftClose,
   PanelLeftOpen,
+  Plug,
   Puzzle,
   ScrollText,
   Settings,
   Users,
   Wrench,
 } from 'lucide-react';
-import { useCallback, useEffect, useState } from 'react';
+import { Fragment, useCallback, useEffect, useState } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useSession } from '../features/auth/useSession';
 import { NotificationBell } from '../features/notifications/NotificationBell';
@@ -22,6 +26,7 @@ import { ThemeToggle } from '../features/theme/ThemeToggle';
 import { useOpenTicket } from '../features/tickets/useOpenTicket';
 import { cn } from '../lib/utils';
 import { LOGS_COPY } from '../features/logs/copy';
+import { SYSTEM_LABEL, SYSTEM_PATHS } from '../features/system/paths';
 import { SkipToBoard } from '../features/keyboard/SkipToBoard';
 import { BrandLogo } from './BrandLogo';
 import { DesktopUpdateBanner } from './DesktopUpdateBanner';
@@ -44,10 +49,19 @@ const NAV_ITEMS: NavItem[] = [
   { to: '/settings/repositories', label: 'Repositories', icon: FolderGit2 },
   { to: '/settings/plugins', label: 'Plugins', icon: Puzzle, adminOnly: true },
   { to: '/settings/users', label: 'Users', icon: Users, adminOnly: true },
-  { to: '/tools', label: 'Tools', icon: Wrench, adminOnly: true },
-  { to: '/logs', label: LOGS_COPY.nav, icon: ScrollText, adminOnly: true },
   { to: '/settings', label: 'Settings', icon: Settings, adminOnly: true, end: true },
 ];
+
+/** Admin-only group shown above Settings. */
+const SYSTEM_ITEMS: NavItem[] = [
+  { to: SYSTEM_PATHS.backup, label: 'Backup', icon: DatabaseBackup, adminOnly: true },
+  { to: SYSTEM_PATHS.connectors, label: 'Connectors', icon: Plug, adminOnly: true },
+  { to: SYSTEM_PATHS.logs, label: LOGS_COPY.nav, icon: ScrollText, adminOnly: true },
+];
+
+function isSystemRoute(pathname: string): boolean {
+  return pathname === '/system' || pathname.startsWith('/system/');
+}
 
 function readSidebarCollapsed(): boolean {
   try {
@@ -73,6 +87,22 @@ function navLinkClass({
   );
 }
 
+function SidebarLink({ item, collapsed }: { item: NavItem; collapsed: boolean }) {
+  const { to, label, icon: Icon, end } = item;
+  return (
+    <NavLink
+      to={to}
+      end={end}
+      aria-label={collapsed ? label : undefined}
+      title={collapsed ? label : undefined}
+      className={({ isActive }) => navLinkClass({ isActive, collapsed })}
+    >
+      <Icon className="h-[1.125rem] w-[1.125rem] shrink-0" aria-hidden />
+      {!collapsed && <span>{label}</span>}
+    </NavLink>
+  );
+}
+
 function isChatRoute(pathname: string): boolean {
   return pathname === '/chat' || pathname.startsWith('/chat/');
 }
@@ -90,6 +120,11 @@ export function AppShell() {
   const boardLayout = isBoardRoute(pathname);
 
   const [sidebarCollapsed, setSidebarCollapsed] = useState(readSidebarCollapsed);
+  const onSystemRoute = isSystemRoute(pathname);
+  const [systemOpen, setSystemOpen] = useState(onSystemRoute);
+  useEffect(() => {
+    if (onSystemRoute) setSystemOpen(true);
+  }, [onSystemRoute]);
 
   useEffect(() => {
     try {
@@ -106,6 +141,7 @@ export function AppShell() {
     setSidebarCollapsed((prev) => !prev);
   }, []);
 
+  const showSystem = user?.role === 'admin';
   const visibleNavItems = NAV_ITEMS.filter((item) => {
     if (desktopMode && item.to === '/settings/users') {
       return false;
@@ -150,20 +186,49 @@ export function AppShell() {
           className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto p-2"
           aria-label="Main"
         >
-          {visibleNavItems.map(({ to, label, icon: Icon, end }) => (
-            <NavLink
-              key={to}
-              to={to}
-              end={end}
-              aria-label={sidebarCollapsed ? label : undefined}
-              title={sidebarCollapsed ? label : undefined}
-              className={({ isActive }) =>
-                navLinkClass({ isActive, collapsed: sidebarCollapsed })
-              }
-            >
-              <Icon className="h-[1.125rem] w-[1.125rem] shrink-0" aria-hidden />
-              {!sidebarCollapsed && <span>{label}</span>}
-            </NavLink>
+          {visibleNavItems.map((item) => (
+            <Fragment key={item.to}>
+              {item.to === '/settings' && showSystem ? (
+                sidebarCollapsed ? (
+                  SYSTEM_ITEMS.map((child) => (
+                    <SidebarLink key={child.to} item={child} collapsed />
+                  ))
+                ) : (
+                  <div data-testid="nav-group-system">
+                    <button
+                      type="button"
+                      onClick={() => setSystemOpen((open) => !open)}
+                      aria-expanded={systemOpen}
+                      aria-controls="nav-group-system-items"
+                      className={cn(
+                        navLinkClass({ isActive: false, collapsed: false }),
+                        'w-full',
+                        onSystemRoute && !systemOpen && 'text-accent',
+                      )}
+                    >
+                      <Wrench className="h-[1.125rem] w-[1.125rem] shrink-0" aria-hidden />
+                      <span className="flex-1 text-left">{SYSTEM_LABEL}</span>
+                      {systemOpen ? (
+                        <ChevronDown className="h-4 w-4 shrink-0" aria-hidden />
+                      ) : (
+                        <ChevronRight className="h-4 w-4 shrink-0" aria-hidden />
+                      )}
+                    </button>
+                    {systemOpen ? (
+                      <div
+                        id="nav-group-system-items"
+                        className="mt-0.5 flex flex-col gap-0.5 pl-4"
+                      >
+                        {SYSTEM_ITEMS.map((child) => (
+                          <SidebarLink key={child.to} item={child} collapsed={false} />
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
+                )
+              ) : null}
+              <SidebarLink item={item} collapsed={sidebarCollapsed} />
+            </Fragment>
           ))}
         </nav>
 

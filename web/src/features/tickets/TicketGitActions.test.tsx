@@ -318,7 +318,7 @@ describe('TicketGitActions', () => {
   });
 
   it("hides the ask button when the assignee's connector is not ready", async () => {
-    const reason = "Ada's connector isn't ready. Check it in Tools → Connectors.";
+    const reason = "Ada's connector isn't ready. Check it in System → Connectors.";
     rebaseMutateAsync.mockRejectedValue(
       new ApiError(
         400,

@@ -159,6 +159,7 @@ impl OpenCodeRunServers {
         if !host.home.as_os_str().is_empty() {
             cmd.env("HOME", &host.home);
         }
+        crate::providers::env_hygiene::scrub(&mut cmd);
         cmd.args(&args)
             .env("OPENCODE_CONFIG", config_path)
             .envs(env.iter().map(|(k, v)| (*k, v.as_str())))

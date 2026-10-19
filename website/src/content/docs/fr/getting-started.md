@@ -7,7 +7,7 @@ description: "D’une installation neuve à votre premier lancement d’agent en
 
 Cinq étapes vous mènent d’une installation neuve à votre premier lancement d’agent. Il vous faut un checkout git local et une CLI d’agent. Pas de compte Coppice.
 
-À la première installation, Coppice ouvre une courte configuration qui ajoute votre premier dépôt, votre premier tableau et une équipe de départ. Vous pouvez la rouvrir depuis Tools.
+À la première installation, Coppice ouvre une courte configuration qui ajoute votre premier dépôt, votre premier tableau et une équipe de départ. Vous pouvez la rouvrir depuis **System → Connectors** avec **Set up workspace**.
 
 <a id="1-install-a-provider-and-sign-in"></a>
 
@@ -15,7 +15,7 @@ Cinq étapes vous mènent d’une installation neuve à votre premier lancement 
 Un fournisseur est la CLI d’agent que Coppice lance pour vous : Claude Code, Codex, Cursor, OpenCode ou Kilo Code. Coppice ne l’installe pas. Il trouve les CLI déjà présentes sur votre ordinateur.
 
 1. Installez la CLI et connectez-vous dans votre terminal, comme d’habitude.
-2. Dans Coppice, ouvrez **Tools** dans la barre latérale, puis l’onglet **Connectors**.
+2. Dans Coppice, ouvrez **System** dans la barre latérale, puis **Connectors**.
 3. Trouvez la carte de votre CLI. Elle affiche **Ready** quand Coppice peut l’utiliser.
 
 Si elle affiche **Found, not signed in**, connectez-vous à la CLI dans votre terminal. Si elle affiche **Not on your PATH**, installez-la, ou suivez **Install docs** sur la carte. Cliquez ensuite sur **Run check**.

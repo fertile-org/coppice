@@ -93,6 +93,14 @@ export function ChatMessageBubble({
 }) {
   if (streaming) {
     const text = streamingText?.trim() ?? '';
+    // The indicator is its own bubble, so it is not wrapped in another one.
+    if (!text) {
+      return (
+        <div className="flex w-full justify-start" data-testid="chat-streaming-bubble">
+          <ThinkingIndicator />
+        </div>
+      );
+    }
     return (
       <div className="flex w-full justify-start">
         <article
@@ -103,13 +111,9 @@ export function ChatMessageBubble({
           className="max-w-[85%] rounded-2xl rounded-bl-md border border-moss-200 bg-moss-50 px-3 py-1.5 font-body text-sm text-text-primary"
           data-testid="chat-streaming-bubble"
         >
-          {text ? (
-            <div className="leading-snug text-text-primary">
-              <MarkdownContent>{text}</MarkdownContent>
-            </div>
-          ) : (
-            <ThinkingIndicator />
-          )}
+          <div className="leading-snug text-text-primary">
+            <MarkdownContent>{text}</MarkdownContent>
+          </div>
         </article>
       </div>
     );

@@ -2,7 +2,6 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use anyhow::Context;
-use coppice_connectors::probe::{probe, ProbeEnv, ProbeOutcome};
 use sqlx::PgPool;
 use uuid::Uuid;
 
@@ -21,8 +20,6 @@ use crate::services::context_builder::{connector_check_context, write_context_do
 use crate::services::run_service::RunService;
 use crate::util::error_format::format_job_error;
 use crate::AppState;
-
-const VERSION_PROBE_TIMEOUT: Duration = Duration::from_secs(10);
 
 const MAX_CHECK_TIMEOUT_SECS: u64 = 180;
 
@@ -113,11 +110,6 @@ async fn run_check(
             "agent connector changed (expected {expected_connector}, got {connector_name})"
         );
     }
-    // Kilo has no read-only tool turn. A version command can succeed or fail
-    // on its own; it does not touch tools.
-    if connector_name == coppice_connectors::KILO_CODE {
-        return run_kilo_version_check(state, run_svc, run, checks, check_id).await;
-    }
     let connector = state
         .connectors
         .registry()
@@ -131,13 +123,9 @@ async fn run_check(
         .unwrap_or_else(|| slugify(&agent.name));
 
     std::fs::create_dir_all(scratch).context("create connector check scratch directory")?;
-    write_context_document(scratch, &connector_check_context(&agent.name))
-        .context("write connector check context")?;
-    let context_path = scratch.join(".agent").join("context.md");
 
     let stream = state.run_streams.register(run.id);
     crate::services::run_service::spawn_reported_model_writer(pool.clone(), run.id, stream.clone());
-    let cancel_rx = stream.cancelled_rx();
     run_svc
         .mark_running(run.id)
         .await
@@ -173,49 +161,105 @@ async fn run_check(
         .run_timeout_secs(connector_name)
         .unwrap_or(MAX_CHECK_TIMEOUT_SECS)
         .min(MAX_CHECK_TIMEOUT_SECS);
-    let provider_run = connector.run(AgentRunInput {
-        agent_id: run.agent_id.to_string(),
-        agent_key,
-        agent_role: agent.role.clone(),
-        job_type: run.job_type.clone(),
-        ticket_id: None,
-        ticket_status: None,
-        context_profile: ContextProfile::ConnectorCheck,
-        context_path: context_path.to_string_lossy().into_owned(),
-        run_id: Some(run.id.to_string()),
-        chat_session_id: None,
-        artifacts_dir: Some(state.config.storage.artifacts_dir.clone()),
-        stream: Some(stream.clone()),
-        cancel_rx: Some(cancel_rx),
-        model_provider: agent.model_provider.clone(),
-        model: agent.model.clone(),
-        session_created_tx: None,
-        resume_context: None,
-        resume_session_id: None,
-        read_only_tools: true,
-        mcp: Some(grant.access.clone()),
-    });
-    let timed = tokio::time::timeout(Duration::from_secs(timeout_secs), provider_run).await;
-    crate::services::run_service::record_reported_model(pool, run.id, &stream).await;
-    grant.revoke().await;
-    let Ok(provider_result) = timed else {
-        stream.cancel();
-        best_effort_persist_artifacts(
-            state,
-            &stream,
-            run.id,
-            connector_name,
-            None,
-            "after timeout",
-        );
-        state.run_streams.remove(run.id);
-        anyhow::bail!("connection check timed out after {timeout_secs}s");
-    };
-    let provider_result = prefer_submitted_result(pool, run.id, provider_result).await;
 
-    let result = match provider_result {
-        Ok(result) => result,
-        Err(ProviderError::Cancelled) => {
+    let mut verdict = Ok(());
+    let mut last_outcome = RunStatus::Succeeded;
+    for phase in CheckPhase::ALL {
+        let phase_dir = scratch.join(phase.dir_name());
+        std::fs::create_dir_all(&phase_dir).context("create connector check phase directory")?;
+        write_context_document(&phase_dir, &phase.context(&agent.name, connector_name))
+            .context("write connector check context")?;
+        // Each phase is judged on its own submission and tool calls.
+        sqlx::query("UPDATE agent_runs SET submitted_result = NULL WHERE id = $1")
+            .bind(run.id)
+            .execute(pool)
+            .await
+            .context("clear the previous phase's result")?;
+        let phase_started: time::OffsetDateTime = sqlx::query_scalar("SELECT now()")
+            .fetch_one(pool)
+            .await
+            .context("read phase start time")?;
+
+        let provider_run = connector.run(AgentRunInput {
+            agent_id: run.agent_id.to_string(),
+            agent_key: agent_key.clone(),
+            agent_role: agent.role.clone(),
+            job_type: phase.job_type().to_string(),
+            ticket_id: None,
+            ticket_status: None,
+            context_profile: phase.context_profile(),
+            context_path: phase_dir
+                .join(".agent")
+                .join("context.md")
+                .to_string_lossy()
+                .into_owned(),
+            run_id: Some(run.id.to_string()),
+            chat_session_id: None,
+            artifacts_dir: Some(state.config.storage.artifacts_dir.clone()),
+            stream: Some(stream.clone()),
+            cancel_rx: Some(stream.cancelled_rx()),
+            model_provider: agent.model_provider.clone(),
+            model: agent.model.clone(),
+            session_created_tx: None,
+            resume_context: None,
+            resume_session_id: None,
+            read_only_tools: phase.read_only_tools(connector_name),
+            mcp: Some(grant.access.clone()),
+        });
+        let timed = tokio::time::timeout(Duration::from_secs(timeout_secs), provider_run).await;
+        crate::services::run_service::record_reported_model(pool, run.id, &stream).await;
+        let Ok(provider_result) = timed else {
+            grant.revoke().await;
+            stream.cancel();
+            best_effort_persist_artifacts(
+                state,
+                &stream,
+                run.id,
+                connector_name,
+                None,
+                "after timeout",
+            );
+            state.run_streams.remove(run.id);
+            anyhow::bail!(
+                "{}: connection check timed out after {timeout_secs}s",
+                phase.label()
+            );
+        };
+        let provider_result = prefer_submitted_result(pool, run.id, provider_result).await;
+        let result = match provider_result {
+            Ok(result) => result,
+            Err(ProviderError::Cancelled) => {
+                grant.revoke().await;
+                best_effort_persist_artifacts(
+                    state,
+                    &stream,
+                    run.id,
+                    connector_name,
+                    None,
+                    "after cancel",
+                );
+                state.run_streams.remove(run.id);
+                return Err(JobCancelled.into());
+            }
+            Err(err) => {
+                grant.revoke().await;
+                best_effort_persist_artifacts(
+                    state,
+                    &stream,
+                    run.id,
+                    connector_name,
+                    None,
+                    "after provider error",
+                );
+                state.run_streams.remove(run.id);
+                return Err(anyhow::Error::new(err).context(format!(
+                    "{}: connector `{connector_name}` connection check failed",
+                    phase.label()
+                )));
+            }
+        };
+        if run_svc.is_cancelled(run.id).await? {
+            grant.revoke().await;
             best_effort_persist_artifacts(
                 state,
                 &stream,
@@ -227,124 +271,143 @@ async fn run_check(
             state.run_streams.remove(run.id);
             return Err(JobCancelled.into());
         }
-        Err(err) => {
-            best_effort_persist_artifacts(
-                state,
-                &stream,
-                run.id,
-                connector_name,
-                None,
-                "after provider error",
-            );
-            state.run_streams.remove(run.id);
-            return Err(anyhow::Error::new(err).context(format!(
-                "connector `{connector_name}` connection check failed"
-            )));
+        let (outcome, status) = match result {
+            AgentRunResult::Done { .. } => ("done", RunStatus::Succeeded),
+            AgentRunResult::Blocked { .. } => ("blocked", RunStatus::Blocked),
+            AgentRunResult::Continued { .. } => ("continued", RunStatus::Succeeded),
+        };
+        last_outcome = status;
+        let (ticket_get_ok, result_submit_ok): (bool, bool) = sqlx::query_as(
+            "SELECT \
+                 EXISTS (SELECT 1 FROM run_tool_calls WHERE run_id = $1 AND created_at >= $2 AND tool = 'ticket_get' AND status = 'ok'), \
+                 EXISTS (SELECT 1 FROM run_tool_calls WHERE run_id = $1 AND created_at >= $2 AND tool = 'result_submit' AND status = 'ok')",
+        )
+        .bind(run.id)
+        .bind(phase_started)
+        .fetch_one(pool)
+        .await
+        .context("load connector check tool calls")?;
+        let wrote = phase_dir.join(WRITE_CHECK_FILE).exists();
+        let phase_verdict = evaluate_phase(
+            phase,
+            ticket_get_ok,
+            result_submit_ok,
+            outcome,
+            wrote && phase.must_block_writes(connector_name),
+        );
+        tracing::info!(run_id = %run.id, %check_id, phase = phase.label(), passed = phase_verdict.is_ok(), "connector check phase finished");
+        if phase_verdict.is_err() {
+            verdict = phase_verdict;
+            break;
         }
-    };
+    }
+    grant.revoke().await;
     best_effort_persist_artifacts(state, &stream, run.id, connector_name, None, "after check");
     state.run_streams.remove(run.id);
     if run_svc.is_cancelled(run.id).await? {
         return Err(JobCancelled.into());
     }
-
-    let (outcome, run_status) = match result {
-        AgentRunResult::Done { .. } => ("done", RunStatus::Succeeded),
-        AgentRunResult::Blocked { .. } => ("blocked", RunStatus::Blocked),
-        AgentRunResult::Continued { .. } => ("continued", RunStatus::Succeeded),
-    };
     run_svc
         .finish_run(
             run.id,
-            run_status,
+            last_outcome,
             Some(scratch.to_string_lossy().into_owned()),
             None,
         )
         .await
         .context("finish connector check run")?;
-
-    let (ticket_get_ok, result_submit_ok): (bool, bool) = sqlx::query_as(
-        "SELECT \
-             EXISTS (SELECT 1 FROM run_tool_calls WHERE run_id = $1 AND tool = 'ticket_get' AND status = 'ok'), \
-             EXISTS (SELECT 1 FROM run_tool_calls WHERE run_id = $1 AND tool = 'result_submit' AND status = 'ok')",
-    )
-    .bind(run.id)
-    .fetch_one(pool)
-    .await
-    .context("load connector check tool calls")?;
-    Ok(evaluate_check(ticket_get_ok, result_submit_ok, outcome))
+    Ok(verdict)
 }
 
-/// `kilo --version` (the descriptor probe). `Ok` only when that command exits 0.
-fn kilo_connection_verdict(outcome: &ProbeOutcome) -> Result<(), String> {
-    match outcome {
-        ProbeOutcome::Ok { .. } => Ok(()),
-        ProbeOutcome::Failed { message } if message.trim().is_empty() => {
-            Err("kilo --version failed".into())
+/// A read-only phase asks the agent to create this file; finding it means
+/// that mode did not block writes.
+const WRITE_CHECK_FILE: &str = "coppice-write-check.txt";
+
+/// The modes Coppice launches a connector in, each with its real flags.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CheckPhase {
+    Chat,
+    Plan,
+    Ticket,
+}
+
+impl CheckPhase {
+    const ALL: [CheckPhase; 3] = [CheckPhase::Chat, CheckPhase::Plan, CheckPhase::Ticket];
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::Chat => "Chat",
+            Self::Plan => "Planning",
+            Self::Ticket => "Ticket work",
         }
-        ProbeOutcome::Failed { message } => Err(message.clone()),
-        ProbeOutcome::TimedOut => Err("kilo --version timed out".into()),
-        ProbeOutcome::NotRun => Err("kilo was not found".into()),
+    }
+
+    fn dir_name(self) -> &'static str {
+        match self {
+            Self::Chat => "chat",
+            Self::Plan => "plan",
+            Self::Ticket => "ticket",
+        }
+    }
+
+    fn job_type(self) -> &'static str {
+        match self {
+            Self::Chat => "chat_turn",
+            Self::Plan => crate::domain::workflow::JOB_TYPE_PLAN_TICKET,
+            Self::Ticket => "work_on_ticket",
+        }
+    }
+
+    fn context_profile(self) -> ContextProfile {
+        match self {
+            Self::Chat => ContextProfile::Conversation,
+            Self::Plan | Self::Ticket => ContextProfile::ConnectorCheck,
+        }
+    }
+
+    /// The same read-only rule the real runs use.
+    fn read_only_tools(self, connector: &str) -> bool {
+        match self {
+            Self::Chat => true,
+            Self::Plan => crate::providers::connector_enforces_read_only(connector),
+            Self::Ticket => false,
+        }
+    }
+
+    /// Whether a write in this phase means the mode leaked.
+    fn must_block_writes(self, connector: &str) -> bool {
+        self != Self::Ticket && self.read_only_tools(connector)
+    }
+
+    fn context(self, agent_name: &str, connector: &str) -> String {
+        let mut text = connector_check_context(agent_name);
+        if self.must_block_writes(connector) {
+            text.push_str(&format!(
+                "\nBefore that, try once to create a file named `{WRITE_CHECK_FILE}` in your working \
+                 directory. This run may not allow it. If it fails, carry on.\n"
+            ));
+        }
+        text
     }
 }
 
-async fn run_kilo_version_check(
-    state: &AppState,
-    run_svc: &RunService<'_>,
-    run: &AgentRun,
-    checks: &ConnectorCheckService<'_>,
-    check_id: Uuid,
-) -> anyhow::Result<Result<(), String>> {
-    run_svc
-        .mark_running(run.id)
-        .await
-        .context("mark connector check run running")?;
-    checks
-        .mark_running(check_id)
-        .await
-        .context("mark connector check running")?;
-    let command = state
-        .config
-        .agent
-        .connectors
-        .command(coppice_connectors::KILO_CODE)
-        .map(str::to_string);
-    let outcome = tokio::task::spawn_blocking(move || probe_kilo_version(command.as_deref()))
-        .await
-        .context("kilo version probe task")?;
-    match kilo_connection_verdict(&outcome) {
-        Ok(()) => {
-            run_svc
-                .finish_run(run.id, RunStatus::Succeeded, None, None)
-                .await
-                .context("finish kilo version check")?;
-            Ok(Ok(()))
-        }
-        Err(reason) => Err(anyhow::anyhow!(reason)),
+/// `leaked_write`: the phase had to block writes and a file appeared anyway.
+fn evaluate_phase(
+    phase: CheckPhase,
+    ticket_get_ok: bool,
+    result_submit_ok: bool,
+    outcome: &str,
+    leaked_write: bool,
+) -> Result<(), String> {
+    evaluate_check(ticket_get_ok, result_submit_ok, outcome)
+        .map_err(|reason| format!("{}: {reason}", phase.label()))?;
+    if leaked_write {
+        return Err(format!(
+            "{}: the agent created a file, so this mode did not block writes",
+            phase.label()
+        ));
     }
-}
-
-fn probe_kilo_version(command: Option<&str>) -> ProbeOutcome {
-    let Some(descriptor) = coppice_connectors::get(coppice_connectors::KILO_CODE) else {
-        return ProbeOutcome::NotRun;
-    };
-    let host = crate::host_env::current();
-    let env_lookup = |key: &str| {
-        process_auth_env(key).or_else(|| host.var_string(key))
-    };
-    let env = ProbeEnv {
-        home: &host.home,
-        path: &host.path,
-        command_override: command,
-        env_lookup: &env_lookup,
-    };
-    probe(descriptor, &env, VERSION_PROBE_TIMEOUT).probe
-}
-
-fn process_auth_env(key: &str) -> Option<String> {
-    std::env::var_os(key)
-        .filter(|value| !value.is_empty())
-        .map(|value| value.to_string_lossy().into_owned())
+    Ok(())
 }
 
 /// Failure text for a check run error raised outside `execute_connector_check`
@@ -371,32 +434,41 @@ mod tests {
     use super::*;
 
     #[test]
-    fn kilo_version_check_passes_only_when_the_command_succeeds() {
-        assert!(kilo_connection_verdict(&ProbeOutcome::Ok {
-            first_line: "kilo 1.2.3".into(),
-        })
-        .is_ok());
+    fn a_phase_fails_on_its_first_reason_and_names_itself() {
+        assert!(evaluate_phase(CheckPhase::Chat, true, true, "done", false).is_ok());
         assert_eq!(
-            kilo_connection_verdict(&ProbeOutcome::Failed {
-                message: "kilo: version check failed".into(),
-            })
-            .unwrap_err(),
-            "kilo: version check failed"
+            evaluate_phase(CheckPhase::Chat, true, false, "done", false).unwrap_err(),
+            "Chat: result_submit was not called"
         );
         assert_eq!(
-            kilo_connection_verdict(&ProbeOutcome::Failed {
-                message: "  ".into(),
-            })
-            .unwrap_err(),
-            "kilo --version failed"
+            evaluate_phase(CheckPhase::Plan, true, true, "done", true).unwrap_err(),
+            "Planning: the agent created a file, so this mode did not block writes"
         );
         assert_eq!(
-            kilo_connection_verdict(&ProbeOutcome::TimedOut).unwrap_err(),
-            "kilo --version timed out"
+            evaluate_phase(CheckPhase::Ticket, false, true, "done", false).unwrap_err(),
+            "Ticket work: ticket_get was not called"
+        );
+    }
+
+    #[test]
+    fn phases_use_the_real_modes() {
+        assert_eq!(
+            CheckPhase::Chat.context_profile(),
+            ContextProfile::Conversation
         );
         assert_eq!(
-            kilo_connection_verdict(&ProbeOutcome::NotRun).unwrap_err(),
-            "kilo was not found"
+            CheckPhase::Plan.job_type(),
+            crate::domain::workflow::JOB_TYPE_PLAN_TICKET
         );
+        assert!(CheckPhase::Chat.read_only_tools(coppice_connectors::CODEX));
+        assert!(!CheckPhase::Ticket.read_only_tools(coppice_connectors::CLAUDE_CODE));
+        // Planning blocks writes only where the CLI enforces read-only.
+        assert!(CheckPhase::Plan.must_block_writes(coppice_connectors::CLAUDE_CODE));
+        assert!(!CheckPhase::Plan.must_block_writes(coppice_connectors::CODEX));
+        assert!(!CheckPhase::Ticket.must_block_writes(coppice_connectors::CLAUDE_CODE));
+        let chat = CheckPhase::Chat.context("Ada", coppice_connectors::CLAUDE_CODE);
+        assert!(chat.contains(WRITE_CHECK_FILE));
+        let ticket = CheckPhase::Ticket.context("Ada", coppice_connectors::CLAUDE_CODE);
+        assert!(!ticket.contains(WRITE_CHECK_FILE));
     }
 }

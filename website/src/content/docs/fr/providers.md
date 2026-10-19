@@ -42,11 +42,11 @@ Le formulaire d’agent liste chaque connecteur avec son statut :
 | **Not on your PATH** | Coppice ne trouve pas la commande. Installez-la, ou vérifiez votre PATH. |
 | **Installed** | Coppice a trouvé la commande. Pour Kilo Code, il ne peut pas vérifier la connexion sans utiliser votre forfait. |
 
-Kilo Code affiche **Kilo Code — Installed**. Tools → Connectors ajoute : « Coppice can't check this sign-in without using your plan. A run will show an error if you're signed out. » Toutes les CLI peuvent discuter. Les conversations Claude Code, Codex, Cursor et Kilo Code affichent « Coppice hasn't confirmed that {cli} stays read-only. The agent can still run commands on your computer. » Les conversations OpenCode n’ont pas de bandeau. Test connection vérifie que la commande `kilo` se lance.
+Kilo Code affiche **Kilo Code — Installed**. System → Connectors ajoute : « Coppice can't check this sign-in without using your plan. A run will show an error if you're signed out. » Toutes les CLI peuvent discuter. Les conversations Claude Code, Codex, Cursor et Kilo Code affichent « Coppice hasn't confirmed that {cli} stays read-only. The agent can still run commands on your computer. » Les conversations OpenCode n’ont pas de bandeau. Test connection vérifie que la commande `kilo` se lance.
 
 Vous pouvez enregistrer un agent avant que sa CLI soit prête. Il commence à travailler sur les tickets une fois la CLI installée et connectée. Si vous avez installé la CLI après avoir ouvert Coppice, quittez et rouvrez Coppice pour qu’il trouve la nouvelle commande.
 
-Pour désactiver un connecteur, utilisez **Tools → Connectors**.
+Pour désactiver un connecteur, utilisez **System → Connectors**.
 
 <a id="use-your-own-api-key-or-another-provider"></a>
 

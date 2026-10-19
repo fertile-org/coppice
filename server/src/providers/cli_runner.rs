@@ -35,7 +35,83 @@ pub struct CliInvocation {
     /// How long to wait for exit after a result before stopping the group.
     /// `None` uses [`RESULT_EXIT_GRACE`].
     pub result_exit_grace: Option<Duration>,
+    /// `(first output, idle)`; `None` uses [`FIRST_OUTPUT_TIMEOUT`] and [`IDLE_TIMEOUT`].
+    pub stall_limits: Option<(Duration, Duration)>,
 }
+
+impl CliInvocation {
+    fn first_output_timeout(&self) -> Duration {
+        self.stall_limits
+            .map_or(FIRST_OUTPUT_TIMEOUT, |(first, _)| first)
+    }
+
+    fn idle_timeout(&self) -> Duration {
+        self.stall_limits.map_or(IDLE_TIMEOUT, |(_, idle)| idle)
+    }
+}
+
+/// One log line per run on how the stream went, written when the run ends,
+/// so a broken run shows which part of the protocol failed.
+struct ProtocolSummary {
+    program: String,
+    run_id: Option<String>,
+    started: std::time::Instant,
+    lines: u64,
+    json_lines: u64,
+    terminal: bool,
+    ended: &'static str,
+    exit_code: Option<i32>,
+}
+
+impl ProtocolSummary {
+    fn new(program: &str, run_id: Option<&str>) -> Self {
+        Self {
+            program: program.to_string(),
+            run_id: run_id.map(str::to_string),
+            started: std::time::Instant::now(),
+            lines: 0,
+            json_lines: 0,
+            terminal: false,
+            ended: "exited",
+            exit_code: None,
+        }
+    }
+
+    fn line(&mut self, json: bool) {
+        self.lines += 1;
+        if json {
+            self.json_lines += 1;
+        }
+    }
+
+    fn ended(&mut self, how: &'static str) {
+        self.ended = how;
+    }
+}
+
+impl Drop for ProtocolSummary {
+    fn drop(&mut self) {
+        tracing::info!(
+            program = %self.program,
+            run_id = self.run_id.as_deref().unwrap_or(""),
+            lines = self.lines,
+            json_lines = self.json_lines,
+            other_lines = self.lines - self.json_lines,
+            terminal_event = self.terminal,
+            ended = self.ended,
+            exit_code = self.exit_code,
+            duration_ms = self.started.elapsed().as_millis() as u64,
+            "cli stream summary"
+        );
+    }
+}
+
+/// A CLI that prints nothing this long after starting is stuck (sign-in
+/// prompt, a flag it doesn't know, a hung startup).
+pub const FIRST_OUTPUT_TIMEOUT: Duration = Duration::from_secs(3 * 60);
+/// A CLI silent this long with no tool running has stalled. A running tool
+/// (a long build or test suite) may be silent for longer.
+pub const IDLE_TIMEOUT: Duration = Duration::from_secs(20 * 60);
 
 /// After a structured result, wait this long for the CLI to exit, then stop
 /// the process group. Claude Code 2.1.292+ keeps running while background
@@ -48,6 +124,38 @@ pub trait LineHandler: Send {
     /// The handler forwards console events, accumulates text, and says whether
     /// the stream reached its terminal event.
     fn on_json(&mut self, value: &Value) -> LineStep;
+
+    /// Whether a tool the agent started has not reported back yet. Silence
+    /// then is the tool working, not a stall.
+    fn tools_running(&self) -> bool {
+        false
+    }
+
+    /// Lines to write to the CLI's stdin, for runs started with
+    /// [`run_cli_interactive`] (answers to control requests). Ignored otherwise.
+    fn take_replies(&mut self) -> Vec<String> {
+        Vec::new()
+    }
+}
+
+/// Tool calls started and not yet finished, by call id.
+#[derive(Debug, Default)]
+pub struct ToolTracker {
+    running: std::collections::HashSet<String>,
+}
+
+impl ToolTracker {
+    pub fn started(&mut self, id: &str) {
+        self.running.insert(id.to_string());
+    }
+
+    pub fn finished(&mut self, id: &str) {
+        self.running.remove(id);
+    }
+
+    pub fn any(&self) -> bool {
+        !self.running.is_empty()
+    }
 }
 
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
@@ -81,11 +189,20 @@ pub enum CliError {
     Cancelled,
     #[error("CLI run timed out")]
     TimedOut { stderr_tail: Vec<String> },
+    /// Stopped by [`FIRST_OUTPUT_TIMEOUT`] or [`IDLE_TIMEOUT`]; `reason` is a sentence.
+    #[error("{reason}")]
+    Stalled {
+        reason: String,
+        stderr_tail: Vec<String>,
+    },
     #[error("CLI I/O error: {0}")]
     Io(std::io::Error),
 }
 
-fn resolve_cli_program(host: &crate::host_env::HostEnv, program: &str) -> Result<String, CliError> {
+pub(super) fn resolve_cli_program(
+    host: &crate::host_env::HostEnv,
+    program: &str,
+) -> Result<String, CliError> {
     if program.contains('/') || program.contains('\\') {
         return Ok(program.to_string());
     }
@@ -115,6 +232,37 @@ pub async fn run_cli_with_stdin(
     handler: &mut dyn LineHandler,
     io: RunIo,
 ) -> Result<CliExit, CliError> {
+    let mode = match stdin {
+        Some(input) => StdinMode::Once(input),
+        None => StdinMode::Null,
+    };
+    run_cli_inner(inv, mode, handler, io).await
+}
+
+/// Keeps stdin open: writes `initial` lines, then the handler's replies, and
+/// closes stdin once the terminal event is read. Writing happens on its own
+/// task so a CLI that stops reading can't stall reading its output.
+pub async fn run_cli_interactive(
+    inv: CliInvocation,
+    initial: Vec<String>,
+    handler: &mut dyn LineHandler,
+    io: RunIo,
+) -> Result<CliExit, CliError> {
+    run_cli_inner(inv, StdinMode::Interactive(initial), handler, io).await
+}
+
+enum StdinMode {
+    Null,
+    Once(String),
+    Interactive(Vec<String>),
+}
+
+async fn run_cli_inner(
+    inv: CliInvocation,
+    stdin: StdinMode,
+    handler: &mut dyn LineHandler,
+    io: RunIo,
+) -> Result<CliExit, CliError> {
     let host = crate::host_env::current();
     let program = resolve_cli_program(&host, &inv.program)?;
     let secrets =
@@ -124,13 +272,14 @@ pub async fn run_cli_with_stdin(
     if !host.home.as_os_str().is_empty() {
         cmd.env("HOME", &host.home);
     }
+    super::env_hygiene::scrub(&mut cmd);
     cmd.args(&inv.args)
         .envs(inv.env.iter().map(|(k, v)| (k.as_str(), v.as_str())))
         .current_dir(&inv.cwd)
-        .stdin(if stdin.is_some() {
-            Stdio::piped()
-        } else {
+        .stdin(if matches!(stdin, StdinMode::Null) {
             Stdio::null()
+        } else {
+            Stdio::piped()
         })
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
@@ -147,14 +296,39 @@ pub async fn run_cli_with_stdin(
         )
         .map_err(CliError::Spawn)?;
 
-    let stdin_task = stdin.map(|input| {
-        let mut pipe = tracked.take_stdin().expect("piped stdin");
-        tokio::spawn(async move {
-            use tokio::io::AsyncWriteExt;
-            let _ = pipe.write_all(input.as_bytes()).await;
-            let _ = pipe.shutdown().await;
-        })
-    });
+    let mut replies: Option<tokio::sync::mpsc::UnboundedSender<String>> = None;
+    let stdin_task = match stdin {
+        StdinMode::Null => None,
+        StdinMode::Once(input) => {
+            let mut pipe = tracked.take_stdin().expect("piped stdin");
+            Some(tokio::spawn(async move {
+                use tokio::io::AsyncWriteExt;
+                let _ = pipe.write_all(input.as_bytes()).await;
+                let _ = pipe.shutdown().await;
+            }))
+        }
+        StdinMode::Interactive(initial) => {
+            let mut pipe = tracked.take_stdin().expect("piped stdin");
+            let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+            for line in initial {
+                let _ = tx.send(line);
+            }
+            replies = Some(tx);
+            Some(tokio::spawn(async move {
+                use tokio::io::AsyncWriteExt;
+                while let Some(mut line) = rx.recv().await {
+                    if !line.ends_with('\n') {
+                        line.push('\n');
+                    }
+                    if pipe.write_all(line.as_bytes()).await.is_err() || pipe.flush().await.is_err()
+                    {
+                        break;
+                    }
+                }
+                let _ = pipe.shutdown().await;
+            }))
+        }
+    };
     let stdout = tracked.take_stdout().expect("piped stdout");
     let stderr = tracked.take_stderr().expect("piped stderr");
     let stderr_tail = Arc::new(Mutex::new(Vec::new()));
@@ -168,14 +342,53 @@ pub async fn run_cli_with_stdin(
     // `secrets` stays alive for stdout lines read on this task. The stderr task
     // holds a clone until that pipe is drained.
 
-    let mut reader = BufReader::new(stdout).lines();
-    let deadline = tokio::time::Instant::now() + inv.timeout;
+    let mut reader = super::line_reader::CappedLines::new(
+        BufReader::new(stdout),
+        super::line_reader::MAX_LINE_BYTES,
+    );
+    let started = tokio::time::Instant::now();
+    let deadline = started + inv.timeout;
     let mut cancel_rx = io.cancel_rx;
     let mut session_sent = false;
     let mut stopped_on_result = false;
+    let mut summary = ProtocolSummary::new(&inv.program, inv.run_id.as_deref());
+    let mut last_output: Option<tokio::time::Instant> = None;
 
     loop {
+        let now = tokio::time::Instant::now();
+        let stall_at = match last_output {
+            None => started + inv.first_output_timeout(),
+            Some(_) if handler.tools_running() => deadline,
+            Some(at) => at + inv.idle_timeout(),
+        };
+        if now >= stall_at && stall_at < deadline {
+            let reason = match last_output {
+                None => format!(
+                    "the CLI printed nothing in its first {} seconds, so Coppice stopped it",
+                    inv.first_output_timeout().as_secs()
+                ),
+                Some(_) => format!(
+                    "the CLI printed nothing for {} minutes with no tool running, so Coppice stopped it",
+                    inv.idle_timeout().as_secs() / 60
+                ),
+            };
+            summary.ended("stalled");
+            let _ = tracked.shutdown("stalled").await;
+            if tokio::time::timeout(STDERR_DRAIN_AFTER_KILL, &mut stderr_task)
+                .await
+                .is_err()
+            {
+                stderr_task.abort();
+            }
+            let stderr_tail = std::mem::take(&mut *stderr_tail.lock().unwrap());
+            return Err(CliError::Stalled {
+                reason,
+                stderr_tail,
+            });
+        }
+
         if is_cancelled(&cancel_rx) {
+            summary.ended("cancelled");
             let _ = tracked.shutdown("cancelled").await;
             return Err(CliError::Cancelled);
         }
@@ -185,12 +398,18 @@ pub async fn run_cli_with_stdin(
 
             _ = wait_cancel(&mut cancel_rx) => {
                 if is_cancelled(&cancel_rx) {
+                    summary.ended("cancelled");
                     let _ = tracked.shutdown("cancelled").await;
                     return Err(CliError::Cancelled);
                 }
             }
 
+            _ = tokio::time::sleep_until(stall_at.min(deadline)), if stall_at < deadline => {
+                continue;
+            }
+
             _ = tokio::time::sleep_until(deadline) => {
+                summary.ended("timed out");
                 let _ = tracked.shutdown("timed out").await;
                 // A grandchild can hold the inherited stderr pipe open past the kill.
                 if tokio::time::timeout(STDERR_DRAIN_AFTER_KILL, &mut stderr_task)
@@ -206,7 +425,9 @@ pub async fn run_cli_with_stdin(
             line = reader.next_line() => {
                 match line {
                     Ok(Some(raw)) => {
+                        last_output = Some(tokio::time::Instant::now());
                         let parsed = serde_json::from_str::<Value>(&raw);
+                        summary.line(parsed.is_ok());
                         // A run's JSON lines become its console, which is kept
                         // in the run folder. Only other stdout goes to the
                         // server log.
@@ -222,6 +443,11 @@ pub async fn run_cli_with_stdin(
                             continue;
                         };
                         let step = handler.on_json(&value);
+                        if let Some(tx) = &replies {
+                            for reply in handler.take_replies() {
+                                let _ = tx.send(reply);
+                            }
+                        }
                         if !session_sent {
                             if let Some(sid) = step.session_id.filter(|s| !s.is_empty()) {
                                 if let Some(tx) = &io.session_created_tx {
@@ -232,11 +458,15 @@ pub async fn run_cli_with_stdin(
                         }
                         if step.stop {
                             stopped_on_result = true;
+                            summary.terminal = true;
+                            // Closing stdin tells an interactive CLI the turn is over.
+                            replies = None;
                             break;
                         }
                     }
                     Ok(None) => break,
                     Err(e) => {
+                        summary.ended("read error");
                         let _ = tracked.shutdown("io error").await;
                         return Err(CliError::Io(e));
                     }
@@ -245,8 +475,10 @@ pub async fn run_cli_with_stdin(
         }
     }
 
-    if stopped_on_result && inv.result_before_exit {
-        return finish_after_result(
+    drop(replies);
+    let finished = if stopped_on_result && inv.result_before_exit {
+        summary.ended("result");
+        finish_after_result(
             &mut tracked,
             &mut cancel_rx,
             stdin_task,
@@ -254,22 +486,28 @@ pub async fn run_cli_with_stdin(
             &stderr_tail,
             inv.result_exit_grace.unwrap_or(RESULT_EXIT_GRACE),
         )
-        .await;
-    }
-
-    let status = tracked
-        .wait_and_reap("run ended")
         .await
-        .map_err(CliError::Io)?;
-    finish_ok(
-        stdin_task,
-        &mut stderr_task,
-        &stderr_tail,
-        status,
-        false,
-        false,
-    )
-    .await
+    } else {
+        let status = tracked
+            .wait_and_reap("run ended")
+            .await
+            .map_err(CliError::Io)?;
+        finish_ok(
+            stdin_task,
+            &mut stderr_task,
+            &stderr_tail,
+            status,
+            false,
+            false,
+        )
+        .await
+    };
+    match &finished {
+        Ok(exit) => summary.exit_code = exit.status.code(),
+        Err(CliError::Cancelled) => summary.ended("cancelled"),
+        Err(_) => {}
+    }
+    finished
 }
 
 enum AfterResult {
@@ -381,7 +619,7 @@ pub fn log_launch(
 }
 
 /// Records stderr and keeps the first lines for error messages.
-async fn pump_stderr(
+pub(super) async fn pump_stderr(
     stderr: impl AsyncRead + Unpin,
     _secrets: crate::logs::SecretGuard,
     run_id: Option<String>,
@@ -469,6 +707,7 @@ mod tests {
                     ticket_id: Some("ticket-9".into()),
                     result_before_exit: false,
                     result_exit_grace: None,
+                    stall_limits: None,
                 };
                 run_cli(
                     invocation,

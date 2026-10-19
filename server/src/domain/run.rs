@@ -31,6 +31,9 @@ pub struct AgentRun {
     pub started_at: Option<OffsetDateTime>,
     pub ended_at: Option<OffsetDateTime>,
     pub created_at: OffsetDateTime,
+    /// The live console format this run used (`ConsoleKind` in camelCase).
+    /// `None` means the connector's default.
+    pub console_kind: Option<String>,
 }
 
 pub fn run_status_to_str(status: RunStatus) -> &'static str {

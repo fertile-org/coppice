@@ -5,6 +5,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ToastProvider } from '../../components/ToastProvider';
 import { SessionContext, type SessionContextValue } from '../auth/useSession';
+import { ThemeProvider } from '../theme/ThemeProvider';
 import { INIT_COPY } from './copy';
 import { InitWizard } from './InitWizard';
 import { InitWizardOffer } from './InitWizardOffer';
@@ -178,7 +179,7 @@ describe('InitWizard', () => {
     fireEvent.click(screen.getByRole('button', { name: INIT_COPY.next }));
     expect(
       await screen.findByText(
-        'No agent CLI is ready yet. Install one and sign in, then check it in Tools → Connectors.',
+        'No agent CLI is ready yet. Install one and sign in, then check it in System → Connectors.',
       ),
     ).toBeInTheDocument();
     expect(screen.queryByText('Create stays off until a CLI shows Ready.')).not.toBeInTheDocument();
@@ -291,9 +292,11 @@ function renderOffer(desktopMode: boolean, role = 'admin') {
     <QueryClientProvider client={client}>
       <ToastProvider>
         <SessionContext.Provider value={session(desktopMode, role)}>
-          <MemoryRouter>
-            <InitWizardOffer boardsEmpty />
-          </MemoryRouter>
+          <ThemeProvider>
+            <MemoryRouter>
+              <InitWizardOffer boardsEmpty />
+            </MemoryRouter>
+          </ThemeProvider>
         </SessionContext.Provider>
       </ToastProvider>
     </QueryClientProvider>,
@@ -321,10 +324,24 @@ describe('InitWizardOffer', () => {
     vi.unstubAllGlobals();
   });
 
-  it('opens on an empty desktop workspace', async () => {
+  it('opens as a welcome page on an empty desktop workspace', async () => {
     renderOffer(true);
     expect(await screen.findByRole('heading', { name: INIT_COPY.title })).toBeInTheDocument();
     expect(screen.getByTestId('init-offer')).toHaveAttribute('data-open', 'yes');
+    const welcome = screen.getByTestId('init-welcome');
+    expect(welcome).toContainElement(screen.getByRole('img', { name: 'Coppice' }));
+    expect(
+      screen.getByRole('heading', { level: 1, name: INIT_COPY.welcomeTitle }),
+    ).toBeInTheDocument();
+    expect(welcome).toHaveTextContent(INIT_COPY.welcomeIntro);
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
+  it('leaves the welcome page when setup is skipped', async () => {
+    renderOffer(true);
+    fireEvent.click(await screen.findByRole('button', { name: INIT_COPY.skip }));
+    await waitFor(() => expect(screen.queryByTestId('init-welcome')).not.toBeInTheDocument());
+    expect(localStorage.getItem('coppice.initWizard')).toBe('skipped');
   });
 
   it('stays closed when the workspace already has a repository', async () => {

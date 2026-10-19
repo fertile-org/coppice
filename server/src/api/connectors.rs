@@ -139,6 +139,9 @@ async fn list_connectors(
     AuthUser { .. }: AuthUser,
 ) -> Json<ConnectorListResponse> {
     let registry = state.connectors.registry();
+    // OpenCode 2 runs use the structured console; the version decides.
+    let opencode_console =
+        crate::providers::run_console_kind(coppice_connectors::OPENCODE, &state.config).await;
     let items = coppice_connectors::all()
         .iter()
         .filter(|descriptor| registry.has(descriptor.id))
@@ -154,7 +157,11 @@ async fn list_connectors(
             ConnectorResponse {
                 id: descriptor.id.to_string(),
                 display_name: descriptor.display_name,
-                console: descriptor.console,
+                console: if descriptor.id == coppice_connectors::OPENCODE {
+                    opencode_console.unwrap_or(descriptor.console)
+                } else {
+                    descriptor.console
+                },
                 caps: ConnectorCapsResponse {
                     read_only_tools: descriptor.caps.read_only_tools,
                     chat_resume: descriptor.caps.chat_resume,

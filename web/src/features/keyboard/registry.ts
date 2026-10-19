@@ -129,7 +129,7 @@ export const SHORTCUT_ACTIONS: readonly ShortcutAction[] = [
   },
   {
     id: 'nav.tools',
-    label: 'Go to Tools',
+    label: 'Go to System',
     group: 'Navigate',
     bindings: [sequence('g', 't')],
     scopes: ['global'],
