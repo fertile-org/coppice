@@ -256,6 +256,31 @@ describe('ChatPage', () => {
     expect(screen.queryByRole('button', { name: 'Start chat' })).not.toBeInTheDocument();
   });
 
+  it('puts the most recently chatted agent first and the rest by name', () => {
+    mocks.sessions = [
+      {
+        ...ACTIVE_SESSION,
+        id: '00000000-0000-4000-8000-000000000041',
+        agentId: '00000000-0000-4000-8000-000000000012',
+        updatedAt: '2026-09-08T00:01:00Z',
+      },
+      {
+        ...ACTIVE_SESSION,
+        id: '00000000-0000-4000-8000-000000000042',
+        agentId: '00000000-0000-4000-8000-000000000013',
+        updatedAt: '2026-09-08T00:05:00Z',
+      },
+    ];
+    renderChat('/chat');
+
+    const text = screen.getByTestId('chat-session-list').textContent ?? '';
+    const order = ['Codex Agent', 'Kilo Agent', 'Backend Engineer', 'Cursor Agent', 'OpenCode Agent'].map(
+      (name) => text.indexOf(name),
+    );
+    expect(order.every((index) => index >= 0)).toBe(true);
+    expect([...order].sort((a, b) => a - b)).toEqual(order);
+  });
+
   it('lists Cursor and Kilo Code as chats that can start', () => {
     renderChat('/chat');
 
