@@ -327,6 +327,36 @@ pub const KIMI: RunContract = RunContract {
     plan_mode: None,
 };
 
+/// Grok over ACP (`grok agent stdio`). Agent options go between `agent` and
+/// the transport. Refusing a permission prompt cancels the turn, so every run
+/// approves prompts, and read-only runs are kept read-only another way: the
+/// connector sets `GROK_SANDBOX=read-only` (kernel-enforced, writes only to
+/// `~/.grok` and temp folders), and Grok routes shell commands to Coppice,
+/// which refuses them. File edits are not routed, so the sandbox is what stops
+/// them (checked on 1.0.62).
+pub const GROK: RunContract = RunContract {
+    permission_mode: PermissionMode {
+        write: &["--always-approve"],
+        read_only: Some(&["--always-approve"]),
+        read_only_min_version: None,
+        min_version: None,
+        gate: false,
+        reason: "Refusing a Grok permission prompt cancels the turn, so runs approve prompts. Read-only runs add GROK_SANDBOX=read-only, and Coppice refuses the shell commands Grok routes to it.",
+    },
+    leading: &[flag(&["agent"], "Run Grok without the interactive UI.")],
+    trailing: &[
+        flag(
+            &["--no-leader"],
+            "A process of its own: Grok refuses a sandbox in leader mode, and a shared leader would outlive the run.",
+        ),
+        flag(&["stdio"], "Agent Client Protocol on stdin and stdout."),
+    ],
+    process_cwd_is_worktree: true,
+    result_before_exit: true,
+    prompt: PromptPlace::None,
+    plan_mode: None,
+};
+
 pub const CURSOR: RunContract = RunContract {
     permission_mode: PermissionMode {
         write: &["--force"],

@@ -12,12 +12,13 @@ A connector is how Coppice drives one agent CLI. The board, tickets and worktree
 | --- | --- | --- | --- | --- | --- |
 | Claude Code | `claude-code` | `claude` | Subprocess in the worktree: `claude -p … --output-format stream-json --verbose --permission-mode bypassPermissions` | `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN` set, or `~/.claude/.credentials.json`; otherwise `claude auth status` | [claude-code.md](claude-code.md) |
 | Codex | `codex` | `codex` | Subprocess: `codex exec --json --dangerously-bypass-approvals-and-sandbox -C <worktree>` (`--no-daemon` when the CLI is ≥ 0.156) | `OPENAI_API_KEY` set, or `~/.codex/auth.json`; otherwise `codex login status` | [codex.md](codex.md) |
-| Cursor | `cursor` | `agent` | Subprocess in the worktree: `agent -p … --trust --force --output-format stream-json --workspace <worktree>` | `~/.config/cursor/auth.json` or `~/.cursor/auth.json`. Neither means not signed in | [cursor.md](cursor.md) |
+| Cursor | `cursor` | `cursor-agent` | Subprocess in the worktree: `cursor-agent -p … --trust --force --output-format stream-json --workspace <worktree>` | `~/.config/cursor/auth.json` or `~/.cursor/auth.json`. Neither means not signed in | [cursor.md](cursor.md) |
 | OpenCode | `opencode` | `opencode` | 2.x: `opencode acp` per run over the Agent Client Protocol, with the structured console. 1.x: a fresh `opencode serve --hostname … --port …` per run over HTTP/SSE, with a Live Session | `~/.local/share/opencode/auth.json`; otherwise `opencode auth list` | [opencode.md](opencode.md) |
 | Kilo Code | `kilo-code` | `kilo` | Subprocess in the worktree: `kilo run --format json --auto --dir <worktree>` | None. `kilo auth` is interactive, so Coppice never runs it | [kilo-code.md](kilo-code.md) |
 | GitHub Copilot | `copilot` | `copilot` | `copilot --acp --no-ask-user --allow-all-tools` per run over the Agent Client Protocol, with the structured console | None free; Installed until Test connection | [copilot.md](copilot.md) |
 | Qwen Code | `qwen-code` | `qwen` | `qwen --acp --approval-mode yolo --exclude-tools …` per run over ACP | None free; Installed until Test connection | [qwen-code.md](qwen-code.md) |
 | Kimi Code | `kimi` | `kimi` | `kimi acp` per run over ACP, session mode `yolo` | None free; Installed until Test connection | [kimi.md](kimi.md) |
+| Grok | `grok` | `grok` | `grok agent --always-approve --no-leader stdio` per run over ACP | None free; Installed until Test connection | [grok.md](grok.md) |
 
 ### Detection and status
 
@@ -43,7 +44,7 @@ Each connector has a `[agent.connectors.<id>]` section in `config.toml`:
 | Key | Connectors | Default |
 | --- | --- | --- |
 | `enabled` | all | `false` |
-| `command` | `cursor` (`agent`), `opencode` (`opencode`), `kilo-code` (`kilo`) | Claude Code and Codex always run `claude` / `codex` |
+| `command` | `cursor` (`cursor-agent`), `opencode` (`opencode`), `kilo-code` (`kilo`) | Claude Code and Codex always run `claude` / `codex` |
 | `model_providers` | all | Optional. Empty or omitted uses the built-in list: `claude-code` → `sonnet, opus, haiku, fable`; `codex` → `openai`; `cursor` → `cursor`. `opencode` and `kilo-code` read providers from `opencode models` / `kilo models` (a few seconds; a CLI failure leaves the list empty). A non-empty value replaces that built-in list. Turning a connector on still fills an empty file entry from the descriptor when the descriptor has one |
 | `run_timeout_secs` | all | `600`; `opencode` `1800` |
 | `serve_hostname` | `opencode` | `127.0.0.1` (each run's server picks a free port; `serve_port` is ignored) |
@@ -78,6 +79,7 @@ A copy is `git clone --local --shared --no-checkout` of the registered checkout,
 | `copilot` | `session/load` | On, in the per-chat folder, no banner. Chat and planning add `--deny-tool shell --deny-tool write --disable-builtin-mcps`; deny beats `--allow-all-tools`. Checked on 1.0.98 with a real model: a shell command and a file write did not run, reading and `result_submit` did |
 | `qwen-code` | `session/resume` | On, in the per-chat folder, no banner. Chat and planning also exclude `run_shell_command`, `write_file`, `edit`, and `notebook_edit`; the `tool_call` bridge cannot reach an excluded tool. Plan mode is never used: on 0.25.2 it refused the gateway's MCP call. Checked against a scripted model |
 | `kimi` | `session/resume` | On, in the per-chat folder, no banner. Chat and planning offer to handle file writes and terminal commands, Kimi routes them to Coppice, and Coppice refuses; a subagent's writes go the same way. Checked on 2.2.0 against a scripted model |
+| `grok` | `session/resume` | On, in the per-chat folder, no banner. Chat and planning set `GROK_SANDBOX=read-only`, which blocks file edits outside temp folders, and offer to handle terminal commands, which Grok routes to Coppice and Coppice refuses. Grok's edit tools are not routed, so a read-only run in a temp folder is refused. Checked on 1.0.62 with the real model |
 
 Ticket runs can resume a prior session on `claude-code` and `cursor`. The other connectors start a fresh session and continue from the ticket checkpoint.
 

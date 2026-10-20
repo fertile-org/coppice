@@ -1232,7 +1232,10 @@ pub struct CursorConnectorConfig {
     /// Absent until the user sets the switch in Connectors.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub enabled: Option<bool>,
-    #[serde(default = "default_cursor_command")]
+    #[serde(
+        default = "default_cursor_command",
+        deserialize_with = "deserialize_cursor_command"
+    )]
     pub command: String,
     #[serde(default = "default_cursor_run_timeout_secs")]
     pub run_timeout_secs: u64,
@@ -1243,7 +1246,22 @@ pub struct CursorConnectorConfig {
 pub type CursorProviderConfig = CursorConnectorConfig;
 
 fn default_cursor_command() -> String {
-    "agent".into()
+    "cursor-agent".into()
+}
+
+/// Coppice used to write `command = "agent"` for Cursor. Grok installs its own
+/// `agent` too, so that old default now means Cursor's `cursor-agent`, which
+/// Cursor's installer has always shipped.
+fn deserialize_cursor_command<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let configured = String::deserialize(deserializer)?;
+    Ok(if configured.trim() == "agent" {
+        default_cursor_command()
+    } else {
+        configured
+    })
 }
 
 fn default_cursor_run_timeout_secs() -> u64 {
@@ -1830,10 +1848,23 @@ mod tests {
     }
 
     #[test]
+    fn cursor_old_agent_command_reads_as_cursor_agent() {
+        let read = |command: &str| {
+            toml::from_str::<CursorConnectorConfig>(&format!("command = {command:?}"))
+                .unwrap()
+                .command
+        };
+        assert_eq!(read("agent"), "cursor-agent");
+        assert_eq!(read(" agent "), "cursor-agent");
+        assert_eq!(read("/opt/cursor/bin/agent"), "/opt/cursor/bin/agent");
+        assert_eq!(read("my-agent"), "my-agent");
+    }
+
+    #[test]
     fn cursor_connector_defaults() {
         let cfg = CursorConnectorConfig::default();
         assert_eq!(cfg.enabled, None);
-        assert_eq!(cfg.command, "agent");
+        assert_eq!(cfg.command, "cursor-agent");
         assert_eq!(cfg.run_timeout_secs, 600);
         assert!(cfg.model_providers.is_empty());
     }
@@ -1842,7 +1873,7 @@ mod tests {
     fn command_for_connectors() {
         let mut cfg = AgentConnectorsConfig::default();
         assert_eq!(cfg.command("kilo-code"), Some("kilo"));
-        assert_eq!(cfg.command("cursor"), Some("agent"));
+        assert_eq!(cfg.command("cursor"), Some("cursor-agent"));
         assert_eq!(cfg.command("opencode"), Some("opencode"));
         assert_eq!(cfg.command("claude-code"), None);
         assert_eq!(cfg.command("codex"), Some("codex"));

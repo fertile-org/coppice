@@ -1,5 +1,5 @@
 //! Connectors that are an ACP agent CLI and nothing else: GitHub Copilot CLI,
-//! Qwen Code, and Kimi Code. The run contract gives their flags; this file
+//! Qwen Code, Kimi Code, and Grok. The run contract gives their flags; this file
 //! gives the few things that differ between them.
 
 use super::acp::{self, AcpLaunch, AcpLimits, AcpTurn, NoObserver, ToolPolicy};
@@ -9,6 +9,7 @@ use super::{worktree_dir_from_context, AgentProvider, AgentRunInput, AgentRunRes
 use crate::services::ticket_attachments;
 use crate::sessions::opencode_events::coppice_run_prompt;
 use async_trait::async_trait;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 /// What differs between the ACP CLI connectors.
@@ -22,6 +23,11 @@ pub struct AcpCliSpec {
     pub session_mode: Option<&'static str>,
     /// Whether the CLI takes `--add-dir` for staged ticket attachments.
     pub add_dir: bool,
+    /// Environment for read-only runs.
+    pub read_only_env: &'static [(&'static str, &'static str)],
+    /// Read-only holds only outside temp folders, so a read-only run in one is
+    /// refused rather than started unprotected.
+    pub read_only_needs_non_temp_dir: bool,
 }
 
 pub const COPILOT: AcpCliSpec = AcpCliSpec {
@@ -30,6 +36,8 @@ pub const COPILOT: AcpCliSpec = AcpCliSpec {
     sign_in_hint: "Run `copilot login`, then try again.",
     session_mode: None,
     add_dir: true,
+    read_only_env: &[],
+    read_only_needs_non_temp_dir: false,
 };
 
 pub const QWEN_CODE: AcpCliSpec = AcpCliSpec {
@@ -38,6 +46,8 @@ pub const QWEN_CODE: AcpCliSpec = AcpCliSpec {
     sign_in_hint: "Run `qwen` and sign in, then try again.",
     session_mode: None,
     add_dir: true,
+    read_only_env: &[],
+    read_only_needs_non_temp_dir: false,
 };
 
 /// `kimi acp` has no permission flags; yolo keeps a headless run from waiting
@@ -49,10 +59,42 @@ pub const KIMI: AcpCliSpec = AcpCliSpec {
     sign_in_hint: "Run `kimi login`, then try again.",
     session_mode: Some("yolo"),
     add_dir: false,
+    read_only_env: &[],
+    read_only_needs_non_temp_dir: false,
+};
+
+/// `grok agent stdio` takes no permission flags beyond `--always-approve`.
+/// Read-only runs use its kernel sandbox, which still lets the agent write to
+/// temp folders, and Coppice refuses the shell commands Grok routes to it.
+/// It takes no `--add-dir`; the sandbox lets it read staged files anyway.
+pub const GROK: AcpCliSpec = AcpCliSpec {
+    id: coppice_connectors::GROK,
+    console_prefix: "grok",
+    sign_in_hint: "Run `grok login`, then try again.",
+    session_mode: None,
+    add_dir: false,
+    read_only_env: &[("GROK_SANDBOX", "read-only")],
+    read_only_needs_non_temp_dir: true,
 };
 
 fn descriptor(spec: &AcpCliSpec) -> &'static coppice_connectors::ConnectorDescriptor {
     coppice_connectors::get(spec.id).expect("ACP CLI connector has a descriptor")
+}
+
+/// Folders a sandbox that keeps the agent read-only still lets it write to:
+/// `/tmp`, `/var/tmp`, and the OS temp folder (`$TMPDIR` on macOS).
+fn temp_roots() -> Vec<PathBuf> {
+    let mut roots: Vec<PathBuf> = vec!["/tmp".into(), "/var/tmp".into(), std::env::temp_dir()];
+    for root in roots.clone() {
+        if let Ok(real) = std::fs::canonicalize(&root) {
+            roots.push(real);
+        }
+    }
+    roots
+}
+
+pub fn in_temp_dir(dir: &Path, roots: &[PathBuf]) -> bool {
+    roots.iter().any(|root| dir.starts_with(root))
 }
 
 /// The CLI's arguments for a run: the pinned flags and the permission flags
@@ -66,6 +108,16 @@ pub fn launch_args(spec: &AcpCliSpec, read_only: bool, version: Option<&str>) ->
         port: "",
         version,
     })
+}
+
+fn env_for(spec: &AcpCliSpec, read_only: bool) -> Vec<(String, String)> {
+    if !read_only {
+        return Vec::new();
+    }
+    spec.read_only_env
+        .iter()
+        .map(|(key, value)| (key.to_string(), value.to_string()))
+        .collect()
 }
 
 pub struct AcpCliProvider {
@@ -92,10 +144,20 @@ impl AgentProvider for AcpCliProvider {
 
     async fn run(&self, input: AgentRunInput) -> Result<AgentRunResult, ProviderError> {
         let worktree = worktree_dir_from_context(&input.context_path)?;
-        let version = super::cli_version::detect(&self.command).await.ok();
         // Planning is always read-only.
         let read_only = input.read_only_tools
             || crate::domain::workflow::is_read_only_job(&input.job_type);
+        if read_only
+            && self.spec.read_only_needs_non_temp_dir
+            && in_temp_dir(&worktree, &temp_roots())
+        {
+            return Err(ProviderError::InvalidInput(format!(
+                "{} can't be kept read-only in a temp folder ({}). Move Coppice's worktrees folder out of the temp folder, then try again.",
+                descriptor(&self.spec).display_name,
+                worktree.display()
+            )));
+        }
+        let version = super::cli_version::detect(&self.command).await.ok();
         let staged = ticket_attachments::load_for_run(
             input.artifacts_dir.as_deref(),
             input.ticket_id.as_deref(),
@@ -117,7 +179,7 @@ impl AgentProvider for AcpCliProvider {
                 console_prefix: self.spec.console_prefix,
                 program: &self.command,
                 args,
-                env: Vec::new(),
+                env: env_for(&self.spec, read_only),
                 worktree: &worktree,
                 prompt: &prompt,
                 run_timeout: self.run_timeout,
@@ -164,7 +226,7 @@ impl AcpCliModels {
             display_name: descriptor(&self.spec).display_name.to_string(),
             program: self.command.clone(),
             args: launch_args(&self.spec, true, None),
-            env: Vec::new(),
+            env: env_for(&self.spec, true),
             cwd: dir.path().to_path_buf(),
             run_id: None,
             ticket_id: None,
@@ -265,6 +327,33 @@ mod tests {
             assert_eq!(excluded.contains("run_shell_command"), read_only, "{excluded}");
             assert_eq!(excluded.contains("write_file"), read_only, "{excluded}");
         }
+    }
+
+    #[test]
+    fn grok_puts_agent_options_before_stdio_and_sandboxes_read_only() {
+        for read_only in [true, false] {
+            assert_eq!(
+                launch_args(&GROK, read_only, None),
+                ["agent", "--always-approve", "--no-leader", "stdio"]
+            );
+        }
+        assert_eq!(
+            env_for(&GROK, true),
+            [("GROK_SANDBOX".to_string(), "read-only".to_string())]
+        );
+        assert!(env_for(&GROK, false).is_empty());
+        assert!(env_for(&KIMI, true).is_empty());
+    }
+
+    #[test]
+    fn temp_folders_are_spotted_after_resolving_links() {
+        let roots = vec![PathBuf::from("/tmp"), PathBuf::from("/private/var/folders/x/T")];
+        assert!(in_temp_dir(Path::new("/tmp/wt"), &roots));
+        assert!(in_temp_dir(Path::new("/private/var/folders/x/T/coppice/wt"), &roots));
+        assert!(!in_temp_dir(Path::new("/home/me/.local/share/coppice/worktrees/a"), &roots));
+        assert!(!in_temp_dir(Path::new("/tmpfoo/wt"), &roots));
+        let real = temp_roots();
+        assert!(real.iter().any(|r| r == &std::env::temp_dir()));
     }
 
     #[test]

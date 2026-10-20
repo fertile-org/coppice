@@ -62,7 +62,7 @@ Il faut Windows 11, car les anciennes versions de Windows 10 ne peuvent pas affi
    Utilisez `apt`, pas `dpkg -i`. `apt` installe aussi ce dont Coppice a besoin.
 
    Pour mettre Coppice à jour plus tard, lancez `sudo apt update && sudo apt upgrade`. Vos tableaux et paramètres restent en place.
-4. Installez dans Ubuntu les CLI d’agents que vous utilisez (Claude Code, Codex, Cursor, OpenCode, Kilo Code, GitHub Copilot, Qwen Code, Kimi Code). Connectez-vous à elles et à git là aussi.
+4. Installez dans Ubuntu les CLI d’agents que vous utilisez (Claude Code, Codex, Cursor, OpenCode, Kilo Code, GitHub Copilot, Qwen Code, Kimi Code, Grok). Connectez-vous à elles et à git là aussi.
 5. Lancez Coppice depuis le menu Démarrer de Windows (sous Ubuntu), ou lancez `coppice` dans Ubuntu.
 
    Si une CLI affiche Not on your PATH, lancez Coppice avec `coppice` dans Ubuntu.
@@ -78,7 +78,7 @@ Gardez vos dépôts dans votre dossier personnel Linux, par exemple `~/code/my-a
 2. Indiquez-lui un checkout git local que vous avez déjà sur le disque.
 3. **Connectez votre CLI d’agent.** Choisissez votre CLI d’agent en créant un agent, et Coppice l’active. Chacune indique si elle est **Ready**, **Found, not signed in** ou **Not on your PATH**. Connectez-vous d’abord à la CLI dans votre terminal, comme d’habitude.
 
-   Kilo Code, GitHub Copilot, Qwen Code et Kimi Code affichent **Installed** (par exemple **Kilo Code — Installed**). System → Connectors ajoute : « Coppice can't check this sign-in without using your plan. A run will show an error if you're signed out. » (Coppice ne peut pas vérifier cette connexion sans utiliser votre forfait. Un lancement affichera une erreur si vous êtes déconnecté.)
+   Kilo Code, GitHub Copilot, Qwen Code, Kimi Code et Grok affichent **Installed** (par exemple **Kilo Code — Installed**). System → Connectors ajoute : « Coppice can't check this sign-in without using your plan. A run will show an error if you're signed out. » (Coppice ne peut pas vérifier cette connexion sans utiliser votre forfait. Un lancement affichera une erreur si vous êtes déconnecté.)
 
    Pour désactiver un connecteur plus tard, utilisez l’interrupteur dans System → Connectors, ou mettez `enabled = false` pour lui dans votre `config.toml` Coppice :
 

@@ -1,6 +1,6 @@
 ---
 title: 提供商
-description: "Coppice 运行的智能体 CLI：Claude Code、Codex、Cursor、OpenCode、Kilo Code、GitHub Copilot、Qwen Code 和 Kimi Code。"
+description: "Coppice 运行的智能体 CLI：Claude Code、Codex、Cursor、OpenCode、Kilo Code、GitHub Copilot、Qwen Code、Kimi Code、Grok 和 Grok。"
 ---
 
 # 提供商
@@ -15,12 +15,13 @@ description: "Coppice 运行的智能体 CLI：Claude Code、Codex、Cursor、Op
 | --- | --- | --- |
 | Claude Code | `claude` | [安装指南](https://docs.anthropic.com/en/docs/claude-code/setup) |
 | Codex | `codex` | [安装指南](https://developers.openai.com/codex/cli) |
-| Cursor | `agent` | [安装指南](https://cursor.com/docs/cli/installation) |
+| Cursor | `cursor-agent` | [安装指南](https://cursor.com/docs/cli/installation) |
 | OpenCode | `opencode` | [安装指南](https://opencode.ai/docs/) |
 | Kilo Code | `kilo` | [安装指南](https://kilo.ai/docs/cli) |
 | GitHub Copilot | `copilot` | [安装指南](https://docs.github.com/en/copilot/how-tos/copilot-cli) |
 | Qwen Code | `qwen` | [安装指南](https://github.com/QwenLM/qwen-code) |
 | Kimi Code | `kimi` | [安装指南](https://moonshotai.github.io/kimi-code/) |
+| Grok | `grok` | [安装指南](https://x.ai/cli) |
 
 <figure>
 <img src="/assets/docs/model-picker.webp" width="1440" height="900" alt="智能体上的模型选择器，列出该智能体 CLI 提供的模型。">
@@ -43,9 +44,9 @@ description: "Coppice 运行的智能体 CLI：Claude Code、Codex、Cursor、Op
 | **Ready** | 一次免费的登录检查确认你已登录。 |
 | **Found, not signed in** | Coppice 找到了命令，但你还没有登录。请在终端里登录。 |
 | **Not on your PATH** | Coppice 找不到该命令。请安装它，或检查你的 PATH。 |
-| **Installed** | Coppice 找到了命令。对于 Kilo Code、GitHub Copilot、Qwen Code 和 Kimi Code，不消耗你的套餐额度就无法检查登录状态。 |
+| **Installed** | Coppice 找到了命令。对于 Kilo Code、GitHub Copilot、Qwen Code、Kimi Code、Grok 和 Grok，不消耗你的套餐额度就无法检查登录状态。 |
 
-Kilo Code、GitHub Copilot、Qwen Code 和 Kimi Code 显示为 **Installed**。System → Connectors 中还会提示："Coppice can't check this sign-in without using your plan. A run will show an error if you're signed out."（不消耗你的套餐额度，Coppice 就无法检查登录状态；如果你已退出登录，运行时会报错。）想确认它能用，就点 **Test connection**（测试连接）：它会跑一次简短的聊天、规划和工单。所有 CLI 都能聊天。Claude Code、Codex、Cursor 和 Kilo Code 的聊天会显示 "Coppice hasn't confirmed that {cli} stays read-only. The agent can still run commands on your computer."（Coppice 尚未确认 {cli} 会保持只读，智能体仍可在你的电脑上执行命令。）OpenCode、GitHub Copilot、Qwen Code 和 Kimi Code 的聊天没有这条横幅：在聊天和规划中，Coppice 会阻止它们写文件和执行 shell 命令。你在这些 CLI 里自己配置的 MCP 工具仍可能改动内容。
+Kilo Code、GitHub Copilot、Qwen Code、Kimi Code、Grok 和 Grok 显示为 **Installed**。System → Connectors 中还会提示："Coppice can't check this sign-in without using your plan. A run will show an error if you're signed out."（不消耗你的套餐额度，Coppice 就无法检查登录状态；如果你已退出登录，运行时会报错。）想确认它能用，就点 **Test connection**（测试连接）：它会跑一次简短的聊天、规划和工单。所有 CLI 都能聊天。Claude Code、Codex、Cursor 和 Kilo Code 的聊天会显示 "Coppice hasn't confirmed that {cli} stays read-only. The agent can still run commands on your computer."（Coppice 尚未确认 {cli} 会保持只读，智能体仍可在你的电脑上执行命令。）OpenCode、GitHub Copilot、Qwen Code、Kimi Code、Grok 和 Grok 的聊天没有这条横幅：在聊天和规划中，Coppice 会阻止它们写文件和执行 shell 命令。你在这些 CLI 里自己配置的 MCP 工具仍可能改动内容。
 
 CLI 还没就绪时，也可以先保存智能体。CLI 安装并登录后，它就会开始处理工单。如果你是在打开 Coppice 之后才安装的 CLI，请退出并重新打开 Coppice，让它找到新命令。
 

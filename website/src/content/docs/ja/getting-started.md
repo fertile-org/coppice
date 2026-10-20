@@ -12,7 +12,7 @@ description: "インストール直後から最初のエージェント実行ま
 <a id="1-install-a-provider-and-sign-in"></a>
 
 ## 1. プロバイダーをインストールしてサインインする
-プロバイダーとは、Coppice があなたの代わりに動かすエージェント CLI のことです。Claude Code、Codex、Cursor、OpenCode、Kilo Code、GitHub Copilot、Qwen Code、Kimi Code があります。Coppice は CLI をインストールしません。コンピューターにすでにある CLI を見つけます。
+プロバイダーとは、Coppice があなたの代わりに動かすエージェント CLI のことです。Claude Code、Codex、Cursor、OpenCode、Kilo Code、GitHub Copilot、Qwen Code、Kimi Code、Grok があります。Coppice は CLI をインストールしません。コンピューターにすでにある CLI を見つけます。
 
 1. いつもどおりの方法で CLI をインストールし、ターミナルでサインインします。
 2. Coppice のサイドバーで **System** を開き、**Connectors** を開きます。
@@ -20,7 +20,7 @@ description: "インストール直後から最初のエージェント実行ま
 
 **Found, not signed in** と表示されたら、ターミナルで CLI にサインインしてください。**Not on your PATH** と表示されたら、CLI をインストールするか、カードの **Install docs** に従ってください。そのあと **Run check** をクリックします。
 
-Kilo Code、GitHub Copilot、Qwen Code、Kimi Code は **Installed** と表示されます。Coppice はあなたのプランを使わずにこれらのサインインを確認できないので、サインアウトしていると実行時にエラーが表示されます。
+Kilo Code、GitHub Copilot、Qwen Code、Kimi Code、Grok は **Installed** と表示されます。Coppice はあなたのプランを使わずにこれらのサインインを確認できないので、サインアウトしていると実行時にエラーが表示されます。
 
 <a id="2-set-up-an-agent"></a>
 

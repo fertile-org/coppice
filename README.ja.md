@@ -23,7 +23,7 @@
 
 Beta のインストーラーは、macOS 用の `.dmg`（Apple Silicon または Intel）と Linux 用の `.deb`（`amd64` または `arm64`）です。[リリースページ](https://github.com/fertile-org/coppice/releases)から入手してください。
 
-すでに使っている CLI をそのまま使えます：Claude Code、Codex、Cursor、OpenCode、Kilo Code、GitHub Copilot、Qwen Code、Kimi Code。いつもの方法でインストールしてサインインしてください。Coppice はログインシェルの `PATH` からそれらを見つけます。
+すでに使っている CLI をそのまま使えます：Claude Code、Codex、Cursor、OpenCode、Kilo Code、GitHub Copilot、Qwen Code、Kimi Code、Grok。いつもの方法でインストールしてサインインしてください。Coppice はログインシェルの `PATH` からそれらを見つけます。
 
 ## はじめに
 

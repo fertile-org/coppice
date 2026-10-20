@@ -92,7 +92,7 @@ export function presetToFormValues(
   };
 }
 
-/** `agent login` in the Cursor sign-in line is inline code, not backtick characters. */
+/** `cursor-agent login` in the Cursor sign-in line is inline code, not backtick characters. */
 function cursorSignInLine(line: string) {
   const parts = line.split('`');
   return parts.map((part, index) =>

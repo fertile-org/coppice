@@ -129,7 +129,7 @@ mod tests {
         // The search path adds standard install dirs, so BINARY depends on the
         // host for CLIs outside the test's own bin dir.
         for (start, end) in [
-            ("cursor         no       ", "missing  agent login (copy URL)"),
+            ("cursor         no       ", "missing  cursor-agent login (copy URL)"),
             ("codex          no       ", "ok       codex login --device-auth"),
         ] {
             assert!(

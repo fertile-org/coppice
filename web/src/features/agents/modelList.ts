@@ -19,7 +19,7 @@ export function turnedOffConnectorName(
 }
 
 export const CURSOR_MODELS_SIGN_IN =
-  "Cursor's CLI isn't signed in for Coppice. Run `agent login` in a terminal, then click Refresh models.";
+  "Cursor's CLI isn't signed in for Coppice. Run `cursor-agent login` in a terminal, then click Refresh models.";
 
 /** Small text under the failure message. Cursor's signed-out CLI replaces the stderr line. */
 export function modelsFailureExtra(

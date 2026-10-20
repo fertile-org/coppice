@@ -26,7 +26,7 @@ describe('model list copy', () => {
       CURSOR_MODELS_SIGN_IN,
     );
     expect(CURSOR_MODELS_SIGN_IN).toBe(
-      "Cursor's CLI isn't signed in for Coppice. Run `agent login` in a terminal, then click Refresh models.",
+      "Cursor's CLI isn't signed in for Coppice. Run `cursor-agent login` in a terminal, then click Refresh models.",
     );
     expect(modelsFailureExtra('cursor', '  ')).toBeNull();
   });

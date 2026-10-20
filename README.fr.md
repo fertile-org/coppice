@@ -23,7 +23,7 @@ C’est vous qui lancez le travail. Créez un ticket, ou approuvez celui qu’un
 
 Les installeurs de la beta sont un `.dmg` pour macOS (Apple Silicon ou Intel) et un `.deb` pour Linux (`amd64` ou `arm64`). Récupérez-les sur la [page des versions](https://github.com/fertile-org/coppice/releases).
 
-Apportez les CLI que vous utilisez déjà : Claude Code, Codex, Cursor, OpenCode, Kilo Code, GitHub Copilot, Qwen Code et Kimi Code. Installez-les et connectez-vous comme d’habitude. Coppice les trouve dans le `PATH` de votre shell de connexion.
+Apportez les CLI que vous utilisez déjà : Claude Code, Codex, Cursor, OpenCode, Kilo Code, GitHub Copilot, Qwen Code, Kimi Code et Grok. Installez-les et connectez-vous comme d’habitude. Coppice les trouve dans le `PATH` de votre shell de connexion.
 
 ## Pour commencer
 

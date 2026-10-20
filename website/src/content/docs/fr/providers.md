@@ -1,6 +1,6 @@
 ---
 title: Fournisseurs
-description: "Les CLI d’agents que Coppice pilote : Claude Code, Codex, Cursor, OpenCode, Kilo Code, GitHub Copilot, Qwen Code et Kimi Code."
+description: "Les CLI d’agents que Coppice pilote : Claude Code, Codex, Cursor, OpenCode, Kilo Code, GitHub Copilot, Qwen Code, Kimi Code et Grok."
 ---
 
 # Fournisseurs
@@ -15,12 +15,13 @@ Fatigué de garder un terminal ouvert pour chaque agent ? Coppice pilote les CLI
 | --- | --- | --- |
 | Claude Code | `claude` | [Guide d’installation](https://docs.anthropic.com/en/docs/claude-code/setup) |
 | Codex | `codex` | [Guide d’installation](https://developers.openai.com/codex/cli) |
-| Cursor | `agent` | [Guide d’installation](https://cursor.com/docs/cli/installation) |
+| Cursor | `cursor-agent` | [Guide d’installation](https://cursor.com/docs/cli/installation) |
 | OpenCode | `opencode` | [Guide d’installation](https://opencode.ai/docs/) |
 | Kilo Code | `kilo` | [Guide d’installation](https://kilo.ai/docs/cli) |
 | GitHub Copilot | `copilot` | [Guide d’installation](https://docs.github.com/en/copilot/how-tos/copilot-cli) |
 | Qwen Code | `qwen` | [Guide d’installation](https://github.com/QwenLM/qwen-code) |
 | Kimi Code | `kimi` | [Guide d’installation](https://moonshotai.github.io/kimi-code/) |
+| Grok | `grok` | [Guide d’installation](https://x.ai/cli) |
 
 <figure>
 <img src="/assets/docs/model-picker.webp" width="1440" height="900" alt="Le sélecteur de modèle d’un agent, avec les modèles de la CLI de l’agent.">
@@ -43,9 +44,9 @@ Le formulaire d’agent liste chaque connecteur avec son statut :
 | **Ready** | Une vérification de connexion gratuite a confirmé que vous êtes connecté. |
 | **Found, not signed in** | Coppice a trouvé la commande, mais vous n’êtes pas connecté. Connectez-vous depuis votre terminal. |
 | **Not on your PATH** | Coppice ne trouve pas la commande. Installez-la, ou vérifiez votre PATH. |
-| **Installed** | Coppice a trouvé la commande. Pour Kilo Code, GitHub Copilot, Qwen Code et Kimi Code, il ne peut pas vérifier la connexion sans utiliser votre forfait. |
+| **Installed** | Coppice a trouvé la commande. Pour Kilo Code, GitHub Copilot, Qwen Code, Kimi Code et Grok, il ne peut pas vérifier la connexion sans utiliser votre forfait. |
 
-Kilo Code, GitHub Copilot, Qwen Code et Kimi Code affichent **Installed**. System → Connectors ajoute : « Coppice can't check this sign-in without using your plan. A run will show an error if you're signed out. » Pour vérifier que l’une fonctionne, utilisez **Test connection** : il lance une courte conversation, un plan et un ticket. Toutes les CLI peuvent discuter. Les conversations Claude Code, Codex, Cursor et Kilo Code affichent « Coppice hasn't confirmed that {cli} stays read-only. The agent can still run commands on your computer. » Les conversations OpenCode, GitHub Copilot, Qwen Code et Kimi Code n’ont pas de bandeau : dans les conversations et la planification, Coppice bloque leurs écritures de fichiers et leurs commandes shell. Un outil MCP que vous avez configuré vous-même dans cette CLI peut encore modifier des choses.
+Kilo Code, GitHub Copilot, Qwen Code, Kimi Code et Grok affichent **Installed**. System → Connectors ajoute : « Coppice can't check this sign-in without using your plan. A run will show an error if you're signed out. » Pour vérifier que l’une fonctionne, utilisez **Test connection** : il lance une courte conversation, un plan et un ticket. Toutes les CLI peuvent discuter. Les conversations Claude Code, Codex, Cursor et Kilo Code affichent « Coppice hasn't confirmed that {cli} stays read-only. The agent can still run commands on your computer. » Les conversations OpenCode, GitHub Copilot, Qwen Code, Kimi Code et Grok n’ont pas de bandeau : dans les conversations et la planification, Coppice bloque leurs écritures de fichiers et leurs commandes shell. Un outil MCP que vous avez configuré vous-même dans cette CLI peut encore modifier des choses.
 
 Vous pouvez enregistrer un agent avant que sa CLI soit prête. Il commence à travailler sur les tickets une fois la CLI installée et connectée. Si vous avez installé la CLI après avoir ouvert Coppice, quittez et rouvrez Coppice pour qu’il trouve la nouvelle commande.
 

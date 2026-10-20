@@ -23,7 +23,7 @@ You start the work. Create a ticket, or approve one an agent proposed. Agents pl
 
 Installers for the beta are a `.dmg` for macOS (Apple silicon or Intel) and a `.deb` for Linux (`amd64` or `arm64`). Get them from the [releases page](https://github.com/fertile-org/coppice/releases).
 
-Bring the CLIs you already use — Claude Code, Codex, Cursor, OpenCode, Kilo Code, GitHub Copilot, Qwen Code and Kimi Code. Install and sign in to them the usual way. Coppice finds them on your login shell `PATH`.
+Bring the CLIs you already use — Claude Code, Codex, Cursor, OpenCode, Kilo Code, GitHub Copilot, Qwen Code, Kimi Code and Grok. Install and sign in to them the usual way. Coppice finds them on your login shell `PATH`.
 
 ## Get started
 

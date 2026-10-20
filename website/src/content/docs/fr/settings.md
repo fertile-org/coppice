@@ -74,7 +74,7 @@ enabled = false
 
 L’interrupteur dans **System → Connectors** écrit la même ligne.
 
-Kilo Code, GitHub Copilot, Qwen Code et Kimi Code restent désactivés tant que vous ne les activez pas. Coppice ne peut pas vérifier leur connexion gratuitement.
+Kilo Code, GitHub Copilot, Qwen Code, Kimi Code et Grok restent désactivés tant que vous ne les activez pas. Coppice ne peut pas vérifier leur connexion gratuitement.
 
 ## `[agent]`
 
@@ -95,7 +95,7 @@ Ids : `claude-code`, `codex`, `cursor`, `opencode`, `kilo-code`. Chaque table es
 | `enabled` | bool | non défini : activé si la CLI est connectée | Active ou désactive le connecteur. |
 | `model_providers` | list of strings | `[]` | Fournisseurs de modèles pour ce connecteur. Remplis quand vous l’activez. |
 | `run_timeout_secs` | integer | `1800` pour OpenCode, `600` pour les autres | Secondes avant qu’un lancement sur ce connecteur échoue. |
-| `command` | string | `agent` (Cursor), `codex`, `opencode`, `kilo` | Le binaire de CLI à lancer. Claude Code lance toujours `claude` et n’a pas de `command`. |
+| `command` | string | `cursor-agent` (Cursor), `codex`, `opencode`, `kilo` | Le binaire de CLI à lancer. Claude Code lance toujours `claude` et n’a pas de `command`. |
 
 OpenCode uniquement :
 

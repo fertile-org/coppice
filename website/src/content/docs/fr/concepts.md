@@ -24,7 +24,7 @@ Un ticket bloqué passe en **Blocked** (bloqué) avec un commentaire qui expliqu
 
 ## Agents
 
-Coppice pilote les CLI d’agents que vous utilisez déjà, comme Claude Code, Codex, Cursor, OpenCode, Kilo Code, GitHub Copilot, Qwen Code et Kimi Code. Chaque agent a un rôle, comme PM, Technical Lead ou Backend Engineer, et tourne sur une CLI. Voir [Fournisseurs](/docs/providers).
+Coppice pilote les CLI d’agents que vous utilisez déjà, comme Claude Code, Codex, Cursor, OpenCode, Kilo Code, GitHub Copilot, Qwen Code, Kimi Code et Grok. Chaque agent a un rôle, comme PM, Technical Lead ou Backend Engineer, et tourne sur une CLI. Voir [Fournisseurs](/docs/providers).
 
 Chaque agent peut utiliser un modèle différent, même sur la même CLI. Votre PM peut tourner sur Claude Opus pendant que votre Backend Engineer tourne sur Claude Sonnet.
 

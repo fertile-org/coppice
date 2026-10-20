@@ -24,7 +24,7 @@ Coppice はコーディング作業のためのボードです。あなたがチ
 
 ## エージェント
 
-Coppice は、あなたがすでに使っているエージェント CLI（Claude Code、Codex、Cursor、OpenCode、Kilo Code、GitHub Copilot、Qwen Code、Kimi Code など）を動かします。各エージェントには PM、Technical Lead、Backend Engineer などの役割があり、1 つの CLI で動きます。[プロバイダー](/docs/providers)を参照してください。
+Coppice は、あなたがすでに使っているエージェント CLI（Claude Code、Codex、Cursor、OpenCode、Kilo Code、GitHub Copilot、Qwen Code、Kimi Code、Grok など）を動かします。各エージェントには PM、Technical Lead、Backend Engineer などの役割があり、1 つの CLI で動きます。[プロバイダー](/docs/providers)を参照してください。
 
 エージェントごとに別のモデルを使えます。同じ CLI でも構いません。PM は Claude Opus、Backend Engineer は Claude Sonnet、という使い分けができます。
 

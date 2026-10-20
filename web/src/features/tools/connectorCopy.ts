@@ -24,7 +24,7 @@ export function readinessLabel(readiness: ConnectorReadiness | null | undefined)
 }
 
 /** Connectors whose sign-in cannot be checked without a plan-using request. */
-export const NO_FREE_SIGN_IN_CHECK = ['kilo-code', 'copilot', 'qwen-code', 'kimi'] as const;
+export const NO_FREE_SIGN_IN_CHECK = ['kilo-code', 'copilot', 'qwen-code', 'kimi', 'grok'] as const;
 
 export const SIGN_IN_UNCHECKED_HINT =
   "Coppice can't check this sign-in without using your plan. A run will show an error if you're signed out.";
@@ -51,6 +51,7 @@ const CHAT_READ_ONLY: Record<string, { name: string; status: ChatReadOnlyStatus 
   copilot: { name: 'GitHub Copilot', status: 'passed' },
   'qwen-code': { name: 'Qwen Code', status: 'passed' },
   kimi: { name: 'Kimi Code', status: 'passed' },
+  grok: { name: 'Grok', status: 'passed' },
   mock: { name: 'Mock', status: 'passed' },
 };
 

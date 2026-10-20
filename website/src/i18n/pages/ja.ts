@@ -60,7 +60,7 @@ export const pages: Pages = {
       },
       {
         title: '2 つ目のサブスクリプションは不要。',
-        body: 'Coppice は、あなたがすでに契約している CLI を動かします：Claude Code、Codex、Cursor、OpenCode、Kilo Code、GitHub Copilot、Qwen Code、Kimi Code。',
+        body: 'Coppice は、あなたがすでに契約している CLI を動かします：Claude Code、Codex、Cursor、OpenCode、Kilo Code、GitHub Copilot、Qwen Code、Kimi Code、Grok。',
       },
     ],
     notTitle: 'Coppice ではないもの',

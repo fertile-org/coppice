@@ -199,6 +199,7 @@ pub const READ_ONLY_CAPABLE_CONNECTORS: &[&str] = &[
     coppice_connectors::COPILOT,
     coppice_connectors::QWEN_CODE,
     coppice_connectors::KIMI,
+    coppice_connectors::GROK,
 ];
 
 pub fn connector_enforces_read_only(connector: &str) -> bool {

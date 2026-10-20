@@ -215,7 +215,7 @@ mod tests {
     }
 
     const CURSOR_MISSING_BINARY: &[&str] = &[
-        "binary: MISSING (`agent` not on PATH)",
+        "binary: MISSING (`cursor-agent` not on PATH)",
         "  next: coppice connector install cursor  (ensure PATH includes $HOME/.local/bin and $HOME/.opencode/bin)",
     ];
 
@@ -240,7 +240,7 @@ mod tests {
         rest.extend([
             "auth: MISSING",
             "  next: coppice connector setup cursor",
-            "  hint: agent login (copy URL)",
+            "  hint: cursor-agent login (copy URL)",
         ]);
         assert_eq!(d.lines, expect(header("cursor", dir.path()), &rest));
         assert_eq!(d.result, Err("doctor failed for cursor".into()));
@@ -253,7 +253,7 @@ mod tests {
         std::fs::write(dir.path().join(".cursor/auth.json"), "{}").unwrap();
         let d = doctor("cursor", dir.path(), &[], &[]);
         let mut rest = CURSOR_MISSING_BINARY.to_vec();
-        rest.push("auth: ok (agent login (copy URL))");
+        rest.push("auth: ok (cursor-agent login (copy URL))");
         assert_eq!(d.lines, expect(header("cursor", dir.path()), &rest));
         assert_eq!(d.result, Err("doctor failed for cursor".into()));
     }
@@ -265,12 +265,12 @@ mod tests {
             "cursor",
             dir.path(),
             &[(
-                "agent",
+                "cursor-agent",
                 "[ \"$1\" = models ] && echo gpt-5 && exit 0; exit 1",
             )],
             &[],
         );
-        let binary = format!("binary: ok ({})", dir.path().join("bin/agent").display());
+        let binary = format!("binary: ok ({})", dir.path().join("bin/cursor-agent").display());
         assert_eq!(
             d.lines,
             expect(
@@ -335,8 +335,8 @@ mod tests {
     #[test]
     fn doctor_output_probe_fails_auth_missing_uses_stdout() {
         let dir = tempfile::tempdir().unwrap();
-        let d = doctor("cursor", dir.path(), &[("agent", "echo no; exit 1")], &[]);
-        let binary = format!("binary: ok ({})", dir.path().join("bin/agent").display());
+        let d = doctor("cursor", dir.path(), &[("cursor-agent", "echo no; exit 1")], &[]);
+        let binary = format!("binary: ok ({})", dir.path().join("bin/cursor-agent").display());
         assert_eq!(
             d.lines,
             expect(
@@ -345,7 +345,7 @@ mod tests {
                     &binary,
                     "auth: MISSING",
                     "  next: coppice connector setup cursor",
-                    "  hint: agent login (copy URL)",
+                    "  hint: cursor-agent login (copy URL)",
                     "models probe: FAIL (no)",
                 ]
             )
@@ -361,17 +361,17 @@ mod tests {
         let d = doctor(
             "cursor",
             dir.path(),
-            &[("agent", "echo out; echo boom >&2; exit 2")],
+            &[("cursor-agent", "echo out; echo boom >&2; exit 2")],
             &[],
         );
-        let binary = format!("binary: ok ({})", dir.path().join("bin/agent").display());
+        let binary = format!("binary: ok ({})", dir.path().join("bin/cursor-agent").display());
         assert_eq!(
             d.lines,
             expect(
                 header("cursor", dir.path()),
                 &[
                     &binary,
-                    "auth: ok (agent login (copy URL))",
+                    "auth: ok (cursor-agent login (copy URL))",
                     "models probe: FAIL (boom)",
                 ]
             )
@@ -382,7 +382,7 @@ mod tests {
     #[test]
     fn doctor_output_probe_fails_without_output() {
         let dir = tempfile::tempdir().unwrap();
-        let d = doctor("cursor", dir.path(), &[("agent", "exit 3")], &[]);
+        let d = doctor("cursor", dir.path(), &[("cursor-agent", "exit 3")], &[]);
         assert_eq!(
             d.lines.last().unwrap(),
             "models probe: FAIL (command failed)"
@@ -402,7 +402,7 @@ mod tests {
         let config = config.display().to_string();
         let env = [("COPPICE_CONFIG", config.as_str())];
 
-        let d = doctor("cursor", dir.path(), &[("agent", "exit 0")], &env);
+        let d = doctor("cursor", dir.path(), &[("cursor-agent", "exit 0")], &env);
         assert_eq!(d.lines[2], "binary: MISSING (`my-agent` not on PATH)");
 
         let d = doctor("cursor", dir.path(), &[("my-agent", "echo gpt-5")], &env);
@@ -469,7 +469,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let bin = dir.path().join("bin");
         std::fs::create_dir_all(&bin).unwrap();
-        let agent = bin.join("agent");
+        let agent = bin.join("cursor-agent");
         std::fs::write(&agent, "#!/bin/sh\necho no\nexit 1\n").unwrap();
         #[cfg(unix)]
         {

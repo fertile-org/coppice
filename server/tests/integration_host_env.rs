@@ -93,7 +93,7 @@ async fn short_path_login_shell_finds_clis_and_refresh_sees_a_new_dir() {
 
     let result_line = r#"{"type":"result","subtype":"success","is_error":false,"result":"{\"status\":\"done\",\"summary\":\"Found via the login shell.\",\"changedFiles\":[],\"testsRun\":[],\"assignTo\":\"backend_engineer\",\"mentionAgents\":[],\"blockers\":[]}"}"#;
     script(
-        &tools.join("agent"),
+        &tools.join("cursor-agent"),
         &format!(
             r#"case "$1" in
   models) echo 'composer-2.5 - Composer 2.5'; exit 0 ;;
@@ -142,7 +142,7 @@ esac"#,
     let cursor_json = common::json_body(cursor).await;
     assert_eq!(cursor_json["readiness"], "ready", "{cursor_json}");
     let cursor_path = cursor_json["cli"]["path"].as_str().unwrap_or("");
-    assert!(cursor_path.contains("tools/bin/agent"), "{cursor_path}");
+    assert!(cursor_path.contains("tools/bin/cursor-agent"), "{cursor_path}");
 
     let claude = app
         .clone()
@@ -184,7 +184,7 @@ esac"#,
     std::fs::create_dir_all(work.path().join(".agent")).unwrap();
     std::fs::write(work.path().join(".agent/context.md"), "context").unwrap();
     let provider = CursorProvider::new(CursorProviderConfig {
-        command: "agent".into(),
+        command: "cursor-agent".into(),
         enabled: Some(true),
         run_timeout_secs: 30,
         ..CursorProviderConfig::default()

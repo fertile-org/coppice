@@ -23,7 +23,7 @@
 
 Beta 版的安裝包包括 macOS 的 `.dmg`（Apple 晶片或 Intel）和 Linux 的 `.deb`（`amd64` 或 `arm64`）。請從[釋出頁面](https://github.com/fertile-org/coppice/releases)下載。
 
-帶上你已經在用的 CLI：Claude Code、Codex、Cursor、OpenCode、Kilo Code、GitHub Copilot、Qwen Code 和 Kimi Code。按常規方式安裝並登入即可。Coppice 會在你登入 shell 的 `PATH` 中找到它們。
+帶上你已經在用的 CLI：Claude Code、Codex、Cursor、OpenCode、Kilo Code、GitHub Copilot、Qwen Code、Kimi Code、Grok 和 Grok。按常規方式安裝並登入即可。Coppice 會在你登入 shell 的 `PATH` 中找到它們。
 
 ## 開始使用
 

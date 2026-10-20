@@ -2,7 +2,9 @@ use std::process::{Command, Stdio};
 
 use clap::Args;
 
-use coppice_connectors::{CLAUDE_CODE, CODEX, COPILOT, CURSOR, KILO_CODE, KIMI, MOCK, OPENCODE, QWEN_CODE};
+use coppice_connectors::{
+    CLAUDE_CODE, CODEX, COPILOT, CURSOR, GROK, KILO_CODE, KIMI, MOCK, OPENCODE, QWEN_CODE,
+};
 
 use super::registry::{binary_on_path, parse_id};
 
@@ -28,7 +30,7 @@ pub fn run(args: SetupArgs) -> anyhow::Result<()> {
 
     match id {
         CURSOR => {
-            println!("Running `agent login` — copy any URL into a browser on your machine.");
+            println!("Running `cursor-agent login` — copy any URL into a browser on your machine.");
             run_interactive(m.binary, &["login"])?;
         }
         CODEX => {
@@ -60,6 +62,10 @@ pub fn run(args: SetupArgs) -> anyhow::Result<()> {
         }
         KIMI => {
             println!("Running `kimi login`.");
+            run_interactive(m.binary, &["login"])?;
+        }
+        GROK => {
+            println!("Running `grok login`.");
             run_interactive(m.binary, &["login"])?;
         }
         QWEN_CODE => {

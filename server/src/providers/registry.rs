@@ -3,7 +3,9 @@ use std::sync::Arc;
 
 #[cfg(feature = "mock-provider")]
 use coppice_connectors::MOCK;
-use coppice_connectors::{CLAUDE_CODE, CODEX, COPILOT, CURSOR, KILO_CODE, KIMI, OPENCODE, QWEN_CODE};
+use coppice_connectors::{
+    CLAUDE_CODE, CODEX, COPILOT, CURSOR, GROK, KILO_CODE, KIMI, OPENCODE, QWEN_CODE,
+};
 
 use crate::config::AppConfig;
 use crate::providers::acp_cli::{self, AcpCliModels, AcpCliProvider, AcpCliSpec};
@@ -77,6 +79,10 @@ pub static FACTORIES: &[ConnectorFactory] = &[
         id: KIMI,
         build: build_kimi,
     },
+    ConnectorFactory {
+        id: GROK,
+        build: build_grok,
+    },
 ];
 
 fn build_acp_cli(
@@ -108,6 +114,11 @@ fn build_qwen_code(config: &AppConfig, _deps: &FactoryDeps) -> Option<BuiltConne
 fn build_kimi(config: &AppConfig, _deps: &FactoryDeps) -> Option<BuiltConnector> {
     let cfg = &config.agent.connectors.kimi;
     build_acp_cli(acp_cli::KIMI, &cfg.command, cfg.run_timeout_secs, &cfg.model_providers)
+}
+
+fn build_grok(config: &AppConfig, _deps: &FactoryDeps) -> Option<BuiltConnector> {
+    let cfg = &config.agent.connectors.grok;
+    build_acp_cli(acp_cli::GROK, &cfg.command, cfg.run_timeout_secs, &cfg.model_providers)
 }
 
 #[cfg(feature = "mock-provider")]
