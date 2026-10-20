@@ -65,7 +65,7 @@ Linux で `XDG_CONFIG_HOME` が設定されている場合、ファイルは `$X
 <a id="connectors"></a>
 
 ## コネクタ
-サインイン済みの CLI は既定でオンです。オフにしたいときだけ 1 行書きます。
+Coppice が見つけた CLI は既定でオンです。ただし、サインイン確認でサインアウトしているとわかった CLI はオフです。オフにしたいときだけ 1 行書きます。
 
 ```toml
 [agent.connectors.claude-code]
@@ -74,7 +74,7 @@ enabled = false
 
 **System → Connectors** のスイッチも同じ行を書き込みます。
 
-Kilo Code、GitHub Copilot、Qwen Code、Kimi Code、Grok は、あなたがオンにするまでオフのままです。Coppice は無料でこれらのサインインを確認できないためです。
+Kilo Code、GitHub Copilot、Qwen Code、Kimi Code は、Coppice が見つけた時点でオンになります。Coppice は無料でこれらのサインインを確認できないので、サインアウトしていると実行時にエラーが表示されます。
 
 ## `[agent]`
 

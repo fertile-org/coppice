@@ -72,7 +72,7 @@ Log mỗi ngày được chia thành các file tối đa 32 MiB, và mọi file 
 <a id="connectors"></a>
 
 ## Connector
-CLI nào đã đăng nhập thì được bật sẵn. Muốn tắt một CLI, chỉ cần một dòng:
+CLI nào Coppice tìm thấy thì được bật sẵn, trừ khi bước kiểm tra đăng nhập cho thấy bạn đã đăng xuất. Muốn tắt một CLI, chỉ cần một dòng:
 
 ```toml
 [agent.connectors.claude-code]
@@ -81,7 +81,7 @@ enabled = false
 
 Công tắc trong **System → Connectors** ghi đúng dòng đó.
 
-Kilo Code, GitHub Copilot, Qwen Code, Kimi Code và Grok mặc định tắt, bạn phải tự bật. Coppice không kiểm tra miễn phí được trạng thái đăng nhập của các CLI này.
+Kilo Code, GitHub Copilot, Qwen Code và Kimi Code được bật ngay khi Coppice tìm thấy. Coppice không kiểm tra miễn phí được trạng thái đăng nhập của các CLI này, nên nếu bạn đã đăng xuất thì lần chạy sẽ báo lỗi.
 
 ## `[agent]`
 

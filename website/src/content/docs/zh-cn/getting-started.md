@@ -20,7 +20,7 @@ description: "从全新安装到第一次运行智能体，只需五步。"
 
 如果显示 **Found, not signed in**（已找到，未登录），请在终端里登录该 CLI。如果显示 **Not on your PATH**（不在 PATH 中），请安装它，或按卡片上的 **Install docs**（安装文档）操作。然后点击 **Run check**（运行检查）。
 
-Kilo Code、GitHub Copilot、Qwen Code、Kimi Code 和 Grok 显示 **Installed**（已安装）。不消耗你的套餐额度，Coppice 就无法检查它们的登录状态，所以如果你已退出登录，运行时会报错。
+Kilo Code、GitHub Copilot、Qwen Code 和 Kimi Code 显示 **Installed**（已安装）。不消耗你的套餐额度，Coppice 就无法检查它们的登录状态，所以如果你已退出登录，运行时会报错。
 
 <a id="2-set-up-an-agent"></a>
 

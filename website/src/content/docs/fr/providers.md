@@ -44,13 +44,13 @@ Le formulaire d’agent liste chaque connecteur avec son statut :
 | **Ready** | Une vérification de connexion gratuite a confirmé que vous êtes connecté. |
 | **Found, not signed in** | Coppice a trouvé la commande, mais vous n’êtes pas connecté. Connectez-vous depuis votre terminal. |
 | **Not on your PATH** | Coppice ne trouve pas la commande. Installez-la, ou vérifiez votre PATH. |
-| **Installed** | Coppice a trouvé la commande. Pour Kilo Code, GitHub Copilot, Qwen Code, Kimi Code et Grok, il ne peut pas vérifier la connexion sans utiliser votre forfait. |
+| **Installed** | Coppice a trouvé la commande. Pour Kilo Code, GitHub Copilot, Qwen Code et Kimi Code, il ne peut pas vérifier la connexion sans utiliser votre forfait. |
 
-Kilo Code, GitHub Copilot, Qwen Code, Kimi Code et Grok affichent **Installed**. System → Connectors ajoute : « Coppice can't check this sign-in without using your plan. A run will show an error if you're signed out. » Pour vérifier que l’une fonctionne, utilisez **Test connection** : il lance une courte conversation, un plan et un ticket. Toutes les CLI peuvent discuter. Les conversations Claude Code, Codex, Cursor et Kilo Code affichent « Coppice hasn't confirmed that {cli} stays read-only. The agent can still run commands on your computer. » Les conversations OpenCode, GitHub Copilot, Qwen Code, Kimi Code et Grok n’ont pas de bandeau : dans les conversations et la planification, Coppice bloque leurs écritures de fichiers et leurs commandes shell. Un outil MCP que vous avez configuré vous-même dans cette CLI peut encore modifier des choses.
+Kilo Code, GitHub Copilot, Qwen Code et Kimi Code affichent **Installed**. System → Connectors ajoute : « Coppice can't check this sign-in without using your plan. A run will show an error if you're signed out. » Pour vérifier que l’une fonctionne, utilisez **Test connection** : il lance une courte conversation, un plan et un ticket. Toutes les CLI peuvent discuter. Les conversations Claude Code, Codex, Cursor et Kilo Code affichent « Coppice hasn't confirmed that {cli} stays read-only. The agent can still run commands on your computer. » Les conversations OpenCode, GitHub Copilot, Qwen Code, Kimi Code et Grok n’ont pas de bandeau : dans les conversations et la planification, Coppice bloque leurs écritures de fichiers et leurs commandes shell. Un outil MCP que vous avez configuré vous-même dans cette CLI peut encore modifier des choses.
 
 Vous pouvez enregistrer un agent avant que sa CLI soit prête. Il commence à travailler sur les tickets une fois la CLI installée et connectée. Si vous avez installé la CLI après avoir ouvert Coppice, quittez et rouvrez Coppice pour qu’il trouve la nouvelle commande.
 
-Pour désactiver un connecteur, utilisez **System → Connectors**.
+Un connecteur dont Coppice trouve la commande est activé, sauf si vous n’êtes pas connecté. Pour en activer ou en désactiver un, utilisez son interrupteur dans **System → Connectors**.
 
 <a id="use-your-own-api-key-or-another-provider"></a>
 

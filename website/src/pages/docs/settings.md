@@ -63,7 +63,7 @@ Each day's log is split into files of up to 32 MiB, and every file counts toward
 | `run_console_max_bytes` | integer | `67108864` | Most bytes one run keeps for its console, and the same again for its terminal log. The oldest part goes first. Changing it needs a restart. |
 
 ## Connectors
-Signed-in CLIs are on by default. You only need a line to turn one off:
+A CLI that Coppice finds is on by default, unless its sign-in check says you're signed out. You only need a line to turn one off:
 
 ```toml
 [agent.connectors.claude-code]
@@ -72,7 +72,7 @@ enabled = false
 
 The switch in **System → Connectors** writes the same line.
 
-Kilo Code, GitHub Copilot, Qwen Code, Kimi Code and Grok stay off until you turn them on. Coppice can't check their sign-in for free.
+Kilo Code, GitHub Copilot, Qwen Code and Kimi Code are on once Coppice finds them. Coppice can't check their sign-in for free, so a run shows an error if you're signed out.
 
 ## `[agent]`
 

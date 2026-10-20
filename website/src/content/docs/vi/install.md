@@ -78,7 +78,7 @@ Hãy để repo trong thư mục home của Linux, ví dụ `~/code/my-app`, đ�
 2. Chọn một thư mục git checkout có sẵn trên máy.
 3. **Kết nối agent CLI.** Khi tạo agent, chọn agent CLI muốn dùng, Coppice sẽ bật nó lên. Mỗi CLI hiện một trong các trạng thái **Ready**, **Found, not signed in** hoặc **Not on your PATH**. Nhớ đăng nhập CLI trong terminal trước, như bạn vẫn làm.
 
-   Kilo Code, GitHub Copilot, Qwen Code, Kimi Code và Grok hiện **Installed** (ví dụ **Kilo Code — Installed**). Trong System → Connectors có thêm dòng: "Coppice can't check this sign-in without using your plan. A run will show an error if you're signed out." (Coppice không kiểm tra được trạng thái đăng nhập nếu không dùng đến gói của bạn. Nếu bạn đã đăng xuất, lần chạy sẽ báo lỗi.)
+   Kilo Code, GitHub Copilot, Qwen Code và Kimi Code hiện **Installed** (ví dụ **Kilo Code — Installed**). Trong System → Connectors có thêm dòng: "Coppice can't check this sign-in without using your plan. A run will show an error if you're signed out." (Coppice không kiểm tra được trạng thái đăng nhập nếu không dùng đến gói của bạn. Nếu bạn đã đăng xuất, lần chạy sẽ báo lỗi.)
 
    Sau này muốn tắt một connector, dùng công tắc trong System → Connectors, hoặc đặt `enabled = false` cho nó trong file `config.toml` của Coppice:
 

@@ -78,7 +78,7 @@ WSL は Windows の PATH を Ubuntu に追加するので、Coppice が Windows 
 2. ディスク上にすでにあるローカルの git チェックアウトを指定します。
 3. **エージェント CLI をつなぐ。** エージェントを作るときにエージェント CLI を選ぶと、Coppice がそれをオンにします。それぞれ **Ready**、**Found, not signed in**、**Not on your PATH** のどれかが表示されます。まずはいつもどおりの方法で、ターミナルで CLI にサインインしてください。
 
-   Kilo Code、GitHub Copilot、Qwen Code、Kimi Code、Grok は **Installed**（例：**Kilo Code — Installed**）と表示されます。System → Connectors には次の説明が付きます："Coppice can't check this sign-in without using your plan. A run will show an error if you're signed out."（Coppice はあなたのプランを使わずにこのサインインを確認できません。サインアウトしていると実行時にエラーが表示されます。）
+   Kilo Code、GitHub Copilot、Qwen Code、Kimi Code は **Installed**（例：**Kilo Code — Installed**）と表示されます。System → Connectors には次の説明が付きます："Coppice can't check this sign-in without using your plan. A run will show an error if you're signed out."（Coppice はあなたのプランを使わずにこのサインインを確認できません。サインアウトしていると実行時にエラーが表示されます。）
 
    あとでコネクタをオフにするには、System → Connectors のトグルを使うか、Coppice の `config.toml` でそのコネクタに `enabled = false` を設定します。
 

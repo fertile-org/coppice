@@ -78,7 +78,7 @@ WSL 会把 Windows 的 PATH 加到 Ubuntu 中，所以 Coppice 可能会找到�
 2. 选择你磁盘上已有的一个本地 git 仓库。
 3. **连接你的智能体 CLI。** 创建智能体时选择你的智能体 CLI，Coppice 就会启用它。每个 CLI 都会显示状态：**Ready**（就绪）、**Found, not signed in**（已找到，未登录）或 **Not on your PATH**（不在 PATH 中）。请先像平常一样在终端里登录该 CLI。
 
-   Kilo Code、GitHub Copilot、Qwen Code、Kimi Code 和 Grok 显示为 **Installed**（例如 **Kilo Code — Installed**）。System → Connectors 中还会提示："Coppice can't check this sign-in without using your plan. A run will show an error if you're signed out."（不消耗你的套餐额度，Coppice 就无法检查登录状态；如果你已退出登录，运行时会报错。）
+   Kilo Code、GitHub Copilot、Qwen Code 和 Kimi Code 显示为 **Installed**（例如 **Kilo Code — Installed**）。System → Connectors 中还会提示："Coppice can't check this sign-in without using your plan. A run will show an error if you're signed out."（不消耗你的套餐额度，Coppice 就无法检查登录状态；如果你已退出登录，运行时会报错。）
 
    以后要关闭某个连接器，可以在 System → Connectors 中使用开关，或在 Coppice 的 `config.toml` 中为它设置 `enabled = false`：
 

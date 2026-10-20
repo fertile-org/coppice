@@ -78,7 +78,7 @@ Gardez vos dépôts dans votre dossier personnel Linux, par exemple `~/code/my-a
 2. Indiquez-lui un checkout git local que vous avez déjà sur le disque.
 3. **Connectez votre CLI d’agent.** Choisissez votre CLI d’agent en créant un agent, et Coppice l’active. Chacune indique si elle est **Ready**, **Found, not signed in** ou **Not on your PATH**. Connectez-vous d’abord à la CLI dans votre terminal, comme d’habitude.
 
-   Kilo Code, GitHub Copilot, Qwen Code, Kimi Code et Grok affichent **Installed** (par exemple **Kilo Code — Installed**). System → Connectors ajoute : « Coppice can't check this sign-in without using your plan. A run will show an error if you're signed out. » (Coppice ne peut pas vérifier cette connexion sans utiliser votre forfait. Un lancement affichera une erreur si vous êtes déconnecté.)
+   Kilo Code, GitHub Copilot, Qwen Code et Kimi Code affichent **Installed** (par exemple **Kilo Code — Installed**). System → Connectors ajoute : « Coppice can't check this sign-in without using your plan. A run will show an error if you're signed out. » (Coppice ne peut pas vérifier cette connexion sans utiliser votre forfait. Un lancement affichera une erreur si vous êtes déconnecté.)
 
    Pour désactiver un connecteur plus tard, utilisez l’interrupteur dans System → Connectors, ou mettez `enabled = false` pour lui dans votre `config.toml` Coppice :
 

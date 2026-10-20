@@ -20,7 +20,7 @@ description: "從全新安裝到第一次執行代理，只需五步。"
 
 如果顯示 **Found, not signed in**（已找到，未登入），請在終端裏登入該 CLI。如果顯示 **Not on your PATH**（不在 PATH 中），請安裝它，或按卡片上的 **Install docs**（安裝文件）操作。然後點選 **Run check**（執行檢查）。
 
-Kilo Code、GitHub Copilot、Qwen Code、Kimi Code 和 Grok 顯示 **Installed**（已安裝）。不消耗你的套餐額度，Coppice 就無法檢查它們的登入狀態，所以如果你已退出登入，執行時會報錯。
+Kilo Code、GitHub Copilot、Qwen Code 和 Kimi Code 顯示 **Installed**（已安裝）。不消耗你的套餐額度，Coppice 就無法檢查它們的登入狀態，所以如果你已退出登入，執行時會報錯。
 
 <a id="2-set-up-an-agent"></a>
 
