@@ -766,6 +766,12 @@ mod embedded_tests {
         let imported = BackupService::import_from_bytes(&config, &pool, &bytes, None, &store).await;
         let err = imported.expect_err("hostile import must fail");
         let text = err.to_string();
+        // Not a skip: CI installs psql, and a silent pass would hide the check.
+        assert!(
+            !matches!(err, crate::services::backup_service::BackupError::ToolUnavailable(_)),
+            "this test runs `psql` from PATH; install postgresql-client \
+             (`sudo apt install postgresql-client`). Got: {text}"
+        );
         assert!(
             text.contains("pg_execute_server_program"),
             "import error should be the server-program denial, got: {text}"
