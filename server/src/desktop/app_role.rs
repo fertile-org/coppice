@@ -767,8 +767,16 @@ mod embedded_tests {
         let err = imported.expect_err("hostile import must fail");
         let text = err.to_string();
         // Not a skip: CI installs psql, and a silent pass would hide the check.
+        // Only a psql that could not start counts; a psql that ran and was
+        // refused is also ToolUnavailable ("psql restore failed: …") and is the
+        // denial this test expects.
+        let psql_missing = matches!(
+            &err,
+            crate::services::backup_service::BackupError::ToolUnavailable(message)
+                if message.starts_with("psql: ")
+        );
         assert!(
-            !matches!(err, crate::services::backup_service::BackupError::ToolUnavailable(_)),
+            !psql_missing,
             "this test runs `psql` from PATH; install postgresql-client \
              (`sudo apt install postgresql-client`). Got: {text}"
         );
