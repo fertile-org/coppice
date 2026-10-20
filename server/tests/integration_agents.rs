@@ -228,6 +228,15 @@ async fn list_connectors_returns_mock() {
         .map(|i| i["id"].as_str().unwrap())
         .collect();
     assert!(ids.contains(&"mock"));
+    // Connectors that are off are listed too, so the picker can say why.
+    for descriptor in coppice_connectors::all() {
+        assert!(ids.contains(&descriptor.id), "missing {}", descriptor.id);
+    }
+    assert!(body["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|item| item["enabled"].is_boolean()));
 }
 
 #[tokio::test]

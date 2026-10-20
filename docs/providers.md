@@ -34,7 +34,7 @@ Kilo Code shows **Kilo Code — Installed**. Tools → Connectors adds: "Coppice
 
 You can save an agent before its CLI is ready. It starts working tickets once the CLI is installed and signed in. If you installed the CLI after opening Coppice, quit and reopen Coppice so it finds the new command.
 
-To turn a connector off, use **Tools → Connectors**.
+A connector whose command Coppice finds is on, unless you aren't signed in. To turn one on or off, use its switch in **System → Connectors**.
 
 ## Use your own API key or another provider
 

@@ -20,7 +20,7 @@ Nhà cung cấp là agent CLI mà Coppice chạy giúp bạn: Claude Code, Codex
 
 Nếu thẻ hiện **Found, not signed in**, hãy đăng nhập CLI trong terminal. Nếu hiện **Not on your PATH**, hãy cài CLI, hoặc làm theo **Install docs** trên thẻ. Xong thì bấm **Run check**.
 
-Kilo Code, GitHub Copilot, Qwen Code, Kimi Code và Grok hiện **Installed**. Coppice không kiểm tra được trạng thái đăng nhập của các CLI này nếu không dùng đến gói của bạn, nên nếu bạn đã đăng xuất thì lần chạy sẽ báo lỗi.
+Kilo Code, GitHub Copilot, Qwen Code và Kimi Code hiện **Installed**. Coppice không kiểm tra được trạng thái đăng nhập của các CLI này nếu không dùng đến gói của bạn, nên nếu bạn đã đăng xuất thì lần chạy sẽ báo lỗi.
 
 <a id="2-set-up-an-agent"></a>
 

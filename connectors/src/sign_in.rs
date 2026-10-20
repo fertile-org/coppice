@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 use serde::Serialize;
 
 use crate::probe::ProbeEnv;
-use crate::{ConnectorDescriptor, CLAUDE_CODE, CODEX, CURSOR, KILO_CODE, OPENCODE};
+use crate::{ConnectorDescriptor, CLAUDE_CODE, CODEX, CURSOR, GROK, KILO_CODE, OPENCODE};
 
 const OUTPUT_CAP: u64 = 8 * 1024;
 const POLL: Duration = Duration::from_millis(50);
@@ -77,6 +77,9 @@ pub fn evidence_from(id: &str, command: Option<CommandObservation<'_>>) -> Optio
     if id == OPENCODE {
         return interpret_opencode(command);
     }
+    if id == GROK {
+        return interpret_grok(command);
+    }
     None
 }
 
@@ -116,6 +119,19 @@ fn interpret_cursor(command: CommandObservation<'_>) -> Option<bool> {
         return None;
     }
     Some(command.exit_ok)
+}
+
+/// `grok models` lists models without a request to the plan and opens with
+/// "You are logged in with …" or "You are not authenticated.".
+fn interpret_grok(command: CommandObservation<'_>) -> Option<bool> {
+    let lower = format!("{}\n{}", command.stdout, command.stderr).to_ascii_lowercase();
+    if lower.contains("not authenticated") || lower.contains("not logged in") {
+        return Some(false);
+    }
+    if lower.contains("you are logged in") {
+        return Some(true);
+    }
+    None
 }
 
 fn interpret_opencode(command: CommandObservation<'_>) -> Option<bool> {
@@ -198,6 +214,10 @@ fn spec_for(id: &str) -> Spec {
     } else if id == OPENCODE {
         Spec {
             command: Some(&["auth", "list"]),
+        }
+    } else if id == GROK {
+        Spec {
+            command: Some(&["models"]),
         }
     } else {
         Spec { command: None }
@@ -341,6 +361,25 @@ mod tests {
             stdout,
             stderr,
         }
+    }
+
+    #[test]
+    fn grok_models_reports_sign_in() {
+        assert_eq!(
+            evidence_from(
+                GROK,
+                Some(obs(true, "You are logged in with grok.com.\n\nDefault model: grok-4.7\n", ""))
+            ),
+            Some(true)
+        );
+        assert_eq!(
+            evidence_from(
+                GROK,
+                Some(obs(true, "You are not authenticated.\n\nDefault model: grok-4.6\n", ""))
+            ),
+            Some(false)
+        );
+        assert_eq!(evidence_from(GROK, Some(obs(false, "", "error: unexpected"))), None);
     }
 
     #[test]

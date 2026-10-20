@@ -78,7 +78,9 @@ function HealthBadge({
 }
 
 function firstReadyConnector(options: ConnectorOption[]): string {
-  return options.find((option) => option.readiness === 'ready')?.id ?? '';
+  return (
+    options.find((option) => option.enabled !== false && option.readiness === 'ready')?.id ?? ''
+  );
 }
 
 function CreateAgentDialog({

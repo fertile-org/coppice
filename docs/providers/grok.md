@@ -4,7 +4,7 @@ Coppice runs Grok over the Agent Client Protocol: `grok agent --always-approve -
 
 ## Sign in
 
-Run `grok login` (or set `XAI_API_KEY`). Grok keeps its sign-in in `~/.grok/auth.json`. Coppice has no free sign-in check, so the connector shows **Installed** until a run or **Test connection** proves it. When Grok answers a prompt with `Rate limited`, the run fails with Grok's own message, which names the limit.
+Run `grok login` (or set `XAI_API_KEY`). Grok keeps its sign-in in `~/.grok/auth.json`. Coppice checks the sign-in with `grok models`, which lists models without using your plan, so the connector shows **Ready** or **Found, not signed in**. When Grok answers a prompt with `Rate limited`, the run fails with Grok's own message, which names the limit.
 
 ## How a run works
 

@@ -65,7 +65,7 @@ Coppice 把設定儲存在一個檔案 `config.toml` 中：
 <a id="connectors"></a>
 
 ## 聯結器
-已登入的 CLI 預設開啟。只有想關閉某個聯結器時，才需要加一行：
+Coppice 找到的 CLI 預設開啟，除非登入檢查顯示你已退出登入。只有想關閉某個聯結器時，才需要加一行：
 
 ```toml
 [agent.connectors.claude-code]
@@ -74,7 +74,7 @@ enabled = false
 
 **System → Connectors** 中的開關寫入的也是這一行。
 
-Kilo Code、GitHub Copilot、Qwen Code、Kimi Code 和 Grok 預設關閉，需要你手動開啟。Coppice 無法免費檢查它們的登入狀態。
+Kilo Code、GitHub Copilot、Qwen Code 和 Kimi Code 只要被 Coppice 找到就會開啟。Coppice 無法免費檢查它們的登入狀態，所以如果你已退出登入，執行時會報錯。
 
 ## `[agent]`
 

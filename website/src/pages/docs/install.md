@@ -69,7 +69,7 @@ Keep your repos in your Linux home folder, for example `~/code/my-app`, not unde
 2. Point it at a local git checkout you already have on disk.
 3. **Connect your agent CLI.** Pick your agent CLI when you create an agent, and Coppice turns it on. Each one shows whether it's **Ready**, **Found, not signed in**, or **Not on your PATH**. Sign in to the CLI in your terminal first, the same way you normally would.
 
-   Kilo Code, GitHub Copilot, Qwen Code, Kimi Code and Grok show **Installed** (for example **Kilo Code — Installed**). System → Connectors adds: "Coppice can't check this sign-in without using your plan. A run will show an error if you're signed out."
+   Kilo Code, GitHub Copilot, Qwen Code and Kimi Code show **Installed** (for example **Kilo Code — Installed**). System → Connectors adds: "Coppice can't check this sign-in without using your plan. A run will show an error if you're signed out."
 
    To turn a connector off later, use the toggle in System → Connectors, or set `enabled = false` for it in your Coppice `config.toml`:
 

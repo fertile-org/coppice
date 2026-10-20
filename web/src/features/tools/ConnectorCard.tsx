@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Button } from '../../components/ui/button';
+import { Switch } from '../../components/ui/switch';
 import {
   Dialog,
   DialogContent,
@@ -13,14 +14,6 @@ import { ConnectorTestSection } from './ConnectorTestSection';
 import { UncoveredModels } from './UncoveredModels';
 import { turnOffConfirm } from './connectorCopy';
 import { useRecheckConnector, useSetConnectorEnabled } from './useConnectorDiagnostics';
-
-function enabledPillClass(enabled: boolean): string {
-  const base =
-    'inline-flex shrink-0 items-center rounded-full border px-2 py-0.5 font-body text-xs';
-  return enabled
-    ? `${base} border-success-muted bg-success-muted text-success`
-    : `${base} border-border bg-paper-200 text-text-secondary`;
-}
 
 function needsHelp(connector: ConnectorStatus): boolean {
   return (
@@ -81,17 +74,15 @@ export function ConnectorCard({ connector }: { connector: ConnectorStatus }) {
             {connector.displayName}
           </h3>
           <span className="font-mono text-xs text-text-muted">{connector.id}</span>
-          <button
-            type="button"
-            role="switch"
-            aria-checked={connector.enabled}
-            aria-label={`Enabled ${connector.displayName}`}
-            disabled={setEnabled.isPending || (connector.enabled && !countKnown)}
-            onClick={handleToggle}
-            className={enabledPillClass(connector.enabled)}
-          >
-            {connector.enabled ? 'Enabled' : 'Disabled'}
-          </button>
+          <label className="inline-flex shrink-0 items-center gap-2 font-body text-xs text-text-secondary">
+            <Switch
+              checked={connector.enabled}
+              aria-label={`Enabled ${connector.displayName}`}
+              disabled={setEnabled.isPending || (connector.enabled && !countKnown)}
+              onCheckedChange={handleToggle}
+            />
+            {connector.enabled ? 'On' : 'Off'}
+          </label>
         </div>
         <Button
           type="button"

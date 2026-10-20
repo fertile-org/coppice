@@ -33,7 +33,9 @@ For each connector, Coppice resolves the binary (the `command` key if set, other
 | `not_on_path` | Not on your PATH | Binary not found |
 | `found` | *(no label)* | Binary found, sign-in can't be checked |
 
-Kilo Code is always `found` once `kilo` is on `PATH`. Coppice makes no sign-in claim for it.
+Kilo Code is always `found` once `kilo` is on `PATH`. Coppice makes no sign-in claim for it. Grok's check is `grok models`, which prints "You are logged in…" or "You are not authenticated." without using the plan.
+
+A connector without an `enabled` key is on when it is `ready` or `found`, and off when it is `not_on_path` or `found_not_signed_in`. `enabled = true` or `false` (the switch in System → Connectors, or saving an agent with that connector) overrides that. `GET /api/connectors` lists every connector with `enabled`, and the agent form puts the ones that are on first.
 
 Probes run at server start, on **Run check**, and when **Test connection** starts. They don't run on every page load.
 

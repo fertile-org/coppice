@@ -65,7 +65,7 @@ Le journal de chaque jour est découpé en fichiers de 32 Mio au plus, et chaque
 <a id="connectors"></a>
 
 ## Connecteurs
-Les CLI connectées sont activées par défaut. Il ne faut une ligne que pour en désactiver une :
+Les CLI que Coppice trouve sont activées par défaut, sauf si leur vérification de connexion indique que vous êtes déconnecté. Il ne faut une ligne que pour en désactiver une :
 
 ```toml
 [agent.connectors.claude-code]
@@ -74,7 +74,7 @@ enabled = false
 
 L’interrupteur dans **System → Connectors** écrit la même ligne.
 
-Kilo Code, GitHub Copilot, Qwen Code, Kimi Code et Grok restent désactivés tant que vous ne les activez pas. Coppice ne peut pas vérifier leur connexion gratuitement.
+Kilo Code, GitHub Copilot, Qwen Code et Kimi Code sont activés dès que Coppice les trouve. Coppice ne peut pas vérifier leur connexion gratuitement, donc un lancement affiche une erreur si vous êtes déconnecté.
 
 ## `[agent]`
 

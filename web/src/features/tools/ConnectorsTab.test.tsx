@@ -197,6 +197,22 @@ describe('ConnectorsTab', () => {
     );
   });
 
+  it('filters connectors by name or id', async () => {
+    renderTab();
+    await card('kilo-code');
+
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Search connectors' }), {
+      target: { value: 'claude' },
+    });
+    expect(screen.getByTestId('connector-card-claude-code')).toBeInTheDocument();
+    expect(screen.queryByTestId('connector-card-kilo-code')).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Search connectors' }), {
+      target: { value: 'nothing-like-this' },
+    });
+    expect(screen.getByText('No connector matches “nothing-like-this”.')).toBeInTheDocument();
+  });
+
   it('shows the oldest CLI version Coppice runs', async () => {
     stubApi((path, init) =>
       path === '/api/tools/connectors' && (init.method ?? 'GET') === 'GET'

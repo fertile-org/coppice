@@ -20,7 +20,7 @@ Un fournisseur est la CLI d’agent que Coppice lance pour vous : Claude Code, C
 
 Si elle affiche **Found, not signed in**, connectez-vous à la CLI dans votre terminal. Si elle affiche **Not on your PATH**, installez-la, ou suivez **Install docs** sur la carte. Cliquez ensuite sur **Run check**.
 
-Kilo Code, GitHub Copilot, Qwen Code, Kimi Code et Grok affichent **Installed**. Coppice ne peut pas vérifier leur connexion sans utiliser votre forfait, donc un lancement affiche une erreur si vous êtes déconnecté.
+Kilo Code, GitHub Copilot, Qwen Code et Kimi Code affichent **Installed**. Coppice ne peut pas vérifier leur connexion sans utiliser votre forfait, donc un lancement affiche une erreur si vous êtes déconnecté.
 
 <a id="2-set-up-an-agent"></a>
 

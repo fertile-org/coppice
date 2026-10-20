@@ -142,9 +142,11 @@ async fn list_connectors(
     // OpenCode 2 runs use the structured console; the version decides.
     let opencode_console =
         crate::providers::run_console_kind(coppice_connectors::OPENCODE, &state.config).await;
+    // Every connector, so the picker can show why one is unavailable. Mock is
+    // listed only in builds that register it.
     let items = coppice_connectors::all()
         .iter()
-        .filter(|descriptor| registry.has(descriptor.id))
+        .filter(|descriptor| descriptor.id != MOCK || registry.has(MOCK))
         .map(|descriptor| {
             let readiness = if descriptor.id == MOCK {
                 Some(Readiness::Ready)
@@ -166,7 +168,7 @@ async fn list_connectors(
                     read_only_tools: descriptor.caps.read_only_tools,
                     chat_resume: descriptor.caps.chat_resume,
                 },
-                enabled: true,
+                enabled: registry.has(descriptor.id),
                 readiness,
                 docs_url: descriptor.install.docs_url,
             }

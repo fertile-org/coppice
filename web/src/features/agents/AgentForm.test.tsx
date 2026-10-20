@@ -12,7 +12,7 @@ import {
   type PluginAssignmentState,
 } from './AgentForm';
 import { NOT_COVERED_BY_PLAN } from '../runs/reportedModel';
-import type { Agent, ModelGroup } from './useAgents';
+import type { Agent, ConnectorOption, ModelGroup } from './useAgents';
 
 const mocks = vi.hoisted(() => ({
   plugins: [] as Plugin[],
@@ -118,7 +118,7 @@ function Harness({
   onSubmit: (values: AgentFormValues) => void;
   pluginAssignment?: PluginAssignmentState;
   mode?: 'create' | 'edit';
-  connectorOptions?: { id: string; displayName?: string }[];
+  connectorOptions?: ConnectorOption[];
 }) {
   const [values, setValues] = useState(initial);
   return (
@@ -492,6 +492,32 @@ describe('AgentForm plugins picker', () => {
 });
 
 describe('AgentForm connector hints', () => {
+  it('lists connectors that can run first and keeps the rest pickable with their status', () => {
+    render(
+      <Harness
+        initial={baseValues({ connector: 'claude-code', name: 'Ada' })}
+        onSubmit={vi.fn()}
+        connectorOptions={[
+          { id: 'claude-code', displayName: 'Claude Code', readiness: 'ready', enabled: true },
+          { id: 'codex', displayName: 'Codex', readiness: 'not_on_path', enabled: false },
+          { id: 'cursor', displayName: 'Cursor', readiness: 'ready', enabled: false },
+          { id: 'grok', displayName: 'Grok', readiness: 'found', enabled: true },
+        ]}
+      />,
+    );
+
+    const trigger = screen.getByRole('combobox', { name: 'Connector' });
+    const list = openCombobox(trigger);
+    expect(within(list).getAllByRole('option').map((option) => option.textContent)).toEqual([
+      'Claude Code — Ready',
+      'Grok — Installed',
+      'Codex — Not on your PATH',
+      'Cursor — Turned off',
+    ]);
+    selectComboboxOption(trigger, 'Codex — Not on your PATH');
+    expect(trigger).toHaveTextContent('Codex — Not on your PATH');
+  });
+
   it('shows the install hint and the no-ready hint', () => {
     render(
       <MemoryRouter>

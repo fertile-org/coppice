@@ -143,8 +143,26 @@ function modelPickerOptions({
 
 function connectorOptionLabel(option: ConnectorOption): string {
   const name = option.displayName ?? option.id;
-  const status = readinessLabel(option.readiness);
+  const status =
+    option.enabled === false && (option.readiness === 'ready' || option.readiness === 'found')
+      ? 'Turned off'
+      : option.enabled === false && option.readiness == null
+        ? 'Checking…'
+        : readinessLabel(option.readiness);
   return status ? `${name} — ${status}` : name;
+}
+
+/**
+ * Connectors that can run come first. The rest stay pickable with their status:
+ * saving an agent turns its connector on, and a run works once the CLI is set up.
+ */
+function connectorPickerOptions(connectorOptions: ConnectorOption[]): ComboboxOption[] {
+  const usable = connectorOptions.filter((option) => option.enabled !== false);
+  const unusable = connectorOptions.filter((option) => option.enabled === false);
+  return [...usable, ...unusable].map((option) => ({
+    value: option.id,
+    label: connectorOptionLabel(option),
+  }));
 }
 
 function ConnectorHints({
@@ -481,10 +499,7 @@ export function AgentForm({
           value={values.connector}
           onValueChange={handleConnectorChange}
           searchPlaceholder="Search connectors…"
-          options={connectorOptions.map((option) => ({
-            value: option.id,
-            label: connectorOptionLabel(option),
-          }))}
+          options={connectorPickerOptions(connectorOptions)}
         />
         <ConnectorHints values={values} connectorOptions={connectorOptions} />
       </div>

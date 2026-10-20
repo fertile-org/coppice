@@ -44,13 +44,13 @@ Form tạo agent liệt kê mọi connector kèm trạng thái:
 | **Ready** | Coppice đã kiểm tra (không tốn phí) và thấy bạn đang đăng nhập. |
 | **Found, not signed in** | Coppice tìm thấy lệnh nhưng bạn chưa đăng nhập. Hãy đăng nhập trong terminal. |
 | **Not on your PATH** | Coppice không tìm thấy lệnh. Hãy cài CLI, hoặc kiểm tra lại PATH. |
-| **Installed** | Coppice tìm thấy lệnh. Với Kilo Code, GitHub Copilot, Qwen Code, Kimi Code và Grok, Coppice không kiểm tra được trạng thái đăng nhập nếu không dùng đến gói của bạn. |
+| **Installed** | Coppice tìm thấy lệnh. Với Kilo Code, GitHub Copilot, Qwen Code và Kimi Code, Coppice không kiểm tra được trạng thái đăng nhập nếu không dùng đến gói của bạn. |
 
-Kilo Code, GitHub Copilot, Qwen Code, Kimi Code và Grok hiện **Installed**. Trong System → Connectors có thêm dòng: "Coppice can't check this sign-in without using your plan. A run will show an error if you're signed out." Muốn chắc chắn là chạy được, dùng **Test connection**: nó chạy thử một lượt chat, một lượt lên kế hoạch và một lượt làm ticket ngắn. CLI nào cũng chat được. Khi chat với Claude Code, Codex, Cursor và Kilo Code sẽ có dòng "Coppice hasn't confirmed that {cli} stays read-only. The agent can still run commands on your computer." (Coppice chưa xác nhận được {cli} luôn chỉ đọc. Agent vẫn có thể chạy lệnh trên máy bạn.) Chat với OpenCode, GitHub Copilot, Qwen Code, Kimi Code và Grok thì không có banner này: khi chat và lên kế hoạch, Coppice chặn chúng ghi file và chạy lệnh shell. Riêng các công cụ MCP bạn tự cấu hình trong CLI đó thì vẫn có thể thay đổi dữ liệu.
+Kilo Code, GitHub Copilot, Qwen Code và Kimi Code hiện **Installed**. Trong System → Connectors có thêm dòng: "Coppice can't check this sign-in without using your plan. A run will show an error if you're signed out." Muốn chắc chắn là chạy được, dùng **Test connection**: nó chạy thử một lượt chat, một lượt lên kế hoạch và một lượt làm ticket ngắn. CLI nào cũng chat được. Khi chat với Claude Code, Codex, Cursor và Kilo Code sẽ có dòng "Coppice hasn't confirmed that {cli} stays read-only. The agent can still run commands on your computer." (Coppice chưa xác nhận được {cli} luôn chỉ đọc. Agent vẫn có thể chạy lệnh trên máy bạn.) Chat với OpenCode, GitHub Copilot, Qwen Code, Kimi Code và Grok thì không có banner này: khi chat và lên kế hoạch, Coppice chặn chúng ghi file và chạy lệnh shell. Riêng các công cụ MCP bạn tự cấu hình trong CLI đó thì vẫn có thể thay đổi dữ liệu.
 
 Bạn có thể lưu agent trước khi CLI sẵn sàng. Khi CLI đã cài và đăng nhập xong, agent sẽ bắt đầu nhận ticket. Nếu bạn cài CLI sau khi đã mở Coppice, hãy thoát rồi mở lại Coppice để nó tìm thấy lệnh mới.
 
-Muốn tắt một connector, vào **System → Connectors**.
+Connector nào Coppice tìm thấy lệnh thì được bật, trừ khi bạn chưa đăng nhập. Muốn bật hay tắt một connector, dùng công tắc của nó trong **System → Connectors**.
 
 <a id="use-your-own-api-key-or-another-provider"></a>
 

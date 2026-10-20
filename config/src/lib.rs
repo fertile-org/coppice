@@ -871,8 +871,8 @@ pub struct AgentConnectorsConfig {
 pub enum ConnectorSwitch {
     /// Not a connector id this config knows.
     Unknown,
-    /// The key is absent. A CLI that is found and passes the free sign-in
-    /// check is on until the user turns it off in Connectors.
+    /// The key is absent. A CLI that is found is on until the user turns it
+    /// off, unless its free sign-in check says it is signed out.
     Automatic,
     On,
     Off,
