@@ -83,8 +83,12 @@ describe('ACP CLI connectors', () => {
     expect(chatUnavailableMessage(id)).toBeNull();
   });
 
-  it.each(['copilot', 'qwen-code', 'kimi', 'grok'])('%s says its sign-in is unchecked when installed', (id) => {
+  it.each(['copilot', 'qwen-code', 'kimi'])('%s says its sign-in is unchecked when installed', (id) => {
     expect(signInUncheckedHint(id, 'found')).toBe(SIGN_IN_UNCHECKED_HINT);
     expect(signInUncheckedHint(id, 'ready')).toBeNull();
+  });
+
+  it('checks Grok sign-in with grok models, so it has no unchecked hint', () => {
+    expect(signInUncheckedHint('grok', 'found')).toBeNull();
   });
 });

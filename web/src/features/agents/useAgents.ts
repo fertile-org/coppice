@@ -47,6 +47,8 @@ export interface ConnectorOption {
   id: string;
   displayName?: string;
   readiness?: 'ready' | 'found_not_signed_in' | 'not_on_path' | 'found' | null;
+  /** On in the live registry. Only these can run; the rest are listed to say why not. */
+  enabled?: boolean;
 }
 
 export interface ModelProviderOption {

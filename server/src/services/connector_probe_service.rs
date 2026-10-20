@@ -316,14 +316,16 @@ impl From<&LastRun> for LastRunResponse {
 
 /// A connector not yet probed (startup probe still running) reports
 /// `probedAt: null`, `cli.found: false`, and probe status `not_run`.
-/// Ids whose free sign-in check passed. The live registry uses the same set.
-pub fn ready_connector_ids(probes: &ConnectorProbes) -> Vec<String> {
+/// Ids that are on unless the user turned them off: the free sign-in check
+/// passed, or the CLI is installed and has no free check (Kilo Code and the
+/// like). A CLI that is missing or reliably signed out stays off.
+pub fn automatic_on_connector_ids(probes: &ConnectorProbes) -> Vec<String> {
     coppice_connectors::all()
         .iter()
         .filter(|descriptor| {
-            probes
-                .get(descriptor.id)
-                .is_some_and(|cached| cached.readiness == Readiness::Ready)
+            probes.get(descriptor.id).is_some_and(|cached| {
+                matches!(cached.readiness, Readiness::Ready | Readiness::Found)
+            })
         })
         .map(|descriptor| descriptor.id.to_string())
         .collect()

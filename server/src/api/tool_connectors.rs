@@ -5,7 +5,7 @@ use crate::services::connector_check_service::{
     CheckDetail, CheckError as ConnectorCheckError, ConnectorCheckService,
 };
 use crate::services::connector_probe_service::{
-    check_connector, diagnosable, list_statuses, ready_connector_ids, CheckError,
+    check_connector, diagnosable, list_statuses, automatic_on_connector_ids, CheckError,
     ConnectorStatusResponse,
 };
 use crate::services::uncovered_model_service::{UncoveredModelError, UncoveredModelService};
@@ -36,7 +36,7 @@ pub fn routes() -> Router<Arc<AppState>> {
 fn sync_enabled(state: &AppState, id: &str) -> bool {
     state
         .connectors
-        .sync_readiness(ready_connector_ids(&state.connector_probes));
+        .sync_readiness(automatic_on_connector_ids(&state.connector_probes));
     state.connectors.is_enabled(id).unwrap_or(false)
 }
 
@@ -46,7 +46,7 @@ async fn list_connectors(
 ) -> Result<Json<Vec<ConnectorStatusResponse>>, StatusCode> {
     state
         .connectors
-        .sync_readiness(ready_connector_ids(&state.connector_probes));
+        .sync_readiness(automatic_on_connector_ids(&state.connector_probes));
     list_statuses(&state.connector_probes, state.db.as_ref(), &|id| {
         state.connectors.is_enabled(id).unwrap_or(false)
     })
@@ -158,7 +158,7 @@ async fn set_enabled(
         })?;
     state
         .connectors
-        .sync_readiness(ready_connector_ids(&state.connector_probes));
+        .sync_readiness(automatic_on_connector_ids(&state.connector_probes));
     list_statuses(
         &state.connector_probes,
         state.db.as_ref(),

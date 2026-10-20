@@ -398,7 +398,7 @@ pub async fn serve(
                 .refresh_all(&state.connectors.config())
                 .await;
             state.connectors.sync_readiness(
-                crate::services::connector_probe_service::ready_connector_ids(
+                crate::services::connector_probe_service::automatic_on_connector_ids(
                     &state.connector_probes,
                 ),
             );
