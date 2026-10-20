@@ -16,7 +16,7 @@ Astro site for the Beta marketing page and user docs. Contributor docs stay in t
 
 Copy follows `POSITIONING.md` (M12 Beta). Download buttons link to `/download`. Asset URLs live in `src/content/downloads.ts`. Homepage and download wording live in `src/i18n/pages/en.ts`.
 
-English keeps those URLs. `zh-CN`, `zh-TW`, `zh-HK`, `ja`, and `fr` use a lowercase prefix (`/ja/docs/concepts`). Untranslated locale URLs render the English page. See [I18N.md](I18N.md).
+English keeps those URLs. `vi`, `zh-CN`, `zh-TW`, `zh-HK`, `ja`, and `fr` use a lowercase prefix (`/ja/docs/concepts`). Untranslated locale URLs render the English page. See [I18N.md](I18N.md).
 
 - macOS (Apple Silicon) — `Coppice-mac-arm64.dmg`
 - macOS (Intel) — `Coppice-mac-x64.dmg`

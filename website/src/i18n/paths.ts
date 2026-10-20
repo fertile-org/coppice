@@ -2,7 +2,7 @@ import { DEFAULT_LOCALE, LOCALES } from './locales.mjs';
 
 export { DEFAULT_LOCALE, LOCALES };
 
-export type LocalePath = 'en' | 'zh-cn' | 'zh-tw' | 'zh-hk' | 'ja' | 'fr';
+export type LocalePath = 'en' | 'vi' | 'zh-cn' | 'zh-tw' | 'zh-hk' | 'ja' | 'fr';
 
 const LOCALE_BY_PATH = new Map(LOCALES.map((locale) => [locale.path, locale]));
 const NON_DEFAULT = LOCALES.filter((locale) => locale.path !== DEFAULT_LOCALE).map((locale) => locale.path);

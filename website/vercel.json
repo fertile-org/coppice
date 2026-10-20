@@ -8,6 +8,11 @@
       "permanent": true
     },
     {
+      "source": "/vi/docs/chat",
+      "destination": "/vi/docs/concepts#chat",
+      "permanent": true
+    },
+    {
       "source": "/zh-cn/docs/chat",
       "destination": "/zh-cn/docs/concepts#chat",
       "permanent": true

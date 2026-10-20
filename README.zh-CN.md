@@ -1,4 +1,12 @@
-[English](README.md) · [简体中文](README.zh-CN.md) · [繁體中文（台灣）](README.zh-TW.md) · [繁體中文（香港）](README.zh-HK.md) · [日本語](README.ja.md) · [Français](README.fr.md)
+<p align="center">
+  <a href="README.md">English</a> ·
+  <a href="README.vi.md">Tiếng Việt</a> ·
+  <a href="README.zh-CN.md">简体中文</a> ·
+  <a href="README.zh-TW.md">繁體中文（台灣）</a> ·
+  <a href="README.zh-HK.md">繁體中文（香港）</a> ·
+  <a href="README.ja.md">日本語</a> ·
+  <a href="README.fr.md">Français</a>
+</p>
 
 <p align="center">
   <img src="website/public/logo.svg" alt="" width="72" />

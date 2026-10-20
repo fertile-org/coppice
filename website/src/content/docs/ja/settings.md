@@ -88,14 +88,14 @@ Kilo Code、GitHub Copilot、Qwen Code、Kimi Code、Grok は、あなたがオ�
 
 ## `[agent.connectors.<id>]`
 
-ID：`claude-code`、`codex`、`cursor`、`opencode`、`kilo-code`。どのテーブルも省略できます。
+ID：`claude-code`、`codex`、`cursor`、`opencode`、`kilo-code`、`copilot`、`qwen-code`、`kimi`、`grok`。どのテーブルも省略できます。
 
 | フィールド | 型 | 既定値 | 内容 |
 | --- | --- | --- | --- |
 | `enabled` | bool | 未設定：CLI がサインイン済みならオン | コネクタをオンまたはオフにします。 |
 | `model_providers` | list of strings | `[]` | このコネクタのモデルプロバイダー。オンにしたときに入力されます。 |
 | `run_timeout_secs` | integer | OpenCode は `1800`、ほかは `600` | このコネクタでの実行が失敗とみなされるまでの秒数。 |
-| `command` | string | `cursor-agent`（Cursor）、`codex`、`opencode`、`kilo` | 実行する CLI のバイナリ。Claude Code は常に `claude` を実行し、`command` はありません。 |
+| `command` | string | `cursor-agent`（Cursor）、`codex`、`opencode`、`kilo`、`copilot`、`qwen`、`kimi`、`grok` | 実行する CLI のバイナリ。Claude Code は常に `claude` を実行し、`command` はありません。 |
 
 OpenCode のみ：
 
