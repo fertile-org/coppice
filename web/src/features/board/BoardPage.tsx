@@ -44,7 +44,12 @@ import {
 import { BoardColumn } from './BoardColumn';
 import { useBoardKeyboard } from './useBoardKeyboard';
 import { useTicketShortcuts } from './useTicketShortcuts';
-import { ReviewCapacityBar } from './ReviewCapacityBar';
+import {
+  BoardSettingsButton,
+  BoardSettingsDrawer,
+} from './BoardSettingsDrawer';
+import { ReviewWaitingChip } from './ReviewWaitingChip';
+import { useReviewCapacity } from './useReviewCapacity';
 import { BOARD_COLUMNS, isTicketStatus, type TicketStatus } from './columns';
 import { resolveAssigneeName, TicketCard } from './TicketCard';
 import { buildTicketHierarchyIndex } from './ticketHierarchy';
@@ -73,6 +78,9 @@ export function BoardPage() {
   const queryClient = useQueryClient();
   const selectedTicketId = searchParams.get('ticket');
   const [filterOpen, setFilterOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const panelOpen = filterOpen || settingsOpen;
+  const reviewCapacity = useReviewCapacity(boardId);
 
   const filters = useMemo(
     () => parseBoardFilters(searchParams),
@@ -178,8 +186,8 @@ export function BoardPage() {
     closeDrawerRef.current = closeDrawer;
   }, [columnSnapshots, boardFocus, closeDrawer]);
 
-  const drawerOpen = Boolean(selectedTicketId) && !filterOpen;
-  useKeyboardEnvironment({ drawerOpen, modalOpen: filterOpen });
+  const drawerOpen = Boolean(selectedTicketId) && !panelOpen;
+  useKeyboardEnvironment({ drawerOpen, modalOpen: panelOpen });
 
   function moveBoardFocus(next: BoardFocus) {
     setFocusState(next);
@@ -187,7 +195,7 @@ export function BoardPage() {
   }
 
   useBoardKeyboard({
-    enabled: !drawerOpen && !filterOpen,
+    enabled: !drawerOpen && !panelOpen,
     columnsRef,
     focusRef,
     onMove: moveBoardFocus,
@@ -277,6 +285,7 @@ export function BoardPage() {
     returnTicketId.current = ticketId;
     setFocusState({ type: 'card', ticketId });
     setFilterOpen(false);
+    setSettingsOpen(false);
     setSearchParams((prev) => {
       const next = new URLSearchParams(prev);
       next.set('ticket', ticketId);
@@ -294,15 +303,25 @@ export function BoardPage() {
     closeDrawer: () => closeDrawerRef.current(),
   });
 
+  function clearSelectedTicket() {
+    if (!selectedTicketId) return;
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.delete('ticket');
+      return next;
+    });
+  }
+
   function openFilters() {
-    if (selectedTicketId) {
-      setSearchParams((prev) => {
-        const next = new URLSearchParams(prev);
-        next.delete('ticket');
-        return next;
-      });
-    }
+    clearSelectedTicket();
+    setSettingsOpen(false);
     setFilterOpen(true);
+  }
+
+  function openSettings() {
+    clearSelectedTicket();
+    setFilterOpen(false);
+    setSettingsOpen(true);
   }
 
   function handleDragStart(event: DragStartEvent) {
@@ -350,12 +369,18 @@ export function BoardPage() {
           <p className="mt-1 font-body text-sm text-text-secondary">
             Drag tickets between columns to update status.
           </p>
-          <ReviewCapacityBar boardId={boardId} />
+          <ReviewWaitingChip saved={reviewCapacity.saved} />
         </div>
-        <BoardFilterButton
-          activeCount={activeFilterCount}
-          onClick={openFilters}
-        />
+        <div className="flex gap-2">
+          <BoardSettingsButton
+            saved={reviewCapacity.saved}
+            onClick={openSettings}
+          />
+          <BoardFilterButton
+            activeCount={activeFilterCount}
+            onClick={openFilters}
+          />
+        </div>
       </div>
 
       {isLoading && (
@@ -446,7 +471,7 @@ export function BoardPage() {
 
       {shownTicketId && (
         <TicketDrawer
-          open={Boolean(selectedTicketId) && !filterOpen}
+          open={Boolean(selectedTicketId) && !panelOpen}
           ticketId={shownTicketId}
           parentTicket={shownParentTicket}
           onClose={closeDrawer}
@@ -460,6 +485,13 @@ export function BoardPage() {
         onChange={updateFilters}
         onClose={() => setFilterOpen(false)}
         onClear={clearFilters}
+      />
+
+      <BoardSettingsDrawer
+        open={settingsOpen}
+        boardId={boardId}
+        capacity={reviewCapacity}
+        onClose={() => setSettingsOpen(false)}
       />
 
       {acceptTicket && (

@@ -6,8 +6,24 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ToastProvider } from '../../components/ToastProvider';
 import { BoardPage } from './BoardPage';
 
-vi.mock('./ReviewCapacityBar', () => ({
-  ReviewCapacityBar: () => null,
+vi.mock('./useReviewCapacity', () => ({
+  useReviewCapacity: () => ({
+    saved: {
+      reviewCap: null,
+      countInReview: false,
+      waitingOnReview: null,
+      boardSettingsLabel: 'Board settings',
+      reviewCapLabel: 'Review cap',
+      reviewCapHint: 'Leave it empty for no cap.',
+      countInReviewLabel: 'Also count In Review',
+      reviewCapInvalid: 'Invalid cap.',
+    },
+    draft: { cap: '', countInReview: false },
+    setDraft: () => {},
+    error: null,
+    commit: () => true,
+    isPending: false,
+  }),
 }));
 import type { Ticket } from './useTickets';
 
@@ -98,11 +114,13 @@ vi.mock('../repos/useRepos', () => ({
 
 vi.mock('../tickets/TicketDrawer', () => ({
   TicketDrawer: ({
+    open,
     parentTicket,
   }: {
+    open: boolean;
     parentTicket?: { id: string; title: string } | null;
   }) => (
-    <div data-testid="ticket-drawer-parent">
+    <div data-testid="ticket-drawer-parent" data-open={String(open)}>
       {parentTicket?.title ?? 'No parent'}
     </div>
   ),
@@ -233,6 +251,41 @@ describe('BoardPage ticket hierarchy', () => {
     const ready = screen.getByRole('region', { name: 'Ready' });
     expect(within(ready).queryByText('Frontend Engineer')).toBeNull();
     expect(within(ready).queryByText('Unknown agent')).toBeNull();
+  });
+
+  it('keeps one of the ticket, filter and settings panels open at a time', () => {
+    renderBoard('/boards/board-1?ticket=middle');
+    expect(screen.getByTestId('ticket-drawer-parent')).toHaveAttribute(
+      'data-open',
+      'true',
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Board settings' }));
+    expect(
+      screen.getByRole('dialog', { name: 'Board settings' }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByTestId('ticket-drawer-parent'),
+    ).toHaveAttribute('data-open', 'false');
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Filters', hidden: true }),
+    );
+    expect(screen.getByRole('dialog', { name: 'Board filters' })).toBeInTheDocument();
+    expect(screen.queryByRole('dialog', { name: 'Board settings' })).toBeNull();
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Board settings', hidden: true }),
+    );
+    expect(screen.getByRole('dialog', { name: 'Board settings' })).toBeInTheDocument();
+    expect(screen.queryByRole('dialog', { name: 'Board filters' })).toBeNull();
+
+    fireEvent.click(screen.getByText('Middle ticket'));
+    expect(screen.queryByRole('dialog', { name: 'Board settings' })).toBeNull();
+    expect(screen.getByTestId('ticket-drawer-parent')).toHaveAttribute(
+      'data-open',
+      'true',
+    );
   });
 
   it('hides archived tickets by default and shows them via the filter drawer', () => {
