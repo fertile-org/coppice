@@ -8,7 +8,9 @@ use std::sync::{Arc, RwLock};
 use coppice_config::connector_file::{write_toml_atomic, ConnectorFilePatch};
 use coppice_config::settings_file::{self, ConfigDocument, ConfigTextError, SaveError};
 use coppice_config::AppConfig;
-use coppice_connectors::{ConnectorDescriptor, CURSOR, KILO_CODE, MOCK, OPENCODE};
+use coppice_connectors::{
+    ConnectorDescriptor, COPILOT, CURSOR, GROK, KILO_CODE, KIMI, MOCK, OPENCODE, QWEN_CODE,
+};
 use toml_edit::DocumentMut;
 
 use crate::providers::ConnectorRegistry;
@@ -276,7 +278,8 @@ fn persist_enabled(
         .parse::<DocumentMut>()
         .map_err(|err| ConnectorConfigError::Toml(err.to_string()))?;
     let command_if_missing =
-        matches!(descriptor.id, CURSOR | KILO_CODE | OPENCODE).then_some(descriptor.binary);
+        matches!(descriptor.id, CURSOR | KILO_CODE | OPENCODE | COPILOT | QWEN_CODE | KIMI | GROK)
+            .then_some(descriptor.binary);
     coppice_config::connector_file::set_connector_enabled(
         &mut doc,
         &ConnectorFilePatch {

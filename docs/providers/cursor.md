@@ -1,13 +1,13 @@
 # Cursor
 
-Use the [Cursor Agent CLI](https://cursor.com) (`agent`) as a Coppice connector. Coppice starts `agent` for each ticket run and shows live progress in the ticket drawer.
+Use the [Cursor Agent CLI](https://cursor.com) (`cursor-agent`) as a Coppice connector. Coppice starts `cursor-agent` for each ticket run and shows live progress in the ticket drawer.
 
 **Connector id:** `cursor`
 
 ## Prerequisites
 
 - Coppice running via Docker Compose (`make compose-up`), or a host install with `coppice` on your PATH
-- A Cursor account that can log in with `agent login`
+- A Cursor account that can log in with `cursor-agent login`
 
 ## One-time setup (Docker Compose)
 
@@ -31,8 +31,8 @@ What each step does:
 |------|---------------------|
 | `enable` | Writes `enabled = true` into `deploy/config/config.toml` |
 | recreate server | Needed after `coppice connector enable` or a hand-edit. The in-app Connectors switch and saving an agent apply immediately |
-| `install` | Downloads `agent` into the container’s home volume |
-| `setup` | Runs `agent login` — copy the printed URL into a browser on your machine, finish login, return to the terminal |
+| `install` | Downloads `cursor-agent` into the container’s home volume |
+| `setup` | Runs `cursor-agent login` — copy the printed URL into a browser on your machine, finish login, return to the terminal |
 | `doctor` | Prints `doctor: ok` when the CLI and login look healthy |
 
 CLI binaries and login state live in a Compose volume at `/home/coppice`. You do **not** need to mount host `~/.local` or `~/.config`.
@@ -59,15 +59,17 @@ Optional config (usually set by `enable`):
 ```toml
 [agent.connectors.cursor]
 enabled = true
-command = "agent"
+command = "cursor-agent"
 # Optional. A non-empty list replaces the built-in provider (cursor).
 # model_providers = ["cursor"]
 # run_timeout_secs = 600
 ```
 
+Older Coppice versions wrote `command = "agent"`. Grok also installs an `agent` command, so Coppice reads that old value as `cursor-agent`.
+
 ## If something goes wrong
 
-Start at **System → Connectors** (admin): it shows whether `agent` is found, whether auth is detected or verified by the `agent models` probe, the probe output, the last real run, and **Test connection** runs a real gateway check with a failure reason ([diagnostics](README.md#diagnostics-tools--connectors)).
+Start at **System → Connectors** (admin): it shows whether `cursor-agent` is found, whether auth is detected or verified by the `cursor-agent models` probe, the probe output, the last real run, and **Test connection** runs a real gateway check with a failure reason ([diagnostics](README.md#diagnostics-tools--connectors)).
 
 | Symptom | What to try |
 |---------|-------------|
@@ -89,7 +91,7 @@ Start at **System → Connectors** (admin): it shows whether `agent` is found, w
 **Ticket / write-capable runs** spawn roughly:
 
 ```text
-agent -p "<prompt>" --trust --force --output-format stream-json --workspace <worktree>
+cursor-agent -p "<prompt>" --trust --force --output-format stream-json --workspace <worktree>
 ```
 
 Plan runs use `--mode plan` and omit `--force`. Ask mode is the chat flag. Neither mode was shown to block shell writes. Stdout is NDJSON (`stream-json`); the final `result` event is parsed for Coppice’s JSON result contract. Live events are published as `cursor.console.*` on the run WebSocket. Ticket runs accept optional `--model` and `--resume <session_id>`.

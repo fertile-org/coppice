@@ -199,12 +199,12 @@ async function installCursorCli() {
     `,
     { user: '0:0' },
   );
-  await run(composeArgs(['cp', AGENT_BIN, 'server:/home/coppice/.local/bin/agent']));
+  await run(composeArgs(['cp', AGENT_BIN, 'server:/home/coppice/.local/bin/cursor-agent']));
   await serverSh(
     `
     set -eu
-    chown ${serverUser()} /home/coppice/.local/bin/agent
-    chmod 755 /home/coppice/.local/bin/agent
+    chown ${serverUser()} /home/coppice/.local/bin/cursor-agent
+    chmod 755 /home/coppice/.local/bin/cursor-agent
     `,
     { user: '0:0' },
   );

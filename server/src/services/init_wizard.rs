@@ -391,7 +391,7 @@ mod tests {
 
     fn checked<'a>(pairs: &'a [(&'a str, Readiness)]) -> Vec<(&'a str, Readiness)> {
         let mut all = pairs.to_vec();
-        for id in [CURSOR, CLAUDE_CODE, CODEX, KILO_CODE, OPENCODE] {
+        for id in coppice_connectors::all().iter().map(|d| d.id).filter(|id| *id != MOCK) {
             if !all.iter().any(|(key, _)| *key == id) {
                 all.push((id, Readiness::NotOnPath));
             }

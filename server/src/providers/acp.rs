@@ -53,6 +53,8 @@ pub struct AcpLaunch {
     pub run_id: Option<String>,
     pub ticket_id: Option<String>,
     pub task_log_dir: Option<PathBuf>,
+    /// How to sign in, for an agent that answers "Authentication required".
+    pub sign_in_hint: Option<String>,
 }
 
 /// Which tool calls Coppice approves when the agent asks.
@@ -72,6 +74,9 @@ pub struct AcpTurn<'a> {
     pub resume_session_id: Option<&'a str>,
     pub prompt: &'a str,
     pub policy: ToolPolicy,
+    /// A `mode` session option value to set, such as Kimi Code's `yolo`.
+    /// Skipped when the agent offers no such option.
+    pub session_mode: Option<&'a str>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -109,6 +114,8 @@ pub struct AcpOutcome {
     /// Titles of tool calls Coppice refused.
     pub refused: Vec<String>,
     pub stderr_tail: Vec<String>,
+    /// `(value, name)` of the models the session offered.
+    pub models: Vec<(String, String)>,
 }
 
 impl AcpOutcome {
@@ -192,6 +199,7 @@ pub async fn run_turn(
 
     let mut conn = Connection {
         name: launch.display_name.clone(),
+        sign_in_hint: launch.sign_in_hint.clone(),
         stdin: Some(stdin),
         lines: CappedLines::new(BufReader::new(stdout), MAX_LINE_BYTES),
         next_id: 0,
@@ -282,6 +290,7 @@ enum Wait {
 
 struct Connection<'o> {
     name: String,
+    sign_in_hint: Option<String>,
     stdin: Option<ChildStdin>,
     lines: CappedLines<BufReader<ChildStdout>>,
     next_id: u64,
@@ -306,14 +315,18 @@ impl Connection<'_> {
         turn: &AcpTurn<'_>,
         session_tx: Option<watch::Sender<String>>,
     ) -> Result<AcpOutcome, ProviderError> {
+        // A read-only run offers to handle file writes and commands, so an
+        // agent that routes them to the client (Kimi Code does) asks Coppice,
+        // which refuses. Reads stay with the agent.
+        let gate = self.policy == ToolPolicy::ReadOnly;
         let init = self
             .call(
                 "initialize",
                 json!({
                     "protocolVersion": PROTOCOL_VERSION,
                     "clientCapabilities": {
-                        "fs": { "readTextFile": false, "writeTextFile": false },
-                        "terminal": false
+                        "fs": { "readTextFile": false, "writeTextFile": gate },
+                        "terminal": gate
                     }
                 }),
                 Wait::Handshake("initialize"),
@@ -376,6 +389,18 @@ impl Connection<'_> {
                 })?,
         };
         self.session_id = Some(session_id.clone());
+        let models = offered_models(&session);
+        if turn.prompt.is_empty() {
+            // A look at the session only, such as listing models.
+            return Ok(AcpOutcome {
+                session_id,
+                stop_reason: "no_prompt".into(),
+                agent_text: String::new(),
+                refused: Vec::new(),
+                stderr_tail: Vec::new(),
+                models,
+            });
+        }
         if let Some(tx) = session_tx {
             let _ = tx.send(session_id.clone());
         }
@@ -383,6 +408,10 @@ impl Connection<'_> {
         let model = self
             .choose_model(&session_id, session.get("configOptions"), turn.model)
             .await?;
+        if let Some(mode) = turn.session_mode {
+            self.choose_mode(&session_id, session.get("configOptions"), mode)
+                .await?;
+        }
         self.observer.on_session(&session_id, model.as_deref());
 
         self.last_activity = Instant::now();
@@ -412,6 +441,7 @@ impl Connection<'_> {
             agent_text: std::mem::take(&mut self.agent_text),
             refused: std::mem::take(&mut self.refused),
             stderr_tail: Vec::new(),
+            models,
         })
     }
 
@@ -516,7 +546,58 @@ impl Connection<'_> {
         Ok(Some(wanted.to_string()))
     }
 
+    /// Sets the `mode` session option when the agent offers `wanted`.
+    async fn choose_mode(
+        &mut self,
+        session_id: &str,
+        config_options: Option<&Value>,
+        wanted: &str,
+    ) -> Result<(), ProviderError> {
+        let Some(option) = config_options
+            .and_then(Value::as_array)
+            .and_then(|options| {
+                options
+                    .iter()
+                    .find(|o| o.get("category").and_then(Value::as_str) == Some("mode"))
+            })
+            .cloned()
+        else {
+            tracing::warn!(agent = %self.name, mode = wanted, "the agent offers no mode option");
+            return Ok(());
+        };
+        if option.get("currentValue").and_then(Value::as_str) == Some(wanted) {
+            return Ok(());
+        }
+        if !option_values(option.get("options")).iter().any(|v| v == wanted) {
+            tracing::warn!(agent = %self.name, mode = wanted, "the agent has no such mode");
+            return Ok(());
+        }
+        let config_id = option.get("id").and_then(Value::as_str).unwrap_or("mode").to_string();
+        self.call(
+            "session/set_config_option",
+            json!({ "sessionId": session_id, "configId": config_id, "value": wanted }),
+            Wait::Handshake("session/set_config_option"),
+        )
+        .await?
+        .map_err(|err| self.rpc_failure("session/set_config_option", err))?;
+        Ok(())
+    }
+
     fn rpc_failure(&self, method: &str, err: RpcError) -> ProviderError {
+        if err.code == AUTH_REQUIRED
+            || err
+                .message
+                .to_lowercase()
+                .contains("authentication required")
+        {
+            return ProviderError::InvalidFixture(format!(
+                "{} isn't signed in. {}",
+                self.name,
+                self.sign_in_hint
+                    .as_deref()
+                    .unwrap_or("Sign in with its CLI, then try again.")
+            ));
+        }
         ProviderError::InvalidFixture(format!(
             "{} rejected {method}: {} (code {})",
             self.name, err.message, err.code
@@ -774,9 +855,20 @@ impl Connection<'_> {
                 tracing::info!(agent = %self.name, tool = %title, "refused a tool request in a read-only run");
             }
             json!({ "jsonrpc": "2.0", "id": id, "result": { "outcome": choose_permission_option(params, allowed) } })
+        } else if self.policy == ToolPolicy::ReadOnly
+            && (method == "fs/write_text_file" || method.starts_with("terminal/"))
+        {
+            let what = gated_request_title(method, params);
+            self.refused.push(what.clone());
+            tracing::info!(agent = %self.name, request = %what, "refused a write or command in a read-only run");
+            json!({
+                "jsonrpc": "2.0",
+                "id": id,
+                "error": { "code": -32603, "message": READ_ONLY_REFUSAL }
+            })
         } else {
-            // Coppice declares no file system or terminal capability, so these
-            // and anything newer get a clear error instead of no answer.
+            // Coppice declares no other client capability, so these and
+            // anything newer get a clear error instead of no answer.
             tracing::warn!(agent = %self.name, method, "unsupported ACP request from the agent");
             json!({
                 "jsonrpc": "2.0",
@@ -785,6 +877,88 @@ impl Connection<'_> {
             })
         };
         self.send(&reply).await
+    }
+}
+
+/// Models from the `model` config option, or the older `models.availableModels`.
+fn offered_models(session: &Value) -> Vec<(String, String)> {
+    fn flatten(options: Option<&Value>, out: &mut Vec<(String, String)>) {
+        for option in options.and_then(Value::as_array).into_iter().flatten() {
+            if let Some(value) = option.get("value").and_then(Value::as_str) {
+                let name = option.get("name").and_then(Value::as_str).unwrap_or(value);
+                if !out.iter().any(|(v, _)| v == value) {
+                    out.push((value.to_string(), name.to_string()));
+                }
+            }
+            flatten(option.get("options"), out);
+        }
+    }
+    let mut out = Vec::new();
+    let model_option = session
+        .get("configOptions")
+        .and_then(Value::as_array)
+        .and_then(|options| {
+            options.iter().find(|o| {
+                o.get("category").and_then(Value::as_str) == Some("model")
+                    || o.get("id").and_then(Value::as_str) == Some("model")
+            })
+        });
+    flatten(model_option.and_then(|o| o.get("options")), &mut out);
+    if out.is_empty() {
+        for model in session
+            .pointer("/models/availableModels")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+        {
+            if let Some(id) = model.get("modelId").and_then(Value::as_str) {
+                let name = model.get("name").and_then(Value::as_str).unwrap_or(id);
+                if !out.iter().any(|(v, _)| v == id) {
+                    out.push((id.to_string(), name.to_string()));
+                }
+            }
+        }
+    }
+    out
+}
+
+/// An observer for a session look that streams nothing.
+pub struct NoObserver;
+
+impl AcpObserver for NoObserver {
+    fn on_session(&mut self, _session_id: &str, _model: Option<&str>) {}
+    fn on_update(&mut self, _update: &Value) {}
+    fn on_end(&mut self) {}
+}
+
+/// JSON-RPC code ACP agents use for "sign in first".
+const AUTH_REQUIRED: i64 = -32000;
+
+const READ_ONLY_REFUSAL: &str =
+    "Coppice: this run only allows reading. Writing files and running commands are refused.";
+
+/// `write <path>` or `run <command>`, for the refused list.
+fn gated_request_title(method: &str, params: &Value) -> String {
+    if method == "fs/write_text_file" {
+        let path = params
+            .get("path")
+            .and_then(Value::as_str)
+            .unwrap_or("a file");
+        return format!("write {path}");
+    }
+    let command = params
+        .get("command")
+        .and_then(Value::as_str)
+        .unwrap_or("a command");
+    let args: Vec<&str> = params
+        .get("args")
+        .and_then(Value::as_array)
+        .map(|a| a.iter().filter_map(Value::as_str).collect())
+        .unwrap_or_default();
+    if args.is_empty() {
+        format!("run {command}")
+    } else {
+        format!("run {command} {}", args.join(" "))
     }
 }
 
@@ -839,9 +1013,18 @@ fn permission_decision(policy: ToolPolicy, params: &Value) -> (bool, String) {
         .to_string();
     let allowed = match policy {
         ToolPolicy::AllowAll => true,
-        ToolPolicy::ReadOnly => READ_ONLY_KINDS.contains(&kind),
+        ToolPolicy::ReadOnly => READ_ONLY_KINDS.contains(&kind) || is_gateway_tool(&title),
     };
     (allowed, title)
+}
+
+/// The Coppice gateway's own tools, as the agents name them:
+/// `mcp__coppice__x` (Kimi, Qwen) or `coppice-x` (Copilot).
+fn is_gateway_tool(title: &str) -> bool {
+    let server = crate::mcp::protocol::SERVER_NAME;
+    title.starts_with(&format!("mcp__{server}__"))
+        || title.starts_with(&format!("{server}-"))
+        || title.starts_with(&format!("{server}_"))
 }
 
 fn choose_permission_option(params: &Value, allow: bool) -> Value {
@@ -897,6 +1080,18 @@ mod tests {
     }
 
     #[test]
+    fn read_only_still_allows_the_gateway_tools() {
+        for title in ["mcp__coppice__result_submit", "coppice-ticket_get", "coppice_result_submit"] {
+            let params = json!({ "toolCall": { "kind": "other", "title": title }, "options": [] });
+            assert!(permission_decision(ToolPolicy::ReadOnly, &params).0, "{title}");
+        }
+        for title in ["mcp__other__delete", "coppicex-run", "touch x"] {
+            let params = json!({ "toolCall": { "kind": "other", "title": title }, "options": [] });
+            assert!(!permission_decision(ToolPolicy::ReadOnly, &params).0, "{title}");
+        }
+    }
+
+    #[test]
     fn a_missing_kind_counts_as_other() {
         let params = json!({ "toolCall": { "toolCallId": "t" }, "options": [] });
         let (allowed, title) = permission_decision(ToolPolicy::ReadOnly, &params);
@@ -929,6 +1124,30 @@ mod tests {
     }
 
     #[test]
+    fn offered_models_read_the_config_option_or_the_older_list() {
+        let config = json!({ "configOptions": [
+            { "id": "mode", "category": "mode", "options": [{ "value": "yolo" }] },
+            { "id": "model", "category": "model", "options": [
+                { "value": "auto", "name": "Auto" },
+                { "value": "auto", "name": "Auto again" },
+                { "group": "g", "options": [{ "value": "gpt-5", "name": "GPT-5" }] }
+            ] }
+        ] });
+        assert_eq!(
+            offered_models(&config),
+            [("auto".to_string(), "Auto".to_string()), ("gpt-5".to_string(), "GPT-5".to_string())]
+        );
+        let older = json!({ "models": { "availableModels": [
+            { "modelId": "qwen3(openai)", "name": "Qwen 3" }, { "modelId": "x" }
+        ] } });
+        assert_eq!(
+            offered_models(&older),
+            [("qwen3(openai)".to_string(), "Qwen 3".to_string()), ("x".to_string(), "x".to_string())]
+        );
+        assert!(offered_models(&json!({})).is_empty());
+    }
+
+    #[test]
     fn model_values_flatten_groups() {
         let options = json!([
             { "value": "a/one", "name": "One" },
@@ -957,6 +1176,7 @@ mod tests {
             agent_text: String::new(),
             refused,
             stderr_tail: Vec::new(),
+            models: Vec::new(),
         };
         assert!(outcome("end_turn", vec![])
             .stop_problem("OpenCode")

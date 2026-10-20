@@ -298,10 +298,10 @@ describe('AgentForm model choice', () => {
       return (
         element?.tagName === 'P' &&
         element.textContent ===
-          "Cursor's CLI isn't signed in for Coppice. Run agent login in a terminal, then click Refresh models."
+          "Cursor's CLI isn't signed in for Coppice. Run cursor-agent login in a terminal, then click Refresh models."
       );
     });
-    expect(signIn.querySelector('code')?.textContent).toBe('agent login');
+    expect(signIn.querySelector('code')?.textContent).toBe('cursor-agent login');
     expect(signIn.textContent).not.toContain('`');
     expect(screen.queryByText('Error: Authentication required')).toBeNull();
   });

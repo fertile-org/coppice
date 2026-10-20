@@ -147,13 +147,7 @@ How people run Coppice without cloning the repo.
 
 Download the installer from the GitHub Release. Coppice bundles its own database and server, so there is no Docker, no Postgres, and no login screen (single admin session via `auth.desktop_mode`). Agents run on your machine with your own tools: install **Git** and the agent CLIs you plan to use (for example `claude` or `codex`) and log in to each of them first. Coppice finds them through your login shell's `PATH`.
 
-**macOS** (Apple silicon: `mac-arm64`, Intel: `mac-x64`): open `Coppice-<version>-mac-<arch>.dmg`, drag **Coppice** to **Applications**, and launch it. If the build is not signed, macOS says Coppice "can't be opened" or "is damaged"; run once:
-
-```bash
-xattr -dr com.apple.quarantine /Applications/Coppice.app
-```
-
-Alternatively, after the first blocked launch open **System Settings → Privacy & Security** and click **Open Anyway**.
+**macOS** (Apple silicon: `mac-arm64`, Intel: `mac-x64`): open `Coppice-<version>-mac-<arch>.dmg`, drag **Coppice** to **Applications**, and launch it. Release builds are signed with Coppice's Developer ID and notarized by Apple.
 
 **Linux** (Ubuntu 22.04+ / Debian 12+, `amd64` or `arm64`):
 

@@ -74,7 +74,7 @@ enabled = false
 
 **System → Connectors** のスイッチも同じ行を書き込みます。
 
-Kilo Code は、あなたがオンにするまでオフのままです。Coppice は無料でそのサインインを確認できないためです。
+Kilo Code、GitHub Copilot、Qwen Code、Kimi Code、Grok は、あなたがオンにするまでオフのままです。Coppice は無料でこれらのサインインを確認できないためです。
 
 ## `[agent]`
 
@@ -95,7 +95,7 @@ ID：`claude-code`、`codex`、`cursor`、`opencode`、`kilo-code`。どのテ�
 | `enabled` | bool | 未設定：CLI がサインイン済みならオン | コネクタをオンまたはオフにします。 |
 | `model_providers` | list of strings | `[]` | このコネクタのモデルプロバイダー。オンにしたときに入力されます。 |
 | `run_timeout_secs` | integer | OpenCode は `1800`、ほかは `600` | このコネクタでの実行が失敗とみなされるまでの秒数。 |
-| `command` | string | `agent`（Cursor）、`codex`、`opencode`、`kilo` | 実行する CLI のバイナリ。Claude Code は常に `claude` を実行し、`command` はありません。 |
+| `command` | string | `cursor-agent`（Cursor）、`codex`、`opencode`、`kilo` | 実行する CLI のバイナリ。Claude Code は常に `claude` を実行し、`command` はありません。 |
 
 OpenCode のみ：
 

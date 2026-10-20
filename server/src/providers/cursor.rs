@@ -62,7 +62,7 @@ impl AgentProvider for CursorProvider {
         );
         args.extend(ticket_attachments::add_dir_args(&staged));
 
-        // Auth is host-managed: the operator runs `agent login` wherever the
+        // Auth is host-managed: the operator runs `cursor-agent login` wherever the
         // server runs. The child process inherits that environment directly.
         // Coppice does not inject or strip credentials.
 
@@ -259,7 +259,7 @@ fn format_stderr_suffix(lines: &[String]) -> String {
     }
 }
 
-/// Build `agent` CLI argv (excluding the binary name).
+/// Build `cursor-agent` CLI argv (excluding the binary name).
 ///
 /// Ticket runs use `--force` (write-capable). Plan runs use `--mode plan` and
 /// omit `--force`. Chat uses `--mode ask` and omits `--force`. Ask mode blocks

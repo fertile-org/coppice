@@ -33,7 +33,7 @@ Toutes les versions sont aussi sur [GitHub Releases](https://github.com/fertile-
 
 Coppice cherche les nouvelles versions en arrière-plan. Pour désactiver ça, ouvrez **Settings → Updates** et désactivez **Automatic updates**. Vos tableaux et paramètres restent en place lors d’une mise à jour.
 
-- **macOS :** choisissez **Download update** dans le bandeau, puis glissez le nouveau Coppice dans Applications.
+- **macOS :** Coppice télécharge la mise à jour pour vous. Choisissez **Restart to update** dans le bandeau, ou elle s’installe la prochaine fois que vous quittez Coppice.
 - **Linux :** installer le `.deb` ajoute la source de paquets de Coppice, donc les nouvelles versions arrivent avec vos autres mises à jour dans le gestionnaire de mises à jour, ou lancez `sudo apt update && sudo apt upgrade`.
 
 <a id="windows-11-through-wsl"></a>
@@ -62,7 +62,7 @@ Il faut Windows 11, car les anciennes versions de Windows 10 ne peuvent pas affi
    Utilisez `apt`, pas `dpkg -i`. `apt` installe aussi ce dont Coppice a besoin.
 
    Pour mettre Coppice à jour plus tard, lancez `sudo apt update && sudo apt upgrade`. Vos tableaux et paramètres restent en place.
-4. Installez dans Ubuntu les CLI d’agents que vous utilisez (Claude Code, Codex, Cursor, OpenCode, Kilo Code). Connectez-vous à elles et à git là aussi.
+4. Installez dans Ubuntu les CLI d’agents que vous utilisez (Claude Code, Codex, Cursor, OpenCode, Kilo Code, GitHub Copilot, Qwen Code, Kimi Code, Grok). Connectez-vous à elles et à git là aussi.
 5. Lancez Coppice depuis le menu Démarrer de Windows (sous Ubuntu), ou lancez `coppice` dans Ubuntu.
 
    Si une CLI affiche Not on your PATH, lancez Coppice avec `coppice` dans Ubuntu.
@@ -78,7 +78,7 @@ Gardez vos dépôts dans votre dossier personnel Linux, par exemple `~/code/my-a
 2. Indiquez-lui un checkout git local que vous avez déjà sur le disque.
 3. **Connectez votre CLI d’agent.** Choisissez votre CLI d’agent en créant un agent, et Coppice l’active. Chacune indique si elle est **Ready**, **Found, not signed in** ou **Not on your PATH**. Connectez-vous d’abord à la CLI dans votre terminal, comme d’habitude.
 
-   Kilo Code affiche **Kilo Code — Installed**. System → Connectors ajoute : « Coppice can't check this sign-in without using your plan. A run will show an error if you're signed out. » (Coppice ne peut pas vérifier cette connexion sans utiliser votre forfait. Un lancement affichera une erreur si vous êtes déconnecté.)
+   Kilo Code, GitHub Copilot, Qwen Code, Kimi Code et Grok affichent **Installed** (par exemple **Kilo Code — Installed**). System → Connectors ajoute : « Coppice can't check this sign-in without using your plan. A run will show an error if you're signed out. » (Coppice ne peut pas vérifier cette connexion sans utiliser votre forfait. Un lancement affichera une erreur si vous êtes déconnecté.)
 
    Pour désactiver un connecteur plus tard, utilisez l’interrupteur dans System → Connectors, ou mettez `enabled = false` pour lui dans votre `config.toml` Coppice :
 

@@ -28,7 +28,7 @@ You can also get every build from [GitHub Releases](https://github.com/fertile-o
 
 Coppice checks for new versions in the background. To turn this off, open **Settings → Updates** and turn off **Automatic updates**. Your boards and settings stay when you update.
 
-- **macOS:** choose **Download update** in the banner, then drag the new Coppice into Applications.
+- **macOS:** Coppice downloads the update for you. Choose **Restart to update** in the banner, or it installs the next time you quit Coppice.
 - **Linux:** installing the `.deb` adds Coppice's package source, so new versions arrive with your other updates in Software Updater, or run `sudo apt update && sudo apt upgrade`.
 
 ## Windows 11 (through WSL)
@@ -55,7 +55,7 @@ You need Windows 11, because older Windows 10 builds can't show Linux app window
    Use `apt`, not `dpkg -i`. `apt` also installs what Coppice needs.
 
    To update Coppice later, run `sudo apt update && sudo apt upgrade`. Your boards and settings stay.
-4. Install the agent CLIs you use (Claude Code, Codex, Cursor, OpenCode, Kilo Code) in Ubuntu. Sign in to them and to git there too.
+4. Install the agent CLIs you use (Claude Code, Codex, Cursor, OpenCode, Kilo Code, GitHub Copilot, Qwen Code, Kimi Code, Grok) in Ubuntu. Sign in to them and to git there too.
 5. Start Coppice from the Windows Start menu (under Ubuntu), or run `coppice` in Ubuntu.
 
    If a CLI shows Not on your PATH, start Coppice by running `coppice` in Ubuntu.
@@ -69,7 +69,7 @@ Keep your repos in your Linux home folder, for example `~/code/my-app`, not unde
 2. Point it at a local git checkout you already have on disk.
 3. **Connect your agent CLI.** Pick your agent CLI when you create an agent, and Coppice turns it on. Each one shows whether it's **Ready**, **Found, not signed in**, or **Not on your PATH**. Sign in to the CLI in your terminal first, the same way you normally would.
 
-   Kilo Code shows **Kilo Code — Installed**. System → Connectors adds: "Coppice can't check this sign-in without using your plan. A run will show an error if you're signed out."
+   Kilo Code, GitHub Copilot, Qwen Code, Kimi Code and Grok show **Installed** (for example **Kilo Code — Installed**). System → Connectors adds: "Coppice can't check this sign-in without using your plan. A run will show an error if you're signed out."
 
    To turn a connector off later, use the toggle in System → Connectors, or set `enabled = false` for it in your Coppice `config.toml`:
 

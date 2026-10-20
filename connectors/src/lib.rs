@@ -17,6 +17,10 @@ pub const CLAUDE_CODE: &str = "claude-code";
 pub const CODEX: &str = "codex";
 pub const KILO_CODE: &str = "kilo-code";
 pub const OPENCODE: &str = "opencode";
+pub const COPILOT: &str = "copilot";
+pub const QWEN_CODE: &str = "qwen-code";
+pub const KIMI: &str = "kimi";
+pub const GROK: &str = "grok";
 
 /// How chat treats one connector. Change an arm to flip a CLI later.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -31,7 +35,12 @@ pub enum ChatReadOnlyStatus {
 
 pub fn chat_read_only_status(connector: &str) -> ChatReadOnlyStatus {
     match connector {
-        OPENCODE | MOCK => ChatReadOnlyStatus::Passed,
+        // Copilot: deny rules (real model). Qwen Code: tools removed. Kimi:
+        // writes and commands refused by Coppice. The last two were checked
+        // against a scripted model; enforcement is the CLI's, not the model's.
+        // Grok: its read-only sandbox plus commands refused by Coppice (real
+        // model).
+        OPENCODE | MOCK | COPILOT | QWEN_CODE | KIMI | GROK => ChatReadOnlyStatus::Passed,
         CLAUDE_CODE | CODEX | CURSOR | KILO_CODE => ChatReadOnlyStatus::Untested,
         _ => ChatReadOnlyStatus::Unavailable,
     }
@@ -101,6 +110,8 @@ pub struct InstallInfo {
 pub enum McpWiring {
     ClaudeJson,
     CursorHome,
+    /// Passed in the ACP `session/new` request; nothing is written to disk.
+    AcpSession,
     OpenCodeJson,
     KiloJson,
     CodexFlags,
@@ -242,9 +253,9 @@ const CONNECTORS: &[ConnectorDescriptor] = &[
     ConnectorDescriptor {
         id: CURSOR,
         display_name: "Cursor",
-        binary: "agent",
+        binary: "cursor-agent",
         install: InstallInfo {
-            auth_hint: "agent login (copy URL)",
+            auth_hint: "cursor-agent login (copy URL)",
             auth_paths: &[".config/cursor/auth.json", ".cursor/auth.json"],
             auth_env: &[],
             probe_args: &["models"],
@@ -389,6 +400,110 @@ const CONNECTORS: &[ConnectorDescriptor] = &[
             reason: "Earlier versions leave a copy of a native module in the shared temp folder on every start and never remove it.",
         }),
     },
+    ConnectorDescriptor {
+        id: COPILOT,
+        display_name: "GitHub Copilot",
+        binary: "copilot",
+        install: InstallInfo {
+            auth_hint: "Run copilot login, or set COPILOT_GITHUB_TOKEN",
+            auth_paths: &[".copilot/config.json"],
+            auth_env: &["COPILOT_GITHUB_TOKEN", "GH_TOKEN", "GITHUB_TOKEN"],
+            probe_args: &["--version"],
+            probe_proves_auth: false,
+            docs_url: "https://docs.github.com/en/copilot/how-tos/copilot-cli",
+        },
+        default_model_providers: &["copilot"],
+        mcp_wiring: McpWiring::AcpSession,
+        mcp_tool_names: ToolNameStyle::Dash,
+        console: ConsoleKind::Structured,
+        caps: Capabilities {
+            read_only_tools: true,
+            chat_resume: true,
+            session_events: true,
+            run_resume: false,
+            run_server: false,
+        },
+        run_contract: run_contract::COPILOT,
+        min_version: None,
+    },
+    ConnectorDescriptor {
+        id: QWEN_CODE,
+        display_name: "Qwen Code",
+        binary: "qwen",
+        install: InstallInfo {
+            auth_hint: "Run qwen and sign in, or set OPENAI_API_KEY",
+            auth_paths: &[".qwen/oauth_creds.json", ".qwen/settings.json"],
+            auth_env: &["OPENAI_API_KEY", "DASHSCOPE_API_KEY"],
+            probe_args: &["--version"],
+            probe_proves_auth: false,
+            docs_url: "https://github.com/QwenLM/qwen-code",
+        },
+        default_model_providers: &["qwen"],
+        mcp_wiring: McpWiring::AcpSession,
+        mcp_tool_names: ToolNameStyle::McpDoubleUnderscore,
+        console: ConsoleKind::Structured,
+        caps: Capabilities {
+            read_only_tools: true,
+            chat_resume: true,
+            session_events: true,
+            run_resume: false,
+            run_server: false,
+        },
+        run_contract: run_contract::QWEN_CODE,
+        min_version: None,
+    },
+    ConnectorDescriptor {
+        id: KIMI,
+        display_name: "Kimi Code",
+        binary: "kimi",
+        install: InstallInfo {
+            auth_hint: "Run kimi login",
+            auth_paths: &[],
+            auth_env: &["KIMI_API_KEY"],
+            probe_args: &["--version"],
+            probe_proves_auth: false,
+            docs_url: "https://moonshotai.github.io/kimi-code/",
+        },
+        default_model_providers: &["kimi"],
+        mcp_wiring: McpWiring::AcpSession,
+        mcp_tool_names: ToolNameStyle::McpDoubleUnderscore,
+        console: ConsoleKind::Structured,
+        caps: Capabilities {
+            read_only_tools: true,
+            chat_resume: true,
+            session_events: true,
+            run_resume: false,
+            run_server: false,
+        },
+        run_contract: run_contract::KIMI,
+        min_version: None,
+    },
+    ConnectorDescriptor {
+        id: GROK,
+        display_name: "Grok",
+        binary: "grok",
+        install: InstallInfo {
+            auth_hint: "Run grok login",
+            auth_paths: &[".grok/auth.json"],
+            auth_env: &["XAI_API_KEY"],
+            probe_args: &["--version"],
+            probe_proves_auth: false,
+            docs_url: "https://x.ai/cli",
+        },
+        default_model_providers: &["grok"],
+        mcp_wiring: McpWiring::AcpSession,
+        mcp_tool_names: ToolNameStyle::McpDoubleUnderscore,
+        console: ConsoleKind::Structured,
+        caps: Capabilities {
+            read_only_tools: true,
+            chat_resume: true,
+            session_events: true,
+            run_resume: false,
+            run_server: false,
+        },
+        run_contract: run_contract::GROK,
+        min_version: None,
+    },
 ];
 
 /// Every known connector, in display order.
@@ -425,19 +540,27 @@ mod tests {
         let unique: HashSet<&str> = ids.iter().copied().collect();
         assert_eq!(unique.len(), ids.len(), "duplicate connector ids: {ids:?}");
         #[cfg(feature = "mock")]
-        let expected = vec![MOCK, CURSOR, CLAUDE_CODE, CODEX, KILO_CODE, OPENCODE];
+        let expected = vec![
+            MOCK, CURSOR, CLAUDE_CODE, CODEX, KILO_CODE, OPENCODE, COPILOT, QWEN_CODE, KIMI, GROK,
+        ];
         #[cfg(not(feature = "mock"))]
-        let expected = vec![CURSOR, CLAUDE_CODE, CODEX, KILO_CODE, OPENCODE];
+        let expected = vec![
+            CURSOR, CLAUDE_CODE, CODEX, KILO_CODE, OPENCODE, COPILOT, QWEN_CODE, KIMI, GROK,
+        ];
         assert_eq!(ids, expected);
         assert_eq!(
-            [MOCK, CLAUDE_CODE, CURSOR, CODEX, KILO_CODE, OPENCODE],
+            [MOCK, CLAUDE_CODE, CURSOR, CODEX, KILO_CODE, OPENCODE, COPILOT, QWEN_CODE, KIMI, GROK],
             [
                 "mock",
                 "claude-code",
                 "cursor",
                 "codex",
                 "kilo-code",
-                "opencode"
+                "opencode",
+                "copilot",
+                "qwen-code",
+                "kimi",
+                "grok"
             ]
         );
     }
@@ -544,9 +667,9 @@ mod tests {
         assert!(get(MOCK).is_none());
 
         let cursor = get(CURSOR).unwrap();
-        assert_eq!(cursor.binary, "agent");
+        assert_eq!(cursor.binary, "cursor-agent");
         assert_eq!(cursor.default_model_providers, ["cursor"]);
-        assert_eq!(cursor.install.auth_hint, "agent login (copy URL)");
+        assert_eq!(cursor.install.auth_hint, "cursor-agent login (copy URL)");
         assert_eq!(
             cursor.install.auth_paths,
             [".config/cursor/auth.json", ".cursor/auth.json"]

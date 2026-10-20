@@ -466,11 +466,27 @@ mod tests {
 
     fn script(dir: &Path, body: &str) -> PathBuf {
         let path = dir.join("cli");
-        std::fs::write(&path, format!("#!/bin/sh\n{body}\n")).unwrap();
+        std::fs::write(
+            &path,
+            format!("#!/bin/sh\n[ \"$1\" = __probe ] && exit 0\n{body}\n"),
+        )
+        .unwrap();
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
             std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+            // A test thread that forks while this file is still open for
+            // writing keeps it busy until that child execs (ETXTBSY), and the
+            // code under test would read the failed spawn as "found".
+            const ETXTBSY: i32 = 26;
+            for _ in 0..100 {
+                match std::process::Command::new(&path).arg("__probe").status() {
+                    Err(err) if err.raw_os_error() == Some(ETXTBSY) => {
+                        std::thread::sleep(std::time::Duration::from_millis(10));
+                    }
+                    _ => break,
+                }
+            }
         }
         path
     }

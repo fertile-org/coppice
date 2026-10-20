@@ -856,6 +856,14 @@ pub struct AgentConnectorsConfig {
     pub kilo_code: KiloCodeConnectorConfig,
     #[serde(default, rename = "cursor")]
     pub cursor: CursorConnectorConfig,
+    #[serde(default, rename = "copilot")]
+    pub copilot: CopilotConnectorConfig,
+    #[serde(default, rename = "qwen-code")]
+    pub qwen_code: QwenCodeConnectorConfig,
+    #[serde(default, rename = "kimi")]
+    pub kimi: KimiConnectorConfig,
+    #[serde(default, rename = "grok")]
+    pub grok: GrokConnectorConfig,
 }
 
 /// Whether the user set a connector's switch.
@@ -891,6 +899,10 @@ impl AgentConnectorsConfig {
             "codex" => self.codex.enabled,
             "kilo-code" => self.kilo_code.enabled,
             "cursor" => self.cursor.enabled,
+            "copilot" => self.copilot.enabled,
+            "qwen-code" => self.qwen_code.enabled,
+            "kimi" => self.kimi.enabled,
+            "grok" => self.grok.enabled,
             _ => return ConnectorSwitch::Unknown,
         };
         match flag {
@@ -919,6 +931,10 @@ impl AgentConnectorsConfig {
             "kilo-code" => Some(&self.kilo_code.command),
             "cursor" => Some(&self.cursor.command),
             "codex" => Some(&self.codex.command),
+            "copilot" => Some(&self.copilot.command),
+            "qwen-code" => Some(&self.qwen_code.command),
+            "kimi" => Some(&self.kimi.command),
+            "grok" => Some(&self.grok.command),
             _ => None,
         }
     }
@@ -979,6 +995,30 @@ impl AgentConnectorsConfig {
                 enabled,
                 default_model_providers,
             )),
+            "copilot" => Ok(apply(
+                &mut self.copilot.enabled,
+                &mut self.copilot.model_providers,
+                enabled,
+                default_model_providers,
+            )),
+            "qwen-code" => Ok(apply(
+                &mut self.qwen_code.enabled,
+                &mut self.qwen_code.model_providers,
+                enabled,
+                default_model_providers,
+            )),
+            "kimi" => Ok(apply(
+                &mut self.kimi.enabled,
+                &mut self.kimi.model_providers,
+                enabled,
+                default_model_providers,
+            )),
+            "grok" => Ok(apply(
+                &mut self.grok.enabled,
+                &mut self.grok.model_providers,
+                enabled,
+                default_model_providers,
+            )),
             "mock" => Err("mock"),
             _ => Err("unknown"),
         }
@@ -992,6 +1032,10 @@ impl AgentConnectorsConfig {
             "codex" => Some(self.codex.run_timeout_secs),
             "kilo-code" => Some(self.kilo_code.run_timeout_secs),
             "cursor" => Some(self.cursor.run_timeout_secs),
+            "copilot" => Some(self.copilot.run_timeout_secs),
+            "qwen-code" => Some(self.qwen_code.run_timeout_secs),
+            "kimi" => Some(self.kimi.run_timeout_secs),
+            "grok" => Some(self.grok.run_timeout_secs),
             _ => None,
         }
     }
@@ -1148,12 +1192,50 @@ impl Default for KiloCodeConnectorConfig {
     }
 }
 
+/// Config for a CLI connector with a command, a run timeout, and model
+/// providers. Each gets its own type so its serde defaults are its own.
+macro_rules! cli_connector_config {
+    ($name:ident, $alias:ident, $command:literal, $timeout:literal) => {
+        #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+        #[serde(default)]
+        pub struct $name {
+            /// Absent until the user sets the switch in Connectors.
+            #[serde(skip_serializing_if = "Option::is_none")]
+            pub enabled: Option<bool>,
+            pub command: String,
+            pub run_timeout_secs: u64,
+            pub model_providers: Vec<String>,
+        }
+
+        pub type $alias = $name;
+
+        impl Default for $name {
+            fn default() -> Self {
+                Self {
+                    enabled: None,
+                    command: $command.into(),
+                    run_timeout_secs: $timeout,
+                    model_providers: Vec::new(),
+                }
+            }
+        }
+    };
+}
+
+cli_connector_config!(CopilotConnectorConfig, CopilotProviderConfig, "copilot", 600);
+cli_connector_config!(QwenCodeConnectorConfig, QwenCodeProviderConfig, "qwen", 600);
+cli_connector_config!(KimiConnectorConfig, KimiProviderConfig, "kimi", 600);
+cli_connector_config!(GrokConnectorConfig, GrokProviderConfig, "grok", 600);
+
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct CursorConnectorConfig {
     /// Absent until the user sets the switch in Connectors.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub enabled: Option<bool>,
-    #[serde(default = "default_cursor_command")]
+    #[serde(
+        default = "default_cursor_command",
+        deserialize_with = "deserialize_cursor_command"
+    )]
     pub command: String,
     #[serde(default = "default_cursor_run_timeout_secs")]
     pub run_timeout_secs: u64,
@@ -1164,7 +1246,22 @@ pub struct CursorConnectorConfig {
 pub type CursorProviderConfig = CursorConnectorConfig;
 
 fn default_cursor_command() -> String {
-    "agent".into()
+    "cursor-agent".into()
+}
+
+/// Coppice used to write `command = "agent"` for Cursor. Grok installs its own
+/// `agent` too, so that old default now means Cursor's `cursor-agent`, which
+/// Cursor's installer has always shipped.
+fn deserialize_cursor_command<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let configured = String::deserialize(deserializer)?;
+    Ok(if configured.trim() == "agent" {
+        default_cursor_command()
+    } else {
+        configured
+    })
 }
 
 fn default_cursor_run_timeout_secs() -> u64 {
@@ -1693,6 +1790,29 @@ mod tests {
     }
 
     #[test]
+    fn new_cli_connectors_default_and_parse() {
+        let cfg: AgentConnectorsConfig = toml::from_str(
+            r#"
+            [copilot]
+            enabled = true
+            [qwen-code]
+            command = "/opt/qwen"
+            run_timeout_secs = 90
+            "#,
+        )
+        .expect("parse");
+        assert_eq!(cfg.copilot.enabled, Some(true));
+        assert_eq!(cfg.copilot.command, "copilot");
+        assert_eq!(cfg.qwen_code.command, "/opt/qwen");
+        assert_eq!(cfg.qwen_code.run_timeout_secs, 90);
+        assert_eq!(cfg.kimi.command, "kimi");
+        assert_eq!(cfg.grok.run_timeout_secs, 600);
+        assert_eq!(cfg.command("qwen-code"), Some("/opt/qwen"));
+        assert_eq!(cfg.switch("kimi"), ConnectorSwitch::Automatic);
+        assert_eq!(cfg.switch("copilot"), ConnectorSwitch::On);
+    }
+
+    #[test]
     fn kilo_code_connector_defaults() {
         let cfg = KiloCodeConnectorConfig::default();
         assert_eq!(cfg.enabled, None);
@@ -1728,10 +1848,23 @@ mod tests {
     }
 
     #[test]
+    fn cursor_old_agent_command_reads_as_cursor_agent() {
+        let read = |command: &str| {
+            toml::from_str::<CursorConnectorConfig>(&format!("command = {command:?}"))
+                .unwrap()
+                .command
+        };
+        assert_eq!(read("agent"), "cursor-agent");
+        assert_eq!(read(" agent "), "cursor-agent");
+        assert_eq!(read("/opt/cursor/bin/agent"), "/opt/cursor/bin/agent");
+        assert_eq!(read("my-agent"), "my-agent");
+    }
+
+    #[test]
     fn cursor_connector_defaults() {
         let cfg = CursorConnectorConfig::default();
         assert_eq!(cfg.enabled, None);
-        assert_eq!(cfg.command, "agent");
+        assert_eq!(cfg.command, "cursor-agent");
         assert_eq!(cfg.run_timeout_secs, 600);
         assert!(cfg.model_providers.is_empty());
     }
@@ -1740,7 +1873,7 @@ mod tests {
     fn command_for_connectors() {
         let mut cfg = AgentConnectorsConfig::default();
         assert_eq!(cfg.command("kilo-code"), Some("kilo"));
-        assert_eq!(cfg.command("cursor"), Some("agent"));
+        assert_eq!(cfg.command("cursor"), Some("cursor-agent"));
         assert_eq!(cfg.command("opencode"), Some("opencode"));
         assert_eq!(cfg.command("claude-code"), None);
         assert_eq!(cfg.command("codex"), Some("codex"));

@@ -6,7 +6,9 @@ use toml_edit::DocumentMut;
 use coppice_config::connector_file::{
     set_connector_enabled, write_toml_atomic, ConnectorFilePatch,
 };
-use coppice_connectors::{ConnectorDescriptor, CURSOR, KILO_CODE, MOCK, OPENCODE};
+use coppice_connectors::{
+    ConnectorDescriptor, COPILOT, CURSOR, GROK, KILO_CODE, KIMI, MOCK, OPENCODE, QWEN_CODE,
+};
 
 use super::registry::parse_id;
 
@@ -67,7 +69,9 @@ pub fn resolve_config_path(explicit: Option<&Path>) -> anyhow::Result<PathBuf> {
 }
 
 pub fn enable_in_doc(doc: &mut DocumentMut, m: &ConnectorDescriptor) -> anyhow::Result<()> {
-    let command_if_missing = matches!(m.id, CURSOR | KILO_CODE | OPENCODE).then_some(m.binary);
+    let command_if_missing =
+        matches!(m.id, CURSOR | KILO_CODE | OPENCODE | COPILOT | QWEN_CODE | KIMI | GROK)
+            .then_some(m.binary);
     set_connector_enabled(
         doc,
         &ConnectorFilePatch {
@@ -97,7 +101,7 @@ mod tests {
         assert!(text.contains("[agent.connectors.cursor]"));
         assert!(text.contains("enabled = true"));
         assert!(text.contains("\"cursor\""));
-        assert!(text.contains("command = \"agent\""));
+        assert!(text.contains("command = \"cursor-agent\""));
     }
 
     #[test]

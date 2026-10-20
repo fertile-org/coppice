@@ -1,6 +1,6 @@
 ---
 title: プロバイダー
-description: "Coppice が動かすエージェント CLI：Claude Code、Codex、Cursor、OpenCode、Kilo Code。"
+description: "Coppice が動かすエージェント CLI：Claude Code、Codex、Cursor、OpenCode、Kilo Code、GitHub Copilot、Qwen Code、Kimi Code、Grok。"
 ---
 
 # プロバイダー
@@ -15,9 +15,13 @@ description: "Coppice が動かすエージェント CLI：Claude Code、Codex�
 | --- | --- | --- |
 | Claude Code | `claude` | [インストールガイド](https://docs.anthropic.com/en/docs/claude-code/setup) |
 | Codex | `codex` | [インストールガイド](https://developers.openai.com/codex/cli) |
-| Cursor | `agent` | [インストールガイド](https://cursor.com/docs/cli/installation) |
+| Cursor | `cursor-agent` | [インストールガイド](https://cursor.com/docs/cli/installation) |
 | OpenCode | `opencode` | [インストールガイド](https://opencode.ai/docs/) |
 | Kilo Code | `kilo` | [インストールガイド](https://kilo.ai/docs/cli) |
+| GitHub Copilot | `copilot` | [インストールガイド](https://docs.github.com/en/copilot/how-tos/copilot-cli) |
+| Qwen Code | `qwen` | [インストールガイド](https://github.com/QwenLM/qwen-code) |
+| Kimi Code | `kimi` | [インストールガイド](https://moonshotai.github.io/kimi-code/) |
+| Grok | `grok` | [インストールガイド](https://x.ai/cli) |
 
 <figure>
 <img src="/assets/docs/model-picker.webp" width="1440" height="900" alt="エージェントのモデル選択。エージェントの CLI が提供するモデルが並んでいる。">
@@ -40,9 +44,9 @@ description: "Coppice が動かすエージェント CLI：Claude Code、Codex�
 | **Ready** | 無料のサインイン確認で、サインイン済みであることを確かめました。 |
 | **Found, not signed in** | コマンドは見つかりましたが、サインインしていません。ターミナルからサインインしてください。 |
 | **Not on your PATH** | コマンドが見つかりません。インストールするか、PATH を確認してください。 |
-| **Installed** | コマンドは見つかりました。Kilo Code の場合、プランを使わずにサインインを確認できません。 |
+| **Installed** | コマンドは見つかりました。Kilo Code、GitHub Copilot、Qwen Code、Kimi Code、Grok の場合、プランを使わずにサインインを確認できません。 |
 
-Kilo Code は **Kilo Code — Installed** と表示されます。System → Connectors には次の説明が付きます："Coppice can't check this sign-in without using your plan. A run will show an error if you're signed out." どの CLI でもチャットできます。Claude Code、Codex、Cursor、Kilo Code のチャットには "Coppice hasn't confirmed that {cli} stays read-only. The agent can still run commands on your computer." と表示されます。OpenCode のチャットにはバナーはありません。Test connection は `kilo` コマンドが動くかを確認します。
+Kilo Code、GitHub Copilot、Qwen Code、Kimi Code、Grok は **Installed** と表示されます。System → Connectors には次の説明が付きます："Coppice can't check this sign-in without using your plan. A run will show an error if you're signed out." 使えるか確かめるには **Test connection** を使います。短いチャット、計画、チケットの実行を一度ずつ試します。どの CLI でもチャットできます。Claude Code、Codex、Cursor、Kilo Code のチャットには "Coppice hasn't confirmed that {cli} stays read-only. The agent can still run commands on your computer." と表示されます。OpenCode、GitHub Copilot、Qwen Code、Kimi Code、Grok のチャットにはバナーはありません。チャットと計画では、Coppice がファイルの書き込みと shell コマンドを止めます。その CLI に自分で設定した MCP ツールは、まだ変更を加えられます。
 
 CLI の準備ができる前でもエージェントは保存できます。CLI をインストールしてサインインすれば、チケットの作業を始めます。Coppice を開いたあとで CLI をインストールした場合は、新しいコマンドを見つけられるよう Coppice を終了して開き直してください。
 

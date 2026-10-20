@@ -33,7 +33,7 @@ Coppice Beta はデスクトップアプリとして配布しています。Dock
 
 Coppice はバックグラウンドで新しいバージョンを確認します。オフにするには **Settings → Updates** を開き、**Automatic updates** をオフにします。アップデートしてもボードと設定はそのまま残ります。
 
-- **macOS：** バナーの **Download update** を選び、新しい Coppice を Applications にドラッグします。
+- **macOS：** Coppice が更新をダウンロードします。バナーの **Restart to update** を選ぶか、次に Coppice を終了したときにインストールされます。
 - **Linux：** `.deb` をインストールすると Coppice のパッケージソースが追加されるので、新しいバージョンはソフトウェアの更新でほかのアップデートと一緒に届きます。`sudo apt update && sudo apt upgrade` を実行しても構いません。
 
 <a id="windows-11-through-wsl"></a>
@@ -62,7 +62,7 @@ Windows 11 が必要です。古い Windows 10 のビルドでは Linux アプ�
    `dpkg -i` ではなく `apt` を使ってください。`apt` は Coppice に必要なものも一緒にインストールします。
 
    あとで Coppice をアップデートするには、`sudo apt update && sudo apt upgrade` を実行します。ボードと設定はそのまま残ります。
-4. 使うエージェント CLI（Claude Code、Codex、Cursor、OpenCode、Kilo Code）を Ubuntu にインストールします。CLI と git へのサインインも Ubuntu で行います。
+4. 使うエージェント CLI（Claude Code、Codex、Cursor、OpenCode、Kilo Code、GitHub Copilot、Qwen Code、Kimi Code、Grok）を Ubuntu にインストールします。CLI と git へのサインインも Ubuntu で行います。
 5. Windows のスタートメニュー（Ubuntu の下）から Coppice を起動するか、Ubuntu で `coppice` を実行します。
 
    CLI に Not on your PATH と表示されたら、Ubuntu で `coppice` を実行して Coppice を起動してください。
@@ -78,7 +78,7 @@ WSL は Windows の PATH を Ubuntu に追加するので、Coppice が Windows 
 2. ディスク上にすでにあるローカルの git チェックアウトを指定します。
 3. **エージェント CLI をつなぐ。** エージェントを作るときにエージェント CLI を選ぶと、Coppice がそれをオンにします。それぞれ **Ready**、**Found, not signed in**、**Not on your PATH** のどれかが表示されます。まずはいつもどおりの方法で、ターミナルで CLI にサインインしてください。
 
-   Kilo Code は **Kilo Code — Installed** と表示されます。System → Connectors には次の説明が付きます："Coppice can't check this sign-in without using your plan. A run will show an error if you're signed out."（Coppice はあなたのプランを使わずにこのサインインを確認できません。サインアウトしていると実行時にエラーが表示されます。）
+   Kilo Code、GitHub Copilot、Qwen Code、Kimi Code、Grok は **Installed**（例：**Kilo Code — Installed**）と表示されます。System → Connectors には次の説明が付きます："Coppice can't check this sign-in without using your plan. A run will show an error if you're signed out."（Coppice はあなたのプランを使わずにこのサインインを確認できません。サインアウトしていると実行時にエラーが表示されます。）
 
    あとでコネクタをオフにするには、System → Connectors のトグルを使うか、Coppice の `config.toml` でそのコネクタに `enabled = false` を設定します。
 

@@ -72,7 +72,7 @@ enabled = false
 
 The switch in **System → Connectors** writes the same line.
 
-Kilo Code stays off until you turn it on. Coppice can't check its sign-in for free.
+Kilo Code, GitHub Copilot, Qwen Code, Kimi Code and Grok stay off until you turn them on. Coppice can't check their sign-in for free.
 
 ## `[agent]`
 
@@ -93,7 +93,7 @@ Ids: `claude-code`, `codex`, `cursor`, `opencode`, `kilo-code`. Each table is op
 | `enabled` | bool | not set: on if the CLI is signed in | Turns the connector on or off. |
 | `model_providers` | list of strings | `[]` | Model providers for this connector. Filled in when you turn it on. |
 | `run_timeout_secs` | integer | `1800` for OpenCode, `600` for others | Seconds before a run on this connector fails. |
-| `command` | string | `agent` (Cursor), `codex`, `opencode`, `kilo` | The CLI binary to run. Claude Code always runs `claude` and has no `command`. |
+| `command` | string | `cursor-agent` (Cursor), `codex`, `opencode`, `kilo` | The CLI binary to run. Claude Code always runs `claude` and has no `command`. |
 
 OpenCode only:
 

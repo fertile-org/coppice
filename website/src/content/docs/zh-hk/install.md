@@ -33,7 +33,7 @@ Coppice Beta 以桌面應用的形式釋出。不需要 Docker，不需要伺服
 
 Coppice 會在後台檢查新版本。如果想關閉，開啓 **Settings → Updates**（設定 → 更新），關掉 **Automatic updates**（自動更新）。更新後，你的看板和設定都會保留。
 
-- **macOS：** 在橫幅中選擇 **Download update**（下載更新），然後把新的 Coppice 拖進“應用程式”資料夾。
+- **macOS：** Coppice 會替你下載更新。在橫幅中選擇 **Restart to update**（重新啓動以更新），或者在你下次結束 Coppice 時自動安裝。
 - **Linux：** 安裝 `.deb` 時會新增 Coppice 的軟件源，所以新版本會和其他更新一起出現在“軟件更新器”裏；也可以執行 `sudo apt update && sudo apt upgrade`。
 
 <a id="windows-11-through-wsl"></a>
@@ -62,7 +62,7 @@ Linux x64 版本應該可以通過 WSL 在 Windows 11 上執行，但我們還�
    請用 `apt`，不要用 `dpkg -i`。`apt` 會順帶安裝 Coppice 需要的依賴。
 
    以後要更新 Coppice，執行 `sudo apt update && sudo apt upgrade`。你的看板和設定都會保留。
-4. 在 Ubuntu 中安裝你要用的代理 CLI（Claude Code、Codex、Cursor、OpenCode、Kilo Code），並在 Ubuntu 裏登入這些 CLI 和 git。
+4. 在 Ubuntu 中安裝你要用的代理 CLI（Claude Code、Codex、Cursor、OpenCode、Kilo Code、GitHub Copilot、Qwen Code、Kimi Code、Grok），並在 Ubuntu 裏登入這些 CLI 和 git。
 5. 從 Windows“開始”選單（Ubuntu 分組下）啓動 Coppice，或在 Ubuntu 中執行 `coppice`。
 
    如果某個 CLI 顯示 Not on your PATH，請在 Ubuntu 中執行 `coppice` 來啓動 Coppice。
@@ -78,7 +78,7 @@ WSL 會把 Windows 的 PATH 加到 Ubuntu 中，所以 Coppice 可能會找到�
 2. 選擇你磁碟上已有的一個本地 git 倉庫。
 3. **連線你的代理 CLI。** 建立代理時選擇你的代理 CLI，Coppice 就會啓用它。每個 CLI 都會顯示狀態：**Ready**（就緒）、**Found, not signed in**（已找到，未登入）或 **Not on your PATH**（不在 PATH 中）。請先像平常一樣在終端裏登入該 CLI。
 
-   Kilo Code 顯示為 **Kilo Code — Installed**。System → Connectors 中還會提示："Coppice can't check this sign-in without using your plan. A run will show an error if you're signed out."（不消耗你的套餐額度，Coppice 就無法檢查登入狀態；如果你已退出登入，執行時會報錯。）
+   Kilo Code、GitHub Copilot、Qwen Code、Kimi Code 和 Grok 顯示為 **Installed**（例如 **Kilo Code — Installed**）。System → Connectors 中還會提示："Coppice can't check this sign-in without using your plan. A run will show an error if you're signed out."（不消耗你的套餐額度，Coppice 就無法檢查登入狀態；如果你已退出登入，執行時會報錯。）
 
    以後要關閉某個聯結器，可以在 System → Connectors 中使用開關，或在 Coppice 的 `config.toml` 中為它設定 `enabled = false`：
 

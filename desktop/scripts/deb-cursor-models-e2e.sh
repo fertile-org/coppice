@@ -2,8 +2,8 @@
 # Install a Coppice .deb in a clean container and list Cursor models the way a
 # desktop launcher starts the app for Hung:
 #   env -i HOME PATH=/usr/bin:/bin DISPLAY SHELL=/bin/zsh
-# with ~/.zshrc prepending $HOME/.local/bin, and a fake `agent` there that
-# prints the real `agent models` list.
+# with ~/.zshrc prepending $HOME/.local/bin, and a fake `cursor-agent` there that
+# prints the real `cursor-agent models` list.
 #
 # Usage:
 #   desktop/scripts/deb-cursor-models-e2e.sh path/to/Coppice-*.deb
@@ -15,7 +15,7 @@
 #
 # Asserts model-providers includes cursor, models?refresh=true returns Auto
 # and the rest of the fixture, and a second refresh (after the server's 2s
-# coalesce window) is a real HTTP request that runs `agent` again.
+# coalesce window) is a real HTTP request that runs `cursor-agent` again.
 #
 # The same installed binary then checks `coppice-server --version`, a fresh
 # profile whose config.toml is the desktop template (no connector lines) and
@@ -89,8 +89,8 @@ export PATH="$HOME/.local/bin:$PATH"
 EOF
 chown hung:hung "${hung_home}/.zshrc"
 
-# Real `agent models` text from a Linux desktop (two spaces in "Grok 4.7  Low").
-cat >"${hung_home}/.local/bin/agent" <<'EOF'
+# Real `cursor-agent models` text from a Linux desktop (two spaces in "Grok 4.7  Low").
+cat >"${hung_home}/.local/bin/cursor-agent" <<'EOF'
 #!/bin/sh
 count_file="${HOME}/.agent-models-count"
 stdio_file="${HOME}/.agent-models-stdio"
@@ -125,8 +125,8 @@ grok-4.7-low - Grok 4.7  Low
 cursor-grok-4.6-low-fast - Grok 4.6 Low Fast
 MODELS
 EOF
-chmod 755 "${hung_home}/.local/bin/agent"
-chown hung:hung "${hung_home}/.local/bin/agent"
+chmod 755 "${hung_home}/.local/bin/cursor-agent"
+chown hung:hung "${hung_home}/.local/bin/cursor-agent"
 
 # Pre-seed before first launch. ensure_config_file never overwrites an existing
 # file, and the defaults for these dirs are relative to the process cwd, which
@@ -400,7 +400,7 @@ fi
 
 read_ready
 
-# Startup probes `agent models` once. Wait until that count stops moving.
+# Startup probes `cursor-agent models` once. Wait until that count stops moving.
 count_now() {
   if [[ -f "${count_file}" ]]; then
     cat "${count_file}"
@@ -458,7 +458,7 @@ if missing:
 print("providers:", ", ".join(ids))
 PY
 
-# Past the 2s model-list coalesce so each refresh runs `agent` again.
+# Past the 2s model-list coalesce so each refresh runs `cursor-agent` again.
 sleep 3
 
 refresh() {
@@ -557,11 +557,11 @@ for secret in ("cookie", "authorization", "coppice_session"):
 fallback = "yes" if "login shell capture fell back" in log else "no"
 program = "missing"
 for line in log.splitlines():
-    if "listed models" in line and ".local/bin/agent" in line:
+    if "listed models" in line and ".local/bin/cursor-agent" in line:
         program = line
         break
 if program == "missing":
-    sys.exit("listed-models log did not name .local/bin/agent")
+    sys.exit("listed-models log did not name .local/bin/cursor-agent")
 print(f"refresh_requests: {len(refresh)}")
 print(f"shell_fallback: {fallback}")
 print(f"program: {program}")

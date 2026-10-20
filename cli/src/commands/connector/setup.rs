@@ -2,7 +2,9 @@ use std::process::{Command, Stdio};
 
 use clap::Args;
 
-use coppice_connectors::{CLAUDE_CODE, CODEX, CURSOR, KILO_CODE, MOCK, OPENCODE};
+use coppice_connectors::{
+    CLAUDE_CODE, CODEX, COPILOT, CURSOR, GROK, KILO_CODE, KIMI, MOCK, OPENCODE, QWEN_CODE,
+};
 
 use super::registry::{binary_on_path, parse_id};
 
@@ -28,7 +30,7 @@ pub fn run(args: SetupArgs) -> anyhow::Result<()> {
 
     match id {
         CURSOR => {
-            println!("Running `agent login` — copy any URL into a browser on your machine.");
+            println!("Running `cursor-agent login` — copy any URL into a browser on your machine.");
             run_interactive(m.binary, &["login"])?;
         }
         CODEX => {
@@ -53,6 +55,21 @@ pub fn run(args: SetupArgs) -> anyhow::Result<()> {
         OPENCODE => {
             println!("Running `opencode auth login`.");
             run_interactive(m.binary, &["auth", "login"])?;
+        }
+        COPILOT => {
+            println!("Running `copilot login`.");
+            run_interactive(m.binary, &["login"])?;
+        }
+        KIMI => {
+            println!("Running `kimi login`.");
+            run_interactive(m.binary, &["login"])?;
+        }
+        GROK => {
+            println!("Running `grok login`.");
+            run_interactive(m.binary, &["login"])?;
+        }
+        QWEN_CODE => {
+            println!("Qwen Code signs in from its own screen: run `{}` in a terminal and follow it.", m.binary);
         }
         KILO_CODE => {
             println!("Kilo: try `kilo auth login` or open the TUI and use /connect.");

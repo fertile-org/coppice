@@ -244,6 +244,119 @@ pub const CODEX: RunContract = RunContract {
     plan_mode: None,
 };
 
+/// GitHub Copilot CLI over ACP (`copilot --acp`). Deny rules win over
+/// `--allow-all-tools` (Copilot's own permission docs), so a read-only run
+/// gets no prompts and no shell or file writes. Checked on 1.0.98: a denied
+/// shell command and file write did not run and the turn went on.
+pub const COPILOT: RunContract = RunContract {
+    permission_mode: PermissionMode {
+        write: &["--allow-all-tools"],
+        read_only: Some(&[
+            "--allow-all-tools",
+            "--deny-tool",
+            "shell",
+            "--deny-tool",
+            "write",
+            "--disable-builtin-mcps",
+        ]),
+        read_only_min_version: None,
+        min_version: None,
+        gate: false,
+        reason: "Write runs allow every tool so the run never waits on a prompt. Read-only runs also deny shell and write, which beats the allow, and turn off the built-in GitHub MCP server, which can act on GitHub with the user's account.",
+    },
+    leading: &[
+        flag(&["--acp"], "Agent Client Protocol on stdin and stdout."),
+        flag(&["--no-ask-user"], "No one is there to answer a question in a headless run."),
+    ],
+    trailing: &[],
+    process_cwd_is_worktree: true,
+    result_before_exit: true,
+    prompt: PromptPlace::None,
+    plan_mode: None,
+};
+
+/// Qwen Code over ACP (`qwen --acp`). Its plan mode refuses MCP tool calls
+/// (checked on 0.25.2), so planning never uses it: read-only runs remove the
+/// shell and write tools instead, which also keeps the `tool_call` bridge from
+/// reaching them.
+pub const QWEN_CODE: RunContract = RunContract {
+    permission_mode: PermissionMode {
+        write: &[
+            "--approval-mode",
+            "yolo",
+            "--exclude-tools",
+            "ask_user_question,enter_plan_mode,exit_plan_mode",
+        ],
+        read_only: Some(&[
+            "--approval-mode",
+            "yolo",
+            "--exclude-tools",
+            "ask_user_question,enter_plan_mode,exit_plan_mode,run_shell_command,write_file,edit,notebook_edit",
+        ]),
+        read_only_min_version: None,
+        min_version: None,
+        gate: false,
+        reason: "yolo so a headless run never waits; asking the user and plan mode are removed in every run. Read-only runs also remove run_shell_command, write_file, edit, and notebook_edit.",
+    },
+    leading: &[flag(&["--acp"], "Agent Client Protocol on stdin and stdout.")],
+    trailing: &[],
+    process_cwd_is_worktree: true,
+    result_before_exit: true,
+    prompt: PromptPlace::None,
+    plan_mode: None,
+};
+
+/// Kimi Code over ACP (`kimi acp`). Its mode is a session option, set to
+/// `yolo` by the connector. Read-only comes from Coppice: the client offers to
+/// handle file writes and commands, Kimi routes them there, and Coppice
+/// refuses (checked on 2.2.0).
+pub const KIMI: RunContract = RunContract {
+    permission_mode: PermissionMode {
+        write: &[],
+        read_only: None,
+        read_only_min_version: None,
+        min_version: None,
+        gate: false,
+        reason: "kimi acp takes no permission flags. The session runs in yolo mode, and read-only runs refuse the file writes and commands Kimi routes to Coppice.",
+    },
+    leading: &[flag(&["acp"], "Agent Client Protocol on stdin and stdout.")],
+    trailing: &[],
+    process_cwd_is_worktree: true,
+    result_before_exit: true,
+    prompt: PromptPlace::None,
+    plan_mode: None,
+};
+
+/// Grok over ACP (`grok agent stdio`). Agent options go between `agent` and
+/// the transport. Refusing a permission prompt cancels the turn, so every run
+/// approves prompts, and read-only runs are kept read-only another way: the
+/// connector sets `GROK_SANDBOX=read-only` (kernel-enforced, writes only to
+/// `~/.grok` and temp folders), and Grok routes shell commands to Coppice,
+/// which refuses them. File edits are not routed, so the sandbox is what stops
+/// them (checked on 1.0.62).
+pub const GROK: RunContract = RunContract {
+    permission_mode: PermissionMode {
+        write: &["--always-approve"],
+        read_only: Some(&["--always-approve"]),
+        read_only_min_version: None,
+        min_version: None,
+        gate: false,
+        reason: "Refusing a Grok permission prompt cancels the turn, so runs approve prompts. Read-only runs add GROK_SANDBOX=read-only, and Coppice refuses the shell commands Grok routes to it.",
+    },
+    leading: &[flag(&["agent"], "Run Grok without the interactive UI.")],
+    trailing: &[
+        flag(
+            &["--no-leader"],
+            "A process of its own: Grok refuses a sandbox in leader mode, and a shared leader would outlive the run.",
+        ),
+        flag(&["stdio"], "Agent Client Protocol on stdin and stdout."),
+    ],
+    process_cwd_is_worktree: true,
+    result_before_exit: true,
+    prompt: PromptPlace::None,
+    plan_mode: None,
+};
+
 pub const CURSOR: RunContract = RunContract {
     permission_mode: PermissionMode {
         write: &["--force"],

@@ -1,4 +1,6 @@
 pub mod acp;
+pub mod acp_cli;
+pub mod acp_connector;
 pub mod claude_code;
 pub mod claude_console;
 pub mod claude_hook;
@@ -194,6 +196,10 @@ pub const READ_ONLY_CAPABLE_CONNECTORS: &[&str] = &[
     coppice_connectors::MOCK,
     coppice_connectors::CLAUDE_CODE,
     coppice_connectors::OPENCODE,
+    coppice_connectors::COPILOT,
+    coppice_connectors::QWEN_CODE,
+    coppice_connectors::KIMI,
+    coppice_connectors::GROK,
 ];
 
 pub fn connector_enforces_read_only(connector: &str) -> bool {

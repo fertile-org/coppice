@@ -74,7 +74,7 @@ enabled = false
 
 **System → Connectors** 中的開關寫入的也是這一行。
 
-Kilo Code 預設關閉，需要你手動開啓。Coppice 無法免費檢查它的登入狀態。
+Kilo Code、GitHub Copilot、Qwen Code、Kimi Code 和 Grok 預設關閉，需要你手動開啓。Coppice 無法免費檢查它們的登入狀態。
 
 ## `[agent]`
 
@@ -95,7 +95,7 @@ Kilo Code 預設關閉，需要你手動開啓。Coppice 無法免費檢查它�
 | `enabled` | 布林值 | 未設定：CLI 已登入則開啓 | 開啓或關閉該聯結器。 |
 | `model_providers` | 字串列表 | `[]` | 該聯結器的模型提供商。開啓聯結器時自動填寫。 |
 | `run_timeout_secs` | 整數 | OpenCode 為 `1800`，其他為 `600` | 該聯結器上的一次執行超過多少秒算失敗。 |
-| `command` | 字串 | `agent`（Cursor）、`codex`、`opencode`、`kilo` | 要執行的 CLI 執行檔。Claude Code 始終執行 `claude`，沒有 `command`。 |
+| `command` | 字串 | `cursor-agent`（Cursor）、`codex`、`opencode`、`kilo` | 要執行的 CLI 執行檔。Claude Code 始終執行 `claude`，沒有 `command`。 |
 
 僅限 OpenCode：
 

@@ -58,7 +58,7 @@ export const pages = {
       },
       {
         title: 'No second subscription.',
-        body: 'Coppice drives the CLIs you already pay for: Claude Code, Codex, Cursor, OpenCode and Kilo Code.',
+        body: 'Coppice drives the CLIs you already pay for: Claude Code, Codex, Cursor, OpenCode, Kilo Code, GitHub Copilot, Qwen Code, Kimi Code and Grok.',
       },
     ],
     notTitle: 'What it is not',

@@ -11,7 +11,7 @@ Five steps take you from a fresh install to your first agent run. You need a loc
 On a fresh install, Coppice opens a short setup that adds your first repository, board, and starter team. You can reopen it from **System → Connectors** with **Set up workspace**.
 
 ## 1. Install a provider and sign in
-A provider is the agent CLI Coppice runs for you: Claude Code, Codex, Cursor, OpenCode or Kilo Code. Coppice doesn't install it. It finds the CLIs already on your computer.
+A provider is the agent CLI Coppice runs for you: Claude Code, Codex, Cursor, OpenCode, Kilo Code, GitHub Copilot, Qwen Code, Kimi Code or Grok. Coppice doesn't install it. It finds the CLIs already on your computer.
 
 1. Install the CLI and sign in to it in your terminal, the way you normally would.
 2. In Coppice, open **System** in the sidebar, then **Connectors**.
@@ -19,7 +19,7 @@ A provider is the agent CLI Coppice runs for you: Claude Code, Codex, Cursor, Op
 
 If it shows **Found, not signed in**, sign in to the CLI in your terminal. If it shows **Not on your PATH**, install it, or follow **Install docs** on the card. Then click **Run check**.
 
-Kilo Code shows **Installed**. Coppice can't check that sign-in without using your plan, so a run shows an error if you're signed out.
+Kilo Code, GitHub Copilot, Qwen Code, Kimi Code and Grok show **Installed**. Coppice can't check their sign-in without using your plan, so a run shows an error if you're signed out.
 
 ## 2. Set up an agent
 1. Open **Agents** in the sidebar and click **New agent**.
