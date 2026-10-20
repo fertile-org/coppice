@@ -60,7 +60,7 @@ export const pages: Pages = {
       },
       {
         title: '不用再多一份訂閲。',
-        body: 'Coppice 驅動的是你已經付費的 CLI：Claude Code、Codex、Cursor、OpenCode、Kilo Code、GitHub Copilot、Qwen Code、Kimi Code、Grok 和 Grok。',
+        body: 'Coppice 驅動的是你已經付費的 CLI：Claude Code、Codex、Cursor、OpenCode、Kilo Code、GitHub Copilot、Qwen Code、Kimi Code 和 Grok。',
       },
     ],
     notTitle: '它不是什麼',

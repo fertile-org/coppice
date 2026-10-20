@@ -28,7 +28,7 @@ You can also get every build from [GitHub Releases](https://github.com/fertile-o
 
 Coppice checks for new versions in the background. To turn this off, open **Settings → Updates** and turn off **Automatic updates**. Your boards and settings stay when you update.
 
-- **macOS:** choose **Download update** in the banner, then drag the new Coppice into Applications.
+- **macOS:** Coppice downloads the update for you. Choose **Restart to update** in the banner, or it installs the next time you quit Coppice.
 - **Linux:** installing the `.deb` adds Coppice's package source, so new versions arrive with your other updates in Software Updater, or run `sudo apt update && sudo apt upgrade`.
 
 ## Windows 11 (through WSL)

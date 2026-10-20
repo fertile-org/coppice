@@ -24,7 +24,7 @@ Coppice 是一塊用於編碼工作的看板。你寫工單，代理在各自的
 
 ## 代理
 
-Coppice 執行你已經在用的代理 CLI，例如 Claude Code、Codex、Cursor、OpenCode、Kilo Code、GitHub Copilot、Qwen Code、Kimi Code、Grok 和 Grok。每個代理都有一個角色，比如 PM、Technical Lead 或 Backend Engineer，並執行在一個 CLI 上。參見[提供商](/docs/providers)。
+Coppice 執行你已經在用的代理 CLI，例如 Claude Code、Codex、Cursor、OpenCode、Kilo Code、GitHub Copilot、Qwen Code、Kimi Code 和 Grok。每個代理都有一個角色，比如 PM、Technical Lead 或 Backend Engineer，並執行在一個 CLI 上。參見[提供商](/docs/providers)。
 
 每個代理都可以用不同的模型，即使在同一個 CLI 上也一樣。你的 PM 可以用 Claude Opus，Backend Engineer 則用 Claude Sonnet。
 

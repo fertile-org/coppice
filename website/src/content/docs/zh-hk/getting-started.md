@@ -12,7 +12,7 @@ description: "從全新安裝到第一次執行代理，只需五步。"
 <a id="1-install-a-provider-and-sign-in"></a>
 
 ## 1. 安裝提供商並登入
-提供商就是 Coppice 替你執行的代理 CLI：Claude Code、Codex、Cursor、OpenCode、Kilo Code、GitHub Copilot、Qwen Code、Kimi Code、Grok 或 Grok。Coppice 不負責安裝它們，而是查詢你電腦上已有的 CLI。
+提供商就是 Coppice 替你執行的代理 CLI：Claude Code、Codex、Cursor、OpenCode、Kilo Code、GitHub Copilot、Qwen Code、Kimi Code 或 Grok。Coppice 不負責安裝它們，而是查詢你電腦上已有的 CLI。
 
 1. 像平常一樣安裝 CLI，並在終端裏登入。
 2. 在 Coppice 側邊欄中開啓 **System**（系統），再開啓 **Connectors**（聯結器）。
@@ -20,7 +20,7 @@ description: "從全新安裝到第一次執行代理，只需五步。"
 
 如果顯示 **Found, not signed in**（已找到，未登入），請在終端裏登入該 CLI。如果顯示 **Not on your PATH**（不在 PATH 中），請安裝它，或按卡片上的 **Install docs**（安裝文件）操作。然後點選 **Run check**（執行檢查）。
 
-Kilo Code、GitHub Copilot、Qwen Code、Kimi Code、Grok 和 Grok 顯示 **Installed**（已安裝）。不消耗你的套餐額度，Coppice 就無法檢查它們的登入狀態，所以如果你已退出登入，執行時會報錯。
+Kilo Code、GitHub Copilot、Qwen Code、Kimi Code 和 Grok 顯示 **Installed**（已安裝）。不消耗你的套餐額度，Coppice 就無法檢查它們的登入狀態，所以如果你已退出登入，執行時會報錯。
 
 <a id="2-set-up-an-agent"></a>
 

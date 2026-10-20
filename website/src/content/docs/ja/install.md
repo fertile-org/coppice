@@ -33,7 +33,7 @@ Coppice Beta はデスクトップアプリとして配布しています。Dock
 
 Coppice はバックグラウンドで新しいバージョンを確認します。オフにするには **Settings → Updates** を開き、**Automatic updates** をオフにします。アップデートしてもボードと設定はそのまま残ります。
 
-- **macOS：** バナーの **Download update** を選び、新しい Coppice を Applications にドラッグします。
+- **macOS：** Coppice が更新をダウンロードします。バナーの **Restart to update** を選ぶか、次に Coppice を終了したときにインストールされます。
 - **Linux：** `.deb` をインストールすると Coppice のパッケージソースが追加されるので、新しいバージョンはソフトウェアの更新でほかのアップデートと一緒に届きます。`sudo apt update && sudo apt upgrade` を実行しても構いません。
 
 <a id="windows-11-through-wsl"></a>

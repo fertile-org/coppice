@@ -24,7 +24,7 @@ Coppice 是一块用于编码工作的看板。你写工单，智能体在各自
 
 ## 智能体
 
-Coppice 运行你已经在用的智能体 CLI，例如 Claude Code、Codex、Cursor、OpenCode、Kilo Code、GitHub Copilot、Qwen Code、Kimi Code、Grok 和 Grok。每个智能体都有一个角色，比如 PM、Technical Lead 或 Backend Engineer，并运行在一个 CLI 上。参见[提供商](/docs/providers)。
+Coppice 运行你已经在用的智能体 CLI，例如 Claude Code、Codex、Cursor、OpenCode、Kilo Code、GitHub Copilot、Qwen Code、Kimi Code 和 Grok。每个智能体都有一个角色，比如 PM、Technical Lead 或 Backend Engineer，并运行在一个 CLI 上。参见[提供商](/docs/providers)。
 
 每个智能体都可以用不同的模型，即使在同一个 CLI 上也一样。你的 PM 可以用 Claude Opus，Backend Engineer 则用 Claude Sonnet。
 
