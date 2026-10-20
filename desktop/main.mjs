@@ -10,6 +10,7 @@ import { attachMacUpdater, configureMacFeed } from './src/macUpdater.mjs';
 import { macUpdateFeed, updateBase } from './src/updateEndpoints.mjs';
 import { readUpdateBase, readUpdaterMode } from './src/readUpdaterMode.mjs';
 import { checkForUpdate } from './src/updateCheck.mjs';
+import { watchLinuxInstall } from './src/linuxInstall.mjs';
 import { bannerForUpdate, startUpdateLoop, UPDATE_INTERVAL_MS } from './src/updatePlan.mjs';
 import { readUpdateSettings, UPDATE_SETTINGS_NAME, writeUpdateSettings } from './src/updateSettings.mjs';
 import { devUserDataPath } from './src/userDataPath.mjs';
@@ -67,6 +68,8 @@ let macUpdater = null;
 let macUpdaterLoading = null;
 let macInPlaceReady = packagedMacInPlaceUpdates();
 let installingUpdate = false;
+let linuxInstalled = null;
+let linuxInstallWatch = null;
 let checkGeneration = 0;
 
 function resourcesDir() {
@@ -122,8 +125,29 @@ function publishBanner() {
       macInPlaceUpdates: macInPlaceReady,
       availability: updateAvailability,
       download: downloadState,
+      linuxInstalled,
     }),
   );
+}
+
+// apt installs outside the app. While a newer release is out, watch dpkg so the
+// banner can offer a restart once the package is on disk.
+function syncLinuxInstallWatch() {
+  if (process.platform !== 'linux' || !app.isPackaged) return;
+  const want = updateAvailability !== null && linuxInstalled === null;
+  if (want && !linuxInstallWatch) {
+    linuxInstallWatch = watchLinuxInstall({
+      currentVersion: app.getVersion(),
+      onInstalled(version) {
+        linuxInstallWatch = null;
+        linuxInstalled = version;
+        publishBanner();
+      },
+    });
+  } else if (!want && linuxInstallWatch) {
+    linuxInstallWatch.stop();
+    linuxInstallWatch = null;
+  }
 }
 
 async function ensureMacUpdater() {
@@ -177,6 +201,7 @@ async function runUpdateCheck({ manual = false } = {}) {
     downloadState = null;
     publishBanner();
   }
+  syncLinuxInstallWatch();
   return result;
 }
 
@@ -189,6 +214,8 @@ function stopUpdateChecks() {
   updateLoop?.stop();
   updateLoop = null;
   checkGeneration += 1;
+  linuxInstallWatch?.stop();
+  linuxInstallWatch = null;
 }
 
 ipcMain.handle('coppice:update-info', () => updateState);
@@ -216,6 +243,13 @@ ipcMain.handle('coppice:check-for-updates', async () => {
 });
 
 ipcMain.handle('coppice:restart-to-update', async () => {
+  if (process.platform === 'linux') {
+    // apt already replaced the files; a relaunch runs the new version.
+    if (!linuxInstalled) return;
+    app.relaunch();
+    app.quit();
+    return;
+  }
   if (!macUpdater || downloadState?.phase !== 'downloaded') return;
   quitting = true;
   stopUpdateChecks();

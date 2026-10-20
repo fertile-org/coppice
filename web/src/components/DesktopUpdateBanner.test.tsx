@@ -1,5 +1,5 @@
 import '@testing-library/jest-dom/vitest';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { DesktopUpdateInfo } from '../lib/desktop';
 import { DesktopUpdateBanner } from './DesktopUpdateBanner';
@@ -36,16 +36,45 @@ describe('DesktopUpdateBanner', () => {
     expect(container).toBeEmptyDOMElement();
   });
 
-  it('tells Linux to upgrade through apt', async () => {
+  it('shows Linux the apt command for Coppice in a dialog', async () => {
     stubBridge({ kind: 'linux', version: '9.0.0' });
+    const writeText = vi.fn(async () => undefined);
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
     render(<DesktopUpdateBanner />);
     const banner = await screen.findByRole('status');
-    expect(banner).toHaveTextContent(
-      'Coppice 9.0.0 is available. Install it from Software Updater, or run sudo apt update && sudo apt upgrade.',
-    );
-    expect(screen.getByText('sudo apt update && sudo apt upgrade').tagName).toBe('CODE');
+    expect(banner).toHaveTextContent('Coppice 9.0.0 is available.');
+    expect(banner).not.toHaveTextContent('sudo');
     expect(screen.getByRole('button', { name: 'Dismiss' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Download update' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'How to update' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Update to Coppice 9.0.0' });
+    expect(dialog).toHaveTextContent(
+      'sudo apt update && sudo apt install --only-upgrade coppice-desktop',
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Copy command' }));
+    await vi.waitFor(() =>
+      expect(writeText).toHaveBeenCalledWith(
+        'sudo apt update && sudo apt install --only-upgrade coppice-desktop',
+      ),
+    );
+    expect(await screen.findByRole('button', { name: 'Copied' })).toBeInTheDocument();
+  });
+
+  it('turns the open Linux dialog into a restart once apt has installed', async () => {
+    let push: ((info: DesktopUpdateInfo | null) => void) | undefined;
+    stubBridge({ kind: 'linux', version: '9.0.0' });
+    window.coppiceDesktop!.onUpdateInfo = (listener) => {
+      push = listener;
+      return () => {};
+    };
+    render(<DesktopUpdateBanner />);
+    fireEvent.click(await screen.findByRole('button', { name: 'How to update' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Update to Coppice 9.0.0' });
+    expect(within(dialog).queryByRole('button', { name: 'Restart Coppice' })).not.toBeInTheDocument();
+
+    push?.({ kind: 'ready', version: '9.0.0' });
+    fireEvent.click(await within(dialog).findByRole('button', { name: 'Restart Coppice' }));
+    await vi.waitFor(() => expect(window.coppiceDesktop?.restartToUpdate).toHaveBeenCalled());
   });
 
   it('offers a release-page download while macOS builds are unsigned', async () => {

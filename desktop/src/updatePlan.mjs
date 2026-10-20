@@ -2,7 +2,9 @@ export const UPDATE_INTERVAL_MS = 4 * 60 * 60 * 1000;
 
 // Signed macOS hides the banner until the zip is on disk. Anything else
 // shows as soon as a newer release exists. Downloading is not a banner.
-export function bannerForUpdate({ platform, macInPlaceUpdates, availability, download }) {
+// On Linux, a newer package already installed by apt is ready to restart into.
+export function bannerForUpdate({ platform, macInPlaceUpdates, availability, download, linuxInstalled }) {
+  if (platform === 'linux' && linuxInstalled) return { kind: 'ready', version: linuxInstalled };
   if (platform === 'darwin' && macInPlaceUpdates) {
     if (download?.phase === 'downloaded' && download.version) {
       return { kind: 'ready', version: download.version };

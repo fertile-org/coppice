@@ -12,6 +12,19 @@ test('linux banner points at apt as soon as a release is newer', () => {
   );
 });
 
+test('linux offers restart once apt has installed the newer package', () => {
+  assert.deepEqual(
+    bannerForUpdate({
+      platform: 'linux',
+      macInPlaceUpdates: false,
+      availability: available,
+      download: null,
+      linuxInstalled: '1.4.0-rc.2',
+    }),
+    { kind: 'ready', version: '1.4.0-rc.2' },
+  );
+});
+
 test('unsigned macOS offers the release page', () => {
   assert.deepEqual(
     bannerForUpdate({ platform: 'darwin', macInPlaceUpdates: false, availability: available, download: null }),
