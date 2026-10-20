@@ -41,6 +41,7 @@ describe('locale registry', () => {
       LOCALES.map((locale) => [locale.path, locale.code, locale.name]),
       [
         ['en', 'en', 'English'],
+        ['vi', 'vi', 'Tiếng Việt'],
         ['zh-cn', 'zh-CN', '简体中文'],
         ['zh-tw', 'zh-TW', '繁體中文（台灣）'],
         ['zh-hk', 'zh-HK', '繁體中文（香港）'],
@@ -71,6 +72,7 @@ describe('locale paths', () => {
     });
     assert.equal(localizedPath('zh-hk', '/docs/concepts'), '/zh-hk/docs/concepts');
     assert.equal(localizedPath('fr', '/'), '/fr');
+    assert.equal(localizedPath('vi', '/docs/install'), '/vi/docs/install');
   });
 });
 

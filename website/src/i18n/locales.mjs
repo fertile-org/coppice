@@ -4,6 +4,7 @@ export const DEFAULT_LOCALE = 'en';
 
 export const LOCALES = [
   { path: 'en', code: 'en', name: 'English' },
+  { path: 'vi', code: 'vi', name: 'Tiếng Việt' },
   { path: 'zh-cn', code: 'zh-CN', name: '简体中文' },
   { path: 'zh-tw', code: 'zh-TW', name: '繁體中文（台灣）' },
   { path: 'zh-hk', code: 'zh-HK', name: '繁體中文（香港）' },

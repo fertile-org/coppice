@@ -28,7 +28,7 @@ function isRedirect(html) {
   return /http-equiv=["']refresh["']/i.test(html) && !html.includes('data-pagefind-body');
 }
 
-const LOCALE_PATHS = ['zh-cn', 'zh-tw', 'zh-hk', 'ja', 'fr'];
+const LOCALE_PATHS = ['vi', 'zh-cn', 'zh-tw', 'zh-hk', 'ja', 'fr'];
 
 function routeOf(file) {
   const name = rel(file).replace(/\.html$/, '');

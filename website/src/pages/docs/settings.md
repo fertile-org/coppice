@@ -86,14 +86,14 @@ Kilo Code, GitHub Copilot, Qwen Code, Kimi Code and Grok stay off until you turn
 
 ## `[agent.connectors.<id>]`
 
-Ids: `claude-code`, `codex`, `cursor`, `opencode`, `kilo-code`. Each table is optional.
+Ids: `claude-code`, `codex`, `cursor`, `opencode`, `kilo-code`, `copilot`, `qwen-code`, `kimi`, `grok`. Each table is optional.
 
 | Field | Type | Default | What it does |
 | --- | --- | --- | --- |
 | `enabled` | bool | not set: on if the CLI is signed in | Turns the connector on or off. |
 | `model_providers` | list of strings | `[]` | Model providers for this connector. Filled in when you turn it on. |
 | `run_timeout_secs` | integer | `1800` for OpenCode, `600` for others | Seconds before a run on this connector fails. |
-| `command` | string | `cursor-agent` (Cursor), `codex`, `opencode`, `kilo` | The CLI binary to run. Claude Code always runs `claude` and has no `command`. |
+| `command` | string | `cursor-agent` (Cursor), `codex`, `opencode`, `kilo`, `copilot`, `qwen`, `kimi`, `grok` | The CLI binary to run. Claude Code always runs `claude` and has no `command`. |
 
 OpenCode only:
 

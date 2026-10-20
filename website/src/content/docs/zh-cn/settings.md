@@ -88,14 +88,14 @@ Kilo Code、GitHub Copilot、Qwen Code、Kimi Code 和 Grok 默认关闭，需�
 
 ## `[agent.connectors.<id>]`
 
-可用的 id：`claude-code`、`codex`、`cursor`、`opencode`、`kilo-code`。每个表都是可选的。
+可用的 id：`claude-code`、`codex`、`cursor`、`opencode`、`kilo-code`、`copilot`、`qwen-code`、`kimi`、`grok`。每个表都是可选的。
 
 | 字段 | 类型 | 默认值 | 作用 |
 | --- | --- | --- | --- |
 | `enabled` | 布尔值 | 未设置：CLI 已登录则开启 | 开启或关闭该连接器。 |
 | `model_providers` | 字符串列表 | `[]` | 该连接器的模型提供商。开启连接器时自动填写。 |
 | `run_timeout_secs` | 整数 | OpenCode 为 `1800`，其他为 `600` | 该连接器上的一次运行超过多少秒算失败。 |
-| `command` | 字符串 | `cursor-agent`（Cursor）、`codex`、`opencode`、`kilo` | 要运行的 CLI 可执行文件。Claude Code 始终运行 `claude`，没有 `command`。 |
+| `command` | 字符串 | `cursor-agent`（Cursor）、`codex`、`opencode`、`kilo`、`copilot`、`qwen`、`kimi`、`grok` | 要运行的 CLI 可执行文件。Claude Code 始终运行 `claude`，没有 `command`。 |
 
 仅限 OpenCode：
 
