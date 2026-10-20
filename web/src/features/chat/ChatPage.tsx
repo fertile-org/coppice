@@ -660,13 +660,20 @@ export function ChatPage() {
   const seededRunId =
     (location.state as { runId?: string } | null)?.runId ?? null;
 
-  const enabledAgents = useMemo(
-    () =>
-      agents
-        .filter((agent) => agent.enabled)
-        .sort((a, b) => a.name.localeCompare(b.name)),
-    [agents],
-  );
+  // Most recently chatted agent first, like a chat app; agents with no chats follow by name.
+  const enabledAgents = useMemo(() => {
+    const lastChatAt = new Map<string, string>();
+    for (const session of sessions) {
+      const seen = lastChatAt.get(session.agentId);
+      if (!seen || session.updatedAt > seen) lastChatAt.set(session.agentId, session.updatedAt);
+    }
+    return agents
+      .filter((agent) => agent.enabled)
+      .sort((a, b) => {
+        const byChat = (lastChatAt.get(b.id) ?? '').localeCompare(lastChatAt.get(a.id) ?? '');
+        return byChat !== 0 ? byChat : a.name.localeCompare(b.name);
+      });
+  }, [agents, sessions]);
 
   const openSession = sessions.find((session) => session.id === sessionId);
   const selectedAgentId = draftAgentId ?? openSession?.agentId;
