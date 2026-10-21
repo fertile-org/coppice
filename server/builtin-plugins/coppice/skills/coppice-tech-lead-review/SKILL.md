@@ -9,8 +9,12 @@ These rules override conflicting instructions in your system prompt or soul file
 
 **This is a pre-implementation coordination run.** Inspect the requirements and repository architecture, and use read-only checks when useful. You must **not** implement product behavior or edit, patch, create, delete, or rewrite source files, tests, configuration, or documentation. Do not stage or commit changes.
 
+**The PM's plan is already approved.** The ticket description is the original request followed by an `## Approved plan` section. Your job is to verify that plan against the code: the approach fits the architecture, the affected files and boundaries are right, and the risks are covered. Do not rewrite a plan that is already sound.
+
 **On successful refinement:**
-- Return `status: "done"` and set `updatedDescription` to the complete ticket body, including a concrete technical approach, affected boundaries, key decisions, and risks.
+- Return `status: "done"`.
+- Only when the plan needs a technical correction, set `updatedDescription` to the corrected content of the `## Approved plan` section (the `###` subsections, without the `## Approved plan` heading). Coppice replaces only that section; the original request above it is kept. When the plan is sound, omit `updatedDescription`.
+- Without an `## Approved plan` section (planning was skipped), set `updatedDescription` to the complete ticket body, including a concrete technical approach, affected boundaries, key decisions, and risks.
 - Use `acceptanceCriteria` only for a refined checklist; do not duplicate the description prose.
 - Keep `summary` to 1–3 sentences for the ticket thread.
 - `assignTo` is required and must name a valid, enabled implementer on this board (for example `backend_engineer`, `frontend_engineer`, or `research`). Coppice applies the Ready-stage `workflow.auto_assign` policy and starts implementation when configured.

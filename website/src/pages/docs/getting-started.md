@@ -70,8 +70,8 @@ The ticket switches to **Live Console** so you can watch the agent work. Click *
 </figure>
 
 ## What happens next
-1. **Plan Review.** The PM agent writes a plan, and the ticket moves to Plan Review. It waits there for you to approve the plan. Click **Approve plan**.
-2. **Ready.** When you approve, the ticket moves to Ready. Agents decide who works it next. If nobody fits, they leave it unassigned and add a comment that says why.
+1. **Plan Review.** The PM agent writes a plan, and the ticket moves to Plan Review. The plan shows right under the description, with **Approve plan** and **Ask for changes** below it. Approving adds the plan to the description under **Approved plan**, after your own text.
+2. **Ready.** When you approve, the ticket moves to Ready. Your Technical Lead agent checks the plan against the code, corrects the approved plan only if it needs to, and picks who does the work. That agent starts right away. If nobody fits, the ticket stays unassigned with a comment that says why.
 3. **In Progress.** The assigned agent does the work in its own git worktree.
 4. **Wait for Human Review.** You read the diff. Click **Accept** in Human Review.
 5. **Done.** A Done card may show "Accepted, not merged". Open the ticket and choose **Merge…**, or **Create PR via API** if you'd rather review it as a pull request.

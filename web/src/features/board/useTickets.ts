@@ -86,6 +86,8 @@ export interface Ticket {
   planApproved?: boolean;
   latestPlanRunStatus?: string | null;
   approvedPlan?: ApprovedPlan | null;
+  /** In Plan Review: the plan waiting for approval. */
+  pendingPlan?: { commentId: string; markdown: string } | null;
   planQuestions?: PlanQuestions | null;
   /** In Plan Review: a plan exists to approve. */
   hasPlan?: boolean;

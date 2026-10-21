@@ -207,6 +207,8 @@ where
         "/tmp/coppice-test-artifacts",
     );
     let mut config = AppConfig::load_defaults().expect("test config");
+    // Runs start only when a test asks; the auto-start helpers turn this on.
+    config.workflow.auto_start_runs = false;
     configure(&mut config);
     let skills = init_test_plugins(&mut config, &pool).await;
     let opencode_runs = AppState::test_opencode_runs();
@@ -255,6 +257,8 @@ where
         "/tmp/coppice-test-artifacts",
     );
     let mut config = AppConfig::load_defaults().expect("test config");
+    // Runs start only when a test asks; the auto-start helpers turn this on.
+    config.workflow.auto_start_runs = false;
     configure(&mut config);
     config.agent.worker_count = 1;
     let skills = init_test_plugins(&mut config, &pool).await;

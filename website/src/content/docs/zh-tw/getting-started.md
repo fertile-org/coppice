@@ -81,8 +81,8 @@ Coppice 會開啟你的新看板。
 <a id="what-happens-next"></a>
 
 ## 接下來會發生什麼
-1. **Plan Review**（計劃審查）。PM 代理寫好計劃後，工單會移到 Plan Review，等你批准計劃。點選 **Approve plan**（批准計劃）。
-2. **Ready**。你批准後，工單移到 Ready，由代理決定接下來誰來做。如果沒有合適的人選，它們會讓工單保持未指派，並留言說明原因。
+1. **Plan Review**（計劃審查）。PM 代理寫好計劃後，工單會移到 Plan Review。計劃就顯示在描述下方，下面是 **Approve plan**（批准計劃）和 **Ask for changes**（要求修改）。批准後，計劃會以 **Approved plan** 一節加到描述裡，排在你寫的內容之後。
+2. **Ready**。你批准後，工單移到 Ready。Technical Lead 代理會對照程式碼檢查計劃，只在需要時修改已批准的計劃，然後決定由誰來做。被指派的代理會立即開始。如果沒有合適的人選，工單會保持未指派，並留言說明原因。
 3. **In Progress**。被指派的代理在自己的 git worktree 中完成工作。
 4. **Wait for Human Review**（等待人工審查）。你來閱讀 diff，在 Human Review 中點選 **Accept**（接受）。
 5. **Done**。Done 卡片上可能顯示 "Accepted, not merged"（已接受，未合併）。開啟工單選擇 **Merge…**；如果你更想以 pull request 的形式審查，就選 **Create PR via API**。

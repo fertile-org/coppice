@@ -81,8 +81,8 @@ Coppice 会打开你的新看板。
 <a id="what-happens-next"></a>
 
 ## 接下来会发生什么
-1. **Plan Review**（计划审核）。PM 智能体写好计划后，工单会移到 Plan Review，等你批准计划。点击 **Approve plan**（批准计划）。
-2. **Ready**。你批准后，工单移到 Ready，由智能体决定接下来谁来做。如果没有合适的人选，它们会让工单保持未指派，并留言说明原因。
+1. **Plan Review**（计划审核）。PM 智能体写好计划后，工单会移到 Plan Review。计划就显示在描述下方，下面是 **Approve plan**（批准计划）和 **Ask for changes**（要求修改）。批准后，计划会以 **Approved plan** 一节加到描述里，排在你写的内容之后。
+2. **Ready**。你批准后，工单移到 Ready。Technical Lead 智能体会对照代码检查计划，只在需要时修改已批准的计划，然后决定由谁来做。被指派的智能体会立即开始。如果没有合适的人选，工单会保持未指派，并留言说明原因。
 3. **In Progress**。被指派的智能体在自己的 git worktree 中完成工作。
 4. **Wait for Human Review**（等待人工审核）。你来阅读 diff，在 Human Review 中点击 **Accept**（接受）。
 5. **Done**。Done 卡片上可能显示 "Accepted, not merged"（已接受，未合并）。打开工单选择 **Merge…**；如果你更想以 pull request 的形式审核，就选 **Create PR via API**。

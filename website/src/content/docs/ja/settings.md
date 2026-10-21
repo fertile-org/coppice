@@ -109,7 +109,7 @@ OpenCode の `command` を変えた場合も再起動が必要です。
 
 | フィールド | 型 | 既定値 | 内容 |
 | --- | --- | --- | --- |
-| `auto_start_runs` | bool | `false` | true の場合、リポジトリのあるチケットにエージェントを割り当てると実行が始まります。false の場合は **Run agent** をクリックします。 |
+| `auto_start_runs` | bool | `true` | true の場合、リポジトリのあるチケットにエージェントを割り当てると実行が始まります。false の場合は **Run agent** をクリックします。 |
 | `auto_assign.default` | bool | `true` | 個別の設定がないすべてのステータスで自動割り当てをオンにします。 |
 | `auto_assign.<status>` | bool | `backlog`：`false`。ほか：`default` に従う | 1 つのステータスについて自動割り当てをオンまたはオフにします。 |
 | `auto_split.default` | bool | `false` | 個別の設定がないすべてのステータスで自動分割をオンにします。 |

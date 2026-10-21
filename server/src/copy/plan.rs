@@ -354,6 +354,20 @@ pub fn plan_template() -> String {
 
 pub const PREVIOUS_PLAN_HEADING: &str = "## Previous plan";
 
+/// Description section an approved plan is written into. The text above it is
+/// the original description; the Tech Lead may revise only this section.
+pub const APPROVED_PLAN_SECTION: &str = "## Approved plan";
+
+/// The plan as it goes under [`APPROVED_PLAN_SECTION`]: the text after
+/// `## Plan`, so a revision's `### Changes requested` preamble is left out.
+pub fn approved_plan_section_body(plan_comment: &str) -> String {
+    let body = plan_comment.trim();
+    match body.find(PLAN_HEADING) {
+        Some(start) => body[start + PLAN_HEADING.len()..].trim().to_string(),
+        None => body.to_string(),
+    }
+}
+
 /// Heading a revised plan opens with, one line per change request.
 pub const REVISED_CHANGES_HEADING: &str = "### Changes requested";
 
@@ -401,6 +415,13 @@ pub fn plan_instructions(revision: Option<&PlanRevision<'_>>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn approved_plan_section_drops_the_heading_and_a_revision_preamble() {
+        let plan = "### Changes requested\n1. Done.\n\n## Plan\n\n### Approach\nShip it.";
+        assert_eq!(approved_plan_section_body(plan), "### Approach\nShip it.");
+        assert_eq!(approved_plan_section_body("  Just text. "), "Just text.");
+    }
 
     #[test]
     fn wraps_a_plain_summary_in_the_plan_format() {

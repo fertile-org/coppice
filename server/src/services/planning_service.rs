@@ -23,6 +23,7 @@ use crate::domain::workflow::{is_pm_identity, is_tech_lead_identity, JOB_TYPE_PL
 use crate::sandbox::permissive::PROFILE_ID;
 use crate::services::agent_service::AgentService;
 use crate::services::comment_service::CommentService;
+use crate::services::result_contract::upsert_markdown_section;
 use crate::services::review_capacity::{ReviewCapacityError, ReviewCapacityService};
 use crate::services::run_service::{RunError, RunService};
 use crate::services::ticket_service::{TicketError, TicketService};
@@ -379,6 +380,9 @@ impl<'a> PlanningService<'a> {
             return Ok(());
         }
 
+        self.write_plan_into_description(ticket_id, &ticket.ticket.description, &plan.body)
+            .await?;
+
         CommentService::new(self.pool)
             .create(
                 ticket_id,
@@ -392,6 +396,36 @@ impl<'a> PlanningService<'a> {
             .await?;
 
         self.start_tech_lead(ticket_id).await?;
+        Ok(())
+    }
+
+    /// Keep the original description and put the approved plan under its own
+    /// section, so the plan is the ticket's refined spec. Not a human edit, so
+    /// the content version (and the approval) stays as it is.
+    async fn write_plan_into_description(
+        &self,
+        ticket_id: Uuid,
+        description: &str,
+        plan_body: &str,
+    ) -> Result<(), PlanError> {
+        let section = plan::approved_plan_section_body(plan_body);
+        if section.is_empty() {
+            return Ok(());
+        }
+        let updated = upsert_markdown_section(description, plan::APPROVED_PLAN_SECTION, &section);
+        TicketService::new(self.pool)
+            .update_fields(
+                ticket_id,
+                None,
+                Some(&updated),
+                None,
+                None,
+                None,
+                None,
+                None,
+                false,
+            )
+            .await?;
         Ok(())
     }
 

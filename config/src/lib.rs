@@ -561,7 +561,9 @@ fn default_context_output_tokens() -> usize {
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct WorkflowConfig {
-    #[serde(default)]
+    /// Start the next agent's run when work is handed to it. On by default;
+    /// `auto_start_runs = false` leaves each run to a human.
+    #[serde(default = "default_true")]
     pub auto_start_runs: bool,
     #[serde(default)]
     pub auto_assign: AutoAssignConfig,
@@ -598,7 +600,7 @@ fn default_true() -> bool {
 impl Default for WorkflowConfig {
     fn default() -> Self {
         Self {
-            auto_start_runs: false,
+            auto_start_runs: true,
             auto_assign: AutoAssignConfig {
                 default: true,
                 backlog: Some(false),
@@ -1222,7 +1224,12 @@ macro_rules! cli_connector_config {
     };
 }
 
-cli_connector_config!(CopilotConnectorConfig, CopilotProviderConfig, "copilot", 600);
+cli_connector_config!(
+    CopilotConnectorConfig,
+    CopilotProviderConfig,
+    "copilot",
+    600
+);
 cli_connector_config!(QwenCodeConnectorConfig, QwenCodeProviderConfig, "qwen", 600);
 cli_connector_config!(KimiConnectorConfig, KimiProviderConfig, "kimi", 600);
 cli_connector_config!(GrokConnectorConfig, GrokProviderConfig, "grok", 600);
@@ -1919,6 +1926,15 @@ mod tests {
         assert!(!cfg.auto_split.effective("backlog"));
         assert!(!cfg.auto_split.effective("ready"));
         assert!(!cfg.auto_split.effective("in_progress"));
+    }
+
+    #[test]
+    fn workflow_auto_start_runs_is_on_unless_turned_off() {
+        assert!(WorkflowConfig::default().auto_start_runs);
+        let cfg: WorkflowConfig = toml::from_str("").unwrap();
+        assert!(cfg.auto_start_runs);
+        let cfg: WorkflowConfig = toml::from_str("auto_start_runs = false\n").unwrap();
+        assert!(!cfg.auto_start_runs);
     }
 
     #[test]

@@ -77,4 +77,18 @@ describe('PlanReviewActions', () => {
     expect(screen.getByRole('button', { name: PLAN_COPY.approvePlan })).toBeVisible();
     expect(screen.getByRole('button', { name: PLAN_COPY.askForChanges })).toBeVisible();
   });
+  it('shows the plan right above Approve plan and Ask for changes', () => {
+    wrap(
+      <PlanReviewActions
+        ticketId="t1"
+        boardId="b1"
+        plan={'## Plan\n\n### Approach\nMove the settings into a drawer.'}
+      />,
+    );
+    const plan = screen.getByTestId('pending-plan');
+    expect(plan).toHaveTextContent('Move the settings into a drawer.');
+    const approve = screen.getByRole('button', { name: PLAN_COPY.approvePlan });
+    expect(plan.compareDocumentPosition(approve) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.getByText(PLAN_COPY.approveAddsToDescription)).toBeInTheDocument();
+  });
 });

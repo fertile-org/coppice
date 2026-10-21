@@ -109,7 +109,7 @@ Kilo Code、GitHub Copilot、Qwen Code 和 Kimi Code 只要被 Coppice 找到就
 
 | 字段 | 类型 | 默认值 | 作用 |
 | --- | --- | --- | --- |
-| `auto_start_runs` | 布尔值 | `false` | 为 true 时，给已关联仓库的工单指派智能体会自动开始运行。为 false 时，需要你点击 **Run agent**。 |
+| `auto_start_runs` | 布尔值 | `true` | 为 true 时，给已关联仓库的工单指派智能体会自动开始运行。为 false 时，需要你点击 **Run agent**。 |
 | `auto_assign.default` | 布尔值 | `true` | 为所有没有单独设置的状态开启自动指派。 |
 | `auto_assign.<status>` | 布尔值 | `backlog`：`false`；其他：使用 `default` | 为某个状态开启或关闭自动指派。 |
 | `auto_split.default` | 布尔值 | `false` | 为所有没有单独设置的状态开启自动拆分。 |

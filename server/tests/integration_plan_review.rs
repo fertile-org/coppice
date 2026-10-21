@@ -403,6 +403,9 @@ async fn approve_posts_the_note_and_the_review_checklist() {
     assert_eq!(message(stale).await, PLAN_STALE);
 
     post_plan(&app, &ticket_id, pm_uuid, pool, &cookie, &csrf).await;
+    let in_review = common::get_ticket(&app, &ticket_id, &cookie, &csrf).await;
+    assert_eq!(in_review["pendingPlan"]["markdown"], CANONICAL_PLAN.trim());
+    let original = in_review["description"].as_str().unwrap().to_string();
     let approve = app
         .clone()
         .oneshot(common::json_request(
@@ -418,6 +421,16 @@ async fn approve_posts_the_note_and_the_review_checklist() {
     let approved = common::get_ticket(&app, &ticket_id, &cookie, &csrf).await;
     assert_eq!(approved["status"], "ready");
     assert!(approved["assigneeAgentId"].is_null());
+    assert!(approved.get("pendingPlan").is_none());
+    // The original text stays first; the plan follows as the approved plan.
+    let description = approved["description"].as_str().unwrap();
+    assert!(description.starts_with(original.trim()), "{description}");
+    assert!(
+        description.contains("## Approved plan\n\n### Approach"),
+        "{description}"
+    );
+    assert!(!description.contains("## Plan\n"), "{description}");
+    assert!(approved["planApproved"].as_bool().unwrap(), "{approved}");
     let notes = comments(&app, &ticket_id, &cookie, &csrf).await;
     assert!(notes.iter().any(|note| note["body"] == PLAN_APPROVED_NOTE));
     assert!(notes.iter().any(|note| note["body"] == NO_TECH_LEAD));
