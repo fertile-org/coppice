@@ -29,7 +29,7 @@ jobs:
       - name: Install zsh and psql
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends zsh postgresql-client
       - name: Test
-        run: cargo nextest run --workspace --features embedded-test-db --profile ci
+        run: cargo nextest run --workspace --features embedded-test-db --profile ci --build-jobs 4
       - name: Clippy
         run: |
           cargo clippy --workspace -- -D warnings

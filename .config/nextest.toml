@@ -1,9 +1,35 @@
 # Each test runs in its own process with its own cloned database, so the
-# suite is safe to run in parallel. See docs/testing.md.
+# suite is safe to run in parallel. Caps are sized for a 16 GB machine.
+# Override with --profile low-mem (or NEXTEST_PROFILE=low-mem) on ~8 GB hosts.
+# See docs/testing.md.
 
 [profile.default]
 # Flag tests slower than 30s; kill them after 2 minutes so a hang fails fast.
 slow-timeout = { period = "30s", terminate-after = 4 }
+# Unbounded (num-cpus) concurrency OOMs 16 GB hosts (measured ~22 GiB peak on 16 cores).
+test-threads = 8
 
 [profile.ci]
 fail-fast = false
+slow-timeout = { period = "30s", terminate-after = 4 }
+test-threads = 8
+
+[profile.low-mem]
+# ~8 GB machines: two tests at a time, one heavy binary at a time.
+fail-fast = false
+slow-timeout = { period = "30s", terminate-after = 4 }
+test-threads = 2
+
+# Git clones, MCP servers, knowledge fixtures, and workflow workers.
+# Keep these override filters in sync across default / ci / low-mem.
+[[profile.default.overrides]]
+filter = 'binary(/^(integration_plugins|integration_repo_git|integration_ticket_git|integration_knowledge|integration_knowledge_compaction|integration_workflow|integration_mcp|integration_desktop)$/)'
+threads-required = 4
+
+[[profile.ci.overrides]]
+filter = 'binary(/^(integration_plugins|integration_repo_git|integration_ticket_git|integration_knowledge|integration_knowledge_compaction|integration_workflow|integration_mcp|integration_desktop)$/)'
+threads-required = 4
+
+[[profile.low-mem.overrides]]
+filter = 'binary(/^(integration_plugins|integration_repo_git|integration_ticket_git|integration_knowledge|integration_knowledge_compaction|integration_workflow|integration_mcp|integration_desktop)$/)'
+threads-required = 2

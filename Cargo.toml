@@ -12,3 +12,7 @@ opt-level = 3
 
 [profile.dev.package.blake2]
 opt-level = 3
+
+# Smaller rustc/linker RSS and test binaries. Backtraces still get line numbers.
+[profile.test]
+debug = "line-tables-only"
