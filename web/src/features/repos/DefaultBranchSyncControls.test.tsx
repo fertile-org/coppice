@@ -73,6 +73,12 @@ function baseStatus(
   };
 }
 
+const DIRTY_PULL =
+  'Main repository has uncommitted changes — commit or stash before pulling';
+const DIRTY_PUSH =
+  'Main repository has uncommitted changes — commit or stash before pushing';
+const NO_REMOTE = 'Set repository remote URL in Settings → Repositories';
+
 describe('DefaultBranchSyncControls', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -112,29 +118,133 @@ describe('DefaultBranchSyncControls', () => {
     ).toBeVisible();
   });
 
-  it('disables Pull and surfaces pullDisabledReason when canPull is false', () => {
+  it('shows one uncommitted-changes line for a dirty tree', () => {
     render(
       <DefaultBranchSyncControls
         repo={repo}
         statusOverride={baseStatus({
+          workingTreeClean: false,
           canPull: false,
-          pullDisabledReason:
-            'Main repository has uncommitted changes — commit or stash before pulling',
+          canPush: false,
+          pullDisabledReason: DIRTY_PULL,
+          pushDisabledReason: DIRTY_PUSH,
         })}
       />,
     );
 
     const pull = screen.getByRole('button', { name: 'Pull' });
     expect(pull).toBeDisabled();
-    expect(pull).toHaveAttribute(
+    expect(pull).toHaveAttribute('title', DIRTY_PULL);
+    expect(screen.getByRole('button', { name: 'Push to remote' })).toHaveAttribute(
       'title',
-      'Main repository has uncommitted changes — commit or stash before pulling',
+      DIRTY_PUSH,
     );
+    expect(screen.getAllByText(/uncommitted changes/)).toHaveLength(1);
+    expect(screen.getByText(/working tree dirty/)).toBeVisible();
+  });
+
+  it('keeps the push-disabled reason next to the dirty-tree line', () => {
+    render(
+      <DefaultBranchSyncControls
+        repo={repo}
+        statusOverride={baseStatus({
+          workingTreeClean: false,
+          pushEnabled: false,
+          canPull: false,
+          canPush: false,
+          pullDisabledReason: DIRTY_PULL,
+          pushDisabledReason: 'git.push_enabled is false in server config',
+        })}
+      />,
+    );
+
+    expect(screen.getAllByText(/uncommitted changes/)).toHaveLength(1);
     expect(
-      screen.getByText(
-        'Main repository has uncommitted changes — commit or stash before pulling',
-      ),
+      screen.getByText('git.push_enabled is false in server config'),
     ).toBeVisible();
+  });
+
+  it('does not repeat not-behind / not-ahead when in sync', () => {
+    render(
+      <DefaultBranchSyncControls
+        repo={repo}
+        statusOverride={baseStatus({
+          aheadCount: 0,
+          behindCount: 0,
+          canPush: false,
+          pushDisabledReason: 'Local default branch is not ahead of remote',
+        })}
+      />,
+    );
+
+    expect(screen.getByText('in sync with remote')).toBeVisible();
+    expect(screen.queryByText(/not behind remote/)).toBeNull();
+    expect(screen.queryByText(/not ahead of remote/)).toBeNull();
+    expect(screen.getByRole('button', { name: 'Pull' })).toHaveAttribute(
+      'title',
+      'Local default branch is not behind remote',
+    );
+  });
+
+  it('shows "Fetch remote first" once when there is no remote ref', () => {
+    render(
+      <DefaultBranchSyncControls
+        repo={repo}
+        statusOverride={baseStatus({
+          remoteSha: null,
+          aheadCount: null,
+          behindCount: null,
+          canPush: false,
+          canPull: false,
+          pushDisabledReason: 'Fetch remote first',
+          pullDisabledReason: 'Fetch remote first',
+        })}
+      />,
+    );
+
+    expect(screen.getAllByText('Fetch remote first')).toHaveLength(1);
+  });
+
+  it('shows the missing remote URL reason once', () => {
+    render(
+      <DefaultBranchSyncControls
+        repo={repo}
+        statusOverride={baseStatus({
+          remoteSha: null,
+          aheadCount: null,
+          behindCount: null,
+          canFetch: false,
+          canPush: false,
+          canPull: false,
+          fetchDisabledReason: NO_REMOTE,
+          pushDisabledReason: NO_REMOTE,
+          pullDisabledReason: NO_REMOTE,
+        })}
+      />,
+    );
+
+    expect(screen.getAllByText(NO_REMOTE)).toHaveLength(1);
+  });
+
+  it('shows both hints when diverged', () => {
+    render(
+      <DefaultBranchSyncControls
+        repo={repo}
+        statusOverride={baseStatus({
+          aheadCount: 1,
+          behindCount: 1,
+          canPush: false,
+          canPull: false,
+          pullDisabledReason:
+            'Local default branch has diverged from remote — refuse pull without merge or rebase',
+          pushDisabledReason:
+            'Local default branch is behind or diverged from remote — use Pull when strictly behind, or resolve divergence outside Coppice',
+        })}
+      />,
+    );
+
+    expect(screen.getByText(/has diverged from remote/)).toBeVisible();
+    expect(screen.getByText(/use Pull when strictly behind/)).toBeVisible();
   });
 
   it('disables Push and surfaces pushDisabledReason when canPush is false', () => {
@@ -142,6 +252,7 @@ describe('DefaultBranchSyncControls', () => {
       <DefaultBranchSyncControls
         repo={repo}
         statusOverride={baseStatus({
+          pushEnabled: false,
           canPush: false,
           pushDisabledReason: 'git.push_enabled is false in server config',
           aheadCount: 0,
