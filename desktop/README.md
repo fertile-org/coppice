@@ -52,6 +52,12 @@ Packaged apps keep their data in `Coppice` (`~/.config/Coppice`, `~/Library/Appl
 Tagged releases are built by `.github/workflows/release.yml` — see
 [docs/development.md](../docs/development.md#desktop-release-tag-and-publish).
 
+## Memory
+
+`scripts/mem-snapshot.sh [PID]` (repo root) prints RSS and PSS for a running app, grouped into Electron, `coppice-server`, Postgres, connector CLIs and their descendants. It finds the Electron main process by name when no PID is given; a `coppice-server` PID also works. `VERBOSE=1` lists every process. On Linux, use the PSS total — summed RSS counts Postgres shared buffers and Electron's shared libraries once per process.
+
+The bundled Postgres is sized for one user (`MEMORY_SETTINGS` in `server/src/desktop/postgres.rs`: 32MB shared buffers, 20 connections). The desktop pool uses `min_connections` 0 and closes unused connections after 60 s, so request-burst backends exit. Job workers still poll every 500 ms, so a handful of backends stay up while the app is open.
+
 ## Replace keys
 
 In the desktop app, **Tools → Backup → Replace keys** writes new `session_secret` and `master_key` files, a new admin password, and new Postgres passwords for the bootstrap superuser (`pg_password`) and the application role (`pg_app_password`). Everyone is signed out. Tokens this install can still read are re-encrypted. Tokens already marked for re-entry stay that way until they are pasted again.

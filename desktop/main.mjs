@@ -14,6 +14,7 @@ import { watchLinuxInstall } from './src/linuxInstall.mjs';
 import { bannerForUpdate, startUpdateLoop, UPDATE_INTERVAL_MS } from './src/updatePlan.mjs';
 import { readUpdateSettings, UPDATE_SETTINGS_NAME, writeUpdateSettings } from './src/updateSettings.mjs';
 import { devUserDataPath } from './src/userDataPath.mjs';
+import { disposeWindow } from './src/disposeWindow.mjs';
 import { createErrorWindow, createMainWindow, createSplashWindow } from './src/windows.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -280,10 +281,6 @@ ipcMain.handle('coppice:error-action', (event, action) => {
 });
 
 
-function closeWindow(win) {
-  if (win && !win.isDestroyed()) win.close();
-}
-
 /** Opens the new window before closing the old ones so `window-all-closed` never fires in between. */
 function showError(message, lines) {
   errorDetails = { message, lines };
@@ -291,14 +288,14 @@ function showError(message, lines) {
   errorWindow = createErrorWindow();
   splashWindow = null;
   mainWindow = null;
-  previous.forEach(closeWindow);
+  previous.forEach(disposeWindow);
 }
 
 function openMainWindow(url) {
   const win = createMainWindow({ origin: new URL(url).origin });
   mainWindow = win;
   win.once('ready-to-show', () => {
-    closeWindow(splashWindow);
+    disposeWindow(splashWindow);
     splashWindow = null;
   });
   win.on('closed', () => {
@@ -333,7 +330,7 @@ async function launchServer() {
   const previousError = errorWindow;
   errorWindow = null;
   showSplash();
-  closeWindow(previousError);
+  disposeWindow(previousError);
 
   let current = null;
   let url;

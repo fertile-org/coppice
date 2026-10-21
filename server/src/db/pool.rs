@@ -5,13 +5,26 @@ use sqlx::PgPool;
 
 use coppice_migrations::run_migrations;
 
-pub async fn connect_and_migrate(database_url: &str) -> anyhow::Result<PgPool> {
-    let pool = PgPoolOptions::new()
-        .max_connections(10)
-        .connect(database_url)
-        .await?;
+pub const APP_POOL_MAX_CONNECTIONS: u32 = 10;
+/// Desktop pool connections close after this long unused, so each one's
+/// Postgres backend exits while the app sits idle.
+const DESKTOP_IDLE_TIMEOUT: Duration = Duration::from_secs(60);
+
+pub async fn connect_and_migrate(database_url: &str, desktop: bool) -> anyhow::Result<PgPool> {
+    let pool = app_pool_options(desktop).connect(database_url).await?;
     migrate_pool(&pool).await?;
     Ok(pool)
+}
+
+fn app_pool_options(desktop: bool) -> PgPoolOptions {
+    let options = PgPoolOptions::new().max_connections(APP_POOL_MAX_CONNECTIONS);
+    if desktop {
+        options
+            .min_connections(0)
+            .idle_timeout(DESKTOP_IDLE_TIMEOUT)
+    } else {
+        options
+    }
 }
 
 /// Integration / lib DB tests: short timeouts so a missing Postgres fails in ~2s, not 30s.
@@ -114,4 +127,27 @@ pub async fn truncate_test_workspace(pool: &PgPool) -> anyhow::Result<()> {
     .execute(pool)
     .await?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn desktop_pool_lets_idle_connections_close() {
+        let options = app_pool_options(true);
+        assert_eq!(options.get_max_connections(), APP_POOL_MAX_CONNECTIONS);
+        assert_eq!(options.get_min_connections(), 0);
+        assert_eq!(options.get_idle_timeout(), Some(DESKTOP_IDLE_TIMEOUT));
+    }
+
+    #[test]
+    fn server_pool_keeps_its_defaults() {
+        let options = app_pool_options(false);
+        assert_eq!(options.get_max_connections(), APP_POOL_MAX_CONNECTIONS);
+        assert_eq!(
+            options.get_idle_timeout(),
+            PgPoolOptions::new().get_idle_timeout()
+        );
+    }
 }
