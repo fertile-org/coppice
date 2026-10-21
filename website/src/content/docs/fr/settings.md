@@ -151,7 +151,7 @@ Chaque nombre et intervalle ci-dessus doit être supérieur à 0.
 | --- | --- | --- | --- |
 | `author_name` | string | `Coppice` | Nom d’auteur des commits créés par Coppice. |
 | `author_email` | string | `coppice@localhost` | E-mail d’auteur de ces commits. |
-| `push_enabled` | bool | `false` | Autorise Coppice à pousser des branches et à ouvrir des pull requests. |
+| `push_enabled` | bool | `false` (`true` dans l'application de bureau) | Autorise Coppice à pousser des branches et à ouvrir des pull requests. |
 
 ## `[plugins]`
 
