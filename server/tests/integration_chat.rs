@@ -297,6 +297,7 @@ async fn conversation_profile_starts_kilo_read_only_chat() {
         command: "kilo-not-installed".into(),
         model_providers: vec![],
         run_timeout_secs: 30,
+        ..KiloCodeProviderConfig::default()
     });
     let err = provider
         .run(AgentRunInput {

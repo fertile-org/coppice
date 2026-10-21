@@ -81,7 +81,7 @@ Kilo Code、GitHub Copilot、Qwen Code、Kimi Code は、Coppice が見つけた
 | フィールド | 型 | 既定値 | 内容 |
 | --- | --- | --- | --- |
 | `worktrees_path` | string | `<data-dir>/worktrees` | チケットごとの git worktree を置くフォルダー。 |
-| `worker_count` | integer | `2` | 同時に動くエージェントのジョブの数。1 未満は 1 として扱います。 |
+| `worker_count` | integer | `8` | 全コネクタ合わせたエージェントジョブの上限。1 未満は 1 として扱います。既存の `worker_count = 2` は古い上限のままなので、他コネクタを止めることがあります。上げるか行を削除してください。 |
 | `health_check_interval_secs` | integer | `60` | エージェントのヘルスチェックの間隔（秒）。10 未満は 10 として扱います。 |
 
 `<data-dir>` は `config.toml` があるフォルダーです。Linux と WSL では `~/.config/Coppice`、macOS では `~/Library/Application Support/Coppice` です。
@@ -95,6 +95,7 @@ ID：`claude-code`、`codex`、`cursor`、`opencode`、`kilo-code`、`copilot`�
 | `enabled` | bool | 未設定：CLI がサインイン済みならオン | コネクタをオンまたはオフにします。 |
 | `model_providers` | list of strings | `[]` | このコネクタのモデルプロバイダー。オンにしたときに入力されます。 |
 | `run_timeout_secs` | integer | すべてのコネクタで `1800` | このコネクタでの実行が失敗とみなされるまでの秒数。 |
+| `max_concurrent_runs` | integer | `2` | このコネクタが同時に動かせるジョブ数。超過分は queued のまま、空きが出たら古い順に始まります。1 未満は 1 です。 |
 | `command` | string | `cursor-agent`（Cursor）、`codex`、`opencode`、`kilo`、`copilot`、`qwen`、`kimi`、`grok` | 実行する CLI のバイナリ。Claude Code は常に `claude` を実行し、`command` はありません。 |
 
 OpenCode のみ：

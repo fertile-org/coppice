@@ -88,7 +88,7 @@ Kilo Code, GitHub Copilot, Qwen Code và Kimi Code được bật ngay khi Coppi
 | Trường | Kiểu | Mặc định | Tác dụng |
 | --- | --- | --- | --- |
 | `worktrees_path` | string | `<data-dir>/worktrees` | Thư mục nơi mỗi ticket có git worktree riêng. |
-| `worker_count` | integer | `2` | Số job agent chạy cùng lúc. Giá trị dưới 1 được tính là 1. |
+| `worker_count` | integer | `8` | Trần tổng số job agent trên mọi connector. Giá trị dưới 1 được tính là 1. Config cũ còn `worker_count = 2` giữ trần cũ và vẫn có thể chặn connector khác cho đến khi bạn tăng hoặc xóa dòng đó. |
 | `health_check_interval_secs` | integer | `60` | Số giây giữa các lần kiểm tra sức khỏe agent. Giá trị dưới 10 được tính là 10. |
 
 `<data-dir>` là thư mục chứa `config.toml`: `~/.config/Coppice` trên Linux và WSL, và `~/Library/Application Support/Coppice` trên macOS.
@@ -102,6 +102,7 @@ Các id: `claude-code`, `codex`, `cursor`, `opencode`, `kilo-code`, `copilot`, `
 | `enabled` | bool | không đặt: bật nếu CLI đã đăng nhập | Bật hoặc tắt connector. |
 | `model_providers` | list of strings | `[]` | Các nhà cung cấp model cho connector này. Được điền khi bạn bật nó. |
 | `run_timeout_secs` | integer | `1800` với mọi connector | Chạy quá số giây này trên connector đó thì báo lỗi. |
+| `max_concurrent_runs` | integer | `2` | Số job connector này được chạy cùng lúc. Job thừa giữ `queued` và chạy theo thứ tự cũ nhất khi có chỗ. Dưới 1 tính là 1. |
 | `command` | string | `cursor-agent` (Cursor), `codex`, `opencode`, `kilo`, `copilot`, `qwen`, `kimi`, `grok` | File chạy của CLI. Claude Code luôn chạy `claude` và không có `command`. |
 
 Chỉ dành cho OpenCode:

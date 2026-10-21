@@ -209,6 +209,10 @@ where
     let mut config = AppConfig::load_defaults().expect("test config");
     // Runs start only when a test asks; the auto-start helpers turn this on.
     config.workflow.auto_start_runs = false;
+    // Production default is 8. Tests that spawn workers without an explicit
+    // count must stay at 1 so they do not claim jobs from other binaries on
+    // the shared embedded database.
+    config.agent.worker_count = 1;
     configure(&mut config);
     let skills = init_test_plugins(&mut config, &pool).await;
     let opencode_runs = AppState::test_opencode_runs();
@@ -226,6 +230,7 @@ where
         tools: gateway.tools,
         plugin_mcp: gateway.plugin_mcp,
         connector_probes: Arc::new(ConnectorProbes::new()),
+        connector_slots: Arc::new(coppice_server::workers::connector_slots::ConnectorSlots::new()),
         database_url: AppState::share_database_url(&config.database.url),
         config,
         db: Some(pool),
@@ -278,6 +283,7 @@ where
         tools: gateway.tools,
         plugin_mcp: gateway.plugin_mcp,
         connector_probes: Arc::new(ConnectorProbes::new()),
+        connector_slots: Arc::new(coppice_server::workers::connector_slots::ConnectorSlots::new()),
         database_url: AppState::share_database_url(&config.database.url),
         config,
         db: Some(pool),
@@ -328,6 +334,7 @@ where
         tools: gateway.tools,
         plugin_mcp: gateway.plugin_mcp,
         connector_probes: Arc::new(ConnectorProbes::new()),
+        connector_slots: Arc::new(coppice_server::workers::connector_slots::ConnectorSlots::new()),
         database_url: AppState::share_database_url(&config.database.url),
         config,
         db: Some(pool),

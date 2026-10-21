@@ -23,7 +23,7 @@ max_upload_bytes = 10485760
 
 [agent]
 worktrees_path = "./data/worktrees"
-worker_count = 2
+worker_count = 8
 health_check_interval_secs = 60
 
 [agent.connectors.opencode]

@@ -81,7 +81,7 @@ Kilo Code、GitHub Copilot、Qwen Code 和 Kimi Code 只要被 Coppice 找到就
 | 字段 | 类型 | 默认值 | 作用 |
 | --- | --- | --- | --- |
 | `worktrees_path` | 字符串 | `<data-dir>/worktrees` | 存放 worktree 的文件夹，每个工单各有一个 git worktree。 |
-| `worker_count` | 整数 | `2` | 同时运行的智能体任务数。小于 1 时按 1 处理。 |
+| `worker_count` | 整数 | `8` | 所有连接器合计的智能体任务上限。小于 1 时按 1 处理。旧配置里的 `worker_count = 2` 仍会挡住其他连接器，直到你提高或删掉这一行。 |
 | `health_check_interval_secs` | 整数 | `60` | 智能体健康检查的间隔秒数。小于 10 时按 10 处理。 |
 
 `<data-dir>` 是存放 `config.toml` 的文件夹：Linux 和 WSL 上为 `~/.config/Coppice`，macOS 上为 `~/Library/Application Support/Coppice`。
@@ -95,6 +95,7 @@ Kilo Code、GitHub Copilot、Qwen Code 和 Kimi Code 只要被 Coppice 找到就
 | `enabled` | 布尔值 | 未设置：CLI 已登录则开启 | 开启或关闭该连接器。 |
 | `model_providers` | 字符串列表 | `[]` | 该连接器的模型提供商。开启连接器时自动填写。 |
 | `run_timeout_secs` | 整数 | 所有连接器均为 `1800` | 该连接器上的一次运行超过多少秒算失败。 |
+| `max_concurrent_runs` | 整数 | `2` | 该连接器同时可跑的任务数。多出来的保持排队，空出槽位后按最旧优先启动。小于 1 时按 1 处理。 |
 | `command` | 字符串 | `cursor-agent`（Cursor）、`codex`、`opencode`、`kilo`、`copilot`、`qwen`、`kimi`、`grok` | 要运行的 CLI 可执行文件。Claude Code 始终运行 `claude`，没有 `command`。 |
 
 仅限 OpenCode：

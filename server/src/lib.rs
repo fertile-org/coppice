@@ -55,6 +55,9 @@ pub struct AppState {
     pub tools: Arc<crate::mcp::registry::ToolRegistry>,
     pub plugin_mcp: Arc<crate::mcp::proxy::McpServerPool>,
     pub connector_probes: Arc<crate::services::connector_probe_service::ConnectorProbes>,
+    /// Shared per-connector in-flight counts. `AppState` is `Clone`; workers
+    /// must see the same counters.
+    pub connector_slots: Arc<crate::workers::connector_slots::ConnectorSlots>,
 }
 
 impl AppState {
@@ -70,7 +73,8 @@ impl AppState {
     }
 
     pub fn set_database_url(&self, url: String) {
-        *self.database_url
+        *self
+            .database_url
             .write()
             .unwrap_or_else(|err| err.into_inner()) = url;
     }
@@ -228,10 +232,12 @@ pub async fn test_state() -> Arc<AppState> {
         attachments: AppState::attachment_store_from_config(&config),
         connectors: AppState::connectors_runtime(&config, opencode_runs.clone()),
         agent_health: Arc::new(crate::services::agent_health::AgentHealthRegistry::new()),
-        run_streams: Arc::new(crate::sessions::run_registry::RunStreamRegistry::with_artifacts(
-            config.storage.artifacts_dir.clone(),
-            config.storage.effective_run_console_max_bytes(),
-        )),
+        run_streams: Arc::new(
+            crate::sessions::run_registry::RunStreamRegistry::with_artifacts(
+                config.storage.artifacts_dir.clone(),
+                config.storage.effective_run_console_max_bytes(),
+            ),
+        ),
         event_bus: Arc::new(crate::events::bus::EventBus::new()),
         opencode_runs,
         agent_templates: AppState::load_agent_templates(),
@@ -242,6 +248,7 @@ pub async fn test_state() -> Arc<AppState> {
         connector_probes: Arc::new(
             crate::services::connector_probe_service::ConnectorProbes::new(),
         ),
+        connector_slots: Arc::new(crate::workers::connector_slots::ConnectorSlots::new()),
         config: config.clone(),
         database_url: AppState::share_database_url(&config.database.url),
         db: None,

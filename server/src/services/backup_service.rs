@@ -272,7 +272,10 @@ fn is_importable_connector_setting(path: &str) -> bool {
     if parts.next().is_some() || id.is_empty() {
         return false;
     }
-    matches!(field, "enabled" | "model_providers" | "run_timeout_secs")
+    matches!(
+        field,
+        "enabled" | "model_providers" | "run_timeout_secs" | "max_concurrent_runs"
+    )
 }
 
 fn remove_secret_keys(table: &mut toml_edit::Table) {
@@ -1127,6 +1130,19 @@ ready = true
             );
         }
         assert_eq!(std::fs::read_to_string(&config_path).unwrap(), local);
+    }
+
+    #[test]
+    fn importable_connector_settings_include_max_concurrent_runs() {
+        assert!(is_importable_connector_setting(
+            "agent.connectors.cursor.max_concurrent_runs"
+        ));
+        assert!(is_importable_connector_setting(
+            "agent.connectors.claude-code.run_timeout_secs"
+        ));
+        assert!(!is_importable_connector_setting(
+            "agent.connectors.cursor.command"
+        ));
     }
 
     #[test]

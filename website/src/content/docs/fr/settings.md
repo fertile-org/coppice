@@ -81,7 +81,7 @@ Kilo Code, GitHub Copilot, Qwen Code et Kimi Code sont activés dès que Coppice
 | Champ | Type | Défaut | Rôle |
 | --- | --- | --- | --- |
 | `worktrees_path` | string | `<data-dir>/worktrees` | Dossier où chaque ticket a son propre worktree git. |
-| `worker_count` | integer | `2` | Nombre de tâches d’agents exécutées en même temps. En dessous de 1, vaut 1. |
+| `worker_count` | integer | `8` | Plafond total de tâches d’agents, tous connecteurs confondus. En dessous de 1, vaut 1. Un ancien `worker_count = 2` garde l’ancien plafond et peut bloquer les autres connecteurs tant que vous ne l’augmentez pas ou ne le retirez pas. |
 | `health_check_interval_secs` | integer | `60` | Secondes entre deux vérifications de santé des agents. En dessous de 10, vaut 10. |
 
 `<data-dir>` est le dossier qui contient `config.toml` : `~/.config/Coppice` sous Linux et WSL, et `~/Library/Application Support/Coppice` sous macOS.
@@ -95,6 +95,7 @@ Ids : `claude-code`, `codex`, `cursor`, `opencode`, `kilo-code`, `copilot`, `qwe
 | `enabled` | bool | non défini : activé si la CLI est connectée | Active ou désactive le connecteur. |
 | `model_providers` | list of strings | `[]` | Fournisseurs de modèles pour ce connecteur. Remplis quand vous l’activez. |
 | `run_timeout_secs` | integer | `1800` pour tous les connecteurs | Secondes avant qu’un lancement sur ce connecteur échoue. |
+| `max_concurrent_runs` | integer | `2` | Nombre de tâches que ce connecteur peut exécuter en même temps. Les autres restent en file et partent de la plus ancienne. En dessous de 1, vaut 1. |
 | `command` | string | `cursor-agent` (Cursor), `codex`, `opencode`, `kilo`, `copilot`, `qwen`, `kimi`, `grok` | Le binaire de CLI à lancer. Claude Code lance toujours `claude` et n’a pas de `command`. |
 
 OpenCode uniquement :
