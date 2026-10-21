@@ -1650,3 +1650,73 @@ async fn drag_into_in_review_with_auto_assign_off_assigns_nobody() {
     .await;
     assert!(runs.is_empty());
 }
+
+#[tokio::test]
+async fn drag_into_in_review_during_an_active_run_starts_no_second_agent() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+
+    let (state, app, cookie, csrf, _env) =
+        common::bootstrap_and_login_with_auto_start_workers().await;
+    let pool = state.db.as_ref().expect("db pool");
+    let board_id = common::create_test_board(&app, &cookie, &csrf).await;
+    let (_git_dir, local_path) = common::create_temp_git_checkout();
+    let repo_id =
+        common::register_test_repo(&app, &local_path.display().to_string(), &cookie, &csrf).await;
+    let tech_lead_id =
+        common::create_agent_with_preset_key(&app, "tech_lead", "Busy Tech Lead", &cookie, &csrf)
+            .await;
+    let engineer_id = common::create_agent_with_preset_key(
+        &app,
+        "backend_engineer",
+        "Busy Backend Engineer",
+        &cookie,
+        &csrf,
+    )
+    .await;
+
+    let ticket_id = common::create_test_ticket(&app, &board_id, &cookie, &csrf).await;
+    common::set_ticket_repo(&app, &ticket_id, &repo_id, &cookie, &csrf).await;
+    let ticket_uuid = uuid::Uuid::parse_str(&ticket_id).expect("ticket UUID");
+    let engineer_uuid = uuid::Uuid::parse_str(&engineer_id).expect("engineer UUID");
+    sqlx::query("UPDATE tickets SET status = 'in_progress', assignee_agent_id = $2 WHERE id = $1")
+        .bind(ticket_uuid)
+        .bind(engineer_uuid)
+        .execute(pool)
+        .await
+        .expect("engineer owns the ticket");
+    sqlx::query(
+        r#"
+        INSERT INTO agent_runs (
+            id, ticket_id, agent_id, job_type, status, sandbox_profile_id,
+            context_profile, started_at
+        )
+        VALUES ($1, $2, $3, 'work_on_ticket', 'running', 'permissive-default', 'full', now())
+        "#,
+    )
+    .bind(uuid::Uuid::new_v4())
+    .bind(ticket_uuid)
+    .bind(engineer_uuid)
+    .execute(pool)
+    .await
+    .expect("active engineer run");
+
+    let moved = patch_status(&app, &ticket_id, "in_review", &cookie, &csrf).await;
+    assert_eq!(moved["status"], "in_review");
+    assert_eq!(moved["assigneeAgentId"], engineer_id);
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    let runs = common::poll_runs_until_count(
+        &app,
+        &ticket_id,
+        &cookie,
+        &csrf,
+        "only the engineer run",
+        Duration::from_secs(1),
+        |_| true,
+    )
+    .await;
+    assert!(!has_work_run(&runs, &tech_lead_id), "{runs:?}");
+    assert_eq!(runs.len(), 1);
+}

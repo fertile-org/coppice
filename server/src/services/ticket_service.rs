@@ -1038,7 +1038,7 @@ impl<'a> TicketService<'a> {
         Ok(rows.into_iter().collect())
     }
 
-    async fn ticket_has_active_run(&self, ticket_id: Uuid) -> Result<bool, TicketError> {
+    pub(crate) async fn ticket_has_active_run(&self, ticket_id: Uuid) -> Result<bool, TicketError> {
         sqlx::query_scalar::<_, bool>(
             r#"
             SELECT EXISTS(

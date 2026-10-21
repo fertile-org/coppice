@@ -32,14 +32,18 @@ impl<'a> StageOwnerService<'a> {
         Self { pool, workflow }
     }
 
-    /// A person moved the ticket into In Review or In QA.
+    /// A person moved the ticket into In Review or In QA. A ticket with a
+    /// queued or running run is left alone: that run finishes first and the
+    /// workflow gate hands off from there.
     pub async fn on_entered_review_stage(&self, ticket_id: Uuid) -> Result<(), PlanError> {
-        let ticket = TicketService::new(self.pool).get(ticket_id).await?.ticket;
+        let tickets = TicketService::new(self.pool);
+        let ticket = tickets.get(ticket_id).await?.ticket;
         let status = ticket.status;
         if !is_owned_stage(status)
             || ticket.repo_id.is_none()
             || !self.workflow.auto_start_runs
             || !self.workflow.auto_assign.effective(status_to_str(status))
+            || tickets.ticket_has_active_run(ticket_id).await?
             || PlanningService::new(self.pool)
                 .is_split_parent(ticket_id)
                 .await?
