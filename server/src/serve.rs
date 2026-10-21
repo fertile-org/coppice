@@ -309,7 +309,8 @@ pub async fn serve(
             }
         }
     }
-    let db = crate::db::connect_and_migrate(&config.database.url).await?;
+    let db =
+        crate::db::connect_and_migrate(&config.database.url, config.auth.desktop_mode).await?;
     if let Some(secrets_dir) = crate::services::secret_rotation::desktop_secrets_dir(
         config.auth.desktop_mode,
         options.config_path.as_deref(),

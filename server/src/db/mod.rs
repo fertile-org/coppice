@@ -8,6 +8,7 @@ mod test_embed;
 
 pub use pool::{
     connect_and_migrate, connect_and_migrate_for_tests, shared_test_pool, truncate_test_workspace,
+    APP_POOL_MAX_CONNECTIONS,
 };
 
 #[cfg(feature = "embedded-test-db")]

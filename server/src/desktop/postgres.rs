@@ -19,6 +19,19 @@ const LOOPBACK_SETTINGS: [(&str, &str); 2] = [
     ("listen_addresses", "127.0.0.1"),
     ("unix_socket_directories", ""),
 ];
+/// Memory sizing for a single-user desktop. Stock Postgres sizes for a shared
+/// server (128MB shared buffers, 100 connection slots); the app pool tops out
+/// at 10 connections and the database stays small. Passed on the command line
+/// so they hold whatever `postgresql.conf` says.
+const MEMORY_SETTINGS: [(&str, &str); 6] = [
+    ("shared_buffers", "32MB"),
+    ("max_connections", "20"),
+    ("work_mem", "4MB"),
+    ("maintenance_work_mem", "32MB"),
+    ("autovacuum_max_workers", "1"),
+    // No subscriptions on the desktop; 0 also skips the launcher process.
+    ("max_logical_replication_workers", "0"),
+];
 /// Collector file names. The logs sweep treats a file newer than this age as
 /// the one Postgres may still have open (`postgres_files::OPEN_WINDOW`).
 const LOG_FILENAME: &str = "postgresql-%Y-%m-%d_%H%M%S.log";
@@ -434,12 +447,12 @@ impl DesktopPostgres {
 }
 
 /// `pg_ctl -o` value. Command-line settings beat every config file (includes,
-/// `postgresql.auto.conf`), so loopback and log rotation hold whatever the
+/// `postgresql.auto.conf`), so loopback, memory and log rotation hold whatever the
 /// files say. pg_ctl passes this through `/bin/sh`, where an unquoted `name=`
 /// is an empty value.
 fn server_options(port: u16, log_directory: &Path) -> String {
     let mut options = format!("-p {port}");
-    for (key, value) in LOOPBACK_SETTINGS {
+    for (key, value) in LOOPBACK_SETTINGS.iter().chain(&MEMORY_SETTINGS) {
         options.push_str(&format!(" -c {key}={value}"));
     }
     for setting in logging_settings(log_directory) {
@@ -1174,6 +1187,36 @@ mod tests {
         );
         let quoted = server_options(1, Path::new("/tmp/Coppice's logs"));
         assert!(quoted.contains("'/tmp/Coppice'\\''s logs'"), "{quoted}");
+    }
+
+    #[test]
+    fn server_options_size_postgres_for_a_single_user_desktop() {
+        let options = server_options(5433, Path::new("/tmp/logs"));
+        for expected in [
+            " -c shared_buffers=32MB",
+            " -c max_connections=20",
+            " -c work_mem=4MB",
+            " -c maintenance_work_mem=32MB",
+            " -c autovacuum_max_workers=1",
+            " -c max_logical_replication_workers=0",
+        ] {
+            assert!(options.contains(expected), "{expected} missing: {options}");
+        }
+    }
+
+    #[test]
+    fn desktop_max_connections_leave_room_beyond_the_app_pool() {
+        let max_connections: u32 = MEMORY_SETTINGS
+            .iter()
+            .find(|(key, _)| *key == "max_connections")
+            .map(|(_, value)| value.parse().unwrap())
+            .unwrap();
+        // superuser_reserved_connections (3) + provisioning, backups and
+        // key rotation connect beside the app pool.
+        assert!(
+            max_connections >= crate::db::APP_POOL_MAX_CONNECTIONS + 3 + 4,
+            "{max_connections}"
+        );
     }
 
     #[test]

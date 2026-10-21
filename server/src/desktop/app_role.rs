@@ -707,7 +707,7 @@ mod embedded_tests {
         .expect("provision fresh database");
         let url = app_database_url(port, APP_PASSWORD, FRESH_DB).unwrap();
         assert!(url.contains("postgres://coppice_app:"));
-        crate::db::connect_and_migrate(&url)
+        crate::db::connect_and_migrate(&url, true)
             .await
             .expect("migrations as application role");
     }
