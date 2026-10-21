@@ -3,6 +3,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { TicketMarkdown } from '../../components/TicketMarkdown';
 import { apiFetch, parseApiErrorMessage } from '../../lib/api';
 import { ticketsQueryKey, type PlanQuestions } from '../board/useTickets';
+import { agentRunsQueryKey } from '../tickets/useAgentRuns';
 import { commentsQueryKey, ticketQueryKey } from '../tickets/useTicket';
 import { useRegisterShortcut } from '../keyboard/useKeyboard';
 import { approveTicketPlan } from './approvePlan';
@@ -138,6 +139,8 @@ export function PlanReviewActions({
     void queryClient.invalidateQueries({ queryKey: ticketQueryKey(ticketId) });
     void queryClient.invalidateQueries({ queryKey: commentsQueryKey(ticketId) });
     void queryClient.invalidateQueries({ queryKey: ticketsQueryKey(boardId) });
+    // Approve and plan changes can queue the Tech Lead or the planner.
+    void queryClient.invalidateQueries({ queryKey: agentRunsQueryKey(ticketId) });
   }
 
   const approve = useMutation({

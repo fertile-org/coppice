@@ -367,6 +367,10 @@ export function useAssignAgent(ticketId: string) {
       void queryClient.invalidateQueries({
         queryKey: ['tickets', ticket.boardId],
       });
+      // Auto-start may have queued a run; the drawer's Stop reads this list.
+      void queryClient.invalidateQueries({
+        queryKey: agentRunsQueryKey(ticketId),
+      });
     },
   });
 }
@@ -560,6 +564,10 @@ export function useUpdateTicketStatus(ticketId: string) {
     mutationFn: (body: UpdateStatusInput) => patchTicketStatus(ticketId, body),
     onSuccess: (ticket) => {
       queryClient.setQueryData(ticketQueryKey(ticketId), ticket);
+      // Entering Ready can start the Tech Lead.
+      void queryClient.invalidateQueries({
+        queryKey: agentRunsQueryKey(ticketId),
+      });
     },
   });
 }

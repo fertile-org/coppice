@@ -982,6 +982,7 @@ async fn update_status(
             .get(ticket_id)
             .await
             .map_err(map_update_status_error)?;
+        publish_ticket_and_runs(&state, pool, &ticket).await;
     }
     if previous.ticket.status != ticket.ticket.status
         && crate::domain::workflow::is_owned_stage(ticket.ticket.status)
@@ -1031,7 +1032,7 @@ async fn start_plan_run(
         .get(ticket_id)
         .await
         .map_err(map_update_status_error)?;
-    crate::events::publish_ticket_updated(&state.event_bus, &ticket);
+    publish_ticket_and_runs(&state, pool, &ticket).await;
     Ok(Json(ticket_to_response(ticket)))
 }
 
@@ -1049,6 +1050,7 @@ async fn approve_plan(
         .get(ticket_id)
         .await
         .map_err(map_update_status_error)?;
+    publish_ticket_and_runs(&state, pool, &ticket).await;
     Ok(Json(
         with_approved_plan(&state, pool, ticket)
             .await
@@ -1071,6 +1073,7 @@ async fn ask_for_plan_changes(
         .get(ticket_id)
         .await
         .map_err(map_update_status_error)?;
+    publish_ticket_and_runs(&state, pool, &ticket).await;
     Ok(Json(ticket_to_response(ticket)))
 }
 
@@ -1094,7 +1097,7 @@ async fn send_plan_answers(
         .get(ticket_id)
         .await
         .map_err(map_update_status_error)?;
-    crate::events::publish_ticket_updated(&state.event_bus, &ticket);
+    publish_ticket_and_runs(&state, pool, &ticket).await;
     Ok(Json(ticket_to_response(ticket)))
 }
 
@@ -1121,7 +1124,7 @@ async fn verify_parent(
         .get(ticket_id)
         .await
         .map_err(map_update_status_error)?;
-    crate::events::publish_ticket_updated(&state.event_bus, &ticket);
+    publish_ticket_and_runs(&state, pool, &ticket).await;
     Ok(Json(ticket_to_response(ticket)))
 }
 
@@ -1283,10 +1286,12 @@ async fn assign_agent(
     if state.config.workflow.auto_start_runs
         && ticket.ticket.assignee_agent_id.is_some()
         && ticket.ticket.repo_id.is_some()
-        && RunService::new(pool).start_run(ticket_id).await.is_ok()
     {
-        ticket = ticket_svc.get(ticket_id).await.map_err(map_error)?;
-        crate::events::publish_ticket_updated(&state.event_bus, &ticket);
+        if let Ok(run) = RunService::new(pool).start_run(ticket_id).await {
+            ticket = ticket_svc.get(ticket_id).await.map_err(map_error)?;
+            crate::events::publish_ticket_updated(&state.event_bus, &ticket);
+            crate::events::publish_run_queued(&state.event_bus, &run);
+        }
     }
 
     Ok(Json(ticket_to_response(ticket)))
@@ -1351,6 +1356,7 @@ async fn run_agent(
         .start_run(ticket_id)
         .await
         .map_err(map_run_error_response)?;
+    crate::events::publish_run_queued(&state.event_bus, &run);
     if let Ok(updated) = TicketService::new(pool).get(ticket_id).await {
         if updated.ticket.status != ticket.ticket.status {
             crate::events::publish_ticket_updated(&state.event_bus, &updated);
@@ -1626,8 +1632,19 @@ async fn final_approve(
 
 async fn publish_ticket_state(state: &AppState, pool: &sqlx::PgPool, ticket_id: Uuid) {
     if let Ok(ticket) = TicketService::new(pool).get(ticket_id).await {
-        crate::events::publish_ticket_updated(&state.event_bus, &ticket);
+        publish_ticket_and_runs(state, pool, &ticket).await;
     }
+}
+
+/// `ticket.updated` plus `agent_run.started` for each active run, so a run
+/// queued by the service call shows up before a worker picks it up.
+async fn publish_ticket_and_runs(
+    state: &AppState,
+    pool: &sqlx::PgPool,
+    ticket: &crate::services::ticket_service::TicketWithDisplay,
+) {
+    crate::events::publish_ticket_updated(&state.event_bus, ticket);
+    crate::events::publish_ticket_active_runs(&state.event_bus, pool, ticket.ticket.id).await;
 }
 
 async fn ticket_git_info(
@@ -1850,6 +1867,7 @@ async fn resolve_ticket_conflict(
     )
     .await
     .map_err(map_resolve_error)?;
+    crate::events::publish_run_queued(&state.event_bus, &outcome.run);
 
     if let Some(comment_id) = outcome.new_comment_id {
         state.event_bus.publish(AppEvent::CommentCreated {
@@ -2007,6 +2025,7 @@ async fn approve_splits(
     let mut responses = Vec::with_capacity(children.len());
     for child in children {
         let enriched = ticket_svc.get(child.id).await.map_err(map_error)?;
+        crate::events::publish_ticket_active_runs(&state.event_bus, pool, child.id).await;
         responses.push(ticket_to_response(enriched));
     }
     Ok(Json(responses))

@@ -26,6 +26,40 @@ pub fn publish_ticket_updated(bus: &EventBus, ticket: &TicketWithDisplay) {
     });
 }
 
+/// Announce a ticket run the moment it is committed, while it may still sit
+/// `queued` behind busy workers. The worker sends `running` on pickup. Call
+/// this only after the run's transaction commits: an early event makes the
+/// client refetch a runs list that does not have the run yet.
+pub fn publish_run_queued(bus: &EventBus, run: &AgentRun) {
+    let Some(ticket_id) = run.ticket_id else {
+        return;
+    };
+    if !matches!(run.status, RunStatus::Queued | RunStatus::Running) {
+        return;
+    }
+    bus.publish(AppEvent::AgentRunStarted {
+        run_id: run.id,
+        ticket_id,
+        agent_id: run.agent_id,
+        status: run_status_to_str(run.status).into(),
+    });
+}
+
+/// Announce a ticket's active runs after a service call that may have queued
+/// one without handing it back (planning, Ready hand-offs, splits).
+pub async fn publish_ticket_active_runs(bus: &EventBus, pool: &PgPool, ticket_id: Uuid) {
+    match RunService::new(pool).active_for_ticket(ticket_id).await {
+        Ok(runs) => {
+            for run in &runs {
+                publish_run_queued(bus, run);
+            }
+        }
+        Err(err) => {
+            tracing::warn!(error = %err, %ticket_id, "failed to load active runs to publish");
+        }
+    }
+}
+
 pub async fn publish_run_finished(
     state: &AppState,
     pool: &PgPool,

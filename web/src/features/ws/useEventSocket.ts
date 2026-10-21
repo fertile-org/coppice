@@ -84,6 +84,10 @@ function dispatchMessage(raw: string) {
       void queryClient.invalidateQueries({
         queryKey: ['ticket', msg.ticket_id],
       });
+      // A status change often comes with a run queued for the ticket.
+      void queryClient.invalidateQueries({
+        queryKey: ['agent-runs', msg.ticket_id],
+      });
     }
   }
 

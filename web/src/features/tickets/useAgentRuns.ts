@@ -4,7 +4,7 @@ import {
   useQueryClient,
   type QueryClient,
 } from '@tanstack/react-query';
-import { apiFetch } from '../../lib/api';
+import { ApiError, apiFetch } from '../../lib/api';
 import {
   agentRunSchema,
   type AgentRun,
@@ -63,8 +63,19 @@ export function shouldPollRunForReconciliation(run: AgentRun): boolean {
   return isActiveRunStatus(run.status) || run.endedAt == null;
 }
 
-export function agentRunsRefetchInterval(runs: AgentRun[] | undefined): number | false {
+/**
+ * Poll while a run is active. `ticketSaysActive` is the ticket's
+ * `hasActiveRun`: when it disagrees with a cached list that has no active
+ * run, keep polling until the list catches up.
+ */
+export function agentRunsRefetchInterval(
+  runs: AgentRun[] | undefined,
+  ticketSaysActive = false,
+): number | false {
   if (runs?.some(shouldPollRunForReconciliation)) {
+    return 3000;
+  }
+  if (ticketSaysActive) {
     return 3000;
   }
   return false;
@@ -76,15 +87,24 @@ function invalidateRunRelated(queryClient: QueryClient, ticketId: string) {
   void queryClient.invalidateQueries({ queryKey: commentsQueryKey(ticketId) });
 }
 
-export function useAgentRuns(ticketId: string | undefined) {
+export function useAgentRuns(
+  ticketId: string | undefined,
+  options: { ticketSaysActive?: boolean } = {},
+) {
+  const ticketSaysActive = options.ticketSaysActive ?? false;
   return useQuery({
     queryKey: agentRunsQueryKey(ticketId ?? ''),
     queryFn: () => fetchAgentRuns(ticketId!),
     enabled: Boolean(ticketId),
     refetchInterval: (query) => {
-      return agentRunsRefetchInterval(query.state.data);
+      return agentRunsRefetchInterval(query.state.data, ticketSaysActive);
     },
   });
+}
+
+/** run-agent answers 409 when the ticket already has an active run. */
+export function isActiveRunConflict(error: unknown): boolean {
+  return error instanceof ApiError && error.status === 409;
 }
 
 export function patchAgentRunStatusInCache(
@@ -129,6 +149,14 @@ export function useRunAgent(ticketId: string) {
       upsertAgentRunInCache(queryClient, ticketId, run);
       invalidateRunRelated(queryClient, ticketId);
       void queryClient.invalidateQueries({ queryKey: ['tickets'] });
+    },
+    // The cached runs list missed a run the server already has: refetch so
+    // the drawer shows Stop instead of waiting for a reload.
+    onError: (error) => {
+      if (isActiveRunConflict(error)) {
+        invalidateRunRelated(queryClient, ticketId);
+        void queryClient.invalidateQueries({ queryKey: ['tickets'] });
+      }
     },
   });
 }

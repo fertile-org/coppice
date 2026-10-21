@@ -367,6 +367,28 @@ impl<'a> RunService<'a> {
         Ok(row.as_ref().map(row_to_run))
     }
 
+    /// Queued or running runs on a ticket, oldest first.
+    pub async fn active_for_ticket(&self, ticket_id: Uuid) -> Result<Vec<AgentRun>, RunError> {
+        let rows = sqlx::query(
+            r#"
+            SELECT
+                id, ticket_id, agent_id, job_type, status, sandbox_profile_id,
+                worktree_path, branch_name, error_message, session_id,
+                context_profile, trigger_comment_id,
+                started_at, ended_at, created_at
+            FROM agent_runs
+            WHERE ticket_id = $1
+              AND status IN ('queued', 'running')
+            ORDER BY created_at
+            "#,
+        )
+        .bind(ticket_id)
+        .fetch_all(self.pool)
+        .await?;
+
+        Ok(rows.iter().map(row_to_run).collect())
+    }
+
     pub async fn list_for_ticket(
         &self,
         ticket_id: Uuid,

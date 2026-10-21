@@ -29,6 +29,10 @@ describe('useEventSocket dispatch', () => {
 
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['tickets'] });
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['ticket', 'ticket-123'] });
+    // A run queued with the status change must show up without a reload.
+    expect(invalidateSpy).toHaveBeenCalledWith({
+      queryKey: ['agent-runs', 'ticket-123'],
+    });
   });
 
   it('invalidates agent runs on agent_run.started', async () => {

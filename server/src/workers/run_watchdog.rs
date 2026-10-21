@@ -141,6 +141,7 @@ async fn interrupt_run(state: &AppState, pool: &PgPool, run_id: Uuid, reason: &s
     match mark_run_interrupted(state, run_id, reason).await {
         Ok(interrupted) => {
             RunOrchestrator::new(pool, &state.config.workflow)
+                .with_event_bus(&state.event_bus)
                 .handle_terminal_run(&interrupted)
                 .await;
         }
