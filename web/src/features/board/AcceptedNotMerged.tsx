@@ -69,6 +69,7 @@ export function AcceptedNotMerged({
       await resolveConflict.mutateAsync({
         baseBranch: conflict.baseBranch,
         files: conflict.files,
+        operation: conflict.operation,
       });
       setConflict(null);
       setOpen(false);

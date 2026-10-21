@@ -292,6 +292,80 @@ describe('Done card accepted branch', () => {
     ).toBe(false);
   });
 
+  it('asks the assignee and invalidates the board tickets query', async () => {
+    const invalidateSpy = vi.spyOn(QueryClient.prototype, 'invalidateQueries');
+    apiFetch.mockImplementation(async (path: string, init?: RequestInit) => {
+      if (String(path).endsWith('/git-info')) {
+        return jsonResponse({
+          ticketBranch: 'agent/accepted',
+          worktreePath: '/tmp/wt',
+          worktreeExists: true,
+          defaultBranch: 'main',
+          branches: ['main'],
+        });
+      }
+      if (
+        String(path) === `/api/tickets/${ticketId}/merge-branch` &&
+        init?.method === 'POST'
+      ) {
+        throw new ApiError(
+          400,
+          JSON.stringify({
+            message:
+              "Couldn't merge into main because these files conflict: README.md. Nothing was changed.",
+            conflict: {
+              operation: 'merge',
+              baseBranch: 'main',
+              files: ['README.md'],
+              canAskAssignee: true,
+              askLabel: 'Ask Ada to resolve',
+              rereviewNote:
+                "When the conflicts are resolved, the ticket goes back to In Review. You'll need to accept it again before it merges.",
+            },
+          }),
+        );
+      }
+      if (
+        String(path) === `/api/tickets/${ticketId}/resolve-conflict` &&
+        init?.method === 'POST'
+      ) {
+        return jsonResponse({ run: { id: 'run-1' } });
+      }
+      return jsonResponse({});
+    });
+
+    renderCard(makeTicket());
+    const mergeButton = await screen.findByRole('button', { name: 'Merge…' });
+    await waitFor(() => expect(mergeButton).toBeEnabled());
+    expect(mergeButton).toBeVisible();
+    fireEvent.click(mergeButton);
+    const dialog = await screen.findByRole('dialog', { name: 'Merge ticket branch' });
+    fireEvent.click(within(dialog).getByRole('button', { name: /^Merge$/ }));
+
+    expect(screen.getByText('Accepted, not merged')).toBeVisible();
+    const ask = await within(dialog).findByRole('button', {
+      name: 'Ask Ada to resolve',
+    });
+    fireEvent.click(ask);
+
+    await waitFor(() => {
+      expect(apiFetch).toHaveBeenCalledWith(
+        `/api/tickets/${ticketId}/resolve-conflict`,
+        expect.objectContaining({
+          method: 'POST',
+          body: JSON.stringify({
+            baseBranch: 'main',
+            files: ['README.md'],
+            operation: 'merge',
+          }),
+        }),
+      );
+    });
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['tickets'] });
+    expect(await screen.findByRole('button', { name: 'Merge…' })).toBeVisible();
+    invalidateSpy.mockRestore();
+  });
+
   it('creates a pull request from a Done card with the existing button', async () => {
     const open = vi.spyOn(window, 'open').mockImplementation(() => null);
     apiFetch.mockImplementation(async (path: string, init?: RequestInit) => {

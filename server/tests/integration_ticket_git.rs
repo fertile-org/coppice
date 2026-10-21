@@ -425,10 +425,15 @@ async fn merge_branch_conflict_aborts_and_leaves_branch_unchanged() {
         .await
         .unwrap();
     let ticket: serde_json::Value = common::json_body(ticket).await;
-    assert_eq!(ticket["status"], "in_progress");
+    assert_eq!(ticket["status"], "done", "a conflict leaves the ticket in Done");
     assert!(ticket["assigneeAgentId"].is_null());
-    assert_eq!(ticket["humanReview"]["stale"], true);
+    assert_eq!(ticket["humanReview"]["stale"], false);
     assert_eq!(ticket["humanReview"]["merged"], false);
+    assert_eq!(body["conflict"]["canAskAssignee"], false);
+    assert_eq!(
+        body["conflict"]["unavailableReason"],
+        coppice_server::copy::conflict::NO_ASSIGNEE
+    );
 
     let comments = app
         .clone()
@@ -446,11 +451,11 @@ async fn merge_branch_conflict_aborts_and_leaves_branch_unchanged() {
         "main",
         &["README.md".into()],
     );
-    assert!(comments
+    assert!(!comments
         .as_array()
         .unwrap()
         .iter()
-        .any(|comment| { comment["body"] == expected && comment["authorType"] == "system" }));
+        .any(|comment| comment["body"] == expected));
 }
 
 #[tokio::test]

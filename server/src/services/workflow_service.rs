@@ -89,8 +89,8 @@ impl WorkflowService {
         if from == to {
             return None;
         }
-        // Done is not a column a person can drag out of. A merge conflict uses
-        // `TicketService::reopen_after_merge_conflict`, which does not call this.
+        // Done is not a column a person can drag out of. Asking the assignee to
+        // resolve a merge conflict reopens it in `RunService` instead.
         if from == TicketStatus::Done {
             return Some(crate::copy::conflict::DONE_COLUMN_HOLDS);
         }

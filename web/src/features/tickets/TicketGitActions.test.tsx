@@ -259,6 +259,7 @@ describe('TicketGitActions', () => {
     expect(resolveMutateAsync).toHaveBeenCalledWith({
       baseBranch: 'main',
       files: ['README.md'],
+      operation: 'rebase',
     });
   });
 
@@ -289,7 +290,14 @@ describe('TicketGitActions', () => {
     expect(ask.parentElement).toBe(
       within(dialog).getByRole('button', { name: 'Cancel' }).parentElement,
     );
-    expect(resolveMutateAsync).not.toHaveBeenCalled();
+    fireEvent.click(ask);
+    await waitFor(() => {
+      expect(resolveMutateAsync).toHaveBeenCalledWith({
+        baseBranch: 'main',
+        files: ['README.md'],
+        operation: 'merge',
+      });
+    });
   });
 
   it('hides the ask button when there is no assignee', async () => {

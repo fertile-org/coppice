@@ -490,8 +490,50 @@ async fn merge_main(fx: &TicketGit) -> axum::response::Response {
         .unwrap()
 }
 
+async fn post_resolve_merge(fx: &TicketGit) -> axum::response::Response {
+    fx.app
+        .clone()
+        .oneshot(common::json_request(
+            "POST",
+            &format!("/api/tickets/{}/resolve-conflict", fx.ticket_id),
+            r#"{"baseBranch":"main","files":["README.md"],"operation":"merge"}"#,
+            &fx.cookie,
+            &fx.csrf,
+        ))
+        .await
+        .unwrap()
+}
+
+fn reopen_comment_for_readme() -> String {
+    coppice_server::copy::conflict::merge_conflict_reopen_comment("main", &["README.md".into()])
+}
+
+/// Done, accepted, and the merge into main conflicts on README.md.
+async fn done_with_merge_conflict(fx: &TicketGit) -> serde_json::Value {
+    diverge_readme(&fx.local_path, &fx.worktree_path);
+    let approved = accept_to_done(fx).await;
+    assert_eq!(approved["status"], "done");
+    let res = merge_main(fx).await;
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+    common::json_body(res).await
+}
+
+async fn assert_still_done(fx: &TicketGit) {
+    let ticket = ticket_json(fx).await;
+    assert_eq!(ticket["status"], "done");
+    assert_eq!(ticket["humanReview"]["stale"], false);
+    assert_eq!(ticket["humanReview"]["merged"], false);
+    let expected = reopen_comment_for_readme();
+    let thread = comments(fx).await;
+    assert!(
+        !thread.iter().any(|comment| comment["body"] == expected),
+        "no reopen comment while the ticket stays Done: {thread:?}"
+    );
+    assert!(list_runs(fx).await.is_empty(), "no run was started");
+}
+
 #[tokio::test]
-async fn merge_conflict_on_done_reopens_in_progress_and_starts_the_assignee() {
+async fn merge_conflict_on_done_stays_done_until_asked() {
     let _guard = common::DB_TEST_LOCK.lock().await;
     if !common::db_available().await {
         return;
@@ -521,7 +563,25 @@ async fn merge_conflict_on_done_reopens_in_progress_and_starts_the_assignee() {
     let body: serde_json::Value = common::json_body(res).await;
     assert_eq!(body["conflict"]["files"], serde_json::json!(["README.md"]));
     assert_eq!(body["conflict"]["operation"], "merge");
+    assert_eq!(body["conflict"]["canAskAssignee"], true);
     assert_eq!(git_rev_parse(&fx.local_path, "HEAD"), main_before);
+    assert_still_done(&fx).await;
+
+    // Closing the dialog and merging again retries and shows the same offer.
+    let again = merge_main(&fx).await;
+    assert_eq!(again.status(), StatusCode::BAD_REQUEST);
+    let again: serde_json::Value = common::json_body(again).await;
+    assert_eq!(again["conflict"]["operation"], "merge");
+    assert_eq!(again["conflict"]["canAskAssignee"], true);
+    assert_eq!(git_rev_parse(&fx.local_path, "HEAD"), main_before);
+    assert_still_done(&fx).await;
+
+    let asked = post_resolve_merge(&fx).await;
+    assert_eq!(asked.status(), StatusCode::OK);
+    let asked: serde_json::Value = common::json_body(asked).await;
+    let run_id = asked["run"]["id"].as_str().unwrap().to_string();
+    assert_eq!(asked["run"]["agentId"], agent_id);
+    assert_eq!(asked["run"]["jobType"], "work_on_ticket");
 
     let ticket = ticket_json(&fx).await;
     assert_eq!(ticket["status"], "in_progress");
@@ -536,6 +596,12 @@ async fn merge_conflict_on_done_reopens_in_progress_and_starts_the_assignee() {
             .await
             .expect("acceptance row kept");
     assert_eq!(accepted_at_after, accepted_at_before);
+    let exempt: bool = sqlx::query_scalar("SELECT review_cap_exempt FROM tickets WHERE id = $1")
+        .bind(ticket_uuid)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert!(exempt, "the reopened ticket may pass a full review cap");
 
     let thread = comments(&fx).await;
     assert!(
@@ -545,10 +611,7 @@ async fn merge_conflict_on_done_reopens_in_progress_and_starts_the_assignee() {
             .contains("Accepted: ticket moved to **Done**.")),
         "the earlier accept stays in the thread: {thread:?}"
     );
-    let expected = coppice_server::copy::conflict::merge_conflict_reopen_comment(
-        "main",
-        &["README.md".into()],
-    );
+    let expected = reopen_comment_for_readme();
     let reopen = thread
         .iter()
         .find(|comment| comment["body"] == expected && comment["authorType"] == "system")
@@ -557,22 +620,21 @@ async fn merge_conflict_on_done_reopens_in_progress_and_starts_the_assignee() {
 
     let runs = list_runs(&fx).await;
     assert_eq!(runs.len(), 1);
-    assert_eq!(runs[0]["agentId"], agent_id);
-    assert_eq!(runs[0]["jobType"], "work_on_ticket");
-    let run_id = uuid::Uuid::parse_str(runs[0]["id"].as_str().unwrap()).unwrap();
+    assert_eq!(runs[0]["id"], run_id);
     let row: (String, Option<uuid::Uuid>) =
         sqlx::query_as("SELECT context_profile, trigger_comment_id FROM agent_runs WHERE id = $1")
-            .bind(run_id)
+            .bind(uuid::Uuid::parse_str(&run_id).unwrap())
             .fetch_one(&pool)
             .await
             .expect("run row");
     assert_eq!(row.0, "full");
     assert_eq!(row.1.unwrap().to_string(), comment_id);
 
-    let again = merge_main(&fx).await;
-    assert_eq!(again.status(), StatusCode::CONFLICT);
-    assert_eq!(git_rev_parse(&fx.local_path, "HEAD"), main_before);
-    assert_eq!(ticket_json(&fx).await["status"], "in_progress");
+    let second = post_resolve_merge(&fx).await;
+    assert_eq!(second.status(), StatusCode::OK);
+    let second: serde_json::Value = common::json_body(second).await;
+    assert_eq!(second["run"]["id"], run_id);
+    assert_eq!(list_runs(&fx).await.len(), 1);
 
     let direct_done = fx
         .app
@@ -607,7 +669,7 @@ async fn merge_conflict_on_done_reopens_in_progress_and_starts_the_assignee() {
         .oneshot(common::json_request(
             "PATCH",
             &format!("/api/tickets/{}/status", fx.ticket_id),
-            r#"{"status":"wait_for_final_review"}"#,
+            r#"{"status":"in_review"}"#,
             &fx.cookie,
             &fx.csrf,
         ))
@@ -632,6 +694,61 @@ async fn merge_conflict_on_done_reopens_in_progress_and_starts_the_assignee() {
 }
 
 #[tokio::test]
+async fn asking_on_a_done_merge_conflict_with_a_connector_not_ready_stays_done() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+
+    let fx = setup_ticket().await;
+    let agent_id = assign_ada(&fx).await;
+    done_with_merge_conflict(&fx).await;
+    let pool = fx.state.db.clone().expect("pool");
+    sqlx::query("UPDATE agents SET connector = 'cursor' WHERE id = $1")
+        .bind(uuid::Uuid::parse_str(&agent_id).unwrap())
+        .execute(&pool)
+        .await
+        .expect("switch connector");
+
+    let res = post_resolve_merge(&fx).await;
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+    let body: serde_json::Value = common::json_body(res).await;
+    assert_eq!(
+        body["message"],
+        coppice_server::copy::conflict::connector_not_ready_reason("Ada")
+    );
+    assert_still_done(&fx).await;
+}
+
+#[tokio::test]
+async fn asking_on_a_done_merge_conflict_when_the_run_cannot_start_stays_done() {
+    let _guard = common::DB_TEST_LOCK.lock().await;
+    if !common::db_available().await {
+        return;
+    }
+
+    let fx = setup_ticket().await;
+    assign_ada(&fx).await;
+    done_with_merge_conflict(&fx).await;
+
+    // The run start re-verifies the repository after the comment is posted.
+    let moved = fx.local_path.with_extension("moved");
+    std::fs::rename(&fx.local_path, &moved).expect("hide the checkout");
+    let res = post_resolve_merge(&fx).await;
+    std::fs::rename(&moved, &fx.local_path).expect("restore the checkout");
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+    let body: serde_json::Value = common::json_body(res).await;
+    assert!(
+        body["message"]
+            .as_str()
+            .unwrap_or("")
+            .contains("repository path is not ready"),
+        "the run start must fail on the repository: {body}"
+    );
+    assert_still_done(&fx).await;
+}
+
+#[tokio::test]
 async fn merge_conflict_run_context_lists_the_conflicting_files() {
     let _guard = common::DB_TEST_LOCK.lock().await;
     if !common::db_available().await {
@@ -640,16 +757,16 @@ async fn merge_conflict_run_context_lists_the_conflicting_files() {
 
     let fx = setup_with_workers().await;
     assign_ada(&fx).await;
-    diverge_readme(&fx.local_path, &fx.worktree_path);
-    accept_to_done(&fx).await;
-
-    let res = merge_main(&fx).await;
-    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
-
-    let comment = coppice_server::copy::conflict::merge_conflict_reopen_comment(
-        "main",
-        &["README.md".into()],
+    done_with_merge_conflict(&fx).await;
+    assert!(
+        list_runs(&fx).await.is_empty(),
+        "the conflict alone starts nothing"
     );
+
+    let asked = post_resolve_merge(&fx).await;
+    assert_eq!(asked.status(), StatusCode::OK);
+
+    let comment = reopen_comment_for_readme();
     let deadline = Instant::now() + Duration::from_secs(30);
     let context_path = fx.worktree_path.join(".agent").join("context.md");
     loop {
@@ -657,6 +774,10 @@ async fn merge_conflict_run_context_lists_the_conflicting_files() {
             assert!(
                 context.contains(&comment),
                 "context.md should carry the conflict comment:\n{context}"
+            );
+            assert!(
+                context.contains("**Status:** in_progress"),
+                "context.md should show In Progress:\n{context}"
             );
             break;
         }

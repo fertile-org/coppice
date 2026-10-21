@@ -15,7 +15,7 @@ Coppice is a board for coding work. You write tickets, agents do the work on the
 3. **Ready.** Once you approve the plan, it becomes part of the ticket's description, under **Approved plan**. Your Technical Lead agent checks it against the code, corrects that section only if it needs to, and picks who does the work. That agent's run starts on its own; to start runs yourself, set `auto_start_runs = false` in Settings. If there's no Technical Lead or nobody fits, the ticket stays in Ready, unassigned, with a comment.
 4. **In Progress, In Review, In QA.** Agents build, review, and test the change on the ticket's own branch. Your main checkout isn't touched.
 5. **Wait for Human Review.** You open the diff, leave feedback as comments, and choose **Accept** when it's right. If an agent adds a commit after that, the ticket goes back to In Review, and then returns to you.
-6. **Done.** Accepting doesn't merge. Choose **Merge…** when you're ready, and what you accepted is exactly what merges. If files conflict, Coppice leaves main untouched and sends the ticket back to In Progress, where the same agent resolves them. You accept it again before it merges.
+6. **Done.** Accepting doesn't merge. Choose **Merge…** when you're ready, and what you accepted is exactly what merges. If files conflict, Coppice leaves main untouched and lists the files, and the ticket stays in Done until you choose **Ask [agent] to resolve**, which sends it back to In Progress. You accept it again before it merges.
 
 A stuck ticket goes to **Blocked** with a comment saying why.
 

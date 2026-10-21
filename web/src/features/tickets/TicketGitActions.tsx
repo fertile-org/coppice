@@ -423,6 +423,7 @@ export function TicketGitActions({ ticket }: TicketGitActionsProps) {
       await resolveConflict.mutateAsync({
         baseBranch: conflict.baseBranch,
         files: conflict.files,
+        operation: conflict.operation,
       });
       setConflict(null);
       setMergeOpen(false);

@@ -213,9 +213,16 @@ async function postMergeBranch(
   return res.json() as Promise<MergeBranchResponse>;
 }
 
+type ResolveConflictBody = {
+  baseBranch: string;
+  files: string[];
+  /** A merge conflict on a Done ticket moves it back to In Progress. */
+  operation: 'merge' | 'rebase';
+};
+
 async function postResolveConflict(
   ticketId: string,
-  body: { baseBranch: string; files: string[] },
+  body: ResolveConflictBody,
 ): Promise<{ run: { id: string } }> {
   const res = await apiFetch(`/api/tickets/${ticketId}/resolve-conflict`, {
     method: 'POST',
@@ -473,12 +480,12 @@ export function useResolveConflict(ticketId: string) {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: (body: { baseBranch: string; files: string[] }) =>
-      postResolveConflict(ticketId, body),
+    mutationFn: (body: ResolveConflictBody) => postResolveConflict(ticketId, body),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ticketQueryKey(ticketId) });
       void queryClient.invalidateQueries({ queryKey: agentRunsQueryKey(ticketId) });
       void queryClient.invalidateQueries({ queryKey: commentsQueryKey(ticketId) });
+      void queryClient.invalidateQueries({ queryKey: ['tickets'] });
     },
   });
 }

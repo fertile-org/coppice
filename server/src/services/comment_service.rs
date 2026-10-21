@@ -171,6 +171,15 @@ impl<'a> CommentService<'a> {
         Ok(row_to_comment(&row))
     }
 
+    /// Remove a system comment that was posted for an action that then failed.
+    pub async fn delete(&self, comment_id: Uuid) -> Result<(), CommentError> {
+        sqlx::query("DELETE FROM ticket_comments WHERE id = $1")
+            .bind(comment_id)
+            .execute(self.pool)
+            .await?;
+        Ok(())
+    }
+
     pub async fn list_attachments_by_ids(
         &self,
         attachment_ids: &[Uuid],

@@ -15,6 +15,7 @@ use crate::sandbox::permissive::PROFILE_ID;
 use crate::services::agent_service::AgentError;
 use crate::services::agent_service::AgentService;
 use crate::services::comment_service::{CommentError, CommentService};
+use crate::services::human_review_service::{HumanReviewError, HumanReviewService};
 use crate::services::job_service::{JobError, JobService};
 use crate::services::mention_service::MentionError;
 use crate::services::notification_service::NotificationService;
@@ -34,6 +35,9 @@ const JOB_TYPE_CHAT_TURN: &str = "chat_turn";
 pub struct StartRunOptions {
     pub context_profile: ContextProfile,
     pub trigger_comment_id: Option<Uuid>,
+    /// Move a Done ticket to In Progress in the run-insert transaction, after
+    /// a person asked the assignee to resolve a merge conflict.
+    pub reopen_done_after_merge_conflict: bool,
 }
 
 impl Default for StartRunOptions {
@@ -41,6 +45,7 @@ impl Default for StartRunOptions {
         Self {
             context_profile: ContextProfile::Full,
             trigger_comment_id: None,
+            reopen_done_after_merge_conflict: false,
         }
     }
 }
@@ -289,6 +294,7 @@ impl<'a> RunService<'a> {
             &agent_role,
             JOB_TYPE_WORK_ON_TICKET,
             ContextProfile::Full,
+            false,
         )
         .await?;
 
@@ -662,6 +668,7 @@ impl<'a> RunService<'a> {
             &agent_role,
             job_type,
             options.context_profile,
+            options.reopen_done_after_merge_conflict,
         )
         .await?;
 
@@ -682,6 +689,10 @@ impl<'a> RunService<'a> {
     /// Move Ready/Backlog implementer work to `in_progress` in the same
     /// transaction that inserts the queued run. A later update would let other
     /// connections observe the run while the ticket is still `ready`.
+    ///
+    /// With `reopen_done_after_merge_conflict`, a Done ticket moves to
+    /// In Progress here instead, so it never leaves Done without a run.
+    #[allow(clippy::too_many_arguments)]
     async fn apply_queued_run_start_status(
         tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
         ticket_id: Uuid,
@@ -689,6 +700,7 @@ impl<'a> RunService<'a> {
         agent_role: &str,
         job_type: &str,
         context_profile: ContextProfile,
+        reopen_done_after_merge_conflict: bool,
     ) -> Result<(), RunError> {
         let row = sqlx::query(
             r#"
@@ -710,6 +722,9 @@ impl<'a> RunService<'a> {
         let substatus_str: Option<String> = row.get("substatus");
         let substatus = substatus_str.as_deref().and_then(substatus_from_str);
         let substatus_metadata: Option<serde_json::Value> = row.get("substatus_metadata");
+        if reopen_done_after_merge_conflict {
+            return Self::reopen_done_after_merge_conflict(tx, ticket_id, current).await;
+        }
         let Some(new_status) = WorkflowService::resolve_run_start_transition(
             current,
             agent_key,
@@ -771,6 +786,44 @@ impl<'a> RunService<'a> {
             .bind(status_to_str(new_status))
             .execute(&mut **tx)
             .await?;
+        Ok(())
+    }
+
+    /// Done → In Progress after a merge conflict. Keeps the assignee and the
+    /// acceptance (marked stale), and lets the ticket back past a full review
+    /// cap. This is the only write that leaves Done; dragging still cannot.
+    /// `after_status_write(Done, InProgress)` is a no-op, so it is not called.
+    async fn reopen_done_after_merge_conflict(
+        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        ticket_id: Uuid,
+        current: TicketStatus,
+    ) -> Result<(), RunError> {
+        if current != TicketStatus::Done {
+            return Err(RunError::Validation(
+                "This ticket is no longer in Done.".into(),
+            ));
+        }
+        sqlx::query(
+            r#"
+            UPDATE tickets
+            SET status = $2,
+                substatus = NULL,
+                substatus_metadata = NULL,
+                review_cap_exempt = true,
+                updated_at = now()
+            WHERE id = $1
+            "#,
+        )
+        .bind(ticket_id)
+        .bind(status_to_str(TicketStatus::InProgress))
+        .execute(&mut **tx)
+        .await?;
+        HumanReviewService::retain_stale_acceptance(&mut **tx, ticket_id)
+            .await
+            .map_err(|err| {
+                let HumanReviewError::Database(err) = err;
+                RunError::Database(err)
+            })?;
         Ok(())
     }
 
