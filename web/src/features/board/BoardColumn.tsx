@@ -1,13 +1,21 @@
 import { useDroppable } from '@dnd-kit/core';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { Fragment, useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
+import {
+  Fragment,
+  memo,
+  useEffect,
+  useRef,
+  useState,
+  type FormEvent,
+  type ReactNode,
+} from 'react';
 import {
   columnAccentClass,
   columnBgClass,
   columnBorderClass,
   type BoardColumnDef,
 } from './columns';
-import { boardFocusDomId, type BoardFocus } from './boardFocus';
+import { boardFocusDomId } from './boardFocus';
 import { resolveAssigneeName, TicketCard } from './TicketCard';
 import type { TicketHierarchyIndex } from './ticketHierarchy';
 import type { Ticket } from './useTickets';
@@ -24,12 +32,21 @@ interface BoardColumnProps {
   onRunPlan?: (ticketId: string) => void;
   planRunTicketId?: string | null;
   columnIndex?: number;
-  boardFocus?: BoardFocus;
+  /** Board keyboard focus is active (roving tabindex on). */
+  hasBoardFocus?: boolean;
+  /** The focused card when it is in this column, else null. */
+  focusedTicketId?: string | null;
+  /** Board focus is on this column's heading. */
+  headingFocused?: boolean;
   onCardFocus?: (ticketId: string) => void;
   onHeadingFocus?: (columnIndex: number) => void;
 }
 
-export function BoardColumn({
+/**
+ * Memoized with primitive focus props so a focus or URL change re-renders only
+ * the columns it touches.
+ */
+export const BoardColumn = memo(function BoardColumn({
   column,
   tickets,
   hierarchyIndex,
@@ -41,7 +58,9 @@ export function BoardColumn({
   onRunPlan,
   planRunTicketId = null,
   columnIndex = 0,
-  boardFocus,
+  hasBoardFocus = false,
+  focusedTicketId = null,
+  headingFocused = false,
   onCardFocus,
   onHeadingFocus,
 }: BoardColumnProps) {
@@ -60,10 +79,7 @@ export function BoardColumn({
   }
 
   const headingFocusable = tickets.length === 0;
-  const headingSelected =
-    headingFocusable &&
-    boardFocus?.type === 'heading' &&
-    boardFocus.column === columnIndex;
+  const headingSelected = headingFocusable && headingFocused;
   const headingFocusId = `heading:${columnIndex}`;
 
   return (
@@ -127,10 +143,9 @@ export function BoardColumn({
 
         <ColumnCards
           tickets={tickets}
-          focusedTicketId={boardFocus?.type === 'card' ? boardFocus.ticketId : null}
+          focusedTicketId={focusedTicketId}
           renderCard={(ticket) => {
-            const selected =
-              boardFocus?.type === 'card' && boardFocus.ticketId === ticket.id;
+            const selected = focusedTicketId === ticket.id;
             const focusId = boardFocusDomId({ type: 'card', ticketId: ticket.id });
             return (
               <TicketCard
@@ -145,10 +160,10 @@ export function BoardColumn({
                 )}
                 onRunPlan={onRunPlan}
                 planRunPending={planRunTicketId === ticket.id}
-                tabIndex={boardFocus ? (selected ? 0 : -1) : 0}
-                boardFocusId={boardFocus ? focusId : undefined}
-                boardTabStop={Boolean(selected)}
-                onFocusCard={() => onCardFocus?.(ticket.id)}
+                tabIndex={hasBoardFocus ? (selected ? 0 : -1) : 0}
+                boardFocusId={hasBoardFocus ? focusId : undefined}
+                boardTabStop={selected}
+                onFocusCard={onCardFocus}
               />
             );
           }}
@@ -156,7 +171,7 @@ export function BoardColumn({
       </div>
     </section>
   );
-}
+});
 
 /** Columns longer than this render only the cards in view. */
 export const VIRTUALIZE_AFTER = 80;

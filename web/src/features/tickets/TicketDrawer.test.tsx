@@ -1,5 +1,5 @@
 import '@testing-library/jest-dom/vitest';
-import { beforeEach, describe, it, expect, vi } from 'vitest';
+import { afterEach, beforeEach, describe, it, expect, vi } from 'vitest';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter, useLocation } from 'react-router-dom';
@@ -13,7 +13,7 @@ import type { TicketParentSummary } from '../board/ticketHierarchy';
 import type { AgentRun } from '../../lib/schemas/agentRun';
 import type { Connector } from '../../lib/schemas/connector';
 
-const ticketState: { ticket: Ticket } = {
+const ticketState: { ticket: Ticket; placeholder?: boolean } = {
   ticket: {
     id: '00000000-0000-0000-0000-000000000001',
     boardId: '00000000-0000-0000-0000-000000000002',
@@ -110,6 +110,7 @@ const runMocks = vi.hoisted(() => ({
 vi.mock('./useTicket', () => ({
   useTicket: () => ({
     data: ticketState.ticket,
+    isPlaceholderData: ticketState.placeholder ?? false,
     isLoading: false,
     isError: false,
     refetch: vi.fn(),
@@ -737,5 +738,102 @@ describe('TicketDrawer keyboard sections', () => {
       'true',
     );
     input.remove();
+  });
+});
+
+function stubReducedMotion(reduce: boolean) {
+  vi.stubGlobal(
+    'matchMedia',
+    (query: string) => ({
+      matches: reduce && query === '(prefers-reduced-motion: reduce)',
+      media: query,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+    }),
+  );
+}
+
+function fireAnimationEnd(node: Element, animationName: string) {
+  const event = new Event('animationend', { bubbles: true });
+  Object.defineProperty(event, 'animationName', { value: animationName });
+  act(() => {
+    node.dispatchEvent(event);
+  });
+}
+
+describe('TicketDrawer first frame', () => {
+  beforeEach(() => {
+    resetShortcutMocks();
+    runsState.runs = [];
+    childrenState.children = [];
+    ticketState.placeholder = false;
+    ticketState.ticket = {
+      ...ticketState.ticket,
+      status: 'backlog',
+      description: 'Ticket description',
+      archivedAt: null,
+      hasActiveRun: false,
+    };
+  });
+
+  afterEach(() => {
+    ticketState.placeholder = false;
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+  });
+
+  it('shows the board-list title and status while the detail loads, without the body', () => {
+    ticketState.placeholder = true;
+    ticketState.ticket = { ...ticketState.ticket, description: undefined };
+    renderDrawer();
+
+    const dialog = screen.getByRole('dialog', { name: 'Ticket detail' });
+    expect(within(dialog).getByRole('heading', { name: 'Test ticket' })).toBeVisible();
+    expect(within(dialog).queryByText('Loading…')).toBeNull();
+    expect(screen.getByTestId('ticket-detail-skeleton')).toBeInTheDocument();
+    // No editable description or metadata panel on list data.
+    expect(screen.queryByRole('button', { name: 'Edit' })).toBeNull();
+    expect(screen.queryByText('Comments')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Run Agent' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Archive' })).toBeDisabled();
+  });
+
+  it('mounts comments only after the sheet slide ends', () => {
+    stubReducedMotion(false);
+    renderDrawer();
+
+    expect(screen.getByText('Ticket description')).toBeInTheDocument();
+    expect(screen.getByTestId('ticket-comments-deferred')).toBeInTheDocument();
+    expect(screen.queryByText('Comments', { selector: 'div' })).toBeNull();
+
+    const dialog = screen.getByRole('dialog', { name: 'Ticket detail' });
+    // A child's animation bubbles up; it must not settle the sheet.
+    fireAnimationEnd(screen.getByText('Ticket description'), 'sheet-in-right');
+    fireAnimationEnd(dialog, 'fade-in');
+    expect(screen.getByTestId('ticket-comments-deferred')).toBeInTheDocument();
+
+    fireAnimationEnd(dialog, 'sheet-in-right');
+    expect(screen.queryByTestId('ticket-comments-deferred')).toBeNull();
+    expect(screen.getByText('Comments', { selector: 'div' })).toBeInTheDocument();
+  });
+
+  it('settles after a fallback timeout when animationend never fires', () => {
+    vi.useFakeTimers();
+    stubReducedMotion(false);
+    renderDrawer();
+    expect(screen.getByTestId('ticket-comments-deferred')).toBeInTheDocument();
+
+    act(() => {
+      vi.advanceTimersByTime(300);
+    });
+    expect(screen.queryByTestId('ticket-comments-deferred')).toBeNull();
+  });
+
+  it('mounts comments right away with prefers-reduced-motion', () => {
+    stubReducedMotion(true);
+    renderDrawer();
+
+    expect(screen.queryByTestId('ticket-comments-deferred')).toBeNull();
+    expect(screen.getByText('Comments', { selector: 'div' })).toBeInTheDocument();
   });
 });
