@@ -48,7 +48,7 @@ function ToastViewport({
       aria-live="polite"
       aria-relevant="additions"
       data-toast-region=""
-      className="pointer-events-none fixed bottom-4 right-4 z-[100] flex w-full max-w-sm flex-col gap-2"
+      className="pointer-events-none fixed right-4 top-4 z-[100] flex w-full max-w-sm flex-col gap-2"
     >
       {toasts.map((toast) => (
         <ToastMessage key={toast.id} toast={toast} onDismiss={onDismiss} />

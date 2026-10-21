@@ -158,7 +158,7 @@ Mọi giá trị số lượng và thời gian ở trên đều phải lớn hơ
 | --- | --- | --- | --- |
 | `author_name` | string | `Coppice` | Tên tác giả trên các commit Coppice tạo. |
 | `author_email` | string | `coppice@localhost` | Email tác giả trên các commit đó. |
-| `push_enabled` | bool | `false` | Cho phép Coppice push branch và mở pull request. |
+| `push_enabled` | bool | `false` (`true` trong ứng dụng desktop) | Cho phép Coppice push branch và mở pull request. |
 
 ## `[plugins]`
 

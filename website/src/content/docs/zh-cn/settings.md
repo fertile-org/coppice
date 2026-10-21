@@ -151,7 +151,7 @@ Kilo Code、GitHub Copilot、Qwen Code 和 Kimi Code 只要被 Coppice 找到就
 | --- | --- | --- | --- |
 | `author_name` | 字符串 | `Coppice` | Coppice 所做提交的作者名。 |
 | `author_email` | 字符串 | `coppice@localhost` | 这些提交的作者邮箱。 |
-| `push_enabled` | 布尔值 | `false` | 允许 Coppice 推送分支并创建 pull request。 |
+| `push_enabled` | 布尔值 | `false`（桌面应用为 `true`） | 允许 Coppice 推送分支并创建 pull request。 |
 
 ## `[plugins]`
 

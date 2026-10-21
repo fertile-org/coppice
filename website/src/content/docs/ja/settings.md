@@ -151,7 +151,7 @@ OpenCode の `command` を変えた場合も再起動が必要です。
 | --- | --- | --- | --- |
 | `author_name` | string | `Coppice` | Coppice が作るコミットの作者名。 |
 | `author_email` | string | `coppice@localhost` | それらのコミットの作者のメールアドレス。 |
-| `push_enabled` | bool | `false` | Coppice にブランチのプッシュとプルリクエストの作成を許可します。 |
+| `push_enabled` | bool | `false`（デスクトップアプリでは `true`） | Coppice にブランチのプッシュとプルリクエストの作成を許可します。 |
 
 ## `[plugins]`
 

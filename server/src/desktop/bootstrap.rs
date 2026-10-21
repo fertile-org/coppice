@@ -250,7 +250,24 @@ pub fn desktop_config(
     config.auth.bootstrap_admin_password = Some(secrets.admin_password.clone());
     config.secrets.master_key = secrets.master_key.clone();
     config.mcp.base_url = None;
+    // The desktop user owns the repos and pushes with their own git
+    // credentials, so push is on unless the file turns it off.
+    if !file_sets_push_enabled(&layout.config_file) {
+        config.git.push_enabled = true;
+    }
     Ok(config)
+}
+
+fn file_sets_push_enabled(path: &Path) -> bool {
+    std::fs::read_to_string(path)
+        .ok()
+        .and_then(|text| text.parse::<toml::Table>().ok())
+        .is_some_and(|table| {
+            table
+                .get("git")
+                .and_then(|git| git.get("push_enabled"))
+                .is_some()
+        })
 }
 
 #[cfg(test)]
@@ -636,5 +653,23 @@ mod tests {
         );
         assert_eq!(cfg.secrets.master_key, secrets.master_key);
         assert_eq!(cfg.mcp.base_url, None);
+    }
+
+    #[test]
+    fn desktop_config_enables_push_unless_file_turns_it_off() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let layout = layout_in(&dir);
+        let secrets = load_or_create_secrets(&layout.secrets_dir).expect("secrets");
+        ensure_config_file(&layout).expect("create");
+        let pg_url = "postgres://coppice:pw@127.0.0.1:55432/coppice";
+
+        let cfg = desktop_config(&layout, &secrets, pg_url, 43210).expect("config");
+        assert!(cfg.git.push_enabled, "starter file leaves push on");
+
+        let mut contents = std::fs::read_to_string(&layout.config_file).unwrap();
+        contents.push_str("\n[git]\npush_enabled = false\n");
+        std::fs::write(&layout.config_file, contents).unwrap();
+        let cfg = desktop_config(&layout, &secrets, pg_url, 43210).expect("config");
+        assert!(!cfg.git.push_enabled, "an explicit false is kept");
     }
 }
