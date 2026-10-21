@@ -16,7 +16,7 @@ function shortSha(sha: string | null): string {
   return sha.slice(0, 7);
 }
 
-function syncSummary(status: DefaultBranchSyncStatus): string {
+function syncSummaryParts(status: DefaultBranchSyncStatus): string[] {
   const parts: string[] = [];
   if (!status.workingTreeClean) {
     parts.push('working tree dirty');
@@ -32,7 +32,64 @@ function syncSummary(status: DefaultBranchSyncStatus): string {
       );
     }
   }
-  return parts.join(' · ') || `${status.defaultBranch} sync`;
+  return parts;
+}
+
+function syncSummary(status: DefaultBranchSyncStatus): string {
+  return syncSummaryParts(status).join(' · ') || `${status.defaultBranch} sync`;
+}
+
+const DIRTY_TREE_HINT =
+  'Main repository has uncommitted changes — commit or stash before pulling or pushing.';
+
+/**
+ * Disabled reasons shown under the buttons, minus those the summary already says.
+ *
+ * Mirrors the gate order in `server/src/services/repo_git_service.rs`
+ * (`default_branch_pull_gate` / `default_branch_push_gate`) and
+ * `git_ops::fetch_gate` / `push_gate`: config, local branch missing, dirty tree,
+ * missing remote ref, then counts. A reason is hidden only when the status
+ * fields show its gate got past the config and branch checks; anything else
+ * (config, push disabled, new gates) is still shown.
+ */
+function syncHints(status: DefaultBranchSyncStatus): string[] {
+  const pullGatePassedConfig = status.canFetch && status.localSha != null;
+  const pushGatePassedConfig = status.pushEnabled && pullGatePassedConfig;
+  let showPull = !status.canPull && status.pullDisabledReason != null;
+  let showPush = !status.canPush && status.pushDisabledReason != null;
+  const hints: string[] = [];
+
+  if (!status.workingTreeClean) {
+    if (pullGatePassedConfig || pushGatePassedConfig) {
+      hints.push(DIRTY_TREE_HINT);
+    }
+    if (pullGatePassedConfig) showPull = false;
+    if (pushGatePassedConfig) showPush = false;
+  } else if (
+    status.remoteSha != null &&
+    status.aheadCount != null &&
+    status.behindCount != null
+  ) {
+    // "not behind" / "ahead — pull is not needed"
+    if (pullGatePassedConfig && status.behindCount === 0) showPull = false;
+    // "not ahead" while in sync
+    if (
+      pushGatePassedConfig &&
+      status.aheadCount === 0 &&
+      status.behindCount === 0
+    ) {
+      showPush = false;
+    }
+  }
+
+  if (showPull && status.pullDisabledReason) hints.push(status.pullDisabledReason);
+  if (showPush && status.pushDisabledReason) hints.push(status.pushDisabledReason);
+  if (!status.canFetch && status.fetchDisabledReason) {
+    hints.push(status.fetchDisabledReason);
+  }
+
+  const summaryParts = new Set(syncSummaryParts(status));
+  return [...new Set(hints)].filter((hint) => !summaryParts.has(hint));
 }
 
 export interface DefaultBranchSyncControlsProps {
@@ -199,21 +256,11 @@ export function DefaultBranchSyncControls({
               {pushPending ? 'Pushing…' : 'Push to remote'}
             </Button>
           </div>
-          {!status.canPull && status.pullDisabledReason && (
-            <p className="font-body text-xs text-text-muted">
-              {status.pullDisabledReason}
+          {syncHints(status).map((hint) => (
+            <p key={hint} className="font-body text-xs text-text-muted">
+              {hint}
             </p>
-          )}
-          {!status.canPush && status.pushDisabledReason && (
-            <p className="font-body text-xs text-text-muted">
-              {status.pushDisabledReason}
-            </p>
-          )}
-          {!status.canFetch && status.fetchDisabledReason && (
-            <p className="font-body text-xs text-text-muted">
-              {status.fetchDisabledReason}
-            </p>
-          )}
+          ))}
         </>
       )}
       {error && <p className="font-body text-xs text-danger">{error}</p>}
