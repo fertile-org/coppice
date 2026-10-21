@@ -223,7 +223,13 @@ async fn confirm_creates_repo_board_and_starter_team_without_a_run() {
             .iter()
             .map(|member| member["presetKey"].as_str().unwrap())
             .collect::<Vec<_>>(),
-        vec!["pm", "tech_lead", "backend_engineer"]
+        vec![
+            "pm",
+            "tech_lead",
+            "backend_engineer",
+            "frontend_engineer",
+            "qc"
+        ]
     );
 
     let missing = tempfile::tempdir().expect("not a git checkout");
@@ -272,8 +278,8 @@ async fn confirm_creates_repo_board_and_starter_team_without_a_run() {
     let created_json = common::json_body(created).await;
     assert_eq!(created_json["connectorId"], "claude-code");
     assert_eq!(created_json["connectorDisplayName"], "Claude Code");
-    assert_eq!(created_json["agents"].as_array().unwrap().len(), 3);
-    assert_eq!(counts(pool).await, (1, 1, 3, 0, 0));
+    assert_eq!(created_json["agents"].as_array().unwrap().len(), 5);
+    assert_eq!(counts(pool).await, (1, 1, 5, 0, 0));
     assert_eq!(
         state.connector_probes.get(CLAUDE_CODE).unwrap().probed_at,
         OffsetDateTime::UNIX_EPOCH
@@ -313,7 +319,9 @@ async fn confirm_creates_repo_board_and_starter_team_without_a_run() {
         keys,
         vec![
             "backend_engineer".to_string(),
+            "frontend_engineer".to_string(),
             "pm".to_string(),
+            "qc".to_string(),
             "tech_lead".to_string()
         ]
     );
@@ -332,7 +340,7 @@ async fn confirm_creates_repo_board_and_starter_team_without_a_run() {
     assert_eq!(again.status(), axum::http::StatusCode::CREATED);
     let again_json = common::json_body(again).await;
     assert_eq!(again_json["repositoryId"], created_json["repositoryId"]);
-    assert_eq!(counts(pool).await, (1, 2, 6, 0, 0));
+    assert_eq!(counts(pool).await, (1, 2, 10, 0, 0));
     let stored_name: String = sqlx::query_scalar("SELECT name FROM repos")
         .fetch_one(pool)
         .await
@@ -355,7 +363,7 @@ async fn confirm_creates_repo_board_and_starter_team_without_a_run() {
         common::json_body(same_path_board).await["code"],
         "duplicate_board"
     );
-    assert_eq!(counts(pool).await, (1, 2, 6, 0, 0));
+    assert_eq!(counts(pool).await, (1, 2, 10, 0, 0));
 
     let other = git_repo();
     let duplicate_board = app
@@ -374,7 +382,7 @@ async fn confirm_creates_repo_board_and_starter_team_without_a_run() {
         common::json_body(duplicate_board).await["code"],
         "duplicate_board"
     );
-    assert_eq!(counts(pool).await, (1, 2, 6, 0, 0));
+    assert_eq!(counts(pool).await, (1, 2, 10, 0, 0));
 }
 
 #[tokio::test]
@@ -448,9 +456,9 @@ async fn picking_a_later_ready_cli_creates_the_team_on_it() {
         .fetch_all(pool)
         .await
         .unwrap();
-    assert_eq!(connectors.len(), 3);
+    assert_eq!(connectors.len(), 5);
     assert!(connectors
         .iter()
         .all(|connector| connector == "claude-code"));
-    assert_eq!(counts(pool).await, (1, 1, 3, 0, 0));
+    assert_eq!(counts(pool).await, (1, 1, 5, 0, 0));
 }

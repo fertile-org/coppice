@@ -14,6 +14,7 @@ use crate::copy::conflict::DONE_COLUMN_HOLDS;
 use crate::copy::plan::{NO_PM, PLAN_REQUIRED, READY_REQUIRES_PLAN};
 use crate::copy::restart::{git_error, ERROR_NONE, ERROR_USE_CANCEL, ERROR_USE_DISCARD};
 use crate::services::planning_service::{PlanningService, StartOutcome};
+use crate::services::stage_owner_service::StageOwnerService;
 use crate::services::workflow_service::{WorkflowService, DONE_REQUIRES_ACCEPT};
 use crate::domain::agent_health::AgentHealthStatus;
 use crate::services::agent_health::missing_connector_detail;
@@ -1009,6 +1010,20 @@ async fn update_status(
     {
         if let Err(err) = PlanningService::new(pool).on_entered_ready(ticket_id).await {
             tracing::warn!(error = %err, %ticket_id, "tech lead run did not start");
+        }
+        ticket = service
+            .get(ticket_id)
+            .await
+            .map_err(map_update_status_error)?;
+    }
+    if previous.ticket.status != ticket.ticket.status
+        && crate::domain::workflow::is_owned_stage(ticket.ticket.status)
+    {
+        if let Err(err) = StageOwnerService::new(pool, &state.config.workflow)
+            .on_entered_review_stage(ticket_id)
+            .await
+        {
+            tracing::warn!(error = %err, %ticket_id, "stage owner run did not start");
         }
         ticket = service
             .get(ticket_id)

@@ -19,6 +19,8 @@ const previewReady = {
     { presetKey: 'pm', name: 'PM', role: 'PM' },
     { presetKey: 'tech_lead', name: 'Technical Lead', role: 'Technical Lead' },
     { presetKey: 'backend_engineer', name: 'Backend Engineer', role: 'Backend Engineer' },
+    { presetKey: 'frontend_engineer', name: 'Frontend Engineer', role: 'Frontend Engineer' },
+    { presetKey: 'qc', name: 'QC', role: 'QC' },
   ],
 };
 
@@ -118,7 +120,7 @@ describe('InitWizard', () => {
     expect(postCount()).toBe(0);
 
     fireEvent.click(screen.getByRole('button', { name: INIT_COPY.next }));
-    expect(await screen.findByText('PM, Technical Lead, and Backend Engineer.')).toBeInTheDocument();
+    expect(await screen.findByText('PM, Technical Lead, Backend Engineer, Frontend Engineer, and QC.')).toBeInTheDocument();
     expect(screen.getByLabelText('Agent CLI')).toHaveValue('claude-code');
     expect(screen.getByText('They run on Claude Code with its default model.')).toBeInTheDocument();
     expect(screen.getByText(INIT_COPY.teamIdle)).toBeInTheDocument();

@@ -18,5 +18,5 @@ description: mentionAgents / agentRequests / assignTo semantics, one-hop consult
 
 ## Coppice platform rules — implementer completion (required)
 
-- On `status: "done"`, **omit `assignTo`** — workflow gates move the ticket to In Review automatically.
-- Only PM agents use `assignTo` (when refining backlog tickets). Use agent keys that exist on the board (e.g. `backend_engineer`, `research`).
+- On `status: "done"`, workflow gates move the ticket to In Review and start the reviewer. Set `assignTo` to a Tech Lead or reviewer key from `board_agents` (e.g. `tech_lead`, `reviewer`); if you omit it, Coppice picks the oldest enabled one.
+- Outside that handoff, only PM agents use `assignTo` (when refining backlog tickets). Use agent keys that exist on the board (e.g. `backend_engineer`, `research`).
