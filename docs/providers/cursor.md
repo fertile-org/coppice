@@ -62,7 +62,7 @@ enabled = true
 command = "cursor-agent"
 # Optional. A non-empty list replaces the built-in provider (cursor).
 # model_providers = ["cursor"]
-# run_timeout_secs = 600
+# run_timeout_secs = 1800
 ```
 
 Older Coppice versions wrote `command = "agent"`. Grok also installs an `agent` command, so Coppice reads that old value as `cursor-agent`.

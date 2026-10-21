@@ -1074,6 +1074,10 @@ fn default_opencode_command() -> String {
     "opencode".into()
 }
 
+/// Wall-clock limit for one agent run when a connector sets no `run_timeout_secs`.
+/// Shared by every connector so their defaults can't drift apart.
+const DEFAULT_RUN_TIMEOUT_SECS: u64 = 1800;
+
 fn default_opencode_host() -> String {
     "127.0.0.1".into()
 }
@@ -1083,7 +1087,7 @@ fn default_opencode_port() -> u16 {
 }
 
 fn default_opencode_run_timeout_secs() -> u64 {
-    1800
+    DEFAULT_RUN_TIMEOUT_SECS
 }
 
 impl Default for OpenCodeConnectorConfig {
@@ -1132,7 +1136,7 @@ fn default_codex_command() -> String {
 }
 
 fn default_codex_run_timeout_secs() -> u64 {
-    600
+    DEFAULT_RUN_TIMEOUT_SECS
 }
 
 impl Default for CodexConnectorConfig {
@@ -1147,7 +1151,7 @@ impl Default for CodexConnectorConfig {
 }
 
 fn default_claude_code_run_timeout_secs() -> u64 {
-    600
+    DEFAULT_RUN_TIMEOUT_SECS
 }
 
 impl Default for ClaudeCodeConnectorConfig {
@@ -1180,7 +1184,7 @@ fn default_kilo_code_command() -> String {
 }
 
 fn default_kilo_code_run_timeout_secs() -> u64 {
-    600
+    DEFAULT_RUN_TIMEOUT_SECS
 }
 
 impl Default for KiloCodeConnectorConfig {
@@ -1197,7 +1201,7 @@ impl Default for KiloCodeConnectorConfig {
 /// Config for a CLI connector with a command, a run timeout, and model
 /// providers. Each gets its own type so its serde defaults are its own.
 macro_rules! cli_connector_config {
-    ($name:ident, $alias:ident, $command:literal, $timeout:literal) => {
+    ($name:ident, $alias:ident, $command:literal, $timeout:expr) => {
         #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
         #[serde(default)]
         pub struct $name {
@@ -1228,11 +1232,26 @@ cli_connector_config!(
     CopilotConnectorConfig,
     CopilotProviderConfig,
     "copilot",
-    600
+    DEFAULT_RUN_TIMEOUT_SECS
 );
-cli_connector_config!(QwenCodeConnectorConfig, QwenCodeProviderConfig, "qwen", 600);
-cli_connector_config!(KimiConnectorConfig, KimiProviderConfig, "kimi", 600);
-cli_connector_config!(GrokConnectorConfig, GrokProviderConfig, "grok", 600);
+cli_connector_config!(
+    QwenCodeConnectorConfig,
+    QwenCodeProviderConfig,
+    "qwen",
+    DEFAULT_RUN_TIMEOUT_SECS
+);
+cli_connector_config!(
+    KimiConnectorConfig,
+    KimiProviderConfig,
+    "kimi",
+    DEFAULT_RUN_TIMEOUT_SECS
+);
+cli_connector_config!(
+    GrokConnectorConfig,
+    GrokProviderConfig,
+    "grok",
+    DEFAULT_RUN_TIMEOUT_SECS
+);
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct CursorConnectorConfig {
@@ -1272,7 +1291,7 @@ where
 }
 
 fn default_cursor_run_timeout_secs() -> u64 {
-    600
+    DEFAULT_RUN_TIMEOUT_SECS
 }
 
 impl Default for CursorConnectorConfig {
@@ -1728,7 +1747,7 @@ mod tests {
     fn claude_code_connector_defaults() {
         let cfg = ClaudeCodeConnectorConfig::default();
         assert_eq!(cfg.enabled, None);
-        assert_eq!(cfg.run_timeout_secs, 600);
+        assert_eq!(cfg.run_timeout_secs, 1800);
         assert!(cfg.model_providers.is_empty());
     }
 
@@ -1763,7 +1782,7 @@ mod tests {
     fn codex_connector_defaults() {
         let cfg = CodexConnectorConfig::default();
         assert_eq!(cfg.enabled, None);
-        assert_eq!(cfg.run_timeout_secs, 600);
+        assert_eq!(cfg.run_timeout_secs, 1800);
         assert!(cfg.model_providers.is_empty());
     }
 
@@ -1813,7 +1832,7 @@ mod tests {
         assert_eq!(cfg.qwen_code.command, "/opt/qwen");
         assert_eq!(cfg.qwen_code.run_timeout_secs, 90);
         assert_eq!(cfg.kimi.command, "kimi");
-        assert_eq!(cfg.grok.run_timeout_secs, 600);
+        assert_eq!(cfg.grok.run_timeout_secs, 1800);
         assert_eq!(cfg.command("qwen-code"), Some("/opt/qwen"));
         assert_eq!(cfg.switch("kimi"), ConnectorSwitch::Automatic);
         assert_eq!(cfg.switch("copilot"), ConnectorSwitch::On);
@@ -1824,7 +1843,7 @@ mod tests {
         let cfg = KiloCodeConnectorConfig::default();
         assert_eq!(cfg.enabled, None);
         assert_eq!(cfg.command, "kilo");
-        assert_eq!(cfg.run_timeout_secs, 600);
+        assert_eq!(cfg.run_timeout_secs, 1800);
         assert!(cfg.model_providers.is_empty());
     }
 
@@ -1872,7 +1891,7 @@ mod tests {
         let cfg = CursorConnectorConfig::default();
         assert_eq!(cfg.enabled, None);
         assert_eq!(cfg.command, "cursor-agent");
-        assert_eq!(cfg.run_timeout_secs, 600);
+        assert_eq!(cfg.run_timeout_secs, 1800);
         assert!(cfg.model_providers.is_empty());
     }
 
@@ -1893,7 +1912,33 @@ mod tests {
     #[test]
     fn run_timeout_for_connectors() {
         let mut cfg = AgentConnectorsConfig::default();
-        assert_eq!(cfg.run_timeout_secs("kilo-code"), Some(600));
+        for id in [
+            "claude-code",
+            "codex",
+            "kilo-code",
+            "cursor",
+            "opencode",
+            "copilot",
+            "qwen-code",
+            "kimi",
+            "grok",
+        ] {
+            assert_eq!(cfg.run_timeout_secs(id), Some(1800), "{id}");
+        }
+        let parsed: AgentConnectorsConfig = toml::from_str(
+            r#"
+            [claude-code]
+            enabled = true
+            [codex]
+            enabled = true
+            [grok]
+            enabled = true
+            "#,
+        )
+        .expect("parse");
+        assert_eq!(parsed.run_timeout_secs("claude-code"), Some(1800));
+        assert_eq!(parsed.run_timeout_secs("codex"), Some(1800));
+        assert_eq!(parsed.run_timeout_secs("grok"), Some(1800));
         assert_eq!(cfg.run_timeout_secs("mock"), None);
         assert_eq!(cfg.run_timeout_secs("nope"), None);
         cfg.claude_code.run_timeout_secs = 42;

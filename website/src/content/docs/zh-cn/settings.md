@@ -94,7 +94,7 @@ Kilo Code、GitHub Copilot、Qwen Code 和 Kimi Code 只要被 Coppice 找到就
 | --- | --- | --- | --- |
 | `enabled` | 布尔值 | 未设置：CLI 已登录则开启 | 开启或关闭该连接器。 |
 | `model_providers` | 字符串列表 | `[]` | 该连接器的模型提供商。开启连接器时自动填写。 |
-| `run_timeout_secs` | 整数 | OpenCode 为 `1800`，其他为 `600` | 该连接器上的一次运行超过多少秒算失败。 |
+| `run_timeout_secs` | 整数 | 所有连接器均为 `1800` | 该连接器上的一次运行超过多少秒算失败。 |
 | `command` | 字符串 | `cursor-agent`（Cursor）、`codex`、`opencode`、`kilo`、`copilot`、`qwen`、`kimi`、`grok` | 要运行的 CLI 可执行文件。Claude Code 始终运行 `claude`，没有 `command`。 |
 
 仅限 OpenCode：

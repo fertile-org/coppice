@@ -94,7 +94,7 @@ ID：`claude-code`、`codex`、`cursor`、`opencode`、`kilo-code`、`copilot`�
 | --- | --- | --- | --- |
 | `enabled` | bool | 未設定：CLI がサインイン済みならオン | コネクタをオンまたはオフにします。 |
 | `model_providers` | list of strings | `[]` | このコネクタのモデルプロバイダー。オンにしたときに入力されます。 |
-| `run_timeout_secs` | integer | OpenCode は `1800`、ほかは `600` | このコネクタでの実行が失敗とみなされるまでの秒数。 |
+| `run_timeout_secs` | integer | すべてのコネクタで `1800` | このコネクタでの実行が失敗とみなされるまでの秒数。 |
 | `command` | string | `cursor-agent`（Cursor）、`codex`、`opencode`、`kilo`、`copilot`、`qwen`、`kimi`、`grok` | 実行する CLI のバイナリ。Claude Code は常に `claude` を実行し、`command` はありません。 |
 
 OpenCode のみ：
