@@ -2,7 +2,7 @@ import type { CriterionStatus, PlanCriterion } from '../board/useTickets';
 import { PLAN_COPY } from './copy';
 
 export interface ApprovedPlan {
-  commentId: string;
+  planId: string;
   markdown: string;
   steps: string[];
   criteria?: PlanCriterion[];

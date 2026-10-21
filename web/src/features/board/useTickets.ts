@@ -38,11 +38,18 @@ export interface PlanCriterion {
 }
 
 export interface ApprovedPlan {
-  commentId: string;
+  planId: string;
   markdown: string;
   steps: string[];
   /** Acceptance criteria with the result for the reviewed commit. */
   criteria?: PlanCriterion[];
+}
+
+export interface PendingPlan {
+  planId: string;
+  revision: number;
+  markdown: string;
+  changeRequests: string[];
 }
 
 export interface PlanQuestion {
@@ -87,7 +94,7 @@ export interface Ticket {
   latestPlanRunStatus?: string | null;
   approvedPlan?: ApprovedPlan | null;
   /** In Plan Review: the plan waiting for approval. */
-  pendingPlan?: { commentId: string; markdown: string } | null;
+  pendingPlan?: PendingPlan | null;
   planQuestions?: PlanQuestions | null;
   /** In Plan Review: a plan exists to approve. */
   hasPlan?: boolean;

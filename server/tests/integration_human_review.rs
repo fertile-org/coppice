@@ -621,25 +621,25 @@ async fn seed_approved_plan(fx: &Fixture, markdown: &str) {
         .fetch_one(&pool)
         .await
         .unwrap();
-    let comment_id = Uuid::new_v4();
+    let plan_id = Uuid::new_v4();
     sqlx::query(
         r#"
-        INSERT INTO ticket_comments (id, ticket_id, author_type, body, intent, plan_content_version)
-        VALUES ($1, $2, 'agent', $3, 'plan', $4)
+        INSERT INTO ticket_plans (id, ticket_id, revision, body, content_version)
+        VALUES ($1, $2, 1, $3, $4)
         "#,
     )
-    .bind(comment_id)
+    .bind(plan_id)
     .bind(ticket_id)
     .bind(markdown)
     .bind(version)
     .execute(&pool)
     .await
-    .expect("plan comment");
+    .expect("plan");
     sqlx::query(
-        "UPDATE tickets SET approved_plan_comment_id = $2, approved_plan_content_version = $3 WHERE id = $1",
+        "UPDATE tickets SET approved_plan_id = $2, approved_plan_content_version = $3 WHERE id = $1",
     )
     .bind(ticket_id)
-    .bind(comment_id)
+    .bind(plan_id)
     .bind(version)
     .execute(&pool)
     .await

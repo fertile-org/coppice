@@ -294,7 +294,7 @@ async fn drive_plan_run(
 
     let verifying = run.job_type == crate::domain::workflow::JOB_TYPE_VERIFY_PARENT;
     let revision_input = crate::services::planning_service::PlanningService::new(pool)
-        .revision_context(ticket_id, run.trigger_comment_id)
+        .revision_context(ticket_id)
         .await
         .context("load plan change requests")?;
 
@@ -522,9 +522,13 @@ async fn drive_plan_run(
             .context("move the parent to Human Review")?;
     } else if questions.is_empty() {
         PlanningService::new(pool)
+            .insert_plan(ticket_id, run.agent_id, &summary, Some(run.id))
+            .await
+            .context("insert plan")?;
+        PlanningService::new(pool)
             .bind_latest_plan(ticket_id)
             .await
-            .context("bind plan comment")?;
+            .context("bind plan")?;
         if let AgentRunResult::Done { split_tickets, .. } = &result {
             if !split_tickets.is_empty() {
                 crate::services::split_service::SplitService::new(pool, &state.config.workflow)
@@ -557,16 +561,19 @@ async fn drive_plan_run(
         .await
         .context("load ticket after plan")?;
     crate::events::publish_ticket_updated(&state.event_bus, &updated);
-    let comments = CommentService::new(pool)
-        .list_by_ticket(ticket_id)
-        .await
-        .context("list comments after plan")?;
-    if let Some(comment) = comments.last() {
-        state.event_bus.publish(AppEvent::CommentCreated {
-            comment_id: comment.id,
-            ticket_id,
-            author_type: author_type_to_str(comment.author_type).into(),
-        });
+    let plan_only = !verifying && questions.is_empty();
+    if !plan_only {
+        let comments = CommentService::new(pool)
+            .list_by_ticket(ticket_id)
+            .await
+            .context("list comments after plan")?;
+        if let Some(comment) = comments.last() {
+            state.event_bus.publish(AppEvent::CommentCreated {
+                comment_id: comment.id,
+                ticket_id,
+                author_type: author_type_to_str(comment.author_type).into(),
+            });
+        }
     }
     publish_run_finished(
         state,

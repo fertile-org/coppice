@@ -91,4 +91,21 @@ describe('PlanReviewActions', () => {
     expect(plan.compareDocumentPosition(approve) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(screen.getByText(PLAN_COPY.approveAddsToDescription)).toBeInTheDocument();
   });
+
+  it('shows the revision and a collapsed list of requested changes', () => {
+    wrap(
+      <PlanReviewActions
+        ticketId="t1"
+        boardId="b1"
+        revision={2}
+        changeRequests={['Use Postgres.', 'Split the API change.']}
+        plan={'## Plan\n\n### Approach\nPostgres.'}
+      />,
+    );
+    expect(screen.getByText('Revision 2')).toBeVisible();
+    const requested = screen.getByText(PLAN_COPY.requestedChanges);
+    expect(requested.closest('details')).not.toHaveAttribute('open');
+    expect(screen.getByText('Use Postgres.')).toBeInTheDocument();
+    expect(screen.getByText('Split the API change.')).toBeInTheDocument();
+  });
 });

@@ -34,7 +34,7 @@ pub struct Ticket {
     pub clarification_round: i32,
     pub skip_planning: bool,
     pub content_version: i32,
-    pub approved_plan_comment_id: Option<Uuid>,
+    pub approved_plan_id: Option<Uuid>,
     pub approved_plan_content_version: Option<i32>,
     pub created_by: String,
     pub created_by_id: Option<Uuid>,

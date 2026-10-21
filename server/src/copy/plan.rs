@@ -1,7 +1,7 @@
 //! Copy for planning and Plan Review.
 //!
 //! Replace these strings word for word. The API sends them to the web app,
-//! and planning runs post the plan comment from [`format_plan`].
+//! and planning runs store the plan from [`format_plan`] on `ticket_plans`.
 
 /// Refused drag or status write into In Progress.
 pub const PLAN_REQUIRED: &str =

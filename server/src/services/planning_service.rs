@@ -14,7 +14,7 @@ use crate::copy::plan::{
 };
 use crate::copy::review::is_ready_hold;
 use crate::domain::agent::Agent;
-use crate::domain::comment::{AuthorType, Comment, CommentIntent};
+use crate::domain::comment::{AuthorType, CommentIntent};
 use crate::domain::context_profile::ContextProfile;
 use crate::domain::job::{job_status_to_str, JobStatus};
 use crate::domain::run::{run_status_to_str, RunStatus};
@@ -74,9 +74,23 @@ impl From<crate::services::comment_service::CommentError> for PlanError {
 }
 
 pub struct ApprovedPlan {
-    pub comment_id: Uuid,
+    pub plan_id: Uuid,
     pub markdown: String,
     pub steps: Vec<String>,
+}
+
+/// One plan revision stored off the comment thread.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TicketPlan {
+    pub id: Uuid,
+    pub ticket_id: Uuid,
+    pub run_id: Option<Uuid>,
+    pub agent_id: Option<Uuid>,
+    pub revision: i32,
+    pub body: String,
+    pub content_version: i32,
+    pub change_request: Option<String>,
+    pub created_at: time::OffsetDateTime,
 }
 
 pub struct PlanningService<'a> {
@@ -147,7 +161,7 @@ impl<'a> PlanningService<'a> {
             .get(ticket_id)
             .await?
             .ticket
-            .approved_plan_comment_id
+            .approved_plan_id
             .is_some()
         {
             IMPLEMENTATION_NOT_STARTED
@@ -257,51 +271,88 @@ impl<'a> PlanningService<'a> {
         Ok(StartOutcome::Started(inserted_id))
     }
 
-    /// Post the plan comment and move a Ready ticket to Plan Review.
-    pub async fn record_plan(
+    /// Insert a plan revision. Does not move the ticket; call [`Self::bind_latest_plan`].
+    pub async fn insert_plan(
         &self,
         ticket_id: Uuid,
         agent_id: Uuid,
         summary: &str,
-    ) -> Result<Comment, PlanError> {
-        let body = format_plan(summary);
-        let comment = CommentService::new(self.pool)
-            .create(
-                ticket_id,
-                AuthorType::Agent,
-                Some(agent_id),
-                &body,
-                CommentIntent::Plan,
-                &[],
-                &[],
-            )
-            .await?;
-        self.bind_plan_comment(ticket_id, comment.id).await?;
-        CommentService::new(self.pool)
-            .get(comment.id)
-            .await
-            .map_err(Into::into)
+        run_id: Option<Uuid>,
+    ) -> Result<TicketPlan, PlanError> {
+        self.insert_plan_body(
+            ticket_id,
+            Some(agent_id),
+            run_id,
+            &format_plan(summary),
+            None,
+        )
+        .await
     }
 
-    /// Stamp the newest plan comment and move Ready into Plan Review.
+    async fn insert_plan_body(
+        &self,
+        ticket_id: Uuid,
+        agent_id: Option<Uuid>,
+        run_id: Option<Uuid>,
+        body: &str,
+        revision: Option<i32>,
+    ) -> Result<TicketPlan, PlanError> {
+        let ticket = TicketService::new(self.pool).get(ticket_id).await?;
+        let mut tx = self.pool.begin().await?;
+        sqlx::query("SELECT id FROM tickets WHERE id = $1 FOR UPDATE")
+            .bind(ticket_id)
+            .execute(&mut *tx)
+            .await?;
+        let next = match revision {
+            Some(forced) => forced,
+            None => {
+                let next: i32 = sqlx::query_scalar(
+                    "SELECT COALESCE(MAX(revision), 0) + 1 FROM ticket_plans WHERE ticket_id = $1",
+                )
+                .bind(ticket_id)
+                .fetch_one(&mut *tx)
+                .await?;
+                next
+            }
+        };
+        let id = Uuid::new_v4();
+        let row = sqlx::query(
+            r#"
+            INSERT INTO ticket_plans (
+                id, ticket_id, run_id, agent_id, revision, body, content_version
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
+            RETURNING id, ticket_id, run_id, agent_id, revision, body, content_version,
+                      change_request, created_at
+            "#,
+        )
+        .bind(id)
+        .bind(ticket_id)
+        .bind(run_id)
+        .bind(agent_id)
+        .bind(next)
+        .bind(body)
+        .bind(ticket.ticket.content_version)
+        .fetch_one(&mut *tx)
+        .await?;
+        tx.commit().await?;
+        Ok(row_to_plan(&row))
+    }
+
+    /// Clear approval and move Backlog/Ready into Plan Review.
     pub async fn bind_latest_plan(&self, ticket_id: Uuid) -> Result<(), PlanError> {
-        let Some(comment) = self.latest_plan_comment(ticket_id).await? else {
+        let Some(plan) = self.latest_plan(ticket_id).await? else {
             return Err(PlanError::Validation(NO_PLAN_YET.into()));
         };
-        self.bind_plan_comment(ticket_id, comment.id).await
+        self.bind_plan(ticket_id, plan.id).await
     }
 
-    async fn bind_plan_comment(&self, ticket_id: Uuid, comment_id: Uuid) -> Result<(), PlanError> {
+    async fn bind_plan(&self, ticket_id: Uuid, _plan_id: Uuid) -> Result<(), PlanError> {
         let ticket = TicketService::new(self.pool).get(ticket_id).await?;
-        sqlx::query("UPDATE ticket_comments SET plan_content_version = $2 WHERE id = $1")
-            .bind(comment_id)
-            .bind(ticket.ticket.content_version)
-            .execute(self.pool)
-            .await?;
         sqlx::query(
             r#"
             UPDATE tickets
-            SET approved_plan_comment_id = NULL,
+            SET approved_plan_id = NULL,
                 approved_plan_content_version = NULL,
                 updated_at = now()
             WHERE id = $1
@@ -337,17 +388,17 @@ impl<'a> PlanningService<'a> {
                 plan::APPROVE_WAITING_FOR_ANSWERS.into(),
             ));
         }
-        let Some(plan) = self.latest_plan_comment(ticket_id).await? else {
+        let Some(plan) = self.latest_plan(ticket_id).await? else {
             return Err(PlanError::Validation(NO_PLAN_YET.into()));
         };
-        if plan.plan_content_version != Some(ticket.ticket.content_version) {
+        if plan.content_version != ticket.ticket.content_version {
             return Err(PlanError::Validation(PLAN_STALE.into()));
         }
 
         sqlx::query(
             r#"
             UPDATE tickets
-            SET approved_plan_comment_id = $2,
+            SET approved_plan_id = $2,
                 approved_plan_content_version = $3,
                 updated_at = now()
             WHERE id = $1
@@ -435,7 +486,7 @@ impl<'a> PlanningService<'a> {
         &self,
         parent: &crate::domain::ticket::Ticket,
         pending: &crate::domain::workflow::PendingSplitRecommendation,
-        plan_comment_id: Uuid,
+        plan_id: Uuid,
         workflow: &crate::config::WorkflowConfig,
     ) -> Result<usize, PlanError> {
         let children = crate::services::split_service::SplitService::new(self.pool, workflow)
@@ -452,31 +503,24 @@ impl<'a> PlanningService<'a> {
                 &spec.steps,
                 spec.acceptance_criteria.as_deref(),
             );
-            let comment = CommentService::new(self.pool)
-                .create(
+            let child_plan = self
+                .insert_plan_body(
                     child.id,
-                    AuthorType::Agent,
                     Some(pending.recommended_by_agent_id),
+                    None,
                     &body,
-                    CommentIntent::Plan,
-                    &[],
-                    &[],
+                    Some(1),
                 )
-                .await?;
-            sqlx::query("UPDATE ticket_comments SET plan_content_version = $2 WHERE id = $1")
-                .bind(comment.id)
-                .bind(child.content_version)
-                .execute(self.pool)
                 .await?;
             sqlx::query(
                 r#"
                 UPDATE tickets
-                SET approved_plan_comment_id = $2, approved_plan_content_version = $3, updated_at = now()
+                SET approved_plan_id = $2, approved_plan_content_version = $3, updated_at = now()
                 WHERE id = $1
                 "#,
             )
             .bind(child.id)
-            .bind(comment.id)
+            .bind(child_plan.id)
             .bind(child.content_version)
             .execute(self.pool)
             .await?;
@@ -486,13 +530,13 @@ impl<'a> PlanningService<'a> {
             .await?;
         sqlx::query(
             r#"
-            INSERT INTO ticket_plan_splits (parent_ticket_id, plan_comment_id)
+            INSERT INTO ticket_plan_splits (parent_ticket_id, plan_id)
             VALUES ($1, $2)
-            ON CONFLICT (parent_ticket_id) DO UPDATE SET plan_comment_id = EXCLUDED.plan_comment_id
+            ON CONFLICT (parent_ticket_id) DO UPDATE SET plan_id = EXCLUDED.plan_id
             "#,
         )
         .bind(parent.id)
-        .bind(plan_comment_id)
+        .bind(plan_id)
         .execute(self.pool)
         .await?;
         Ok(children.len())
@@ -676,9 +720,7 @@ impl<'a> PlanningService<'a> {
         let blocked: bool = sqlx::query_scalar(
             r#"
             SELECT EXISTS(SELECT 1 FROM ticket_plan_questions WHERE ticket_id = $1)
-                OR EXISTS(
-                    SELECT 1 FROM ticket_comments WHERE ticket_id = $1 AND intent = 'plan'
-                )
+                OR EXISTS(SELECT 1 FROM ticket_plans WHERE ticket_id = $1)
             "#,
         )
         .bind(ticket_id)
@@ -787,9 +829,9 @@ impl<'a> PlanningService<'a> {
         if ticket.ticket.status != TicketStatus::PlanReview {
             return Err(PlanError::Validation(ASK_ONLY_FROM_PLAN_REVIEW.into()));
         }
-        if self.latest_plan_comment(ticket_id).await?.is_none() {
+        let Some(plan) = self.latest_plan(ticket_id).await? else {
             return Err(PlanError::Validation(NO_PLAN_YET.into()));
-        }
+        };
         if body.trim().is_empty() {
             return Err(PlanError::Validation(ASK_COMMENT_REQUIRED.into()));
         }
@@ -797,16 +839,11 @@ impl<'a> PlanningService<'a> {
             return Err(PlanError::Validation(PLAN_ALREADY_RUNNING.into()));
         }
 
-        let comment = CommentService::new(self.pool)
-            .create(
-                ticket_id,
-                AuthorType::Human,
-                None,
-                body.trim(),
-                CommentIntent::ReviewFeedback,
-                &[],
-                &[],
-            )
+        let appended = append_change_request(plan.change_request.as_deref(), body.trim());
+        sqlx::query("UPDATE ticket_plans SET change_request = $2 WHERE id = $1")
+            .bind(plan.id)
+            .bind(&appended)
+            .execute(self.pool)
             .await?;
         // A split proposed with the plan goes with it; the revision may propose another.
         if ticket
@@ -825,7 +862,7 @@ impl<'a> PlanningService<'a> {
         sqlx::query(
             r#"
             UPDATE tickets
-            SET approved_plan_comment_id = NULL,
+            SET approved_plan_id = NULL,
                 approved_plan_content_version = NULL,
                 updated_at = now()
             WHERE id = $1
@@ -835,7 +872,7 @@ impl<'a> PlanningService<'a> {
         .execute(self.pool)
         .await?;
 
-        self.start(ticket_id, Some(comment.id)).await?;
+        self.start(ticket_id, None).await?;
         Ok(())
     }
 
@@ -847,17 +884,16 @@ impl<'a> PlanningService<'a> {
         {
             return Ok(None);
         }
-        let Some(comment_id) = ticket.ticket.approved_plan_comment_id else {
+        let Some(plan_id) = ticket.ticket.approved_plan_id else {
             return Ok(None);
         };
-        let comment = CommentService::new(self.pool)
-            .get(comment_id)
-            .await
-            .map_err(|err| PlanError::Validation(err.to_string()))?;
+        let Some(plan) = self.plan_by_id(plan_id).await? else {
+            return Ok(None);
+        };
         Ok(Some(ApprovedPlan {
-            comment_id: comment.id,
-            steps: plan::checklist_steps(&comment.body),
-            markdown: comment.body,
+            plan_id: plan.id,
+            steps: plan::checklist_steps(&plan.body),
+            markdown: plan.body,
         }))
     }
 
@@ -879,82 +915,78 @@ impl<'a> PlanningService<'a> {
         Ok(id)
     }
 
-    /// For a run started by Ask for changes: the latest plan and every change
-    /// request that started a plan run on this ticket, oldest first. `None`
-    /// for a first plan, or a run started by something else.
+    /// For a revision run: the latest plan and every change request, oldest first.
+    /// `None` when the latest plan has no change request (a first plan).
     pub async fn revision_context(
         &self,
         ticket_id: Uuid,
-        trigger_comment_id: Option<Uuid>,
     ) -> Result<Option<PlanRevisionContext>, PlanError> {
-        let Some(trigger_comment_id) = trigger_comment_id else {
+        let Some(latest) = self.latest_plan(ticket_id).await? else {
             return Ok(None);
         };
-        let trigger_intent: Option<String> =
-            sqlx::query_scalar("SELECT intent FROM ticket_comments WHERE id = $1")
-                .bind(trigger_comment_id)
-                .fetch_optional(self.pool)
-                .await?;
-        if trigger_intent.as_deref() != Some("review_feedback") {
+        if latest
+            .change_request
+            .as_deref()
+            .map(str::trim)
+            .is_none_or(str::is_empty)
+        {
             return Ok(None);
         }
-        let requests: Vec<String> = sqlx::query_scalar(
-            r#"
-            SELECT comment.body
-            FROM ticket_comments comment
-            WHERE comment.ticket_id = $1
-              AND comment.intent = 'review_feedback'
-              AND (
-                  comment.id = $2
-                  OR comment.id IN (
-                      SELECT run.trigger_comment_id
-                      FROM agent_runs run
-                      WHERE run.ticket_id = $1
-                        AND run.job_type = $3
-                        AND run.trigger_comment_id IS NOT NULL
-                  )
-              )
-            ORDER BY comment.created_at, comment.id
-            "#,
-        )
-        .bind(ticket_id)
-        .bind(trigger_comment_id)
-        .bind(JOB_TYPE_PLAN_TICKET)
-        .fetch_all(self.pool)
-        .await?;
-        let previous_plan = self
-            .latest_plan_comment(ticket_id)
-            .await?
-            .map(|comment| comment.body)
-            .unwrap_or_default();
+        let requests = self.change_requests(ticket_id).await?;
         Ok(Some(PlanRevisionContext {
-            previous_plan,
+            previous_plan: latest.body,
             requests,
         }))
     }
 
-    pub async fn latest_plan_comment(&self, ticket_id: Uuid) -> Result<Option<Comment>, PlanError> {
+    /// Every non-null change request on the ticket, oldest revision first.
+    pub async fn change_requests(&self, ticket_id: Uuid) -> Result<Vec<String>, PlanError> {
+        let requests: Vec<String> = sqlx::query_scalar(
+            r#"
+            SELECT change_request
+            FROM ticket_plans
+            WHERE ticket_id = $1
+              AND change_request IS NOT NULL
+              AND btrim(change_request) <> ''
+            ORDER BY revision ASC, created_at ASC
+            "#,
+        )
+        .bind(ticket_id)
+        .fetch_all(self.pool)
+        .await?;
+        Ok(requests)
+    }
+
+    pub async fn latest_plan(&self, ticket_id: Uuid) -> Result<Option<TicketPlan>, PlanError> {
         let row = sqlx::query(
             r#"
-            SELECT id
-            FROM ticket_comments
-            WHERE ticket_id = $1 AND intent = 'plan'
-            ORDER BY created_at DESC, id DESC
+            SELECT id, ticket_id, run_id, agent_id, revision, body, content_version,
+                   change_request, created_at
+            FROM ticket_plans
+            WHERE ticket_id = $1
+            ORDER BY revision DESC
             LIMIT 1
             "#,
         )
         .bind(ticket_id)
         .fetch_optional(self.pool)
         .await?;
-        let Some(row) = row else {
-            return Ok(None);
-        };
-        let id: Uuid = row.get("id");
-        CommentService::new(self.pool)
-            .get(id)
-            .await
-            .map(Some)
-            .map_err(Into::into)
+        Ok(row.as_ref().map(row_to_plan))
+    }
+
+    async fn plan_by_id(&self, plan_id: Uuid) -> Result<Option<TicketPlan>, PlanError> {
+        let row = sqlx::query(
+            r#"
+            SELECT id, ticket_id, run_id, agent_id, revision, body, content_version,
+                   change_request, created_at
+            FROM ticket_plans
+            WHERE id = $1
+            "#,
+        )
+        .bind(plan_id)
+        .fetch_optional(self.pool)
+        .await?;
+        Ok(row.as_ref().map(row_to_plan))
     }
 }
 
@@ -982,6 +1014,27 @@ pub struct PlanQuestionsState {
 pub struct PlanRevisionContext {
     pub previous_plan: String,
     pub requests: Vec<String>,
+}
+
+fn row_to_plan(row: &sqlx::postgres::PgRow) -> TicketPlan {
+    TicketPlan {
+        id: row.get("id"),
+        ticket_id: row.get("ticket_id"),
+        run_id: row.get("run_id"),
+        agent_id: row.get("agent_id"),
+        revision: row.get("revision"),
+        body: row.get("body"),
+        content_version: row.get("content_version"),
+        change_request: row.get("change_request"),
+        created_at: row.get("created_at"),
+    }
+}
+
+fn append_change_request(existing: Option<&str>, added: &str) -> String {
+    match existing.map(str::trim).filter(|text| !text.is_empty()) {
+        Some(prev) => format!("{prev}\n\n{added}"),
+        None => added.to_string(),
+    }
 }
 
 fn map_capacity_error(err: ReviewCapacityError) -> PlanError {
@@ -1098,6 +1151,19 @@ mod tests {
             status_after_planning_run(TicketStatus::PlanReview),
             None,
             "approval is a separate move from the planning run"
+        );
+    }
+
+    #[test]
+    fn a_second_ask_appends_to_the_same_revision() {
+        assert_eq!(append_change_request(None, "Use Postgres."), "Use Postgres.");
+        assert_eq!(
+            append_change_request(Some("Use Postgres."), "Split the API."),
+            "Use Postgres.\n\nSplit the API."
+        );
+        assert_eq!(
+            append_change_request(Some("  "), "Only this."),
+            "Only this."
         );
     }
 }
