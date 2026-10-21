@@ -60,7 +60,7 @@ enabled = true
 command = "kilo"
 # Optional. A non-empty list replaces the providers read from `kilo models`.
 # model_providers = ["anthropic", "openai"]
-# run_timeout_secs = 600
+# run_timeout_secs = 1800
 ```
 
 ## If something goes wrong

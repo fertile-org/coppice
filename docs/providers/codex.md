@@ -59,7 +59,7 @@ Optional config (usually set by `enable`):
 enabled = true
 # Optional. A non-empty list replaces the built-in provider (openai).
 # model_providers = ["openai", "azure"]
-# run_timeout_secs = 600
+# run_timeout_secs = 1800
 ```
 
 ## If something goes wrong

@@ -94,7 +94,7 @@ Ids : `claude-code`, `codex`, `cursor`, `opencode`, `kilo-code`, `copilot`, `qwe
 | --- | --- | --- | --- |
 | `enabled` | bool | non défini : activé si la CLI est connectée | Active ou désactive le connecteur. |
 | `model_providers` | list of strings | `[]` | Fournisseurs de modèles pour ce connecteur. Remplis quand vous l’activez. |
-| `run_timeout_secs` | integer | `1800` pour OpenCode, `600` pour les autres | Secondes avant qu’un lancement sur ce connecteur échoue. |
+| `run_timeout_secs` | integer | `1800` pour tous les connecteurs | Secondes avant qu’un lancement sur ce connecteur échoue. |
 | `command` | string | `cursor-agent` (Cursor), `codex`, `opencode`, `kilo`, `copilot`, `qwen`, `kimi`, `grok` | Le binaire de CLI à lancer. Claude Code lance toujours `claude` et n’a pas de `command`. |
 
 OpenCode uniquement :

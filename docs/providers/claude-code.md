@@ -59,7 +59,7 @@ Optional config (usually set by `enable`):
 enabled = true
 # Optional. A non-empty list replaces the built-in providers (sonnet, opus, haiku, fable).
 # model_providers = ["sonnet", "opus", "haiku", "fable"]
-# run_timeout_secs = 600
+# run_timeout_secs = 1800
 ```
 
 ## If something goes wrong

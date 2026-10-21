@@ -101,7 +101,7 @@ Các id: `claude-code`, `codex`, `cursor`, `opencode`, `kilo-code`, `copilot`, `
 | --- | --- | --- | --- |
 | `enabled` | bool | không đặt: bật nếu CLI đã đăng nhập | Bật hoặc tắt connector. |
 | `model_providers` | list of strings | `[]` | Các nhà cung cấp model cho connector này. Được điền khi bạn bật nó. |
-| `run_timeout_secs` | integer | `1800` với OpenCode, `600` với các connector khác | Chạy quá số giây này trên connector đó thì báo lỗi. |
+| `run_timeout_secs` | integer | `1800` với mọi connector | Chạy quá số giây này trên connector đó thì báo lỗi. |
 | `command` | string | `cursor-agent` (Cursor), `codex`, `opencode`, `kilo`, `copilot`, `qwen`, `kimi`, `grok` | File chạy của CLI. Claude Code luôn chạy `claude` và không có `command`. |
 
 Chỉ dành cho OpenCode:
