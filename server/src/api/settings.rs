@@ -2,7 +2,7 @@ use crate::api::auth::{pool_from_state, AuthUser};
 use crate::connectors_runtime::ConfigFileError;
 use crate::domain::agent::Agent;
 use crate::middleware::admin::AdminUser;
-use crate::providers::READ_ONLY_CAPABLE_CONNECTORS;
+use crate::providers::{descriptor, READ_ONLY_CAPABLE_CONNECTORS};
 use crate::services::workspace_settings_service::{
     WorkspaceSettingsError, WorkspaceSettingsService,
 };
@@ -79,16 +79,34 @@ struct CompactionAgentResponse {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
+struct ReadOnlyConnectorResponse {
+    id: &'static str,
+    display_name: &'static str,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 struct KnowledgeSettingsResponse {
     compaction_agent_id: Option<Uuid>,
     compaction_agent: Option<CompactionAgentResponse>,
-    read_only_connectors: &'static [&'static str],
+    read_only_connectors: Vec<ReadOnlyConnectorResponse>,
 }
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct KnowledgeSettingsBody {
     compaction_agent_id: Option<Uuid>,
+}
+
+fn read_only_connectors() -> Vec<ReadOnlyConnectorResponse> {
+    READ_ONLY_CAPABLE_CONNECTORS
+        .iter()
+        .copied()
+        .map(|id| ReadOnlyConnectorResponse {
+            id,
+            display_name: descriptor(id).map(|d| d.display_name).unwrap_or(id),
+        })
+        .collect()
 }
 
 fn settings_response(agent: Option<Agent>) -> KnowledgeSettingsResponse {
@@ -100,7 +118,7 @@ fn settings_response(agent: Option<Agent>) -> KnowledgeSettingsResponse {
             enabled: agent.enabled,
             connector: agent.connector,
         }),
-        read_only_connectors: READ_ONLY_CAPABLE_CONNECTORS,
+        read_only_connectors: read_only_connectors(),
     }
 }
 

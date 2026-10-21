@@ -1,5 +1,10 @@
 import { z } from 'zod';
 
+export const readOnlyConnectorSchema = z.object({
+  id: z.string(),
+  displayName: z.string(),
+});
+
 export const knowledgeSettingsSchema = z.object({
   compactionAgentId: z.string().uuid().nullable(),
   compactionAgent: z
@@ -10,7 +15,7 @@ export const knowledgeSettingsSchema = z.object({
       connector: z.string(),
     })
     .nullable(),
-  readOnlyConnectors: z.array(z.string()),
+  readOnlyConnectors: z.array(readOnlyConnectorSchema),
 });
 
 export type KnowledgeSettings = z.infer<typeof knowledgeSettingsSchema>;

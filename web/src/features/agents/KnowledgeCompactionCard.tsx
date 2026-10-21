@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import { Combobox } from '../../components/ui/combobox';
 import { ApiError } from '../../lib/api';
+import type { KnowledgeSettings } from '../../lib/schemas/settings';
 import { useSession } from '../auth/useSession';
 import { formatInterval, pluralTickets } from '../knowledge/compactionFormat';
 import { useCompactionStatus } from '../knowledge/useCompaction';
@@ -13,6 +14,24 @@ import type { Agent } from './useAgents';
 
 export const KNOWLEDGE_COMPACTION_ANCHOR = 'knowledge-compaction';
 const NO_READ_ONLY_REASON = "Can't run compaction safely";
+
+function formatConnectorList(
+  connectors: KnowledgeSettings['readOnlyConnectors'],
+): string {
+  const names = connectors.map((connector) => connector.displayName);
+  if (names.length <= 1) return names[0] ?? '';
+  if (names.length === 2) return `${names[0]} or ${names[1]}`;
+  return `${names.slice(0, -1).join(', ')}, or ${names[names.length - 1]}`;
+}
+
+function incapableAgentWarning(
+  connectors: KnowledgeSettings['readOnlyConnectors'],
+): string {
+  const list = formatConnectorList(connectors);
+  return list
+    ? `This agent's CLI can't run compaction safely. Pick an agent that uses ${list}.`
+    : "This agent's CLI can't run compaction safely.";
+}
 
 function errorMessage(error: unknown): string {
   if (error instanceof ApiError) {
@@ -58,7 +77,7 @@ export function KnowledgeCompactionCard({
   const readOnlyConnectors = settingsQuery.data?.readOnlyConnectors ?? [];
   const current = settingsQuery.data?.compactionAgent ?? null;
   const canRunCompaction = (agent: Pick<Agent, 'connector'>) =>
-    readOnlyConnectors.includes(agent.connector);
+    readOnlyConnectors.some((connector) => connector.id === agent.connector);
   const options = agents.filter(
     (agent) => agent.enabled || agent.id === savedId,
   );
@@ -188,7 +207,7 @@ export function KnowledgeCompactionCard({
       )}
       {selectedInvalid && (
         <p className="mt-3 rounded-md bg-amber-100 px-3 py-2 font-body text-sm text-amber-900">
-          This agent's CLI can't run compaction safely. Pick an agent that uses OpenCode.
+          {incapableAgentWarning(readOnlyConnectors)}
         </p>
       )}
       {error && (
