@@ -1,6 +1,6 @@
+use crate::sessions::run_registry::is_console_event_type;
 use std::collections::HashMap;
 use std::path::PathBuf;
-use crate::sessions::run_registry::is_console_event_type;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -11,15 +11,16 @@ use tokio::sync::{oneshot, watch};
 
 use crate::domain::comment::{author_type_to_str, CommentIntent};
 use crate::domain::context_profile::ContextProfile;
-use crate::mcp::grant::{grant_for_run, McpAccess};
-use crate::mcp::token::NewRunToolScope;
-use crate::mcp::tools::result::prefer_submitted_result;
 use crate::domain::run::{run_status_to_str, AgentRun, RunStatus};
 use crate::domain::slug::slugify;
 use crate::domain::substatus::TicketStatus;
 use crate::domain::ticket::{status_to_str, substatus_to_str};
 use crate::domain::workflow::is_ready_tech_lead_refinement;
 use crate::events::{publish_run_finished, AppEvent};
+use crate::mcp::grant::{grant_for_run, McpAccess};
+use crate::mcp::token::NewRunToolScope;
+use crate::mcp::tools::result::prefer_submitted_result;
+use crate::plugins::skills::required_skill;
 use crate::providers::{
     connector_supports_chat_resume, is_resume_session_invalid, AgentRunInput, AgentRunResult,
     ProviderError,
@@ -29,7 +30,6 @@ use crate::services::agent_service::AgentService;
 use crate::services::artifact_service::{ArtifactService, RunArtifactMeta, RunArtifactPaths};
 use crate::services::comment_service::CommentService;
 use crate::services::connector_check_service::ConnectorCheckService;
-use crate::plugins::skills::required_skill;
 use crate::services::context_builder::{
     build_tool_first_context, write_context_document, ContextInput, HumanRequest,
 };
@@ -95,32 +95,49 @@ pub fn spawn_workers(state: Arc<AppState>) {
 async fn process_one(state: &AppState, worker_id: &str) -> anyhow::Result<()> {
     let pool = state.db.as_ref().context("no db")?;
     let job_svc = JobService::new(pool);
-    let job = job_svc.claim_next(worker_id).await?;
-    let Some(job) = job else {
-        return Ok(());
-    };
+    let (job, run, _slot) = {
+        let _claim = state.connector_slots.lock_claim().await;
+        let excluded = state
+            .connector_slots
+            .saturated(&state.config.agent.connectors);
+        let job = job_svc.claim_next_excluding(worker_id, &excluded).await?;
+        let Some(job) = job else {
+            return Ok(());
+        };
 
-    let run_svc = RunService::new(pool);
-    let run = run_svc.get(job.run_id).await.context("load run")?;
+        let run_svc = RunService::new(pool);
+        let run = run_svc.get(job.run_id).await.context("load run")?;
 
-    if run.status != RunStatus::Queued {
-        tracing::debug!(
-            run_id = %run.id,
-            job_id = %job.id,
-            status = %run_status_to_str(run.status),
-            "discarding stale job for inactive run"
-        );
-        job_svc
-            .mark_failed(job.id, "stale job for inactive run")
-            .await?;
-        if let Err(err) = ConnectorCheckService::new(pool)
-            .fail_for_run(run.id, "stale job for inactive run")
-            .await
-        {
-            tracing::warn!(run_id = %run.id, error = %err, "failed to fail connector check for stale job");
+        if run.status != RunStatus::Queued {
+            tracing::debug!(
+                run_id = %run.id,
+                job_id = %job.id,
+                status = %run_status_to_str(run.status),
+                "discarding stale job for inactive run"
+            );
+            job_svc
+                .mark_failed(job.id, "stale job for inactive run")
+                .await?;
+            if let Err(err) = ConnectorCheckService::new(pool)
+                .fail_for_run(run.id, "stale job for inactive run")
+                .await
+            {
+                tracing::warn!(run_id = %run.id, error = %err, "failed to fail connector check for stale job");
+            }
+            return Ok(());
         }
-        return Ok(());
-    }
+
+        let connector = run_svc
+            .agent_connector_for_run(run.agent_id)
+            .await
+            .ok()
+            .flatten();
+        let slot = connector
+            .as_ref()
+            .map(|name| state.connector_slots.acquire(name));
+        (job, run, slot)
+    };
+    let run_svc = RunService::new(pool);
 
     // Before the run starts, so a client opening its live console picks the
     // right view from the first event.
@@ -457,31 +474,28 @@ async fn execute_job(
         _ => None,
     };
 
-    let consultation_request_owned =
-        if run.job_type == "respond_to_mention" && run.context_profile == ContextProfile::Full {
-            let trigger_comment_id = run
-                .trigger_comment_id
-                .context("consultation run has no trigger comment")?;
-            let body = trigger_body
-                .as_deref()
-                .context("consultation trigger comment has no body")?;
-            let mention = MentionService::new(pool)
-                .find_pending_for_agent_and_comment(
-                    ticket_id,
-                    run.agent_id,
-                    Some(trigger_comment_id),
-                )
-                .await
-                .context("load consultation trigger mention")?
-                .context("consultation run has no pending linked mention")?;
-            Some(consultation_request_from_trigger(
-                body,
-                &mention,
-                run.agent_id,
-            )?)
-        } else {
-            None
-        };
+    let consultation_request_owned = if run.job_type == "respond_to_mention"
+        && run.context_profile == ContextProfile::Full
+    {
+        let trigger_comment_id = run
+            .trigger_comment_id
+            .context("consultation run has no trigger comment")?;
+        let body = trigger_body
+            .as_deref()
+            .context("consultation trigger comment has no body")?;
+        let mention = MentionService::new(pool)
+            .find_pending_for_agent_and_comment(ticket_id, run.agent_id, Some(trigger_comment_id))
+            .await
+            .context("load consultation trigger mention")?
+            .context("consultation run has no pending linked mention")?;
+        Some(consultation_request_from_trigger(
+            body,
+            &mention,
+            run.agent_id,
+        )?)
+    } else {
+        None
+    };
     let consultation_request_ref = consultation_request_owned.as_deref();
 
     let local_path: String = repo_row.get("local_path");
@@ -617,30 +631,33 @@ async fn execute_job(
         .into_owned();
 
     let connector_name = &agent.connector;
-    let connector = state.connectors.registry().get(connector_name).ok_or_else(|| {
-        anyhow::anyhow!(crate::connectors_runtime::connector_unavailable_message(
-            connector_name
-        ))
-    })?;
+    let connector = state
+        .connectors
+        .registry()
+        .get(connector_name)
+        .ok_or_else(|| {
+            anyhow::anyhow!(crate::connectors_runtime::connector_unavailable_message(
+                connector_name
+            ))
+        })?;
 
-    let session_created_tx = if crate::providers::descriptor(connector_name)
-        .is_some_and(|d| d.caps.session_events)
-    {
-        let (tx, mut rx) = watch::channel(String::new());
-        let pool = pool.clone();
-        let run_id = run.id;
-        tokio::spawn(async move {
-            if rx.changed().await.is_ok() {
-                let sid = rx.borrow().clone();
-                if !sid.is_empty() {
-                    let _ = RunService::new(&pool).set_session_id(run_id, &sid).await;
+    let session_created_tx =
+        if crate::providers::descriptor(connector_name).is_some_and(|d| d.caps.session_events) {
+            let (tx, mut rx) = watch::channel(String::new());
+            let pool = pool.clone();
+            let run_id = run.id;
+            tokio::spawn(async move {
+                if rx.changed().await.is_ok() {
+                    let sid = rx.borrow().clone();
+                    if !sid.is_empty() {
+                        let _ = RunService::new(&pool).set_session_id(run_id, &sid).await;
+                    }
                 }
-            }
-        });
-        Some(tx)
-    } else {
-        None
-    };
+            });
+            Some(tx)
+        } else {
+            None
+        };
 
     let provider_result = connector
         .run(AgentRunInput {
@@ -662,7 +679,7 @@ async fn execute_job(
             session_created_tx,
             resume_context,
             resume_session_id: load_resume_session_id(pool, run, connector_name).await,
-                    read_only_tools: false,
+            read_only_tools: false,
             mcp: Some(grant.access.clone()),
         })
         .await;
@@ -696,9 +713,9 @@ async fn execute_job(
                 "after provider error",
             );
             state.run_streams.remove(run.id);
-            return Err(anyhow::Error::new(err).context(format!(
-                "connector `{connector_name}` run failed"
-            )));
+            return Err(
+                anyhow::Error::new(err).context(format!("connector `{connector_name}` run failed"))
+            );
         }
     };
 
@@ -778,11 +795,19 @@ async fn execute_job(
                 .ok();
         }
         ReviewerBriefService::new(pool)
-            .record(ticket_id, &result, brief_commit_sha.as_deref().unwrap_or(""))
+            .record(
+                ticket_id,
+                &result,
+                brief_commit_sha.as_deref().unwrap_or(""),
+            )
             .await
             .context("store reviewer brief")?;
         crate::services::criteria_results::CriteriaResultsService::new(pool)
-            .record(ticket_id, &result, brief_commit_sha.as_deref().unwrap_or(""))
+            .record(
+                ticket_id,
+                &result,
+                brief_commit_sha.as_deref().unwrap_or(""),
+            )
             .await
             .context("store acceptance criteria results")?;
     }
@@ -801,12 +826,9 @@ async fn execute_job(
         .await
         .context("finish run via orchestrator")?;
 
-    if let Err(err) = TicketGitService::new(
-        pool,
-        PathBuf::from(&state.config.agent.worktrees_path),
-    )
-    .note_branch_head(ticket_id)
-    .await
+    if let Err(err) = TicketGitService::new(pool, PathBuf::from(&state.config.agent.worktrees_path))
+        .note_branch_head(ticket_id)
+        .await
     {
         tracing::warn!(
             ticket_id = %ticket_id,
@@ -955,11 +977,15 @@ async fn invoke_chat_provider(
     resume_session_id: Option<String>,
     mcp: McpAccess,
 ) -> Result<AgentRunResult, ProviderError> {
-    let connector = state.connectors.registry().get(connector_name).ok_or_else(|| {
-        ProviderError::InvalidInput(crate::connectors_runtime::connector_unavailable_message(
-            connector_name,
-        ))
-    })?;
+    let connector = state
+        .connectors
+        .registry()
+        .get(connector_name)
+        .ok_or_else(|| {
+            ProviderError::InvalidInput(crate::connectors_runtime::connector_unavailable_message(
+                connector_name,
+            ))
+        })?;
     let (session_created_tx, session_persisted) =
         match spawn_chat_session_created_tx(pool.clone(), run.id, connector_name) {
             Some((tx, persisted)) => (Some(tx), Some(persisted)),
@@ -1065,7 +1091,10 @@ async fn execute_chat_turn(
     .context("mint chat tool token")?;
 
     let connector_name = agent.connector.as_str();
-    let stored_resume = session.provider_session_id.clone().filter(|s| !s.is_empty());
+    let stored_resume = session
+        .provider_session_id
+        .clone()
+        .filter(|s| !s.is_empty());
     let connector_matches = session.provider_session_connector.as_deref() == Some(connector_name);
     let mut chat_resume_attempted = false;
     let mut chat_resume_used = false;
@@ -1215,7 +1244,14 @@ async fn execute_chat_turn(
     let result = match provider_result {
         Ok(result) => result,
         Err(ProviderError::Cancelled) => {
-            best_effort_persist_artifacts(state, &stream, run.id, connector_name, None, "after cancel");
+            best_effort_persist_artifacts(
+                state,
+                &stream,
+                run.id,
+                connector_name,
+                None,
+                "after cancel",
+            );
             state.run_streams.remove(run.id);
             return Err(JobCancelled.into());
         }
@@ -1232,9 +1268,8 @@ async fn execute_chat_turn(
                 "after provider error",
             );
             state.run_streams.remove(run.id);
-            return Err(anyhow::Error::new(err).context(format!(
-                "connector `{connector_name}` chat turn failed"
-            )));
+            return Err(anyhow::Error::new(err)
+                .context(format!("connector `{connector_name}` chat turn failed")));
         }
     };
 

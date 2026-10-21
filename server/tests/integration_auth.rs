@@ -30,6 +30,7 @@ async fn test_state_with_db() -> Arc<AppState> {
         connector_probes: Arc::new(
             coppice_server::services::connector_probe_service::ConnectorProbes::new(),
         ),
+        connector_slots: Arc::new(coppice_server::workers::connector_slots::ConnectorSlots::new()),
         database_url: AppState::share_database_url(&config.database.url),
         config,
         db: Some(pool),

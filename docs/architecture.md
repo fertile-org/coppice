@@ -80,19 +80,20 @@ providers/codex.rs         subprocess connector (codex exec, host-managed auth)
 providers/cursor.rs        subprocess connector (agent -p, host-managed auth)
 providers/kilo_code.rs     subprocess connector (kilo run, host-managed auth)
 services/run_service.rs   create/cancel/finish runs
-services/job_service.rs   enqueue, claim (SKIP LOCKED), mark done/failed
+services/job_service.rs   enqueue, claim_next / claim_next_excluding (SKIP LOCKED), mark done/failed
 services/repo_service.rs       global registered repos (local_path, verify)
 services/worktree_service.rs   worktree per (ticket, agent) from registered local_path
 services/context_builder.rs    write the slim tool-first .agent/context.md (agent, task, repo, skills, tool pointers)
 services/result_contract.rs    apply nextStatus, comments, blocker metadata
 workers/job_worker.rs     poll queue, run pipeline, spawn at server startup
+workers/connector_slots.rs in-process per-connector in-flight counts + claim mutex
 ```
 
 **Registered repositories:** Admin registers operator-managed git checkouts via `local_path` (instance-wide). Optional `remote_url` for display and future PR APIs. Coppice does **not** `git clone`. See [M03 registered repositories spec](superpowers/specs/2026-06-08-m03-registered-repositories-design.md).
 
 **Stage owners (In Review, In QA):** when an implementer finishes, the workflow gate moves the ticket to In Review; when the Tech Lead approves, to In QA. `WorkflowService::resolve_transition` picks the owner for that stage: an eligible `assignTo` from the finishing agent wins, else the oldest enabled eligible agent (`domain/workflow.rs` `stage_owner_for`: Tech Lead or reviewer for In Review, QC for In QA), with a system note when an `assignTo` was replaced. With no eligible agent the ticket enters the stage unassigned and a note names the missing role. The orchestrator starts the new owner's `work_on_ticket` run when `auto_start_runs` is on; `workflow.auto_assign` for the source status turns the assignment into a pending recommendation. A person dragging a card into In Review or In QA goes through `StageOwnerService::on_entered_review_stage`, which applies `auto_assign` for the target status and does nothing while the ticket has a queued or running run. Plan Review and Wait for Human Review are the only stops that wait for a person.
 
-**Run pipeline (worker):** claim pending job → load run/ticket/agent/repo → validate repo `local_path` → mark running → ensure worktree from registered path (`WORKTREES_PATH/TICKET-{id}-{agent}-{repo}/`) → write context file → mint a gateway token → call `AgentProvider::run` → apply result contract → revoke the token → finish run.
+**Run pipeline (worker):** under the in-process claim mutex, list connectors already at `max_concurrent_runs` and `claim_next_excluding` those ids (`agent_jobs → agent_runs → agents`, `FOR UPDATE OF` the job row `SKIP LOCKED`) → load run/ticket/agent/repo → validate repo `local_path` → count the job against its connector (`ConnectorSlots`) → mark running → ensure worktree from registered path (`WORKTREES_PATH/TICKET-{id}-{agent}-{repo}/`) → write context file → mint a gateway token → call `AgentProvider::run` → apply result contract → revoke the token → finish run and drop the slot. `agent.worker_count` is the total cap across connectors (default 8). The in-process mutex is correct because there is one server per database (Compose and desktop). If several servers ever share a DB, switch the claim critical section to `pg_advisory_xact_lock`.
 
 ## Connector layer
 

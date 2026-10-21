@@ -774,6 +774,7 @@ pub struct AgentConfig {
     )]
     ignored_default_connector: Option<String>,
     pub worktrees_path: String,
+    #[serde(default = "default_worker_count")]
     pub worker_count: u32,
     #[serde(default = "default_health_check_interval")]
     pub health_check_interval_secs: u32,
@@ -801,8 +802,16 @@ pub struct AgentConfig {
     pub connectors: AgentConnectorsConfig,
 }
 
+fn default_worker_count() -> u32 {
+    8
+}
+
 fn default_health_check_interval() -> u32 {
     60
+}
+
+fn default_max_concurrent_runs() -> u32 {
+    2
 }
 
 /// How many repository copies one chat keeps. Opening another closes the
@@ -1041,6 +1050,23 @@ impl AgentConnectorsConfig {
             _ => None,
         }
     }
+
+    /// Per-connector in-flight cap. `mock` and unknown ids use 2. Values below 1 count as 1.
+    pub fn max_concurrent_runs(&self, id: &str) -> u32 {
+        let raw = match id {
+            "opencode" => self.opencode.max_concurrent_runs,
+            "claude-code" => self.claude_code.max_concurrent_runs,
+            "codex" => self.codex.max_concurrent_runs,
+            "kilo-code" => self.kilo_code.max_concurrent_runs,
+            "cursor" => self.cursor.max_concurrent_runs,
+            "copilot" => self.copilot.max_concurrent_runs,
+            "qwen-code" => self.qwen_code.max_concurrent_runs,
+            "kimi" => self.kimi.max_concurrent_runs,
+            "grok" => self.grok.max_concurrent_runs,
+            _ => default_max_concurrent_runs(),
+        };
+        raw.max(1)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
@@ -1059,6 +1085,8 @@ pub struct OpenCodeConnectorConfig {
     /// Long shell commands (e.g. full `cargo test --workspace`) can exceed the default.
     #[serde(default = "default_opencode_run_timeout_secs")]
     pub run_timeout_secs: u64,
+    #[serde(default = "default_max_concurrent_runs")]
+    pub max_concurrent_runs: u32,
     #[serde(default)]
     pub model_providers: Vec<String>,
 }
@@ -1098,6 +1126,7 @@ impl Default for OpenCodeConnectorConfig {
             serve_hostname: default_opencode_host(),
             serve_port: default_opencode_port(),
             run_timeout_secs: default_opencode_run_timeout_secs(),
+            max_concurrent_runs: default_max_concurrent_runs(),
             model_providers: Vec::new(),
         }
     }
@@ -1110,6 +1139,8 @@ pub struct ClaudeCodeConnectorConfig {
     pub enabled: Option<bool>,
     #[serde(default = "default_claude_code_run_timeout_secs")]
     pub run_timeout_secs: u64,
+    #[serde(default = "default_max_concurrent_runs")]
+    pub max_concurrent_runs: u32,
     #[serde(default)]
     pub model_providers: Vec<String>,
 }
@@ -1125,6 +1156,8 @@ pub struct CodexConnectorConfig {
     pub command: String,
     #[serde(default = "default_codex_run_timeout_secs")]
     pub run_timeout_secs: u64,
+    #[serde(default = "default_max_concurrent_runs")]
+    pub max_concurrent_runs: u32,
     #[serde(default)]
     pub model_providers: Vec<String>,
 }
@@ -1145,6 +1178,7 @@ impl Default for CodexConnectorConfig {
             enabled: None,
             command: default_codex_command(),
             run_timeout_secs: default_codex_run_timeout_secs(),
+            max_concurrent_runs: default_max_concurrent_runs(),
             model_providers: Vec::new(),
         }
     }
@@ -1159,6 +1193,7 @@ impl Default for ClaudeCodeConnectorConfig {
         Self {
             enabled: None,
             run_timeout_secs: default_claude_code_run_timeout_secs(),
+            max_concurrent_runs: default_max_concurrent_runs(),
             model_providers: Vec::new(),
         }
     }
@@ -1173,6 +1208,8 @@ pub struct KiloCodeConnectorConfig {
     pub command: String,
     #[serde(default = "default_kilo_code_run_timeout_secs")]
     pub run_timeout_secs: u64,
+    #[serde(default = "default_max_concurrent_runs")]
+    pub max_concurrent_runs: u32,
     #[serde(default)]
     pub model_providers: Vec<String>,
 }
@@ -1193,6 +1230,7 @@ impl Default for KiloCodeConnectorConfig {
             enabled: None,
             command: default_kilo_code_command(),
             run_timeout_secs: default_kilo_code_run_timeout_secs(),
+            max_concurrent_runs: default_max_concurrent_runs(),
             model_providers: Vec::new(),
         }
     }
@@ -1210,6 +1248,7 @@ macro_rules! cli_connector_config {
             pub enabled: Option<bool>,
             pub command: String,
             pub run_timeout_secs: u64,
+            pub max_concurrent_runs: u32,
             pub model_providers: Vec<String>,
         }
 
@@ -1221,6 +1260,7 @@ macro_rules! cli_connector_config {
                     enabled: None,
                     command: $command.into(),
                     run_timeout_secs: $timeout,
+                    max_concurrent_runs: default_max_concurrent_runs(),
                     model_providers: Vec::new(),
                 }
             }
@@ -1265,6 +1305,8 @@ pub struct CursorConnectorConfig {
     pub command: String,
     #[serde(default = "default_cursor_run_timeout_secs")]
     pub run_timeout_secs: u64,
+    #[serde(default = "default_max_concurrent_runs")]
+    pub max_concurrent_runs: u32,
     #[serde(default)]
     pub model_providers: Vec<String>,
 }
@@ -1300,6 +1342,7 @@ impl Default for CursorConnectorConfig {
             enabled: None,
             command: default_cursor_command(),
             run_timeout_secs: default_cursor_run_timeout_secs(),
+            max_concurrent_runs: default_max_concurrent_runs(),
             model_providers: Vec::new(),
         }
     }
@@ -1528,7 +1571,7 @@ impl AppConfig {
             agent: AgentConfig {
                 ignored_default_connector: None,
                 worktrees_path: "./data/worktrees".into(),
-                worker_count: 2,
+                worker_count: default_worker_count(),
                 health_check_interval_secs: default_health_check_interval(),
                 chat_open_repo_cap: default_chat_open_repo_cap(),
                 chat_eager_copy_timeout_secs: default_chat_eager_copy_timeout_secs(),
@@ -1892,7 +1935,59 @@ mod tests {
         assert_eq!(cfg.enabled, None);
         assert_eq!(cfg.command, "cursor-agent");
         assert_eq!(cfg.run_timeout_secs, 1800);
+        assert_eq!(cfg.max_concurrent_runs, 2);
         assert!(cfg.model_providers.is_empty());
+    }
+
+    #[test]
+    fn missing_worker_count_loads_as_eight() {
+        let cfg = AppConfig::load_defaults().expect("defaults");
+        assert_eq!(cfg.agent.worker_count, 8);
+
+        let parsed: AgentConfig = toml::from_str(
+            r#"
+            worktrees_path = "/tmp"
+            "#,
+        )
+        .expect("parse agent without worker_count");
+        assert_eq!(parsed.worker_count, 8);
+    }
+
+    #[test]
+    fn max_concurrent_runs_defaults_to_two_including_mock() {
+        let mut cfg = AgentConnectorsConfig::default();
+        for id in [
+            "claude-code",
+            "codex",
+            "kilo-code",
+            "cursor",
+            "opencode",
+            "copilot",
+            "qwen-code",
+            "kimi",
+            "grok",
+            "mock",
+            "nope",
+        ] {
+            assert_eq!(cfg.max_concurrent_runs(id), 2, "{id}");
+        }
+        let parsed: AgentConnectorsConfig = toml::from_str(
+            r#"
+            [claude-code]
+            enabled = true
+            [cursor]
+            max_concurrent_runs = 0
+            [codex]
+            max_concurrent_runs = 4
+            "#,
+        )
+        .expect("parse");
+        assert_eq!(parsed.max_concurrent_runs("claude-code"), 2);
+        assert_eq!(parsed.max_concurrent_runs("cursor"), 1);
+        assert_eq!(parsed.max_concurrent_runs("codex"), 4);
+        assert_eq!(parsed.max_concurrent_runs("mock"), 2);
+        cfg.cursor.max_concurrent_runs = 0;
+        assert_eq!(cfg.max_concurrent_runs("cursor"), 1);
     }
 
     #[test]

@@ -372,10 +372,12 @@ pub async fn serve(
         attachments: AppState::attachment_store_from_config(&config),
         connectors,
         agent_health: Arc::new(crate::services::agent_health::AgentHealthRegistry::new()),
-        run_streams: Arc::new(crate::sessions::run_registry::RunStreamRegistry::with_artifacts(
-            config.storage.artifacts_dir.clone(),
-            config.storage.effective_run_console_max_bytes(),
-        )),
+        run_streams: Arc::new(
+            crate::sessions::run_registry::RunStreamRegistry::with_artifacts(
+                config.storage.artifacts_dir.clone(),
+                config.storage.effective_run_console_max_bytes(),
+            ),
+        ),
         event_bus: Arc::new(crate::events::bus::EventBus::new()),
         opencode_runs: opencode_runs.clone(),
         agent_templates,
@@ -386,6 +388,7 @@ pub async fn serve(
         connector_probes: Arc::new(
             crate::services::connector_probe_service::ConnectorProbes::new(),
         ),
+        connector_slots: Arc::new(crate::workers::connector_slots::ConnectorSlots::new()),
         database_url: AppState::share_database_url(&config.database.url),
         config,
         db: Some(db),
