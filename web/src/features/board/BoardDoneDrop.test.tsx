@@ -7,8 +7,15 @@ import { ToastProvider } from '../../components/ToastProvider';
 import { ApiError } from '../../lib/api';
 import { BoardPage } from './BoardPage';
 
-vi.mock('./ReviewCapacityBar', () => ({
-  ReviewCapacityBar: () => null,
+vi.mock('./useReviewCapacity', () => ({
+  useReviewCapacity: () => ({
+    saved: undefined,
+    draft: null,
+    setDraft: () => {},
+    error: null,
+    commit: () => true,
+    isPending: false,
+  }),
 }));
 
 vi.mock('../repos/useRepos', () => ({

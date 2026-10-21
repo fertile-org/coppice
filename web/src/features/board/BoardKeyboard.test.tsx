@@ -9,8 +9,24 @@ import { SkipToBoard } from '../keyboard/SkipToBoard';
 import { BoardPage } from './BoardPage';
 import type { Ticket } from './useTickets';
 
-vi.mock('./ReviewCapacityBar', () => ({
-  ReviewCapacityBar: () => null,
+vi.mock('./useReviewCapacity', () => ({
+  useReviewCapacity: () => ({
+    saved: {
+      reviewCap: null,
+      countInReview: false,
+      waitingOnReview: null,
+      boardSettingsLabel: 'Board settings',
+      reviewCapLabel: 'Review cap',
+      reviewCapHint: 'Leave it empty for no cap.',
+      countInReviewLabel: 'Also count In Review',
+      reviewCapInvalid: 'Invalid cap.',
+    },
+    draft: { cap: '', countInReview: false },
+    setDraft: () => {},
+    error: null,
+    commit: () => true,
+    isPending: false,
+  }),
 }));
 
 const ticketsState = vi.hoisted(() => ({
@@ -593,6 +609,14 @@ describe('board keyboard navigation', () => {
     renderBoard();
     press('j');
     fireEvent.click(screen.getByRole('button', { name: 'Filters' }));
+    press('j');
+    expect(card('Beta', true)).toHaveAttribute('data-board-tabstop', 'true');
+  });
+
+  it('ignores board movement while board settings is open', () => {
+    renderBoard();
+    press('j');
+    fireEvent.click(screen.getByRole('button', { name: 'Board settings' }));
     press('j');
     expect(card('Beta', true)).toHaveAttribute('data-board-tabstop', 'true');
   });
