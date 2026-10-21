@@ -1290,7 +1290,7 @@ async fn assign_agent(
         if let Ok(run) = RunService::new(pool).start_run(ticket_id).await {
             ticket = ticket_svc.get(ticket_id).await.map_err(map_error)?;
             crate::events::publish_ticket_updated(&state.event_bus, &ticket);
-            crate::events::publish_run_queued(&state.event_bus, &run);
+            crate::events::publish_run_active(&state.event_bus, &run);
         }
     }
 
@@ -1356,7 +1356,7 @@ async fn run_agent(
         .start_run(ticket_id)
         .await
         .map_err(map_run_error_response)?;
-    crate::events::publish_run_queued(&state.event_bus, &run);
+    crate::events::publish_run_active(&state.event_bus, &run);
     if let Ok(updated) = TicketService::new(pool).get(ticket_id).await {
         if updated.ticket.status != ticket.ticket.status {
             crate::events::publish_ticket_updated(&state.event_bus, &updated);
@@ -1867,7 +1867,7 @@ async fn resolve_ticket_conflict(
     )
     .await
     .map_err(map_resolve_error)?;
-    crate::events::publish_run_queued(&state.event_bus, &outcome.run);
+    crate::events::publish_run_active(&state.event_bus, &outcome.run);
 
     if let Some(comment_id) = outcome.new_comment_id {
         state.event_bus.publish(AppEvent::CommentCreated {

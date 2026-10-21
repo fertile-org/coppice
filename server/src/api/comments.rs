@@ -345,7 +345,7 @@ async fn create_comment(
                     )
                     .await
                     .map_err(map_run_error)?;
-                crate::events::publish_run_queued(&state.event_bus, &run);
+                crate::events::publish_run_active(&state.event_bus, &run);
                 started_runs.push(StartedRunSummary {
                     run_id: run.id,
                     agent_id: run.agent_id,

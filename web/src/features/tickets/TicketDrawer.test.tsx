@@ -109,6 +109,7 @@ const runMocks = vi.hoisted(() => ({
 }));
 
 vi.mock('./useTicket', () => ({
+  ticketQueryKey: (ticketId: string) => ['ticket', ticketId],
   useTicket: () => ({
     data: ticketState.ticket,
     isPlaceholderData: ticketState.placeholder ?? false,
@@ -385,6 +386,62 @@ describe('TicketDrawer', () => {
     expect(invalidate).toHaveBeenCalledWith({
       queryKey: ['agent-runs', ticketState.ticket.id],
     });
+  });
+
+  it('heals a stale hasActiveRun after the only run failed', () => {
+    ticketState.ticket = {
+      ...ticketState.ticket,
+      status: 'in_progress',
+      assigneeAgentId: '00000000-0000-0000-0000-000000000010',
+      repoId: '00000000-0000-0000-0000-000000000011',
+      hasActiveRun: true,
+    };
+    runsState.runs = [
+      {
+        id: '00000000-0000-0000-0000-0000000000bb',
+        ticketId: ticketState.ticket.id,
+        agentId: '00000000-0000-0000-0000-000000000010',
+        jobType: 'work_on_ticket',
+        status: 'failed',
+        sandboxProfileId: 'permissive-default',
+        worktreePath: null,
+        branchName: null,
+        startedAt: '2026-06-08T00:00:00.000Z',
+        endedAt: '2026-06-08T00:01:00.000Z',
+        createdAt: '2026-06-08T00:00:00.000Z',
+        errorMessage: 'boom',
+        connector: 'mock',
+      },
+    ];
+    const client = new QueryClient();
+    const invalidate = vi.spyOn(client, 'invalidateQueries');
+    const { rerender } = renderDrawer(null, client);
+
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ['ticket', ticketState.ticket.id] });
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: ['agent-runs', ticketState.ticket.id],
+    });
+    expect(screen.getByRole('button', { name: 'Run Agent' })).toBeDisabled();
+
+    // The ticket refetch reports no active run.
+    ticketState.ticket = { ...ticketState.ticket, hasActiveRun: false };
+    rerender(
+      <MemoryRouter initialEntries={[`/?ticket=${ticketState.ticket.id}`]}>
+        <QueryClientProvider client={client}>
+          <ConfirmProvider>
+            <ToastProvider>
+              <TicketDrawer
+                ticketId="00000000-0000-0000-0000-000000000001"
+                parentTicket={null}
+                onClose={() => {}}
+              />
+            </ToastProvider>
+          </ConfirmProvider>
+        </QueryClientProvider>
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByRole('button', { name: 'Run Agent' })).toBeEnabled();
   });
 
   it('does not refetch runs when the cached list already has the active run', () => {

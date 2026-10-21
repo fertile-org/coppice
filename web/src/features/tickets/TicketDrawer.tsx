@@ -32,6 +32,7 @@ import { AcceptTicketDialog } from './AcceptTicketDialog';
 import {
   useArchiveTicket,
   useFinalApprove,
+  ticketQueryKey,
   useTicket,
   useUnarchiveTicket,
 } from './useTicket';
@@ -175,8 +176,10 @@ function TicketDrawerPanel({
   );
   const activeRun = runs?.find((run) => isActiveRunStatus(run.status));
   const hasActiveRun = Boolean(activeRun || ticket?.hasActiveRun);
-  // The ticket knows about a run the cached list is missing (a dropped or
-  // early event). Refetch once on the mismatch; the 3s poll covers the rest.
+  // The ticket and the cached runs disagree: either the list missed a run (a
+  // dropped or early event) or the ticket kept a stale hasActiveRun after the
+  // run ended. Refetch both once on the mismatch; the 3s poll covers the rest
+  // and stops once the ticket reports no active run.
   const runsMissActiveRun = Boolean(ticket?.hasActiveRun && runs && !activeRun);
   const reconnectableRun = runs?.find(shouldPollRunForReconciliation);
   const latestRun = runs?.[0] ?? null;
@@ -203,6 +206,7 @@ function TicketDrawerPanel({
   useEffect(() => {
     if (!runsMissActiveRun) return;
     void queryClient.invalidateQueries({ queryKey: agentRunsQueryKey(ticketId) });
+    void queryClient.invalidateQueries({ queryKey: ticketQueryKey(ticketId) });
   }, [runsMissActiveRun, queryClient, ticketId]);
 
   function moveSection(direction: 1 | -1) {

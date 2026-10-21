@@ -271,7 +271,7 @@ async fn retry_run(
     let pool = pool_from_state(&state)?;
     let service = RunService::new(pool);
     let run = service.retry(run_id).await.map_err(map_error)?;
-    crate::events::publish_run_queued(&state.event_bus, &run);
+    crate::events::publish_run_active(&state.event_bus, &run);
     let connector = service
         .agent_connector_for_run(run.agent_id)
         .await
